@@ -13,13 +13,12 @@ use crate::model::{
 use crate::thumbnail_cache::{
     request_for_entry, request_for_transfer_conflict_path, ColumnViewport, ThumbnailLoadOutcome,
     ThumbnailLoadPolicy, ThumbnailLoadResult, ThumbnailPriority, ThumbnailPurpose, ThumbnailScope,
-    COLUMN_THUMBNAIL_EDGE, LIST_THUMBNAIL_EDGE, TRANSFER_CONFLICT_THUMBNAIL_EDGE,
+    ThumbnailWork, COLUMN_THUMBNAIL_EDGE, LIST_THUMBNAIL_EDGE, TRANSFER_CONFLICT_THUMBNAIL_EDGE,
 };
 use crate::virtual_range::initial_virtual_range;
 
-/// 缩略图预热行数：对齐视图实际 overscan（16 行），避免大量无效解码排队。
+/// 缩略图预热 overscan 行数：对齐视图实际 overscan（16 行），避免大量无效解码排队。
 const OVERSCAN_ROWS: usize = 12;
-const INITIAL_THUMBNAIL_ROWS: usize = OVERSCAN_ROWS * 2 + 1;
 
 impl FileBrowser {
     pub(super) fn schedule_thumbnail_refresh(&mut self) -> Task<Message> {
@@ -142,25 +141,44 @@ impl FileBrowser {
 
             match outcome.result {
                 ThumbnailLoadResult::Ready(thumbnail) => {
-                    tracing::debug!(
+                    tracing::info!(
                         target: "app_ui::thumbnail",
                         source = ?thumbnail.source,
-                        output = ?thumbnail.output,
                         purpose = ?outcome.work.purpose,
                         width = thumbnail.width,
                         height = thumbnail.height,
                         cache_hit = thumbnail.cache_hit,
+                        key_prefix = %thumbnail.key.as_str().get(..12).unwrap_or(""),
                         "thumbnail batch item loaded"
                     );
                     let is_current_request =
                         self.is_current_thumbnail_request(&outcome.work.request);
                     if !is_current_request {
+                        self.requeue_drifted_thumbnail_request(&outcome.work);
                         if outcome.work.purpose == ThumbnailPurpose::Preview {
                             commands.push(
                                 self.accept_preview_thumbnail_unavailable(&outcome.work.request),
                             );
                         }
                         continue;
+                    }
+                    // 诊断埋点：插入的 key 与当前条目 key 不同 = 视图将永远查不到这份结果。
+                    if let Some(entry) = self.entry_for_path(&thumbnail.source) {
+                        if let Some(current_request) =
+                            request_for_entry(entry, outcome.work.request.max_edge)
+                        {
+                            let inserted = thumbnail.key.as_str();
+                            let current = current_request.key();
+                            if inserted != current.as_str() {
+                                tracing::warn!(
+                                    target: "app_ui::thumbnail",
+                                    source = ?thumbnail.source,
+                                    inserted_prefix = %inserted.get(..12).unwrap_or(""),
+                                    current_prefix = %current.as_str().get(..12).unwrap_or(""),
+                                    "inserted thumbnail key mismatches current entry key"
+                                );
+                            }
+                        }
                     }
                     let ready = self
                         .thumbnail_cache
@@ -185,7 +203,7 @@ impl FileBrowser {
                 }
                 ThumbnailLoadResult::Failed(error) => {
                     let log_error = sanitized_application_log_detail(&error);
-                    tracing::debug!(
+                    tracing::info!(
                         target: "app_ui::thumbnail",
                         source = ?outcome.work.request.source,
                         purpose = ?outcome.work.purpose,
@@ -236,6 +254,12 @@ impl FileBrowser {
                     self.active_entry_thumbnail_edge(),
                     ThumbnailPriority::Focused,
                 );
+                tracing::info!(
+                    target: "app_ui::thumbnail",
+                    source = ?entry.path,
+                    interaction = "selected",
+                    "interaction thumbnail enqueue"
+                );
             }
         }
 
@@ -245,6 +269,12 @@ impl FileBrowser {
                     &entry,
                     self.active_entry_thumbnail_edge(),
                     ThumbnailPriority::Focused,
+                );
+                tracing::info!(
+                    target: "app_ui::thumbnail",
+                    source = ?entry.path,
+                    interaction = "hovered",
+                    "interaction thumbnail enqueue"
                 );
             }
         }
@@ -326,6 +356,12 @@ impl FileBrowser {
         let geometry =
             crate::list_view::ListGeometry::for_level(self.user_config.list_view_density);
         let directory = pane.current_dir.clone();
+        // 初始预热行数必须由真实视口高度推导；固定行数在窗口较高时会让
+        // 折叠线以下的可见条目永远等不到调度，只能靠 hover/滚动补救。
+        let initial_rows = crate::list_view::list_initial_rows(
+            self.main_window_height,
+            self.user_config.list_view_density,
+        );
         let range = viewport
             .map(|viewport| {
                 crate::visible_entries::list_entry_range_for_viewport(
@@ -343,7 +379,7 @@ impl FileBrowser {
                     pane.entries,
                     pane.expanded_directories,
                     geometry.row_height,
-                    INITIAL_THUMBNAIL_ROWS,
+                    initial_rows,
                 )
             });
         let entries = crate::visible_entries::visible_entries_in_range(
@@ -357,6 +393,15 @@ impl FileBrowser {
             .iter()
             .filter_map(|visible_entry| request_for_entry(visible_entry.entry, LIST_THUMBNAIL_EDGE))
             .collect::<Vec<_>>();
+        tracing::info!(
+            target: "app_ui::thumbnail",
+            pane = %pane_id.key(),
+            directory = %directory.display(),
+            range_start = range.start,
+            range_end = range.end,
+            requests = requests.len(),
+            "list thumbnail schedule"
+        );
         let keep = requests
             .iter()
             .map(ThumbnailRequest::key)
@@ -556,7 +601,14 @@ impl FileBrowser {
                 )
             })
             .unwrap_or_else(|| {
-                initial_virtual_range(len, geometry.entry_scroll_height, INITIAL_THUMBNAIL_ROWS)
+                initial_virtual_range(
+                    len,
+                    geometry.entry_scroll_height,
+                    crate::three_column_view::column_initial_rows(
+                        self.main_window_height,
+                        self.user_config.columns_view_density,
+                    ),
+                )
             });
         (range.start, range.end)
     }
@@ -585,6 +637,43 @@ impl FileBrowser {
                 .transfer_conflict
                 .as_ref()
                 .is_some_and(|state| thumbnail_request_matches_transfer_conflict(state, request))
+    }
+
+    /// 被拒结果里条目仍在、只是请求 key 漂移时（inflight 期间条目元数据落地：
+    /// 初始扫描的 Pending → demand 填充、增量应用预填真实值），用当前条目的
+    /// key 重新入队。否则该条目在 hover/滚动重新调度前一直显示占位图标。
+    fn requeue_drifted_thumbnail_request(&mut self, work: &ThumbnailWork) {
+        let Some(entry) = self.entry_for_path(&work.request.source) else {
+            return;
+        };
+        let Some(request) = request_for_entry(entry, work.request.max_edge) else {
+            return;
+        };
+        if request.key() == work.request.key() {
+            return;
+        }
+        tracing::info!(
+            target: "app_ui::thumbnail",
+            source = ?work.request.source,
+            purpose = ?work.purpose,
+            "thumbnail request key drifted; requeueing with current entry metadata"
+        );
+        match (work.load_policy, work.scope.clone()) {
+            (ThumbnailLoadPolicy::LoadOrGenerate, Some(scope)) => self
+                .thumbnail_cache
+                .enqueue_request_for_scope(request, work.purpose, work.priority, scope),
+            (ThumbnailLoadPolicy::LoadOrGenerate, None) => {
+                let _ = self
+                    .thumbnail_cache
+                    .enqueue_request(request, work.purpose, work.priority);
+            }
+            (ThumbnailLoadPolicy::CacheOnly, Some(scope)) => self
+                .thumbnail_cache
+                .enqueue_cached_request_for_scope(request, work.purpose, work.priority, scope),
+            (ThumbnailLoadPolicy::CacheOnly, None) => self
+                .thumbnail_cache
+                .enqueue_cached_request(request, work.purpose, work.priority),
+        }
     }
 
     fn active_entry_thumbnail_edge(&self) -> u32 {

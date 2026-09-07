@@ -92,7 +92,18 @@ impl FileBrowser {
             self.list_directory_summary_cache
                 .remember_direct_child_count(directory.to_path_buf(), count);
         }
-        Some(self.schedule_visible_list_directory_summaries())
+        // 增量重建条目会带上 discovery 已落地的元数据，缩略图缓存 key 随之漂移；
+        // 重调度可见范围，否则缩略图要等 hover/滚动才出现。
+        tracing::info!(
+            target: "app_ui::entry_changes",
+            directory = %directory.display(),
+            changes = changes.len(),
+            "entry changes applied; rescheduling visible thumbnails"
+        );
+        Some(Task::batch([
+            self.schedule_visible_list_directory_summaries(),
+            self.schedule_thumbnail_refresh_for_pane(self.active_pane_id()),
+        ]))
     }
 
     /// 操作完成时的对账：被显示目录（活动窗格当前目录 + 已加载展开目录）中，

@@ -1,9 +1,10 @@
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use desktop_linux::{NetworkConnection, NetworkConnectionId, NetworkMountState, NetworkProtocol};
 use file_core::{
-    DirectoryEntry, EntryMetadata, FileKind, TransferConflictItem, TransferConflictMetadata,
+    DirectoryEntry, DirectoryMetadataAvailability, EntryMetadata, FileKind,
+    TransferConflictItem, TransferConflictMetadata,
 };
 
 use super::*;
@@ -18,18 +19,64 @@ use crate::network_connections::NetworkConnectionState;
 use crate::operation_queue::QueuedTransfer;
 
 #[test]
-fn missing_viewport_schedules_initial_list_thumbnail_rows() {
-    let entries = (0..100)
+fn missing_viewport_schedules_list_thumbnails_for_full_window_height() {
+    let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
+    browser.main_window_height = 2000.0;
+    browser.view_mode = BrowserViewMode::List;
+    let initial_rows = crate::list_view::list_initial_rows(
+        browser.main_window_height,
+        browser.user_config.list_view_density,
+    );
+    // 回归：初始预热行数由真实窗口高度推导（2000px 下远超旧固定 25 行），
+    // 未产生滚动事件的折叠线以下条目也必须拿到缩略图调度。
+    assert!(initial_rows > 25);
+    browser.entries = (0..120)
         .map(|index| image_entry(&format!("/workspace/{index}.png")))
-        .collect::<Vec<_>>();
-    let range = crate::visible_entries::initial_list_entry_range(
-        &entries,
-        &HashMap::new(),
-        crate::list_view::LIST_ROW_HEIGHT,
-        INITIAL_THUMBNAIL_ROWS,
+        .collect::<Vec<_>>()
+        .into();
+
+    browser.schedule_visible_list_thumbnail_range_for_pane(BrowserPaneId::PRIMARY, None);
+
+    let scheduled = drain_scheduled_requests(&mut browser);
+    assert_eq!(scheduled.len(), initial_rows.min(120));
+}
+
+#[test]
+fn missing_viewport_schedules_column_thumbnails_for_full_window_height() {
+    let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
+    browser.main_window_height = 2000.0;
+    browser.current_dir = PathBuf::from("/workspace");
+    browser.entries = (0..120)
+        .map(|index| image_entry(&format!("/workspace/{index}.png")))
+        .collect::<Vec<_>>()
+        .into();
+
+    let requests = browser.thumbnail_requests_for_pane_directory_range(
+        BrowserPaneId::PRIMARY,
+        Path::new("/workspace"),
     );
 
-    assert_eq!((range.start, range.end), (0, INITIAL_THUMBNAIL_ROWS));
+    let initial_rows = crate::three_column_view::column_initial_rows(
+        browser.main_window_height,
+        browser.user_config.columns_view_density,
+    );
+    assert!(initial_rows > 25);
+    assert_eq!(requests.len(), initial_rows.min(120));
+}
+
+fn drain_scheduled_requests(browser: &mut FileBrowser) -> Vec<PathBuf> {
+    let mut sources = Vec::new();
+    loop {
+        let batch = browser.thumbnail_cache.take_next_batch();
+        if batch.is_empty() {
+            break;
+        }
+        for work in batch {
+            sources.push(work.request.source.clone());
+            browser.thumbnail_cache.finish(&work.request.key());
+        }
+    }
+    sources
 }
 
 #[test]
@@ -448,6 +495,69 @@ fn transfer_conflict_thumbnail_requests_are_queued() {
         .all(|work| work.purpose == ThumbnailPurpose::TransferConflict));
 }
 
+#[test]
+fn drifted_thumbnail_result_requeues_with_current_entry_metadata() {
+    let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
+    // 调度时条目元数据尚未落地（Pending：len=0），入队请求带着「空钥匙」。
+    browser.entries = vec![pending_image_entry("/workspace/photo.png")].into();
+    let pending_entry = browser.entries.first().unwrap().clone();
+    let request =
+        request_for_entry(&pending_entry, LIST_THUMBNAIL_EDGE).expect("pending request");
+    let scope =
+        thumbnail_scope_for_pane_directory(BrowserPaneId::PRIMARY, Path::new("/workspace"));
+    browser.thumbnail_cache.enqueue_request_for_scope(
+        request,
+        ThumbnailPurpose::List,
+        ThumbnailPriority::Visible,
+        scope.clone(),
+    );
+    let work = browser
+        .thumbnail_cache
+        .take_next_batch()
+        .pop()
+        .expect("inflight work");
+    let stale_key = work.key();
+
+    // 加载期间元数据落地：条目被重建为带真实 len 的版本，key 随之漂移。
+    browser.entries = vec![image_entry("/workspace/photo.png")].into();
+
+    browser.requeue_drifted_thumbnail_request(&work);
+
+    let requeued = browser.thumbnail_cache.take_next_batch();
+    assert_eq!(requeued.len(), 1);
+    assert_eq!(requeued[0].request.source, PathBuf::from("/workspace/photo.png"));
+    assert_eq!(requeued[0].request.metadata.len, 10);
+    assert_ne!(requeued[0].key(), stale_key);
+    assert_eq!(requeued[0].purpose, work.purpose);
+    assert_eq!(requeued[0].priority, work.priority);
+    assert_eq!(requeued[0].scope, Some(scope));
+}
+
+#[test]
+fn thumbnail_result_for_removed_entry_is_not_requeued() {
+    let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
+    browser.entries = vec![image_entry("/workspace/photo.png")].into();
+    let request = request_for_entry(browser.entries.first().unwrap(), LIST_THUMBNAIL_EDGE)
+        .expect("request");
+    browser.thumbnail_cache.enqueue_request(
+        request,
+        ThumbnailPurpose::List,
+        ThumbnailPriority::Visible,
+    );
+    let work = browser
+        .thumbnail_cache
+        .take_next_batch()
+        .pop()
+        .expect("inflight work");
+
+    // 条目已离开当前目录：结果照旧丢弃，不允许重排。
+    browser.entries = vec![image_entry("/elsewhere/photo.png")].into();
+
+    browser.requeue_drifted_thumbnail_request(&work);
+
+    assert!(browser.thumbnail_cache.take_next_batch().is_empty());
+}
+
 fn browser_with_inactive_image_pane() -> (FileBrowser, BrowserPaneId, PathBuf, DirectoryEntry) {
     browser_with_inactive_pane_image("/inactive/photo.png")
 }
@@ -524,6 +634,20 @@ fn image_entry(path: &str) -> DirectoryEntry {
         EntryMetadata {
             len: 10,
             modified: None,
+            ..EntryMetadata::default()
+        },
+        false,
+        false,
+        false,
+    )
+}
+
+fn pending_image_entry(path: &str) -> DirectoryEntry {
+    DirectoryEntry::new(
+        PathBuf::from(path),
+        FileKind::File,
+        EntryMetadata {
+            filesystem_availability: DirectoryMetadataAvailability::Pending,
             ..EntryMetadata::default()
         },
         false,

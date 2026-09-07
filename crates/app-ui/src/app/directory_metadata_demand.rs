@@ -447,7 +447,9 @@ impl FileBrowser {
             pane.directory_order_phase =
                 crate::model::DirectoryOrderPhase::Ready { field, direction };
             pane.sync_active_tab_state();
-            return Task::none();
+            // 条目元数据从 Pending 落地为真实值，缩略图缓存 key 随之漂移；
+            // 重建后必须用新条目重新调度，否则缩略图要等 hover/滚动才出现。
+            return self.schedule_thumbnail_refresh_for_pane(pane_id);
         }
         let crate::model::DirectoryOrderPhase::WaitingForMetadata {
             request_generation: expected_generation,
@@ -480,7 +482,13 @@ impl FileBrowser {
         crate::startup_trace::mark_once("initial_directory_requested_sort_ready");
         crate::startup_trace::mark_once("initial_directory_ready");
         self.sync_active_tab_state();
-        Task::none()
+        // 同非活动窗格分支：元数据落地重建条目后，缩略图 key 漂移，必须重调度。
+        tracing::info!(
+            target: "app_ui::entry_changes",
+            entries = self.entries.len(),
+            "metadata commit rebuilt root entries; rescheduling thumbnails"
+        );
+        self.schedule_thumbnail_refresh()
     }
 
     fn commit_expanded_metadata_sort_if_ready(
@@ -501,7 +509,8 @@ impl FileBrowser {
                 return Task::none();
             }
             pane.sync_active_tab_state();
-            return Task::none();
+            // 展开目录条目元数据落地同样漂移缩略图 key，重调度整个窗格可见范围。
+            return self.schedule_thumbnail_refresh_for_pane(pane_id);
         }
         let Some(expanded) = self.expanded_directories.get_mut(path) else {
             return Task::none();
@@ -510,7 +519,7 @@ impl FileBrowser {
             return Task::none();
         }
         self.sync_active_tab_state();
-        Task::none()
+        self.schedule_thumbnail_refresh()
     }
 }
 
@@ -556,6 +565,8 @@ fn directory_metadata_requirement_label(requirement: DirectoryMetadataRequiremen
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use file_core::{
         discover_directory_with_progress, resolve_directory_metadata, DirectoryMetadataRequest,
         ScanOptions, SortDirection, SortField,
@@ -1015,5 +1026,122 @@ mod tests {
         ));
 
         assert!(browser.current_error().is_some());
+    }
+
+    #[tokio::test]
+    async fn metadata_commit_reschedules_thumbnails_with_real_entry_metadata() {
+        let directory = tempfile::tempdir().unwrap();
+        let image_path = directory.path().join("a-photo.png");
+        std::fs::write(&image_path, vec![0_u8; 64]).unwrap();
+        let options = ScanOptions {
+            sort_field: SortField::Size,
+            sort_direction: SortDirection::Ascending,
+            ..ScanOptions::default()
+        };
+        let discovery = discover_directory_with_progress(
+            directory.path(),
+            options.clone(),
+            CancellationToken::new(),
+            |_| {},
+        )
+        .await
+        .unwrap();
+        let resolver = discovery.metadata_resolver.clone();
+        let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+        browser.view_mode = BrowserViewMode::List;
+        browser.options = options;
+        browser.current_dir = directory.path().to_path_buf();
+
+        // 预占全部解码槽位：commit 内部的 pump 取不走新请求，才能断言入队结果。
+        let max_slots = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4)
+            .clamp(2, 8);
+        let mut filler_keys = Vec::new();
+        for index in 0..max_slots {
+            let filler_request = thumbnails::ThumbnailRequest::new(
+                PathBuf::from(format!("/filler-{index}.png")),
+                thumbnails::ThumbnailSourceMetadata {
+                    len: index as u64,
+                    modified: None,
+                },
+                crate::thumbnail_cache::LIST_THUMBNAIL_EDGE,
+            );
+            filler_keys.push(filler_request.key());
+            browser.thumbnail_cache.enqueue_request(
+                filler_request,
+                crate::thumbnail_cache::ThumbnailPurpose::List,
+                crate::thumbnail_cache::ThumbnailPriority::Visible,
+            );
+        }
+        drop(browser.thumbnail_cache.take_next_batch());
+
+        let load_request = browser.next_directory_load_request(directory.path().to_path_buf());
+        let collection_generation = load_request.generation;
+        drop(browser.accept_directory_discovery(
+            load_request,
+            crate::model::PrebuiltDirectoryDiscovery::build(discovery),
+        ));
+        // 权威扫描提交后条目元数据是 Pending，自动调度的缩略图请求基于空值 key。
+        assert_eq!(
+            browser.entries[0].metadata.filesystem_availability,
+            file_core::DirectoryMetadataAvailability::Pending
+        );
+        let stale_key = crate::thumbnail_cache::request_for_entry(
+            &browser.entries[0],
+            crate::thumbnail_cache::LIST_THUMBNAIL_EDGE,
+        )
+        .expect("pending request")
+        .key();
+
+        let expected_generation = match browser.directory_order_phase {
+            crate::model::DirectoryOrderPhase::WaitingForMetadata {
+                request_generation, ..
+            } => request_generation,
+            other => panic!("size sort must wait for metadata, got {other:?}"),
+        };
+        let resolution = resolve_directory_metadata(
+            resolver,
+            DirectoryMetadataRequest {
+                request_generation: expected_generation,
+                requirement: DirectoryMetadataRequirement::Filesystem,
+                targets: vec![0],
+            },
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        drop(browser.accept_directory_metadata_resolution(
+            DirectoryMetadataLoadRequest {
+                context: DirectoryMetadataLoadContext::Root {
+                    pane_id: BrowserPaneId::PRIMARY,
+                    path: directory.path().to_path_buf(),
+                    collection_generation,
+                },
+                request_generation: expected_generation,
+                requirement: DirectoryMetadataRequirement::Filesystem,
+                targets: vec![0],
+            },
+            Ok(resolution),
+        ));
+
+        // 排序提交重建条目后元数据落地，且必须已经用真实 key 重新入队缩略图。
+        assert_eq!(
+            browser.entries[0].metadata.filesystem_availability,
+            file_core::DirectoryMetadataAvailability::Complete
+        );
+        let current_request = crate::thumbnail_cache::request_for_entry(
+            &browser.entries[0],
+            crate::thumbnail_cache::LIST_THUMBNAIL_EDGE,
+        )
+        .expect("current request");
+        assert_ne!(current_request.key(), stale_key);
+
+        browser.thumbnail_cache.finish(&filler_keys[0]);
+        let requeued = browser.thumbnail_cache.take_next_batch();
+        assert_eq!(requeued.len(), 1);
+        assert_eq!(requeued[0].request.source, image_path);
+        assert_eq!(requeued[0].request.metadata.len, 64);
+        assert_eq!(requeued[0].key(), current_request.key());
     }
 }

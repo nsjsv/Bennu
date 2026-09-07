@@ -327,8 +327,10 @@ impl FileBrowser {
         Task::none()
     }
 
-    /// 面板会话下分页文档按面板宽度排版;独立窗口会话沿用窗口尺寸。
-    pub(super) fn preview_document_layout_size(&self) -> PreviewSize {
+    /// 当前预览表面的媒体区视口尺寸:独立窗口会话沿用窗口尺寸,
+    /// 面板会话用面板估算值。预览内容的排版与缩放钳制共用这一个来源,
+    /// 保证视图渲染基准与交互消息的处理基准一致。
+    pub(super) fn preview_surface_viewport(&self) -> PreviewSize {
         match self.preview_load_surface {
             PreviewLoadSurface::StandaloneWindow => self.preview_size,
             PreviewLoadSurface::RightDockedPanel => self.right_preview_panel_viewport(),

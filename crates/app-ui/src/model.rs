@@ -122,13 +122,17 @@ pub(crate) use sqlite_preview::{
 mod preview;
 pub(crate) use preview::RightPreviewPanelInfoSnapshot;
 pub(crate) use preview::{
-    image_preview_zoom_multiplier, AudioPreviewPlayback, AudioPreviewPlaybackStatus,
-    ImagePreviewContent, ImagePreviewViewport, PreviewContent, PreviewImageViewportMessage,
-    PreviewSize, PreviewState, PreviewTreeDirectoryChildren, PreviewTreeEntry,
-    PreviewWindowChromeState, PreviewWindowProfile, RemotePreviewCacheFinished,
-    RemotePreviewCacheMessage, RemotePreviewCacheProgress, RemotePreviewDownload,
-    VideoPreviewFrame, VideoPreviewPlayback, VideoPreviewPlaybackStatus,
-    VideoPreviewSeekCompletion, PREVIEW_WINDOW_INITIAL_CONTROLS_DURATION,
+    image_preview_size, scaled_media_size, AudioPreviewPlayback, AudioPreviewPlaybackStatus,
+    ImagePreviewContent, PreviewContent, PreviewSize, PreviewState,
+    PreviewTreeDirectoryChildren, PreviewTreeEntry, PreviewWindowChromeState,
+    PreviewWindowProfile, RemotePreviewCacheFinished, RemotePreviewCacheMessage,
+    RemotePreviewCacheProgress, RemotePreviewDownload, VideoPreviewFrame, VideoPreviewPlayback,
+    VideoPreviewPlaybackStatus, VideoPreviewSeekCompletion,
+    PREVIEW_WINDOW_INITIAL_CONTROLS_DURATION,
+};
+mod image_preview_viewport;
+pub(crate) use image_preview_viewport::{
+    image_preview_zoom_multiplier, ImagePreviewViewport, PreviewImageViewportMessage,
 };
 mod settings;
 pub(crate) use settings::{SettingsCategory, SettingsSubpage};

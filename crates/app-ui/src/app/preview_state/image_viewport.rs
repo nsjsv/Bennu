@@ -1,10 +1,10 @@
-use iced::Point;
+use iced::Size;
 use iced::Task;
 
 use super::FileBrowser;
 use crate::model::{
-    image_preview_zoom_multiplier, Message, PreviewContent, PreviewImageViewportMessage,
-    PreviewState,
+    image_preview_size, image_preview_zoom_multiplier, Message, PreviewContent,
+    PreviewImageViewportMessage, PreviewState,
 };
 
 impl FileBrowser {
@@ -14,17 +14,20 @@ impl FileBrowser {
         &mut self,
         message: PreviewImageViewportMessage,
     ) -> Task<Message> {
-        if !matches!(
-            self.preview,
-            Some(PreviewState::Ready(PreviewContent::Image(_)))
-        ) {
-            return Task::none();
-        }
+        let (image_width, image_height) = match &self.preview {
+            Some(PreviewState::Ready(PreviewContent::Image(content))) => content.dimensions(),
+            _ => return Task::none(),
+        };
 
+        // 面板/独立窗口两种表面的媒体区尺寸分派，与视图渲染基准同源。
+        let panel_size = self.preview_surface_viewport();
+        let panel = Size::new(panel_size.width, panel_size.height);
+        let (fit_width, fit_height) = image_preview_size(panel_size, image_width, image_height);
+        let fit = Size::new(fit_width, fit_height);
         let viewport = &mut self.preview_image_viewport;
         match message {
             PreviewImageViewportMessage::PointerMoved(position) => {
-                viewport.apply_pointer_motion(position);
+                viewport.apply_pointer_motion(position, panel, fit);
             }
             PreviewImageViewportMessage::PanStarted => {
                 tracing::debug!(target: "app_ui::preview", "[viewport] pan started");
@@ -37,20 +40,14 @@ impl FileBrowser {
             PreviewImageViewportMessage::Zoomed(delta) => {
                 let multiplier = image_preview_zoom_multiplier(delta);
                 let anchor = viewport.pointer;
-                let panel_center = Point::new(
-                    self.preview_size.width / 2.0,
-                    self.preview_size.height / 2.0,
-                );
                 let before_scale = viewport.scale;
                 let before_offset = viewport.offset;
-                viewport.apply_zoom(multiplier, anchor, panel_center);
+                viewport.apply_zoom(multiplier, anchor, panel, fit);
                 tracing::debug!(
                     target: "app_ui::preview",
                     "[viewport] zoom delta={delta:?} multiplier={multiplier:.4} anchor={anchor:?} \
-                     panel={:.1}x{:.1} before=(scale={before_scale:.3}, offset=({:.1},{:.1})) \
+                     panel={panel:.1?} fit={fit:.1?} before=(scale={before_scale:.3}, offset=({:.1},{:.1})) \
                      after=(scale={:.3}, offset=({:.1},{:.1}))",
-                    self.preview_size.width,
-                    self.preview_size.height,
                     before_offset.x,
                     before_offset.y,
                     viewport.scale,

@@ -134,17 +134,22 @@ where
         cursor: iced::mouse::Cursor,
         viewport: &Rectangle,
     ) {
-        self.content.as_widget().draw(
-            &tree.children[0],
-            renderer,
-            theme,
-            renderer_style,
-            layout.children().next().expect("translated child"),
-            cursor,
-            viewport,
-        );
+        let Some(clipped_viewport) = layout.bounds().intersection(viewport) else {
+            return;
+        };
+        // 媒体面板边界是缩放内容唯一的像素裁剪层：窗口表面只在窗口边缘
+        // 裁剪，缺了这一层放大后的图片会盖住窗口内其余 UI。with_layer 在
+        // 原绘制时序内推层，chrome 顶部栏与底部控件在其后绘制，仍在图上。
+        renderer.with_layer(clipped_viewport, |renderer| {
+            self.content.as_widget().draw(
+                &tree.children[0],
+                renderer,
+                theme,
+                renderer_style,
+                layout.children().next().expect("translated child"),
+                cursor,
+                &clipped_viewport,
+            );
+        });
     }
 }
-
-// 超出媒体面板的绘制依赖预览窗口表面裁剪；chrome 顶部栏与底部控件
-// 在窗口 Stack 中后绘制，保持既有层级：图片始终在控件之下。

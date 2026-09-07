@@ -4,7 +4,6 @@ use std::time::{Duration, Instant};
 
 use file_core::{DirectoryEntry, FileKind};
 use iced::widget::{image, svg};
-use iced::{mouse, Point};
 
 use super::sqlite_preview::SqliteDatabasePreview;
 use crate::animated_image_preview::AnimatedImagePreview;
@@ -135,98 +134,45 @@ pub(crate) enum ImagePreviewContent {
     },
 }
 
-/// 图片预览的缩放/平移视口。scale 相对"适应窗口"尺寸（1.0 = fit），
-/// offset 是图片中心相对媒体区中心的偏移（媒体区坐标）。
-/// 所有权在 FileBrowser：open_preview_for_resolved_path 开启新会话时重置，
-/// 同一会话内缩略图→原图的内容替换保留；pointer 缓存供滚轮缩放取锚点。
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct ImagePreviewViewport {
-    pub(crate) scale: f32,
-    pub(crate) offset: Point,
-    pub(crate) pointer: Option<Point>,
-    pub(crate) panning: bool,
-}
-
-impl Default for ImagePreviewViewport {
-    fn default() -> Self {
-        Self {
-            scale: 1.0,
-            offset: Point::ORIGIN,
-            pointer: None,
-            panning: false,
+impl ImagePreviewContent {
+    /// 原始像素尺寸；缩略图形态取缩略图尺寸，fit 计算只看纵横比时二者等价。
+    pub(crate) fn dimensions(&self) -> (u32, u32) {
+        match self {
+            ImagePreviewContent::Thumbnail { width, height, .. } => (*width, *height),
+            ImagePreviewContent::OriginalRaster { width, height, .. } => (*width, *height),
+            ImagePreviewContent::OriginalSvg { width, height, .. } => (*width, *height),
         }
     }
 }
 
-impl ImagePreviewViewport {
-    pub(crate) fn is_zoomed(&self) -> bool {
-        self.scale != 1.0 || self.offset != Point::ORIGIN
-    }
-
-    /// 缩放：scale > 1 时以锚点（指针位置）为中心，缩放前后锚点下的图像
-    /// 内容不动；锚点缺失时退化为围绕媒体区中心缩放。
-    /// scale 缩到不大于 1 后图片四周已有空隙，锚点保持只会把图片推向
-    /// 窗口边缘方向，因此一律归零 offset 围绕中心居中缩小。
-    pub(crate) fn apply_zoom(
-        &mut self,
-        multiplier: f32,
-        anchor: Option<Point>,
-        panel_center: Point,
-    ) {
-        let next_scale =
-            (self.scale * multiplier).clamp(IMAGE_PREVIEW_MIN_SCALE, IMAGE_PREVIEW_MAX_SCALE);
-        if next_scale <= 1.0 {
-            self.offset = Point::ORIGIN;
-            self.scale = next_scale;
-            return;
-        }
-        let anchor = anchor.unwrap_or(panel_center);
-        let anchor_relative_x = anchor.x - panel_center.x - self.offset.x;
-        let anchor_relative_y = anchor.y - panel_center.y - self.offset.y;
-        self.offset = Point::new(
-            anchor.x - panel_center.x - anchor_relative_x * next_scale / self.scale,
-            anchor.y - panel_center.y - anchor_relative_y * next_scale / self.scale,
-        );
-        self.scale = next_scale;
-    }
-
-    pub(crate) fn apply_pointer_motion(&mut self, position: Point) {
-        if self.panning {
-            if let Some(previous) = self.pointer {
-                self.offset = Point::new(
-                    self.offset.x + position.x - previous.x,
-                    self.offset.y + position.y - previous.y,
-                );
-            }
-        }
-        self.pointer = Some(position);
-    }
-
-    pub(crate) fn reset(&mut self) {
-        *self = Self::default();
-    }
+/// 图片在预览媒体区内按纵横比缩放后的适应窗口（fit）显示尺寸。
+/// 视图层定位与视口钳制共用这一个来源。
+pub(crate) fn image_preview_size(size: PreviewSize, width: u32, height: u32) -> (f32, f32) {
+    let max_width = size.width.max(1.0);
+    let max_height = size.height.max(1.0);
+    scaled_media_size(max_width, max_height, width, height)
 }
 
-/// 滚轮增量 → 缩放倍率；行增量按每行 10%，像素增量按 40px 一行折算。
-pub(crate) fn image_preview_zoom_multiplier(delta: mouse::ScrollDelta) -> f32 {
-    let lines = match delta {
-        mouse::ScrollDelta::Lines { y, .. } => y,
-        mouse::ScrollDelta::Pixels { y, .. } => y / 40.0,
-    };
-    1.1_f32.powf(lines)
-}
+pub(crate) fn scaled_media_size(
+    max_width: f32,
+    max_height: f32,
+    width: u32,
+    height: u32,
+) -> (f32, f32) {
+    if width == 0 || height == 0 {
+        return (max_width, max_height);
+    }
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum PreviewImageViewportMessage {
-    PointerMoved(Point),
-    PanStarted,
-    PanEnded,
-    Zoomed(mouse::ScrollDelta),
-    ResetRequested,
-}
+    let aspect_ratio = width as f32 / height as f32;
+    let mut frame_width = max_width;
+    let mut frame_height = frame_width / aspect_ratio;
+    if frame_height > max_height {
+        frame_height = max_height;
+        frame_width = frame_height * aspect_ratio;
+    }
 
-const IMAGE_PREVIEW_MIN_SCALE: f32 = 0.2;
-const IMAGE_PREVIEW_MAX_SCALE: f32 = 8.0;
+    (frame_width.max(1.0), frame_height.max(1.0))
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct AudioPreviewPlayback {
@@ -678,103 +624,3 @@ mod tests {
     }
 }
 
-#[cfg(test)]
-mod image_preview_viewport_tests {
-    use super::*;
-
-    const PANEL_CENTER: Point = Point::new(400.0, 300.0);
-
-    #[test]
-    fn zoom_keeps_the_anchored_image_point_under_the_cursor() {
-        let mut viewport = ImagePreviewViewport::default();
-        let anchor = Point::new(200.0, 150.0);
-
-        viewport.apply_zoom(2.0, Some(anchor), PANEL_CENTER);
-
-        assert_eq!(viewport.scale, 2.0);
-        // 缩放前锚点在中心左侧 200px；缩放后该图像点必须仍在锚点处。
-        let before = (anchor.x - PANEL_CENTER.x, anchor.y - PANEL_CENTER.y);
-        let after = (
-            anchor.x - PANEL_CENTER.x - viewport.offset.x,
-            anchor.y - PANEL_CENTER.y - viewport.offset.y,
-        );
-        assert_eq!(after, (before.0 * 2.0, before.1 * 2.0));
-    }
-
-    #[test]
-    fn zoom_is_clamped_to_the_configured_range() {
-        let mut viewport = ImagePreviewViewport::default();
-        viewport.apply_zoom(1_000.0, None, PANEL_CENTER);
-        assert_eq!(viewport.scale, IMAGE_PREVIEW_MAX_SCALE);
-
-        viewport.apply_zoom(0.0, None, PANEL_CENTER);
-        assert_eq!(viewport.scale, IMAGE_PREVIEW_MIN_SCALE);
-    }
-
-    #[test]
-    fn pan_accumulates_only_while_panning() {
-        let mut viewport = ImagePreviewViewport::default();
-        viewport.apply_pointer_motion(Point::new(10.0, 10.0));
-
-        viewport.panning = true;
-        viewport.apply_pointer_motion(Point::new(25.0, -5.0));
-        assert_eq!(viewport.offset, Point::new(15.0, -15.0));
-
-        viewport.panning = false;
-        viewport.apply_pointer_motion(Point::new(100.0, 100.0));
-        assert_eq!(viewport.offset, Point::new(15.0, -15.0));
-    }
-
-    #[test]
-    fn reset_restores_the_fit_viewport() {
-        let mut viewport = ImagePreviewViewport::default();
-        viewport.apply_zoom(2.0, None, PANEL_CENTER);
-        viewport.panning = true;
-
-        viewport.reset();
-
-        assert_eq!(viewport, ImagePreviewViewport::default());
-        assert!(!viewport.is_zoomed());
-    }
-
-    #[test]
-    fn wheel_delta_converts_to_a_multiplicative_zoom_step() {
-        assert_eq!(
-            image_preview_zoom_multiplier(mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 }),
-            1.1
-        );
-        assert_eq!(
-            image_preview_zoom_multiplier(mouse::ScrollDelta::Pixels { x: 0.0, y: 40.0 }),
-            1.1
-        );
-    }
-    #[test]
-    fn zooming_out_below_fit_stays_centered_instead_of_chasing_the_anchor() {
-        let mut viewport = ImagePreviewViewport::default();
-
-        // 从适应窗口连续缩小，锚点取在窗口边缘：图片必须原地居中缩小。
-        viewport.apply_zoom(0.9, Some(Point::new(20.0, 20.0)), PANEL_CENTER);
-        assert_eq!(viewport.scale, 0.9);
-        assert_eq!(viewport.offset, Point::ORIGIN);
-
-        viewport.apply_zoom(0.9, Some(Point::new(20.0, 20.0)), PANEL_CENTER);
-        assert_eq!(viewport.offset, Point::ORIGIN);
-    }
-
-    #[test]
-    fn zooming_back_below_fit_clears_pan_offset_left_by_zooming_in() {
-        let mut viewport = ImagePreviewViewport::default();
-        let anchor = Point::new(100.0, 500.0);
-        viewport.apply_zoom(4.0, Some(anchor), PANEL_CENTER);
-        viewport.apply_pointer_motion(Point::new(120.0, 480.0));
-        viewport.panning = true;
-        viewport.apply_pointer_motion(Point::new(300.0, 300.0));
-        viewport.panning = false;
-        assert_ne!(viewport.offset, Point::ORIGIN);
-
-        viewport.apply_zoom(0.2, Some(anchor), PANEL_CENTER);
-
-        assert_eq!(viewport.scale, 0.8);
-        assert_eq!(viewport.offset, Point::ORIGIN);
-    }
-}

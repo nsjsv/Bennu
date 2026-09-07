@@ -94,7 +94,7 @@ impl FileBrowser {
         match outcome {
             DocumentPrepareOutcome::Ready(prepared) => {
                 // 页面按呈现面视口排版:独立窗口用窗口尺寸,面板用面板宽度。
-                let layout_size = self.preview_document_layout_size();
+                let layout_size = self.preview_surface_viewport();
                 let document = match PagedDocumentPreview::new(
                     prepared,
                     pending.cancellation,

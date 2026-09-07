@@ -21,10 +21,11 @@ use crate::formatting::{format_duration, format_file_size, format_middle_ellipsi
 use crate::icons::{preview_entry_icon_symbol, rotated_chevron_right_view, IconSymbol};
 use crate::matugen_theme::ui_colors;
 use crate::model::{
-    AudioPreviewPlayback, AudioPreviewPlaybackStatus, ImagePreviewContent, ImagePreviewViewport,
-    Message, PreviewContent, PreviewImageViewportMessage, PreviewSize, PreviewState,
-    PreviewTreeDirectoryChildren, PreviewTreeEntry, ScrollbarRegion, ScrollbarViewport,
-    ScrollbarVisibility, TextPreviewDocument, VideoPreviewPlayback, VideoPreviewPlaybackStatus,
+    image_preview_size, scaled_media_size, AudioPreviewPlayback, AudioPreviewPlaybackStatus,
+    ImagePreviewContent, ImagePreviewViewport, Message, PreviewContent,
+    PreviewImageViewportMessage, PreviewSize, PreviewState, PreviewTreeDirectoryChildren,
+    PreviewTreeEntry, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility,
+    TextPreviewDocument, VideoPreviewPlayback, VideoPreviewPlaybackStatus,
 };
 use crate::operation_progress::remote_preview_download_panel;
 use crate::translated_surface::translated_surface;
@@ -727,12 +728,6 @@ fn preview_image_frame(
         .height(Length::Fixed(height))
 }
 
-fn image_preview_size(size: PreviewSize, width: u32, height: u32) -> (f32, f32) {
-    let max_width = size.width.max(1.0);
-    let max_height = size.height.max(1.0);
-    scaled_media_size(max_width, max_height, width, height)
-}
-
 fn animated_image_control_width(size: PreviewSize, image_width: f32) -> f32 {
     let available_width = (size.width - ANIMATED_IMAGE_CONTROL_SIDE_PADDING * 2.0).max(1.0);
     available_width.min(image_width.max(ANIMATED_IMAGE_MIN_CONTROL_WIDTH))
@@ -1038,22 +1033,6 @@ fn video_frame_size(size: PreviewSize, width: u32, height: u32) -> (f32, f32) {
     let max_width = size.width.max(1.0);
     let max_height = size.height.max(1.0);
     scaled_media_size(max_width, max_height, width, height)
-}
-
-fn scaled_media_size(max_width: f32, max_height: f32, width: u32, height: u32) -> (f32, f32) {
-    if width == 0 || height == 0 {
-        return (max_width, max_height);
-    }
-
-    let aspect_ratio = width as f32 / height as f32;
-    let mut frame_width = max_width;
-    let mut frame_height = frame_width / aspect_ratio;
-    if frame_height > max_height {
-        frame_height = max_height;
-        frame_width = frame_height * aspect_ratio;
-    }
-
-    (frame_width.max(1.0), frame_height.max(1.0))
 }
 
 fn video_primary_button(

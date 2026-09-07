@@ -68,6 +68,7 @@ mod shortcuts;
 mod sidebar;
 mod sidebar_devices;
 mod sqlite_preview;
+mod startup_probe_cache;
 mod startup_rendering;
 mod startup_trace;
 mod terminal_panel;
@@ -227,6 +228,9 @@ fn main() -> std::process::ExitCode {
     ) {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(error) => {
+            // 渲染初始化失败时先尝试 GL 兜底重启(内部删除探针缓存,
+            // 重启后重新探针自愈);兜底已用过或重启失败才报错退出。
+            let _ = startup_probe_cache::gl_fallback_restart_after_renderer_failure();
             eprintln!("file-manager: application runtime failed: {error}");
             std::process::ExitCode::FAILURE
         }

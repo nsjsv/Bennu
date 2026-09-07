@@ -27,10 +27,18 @@ pub(crate) enum StartupRenderingBackend {
 }
 
 impl StartupRenderingBackend {
-    fn environment_value(self) -> &'static str {
+    pub(crate) fn environment_value(self) -> &'static str {
         match self {
             Self::Vulkan => VULKAN_BACKEND_VALUE,
             Self::Gl => GL_BACKEND_VALUE,
+        }
+    }
+
+    pub(crate) fn from_environment_value(value: &str) -> Option<Self> {
+        match value {
+            VULKAN_BACKEND_VALUE => Some(Self::Vulkan),
+            GL_BACKEND_VALUE => Some(Self::Gl),
+            _ => None,
         }
     }
 }
@@ -49,10 +57,10 @@ pub(crate) struct StartupRenderingEnvironmentStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct RendererProbeGpuSelection {
-    wgpu_power_preference: &'static str,
-    mesa_vulkan_device_select: String,
-    vulkan_loader_driver_select: Option<&'static str>,
+pub(crate) struct RendererProbeGpuSelection {
+    pub(crate) wgpu_power_preference: &'static str,
+    pub(crate) mesa_vulkan_device_select: String,
+    pub(crate) vulkan_loader_driver_select: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,7 +117,7 @@ impl StartupRenderingEnvironment {
         }
     }
 
-    fn from_probe_selection(
+    pub(crate) fn from_probe_selection(
         preference: RenderingGpuPreference,
         gpu_selection: Option<&RendererProbeGpuSelection>,
         backend: StartupRenderingBackend,
@@ -176,7 +184,7 @@ impl StartupRenderingEnvironment {
         }
     }
 
-    fn apply_to_command(&self, command: &mut Command) {
+    pub(crate) fn apply_to_command(&self, command: &mut Command) {
         for variable in &self.variables {
             match &variable.value {
                 Some(value) => {
@@ -276,10 +284,7 @@ impl RendererProbeGpuSelection {
         let mesa_vulkan_device_select = fields.next()?.to_owned();
         let vulkan_loader_driver_select = match fields.next()? {
             "none" => None,
-            "*amd*,*radeon*" => Some("*amd*,*radeon*"),
-            "*nvidia*" => Some("*nvidia*"),
-            "*intel*" => Some("*intel*"),
-            _ => return None,
+            value => Some(parse_vulkan_loader_driver_select_value(value)?),
         };
         if fields.next().is_some() || !valid_mesa_vulkan_device_select(&mesa_vulkan_device_select) {
             return None;
@@ -292,7 +297,7 @@ impl RendererProbeGpuSelection {
     }
 }
 
-fn valid_mesa_vulkan_device_select(value: &str) -> bool {
+pub(crate) fn valid_mesa_vulkan_device_select(value: &str) -> bool {
     let Some(value) = value.strip_suffix('!') else {
         return false;
     };
@@ -303,6 +308,26 @@ fn valid_mesa_vulkan_device_select(value: &str) -> bool {
         && !device_id.is_empty()
         && vendor_id.bytes().all(|byte| byte.is_ascii_hexdigit())
         && device_id.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+/// wgpu 电源偏好字面量域。缓存里会出现 "none"(探针未能识别显示 GPU 或 GL 回退),
+/// 探针 stdout 只产 "low"/"high"。
+pub(crate) fn parse_wgpu_power_preference_value(value: &str) -> Option<&'static str> {
+    match value {
+        "low" => Some("low"),
+        "high" => Some("high"),
+        "none" => Some("none"),
+        _ => None,
+    }
+}
+
+pub(crate) fn parse_vulkan_loader_driver_select_value(value: &str) -> Option<&'static str> {
+    match value {
+        "*amd*,*radeon*" => Some("*amd*,*radeon*"),
+        "*nvidia*" => Some("*nvidia*"),
+        "*intel*" => Some("*intel*"),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -483,17 +508,47 @@ fn renderer_probe_view(_state: &(), _window: window::Id) -> Element<'_, ()> {
 }
 
 pub(crate) fn apply_fast_startup_environment() -> StartupRenderingEnvironment {
-    let preference = config::load_app_config().rendering_gpu_preference;
-    let probe_completion = renderer_probe_command(preference)
-        .map(|command| run_renderer_probe(command, RENDERER_PROBE_TIMEOUT))
-        .unwrap_or_else(|_| RendererProbeCompletion::gl_fallback());
-    let environment = StartupRenderingEnvironment::from_probe_selection(
-        preference,
-        probe_completion.gpu_selection.as_ref(),
-        probe_completion.backend,
-    );
+    let mut app_config = config::load_app_config();
+    let preference = app_config.rendering_gpu_preference;
+    // DisplayGpu 偏好需要显示 GPU 身份参与缓存判定与写回;sysfs 枚举毫秒级。
+    let display_gpu = (preference == RenderingGpuPreference::DisplayGpu)
+        .then(desktop_linux::detect_display_renderer_gpu);
+    let display_gpu = display_gpu.flatten();
+    let cached_environment =
+        crate::startup_probe_cache::cached_probe_environment(&app_config, display_gpu.as_ref());
+    let environment = match cached_environment {
+        Some(environment) => {
+            startup_trace::mark("startup_probe_cache_hit");
+            environment
+        }
+        None => {
+            startup_trace::mark("startup_probe_cache_miss");
+            let probe_completion = renderer_probe_command(preference)
+                .map(|command| run_renderer_probe(command, RENDERER_PROBE_TIMEOUT))
+                .unwrap_or_else(|_| RendererProbeCompletion::gl_fallback());
+            crate::startup_probe_cache::store_probe_completion(
+                &mut app_config,
+                probe_completion.gpu_selection.as_ref(),
+                probe_completion.backend,
+                display_gpu.as_ref(),
+            );
+            if let Err(error) = config::save_app_config(&app_config) {
+                tracing::warn!(
+                    target: "app_ui::startup",
+                    event = "probe_cache_write_failed",
+                    error = %error,
+                    "failed to persist renderer probe cache"
+                );
+            }
+            StartupRenderingEnvironment::from_probe_selection(
+                preference,
+                probe_completion.gpu_selection.as_ref(),
+                probe_completion.backend,
+            )
+        }
+    };
     environment.apply_to_current_process();
-    startup_trace::record_rendering_backend_selected(probe_completion.backend.environment_value());
+    startup_trace::record_rendering_backend_selected(environment.backend().environment_value());
     startup_trace::mark("startup_rendering_environment_ready");
     environment
 }

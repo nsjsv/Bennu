@@ -19,7 +19,7 @@ pub(crate) fn save_user_preferences_command(
 }
 
 async fn persist_app_config(app_config: config::AppConfig) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || config::save_app_config(&app_config))
+    tokio::task::spawn_blocking(move || config::save_app_config_preserving_probe_cache(&app_config))
         .await
         .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())

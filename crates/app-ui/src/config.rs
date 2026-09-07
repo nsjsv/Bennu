@@ -13,7 +13,12 @@ use crate::network_connections::SavedNetworkConnection;
 use crate::shortcuts::ShortcutConfig;
 
 mod app_config;
-pub(crate) use app_config::{load_app_config, save_app_config, AppConfig};
+pub(crate) use app_config::{
+    load_app_config, save_app_config, save_app_config_preserving_probe_cache, AppConfig,
+    RendererProbeCacheRecord,
+};
+#[cfg(test)]
+pub(crate) use app_config::default_app_config;
 pub(crate) mod launch_window;
 mod legacy_toml;
 pub(crate) use launch_window::{

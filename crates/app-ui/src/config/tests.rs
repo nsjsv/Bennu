@@ -101,6 +101,7 @@ fn app_config_toml_contains_only_startup_level_keys() {
         rendering_gpu_preference: RenderingGpuPreference::HighPerformanceGpu,
         search_content_indexing_enabled: false,
         search_max_extract_bytes: 4096,
+        renderer_probe_cache: None,
     };
 
     let content = app_config::toml_app_config_content(&app_config).unwrap();
@@ -160,6 +161,7 @@ fn writes_app_config_without_user_preferences() {
         rendering_gpu_preference: RenderingGpuPreference::DisplayGpu,
         search_content_indexing_enabled: true,
         search_max_extract_bytes: 8192,
+        renderer_probe_cache: None,
     };
 
     app_config::write_app_config(&path, &app_config).expect("write app config");
@@ -183,6 +185,7 @@ fn user_preferences_round_trip_through_sqlite() {
         rendering_gpu_preference: RenderingGpuPreference::HighPerformanceGpu,
         search_content_indexing_enabled: false,
         search_max_extract_bytes: 1234,
+        renderer_probe_cache: None,
     };
     let mut config = default_user_config();
     config.show_hidden_files = true;
@@ -898,4 +901,86 @@ fn preview_extension_rules_roundtrip_through_stored_preferences() {
         default.preview_extension_rules.text
     );
     assert!(restored.preview_extension_rules.image.is_empty());
+}
+
+#[test]
+fn renderer_probe_cache_section_survives_a_toml_round_trip() {
+    let stored = RendererProbeCacheRecord {
+        version: 1,
+        backend: "vulkan".to_owned(),
+        rendering_gpu_preference: "display".to_owned(),
+        wgpu_power_preference: Some("low".to_owned()),
+        mesa_vulkan_device_select: Some("1002:15bf!".to_owned()),
+        vulkan_loader_driver_select: Some("*amd*,*radeon*".to_owned()),
+        display_gpu_device_select: Some("1002:15bf!".to_owned()),
+    };
+    let mut app_config = app_config::default_app_config();
+    app_config.renderer_probe_cache = Some(stored.clone());
+
+    let temp_dir = tempfile::tempdir().expect("create temp config dir");
+    let path = temp_dir.path().join("config.toml");
+    app_config::write_app_config(&path, &app_config).expect("write app config");
+
+    let loaded = app_config::load_app_config_from_dir(temp_dir.path(), app_config::default_app_config())
+        .renderer_probe_cache
+        .expect("cache survives round trip");
+    assert_eq!(loaded, stored);
+}
+
+#[test]
+fn damaged_renderer_probe_cache_section_drops_cache_but_keeps_other_keys() {
+    let temp_dir = tempfile::tempdir().expect("create temp config dir");
+    let path = temp_dir.path().join("config.toml");
+    fs::write(
+        &path,
+        r#"
+thumbnail_cache_dir = "/tmp/thumbnails"
+rendering_backend = "gpu"
+
+[renderer_probe_cache]
+version = "one"
+backend = "vulkan"
+"#,
+    )
+    .expect("write damaged config");
+
+    let loaded = app_config::load_app_config_from_dir(temp_dir.path(), app_config::default_app_config());
+
+    assert_eq!(loaded.renderer_probe_cache, None);
+    assert_eq!(loaded.rendering_gpu_preference, RenderingGpuPreference::HighPerformanceGpu);
+    assert_eq!(
+        loaded.thumbnail_cache_dir,
+        PathBuf::from("/tmp/thumbnails")
+    );
+}
+
+#[test]
+fn preserving_save_keeps_stored_probe_cache_section() {
+    let stored = RendererProbeCacheRecord {
+        version: 1,
+        backend: "gl".to_owned(),
+        rendering_gpu_preference: "gpu".to_owned(),
+        wgpu_power_preference: Some("high".to_owned()),
+        mesa_vulkan_device_select: None,
+        vulkan_loader_driver_select: None,
+        display_gpu_device_select: None,
+    };
+    let mut stored_config = app_config::default_app_config();
+    stored_config.renderer_probe_cache = Some(stored.clone());
+
+    let temp_dir = tempfile::tempdir().expect("create temp config dir");
+    let path = temp_dir.path().join("config.toml");
+    app_config::write_app_config(&path, &stored_config).expect("write stored config");
+
+    let user_persisted = AppConfig::from_user_config(&default_user_config());
+    app_config::save_app_config_preserving_probe_cache_at(&path, &user_persisted)
+        .expect("preserving save");
+
+    let reloaded =
+        app_config::load_app_config_from_dir(temp_dir.path(), app_config::default_app_config());
+    assert_eq!(reloaded.renderer_probe_cache, Some(stored));
+    assert_eq!(
+        reloaded.rendering_gpu_preference,
+        user_persisted.rendering_gpu_preference
+    );
 }

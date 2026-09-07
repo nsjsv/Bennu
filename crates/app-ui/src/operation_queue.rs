@@ -461,10 +461,6 @@ impl FileOperationQueue {
             });
         }
         let _ = self.start_next();
-        // TEMP-TRACE: 删除时搜索 TEMP-TRACE 移除
-        if std::env::var("FILE_MANAGER_TRACE").is_ok() {
-            eprintln!("[op-trace] task {id} enqueued title={}", operation.title());
-        }
 
         #[cfg(test)]
         let persistence_error = self.complete_test_persistence();

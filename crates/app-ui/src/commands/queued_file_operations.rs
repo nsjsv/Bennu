@@ -102,12 +102,6 @@ impl Recipe for FileOperationRecipe {
         Box::pin(iced::stream::channel(
             FILE_OPERATION_CHANNEL_SIZE,
             async move |mut output| {
-                // TEMP-TRACE: 删除时搜索 TEMP-TRACE 整段移除
-                let trace = std::env::var("FILE_MANAGER_TRACE").is_ok();
-                let spawned_at = std::time::Instant::now();
-                if trace {
-                    eprintln!("[op-trace] task {task_id} runner spawned");
-                }
                 let result = run_queued_file_operation(
                     operation,
                     controls,
@@ -117,12 +111,6 @@ impl Recipe for FileOperationRecipe {
                     &mut output,
                 )
                 .await;
-                if trace {
-                    eprintln!(
-                        "[op-trace] task {task_id} runner finished, spawn-to-finish={:?}",
-                        spawned_at.elapsed()
-                    );
-                }
                 let _ = output
                     .send(Message::FileOperationFinished(task_id, result))
                     .await;

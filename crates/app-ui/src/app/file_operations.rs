@@ -1,5 +1,8 @@
 use iced::Task;
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+use file_core::ResolvedEntryChange;
 
 use super::FileBrowser;
 use crate::model::{IconGridExpansionMigration, Message};
@@ -105,20 +108,115 @@ impl FileBrowser {
             return Task::none();
         }
 
+        // rename 事实已由 FileOperationMovesRenamed 处理（列表增量 + 路径迁移 + 搜索刷新）。
+        // 这里只剩 summaries 失效重算：journal 落盘晚于 rename，整页 reload 不再等它。
         let operation = self.operation_queue.operation(task_id).cloned();
-        let path_migration_task = self.migrate_completed_paths(&migrations);
-        let pane_reload_task = if let Some(operation) = operation.as_ref() {
+        if let Some(operation) = operation.as_ref() {
             self.invalidate_list_directory_summaries_for_file_operation(operation);
-            self.reload_visible_panes_after_file_operation_preserving_list_directory_summaries()
-        } else {
-            self.reload_visible_panes_after_file_operation()
-        };
-        let search_refresh_task = if self.search_workspace.is_some() {
-            self.submit_search()
-        } else {
-            Task::none()
-        };
-        Task::batch([path_migration_task, pane_reload_task, search_refresh_task])
+            return self.schedule_visible_list_directory_summaries();
+        }
+        Task::none()
+    }
+
+    // 操作完成后的刷新分流：成功 Move 的条目变更已由 renamed 消息增量应用，
+    // 这里只对账（对不上才全量兜底）；Copy 交给 watcher 增量补入 + 溢出兜底；
+    // 其余操作类型维持全量重扫。
+    fn finish_refresh_task_for_operation(
+        &mut self,
+        operation: &QueuedFileOperation,
+        completed_successfully: bool,
+    ) -> Task<Message> {
+        match (operation, completed_successfully) {
+            (QueuedFileOperation::Move { transfers, .. }, true) => {
+                let pairs = transfers
+                    .iter()
+                    .map(|transfer| (transfer.source.clone(), transfer.target.clone()))
+                    .collect::<Vec<_>>();
+                if self.transfers_are_reflected_in_visible_directories(&pairs) {
+                    self.schedule_visible_list_directory_summaries()
+                } else {
+                    self.reload_visible_panes_after_file_operation_preserving_list_directory_summaries()
+                }
+            }
+            (QueuedFileOperation::Copy { .. }, true) => {
+                self.schedule_visible_list_directory_summaries()
+            }
+            _ => {
+                self.reload_visible_panes_after_file_operation_preserving_list_directory_summaries()
+            }
+        }
+    }
+
+    // rename 已在文件系统发生：条目变更立即增量应用（源目录移除 + 目标目录插入，
+    // 元数据从源条目继承——rename 不改变文件元数据），不等 journal 落盘。
+    // 源条目不可见（目录未显示）时跳过立即应用，交给 watcher 与对账兜底。
+    pub(super) fn accept_file_operation_moves_renamed(
+        &mut self,
+        task_id: u64,
+        moves: Vec<crate::operation_history::CompletedTransfer>,
+    ) -> Task<Message> {
+        let _ = task_id;
+        if moves.is_empty() {
+            return Task::none();
+        }
+        let mut per_directory: HashMap<PathBuf, Vec<ResolvedEntryChange>> = HashMap::new();
+        for completed in &moves {
+            let Some(source_directory) = completed.source.parent().map(Path::to_path_buf) else {
+                continue;
+            };
+            let Some(target_directory) = completed.target.parent().map(Path::to_path_buf) else {
+                continue;
+            };
+            let Some(target_name) = completed
+                .target
+                .file_name()
+                .map(std::ffi::OsStr::to_os_string)
+            else {
+                continue;
+            };
+            let Some(existing) = self.find_discovered_entry(&completed.source) else {
+                continue;
+            };
+            let to = existing.renamed_to(completed.target.clone(), target_name);
+            // 跨目录移动要同时更新两个目录的列表：源移除 + 目标插入。
+            if source_directory == target_directory {
+                per_directory.entry(source_directory).or_default().push(
+                    ResolvedEntryChange::Renamed {
+                        from: completed.source.clone(),
+                        to,
+                    },
+                );
+            } else {
+                per_directory.entry(source_directory).or_default().push(
+                    ResolvedEntryChange::Removed {
+                        path: completed.source.clone(),
+                    },
+                );
+                per_directory
+                    .entry(target_directory)
+                    .or_default()
+                    .push(ResolvedEntryChange::Added(to));
+            }
+        }
+
+        let mut tasks = Vec::new();
+        for (directory, changes) in per_directory {
+            if let Some(task) = self.apply_entry_changes(&directory, &changes) {
+                tasks.push(task);
+            }
+        }
+
+        let migrations = moves
+            .iter()
+            .map(|completed| {
+                CompletedPathMigration::new(completed.source.clone(), completed.target.clone())
+            })
+            .collect::<Vec<_>>();
+        tasks.push(self.migrate_completed_paths(&migrations));
+        if self.search_workspace.is_some() {
+            tasks.push(self.submit_search());
+        }
+        Task::batch(tasks)
     }
 
     pub(super) fn accept_file_operation_finished(
@@ -198,7 +296,7 @@ impl FileBrowser {
 
         let pane_reload_task = if let Some(operation) = completed_operation.as_ref() {
             self.invalidate_list_directory_summaries_for_file_operation(operation);
-            self.reload_visible_panes_after_file_operation_preserving_list_directory_summaries()
+            self.finish_refresh_task_for_operation(operation, completed_successfully)
         } else {
             self.reload_visible_panes_after_file_operation()
         };

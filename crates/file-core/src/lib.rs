@@ -87,6 +87,6 @@ pub use trash_bin::{
     trash_path_with_restore_entry_and_cancellation, TrashCommitOutcome, TrashEntry,
     TrashRestoreEntry, TrashScan, TrashTrackingWarning,
 };
-pub use watch::{watch_directory, DirectoryChange, DirectoryWatcher};
+pub use watch::{watch_directory, DirectoryEntryChanges, DirectoryWatcher, ResolvedEntryChange};
 
 pub(crate) const SEVEN_ZIP_COMMAND_NAMES: [&str; 3] = ["7z", "7zz", "7za"];

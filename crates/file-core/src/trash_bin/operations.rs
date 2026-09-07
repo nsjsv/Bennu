@@ -361,48 +361,24 @@ fn verify_trash_info_identity(
     Ok(())
 }
 
-// TEMP-TRACE: 删除链路分段计时，FILE_MANAGER_TRACE=1 启用；定位后整段删除（搜索 TEMP-TRACE）
-fn trash_trace(stage: &str, elapsed: std::time::Duration) {
-    if std::env::var("FILE_MANAGER_TRACE").is_ok() {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default();
-        eprintln!(
-            "[trash-trace {}.{:03}] {stage}: {elapsed:?}",
-            now.as_secs(),
-            now.subsec_millis()
-        );
-    }
-}
-
 fn trash_path_with_tracking_blocking(
     path: PathBuf,
     cancellation: CancellationToken,
 ) -> Result<TrashCommitOutcome, FileError> {
-    let trace_total = std::time::Instant::now();
     if cancellation.is_cancelled() {
         return Err(FileError::Cancelled);
     }
-    let stage = std::time::Instant::now();
     let path = canonical_trash_source_path(&path)?;
-    trash_trace("canonicalize", stage.elapsed());
-    let stage = std::time::Instant::now();
     let tracking = TrashTrackingPlan::prepare(&path, cancellation.clone())?;
-    trash_trace("prepare(total)", stage.elapsed());
     if cancellation.is_cancelled() {
         return Err(FileError::Cancelled);
     }
-    let stage = std::time::Instant::now();
     trash::delete(&path).map_err(|error| FileError::Trash {
         path: path.clone(),
         message: error.to_string(),
     })?;
-    trash_trace("trash::delete", stage.elapsed());
 
-    let stage = std::time::Instant::now();
     let find_result = tracking.find_committed_entry();
-    trash_trace("find_committed_entry", stage.elapsed());
-    trash_trace("TOTAL", trace_total.elapsed());
     match find_result {
         Ok(entry) => Ok(TrashCommitOutcome::Tracked(Box::new(entry))),
         Err(message) => Ok(TrashCommitOutcome::CommittedWithoutRestoreEntry(
@@ -452,7 +428,6 @@ enum TrashTrackingScope {
 
 impl TrashTrackingPlan {
     fn prepare(path: &Path, cancellation: CancellationToken) -> Result<Self, FileError> {
-        let stage = std::time::Instant::now();
         let source_identity = inspect_trash_object(path).map_err(|source| FileError::Metadata {
             path: path.to_path_buf(),
             source,
@@ -471,7 +446,6 @@ impl TrashTrackingPlan {
             .iter()
             .map(|mount| mount.mount_point.clone())
             .collect();
-        trash_trace("  inspect+mountinfo", stage.elapsed());
         let source_mount =
             deepest_mount_point(&mount_points, path).ok_or_else(|| FileError::Trash {
                 path: path.to_path_buf(),
@@ -510,18 +484,14 @@ impl TrashTrackingPlan {
                 top_identity,
             }
         };
-        let stage = std::time::Instant::now();
         let catalog = discover_trash_locations_from_mountinfo_with_cancellation(
             &data_home,
             uid,
             &mountinfo,
             &cancellation,
         )?;
-        trash_trace("  discover_locations", stage.elapsed());
-        let stage = std::time::Instant::now();
         let before_info_objects =
             snapshot_scope_info_objects(&scope, &catalog.locations, &cancellation)?;
-        trash_trace("  snapshot_baseline", stage.elapsed());
         Ok(Self {
             original_path: path.to_path_buf(),
             scope,
@@ -592,7 +562,6 @@ impl TrashTrackingPlan {
     }
 
     fn find_committed_entry(self) -> Result<TrashRestoreEntry, String> {
-        let stage = std::time::Instant::now();
         let catalog =
             discover_trash_locations_from_mountinfo(&self.data_home, self.uid, &self.mountinfo)
                 .map_err(|error| {
@@ -682,7 +651,6 @@ impl TrashTrackingPlan {
                 });
             }
         }
-        trash_trace("  candidates_scan", stage.elapsed());
         if candidates.len() == 1 {
             return Ok(candidates.remove(0).restore_entry());
         }

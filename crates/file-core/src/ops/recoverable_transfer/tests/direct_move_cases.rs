@@ -39,6 +39,7 @@ async fn direct_move_batch_defers_fingerprint_and_resumes_to_completion() {
         vec![record],
         &journal,
         &running_transfer_options(),
+        &mut |_| {},
     )
     .await
     .unwrap();

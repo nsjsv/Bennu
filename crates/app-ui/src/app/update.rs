@@ -215,6 +215,9 @@ impl FileBrowser {
             Message::FileOperationDirectMovesCommitted { task_id, commits } => {
                 self.accept_file_operation_direct_moves_committed(task_id, commits)
             }
+            Message::FileOperationMovesRenamed { task_id, moves } => {
+                self.accept_file_operation_moves_renamed(task_id, moves)
+            }
             Message::FileOperationFinished(task_id, completion) => {
                 self.accept_file_operation_finished(task_id, completion)
             }
@@ -793,7 +796,7 @@ impl FileBrowser {
             Message::ExpandedDirectoryEntriesReady(request, discovery) => {
                 self.accept_expanded_directory_discovery(request, discovery)
             }
-            Message::ObservedDirectoryChanged(path) => self.reload_observed_directory(path),
+            Message::ObservedDirectoryChanges(change) => self.reload_observed_directory(change),
             Message::SettingsOpened => self.open_settings(),
             Message::SettingsCategorySelected(category) => self.select_settings_category(category),
             Message::SettingsSubpageOpened(subpage) => self.select_settings_subpage(subpage),

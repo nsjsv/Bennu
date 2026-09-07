@@ -277,10 +277,14 @@ async fn batch_direct_move_renames_every_record_before_the_batch_commit() {
         records.push(record);
     }
 
-    let batch =
-        run_direct_move_batch_to_durable_renamed(records, &journal, &running_transfer_options())
-            .await
-            .unwrap();
+    let batch = run_direct_move_batch_to_durable_renamed(
+        records,
+        &journal,
+        &running_transfer_options(),
+        &mut |_| {},
+    )
+    .await
+    .unwrap();
     assert_eq!(batch.len(), 3);
     assert!(batch.iter().all(|record| matches!(
         record,
@@ -341,10 +345,14 @@ async fn batch_direct_move_recovers_after_a_crash_between_renames() {
     // commit: record 0's source is already at its target.
     rename_noreplace(&sources[0], &targets[0]).unwrap();
 
-    let batch =
-        run_direct_move_batch_to_durable_renamed(records, &journal, &running_transfer_options())
-            .await
-            .unwrap();
+    let batch = run_direct_move_batch_to_durable_renamed(
+        records,
+        &journal,
+        &running_transfer_options(),
+        &mut |_| {},
+    )
+    .await
+    .unwrap();
     assert_eq!(batch.len(), 3);
     assert!(batch.iter().all(|record| matches!(
         record,

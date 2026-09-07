@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use file_core::{DirectoryEntry, EntryMetadata, FileKind, ScanWarning, TrashEntry, TrashScan};
 
@@ -263,9 +263,16 @@ fn trash_watch_event_refreshes_snapshot_but_unrelated_paths_do_not() {
         .next()
         .expect("home trash watch root");
 
-    drop(browser.reload_observed_directory(watch_root.join("info")));
+    drop(browser.reload_observed_directory(observed_changes(&watch_root.join("info"))));
     assert!(browser.trash_refresh.begin_if_idle().is_none());
 
-    drop(browser.reload_observed_directory(PathBuf::from("/tmp/unrelated-directory")));
+    drop(browser.reload_observed_directory(observed_changes(Path::new("/tmp/unrelated-directory"))));
     assert!(browser.trash_refresh.begin_if_idle().is_none());
+}
+
+fn observed_changes(directory: &std::path::Path) -> file_core::DirectoryEntryChanges {
+    file_core::DirectoryEntryChanges {
+        directory: directory.to_path_buf(),
+        changes: vec![file_core::ResolvedEntryChange::RescanRequired],
+    }
 }

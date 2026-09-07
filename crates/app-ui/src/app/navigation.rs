@@ -528,7 +528,11 @@ impl FileBrowser {
         Task::batch(commands)
     }
 
-    pub(super) fn reload_observed_directory(&mut self, path: PathBuf) -> Task<Message> {
+    pub(super) fn reload_observed_directory(
+        &mut self,
+        change: file_core::DirectoryEntryChanges,
+    ) -> Task<Message> {
+        let path = change.directory.clone();
         if self.has_trash_tab()
             && file_core::trash_bin::trash_watch_directories()
                 .iter()
@@ -539,6 +543,12 @@ impl FileBrowser {
 
         if self.is_trash_view {
             return Task::none();
+        }
+
+        // 增量优先：结构化变更直接修正条目，列表不重置；RescanRequired 或
+        // 无应用目标（事件丢失、批量溢出）时才退回全量重扫。
+        if let Some(task) = self.apply_entry_changes(&path, &change.changes) {
+            return task;
         }
 
         if path == self.current_dir {

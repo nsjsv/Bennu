@@ -205,7 +205,7 @@ fn observed_path_refreshes_icon_and_persistent_directory_owners() {
         expanded(Vec::new(), ExpandedDirectoryStatus::Loaded, 3),
     );
 
-    drop(browser.reload_observed_directory(root.clone()));
+    drop(browser.reload_observed_directory(observed_changes(&root)));
 
     assert_eq!(
         browser
@@ -406,4 +406,11 @@ fn dropping_icon_state_clears_hidden_selection_and_rename_state() {
     assert_eq!(browser.pending_created_entry_rename, None);
     assert!(browser.rename_input.is_empty());
     assert!(browser.preview.is_none());
+}
+
+fn observed_changes(directory: &std::path::Path) -> file_core::DirectoryEntryChanges {
+    file_core::DirectoryEntryChanges {
+        directory: directory.to_path_buf(),
+        changes: vec![file_core::ResolvedEntryChange::RescanRequired],
+    }
 }

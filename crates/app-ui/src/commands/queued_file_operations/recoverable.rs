@@ -321,21 +321,27 @@ pub(super) async fn run_queued_transfers(
     let journal = task_queue_transfer_journal(store, controls.clone());
 
     let prepared =
-        match prepare_queued_transfer_records(records, &journal, &base_options, &controls).await {
-            Ok(prepared) => prepared,
-            Err(error) => {
-                return settle_recoverable_transfer_failure(
-                    mode,
-                    error,
-                    Vec::new(),
-                    stored_task_id,
-                    task_id,
-                    output,
-                    &journal,
-                    &controls,
-                )
-                .await;
-            }
+        {
+            let prepared =
+                match prepare_queued_transfer_records(records, &journal, &base_options, &controls)
+                    .await
+                {
+                    Ok(prepared) => prepared,
+                    Err(error) => {
+                        return settle_recoverable_transfer_failure(
+                            mode,
+                            error,
+                            Vec::new(),
+                            stored_task_id,
+                            task_id,
+                            output,
+                            &journal,
+                            &controls,
+                        )
+                        .await;
+                    }
+                };
+            prepared
         };
     let progress_records = prepared
         .iter()
@@ -564,7 +570,26 @@ async fn settle_intent_segment(
         .into_iter()
         .map(|(_, record)| record)
         .collect();
-    let batch = run_direct_move_batch_to_durable_renamed(records, journal, options).await?;
+    let batch = {
+        // rename 全部完成后立即上报 UI（同一条 output channel，先于 durable commits），
+        // 让列表刷新不等 parent fsync 与 journal 落盘。
+        let renamed_output = output.clone();
+        let mut on_renamed = |moves: Vec<(PathBuf, PathBuf)>| {
+            let _ = renamed_output
+                .clone()
+                .try_send(Message::FileOperationMovesRenamed {
+                    task_id,
+                    moves: moves
+                        .into_iter()
+                        .map(|(source, target)| CompletedTransfer { source, target })
+                        .collect(),
+                });
+        };
+        let batch =
+            run_direct_move_batch_to_durable_renamed(records, journal, options, &mut on_renamed)
+                .await?;
+        batch
+    };
 
     let mut durable_direct_moves = Vec::new();
     let mut diverged = Vec::new();
@@ -1368,11 +1393,21 @@ mod recoverable_transfer_tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
+        // rename 事实必须先于 durable 提交消息到达 UI：列表刷新不等 journal 落盘。
+        let renamed_moves = messages
+            .iter()
+            .enumerate()
+            .filter_map(|(position, message)| match message {
+                Message::FileOperationMovesRenamed { moves, .. } => Some((position, moves.len())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(renamed_moves, vec![(0, transfers.len())]);
         let first_item_completion = messages
             .iter()
             .position(|message| matches!(message, Message::FileOperationProgressed(_, _)))
             .expect("batch should publish item completion progress");
-        assert_eq!(direct_commit_batches, vec![(0, task_id, transfers.len())]);
+        assert_eq!(direct_commit_batches, vec![(1, task_id, transfers.len())]);
         assert!(direct_commit_batches[0].0 < first_item_completion);
         let direct_commit_batch = messages
             .iter()
@@ -1533,6 +1568,7 @@ mod recoverable_transfer_tests {
             records,
             &journal,
             &FileTransferOptions::new(running.controls.clone()),
+            &mut |_| {},
         )
         .await
         .unwrap();

@@ -415,7 +415,7 @@ fn watcher_refresh_keeps_current_list_follow_session_and_rejects_prior_generatio
     drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::List));
     let stale_request = list_request(&browser, &project);
 
-    drop(browser.reload_observed_directory(project.clone()));
+    drop(browser.reload_observed_directory(observed_changes(&project)));
     let refreshed_request = list_request(&browser, &project);
     assert_eq!(stale_request.context, refreshed_request.context);
     assert!(refreshed_request.generation > stale_request.generation);
@@ -505,4 +505,11 @@ fn select_all_cancels_list_to_icons_follow() {
         .as_ref()
         .is_some_and(|state| !state.has_follow_plan() && state.directory(&source).is_none()));
     assert!(browser.selected_paths.contains(&other));
+}
+
+fn observed_changes(directory: &std::path::Path) -> file_core::DirectoryEntryChanges {
+    file_core::DirectoryEntryChanges {
+        directory: directory.to_path_buf(),
+        changes: vec![file_core::ResolvedEntryChange::RescanRequired],
+    }
 }

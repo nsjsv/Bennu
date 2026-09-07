@@ -92,6 +92,16 @@ fn direct_move_commit_batch_message(
     }
 }
 
+fn direct_move_renamed_batch_message(moves: Vec<(PathBuf, PathBuf)>) -> Message {
+    Message::FileOperationMovesRenamed {
+        task_id: 0,
+        moves: moves
+            .into_iter()
+            .map(|(source, target)| crate::operation_history::CompletedTransfer { source, target })
+            .collect(),
+    }
+}
+
 fn loaded_expanded_directory() -> ExpandedDirectory {
     ExpandedDirectory {
         entries: Vec::new(),
@@ -301,7 +311,7 @@ fn duplicate_completion_is_rejected_before_history_side_effects() {
 }
 
 #[test]
-fn durable_direct_move_commit_migrates_paths_before_terminal_completion() {
+fn moved_renames_migrate_paths_before_terminal_completion() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let workspace = tempfile::tempdir().unwrap();
     let source = workspace.path().join("old");
@@ -320,12 +330,10 @@ fn durable_direct_move_commit_migrates_paths_before_terminal_completion() {
     }));
     let task_id = browser.operation_queue.tasks().last().unwrap().id;
 
-    drop(browser.update(direct_move_commit_message(
-        task_id,
+    drop(browser.update(direct_move_renamed_batch_message(vec![(
         source.clone(),
         destination.clone(),
-        2,
-    )));
+    )])));
 
     assert_eq!(browser.current_dir, destination.join("nested"));
     drop(browser.accept_file_operation_finished(
@@ -349,7 +357,7 @@ fn durable_direct_move_commit_migrates_paths_before_terminal_completion() {
 }
 
 #[test]
-fn direct_move_commit_batch_migrates_all_paths_with_one_pane_and_search_refresh() {
+fn moved_renames_batch_migrates_all_paths_with_one_pane_and_search_refresh() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let workspace = tempfile::tempdir().unwrap();
     let first_source = workspace.path().join("first-old");
@@ -379,22 +387,22 @@ fn direct_move_commit_batch_migrates_all_paths_with_one_pane_and_search_refresh(
     let pane_generation = browser.directory_load_generation;
     let search_generation = browser.search_workspace.as_ref().unwrap().run.generation;
 
-    drop(browser.update(direct_move_commit_batch_message(
-        task_id,
-        vec![
-            (0, first_source, first_target.clone(), 2),
-            (1, second_source, second_target.clone(), 2),
-        ],
-    )));
+    drop(browser.update(direct_move_renamed_batch_message(vec![
+        (first_source, first_target.clone()),
+        (second_source, second_target.clone()),
+    ])));
 
     assert_eq!(browser.current_dir, first_target.join("nested"));
     assert_eq!(browser.renaming, Some(second_target.join("report.txt")));
-    assert_eq!(browser.directory_load_generation, pane_generation + 1);
+    // renamed 走增量应用：路径迁移照常，但不触发全量重扫（generation 不变）。
+    // 目录未在 discovery 中显示时跳过立即应用，由 watcher 与对账兜底。
+    assert_eq!(browser.directory_load_generation, pane_generation);
     assert_eq!(
         browser.search_workspace.as_ref().unwrap().run.generation,
         search_generation + 1
     );
 
+    // journal 落盘只失效 summaries 重算，不再整页 reload，也不重复迁移路径。
     drop(browser.update(direct_move_commit_batch_message(
         task_id,
         vec![(
@@ -404,11 +412,12 @@ fn direct_move_commit_batch_migrates_all_paths_with_one_pane_and_search_refresh(
             2,
         )],
     )));
-    assert_eq!(browser.directory_load_generation, pane_generation + 1);
+    assert_eq!(browser.directory_load_generation, pane_generation);
     assert_eq!(
         browser.search_workspace.as_ref().unwrap().run.generation,
         search_generation + 1
     );
+    assert_eq!(browser.current_dir, first_target.join("nested"));
 }
 
 #[tokio::test]

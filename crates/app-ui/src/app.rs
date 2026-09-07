@@ -13,6 +13,7 @@ pub(crate) mod convert;
 mod desktop_activation;
 mod directory_expansion_loading;
 mod directory_metadata_demand;
+mod entry_changes;
 mod directory_recovery;
 mod events;
 mod file_operation_notifications;

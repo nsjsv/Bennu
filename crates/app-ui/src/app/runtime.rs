@@ -152,7 +152,7 @@ fn directory_watch_stream(path: &PathBuf) -> impl iced::futures::Stream<Item = M
         if let Ok(mut watcher) = watch_directory(path, DIRECTORY_WATCH_DEBOUNCE) {
             while let Some(change) = watcher.recv().await {
                 if output
-                    .send(Message::ObservedDirectoryChanged(change.path))
+                    .send(Message::ObservedDirectoryChanges(change))
                     .await
                     .is_err()
                 {

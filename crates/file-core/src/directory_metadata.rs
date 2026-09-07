@@ -172,6 +172,50 @@ impl DiscoveredDirectoryEntry {
         }
     }
 
+    // 增量更新入口：从 std::fs::Metadata 构造，filesystem cell 预填完整，
+    // display_entry() 无需再发起 demand。
+    /// 增量更新入口的公开构造：测试与跨 crate 应用方需要直接构造带完整元数据的条目。
+    pub fn with_complete_filesystem_metadata(
+        path: PathBuf,
+        name: OsString,
+        kind: FileKind,
+        is_hidden: bool,
+        is_symlink: bool,
+        metadata: &std::fs::Metadata,
+    ) -> Self {
+        let filesystem_metadata = OnceCell::new();
+        filesystem_metadata
+            .set(Ok(directory_filesystem_metadata(metadata, false)))
+            .expect("new filesystem metadata cell must be empty");
+        Self {
+            inner: Arc::new(DiscoveredDirectoryEntryInner {
+                path,
+                name,
+                kind,
+                is_hidden,
+                is_symlink,
+                filesystem_metadata,
+                identity_names: OnceCell::new(),
+            }),
+        }
+    }
+
+    /// rename 不改变文件元数据：共享已填写的 metadata/identity cells，
+    /// 仅替换 path/name。未填写的 cell 克隆后仍是待解析状态。
+    pub fn renamed_to(&self, path: PathBuf, name: OsString) -> Self {
+        Self {
+            inner: Arc::new(DiscoveredDirectoryEntryInner {
+                path,
+                name,
+                kind: self.inner.kind,
+                is_hidden: self.inner.is_hidden,
+                is_symlink: self.inner.is_symlink,
+                filesystem_metadata: self.inner.filesystem_metadata.clone(),
+                identity_names: self.inner.identity_names.clone(),
+            }),
+        }
+    }
+
     pub fn path(&self) -> &Path {
         &self.inner.path
     }

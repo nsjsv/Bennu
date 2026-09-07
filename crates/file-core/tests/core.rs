@@ -16,7 +16,8 @@ use file_core::{
     BatchRenameItem, DirectoryEntry, DirectoryMetadataAvailability, DirectoryMetadataRequest,
     DirectoryMetadataRequirement, DirectoryMetadataState, EntryMetadata, FileError, FileKind,
     FileOperationControls, FileOperationRunState, FileOperationVerification, FileTransferOptions,
-    ScanOptions, SortDirection, SortField, TransferConflictCheck, TransferConflictStrategy,
+    ResolvedEntryChange, ScanOptions, SortDirection, SortField, TransferConflictCheck,
+    TransferConflictStrategy,
 };
 use tempfile::tempdir;
 

@@ -645,18 +645,23 @@ mod tests {
     }
 
     #[test]
-    fn space_without_hovered_entry_leaves_panel_session_alone() {
-        // 面板会话没有独立窗口;鼠标悬停在空白处按 Space 是“没开则不误开”,
-        // 不得清空面板正在显示的内容。
+    fn space_without_hovered_entry_opens_selected_preview() {
+        // 键盘选中即够:纯键盘操作没有 hovered_entry,Space 照样按选中项
+        // 开独立窗口;面板会话(无独立窗口)不被清空,而是切到独立窗口。
         let path = PathBuf::from("/workspace/report.txt");
         let mut browser = panel_open_browser();
+        browser.entries = Arc::new(vec![test_file_entry(&path)]);
         browser.selected = Some(path.clone());
         browser.preview_shown_path = Some(path.clone());
         browser.preview = Some(PreviewState::Loading(path.clone()));
 
         drop(browser.request_preview());
 
-        assert!(browser.preview.is_some());
-        assert!(browser.preview_window.is_none());
+        assert_eq!(
+            browser.preview_load_surface,
+            PreviewLoadSurface::StandaloneWindow
+        );
+        assert!(browser.preview_window.is_some());
+        assert_eq!(browser.preview_shown_path, Some(path));
     }
 }

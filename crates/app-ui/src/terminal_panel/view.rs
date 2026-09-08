@@ -22,6 +22,8 @@ pub(crate) const CELL_HEIGHT: f32 = FONT_SIZE * 1.4;
 /// 底部窄条高度(收起时)。
 pub(crate) const BOTTOM_BAR_HEIGHT: f32 = 28.0;
 const BOTTOM_BAR_ICON_SIZE: f32 = 15.0;
+/// 左端选中统计相对内容区起点的缩进(侧边栏让位宽度之外的间距)。
+const SUMMARY_SIDEBAR_GAP: f32 = 10.0;
 /// 展开面板顶部的分隔线 + 拖拽热区总高度。
 const DRAG_HANDLE_HEIGHT: f32 = 6.0;
 /// 分隔线可见宽度。
@@ -90,7 +92,7 @@ pub(crate) fn terminal_panel_area(browser: &FileBrowser) -> Element<'_, Message>
             .into();
         }
     }
-    collapsed_strip()
+    collapsed_strip(browser)
 }
 
 /// 终端标签条:标签(标题 + 未读圆点 + ×)+ 右端「+」新建按钮。
@@ -254,8 +256,8 @@ fn resize_handle() -> Element<'static, Message> {
     .into()
 }
 
-/// 收起态窄条:顶部分隔线 + 右下角终端图标,背景与内容区一致。
-fn collapsed_strip() -> Element<'static, Message> {
+/// 收起态窄条(底部工具栏):顶部分隔线 + 左端窗格选中统计 + 右下角终端图标。
+fn collapsed_strip(browser: &FileBrowser) -> Element<'_, Message> {
     let icon = button(
         IconSymbol::Terminal
             .view(BOTTOM_BAR_ICON_SIZE)
@@ -266,6 +268,7 @@ fn collapsed_strip() -> Element<'static, Message> {
     .on_press(Message::TerminalPanel(TerminalPanelMessage::ToggleRequested))
     .padding(4.0)
     .style(crate::appearance::transparent_button_style());
+    let summaries = browser.pane_selection_summaries();
     iced::widget::column![
         container(space::Space::new())
             .width(Length::Fill)
@@ -273,6 +276,7 @@ fn collapsed_strip() -> Element<'static, Message> {
             .style(divider_line_style),
         container(
             row![
+                pane_selection_summary_strip(summaries),
                 space::Space::new().width(Length::Fill),
                 icon.width(Length::Fixed(BOTTOM_BAR_HEIGHT - DIVIDER_LINE_HEIGHT))
                     .height(Length::Fixed(BOTTOM_BAR_HEIGHT - DIVIDER_LINE_HEIGHT)),
@@ -281,7 +285,9 @@ fn collapsed_strip() -> Element<'static, Message> {
         )
         .width(Length::Fill)
         .height(Length::Fixed(BOTTOM_BAR_HEIGHT - DIVIDER_LINE_HEIGHT))
+        // 左端统计与终端标签条同源让位侧边栏浮层,随 sidebar_width 变化收放。
         .padding(iced::Padding {
+            left: browser.sidebar_width + SUMMARY_SIDEBAR_GAP,
             right: 6.0,
             ..iced::Padding::default()
         })
@@ -289,6 +295,55 @@ fn collapsed_strip() -> Element<'static, Message> {
         .style(content_background_style),
     ]
     .into()
+}
+
+/// 底部工具栏左端的窗格选中统计:文件夹图标+数量、文件图标+数量+总大小,
+/// 大小只累加文件;多窗格并排,竖线分隔;没有窗格选中时整段不出现。
+fn pane_selection_summary_strip(
+    summaries: Vec<crate::selection_summary::PaneSelectionSummary>,
+) -> Element<'static, Message> {
+    const SUMMARY_ICON_SIZE: f32 = 13.0;
+    const SUMMARY_TEXT_SIZE: f32 = 12.0;
+    const GROUP_SPACING: f32 = 6.0;
+    let mut strip = row![].spacing(18).align_y(Vertical::Center);
+    for (index, summary) in summaries.into_iter().enumerate() {
+        if index > 0 {
+            strip = strip.push(
+                container(space::Space::new())
+                    .width(Length::Fixed(DIVIDER_LINE_HEIGHT))
+                    .height(Length::Fixed(14.0))
+                    .style(divider_line_style),
+            );
+        }
+        let mut group = row![].spacing(GROUP_SPACING).align_y(Vertical::Center);
+        if summary.directory_count > 0 {
+            group = group
+                .push(
+                    IconSymbol::Folder
+                        .view(SUMMARY_ICON_SIZE)
+                        .style(crate::appearance::icon_svg_style()),
+                )
+                .push(text(summary.directory_count.to_string()).size(SUMMARY_TEXT_SIZE));
+        }
+        if summary.file_count > 0 {
+            group = group
+                .push(
+                    IconSymbol::File
+                        .view(SUMMARY_ICON_SIZE)
+                        .style(crate::appearance::icon_svg_style()),
+                )
+                .push(
+                    text(format!(
+                        "{} · {}",
+                        summary.file_count,
+                        crate::formatting::format_file_size(summary.file_total_bytes)
+                    ))
+                    .size(SUMMARY_TEXT_SIZE),
+                );
+        }
+        strip = strip.push(group);
+    }
+    strip.into()
 }
 
 fn divider_line_style(theme: &Theme) -> iced::widget::container::Style {

@@ -1125,7 +1125,10 @@ impl FileBrowser {
         // 覆盖点击/键盘/删除/改名/tab 切换/窗格切换/目录导航/启动偏好加载
         // 的全部路径;面板关闭时是空操作。
         let right_preview_panel_command = self.sync_right_preview_panel();
-        Task::batch([command, right_preview_panel_command])
+        // 选中统计的大小需求:选中入口(点击/框选/键盘/全选/粘贴回显等)
+        // 太多,统一在出口按选中签名收敛,变化时补一次选中条目元数据调度。
+        let selection_metadata_command = self.schedule_selected_metadata_if_selection_changed();
+        Task::batch([command, right_preview_panel_command, selection_metadata_command])
     }
 }
 

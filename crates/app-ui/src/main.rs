@@ -64,6 +64,7 @@ mod preview;
 mod remote_preview_cache;
 mod runtime_logging;
 mod selection_marquee;
+mod selection_summary;
 mod shortcuts;
 mod sidebar;
 mod sidebar_devices;

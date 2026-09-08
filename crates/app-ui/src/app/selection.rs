@@ -5,12 +5,14 @@ use std::time::Instant;
 use file_core::FileKind;
 use iced::Task;
 
+use super::panes::BrowserPaneView;
 use super::{FileBrowser, DOUBLE_CLICK_THRESHOLD};
 
 use crate::model::{
     BrowserPaneId, BrowserViewMode, ContextMenuState, FileContextMenuExpansion,
     FileContextMenuState, FileDeleteAction, FileDragStationaryAction, LastActivationClick, Message,
 };
+use crate::selection_summary::{summarize_selected_entries, PaneSelectionSummary};
 
 #[cfg(test)]
 mod activation_tests;
@@ -670,6 +672,70 @@ impl FileBrowser {
             }
         }
         paths
+    }
+
+    /// 窗格底部选中统计。候选条目与各视图的操作可见集同源:
+    /// 列表/多栏取直接条目+展开子条目,图标取直接条目+交互展开子条目,
+    /// 保证底栏数字与删除/复制等操作作用范围一致。
+    pub(crate) fn pane_selection_summary(
+        &self,
+        pane: BrowserPaneView<'_>,
+    ) -> Option<PaneSelectionSummary> {
+        // 搜索工作区替换了窗格内容,生效的是搜索结果独立选择集,
+        // 底栏统计只属于文件浏览窗格。
+        if pane.selected_paths.is_empty() || self.search_workspace.is_some() {
+            return None;
+        }
+
+        let mut summary = summarize_selected_entries(
+            pane.entries.iter(),
+            pane.selected_paths,
+            |entry| pane.metadata_for_entry(entry).len,
+        );
+        match pane.view_mode {
+            BrowserViewMode::Icons => {
+                if let Some(expansion) = self
+                    .icon_grid_expansion
+                    .as_ref()
+                    .filter(|state| {
+                        state.context().pane_id == pane.id
+                            && state.context().current_dir == *pane.current_dir
+                    })
+                {
+                    let selected_children = pane
+                        .selected_paths
+                        .iter()
+                        .filter(|path| path.parent() != Some(pane.current_dir.as_path()))
+                        .filter_map(|path| expansion.entry(path));
+                    summary.merge(summarize_selected_entries(
+                        selected_children,
+                        pane.selected_paths,
+                        |entry| pane.metadata_for_entry(entry).len,
+                    ));
+                }
+            }
+            BrowserViewMode::Columns | BrowserViewMode::List => {
+                summary.merge(summarize_selected_entries(
+                    pane.expanded_directories
+                        .values()
+                        .flat_map(|expanded| expanded.entries.iter()),
+                    pane.selected_paths,
+                    |entry| pane.metadata_for_entry(entry).len,
+                ));
+            }
+        }
+        (!summary.is_empty()).then_some(summary)
+    }
+
+    /// 底部工具栏左端的选中统计:按窗格顺序,只产出有选中的窗格。
+    pub(crate) fn pane_selection_summaries(&self) -> Vec<PaneSelectionSummary> {
+        self.panes
+            .iter()
+            .filter_map(|pane| {
+                let pane = self.pane_view(pane.id)?;
+                self.pane_selection_summary(pane)
+            })
+            .collect()
     }
     pub(super) fn focus_after_removed_file_operation_paths(
         &mut self,

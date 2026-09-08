@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use file_core::{
@@ -19,7 +20,7 @@ struct DirectoryMetadataDemandSource {
     context: DirectoryMetadataLoadContext,
     discovery: DirectoryDiscovery,
     cancellation: tokio_util::sync::CancellationToken,
-    visible_targets: Vec<usize>,
+    targets: Vec<usize>,
 }
 
 impl FileBrowser {
@@ -34,6 +35,192 @@ impl FileBrowser {
         viewport_override: Option<ColumnViewport>,
     ) -> Task<Message> {
         self.ensure_expanded_metadata_cancellation_tokens(pane_id);
+        // 选中统计的大小需求与视图模式无关,借同一入口调度:目录加载、
+        // 滚动等既有触发点由此自动覆盖选中条目。
+        let selected_demand = self.schedule_selected_directory_metadata(pane_id);
+        let visible_demand =
+            self.schedule_list_visible_directory_metadata(pane_id, viewport_override);
+        Task::batch([selected_demand, visible_demand])
+    }
+
+    /// 选中条目的文件系统元数据 demand:底部统计栏要显示选中文件的真实
+    /// 大小,而可见范围 demand 只覆盖视口内且相关列可见的行。选中的文件
+    /// 一律纳入,覆盖三种视图:直接条目走 Root,列表/多栏/图标的展开子
+    /// 条目走 Expanded。是否真的发起由 in-flight 去重决定,重复调度安全。
+    fn schedule_selected_directory_metadata(&mut self, pane_id: BrowserPaneId) -> Task<Message> {
+        let Some(pane) = self.pane_view(pane_id) else {
+            return Task::none();
+        };
+        if pane.selected_paths.is_empty() {
+            return Task::none();
+        }
+        let root_generation = if pane_id == self.active_pane_id() {
+            self.directory_load_generation
+        } else {
+            self.pane_by_id(pane_id)
+                .map(|pane| pane.directory_load_generation)
+                .unwrap_or_default()
+        };
+        let root_context = DirectoryMetadataLoadContext::Root {
+            pane_id,
+            path: pane.current_dir.clone(),
+            collection_generation: root_generation,
+        };
+        // (context, discovery, cancellation, targets):一次性收集后统一调度
+        let mut groups: Vec<(
+            DirectoryMetadataLoadContext,
+            DirectoryDiscovery,
+            tokio_util::sync::CancellationToken,
+            Vec<usize>,
+        )> = Vec::new();
+
+        let selected = pane.selected_paths;
+        // 直接条目:一次遍历窗格条目,避免按选中路径逐个线性查找。
+        if let Some(discovery) = pane.directory_discovery.cloned() {
+            let mut targets = Vec::new();
+            for entry in pane.entries.iter() {
+                if !selected.contains(&entry.path) {
+                    continue;
+                }
+                if let Some(index) = entry.discovery_index {
+                    targets.push(index);
+                }
+            }
+            if !targets.is_empty() {
+                groups.push((
+                    root_context.clone(),
+                    discovery,
+                    self.directory_load_cancel_for_pane(pane_id),
+                    targets,
+                ));
+            }
+        }
+        // 列表/多栏:展开子条目挂在 expanded_directories。
+        for (directory_path, expanded) in pane.expanded_directories.iter() {
+            if !matches!(expanded.status, ExpandedDirectoryStatus::Loaded) {
+                continue;
+            }
+            let Some(discovery) = expanded.directory_discovery.clone() else {
+                continue;
+            };
+            let mut targets = Vec::new();
+            for entry in expanded.entries.iter() {
+                if !selected.contains(&entry.path) {
+                    continue;
+                }
+                if let Some(index) = entry.discovery_index {
+                    targets.push(index);
+                }
+            }
+            if !targets.is_empty() {
+                groups.push((
+                    DirectoryMetadataLoadContext::Expanded {
+                        pane_id,
+                        path: directory_path.clone(),
+                        load_generation: expanded.load_generation,
+                    },
+                    discovery,
+                    expanded.load_cancel.clone().unwrap_or_default(),
+                    targets,
+                ));
+            }
+        }
+        // 图标视图:展开子条目挂在 icon_grid_expansion 的交互目录里。
+        let icon_expansion = self.icon_grid_expansion.as_ref().filter(|state| {
+            state.context().pane_id == pane.id
+                && state.context().current_dir == *pane.current_dir
+        });
+        if let Some(expansion) = icon_expansion {
+            for (directory_path, directory) in expansion.directories() {
+                let contents = &directory.contents;
+                if !matches!(contents.status, ExpandedDirectoryStatus::Loaded) {
+                    continue;
+                }
+                let Some(discovery) = contents.directory_discovery.clone() else {
+                    continue;
+                };
+                let mut targets = Vec::new();
+                for entry in contents.entries.iter() {
+                    if !selected.contains(&entry.path) {
+                        continue;
+                    }
+                    if let Some(index) = entry.discovery_index {
+                        targets.push(index);
+                    }
+                }
+                if !targets.is_empty() {
+                    groups.push((
+                        DirectoryMetadataLoadContext::Expanded {
+                            pane_id,
+                            path: directory_path.to_path_buf(),
+                            load_generation: contents.load_generation,
+                        },
+                        discovery,
+                        contents.load_cancel.clone().unwrap_or_default(),
+                        targets,
+                    ));
+                }
+            }
+        }
+
+        let mut tasks = Vec::new();
+        for (context, discovery, cancellation, targets) in groups {
+            tasks.push(self.schedule_directory_metadata_requirement(
+                context,
+                &discovery,
+                cancellation,
+                DirectoryMetadataRequirement::Filesystem,
+                targets,
+            ));
+        }
+        Task::batch(tasks)
+    }
+
+    /// 选中集合签名:排序后哈希保证同一集合签名稳定;签名变化才补调度,
+    /// 让每条消息出口处的检查在选中未变时零成本通过。
+    pub(super) fn schedule_selected_metadata_if_selection_changed(&mut self) -> Task<Message> {
+        use std::hash::{Hash, Hasher};
+
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        {
+            let mut paths: Vec<&PathBuf> = self.selected_paths.iter().collect();
+            paths.sort();
+            paths.hash(&mut hasher);
+        }
+        for pane in &self.panes {
+            let mut paths: Vec<&PathBuf> = pane.selected_paths.iter().collect();
+            paths.sort();
+            paths.hash(&mut hasher);
+        }
+        let signature = hasher.finish();
+        if self.selection_metadata_signature == signature {
+            return Task::none();
+        }
+        self.selection_metadata_signature = signature;
+        let pane_ids: Vec<BrowserPaneId> = self.panes.iter().map(|pane| pane.id).collect();
+        Task::batch(
+            pane_ids
+                .into_iter()
+                .map(|pane_id| self.schedule_selected_directory_metadata(pane_id))
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    fn directory_load_cancel_for_pane(&self, pane_id: BrowserPaneId) -> tokio_util::sync::CancellationToken {
+        if pane_id == self.active_pane_id() {
+            self.directory_load_cancel.clone()
+        } else {
+            self.pane_by_id(pane_id)
+                .and_then(|pane| pane.directory_load_cancel.clone())
+        }
+        .unwrap_or_default()
+    }
+
+    fn schedule_list_visible_directory_metadata(
+        &mut self,
+        pane_id: BrowserPaneId,
+        viewport_override: Option<ColumnViewport>,
+    ) -> Task<Message> {
         let root_generation = if pane_id == self.active_pane_id() {
             self.directory_load_generation
         } else {
@@ -70,7 +257,7 @@ impl FileBrowser {
                     context: root_context.clone(),
                     discovery: root_discovery,
                     cancellation: root_cancellation,
-                    visible_targets: Vec::new(),
+                    targets: Vec::new(),
                 },
             )]);
             let list_density = self.user_config.list_view_density;
@@ -129,13 +316,13 @@ impl FileBrowser {
                             context: context.clone(),
                             discovery,
                             cancellation: expanded.load_cancel.clone().unwrap_or_default(),
-                            visible_targets: Vec::new(),
+                            targets: Vec::new(),
                         }
                     });
                     context
                 };
                 if let Some(source) = sources.get_mut(&context) {
-                    source.visible_targets.push(index);
+                    source.targets.push(index);
                 }
             }
             sources.into_values().collect::<Vec<_>>()
@@ -168,7 +355,7 @@ impl FileBrowser {
             let filesystem_targets = if sort_requires_filesystem {
                 (0..source.discovery.entries.len()).collect()
             } else if filesystem_is_visible {
-                source.visible_targets.clone()
+                source.targets.clone()
             } else {
                 Vec::new()
             };
@@ -185,7 +372,7 @@ impl FileBrowser {
                     &source.discovery,
                     source.cancellation,
                     DirectoryMetadataRequirement::IdentityNames,
-                    source.visible_targets,
+                    source.targets,
                 ));
             }
         }

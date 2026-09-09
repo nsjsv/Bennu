@@ -6,12 +6,16 @@ use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 
 use crate::gvfs_devices;
+use crate::storage_device_visibility::{
+    udisks_device_is_visible, DesktopUserContext, UdisksFstabEntry, UdisksVisibilityFacts,
+};
 use thiserror::Error;
 use udisks2::zbus::names::OwnedInterfaceName;
 use udisks2::zbus::zvariant::{OwnedObjectPath, OwnedValue};
 use udisks2::{standard_options, Client};
 
 const FILESYSTEM_INTERFACE: &str = "org.freedesktop.UDisks2.Filesystem";
+const LOOP_INTERFACE: &str = "org.freedesktop.UDisks2.Loop";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum StorageDeviceId {
@@ -188,14 +192,18 @@ fn merge_storage_device_results(
 async fn load_udisks_storage_devices() -> Result<Vec<StorageDevice>, StorageDeviceError> {
     let client = Client::new().await?;
     let managed_objects = client.object_manager().get_managed_objects().await?;
+    let user = DesktopUserContext::from_process_environment();
     let mut devices = Vec::new();
 
     for (object_path, interfaces) in managed_objects {
         if !has_interface(&interfaces, FILESYSTEM_INTERFACE) {
             continue;
         }
+        let is_loop_device = has_interface(&interfaces, LOOP_INTERFACE);
         let object = client.object(object_path.clone())?;
-        if let Some(device) = storage_device_from_object(&client, object_path, object).await? {
+        if let Some(device) =
+            storage_device_from_object(&client, object_path, object, is_loop_device, &user).await?
+        {
             devices.push(device);
         }
     }
@@ -282,13 +290,10 @@ async fn storage_device_from_object(
     client: &Client,
     object_path: OwnedObjectPath,
     object: udisks2::Object,
+    is_loop_device: bool,
+    user: &DesktopUserContext,
 ) -> Result<Option<StorageDevice>, StorageDeviceError> {
     let block = object.block().await?;
-    let visibility_hint = udisks_visibility_hint(
-        block.hint_ignore().await.unwrap_or(false),
-        block.hint_system().await.unwrap_or(false),
-    );
-
     let filesystem = object.filesystem().await?;
     let mount_points = filesystem
         .mount_points()
@@ -296,7 +301,24 @@ async fn storage_device_from_object(
         .into_iter()
         .filter_map(path_from_udisks_bytes)
         .collect::<Vec<_>>();
-    if !storage_device_is_visible(visibility_hint, &mount_points) {
+    let facts = UdisksVisibilityFacts {
+        hint_ignore: block.hint_ignore().await.unwrap_or(false),
+        fstab_entries: if mount_points.is_empty() {
+            unmounted_udisks_fstab_entries(&block).await
+        } else {
+            Vec::new()
+        },
+        mount_points: mount_points.clone(),
+        loop_setup_by_uid: if is_loop_device {
+            match object.r#loop().await {
+                Ok(loop_device) => loop_device.setup_by_uid().await.ok(),
+                Err(_) => None,
+            }
+        } else {
+            None
+        },
+    };
+    if !udisks_device_is_visible(&facts, user) {
         return Ok(None);
     }
 
@@ -374,35 +396,54 @@ async fn storage_device_from_object(
     }))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum UdisksVisibilityHint {
-    Ignored,
-    System,
-    User,
+/// fstab rows tracked by UDisks only decide visibility while the volume is
+/// unmounted, mirroring GVfs `should_include_volume_check_configuration()`.
+async fn unmounted_udisks_fstab_entries(
+    block: &udisks2::block::BlockProxy<'_>,
+) -> Vec<UdisksFstabEntry> {
+    let Ok(configuration) = block.configuration().await else {
+        return Vec::new();
+    };
+    configuration
+        .iter()
+        .filter(|(entry_type, _)| entry_type == "fstab")
+        .filter_map(|(_, values)| fstab_entry_from_udisks_values(values))
+        .collect()
 }
 
-fn udisks_visibility_hint(hint_ignore: bool, hint_system: bool) -> UdisksVisibilityHint {
-    if hint_ignore {
-        UdisksVisibilityHint::Ignored
-    } else if hint_system {
-        UdisksVisibilityHint::System
+fn fstab_entry_from_udisks_values(
+    values: &HashMap<String, OwnedValue>,
+) -> Option<UdisksFstabEntry> {
+    let dir = path_from_udisks_bytes(udisks_bytestring_value(values.get("dir")?)?)?;
+    let options = values
+        .get("opts")
+        .and_then(udisks_bytestring_value)
+        .map(|bytes| String::from_utf8_lossy(&trim_nul_bytes(bytes)).into_owned())
+        .unwrap_or_default();
+    let visibility_override = if options.split(',').any(|option| option == "x-gvfs-show") {
+        Some(true)
+    } else if options.split(',').any(|option| option == "x-gvfs-hide") {
+        Some(false)
     } else {
-        UdisksVisibilityHint::User
-    }
+        None
+    };
+    Some(UdisksFstabEntry {
+        dir,
+        visibility_override,
+    })
 }
 
-fn storage_device_is_visible(
-    visibility_hint: UdisksVisibilityHint,
-    mount_points: &[PathBuf],
-) -> bool {
-    match visibility_hint {
-        UdisksVisibilityHint::Ignored => false,
-        // Internal data volumes can be marked as System by UDisks; root mount
-        // ownership, not the hint alone, decides whether the device is hidden.
-        UdisksVisibilityHint::System | UdisksVisibilityHint::User => {
-            !mount_points.iter().any(|path| path == Path::new("/"))
-        }
-    }
+/// UDisks encodes `fstab` fields as `ay` bytestrings, which zvariant surfaces
+/// as an array of `u8` values.
+fn udisks_bytestring_value(value: &OwnedValue) -> Option<Vec<u8>> {
+    let array = value
+        .downcast_ref::<udisks2::zbus::zvariant::Array>()
+        .ok()?;
+    array
+        .iter()
+        .map(|item| item.downcast_ref::<u8>())
+        .collect::<Result<Vec<u8>, _>>()
+        .ok()
 }
 
 fn has_interface(
@@ -500,27 +541,6 @@ mod tests {
         );
 
         assert_eq!(label, "sdb1");
-    }
-
-    #[test]
-    fn visibility_keeps_unmounted_internal_data_filesystems() {
-        assert!(storage_device_is_visible(UdisksVisibilityHint::System, &[]));
-    }
-
-    #[test]
-    fn visibility_hides_root_filesystem() {
-        assert!(!storage_device_is_visible(
-            UdisksVisibilityHint::System,
-            &[PathBuf::from("/")]
-        ));
-    }
-
-    #[test]
-    fn visibility_honors_udisks_ignore_hint() {
-        assert!(!storage_device_is_visible(
-            UdisksVisibilityHint::Ignored,
-            &[]
-        ));
     }
 
     #[test]

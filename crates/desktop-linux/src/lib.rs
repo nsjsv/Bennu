@@ -9,6 +9,7 @@ pub mod network_mounts;
 pub mod network_secrets;
 pub mod open;
 pub mod open_with;
+mod storage_device_visibility;
 pub mod storage_devices;
 pub mod wayland_dnd;
 pub mod x11_dnd;

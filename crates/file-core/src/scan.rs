@@ -379,13 +379,14 @@ fn unix_group_lookup_buffer_len() -> usize {
     }
 }
 
+/// 隐藏判定的唯一权威：点前缀。列表过滤与目录摘要统计必须共用此规则。
 #[cfg(unix)]
-pub(crate) fn is_hidden_name(name: &std::ffi::OsStr) -> bool {
+pub fn is_hidden_name(name: &std::ffi::OsStr) -> bool {
     name.as_bytes().first() == Some(&b'.')
 }
 
 #[cfg(not(unix))]
-pub(crate) fn is_hidden_name(name: &std::ffi::OsStr) -> bool {
+pub fn is_hidden_name(name: &std::ffi::OsStr) -> bool {
     name.to_string_lossy().starts_with('.')
 }
 

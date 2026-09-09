@@ -13,9 +13,9 @@ use super::FileBrowser;
 use crate::commands::load_list_directory_summary_command;
 use crate::formatting::format_file_size;
 use crate::model::{
-    BrowserPaneId, BrowserViewMode, ExpandedDirectory, ExpandedDirectoryStatus,
-    ListDirectorySizeDisplayMode, ListDirectorySummaryCache, ListDirectorySummaryLoadRequest,
-    Message,
+    displayed_address_directory, BrowserPaneId, BrowserViewMode, ExpandedDirectory,
+    ExpandedDirectoryStatus, ListDirectorySizeDisplayMode, ListDirectorySummaryCache,
+    ListDirectorySummaryLoadRequest, Message,
 };
 use crate::operation_queue::QueuedFileOperation;
 use crate::thumbnail_cache::ColumnViewport;
@@ -104,18 +104,34 @@ impl FileBrowser {
         pane_id: BrowserPaneId,
         viewport_override: Option<ColumnViewport>,
     ) -> Task<Message> {
-        let rendered_directories =
-            self.rendered_list_directories_for_pane(pane_id, viewport_override);
-        if rendered_directories.is_empty() {
-            return Task::none();
-        }
-
         let include_recursive_total_size = self
             .user_config
             .list_directory_size_display_mode
             .uses_recursive_total_size();
         let mut commands = Vec::new();
-        for directory in rendered_directories {
+
+        // 底部工具栏常显当前目录文件总大小：当前目录摘要与列表条目摘要共用
+        // 本漏斗调度，导航/增量失效/文件操作后的重算自动覆盖，无需新触发点。
+        // "当前目录"与地址栏同源：多栏模式取最深打开的栏，而非栏浏览根。
+        // 递归量对底栏无意义，显式关闭。
+        let displayed_dir = self.pane_view(pane_id).map(|pane| {
+            displayed_address_directory(
+                pane.current_dir,
+                pane.view_mode,
+                pane.deepest_open_column_directory,
+            )
+            .to_path_buf()
+        });
+        if let Some(displayed_dir) = displayed_dir {
+            if let Some(request) = self
+                .list_directory_summary_cache
+                .start_request(displayed_dir, false)
+            {
+                commands.push(load_list_directory_summary_command(request));
+            }
+        }
+
+        for directory in self.rendered_list_directories_for_pane(pane_id, viewport_override) {
             if let Some(loaded_child_count) = directory.loaded_child_count {
                 self.list_directory_summary_cache
                     .remember_direct_child_count(directory.path.clone(), loaded_child_count);
@@ -159,6 +175,41 @@ impl FileBrowser {
     ) {
         self.list_directory_summary_cache
             .remember_direct_child_count(path.to_path_buf(), direct_child_count);
+    }
+
+    /// 底部工具栏常显统计：按窗格顺序，每窗格给出选中统计与当前目录
+    /// 可见文件总大小。"当前目录"与地址栏同源（多栏取最深打开的栏）。
+    /// 可见口径 = 文件系统事实按 show_hidden_files 推导，缓存条目保持不含配置。
+    pub(crate) fn pane_status_strip_entries(
+        &self,
+    ) -> Vec<crate::selection_summary::PaneStatusStripEntry> {
+        self.panes
+            .iter()
+            .filter_map(|pane| {
+                let pane_view = self.pane_view(pane.id)?;
+                let displayed_dir = displayed_address_directory(
+                    pane_view.current_dir,
+                    pane_view.view_mode,
+                    pane_view.deepest_open_column_directory,
+                );
+                Some(crate::selection_summary::PaneStatusStripEntry {
+                    selection: self.pane_selection_summary(pane_view),
+                    visible_files_total_size_bytes: self
+                        .visible_files_total_size_bytes(displayed_dir),
+                })
+            })
+            .collect()
+    }
+
+    fn visible_files_total_size_bytes(&self, path: &Path) -> Option<u64> {
+        let summary = self.list_directory_summary_cache.summary_for_path(path)?;
+        let files_total = summary.files_total_size_bytes?;
+        if self.user_config.show_hidden_files {
+            return Some(files_total);
+        }
+        Some(
+            files_total.saturating_sub(summary.hidden_files_total_size_bytes.unwrap_or(0)),
+        )
     }
 
     pub(super) fn invalidate_list_directory_summary(&mut self, path: &Path) {
@@ -677,6 +728,8 @@ mod tests {
             ListDirectorySummary {
                 direct_child_count: count,
                 recursive_total_size_bytes: Some(size),
+                files_total_size_bytes: Some(size),
+                hidden_files_total_size_bytes: Some(0),
             }
         ));
     }
@@ -696,6 +749,24 @@ mod tests {
             browser.user_config.list_directory_size_display_mode,
             ListDirectorySizeDisplayMode::RecursiveTotalSize
         );
+    }
+
+    #[test]
+    fn status_strip_reports_deepest_open_column_in_columns_mode() {
+        let (mut browser, _) = FileBrowser::new(config::default_user_config());
+        browser.view_mode = BrowserViewMode::Columns;
+        let root = PathBuf::from("/workspace");
+        let column = root.join("sub");
+        browser.current_dir = root.clone();
+        browser.deepest_open_column_directory = Some(column.clone());
+        remember_summary(&mut browser, &root, 10, 1000);
+        remember_summary(&mut browser, &column, 4, 256);
+
+        let entries = browser.pane_status_strip_entries();
+
+        assert_eq!(entries.len(), 1);
+        // 多栏模式下"当前目录"与地址栏同源：最深打开的栏，而非栏浏览根。
+        assert_eq!(entries[0].visible_files_total_size_bytes, Some(256));
     }
 
     #[test]

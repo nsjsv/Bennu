@@ -26,6 +26,8 @@ fn remember_summary(browser: &mut FileBrowser, path: &std::path::Path, count: us
         ListDirectorySummary {
             direct_child_count: count,
             recursive_total_size_bytes: Some(size),
+            files_total_size_bytes: Some(size),
+            hidden_files_total_size_bytes: Some(0),
         }
     ));
 }

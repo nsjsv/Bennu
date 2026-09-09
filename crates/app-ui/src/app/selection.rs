@@ -754,16 +754,6 @@ impl FileBrowser {
         (!summary.is_empty()).then_some(summary)
     }
 
-    /// 底部工具栏左端的选中统计:按窗格顺序,只产出有选中的窗格。
-    pub(crate) fn pane_selection_summaries(&self) -> Vec<PaneSelectionSummary> {
-        self.panes
-            .iter()
-            .filter_map(|pane| {
-                let pane = self.pane_view(pane.id)?;
-                self.pane_selection_summary(pane)
-            })
-            .collect()
-    }
     pub(super) fn focus_after_removed_file_operation_paths(
         &mut self,
         removed_paths: &[PathBuf],

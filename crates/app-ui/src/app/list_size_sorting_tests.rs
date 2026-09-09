@@ -134,6 +134,8 @@ fn recursive_size_sort_reorders_expanded_entries_and_inactive_pane() {
             Ok(ListDirectorySummary {
                 direct_child_count: 0,
                 recursive_total_size_bytes: Some(size),
+                files_total_size_bytes: Some(size),
+                hidden_files_total_size_bytes: Some(0),
             }),
         ));
     }

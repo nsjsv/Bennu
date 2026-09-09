@@ -366,6 +366,8 @@ mod tests {
             ListDirectorySummary {
                 direct_child_count: count,
                 recursive_total_size_bytes: Some(size),
+                files_total_size_bytes: Some(size),
+                hidden_files_total_size_bytes: Some(0),
             }
         ));
     }

@@ -37,6 +37,8 @@ async fn load_list_directory_summary(
         Ok(ListDirectorySummary {
             direct_child_count: contents.total_item_count(),
             recursive_total_size_bytes,
+            files_total_size_bytes: Some(contents.files_total_size_bytes),
+            hidden_files_total_size_bytes: Some(contents.hidden_files_total_size_bytes),
         })
     })
     .await

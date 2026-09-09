@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 
+use file_core::is_hidden_name;
 use tokio_util::sync::CancellationToken;
 
 const DIRECTORY_CONTENTS_PROGRESS_INTERVAL: usize = 128;
@@ -13,6 +14,10 @@ pub(crate) struct DirectoryContentsSummary {
     pub(crate) directory_count: usize,
     pub(crate) total_size_bytes: u64,
     pub(crate) total_disk_size_bytes: u64,
+    // 直属文件大小记账：缓存只存文件系统原样事实，隐藏部分单独记录，
+    // 可见口径（扣除隐藏）由 UI 按 show_hidden_files 推导。
+    pub(crate) files_total_size_bytes: u64,
+    pub(crate) hidden_files_total_size_bytes: u64,
 }
 
 impl DirectoryContentsSummary {
@@ -96,6 +101,16 @@ fn read_directory_summary(
                     .file_count
                     .checked_add(1)
                     .ok_or(DirectorySummaryError::Overflow("file count"))?;
+                summary.files_total_size_bytes = summary
+                    .files_total_size_bytes
+                    .checked_add(metadata.len())
+                    .ok_or(DirectorySummaryError::Overflow("file size"))?;
+                if is_hidden_name(&entry.file_name()) {
+                    summary.hidden_files_total_size_bytes = summary
+                        .hidden_files_total_size_bytes
+                        .checked_add(metadata.len())
+                        .ok_or(DirectorySummaryError::Overflow("hidden file size"))?;
+                }
             }
             summary.total_size_bytes = summary
                 .total_size_bytes
@@ -195,6 +210,30 @@ mod tests {
         assert_eq!(direct.directory_count, 1);
         assert_eq!(recursive.file_count, 2);
         assert_eq!(recursive.directory_count, 1);
+    }
+
+    #[test]
+    fn file_size_accounting_records_hidden_share_separately() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let child = temp_dir.path().join("child");
+        std::fs::create_dir(&child).expect("create child");
+        std::fs::write(temp_dir.path().join("top.txt"), b"top").expect("write top file");
+        std::fs::write(temp_dir.path().join(".hidden"), b"hid").expect("write hidden file");
+        std::fs::write(child.join("nested.txt"), b"nested").expect("write nested file");
+
+        let direct =
+            read_directory_contents_summary(temp_dir.path(), CancellationToken::new(), |_| {})
+                .expect("direct summary");
+
+        // 只记直属文件，不进子文件夹；目录自身的 inode 大小也不计入文件大小。
+        let top_len = std::fs::metadata(temp_dir.path().join("top.txt"))
+            .expect("top metadata")
+            .len();
+        let hidden_len = std::fs::metadata(temp_dir.path().join(".hidden"))
+            .expect("hidden metadata")
+            .len();
+        assert_eq!(direct.files_total_size_bytes, top_len + hidden_len);
+        assert_eq!(direct.hidden_files_total_size_bytes, hidden_len);
     }
 
     #[cfg(unix)]

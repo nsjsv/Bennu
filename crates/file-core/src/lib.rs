@@ -69,7 +69,7 @@ pub use ops::{
     TransferJournalMutation, TransferJournalRecord, TransferWorkKey, VideoTargetFormat,
 };
 pub use scan::{
-    discover_directory_with_progress, scan_directory, scan_directory_with_progress,
+    discover_directory_with_progress, is_hidden_name, scan_directory, scan_directory_with_progress,
     DirectoryDiscovery, DirectoryDiscoveryBatch, DirectoryScan, DirectoryScanBatch, FileError,
     ScanOptions, ScanWarning,
 };

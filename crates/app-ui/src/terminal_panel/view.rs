@@ -256,7 +256,7 @@ fn resize_handle() -> Element<'static, Message> {
     .into()
 }
 
-/// 收起态窄条(底部工具栏):顶部分隔线 + 左端窗格选中统计 + 右下角终端图标。
+/// 收起态窄条(底部工具栏):顶部分隔线 + 左端窗格状态统计 + 右下角终端图标。
 fn collapsed_strip(browser: &FileBrowser) -> Element<'_, Message> {
     let icon = button(
         IconSymbol::Terminal
@@ -268,45 +268,50 @@ fn collapsed_strip(browser: &FileBrowser) -> Element<'_, Message> {
     .on_press(Message::TerminalPanel(TerminalPanelMessage::ToggleRequested))
     .padding(4.0)
     .style(crate::appearance::transparent_button_style());
-    let summaries = browser.pane_selection_summaries();
+    // 搜索工作区替换了窗格内容,常显统计只属于文件浏览窗格。
+    let status_entries = (browser.search_workspace.is_none())
+        .then(|| browser.pane_status_strip_entries());
+    let mut content = row![].align_y(Vertical::Center);
+    if let Some(entries) = status_entries {
+        content = content.push(pane_status_summary_strip(entries));
+    }
+    let content = content
+        .push(space::Space::new().width(Length::Fill))
+        .push(
+            icon.width(Length::Fixed(BOTTOM_BAR_HEIGHT - DIVIDER_LINE_HEIGHT))
+                .height(Length::Fixed(BOTTOM_BAR_HEIGHT - DIVIDER_LINE_HEIGHT)),
+        );
     iced::widget::column![
         container(space::Space::new())
             .width(Length::Fill)
             .height(Length::Fixed(DIVIDER_LINE_HEIGHT))
             .style(divider_line_style),
-        container(
-            row![
-                pane_selection_summary_strip(summaries),
-                space::Space::new().width(Length::Fill),
-                icon.width(Length::Fixed(BOTTOM_BAR_HEIGHT - DIVIDER_LINE_HEIGHT))
-                    .height(Length::Fixed(BOTTOM_BAR_HEIGHT - DIVIDER_LINE_HEIGHT)),
-            ]
-            .align_y(Vertical::Center),
-        )
-        .width(Length::Fill)
-        .height(Length::Fixed(BOTTOM_BAR_HEIGHT - DIVIDER_LINE_HEIGHT))
-        // 左端统计与终端标签条同源让位侧边栏浮层,随 sidebar_width 变化收放。
-        .padding(iced::Padding {
-            left: browser.sidebar_width + SUMMARY_SIDEBAR_GAP,
-            right: 6.0,
-            ..iced::Padding::default()
-        })
-        .align_y(Vertical::Center)
-        .style(content_background_style),
+        container(content)
+            .width(Length::Fill)
+            .height(Length::Fixed(BOTTOM_BAR_HEIGHT - DIVIDER_LINE_HEIGHT))
+            // 左端统计与终端标签条同源让位侧边栏浮层,随 sidebar_width 变化收放。
+            .padding(iced::Padding {
+                left: browser.sidebar_width + SUMMARY_SIDEBAR_GAP,
+                right: 6.0,
+                ..iced::Padding::default()
+            })
+            .align_y(Vertical::Center)
+            .style(content_background_style),
     ]
     .into()
 }
 
-/// 底部工具栏左端的窗格选中统计:文件夹图标+数量、文件图标+数量+总大小,
-/// 大小只累加文件;多窗格并排,竖线分隔;没有窗格选中时整段不出现。
-fn pane_selection_summary_strip(
-    summaries: Vec<crate::selection_summary::PaneSelectionSummary>,
+/// 底部工具栏左端常显统计:每窗格 = 选中统计(📁 数量、📄 数量 · 选中大小)
+/// 加 " / 目录文件总大小";无选中只显总大小;大小未加载完显 "-"。
+/// 多窗格并排,竖线分隔。
+fn pane_status_summary_strip(
+    entries: Vec<crate::selection_summary::PaneStatusStripEntry>,
 ) -> Element<'static, Message> {
     const SUMMARY_ICON_SIZE: f32 = 13.0;
     const SUMMARY_TEXT_SIZE: f32 = 12.0;
     const GROUP_SPACING: f32 = 6.0;
     let mut strip = row![].spacing(18).align_y(Vertical::Center);
-    for (index, summary) in summaries.into_iter().enumerate() {
+    for (index, entry) in entries.into_iter().enumerate() {
         if index > 0 {
             strip = strip.push(
                 container(space::Space::new())
@@ -316,31 +321,44 @@ fn pane_selection_summary_strip(
             );
         }
         let mut group = row![].spacing(GROUP_SPACING).align_y(Vertical::Center);
-        if summary.directory_count > 0 {
-            group = group
-                .push(
-                    IconSymbol::Folder
-                        .view(SUMMARY_ICON_SIZE)
-                        .style(crate::appearance::icon_svg_style()),
-                )
-                .push(text(summary.directory_count.to_string()).size(SUMMARY_TEXT_SIZE));
-        }
-        if summary.file_count > 0 {
-            group = group
-                .push(
+        if let Some(selection) = entry.selection {
+            if selection.directory_count > 0 {
+                group = group
+                    .push(
+                        IconSymbol::Folder
+                            .view(SUMMARY_ICON_SIZE)
+                            .style(crate::appearance::icon_svg_style()),
+                    )
+                    .push(text(selection.directory_count.to_string()).size(SUMMARY_TEXT_SIZE));
+            }
+            if selection.file_count > 0 {
+                group = group.push(
                     IconSymbol::File
                         .view(SUMMARY_ICON_SIZE)
                         .style(crate::appearance::icon_svg_style()),
-                )
-                .push(
-                    text(format!(
-                        "{} · {}",
-                        summary.file_count,
-                        crate::formatting::format_file_size(summary.file_total_bytes)
-                    ))
-                    .size(SUMMARY_TEXT_SIZE),
                 );
+            }
         }
+        let total_text = entry
+            .visible_files_total_size_bytes
+            .map(crate::formatting::format_file_size)
+            .unwrap_or_else(|| "-".to_owned());
+        // 大小段呈"选中大小 / 总大小";无选中只显总大小。
+        let size_text = match entry.selection {
+            Some(selection) if selection.file_count > 0 => format!(
+                "{} · {} / {}",
+                selection.file_count,
+                crate::formatting::format_file_size(selection.file_total_bytes),
+                total_text
+            ),
+            Some(selection) => format!(
+                "{} / {}",
+                crate::formatting::format_file_size(selection.file_total_bytes),
+                total_text
+            ),
+            None => total_text,
+        };
+        group = group.push(text(size_text).size(SUMMARY_TEXT_SIZE));
         strip = strip.push(group);
     }
     strip.into()

@@ -23,6 +23,14 @@ impl PaneSelectionSummary {
     }
 }
 
+/// 底部工具栏单窗格状态:选中统计(无选中为空)+ 当前目录可见文件总大小。
+/// 总大小由文件系统事实按 show_hidden_files 推导,加载中为 None(显 "-")。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PaneStatusStripEntry {
+    pub(crate) selection: Option<PaneSelectionSummary>,
+    pub(crate) visible_files_total_size_bytes: Option<u64>,
+}
+
 /// 聚合候选条目中被选中的部分。候选集必须与窗格可见条目同源,
 /// 已失效的选中路径(条目离开窗格)自然落空,不进入统计。
 /// 大小经由 display_len 取 UI 权威值(基础扫描阶段 len 尚未补全,

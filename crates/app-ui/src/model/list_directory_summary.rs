@@ -45,6 +45,10 @@ impl ListDirectorySizeDisplayMode {
 pub(crate) struct ListDirectorySummary {
     pub(crate) direct_child_count: usize,
     pub(crate) recursive_total_size_bytes: Option<u64>,
+    // 直属文件大小事实（含隐藏与隐藏子集），由 direct 扫描顺带产出；
+    // 可见口径由 UI 按 show_hidden_files 推导，缓存不掺配置。
+    pub(crate) files_total_size_bytes: Option<u64>,
+    pub(crate) hidden_files_total_size_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,10 +68,14 @@ struct ListDirectorySummaryCacheEntry {
     generation: u64,
     direct_child_count: Option<usize>,
     recursive_total_size_bytes: Option<u64>,
+    files_total_size_bytes: Option<u64>,
+    hidden_files_total_size_bytes: Option<u64>,
     direct_child_count_loading: bool,
     direct_child_count_failed: bool,
     recursive_total_size_loading: bool,
     recursive_total_size_failed: bool,
+    files_total_size_loading: bool,
+    files_total_size_failed: bool,
 }
 
 impl ListDirectorySummaryCache {
@@ -76,6 +84,8 @@ impl ListDirectorySummaryCache {
         Some(ListDirectorySummary {
             direct_child_count: entry.direct_child_count?,
             recursive_total_size_bytes: entry.recursive_total_size_bytes,
+            files_total_size_bytes: entry.files_total_size_bytes,
+            hidden_files_total_size_bytes: entry.hidden_files_total_size_bytes,
         })
     }
 
@@ -94,11 +104,16 @@ impl ListDirectorySummaryCache {
         let entry = self.entries.entry(path.clone()).or_default();
         let direct_child_count_missing =
             entry.direct_child_count.is_none() && !entry.direct_child_count_failed;
+        // 大小与数量同属 direct 扫描，但 discovery 只能回填数量；
+        // 数量已知时大小仍需后台加载，所以作为独立理由发起请求。
+        let files_total_size_missing =
+            entry.files_total_size_bytes.is_none() && !entry.files_total_size_failed;
         let recursive_total_size_missing = include_recursive_total_size
             && entry.recursive_total_size_bytes.is_none()
             && !entry.recursive_total_size_failed;
-        let should_start_direct_request =
-            direct_child_count_missing && !entry.direct_child_count_loading;
+        let should_start_direct_request = (direct_child_count_missing
+            && !entry.direct_child_count_loading)
+            || (files_total_size_missing && !entry.files_total_size_loading);
         let should_start_recursive_request =
             recursive_total_size_missing && !entry.recursive_total_size_loading;
 
@@ -107,7 +122,12 @@ impl ListDirectorySummaryCache {
         }
 
         if should_start_direct_request {
-            entry.direct_child_count_loading = true;
+            if direct_child_count_missing {
+                entry.direct_child_count_loading = true;
+            }
+            if files_total_size_missing {
+                entry.files_total_size_loading = true;
+            }
         }
         if should_start_recursive_request {
             entry.recursive_total_size_loading = true;
@@ -135,6 +155,10 @@ impl ListDirectorySummaryCache {
         entry.direct_child_count = Some(summary.direct_child_count);
         entry.direct_child_count_loading = false;
         entry.direct_child_count_failed = false;
+        entry.files_total_size_bytes = summary.files_total_size_bytes;
+        entry.hidden_files_total_size_bytes = summary.hidden_files_total_size_bytes;
+        entry.files_total_size_loading = false;
+        entry.files_total_size_failed = false;
         if request.include_recursive_total_size {
             entry.recursive_total_size_bytes = summary.recursive_total_size_bytes;
             entry.recursive_total_size_loading = false;
@@ -155,6 +179,10 @@ impl ListDirectorySummaryCache {
         if entry.direct_child_count.is_none() {
             entry.direct_child_count_failed = true;
         }
+        entry.files_total_size_loading = false;
+        if entry.files_total_size_bytes.is_none() {
+            entry.files_total_size_failed = true;
+        }
         if request.include_recursive_total_size {
             entry.recursive_total_size_loading = false;
             entry.recursive_total_size_failed = true;
@@ -169,10 +197,14 @@ impl ListDirectorySummaryCache {
         entry.generation = entry.generation.wrapping_add(1);
         entry.direct_child_count = None;
         entry.recursive_total_size_bytes = None;
+        entry.files_total_size_bytes = None;
+        entry.hidden_files_total_size_bytes = None;
         entry.direct_child_count_loading = false;
         entry.direct_child_count_failed = false;
         entry.recursive_total_size_loading = false;
         entry.recursive_total_size_failed = false;
+        entry.files_total_size_loading = false;
+        entry.files_total_size_failed = false;
     }
 
     pub(crate) fn invalidate_path_subtree(&mut self, path: &Path) {
@@ -231,9 +263,15 @@ mod tests {
             ListDirectorySummary {
                 direct_child_count: 4,
                 recursive_total_size_bytes: None,
+                files_total_size_bytes: Some(256),
+                hidden_files_total_size_bytes: Some(16),
             }
         ));
         assert_eq!(cache.summary_for_path(&path).unwrap().direct_child_count, 4);
+        assert_eq!(
+            cache.summary_for_path(&path).unwrap().files_total_size_bytes,
+            Some(256)
+        );
         assert!(cache.start_request(path.clone(), false).is_none());
 
         cache.invalidate_path(&path);
@@ -276,6 +314,8 @@ mod tests {
             ListDirectorySummary {
                 direct_child_count: 9,
                 recursive_total_size_bytes: Some(4096),
+                files_total_size_bytes: Some(1024),
+                hidden_files_total_size_bytes: Some(32),
             }
         ));
         assert!(cache.summary_for_path(&path).is_none());
@@ -320,6 +360,8 @@ mod tests {
                 ListDirectorySummary {
                     direct_child_count: 1,
                     recursive_total_size_bytes: Some(128),
+                    files_total_size_bytes: Some(64),
+                    hidden_files_total_size_bytes: Some(8),
                 }
             ));
         }
@@ -349,6 +391,56 @@ mod tests {
         assert_eq!(summary.direct_child_count, 4);
         assert_eq!(summary.recursive_total_size_bytes, None);
         assert!(cache.start_request(path, true).is_none());
+    }
+
+    #[test]
+    fn remembered_count_still_triggers_file_size_load() {
+        let path = PathBuf::from("/workspace/projects");
+        let mut cache = ListDirectorySummaryCache::default();
+        // discovery 导航时只回填数量；大小必须仍能发起 direct 请求。
+        cache.remember_direct_child_count(path.clone(), 4);
+
+        let request = cache
+            .start_request(path.clone(), false)
+            .expect("size-only request");
+        assert!(!request.include_recursive_total_size);
+        assert!(cache.start_request(path.clone(), false).is_none());
+
+        assert!(cache.store_summary(
+            &request,
+            ListDirectorySummary {
+                direct_child_count: 4,
+                recursive_total_size_bytes: None,
+                files_total_size_bytes: Some(512),
+                hidden_files_total_size_bytes: Some(64),
+            }
+        ));
+        let summary = cache.summary_for_path(&path).expect("summary");
+        assert_eq!(summary.files_total_size_bytes, Some(512));
+        assert_eq!(summary.hidden_files_total_size_bytes, Some(64));
+        assert!(cache.start_request(path, false).is_none());
+    }
+
+    #[test]
+    fn file_size_failure_does_not_retry_until_invalidation_and_keeps_count() {
+        let path = PathBuf::from("/workspace/projects");
+        let mut cache = ListDirectorySummaryCache::default();
+        cache.remember_direct_child_count(path.clone(), 4);
+
+        let request = cache
+            .start_request(path.clone(), false)
+            .expect("size-only request");
+        assert!(cache.store_failure(&request));
+
+        let summary = cache
+            .summary_for_path(&path)
+            .expect("count survives size failure");
+        assert_eq!(summary.direct_child_count, 4);
+        assert_eq!(summary.files_total_size_bytes, None);
+        assert!(cache.start_request(path.clone(), false).is_none());
+
+        cache.invalidate_path(&path);
+        assert!(cache.start_request(path, false).is_some());
     }
 
     #[test]

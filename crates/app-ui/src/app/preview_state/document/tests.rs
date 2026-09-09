@@ -106,7 +106,7 @@ fn stale_and_invalid_scrolls_do_not_change_scrollbar_state() {
     let source = directory.path().join("stale-scroll.pdf");
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     prepare_current_document(&mut browser, source, 6);
-    drop(browser.show_scrollbars_temporarily(ScrollbarRegion::Sidebar));
+    drop(browser.start_scrollbar_reveal(ScrollbarRegion::Sidebar));
 
     let mut stale_key = browser
         .active_document_preview_mut()

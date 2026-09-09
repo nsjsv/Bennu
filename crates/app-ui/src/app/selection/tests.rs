@@ -782,3 +782,53 @@ fn iced_file_drag_keeps_sidebar_trash_non_drop_target() {
         .as_ref()
         .is_some_and(|session| session.hovered_target.is_none()));
 }
+
+#[test]
+fn symlink_menu_entry_gates_out_remote_mount_selection() {
+    let (mut browser, _) = FileBrowser::new(config::default_user_config());
+    let mount = PathBuf::from("/run/user/1000/gvfs/mtp:host=phone");
+    let remote_file = mount.join("DCIM/photo.jpg");
+    let local_file = PathBuf::from("/workspace/report.txt");
+    browser.current_dir = mount.clone();
+    browser.entries = vec![
+        test_entry(remote_file.clone(), FileKind::File),
+        test_entry(local_file.clone(), FileKind::File),
+    ]
+    .into();
+
+    let connection = desktop_linux::NetworkConnection::new(
+        desktop_linux::NetworkConnectionId::new("phone"),
+        "Phone",
+        desktop_linux::NetworkProtocol::Smb,
+        "smb://phone/share",
+    )
+    .unwrap();
+    let id = connection.id.clone();
+    browser.network_connections =
+        crate::network_connections::NetworkConnectionState::from_connections(vec![connection]);
+    browser
+        .network_connections
+        .accept_loaded(vec![(id, desktop_linux::NetworkMountState::Mounted(mount))]);
+
+    // 远程选中:整份选中按远程处理,不提供创建符号链接。
+    browser.selected_paths = std::iter::once(remote_file.clone()).collect();
+    browser.selected = Some(remote_file.clone());
+    drop(browser.handle_entry_right_clicked(remote_file.clone()));
+    let ContextMenuState::FileArea(remote_menu) =
+        browser.context_menu.as_ref().expect("context menu opens")
+    else {
+        panic!("file context menu opens");
+    };
+    assert!(!remote_menu.can_create_symlink);
+
+    // 本地选中不受影响。
+    browser.selected_paths = std::iter::once(local_file.clone()).collect();
+    browser.selected = Some(local_file.clone());
+    drop(browser.handle_entry_right_clicked(local_file.clone()));
+    let ContextMenuState::FileArea(local_menu) =
+        browser.context_menu.as_ref().expect("context menu opens")
+    else {
+        panic!("file context menu opens");
+    };
+    assert!(local_menu.can_create_symlink);
+}

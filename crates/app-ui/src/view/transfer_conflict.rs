@@ -21,6 +21,7 @@ use super::option_controls::secondary_action_button_style;
 use super::{themed_icon, IconTone};
 
 const TRANSFER_CONFLICT_PANEL_WIDTH: f32 = 560.0;
+const TRANSFER_CONFLICT_PANEL_WIDTH_WITH_MERGE: f32 = 700.0;
 const TRANSFER_CONFLICT_PATH_MAX_CHARS: usize = 32;
 const TRANSFER_CONFLICT_NAME_MAX_CHARS: usize = 48;
 const TRANSFER_CONFLICT_THUMBNAIL_SIZE: f32 = 48.0;
@@ -69,7 +70,9 @@ pub(super) fn transfer_conflict_panel<'a>(
         .text_size(14)
         .spacing(8);
 
-    let actions = row![
+    // 「合并」只在源与目标都是目录时提供(与冲突项 can_merge 同源)。
+    let merge_offered = conflict.can_merge();
+    let mut actions = row![
         conflict_action_button("Cancel", Message::TransferConflictCancelRequested),
         Space::new().width(Length::Fill),
         conflict_action_button(
@@ -83,12 +86,25 @@ pub(super) fn transfer_conflict_panel<'a>(
         ),
         Space::new().width(Length::Fill),
         conflict_action_button(
+            "Keep Both",
+            Message::TransferConflictChoiceSelected(TransferConflictChoice::KeepBoth),
+        ),
+        Space::new().width(Length::Fill),
+        conflict_action_button(
             "Replace",
             Message::TransferConflictChoiceSelected(TransferConflictChoice::Replace),
         ),
     ]
     .spacing(12)
     .align_y(Alignment::Center);
+    if merge_offered {
+        actions = actions
+            .push(Space::new().width(Length::Fill))
+            .push(conflict_action_button(
+                "Merge",
+                Message::TransferConflictChoiceSelected(TransferConflictChoice::Merge),
+            ));
+    }
 
     let content = column![
         title,
@@ -100,9 +116,14 @@ pub(super) fn transfer_conflict_panel<'a>(
     .spacing(13)
     .width(Length::Fill);
 
+    let panel_width = if merge_offered {
+        TRANSFER_CONFLICT_PANEL_WIDTH_WITH_MERGE
+    } else {
+        TRANSFER_CONFLICT_PANEL_WIDTH
+    };
     container(content)
         .padding([14, 12])
-        .width(Length::Fixed(TRANSFER_CONFLICT_PANEL_WIDTH))
+        .width(Length::Fixed(panel_width))
         .style(context_menu_style)
         .into()
 }

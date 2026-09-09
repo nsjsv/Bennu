@@ -148,6 +148,8 @@ impl FileBrowser {
             ShortcutAction::TerminalCloseTab => self.close_active_terminal_tab_via_shortcut(),
             ShortcutAction::SelectAll => self.select_all_in_file_selection_scope(),
             ShortcutAction::Copy => self.copy_selected(),
+            ShortcutAction::DuplicateSelected => self.duplicate_selected(),
+            ShortcutAction::NewFolderFromSelection => self.new_folder_from_selection(),
             ShortcutAction::Paste => self.paste_pending(),
             ShortcutAction::Cut => self.move_selected(),
             ShortcutAction::Delete => self.trash_selected(),

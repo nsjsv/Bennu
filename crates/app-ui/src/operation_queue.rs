@@ -84,9 +84,29 @@ pub(crate) enum QueuedFileOperation {
         transfers: Vec<QueuedTransfer>,
         verification: FileOperationVerification,
     },
+    /// 右键「复制副本」:与 Copy 同一条恢复管线,仅多一个
+    /// 「完成后选中新副本」的收尾语义(见 duplicate_selection_targets)。
+    Duplicate {
+        transfers: Vec<QueuedTransfer>,
+        verification: FileOperationVerification,
+    },
     Move {
         transfers: Vec<QueuedTransfer>,
         verification: FileOperationVerification,
+    },
+    /// 用选中项新建文件夹:目录已由入队侧按命名规则起好名,
+    /// 选中条目随之移入;撤销时整批还原(见 UngatherNewFolder)。
+    GatherSelectionIntoNewFolder {
+        directory: PathBuf,
+        sources: Vec<PathBuf>,
+    },
+    /// GatherSelectionIntoNewFolder 的撤销:移回条目后删除空目录。
+    UngatherNewFolder {
+        directory: PathBuf,
+        restore_targets: Vec<PathBuf>,
+    },
+    CreateSymbolicLinks {
+        links: Vec<SymbolicLinkCreation>,
     },
     CreateArchive {
         sources: Vec<PathBuf>,
@@ -101,6 +121,13 @@ pub(crate) enum QueuedFileOperation {
     Convert {
         requests: Vec<ConversionRequest>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SymbolicLinkCreation {
+    pub(crate) link_path: PathBuf,
+    /// 符号链接目标一律存绝对路径。
+    pub(crate) target_path: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,7 +160,11 @@ impl QueuedFileOperation {
             Self::DeletePermanently { .. } => "Delete Permanently",
             Self::EmptyTrash => "Empty Trash",
             Self::Copy { .. } => "Copy",
+            Self::Duplicate { .. } => "Duplicate",
             Self::Move { .. } => "Move",
+            Self::GatherSelectionIntoNewFolder { .. } => "New Folder with Selection",
+            Self::UngatherNewFolder { .. } => "New Folder with Selection",
+            Self::CreateSymbolicLinks { .. } => "Create Symbolic Link",
             Self::CreateArchive { .. } => "Create Archive",
             Self::ExtractArchive { .. } => "Extract Archive",
             Self::Convert { .. } => "Convert Format",
@@ -144,6 +175,21 @@ impl QueuedFileOperation {
         match self {
             Self::CreateDirectory { parent } => Some(parent.join(NEW_DIRECTORY_NAME)),
             Self::CreateEmptyFile { parent } => Some(parent.join(NEW_FILE_NAME)),
+            // 收纳文件夹在入队侧已按命名规则确定路径,完成后照常进入重命名态。
+            Self::GatherSelectionIntoNewFolder { directory, .. } => Some(directory.clone()),
+            _ => None,
+        }
+    }
+
+    /// 「复制副本」完成后应整批选中的新副本路径;其余操作无此语义。
+    pub(crate) fn duplicate_selection_targets(&self) -> Option<Vec<PathBuf>> {
+        match self {
+            Self::Duplicate { transfers, .. } => Some(
+                transfers
+                    .iter()
+                    .map(|transfer| transfer.target.clone())
+                    .collect(),
+            ),
             _ => None,
         }
     }
@@ -156,7 +202,10 @@ impl QueuedFileOperation {
     }
 
     fn uses_recovery_journal(&self) -> bool {
-        matches!(self, Self::Copy { .. } | Self::Move { .. })
+        matches!(
+            self,
+            Self::Copy { .. } | Self::Duplicate { .. } | Self::Move { .. }
+        )
     }
 
     fn to_stored(&self) -> StoredOperation {

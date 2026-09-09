@@ -51,8 +51,22 @@ impl QueuedFileOperation {
                 directory_path: "Trash".to_owned(),
                 total_items: 1,
             },
-            Self::Copy { transfers, .. } | Self::Move { transfers, .. } => {
-                path_lines_from_transfers(transfers)
+            Self::Copy { transfers, .. }
+            | Self::Duplicate { transfers, .. }
+            | Self::Move { transfers, .. } => path_lines_from_transfers(transfers),
+            Self::GatherSelectionIntoNewFolder { directory, sources } => {
+                path_lines_from_gather(directory, sources)
+            }
+            Self::UngatherNewFolder {
+                directory,
+                restore_targets,
+            } => path_lines_from_gather(directory, restore_targets),
+            Self::CreateSymbolicLinks { links } => {
+                let link_paths = links
+                    .iter()
+                    .map(|link| link.link_path.clone())
+                    .collect::<Vec<_>>();
+                path_lines_from_paths(&link_paths)
             }
             Self::CreateArchive {
                 sources, target, ..
@@ -192,6 +206,18 @@ fn path_lines_from_transfers(transfers: &[QueuedTransfer]) -> FileOperationPathL
             &transfer.source,
             parent_path(&transfer.target),
             transfers.len(),
+        ),
+    }
+}
+
+fn path_lines_from_gather(directory: &Path, entry_paths: &[PathBuf]) -> FileOperationPathLines {
+    match entry_paths {
+        [] => FileOperationPathLines::from_paths(directory, directory, parent_path(directory), 1),
+        [first, ..] => FileOperationPathLines::from_paths(
+            directory,
+            first,
+            parent_path(directory),
+            entry_paths.len(),
         ),
     }
 }

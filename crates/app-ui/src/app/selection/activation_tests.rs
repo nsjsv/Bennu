@@ -622,6 +622,83 @@ fn list_select_all_and_range_use_the_same_visible_rows() {
 }
 
 #[test]
+fn column_shift_range_stays_in_the_clicked_column() {
+    let project = PathBuf::from("/workspace/project");
+    let alpha = PathBuf::from("/workspace/alpha.txt");
+    let zeta = PathBuf::from("/workspace/zeta.txt");
+    let child = project.join("main.rs");
+    let mut browser = browser_with_entries(&[alpha.clone(), zeta.clone()]);
+    browser.view_mode = BrowserViewMode::Columns;
+    browser.entries = vec![
+        test_entry(alpha.clone(), FileKind::File),
+        test_entry(project.clone(), FileKind::Directory),
+        test_entry(zeta.clone(), FileKind::File),
+    ]
+    .into();
+    browser.expanded_directories.insert(
+        project.clone(),
+        loaded_directory(vec![test_entry(child.clone(), FileKind::File)]),
+    );
+
+    drop(browser.handle_column_entry_clicked(alpha.clone()));
+    browser.keyboard_modifiers = keyboard::Modifiers::SHIFT;
+    drop(browser.handle_column_entry_clicked(zeta.clone()));
+
+    assert_eq!(
+        browser.selected_paths,
+        HashSet::from([alpha, project, zeta])
+    );
+    assert!(!browser.selected_paths.contains(&child));
+}
+
+#[test]
+fn column_shift_click_in_another_column_selects_only_target_and_reanchors() {
+    let project = PathBuf::from("/workspace/project");
+    let alpha = PathBuf::from("/workspace/alpha.txt");
+    let child = project.join("main.rs");
+    let sibling = project.join("util.rs");
+    let mut browser = browser_with_entries(&[alpha.clone()]);
+    browser.view_mode = BrowserViewMode::Columns;
+    browser.entries = vec![
+        test_entry(alpha.clone(), FileKind::File),
+        test_entry(project.clone(), FileKind::Directory),
+    ]
+    .into();
+    browser.expanded_directories.insert(
+        project.clone(),
+        loaded_directory(vec![
+            test_entry(child.clone(), FileKind::File),
+            test_entry(sibling.clone(), FileKind::File),
+        ]),
+    );
+
+    drop(browser.handle_column_entry_clicked(alpha.clone()));
+    browser.keyboard_modifiers = keyboard::Modifiers::SHIFT;
+    drop(browser.handle_column_entry_clicked(child.clone()));
+    assert_eq!(browser.selected_paths, HashSet::from([child.clone()]));
+    assert_eq!(browser.selection_anchor, Some(child.clone()));
+
+    drop(browser.handle_column_entry_clicked(sibling.clone()));
+    assert_eq!(browser.selected_paths, HashSet::from([child, sibling]));
+}
+
+#[test]
+fn trash_shift_range_spans_entries_across_original_parents() {
+    let first = PathBuf::from("/origin-a/first.txt");
+    let second = PathBuf::from("/origin-b/nested/second.txt");
+    let mut browser = browser_with_entries(&[first.clone(), second.clone()]);
+    browser.view_mode = BrowserViewMode::Columns;
+    browser.current_dir = trash_location_path();
+    browser.is_trash_view = true;
+
+    drop(browser.handle_column_entry_clicked(first.clone()));
+    browser.keyboard_modifiers = keyboard::Modifiers::SHIFT;
+    drop(browser.handle_column_entry_clicked(second.clone()));
+
+    assert_eq!(browser.selected_paths, HashSet::from([first, second]));
+}
+
+#[test]
 fn icon_grid_select_all_and_range_only_use_direct_entries() {
     let parent = PathBuf::from("/workspace/project");
     let hidden_child = parent.join("main.rs");

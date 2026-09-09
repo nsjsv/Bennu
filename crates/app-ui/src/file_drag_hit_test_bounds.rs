@@ -45,7 +45,6 @@ pub(crate) enum FileDragHitTestBoundsRequest {
     SelectionMarquee,
     Breadcrumbs(u64),
     FileDropLayout(FileDropLayoutRequest),
-    PasteTarget,
 }
 
 pub(crate) fn file_drag_hit_test_bounds_command(
@@ -258,9 +257,6 @@ impl widget::Operation<Message> for FileDragHitTestBoundsOperation {
             }
             FileDragHitTestBoundsRequest::FileDropLayout(request) => {
                 Message::FileDropLayoutMeasured(request, self.measured_bounds())
-            }
-            FileDragHitTestBoundsRequest::PasteTarget => {
-                Message::PasteTargetMeasured(self.measured_bounds())
             }
         };
         Outcome::Some(message)

@@ -8,11 +8,12 @@ use super::*;
 fn defaults_match_existing_menu_order() {
     let preferences = ContextMenuPreferences::defaults();
     assert_eq!(
-        preferences.file_entry_items(false, true),
+        preferences.file_entry_items(false, true, true),
         vec![
             FileAreaMenuItem::Open,
             FileAreaMenuItem::OpenWith,
             FileAreaMenuItem::Copy,
+            FileAreaMenuItem::Duplicate,
             FileAreaMenuItem::Move,
             FileAreaMenuItem::CreateArchive,
             FileAreaMenuItem::ConvertFormat,
@@ -21,19 +22,55 @@ fn defaults_match_existing_menu_order() {
             FileAreaMenuItem::Rename,
             FileAreaMenuItem::BatchRename,
             FileAreaMenuItem::NewEntry,
+            FileAreaMenuItem::NewFolderFromSelection,
             FileAreaMenuItem::OpenTerminalHere,
+            FileAreaMenuItem::CopyPath,
+            FileAreaMenuItem::CreateSymlink,
             FileAreaMenuItem::Delete,
             FileAreaMenuItem::Properties,
         ]
     );
     // 目录:无 FileChecksum。
     assert!(!preferences
-        .file_entry_items(true, true)
+        .file_entry_items(true, true, true)
         .contains(&FileAreaMenuItem::FileChecksum));
     // 不可批量重命名:无 BatchRename。
     assert!(!preferences
-        .file_entry_items(false, false)
+        .file_entry_items(false, false, false)
         .contains(&FileAreaMenuItem::BatchRename));
+}
+
+#[test]
+fn selection_only_items_stay_out_of_the_blank_area_menu() {
+    // 复制副本 / 收纳文件夹 / 复制路径 / 创建符号链接都作用于选中条目,
+    // 空白处右键没有选中项,不提供这些条目。
+    for item in FILE_BLANK_MENU_ITEMS {
+        assert!(!matches!(
+            item,
+            FileAreaMenuItem::Duplicate
+                | FileAreaMenuItem::NewFolderFromSelection
+                | FileAreaMenuItem::CopyPath
+                | FileAreaMenuItem::CreateSymlink
+        ));
+    }
+}
+
+#[test]
+fn symlink_item_gates_on_local_mount_clearance() {
+    let preferences = ContextMenuPreferences::defaults();
+    // 全本地时文件与目录都提供创建符号链接;远程挂载选中时隐藏。
+    assert!(preferences
+        .file_entry_items(false, true, true)
+        .contains(&FileAreaMenuItem::CreateSymlink));
+    assert!(preferences
+        .file_entry_items(true, true, true)
+        .contains(&FileAreaMenuItem::CreateSymlink));
+    assert!(!preferences
+        .file_entry_items(false, true, false)
+        .contains(&FileAreaMenuItem::CreateSymlink));
+    assert!(!preferences
+        .file_entry_items(true, true, false)
+        .contains(&FileAreaMenuItem::CreateSymlink));
 }
 
 #[test]
@@ -42,13 +79,13 @@ fn new_entry_position_tracks_visibility() {
     for index in 0..3 {
         preferences.file_entry.toggle(index);
     }
-    let items = preferences.file_entry_items(false, false);
-    assert_eq!(items[0], FileAreaMenuItem::Move);
-    // 隐藏 Open/OpenWith/Copy 后,NewEntry 前剩 Move、CreateArchive、ConvertFormat、
-    // FileChecksum、Paste、Rename 共 6 行。
+    let items = preferences.file_entry_items(false, false, false);
+    assert_eq!(items[0], FileAreaMenuItem::Duplicate);
+    // 隐藏 Open/OpenWith/Copy 后,NewEntry 前剩 Duplicate、Move、CreateArchive、
+    // ConvertFormat、FileChecksum、Paste、Rename 共 7 行。
     assert_eq!(
         items.iter().position(|item| *item == FileAreaMenuItem::NewEntry),
-        Some(6)
+        Some(7)
     );
 }
 

@@ -23,10 +23,10 @@ use crate::thumbnail_cache::{
 
 pub(crate) const ENTRY_ICON_SIZE: f32 = 18.0;
 const COLUMN_ENTRY_ICON_SIZE: f32 = 16.0;
-const CUT_BADGE_AREA_RATIO: f32 = 0.42;
-const CUT_BADGE_ICON_RATIO: f32 = 0.66;
-const CUT_BADGE_MIN_SIZE: f32 = 10.0;
-const CUT_BADGE_MAX_SIZE: f32 = 24.0;
+const ENTRY_BADGE_AREA_RATIO: f32 = 0.42;
+const ENTRY_BADGE_ICON_RATIO: f32 = 0.66;
+const ENTRY_BADGE_MIN_SIZE: f32 = 10.0;
+const ENTRY_BADGE_MAX_SIZE: f32 = 24.0;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum FileEntryIconDensity {
@@ -259,34 +259,37 @@ fn decorate_file_entry_icon<'a, Renderer>(
 where
     Renderer: iced::advanced::Renderer + iced::advanced::svg::Renderer + 'a + 'static,
 {
-    match modifier {
-        FileEntryContentModifier::None => content,
-        FileEntryContentModifier::Cut => {
-            Stack::with_children([content, cut_badge_overlay(icon_area_size)])
-                .width(Length::Fixed(icon_area_size))
-                .height(Length::Fixed(icon_area_size))
-                .into()
-        }
-    }
+    let badge_symbol = match modifier {
+        FileEntryContentModifier::None => return content,
+        FileEntryContentModifier::Cut => IconSymbol::Scissors,
+        FileEntryContentModifier::Copied => IconSymbol::Copy,
+    };
+    Stack::with_children([content, entry_badge_overlay(icon_area_size, badge_symbol)])
+        .width(Length::Fixed(icon_area_size))
+        .height(Length::Fixed(icon_area_size))
+        .into()
 }
 
-fn cut_badge_overlay<'a, Renderer>(icon_area_size: f32) -> Element<'a, Message, Theme, Renderer>
+fn entry_badge_overlay<'a, Renderer>(
+    icon_area_size: f32,
+    badge_symbol: IconSymbol,
+) -> Element<'a, Message, Theme, Renderer>
 where
     Renderer: iced::advanced::Renderer + iced::advanced::svg::Renderer + 'a + 'static,
 {
     let badge_size =
-        (icon_area_size * CUT_BADGE_AREA_RATIO).clamp(CUT_BADGE_MIN_SIZE, CUT_BADGE_MAX_SIZE);
-    let badge_icon_size = badge_size * CUT_BADGE_ICON_RATIO;
+        (icon_area_size * ENTRY_BADGE_AREA_RATIO).clamp(ENTRY_BADGE_MIN_SIZE, ENTRY_BADGE_MAX_SIZE);
+    let badge_icon_size = badge_size * ENTRY_BADGE_ICON_RATIO;
     let badge = container(
-        IconSymbol::Scissors
+        badge_symbol
             .view(badge_icon_size)
-            .style(cut_badge_icon_style),
+            .style(entry_badge_icon_style),
     )
     .width(Length::Fixed(badge_size))
     .height(Length::Fixed(badge_size))
     .center_x(Length::Fixed(badge_size))
     .center_y(Length::Fixed(badge_size))
-    .style(cut_badge_style);
+    .style(entry_badge_style);
 
     container(badge)
         .width(Length::Fill)
@@ -296,7 +299,7 @@ where
         .into()
 }
 
-fn cut_badge_style(theme: &Theme) -> iced::widget::container::Style {
+fn entry_badge_style(theme: &Theme) -> iced::widget::container::Style {
     let colors = ui_colors(theme);
     iced::widget::container::Style {
         background: Some(Background::Color(colors.surface_bright)),
@@ -309,7 +312,7 @@ fn cut_badge_style(theme: &Theme) -> iced::widget::container::Style {
     }
 }
 
-fn cut_badge_icon_style(
+fn entry_badge_icon_style(
     theme: &Theme,
     _status: iced::widget::svg::Status,
 ) -> iced::widget::svg::Style {
@@ -531,8 +534,8 @@ mod tests {
                 matches!(background, Background::Color(color) if *color == badge_backplate_color)
             })
             .expect("cut badge must draw an opaque contrast backplate");
-        let expected_badge_size =
-            (icon_area_size * CUT_BADGE_AREA_RATIO).clamp(CUT_BADGE_MIN_SIZE, CUT_BADGE_MAX_SIZE);
+        let expected_badge_size = (icon_area_size * ENTRY_BADGE_AREA_RATIO)
+            .clamp(ENTRY_BADGE_MIN_SIZE, ENTRY_BADGE_MAX_SIZE);
         assert_approximately_equal(badge_quad.bounds.x, bounds.x);
         assert_approximately_equal(
             badge_quad.bounds.y,
@@ -545,6 +548,43 @@ mod tests {
             unreachable!();
         };
         assert_approximately_equal(backplate_color.a, 1.0);
+    }
+
+    #[test]
+    fn copied_svg_draws_undimmed_body_with_lower_left_badge() {
+        let icon_area_size = ENTRY_ICON_SIZE;
+        let body: Element<'_, Message, Theme, RecordingRenderer> = IconSymbol::File
+            .view(icon_area_size)
+            .style(icon_svg_style())
+            .opacity(FileEntryContentModifier::Copied.opacity())
+            .into();
+        let decorated =
+            decorate_file_entry_icon(body, icon_area_size, FileEntryContentModifier::Copied);
+
+        let (bounds, renderer) = draw_element(decorated, Size::new(icon_area_size, icon_area_size));
+
+        assert_eq!(bounds.size(), Size::new(icon_area_size, icon_area_size));
+        assert_eq!(renderer.svgs.len(), 2);
+        assert_approximately_equal(renderer.svgs[0].opacity, 1.0);
+        assert_approximately_equal(renderer.svgs[1].opacity, 1.0);
+        assert!(renderer.svgs[1].bounds.center_x() < bounds.center_x());
+        assert!(renderer.svgs[1].bounds.center_y() > bounds.center_y());
+
+        let badge_backplate_color = ui_colors(&Theme::Light).surface_bright;
+        let (badge_quad, _) = renderer
+            .quads
+            .iter()
+            .find(|(_, background)| {
+                matches!(background, Background::Color(color) if *color == badge_backplate_color)
+            })
+            .expect("copied badge must draw an opaque contrast backplate");
+        let expected_badge_size = (icon_area_size * ENTRY_BADGE_AREA_RATIO)
+            .clamp(ENTRY_BADGE_MIN_SIZE, ENTRY_BADGE_MAX_SIZE);
+        assert_approximately_equal(badge_quad.bounds.x, bounds.x);
+        assert_approximately_equal(
+            badge_quad.bounds.y,
+            bounds.y + bounds.height - expected_badge_size,
+        );
     }
 
     #[test]

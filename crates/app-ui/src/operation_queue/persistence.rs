@@ -4,8 +4,8 @@ use file_core::{
 };
 use file_operation_store::{
     StoredArchiveCompressionLevel, StoredArchiveFormat, StoredBatchRenameItem,
-    StoredFileOperationVerification, StoredOperation, StoredPath, StoredTransfer,
-    StoredTransferConflictStrategy, StoredTrashEntry, TRANSFER_JOURNAL_VERSION,
+    StoredFileOperationVerification, StoredOperation, StoredPath, StoredSymbolicLinkCreation,
+    StoredTransfer, StoredTransferConflictStrategy, StoredTrashEntry, TRANSFER_JOURNAL_VERSION,
 };
 
 use super::{QueuedFileOperation, QueuedTransfer};
@@ -49,10 +49,46 @@ pub(super) fn queued_operation_to_stored(operation: &QueuedFileOperation) -> Sto
         QueuedFileOperation::Copy {
             transfers,
             verification,
-        } => StoredOperation::Copy {
-            transfers: stored_transfers(transfers),
-            verification: stored_verification(*verification),
-            recovery_version: Some(TRANSFER_JOURNAL_VERSION),
+        }
+        | QueuedFileOperation::Duplicate {
+            transfers,
+            verification,
+        } => {
+            // 复制副本与复制共用同一存储与恢复语义;重启恢复后按普通复制续跑,
+            // 丢掉的只是「完成后选中新副本」这一层收尾。
+            StoredOperation::Copy {
+                transfers: stored_transfers(transfers),
+                verification: stored_verification(*verification),
+                recovery_version: Some(TRANSFER_JOURNAL_VERSION),
+            }
+        }
+        QueuedFileOperation::GatherSelectionIntoNewFolder { directory, sources } => {
+            StoredOperation::GatherSelectionIntoNewFolder {
+                directory: StoredPath::from_path(directory),
+                sources: sources
+                    .iter()
+                    .map(|path| StoredPath::from_path(path))
+                    .collect(),
+            }
+        }
+        QueuedFileOperation::UngatherNewFolder {
+            directory,
+            restore_targets,
+        } => StoredOperation::UngatherNewFolder {
+            directory: StoredPath::from_path(directory),
+            restore_targets: restore_targets
+                .iter()
+                .map(|path| StoredPath::from_path(path))
+                .collect(),
+        },
+        QueuedFileOperation::CreateSymbolicLinks { links } => StoredOperation::CreateSymbolicLinks {
+            links: links
+                .iter()
+                .map(|link| StoredSymbolicLinkCreation {
+                    link_path: StoredPath::from_path(&link.link_path),
+                    target_path: StoredPath::from_path(&link.target_path),
+                })
+                .collect(),
         },
         QueuedFileOperation::Move {
             transfers,

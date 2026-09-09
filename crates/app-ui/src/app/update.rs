@@ -510,7 +510,6 @@ impl FileBrowser {
             Message::FileDropLayoutMeasured(request, bounds) => {
                 self.accept_drop_layout(request, bounds)
             }
-            Message::PasteTargetMeasured(bounds) => self.accept_paste_target_measured(bounds),
             Message::PaneCursorEntered(pane_id) => {
                 self.hovered_pane_id = Some(pane_id);
                 Task::none()
@@ -925,6 +924,9 @@ impl FileBrowser {
                 self.remember_scrollbar_viewport(region, viewport);
                 self.update(*event)
             }
+            Message::ScrollbarLayoutVerified { region, viewport } => {
+                self.handle_scrollbar_layout_verified(region, viewport)
+            }
             Message::ScrollbarAutoHideElapsed(generation) => {
                 self.start_global_scrollbar_hide(generation);
                 Task::none()
@@ -1079,6 +1081,17 @@ impl FileBrowser {
             Message::RestoreSelected => self.restore_selected(),
             Message::EmptyTrashRequested => self.empty_trash_requested(),
             Message::CopySelected => self.copy_selected(),
+            Message::DuplicateSelected => self.duplicate_selected(),
+            Message::NewFolderFromSelection => self.new_folder_from_selection(),
+            Message::CopyPathSelected => self.copy_selected_path_text(),
+            Message::CreateSymlinkSelected => self.create_symlinks_for_selection(),
+            Message::PathTextCopied(result) => {
+                match result {
+                    Ok(()) => self.clear_global_error(),
+                    Err(error) => self.show_global_error(error),
+                };
+                Task::none()
+            }
             Message::MoveSelected => self.move_selected(),
             Message::PastePending => self.paste_pending(),
             Message::FileClipboardWriteFinished(result) => self.accept_file_clipboard_write(result),
@@ -1112,6 +1125,9 @@ impl FileBrowser {
                 transfers,
                 conflicts,
             } => self.accept_transfer_conflicts_checked(mode, transfers, conflicts),
+            Message::TransferConflictMergesExpanded { mode, expansion } => {
+                self.accept_expanded_transfer_conflict_merges(mode, expansion)
+            }
             Message::TransferConflictChoiceSelected(_)
             | Message::TransferConflictApplyToAllToggled
             | Message::TransferConflictCancelRequested => {

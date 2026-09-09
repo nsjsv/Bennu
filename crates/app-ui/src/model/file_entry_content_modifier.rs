@@ -9,12 +9,14 @@ pub(crate) enum FileEntryContentModifier {
     #[default]
     None,
     Cut,
+    Copied,
 }
 
 impl FileEntryContentModifier {
     pub(crate) fn opacity(self) -> f32 {
         match self {
-            Self::None => 1.0,
+            // 复制的源文件原地保留，不淡化，只挂角标。
+            Self::None | Self::Copied => 1.0,
             Self::Cut => CUT_ENTRY_CONTENT_OPACITY,
         }
     }
@@ -23,6 +25,9 @@ impl FileEntryContentModifier {
 impl PendingOperation {
     pub(crate) fn content_modifier_for_path(&self, path: &Path) -> FileEntryContentModifier {
         match self {
+            Self::Copy(paths) if paths.iter().any(|source| source.as_path() == path) => {
+                FileEntryContentModifier::Copied
+            }
             Self::Move(paths) if paths.iter().any(|source| source.as_path() == path) => {
                 FileEntryContentModifier::Cut
             }

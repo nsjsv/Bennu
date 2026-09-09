@@ -21,6 +21,7 @@ mod clipboard;
 mod column_gesture_tests;
 mod conflict;
 mod drag;
+mod entry_actions;
 mod file_drop;
 mod file_drop_target;
 mod keyboard_navigation;
@@ -48,6 +49,22 @@ impl FileBrowser {
         self.selection_anchor = Some(path.clone());
         self.pending_keyboard_column_focus = None;
         self.focus_path(path);
+    }
+
+    /// 批量操作(复制副本等)完成后的整批选中:全部进入选中集,
+    /// 主选中与焦点落在最后一个目标上(与 Finder 的批次选中一致)。
+    pub(super) fn select_operation_result_paths(&mut self, paths: Vec<PathBuf>) {
+        let Some(anchor) = paths.first().cloned() else {
+            return;
+        };
+        let Some(primary) = paths.last().cloned() else {
+            return;
+        };
+        self.cancel_expansion_follow_plans();
+        self.selected_paths = paths.into_iter().collect();
+        self.selection_anchor = Some(anchor);
+        self.pending_keyboard_column_focus = None;
+        self.focus_path(primary);
     }
 
     pub(super) fn handle_column_entry_clicked(&mut self, path: PathBuf) -> Task<Message> {
@@ -313,12 +330,14 @@ impl FileBrowser {
         self.cancel_file_drag_interaction();
         let target_is_directory = self.entry_kind(&path) == Some(FileKind::Directory);
         let can_batch_rename = self.batch_rename_available_for_selection();
+        let can_create_symlink = self.selection_all_paths_local();
         if self.file_area_menu_is_visible(true, target_is_directory, can_batch_rename) {
             self.context_menu = Some(ContextMenuState::FileArea(FileContextMenuState {
                 target: Some(path.clone()),
                 target_is_directory,
                 paste_directory: self.entry_parent_directory(&path),
                 can_batch_rename,
+                can_create_symlink,
                 delete_action,
                 position: self.cursor_position,
                 expansion: FileContextMenuExpansion::None,
@@ -355,6 +374,7 @@ impl FileBrowser {
                 target_is_directory: false,
                 paste_directory: directory,
                 can_batch_rename: false,
+                can_create_symlink: false,
                 delete_action: FileDeleteAction::MoveToTrash,
                 position: self.cursor_position,
                 expansion: FileContextMenuExpansion::None,
@@ -375,11 +395,18 @@ impl FileBrowser {
             !menus.trash_items(has_target).is_empty()
         } else if has_target {
             !menus
-                .file_entry_items(target_is_directory, can_batch_rename)
+                .file_entry_items(target_is_directory, can_batch_rename, true)
                 .is_empty()
         } else {
             !menus.file_blank_items().is_empty()
         }
+    }
+
+    /// 选中项全部位于本地挂载时才允许创建符号链接;混合选中按远程处理。
+    fn selection_all_paths_local(&self) -> bool {
+        self.selected_paths_for_operation()
+            .iter()
+            .all(|path| !self.path_is_remote_mount(path))
     }
 
     pub(super) fn update_file_context_menu_expansion(
@@ -633,7 +660,7 @@ impl FileBrowser {
         preserve_existing: bool,
     ) -> PathBuf {
         let effective_anchor =
-            if self.view_mode == BrowserViewMode::Icons && anchor.parent() != target.parent() {
+            if self.range_selection_confined_to_directory() && anchor.parent() != target.parent() {
                 target.clone()
             } else {
                 anchor

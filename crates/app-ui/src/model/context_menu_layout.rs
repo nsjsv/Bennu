@@ -231,10 +231,12 @@ impl ContextMenuPreferences {
         &self,
         target_is_directory: bool,
         can_batch_rename: bool,
+        can_create_symlink: bool,
     ) -> Vec<FileAreaMenuItem> {
         self.file_entry.ordered_visible_where(|item| match item {
             FileAreaMenuItem::FileChecksum => !target_is_directory,
             FileAreaMenuItem::BatchRename => can_batch_rename,
+            FileAreaMenuItem::CreateSymlink => can_create_symlink,
             _ => true,
         })
     }

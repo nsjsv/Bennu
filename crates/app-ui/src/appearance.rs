@@ -498,6 +498,20 @@ pub(crate) fn drag_preview_style(theme: &Theme) -> container::Appearance {
     }
 }
 
+/// 拖拽预览徽标(复制/移动意图):底色与外层预览卡片拉开一档。
+pub(crate) fn drag_preview_badge_style(theme: &Theme) -> container::Appearance {
+    let colors = ui_colors(theme);
+    container::Appearance {
+        background: Some(Background::Color(colors.secondary_container)),
+        text_color: Some(colors.on_secondary_container),
+        border: Border {
+            radius: 8.0.into(),
+            ..Border::default()
+        },
+        ..container::Appearance::default()
+    }
+}
+
 pub(crate) fn switch_track_on_style(theme: &Theme) -> container::Appearance {
     container::Appearance {
         background: Some(Background::Color(ui_colors(theme).primary)),

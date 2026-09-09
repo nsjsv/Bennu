@@ -1,14 +1,17 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+use iced::advanced::widget as advanced_widget;
+use iced::advanced::widget::operation::{Operation, Outcome, Scrollable as ScrollableOperation};
 use iced::time::{Duration as IcedDuration, Instant as IcedInstant};
 use iced::widget::{canvas, container, scrollable, Stack};
 use iced::{
     alignment::{Horizontal, Vertical},
-    mouse, Element, Length, Point, Rectangle, Size, Task, Theme,
+    mouse, Element, Length, Point, Rectangle, Size, Task, Theme, Vector,
 };
 
 use super::runtime::scrollbar_auto_hide_command;
+use super::smooth_scroll::smooth_scroll_id;
 use super::FileBrowser;
 use crate::animation::{ease_out_cubic, elapsed_fraction as scrollbar_animation_progress};
 use crate::matugen_theme::ui_colors;
@@ -96,7 +99,26 @@ impl FileBrowser {
         self.scrollbar.viewport_by_region.remove(region);
     }
 
+    // 显示入口保持唯一：先探实时布局再决定是否淡入。iced 在内容塞得下时永不发布
+    // on_scroll，缓存里的溢出数据可能过期，"能不能滚"必须以探针读到的当帧布局为准。
     pub(super) fn show_scrollbars_temporarily(&mut self, region: ScrollbarRegion) -> Task<Message> {
+        advanced_widget::operate(ScrollbarLayoutProbe::new(region))
+    }
+
+    // 探针回信：把当帧布局写回缓存（自愈过期数据），核实溢出后才淡入。
+    pub(super) fn handle_scrollbar_layout_verified(
+        &mut self,
+        region: ScrollbarRegion,
+        viewport: ScrollbarViewport,
+    ) -> Task<Message> {
+        self.remember_scrollbar_viewport(region.clone(), viewport);
+        if !scrollbar_viewport_has_overflow(viewport) {
+            return Task::none();
+        }
+        self.start_scrollbar_reveal(region)
+    }
+
+    pub(super) fn start_scrollbar_reveal(&mut self, region: ScrollbarRegion) -> Task<Message> {
         let scrollbar = &mut self.scrollbar;
         scrollbar.active_region = Some(region);
         scrollbar.auto_hide_generation = scrollbar.auto_hide_generation.wrapping_add(1);
@@ -408,6 +430,65 @@ fn scrollbar_has_overflow(axis: ScrollbarAxis, viewport: ScrollbarViewport) -> b
     }
 }
 
+// 显示门槛看任一轴：逐轴 thumb 计算对无溢出轴本就返回 None，不会多画。
+fn scrollbar_viewport_has_overflow(viewport: ScrollbarViewport) -> bool {
+    viewport.content_height > viewport.viewport_height
+        || viewport.content_width > viewport.viewport_width
+}
+
+// 只读不改：按 smooth_scroll_id 定位目标滚动区，把当帧布局带回给 update。
+struct ScrollbarLayoutProbe {
+    region: ScrollbarRegion,
+    target: advanced_widget::Id,
+    viewport: Option<ScrollbarViewport>,
+}
+
+impl ScrollbarLayoutProbe {
+    fn new(region: ScrollbarRegion) -> Self {
+        Self {
+            target: smooth_scroll_id(&region).into(),
+            region,
+            viewport: None,
+        }
+    }
+}
+
+impl Operation<Message> for ScrollbarLayoutProbe {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<Message>)) {
+        operate(self);
+    }
+
+    fn scrollable(
+        &mut self,
+        id: Option<&advanced_widget::Id>,
+        bounds: Rectangle,
+        content_bounds: Rectangle,
+        translation: Vector,
+        _state: &mut dyn ScrollableOperation,
+    ) {
+        if id == Some(&self.target) {
+            self.viewport = Some(ScrollbarViewport {
+                offset_x: translation.x.max(0.0),
+                offset_y: translation.y.max(0.0),
+                viewport_width: bounds.width,
+                viewport_height: bounds.height,
+                content_width: content_bounds.width,
+                content_height: content_bounds.height,
+            });
+        }
+    }
+
+    fn finish(&self) -> Outcome<Message> {
+        match self.viewport {
+            Some(viewport) => Outcome::Some(Message::ScrollbarLayoutVerified {
+                region: self.region.clone(),
+                viewport,
+            }),
+            None => Outcome::None,
+        }
+    }
+}
+
 fn scrollbar_thumb_bounds(
     axis: ScrollbarAxis,
     viewport: ScrollbarViewport,
@@ -532,7 +613,7 @@ mod tests {
         let active_region = ScrollbarRegion::Sidebar;
         let inactive_region = ScrollbarRegion::Settings;
 
-        drop(browser.show_scrollbars_temporarily(active_region.clone()));
+        drop(browser.start_scrollbar_reveal(active_region.clone()));
 
         assert!(browser.scrollbar_visibility_for(&active_region).opacity() > 0.0);
         assert_eq!(
@@ -547,8 +628,8 @@ mod tests {
         let first_region = ScrollbarRegion::Sidebar;
         let second_region = ScrollbarRegion::Settings;
 
-        drop(browser.show_scrollbars_temporarily(first_region.clone()));
-        drop(browser.show_scrollbars_temporarily(second_region.clone()));
+        drop(browser.start_scrollbar_reveal(first_region.clone()));
+        drop(browser.start_scrollbar_reveal(second_region.clone()));
 
         assert_eq!(
             browser.scrollbar_visibility_for(&first_region),
@@ -562,8 +643,8 @@ mod tests {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
         let region = ScrollbarRegion::Sidebar;
 
-        drop(browser.show_scrollbars_temporarily(region.clone()));
-        drop(browser.show_scrollbars_temporarily(region.clone()));
+        drop(browser.start_scrollbar_reveal(region.clone()));
+        drop(browser.start_scrollbar_reveal(region.clone()));
         browser.start_global_scrollbar_hide(1);
 
         assert!(browser.scrollbar_visibility_for(&region).opacity() > 0.0);
@@ -573,7 +654,7 @@ mod tests {
     fn scrollbar_hide_uses_global_generation() {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
 
-        drop(browser.show_scrollbars_temporarily(ScrollbarRegion::Sidebar));
+        drop(browser.start_scrollbar_reveal(ScrollbarRegion::Sidebar));
         browser.start_global_scrollbar_hide(1);
 
         assert!(matches!(
@@ -587,7 +668,7 @@ mod tests {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
         let region = ScrollbarRegion::PaneIcons(crate::model::BrowserPaneId::PRIMARY);
 
-        drop(browser.show_scrollbars_temporarily(region.clone()));
+        drop(browser.start_scrollbar_reveal(region.clone()));
 
         assert!(browser.scrollbar_visibility_for(&region).opacity() > 0.0);
         assert_eq!(
@@ -717,5 +798,74 @@ mod tests {
         assert_eq!(narrow.x, 3.0);
         assert_eq!(expanded.width, SCROLLBAR_HOVER_WIDTH);
         assert_eq!(expanded.x, 0.0);
+    }
+
+    fn viewport_for(content_height: f32, viewport_height: f32) -> ScrollbarViewport {
+        ScrollbarViewport {
+            offset_x: 0.0,
+            offset_y: 0.0,
+            viewport_width: 800.0,
+            viewport_height,
+            content_width: 800.0,
+            content_height,
+        }
+    }
+
+    #[test]
+    fn verified_viewport_without_overflow_heals_cache_and_skips_reveal() {
+        let (mut browser, _) = FileBrowser::new(config::default_user_config());
+        let region = ScrollbarRegion::PaneList(crate::model::BrowserPaneId::PRIMARY);
+        // 预置过期缓存：旧布局曾溢出，真实布局已塞得下。
+        browser.remember_scrollbar_viewport(region.clone(), viewport_for(1500.0, 600.0));
+
+        drop(browser.handle_scrollbar_layout_verified(region.clone(), viewport_for(600.0, 600.0)));
+
+        assert_eq!(
+            browser.scrollbar_visibility_for(&region),
+            ScrollbarVisibility::Hidden
+        );
+        assert_eq!(
+            browser.scrollbar_viewport_for(&region),
+            Some(viewport_for(600.0, 600.0))
+        );
+    }
+
+    #[test]
+    fn verified_viewport_with_overflow_reveals_scrollbar() {
+        let (mut browser, _) = FileBrowser::new(config::default_user_config());
+        let region = ScrollbarRegion::PaneList(crate::model::BrowserPaneId::PRIMARY);
+
+        drop(browser.handle_scrollbar_layout_verified(region.clone(), viewport_for(1500.0, 600.0)));
+
+        assert!(browser.scrollbar_visibility_for(&region).opacity() > 0.0);
+        assert_eq!(
+            browser.scrollbar_viewport_for(&region),
+            Some(viewport_for(1500.0, 600.0))
+        );
+    }
+
+    #[test]
+    fn probe_without_target_produces_no_reply() {
+        let probe = ScrollbarLayoutProbe::new(ScrollbarRegion::Settings);
+
+        assert!(matches!(probe.finish(), Outcome::None));
+    }
+
+    #[test]
+    fn probe_with_target_replies_with_region_and_viewport() {
+        let region = ScrollbarRegion::Settings;
+        let mut probe = ScrollbarLayoutProbe::new(region.clone());
+        probe.viewport = Some(viewport_for(900.0, 600.0));
+
+        match probe.finish() {
+            Outcome::Some(Message::ScrollbarLayoutVerified {
+                region: replied_region,
+                viewport,
+            }) => {
+                assert_eq!(replied_region, region);
+                assert_eq!(viewport, viewport_for(900.0, 600.0));
+            }
+            _ => panic!("probe must reply with the verified viewport"),
+        }
     }
 }

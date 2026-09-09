@@ -144,7 +144,11 @@ fn operation_supports_desktop_notification(operation: &QueuedFileOperation) -> b
         | QueuedFileOperation::DeletePermanently { .. }
         | QueuedFileOperation::EmptyTrash
         | QueuedFileOperation::Copy { .. }
+        | QueuedFileOperation::Duplicate { .. }
         | QueuedFileOperation::Move { .. }
+        | QueuedFileOperation::GatherSelectionIntoNewFolder { .. }
+        | QueuedFileOperation::UngatherNewFolder { .. }
+        | QueuedFileOperation::CreateSymbolicLinks { .. }
         | QueuedFileOperation::CreateArchive { .. }
         | QueuedFileOperation::ExtractArchive { .. }
         | QueuedFileOperation::Convert { .. } => true,

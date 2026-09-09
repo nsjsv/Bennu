@@ -30,8 +30,16 @@ impl FileBrowser {
         )
     }
 
+    /// shift 范围选择只作用于点击所在的目录容器:图标网格是一个交互面板,
+    /// 多栏视图一栏就是一个目录。列表视图按 Finder 惯例让范围扫过展开子行;
+    /// 回收站条目保留原始父目录且永远单列,不能按父目录分容器,保持摊平。
+    pub(super) fn range_selection_confined_to_directory(&self) -> bool {
+        matches!(self.view_mode, BrowserViewMode::Icons | BrowserViewMode::Columns)
+            && !self.is_trash_view
+    }
+
     pub(super) fn visible_range_paths(&self, anchor: &Path, target: &Path) -> Vec<PathBuf> {
-        let paths = if self.view_mode == BrowserViewMode::Icons {
+        let paths = if self.range_selection_confined_to_directory() {
             let target_directory = target.parent().unwrap_or(self.current_dir.as_path());
             if anchor.parent() != Some(target_directory) {
                 return vec![target.to_path_buf()];

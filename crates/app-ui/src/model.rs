@@ -54,6 +54,12 @@ pub(crate) use address_bar::{
     AddressBarTransition, AddressEditingSession, AddressEditingSessionId, AddressSuggestionRequest,
     BreadcrumbSegment, BreadcrumbSegmentKind,
 };
+mod entry_naming;
+pub(crate) use entry_naming::{
+    entry_exists, suffixed_name_candidates, unique_duplicated_directory_name,
+    unique_duplicated_file_name, unique_gathered_folder_directory, unique_symlink_directory_name,
+    unique_symlink_file_name, GATHERED_FOLDER_BASE_NAME,
+};
 mod browser_panes;
 pub(crate) use browser_panes::{
     empty_directory_entry_snapshot, retain_direct_entry_selection, BrowserPane, BrowserPaneId,
@@ -501,7 +507,6 @@ pub(crate) enum Message {
     ColumnEntryBoundsMeasured(Vec<ColumnEntryBounds>),
     BreadcrumbDropTargetBoundsMeasured(u64, Vec<BreadcrumbDropTargetBounds>),
     FileDropLayoutMeasured(FileDropLayoutRequest, FileDragHitTestBounds),
-    PasteTargetMeasured(FileDragHitTestBounds),
     PaneCursorEntered(BrowserPaneId),
     PaneCursorExited(BrowserPaneId),
     KeyboardModifiersChanged(keyboard::Modifiers),
@@ -727,6 +732,10 @@ pub(crate) enum Message {
         viewport: ScrollbarViewport,
         event: Box<Message>,
     },
+    ScrollbarLayoutVerified {
+        region: ScrollbarRegion,
+        viewport: ScrollbarViewport,
+    },
     ScrollbarAutoHideElapsed(u64),
     WindowChromeAnimationTick,
     PreviewWindowInitialChromeElapsed(u64),
@@ -778,6 +787,11 @@ pub(crate) enum Message {
     RestoreSelected,
     EmptyTrashRequested,
     CopySelected,
+    DuplicateSelected,
+    NewFolderFromSelection,
+    CopyPathSelected,
+    CreateSymlinkSelected,
+    PathTextCopied(Result<(), String>),
     MoveSelected,
     PastePending,
     FileClipboardWriteFinished(Result<(), String>),
@@ -801,6 +815,11 @@ pub(crate) enum Message {
         mode: TransferConflictMode,
         transfers: Vec<QueuedTransfer>,
         conflicts: Vec<TransferConflictItem>,
+    },
+    /// 「合并」把冲突目录展开成子项传输后的回执;随后走统一的冲突复查。
+    TransferConflictMergesExpanded {
+        mode: TransferConflictMode,
+        expansion: Result<(Vec<QueuedTransfer>, Vec<TransferConflictItem>), String>,
     },
     TransferConflictChoiceSelected(TransferConflictChoice),
     TransferConflictApplyToAllToggled,
@@ -865,6 +884,10 @@ pub(crate) enum TransferConflictChoice {
     Replace,
     Skip,
     Rename,
+    /// 保留两者:按共享命名规则给冲突目标起新名后原样传输。
+    KeepBoth,
+    /// 合并:仅源与目标都是目录时提供,展开成子项传输后再逐项走冲突流程。
+    Merge,
 }
 
 #[derive(Debug, Clone)]
@@ -950,6 +973,8 @@ pub(crate) struct FileContextMenuState {
     pub(crate) target_is_directory: bool,
     pub(crate) paste_directory: PathBuf,
     pub(crate) can_batch_rename: bool,
+    /// 选中项含远程挂载路径时为 false:gvfs 上的 symlink 不可靠,菜单隐藏「创建符号链接」。
+    pub(crate) can_create_symlink: bool,
     pub(crate) delete_action: FileDeleteAction,
     pub(crate) position: Point,
     pub(crate) expansion: FileContextMenuExpansion,

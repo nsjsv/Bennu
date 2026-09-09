@@ -67,6 +67,11 @@ pub(crate) enum FileOperationOutcome {
         transfers: Vec<CompletedTransfer>,
         history_eligibility: FileOperationHistoryEligibility,
     },
+    /// 用选中项新建文件夹的成果:新目录连同整批移入的条目一起撤销/重做。
+    GatheredIntoNewFolder {
+        directory: PathBuf,
+        moved: Vec<CompletedTransfer>,
+    },
     Convert {
         /// 逐文件失败的「源名: 原因」清单;空表示全部成功。
         failures: Vec<String>,
@@ -201,6 +206,7 @@ impl FileOperationOutcome {
             | Self::Trash { .. }
             | Self::Restore { .. }
             | Self::Copy { .. }
+            | Self::GatheredIntoNewFolder { .. }
             | Self::Convert { .. } => Vec::new(),
         }
     }
@@ -305,6 +311,10 @@ pub(crate) enum FileOperationHistoryItem {
     },
     Move {
         transfers: Vec<CompletedTransfer>,
+    },
+    GatheredIntoNewFolder {
+        directory: PathBuf,
+        moved: Vec<CompletedTransfer>,
     },
 }
 
@@ -532,6 +542,15 @@ impl FileOperationHistoryItem {
                 transfers: transfers.clone(),
             }),
             FileOperationOutcome::Move { .. } => None,
+            FileOperationOutcome::GatheredIntoNewFolder { directory, moved }
+                if !moved.is_empty() =>
+            {
+                Some(Self::GatheredIntoNewFolder {
+                    directory: directory.clone(),
+                    moved: moved.clone(),
+                })
+            }
+            FileOperationOutcome::GatheredIntoNewFolder { .. } => None,
         }
     }
 
@@ -562,6 +581,15 @@ impl FileOperationHistoryItem {
                 transfers: reverse_transfers(transfers),
                 verification: FileOperationVerification::default(),
             }),
+            Self::GatheredIntoNewFolder { directory, moved } => {
+                Some(QueuedFileOperation::UngatherNewFolder {
+                    directory: directory.clone(),
+                    restore_targets: moved
+                        .iter()
+                        .map(|transfer| transfer.source.clone())
+                        .collect(),
+                })
+            }
         }
     }
 
@@ -590,6 +618,16 @@ impl FileOperationHistoryItem {
                 transfers: forward_transfers(transfers),
                 verification: FileOperationVerification::default(),
             }),
+            // 重做沿用原目录名;若名字在撤销期间被占,执行器会按同一规则重选。
+            Self::GatheredIntoNewFolder { directory, moved } => {
+                Some(QueuedFileOperation::GatherSelectionIntoNewFolder {
+                    directory: directory.clone(),
+                    sources: moved
+                        .iter()
+                        .map(|transfer| transfer.source.clone())
+                        .collect(),
+                })
+            }
         }
     }
 

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use desktop_linux::{
     ClipboardImage, DesktopClipboardContent, FileClipboardOperation, FileClipboardSelection,
@@ -10,12 +10,11 @@ use crate::app::FileBrowser;
 use crate::commands::{
     create_clipboard_file_command, read_desktop_clipboard_command, write_file_clipboard_command,
 };
-use crate::file_drag_hit_test_bounds::{
-    file_drag_hit_test_bounds_command, FileDragHitTestBoundsRequest,
-};
 use crate::model::{
-    BrowserViewMode, ContextMenuState, DestructiveActionConfirmation, FileDragHitTestBounds,
-    FileDropPrompt, Message, PendingOperation, TransferConflictMode,
+    entry_exists, unique_duplicated_directory_name, unique_duplicated_file_name,
+    unique_gathered_folder_directory, BrowserViewMode, ContextMenuState,
+    DestructiveActionConfirmation, FileDropPrompt, Message, PendingOperation,
+    TransferConflictMode,
 };
 use crate::operation_queue::{QueuedFileOperation, QueuedTransfer};
 
@@ -50,6 +49,77 @@ impl FileBrowser {
             FileClipboardOperation::Move,
             paths,
         ))
+    }
+
+    /// 「复制副本」(Finder Duplicate):每个选中项在所在父目录原位复制,
+    /// 目标名按共享命名规则起名;完成后由 accept_file_operation_finished 选中副本。
+    pub(in crate::app) fn duplicate_selected(&mut self) -> Task<Message> {
+        self.context_menu = None;
+        if self.search_workspace.is_none() && self.is_trash_view {
+            return Task::none();
+        }
+        let sources = self.active_file_selection();
+        if sources.is_empty() {
+            return Task::none();
+        }
+        let transfers = sources
+            .iter()
+            .map(|source| {
+                let parent = self.entry_parent_directory(source);
+                let name = source
+                    .file_name()
+                    .unwrap_or_else(|| std::ffi::OsStr::new("item"));
+                let unique_name = if self.entry_kind(source) == Some(file_core::FileKind::Directory)
+                {
+                    unique_duplicated_directory_name(name, |candidate| {
+                        entry_exists(&parent.join(candidate))
+                    })
+                } else {
+                    unique_duplicated_file_name(name, |candidate| {
+                        entry_exists(&parent.join(candidate))
+                    })
+                };
+                QueuedTransfer::new(source.clone(), parent.join(unique_name))
+            })
+            .collect::<Vec<_>>();
+        self.enqueue_file_operation(QueuedFileOperation::Duplicate {
+            transfers,
+            verification: self.file_operation_verification(),
+        })
+    }
+
+    /// 「用选中项新建文件夹」:在活动栏目录下创建「新建文件夹( 2/3…)」,
+    /// 把 parent 等于该目录的选中项整批移入;跨栏选中项留在原地。
+    pub(in crate::app) fn new_folder_from_selection(&mut self) -> Task<Message> {
+        self.context_menu = None;
+        if self.search_workspace.is_some() || self.is_trash_view {
+            return Task::none();
+        }
+        let directory = self.gather_target_directory();
+        let sources =
+            gather_sources_in_directory(&self.selected_paths_for_operation(), &directory);
+        if sources.is_empty() {
+            return Task::none();
+        }
+        self.clear_preview();
+        self.renaming = None;
+        self.drag_selection_anchor = None;
+        self.cancel_file_drag_interaction();
+        self.enqueue_file_operation(QueuedFileOperation::GatherSelectionIntoNewFolder {
+            directory: unique_gathered_folder_directory(&directory),
+            sources,
+        })
+    }
+
+    /// 与 keyboard_paste_directory 同源的「活动栏」语义:多栏取聚焦已渲染栏,
+    /// 列表/图标视图就是当前目录。
+    fn gather_target_directory(&self) -> PathBuf {
+        if self.view_mode != BrowserViewMode::Columns {
+            return self.current_dir.clone();
+        }
+        self.focused_rendered_column_directory()
+            .or_else(|| self.deepest_open_column_directory.clone())
+            .unwrap_or_else(|| self.current_dir.clone())
     }
 
     pub(in crate::app) fn trash_selected(&mut self) -> Task<Message> {
@@ -196,32 +266,9 @@ impl FileBrowser {
             self.context_menu = None;
             return Task::none();
         }
-        if self.context_menu.is_none() && self.view_mode == BrowserViewMode::Columns {
-            // 悬停缓存会在布局静止位移时过期;多栏粘贴改为按实测栏几何解析指针位置。
-            self.context_menu = None;
-            return file_drag_hit_test_bounds_command(FileDragHitTestBoundsRequest::PasteTarget);
-        }
         let paste_directory = self.paste_target_directory();
         self.context_menu = None;
         read_desktop_clipboard_command(paste_directory, self.pending_operation.clone())
-    }
-
-    pub(in crate::app) fn accept_paste_target_measured(
-        &mut self,
-        bounds: FileDragHitTestBounds,
-    ) -> Task<Message> {
-        let paste_directory = self.paste_directory_at_cursor(&bounds);
-        read_desktop_clipboard_command(paste_directory, self.pending_operation.clone())
-    }
-
-    fn paste_directory_at_cursor(&self, bounds: &FileDragHitTestBounds) -> PathBuf {
-        bounds
-            .directory_targets
-            .iter()
-            .rev()
-            .find(|target| target.bounds.contains(self.cursor_position))
-            .map(|target| target.directory.clone())
-            .unwrap_or_else(|| self.current_dir.clone())
     }
 
     pub(in crate::app) fn accept_file_clipboard_write(
@@ -416,9 +463,32 @@ impl FileBrowser {
             .as_ref()
             .and_then(ContextMenuState::paste_directory)
             .cloned()
-            .or_else(|| self.cursor_paste_directory.clone())
+            .unwrap_or_else(|| self.keyboard_paste_directory())
+    }
+
+    /// Cmd+V 的目的地对齐 Finder:多栏视图贴进"活动栏"(聚焦且已渲染的那一栏),
+    /// 不看指针悬停;无聚焦时回退最深打开栏,再回退当前目录。搜索结果浮层下
+    /// 浏览器栏不是粘贴语境,保持指针回退。列表/图标单目录,悬停父目录即当前目录。
+    fn keyboard_paste_directory(&self) -> PathBuf {
+        if self.view_mode != BrowserViewMode::Columns || self.search_workspace.is_some() {
+            return self
+                .cursor_paste_directory
+                .clone()
+                .unwrap_or_else(|| self.current_dir.clone());
+        }
+        self.focused_rendered_column_directory()
+            .or_else(|| self.deepest_open_column_directory.clone())
             .unwrap_or_else(|| self.current_dir.clone())
     }
+}
+
+/// 只收纳「parent 等于目标目录」的选中项;parent 不一致的跨栏选中项留在原地。
+fn gather_sources_in_directory(selected: &[PathBuf], directory: &Path) -> Vec<PathBuf> {
+    selected
+        .iter()
+        .filter(|path| path.parent() == Some(directory))
+        .cloned()
+        .collect()
 }
 
 #[cfg(test)]
@@ -538,6 +608,11 @@ mod tests {
         );
         assert_eq!(
             PendingOperation::Copy(vec![source.clone()]).content_modifier_for_path(&source),
+            FileEntryContentModifier::Copied
+        );
+        assert_eq!(
+            PendingOperation::Copy(vec![source.clone()])
+                .content_modifier_for_path(Path::new("/workspace/report.txt.bak")),
             FileEntryContentModifier::None
         );
     }
@@ -569,7 +644,7 @@ mod tests {
         drop(browser.copy_selected());
         assert_eq!(
             browser.file_entry_content_modifier(&second),
-            FileEntryContentModifier::None
+            FileEntryContentModifier::Copied
         );
     }
 
@@ -648,57 +723,112 @@ mod tests {
     }
 
     #[test]
-    fn paste_directory_at_cursor_hits_rendered_column_bounds() {
+    fn columns_keyboard_paste_targets_focused_column_not_pointer_hover() {
+        let project = PathBuf::from("/workspace/project");
         let mut browser = browser_with_entries(&[PathBuf::from("/workspace/a.txt")]);
-        let column_bounds = FileDragHitTestBounds {
-            tabs: Vec::new(),
-            entries: Vec::new(),
-            breadcrumbs: Vec::new(),
-            directory_targets: vec![crate::model::DirectoryFileDragTargetBounds {
-                pane_id: crate::model::BrowserPaneId(0),
-                directory: PathBuf::from("/workspace/project"),
-                bounds: iced::Rectangle::new(
-                    iced::Point::new(0.0, 0.0),
-                    iced::Size::new(200.0, 600.0),
-                ),
-            }],
-            blocked_directories: Vec::new(),
-            sidebar_directories: Vec::new(),
-            empty_sidebar_bookmarks: None,
-        };
+        browser.view_mode = BrowserViewMode::Columns;
+        browser.deepest_open_column_directory = Some(project.clone());
+        browser.focused_column_directory = Some(project.clone());
+        browser.cursor_paste_directory = Some(PathBuf::from("/workspace"));
 
-        browser.cursor_position = iced::Point::new(150.0, 300.0);
-        assert_eq!(
-            browser.paste_directory_at_cursor(&column_bounds),
-            PathBuf::from("/workspace/project")
-        );
+        assert_eq!(browser.paste_target_directory(), project);
     }
 
     #[test]
-    fn paste_directory_at_cursor_falls_back_to_current_dir_on_miss() {
+    fn columns_keyboard_paste_falls_back_to_deepest_open_column_without_focus() {
+        let project = PathBuf::from("/workspace/project");
         let mut browser = browser_with_entries(&[PathBuf::from("/workspace/a.txt")]);
-        let column_bounds = FileDragHitTestBounds {
-            tabs: Vec::new(),
-            entries: Vec::new(),
-            breadcrumbs: Vec::new(),
-            directory_targets: vec![crate::model::DirectoryFileDragTargetBounds {
-                pane_id: crate::model::BrowserPaneId(0),
-                directory: PathBuf::from("/workspace/project"),
-                bounds: iced::Rectangle::new(
-                    iced::Point::new(0.0, 0.0),
-                    iced::Size::new(200.0, 600.0),
-                ),
-            }],
-            blocked_directories: Vec::new(),
-            sidebar_directories: Vec::new(),
-            empty_sidebar_bookmarks: None,
+        browser.view_mode = BrowserViewMode::Columns;
+        browser.deepest_open_column_directory = Some(project.clone());
+        browser.cursor_paste_directory = Some(PathBuf::from("/workspace"));
+
+        assert_eq!(browser.paste_target_directory(), project);
+    }
+
+    #[test]
+    fn columns_keyboard_paste_falls_back_to_current_dir_when_nothing_open() {
+        let mut browser = browser_with_entries(&[PathBuf::from("/workspace/a.txt")]);
+        browser.view_mode = BrowserViewMode::Columns;
+
+        assert_eq!(browser.paste_target_directory(), PathBuf::from("/workspace"));
+    }
+
+    #[test]
+    fn duplicate_selected_enqueues_in_place_copies_for_whole_selection() {
+        let report = PathBuf::from("/workspace/report.pdf");
+        let notes = PathBuf::from("/workspace/notes");
+        let mut browser = browser_with_entries(&[report.clone(), notes.clone()]);
+        // 副本走复制管线,恢复日志需要任务存储。
+        let state_directory = tempfile::tempdir().unwrap();
+        browser.operation_queue.set_store(
+            file_operation_store::TaskQueueStore::new(
+                state_directory.path().join("state.sqlite"),
+            )
+            .unwrap(),
+        );
+
+        drop(browser.duplicate_selected());
+
+        assert_eq!(browser.operation_queue.tasks().len(), 1);
+        assert!(matches!(
+            &browser.operation_queue.tasks()[0].operation,
+            QueuedFileOperation::Duplicate { transfers, .. }
+                if transfers == &vec![
+                    QueuedTransfer::new(report.clone(), PathBuf::from("/workspace/report副本.pdf")),
+                    QueuedTransfer::new(notes.clone(), PathBuf::from("/workspace/notes副本")),
+                ]
+        ));
+    }
+
+    #[test]
+    fn duplicate_completion_selects_the_new_copies() {
+        let first_copy = PathBuf::from("/workspace/report副本.pdf");
+        let second_copy = PathBuf::from("/workspace/notes副本");
+        let mut browser = browser_with_entries(&[PathBuf::from("/workspace/report.pdf")]);
+        let operation = QueuedFileOperation::Duplicate {
+            transfers: vec![
+                QueuedTransfer::new(PathBuf::from("/workspace/report.pdf"), first_copy.clone()),
+                QueuedTransfer::new(PathBuf::from("/workspace/notes"), second_copy.clone()),
+            ],
+            verification: browser.file_operation_verification(),
         };
-        let fallback = browser.current_dir.clone();
 
-        browser.cursor_position = iced::Point::new(500.0, 300.0);
-        assert_eq!(browser.paste_directory_at_cursor(&column_bounds), fallback);
+        let targets = operation.duplicate_selection_targets().unwrap();
+        browser.select_operation_result_paths(targets);
 
-        browser.cursor_position = iced::Point::new(-10.0, 300.0);
-        assert_eq!(browser.paste_directory_at_cursor(&column_bounds), fallback);
+        assert!(browser.selected_paths.contains(&first_copy));
+        assert!(browser.selected_paths.contains(&second_copy));
+        assert_eq!(browser.selected, Some(second_copy));
+    }
+
+    #[test]
+    fn gather_sources_keeps_only_entries_inside_the_target_directory() {
+        let in_current = PathBuf::from("/workspace/report.txt");
+        let in_other_column = PathBuf::from("/workspace/project/plan.txt");
+
+        let sources = gather_sources_in_directory(
+            &[in_current.clone(), in_other_column],
+            &PathBuf::from("/workspace"),
+        );
+
+        assert_eq!(sources, vec![in_current]);
+    }
+
+    #[test]
+    fn new_folder_from_selection_enqueues_one_undoable_move_batch() {
+        let workspace = tempfile::tempdir().unwrap();
+        let report = workspace.path().join("report.txt");
+        let mut browser = browser_with_entries(std::slice::from_ref(&report));
+        browser.current_dir = workspace.path().to_path_buf();
+
+        drop(browser.new_folder_from_selection());
+
+        assert_eq!(browser.operation_queue.tasks().len(), 1);
+        assert!(matches!(
+            &browser.operation_queue.tasks()[0].operation,
+            QueuedFileOperation::GatherSelectionIntoNewFolder { directory, sources }
+                if directory == &workspace.path().join("新建文件夹")
+                    && sources == &vec![report.clone()]
+        ));
     }
 }

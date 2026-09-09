@@ -59,7 +59,8 @@ use crate::app::panes::BrowserPaneView;
 use crate::app::smooth_scroll::smooth_scroll_id;
 use crate::app::FileBrowser;
 use crate::appearance::{
-    app_content_style, column_resize_divider_style, drag_preview_style, icon_svg_style,
+    app_content_style, column_resize_divider_style, drag_preview_badge_style,
+    drag_preview_style, icon_svg_style,
     selected_icon_svg_style, selected_tab_item_style, tab_split_overlay_style,
     warning_icon_svg_style,
 };
@@ -711,9 +712,17 @@ fn drag_preview_panel(browser: &FileBrowser) -> Option<Element<'_, Message>> {
     let source = drag.sources.first()?;
     let (symbol, tone, label) = drag_preview_item(browser, source);
     let label = format_middle_ellipsized_text(&label, DRAG_PREVIEW_LABEL_MAX_CHARS);
+    // 拖拽修饰键意图徽标:Ctrl=复制,其余为移动,实时跟随按键变化。
+    let intent_label = match browser.file_drag_transfer_intent() {
+        crate::model::TransferConflictMode::Copy => "Copy",
+        crate::model::TransferConflictMode::Move => "Move",
+    };
     let content = row![
         themed_icon(symbol, tone, DRAG_PREVIEW_ICON_SIZE),
         readable_text(label).size(13),
+        container(readable_text(intent_label).size(12))
+            .padding([2, 8])
+            .style(drag_preview_badge_style),
     ]
     .spacing(8)
     .align_y(Alignment::Center);

@@ -2,22 +2,22 @@ use std::any::TypeId;
 use std::ffi::OsString;
 use std::future::Future;
 use std::hash::Hash;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::time::{Duration, Instant};
 
 use file_core::{
     create_archive_with_controls_and_progress, create_directory, create_empty_file,
     delete_path_permanently, delete_trash_entry, extract_archive_with_controls_and_progress,
-    is_direct_move_segment_candidate, persist_recoverable_source_manifest_with_controls,
-    prepare_direct_move_intent_segment, rename_path, restore_trash_entry,
-    run_direct_move_batch_to_durable_renamed, run_recoverable_transfer,
-    trash_path_with_restore_entry_and_cancellation, ArchiveCreationRequest,
-    ArchiveExtractionRequest, CopyProgress, DirectMoveBatchRecord, DirectMoveIntentBatchRecord,
-    FileError, FileOperationControls, FileOperationVerification, FileTransferOptions,
-    RecoverableTransferError, RecoverableTransferOperation, RecoverableTransferOutcome,
-    TransferConflictStrategy, TransferJournal, TransferJournalError, TransferJournalMutation,
-    TransferJournalRecord, TransferWorkKey, TrashRestoreEntry,
+    is_direct_move_segment_candidate, is_transfer_target_available,
+    persist_recoverable_source_manifest_with_controls, prepare_direct_move_intent_segment,
+    rename_path, restore_trash_entry, run_direct_move_batch_to_durable_renamed,
+    run_recoverable_transfer, trash_path_with_restore_entry_and_cancellation,
+    ArchiveCreationRequest, ArchiveExtractionRequest, CopyProgress, DirectMoveBatchRecord,
+    DirectMoveIntentBatchRecord, FileError, FileOperationControls, FileOperationVerification,
+    FileTransferOptions, RecoverableTransferError, RecoverableTransferOperation,
+    RecoverableTransferOutcome, TransferConflictStrategy, TransferJournal, TransferJournalError,
+    TransferJournalMutation, TransferJournalRecord, TransferWorkKey, TrashRestoreEntry,
 };
 use file_operation_store::TaskQueueStore;
 use iced::advanced::subscription::{self, EventStream, Hasher, Recipe};
@@ -192,6 +192,45 @@ async fn run_queued_file_operation(
                 )
                 .await
             }
+        }
+        QueuedFileOperation::Duplicate {
+            transfers,
+            verification,
+        } => {
+            return {
+                // 副本走复制管线;完成后由 UI 按 duplicate_selection_targets 选中。
+                run_queued_transfers(
+                    transfers,
+                    controls,
+                    stored_task_id.expect("recoverable duplicate has a persisted task id"),
+                    task_id,
+                    output,
+                    store,
+                    QueuedTransferMode::Copy,
+                    verification,
+                )
+                .await
+            }
+        }
+        QueuedFileOperation::GatherSelectionIntoNewFolder { directory, sources } => {
+            run_queued_gather_selection_into_new_folder(
+                directory,
+                sources,
+                controls,
+                task_id,
+                output,
+            )
+            .await
+        }
+        QueuedFileOperation::UngatherNewFolder {
+            directory,
+            restore_targets,
+        } => {
+            run_queued_ungather_new_folder(directory, restore_targets, controls, task_id, output)
+                .await
+        }
+        QueuedFileOperation::CreateSymbolicLinks { links } => {
+            run_queued_create_symbolic_links(links, controls, task_id, output).await
         }
         QueuedFileOperation::Move {
             transfers,
@@ -432,6 +471,151 @@ async fn run_queued_create_empty_file(
     )
     .await;
     Ok(FileOperationOutcome::CreateEmptyFile { path })
+}
+
+async fn run_queued_gather_selection_into_new_folder(
+    directory: PathBuf,
+    sources: Vec<PathBuf>,
+    mut controls: FileOperationControls,
+    task_id: u64,
+    output: &mut IcedSender<Message>,
+) -> Result<FileOperationOutcome, String> {
+    controls
+        .wait_until_running()
+        .await
+        .map_err(|error| error.to_string())?;
+    // 入队侧已起好名;极端竞争下名字被占时按同一命名规则就地重选,
+    // 让操作完成而不是带着误导性的失败退出。
+    let directory = available_gathered_folder_directory(directory).await?;
+    create_directory(&directory)
+        .await
+        .map_err(|error| error.to_string())?;
+
+    let mut moved = Vec::with_capacity(sources.len());
+    for (index, source) in sources.iter().enumerate() {
+        controls
+            .wait_until_running()
+            .await
+            .map_err(|error| error.to_string())?;
+        let name = source
+            .file_name()
+            .map(std::ffi::OsStr::to_os_string)
+            .ok_or_else(|| format!("missing file name for {}", source.display()))?;
+        let target = directory.join(name);
+        // 源与目标同在一个父目录树内,rename 原子完成且必同盘。
+        tokio::fs::rename(source, &target)
+            .await
+            .map_err(|error| error.to_string())?;
+        moved.push(CompletedTransfer {
+            source: source.clone(),
+            target,
+        });
+        send_file_operation_progress(
+            output,
+            task_id,
+            FileOperationProgressUpdate::IndeterminateItems {
+                completed: index + 1,
+                total: sources.len(),
+            },
+        )
+        .await;
+    }
+    Ok(FileOperationOutcome::GatheredIntoNewFolder {
+        directory,
+        moved,
+    })
+}
+
+async fn run_queued_ungather_new_folder(
+    directory: PathBuf,
+    restore_targets: Vec<PathBuf>,
+    mut controls: FileOperationControls,
+    task_id: u64,
+    output: &mut IcedSender<Message>,
+) -> Result<FileOperationOutcome, String> {
+    let total = restore_targets.len();
+    for (index, restore_target) in restore_targets.iter().enumerate() {
+        controls
+            .wait_until_running()
+            .await
+            .map_err(|error| error.to_string())?;
+        let name = restore_target
+            .file_name()
+            .map(std::ffi::OsStr::to_os_string)
+            .ok_or_else(|| format!("missing file name for {}", restore_target.display()))?;
+        tokio::fs::rename(directory.join(name), restore_target)
+            .await
+            .map_err(|error| error.to_string())?;
+        send_file_operation_progress(
+            output,
+            task_id,
+            FileOperationProgressUpdate::IndeterminateItems {
+                completed: index + 1,
+                total,
+            },
+        )
+        .await;
+    }
+    // 只接受空目录;若撤销前用户往里放了新内容,操作显式失败而不是吞掉它们。
+    tokio::fs::remove_dir(&directory)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(FileOperationOutcome::NoHistory)
+}
+
+async fn available_gathered_folder_directory(directory: PathBuf) -> Result<PathBuf, String> {
+    if is_transfer_target_available(&directory)
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        return Ok(directory);
+    }
+    let parent = directory
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| format!("missing parent for {}", directory.display()))?;
+    for name in crate::model::suffixed_name_candidates(
+        std::ffi::OsStr::new(crate::model::GATHERED_FOLDER_BASE_NAME),
+        "",
+        false,
+    ) {
+        let candidate = parent.join(name);
+        if is_transfer_target_available(&candidate)
+            .await
+            .map_err(|error| error.to_string())?
+        {
+            return Ok(candidate);
+        }
+    }
+    Ok(directory)
+}
+
+async fn run_queued_create_symbolic_links(
+    links: Vec<crate::operation_queue::SymbolicLinkCreation>,
+    mut controls: FileOperationControls,
+    task_id: u64,
+    output: &mut IcedSender<Message>,
+) -> Result<FileOperationOutcome, String> {
+    let total = links.len();
+    for (index, link) in links.iter().enumerate() {
+        controls
+            .wait_until_running()
+            .await
+            .map_err(|error| error.to_string())?;
+        tokio::fs::symlink(&link.target_path, &link.link_path)
+            .await
+            .map_err(|error| error.to_string())?;
+        send_file_operation_progress(
+            output,
+            task_id,
+            FileOperationProgressUpdate::IndeterminateItems {
+                completed: index + 1,
+                total,
+            },
+        )
+        .await;
+    }
+    Ok(FileOperationOutcome::NoHistory)
 }
 
 async fn run_queued_trash(

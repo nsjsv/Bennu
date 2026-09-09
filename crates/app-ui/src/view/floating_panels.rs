@@ -508,7 +508,11 @@ fn file_context_menu_panel<'a>(
 
     // 行渲染与「New...」子菜单偏移共用同一份配置后的可见项列表。
     let items = match &menu.target {
-        Some(_) => context_menus.file_entry_items(menu.target_is_directory, menu.can_batch_rename),
+        Some(_) => context_menus.file_entry_items(
+            menu.target_is_directory,
+            menu.can_batch_rename,
+            menu.can_create_symlink,
+        ),
         None => context_menus.file_blank_items(),
     };
     let mut menu_content = iced::widget::Column::new()
@@ -534,6 +538,18 @@ fn file_context_menu_panel<'a>(
             ),
             (FileAreaMenuItem::Copy, _) => {
                 menu_item(IconSymbol::Copy, item.label(), Message::CopySelected)
+            }
+            (FileAreaMenuItem::Duplicate, _) => {
+                menu_item(IconSymbol::Copy, item.label(), Message::DuplicateSelected)
+            }
+            (FileAreaMenuItem::NewFolderFromSelection, _) => {
+                menu_item(IconSymbol::Folder, item.label(), Message::NewFolderFromSelection)
+            }
+            (FileAreaMenuItem::CopyPath, _) => {
+                menu_item(IconSymbol::List, item.label(), Message::CopyPathSelected)
+            }
+            (FileAreaMenuItem::CreateSymlink, _) => {
+                menu_item(IconSymbol::Link, item.label(), Message::CreateSymlinkSelected)
             }
             (FileAreaMenuItem::Move, _) => menu_item(
                 IconSymbol::ArrowRight,

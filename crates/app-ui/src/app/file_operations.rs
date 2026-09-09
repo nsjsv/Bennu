@@ -248,6 +248,16 @@ impl FileBrowser {
             self.pending_created_entry_rename = Some(path);
         }
 
+        // 复制副本对齐 Finder:成功后整批选中新副本(撤销重放不抢焦点)。
+        if completed_successfully && !is_history_replay {
+            if let Some(targets) = completed_operation
+                .as_ref()
+                .and_then(QueuedFileOperation::duplicate_selection_targets)
+            {
+                self.select_operation_result_paths(targets);
+            }
+        }
+
         let desktop_notification_task = match completed_operation.as_ref() {
             Some(operation) => {
                 self.file_operation_notification_command(operation, terminal_status, &completion)

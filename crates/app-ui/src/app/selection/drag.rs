@@ -6,6 +6,7 @@ use super::super::paths::{self, PasteTargetMode};
 use super::super::wayland_dnd::WaylandFileDragRequest;
 use super::super::{FileBrowser, POINTER_DRAG_ACTIVATION_DISTANCE};
 use crate::model::{
+    entry_exists, unique_duplicated_directory_name, unique_duplicated_file_name,
     BrowserPaneId, FileDragGestureId, FileDragNativeDndState, FileDragPhase, FileDragState,
     FileDragStationaryAction, FileDropTarget, Message, SelectionMarqueeSource,
     TransferConflictMode,
@@ -225,13 +226,28 @@ impl FileBrowser {
         (!pane.is_trash_view).then(|| pane.current_dir.clone())
     }
 
+    /// 拖拽修饰键实时意图:Ctrl=强制复制(Finder Option 语义);Shift 按下
+    /// 与无修饰均为移动意图(现状),跨盘是否降级为复制由传输引擎决定。
+    /// 修饰键在拖放落点实时读取,拖拽途中切换立即生效。
+    pub(crate) fn file_drag_transfer_intent(&self) -> TransferConflictMode {
+        if self.keyboard_modifiers.control() && !self.keyboard_modifiers.shift() {
+            TransferConflictMode::Copy
+        } else {
+            TransferConflictMode::Move
+        }
+    }
+
     pub(super) fn move_dragged_files(
         &mut self,
         sources: Vec<PathBuf>,
         target_directory: PathBuf,
     ) -> Task<Message> {
+        let mode = self.file_drag_transfer_intent();
         let transfer_targets =
             paths::transfer_targets(&target_directory, &sources, PasteTargetMode::Move);
+        if mode == TransferConflictMode::Copy {
+            return self.copy_dragged_files(transfer_targets, target_directory);
+        }
         if transfer_targets.is_empty()
             || transfer_targets.iter().any(|(source, target)| {
                 source == target
@@ -261,8 +277,38 @@ impl FileBrowser {
         };
         Task::batch([
             open_drop_target,
-            self.enqueue_or_confirm_transfers(TransferConflictMode::Move, transfers),
+            self.enqueue_or_confirm_transfers(mode, transfers),
         ])
+    }
+
+    /// Ctrl 拖拽的复制分支:同目录拖放视为原位副本(共享命名规则起名),
+    /// 其余目标沿用源名;把条目拖进自身子树仍然拒绝。
+    fn copy_dragged_files(
+        &mut self,
+        transfer_targets: Vec<(PathBuf, PathBuf)>,
+        target_directory: PathBuf,
+    ) -> Task<Message> {
+        if transfer_targets
+            .iter()
+            .any(|(source, target)| target.starts_with(source))
+        {
+            return Task::none();
+        }
+        let transfers = transfer_targets
+            .into_iter()
+            .map(|(source, target)| {
+                if source != target {
+                    return QueuedTransfer::new(source, target);
+                }
+                let is_directory =
+                    self.entry_kind(&source) == Some(file_core::FileKind::Directory);
+                QueuedTransfer::new(
+                    source.clone(),
+                    in_place_duplicate_target(&source, &target_directory, is_directory),
+                )
+            })
+            .collect::<Vec<_>>();
+        self.enqueue_or_confirm_transfers(TransferConflictMode::Copy, transfers)
     }
 
     pub(crate) fn extend_drag_selection_to(&mut self, path: PathBuf) {
@@ -275,6 +321,27 @@ impl FileBrowser {
         };
         self.select_drag_range(anchor, path, self.keyboard_modifiers.control());
     }
+}
+
+/// 同目录复制拖放的原位副本目标:按共享命名规则在源父目录里起唯一名。
+fn in_place_duplicate_target(
+    source: &Path,
+    fallback_directory: &Path,
+    source_is_directory: bool,
+) -> PathBuf {
+    let parent = source
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| fallback_directory.to_path_buf());
+    let name = source
+        .file_name()
+        .unwrap_or_else(|| std::ffi::OsStr::new("item"));
+    let unique_name = if source_is_directory {
+        unique_duplicated_directory_name(name, |candidate| entry_exists(&parent.join(candidate)))
+    } else {
+        unique_duplicated_file_name(name, |candidate| entry_exists(&parent.join(candidate)))
+    };
+    parent.join(unique_name)
 }
 
 pub(super) fn resolve_file_drag_target(
@@ -329,6 +396,51 @@ fn file_drag_directory_target_needs_fallback(sources: &[PathBuf], target: &Path)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use iced::keyboard;
+
+    #[test]
+    fn drag_transfer_intent_follows_live_modifiers() {
+        let (mut browser, _) = crate::app::FileBrowser::new(crate::config::default_user_config());
+
+        // 无修饰=移动意图(现状)。
+        assert_eq!(
+            browser.file_drag_transfer_intent(),
+            TransferConflictMode::Move
+        );
+
+        browser.keyboard_modifiers = keyboard::Modifiers::CTRL;
+        assert_eq!(
+            browser.file_drag_transfer_intent(),
+            TransferConflictMode::Copy
+        );
+
+        // Shift 与 Ctrl+Shift 都保持移动语义:Shift 本身就是移动修饰键。
+        browser.keyboard_modifiers = keyboard::Modifiers::SHIFT;
+        assert_eq!(
+            browser.file_drag_transfer_intent(),
+            TransferConflictMode::Move
+        );
+        browser.keyboard_modifiers =
+            keyboard::Modifiers::CTRL | keyboard::Modifiers::SHIFT;
+        assert_eq!(
+            browser.file_drag_transfer_intent(),
+            TransferConflictMode::Move
+        );
+    }
+
+    #[test]
+    fn ctrl_drag_inside_same_directory_plans_in_place_duplicate() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("report.pdf");
+        std::fs::write(&source, b"data").unwrap();
+        let directory_path = directory.path().to_path_buf();
+
+        let target =
+            in_place_duplicate_target(&source, &directory_path, false);
+
+        assert_eq!(target, directory.path().join("report副本.pdf"));
+        assert!(!target.exists());
+    }
 
     #[test]
     fn unsafe_directory_targets_are_rejected_for_every_source_relationship() {

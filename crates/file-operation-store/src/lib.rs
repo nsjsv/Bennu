@@ -240,6 +240,12 @@ pub struct StoredBatchRenameItem {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredSymbolicLinkCreation {
+    pub link_path: StoredPath,
+    pub target_path: StoredPath,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StoredTrashEntry {
     pub trash_path: StoredPath,
     pub info_path: StoredPath,
@@ -299,6 +305,17 @@ pub enum StoredOperation {
         #[serde(default)]
         recovery_version: Option<u32>,
     },
+    GatherSelectionIntoNewFolder {
+        directory: StoredPath,
+        sources: Vec<StoredPath>,
+    },
+    UngatherNewFolder {
+        directory: StoredPath,
+        restore_targets: Vec<StoredPath>,
+    },
+    CreateSymbolicLinks {
+        links: Vec<StoredSymbolicLinkCreation>,
+    },
     Move {
         transfers: Vec<StoredTransfer>,
         #[serde(default)]
@@ -339,6 +356,9 @@ impl StoredOperation {
             Self::EmptyTrash => "empty_trash",
             Self::Copy { .. } => "copy",
             Self::Move { .. } => "move",
+            Self::GatherSelectionIntoNewFolder { .. } => "gather_selection_into_new_folder",
+            Self::UngatherNewFolder { .. } => "ungather_new_folder",
+            Self::CreateSymbolicLinks { .. } => "create_symbolic_links",
             Self::CreateArchive { .. } => "create_archive",
             Self::ExtractArchive { .. } => "extract_archive",
             Self::Convert { .. } => "convert",

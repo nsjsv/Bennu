@@ -71,6 +71,8 @@ impl FileBrowser {
             | ShortcutAction::ToggleTerminal
             | ShortcutAction::TerminalNewTab
             | ShortcutAction::TerminalCloseTab
+            | ShortcutAction::DuplicateSelected
+            | ShortcutAction::NewFolderFromSelection
             | ShortcutAction::Paste => Task::none(),
         }
     }

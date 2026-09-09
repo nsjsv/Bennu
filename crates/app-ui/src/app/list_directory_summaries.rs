@@ -245,7 +245,7 @@ impl FileBrowser {
                     );
                 }
             }
-            QueuedFileOperation::Copy { transfers, .. } => {
+            QueuedFileOperation::Copy { transfers, .. } | QueuedFileOperation::Duplicate { transfers, .. } => {
                 for transfer in transfers {
                     self.invalidate_list_directory_summary_subtree_and_ancestor_chain(
                         &transfer.target,
@@ -274,6 +274,30 @@ impl FileBrowser {
                 for request in requests {
                     self.invalidate_list_directory_summary_subtree_and_ancestor_chain(
                         &request.source,
+                    );
+                }
+            }
+            QueuedFileOperation::GatherSelectionIntoNewFolder { directory, sources } => {
+                self.invalidate_list_directory_summary_subtree_and_ancestor_chain(directory);
+                for source in sources {
+                    self.invalidate_list_directory_summary_subtree_and_ancestor_chain(source);
+                }
+            }
+            QueuedFileOperation::UngatherNewFolder {
+                directory,
+                restore_targets,
+            } => {
+                self.invalidate_list_directory_summary_subtree_and_ancestor_chain(directory);
+                for restore_target in restore_targets {
+                    self.invalidate_list_directory_summary_subtree_and_ancestor_chain(
+                        restore_target,
+                    );
+                }
+            }
+            QueuedFileOperation::CreateSymbolicLinks { links } => {
+                for link in links {
+                    self.invalidate_list_directory_summary_subtree_and_ancestor_chain(
+                        &link.link_path,
                     );
                 }
             }

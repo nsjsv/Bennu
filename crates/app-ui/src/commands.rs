@@ -296,13 +296,93 @@ pub(crate) fn check_transfer_conflicts_command(
     transfers: Vec<QueuedTransfer>,
 ) -> Task<Message> {
     let issued_transfers = transfers.clone();
-    Task::perform(check_transfer_conflicts(transfers), move |conflicts| {
-        Message::TransferConflictsChecked {
-            mode,
-            transfers: issued_transfers.clone(),
-            conflicts,
+    Task::perform(
+        async move { check_transfer_conflicts(&transfers).await },
+        move |conflicts| {
+            Message::TransferConflictsChecked {
+                mode,
+                transfers: issued_transfers.clone(),
+                conflicts,
+            }
+        },
+    )
+}
+
+pub(crate) fn expand_transfer_conflict_merges_command(
+    mode: TransferConflictMode,
+    merge_pairs: Vec<(PathBuf, PathBuf)>,
+    remaining_transfers: Vec<QueuedTransfer>,
+    remaining_conflicts: Vec<TransferConflictItem>,
+) -> Task<Message> {
+    Task::perform(
+        expand_transfer_conflict_merges(merge_pairs, remaining_transfers, remaining_conflicts),
+        move |expansion| {
+            Message::TransferConflictMergesExpanded {
+                mode,
+                expansion,
+            }
+        },
+    )
+}
+
+/// 把每个合并对(source 目录 → target 目录)展开成「子项 → target/子项」传输,
+/// 只对新子项做冲突检查:剩余传输的冲突状态已在对话框里逐项敲定,不能重查。
+async fn expand_transfer_conflict_merges(
+    merge_pairs: Vec<(PathBuf, PathBuf)>,
+    mut transfers: Vec<QueuedTransfer>,
+    mut conflicts: Vec<TransferConflictItem>,
+) -> Result<(Vec<QueuedTransfer>, Vec<TransferConflictItem>), String> {
+    let mut reserved_targets: std::collections::HashSet<PathBuf> = transfers
+        .iter()
+        .map(|transfer| transfer.target.clone())
+        .collect();
+    let mut child_transfers = Vec::new();
+    for (source_directory, target_directory) in merge_pairs {
+        let mut entries = tokio::fs::read_dir(&source_directory)
+            .await
+            .map_err(|error| error.to_string())?;
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|error| error.to_string())?
+        {
+            let child_source = entry.path();
+            let Some(name) = child_source.file_name() else {
+                continue;
+            };
+            let candidate = target_directory.join(name);
+            let child_target = if reserved_targets.contains(&candidate) {
+                unique_reserved_target(&candidate, &reserved_targets)
+            } else {
+                candidate
+            };
+            reserved_targets.insert(child_target.clone());
+            child_transfers.push(QueuedTransfer::new(child_source, child_target));
         }
-    })
+    }
+
+    let new_conflicts = check_transfer_conflicts(&child_transfers).await;
+    transfers.extend(child_transfers);
+    conflicts.extend(new_conflicts);
+    Ok((transfers, conflicts))
+}
+
+/// 批内目标撞名时的后备名;与磁盘是否占用无关,那由冲突检查统一裁决。
+fn unique_reserved_target(target: &Path, reserved: &std::collections::HashSet<PathBuf>) -> PathBuf {
+    let parent = target.parent().map(Path::to_path_buf).unwrap_or_default();
+    let name = target
+        .file_name()
+        .map(std::ffi::OsStr::to_os_string)
+        .unwrap_or_else(|| std::ffi::OsString::from("item"));
+    for index in 1..1000u32 {
+        let mut next = name.clone();
+        next.push(format!(".copy{index}"));
+        let candidate = parent.join(next);
+        if !reserved.contains(&candidate) {
+            return candidate;
+        }
+    }
+    target.to_path_buf()
 }
 
 async fn create_clipboard_file_at_available_path(
@@ -317,10 +397,12 @@ async fn create_clipboard_file_at_available_path(
         .map_err(|error| error.to_string())
 }
 
-async fn check_transfer_conflicts(transfers: Vec<QueuedTransfer>) -> Vec<TransferConflictItem> {
+async fn check_transfer_conflicts(transfers: &[QueuedTransfer]) -> Vec<TransferConflictItem> {
     let conflict_checks = transfers
-        .into_iter()
-        .map(|transfer| TransferConflictCheck::new(transfer.source, transfer.target))
+        .iter()
+        .map(|transfer| {
+            TransferConflictCheck::new(transfer.source.clone(), transfer.target.clone())
+        })
         .collect();
     check_core_transfer_conflicts(conflict_checks).await
 }
@@ -560,4 +642,82 @@ fn suggestion_directory_and_prefix(input: &str, current_dir: &Path) -> Option<(P
         .unwrap_or_else(|| current_dir.to_path_buf());
 
     Some((directory, prefix))
+}
+
+#[cfg(test)]
+mod merge_expansion_tests {
+    use super::*;
+
+    /// read_dir 顺序不稳定,按集合比较子项传输。
+    fn contains_transfer(transfers: &[QueuedTransfer], source: &Path, target: &Path) -> bool {
+        transfers
+            .iter()
+            .any(|transfer| transfer.source == source && transfer.target == target)
+    }
+
+    #[tokio::test]
+    async fn merge_expansion_transfers_children_without_new_conflicts() {
+        let workspace = tempfile::tempdir().unwrap();
+        let source = workspace.path().join("source");
+        let target = workspace.path().join("target");
+        std::fs::create_dir_all(source.join("nested")).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(source.join("report.txt"), b"report").unwrap();
+        std::fs::write(source.join("nested").join("child.txt"), b"child").unwrap();
+
+        let (transfers, conflicts) =
+            expand_transfer_conflict_merges(vec![(source.clone(), target.clone())], Vec::new(), Vec::new())
+                .await
+                .unwrap();
+
+        // 目标目录为空:子项全部照原名落位,不产生新冲突。
+        assert!(conflicts.is_empty());
+        assert_eq!(transfers.len(), 2);
+        assert!(contains_transfer(
+            &transfers,
+            &source.join("report.txt"),
+            &target.join("report.txt")
+        ));
+        assert!(contains_transfer(
+            &transfers,
+            &source.join("nested"),
+            &target.join("nested")
+        ));
+    }
+
+    #[tokio::test]
+    async fn merge_expansion_reflags_same_named_children_as_new_conflicts() {
+        let workspace = tempfile::tempdir().unwrap();
+        let source = workspace.path().join("source");
+        let target = workspace.path().join("target");
+        std::fs::create_dir_all(source.join("nested")).unwrap();
+        std::fs::create_dir_all(target.join("nested")).unwrap();
+        std::fs::write(source.join("nested").join("inner.txt"), b"inner").unwrap();
+        std::fs::write(source.join("dup.txt"), b"source content").unwrap();
+        std::fs::write(target.join("dup.txt"), b"target content").unwrap();
+
+        let (transfers, conflicts) =
+            expand_transfer_conflict_merges(vec![(source.clone(), target.clone())], Vec::new(), Vec::new())
+                .await
+                .unwrap();
+
+        assert_eq!(transfers.len(), 2);
+        // 嵌套同名目录再次进冲突清单且仍可合并,逐层推进;
+        // 同名文件不可合并,留在对话框里按替换/保留两者裁决。
+        let nested_conflict = conflicts
+            .iter()
+            .find(|conflict| conflict.source == source.join("nested"))
+            .unwrap();
+        assert_eq!(nested_conflict.target, target.join("nested"));
+        assert!(nested_conflict.can_merge());
+        let file_conflict = conflicts
+            .iter()
+            .find(|conflict| conflict.source == source.join("dup.txt"))
+            .unwrap();
+        assert!(!file_conflict.can_merge());
+        assert_eq!(
+            file_conflict.source_metadata.len,
+            "source content".len() as u64
+        );
+    }
 }

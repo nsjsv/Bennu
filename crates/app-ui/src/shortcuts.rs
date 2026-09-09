@@ -27,6 +27,8 @@ pub(crate) enum ShortcutAction {
     TerminalCloseTab,
     SelectAll,
     Copy,
+    DuplicateSelected,
+    NewFolderFromSelection,
     Paste,
     Cut,
     Delete,
@@ -72,6 +74,8 @@ impl ShortcutAction {
             | Self::Preview
             | Self::SelectAll
             | Self::Copy
+            | Self::DuplicateSelected
+            | Self::NewFolderFromSelection
             | Self::Paste
             | Self::Cut
             | Self::Undo
@@ -108,6 +112,8 @@ pub(crate) enum ShortcutBindingId {
     TerminalCloseTab,
     SelectAll,
     Copy,
+    DuplicateSelected,
+    NewFolderFromSelection,
     CopyNamed,
     Paste,
     PasteNamed,
@@ -118,7 +124,7 @@ pub(crate) enum ShortcutBindingId {
     Redo,
 }
 
-const ALL_SHORTCUT_BINDING_IDS: [ShortcutBindingId; 28] = [
+const ALL_SHORTCUT_BINDING_IDS: [ShortcutBindingId; 30] = [
     ShortcutBindingId::OpenSelected,
     ShortcutBindingId::RenameSelected,
     ShortcutBindingId::FocusPathInput,
@@ -139,6 +145,8 @@ const ALL_SHORTCUT_BINDING_IDS: [ShortcutBindingId; 28] = [
     ShortcutBindingId::TerminalCloseTab,
     ShortcutBindingId::SelectAll,
     ShortcutBindingId::Copy,
+    ShortcutBindingId::DuplicateSelected,
+    ShortcutBindingId::NewFolderFromSelection,
     ShortcutBindingId::CopyNamed,
     ShortcutBindingId::Paste,
     ShortcutBindingId::PasteNamed,
@@ -178,6 +186,8 @@ impl ShortcutBindingId {
             Self::TerminalCloseTab => ShortcutAction::TerminalCloseTab,
             Self::SelectAll => ShortcutAction::SelectAll,
             Self::Copy | Self::CopyNamed => ShortcutAction::Copy,
+            Self::DuplicateSelected => ShortcutAction::DuplicateSelected,
+            Self::NewFolderFromSelection => ShortcutAction::NewFolderFromSelection,
             Self::Paste | Self::PasteNamed => ShortcutAction::Paste,
             Self::Cut | Self::CutNamed => ShortcutAction::Cut,
             Self::Delete => ShortcutAction::Delete,
@@ -208,6 +218,8 @@ impl ShortcutBindingId {
             Self::TerminalCloseTab => "Close Terminal Tab",
             Self::SelectAll => "Select All",
             Self::Copy => "Copy",
+            Self::DuplicateSelected => "Duplicate",
+            Self::NewFolderFromSelection => "New Folder with Selection",
             Self::CopyNamed => "Copy Named Key",
             Self::Paste => "Paste",
             Self::PasteNamed => "Paste Named Key",
@@ -241,6 +253,8 @@ impl ShortcutBindingId {
             Self::TerminalCloseTab => "terminal_close_tab",
             Self::SelectAll => "select_all",
             Self::Copy => "copy",
+            Self::DuplicateSelected => "duplicate_selected",
+            Self::NewFolderFromSelection => "new_folder_from_selection",
             Self::CopyNamed => "copy_named",
             Self::Paste => "paste",
             Self::PasteNamed => "paste_named",
@@ -439,6 +453,8 @@ fn default_binding(id: ShortcutBindingId) -> KeyBinding {
         ShortcutBindingId::TerminalCloseTab => KeyBinding::control_shift_character('W'),
         ShortcutBindingId::SelectAll => KeyBinding::primary_character('A'),
         ShortcutBindingId::Copy => KeyBinding::primary_character('C'),
+        ShortcutBindingId::DuplicateSelected => KeyBinding::primary_character('D'),
+        ShortcutBindingId::NewFolderFromSelection => KeyBinding::control_shift_character('N'),
         ShortcutBindingId::CopyNamed => KeyBinding::named(ShortcutNamedKey::Copy),
         ShortcutBindingId::Paste => KeyBinding::primary_character('V'),
         ShortcutBindingId::PasteNamed => KeyBinding::named(ShortcutNamedKey::Paste),

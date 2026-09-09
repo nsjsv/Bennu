@@ -8,16 +8,17 @@ use std::time::{Duration, Instant};
 
 use file_core::{
     create_archive_with_controls_and_progress, create_directory, create_empty_file,
-    delete_path_permanently, delete_trash_entry, extract_archive_with_controls_and_progress,
+    delete_path_permanently, extract_archive_with_controls_and_progress,
     is_direct_move_segment_candidate, is_transfer_target_available,
     persist_recoverable_source_manifest_with_controls, prepare_direct_move_intent_segment,
-    rename_path, restore_trash_entry, run_direct_move_batch_to_durable_renamed,
-    run_recoverable_transfer, trash_path_with_restore_entry_and_cancellation,
+    rename_path, run_direct_move_batch_to_durable_renamed,
+    run_recoverable_transfer,
     ArchiveCreationRequest, ArchiveExtractionRequest, CopyProgress, DirectMoveBatchRecord,
     DirectMoveIntentBatchRecord, FileError, FileOperationControls, FileOperationVerification,
     FileTransferOptions, RecoverableTransferError, RecoverableTransferOperation,
     RecoverableTransferOutcome, TransferConflictStrategy, TransferJournal, TransferJournalError,
-    TransferJournalMutation, TransferJournalRecord, TransferWorkKey, TrashRestoreEntry,
+    TransferJournalMutation, TransferJournalRecord, TransferWorkKey, TrashCommitBatch,
+    TrashRestoreEntry, TrashVerificationBatch,
 };
 use file_operation_store::TaskQueueStore;
 use iced::advanced::subscription::{self, EventStream, Hasher, Recipe};
@@ -628,12 +629,14 @@ async fn run_queued_trash(
     let mut entries = Vec::new();
     let mut tracked_paths = Vec::new();
     let mut tracking_warnings = Vec::new();
+    let mut commit_batch = TrashCommitBatch::new();
     for (index, path) in paths.iter().cloned().enumerate() {
         controls
             .wait_until_running()
             .await
             .map_err(|error| error.to_string())?;
-        match trash_path_with_restore_entry_and_cancellation(&path, controls.cancellation_token())
+        match commit_batch
+            .commit(&path, controls.cancellation_token())
             .await
             .map_err(|error| error.to_string())?
         {
@@ -671,12 +674,14 @@ async fn run_queued_restore(
 ) -> Result<FileOperationOutcome, String> {
     let total = entries.len();
     let mut restored_paths = Vec::with_capacity(total);
+    let batch = TrashVerificationBatch::new();
     for (index, entry) in entries.iter().cloned().enumerate() {
         controls
             .wait_until_running()
             .await
             .map_err(|error| error.to_string())?;
-        let restored_path = restore_trash_entry(entry, TransferConflictStrategy::KeepBoth)
+        let restored_path = batch
+            .restore_entry(entry, TransferConflictStrategy::KeepBoth)
             .await
             .map_err(|error| error.to_string())?;
         restored_paths.push(restored_path);
@@ -703,12 +708,14 @@ async fn run_queued_delete_trash_entries(
     output: &mut IcedSender<Message>,
 ) -> Result<FileOperationOutcome, String> {
     let total = entries.len();
+    let batch = TrashVerificationBatch::new();
     for (index, entry) in entries.into_iter().enumerate() {
         controls
             .wait_until_running()
             .await
             .map_err(|error| error.to_string())?;
-        delete_trash_entry(entry)
+        batch
+            .delete_entry(entry)
             .await
             .map_err(|error| error.to_string())?;
         send_file_operation_progress(

@@ -148,6 +148,18 @@ impl QueuedTransfer {
 }
 
 impl QueuedFileOperation {
+    /// 会改动回收站内容的批量操作。运行期间 UI 挂起 watcher 触发的回收站
+    /// 重扫,任务终结后统一补刷一次。
+    pub(crate) fn changes_trash(&self) -> bool {
+        matches!(
+            self,
+            Self::Trash { .. }
+                | Self::Restore { .. }
+                | Self::DeleteTrashEntries { .. }
+                | Self::EmptyTrash
+        )
+    }
+
     pub(crate) fn title(&self) -> &'static str {
         match self {
             Self::Rename { .. } => "Rename",
@@ -332,6 +344,16 @@ impl FileOperationTask {
             self.status.label()
         }
     }
+
+    fn is_running(&self) -> bool {
+        matches!(
+            self.status,
+            FileOperationStatus::Pending
+                | FileOperationStatus::Running
+                | FileOperationStatus::Paused
+                | FileOperationStatus::Canceling
+        )
+    }
 }
 
 pub(crate) struct RunningFileOperation {
@@ -436,6 +458,13 @@ impl FileOperationQueue {
 
     pub(crate) fn tasks(&self) -> &[FileOperationTask] {
         &self.tasks
+    }
+
+    /// 是否存在仍在运行(未到终态)的回收站变更类批量任务。
+    pub(crate) fn has_running_trash_change_operation(&self) -> bool {
+        self.tasks
+            .iter()
+            .any(|task| task.is_running() && task.operation.changes_trash())
     }
 
     pub(crate) fn is_panel_open(&self) -> bool {

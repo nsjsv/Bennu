@@ -84,8 +84,8 @@ pub use transfer_conflict::{
 pub use trash_bin::{
     delete_trash_entry, empty_trash, empty_trash_with_cancellation, restore_trash_entry,
     scan_trash, scan_trash_with_cancellation, trash_path, trash_path_with_restore_entry,
-    trash_path_with_restore_entry_and_cancellation, TrashCommitOutcome, TrashEntry,
-    TrashRestoreEntry, TrashScan, TrashTrackingWarning,
+    trash_path_with_restore_entry_and_cancellation, TrashCommitBatch, TrashCommitOutcome,
+    TrashEntry, TrashRestoreEntry, TrashScan, TrashTrackingWarning, TrashVerificationBatch,
 };
 pub use watch::{watch_directory, DirectoryEntryChanges, DirectoryWatcher, ResolvedEntryChange};
 

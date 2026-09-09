@@ -280,6 +280,74 @@ async fn empty_trash_does_not_report_advisory_metadata_warning_as_failure() {
     assert!(!root.join("info/item.trashinfo").exists());
 }
 
+#[tokio::test]
+async fn batch_delete_rejects_replaced_payload_and_deletes_the_rest() {
+    let fixture = tempdir().unwrap();
+    let root = fixture.path().join("data/Trash");
+    create_location(&root);
+    write_entry(
+        &root,
+        "a-valid",
+        &fixture.path().join("valid.txt").display().to_string(),
+        b"valid",
+    );
+    write_entry(
+        &root,
+        "b-replaced",
+        &fixture.path().join("replaced.txt").display().to_string(),
+        b"original",
+    );
+    let mut entries = scan_home_entries(fixture.path());
+    assert_eq!(entries.len(), 2);
+    let replaced_index = entries
+        .iter()
+        .position(|entry| entry.trash_path == root.join("files/b-replaced"))
+        .unwrap();
+    let replaced = entries.remove(replaced_index).restore_entry();
+    let valid = entries.remove(0).restore_entry();
+    fs::remove_file(&replaced.trash_path).unwrap();
+    fs::write(&replaced.trash_path, b"foreign").unwrap();
+
+    let batch = super::super::batch::TrashVerificationBatch::new();
+    batch.delete_entry(valid).await.unwrap();
+    let error = batch.delete_entry(replaced.clone()).await.unwrap_err();
+
+    assert!(error.to_string().contains("identity changed"));
+    assert_eq!(fs::read(&replaced.trash_path).unwrap(), b"foreign");
+    assert!(replaced.info_path.exists());
+    assert!(!root.join("files/a-valid").exists());
+    assert!(!root.join("info/a-valid.trashinfo").exists());
+}
+
+#[tokio::test]
+async fn batch_restore_restores_every_entry_of_the_batch() {
+    let fixture = tempdir().unwrap();
+    let root = fixture.path().join("data/Trash");
+    create_location(&root);
+    let first_original = fixture.path().join("first.txt");
+    let second_original = fixture.path().join("second.txt");
+    write_entry(&root, "first", &first_original.display().to_string(), b"first");
+    write_entry(&root, "second", &second_original.display().to_string(), b"second");
+    let entries = scan_home_entries(fixture.path());
+    assert_eq!(entries.len(), 2);
+
+    let batch = super::super::batch::TrashVerificationBatch::new();
+    for entry in entries {
+        let restored = batch
+            .restore_entry(entry.restore_entry(), TransferConflictStrategy::Fail)
+            .await
+            .unwrap();
+        assert!(restored == first_original || restored == second_original);
+    }
+
+    assert_eq!(fs::read(&first_original).unwrap(), b"first");
+    assert_eq!(fs::read(&second_original).unwrap(), b"second");
+    assert!(!root.join("files/first").exists());
+    assert!(!root.join("files/second").exists());
+    assert!(!root.join("info/first.trashinfo").exists());
+    assert!(!root.join("info/second.trashinfo").exists());
+}
+
 #[test]
 fn tracking_requires_an_absolute_source_before_any_trash_side_effect() {
     let error = canonical_trash_source_path(Path::new("relative")).unwrap_err();

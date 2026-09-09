@@ -538,6 +538,12 @@ impl FileBrowser {
                 .iter()
                 .any(|watched| path.starts_with(watched))
         {
+            // 批量回收站任务本身就是这些事件的来源,逐条全量重扫是平方级
+            // 放大;挂起到任务终结后统一补刷一次。
+            if self.operation_queue.has_running_trash_change_operation() {
+                self.trash_batch_rescan_pending = true;
+                return Task::none();
+            }
             return self.refresh_trash_snapshot_for_trash_tabs();
         }
 

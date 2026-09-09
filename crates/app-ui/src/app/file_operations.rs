@@ -310,6 +310,17 @@ impl FileBrowser {
         } else {
             self.reload_visible_panes_after_file_operation()
         };
+        // 挂起期间回收站可能被本批任务改了很多条;终结时若仍有别的批次在跑,
+        // 这次补刷会被挂起逻辑再次拦下并重新记脏,最后一个批次结束后刷到终态。
+        let trash_batch_rescan_task =
+            if completed_operation.as_ref().is_some_and(|op| op.changes_trash())
+                && self.trash_batch_rescan_pending
+            {
+                self.trash_batch_rescan_pending = false;
+                self.refresh_trash_snapshot_for_trash_tabs()
+            } else {
+                Task::none()
+            };
         let search_refresh_task = if self.search_workspace.is_some() {
             self.submit_search()
         } else {
@@ -321,6 +332,7 @@ impl FileBrowser {
             path_migration_task,
             search_refresh_task,
             pane_reload_task,
+            trash_batch_rescan_task,
             self.continue_file_operation_persistence(),
         ])
     }

@@ -1,3 +1,4 @@
+mod batch;
 mod catalog;
 mod model;
 mod mountinfo;
@@ -5,6 +6,7 @@ mod operations;
 mod scan;
 mod trash_info;
 
+pub use batch::{TrashCommitBatch, TrashVerificationBatch};
 pub use catalog::trash_watch_directories;
 pub use model::{
     TrashCommitOutcome, TrashEntry, TrashRestoreEntry, TrashScan, TrashTrackingWarning,

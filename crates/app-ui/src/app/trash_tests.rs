@@ -270,6 +270,38 @@ fn trash_watch_event_refreshes_snapshot_but_unrelated_paths_do_not() {
     assert!(browser.trash_refresh.begin_if_idle().is_none());
 }
 
+#[test]
+fn trash_watch_event_during_batch_operation_defers_rescan_until_it_finishes() {
+    let (mut browser, _) = FileBrowser::new(config::default_user_config());
+    browser.is_trash_view = true;
+    let watch_root = file_core::trash_bin::trash_watch_directories()
+        .into_iter()
+        .next()
+        .expect("home trash watch root");
+
+    drop(browser.enqueue_file_operation(crate::operation_queue::QueuedFileOperation::EmptyTrash));
+
+    // 批量任务运行中:watcher 事件只记脏,不发起重扫。
+    drop(browser.reload_observed_directory(observed_changes(&watch_root.join("info"))));
+    assert!(browser.trash_refresh.begin_if_idle().is_some());
+
+    // 任务终结:统一补刷一次,重扫被占用。
+    let task_id = browser
+        .operation_queue
+        .tasks()
+        .iter()
+        .find(|task| task.operation.changes_trash())
+        .expect("queued trash operation")
+        .id;
+    drop(browser.update(crate::model::Message::FileOperationFinished(
+        task_id,
+        crate::operation_history::FileOperationCompletion::Succeeded(
+            crate::operation_history::FileOperationOutcome::NoHistory,
+        ),
+    )));
+    assert!(browser.trash_refresh.begin_if_idle().is_none());
+}
+
 fn observed_changes(directory: &std::path::Path) -> file_core::DirectoryEntryChanges {
     file_core::DirectoryEntryChanges {
         directory: directory.to_path_buf(),

@@ -184,6 +184,9 @@ pub(crate) struct FileBrowser {
     pub(crate) directory_loading_placeholder: Option<DirectoryLoadingPlaceholder>,
     pub(crate) trash_entries: Vec<TrashEntry>,
     pub(crate) trash_refresh: TrashRefreshState,
+    /// 回收站批量任务运行期间,watcher 触发的回收站重扫被挂起,只置此标记;
+    /// 批量任务终结时统一补刷一次,避免逐条全量重扫的平方级风暴。
+    trash_batch_rescan_pending: bool,
     pub(crate) selected: Option<PathBuf>,
     selected_paths: HashSet<PathBuf>,
     pub(crate) hovered_entry: Option<PathBuf>,
@@ -568,6 +571,7 @@ impl FileBrowser {
             directory_loading_placeholder: None,
             trash_entries: Vec::new(),
             trash_refresh: TrashRefreshState::default(),
+            trash_batch_rescan_pending: false,
             selected: None,
             selected_paths: HashSet::new(),
             hovered_entry: None,

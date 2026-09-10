@@ -1,5 +1,11 @@
 # Bennu
 
+[![Release](https://img.shields.io/github/v/release/nsjsv/Bennu)](https://github.com/nsjsv/Bennu/releases)
+[![AUR](https://img.shields.io/aur/version/bennu-bin)](https://aur.archlinux.org/packages/bennu-bin)
+[![License](https://img.shields.io/github/license/nsjsv/Bennu)](LICENSE)
+![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Wayland-blue)
+![Built with](https://img.shields.io/badge/built%20with-Rust%20%2B%20iced-orange)
+
 **一个认真对待文件操作的 Linux 文件管理器**
 
 用 Rust 编写，围绕多栏浏览、后台任务、索引搜索与内容预览构建。

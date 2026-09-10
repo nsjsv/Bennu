@@ -16,11 +16,22 @@
 
 ## 截图预览
 
-| ![多栏浏览](docs/images/columns.png) | ![列表视图](docs/images/list.png) | ![网格视图](docs/images/grid.png) |
-|:---:|:---:|:---:|
-| **多栏浏览** | **列表视图** | **网格视图** |
-| ![内容预览](docs/images/preview.png) | ![外观与配色](docs/images/appearance.png) | |
-| **内容预览** | **外观与配色** | |
+<p align="center">
+  <img src="docs/images/columns.png" alt="多栏浏览" width="49%">
+  <img src="docs/images/list.png" alt="列表视图" width="49%">
+</p>
+<p align="center"><b>多栏浏览</b> · <b>列表视图</b></p>
+
+<p align="center">
+  <img src="docs/images/grid.png" alt="网格视图" width="49%">
+  <img src="docs/images/preview.png" alt="内容预览" width="49%">
+</p>
+<p align="center"><b>网格视图</b> · <b>内容预览</b></p>
+
+<p align="center">
+  <img src="docs/images/appearance.png" alt="外观与配色" width="49%">
+</p>
+<p align="center"><b>外观与配色</b></p>
 
 ## 功能亮点
 

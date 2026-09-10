@@ -16,11 +16,22 @@ Developed and tested mainly on Wayland.
 
 ## Screenshots
 
-| ![Columns](docs/images/columns.png) | ![List view](docs/images/list.png) | ![Grid view](docs/images/grid.png) |
-|:---:|:---:|:---:|
-| **Columns** | **List view** | **Grid view** |
-| ![Quick preview](docs/images/preview.png) | ![Themes & color schemes](docs/images/appearance.png) | |
-| **Quick preview** | **Themes & color schemes** | |
+<p align="center">
+  <img src="docs/images/columns.png" alt="Columns" width="49%">
+  <img src="docs/images/list.png" alt="List view" width="49%">
+</p>
+<p align="center"><b>Columns</b> · <b>List view</b></p>
+
+<p align="center">
+  <img src="docs/images/grid.png" alt="Grid view" width="49%">
+  <img src="docs/images/preview.png" alt="Quick preview" width="49%">
+</p>
+<p align="center"><b>Grid view</b> · <b>Quick preview</b></p>
+
+<p align="center">
+  <img src="docs/images/appearance.png" alt="Themes & color schemes" width="49%">
+</p>
+<p align="center"><b>Themes &amp; color schemes</b></p>
 
 ## Features
 

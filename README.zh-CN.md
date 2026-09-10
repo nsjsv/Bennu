@@ -16,11 +16,11 @@
 
 ## 截图预览
 
-<!-- 把截图放进 docs/images/ 后取消注释并替换文件名。
-| 主窗口 | 多栏浏览 | 列表视图 |
+| ![多栏浏览](docs/images/columns.png) | ![列表视图](docs/images/list.png) | ![网格视图](docs/images/grid.png) |
 |:---:|:---:|:---:|
-| ![主窗口](docs/images/main.png) | ![多栏浏览](docs/images/columns.png) | ![列表视图](docs/images/list.png) |
--->
+| **多栏浏览** | **列表视图** | **网格视图** |
+| ![内容预览](docs/images/preview.png) | ![外观与配色](docs/images/appearance.png) | |
+| **内容预览** | **外观与配色** | |
 
 ## 功能亮点
 

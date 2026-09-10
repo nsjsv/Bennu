@@ -16,11 +16,11 @@ Developed and tested mainly on Wayland.
 
 ## Screenshots
 
-<!-- Drop screenshots into docs/images/, then uncomment and adjust.
-| Main window | Multi-column view | List view |
+| ![Columns](docs/images/columns.png) | ![List view](docs/images/list.png) | ![Grid view](docs/images/grid.png) |
 |:---:|:---:|:---:|
-| ![Main window](docs/images/main.png) | ![Multi-column view](docs/images/columns.png) | ![List view](docs/images/list.png) |
--->
+| **Columns** | **List view** | **Grid view** |
+| ![Quick preview](docs/images/preview.png) | ![Themes & color schemes](docs/images/appearance.png) | |
+| **Quick preview** | **Themes & color schemes** | |
 
 ## Features
 

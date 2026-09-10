@@ -11,8 +11,8 @@ use crate::model::{
     BrowserTabSession, BrowserViewMode, ColumnBrowserViewport,
 };
 
-pub(crate) const HELP_TEXT: &str = "Usage: file-manager [OPTIONS] [PATH]...\n\nOpen local directories or reveal local files.\n\nArguments:\n  [PATH]...        Local directories or files to open\n\nOptions:\n  -h, --help       Print help\n  -V, --version    Print version\n";
-pub(crate) const VERSION_TEXT: &str = concat!("file-manager ", env!("CARGO_PKG_VERSION"), "\n");
+pub(crate) const HELP_TEXT: &str = "Usage: bennu [OPTIONS] [PATH]...\n\nOpen local directories or reveal local files.\n\nArguments:\n  [PATH]...        Local directories or files to open\n\nOptions:\n  -h, --help       Print help\n  -V, --version    Print version\n";
+pub(crate) const VERSION_TEXT: &str = concat!("bennu ", env!("CARGO_PKG_VERSION"), "\n");
 pub(crate) const RENDERER_PROBE_ARGUMENT: &str = "--renderer-probe";
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -203,7 +203,7 @@ pub(super) fn toml_app_config_content(config: &AppConfig) -> Result<String, toml
 
     let content = toml::to_string_pretty(&document)?;
     Ok(format!(
-        "# File Manager application configuration\n{content}"
+        "# Bennu application configuration\n{content}"
     ))
 }
 

@@ -12,7 +12,7 @@ fn run_without_gui(arguments: &[&str]) -> Output {
         .env("XDG_STATE_HOME", root.path().join("state"))
         .env(
             "DBUS_SESSION_BUS_ADDRESS",
-            "unix:path=/nonexistent/file-manager-test-bus",
+            "unix:path=/nonexistent/bennu-test-bus",
         )
         .env("FILE_MANAGER_STARTUP_TRACE", "1")
         .env_remove("DISPLAY")
@@ -29,10 +29,10 @@ fn command_line_help_and_version_exit_before_desktop_activation() {
     let version = run_without_gui(&["--version"]);
 
     assert!(help.status.success());
-    assert!(String::from_utf8_lossy(&help.stdout).starts_with("Usage: file-manager"));
+    assert!(String::from_utf8_lossy(&help.stdout).starts_with("Usage: bennu"));
     assert!(help.stderr.is_empty());
     assert!(version.status.success());
-    assert!(String::from_utf8_lossy(&version.stdout).starts_with("file-manager "));
+    assert!(String::from_utf8_lossy(&version.stdout).starts_with("bennu "));
     assert!(version.stderr.is_empty());
 }
 

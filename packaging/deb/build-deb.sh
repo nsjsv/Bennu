@@ -16,7 +16,7 @@ if [[ $# -ne 1 ]] || ! [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 fi
 SEMVER="$1"
 
-APP_NAME=file-manager
+APP_NAME=bennu
 DEB_ARCH=amd64
 DEB_REVISION=1
 
@@ -127,7 +127,7 @@ mkdir -p "${deb_dir}/DEBIAN"
 bash "${REPO_ROOT}/packaging/common/install-payload.sh" \
     "${deb_dir}" \
     "${target_dir}/release/app-ui" \
-    "${target_dir}/release/file-searchd"
+    "${target_dir}/release/bennu-searchd"
 build_control_file "${deb_dir}/DEBIAN"
 
 mkdir -p "${dist_dir}"

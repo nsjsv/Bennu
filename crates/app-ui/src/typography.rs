@@ -82,7 +82,7 @@ mod tests {
 
     #[test]
     fn ascii_text_keeps_fast_shaping() {
-        assert!(!needs_advanced_text_shaping("File Manager"));
+        assert!(!needs_advanced_text_shaping("Bennu"));
     }
 
     #[test]

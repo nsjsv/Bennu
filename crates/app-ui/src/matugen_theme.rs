@@ -24,7 +24,7 @@ impl AppearanceMode {
             Self::Light => "Light",
             Self::Dark => "Dark",
         };
-        format!("File Manager {source} {mode}")
+        format!("Bennu {source} {mode}")
     }
 }
 

@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use desktop_linux::{
     open_path_with_application, open_path_with_terminal_emulator, open_terminal_at_directory,
-    open_with_applications, read_desktop_clipboard, write_file_clipboard, FileClipboardSelection,
-    OpenWithLaunchMode, TerminalEmulator,
+    open_url, open_with_applications, read_desktop_clipboard, write_file_clipboard,
+    FileClipboardSelection, OpenWithLaunchMode, TerminalEmulator,
 };
 use file_core::{
     available_transfer_target_path, check_transfer_conflicts as check_core_transfer_conflicts,
@@ -192,6 +192,16 @@ pub(crate) fn thumbnail_batch_command(
     Task::perform(
         load_thumbnail_batch(cache_dir, works),
         Message::ThumbnailBatchLoaded,
+    )
+}
+
+/// 关于页的开源仓库链接；点击后交给系统默认浏览器。
+const ABOUT_REPOSITORY_URL: &str = "https://github.com/nsjsv/Bennu";
+
+pub(crate) fn open_about_repository_link_command() -> Task<Message> {
+    Task::perform(
+        async { open_url(ABOUT_REPOSITORY_URL).await.map_err(|error| error.to_string()) },
+        Message::AboutRepositoryLinkOpened,
     )
 }
 

@@ -62,7 +62,7 @@ const FILE_DROP_TARGET_MIME_TYPES: &[&str] = &[
     "text/plain",
 ];
 const FILE_DRAG_SOURCE_ACTIONS: DndAction = DndAction::Copy.union(DndAction::Move);
-const INTERNAL_FILE_DRAG_MIME: &str = "application/x-file-manager-internal-dnd";
+const INTERNAL_FILE_DRAG_MIME: &str = "application/x-bennu-internal-dnd";
 const DRAG_REQUEST_TTL: Duration = Duration::from_millis(750);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

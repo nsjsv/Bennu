@@ -19,6 +19,7 @@ use crate::model::{
 };
 use crate::typography::{localized_text, readable_text};
 
+use super::about_settings::about_settings_detail;
 use super::application_logs::application_logs_settings_detail;
 use super::auxiliary_window_layout::{
     auxiliary_detail_scroller, auxiliary_detail_surface_with_sidebar_space,
@@ -239,6 +240,9 @@ fn settings_category_detail(browser: &FileBrowser) -> Element<'_, Message> {
         }
         SettingsCategory::Logs => {
             application_logs_settings_detail(browser, scrollbar_visibility, scrollbar_viewport)
+        }
+        SettingsCategory::About => {
+            about_settings_detail(browser, scrollbar_visibility, scrollbar_viewport)
         }
     }
 }

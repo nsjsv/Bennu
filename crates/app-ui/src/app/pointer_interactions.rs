@@ -24,8 +24,8 @@ impl FileBrowser {
     }
 
     pub(super) fn finish_pointer_drag_interactions(&mut self, window: window::Id) -> Task<Message> {
-        self.finish_tab_drag();
-        self.finish_pane_drag();
+        let tab_drag_finished = self.finish_tab_drag();
+        let pane_drag_finished = self.finish_pane_drag();
         self.finish_batch_rename_preview_drag();
         self.finish_terminal_panel_pointer_interaction();
         // 任何窗口里的左键释放都结束图片平移；面板内释放由
@@ -42,6 +42,8 @@ impl FileBrowser {
             }
         }
         Task::batch([
+            tab_drag_finished,
+            pane_drag_finished,
             self.finish_context_menu_settings_drag(),
             self.finish_sidebar_bookmark_drag(),
             self.finish_sidebar_resize_drag_command(),

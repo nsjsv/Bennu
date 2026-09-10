@@ -48,7 +48,7 @@ pub(crate) fn default_remote_preview_cache_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."));
     dirs::cache_dir()
         .unwrap_or(fallback_base)
-        .join("file-manager")
+        .join("bennu")
         .join("network-preview")
 }
 
@@ -135,7 +135,7 @@ fn remote_preview_cache_signature(
     source_metadata: &std::fs::Metadata,
 ) -> String {
     let mut hasher = blake3::Hasher::new();
-    update_signature_field(&mut hasher, b"file-manager-network-preview");
+    update_signature_field(&mut hasher, b"bennu-network-preview");
     #[cfg(unix)]
     {
         update_signature_field(&mut hasher, source_path.as_os_str().as_bytes());

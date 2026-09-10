@@ -5,8 +5,8 @@ use regex::Regex;
 
 pub(crate) const APPLICATION_LOG_ENTRY_LIMIT: usize = 200;
 pub(crate) const APPLICATION_LOG_MESSAGE_CHAR_LIMIT: usize = 1_000;
-pub(crate) const APP_JOURNAL_IDENTIFIER: &str = "file-manager-ui";
-pub(crate) const SEARCH_JOURNAL_IDENTIFIER: &str = "file-manager-search";
+pub(crate) const APP_JOURNAL_IDENTIFIER: &str = "bennu-ui";
+pub(crate) const SEARCH_JOURNAL_IDENTIFIER: &str = "bennu-search";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum ApplicationLogLevel {

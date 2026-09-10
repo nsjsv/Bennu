@@ -232,25 +232,28 @@ impl FileBrowser {
         let was_active = tab_id == self.active_tab_id;
         self.invalidate_file_drop_for_tab_close();
 
-        if self
+        let drag_finish_task = if self
             .tab_drag
             .as_ref()
             .is_some_and(|drag| drag.tab_id == tab_id)
         {
-            self.finish_tab_drag();
-        }
+            self.finish_tab_drag()
+        } else {
+            Task::none()
+        };
 
         self.start_tab_close_animation(tab_id);
 
         if !was_active {
-            return Task::none();
+            return drag_finish_task;
         }
 
         let Some(adjacent_tab_id) = self.adjacent_open_tab_id(closing_index, tab_id) else {
-            return Task::none();
+            return drag_finish_task;
         };
         Task::batch([
             self.select_tab(adjacent_tab_id),
+            drag_finish_task,
             self.request_browser_session_save(),
         ])
     }
@@ -283,30 +286,29 @@ impl FileBrowser {
         &mut self,
         entered_pane_id: BrowserPaneId,
         entered_tab_id: usize,
-    ) {
+    ) -> Task<Message> {
         let Some(drag) = self.tab_drag.as_ref() else {
-            return;
+            return Task::none();
         };
         if drag.mode != TabDragMode::Reorder
             || drag.source_pane_id != entered_pane_id
             || !drag.is_dragging()
         {
-            return;
+            return Task::none();
         }
         let dragged_tab_id = drag.tab_id;
         if dragged_tab_id == entered_tab_id
             || self.tab_is_closing(dragged_tab_id)
             || self.tab_is_closing(entered_tab_id)
         {
-            return;
+            return Task::none();
         }
 
         let Some(dragged_index) = self.tabs.iter().position(|tab| tab.id == dragged_tab_id) else {
-            self.finish_tab_drag();
-            return;
+            return self.finish_tab_drag();
         };
         let Some(entered_index) = self.tabs.iter().position(|tab| tab.id == entered_tab_id) else {
-            return;
+            return Task::none();
         };
 
         let shifted_tab_ids = self.shifted_tab_ids_for_reorder(dragged_index, entered_index);
@@ -320,19 +322,23 @@ impl FileBrowser {
         self.tabs.insert(entered_index, dragged_tab);
         self.start_tab_reorder_animations(shifted_tab_ids, shift_offset);
         self.sync_active_pane_state();
+        // 标签顺序属于会话模型；重排落点必须标记保存，否则重启后顺序回退。
+        self.request_browser_session_save()
     }
 
-    pub(super) fn finish_tab_drag(&mut self) {
+    pub(super) fn finish_tab_drag(&mut self) -> Task<Message> {
         let Some(drag) = self.tab_drag.take() else {
-            return;
+            return Task::none();
         };
         if drag.mode != TabDragMode::Split || !drag.is_dragging() {
-            return;
+            return Task::none();
         }
         let Some(target) = drag.split_target else {
-            return;
+            return Task::none();
         };
         self.finish_tab_split_drag(drag.source_pane_id, drag.tab_id, target.region);
+        // 分屏/跨栏移动改变了 panes 与 pane_layout；与会话保存不变量对齐。
+        self.request_browser_session_save()
     }
 
     pub(super) fn update_tab_drag(&mut self, position: iced::Point) {
@@ -609,7 +615,8 @@ impl FileBrowser {
                 .as_ref()
                 .is_some_and(|drag| drag.tab_id == tab_id)
             {
-                self.finish_tab_drag();
+                // 被关闭标签的拖拽已在 close_tab 时结束；此处兜底不产生布局变更。
+                let _ = self.finish_tab_drag();
             }
         }
 
@@ -739,4 +746,81 @@ pub(super) fn apply_tab_to_pane(pane: &mut BrowserPane, tab: &BrowserTab) {
     pane.directory_collection_phase = tab.directory_collection_phase;
     pane.directory_order_phase = tab.directory_order_phase;
     pane.sync_active_tab_state();
+}
+
+#[cfg(test)]
+mod drag_session_save_tests {
+    use super::*;
+    use crate::config;
+
+    fn save_enabled_browser(tabs: Vec<BrowserTab>) -> FileBrowser {
+        let mut config = config::ui_thread_startup_config();
+        config.startup_location_policy = config::StartupLocationPolicy::PreviousSession;
+        config.save_view_state = config.startup_location_policy.saves_view_state();
+        let (mut browser, _) = FileBrowser::new(config);
+        browser.active_tab_id = tabs[0].id;
+        browser.tabs = tabs;
+        browser
+    }
+
+    #[test]
+    fn finishing_split_tab_drag_requests_session_save() {
+        let mut browser =
+            save_enabled_browser(vec![BrowserTab::directory(0, PathBuf::from("/workspace/left"))]);
+        browser.tab_drag = Some(TabDragState {
+            source_pane_id: BrowserPaneId::PRIMARY,
+            tab_id: 0,
+            phase: FileDragPhase::Dragging,
+            mode: TabDragMode::Split,
+            split_target: Some(TabSplitTarget {
+                region: SplitRegion::Right,
+            }),
+        });
+
+        drop(browser.finish_tab_drag());
+
+        assert!(matches!(browser.pane_layout, BrowserPaneLayout::Split { .. }));
+        assert!(browser.pending_browser_session_save);
+    }
+
+    #[test]
+    fn finishing_tab_drag_without_split_target_does_not_request_session_save() {
+        let mut browser =
+            save_enabled_browser(vec![BrowserTab::directory(0, PathBuf::from("/workspace/left"))]);
+        browser.tab_drag = Some(TabDragState {
+            source_pane_id: BrowserPaneId::PRIMARY,
+            tab_id: 0,
+            phase: FileDragPhase::Dragging,
+            mode: TabDragMode::Split,
+            split_target: None,
+        });
+
+        drop(browser.finish_tab_drag());
+
+        assert!(matches!(
+            browser.pane_layout,
+            BrowserPaneLayout::Single { .. }
+        ));
+        assert!(!browser.pending_browser_session_save);
+    }
+
+    #[test]
+    fn reordering_tab_requests_session_save() {
+        let mut browser = save_enabled_browser(vec![
+            BrowserTab::directory(0, PathBuf::from("/workspace/left")),
+            BrowserTab::directory(1, PathBuf::from("/workspace/right")),
+        ]);
+        browser.tab_drag = Some(TabDragState {
+            source_pane_id: BrowserPaneId::PRIMARY,
+            tab_id: 1,
+            phase: FileDragPhase::Dragging,
+            mode: TabDragMode::Reorder,
+            split_target: None,
+        });
+
+        drop(browser.reorder_dragged_tab(BrowserPaneId::PRIMARY, 0));
+
+        assert_eq!(browser.tabs[0].id, 1);
+        assert!(browser.pending_browser_session_save);
+    }
 }

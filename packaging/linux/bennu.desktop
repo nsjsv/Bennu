@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=File Manager
-Icon=file-manager
-Exec=file-manager %F
+Name=Bennu
+Icon=bennu
+Exec=bennu %F
 MimeType=inode/directory;
 Categories=System;FileManager;
 Terminal=false

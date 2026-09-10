@@ -45,7 +45,7 @@ pub(super) fn renderer_restart_notice_panel() -> Element<'static, Message> {
     container(
         column![
             title,
-            readable_text("Rendering GPU preference changes require restarting File Manager.")
+            readable_text("Rendering GPU preference changes require restarting Bennu.")
                 .size(13),
             actions,
         ]

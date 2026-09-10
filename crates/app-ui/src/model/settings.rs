@@ -6,16 +6,18 @@ pub(crate) enum SettingsCategory {
     Search,
     Shortcuts,
     Logs,
+    About,
 }
 
 impl SettingsCategory {
-    pub(crate) const ALL: [Self; 6] = [
+    pub(crate) const ALL: [Self; 7] = [
         Self::General,
         Self::Appearance,
         Self::Files,
         Self::Search,
         Self::Shortcuts,
         Self::Logs,
+        Self::About,
     ];
 
     pub(crate) fn label(self) -> &'static str {
@@ -26,6 +28,7 @@ impl SettingsCategory {
             Self::Search => "Search",
             Self::Shortcuts => "Shortcuts",
             Self::Logs => "Logs",
+            Self::About => "About",
         }
     }
 }

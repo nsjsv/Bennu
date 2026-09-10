@@ -61,6 +61,8 @@ impl FileBrowser {
         Task::batch([
             self.reload_current(),
             self.request_breadcrumb_drop_target_bounds_measurement(),
+            // 中键分屏同样改变 panes 与 pane_layout，归属会话保存不变量。
+            self.request_browser_session_save(),
         ])
     }
 
@@ -145,6 +147,20 @@ mod tests {
         drop(browser.open_directory_from_middle_click(directory.clone()));
 
         assert_split_directory(&browser, directory, SplitAxis::Vertical);
+    }
+
+    #[test]
+    fn middle_click_split_requests_session_save() {
+        let mut config = config::ui_thread_startup_config();
+        config.startup_location_policy = config::StartupLocationPolicy::PreviousSession;
+        config.save_view_state = config.startup_location_policy.saves_view_state();
+        let mut browser = FileBrowser::new(config).0;
+        browser.keyboard_modifiers = keyboard::Modifiers::SHIFT;
+
+        drop(browser.open_directory_from_middle_click(PathBuf::from("/workspace/project")));
+
+        assert!(matches!(browser.pane_layout, BrowserPaneLayout::Split { .. }));
+        assert!(browser.pending_browser_session_save);
     }
 
     fn assert_split_directory(browser: &FileBrowser, directory: PathBuf, expected_axis: SplitAxis) {

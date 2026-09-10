@@ -354,9 +354,11 @@ impl FileBrowser {
                 if !releasing_file_drag {
                     self.activate_pane(pane_id);
                 }
-                self.finish_tab_drag();
-                self.finish_pane_drag();
+                let tab_drag_finished = self.finish_tab_drag();
+                let pane_drag_finished = self.finish_pane_drag();
                 Task::batch([
+                    tab_drag_finished,
+                    pane_drag_finished,
                     self.finish_sidebar_bookmark_drag(),
                     self.finish_sidebar_resize_drag_command(),
                     self.finish_right_preview_panel_drag_commands(),
@@ -414,9 +416,11 @@ impl FileBrowser {
                 } else {
                     None
                 };
-                self.finish_tab_drag();
-                self.finish_pane_drag();
+                let tab_drag_finished = self.finish_tab_drag();
+                let pane_drag_finished = self.finish_pane_drag();
                 Task::batch([
+                    tab_drag_finished,
+                    pane_drag_finished,
                     self.finish_sidebar_bookmark_drag(),
                     self.finish_sidebar_resize_drag_command(),
                     self.finish_right_preview_panel_drag_commands(),
@@ -800,6 +804,17 @@ impl FileBrowser {
             Message::SettingsCategorySelected(category) => self.select_settings_category(category),
             Message::SettingsSubpageOpened(subpage) => self.select_settings_subpage(subpage),
             Message::SettingsSubpageClosed => self.close_settings_subpage(),
+            Message::AboutRepositoryLinkPressed => {
+                crate::commands::open_about_repository_link_command()
+            }
+            Message::AboutRepositoryLinkOpened(Ok(())) => {
+                self.clear_global_error();
+                Task::none()
+            }
+            Message::AboutRepositoryLinkOpened(Err(error)) => {
+                self.show_global_error(error);
+                Task::none()
+            }
             Message::ContextMenuSettingsPageShifted(step) => {
                 self.shift_context_menu_settings_page(step)
             }
@@ -1014,8 +1029,7 @@ impl FileBrowser {
                 self.close_tab(tab_id)
             }
             Message::TabDragEntered(pane_id, tab_id) => {
-                self.reorder_dragged_tab(pane_id, tab_id);
-                Task::none()
+                self.reorder_dragged_tab(pane_id, tab_id)
             }
             Message::TabDragFinished => {
                 self.finish_tab_drag_from_captured_release(self.main_window)

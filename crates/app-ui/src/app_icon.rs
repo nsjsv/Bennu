@@ -3,12 +3,17 @@
 use std::sync::LazyLock;
 
 use iced::window;
+use iced::widget::image::Handle;
 
 use crate::config::default_state_database_path;
 use crate::matugen_theme::ThemeMode;
 
 const DARK_ICON_PNG: &[u8] = include_bytes!("../assets/app-icon-dark.png");
 const LIGHT_ICON_PNG: &[u8] = include_bytes!("../assets/app-icon-light.png");
+/// 界面展示（关于页半页大图标）用高清源；packaging hicolor 的 512px 是
+/// 仓库里最大的品牌位图，放大场景必须用它而不是 128px 窗口图标。
+const DISPLAY_ICON_PNG: &[u8] =
+    include_bytes!("../../../packaging/linux/icons/hicolor/512x512/apps/bennu.png");
 
 /// 启动期窗口图标。与 stored_launch_window_policy 一样独立于完整配置加载路径：
 /// 在主实例声明 D-Bus 名之前调用，任何读取或解码失败都回退到无图标，绝不阻塞窗口创建。
@@ -30,6 +35,14 @@ fn icon_png_for_mode(theme_mode: ThemeMode) -> &'static [u8] {
         // 同步线程（启动极早期、测试）没有 reactor，此时回退浅色，绝不让图标选择 panic。
         ThemeMode::Automatic => automatic_mode_png(),
     }
+}
+
+/// 界面内展示用的品牌图标 Handle（如关于页）。iced 以 Handle 的 id 作图片
+/// 缓存键，from_bytes 每次 Id::unique()；视图每帧重建若现场造 Handle 会
+/// 让缓存永远 miss、纹理反复异步上传导致闪烁，因此这里用静态句柄保证 id 稳定。
+pub(crate) fn display_icon_handle() -> Handle {
+    static DISPLAY_HANDLE: LazyLock<Handle> = LazyLock::new(|| Handle::from_bytes(DISPLAY_ICON_PNG));
+    DISPLAY_HANDLE.clone()
 }
 
 fn automatic_mode_png() -> &'static [u8] {

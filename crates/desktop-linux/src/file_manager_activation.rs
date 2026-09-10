@@ -10,11 +10,11 @@ use url::Url;
 use zbus::fdo::RequestNameFlags;
 use zbus::proxy::MethodFlags;
 
-pub const FILE_MANAGER_ACTIVATION_BUS_NAME: &str = "io.github.nsjsv.FileManager";
-pub const FILE_MANAGER_ACTIVATION_OBJECT_PATH: &str = "/io/github/nsjsv/FileManager";
+pub const FILE_MANAGER_ACTIVATION_BUS_NAME: &str = "io.github.nsjsv.Bennu";
+pub const FILE_MANAGER_ACTIVATION_OBJECT_PATH: &str = "/io/github/nsjsv/Bennu";
 pub const FILE_MANAGER1_BUS_NAME: &str = "org.freedesktop.FileManager1";
 pub const FILE_MANAGER1_OBJECT_PATH: &str = "/org/freedesktop/FileManager1";
-const FILE_MANAGER_ACTIVATION_INTERFACE: &str = "io.github.nsjsv.FileManager.Activation1";
+const FILE_MANAGER_ACTIVATION_INTERFACE: &str = "io.github.nsjsv.Bennu.Activation1";
 const ACTIVATION_CHANNEL_CAPACITY: usize = 64;
 const MAX_ACTIVATION_TARGETS: usize = 256;
 const MAX_ACTIVATION_PATH_BYTES: usize = 1024 * 1024;
@@ -544,7 +544,7 @@ struct BrandedActivationInterface {
     event_sender: Sender<DesktopActivationEvent>,
 }
 
-#[zbus::interface(name = "io.github.nsjsv.FileManager.Activation1")]
+#[zbus::interface(name = "io.github.nsjsv.Bennu.Activation1")]
 impl BrandedActivationInterface {
     fn activate(&self, startup_id: String) -> zbus::fdo::Result<()> {
         let startup_id = DesktopStartupId::parse(startup_id).map_err(fdo_request_error)?;

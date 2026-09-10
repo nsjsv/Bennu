@@ -190,7 +190,7 @@ impl OfficeDocumentPreviewWorkspace {
 
 fn create_private_tempdir() -> Result<TempDir, io::Error> {
     let root = tempfile::Builder::new()
-        .prefix("file-manager-document-preview-")
+        .prefix("bennu-document-preview-")
         .tempdir()?;
     fs::set_permissions(root.path(), fs::Permissions::from_mode(0o700))?;
     Ok(root)

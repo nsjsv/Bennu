@@ -14,7 +14,7 @@ fn help_exits_successfully_without_a_display() {
     let output = run_app(&["--help"]);
 
     assert!(output.status.success());
-    assert!(String::from_utf8_lossy(&output.stdout).contains("Usage: file-manager"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Usage: bennu"));
     assert!(output.stderr.is_empty());
 }
 
@@ -25,7 +25,7 @@ fn version_exits_successfully_without_a_display() {
     assert!(output.status.success());
     assert_eq!(
         String::from_utf8(output.stdout).expect("version stdout is UTF-8"),
-        format!("file-manager {}\n", env!("CARGO_PKG_VERSION"))
+        format!("bennu {}\n", env!("CARGO_PKG_VERSION"))
     );
     assert!(output.stderr.is_empty());
 }
@@ -38,7 +38,7 @@ fn unknown_option_returns_usage_exit_code_before_gui_startup() {
     assert!(output.stdout.is_empty());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("--unknown"));
-    assert!(stderr.contains("file-manager --help"));
+    assert!(stderr.contains("bennu --help"));
 }
 
 #[test]

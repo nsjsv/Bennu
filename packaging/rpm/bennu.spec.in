@@ -1,10 +1,10 @@
-Name:           file-manager
+Name:           bennu
 Version:        @SEMVER@
 Release:        1%{?dist}
 Summary:        Linux desktop file manager written in Rust and Iced
 
 License:        GPL-3.0-or-later
-URL:            https://github.com/nsjsv/File_Manager
+URL:            https://github.com/nsjsv/Bennu
 BuildArch:      x86_64
 
 # Runtime commands not covered by automatic soname dependencies.
@@ -14,21 +14,21 @@ Suggests:       7zip, ffmpeg, ffmpegthumbnailer, gvfs-smb, gvfs-mtp, gvfs-gphoto
 %description
 Multi-column file manager with previews (text, Markdown, archives, PDF,
 Office, images, audio and video), virtualized large-directory views and an
-optional indexed search service (file-manager-search.service, enabled by the
+optional indexed search service (bennu-search.service, enabled by the
 user via systemctl --user).
 
 %install
 bash "@PAYLOAD_SCRIPT@" "%{buildroot}" "@APP_BINARY@" "@DAEMON_BINARY@"
 
 %files
-%license /usr/share/licenses/file-manager/LICENSE
-%doc /usr/share/doc/file-manager/matugen.md
-/usr/bin/file-manager
-/usr/lib/file-manager/file-searchd
-/usr/lib/systemd/user/file-manager-search.service
-/usr/share/applications/file-manager.desktop
-/usr/share/icons/hicolor/512x512/apps/file-manager.png
-/usr/share/file-manager/matugen/file-manager-colors.toml
-/usr/share/dbus-1/services/io.github.nsjsv.FileManager.service
+%license /usr/share/licenses/bennu/LICENSE
+%doc /usr/share/doc/bennu/matugen.md
+/usr/bin/bennu
+/usr/lib/bennu/bennu-searchd
+/usr/lib/systemd/user/bennu-search.service
+/usr/share/applications/bennu.desktop
+/usr/share/icons/hicolor/512x512/apps/bennu.png
+/usr/share/bennu/matugen/bennu-colors.toml
+/usr/share/dbus-1/services/io.github.nsjsv.Bennu.service
 
 %changelog

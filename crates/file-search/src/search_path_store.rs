@@ -11,7 +11,7 @@ use crate::VersionedSearchPathPreferences;
 const SEARCH_PATH_FORMAT_VERSION: u32 = 1;
 const SEARCH_PATH_SIDECAR_MAX_BYTES: u64 = 1_048_576;
 #[cfg(not(test))]
-const SEARCH_PATH_CONFIG_DIRECTORY: &str = "file-manager";
+const SEARCH_PATH_CONFIG_DIRECTORY: &str = "bennu";
 #[cfg(not(test))]
 const SEARCH_PATH_CONFIG_FILE: &str = "search-paths.json";
 static TEMPORARY_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);

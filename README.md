@@ -1,4 +1,4 @@
-# File Manager
+# Bennu
 
 **一个认真对待文件操作的 Linux 文件管理器**
 
@@ -6,7 +6,7 @@
 
 主要在 Wayland 环境下开发和测试。
 
-[Releases](https://github.com/nsjsv/File_Manager/releases) · [AUR](https://aur.archlinux.org/packages/file-manager-bin) · [Issues](https://github.com/nsjsv/File_Manager/issues) · [Pull Requests](https://github.com/nsjsv/File_Manager/pulls) · [License](LICENSE)
+[Releases](https://github.com/nsjsv/Bennu/releases) · [AUR](https://aur.archlinux.org/packages/bennu-bin) · [Issues](https://github.com/nsjsv/Bennu/issues) · [Pull Requests](https://github.com/nsjsv/Bennu/pulls) · [License](LICENSE)
 
 ## 功能亮点
 
@@ -24,64 +24,68 @@
 
 ### Arch Linux（AUR）
 
-推荐直接安装预编译包 [file-manager-bin](https://aur.archlinux.org/packages/file-manager-bin)：
+推荐直接安装预编译包 [bennu-bin](https://aur.archlinux.org/packages/bennu-bin)：
 
 ```bash
-paru -S file-manager-bin
+paru -S bennu-bin
 ```
+
+> 从旧包 `file-manager-bin` 迁移：直接安装 `bennu-bin`，pacman 会提示移除旧包；
+> 首次启动会自动把 `~/.local/share/file-manager` 与 `~/.config/file-manager`
+> 搬移到 `bennu/`，标签页、偏好与操作记录原样保留。
 
 ### Debian / Ubuntu
 
-从 [Releases](https://github.com/nsjsv/File_Manager/releases) 下载 `.deb` 安装（兼容 Ubuntu 24.04+、Debian 13+）：
+从 [Releases](https://github.com/nsjsv/Bennu/releases) 下载 `.deb` 安装（兼容 Ubuntu 24.04+、Debian 13+）：
 
 ```bash
-sudo apt install ./file-manager_0.2.6-1_amd64.deb
+sudo apt install ./bennu_0.2.6-1_amd64.deb
 ```
 
 ### Fedora / openSUSE
 
-从 [Releases](https://github.com/nsjsv/File_Manager/releases) 下载 `.rpm` 安装：
+从 [Releases](https://github.com/nsjsv/Bennu/releases) 下载 `.rpm` 安装：
 
 ```bash
-sudo dnf install ./file-manager-0.2.6-1.*.rpm
+sudo dnf install ./bennu-0.2.6-1.*.rpm
 ```
 
-其他发行版可以先查看 [Releases](https://github.com/nsjsv/File_Manager/releases)。如果预编译包无法运行，请按下文从源码构建。
+其他发行版可以先查看 [Releases](https://github.com/nsjsv/Bennu/releases)。如果预编译包无法运行，请按下文从源码构建。
 
 以上预编译包均不自动启用后台服务，PDF/Office、视频、压缩包等预览依赖的可选软件（poppler、ffmpeg、7zip、gvfs 等）以弱依赖声明，需要时自行安装。
 
 ### 启用索引搜索
 
-发行包会安装 `file-manager-search.service`。启用后，搜索服务会在后台维护 Home 和自定义位置的索引：
+发行包会安装 `bennu-search.service`。启用后，搜索服务会在后台维护 Home 和自定义位置的索引：
 
 ```bash
-systemctl --user enable --now file-manager-search.service
+systemctl --user enable --now bennu-search.service
 ```
 
 查看状态和日志：
 
 ```bash
-systemctl --user status file-manager-search.service
-journalctl --user -u file-manager-search.service -f
+systemctl --user status bennu-search.service
+journalctl --user -u bennu-search.service -f
 ```
 
 
 
 ## 使用
 
-安装后的命令名是 `file-manager`：
+安装后的命令名是 `bennu`：
 
 ```bash
-file-manager
+bennu
 ```
 
 
 | 命令                                     | 行为                        |
 | -------------------------------------- | ------------------------- |
-| `file-manager`                         | 按设置中的 Home、自定义目录或上次会话策略启动 |
-| `file-manager .`                       | 打开当前目录                    |
-| `file-manager ~/Downloads ~/Documents` | 按顺序在同一窗格中打开多个标签           |
-| `file-manager report.pdf notes.txt`    | 打开文件所在目录并选中对应文件           |
+| `bennu`                         | 按设置中的 Home、自定义目录或上次会话策略启动 |
+| `bennu .`                       | 打开当前目录                    |
+| `bennu ~/Downloads ~/Documents` | 按顺序在同一窗格中打开多个标签           |
+| `bennu report.pdf notes.txt`    | 打开文件所在目录并选中对应文件           |
 
 
 应用已经运行时，再次执行命令会复用现有实例：不带路径时聚焦主窗口，带路径时复用已有标签并补充缺失目录，不会清空其他标签或分栏。
@@ -91,8 +95,8 @@ file-manager
 查看帮助和版本：
 
 ```bash
-file-manager --help
-file-manager --version
+bennu --help
+bennu --version
 ```
 
 ## 文档
@@ -117,8 +121,8 @@ sudo pacman -S --needed base-devel git rust cargo pkgconf \
 克隆仓库并运行：
 
 ```bash
-git clone https://github.com/nsjsv/File_Manager.git
-cd File_Manager
+git clone https://github.com/nsjsv/Bennu.git
+cd Bennu
 cargo run --locked -p app-ui
 ```
 
@@ -129,7 +133,7 @@ cargo build --release --locked -p app-ui -p file-search
 ./target/release/app-ui
 ```
 
-源码构建的 App 二进制名为 `app-ui`，搜索 daemon 为 `file-searchd`。这些命令不会安装 systemd user unit 或品牌 D-Bus service；如果系统中没有兼容的搜索服务，索引搜索不可用，但当前目录搜索仍可回退到本地扫描。
+源码构建的 App 二进制名为 `app-ui`，搜索 daemon 为 `bennu-searchd`。这些命令不会安装 systemd user unit 或品牌 D-Bus service；如果系统中没有兼容的搜索服务，索引搜索不可用，但当前目录搜索仍可回退到本地扫描。
 
 **可选预览、压缩包与桌面集成依赖**
 
@@ -170,9 +174,9 @@ Windows、macOS 和 X11 不保证可用。
 
 ## 参与项目
 
-如果某个操作不符合你的习惯，或在特定发行版、桌面环境中无法工作，欢迎提交 [Issue](https://github.com/nsjsv/File_Manager/issues)。提供复现步骤、预期结果、实际结果和相关日志，会让问题更容易定位。
+如果某个操作不符合你的习惯，或在特定发行版、桌面环境中无法工作，欢迎提交 [Issue](https://github.com/nsjsv/Bennu/issues)。提供复现步骤、预期结果、实际结果和相关日志，会让问题更容易定位。
 
-代码改动可以通过 [Pull Request](https://github.com/nsjsv/File_Manager/pulls) 提交。
+代码改动可以通过 [Pull Request](https://github.com/nsjsv/Bennu/pulls) 提交。
 
 ### AI 辅助提交说明
 

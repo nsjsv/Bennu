@@ -31,7 +31,7 @@ pub(crate) use user_preferences::{
     load_user_config_for_app_config, save_user_preferences, UserPreferences,
 };
 
-const APP_DIR_NAME: &str = "file-manager";
+const APP_DIR_NAME: &str = "bennu";
 pub(super) const CONFIG_FILE_NAME: &str = "config.toml";
 const MATUGEN_THEME_FILE_NAME: &str = "matugen.toml";
 const STATE_DATABASE_FILE_NAME: &str = "state.sqlite";

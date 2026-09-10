@@ -1,6 +1,6 @@
 pub(super) fn translate(text: &str) -> Option<String> {
     let exact = match text {
-        "Search - File Manager" => Some("搜索 - 文件管理器"),
+        "Search - Bennu" => Some("搜索 - Bennu"),
         "Search" => Some("搜索"),
         "Searching..." => Some("正在搜索..."),
         "No search results" => Some("没有搜索结果"),

@@ -11,40 +11,42 @@ fn repository_root() -> &'static Path {
 #[test]
 fn desktop_and_brand_activation_files_expose_local_file_manager_contract() {
     let root = repository_root();
-    let desktop_entry = fs::read_to_string(root.join("packaging/linux/file-manager.desktop"))
+    let desktop_entry = fs::read_to_string(root.join("packaging/linux/bennu.desktop"))
         .expect("read desktop entry");
     assert!(desktop_entry
         .lines()
-        .any(|line| line == "Exec=file-manager %F"));
+        .any(|line| line == "Exec=bennu %F"));
     assert!(desktop_entry
         .lines()
         .any(|line| line == "MimeType=inode/directory;"));
     assert!(desktop_entry
         .lines()
-        .any(|line| line == "Icon=file-manager"));
+        .any(|line| line == "Icon=bennu"));
 
-    let service_name = "io.github.nsjsv.FileManager.service";
+    let service_name = "io.github.nsjsv.Bennu.service";
     let activation_service = fs::read_to_string(root.join("packaging/linux").join(service_name))
         .expect("read activation service");
     assert!(activation_service
         .lines()
-        .any(|line| line == "Name=io.github.nsjsv.FileManager"));
+        .any(|line| line == "Name=io.github.nsjsv.Bennu"));
     assert!(activation_service
         .lines()
-        .any(|line| line == "Exec=/usr/bin/file-manager --activation-service"));
+        .any(|line| line == "Exec=/usr/bin/bennu --activation-service"));
 
-    let release_workflow = fs::read_to_string(root.join(".github/workflows/release.yml"))
-        .expect("read release workflow");
-    assert!(release_workflow.contains("usr/share/dbus-1/services/${ACTIVATION_SERVICE_FILE}"));
-    assert!(release_workflow.contains("usr/share/${APP_NAME}/matugen/file-manager-colors.toml"));
-    assert!(release_workflow.contains("usr/share/doc/${APP_NAME}/matugen.md"));
-    assert!(release_workflow.contains("usr/share/icons/hicolor/512x512/apps/file-manager.png"));
+    // payload 布局的单一事实来源是 install-payload.sh，workflow 只调用它。
+    let payload_installer = fs::read_to_string(root.join("packaging/common/install-payload.sh"))
+        .expect("read install payload script");
+    assert!(payload_installer.contains("usr/share/dbus-1/services/${ACTIVATION_SERVICE_FILE}"));
+    assert!(payload_installer.contains("usr/share/${APP_NAME}/matugen/bennu-colors.toml"));
+    assert!(payload_installer.contains("usr/share/doc/${APP_NAME}/matugen.md"));
+    assert!(payload_installer.contains("icons/hicolor/512x512/apps/bennu.png"));
+    assert!(payload_installer.contains("usr/share/icons/hicolor/512x512/apps/${APP_NAME}.png"));
 }
 
 #[test]
 fn packaged_matugen_template_exports_every_runtime_color_role() {
     let root = repository_root();
-    let template = fs::read_to_string(root.join("packaging/matugen/file-manager-colors.toml"))
+    let template = fs::read_to_string(root.join("packaging/matugen/bennu-colors.toml"))
         .expect("read Matugen template");
     assert!(template.contains("mode = \"{{ mode }}\""));
 
@@ -88,8 +90,8 @@ fn packaged_matugen_template_exports_every_runtime_color_role() {
 
     let instructions = fs::read_to_string(root.join("packaging/matugen/README.md"))
         .expect("read Matugen instructions");
-    assert!(instructions.contains("/usr/share/file-manager/matugen/file-manager-colors.toml"));
-    assert!(instructions.contains("~/.config/file-manager/matugen.toml"));
+    assert!(instructions.contains("/usr/share/bennu/matugen/bennu-colors.toml"));
+    assert!(instructions.contains("~/.config/bennu/matugen.toml"));
     assert!(instructions.contains("-m dark"));
     assert!(instructions.contains("-m light"));
 }

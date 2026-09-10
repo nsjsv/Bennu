@@ -4,7 +4,7 @@ use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::prelude::*;
 
 const DEFAULT_LOG_FILTER: &str = "file_search=info";
-const SEARCH_JOURNAL_IDENTIFIER: &str = "file-manager-search";
+const SEARCH_JOURNAL_IDENTIFIER: &str = "bennu-search";
 const DAEMON_LOG_DETAIL_CHAR_LIMIT: usize = 1_000;
 
 pub(super) fn init_runtime_logging() {

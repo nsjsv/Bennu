@@ -75,7 +75,7 @@ pub(super) fn translate(text: &str) -> Option<String> {
         "Restart the index service to establish a verified connection." => {
             "请重启索引服务以重新建立可信连接。"
         }
-        "Reinstall the search components from the current File Manager package." => {
+        "Reinstall the search components from the current Bennu package." => {
             "请从当前文件管理器软件包重新安装搜索组件。"
         }
         "Review the technical details. Use force restart only if the service remains unresponsive." => {

@@ -17,22 +17,22 @@ PAYLOAD_DIR="$1"
 APP_BINARY="$2"
 DAEMON_BINARY="$3"
 
-APP_NAME=file-manager
-DAEMON_BINARY_NAME=file-searchd
-ACTIVATION_SERVICE_FILE=io.github.nsjsv.FileManager.service
+APP_NAME=bennu
+DAEMON_BINARY_NAME=bennu-searchd
+ACTIVATION_SERVICE_FILE=io.github.nsjsv.Bennu.service
 
 install -Dm755 "${APP_BINARY}" "${PAYLOAD_DIR}/usr/bin/${APP_NAME}"
 install -Dm755 "${DAEMON_BINARY}" "${PAYLOAD_DIR}/usr/lib/${APP_NAME}/${DAEMON_BINARY_NAME}"
-install -Dm644 "${REPO_ROOT}/packaging/linux/file-manager-search.service" \
-    "${PAYLOAD_DIR}/usr/lib/systemd/user/file-manager-search.service"
+install -Dm644 "${REPO_ROOT}/packaging/linux/bennu-search.service" \
+    "${PAYLOAD_DIR}/usr/lib/systemd/user/bennu-search.service"
 install -Dm644 "${REPO_ROOT}/LICENSE" \
     "${PAYLOAD_DIR}/usr/share/licenses/${APP_NAME}/LICENSE"
-install -Dm644 "${REPO_ROOT}/packaging/linux/file-manager.desktop" \
+install -Dm644 "${REPO_ROOT}/packaging/linux/bennu.desktop" \
     "${PAYLOAD_DIR}/usr/share/applications/${APP_NAME}.desktop"
-install -Dm644 "${REPO_ROOT}/packaging/linux/icons/hicolor/512x512/apps/file-manager.png" \
+install -Dm644 "${REPO_ROOT}/packaging/linux/icons/hicolor/512x512/apps/bennu.png" \
     "${PAYLOAD_DIR}/usr/share/icons/hicolor/512x512/apps/${APP_NAME}.png"
-install -Dm644 "${REPO_ROOT}/packaging/matugen/file-manager-colors.toml" \
-    "${PAYLOAD_DIR}/usr/share/${APP_NAME}/matugen/file-manager-colors.toml"
+install -Dm644 "${REPO_ROOT}/packaging/matugen/bennu-colors.toml" \
+    "${PAYLOAD_DIR}/usr/share/${APP_NAME}/matugen/bennu-colors.toml"
 install -Dm644 "${REPO_ROOT}/packaging/matugen/README.md" \
     "${PAYLOAD_DIR}/usr/share/doc/${APP_NAME}/matugen.md"
 install -Dm644 "${REPO_ROOT}/packaging/linux/${ACTIVATION_SERVICE_FILE}" \
@@ -40,10 +40,10 @@ install -Dm644 "${REPO_ROOT}/packaging/linux/${ACTIVATION_SERVICE_FILE}" \
 
 test -x "${PAYLOAD_DIR}/usr/bin/${APP_NAME}"
 test -x "${PAYLOAD_DIR}/usr/lib/${APP_NAME}/${DAEMON_BINARY_NAME}"
-test -f "${PAYLOAD_DIR}/usr/lib/systemd/user/file-manager-search.service"
+test -f "${PAYLOAD_DIR}/usr/lib/systemd/user/bennu-search.service"
 test -f "${PAYLOAD_DIR}/usr/share/licenses/${APP_NAME}/LICENSE"
 test -f "${PAYLOAD_DIR}/usr/share/applications/${APP_NAME}.desktop"
 test -f "${PAYLOAD_DIR}/usr/share/icons/hicolor/512x512/apps/${APP_NAME}.png"
-test -f "${PAYLOAD_DIR}/usr/share/${APP_NAME}/matugen/file-manager-colors.toml"
+test -f "${PAYLOAD_DIR}/usr/share/${APP_NAME}/matugen/bennu-colors.toml"
 test -f "${PAYLOAD_DIR}/usr/share/doc/${APP_NAME}/matugen.md"
 test -f "${PAYLOAD_DIR}/usr/share/dbus-1/services/${ACTIVATION_SERVICE_FILE}"

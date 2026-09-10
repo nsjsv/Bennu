@@ -29,15 +29,15 @@ impl SearchRuntimeIdentity {
 
     pub const fn systemd_unit(self) -> &'static str {
         match self {
-            Self::Release => "file-manager-search.service",
-            Self::Development => "file-manager-search-dev.service",
+            Self::Release => "bennu-search.service",
+            Self::Development => "bennu-search-dev.service",
         }
     }
 
     pub const fn socket_name(self) -> &'static str {
         match self {
-            Self::Release => "file-manager-search.sock",
-            Self::Development => "file-manager-search-dev.sock",
+            Self::Release => "bennu-search.sock",
+            Self::Development => "bennu-search-dev.sock",
         }
     }
 
@@ -101,19 +101,19 @@ mod tests {
 
         assert_eq!(
             SearchRuntimeIdentity::Release.systemd_unit(),
-            "file-manager-search.service"
+            "bennu-search.service"
         );
         assert_eq!(
             SearchRuntimeIdentity::Development.systemd_unit(),
-            "file-manager-search-dev.service"
+            "bennu-search-dev.service"
         );
         assert_eq!(
             SearchRuntimeIdentity::Release.socket_path_in(runtime_directory),
-            runtime_directory.join(OsStr::new("file-manager-search.sock"))
+            runtime_directory.join(OsStr::new("bennu-search.sock"))
         );
         assert_eq!(
             SearchRuntimeIdentity::Development.socket_path_in(runtime_directory),
-            runtime_directory.join(OsStr::new("file-manager-search-dev.sock"))
+            runtime_directory.join(OsStr::new("bennu-search-dev.sock"))
         );
     }
 }

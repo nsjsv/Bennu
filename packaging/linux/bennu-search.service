@@ -1,15 +1,15 @@
 [Unit]
-Description=File Manager indexed search service
-Documentation=https://github.com/nsjsv/File_Manager
+Description=Bennu indexed search service
+Documentation=https://github.com/nsjsv/Bennu
 ConditionControlGroupController=v2
 ConditionControlGroupController=memory
 ConditionControlGroupController=cpu
 
 [Service]
 Type=exec
-SyslogIdentifier=file-manager-search
-ExecStartPre=/usr/lib/file-manager/file-searchd --shutdown-existing
-ExecStart=/usr/lib/file-manager/file-searchd
+SyslogIdentifier=bennu-search
+ExecStartPre=/usr/lib/bennu/bennu-searchd --shutdown-existing
+ExecStart=/usr/lib/bennu/bennu-searchd
 
 MemoryAccounting=yes
 IOAccounting=yes

@@ -654,7 +654,7 @@ fn diagnostic_recommendation(kind: SearchServiceDiagnosticKind) -> &'static str 
             "Restart the index service to establish a verified connection."
         }
         SearchServiceDiagnosticKind::ComponentIncompatible => {
-            "Reinstall the search components from the current File Manager package."
+            "Reinstall the search components from the current Bennu package."
         }
         SearchServiceDiagnosticKind::RecoveryFailed => {
             "Review the technical details. Use force restart only if the service remains unresponsive."

@@ -246,7 +246,7 @@ impl StartupRenderingEnvironmentStatus {
     }
 }
 
-const RENDERER_PROBE_SELECTION_PREFIX: &str = "file-manager-renderer-gpu-v1";
+const RENDERER_PROBE_SELECTION_PREFIX: &str = "bennu-renderer-gpu-v1";
 
 impl RendererProbeGpuSelection {
     fn from_display_gpu(display_renderer_gpu: &DisplayRendererGpu) -> Self {
@@ -567,7 +567,7 @@ pub(crate) fn restart_current_process(
         environment.apply_to_command(&mut command);
 
         let error = command.exec();
-        Err(format!("failed to restart File Manager: {error}"))
+        Err(format!("failed to restart Bennu: {error}"))
     }
 
     #[cfg(not(unix))]
@@ -633,7 +633,7 @@ mod tests {
 
     #[test]
     fn renderer_probe_command_fixes_the_hidden_action_and_vulkan_environment() {
-        let executable = PathBuf::from("/tmp/file-manager-renderer-probe-test");
+        let executable = PathBuf::from("/tmp/bennu-renderer-probe-test");
         let command = renderer_probe_command_for_executable(
             executable.clone(),
             RenderingGpuPreference::HighPerformanceGpu,
@@ -726,11 +726,11 @@ mod tests {
             Some(gpu_selection.clone())
         );
         assert!(RendererProbeGpuSelection::decode(
-            b"unexpected\nfile-manager-renderer-gpu-v1\tlow\t1002:15bf!\n"
+            b"unexpected\nbennu-renderer-gpu-v1\tlow\t1002:15bf!\n"
         )
         .is_none());
         assert!(RendererProbeGpuSelection::decode(
-            b"file-manager-renderer-gpu-v1\tlow\t$LD_PRELOAD!\t*nvidia*"
+            b"bennu-renderer-gpu-v1\tlow\t$LD_PRELOAD!\t*nvidia*"
         )
         .is_none());
     }

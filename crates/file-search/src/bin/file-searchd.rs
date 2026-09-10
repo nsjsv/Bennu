@@ -237,8 +237,8 @@ fn is_file_searchd_executable_path(executable_path: &Path) -> bool {
     matches!(
         executable_path.file_name(),
         Some(file_name)
-            if file_name == OsStr::new("file-searchd")
-                || file_name == OsStr::new("file-searchd (deleted)")
+            if file_name == OsStr::new("bennu-searchd")
+                || file_name == OsStr::new("bennu-searchd (deleted)")
     )
 }
 
@@ -285,7 +285,9 @@ fn database_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
     let base = dirs::data_dir()
         .or_else(dirs::cache_dir)
         .ok_or("could not find XDG data or cache directory")?;
-    Ok(base.join("file-manager").join("search.sqlite"))
+    // 守护进程独立启动，同样要在读索引前完成改名迁移。
+    file_core::data_dir_migration::migrate_legacy_data_dir(&base);
+    Ok(base.join("bennu").join("search.sqlite"))
 }
 
 #[cfg(test)]
@@ -382,10 +384,10 @@ mod tests {
     #[test]
     fn owner_path_accepts_file_searchd_and_deleted_executable() {
         assert!(is_file_searchd_executable_path(Path::new(
-            "/usr/lib/file-manager/file-searchd"
+            "/usr/lib/bennu/bennu-searchd"
         )));
         assert!(is_file_searchd_executable_path(Path::new(
-            "/usr/lib/file-manager/file-searchd (deleted)"
+            "/usr/lib/bennu/bennu-searchd (deleted)"
         )));
     }
 
@@ -393,7 +395,7 @@ mod tests {
     fn owner_path_rejects_unknown_executable() {
         assert!(!is_file_searchd_executable_path(Path::new("/usr/bin/bash")));
         assert!(!is_file_searchd_executable_path(Path::new(
-            "/usr/lib/file-manager/file-searchd-old"
+            "/usr/lib/bennu/bennu-searchd-old"
         )));
     }
 

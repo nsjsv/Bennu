@@ -1,3 +1,4 @@
+mod about_settings;
 mod address_bar;
 mod application_logs;
 mod archive_creation;

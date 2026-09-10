@@ -14,7 +14,7 @@ if [[ $# -ne 1 ]] || ! [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 fi
 SEMVER="$1"
 
-APP_NAME=file-manager
+APP_NAME=bennu
 
 cd "${REPO_ROOT}"
 
@@ -69,13 +69,13 @@ CARGO_TARGET_DIR="${target_dir}" cargo build --release --locked -p app-ui -p fil
 dist_dir="${REPO_ROOT}/dist"
 mkdir -p "${dist_dir}"
 
-spec_path="${dist_dir}/file-manager.spec"
+spec_path="${dist_dir}/bennu.spec"
 sed \
     -e "s|@SEMVER@|${SEMVER}|g" \
     -e "s|@PAYLOAD_SCRIPT@|${REPO_ROOT}/packaging/common/install-payload.sh|g" \
     -e "s|@APP_BINARY@|${target_dir}/release/app-ui|g" \
-    -e "s|@DAEMON_BINARY@|${target_dir}/release/file-searchd|g" \
-    "${REPO_ROOT}/packaging/rpm/file-manager.spec.in" > "${spec_path}"
+    -e "s|@DAEMON_BINARY@|${target_dir}/release/bennu-searchd|g" \
+    "${REPO_ROOT}/packaging/rpm/bennu.spec.in" > "${spec_path}"
 
 rpmbuild --quiet -bb \
     --define "_topdir $(mktemp -d)" \

@@ -20,8 +20,8 @@ const REQUIRED_MEMORY_MAX: u64 = 640_000_000;
 const REQUIRED_MEMORY_SWAP_MAX: u64 = 0;
 const REQUIRED_SERVICE_SLICE: &str = "background.slice";
 const MAXIMUM_SUPPORTED_BASE_PAGE_BYTES: u64 = 65_536;
-const PACKAGED_RELEASE_FRAGMENT_PATH: &str = "/usr/lib/systemd/user/file-manager-search.service";
-const PACKAGED_RELEASE_EXEC_START_PATH: &str = "/usr/lib/file-manager/file-searchd";
+const PACKAGED_RELEASE_FRAGMENT_PATH: &str = "/usr/lib/systemd/user/bennu-search.service";
+const PACKAGED_RELEASE_EXEC_START_PATH: &str = "/usr/lib/bennu/bennu-searchd";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SearchUnitAction {
@@ -780,16 +780,16 @@ fn expected_user_fragment(runtime_identity: SearchRuntimeIdentity) -> Option<Pat
 fn expected_development_exec_start() -> Option<PathBuf> {
     let application_path = std::env::current_exe().ok()?;
     let install_prefix = application_path.parent()?.parent()?;
-    Some(install_prefix.join("lib/file-manager/file-searchd"))
+    Some(install_prefix.join("lib/bennu/bennu-searchd"))
 }
 
 fn unexpected_definition_action(runtime_identity: SearchRuntimeIdentity) -> &'static str {
     match runtime_identity {
         SearchRuntimeIdentity::Release => {
-            "reinstall the current File Manager package, run systemctl --user daemon-reload, then retry"
+            "reinstall the current Bennu package, run systemctl --user daemon-reload, then retry"
         }
         SearchRuntimeIdentity::Development => {
-            "run scripts/install-file-manager-dev.sh install --yes to restore the managed development unit, then retry"
+            "run scripts/install-bennu-dev.sh install --yes to restore the managed development unit, then retry"
         }
     }
 }

@@ -5,7 +5,7 @@ use thiserror::Error;
 use tokio::process::Command;
 
 const NOTIFY_SEND_COMMAND: &str = "notify-send";
-const NOTIFICATION_APP_NAME: &str = "File Manager";
+const NOTIFICATION_APP_NAME: &str = "Bennu";
 const NOTIFICATION_ICON_NAME: &str = "system-file-manager";
 
 #[derive(Debug, Error)]
@@ -91,7 +91,7 @@ mod tests {
             arguments,
             vec![
                 "--app-name",
-                "File Manager",
+                "Bennu",
                 "--icon",
                 "system-file-manager",
                 "--urgency",

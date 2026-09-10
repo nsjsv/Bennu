@@ -181,6 +181,42 @@ pub enum OpenError {
     },
 }
 
+/// URL 不是文件系统路径，单独建错误概念，避免把链接伪装成 Path 复用 OpenError。
+#[derive(Debug, Error)]
+pub enum UrlOpenError {
+    #[error("could not start xdg-open for {url:?}: {source}")]
+    Spawn {
+        url: String,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("xdg-open failed for {url:?} with status {status}")]
+    Failed { url: String, status: ExitStatus },
+}
+
+pub async fn open_url(url: &str) -> Result<(), UrlOpenError> {
+    let status = Command::new(XDG_OPEN)
+        .arg(url)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await
+        .map_err(|source| UrlOpenError::Spawn {
+            url: url.to_owned(),
+            source,
+        })?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(UrlOpenError::Failed {
+            url: url.to_owned(),
+            status,
+        })
+    }
+}
+
 pub async fn open_path(path: impl AsRef<Path>) -> Result<(), OpenError> {
     open_path_with_terminal_emulator(path, TerminalEmulator::Automatic).await
 }

@@ -500,7 +500,7 @@ mod tests {
     #[test]
     fn uri_list_round_trips_spaces_and_non_utf8_bytes() {
         let paths = vec![
-            PathBuf::from("/tmp/File Manager/a b.txt"),
+            PathBuf::from("/tmp/Bennu/a b.txt"),
             PathBuf::from(OsString::from_vec(b"/tmp/non-utf8-\xFF".to_vec())),
         ];
 
@@ -508,7 +508,7 @@ mod tests {
 
         assert_eq!(
             payload,
-            "file:///tmp/File%20Manager/a%20b.txt\nfile:///tmp/non-utf8-%FF"
+            "file:///tmp/Bennu/a%20b.txt\nfile:///tmp/non-utf8-%FF"
         );
         assert_eq!(parse_file_uri_list(&payload).unwrap(), paths);
     }

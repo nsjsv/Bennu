@@ -45,8 +45,8 @@ pub use network_secrets::{
     store_network_connection_credentials, NetworkSecretError,
 };
 pub use open::{
-    open_path, open_path_with_terminal_emulator, open_terminal_at_directory, OpenError,
-    TerminalEmulator, TERMINAL_EMULATOR_OPTIONS,
+    open_path, open_path_with_terminal_emulator, open_terminal_at_directory, open_url, OpenError,
+    TerminalEmulator, TERMINAL_EMULATOR_OPTIONS, UrlOpenError,
 };
 pub use open_with::{
     open_path_with_application, open_with_applications, OpenWithApplication,

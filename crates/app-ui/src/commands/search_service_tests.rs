@@ -23,7 +23,7 @@ use crate::model::{SearchServiceDiagnosticKind, SearchServiceRecoveryAction};
 const SEARCH_ENDPOINT_SERVER_TIMEOUT: Duration = Duration::from_secs(5);
 
 fn valid_snapshot_text() -> &'static str {
-    "NRestarts=0\nMemorySwapMax=0\nCPUQuotaPerSecUSec=infinity\nSlice=background.slice\nSubState=running\nResult=success\nControlGroup=/user.slice/search.service\nMemoryMax=640000000\nActiveState=active\nExecMainStatus=0\nMainPID=42\nMemoryHigh=512000000\nFragmentPath=/home/test/.config/systemd/user/file-manager-search.service\nDropInPaths=/home/test/.config/systemd/user/file-manager-search.service.d/override.conf\nExecStart={ path=/home/test/.local/share/file-manager-dev/file-searchd ; argv[]=/home/test/.local/share/file-manager-dev/file-searchd ; }\n"
+    "NRestarts=0\nMemorySwapMax=0\nCPUQuotaPerSecUSec=infinity\nSlice=background.slice\nSubState=running\nResult=success\nControlGroup=/user.slice/search.service\nMemoryMax=640000000\nActiveState=active\nExecMainStatus=0\nMainPID=42\nMemoryHigh=512000000\nFragmentPath=/home/test/.config/systemd/user/bennu-search.service\nDropInPaths=/home/test/.config/systemd/user/bennu-search.service.d/override.conf\nExecStart={ path=/home/test/.local/share/bennu-dev/bennu-searchd ; argv[]=/home/test/.local/share/bennu-dev/bennu-searchd ; }\n"
 }
 
 fn create_systemctl_test_peer(
@@ -66,7 +66,7 @@ fn create_sequenced_recovery_systemctl(
     let systemctl_log_path = temporary_directory.join("recovery-systemctl.log");
     let show_count_path = temporary_directory.join("recovery-show-count");
     let systemctl_script = format!(
-        "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >>\"{}\"\nif [[ \"$*\" == *\" show file-manager-search.service\" ]]; then\n    if [[ -f \"{}\" ]]; then\n        read -r show_count <\"{}\"\n    else\n        show_count=0\n    fi\n    if (( show_count == 0 )); then\n        printf '%s' '{}'\n    else\n        printf '%s' '{}'\n    fi\n    printf '%s' \"$((show_count + 1))\" >\"{}\"\nfi\n",
+        "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >>\"{}\"\nif [[ \"$*\" == *\" show bennu-search.service\" ]]; then\n    if [[ -f \"{}\" ]]; then\n        read -r show_count <\"{}\"\n    else\n        show_count=0\n    fi\n    if (( show_count == 0 )); then\n        printf '%s' '{}'\n    else\n        printf '%s' '{}'\n    fi\n    printf '%s' \"$((show_count + 1))\" >\"{}\"\nfi\n",
         systemctl_log_path.display(),
         show_count_path.display(),
         show_count_path.display(),
@@ -134,7 +134,7 @@ async fn assert_search_endpoint_server_completed_within(
 #[test]
 fn search_directory_adapter_preserves_native_non_utf8_paths() {
     let path = PathBuf::from(std::ffi::OsString::from_vec(
-        b"/tmp/file-manager-search-\xff".to_vec(),
+        b"/tmp/bennu-search-\xff".to_vec(),
     ));
     let uri = Url::from_file_path(&path).unwrap();
 
@@ -184,10 +184,10 @@ fn unit_snapshot_parses_properties_without_order_dependency() {
     assert_eq!(snapshot.restart_count, 0);
     assert!(snapshot
         .description()
-        .contains("FragmentPath=/home/test/.config/systemd/user/file-manager-search.service"));
+        .contains("FragmentPath=/home/test/.config/systemd/user/bennu-search.service"));
     assert!(snapshot
         .description()
-        .contains("ExecStartPath=/home/test/.local/share/file-manager-dev/file-searchd"));
+        .contains("ExecStartPath=/home/test/.local/share/bennu-dev/bennu-searchd"));
     assert!(snapshot.description().contains("unit source guidance"));
 }
 
@@ -196,7 +196,7 @@ fn endpoint_timeout_maps_to_a_stable_user_diagnostic_category() {
     let diagnostic = ValidatedSearchServiceFailure::StableOwnerEndpoint {
         main_pid: NonZeroU32::new(42).unwrap(),
         endpoint_failure: SearchEndpointProbeFailure::TimedOut,
-        unit_description: "Unit=file-manager-search.service".to_owned(),
+        unit_description: "Unit=bennu-search.service".to_owned(),
     }
     .into_diagnostic();
 
@@ -209,14 +209,14 @@ fn endpoint_timeout_maps_to_a_stable_user_diagnostic_category() {
         .contains("endpoint inspection timed out"));
     assert!(diagnostic
         .technical_detail
-        .contains("Unit=file-manager-search.service"));
+        .contains("Unit=bennu-search.service"));
 }
 
 #[test]
 fn unit_snapshot_reports_only_the_exec_start_executable_path() {
     let snapshot_text = valid_snapshot_text().replace(
-        "argv[]=/home/test/.local/share/file-manager-dev/file-searchd ;",
-        "argv[]=/home/test/.local/share/file-manager-dev/file-searchd --api-key very-secret ;",
+        "argv[]=/home/test/.local/share/bennu-dev/bennu-searchd ;",
+        "argv[]=/home/test/.local/share/bennu-dev/bennu-searchd --api-key very-secret ;",
     );
 
     let snapshot =
@@ -224,7 +224,7 @@ fn unit_snapshot_reports_only_the_exec_start_executable_path() {
     let description = snapshot.description();
 
     assert!(
-        description.contains("ExecStartPath=/home/test/.local/share/file-manager-dev/file-searchd")
+        description.contains("ExecStartPath=/home/test/.local/share/bennu-dev/bennu-searchd")
     );
     assert!(!description.contains("--api-key"));
     assert!(!description.contains("very-secret"));
@@ -323,8 +323,8 @@ fn unit_snapshot_rejects_missing_and_invalid_properties() {
     }
 
     let control_character_snapshot = valid_snapshot_text().replace(
-        "DropInPaths=/home/test/.config/systemd/user/file-manager-search.service.d/override.conf",
-        "DropInPaths=/home/test/.config/systemd/user/file-manager-search.service.d/\toverride.conf",
+        "DropInPaths=/home/test/.config/systemd/user/bennu-search.service.d/override.conf",
+        "DropInPaths=/home/test/.config/systemd/user/bennu-search.service.d/\toverride.conf",
     );
     assert!(
         SearchUnitSnapshot::parse(&control_character_snapshot, SearchRuntimeIdentity::Release)
@@ -332,11 +332,11 @@ fn unit_snapshot_rejects_missing_and_invalid_properties() {
     );
 
     let oversized_exec_start = format!(
-        "{{ path=/tmp/file-searchd ; argv[]={}; }}",
+        "{{ path=/tmp/bennu-searchd ; argv[]={}; }}",
         "x".repeat(20_000)
     );
     let oversized_snapshot = valid_snapshot_text().replace(
-        "{ path=/home/test/.local/share/file-manager-dev/file-searchd ; argv[]=/home/test/.local/share/file-manager-dev/file-searchd ; }",
+        "{ path=/home/test/.local/share/bennu-dev/bennu-searchd ; argv[]=/home/test/.local/share/bennu-dev/bennu-searchd ; }",
         &oversized_exec_start,
     );
     assert!(
@@ -410,7 +410,7 @@ fn unit_actions_use_user_systemd_without_a_shell() {
             "--no-pager",
             "--no-block",
             "start",
-            "file-manager-search-dev.service"
+            "bennu-search-dev.service"
         ]
     );
     assert_eq!(
@@ -420,7 +420,7 @@ fn unit_actions_use_user_systemd_without_a_shell() {
             "--no-pager",
             "--no-block",
             "restart",
-            "file-manager-search.service"
+            "bennu-search.service"
         ]
     );
     assert_eq!(
@@ -431,7 +431,7 @@ fn unit_actions_use_user_systemd_without_a_shell() {
             "--signal=SIGKILL",
             "--kill-whom=all",
             "kill",
-            "file-manager-search.service"
+            "bennu-search.service"
         ]
     );
     assert_eq!(
@@ -440,7 +440,7 @@ fn unit_actions_use_user_systemd_without_a_shell() {
             "--user",
             "--no-pager",
             "reset-failed",
-            "file-manager-search.service"
+            "bennu-search.service"
         ]
     );
 }
@@ -629,7 +629,7 @@ async fn incompatible_endpoint_is_restarted_only_once_before_compatibility() {
     let snapshot_text =
         valid_snapshot_text().replace("MainPID=42", &format!("MainPID={}", std::process::id()));
     let systemctl_script = format!(
-        "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >>\"{}\"\nif [[ \"$*\" == *\" show file-manager-search.service\" ]]; then\n    printf '%s' '{}'\nfi\n",
+        "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >>\"{}\"\nif [[ \"$*\" == *\" show bennu-search.service\" ]]; then\n    printf '%s' '{}'\nfi\n",
         systemctl_log_path.display(),
         snapshot_text
     );
@@ -699,7 +699,7 @@ async fn incompatible_endpoint_is_restarted_only_once_before_compatibility() {
     assert_eq!(
         systemctl_log
             .lines()
-            .filter(|line| line.ends_with("restart file-manager-search.service"))
+            .filter(|line| line.ends_with("restart bennu-search.service"))
             .count(),
         1
     );
@@ -755,13 +755,13 @@ async fn graceful_recovery_retries_a_transient_disconnect_without_sending_sigkil
     let systemctl_log = tokio::fs::read_to_string(systemctl_log_path).await.unwrap();
     let mutation_actions = systemctl_log
         .lines()
-        .filter(|line| !line.ends_with("show file-manager-search.service"))
+        .filter(|line| !line.ends_with("show bennu-search.service"))
         .collect::<Vec<_>>();
     assert_eq!(
         mutation_actions,
         [
             "--user --no-pager daemon-reload",
-            "--user --no-pager --no-block restart file-manager-search.service",
+            "--user --no-pager --no-block restart bennu-search.service",
         ]
     );
 }
@@ -809,15 +809,15 @@ async fn force_recovery_kills_the_whole_control_group_before_restart() {
     let systemctl_log = tokio::fs::read_to_string(systemctl_log_path).await.unwrap();
     let mutation_actions = systemctl_log
         .lines()
-        .filter(|line| !line.ends_with("show file-manager-search.service"))
+        .filter(|line| !line.ends_with("show bennu-search.service"))
         .collect::<Vec<_>>();
     assert_eq!(
         mutation_actions,
         [
-            "--user --no-pager --signal=SIGKILL --kill-whom=all kill file-manager-search.service",
-            "--user --no-pager reset-failed file-manager-search.service",
+            "--user --no-pager --signal=SIGKILL --kill-whom=all kill bennu-search.service",
+            "--user --no-pager reset-failed bennu-search.service",
             "--user --no-pager daemon-reload",
-            "--user --no-pager --no-block restart file-manager-search.service",
+            "--user --no-pager --no-block restart bennu-search.service",
         ]
     );
 }
@@ -827,7 +827,7 @@ async fn force_recovery_stops_after_a_systemctl_kill_failure() {
     let temporary_directory = tempdir().unwrap();
     let systemctl_log_path = temporary_directory.path().join("failed-systemctl.log");
     let systemctl_script = format!(
-        "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >>\"{}\"\nif [[ \"$*\" == *\" show file-manager-search.service\" ]]; then\n    printf '%s' '{}'\nelif [[ \"$*\" == *\" kill file-manager-search.service\" ]]; then\n    printf '%s\\n' 'permission denied' >&2\n    exit 17\nfi\n",
+        "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >>\"{}\"\nif [[ \"$*\" == *\" show bennu-search.service\" ]]; then\n    printf '%s' '{}'\nelif [[ \"$*\" == *\" kill bennu-search.service\" ]]; then\n    printf '%s\\n' 'permission denied' >&2\n    exit 17\nfi\n",
         systemctl_log_path.display(),
         valid_snapshot_text(),
     );
@@ -853,15 +853,15 @@ async fn force_recovery_stops_after_a_systemctl_kill_failure() {
     assert_eq!(error.kind, SearchServiceDiagnosticKind::RecoveryFailed);
     assert!(error
         .technical_detail
-        .contains("systemctl --user kill file-manager-search.service failed"));
+        .contains("systemctl --user kill bennu-search.service failed"));
     assert!(error.technical_detail.contains("permission denied"));
     assert!(error.technical_detail.contains("before recovery:"));
     let systemctl_log = tokio::fs::read_to_string(systemctl_log_path).await.unwrap();
     assert_eq!(
         systemctl_log.lines().collect::<Vec<_>>(),
         [
-            "--user --no-pager --property=ActiveState --property=SubState --property=MainPID --property=ControlGroup --property=MemoryHigh --property=MemoryMax --property=MemorySwapMax --property=Slice --property=CPUQuotaPerSecUSec --property=Result --property=ExecMainStatus --property=NRestarts --property=FragmentPath --property=DropInPaths --property=ExecStart show file-manager-search.service",
-            "--user --no-pager --signal=SIGKILL --kill-whom=all kill file-manager-search.service",
+            "--user --no-pager --property=ActiveState --property=SubState --property=MainPID --property=ControlGroup --property=MemoryHigh --property=MemoryMax --property=MemorySwapMax --property=Slice --property=CPUQuotaPerSecUSec --property=Result --property=ExecMainStatus --property=NRestarts --property=FragmentPath --property=DropInPaths --property=ExecStart show bennu-search.service",
+            "--user --no-pager --signal=SIGKILL --kill-whom=all kill bennu-search.service",
         ]
     );
 }

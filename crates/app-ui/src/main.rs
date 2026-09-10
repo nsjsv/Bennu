@@ -91,10 +91,19 @@ fn main() -> std::process::ExitCode {
     // 限制 glibc 的线程 arena 数量，避免预览关闭后的分配页长期滞留。
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     let _ = unsafe { libc::mallopt(libc::M_ARENA_MAX, 1) };
+    // 改名迁移必须在任何状态数据库/配置读取之前执行（含窗口图标
+    // 的 stored_theme_mode 读取）。
+    if let Some(data_dir) = dirs::data_dir() {
+        file_core::data_dir_migration::migrate_legacy_data_dir(&data_dir);
+    }
+    // 搜索路径配置与 matugen 输出在配置目录，同样需要搬移。
+    if let Some(config_dir) = dirs::config_dir() {
+        file_core::data_dir_migration::migrate_legacy_config_dir(&config_dir);
+    }
     let action = match command_line::parse_process_arguments() {
         Ok(action) => action,
         Err(error) => {
-            eprintln!("file-manager: {error}\nTry 'file-manager --help' for more information.");
+            eprintln!("bennu: {error}\nTry 'bennu --help' for more information.");
             return std::process::ExitCode::from(2);
         }
     };
@@ -156,7 +165,7 @@ fn main() -> std::process::ExitCode {
         }
         Ok(desktop_linux::FileManagerActivationClaim::Detached) => None,
         Err(error) => {
-            eprintln!("file-manager: desktop activation failed: {error}");
+            eprintln!("bennu: desktop activation failed: {error}");
             return std::process::ExitCode::FAILURE;
         }
     };
@@ -167,7 +176,7 @@ fn main() -> std::process::ExitCode {
                 let first_event = match controller.wait_for_initial_event() {
                     Ok(event) => event,
                     Err(error) => {
-                        eprintln!("file-manager: desktop activation failed: {error}");
+                        eprintln!("bennu: desktop activation failed: {error}");
                         return std::process::ExitCode::FAILURE;
                     }
                 };
@@ -218,7 +227,7 @@ fn main() -> std::process::ExitCode {
     tracing::info!(
         target: "app_ui::runtime",
         event = "application_started",
-        "File Manager application started"
+        "Bennu application started"
     );
     let startup_rendering_environment = startup_rendering::apply_fast_startup_environment();
     match app::run(
@@ -232,7 +241,7 @@ fn main() -> std::process::ExitCode {
             // 渲染初始化失败时先尝试 GL 兜底重启(内部删除探针缓存,
             // 重启后重新探针自愈);兜底已用过或重启失败才报错退出。
             let _ = startup_probe_cache::gl_fallback_restart_after_renderer_failure();
-            eprintln!("file-manager: application runtime failed: {error}");
+            eprintln!("bennu: application runtime failed: {error}");
             std::process::ExitCode::FAILURE
         }
     }

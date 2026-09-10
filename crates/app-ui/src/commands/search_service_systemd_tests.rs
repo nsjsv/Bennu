@@ -17,7 +17,7 @@ fn packaged_release_definition_has_no_override_guidance() {
     )
     .description();
 
-    assert!(description.contains("FragmentPath=/usr/lib/systemd/user/file-manager-search.service"));
+    assert!(description.contains("FragmentPath=/usr/lib/systemd/user/bennu-search.service"));
     assert!(description.contains("DropInPaths=<none>"));
     assert!(!description.contains("unit source guidance"));
     assert!(!description.contains("user unit definition"));
@@ -38,7 +38,7 @@ fn release_user_fragment_identifies_the_actual_override_source() {
 #[test]
 fn packaged_fragment_with_drop_in_names_the_drop_in_conflict() {
     let drop_in_path =
-        "/home/test/.config/systemd/user/file-manager-search.service.d/override.conf";
+        "/home/test/.config/systemd/user/bennu-search.service.d/override.conf";
     let description = release_snapshot(
         PACKAGED_RELEASE_FRAGMENT_PATH,
         drop_in_path,
@@ -52,13 +52,13 @@ fn packaged_fragment_with_drop_in_names_the_drop_in_conflict() {
 
 #[test]
 fn unexpected_exec_start_recommends_reinstalling_the_bundle_not_removing_an_override() {
-    let unexpected_exec = "/opt/old-file-manager/file-searchd";
+    let unexpected_exec = "/opt/old-bennu/bennu-searchd";
     let description =
         release_snapshot(PACKAGED_RELEASE_FRAGMENT_PATH, "", unexpected_exec).description();
 
     assert!(description.contains(unexpected_exec));
     assert!(description.contains("FragmentPath/ExecStartPath do not match the current bundle"));
-    assert!(description.contains("reinstall the current File Manager package"));
+    assert!(description.contains("reinstall the current Bennu package"));
     assert!(!description.contains("a user unit definition or drop-in overrides"));
 }
 

@@ -8,7 +8,10 @@ use tokio::process::Command;
 use crate::network_mounts::{NetworkConnection, NetworkMountCredentials};
 
 const SECRET_TOOL: &str = "secret-tool";
-const APP_ATTRIBUTE: &str = "file-manager";
+const APP_ATTRIBUTE: &str = "bennu";
+/// 改名前的 keyring application 属性；仅用于读取回退与一次性迁移，
+/// 新写入一律使用 APP_ATTRIBUTE。
+const LEGACY_APP_ATTRIBUTE: &str = "file-manager";
 const KIND_ATTRIBUTE: &str = "network-connection-password";
 
 #[derive(Debug, Error)]
@@ -39,7 +42,37 @@ pub async fn lookup_network_connection_credentials(
     connection: NetworkConnection,
 ) -> Result<Option<NetworkMountCredentials>, NetworkSecretError> {
     let key = NetworkSecretKey::from_connection(&connection);
-    let output = run_secret_tool_command("lookup", &connection, key.lookup_args()).await?;
+    if let Some(credentials) = lookup_by_attribute(&connection, &key, APP_ATTRIBUTE).await? {
+        return Ok(Some(credentials));
+    }
+
+    // 新属性未命中：回退读改名前遗留的条目，命中则一次性搬运到新属性，
+    // 避免旧条目永久孤儿化。
+    let Some(credentials) = lookup_by_attribute(&connection, &key, LEGACY_APP_ATTRIBUTE).await?
+    else {
+        return Ok(None);
+    };
+    store_network_connection_credentials(connection.clone(), credentials.clone()).await?;
+    let legacy_output =
+        run_secret_tool_command("clear", &connection, key.legacy_clear_args()).await?;
+    if !legacy_output.status.success() && !stderr_text(&legacy_output).is_empty() {
+        return Err(secret_tool_failed(
+            "clear",
+            &connection,
+            legacy_output.status,
+            stderr_text(&legacy_output),
+        ));
+    }
+    Ok(Some(credentials))
+}
+
+async fn lookup_by_attribute(
+    connection: &NetworkConnection,
+    key: &NetworkSecretKey,
+    app_attribute: &str,
+) -> Result<Option<NetworkMountCredentials>, NetworkSecretError> {
+    let output =
+        run_secret_tool_command("lookup", connection, key.lookup_args_for(app_attribute)).await?;
     if !output.status.success() {
         let stderr = stderr_text(&output);
         if stderr.is_empty() {
@@ -47,7 +80,7 @@ pub async fn lookup_network_connection_credentials(
         }
         return Err(secret_tool_failed(
             "lookup",
-            &connection,
+            connection,
             output.status,
             stderr,
         ));
@@ -125,13 +158,19 @@ pub async fn clear_network_connection_credentials(
     let key = NetworkSecretKey::from_connection(&connection);
     let output = run_secret_tool_command("clear", &connection, key.clear_args()).await?;
     if output.status.success() || stderr_text(&output).is_empty() {
+        return Ok(());
+    }
+    // 新属性未命中：清理改名前遗留的条目。
+    let legacy_output =
+        run_secret_tool_command("clear", &connection, key.legacy_clear_args()).await?;
+    if legacy_output.status.success() || stderr_text(&legacy_output).is_empty() {
         Ok(())
     } else {
         Err(secret_tool_failed(
             "clear",
             &connection,
-            output.status,
-            stderr_text(&output),
+            legacy_output.status,
+            stderr_text(&legacy_output),
         ))
     }
 }
@@ -154,12 +193,20 @@ impl NetworkSecretKey {
         }
     }
 
-    fn lookup_args(&self) -> Vec<String> {
-        self.command_args("lookup")
-    }
-
     fn clear_args(&self) -> Vec<String> {
         self.command_args("clear")
+    }
+
+    fn legacy_clear_args(&self) -> Vec<String> {
+        let mut args = vec!["clear".to_owned()];
+        args.extend(self.attribute_args_for(LEGACY_APP_ATTRIBUTE));
+        args
+    }
+
+    fn lookup_args_for(&self, app_attribute: &str) -> Vec<String> {
+        let mut args = vec!["lookup".to_owned()];
+        args.extend(self.attribute_args_for(app_attribute));
+        args
     }
 
     fn store_args(&self) -> Vec<String> {
@@ -175,9 +222,13 @@ impl NetworkSecretKey {
     }
 
     fn attribute_args(&self) -> Vec<String> {
+        self.attribute_args_for(APP_ATTRIBUTE)
+    }
+
+    fn attribute_args_for(&self, app_attribute: &str) -> Vec<String> {
         vec![
             "application".to_owned(),
-            APP_ATTRIBUTE.to_owned(),
+            app_attribute.to_owned(),
             "kind".to_owned(),
             KIND_ATTRIBUTE.to_owned(),
             "id".to_owned(),
@@ -192,7 +243,7 @@ impl NetworkSecretKey {
     }
 
     fn label(&self) -> String {
-        format!("File Manager network password ({})", self.id)
+        format!("Bennu network password ({})", self.id)
     }
 }
 

@@ -123,7 +123,7 @@ pub(crate) fn gl_fallback_restart_after_renderer_failure() -> Result<(), String>
     );
     let error = command.exec();
     Err(format!(
-        "failed to restart File Manager with GL fallback: {error}"
+        "failed to restart Bennu with GL fallback: {error}"
     ))
 }
 

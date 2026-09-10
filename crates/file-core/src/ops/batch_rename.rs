@@ -155,7 +155,7 @@ async fn available_batch_rename_temporary_path(
         .ok_or_else(|| invalid_batch_rename_input(source, "source name cannot be empty"))?;
 
     for index in 0..1000 {
-        let candidate = parent.join(format!(".file-manager-batch-rename-{index}.tmp"));
+        let candidate = parent.join(format!(".bennu-batch-rename-{index}.tmp"));
         if reserved.contains(&candidate) {
             continue;
         }
@@ -282,7 +282,7 @@ mod tests {
         let first = dir.path().join("first.txt");
         let second = dir.path().join("second.txt");
         let final_first = dir.path().join("alpha.txt");
-        let temp_second = dir.path().join(".file-manager-batch-rename-1.tmp");
+        let temp_second = dir.path().join(".bennu-batch-rename-1.tmp");
         fs::write(&final_first, b"one").unwrap();
         fs::write(&temp_second, b"two").unwrap();
 
@@ -290,7 +290,7 @@ mod tests {
             &[(final_first.clone(), first.clone())],
             &[
                 (
-                    dir.path().join(".file-manager-batch-rename-0.tmp"),
+                    dir.path().join(".bennu-batch-rename-0.tmp"),
                     first.clone(),
                 ),
                 (temp_second.clone(), second.clone()),
@@ -310,9 +310,9 @@ mod tests {
         let first = dir.path().join("first.txt");
         let second = dir.path().join("second.txt");
         let third = dir.path().join("third.txt");
-        let temp_first = dir.path().join(".file-manager-batch-rename-0.tmp");
-        let temp_second = dir.path().join(".file-manager-batch-rename-1.tmp");
-        let temp_third = dir.path().join(".file-manager-batch-rename-2.tmp");
+        let temp_first = dir.path().join(".bennu-batch-rename-0.tmp");
+        let temp_second = dir.path().join(".bennu-batch-rename-1.tmp");
+        let temp_third = dir.path().join(".bennu-batch-rename-2.tmp");
         fs::write(&second, b"one").unwrap();
         fs::write(&third, b"two").unwrap();
         fs::write(&temp_third, b"three").unwrap();

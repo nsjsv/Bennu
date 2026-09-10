@@ -100,7 +100,7 @@ impl GvfsDeviceRuntime {
         let (request_sender, request_receiver) = mpsc::unbounded_channel();
         let (startup_sender, startup_receiver) = std::sync::mpsc::sync_channel(1);
         thread::Builder::new()
-            .name("file-manager-gvfs-devices".to_owned())
+            .name("bennu-gvfs-devices".to_owned())
             .spawn(move || {
                 let context = MainContext::new();
                 context.block_on(async move {

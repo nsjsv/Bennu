@@ -17,6 +17,7 @@ serde = { version = "1", features = ["derive"] }
 sha1.workspace = true
 sha2.workspace = true
 tar = "0.4.46"
+tracing.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true

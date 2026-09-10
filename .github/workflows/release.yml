@@ -18,13 +18,13 @@ defaults:
     shell: bash
 
 env:
-  APP_NAME: file-manager
+  APP_NAME: bennu
   CARGO_PACKAGE: app-ui
   CARGO_BINARY: app-ui
   DAEMON_CARGO_PACKAGE: file-search
-  DAEMON_BINARY: file-searchd
-  SEARCH_SERVICE_UNIT: file-manager-search.service
-  ACTIVATION_SERVICE_FILE: io.github.nsjsv.FileManager.service
+  DAEMON_BINARY: bennu-searchd
+  SEARCH_SERVICE_UNIT: bennu-search.service
+  ACTIVATION_SERVICE_FILE: io.github.nsjsv.Bennu.service
   ARCH: x86_64
 
 jobs:
@@ -148,11 +148,11 @@ jobs:
           SHA256_X86_64: ${{ needs.linux-release.outputs.sha256_x86_64 }}
         run: |
           if [[ -z "${AUR_SSH_PRIVATE_KEY}" ]]; then
-            echo "::error::AUR_SSH_PRIVATE_KEY secret is required to publish file-manager-bin"
+            echo "::error::AUR_SSH_PRIVATE_KEY secret is required to publish bennu-bin"
             exit 1
           fi
           if [[ -z "${AUR_KNOWN_HOSTS}" ]]; then
-            echo "::error::AUR_KNOWN_HOSTS secret is required to publish file-manager-bin"
+            echo "::error::AUR_KNOWN_HOSTS secret is required to publish bennu-bin"
             exit 1
           fi
           if [[ -z "${SHA256_X86_64}" ]]; then
@@ -171,13 +171,13 @@ jobs:
 
           aur_workdir="$(mktemp -d)"
           chmod 755 "${aur_workdir}"
-          aur_repo="${aur_workdir}/file-manager-bin"
-          git clone "ssh://aur@aur.archlinux.org/file-manager-bin.git" "${aur_repo}"
+          aur_repo="${aur_workdir}/bennu-bin"
+          git clone "ssh://aur@aur.archlinux.org/bennu-bin.git" "${aur_repo}"
 
           sed \
             -e "s|@PKGVER@|${PKGVER}|g" \
             -e "s|@SHA256_X86_64@|${SHA256_X86_64}|g" \
-            packaging/aur/file-manager-bin/PKGBUILD.in > "${aur_repo}/PKGBUILD"
+            packaging/aur/bennu-bin/PKGBUILD.in > "${aur_repo}/PKGBUILD"
 
           if grep -Eq '@PKGVER@|@SHA256_X86_64@' "${aur_repo}/PKGBUILD"; then
             echo "::error::AUR PKGBUILD still contains template placeholders"
@@ -275,11 +275,11 @@ jobs:
         run: |
           shopt -s nullglob
           assets=(
-            dist/file-manager-v*.tar.gz
+            dist/bennu-v*.tar.gz
             dist/SHA256SUMS
-            dist/file-manager_*.deb
+            dist/bennu_*.deb
             dist/SHA256SUMS.deb
-            dist/file-manager-*.rpm
+            dist/bennu-*.rpm
             dist/SHA256SUMS.rpm
           )
 

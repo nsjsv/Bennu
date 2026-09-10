@@ -82,7 +82,7 @@ pub(super) async fn recover_search_service_with(
                 return Err(SearchServiceDiagnostic::new(
                     SearchServiceDiagnosticKind::ComponentIncompatible,
                     format!(
-                        "{}; {unit_description}; reinstall the search service components from the current File Manager bundle, then try again",
+                        "{}; {unit_description}; reinstall the search service components from the current Bennu bundle, then try again",
                         incompatibility.into_message()
                     ),
                 ));

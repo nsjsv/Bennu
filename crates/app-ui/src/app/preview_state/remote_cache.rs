@@ -162,7 +162,7 @@ mod tests {
     fn completed_remote_office_cache_reuses_local_document_dispatch() {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
         let source = PathBuf::from("/run/user/1000/gvfs/dav/report.docx");
-        let cache_path = PathBuf::from("/tmp/file-manager-preview/report.docx");
+        let cache_path = PathBuf::from("/tmp/bennu-preview/report.docx");
         browser.preview = Some(PreviewState::DownloadingRemoteFile(
             RemotePreviewDownload::new(source.clone(), 5),
         ));
@@ -194,7 +194,7 @@ mod tests {
     fn completed_remote_pdf_cache_reuses_local_document_dispatch() {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
         let source = PathBuf::from("/run/user/1000/gvfs/dav/report.pdf");
-        let cache_path = PathBuf::from("/tmp/file-manager-preview/report.pdf");
+        let cache_path = PathBuf::from("/tmp/bennu-preview/report.pdf");
         browser.preview = Some(PreviewState::DownloadingRemoteFile(
             RemotePreviewDownload::new(source.clone(), 4),
         ));

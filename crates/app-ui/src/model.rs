@@ -666,6 +666,8 @@ pub(crate) enum Message {
     SettingsCategorySelected(SettingsCategory),
     SettingsSubpageOpened(SettingsSubpage),
     SettingsSubpageClosed,
+    AboutRepositoryLinkPressed,
+    AboutRepositoryLinkOpened(Result<(), String>),
     ContextMenuSettingsPageShifted(ContextMenuSettingsPageStep),
     ContextMenuSettingsItemToggled {
         page: ContextMenuSettingsPage,

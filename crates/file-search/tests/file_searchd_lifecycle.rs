@@ -20,15 +20,15 @@ async fn sigterm_reuses_protocol_shutdown_completion_boundary() {
     let mut idle_client = UnixStream::connect(&fixture.socket_path).await.unwrap();
     let daemon_process_id = daemon_process.id().unwrap();
     let signal_status = unsafe { libc::kill(daemon_process_id as i32, libc::SIGTERM) };
-    assert_eq!(signal_status, 0, "failed to send SIGTERM to file-searchd");
+    assert_eq!(signal_status, 0, "failed to send SIGTERM to bennu-searchd");
 
     let exit_status = tokio::time::timeout(Duration::from_secs(30), daemon_process.wait())
         .await
-        .expect("file-searchd did not finish graceful shutdown")
+        .expect("bennu-searchd did not finish graceful shutdown")
         .unwrap();
     assert!(
         exit_status.success(),
-        "file-searchd did not exit successfully after SIGTERM: {exit_status}"
+        "bennu-searchd did not exit successfully after SIGTERM: {exit_status}"
     );
 
     let mut trailing_byte = [0_u8; 1];
@@ -85,15 +85,15 @@ async fn sigterm_during_locked_database_maintenance_exits_without_waiting_for_sq
 
     let daemon_process_id = daemon_process.id().unwrap();
     let signal_status = unsafe { libc::kill(daemon_process_id as i32, libc::SIGTERM) };
-    assert_eq!(signal_status, 0, "failed to send SIGTERM to file-searchd");
+    assert_eq!(signal_status, 0, "failed to send SIGTERM to bennu-searchd");
     let exit_status = tokio::time::timeout(Duration::from_secs(2), daemon_process.wait())
         .await
-        .expect("file-searchd waited for locked SQLite maintenance")
+        .expect("bennu-searchd waited for locked SQLite maintenance")
         .unwrap();
 
     assert!(
         exit_status.success(),
-        "file-searchd did not exit successfully after SIGTERM: {exit_status}"
+        "bennu-searchd did not exit successfully after SIGTERM: {exit_status}"
     );
     assert!(
         !fixture.socket_path.exists(),
@@ -121,11 +121,11 @@ async fn shutdown_existing_retires_running_file_searchd_and_removes_socket() {
 
     let daemon_exit_status = tokio::time::timeout(Duration::from_secs(30), daemon_process.wait())
         .await
-        .expect("legacy file-searchd did not finish protocol shutdown")
+        .expect("legacy bennu-searchd did not finish protocol shutdown")
         .unwrap();
     assert!(
         daemon_exit_status.success(),
-        "legacy file-searchd did not exit successfully: {daemon_exit_status}"
+        "legacy bennu-searchd did not exit successfully: {daemon_exit_status}"
     );
     assert!(
         !fixture.socket_path.exists(),
@@ -185,7 +185,7 @@ impl DaemonProcessFixture {
             std::fs::create_dir_all(directory).unwrap();
         }
 
-        let socket_path = runtime_directory.join("file-manager-search.sock");
+        let socket_path = runtime_directory.join("bennu-search.sock");
         Self {
             _temporary_directory: temporary_directory,
             home_directory,
@@ -198,11 +198,11 @@ impl DaemonProcessFixture {
     }
 
     fn database_path(&self) -> PathBuf {
-        self.data_directory.join("file-manager/search.sqlite")
+        self.data_directory.join("bennu/search.sqlite")
     }
 
     fn daemon_command(&self) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_file-searchd"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_bennu-searchd"));
         command
             .env("HOME", &self.home_directory)
             .env("XDG_RUNTIME_DIR", &self.runtime_directory)
@@ -224,11 +224,11 @@ async fn wait_for_endpoint(daemon_process: &mut tokio::process::Child, socket_pa
             return;
         }
         if let Some(exit_status) = daemon_process.try_wait().unwrap() {
-            panic!("file-searchd exited before endpoint readiness: {exit_status}");
+            panic!("bennu-searchd exited before endpoint readiness: {exit_status}");
         }
         assert!(
             Instant::now() < startup_deadline,
-            "file-searchd endpoint did not become ready"
+            "bennu-searchd endpoint did not become ready"
         );
         tokio::time::sleep(Duration::from_millis(25)).await;
     }

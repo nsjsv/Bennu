@@ -28,5 +28,5 @@ zip = "8.6.0"
 tempfile.workspace = true
 
 [[bin]]
-name = "file-searchd"
+name = "bennu-searchd"
 path = "src/bin/file-searchd.rs"

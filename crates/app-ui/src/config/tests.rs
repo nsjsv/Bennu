@@ -167,7 +167,7 @@ fn writes_app_config_without_user_preferences() {
     app_config::write_app_config(&path, &app_config).expect("write app config");
 
     let content = fs::read_to_string(path).expect("read app config");
-    assert!(content.starts_with("# File Manager application configuration\n"));
+    assert!(content.starts_with("# Bennu application configuration\n"));
     assert!(content.contains("rendering_backend = \"display\""));
     assert!(content.contains("search_content_indexing_enabled = true"));
     assert!(content.contains("search_max_extract_bytes = 8192"));
@@ -181,7 +181,7 @@ fn user_preferences_round_trip_through_sqlite() {
     let state_database_path = temp_dir.path().join("state.sqlite");
     let store = TaskQueueStore::new(&state_database_path).expect("create state store");
     let app_config = AppConfig {
-        thumbnail_cache_dir: PathBuf::from("/var/cache/file-manager/thumbs"),
+        thumbnail_cache_dir: PathBuf::from("/var/cache/bennu/thumbs"),
         rendering_gpu_preference: RenderingGpuPreference::HighPerformanceGpu,
         search_content_indexing_enabled: false,
         search_max_extract_bytes: 1234,

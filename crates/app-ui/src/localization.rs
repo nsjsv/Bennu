@@ -313,13 +313,23 @@ fn translated_item_count(label: &str) -> Option<String> {
 
 fn exact_translation(text: &str) -> Option<&'static str> {
     match text {
-        "File Manager" => Some("文件管理器"),
-        "Settings - File Manager" => Some("设置 - 文件管理器"),
-        "Properties - File Manager" => Some("属性 - 文件管理器"),
-        "Preview - File Manager" => Some("预览 - 文件管理器"),
+        "Settings - Bennu" => Some("设置 - Bennu"),
+        "Properties - Bennu" => Some("属性 - Bennu"),
+        "Preview - Bennu" => Some("预览 - Bennu"),
+        "Search - Bennu" => Some("搜索 - Bennu"),
         "Closing window..." => Some("正在关闭窗口..."),
         "Settings" => Some("设置"),
         "General" => Some("通用"),
+        "About" => Some("关于"),
+        "Version" => Some("版本"),
+        "License" => Some("许可证"),
+        "GitHub repository" => Some("GitHub 仓库"),
+        "Report issues or browse the source code in your browser." => {
+            Some("在浏览器中查看源代码或提交问题。")
+        }
+        "Bennu is free software released under the GNU General Public License, version 3 or later." => {
+            Some("Bennu 是自由软件，基于 GNU 通用公共许可证第三版或更高版本授权。")
+        }
         "Appearance" => Some("外观"),
         "Theme" => Some("主题"),
         "Mode" => Some("模式"),
@@ -390,7 +400,7 @@ fn exact_translation(text: &str) -> Option<&'static str> {
         "Rendering" => Some("渲染"),
         "Discrete GPU" => Some("独立显卡"),
         "Restart Required" => Some("需要重启"),
-        "Rendering GPU preference changes require restarting File Manager." => {
+        "Rendering GPU preference changes require restarting Bennu." => {
             Some("更改渲染显卡偏好后需要重启文件管理器。")
         }
         "Restart" => Some("重启"),

@@ -272,19 +272,19 @@ fn supported_thumbnail_path_includes_images_and_videos() {
 
 #[test]
 fn thumbnail_cache_path_matches_cache_dir_descendants_only() {
-    let cache_dir = Path::new("/tmp/file-manager/thumbnails");
+    let cache_dir = Path::new("/tmp/bennu/thumbnails");
 
     assert!(path_is_in_thumbnail_cache(
         cache_dir,
-        "/tmp/file-manager/thumbnails"
+        "/tmp/bennu/thumbnails"
     ));
     assert!(path_is_in_thumbnail_cache(
         cache_dir,
-        "/tmp/file-manager/thumbnails/generated.png"
+        "/tmp/bennu/thumbnails/generated.png"
     ));
     assert!(!path_is_in_thumbnail_cache(
         cache_dir,
-        "/tmp/file-manager/thumbnails-extra/generated.png"
+        "/tmp/bennu/thumbnails-extra/generated.png"
     ));
     assert!(!path_is_in_thumbnail_cache("", "generated.png"));
 }

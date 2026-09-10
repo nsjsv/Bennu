@@ -42,10 +42,10 @@ const MIN_PROPERTIES_WIDTH: f32 = 680.0;
 const MIN_PROPERTIES_HEIGHT: f32 = 440.0;
 pub(super) const MAIN_WINDOW_INITIAL_WIDTH: f32 = 1180.0;
 pub(super) const MAIN_WINDOW_INITIAL_HEIGHT: f32 = 680.0;
-const MAIN_WINDOW_APP_ID: &str = "file-manager";
-const SETTINGS_WINDOW_APP_ID: &str = "file-manager-settings";
-const PROPERTIES_WINDOW_APP_ID: &str = "file-manager-properties";
-const PREVIEW_WINDOW_APP_ID: &str = "file-manager-preview";
+const MAIN_WINDOW_APP_ID: &str = "bennu";
+const SETTINGS_WINDOW_APP_ID: &str = "bennu-settings";
+const PROPERTIES_WINDOW_APP_ID: &str = "bennu-properties";
+const PREVIEW_WINDOW_APP_ID: &str = "bennu-preview";
 const PREVIEW_RESIZE_MATCH_TOLERANCE: f32 = 1.0;
 
 pub(super) fn main_window_settings() -> window::Settings {
@@ -322,15 +322,15 @@ impl FileBrowser {
 
     pub(crate) fn window_title(&self, window: window::Id) -> String {
         if self.settings_window == Some(window) {
-            crate::localization::translate_current("Settings - File Manager")
+            crate::localization::translate_current("Settings - Bennu")
         } else if self.properties_window == Some(window) {
-            crate::localization::translate_current("Properties - File Manager")
+            crate::localization::translate_current("Properties - Bennu")
         } else if self.preview_window == Some(window) {
-            crate::localization::translate_current("Preview - File Manager")
+            crate::localization::translate_current("Preview - Bennu")
         } else if self.search_workspace.is_some() {
-            crate::localization::translate_current("Search - File Manager")
+            crate::localization::translate_current("Search - Bennu")
         } else {
-            crate::localization::translate_current("File Manager")
+            crate::localization::translate_current("Bennu")
         }
     }
 
@@ -355,7 +355,8 @@ impl FileBrowser {
             SettingsCategory::General
             | SettingsCategory::Appearance
             | SettingsCategory::Files
-            | SettingsCategory::Shortcuts => Task::none(),
+            | SettingsCategory::Shortcuts
+            | SettingsCategory::About => Task::none(),
         };
         Task::batch([
             self.commit_rename_if_active(),
@@ -382,7 +383,8 @@ impl FileBrowser {
             SettingsCategory::General
             | SettingsCategory::Appearance
             | SettingsCategory::Files
-            | SettingsCategory::Shortcuts => Task::none(),
+            | SettingsCategory::Shortcuts
+            | SettingsCategory::About => Task::none(),
         };
         Task::batch([reset_scroll, refresh])
     }

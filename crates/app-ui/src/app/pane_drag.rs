@@ -1,13 +1,14 @@
 use std::path::Path;
 
-use iced::{event, Point};
+use iced::{event, Point, Task};
 
 use super::tabs::apply_active_tab_to_pane;
 use super::{FileBrowser, POINTER_DRAG_ACTIVATION_DISTANCE};
 use crate::app::panes::SplitOverlayBounds;
 use crate::model::{
     BrowserPane, BrowserPaneId, BrowserPaneLayout, FileDragNativeDndState, FileDragPhase,
-    PaneDragPointerPress, PaneDragState, PaneDropTarget, SelectionMarqueePhase, SplitRegion,
+    Message, PaneDragPointerPress, PaneDragState, PaneDropTarget, SelectionMarqueePhase,
+    SplitRegion,
 };
 
 const PANE_DROP_CENTER_FRACTION: f32 = 0.28;
@@ -131,23 +132,26 @@ impl FileBrowser {
         }
     }
 
-    pub(super) fn finish_pane_drag(&mut self) {
+    pub(super) fn finish_pane_drag(&mut self) -> Task<Message> {
         self.pane_drag_pointer_press = None;
         let Some(drag) = self.pane_drag.take() else {
-            return;
+            return Task::none();
         };
         if !drag.is_dragging() {
-            return;
+            return Task::none();
         }
 
         match drag.target {
             Some(PaneDropTarget::Merge(target_pane_id)) => {
                 self.merge_dragged_pane_into_target(drag.source_pane_id, target_pane_id);
+                // 合并把布局改回 Single 并增删 panes；与会话保存不变量对齐。
+                self.request_browser_session_save()
             }
             Some(PaneDropTarget::Split(region)) => {
                 self.move_dragged_pane_to_split_region(drag.source_pane_id, region);
+                self.request_browser_session_save()
             }
-            None => {}
+            None => Task::none(),
         }
     }
 
@@ -473,11 +477,15 @@ mod tests {
     use crate::thumbnail_cache::ColumnViewport;
 
     fn split_browser_for_test() -> FileBrowser {
+        split_browser_for_test_with(config::default_user_config())
+    }
+
+    fn split_browser_for_test_with(config: config::UserConfig) -> FileBrowser {
         let left_directory = PathBuf::from("/workspace/left");
         let right_directory = PathBuf::from("/workspace/right");
         let left_tab = BrowserTab::directory(0, left_directory.clone());
         let right_tab = BrowserTab::directory(1, right_directory);
-        let (mut browser, _) = FileBrowser::new(config::default_user_config());
+        let (mut browser, _) = FileBrowser::new(config);
 
         browser.sidebar_width = 0.0;
         browser.main_window_width = 200.0;
@@ -697,5 +705,64 @@ mod tests {
             pane_drag.target,
             Some(PaneDropTarget::Split(SplitRegion::Right))
         );
+    }
+
+    fn split_browser_with_save_enabled() -> FileBrowser {
+        let mut config = config::ui_thread_startup_config();
+        config.startup_location_policy = config::StartupLocationPolicy::PreviousSession;
+        config.save_view_state = config.startup_location_policy.saves_view_state();
+        split_browser_for_test_with(config)
+    }
+
+    #[test]
+    fn pane_drag_merge_finish_requests_session_save() {
+        let mut browser = split_browser_with_save_enabled();
+        browser.pane_drag = Some(PaneDragState {
+            source_pane_id: BrowserPaneId::PRIMARY,
+            phase: FileDragPhase::Dragging,
+            target: Some(PaneDropTarget::Merge(BrowserPaneId(1))),
+        });
+
+        drop(browser.finish_pane_drag());
+
+        assert!(matches!(
+            browser.pane_layout,
+            BrowserPaneLayout::Single { .. }
+        ));
+        assert!(browser.pending_browser_session_save);
+    }
+
+    #[test]
+    fn pane_drag_split_region_finish_requests_session_save() {
+        let mut browser = split_browser_with_save_enabled();
+        browser.pane_drag = Some(PaneDragState {
+            source_pane_id: BrowserPaneId::PRIMARY,
+            phase: FileDragPhase::Dragging,
+            target: Some(PaneDropTarget::Split(SplitRegion::Right)),
+        });
+
+        drop(browser.finish_pane_drag());
+
+        let BrowserPaneLayout::Split { first, second, .. } = browser.pane_layout else {
+            panic!("expected split pane layout");
+        };
+        // 拖到 Right 区域：源窗格排第二位，另一栏排第一。
+        assert_eq!(second, BrowserPaneId::PRIMARY);
+        assert_eq!(first, BrowserPaneId(1));
+        assert!(browser.pending_browser_session_save);
+    }
+
+    #[test]
+    fn pane_drag_without_drop_target_does_not_request_session_save() {
+        let mut browser = split_browser_with_save_enabled();
+        browser.pane_drag = Some(PaneDragState {
+            source_pane_id: BrowserPaneId::PRIMARY,
+            phase: FileDragPhase::Dragging,
+            target: None,
+        });
+
+        drop(browser.finish_pane_drag());
+
+        assert!(!browser.pending_browser_session_save);
     }
 }

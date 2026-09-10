@@ -2,6 +2,7 @@ pub mod archive;
 pub mod archive_extraction;
 pub mod archive_listing;
 pub mod checksum;
+pub mod data_dir_migration;
 pub mod directory_metadata;
 pub mod entry;
 pub mod media;

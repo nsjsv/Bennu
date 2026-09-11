@@ -10,7 +10,7 @@ use iced::{Alignment, Element, Length};
 
 use crate::app::panes::{BrowserPaneView, DirectoryContentAvailability};
 use crate::app::scrollbar::{enhanced_scrollbar, scrollbar_on_scroll, ScrollbarAxis};
-use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
+use crate::app::smooth_scroll::{smooth_scroll_content_with_shift, smooth_scroll_id};
 use crate::app::FileBrowser;
 use crate::appearance::{
     context_menu_style, enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction,
@@ -80,7 +80,11 @@ pub(crate) fn icon_grid_view<'a>(
     };
     let scrollbar_region = ScrollbarRegion::PaneIcons(pane_id);
     let scrollbar_visibility = browser.scrollbar_visibility_for(&scrollbar_region);
-    let grid_scroll = scrollable(smooth_scroll_content(content, scrollbar_region.clone()))
+    let grid_scroll = scrollable(smooth_scroll_content_with_shift(
+        content,
+        scrollbar_region.clone(),
+        browser.smooth_scroll_shift_pressed(),
+    ))
         .id(smooth_scroll_id(&scrollbar_region))
         .direction(enhanced_vertical_scrollbar_direction(
             scrollbar_visibility,

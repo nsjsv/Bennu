@@ -621,6 +621,8 @@ mod tests {
             phase: FileDragPhase::Dragging,
             native_dnd: FileDragNativeDndState::NotRequested,
             column_directories_snapshot: Vec::new(),
+            press_origin: iced::Point::ORIGIN,
+            preview_entries: Vec::new(),
         });
 
         drop(browser.update(Message::KeyboardModifiersChanged(ctrl_shift_modifiers())));

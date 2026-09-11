@@ -13,6 +13,8 @@ pub(crate) enum IconSymbol {
     ArrowUp,
     Bookmark,
     Check,
+    FileSolid,
+    FolderSolid,
     ChevronRight,
     Close,
     Columns,
@@ -88,6 +90,15 @@ fn rotated_chevron_right_bytes(rotation_degrees: f32) -> Vec<u8> {
         &CHEVRON_RIGHT_SVG[svg_end..]
     )
     .into_bytes()
+}
+
+/// 拖拽堆叠用实心图标:中空线条图标叠放会互相穿透,实心形状靠
+/// 遮挡产生层次。
+pub(crate) fn file_kind_solid_symbol(kind: FileKind) -> IconSymbol {
+    match kind {
+        FileKind::Directory => IconSymbol::FolderSolid,
+        FileKind::Symlink | FileKind::Other | FileKind::File => IconSymbol::FileSolid,
+    }
 }
 
 fn file_kind_icon_symbol(kind: FileKind, extension: Option<&str>) -> IconSymbol {
@@ -173,11 +184,13 @@ impl IconSymbol {
             Self::Eye => include_bytes!("../assets/icons/lucide/eye.svg"),
             Self::EyeOff => include_bytes!("../assets/icons/lucide/eye-off.svg"),
             Self::File => include_bytes!("../assets/icons/lucide/file.svg"),
+            Self::FileSolid => include_bytes!("../assets/icons/solid/file.svg"),
             Self::FileArchive => include_bytes!("../assets/icons/lucide/file-archive.svg"),
             Self::FileCode => include_bytes!("../assets/icons/lucide/file-code.svg"),
             Self::FileImage => include_bytes!("../assets/icons/lucide/file-image.svg"),
             Self::FileText => include_bytes!("../assets/icons/lucide/file-text.svg"),
             Self::Folder => include_bytes!("../assets/icons/lucide/folder.svg"),
+            Self::FolderSolid => include_bytes!("../assets/icons/solid/folder.svg"),
             Self::FolderOpen => include_bytes!("../assets/icons/lucide/folder-open.svg"),
             Self::Grid => GRID_ICON,
             Self::GripVertical => include_bytes!("../assets/icons/lucide/grip-vertical.svg"),

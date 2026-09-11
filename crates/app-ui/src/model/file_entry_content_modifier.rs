@@ -4,7 +4,7 @@ use super::PendingOperation;
 
 pub(crate) const CUT_ENTRY_CONTENT_OPACITY: f32 = 0.55;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(crate) enum FileEntryContentModifier {
     #[default]
     None,

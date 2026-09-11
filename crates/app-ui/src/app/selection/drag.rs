@@ -15,42 +15,85 @@ use crate::operation_queue::QueuedTransfer;
 
 impl FileBrowser {
     pub(crate) fn update_file_drag(&mut self, position: iced::Point) -> Task<Message> {
-        {
-            let Some(file_drag) = &mut self.file_drag else {
-                return Task::none();
-            };
-            let FileDragPhase::WaitingForMovement { origin } = file_drag.phase else {
-                return Task::none();
-            };
-
-            let delta_x = position.x - origin.x;
-            let delta_y = position.y - origin.y;
-            if delta_x * delta_x + delta_y * delta_y
-                < POINTER_DRAG_ACTIVATION_DISTANCE * POINTER_DRAG_ACTIVATION_DISTANCE
-            {
-                return Task::none();
+        let mut activated = false;
+        let mut dragging = false;
+        if let Some(file_drag) = &mut self.file_drag {
+            match file_drag.phase {
+                FileDragPhase::WaitingForMovement { origin } => {
+                    let delta_x = position.x - origin.x;
+                    let delta_y = position.y - origin.y;
+                    if delta_x * delta_x + delta_y * delta_y
+                        >= POINTER_DRAG_ACTIVATION_DISTANCE * POINTER_DRAG_ACTIVATION_DISTANCE
+                    {
+                        file_drag.phase = FileDragPhase::Dragging;
+                        activated = true;
+                    }
+                }
+                FileDragPhase::Dragging => dragging = true,
             }
-
-            file_drag.phase = FileDragPhase::Dragging;
+        } else {
+            return Task::none();
         }
 
-        self.prepare_native_file_drag_after_activation()
+        if activated {
+            // 快速甩动可能一步越出窗口:应用内设施照常启动,同时立即交接。
+            return if self.cursor_strictly_outside_main_window(position) {
+                Task::batch([
+                    self.begin_iced_file_drag_after_activation(),
+                    self.start_native_file_drag_for_cursor_left(),
+                ])
+            } else {
+                self.begin_iced_file_drag_after_activation()
+            };
+        }
+        if dragging && self.cursor_in_window_handoff_band(position) {
+            return self.start_native_file_drag_for_cursor_left();
+        }
+        Task::none()
     }
 
-    fn prepare_native_file_drag_after_activation(&mut self) -> Task<Message> {
+    /// 拖动中(左键隐式 grab)Wayland/X11 不发 CursorLeft——指针事件
+    /// 持续发给本窗口,光标越界也一样——所以交接时机只能按坐标判定。
+    /// 光标贴近边缘(缓冲带)就交接:越过边缘后合成器会结束隐式
+    /// grab,按压记录随之失效,越界后才请求的拖放注定被拒。
+    fn cursor_in_window_handoff_band(&self, position: iced::Point) -> bool {
+        const EDGE_HANDOFF_BAND: f32 = 16.0;
+        self.cursor_strictly_outside_main_window(position)
+            || position.x < EDGE_HANDOFF_BAND
+            || position.y < EDGE_HANDOFF_BAND
+            || position.x > self.main_window_width - EDGE_HANDOFF_BAND
+            || position.y > self.main_window_height - EDGE_HANDOFF_BAND
+    }
+
+    fn cursor_strictly_outside_main_window(&self, position: iced::Point) -> bool {
+        position.x < 0.0
+            || position.y < 0.0
+            || position.x > self.main_window_width
+            || position.y > self.main_window_height
+    }
+
+    /// 光标离开主窗口才把拖放交给 Wayland 原生会话(跨窗口拖放):窗口内
+    /// 保持应用内拖拽,滚轮/shift 滚轮/边缘自动滚全程可用。请求失败时保持
+    /// 应用内拖拽——回到窗口即恢复移动事件,重进后松手仍正常收尾,只有
+    /// 窗口外落放会丢失;此处不能像激活失败那样整段取消,用户可能只是
+    /// 晃过窗口边缘。
+    pub(crate) fn start_native_file_drag_for_cursor_left(&mut self) -> Task<Message> {
+        // 光标不在窗口内就没有后续 motion 来重算边缘滚计划,先无条件
+        // 清掉,防止帧循环带着残留计划在窗口外继续滚动。
+        self.stop_file_drag_edge_scroll();
         let can_start_native_drag = self.wayland_dnd.is_some()
             && self
                 .file_drag
                 .as_ref()
                 .is_some_and(FileDragState::can_start_native_dnd);
         if !can_start_native_drag {
-            return self.begin_iced_file_drag_after_activation();
+            return Task::none();
         }
 
         let drag_sources = self
             .file_drag
             .as_ref()
-            .expect("native drag activation requires an active file drag")
+            .expect("native drag handoff requires an active file drag")
             .sources
             .clone();
         match self.request_wayland_file_drag(drag_sources) {
@@ -58,17 +101,23 @@ impl FileBrowser {
                 if let Some(file_drag) = &mut self.file_drag {
                     file_drag.native_dnd = FileDragNativeDndState::NotRequested;
                 }
-                self.begin_iced_file_drag_after_activation()
+                Task::none()
+            }
+            WaylandFileDragRequest::Rejected(error) => {
+                if let Some(file_drag) = &mut self.file_drag {
+                    file_drag.native_dnd = FileDragNativeDndState::NotRequested;
+                }
+                // 请求已发出但失败:跨窗口拖放不可用需要让用户知道,
+                // 但应用内拖拽仍然有效,不能整段取消。
+                self.show_global_error(error);
+                Task::none()
             }
             WaylandFileDragRequest::Requested(session_id) => {
                 if let Some(file_drag) = &mut self.file_drag {
                     file_drag.native_dnd = FileDragNativeDndState::Requested(session_id);
                 }
-                Task::none()
-            }
-            WaylandFileDragRequest::Rejected(error) => {
-                self.cancel_file_drag_interaction();
-                self.show_global_error(error);
+                // 交接后落点归合成器管辖,冻结的应用内落点高亮必须清掉。
+                self.clear_file_drag_target();
                 Task::none()
             }
         }
@@ -85,6 +134,7 @@ impl FileBrowser {
         &mut self,
         release_directory: Option<PathBuf>,
     ) -> Task<Message> {
+        self.stop_file_drag_edge_scroll();
         let native_dnd = self
             .file_drag
             .as_ref()
@@ -154,7 +204,37 @@ impl FileBrowser {
             },
             native_dnd: FileDragNativeDndState::NotRequested,
             column_directories_snapshot,
+            press_origin: self.cursor_position,
+            preview_entries: Vec::new(),
         });
+    }
+
+    /// 用最近的条目 bounds 测量填充拖拽预览偏移快照。只填充一次:
+    /// 拖动中源视图滚动重排会改变条目原点,重算会让已提起的预览组跳位。
+    pub(crate) fn refresh_file_drag_preview_layout(
+        &mut self,
+        bounds: &[crate::model::ColumnEntryBounds],
+    ) {
+        let Some(file_drag) = &mut self.file_drag else {
+            return;
+        };
+        if !file_drag.is_dragging() || !file_drag.preview_entries.is_empty() {
+            return;
+        }
+        let source_pane_id = file_drag.source_pane_id;
+        let press_origin = file_drag.press_origin;
+        let sources: std::collections::HashSet<&std::path::Path> =
+            file_drag.sources.iter().map(|path| path.as_path()).collect();
+        file_drag.preview_entries = bounds
+            .iter()
+            .filter(|bound| {
+                bound.pane_id == source_pane_id && sources.contains(bound.path.as_path())
+            })
+            .map(|bound| crate::model::FileDragPreviewEntry {
+                path: bound.path.clone(),
+                offset: bound.bounds.position() - press_origin,
+            })
+            .collect();
     }
 
     fn finish_stationary_file_drag(&mut self, file_drag: FileDragState) -> Task<Message> {

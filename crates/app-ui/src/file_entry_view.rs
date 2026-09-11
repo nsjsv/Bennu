@@ -8,7 +8,7 @@ use iced::{Background, Border, Element, Length, Theme};
 use crate::app::panes::BrowserPaneView;
 use crate::app::FileBrowser;
 use crate::appearance::{
-    base_text_color, dragged_row_style, hovered_row_style, icon_svg_style, muted_icon_svg_style,
+    base_text_color, hovered_row_style, icon_svg_style,
     open_child_row_style, selected_icon_svg_style, selected_row_style, selected_row_style_for_run,
     warning_icon_svg_style,
 };
@@ -76,7 +76,6 @@ pub(crate) enum FileEntryVisualState {
 pub(crate) enum FileEntryIconTone {
     Normal,
     Selected,
-    Muted,
     Warning,
 }
 
@@ -104,8 +103,8 @@ impl FileEntryVisualState {
 
     pub(crate) fn icon_tone(self) -> FileEntryIconTone {
         match self {
-            Self::Dragged => FileEntryIconTone::Muted,
-            Self::Selected => FileEntryIconTone::Selected,
+            // 拖拽源与选中共用同一高亮观感,拖拽预览由光标旁的堆叠图标负责。
+            Self::Dragged | Self::Selected => FileEntryIconTone::Selected,
             Self::Normal | Self::Hovered | Self::OpenChild => FileEntryIconTone::Normal,
         }
     }
@@ -116,8 +115,7 @@ impl FileEntryVisualState {
     ) -> impl Fn(&Theme) -> iced::widget::container::Style + Clone {
         move |theme| {
             let text_color = match self {
-                Self::Dragged => dragged_row_style(theme).text_color,
-                Self::Selected => selected_row_style(theme).text_color,
+                Self::Dragged | Self::Selected => selected_row_style(theme).text_color,
                 Self::Hovered => hovered_row_style(theme).text_color,
                 Self::OpenChild => open_child_row_style(theme).text_color,
                 Self::Normal => Some(base_text_color(theme)),
@@ -136,8 +134,7 @@ impl FileEntryVisualState {
         selection_run_position: Option<SelectionRunPosition>,
     ) -> Option<Box<dyn Fn(&Theme) -> iced::widget::container::Style>> {
         match self {
-            Self::Dragged => Some(Box::new(dragged_row_style)),
-            Self::Selected => {
+            Self::Dragged | Self::Selected => {
                 let style: Box<dyn Fn(&Theme) -> iced::widget::container::Style> =
                     match selection_run_position {
                         Some(position) => Box::new(selected_row_style_for_run(position)),
@@ -159,6 +156,17 @@ impl FileBrowser {
             .map_or(FileEntryContentModifier::None, |operation| {
                 operation.content_modifier_for_path(path)
             })
+    }
+
+    /// 拖拽预览图标:按源条目的文件类型取图标;损坏的符号链接显示警告。
+    pub(crate) fn file_drag_icon_symbol(&self, path: &Path) -> IconSymbol {
+        match self.entry_for_path(path) {
+            Some(entry) if entry.kind == FileKind::Symlink && entry.is_broken_symlink => {
+                IconSymbol::TriangleAlert
+            }
+            Some(entry) => crate::icons::file_kind_solid_symbol(entry.kind),
+            None => IconSymbol::FileSolid,
+        }
     }
 }
 
@@ -340,7 +348,6 @@ fn entry_icon(
         file_entry_icon_symbol(entry.kind, entry.name())
     };
     let tone = match (symbol, tone) {
-        (IconSymbol::TriangleAlert, FileEntryIconTone::Muted) => FileEntryIconTone::Muted,
         (IconSymbol::TriangleAlert, _) => FileEntryIconTone::Warning,
         _ => tone,
     };
@@ -353,7 +360,6 @@ fn icon_tone_style(
     match tone {
         FileEntryIconTone::Normal => icon_svg_style(),
         FileEntryIconTone::Selected => selected_icon_svg_style(),
-        FileEntryIconTone::Muted => muted_icon_svg_style(),
         FileEntryIconTone::Warning => warning_icon_svg_style(),
     }
 }
@@ -625,12 +631,11 @@ mod tests {
                 FileEntryVisualState::OpenChild => open_child_row_style(&theme)
                     .text_color
                     .expect("open-child style must define text color"),
-                FileEntryVisualState::Selected => selected_row_style(&theme)
-                    .text_color
-                    .expect("selection style must define text color"),
-                FileEntryVisualState::Dragged => dragged_row_style(&theme)
-                    .text_color
-                    .expect("drag style must define text color"),
+                FileEntryVisualState::Dragged | FileEntryVisualState::Selected => {
+                    selected_row_style(&theme)
+                        .text_color
+                        .expect("selection style must define text color")
+                }
             };
             let style = visual_state.content_style(FileEntryContentModifier::Cut)(&theme);
             let cut_color = style

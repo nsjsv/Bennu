@@ -377,6 +377,7 @@ impl FileBrowser {
     pub(in crate::app) fn cancel_file_drag_interaction(&mut self) {
         self.file_drag = None;
         self.file_drop_session = None;
+        self.stop_file_drag_edge_scroll();
         self.clear_internal_file_drop_visuals();
     }
 

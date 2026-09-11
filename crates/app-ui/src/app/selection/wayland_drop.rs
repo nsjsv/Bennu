@@ -204,6 +204,8 @@ fn install_internal_source(
         phase: FileDragPhase::Dragging,
         native_dnd: FileDragNativeDndState::Started(source_session_id),
         column_directories_snapshot: Vec::new(),
+        press_origin: iced::Point::ORIGIN,
+        preview_entries: Vec::new(),
     });
 }
 

@@ -154,6 +154,8 @@ mod tests {
             phase: FileDragPhase::Dragging,
             native_dnd: FileDragNativeDndState::NotRequested,
             column_directories_snapshot: Vec::new(),
+            press_origin: iced::Point::ORIGIN,
+            preview_entries: Vec::new(),
         });
         browser.selection_marquee = Some(SelectionMarquee {
             gesture_origin: Point::new(0.0, 0.0),

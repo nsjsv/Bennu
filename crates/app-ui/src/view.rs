@@ -52,16 +52,15 @@ pub(crate) use tab_motion::translated_with_width_overflow;
 
 use std::path::Path;
 
-use file_core::{DirectoryEntry, FileKind};
-use iced::widget::{container, mouse_area, opaque, row, stack, Column, Row, Space, Svg};
+use iced::alignment::Vertical;
+use iced::widget::{container, mouse_area, opaque, row, stack, Stack, Column, Row, Space, Svg};
 use iced::{Alignment, Element, Length, Point, Theme};
 
 use crate::app::panes::BrowserPaneView;
 use crate::app::smooth_scroll::smooth_scroll_id;
 use crate::app::FileBrowser;
 use crate::appearance::{
-    app_content_style, column_resize_divider_style, drag_preview_badge_style,
-    drag_preview_style, icon_svg_style,
+    app_content_style, column_resize_divider_style, faded_drag_preview_label_style, icon_svg_style,
     selected_icon_svg_style, selected_tab_item_style, tab_split_overlay_style,
     warning_icon_svg_style,
 };
@@ -73,7 +72,7 @@ use crate::floating_surface::{
 };
 use crate::formatting::format_middle_ellipsized_text;
 use crate::icon_grid_view::icon_grid_view;
-use crate::icons::{file_entry_icon_symbol, IconSymbol};
+use crate::icons::IconSymbol;
 use crate::list_view::list_browser_view;
 use crate::model::{
     BrowserPaneId, BrowserPaneLayout, BrowserViewMode, Message, ScrollbarRegion, SplitAxis,
@@ -123,8 +122,6 @@ const TAB_LABEL_MAX_CHARS: usize = 24;
 const ERROR_NOTIFICATION_CONTENT_OFFSET_X: f32 = 18.0;
 const ERROR_NOTIFICATION_FLOAT_Y: f32 = 18.0;
 const RENDERER_RESTART_NOTICE_ERROR_OFFSET_Y: f32 = 58.0;
-const DRAG_PREVIEW_ICON_SIZE: f32 = 18.0;
-const DRAG_PREVIEW_LABEL_MAX_CHARS: usize = 34;
 const DRAG_PREVIEW_OFFSET_X: f32 = 14.0;
 const DRAG_PREVIEW_OFFSET_Y: f32 = 14.0;
 
@@ -224,24 +221,28 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
         floating.push(FloatingContent {
             element: destructive_action_confirmation_panel(confirmation),
             placement: FloatingPlacement::Center,
+            captures_pointer: true,
         });
     } else if let Some(file_drop_prompt) = &browser.file_drop_prompt {
         floating_input = BrowserFloatingInput::Modal;
         floating.push(FloatingContent {
             element: file_drop_operation_panel(file_drop_prompt),
             placement: FloatingPlacement::Center,
+            captures_pointer: true,
         });
     } else if let Some(conflict) = &browser.transfer_conflict {
         floating_input = BrowserFloatingInput::Modal;
         floating.push(FloatingContent {
             element: transfer_conflict_panel(conflict, &browser.thumbnail_cache),
             placement: FloatingPlacement::Center,
+            captures_pointer: true,
         });
     } else if let Some(archive_extraction) = &browser.archive_extraction {
         floating_input = BrowserFloatingInput::Modal;
         floating.push(FloatingContent {
             element: archive_extraction_panel(archive_extraction),
             placement: FloatingPlacement::Center,
+            captures_pointer: true,
         });
     } else if let Some(batch_rename) = &browser.batch_rename {
         floating_input = BrowserFloatingInput::Modal;
@@ -252,35 +253,41 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
                 browser.scrollbar_viewport_for(&ScrollbarRegion::BatchRenamePreview),
             ),
             placement: FloatingPlacement::Center,
+            captures_pointer: true,
         });
     } else if let Some(editor) = &browser.network_connection_editor {
         floating_input = BrowserFloatingInput::Modal;
         floating.push(FloatingContent {
             element: network_connection_editor_panel(editor),
             placement: FloatingPlacement::Center,
+            captures_pointer: true,
         });
-    } else if let Some(drag_preview) = drag_preview_panel(browser) {
+    } else if let Some((drag_preview, drag_preview_origin)) = drag_preview_panel(browser) {
         floating.push(FloatingContent {
             element: drag_preview,
-            placement: FloatingPlacement::Free(drag_preview_position(browser.cursor_position)),
+            placement: FloatingPlacement::Free(drag_preview_origin),
+            captures_pointer: false,
         });
     } else if let Some(archive_creation) = &browser.archive_creation {
         floating_input = BrowserFloatingInput::DismissibleBlocking;
         floating.push(FloatingContent {
             element: archive_creation_panel(archive_creation),
             placement: FloatingPlacement::Center,
+            captures_pointer: true,
         });
     } else if let Some(convert) = &browser.convert {
         floating_input = BrowserFloatingInput::DismissibleBlocking;
         floating.push(FloatingContent {
             element: convert_panel(convert),
             placement: FloatingPlacement::Center,
+            captures_pointer: true,
         });
     } else if let Some(checksum) = &browser.checksum {
         floating_input = BrowserFloatingInput::DismissibleBlocking;
         floating.push(FloatingContent {
             element: checksum_panel(checksum),
             placement: FloatingPlacement::Center,
+            captures_pointer: true,
         });
     } else if let Some(context_menu) = &browser.context_menu {
         floating_input = BrowserFloatingInput::ContextMenuReplacement;
@@ -299,6 +306,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
                 selected_search_entry_types,
             ),
             placement: FloatingPlacement::At(context_menu.position()),
+            captures_pointer: true,
         });
     } else if let Some(open_with) = &browser.open_with {
         floating_input = BrowserFloatingInput::DismissibleBlocking;
@@ -309,6 +317,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
                 browser.scrollbar_viewport_for(&ScrollbarRegion::OpenWithApplications),
             ),
             placement: FloatingPlacement::Center,
+            captures_pointer: true,
         });
     }
 
@@ -316,6 +325,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
         floating.push(FloatingContent {
             element: tab_split_overlay(bounds.width, bounds.height),
             placement: FloatingPlacement::Free(bounds.top_left),
+            captures_pointer: true,
         });
     }
 
@@ -323,6 +333,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
         floating.push(FloatingContent {
             element: tab_split_overlay(bounds.width, bounds.height),
             placement: FloatingPlacement::Free(bounds.top_left),
+            captures_pointer: true,
         });
     }
 
@@ -330,6 +341,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
         floating.push(FloatingContent {
             element: tab_preview,
             placement: FloatingPlacement::Free(drag_preview_position(browser.cursor_position)),
+            captures_pointer: true,
         });
     }
 
@@ -337,6 +349,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
         floating.push(FloatingContent {
             element: pane_preview,
             placement: FloatingPlacement::Free(drag_preview_position(browser.cursor_position)),
+            captures_pointer: true,
         });
     }
 
@@ -348,6 +361,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
                 .style(selected_tab_item_style)
                 .into(),
             placement: FloatingPlacement::Free(drag_preview_position(browser.cursor_position)),
+            captures_pointer: true,
         });
     }
 
@@ -358,6 +372,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
                 browser.sidebar_width + ERROR_NOTIFICATION_CONTENT_OFFSET_X,
                 ERROR_NOTIFICATION_FLOAT_Y,
             )),
+            captures_pointer: true,
         });
     }
 
@@ -373,6 +388,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
                 browser.sidebar_width + ERROR_NOTIFICATION_CONTENT_OFFSET_X,
                 notice_y,
             )),
+            captures_pointer: true,
         });
     }
 
@@ -390,6 +406,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
                 left: browser.sidebar_width + 12.0,
                 bottom: OPERATION_QUEUE_PANEL_BOTTOM,
             },
+            captures_pointer: true,
         });
     }
 
@@ -404,6 +421,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
                 right: OPERATION_QUEUE_INDICATOR_RIGHT,
                 bottom: OPERATION_QUEUE_INDICATOR_BOTTOM,
             },
+            captures_pointer: true,
         });
     }
 
@@ -705,63 +723,128 @@ fn drag_preview_position(cursor_position: Point) -> Point {
     )
 }
 
-fn drag_preview_panel(browser: &FileBrowser) -> Option<Element<'_, Message>> {
+// 拖拽预览:提起的选中条目按按下瞬间的相对位置围绕光标排布,
+// 离光标越远越淡。最大半径与拖出软件的 Wayland 位图上限一致。
+const DRAG_PREVIEW_FADE_RADIUS: f32 = 256.0;
+// 此距离内不参与淡出,核心组保持全浓。
+const DRAG_PREVIEW_FADE_SOLID_DISTANCE: f32 = 96.0;
+const DRAG_PREVIEW_MAX_PILLS: usize = 128;
+const DRAG_PREVIEW_PILL_ICON_SIZE: f32 = 24.0;
+const DRAG_PREVIEW_PILL_LABEL_SIZE: f32 = 12.0;
+const DRAG_PREVIEW_PILL_LABEL_WIDTH: f32 = 132.0;
+const DRAG_PREVIEW_PILL_LABEL_MAX_CHARS: usize = 20;
+// 无底板:24 图标 + 6 间距 + 132 文件名。
+const DRAG_PREVIEW_PILL_WIDTH: f32 = 162.0;
+const DRAG_PREVIEW_PILL_HEIGHT: f32 = 24.0;
+
+/// 返回预览浮层与其窗口位置:左上角对准最早出现的条目,使负偏移
+/// (按住条目右下时)也能完整显示。
+fn drag_preview_panel(browser: &FileBrowser) -> Option<(Element<'_, Message>, Point)> {
     let drag = browser.file_drag.as_ref()?;
-    if !drag.displays_iced_drag_preview() {
+    if !drag.displays_iced_drag_preview() || drag.preview_entries.is_empty() {
         return None;
     }
-    let source = drag.sources.first()?;
-    let (symbol, tone, label) = drag_preview_item(browser, source);
-    let label = format_middle_ellipsized_text(&label, DRAG_PREVIEW_LABEL_MAX_CHARS);
-    // 拖拽修饰键意图徽标:Ctrl=复制,其余为移动,实时跟随按键变化。
-    let intent_label = match browser.file_drag_transfer_intent() {
-        crate::model::TransferConflictMode::Copy => "Copy",
-        crate::model::TransferConflictMode::Move => "Move",
-    };
-    let content = row![
-        themed_icon(symbol, tone, DRAG_PREVIEW_ICON_SIZE),
-        readable_text(label).size(13),
-        container(readable_text(intent_label).size(12))
-            .padding([2, 8])
-            .style(drag_preview_badge_style),
-    ]
-    .spacing(8)
-    .align_y(Alignment::Center);
-
-    Some(
-        container(content)
-            .padding([7, 10])
-            .style(drag_preview_style)
-            .into(),
-    )
+    let pills: Vec<(iced::Vector, Element<'static, Message>)> = drag
+        .preview_entries
+        .iter()
+        .filter_map(|entry| {
+            let fade = drag_preview_fade(entry.offset)?;
+            Some((
+                entry.offset,
+                drag_preview_pill(browser, &entry.path, fade),
+            ))
+        })
+        .take(DRAG_PREVIEW_MAX_PILLS)
+        .collect();
+    let origin_x = pills
+        .iter()
+        .map(|(offset, _)| offset.x)
+        .fold(0.0_f32, f32::min);
+    let origin_y = pills
+        .iter()
+        .map(|(offset, _)| offset.y)
+        .fold(0.0_f32, f32::min);
+    // 浮层的可视范围按 Stack 的布局尺寸划定,不设尺寸就只盖住第一个
+    // 胶囊,后续胶囊会被视口剔除;这里显式撑出覆盖全部胶囊的包围盒。
+    let stack_width = pills
+        .iter()
+        .map(|(offset, _)| offset.x - origin_x)
+        .fold(0.0_f32, f32::max)
+        + DRAG_PREVIEW_PILL_WIDTH;
+    let stack_height = pills
+        .iter()
+        .map(|(offset, _)| offset.y - origin_y)
+        .fold(0.0_f32, f32::max)
+        + DRAG_PREVIEW_PILL_HEIGHT;
+    let layers: Vec<Element<'static, Message>> = pills
+        .into_iter()
+        .map(|(offset, pill)| drag_preview_pill_layer(offset, pill, origin_x, origin_y))
+        .collect();
+    let stack = Stack::with_children(layers)
+        .width(Length::Fixed(stack_width))
+        .height(Length::Fixed(stack_height));
+    Some((
+        stack.into(),
+        Point::new(
+            browser.cursor_position.x + origin_x,
+            browser.cursor_position.y + origin_y,
+        ),
+    ))
 }
 
-fn drag_preview_item(browser: &FileBrowser, path: &Path) -> (IconSymbol, IconTone, String) {
-    if let Some(entry) = browser.entry_for_path(path) {
-        return drag_preview_entry_item(entry);
-    }
-
-    let name = path.file_name().unwrap_or(path.as_os_str());
-    (
-        file_entry_icon_symbol(FileKind::Other, name),
-        IconTone::Normal,
-        name.to_string_lossy().into_owned(),
-    )
+/// 离光标越远越淡:淡出半径线性,核心距离内保持全浓;超出半径不显示。
+/// 返回的是"可见度"(1 = 全浓,0 = 消失)。
+fn drag_preview_fade(offset: iced::Vector) -> Option<f32> {
+    let distance = (offset.x * offset.x + offset.y * offset.y).sqrt();
+    let visibility = (DRAG_PREVIEW_FADE_RADIUS - distance)
+        / (DRAG_PREVIEW_FADE_RADIUS - DRAG_PREVIEW_FADE_SOLID_DISTANCE);
+    (visibility > 0.0).then(|| visibility.clamp(0.0, 1.0))
 }
 
-fn drag_preview_entry_item(entry: &DirectoryEntry) -> (IconSymbol, IconTone, String) {
-    let symbol = if entry.kind == FileKind::Symlink && entry.is_broken_symlink {
-        IconSymbol::TriangleAlert
-    } else {
-        file_entry_icon_symbol(entry.kind, entry.name())
-    };
+/// 单个条目:文件类型图标 + 文件名,无底板直接浮在内容上,随淡出
+/// 程度向背景色收敛。faded_themed_icon 与文字样式收的是"向背景混色
+/// 量"(1 = 消失),而上面算出的 fade 是"可见度"(1 = 全浓),
+/// 传参时做 1 - x 换算。
+fn drag_preview_pill(browser: &FileBrowser, path: &std::path::Path, fade: f32) -> Element<'static, Message> {
+    let symbol = browser.file_drag_icon_symbol(path);
     let tone = if symbol == IconSymbol::TriangleAlert {
         IconTone::Warning
     } else {
         IconTone::Normal
     };
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("?");
+    let label = format_middle_ellipsized_text(name, DRAG_PREVIEW_PILL_LABEL_MAX_CHARS);
+    container(
+        row![
+            faded_themed_icon(symbol, tone, DRAG_PREVIEW_PILL_ICON_SIZE, 1.0 - fade),
+            readable_text(label)
+                .size(DRAG_PREVIEW_PILL_LABEL_SIZE)
+                .width(Length::Fixed(DRAG_PREVIEW_PILL_LABEL_WIDTH))
+                .wrapping(iced::widget::text::Wrapping::None),
+        ]
+        .spacing(6)
+        .align_y(Vertical::Center),
+    )
+    .style(move |theme| faded_drag_preview_label_style(theme, 1.0 - fade))
+    .into()
+}
 
-    (symbol, tone, entry.name().to_string_lossy().into_owned())
+/// iced 容器无法给内容负偏移,用占位空间把胶囊放到相对光标的
+/// 目标位置;Stack 尺寸由占位与胶囊自身撑出。
+fn drag_preview_pill_layer(
+    offset: iced::Vector,
+    pill: Element<'static, Message>,
+    origin_x: f32,
+    origin_y: f32,
+) -> Element<'static, Message> {
+    Column::with_children(vec![
+        Space::new().height(offset.y - origin_y).into(),
+        row![Space::new().width(offset.x - origin_x), pill].into(),
+    ])
+    .into()
 }
 
 fn tab_drag_preview_panel(browser: &FileBrowser) -> Option<Element<'_, Message>> {
@@ -827,6 +910,33 @@ fn tab_title_text(directory: &Path, is_trash_view: bool) -> String {
 
 pub(super) fn themed_icon(symbol: IconSymbol, tone: IconTone, size: f32) -> Svg<'static, Theme> {
     symbol.view(size).style(icon_tone_style(tone))
+}
+
+/// 图标颜色向背景色褪色(fade 0=原色,1=完全融入背景):拖拽堆叠的
+/// 后层用它做出深浅层次。
+pub(super) fn faded_themed_icon(
+    symbol: IconSymbol,
+    tone: IconTone,
+    size: f32,
+    fade: f32,
+) -> Svg<'static, Theme> {
+    symbol.view(size).style(move |theme, status| {
+        let mut style = icon_tone_style(tone)(theme, status);
+        if let Some(color) = style.color.as_mut() {
+            let background = crate::matugen_theme::ui_colors(theme).background;
+            *color = mix_color(*color, background, fade);
+        }
+        style
+    })
+}
+
+fn mix_color(from: iced::Color, to: iced::Color, t: f32) -> iced::Color {
+    iced::Color {
+        r: from.r + (to.r - from.r) * t,
+        g: from.g + (to.g - from.g) * t,
+        b: from.b + (to.b - from.b) * t,
+        a: from.a,
+    }
 }
 
 pub(super) fn icon_tone_style(

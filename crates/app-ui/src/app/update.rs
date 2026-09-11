@@ -487,6 +487,12 @@ impl FileBrowser {
                     {
                         self.preview_window_chrome.start_hide();
                     }
+                    return Task::none();
+                }
+                if window == self.main_window {
+                    // 窗口内拖动期间收不到 release，必须在离开窗口时把
+                    // 拖放交给合成器，否则窗口外松手会挂起。
+                    return self.start_native_file_drag_for_cursor_left();
                 }
                 Task::none()
             }
@@ -506,6 +512,7 @@ impl FileBrowser {
                 }
             }
             Message::ColumnEntryBoundsMeasured(bounds) => {
+                self.refresh_file_drag_preview_layout(&bounds);
                 self.update_selection_from_column_entry_bounds(bounds)
             }
             Message::BreadcrumbDropTargetBoundsMeasured(generation, bounds) => {

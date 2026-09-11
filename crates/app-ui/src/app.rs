@@ -16,6 +16,7 @@ mod directory_metadata_demand;
 mod entry_changes;
 mod directory_recovery;
 mod events;
+mod file_drag_edge_scroll;
 mod file_operation_notifications;
 mod file_operations;
 mod global_error;
@@ -373,6 +374,7 @@ pub(crate) struct FileBrowser {
     last_browser_session_save: Option<std::time::Instant>,
     scrollbar: ScrollbarState,
     smooth_scroll: MosScrollState,
+    file_drag_edge_scroll: Option<file_drag_edge_scroll::FileDragEdgeScroll>,
     back_stack: Vec<PathBuf>,
     forward_stack: Vec<PathBuf>,
     next_tab_id: usize,
@@ -428,6 +430,7 @@ impl FileBrowser {
         Task::batch([
             self.advance_smooth_scroll_animation(),
             self.advance_scrollbar_animation(),
+            self.advance_file_drag_edge_scroll(),
             self.advance_address_bar_transition(),
             self.advance_tab_bar_reveal_animation(),
             self.advance_tab_animations(),
@@ -773,6 +776,7 @@ impl FileBrowser {
             last_browser_session_save: None,
             scrollbar: ScrollbarState::default(),
             smooth_scroll: MosScrollState::default(),
+            file_drag_edge_scroll: None,
             back_stack: Vec::new(),
             forward_stack: Vec::new(),
             next_tab_id: 1,
@@ -923,6 +927,7 @@ impl FileBrowser {
             || self.preview_window_bottom_controls.is_animating()
             || self.scrollbar_animation_is_active()
             || self.smooth_scroll_animation_is_active()
+            || self.file_drag_edge_scroll_is_active()
             || self.address_bar_transition_is_active()
             || self.tab_bar_reveal_animation_is_active()
             || self.tab_animation_is_active()

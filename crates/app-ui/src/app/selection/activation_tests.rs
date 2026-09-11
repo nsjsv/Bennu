@@ -133,7 +133,7 @@ fn shift_range_click_does_not_seed_activation_double_click() {
 }
 
 #[test]
-fn file_drag_requests_wayland_dnd_immediately_after_activation() {
+fn file_drag_stays_in_app_until_cursor_leaves() {
     let source = PathBuf::from("/workspace/report.txt");
     let mut browser = browser_with_entries(std::slice::from_ref(&source));
     drop(browser.accept_wayland_dnd_handle(Ok(Some(WaylandDndWindowHandle::new(1, 2)))));
@@ -145,7 +145,18 @@ fn file_drag_requests_wayland_dnd_immediately_after_activation() {
         Some(FileDragNativeDndState::NotRequested)
     );
 
+    // 激活不再立即请求原生拖放:窗口内保持应用内拖拽,滚轮/shift 滚轮/
+    // 边缘自动滚才有输入可用。
     drop(browser.update_file_drag(Point::new(10.0, 0.0)));
+    assert_eq!(
+        browser.file_drag.as_ref().map(|drag| drag.native_dnd),
+        Some(FileDragNativeDndState::NotRequested)
+    );
+
+    // 离开主窗口才把拖放交给合成器(跨窗口拖放)。
+    drop(browser.update(Message::CursorLeft {
+        window: browser.main_window,
+    }));
     assert!(matches!(
         browser.file_drag.as_ref().map(|drag| drag.native_dnd),
         Some(FileDragNativeDndState::Requested(_))
@@ -153,16 +164,36 @@ fn file_drag_requests_wayland_dnd_immediately_after_activation() {
 }
 
 #[test]
-fn main_window_outside_cursor_move_requests_wayland_dnd() {
+fn outside_cursor_move_hands_drag_to_native() {
     let source = PathBuf::from("/workspace/report.txt");
     let mut browser = browser_with_entries(std::slice::from_ref(&source));
     drop(browser.accept_wayland_dnd_handle(Ok(Some(WaylandDndWindowHandle::new(1, 2)))));
 
     drop(browser.handle_column_entry_clicked(source));
-    drop(browser.update(Message::CursorMoved {
-        window: browser.main_window,
-        position: Point::new(browser.main_window_width + 1.0, 12.0),
-    }));
+    drop(browser.update_file_drag(Point::new(10.0, 12.0)));
+    // 拖动中(隐式 grab)越界后收不到 CursorLeft,交接只能按坐标判定。
+    drop(browser.update_file_drag(Point::new(browser.main_window_width + 1.0, 12.0)));
+
+    let file_drag = browser
+        .file_drag
+        .as_ref()
+        .expect("file drag remains active");
+    assert!(file_drag.is_dragging());
+    assert!(matches!(
+        file_drag.native_dnd,
+        FileDragNativeDndState::Requested(_)
+    ));
+}
+
+#[test]
+fn fling_past_window_edge_hands_drag_to_native_in_one_move() {
+    let source = PathBuf::from("/workspace/report.txt");
+    let mut browser = browser_with_entries(std::slice::from_ref(&source));
+    drop(browser.accept_wayland_dnd_handle(Ok(Some(WaylandDndWindowHandle::new(1, 2)))));
+
+    drop(browser.handle_column_entry_clicked(source));
+    // 一步从按压点甩出窗口:激活与交接必须同时发生。
+    drop(browser.update_file_drag(Point::new(browser.main_window_width + 1.0, 12.0)));
 
     let file_drag = browser
         .file_drag
@@ -183,6 +214,9 @@ fn iced_release_does_not_consume_requested_wayland_source() {
 
     drop(browser.handle_column_entry_clicked(source));
     drop(browser.update_file_drag(Point::new(10.0, 0.0)));
+    drop(browser.update(Message::CursorLeft {
+        window: browser.main_window,
+    }));
     let requested = browser
         .file_drag
         .as_ref()
@@ -869,4 +903,66 @@ fn trash_plain_click_after_select_all_focuses_single_entry() {
 
     assert_eq!(browser.selected, Some(second.clone()));
     assert_eq!(browser.selected_paths, HashSet::from([second]));
+}
+
+fn active_drag_browser(origin: Point) -> FileBrowser {
+    let mut browser = browser_with_entries(&[]);
+    browser.cursor_position = origin;
+    browser.file_drag = Some(crate::model::FileDragState {
+        gesture_id: crate::model::FileDragGestureId(1),
+        source_pane_id: browser.active_pane_id(),
+        source_tab_id: browser.active_tab_id,
+        sources: vec![PathBuf::from("/workspace/report.txt")],
+        pressed_path: PathBuf::from("/workspace/report.txt"),
+        bookmark_source: None,
+        stationary_action: crate::model::FileDragStationaryAction::SelectionOnly,
+        phase: FileDragPhase::WaitingForMovement { origin },
+        native_dnd: FileDragNativeDndState::NotRequested,
+        column_directories_snapshot: Vec::new(),
+        press_origin: iced::Point::ORIGIN,
+        preview_entries: Vec::new(),
+    });
+    browser
+}
+
+#[test]
+fn file_drag_activation_stays_in_app_until_cursor_leaves() {
+    let origin = Point::new(100.0, 100.0);
+    let mut browser = active_drag_browser(origin);
+
+    drop(browser.update_file_drag(Point::new(104.0, 100.0)));
+
+    let file_drag = browser.file_drag.as_ref().expect("drag survives activation");
+    assert!(matches!(file_drag.phase, FileDragPhase::Dragging));
+    // 窗口内必须保持应用内拖拽(原生 dnd 未请求),滚轮/shift 滚轮/
+    // 边缘自动滚才有输入可用;离开窗口时才交给合成器。
+    assert_eq!(file_drag.native_dnd, FileDragNativeDndState::NotRequested);
+    assert!(browser.file_drop_session.is_some());
+}
+
+#[test]
+fn cursor_leaving_hands_drag_to_native_session() {
+    let origin = Point::new(100.0, 100.0);
+    let mut browser = active_drag_browser(origin);
+    drop(browser.update_file_drag(Point::new(104.0, 100.0)));
+    let top_edge = Point::new(
+        browser.sidebar_width + 20.0,
+        browser.main_panes_area_top() + 5.0,
+    );
+    browser.update_file_drag_edge_scroll(top_edge);
+    assert!(browser.file_drag_edge_scroll.is_some());
+
+    drop(browser.start_native_file_drag_for_cursor_left());
+
+    // 无 wayland dnd 运行时的测试环境走 Unavailable:拖拽仍保持应用内,
+    // 且边缘自动滚计划必须清掉,防止合成器接管后残留滚动。
+    assert_eq!(
+        browser
+            .file_drag
+            .as_ref()
+            .expect("drag survives handoff failure")
+            .native_dnd,
+        FileDragNativeDndState::NotRequested
+    );
+    assert!(browser.file_drag_edge_scroll.is_none());
 }

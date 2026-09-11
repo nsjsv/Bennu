@@ -6,7 +6,7 @@ use iced::{Alignment, Element, Length};
 
 use crate::app::panes::{BrowserPaneView, DirectoryContentAvailability};
 use crate::app::scrollbar::{enhanced_scrollbar, scrollbar_on_scroll, ScrollbarAxis};
-use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
+use crate::app::smooth_scroll::{smooth_scroll_content_with_shift, smooth_scroll_id};
 use crate::app::FileBrowser;
 use crate::appearance::{
     enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction, icon_svg_style,
@@ -92,7 +92,7 @@ pub(crate) fn list_initial_rows(window_height: f32, level: ViewDensityLevel) -> 
 }
 const LIST_ROW_PADDING: [u16; 2] = [0, 8];
 const LIST_HEADER_PADDING: [u16; 2] = [4, 8];
-const LIST_ROW_SPACING: u32 = 6;
+pub(crate) const LIST_ROW_SPACING: u32 = 6;
 const LIST_INDENT_WIDTH: f32 = 18.0;
 const LIST_TOGGLE_WIDTH: f32 = 18.0;
 const LIST_TOGGLE_ICON_SIZE: f32 = 14.0;
@@ -210,7 +210,11 @@ pub(crate) fn list_browser_view<'a>(
     }
     let scrollbar_region = ScrollbarRegion::PaneList(pane.id);
     let scrollbar_visibility = browser.scrollbar_visibility_for(&scrollbar_region);
-    let list_scroll = scrollable(smooth_scroll_content(rows, scrollbar_region.clone()))
+    let list_scroll = scrollable(smooth_scroll_content_with_shift(
+        rows,
+        scrollbar_region.clone(),
+        browser.smooth_scroll_shift_pressed(),
+    ))
         .id(smooth_scroll_id(&scrollbar_region))
         .direction(enhanced_vertical_scrollbar_direction(
             scrollbar_visibility,

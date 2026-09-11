@@ -437,6 +437,15 @@ impl WaylandFileDnd {
 
     fn start_pending_file_drag(&mut self, qh: &QueueHandle<Self>) {
         let Some(press) = self.active_left_press.clone() else {
+            // 按压记录只在按住期间存在;请求到达时已无按压就立即
+            // 拒绝,静默挂起只会拖到 TTL 过期后报出误导性的过期错误。
+            let Some(request) = self.pending_file_drag.take() else {
+                return;
+            };
+            self.reject_file_drag_request(
+                request,
+                "Wayland file drag request arrived after the pointer press was released",
+            );
             return;
         };
         if press.surface != self.surface {

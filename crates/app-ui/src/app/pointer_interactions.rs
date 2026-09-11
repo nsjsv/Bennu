@@ -89,6 +89,7 @@ impl FileBrowser {
         self.update_tab_drag(position);
         self.update_pane_drag(position);
         let file_drag_command = self.update_file_drag(position);
+        self.update_file_drag_edge_scroll(position);
         self.update_sidebar_bookmark_drag(position);
         self.update_sidebar_resize_drag(position);
         self.update_right_preview_panel_resize_drag(position);

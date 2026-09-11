@@ -123,7 +123,7 @@ impl FileBrowser {
     }
 
     /// 窗格区的窗口 y 起点:全窗工具栏顶栏横贯后,窗格从它下方开始。
-    fn main_panes_area_top(&self) -> f32 {
+    pub(super) fn main_panes_area_top(&self) -> f32 {
         crate::model::MAIN_TOOLBAR_ROW_HEIGHT
     }
 
@@ -470,7 +470,7 @@ impl FileBrowser {
         };
     }
 
-    fn split_content_width(&self) -> f32 {
+    pub(super) fn split_content_width(&self) -> f32 {
         (self.main_window_width - self.sidebar_width).max(1.0)
     }
 }

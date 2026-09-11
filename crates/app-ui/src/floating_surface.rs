@@ -176,6 +176,9 @@ where
 {
     pub(crate) element: Element<'a, Message, Theme, Renderer>,
     pub(crate) placement: FloatingPlacement,
+    /// 纯视觉浮层(如拖拽预览)会盖住光标,若捕获指针事件,底层
+    /// widget 将收不到松手,拖拽状态无法收尾;此类浮层须置 false。
+    pub(crate) captures_pointer: bool,
 }
 
 struct FloatingSurface<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
@@ -352,6 +355,7 @@ where
                 floating: &mut floating.element,
                 placement: floating.placement,
                 state: floating_tree,
+                captures_pointer: floating.captures_pointer,
             })));
         }
 
@@ -466,6 +470,7 @@ where
     floating: &'b mut Element<'a, Message, Theme, Renderer>,
     placement: FloatingPlacement,
     state: &'b mut widget::Tree,
+    captures_pointer: bool,
 }
 
 impl<'a, 'b, Message, Theme, Renderer> overlay::Overlay<Message, Theme, Renderer>
@@ -501,7 +506,9 @@ where
             self.state, event, layout, cursor, renderer, clipboard, shell, &bounds,
         );
 
-        if should_capture_floating_overlay_event(event, cursor, bounds) {
+        if self.captures_pointer
+            && should_capture_floating_overlay_event(event, cursor, bounds)
+        {
             shell.capture_event();
         }
     }

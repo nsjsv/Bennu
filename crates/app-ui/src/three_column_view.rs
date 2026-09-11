@@ -39,7 +39,7 @@ const COLUMN_CONTENT_SPACING: u32 = 2;
 const COLUMN_PADDING: [u16; 2] = [5, 5];
 const COLUMN_ENTRY_TEXT_SIZE: u32 = 13;
 pub(crate) const COLUMN_ENTRY_HEIGHT: f32 = 24.0;
-const COLUMN_OVERSCAN_ROWS: usize = 16;
+pub(crate) const COLUMN_OVERSCAN_ROWS: usize = 16;
 const COLUMN_ENTRY_SPACING: u32 = 4;
 const COLUMN_ENTRY_PADDING: [u16; 2] = [1, 4];
 

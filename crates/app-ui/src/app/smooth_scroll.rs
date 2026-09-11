@@ -451,6 +451,12 @@ fn wheel_delta_for_region(
     shift_pressed: bool,
     delta: mouse::ScrollDelta,
 ) -> Option<WheelScrollDelta> {
+    // 多栏的单列是竖向滚动区,shift 横滚的目标是外层整排列排
+    // (ColumnBrowser):这里不认领 shift 事件,让它冒泡到外层,
+    // 否则横向增量发布给竖轴滚动区会被静默丢弃。
+    if shift_pressed && matches!(region, ScrollbarRegion::Column { .. }) {
+        return None;
+    }
     let delta = match smooth_scroll_axis(region) {
         SmoothScrollAxis::Vertical => vertical_wheel_delta(shift_pressed, delta),
         SmoothScrollAxis::Horizontal => horizontal_wheel_delta(shift_pressed, delta),
@@ -502,18 +508,23 @@ fn view_density_step_from_wheel(
 }
 
 fn vertical_wheel_delta(shift_pressed: bool, delta: mouse::ScrollDelta) -> WheelScrollDelta {
+    // winit 不做 shift 竖转横，滚轮事件 x 恒为 0；shift 时必须取 y 转
+    // 横向输出，否则增量恒为零被 is_resting 丢弃。
+    if shift_pressed {
+        return horizontal_wheel_delta(true, delta);
+    }
     match delta {
-        mouse::ScrollDelta::Lines { x, y } => WheelScrollDelta {
+        mouse::ScrollDelta::Lines { x: _, y } => WheelScrollDelta {
             delta: SmoothScrollDelta {
                 x: 0.0,
-                y: -if shift_pressed { x } else { y } * MOS_SCROLL_STEP,
+                y: -y * MOS_SCROLL_STEP,
             },
             mode: WheelScrollMode::MosAnimated,
         },
-        mouse::ScrollDelta::Pixels { x, y } => WheelScrollDelta {
+        mouse::ScrollDelta::Pixels { x: _, y } => WheelScrollDelta {
             delta: SmoothScrollDelta {
                 x: 0.0,
-                y: -if shift_pressed { x } else { y },
+                y: -y,
             },
             mode: WheelScrollMode::Direct,
         },
@@ -619,6 +630,34 @@ mod tests {
     }
 
     #[test]
+    fn shifted_vertical_area_converts_wheel_to_horizontal_scroll() {
+        // winit 滚轮事件 x 恒为 0,shift 必须取 y 转横向输出,否则增量
+        // 恒为零被丢弃。
+        let delta = vertical_wheel_delta(true, mouse::ScrollDelta::Lines { x: 0.0, y: -2.0 });
+        assert_eq!(
+            delta,
+            WheelScrollDelta {
+                delta: SmoothScrollDelta {
+                    x: MOS_SCROLL_STEP * 2.0,
+                    y: 0.0,
+                },
+                mode: WheelScrollMode::MosAnimated,
+            }
+        );
+        let delta = vertical_wheel_delta(true, mouse::ScrollDelta::Pixels { x: 0.0, y: -30.0 });
+        assert_eq!(
+            delta,
+            WheelScrollDelta {
+                delta: SmoothScrollDelta {
+                    x: 30.0,
+                    y: 0.0,
+                },
+                mode: WheelScrollMode::Direct,
+            }
+        );
+    }
+
+    #[test]
     fn vertical_pixel_delta_preserves_native_wheel_delta() {
         let delta = vertical_wheel_delta(false, mouse::ScrollDelta::Pixels { x: 0.0, y: -4.0 });
 
@@ -664,6 +703,8 @@ mod tests {
 
     #[test]
     fn column_region_ignores_shifted_vertical_wheel() {
+        // None 让 shift 事件冒泡:多栏单列的 shift 横滚由外层
+        // ColumnBrowser 认领,发布给竖轴单列只会被静默丢弃。
         let delta = wheel_delta_for_region(
             &ScrollbarRegion::Column {
                 pane_id: BrowserPaneId::PRIMARY,

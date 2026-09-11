@@ -57,6 +57,14 @@ pub(crate) struct PaneDragPointerPress {
     pub(crate) origin: Point,
 }
 
+/// 拖拽预览中的一个条目:原点相对按下点(提起瞬间的光标位置)的偏移,
+/// 拖动期间保持不变——预览组是被"提起"的瞬时快照,不随源视图滚动重排。
+#[derive(Debug, Clone)]
+pub(crate) struct FileDragPreviewEntry {
+    pub(crate) path: PathBuf,
+    pub(crate) offset: iced::Vector,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FileDragStationaryAction {
     SelectionOnly,
@@ -75,6 +83,10 @@ pub(crate) struct FileDragState {
     pub(crate) phase: FileDragPhase,
     pub(crate) native_dnd: FileDragNativeDndState,
     pub(crate) column_directories_snapshot: Vec<PathBuf>,
+    /// 按下瞬间的光标位置(窗口坐标),预览偏移以此为基准。
+    pub(crate) press_origin: Point,
+    /// 提起时的条目偏移快照;空表示尚未由 bounds 测量填充。
+    pub(crate) preview_entries: Vec<FileDragPreviewEntry>,
 }
 
 impl FileDragState {

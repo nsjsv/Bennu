@@ -2,13 +2,17 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use desktop_linux::{WaylandDndController, WaylandDndWindowHandle, WaylandFileDragSessionId};
-use file_core::FileKind;
 use iced::Task;
 
 use super::FileBrowser;
-use crate::icons::{file_entry_icon_symbol, IconSymbol};
+use crate::matugen_theme::ui_colors;
 use crate::model::Message;
-use crate::wayland_drag_icon::render_wayland_file_drag_icon;
+use crate::wayland_drag_icon::{
+    file_drag_display_name, render_wayland_file_drag_icon, FileDragIconEntry, FileDragPillPalette,
+};
+
+/// 拖出位图中光标与单胶囊回退内容之间的缝隙。
+const DRAG_ICON_CURSOR_GAP: f32 = 6.0;
 
 #[derive(Clone, Debug)]
 pub(super) struct WaylandDndRuntime {
@@ -50,6 +54,45 @@ impl FileBrowser {
         Task::none()
     }
 
+    /// 拖拽图标配色:与窗口内 drag_preview_panel 同源取自当前主题。
+    fn file_drag_pill_palette(&self) -> FileDragPillPalette {
+        let theme = self
+            .application_theme
+            .active(self.user_config.theme_mode, self.user_config.color_scheme);
+        let colors = ui_colors(&theme);
+        FileDragPillPalette {
+            content: colors.on_surface,
+        }
+    }
+
+    /// 拖出位图内容:优先用提起时的偏移快照;快照尚未就绪(极快
+    /// 交接)时退回按下条目的单胶囊,给光标留一小段缝隙。
+    fn file_drag_icon_entries(&self, paths: &[PathBuf]) -> Vec<FileDragIconEntry> {
+        if let Some(drag) = self.file_drag.as_ref() {
+            if !drag.preview_entries.is_empty() {
+                return drag
+                    .preview_entries
+                    .iter()
+                    .map(|entry| FileDragIconEntry {
+                        symbol: self.file_drag_icon_symbol(&entry.path),
+                        label: file_drag_display_name(&entry.path),
+                        offset: entry.offset,
+                    })
+                    .collect();
+            }
+        }
+        paths
+            .first()
+            .map(|path| {
+                vec![FileDragIconEntry {
+                    symbol: self.file_drag_icon_symbol(path),
+                    label: file_drag_display_name(path),
+                    offset: iced::Vector::new(DRAG_ICON_CURSOR_GAP, DRAG_ICON_CURSOR_GAP),
+                }]
+            })
+            .unwrap_or_default()
+    }
+
     pub(crate) fn request_wayland_file_drag(&self, paths: Vec<PathBuf>) -> WaylandFileDragRequest {
         if self.is_trash_view || paths.is_empty() {
             return WaylandFileDragRequest::Unavailable;
@@ -62,23 +105,8 @@ impl FileBrowser {
             return WaylandFileDragRequest::Unavailable;
         };
         let path_count = paths.len();
-        let first_path = &paths[0];
-        let symbol = self
-            .entry_for_path(first_path)
-            .map(|entry| {
-                if entry.kind == FileKind::Symlink && entry.is_broken_symlink {
-                    IconSymbol::TriangleAlert
-                } else {
-                    file_entry_icon_symbol(entry.kind, entry.name())
-                }
-            })
-            .unwrap_or_else(|| {
-                file_entry_icon_symbol(
-                    FileKind::Other,
-                    first_path.file_name().unwrap_or(first_path.as_os_str()),
-                )
-            });
-        let icon = match render_wayland_file_drag_icon(symbol, path_count) {
+        let entries = self.file_drag_icon_entries(&paths);
+        let icon = match render_wayland_file_drag_icon(&entries, self.file_drag_pill_palette()) {
             Ok(icon) => icon,
             Err(error) => {
                 tracing::warn!(%error, path_count, "Wayland file drag icon rendering failed");

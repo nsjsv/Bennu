@@ -75,6 +75,35 @@ pub async fn run_recoverable_transfer_to_direct_move_intent<J: TransferJournal>(
     }
 }
 
+/// 任务以普通失败收尾前,把单个仍可回滚的记录就地结算为终态失败。失败与
+/// 取消一样必须先关账:队列只有确认恢复日志全部终态后才能写入失败状态并
+/// 丢弃恢复细节,否则任务会永远停在中间状态、每次启动都被恢复重跑。
+/// 终态记录原样返回;forward-only 检查点(含悬挂的 cancel/failure intent)
+/// 禁止就地失败,只能由前向恢复收敛。
+pub async fn settle_failed_recoverable_transfer<J: TransferJournal>(
+    mut record: TransferJournalRecord,
+    journal: &J,
+    diagnostic: String,
+) -> Result<TransferJournalRecord, RecoverableTransferError> {
+    if checkpoint_requires_forward_recovery(&record.checkpoint) {
+        return Err(RecoverableTransferError::RecoveryBlocked {
+            diagnostic: format!(
+                "record must recover forward instead of failing in place: {diagnostic}"
+            ),
+        });
+    }
+    match record.checkpoint {
+        TransferCheckpoint::Completed(_)
+        | TransferCheckpoint::Canceled { .. }
+        | TransferCheckpoint::Failed { .. }
+        | TransferCheckpoint::Skipped => Ok(record),
+        _ => {
+            fail_recoverable_transfer(&mut record, journal, diagnostic).await?;
+            Ok(record)
+        }
+    }
+}
+
 async fn run_recoverable_transfer_to_boundary<J: TransferJournal>(
     mut record: TransferJournalRecord,
     journal: &J,

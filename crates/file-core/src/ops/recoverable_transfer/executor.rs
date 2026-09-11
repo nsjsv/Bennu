@@ -43,7 +43,7 @@ use merge::{advance_merge_transfer, prepare_merge_transfer};
 use recovery::{finish_cancel, finish_failure};
 pub use run::{
     run_recoverable_transfer, run_recoverable_transfer_to_direct_move_intent,
-    DirectMoveIntentBoundary,
+    settle_failed_recoverable_transfer, DirectMoveIntentBoundary,
 };
 use validation::validate_checkpoint_semantics;
 

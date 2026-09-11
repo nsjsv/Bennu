@@ -28,8 +28,8 @@ pub use executor::{
     is_direct_move_segment_candidate, persist_recoverable_source_manifest,
     persist_recoverable_source_manifest_with_controls, prepare_direct_move_intent_segment,
     run_direct_move_batch_to_durable_renamed, run_recoverable_transfer,
-    run_recoverable_transfer_to_direct_move_intent, DirectMoveBatchRecord,
-    DirectMoveIntentBatchRecord, DirectMoveIntentBoundary,
+    run_recoverable_transfer_to_direct_move_intent, settle_failed_recoverable_transfer,
+    DirectMoveBatchRecord, DirectMoveIntentBatchRecord, DirectMoveIntentBoundary,
 };
 pub use fingerprint::ObjectFingerprint;
 pub(crate) use fingerprint::{fingerprint_object, fingerprint_object_with_controls};

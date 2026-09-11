@@ -677,6 +677,20 @@ async fn run_not_applicable_record(
     Ok(())
 }
 
+/// 这些错误类的完成语义本身要求保留恢复细节(RecoveryInterrupted/
+/// RecoveryBlocked),队列不会以 FinalizeRecovery 收尾,因此不由失败结算关账。
+fn failure_preserves_recovery_details(error: &RecoverableTransferError) -> bool {
+    matches!(
+        error,
+        RecoverableTransferError::Journal { .. }
+            | RecoverableTransferError::RecoveryRequired { .. }
+            | RecoverableTransferError::RecoveryBlocked { .. }
+    ) || matches!(
+        error,
+        RecoverableTransferError::FileOperation(FileError::ApplicationStopping)
+    )
+}
+
 async fn settle_recoverable_transfer_failure(
     mode: QueuedTransferMode,
     error: RecoverableTransferError,
@@ -687,11 +701,11 @@ async fn settle_recoverable_transfer_failure(
     journal: &TaskQueueTransferJournal,
     controls: &FileOperationControls,
 ) -> FileOperationCompletion {
-    if !matches!(
+    let cancellation_demanded = matches!(
         &error,
         RecoverableTransferError::FileOperation(FileError::Cancelled)
-    ) && !matches!(controls.checkpoint_now(), Err(FileError::Cancelled))
-    {
+    ) || matches!(controls.checkpoint_now(), Err(FileError::Cancelled));
+    if !cancellation_demanded && failure_preserves_recovery_details(&error) {
         return recoverable_transfer_failure(mode, error, completed_move_transfers);
     }
 
@@ -712,6 +726,51 @@ async fn settle_recoverable_transfer_failure(
             }
         };
 
+    if cancellation_demanded {
+        return settle_cancellation_records(
+            records,
+            mode,
+            error,
+            task_id,
+            output,
+            journal,
+            controls,
+        )
+        .await;
+    }
+
+    // 普通失败与取消一样必须关账:把所有未终态记录就地结算为失败,队列才
+    // 能以 FinalizeRecovery 写入失败状态。任一记录无法结算(日志故障或
+    // forward-only 检查点)时降级为 RecoveryInterrupted 保留恢复细节,交给
+    // 启动恢复收敛,避免任务卡在数据库中间状态、每次启动重跑重报。
+    let mut settlement_error = None;
+    for record in records {
+        if let Err(settle_failure) =
+            file_core::settle_failed_recoverable_transfer(record, journal, error.to_string())
+                .await
+        {
+            settlement_error.get_or_insert(settle_failure);
+            break;
+        }
+    }
+    if let Some(settlement_error) = settlement_error {
+        return FileOperationCompletion::RecoveryInterrupted(
+            settlement_error.to_string(),
+            completed_move_transfers,
+        );
+    }
+    recoverable_transfer_failure(mode, error, completed_move_transfers)
+}
+
+async fn settle_cancellation_records(
+    records: Vec<TransferJournalRecord>,
+    mode: QueuedTransferMode,
+    error: RecoverableTransferError,
+    task_id: u64,
+    output: &mut IcedSender<Message>,
+    journal: &TaskQueueTransferJournal,
+    controls: &FileOperationControls,
+) -> FileOperationCompletion {
     let mut batch_progress = TransferBatchProgress::new(&records);
     let settlement_options = FileTransferOptions::new(controls.clone());
     let mut settled_completed = Vec::new();
@@ -1016,6 +1075,7 @@ mod recoverable_transfer_tests {
 
     mod cancellation_terminalization;
     mod cross_filesystem_recovery;
+    mod failure_settlement;
     mod start_latency_harness;
 
     fn task_queue_transfer_journal_channel(

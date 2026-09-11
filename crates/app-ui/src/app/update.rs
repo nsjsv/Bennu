@@ -904,6 +904,9 @@ impl FileBrowser {
                 self.select_language_setting(language_setting)
             }
             Message::VisibleColumnCountSelected(count) => self.select_visible_column_count(count),
+            Message::ColumnWidthAdjustModeSelected(mode) => {
+                self.select_column_width_adjust_mode(mode)
+            }
             Message::StartupLocationPolicySelected(policy) => {
                 self.select_startup_location_policy(policy)
             }

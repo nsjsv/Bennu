@@ -129,7 +129,6 @@ mod tests {
             column_index: 0,
             cursor_start_x: 0.0,
             width_start: 240.0,
-            content_width_start: 720.0,
         });
         browser.tab_drag = Some(TabDragState {
             source_pane_id: browser.active_pane_id(),

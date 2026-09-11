@@ -321,7 +321,9 @@ pub(crate) struct FileBrowser {
     pub(crate) address_bar_transition: Option<AddressBarTransition>,
     next_address_editing_session_id: u64,
     pub(crate) column_width_overrides: HashMap<usize, f32>,
-    column_width_reference_content_widths: HashMap<usize, f32>,
+    /// 所有栏宽 override 共享的参考内容宽度:override 值语义上是"参考宽度下的宽度",
+    /// 读取时按 参考宽→当前内容宽 等比例换算。持久化/恢复/拖拽/模式切换都走同一换算。
+    column_width_reference_content_width: f32,
     pub(crate) terminal_emulator: TerminalEmulator,
     pub(crate) terminal_panel: crate::terminal_panel::TerminalPanelState,
     pub(crate) selected_settings_category: SettingsCategory,
@@ -719,7 +721,7 @@ impl FileBrowser {
             address_bar_transition: None,
             next_address_editing_session_id: 1,
             column_width_overrides: HashMap::new(),
-            column_width_reference_content_widths: HashMap::new(),
+            column_width_reference_content_width: MAIN_WINDOW_INITIAL_WIDTH,
             terminal_emulator: user_config.terminal_emulator,
             terminal_panel: crate::terminal_panel::TerminalPanelState::new(),
             selected_settings_category: SettingsCategory::General,
@@ -793,7 +795,7 @@ impl FileBrowser {
             .application_theme
             .replace_custom_color_scheme(user_config.custom_color_scheme);
         browser.refresh_current_language();
-        browser.refresh_column_width_reference_content_widths();
+        browser.refresh_column_width_reference_content_width();
         startup_trace::mark_once("file_browser_new_ready");
         let startup_rendering_environment = browser.startup_rendering_environment.clone();
         (

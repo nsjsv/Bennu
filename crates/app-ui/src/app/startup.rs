@@ -95,6 +95,8 @@ impl FileBrowser {
         match operation_store {
             Ok(loaded_store) => {
                 let persisted_column_width_overrides = loaded_store.column_width_overrides;
+                let persisted_reference_content_width =
+                    loaded_store.column_width_reference_content_width;
                 let classified_startup_session = loaded_store.classified_startup_session;
                 if let Some(error) = self
                     .operation_queue
@@ -103,7 +105,10 @@ impl FileBrowser {
                     self.show_global_error(error);
                 }
                 if !persisted_column_width_overrides.is_empty() {
-                    self.apply_column_width_overrides(persisted_column_width_overrides);
+                    self.apply_column_width_overrides(
+                        persisted_column_width_overrides,
+                        persisted_reference_content_width,
+                    );
                 }
                 let session_command = classified_startup_session
                     .map(|classified| self.accept_startup_plan(classified))
@@ -256,6 +261,7 @@ mod tests {
             task_queue_store: TaskQueueStore::new(root.path().join("state.sqlite"))
                 .expect("create operation store"),
             column_width_overrides: HashMap::new(),
+            column_width_reference_content_width: None,
             classified_startup_session,
         }
     }

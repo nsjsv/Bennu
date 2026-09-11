@@ -34,7 +34,8 @@ pub use user_preferences::{
     StoredContextMenuItemEntry, StoredContextMenuLayout, StoredContextMenuLayouts,
     StoredCustomColorScheme, StoredCustomColorSet, StoredListViewColumn, StoredNetworkConnection,
     StoredPreviewExtensionRules, StoredShortcutBinding, StoredSidebarFavorite,
-    StoredUserPreferences, StoredWindowControlPlacement, LAUNCH_WINDOW_POLICY_MERGE_INTO_EXISTING,
+    StoredUserPreferences, StoredWindowControlPlacement, COLUMN_WIDTH_ADJUST_MODE_PER_COLUMN,
+    COLUMN_WIDTH_ADJUST_MODE_UNIFORM, LAUNCH_WINDOW_POLICY_MERGE_INTO_EXISTING,
     LAUNCH_WINDOW_POLICY_OPEN_NEW_WINDOW,
 };
 
@@ -72,6 +73,9 @@ CREATE TABLE IF NOT EXISTS user_preferences (
 "#;
 
 const COLUMN_WIDTH_PREFERENCE_PREFIX: &str = "column_width.";
+/// 所有栏宽 override 共享的参考内容宽度。read_column_widths 只解析数字后缀,
+/// 该键天然被忽略;replace_column_widths 负责整体重写时一并维护它。
+pub const COLUMN_WIDTH_REFERENCE_CONTENT_WIDTH_KEY: &str = "column_width.reference_content_width";
 const BROWSER_SESSION_KEY: &str = "main";
 
 #[derive(Debug)]
@@ -631,7 +635,26 @@ impl TaskQueueStore {
         read_indexed_column_widths(&self.connection()?)
     }
 
-    pub fn replace_column_widths(&self, widths: HashMap<usize, f64>) -> StoreResult<()> {
+    /// 读取栏宽 override 的参考内容宽度;从未写入过时返回 None(旧数据兜底)。
+    pub fn read_column_width_reference_content_width(&self) -> StoreResult<Option<f64>> {
+        let connection = self.connection()?;
+        let value = connection
+            .query_row(
+                "SELECT value_real
+                 FROM ui_column_view_preferences
+                 WHERE preference_key = ?1",
+                params![COLUMN_WIDTH_REFERENCE_CONTENT_WIDTH_KEY],
+                |row| row.get::<_, f64>(0),
+            )
+            .optional()?;
+        Ok(value.filter(|width| width.is_finite() && *width > 0.0))
+    }
+
+    pub fn replace_column_widths(
+        &self,
+        widths: HashMap<usize, f64>,
+        reference_content_width: Option<f64>,
+    ) -> StoreResult<()> {
         let connection = self.connection()?;
         let indexed_pattern = format!("{COLUMN_WIDTH_PREFERENCE_PREFIX}%");
         connection.execute(
@@ -650,6 +673,15 @@ impl TaskQueueStore {
                 "INSERT INTO ui_column_view_preferences (preference_key, value_real)
                  VALUES (?1, ?2)",
                 params![column_width_preference_key(column_index), width],
+            )?;
+        }
+        if let Some(reference_content_width) =
+            reference_content_width.filter(|width| width.is_finite() && *width > 0.0)
+        {
+            connection.execute(
+                "INSERT INTO ui_column_view_preferences (preference_key, value_real)
+                 VALUES (?1, ?2)",
+                params![COLUMN_WIDTH_REFERENCE_CONTENT_WIDTH_KEY, reference_content_width],
             )?;
         }
         Ok(())

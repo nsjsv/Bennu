@@ -20,8 +20,9 @@ use super::{
     normalize_right_preview_panel_width, normalize_right_preview_preview_ratio,
     normalize_sidebar_width, normalize_visible_column_count,
     sort_direction_config_value, sort_direction_from_config_value, sort_field_config_value,
-    sort_field_from_config_value, LaunchWindowPolicy, PreviewExtensionRules,
-    PreviewFileSizeLimits, SidebarFavoriteConfig, UiLanguageSetting, UserConfig, ViewDensityLevel,
+    sort_field_from_config_value, ColumnWidthAdjustMode, LaunchWindowPolicy,
+    PreviewExtensionRules, PreviewFileSizeLimits, SidebarFavoriteConfig, UiLanguageSetting,
+    UserConfig, ViewDensityLevel,
 };
 use crate::matugen_theme::{ColorSchemePreset, CustomColorScheme, ThemeMode};
 use crate::model::{
@@ -62,6 +63,7 @@ pub(crate) struct UserPreferences {
     pub(crate) list_directory_size_display_mode: ListDirectorySizeDisplayMode,
     pub(crate) startup_location_policy: StartupLocationPolicy,
     pub(crate) launch_window_policy: LaunchWindowPolicy,
+    pub(crate) column_width_adjust_mode: ColumnWidthAdjustMode,
     pub(crate) startup_custom_directory: PathBuf,
     pub(crate) save_view_state: bool,
     pub(crate) shortcuts: ShortcutConfig,
@@ -119,6 +121,7 @@ impl UserPreferences {
             list_directory_size_display_mode: config.list_directory_size_display_mode,
             startup_location_policy: config.startup_location_policy,
             launch_window_policy: config.launch_window_policy,
+            column_width_adjust_mode: config.column_width_adjust_mode,
             startup_custom_directory: config.startup_custom_directory.clone(),
             save_view_state: config.startup_location_policy.saves_view_state(),
             shortcuts: config.shortcuts.clone(),
@@ -158,6 +161,7 @@ impl UserPreferences {
         config.list_directory_size_display_mode = self.list_directory_size_display_mode;
         config.startup_location_policy = self.startup_location_policy;
         config.launch_window_policy = self.launch_window_policy;
+        config.column_width_adjust_mode = self.column_width_adjust_mode;
         config.startup_custom_directory = self.startup_custom_directory.clone();
         config.save_view_state = self.startup_location_policy.saves_view_state();
         config.shortcuts = self.shortcuts.clone();
@@ -229,6 +233,7 @@ impl UserPreferences {
                 .to_owned();
         stored.startup_location = self.startup_location_policy.config_value().to_owned();
         stored.launch_window_policy = self.launch_window_policy.config_value().to_owned();
+        stored.column_width_adjust_mode = self.column_width_adjust_mode.config_value().to_owned();
         stored.startup_custom_directory = StoredPath::from_path(&self.startup_custom_directory);
         stored.save_view_state = self.startup_location_policy.saves_view_state();
         stored.shortcuts = stored_shortcuts(&self.shortcuts);
@@ -337,6 +342,10 @@ impl UserPreferences {
                 &stored.launch_window_policy,
             )
             .unwrap_or(default_preferences.launch_window_policy),
+            column_width_adjust_mode: ColumnWidthAdjustMode::from_config_value(
+                &stored.column_width_adjust_mode,
+            )
+            .unwrap_or(default_preferences.column_width_adjust_mode),
             startup_custom_directory: stored.startup_custom_directory.to_path_buf(),
             save_view_state: startup_location_policy.saves_view_state(),
             shortcuts: shortcut_config_from_stored(&stored.shortcuts),

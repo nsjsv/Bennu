@@ -150,9 +150,14 @@ pub(crate) fn delayed_thumbnail_refresh_command(
 pub(crate) fn save_column_width_overrides_command(
     task_queue_store: TaskQueueStore,
     column_width_overrides: HashMap<usize, f32>,
+    reference_content_width: Option<f32>,
 ) -> Task<Message> {
     Task::perform(
-        persist_column_width_overrides(task_queue_store, column_width_overrides),
+        persist_column_width_overrides(
+            task_queue_store,
+            column_width_overrides,
+            reference_content_width,
+        ),
         Message::ColumnWidthOverrideSaved,
     )
 }
@@ -488,11 +493,15 @@ async fn load_operation_store(
                 (column_index, config::normalize_column_width(width as f32))
             })
             .collect();
+        let column_width_reference_content_width = store
+            .read_column_width_reference_content_width()?
+            .map(|width| width as f32);
         let classified_startup_session = startup_session_request
             .map(|request| startup_paths::classify_startup_session(request, browser_session));
         Ok::<LoadedOperationStore, file_operation_store::StoreError>(LoadedOperationStore {
             task_queue_store: store,
             column_width_overrides,
+            column_width_reference_content_width,
             classified_startup_session,
         })
     })
@@ -504,6 +513,7 @@ async fn load_operation_store(
 async fn persist_column_width_overrides(
     task_queue_store: TaskQueueStore,
     column_width_overrides: HashMap<usize, f32>,
+    reference_content_width: Option<f32>,
 ) -> Result<(), String> {
     let stored_widths = column_width_overrides
         .into_iter()
@@ -514,10 +524,13 @@ async fn persist_column_width_overrides(
             )
         })
         .collect();
-    tokio::task::spawn_blocking(move || task_queue_store.replace_column_widths(stored_widths))
-        .await
-        .map_err(|error| error.to_string())?
-        .map_err(|error| error.to_string())
+    let stored_reference = reference_content_width.map(f64::from);
+    tokio::task::spawn_blocking(move || {
+        task_queue_store.replace_column_widths(stored_widths, stored_reference)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())
 }
 
 async fn load_thumbnail_batch(

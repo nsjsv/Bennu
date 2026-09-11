@@ -63,6 +63,7 @@ fn loaded_store(
         task_queue_store: TaskQueueStore::new(root.path().join("state.sqlite"))
             .expect("create operation store"),
         column_width_overrides: HashMap::new(),
+        column_width_reference_content_width: None,
         classified_startup_session,
     }
 }

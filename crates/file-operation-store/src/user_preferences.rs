@@ -11,6 +11,10 @@ const DEFAULT_VIEW_DENSITY_INDEX: u8 = 2;
 pub const LAUNCH_WINDOW_POLICY_MERGE_INTO_EXISTING: &str = "merge_into_existing";
 pub const LAUNCH_WINDOW_POLICY_OPEN_NEW_WINDOW: &str = "open_new_window";
 
+/// StoredUserPreferences.column_width_adjust_mode 的合法取值。
+pub const COLUMN_WIDTH_ADJUST_MODE_PER_COLUMN: &str = "per_column";
+pub const COLUMN_WIDTH_ADJUST_MODE_UNIFORM: &str = "uniform";
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StoredUserPreferences {
     pub network_list_thumbnail_downloads_enabled: bool,
@@ -93,6 +97,9 @@ pub struct StoredUserPreferences {
     pub custom_color_scheme: Option<StoredCustomColorScheme>,
     #[serde(default = "default_launch_window_policy")]
     pub launch_window_policy: String,
+    /// 多栏视图栏宽的调整方式;缺省 = 每栏独立(旧数据行为)。
+    #[serde(default = "default_column_width_adjust_mode")]
+    pub column_width_adjust_mode: String,
     /// 各右键菜单的项顺序与可见性;None = 旧版本数据,读取端回退内置默认。
     #[serde(default)]
     pub context_menu_layouts: Option<StoredContextMenuLayouts>,
@@ -170,6 +177,7 @@ impl Default for StoredUserPreferences {
             color_scheme: default_color_scheme(),
             custom_color_scheme: None,
             launch_window_policy: default_launch_window_policy(),
+            column_width_adjust_mode: default_column_width_adjust_mode(),
             context_menu_layouts: None,
         }
     }
@@ -224,6 +232,11 @@ pub struct StoredCustomColorSet {
 /// 新装/旧数据缺字段的默认策略：每次触发启动都打开新窗口。
 fn default_launch_window_policy() -> String {
     LAUNCH_WINDOW_POLICY_OPEN_NEW_WINDOW.to_owned()
+}
+
+/// 新装/旧数据缺字段的默认策略：保持每栏独立调宽的历史行为。
+fn default_column_width_adjust_mode() -> String {
+    COLUMN_WIDTH_ADJUST_MODE_PER_COLUMN.to_owned()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -429,6 +442,28 @@ mod launch_window_policy_tests {
         assert_eq!(
             StoredUserPreferences::default().launch_window_policy,
             LAUNCH_WINDOW_POLICY_OPEN_NEW_WINDOW
+        );
+    }
+
+    #[test]
+    fn missing_column_width_adjust_mode_defaults_to_per_column() {
+        // 回归:旧偏好数据没有模式字段,必须回退到每栏独立的历史行为。
+        let stored = StoredUserPreferences::default();
+        let mut json = serde_json::to_value(&stored).expect("serialize preferences");
+        json.as_object_mut()
+            .expect("preferences serialize to an object")
+            .remove("column_width_adjust_mode");
+
+        let parsed: StoredUserPreferences =
+            serde_json::from_value(json).expect("deserialize preferences");
+
+        assert_eq!(
+            parsed.column_width_adjust_mode,
+            COLUMN_WIDTH_ADJUST_MODE_PER_COLUMN
+        );
+        assert_eq!(
+            StoredUserPreferences::default().column_width_adjust_mode,
+            COLUMN_WIDTH_ADJUST_MODE_PER_COLUMN
         );
     }
 

@@ -9,7 +9,9 @@ use iced::{window, Alignment, Element, Length, Theme};
 
 use crate::app::FileBrowser;
 use crate::appearance::context_menu_button_style;
-use crate::config::{LaunchWindowPolicy, StartupLocationPolicy, UiLanguageSetting};
+use crate::config::{
+    ColumnWidthAdjustMode, LaunchWindowPolicy, StartupLocationPolicy, UiLanguageSetting,
+};
 use crate::icons::{rotated_chevron_right_view, IconSymbol};
 use crate::matugen_theme::{ColorSchemeFamily, ColorSchemePreset, ContrastWarnings, ThemeMode};
 use crate::model::{
@@ -133,6 +135,17 @@ impl fmt::Display for VisibleColumnCountPickOption {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&crate::localization::translate_current(
             visible_column_count_label(self.0),
+        ))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ColumnWidthAdjustModePickOption(ColumnWidthAdjustMode);
+
+impl fmt::Display for ColumnWidthAdjustModePickOption {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&crate::localization::translate_current(
+            column_width_adjust_mode_label(self.0),
         ))
     }
 }
@@ -302,10 +315,16 @@ fn appearance_settings_detail(
             ),
             settings_group(
                 "Columns view",
-                vec![labeled_setting_row(
-                    "Visible columns",
-                    visible_column_count_dropdown(browser),
-                )],
+                vec![
+                    labeled_setting_row(
+                        "Column width",
+                        column_width_adjust_mode_dropdown(browser),
+                    ),
+                    labeled_setting_row(
+                        "Visible columns",
+                        visible_column_count_dropdown(browser),
+                    ),
+                ],
             ),
             settings_group(
                 "Rendering",
@@ -716,6 +735,32 @@ fn visible_column_count_label(count: usize) -> &'static str {
         5 => "5 columns",
         _ => "3 columns",
     }
+}
+
+fn column_width_adjust_mode_label(mode: ColumnWidthAdjustMode) -> &'static str {
+    match mode {
+        ColumnWidthAdjustMode::Uniform => "All columns together",
+        ColumnWidthAdjustMode::PerColumn => "Adjust each column separately",
+    }
+}
+
+fn column_width_adjust_mode_dropdown(browser: &FileBrowser) -> Element<'static, Message> {
+    let options = [ColumnWidthAdjustMode::PerColumn, ColumnWidthAdjustMode::Uniform]
+        .into_iter()
+        .map(ColumnWidthAdjustModePickOption)
+        .collect::<Vec<_>>();
+
+    pick_list(
+        options,
+        Some(ColumnWidthAdjustModePickOption(
+            browser.user_config().column_width_adjust_mode,
+        )),
+        |selected| Message::ColumnWidthAdjustModeSelected(selected.0),
+    )
+    .width(Length::Fixed(SETTINGS_DROPDOWN_WIDTH))
+    .text_size(12)
+    .padding([5, 8])
+    .into()
 }
 
 fn launch_window_dropdown(browser: &FileBrowser) -> Element<'static, Message> {

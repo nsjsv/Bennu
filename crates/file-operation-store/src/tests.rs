@@ -184,26 +184,56 @@ fn delete_permanently_operation_roundtrips_through_json_and_database() {
 fn column_widths_roundtrip_replace_and_clear() {
     let (store, root) = test_store();
     store
-        .replace_column_widths(HashMap::from([(0, 240.5), (2, 360.0)]))
+        .replace_column_widths(
+            HashMap::from([(0, 240.5), (2, 360.0)]),
+            Some(1_920.0),
+        )
         .unwrap();
 
     assert_eq!(
         store.read_column_widths().unwrap(),
         HashMap::from([(0, 240.5), (2, 360.0)])
     );
+    assert_eq!(
+        store.read_column_width_reference_content_width().unwrap(),
+        Some(1_920.0)
+    );
 
     store
-        .replace_column_widths(HashMap::from([(1, 128.0)]))
+        .replace_column_widths(HashMap::from([(1, 128.0)]), Some(1_280.0))
         .unwrap();
 
     assert_eq!(
         store.read_column_widths().unwrap(),
         HashMap::from([(1, 128.0)])
     );
+    assert_eq!(
+        store.read_column_width_reference_content_width().unwrap(),
+        Some(1_280.0)
+    );
 
-    store.replace_column_widths(HashMap::new()).unwrap();
+    store.replace_column_widths(HashMap::new(), None).unwrap();
 
     assert!(store.read_column_widths().unwrap().is_empty());
+    assert_eq!(
+        store.read_column_width_reference_content_width().unwrap(),
+        None
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn column_width_reference_roundtrip_without_widths() {
+    let (store, root) = test_store();
+    store
+        .replace_column_widths(HashMap::new(), Some(800.0))
+        .unwrap();
+
+    assert!(store.read_column_widths().unwrap().is_empty());
+    assert_eq!(
+        store.read_column_width_reference_content_width().unwrap(),
+        Some(800.0)
+    );
     let _ = fs::remove_dir_all(root);
 }
 
@@ -215,7 +245,7 @@ fn clear_tasks_keeps_column_widths() {
     };
     store.insert_task(&operation).unwrap();
     store
-        .replace_column_widths(HashMap::from([(0, 240.0), (2, 360.0)]))
+        .replace_column_widths(HashMap::from([(0, 240.0), (2, 360.0)]), Some(1_600.0))
         .unwrap();
 
     store.clear_tasks().unwrap();
@@ -224,6 +254,10 @@ fn clear_tasks_keeps_column_widths() {
     assert_eq!(
         store.read_column_widths().unwrap(),
         HashMap::from([(0, 240.0), (2, 360.0)])
+    );
+    assert_eq!(
+        store.read_column_width_reference_content_width().unwrap(),
+        Some(1_600.0)
     );
     let _ = fs::remove_dir_all(root);
 }

@@ -784,6 +784,7 @@ async fn shutdown_waits_for_old_preferences_save_then_commits_latest_search_hist
     drop(browser.accept_operation_store(Ok(LoadedOperationStore {
         task_queue_store: store.clone(),
         column_width_overrides: HashMap::new(),
+        column_width_reference_content_width: None,
         classified_startup_session: None,
     })));
     browser.user_preferences_save_in_flight = true;
@@ -825,6 +826,7 @@ async fn final_shutdown_session_waits_for_an_older_save_outcome() {
     drop(browser.accept_operation_store(Ok(LoadedOperationStore {
         task_queue_store: store.clone(),
         column_width_overrides: HashMap::new(),
+        column_width_reference_content_width: None,
         classified_startup_session: None,
     })));
     let final_directory = temp_dir.path().join("final-directory");
@@ -860,6 +862,7 @@ async fn recoverable_runner_ack_precedes_one_shutdown_transaction_and_exit() {
     drop(browser.accept_operation_store(Ok(LoadedOperationStore {
         task_queue_store: store.clone(),
         column_width_overrides: HashMap::new(),
+        column_width_reference_content_width: None,
         classified_startup_session: None,
     })));
     let enqueue = browser.operation_queue.enqueue(QueuedFileOperation::Copy {
@@ -925,6 +928,7 @@ async fn terminal_recoverable_completion_is_not_rewritten_as_recovery_pending() 
     drop(browser.accept_operation_store(Ok(LoadedOperationStore {
         task_queue_store: store.clone(),
         column_width_overrides: HashMap::new(),
+        column_width_reference_content_width: None,
         classified_startup_session: None,
     })));
     assert!(browser
@@ -976,6 +980,7 @@ async fn close_all_windows_saves_browser_session_before_exit() {
     drop(browser.accept_operation_store(Ok(LoadedOperationStore {
         task_queue_store: store.clone(),
         column_width_overrides: HashMap::new(),
+        column_width_reference_content_width: None,
         classified_startup_session: None,
     })));
 

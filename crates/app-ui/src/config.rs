@@ -19,6 +19,10 @@ pub(crate) use app_config::{
 };
 #[cfg(test)]
 pub(crate) use app_config::default_app_config;
+pub(crate) mod column_width_adjust_mode;
+pub(crate) use column_width_adjust_mode::{
+    ColumnWidthAdjustMode, DEFAULT_COLUMN_WIDTH_ADJUST_MODE,
+};
 pub(crate) mod launch_window;
 mod legacy_toml;
 pub(crate) use launch_window::{
@@ -586,6 +590,7 @@ pub(crate) struct UserConfig {
     pub(crate) save_view_state: bool,
     pub(crate) shortcuts: ShortcutConfig,
     pub(crate) launch_window_policy: LaunchWindowPolicy,
+    pub(crate) column_width_adjust_mode: ColumnWidthAdjustMode,
     pub(crate) context_menus: ContextMenuPreferences,
 }
 
@@ -645,6 +650,7 @@ pub(crate) fn default_user_config() -> UserConfig {
         startup_custom_directory: fallback_base.clone(),
         save_view_state: false,
         launch_window_policy: DEFAULT_LAUNCH_WINDOW_POLICY,
+        column_width_adjust_mode: DEFAULT_COLUMN_WIDTH_ADJUST_MODE,
         shortcuts: ShortcutConfig::defaults(),
         context_menus: crate::model::ContextMenuPreferences::defaults(),
     }
@@ -690,6 +696,7 @@ pub(crate) fn ui_thread_startup_config() -> UserConfig {
         shortcuts: ShortcutConfig::defaults(),
         context_menus: ContextMenuPreferences::defaults(),
         launch_window_policy: DEFAULT_LAUNCH_WINDOW_POLICY,
+        column_width_adjust_mode: DEFAULT_COLUMN_WIDTH_ADJUST_MODE,
     }
 }
 

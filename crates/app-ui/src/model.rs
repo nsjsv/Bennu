@@ -290,6 +290,8 @@ pub(crate) struct ClassifiedStartupSession {
 pub(crate) struct LoadedOperationStore {
     pub(crate) task_queue_store: TaskQueueStore,
     pub(crate) column_width_overrides: HashMap<usize, f32>,
+    /// 上次保存栏宽时的参考内容宽度;None 表示旧数据未记录过(按当前窗口兜底)。
+    pub(crate) column_width_reference_content_width: Option<f32>,
     pub(crate) classified_startup_session: Option<ClassifiedStartupSession>,
 }
 
@@ -695,6 +697,7 @@ pub(crate) enum Message {
     ShowHiddenFilesToggled,
     ListDirectorySizeDisplayModeToggled,
     VisibleColumnCountSelected(usize),
+    ColumnWidthAdjustModeSelected(crate::config::ColumnWidthAdjustMode),
     NetworkListThumbnailDownloadsToggled,
     SearchContentIndexingToggled,
     PreviewSizeLimitInputChanged(usize, String),

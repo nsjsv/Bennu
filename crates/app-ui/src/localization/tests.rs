@@ -129,6 +129,11 @@ fn translates_known_dynamic_text() {
             "最大内容提取大小：8 MiB",
         ),
         ("Volume 75%", "音量 75%"),
+        // 拖拽动作胶囊:动作词+落点目录名。
+        ("Move to project", "移动到project"),
+        ("Copy to 备份", "复制到备份"),
+        ("Create link to /mnt/data", "创建链接到/mnt/data"),
+        ("Move to Trash", "移到回收站"),
     ] {
         assert_eq!(translate(UiLanguage::Chinese, text), expected);
     }

@@ -159,6 +159,9 @@ pub(crate) enum FloatingPlacement {
     Center,
     At(Point),
     Free(Point),
+    /// 右下角钉在 anchor 上,元素往锚点左上展开;布局后按实际尺寸
+    /// 反推位置,跟随锚点不做屏内回退(如拖拽聚合行挂在指针尖)。
+    AnchorBottomRight { anchor: Point },
     BottomLeft {
         left: f32,
         bottom: f32,
@@ -572,7 +575,7 @@ fn should_capture_floating_overlay_event(
 
 fn floating_max_size(placement: FloatingPlacement, bounds: Size) -> Size {
     match placement {
-        FloatingPlacement::Free(_) => bounds,
+        FloatingPlacement::Free(_) | FloatingPlacement::AnchorBottomRight { .. } => bounds,
         FloatingPlacement::Center
         | FloatingPlacement::At(_)
         | FloatingPlacement::BottomLeft { .. }
@@ -594,6 +597,10 @@ fn floating_position(placement: FloatingPlacement, size: Size, surface: Size) ->
             (surface.height - size.height) / 2.0,
         ),
         FloatingPlacement::At(position) | FloatingPlacement::Free(position) => position,
+        FloatingPlacement::AnchorBottomRight { anchor } => Point::new(
+            anchor.x - size.width,
+            anchor.y - size.height,
+        ),
         FloatingPlacement::BottomLeft { left, bottom } => {
             Point::new(left, surface.height - bottom - size.height)
         }
@@ -606,7 +613,10 @@ fn floating_position(placement: FloatingPlacement, size: Size, surface: Size) ->
             surface.height - bottom - size.height,
         ),
     };
-    if matches!(placement, FloatingPlacement::Free(_)) {
+    if matches!(
+        placement,
+        FloatingPlacement::Free(_) | FloatingPlacement::AnchorBottomRight { .. }
+    ) {
         return desired;
     }
 

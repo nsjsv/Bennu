@@ -264,12 +264,22 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
             placement: FloatingPlacement::Center,
             captures_pointer: true,
         });
-    } else if let Some((drag_preview, drag_preview_origin)) = drag_preview_panel(browser) {
+    } else if let Some((drag_preview, drag_preview_placement)) = drag_preview_panel(browser) {
         floating.push(FloatingContent {
             element: drag_preview,
-            placement: FloatingPlacement::Free(drag_preview_origin),
+            placement: drag_preview_placement,
             captures_pointer: false,
         });
+        if let Some(action_capsule) = file_drag_action_capsule_panel(browser) {
+            floating.push(FloatingContent {
+                element: action_capsule,
+                placement: FloatingPlacement::Free(Point::new(
+                    browser.cursor_position.x + DRAG_ACTION_CAPSULE_OFFSET_X,
+                    browser.cursor_position.y + DRAG_ACTION_CAPSULE_OFFSET_Y,
+                )),
+                captures_pointer: false,
+            });
+        }
     } else if let Some(archive_creation) = &browser.archive_creation {
         floating_input = BrowserFloatingInput::DismissibleBlocking;
         floating.push(FloatingContent {
@@ -743,22 +753,25 @@ const DRAG_PREVIEW_LABEL_MAX_CHARS: usize = 20;
 const DRAG_PREVIEW_PILL_WIDTH: f32 = 162.0;
 const DRAG_PREVIEW_PILL_HEIGHT: f32 = 24.0;
 const DRAG_PREVIEW_SUMMARY_TEXT_SIZE: f32 = 12.0;
-// 聚合行相对光标的摆放偏移。
-const DRAG_PREVIEW_SUMMARY_OFFSET_X: f32 = 10.0;
-const DRAG_PREVIEW_SUMMARY_OFFSET_Y: f32 = 10.0;
+// 动作胶囊相对光标的摆放偏移:z 序在预览之上(后 push),
+// 覆盖在提起的缩略图上。
+const DRAG_ACTION_CAPSULE_OFFSET_X: f32 = 25.0;
+const DRAG_ACTION_CAPSULE_OFFSET_Y: f32 = 25.0;
 
-/// 返回预览浮层与其窗口位置:左上角对准最早出现的条目,使负偏移
-/// (按住条目右下时)也能完整显示。
-fn drag_preview_panel(browser: &FileBrowser) -> Option<(Element<'_, Message>, Point)> {
+/// 返回预览浮层与其定位:提起条目组左上角对准最早出现的条目,使负
+/// 偏移(按住条目右下时)也能完整显示;聚合行右下角钉在指针尖上,
+/// 往指针左上展开,不挡指针也不被指针挡。
+fn drag_preview_panel(
+    browser: &FileBrowser,
+) -> Option<(Element<'_, Message>, FloatingPlacement)> {
     // 临时调试:环境变量触发,绕过拖拽状态直接渲染聚合行,验证浮层渲染链。
     if std::env::var_os("FM_DEBUG_DRAG_SUMMARY").is_some() {
         let summary = crate::wayland_drag_icon::file_drag_group_summary_text(37, 12);
         return Some((
             drag_preview_summary_row(&summary),
-            Point::new(
-                browser.cursor_position.x + DRAG_PREVIEW_SUMMARY_OFFSET_X,
-                browser.cursor_position.y + DRAG_PREVIEW_SUMMARY_OFFSET_Y,
-            ),
+            FloatingPlacement::AnchorBottomRight {
+                anchor: browser.cursor_position,
+            },
         ));
     }
     let drag = browser.file_drag.as_ref()?;
@@ -822,10 +835,9 @@ fn drag_preview_panel(browser: &FileBrowser) -> Option<(Element<'_, Message>, Po
         let summary = crate::wayland_drag_icon::file_drag_group_summary_text(folders, files);
         return Some((
             drag_preview_summary_row(&summary),
-            Point::new(
-                browser.cursor_position.x + DRAG_PREVIEW_SUMMARY_OFFSET_X,
-                browser.cursor_position.y + DRAG_PREVIEW_SUMMARY_OFFSET_Y,
-            ),
+            FloatingPlacement::AnchorBottomRight {
+                anchor: browser.cursor_position,
+            },
         ));
     }
     let tiles: Vec<(iced::Vector, Element<'static, Message>)> = drag
@@ -849,7 +861,17 @@ fn drag_preview_panel(browser: &FileBrowser) -> Option<(Element<'_, Message>, Po
     let stack = Stack::with_children(layers)
         .width(Length::Fixed(stack_width))
         .height(Length::Fixed(stack_height));
-    Some((stack.into(), stack_origin))
+    Some((
+        stack.into(),
+        FloatingPlacement::Free(stack_origin),
+    ))
+}
+
+/// 拖拽动作胶囊:与提起条目预览同门控(出窗交接原生拖放后一并消失),
+/// 文案由 file_drag_action_capsule_label 实时合成,底板与聚合行同款。
+fn file_drag_action_capsule_panel(browser: &FileBrowser) -> Option<Element<'static, Message>> {
+    let label = browser.file_drag_action_capsule_label()?;
+    Some(drag_preview_summary_row(&label))
 }
 
 /// 聚合行:总数说明文字,文字胶囊底板与逐个条目同款。

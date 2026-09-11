@@ -7,11 +7,11 @@ use super::super::wayland_dnd::WaylandFileDragRequest;
 use super::super::{FileBrowser, POINTER_DRAG_ACTIVATION_DISTANCE};
 use crate::model::{
     entry_exists, unique_duplicated_directory_name, unique_duplicated_file_name,
-    BrowserPaneId, FileDragGestureId, FileDragNativeDndState, FileDragPhase, FileDragState,
-    FileDragStationaryAction, FileDropTarget, Message, SelectionMarqueeSource,
-    TransferConflictMode,
+    BrowserPaneId, FileDragDropIntent, FileDragGestureId, FileDragNativeDndState, FileDragPhase,
+    FileDragState, FileDragStationaryAction, FileDropTarget, Message, SelectionMarqueeSource,
+    TabDropDestination, TransferConflictMode,
 };
-use crate::operation_queue::QueuedTransfer;
+use crate::operation_queue::{QueuedFileOperation, QueuedTransfer};
 
 impl FileBrowser {
     pub(crate) fn update_file_drag(&mut self, position: iced::Point) -> Task<Message> {
@@ -325,15 +325,30 @@ impl FileBrowser {
         (!pane.is_trash_view).then(|| pane.current_dir.clone())
     }
 
-    /// 拖拽修饰键实时意图:Ctrl=强制复制(Finder Option 语义);Shift 按下
-    /// 与无修饰均为移动意图(现状),跨盘是否降级为复制由传输引擎决定。
-    /// 修饰键在拖放落点实时读取,拖拽途中切换立即生效。
-    pub(crate) fn file_drag_transfer_intent(&self) -> TransferConflictMode {
-        if self.keyboard_modifiers.control() && !self.keyboard_modifiers.shift() {
-            TransferConflictMode::Copy
-        } else {
-            TransferConflictMode::Move
+    /// 拖放修饰键实时意图:Ctrl=强制复制(Finder Option 语义,优先于
+    /// Alt);Alt=在落点创建指向源的符号链接——源与落点都在本地挂载才
+    /// 成立,gvfs 等远程挂载上 symlink 不可靠,与右键菜单「创建符号链接」
+    /// 同源 gating,不成立时回退移动;Shift 与无修饰均为移动意图(Shift
+    /// 本身是移动修饰键),跨盘是否降级为复制由传输引擎决定。修饰键在
+    /// 拖放落点实时读取,拖拽途中切换立即生效;胶囊文案与落地共用此判定。
+    pub(crate) fn file_drag_drop_intent(
+        &self,
+        sources: &[PathBuf],
+        target_directory: &Path,
+    ) -> FileDragDropIntent {
+        let modifiers = self.keyboard_modifiers;
+        if modifiers.control() && !modifiers.shift() {
+            return FileDragDropIntent::Copy;
         }
+        let symlinks_supported = !modifiers.shift()
+            && sources
+                .iter()
+                .all(|source| !self.path_is_remote_mount(source))
+            && !self.path_is_remote_mount(target_directory);
+        if modifiers.alt() && symlinks_supported {
+            return FileDragDropIntent::CreateLink;
+        }
+        FileDragDropIntent::Move
     }
 
     pub(super) fn move_dragged_files(
@@ -341,7 +356,11 @@ impl FileBrowser {
         sources: Vec<PathBuf>,
         target_directory: PathBuf,
     ) -> Task<Message> {
-        let mode = self.file_drag_transfer_intent();
+        let intent = self.file_drag_drop_intent(&sources, &target_directory);
+        if intent == FileDragDropIntent::CreateLink {
+            return self.enqueue_dragged_symbolic_links(&sources, &target_directory);
+        }
+        let mode = intent.conflict_mode();
         let transfer_targets =
             paths::transfer_targets(&target_directory, &sources, PasteTargetMode::Move);
         if mode == TransferConflictMode::Copy {
@@ -410,6 +429,80 @@ impl FileBrowser {
         self.enqueue_or_confirm_transfers(TransferConflictMode::Copy, transfers)
     }
 
+    /// Alt 拖放的落地:在落点目录为每个源创建符号链接,目标一律源路径,
+    /// 命名与右键菜单「创建符号链接」走同一共享唯一规则。
+    fn enqueue_dragged_symbolic_links(
+        &mut self,
+        sources: &[PathBuf],
+        target_directory: &Path,
+    ) -> Task<Message> {
+        let links = sources
+            .iter()
+            .map(|source| self.symbolic_link_creation_for(source, target_directory))
+            .collect::<Vec<_>>();
+        self.enqueue_file_operation(QueuedFileOperation::CreateSymbolicLinks { links })
+    }
+
+    /// 拖拽动作胶囊文案:悬停落点+修饰键意图实时合成。无拖拽、出窗交接
+    /// 原生拖放、无落点、书签槽(非传输语义)时返回 None 不渲染。目录名
+    /// 动态拼接,这里按当前语言产出成品——readable_text 对 String 不做
+    /// 翻译,渲染层不会兜底。
+    pub(crate) fn file_drag_action_capsule_label(&self) -> Option<String> {
+        let drag = self.file_drag.as_ref()?;
+        if !drag.displays_iced_drag_preview() {
+            return None;
+        }
+        // 光标正压在被拖的源条目上:提起的内容还悬在自己身上,落点是
+        // 自身或原目录,落地均为空操作,不显示误导性动作。
+        if self
+            .hovered_entry
+            .as_ref()
+            .is_some_and(|hovered| drag.sources.contains(hovered))
+        {
+            return None;
+        }
+        let session = self.file_drop_session.as_ref()?;
+        match session.hovered_target.as_ref()? {
+            FileDropTarget::Directory(directory) => {
+                self.file_drag_directory_capsule(&drag.sources, directory)
+            }
+            FileDropTarget::Trash => {
+                Some(crate::localization::translate_current("Move to Trash"))
+            }
+            FileDropTarget::Tab(tab) => match &tab.destination {
+                TabDropDestination::Trash => {
+                    Some(crate::localization::translate_current("Move to Trash"))
+                }
+                TabDropDestination::Directory(directory) => {
+                    self.file_drag_directory_capsule(&drag.sources, directory)
+                }
+            },
+            FileDropTarget::SidebarBookmarkSlot(_) => None,
+        }
+    }
+
+    /// 目录落点的胶囊文案。移动意图下落点是源自身、自身子树或源父
+    /// 目录(拖起后悬在自己目录的条目或空白上)时,落地均为空操作,
+    /// 返回 None 不显示误导性动作;复制/链接在同落点有原位副本/链接
+    /// 行为,照常显示。判定条件与 move_dragged_files 的空操作分支一致。
+    fn file_drag_directory_capsule(
+        &self,
+        sources: &[PathBuf],
+        directory: &Path,
+    ) -> Option<String> {
+        let intent = self.file_drag_drop_intent(sources, directory);
+        if intent == FileDragDropIntent::Move
+            && sources.iter().any(|source| {
+                source == directory
+                    || directory.starts_with(source)
+                    || source.parent().is_some_and(|parent| parent == directory)
+            })
+        {
+            return None;
+        }
+        Some(file_drag_transfer_label(intent, directory))
+    }
+
     pub(crate) fn extend_drag_selection_to(&mut self, path: PathBuf) {
         let Some(anchor) = self.drag_selection_anchor.clone() else {
             if self.selection_marquee.is_some() {
@@ -420,6 +513,27 @@ impl FileBrowser {
         };
         self.select_drag_range(anchor, path, self.keyboard_modifiers.control());
     }
+}
+
+/// 拖放意图的胶囊文案:目录名拼进英文 key 后按当前语言翻译,中文由
+/// dynamic_translation 的前缀规则还原语序。
+fn file_drag_transfer_label(intent: FileDragDropIntent, directory: &Path) -> String {
+    let name = display_directory_name(directory);
+    let key = match intent {
+        FileDragDropIntent::Copy => format!("Copy to {name}"),
+        FileDragDropIntent::CreateLink => format!("Create link to {name}"),
+        FileDragDropIntent::Move => format!("Move to {name}"),
+    };
+    crate::localization::translate_current(&key)
+}
+
+/// 落点显示名:file_name 为空(如根目录"/")时退回完整路径。
+fn display_directory_name(directory: &Path) -> String {
+    directory
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_owned)
+        .unwrap_or_else(|| directory.to_string_lossy().into_owned())
 }
 
 /// 同目录复制拖放的原位副本目标:按共享命名规则在源父目录里起唯一名。
@@ -495,36 +609,198 @@ fn file_drag_directory_target_needs_fallback(sources: &[PathBuf], target: &Path)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::SidebarBookmarkDropSlot;
+    use crate::sidebar_devices::SidebarDeviceEntry;
+    use desktop_linux::{StorageDeviceAccess, StorageDeviceId};
     use iced::keyboard;
 
     #[test]
-    fn drag_transfer_intent_follows_live_modifiers() {
+    fn drag_drop_intent_follows_live_modifiers() {
         let (mut browser, _) = crate::app::FileBrowser::new(crate::config::default_user_config());
+        let target = PathBuf::from("/tmp/drag-target");
 
         // 无修饰=移动意图(现状)。
         assert_eq!(
-            browser.file_drag_transfer_intent(),
-            TransferConflictMode::Move
+            browser.file_drag_drop_intent(&[], &target),
+            FileDragDropIntent::Move
         );
 
         browser.keyboard_modifiers = keyboard::Modifiers::CTRL;
         assert_eq!(
-            browser.file_drag_transfer_intent(),
-            TransferConflictMode::Copy
+            browser.file_drag_drop_intent(&[], &target),
+            FileDragDropIntent::Copy
         );
 
         // Shift 与 Ctrl+Shift 都保持移动语义:Shift 本身就是移动修饰键。
         browser.keyboard_modifiers = keyboard::Modifiers::SHIFT;
         assert_eq!(
-            browser.file_drag_transfer_intent(),
-            TransferConflictMode::Move
+            browser.file_drag_drop_intent(&[], &target),
+            FileDragDropIntent::Move
         );
         browser.keyboard_modifiers =
             keyboard::Modifiers::CTRL | keyboard::Modifiers::SHIFT;
         assert_eq!(
-            browser.file_drag_transfer_intent(),
-            TransferConflictMode::Move
+            browser.file_drag_drop_intent(&[], &target),
+            FileDragDropIntent::Move
         );
+
+        // Alt=创建链接;Ctrl 与 Alt 同时按住时 Ctrl 复制优先。
+        browser.keyboard_modifiers = keyboard::Modifiers::ALT;
+        assert_eq!(
+            browser.file_drag_drop_intent(&[], &target),
+            FileDragDropIntent::CreateLink
+        );
+        browser.keyboard_modifiers =
+            keyboard::Modifiers::CTRL | keyboard::Modifiers::ALT;
+        assert_eq!(
+            browser.file_drag_drop_intent(&[], &target),
+            FileDragDropIntent::Copy
+        );
+    }
+
+    #[test]
+    fn alt_drag_intent_falls_back_to_move_on_remote_mount() {
+        let (mut browser, _) = crate::app::FileBrowser::new(crate::config::default_user_config());
+        browser.sidebar_devices.devices = vec![SidebarDeviceEntry {
+            id: StorageDeviceId::new("gvfs"),
+            label: "gvfs".to_owned(),
+            detail: None,
+            size_bytes: 0,
+            mount_points: vec![PathBuf::from("/run/user/1000/gvfs")],
+            access: StorageDeviceAccess::RemoteFilesystem,
+            can_mount: true,
+            can_unmount: true,
+            removal: None,
+        }];
+        browser.keyboard_modifiers = keyboard::Modifiers::ALT;
+
+        let remote_source = PathBuf::from("/run/user/1000/gvfs/mtp/DCIM/photo.jpg");
+        let local_source = PathBuf::from("/home/user/photo.jpg");
+        let local_target = PathBuf::from("/home/user/photos");
+        let remote_target = PathBuf::from("/run/user/1000/gvfs/mtp/DCIM");
+
+        // 源或落点在远程挂载:gvfs 上 symlink 不可靠,回退移动。
+        assert_eq!(
+            browser.file_drag_drop_intent(&[remote_source], &local_target),
+            FileDragDropIntent::Move
+        );
+        assert_eq!(
+            browser.file_drag_drop_intent(std::slice::from_ref(&local_source), &remote_target),
+            FileDragDropIntent::Move
+        );
+        assert_eq!(
+            browser.file_drag_drop_intent(std::slice::from_ref(&local_source), &local_target),
+            FileDragDropIntent::CreateLink
+        );
+    }
+
+    #[test]
+    fn drag_action_capsule_label_follows_target_and_intent() {
+        let (mut browser, _) = crate::app::FileBrowser::new(crate::config::default_user_config());
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("report.pdf");
+        std::fs::write(&source, b"data").unwrap();
+        let project = directory.path().join("project");
+        std::fs::create_dir(&project).unwrap();
+
+        // 无拖拽会话:不渲染。
+        assert!(browser.file_drag_action_capsule_label().is_none());
+
+        // entries 为空时 sources 回退到 self.selected。
+        browser.selected = Some(source.clone());
+        browser.cursor_position = iced::Point::new(0.0, 0.0);
+        browser.start_file_drag(
+            source.clone(),
+            FileDragStationaryAction::SelectionOnly,
+            Vec::new(),
+        );
+        drop(browser.update_file_drag(iced::Point::new(10.0, 0.0)));
+
+        // 拖拽中但无悬停落点:不渲染。
+        assert!(browser.file_drag_action_capsule_label().is_none());
+
+        drop(browser.handle_drop_target_hovered(project.clone()));
+        assert_eq!(
+            browser.file_drag_action_capsule_label().as_deref(),
+            Some("Move to project")
+        );
+
+        // 光标悬停回被拖的源条目:提起的内容悬在自己身上,落点无意义,不显示。
+        drop(browser.handle_entry_hovered(source.clone()));
+        assert!(browser.file_drag_action_capsule_label().is_none());
+
+        // 悬停源父目录(当前目录空白处):移动落地是空操作,不显示;
+        // Ctrl 复制在同目录有原位副本,照常显示。
+        let current_directory = directory.path().to_path_buf();
+        let directory_name = current_directory
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap()
+            .to_owned();
+        drop(browser.handle_drop_target_hovered(current_directory.clone()));
+        assert!(browser.file_drag_action_capsule_label().is_none());
+        browser.keyboard_modifiers = keyboard::Modifiers::CTRL;
+        assert_eq!(
+            browser.file_drag_action_capsule_label().as_deref(),
+            Some(format!("Copy to {directory_name}").as_str())
+        );
+        browser.keyboard_modifiers = keyboard::Modifiers::empty();
+
+        // 离开源条目回到文件夹落点:恢复显示。
+        drop(browser.handle_entry_hover_cleared(source.clone()));
+        drop(browser.handle_drop_target_hovered(project.clone()));
+        assert_eq!(
+            browser.file_drag_action_capsule_label().as_deref(),
+            Some("Move to project")
+        );
+        browser.keyboard_modifiers = keyboard::Modifiers::CTRL;
+        assert_eq!(
+            browser.file_drag_action_capsule_label().as_deref(),
+            Some("Copy to project")
+        );
+        browser.keyboard_modifiers = keyboard::Modifiers::ALT;
+        assert_eq!(
+            browser.file_drag_action_capsule_label().as_deref(),
+            Some("Create link to project")
+        );
+
+        // 回收站落点固定移动文案,修饰键不影响(落地行为同样不看)。
+        let session = browser.file_drop_session.as_mut().unwrap();
+        session.hovered_target = Some(FileDropTarget::Trash);
+        assert_eq!(
+            browser.file_drag_action_capsule_label().as_deref(),
+            Some("Move to Trash")
+        );
+
+        // 书签槽不是传输语义:不渲染。
+        let session = browser.file_drop_session.as_mut().unwrap();
+        session.hovered_target = Some(FileDropTarget::SidebarBookmarkSlot(
+            SidebarBookmarkDropSlot::Insert { index: 0 },
+        ));
+        assert!(browser.file_drag_action_capsule_label().is_none());
+    }
+
+    #[test]
+    fn alt_drag_release_queues_symlinks_into_target_directory() {
+        let (mut browser, _) = crate::app::FileBrowser::new(crate::config::default_user_config());
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("report.pdf");
+        std::fs::write(&source, b"data").unwrap();
+        let target = directory.path().join("archive");
+        std::fs::create_dir(&target).unwrap();
+
+        browser.keyboard_modifiers = keyboard::Modifiers::ALT;
+        drop(browser.move_dragged_files(vec![source.clone()], target.clone()));
+
+        assert_eq!(browser.operation_queue.tasks().len(), 1);
+        match &browser.operation_queue.tasks()[0].operation {
+            QueuedFileOperation::CreateSymbolicLinks { links } => {
+                assert_eq!(links.len(), 1);
+                assert_eq!(links[0].target_path, source);
+                assert_eq!(links[0].link_path.parent(), Some(target.as_path()));
+            }
+            other => panic!("expected symlink creation, got {other:?}"),
+        }
     }
 
     #[test]

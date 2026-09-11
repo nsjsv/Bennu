@@ -142,6 +142,17 @@ fn locale_value_is_chinese(value: &str) -> bool {
 }
 
 fn dynamic_translation(text: &str) -> Option<String> {
+    // 拖拽动作胶囊:动作词+落点目录名,英文前缀拼名、中文同序还原。
+    // "Move to Trash" 是精确词条,在 exact_translation 里先命中,不会走到这里。
+    if let Some(name) = text.strip_prefix("Create link to ") {
+        return Some(format!("创建链接到{name}"));
+    }
+    if let Some(name) = text.strip_prefix("Copy to ") {
+        return Some(format!("复制到{name}"));
+    }
+    if let Some(name) = text.strip_prefix("Move to ") {
+        return Some(format!("移动到{name}"));
+    }
     if let Some((shown, total)) =
         parse_two_counts(text, "Only showing ", " lines. Full line count: ", ".")
     {

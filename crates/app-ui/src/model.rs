@@ -199,11 +199,11 @@ pub(crate) use x11_dnd::X11DndMessage;
 mod drag;
 pub(crate) use drag::{
     BreadcrumbDropTargetBounds, DirectoryFileDragTargetBounds, FileDragBlockedDirectoryBounds,
-    FileDragHitTestBounds, FileDragNativeDndState, FileDragPhase, FileDragPreviewEntry,
-    FileDragState, FileDragStationaryAction, FileDropEntryTargetBounds, FileDropHitTestBounds,
-    LastActivationClick, PaneDragPointerPress, PaneDragState, PaneDropTarget,
-    SidebarBookmarkDragState, SidebarBookmarkDropSlot, SidebarFileDragTargetBounds, TabDragMode,
-    TabDragState, TabSplitTarget,
+    FileDragDropIntent, FileDragHitTestBounds, FileDragNativeDndState, FileDragPhase,
+    FileDragPreviewEntry, FileDragState, FileDragStationaryAction, FileDropEntryTargetBounds,
+    FileDropHitTestBounds, LastActivationClick, PaneDragPointerPress, PaneDragState,
+    PaneDropTarget, SidebarBookmarkDragState, SidebarBookmarkDropSlot, SidebarFileDragTargetBounds,
+    TabDragMode, TabDragState, TabSplitTarget,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

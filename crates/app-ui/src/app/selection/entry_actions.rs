@@ -1,6 +1,6 @@
 //! 复制路径与创建符号链接:两个作用于当前选中项的工具动作。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use desktop_linux::write_desktop_clipboard_text;
 use iced::Task;
@@ -41,26 +41,36 @@ impl FileBrowser {
             .iter()
             .map(|source| {
                 let parent = self.entry_parent_directory(source);
-                let name = source
-                    .file_name()
-                    .unwrap_or_else(|| std::ffi::OsStr::new("item"));
-                let link_name = if self.entry_kind(source) == Some(file_core::FileKind::Directory)
-                {
-                    unique_symlink_directory_name(name, |candidate| {
-                        entry_exists(&parent.join(candidate))
-                    })
-                } else {
-                    unique_symlink_file_name(name, |candidate| {
-                        entry_exists(&parent.join(candidate))
-                    })
-                };
-                SymbolicLinkCreation {
-                    link_path: parent.join(link_name),
-                    target_path: source.clone(),
-                }
+                self.symbolic_link_creation_for(source, &parent)
             })
             .collect::<Vec<_>>();
         self.enqueue_file_operation(QueuedFileOperation::CreateSymbolicLinks { links })
+    }
+
+    /// 单个源的符号链接构造:名字按共享唯一命名规则在 directory 里起名,
+    /// 目标一律绝对路径。右键菜单(建在源父目录)与 Alt 拖放(建在落点)
+    /// 共用此不变量,重名自动递增。
+    pub(in crate::app) fn symbolic_link_creation_for(
+        &self,
+        source: &Path,
+        directory: &Path,
+    ) -> SymbolicLinkCreation {
+        let name = source
+            .file_name()
+            .unwrap_or_else(|| std::ffi::OsStr::new("item"));
+        let link_name = if self.entry_kind(source) == Some(file_core::FileKind::Directory) {
+            unique_symlink_directory_name(name, |candidate| {
+                entry_exists(&directory.join(candidate))
+            })
+        } else {
+            unique_symlink_file_name(name, |candidate| {
+                entry_exists(&directory.join(candidate))
+            })
+        };
+        SymbolicLinkCreation {
+            link_path: directory.join(link_name),
+            target_path: source.to_path_buf(),
+        }
     }
 }
 

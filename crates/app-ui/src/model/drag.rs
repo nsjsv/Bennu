@@ -4,7 +4,7 @@ use std::time::Instant;
 use desktop_linux::WaylandFileDragSessionId;
 use iced::{Point, Rectangle};
 
-use super::SplitRegion;
+use super::{SplitRegion, TransferConflictMode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TabDragMode {
@@ -69,6 +69,25 @@ pub(crate) struct FileDragPreviewEntry {
 pub(crate) enum FileDragStationaryAction {
     SelectionOnly,
     ActivateColumnEntry,
+}
+
+/// 拖放意图:动作胶囊文案与落地传输共用的单一判定结果。创建链接没有
+/// 冲突策略(共享命名规则保证唯一),不并入 TransferConflictMode。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FileDragDropIntent {
+    Move,
+    Copy,
+    CreateLink,
+}
+
+impl FileDragDropIntent {
+    /// 传输冲突模式;CreateLink 在入口就分流到链接入队,不走此转换。
+    pub(crate) fn conflict_mode(self) -> TransferConflictMode {
+        match self {
+            Self::Copy => TransferConflictMode::Copy,
+            Self::Move | Self::CreateLink => TransferConflictMode::Move,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -289,6 +289,8 @@ pub(crate) struct FileBrowser {
     split_resize_drag: Option<SplitResizeDrag>,
     pub(crate) selection_marquee: Option<SelectionMarquee>,
     pub(crate) file_drag: Option<FileDragState>,
+    /// 拖拽源所在的列表滚动可视区,最近一次测量快照。
+    pub(crate) file_drag_viewport: Option<iced::Rectangle>,
     pub(crate) file_drop_session: Option<FileDropSessionState>,
     next_file_drag_gesture_id: u64,
     file_drop_layout_generation: u64,
@@ -680,6 +682,7 @@ impl FileBrowser {
             split_resize_drag: None,
             selection_marquee: None,
             file_drag: None,
+            file_drag_viewport: None,
             file_drop_session: None,
             next_file_drag_gesture_id: 0,
             file_drop_layout_generation: 0,

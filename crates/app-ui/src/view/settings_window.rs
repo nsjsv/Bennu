@@ -25,6 +25,7 @@ use super::auxiliary_window_layout::{
     auxiliary_detail_scroller, auxiliary_detail_surface_with_sidebar_space,
     auxiliary_full_height_sidebar, auxiliary_sidebar_button,
 };
+use super::context_menu_settings::context_menu_settings_section;
 use super::file_operation_verification_settings::file_operation_verification_options;
 use super::network_settings::network_thumbnails_row;
 use super::option_controls::{
@@ -38,7 +39,6 @@ use super::settings_group::{
     info_setting_row, labeled_setting_row, settings_card, settings_group, toggle_setting_row,
     SETTINGS_GROUP_SPACING,
 };
-use super::context_menu_settings::context_menu_settings_section;
 use super::shortcut_settings::shortcut_settings_section;
 use super::window_chrome::{floating_window_control_group, separate_window_content};
 use super::window_control_settings::window_control_settings_row;
@@ -79,7 +79,9 @@ struct TerminalShellPickOption(String);
 impl fmt::Display for TerminalShellPickOption {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.0.is_empty() {
-            return formatter.write_str(&crate::localization::translate_current(SYSTEM_DEFAULT_SHELL_LABEL));
+            return formatter.write_str(&crate::localization::translate_current(
+                SYSTEM_DEFAULT_SHELL_LABEL,
+            ));
         }
         formatter.write_str(
             std::path::Path::new(&self.0)

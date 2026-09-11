@@ -3,10 +3,10 @@ use iced::mouse::Interaction;
 use iced::widget::{column, container, mouse_area, row, scrollable, space::Space};
 use iced::{Alignment, Element, Length};
 
-use crate::app::FileBrowser;
 use crate::app::right_preview_panel::{
     PANEL_CONTENT_PADDING, PANEL_RATIO_DIVIDER_HEIGHT, PANEL_RESIZE_HANDLE_WIDTH,
 };
+use crate::app::FileBrowser;
 use crate::appearance::{app_content_style, column_resize_divider_style, muted_text_color};
 use crate::formatting::{format_middle_ellipsized_text, format_system_time};
 use crate::model::{Message, RightPreviewPanelInfoSnapshot, SPLIT_PORTION_TOTAL};
@@ -72,9 +72,9 @@ fn ratio_resize_divider() -> Element<'static, Message> {
                 .width(Length::Fill)
                 .height(Length::Fixed(top_padding)),
             line,
-            Space::new()
-                .width(Length::Fill)
-                .height(Length::Fixed(PANEL_RATIO_DIVIDER_HEIGHT - 1.0 - top_padding)),
+            Space::new().width(Length::Fill).height(Length::Fixed(
+                PANEL_RATIO_DIVIDER_HEIGHT - 1.0 - top_padding
+            )),
         ]
         .width(Length::Fill),
     )
@@ -104,9 +104,7 @@ fn right_preview_info_content(browser: &FileBrowser) -> Element<'_, Message> {
         .map(|snapshot| crate::localization::translate_current(&snapshot.type_label))
         .unwrap_or_else(|| "—".to_owned());
     let size_label = match snapshot {
-        Some(snapshot) if snapshot.kind != FileKind::Directory => {
-            display_size(snapshot.size_bytes)
-        }
+        Some(snapshot) if snapshot.kind != FileKind::Directory => display_size(snapshot.size_bytes),
         // 目录体积需聚合统计,与访达一致留空。
         _ => "—".to_owned(),
     };
@@ -142,9 +140,7 @@ fn fallback_name(path: &std::path::Path) -> String {
 
 fn location_label(snapshot: Option<&RightPreviewPanelInfoSnapshot>) -> String {
     snapshot
-        .map(|snapshot| {
-            format_middle_ellipsized_text(&snapshot.location.to_string_lossy(), 52)
-        })
+        .map(|snapshot| format_middle_ellipsized_text(&snapshot.location.to_string_lossy(), 52))
         .unwrap_or_else(|| "—".to_owned())
 }
 
@@ -157,9 +153,17 @@ fn optional_time(time: Option<Option<std::time::SystemTime>>) -> String {
 /// 与属性窗口的体积措辞一致:本地化单位 + 原始字节数。
 fn display_size(bytes: u64) -> String {
     if crate::localization::current_language_is_chinese() {
-        format!("{}（{} 字节）", crate::formatting::format_file_size(bytes), bytes)
+        format!(
+            "{}（{} 字节）",
+            crate::formatting::format_file_size(bytes),
+            bytes
+        )
     } else {
-        format!("{} ({} bytes)", crate::formatting::format_file_size(bytes), bytes)
+        format!(
+            "{} ({} bytes)",
+            crate::formatting::format_file_size(bytes),
+            bytes
+        )
     }
 }
 

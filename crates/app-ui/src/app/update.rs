@@ -511,8 +511,9 @@ impl FileBrowser {
                     Task::none()
                 }
             }
-            Message::ColumnEntryBoundsMeasured(bounds) => {
+            Message::ColumnEntryBoundsMeasured(bounds, viewports) => {
                 self.refresh_file_drag_preview_layout(&bounds);
+                self.note_file_drag_viewport(&bounds, &viewports);
                 self.update_selection_from_column_entry_bounds(bounds)
             }
             Message::BreadcrumbDropTargetBoundsMeasured(generation, bounds) => {

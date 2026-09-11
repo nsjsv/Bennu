@@ -504,7 +504,7 @@ pub(crate) enum Message {
     },
     ColumnBrowserCursorEntered(BrowserPaneId),
     ColumnBrowserCursorExited(BrowserPaneId),
-    ColumnEntryBoundsMeasured(Vec<ColumnEntryBounds>),
+    ColumnEntryBoundsMeasured(Vec<ColumnEntryBounds>, Vec<iced::Rectangle>),
     BreadcrumbDropTargetBoundsMeasured(u64, Vec<BreadcrumbDropTargetBounds>),
     FileDropLayoutMeasured(FileDropLayoutRequest, FileDragHitTestBounds),
     PaneCursorEntered(BrowserPaneId),

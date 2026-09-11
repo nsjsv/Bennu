@@ -24,8 +24,8 @@ use crate::model::{
     image_preview_size, scaled_media_size, AudioPreviewPlayback, AudioPreviewPlaybackStatus,
     ImagePreviewContent, ImagePreviewViewport, Message, PreviewContent,
     PreviewImageViewportMessage, PreviewSize, PreviewState, PreviewTreeDirectoryChildren,
-    PreviewTreeEntry, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility,
-    TextPreviewDocument, VideoPreviewPlayback, VideoPreviewPlaybackStatus,
+    PreviewTreeEntry, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility, TextPreviewDocument,
+    VideoPreviewPlayback, VideoPreviewPlaybackStatus,
 };
 use crate::operation_progress::remote_preview_download_panel;
 use crate::translated_surface::translated_surface;

@@ -108,6 +108,9 @@ struct FileDragHitTestBoundsOperation {
     blocked_directories: Vec<FileDragBlockedDirectoryBounds>,
     sidebar_directories: Vec<SidebarFileDragTargetBounds>,
     empty_sidebar_bookmark_bounds: Option<Rectangle>,
+    /// 遍历中遇到的滚动可视区(surface 坐标),拖拽聚合判断用来区分
+    /// "超出列表视口"与"超出窗口"。
+    scrollable_viewports: Vec<Rectangle>,
 }
 
 impl FileDragHitTestBoundsOperation {
@@ -124,6 +127,7 @@ impl FileDragHitTestBoundsOperation {
             blocked_directories: Vec::new(),
             sidebar_directories: Vec::new(),
             empty_sidebar_bookmark_bounds: None,
+            scrollable_viewports: Vec::new(),
         }
     }
 
@@ -182,6 +186,11 @@ impl widget::Operation<Message> for FileDragHitTestBoundsOperation {
         // Iced 以 content 坐标遍历滚动子树，命中快照必须还原到 surface 坐标。
         self.pending_scrollable_coordinates =
             Some(self.coordinates.scrollable_content(bounds, translation));
+        if let Some(viewport) = self.pending_scrollable_coordinates.as_ref().map(|context| context.visible_bounds) {
+            if viewport.width > 0.0 && viewport.height > 0.0 {
+                self.scrollable_viewports.push(viewport);
+            }
+        }
     }
 
     fn custom(&mut self, _id: Option<&widget::Id>, bounds: Rectangle, state: &mut dyn Any) {
@@ -250,7 +259,10 @@ impl widget::Operation<Message> for FileDragHitTestBoundsOperation {
     fn finish(&self) -> Outcome<Message> {
         let message = match self.request {
             FileDragHitTestBoundsRequest::SelectionMarquee => {
-                Message::ColumnEntryBoundsMeasured(self.entries.clone())
+                Message::ColumnEntryBoundsMeasured(
+                    self.entries.clone(),
+                    self.scrollable_viewports.clone(),
+                )
             }
             FileDragHitTestBoundsRequest::Breadcrumbs(generation) => {
                 Message::BreadcrumbDropTargetBoundsMeasured(generation, self.breadcrumb_targets())

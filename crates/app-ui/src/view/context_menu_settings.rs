@@ -1,5 +1,6 @@
-use iced::widget::{button, checkbox, column, container, mouse_area, rich_text, row,
-    space::Space, Button};
+use iced::widget::{
+    button, checkbox, column, container, mouse_area, rich_text, row, space::Space, Button,
+};
 use iced::{Alignment, Background, Color, Element, Length};
 
 use crate::app::FileBrowser;
@@ -8,14 +9,12 @@ use crate::appearance::{
 };
 use crate::icons::IconSymbol;
 use crate::model::{
-    ContextMenuSettingsPage, ContextMenuSettingsPageStep, ContextMenuSettingsRow,
-    CONTEXT_MENU_SETTINGS_PAGES, Message,
+    ContextMenuSettingsPage, ContextMenuSettingsPageStep, ContextMenuSettingsRow, Message,
+    CONTEXT_MENU_SETTINGS_PAGES,
 };
 use crate::typography::readable_text;
 
-use super::option_controls::{
-    destructive_confirmation_button_style, secondary_action_button,
-};
+use super::option_controls::{destructive_confirmation_button_style, secondary_action_button};
 use super::tab_motion::translated;
 use super::{themed_icon, IconTone};
 
@@ -57,24 +56,26 @@ pub(super) fn context_menu_settings_section(browser: &FileBrowser) -> Element<'_
         })
         .collect();
 
-    let pager = container(row![
-        pager_button(
-            IconSymbol::ArrowLeft,
-            Message::ContextMenuSettingsPageShifted(ContextMenuSettingsPageStep::Previous),
-        ),
-        readable_text(format!(
-            "{}/{}",
-            position + 1,
-            CONTEXT_MENU_SETTINGS_PAGES.len()
-        ))
-        .size(14),
-        pager_button(
-            IconSymbol::ArrowRight,
-            Message::ContextMenuSettingsPageShifted(ContextMenuSettingsPageStep::Next),
-        ),
-    ]
-    .spacing(14)
-    .align_y(Alignment::Center))
+    let pager = container(
+        row![
+            pager_button(
+                IconSymbol::ArrowLeft,
+                Message::ContextMenuSettingsPageShifted(ContextMenuSettingsPageStep::Previous),
+            ),
+            readable_text(format!(
+                "{}/{}",
+                position + 1,
+                CONTEXT_MENU_SETTINGS_PAGES.len()
+            ))
+            .size(14),
+            pager_button(
+                IconSymbol::ArrowRight,
+                Message::ContextMenuSettingsPageShifted(ContextMenuSettingsPageStep::Next),
+            ),
+        ]
+        .spacing(14)
+        .align_y(Alignment::Center),
+    )
     .width(Length::Fill)
     .center_x(Length::Fill);
 
@@ -149,8 +150,7 @@ fn menu_preview_panel(rows: Vec<Element<'static, Message>>) -> Element<'static, 
 
 fn menu_row_separator() -> Element<'static, Message> {
     container(
-        container(Space::new().width(Length::Fill).height(Length::Fixed(1.0)))
-            .width(Length::Fill),
+        container(Space::new().width(Length::Fill).height(Length::Fixed(1.0))).width(Length::Fill),
     )
     .style(menu_row_separator_style)
     .into()
@@ -284,19 +284,19 @@ fn pager_button(icon: IconSymbol, message: Message) -> Button<'static, Message> 
 /// 恢复默认:同一颗按钮两段式——第一次点进入红色待确认态,再点一次真正恢复;
 /// 翻页或改动排序即撤销待确认态。
 fn reset_row(browser: &FileBrowser, page: ContextMenuSettingsPage) -> Element<'_, Message> {
-    let reset: Element<'static, Message> =
-        if browser.context_menu_reset_confirmation == Some(page) {
-            button(container(readable_text("Click Again to Reset").size(12)).padding([6, 10]))
-                .on_press(Message::ContextMenuSettingsResetConfirmed(page))
-                .style(destructive_confirmation_button_style())
-                .into()
-        } else {
-            secondary_action_button(
-                "Restore defaults",
-                Message::ContextMenuSettingsResetRequested(page),
-            )
+    let reset: Element<'static, Message> = if browser.context_menu_reset_confirmation == Some(page)
+    {
+        button(container(readable_text("Click Again to Reset").size(12)).padding([6, 10]))
+            .on_press(Message::ContextMenuSettingsResetConfirmed(page))
+            .style(destructive_confirmation_button_style())
             .into()
-        };
+    } else {
+        secondary_action_button(
+            "Restore defaults",
+            Message::ContextMenuSettingsResetRequested(page),
+        )
+        .into()
+    };
     center_horizontally(reset)
 }
 

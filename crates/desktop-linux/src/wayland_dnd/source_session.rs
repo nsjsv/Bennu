@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-const MAX_FILE_DRAG_ICON_EDGE: u32 = 256;
+const MAX_FILE_DRAG_ICON_EDGE: u32 = 512;
 static NEXT_CONTROLLER_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_FILE_DRAG_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 

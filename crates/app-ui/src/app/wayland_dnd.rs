@@ -1,14 +1,17 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use desktop_linux::{WaylandDndController, WaylandDndWindowHandle, WaylandFileDragSessionId};
 use iced::Task;
+use iced::widget::image;
 
 use super::FileBrowser;
+use crate::appearance::subtle_border_color;
 use crate::matugen_theme::ui_colors;
 use crate::model::Message;
 use crate::wayland_drag_icon::{
-    file_drag_display_name, render_wayland_file_drag_icon, FileDragIconEntry, FileDragPillPalette,
+    file_drag_display_name, file_drag_group_summary_text, render_wayland_file_drag_icon,
+    FileDragIconEntry, FileDragPillPalette,
 };
 
 /// 拖出位图中光标与单胶囊回退内容之间的缝隙。
@@ -61,7 +64,19 @@ impl FileBrowser {
             .active(self.user_config.theme_mode, self.user_config.color_scheme);
         let colors = ui_colors(&theme);
         FileDragPillPalette {
+            background: colors.surface_bright,
+            border: subtle_border_color(&theme),
             content: colors.on_surface,
+        }
+    }
+
+    /// 拖出位图的条目缩略图:缓存句柄是磁盘 PNG 路径,读出原始字节
+    /// 后以 data URI 嵌入位图 SVG;非文件句柄/读取失败回退类型图标。
+    fn drag_preview_thumbnail_png(&self, path: &Path) -> Option<Vec<u8>> {
+        let handle = self.drag_preview_thumbnail(path)?;
+        match handle {
+            image::Handle::Path(_, thumbnail_path) => std::fs::read(thumbnail_path).ok(),
+            _ => None,
         }
     }
 
@@ -77,6 +92,7 @@ impl FileBrowser {
                         symbol: self.file_drag_icon_symbol(&entry.path),
                         label: file_drag_display_name(&entry.path),
                         offset: entry.offset,
+                        thumbnail_png: self.drag_preview_thumbnail_png(&entry.path),
                     })
                     .collect();
             }
@@ -88,6 +104,7 @@ impl FileBrowser {
                     symbol: self.file_drag_icon_symbol(path),
                     label: file_drag_display_name(path),
                     offset: iced::Vector::new(DRAG_ICON_CURSOR_GAP, DRAG_ICON_CURSOR_GAP),
+                    thumbnail_png: self.drag_preview_thumbnail_png(path),
                 }]
             })
             .unwrap_or_default()
@@ -106,7 +123,13 @@ impl FileBrowser {
         };
         let path_count = paths.len();
         let entries = self.file_drag_icon_entries(&paths);
-        let icon = match render_wayland_file_drag_icon(&entries, self.file_drag_pill_palette()) {
+        let (folders, files) = self.file_drag_group_counts();
+        let summary = file_drag_group_summary_text(folders, files);
+        let icon = match render_wayland_file_drag_icon(
+            &entries,
+            Some(&summary),
+            self.file_drag_pill_palette(),
+        ) {
             Ok(icon) => icon,
             Err(error) => {
                 tracing::warn!(%error, path_count, "Wayland file drag icon rendering failed");

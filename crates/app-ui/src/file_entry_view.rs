@@ -168,6 +168,37 @@ impl FileBrowser {
             None => IconSymbol::FileSolid,
         }
     }
+
+    /// 拖拽组内文件夹与文件的数量,聚合预览文案用。
+    pub(crate) fn file_drag_group_counts(&self) -> (usize, usize) {
+        let Some(drag) = self.file_drag.as_ref() else {
+            return (0, 0);
+        };
+        let mut folders = 0;
+        let mut files = 0;
+        for source in &drag.sources {
+            match self.entry_for_path(source).map(|entry| entry.kind) {
+                Some(FileKind::Directory) => folders += 1,
+                _ => files += 1,
+            }
+        }
+        (folders, files)
+    }
+
+    /// 拖拽预览的缩略图:按各视图的源尺寸依次命中缓存;文件夹与
+    /// 尚未生成缩略图的条目回退到类型图标(None)。
+    pub(crate) fn drag_preview_thumbnail(&self, path: &Path) -> Option<image::Handle> {
+        let entry = self.entry_for_path(path)?;
+        let candidate_edges = [
+            crate::thumbnail_cache::LIST_THUMBNAIL_EDGE,
+            crate::thumbnail_cache::COLUMN_THUMBNAIL_EDGE,
+            self.user_config().icons_icon_edge().saturating_mul(2),
+        ];
+        candidate_edges
+            .iter()
+            .find_map(|edge| self.thumbnail_cache.ready_for_entry(entry, *edge))
+            .map(|thumbnail| thumbnail.handle.clone())
+    }
 }
 
 pub(crate) fn entry_text_input_style(

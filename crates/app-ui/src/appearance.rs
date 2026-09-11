@@ -497,11 +497,33 @@ pub(crate) fn faded_drag_preview_label_style(theme: &Theme, fade: f32) -> contai
     }
     let colors = ui_colors(theme);
     container::Appearance {
-        text_color: Some(mix_color(
-            colors.on_surface,
-            colors.background,
-            fade,
-        )),
+        text_color: Some(mix_color(colors.on_surface, colors.background, fade)),
+        ..container::Appearance::default()
+    }
+}
+
+/// 拖拽预览胶囊底板:淡出程度越高,底板/文字/描边越向背景色收敛,
+/// 与窗口内图标淡出(faded_themed_icon)同一收敛方向。逐个条目与
+/// 聚合总数行共用。
+pub(crate) fn faded_drag_preview_pill_style(theme: &Theme, fade: f32) -> container::Appearance {
+    fn mix_color(from: iced::Color, to: iced::Color, t: f32) -> iced::Color {
+        iced::Color {
+            r: from.r + (to.r - from.r) * t,
+            g: from.g + (to.g - from.g) * t,
+            b: from.b + (to.b - from.b) * t,
+            a: from.a,
+        }
+    }
+    let colors = ui_colors(theme);
+    let mix = |color: iced::Color| mix_color(color, colors.background, fade);
+    container::Appearance {
+        background: Some(Background::Color(mix(colors.surface_bright))),
+        text_color: Some(mix(colors.on_surface)),
+        border: Border {
+            color: mix(subtle_border_color(theme)),
+            width: 1.0,
+            radius: 9.0.into(),
+        },
         ..container::Appearance::default()
     }
 }

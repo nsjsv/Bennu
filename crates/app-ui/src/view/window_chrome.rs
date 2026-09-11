@@ -68,7 +68,6 @@ impl MainPaneWindowChromeRole {
     }
 }
 
-
 #[derive(Debug, Clone, Copy)]
 enum WindowControlPresentation {
     Standard,

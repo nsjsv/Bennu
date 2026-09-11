@@ -1,11 +1,11 @@
 //! 设置「关于」分类页：应用标识（图标 + 名称 + 版本）、许可证说明与开源仓库链接。
 
-use iced::widget::{button, column, container, image, row, text};
-use iced::{Alignment, Background, Border, Color, Element, Length, Theme};
 use crate::app::FileBrowser;
 use crate::appearance::muted_text_color;
 use crate::model::{Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility};
 use crate::typography::readable_text;
+use iced::widget::{button, column, container, image, row, text};
+use iced::{Alignment, Background, Border, Color, Element, Length, Theme};
 
 use super::auxiliary_window_layout::auxiliary_detail_scroller;
 use super::settings_group::{
@@ -22,7 +22,8 @@ const ABOUT_ICON_SIZE: f32 = 140.0;
 /// 品牌展示名，不做翻译。
 const APP_DISPLAY_NAME: &str = "Bennu";
 
-const LICENSE_DESCRIPTION: &str = "Bennu is free software released under the GNU General Public License, version 3 or later.";
+const LICENSE_DESCRIPTION: &str =
+    "Bennu is free software released under the GNU General Public License, version 3 or later.";
 const REPOSITORY_ROW_TITLE: &str = "GitHub repository";
 const REPOSITORY_ROW_DESCRIPTION: &str = "Report issues or browse the source code in your browser.";
 
@@ -37,7 +38,10 @@ pub(super) fn about_settings_detail(
         app_identity_row(),
         settings_group(
             "License",
-            vec![info_setting_row(muted_setting_text(LICENSE_DESCRIPTION, 11))],
+            vec![info_setting_row(muted_setting_text(
+                LICENSE_DESCRIPTION,
+                11
+            ))],
         ),
         settings_card(vec![repository_link_row()]),
     ]
@@ -94,14 +98,19 @@ fn app_identity_row() -> Element<'static, Message> {
 
 fn repository_link_row() -> Element<'static, Message> {
     let labels = column![
-        readable_text(REPOSITORY_ROW_TITLE).size(12).width(Length::Fill),
+        readable_text(REPOSITORY_ROW_TITLE)
+            .size(12)
+            .width(Length::Fill),
         muted_setting_text(REPOSITORY_ROW_DESCRIPTION, 11),
     ]
     .spacing(2)
     .width(Length::Fill);
-    let content = row![labels, themed_icon(IconSymbol::Link, IconTone::Normal, 13.0)]
-        .spacing(8)
-        .align_y(Alignment::Center);
+    let content = row![
+        labels,
+        themed_icon(IconSymbol::Link, IconTone::Normal, 13.0)
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center);
 
     button(content)
         .on_press(Message::AboutRepositoryLinkPressed)

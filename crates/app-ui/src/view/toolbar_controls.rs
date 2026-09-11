@@ -1,4 +1,4 @@
-use iced::widget::{Button, Row, button, container, row};
+use iced::widget::{button, container, row, Button, Row};
 use iced::{Alignment, Background, Border, Color, Element, Theme};
 
 use crate::app::panes::BrowserPaneView;
@@ -9,7 +9,7 @@ use crate::appearance::{
 use crate::icons::IconSymbol;
 use crate::model::{BrowserPaneId, BrowserViewMode, Message};
 
-use super::{IconTone, TOOLBAR_ICON_SIZE, VIEW_MODE_ICON_SIZE, themed_icon};
+use super::{themed_icon, IconTone, TOOLBAR_ICON_SIZE, VIEW_MODE_ICON_SIZE};
 
 pub(super) fn navigation_button_group(pane_id: BrowserPaneId) -> Element<'static, Message> {
     toolbar_button_group(row![

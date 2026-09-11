@@ -53,16 +53,18 @@ pub(crate) use tab_motion::translated_with_width_overflow;
 use std::path::Path;
 
 use iced::alignment::Vertical;
-use iced::widget::{container, mouse_area, opaque, row, stack, Stack, Column, Row, Space, Svg};
+use iced::widget::{
+    container, image, mouse_area, opaque, row, stack, Column, Row, Space, Stack, Svg,
+};
 use iced::{Alignment, Element, Length, Point, Theme};
 
 use crate::app::panes::BrowserPaneView;
 use crate::app::smooth_scroll::smooth_scroll_id;
 use crate::app::FileBrowser;
 use crate::appearance::{
-    app_content_style, column_resize_divider_style, faded_drag_preview_label_style, icon_svg_style,
-    selected_icon_svg_style, selected_tab_item_style, tab_split_overlay_style,
-    warning_icon_svg_style,
+    app_content_style, column_resize_divider_style, faded_drag_preview_label_style,
+    faded_drag_preview_pill_style, icon_svg_style, selected_icon_svg_style,
+    selected_tab_item_style, tab_split_overlay_style, warning_icon_svg_style,
 };
 use crate::file_drag_hit_test_bounds::FileDragHitTestMarker;
 use crate::file_drag_hit_test_marker::track_file_drag_hit_test_marker;
@@ -615,9 +617,11 @@ fn pane_navigation_content<'a>(
             .push(address_bar(browser, pane))
             .push(search_input_panel(browser))
             .push(view_mode_button_group(pane))
-            .push(right_preview_panel_toggle_button(browser.right_preview_panel_open));
-        push_pane_window_controls(navigation, browser, chrome_role, WindowControlSide::Right)
-            .into()
+            .push(right_preview_panel_toggle_button(
+                browser.right_preview_panel_open,
+            ));
+            push_pane_window_controls(navigation, browser, chrome_role, WindowControlSide::Right)
+                .into()
         }
         PaneNavigationLayout::StackedRows => {
             let control_row = Row::new()
@@ -644,7 +648,9 @@ fn pane_navigation_content<'a>(
                 .push(address_bar(browser, pane))
                 .push(search_input_panel(browser))
                 .push(view_mode_button_group(pane))
-                .push(right_preview_panel_toggle_button(browser.right_preview_panel_open))
+                .push(right_preview_panel_toggle_button(
+                    browser.right_preview_panel_open,
+                ))
                 .width(Length::Fill);
             Column::new()
                 .spacing(8)
@@ -728,68 +734,134 @@ fn drag_preview_position(cursor_position: Point) -> Point {
 const DRAG_PREVIEW_FADE_RADIUS: f32 = 256.0;
 // 此距离内不参与淡出,核心组保持全浓。
 const DRAG_PREVIEW_FADE_SOLID_DISTANCE: f32 = 96.0;
-const DRAG_PREVIEW_MAX_PILLS: usize = 128;
-const DRAG_PREVIEW_PILL_ICON_SIZE: f32 = 24.0;
-const DRAG_PREVIEW_PILL_LABEL_SIZE: f32 = 12.0;
-const DRAG_PREVIEW_PILL_LABEL_WIDTH: f32 = 132.0;
-const DRAG_PREVIEW_PILL_LABEL_MAX_CHARS: usize = 20;
-// 无底板:24 图标 + 6 间距 + 132 文件名。
+const DRAG_PREVIEW_MAX_TILES: usize = 128;
+const DRAG_PREVIEW_TILE_SIZE: f32 = 24.0;
+const DRAG_PREVIEW_LABEL_SIZE: f32 = 12.0;
+const DRAG_PREVIEW_LABEL_WIDTH: f32 = 132.0;
+const DRAG_PREVIEW_LABEL_MAX_CHARS: usize = 20;
+// 条目行:24 图标 + 6 间距 + 132 文件名,全部裸露无背景。
 const DRAG_PREVIEW_PILL_WIDTH: f32 = 162.0;
 const DRAG_PREVIEW_PILL_HEIGHT: f32 = 24.0;
+const DRAG_PREVIEW_SUMMARY_TEXT_SIZE: f32 = 12.0;
+// 聚合行相对光标的摆放偏移。
+const DRAG_PREVIEW_SUMMARY_OFFSET_X: f32 = 10.0;
+const DRAG_PREVIEW_SUMMARY_OFFSET_Y: f32 = 10.0;
 
 /// 返回预览浮层与其窗口位置:左上角对准最早出现的条目,使负偏移
 /// (按住条目右下时)也能完整显示。
 fn drag_preview_panel(browser: &FileBrowser) -> Option<(Element<'_, Message>, Point)> {
+    // 临时调试:环境变量触发,绕过拖拽状态直接渲染聚合行,验证浮层渲染链。
+    if std::env::var_os("FM_DEBUG_DRAG_SUMMARY").is_some() {
+        let summary = crate::wayland_drag_icon::file_drag_group_summary_text(37, 12);
+        return Some((
+            drag_preview_summary_row(&summary),
+            Point::new(
+                browser.cursor_position.x + DRAG_PREVIEW_SUMMARY_OFFSET_X,
+                browser.cursor_position.y + DRAG_PREVIEW_SUMMARY_OFFSET_Y,
+            ),
+        ));
+    }
     let drag = browser.file_drag.as_ref()?;
     if !drag.displays_iced_drag_preview() || drag.preview_entries.is_empty() {
         return None;
     }
-    let pills: Vec<(iced::Vector, Element<'static, Message>)> = drag
+    // 出界判断必须用全部选中条目的包围盒:淡出半径外的条目虽不
+    // 渲染,但它们代表着"屏幕铺不下"这件事本身。
+    let offsets: Vec<iced::Vector> = drag
+        .preview_entries
+        .iter()
+        .map(|entry| entry.offset)
+        .collect();
+    let origin_x = offsets
+        .iter()
+        .map(|offset| offset.x)
+        .fold(0.0_f32, f32::min);
+    let origin_y = offsets
+        .iter()
+        .map(|offset| offset.y)
+        .fold(0.0_f32, f32::min);
+    let stack_width = offsets
+        .iter()
+        .map(|offset| offset.x - origin_x)
+        .fold(0.0_f32, f32::max)
+        + DRAG_PREVIEW_PILL_WIDTH;
+    let stack_height = offsets
+        .iter()
+        .map(|offset| offset.y - origin_y)
+        .fold(0.0_f32, f32::max)
+        + DRAG_PREVIEW_PILL_HEIGHT;
+    let stack_origin = Point::new(
+        browser.cursor_position.x + origin_x,
+        browser.cursor_position.y + origin_y,
+    );
+    // 列表是虚拟化的,bounds 快照只覆盖屏幕上可见的行:选中数超过
+    // 快照数就说明有选中内容在屏幕外。此时(或包围盒超出列表可视
+    // 区——它比窗口小,上下还隔着工具栏等)屏幕已铺不下选中内容,
+    // 收拢为一行总数文字,不再逐个铺开。
+    let selection_overflows_screen =
+        drag.sources.len() > drag.preview_entries.len();
+    let overflows_viewport = match browser.file_drag_viewport {
+        Some(viewport) => {
+            let viewport_right = viewport.x + viewport.width;
+            let viewport_bottom = viewport.y + viewport.height;
+            stack_origin.x < viewport.x
+                || stack_origin.y < viewport.y
+                || stack_origin.x + stack_width > viewport_right
+                || stack_origin.y + stack_height > viewport_bottom
+        }
+        // 视口快照未就绪:退回窗口边界判断。
+        None => {
+            stack_origin.x < 0.0
+                || stack_origin.y < 0.0
+                || stack_origin.x + stack_width > browser.main_window_width
+                || stack_origin.y + stack_height > browser.main_window_height
+        }
+    };
+    if selection_overflows_screen || overflows_viewport {
+        let (folders, files) = browser.file_drag_group_counts();
+        let summary = crate::wayland_drag_icon::file_drag_group_summary_text(folders, files);
+        return Some((
+            drag_preview_summary_row(&summary),
+            Point::new(
+                browser.cursor_position.x + DRAG_PREVIEW_SUMMARY_OFFSET_X,
+                browser.cursor_position.y + DRAG_PREVIEW_SUMMARY_OFFSET_Y,
+            ),
+        ));
+    }
+    let tiles: Vec<(iced::Vector, Element<'static, Message>)> = drag
         .preview_entries
         .iter()
         .filter_map(|entry| {
             let fade = drag_preview_fade(entry.offset)?;
             Some((
                 entry.offset,
-                drag_preview_pill(browser, &entry.path, fade),
+                drag_preview_entry_tile(browser, &entry.path, fade),
             ))
         })
-        .take(DRAG_PREVIEW_MAX_PILLS)
+        .take(DRAG_PREVIEW_MAX_TILES)
         .collect();
-    let origin_x = pills
-        .iter()
-        .map(|(offset, _)| offset.x)
-        .fold(0.0_f32, f32::min);
-    let origin_y = pills
-        .iter()
-        .map(|(offset, _)| offset.y)
-        .fold(0.0_f32, f32::min);
+    let layers: Vec<Element<'static, Message>> = tiles
+        .into_iter()
+        .map(|(offset, tile)| drag_preview_tile_layer(offset, tile, origin_x, origin_y))
+        .collect();
     // 浮层的可视范围按 Stack 的布局尺寸划定,不设尺寸就只盖住第一个
     // 胶囊,后续胶囊会被视口剔除;这里显式撑出覆盖全部胶囊的包围盒。
-    let stack_width = pills
-        .iter()
-        .map(|(offset, _)| offset.x - origin_x)
-        .fold(0.0_f32, f32::max)
-        + DRAG_PREVIEW_PILL_WIDTH;
-    let stack_height = pills
-        .iter()
-        .map(|(offset, _)| offset.y - origin_y)
-        .fold(0.0_f32, f32::max)
-        + DRAG_PREVIEW_PILL_HEIGHT;
-    let layers: Vec<Element<'static, Message>> = pills
-        .into_iter()
-        .map(|(offset, pill)| drag_preview_pill_layer(offset, pill, origin_x, origin_y))
-        .collect();
     let stack = Stack::with_children(layers)
         .width(Length::Fixed(stack_width))
         .height(Length::Fixed(stack_height));
-    Some((
-        stack.into(),
-        Point::new(
-            browser.cursor_position.x + origin_x,
-            browser.cursor_position.y + origin_y,
-        ),
-    ))
+    Some((stack.into(), stack_origin))
+}
+
+/// 聚合行:总数说明文字,文字胶囊底板与逐个条目同款。
+fn drag_preview_summary_row(label: &str) -> Element<'static, Message> {
+    container(
+        readable_text(label.to_owned())
+            .size(DRAG_PREVIEW_SUMMARY_TEXT_SIZE)
+            .wrapping(iced::widget::text::Wrapping::None),
+    )
+    .padding([4, 6])
+    .style(|theme| faded_drag_preview_pill_style(theme, 0.0))
+    .into()
 }
 
 /// 离光标越远越淡:淡出半径线性,核心距离内保持全浓;超出半径不显示。
@@ -801,11 +873,15 @@ fn drag_preview_fade(offset: iced::Vector) -> Option<f32> {
     (visibility > 0.0).then(|| visibility.clamp(0.0, 1.0))
 }
 
-/// 单个条目:文件类型图标 + 文件名,无底板直接浮在内容上,随淡出
-/// 程度向背景色收敛。faded_themed_icon 与文字样式收的是"向背景混色
-/// 量"(1 = 消失),而上面算出的 fade 是"可见度"(1 = 全浓),
-/// 传参时做 1 - x 换算。
-fn drag_preview_pill(browser: &FileBrowser, path: &std::path::Path, fade: f32) -> Element<'static, Message> {
+/// 单个条目:内容缩略图(没有则退回文件类型图标)+ 文件名,全部
+/// 裸露无背景,随淡出程度向背景色收敛。faded_themed_icon 收的是
+/// "向背景混色量"(1 = 消失),上面算出的 fade 是"可见度"
+/// (1 = 全浓),传参时做 1 - x 换算。
+fn drag_preview_entry_tile(
+    browser: &FileBrowser,
+    path: &std::path::Path,
+    fade: f32,
+) -> Element<'static, Message> {
     let symbol = browser.file_drag_icon_symbol(path);
     let tone = if symbol == IconSymbol::TriangleAlert {
         IconTone::Warning
@@ -816,33 +892,41 @@ fn drag_preview_pill(browser: &FileBrowser, path: &std::path::Path, fade: f32) -
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("?");
-    let label = format_middle_ellipsized_text(name, DRAG_PREVIEW_PILL_LABEL_MAX_CHARS);
-    container(
-        row![
-            faded_themed_icon(symbol, tone, DRAG_PREVIEW_PILL_ICON_SIZE, 1.0 - fade),
+    let label = format_middle_ellipsized_text(name, DRAG_PREVIEW_LABEL_MAX_CHARS);
+    let leading: Element<'static, Message> = match browser.drag_preview_thumbnail(path) {
+        Some(handle) => image(handle)
+            .width(Length::Fixed(DRAG_PREVIEW_TILE_SIZE))
+            .height(Length::Fixed(DRAG_PREVIEW_TILE_SIZE))
+            .opacity(fade)
+            .into(),
+        None => faded_themed_icon(symbol, tone, DRAG_PREVIEW_TILE_SIZE, 1.0 - fade).into(),
+    };
+    row![
+        leading,
+        container(
             readable_text(label)
-                .size(DRAG_PREVIEW_PILL_LABEL_SIZE)
-                .width(Length::Fixed(DRAG_PREVIEW_PILL_LABEL_WIDTH))
+                .size(DRAG_PREVIEW_LABEL_SIZE)
+                .width(Length::Fixed(DRAG_PREVIEW_LABEL_WIDTH))
                 .wrapping(iced::widget::text::Wrapping::None),
-        ]
-        .spacing(6)
-        .align_y(Vertical::Center),
-    )
-    .style(move |theme| faded_drag_preview_label_style(theme, 1.0 - fade))
+        )
+        .style(move |theme| faded_drag_preview_label_style(theme, 1.0 - fade)),
+    ]
+    .spacing(6)
+    .align_y(Vertical::Center)
     .into()
 }
 
 /// iced 容器无法给内容负偏移,用占位空间把胶囊放到相对光标的
 /// 目标位置;Stack 尺寸由占位与胶囊自身撑出。
-fn drag_preview_pill_layer(
+fn drag_preview_tile_layer(
     offset: iced::Vector,
-    pill: Element<'static, Message>,
+    tile: Element<'static, Message>,
     origin_x: f32,
     origin_y: f32,
 ) -> Element<'static, Message> {
     Column::with_children(vec![
         Space::new().height(offset.y - origin_y).into(),
-        row![Space::new().width(offset.x - origin_x), pill].into(),
+        row![Space::new().width(offset.x - origin_x), tile].into(),
     ])
     .into()
 }

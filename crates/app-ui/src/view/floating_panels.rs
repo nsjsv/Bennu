@@ -21,7 +21,7 @@ use crate::model::{
     DestructiveActionConfirmation, FileAreaMenuItem, FileContextMenuExpansion,
     FileContextMenuState, FileDropPrompt, FilePropertiesMessage, ListColumnConfig, ListColumnKind,
     ListViewPreferences, Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility,
-    SearchContextMenuState, SearchResultMenuItem, SearchEntryTypePreset,
+    SearchContextMenuState, SearchEntryTypePreset, SearchResultMenuItem,
     SidebarBookmarkContextMenuState, TrashMenuItem,
 };
 use crate::open_with::OpenWithState;
@@ -408,7 +408,9 @@ fn search_context_menu_panel<'a>(
                 Message::SearchOpenContainingDirectory(menu.target.clone()),
             ),
             SearchResultMenuItem::Copy => (IconSymbol::Copy, item.label(), Message::CopySelected),
-            SearchResultMenuItem::Cut => (IconSymbol::ArrowRight, item.label(), Message::MoveSelected),
+            SearchResultMenuItem::Cut => {
+                (IconSymbol::ArrowRight, item.label(), Message::MoveSelected)
+            }
             SearchResultMenuItem::MoveToTrash => {
                 (IconSymbol::Trash, item.label(), Message::TrashSelected)
             }
@@ -542,20 +544,22 @@ fn file_context_menu_panel<'a>(
             (FileAreaMenuItem::Duplicate, _) => {
                 menu_item(IconSymbol::Copy, item.label(), Message::DuplicateSelected)
             }
-            (FileAreaMenuItem::NewFolderFromSelection, _) => {
-                menu_item(IconSymbol::Folder, item.label(), Message::NewFolderFromSelection)
-            }
+            (FileAreaMenuItem::NewFolderFromSelection, _) => menu_item(
+                IconSymbol::Folder,
+                item.label(),
+                Message::NewFolderFromSelection,
+            ),
             (FileAreaMenuItem::CopyPath, _) => {
                 menu_item(IconSymbol::List, item.label(), Message::CopyPathSelected)
             }
-            (FileAreaMenuItem::CreateSymlink, _) => {
-                menu_item(IconSymbol::Link, item.label(), Message::CreateSymlinkSelected)
-            }
-            (FileAreaMenuItem::Move, _) => menu_item(
-                IconSymbol::ArrowRight,
+            (FileAreaMenuItem::CreateSymlink, _) => menu_item(
+                IconSymbol::Link,
                 item.label(),
-                Message::MoveSelected,
+                Message::CreateSymlinkSelected,
             ),
+            (FileAreaMenuItem::Move, _) => {
+                menu_item(IconSymbol::ArrowRight, item.label(), Message::MoveSelected)
+            }
             (FileAreaMenuItem::CreateArchive, _) => menu_item(
                 IconSymbol::FileArchive,
                 item.label(),
@@ -600,9 +604,13 @@ fn file_context_menu_panel<'a>(
                 Message::FileProperties(FilePropertiesMessage::Requested(path.clone())),
             ),
             // 空白菜单不含条目专属项;条目菜单必有 target。
-            (FileAreaMenuItem::Open | FileAreaMenuItem::OpenWith | FileAreaMenuItem::Rename | FileAreaMenuItem::Properties, None) => {
-                continue
-            }
+            (
+                FileAreaMenuItem::Open
+                | FileAreaMenuItem::OpenWith
+                | FileAreaMenuItem::Rename
+                | FileAreaMenuItem::Properties,
+                None,
+            ) => continue,
             // NewEntry 已在循环开头作为子菜单触发行处理。
             (FileAreaMenuItem::NewEntry, _) => continue,
         };
@@ -746,11 +754,13 @@ fn trash_context_menu_panel<'a>(
     let mut menu_content = iced::widget::Column::new().spacing(4).padding(8);
     for item in context_menus.trash_items(menu.target.is_some()) {
         match item {
-            TrashMenuItem::Restore => menu_content = menu_content.push(menu_button(
-                IconSymbol::ArrowLeft,
-                item.label(),
-                Message::RestoreSelected,
-            )),
+            TrashMenuItem::Restore => {
+                menu_content = menu_content.push(menu_button(
+                    IconSymbol::ArrowLeft,
+                    item.label(),
+                    Message::RestoreSelected,
+                ))
+            }
             TrashMenuItem::DeletePermanently => {
                 menu_content = menu_content.push(menu_button(
                     IconSymbol::Trash,

@@ -209,6 +209,25 @@ impl FileBrowser {
         });
     }
 
+    /// 记录拖拽源条目所在的列表滚动视口:聚合判断的"屏幕显示范围"
+    /// 以列表可视区域为准(比整个窗口小,上下还隔着工具栏等)。
+    pub(crate) fn note_file_drag_viewport(
+        &mut self,
+        bounds: &[crate::model::ColumnEntryBounds],
+        viewports: &[iced::Rectangle],
+    ) {
+        self.file_drag_viewport = viewports.iter().copied().find(|viewport| {
+            bounds.iter().any(|bound| {
+                self.file_drag
+                    .as_ref()
+                    .is_some_and(|file_drag| {
+                        file_drag.sources.iter().any(|source| source == &bound.path)
+                    })
+                    && viewport.contains(bound.bounds.center())
+            })
+        });
+    }
+
     /// 用最近的条目 bounds 测量填充拖拽预览偏移快照。只填充一次:
     /// 拖动中源视图滚动重排会改变条目原点,重算会让已提起的预览组跳位。
     pub(crate) fn refresh_file_drag_preview_layout(

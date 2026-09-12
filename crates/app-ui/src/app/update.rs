@@ -1169,7 +1169,15 @@ impl FileBrowser {
         // 选中统计的大小需求:选中入口(点击/框选/键盘/全选/粘贴回显等)
         // 太多,统一在出口按选中签名收敛,变化时补一次选中条目元数据调度。
         let selection_metadata_command = self.schedule_selected_metadata_if_selection_changed();
-        Task::batch([command, right_preview_panel_command, selection_metadata_command])
+        // 视口越界自愈:条目集骤减后记录的滚动偏移可能超出新内容,
+        // 出口统一重钉,防止虚拟列表渲染出整屏空白。
+        let viewport_clamp_command = self.clamp_viewports_to_content();
+        Task::batch([
+            command,
+            right_preview_panel_command,
+            selection_metadata_command,
+            viewport_clamp_command,
+        ])
     }
 }
 

@@ -153,6 +153,23 @@ fn flat_list_entry_height_range(
     }
 }
 
+/// 列表行区总高(不含表头):与虚拟范围渲染的累计高度同口径(含展开
+/// 状态行),供视口越界自愈判定最大滚动偏移。
+pub(crate) fn list_rows_content_height(
+    entries: &[DirectoryEntry],
+    expanded_directories: &HashMap<PathBuf, ExpandedDirectory>,
+    row_height: f32,
+) -> f32 {
+    let mut total_height = 0.0;
+    for_each_visible_entry(entries, expanded_directories, &mut |visible_entry| {
+        total_height += row_height * visible_entry.animation_progress.clamp(0.0, 1.0);
+        if let Some(expanded) = expanded_directories.get(&visible_entry.entry.path) {
+            total_height += visible_entry_status_row_height(expanded, row_height);
+        }
+    });
+    total_height
+}
+
 pub(crate) fn list_entry_vertical_bounds(
     entries: &[DirectoryEntry],
     expanded_directories: &HashMap<PathBuf, ExpandedDirectory>,

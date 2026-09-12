@@ -102,6 +102,13 @@ impl FileBrowser {
     // 显示入口保持唯一：先探实时布局再决定是否淡入。iced 在内容塞得下时永不发布
     // on_scroll，缓存里的溢出数据可能过期，"能不能滚"必须以探针读到的当帧布局为准。
     pub(super) fn show_scrollbars_temporarily(&mut self, region: ScrollbarRegion) -> Task<Message> {
+        self.verify_scrollbar_layout(region)
+    }
+
+    // 只探测不预设显示意图：把当帧布局写回缓存自愈过期数据；是否淡入由
+    // 回信核实决定（无溢出只刷新缓存，thumb 随之消失）。视口重钉等让
+    // 内容高度骤变的路径用它同步滚动条，不经过 hover 显示入口。
+    pub(super) fn verify_scrollbar_layout(&mut self, region: ScrollbarRegion) -> Task<Message> {
         advanced_widget::operate(ScrollbarLayoutProbe::new(region))
     }
 

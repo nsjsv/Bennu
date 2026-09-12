@@ -145,6 +145,181 @@ impl FileBrowser {
         Task::batch([vertical, horizontal])
     }
 
+    /// 视口越界自愈:条目集骤减(切换"显示隐藏文件"、文件操作、增量更新
+    /// 等)后,记录的滚动偏移可能超过新内容可支撑的最大偏移,虚拟列表按
+    /// 旧偏移算出的可见区间落在内容之外,渲染出整屏空白("列表内容消失")。
+    /// 出口统一把三种视图的越界视口重钉到内容尾部,并同步 iced 的真实
+    /// 滚动位置。
+    pub(super) fn clamp_viewports_to_content(&mut self) -> Task<Message> {
+        #[derive(Debug)]
+        enum Reclamp {
+            Shared {
+                pane_id: BrowserPaneId,
+                region: ScrollbarRegion,
+                directory: PathBuf,
+                viewport: ColumnViewport,
+            },
+            Icons {
+                pane_id: BrowserPaneId,
+                directory: PathBuf,
+                viewport: crate::model::IconGridViewport,
+            },
+        }
+
+        let pane_ids: Vec<_> = self.panes.iter().map(|pane| pane.id).collect();
+        let mut pending = Vec::new();
+        for pane_id in pane_ids {
+            let Some(pane) = self.pane_view(pane_id) else {
+                continue;
+            };
+            match pane.view_mode {
+                BrowserViewMode::List => {
+                    let Some(viewport) = pane.column_viewports.get(pane.current_dir).copied()
+                    else {
+                        continue;
+                    };
+                    let geometry = crate::list_view::ListGeometry::for_level(
+                        self.user_config.list_view_density,
+                    );
+                    // 粗估守卫:行数乘积是内容高度下界,偏移在此之内必然合法,
+                    // 免去常规帧的精确遍历;疑似越界才做含展开状态行的精确计算。
+                    let flat_lower_bound =
+                        LIST_HEADER_HEIGHT + pane.entries.len() as f32 * geometry.row_height;
+                    if viewport.offset_y <= (flat_lower_bound - viewport.height).max(0.0) {
+                        continue;
+                    }
+                    let content_height = LIST_HEADER_HEIGHT
+                        + crate::visible_entries::list_rows_content_height(
+                            pane.entries,
+                            pane.expanded_directories,
+                            geometry.row_height,
+                        );
+                    let max_offset = (content_height - viewport.height).max(0.0);
+                    if viewport.offset_y > max_offset {
+                        pending.push(Reclamp::Shared {
+                            pane_id,
+                            region: ScrollbarRegion::PaneList(pane_id),
+                            directory: pane.current_dir.clone(),
+                            viewport: ColumnViewport {
+                                offset_y: max_offset,
+                                height: viewport.height,
+                            },
+                        });
+                    }
+                }
+                BrowserViewMode::Columns => {
+                    let geometry = crate::three_column_view::ColumnGeometry::for_level(
+                        self.user_config.columns_view_density,
+                    );
+                    for directory in crate::three_column_view::column_directories_for_pane(pane) {
+                        let Some(viewport) = pane.column_viewports.get(&directory).copied() else {
+                            continue;
+                        };
+                        // 栏内容高按行数乘积保守估计(不含面板外留白),
+                        // clamp 稍紧只是不在最底部,不会二次越界。
+                        let entries: &[file_core::DirectoryEntry] = if directory
+                            == *pane.current_dir
+                        {
+                            pane.entries
+                        } else {
+                            let Some(expanded) = pane.expanded_directories.get(&directory) else {
+                                continue;
+                            };
+                            &expanded.entries
+                        };
+                        let content_height = geometry.entries_top_padding
+                            + entries.len() as f32 * geometry.entry_scroll_height;
+                        let max_offset = (content_height - viewport.height).max(0.0);
+                        if viewport.offset_y > max_offset {
+                            pending.push(Reclamp::Shared {
+                                pane_id,
+                                region: ScrollbarRegion::Column {
+                                    pane_id,
+                                    directory: directory.clone(),
+                                },
+                                directory,
+                                viewport: ColumnViewport {
+                                    offset_y: max_offset,
+                                    height: viewport.height,
+                                },
+                            });
+                        }
+                    }
+                }
+                BrowserViewMode::Icons => {
+                    let layout = self.icon_grid_layout_for_pane(pane);
+                    let viewport = pane.icon_grid_viewport;
+                    let max_offset = (layout.total_height() - viewport.height).max(0.0);
+                    if viewport.offset_y > max_offset {
+                        pending.push(Reclamp::Icons {
+                            pane_id,
+                            directory: pane.current_dir.clone(),
+                            viewport: crate::model::IconGridViewport {
+                                offset_y: max_offset,
+                                ..viewport
+                            },
+                        });
+                    }
+                }
+            }
+        }
+
+        let mut commands = Vec::new();
+        for reclamp in pending {
+            match reclamp {
+                Reclamp::Shared {
+                    pane_id,
+                    region,
+                    directory,
+                    viewport,
+                } => {
+                    if pane_id == self.active_pane_id() {
+                        self.column_viewports.insert(directory, viewport);
+                    } else if let Some(pane_snapshot) = self.pane_by_id_mut(pane_id) {
+                        pane_snapshot.column_viewports.insert(directory, viewport);
+                    }
+                    commands.push(iced::widget::operation::scroll_to(
+                        smooth_scroll_id(&region),
+                        iced::widget::scrollable::AbsoluteOffset {
+                            x: None,
+                            y: Some(viewport.offset_y),
+                        },
+                    ));
+                    // 重钉让内容高度骤变,滚动条缓存的溢出数据随之过期;
+                    // 借布局探针把当帧布局写回,thumb 不再照旧数据显示。
+                    commands.push(self.verify_scrollbar_layout(region));
+                }
+                Reclamp::Icons {
+                    pane_id,
+                    directory,
+                    viewport,
+                } => {
+                    self.icon_grid_viewports.insert(
+                        pane_id,
+                        super::PaneIconGridViewport {
+                            directory,
+                            viewport,
+                        },
+                    );
+                    commands.push(iced::widget::operation::scroll_to(
+                        smooth_scroll_id(&ScrollbarRegion::PaneIcons(pane_id)),
+                        iced::widget::scrollable::AbsoluteOffset {
+                            x: None,
+                            y: Some(viewport.offset_y),
+                        },
+                    ));
+                    commands
+                        .push(self.verify_scrollbar_layout(ScrollbarRegion::PaneIcons(pane_id)));
+                }
+            }
+        }
+        if commands.is_empty() {
+            Task::none()
+        } else {
+            Task::batch(commands)
+        }
+    }
+
     /// 主选中项在当前视图中的纵向定位任务；目录内容尚未就绪时返回 None。
     pub(super) fn view_switch_reveal_scroll(&self, path: &Path) -> Option<Task<Message>> {
         let pane_id = self.active_pane_id();
@@ -850,6 +1025,19 @@ fn advance_expanded_directories(
 mod tests {
     use super::*;
 
+    use file_core::{DirectoryEntry, EntryMetadata};
+
+    fn test_entry(path: PathBuf) -> DirectoryEntry {
+        DirectoryEntry::new(
+            path,
+            FileKind::File,
+            EntryMetadata::default(),
+            false,
+            false,
+            false,
+        )
+    }
+
     #[test]
     fn visible_column_count_selection_normalizes_to_configured_range() {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
@@ -862,5 +1050,140 @@ mod tests {
 
         drop(browser.select_visible_column_count(4));
         assert_eq!(browser.user_config.visible_column_count, 4);
+    }
+
+    #[test]
+    fn list_viewport_offset_is_reclamped_when_entries_shrink_below_it() {
+        let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+        let root = PathBuf::from("/workspace");
+        browser.current_dir = root.clone();
+        browser.view_mode = BrowserViewMode::List;
+        browser.entries = (0..500)
+            .map(|index| test_entry(root.join(format!("item-{index}"))))
+            .collect::<Vec<_>>()
+            .into();
+        browser.column_viewports.insert(
+            root.clone(),
+            ColumnViewport {
+                offset_y: 22000.0,
+                height: 800.0,
+            },
+        );
+
+        // 模拟关闭"显示隐藏文件"后的条目骤减:滚动偏移仍停在旧内容的底部。
+        browser.entries = (0..5)
+            .map(|index| test_entry(root.join(format!("item-{index}"))))
+            .collect::<Vec<_>>()
+            .into();
+
+        drop(browser.update(crate::model::Message::ThemeModeSelected(
+            crate::matugen_theme::ThemeMode::Dark,
+        )));
+
+        let clamped = browser
+            .column_viewports
+            .get(&root)
+            .expect("viewport stays recorded");
+        // 新内容(5 行 + 表头)不足一屏,合法偏移只有 0;保持 22000 会让
+        // 虚拟列表渲染出整屏空白。
+        assert_eq!(clamped.offset_y, 0.0);
+    }
+
+    #[test]
+    fn columns_viewport_offset_is_reclamped_when_entries_shrink_below_it() {
+        let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+        let root = PathBuf::from("/workspace");
+        browser.current_dir = root.clone();
+        browser.view_mode = BrowserViewMode::Columns;
+        browser.entries = (0..200)
+            .map(|index| test_entry(root.join(format!("item-{index}"))))
+            .collect::<Vec<_>>()
+            .into();
+        browser.column_viewports.insert(
+            root.clone(),
+            ColumnViewport {
+                offset_y: 8000.0,
+                height: 600.0,
+            },
+        );
+
+        // 关闭"显示隐藏文件"后栏条目骤减,旧偏移落在内容之外,
+        // 对应首栏显示尾部条目、其余栏空白的截图症状。
+        browser.entries = (0..5)
+            .map(|index| test_entry(root.join(format!("item-{index}"))))
+            .collect::<Vec<_>>()
+            .into();
+
+        drop(browser.update(crate::model::Message::ThemeModeSelected(
+            crate::matugen_theme::ThemeMode::Dark,
+        )));
+
+        let clamped = browser
+            .column_viewports
+            .get(&root)
+            .expect("viewport stays recorded");
+        assert_eq!(clamped.offset_y, 0.0);
+    }
+
+    #[test]
+    fn icons_viewport_offset_is_reclamped_when_entries_shrink_below_it() {
+        let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+        let root = PathBuf::from("/workspace");
+        browser.current_dir = root.clone();
+        browser.view_mode = BrowserViewMode::Icons;
+        browser.entries = (0..5)
+            .map(|index| test_entry(root.join(format!("item-{index}"))))
+            .collect::<Vec<_>>()
+            .into();
+        browser.icon_grid_viewports.insert(
+            browser.active_pane_id(),
+            crate::app::PaneIconGridViewport {
+                directory: root.clone(),
+                viewport: crate::model::IconGridViewport {
+                    offset_y: 20000.0,
+                    width: 600.0,
+                    height: 400.0,
+                },
+            },
+        );
+
+        drop(browser.update(crate::model::Message::ThemeModeSelected(
+            crate::matugen_theme::ThemeMode::Dark,
+        )));
+
+        let clamped = browser
+            .icon_grid_viewports
+            .get(&browser.active_pane_id())
+            .expect("viewport stays recorded");
+        assert_eq!(clamped.viewport.offset_y, 0.0);
+    }
+
+    #[test]
+    fn list_viewport_within_new_content_is_left_untouched() {
+        let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+        let root = PathBuf::from("/workspace");
+        browser.view_mode = BrowserViewMode::List;
+        browser.entries = (0..500)
+            .map(|index| test_entry(root.join(format!("item-{index}"))))
+            .collect::<Vec<_>>()
+            .into();
+        browser.column_viewports.insert(
+            root.clone(),
+            ColumnViewport {
+                offset_y: 4600.0,
+                height: 800.0,
+            },
+        );
+
+        drop(browser.update(crate::model::Message::ThemeModeSelected(
+            crate::matugen_theme::ThemeMode::Dark,
+        )));
+
+        let viewport = browser
+            .column_viewports
+            .get(&root)
+            .expect("viewport stays recorded");
+        // 合法偏移不得被自愈误改(内容 500 行 × 46px 远超 4600+800)。
+        assert_eq!(viewport.offset_y, 4600.0);
     }
 }

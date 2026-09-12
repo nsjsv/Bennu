@@ -180,6 +180,7 @@ impl FileBrowser {
     /// 底部工具栏常显统计：按窗格顺序，每窗格给出选中统计与当前目录
     /// 可见文件总大小。"当前目录"与地址栏同源（多栏取最深打开的栏）。
     /// 可见口径 = 文件系统事实按 show_hidden_files 推导，缓存条目保持不含配置。
+    /// 隐藏条目数取原样事实，两种开关状态都原样呈现。
     pub(crate) fn pane_status_strip_entries(
         &self,
     ) -> Vec<crate::selection_summary::PaneStatusStripEntry> {
@@ -192,24 +193,28 @@ impl FileBrowser {
                     pane_view.view_mode,
                     pane_view.deepest_open_column_directory,
                 );
+                let summary = self
+                    .list_directory_summary_cache
+                    .summary_for_path(displayed_dir);
                 Some(crate::selection_summary::PaneStatusStripEntry {
                     selection: self.pane_selection_summary(pane_view),
-                    visible_files_total_size_bytes: self
-                        .visible_files_total_size_bytes(displayed_dir),
+                    visible_files_total_size_bytes: summary
+                        .and_then(|summary| self.visible_files_total_size_for_summary(summary)),
+                    hidden_entry_count: summary.and_then(|summary| summary.hidden_entry_count),
                 })
             })
             .collect()
     }
 
-    fn visible_files_total_size_bytes(&self, path: &Path) -> Option<u64> {
-        let summary = self.list_directory_summary_cache.summary_for_path(path)?;
+    fn visible_files_total_size_for_summary(
+        &self,
+        summary: crate::model::ListDirectorySummary,
+    ) -> Option<u64> {
         let files_total = summary.files_total_size_bytes?;
         if self.user_config.show_hidden_files {
             return Some(files_total);
         }
-        Some(
-            files_total.saturating_sub(summary.hidden_files_total_size_bytes.unwrap_or(0)),
-        )
+        Some(files_total.saturating_sub(summary.hidden_files_total_size_bytes.unwrap_or(0)))
     }
 
     pub(super) fn invalidate_list_directory_summary(&mut self, path: &Path) {
@@ -730,6 +735,7 @@ mod tests {
                 recursive_total_size_bytes: Some(size),
                 files_total_size_bytes: Some(size),
                 hidden_files_total_size_bytes: Some(0),
+                hidden_entry_count: Some(0),
             }
         ));
     }

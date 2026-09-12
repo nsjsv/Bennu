@@ -368,6 +368,7 @@ mod tests {
                 recursive_total_size_bytes: Some(size),
                 files_total_size_bytes: Some(size),
                 hidden_files_total_size_bytes: Some(0),
+                hidden_entry_count: Some(0),
             }
         ));
     }

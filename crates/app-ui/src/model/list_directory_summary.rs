@@ -49,6 +49,9 @@ pub(crate) struct ListDirectorySummary {
     // 可见口径由 UI 按 show_hidden_files 推导，缓存不掺配置。
     pub(crate) files_total_size_bytes: Option<u64>,
     pub(crate) hidden_files_total_size_bytes: Option<u64>,
+    // 直属隐藏条目数（隐藏文件 + 隐藏文件夹），底栏幽灵开关的数量事实；
+    // 与大小同请求产出，加载中/失败为 None（幽灵组整体隐藏）。
+    pub(crate) hidden_entry_count: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,6 +73,7 @@ struct ListDirectorySummaryCacheEntry {
     recursive_total_size_bytes: Option<u64>,
     files_total_size_bytes: Option<u64>,
     hidden_files_total_size_bytes: Option<u64>,
+    hidden_entry_count: Option<usize>,
     direct_child_count_loading: bool,
     direct_child_count_failed: bool,
     recursive_total_size_loading: bool,
@@ -86,6 +90,7 @@ impl ListDirectorySummaryCache {
             recursive_total_size_bytes: entry.recursive_total_size_bytes,
             files_total_size_bytes: entry.files_total_size_bytes,
             hidden_files_total_size_bytes: entry.hidden_files_total_size_bytes,
+            hidden_entry_count: entry.hidden_entry_count,
         })
     }
 
@@ -157,6 +162,7 @@ impl ListDirectorySummaryCache {
         entry.direct_child_count_failed = false;
         entry.files_total_size_bytes = summary.files_total_size_bytes;
         entry.hidden_files_total_size_bytes = summary.hidden_files_total_size_bytes;
+        entry.hidden_entry_count = summary.hidden_entry_count;
         entry.files_total_size_loading = false;
         entry.files_total_size_failed = false;
         if request.include_recursive_total_size {
@@ -199,6 +205,7 @@ impl ListDirectorySummaryCache {
         entry.recursive_total_size_bytes = None;
         entry.files_total_size_bytes = None;
         entry.hidden_files_total_size_bytes = None;
+        entry.hidden_entry_count = None;
         entry.direct_child_count_loading = false;
         entry.direct_child_count_failed = false;
         entry.recursive_total_size_loading = false;
@@ -265,6 +272,7 @@ mod tests {
                 recursive_total_size_bytes: None,
                 files_total_size_bytes: Some(256),
                 hidden_files_total_size_bytes: Some(16),
+                hidden_entry_count: Some(2),
             }
         ));
         assert_eq!(cache.summary_for_path(&path).unwrap().direct_child_count, 4);
@@ -316,6 +324,7 @@ mod tests {
                 recursive_total_size_bytes: Some(4096),
                 files_total_size_bytes: Some(1024),
                 hidden_files_total_size_bytes: Some(32),
+                hidden_entry_count: Some(3),
             }
         ));
         assert!(cache.summary_for_path(&path).is_none());
@@ -362,6 +371,7 @@ mod tests {
                     recursive_total_size_bytes: Some(128),
                     files_total_size_bytes: Some(64),
                     hidden_files_total_size_bytes: Some(8),
+                    hidden_entry_count: Some(1),
                 }
             ));
         }
@@ -413,11 +423,14 @@ mod tests {
                 recursive_total_size_bytes: None,
                 files_total_size_bytes: Some(512),
                 hidden_files_total_size_bytes: Some(64),
+                hidden_entry_count: Some(5),
             }
         ));
         let summary = cache.summary_for_path(&path).expect("summary");
         assert_eq!(summary.files_total_size_bytes, Some(512));
         assert_eq!(summary.hidden_files_total_size_bytes, Some(64));
+        // 隐藏条目数事实随同一份摘要落缓存并原样回传，UI 不做开关推导。
+        assert_eq!(summary.hidden_entry_count, Some(5));
         assert!(cache.start_request(path, false).is_none());
     }
 

@@ -273,7 +273,10 @@ fn collapsed_strip(browser: &FileBrowser) -> Element<'_, Message> {
         .then(|| browser.pane_status_strip_entries());
     let mut content = row![].align_y(Vertical::Center);
     if let Some(entries) = status_entries {
-        content = content.push(pane_status_summary_strip(entries));
+        content = content.push(pane_status_summary_strip(
+            entries,
+            browser.options.include_hidden,
+        ));
     }
     let content = content
         .push(space::Space::new().width(Length::Fill))
@@ -303,13 +306,15 @@ fn collapsed_strip(browser: &FileBrowser) -> Element<'_, Message> {
 
 /// 底部工具栏左端常显统计:每窗格 = 选中统计(📁 数量、📄 数量 · 选中大小)
 /// 加 " / 目录文件总大小";无选中只显总大小;大小未加载完显 "-"。
+/// 组尾为幽灵开关:当前目录隐藏条目数,点击切换"显示隐藏文件"。
 /// 多窗格并排,竖线分隔。
+const SUMMARY_ICON_SIZE: f32 = 13.0;
+const SUMMARY_TEXT_SIZE: f32 = 12.0;
+const GROUP_SPACING: f32 = 6.0;
 fn pane_status_summary_strip(
     entries: Vec<crate::selection_summary::PaneStatusStripEntry>,
+    hidden_files_visible: bool,
 ) -> Element<'static, Message> {
-    const SUMMARY_ICON_SIZE: f32 = 13.0;
-    const SUMMARY_TEXT_SIZE: f32 = 12.0;
-    const GROUP_SPACING: f32 = 6.0;
     let mut strip = row![].spacing(18).align_y(Vertical::Center);
     for (index, entry) in entries.into_iter().enumerate() {
         if index > 0 {
@@ -359,9 +364,39 @@ fn pane_status_summary_strip(
             None => total_text,
         };
         group = group.push(text(size_text).size(SUMMARY_TEXT_SIZE));
+        if let Some(hidden_count) = entry.hidden_entry_count {
+            group = group.push(hidden_ghost_toggle(hidden_count, hidden_files_visible));
+        }
         strip = strip.push(group);
     }
     strip.into()
+}
+
+/// 幽灵开关:幽灵图标 + 当前目录直属隐藏条目数(文件+文件夹)。
+/// 隐藏内容显示中时幽灵被打叉;点击发与设置页相同的全局开关消息。
+fn hidden_ghost_toggle(
+    hidden_count: usize,
+    hidden_files_visible: bool,
+) -> Element<'static, Message> {
+    let symbol = if hidden_files_visible {
+        IconSymbol::GhostX
+    } else {
+        IconSymbol::Ghost
+    };
+    button(
+        row![
+            symbol
+                .view(SUMMARY_ICON_SIZE)
+                .style(crate::appearance::icon_svg_style()),
+            text(hidden_count.to_string()).size(SUMMARY_TEXT_SIZE),
+        ]
+        .spacing(GROUP_SPACING)
+        .align_y(Vertical::Center),
+    )
+    .on_press(Message::ShowHiddenFilesToggled)
+    .padding(2.0)
+    .style(crate::appearance::transparent_button_style())
+    .into()
 }
 
 fn divider_line_style(theme: &Theme) -> iced::widget::container::Style {

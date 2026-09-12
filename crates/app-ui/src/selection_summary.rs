@@ -25,10 +25,12 @@ impl PaneSelectionSummary {
 
 /// 底部工具栏单窗格状态:选中统计(无选中为空)+ 当前目录可见文件总大小。
 /// 总大小由文件系统事实按 show_hidden_files 推导,加载中为 None(显 "-")。
+/// 隐藏条目数是原样事实,两种开关状态都显示;None = 未加载,幽灵组隐藏。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PaneStatusStripEntry {
     pub(crate) selection: Option<PaneSelectionSummary>,
     pub(crate) visible_files_total_size_bytes: Option<u64>,
+    pub(crate) hidden_entry_count: Option<usize>,
 }
 
 /// 聚合候选条目中被选中的部分。候选集必须与窗格可见条目同源,

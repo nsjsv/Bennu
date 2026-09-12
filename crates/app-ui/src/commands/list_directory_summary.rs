@@ -39,6 +39,7 @@ async fn load_list_directory_summary(
             recursive_total_size_bytes,
             files_total_size_bytes: Some(contents.files_total_size_bytes),
             hidden_files_total_size_bytes: Some(contents.hidden_files_total_size_bytes),
+            hidden_entry_count: Some(contents.hidden_entry_count),
         })
     })
     .await

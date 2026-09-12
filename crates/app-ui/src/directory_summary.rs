@@ -18,6 +18,9 @@ pub(crate) struct DirectoryContentsSummary {
     // 可见口径（扣除隐藏）由 UI 按 show_hidden_files 推导。
     pub(crate) files_total_size_bytes: u64,
     pub(crate) hidden_files_total_size_bytes: u64,
+    // 隐藏条目数事实（隐藏文件 + 隐藏文件夹），与隐藏大小同源产出，
+    // 供底栏幽灵开关显示；缓存同样不掺配置。
+    pub(crate) hidden_entry_count: usize,
 }
 
 impl DirectoryContentsSummary {
@@ -111,6 +114,13 @@ fn read_directory_summary(
                         .checked_add(metadata.len())
                         .ok_or(DirectorySummaryError::Overflow("hidden file size"))?;
                 }
+            }
+            // 幽灵开关的数量口径：隐藏文件夹与隐藏文件都算一个条目。
+            if is_hidden_name(&entry.file_name()) {
+                summary.hidden_entry_count = summary
+                    .hidden_entry_count
+                    .checked_add(1)
+                    .ok_or(DirectorySummaryError::Overflow("hidden entry count"))?;
             }
             summary.total_size_bytes = summary
                 .total_size_bytes
@@ -234,6 +244,26 @@ mod tests {
             .len();
         assert_eq!(direct.files_total_size_bytes, top_len + hidden_len);
         assert_eq!(direct.hidden_files_total_size_bytes, hidden_len);
+    }
+
+    #[test]
+    fn hidden_entry_count_covers_hidden_files_and_directories() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        std::fs::create_dir(temp_dir.path().join(".hidden-dir")).expect("create hidden dir");
+        std::fs::write(temp_dir.path().join(".hidden-file"), b"hid").expect("write hidden file");
+        std::fs::write(temp_dir.path().join("visible.txt"), b"top").expect("write visible file");
+        // 隐藏目录的内部条目不属于直属口径，不得计入。
+        std::fs::write(
+            temp_dir.path().join(".hidden-dir").join("nested.txt"),
+            b"nested",
+        )
+        .expect("write nested file");
+
+        let direct =
+            read_directory_contents_summary(temp_dir.path(), CancellationToken::new(), |_| {})
+                .expect("direct summary");
+
+        assert_eq!(direct.hidden_entry_count, 2);
     }
 
     #[cfg(unix)]

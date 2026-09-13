@@ -1081,6 +1081,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn switching_to_list_demands_visible_rows_despite_stale_shared_viewport() {
+        let options = ScanOptions::default();
+        let (directory, discovery) = discovered_fixture(2, options.clone()).await;
+        let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+        browser.view_mode = BrowserViewMode::Columns;
+        browser.options = options;
+        browser.current_dir = directory.path().to_path_buf();
+        let load_request = browser.next_directory_load_request(directory.path().to_path_buf());
+        drop(browser.accept_directory_discovery(
+            load_request,
+            crate::model::PrebuiltDirectoryDiscovery::build(discovery),
+        ));
+        // Columns 模式下目录加载不产生 List filesystem demand
+        assert!(!browser
+            .directory_metadata_in_flight
+            .iter()
+            .any(|key| key.requirement == DirectoryMetadataRequirement::Filesystem));
+
+        // 列表与多栏共用 column_viewports 键位:这里预置多栏当前列滚到
+        // 很深处的旧记录。切换后列表从顶部开始,demand 必须按列表真实
+        // 起始视口取范围,而不是沿用该记录(否则首屏行日期一直显示 "-")。
+        browser.column_viewports.insert(
+            directory.path().to_path_buf(),
+            ColumnViewport {
+                offset_y: 100_000.0,
+                height: 600.0,
+            },
+        );
+
+        drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::List));
+
+        assert!(browser.directory_metadata_in_flight.iter().any(|key| {
+            key.requirement == DirectoryMetadataRequirement::Filesystem
+                && matches!(key.context, DirectoryMetadataLoadContext::Root { .. })
+                && key.index == 0
+        }));
+    }
+
+    #[tokio::test]
     async fn expanded_metadata_uses_its_own_discovery_owner() {
         let root = tempfile::tempdir().unwrap();
         let expanded_path = root.path().join("expanded");

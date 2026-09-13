@@ -106,14 +106,22 @@ impl FileBrowser {
         self.file_entry_bounds.clear();
         self.user_config.browser_view_mode = view_mode;
         self.sync_active_tab_state();
-        let list_directory_summary_command = if view_mode == BrowserViewMode::List {
-            self.schedule_visible_list_directory_summaries_for_pane(pane_id)
-        } else {
-            Task::none()
-        };
+        let (list_metadata_command, list_directory_summary_command) =
+            if view_mode == BrowserViewMode::List {
+                (
+                    self.schedule_visible_directory_metadata(
+                        pane_id,
+                        Some(self.list_demand_viewport_after_view_switch()),
+                    ),
+                    self.schedule_visible_list_directory_summaries_for_pane(pane_id),
+                )
+            } else {
+                (Task::none(), Task::none())
+            };
         let view_switch_reveal = self.reveal_selected_after_view_switch();
         Task::batch([
             transition_command,
+            list_metadata_command,
             list_directory_summary_command,
             view_switch_reveal,
             self.persist_user_preferences_command(),
@@ -143,6 +151,34 @@ impl FileBrowser {
             Task::none()
         };
         Task::batch([vertical, horizontal])
+    }
+
+    /// 切到 List 后列表的真实起始视口:有可计算的主选中项时与
+    /// `view_switch_reveal_scroll` 的揭示落点一致(scroll_to 不触发
+    /// on_scroll,落点只能在此同步推算),否则列表从顶部开始。
+    /// 不能沿用 `column_viewports` 记录:切换瞬间该键下还是多栏当前列
+    /// 的滚动偏移,按它取 demand 范围会漏掉列表首屏行的元数据。
+    fn list_demand_viewport_after_view_switch(&self) -> ColumnViewport {
+        let geometry =
+            crate::list_view::ListGeometry::for_level(self.user_config.list_view_density);
+        let anchor = self.selected.as_ref().and_then(|path| {
+            let (item_offset, item_height) = crate::visible_entries::list_entry_vertical_bounds(
+                &self.entries,
+                &self.expanded_directories,
+                path,
+                geometry.row_height,
+                LIST_HEADER_HEIGHT,
+            )?;
+            Some(reveal_target_y(
+                self.column_viewports.get(&self.current_dir),
+                item_offset,
+                item_height,
+            ))
+        });
+        ColumnViewport {
+            offset_y: anchor.unwrap_or(0.0).max(0.0),
+            height: self.main_window_height,
+        }
     }
 
     /// 视口越界自愈:条目集骤减(切换"显示隐藏文件"、文件操作、增量更新

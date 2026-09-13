@@ -385,7 +385,7 @@ async fn verify_owned_payload(
             } else if let Some(expected) = expected_fingerprint {
                 fingerprint_object(&payload_path).await? == expected
             } else {
-                same_staging_metadata(&payload_identity, expected_identity)
+                payload_identity.matches_staging_snapshot(expected_identity)
             }
         }
     };
@@ -423,7 +423,7 @@ async fn restore_owned_payload(
                 } else if let Some(expected) = expected_fingerprint {
                     fingerprint_object(&record.request.source).await? == expected
                 } else {
-                    same_staging_metadata(&source_identity, expected_identity)
+                    source_identity.matches_staging_snapshot(expected_identity)
                 }
             }
         };
@@ -450,12 +450,4 @@ async fn restore_owned_payload(
     rename_noreplace(&payload_path, &restored)
         .map_err(|error| error.into_transfer_error(&payload_path, &restored))?;
     sync_rename_parents(&payload_path, &restored).await
-}
-
-fn same_staging_metadata(current: &FileIdentity, expected: &FileIdentity) -> bool {
-    current.object_kind == expected.object_kind
-        && current.size == expected.size
-        && current.modified_seconds == expected.modified_seconds
-        && current.modified_nanoseconds == expected.modified_nanoseconds
-        && current.symbolic_link_target == expected.symbolic_link_target
 }

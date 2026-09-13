@@ -657,7 +657,7 @@ async fn stage_transfer<J: TransferJournal>(
         if payload_fingerprint != expected_fingerprint {
             return Err(RecoverableTransferError::FingerprintMismatch { path: payload_path });
         }
-    } else if !same_staging_metadata(&payload_identity, &staging.prepared.source_identity) {
+    } else if !payload_identity.matches_staging_snapshot(&staging.prepared.source_identity) {
         return Err(RecoverableTransferError::SourceChanged { path: payload_path });
     }
     let payload = CommitPayload::Artifact {
@@ -849,14 +849,6 @@ pub(super) async fn sync_parent(path: &Path) -> Result<(), RecoverableTransferEr
                 io::Error::other(join_error),
             )
         })?
-}
-
-fn same_staging_metadata(current: &FileIdentity, expected: &FileIdentity) -> bool {
-    current.object_kind == expected.object_kind
-        && current.size == expected.size
-        && current.modified_seconds == expected.modified_seconds
-        && current.modified_nanoseconds == expected.modified_nanoseconds
-        && current.symbolic_link_target == expected.symbolic_link_target
 }
 
 async fn sync_tree(path: &Path) -> Result<(), RecoverableTransferError> {

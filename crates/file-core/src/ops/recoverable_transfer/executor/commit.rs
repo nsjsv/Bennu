@@ -223,7 +223,7 @@ pub(super) async fn create_replace_backup<J: TransferJournal>(
 
     let backup_identity = inspect_file_identity(&backup_path).await?;
     if !backup_identity.same_object(expected_target_identity)
-        || !same_staging_metadata(&backup_identity, expected_target_identity)
+        || !backup_identity.matches_staging_snapshot(expected_target_identity)
     {
         return Err(RecoverableTransferError::TargetConflict { path: backup_path });
     }
@@ -257,14 +257,6 @@ fn backup_payload_identity(backup: &BackupCreationTransfer) -> &FileIdentity {
         } => payload_identity,
         CommitPayload::DirectSource { identity } => identity,
     }
-}
-
-fn same_staging_metadata(current: &FileIdentity, expected: &FileIdentity) -> bool {
-    current.object_kind == expected.object_kind
-        && current.size == expected.size
-        && current.modified_seconds == expected.modified_seconds
-        && current.modified_nanoseconds == expected.modified_nanoseconds
-        && current.symbolic_link_target == expected.symbolic_link_target
 }
 
 pub(super) fn commit_payload_identity(commit: &CommitTransfer) -> &FileIdentity {

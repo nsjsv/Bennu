@@ -25,6 +25,27 @@ where
     )
 }
 
+/// 网格瓦片用的居中变体:与带 tooltip 版的文本配置一致(对齐/换行/行高),
+/// 只去掉悬停浮层——占位行等纯展示场景用。
+pub(crate) fn measured_middle_ellipsized_centered_text<'a, Message>(
+    content: impl Into<String>,
+    size: f32,
+    line_height_pixels: f32,
+) -> Element<'a, Message>
+where
+    Message: 'a,
+{
+    Element::new(
+        MeasuredMiddleEllipsizedText::file_name(content)
+            .size(size)
+            .line_height(text::LineHeight::Absolute(Pixels(line_height_pixels)))
+            .wrapping(text::Wrapping::WordOrGlyph)
+            .align_x(text::Alignment::Center)
+            .width(Length::Fill)
+            .height(Length::Fill),
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MiddleEllipsisKind {
     GeneralText,

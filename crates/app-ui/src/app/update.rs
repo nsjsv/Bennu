@@ -206,8 +206,11 @@ impl FileBrowser {
             Message::VideoPreviewFailed(path, generation, error) => {
                 self.accept_video_preview_error(path, generation, error)
             }
-            Message::FileOperationProgressed(task_id, progress) => {
-                if let Some(error) = self.operation_queue.update_progress(task_id, progress) {
+            Message::FileOperationProgressed(task_id, progress, transfer_snapshots) => {
+                if let Some(error) = self
+                    .operation_queue
+                    .update_progress(task_id, progress, transfer_snapshots)
+                {
                     self.show_global_error(error);
                 }
                 Task::none()

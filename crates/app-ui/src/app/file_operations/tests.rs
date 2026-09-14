@@ -191,6 +191,7 @@ fn progress_and_completion_keep_queue_panel_closed() {
             completed: 1,
             total: 2,
         },
+        Vec::new(),
     )));
     assert!(!browser.operation_queue.is_panel_open());
 

@@ -161,14 +161,23 @@ impl FileBrowser {
     fn list_demand_viewport_after_view_switch(&self) -> ColumnViewport {
         let geometry =
             crate::list_view::ListGeometry::for_level(self.user_config.list_view_density);
+        let pane_id = self.active_pane_id();
         let anchor = self.selected.as_ref().and_then(|path| {
-            let (item_offset, item_height) = crate::visible_entries::list_entry_vertical_bounds(
-                &self.entries,
-                &self.expanded_directories,
-                path,
+            // 列表渲染的是"真实条目+传输占位+状态行"的合并行流,reveal
+            // 落点必须按同一条流推算,占位行在选中项上方时不漏算。
+            let pane = self.pane_view(pane_id)?;
+            let rows = crate::transfer_placeholder_view::build_list_transfer_rows(
+                self,
+                pane,
                 geometry.row_height,
-                LIST_HEADER_HEIGHT,
-            )?;
+            );
+            let (item_offset, item_height) =
+                crate::transfer_placeholder_view::list_transfer_rows_vertical_bounds(
+                    &rows,
+                    path,
+                    geometry.row_height,
+                    LIST_HEADER_HEIGHT,
+                )?;
             Some(reveal_target_y(
                 self.column_viewports.get(&self.current_dir),
                 item_offset,
@@ -224,10 +233,15 @@ impl FileBrowser {
                     if viewport.offset_y <= (flat_lower_bound - viewport.height).max(0.0) {
                         continue;
                     }
+                    // 精确口径与列表渲染同流:真实条目+传输占位+展开状态行。
+                    let rows = crate::transfer_placeholder_view::build_list_transfer_rows(
+                        self,
+                        pane,
+                        geometry.row_height,
+                    );
                     let content_height = LIST_HEADER_HEIGHT
-                        + crate::visible_entries::list_rows_content_height(
-                            pane.entries,
-                            pane.expanded_directories,
+                        + crate::transfer_placeholder_view::list_transfer_rows_content_height(
+                            &rows,
                             geometry.row_height,
                         );
                     let max_offset = (content_height - viewport.height).max(0.0);
@@ -248,23 +262,20 @@ impl FileBrowser {
                         self.user_config.columns_view_density,
                     );
                     for directory in crate::three_column_view::column_directories_for_pane(pane) {
-                        let Some(viewport) = pane.column_viewports.get(&directory).copied() else {
+                        let Some(viewport) = pane.column_viewports.get(&directory).copied()
+                        else {
                             continue;
                         };
-                        // 栏内容高按行数乘积保守估计(不含面板外留白),
-                        // clamp 稍紧只是不在最底部,不会二次越界。
-                        let entries: &[file_core::DirectoryEntry] = if directory
-                            == *pane.current_dir
-                        {
-                            pane.entries
-                        } else {
-                            let Some(expanded) = pane.expanded_directories.get(&directory) else {
-                                continue;
-                            };
-                            &expanded.entries
-                        };
+                        // 栏内容高按合并流格子数乘积保守估计(不含面板外留白),
+                        // clamp 稍紧只是不在最底部,不会二次越界;传输占位计入。
+                        let merged_count =
+                            crate::transfer_placeholder_view::column_transfer_item_count(
+                                self,
+                                pane,
+                                &directory,
+                            );
                         let content_height = geometry.entries_top_padding
-                            + entries.len() as f32 * geometry.entry_scroll_height;
+                            + merged_count as f32 * geometry.entry_scroll_height;
                         let max_offset = (content_height - viewport.height).max(0.0);
                         if viewport.offset_y > max_offset {
                             pending.push(Reclamp::Shared {
@@ -374,10 +385,16 @@ impl FileBrowser {
             BrowserViewMode::List => {
                 let geometry =
                     crate::list_view::ListGeometry::for_level(self.user_config.list_view_density);
+                // 与列表渲染同一合并行流(含占位/状态行),落点才与实际行位置一致。
+                let pane = self.pane_view(pane_id)?;
+                let rows = crate::transfer_placeholder_view::build_list_transfer_rows(
+                    self,
+                    pane,
+                    geometry.row_height,
+                );
                 let (item_offset, item_height) =
-                    crate::visible_entries::list_entry_vertical_bounds(
-                        &self.entries,
-                        &self.expanded_directories,
+                    crate::transfer_placeholder_view::list_transfer_rows_vertical_bounds(
+                        &rows,
                         path,
                         geometry.row_height,
                         LIST_HEADER_HEIGHT,
@@ -390,20 +407,19 @@ impl FileBrowser {
             }
             BrowserViewMode::Columns => {
                 let directory = self.entry_parent_directory(path);
-                let entries = if directory == self.current_dir {
-                    self.entries.as_ref()
-                } else {
-                    self.expanded_directories
-                        .get(&directory)?
-                        .entries
-                        .as_slice()
-                };
-                let row_index = entries.iter().position(|entry| entry.path == path)?;
+                // 多栏渲染的是占位合入后的合并序列,行偏移按同一序列推算。
+                let pane = self.pane_view(pane_id)?;
                 let geometry = crate::three_column_view::ColumnGeometry::for_level(
                     self.user_config.columns_view_density,
                 );
-                let item_offset =
-                    geometry.entries_top_padding + row_index as f32 * geometry.entry_scroll_height;
+                let item_offset = geometry.entries_top_padding
+                    + crate::transfer_placeholder_view::column_transfer_item_offset(
+                        self,
+                        pane,
+                        &directory,
+                        path,
+                        geometry.entry_scroll_height,
+                    )?;
                 let viewport = self.column_viewports.get(&directory);
                 (
                     ScrollbarRegion::Column { pane_id, directory },

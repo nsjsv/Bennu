@@ -9,7 +9,7 @@ async fn collected_progress_updates(
 ) -> Vec<FileOperationProgressUpdate> {
     let mut updates = Vec::new();
     while let Some(message) = receiver.next().await {
-        if let Message::FileOperationProgressed(id, progress) = message {
+        if let Message::FileOperationProgressed(id, progress, _) = message {
             assert_eq!(id, task_id);
             updates.push(progress);
         }

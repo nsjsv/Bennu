@@ -428,7 +428,11 @@ pub(crate) enum Message {
     VideoPreviewSeekFrameFailed(PathBuf, u64, Duration, String),
     VideoPreviewFinished(PathBuf, u64),
     VideoPreviewFailed(PathBuf, u64, String),
-    FileOperationProgressed(u64, crate::operation_progress::FileOperationProgressUpdate),
+    FileOperationProgressed(
+        u64,
+        crate::operation_progress::FileOperationProgressUpdate,
+        Vec<crate::operation_progress::TransferEntrySnapshot>,
+    ),
     FileOperationDirectMovesCommitted {
         task_id: u64,
         commits: Vec<crate::commands::DurableDirectMoveCommit>,

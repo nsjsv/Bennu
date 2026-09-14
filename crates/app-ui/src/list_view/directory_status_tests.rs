@@ -51,9 +51,17 @@ fn expanded_directory_status_row_exists(browser: &FileBrowser) -> bool {
     let pane = browser
         .pane_view(browser.active_pane_id())
         .expect("active pane");
-    let directory = browser.entries.first().expect("expanded directory");
-    let geometry = ListGeometry::for_level(browser.user_config().list_view_density);
-    list_directory_status_for_entry(pane, &geometry, directory, 1, 0).is_some()
+    let rows = crate::transfer_placeholder_view::build_list_transfer_rows(
+        browser,
+        pane,
+        ListGeometry::for_level(browser.user_config().list_view_density).row_height,
+    );
+    rows.iter().any(|row| {
+        matches!(
+            row,
+            crate::transfer_placeholder_view::ListTransferRow::DirectoryStatusRow { .. }
+        )
+    })
 }
 
 #[test]

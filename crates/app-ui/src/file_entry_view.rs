@@ -47,7 +47,7 @@ impl FileEntryIconDensity {
     }
 
     // 显示槽与密度几何一致取整到整数像素；缩略图源尺寸保持固定。
-    fn thumbnail_size(self) -> f32 {
+    pub(crate) fn thumbnail_size(self) -> f32 {
         match self {
             Self::List(level) => (LIST_THUMBNAIL_SIZE * level.scale()).round(),
             Self::Column(level) => (COLUMN_THUMBNAIL_SIZE * level.scale()).round(),
@@ -55,7 +55,7 @@ impl FileEntryIconDensity {
         }
     }
 
-    fn icon_size(self) -> f32 {
+    pub(crate) fn icon_size(self) -> f32 {
         match self {
             Self::List(level) => (ENTRY_ICON_SIZE * level.scale()).round(),
             Self::Column(level) => (COLUMN_ENTRY_ICON_SIZE * level.scale()).round(),

@@ -109,6 +109,8 @@ impl FileOperationQueue {
         }
         self.tasks.push(FileOperationTask {
             id,
+            transfer_progress: initial_transfer_progress(&operation),
+            enqueued_at: std::time::SystemTime::now(),
             operation,
             status: task_status,
             progress: FileOperationProgress::pending(),

@@ -67,6 +67,7 @@ async fn send_convert_progress(
         .send(Message::FileOperationProgressed(
             task_id,
             FileOperationProgressUpdate::IndeterminateItems { completed, total },
+            Vec::new(),
         ))
         .await;
 }

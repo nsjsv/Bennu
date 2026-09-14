@@ -1,5 +1,4 @@
 use crate::config::DEFAULT_ICON_GRID_SIZE;
-#[cfg(test)]
 use crate::model::IconGridViewport;
 #[cfg(test)]
 use crate::virtual_range::{
@@ -167,6 +166,27 @@ pub(crate) fn keyboard_target_index(
         IconGridDirection::Left => current_index.saturating_sub(1),
         IconGridDirection::Right => current_index.saturating_add(1).min(last_index),
     })
+}
+
+/// 可见窗口的纵向范围(含上下 overscan):viewport 无效时退化为
+/// "从顶部到一屏高",供首帧/未测量场景兜底。
+pub(crate) fn visible_vertical_window(
+    viewport: IconGridViewport,
+    icon_edge: u32,
+    height_bound: f32,
+) -> (f32, f32) {
+    let overscan = ICON_GRID_OVERSCAN_ROWS as f32 * row_height(icon_edge);
+    if viewport.width > f32::EPSILON && viewport.height > f32::EPSILON {
+        (
+            (viewport.offset_y - overscan).max(0.0),
+            viewport.offset_y + viewport.height + overscan,
+        )
+    } else {
+        (
+            0.0,
+            ICON_GRID_CONTENT_PADDING + height_bound.max(0.0) + overscan,
+        )
+    }
 }
 
 #[cfg(test)]

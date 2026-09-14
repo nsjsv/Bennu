@@ -266,14 +266,30 @@ fn directory_column<'a>(
         .padding(COLUMN_PADDING)
         .width(Length::Fill);
 
+    // 占位从操作队列按本栏目录派生,与条目按该目录的排序合入同一条
+    // 渲染流后再切虚拟窗口,滚动数学与行渲染共用同一份序列。
+    let transfer_placeholders =
+        crate::transfer_placeholders::transfer_placeholders_for_directory(
+            &browser.operation_queue,
+            directory,
+        );
     match column_content(pane, directory) {
         ColumnContent::Entries(entries) => {
+            let merged_items = crate::transfer_placeholders::merge_entries_with_placeholders(
+                entries,
+                &transfer_placeholders,
+                crate::transfer_placeholder_view::transfer_sort_for_pane_directory(
+                    browser,
+                    pane,
+                    directory,
+                ),
+            );
             let range = pane
                 .column_viewports
                 .get(directory)
                 .map(|viewport| {
                     column_virtual_range_for_viewport(
-                        entries.len(),
+                        merged_items.len(),
                         viewport.offset_y,
                         viewport.height,
                         COLUMN_OVERSCAN_ROWS,
@@ -282,7 +298,7 @@ fn directory_column<'a>(
                 })
                 .unwrap_or_else(|| {
                     initial_virtual_range(
-                        entries.len(),
+                        merged_items.len(),
                         geometry.entry_scroll_height,
                         column_initial_rows(
                             browser.main_window_height,
@@ -291,29 +307,71 @@ fn directory_column<'a>(
                     )
                 });
             content = content.push(vertical_spacer(range.before_height));
-            for entry_index in range.start..range.end {
-                let Some(entry) = entries.get(entry_index) else {
+            for item_index in range.start..range.end {
+                let Some(item) = merged_items.get(item_index) else {
                     break;
                 };
-                content = content.push(column_entry_row(
-                    browser,
-                    pane,
-                    entries,
-                    entry_index,
-                    entry,
-                    active_child,
-                ));
+                match item {
+                    crate::transfer_placeholders::MergedTransferItem::Entry(entry) => {
+                        content = content.push(column_entry_row(
+                            browser,
+                            pane,
+                            entry,
+                            active_child,
+                            selection_run_position_in_merged_items(
+                                &merged_items,
+                                item_index,
+                                pane.selected_paths,
+                            ),
+                        ));
+                    }
+                    crate::transfer_placeholders::MergedTransferItem::Placeholder(
+                        placeholder,
+                    ) => {
+                        content = content.push(
+                            crate::transfer_placeholder_view::transfer_placeholder_column_row(
+                                placeholder,
+                                geometry,
+                            ),
+                        );
+                    }
+                }
             }
             content = content.push(vertical_spacer(range.after_height));
         }
         ColumnContent::Pending => {}
         ColumnContent::Empty => {
-            let message = if pane.is_trash_view {
-                "Trash is empty"
+            if transfer_placeholders.is_empty() {
+                let message = if pane.is_trash_view {
+                    "Trash is empty"
+                } else {
+                    "No items"
+                };
+                content = content.push(column_message(message));
             } else {
-                "No items"
-            };
-            content = content.push(column_message(message));
+                let merged_items = crate::transfer_placeholders::merge_entries_with_placeholders(
+                    &[],
+                    &transfer_placeholders,
+                    crate::transfer_placeholder_view::transfer_sort_for_pane_directory(
+                        browser,
+                        pane,
+                        directory,
+                    ),
+                );
+                for item in &merged_items {
+                    if let crate::transfer_placeholders::MergedTransferItem::Placeholder(
+                        placeholder,
+                    ) = item
+                    {
+                        content = content.push(
+                            crate::transfer_placeholder_view::transfer_placeholder_column_row(
+                                placeholder,
+                                geometry,
+                            ),
+                        );
+                    }
+                }
+            }
         }
     }
 
@@ -453,10 +511,9 @@ fn vertical_spacer(height: f32) -> Element<'static, Message> {
 fn column_entry_row<'a>(
     browser: &'a FileBrowser,
     pane: BrowserPaneView<'a>,
-    entries: &[DirectoryEntry],
-    entry_index: usize,
     entry: &DirectoryEntry,
     active_child: Option<&Path>,
+    selection_run_position: Option<SelectionRunPosition>,
 ) -> Element<'a, Message> {
     let geometry = ColumnGeometry::for_level(browser.user_config().columns_view_density);
     let visual_state = FileEntryVisualState::from_entry_context(
@@ -513,8 +570,6 @@ fn column_entry_row<'a>(
         .height(Length::Fixed(geometry.entry_height))
         .center_y(Length::Fixed(geometry.entry_height))
         .width(Length::Fill);
-    let selection_run_position =
-        selection_run_position_for_entry_index(entries, entry_index, pane.selected_paths);
     let row_container = match visual_state.row_style_for_selection_run(selection_run_position) {
         Some(style) => row_container.style(style),
         None => row_container,
@@ -541,28 +596,36 @@ fn column_entry_row<'a>(
     track_column_entry_bounds(row_element, pane.id, entry.path.clone())
 }
 
-fn selection_run_position_for_entry_index(
-    entries: &[DirectoryEntry],
+/// 选中连排位置:邻居只在合并流中相邻真实条目同被选中时延续连排,
+/// 占位与空槽天然断开。
+fn selection_run_position_in_merged_items(
+    merged_items: &[crate::transfer_placeholders::MergedTransferItem],
     index: usize,
     selected_paths: &std::collections::HashSet<PathBuf>,
 ) -> Option<SelectionRunPosition> {
-    let entry = entries.get(index)?;
+    let item = merged_items.get(index)?;
+    let entry = match item {
+        crate::transfer_placeholders::MergedTransferItem::Entry(entry) => *entry,
+        crate::transfer_placeholders::MergedTransferItem::Placeholder(_) => return None,
+    };
     if !selected_paths.contains(&entry.path) {
         return None;
     }
-    let previous_selected = index
-        .checked_sub(1)
-        .and_then(|previous| entries.get(previous))
-        .is_some_and(|previous| selected_paths.contains(&previous.path));
-    let next_selected = entries
-        .get(index + 1)
-        .is_some_and(|next| selected_paths.contains(&next.path));
+    let neighbor_selected = |offset: usize| {
+        merged_items.get(offset).is_some_and(|neighbor| match neighbor {
+            crate::transfer_placeholders::MergedTransferItem::Entry(neighbor_entry) => {
+                selected_paths.contains(&neighbor_entry.path)
+            }
+            crate::transfer_placeholders::MergedTransferItem::Placeholder(_) => false,
+        })
+    };
     Some(SelectionRunPosition::from_neighbors(
-        previous_selected,
-        next_selected,
+        index.checked_sub(1).is_some_and(neighbor_selected),
+        neighbor_selected(index + 1),
     ))
 }
 
+/// 多栏各栏的排序配置:当前目录用扫描选项,其余栏用各自展开目录的排序。
 fn column_content<'a>(pane: BrowserPaneView<'a>, directory: &Path) -> ColumnContent<'a> {
     if directory == pane.current_dir.as_path() {
         return match pane.current_directory_content() {

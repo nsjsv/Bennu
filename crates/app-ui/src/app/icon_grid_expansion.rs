@@ -32,14 +32,60 @@ impl FileBrowser {
         &'a self,
         pane: BrowserPaneView<'a>,
     ) -> IconGridLayout<'a> {
+        let root_placeholders = crate::transfer_placeholders::transfer_placeholders_for_directory(
+            &self.operation_queue,
+            pane.current_dir,
+        );
+        self.icon_grid_layout_for_pane_with_placeholders(pane, &root_placeholders)
+    }
+
+    /// 空目录但有传入占位时,视图用预派生的占位集合建布局,避免
+    /// 「No items」空态与布局各查一遍队列导致两帧之间闪烁。
+    pub(crate) fn icon_grid_layout_for_pane_with_placeholders<'a>(
+        &'a self,
+        pane: BrowserPaneView<'a>,
+        root_placeholders: &[crate::transfer_placeholders::TransferPlaceholder],
+    ) -> IconGridLayout<'a> {
         let expansion = self.icon_grid_expansion.as_ref().filter(|state| {
             pane.view_mode == BrowserViewMode::Icons
                 && state.context().pane_id == pane.id
                 && state.context().current_dir == *pane.current_dir
         });
-        IconGridLayout::new(
+        // 展开子面板与根面板同一事实源:拖放进展开中的目录时,band 内
+        // 占位按该目录的排序出现,与列表/多栏行为一致。
+        let mut expanded_placeholders =
+            crate::icon_grid_layout::ExpandedTransferPlaceholderIndex::new();
+        if let Some(expansion) = expansion {
+            for (path, directory) in expansion
+                .directories()
+                .filter(|(_, directory)| directory.is_visible())
+            {
+                let placeholders =
+                    crate::transfer_placeholders::transfer_placeholders_for_directory(
+                        &self.operation_queue,
+                        path,
+                    );
+                if placeholders.is_empty() {
+                    continue;
+                }
+                expanded_placeholders.insert(
+                    path.to_path_buf(),
+                    (
+                        placeholders,
+                        crate::transfer_placeholder_view::transfer_sort_for_expanded(
+                            self,
+                            &directory.contents,
+                        ),
+                    ),
+                );
+            }
+        }
+        IconGridLayout::with_root_transfer_placeholders(
             pane.current_dir,
             pane.entries,
+            root_placeholders,
+            crate::transfer_placeholder_view::transfer_sort_for_root(self),
+            &expanded_placeholders,
             pane.icon_grid_viewport.width,
             self.main_window_height,
             self.user_config.icons_icon_edge(),

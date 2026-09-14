@@ -1,17 +1,44 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use file_core::DirectoryEntry;
 
 use crate::icon_grid_geometry::{
     column_count_for_width, grid_gap, keyboard_target_index, row_count_for_entries, row_height,
-    tile_visual_height, tile_width, IconGridDirection, ICON_GRID_CONTENT_PADDING,
-    ICON_GRID_OVERSCAN_ROWS,
+    tile_visual_height, tile_width, visible_vertical_window, IconGridDirection,
+    ICON_GRID_CONTENT_PADDING,
 };
 use crate::model::{
     ExpandedDirectoryStatus, IconGridExpandedDirectory, IconGridExpansionState, IconGridViewport,
 };
+use crate::transfer_placeholders::{
+    merge_entries_with_placeholders, TransferPlaceholder, TransferSortOptions,
+};
 use crate::virtual_range::vertical_scroll_delta_to_reveal;
+
+/// 展开子面板的占位注入表:目录 -> (占位, 排序)。由调用方(持有
+/// FileBrowser)一次性派生,布局保持纯几何、不触操作队列;拖放进
+/// 展开中的目录时,band 内占位与列表/多栏同一事实源。
+pub(crate) type ExpandedTransferPlaceholderIndex =
+    HashMap<PathBuf, (Vec<TransferPlaceholder>, TransferSortOptions)>;
+
+/// 网格单元:真实条目或传输占位(根面板与展开子面板均可合入)。
+/// 交互(键盘/命中/揭示)一律只认 Entry,占位纯展示。
+#[derive(Debug, Clone)]
+pub(crate) enum IconGridCell<'a> {
+    Entry(&'a DirectoryEntry),
+    Placeholder(TransferPlaceholder),
+}
+
+impl<'a> IconGridCell<'a> {
+    fn entry(&self) -> Option<&'a DirectoryEntry> {
+        match self {
+            Self::Entry(entry) => Some(entry),
+            Self::Placeholder(_) => None,
+        }
+    }
+}
 
 pub(crate) const ICON_GRID_STATUS_HEIGHT: f32 = 48.0;
 
@@ -34,7 +61,7 @@ pub(crate) struct IconGridVisibleRows {
 #[derive(Debug)]
 pub(crate) struct IconGridRowsLayout<'a> {
     pub(crate) directory: &'a Path,
-    pub(crate) entries: &'a [DirectoryEntry],
+    pub(crate) cells: Arc<[IconGridCell<'a>]>,
     pub(crate) start_row: usize,
     pub(crate) end_row: usize,
     pub(crate) column_count: usize,
@@ -165,9 +192,15 @@ struct IconGridEntryGeometry<'a> {
 }
 
 impl<'a> IconGridLayout<'a> {
-    pub(crate) fn new(
+    /// 根面板与展开子面板合入传输占位:占位按各自排序插入条目流,
+    /// 几何随合并后单元格数推导;交互(键盘/命中/揭示)只认真实条目。
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn with_root_transfer_placeholders(
         root_directory: &'a Path,
         root_entries: &'a [DirectoryEntry],
+        root_placeholders: &[TransferPlaceholder],
+        root_sort: TransferSortOptions,
+        expanded_placeholders: &ExpandedTransferPlaceholderIndex,
         viewport_width: f32,
         height_bound: f32,
         icon_edge: u32,
@@ -175,18 +208,39 @@ impl<'a> IconGridLayout<'a> {
     ) -> Self {
         let expansion = expansion.filter(|state| state.context().current_dir == root_directory);
         let children_by_parent = expansion.map(index_visible_children);
-        let root_status = if root_entries.is_empty() {
+        let root_cells: Arc<[IconGridCell<'a>]> =
+            merge_entries_with_placeholders(root_entries, root_placeholders, root_sort)
+                .into_iter()
+                .map(|item| match item {
+                    crate::transfer_placeholders::MergedTransferItem::Entry(entry) => {
+                        IconGridCell::Entry(entry)
+                    }
+                    crate::transfer_placeholders::MergedTransferItem::Placeholder(
+                        placeholder,
+                    ) => IconGridCell::Placeholder(placeholder),
+                })
+                .collect();
+        // 条目索引 -> 单元格索引:展开锚点仍以条目索引为键,布局阶段
+        // 换算成行号,占位插入不会让锚点漂移。
+        let root_entry_cell_positions = root_cells
+            .iter()
+            .enumerate()
+            .filter_map(|(cell_index, cell)| cell.entry().map(|_| cell_index))
+            .collect::<Vec<_>>();
+        let root_status = if root_cells.is_empty() {
             IconGridPanelStatus::Empty
         } else {
             IconGridPanelStatus::Loaded
         };
         let root = build_panel(
             root_directory,
-            root_entries,
+            root_cells,
             root_status,
             viewport_width.max(0.0),
             icon_edge,
             children_by_parent.as_ref(),
+            Some(&root_entry_cell_positions),
+            Some(expanded_placeholders),
         );
         Self {
             icon_edge,
@@ -224,8 +278,7 @@ impl<'a> IconGridLayout<'a> {
 
     pub(crate) fn interactive_entry_paths(&self) -> Vec<PathBuf> {
         if let [IconGridFlowSegment::Rows(rows)] = self.root.flow.as_slice() {
-            return rows_entries(rows)
-                .iter()
+            return rows_entries(&rows.cells)
                 .map(|entry| entry.path.clone())
                 .collect();
         }
@@ -251,20 +304,19 @@ impl<'a> IconGridLayout<'a> {
         direction: IconGridDirection,
     ) -> Option<IconGridNavigationTarget<'a>> {
         if let [IconGridFlowSegment::Rows(rows)] = self.root.flow.as_slice() {
-            let current_index = current_path.and_then(|current_path| {
-                rows.entries
-                    .iter()
-                    .position(|entry| entry.path == current_path)
-            });
+            // 键盘导航只落在真实条目上;占位格被自然跳过。
+            let entries = rows_entries(&rows.cells).collect::<Vec<_>>();
+            let current_index = current_path
+                .and_then(|current_path| entries.iter().position(|entry| entry.path == current_path));
             let target_index = keyboard_target_index(
                 current_index,
                 direction,
-                rows.entries.len(),
+                entries.len(),
                 rows.column_count,
             )?;
             return Some(IconGridNavigationTarget {
                 directory: rows.directory,
-                entry: &rows.entries[target_index],
+                entry: entries[target_index],
             });
         }
 
@@ -318,14 +370,18 @@ impl<'a> IconGridLayout<'a> {
 
 fn build_panel<'a>(
     directory: &'a Path,
-    entries: &'a [DirectoryEntry],
+    cells: Arc<[IconGridCell<'a>]>,
     status: IconGridPanelStatus,
     width: f32,
     icon_edge: u32,
     children_by_parent: Option<&IconGridChildrenByParent<'a>>,
+    // 本面板子锚点(条目索引 -> 单元格索引)的换算表;根面板携带,
+    // 子面板的条目与单元格一一对应,用恒等映射。
+    entry_cell_positions: Option<&[usize]>,
+    expanded_placeholders: Option<&ExpandedTransferPlaceholderIndex>,
 ) -> IconGridPanelLayout<'a> {
     let column_count = column_count_for_width(width, icon_edge);
-    if status != IconGridPanelStatus::Loaded || entries.is_empty() {
+    if status != IconGridPanelStatus::Loaded || cells.is_empty() {
         return IconGridPanelLayout {
             status,
             height: ICON_GRID_CONTENT_PADDING * 2.0 + ICON_GRID_STATUS_HEIGHT,
@@ -333,7 +389,11 @@ fn build_panel<'a>(
         };
     }
 
-    let total_rows = row_count_for_entries(entries.len(), column_count);
+    let anchor_cell_index = |anchor_index: usize| match entry_cell_positions {
+        Some(positions) => positions.get(anchor_index).copied().unwrap_or(anchor_index),
+        None => anchor_index,
+    };
+    let total_rows = row_count_for_entries(cells.len(), column_count);
     let children = children_by_parent
         .and_then(|children| children.get(directory))
         .map(Vec::as_slice)
@@ -344,13 +404,13 @@ fn build_panel<'a>(
     let mut top = ICON_GRID_CONTENT_PADDING;
     let mut child_cursor = 0;
     while child_cursor < children.len() {
-        let anchor_row = children[child_cursor].1.anchor_index / column_count;
+        let anchor_row = anchor_cell_index(children[child_cursor].1.anchor_index) / column_count;
         let rows_end = anchor_row.saturating_add(1).min(total_rows);
         if next_row < rows_end {
             let height = (rows_end - next_row) as f32 * row_height(icon_edge);
             flow.push(IconGridFlowSegment::Rows(IconGridRowsLayout {
                 directory,
-                entries,
+                cells: Arc::clone(&cells),
                 start_row: next_row,
                 end_row: rows_end,
                 column_count,
@@ -362,24 +422,27 @@ fn build_panel<'a>(
         }
 
         while child_cursor < children.len()
-            && children[child_cursor].1.anchor_index / column_count == anchor_row
+            && anchor_cell_index(children[child_cursor].1.anchor_index) / column_count == anchor_row
         {
             let (child_path, child) = children[child_cursor];
-            let (child_entries, child_status) = expanded_panel_content(child);
+            let (child_cells, child_status) =
+                expanded_panel_content(child_path, child, expanded_placeholders);
             let child_panel = build_panel(
                 child_path,
-                child_entries,
+                child_cells,
                 child_status,
                 width,
                 icon_edge,
                 children_by_parent,
+                None,
+                expanded_placeholders,
             );
             let natural_height = child_panel.height;
             let animation_progress = child.contents.animation_progress.clamp(0.0, 1.0);
             let height = natural_height * animation_progress;
             flow.push(IconGridFlowSegment::Band(IconGridBandLayout {
                 directory: child_path,
-                anchor_column: child.anchor_index % column_count,
+                anchor_column: anchor_cell_index(child.anchor_index) % column_count,
                 top,
                 height,
                 natural_height,
@@ -395,7 +458,7 @@ fn build_panel<'a>(
         let height = (total_rows - next_row) as f32 * row_height(icon_edge);
         flow.push(IconGridFlowSegment::Rows(IconGridRowsLayout {
             directory,
-            entries,
+            cells,
             start_row: next_row,
             end_row: total_rows,
             column_count,
@@ -436,18 +499,50 @@ fn index_visible_children(expansion: &IconGridExpansionState) -> IconGridChildre
     children_by_parent
 }
 
-fn expanded_panel_content(
-    directory: &IconGridExpandedDirectory,
-) -> (&[DirectoryEntry], IconGridPanelStatus) {
+fn expanded_panel_content<'a>(
+    directory_path: &Path,
+    directory: &'a IconGridExpandedDirectory,
+    expanded_placeholders: Option<&ExpandedTransferPlaceholderIndex>,
+) -> (Arc<[IconGridCell<'a>]>, IconGridPanelStatus) {
     match &directory.contents.status {
-        ExpandedDirectoryStatus::Loading => (&[], IconGridPanelStatus::Loading),
-        ExpandedDirectoryStatus::Loaded if directory.contents.entries.is_empty() => {
-            (&directory.contents.entries, IconGridPanelStatus::Empty)
-        }
+        ExpandedDirectoryStatus::Loading => (Arc::from(Vec::new()), IconGridPanelStatus::Loading),
+        ExpandedDirectoryStatus::Error => (Arc::from(Vec::new()), IconGridPanelStatus::Error),
         ExpandedDirectoryStatus::Loaded => {
-            (&directory.contents.entries, IconGridPanelStatus::Loaded)
+            // 展开子面板与根面板同一规则:目标为该目录的传入占位按该
+            // 目录的排序合入;空目录但有占位时按有内容渲染,顶掉空态。
+            let cells: Vec<IconGridCell> = match expanded_placeholders
+                .and_then(|index| index.get(directory_path))
+                .filter(|(placeholders, _)| !placeholders.is_empty())
+            {
+                Some((placeholders, sort)) => merge_entries_with_placeholders(
+                    &directory.contents.entries,
+                    placeholders,
+                    *sort,
+                )
+                .into_iter()
+                .map(|item| match item {
+                    crate::transfer_placeholders::MergedTransferItem::Entry(entry) => {
+                        IconGridCell::Entry(entry)
+                    }
+                    crate::transfer_placeholders::MergedTransferItem::Placeholder(
+                        placeholder,
+                    ) => IconGridCell::Placeholder(placeholder),
+                })
+                .collect(),
+                None => directory
+                    .contents
+                    .entries
+                    .iter()
+                    .map(IconGridCell::Entry)
+                    .collect(),
+            };
+            let status = if cells.is_empty() {
+                IconGridPanelStatus::Empty
+            } else {
+                IconGridPanelStatus::Loaded
+            };
+            (cells.into(), status)
         }
-        ExpandedDirectoryStatus::Error => (&[], IconGridPanelStatus::Error),
     }
 }
 
@@ -473,14 +568,14 @@ fn collect_visible_entries<'a>(
                     continue;
                 };
                 for row in visible_rows.start_row..visible_rows.end_row {
-                    let start = row
-                        .saturating_mul(rows.column_count)
-                        .min(rows.entries.len());
+                    let start = row.saturating_mul(rows.column_count).min(rows.cells.len());
                     let end = start
                         .saturating_add(rows.column_count)
-                        .min(rows.entries.len());
-                    for entry in &rows.entries[start..end] {
-                        collected.push(IconGridVisibleEntry { entry });
+                        .min(rows.cells.len());
+                    for cell in &rows.cells[start..end] {
+                        if let Some(entry) = cell.entry() {
+                            collected.push(IconGridVisibleEntry { entry });
+                        }
                     }
                 }
             }
@@ -520,26 +615,28 @@ fn collect_interactive_entries<'a>(
             IconGridFlowSegment::Rows(rows) => {
                 let rows_top = panel_top + rows.top;
                 for row in rows.start_row..rows.end_row {
-                    let start = row
-                        .saturating_mul(rows.column_count)
-                        .min(rows.entries.len());
+                    let start = row.saturating_mul(rows.column_count).min(rows.cells.len());
                     let end = start
                         .saturating_add(rows.column_count)
-                        .min(rows.entries.len());
+                        .min(rows.cells.len());
                     let top = rows_top
                         + row.saturating_sub(rows.start_row) as f32 * row_height(icon_edge);
-                    for (column, entry) in rows.entries[start..end].iter().enumerate() {
-                        collected.push(IconGridEntryGeometry {
-                            directory: rows.directory,
-                            entry,
-                            center_x: panel_left
-                                + ICON_GRID_CONTENT_PADDING
-                                + column as f32 * (tile_width(icon_edge) + grid_gap(icon_edge))
-                                + tile_width(icon_edge) / 2.0,
-                            center_y: top + tile_visual_height(icon_edge) / 2.0,
-                            top,
-                            bottom: top + tile_visual_height(icon_edge),
-                        });
+                    // 交互几何按单元格列位计算;占位格不产生交互事实。
+                    for (column, cell) in rows.cells[start..end].iter().enumerate() {
+                        if let Some(entry) = cell.entry() {
+                            collected.push(IconGridEntryGeometry {
+                                directory: rows.directory,
+                                entry,
+                                center_x: panel_left
+                                    + ICON_GRID_CONTENT_PADDING
+                                    + column as f32
+                                        * (tile_width(icon_edge) + grid_gap(icon_edge))
+                                    + tile_width(icon_edge) / 2.0,
+                                center_y: top + tile_visual_height(icon_edge) / 2.0,
+                                top,
+                                bottom: top + tile_visual_height(icon_edge),
+                            });
+                        }
                     }
                 }
             }
@@ -557,17 +654,10 @@ fn collect_interactive_entries<'a>(
     }
 }
 
-fn rows_entries<'a>(rows: &'a IconGridRowsLayout<'a>) -> &'a [DirectoryEntry] {
-    let start = rows
-        .start_row
-        .saturating_mul(rows.column_count)
-        .min(rows.entries.len());
-    let end = rows
-        .end_row
-        .saturating_mul(rows.column_count)
-        .min(rows.entries.len())
-        .max(start);
-    &rows.entries[start..end]
+fn rows_entries<'cells, 'a>(
+    cells: &'cells [IconGridCell<'a>],
+) -> impl Iterator<Item = &'a DirectoryEntry> + 'cells {
+    cells.iter().filter_map(IconGridCell::entry)
 }
 
 fn collect_interactive_paths(
@@ -578,7 +668,7 @@ fn collect_interactive_paths(
     for segment in &panel.flow {
         match segment {
             IconGridFlowSegment::Rows(rows) => {
-                for entry in rows_entries(rows) {
+                for entry in rows_entries(&rows.cells) {
                     if candidates.contains(entry.path.as_path()) {
                         matches.insert(entry.path.clone());
                     }
@@ -605,18 +695,21 @@ fn find_interactive_entry<'a>(
                 let start = rows
                     .start_row
                     .saturating_mul(rows.column_count)
-                    .min(rows.entries.len());
+                    .min(rows.cells.len());
                 let end = rows
                     .end_row
                     .saturating_mul(rows.column_count)
-                    .min(rows.entries.len());
-                let Some(relative_index) = rows.entries[start..end]
+                    .min(rows.cells.len());
+                let Some(relative_index) = rows.cells[start..end]
                     .iter()
-                    .position(|entry| entry.path == path)
+                    .position(|cell| cell.entry().is_some_and(|entry| entry.path == path))
                 else {
                     continue;
                 };
                 let index = relative_index + start;
+                let Some(entry) = rows.cells[index].entry() else {
+                    continue;
+                };
                 let row = index / rows.column_count;
                 let column = index % rows.column_count;
                 let top = panel_top
@@ -624,7 +717,7 @@ fn find_interactive_entry<'a>(
                     + row.saturating_sub(rows.start_row) as f32 * row_height(icon_edge);
                 return Some(IconGridEntryGeometry {
                     directory: rows.directory,
-                    entry: &rows.entries[index],
+                    entry,
                     center_x: panel_left
                         + ICON_GRID_CONTENT_PADDING
                         + column as f32 * (tile_width(icon_edge) + grid_gap(icon_edge))
@@ -649,25 +742,6 @@ fn find_interactive_entry<'a>(
         }
     }
     None
-}
-
-fn visible_vertical_window(
-    viewport: IconGridViewport,
-    icon_edge: u32,
-    height_bound: f32,
-) -> (f32, f32) {
-    let overscan = ICON_GRID_OVERSCAN_ROWS as f32 * row_height(icon_edge);
-    if viewport.width > f32::EPSILON && viewport.height > f32::EPSILON {
-        (
-            (viewport.offset_y - overscan).max(0.0),
-            viewport.offset_y + viewport.height + overscan,
-        )
-    } else {
-        (
-            0.0,
-            ICON_GRID_CONTENT_PADDING + height_bound.max(0.0) + overscan,
-        )
-    }
 }
 
 fn adjacent_vertical_entry<'a>(

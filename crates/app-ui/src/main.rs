@@ -79,6 +79,8 @@ mod text_preview_loading;
 mod text_preview_viewer;
 mod three_column_view;
 mod thumbnail_cache;
+mod transfer_placeholder_view;
+mod transfer_placeholders;
 mod translated_surface;
 mod typography;
 mod ui_pacing;

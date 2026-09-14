@@ -72,6 +72,7 @@ fn animation_subscription_is_needed_only_for_active_indeterminate_work() {
             completed_items: 0,
             total_items: 1,
         },
+        Vec::new(),
     );
 
     assert!(!queue.has_active_indeterminate_progress());
@@ -89,22 +90,22 @@ fn paused_and_terminal_tasks_ignore_late_progress_updates() {
         total_items: 1,
     };
 
-    queue.update_progress(task_id, update(100));
+    queue.update_progress(task_id, update(100), Vec::new());
     assert_eq!(queue.tasks()[0].progress.bytes(), Some((100, 1_000)));
 
     queue.toggle_pause(task_id);
-    queue.update_progress(task_id, update(500));
+    queue.update_progress(task_id, update(500), Vec::new());
     assert_eq!(queue.tasks()[0].progress.bytes(), Some((100, 1_000)));
 
     queue.toggle_pause(task_id);
-    queue.update_progress(task_id, update(500));
+    queue.update_progress(task_id, update(500), Vec::new());
     assert_eq!(queue.tasks()[0].progress.bytes(), Some((500, 1_000)));
 
     queue.finish(
         task_id,
         FileOperationFinish::Failed("write failed".to_owned()),
     );
-    queue.update_progress(task_id, update(900));
+    queue.update_progress(task_id, update(900), Vec::new());
     assert_eq!(queue.tasks()[0].progress.bytes(), Some((500, 1_000)));
     assert_eq!(queue.tasks()[0].progress.fraction(), Some(0.5));
 }
@@ -145,6 +146,7 @@ fn failure_and_cancellation_preserve_last_trusted_progress() {
             completed_items: 1,
             total_items: 3,
         },
+        Vec::new(),
     );
 
     failed_queue.finish(
@@ -167,6 +169,7 @@ fn failure_and_cancellation_preserve_last_trusted_progress() {
             completed_items: 2,
             total_items: 3,
         },
+        Vec::new(),
     );
     canceled_queue.cancel(canceled_task_id);
     canceled_queue.finish(canceled_task_id, FileOperationFinish::Canceled);

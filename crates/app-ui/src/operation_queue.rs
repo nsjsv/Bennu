@@ -15,7 +15,10 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use crate::model::sanitized_application_log_detail;
-use crate::operation_progress::{FileOperationProgress, FileOperationProgressUpdate};
+use crate::operation_progress::{
+    FileOperationProgress, FileOperationProgressUpdate, TransferEntrySnapshot,
+    TransferEntrySnapshotState,
+};
 
 mod persistence;
 use persistence::{queued_operation_from_stored, queued_operation_to_stored};
@@ -320,6 +323,12 @@ pub(crate) struct FileOperationTask {
     pub(crate) operation: QueuedFileOperation,
     pub(crate) status: FileOperationStatus,
     pub(crate) progress: FileOperationProgress,
+    /// 传入条目的逐条目快照(占位行单一事实源)。入队即初始化:
+    /// Copy/Duplicate 全量 Queued(占位立即出现),Move 置空——同盘移动
+    /// 走瞬时 rename 全程无字节进度,跨盘 move 从首条复制进度起出现。
+    pub(crate) transfer_progress: Vec<TransferEntrySnapshot>,
+    /// 任务入队时刻;占位行在 Modified 排序下的缺省键(≈最新)。
+    pub(crate) enqueued_at: std::time::SystemTime,
     pub(crate) completion_warning: Option<String>,
     pub(crate) error: Option<String>,
     is_read: bool,
@@ -516,6 +525,8 @@ impl FileOperationQueue {
             operation: operation.clone(),
             status: FileOperationStatus::Pending,
             progress: FileOperationProgress::pending(),
+            transfer_progress: initial_transfer_progress(&operation),
+            enqueued_at: std::time::SystemTime::now(),
             completion_warning: None,
             error: None,
             is_read,
@@ -741,6 +752,7 @@ impl FileOperationQueue {
         &mut self,
         id: u64,
         update: FileOperationProgressUpdate,
+        transfer_snapshots: Vec<TransferEntrySnapshot>,
     ) -> Option<String> {
         let position = self.tasks.iter().position(|task| task.id == id)?;
         if !matches!(
@@ -751,6 +763,11 @@ impl FileOperationQueue {
         }
         self.tasks[position].execution_phase = Some(FileOperationExecutionPhase::Executing);
         self.tasks[position].progress.update(update);
+        // 快照流只由恢复式传输的后台发送;空向量表示本消息不携带逐条目
+        // 语义(直移 rename 结算/非传输操作),保留已有快照不回退。
+        if !transfer_snapshots.is_empty() {
+            self.tasks[position].transfer_progress = transfer_snapshots;
+        }
         None
     }
 
@@ -1151,6 +1168,30 @@ fn terminal_persistence(operation: &QueuedFileOperation) -> TaskStatePersistence
     } else {
         TaskStatePersistence::Update
     }
+}
+
+/// 入队/恢复时的占位初值:Copy/Duplicate 全部条目以 Queued 快照出现
+/// (占位立即可见,空环),Move 置空留待运行期按实际复制进度出现。
+/// is_directory 在边界处对源做一次 metadata 判定;恢复时源可能已不存在,
+/// 判定失败按文件图标处理,首条进度快照会用清单事实替换。
+fn initial_transfer_progress(operation: &QueuedFileOperation) -> Vec<TransferEntrySnapshot> {
+    let transfers = match operation {
+        QueuedFileOperation::Copy { transfers, .. }
+        | QueuedFileOperation::Duplicate { transfers, .. } => transfers,
+        _ => return Vec::new(),
+    };
+    transfers
+        .iter()
+        .map(|transfer| TransferEntrySnapshot {
+            target: transfer.target.clone(),
+            is_directory: std::fs::metadata(&transfer.source)
+                .map(|metadata| metadata.is_dir())
+                .unwrap_or(false),
+            completed_bytes: None,
+            total_bytes: None,
+            state: TransferEntrySnapshotState::Queued,
+        })
+        .collect()
 }
 
 fn stored_status_is_terminal(status: StoredTaskStatus) -> bool {

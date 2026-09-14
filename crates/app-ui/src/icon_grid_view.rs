@@ -29,8 +29,8 @@ use crate::icon_grid_geometry::{
     ICON_GRID_CONTENT_PADDING, ICON_GRID_LABEL_SIZE,
 };
 use crate::icon_grid_layout::{
-    IconGridBandLayout, IconGridFlowSegment, IconGridPanelLayout, IconGridPanelStatus,
-    IconGridRowsLayout, ICON_GRID_STATUS_HEIGHT,
+    IconGridBandLayout, IconGridCell, IconGridFlowSegment, IconGridPanelLayout,
+    IconGridPanelStatus, IconGridRowsLayout, ICON_GRID_STATUS_HEIGHT,
 };
 use crate::icons::rotated_chevron_right_view;
 use crate::input_blocking_space::input_blocking_space;
@@ -57,15 +57,26 @@ pub(crate) fn icon_grid_view<'a>(
     pane: BrowserPaneView<'a>,
 ) -> Element<'a, Message> {
     let pane_id = pane.id;
+    // 空目录但目标正在传入(占位非空)时按有内容渲染,占位格子顶掉
+    // 「No items」提示;占位派生一次,避免布局与空态判定各查一遍队列。
+    let transfer_placeholders = crate::transfer_placeholders::transfer_placeholders_for_directory(
+        &browser.operation_queue,
+        pane.current_dir,
+    );
     let content: Element<'a, Message> = match pane.current_directory_content() {
         DirectoryContentAvailability::Pending => Space::new().height(Length::Fill).into(),
-        DirectoryContentAvailability::Available([]) => grid_message(if pane.is_trash_view {
-            "Trash is empty"
-        } else {
-            "No items"
-        }),
+        DirectoryContentAvailability::Available([])
+            if transfer_placeholders.is_empty() =>
+        {
+            grid_message(if pane.is_trash_view {
+                "Trash is empty"
+            } else {
+                "No items"
+            })
+        }
         DirectoryContentAvailability::Available(_) => {
-            let layout = browser.icon_grid_layout_for_pane(pane);
+            let layout =
+                browser.icon_grid_layout_for_pane_with_placeholders(pane, &transfer_placeholders);
             render_panel(
                 browser,
                 pane,
@@ -127,6 +138,10 @@ pub(crate) fn icon_grid_view<'a>(
     .on_enter(Message::ColumnBrowserCursorEntered(pane.id))
     .on_exit(Message::ColumnBrowserCursorExited(pane.id))
     .into()
+}
+
+fn start_cell_index(rows: &IconGridRowsLayout, row: usize) -> usize {
+    row.saturating_mul(rows.column_count).min(rows.cells.len())
 }
 
 fn render_panel<'a>(
@@ -206,26 +221,44 @@ fn render_rows<'a>(
         .spacing(0)
         .push(vertical_spacer(visible.before_height));
     let row_height = row_height(icon_edge);
+    // 展开锚点以条目索引为键:渲染按单元格走,条目索引单独计数。
+    let mut next_entry_index =
+        rows.cells[..start_cell_index(rows, visible.start_row)]
+            .iter()
+            .filter(|cell| matches!(cell, IconGridCell::Entry(_)))
+            .count();
     for row_index in visible.start_row..visible.end_row {
-        let start = row_index
-            .saturating_mul(rows.column_count)
-            .min(rows.entries.len());
+        let start = start_cell_index(rows, row_index);
         let end = start
             .saturating_add(rows.column_count)
-            .min(rows.entries.len());
+            .min(rows.cells.len());
         let mut row = Row::new()
             .spacing(grid_gap(icon_edge))
             .align_y(Alignment::Start)
             .height(Length::Fixed(row_height));
-        for (entry_index, entry) in rows.entries[start..end].iter().enumerate() {
-            row = row.push(icon_grid_entry(
-                browser,
-                pane,
-                rows.directory,
-                start + entry_index,
-                entry,
-                input,
-            ));
+        for cell in &rows.cells[start..end] {
+            match cell {
+                IconGridCell::Entry(entry) => {
+                    let entry_index = next_entry_index;
+                    next_entry_index += 1;
+                    row = row.push(icon_grid_entry(
+                        browser,
+                        pane,
+                        rows.directory,
+                        entry_index,
+                        entry,
+                        input,
+                    ));
+                }
+                IconGridCell::Placeholder(placeholder) => {
+                    row = row.push(
+                        crate::transfer_placeholder_view::transfer_placeholder_grid_cell(
+                            placeholder,
+                            icon_edge,
+                        ),
+                    );
+                }
+            }
         }
         content = content.push(row);
     }

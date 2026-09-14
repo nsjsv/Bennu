@@ -279,10 +279,17 @@ impl FileBrowser {
                 let viewport = self.column_viewports.get(&self.current_dir)?;
                 let geometry =
                     crate::list_view::ListGeometry::for_level(self.user_config.list_view_density);
+                // 键盘跟随与列表渲染消费同一合并行流(含占位/状态行),
+                // 占位行在选中项上方时不漏算位移。
+                let pane = self.pane_view(pane_id)?;
+                let rows = crate::transfer_placeholder_view::build_list_transfer_rows(
+                    self,
+                    pane,
+                    geometry.row_height,
+                );
                 let (item_offset, item_height) =
-                    crate::visible_entries::list_entry_vertical_bounds(
-                        &self.entries,
-                        &self.expanded_directories,
+                    crate::transfer_placeholder_view::list_transfer_rows_vertical_bounds(
+                        &rows,
                         path,
                         geometry.row_height,
                         LIST_HEADER_HEIGHT,
@@ -300,25 +307,25 @@ impl FileBrowser {
             BrowserViewMode::Columns => {
                 let directory = self.entry_parent_directory(path);
                 let viewport = self.column_viewports.get(&directory)?;
-                let entries = if directory == self.current_dir {
-                    self.entries.as_ref()
-                } else {
-                    self.expanded_directories
-                        .get(&directory)?
-                        .entries
-                        .as_slice()
-                };
-                let row_index = entries.iter().position(|entry| entry.path == path)?;
+                // 多栏渲染的是占位合入后的合并序列,行偏移按同一序列推算。
+                let pane = self.pane_view(pane_id)?;
                 let geometry = crate::three_column_view::ColumnGeometry::for_level(
                     self.user_config.columns_view_density,
                 );
+                let item_offset = geometry.entries_top_padding
+                    + crate::transfer_placeholder_view::column_transfer_item_offset(
+                        self,
+                        pane,
+                        &directory,
+                        path,
+                        geometry.entry_scroll_height,
+                    )?;
                 (
                     ScrollbarRegion::Column { pane_id, directory },
                     vertical_scroll_delta_to_reveal(
                         viewport.offset_y,
                         viewport.height,
-                        geometry.entries_top_padding
-                            + row_index as f32 * geometry.entry_scroll_height,
+                        item_offset,
                         geometry.entry_height,
                     ),
                 )
@@ -769,14 +776,26 @@ mod tests {
             .expanded_directories
             .insert(directory.path.clone(), expanded_directory(Vec::new(), 1.0));
 
-        assert_eq!(
-            crate::visible_entries::list_entry_vertical_bounds(
-                &browser.entries,
-                &browser.expanded_directories,
+        let bounds_for = |browser: &FileBrowser| {
+            let pane = browser
+                .pane_view(browser.active_pane_id())
+                .expect("active pane");
+            let rows = crate::transfer_placeholder_view::build_list_transfer_rows(
+                browser,
+                pane,
+                LIST_ROW_HEIGHT,
+            );
+            crate::transfer_placeholder_view::list_transfer_rows_vertical_bounds(
+                &rows,
                 &sibling.path,
                 LIST_ROW_HEIGHT,
                 LIST_HEADER_HEIGHT,
-            ),
+            )
+        };
+
+        // 展开状态行计入:目录行 + 状态行之后才是 sibling。
+        assert_eq!(
+            bounds_for(&browser),
             Some((LIST_HEADER_HEIGHT + LIST_ROW_HEIGHT * 2.0, LIST_ROW_HEIGHT))
         );
 
@@ -792,14 +811,9 @@ mod tests {
             .expanded_directories
             .insert(directory.path.clone(), expanded_directory(vec![child], 0.5));
 
+        // 动画中的子行按进度收缩:sibling 位于 1.0 + 0.5 行高处。
         assert_eq!(
-            crate::visible_entries::list_entry_vertical_bounds(
-                &browser.entries,
-                &browser.expanded_directories,
-                &sibling.path,
-                LIST_ROW_HEIGHT,
-                LIST_HEADER_HEIGHT,
-            ),
+            bounds_for(&browser),
             Some((LIST_HEADER_HEIGHT + LIST_ROW_HEIGHT * 1.5, LIST_ROW_HEIGHT,))
         );
     }

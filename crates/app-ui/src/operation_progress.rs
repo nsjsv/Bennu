@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use file_operation_store::StoredProgress;
 use iced::widget::{column, container, progress_bar, svg, Column, Svg};
 use iced::{Element, Length};
@@ -152,6 +154,26 @@ pub(crate) enum FileOperationProgressUpdate {
         total: usize,
     },
     Indeterminate,
+}
+
+/// 单个传入条目的传输快照:占位行的单一事实源,由任务 `transfer_progress`
+/// 全量替换持有,视图渲染时从队列派生,不另建占位状态。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TransferEntrySnapshot {
+    /// 最终落地路径(含重名序号,入队后不变),`parent()` 用于匹配目标目录。
+    pub(crate) target: PathBuf,
+    pub(crate) is_directory: bool,
+    /// `None` 表示未开始或字节数未知(排队中/清单缺失),占位画空环。
+    pub(crate) completed_bytes: Option<u64>,
+    pub(crate) total_bytes: Option<u64>,
+    pub(crate) state: TransferEntrySnapshotState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TransferEntrySnapshotState {
+    Queued,
+    Active,
+    Completed,
 }
 
 pub(crate) fn active_byte_fraction(completed_bytes: u64, total_bytes: u64) -> Option<f32> {

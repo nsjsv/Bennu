@@ -153,51 +153,6 @@ fn flat_list_entry_height_range(
     }
 }
 
-/// 列表行区总高(不含表头):与虚拟范围渲染的累计高度同口径(含展开
-/// 状态行),供视口越界自愈判定最大滚动偏移。
-pub(crate) fn list_rows_content_height(
-    entries: &[DirectoryEntry],
-    expanded_directories: &HashMap<PathBuf, ExpandedDirectory>,
-    row_height: f32,
-) -> f32 {
-    let mut total_height = 0.0;
-    for_each_visible_entry(entries, expanded_directories, &mut |visible_entry| {
-        total_height += row_height * visible_entry.animation_progress.clamp(0.0, 1.0);
-        if let Some(expanded) = expanded_directories.get(&visible_entry.entry.path) {
-            total_height += visible_entry_status_row_height(expanded, row_height);
-        }
-    });
-    total_height
-}
-
-pub(crate) fn list_entry_vertical_bounds(
-    entries: &[DirectoryEntry],
-    expanded_directories: &HashMap<PathBuf, ExpandedDirectory>,
-    path: &Path,
-    row_height: f32,
-    header_height: f32,
-) -> Option<(f32, f32)> {
-    if !has_visible_list_expansion(entries, expanded_directories) {
-        return entries
-            .iter()
-            .position(|entry| entry.path == path)
-            .map(|index| (header_height + index as f32 * row_height, row_height));
-    }
-    let mut offset = header_height;
-    let mut target = None;
-    for_each_visible_entry(entries, expanded_directories, &mut |visible_entry| {
-        let item_height = row_height * visible_entry.animation_progress.clamp(0.0, 1.0);
-        if target.is_none() && visible_entry.entry.path == path {
-            target = Some((offset, item_height));
-        }
-        offset += item_height;
-        if let Some(expanded) = expanded_directories.get(&visible_entry.entry.path) {
-            offset += visible_entry_status_row_height(expanded, row_height);
-        }
-    });
-    target
-}
-
 #[derive(Debug, Clone, Copy)]
 enum ListEntryRangeLimit {
     Viewport { top: f32, bottom: f32 },
@@ -504,7 +459,7 @@ mod tests {
         )
     }
     #[test]
-    fn flat_list_fast_paths_preserve_range_slice_and_bounds() {
+    fn flat_list_fast_paths_preserve_range_slice() {
         let root = PathBuf::from("/workspace");
         let entries = (0..5)
             .map(|index| test_entry(root.join(format!("item-{index}")), FileKind::File))
@@ -528,16 +483,6 @@ mod tests {
         assert_eq!(visible.len(), 3);
         assert_eq!(visible[0].entry.path, entries[2].path);
         assert_eq!(visible[2].entry.path, entries[4].path);
-        assert_eq!(
-            list_entry_vertical_bounds(
-                &entries,
-                &expanded_directories,
-                &entries[3].path,
-                10.0,
-                5.0,
-            ),
-            Some((35.0, 10.0))
-        );
     }
 
     #[test]
@@ -676,10 +621,6 @@ mod tests {
         assert_eq!(range.start, 2);
         assert_eq!(range.end, 3);
         assert_eq!(range.before_height, 69.0);
-        assert_eq!(
-            list_entry_vertical_bounds(&entries, &expanded_directories, &sibling.path, 46.0, 32.0,),
-            Some((101.0, 46.0))
-        );
     }
 
     #[test]

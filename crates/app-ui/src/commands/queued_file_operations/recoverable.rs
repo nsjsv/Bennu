@@ -7,7 +7,7 @@ use file_operation_store::{
 mod progress;
 mod store_codec;
 
-use progress::TransferBatchProgress;
+use progress::{send_transfer_batch_progress, TransferBatchProgress};
 pub(super) use progress::{
     send_archive_creation_progress, send_archive_extraction_progress, send_file_operation_progress,
 };
@@ -350,7 +350,7 @@ pub(super) async fn run_queued_transfers(
             | DirectMoveIntentBatchRecord::NotApplicable(record) => record.clone(),
         })
         .collect::<Vec<_>>();
-    let mut batch_progress = TransferBatchProgress::new(&progress_records);
+    let mut batch_progress = TransferBatchProgress::new(&progress_records, mode);
 
     let mut completed = Vec::new();
     let mut intent_records: Vec<(usize, TransferJournalRecord)> = Vec::new();
@@ -600,12 +600,8 @@ async fn settle_intent_segment(
             DirectMoveBatchRecord::Diverged(record) => diverged.push((index, record)),
             DirectMoveBatchRecord::Failed { error, .. } => {
                 first_item_error.get_or_insert(error);
-                send_file_operation_progress(
-                    output,
-                    task_id,
-                    batch_progress.complete_record(index),
-                )
-                .await;
+                let update = batch_progress.complete_record(index);
+                send_transfer_batch_progress(output, task_id, batch_progress, update).await;
             }
         }
     }
@@ -636,7 +632,8 @@ async fn settle_intent_segment(
         )
         .await?;
         accept_recoverable_transfer_outcome(outcome, completed);
-        send_file_operation_progress(output, task_id, batch_progress.complete_record(index)).await;
+        let update = batch_progress.complete_record(index);
+        send_transfer_batch_progress(output, task_id, batch_progress, update).await;
     }
 
     if let Some(error) = first_item_error {
@@ -673,7 +670,8 @@ async fn run_not_applicable_record(
     .await?;
     send_durable_direct_move_commit_values(output, task_id, journal.take_durable_commits()).await;
     accept_recoverable_transfer_outcome(outcome, completed);
-    send_file_operation_progress(output, task_id, batch_progress.complete_record(index)).await;
+    let update = batch_progress.complete_record(index);
+    send_transfer_batch_progress(output, task_id, batch_progress, update).await;
     Ok(())
 }
 
@@ -771,7 +769,7 @@ async fn settle_cancellation_records(
     journal: &TaskQueueTransferJournal,
     controls: &FileOperationControls,
 ) -> FileOperationCompletion {
-    let mut batch_progress = TransferBatchProgress::new(&records);
+    let mut batch_progress = TransferBatchProgress::new(&records, mode);
     let settlement_options = FileTransferOptions::new(controls.clone());
     let mut settled_completed = Vec::new();
     let mut settlement_error = None;
@@ -796,12 +794,8 @@ async fn settle_cancellation_records(
         match settled {
             Ok(outcome) => {
                 accept_recoverable_transfer_outcome(outcome, &mut settled_completed);
-                send_file_operation_progress(
-                    output,
-                    task_id,
-                    batch_progress.complete_record(record_index),
-                )
-                .await;
+                let update = batch_progress.complete_record(record_index);
+                send_transfer_batch_progress(output, task_id, &batch_progress, update).await;
             }
             Err(RecoverableTransferError::FileOperation(FileError::Cancelled)) => {}
             Err(record_error) => {
@@ -922,12 +916,8 @@ async fn complete_durable_direct_move_segment(
             Ok(outcome) => {
                 accept_recoverable_transfer_outcome(outcome, completed);
                 if first_settlement_error.is_none() {
-                    send_file_operation_progress(
-                        output,
-                        task_id,
-                        batch_progress.complete_record(index),
-                    )
-                    .await;
+                    let update = batch_progress.complete_record(index);
+                    send_transfer_batch_progress(output, task_id, batch_progress, update).await;
                 }
             }
             Err(error) if recovery_interruption_prevents_settlement(&error) => {
@@ -1055,7 +1045,7 @@ async fn send_copy_progress(
     let Some(update) = batch_progress.observe_copy_progress(record_index, &progress) else {
         return;
     };
-    send_file_operation_progress(output, task_id, update).await;
+    send_transfer_batch_progress(output, task_id, batch_progress, update).await;
 }
 
 #[cfg(test)]
@@ -1256,6 +1246,7 @@ mod recoverable_transfer_tests {
                     completed_items,
                     total_items,
                 },
+                _,
             ) = message
             {
                 assert_eq!(id, task_id);
@@ -1465,7 +1456,9 @@ mod recoverable_transfer_tests {
         assert_eq!(renamed_moves, vec![(0, transfers.len())]);
         let first_item_completion = messages
             .iter()
-            .position(|message| matches!(message, Message::FileOperationProgressed(_, _)))
+            .position(
+                |message| matches!(message, Message::FileOperationProgressed(_, _, _)),
+            )
             .expect("batch should publish item completion progress");
         assert_eq!(direct_commit_batches, vec![(1, task_id, transfers.len())]);
         assert!(direct_commit_batches[0].0 < first_item_completion);
@@ -1602,7 +1595,7 @@ mod recoverable_transfer_tests {
             .await
             .unwrap();
         }
-        let mut batch_progress = TransferBatchProgress::new(&records);
+        let mut batch_progress = TransferBatchProgress::new(&records, QueuedTransferMode::Move);
         let (mut output, _messages) = iced::futures::channel::mpsc::channel(64);
         let mut durable_direct_moves = Vec::new();
         let mut intent_records = Vec::new();
@@ -1998,7 +1991,7 @@ mod recoverable_transfer_tests {
             .unwrap();
         let journal = task_queue_transfer_journal(store.clone(), running.controls.clone());
         let (mut output, _messages) = iced::futures::channel::mpsc::channel(64);
-        let mut batch_progress = TransferBatchProgress::new(&records);
+        let mut batch_progress = TransferBatchProgress::new(&records, QueuedTransferMode::Move);
 
         run_recoverable_record_with_progress(
             records.remove(0),
@@ -2098,7 +2091,7 @@ mod recoverable_transfer_tests {
             .unwrap();
         let journal = task_queue_transfer_journal(store.clone(), running.controls.clone());
         let (mut output, _messages) = iced::futures::channel::mpsc::channel(64);
-        let mut batch_progress = TransferBatchProgress::new(&records);
+        let mut batch_progress = TransferBatchProgress::new(&records, QueuedTransferMode::Copy);
 
         run_recoverable_record_with_progress(
             records.remove(0),

@@ -88,6 +88,7 @@ fn recoverable_task_waits_for_journal_ack_before_starting() {
     queue.update_progress(
         queue.tasks()[0].id,
         FileOperationProgressUpdate::Indeterminate,
+        Vec::new(),
     );
     assert_eq!(queue.tasks()[0].status_label(), "Running");
 }

@@ -20,6 +20,35 @@ fn entry(path: impl Into<PathBuf>, kind: FileKind) -> DirectoryEntry {
     )
 }
 
+impl<'a> IconGridLayout<'a> {
+    /// 无占位的布局构造:测试夹具统一入口(生产路径统一走
+    /// with_root_transfer_placeholders,空占位时行为一致)。
+    pub(crate) fn new(
+        root_directory: &'a Path,
+        root_entries: &'a [DirectoryEntry],
+        viewport_width: f32,
+        height_bound: f32,
+        icon_edge: u32,
+        expansion: Option<&'a IconGridExpansionState>,
+    ) -> Self {
+        Self::with_root_transfer_placeholders(
+            root_directory,
+            root_entries,
+            &[],
+            TransferSortOptions {
+                field: file_core::SortField::Name,
+                direction: file_core::SortDirection::Ascending,
+                directories_first: true,
+            },
+            &ExpandedTransferPlaceholderIndex::new(),
+            viewport_width,
+            height_bound,
+            icon_edge,
+            expansion,
+        )
+    }
+}
+
 fn files(directory: &str, count: usize) -> Vec<DirectoryEntry> {
     (0..count)
         .map(|index| entry(format!("{directory}/item-{index:03}"), FileKind::File))
@@ -420,6 +449,68 @@ fn flat_layout_paths_and_membership_preserve_entry_identity() {
     assert_eq!(matching.len(), 2);
     assert!(matching.contains(&entries[1].path));
     assert!(matching.contains(&entries[3].path));
+}
+
+#[test]
+fn expansion_band_merges_transfer_placeholders_for_its_directory() {
+    // 拖放进展开中的目录:band 内占位与列表/多栏同一事实源,按该目录
+    // 排序合入;空目录但有占位时按有内容渲染,不落「No items」空态。
+    let root_entries = vec![entry("/workspace/root", FileKind::Directory)];
+    let state = expansion(Vec::new());
+    let mut expanded_placeholders = ExpandedTransferPlaceholderIndex::new();
+    expanded_placeholders.insert(
+        PathBuf::from("/workspace/root"),
+        (
+            vec![TransferPlaceholder {
+                name: "incoming.txt".to_owned(),
+                is_directory: false,
+                progress: None,
+                total_bytes: Some(1),
+                enqueued_at: std::time::SystemTime::UNIX_EPOCH,
+            }],
+            TransferSortOptions {
+                field: file_core::SortField::Name,
+                direction: file_core::SortDirection::Ascending,
+                directories_first: true,
+            },
+        ),
+    );
+    let layout = IconGridLayout::with_root_transfer_placeholders(
+        Path::new("/workspace"),
+        &root_entries,
+        &[],
+        TransferSortOptions {
+            field: file_core::SortField::Name,
+            direction: file_core::SortDirection::Ascending,
+            directories_first: true,
+        },
+        &expanded_placeholders,
+        500.0,
+        800.0,
+        96,
+        Some(&state),
+    );
+
+    let band = first_band(&layout);
+    assert_eq!(band.panel.status, IconGridPanelStatus::Loaded);
+    let band_rows = band
+        .panel
+        .flow
+        .iter()
+        .find_map(|segment| match segment {
+            IconGridFlowSegment::Rows(rows) => Some(rows),
+            IconGridFlowSegment::Band(_) => None,
+        })
+        .unwrap();
+    assert_eq!(band_rows.cells.len(), 1);
+    assert!(matches!(
+        band_rows.cells[0],
+        IconGridCell::Placeholder(_)
+    ));
+    // 占位格子不产生交互事实。
+    let matching = layout.interactive_paths_matching(&[PathBuf::from("/workspace/root")]);
+    assert_eq!(matching.len(), 1);
+    assert!(matching.contains(Path::new("/workspace/root")));
 }
 
 #[test]

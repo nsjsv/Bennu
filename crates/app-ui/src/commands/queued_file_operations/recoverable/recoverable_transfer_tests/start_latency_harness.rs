@@ -458,7 +458,7 @@ async fn run_scenario(
     });
     let mut first_progress = None;
     while let Some(message) = messages.next().await {
-        if matches!(message, Message::FileOperationProgressed(_, _)) && first_progress.is_none() {
+        if matches!(message, Message::FileOperationProgressed(_, _, _)) && first_progress.is_none() {
             first_progress = Some(Instant::now());
         }
     }

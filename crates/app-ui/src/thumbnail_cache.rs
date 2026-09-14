@@ -79,6 +79,9 @@ pub(crate) enum ThumbnailLoadResult {
 #[derive(Debug, Clone)]
 pub(crate) struct ThumbnailHandleEntry {
     pub(crate) handle: image::Handle,
+    /// 请求源路径：就绪表只按 ThumbnailKey(哈希) 索引,预览会话需要
+    /// 按源路径回查"当前已有的最大尺寸缩略图",必须冗余记录。
+    pub(crate) source: PathBuf,
     pub(crate) width: u32,
     pub(crate) height: u32,
     pub(crate) max_edge: u32,
@@ -151,19 +154,21 @@ impl ThumbnailCache {
         )
     }
 
+    /// 与 `enqueue_request` 同语义的 CacheOnly 变体：只读磁盘缓存不生成,
+    /// 返回是否需要等待结果事件。
     pub(crate) fn enqueue_cached_request(
         &mut self,
         request: ThumbnailRequest,
         purpose: ThumbnailPurpose,
         priority: ThumbnailPriority,
-    ) {
+    ) -> bool {
         self.enqueue_request_with_scope(
             request,
             purpose,
             priority,
             ThumbnailLoadPolicy::CacheOnly,
             None,
-        );
+        )
     }
 
     pub(crate) fn enqueue_request_for_scope(
@@ -280,6 +285,7 @@ impl ThumbnailCache {
         let key = thumbnail.key.clone();
         let entry = ThumbnailHandleEntry {
             handle: image::Handle::from_path(thumbnail.output.clone()),
+            source: thumbnail.source.clone(),
             width: thumbnail.width,
             height: thumbnail.height,
             max_edge,
@@ -309,6 +315,18 @@ impl ThumbnailCache {
         request: &ThumbnailRequest,
     ) -> Option<&ThumbnailHandleEntry> {
         self.ready.get(&request.key())
+    }
+
+    /// 同一源路径下已就绪的最大尺寸缩略图（不限请求档位）：
+    /// 预览会话用它把列表阶段已生成的缩略图直接抬上屏。
+    pub(crate) fn largest_ready_for_source(
+        &self,
+        source: &Path,
+    ) -> Option<&ThumbnailHandleEntry> {
+        self.ready
+            .values()
+            .filter(|entry| entry.source == source)
+            .max_by_key(|entry| entry.max_edge)
     }
 
     pub(crate) fn mark_failure(&mut self, key: ThumbnailKey) {
@@ -448,6 +466,25 @@ pub(crate) fn request_for_transfer_conflict_path(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cache_only_work_dispatches_with_its_policy_intact() {
+        let mut cache = ThumbnailCache::new(PathBuf::from("cache"));
+        let request = thumbnail_request("photo.png", 1);
+
+        let waits = cache.enqueue_cached_request(
+            request.clone(),
+            ThumbnailPurpose::Preview,
+            ThumbnailPriority::Preview,
+        );
+        assert!(waits);
+
+        // 派发链路不得改写 CacheOnly:该策略保证只读磁盘缓存,零解码。
+        let batch = cache.take_next_batch();
+        assert_eq!(batch.len(), 1);
+        assert_eq!(batch[0].load_policy, ThumbnailLoadPolicy::CacheOnly);
+        assert_eq!(batch[0].request, request);
+    }
 
     fn thumbnail_request(file_name: &str, len: u64) -> ThumbnailRequest {
         ThumbnailRequest::new(

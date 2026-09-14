@@ -199,7 +199,7 @@ fn clear_preview_drops_pending_original_image_request() {
     browser.preview = Some(PreviewState::Loading(path.clone()));
     let generation = browser.next_original_image_preview_generation();
     drop(browser.accept_image_preview_dimensions(path, generation, Ok((320, 240))));
-    assert!(browser.pending_original_image_preview.is_some());
+    assert!(browser.pending_preview_thumbnail_display.is_some());
     let cancellation = browser
         .original_image_preview_cancel
         .clone()
@@ -207,7 +207,7 @@ fn clear_preview_drops_pending_original_image_request() {
 
     browser.clear_preview();
 
-    assert!(browser.pending_original_image_preview.is_none());
+    assert!(browser.pending_preview_thumbnail_display.is_none());
     assert!(cancellation.is_cancelled());
     assert!(browser.original_image_preview_cancel.is_none());
 }
@@ -219,7 +219,7 @@ fn new_original_request_drops_previous_pending_request() {
     browser.preview = Some(PreviewState::Loading(path.clone()));
     let generation = browser.next_original_image_preview_generation();
     drop(browser.accept_image_preview_dimensions(path, generation, Ok((320, 240))));
-    assert!(browser.pending_original_image_preview.is_some());
+    assert!(browser.pending_preview_thumbnail_display.is_some());
     let previous_cancellation = browser
         .original_image_preview_cancel
         .clone()
@@ -227,7 +227,7 @@ fn new_original_request_drops_previous_pending_request() {
 
     browser.next_original_image_preview_generation();
 
-    assert!(browser.pending_original_image_preview.is_none());
+    assert!(browser.pending_preview_thumbnail_display.is_none());
     assert!(previous_cancellation.is_cancelled());
     assert!(browser
         .original_image_preview_cancel

@@ -21,7 +21,7 @@ mod image_viewport;
 mod original_image;
 mod remote_cache;
 mod sqlite;
-pub(super) use original_image::PendingOriginalImagePreview;
+pub(super) use original_image::PendingPreviewThumbnailDisplay;
 pub(crate) use sqlite::{SqlitePreviewState, SqliteTablesResizeDrag, SQLITE_DEFAULT_TABLES_WIDTH};
 #[cfg(test)]
 mod tests;

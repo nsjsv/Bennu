@@ -10,7 +10,7 @@ use crate::config::ui_thread_startup_config;
 use crate::model::{ImagePreviewContent, PreviewContent, PreviewState};
 use crate::thumbnail_cache::{
     ThumbnailLoadOutcome, ThumbnailLoadPolicy, ThumbnailLoadResult, ThumbnailPriority,
-    ThumbnailPurpose, ThumbnailWork,
+    ThumbnailPurpose, ThumbnailWork, LIST_THUMBNAIL_EDGE,
 };
 
 #[test]
@@ -128,22 +128,103 @@ fn image_preview_without_directory_entry_opens_window_before_original_load() {
         Some(PreviewState::Loading(current)) if current == &path
     ));
     assert!(browser.preview_window.is_some());
-    assert!(browser.pending_original_image_preview.is_none());
+    assert!(browser.pending_preview_thumbnail_display.is_none());
     assert!(command.units() > 0);
 }
 
 #[test]
-fn ready_preview_thumbnail_opens_window_and_starts_original() {
+fn ready_listing_thumbnail_shows_immediately_and_starts_original() {
     let path = PathBuf::from("/workspace/photo.png");
     let image_entry = image_entry(path.to_string_lossy().as_ref());
     let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
     browser.entries = vec![image_entry.clone()].into();
     browser.preview = Some(PreviewState::Loading(path.clone()));
     let generation = browser.next_original_image_preview_generation();
-    let request = preview_request(&image_entry, 320, 240);
+    let listing_request =
+        request_for_entry(&image_entry, LIST_THUMBNAIL_EDGE).expect("listing request");
+    browser.thumbnail_cache.insert_ready(
+        thumbnails::CachedThumbnail {
+            key: listing_request.key(),
+            source: listing_request.source.clone(),
+            output: PathBuf::from("/tmp/listing-thumbnail.png"),
+            width: 96,
+            height: 64,
+            cache_hit: false,
+        },
+        LIST_THUMBNAIL_EDGE,
+    );
+
+    let command = browser.accept_image_preview_dimensions(path.clone(), generation, Ok((320, 240)));
+
+    assert!(matches!(
+        &browser.preview,
+        Some(PreviewState::Ready(PreviewContent::Image(
+            ImagePreviewContent::Thumbnail { path: current, max_edge: 96, .. }
+        ))) if current == &path
+    ));
+    assert!(browser.pending_preview_thumbnail_display.is_none());
+    assert!(browser.preview_window.is_some());
+    assert!(command.units() > 0);
+}
+
+#[test]
+fn small_ready_thumbnail_upgrades_when_preview_thumbnail_arrives() {
+    let path = PathBuf::from("/workspace/photo.png");
+    let image_entry = image_entry(path.to_string_lossy().as_ref());
+    let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
+    browser.entries = vec![image_entry.clone()].into();
+    browser.preview = Some(PreviewState::Loading(path.clone()));
+    let generation = browser.next_original_image_preview_generation();
+    let listing_request =
+        request_for_entry(&image_entry, LIST_THUMBNAIL_EDGE).expect("listing request");
+    browser.thumbnail_cache.insert_ready(
+        thumbnails::CachedThumbnail {
+            key: listing_request.key(),
+            source: listing_request.source.clone(),
+            output: PathBuf::from("/tmp/listing-thumbnail.png"),
+            width: 96,
+            height: 64,
+            cache_hit: false,
+        },
+        LIST_THUMBNAIL_EDGE,
+    );
+
     drop(browser.accept_image_preview_dimensions(path.clone(), generation, Ok((320, 240))));
 
-    let command = browser.accept_thumbnail_batch(vec![ready_preview_outcome(request, 320, 240)]);
+    // 预览档位缩略图已并行生成并派发;模拟生成完成返回:
+    // 展示升级到更大尺寸帧,原图并行加载不受影响。
+    let desired_request = preview_request(&image_entry, 320, 240);
+    browser.accept_thumbnail_batch(vec![ready_preview_outcome(desired_request, 512, 384)]);
+
+    assert!(matches!(
+        &browser.preview,
+        Some(PreviewState::Ready(PreviewContent::Image(
+            ImagePreviewContent::Thumbnail { max_edge: 512, .. }
+        )))
+    ));
+}
+
+#[test]
+fn cold_cache_starts_original_and_display_upgrades_from_generated_thumbnail() {
+    let path = PathBuf::from("/workspace/photo.png");
+    let image_entry = image_entry(path.to_string_lossy().as_ref());
+    let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
+    browser.entries = vec![image_entry.clone()].into();
+    browser.preview = Some(PreviewState::Loading(path.clone()));
+    let generation = browser.next_original_image_preview_generation();
+
+    let command = browser.accept_image_preview_dimensions(path.clone(), generation, Ok((320, 240)));
+
+    assert!(matches!(
+        &browser.preview,
+        Some(PreviewState::Loading(current)) if current == &path
+    ));
+    assert!(browser.pending_preview_thumbnail_display.is_some());
+    assert!(browser.preview_window.is_some());
+    assert!(command.units() > 0);
+
+    let request = preview_request(&image_entry, 320, 240);
+    browser.accept_thumbnail_batch(vec![ready_preview_outcome(request, 320, 240)]);
 
     assert!(matches!(
         &browser.preview,
@@ -151,9 +232,7 @@ fn ready_preview_thumbnail_opens_window_and_starts_original() {
             ImagePreviewContent::Thumbnail { path: current, .. }
         ))) if current == &path
     ));
-    assert!(browser.preview_window.is_some());
-    assert!(browser.pending_original_image_preview.is_none());
-    assert!(command.units() > 0);
+    assert!(browser.pending_preview_thumbnail_display.is_none());
 }
 
 #[test]
@@ -176,8 +255,8 @@ fn failed_preview_thumbnail_keeps_window_open_while_original_loads() {
         Some(PreviewState::Loading(current)) if current == &path
     ));
     assert!(browser.preview_window.is_some());
-    assert!(browser.pending_original_image_preview.is_none());
-    assert!(command.units() > 0);
+    assert!(browser.pending_preview_thumbnail_display.is_none());
+    assert_eq!(command.units(), 0);
 }
 
 #[test]
@@ -201,8 +280,7 @@ fn stale_preview_thumbnail_key_cannot_consume_current_request() {
     ));
     assert!(browser.preview_window.is_some());
 
-    let command =
-        browser.accept_thumbnail_batch(vec![ready_preview_outcome(expected_request, 320, 240)]);
+    browser.accept_thumbnail_batch(vec![ready_preview_outcome(expected_request, 320, 240)]);
 
     assert!(matches!(
         &browser.preview,
@@ -211,8 +289,7 @@ fn stale_preview_thumbnail_key_cannot_consume_current_request() {
         ))) if current == &path
     ));
     assert!(browser.preview_window.is_some());
-    assert!(browser.pending_original_image_preview.is_none());
-    assert!(command.units() > 0);
+    assert!(browser.pending_preview_thumbnail_display.is_none());
 }
 
 #[test]
@@ -234,9 +311,9 @@ fn expected_thumbnail_for_removed_entry_falls_back_to_original_result_window() {
         &browser.preview,
         Some(PreviewState::Loading(current)) if current == &path
     ));
-    assert!(browser.pending_original_image_preview.is_none());
+    assert!(browser.pending_preview_thumbnail_display.is_none());
     assert!(browser.preview_window.is_some());
-    assert!(fallback_command.units() > 0);
+    assert_eq!(fallback_command.units(), 0);
 
     let original_command = browser.accept_original_image_preview(
         path,

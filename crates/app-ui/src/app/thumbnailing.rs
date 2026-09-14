@@ -156,9 +156,7 @@ impl FileBrowser {
                     if !is_current_request {
                         self.requeue_drifted_thumbnail_request(&outcome.work);
                         if outcome.work.purpose == ThumbnailPurpose::Preview {
-                            commands.push(
-                                self.accept_preview_thumbnail_unavailable(&outcome.work.request),
-                            );
+                            self.accept_preview_thumbnail_unavailable(&outcome.work.request);
                         }
                         continue;
                     }
@@ -197,8 +195,7 @@ impl FileBrowser {
                         "cached thumbnail missed"
                     );
                     if outcome.work.purpose == ThumbnailPurpose::Preview {
-                        commands
-                            .push(self.accept_preview_thumbnail_unavailable(&outcome.work.request));
+                        self.accept_preview_thumbnail_unavailable(&outcome.work.request);
                     }
                 }
                 ThumbnailLoadResult::Failed(error) => {
@@ -212,8 +209,7 @@ impl FileBrowser {
                     );
                     self.thumbnail_cache.mark_failure(key);
                     if outcome.work.purpose == ThumbnailPurpose::Preview {
-                        commands
-                            .push(self.accept_preview_thumbnail_unavailable(&outcome.work.request));
+                        self.accept_preview_thumbnail_unavailable(&outcome.work.request);
                     }
                 }
             }
@@ -667,12 +663,14 @@ impl FileBrowser {
                     .thumbnail_cache
                     .enqueue_request(request, work.purpose, work.priority);
             }
-            (ThumbnailLoadPolicy::CacheOnly, Some(scope)) => self
-                .thumbnail_cache
-                .enqueue_cached_request_for_scope(request, work.purpose, work.priority, scope),
-            (ThumbnailLoadPolicy::CacheOnly, None) => self
-                .thumbnail_cache
-                .enqueue_cached_request(request, work.purpose, work.priority),
+            (ThumbnailLoadPolicy::CacheOnly, Some(scope)) => {
+                self.thumbnail_cache
+                    .enqueue_cached_request_for_scope(request, work.purpose, work.priority, scope);
+            }
+            (ThumbnailLoadPolicy::CacheOnly, None) => {
+                self.thumbnail_cache
+                    .enqueue_cached_request(request, work.purpose, work.priority);
+            }
         }
     }
 

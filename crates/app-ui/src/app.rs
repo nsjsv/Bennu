@@ -100,7 +100,7 @@ use crate::app::checksum::ChecksumState;
 use crate::app::column_resize::ColumnResizeDrag;
 use crate::app::convert::ConvertState;
 use crate::app::events::global_event_message;
-use crate::app::preview_state::PendingOriginalImagePreview;
+use crate::app::preview_state::PendingPreviewThumbnailDisplay;
 use crate::app::preview_state::SqlitePreviewState;
 use crate::app::preview_state::SqliteTablesResizeDrag;
 use crate::app::runtime::{
@@ -204,7 +204,7 @@ pub(crate) struct FileBrowser {
     animated_image_preview_generation: u64,
     original_image_preview_generation: u64,
     original_image_preview_cancel: Option<tokio_util::sync::CancellationToken>,
-    pending_original_image_preview: Option<PendingOriginalImagePreview>,
+    pending_preview_thumbnail_display: Option<PendingPreviewThumbnailDisplay>,
     remote_preview_download_generation: u64,
     text_preview_generation: u64,
     directory_load_generation: u64,
@@ -602,7 +602,7 @@ impl FileBrowser {
             animated_image_preview_generation: 0,
             original_image_preview_generation: 0,
             original_image_preview_cancel: None,
-            pending_original_image_preview: None,
+            pending_preview_thumbnail_display: None,
             remote_preview_download_generation: 0,
             text_preview_generation: 0,
             directory_load_generation: 0,

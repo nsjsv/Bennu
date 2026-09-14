@@ -54,6 +54,21 @@ pub(crate) fn canvas_height_for_panel(height: f32) -> f32 {
     (height - DRAG_HANDLE_HEIGHT - TAB_STRIP_HEIGHT).max(CELL_HEIGHT)
 }
 
+/// 底部抽屉当前占据的高度:展开时拖拽手柄 + 标签条 + 终端画布,
+/// 收起时窄条。悬浮面板安全区的底部让位用它计算,与
+/// [`terminal_panel_area`] 的分支保持同一判断。
+pub(crate) fn terminal_panel_area_height(browser: &FileBrowser) -> f32 {
+    if browser.terminal_panel.active_tab().is_some()
+        && browser.terminal_panel.height() >= CELL_HEIGHT
+    {
+        DRAG_HANDLE_HEIGHT
+            + TAB_STRIP_HEIGHT
+            + canvas_height_for_panel(browser.terminal_panel.height())
+    } else {
+        BOTTOM_BAR_HEIGHT
+    }
+}
+
 /// 主窗口最底部区域:访达式抽屉。收起时是与内容同背景的窄条(仅顶部分隔线 +
 /// 右下角图标);展开时终端取代窄条,图标消失,顶部分隔线即拖拽手柄。
 /// 抽屉横贯窗宽,左段由上层贴满侧边的边栏卡片盖住;标签条与终端文字

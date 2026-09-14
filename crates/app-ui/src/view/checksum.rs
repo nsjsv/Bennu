@@ -37,31 +37,37 @@ pub(super) fn checksum_panel(state: &ChecksumState) -> Element<'_, Message> {
     .spacing(8)
     .align_y(Alignment::Center);
 
-    let mut content = column![
+    // 标题、路径与关闭按钮钉死在面板两端;中间内容用 Shrink 滚动区:
+    // 窗口够高时按内容自然伸缩,窗口太矮时中间出滚动条,关闭按钮
+    // 永远可见可达(iced flex 会把剩余高度传给 Shrink 子元素)。
+    let mut body = column![]
+        .spacing(SECTION_SPACING)
+        .width(Length::Fill);
+
+    if state.files().len() > 1 {
+        body = body.push(file_chip_list(state));
+    }
+
+    body = body.push(computation_section(state));
+    body = body.push(verify_section(state));
+
+    let content = column![
         title,
         readable_text(format_middle_ellipsized_text(
             &state.active_file().to_string_lossy(),
             ACTIVE_PATH_MAX_CHARS,
         ))
         .size(11)
-        .width(Length::Fill)
-    ]
-    .spacing(SECTION_SPACING)
-    .width(Length::Fill);
-
-    if state.files().len() > 1 {
-        content = content.push(file_chip_list(state));
-    }
-
-    content = content.push(computation_section(state));
-    content = content.push(verify_section(state));
-    content = content.push(
+        .width(Length::Fill),
+        scrollable(body).width(Length::Fill).height(Length::Shrink),
         row![
             Space::new().width(Length::Fill),
             secondary_action_button("Close", Message::DismissFloating),
         ]
         .align_y(Alignment::Center),
-    );
+    ]
+    .spacing(SECTION_SPACING)
+    .width(Length::Fill);
 
     container(content)
         .padding(16)

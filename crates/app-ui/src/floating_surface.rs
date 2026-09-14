@@ -1,19 +1,80 @@
 use iced::advanced::{layout, overlay, renderer, widget, Clipboard, Layout, Shell, Widget};
 use iced::mouse;
+use iced::widget::scrollable;
 use iced::{Element, Event, Length, Point, Rectangle, Size, Vector};
 
 const FLOATING_SURFACE_MARGIN: f32 = 18.0;
 
+/// 主窗口常驻 UI 占掉的高度:顶部工具栏行与底部终端抽屉。悬浮面板
+/// 只在两者之间的内容区里限尺寸与定位,窗口缩小时才不会压住常驻
+/// 按钮(工具栏导航键、底部条终端开关)。跟随指针的拖拽预览类浮层
+/// 不受此约束。
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FloatingArea {
+    pub(crate) top: f32,
+    pub(crate) bottom: f32,
+}
+
+impl FloatingArea {
+    /// 窗口高度映射成内容区的 y 起点(相对窗口顶沿)与可用高度。
+    fn vertical_span(&self, surface_height: f32) -> (f32, f32) {
+        (
+            self.top,
+            (surface_height - self.top - self.bottom).max(0.0),
+        )
+    }
+}
+
+/// 自动定位浮层的兜底滚动:窗口缩到比面板还矮时,面板整体可滚动,
+/// 底部动作按钮永远可达,而不是被裁出窗外。iced 的 Shrink 布局会
+/// 钳在安全区上限内,面板装得下时外观与滚动行为都不变。跟指针走的
+/// 浮层(Free/AnchorBottomRight)不包:拖拽预览必须贴着光标自由出血。
+fn fallback_floating_scroll<'a, Message: Clone + 'a>(
+    floating: FloatingContent<'a, Message>,
+) -> FloatingContent<'a, Message> {
+    let auto_positioned = matches!(
+        floating.placement,
+        FloatingPlacement::Center
+            | FloatingPlacement::At(_)
+            | FloatingPlacement::BottomLeft { .. }
+            | FloatingPlacement::BottomRightInArea { .. }
+    );
+    if !auto_positioned {
+        return floating;
+    }
+
+    let element = scrollable(floating.element)
+        .direction(scrollable::Direction::Vertical(
+            scrollable::Scrollbar::new().width(6.0).scroller_width(6.0),
+        ))
+        // Scrollable::new 的 enclose 会因内容 size_hint=Fill 把 Shrink 宽度
+        // 升级成 Fill,节点撑满安全区、面板贴左;显式设回 Shrink,让节点
+        // 收缩到面板实际宽度,居中定位才有正确的尺寸基准。
+        .width(Length::Shrink)
+        .height(Length::Shrink)
+        .into();
+    FloatingContent {
+        element,
+        ..floating
+    }
+}
+
 pub(crate) fn floating_surface<'a, Message>(
     content: impl Into<Element<'a, Message>>,
     floating: Vec<FloatingContent<'a, Message>>,
+    area: FloatingArea,
 ) -> Element<'a, Message>
 where
     Message: Clone + 'a,
 {
+    let floating = floating
+        .into_iter()
+        .map(fallback_floating_scroll)
+        .collect();
     Element::new(FloatingSurface {
         content: content.into(),
         floating,
+        area,
         background_input_policy: BackgroundInputPolicy::Interactive,
         outside_click_dismissal: None,
     })
@@ -22,13 +83,19 @@ where
 pub(crate) fn modal_floating_surface<'a, Message>(
     content: impl Into<Element<'a, Message>>,
     floating: Vec<FloatingContent<'a, Message>>,
+    area: FloatingArea,
 ) -> Element<'a, Message>
 where
     Message: Clone + 'a,
 {
+    let floating = floating
+        .into_iter()
+        .map(fallback_floating_scroll)
+        .collect();
     Element::new(FloatingSurface {
         content: content.into(),
         floating,
+        area,
         background_input_policy: BackgroundInputPolicy::Blocked,
         outside_click_dismissal: None,
     })
@@ -38,13 +105,19 @@ pub(crate) fn dismissable_blocking_floating_surface<'a, Message>(
     content: impl Into<Element<'a, Message>>,
     floating: Vec<FloatingContent<'a, Message>>,
     dismiss_message: Message,
+    area: FloatingArea,
 ) -> Element<'a, Message>
 where
     Message: Clone + 'a,
 {
+    let floating = floating
+        .into_iter()
+        .map(fallback_floating_scroll)
+        .collect();
     Element::new(FloatingSurface {
         content: content.into(),
         floating,
+        area,
         background_input_policy: BackgroundInputPolicy::Blocked,
         outside_click_dismissal: Some(OutsideClickDismissal {
             message: dismiss_message,
@@ -57,13 +130,19 @@ pub(crate) fn replaceable_context_menu_floating_surface<'a, Message>(
     content: impl Into<Element<'a, Message>>,
     floating: Vec<FloatingContent<'a, Message>>,
     dismiss_message: Message,
+    area: FloatingArea,
 ) -> Element<'a, Message>
 where
     Message: Clone + 'a,
 {
+    let floating = floating
+        .into_iter()
+        .map(fallback_floating_scroll)
+        .collect();
     Element::new(FloatingSurface {
         content: content.into(),
         floating,
+        area,
         background_input_policy: BackgroundInputPolicy::Blocked,
         outside_click_dismissal: Some(OutsideClickDismissal {
             message: dismiss_message,
@@ -190,6 +269,7 @@ where
 {
     content: Element<'a, Message, Theme, Renderer>,
     floating: Vec<FloatingContent<'a, Message, Theme, Renderer>>,
+    area: FloatingArea,
     background_input_policy: BackgroundInputPolicy,
     outside_click_dismissal: Option<OutsideClickDismissal<Message>>,
 }
@@ -357,6 +437,7 @@ where
             overlays.push(overlay::Element::new(Box::new(FloatingOverlay {
                 floating: &mut floating.element,
                 placement: floating.placement,
+                area: self.area,
                 state: floating_tree,
                 captures_pointer: floating.captures_pointer,
             })));
@@ -389,13 +470,15 @@ where
             checked_any_floating = true;
             let limits = layout::Limits::new(
                 Size::ZERO,
-                floating_max_size(floating.placement, surface_size),
+                floating_max_size(floating.placement, surface_size, self.area),
             );
             let node = floating
                 .element
                 .as_widget_mut()
                 .layout(tree, renderer, &limits);
-            if floating_bounds(floating.placement, node.size(), surface_size).contains(position) {
+            if floating_bounds(floating.placement, node.size(), surface_size, self.area)
+                .contains(position)
+            {
                 return FloatingPointerTarget::FloatingBounds;
             }
         }
@@ -472,6 +555,7 @@ where
 {
     floating: &'b mut Element<'a, Message, Theme, Renderer>,
     placement: FloatingPlacement,
+    area: FloatingArea,
     state: &'b mut widget::Tree,
     captures_pointer: bool,
 }
@@ -484,14 +568,14 @@ where
     Renderer: iced::advanced::Renderer + 'a,
 {
     fn layout(&mut self, renderer: &Renderer, bounds: Size) -> layout::Node {
-        let max_size = floating_max_size(self.placement, bounds);
+        let max_size = floating_max_size(self.placement, bounds, self.area);
         let limits = layout::Limits::new(Size::ZERO, max_size);
         let node = self
             .floating
             .as_widget_mut()
             .layout(self.state, renderer, &limits);
         let size = node.size();
-        node.move_to(floating_position(self.placement, size, bounds))
+        node.move_to(floating_position(self.placement, size, bounds, self.area))
     }
 
     fn update(
@@ -573,7 +657,8 @@ fn should_capture_floating_overlay_event(
     is_mouse_event(event) && cursor.is_over(bounds)
 }
 
-fn floating_max_size(placement: FloatingPlacement, bounds: Size) -> Size {
+fn floating_max_size(placement: FloatingPlacement, bounds: Size, area: FloatingArea) -> Size {
+    let (_, available_height) = area.vertical_span(bounds.height);
     match placement {
         FloatingPlacement::Free(_) | FloatingPlacement::AnchorBottomRight { .. } => bounds,
         FloatingPlacement::Center
@@ -581,20 +666,32 @@ fn floating_max_size(placement: FloatingPlacement, bounds: Size) -> Size {
         | FloatingPlacement::BottomLeft { .. }
         | FloatingPlacement::BottomRightInArea { .. } => Size::new(
             (bounds.width - FLOATING_SURFACE_MARGIN * 2.0).max(0.0),
-            (bounds.height - FLOATING_SURFACE_MARGIN * 2.0).max(0.0),
+            (available_height - FLOATING_SURFACE_MARGIN * 2.0).max(0.0),
         ),
     }
 }
 
-fn floating_bounds(placement: FloatingPlacement, size: Size, surface: Size) -> Rectangle {
-    Rectangle::new(floating_position(placement, size, surface), size)
+fn floating_bounds(
+    placement: FloatingPlacement,
+    size: Size,
+    surface: Size,
+    area: FloatingArea,
+) -> Rectangle {
+    Rectangle::new(floating_position(placement, size, surface, area), size)
 }
 
-fn floating_position(placement: FloatingPlacement, size: Size, surface: Size) -> Point {
+fn floating_position(
+    placement: FloatingPlacement,
+    size: Size,
+    surface: Size,
+    area: FloatingArea,
+) -> Point {
+    let (area_top, available_height) = area.vertical_span(surface.height);
+    let area_bottom = area_top + available_height;
     let desired = match placement {
         FloatingPlacement::Center => Point::new(
             (surface.width - size.width) / 2.0,
-            (surface.height - size.height) / 2.0,
+            area_top + (available_height - size.height) / 2.0,
         ),
         FloatingPlacement::At(position) | FloatingPlacement::Free(position) => position,
         FloatingPlacement::AnchorBottomRight { anchor } => Point::new(
@@ -602,7 +699,7 @@ fn floating_position(placement: FloatingPlacement, size: Size, surface: Size) ->
             anchor.y - size.height,
         ),
         FloatingPlacement::BottomLeft { left, bottom } => {
-            Point::new(left, surface.height - bottom - size.height)
+            Point::new(left, area_bottom - bottom - size.height)
         }
         FloatingPlacement::BottomRightInArea {
             area_width,
@@ -610,7 +707,7 @@ fn floating_position(placement: FloatingPlacement, size: Size, surface: Size) ->
             bottom,
         } => Point::new(
             area_width - right - size.width,
-            surface.height - bottom - size.height,
+            area_bottom - bottom - size.height,
         ),
     };
     if matches!(
@@ -621,11 +718,13 @@ fn floating_position(placement: FloatingPlacement, size: Size, surface: Size) ->
     }
 
     let max_x = (surface.width - size.width - FLOATING_SURFACE_MARGIN).max(FLOATING_SURFACE_MARGIN);
-    let max_y =
-        (surface.height - size.height - FLOATING_SURFACE_MARGIN).max(FLOATING_SURFACE_MARGIN);
+    let max_y = (area_bottom - size.height - FLOATING_SURFACE_MARGIN).max(area_top + FLOATING_SURFACE_MARGIN);
     Point::new(
         desired.x.max(FLOATING_SURFACE_MARGIN).min(max_x),
-        desired.y.max(FLOATING_SURFACE_MARGIN).min(max_y),
+        desired
+            .y
+            .max(area_top + FLOATING_SURFACE_MARGIN)
+            .min(max_y),
     )
 }
 

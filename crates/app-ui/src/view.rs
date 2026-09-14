@@ -71,7 +71,7 @@ use crate::file_drag_hit_test_bounds::FileDragHitTestMarker;
 use crate::file_drag_hit_test_marker::track_file_drag_hit_test_marker;
 use crate::floating_surface::{
     dismissable_blocking_floating_surface, floating_surface, modal_floating_surface,
-    replaceable_context_menu_floating_surface, FloatingContent, FloatingPlacement,
+    replaceable_context_menu_floating_surface, FloatingArea, FloatingContent, FloatingPlacement,
 };
 use crate::formatting::format_middle_ellipsized_text;
 use crate::icon_grid_view::icon_grid_view;
@@ -170,6 +170,16 @@ pub(super) fn auxiliary_window_message(message: &'static str) -> Element<'static
         .height(Length::Fill)
         .style(app_content_style)
         .into()
+}
+
+/// 悬浮面板安全区:顶部让出工具栏行,底部让出终端抽屉(收起窄条或
+/// 展开面板)。面板限尺寸与定位都发生在这个区域里,窗口缩小时不再
+/// 压住工具栏与底部条的常驻按钮。
+fn floating_area(browser: &FileBrowser) -> FloatingArea {
+    FloatingArea {
+        top: crate::model::MAIN_TOOLBAR_ROW_HEIGHT,
+        bottom: crate::terminal_panel::view::terminal_panel_area_height(browser),
+    }
 }
 
 pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
@@ -450,14 +460,22 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
     }
 
     let browser_surface = match floating_input {
-        BrowserFloatingInput::Plain => floating_surface(content, floating),
-        BrowserFloatingInput::Modal => modal_floating_surface(content, floating),
-        BrowserFloatingInput::DismissibleBlocking => {
-            dismissable_blocking_floating_surface(content, floating, Message::DismissFloating)
+        BrowserFloatingInput::Plain => {
+            floating_surface(content, floating, floating_area(browser))
         }
-        BrowserFloatingInput::ContextMenuReplacement => {
-            replaceable_context_menu_floating_surface(content, floating, Message::DismissFloating)
-        }
+        BrowserFloatingInput::Modal => modal_floating_surface(content, floating, floating_area(browser)),
+        BrowserFloatingInput::DismissibleBlocking => dismissable_blocking_floating_surface(
+            content,
+            floating,
+            Message::DismissFloating,
+            floating_area(browser),
+        ),
+        BrowserFloatingInput::ContextMenuReplacement => replaceable_context_menu_floating_surface(
+            content,
+            floating,
+            Message::DismissFloating,
+            floating_area(browser),
+        ),
     };
     let main_window = browser.main_window_id();
     let frame_state = browser.window_frame_state(main_window);

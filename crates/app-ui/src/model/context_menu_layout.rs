@@ -118,6 +118,17 @@ pub(crate) struct ContextMenuPreferences {
     pub(crate) network_connection: ContextMenuLayout<SidebarNetworkConnectionAction>,
 }
 
+/// 文件条目菜单的一级结构:普通行 / 组行(锚点 + 可见成员)。
+/// 菜单渲染与空菜单判定共用;组成员不占一级行。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum FileEntryMenuEntry {
+    Item(FileAreaMenuItem),
+    Group {
+        anchor: FileAreaMenuItem,
+        members: Vec<FileAreaMenuItem>,
+    },
+}
+
 /// 菜单布局的存储无关形态:9 页 × 有序 (id, visible)。由 config 层与 Stored 结构互转。
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct ContextMenuLayoutConfigValues {
@@ -227,18 +238,58 @@ impl ContextMenuPreferences {
 
     // ---- 菜单渲染取数(也是构造边界空菜单判定的唯一来源) ----
 
-    pub(crate) fn file_entry_items(
+    pub(crate) fn file_entry_menu_entries(
         &self,
         target_is_directory: bool,
         can_batch_rename: bool,
         can_create_symlink: bool,
-    ) -> Vec<FileAreaMenuItem> {
-        self.file_entry.ordered_visible_where(|item| match item {
-            FileAreaMenuItem::FileChecksum => !target_is_directory,
-            FileAreaMenuItem::BatchRename => can_batch_rename,
-            FileAreaMenuItem::CreateSymlink => can_create_symlink,
-            _ => true,
-        })
+    ) -> Vec<FileEntryMenuEntry> {
+        let eligible = |entry: &ContextMenuEntry<FileAreaMenuItem>| {
+            entry.visible
+                && match entry.item {
+                    FileAreaMenuItem::FileChecksum => !target_is_directory,
+                    FileAreaMenuItem::BatchRename => can_batch_rename,
+                    FileAreaMenuItem::CreateSymlink => can_create_symlink,
+                    _ => true,
+                }
+        };
+        let mut entries = Vec::new();
+        for entry in &self.file_entry.entries {
+            if !eligible(entry) {
+                continue;
+            }
+            // 成员不占一级行,由所属组锚点收进子菜单。
+            if file_entry_group_anchor_of(entry.item).is_some() {
+                continue;
+            }
+            let Some(group) = file_entry_group_of(entry.item) else {
+                entries.push(FileEntryMenuEntry::Item(entry.item));
+                continue;
+            };
+            let members: Vec<_> = self
+                .file_entry
+                .entries
+                .iter()
+                .filter(|candidate| {
+                    eligible(candidate) && group.members.contains(&candidate.item)
+                })
+                .map(|candidate| candidate.item)
+                .collect();
+            // 「新建...」子菜单硬编码行恒在,成员空也保持组行;
+            // 动作锚点成员空时退化为普通行;纯触发器(工具)成员空时整行省略。
+            if members.is_empty() && entry.item != FileAreaMenuItem::NewEntry {
+                if entry.item.is_pure_trigger() {
+                    continue;
+                }
+                entries.push(FileEntryMenuEntry::Item(entry.item));
+                continue;
+            }
+            entries.push(FileEntryMenuEntry::Group {
+                anchor: entry.item,
+                members,
+            });
+        }
+        entries
     }
 
     pub(crate) fn file_blank_items(&self) -> Vec<FileAreaMenuItem> {
@@ -359,12 +410,16 @@ impl ContextMenuSettingsDragState {
 }
 
 /// 设置页列表的页无关行模型:异构布局类型被封装在 ContextMenuPreferences 内部。
+/// entry_index 是该行在所属布局 entries 里的真实下标(眼睛开关与拖拽换位的落点,
+/// 对文件条目页与行号不同,其余页恒等);group_anchor 标记组行(带 ▸ 与悬停成员面板)。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ContextMenuSettingsRow {
     pub(crate) label: &'static str,
     pub(crate) icon: IconSymbol,
     pub(crate) visible: bool,
     pub(crate) locked: bool,
+    pub(crate) entry_index: usize,
+    pub(crate) group_anchor: Option<FileAreaMenuItem>,
 }
 
 impl ContextMenuSettingsPage {
@@ -402,9 +457,7 @@ impl ContextMenuPreferences {
         page: ContextMenuSettingsPage,
     ) -> Vec<ContextMenuSettingsRow> {
         match page {
-            ContextMenuSettingsPage::FileEntry => {
-                settings_rows_for(&self.file_entry, FileAreaMenuItem::label, FileAreaMenuItem::icon)
-            }
+            ContextMenuSettingsPage::FileEntry => self.file_entry_settings_rows(),
             ContextMenuSettingsPage::FileBlank => {
                 settings_rows_for(&self.file_blank, FileAreaMenuItem::label, FileAreaMenuItem::icon)
             }
@@ -426,11 +479,14 @@ impl ContextMenuPreferences {
                 .list_columns
                 .entries
                 .iter()
-                .map(|entry| ContextMenuSettingsRow {
+                .enumerate()
+                .map(|(entry_index, entry)| ContextMenuSettingsRow {
                     label: entry.item.label(),
                     icon: IconSymbol::List,
                     visible: entry.visible || entry.item == ListColumnKind::Name,
                     locked: entry.item == ListColumnKind::Name,
+                    entry_index,
+                    group_anchor: None,
                 })
                 .collect(),
             ContextMenuSettingsPage::SidebarBookmark => {
@@ -440,22 +496,28 @@ impl ContextMenuPreferences {
                 .sidebar_device
                 .entries
                 .iter()
-                .map(|entry| ContextMenuSettingsRow {
+                .enumerate()
+                .map(|(entry_index, entry)| ContextMenuSettingsRow {
                     label: device_settings_label(entry.item),
                     icon: IconSymbol::HardDrive,
                     visible: entry.visible,
                     locked: false,
+                    entry_index,
+                    group_anchor: None,
                 })
                 .collect(),
             ContextMenuSettingsPage::NetworkConnection => self
                 .network_connection
                 .entries
                 .iter()
-                .map(|entry| ContextMenuSettingsRow {
+                .enumerate()
+                .map(|(entry_index, entry)| ContextMenuSettingsRow {
                     label: entry.item.label(),
                     icon: network_action_config_values::network_icon(entry.item),
                     visible: entry.visible,
                     locked: false,
+                    entry_index,
+                    group_anchor: None,
                 })
                 .collect(),
         }
@@ -495,7 +557,15 @@ impl ContextMenuPreferences {
         to: usize,
     ) {
         match page {
-            ContextMenuSettingsPage::FileEntry => self.file_entry.reordered(from, to),
+            ContextMenuSettingsPage::FileEntry => {
+                // 行号映射到锚点条目下标后再换位;成员条目不随动,渲染按组收纳,
+                // 视觉上整组(触发行+子菜单)一起移动。
+                let rows = self.file_entry_settings_rows();
+                if let (Some(from_row), Some(to_row)) = (rows.get(from), rows.get(to)) {
+                    self.file_entry
+                        .reordered(from_row.entry_index, to_row.entry_index);
+                }
+            }
             ContextMenuSettingsPage::FileBlank => self.file_blank.reordered(from, to),
             ContextMenuSettingsPage::Trash => self.trash.reordered(from, to),
             ContextMenuSettingsPage::Search => self.search.reordered(from, to),
@@ -553,13 +623,60 @@ fn settings_rows_for<I: Copy + PartialEq>(
     layout
         .entries
         .iter()
-        .map(|entry| ContextMenuSettingsRow {
+        .enumerate()
+        .map(|(entry_index, entry)| ContextMenuSettingsRow {
             label: label(entry.item),
             icon: icon(entry.item),
             visible: entry.visible,
             locked: false,
+            entry_index,
+            group_anchor: None,
         })
         .collect()
+}
+
+impl ContextMenuPreferences {
+    /// 文件条目页的顶级行:非成员项 + 组锚点行;成员只出现在悬停成员面板里。
+    fn file_entry_settings_rows(&self) -> Vec<ContextMenuSettingsRow> {
+        self.file_entry
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| file_entry_group_anchor_of(entry.item).is_none())
+            .map(|(entry_index, entry)| ContextMenuSettingsRow {
+                label: entry.item.label(),
+                icon: entry.item.icon(),
+                visible: entry.visible,
+                locked: false,
+                entry_index,
+                group_anchor: file_entry_group_of(entry.item).map(|group| group.anchor),
+            })
+            .collect()
+    }
+
+    /// 文件条目页悬停成员面板的成员行:独立眼睛开关,无拖拽手柄。
+    pub(crate) fn file_entry_settings_member_rows(
+        &self,
+        anchor: FileAreaMenuItem,
+    ) -> Vec<ContextMenuSettingsRow> {
+        let Some(group) = file_entry_group_of(anchor) else {
+            return Vec::new();
+        };
+        self.file_entry
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| group.members.contains(&entry.item))
+            .map(|(entry_index, entry)| ContextMenuSettingsRow {
+                label: entry.item.label(),
+                icon: entry.item.icon(),
+                visible: entry.visible,
+                locked: false,
+                entry_index,
+                group_anchor: None,
+            })
+            .collect()
+    }
 }
 
 fn device_settings_label(action: SidebarDeviceAction) -> &'static str {

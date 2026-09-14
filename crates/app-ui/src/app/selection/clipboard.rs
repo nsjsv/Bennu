@@ -130,6 +130,19 @@ impl FileBrowser {
         self.trash_explicit_paths(self.active_file_selection())
     }
 
+    /// Shift+删除:跳过回收站直接永久删除,仍走破坏性操作确认框。
+    pub(in crate::app) fn delete_selected_permanently(&mut self) -> Task<Message> {
+        self.context_menu = None;
+        let paths = self.active_file_selection();
+        if paths.is_empty() {
+            return Task::none();
+        }
+        self.request_destructive_action_confirmation(
+            DestructiveActionConfirmation::DeletePermanently { paths },
+        );
+        Task::none()
+    }
+
     pub(in crate::app) fn trash_explicit_paths(&mut self, paths: Vec<PathBuf>) -> Task<Message> {
         self.context_menu = None;
         if paths.is_empty() {

@@ -10,6 +10,7 @@ pub(crate) enum FileAreaMenuItem {
     Copy,
     Duplicate,
     Move,
+    Tools,
     CreateArchive,
     ConvertFormat,
     FileChecksum,
@@ -25,12 +26,13 @@ pub(crate) enum FileAreaMenuItem {
     Properties,
 }
 
-pub(crate) const FILE_ENTRY_MENU_ITEMS: [FileAreaMenuItem; 18] = [
+pub(crate) const FILE_ENTRY_MENU_ITEMS: [FileAreaMenuItem; 19] = [
     FileAreaMenuItem::Open,
     FileAreaMenuItem::OpenWith,
     FileAreaMenuItem::Copy,
     FileAreaMenuItem::Duplicate,
     FileAreaMenuItem::Move,
+    FileAreaMenuItem::Tools,
     FileAreaMenuItem::CreateArchive,
     FileAreaMenuItem::ConvertFormat,
     FileAreaMenuItem::FileChecksum,
@@ -53,6 +55,54 @@ pub(crate) const FILE_BLANK_MENU_ITEMS: [FileAreaMenuItem; 3] = [
     FileAreaMenuItem::OpenTerminalHere,
 ];
 
+/// 文件条目菜单的悬停子菜单分组。锚点行单点执行自身动作(纯触发器除外),
+/// 成员渲染进子菜单且保留独立可见性;组是结构常量,不参与存储与排序配置。
+pub(crate) struct FileEntryMenuGroupSpec {
+    pub(crate) anchor: FileAreaMenuItem,
+    pub(crate) members: &'static [FileAreaMenuItem],
+}
+
+pub(crate) const FILE_ENTRY_MENU_GROUPS: [FileEntryMenuGroupSpec; 4] = [
+    FileEntryMenuGroupSpec {
+        anchor: FileAreaMenuItem::Copy,
+        members: &[FileAreaMenuItem::Duplicate, FileAreaMenuItem::CopyPath],
+    },
+    FileEntryMenuGroupSpec {
+        anchor: FileAreaMenuItem::Tools,
+        members: &[
+            FileAreaMenuItem::CreateArchive,
+            FileAreaMenuItem::ConvertFormat,
+            FileAreaMenuItem::FileChecksum,
+            FileAreaMenuItem::CreateSymlink,
+        ],
+    },
+    FileEntryMenuGroupSpec {
+        anchor: FileAreaMenuItem::Rename,
+        members: &[FileAreaMenuItem::BatchRename],
+    },
+    FileEntryMenuGroupSpec {
+        anchor: FileAreaMenuItem::NewEntry,
+        members: &[FileAreaMenuItem::NewFolderFromSelection],
+    },
+];
+
+/// 成员所属组的锚点;非成员返回 None。
+pub(crate) fn file_entry_group_anchor_of(item: FileAreaMenuItem) -> Option<FileAreaMenuItem> {
+    FILE_ENTRY_MENU_GROUPS
+        .iter()
+        .find(|group| group.members.contains(&item))
+        .map(|group| group.anchor)
+}
+
+/// 锚点对应的组;非锚点返回 None。
+pub(crate) fn file_entry_group_of(
+    anchor: FileAreaMenuItem,
+) -> Option<&'static FileEntryMenuGroupSpec> {
+    FILE_ENTRY_MENU_GROUPS
+        .iter()
+        .find(|group| group.anchor == anchor)
+}
+
 impl FileAreaMenuItem {
     pub(crate) fn label(self) -> &'static str {
         match self {
@@ -61,6 +111,7 @@ impl FileAreaMenuItem {
             Self::Copy => "Copy",
             Self::Duplicate => "Duplicate",
             Self::Move => "Move",
+            Self::Tools => "Tools",
             Self::CreateArchive => "Create Archive...",
             Self::ConvertFormat => "Convert Format...",
             Self::FileChecksum => "File Checksum...",
@@ -84,6 +135,7 @@ impl FileAreaMenuItem {
             Self::Copy => "copy",
             Self::Duplicate => "duplicate",
             Self::Move => "move",
+            Self::Tools => "tools",
             Self::CreateArchive => "create_archive",
             Self::ConvertFormat => "convert_format",
             Self::FileChecksum => "file_checksum",
@@ -107,6 +159,7 @@ impl FileAreaMenuItem {
             "copy" => Self::Copy,
             "duplicate" => Self::Duplicate,
             "move" => Self::Move,
+            "tools" => Self::Tools,
             "create_archive" => Self::CreateArchive,
             "convert_format" => Self::ConvertFormat,
             "file_checksum" => Self::FileChecksum,
@@ -124,13 +177,18 @@ impl FileAreaMenuItem {
         })
     }
 
+    /// 纯触发器锚点:自身无动作,单点仅展开子菜单(成员空时整行省略)。
+    pub(crate) fn is_pure_trigger(self) -> bool {
+        matches!(self, Self::Tools)
+    }
+
     /// 与 floating_panels 菜单渲染使用的图标保持一致。
-    pub(crate) fn icon(self) -> IconSymbol {
-        match self {
+    pub(crate) fn icon(self) -> IconSymbol {        match self {
             Self::Open => IconSymbol::Folder,
             Self::OpenWith => IconSymbol::Monitor,
             Self::Copy | Self::Duplicate | Self::Paste => IconSymbol::Copy,
             Self::Move => IconSymbol::ArrowRight,
+            Self::Tools => IconSymbol::Settings,
             Self::CreateArchive => IconSymbol::FileArchive,
             Self::ConvertFormat => IconSymbol::FileImage,
             Self::FileChecksum => IconSymbol::Hash,

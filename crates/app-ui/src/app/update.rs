@@ -618,6 +618,10 @@ impl FileBrowser {
             Message::FileContextMenuExpansionChanged(expansion) => {
                 self.update_file_context_menu_expansion(expansion)
             }
+            Message::DeleteSelectedPermanently => self.delete_selected_permanently(),
+            Message::ContextMenuPreviewExpansionChanged(expansion) => {
+                self.update_context_menu_preview_expansion(expansion)
+            }
             Message::DestructiveActionConfirmed => self.confirm_destructive_action(),
             Message::DestructiveActionCanceled => self.cancel_destructive_action(),
             Message::AuxiliaryWindowCloseRequested(window) => self.close_auxiliary_window(window),

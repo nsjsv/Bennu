@@ -89,9 +89,32 @@ pub(super) fn context_menu_settings_section(browser: &FileBrowser) -> Element<'_
     .center_x(Length::Fixed(CONTEXT_MENU_WIDTH))
     .into();
 
+    // 文件条目页悬停组行时,成员子面板在预览面板旁边展开,与真实菜单同构。
+    let preview: Element<'static, Message> =
+        match (page, browser.context_menu_preview_expansion) {
+            (ContextMenuSettingsPage::FileEntry, Some(anchor)) => {
+                let member_rows = browser
+                    .user_config()
+                    .context_menus
+                    .file_entry_settings_member_rows(anchor);
+                if member_rows.is_empty() {
+                    menu_preview_panel(item_rows)
+                } else {
+                    row![
+                        menu_preview_panel(item_rows),
+                        member_panel(member_rows),
+                    ]
+                    .spacing(4)
+                    .align_y(Alignment::Start)
+                    .into()
+                }
+            }
+            _ => menu_preview_panel(item_rows),
+        };
+
     column![
         center_horizontally(page_label),
-        center_horizontally(menu_preview_panel(item_rows)),
+        center_horizontally(preview),
         pager,
         center_horizontally(reset_row(browser, page)),
     ]
@@ -156,6 +179,38 @@ fn menu_row_separator() -> Element<'static, Message> {
     .into()
 }
 
+/// 文件条目预览的成员子面板:与真实子菜单同排版,成员行只有眼睛开关,无拖拽手柄。
+fn member_panel(rows: Vec<ContextMenuSettingsRow>) -> Element<'static, Message> {
+    let mut content = column![].spacing(CONTEXT_MENU_ITEM_SPACING).width(Length::Fill);
+    let row_count = rows.len();
+    for (index, entry) in rows.into_iter().enumerate() {
+        content = content.push(member_row(entry));
+        if index + 1 < row_count {
+            content = content.push(menu_row_separator());
+        }
+    }
+
+    container(container(content).padding(CONTEXT_MENU_PADDING))
+        .width(Length::Fixed(CONTEXT_MENU_WIDTH))
+        .style(context_menu_style)
+        .into()
+}
+
+fn member_row(entry: ContextMenuSettingsRow) -> Element<'static, Message> {
+    let menu_icon = if entry.visible {
+        themed_icon(entry.icon, IconTone::Normal, CONTEXT_MENU_ICON_SIZE)
+    } else {
+        themed_icon(entry.icon, IconTone::Normal, CONTEXT_MENU_ICON_SIZE)
+            .style(muted_icon_svg_style())
+    };
+    row![menu_icon, item_label(&entry), eye_toggle_button(ContextMenuSettingsPage::FileEntry, &entry)]
+        .spacing(4)
+        .align_y(Alignment::Center)
+        .height(Length::Fixed(CONTEXT_MENU_ITEM_HEIGHT))
+        .width(Length::Fill)
+        .into()
+}
+
 fn menu_row_separator_style(theme: &iced::Theme) -> iced::widget::container::Style {
     iced::widget::container::Style {
         background: Some(Background::Color(Color {
@@ -166,8 +221,8 @@ fn menu_row_separator_style(theme: &iced::Theme) -> iced::widget::container::Sty
     }
 }
 
-/// 行 = 拖拽手柄 + 菜单项原样预览(图标+名称,隐藏时删除线淡化) + 眼睛开关。
-/// 手柄与眼睛都是无框透明按钮,只显示图标。
+/// 行 = 拖拽手柄 + 菜单项原样预览(图标+名称,组行带 ▸,隐藏时删除线淡化) + 眼睛开关。
+/// 手柄与眼睛都是无框透明按钮,只显示图标;文件条目页悬停组行展开成员面板,普通行收起。
 fn context_menu_item_row(
     page: ContextMenuSettingsPage,
     index: usize,
@@ -220,16 +275,47 @@ fn context_menu_item_row(
             .into()
     };
 
-    let eye_icon = if entry.visible {
-        IconSymbol::Eye
+    let mut content = row![grip, item_content]
+        .spacing(4)
+        .align_y(Alignment::Center)
+        .height(Length::Fixed(CONTEXT_MENU_ITEM_HEIGHT))
+        .width(Length::Fill);
+    if entry.group_anchor.is_some() {
+        content = content.push(
+            themed_icon(IconSymbol::ChevronRight, IconTone::Normal, CONTEXT_MENU_ICON_SIZE)
+                .width(Length::Fixed(CONTEXT_MENU_ICON_SIZE))
+                .height(Length::Fixed(CONTEXT_MENU_ICON_SIZE)),
+        );
+    }
+    content = content.push(eye_toggle_button(page, entry));
+
+    // 悬停整行切换预览展开:组行为 Some(锚点),普通行为 None;仅文件条目页消费。
+    let content: Element<'static, Message> = if page == ContextMenuSettingsPage::FileEntry {
+        mouse_area(content)
+            .on_enter(Message::ContextMenuPreviewExpansionChanged(
+                entry.group_anchor,
+            ))
+            .into()
     } else {
-        IconSymbol::EyeOff
+        content.into()
     };
-    let eye_icon_view = themed_icon(eye_icon, IconTone::Normal, CONTEXT_MENU_EYE_ICON_SIZE);
+
+    match drag_offset {
+        Some(offset) => translated(content, 0.0, offset),
+        None => content,
+    }
+}
+
+/// 眼睛开关:可见性切换按行的布局下标落点(FileEntry 页与行号不同),无框透明样式。
+fn eye_toggle_button(
+    page: ContextMenuSettingsPage,
+    entry: &ContextMenuSettingsRow,
+) -> Element<'static, Message> {
     let eye_icon_view = if entry.visible {
-        eye_icon_view
+        themed_icon(IconSymbol::Eye, IconTone::Normal, CONTEXT_MENU_EYE_ICON_SIZE)
     } else {
-        eye_icon_view.style(muted_icon_svg_style())
+        themed_icon(IconSymbol::EyeOff, IconTone::Normal, CONTEXT_MENU_EYE_ICON_SIZE)
+            .style(muted_icon_svg_style())
     };
     let mut eye = mouse_area(
         container(
@@ -243,19 +329,12 @@ fn context_menu_item_row(
         .align_y(Alignment::Center),
     );
     if !entry.locked {
-        eye = eye.on_press(Message::ContextMenuSettingsItemToggled { page, index });
+        eye = eye.on_press(Message::ContextMenuSettingsItemToggled {
+            page,
+            index: entry.entry_index,
+        });
     }
-
-    let content = row![grip, item_content, eye]
-        .spacing(4)
-        .align_y(Alignment::Center)
-        .height(Length::Fixed(CONTEXT_MENU_ITEM_HEIGHT))
-        .width(Length::Fill);
-
-    match drag_offset {
-        Some(offset) => translated(content, 0.0, offset),
-        None => content.into(),
-    }
+    eye.into()
 }
 
 /// 菜单项名:与真实菜单一样走本地化;隐藏时删除线并沿用容器淡化色。

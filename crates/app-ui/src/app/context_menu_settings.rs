@@ -3,7 +3,7 @@ use iced::{Point, Task};
 use super::{FileBrowser, POINTER_DRAG_ACTIVATION_DISTANCE};
 use crate::model::{
     ContextMenuSettingsDragState, ContextMenuSettingsPage, ContextMenuSettingsPageStep,
-    CONTEXT_MENU_SETTINGS_ROW_PITCH, Message,
+    FileAreaMenuItem, CONTEXT_MENU_SETTINGS_ROW_PITCH, Message,
 };
 
 impl FileBrowser {
@@ -14,6 +14,18 @@ impl FileBrowser {
         self.context_menu_settings_page = self.context_menu_settings_page.stepped(step);
         self.context_menu_reset_confirmation = None;
         self.context_menu_settings_drag = None;
+        self.context_menu_preview_expansion = None;
+        Task::none()
+    }
+
+    /// 设置页文件条目预览的悬停展开;拖拽进行中忽略,避免换位时成员面板跳动。
+    pub(super) fn update_context_menu_preview_expansion(
+        &mut self,
+        expansion: Option<FileAreaMenuItem>,
+    ) -> Task<Message> {
+        if self.context_menu_settings_drag.is_none() {
+            self.context_menu_preview_expansion = expansion;
+        }
         Task::none()
     }
 

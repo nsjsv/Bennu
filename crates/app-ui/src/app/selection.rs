@@ -444,7 +444,7 @@ impl FileBrowser {
             !menus.trash_items(has_target).is_empty()
         } else if has_target {
             !menus
-                .file_entry_items(target_is_directory, can_batch_rename, true)
+                .file_entry_menu_entries(target_is_directory, can_batch_rename, true)
                 .is_empty()
         } else {
             !menus.file_blank_items().is_empty()

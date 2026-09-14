@@ -566,6 +566,7 @@ fn exact_translation(text: &str) -> Option<&'static str> {
         "1 item" => Some("1 个项目"),
         "New..." => Some("新建..."),
         "Open Terminal Here" => Some("在此处打开终端"),
+        "Tools" => Some("工具"),
         "Duplicate" => Some("复制副本"),
         "New Folder with Selection" => Some("用选中项新建文件夹"),
         "Copy Path" => Some("复制路径"),

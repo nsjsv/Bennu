@@ -152,7 +152,7 @@ pub(crate) use context_menu_items::{
 pub(crate) use context_menu_layout::{
     ContextMenuLayoutConfigValues, ContextMenuPreferences, ContextMenuSettingsDragState,
     ContextMenuSettingsPage, ContextMenuSettingsPageStep, ContextMenuSettingsRow,
-    CONTEXT_MENU_SETTINGS_PAGES, CONTEXT_MENU_SETTINGS_ROW_PITCH,
+    FileEntryMenuEntry, CONTEXT_MENU_SETTINGS_PAGES, CONTEXT_MENU_SETTINGS_ROW_PITCH,
 };
 mod window_controls;
 pub(crate) use window_controls::{
@@ -537,6 +537,8 @@ pub(crate) enum Message {
     ArchiveExtraction(ArchiveExtractionMessage),
     BatchRename(BatchRenameMessage),
     FileContextMenuExpansionChanged(FileContextMenuExpansion),
+    DeleteSelectedPermanently,
+    ContextMenuPreviewExpansionChanged(Option<FileAreaMenuItem>),
     DestructiveActionConfirmed,
     DestructiveActionCanceled,
     AuxiliaryWindowCloseRequested(window::Id),
@@ -1009,7 +1011,8 @@ impl FileDeleteAction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FileContextMenuExpansion {
     None,
-    NewEntry,
+    /// 展开锚点组的子菜单;锚点是组内一级行对应的菜单项。
+    Group(FileAreaMenuItem),
 }
 
 #[derive(Debug, Clone)]

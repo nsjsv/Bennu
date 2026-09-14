@@ -1,0 +1,176 @@
+//! 右键菜单的悬停子菜单:组触发行、子菜单槽位与成员行渲染。
+//! 触发行与子菜单共用「展开锚点」这一状态,悬停普通行由 floating_panels 收起。
+
+use iced::widget::{button, container, mouse_area, row, Column, Row, Space};
+use iced::{Alignment, Element, Length};
+
+use crate::app::archive_creation::ArchiveCreationMessage;
+use crate::app::checksum::ChecksumMessage;
+use crate::app::convert::ConvertMessage;
+use crate::appearance::{context_menu_item_button_style, context_menu_style};
+use crate::icons::IconSymbol;
+use crate::model::{
+    BatchRenameMessage, FileAreaMenuItem, FileContextMenuExpansion, FileContextMenuState, Message,
+};
+
+use super::{themed_icon, IconTone, MENU_ICON_SIZE};
+
+pub(super) const CONTEXT_MENU_PADDING: f32 = 8.0;
+pub(super) const CONTEXT_MENU_ITEM_SPACING: f32 = 4.0;
+pub(super) const CONTEXT_MENU_ITEM_HEIGHT: f32 = 28.0;
+pub(super) const CONTEXT_SUBMENU_WIDTH: f32 = 170.0;
+
+/// 子菜单槽位:把子菜单面板钉在触发行右侧同行高度(行号来自结构列表,无硬编码行数)。
+pub(super) fn submenu_slot(row_index: usize, content: Element<'_, Message>) -> Element<'_, Message> {
+    let trigger_top = CONTEXT_MENU_PADDING
+        + row_index as f32 * (CONTEXT_MENU_ITEM_HEIGHT + CONTEXT_MENU_ITEM_SPACING);
+    Column::new()
+        .push(Space::new().height(Length::Fixed(trigger_top)))
+        .push(content)
+        .into()
+}
+
+/// 组触发行:动作锚点(on_press 有值)单点执行动作,纯触发器单点仅展开;悬停一律展开。
+pub(super) fn group_trigger_row(
+    anchor: FileAreaMenuItem,
+    icon: IconSymbol,
+    label: &'static str,
+    on_press: Option<Message>,
+) -> Element<'static, Message> {
+    let mut button = button(menu_label_with_chevron(icon, label))
+        .width(Length::Fill)
+        .height(Length::Fixed(CONTEXT_MENU_ITEM_HEIGHT))
+        .style(context_menu_item_button_style());
+    if let Some(message) = on_press {
+        button = button.on_press(message);
+    }
+    mouse_area(button)
+        .on_enter(Message::FileContextMenuExpansionChanged(
+            FileContextMenuExpansion::Group(anchor),
+        ))
+        .into()
+}
+
+/// 组的子菜单面板:「新建...」的硬编码行在最前,其余组只渲染成员行。
+pub(super) fn group_submenu_panel(
+    menu: &FileContextMenuState,
+    anchor: FileAreaMenuItem,
+    members: &[FileAreaMenuItem],
+) -> Element<'static, Message> {
+    let mut content = Column::new()
+        .spacing(CONTEXT_MENU_ITEM_SPACING)
+        .padding(CONTEXT_MENU_PADDING);
+    if anchor == FileAreaMenuItem::NewEntry {
+        content = content
+            .push(submenu_item(
+                IconSymbol::File,
+                "New File",
+                Message::CreateEmptyFile(menu.paste_directory.clone()),
+                anchor,
+            ))
+            .push(submenu_item(
+                IconSymbol::Folder,
+                "New Folder",
+                Message::CreateDirectory(menu.paste_directory.clone()),
+                anchor,
+            ));
+    }
+    for member in members {
+        if let Some((icon, label, message)) = member_menu_action(*member) {
+            content = content.push(submenu_item(icon, label, message, anchor));
+        }
+    }
+
+    mouse_area(
+        container(content)
+            .width(Length::Fixed(CONTEXT_SUBMENU_WIDTH))
+            .style(context_menu_style),
+    )
+    .on_enter(Message::FileContextMenuExpansionChanged(
+        FileContextMenuExpansion::Group(anchor),
+    ))
+    .into()
+}
+
+/// 成员行的动作映射;成员只会是组表里声明的低频项,其余变体不可达。
+fn member_menu_action(
+    member: FileAreaMenuItem,
+) -> Option<(IconSymbol, &'static str, Message)> {
+    let action = match member {
+        FileAreaMenuItem::Duplicate => (member.icon(), member.label(), Message::DuplicateSelected),
+        FileAreaMenuItem::CopyPath => (member.icon(), member.label(), Message::CopyPathSelected),
+        FileAreaMenuItem::CreateArchive => (
+            member.icon(),
+            member.label(),
+            Message::ArchiveCreation(ArchiveCreationMessage::OpenSelected),
+        ),
+        FileAreaMenuItem::ConvertFormat => (
+            member.icon(),
+            member.label(),
+            Message::Convert(ConvertMessage::OpenSelected),
+        ),
+        FileAreaMenuItem::FileChecksum => (
+            member.icon(),
+            member.label(),
+            Message::Checksum(ChecksumMessage::OpenSelected),
+        ),
+        FileAreaMenuItem::BatchRename => (
+            member.icon(),
+            member.label(),
+            Message::BatchRename(BatchRenameMessage::OpenSelected),
+        ),
+        FileAreaMenuItem::NewFolderFromSelection => (
+            member.icon(),
+            member.label(),
+            Message::NewFolderFromSelection,
+        ),
+        FileAreaMenuItem::CreateSymlink => (
+            member.icon(),
+            member.label(),
+            Message::CreateSymlinkSelected,
+        ),
+        _ => return None,
+    };
+    Some(action)
+}
+
+/// 子菜单成员行:悬停保持本组展开。
+fn submenu_item(
+    icon: IconSymbol,
+    label: &'static str,
+    message: Message,
+    anchor: FileAreaMenuItem,
+) -> Element<'static, Message> {
+    mouse_area(
+        button(menu_label(icon, label))
+            .on_press(message)
+            .width(Length::Fill)
+            .height(Length::Fixed(CONTEXT_MENU_ITEM_HEIGHT))
+            .style(context_menu_item_button_style()),
+    )
+    .on_enter(Message::FileContextMenuExpansionChanged(
+        FileContextMenuExpansion::Group(anchor),
+    ))
+    .into()
+}
+
+fn menu_label(icon: IconSymbol, label: &'static str) -> Row<'static, Message> {
+    row![
+        themed_icon(icon, IconTone::Normal, MENU_ICON_SIZE),
+        crate::typography::readable_text(label),
+    ]
+    .spacing(6)
+    .align_y(Alignment::Center)
+    .width(Length::Fill)
+}
+
+fn menu_label_with_chevron(icon: IconSymbol, label: &'static str) -> Row<'static, Message> {
+    row![
+        themed_icon(icon, IconTone::Normal, MENU_ICON_SIZE),
+        crate::typography::readable_text(label).width(Length::Fill),
+        themed_icon(IconSymbol::ChevronRight, IconTone::Normal, MENU_ICON_SIZE),
+    ]
+    .spacing(6)
+    .align_y(Alignment::Center)
+    .width(Length::Fill)
+}

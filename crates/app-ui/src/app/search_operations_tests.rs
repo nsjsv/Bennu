@@ -187,6 +187,25 @@ fn trash_and_permanent_delete_reuse_queue_and_confirmation_boundaries() {
 }
 
 #[test]
+fn shift_delete_menu_action_requests_permanent_delete_confirmation() {
+    // 菜单的 Shift+删除变体:对当前选中(搜索结果或普通选中)请求永久删除确认,
+    // 不直接入队,且同时收起右键菜单。
+    let (mut browser, expected_paths) = browser_with_search_selection();
+    drop(browser.delete_selected_permanently());
+    assert!(browser.context_menu.is_none());
+    assert!(matches!(
+        browser.destructive_action_confirmation,
+        Some(DestructiveActionConfirmation::DeletePermanently { ref paths })
+            if paths == &expected_paths
+    ));
+
+    // 空选中:直接空操作,不弹确认框。
+    let (mut empty_browser, _) = FileBrowser::new(config::default_user_config());
+    drop(empty_browser.delete_selected_permanently());
+    assert!(empty_browser.destructive_action_confirmation.is_none());
+}
+
+#[test]
 fn right_click_targets_search_selection_without_mutating_underlying_selection() {
     let (mut browser, expected_paths) = browser_with_search_selection();
     let third = browser.current_dir.join("third.txt");

@@ -5,39 +5,74 @@ use crate::icons::IconSymbol;
 use super::*;
 
 #[test]
-fn defaults_match_existing_menu_order() {
+fn defaults_match_existing_menu_structure() {
     let preferences = ContextMenuPreferences::defaults();
+    // 一级结构:组锚点折叠成员,其余保持全集原序;工具组插在移动和粘贴之间。
     assert_eq!(
-        preferences.file_entry_items(false, true, true),
+        preferences.file_entry_menu_entries(false, true, true),
         vec![
-            FileAreaMenuItem::Open,
-            FileAreaMenuItem::OpenWith,
-            FileAreaMenuItem::Copy,
-            FileAreaMenuItem::Duplicate,
-            FileAreaMenuItem::Move,
-            FileAreaMenuItem::CreateArchive,
-            FileAreaMenuItem::ConvertFormat,
-            FileAreaMenuItem::FileChecksum,
-            FileAreaMenuItem::Paste,
-            FileAreaMenuItem::Rename,
-            FileAreaMenuItem::BatchRename,
-            FileAreaMenuItem::NewEntry,
-            FileAreaMenuItem::NewFolderFromSelection,
-            FileAreaMenuItem::OpenTerminalHere,
-            FileAreaMenuItem::CopyPath,
-            FileAreaMenuItem::CreateSymlink,
-            FileAreaMenuItem::Delete,
-            FileAreaMenuItem::Properties,
+            FileEntryMenuEntry::Item(FileAreaMenuItem::Open),
+            FileEntryMenuEntry::Item(FileAreaMenuItem::OpenWith),
+            FileEntryMenuEntry::Group {
+                anchor: FileAreaMenuItem::Copy,
+                members: vec![FileAreaMenuItem::Duplicate, FileAreaMenuItem::CopyPath],
+            },
+            FileEntryMenuEntry::Item(FileAreaMenuItem::Move),
+            FileEntryMenuEntry::Group {
+                anchor: FileAreaMenuItem::Tools,
+                members: vec![
+                    FileAreaMenuItem::CreateArchive,
+                    FileAreaMenuItem::ConvertFormat,
+                    FileAreaMenuItem::FileChecksum,
+                    FileAreaMenuItem::CreateSymlink,
+                ],
+            },
+            FileEntryMenuEntry::Item(FileAreaMenuItem::Paste),
+            FileEntryMenuEntry::Group {
+                anchor: FileAreaMenuItem::Rename,
+                members: vec![FileAreaMenuItem::BatchRename],
+            },
+            FileEntryMenuEntry::Group {
+                anchor: FileAreaMenuItem::NewEntry,
+                members: vec![FileAreaMenuItem::NewFolderFromSelection],
+            },
+            FileEntryMenuEntry::Item(FileAreaMenuItem::OpenTerminalHere),
+            FileEntryMenuEntry::Item(FileAreaMenuItem::Delete),
+            FileEntryMenuEntry::Item(FileAreaMenuItem::Properties),
         ]
     );
-    // 目录:无 FileChecksum。
-    assert!(!preferences
-        .file_entry_items(true, true, true)
-        .contains(&FileAreaMenuItem::FileChecksum));
-    // 不可批量重命名:无 BatchRename。
-    assert!(!preferences
-        .file_entry_items(false, false, false)
-        .contains(&FileAreaMenuItem::BatchRename));
+}
+
+#[test]
+fn runtime_eligibility_gates_members_and_degrades_groups() {
+    let preferences = ContextMenuPreferences::defaults();
+    // 目录:工具子菜单无文件校验。
+    let tools_members = |target_is_directory: bool, can_create_symlink: bool| {
+        preferences
+            .file_entry_menu_entries(target_is_directory, true, can_create_symlink)
+            .iter()
+            .find_map(|entry| match entry {
+                FileEntryMenuEntry::Group {
+                    anchor: FileAreaMenuItem::Tools,
+                    members,
+                } => Some(members.clone()),
+                _ => None,
+            })
+            .unwrap()
+    };
+    assert!(!tools_members(true, true).contains(&FileAreaMenuItem::FileChecksum));
+    // 远程挂载:工具子菜单无创建符号链接。
+    assert!(!tools_members(false, false).contains(&FileAreaMenuItem::CreateSymlink));
+    // 不可批量重命名:重命名组退化为普通行。
+    let entries = preferences.file_entry_menu_entries(false, false, true);
+    assert!(entries.contains(&FileEntryMenuEntry::Item(FileAreaMenuItem::Rename)));
+    assert!(!entries.iter().any(|entry| matches!(
+        entry,
+        FileEntryMenuEntry::Group {
+            anchor: FileAreaMenuItem::Rename,
+            ..
+        }
+    )));
 }
 
 #[test]
@@ -56,37 +91,99 @@ fn selection_only_items_stay_out_of_the_blank_area_menu() {
 }
 
 #[test]
-fn symlink_item_gates_on_local_mount_clearance() {
-    let preferences = ContextMenuPreferences::defaults();
-    // 全本地时文件与目录都提供创建符号链接;远程挂载选中时隐藏。
-    assert!(preferences
-        .file_entry_items(false, true, true)
-        .contains(&FileAreaMenuItem::CreateSymlink));
-    assert!(preferences
-        .file_entry_items(true, true, true)
-        .contains(&FileAreaMenuItem::CreateSymlink));
-    assert!(!preferences
-        .file_entry_items(false, true, false)
-        .contains(&FileAreaMenuItem::CreateSymlink));
-    assert!(!preferences
-        .file_entry_items(true, true, false)
-        .contains(&FileAreaMenuItem::CreateSymlink));
-}
-
-#[test]
 fn new_entry_position_tracks_visibility() {
     let mut preferences = ContextMenuPreferences::defaults();
+    // 隐藏 Open/OpenWith/Copy;组行随锚点一起消失。
     for index in 0..3 {
         preferences.file_entry.toggle(index);
     }
-    let items = preferences.file_entry_items(false, false, false);
-    assert_eq!(items[0], FileAreaMenuItem::Duplicate);
-    // 隐藏 Open/OpenWith/Copy 后,NewEntry 前剩 Duplicate、Move、CreateArchive、
-    // ConvertFormat、FileChecksum、Paste、Rename 共 7 行。
-    assert_eq!(
-        items.iter().position(|item| *item == FileAreaMenuItem::NewEntry),
-        Some(7)
-    );
+    let entries = preferences.file_entry_menu_entries(false, false, true);
+    let new_entry_index = entries
+        .iter()
+        .position(|entry| {
+            matches!(
+                entry,
+                FileEntryMenuEntry::Group {
+                    anchor: FileAreaMenuItem::NewEntry,
+                    ..
+                }
+            )
+        })
+        .unwrap();
+    // 前面剩移动、工具组、粘贴、重命名组共 4 行。
+    assert_eq!(new_entry_index, 4);
+}
+
+#[test]
+fn hidden_group_anchor_hides_the_whole_group() {
+    let mut preferences = ContextMenuPreferences::defaults();
+    let copy_index = preferences
+        .file_entry
+        .entries
+        .iter()
+        .position(|entry| entry.item == FileAreaMenuItem::Copy)
+        .unwrap();
+    preferences.file_entry.toggle(copy_index);
+    let entries = preferences.file_entry_menu_entries(false, true, true);
+    assert!(!entries.iter().any(|entry| matches!(
+        entry,
+        FileEntryMenuEntry::Group {
+            anchor: FileAreaMenuItem::Copy,
+            ..
+        }
+    )));
+    // 成员也不作为一级行出现。
+    assert!(!entries.iter().any(|entry| matches!(
+        entry,
+        FileEntryMenuEntry::Item(FileAreaMenuItem::Duplicate)
+            | FileEntryMenuEntry::Item(FileAreaMenuItem::CopyPath)
+    )));
+}
+
+#[test]
+fn empty_member_lists_degrade_or_omit_group_rows() {
+    let mut preferences = ContextMenuPreferences::defaults();
+    let toggle_item = |preferences: &mut ContextMenuPreferences, member: FileAreaMenuItem| {
+        let index = preferences
+            .file_entry
+            .entries
+            .iter()
+            .position(|entry| entry.item == member)
+            .unwrap();
+        preferences.file_entry.toggle(index);
+    };
+    // 复制组成员全部隐藏 → 复制退化为普通行(单点动作仍在)。
+    toggle_item(&mut preferences, FileAreaMenuItem::Duplicate);
+    toggle_item(&mut preferences, FileAreaMenuItem::CopyPath);
+    let entries = preferences.file_entry_menu_entries(false, true, true);
+    assert!(entries.contains(&FileEntryMenuEntry::Item(FileAreaMenuItem::Copy)));
+    // 工具组成员全部隐藏 → 纯触发器整行省略。
+    for member in [
+        FileAreaMenuItem::CreateArchive,
+        FileAreaMenuItem::ConvertFormat,
+        FileAreaMenuItem::FileChecksum,
+        FileAreaMenuItem::CreateSymlink,
+    ] {
+        toggle_item(&mut preferences, member);
+    }
+    let entries = preferences.file_entry_menu_entries(false, true, true);
+    assert!(!entries.iter().any(|entry| matches!(
+        entry,
+        FileEntryMenuEntry::Group {
+            anchor: FileAreaMenuItem::Tools,
+            ..
+        }
+    )));
+    // 「新建...」硬编码行恒在:成员隐藏也保持组行。
+    toggle_item(&mut preferences, FileAreaMenuItem::NewFolderFromSelection);
+    let entries = preferences.file_entry_menu_entries(false, true, true);
+    assert!(entries.iter().any(|entry| matches!(
+        entry,
+        FileEntryMenuEntry::Group {
+            anchor: FileAreaMenuItem::NewEntry,
+            members
+        } if members.is_empty()
+    )));
 }
 
 #[test]
@@ -126,6 +223,88 @@ fn normalized_from_stored_appends_missing_and_drops_unknown() {
 }
 
 #[test]
+fn stored_layout_without_tools_appends_it_visible_at_the_end() {
+    // 老配置没有 tools 条目:按全集顺序追加到末尾且可见,其余保持存储顺序。
+    let old_items = [
+        FileAreaMenuItem::Open,
+        FileAreaMenuItem::OpenWith,
+        FileAreaMenuItem::Copy,
+        FileAreaMenuItem::Duplicate,
+        FileAreaMenuItem::Move,
+        FileAreaMenuItem::CreateArchive,
+        FileAreaMenuItem::ConvertFormat,
+        FileAreaMenuItem::FileChecksum,
+        FileAreaMenuItem::Paste,
+        FileAreaMenuItem::Rename,
+        FileAreaMenuItem::BatchRename,
+        FileAreaMenuItem::NewEntry,
+        FileAreaMenuItem::NewFolderFromSelection,
+        FileAreaMenuItem::OpenTerminalHere,
+        FileAreaMenuItem::CopyPath,
+        FileAreaMenuItem::CreateSymlink,
+        FileAreaMenuItem::Delete,
+        FileAreaMenuItem::Properties,
+    ];
+    let stored: Vec<(String, bool)> = old_items
+        .iter()
+        .map(|item| (item.config_value().to_owned(), true))
+        .collect();
+    let layout = ContextMenuLayout::<FileAreaMenuItem>::normalized_from_stored(
+        &stored,
+        &FILE_ENTRY_MENU_ITEMS,
+        FileAreaMenuItem::from_config_value,
+    );
+    assert_eq!(layout.entries.len(), FILE_ENTRY_MENU_ITEMS.len());
+    let last = layout.entries.last().unwrap();
+    assert_eq!(last.item, FileAreaMenuItem::Tools);
+    assert!(last.visible);
+}
+
+#[test]
+fn file_entry_settings_rows_project_groups_to_single_rows() {
+    let preferences = ContextMenuPreferences::defaults();
+    let rows = preferences.settings_rows(ContextMenuSettingsPage::FileEntry);
+    // 19 项中 8 个成员被收进组面板,顶级行 = 11 行。
+    assert_eq!(rows.len(), 11);
+    let group_anchors: Vec<_> = rows.iter().filter_map(|row| row.group_anchor).collect();
+    assert_eq!(
+        group_anchors,
+        vec![
+            FileAreaMenuItem::Copy,
+            FileAreaMenuItem::Tools,
+            FileAreaMenuItem::Rename,
+            FileAreaMenuItem::NewEntry,
+        ]
+    );
+    // entry_index 指向布局真实下标。
+    assert_eq!(rows[0].entry_index, 0);
+    assert_eq!(rows[2].entry_index, 2);
+    // 成员面板行带布局下标,按成员表顺序。
+    let members = preferences.file_entry_settings_member_rows(FileAreaMenuItem::Tools);
+    assert_eq!(members.len(), 4);
+    assert_eq!(members[0].label, "Create Archive...");
+    assert_eq!(members[3].label, "Create Symbolic Link");
+}
+
+#[test]
+fn file_entry_drag_moves_the_anchor_entry_only() {
+    let mut preferences = ContextMenuPreferences::defaults();
+    // 行 2(复制组)拖到行 5(粘贴)之后:锚点条目换位,成员条目留在原下标。
+    preferences.reorder_settings_row(ContextMenuSettingsPage::FileEntry, 2, 5);
+    let rows = preferences.settings_rows(ContextMenuSettingsPage::FileEntry);
+    assert_eq!(rows[5].label, "Copy");
+    // 锚点移走后,原下标 2 由成员 Duplicate 顶上;CopyPath 仍在 15。
+    assert_eq!(
+        preferences.file_entry.entries[2].item,
+        FileAreaMenuItem::Duplicate
+    );
+    assert_eq!(
+        preferences.file_entry.entries[15].item,
+        FileAreaMenuItem::CopyPath
+    );
+}
+
+#[test]
 fn list_columns_keep_name_visible() {
     let mut preferences = ContextMenuPreferences::defaults();
     let name_index = preferences
@@ -146,6 +325,8 @@ fn list_columns_keep_name_visible() {
             icon: IconSymbol::List,
             visible: true,
             locked: true,
+            entry_index: name_index,
+            group_anchor: None,
         }
     );
 }

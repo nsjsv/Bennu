@@ -233,6 +233,7 @@ impl FileBrowser {
             column_directories_snapshot,
             press_origin: self.cursor_position,
             preview_entries: Vec::new(),
+            wayland_drag_icon: None,
         });
         // 按下即测量条目偏移:激活瞬间要交接原生拖放并一次性生成位图,
         // 快照必须在此之前就绪(极速甩动来不及则退单胶囊兜底)。
@@ -265,31 +266,44 @@ impl FileBrowser {
     /// 用最近的条目 bounds 测量填充拖拽预览偏移快照。只填充一次:
     /// 拖动中源视图滚动重排会改变条目原点,重算会让已提起的预览组跳位。
     /// WaitingForMovement 期间也填充:按下时发起的测量在激活交接原生
-    /// 拖放之前到达,位图偏移依赖这份快照。
+    /// 拖放之前到达,位图偏移依赖这份快照。填充成功的同一刻发起拖出
+    /// 位图的后台预渲染——激活瞬间直接消费现成位图,"只填一次"守卫
+    /// 同时保证预渲染只发起一次。
     pub(crate) fn refresh_file_drag_preview_layout(
         &mut self,
         bounds: &[crate::model::ColumnEntryBounds],
-    ) {
-        let Some(file_drag) = &mut self.file_drag else {
-            return;
-        };
-        if !file_drag.preview_entries.is_empty() {
-            return;
+    ) -> Task<Message> {
+        {
+            let Some(file_drag) = &mut self.file_drag else {
+                return Task::none();
+            };
+            if !file_drag.preview_entries.is_empty() {
+                return Task::none();
+            }
+            let source_pane_id = file_drag.source_pane_id;
+            let press_origin = file_drag.press_origin;
+            let sources: std::collections::HashSet<&std::path::Path> = file_drag
+                .sources
+                .iter()
+                .map(|path| path.as_path())
+                .collect();
+            file_drag.preview_entries = bounds
+                .iter()
+                .filter(|bound| {
+                    bound.pane_id == source_pane_id && sources.contains(bound.path.as_path())
+                })
+                .map(|bound| crate::model::FileDragPreviewEntry {
+                    path: bound.path.clone(),
+                    offset: bound.bounds.position() - press_origin,
+                })
+                .collect();
         }
-        let source_pane_id = file_drag.source_pane_id;
-        let press_origin = file_drag.press_origin;
-        let sources: std::collections::HashSet<&std::path::Path> =
-            file_drag.sources.iter().map(|path| path.as_path()).collect();
-        file_drag.preview_entries = bounds
-            .iter()
-            .filter(|bound| {
-                bound.pane_id == source_pane_id && sources.contains(bound.path.as_path())
-            })
-            .map(|bound| crate::model::FileDragPreviewEntry {
-                path: bound.path.clone(),
-                offset: bound.bounds.position() - press_origin,
-            })
-            .collect();
+        // 快照借用在上面作用域结束:发起预渲染要重新读取浏览器状态。
+        if self.wayland_dnd.is_some() {
+            self.preload_wayland_drag_icon()
+        } else {
+            Task::none()
+        }
     }
 
     fn finish_stationary_file_drag(&mut self, file_drag: FileDragState) -> Task<Message> {
@@ -848,6 +862,7 @@ mod tests {
             column_directories_snapshot: Vec::new(),
             press_origin: iced::Point::new(0.0, 0.0),
             preview_entries: Vec::new(),
+            wayland_drag_icon: None,
         });
         // 激活拖拽会话(测试环境无 wayland 句柄,走应用内拖拽回退),
         // 落点悬停会话由此建立。
@@ -1005,7 +1020,8 @@ mod tests {
             ),
         }];
 
-        browser.refresh_file_drag_preview_layout(&bounds);
+        // 测试环境无 wayland 句柄,填充不发起预渲染。
+        drop(browser.refresh_file_drag_preview_layout(&bounds));
 
         let file_drag = browser.file_drag.as_ref().unwrap();
         assert!(!file_drag.is_dragging());

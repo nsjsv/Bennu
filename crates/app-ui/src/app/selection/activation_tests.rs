@@ -912,6 +912,7 @@ fn active_drag_browser(origin: Point) -> FileBrowser {
         column_directories_snapshot: Vec::new(),
         press_origin: iced::Point::ORIGIN,
         preview_entries: Vec::new(),
+        wayland_drag_icon: None,
     });
     browser
 }

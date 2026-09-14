@@ -5,7 +5,7 @@ use std::time::Duration;
 use desktop_linux::{
     DesktopActivationEvent, DesktopClipboardContent, FileClipboardOperation,
     OpenWithApplicationList, StorageDeviceId, StorageDeviceSnapshot, TerminalEmulator,
-    WaylandDndFileDrop, WaylandDndWindowHandle, WaylandFileDragSourceEvent,
+    WaylandDndFileDrop, WaylandDndWindowHandle, WaylandFileDragIcon, WaylandFileDragSourceEvent,
     WaylandFileDropTargetEvent, WaylandFileDropTargetSessionId,
 };
 use file_core::FileOperationVerification;
@@ -820,6 +820,12 @@ pub(crate) enum Message {
     WaylandFileDragSourceEvent(WaylandFileDragSourceEvent),
     WaylandFileDropTargetEvent(WaylandFileDropTargetEvent),
     WaylandDndRuntimeFailed(String),
+    /// 拖出位图的后台预渲染完成;gesture_id 用于校验结果归属,拖拽已
+    /// 取消或手势更替时迟到结果直接丢弃。
+    WaylandDragIconReady {
+        gesture_id: FileDragGestureId,
+        icon: Result<WaylandFileDragIcon, String>,
+    },
     FileDropOperationSelected(FileClipboardOperation),
     FileDropCancelled,
     TransferConflictsChecked {

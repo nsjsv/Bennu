@@ -155,6 +155,7 @@ mod tests {
             column_directories_snapshot: Vec::new(),
             press_origin: iced::Point::ORIGIN,
             preview_entries: Vec::new(),
+            wayland_drag_icon: None,
         });
         browser.selection_marquee = Some(SelectionMarquee {
             gesture_origin: Point::new(0.0, 0.0),

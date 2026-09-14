@@ -531,9 +531,12 @@ impl FileBrowser {
                 }
             }
             Message::ColumnEntryBoundsMeasured(bounds, viewports) => {
-                self.refresh_file_drag_preview_layout(&bounds);
+                let drag_icon_preload = self.refresh_file_drag_preview_layout(&bounds);
                 self.note_file_drag_viewport(&bounds, &viewports);
-                self.update_selection_from_column_entry_bounds(bounds)
+                Task::batch([
+                    drag_icon_preload,
+                    self.update_selection_from_column_entry_bounds(bounds),
+                ])
             }
             Message::BreadcrumbDropTargetBoundsMeasured(generation, bounds) => {
                 self.accept_breadcrumb_drop_target_bounds(generation, bounds)
@@ -1160,6 +1163,9 @@ impl FileBrowser {
             }
             Message::WaylandFileDragSourceEvent(event) => self.accept_wayland_source_event(event),
             Message::WaylandFileDropTargetEvent(event) => self.accept_wayland_target_event(event),
+            Message::WaylandDragIconReady { gesture_id, icon } => {
+                self.accept_wayland_drag_icon_ready(gesture_id, icon)
+            }
             Message::WaylandDndRuntimeFailed(error) => {
                 self.accept_wayland_dnd_runtime_failure(error)
             }

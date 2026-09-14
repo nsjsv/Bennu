@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use desktop_linux::WaylandFileDragSessionId;
+use desktop_linux::{WaylandFileDragIcon, WaylandFileDragSessionId};
 use iced::{Point, Rectangle};
 
 use super::{SplitRegion, TransferConflictMode};
@@ -106,6 +106,10 @@ pub(crate) struct FileDragState {
     pub(crate) press_origin: Point,
     /// 提起时的条目偏移快照;空表示尚未由 bounds 测量填充。
     pub(crate) preview_entries: Vec<FileDragPreviewEntry>,
+    /// bounds 快照回填时后台预渲染好的拖出位图;激活交接时 take 消费,
+    /// 未就绪(极速甩动)则由激活路径现场生成兜底。字段挂在手势状态
+    /// 里,手势取消/更替时随状态一起丢弃,迟到结果无法串手势。
+    pub(crate) wayland_drag_icon: Option<WaylandFileDragIcon>,
 }
 
 impl FileDragState {

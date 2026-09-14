@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use desktop_linux::WaylandFileDragIcon;
@@ -41,8 +41,10 @@ pub(crate) struct FileDragIconEntry {
     pub(crate) label: String,
     /// 相对按下点(提起瞬间的光标位置)的条目原点偏移。
     pub(crate) offset: iced::Vector,
-    /// 缩略图文件原始 PNG 字节;无缩略图的条目回退到类型图标。
-    pub(crate) thumbnail_png: Option<Vec<u8>>,
+    /// 缩略图 PNG 的磁盘路径;渲染时才读字节,收集输入的主线程不做
+    /// IO(缩略图缓存句柄不是 Send,只能在这里取路径)。无路径的条目
+    /// 回退到类型图标。
+    pub(crate) thumbnail_png_path: Option<PathBuf>,
 }
 
 /// 拖拽图标配色:取自当前主题,与窗口内 drag_preview_panel 同源。
@@ -87,17 +89,28 @@ pub(crate) fn render_wayland_file_drag_icon(
     let mut tiles = Vec::with_capacity(entries.len());
     let mut canvas_width = 1.0_f32;
     let mut canvas_height = 1.0_f32;
-    for entry in entries {
+    // 文件名宽度一次批量量完:旧法每个名字各渲染一张 512×24 画布,
+    // 多选时串行渲染上百张,是位图生成延迟的大头。
+    let labels: Vec<&str> = entries.iter().map(|entry| entry.label.as_str()).collect();
+    let measured_widths = measure_text_widths(&labels)?;
+    for (entry, measured_width) in entries.iter().zip(&measured_widths) {
         let position = entry.offset + iced::Vector::new(shift_x, shift_y);
         let fade = drag_icon_fade(position);
         let Some(fade) = fade else {
             continue;
         };
-        let label_width = fitted_label_width(&entry.label)?;
+        let label_width = fitted_label_width(*measured_width);
         let row_width = PILL_LABEL_LEFT + label_width + PILL_PADDING_RIGHT;
         canvas_width = canvas_width.max(position.x + row_width);
         canvas_height = canvas_height.max(position.y + TILE_SIZE);
-        tiles.push((position, row_width, label_width, fade, entry));
+        tiles.push((
+            position,
+            row_width,
+            label_width,
+            *measured_width,
+            fade,
+            entry,
+        ));
     }
     // 画布装不下整组就收拢为总数行,而不是裁掉超出部分。
     if (canvas_width > DRAG_ICON_CANVAS_MAX_EDGE as f32
@@ -178,23 +191,25 @@ fn drag_icon_fade(position: iced::Vector) -> Option<f32> {
 fn entry_group_svg(
     canvas_width: u32,
     canvas_height: u32,
-    tiles: &[(iced::Vector, f32, f32, f32, &FileDragIconEntry)],
+    tiles: &[(iced::Vector, f32, f32, f32, f32, &FileDragIconEntry)],
     palette: FileDragPillPalette,
 ) -> Result<String, String> {
     let content = hex_color(palette.content);
     let mut groups = String::new();
-    for (position, _, label_width, fade, entry) in tiles {
+    for (position, _, label_width, measured_width, fade, entry) in tiles {
         let icon_x = position.x + TILE_ICON_LEFT;
         let icon_y = position.y + TILE_ICON_TOP;
         let label_x = position.x + PILL_LABEL_LEFT;
-        let label = truncate_label_to_width(&entry.label, *label_width)?;
-        let leading = match &entry.thumbnail_png {
-            Some(png) => format!(
+        let label = truncate_label_to_width(&entry.label, *measured_width, *label_width)?;
+        let leading = match entry.thumbnail_png_path.as_deref().map(std::fs::read) {
+            // 缩略图字节渲染时才从磁盘读:被淡出裁掉的条目连读盘都省
+            // 掉;读取失败回退类型图标,与旧收集期读取失败同语义。
+            Some(Ok(png)) => format!(
                 "<image x=\"{icon_x}\" y=\"{icon_y}\" width=\"{TILE_SIZE}\" \
 height=\"{TILE_SIZE}\" href=\"data:image/png;base64,{}\"/>",
-                base64_encode(png)
+                base64_encode(&png)
             ),
-            None => nested_icon_svg(entry.symbol, icon_x, icon_y, &content),
+            _ => nested_icon_svg(entry.symbol, icon_x, icon_y, &content),
         };
         groups.push_str(&format!(
             "<g opacity=\"{fade:.3}\">{leading}\
@@ -213,29 +228,48 @@ height=\"{canvas_height}\">{groups}</svg>"
 /// 嵌入条目图标:沿用原 SVG 的 viewBox 与形状定义,只注入画布内
 /// 位置(图标源文件自带 24x24 尺寸)并把 currentColor 换成主题前景
 /// 色,实心/线框两种风格都兼容。
-/// 文件名按实测像素截断,保证不超出条目行预留宽度。
-fn truncate_label_to_width(label: &str, width: f32) -> Result<String, String> {
-    if measure_text_width(label)? <= width {
+/// 文件名按实测像素截断,保证不超出条目行预留宽度。前缀渲染宽度随
+/// 字符增加单调不减,超宽时对前缀长度二分;结果与旧的逐字符线性推进
+/// 完全一致(单测逐项比对锁定),测量渲染次数从 O(字符数) 降到
+/// O(log 字符数)。
+fn truncate_label_to_width(
+    label: &str,
+    measured_width: f32,
+    max_width: f32,
+) -> Result<String, String> {
+    // 全名不超宽:批量测量阶段已经量过,这里直接返回,零渲染。
+    if measured_width <= max_width {
         return Ok(label.to_owned());
     }
-    let mut candidate: String = label.chars().take(3).collect();
-    for character in label.chars().skip(3) {
-        let next = format!("{candidate}{character}");
-        if measure_text_width(&next)? > width {
-            break;
-        }
-        candidate = next;
+    let characters: Vec<char> = label.chars().collect();
+    if characters.len() <= 3 {
+        // 与旧线性扫描同款保底:不足 4 个字符的名字没有收缩空间。
+        return Ok(label.to_owned());
     }
-    Ok(candidate)
+    let prefix_fits = |length: usize| {
+        let prefix: String = characters[..length].iter().collect();
+        measure_text_width(&prefix).map(|width| width <= max_width)
+    };
+    if !prefix_fits(3)? {
+        return Ok(characters[..3].iter().collect());
+    }
+    let mut low = 3_usize;
+    let mut high = characters.len() - 1;
+    while low < high {
+        let middle = low + (high - low + 1) / 2;
+        if prefix_fits(middle)? {
+            low = middle;
+        } else {
+            high = middle - 1;
+        }
+    }
+    Ok(characters[..low].iter().collect())
 }
 
-fn fitted_label_width(label: &str) -> Result<f32, String> {
-    let mut width = measure_text_width(label)?;
-    if width > PILL_LABEL_MAX_WIDTH {
-        // 宽度上限由截断循环收紧,这里先按上限占位。
-        width = PILL_LABEL_MAX_WIDTH;
-    }
-    Ok(width.ceil())
+/// 条目行预留宽度:实测宽度封顶到上限后取整。
+fn fitted_label_width(measured_width: f32) -> f32 {
+    // 宽度上限由截断循环收紧,这里先按上限占位。
+    measured_width.min(PILL_LABEL_MAX_WIDTH).ceil()
 }
 
 /// 文件名显示名:与窗口内预览同一截断规则。
@@ -269,21 +303,54 @@ fn render_svg(svg: &str, width: u32, height: u32) -> Result<Pixmap, String> {
     Ok(pixmap)
 }
 
-/// 数字宽度按实测像素给出,保证角标/文件名能完整放进胶囊。
+/// 单文本宽度:批量接口的退化形式,截断二分的探测与聚合行测量都走它。
 fn measure_text_width(text: &str) -> Result<f32, String> {
+    Ok(measure_text_widths(std::slice::from_ref(&text))?[0])
+}
+
+/// 数字宽度按实测像素给出,保证角标/文件名能完整放进胶囊。批量测量:
+/// 所有文本排进同一张画布,每行独立摆放(行距为整数个画布高),一次
+/// 渲染一次扫描得出各自宽度——旧实现每个名字各渲染一遍 512×24 画布。
+/// 行距取整像素保证字形逐位平移,量得宽度与逐次渲染完全一致(单测锁定)。
+fn measure_text_widths(texts: &[&str]) -> Result<Vec<f32>, String> {
     const MEASURE_CANVAS_WIDTH: u32 = 512;
     const MEASURE_CANVAS_HEIGHT: u32 = 24;
+    if texts.is_empty() {
+        return Ok(Vec::new());
+    }
     let content = hex_color(iced::Color::BLACK);
+    let mut rows = String::new();
+    for (index, text) in texts.iter().enumerate() {
+        rows.push_str(&format!(
+            "<text x=\"0\" y=\"{}\" font-family=\"sans-serif\" \
+font-size=\"{SUMMARY_TEXT_SIZE}\" fill=\"{content}\">{escaped}</text>",
+            index as u32 * MEASURE_CANVAS_HEIGHT + SUMMARY_TEXT_BASELINE as u32,
+            escaped = escape_xml_text(text),
+        ));
+    }
+    let canvas_height = texts.len() as u32 * MEASURE_CANVAS_HEIGHT;
     let svg = format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{MEASURE_CANVAS_WIDTH}\" \
-height=\"{MEASURE_CANVAS_HEIGHT}\">\
-<text x=\"0\" y=\"{SUMMARY_TEXT_BASELINE}\" font-family=\"sans-serif\" \
-font-size=\"{SUMMARY_TEXT_SIZE}\" fill=\"{content}\">{escaped}</text></svg>",
-        escaped = escape_xml_text(text),
+height=\"{canvas_height}\">{rows}</svg>"
     );
-    let pixmap = render_svg(&svg, MEASURE_CANVAS_WIDTH, MEASURE_CANVAS_HEIGHT)?;
-    let (_, _, max_x, _) = opaque_bounding_box(&pixmap);
-    Ok(max_x as f32)
+    let pixmap = render_svg(&svg, MEASURE_CANVAS_WIDTH, canvas_height)?;
+    Ok(row_right_edges(&pixmap, MEASURE_CANVAS_HEIGHT))
+}
+
+/// 每行(行高 row_height)不透明像素的最右边界;空行为 0,与旧单文本
+/// 画布整图包围盒的 max_x 同值。
+fn row_right_edges(pixmap: &Pixmap, row_height: u32) -> Vec<f32> {
+    let width = pixmap.width();
+    let mut right_edges = vec![0_u32; pixmap.height() as usize / row_height as usize];
+    for (index, pixel) in pixmap.pixels().iter().enumerate() {
+        if pixel.alpha() == 0 {
+            continue;
+        }
+        let row = index / width as usize / row_height as usize;
+        let right = (index % width as usize) as u32 + 1;
+        right_edges[row] = right_edges[row].max(right);
+    }
+    right_edges.into_iter().map(|edge| edge as f32).collect()
 }
 
 fn color_channel_u8(channel: f32) -> u8 {
@@ -318,23 +385,6 @@ fn font_database() -> Arc<fontdb::Database> {
             Arc::new(database)
         })
         .clone()
-}
-
-fn opaque_bounding_box(pixmap: &Pixmap) -> (u32, u32, u32, u32) {
-    let width = pixmap.width();
-    let (mut min_x, mut min_y, mut max_x, mut max_y) = (u32::MAX, u32::MAX, 0u32, 0u32);
-    for (index, pixel) in pixmap.pixels().iter().enumerate() {
-        if pixel.alpha() == 0 {
-            continue;
-        }
-        let x = (index % width as usize) as u32;
-        let y = (index / width as usize) as u32;
-        min_x = min_x.min(x);
-        min_y = min_y.min(y);
-        max_x = max_x.max(x + 1);
-        max_y = max_y.max(y + 1);
-    }
-    (min_x, min_y, max_x, max_y)
 }
 
 /// 缩略图 PNG 以 data URI 嵌入 SVG,避免 resvg 读取外部文件。
@@ -399,7 +449,96 @@ mod tests {
             symbol,
             label: label.to_owned(),
             offset: iced::Vector::new(x, y),
-            thumbnail_png: None,
+            thumbnail_png_path: None,
+        }
+    }
+
+    /// 旧测量实现的参照:每个文本独立渲染一张 512×24 画布,取整图
+    /// 包围盒右边界。批量测量必须与它逐项一致,位图才会逐字节不变。
+    fn reference_measure_text_width(text: &str) -> f32 {
+        let content = hex_color(iced::Color::BLACK);
+        let svg = format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"512\" height=\"24\">\
+<text x=\"0\" y=\"16\" font-family=\"sans-serif\" font-size=\"12\" \
+fill=\"{content}\">{escaped}</text></svg>",
+            escaped = escape_xml_text(text),
+        );
+        let pixmap = render_svg(&svg, 512, 24).unwrap();
+        let width = pixmap.width();
+        let mut max_x = 0_u32;
+        for (index, pixel) in pixmap.pixels().iter().enumerate() {
+            if pixel.alpha() == 0 {
+                continue;
+            }
+            max_x = max_x.max((index % width as usize) as u32 + 1);
+        }
+        max_x as f32
+    }
+
+    /// 旧截断实现的参照:超宽时逐字符线性推进测量,起点 3 个字符。
+    fn reference_truncate_label_to_width(label: &str, width: f32) -> String {
+        if reference_measure_text_width(label) <= width {
+            return label.to_owned();
+        }
+        let mut candidate: String = label.chars().take(3).collect();
+        for character in label.chars().skip(3) {
+            let next = format!("{candidate}{character}");
+            if reference_measure_text_width(&next) > width {
+                break;
+            }
+            candidate = next;
+        }
+        candidate
+    }
+
+    #[test]
+    fn batch_measurement_matches_per_text_reference() {
+        let corpus: Vec<String> = vec![
+            String::new(),
+            "a.txt".to_owned(),
+            "report-final-2026.pdf".to_owned(),
+            "中文文件名带汉字.txt".to_owned(),
+            "mixed-中英-mixed-name.tar.gz".to_owned(),
+            "巧克力泡泡。、,".to_owned(),
+            "w".repeat(300),
+        ];
+        let references: Vec<&str> = corpus.iter().map(String::as_str).collect();
+
+        let batched = measure_text_widths(&references).unwrap();
+
+        assert_eq!(batched.len(), references.len());
+        for (text, width) in references.iter().zip(&batched) {
+            assert_eq!(
+                *width,
+                reference_measure_text_width(text),
+                "批量测量与逐次渲染宽度不一致:{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn binary_truncation_matches_linear_reference() {
+        let corpus: Vec<String> = vec![
+            "a.txt".to_owned(),
+            "report-final-2026-with-a-very-long-name.pdf".to_owned(),
+            "中文文件名很长需要截断处理的情况.txt".to_owned(),
+            "mixed-中英-mixed-name-needs-truncation.tar.gz".to_owned(),
+            "ab".to_owned(),
+            "abc".to_owned(),
+            "abcd".to_owned(),
+            "e".repeat(60),
+        ];
+        let targets = [PILL_LABEL_MAX_WIDTH, 80.0, 40.0, 12.0, 0.0];
+        for label in &corpus {
+            let measured = measure_text_width(label).unwrap();
+            for target in targets {
+                let binary = truncate_label_to_width(label, measured, target).unwrap();
+                let linear = reference_truncate_label_to_width(label, target);
+                assert_eq!(
+                    binary, linear,
+                    "二分截断与线性参照不一致:{label:?} @ {target}"
+                );
+            }
         }
     }
 

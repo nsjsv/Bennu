@@ -623,6 +623,7 @@ mod tests {
             column_directories_snapshot: Vec::new(),
             press_origin: iced::Point::ORIGIN,
             preview_entries: Vec::new(),
+            wayland_drag_icon: None,
         });
 
         drop(browser.update(Message::KeyboardModifiersChanged(ctrl_shift_modifiers())));

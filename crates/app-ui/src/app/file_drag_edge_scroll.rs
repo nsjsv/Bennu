@@ -202,6 +202,7 @@ mod tests {
             column_directories_snapshot: Vec::new(),
             press_origin: iced::Point::ORIGIN,
             preview_entries: Vec::new(),
+            wayland_drag_icon: None,
         });
 
         browser.update_file_drag_edge_scroll(Point::new(
@@ -244,6 +245,7 @@ mod tests {
             column_directories_snapshot: Vec::new(),
             press_origin: iced::Point::ORIGIN,
             preview_entries: Vec::new(),
+            wayland_drag_icon: None,
         });
 
         browser.update_file_drag_edge_scroll(Point::new(

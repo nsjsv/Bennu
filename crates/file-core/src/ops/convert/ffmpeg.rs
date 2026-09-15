@@ -398,7 +398,7 @@ async fn encode_image_towards_target(
             break;
         }
         let mid = low + (high - low) / 2;
-        let parameter = upper_bound_parameter.from_scalar(mid);
+        let parameter = upper_bound_parameter.with_scalar(mid);
         let bytes = run_image_encode_to_probe(
             request,
             output,

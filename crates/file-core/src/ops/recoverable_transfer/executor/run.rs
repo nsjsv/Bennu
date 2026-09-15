@@ -1,9 +1,14 @@
+use std::path::Path;
+
 use super::super::{
     RecoverableTransferError, RecoverableTransferOutcome, TransferCheckpoint, TransferJournal,
     TransferJournalRecord,
 };
 use super::recovery::{cancel_recoverable_transfer, fail_recoverable_transfer};
-use super::{advance_recoverable_transfer, checkpoint_requires_forward_recovery, TransferAdvance};
+use super::{
+    advance_recoverable_transfer, checkpoint_requires_forward_recovery, ProofContext,
+    TransferAdvance,
+};
 use crate::{FileError, FileTransferOptions};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -98,7 +103,8 @@ pub async fn settle_failed_recoverable_transfer<J: TransferJournal>(
         | TransferCheckpoint::Failed { .. }
         | TransferCheckpoint::Skipped => Ok(record),
         _ => {
-            fail_recoverable_transfer(&mut record, journal, diagnostic).await?;
+            let proof = ProofContext::blank_proof();
+            fail_recoverable_transfer(&mut record, journal, diagnostic, &proof).await?;
             Ok(record)
         }
     }
@@ -107,9 +113,45 @@ pub async fn settle_failed_recoverable_transfer<J: TransferJournal>(
 async fn run_recoverable_transfer_to_boundary<J: TransferJournal>(
     mut record: TransferJournalRecord,
     journal: &J,
-    transfer_options: FileTransferOptions,
+    mut transfer_options: FileTransferOptions,
     boundary: TransferRunBoundary,
 ) -> Result<TransferRunStop, RecoverableTransferError> {
+    // Basic 校验默认携带运行内证明记忆:一次前向运行内每对象至多全文哈希
+    // 一次,崩溃重启后 memo 随运行重建,恢复路径仍全文重验。调用方已附加的
+    // memo(跨记录共享)原样保留。
+    if record.request.verification == crate::ops::FileOperationVerification::BasicMetadata
+        && transfer_options.proof_memo.is_none()
+    {
+        transfer_options.proof_memo = Some(crate::ops::recoverable_transfer::ProofMemo::shared());
+    }
+    if transfer_options.strategy_engine.is_none() {
+        // 引擎探测需要源与目标父目录的设备号;任一侧拿不到就保持 None,
+        // 搬运退回历史路径,不阻塞传输。
+        let source_device = tokio::fs::symlink_metadata(&record.request.source)
+            .await
+            .ok()
+            .map(|metadata| {
+                std::os::unix::fs::MetadataExt::dev(&metadata)
+            });
+        let target_parent = record
+            .request
+            .requested_target
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| record.request.requested_target.clone());
+        let parent_probe = tokio::fs::symlink_metadata(&target_parent).await.ok();
+        if let (Some(source_device), Some(parent_metadata)) = (source_device, parent_probe) {
+            let target_device = std::os::unix::fs::MetadataExt::dev(&parent_metadata);
+            transfer_options.strategy_engine = Some(std::sync::Arc::new(
+                crate::ops::transfer_strategy::TransferStrategyEngine::probe(
+                    source_device,
+                    target_device,
+                    &target_parent,
+                ),
+            ));
+        }
+    }
+
     loop {
         if boundary == TransferRunBoundary::DirectMoveIntent {
             match record.checkpoint {
@@ -121,7 +163,9 @@ async fn run_recoverable_transfer_to_boundary<J: TransferJournal>(
             }
         }
 
-        match advance_recoverable_transfer(&mut record, journal, &transfer_options).await {
+        let advance_result =
+            advance_recoverable_transfer(&mut record, journal, &transfer_options).await;
+        match advance_result {
             Ok(TransferAdvance::Continue) => {}
             Ok(TransferAdvance::Complete(outcome)) => {
                 return Ok(TransferRunStop::Completed(outcome));
@@ -138,8 +182,12 @@ async fn run_recoverable_transfer_to_boundary<J: TransferJournal>(
                 ) =>
             {
                 if !matches!(record.checkpoint, TransferCheckpoint::Canceled { .. }) {
+                    let proof = ProofContext::new(
+                        record.request.verification,
+                        transfer_options.proof_memo.clone(),
+                    );
                     if let Err(cancel_error) =
-                        cancel_recoverable_transfer(&mut record, journal).await
+                        cancel_recoverable_transfer(&mut record, journal, &proof).await
                     {
                         return match cancel_error {
                             RecoverableTransferError::Journal { .. } => Err(cancel_error),
@@ -176,8 +224,13 @@ async fn run_recoverable_transfer_to_boundary<J: TransferJournal>(
             }
             Err(error) => {
                 let diagnostic = error.to_string();
+                let proof = ProofContext::new(
+                    record.request.verification,
+                    transfer_options.proof_memo.clone(),
+                );
                 if let Err(cleanup_error) =
-                    fail_recoverable_transfer(&mut record, journal, diagnostic.clone()).await
+                    fail_recoverable_transfer(&mut record, journal, diagnostic.clone(), &proof)
+                        .await
                 {
                     return match cleanup_error {
                         RecoverableTransferError::Journal { .. } => Err(cleanup_error),

@@ -2,7 +2,7 @@ use super::super::{
     BackupCreationTransfer, CommitPayload, CommitTransfer, PreparedTransfer,
     RecoverableTransferError, RecoverableTransferOperation, RenamedDirectMove, SourceDisposition,
     StagedSourceLocation, StagingTransfer, TransferCheckpoint, TransferExecutionKind,
-    TransferJournalRecord,
+    TransferFingerprint, TransferJournalRecord,
 };
 use super::direct_move::renamed_target_matches_source;
 
@@ -220,7 +220,13 @@ fn validate_commit(
     };
     let strong_payload_matches = record.request.verification
         != crate::FileOperationVerification::Strong
-        || commit.prepared.source_fingerprint == Some(commit.fingerprint);
+        || match &commit.fingerprint {
+            TransferFingerprint::Blake3(fingerprint) => {
+                commit.prepared.source_fingerprint.as_ref() == Some(fingerprint)
+            }
+            // Strong 校验不允许克隆证明
+            TransferFingerprint::KernelClone { .. } => false,
+        };
     let replacement_proof_matches = if record.replacement_manifest.is_some() {
         commit.prepared.expected_target_fingerprint.is_some()
             && (commit.backup_identity.is_some()

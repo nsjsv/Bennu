@@ -770,7 +770,7 @@ async fn basic_copy_and_same_filesystem_move_build_complete_post_side_effect_pro
                     fingerprint_object(&artifact.plan.payload_path())
                         .await
                         .unwrap(),
-                    commit.fingerprint
+                    commit.fingerprint.as_blake3().expect("basic copy keeps a blake3 proof")
                 );
                 assert!(source.exists());
                 assert!(!target.exists());
@@ -807,7 +807,10 @@ async fn basic_copy_and_same_filesystem_move_build_complete_post_side_effect_pro
                 };
                 assert_eq!(
                     fingerprint_object(&target).await.unwrap(),
-                    committed.fingerprint
+                    committed
+                        .fingerprint
+                        .as_blake3()
+                        .expect("direct move keeps a blake3 proof")
                 );
             }
         }
@@ -818,6 +821,7 @@ mod batch_cases;
 mod conflict_cases;
 mod direct_move_cases;
 mod invalid_checkpoint_cases;
+mod kernel_clone_cases;
 mod merge_and_control_cases;
 mod payload_integrity_cases;
 mod recovery_cases;

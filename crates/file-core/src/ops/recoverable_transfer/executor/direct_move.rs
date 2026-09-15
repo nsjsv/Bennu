@@ -3,10 +3,10 @@ use super::{
     path_exists, persist_checkpoint, sync_rename_parents, target_parent, wait_until_running,
 };
 use crate::ops::recoverable_transfer::{
-    fingerprint_object, inspect_file_identity, plan_owned_artifact, rename_noreplace,
+    inspect_file_identity, plan_owned_artifact, rename_noreplace,
     CommittedTransfer, NoReplaceRenameError, OwnedArtifactKind, PreparedTransfer,
     RecoverableTransferError, RenamedDirectMove, SourceDisposition, TransferCheckpoint,
-    TransferExecutionKind, TransferJournal, TransferJournalRecord,
+    TransferExecutionKind, TransferJournal, TransferJournalRecord, ProofContext, TransferFingerprint,
 };
 use crate::transfer_conflict::available_transfer_target_path_candidate;
 use crate::{FileTransferOptions, TransferConflictStrategy};
@@ -180,6 +180,7 @@ pub(super) async fn advance_direct_move_renamed<J: TransferJournal>(
     record: &mut TransferJournalRecord,
     journal: &J,
     renamed: RenamedDirectMove,
+    proof: &ProofContext,
 ) -> Result<(), RecoverableTransferError> {
     let identity_before = inspect_file_identity(&renamed.prepared.resolved_target).await?;
     if identity_before != renamed.target_identity {
@@ -187,7 +188,9 @@ pub(super) async fn advance_direct_move_renamed<J: TransferJournal>(
             path: renamed.prepared.resolved_target,
         });
     }
-    let fingerprint = fingerprint_object(&renamed.prepared.resolved_target).await?;
+    let fingerprint = TransferFingerprint::Blake3(
+        proof.fingerprint_object(&renamed.prepared.resolved_target).await?,
+    );
     let identity_after = inspect_file_identity(&renamed.prepared.resolved_target).await?;
     if identity_after != identity_before {
         return Err(RecoverableTransferError::TargetConflict {

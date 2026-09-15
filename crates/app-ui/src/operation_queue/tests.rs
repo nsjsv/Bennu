@@ -265,7 +265,9 @@ fn completed_checkpoint(path: &std::path::Path) -> TransferCheckpoint {
             changed_nanoseconds: 7,
             symbolic_link_target: None,
         },
-        fingerprint: file_core::ObjectFingerprint([8; 32]),
+        fingerprint: file_core::ops::TransferFingerprint::Blake3(file_core::ObjectFingerprint(
+            [8; 32],
+        )),
     })
 }
 

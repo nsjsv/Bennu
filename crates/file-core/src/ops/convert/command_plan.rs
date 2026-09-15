@@ -37,7 +37,7 @@ impl ImageEncodingParameter {
     }
 
     /// 二分中点换算成具体参数。
-    pub(super) fn from_scalar(self, value: u32) -> Self {
+    pub(super) fn with_scalar(self, value: u32) -> Self {
         match self {
             Self::EncoderQuality(_) => Self::EncoderQuality(value.clamp(0, 100) as u8),
             Self::AvifCrf(_) => Self::AvifCrf(value.min(63)),
@@ -401,7 +401,7 @@ pub(super) fn scale_expression(resize: ResizeSpec) -> Option<String> {
         ResizeSpec::Keep => None,
         ResizeSpec::Percent(percent) => Some(format!("scale=trunc(iw*{percent}/100/2)*2:-2")),
         ResizeSpec::Width(width) => {
-            let even_width = ((width + 1) / 2 * 2).max(2);
+            let even_width = (width.div_ceil(2) * 2).max(2);
             Some(format!("scale={even_width}:-2"))
         }
     }

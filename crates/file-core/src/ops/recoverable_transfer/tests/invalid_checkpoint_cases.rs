@@ -70,7 +70,7 @@ async fn copy_cannot_execute_move_direct_from_corrupted_checkpoint() {
         payload: CommitPayload::DirectSource {
             identity: source_identity,
         },
-        fingerprint: source_fingerprint,
+        fingerprint: TransferFingerprint::Blake3(source_fingerprint),
         backup_identity: None,
     });
     journal

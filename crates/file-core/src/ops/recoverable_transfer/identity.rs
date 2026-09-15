@@ -39,6 +39,23 @@ impl FileIdentity {
             && self.object_kind == other.object_kind
     }
 
+    /// 运行内证明记忆的键:device/inode/size/mtime/ctime 全量身份事实。
+    /// 键含 ctime 是因为 ctime 无法被普通用户进程改写——内容被篡改必然
+    /// 更新 ctime,使 memo 失配并触发重新全文校验。
+    pub fn proof_memo_key(
+        &self,
+    ) -> crate::ops::recoverable_transfer::proof_memo::ProofMemoKey {
+        (
+            self.device,
+            self.inode,
+            self.size,
+            self.modified_seconds,
+            self.modified_nanoseconds,
+            self.changed_seconds,
+            self.changed_nanoseconds,
+        )
+    }
+
     /// 判断副本身份是否仍对应源快照:kind/size/符号链接精确相等,
     /// mtime 按 2 秒桶量化后相等(见 STAGING_MTIME_GRANULARITY_SECONDS)。
     pub fn matches_staging_snapshot(&self, snapshot: &Self) -> bool {

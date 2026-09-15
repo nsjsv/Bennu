@@ -10,6 +10,8 @@ mod fingerprint;
 mod identity;
 mod manifest;
 mod path_codec;
+mod proof;
+mod proof_memo;
 mod protocol;
 mod rename;
 
@@ -25,11 +27,12 @@ pub use artifacts::{
 };
 pub(crate) use durability::{sync_parent_blocking, sync_tree_blocking};
 pub use executor::{
-    is_direct_move_segment_candidate, persist_recoverable_source_manifest,
+    advance_recoverable_transfer, is_direct_move_segment_candidate,
+    persist_recoverable_source_manifest,
     persist_recoverable_source_manifest_with_controls, prepare_direct_move_intent_segment,
     run_direct_move_batch_to_durable_renamed, run_recoverable_transfer,
     run_recoverable_transfer_to_direct_move_intent, settle_failed_recoverable_transfer,
-    DirectMoveBatchRecord, DirectMoveIntentBatchRecord, DirectMoveIntentBoundary,
+    DirectMoveBatchRecord, DirectMoveIntentBatchRecord, DirectMoveIntentBoundary, TransferAdvance,
 };
 pub use fingerprint::ObjectFingerprint;
 pub(crate) use fingerprint::{fingerprint_object, fingerprint_object_with_controls};
@@ -42,6 +45,9 @@ pub(crate) use manifest::{
     verify_source_manifest_with_controls,
 };
 pub use manifest::{SourceManifest, SourceManifestEntry};
+pub(crate) use proof::ProofContext;
+pub use proof::TransferFingerprint;
+pub(crate) use proof_memo::{SharedProofMemo, ProofMemo};
 pub use protocol::{
     BackupCreationTransfer, CommitPayload, CommitTransfer, CommittedTransfer, CompletedTarget,
     ManifestCheckpointBatchUpdate, MergeChildCompletion, MergeChildOutcome, MergeTransfer,

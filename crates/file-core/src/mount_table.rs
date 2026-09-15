@@ -140,6 +140,7 @@ fn path_bytes(path: &Path) -> Vec<u8> {
 mod tests {
     use super::*;
 
+    #[test]
     fn parser_preserves_bytes_order_and_distinct_mounts() {
         let snapshot = parse_mount_table(
             b"1 0 8:1 / / rw - ext4 /dev/root rw\n\

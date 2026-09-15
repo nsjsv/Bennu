@@ -24,7 +24,8 @@ pub use convert::{
 };
 pub(crate) use recoverable_transfer::rename_noreplace;
 pub use recoverable_transfer::{
-    is_direct_move_segment_candidate, persist_recoverable_source_manifest,
+    advance_recoverable_transfer, is_direct_move_segment_candidate,
+    persist_recoverable_source_manifest,
     persist_recoverable_source_manifest_with_controls, prepare_direct_move_intent_segment,
     run_direct_move_batch_to_durable_renamed, run_recoverable_transfer,
     run_recoverable_transfer_to_direct_move_intent, settle_failed_recoverable_transfer,
@@ -37,11 +38,14 @@ pub use recoverable_transfer::{
     RecoverableTransferOutcome, RecoverableTransferRequest, RenamedDirectMove, RetiredSource,
     SourceDisposition, SourceManifest, SourceManifestEntry, SourceRetirementPlan,
     StagedSourceLocation, StagingTransfer, TransferCheckpoint, TransferCheckpointSwap,
-    TransferExecutionKind, TransferFailureIntent, TransferJournal, TransferJournalError,
-    TransferJournalFuture, TransferJournalMutation, TransferJournalRecord, TransferWorkKey,
+    TransferAdvance, TransferExecutionKind, TransferFailureIntent, TransferFingerprint,
+    TransferJournal,
+    TransferJournalError, TransferJournalFuture, TransferJournalMutation, TransferJournalRecord,
+    TransferWorkKey,
 };
 mod transfer_metadata;
 mod transfer_object;
+mod transfer_strategy;
 pub use batch_rename::{batch_rename_paths, BatchRenameItem, CompletedBatchRename};
 use copy::copy_path_with_inspected_source;
 pub use copy::{
@@ -49,6 +53,10 @@ pub use copy::{
     FileOperationVerification, FileTransferOptions, ProgressSender, TransferConflictStrategy,
 };
 use transfer_object::{inspect_transfer_source, TransferSourceKind, TransferSourceObject};
+pub use transfer_strategy::{
+    copy_regular_file_payload, ficlone_supported, PayloadCopyOutcome, PayloadCopyStrategy,
+    RegularFilePayloadCopy, TransferStrategyEngine,
+};
 
 pub async fn rename_path(
     path: impl AsRef<Path>,

@@ -5,7 +5,7 @@ use std::pin::Pin;
 use super::super::copy::{FileOperationVerification, TransferConflictStrategy};
 use super::{
     ArtifactOwner, FileIdentity, ObjectFingerprint, OwnedArtifact, OwnedArtifactPlan,
-    SourceManifest, SourceManifestEntry,
+    SourceManifest, SourceManifestEntry, TransferFingerprint,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -94,7 +94,7 @@ pub enum CommitPayload {
 pub struct CommitTransfer {
     pub prepared: PreparedTransfer,
     pub payload: CommitPayload,
-    pub fingerprint: ObjectFingerprint,
+    pub fingerprint: TransferFingerprint,
     #[serde(default)]
     pub backup_identity: Option<FileIdentity>,
 }
@@ -125,7 +125,7 @@ pub struct CommittedTransfer {
     #[serde(with = "super::path_codec")]
     pub final_target: PathBuf,
     pub target_identity: FileIdentity,
-    pub fingerprint: ObjectFingerprint,
+    pub fingerprint: TransferFingerprint,
     pub artifact: Option<OwnedArtifact>,
     pub source_disposition: SourceDisposition,
     #[serde(default)]
@@ -209,7 +209,7 @@ pub struct CompletedTarget {
     #[serde(with = "super::path_codec")]
     pub path: PathBuf,
     pub identity: FileIdentity,
-    pub fingerprint: ObjectFingerprint,
+    pub fingerprint: TransferFingerprint,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

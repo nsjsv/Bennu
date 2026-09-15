@@ -8,18 +8,23 @@ use super::super::copy::{
     copy_path_with_inspected_source, FileOperationControls, FileTransferOptions,
     TransferConflictStrategy,
 };
+use super::super::transfer_strategy::copy_regular_file_payload;
+use super::super::transfer_strategy::RegularFilePayloadCopy;
 use super::super::ensure_replace_target_does_not_contain_source_path;
+use super::super::transfer_metadata::apply_transfer_metadata_best_effort;
 use super::super::transfer_object::inspect_transfer_source;
 use super::{
     build_source_manifest_with_controls, fingerprint_object_with_controls, inspect_file_identity,
     plan_owned_artifact, recover_owned_artifact, remove_owned_artifact, rename_noreplace,
     sync_parent_blocking, sync_tree_blocking, verify_source_manifest_with_controls,
-    BackupCreationTransfer, CommitPayload, CommitTransfer, FileIdentity, FileObjectKind,
-    ManifestCheckpointBatchUpdate, NoReplaceRenameError, OwnedArtifact, OwnedArtifactKind,
-    PreparedTransfer, RecoverableTransferError, RecoverableTransferOperation,
-    RecoverableTransferOutcome, SourceManifest, StagedSourceLocation, StagingTransfer,
-    TransferCheckpoint, TransferExecutionKind, TransferJournal, TransferJournalError,
-    TransferJournalMutation, TransferJournalRecord,
+    BackupCreationTransfer,
+    CommitPayload, CommitTransfer, FileIdentity, FileObjectKind,
+    ManifestCheckpointBatchUpdate, NoReplaceRenameError, OwnedArtifact,
+    OwnedArtifactKind, PreparedTransfer, ProofContext, RecoverableTransferError,
+    RecoverableTransferOperation, RecoverableTransferOutcome, SourceManifest,
+    StagedSourceLocation, StagingTransfer, TransferCheckpoint, TransferExecutionKind,
+    TransferFingerprint, TransferJournal, TransferJournalError, TransferJournalMutation,
+    TransferJournalRecord,
 };
 use crate::transfer_conflict::{
     available_transfer_target_path_candidate, transfer_target_metadata_if_exists,
@@ -31,6 +36,8 @@ mod direct_move;
 mod merge;
 mod recovery;
 mod run;
+#[cfg(unix)]
+mod staging_parallel;
 mod validation;
 
 pub use batch::{run_direct_move_batch_to_durable_renamed, DirectMoveBatchRecord};
@@ -91,6 +98,7 @@ pub async fn advance_recoverable_transfer<J: TransferJournal>(
     journal: &J,
     transfer_options: &FileTransferOptions,
 ) -> Result<TransferAdvance, RecoverableTransferError> {
+    let proof = ProofContext::new(record.request.verification, transfer_options.proof_memo.clone());
     let checkpoint = record.checkpoint.clone();
     validate_checkpoint_semantics(record, &checkpoint)?;
     if checkpoint_accepts_controls(&checkpoint) {
@@ -123,7 +131,7 @@ pub async fn advance_recoverable_transfer<J: TransferJournal>(
             Ok(TransferAdvance::Continue)
         }
         TransferCheckpoint::Staging(staging) => {
-            stage_transfer(record, journal, transfer_options, staging).await?;
+            stage_transfer(record, journal, transfer_options, staging, &proof).await?;
             Ok(TransferAdvance::Continue)
         }
         TransferCheckpoint::DirectMoveIntent(prepared) => {
@@ -131,46 +139,46 @@ pub async fn advance_recoverable_transfer<J: TransferJournal>(
             Ok(TransferAdvance::Continue)
         }
         TransferCheckpoint::DirectMoveRenamed(renamed) => {
-            advance_direct_move_renamed(record, journal, renamed).await?;
+            advance_direct_move_renamed(record, journal, renamed, &proof).await?;
             Ok(TransferAdvance::Continue)
         }
         TransferCheckpoint::BackupCreationIntent(backup) => {
-            create_replace_backup(record, journal, backup).await?;
+            create_replace_backup(record, journal, backup, &proof).await?;
             Ok(TransferAdvance::Continue)
         }
         TransferCheckpoint::CommitIntent(commit) => {
             if path_exists(&commit_payload_path(record, &commit)).await? {
                 wait_until_running(transfer_options).await?;
             }
-            commit_transfer(record, journal, commit).await?;
+            commit_transfer(record, journal, commit, &proof).await?;
             Ok(TransferAdvance::Continue)
         }
         TransferCheckpoint::TargetCommitted(committed) => {
-            advance_committed_transfer(record, journal, committed).await?;
+            advance_committed_transfer(record, journal, committed, &proof).await?;
             Ok(TransferAdvance::Continue)
         }
         TransferCheckpoint::SourceRetirementIntent(retirement) => {
-            retire_source(record, journal, *retirement).await?;
+            retire_source(record, journal, *retirement, &proof).await?;
             Ok(TransferAdvance::Continue)
         }
         TransferCheckpoint::SourceRetired(retired) => {
-            advance_retired_source(record, journal, *retired).await?;
+            advance_retired_source(record, journal, *retired, &proof).await?;
             Ok(TransferAdvance::Continue)
         }
         TransferCheckpoint::Completed(completed) => {
-            verify_completed_target(&completed).await?;
+            verify_completed_target(&completed, &proof).await?;
             Ok(TransferAdvance::Complete(RecoverableTransferOutcome {
                 source: record.request.source.clone(),
                 final_target: Some(completed.path),
             }))
         }
         TransferCheckpoint::CancelIntent(previous) => {
-            finish_cancel(record, journal, *previous).await?;
+            finish_cancel(record, journal, *previous, &proof).await?;
             Ok(TransferAdvance::Continue)
         }
         TransferCheckpoint::Canceled { .. } => Err(crate::FileError::Cancelled.into()),
         TransferCheckpoint::FailureIntent(failure) => {
-            finish_failure(record, journal, failure).await?;
+            finish_failure(record, journal, failure, &proof).await?;
             Ok(TransferAdvance::Continue)
         }
         TransferCheckpoint::Failed { diagnostic, .. } => {
@@ -189,6 +197,10 @@ async fn prepare_transfer<J: TransferJournal>(
     transfer_options: &FileTransferOptions,
 ) -> Result<(), RecoverableTransferError> {
     let mut controls = transfer_options.controls.clone();
+    // 红线修订三:manifest 从 journal 恢复(进程曾经中断)必须全文重验;
+    // 本进程刚构建的 manifest 距构建仅一个 journal 边界、期间无任何副作用,
+    // 同 tick 重扫是纯重复——源稳定性由开工前复核与完工后夹心保证。
+    let manifest_was_persisted = record.manifest.is_some();
     let manifest = match &record.manifest {
         Some(manifest) => manifest.clone(),
         None => build_source_manifest_with_controls(&record.request.source, &mut controls).await?,
@@ -199,7 +211,9 @@ async fn prepare_transfer<J: TransferJournal>(
             Some(fingerprint_object_with_controls(&record.request.source, &controls).await?)
         }
     };
-    verify_source_manifest_with_controls(&manifest, &mut controls).await?;
+    if manifest_was_persisted {
+        verify_source_manifest_with_controls(&manifest, &mut controls).await?;
+    }
     let source_identity = manifest_root_identity(&manifest)?.clone();
     let requested_target_identity =
         inspect_optional_identity(&record.request.requested_target).await?;
@@ -354,11 +368,14 @@ async fn prepare_transfer<J: TransferJournal>(
                 payload: CommitPayload::DirectSource {
                     identity: prepared.source_identity.clone(),
                 },
-                fingerprint: prepared.source_fingerprint.ok_or_else(|| {
-                    RecoverableTransferError::InvalidCheckpoint {
-                        message: "direct move has no preflight content fingerprint".to_owned(),
-                    }
-                })?,
+                fingerprint: TransferFingerprint::Blake3(
+                    prepared.source_fingerprint.ok_or_else(|| {
+                        RecoverableTransferError::InvalidCheckpoint {
+                            message: "direct move has no preflight content fingerprint"
+                                .to_owned(),
+                        }
+                    })?,
+                ),
                 backup_identity: None,
             })
         }
@@ -571,12 +588,17 @@ async fn stage_transfer<J: TransferJournal>(
     journal: &J,
     transfer_options: &FileTransferOptions,
     staging: StagingTransfer,
+    proof: &ProofContext,
 ) -> Result<(), RecoverableTransferError> {
     super::validate_owned_artifact(&staging.artifact).await?;
     let payload_path = staging.artifact.plan.payload_path();
     let source_exists = path_exists(&record.request.source).await?;
     let payload_exists = path_exists(&payload_path).await?;
 
+    let kernel_clone_staging = !payload_exists
+        && kernel_clone_staging_candidate(record, &staging)
+        && transfer_options.strategy_engine.is_some();
+    let mut kernel_clone_used = false;
     let source_location = if payload_exists {
         let payload_identity = inspect_file_identity(&payload_path).await?;
         if staging.prepared.execution == TransferExecutionKind::MoveToStage
@@ -613,6 +635,43 @@ async fn stage_transfer<J: TransferJournal>(
         verify_prepared_source_with_controls(record, &staging.prepared, &transfer_options.controls)
             .await?;
         match staging.prepared.execution {
+            TransferExecutionKind::CopyToStage if kernel_clone_staging => {
+                // Basic 单文件同盘复制:优先 FICLONE 原子克隆直达 payload。
+                // 只有策略确实命中克隆时才允许 KernelClone 证明;阶梯降级
+                // (内核快拷/用户态循环)都是真实数据搬运,必须回退全文哈希。
+                let mut controls = transfer_options.controls.clone();
+                let engine = transfer_options
+                    .strategy_engine
+                    .as_ref()
+                    .expect("clone candidacy requires an engine");
+                let payload_outcome = copy_regular_file_payload(RegularFilePayloadCopy {
+                    source: &record.request.source,
+                    target: &payload_path,
+                    source_device: staging.prepared.source_identity.device,
+                    bytes_total: staging.prepared.source_identity.size,
+                    engine,
+                    controls: &mut controls,
+                    progress: transfer_options.progress.as_ref(),
+                    source_hasher: None,
+                })
+                .await
+                .map_err(|error_source| {
+                    RecoverableTransferError::FileOperation(error_source)
+                })?;
+                kernel_clone_used = payload_outcome.strategy
+                    == crate::ops::transfer_strategy::PayloadCopyStrategy::KernelClone;
+                // 快照比对按源 mtime(2 秒桶)校验,FICLONE 只克隆数据块,
+                // payload 的时间戳仍是克隆时刻——必须像普通路径一样在提交
+                // 前恢复源元数据,保真与快照校验都依赖它。
+                let clone_source = inspect_transfer_source(&record.request.source).await?;
+                apply_transfer_metadata_best_effort(
+                    &record.request.source,
+                    &payload_path,
+                    &clone_source,
+                )
+                .await;
+                StagedSourceLocation::OriginalPath
+            }
             TransferExecutionKind::CopyToStage => {
                 copy_to_payload(record, transfer_options, &payload_path).await?;
                 StagedSourceLocation::OriginalPath
@@ -648,16 +707,33 @@ async fn stage_transfer<J: TransferJournal>(
     }
     sync_tree(&payload_path).await?;
     let payload_identity = inspect_file_identity(&payload_path).await?;
-    let payload_fingerprint =
-        fingerprint_object_with_controls(&payload_path, &transfer_options.controls).await?;
+    // 克隆 staging 的证明 = 内核原子克隆 + 此处 payload 身份与后续夹心;
+    // 其余路径按"身份→哈希→身份"夹心产出 Blake3 证明(Basic 走运行内 memo)。
+    let payload_fingerprint = if kernel_clone_used {
+        TransferFingerprint::KernelClone {
+            payload_identity: payload_identity.clone(),
+        }
+    } else {
+        let fingerprint =
+            proof.fingerprint_object_with_controls(&payload_path, &transfer_options.controls)
+                .await?;
+        TransferFingerprint::Blake3(fingerprint)
+    };
     if inspect_file_identity(&payload_path).await? != payload_identity {
         return Err(RecoverableTransferError::SourceChanged { path: payload_path });
     }
-    if let Some(expected_fingerprint) = staging.prepared.source_fingerprint {
-        if payload_fingerprint != expected_fingerprint {
+    match (&payload_fingerprint, staging.prepared.source_fingerprint) {
+        (TransferFingerprint::Blake3(fingerprint), Some(expected_fingerprint)) => {
+            if fingerprint != &expected_fingerprint {
+                return Err(RecoverableTransferError::FingerprintMismatch { path: payload_path });
+            }
+        }
+        (TransferFingerprint::KernelClone { .. }, Some(_)) => {
             return Err(RecoverableTransferError::FingerprintMismatch { path: payload_path });
         }
-    } else if !payload_identity.matches_staging_snapshot(&staging.prepared.source_identity) {
+        _ => {}
+    }
+    if !payload_identity.matches_staging_snapshot(&staging.prepared.source_identity) {
         return Err(RecoverableTransferError::SourceChanged { path: payload_path });
     }
     let payload = CommitPayload::Artifact {
@@ -666,10 +742,16 @@ async fn stage_transfer<J: TransferJournal>(
         source_location,
     };
     let checkpoint = if staging.prepared.expected_target_identity.is_some() {
+        // Replace 备份证明永远要求全文哈希;克隆 staging 不进入该分支
+        // (候选条件已排除 Replace),此处还原 Blake3 即可。
         TransferCheckpoint::BackupCreationIntent(BackupCreationTransfer {
             prepared: staging.prepared,
             payload,
-            fingerprint: payload_fingerprint,
+            fingerprint: payload_fingerprint.as_blake3().ok_or_else(|| {
+                RecoverableTransferError::InvalidCheckpoint {
+                    message: "replace staging produced a non-content fingerprint".to_owned(),
+                }
+            })?,
         })
     } else {
         TransferCheckpoint::CommitIntent(CommitTransfer {
@@ -682,12 +764,46 @@ async fn stage_transfer<J: TransferJournal>(
     persist_checkpoint(record, journal, checkpoint).await
 }
 
+/// KernelClone staging 的候选条件:Basic 校验、顶层普通文件、Copy 且无
+/// Replace 备份。目录树、Merge、Move、Strong、Replace 一律走原路径。
+fn kernel_clone_staging_candidate(
+    record: &TransferJournalRecord,
+    staging: &StagingTransfer,
+) -> bool {
+    staging.prepared.execution == TransferExecutionKind::CopyToStage
+        && record.request.operation == RecoverableTransferOperation::Copy
+        && record.request.verification == crate::ops::FileOperationVerification::BasicMetadata
+        && staging.prepared.expected_target_identity.is_none()
+        && staging.prepared.source_identity.object_kind == FileObjectKind::RegularFile
+        && staging.prepared.source_fingerprint.is_none()
+}
+
 async fn copy_to_payload(
     record: &TransferJournalRecord,
     transfer_options: &FileTransferOptions,
     payload_path: &Path,
 ) -> Result<(), RecoverableTransferError> {
     let source_object = inspect_transfer_source(&record.request.source).await?;
+
+    // 目录树且有引擎:并行 staging(两阶段);其余保持原串行路径。
+    #[cfg(unix)]
+    if matches!(
+        source_object.kind,
+        crate::ops::TransferSourceKind::Directory
+    ) {
+        if let Some(engine) = transfer_options.strategy_engine.as_ref() {
+            staging_parallel::copy_tree_to_payload_parallel(
+                &record.request.source,
+                payload_path,
+                engine,
+                &transfer_options.controls,
+                transfer_options.progress.as_ref(),
+            )
+            .await?;
+            return Ok(());
+        }
+    }
+
     let options = FileTransferOptions::new(transfer_options.controls.clone())
         .with_optional_progress(transfer_options.progress.clone())
         .with_conflict_strategy(TransferConflictStrategy::Fail)

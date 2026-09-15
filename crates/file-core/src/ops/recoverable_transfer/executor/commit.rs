@@ -9,15 +9,15 @@ use super::{
     target_parent,
 };
 use crate::ops::recoverable_transfer::{
-    fingerprint_object, fingerprint_object_with_controls, inspect_file_identity,
-    plan_owned_artifact, recover_owned_artifact, remove_empty_owned_artifact, rename_noreplace,
-    validate_owned_artifact, verify_source_manifest_with_controls, BackupCreationTransfer,
-    CommitPayload, CommitTransfer, CommittedTransfer, CompletedTarget, FileIdentity,
-    FileObjectKind, NoReplaceRenameError, OwnedArtifact, OwnedArtifactKind,
-    OwnedTreeEntryDeletionIntent, PreparedTransfer, RecoverableTransferError,
-    RecoverableTransferOperation, RetiredSource, SourceDisposition, SourceManifestEntry,
-    SourceRetirementPlan, StagedSourceLocation, TransferCheckpoint, TransferExecutionKind,
-    TransferJournal, TransferJournalRecord,
+    fingerprint_object_with_controls, inspect_file_identity, plan_owned_artifact,
+    recover_owned_artifact, remove_empty_owned_artifact, rename_noreplace, validate_owned_artifact,
+    verify_source_manifest_with_controls, BackupCreationTransfer, CommitPayload, CommitTransfer,
+    CommittedTransfer, CompletedTarget, FileIdentity, FileObjectKind, NoReplaceRenameError,
+    OwnedArtifact, OwnedArtifactKind, OwnedTreeEntryDeletionIntent, PreparedTransfer,
+    ProofContext, RecoverableTransferError, RecoverableTransferOperation, RetiredSource,
+    SourceDisposition, SourceManifestEntry, SourceRetirementPlan, StagedSourceLocation,
+    TransferCheckpoint, TransferExecutionKind, TransferFingerprint, TransferJournal,
+    TransferJournalRecord,
 };
 use crate::ops::FileOperationControls;
 use crate::transfer_conflict::available_transfer_target_path_candidate;
@@ -26,6 +26,7 @@ pub(super) async fn commit_transfer<J: TransferJournal>(
     record: &mut TransferJournalRecord,
     journal: &J,
     mut commit: CommitTransfer,
+    proof: &ProofContext,
 ) -> Result<(), RecoverableTransferError> {
     if commit.prepared.expected_target_identity.is_some() && commit.backup_identity.is_none() {
         if record.request.verification != crate::FileOperationVerification::Strong
@@ -35,13 +36,18 @@ pub(super) async fn commit_transfer<J: TransferJournal>(
                 message: "replacement commit has no verified backup identity".to_owned(),
             });
         }
+        let backup_fingerprint = commit.fingerprint.as_blake3().ok_or_else(|| {
+            RecoverableTransferError::InvalidCheckpoint {
+                message: "replace commit requires a content fingerprint".to_owned(),
+            }
+        })?;
         return persist_checkpoint(
             record,
             journal,
             TransferCheckpoint::BackupCreationIntent(BackupCreationTransfer {
                 prepared: commit.prepared,
                 payload: commit.payload,
-                fingerprint: commit.fingerprint,
+                fingerprint: backup_fingerprint,
             }),
         )
         .await;
@@ -52,20 +58,20 @@ pub(super) async fn commit_transfer<J: TransferJournal>(
     let target_exists = path_exists(&commit.prepared.resolved_target).await?;
 
     if target_exists && !payload_exists {
-        return persist_inferred_commit(record, journal, commit).await;
+        return persist_inferred_commit(record, journal, commit, proof).await;
     }
     if !payload_exists {
         return Err(RecoverableTransferError::SourceChanged { path: payload_path });
     }
     let payload_identity = inspect_file_identity(&payload_path).await?;
     if payload_identity != *commit_payload_identity(&commit)
-        || fingerprint_object(&payload_path).await? != commit.fingerprint
+        || !proof.matches(&payload_path, &commit.fingerprint).await?
     {
         return Err(RecoverableTransferError::FingerprintMismatch { path: payload_path });
     }
 
     if let Some(expected_target_identity) = &commit.backup_identity {
-        verify_expected_backup(&commit, expected_target_identity).await?;
+        verify_expected_backup(&commit, expected_target_identity, proof).await?;
     } else if target_exists {
         if record.request.conflict_strategy == crate::TransferConflictStrategy::KeepBoth {
             commit.prepared.resolved_target =
@@ -127,7 +133,7 @@ pub(super) async fn commit_transfer<J: TransferJournal>(
         }
     }
     sync_rename_parents(&payload_path, &commit.prepared.resolved_target).await?;
-    let committed = committed_transfer(record, &commit).await?;
+    let committed = committed_transfer(record, &commit, proof).await?;
     persist_checkpoint(
         record,
         journal,
@@ -139,6 +145,7 @@ pub(super) async fn commit_transfer<J: TransferJournal>(
 async fn verify_expected_backup(
     commit: &CommitTransfer,
     expected_backup_identity: &FileIdentity,
+    proof: &ProofContext,
 ) -> Result<(), RecoverableTransferError> {
     let artifact = commit_artifact(commit)?;
     let backup_path = artifact.plan.backup_path();
@@ -149,7 +156,7 @@ async fn verify_expected_backup(
     })?;
     let backup_identity = inspect_file_identity(&backup_path).await?;
     if backup_identity != *expected_backup_identity
-        || fingerprint_object(&backup_path).await? != expected_fingerprint
+        || proof.fingerprint_object(&backup_path).await? != expected_fingerprint
     {
         return Err(RecoverableTransferError::TargetConflict { path: backup_path });
     }
@@ -160,6 +167,7 @@ pub(super) async fn create_replace_backup<J: TransferJournal>(
     record: &mut TransferJournalRecord,
     journal: &J,
     mut backup: BackupCreationTransfer,
+    proof: &ProofContext,
 ) -> Result<(), RecoverableTransferError> {
     let artifact = match &backup.payload {
         CommitPayload::Artifact { artifact, .. } => artifact,
@@ -176,7 +184,7 @@ pub(super) async fn create_replace_backup<J: TransferJournal>(
     };
     let payload_identity = inspect_file_identity(&payload_path).await?;
     if payload_identity != *backup_payload_identity(&backup)
-        || fingerprint_object(&payload_path).await? != backup.fingerprint
+        || proof.fingerprint_object(&payload_path).await? != backup.fingerprint
     {
         return Err(RecoverableTransferError::FingerprintMismatch { path: payload_path });
     }
@@ -200,7 +208,7 @@ pub(super) async fn create_replace_backup<J: TransferJournal>(
                 });
             }
             if let Some(expected_fingerprint) = backup.prepared.expected_target_fingerprint {
-                if fingerprint_object(&backup.prepared.resolved_target).await?
+                if proof.fingerprint_object(&backup.prepared.resolved_target).await?
                     != expected_fingerprint
                 {
                     return Err(RecoverableTransferError::TargetConflict {
@@ -227,7 +235,7 @@ pub(super) async fn create_replace_backup<J: TransferJournal>(
     {
         return Err(RecoverableTransferError::TargetConflict { path: backup_path });
     }
-    let backup_fingerprint = fingerprint_object(&backup_path).await?;
+    let backup_fingerprint = proof.fingerprint_object(&backup_path).await?;
     if inspect_file_identity(&backup_path).await? != backup_identity {
         return Err(RecoverableTransferError::TargetConflict { path: backup_path });
     }
@@ -243,7 +251,7 @@ pub(super) async fn create_replace_backup<J: TransferJournal>(
         TransferCheckpoint::CommitIntent(CommitTransfer {
             prepared: backup.prepared,
             payload: backup.payload,
-            fingerprint: backup.fingerprint,
+            fingerprint: TransferFingerprint::Blake3(backup.fingerprint),
             backup_identity: Some(backup_identity),
         }),
     )
@@ -272,13 +280,15 @@ async fn persist_inferred_commit<J: TransferJournal>(
     record: &mut TransferJournalRecord,
     journal: &J,
     commit: CommitTransfer,
+    proof: &ProofContext,
 ) -> Result<(), RecoverableTransferError> {
     let target_identity = inspect_file_identity(&commit.prepared.resolved_target).await?;
     if !matches_object_verification(
         &commit.prepared.resolved_target,
         &target_identity,
         commit_payload_identity(&commit),
-        commit.fingerprint,
+        &commit.fingerprint,
+        proof,
     )
     .await?
     {
@@ -286,7 +296,7 @@ async fn persist_inferred_commit<J: TransferJournal>(
             path: commit.prepared.resolved_target,
         });
     }
-    let committed = committed_transfer(record, &commit).await?;
+    let committed = committed_transfer(record, &commit, proof).await?;
     persist_checkpoint(
         record,
         journal,
@@ -298,13 +308,15 @@ async fn persist_inferred_commit<J: TransferJournal>(
 async fn committed_transfer(
     record: &TransferJournalRecord,
     commit: &CommitTransfer,
+    proof: &ProofContext,
 ) -> Result<CommittedTransfer, RecoverableTransferError> {
     let target_identity = inspect_file_identity(&commit.prepared.resolved_target).await?;
     if !matches_object_verification(
         &commit.prepared.resolved_target,
         &target_identity,
         commit_payload_identity(commit),
-        commit.fingerprint,
+        &commit.fingerprint,
+        proof,
     )
     .await?
     {
@@ -332,7 +344,7 @@ async fn committed_transfer(
     Ok(CommittedTransfer {
         final_target: commit.prepared.resolved_target.clone(),
         target_identity,
-        fingerprint: commit.fingerprint,
+        fingerprint: commit.fingerprint.clone(),
         artifact,
         source_disposition,
         backup_identity: commit.backup_identity.clone(),
@@ -346,10 +358,11 @@ pub(super) async fn advance_committed_transfer<J: TransferJournal>(
     record: &mut TransferJournalRecord,
     journal: &J,
     mut committed: CommittedTransfer,
+    proof: &ProofContext,
 ) -> Result<(), RecoverableTransferError> {
-    if let Err(target_error) = verify_committed_target(&committed).await {
+    if let Err(target_error) = verify_committed_target(&committed, proof).await {
         if let Some(recovered_backup) =
-            recover_complete_backup_after_target_conflict(record, &committed).await?
+            recover_complete_backup_after_target_conflict(record, &committed, proof).await?
         {
             return Err(RecoverableTransferError::RecoveryBlocked {
                 diagnostic: format!(
@@ -378,7 +391,8 @@ pub(super) async fn advance_committed_transfer<J: TransferJournal>(
                 &backup_path,
                 &current,
                 manifest_root_identity(record_replacement_manifest(record)?)?,
-                expected_fingerprint,
+                &TransferFingerprint::Blake3(expected_fingerprint),
+                proof,
             )
             .await?
             {
@@ -430,6 +444,7 @@ pub(super) async fn advance_committed_transfer<J: TransferJournal>(
                     &artifact.plan.payload_path(),
                     &committed.final_target,
                     &intent,
+                    proof,
                 )
                 .await?
                 {
@@ -456,6 +471,7 @@ pub(super) async fn advance_committed_transfer<J: TransferJournal>(
                         entry,
                         committed.backup_identity.as_ref(),
                         backup_fingerprint,
+                        proof,
                     )
                     .await?,
                 );
@@ -505,6 +521,7 @@ pub(super) async fn advance_committed_transfer<J: TransferJournal>(
 async fn recover_complete_backup_after_target_conflict(
     record: &TransferJournalRecord,
     committed: &CommittedTransfer,
+    proof: &ProofContext,
 ) -> Result<Option<std::path::PathBuf>, RecoverableTransferError> {
     let Some(artifact) = &committed.artifact else {
         return Ok(None);
@@ -529,7 +546,7 @@ async fn recover_complete_backup_after_target_conflict(
     validate_owned_artifact(artifact).await?;
     let backup_identity = inspect_file_identity(&backup_path).await?;
     if backup_identity != *expected_identity
-        || fingerprint_object(&backup_path).await? != expected_fingerprint
+        || proof.fingerprint_object(&backup_path).await? != expected_fingerprint
     {
         return Err(RecoverableTransferError::TargetConflict { path: backup_path });
     }
@@ -545,8 +562,9 @@ pub(super) async fn retire_source<J: TransferJournal>(
     record: &mut TransferJournalRecord,
     journal: &J,
     retirement: SourceRetirementPlan,
+    proof: &ProofContext,
 ) -> Result<(), RecoverableTransferError> {
-    verify_committed_target(&retirement.committed).await?;
+    verify_committed_target(&retirement.committed, proof).await?;
     let Some(artifact) = retirement.artifact.clone() else {
         let artifact = recover_owned_artifact(retirement.artifact_plan.clone()).await?;
         let mut identified_retirement = retirement;
@@ -559,12 +577,19 @@ pub(super) async fn retire_source<J: TransferJournal>(
         .await;
     };
     crate::ops::recoverable_transfer::validate_owned_artifact(&artifact).await?;
+    // 源退休的证明链要求全文哈希:KernelClone 证明不可能出现在 Move
+    // (克隆候选已排除 Move),此处还原 Blake3 即可;若未来出现则拒绝。
+    let committed_fingerprint = retirement.committed.fingerprint.as_blake3().ok_or_else(|| {
+        RecoverableTransferError::InvalidCheckpoint {
+            message: "source retirement requires a content fingerprint".to_owned(),
+        }
+    })?;
     let prepared = PreparedTransfer {
         source_identity: manifest_root_identity(record_manifest(record)?)?.clone(),
         resolved_target: retirement.committed.final_target.clone(),
         expected_target_identity: None,
         expected_target_fingerprint: None,
-        source_fingerprint: Some(retirement.committed.fingerprint),
+        source_fingerprint: Some(committed_fingerprint),
         execution: TransferExecutionKind::MoveToStage,
         staging_plan: None,
     };
@@ -591,7 +616,8 @@ pub(super) async fn retire_source<J: TransferJournal>(
         &payload_path,
         &payload_identity,
         &prepared.source_identity,
-        retirement.committed.fingerprint,
+        &retirement.committed.fingerprint,
+        proof,
     )
     .await?
     {
@@ -615,8 +641,9 @@ pub(super) async fn advance_retired_source<J: TransferJournal>(
     record: &mut TransferJournalRecord,
     journal: &J,
     mut retired: RetiredSource,
+    proof: &ProofContext,
 ) -> Result<(), RecoverableTransferError> {
-    verify_committed_target(&retired.committed).await?;
+    verify_committed_target(&retired.committed, proof).await?;
     if retired.payload_identity.is_none() {
         let payload_path = retired.artifact.plan.payload_path();
         let current = inspect_file_identity(&payload_path).await?;
@@ -625,7 +652,8 @@ pub(super) async fn advance_retired_source<J: TransferJournal>(
             &payload_path,
             &current,
             expected,
-            retired.committed.fingerprint,
+            &retired.committed.fingerprint,
+            proof,
         )
         .await?
         {
@@ -665,6 +693,7 @@ pub(super) async fn advance_retired_source<J: TransferJournal>(
             &retired.artifact.plan.backup_path(),
             &record.request.source,
             &intent,
+            proof,
         )
         .await?
         {
@@ -685,13 +714,19 @@ pub(super) async fn advance_retired_source<J: TransferJournal>(
     }
 
     if let Some(entry) = current_entry.as_ref() {
+        let root_fingerprint = retired.committed.fingerprint.as_blake3().ok_or_else(|| {
+            RecoverableTransferError::InvalidCheckpoint {
+                message: "source retirement requires a content fingerprint".to_owned(),
+            }
+        })?;
         retired.cleanup_intent = Some(
             prepare_owned_tree_entry_deletion_intent(
                 &retired.artifact,
                 &retired.artifact.plan.payload_path(),
                 entry,
                 retired.payload_identity.as_ref(),
-                retired.committed.fingerprint,
+                root_fingerprint,
+                proof,
             )
             .await?,
         );
@@ -725,6 +760,7 @@ async fn prepare_owned_tree_entry_deletion_intent(
     entry: &SourceManifestEntry,
     root_identity: Option<&FileIdentity>,
     root_fingerprint: crate::ops::recoverable_transfer::ObjectFingerprint,
+    proof: &ProofContext,
 ) -> Result<OwnedTreeEntryDeletionIntent, RecoverableTransferError> {
     crate::ops::recoverable_transfer::validate_owned_artifact(artifact).await?;
     let entry_path = owned_tree_entry_path(tree_root, entry);
@@ -744,10 +780,11 @@ async fn prepare_owned_tree_entry_deletion_intent(
             expected_identity,
             entry_position,
             root_fingerprint,
+            proof,
         )
         .await?;
         let current = inspect_file_identity(&entry_path).await?;
-        let fingerprint = fingerprint_object(&entry_path).await?;
+        let fingerprint = proof.fingerprint_object(&entry_path).await?;
         if inspect_file_identity(&entry_path).await? != current {
             return Err(RecoverableTransferError::SourceChanged { path: entry_path });
         }
@@ -775,6 +812,7 @@ async fn advance_owned_tree_entry_deletion(
     deletion_slot: &Path,
     recovered_base: &Path,
     intent: &OwnedTreeEntryDeletionIntent,
+    proof: &ProofContext,
 ) -> Result<OwnedTreeEntryDeletionAdvance, RecoverableTransferError> {
     crate::ops::recoverable_transfer::validate_owned_artifact(artifact).await?;
     let entry_path = owned_tree_entry_path(tree_root, &intent.entry);
@@ -790,7 +828,7 @@ async fn advance_owned_tree_entry_deletion(
                 });
             }
             if intent.expected_identity.is_none() {
-                verify_legacy_deletion_entry(&entry_path, intent).await?;
+                verify_legacy_deletion_entry(&entry_path, intent, proof).await?;
                 let mut upgraded = intent.clone();
                 upgraded.expected_identity = Some(inspect_file_identity(&entry_path).await?);
                 return Ok(OwnedTreeEntryDeletionAdvance::Persist(Box::new(upgraded)));
@@ -799,6 +837,7 @@ async fn advance_owned_tree_entry_deletion(
                 &entry_path,
                 intent.expected_identity.as_ref().unwrap(),
                 intent.fingerprint,
+                proof,
             )
             .await?;
             rename_noreplace(&entry_path, deletion_slot)
@@ -806,14 +845,17 @@ async fn advance_owned_tree_entry_deletion(
             sync_rename_parents(&entry_path, deletion_slot).await?;
 
             let slot_identity = inspect_file_identity(deletion_slot).await?;
-            verify_deletion_entry_exact(deletion_slot, &slot_identity, intent.fingerprint).await?;
+            verify_deletion_entry_exact(deletion_slot, &slot_identity, intent.fingerprint, proof)
+                .await?;
             let mut moved = intent.clone();
             moved.deletion_slot_identity = Some(slot_identity);
             Ok(OwnedTreeEntryDeletionAdvance::Persist(Box::new(moved)))
         }
         (false, true) => {
             if intent.deletion_slot_identity.is_none() {
-                if let Err(error) = verify_legacy_deletion_entry(deletion_slot, intent).await {
+                if let Err(error) =
+                    verify_legacy_deletion_entry(deletion_slot, intent, proof).await
+                {
                     restore_unverified_deletion_slot(
                         &entry_path,
                         deletion_slot,
@@ -831,6 +873,7 @@ async fn advance_owned_tree_entry_deletion(
                 deletion_slot,
                 intent.deletion_slot_identity.as_ref().unwrap(),
                 intent.fingerprint,
+                proof,
             )
             .await
             {
@@ -875,6 +918,7 @@ async fn restore_unverified_deletion_slot(
 async fn verify_legacy_deletion_entry(
     path: &Path,
     intent: &OwnedTreeEntryDeletionIntent,
+    proof: &ProofContext,
 ) -> Result<(), RecoverableTransferError> {
     let expected = intent
         .expected_identity
@@ -887,7 +931,7 @@ async fn verify_legacy_deletion_entry(
                 message: "existing deletion entry has no content fingerprint".to_owned(),
             })?;
     let current = inspect_file_identity(path).await?;
-    if current.same_object(expected) && fingerprint_object(path).await? == fingerprint {
+    if current.same_object(expected) && proof.fingerprint_object(path).await? == fingerprint {
         Ok(())
     } else {
         Err(RecoverableTransferError::SourceChanged {
@@ -900,13 +944,14 @@ async fn verify_deletion_entry_exact(
     path: &Path,
     expected_identity: &FileIdentity,
     expected_fingerprint: Option<crate::ops::recoverable_transfer::ObjectFingerprint>,
+    proof: &ProofContext,
 ) -> Result<(), RecoverableTransferError> {
     let expected_fingerprint =
         expected_fingerprint.ok_or_else(|| RecoverableTransferError::InvalidCheckpoint {
             message: "existing deletion entry has no content fingerprint".to_owned(),
         })?;
     let before = inspect_file_identity(path).await?;
-    let fingerprint = fingerprint_object(path).await?;
+    let fingerprint = proof.fingerprint_object(path).await?;
     let after = inspect_file_identity(path).await?;
     if before == *expected_identity && after == before && fingerprint == expected_fingerprint {
         Ok(())
@@ -936,6 +981,7 @@ async fn verify_retirement_entry_before_intent(
     expected: &FileIdentity,
     position: ManifestEntryPosition,
     root_fingerprint: crate::ops::recoverable_transfer::ObjectFingerprint,
+    proof: &ProofContext,
 ) -> Result<(), RecoverableTransferError> {
     let current = inspect_file_identity(path).await?;
     let matches = match expected.object_kind {
@@ -966,7 +1012,14 @@ async fn verify_retirement_entry_before_intent(
         FileObjectKind::RegularFile | FileObjectKind::SymbolicLink
             if matches!(position, ManifestEntryPosition::Root) =>
         {
-            matches_object_verification(path, &current, expected, root_fingerprint).await?
+            matches_object_verification(
+                path,
+                &current,
+                expected,
+                &TransferFingerprint::Blake3(root_fingerprint),
+                proof,
+            )
+            .await?
         }
         FileObjectKind::RegularFile | FileObjectKind::SymbolicLink => current == *expected,
     };
@@ -1028,16 +1081,17 @@ pub(super) fn completed_target(committed: &CommittedTransfer) -> CompletedTarget
     CompletedTarget {
         path: committed.final_target.clone(),
         identity: committed.target_identity.clone(),
-        fingerprint: committed.fingerprint,
+        fingerprint: committed.fingerprint.clone(),
     }
 }
 
 pub(super) async fn verify_completed_target(
     completed: &CompletedTarget,
+    proof: &ProofContext,
 ) -> Result<(), RecoverableTransferError> {
     let current_identity = inspect_file_identity(&completed.path).await?;
     if current_identity != completed.identity
-        || fingerprint_object(&completed.path).await? != completed.fingerprint
+        || !proof.matches(&completed.path, &completed.fingerprint).await?
     {
         return Err(RecoverableTransferError::TargetConflict {
             path: completed.path.clone(),
@@ -1048,10 +1102,13 @@ pub(super) async fn verify_completed_target(
 
 pub(super) async fn verify_committed_target(
     committed: &CommittedTransfer,
+    proof: &ProofContext,
 ) -> Result<(), RecoverableTransferError> {
     let current_identity = inspect_file_identity(&committed.final_target).await?;
     if current_identity != committed.target_identity
-        || fingerprint_object(&committed.final_target).await? != committed.fingerprint
+        || !proof
+            .matches(&committed.final_target, &committed.fingerprint)
+            .await?
     {
         return Err(RecoverableTransferError::TargetConflict {
             path: committed.final_target.clone(),
@@ -1105,10 +1162,11 @@ pub(super) async fn matches_object_verification(
     path: &Path,
     current_identity: &FileIdentity,
     expected_identity: &FileIdentity,
-    expected_fingerprint: crate::ops::recoverable_transfer::ObjectFingerprint,
+    expected_fingerprint: &TransferFingerprint,
+    proof: &ProofContext,
 ) -> Result<bool, RecoverableTransferError> {
     if !current_identity.same_object(expected_identity) {
         return Ok(false);
     }
-    Ok(fingerprint_object(path).await? == expected_fingerprint)
+    proof.matches(path, expected_fingerprint).await
 }

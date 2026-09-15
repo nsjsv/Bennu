@@ -1,7 +1,8 @@
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use tokio::fs;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncReadExt;
 use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 
@@ -123,6 +124,10 @@ pub struct FileTransferOptions {
     pub(super) progress: Option<ProgressSender>,
     pub(super) conflict_strategy: TransferConflictStrategy,
     pub(super) verification: FileOperationVerification,
+    /// Basic 校验的运行内证明记忆;Strong 校验忽略该字段。
+    pub(super) proof_memo: Option<crate::ops::recoverable_transfer::SharedProofMemo>,
+    /// 按设备对缓存的搬运策略引擎(克隆/内核快拷/用户态阶梯)。
+    pub(super) strategy_engine: Option<std::sync::Arc<crate::ops::transfer_strategy::TransferStrategyEngine>>,
 }
 
 impl FileTransferOptions {
@@ -132,6 +137,8 @@ impl FileTransferOptions {
             progress: None,
             conflict_strategy: TransferConflictStrategy::Fail,
             verification: FileOperationVerification::default(),
+            proof_memo: None,
+            strategy_engine: None,
         }
     }
 
@@ -156,6 +163,25 @@ impl FileTransferOptions {
 
     pub fn with_verification(mut self, verification: FileOperationVerification) -> Self {
         self.verification = verification;
+        self
+    }
+
+    /// 附加运行内证明记忆。同一批传输(同一任务)应共享同一份 memo,
+    /// 使"每对象每次运行至多全文哈希一次"跨批次记录生效。
+    pub fn with_proof_memo(
+        mut self,
+        proof_memo: crate::ops::recoverable_transfer::SharedProofMemo,
+    ) -> Self {
+        self.proof_memo = Some(proof_memo);
+        self
+    }
+
+    /// 附加搬运策略引擎;同一任务的全部记录共享设备能力缓存。
+    pub fn with_strategy_engine(
+        mut self,
+        strategy_engine: std::sync::Arc<crate::ops::transfer_strategy::TransferStrategyEngine>,
+    ) -> Self {
+        self.strategy_engine = Some(strategy_engine);
         self
     }
 }
@@ -225,19 +251,23 @@ pub(super) async fn copy_path_with_inspected_source(
                 progress.as_ref(),
                 conflict_strategy,
                 verification,
+                transfer_options.strategy_engine.as_deref(),
             )
             .await?;
         }
         TransferSourceKind::RegularFile => {
             let mut buffer = vec![0; COPY_BUFFER_SIZE];
             copy_file_to_target(
-                from,
-                &to,
-                source_object,
+                FileCopyTarget {
+                    from,
+                    to: &to,
+                    source_object,
+                    verification,
+                    strategy_engine: transfer_options.strategy_engine.as_deref(),
+                },
                 &mut controls,
                 progress.as_ref(),
                 &mut buffer,
-                verification,
             )
             .await?;
         }
@@ -249,102 +279,111 @@ pub(super) async fn copy_path_with_inspected_source(
     Ok(Some(to))
 }
 
+/// 单个普通文件落到目标的请求集合;引擎未注入时按设备现场探测。
+struct FileCopyTarget<'a> {
+    from: &'a Path,
+    to: &'a Path,
+    source_object: &'a TransferSourceObject,
+    verification: FileOperationVerification,
+    strategy_engine: Option<&'a crate::ops::transfer_strategy::TransferStrategyEngine>,
+}
+
 async fn copy_file_to_target(
-    from: &Path,
-    to: &Path,
-    source_object: &TransferSourceObject,
+    target: FileCopyTarget<'_>,
     controls: &mut FileOperationControls,
     progress: Option<&ProgressSender>,
     buffer: &mut [u8],
-    verification: FileOperationVerification,
 ) -> Result<(), FileError> {
+    let FileCopyTarget {
+        from,
+        to,
+        source_object,
+        verification,
+        strategy_engine,
+    } = target;
     let metadata = &source_object.metadata;
-    let mut reader = fs::File::open(from)
-        .await
-        .map_err(|source| FileError::Copy {
-            from: from.to_path_buf(),
-            to: to.to_path_buf(),
-            source,
-        })?;
-    let mut writer = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&to)
-        .await
-        .map_err(|source| FileError::Copy {
-            from: from.to_path_buf(),
-            to: to.to_path_buf(),
-            source,
-        })?;
 
+    // 引擎未注入(内部低层调用)时按调用点设备现场探测,能力缓存仅覆盖
+    // 本文件;用户任务的引擎由 run 层注入并跨文件复用。
+    let local_engine;
+    let engine = match strategy_engine {
+        Some(engine) => engine,
+        None => {
+            local_engine = crate::ops::transfer_strategy::TransferStrategyEngine::probe(
+                metadata.dev(),
+                metadata.dev(),
+                to,
+            );
+            &local_engine
+        }
+    };
+
+    // Strong 校验在 UserLoop 内联喂数据;克隆/内核快拷不过用户态,
+    // 由下方补读源内容计算,总读次数与历史实现持平。
     let mut source_content_hasher =
         (verification == FileOperationVerification::Strong).then(blake3::Hasher::new);
-    let mut bytes_done = 0;
-    let bytes_total = metadata.len();
-
-    loop {
-        if let Err(error) = controls.wait_until_running().await {
-            let _ = fs::remove_file(&to).await;
-            return Err(error);
-        }
-
-        let read = reader
-            .read(buffer)
-            .await
-            .map_err(|source| FileError::Copy {
-                from: from.to_path_buf(),
-                to: to.to_path_buf(),
-                source,
-            })?;
-        if read == 0 {
-            break;
-        }
-        if let Some(source_content_hasher) = &mut source_content_hasher {
-            source_content_hasher.update(&buffer[..read]);
-        }
-
-        writer
-            .write_all(&buffer[..read])
-            .await
-            .map_err(|source| FileError::Copy {
-                from: from.to_path_buf(),
-                to: to.to_path_buf(),
-                source,
-            })?;
-        bytes_done += read as u64;
-
-        if let Some(progress) = &progress {
-            let _ = progress.send(CopyProgress {
-                from: from.to_path_buf(),
-                to: to.to_path_buf(),
-                bytes_done,
-                bytes_total,
-            });
-        }
-    }
-
-    if let Err(source) = writer.flush().await {
+    let payload_outcome = {
+        crate::ops::transfer_strategy::copy_regular_file_payload(crate::ops::transfer_strategy::RegularFilePayloadCopy {
+            source: from,
+            target: to,
+            source_device: metadata.dev(),
+            bytes_total: metadata.len(),
+            engine,
+            controls,
+            progress,
+            source_hasher: match source_content_hasher.as_mut() {
+                Some(hasher) => Some(hasher),
+                None => None,
+            },
+        })
+        .await
+    };
+    if let Err(error) = payload_outcome {
         let _ = fs::remove_file(to).await;
-        return Err(FileError::Copy {
-            from: from.to_path_buf(),
-            to: to.to_path_buf(),
-            source,
-        });
+        return Err(error);
     }
+
     if verification == FileOperationVerification::Strong {
-        if let Err(source) = writer.sync_all().await {
-            let _ = fs::remove_file(to).await;
-            return Err(FileError::Copy {
-                from: from.to_path_buf(),
-                to: to.to_path_buf(),
-                source,
-            });
+        let writer = fs::OpenOptions::new()
+            .write(true)
+            .open(to)
+            .await;
+        match writer {
+            Ok(writer) => {
+                if let Err(source) = writer.sync_all().await {
+                    let _ = fs::remove_file(to).await;
+                    return Err(FileError::Copy {
+                        from: from.to_path_buf(),
+                        to: to.to_path_buf(),
+                        source,
+                    });
+                }
+            }
+            Err(source) => {
+                let _ = fs::remove_file(to).await;
+                return Err(FileError::Copy {
+                    from: from.to_path_buf(),
+                    to: to.to_path_buf(),
+                    source,
+                });
+            }
         }
     }
-    drop(writer);
 
-    let source_content_hash =
-        source_content_hasher.map(|source_content_hasher| source_content_hasher.finalize());
+    let source_content_hash = match verification {
+        FileOperationVerification::Strong => {
+            if strategy_inlined_hash(payload_outcome.as_ref().unwrap()) {
+                source_content_hasher.map(|hasher| hasher.finalize())
+            } else {
+                let hash = hash_source_content(from, controls, buffer).await;
+                if hash.is_err() {
+                    let _ = fs::remove_file(to).await;
+                }
+                Some(hash?)
+            }
+        }
+        FileOperationVerification::BasicMetadata => None,
+    };
     if let Err(error) =
         verify_copied_file(from, to, metadata, controls, buffer, source_content_hash).await
     {
@@ -359,6 +398,39 @@ async fn copy_file_to_target(
     }
 
     Ok(())
+}
+
+fn strategy_inlined_hash(
+    outcome: &crate::ops::transfer_strategy::PayloadCopyOutcome,
+) -> bool {
+    outcome.strategy == crate::ops::transfer_strategy::PayloadCopyStrategy::UserLoop
+}
+
+/// 补读源内容计算 BLAKE3:克隆/内核快拷路径的字节不过用户态,Strong 校验
+/// 用它换取与历史实现相同的读次数(内联源哈希 + 目标重读)。
+async fn hash_source_content(
+    from: &Path,
+    controls: &mut FileOperationControls,
+    buffer: &mut [u8],
+) -> Result<blake3::Hash, FileError> {
+    let mut reader = fs::File::open(from).await.map_err(|source| FileError::Copy {
+        from: from.to_path_buf(),
+        to: from.to_path_buf(),
+        source,
+    })?;
+    let mut hasher = blake3::Hasher::new();
+    loop {
+        controls.wait_until_running().await?;
+        let read = reader.read(buffer).await.map_err(|source| FileError::Copy {
+            from: from.to_path_buf(),
+            to: from.to_path_buf(),
+            source,
+        })?;
+        if read == 0 {
+            return Ok(hasher.finalize());
+        }
+        hasher.update(&buffer[..read]);
+    }
 }
 
 #[cfg(unix)]
@@ -421,6 +493,7 @@ enum DirectoryCopyStep {
     },
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn copy_directory(
     from: &Path,
     to: &Path,
@@ -429,6 +502,7 @@ async fn copy_directory(
     progress: Option<&ProgressSender>,
     conflict_strategy: TransferConflictStrategy,
     verification: FileOperationVerification,
+    strategy_engine: Option<&crate::ops::transfer_strategy::TransferStrategyEngine>,
 ) -> Result<(), FileError> {
     if to.starts_with(from) {
         return Err(FileError::InvalidInput {
@@ -459,6 +533,7 @@ async fn copy_directory(
             progress,
             conflict_strategy,
             verification,
+            strategy_engine,
         )
         .await
     }
@@ -476,6 +551,7 @@ async fn copy_directory_contents(
     progress: Option<&ProgressSender>,
     conflict_strategy: TransferConflictStrategy,
     verification: FileOperationVerification,
+    strategy_engine: Option<&crate::ops::transfer_strategy::TransferStrategyEngine>,
 ) -> Result<(), FileError> {
     let mut buffer = vec![0; COPY_BUFFER_SIZE];
 
@@ -555,13 +631,16 @@ async fn copy_directory_contents(
                 }
                 TransferSourceKind::RegularFile => {
                     copy_file_to_target(
-                        &source_child,
-                        &target_child,
-                        &source_object,
+                        FileCopyTarget {
+                            from: &source_child,
+                            to: &target_child,
+                            source_object: &source_object,
+                            verification,
+                            strategy_engine,
+                        },
                         controls,
                         progress,
                         &mut buffer,
-                        verification,
                     )
                     .await?;
                 }

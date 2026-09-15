@@ -141,7 +141,7 @@ impl FileBrowser {
 
             match outcome.result {
                 ThumbnailLoadResult::Ready(thumbnail) => {
-                    tracing::info!(
+                    tracing::debug!(
                         target: "app_ui::thumbnail",
                         source = ?thumbnail.source,
                         purpose = ?outcome.work.purpose,
@@ -200,7 +200,7 @@ impl FileBrowser {
                 }
                 ThumbnailLoadResult::Failed(error) => {
                     let log_error = sanitized_application_log_detail(&error);
-                    tracing::info!(
+                    tracing::debug!(
                         target: "app_ui::thumbnail",
                         source = ?outcome.work.request.source,
                         purpose = ?outcome.work.purpose,
@@ -250,7 +250,7 @@ impl FileBrowser {
                     self.active_entry_thumbnail_edge(),
                     ThumbnailPriority::Focused,
                 );
-                tracing::info!(
+                tracing::debug!(
                     target: "app_ui::thumbnail",
                     source = ?entry.path,
                     interaction = "selected",
@@ -266,7 +266,7 @@ impl FileBrowser {
                     self.active_entry_thumbnail_edge(),
                     ThumbnailPriority::Focused,
                 );
-                tracing::info!(
+                tracing::debug!(
                     target: "app_ui::thumbnail",
                     source = ?entry.path,
                     interaction = "hovered",
@@ -389,7 +389,7 @@ impl FileBrowser {
             .iter()
             .filter_map(|visible_entry| request_for_entry(visible_entry.entry, LIST_THUMBNAIL_EDGE))
             .collect::<Vec<_>>();
-        tracing::info!(
+        tracing::debug!(
             target: "app_ui::thumbnail",
             pane = %pane_id.key(),
             directory = %directory.display(),
@@ -648,7 +648,7 @@ impl FileBrowser {
         if request.key() == work.request.key() {
             return;
         }
-        tracing::info!(
+        tracing::debug!(
             target: "app_ui::thumbnail",
             source = ?work.request.source,
             purpose = ?work.purpose,

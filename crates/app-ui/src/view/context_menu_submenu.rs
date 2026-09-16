@@ -10,7 +10,8 @@ use crate::app::convert::ConvertMessage;
 use crate::appearance::{context_menu_item_button_style, context_menu_style};
 use crate::icons::IconSymbol;
 use crate::model::{
-    BatchRenameMessage, FileAreaMenuItem, FileContextMenuExpansion, FileContextMenuState, Message,
+    BatchRenameMessage, FileAreaMenuItem, FileContextMenuExpansion, FileContextMenuState,
+    FileGroupingMode, Message,
 };
 
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};
@@ -88,6 +89,75 @@ pub(super) fn group_submenu_panel(
     )
     .on_enter(Message::FileContextMenuExpansionChanged(
         FileContextMenuExpansion::Group(anchor),
+    ))
+    .into()
+}
+
+/// 空白菜单固定的「分组方式」触发行:纯触发器,悬停展开子菜单,
+/// 单击无动作,与组锚点行同一交互。
+pub(super) fn file_grouping_trigger_row() -> Element<'static, Message> {
+    mouse_area(
+        button(menu_label_with_chevron(IconSymbol::List, "Group By"))
+            .width(Length::Fill)
+            .height(Length::Fixed(CONTEXT_MENU_ITEM_HEIGHT))
+            .style(context_menu_item_button_style()),
+    )
+    .on_enter(Message::FileContextMenuExpansionChanged(
+        FileContextMenuExpansion::FileGrouping,
+    ))
+    .into()
+}
+
+/// 分组方式子菜单:七项单选,当前生效项带勾选标记。悬停保持展开,
+/// 单击只换档,菜单停留在原地便于连续切换。
+pub(super) fn file_grouping_submenu_panel(current: FileGroupingMode) -> Element<'static, Message> {
+    let modes = [
+        FileGroupingMode::None,
+        FileGroupingMode::NameInitial,
+        FileGroupingMode::Kind,
+        FileGroupingMode::Size,
+        FileGroupingMode::ModifiedTime,
+        FileGroupingMode::CreatedTime,
+        FileGroupingMode::AccessedTime,
+    ];
+    let mut content = Column::new()
+        .spacing(CONTEXT_MENU_ITEM_SPACING)
+        .padding(CONTEXT_MENU_PADDING);
+    for mode in modes {
+        content = content.push(file_grouping_submenu_item(mode, mode == current));
+    }
+
+    mouse_area(
+        container(content)
+            .width(Length::Fixed(CONTEXT_SUBMENU_WIDTH))
+            .style(context_menu_style),
+    )
+    .on_enter(Message::FileContextMenuExpansionChanged(
+        FileContextMenuExpansion::FileGrouping,
+    ))
+    .into()
+}
+
+/// 分组方式选项行:标签占满 + 当前项尾部勾选标记。
+fn file_grouping_submenu_item(mode: FileGroupingMode, selected: bool) -> Element<'static, Message> {
+    let mut label = row![
+        crate::typography::readable_text(mode.label()).width(Length::Fill),
+    ]
+    .spacing(6)
+    .align_y(Alignment::Center)
+    .width(Length::Fill);
+    if selected {
+        label = label.push(themed_icon(IconSymbol::Check, IconTone::Normal, MENU_ICON_SIZE));
+    }
+    mouse_area(
+        button(label)
+            .on_press(Message::FileGroupingModeSelected(mode))
+            .width(Length::Fill)
+            .height(Length::Fixed(CONTEXT_MENU_ITEM_HEIGHT))
+            .style(context_menu_item_button_style()),
+    )
+    .on_enter(Message::FileContextMenuExpansionChanged(
+        FileContextMenuExpansion::FileGrouping,
     ))
     .into()
 }

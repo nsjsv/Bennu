@@ -582,6 +582,17 @@ fn exact_translation(text: &str) -> Option<&'static str> {
         "Kind" => Some("类型"),
         "Accessed Time" => Some("访问时间"),
         "Created Time" => Some("创建时间"),
+        // 文件分组的菜单与组头词条;Today/Yesterday/Archives 等与搜索
+        // 筛选共用的 key 由前置模块(search_workspace)提供,不在此重复。
+        "Group By" => Some("分组方式"),
+        "None" => Some("无分组"),
+        "Date Modified" => Some("修改日期"),
+        "Date Created" => Some("创建日期"),
+        "Date Accessed" => Some("访问日期"),
+        "This Week" => Some("本周"),
+        "This Month" => Some("本月"),
+        "Earlier" => Some("更早"),
+        "Applications" => Some("应用"),
         "URI" => Some("URI"),
         "Username" => Some("用户名"),
         "Password" => Some("密码"),

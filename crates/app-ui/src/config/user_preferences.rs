@@ -27,7 +27,7 @@ use super::{
 use crate::matugen_theme::{ColorSchemePreset, CustomColorScheme, ThemeMode};
 use crate::model::{
     list_column_kind_config_value, list_column_kind_from_config_value, BrowserViewMode,
-    ContextMenuLayoutConfigValues, ContextMenuPreferences, ListColumnConfig,
+    ContextMenuLayoutConfigValues, ContextMenuPreferences, FileGroupingMode, ListColumnConfig,
     ListDirectorySizeDisplayMode, ListSortPreference, ListViewPreferences, WindowChromeLayout,
     WindowControlKind, WindowControlPlacement, WindowControlSide, WindowControlVisibility,
     WindowControlsConfig,
@@ -61,6 +61,7 @@ pub(crate) struct UserPreferences {
     pub(crate) icons_view_density: ViewDensityLevel,
     pub(crate) list_view_preferences: ListViewPreferences,
     pub(crate) list_directory_size_display_mode: ListDirectorySizeDisplayMode,
+    pub(crate) file_grouping: FileGroupingMode,
     pub(crate) startup_location_policy: StartupLocationPolicy,
     pub(crate) launch_window_policy: LaunchWindowPolicy,
     pub(crate) column_width_adjust_mode: ColumnWidthAdjustMode,
@@ -119,6 +120,7 @@ impl UserPreferences {
             icons_view_density,
             list_view_preferences: config.list_view_preferences.clone(),
             list_directory_size_display_mode: config.list_directory_size_display_mode,
+            file_grouping: config.file_grouping,
             startup_location_policy: config.startup_location_policy,
             launch_window_policy: config.launch_window_policy,
             column_width_adjust_mode: config.column_width_adjust_mode,
@@ -159,6 +161,7 @@ impl UserPreferences {
         config.icon_grid_size = self.icons_view_density.icon_grid_size();
         config.list_view_preferences = self.list_view_preferences.clone();
         config.list_directory_size_display_mode = self.list_directory_size_display_mode;
+        config.file_grouping = self.file_grouping;
         config.startup_location_policy = self.startup_location_policy;
         config.launch_window_policy = self.launch_window_policy;
         config.column_width_adjust_mode = self.column_width_adjust_mode;
@@ -231,6 +234,7 @@ impl UserPreferences {
         stored.list_directory_size_display_mode =
             list_directory_size_display_mode_config_value(self.list_directory_size_display_mode)
                 .to_owned();
+        stored.file_grouping = Some(self.file_grouping.config_value().to_owned());
         stored.startup_location = self.startup_location_policy.config_value().to_owned();
         stored.launch_window_policy = self.launch_window_policy.config_value().to_owned();
         stored.column_width_adjust_mode = self.column_width_adjust_mode.config_value().to_owned();
@@ -337,6 +341,12 @@ impl UserPreferences {
                 &stored.list_directory_size_display_mode,
             )
             .unwrap_or(default_preferences.list_directory_size_display_mode),
+            // None = 旧版本数据未持久化过分组设置；非法值同样回退默认。
+            file_grouping: stored
+                .file_grouping
+                .as_deref()
+                .and_then(FileGroupingMode::from_config_value)
+                .unwrap_or(default_preferences.file_grouping),
             startup_location_policy,
             launch_window_policy: LaunchWindowPolicy::from_config_value(
                 &stored.launch_window_policy,
@@ -765,6 +775,30 @@ mod tests {
             restored.custom_color_scheme,
             default_user_config().custom_color_scheme
         );
+    }
+
+    #[test]
+    fn file_grouping_roundtrips_and_legacy_missing_field_falls_back_to_none() {
+        let default = default_user_config();
+        let mut config = default.clone();
+        config.file_grouping = FileGroupingMode::Kind;
+
+        let stored = config.user_preferences().to_stored();
+        assert_eq!(stored.file_grouping.as_deref(), Some("kind"));
+        let restored = UserPreferences::from_stored(stored, &default);
+        assert_eq!(restored.file_grouping, FileGroupingMode::Kind);
+
+        // 旧版本记录没有该字段：回退默认（无分组），而不是误开启分组。
+        let legacy = StoredUserPreferences::default();
+        assert_eq!(legacy.file_grouping, None);
+        let restored = UserPreferences::from_stored(legacy, &default);
+        assert_eq!(restored.file_grouping, FileGroupingMode::None);
+
+        // 落盘值为 "none"（用户显式关闭）与缺字段回退结果一致。
+        let mut explicit_none = default_user_config().user_preferences().to_stored();
+        explicit_none.file_grouping = Some("none".to_owned());
+        let restored = UserPreferences::from_stored(explicit_none, &default);
+        assert_eq!(restored.file_grouping, FileGroupingMode::None);
     }
 
     #[test]

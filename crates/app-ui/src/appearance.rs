@@ -22,8 +22,8 @@ pub(crate) use window_chrome::{
 };
 
 pub(crate) use list_header::{
-    list_header_cell_style, list_header_reorder_indicator_style, list_header_style,
-    ListHeaderCellVisualState,
+    group_header_style, list_header_cell_style, list_header_reorder_indicator_style,
+    list_header_style, ListHeaderCellVisualState,
 };
 
 use crate::file_entry_presentation::SelectionRunPosition;
@@ -148,6 +148,42 @@ pub(crate) fn operation_queue_indicator_button_style() -> fn(&Theme, button::Sta
 
 pub(crate) fn transparent_button_style() -> fn(&Theme, button::Status) -> button::Style {
     transparent_icon_button_style
+}
+
+/// 分组索引栏按钮:常态透明无框文本按钮(既定 UI 偏好),悬停浮起
+/// 浅色面;当前可视区所在组常亮浅色面,悬停其上再加深一档。
+pub(crate) fn grouping_rail_button_style(
+    is_active_group: bool,
+) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |theme, status| {
+        let colors = ui_colors(theme);
+        let background = match status {
+            button::Status::Hovered | button::Status::Pressed => {
+                Some(Background::Color(if is_active_group {
+                    colors.surface_container_highest
+                } else {
+                    colors.surface_container_high
+                }))
+            }
+            button::Status::Active if is_active_group => {
+                Some(Background::Color(colors.surface_container_high))
+            }
+            _ => None,
+        };
+        button::Style {
+            background,
+            text_color: if is_active_group || matches!(status, button::Status::Hovered) {
+                colors.on_surface
+            } else {
+                colors.on_surface_variant
+            },
+            border: Border {
+                radius: 6.0.into(),
+                ..Border::default()
+            },
+            ..button::Style::default()
+        }
+    }
 }
 
 pub(crate) fn context_menu_button_style() -> fn(&Theme, button::Status) -> button::Style {

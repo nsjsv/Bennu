@@ -1022,4 +1022,72 @@ mod tests {
             previous_entries.len() as f32 * crate::list_view::LIST_ROW_HEIGHT
         );
     }
+
+    #[test]
+    fn loading_placeholder_row_indices_count_only_entry_rows() {
+        // Pending 加载占位流与正常行流同一条纹规则:只有条目行计数,
+        // 展开状态行只贡献 trailing 高度 spacer、不占条纹序号,行序号
+        // 与条目序一一对应。
+        let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+        browser.view_mode = BrowserViewMode::List;
+        let abandoned = PathBuf::from("/workspace/leaving");
+        browser.current_dir = abandoned.clone();
+        browser.directory_collection_phase = DirectoryCollectionPhase::Ready;
+        let project = DirectoryEntry::new(
+            abandoned.join("project"),
+            FileKind::Directory,
+            EntryMetadata::default(),
+            false,
+            false,
+            false,
+        );
+        browser.entries = vec![
+            project.clone(),
+            DirectoryEntry::new(
+                abandoned.join("f.txt"),
+                FileKind::File,
+                EntryMetadata::default(),
+                false,
+                false,
+                false,
+            ),
+        ]
+        .into();
+        browser.expanded_directories.insert(
+            project.path.clone(),
+            ExpandedDirectory {
+                entries: Vec::new(),
+                directory_discovery: None,
+                status: ExpandedDirectoryStatus::Error,
+                is_expanded: true,
+                is_collapsing: false,
+                animation_progress: 1.0,
+                load_generation: 0,
+                load_context: None,
+                load_cancel: None,
+                directory_order_phase: DirectoryOrderPhase::Ready {
+                    field: SortField::Name,
+                    direction: file_core::SortDirection::Ascending,
+                },
+            },
+        );
+
+        drop(browser.navigate_to(PathBuf::from("/workspace"), NavigationMode::RecordHistory));
+
+        let placeholder = browser
+            .directory_loading_placeholder
+            .as_ref()
+            .expect("list navigation must retain visible placeholder rows");
+        assert_eq!(placeholder.entries.len(), 2);
+        assert_eq!(
+            placeholder
+                .entries
+                .iter()
+                .map(|entry| entry.row_index)
+                .collect::<Vec<_>>(),
+            [0, 1],
+            "状态行 spacer 不占条纹序号,f.txt 的行序号仍是 1"
+        );
+        assert!(placeholder.entries[0].trailing_status_height > 0.0);
+    }
 }

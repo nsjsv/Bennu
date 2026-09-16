@@ -6,10 +6,11 @@ use crate::model::{
     BrowserPaneId, ExpandedDirectory, IconGridExpansionAnchor, IconGridExpansionContext,
     IconGridExpansionSessionId,
 };
+use crate::transfer_placeholder_view::root_grouping;
 use file_core::{EntryMetadata, FileKind};
 use tokio_util::sync::CancellationToken;
 
-fn entry(path: impl Into<PathBuf>, kind: FileKind) -> DirectoryEntry {
+pub(super) fn entry(path: impl Into<PathBuf>, kind: FileKind) -> DirectoryEntry {
     DirectoryEntry::new(
         path.into(),
         kind,
@@ -21,8 +22,8 @@ fn entry(path: impl Into<PathBuf>, kind: FileKind) -> DirectoryEntry {
 }
 
 impl<'a> IconGridLayout<'a> {
-    /// 无占位的布局构造:测试夹具统一入口(生产路径统一走
-    /// with_root_transfer_placeholders,空占位时行为一致)。
+    /// 无占位、未分组的布局构造:测试夹具统一入口(生产路径统一走
+    /// with_root_transfer_placeholders,空占位且分组关闭时行为一致)。
     pub(crate) fn new(
         root_directory: &'a Path,
         root_entries: &'a [DirectoryEntry],
@@ -45,17 +46,58 @@ impl<'a> IconGridLayout<'a> {
             height_bound,
             icon_edge,
             expansion,
+            None,
+        )
+    }
+
+    /// 分组开启的布局构造:按名字首字母划分根文件段(测试统一入口)。
+    pub(crate) fn new_grouped_by_name_initial(
+        root_directory: &'a Path,
+        root_entries: &'a [DirectoryEntry],
+        root_placeholders: &[TransferPlaceholder],
+        direction: file_core::SortDirection,
+        viewport_width: f32,
+        height_bound: f32,
+        icon_edge: u32,
+        expansion: Option<&'a IconGridExpansionState>,
+    ) -> Self {
+        // 大小/日期维度才依赖元数据;名字维度用缺省元数据即可,划分键确定。
+        let metadata_for_entry = |_entry: &DirectoryEntry| EntryMetadata::default();
+        let grouping = root_grouping::RootGrouping {
+            mode: crate::model::FileGroupingMode::NameInitial,
+            direction,
+            language: crate::config::UiLanguage::English,
+            now: std::time::SystemTime::UNIX_EPOCH,
+        };
+        Self::with_root_transfer_placeholders(
+            root_directory,
+            root_entries,
+            root_placeholders,
+            TransferSortOptions {
+                field: file_core::SortField::Name,
+                direction,
+                directories_first: true,
+            },
+            &ExpandedTransferPlaceholderIndex::new(),
+            viewport_width,
+            height_bound,
+            icon_edge,
+            expansion,
+            Some(crate::icon_grid_layout::IconGridRootGrouping {
+                grouping: &grouping,
+                metadata_for_entry: &metadata_for_entry,
+            }),
         )
     }
 }
 
-fn files(directory: &str, count: usize) -> Vec<DirectoryEntry> {
+pub(super) fn files(directory: &str, count: usize) -> Vec<DirectoryEntry> {
     (0..count)
         .map(|index| entry(format!("{directory}/item-{index:03}"), FileKind::File))
         .collect()
 }
 
-fn loaded(entries: Vec<DirectoryEntry>) -> ExpandedDirectory {
+pub(super) fn loaded(entries: Vec<DirectoryEntry>) -> ExpandedDirectory {
     ExpandedDirectory {
         entries,
         directory_discovery: None,
@@ -73,7 +115,7 @@ fn loaded(entries: Vec<DirectoryEntry>) -> ExpandedDirectory {
     }
 }
 
-fn anchor(parent: &str, path: &str, index: usize) -> IconGridExpansionAnchor {
+pub(super) fn anchor(parent: &str, path: &str, index: usize) -> IconGridExpansionAnchor {
     IconGridExpansionAnchor {
         parent_directory: PathBuf::from(parent),
         path: PathBuf::from(path),
@@ -81,7 +123,7 @@ fn anchor(parent: &str, path: &str, index: usize) -> IconGridExpansionAnchor {
     }
 }
 
-fn expansion(root_entries: Vec<DirectoryEntry>) -> IconGridExpansionState {
+pub(super) fn expansion(root_entries: Vec<DirectoryEntry>) -> IconGridExpansionState {
     IconGridExpansionState::new(
         IconGridExpansionContext {
             pane_id: BrowserPaneId(1),
@@ -93,14 +135,14 @@ fn expansion(root_entries: Vec<DirectoryEntry>) -> IconGridExpansionState {
     )
 }
 
-fn first_band<'a>(layout: &'a IconGridLayout<'a>) -> &'a IconGridBandLayout<'a> {
+pub(super) fn first_band<'a>(layout: &'a IconGridLayout<'a>) -> &'a IconGridBandLayout<'a> {
     layout
         .root()
         .flow
         .iter()
         .find_map(|segment| match segment {
             IconGridFlowSegment::Band(band) => Some(band),
-            IconGridFlowSegment::Rows(_) => None,
+            IconGridFlowSegment::Rows(_) | IconGridFlowSegment::GroupHeader(_) => None,
         })
         .expect("layout should include expansion band")
 }
@@ -158,7 +200,7 @@ fn nested_panel_keeps_the_full_width_column_count() {
         .iter()
         .find_map(|segment| match segment {
             IconGridFlowSegment::Rows(rows) => Some(rows.column_count),
-            IconGridFlowSegment::Band(_) => None,
+            IconGridFlowSegment::Band(_) | IconGridFlowSegment::GroupHeader(_) => None,
         })
         .unwrap();
 
@@ -282,7 +324,7 @@ fn panel_layout_contains_only_the_active_sibling_band() {
         .iter()
         .filter_map(|segment| match segment {
             IconGridFlowSegment::Band(band) => Some(band),
-            IconGridFlowSegment::Rows(_) => None,
+            IconGridFlowSegment::Rows(_) | IconGridFlowSegment::GroupHeader(_) => None,
         })
         .collect::<Vec<_>>();
 
@@ -321,7 +363,7 @@ fn nested_band_contributes_to_parent_natural_height() {
         .iter()
         .find_map(|segment| match segment {
             IconGridFlowSegment::Band(band) => Some(band),
-            IconGridFlowSegment::Rows(_) => None,
+            IconGridFlowSegment::Rows(_) | IconGridFlowSegment::GroupHeader(_) => None,
         })
         .unwrap();
 
@@ -489,6 +531,7 @@ fn expansion_band_merges_transfer_placeholders_for_its_directory() {
         800.0,
         96,
         Some(&state),
+        None,
     );
 
     let band = first_band(&layout);
@@ -499,7 +542,7 @@ fn expansion_band_merges_transfer_placeholders_for_its_directory() {
         .iter()
         .find_map(|segment| match segment {
             IconGridFlowSegment::Rows(rows) => Some(rows),
-            IconGridFlowSegment::Band(_) => None,
+            IconGridFlowSegment::Band(_) | IconGridFlowSegment::GroupHeader(_) => None,
         })
         .unwrap();
     assert_eq!(band_rows.cells.len(), 1);

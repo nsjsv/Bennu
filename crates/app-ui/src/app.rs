@@ -14,9 +14,11 @@ mod desktop_activation;
 mod directory_expansion_loading;
 mod directory_metadata_demand;
 mod entry_changes;
+mod entry_hover_recalc;
 mod directory_recovery;
 mod events;
 mod file_drag_edge_scroll;
+mod file_grouping_rail_scroll;
 mod file_operation_notifications;
 mod file_operations;
 mod global_error;
@@ -364,6 +366,10 @@ pub(crate) struct FileBrowser {
     is_cursor_over_column_browser: bool,
     hovered_pane_id: Option<BrowserPaneId>,
     hovered_list_header_column: Option<(BrowserPaneId, ListColumnKind)>,
+    /// 光标最后进入的分组索引栏:栏是事件屏障(除滚轮),滚动补偿重算
+    /// 必须知道"光标正压在栏上",否则会把栏下层的行误判成 hover。
+    /// 栏不可见时由重算路径自愈清除,不逐个卸载点排查。
+    hovered_grouping_rail_pane: Option<BrowserPaneId>,
     pub(crate) keyboard_modifiers: keyboard::Modifiers,
     pub(crate) shortcut_capture: Option<ShortcutCaptureState>,
     selection_anchor: Option<PathBuf>,
@@ -770,6 +776,7 @@ impl FileBrowser {
             is_cursor_over_column_browser: false,
             hovered_pane_id: None,
             hovered_list_header_column: None,
+            hovered_grouping_rail_pane: None,
             keyboard_modifiers: keyboard::Modifiers::default(),
             shortcut_capture: None,
             selection_anchor: None,

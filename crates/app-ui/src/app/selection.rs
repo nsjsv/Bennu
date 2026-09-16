@@ -9,9 +9,9 @@ use super::panes::BrowserPaneView;
 use super::{FileBrowser, DOUBLE_CLICK_THRESHOLD};
 
 use crate::model::{
-    BrowserPaneId, BrowserViewMode, ContextMenuState, FileContextMenuExpansion,
-    FileContextMenuState, FileDeleteAction, FileDragSpringSource, FileDragStationaryAction,
-    LastActivationClick, Message,
+    file_grouping_entry_visible, BrowserPaneId, BrowserViewMode, ContextMenuState,
+    FileContextMenuExpansion, FileContextMenuState, FileDeleteAction, FileDragSpringSource,
+    FileDragStationaryAction, LastActivationClick, Message,
 };
 use crate::selection_summary::{summarize_selected_entries, PaneSelectionSummary};
 
@@ -390,6 +390,8 @@ impl FileBrowser {
                 delete_action,
                 position: self.cursor_position,
                 expansion: FileContextMenuExpansion::None,
+                // 分组方式入口只属于空白菜单,条目菜单一律不带。
+                grouping_entry_visible: false,
             }));
         }
         Task::batch([expansion_command, rename_command])
@@ -427,6 +429,9 @@ impl FileBrowser {
                 delete_action: FileDeleteAction::MoveToTrash,
                 position: self.cursor_position,
                 expansion: FileContextMenuExpansion::None,
+                // 按打开菜单那一刻的视图模式定死入口可见性,后续视图
+                // 切换不会让已打开的菜单中途长出入口。
+                grouping_entry_visible: file_grouping_entry_visible(self.view_mode),
             }));
         }
         Task::batch([expansion_command, rename_command])

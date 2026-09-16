@@ -99,6 +99,37 @@ fn translates_known_static_text() {
 }
 
 #[test]
+fn translates_file_grouping_menu_keys_and_group_titles() {
+    // 菜单七项 + 触发行;Today/Yesterday/Archives(压缩包) 等与搜索
+    // 筛选共用的 key 由前置模块提供,这里一并钉住不被改回英文。
+    for (text, expected) in [
+        ("Group By", "分组方式"),
+        ("None", "无分组"),
+        ("Name", "名称"),
+        ("Kind", "类型"),
+        ("Size", "大小"),
+        ("Date Modified", "修改日期"),
+        ("Date Created", "创建日期"),
+        ("Date Accessed", "访问日期"),
+        ("Today", "今天"),
+        ("Yesterday", "昨天"),
+        ("This Week", "本周"),
+        ("This Month", "本月"),
+        ("Earlier", "更早"),
+        ("Images", "图片"),
+        ("Videos", "视频"),
+        ("Audio", "音频"),
+        ("Documents", "文档"),
+        ("Archives", "压缩包"),
+        ("Applications", "应用"),
+        ("Other", "其他"),
+    ] {
+        assert_eq!(translate(UiLanguage::Chinese, text), expected);
+        assert_eq!(translate(UiLanguage::English, text), text);
+    }
+}
+
+#[test]
 fn translates_known_dynamic_text() {
     for (text, expected) in [
         (

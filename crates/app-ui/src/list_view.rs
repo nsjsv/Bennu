@@ -40,6 +40,9 @@ const LIST_CONTENT_PADDING: iced::Padding = iced::Padding {
 };
 pub(crate) const LIST_ROW_HEIGHT: f32 = 46.0;
 pub(crate) const LIST_OVERSCAN_ROWS: usize = 16;
+/// 分组标题行的 chrome 高度:与表头总高同族(24 单元 + 8 内边距),
+/// 属面板 chrome 不随密度缩放;行流构建与渲染共用本常量保证同口径。
+pub(crate) const LIST_GROUP_HEADER_HEIGHT: f32 = 32.0;
 
 /// 列表条目几何在 100% 基础上按当前档位比例缩放；
 /// 表头、列宽和面板外层留白不参与密度缩放。
@@ -110,6 +113,8 @@ pub(crate) fn list_browser_view<'a>(
     let mut rows = Column::new().spacing(0).width(Length::Fill);
     rows = rows.push(list_header(browser, pane.id));
 
+    // 分组索引栏数据与行流同源派生;Pending 阶段(加载占位)无组头。
+    let mut rail_entries = Vec::new();
     if matches!(
         pane.current_directory_content(),
         DirectoryContentAvailability::Pending
@@ -139,10 +144,15 @@ pub(crate) fn list_browser_view<'a>(
             pane,
             geometry.row_height,
         );
+        // 索引栏条目从同一份行流派生,组头顶点偏移与渲染高度累计同口径。
+        rail_entries = crate::transfer_placeholder_view::list_file_group_rail_entries(
+            &transfer_rows,
+            geometry.row_height,
+        );
         let has_placeholders = transfer_rows.iter().any(|row| {
             matches!(
                 row,
-                crate::transfer_placeholder_view::ListTransferRow::Placeholder(_)
+                crate::transfer_placeholder_view::ListTransferRow::Placeholder { .. }
             )
         });
         if pane.entries.is_empty() && !has_placeholders {
@@ -184,16 +194,19 @@ pub(crate) fn list_browser_view<'a>(
                     break;
                 };
                 match row {
-                    crate::transfer_placeholder_view::ListTransferRow::Entry(visible_entry) => {
+                    crate::transfer_placeholder_view::ListTransferRow::Entry {
+                        visible,
+                        stripe_index,
+                    } => {
                         rows = rows.push(list_entry_row(
                             browser,
                             pane,
                             &geometry,
                             &visible_columns,
-                            visible_entry.entry,
-                            visible_entry.depth,
-                            row_index,
-                            visible_entry.animation_progress,
+                            visible.entry,
+                            visible.depth,
+                            *stripe_index,
+                            visible.animation_progress,
                             crate::transfer_placeholder_view::selection_run_position_in_transfer_rows(
                                 &transfer_rows,
                                 row_index,
@@ -205,26 +218,36 @@ pub(crate) fn list_browser_view<'a>(
                         message,
                         depth,
                         height,
+                        stripe_index,
                     } => {
                         rows = rows.push(list_directory_status_row(
                             message,
                             *depth,
-                            row_index,
+                            *stripe_index,
                             *height,
                             &geometry,
                         ));
                     }
-                    crate::transfer_placeholder_view::ListTransferRow::Placeholder(
+                    crate::transfer_placeholder_view::ListTransferRow::Placeholder {
                         placeholder,
-                    ) => {
+                        stripe_index,
+                    } => {
                         rows = rows.push(
                             crate::transfer_placeholder_view::transfer_placeholder_list_row(
                                 placeholder,
                                 &geometry,
                                 &visible_columns,
-                                row_index,
+                                *stripe_index,
                             ),
                         );
+                    }
+                    crate::transfer_placeholder_view::ListTransferRow::GroupHeader {
+                        title,
+                        count,
+                        height,
+                        ..
+                    } => {
+                        rows = rows.push(list_group_header_row(title, *count, *height, &geometry));
                     }
                 }
             }
@@ -251,7 +274,7 @@ pub(crate) fn list_browser_view<'a>(
             move |viewport: scrollable::Viewport| {
                 let offset = viewport.absolute_offset();
                 let bounds = viewport.bounds();
-                Message::ListScrolled(pane.id, offset.y, bounds.height)
+                Message::ListScrolled(pane.id, offset.y, bounds)
             },
         ));
     let list_scroll = enhanced_scrollbar(
@@ -262,25 +285,54 @@ pub(crate) fn list_browser_view<'a>(
         8.0,
     );
 
-    mouse_area(
+    let pane_surface: Element<'a, Message> =
         container(list_scroll)
             .padding(LIST_CONTENT_PADDING)
             .width(Length::Fill)
             .height(Length::Fill)
-            .style(list_panel_style),
-    )
-    .on_press(Message::BlankAreaPressed(pane.id))
-    .on_release(Message::DropTargetReleased(
-        pane.id,
-        pane.current_dir.clone(),
-    ))
-    .on_right_press(Message::BlankAreaRightClicked(
-        pane.id,
-        pane.current_dir.clone(),
-    ))
-    .on_enter(Message::ColumnBrowserCursorEntered(pane.id))
-    .on_exit(Message::ColumnBrowserCursorExited(pane.id))
-    .into()
+            .style(list_panel_style)
+            .into();
+    // 索引栏叠层:分组开启且组数 ≥2 时挂在滚动区之上;当前可视区顶部
+    // 所在组在渲染期由派生 offsets 与视口偏移推得,不占持久状态。栏右
+    // 缘自带避开滚动条 thumb 的间隙,不会遮挡 overlay 滚动条。
+    let pane_surface: Element<'a, Message> =
+        if crate::model::file_group_rail_visible(&rail_entries) {
+            let viewport_position = pane
+                .column_viewports
+                .get(pane.current_dir)
+                .map(|viewport| viewport.offset_y)
+                .unwrap_or(0.0)
+                - LIST_HEADER_HEIGHT;
+            let active_group =
+                crate::model::active_file_group_index(&rail_entries, viewport_position);
+            Stack::with_children([
+                pane_surface,
+                crate::file_grouping_rail::file_grouping_rail_view(
+                    &rail_entries,
+                    active_group,
+                    pane.id,
+                ),
+            ])
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+        } else {
+            pane_surface
+        };
+
+    mouse_area(pane_surface)
+        .on_press(Message::BlankAreaPressed(pane.id))
+        .on_release(Message::DropTargetReleased(
+            pane.id,
+            pane.current_dir.clone(),
+        ))
+        .on_right_press(Message::BlankAreaRightClicked(
+            pane.id,
+            pane.current_dir.clone(),
+        ))
+        .on_enter(Message::ColumnBrowserCursorEntered(pane.id))
+        .on_exit(Message::ColumnBrowserCursorExited(pane.id))
+        .into()
 }
 
 fn vertical_spacer(height: f32) -> Element<'static, Message> {
@@ -432,10 +484,36 @@ fn list_message(message: &'static str) -> Element<'static, Message> {
         .into()
 }
 
+/// 分组标题行:跨全宽纯静态容器,不包 mouse_area、不发消息——天然
+/// 无 hover/选中态、不响应条目右键菜单,数量直接拼接数字。
+/// 标题是构造时本地化的成品 String,readable_text 的 String 分支不查
+/// 词条、只负责文本整形(中文标题需要 advanced shaping)。
+fn list_group_header_row(
+    title: &str,
+    count: usize,
+    height: f32,
+    geometry: &ListGeometry,
+) -> Element<'static, Message> {
+    container(
+        row![
+            readable_text(title.to_owned()).size(LIST_HEADER_TEXT_SIZE),
+            readable_text(format!("({count})")).size(LIST_HEADER_TEXT_SIZE),
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center),
+    )
+    .padding(geometry.row_padding)
+    .height(Length::Fixed(height))
+    .center_y(Length::Fixed(height))
+    .width(Length::Fill)
+    .style(crate::appearance::group_header_style)
+    .into()
+}
+
 fn list_directory_status_row(
     message: &'static str,
     depth: usize,
-    row_index: usize,
+    stripe_index: usize,
     height: f32,
     geometry: &ListGeometry,
 ) -> Element<'static, Message> {
@@ -451,7 +529,7 @@ fn list_directory_status_row(
         .center_y(Length::Fixed(geometry.row_height))
         .padding(geometry.row_padding)
         .width(Length::Fill)
-        .style(list_row_style(depth, row_index)),
+        .style(list_row_style(depth, stripe_index)),
     )
     .height(Length::Fixed(height))
     .clip(true)
@@ -465,7 +543,7 @@ fn list_entry_row<'a>(
     visible_columns: &[ListColumnConfig],
     entry: &DirectoryEntry,
     depth: usize,
-    row_index: usize,
+    stripe_index: usize,
     animation_progress: f32,
     selection_run_position: Option<crate::file_entry_presentation::SelectionRunPosition>,
 ) -> Element<'a, Message> {
@@ -493,7 +571,9 @@ fn list_entry_row<'a>(
         if let Some(style) = visual_state.row_style_for_selection_run(selection_run_position) {
             row_container.style(style)
         } else {
-            row_container.style(list_row_style(depth, row_index))
+            // 条纹序号来自行流构建期的目录段计数器,与流绝对下标解耦:
+            // 组头/状态行/占位行插拔不再翻转后续条目的条纹相位。
+            row_container.style(list_row_style(depth, stripe_index))
         };
 
     let row_area = mouse_area(row_container)

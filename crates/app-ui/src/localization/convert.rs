@@ -11,7 +11,9 @@ pub(super) fn translate(text: &str) -> Option<String> {
         "High" => "高",
         "Target size" => "目标体积",
         "Target size per file" => "每个文件的目标体积",
-        "Size" => "尺寸",
+        // 转格式的缩放行用独立 key:裸 "Size" 是文件大小概念(属性面板/
+        // 列表列头/分组菜单共用,译"大小"),不能被这里的尺寸语义遮蔽。
+        "Resize" => "尺寸",
         "Custom" => "自定义",
         "Keep" => "保持",
         "Mono" => "单声道",

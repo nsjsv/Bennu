@@ -93,6 +93,13 @@ pub(crate) use list_view_preferences::{
     list_column_kind_config_value, list_column_kind_from_config_value, ListColumnConfig,
     ListColumnKind, ListSortPreference, ListViewPreferences,
 };
+mod file_grouping;
+pub(crate) use file_grouping::{
+    active_file_group_index, date_group_key, dynamic_size_buckets, file_grouping_entry_visible,
+    file_group_rail_visible, file_group_scroll_target_offset, kind_category_group_key,
+    name_initial_group_key, partition_files_into_groups, size_group_bucket_index,
+    FileGroupingContext, FileGroupingMode, FileGroupKey, FileGroupRailEntry, FileGroupSection,
+};
 mod list_directory_summary;
 pub(crate) use list_directory_summary::{
     ListDirectorySizeDisplayMode, ListDirectorySummary, ListDirectorySummaryCache,
@@ -465,6 +472,14 @@ pub(crate) enum Message {
     FlatEntryClicked(BrowserPaneId, PathBuf),
     ListHeaderRightClicked(BrowserPaneId),
     ListColumnVisibilityToggled(ListColumnKind),
+    FileGroupingModeSelected(FileGroupingMode),
+    /// 分组索引栏的点击/扫动落点:按下与按住换档都发同一条消息,目标
+    /// 组序在更新层换算成滚动偏移并主动回写视口状态(scroll_to 不回发
+    /// on_scroll)。扫动的按住状态由索引栏组件局部持有,不进全局状态。
+    FileGroupingRailTargetSelected {
+        pane: BrowserPaneId,
+        group_index: usize,
+    },
     ListColumnResizeStarted(BrowserPaneId, ListColumnKind),
     ListColumnReorderStarted(BrowserPaneId, ListColumnKind),
     ListHeaderColumnEntered(BrowserPaneId, ListColumnKind),
@@ -481,6 +496,10 @@ pub(crate) enum Message {
     EntryRightClicked(BrowserPaneId, PathBuf),
     EntryHovered(BrowserPaneId, PathBuf),
     EntryHoverCleared(BrowserPaneId, PathBuf),
+    /// 分组索引栏进入/离开:栏是事件屏障,光标在栏内时下层行收不到
+    /// exit、栏外滚动重算也不得命中,两个方向都要显式入账。
+    FileGroupingRailCursorEntered(BrowserPaneId),
+    FileGroupingRailCursorExited(BrowserPaneId),
     DropTargetHovered(BrowserPaneId, PathBuf),
     DropTargetHoverCleared(BrowserPaneId, PathBuf),
     DropTargetReleased(BrowserPaneId, PathBuf),
@@ -767,8 +786,12 @@ pub(crate) enum Message {
     PreviewArchiveScrolled,
     ColumnBrowserScrolled(BrowserPaneId, f32, f32),
     ColumnScrolled(BrowserPaneId, PathBuf, f32, f32),
-    ListScrolled(BrowserPaneId, f32, f32),
-    IconGridScrolled(BrowserPaneId, f32, f32, f32),
+    /// 列表滚动帧:offset_y 为内容偏移,viewport 是 iced 实测的可视区
+    /// 窗口坐标矩形——hover 滚动补偿用它把存量光标位置换算成行流内
+    /// 落点,与渲染同源,不另推布局。
+    ListScrolled(BrowserPaneId, f32, iced::Rectangle),
+    /// 大图滚动帧:语义同 ListScrolled,网格无表头,flow 顶点即内容偏移。
+    IconGridScrolled(BrowserPaneId, f32, iced::Rectangle),
     ColumnResizeStarted(BrowserPaneId, usize),
     OpenDirectoryFromMiddleClick(BrowserPaneId, PathBuf),
     OpenTrashInNewTab(BrowserPaneId),
@@ -999,6 +1022,9 @@ pub(crate) struct FileContextMenuState {
     pub(crate) delete_action: FileDeleteAction,
     pub(crate) position: Point,
     pub(crate) expansion: FileContextMenuExpansion,
+    /// 打开菜单时按 pane 视图模式求值的分组方式入口门控
+    /// （仅空白菜单为真）；渲染层只读该结果，不再感知视图模式。
+    pub(crate) grouping_entry_visible: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1023,6 +1049,9 @@ pub(crate) enum FileContextMenuExpansion {
     None,
     /// 展开锚点组的子菜单;锚点是组内一级行对应的菜单项。
     Group(FileAreaMenuItem),
+    /// 空白菜单末尾固定的「分组方式」子菜单;不进可配置菜单体系,
+    /// 与组锚点共用悬停展开状态。
+    FileGrouping,
 }
 
 #[derive(Debug, Clone)]

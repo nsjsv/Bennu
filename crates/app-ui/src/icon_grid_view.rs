@@ -14,7 +14,7 @@ use crate::app::smooth_scroll::{smooth_scroll_content_with_shift, smooth_scroll_
 use crate::app::FileBrowser;
 use crate::appearance::{
     context_menu_style, enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction,
-    icon_grid_expansion_panel_style, icon_svg_style, list_panel_style,
+    group_header_style, icon_grid_expansion_panel_style, icon_svg_style, list_panel_style,
     navigation_icon_button_style,
 };
 use crate::column_entry_bounds::track_column_entry_bounds;
@@ -29,8 +29,9 @@ use crate::icon_grid_geometry::{
     ICON_GRID_CONTENT_PADDING, ICON_GRID_LABEL_SIZE,
 };
 use crate::icon_grid_layout::{
-    IconGridBandLayout, IconGridCell, IconGridFlowSegment, IconGridPanelLayout,
-    IconGridPanelStatus, IconGridRowsLayout, ICON_GRID_STATUS_HEIGHT,
+    IconGridBandLayout, IconGridCell, IconGridFlowSegment, IconGridGroupHeaderLayout,
+    IconGridPanelLayout, IconGridPanelStatus, IconGridRowsLayout, ICON_GRID_GROUP_HEADER_HEIGHT,
+    ICON_GRID_STATUS_HEIGHT,
 };
 use crate::icons::rotated_chevron_right_view;
 use crate::input_blocking_space::input_blocking_space;
@@ -45,6 +46,8 @@ const DISCLOSURE_ICON_SIZE: f32 = 14.0;
 const PANEL_INDICATOR_SIZE: f32 = 14.0;
 const ICON_GRID_NAME_TOOLTIP_WIDTH: f32 = 320.0;
 const ICON_GRID_NAME_TOOLTIP_DELAY: Duration = Duration::from_millis(500);
+/// 分组标题条字号:与列表组头同族的 12px 面板 chrome 文字。
+const GRID_GROUP_HEADER_TEXT_SIZE: u32 = 12;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum IconGridPanelInput {
@@ -63,6 +66,8 @@ pub(crate) fn icon_grid_view<'a>(
         &browser.operation_queue,
         pane.current_dir,
     );
+    // 分组索引栏数据与根面板 flow 同源派生;Pending/空目录无组头段。
+    let mut rail_entries = Vec::new();
     let content: Element<'a, Message> = match pane.current_directory_content() {
         DirectoryContentAvailability::Pending => Space::new().height(Length::Fill).into(),
         DirectoryContentAvailability::Available([])
@@ -77,6 +82,7 @@ pub(crate) fn icon_grid_view<'a>(
         DirectoryContentAvailability::Available(_) => {
             let layout =
                 browser.icon_grid_layout_for_pane_with_placeholders(pane, &transfer_placeholders);
+            rail_entries = layout.root().file_group_rail_entries();
             render_panel(
                 browser,
                 pane,
@@ -109,7 +115,7 @@ pub(crate) fn icon_grid_view<'a>(
             move |viewport: scrollable::Viewport| {
                 let offset = viewport.absolute_offset();
                 let bounds = viewport.bounds();
-                Message::IconGridScrolled(pane_id, offset.y, bounds.width, bounds.height)
+                Message::IconGridScrolled(pane_id, offset.y, bounds)
             },
         ));
     let grid_scroll = enhanced_scrollbar(
@@ -120,24 +126,47 @@ pub(crate) fn icon_grid_view<'a>(
         8.0,
     );
 
-    mouse_area(
-        container(grid_scroll)
+    let pane_surface: Element<'a, Message> = container(grid_scroll)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(list_panel_style)
+        .into();
+    // 索引栏叠层:分组开启且组数 ≥2 时挂上;当前可视区顶部所在组由
+    // flow 派生的 offsets 与视口偏移在渲染期推得,不占持久状态。
+    let pane_surface: Element<'a, Message> =
+        if crate::model::file_group_rail_visible(&rail_entries) {
+            let active_group = crate::model::active_file_group_index(
+                &rail_entries,
+                pane.icon_grid_viewport.offset_y,
+            );
+            Stack::with_children([
+                pane_surface,
+                crate::file_grouping_rail::file_grouping_rail_view(
+                    &rail_entries,
+                    active_group,
+                    pane.id,
+                ),
+            ])
             .width(Length::Fill)
             .height(Length::Fill)
-            .style(list_panel_style),
-    )
-    .on_press(Message::BlankAreaPressed(pane.id))
-    .on_release(Message::DropTargetReleased(
-        pane.id,
-        pane.current_dir.clone(),
-    ))
-    .on_right_press(Message::BlankAreaRightClicked(
-        pane.id,
-        pane.current_dir.clone(),
-    ))
-    .on_enter(Message::ColumnBrowserCursorEntered(pane.id))
-    .on_exit(Message::ColumnBrowserCursorExited(pane.id))
-    .into()
+            .into()
+        } else {
+            pane_surface
+        };
+
+    mouse_area(pane_surface)
+        .on_press(Message::BlankAreaPressed(pane.id))
+        .on_release(Message::DropTargetReleased(
+            pane.id,
+            pane.current_dir.clone(),
+        ))
+        .on_right_press(Message::BlankAreaRightClicked(
+            pane.id,
+            pane.current_dir.clone(),
+        ))
+        .on_enter(Message::ColumnBrowserCursorEntered(pane.id))
+        .on_exit(Message::ColumnBrowserCursorExited(pane.id))
+        .into()
 }
 
 fn start_cell_index(rows: &IconGridRowsLayout, row: usize) -> usize {
@@ -180,6 +209,9 @@ fn render_panel<'a>(
                     input,
                     depth + 1,
                 )),
+                IconGridFlowSegment::GroupHeader(header) => {
+                    content.push(render_group_header(header))
+                }
             };
             cursor = segment.top() + segment.height();
         }
@@ -221,12 +253,6 @@ fn render_rows<'a>(
         .spacing(0)
         .push(vertical_spacer(visible.before_height));
     let row_height = row_height(icon_edge);
-    // 展开锚点以条目索引为键:渲染按单元格走,条目索引单独计数。
-    let mut next_entry_index =
-        rows.cells[..start_cell_index(rows, visible.start_row)]
-            .iter()
-            .filter(|cell| matches!(cell, IconGridCell::Entry(_)))
-            .count();
     for row_index in visible.start_row..visible.end_row {
         let start = start_cell_index(rows, row_index);
         let end = start
@@ -238,15 +264,15 @@ fn render_rows<'a>(
             .height(Length::Fixed(row_height));
         for cell in &rows.cells[start..end] {
             match cell {
-                IconGridCell::Entry(entry) => {
-                    let entry_index = next_entry_index;
-                    next_entry_index += 1;
+                // 展开锚点以条目数组下标为键,格子自带真实下标:分组重排
+                // 后按格子顺序计数会错位,这里直接消费格子携带的下标。
+                IconGridCell::Entry(cell) => {
                     row = row.push(icon_grid_entry(
                         browser,
                         pane,
                         rows.directory,
-                        entry_index,
-                        entry,
+                        cell.entry_index,
+                        cell.entry,
                         input,
                     ));
                 }
@@ -268,6 +294,27 @@ fn render_rows<'a>(
         .width(Length::Fill)
         .height(Length::Fixed(rows.height))
         .into()
+}
+
+/// 分组标题条:全宽纯静态容器,不包 mouse_area、不发消息——天然
+/// 无 hover/选中态、不进交互集合,数量直接拼接数字。视觉与列表组头
+/// 同族(共用同一 container 样式)。标题是构造时本地化的成品 String,
+/// readable_text 的 String 分支不查词条、只负责文本整形。
+fn render_group_header<'a>(header: &IconGridGroupHeaderLayout) -> Element<'a, Message> {
+    container(
+        Row::new()
+            .push(readable_text(header.title.clone()).size(GRID_GROUP_HEADER_TEXT_SIZE))
+            .push(
+                readable_text(format!("({})", header.count)).size(GRID_GROUP_HEADER_TEXT_SIZE),
+            )
+            .spacing(4)
+            .align_y(Alignment::Center),
+    )
+    .height(Length::Fixed(ICON_GRID_GROUP_HEADER_HEIGHT))
+    .center_y(Length::Fixed(ICON_GRID_GROUP_HEADER_HEIGHT))
+    .width(Length::Fill)
+    .style(group_header_style)
+    .into()
 }
 
 fn render_band<'a>(

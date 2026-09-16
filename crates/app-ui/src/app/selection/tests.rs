@@ -2,7 +2,13 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use file_core::{DirectoryEntry, EntryMetadata, FileKind};
-use iced::{Point, Rectangle};
+use iced::{Point, Rectangle, Size};
+
+/// 滚动消息的可视区矩形:原点避开 (0,0),默认光标初值落在视口外,
+/// 滚动补偿守卫按"无光标记录"跳过,不打扰本文件的框选断言。
+fn scroll_viewport() -> Rectangle {
+    Rectangle::new(Point::new(200.0, 120.0), Size::new(600.0, 400.0))
+}
 
 use crate::{
     app::FileBrowser,
@@ -218,7 +224,11 @@ fn scroll_motion_preserves_waiting_marquee_phase() {
         preserve_existing: false,
     });
 
-    drop(browser.update(crate::model::Message::ListScrolled(pane_id, 10.0, 400.0)));
+    drop(browser.update(crate::model::Message::ListScrolled(
+        pane_id,
+        10.0,
+        scroll_viewport(),
+    )));
 
     let marquee = browser
         .selection_marquee
@@ -257,7 +267,11 @@ fn file_view_scroll_messages_move_the_active_marquee_anchor() {
         .expect("selection marquee")
         .start = Point::new(40.0, 50.0);
 
-    drop(browser.update(crate::model::Message::ListScrolled(pane_id, 15.0, 400.0)));
+    drop(browser.update(crate::model::Message::ListScrolled(
+        pane_id,
+        15.0,
+        scroll_viewport(),
+    )));
     assert_eq!(
         browser
             .selection_marquee
@@ -276,7 +290,9 @@ fn file_view_scroll_messages_move_the_active_marquee_anchor() {
         offset_y: 5.0,
     };
     drop(browser.update(crate::model::Message::IconGridScrolled(
-        pane_id, 25.0, 600.0, 400.0,
+        pane_id,
+        25.0,
+        scroll_viewport(),
     )));
     assert_eq!(
         browser
@@ -831,4 +847,48 @@ fn symlink_menu_entry_gates_out_remote_mount_selection() {
         panic!("file context menu opens");
     };
     assert!(local_menu.can_create_symlink);
+}
+
+#[test]
+fn blank_menu_carries_grouping_entry_only_in_grouping_capable_views() {
+    let (mut browser, _) = FileBrowser::new(config::default_user_config());
+    let grouping_entry_visible = |browser: &FileBrowser| {
+        let ContextMenuState::FileArea(menu) =
+            browser.context_menu.as_ref().expect("context menu opens")
+        else {
+            panic!("blank right click opens the file area menu");
+        };
+        menu.grouping_entry_visible
+    };
+
+    // 多栏视图不做分组:菜单照常打开,但不携带分组方式入口。
+    browser.view_mode = BrowserViewMode::Columns;
+    drop(browser.handle_blank_area_right_clicked(PathBuf::from("/tmp")));
+    assert!(!grouping_entry_visible(&browser));
+
+    browser.view_mode = BrowserViewMode::List;
+    drop(browser.handle_blank_area_right_clicked(PathBuf::from("/tmp")));
+    assert!(grouping_entry_visible(&browser));
+
+    browser.view_mode = BrowserViewMode::Icons;
+    drop(browser.handle_blank_area_right_clicked(PathBuf::from("/tmp")));
+    assert!(grouping_entry_visible(&browser));
+}
+
+#[test]
+fn entry_menu_never_carries_grouping_entry() {
+    let (mut browser, _) = FileBrowser::new(config::default_user_config());
+    browser.view_mode = BrowserViewMode::List;
+    let file = PathBuf::from("/tmp/notes.txt");
+    browser.selected_paths = std::iter::once(file.clone()).collect();
+    browser.selected = Some(file.clone());
+
+    drop(browser.handle_entry_right_clicked(file));
+    let ContextMenuState::FileArea(menu) =
+        browser.context_menu.as_ref().expect("context menu opens")
+    else {
+        panic!("entry right click opens the file area menu");
+    };
+    assert!(menu.target.is_some());
+    assert!(!menu.grouping_entry_visible);
 }

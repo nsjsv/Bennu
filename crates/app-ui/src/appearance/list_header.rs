@@ -18,6 +18,15 @@ pub(crate) fn list_header_style(theme: &Theme) -> container::Appearance {
     }
 }
 
+/// 分组标题条:低调全宽标题,无背景无描边,仅用次要文字色与内容区
+/// 分(表头同族的"面板 chrome"视觉)。列表组头行与大图组头条共用。
+pub(crate) fn group_header_style(theme: &Theme) -> container::Appearance {
+    container::Appearance {
+        text_color: Some(ui_colors(theme).on_surface_variant),
+        ..container::Appearance::default()
+    }
+}
+
 pub(crate) fn list_header_cell_style(
     state: ListHeaderCellVisualState,
 ) -> impl Fn(&Theme) -> container::Appearance + Clone {

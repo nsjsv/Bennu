@@ -80,6 +80,22 @@ impl FileBrowser {
                 );
             }
         }
+        // 大图根面板与列表共用同一分组划分器:分组开启时根 cells 先按
+        // 目录置顶、文件段按组划分;子面板/band 永远平铺。元数据解析
+        // 绑定 pane 的显示同源入口,分组键与列表行流同源。
+        let root_grouping =
+            crate::transfer_placeholder_view::root_grouping::RootGrouping::for_pane_root(
+                self,
+                pane,
+                pane.current_dir.as_path(),
+            );
+        let metadata_for_entry = |entry: &DirectoryEntry| pane.metadata_for_entry(entry);
+        let root_grouping = root_grouping.as_ref().map(|grouping| {
+            crate::icon_grid_layout::IconGridRootGrouping {
+                grouping,
+                metadata_for_entry: &metadata_for_entry,
+            }
+        });
         IconGridLayout::with_root_transfer_placeholders(
             pane.current_dir,
             pane.entries,
@@ -90,6 +106,7 @@ impl FileBrowser {
             self.main_window_height,
             self.user_config.icons_icon_edge(),
             expansion,
+            root_grouping,
         )
     }
 

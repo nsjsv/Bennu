@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use file_core::DirectoryEntry;
 use iced::widget::{column, container, row, Space};
-use iced::{Alignment, Element, Length};
+use iced::{Alignment, Element, Length, Point};
 
 use crate::appearance::list_row_style;
 use crate::app::panes::BrowserPaneView;
@@ -17,7 +17,7 @@ use crate::app::FileBrowser;
 use crate::file_drag_spring_ring::file_drag_spring_ring;
 use crate::file_entry_view::{file_entry_symbol_icon, FileEntryIconDensity, FileEntryIconTone};
 use crate::icons::{file_entry_icon_symbol, IconSymbol};
-use crate::list_view::ListGeometry;
+use crate::list_view::{ListGeometry, LIST_GROUP_HEADER_HEIGHT};
 use crate::measured_middle_ellipsized_text::{
     measured_middle_ellipsized_centered_text, measured_middle_ellipsized_text,
 };
@@ -32,6 +32,11 @@ use crate::transfer_placeholders::{
 use crate::typography::readable_text;
 use crate::virtual_range::VirtualRange;
 use crate::visible_entries::{VisibleEntry, VisibleEntryStatusRow};
+
+/// 根目录分组划分:目录置顶 + 文件段按组分段,列表/大图的当前目录
+/// 共用(网格侧经 icon_grid_layout 的分组入参消费)。
+#[path = "transfer_placeholder_view/root_grouping.rs"]
+pub(crate) mod root_grouping;
 
 /// 占位图标槽:类型图标 + 外圈传输进度环。空进度画纯 track 环,与
 /// spring ring 的 progress=0 形态一致。
@@ -74,12 +79,13 @@ fn transfer_placeholder_name_text(
 }
 
 /// 列表视图的占位行:名字列放图标+环+名字,其余列显示缺省占位,
-/// 行高与普通行一致(计入虚拟滚动)。
+/// 行高与普通行一致(计入虚拟滚动)。条纹取所在目录段计数器的当前
+/// 值(透传,不自增):占位插拔不改变任何条目的条纹相位。
 pub(crate) fn transfer_placeholder_list_row(
     placeholder: &TransferPlaceholder,
     geometry: &ListGeometry,
     visible_columns: &[ListColumnConfig],
-    row_index: usize,
+    stripe_index: usize,
 ) -> Element<'static, Message> {
     let mut cells = row![]
         .spacing(0)
@@ -113,7 +119,7 @@ pub(crate) fn transfer_placeholder_list_row(
         .height(Length::Fixed(geometry.row_height))
         .center_y(Length::Fixed(geometry.row_height))
         .width(Length::Fill)
-        .style(list_row_style(0, row_index))
+        .style(list_row_style(0, stripe_index))
         .into()
 }
 
@@ -216,32 +222,60 @@ pub(crate) fn transfer_sort_for_expanded(
 
 /// 列表视图的合并行流:真实条目行、展开状态行与传输占位行交错,
 /// 一次性摊平后供虚拟范围计算与行渲染共用。
+///
+/// 条纹相位不变量:stripe_index 在行流构建期按"每个目录段一个计数器、
+/// 仅 Entry 行自增"赋值,组头/状态行/占位行只透传当前值(不自增)。
+/// 旧实现用合并流的绝对下标,任何 chrome 行插入都翻转奇偶相位,条纹
+/// 呈不连续随机分布;这里把相位所有权收回条目序,chrome 行插拔不再
+/// 影响任何条目的条纹。
 pub(crate) enum ListTransferRow<'a> {
-    Entry(VisibleEntry<'a>),
+    Entry {
+        visible: VisibleEntry<'a>,
+        stripe_index: usize,
+    },
     DirectoryStatusRow {
         message: &'static str,
         depth: usize,
         height: f32,
+        stripe_index: usize,
     },
-    Placeholder(TransferPlaceholder),
+    Placeholder {
+        placeholder: TransferPlaceholder,
+        stripe_index: usize,
+    },
+    /// 根目录分组标题行:仅分组开启时插入文件段之前,title 与
+    /// index_label 都是构造时本地化的成品文案(后者供索引栏派生)。
+    /// entry_path()=None 使其与占位行同一机制地断开选中连排、不进任何
+    /// 条目集合。
+    GroupHeader {
+        title: String,
+        index_label: String,
+        count: usize,
+        height: f32,
+    },
 }
 
 impl ListTransferRow<'_> {
     /// 与渲染同口径:条目行按展开动画进度收缩(list_entry_row 的容器
-    /// 高度),状态行按各自动画高度,占位行恒定整行高。
+    /// 高度),状态行按各自动画高度,占位行恒定整行高,组头行按自身
+    /// chrome 高度——虚拟范围/内容高/reveal 数学全部基于本函数累计。
     fn height(&self, row_height: f32) -> f32 {
         match self {
-            Self::DirectoryStatusRow { height, .. } => *height,
-            Self::Entry(visible) => row_height * visible.animation_progress.clamp(0.0, 1.0),
-            Self::Placeholder(_) => row_height,
+            Self::DirectoryStatusRow { height, .. } | Self::GroupHeader { height, .. } => *height,
+            Self::Entry { visible, .. } => {
+                row_height * visible.animation_progress.clamp(0.0, 1.0)
+            }
+            Self::Placeholder { .. } => row_height,
         }
     }
 
     /// 选中连排(selection run)计算只看真实条目;占位与状态行天然断开。
     fn entry_path(&self) -> Option<&Path> {
         match self {
-            Self::Entry(visible) => Some(visible.entry.path.as_path()),
-            Self::DirectoryStatusRow { .. } | Self::Placeholder(_) => None,
+            Self::Entry { visible, .. } => Some(visible.entry.path.as_path()),
+            Self::DirectoryStatusRow { .. }
+            | Self::GroupHeader { .. }
+            | Self::Placeholder { .. } => None,
         }
     }
 }
@@ -289,28 +323,112 @@ fn push_directory_transfer_rows<'a>(
         })
         .clone();
     let merged = merge_entries_with_placeholders(entries, &placeholders, sort);
-    for item in merged {
-        match item {
-            MergedTransferItem::Entry(entry) => {
-                rows.push(ListTransferRow::Entry(VisibleEntry {
+    // 条纹计数器按目录段各自新建:递归展开的子目录从 0 起算,组间不
+    // 重置(本段计数器跨组延续),chrome 行插拔不消耗序号。
+    let mut stripe_index = 0usize;
+    // 分组只作用于当前目录(根);展开子目录递归进入时 directory 已经
+    // 是子目录路径,天然不等于 current_dir,走平铺分支保持展开内容不分组。
+    let Some(grouping) = root_grouping::RootGrouping::for_pane_root(browser, pane, directory)
+    else {
+        for item in &merged {
+            push_list_transfer_item(
+                browser,
+                pane,
+                item,
+                depth,
+                animation_progress,
+                row_height,
+                placeholder_cache,
+                &mut stripe_index,
+                rows,
+            );
+        }
+        return;
+    };
+    // 分组开启:目录(含目录占位)稳定置顶(不受 directories_first 影响),
+    // 文件段按组分段,每组先输出组头行再摊平组内条目/占位行。
+    let (directories, files) = root_grouping::split_directories_first(merged);
+    for item in &directories {
+        push_list_transfer_item(
+            browser,
+            pane,
+            item,
+            depth,
+            animation_progress,
+            row_height,
+            placeholder_cache,
+            &mut stripe_index,
+            rows,
+        );
+    }
+    for section in grouping.partition(&files, |entry| pane.metadata_for_entry(entry)) {
+        rows.push(ListTransferRow::GroupHeader {
+            title: section.descriptor.title,
+            index_label: section.descriptor.index_label,
+            count: section.items.len(),
+            height: LIST_GROUP_HEADER_HEIGHT,
+        });
+        for item in section.items {
+            push_list_transfer_item(
+                browser,
+                pane,
+                item,
+                depth,
+                animation_progress,
+                row_height,
+                placeholder_cache,
+                &mut stripe_index,
+                rows,
+            );
+        }
+    }
+}
+
+/// 单个合并项的行摊平:条目行后紧跟其展开子行,占位行直接入流。
+/// 组头行不经过此处——它不属于任何合并项,由分组划分单独插入。
+/// stripe_index 是所在目录段的条纹计数器:Entry 消耗序号,占位行只
+/// 透传当前值(不自增),展开状态行在子段创建前同样透传。
+#[allow(clippy::too_many_arguments)]
+fn push_list_transfer_item<'a>(
+    browser: &FileBrowser,
+    pane: BrowserPaneView<'a>,
+    item: &MergedTransferItem<'a>,
+    depth: usize,
+    animation_progress: f32,
+    row_height: f32,
+    placeholder_cache: &mut HashMap<PathBuf, Vec<TransferPlaceholder>>,
+    stripe_index: &mut usize,
+    rows: &mut Vec<ListTransferRow<'a>>,
+) {
+    match item {
+        MergedTransferItem::Entry(entry) => {
+            rows.push(ListTransferRow::Entry {
+                visible: VisibleEntry {
                     entry,
                     depth,
                     animation_progress,
-                }));
-                push_expansion_transfer_rows(
-                    browser,
-                    pane,
-                    entry,
-                    depth,
-                    animation_progress,
-                    row_height,
-                    placeholder_cache,
-                    rows,
-                );
-            }
-            MergedTransferItem::Placeholder(placeholder) => {
-                rows.push(ListTransferRow::Placeholder(placeholder));
-            }
+                },
+                stripe_index: *stripe_index,
+            });
+            *stripe_index += 1;
+            push_expansion_transfer_rows(
+                browser,
+                pane,
+                entry,
+                depth,
+                animation_progress,
+                row_height,
+                placeholder_cache,
+                stripe_index,
+                rows,
+            );
+        }
+        // 占位是合并时逐个克隆出的临时集合,按引用再克隆一份成本可忽略。
+        MergedTransferItem::Placeholder(placeholder) => {
+            rows.push(ListTransferRow::Placeholder {
+                placeholder: placeholder.clone(),
+                stripe_index: *stripe_index,
+            });
         }
     }
 }
@@ -326,6 +444,7 @@ fn push_expansion_transfer_rows<'a>(
     animation_progress: f32,
     row_height: f32,
     placeholder_cache: &mut HashMap<PathBuf, Vec<TransferPlaceholder>>,
+    stripe_index: &mut usize,
     rows: &mut Vec<ListTransferRow<'a>>,
 ) {
     let Some(expanded) = pane
@@ -344,6 +463,7 @@ fn push_expansion_transfer_rows<'a>(
             message,
             depth: depth + 1,
             height: row_height * expanded.animation_progress.clamp(0.0, 1.0),
+            stripe_index: *stripe_index,
         });
     }
     if !matches!(expanded.status, ExpandedDirectoryStatus::Loaded) {
@@ -509,9 +629,35 @@ pub(crate) fn list_transfer_rows_vertical_bounds(
     let mut offset = header_height;
     for row in rows {
         let height = row.height(row_height);
-        if let ListTransferRow::Entry(visible) = row {
+        if let ListTransferRow::Entry { visible, .. } = row {
             if visible.entry.path == path {
                 return Some((offset, height));
+            }
+        }
+        offset += height;
+    }
+    None
+}
+
+/// 光标落点 → 条目路径:沿行流按 `row.height` 累计命中 Entry 行,与
+/// 虚拟范围/reveal 用同一份高度口径,滚动帧的 hover 补偿重算才有与
+/// 渲染一致的落点。组头/状态行/占位行不是条目,命中即返回 None;
+/// 落点越过最后一行(表尾空白)同样为 None。
+pub(crate) fn list_entry_path_at_point<'a>(
+    rows: &'a [ListTransferRow<'a>],
+    row_height: f32,
+    header_height: f32,
+    point: Point,
+) -> Option<&'a Path> {
+    if row_height <= f32::EPSILON {
+        return None;
+    }
+    let mut offset = header_height;
+    for row in rows {
+        let height = row.height(row_height);
+        if let ListTransferRow::Entry { visible, .. } = row {
+            if point.y >= offset && point.y < offset + height {
+                return Some(visible.entry.path.as_path());
             }
         }
         offset += height;
@@ -522,6 +668,27 @@ pub(crate) fn list_transfer_rows_vertical_bounds(
 /// 列表合并行流总高:视口越界自愈的最大偏移口径,与渲染累计高度一致。
 pub(crate) fn list_transfer_rows_content_height(rows: &[ListTransferRow], row_height: f32) -> f32 {
     rows.iter().map(|row| row.height(row_height)).sum()
+}
+
+/// 分组索引栏条目:沿合并行流按 `row.height` 累计遇到组头行记下
+/// "组短标签 → 组头顶点偏移"。与虚拟范围/内容高/reveal 用同一份行高
+/// 口径,派生结果与渲染天然对齐,不另建第二份分组状态。
+pub(crate) fn list_file_group_rail_entries(
+    rows: &[ListTransferRow],
+    row_height: f32,
+) -> Vec<crate::model::FileGroupRailEntry> {
+    let mut offset = 0.0;
+    let mut entries = Vec::new();
+    for row in rows {
+        if let ListTransferRow::GroupHeader { index_label, .. } = row {
+            entries.push(crate::model::FileGroupRailEntry {
+                index_label: index_label.clone(),
+                top_offset: offset,
+            });
+        }
+        offset += row.height(row_height);
+    }
+    entries
 }
 
 fn column_directory_entries<'a>(
@@ -573,73 +740,13 @@ pub(crate) fn column_transfer_item_count(
 }
 
 #[cfg(test)]
-mod tests {
-    use std::path::PathBuf;
+#[path = "transfer_placeholder_view/root_grouping_tests.rs"]
+mod root_grouping_tests;
 
-    use file_core::{DirectoryEntry, EntryMetadata, FileKind};
+#[cfg(test)]
+#[path = "transfer_placeholder_view/stripe_index_tests.rs"]
+mod stripe_index_tests;
 
-    use super::*;
-
-    fn entry(path: &str) -> DirectoryEntry {
-        DirectoryEntry::new(
-            PathBuf::from(path),
-            FileKind::File,
-            EntryMetadata::default(),
-            false,
-            false,
-            false,
-        )
-    }
-
-    fn placeholder_row(name: &str) -> ListTransferRow<'_> {
-        ListTransferRow::Placeholder(TransferPlaceholder {
-            name: name.to_owned(),
-            is_directory: false,
-            progress: None,
-            total_bytes: None,
-            enqueued_at: std::time::SystemTime::UNIX_EPOCH,
-        })
-    }
-
-    #[test]
-    fn vertical_bounds_count_placeholder_rows_above_the_target() {
-        // reveal 数学与渲染同流:占位行在选中项上方时,落点必须计入。
-        let entries = [entry("/d/a.txt"), entry("/d/z.txt")];
-        let rows = [
-            ListTransferRow::Entry(VisibleEntry {
-                entry: &entries[0],
-                depth: 0,
-                animation_progress: 1.0,
-            }),
-            placeholder_row("incoming.txt"),
-            ListTransferRow::Entry(VisibleEntry {
-                entry: &entries[1],
-                depth: 0,
-                animation_progress: 1.0,
-            }),
-        ];
-        assert_eq!(
-            list_transfer_rows_vertical_bounds(&rows, Path::new("/d/z.txt"), 40.0, 30.0),
-            Some((30.0 + 40.0 * 2.0, 40.0))
-        );
-    }
-
-    #[test]
-    fn content_height_counts_placeholder_and_animated_rows() {
-        let entry = entry("/d/a.txt");
-        let rows = [
-            ListTransferRow::Entry(VisibleEntry {
-                entry: &entry,
-                depth: 0,
-                animation_progress: 0.5,
-            }),
-            placeholder_row("incoming.txt"),
-            ListTransferRow::DirectoryStatusRow {
-                message: "No items",
-                depth: 1,
-                height: 40.0,
-            },
-        ];
-        assert_eq!(list_transfer_rows_content_height(&rows, 40.0), 100.0);
-    }
-}
+#[cfg(test)]
+#[path = "transfer_placeholder_view/row_stream_tests.rs"]
+mod tests;

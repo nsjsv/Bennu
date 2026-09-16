@@ -83,6 +83,10 @@ pub struct StoredUserPreferences {
     pub list_sort_direction: String,
     #[serde(default = "default_list_directory_size_display_mode")]
     pub list_directory_size_display_mode: String,
+    /// 文件分组维度（app 层 FileGroupingMode 的持久化串）；None = 旧版本
+    /// 数据，读取端回退无分组。独立字段是全局单值，无需嵌套结构。
+    #[serde(default)]
+    pub file_grouping: Option<String>,
     #[serde(default = "default_window_chrome_layout")]
     pub window_chrome_layout: String,
     #[serde(default = "default_stored_window_controls")]
@@ -170,6 +174,7 @@ impl Default for StoredUserPreferences {
             list_sort_field: default_list_sort_field(),
             list_sort_direction: default_list_sort_direction(),
             list_directory_size_display_mode: default_list_directory_size_display_mode(),
+            file_grouping: None,
             window_chrome_layout: default_window_chrome_layout(),
             window_controls: default_stored_window_controls(),
             search_history: Vec::new(),
@@ -443,6 +448,32 @@ mod launch_window_policy_tests {
             StoredUserPreferences::default().launch_window_policy,
             LAUNCH_WINDOW_POLICY_OPEN_NEW_WINDOW
         );
+    }
+
+    #[test]
+    fn missing_file_grouping_defaults_to_none_and_roundtrips() {
+        // 回归:旧偏好数据没有分组字段,serde 缺省必须回退 None(无分组)。
+        let stored = StoredUserPreferences::default();
+        let mut json = serde_json::to_value(&stored).expect("serialize preferences");
+        json.as_object_mut()
+            .expect("preferences serialize to an object")
+            .remove("file_grouping");
+
+        let parsed: StoredUserPreferences =
+            serde_json::from_value(json).expect("deserialize preferences");
+
+        assert_eq!(parsed.file_grouping, None);
+
+        // 新记录显式落盘分组维度后原样回读。
+        let stored = StoredUserPreferences {
+            file_grouping: Some("kind".to_owned()),
+            ..StoredUserPreferences::default()
+        };
+        let json = serde_json::to_value(&stored).expect("serialize preferences");
+        let parsed: StoredUserPreferences =
+            serde_json::from_value(json).expect("deserialize preferences");
+
+        assert_eq!(parsed.file_grouping.as_deref(), Some("kind"));
     }
 
     #[test]

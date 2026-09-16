@@ -41,6 +41,7 @@ mod file_drag_hit_test_marker;
 mod file_drag_spring_ring;
 mod file_entry_presentation;
 mod file_entry_view;
+mod file_grouping_rail;
 mod floating_surface;
 mod formatting;
 mod icon_grid_geometry;

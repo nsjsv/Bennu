@@ -14,20 +14,20 @@ use crate::appearance::{
 use crate::formatting::format_middle_ellipsized_text;
 use crate::icons::IconSymbol;
 use crate::model::{
-    BrowserPaneId, ContextMenuPreferences, ContextMenuState,
-    DestructiveActionConfirmation, FileAreaMenuItem, FileContextMenuExpansion,
-    FileContextMenuState, FileDeleteAction, FileDropPrompt, FileEntryMenuEntry,
-    FilePropertiesMessage, ListColumnConfig, ListColumnKind, ListViewPreferences, Message,
-    ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility, SearchContextMenuState,
-    SearchEntryTypePreset, SearchResultMenuItem, SidebarBookmarkContextMenuState, TrashMenuItem,
+    BrowserPaneId, ContextMenuPreferences, ContextMenuState, DestructiveActionConfirmation,
+    FileAreaMenuItem, FileContextMenuExpansion, FileContextMenuState, FileDeleteAction,
+    FileDropPrompt, FileEntryMenuEntry, FileGroupingMode, FilePropertiesMessage,
+    ListColumnConfig, ListColumnKind, ListViewPreferences, Message, ScrollbarRegion,
+    ScrollbarViewport, ScrollbarVisibility, SearchContextMenuState, SearchEntryTypePreset,
+    SearchResultMenuItem, SidebarBookmarkContextMenuState, TrashMenuItem,
 };
 use crate::open_with::OpenWithState;
 use crate::sidebar_devices::SidebarDeviceContextMenuState;
 use crate::typography::{localized_text, readable_text};
 
 use super::context_menu_submenu::{
-    group_submenu_panel, group_trigger_row, submenu_slot, CONTEXT_MENU_ITEM_HEIGHT,
-    CONTEXT_MENU_ITEM_SPACING, CONTEXT_MENU_PADDING,
+    file_grouping_submenu_panel, file_grouping_trigger_row, group_submenu_panel, group_trigger_row,
+    submenu_slot, CONTEXT_MENU_ITEM_HEIGHT, CONTEXT_MENU_ITEM_SPACING, CONTEXT_MENU_PADDING,
 };
 use super::network_connections::network_connection_context_menu_panel;
 use super::option_controls::{action_choice_row, primary_action_button, secondary_action_button};
@@ -343,6 +343,7 @@ pub(super) fn context_menu_panel<'a>(
     context_menus: &'a ContextMenuPreferences,
     list_view_preferences: &'a ListViewPreferences,
     selected_search_entry_types: &'a [SearchEntryTypePreset],
+    file_grouping: FileGroupingMode,
 ) -> Element<'a, Message> {
     match menu {
         ContextMenuState::FileArea(menu) => {
@@ -352,6 +353,7 @@ pub(super) fn context_menu_panel<'a>(
                 active_pane_id,
                 context_menus,
                 keyboard_modifiers,
+                file_grouping,
             )
         }
         ContextMenuState::Search(menu) => search_context_menu_panel(menu, context_menus),
@@ -500,6 +502,7 @@ fn file_context_menu_panel<'a>(
     _active_pane_id: BrowserPaneId,
     context_menus: &'a ContextMenuPreferences,
     keyboard_modifiers: iced::keyboard::Modifiers,
+    file_grouping: FileGroupingMode,
 ) -> Element<'a, Message> {
     if is_trash_view {
         return trash_context_menu_panel(menu, context_menus);
@@ -540,10 +543,19 @@ fn file_context_menu_panel<'a>(
             .collect(),
     };
 
+    /// 当前展开的悬停子菜单:配置化组锚点的成员子菜单,或空白菜单
+    /// 末尾固定的「分组方式」子菜单。
+    enum ExpandedSubmenu {
+        Group(usize, FileAreaMenuItem, Vec<FileAreaMenuItem>),
+        FileGrouping(usize),
+    }
+
     let mut menu_content = Column::new()
         .spacing(CONTEXT_MENU_ITEM_SPACING)
         .padding(CONTEXT_MENU_PADDING);
     let mut expanded = None;
+    // 子菜单槽位按真实渲染行号钉位;被配置隐藏/不适用的行不占位。
+    let mut rendered_row_count = 0usize;
     for (row_index, entry) in entries.iter().enumerate() {
         match entry {
             FileEntryMenuEntry::Item(item) => {
@@ -551,11 +563,16 @@ fn file_context_menu_panel<'a>(
                     file_menu_action_row(*item, menu, &terminal_directory, alt_held, shift_held)
                 {
                     menu_content = menu_content.push(row);
+                    rendered_row_count += 1;
                 }
             }
             FileEntryMenuEntry::Group { anchor, members } => {
                 if menu.expansion == FileContextMenuExpansion::Group(*anchor) {
-                    expanded = Some((row_index, *anchor, members.clone()));
+                    expanded = Some(ExpandedSubmenu::Group(
+                        row_index,
+                        *anchor,
+                        members.clone(),
+                    ));
                 }
                 let (icon, label, on_press) = match *anchor {
                     FileAreaMenuItem::Copy => {
@@ -570,8 +587,18 @@ fn file_context_menu_panel<'a>(
                 };
                 menu_content =
                     menu_content.push(group_trigger_row(*anchor, icon, label, on_press));
+                rendered_row_count += 1;
             }
         }
+    }
+
+    // 空白菜单末尾的固定「分组方式」触发行:构造时已按视图模式门控,
+    // 条目菜单一律不带该入口。
+    if menu.grouping_entry_visible {
+        if menu.expansion == FileContextMenuExpansion::FileGrouping {
+            expanded = Some(ExpandedSubmenu::FileGrouping(rendered_row_count));
+        }
+        menu_content = menu_content.push(file_grouping_trigger_row());
     }
 
     let root_menu = container(menu_content)
@@ -579,12 +606,19 @@ fn file_context_menu_panel<'a>(
         .style(context_menu_style);
 
     let content = match expanded {
-        Some((row_index, anchor, members)) => Row::new()
+        Some(ExpandedSubmenu::Group(row_index, anchor, members)) => Row::new()
             .spacing(4)
             .push(root_menu)
             .push(submenu_slot(
                 row_index,
                 group_submenu_panel(menu, anchor, &members),
+            )),
+        Some(ExpandedSubmenu::FileGrouping(row_index)) => Row::new()
+            .spacing(4)
+            .push(root_menu)
+            .push(submenu_slot(
+                row_index,
+                file_grouping_submenu_panel(file_grouping),
             )),
         None => Row::new().push(root_menu),
     };

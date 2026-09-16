@@ -314,6 +314,15 @@ impl FileBrowser {
             Message::ListColumnVisibilityToggled(column) => {
                 self.toggle_list_column_visibility(column)
             }
+            Message::FileGroupingModeSelected(mode) => self.select_file_grouping_mode(mode),
+            Message::FileGroupingRailTargetSelected { pane, group_index } => {
+                self.scroll_to_file_group_target(pane, group_index)
+            }
+            Message::FileGroupingRailCursorEntered(pane_id) => self.enter_file_grouping_rail(pane_id),
+            Message::FileGroupingRailCursorExited(pane_id) => {
+                self.exit_file_grouping_rail(pane_id);
+                Task::none()
+            }
             Message::ListColumnResizeStarted(pane_id, column) => {
                 self.start_list_column_resize_drag(pane_id, column)
             }
@@ -1030,19 +1039,31 @@ impl FileBrowser {
                 self.handle_column_scrolled(pane_id, directory, offset_y, height),
                 self.request_browser_session_save(),
             ]),
-            Message::ListScrolled(pane_id, offset_y, height) => Task::batch([
-                self.show_scrollbars_temporarily(Region::PaneList(pane_id)),
-                self.handle_list_scrolled(pane_id, offset_y, height),
-                self.schedule_visible_directory_metadata(
-                    pane_id,
-                    Some(crate::thumbnail_cache::ColumnViewport { offset_y, height }),
-                ),
-                self.request_browser_session_save(),
-            ]),
-            Message::IconGridScrolled(pane_id, offset_y, width, height) => Task::batch([
-                self.show_scrollbars_temporarily(Region::PaneIcons(pane_id)),
-                self.handle_icon_grid_scrolled(pane_id, offset_y, width, height),
-            ]),
+            Message::ListScrolled(pane_id, offset_y, viewport) => {
+                let scrolled = self.handle_list_scrolled(pane_id, offset_y, viewport.height);
+                self.recalculate_hovered_entry_after_list_scroll(pane_id, offset_y, viewport);
+                Task::batch([
+                    scrolled,
+                    self.show_scrollbars_temporarily(Region::PaneList(pane_id)),
+                    self.schedule_visible_directory_metadata(
+                        pane_id,
+                        Some(crate::thumbnail_cache::ColumnViewport {
+                            offset_y,
+                            height: viewport.height,
+                        }),
+                    ),
+                    self.request_browser_session_save(),
+                ])
+            }
+            Message::IconGridScrolled(pane_id, offset_y, viewport) => {
+                let scrolled =
+                    self.handle_icon_grid_scrolled(pane_id, offset_y, viewport.width, viewport.height);
+                self.recalculate_hovered_entry_after_icon_grid_scroll(pane_id, offset_y, viewport);
+                Task::batch([
+                    scrolled,
+                    self.show_scrollbars_temporarily(Region::PaneIcons(pane_id)),
+                ])
+            }
             Message::ColumnResizeStarted(pane_id, column_index) => {
                 self.activate_pane(pane_id);
                 self.start_column_resize_drag(column_index)

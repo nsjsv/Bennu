@@ -403,7 +403,9 @@ fn resize_row(
         message: custom_toggle,
     });
 
-    let mut rows = vec![labeled_setting_row("Size", segmented_choice_row(choices))];
+    // 行标签用 "Resize" 而非 "Size":该行是缩放百分比选择,裸 "Size"
+    // 要留给文件大小语义(中文"大小"),避免词条被尺寸语义遮蔽。
+    let mut rows = vec![labeled_setting_row("Resize", segmented_choice_row(choices))];
     if selection.uses_custom_width() {
         rows.push(labeled_setting_row(
             "Width",

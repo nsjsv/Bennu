@@ -11,8 +11,8 @@ use crate::config::normalize_visible_column_count;
 use crate::list_view::LIST_HEADER_HEIGHT;
 use crate::model::{
     BrowserPaneId, BrowserViewMode, DirectoryExpansionLoadContext, ExpandedDirectory,
-    ExpandedDirectoryLoadRequest, ExpandedDirectoryStatus, ListExpansionFollowSessionId, Message,
-    ScrollbarRegion,
+    ExpandedDirectoryLoadRequest, ExpandedDirectoryStatus, FileGroupingMode,
+    ListExpansionFollowSessionId, Message, ScrollbarRegion,
 };
 use crate::thumbnail_cache::ColumnViewport;
 use crate::virtual_range::vertical_scroll_delta_to_reveal;
@@ -42,6 +42,16 @@ impl FileBrowser {
             return Task::none();
         }
         self.user_config.visible_column_count = count;
+        self.persist_user_preferences_command()
+    }
+
+    /// 选择文件分组维度:只写全局配置并持久化。分组是纯视图概念,
+    /// 视图层下次渲染自然重算,绝不触碰目录加载生命周期(不重扫)。
+    pub(super) fn select_file_grouping_mode(&mut self, mode: FileGroupingMode) -> Task<Message> {
+        if self.user_config.file_grouping == mode {
+            return Task::none();
+        }
+        self.user_config.file_grouping = mode;
         self.persist_user_preferences_command()
     }
 
@@ -1237,5 +1247,34 @@ mod tests {
             .expect("viewport stays recorded");
         // 合法偏移不得被自愈误改(内容 500 行 × 46px 远超 4600+800)。
         assert_eq!(viewport.offset_y, 4600.0);
+    }
+
+    #[test]
+    fn selecting_file_grouping_updates_config_without_touching_directory_loading() {
+        let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+        browser.view_mode = BrowserViewMode::List;
+        browser.directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
+        let load_generation_before = browser.directory_load_generation;
+        let collection_phase_before = browser.directory_collection_phase;
+
+        drop(browser.update(crate::model::Message::FileGroupingModeSelected(
+            crate::model::FileGroupingMode::Kind,
+        )));
+
+        assert_eq!(
+            browser.user_config.file_grouping,
+            crate::model::FileGroupingMode::Kind
+        );
+        // 分组是纯视图概念:目录加载代数与收集阶段必须原封不动。
+        assert_eq!(browser.directory_load_generation, load_generation_before);
+        assert_eq!(browser.directory_collection_phase, collection_phase_before);
+        // 选择即走用户偏好持久化出口(与视图模式切换同一通道)。
+        assert!(browser.user_preferences_save_in_flight);
+
+        // 重复选择同一维度不产生新的持久化写请求。
+        drop(browser.update(crate::model::Message::FileGroupingModeSelected(
+            crate::model::FileGroupingMode::Kind,
+        )));
+        assert!(browser.pending_user_preferences_save.is_none());
     }
 }

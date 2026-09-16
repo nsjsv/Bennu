@@ -7,7 +7,8 @@ use crate::matugen_theme::{
     default_custom_color_scheme, ColorSchemePreset, CustomColorScheme, ThemeMode,
 };
 use crate::model::{
-    BrowserViewMode, ContextMenuPreferences, ListDirectorySizeDisplayMode, SearchHistory,
+    BrowserViewMode, ContextMenuPreferences, FileGroupingMode, ListDirectorySizeDisplayMode,
+    SearchHistory,
 };
 use crate::network_connections::SavedNetworkConnection;
 use crate::shortcuts::ShortcutConfig;
@@ -585,6 +586,8 @@ pub(crate) struct UserConfig {
     pub(crate) icons_view_density: ViewDensityLevel,
     pub(crate) list_view_preferences: crate::model::ListViewPreferences,
     pub(crate) list_directory_size_display_mode: ListDirectorySizeDisplayMode,
+    /// 文件分组维度，全局一份（列表/大图共用，多栏不读）；默认无分组。
+    pub(crate) file_grouping: FileGroupingMode,
     pub(crate) startup_location_policy: StartupLocationPolicy,
     pub(crate) startup_custom_directory: PathBuf,
     pub(crate) save_view_state: bool,
@@ -646,6 +649,7 @@ pub(crate) fn default_user_config() -> UserConfig {
         icons_view_density: ViewDensityLevel::DEFAULT,
         list_view_preferences: crate::model::ListViewPreferences::default(),
         list_directory_size_display_mode: ListDirectorySizeDisplayMode::ItemCount,
+        file_grouping: FileGroupingMode::None,
         startup_location_policy: StartupLocationPolicy::Home,
         startup_custom_directory: fallback_base.clone(),
         save_view_state: false,
@@ -690,6 +694,7 @@ pub(crate) fn ui_thread_startup_config() -> UserConfig {
         icons_view_density: ViewDensityLevel::DEFAULT,
         list_view_preferences: crate::model::ListViewPreferences::default(),
         list_directory_size_display_mode: ListDirectorySizeDisplayMode::ItemCount,
+        file_grouping: FileGroupingMode::None,
         startup_location_policy: StartupLocationPolicy::Home,
         startup_custom_directory: PathBuf::new(),
         save_view_state: false,

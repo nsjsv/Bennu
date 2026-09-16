@@ -338,6 +338,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
                 &browser.user_config().context_menus,
                 &browser.user_config().list_view_preferences,
                 selected_search_entry_types,
+                browser.user_config().file_grouping,
             ),
             placement: FloatingPlacement::At(context_menu.position()),
             captures_pointer: true,

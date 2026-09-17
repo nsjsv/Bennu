@@ -75,7 +75,7 @@ fn browser_with_grouping(mode: FileGroupingMode) -> crate::app::FileBrowser {
 
 fn merged_name(item: &MergedTransferItem<'_>) -> String {
     match item {
-        MergedTransferItem::Entry(entry) => {
+        MergedTransferItem::Entry { entry, .. } => {
             entry.name().to_string_lossy().into_owned()
         }
         MergedTransferItem::Placeholder(placeholder) => placeholder.name.clone(),
@@ -93,6 +93,7 @@ fn entry_row_with_stripe(entry: &DirectoryEntry, stripe_index: usize) -> ListTra
             depth: 0,
             animation_progress: 1.0,
         },
+        transfer: None,
         stripe_index,
     }
 }
@@ -204,8 +205,13 @@ fn partition_emits_header_counts_and_reverses_sections_on_descending() {
         file_entry("/d/1file", 1),
         file_entry("/d/avocado.md", 1),
     ];
-    let files: Vec<MergedTransferItem<'_>> =
-        entries.iter().map(MergedTransferItem::Entry).collect();
+    let files: Vec<MergedTransferItem<'_>> = entries
+        .iter()
+        .map(|entry| MergedTransferItem::Entry {
+            entry,
+            transfer: None,
+        })
+        .collect();
 
     let browser = browser_with_grouping(FileGroupingMode::NameInitial);
     let pane = browser.pane_view(BrowserPaneId::PRIMARY).unwrap();
@@ -244,9 +250,18 @@ fn size_grouping_sends_unknown_placeholder_size_to_last_bucket() {
     ];
     let placeholder = file_placeholder("incoming.bin");
     let files = vec![
-        MergedTransferItem::Entry(&entries[0]),
-        MergedTransferItem::Entry(&entries[1]),
-        MergedTransferItem::Entry(&entries[2]),
+        MergedTransferItem::Entry {
+            entry: &entries[0],
+            transfer: None,
+        },
+        MergedTransferItem::Entry {
+            entry: &entries[1],
+            transfer: None,
+        },
+        MergedTransferItem::Entry {
+            entry: &entries[2],
+            transfer: None,
+        },
         MergedTransferItem::Placeholder(placeholder),
     ];
 

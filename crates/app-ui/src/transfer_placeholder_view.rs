@@ -40,6 +40,30 @@ pub(crate) mod root_grouping;
 
 /// 占位图标槽:类型图标 + 外圈传输进度环。空进度画纯 track 环,与
 /// spring ring 的 progress=0 形态一致。
+/// 真实条目图标的传输装饰:与占位行同款进度环叠加在图标槽上。
+/// `transfer` 为 None 时原样返回,不引入额外层级。
+pub(crate) fn entry_icon_with_transfer<'a>(
+    base: Element<'a, Message>,
+    transfer: Option<&TransferPlaceholder>,
+    slot_size: f32,
+) -> Element<'a, Message> {
+    let Some(transfer) = transfer else {
+        return base;
+    };
+    iced::widget::Stack::with_children([
+        iced::widget::container(base)
+            .width(iced::Length::Fixed(slot_size))
+            .height(iced::Length::Fixed(slot_size))
+            .center_x(iced::Length::Fixed(slot_size))
+            .center_y(iced::Length::Fixed(slot_size))
+            .into(),
+        file_drag_spring_ring(transfer.progress.unwrap_or(0.0)),
+    ])
+    .width(iced::Length::Fixed(slot_size))
+    .height(iced::Length::Fixed(slot_size))
+    .into()
+}
+
 pub(crate) fn transfer_placeholder_icon(
     placeholder: &TransferPlaceholder,
     density: FileEntryIconDensity,
@@ -79,8 +103,8 @@ fn transfer_placeholder_name_text(
 }
 
 /// 列表视图的占位行:名字列放图标+环+名字,其余列显示缺省占位,
-/// 行高与普通行一致(计入虚拟滚动)。条纹取所在目录段计数器的当前
-/// 值(透传,不自增):占位插拔不改变任何条目的条纹相位。
+/// 行高与普通行一致(计入虚拟滚动)。条纹消耗所在目录段计数器的
+/// 当前值:占位行参与交替,不再与下一真实行同相。
 pub(crate) fn transfer_placeholder_list_row(
     placeholder: &TransferPlaceholder,
     geometry: &ListGeometry,
@@ -231,6 +255,8 @@ pub(crate) fn transfer_sort_for_expanded(
 pub(crate) enum ListTransferRow<'a> {
     Entry {
         visible: VisibleEntry<'a>,
+        /// 同名传输占位改为装饰挂在真实行上(图标叠加进度环),不再单独成行。
+        transfer: Option<TransferPlaceholder>,
         stripe_index: usize,
     },
     DirectoryStatusRow {
@@ -386,8 +412,9 @@ fn push_directory_transfer_rows<'a>(
 
 /// 单个合并项的行摊平:条目行后紧跟其展开子行,占位行直接入流。
 /// 组头行不经过此处——它不属于任何合并项,由分组划分单独插入。
-/// stripe_index 是所在目录段的条纹计数器:Entry 消耗序号,占位行只
-/// 透传当前值(不自增),展开状态行在子段创建前同样透传。
+/// stripe_index 是所在目录段的条纹计数器:Entry 与占位行都消耗序号
+/// (占位若透传,会与下一真实行同相,出现连续同色两行);展开状态行
+/// 在子段创建前同样透传。
 #[allow(clippy::too_many_arguments)]
 fn push_list_transfer_item<'a>(
     browser: &FileBrowser,
@@ -401,13 +428,14 @@ fn push_list_transfer_item<'a>(
     rows: &mut Vec<ListTransferRow<'a>>,
 ) {
     match item {
-        MergedTransferItem::Entry(entry) => {
+        MergedTransferItem::Entry { entry, transfer } => {
             rows.push(ListTransferRow::Entry {
                 visible: VisibleEntry {
                     entry,
                     depth,
                     animation_progress,
                 },
+                transfer: transfer.clone(),
                 stripe_index: *stripe_index,
             });
             *stripe_index += 1;
@@ -429,6 +457,10 @@ fn push_list_transfer_item<'a>(
                 placeholder: placeholder.clone(),
                 stripe_index: *stripe_index,
             });
+            // 占位行参与条纹交替。被同名真实条目替换时序号 1:1 传承,
+            // 行相位不跳变;仅取消且未落地时后续行移一次相位,与任何
+            // 普通行增删一致。
+            *stripe_index += 1;
         }
     }
 }
@@ -722,7 +754,9 @@ pub(crate) fn column_transfer_item_offset(
     );
     let index = merged
         .iter()
-        .position(|item| matches!(item, MergedTransferItem::Entry(entry) if entry.path == path))?;
+        .position(
+            |item| matches!(item, MergedTransferItem::Entry { entry, .. } if entry.path == path),
+        )?;
     Some(index as f32 * row_pitch)
 }
 

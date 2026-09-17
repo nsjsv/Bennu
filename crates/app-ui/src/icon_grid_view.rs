@@ -273,6 +273,7 @@ fn render_rows<'a>(
                         rows.directory,
                         cell.entry_index,
                         cell.entry,
+                        cell.transfer.as_ref(),
                         input,
                     ));
                 }
@@ -398,6 +399,7 @@ fn icon_grid_entry<'a>(
     parent_directory: &Path,
     entry_index: usize,
     entry: &DirectoryEntry,
+    transfer: Option<&crate::transfer_placeholders::TransferPlaceholder>,
     input: IconGridPanelInput,
 ) -> Element<'a, Message> {
     let visual_state = FileEntryVisualState::from_entry_context(pane, &entry.path, false);
@@ -414,17 +416,21 @@ fn icon_grid_entry<'a>(
             || pane.is_path_selected(&entry.path)
             || disclosure.is_some());
 
-    let base_icon: Element<'a, Message> = container(entry_thumbnail_or_icon(
-        browser,
-        entry,
-        icon_tone,
-        FileEntryIconDensity::Grid(icon_edge),
-    ))
-    .width(Length::Fixed(icon_edge as f32))
-    .height(Length::Fixed(icon_edge as f32))
-    .center_x(Length::Fixed(icon_edge as f32))
-    .center_y(Length::Fixed(icon_edge as f32))
-    .into();
+    let base_icon: Element<'a, Message> = crate::transfer_placeholder_view::entry_icon_with_transfer(
+        container(entry_thumbnail_or_icon(
+            browser,
+            entry,
+            icon_tone,
+            FileEntryIconDensity::Grid(icon_edge),
+        ))
+        .width(Length::Fixed(icon_edge as f32))
+        .height(Length::Fixed(icon_edge as f32))
+        .center_x(Length::Fixed(icon_edge as f32))
+        .center_y(Length::Fixed(icon_edge as f32))
+        .into(),
+        transfer,
+        icon_edge as f32,
+    );
     let icon: Element<'a, Message> = if shows_disclosure {
         let (rotation, is_open) = disclosure.unwrap_or((0.0, false));
         let disclosure_button = button(

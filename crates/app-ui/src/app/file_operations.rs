@@ -10,6 +10,7 @@ use crate::operation_history::{
     path_after_completed_migrations, CompletedPathMigration, FileOperationCompletion,
     FileOperationOutcome, PendingHistoryOperation,
 };
+use crate::commands::file_operation_driver_task;
 use crate::operation_queue::{
     file_operation_persistence_command, FileOperationEnqueueOutcome, FileOperationFinish,
     FileOperationPersistenceOutcome, QueuedFileOperation,
@@ -380,6 +381,14 @@ impl FileBrowser {
         self.operation_queue
             .take_next_persistence_request()
             .map(file_operation_persistence_command)
+            .unwrap_or_else(Task::none)
+    }
+
+    /// update 出口统一签发驱动者(Task::stream);无待签发任务时为空操作。
+    pub(super) fn poll_driver_command(&mut self) -> Task<Message> {
+        self.operation_queue
+            .poll_driver_launch()
+            .map(file_operation_driver_task)
             .unwrap_or_else(Task::none)
     }
 

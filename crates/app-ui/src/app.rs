@@ -122,8 +122,8 @@ use crate::app::windows::{
 };
 use crate::command_line::ApplicationLaunchRequest;
 use crate::commands::{
-    ensure_search_service_command, file_operation_subscription, startup_environment_command,
-    wayland_dnd_window_handle_command, x11_dnd_window_handle_command,
+    ensure_search_service_command, startup_environment_command, wayland_dnd_window_handle_command,
+    x11_dnd_window_handle_command,
 };
 use crate::config;
 use crate::config::UiLanguage;
@@ -833,14 +833,9 @@ impl FileBrowser {
     fn subscription(&self) -> Subscription<Message> {
         if !self.application_shutdown_phase.is_running() {
             if self.application_shutdown_phase.is_draining() {
-                let mut subscriptions = vec![event::listen_with(global_event_message)];
-                if let Some(operation_subscription) = self
-                    .operation_queue
-                    .active_subscription()
-                    .map(file_operation_subscription)
-                {
-                    subscriptions.push(operation_subscription);
-                }
+                // 驱动者是 Task::stream 命令,已脱离订阅生命周期,排空期间
+                // 无需为它们保留订阅;终态消息照常送达 update 的排空分支。
+                let subscriptions = vec![event::listen_with(global_event_message)];
                 return Subscription::batch(subscriptions);
             }
             return Subscription::none();
@@ -920,9 +915,12 @@ impl FileBrowser {
             }));
         }
 
-        if let Some(operation) = self.operation_queue.active_subscription() {
-            subscriptions.push(file_operation_subscription(operation));
-        }
+        // 驱动者监督 tick:检测信号超时的驱动者并换代重启,顺带认领其他
+        // 实例遗留的非终态任务(见 operation_queue::supervision)。
+        subscriptions.push(
+            time::every(crate::operation_queue::SUPERVISION_INTERVAL)
+                .map(|_| Message::OperationSupervisionTick),
+        );
 
         subscriptions.push(self.terminal_output_subscription());
 

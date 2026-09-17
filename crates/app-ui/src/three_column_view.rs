@@ -312,11 +312,15 @@ fn directory_column<'a>(
                     break;
                 };
                 match item {
-                    crate::transfer_placeholders::MergedTransferItem::Entry(entry) => {
+                    crate::transfer_placeholders::MergedTransferItem::Entry {
+                        entry,
+                        transfer,
+                    } => {
                         content = content.push(column_entry_row(
                             browser,
                             pane,
                             entry,
+                            transfer.as_ref(),
                             active_child,
                             selection_run_position_in_merged_items(
                                 &merged_items,
@@ -512,6 +516,7 @@ fn column_entry_row<'a>(
     browser: &'a FileBrowser,
     pane: BrowserPaneView<'a>,
     entry: &DirectoryEntry,
+    transfer: Option<&crate::transfer_placeholders::TransferPlaceholder>,
     active_child: Option<&Path>,
     selection_run_position: Option<SelectionRunPosition>,
 ) -> Element<'a, Message> {
@@ -559,7 +564,11 @@ fn column_entry_row<'a>(
         };
 
     let row_content = row![
-        entry_thumbnail_or_icon(browser, entry, icon_tone, geometry.icon_density),
+        crate::transfer_placeholder_view::entry_icon_with_transfer(
+            entry_thumbnail_or_icon(browser, entry, icon_tone, geometry.icon_density),
+            transfer,
+            geometry.icon_density.thumbnail_size(),
+        ),
         name,
         trailing
     ]
@@ -605,7 +614,7 @@ fn selection_run_position_in_merged_items(
 ) -> Option<SelectionRunPosition> {
     let item = merged_items.get(index)?;
     let entry = match item {
-        crate::transfer_placeholders::MergedTransferItem::Entry(entry) => *entry,
+        crate::transfer_placeholders::MergedTransferItem::Entry { entry, .. } => *entry,
         crate::transfer_placeholders::MergedTransferItem::Placeholder(_) => return None,
     };
     if !selected_paths.contains(&entry.path) {
@@ -613,9 +622,10 @@ fn selection_run_position_in_merged_items(
     }
     let neighbor_selected = |offset: usize| {
         merged_items.get(offset).is_some_and(|neighbor| match neighbor {
-            crate::transfer_placeholders::MergedTransferItem::Entry(neighbor_entry) => {
-                selected_paths.contains(&neighbor_entry.path)
-            }
+            crate::transfer_placeholders::MergedTransferItem::Entry {
+                entry: neighbor_entry,
+                ..
+            } => selected_paths.contains(&neighbor_entry.path),
             crate::transfer_placeholders::MergedTransferItem::Placeholder(_) => false,
         })
     };

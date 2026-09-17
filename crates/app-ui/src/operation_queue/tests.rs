@@ -1240,3 +1240,74 @@ fn failed_operation_records_once_but_cancel_completion_does_not() {
     );
     assert_eq!(canceled_queue.tasks()[0].error, None);
 }
+
+// ===== 驱动者监督(operation_queue::supervision)不变量 =====
+
+fn supervised_queue(directory: &std::path::Path) -> (FileOperationQueue, u64) {
+    let store = TaskQueueStore::new(directory.join("state.sqlite")).unwrap();
+    let mut queue = FileOperationQueue::new();
+    queue.set_store(store);
+    let outcome = queue.enqueue(sample_transfer_operation());
+    assert!(outcome.error().is_none());
+    // 测试持久化是同步的:入队后任务已拿到 stored_id 并被推进到 Running。
+    assert_eq!(queue.tasks()[0].status, FileOperationStatus::Running);
+    let task_id = queue.tasks()[0].id;
+    assert!(queue.poll_driver_launch().is_some());
+    (queue, task_id)
+}
+
+#[test]
+fn silent_driver_is_restarted_with_a_new_generation() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut queue, task_id) = supervised_queue(directory.path());
+    let launched_at = Instant::now();
+
+    // 未超时:监督不动驱动者。
+    assert!(queue.supervise(launched_at).is_none());
+    assert_eq!(queue.tasks()[0].driver_generation, 0);
+    assert!(queue.tasks()[0].driver_running);
+
+    // 超时:换代重启,旧代终态被拒,新代可再次签发。
+    let after_timeout = launched_at + super::supervision::DRIVER_SIGNAL_TIMEOUT;
+    assert!(queue.supervise(after_timeout).is_none());
+    assert_eq!(queue.tasks()[0].driver_generation, 1);
+    assert!(!queue.tasks()[0].driver_running);
+    assert!(!queue.driver_generation_is_current(task_id, 0));
+    assert!(queue.driver_generation_is_current(task_id, 1));
+
+    let relaunch = queue.poll_driver_launch().unwrap();
+    assert_eq!(relaunch.id, task_id);
+    assert_eq!(relaunch.generation, 1);
+}
+
+#[test]
+fn paused_driver_is_not_restarted_for_silence() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut queue, task_id) = supervised_queue(directory.path());
+    let launched_at = Instant::now();
+    assert!(queue.toggle_pause(task_id).is_none());
+
+    let after_timeout = launched_at + super::supervision::DRIVER_SIGNAL_TIMEOUT;
+    assert!(queue.supervise(after_timeout).is_none());
+    // 暂停是驱动者合法的静默:不得换代,已签发的驱动者保持原样。
+    assert_eq!(queue.tasks()[0].driver_generation, 0);
+    assert!(queue.tasks()[0].driver_running);
+    assert!(queue.driver_generation_is_current(task_id, 0));
+}
+
+#[test]
+fn transient_operation_driver_is_never_restarted() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = TaskQueueStore::new(directory.path().join("state.sqlite")).unwrap();
+    let mut queue = FileOperationQueue::new();
+    queue.set_store_with_deferred_persistence(store);
+    let outcome = queue.enqueue(sample_operation());
+    assert!(outcome.error().is_none());
+    assert!(queue.poll_driver_launch().is_some());
+
+    let after_timeout = Instant::now() + super::supervision::DRIVER_SIGNAL_TIMEOUT;
+    assert!(queue.supervise(after_timeout).is_none());
+    // 瞬时操作不可重放,监督绝不重启它的驱动者。
+    assert_eq!(queue.tasks()[0].driver_generation, 0);
+    assert!(queue.tasks()[0].driver_running);
+}

@@ -45,6 +45,8 @@ pub(crate) enum IconGridCell<'a> {
 pub(crate) struct IconGridEntryCell<'a> {
     pub(crate) entry: &'a DirectoryEntry,
     pub(crate) entry_index: usize,
+    /// 同名传输占位的装饰(进度环),渲染时叠加在瓦片图标上。
+    pub(crate) transfer: Option<TransferPlaceholder>,
 }
 
 impl<'a> IconGridCell<'a> {
@@ -656,12 +658,16 @@ fn expanded_panel_content<'a>(
                 )
                 .iter()
                 .map(|item| match item {
-                    crate::transfer_placeholders::MergedTransferItem::Entry(entry) => {
+                    crate::transfer_placeholders::MergedTransferItem::Entry {
+                        entry,
+                        transfer,
+                    } => {
                         let entry_index = next_entry_index;
                         next_entry_index += 1;
                         IconGridCell::Entry(IconGridEntryCell {
                             entry,
                             entry_index,
+                            transfer: transfer.clone(),
                         })
                     }
                     crate::transfer_placeholders::MergedTransferItem::Placeholder(
@@ -679,6 +685,7 @@ fn expanded_panel_content<'a>(
                         IconGridCell::Entry(IconGridEntryCell {
                             entry,
                             entry_index,
+                            transfer: None,
                         })
                     })
                     .collect(),

@@ -137,7 +137,7 @@ impl RootGrouping {
         metadata_for_entry: &dyn Fn(&DirectoryEntry) -> EntryMetadata,
     ) -> Option<u64> {
         match item {
-            MergedTransferItem::Entry(entry) => Some(metadata_for_entry(entry).len),
+            MergedTransferItem::Entry { entry, .. } => Some(metadata_for_entry(entry).len),
             MergedTransferItem::Placeholder(placeholder) => placeholder.total_bytes,
         }
     }
@@ -150,7 +150,7 @@ impl RootGrouping {
         metadata_for_entry: &dyn Fn(&DirectoryEntry) -> EntryMetadata,
     ) -> Option<SystemTime> {
         match item {
-            MergedTransferItem::Entry(entry) => {
+            MergedTransferItem::Entry { entry, .. } => {
                 let metadata = metadata_for_entry(entry);
                 match self.mode {
                     FileGroupingMode::ModifiedTime => metadata.modified,
@@ -183,7 +183,7 @@ pub(crate) fn split_directories_first<'a>(
 fn merged_item_is_directory(item: &MergedTransferItem<'_>) -> bool {
     match item {
         // 只有真实目录档置顶;符号链接等按文件参与分组。
-        MergedTransferItem::Entry(entry) => entry.kind == FileKind::Directory,
+        MergedTransferItem::Entry { entry, .. } => entry.kind == FileKind::Directory,
         MergedTransferItem::Placeholder(placeholder) => placeholder.is_directory,
     }
 }
@@ -191,7 +191,7 @@ fn merged_item_is_directory(item: &MergedTransferItem<'_>) -> bool {
 /// 分组键用的名字:非 UTF-8 名按空名走 `#` 兜底组,与首字母键约定一致。
 fn merged_item_name<'item>(item: &'item MergedTransferItem<'_>) -> &'item str {
     match item {
-        MergedTransferItem::Entry(entry) => entry.name().to_str().unwrap_or(""),
+        MergedTransferItem::Entry { entry, .. } => entry.name().to_str().unwrap_or(""),
         MergedTransferItem::Placeholder(placeholder) => &placeholder.name,
     }
 }

@@ -124,10 +124,11 @@ fn stripe_sequence(rows: &[ListTransferRow<'_>]) -> Vec<usize> {
 }
 
 #[test]
-fn placeholder_insertion_keeps_entry_stripes_unchanged() {
-    // 传输占位插进条目流:占位行透传当前计数器,不消耗序号——占位
-    // 插入前后,同一行条目的条纹保持不变(旧实现按流绝对下标取奇偶,
-    // 占位插拔会翻转所有后续行的相位)。
+fn placeholder_row_consumes_its_own_stripe() {
+    // 传输占位插进条目流:占位行消耗自己的序号,与相邻真实行交替。
+    // 旧实现透传计数器,占位与下一真实行同相,列表出现连续两行同色
+    // (用户报告的背景绘制问题);代价是占位插入/消失时后续行移动一次
+    // 相位——与任何普通行增删一致,且占位被真实条目 1:1 替换时不移动。
     let entries = [file_entry("/workspace/a.txt"), file_entry("/workspace/z.txt")];
     let plain_browser = browser_with_entries(entries.to_vec(), FileGroupingMode::None);
     let without_placeholder = build_rows(&plain_browser);
@@ -142,8 +143,8 @@ fn placeholder_insertion_keeps_entry_stripes_unchanged() {
     );
     assert_eq!(
         stripe_sequence(&with_placeholder),
-        [0, 1, 1],
-        "占位行透传当前计数器:插入占位不翻转 z.txt 的条纹"
+        [0, 1, 2],
+        "占位行消耗序号:三行严格交替,不再与下一行同相"
     );
 }
 
@@ -211,13 +212,13 @@ fn expansion_status_row_does_not_consume_stripe() {
 
 #[test]
 fn placeholder_conversion_keeps_its_row_stripe_stable() {
-    // 占位行完成为真实条目:透传时取到的序号与转为 Entry 后消耗的
+    // 占位行完成为真实条目:占位消耗的序号与转为 Entry 后消耗的
     // 序号一致,同一行条纹在转换前后不跳变。
     let entries = [file_entry("/workspace/a.txt"), file_entry("/workspace/z.txt")];
     let placeholder_browser = browser_with_entries(entries.to_vec(), FileGroupingMode::None);
     let placeholder_rows =
         build_rows_with_placeholders(&placeholder_browser, vec![file_placeholder("m.txt")]);
-    assert_eq!(stripe_sequence(&placeholder_rows), [0, 1, 1]);
+    assert_eq!(stripe_sequence(&placeholder_rows), [0, 1, 2]);
 
     // m.txt 落地成真实条目:条纹按条目序 0/1/2,原占位所在的第 2 行
     // 在转换前后都是 1。

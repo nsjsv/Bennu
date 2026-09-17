@@ -1065,6 +1065,7 @@ mod recoverable_transfer_tests {
 
     mod cancellation_terminalization;
     mod cross_filesystem_recovery;
+    mod driver_adoption;
     mod failure_settlement;
     mod start_latency_harness;
 

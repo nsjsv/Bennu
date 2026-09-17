@@ -62,10 +62,11 @@ pub(crate) fn split_root_cells<'a>(
         let cells = merged
             .into_iter()
             .map(|item| match item {
-                MergedTransferItem::Entry(entry) => {
+                MergedTransferItem::Entry { entry, transfer } => {
                     let cell = IconGridCell::Entry(IconGridEntryCell {
                         entry,
                         entry_index: next_entry_index,
+                        transfer,
                     });
                     next_entry_index += 1;
                     cell
@@ -84,10 +85,13 @@ pub(crate) fn split_root_cells<'a>(
         .map(|(index, entry)| (entry.path.as_path(), index))
         .collect();
     let cell_of = |item: &MergedTransferItem<'a>| match item {
-        MergedTransferItem::Entry(entry) => IconGridCell::Entry(IconGridEntryCell {
-            entry,
-            entry_index: entry_index_of_path[entry.path.as_path()],
-        }),
+        MergedTransferItem::Entry { entry, transfer } => {
+            IconGridCell::Entry(IconGridEntryCell {
+                entry,
+                entry_index: entry_index_of_path[entry.path.as_path()],
+                transfer: transfer.clone(),
+            })
+        }
         // 占位是合并时逐个克隆出的临时集合,按引用再克隆一份成本可忽略。
         MergedTransferItem::Placeholder(placeholder) => {
             IconGridCell::Placeholder(placeholder.clone())

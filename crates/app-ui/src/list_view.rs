@@ -196,6 +196,7 @@ pub(crate) fn list_browser_view<'a>(
                 match row {
                     crate::transfer_placeholder_view::ListTransferRow::Entry {
                         visible,
+                        transfer,
                         stripe_index,
                     } => {
                         rows = rows.push(list_entry_row(
@@ -204,6 +205,7 @@ pub(crate) fn list_browser_view<'a>(
                             &geometry,
                             &visible_columns,
                             visible.entry,
+                            transfer.as_ref(),
                             visible.depth,
                             *stripe_index,
                             visible.animation_progress,
@@ -542,6 +544,7 @@ fn list_entry_row<'a>(
     geometry: &ListGeometry,
     visible_columns: &[ListColumnConfig],
     entry: &DirectoryEntry,
+    transfer: Option<&crate::transfer_placeholders::TransferPlaceholder>,
     depth: usize,
     stripe_index: usize,
     animation_progress: f32,
@@ -556,6 +559,7 @@ fn list_entry_row<'a>(
         geometry,
         visible_columns,
         entry,
+        transfer,
         depth,
         icon_tone,
     ))
@@ -640,6 +644,7 @@ fn list_entry_cells<'a>(
     geometry: &ListGeometry,
     visible_columns: &[ListColumnConfig],
     entry: &DirectoryEntry,
+    transfer: Option<&crate::transfer_placeholders::TransferPlaceholder>,
     depth: usize,
     icon_tone: FileEntryIconTone,
 ) -> Row<'a, Message> {
@@ -654,7 +659,15 @@ fn list_entry_cells<'a>(
             row_content = row_content.push(list_column_gap());
         }
         row_content = row_content.push(list_entry_cell(
-            browser, pane, geometry, entry, depth, icon_tone, &metadata, column,
+            browser,
+            pane,
+            geometry,
+            entry,
+            transfer,
+            depth,
+            icon_tone,
+            &metadata,
+            column,
         ));
     }
     row_content.push(list_column_gap())
@@ -696,6 +709,7 @@ fn list_entry_cell<'a>(
     pane: BrowserPaneView<'a>,
     geometry: &ListGeometry,
     entry: &DirectoryEntry,
+    transfer: Option<&crate::transfer_placeholders::TransferPlaceholder>,
     depth: usize,
     icon_tone: FileEntryIconTone,
     metadata: &EntryMetadata,
@@ -707,6 +721,7 @@ fn list_entry_cell<'a>(
             pane,
             geometry,
             entry,
+            transfer,
             depth,
             icon_tone,
             column.width,
@@ -802,6 +817,7 @@ fn list_name_cell<'a>(
     pane: BrowserPaneView<'a>,
     geometry: &ListGeometry,
     entry: &DirectoryEntry,
+    transfer: Option<&crate::transfer_placeholders::TransferPlaceholder>,
     depth: usize,
     icon_tone: FileEntryIconTone,
     width: f32,
@@ -830,7 +846,11 @@ fn list_name_cell<'a>(
     row![
         indent,
         toggle,
-        entry_thumbnail_or_icon(browser, entry, icon_tone, geometry.icon_density),
+        crate::transfer_placeholder_view::entry_icon_with_transfer(
+            entry_thumbnail_or_icon(browser, entry, icon_tone, geometry.icon_density),
+            transfer,
+            geometry.icon_density.thumbnail_size(),
+        ),
         name
     ]
     .spacing(geometry.row_spacing)

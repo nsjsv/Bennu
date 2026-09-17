@@ -78,7 +78,7 @@ pub(crate) use properties::{
     set_file_properties_permissions_command, FilePropertiesPermissionTargets,
 };
 mod queued_file_operations;
-pub(crate) use queued_file_operations::{file_operation_subscription, DurableDirectMoveCommit};
+pub(crate) use queued_file_operations::{file_operation_driver_task, DurableDirectMoveCommit};
 mod search;
 pub(crate) use search::{
     directory_fallback_search_command, search_command, search_with_scope_root_check_command,

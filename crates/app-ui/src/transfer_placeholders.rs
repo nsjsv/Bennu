@@ -142,17 +142,31 @@ fn compare_placeholder_with_placeholder(
 }
 
 /// 把占位按排序合入真实条目流:返回值顺序即渲染顺序。占位来自多个
-/// 队列任务、彼此无序,先按同一比较器排好再归并;同名平局时真实条目
-/// 在前(占位最终被真文件替换消失,先让位避免落地后其余行跳位)。
+/// 队列任务、彼此无序,先按同一比较器排好再归并。
+///
+/// 与真实条目同名的占位不再单独成行——目录复制期间目标目录从创建起
+/// 就与占位同名并存,独立占位行会让整个复制过程出现两行同名;改为把
+/// 占位作为 `transfer` 装饰挂到真实行上(图标叠加进度环)。
 pub(crate) fn merge_entries_with_placeholders<'a>(
     entries: &'a [DirectoryEntry],
     placeholders: &[TransferPlaceholder],
     sort: TransferSortOptions,
 ) -> Vec<MergedTransferItem<'a>> {
-    let mut sorted = placeholders.to_vec();
-    sorted.sort_by(|left, right| compare_placeholder_with_placeholder(left, right, sort));
-    let mut merged = Vec::with_capacity(entries.len() + sorted.len());
-    let mut pending = sorted.iter().peekable();
+    let entry_names: std::collections::HashSet<&OsStr> =
+        entries.iter().map(|entry| entry.name()).collect();
+    let mut decorations: std::collections::HashMap<String, TransferPlaceholder> =
+        std::collections::HashMap::new();
+    let mut unmatched: Vec<TransferPlaceholder> = Vec::new();
+    for placeholder in placeholders {
+        if entry_names.contains(OsStr::new(&placeholder.name)) {
+            decorations.insert(placeholder.name.clone(), placeholder.clone());
+        } else {
+            unmatched.push(placeholder.clone());
+        }
+    }
+    unmatched.sort_by(|left, right| compare_placeholder_with_placeholder(left, right, sort));
+    let mut merged = Vec::with_capacity(entries.len() + unmatched.len());
+    let mut pending = unmatched.iter().peekable();
     for entry in entries {
         while let Some(placeholder) = pending.peek() {
             if compare_placeholder_with_entry(placeholder, entry, sort) != Ordering::Less {
@@ -162,7 +176,8 @@ pub(crate) fn merge_entries_with_placeholders<'a>(
                 pending.next().unwrap().clone(),
             ));
         }
-        merged.push(MergedTransferItem::Entry(entry));
+        let transfer = decorations.remove(entry.name().to_string_lossy().as_ref());
+        merged.push(MergedTransferItem::Entry { entry, transfer });
     }
     merged.extend(pending.map(|placeholder| MergedTransferItem::Placeholder(placeholder.clone())));
     merged
@@ -170,7 +185,12 @@ pub(crate) fn merge_entries_with_placeholders<'a>(
 
 #[derive(Debug)]
 pub(crate) enum MergedTransferItem<'a> {
-    Entry(&'a DirectoryEntry),
+    /// 真实条目;`transfer` 为正在写入该条目的同名传输占位,行渲染时在
+    /// 图标槽叠加进度环。
+    Entry {
+        entry: &'a DirectoryEntry,
+        transfer: Option<TransferPlaceholder>,
+    },
     /// 占位按值携带:条目借用视图数据,占位来自队列派生的临时集合。
     Placeholder(TransferPlaceholder),
 }
@@ -360,6 +380,43 @@ mod tests {
     }
 
     #[test]
+    fn same_name_placeholder_decorates_the_entry_without_a_duplicate_row() {
+        // 目录复制期间目标目录从创建起就与占位同名并存:同名占位必须挂到
+        // 真实行上做装饰,而不是再渲染一行独立占位(两行同名)。
+        let entries = [entry("/target/incoming.bin", FileKind::File, 100, None)];
+        let placeholders = [placeholder("incoming.bin", false, Some(0.25))];
+
+        let merged =
+            merge_entries_with_placeholders(&entries, &placeholders, name_sort(SortDirection::Ascending));
+
+        assert_eq!(merged.len(), 1);
+        match &merged[0] {
+            MergedTransferItem::Entry { transfer, .. } => {
+                let transfer = transfer.as_ref().expect("same-name transfer decorates the entry");
+                assert_eq!(transfer.name, "incoming.bin");
+                assert_eq!(transfer.progress, Some(0.25));
+            }
+            MergedTransferItem::Placeholder(_) => panic!("placeholder must not duplicate the entry"),
+        }
+    }
+
+    #[test]
+    fn same_name_directory_placeholder_decorates_the_real_directory() {
+        // 目录场景(用户报告的形态):真实目录已在列表中且逐步填充。
+        let entries = [entry("/target/Hollow Knight Silksong", FileKind::Directory, 442, None)];
+        let placeholders = [placeholder("Hollow Knight Silksong", true, None)];
+
+        let merged =
+            merge_entries_with_placeholders(&entries, &placeholders, name_sort(SortDirection::Ascending));
+
+        assert_eq!(merged.len(), 1);
+        assert!(matches!(
+            &merged[0],
+            MergedTransferItem::Entry { transfer: Some(_), .. }
+        ));
+    }
+
+    #[test]
     fn merge_inserts_placeholder_at_sorted_name_position() {
         let entries = [
             entry("/target/alpha.txt", FileKind::File, 1, None),
@@ -373,7 +430,9 @@ mod tests {
         let labels = merged
             .iter()
             .map(|item| match item {
-                MergedTransferItem::Entry(entry) => entry.name().to_string_lossy().into_owned(),
+                MergedTransferItem::Entry { entry, .. } => {
+                    entry.name().to_string_lossy().into_owned()
+                }
                 MergedTransferItem::Placeholder(placeholder) => placeholder.name.clone(),
             })
             .collect::<Vec<_>>();
@@ -396,7 +455,9 @@ mod tests {
         let labels = merged
             .iter()
             .map(|item| match item {
-                MergedTransferItem::Entry(entry) => entry.name().to_string_lossy().into_owned(),
+                MergedTransferItem::Entry { entry, .. } => {
+                    entry.name().to_string_lossy().into_owned()
+                }
                 MergedTransferItem::Placeholder(placeholder) => placeholder.name.clone(),
             })
             .collect::<Vec<_>>();
@@ -436,7 +497,9 @@ mod tests {
         let labels = merged
             .iter()
             .map(|item| match item {
-                MergedTransferItem::Entry(entry) => entry.name().to_string_lossy().into_owned(),
+                MergedTransferItem::Entry { entry, .. } => {
+                    entry.name().to_string_lossy().into_owned()
+                }
                 MergedTransferItem::Placeholder(placeholder) => placeholder.name.clone(),
             })
             .collect::<Vec<_>>();
@@ -476,7 +539,9 @@ mod tests {
         let labels = merged
             .iter()
             .map(|item| match item {
-                MergedTransferItem::Entry(entry) => entry.name().to_string_lossy().into_owned(),
+                MergedTransferItem::Entry { entry, .. } => {
+                    entry.name().to_string_lossy().into_owned()
+                }
                 MergedTransferItem::Placeholder(placeholder) => placeholder.name.clone(),
             })
             .collect::<Vec<_>>();
@@ -485,16 +550,19 @@ mod tests {
 
     #[test]
     fn same_name_tie_puts_real_entry_before_placeholder() {
-        // 重名冲突策略为替换时,占位与真文件同名:真文件在前,占位消失
-        // 时其余行不跳位。
+        // 重名冲突策略为替换时,占位与真文件同名:同名占位装饰真实行,
+        // 不再单独成行(旧行为是两行同名并存整个复制过程)。
         let entries = [entry("/target/dup.txt", FileKind::File, 1, None)];
         let placeholders = [placeholder("dup.txt", false, None)];
 
         let merged =
             merge_entries_with_placeholders(&entries, &placeholders, name_sort(SortDirection::Ascending));
 
-        assert!(matches!(merged[0], MergedTransferItem::Entry(_)));
-        assert!(matches!(merged[1], MergedTransferItem::Placeholder(_)));
+        assert_eq!(merged.len(), 1);
+        assert!(matches!(
+            merged[0],
+            MergedTransferItem::Entry { transfer: Some(_), .. }
+        ));
     }
 
     #[test]
@@ -513,7 +581,10 @@ mod tests {
         );
 
         assert!(matches!(merged[0], MergedTransferItem::Placeholder(_)));
-        assert!(matches!(merged[1], MergedTransferItem::Entry(_)));
+        assert!(matches!(
+            merged[1],
+            MergedTransferItem::Entry { transfer: None, .. }
+        ));
     }
 
     fn transfer(target: &str) -> crate::operation_queue::QueuedTransfer {

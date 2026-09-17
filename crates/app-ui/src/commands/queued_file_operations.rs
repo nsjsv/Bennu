@@ -1,7 +1,5 @@
-use std::any::TypeId;
 use std::ffi::OsString;
 use std::future::Future;
-use std::hash::Hash;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::time::{Duration, Instant};
@@ -21,11 +19,8 @@ use file_core::{
     TrashRestoreEntry, TrashVerificationBatch,
 };
 use file_operation_store::TaskQueueStore;
-use iced::advanced::subscription::{self, EventStream, Hasher, Recipe};
 use iced::futures::channel::mpsc::Sender as IcedSender;
-use iced::futures::stream::BoxStream;
 use iced::futures::SinkExt;
-use iced::Subscription;
 
 use crate::localization::translate_current;
 use crate::model::Message;
@@ -76,50 +71,35 @@ fn should_send_byte_progress(last_sent_at: Option<Instant>, now: Instant) -> boo
     }
 }
 
-pub(crate) fn file_operation_subscription(task: RunningFileOperation) -> Subscription<Message> {
-    subscription::from_recipe(FileOperationRecipe { task })
-}
-
-struct FileOperationRecipe {
-    task: RunningFileOperation,
-}
-
-impl Recipe for FileOperationRecipe {
-    type Output = Message;
-
-    fn hash(&self, state: &mut Hasher) {
-        TypeId::of::<Self>().hash(state);
-        self.task.id.hash(state);
-    }
-
-    fn stream(self: Box<Self>, _input: EventStream) -> BoxStream<'static, Self::Output> {
-        let RunningFileOperation {
-            id: task_id,
-            stored_id,
-            operation,
-            controls,
-            store,
-        } = self.task;
-
-        Box::pin(iced::stream::channel(
-            FILE_OPERATION_CHANNEL_SIZE,
-            async move |mut output| {
-                let result = run_queued_file_operation(
-                    operation,
-                    controls,
-                    store,
-                    stored_id,
-                    task_id,
-                    &mut output,
-                )
+/// 驱动者是 `Task::stream`:一次性托付给执行器跑到流结束,不进订阅 hash 名册,
+/// 不会被 subscription() 重评估静默回收。驱动者死亡由队列监督检测并换代重启,
+/// 见 `operation_queue::supervision`。
+pub(crate) fn file_operation_driver_task(task: RunningFileOperation) -> iced::Task<Message> {
+    iced::Task::stream(iced::stream::channel(
+        FILE_OPERATION_CHANNEL_SIZE,
+        async move |mut output| {
+            let RunningFileOperation {
+                id: task_id,
+                stored_id,
+                operation,
+                controls,
+                store,
+                generation,
+            } = task;
+            let result = run_queued_file_operation(
+                operation,
+                controls,
+                store,
+                stored_id,
+                task_id,
+                &mut output,
+            )
+            .await;
+            let _ = output
+                .send(Message::FileOperationFinished(task_id, generation, result))
                 .await;
-                let _ = output
-                    .send(Message::FileOperationFinished(task_id, result))
-                    .await;
-                iced::futures::future::pending().await
-            },
-        ))
-    }
+        },
+    ))
 }
 
 async fn run_queued_file_operation(

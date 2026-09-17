@@ -41,6 +41,9 @@ impl FileOperationQueue {
             task.progress = FileOperationProgress::pending();
             task.completion_warning = None;
             task.error = None;
+            // 驱动者即将(在 update 出口)签发,信号计时从此刻起算。
+            task.driver_running = false;
+            task.last_driver_signal = Some(std::time::Instant::now());
             let _ = task.run_state_sender.send(FileOperationRunState::Running);
             self.queue_task_state(
                 position,
@@ -130,6 +133,9 @@ impl FileOperationQueue {
             post_insert_disposition: PostInsertDisposition::Continue,
             terminal_persistence_pending: false,
             accepted_direct_move_revisions: HashMap::new(),
+            driver_generation: 0,
+            driver_running: false,
+            last_driver_signal: None,
         });
         let position = self.tasks.len().saturating_sub(1);
         self.queue_task_state(

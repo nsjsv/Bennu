@@ -195,8 +195,22 @@ impl FileBrowser {
     pub(super) fn accept_application_shutdown_operation_finished(
         &mut self,
         task_id: u64,
+        generation: u64,
         completion: FileOperationCompletion,
     ) -> Task<Message> {
+        if !self
+            .operation_queue
+            .driver_generation_is_current(task_id, generation)
+        {
+            // 排空阶段不会换代;这条只可能来自被取消的旧驱动者的迟到终态。
+            tracing::warn!(
+                target: "app_ui::operation_supervision",
+                task_id,
+                generation,
+                "stale driver completion during shutdown was rejected"
+            );
+            return Task::none();
+        }
         let is_waiting = matches!(
             &self.application_shutdown_phase,
             ApplicationShutdownPhase::Draining(drain)

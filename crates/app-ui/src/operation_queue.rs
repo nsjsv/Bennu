@@ -341,6 +341,12 @@ pub(crate) struct FileOperationTask {
     post_insert_disposition: PostInsertDisposition,
     terminal_persistence_pending: bool,
     accepted_direct_move_revisions: HashMap<file_core::TransferWorkKey, u64>,
+    /// 当前驱动者代数;监督换代时递增,旧代驱动者的迟到终态凭此被拒。
+    pub(crate) driver_generation: u64,
+    /// 是否已签发驱动者(Task::stream)。监督换代时清零等待重新签发。
+    pub(crate) driver_running: bool,
+    /// 最近一次该任务驱动者的生命信号(任意进度/终态消息)。
+    pub(crate) last_driver_signal: Option<std::time::Instant>,
 }
 
 impl FileOperationTask {
@@ -371,6 +377,7 @@ pub(crate) struct RunningFileOperation {
     pub(crate) operation: QueuedFileOperation,
     pub(crate) controls: FileOperationControls,
     pub(crate) store: Option<TaskQueueStore>,
+    pub(crate) generation: u64,
 }
 
 pub(crate) struct FileOperationShutdownDisposition {
@@ -390,6 +397,8 @@ pub(crate) struct FileOperationQueue {
     pending_deletions: BTreeSet<u64>,
     is_panel_open: bool,
     store: Option<TaskQueueStore>,
+    /// 下次允许扫 store 认领外来任务的时刻(监督节流)。
+    next_store_scan: Option<std::time::Instant>,
     #[cfg(test)]
     persist_synchronously_for_tests: bool,
 }
@@ -405,6 +414,7 @@ impl FileOperationQueue {
             pending_deletions: BTreeSet::new(),
             is_panel_open: false,
             store: None,
+            next_store_scan: None,
             #[cfg(test)]
             persist_synchronously_for_tests: false,
         }
@@ -539,6 +549,9 @@ impl FileOperationQueue {
             post_insert_disposition: PostInsertDisposition::Continue,
             terminal_persistence_pending: false,
             accepted_direct_move_revisions: HashMap::new(),
+            driver_generation: 0,
+            driver_running: false,
+            last_driver_signal: None,
         });
 
         if let Some(store) = self.store.clone() {
@@ -602,6 +615,7 @@ impl FileOperationQueue {
                     task.run_state_receiver.clone(),
                 ),
                 store: self.store.clone(),
+                generation: task.driver_generation,
             })
     }
 
@@ -914,6 +928,9 @@ impl FileOperationQueue {
             }
         };
         self.tasks[position].execution_phase = None;
+        // 任务到终态,驱动者不复存在;标记清零,与监督的存活判断保持一致。
+        self.tasks[position].driver_running = false;
+        self.tasks[position].last_driver_signal = None;
         if self.tasks[position].operation.uses_recovery_journal()
             && matches!(
                 persistence,
@@ -951,6 +968,8 @@ impl FileOperationQueue {
                 let task = &mut self.tasks[position];
                 let _ = task.run_state_sender.send(FileOperationRunState::Running);
                 task.status = FileOperationStatus::Running;
+                // 暂停期间驱动者合法静默;恢复后重计信号超时,防误判死亡。
+                task.last_driver_signal = Some(std::time::Instant::now());
                 self.queue_task_status(position);
             }
             _ => return None,
@@ -1149,6 +1168,8 @@ impl FileOperationQueue {
 
 mod runtime;
 pub(crate) use runtime::PersistedShutdownFileOperation;
+mod supervision;
+pub(crate) use supervision::SUPERVISION_INTERVAL;
 
 fn storage_error(error: impl std::fmt::Display) -> String {
     format!("File operation queue storage failed: {error}")

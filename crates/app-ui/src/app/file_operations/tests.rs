@@ -197,6 +197,7 @@ fn progress_and_completion_keep_queue_panel_closed() {
 
     drop(browser.update(Message::FileOperationFinished(
         task_id,
+        0,
         FileOperationCompletion::Succeeded(FileOperationOutcome::NoHistory),
     )));
     assert!(!browser.operation_queue.is_panel_open());

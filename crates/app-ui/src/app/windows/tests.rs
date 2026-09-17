@@ -891,6 +891,7 @@ async fn recoverable_runner_ack_precedes_one_shutdown_transaction_and_exit() {
 
     let persisted = shutdown_actions(browser.update(Message::FileOperationFinished(
         task_id,
+        0,
         FileOperationCompletion::RecoveryInterrupted("application stopping".to_owned(), Vec::new()),
     )))
     .await;
@@ -948,6 +949,7 @@ async fn terminal_recoverable_completion_is_not_rewritten_as_recovery_pending() 
     drop(browser.update(Message::ApplicationWindowClosed(browser.main_window)));
     let persisted = shutdown_actions(browser.update(Message::FileOperationFinished(
         task_id,
+        0,
         FileOperationCompletion::RecoveryBlocked {
             error: "manual recovery required".to_owned(),
             completed_move_transfers: Vec::new(),

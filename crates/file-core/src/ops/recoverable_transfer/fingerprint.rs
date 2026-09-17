@@ -156,6 +156,8 @@ where
         .collect();
     let prefetched_indices = Arc::new(prefetched_indices);
     let prefetch_count = prefetched_indices.len();
+    let is_prefetched: std::collections::HashSet<usize> =
+        prefetched_indices.iter().copied().collect();
 
     if prefetch_count > 0 {
         enum PrefetchResult {
@@ -213,48 +215,89 @@ where
         let mut last_error: Option<std::io::Error> = None;
 
         for (index, entry) in entries.iter().enumerate() {
-            checkpoint()?;
+            // 提前退出必须先叫停 worker,否则取消/出错后它们会继续把剩余
+            // 队列全部预读完毕。
+            if let Err(error) = checkpoint() {
+                consumer_done.store(true, std::sync::atomic::Ordering::SeqCst);
+                return Err(error);
+            }
             update_component(&mut hasher, entry.relative_path.as_os_str());
             match &entry.kind {
                 FingerprintEntryKind::File { length } => {
                     hasher.update(b"file\0");
                     hasher.update(&length.to_le_bytes());
-                    let content = loop {
-                        if let Some(content) = pending_contents.remove(&index) {
-                            break content;
-                        }
-                        if last_error.is_some() {
+                    // 只有预读集内的小文件等 worker 结果;超过
+                    // PREFETCH_MAX_BYTES 的大文件 worker 不认领,必须由
+                    // 消费者顺序直读。缺了直读分支,消费到大文件时 recv
+                    // 要么永远等不到(worker 被窗口门锁死,整体死锁),
+                    // 要么在通道排空关闭后被误报成 join 失败。
+                    let mut read_total = 0u64;
+                    if is_prefetched.contains(&index) {
+                        let content = loop {
+                            if let Some(content) = pending_contents.remove(&index) {
+                                break content;
+                            }
+                            if last_error.is_some() {
+                                consumer_done.store(true, std::sync::atomic::Ordering::SeqCst);
+                                return Err(last_error.map(|source| {
+                                    RecoverableTransferError::file_system(
+                                        "read fingerprint file",
+                                        &entry.path,
+                                        source,
+                                    )
+                                })
+                                .unwrap());
+                            }
+                            let outcome = {
+                                let receiver = result_rx.lock().unwrap();
+                                receiver.recv().map_err(|join| {
+                                    RecoverableTransferError::file_system(
+                                        "join fingerprint prefetch worker",
+                                        &entry.path,
+                                        std::io::Error::other(join),
+                                    )
+                                })?
+                            };
+                            match outcome {
+                                PrefetchResult::Content(entry_index, content) => {
+                                    pending_contents.insert(entry_index, content);
+                                }
+                                PrefetchResult::Failed(entry_index, error) => {
+                                    pending_contents.insert(entry_index, Vec::new());
+                                    last_error = Some(error);
+                                }
+                            }
+                        };
+                        hasher.update(&content);
+                        read_total = content.len() as u64;
+                    } else {
+                        // blake3 流式 update 与整块 update 同值:直读不改变指纹。
+                        let mut file = std::fs::File::open(&entry.path).map_err(|source| {
                             consumer_done.store(true, std::sync::atomic::Ordering::SeqCst);
-                            return Err(last_error.map(|source| {
+                            RecoverableTransferError::file_system(
+                                "open fingerprint file",
+                                &entry.path,
+                                source,
+                            )
+                        })?;
+                        loop {
+                            checkpoint()?;
+                            let read = file.read(&mut buffer).map_err(|source| {
+                                consumer_done.store(true, std::sync::atomic::Ordering::SeqCst);
                                 RecoverableTransferError::file_system(
                                     "read fingerprint file",
                                     &entry.path,
                                     source,
                                 )
-                            })
-                            .unwrap());
-                        }
-                        let outcome = {
-                            let receiver = result_rx.lock().unwrap();
-                            receiver.recv().map_err(|join| {
-                                RecoverableTransferError::file_system(
-                                    "join fingerprint prefetch worker",
-                                    &entry.path,
-                                    std::io::Error::other(join),
-                                )
-                            })?
-                        };
-                        match outcome {
-                            PrefetchResult::Content(entry_index, content) => {
-                                pending_contents.insert(entry_index, content);
+                            })?;
+                            if read == 0 {
+                                break;
                             }
-                            PrefetchResult::Failed(entry_index, error) => {
-                                pending_contents.insert(entry_index, Vec::new());
-                                last_error = Some(error);
-                            }
+                            read_total += read as u64;
+                            hasher.update(&buffer[..read]);
                         }
-                    };
-                    if content.len() as u64 != *length {
+                    }
+                    if read_total != *length {
                         consumer_done.store(true, std::sync::atomic::Ordering::SeqCst);
                         return Err(RecoverableTransferError::file_system(
                             "read fingerprint file",
@@ -265,7 +308,6 @@ where
                             ),
                         ));
                     }
-                    hasher.update(&content);
                     consumed.store(index + 1, std::sync::atomic::Ordering::SeqCst);
                 }
                 FingerprintEntryKind::SymbolicLink { target } => {
@@ -373,5 +415,113 @@ mod tests {
             error,
             RecoverableTransferError::FileOperation(crate::FileError::ApplicationStopping)
         ));
+    }
+
+    // ===== 大文件直读分支的不变量测试 =====
+    // 参考实现:与阶段一相同的排序单线程顺序遍历,锁定"并行只影响读的
+    // 时机,不影响哈希值"。
+    fn reference_fingerprint(root: &Path) -> ObjectFingerprint {
+        enum Kind {
+            File { length: u64 },
+            Symlink { target: PathBuf },
+            Directory,
+        }
+        struct Entry {
+            rel: PathBuf,
+            path: PathBuf,
+            kind: Kind,
+        }
+        let mut entries: Vec<Entry> = Vec::new();
+        let mut pending = vec![(PathBuf::new(), root.to_path_buf())];
+        while let Some((rel, path)) = pending.pop() {
+            let metadata = std::fs::symlink_metadata(&path).unwrap();
+            let file_type = metadata.file_type();
+            if file_type.is_file() {
+                entries.push(Entry { rel, path, kind: Kind::File { length: metadata.len() } });
+                continue;
+            }
+            if file_type.is_symlink() {
+                let target = std::fs::read_link(&path).unwrap();
+                entries.push(Entry { rel, path, kind: Kind::Symlink { target } });
+                continue;
+            }
+            entries.push(Entry { rel: rel.clone(), path: path.clone(), kind: Kind::Directory });
+            let mut children = Vec::new();
+            for entry in std::fs::read_dir(&path).unwrap() {
+                let entry = entry.unwrap();
+                children.push((entry.file_name(), entry.path()));
+            }
+            children.sort_by(|(left, _), (right, _)| left.cmp(right));
+            for (name, child_path) in children.into_iter().rev() {
+                pending.push((rel.join(name), child_path));
+            }
+        }
+        let mut hasher = blake3::Hasher::new();
+        for entry in &entries {
+            update_component(&mut hasher, entry.rel.as_os_str());
+            match &entry.kind {
+                Kind::File { length } => {
+                    hasher.update(b"file\0");
+                    hasher.update(&length.to_le_bytes());
+                    hasher.update(&std::fs::read(&entry.path).unwrap());
+                }
+                Kind::Symlink { target } => {
+                    hasher.update(b"symlink\0");
+                    update_component(&mut hasher, target.as_os_str());
+                }
+                Kind::Directory => {
+                    hasher.update(b"directory\0");
+                }
+            }
+        }
+        ObjectFingerprint(*hasher.finalize().as_bytes())
+    }
+
+    /// mixed:大文件 + 一批小文件 + 子目录。`large_first` 决定大文件在
+    /// 排序遍历中的位置——居首是旧实现的死锁形态(≥33 个小文件顶满
+    /// 预读窗口,消费者与 worker 互相等待),居末是旧的误报形态
+    /// (worker 排空通道退出,消费者 recv 报 join 失败)。
+    fn write_mixed_tree(root: &Path, large_first: bool) {
+        const LARGE: usize = 32 * 1024 * 1024 + 7;
+        let large = vec![0xA5_u8; LARGE];
+        std::fs::create_dir_all(root.join("subdir")).unwrap();
+        if large_first {
+            std::fs::write(root.join("aaa-large.bin"), &large).unwrap();
+        } else {
+            std::fs::write(root.join("aaa-small.txt"), b"small").unwrap();
+        }
+        for index in 0..40 {
+            std::fs::write(root.join(format!("n{index:02}.txt")), format!("content-{index}"))
+                .unwrap();
+        }
+        std::fs::write(root.join("subdir").join("nested-large.bin"), &large).unwrap();
+        if large_first {
+            std::fs::write(root.join("z-small.txt"), b"small").unwrap();
+        } else {
+            std::fs::write(root.join("zzz-large.bin"), &large).unwrap();
+        }
+    }
+
+    async fn fingerprint_with_deadline(root: &Path) -> ObjectFingerprint {
+        tokio::time::timeout(std::time::Duration::from_secs(60), fingerprint_object(root))
+            .await
+            .expect("fingerprint deadlocked on a tree containing large files")
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn large_file_first_does_not_deadlock_the_prefetch_window() {
+        let directory = tempfile::tempdir().unwrap();
+        write_mixed_tree(directory.path(), true);
+        let fingerprint = fingerprint_with_deadline(directory.path()).await;
+        assert_eq!(fingerprint, reference_fingerprint(directory.path()));
+    }
+
+    #[tokio::test]
+    async fn large_file_last_is_not_misreported_as_worker_join_failure() {
+        let directory = tempfile::tempdir().unwrap();
+        write_mixed_tree(directory.path(), false);
+        let fingerprint = fingerprint_with_deadline(directory.path()).await;
+        assert_eq!(fingerprint, reference_fingerprint(directory.path()));
     }
 }

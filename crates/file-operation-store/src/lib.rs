@@ -32,11 +32,11 @@ pub use recoverable_transfer::{
 mod user_preferences;
 pub use user_preferences::{
     StoredContextMenuItemEntry, StoredContextMenuLayout, StoredContextMenuLayouts,
-    StoredCustomColorScheme, StoredCustomColorSet, StoredListViewColumn, StoredNetworkConnection,
-    StoredPreviewExtensionRules, StoredShortcutBinding, StoredSidebarFavorite,
-    StoredUserPreferences, StoredWindowControlPlacement, COLUMN_WIDTH_ADJUST_MODE_PER_COLUMN,
-    COLUMN_WIDTH_ADJUST_MODE_UNIFORM, LAUNCH_WINDOW_POLICY_MERGE_INTO_EXISTING,
-    LAUNCH_WINDOW_POLICY_OPEN_NEW_WINDOW,
+    StoredCustomColorScheme, StoredCustomColorSet, StoredLastSearchScope, StoredListViewColumn,
+    StoredNetworkConnection, StoredPreviewExtensionRules, StoredShortcutBinding,
+    StoredSidebarFavorite, StoredUserPreferences, StoredWindowControlPlacement,
+    COLUMN_WIDTH_ADJUST_MODE_PER_COLUMN, COLUMN_WIDTH_ADJUST_MODE_UNIFORM,
+    LAUNCH_WINDOW_POLICY_MERGE_INTO_EXISTING, LAUNCH_WINDOW_POLICY_OPEN_NEW_WINDOW,
 };
 
 #[cfg(test)]

@@ -208,6 +208,7 @@ fn audio_section<'a>(
                 message: Message::Convert(ConvertMessage::AudioChannelsSelected(
                     file_core::AudioChannelSpec::Keep,
                 )),
+                tooltip: None,
             },
             SegmentedChoice {
                 label: "Mono",
@@ -215,6 +216,7 @@ fn audio_section<'a>(
                 message: Message::Convert(ConvertMessage::AudioChannelsSelected(
                     file_core::AudioChannelSpec::Mono,
                 )),
+                tooltip: None,
             },
         ]),
     ));
@@ -292,11 +294,13 @@ fn mode_row(
                 label: "Quality",
                 selected: mode == ConvertMode::Quality,
                 message: message(ConvertMode::Quality),
+                tooltip: None,
             },
             SegmentedChoice {
                 label: "Target size",
                 selected: mode == ConvertMode::TargetSize,
                 message: message(ConvertMode::TargetSize),
+                tooltip: None,
             },
         ]),
     )
@@ -339,6 +343,7 @@ fn quality_preset_row(
                     label: preset_label(candidate),
                     selected: candidate == preset,
                     message: preset_message(candidate),
+                    tooltip: None,
                 })
                 .collect(),
         ),
@@ -395,12 +400,14 @@ fn resize_row(
             label: percent_label(percent),
             selected: !selection.uses_custom_width() && selection.percent() == percent,
             message: percent_message(percent),
+            tooltip: None,
         })
         .collect();
     choices.push(SegmentedChoice {
         label: "Custom",
         selected: selection.uses_custom_width(),
         message: custom_toggle,
+        tooltip: None,
     });
 
     // 行标签用 "Resize" 而非 "Size":该行是缩放百分比选择,裸 "Size"
@@ -437,11 +444,13 @@ fn fps_choices(selected: Option<u32>) -> Vec<SegmentedChoice> {
         label: "Keep",
         selected: selected.is_none(),
         message: Message::Convert(ConvertMessage::VideoFpsSelected(None)),
+        tooltip: None,
     }];
     choices.extend(FPS_CHOICES.iter().copied().map(|fps| SegmentedChoice {
         label: fps_label(fps),
         selected: selected == Some(fps),
         message: Message::Convert(ConvertMessage::VideoFpsSelected(Some(fps))),
+        tooltip: None,
     }));
     choices
 }

@@ -58,6 +58,7 @@ fn window_layout_selector(browser: &FileBrowser) -> Element<'static, Message> {
                 label: layout.label(),
                 selected: layout == selected,
                 message: Message::WindowChromeLayoutSelected(layout),
+                tooltip: None,
             })
             .collect(),
     )
@@ -215,6 +216,7 @@ fn side_selector(placement: WindowControlPlacement) -> Element<'static, Message>
                 label: side.label(),
                 selected: side == placement.side(),
                 message: Message::WindowControlSideSelected(placement.kind(), side),
+                tooltip: None,
             })
             .collect(),
     ))

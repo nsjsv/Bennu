@@ -11,8 +11,8 @@ use file_operation_store::{
 };
 
 use crate::model::{
-    BrowserViewMode, ListColumnKind, ListDirectorySizeDisplayMode, WindowChromeLayout,
-    WindowControlKind, WindowControlSide, WindowControlVisibility,
+    BrowserViewMode, LastSearchScope, ListColumnKind, ListDirectorySizeDisplayMode,
+    WindowChromeLayout, WindowControlKind, WindowControlSide, WindowControlVisibility,
 };
 use crate::network_connections::SavedNetworkConnection;
 use crate::shortcuts::ShortcutBindingId;
@@ -249,6 +249,7 @@ fn user_preferences_round_trip_through_sqlite() {
         .set_limit(crate::config::PreviewFileSizeKind::Video, 8 * 1024 * 1024);
     config.search_history.record_submission("report");
     config.search_history.record_submission("images");
+    config.last_search_scope = Some(LastSearchScope::Directory(PathBuf::from("/srv/projects")));
     let mut shortcut_table = toml::Table::new();
     shortcut_table.insert(
         "focus_path_input".to_owned(),
@@ -318,6 +319,10 @@ fn user_preferences_round_trip_through_sqlite() {
     assert!(loaded.network_list_thumbnail_downloads_enabled);
     assert_eq!(loaded.preview_size_limits.video_bytes, 8 * 1024 * 1024);
     assert_eq!(loaded.search_history.entries(), ["images", "report"]);
+    assert_eq!(
+        loaded.last_search_scope,
+        Some(LastSearchScope::Directory(PathBuf::from("/srv/projects")))
+    );
     assert_eq!(
         loaded
             .shortcuts

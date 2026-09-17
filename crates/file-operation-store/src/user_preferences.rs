@@ -93,6 +93,10 @@ pub struct StoredUserPreferences {
     pub window_controls: Vec<StoredWindowControlPlacement>,
     #[serde(default)]
     pub search_history: Vec<String>,
+    /// 最近一次搜索使用的范围;None = 旧版本数据或从未搜索，读取端按
+    /// 未记录处理。
+    #[serde(default)]
+    pub last_search_scope: Option<StoredLastSearchScope>,
     #[serde(default = "default_theme_mode")]
     pub theme_mode: String,
     #[serde(default = "default_color_scheme")]
@@ -107,6 +111,14 @@ pub struct StoredUserPreferences {
     /// 各右键菜单的项顺序与可见性;None = 旧版本数据,读取端回退内置默认。
     #[serde(default)]
     pub context_menu_layouts: Option<StoredContextMenuLayouts>,
+}
+
+/// 最近一次搜索的范围；目录用 StoredPath 保留非 UTF-8 路径字节。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum StoredLastSearchScope {
+    Global,
+    Directory { path: StoredPath },
 }
 
 /// 一份右键菜单的有序项列表;id 为 app 层定义的稳定字符串。
@@ -178,6 +190,7 @@ impl Default for StoredUserPreferences {
             window_chrome_layout: default_window_chrome_layout(),
             window_controls: default_stored_window_controls(),
             search_history: Vec::new(),
+            last_search_scope: None,
             theme_mode: default_theme_mode(),
             color_scheme: default_color_scheme(),
             custom_color_scheme: None,

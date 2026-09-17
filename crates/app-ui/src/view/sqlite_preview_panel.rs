@@ -45,6 +45,7 @@ pub(super) fn sqlite_preview_panel<'a>(
             message: Message::SqlitePreview(SqlitePreviewMessage::TabSelected(
                 SqlitePreviewTab::Tables,
             )),
+            tooltip: None,
         },
         SegmentedChoice {
             label: "SQL Query",
@@ -52,6 +53,7 @@ pub(super) fn sqlite_preview_panel<'a>(
             message: Message::SqlitePreview(SqlitePreviewMessage::TabSelected(
                 SqlitePreviewTab::Sql,
             )),
+            tooltip: None,
         },
     ]);
     let body = match active_tab {

@@ -1,4 +1,4 @@
-use iced::widget::{button, container, row, Button, Column};
+use iced::widget::{button, container, row, tooltip, Button, Column};
 use iced::{Alignment, Background, Border, Color, Element, Length, Shadow, Theme, Vector};
 
 use crate::appearance::{
@@ -15,6 +15,8 @@ pub(super) struct SegmentedChoice {
     pub(super) label: &'static str,
     pub(super) selected: bool,
     pub(super) message: Message,
+    /// 悬停补充说明（如"上次位置"档的完整路径）；None = 无。
+    pub(super) tooltip: Option<String>,
 }
 
 pub(super) fn segmented_choice_row(choices: Vec<SegmentedChoice>) -> Element<'static, Message> {
@@ -112,19 +114,44 @@ pub(super) fn secondary_action_button(
         .style(secondary_action_button_style())
 }
 
-fn segmented_choice_button(choice: SegmentedChoice) -> Button<'static, Message> {
+fn segmented_choice_button(choice: SegmentedChoice) -> Element<'static, Message> {
     let label = container(readable_text(choice.label).size(12))
         .width(Length::Fill)
         .height(Length::Fill)
         .center_x(Length::Fill)
         .center_y(Length::Fill);
 
-    button(label)
+    let button = button(label)
         .on_press(choice.message)
         .width(Length::FillPortion(1))
         .height(Length::Fixed(SEGMENTED_CHOICE_HEIGHT))
         .padding([4, 8])
-        .style(segmented_choice_button_style(choice.selected))
+        .style(segmented_choice_button_style(choice.selected));
+    match choice.tooltip {
+        Some(text) => tooltip(
+            button,
+            container(readable_text(text).size(11))
+                .padding([5, 7])
+                .style(segmented_choice_tooltip_style),
+            tooltip::Position::Bottom,
+        )
+        .into(),
+        None => button.into(),
+    }
+}
+
+fn segmented_choice_tooltip_style(theme: &Theme) -> container::Style {
+    let colors = ui_colors(theme);
+    container::Style {
+        background: Some(Background::Color(colors.surface_container_high)),
+        text_color: Some(colors.on_surface),
+        border: Border {
+            color: subtle_border_color(theme),
+            width: 1.0,
+            radius: 6.0.into(),
+        },
+        ..container::Style::default()
+    }
 }
 
 fn segmented_choice_group_style(theme: &Theme) -> container::Style {

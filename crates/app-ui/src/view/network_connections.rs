@@ -177,6 +177,7 @@ fn protocol_selector(selected: desktop_linux::NetworkProtocol) -> Element<'stati
             message: Message::NetworkConnection(NetworkConnectionMessage::EditorProtocolSelected(
                 desktop_linux::NetworkProtocol::Smb,
             )),
+            tooltip: None,
         },
         SegmentedChoice {
             label: "WebDAV",
@@ -184,6 +185,7 @@ fn protocol_selector(selected: desktop_linux::NetworkProtocol) -> Element<'stati
             message: Message::NetworkConnection(NetworkConnectionMessage::EditorProtocolSelected(
                 desktop_linux::NetworkProtocol::WebDav,
             )),
+            tooltip: None,
         },
         SegmentedChoice {
             label: "SFTP",
@@ -191,6 +193,7 @@ fn protocol_selector(selected: desktop_linux::NetworkProtocol) -> Element<'stati
             message: Message::NetworkConnection(NetworkConnectionMessage::EditorProtocolSelected(
                 desktop_linux::NetworkProtocol::Sftp,
             )),
+            tooltip: None,
         },
     ])
 }

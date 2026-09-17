@@ -7,8 +7,8 @@ use crate::matugen_theme::{
     default_custom_color_scheme, ColorSchemePreset, CustomColorScheme, ThemeMode,
 };
 use crate::model::{
-    BrowserViewMode, ContextMenuPreferences, FileGroupingMode, ListDirectorySizeDisplayMode,
-    SearchHistory,
+    BrowserViewMode, ContextMenuPreferences, FileGroupingMode, LastSearchScope,
+    ListDirectorySizeDisplayMode, SearchHistory,
 };
 use crate::network_connections::SavedNetworkConnection;
 use crate::shortcuts::ShortcutConfig;
@@ -573,6 +573,8 @@ pub(crate) struct UserConfig {
     pub(crate) search_content_indexing_enabled: bool,
     pub(crate) search_max_extract_bytes: u64,
     pub(crate) search_history: SearchHistory,
+    /// 最近一次搜索的范围记忆；打开下一个搜索工作区时恢复为默认档。
+    pub(crate) last_search_scope: Option<LastSearchScope>,
     pub(crate) theme_mode: ThemeMode,
     pub(crate) color_scheme: ColorSchemePreset,
     pub(crate) custom_color_scheme: CustomColorScheme,
@@ -636,6 +638,7 @@ pub(crate) fn default_user_config() -> UserConfig {
         search_content_indexing_enabled: true,
         search_max_extract_bytes: DEFAULT_SEARCH_MAX_EXTRACT_BYTES,
         search_history: SearchHistory::default(),
+        last_search_scope: None,
         theme_mode: ThemeMode::Automatic,
         color_scheme: ColorSchemePreset::Default,
         custom_color_scheme: default_custom_color_scheme(),
@@ -681,6 +684,7 @@ pub(crate) fn ui_thread_startup_config() -> UserConfig {
         search_content_indexing_enabled: true,
         search_max_extract_bytes: DEFAULT_SEARCH_MAX_EXTRACT_BYTES,
         search_history: SearchHistory::default(),
+        last_search_scope: None,
         theme_mode: ThemeMode::Automatic,
         color_scheme: ColorSchemePreset::Default,
         custom_color_scheme: default_custom_color_scheme(),

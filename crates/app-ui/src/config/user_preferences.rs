@@ -4,9 +4,9 @@ use desktop_linux::{NetworkConnection, NetworkConnectionId, NetworkProtocol, Ter
 use file_core::FileOperationVerification;
 use file_operation_store::{
     StoreResult, StoredContextMenuItemEntry, StoredContextMenuLayout, StoredContextMenuLayouts,
-    StoredListViewColumn, StoredNetworkConnection, StoredPath, StoredPreviewExtensionRules,
-    StoredShortcutBinding, StoredSidebarFavorite, StoredUserPreferences,
-    StoredWindowControlPlacement, TaskQueueStore,
+    StoredLastSearchScope, StoredListViewColumn, StoredNetworkConnection, StoredPath,
+    StoredPreviewExtensionRules, StoredShortcutBinding, StoredSidebarFavorite,
+    StoredUserPreferences, StoredWindowControlPlacement, TaskQueueStore,
 };
 
 use super::app_config::AppConfig;
@@ -27,10 +27,10 @@ use super::{
 use crate::matugen_theme::{ColorSchemePreset, CustomColorScheme, ThemeMode};
 use crate::model::{
     list_column_kind_config_value, list_column_kind_from_config_value, BrowserViewMode,
-    ContextMenuLayoutConfigValues, ContextMenuPreferences, FileGroupingMode, ListColumnConfig,
-    ListDirectorySizeDisplayMode, ListSortPreference, ListViewPreferences, WindowChromeLayout,
-    WindowControlKind, WindowControlPlacement, WindowControlSide, WindowControlVisibility,
-    WindowControlsConfig,
+    ContextMenuLayoutConfigValues, ContextMenuPreferences, FileGroupingMode, LastSearchScope,
+    ListColumnConfig, ListDirectorySizeDisplayMode, ListSortPreference, ListViewPreferences,
+    WindowChromeLayout, WindowControlKind, WindowControlPlacement, WindowControlSide,
+    WindowControlVisibility, WindowControlsConfig,
 };
 use crate::network_connections::SavedNetworkConnection;
 use crate::shortcuts::ShortcutConfig;
@@ -69,6 +69,7 @@ pub(crate) struct UserPreferences {
     pub(crate) save_view_state: bool,
     pub(crate) shortcuts: ShortcutConfig,
     pub(crate) search_history: crate::model::SearchHistory,
+    pub(crate) last_search_scope: Option<LastSearchScope>,
     pub(crate) theme_mode: ThemeMode,
     pub(crate) color_scheme: ColorSchemePreset,
     pub(crate) custom_color_scheme: CustomColorScheme,
@@ -128,6 +129,7 @@ impl UserPreferences {
             save_view_state: config.startup_location_policy.saves_view_state(),
             shortcuts: config.shortcuts.clone(),
             search_history: config.search_history.clone(),
+            last_search_scope: config.last_search_scope.clone(),
             theme_mode: config.theme_mode,
             color_scheme: config.color_scheme,
             custom_color_scheme: config.custom_color_scheme.clone(),
@@ -169,6 +171,7 @@ impl UserPreferences {
         config.save_view_state = self.startup_location_policy.saves_view_state();
         config.shortcuts = self.shortcuts.clone();
         config.search_history = self.search_history.clone();
+        config.last_search_scope = self.last_search_scope.clone();
         config.theme_mode = self.theme_mode;
         config.color_scheme = self.color_scheme;
         config.custom_color_scheme = self.custom_color_scheme.clone();
@@ -242,6 +245,12 @@ impl UserPreferences {
         stored.save_view_state = self.startup_location_policy.saves_view_state();
         stored.shortcuts = stored_shortcuts(&self.shortcuts);
         stored.search_history = self.search_history.entries().to_vec();
+        stored.last_search_scope = self.last_search_scope.as_ref().map(|scope| match scope {
+            LastSearchScope::Global => StoredLastSearchScope::Global,
+            LastSearchScope::Directory(path) => StoredLastSearchScope::Directory {
+                path: StoredPath::from_path(path),
+            },
+        });
         stored.theme_mode = self.theme_mode.config_value().to_owned();
         stored.color_scheme = self.color_scheme.config_value().to_owned();
         stored.custom_color_scheme = Some(self.custom_color_scheme.to_stored());
@@ -362,6 +371,12 @@ impl UserPreferences {
             search_history: crate::model::SearchHistory::from_persisted(
                 stored.search_history.clone(),
             ),
+            last_search_scope: stored.last_search_scope.as_ref().map(|scope| match scope {
+                StoredLastSearchScope::Global => LastSearchScope::Global,
+                StoredLastSearchScope::Directory { path } => {
+                    LastSearchScope::Directory(path.to_path_buf())
+                }
+            }),
             theme_mode,
             color_scheme,
             custom_color_scheme,

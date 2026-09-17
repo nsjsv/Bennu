@@ -215,5 +215,6 @@ fn markdown_preview_mode_choice(
         label,
         selected: mode == selected_mode,
         message: Message::MarkdownPreviewModeSelected(mode),
+        tooltip: None,
     }
 }

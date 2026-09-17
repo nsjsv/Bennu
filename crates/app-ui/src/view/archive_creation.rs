@@ -82,6 +82,7 @@ fn archive_format_buttons(state: &ArchiveCreationState) -> Element<'_, Message> 
                 label: archive_format_label(format),
                 selected: format == state.format(),
                 message: Message::ArchiveCreation(ArchiveCreationMessage::FormatSelected(format)),
+                tooltip: None,
             })
             .collect(),
     )
@@ -98,6 +99,7 @@ fn archive_compression_buttons(state: &ArchiveCreationState) -> Element<'_, Mess
                 message: Message::ArchiveCreation(
                     ArchiveCreationMessage::CompressionLevelSelected(level),
                 ),
+                tooltip: None,
             })
             .collect(),
     )

@@ -83,6 +83,7 @@ fn log_threshold_choices(selected: ApplicationLogLevel) -> Element<'static, Mess
                 label: level.label(),
                 selected: level == selected,
                 message: Message::ApplicationLogThresholdSelected(level),
+                tooltip: None,
             })
             .collect(),
     )

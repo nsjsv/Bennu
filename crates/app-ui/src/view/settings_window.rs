@@ -427,6 +427,7 @@ fn theme_mode_selector(browser: &FileBrowser) -> Element<'static, Message> {
             label: mode.label(),
             selected: mode == selected,
             message: Message::ThemeModeSelected(mode),
+            tooltip: None,
         })
         .collect();
 

@@ -23,8 +23,8 @@ use crate::model::{
     SearchEntryTypeMenuState, SearchEntryTypePreset, SearchInputStabilizationRequest,
     SearchInputStabilizationSubject, SearchKeyboardSelection, SearchSelectionGesture,
     SearchSelectionStep, SearchServiceDiagnostic, SearchServiceDiagnosticKind,
-    SearchServiceRecoveryAction, SearchServiceStatusRequest, SearchWorkspaceSessionId,
-    SearchWorkspaceState,
+    SearchServiceRecoveryAction, SearchServiceStatusRequest, SearchSizePreset,
+    SearchWorkspaceSessionId, SearchWorkspaceState,
 };
 use crate::shortcuts::{FileSelectionDirection, ShortcutAction};
 
@@ -101,11 +101,50 @@ impl FileBrowser {
         search_input_stabilization_command(request)
     }
 
+    pub(super) fn update_search_custom_size_min(&mut self, value: String) -> Task<Message> {
+        if let Err(message) = self.ensure_search_workspace() {
+            self.show_global_error(message);
+            return Task::none();
+        }
+        let Some(workspace) = self.search_workspace.as_mut() else {
+            return Task::none();
+        };
+        let max = workspace.filters.custom_size_max.clone();
+        let request = workspace.replace_custom_size(value, max);
+        search_input_stabilization_command(request)
+    }
+
+    pub(super) fn update_search_custom_size_max(&mut self, value: String) -> Task<Message> {
+        if let Err(message) = self.ensure_search_workspace() {
+            self.show_global_error(message);
+            return Task::none();
+        }
+        let Some(workspace) = self.search_workspace.as_mut() else {
+            return Task::none();
+        };
+        let min = workspace.filters.custom_size_min.clone();
+        let request = workspace.replace_custom_size(min, value);
+        search_input_stabilization_command(request)
+    }
+
     pub(super) fn toggle_search_custom_extensions(&mut self) -> Task<Message> {
         let Some(workspace) = self.search_workspace.as_mut() else {
             return Task::none();
         };
         workspace.filters.toggle_custom_extensions();
+        self.restart_search_workspace()
+    }
+
+    pub(super) fn select_search_size_preset(
+        &mut self,
+        size_preset: SearchSizePreset,
+    ) -> Task<Message> {
+        let Some(workspace) = self.search_workspace.as_mut() else {
+            return Task::none();
+        };
+        // 选任何档位（含进入/离开 Custom）都立即 restart；离开 Custom 由
+        // select_size_preset 清空两侧输入。
+        workspace.filters.select_size_preset(size_preset);
         self.restart_search_workspace()
     }
 
@@ -123,6 +162,10 @@ impl FileBrowser {
                     workspace.accepts_custom_extensions_stabilization(&request)
                 })
             }
+            SearchInputStabilizationSubject::CustomSize => self
+                .search_workspace
+                .as_ref()
+                .is_some_and(|workspace| workspace.accepts_custom_size_stabilization(&request)),
         };
         if !accepted {
             return Task::none();
@@ -248,6 +291,23 @@ impl FileBrowser {
         self.restart_search_workspace()
     }
 
+    /// 把当前工作区的选定范围写入持久化范围记忆；仅在真实变化时保存。
+    /// 只在 restart_search_workspace 真实构造查询时调用。
+    fn remember_last_search_scope(&mut self) -> Task<Message> {
+        let Some(scope) = self
+            .search_workspace
+            .as_ref()
+            .map(|workspace| workspace.root.last_search_scope())
+        else {
+            return Task::none();
+        };
+        if self.user_config.last_search_scope.as_ref() == Some(&scope) {
+            return Task::none();
+        }
+        self.user_config.last_search_scope = Some(scope);
+        self.persist_user_preferences_command()
+    }
+
     pub(super) fn select_search_text_scope(
         &mut self,
         text_scope: SearchTextScope,
@@ -332,8 +392,14 @@ impl FileBrowser {
         self.next_search_workspace_session_id =
             self.next_search_workspace_session_id.wrapping_add(1);
         let home = self.home_dir.clone();
+        let last_location = self.user_config.last_search_scope.clone();
         self.clear_pointer_driven_interaction_state();
-        self.search_workspace = Some(SearchWorkspaceState::new(root, home, session_id));
+        self.search_workspace = Some(SearchWorkspaceState::new(
+            root,
+            home,
+            last_location,
+            session_id,
+        ));
         Ok(())
     }
 
@@ -344,7 +410,10 @@ impl FileBrowser {
         let Some(workspace) = self.search_workspace.as_ref() else {
             return Task::none();
         };
-        if workspace.input.trim().is_empty() && !workspace.filters.custom_extensions_are_active() {
+        if workspace.input.trim().is_empty()
+            && !workspace.filters.custom_extensions_are_active()
+            && !workspace.filters.custom_size_has_intent()
+        {
             if let Some(workspace) = self.search_workspace.as_mut() {
                 workspace.clear_query();
             }
@@ -391,7 +460,13 @@ impl FileBrowser {
             return Task::none();
         };
         let (request, cancellation) = workspace.begin_indexed_query(query.clone());
-        search_with_scope_root_check_command(request, query, cancellation)
+        // 真实查询在这里唯一发起：回车、历史点击、范围切换、稳定输入、Refresh、
+        // 筛选变化都经过 restart。空输入与被拒绝的查询不会走到这里，不改写记忆。
+        let remembered = self.remember_last_search_scope();
+        Task::batch([
+            remembered,
+            search_with_scope_root_check_command(request, query, cancellation),
+        ])
     }
 
     pub(super) fn accept_search_scope_root_validation(

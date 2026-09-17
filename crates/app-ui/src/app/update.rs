@@ -5,8 +5,10 @@ impl FileBrowser {
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
         if !self.application_shutdown_phase.is_running() {
             return match message {
-                Message::FileOperationFinished(task_id, completion) => {
-                    self.accept_application_shutdown_operation_finished(task_id, completion)
+                Message::FileOperationFinished(task_id, generation, completion) => {
+                    self.accept_application_shutdown_operation_finished(
+                        task_id, generation, completion,
+                    )
                 }
                 Message::FileOperationPersistenceFinished(outcome) => {
                     self.accept_file_operation_persistence_finished(outcome)
@@ -207,6 +209,7 @@ impl FileBrowser {
                 self.accept_video_preview_error(path, generation, error)
             }
             Message::FileOperationProgressed(task_id, progress, transfer_snapshots) => {
+                self.operation_queue.note_driver_signal(task_id);
                 if let Some(error) = self
                     .operation_queue
                     .update_progress(task_id, progress, transfer_snapshots)
@@ -216,13 +219,35 @@ impl FileBrowser {
                 Task::none()
             }
             Message::FileOperationDirectMovesCommitted { task_id, commits } => {
+                self.operation_queue.note_driver_signal(task_id);
                 self.accept_file_operation_direct_moves_committed(task_id, commits)
             }
             Message::FileOperationMovesRenamed { task_id, moves } => {
+                self.operation_queue.note_driver_signal(task_id);
                 self.accept_file_operation_moves_renamed(task_id, moves)
             }
-            Message::FileOperationFinished(task_id, completion) => {
+            Message::FileOperationFinished(task_id, generation, completion) => {
+                self.operation_queue.note_driver_signal(task_id);
+                if !self.operation_queue.driver_generation_is_current(task_id, generation) {
+                    // 换代重启后被取消的旧驱动者迟到的终态:任务已由新驱动者接手。
+                    tracing::warn!(
+                        target: "app_ui::operation_supervision",
+                        task_id,
+                        generation,
+                        "stale driver completion was rejected"
+                    );
+                    return Task::none();
+                }
                 self.accept_file_operation_finished(task_id, completion)
+            }
+            Message::OperationSupervisionTick => {
+                if let Some(error) = self
+                    .operation_queue
+                    .supervise(std::time::Instant::now())
+                {
+                    self.show_global_error(error);
+                }
+                Task::none()
             }
             Message::FileOperationPersistenceFinished(outcome) => {
                 self.accept_file_operation_persistence_finished(outcome)
@@ -728,6 +753,11 @@ impl FileBrowser {
             Message::SearchCustomExtensionsChanged(value) => {
                 self.update_search_custom_extensions(value)
             }
+            Message::SearchSizePresetSelected(size_preset) => {
+                self.select_search_size_preset(size_preset)
+            }
+            Message::SearchCustomSizeMinChanged(value) => self.update_search_custom_size_min(value),
+            Message::SearchCustomSizeMaxChanged(value) => self.update_search_custom_size_max(value),
             Message::SearchFiltersReset => self.reset_search_filters(),
             Message::SearchKeywordCleared => self.clear_search_keyword(),
             Message::SearchWorkspaceClosed => self.close_search_workspace(),
@@ -1225,11 +1255,15 @@ impl FileBrowser {
         // 视口越界自愈:条目集骤减后记录的滚动偏移可能超出新内容,
         // 出口统一重钉,防止虚拟列表渲染出整屏空白。
         let viewport_clamp_command = self.clamp_viewports_to_content();
+        // 驱动者签发单点收敛:入队/恢复/认领/监督换代后由此统一发出
+        // Task::stream 驱动者,任何消息路径都不必各自处理。
+        let driver_launch_command = self.poll_driver_command();
         Task::batch([
             command,
             right_preview_panel_command,
             selection_metadata_command,
             viewport_clamp_command,
+            driver_launch_command,
         ])
     }
 }

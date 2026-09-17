@@ -175,12 +175,12 @@ pub(crate) use application_logs::{
 };
 pub(crate) mod search;
 pub(crate) use search::{
-    DirectoryFallbackOutcome, IndexedSearchOutcome, IndexedSearchRequest, SearchDateField,
-    SearchDatePreset, SearchDirectoryScope, SearchEntryTypePreset, SearchHistory,
+    DirectoryFallbackOutcome, IndexedSearchOutcome, IndexedSearchRequest, LastSearchScope,
+    SearchDateField, SearchDatePreset, SearchDirectoryScope, SearchEntryTypePreset, SearchHistory,
     SearchHistoryInteraction, SearchInputFocus, SearchInputFocusCheckOrigin,
     SearchInputFocusCheckRequest, SearchInputStabilizationRequest, SearchInputStabilizationSubject,
     SearchKeyboardSelection, SearchResultCompletion, SearchSelectionGesture, SearchSelectionStep,
-    SearchWorkspaceSessionId, SearchWorkspaceState, SEARCH_RESULT_TOTAL_LIMIT,
+    SearchSizePreset, SearchWorkspaceSessionId, SearchWorkspaceState, SEARCH_RESULT_TOTAL_LIMIT,
 };
 mod search_service;
 pub(crate) use search_service::{
@@ -448,9 +448,12 @@ pub(crate) enum Message {
         task_id: u64,
         moves: Vec<crate::operation_history::CompletedTransfer>,
     },
-    FileOperationFinished(u64, FileOperationCompletion),
+    /// 第二个参数是驱动者 generation:换代重启后,被取消的旧驱动者
+    /// 迟到的终态消息凭它被拒,不会把已重启的任务提前终结。
+    FileOperationFinished(u64, u64, FileOperationCompletion),
     FileOperationPersistenceFinished(crate::operation_queue::FileOperationPersistenceOutcome),
     OperationProgressAnimationTick,
+    OperationSupervisionTick,
     FileDragSpringOpenTick,
     BreadcrumbDropTargetHovered(BrowserPaneId, PathBuf),
     BreadcrumbDropTargetHoverCleared(BrowserPaneId, PathBuf),
@@ -610,6 +613,9 @@ pub(crate) enum Message {
     SearchCustomExtensionsChanged(String),
     SearchDateFieldSelected(SearchDateField),
     SearchDatePresetSelected(SearchDatePreset),
+    SearchSizePresetSelected(SearchSizePreset),
+    SearchCustomSizeMinChanged(String),
+    SearchCustomSizeMaxChanged(String),
     SearchFiltersReset,
     SearchKeywordCleared,
     SearchWorkspaceClosed,

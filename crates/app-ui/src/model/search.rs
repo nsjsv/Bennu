@@ -9,6 +9,7 @@ use tokio_util::sync::CancellationToken;
 mod filters;
 pub(crate) use filters::{
     SearchDateField, SearchDatePreset, SearchEntryTypePreset, SearchFilterPresetState,
+    SearchSizePreset,
 };
 mod history;
 pub(crate) use history::SearchHistory;
@@ -25,13 +26,22 @@ pub(crate) struct SearchWorkspaceSessionId(pub(crate) u64);
 pub(crate) enum SearchInputStabilizationSubject {
     Terms,
     CustomExtensions,
+    CustomSize,
+}
+
+/// 稳定化请求携带的原始输入：文本类 subject 用 `Text`，
+/// 自定义大小两侧输入是同一概念的两个投影，合并为一个值。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SearchStabilizationInput {
+    Text(String),
+    SizeRange { min: String, max: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SearchInputStabilizationRequest {
     workspace_session_id: SearchWorkspaceSessionId,
     input_revision: u64,
-    input: String,
+    pub(crate) input: SearchStabilizationInput,
     pub(crate) subject: SearchInputStabilizationSubject,
 }
 
@@ -168,6 +178,7 @@ pub(crate) enum SearchResultCompletion {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SearchDirectoryScope {
     CurrentFolder,
+    LastLocation,
     Home,
     AllIndexedLocations,
 }
@@ -176,29 +187,55 @@ impl SearchDirectoryScope {
     pub(crate) fn label(self) -> &'static str {
         match self {
             Self::CurrentFolder => "Current folder",
+            Self::LastLocation => "Last location",
             Self::Home => "Home",
             Self::AllIndexedLocations => "All indexed locations",
         }
     }
 }
 
+/// 最近一次搜索实际使用的范围，随用户偏好持久化；打开下一个搜索工作区时
+/// 作为默认范围恢复（访达"使用上一次的搜索范围"语义）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum LastSearchScope {
+    Global,
+    Directory(PathBuf),
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct SearchRootSnapshot {
     current_folder: PathBuf,
     home: PathBuf,
+    last_location: Option<LastSearchScope>,
     selected_scope: SearchDirectoryScope,
 }
 
 impl SearchRootSnapshot {
-    pub(crate) fn new(current_folder: PathBuf, home: PathBuf) -> Self {
-        let selected_scope = if current_folder == home {
-            SearchDirectoryScope::Home
-        } else {
-            SearchDirectoryScope::CurrentFolder
+    pub(crate) fn new(
+        current_folder: PathBuf,
+        home: PathBuf,
+        last_location: Option<LastSearchScope>,
+    ) -> Self {
+        // 默认档恢复上次范围；无记录时沿用"在 Home 默认 Home，否则当前文件夹"。
+        // 目录记录若与当前文件夹或 Home 相同，直接归并到对应现有档，不产生重复选项。
+        let selected_scope = match &last_location {
+            Some(LastSearchScope::Global) => SearchDirectoryScope::AllIndexedLocations,
+            Some(LastSearchScope::Directory(directory))
+                if directory.as_path() == current_folder.as_path() =>
+            {
+                SearchDirectoryScope::CurrentFolder
+            }
+            Some(LastSearchScope::Directory(directory)) if directory.as_path() == home.as_path() => {
+                SearchDirectoryScope::Home
+            }
+            Some(_) => SearchDirectoryScope::LastLocation,
+            None if current_folder == home => SearchDirectoryScope::Home,
+            None => SearchDirectoryScope::CurrentFolder,
         };
         Self {
             current_folder,
             home,
+            last_location,
             selected_scope,
         }
     }
@@ -207,6 +244,9 @@ impl SearchRootSnapshot {
         match self.selected_scope {
             SearchDirectoryScope::CurrentFolder => &self.current_folder,
             SearchDirectoryScope::Home | SearchDirectoryScope::AllIndexedLocations => &self.home,
+            // 不变量：selected_scope == LastLocation 当且仅当 last_location 是
+            // 一个不等于 current_folder/home 的目录记录。
+            SearchDirectoryScope::LastLocation => self.last_location_directory().unwrap_or(&self.home),
         }
     }
 
@@ -217,6 +257,36 @@ impl SearchRootSnapshot {
             }
             SearchDirectoryScope::Home => SearchScope::Directory(self.home.clone()),
             SearchDirectoryScope::AllIndexedLocations => SearchScope::Global,
+            SearchDirectoryScope::LastLocation => match &self.last_location {
+                Some(LastSearchScope::Directory(directory)) => {
+                    SearchScope::Directory(directory.clone())
+                }
+                // 同 path()：LastLocation 档只在有目录记录时可用。
+                _ => SearchScope::Global,
+            },
+        }
+    }
+
+    /// LastLocation 档指向的目录；仅在持有目录记录时存在。
+    pub(crate) fn last_location_directory(&self) -> Option<&Path> {
+        match &self.last_location {
+            Some(LastSearchScope::Directory(directory)) => Some(directory.as_path()),
+            _ => None,
+        }
+    }
+
+    /// 当前选定范围的持久化事实，用于随用户偏好落盘。
+    pub(crate) fn last_search_scope(&self) -> LastSearchScope {
+        match self.selected_scope {
+            SearchDirectoryScope::CurrentFolder => {
+                LastSearchScope::Directory(self.current_folder.clone())
+            }
+            SearchDirectoryScope::Home => LastSearchScope::Directory(self.home.clone()),
+            SearchDirectoryScope::AllIndexedLocations => LastSearchScope::Global,
+            SearchDirectoryScope::LastLocation => match &self.last_location {
+                Some(directory @ LastSearchScope::Directory(_)) => directory.clone(),
+                _ => LastSearchScope::Global,
+            },
         }
     }
 
@@ -224,22 +294,29 @@ impl SearchRootSnapshot {
         self.selected_scope
     }
 
-    pub(crate) fn available_scopes(&self) -> &'static [SearchDirectoryScope] {
-        const BOTH: &[SearchDirectoryScope] = &[
-            SearchDirectoryScope::CurrentFolder,
-            SearchDirectoryScope::Home,
-            SearchDirectoryScope::AllIndexedLocations,
-        ];
-        const HOME_ONLY: &[SearchDirectoryScope] = &[
-            SearchDirectoryScope::Home,
-            SearchDirectoryScope::AllIndexedLocations,
-        ];
-
-        if self.current_folder == self.home {
-            HOME_ONLY
+    pub(crate) fn available_scopes(&self) -> Vec<SearchDirectoryScope> {
+        let mut scopes = if self.current_folder == self.home {
+            vec![
+                SearchDirectoryScope::Home,
+                SearchDirectoryScope::AllIndexedLocations,
+            ]
         } else {
-            BOTH
+            vec![
+                SearchDirectoryScope::CurrentFolder,
+                SearchDirectoryScope::Home,
+                SearchDirectoryScope::AllIndexedLocations,
+            ]
+        };
+        // 上次位置只在"不与现有档重复"时出现：等于当前文件夹并入 CurrentFolder，
+        // 等于 Home 并入 Home，全局并入 AllIndexedLocations。
+        let last_directory = self.last_location_directory();
+        if let Some(directory) = last_directory {
+            if directory != self.current_folder && directory != self.home {
+                let insert_at = if self.current_folder == self.home { 0 } else { 1 };
+                scopes.insert(insert_at, SearchDirectoryScope::LastLocation);
+            }
         }
+        scopes
     }
 
     pub(crate) fn select_scope(&mut self, scope: SearchDirectoryScope) -> bool {
@@ -484,6 +561,7 @@ pub(crate) struct SearchWorkspaceState {
     session_id: SearchWorkspaceSessionId,
     input_revision: u64,
     custom_extensions_revision: u64,
+    custom_size_revision: u64,
     pub(crate) root: SearchRootSnapshot,
     pub(crate) input: String,
     pub(crate) filters: SearchFilterPresetState,
@@ -496,13 +574,15 @@ impl SearchWorkspaceState {
     pub(crate) fn new(
         current_folder: PathBuf,
         home: PathBuf,
+        last_location: Option<LastSearchScope>,
         session_id: SearchWorkspaceSessionId,
     ) -> Self {
         Self {
             session_id,
             input_revision: 0,
             custom_extensions_revision: 0,
-            root: SearchRootSnapshot::new(current_folder, home),
+            custom_size_revision: 0,
+            root: SearchRootSnapshot::new(current_folder, home, last_location),
             input: String::new(),
             filters: SearchFilterPresetState::default(),
             run: SearchRunState::new(),
@@ -521,7 +601,7 @@ impl SearchWorkspaceState {
         SearchInputStabilizationRequest {
             workspace_session_id: self.session_id,
             input_revision: self.input_revision,
-            input: self.input.clone(),
+            input: SearchStabilizationInput::Text(self.input.clone()),
             subject: SearchInputStabilizationSubject::Terms,
         }
     }
@@ -538,7 +618,7 @@ impl SearchWorkspaceState {
         request.subject == SearchInputStabilizationSubject::Terms
             && self.session_id == request.workspace_session_id
             && self.input_revision == request.input_revision
-            && self.input == request.input
+            && request.input == SearchStabilizationInput::Text(self.input.clone())
     }
 
     pub(crate) fn replace_custom_extensions(
@@ -550,7 +630,7 @@ impl SearchWorkspaceState {
         SearchInputStabilizationRequest {
             workspace_session_id: self.session_id,
             input_revision: self.custom_extensions_revision,
-            input: self.filters.custom_extensions.clone(),
+            input: SearchStabilizationInput::Text(self.filters.custom_extensions.clone()),
             subject: SearchInputStabilizationSubject::CustomExtensions,
         }
     }
@@ -562,12 +642,49 @@ impl SearchWorkspaceState {
         request.subject == SearchInputStabilizationSubject::CustomExtensions
             && self.session_id == request.workspace_session_id
             && self.custom_extensions_revision == request.input_revision
-            && self.filters.custom_extensions == request.input
+            && request.input
+                == SearchStabilizationInput::Text(self.filters.custom_extensions.clone())
+    }
+
+    /// 自定义大小两侧输入共用一个 revision：任一侧变化都推进它，
+    /// 使另一侧的 pending 请求作废，避免两次重查。
+    pub(crate) fn replace_custom_size(
+        &mut self,
+        min: String,
+        max: String,
+    ) -> SearchInputStabilizationRequest {
+        self.filters.custom_size_min = min;
+        self.filters.custom_size_max = max;
+        self.custom_size_revision = self.custom_size_revision.wrapping_add(1);
+        SearchInputStabilizationRequest {
+            workspace_session_id: self.session_id,
+            input_revision: self.custom_size_revision,
+            input: SearchStabilizationInput::SizeRange {
+                min: self.filters.custom_size_min.clone(),
+                max: self.filters.custom_size_max.clone(),
+            },
+            subject: SearchInputStabilizationSubject::CustomSize,
+        }
+    }
+
+    pub(crate) fn accepts_custom_size_stabilization(
+        &self,
+        request: &SearchInputStabilizationRequest,
+    ) -> bool {
+        request.subject == SearchInputStabilizationSubject::CustomSize
+            && self.session_id == request.workspace_session_id
+            && self.custom_size_revision == request.input_revision
+            && request.input
+                == SearchStabilizationInput::SizeRange {
+                    min: self.filters.custom_size_min.clone(),
+                    max: self.filters.custom_size_max.clone(),
+                }
     }
 
     pub(crate) fn invalidate_input_stabilization(&mut self) {
         self.input_revision = self.input_revision.wrapping_add(1);
         self.custom_extensions_revision = self.custom_extensions_revision.wrapping_add(1);
+        self.custom_size_revision = self.custom_size_revision.wrapping_add(1);
     }
 
     pub(crate) fn begin_indexed_query(

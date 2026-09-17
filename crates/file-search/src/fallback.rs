@@ -7,7 +7,8 @@ use crate::filesystem::{
     LocalFilesystemBoundary, TraversalDepth, TraversalEvent,
 };
 use crate::model::{
-    MatchSource, SearchFileKind, SearchHit, SearchMatchMode, SearchQuery, SearchScope, TimeRange,
+    MatchSource, SearchFileKind, SearchHit, SearchMatchMode, SearchQuery, SearchScope, SizeRange,
+    TimeRange,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,6 +152,7 @@ pub fn search_directory_fallback(
             modified_ms,
             accessed_ms,
             created_ms,
+            metadata.len(),
         ) {
             continue;
         }
@@ -190,6 +192,9 @@ pub fn search_directory_fallback(
     Ok(DirectoryFallbackCompletion::TraversalComplete { inspected_entries })
 }
 
+/// 八个事实全部来自同一次遍历条目的 metadata 快照，参数扁平但概念单一；
+/// 收敛成结构体反而多一层只构造一次的中转。
+#[allow(clippy::too_many_arguments)]
 fn matches_filters(
     query: &SearchQuery,
     path: &std::path::Path,
@@ -198,6 +203,7 @@ fn matches_filters(
     modified_ms: Option<i64>,
     accessed_ms: Option<i64>,
     created_ms: Option<i64>,
+    size: u64,
 ) -> bool {
     (query.filters.entry_type_rules.is_empty()
         || query
@@ -206,9 +212,21 @@ fn matches_filters(
             .iter()
             .any(|rule| entry_type_rule_matches(rule, kind, mime_type)))
         && extension_filter_matches(query, path, kind)
+        && size_filter_matches(kind, size, query.filters.size)
         && time_matches(modified_ms, query.filters.modified)
         && time_matches(accessed_ms, query.filters.accessed)
         && time_matches(created_ms, query.filters.created)
+}
+
+/// 大小语义只作用于文件类条目：目录永不因大小被排除（与索引路径一致）。
+fn size_filter_matches(kind: SearchFileKind, size: u64, range: Option<SizeRange>) -> bool {
+    match range {
+        Some(range) => {
+            kind == SearchFileKind::Directory
+                || (size >= range.min_bytes && range.max_bytes.is_none_or(|max| size < max))
+        }
+        None => true,
+    }
 }
 
 /// 后缀语义只作用于文件类条目：目录即使名称以点后缀结尾也不匹配（与索引路径一致）。
@@ -273,7 +291,7 @@ mod tests {
     use crate::filesystem::file_time_ms;
     use crate::model::{
         MatchSource, SearchCursor, SearchEntryTypeRule, SearchFileKind, SearchFilters,
-        SearchMatchMode, SearchQuery, SearchScope, SearchTextScope, TimeRange,
+        SearchMatchMode, SearchQuery, SearchScope, SearchTextScope, SizeRange, TimeRange,
     };
 
     use super::{search_directory_fallback, DirectoryFallbackCompletion, DirectoryFallbackLimits};
@@ -547,6 +565,68 @@ mod tests {
                 Some(expected_file_name)
             );
         }
+    }
+
+    #[test]
+    fn size_filters_apply_half_open_bounds_and_exempt_directories() {
+        let content = tempdir().unwrap();
+        fs::write(content.path().join("empty.bin"), "").unwrap();
+        fs::write(content.path().join("one.bin"), "x").unwrap();
+        fs::write(content.path().join("two.bin"), "xx").unwrap();
+        fs::write(content.path().join("three.bin"), "xxx").unwrap();
+        fs::write(content.path().join("four.bin"), "xxxx").unwrap();
+        fs::create_dir(content.path().join("size-folder")).unwrap();
+
+        let hit_names = |range: SizeRange| {
+            let mut query = directory_query(content.path().to_path_buf(), "");
+            query.filters.size = Some(range);
+            let mut batches = Vec::new();
+            search_directory_fallback(
+                &query,
+                &SearchExcludeRules::new(Vec::new()),
+                complete_traversal_limits(),
+                &CancellationToken::new(),
+                |batch| batches.push(batch),
+            )
+            .unwrap();
+            batches
+                .into_iter()
+                .flatten()
+                .map(|hit| hit.display_name)
+                .collect::<std::collections::BTreeSet<_>>()
+        };
+
+        // [2, 4)：two/three 命中；0、1、4 排除；目录永不被大小条件排除。
+        let hits = hit_names(SizeRange {
+            min_bytes: 2,
+            max_bytes: Some(4),
+        });
+        assert!(hits.contains("size-folder"));
+        assert_eq!(
+            hits,
+            ["size-folder", "three.bin", "two.bin"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect::<std::collections::BTreeSet<_>>()
+        );
+
+        // 无上界：>= 2 的一切文件命中，目录仍豁免（其 metadata 大小不代表语义）。
+        let hits = hit_names(SizeRange {
+            min_bytes: 2,
+            max_bytes: None,
+        });
+        assert!(hits.contains("size-folder"));
+        assert!(hits.contains("four.bin"));
+        assert!(!hits.contains("one.bin"));
+
+        // 无下界缺省 0：包含 0 字节文件。
+        let hits = hit_names(SizeRange {
+            min_bytes: 0,
+            max_bytes: Some(1),
+        });
+        assert!(hits.contains("size-folder"));
+        assert!(hits.contains("empty.bin"));
+        assert!(!hits.contains("two.bin"));
     }
 
     #[test]

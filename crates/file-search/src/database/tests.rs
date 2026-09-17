@@ -10,7 +10,7 @@ use tempfile::tempdir;
 use crate::extractor::ExtractionStatus;
 use crate::model::{
     MatchSource, MimePattern, SearchEntryTypeRule, SearchFileKind, SearchMatchMode, SearchQuery,
-    SearchScope, SearchTextScope, TimeRange,
+    SearchScope, SearchTextScope, SizeRange, TimeRange,
 };
 
 use super::{
@@ -804,6 +804,144 @@ fn extension_filters_and_with_text_terms_and_time_ranges() {
 
     assert_eq!(batch.hits.len(), 1);
     assert_eq!(batch.hits[0].path, Path::new("/tmp/match.pdf"));
+}
+
+#[test]
+fn size_filters_apply_half_open_bounds_and_exempt_directories() {
+    let database = SearchDatabase::in_memory().unwrap();
+    let kb = 1024_u64;
+    let mb = kb * kb;
+    let gb = mb * kb;
+    for (size, name) in [
+        (0, "zero.bin"),
+        (1, "one.bin"),
+        (16 * kb - 1, "tiny-last.bin"),
+        (16 * kb, "small-first.bin"),
+        (mb - 1, "small-last.bin"),
+        (mb, "medium-first.bin"),
+        (128 * mb - 1, "medium-last.bin"),
+        (128 * mb, "large-first.bin"),
+        (gb - 1, "large-last.bin"),
+        (gb, "huge-first.bin"),
+        (4 * gb - 1, "huge-last.bin"),
+        (4 * gb, "gigantic-first.bin"),
+        (4 * gb + 1, "gigantic-last.bin"),
+    ] {
+        let mut file = indexed_file(&format!("/tmp/{name}"), name, "");
+        file.size = size;
+        database.upsert_file(&file).unwrap();
+    }
+    // 目录 size 为 0：任何档位（包括 >= 4 GB）都不得把它排除。
+    let mut directory = indexed_file("/tmp/size-folder", "size-folder", "");
+    directory.kind = SearchFileKind::Directory;
+    database.upsert_file(&directory).unwrap();
+
+    let preset_hits = [
+        (
+            SizeRange {
+                min_bytes: 0,
+                max_bytes: Some(1),
+            },
+            vec!["zero.bin"],
+        ),
+        (
+            SizeRange {
+                min_bytes: 0,
+                max_bytes: Some(16 * kb),
+            },
+            vec!["tiny-last.bin", "one.bin", "zero.bin"],
+        ),
+        (
+            SizeRange {
+                min_bytes: 16 * kb,
+                max_bytes: Some(mb),
+            },
+            vec!["small-first.bin", "small-last.bin"],
+        ),
+        (
+            SizeRange {
+                min_bytes: mb,
+                max_bytes: Some(128 * mb),
+            },
+            vec!["medium-first.bin", "medium-last.bin"],
+        ),
+        (
+            SizeRange {
+                min_bytes: 128 * mb,
+                max_bytes: Some(gb),
+            },
+            vec!["large-first.bin", "large-last.bin"],
+        ),
+        (
+            SizeRange {
+                min_bytes: gb,
+                max_bytes: Some(4 * gb),
+            },
+            vec!["huge-first.bin", "huge-last.bin"],
+        ),
+        (
+            SizeRange {
+                min_bytes: 4 * gb,
+                max_bytes: None,
+            },
+            vec!["gigantic-first.bin", "gigantic-last.bin"],
+        ),
+    ];
+    for (range, expected_files) in preset_hits {
+        let mut query = SearchQuery::global(1, "");
+        query.filters.size = Some(range);
+
+        let mut names = database
+            .search(&query)
+            .unwrap()
+            .hits
+            .into_iter()
+            .map(|hit| hit.display_name)
+            .collect::<BTreeSet<_>>();
+        // 目录永不被大小条件排除。
+        assert!(
+            names.remove("size-folder"),
+            "directory exempted for {range:?}"
+        );
+        assert_eq!(
+            names,
+            expected_files
+                .into_iter()
+                .map(str::to_owned)
+                .collect::<BTreeSet<_>>(),
+            "unexpected hits for {range:?}"
+        );
+    }
+}
+
+#[test]
+fn size_filter_combines_with_terms_extensions_and_directories_stay_exempt() {
+    let database = SearchDatabase::in_memory().unwrap();
+    for (name, content, kind) in [
+        ("match.pdf", "alpha", SearchFileKind::File),
+        ("wrong-size.pdf", "", SearchFileKind::File),
+        ("wrong-ext.txt", "alpha", SearchFileKind::File),
+    ] {
+        let mut file = indexed_file(&format!("/tmp/{name}"), name, content);
+        file.kind = kind;
+        database.upsert_file(&file).unwrap();
+    }
+    let mut query = SearchQuery::global(1, "alpha");
+    query.filters.extensions = vec!["pdf".to_owned()];
+    query.filters.size = Some(SizeRange {
+        min_bytes: 3,
+        max_bytes: None,
+    });
+
+    let names = database
+        .search(&query)
+        .unwrap()
+        .hits
+        .into_iter()
+        .map(|hit| hit.display_name)
+        .collect::<Vec<_>>();
+
+    assert_eq!(names, vec!["match.pdf".to_owned()]);
 }
 
 #[test]

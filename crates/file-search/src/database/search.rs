@@ -4,7 +4,7 @@ use rusqlite::types::Value;
 use crate::error::SearchResult;
 use crate::model::{
     MatchSource, SearchCursor, SearchEntryTypeRule, SearchFileKind, SearchHit, SearchMatchMode,
-    SearchQuery, SearchResultBatch, SearchScope, SearchTextScope,
+    SearchQuery, SearchResultBatch, SearchScope, SearchTextScope, SizeRange,
 };
 
 use super::{
@@ -212,7 +212,8 @@ fn full_text_query_plan(
         && query.filters.modified.is_none()
         && query.filters.accessed.is_none()
         && query.filters.created.is_none()
-        && query.filters.extensions.is_empty();
+        && query.filters.extensions.is_empty()
+        && query.filters.size.is_none();
     if !unrestricted_full_text_query {
         return Ok(FullTextQueryPlan::FilterWithMetadata);
     }
@@ -345,6 +346,7 @@ fn append_filters(sql: &mut String, values: &mut Vec<Value>, query: &SearchQuery
     append_time_filter(sql, values, "f.accessed_ms", query.filters.accessed);
     append_time_filter(sql, values, "f.created_ms", query.filters.created);
     append_extension_filter(sql, values, &query.filters.extensions);
+    append_size_filter(sql, values, query.filters.size);
 }
 
 fn append_entry_type_rules(
@@ -409,6 +411,31 @@ fn append_extension_filter(sql: &mut String, values: &mut Vec<Value>, extensions
         values.push(Value::Text(extension.clone()));
     }
     sql.push_str("))");
+}
+
+fn append_size_filter(sql: &mut String, values: &mut Vec<Value>, size: Option<SizeRange>) {
+    let Some(size) = size else {
+        return;
+    };
+    // 大小语义只作用于文件类条目：目录直接放行（PRD：文件夹永不被大小排除，
+    // 区别于后缀过滤的"目录不匹配"语义），文件按 [min, max) 判定。
+    sql.push_str(" AND (f.kind = ? OR (f.size >= ?");
+    values.push(Value::Text(
+        SearchFileKind::Directory.as_storage_value().to_owned(),
+    ));
+    values.push(Value::Integer(storage_size_bound(size.min_bytes)));
+    // 上界排他：[min, max)。
+    if let Some(max_bytes) = size.max_bytes {
+        sql.push_str(" AND f.size < ?");
+        values.push(Value::Integer(storage_size_bound(max_bytes)));
+    }
+    sql.push_str("))");
+}
+
+/// size 列是 SQLite 整数：超过 i64 的自定义边界饱和为 i64::MAX，
+/// 该边界在真实文件尺寸之外，不改变过滤语义。
+fn storage_size_bound(bytes: u64) -> i64 {
+    i64::try_from(bytes).unwrap_or(i64::MAX)
 }
 
 fn append_time_filter(

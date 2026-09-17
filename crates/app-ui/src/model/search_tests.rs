@@ -56,6 +56,7 @@ fn search_workspace_for_tests(current_folder: &str, session_id: u64) -> SearchWo
     SearchWorkspaceState::new(
         PathBuf::from(current_folder),
         PathBuf::from("/home/test"),
+        None,
         SearchWorkspaceSessionId(session_id),
     )
 }
@@ -94,6 +95,7 @@ fn home_root_normalizes_to_one_home_scope() {
     let mut workspace = SearchWorkspaceState::new(
         PathBuf::from("/home/test"),
         PathBuf::from("/home/test"),
+        None,
         SearchWorkspaceSessionId(1),
     );
 
@@ -110,6 +112,152 @@ fn home_root_normalizes_to_one_home_scope() {
         .root
         .select_scope(SearchDirectoryScope::CurrentFolder));
     assert_eq!(workspace.root.path(), Path::new("/home/test"));
+}
+
+#[test]
+fn last_search_scope_global_restores_all_indexed_locations() {
+    let workspace = SearchRootSnapshot::new(
+        PathBuf::from("/workspace"),
+        PathBuf::from("/home/test"),
+        Some(LastSearchScope::Global),
+    );
+
+    assert_eq!(
+        workspace.selected_scope(),
+        SearchDirectoryScope::AllIndexedLocations
+    );
+    assert_eq!(workspace.query_scope(), SearchScope::Global);
+    // 全局记录与“所有索引位置”档合并，不产生重复选项。
+    assert_eq!(
+        workspace.available_scopes(),
+        [
+            SearchDirectoryScope::CurrentFolder,
+            SearchDirectoryScope::Home,
+            SearchDirectoryScope::AllIndexedLocations,
+        ]
+    );
+}
+
+#[test]
+fn last_search_scope_directory_restores_last_location_scope() {
+    let workspace = SearchRootSnapshot::new(
+        PathBuf::from("/workspace"),
+        PathBuf::from("/home/test"),
+        Some(LastSearchScope::Directory(PathBuf::from("/downloads"))),
+    );
+
+    assert_eq!(workspace.selected_scope(), SearchDirectoryScope::LastLocation);
+    assert_eq!(
+        workspace.query_scope(),
+        SearchScope::Directory(PathBuf::from("/downloads"))
+    );
+    assert_eq!(workspace.path(), Path::new("/downloads"));
+    assert_eq!(
+        workspace.last_location_directory(),
+        Some(Path::new("/downloads"))
+    );
+    // “上次位置”档插在当前文件夹之后；选中后仍还原同一条持久化事实。
+    assert_eq!(
+        workspace.available_scopes(),
+        [
+            SearchDirectoryScope::CurrentFolder,
+            SearchDirectoryScope::LastLocation,
+            SearchDirectoryScope::Home,
+            SearchDirectoryScope::AllIndexedLocations,
+        ]
+    );
+    assert_eq!(
+        workspace.last_search_scope(),
+        LastSearchScope::Directory(PathBuf::from("/downloads"))
+    );
+}
+
+#[test]
+fn last_search_scope_directory_merges_into_current_folder_or_home() {
+    let current_folder_workspace = SearchRootSnapshot::new(
+        PathBuf::from("/downloads"),
+        PathBuf::from("/home/test"),
+        Some(LastSearchScope::Directory(PathBuf::from("/downloads"))),
+    );
+    assert_eq!(
+        current_folder_workspace.selected_scope(),
+        SearchDirectoryScope::CurrentFolder
+    );
+    assert!(!current_folder_workspace
+        .available_scopes()
+        .contains(&SearchDirectoryScope::LastLocation));
+
+    let home_workspace = SearchRootSnapshot::new(
+        PathBuf::from("/workspace"),
+        PathBuf::from("/home/test"),
+        Some(LastSearchScope::Directory(PathBuf::from("/home/test"))),
+    );
+    assert_eq!(home_workspace.selected_scope(), SearchDirectoryScope::Home);
+    assert!(!home_workspace
+        .available_scopes()
+        .contains(&SearchDirectoryScope::LastLocation));
+}
+
+#[test]
+fn last_search_scope_directory_offers_last_location_from_home_too() {
+    let workspace = SearchRootSnapshot::new(
+        PathBuf::from("/home/test"),
+        PathBuf::from("/home/test"),
+        Some(LastSearchScope::Directory(PathBuf::from("/downloads"))),
+    );
+
+    assert_eq!(workspace.selected_scope(), SearchDirectoryScope::LastLocation);
+    assert_eq!(
+        workspace.available_scopes(),
+        [
+            SearchDirectoryScope::LastLocation,
+            SearchDirectoryScope::Home,
+            SearchDirectoryScope::AllIndexedLocations,
+        ]
+    );
+}
+
+#[test]
+fn missing_last_search_scope_keeps_legacy_default() {
+    let workspace = SearchRootSnapshot::new(
+        PathBuf::from("/workspace"),
+        PathBuf::from("/home/test"),
+        None,
+    );
+    assert_eq!(
+        workspace.selected_scope(),
+        SearchDirectoryScope::CurrentFolder
+    );
+
+    let home_workspace = SearchRootSnapshot::new(
+        PathBuf::from("/home/test"),
+        PathBuf::from("/home/test"),
+        None,
+    );
+    assert_eq!(home_workspace.selected_scope(), SearchDirectoryScope::Home);
+}
+
+#[test]
+fn selecting_last_location_scope_round_trips_persisted_scope() {
+    let mut workspace = SearchRootSnapshot::new(
+        PathBuf::from("/workspace"),
+        PathBuf::from("/home/test"),
+        Some(LastSearchScope::Directory(PathBuf::from("/downloads"))),
+    );
+    assert!(workspace.select_scope(SearchDirectoryScope::CurrentFolder));
+    assert_eq!(
+        workspace.last_search_scope(),
+        LastSearchScope::Directory(PathBuf::from("/workspace"))
+    );
+    assert!(workspace.select_scope(SearchDirectoryScope::LastLocation));
+    assert_eq!(
+        workspace.query_scope(),
+        SearchScope::Directory(PathBuf::from("/downloads"))
+    );
+    assert_eq!(
+        workspace.last_search_scope(),
+        LastSearchScope::Directory(PathBuf::from("/downloads"))
+    );
 }
 
 #[test]
@@ -217,6 +365,40 @@ fn custom_extension_stabilization_is_isolated_from_terms_stabilization() {
 
     workspace.invalidate_input_stabilization();
     assert!(!workspace.accepts_custom_extensions_stabilization(&current));
+}
+
+#[test]
+fn custom_size_stabilization_is_isolated_from_terms_and_extension_stabilization() {
+    let mut workspace = search_workspace_for_tests("/workspace", 1);
+    let stale = workspace.replace_custom_size("1MB".to_owned(), String::new());
+    let current = workspace.replace_custom_size("1MB".to_owned(), "2GB".to_owned());
+
+    assert!(!workspace.accepts_custom_size_stabilization(&stale));
+    assert!(workspace.accepts_custom_size_stabilization(&current));
+
+    // 关键词/后缀侧的稳定化请求不能被自定义大小侧接受，反之亦然。
+    let terms = workspace.replace_input("report".to_owned());
+    assert!(!workspace.accepts_custom_size_stabilization(&terms));
+    assert!(workspace.accepts_input_stabilization(&terms));
+    assert!(!workspace.accepts_input_stabilization(&current));
+    let extensions = workspace.replace_custom_extensions("pdf".to_owned());
+    assert!(!workspace.accepts_custom_size_stabilization(&extensions));
+    assert!(workspace.accepts_custom_extensions_stabilization(&extensions));
+    assert!(!workspace.accepts_custom_extensions_stabilization(&current));
+
+    // restart 边界作废全部三路 pending。
+    workspace.invalidate_input_stabilization();
+    assert!(!workspace.accepts_custom_size_stabilization(&current));
+}
+
+#[test]
+fn custom_size_side_edit_invalidates_the_other_side_pending_request() {
+    let mut workspace = search_workspace_for_tests("/workspace", 1);
+    let pending = workspace.replace_custom_size("1MB".to_owned(), String::new());
+    // 另一侧输入推进同一 revision：上一请求作废。
+    let latest = workspace.replace_custom_size("1MB".to_owned(), "2GB".to_owned());
+    assert!(!workspace.accepts_custom_size_stabilization(&pending));
+    assert!(workspace.accepts_custom_size_stabilization(&latest));
 }
 
 #[test]

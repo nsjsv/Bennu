@@ -23,7 +23,7 @@ use crate::icons::IconSymbol;
 use crate::model::search::SearchFilterPresetState;
 use crate::model::{
     Message, ScrollbarRegion, SearchDateField, SearchDatePreset, SearchDirectoryScope,
-    SearchEntryTypePreset, SearchResultCompletion, SEARCH_RESULT_TOTAL_LIMIT,
+    SearchEntryTypePreset, SearchResultCompletion, SearchSizePreset, SEARCH_RESULT_TOTAL_LIMIT,
 };
 use crate::typography::{localized_text, readable_text};
 use crate::virtual_range::{initial_virtual_range, virtual_range_for_viewport};
@@ -39,6 +39,7 @@ const WIDE_SEARCH_TOOLBAR_WIDTH: f32 = 1_000.0;
 const MEDIUM_SEARCH_TOOLBAR_WIDTH: f32 = 560.0;
 const SEARCH_DATE_FIELD_WIDTH: f32 = 122.0;
 const SEARCH_DATE_PRESET_WIDTH: f32 = 138.0;
+const SEARCH_SIZE_PRESET_WIDTH: f32 = 160.0;
 const SEARCH_TEXT_SCOPE_WIDTH: f32 = 274.0;
 const SEARCH_FILTER_BUTTON_HEIGHT: f32 = 30.0;
 const SEARCH_HISTORY_PANEL_MAX_HEIGHT: f32 = 320.0;
@@ -60,6 +61,15 @@ impl fmt::Display for SearchDateFieldOption {
 struct SearchDatePresetOption(SearchDatePreset);
 
 impl fmt::Display for SearchDatePresetOption {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&crate::localization::translate_current(self.0.label()))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SearchSizePresetOption(SearchSizePreset);
+
+impl fmt::Display for SearchSizePresetOption {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&crate::localization::translate_current(self.0.label()))
     }
@@ -347,13 +357,18 @@ fn search_workspace_toolbar(browser: &FileBrowser) -> Element<'_, Message> {
     let filters = workspace.filters.clone();
     let available_directory_scopes = workspace.root.available_scopes();
     let selected_directory_scope = workspace.root.selected_scope();
+    let last_location_path = workspace
+        .root
+        .last_location_directory()
+        .map(std::path::Path::to_path_buf);
     let selected = browser.active_search_selection().unwrap_or_default();
 
     responsive(move |viewport_size| {
         search_workspace_toolbar_layout(
             root_label.clone(),
-            available_directory_scopes,
+            available_directory_scopes.clone(),
             selected_directory_scope,
+            last_location_path.clone(),
             filters.clone(),
             selected.clone(),
             SearchToolbarDensity::for_width(viewport_size.width),
@@ -366,8 +381,9 @@ fn search_workspace_toolbar(browser: &FileBrowser) -> Element<'_, Message> {
 
 fn search_workspace_toolbar_layout(
     root_label: String,
-    available_directory_scopes: &[SearchDirectoryScope],
+    available_directory_scopes: Vec<SearchDirectoryScope>,
     selected_directory_scope: SearchDirectoryScope,
+    last_location_path: Option<std::path::PathBuf>,
     filters: SearchFilterPresetState,
     selected: Vec<std::path::PathBuf>,
     density: SearchToolbarDensity,
@@ -388,8 +404,11 @@ fn search_workspace_toolbar_layout(
     .align_y(Alignment::Center);
 
     let entry_types = search_entry_type_grid(&filters, density.entry_type_columns());
-    let directory_scope =
-        search_directory_scope_filter(available_directory_scopes, selected_directory_scope);
+    let directory_scope = search_directory_scope_filter(
+        &available_directory_scopes,
+        selected_directory_scope,
+        last_location_path,
+    );
     let controls = search_filter_controls(&filters, density);
     let mut toolbar = Column::new()
         .push(header)
@@ -397,6 +416,10 @@ fn search_workspace_toolbar_layout(
         .push(entry_types)
         .push(controls)
         .spacing(6);
+    // 自定义大小输入行跟在筛选控件区下方，随档位切回非 Custom 消失。
+    if custom_size_input_is_expanded(&filters) {
+        toolbar = toolbar.push(custom_size_input_row(&filters));
+    }
     if !selected.is_empty() {
         toolbar = toolbar.push(search_selection_actions(selected));
     }
@@ -509,6 +532,7 @@ fn search_filter_controls(
     density: SearchToolbarDensity,
 ) -> Element<'static, Message> {
     match density {
+        // 宽窗口一行排开：文本范围 | 日期字段 | 日期范围 | 大小 | 命令按钮。
         SearchToolbarDensity::Wide => {
             row![
                 container(search_text_scope_filter(filters))
@@ -521,12 +545,17 @@ fn search_filter_controls(
                     filters.date_preset,
                     Length::Fixed(SEARCH_DATE_PRESET_WIDTH),
                 ),
+                search_size_preset_filter(
+                    filters.size_preset,
+                    Length::Fixed(SEARCH_SIZE_PRESET_WIDTH),
+                ),
                 search_filter_commands(filters),
             ]
             .spacing(6)
             .align_y(Alignment::Center)
             .into()
         }
+        // 中窗口：大小下拉紧跟日期行；命令按钮折到下一行。
         SearchToolbarDensity::Medium => Column::new()
             .push(search_text_scope_filter(filters))
             .push(
@@ -539,19 +568,25 @@ fn search_filter_controls(
                         filters.date_preset,
                         Length::Fixed(SEARCH_DATE_PRESET_WIDTH),
                     ),
-                    search_filter_commands(filters),
+                    search_size_preset_filter(
+                        filters.size_preset,
+                        Length::Fixed(SEARCH_SIZE_PRESET_WIDTH),
+                    ),
                 ]
                 .spacing(6)
                 .align_y(Alignment::Center),
             )
+            .push(search_filter_commands(filters))
             .spacing(5)
             .into(),
+        // 窄窗口：大小与日期系控件同段折行，任何密度不隐藏。
         SearchToolbarDensity::Narrow => Column::new()
             .push(search_text_scope_filter(filters))
             .push(
                 row![
                     search_date_field_filter(filters.date_field, Length::FillPortion(1)),
                     search_date_preset_filter(filters.date_preset, Length::FillPortion(1)),
+                    search_size_preset_filter(filters.size_preset, Length::FillPortion(1)),
                 ]
                 .spacing(6),
             )
@@ -564,13 +599,19 @@ fn search_filter_controls(
 fn search_directory_scope_filter(
     available_scopes: &[SearchDirectoryScope],
     selected: SearchDirectoryScope,
+    last_location_path: Option<std::path::PathBuf>,
 ) -> Element<'static, Message> {
-    segmented_choice_row(search_directory_scope_choices(available_scopes, selected))
+    segmented_choice_row(search_directory_scope_choices(
+        available_scopes,
+        selected,
+        last_location_path,
+    ))
 }
 
 fn search_directory_scope_choices(
     available_scopes: &[SearchDirectoryScope],
     selected: SearchDirectoryScope,
+    last_location_path: Option<std::path::PathBuf>,
 ) -> Vec<SegmentedChoice> {
     available_scopes
         .iter()
@@ -579,6 +620,14 @@ fn search_directory_scope_choices(
             label: scope.label(),
             selected: scope == selected,
             message: Message::SearchDirectoryScopeSelected(scope),
+            // "上次位置"档只给目录名，悬停补完整路径消歧。
+            tooltip: if scope == SearchDirectoryScope::LastLocation {
+                last_location_path
+                    .as_deref()
+                    .map(|path| path.to_string_lossy().into_owned())
+            } else {
+                None
+            },
         })
         .collect()
 }
@@ -594,11 +643,13 @@ fn search_text_scope_filter(filters: &SearchFilterPresetState) -> Element<'stati
             label: "Name & content",
             selected: name_content_selected,
             message: Message::SearchTextScopeSelected(SearchTextScope::NameAndContent),
+            tooltip: None,
         },
         SegmentedChoice {
             label: "Name only",
             selected: name_only_selected,
             message: Message::SearchTextScopeSelected(SearchTextScope::NameOnly),
+            tooltip: None,
         },
     ];
     if regex_mode {
@@ -632,6 +683,59 @@ fn search_date_preset_filter(
     .width(width)
     .text_size(12)
     .padding([5, 6])
+    .into()
+}
+
+fn search_size_preset_filter(
+    selected: SearchSizePreset,
+    width: Length,
+) -> Element<'static, Message> {
+    pick_list(
+        SearchSizePreset::ALL.map(SearchSizePresetOption),
+        Some(SearchSizePresetOption(selected)),
+        |selected| Message::SearchSizePresetSelected(selected.0),
+    )
+    .width(width)
+    .text_size(12)
+    .padding([5, 6])
+    .into()
+}
+
+/// 自定义大小输入行只跟 Custom 档绑定：下拉本身是开关，无独立展开 bool。
+fn custom_size_input_is_expanded(filters: &SearchFilterPresetState) -> bool {
+    filters.size_preset == SearchSizePreset::Custom
+}
+
+/// 自定义大小输入行：仅在 size_preset == Custom 时展开在筛选控件区下方，
+/// 风格对齐自定义后缀输入行；两侧输入共用 120ms 稳定化。
+fn custom_size_input_row(filters: &SearchFilterPresetState) -> Element<'static, Message> {
+    container(
+        row![
+            readable_text("Min size").size(12),
+            iced::widget::text_input(
+                &crate::localization::translate_current("e.g. 10MB"),
+                &filters.custom_size_min,
+            )
+            .on_input(Message::SearchCustomSizeMinChanged)
+            .padding([5, 8])
+            .size(12)
+            .style(navigation_text_input_style)
+            .width(Length::Fill),
+            readable_text("Max size").size(12),
+            iced::widget::text_input(
+                &crate::localization::translate_current("e.g. 2 GB"),
+                &filters.custom_size_max,
+            )
+            .on_input(Message::SearchCustomSizeMaxChanged)
+            .padding([5, 8])
+            .size(12)
+            .style(navigation_text_input_style)
+            .width(Length::Fill),
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center),
+    )
+    .width(Length::Fill)
     .into()
 }
 
@@ -878,6 +982,7 @@ mod tests {
                 SearchDirectoryScope::Home,
             ],
             SearchDirectoryScope::CurrentFolder,
+            None,
         );
         assert_eq!(both.len(), 2);
         assert_eq!(both[0].label, "Current folder");
@@ -888,10 +993,30 @@ mod tests {
         let home_only = search_directory_scope_choices(
             &[SearchDirectoryScope::Home],
             SearchDirectoryScope::Home,
+            None,
         );
         assert_eq!(home_only.len(), 1);
         assert_eq!(home_only[0].label, "Home");
         assert!(home_only[0].selected);
+    }
+
+    #[test]
+    fn last_location_scope_carries_path_tooltip_only() {
+        let choices = search_directory_scope_choices(
+            &[
+                SearchDirectoryScope::CurrentFolder,
+                SearchDirectoryScope::LastLocation,
+                SearchDirectoryScope::Home,
+                SearchDirectoryScope::AllIndexedLocations,
+            ],
+            SearchDirectoryScope::LastLocation,
+            Some(std::path::PathBuf::from("/srv/downloads")),
+        );
+
+        assert_eq!(choices[0].tooltip, None);
+        assert_eq!(choices[1].tooltip.as_deref(), Some("/srv/downloads"));
+        assert_eq!(choices[2].tooltip, None);
+        assert_eq!(choices[3].tooltip, None);
     }
 
     #[test]
@@ -908,5 +1033,32 @@ mod tests {
             SearchToolbarDensity::for_width(420.0).entry_type_columns(),
             2
         );
+    }
+
+    #[test]
+    fn size_preset_choices_carry_unique_non_empty_labels() {
+        let labels: Vec<String> = SearchSizePreset::ALL
+            .iter()
+            .map(|preset| SearchSizePresetOption(*preset).to_string())
+            .collect();
+        assert_eq!(labels.len(), 9);
+        assert!(labels.iter().all(|label| !label.is_empty()));
+        let mut unique = labels.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), labels.len());
+    }
+
+    #[test]
+    fn custom_size_input_row_follows_the_custom_preset() {
+        let mut filters = SearchFilterPresetState::default();
+        assert!(!custom_size_input_is_expanded(&filters));
+
+        filters.select_size_preset(SearchSizePreset::Custom);
+        assert!(custom_size_input_is_expanded(&filters));
+
+        // 切回任意档位：输入行随档位消失。
+        filters.select_size_preset(SearchSizePreset::Any);
+        assert!(!custom_size_input_is_expanded(&filters));
     }
 }

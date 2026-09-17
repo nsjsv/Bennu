@@ -18,9 +18,9 @@ use crate::config;
 use crate::model::search::{SearchProvider, SEARCH_RESULT_WINDOW};
 use crate::model::{
     ContextMenuState, DirectoryFallbackOutcome, IndexedSearchOutcome, IndexedSearchRequest,
-    SearchEntryTypeMenuState, SearchEntryTypePreset, SearchResultCompletion,
-    SearchServiceDiagnosticKind, SelectionMarquee, SelectionMarqueePhase,
-    SelectionMarqueeScrollAnchor, SelectionMarqueeSource,
+    LastSearchScope, SearchDirectoryScope, SearchEntryTypeMenuState, SearchEntryTypePreset,
+    SearchResultCompletion, SearchServiceDiagnosticKind, SearchSizePreset, SelectionMarquee,
+    SelectionMarqueePhase, SelectionMarqueeScrollAnchor, SelectionMarqueeSource,
 };
 
 #[path = "search_tests/search_scope_tests.rs"]
@@ -129,6 +129,61 @@ fn explicit_search_submission_records_history_but_internal_restart_does_not() {
         .replace_input_immediately("   ".to_owned());
     drop(browser.submit_search_input());
     assert_eq!(browser.user_config.search_history.entries(), ["report"]);
+}
+
+#[test]
+fn real_query_records_last_scope_and_restores_it_on_next_workspace() {
+    let roots = tempdir().unwrap();
+    let downloads = roots.path().join("downloads");
+    let elsewhere = roots.path().join("elsewhere");
+    std::fs::create_dir(&downloads).unwrap();
+    std::fs::create_dir(&elsewhere).unwrap();
+    let mut browser = browser_for_search_tests(downloads.clone());
+    browser.home_dir = roots.path().join("home");
+    stabilize_search_input(&mut browser, "report");
+    assert_eq!(
+        browser.user_config.last_search_scope,
+        Some(LastSearchScope::Directory(downloads.clone()))
+    );
+
+    drop(browser.close_search_workspace());
+    browser.current_dir = elsewhere.clone();
+    let pane_id = browser.active_pane_id();
+    browser.pane_by_id_mut(pane_id).unwrap().current_dir = elsewhere;
+    stabilize_search_input(&mut browser, "report");
+
+    let workspace = browser.search_workspace.as_ref().unwrap();
+    assert_eq!(
+        workspace.root.selected_scope(),
+        SearchDirectoryScope::LastLocation
+    );
+    assert!(matches!(
+        workspace.run.active_query.as_ref().unwrap().scope,
+        SearchScope::Directory(ref root) if *root == downloads,
+    ));
+}
+
+#[test]
+fn switching_to_global_scope_records_global_last_scope() {
+    let mut browser = browser_for_search_tests(PathBuf::from("/downloads"));
+    browser.home_dir = PathBuf::from("/home/test");
+    stabilize_search_input(&mut browser, "report");
+    drop(browser.select_search_directory_scope(SearchDirectoryScope::AllIndexedLocations));
+    assert_eq!(
+        browser.user_config.last_search_scope,
+        Some(LastSearchScope::Global)
+    );
+}
+
+#[test]
+fn opening_and_closing_without_a_query_does_not_record_last_scope() {
+    let mut browser = browser_for_search_tests(PathBuf::from("/downloads"));
+    browser.home_dir = PathBuf::from("/home/test");
+
+    drop(browser.submit_search());
+    assert!(browser.search_workspace.is_some());
+    drop(browser.close_search_workspace());
+    assert_eq!(browser.user_config.last_search_scope, None);
 }
 
 #[test]
@@ -846,4 +901,97 @@ fn invalid_regex_is_rejected_without_submitting_a_query() {
     assert!(workspace.run.active_query.is_none());
     let failure = workspace.window.failure.as_deref().unwrap();
     assert!(failure.starts_with("Invalid regular expression: "));
+}
+
+#[test]
+fn empty_keyword_with_valid_custom_size_submits_a_query() {
+    let mut browser = browser_for_search_tests(PathBuf::from("/workspace"));
+    drop(browser.submit_search());
+    drop(browser.select_search_size_preset(SearchSizePreset::Custom));
+    // Custom 全空输入 = 不限：空关键词仍是空闲态，不发查询。
+    let workspace = browser.search_workspace.as_ref().unwrap();
+    assert!(workspace.run.active_query.is_none());
+
+    // 至少一侧可解析后，空关键词 + 有效大小条件必须放行查询。
+    let request = browser
+        .search_workspace
+        .as_mut()
+        .unwrap()
+        .replace_custom_size("16kb".to_owned(), String::new());
+    drop(browser.accept_search_input_stabilization(request));
+
+    let workspace = browser.search_workspace.as_ref().unwrap();
+    let query = workspace
+        .run
+        .active_query
+        .as_ref()
+        .expect("size-only query");
+    assert_eq!(query.terms, "");
+    assert_eq!(
+        query.filters.size,
+        Some(file_search::SizeRange {
+            min_bytes: 16 * 1024,
+            max_bytes: None,
+        })
+    );
+}
+
+#[test]
+fn invalid_custom_size_is_rejected_then_recovers_after_fixing_the_input() {
+    let mut browser = browser_for_search_tests(PathBuf::from("/workspace"));
+    drop(browser.submit_search());
+    drop(browser.select_search_size_preset(SearchSizePreset::Custom));
+    // 最小值大于最大值：稳定化接受后 restart 走 reject 路径，不发 provider。
+    let request = browser
+        .search_workspace
+        .as_mut()
+        .unwrap()
+        .replace_custom_size("2MB".to_owned(), "1MB".to_owned());
+    drop(browser.accept_search_input_stabilization(request));
+
+    let workspace = browser.search_workspace.as_ref().unwrap();
+    assert!(workspace.run.active_query.is_none());
+    assert!(workspace.run.pending_indexed_request.is_none());
+    let failure = workspace.window.failure.as_deref().unwrap();
+    assert!(failure.starts_with("Invalid size range: "));
+
+    // 修正输入后恢复查询，报错清空。
+    let request = browser
+        .search_workspace
+        .as_mut()
+        .unwrap()
+        .replace_custom_size("2MB".to_owned(), "2GB".to_owned());
+    drop(browser.accept_search_input_stabilization(request));
+
+    let workspace = browser.search_workspace.as_ref().unwrap();
+    assert!(workspace.run.active_query.is_some());
+    assert!(workspace.window.failure.is_none());
+}
+
+#[test]
+fn switching_size_preset_clears_custom_inputs_and_restarts() {
+    let mut browser = browser_for_search_tests(PathBuf::from("/workspace"));
+    drop(browser.submit_search());
+    drop(browser.select_search_size_preset(SearchSizePreset::Custom));
+    let request = browser
+        .search_workspace
+        .as_mut()
+        .unwrap()
+        .replace_custom_size("1MB".to_owned(), String::new());
+    drop(browser.accept_search_input_stabilization(request));
+    assert!(browser
+        .search_workspace
+        .as_ref()
+        .unwrap()
+        .run
+        .active_query
+        .is_some());
+
+    // 从 Custom 切走：清空两侧输入；空关键词回到空闲态。
+    drop(browser.select_search_size_preset(SearchSizePreset::Medium));
+    let workspace = browser.search_workspace.as_ref().unwrap();
+    assert_eq!(workspace.filters.size_preset, SearchSizePreset::Medium);
+    assert!(workspace.filters.custom_size_min.is_empty());
+    assert!(workspace.filters.custom_size_max.is_empty());
+    assert!(workspace.run.active_query.is_none());
 }

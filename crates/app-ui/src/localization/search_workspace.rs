@@ -27,11 +27,24 @@ pub(super) fn translate(text: &str) -> Option<String> {
         "Past 30 days" => Some("近 30 天"),
         "Past year" => Some("近一年"),
         "This year" => Some("今年"),
+        "Any size" => Some("任意大小"),
+        "Empty (0 B)" => Some("空 (0 B)"),
+        "Tiny (0-16 KB)" => Some("极小 (0-16 KB)"),
+        "Small (16 KB-1 MB)" => Some("小 (16 KB-1 MB)"),
+        "Medium (1-128 MB)" => Some("中 (1-128 MB)"),
+        "Large (128 MB-1 GB)" => Some("大 (128 MB-1 GB)"),
+        "Huge (1-4 GB)" => Some("巨大 (1-4 GB)"),
+        "Gigantic (>4 GB)" => Some("特大 (>4 GB)"),
+        "Min size" => Some("最小"),
+        "Max size" => Some("最大"),
+        "e.g. 10MB" => Some("例如 10MB"),
+        "e.g. 2 GB" => Some("例如 2 GB"),
         "Name & content" => Some("文件名与内容"),
         "Name only" => Some("仅文件名"),
         "Regex" => Some("正则"),
         "Regex mode matches file names only." => Some("正则模式仅匹配文件名。"),
         "Current folder" => Some("当前文件夹"),
+        "Last location" => Some("上次位置"),
         "Reset filters" => Some("重置筛选"),
         "Content indexing is unavailable; matching file names only." => {
             Some("内容索引暂不可用，当前仅匹配文件名。")
@@ -81,6 +94,19 @@ pub(super) fn translate(text: &str) -> Option<String> {
     }
     if let Some(error) = text.strip_prefix("Indexed queries unavailable: ") {
         return Some(format!("索引查询不可用：{error}"));
+    }
+    // 大小条件的 reject 报错由查询构造动态拼出，必须在此处还原语序。
+    if let Some(error) = text.strip_prefix("Invalid size range: ") {
+        return Some(format!("无效的大小范围：{error}"));
+    }
+    if let Some(error) = text.strip_prefix("Unknown size unit: ") {
+        return Some(format!("未知的大小单位：{error}"));
+    }
+    if let Some(error) = text.strip_prefix("Invalid size value: ") {
+        return Some(format!("无效的大小值：{error}"));
+    }
+    if let Some(error) = text.strip_prefix("Size value is too large: ") {
+        return Some(format!("大小值过大：{error}"));
     }
     None
 }

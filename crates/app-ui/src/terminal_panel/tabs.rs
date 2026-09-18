@@ -130,12 +130,15 @@ impl FileBrowser {
             if spawned {
                 self.terminal_panel.expanded = true;
                 self.terminal_panel.start_height_animation(target);
+                self.sync_terminal_panel_size();
             }
             return Task::none();
         }
         self.terminal_panel.focused = true;
         let height = self.terminal_panel.height.max(MIN_PANEL_HEIGHT);
         self.spawn_terminal_tab_in_directory(directory, height);
+        // 标签数跨过 1↔2 边界时标签条出现/消失,画布高度变化,其余标签随之重算。
+        self.sync_terminal_panel_size();
         Task::none()
     }
 
@@ -146,7 +149,11 @@ impl FileBrowser {
         rows_height: f32,
     ) -> bool {
         let columns = self.terminal_panel_grid_columns();
-        let rows = super::terminal_panel_canvas_rows(rows_height);
+        // 行数按落位后的标签数取:第二个标签会让标签条出现,画布变矮。
+        let tab_strip_visible = super::view::tab_strip_visible_for_tab_count(
+            self.terminal_panel.tabs.len() + 1,
+        );
+        let rows = super::terminal_panel_canvas_rows(rows_height, tab_strip_visible);
         let shell = self.terminal_panel_shell();
         let session_id = self.terminal_panel.next_session_id;
         self.terminal_panel.next_session_id += 1;
@@ -216,6 +223,8 @@ impl FileBrowser {
                 self.terminal_panel.start_height_animation(super::COLLAPSED_HEIGHT);
             }
         }
+        // 关到 1 个标签时标签条隐藏、画布变高,存留标签随之重算。
+        self.sync_terminal_panel_size();
         Task::none()
     }
 
@@ -232,6 +241,7 @@ impl FileBrowser {
         let columns = self.terminal_panel_grid_columns();
         let rows = super::terminal_panel_canvas_rows(
             self.terminal_panel.height.max(MIN_PANEL_HEIGHT),
+            self.terminal_panel.tab_strip_visible(),
         );
         let Some(tab) = self
             .terminal_panel
@@ -355,13 +365,16 @@ impl FileBrowser {
             .insert(session_id, TabShiftAnimation::new(current_offset + offset));
     }
 
-    /// 标签条内单个标签的槽宽(等分剩余宽度);位移动画距离用。
+    /// 标签条内单个标签的槽宽;位移动画距离用,与视图等分布局保持一致:
+    /// N 个标签和最右 1 个加号排成 N+1 项、N 个间距,标签均分剩余宽度。
     fn terminal_tab_slot_width(&self) -> f32 {
         let count = self.terminal_panel.tabs.len().max(1) as f32;
         let strip_width =
             (self.main_window_width - self.sidebar_width - PANEL_HORIZONTAL_PADDING).max(1.0);
-        ((strip_width - super::view::TAB_STRIP_SPACING * (count - 1.0)) / count)
-            .max(MIN_TAB_SLOT_WIDTH)
+        let shareable_width = strip_width
+            - super::view::TAB_ADD_BUTTON_SIZE
+            - super::view::TAB_STRIP_SPACING * count;
+        (shareable_width / count).max(MIN_TAB_SLOT_WIDTH)
     }
 
     /// 每帧推进位移动画;由 [`FileBrowser::advance_window_animation_frame`] 驱动。

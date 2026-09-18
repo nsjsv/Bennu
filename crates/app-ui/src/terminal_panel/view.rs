@@ -1,6 +1,6 @@
 use iced::mouse::{self, Interaction, ScrollDelta};
 use iced::widget::canvas::{Frame, Geometry, Text as CanvasText};
-use iced::widget::{button, canvas, container, mouse_area, row, space, text};
+use iced::widget::{button, canvas, container, mouse_area, row, space, stack, text};
 use iced::{Color, Element, Length, Point, Rectangle, Size, Theme};
 use iced::alignment::Vertical;
 
@@ -47,11 +47,25 @@ const TAB_UNREAD_DOT_SLOT_WIDTH: f32 = TAB_UNREAD_DOT_SIZE + 3.0;
 const TAB_LABEL_MAX_CHARS: usize = 20;
 /// 标签条「+」按钮的图标与按钮尺寸。
 const TAB_ADD_ICON_SIZE: f32 = 13.0;
-const TAB_ADD_BUTTON_SIZE: f32 = 20.0;
+pub(crate) const TAB_ADD_BUTTON_SIZE: f32 = 20.0;
+
+/// 标签条可见性只由标签数量决定:≥2 个标签显示标签条,单标签只留右上角加号。
+pub(crate) fn tab_strip_visible_for_tab_count(tab_count: usize) -> bool {
+    tab_count >= 2
+}
+
+/// 标签条当前占据的高度;隐藏时为 0,这块高度让给终端画布。
+fn tab_strip_height(tab_strip_visible: bool) -> f32 {
+    if tab_strip_visible {
+        TAB_STRIP_HEIGHT
+    } else {
+        0.0
+    }
+}
 
 /// 面板高度中终端网格可用的部分:去掉拖拽手柄与标签条。
-pub(crate) fn canvas_height_for_panel(height: f32) -> f32 {
-    (height - DRAG_HANDLE_HEIGHT - TAB_STRIP_HEIGHT).max(CELL_HEIGHT)
+pub(crate) fn canvas_height_for_panel(height: f32, tab_strip_visible: bool) -> f32 {
+    (height - DRAG_HANDLE_HEIGHT - tab_strip_height(tab_strip_visible)).max(CELL_HEIGHT)
 }
 
 /// 底部抽屉当前占据的高度:展开时拖拽手柄 + 标签条 + 终端画布,
@@ -61,9 +75,10 @@ pub(crate) fn terminal_panel_area_height(browser: &FileBrowser) -> f32 {
     if browser.terminal_panel.active_tab().is_some()
         && browser.terminal_panel.height() >= CELL_HEIGHT
     {
+        let tab_strip_visible = browser.terminal_panel.tab_strip_visible();
         DRAG_HANDLE_HEIGHT
-            + TAB_STRIP_HEIGHT
-            + canvas_height_for_panel(browser.terminal_panel.height())
+            + tab_strip_height(tab_strip_visible)
+            + canvas_height_for_panel(browser.terminal_panel.height(), tab_strip_visible)
     } else {
         BOTTOM_BAR_HEIGHT
     }
@@ -78,39 +93,55 @@ pub(crate) fn terminal_panel_area(browser: &FileBrowser) -> Element<'_, Message>
         if browser.terminal_panel.height() >= CELL_HEIGHT {
             let focused = browser.terminal_panel.is_focused();
             let session = &active_tab.session;
-            return iced::widget::column![
-                resize_handle(),
-                // 标签条与下方终端文字对齐,同样让出边栏宽度。
-                container(terminal_tab_strip(browser))
+            let tab_strip_visible = browser.terminal_panel.tab_strip_visible();
+            let terminal_canvas = canvas(TerminalGrid { session, focused })
+                .width(Length::Fill)
+                .height(Length::Fill);
+            // 单标签时标签条隐藏、画布吃满其高度,加号悬浮在画布右上角。
+            let canvas_area: Element<'_, Message> = if tab_strip_visible {
+                terminal_canvas.into()
+            } else {
+                stack![
+                    terminal_canvas,
+                    // 右留白由外层画布容器提供,这里只做垂直对齐,与标签条加号同位。
+                    container(add_tab_button())
+                        .width(Length::Fill)
+                        .height(Length::Fixed(TAB_STRIP_HEIGHT))
+                        .padding(iced::Padding {
+                            top: TAB_STRIP_VERTICAL_PADDING,
+                            ..iced::Padding::default()
+                        })
+                        .align_x(iced::alignment::Horizontal::Right),
+                ]
+                .into()
+            };
+            let mut panel = iced::widget::column![resize_handle()];
+            if tab_strip_visible {
+                // 让位边栏的缩进由 terminal_tab_strip 内部统一处理,这里不再叠加。
+                panel = panel.push(terminal_tab_strip(browser));
+            }
+            panel = panel.push(
+                container(canvas_area)
                     .width(Length::Fill)
+                    .height(Length::Fixed(canvas_height_for_panel(
+                        browser.terminal_panel.height(),
+                        tab_strip_visible,
+                    )))
+                    // 左侧让位给边栏列,文字从内容区起点开始。
                     .padding(iced::Padding {
                         left: browser.sidebar_width,
+                        right: PANEL_HORIZONTAL_PADDING,
                         ..iced::Padding::default()
-                    }),
-                container(
-                    canvas(TerminalGrid { session, focused })
-                        .width(Length::Fill)
-                        .height(Length::Fill),
-                )
-                .width(Length::Fill)
-                .height(Length::Fixed(canvas_height_for_panel(
-                    browser.terminal_panel.height(),
-                )))
-                // 左侧让位给边栏列,文字从内容区起点开始。
-                .padding(iced::Padding {
-                    left: browser.sidebar_width,
-                    right: PANEL_HORIZONTAL_PADDING,
-                    ..iced::Padding::default()
-                })
-                .style(content_background_style),
-            ]
-            .into();
+                    })
+                    .style(content_background_style),
+            );
+            return panel.into();
         }
     }
     collapsed_strip(browser)
 }
 
-/// 终端标签条:标签(标题 + 未读圆点 + ×)+ 右端「+」新建按钮。
+/// 终端标签条:标签(标题 + 未读圆点 + ×)等分整行宽度,最右端「+」新建按钮。
 fn terminal_tab_strip(browser: &FileBrowser) -> Element<'_, Message> {
     let mut strip = row![].spacing(TAB_STRIP_SPACING);
     for tab in &browser.terminal_panel.tabs {
@@ -124,7 +155,6 @@ fn terminal_tab_strip(browser: &FileBrowser) -> Element<'_, Message> {
         ));
     }
     strip = strip.push(add_tab_button());
-    strip = strip.push(space::Space::new().width(Length::Fill));
     container(strip)
         .width(Length::Fill)
         .height(Length::Fixed(TAB_STRIP_HEIGHT))

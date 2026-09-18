@@ -147,6 +147,11 @@ impl TerminalPanelState {
             .find(|tab| Some(tab.session.id) == active_session_id)
     }
 
+    /// 标签条可见性:≥2 个标签才显示,单标签只留右上角加号。
+    pub(crate) fn tab_strip_visible(&self) -> bool {
+        view::tab_strip_visible_for_tab_count(self.tabs.len())
+    }
+
     fn start_height_animation(&mut self, target: f32) {
         self.height_animation = Some(HeightAnimation {
             from: self.height,
@@ -300,7 +305,10 @@ impl FileBrowser {
         if !self.terminal_panel.expanded {
             return;
         }
-        let rows = terminal_panel_canvas_rows(self.terminal_panel.height.max(MIN_PANEL_HEIGHT));
+        let rows = terminal_panel_canvas_rows(
+            self.terminal_panel.height.max(MIN_PANEL_HEIGHT),
+            self.terminal_panel.tab_strip_visible(),
+        );
         let columns = self.terminal_panel_grid_columns();
         for tab in &mut self.terminal_panel.tabs {
             tab.session.resize(emulator_dimensions(columns, rows));
@@ -563,8 +571,8 @@ pub(crate) fn terminal_panel_grid_rows(height: f32) -> usize {
 }
 
 /// 面板高度 → PTY 行数:按去掉手柄与标签条后的画布高度换算。
-pub(crate) fn terminal_panel_canvas_rows(height: f32) -> usize {
-    terminal_panel_grid_rows(view::canvas_height_for_panel(height))
+pub(crate) fn terminal_panel_canvas_rows(height: f32, tab_strip_visible: bool) -> usize {
+    terminal_panel_grid_rows(view::canvas_height_for_panel(height, tab_strip_visible))
 }
 
 pub(crate) fn emulator_dimensions(columns: usize, rows: usize) -> emulator::TerminalDimensions {
@@ -607,5 +615,20 @@ mod tests {
     #[test]
     fn rows_follow_cell_height() {
         assert_eq!(terminal_panel_grid_rows(view::CELL_HEIGHT * 5.0), 5);
+    }
+
+    #[test]
+    fn tab_strip_shows_only_with_multiple_tabs() {
+        assert!(!view::tab_strip_visible_for_tab_count(0));
+        assert!(!view::tab_strip_visible_for_tab_count(1));
+        assert!(view::tab_strip_visible_for_tab_count(2));
+    }
+
+    #[test]
+    fn canvas_height_reclaims_tab_strip_when_hidden() {
+        let panel_height = 320.0;
+        // 320 - 6(拖拽手柄) - 26(标签条) 与 320 - 6(标签条隐藏,归画布)。
+        assert_eq!(view::canvas_height_for_panel(panel_height, true), 288.0);
+        assert_eq!(view::canvas_height_for_panel(panel_height, false), 314.0);
     }
 }

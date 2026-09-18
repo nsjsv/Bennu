@@ -18,12 +18,17 @@ pub(crate) const SUPERVISION_INTERVAL: Duration = Duration::from_secs(5);
 const STORE_SCAN_INTERVAL: Duration = Duration::from_secs(30);
 
 impl FileOperationQueue {
-    /// update 出口统一签发驱动者:第一个 Running 且尚未持有驱动者的任务。
+    /// update 出口统一签发驱动者:第一个 Running/Canceling 且尚未持有驱动者的任务。
+    /// 恢复路径重建的 Canceling 任务没有驱动者,取消协议只能靠驱动者收敛到终态,
+    /// 不签发就会永远停在取消中并经 active_subscription 堵死整个队列。
     /// 序列性由 start_next 保证(同一时刻至多一个任务处于非终态推进中)。
     pub(crate) fn poll_driver_launch(&mut self) -> Option<RunningFileOperation> {
         let position = self.tasks.iter().position(|task| {
             !task.driver_running
-                && task.status == FileOperationStatus::Running
+                && matches!(
+                    task.status,
+                    FileOperationStatus::Running | FileOperationStatus::Canceling
+                )
                 && (!task.operation.uses_recovery_journal() || task.stored_id.is_some())
         })?;
         let task = &mut self.tasks[position];
@@ -63,12 +68,14 @@ impl FileOperationQueue {
         combine_storage_errors(storage_error, self.adopt_abandoned_tasks(now))
     }
 
-    /// Running 任务信号超时 → 判定驱动者死亡,换代重启。仅恢复式(journal)
+    /// Running/Canceling 任务信号超时 → 判定驱动者死亡,换代重启。仅恢复式(journal)
     /// 任务可安全重放;瞬时任务(重命名/回收站等)不可重放,不重启。
     fn resume_silent_driver(&mut self, now: Instant) -> Option<String> {
         let stale = self.tasks.iter().position(|task| {
-            task.status == FileOperationStatus::Running
-                && task.driver_running
+            matches!(
+                task.status,
+                FileOperationStatus::Running | FileOperationStatus::Canceling
+            ) && task.driver_running
                 && task.operation.uses_recovery_journal()
                 && task
                     .last_driver_signal
@@ -83,7 +90,12 @@ impl FileOperationQueue {
         task.last_driver_signal = Some(now);
         // 旧驱动者可能只是假死仍在 I/O 中:作废旧 token,它会在下一个检查点
         // (checkpoint_now/wait_until_running)以 Cancelled 退出,防止双驱动。
+        // 取消中任务换代不得丢失取消意图:新 token 保持已取消,重启的驱动者直接收敛取消。
+        let was_canceling = task.status == FileOperationStatus::Canceling;
         task.cancel = CancellationToken::new();
+        if was_canceling {
+            task.cancel.cancel();
+        }
         let (run_state_sender, run_state_receiver) = watch::channel(FileOperationRunState::Running);
         task.run_state_sender = run_state_sender;
         task.run_state_receiver = run_state_receiver;

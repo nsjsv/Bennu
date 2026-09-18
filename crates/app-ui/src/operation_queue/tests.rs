@@ -741,6 +741,33 @@ fn paused_and_canceling_recovery_states_preserve_controls() {
 }
 
 #[test]
+fn restored_canceling_task_is_handed_a_driver() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = TaskQueueStore::new(directory.path().join("state.sqlite")).unwrap();
+    let mut original = FileOperationQueue::new();
+    original.set_store(store.clone());
+    assert!(original
+        .enqueue(sample_transfer_operation())
+        .error()
+        .is_none());
+    let stored_id = original.tasks()[0].stored_id.unwrap();
+    store
+        .update_status(stored_id, StoredTaskStatus::Canceling)
+        .unwrap();
+    drop(original);
+
+    let mut restored = FileOperationQueue::new();
+    assert!(restored.set_store_and_restore(store).is_none());
+    assert_eq!(restored.tasks()[0].status, FileOperationStatus::Canceling);
+
+    // 恢复出的取消中任务没有驱动者:poll 必须签发,否则取消协议无法收敛,
+    // 任务永远停在取消中并经 active_subscription 堵死整个队列。
+    let launch = restored.poll_driver_launch().unwrap();
+    assert_eq!(launch.id, restored.tasks()[0].id);
+    assert!(launch.controls.cancellation_token().is_cancelled());
+}
+
+#[test]
 fn recovery_pending_transfer_with_unfinished_checkpoint_is_requeued_after_restart() {
     let directory = tempfile::tempdir().unwrap();
     let store = TaskQueueStore::new(directory.path().join("state.sqlite")).unwrap();
@@ -1293,6 +1320,27 @@ fn paused_driver_is_not_restarted_for_silence() {
     assert_eq!(queue.tasks()[0].driver_generation, 0);
     assert!(queue.tasks()[0].driver_running);
     assert!(queue.driver_generation_is_current(task_id, 0));
+}
+
+#[test]
+fn silent_canceling_driver_is_restarted_without_losing_cancel_intent() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut queue, task_id) = supervised_queue(directory.path());
+    assert!(queue.cancel(task_id).is_none());
+    assert_eq!(queue.tasks()[0].status, FileOperationStatus::Canceling);
+    let launched_at = queue.tasks()[0].last_driver_signal.unwrap();
+
+    // 取消中任务的驱动者静默超时:同样必须换代重启,否则取消协议永远无法收敛。
+    let after_timeout = launched_at + super::supervision::DRIVER_SIGNAL_TIMEOUT;
+    assert!(queue.supervise(after_timeout).is_none());
+    assert_eq!(queue.tasks()[0].driver_generation, 1);
+    assert!(!queue.tasks()[0].driver_running);
+    // 换代不得丢失取消意图:新 token 保持已取消,重启的驱动者直接收敛取消。
+    assert!(queue.tasks()[0].cancel.is_cancelled());
+    let relaunch = queue.poll_driver_launch().unwrap();
+    assert_eq!(relaunch.id, task_id);
+    assert_eq!(relaunch.generation, 1);
+    assert!(relaunch.controls.cancellation_token().is_cancelled());
 }
 
 #[test]

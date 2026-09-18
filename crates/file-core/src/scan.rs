@@ -85,6 +85,15 @@ pub async fn discover_directory_with_progress(
     if cancellation.is_cancelled() {
         return Err(FileError::Cancelled);
     }
+    if let Some(resolved) = crate::archive_vfs::resolve_archive_virtual_path(&path) {
+        return crate::archive_vfs::discover_archive_directory(
+            &path,
+            &resolved,
+            options,
+            cancellation,
+        )
+        .await;
+    }
     let mut reader = fs::read_dir(&path)
         .await
         .map_err(|source| FileError::ReadDirectory {

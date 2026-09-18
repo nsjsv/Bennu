@@ -12,6 +12,8 @@ fn defaults_match_existing_menu_structure() {
         preferences.file_entry_menu_entries(false, true, true),
         vec![
             FileEntryMenuEntry::Item(FileAreaMenuItem::Open),
+            FileEntryMenuEntry::Item(FileAreaMenuItem::SmartExtractHere),
+            FileEntryMenuEntry::Item(FileAreaMenuItem::ExtractToArchiveFolder),
             FileEntryMenuEntry::Item(FileAreaMenuItem::OpenWith),
             FileEntryMenuEntry::Group {
                 anchor: FileAreaMenuItem::Copy,
@@ -93,8 +95,8 @@ fn selection_only_items_stay_out_of_the_blank_area_menu() {
 #[test]
 fn new_entry_position_tracks_visibility() {
     let mut preferences = ContextMenuPreferences::defaults();
-    // 隐藏 Open/OpenWith/Copy;组行随锚点一起消失。
-    for index in 0..3 {
+    // 隐藏前 5 项(Open/两个解压项/OpenWith/Copy);组行随锚点一起消失。
+    for index in 0..5 {
         preferences.file_entry.toggle(index);
     }
     let entries = preferences.file_entry_menu_entries(false, false, true);
@@ -264,8 +266,8 @@ fn stored_layout_without_tools_appends_it_visible_at_the_end() {
 fn file_entry_settings_rows_project_groups_to_single_rows() {
     let preferences = ContextMenuPreferences::defaults();
     let rows = preferences.settings_rows(ContextMenuSettingsPage::FileEntry);
-    // 19 项中 8 个成员被收进组面板,顶级行 = 11 行。
-    assert_eq!(rows.len(), 11);
+    // 21 项中 8 个成员被收进组面板,顶级行 = 13 行。
+    assert_eq!(rows.len(), 13);
     let group_anchors: Vec<_> = rows.iter().filter_map(|row| row.group_anchor).collect();
     assert_eq!(
         group_anchors,
@@ -278,7 +280,7 @@ fn file_entry_settings_rows_project_groups_to_single_rows() {
     );
     // entry_index 指向布局真实下标。
     assert_eq!(rows[0].entry_index, 0);
-    assert_eq!(rows[2].entry_index, 2);
+    assert_eq!(rows[4].entry_index, 4);
     // 成员面板行带布局下标,按成员表顺序。
     let members = preferences.file_entry_settings_member_rows(FileAreaMenuItem::Tools);
     assert_eq!(members.len(), 4);
@@ -289,17 +291,18 @@ fn file_entry_settings_rows_project_groups_to_single_rows() {
 #[test]
 fn file_entry_drag_moves_the_anchor_entry_only() {
     let mut preferences = ContextMenuPreferences::defaults();
-    // 行 2(复制组)拖到行 5(粘贴)之后:锚点条目换位,成员条目留在原下标。
-    preferences.reorder_settings_row(ContextMenuSettingsPage::FileEntry, 2, 5);
+    // 复制组锚点在布局下标 4;拖到粘贴(下标 11)之后:
+    // 锚点条目换位,成员条目留在原下标。
+    preferences.reorder_settings_row(ContextMenuSettingsPage::FileEntry, 4, 11);
     let rows = preferences.settings_rows(ContextMenuSettingsPage::FileEntry);
-    assert_eq!(rows[5].label, "Copy");
-    // 锚点移走后,原下标 2 由成员 Duplicate 顶上;CopyPath 仍在 15。
+    assert_eq!(rows[11].label, "Copy");
+    // 锚点移走后,原下标 4 由成员 Duplicate 顶上;CopyPath 前移到 16。
     assert_eq!(
-        preferences.file_entry.entries[2].item,
+        preferences.file_entry.entries[4].item,
         FileAreaMenuItem::Duplicate
     );
     assert_eq!(
-        preferences.file_entry.entries[15].item,
+        preferences.file_entry.entries[16].item,
         FileAreaMenuItem::CopyPath
     );
 }

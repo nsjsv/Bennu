@@ -3,6 +3,7 @@ mod application_shutdown;
 pub(crate) mod archive_creation;
 pub(crate) mod archive_extraction;
 pub(crate) mod archive_password;
+mod smart_extract;
 mod batch_rename;
 pub(crate) mod checksum;
 mod column_resize;

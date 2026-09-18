@@ -443,27 +443,57 @@ impl FileBrowser {
         paste_directory: PathBuf,
         operation: PendingOperation,
     ) -> Task<Message> {
-        let (mode, transfers) = match operation {
+        // 包内只读：目标在包内时粘贴语义不成立，直接吞掉。
+        if file_core::archive_path_identity(&paste_directory)
+            != file_core::ArchivePathIdentity::RealFile
+        {
+            return Task::none();
+        }
+        let (mode, transfers, archive_members) = match operation {
             PendingOperation::Copy(sources) => {
+                let (archive_sources, real_sources) =
+                    split_archive_member_sources(sources);
+                let members = (!archive_sources.is_empty()).then(|| {
+                    QueuedFileOperation::ExtractArchiveMembers {
+                        sources: archive_sources,
+                        destination: paste_directory.clone(),
+                    }
+                });
                 let transfers =
-                    paths::transfer_targets(&paste_directory, &sources, PasteTargetMode::Copy)
+                    paths::transfer_targets(&paste_directory, &real_sources, PasteTargetMode::Copy)
                         .into_iter()
                         .map(|(source, target)| QueuedTransfer::new(source, target))
                         .collect::<Vec<_>>();
-                (TransferConflictMode::Copy, transfers)
+                (TransferConflictMode::Copy, transfers, members)
             }
             PendingOperation::Move(sources) => {
-                let transfers = move_paste_transfers(&paste_directory, &sources);
+                // 包内不可写，「移动」里的包内源降级为提取(复制后源无法删除)。
+                let (archive_sources, real_sources) =
+                    split_archive_member_sources(sources);
+                let members = (!archive_sources.is_empty()).then(|| {
+                    QueuedFileOperation::ExtractArchiveMembers {
+                        sources: archive_sources,
+                        destination: paste_directory.clone(),
+                    }
+                });
+                let transfers = move_paste_transfers(&paste_directory, &real_sources);
                 self.pending_operation = None;
-                (TransferConflictMode::Move, transfers)
+                (TransferConflictMode::Move, transfers, members)
             }
         };
 
-        if transfers.is_empty() {
+        if transfers.is_empty() && archive_members.is_none() {
             return Task::none();
         }
 
-        self.enqueue_or_confirm_transfers(mode, transfers)
+        let mut commands = Vec::new();
+        if let Some(members) = archive_members {
+            commands.push(self.enqueue_file_operation(members));
+        }
+        if !transfers.is_empty() {
+            commands.push(self.enqueue_or_confirm_transfers(mode, transfers));
+        }
+        Task::batch(commands)
     }
 
     pub(super) fn paste_target_directory(&self) -> PathBuf {
@@ -497,6 +527,20 @@ fn gather_sources_in_directory(selected: &[PathBuf], directory: &Path) -> Vec<Pa
         .filter(|path| path.parent() == Some(directory))
         .cloned()
         .collect()
+}
+
+/// 把粘贴源拆成「包内成员」与「真实路径」两组；包内成员走提取管线。
+fn split_archive_member_sources(sources: Vec<PathBuf>) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let mut archive_sources = Vec::new();
+    let mut real_sources = Vec::new();
+    for source in sources {
+        if file_core::archive_path_identity(&source) == file_core::ArchivePathIdentity::RealFile {
+            real_sources.push(source);
+        } else {
+            archive_sources.push(source);
+        }
+    }
+    (archive_sources, real_sources)
 }
 
 /// 粘贴移动的目标计算:与拖拽落地共用同一空操作不变量(源等于落点、

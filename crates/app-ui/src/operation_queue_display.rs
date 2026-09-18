@@ -85,6 +85,13 @@ impl QueuedFileOperation {
             Self::ExtractArchive { request } => {
                 path_lines_from_extracted_archive(&request.archive, &request.destination)
             }
+            Self::ExtractArchiveMembers {
+                sources,
+                destination,
+            } => path_lines_from_extracted_archive(
+                sources.first().map(|source| source.as_path()).unwrap_or(destination.as_path()),
+                destination,
+            ),
         }
     }
 }

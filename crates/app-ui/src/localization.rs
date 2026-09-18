@@ -556,6 +556,8 @@ fn exact_translation(text: &str) -> Option<&'static str> {
         "Folders" => Some("文件夹"),
         "PDF" => Some("PDF"),
         "Open with" => Some("打开方式"),
+        "Smart Extract Here" => Some("智能解压到当前文件夹"),
+        "Extract to Archive Folder" => Some("解压到归档文件夹"),
         "Paste" => Some("粘贴"),
         "Create Archive..." => Some("创建归档..."),
         "Batch Rename..." => Some("批量重命名..."),

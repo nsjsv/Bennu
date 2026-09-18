@@ -151,6 +151,7 @@ fn operation_supports_desktop_notification(operation: &QueuedFileOperation) -> b
         | QueuedFileOperation::CreateSymbolicLinks { .. }
         | QueuedFileOperation::CreateArchive { .. }
         | QueuedFileOperation::ExtractArchive { .. }
+        | QueuedFileOperation::ExtractArchiveMembers { .. }
         | QueuedFileOperation::Convert { .. } => true,
         QueuedFileOperation::Rename { .. }
         | QueuedFileOperation::CreateDirectory { .. }

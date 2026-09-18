@@ -1,5 +1,4 @@
 use std::fmt;
-use std::path::PathBuf;
 
 use file_core::{ArchiveExtractionRequest, ArchivePassword};
 use iced::Task;
@@ -44,7 +43,7 @@ pub(crate) struct ArchiveExtractionState {
 }
 
 impl ArchiveExtractionState {
-    fn inspecting(request: ArchiveExtractionRequest) -> Self {
+    pub(super) fn inspecting(request: ArchiveExtractionRequest) -> Self {
         Self {
             request,
             password: ArchivePasswordDraft::new(String::new()),
@@ -117,24 +116,6 @@ impl fmt::Debug for ArchiveExtractionState {
 }
 
 impl FileBrowser {
-    pub(super) fn request_archive_extraction(&mut self, archive: PathBuf) -> Task<Message> {
-        if self.is_trash_view {
-            return Task::none();
-        }
-
-        let request = match ArchiveExtractionRequest::from_archive_path(archive, None) {
-            Ok(request) => request,
-            Err(error) => {
-                self.show_global_error(error.to_string());
-                return Task::none();
-            }
-        };
-
-        self.clear_state_for_archive_extraction();
-        self.archive_extraction = Some(ArchiveExtractionState::inspecting(request.clone()));
-        inspect_archive_extraction_command(request)
-    }
-
     pub(super) fn handle_archive_extraction_message(
         &mut self,
         message: ArchiveExtractionMessage,
@@ -205,7 +186,7 @@ impl FileBrowser {
         }
     }
 
-    fn clear_state_for_archive_extraction(&mut self) {
+    pub(super) fn clear_state_for_archive_extraction(&mut self) {
         self.context_menu = None;
         self.open_with = None;
         self.archive_creation = None;

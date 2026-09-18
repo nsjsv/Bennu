@@ -6,6 +6,8 @@ use crate::model::SearchEntryTypePreset;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FileAreaMenuItem {
     Open,
+    SmartExtractHere,
+    ExtractToArchiveFolder,
     OpenWith,
     Copy,
     Duplicate,
@@ -26,8 +28,10 @@ pub(crate) enum FileAreaMenuItem {
     Properties,
 }
 
-pub(crate) const FILE_ENTRY_MENU_ITEMS: [FileAreaMenuItem; 19] = [
+pub(crate) const FILE_ENTRY_MENU_ITEMS: [FileAreaMenuItem; 21] = [
     FileAreaMenuItem::Open,
+    FileAreaMenuItem::SmartExtractHere,
+    FileAreaMenuItem::ExtractToArchiveFolder,
     FileAreaMenuItem::OpenWith,
     FileAreaMenuItem::Copy,
     FileAreaMenuItem::Duplicate,
@@ -107,6 +111,8 @@ impl FileAreaMenuItem {
     pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Open => "Open",
+            Self::SmartExtractHere => "Smart Extract Here",
+            Self::ExtractToArchiveFolder => "Extract to Archive Folder",
             Self::OpenWith => "Open with",
             Self::Copy => "Copy",
             Self::Duplicate => "Duplicate",
@@ -131,6 +137,8 @@ impl FileAreaMenuItem {
     pub(super) fn config_value(self) -> &'static str {
         match self {
             Self::Open => "open",
+            Self::SmartExtractHere => "smart_extract_here",
+            Self::ExtractToArchiveFolder => "extract_to_archive_folder",
             Self::OpenWith => "open_with",
             Self::Copy => "copy",
             Self::Duplicate => "duplicate",
@@ -155,6 +163,8 @@ impl FileAreaMenuItem {
     pub(super) fn from_config_value(value: &str) -> Option<Self> {
         Some(match value {
             "open" => Self::Open,
+            "smart_extract_here" => Self::SmartExtractHere,
+            "extract_to_archive_folder" => Self::ExtractToArchiveFolder,
             "open_with" => Self::OpenWith,
             "copy" => Self::Copy,
             "duplicate" => Self::Duplicate,
@@ -185,6 +195,7 @@ impl FileAreaMenuItem {
     /// 与 floating_panels 菜单渲染使用的图标保持一致。
     pub(crate) fn icon(self) -> IconSymbol {        match self {
             Self::Open => IconSymbol::Folder,
+            Self::SmartExtractHere | Self::ExtractToArchiveFolder => IconSymbol::FileArchive,
             Self::OpenWith => IconSymbol::Monitor,
             Self::Copy | Self::Duplicate | Self::Paste => IconSymbol::Copy,
             Self::Move => IconSymbol::ArrowRight,

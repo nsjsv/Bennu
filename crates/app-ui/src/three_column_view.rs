@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use file_core::{DirectoryEntry, FileKind};
+use file_core::DirectoryEntry;
 use iced::widget::{container, mouse_area, row, scrollable, text_input, Column, Row, Space};
 use iced::{Alignment, Element, Length};
 
@@ -550,7 +550,7 @@ fn column_entry_row<'a>(
     };
 
     let trailing: Element<'static, Message> =
-        if entry.kind == FileKind::Directory && !pane.is_trash_view {
+        if browser.entry_acts_as_directory(&entry.path) && !pane.is_trash_view {
             themed_icon(
                 IconSymbol::ChevronRight,
                 icon_tone,
@@ -592,7 +592,7 @@ fn column_entry_row<'a>(
         .on_right_press(Message::EntryRightClicked(pane.id, entry.path.clone()))
         .interaction(iced::mouse::Interaction::Pointer);
 
-    let row_area = if entry.kind == FileKind::Directory && !pane.is_trash_view {
+    let row_area = if browser.entry_acts_as_directory(&entry.path) && !pane.is_trash_view {
         row_area.on_middle_press(Message::OpenDirectoryFromMiddleClick(
             pane.id,
             entry.path.clone(),

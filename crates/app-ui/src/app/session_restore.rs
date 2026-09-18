@@ -236,19 +236,41 @@ fn restored_pane_from_session(pane: BrowserPaneSession) -> Option<BrowserPane> {
         .expect("restored tabs is non-empty");
     let tabs = restored_tabs
         .iter()
-        .map(BrowserTabSession::to_browser_tab)
+        .map(|tab| {
+            let mut restored = BrowserTabSession::to_browser_tab(tab);
+            if let Some(real_directory) =
+                file_core::real_directory_outside_archive(&restored.directory)
+            {
+                restored.directory = real_directory;
+            }
+            restored
+        })
         .collect::<Vec<_>>();
-    let active_expanded_directories = active_tab.restored_expanded_directories();
+    let active_expanded_directories = active_tab
+        .restored_expanded_directories()
+        .into_iter()
+        .filter(|(directory, _)| file_core::archive_path_identity(directory) == file_core::ArchivePathIdentity::RealFile)
+        .collect();
+    // 会话恢复不入包内：包内/包根目录归一到归档所在真实目录；包内
+    // 选中与多栏展开链丢弃（真实目录中这些条目并不存在）。真实路径
+    // 的选中照常恢复（CLI 显式工作区同样途经此处）。
+    let normalized_tab_directory =
+        file_core::real_directory_outside_archive(&active_tab.directory)
+            .unwrap_or_else(|| active_tab.directory.clone());
     let mut browser_pane = BrowserPane {
         id: pane.id,
-        current_dir: active_tab.directory.clone(),
+        current_dir: normalized_tab_directory,
         is_trash_view: active_tab.is_trash_view,
         entries: Vec::new().into(),
         directory_discovery: None,
         directory_loading_placeholder: None,
         trash_entries: Vec::new(),
-        selected: active_tab.selected,
-        selected_paths: active_tab.selected_paths,
+        selected: restored_selection(active_tab.selected.clone()),
+        selected_paths: active_tab
+            .selected_paths
+            .into_iter()
+            .filter(|path| file_core::archive_path_identity(path) == file_core::ArchivePathIdentity::RealFile)
+            .collect(),
         selection_anchor: None,
         deepest_open_column_directory: active_tab.deepest_open_column_directory,
         expanded_directories: active_expanded_directories,
@@ -269,6 +291,12 @@ fn restored_pane_from_session(pane: BrowserPaneSession) -> Option<BrowserPane> {
     };
     browser_pane.sync_active_tab_state();
     Some(browser_pane)
+}
+
+fn restored_selection(selected: Option<PathBuf>) -> Option<PathBuf> {
+    let selected = selected?;
+    (file_core::archive_path_identity(&selected) == file_core::ArchivePathIdentity::RealFile)
+        .then_some(selected)
 }
 
 fn sanitize_column_browser_viewport(viewport: ColumnBrowserViewport) -> ColumnBrowserViewport {

@@ -121,6 +121,11 @@ pub(crate) enum QueuedFileOperation {
     ExtractArchive {
         request: ArchiveExtractionRequest,
     },
+    /// 包内成员复制/拖出到真实目录:按成员提取落地,不覆盖既有内容。
+    ExtractArchiveMembers {
+        sources: Vec<PathBuf>,
+        destination: PathBuf,
+    },
     Convert {
         requests: Vec<ConversionRequest>,
     },
@@ -182,6 +187,7 @@ impl QueuedFileOperation {
             Self::CreateSymbolicLinks { .. } => "Create Symbolic Link",
             Self::CreateArchive { .. } => "Create Archive",
             Self::ExtractArchive { .. } => "Extract Archive",
+            Self::ExtractArchiveMembers { .. } => "Extract Archive",
             Self::Convert { .. } => "Convert Format",
         }
     }

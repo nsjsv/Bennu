@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use file_core::FileKind;
+use file_core::{is_supported_archive_path, FileKind};
 use iced::Task;
 
 use super::panes::BrowserPaneView;
@@ -392,6 +392,9 @@ impl FileBrowser {
                 expansion: FileContextMenuExpansion::None,
                 // 分组方式入口只属于空白菜单,条目菜单一律不带。
                 grouping_entry_visible: false,
+                // 解压菜单的消费数据:选中集合里的归档与「是否在包内」。
+                selection_archives: self.archive_selection_paths(),
+                inside_archive: self.current_directory_is_inside_archive(),
             }));
         }
         Task::batch([expansion_command, rename_command])
@@ -432,6 +435,8 @@ impl FileBrowser {
                 // 按打开菜单那一刻的视图模式定死入口可见性,后续视图
                 // 切换不会让已打开的菜单中途长出入口。
                 grouping_entry_visible: file_grouping_entry_visible(self.view_mode),
+                selection_archives: Vec::new(),
+                inside_archive: self.current_directory_is_inside_archive(),
             }));
         }
         Task::batch([expansion_command, rename_command])
@@ -619,6 +624,27 @@ impl FileBrowser {
 
     pub(super) fn entry_kind(&self, path: &Path) -> Option<FileKind> {
         self.entry_kind_recursive(path)
+    }
+
+    /// 条目是否按目录对待：真实目录，或压缩包（视作目录，多栏单击、
+    /// 列表展开、键盘下钻共用这一判定）。
+    pub(crate) fn entry_acts_as_directory(&self, path: &Path) -> bool {
+        self.entry_kind(path) == Some(FileKind::Directory) || is_supported_archive_path(path)
+    }
+
+    /// 选中集合中的压缩包条目（真实目录语义），供解压菜单批量消费。
+    pub(super) fn archive_selection_paths(&self) -> Vec<PathBuf> {
+        self.selected_paths
+            .iter()
+            .filter(|path| is_supported_archive_path(path))
+            .cloned()
+            .collect()
+    }
+
+    /// 当前浏览目录是否位于压缩包内部（含包根），包内只读门控的单一判定。
+    pub(super) fn current_directory_is_inside_archive(&self) -> bool {
+        file_core::archive_path_identity(&self.current_dir)
+            != file_core::ArchivePathIdentity::RealFile
     }
 
     fn directory_drop_target_for_entry(&self, path: &Path) -> PathBuf {

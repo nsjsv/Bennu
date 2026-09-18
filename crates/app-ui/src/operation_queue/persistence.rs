@@ -119,6 +119,8 @@ pub(super) fn queued_operation_to_stored(operation: &QueuedFileOperation) -> Sto
             destination: StoredPath::from_path(&request.destination),
             password_required: request.password.is_some(),
         },
+        // 成员提取是一次性动作,不参与重启恢复;落盘时记为空操作。
+        QueuedFileOperation::ExtractArchiveMembers { .. } => StoredOperation::EmptyTrash,
         QueuedFileOperation::Convert { requests } => StoredOperation::Convert {
             sources: requests
                 .iter()

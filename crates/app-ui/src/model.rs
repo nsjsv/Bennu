@@ -814,6 +814,16 @@ pub(crate) enum Message {
     PaneUp(BrowserPaneId),
     NavigateTo(PathBuf),
     OpenPath(PathBuf),
+    /// 右键「智能解压到当前文件夹」：对选中集合中的每个归档做单根判定后入队。
+    SmartExtractSelected,
+    /// 智能解压的单根判定回流：据此计算目的地并启动既有解压流。
+    SmartExtractDestinationResolved {
+        archive: PathBuf,
+        current_directory: PathBuf,
+        single_root: Result<Option<String>, String>,
+    },
+    /// 右键「解压到 <包名>/」：无条件在当前目录建包名文件夹后逐个解压。
+    ExtractSelectedToArchiveFolder,
     TrashOpened,
     Back,
     Forward,
@@ -1031,6 +1041,10 @@ pub(crate) struct FileContextMenuState {
     /// 打开菜单时按 pane 视图模式求值的分组方式入口门控
     /// （仅空白菜单为真）；渲染层只读该结果，不再感知视图模式。
     pub(crate) grouping_entry_visible: bool,
+    /// 打开菜单那一刻选中集合里的压缩包条目（真实目录内），解压两项的数据源。
+    pub(crate) selection_archives: Vec<PathBuf>,
+    /// 菜单发起位置在压缩包内部（含包根）：条目菜单切换为只读子集。
+    pub(crate) inside_archive: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -57,6 +57,15 @@ impl ArchiveExtractionRequest {
         })
     }
 
+    /// 右键解压语义：目的地由调用方计算（智能解压/包名文件夹），
+    /// 不再固定为归档同级目录。
+    pub fn with_destination(self, destination: PathBuf) -> Self {
+        Self {
+            destination,
+            ..self
+        }
+    }
+
     pub fn with_password(&self, password: Option<ArchivePassword>) -> Self {
         Self {
             archive: self.archive.clone(),

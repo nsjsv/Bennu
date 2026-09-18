@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::time::SystemTime;
 
 use tokio::process::Command;
 
@@ -14,6 +15,10 @@ use crate::{
 pub struct ArchiveListingEntry {
     pub path: String,
     pub kind: FileKind,
+    /// 未压缩大小；目录为 0。虚拟目录的 Size 排序与属性面板消费。
+    pub len: u64,
+    /// 归档头记录的修改时间；7z 外部命令不解析时区敏感的 MTime，保持 None。
+    pub modified: Option<SystemTime>,
 }
 
 pub async fn list_archive_members(
@@ -133,6 +138,8 @@ fn read_zip_members(path: &Path) -> Result<Vec<ArchiveListingEntry>, FileError> 
         members.push(ArchiveListingEntry {
             path: entry.name().to_owned(),
             kind,
+            len: entry.size(),
+            modified: zip_datetime_to_system_time(entry.last_modified()),
         });
     }
 
@@ -184,7 +191,17 @@ fn read_tar_members_from<R: io::Read>(
             })?
             .to_string_lossy()
             .into_owned();
-        members.push(ArchiveListingEntry { path, kind });
+        let header = entry.header();
+        let modified = header
+            .mtime()
+            .ok()
+            .map(|seconds| SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(seconds));
+        members.push(ArchiveListingEntry {
+            path,
+            kind,
+            len: header.size().unwrap_or(0),
+            modified,
+        });
     }
 
     Ok(members)
@@ -267,6 +284,7 @@ fn parse_seven_zip_listing(technical_listing: &str) -> Vec<ArchiveListingEntry> 
             current_entry = Some(SevenZipListedEntry {
                 path: path.to_owned(),
                 is_directory: path.ends_with('/') || path.ends_with('\\'),
+                len: 0,
             });
             continue;
         }
@@ -278,6 +296,8 @@ fn parse_seven_zip_listing(technical_listing: &str) -> Vec<ArchiveListingEntry> 
             entry.is_directory |= seven_zip_folder_field_is_directory(folder);
         } else if let Some(attributes) = line.strip_prefix("Attributes = ") {
             entry.is_directory |= seven_zip_attributes_field_is_directory(attributes);
+        } else if let Some(size) = line.strip_prefix("Size = ") {
+            entry.len = size.trim().parse().unwrap_or(0);
         }
     }
 
@@ -303,6 +323,8 @@ fn push_listed_archive_member(
         } else {
             FileKind::File
         },
+        len: listed_entry.len,
+        modified: None,
     });
 }
 
@@ -341,6 +363,32 @@ enum TarCompression {
 struct SevenZipListedEntry {
     path: String,
     is_directory: bool,
+    len: u64,
+}
+
+/// zip 的 MS-DOS 时间戳按 UTC 解释成 `SystemTime`。DOS 时间本身不
+/// 携带时区，主流工具（info-zip）同样按 UTC 存取；显示语义足够。
+fn zip_datetime_to_system_time(datetime: Option<zip::DateTime>) -> Option<SystemTime> {
+    fn civil_days_since_epoch(year: i64, month: u32, day: u32) -> i64 {
+        let shifted_year = year - i64::from(month <= 2);
+        let era = shifted_year.div_euclid(400);
+        let year_of_era = shifted_year - era * 400;
+        let month_pattern = (month + 9) % 12;
+        let day_of_year = (153 * i64::from(month_pattern) + 2) / 5 + i64::from(day) - 1;
+        let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+        era * 146_097 + day_of_era - 719_468
+    }
+
+    let datetime = datetime?;
+    let (year, month, day) = (i64::from(datetime.year()), datetime.month(), datetime.day());
+    if year < 1970 {
+        return None;
+    }
+    let seconds = civil_days_since_epoch(year, u32::from(month), u32::from(day)) * 86_400
+        + i64::from(datetime.hour()) * 3_600
+        + i64::from(datetime.minute()) * 60
+        + i64::from(datetime.second());
+    Some(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(seconds as u64))
 }
 
 #[cfg(test)]

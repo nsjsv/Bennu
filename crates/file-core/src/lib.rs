@@ -1,6 +1,7 @@
 pub mod archive;
 pub mod archive_extraction;
 pub mod archive_listing;
+pub mod archive_vfs;
 pub mod checksum;
 pub mod data_dir_migration;
 pub mod directory_metadata;
@@ -28,6 +29,11 @@ pub use archive_extraction::{
 pub use archive_listing::{
     list_archive_members, list_archive_members_with_format, sniff_archive_extraction_format,
     ArchiveListingEntry,
+};
+pub use archive_vfs::{
+    archive_path_identity, extract_archive_members_with_controls_and_progress,
+    materialize_archive_member_for_open, real_directory_outside_archive, single_root_member_name,
+    ArchiveMemberExtractionRequest, ArchivePathIdentity,
 };
 pub use checksum::{
     algorithms_matching_digest, compute_file_checksums, find_checksum_entry, is_plausible_digest,

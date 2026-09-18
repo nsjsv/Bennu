@@ -214,6 +214,33 @@ pub(crate) fn open_file_command(
     path: PathBuf,
     terminal_emulator: TerminalEmulator,
 ) -> Task<Message> {
+    // 包内成员：先物化为临时文件再交给系统打开；虚拟路径本身
+    // 对外部程序无意义。
+    if file_core::archive_path_identity(&path) != file_core::ArchivePathIdentity::RealFile {
+        let opened_path = path.clone();
+        return Task::perform(
+            async move {
+                let outcome = match file_core::materialize_archive_member_for_open(
+                    &path,
+                    None,
+                    CancellationToken::new(),
+                )
+                .await
+                {
+                    Ok(materialized) => open_path_with_terminal_emulator(
+                        materialized,
+                        terminal_emulator,
+                    )
+                    .await
+                    .map_err(|error| error.to_string()),
+                    Err(error) => Err(error.to_string()),
+                };
+                (opened_path, outcome)
+            },
+            move |(opened_path, result)| Message::OpenFileFinished(opened_path, result),
+        );
+    }
+
     let opened_path = path.clone();
     Task::perform(
         async move {

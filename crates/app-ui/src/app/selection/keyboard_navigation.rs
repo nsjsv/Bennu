@@ -150,7 +150,7 @@ impl FileBrowser {
         let Some(selected) = self.selected.clone() else {
             return self.move_file_selection_vertically(SelectionStep::Next);
         };
-        if self.entry_kind(&selected) != Some(FileKind::Directory) {
+        if !self.entry_acts_as_directory(&selected) {
             return Task::none();
         }
 
@@ -226,7 +226,7 @@ impl FileBrowser {
     }
 
     fn open_column_for_keyboard_selection(&mut self, path: PathBuf) -> Task<Message> {
-        if self.entry_kind(&path) == Some(FileKind::Directory) {
+        if self.entry_acts_as_directory(&path) {
             self.open_column_for_directory(path)
         } else {
             self.update_open_column_directory_for_entry(&path);
@@ -370,9 +370,11 @@ impl FileBrowser {
         }
 
         match self.entry_kind(&path) {
+            // 压缩包视作目录：真实目录中的归档条目 kind 是 File，但
+            // 双击/Enter 的动作是进入浏览；解压入口统一收在右键菜单。
             Some(FileKind::Directory) => self.navigate_to(path, NavigationMode::RecordHistory),
             Some(_) | None if is_supported_archive_path(&path) => {
-                self.request_archive_extraction(path)
+                self.navigate_to(path, NavigationMode::RecordHistory)
             }
             Some(_) | None => open_file_command(path, self.terminal_emulator),
         }
@@ -391,7 +393,7 @@ impl FileBrowser {
             return Task::none();
         }
 
-        if self.entry_kind(&path) != Some(FileKind::Directory) {
+        if !self.entry_acts_as_directory(&path) {
             return Task::none();
         }
         self.set_deepest_open_column_directory(Some(path.clone()));
@@ -442,6 +444,15 @@ impl FileBrowser {
 
     fn open_preview(&mut self) -> Task<Message> {
         self.context_menu = None;
+        // 包内成员按空格完全无动作:虚拟路径读不了文件,加载必然失败
+        // 并弹「could not read image」全局错误;按只读浏览语义静默忽略。
+        if self
+            .selected
+            .as_deref()
+            .is_some_and(|path| file_core::archive_path_identity(path) != file_core::ArchivePathIdentity::RealFile)
+        {
+            return Task::none();
+        }
         // 空格驱动的加载会话面向独立窗口:异步回流时窗口尺寸/聚焦动作
         // 全部照旧;面板发起的会话经 sync_right_preview_panel 另行标注。
         self.preview_load_surface = PreviewLoadSurface::StandaloneWindow;

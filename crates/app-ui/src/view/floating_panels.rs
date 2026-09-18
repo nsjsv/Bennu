@@ -522,11 +522,43 @@ fn file_context_menu_panel<'a>(
     // 行渲染与子菜单展开共用同一份配置后的结构列表;空白菜单没有组成员,
     // 只有「New...」组行。
     let entries: Vec<FileEntryMenuEntry> = match &menu.target {
-        Some(_) => context_menus.file_entry_menu_entries(
-            menu.target_is_directory,
-            menu.can_batch_rename,
-            menu.can_create_symlink,
-        ),
+        Some(_) => {
+            let mut entries = context_menus.file_entry_menu_entries(
+                menu.target_is_directory,
+                menu.can_batch_rename,
+                menu.can_create_symlink,
+            );
+            if menu.inside_archive {
+                // 包内只读：条目菜单切换为固定的只读子集，写操作与
+                // 解压入口整体不渲染（门控是防御，菜单是交互层真相）。
+                entries = [
+                    FileAreaMenuItem::Open,
+                    FileAreaMenuItem::Copy,
+                    FileAreaMenuItem::CopyPath,
+                    FileAreaMenuItem::Properties,
+                ]
+                .into_iter()
+                .map(FileEntryMenuEntry::Item)
+                .collect();
+            } else if menu.selection_archives.is_empty() {
+                // 解压两项只属于压缩包条目；其余归档无关选中不含它们。
+                entries.retain(|entry| match entry {
+                    FileEntryMenuEntry::Item(item) => !matches!(
+                        item,
+                        FileAreaMenuItem::SmartExtractHere
+                            | FileAreaMenuItem::ExtractToArchiveFolder
+                    ),
+                    FileEntryMenuEntry::Group { members, .. } => !members
+                        .iter()
+                        .any(|item| matches!(
+                            item,
+                            FileAreaMenuItem::SmartExtractHere
+                                | FileAreaMenuItem::ExtractToArchiveFolder
+                        )),
+                });
+            }
+            entries
+        }
         None => context_menus
             .file_blank_items()
             .into_iter()
@@ -687,6 +719,16 @@ fn file_menu_action_row(
         (FileAreaMenuItem::Open, Some(path)) => {
             menu_item(IconSymbol::Folder, item.label(), Message::OpenPath(path.clone()))
         }
+        (FileAreaMenuItem::SmartExtractHere, _) => menu_item(
+            item.icon(),
+            item.label(),
+            Message::SmartExtractSelected,
+        ),
+        (FileAreaMenuItem::ExtractToArchiveFolder, _) => menu_item(
+            item.icon(),
+            item.label(),
+            Message::ExtractSelectedToArchiveFolder,
+        ),
         (FileAreaMenuItem::OpenWith, Some(path)) => {
             menu_item(
                 IconSymbol::Monitor,

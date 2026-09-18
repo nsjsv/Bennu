@@ -200,6 +200,51 @@ impl DiscoveredDirectoryEntry {
         }
     }
 
+    /// 归档虚拟条目专用构造：元数据来自归档头而非文件系统，边界处
+    /// 预填 Complete，让后续 demand（stat / NSS）自然短路。包内条目
+    /// 恒为只读，owner/group 无文件系统语义。
+    pub(crate) fn with_archive_member_metadata(
+        path: PathBuf,
+        name: OsString,
+        kind: FileKind,
+        is_hidden: bool,
+        len: u64,
+        modified: Option<SystemTime>,
+    ) -> Self {
+        let filesystem_metadata = OnceCell::new();
+        filesystem_metadata
+            .set(Ok(DirectoryFilesystemMetadata {
+                len,
+                modified,
+                accessed: None,
+                created: None,
+                readonly: true,
+                permissions_mode: None,
+                user_id: None,
+                group_id: None,
+                is_broken_symlink: false,
+            }))
+            .expect("new filesystem metadata cell must be empty");
+        let identity_names = OnceCell::new();
+        identity_names
+            .set(Ok(DirectoryIdentityNames {
+                owner_name: None,
+                group_name: None,
+            }))
+            .expect("new identity names cell must be empty");
+        Self {
+            inner: Arc::new(DiscoveredDirectoryEntryInner {
+                path,
+                name,
+                kind,
+                is_hidden,
+                is_symlink: false,
+                filesystem_metadata,
+                identity_names,
+            }),
+        }
+    }
+
     /// rename 不改变文件元数据：共享已填写的 metadata/identity cells，
     /// 仅替换 path/name。未填写的 cell 克隆后仍是待解析状态。
     pub fn renamed_to(&self, path: PathBuf, name: OsString) -> Self {

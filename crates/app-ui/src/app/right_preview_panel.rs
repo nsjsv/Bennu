@@ -78,6 +78,15 @@ impl FileBrowser {
             return Task::none();
         };
         let info_command = self.refresh_right_preview_panel_info(path.clone());
+        // 包内成员不进面板预览:虚拟路径读不了文件,按只读浏览语义
+        // 与目录目标同款清空为空态,不发起加载也不弹错。
+        if file_core::archive_path_identity(&path) != file_core::ArchivePathIdentity::RealFile {
+            self.preview_shown_path = Some(path);
+            if self.preview.is_some() {
+                self.clear_preview();
+            }
+            return info_command;
+        }
         let kind = self.entry_kind(&path).unwrap_or(FileKind::Other);
         if kind == FileKind::Directory {
             // 目录目标:清空内容并登记目标。必须连同“已一致”判定一起

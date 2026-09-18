@@ -326,6 +326,9 @@ impl FileBrowser {
                     &request.destination,
                 );
             }
+            QueuedFileOperation::ExtractArchiveMembers { destination, .. } => {
+                self.invalidate_list_directory_summary_subtree_and_ancestor_chain(destination);
+            }
             QueuedFileOperation::Convert { requests } => {
                 for request in requests {
                     self.invalidate_list_directory_summary_subtree_and_ancestor_chain(

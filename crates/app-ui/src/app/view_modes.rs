@@ -862,7 +862,7 @@ impl FileBrowser {
     }
 
     fn toggle_list_directory_for_path(&mut self, path: PathBuf) -> Task<Message> {
-        if self.is_trash_view || self.entry_kind(&path) != Some(FileKind::Directory) {
+        if self.is_trash_view || !self.entry_acts_as_directory(&path) {
             return Task::none();
         }
 
@@ -963,9 +963,11 @@ impl FileBrowser {
 
     fn sync_open_column_directory_to_list_selection(&mut self) -> Task<Message> {
         let selected = self.selected.clone();
-        let selected_kind = selected.as_deref().and_then(|path| self.entry_kind(path));
-        match (selected, selected_kind) {
-            (Some(path), Some(FileKind::Directory)) => {
+        let selected_is_directory = selected
+            .as_deref()
+            .map(|path| self.entry_acts_as_directory(path));
+        match (selected, selected_is_directory) {
+            (Some(path), Some(true)) => {
                 let command = self.open_column_for_directory(path);
                 self.sync_expanded_directories_to_open_columns();
                 command

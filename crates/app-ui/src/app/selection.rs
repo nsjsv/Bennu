@@ -277,10 +277,17 @@ impl FileBrowser {
         let Some(target_directory) = self.directory_drop_target_for_entry_in_pane(pane_id, &path)
         else {
             self.clear_file_drag_target();
+            self.note_file_drag_spring_hover(None);
             return Task::none();
         };
 
-        self.set_file_drag_target(target_directory);
+        self.set_file_drag_target(target_directory.clone());
+        // 与活动 pane 的 handle_entry_hovered 同语义:目录条目的落点是
+        // 条目自身,构成 spring 候选;其余条目清除候选。
+        self.note_file_drag_spring_hover(
+            (target_directory == path)
+                .then(|| (pane_id, path.clone(), FileDragSpringSource::Entry)),
+        );
         Task::none()
     }
 
@@ -296,6 +303,17 @@ impl FileBrowser {
         if let Some(target_directory) = self.directory_drop_target_for_entry_in_pane(pane_id, &path)
         {
             self.clear_file_drag_target_if_matching(&target_directory);
+            // 仅当当前候选正是该目录条目时清除,避免与相邻条目的 enter
+            // 事件乱序时误杀新候选(与面包屑 cleared 同款收敛)。
+            let cleared_spring_candidate = self
+                .file_drag_spring_hover
+                .as_ref()
+                .is_some_and(|candidate| {
+                    candidate.source == FileDragSpringSource::Entry && candidate.directory == path
+                });
+            if cleared_spring_candidate {
+                self.note_file_drag_spring_hover(None);
+            }
         }
         Task::none()
     }
@@ -313,6 +331,9 @@ impl FileBrowser {
             return Task::none();
         }
 
+        // 空白/面包屑落点悬停(非目录条目)与活动 pane 的空白语义一致:
+        // 清除 spring 候选,只保留落点高亮。
+        self.note_file_drag_spring_hover(None);
         self.set_file_drag_target(directory);
         Task::none()
     }

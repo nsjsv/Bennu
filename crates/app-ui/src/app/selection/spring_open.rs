@@ -42,33 +42,37 @@ impl FileBrowser {
             || self.file_drag_drop_intent(&drag.sources, directory) != FileDragDropIntent::Move
     }
 
-    /// 面包屑 spring 的资格:回收站拖放语义不同不触发;悬停当前目录
-    /// 段落导航是空操作不触发。多栏视图允许——导航回祖先即重置栏链
-    /// (拖拽栏链快照由导航路径清空,渲染回到活链)。
-    fn file_drag_spring_breadcrumb_allowed(&self, directory: &Path) -> bool {
-        !self.is_trash_view && directory != self.current_dir
+    /// 面包屑 spring 的资格:悬停 pane 的当前目录段落导航是空操作不
+    /// 触发;回收站 pane 在 note 的拖放资格 gate 处已被排除。多栏视图
+    /// 允许——导航回祖先即重置栏链(拖拽栏链快照由导航路径清空,渲染
+    /// 回到活链)。按候选 pane 判定:跨 pane 悬停时"当前目录"属于被
+    /// 悬停的 pane,不是活动 pane。
+    fn file_drag_spring_breadcrumb_allowed(&self, pane_id: BrowserPaneId, directory: &Path) -> bool {
+        self.pane_view(pane_id)
+            .is_some_and(|pane| directory != pane.current_dir)
     }
 
     /// 所有悬停状态变化后的统一收敛点。`hover` 是 (pane, 目录路径, 来源):
-    /// iced hover 路径由 `handle_entry_hovered` 传入目录条目,原生 dnd 路径
-    /// 由布局快照命中结果传入条目或面包屑段落,面包屑消息由
-    /// `handle_breadcrumb_drop_target_hovered` 传入。传 None(移开/非目录
-    /// 条目/空白/侧边栏/标签页/清理)即清除候选。
+    /// iced hover 路径由 `handle_entry_hovered` / `handle_file_drag_entry_hovered_in_pane`
+    /// 传入目录条目,原生 dnd 路径由布局快照命中结果传入条目或面包屑
+    /// 段落,面包屑消息由 `handle_breadcrumb_drop_target_hovered` 传入。
+    /// 传 None(移开/非目录条目/空白/侧边栏/标签页/清理)即清除候选。
     ///
-    /// 不变量:候选存在 ⟺ 拖拽中且活动 pane 悬停着 spring 资格目录;
-    /// 同目录同 pane 同来源的重复收敛保持计时起点,其余重置。
+    /// 不变量:候选存在 ⟺ 拖拽中且被悬停 pane(任意接受拖放的 pane,
+    /// 含跨 pane 悬停)悬停着 spring 资格目录;同目录同 pane 同来源的
+    /// 重复收敛保持计时起点,其余重置。
     pub(super) fn note_file_drag_spring_hover(
         &mut self,
         hover: Option<(BrowserPaneId, PathBuf, FileDragSpringSource)>,
     ) {
         let candidate = hover
-            .filter(|(pane_id, _, _)| *pane_id == self.active_pane_id())
+            .filter(|(pane_id, _, _)| self.pane_accepts_file_drag(*pane_id))
             .filter(|_| self.file_drag_spring_is_armed())
-            .filter(|(_, directory, source)| match source {
+            .filter(|(pane_id, directory, source)| match source {
                 FileDragSpringSource::Entry => self.file_drag_spring_open_allowed(directory),
                 FileDragSpringSource::Breadcrumb => {
                     self.file_drag_spring_open_allowed(directory)
-                        && self.file_drag_spring_breadcrumb_allowed(directory)
+                        && self.file_drag_spring_breadcrumb_allowed(*pane_id, directory)
                 }
             })
             .map(|(pane_id, directory, source)| FileDragSpringHover {
@@ -92,9 +96,11 @@ impl FileBrowser {
     }
 
     /// 到点触发:列表/大图直接进目录(与双击同路径,历史入栈),多栏
-    /// 在下一栏打开(与双击/按住打开同路径)。打开属于拖拽中途的目录
-    /// 变化,落点布局过期由 stale 标记置位、后续 tick 消化重测(导航
-    /// 加载完成再置一次),否则松手会按旧快照解析落点。
+    /// 在下一栏打开(与双击/按住打开同路径)。跨 pane 候选先激活被悬停
+    /// pane——导航状态(current_dir/历史/多栏链)属于该 pane,激活与
+    /// 点击进入同路。打开属于拖拽中途的目录变化,落点布局过期由 stale
+    /// 标记置位、后续 tick 消化重测(导航加载完成再置一次),否则松手
+    /// 会按旧快照解析落点。
     ///
     /// 触发只置 fired 不清候选:悬停未离开时布局重测会原样重建同一
     /// 目录的候选,清掉会导致每过一个阈值重复触发;同一次悬停仅触发
@@ -114,15 +120,20 @@ impl FileBrowser {
             self.file_drop_layout_stale = false;
             return self.remeasure_active_file_drop_layout();
         }
-        if current.fired
-            || current.pane_id != self.active_pane_id()
-            || current.since.elapsed() < FILE_DRAG_SPRING_OPEN_DELAY
-        {
+        // 候选 pane 在拖拽中途消失(窗格合并等):候选随 pane 失效。
+        if !self.pane_accepts_file_drag(current.pane_id) {
+            self.file_drag_spring_hover = None;
+            return Task::none();
+        }
+        if current.fired || current.since.elapsed() < FILE_DRAG_SPRING_OPEN_DELAY {
             return Task::none();
         }
         let mut fired = current.clone();
         fired.fired = true;
         self.file_drag_spring_hover = Some(fired);
+        if current.pane_id != self.active_pane_id() {
+            self.activate_pane(current.pane_id);
+        }
         let columns_mode = self
             .pane_view(current.pane_id)
             .is_some_and(|pane| pane.view_mode == BrowserViewMode::Columns);
@@ -205,7 +216,10 @@ mod tests {
     use super::super::super::FileBrowser;
     use super::FILE_DRAG_SPRING_OPEN_DELAY;
     use crate::config;
-    use crate::model::{BrowserViewMode, FileDragSpringSource, FileDragStationaryAction};
+    use crate::model::{
+        BrowserPaneId, BrowserPaneLayout, BrowserViewMode, FileDragSpringSource,
+        FileDragStationaryAction, SplitAxis,
+    };
 
     fn test_entry(path: PathBuf, kind: FileKind) -> DirectoryEntry {
         DirectoryEntry::new(
@@ -341,6 +355,153 @@ mod tests {
         // 松手结束拖拽:候选是悬停态的衍生,滞留由 tick 的会话兜底清除。
         browser.cancel_file_drag_interaction();
         drop(browser.handle_file_drag_spring_open_tick());
+        assert!(browser.file_drag_spring_hover.is_none());
+    }
+
+    /// 分栏浏览器:pane A(PRIMARY,活动,列表视图)浏览 /workspace,
+    /// pane B(BrowserPaneId(1),非活动,列表视图)浏览 /second 且含
+    /// folder 目录条目。返回 (browser, folder 路径)。
+    fn split_browser_with_inactive_folder_pane() -> (FileBrowser, PathBuf) {
+        let (mut browser, _dir_a, _dir_b, _file, _workspace) = spring_browser();
+        let folder = PathBuf::from("/second/folder");
+        let mut second_pane = browser.capture_active_pane_snapshot();
+        second_pane.id = BrowserPaneId(1);
+        second_pane.current_dir = PathBuf::from("/second");
+        second_pane.entries = vec![test_entry(folder.clone(), FileKind::Directory)].into();
+        browser.panes.push(second_pane);
+        browser.pane_layout = BrowserPaneLayout::Split {
+            axis: SplitAxis::Horizontal,
+            first: BrowserPaneId::PRIMARY,
+            second: BrowserPaneId(1),
+            active: BrowserPaneId::PRIMARY,
+            first_portion: 500,
+        };
+        (browser, folder)
+    }
+
+    /// 跨 pane 悬停(iced 路径):B 里的目录条目同样构成 spring 候选并
+    /// 画进度环;到点激活 B 并进入目录,A 的状态完整快照回 panes。
+    #[test]
+    fn cross_pane_hover_springs_into_inactive_pane_directory() {
+        let (mut browser, folder) = split_browser_with_inactive_folder_pane();
+        let file = PathBuf::from("/workspace/file.txt");
+        start_drag_on(&mut browser, &file);
+
+        drop(browser.handle_file_drag_entry_hovered_in_pane(
+            BrowserPaneId(1),
+            folder.clone(),
+        ));
+        let candidate = browser.file_drag_spring_hover.as_ref().unwrap();
+        assert_eq!(candidate.directory, folder);
+        assert_eq!(candidate.pane_id, BrowserPaneId(1));
+        assert!(browser.file_drag_spring_open_progress(&folder).is_some());
+
+        // 未到阈值:不动,B 也不被激活。
+        drop(browser.handle_file_drag_spring_open_tick());
+        assert_eq!(browser.active_pane_id(), BrowserPaneId::PRIMARY);
+        assert_eq!(browser.current_dir, PathBuf::from("/workspace"));
+
+        // 到点:激活 B 并进入目录;拖拽存活,A 快照完整。
+        browser.file_drag_spring_hover.as_mut().unwrap().since =
+            Instant::now() - FILE_DRAG_SPRING_OPEN_DELAY - Duration::from_millis(1);
+        drop(browser.handle_file_drag_spring_open_tick());
+        assert_eq!(browser.active_pane_id(), BrowserPaneId(1));
+        assert_eq!(browser.current_dir, folder);
+        assert!(browser.file_drag.as_ref().is_some_and(|drag| drag.is_dragging()));
+        assert_eq!(
+            browser
+                .pane_by_id(BrowserPaneId::PRIMARY)
+                .unwrap()
+                .current_dir,
+            PathBuf::from("/workspace")
+        );
+    }
+
+    /// 跨 pane 悬停(原生 dnd 路径):布局快照命中 pane B 的目录条目,
+    /// 候选成立;到点同样激活 B 并进入。
+    #[test]
+    fn native_layout_cross_pane_hover_opens_directory_in_target_pane() {
+        use iced::{Rectangle, Size};
+
+        use crate::model::{ColumnEntryBounds, FileDragHitTestBounds, FileDropLayoutState};
+
+        let (mut browser, folder) = split_browser_with_inactive_folder_pane();
+        let file = PathBuf::from("/workspace/file.txt");
+        start_drag_on(&mut browser, &file);
+
+        // 激活后落点会话建立(测试无 Wayland 运行时,走应用内回退)。
+        let identity = browser.file_drop_session.as_ref().unwrap().identity.clone();
+        let request = match &browser.file_drop_session.as_ref().unwrap().layout {
+            FileDropLayoutState::Pending(request) => request.clone(),
+            other => panic!("expected pending drop layout, got {other:?}"),
+        };
+
+        // 喂布局:pane B 的 folder 行命中光标,按原生 Moved 事件收敛悬停。
+        let mut measured = FileDragHitTestBounds::default();
+        measured.entries = vec![ColumnEntryBounds {
+            pane_id: BrowserPaneId(1),
+            path: folder.clone(),
+            bounds: Rectangle::new(Point::new(0.0, 0.0), Size::new(200.0, 200.0)),
+        }];
+        drop(browser.accept_drop_layout(request, measured));
+        drop(browser.move_native_file_drop_session(identity, Point::new(50.0, 50.0)));
+        assert_eq!(
+            browser
+                .file_drag_spring_hover
+                .as_ref()
+                .map(|candidate| (candidate.directory.clone(), candidate.pane_id)),
+            Some((folder.clone(), BrowserPaneId(1)))
+        );
+
+        browser.file_drag_spring_hover.as_mut().unwrap().since =
+            Instant::now() - FILE_DRAG_SPRING_OPEN_DELAY - Duration::from_millis(1);
+        drop(browser.handle_file_drag_spring_open_tick());
+        assert_eq!(browser.active_pane_id(), BrowserPaneId(1));
+        assert_eq!(browser.current_dir, folder);
+    }
+
+    /// 候选 pane 在拖拽中途消失(窗格合并等):候选随 pane 失效,tick
+    /// 清除且不导航。
+    #[test]
+    fn cross_pane_candidate_dies_when_candidate_pane_disappears() {
+        let (mut browser, folder) = split_browser_with_inactive_folder_pane();
+        let file = PathBuf::from("/workspace/file.txt");
+        start_drag_on(&mut browser, &file);
+
+        drop(browser.handle_file_drag_entry_hovered_in_pane(
+            BrowserPaneId(1),
+            folder.clone(),
+        ));
+        assert!(browser.file_drag_spring_hover.is_some());
+        browser.panes.retain(|pane| pane.id != BrowserPaneId(1));
+
+        browser.file_drag_spring_hover.as_mut().unwrap().since =
+            Instant::now() - FILE_DRAG_SPRING_OPEN_DELAY - Duration::from_millis(1);
+        drop(browser.handle_file_drag_spring_open_tick());
+        assert!(browser.file_drag_spring_hover.is_none());
+        assert_eq!(browser.active_pane_id(), BrowserPaneId::PRIMARY);
+        assert_ne!(browser.current_dir, folder);
+    }
+
+    /// 回收站视图的 pane 不接受拖放,其目录条目悬停不构成候选。
+    #[test]
+    fn trash_pane_hover_never_springs() {
+        let (mut browser, _folder) = split_browser_with_inactive_folder_pane();
+        let trashed_folder = PathBuf::from("/trash-root/folder");
+        let mut trash_pane = browser.capture_active_pane_snapshot();
+        trash_pane.id = BrowserPaneId(1);
+        trash_pane.current_dir = PathBuf::from("/trash-root");
+        trash_pane.is_trash_view = true;
+        trash_pane.entries = vec![test_entry(trashed_folder.clone(), FileKind::Directory)].into();
+        browser.panes.pop();
+        browser.panes.push(trash_pane);
+
+        let file = PathBuf::from("/workspace/file.txt");
+        start_drag_on(&mut browser, &file);
+        drop(browser.handle_file_drag_entry_hovered_in_pane(
+            BrowserPaneId(1),
+            trashed_folder.clone(),
+        ));
         assert!(browser.file_drag_spring_hover.is_none());
     }
 

@@ -340,20 +340,34 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
             .as_ref()
             .map(|workspace| workspace.filters.selected_entry_types.as_slice())
             .unwrap_or_default();
+        let panels = context_menu_panel(
+            context_menu,
+            browser.is_trash_view,
+            browser.active_pane_id(),
+            browser.keyboard_modifiers,
+            &browser.user_config().context_menus,
+            &browser.user_config().list_view_preferences,
+            selected_search_entry_types,
+            browser.user_config().file_grouping,
+        );
+        // 主菜单只按自身尺寸做 At 钳制,子菜单展开收起永不挤动它;
+        // 子菜单后 push,翻转重叠时绘制在主菜单之上且事件先达。
+        let root_index = floating.len();
         floating.push(FloatingContent {
-            element: context_menu_panel(
-                context_menu,
-                browser.is_trash_view,
-                browser.active_pane_id(),
-                browser.keyboard_modifiers,
-                &browser.user_config().context_menus,
-                &browser.user_config().list_view_preferences,
-                selected_search_entry_types,
-                browser.user_config().file_grouping,
-            ),
+            element: panels.root,
             placement: FloatingPlacement::At(context_menu.position()),
             captures_pointer: true,
         });
+        if let Some((submenu, top)) = panels.submenu {
+            floating.push(FloatingContent {
+                element: submenu,
+                placement: FloatingPlacement::BesideParent {
+                    parent: root_index,
+                    top,
+                },
+                captures_pointer: true,
+            });
+        }
     } else if let Some(open_with) = &browser.open_with {
         floating_input = BrowserFloatingInput::DismissibleBlocking;
         floating.push(FloatingContent {

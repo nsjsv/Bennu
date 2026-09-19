@@ -1,7 +1,7 @@
 //! 右键菜单的悬停子菜单:组触发行、子菜单槽位与成员行渲染。
 //! 触发行与子菜单共用「展开锚点」这一状态,悬停普通行由 floating_panels 收起。
 
-use iced::widget::{button, container, mouse_area, row, Column, Row, Space};
+use iced::widget::{button, container, mouse_area, row, Column, Row};
 use iced::{Alignment, Element, Length};
 
 use crate::app::archive_creation::ArchiveCreationMessage;
@@ -21,17 +21,10 @@ pub(super) const CONTEXT_MENU_ITEM_SPACING: f32 = 4.0;
 pub(super) const CONTEXT_MENU_ITEM_HEIGHT: f32 = 28.0;
 pub(super) const CONTEXT_SUBMENU_WIDTH: f32 = 170.0;
 
-/// 子菜单槽位:把子菜单面板钉在触发行右侧同行高度(行号来自结构列表,无硬编码行数)。
-pub(super) fn submenu_slot(
-    row_index: usize,
-    content: Element<'_, Message>,
-) -> Element<'_, Message> {
-    let trigger_top = CONTEXT_MENU_PADDING
-        + row_index as f32 * (CONTEXT_MENU_ITEM_HEIGHT + CONTEXT_MENU_ITEM_SPACING);
-    Column::new()
-        .push(Space::new().height(Length::Fixed(trigger_top)))
-        .push(content)
-        .into()
+/// 子菜单相对父浮层顶沿的纵向偏移:对齐触发行顶(行号来自结构列表,
+/// 无硬编码行数);横向与安全区钳制由 floating_surface::BesideParent 负责。
+pub(super) fn submenu_top(row_index: usize) -> f32 {
+    CONTEXT_MENU_PADDING + row_index as f32 * (CONTEXT_MENU_ITEM_HEIGHT + CONTEXT_MENU_ITEM_SPACING)
 }
 
 /// 组触发行:动作锚点(on_press 有值)单点执行动作,纯触发器单点仅展开;悬停一律展开。

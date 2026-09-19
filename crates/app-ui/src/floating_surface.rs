@@ -2,8 +2,13 @@ use iced::advanced::{layout, overlay, renderer, widget, Clipboard, Layout, Shell
 use iced::mouse;
 use iced::widget::scrollable;
 use iced::{Element, Event, Length, Point, Rectangle, Size, Vector};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 const FLOATING_SURFACE_MARGIN: f32 = 18.0;
+
+/// BesideParent 子面板与父浮层的横向间隙。
+const BESIDE_PARENT_GAP: f32 = 4.0;
 
 /// 主窗口常驻 UI 占掉的高度:顶部工具栏行与底部终端抽屉。悬浮面板
 /// 只在两者之间的内容区里限尺寸与定位,窗口缩小时才不会压住常驻
@@ -33,6 +38,7 @@ fn fallback_floating_scroll<'a, Message: Clone + 'a>(
         floating.placement,
         FloatingPlacement::Center
             | FloatingPlacement::At(_)
+            | FloatingPlacement::BesideParent { .. }
             | FloatingPlacement::BottomLeft { .. }
             | FloatingPlacement::BottomRightInArea { .. }
     );
@@ -237,6 +243,13 @@ pub(crate) enum FloatingPlacement {
         right: f32,
         bottom: f32,
     },
+    /// 钉在另一浮层(parent 索引)右侧、纵向偏移 top 处的子面板。
+    /// 右侧溢出安全区时翻到父浮层左侧;纵向独立钳制进安全区。
+    /// 父浮层矩形必须已解析(浮层按 Vec 顺序布局,parent 在前)。
+    BesideParent {
+        parent: usize,
+        top: f32,
+    },
 }
 
 pub(crate) struct FloatingContent<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
@@ -420,11 +433,17 @@ where
             }
         }
 
-        for (floating, floating_tree) in self.floating.iter_mut().zip(children) {
+        // 每帧重建解析矩形表:BesideParent 子浮层按索引读取父浮层的
+        // 钳制后矩形,浮层按 Vec 顺序布局保证父先写入,无跨帧状态。
+        let resolved = Rc::new(RefCell::new(vec![None; self.floating.len()]));
+        for (index, (floating, floating_tree)) in self.floating.iter_mut().zip(children).enumerate()
+        {
             overlays.push(overlay::Element::new(Box::new(FloatingOverlay {
                 floating: &mut floating.element,
                 placement: floating.placement,
                 area: self.area,
+                index,
+                resolved: Rc::clone(&resolved),
                 state: floating_tree,
                 captures_pointer: floating.captures_pointer,
             })));
@@ -452,8 +471,16 @@ where
         };
 
         let surface_size = Size::new(layout.bounds().width, layout.bounds().height);
+        // 与 overlay 循环同序:逐浮层 layout 后写回解析表,BesideParent
+        // 子浮层解析时父矩形必然已在表中(父索引 < 子索引)。
+        let mut resolved = vec![None; self.floating.len()];
         let mut checked_any_floating = false;
-        for (floating, tree) in self.floating.iter_mut().zip(children.iter_mut().skip(1)) {
+        for (index, (floating, tree)) in self
+            .floating
+            .iter_mut()
+            .zip(children.iter_mut().skip(1))
+            .enumerate()
+        {
             checked_any_floating = true;
             let limits = layout::Limits::new(
                 Size::ZERO,
@@ -463,9 +490,15 @@ where
                 .element
                 .as_widget_mut()
                 .layout(tree, renderer, &limits);
-            if floating_bounds(floating.placement, node.size(), surface_size, self.area)
-                .contains(position)
-            {
+            let resolved_position = floating_position(
+                floating.placement,
+                node.size(),
+                surface_size,
+                self.area,
+                &resolved,
+            );
+            resolved[index] = Some(Rectangle::new(resolved_position, node.size()));
+            if Rectangle::new(resolved_position, node.size()).contains(position) {
                 return FloatingPointerTarget::FloatingBounds;
             }
         }
@@ -543,6 +576,10 @@ where
     floating: &'b mut Element<'a, Message, Theme, Renderer>,
     placement: FloatingPlacement,
     area: FloatingArea,
+    index: usize,
+    /// 本帧所有浮层钳制后矩形的共享表;布局解析后写回自身槽位,
+    /// BesideParent 子浮层按 parent 索引读父矩形。
+    resolved: Rc<RefCell<Vec<Option<Rectangle>>>>,
     state: &'b mut widget::Tree,
     captures_pointer: bool,
 }
@@ -562,7 +599,16 @@ where
             .as_widget_mut()
             .layout(self.state, renderer, &limits);
         let size = node.size();
-        node.move_to(floating_position(self.placement, size, bounds, self.area))
+        let position = floating_position(
+            self.placement,
+            size,
+            bounds,
+            self.area,
+            &self.resolved.borrow(),
+        );
+        // 子浮层(BesideParent)与父浮层共享此表:先解析的父矩形供后解析的子读取。
+        self.resolved.borrow_mut()[self.index] = Some(Rectangle::new(position, size));
+        node.move_to(position)
     }
 
     fn update(
@@ -648,6 +694,7 @@ fn floating_max_size(placement: FloatingPlacement, bounds: Size, area: FloatingA
         FloatingPlacement::Free(_) | FloatingPlacement::AnchorBottomRight { .. } => bounds,
         FloatingPlacement::Center
         | FloatingPlacement::At(_)
+        | FloatingPlacement::BesideParent { .. }
         | FloatingPlacement::BottomLeft { .. }
         | FloatingPlacement::BottomRightInArea { .. } => Size::new(
             (bounds.width - FLOATING_SURFACE_MARGIN * 2.0).max(0.0),
@@ -656,20 +703,12 @@ fn floating_max_size(placement: FloatingPlacement, bounds: Size, area: FloatingA
     }
 }
 
-fn floating_bounds(
-    placement: FloatingPlacement,
-    size: Size,
-    surface: Size,
-    area: FloatingArea,
-) -> Rectangle {
-    Rectangle::new(floating_position(placement, size, surface, area), size)
-}
-
 fn floating_position(
     placement: FloatingPlacement,
     size: Size,
     surface: Size,
     area: FloatingArea,
+    resolved: &[Option<Rectangle>],
 ) -> Point {
     let (area_top, available_height) = area.vertical_span(surface.height);
     let area_bottom = area_top + available_height;
@@ -693,6 +732,21 @@ fn floating_position(
             area_width - right - size.width,
             area_bottom - bottom - size.height,
         ),
+        FloatingPlacement::BesideParent { parent, top } => {
+            // 浮层按 Vec 顺序布局,父索引 < 子索引,父矩形必然先解析;
+            // 乱序 push 是结构性错误,直接 panic 暴露而不是静默错位。
+            let parent_rect = resolved[parent]
+                .expect("BesideParent parent floating must be laid out before child");
+            // 右侧放不下(溢出安全区)翻到父浮层左侧;两侧都放不下贴安全区左缘。
+            let desired_x = parent_rect.x + parent_rect.width + BESIDE_PARENT_GAP;
+            let x = if desired_x + size.width > surface.width - FLOATING_SURFACE_MARGIN {
+                (parent_rect.x - size.width - BESIDE_PARENT_GAP).max(FLOATING_SURFACE_MARGIN)
+            } else {
+                desired_x
+            };
+            // 纵向随触发行偏移,与 At 同一钳制路径独立进安全区。
+            Point::new(x, parent_rect.y + top)
+        }
     };
     if matches!(
         placement,

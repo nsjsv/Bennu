@@ -28,7 +28,7 @@ use crate::typography::{localized_text, readable_text};
 
 use super::context_menu_submenu::{
     file_grouping_submenu_panel, file_grouping_trigger_row, group_submenu_panel, group_trigger_row,
-    submenu_slot, CONTEXT_MENU_ITEM_HEIGHT, CONTEXT_MENU_ITEM_SPACING, CONTEXT_MENU_PADDING,
+    submenu_top, CONTEXT_MENU_ITEM_HEIGHT, CONTEXT_MENU_ITEM_SPACING, CONTEXT_MENU_PADDING,
 };
 use super::network_connections::network_connection_context_menu_panel;
 use super::option_controls::{action_choice_row, primary_action_button, secondary_action_button};
@@ -402,6 +402,14 @@ fn action_label(icon: IconSymbol, label: &'static str, size: f32) -> Row<'static
     .align_y(Alignment::Center)
 }
 
+/// 右键菜单浮层内容:主菜单面板 + 悬停展开的子菜单(仅文件区菜单)。
+/// 子菜单的纵向偏移 top 相对父浮层顶沿,由 floating_surface 独立定位与
+/// 钳制,展开与否不影响主菜单位置。
+pub(super) struct ContextMenuPanels<'a> {
+    pub(super) root: Element<'a, Message>,
+    pub(super) submenu: Option<(Element<'a, Message>, f32)>,
+}
+
 pub(super) fn context_menu_panel<'a>(
     menu: &'a ContextMenuState,
     is_trash_view: bool,
@@ -411,32 +419,43 @@ pub(super) fn context_menu_panel<'a>(
     list_view_preferences: &'a ListViewPreferences,
     selected_search_entry_types: &'a [SearchEntryTypePreset],
     file_grouping: FileGroupingMode,
-) -> Element<'a, Message> {
+) -> ContextMenuPanels<'a> {
     match menu {
-        ContextMenuState::FileArea(menu) => file_context_menu_panel(
-            menu,
-            is_trash_view,
-            active_pane_id,
-            context_menus,
-            keyboard_modifiers,
-            file_grouping,
-        ),
-        ContextMenuState::Search(menu) => search_context_menu_panel(menu, context_menus),
-        ContextMenuState::SearchEntryTypes(_) => {
-            search_entry_types_menu_panel(context_menus, selected_search_entry_types)
+        ContextMenuState::FileArea(menu) => {
+            let (root, submenu) = file_context_menu_panel(
+                menu,
+                is_trash_view,
+                active_pane_id,
+                context_menus,
+                keyboard_modifiers,
+                file_grouping,
+            );
+            ContextMenuPanels { root, submenu }
         }
-        ContextMenuState::ListColumns(_) => {
-            list_column_context_menu_panel(context_menus, list_view_preferences)
-        }
-        ContextMenuState::SidebarBookmark(menu) => {
-            sidebar_bookmark_context_menu_panel(menu, context_menus)
-        }
-        ContextMenuState::SidebarDevice(menu) => {
-            sidebar_device_context_menu_panel(menu, context_menus)
-        }
-        ContextMenuState::NetworkConnection(menu) => {
-            network_connection_context_menu_panel(menu, context_menus)
-        }
+        ContextMenuState::Search(menu) => ContextMenuPanels {
+            root: search_context_menu_panel(menu, context_menus),
+            submenu: None,
+        },
+        ContextMenuState::SearchEntryTypes(_) => ContextMenuPanels {
+            root: search_entry_types_menu_panel(context_menus, selected_search_entry_types),
+            submenu: None,
+        },
+        ContextMenuState::ListColumns(_) => ContextMenuPanels {
+            root: list_column_context_menu_panel(context_menus, list_view_preferences),
+            submenu: None,
+        },
+        ContextMenuState::SidebarBookmark(menu) => ContextMenuPanels {
+            root: sidebar_bookmark_context_menu_panel(menu, context_menus),
+            submenu: None,
+        },
+        ContextMenuState::SidebarDevice(menu) => ContextMenuPanels {
+            root: sidebar_device_context_menu_panel(menu, context_menus),
+            submenu: None,
+        },
+        ContextMenuState::NetworkConnection(menu) => ContextMenuPanels {
+            root: network_connection_context_menu_panel(menu, context_menus),
+            submenu: None,
+        },
     }
 }
 
@@ -568,9 +587,9 @@ fn file_context_menu_panel<'a>(
     context_menus: &'a ContextMenuPreferences,
     keyboard_modifiers: iced::keyboard::Modifiers,
     file_grouping: FileGroupingMode,
-) -> Element<'a, Message> {
+) -> (Element<'a, Message>, Option<(Element<'a, Message>, f32)>) {
     if is_trash_view {
-        return trash_context_menu_panel(menu, context_menus);
+        return (trash_context_menu_panel(menu, context_menus), None);
     }
 
     let terminal_directory = if menu.target_is_directory {
@@ -695,25 +714,24 @@ fn file_context_menu_panel<'a>(
 
     let root_menu = container(menu_content)
         .width(Length::Fixed(CONTEXT_MENU_WIDTH))
-        .style(context_menu_style);
+        .style(context_menu_style)
+        .into();
 
-    let content = match expanded {
-        Some(ExpandedSubmenu::Group(row_index, anchor, members)) => {
-            Row::new().spacing(4).push(root_menu).push(submenu_slot(
-                row_index,
-                group_submenu_panel(menu, anchor, &members),
-            ))
-        }
-        Some(ExpandedSubmenu::FileGrouping(row_index)) => {
-            Row::new().spacing(4).push(root_menu).push(submenu_slot(
-                row_index,
-                file_grouping_submenu_panel(file_grouping),
-            ))
-        }
-        None => Row::new().push(root_menu),
+    let submenu = match expanded {
+        // 子菜单纵向钉在触发行顶(行号来自结构列表,无硬编码行数),
+        // 横向与钳制由 floating_surface::BesideParent 接管。
+        Some(ExpandedSubmenu::Group(row_index, anchor, members)) => Some((
+            group_submenu_panel(menu, anchor, &members),
+            submenu_top(row_index),
+        )),
+        Some(ExpandedSubmenu::FileGrouping(row_index)) => Some((
+            file_grouping_submenu_panel(file_grouping),
+            submenu_top(row_index),
+        )),
+        None => None,
     };
 
-    container(content).width(Length::Shrink).into()
+    (root_menu, submenu)
 }
 
 /// 复制的动作与文案:按住 Alt 时实时切换为复制路径。

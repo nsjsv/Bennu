@@ -187,7 +187,7 @@ fn center_panel_stays_inside_content_area_on_small_window() {
     let area = window_area();
     let panel = Size::new(200.0, 300.0);
 
-    let position = floating_position(FloatingPlacement::Center, panel, window_size(), area);
+    let position = floating_position(FloatingPlacement::Center, panel, window_size(), area, &[]);
     let bottom = position.y + panel.height;
 
     assert!(position.y >= TOOLBAR_HEIGHT + FLOATING_SURFACE_MARGIN);
@@ -202,7 +202,7 @@ fn center_panel_clamps_below_toolbar_when_it_outgrows_content_area() {
     let surface = Size::new(800.0, 350.0);
     let panel = Size::new(200.0, 300.0);
 
-    let position = floating_position(FloatingPlacement::Center, panel, surface, area);
+    let position = floating_position(FloatingPlacement::Center, panel, surface, area, &[]);
 
     assert_eq!(position.y, TOOLBAR_HEIGHT + FLOATING_SURFACE_MARGIN);
 }
@@ -220,6 +220,7 @@ fn bottom_left_panel_sits_above_bottom_strip() {
         panel,
         window_size(),
         area,
+        &[],
     );
 
     assert_eq!(
@@ -239,6 +240,7 @@ fn at_placement_notification_shifts_below_toolbar() {
         panel,
         window_size(),
         area,
+        &[],
     );
 
     assert_eq!(position.y, TOOLBAR_HEIGHT + FLOATING_SURFACE_MARGIN);
@@ -254,6 +256,7 @@ fn at_placement_inside_content_area_keeps_requested_position() {
         panel,
         window_size(),
         area,
+        &[],
     );
 
     assert_eq!(position, Point::new(300.0, 200.0));
@@ -269,6 +272,7 @@ fn free_placement_still_follows_pointer_anywhere() {
         panel,
         window_size(),
         area,
+        &[],
     );
 
     assert_eq!(position, Point::new(30.0, 10.0));
@@ -286,6 +290,7 @@ fn anchor_bottom_right_still_expands_from_cursor() {
         panel,
         window_size(),
         area,
+        &[],
     );
 
     assert_eq!(position, Point::new(20.0, 20.0));
@@ -302,5 +307,109 @@ fn center_max_height_excludes_reserved_chrome() {
     assert_eq!(
         max_size.height,
         window_size().height - TOOLBAR_HEIGHT - BOTTOM_STRIP_HEIGHT - FLOATING_SURFACE_MARGIN * 2.0
+    );
+}
+
+/// BesideParent 测试基准父浮层:已是钳制后矩形(resolved 表存的就是它)。
+fn resolved_parent(x: f32, y: f32) -> Rectangle {
+    Rectangle::new(Point::new(x, y), Size::new(190.0, 200.0))
+}
+
+#[test]
+fn beside_parent_sits_right_of_parent_when_it_fits() {
+    let area = window_area();
+    let resolved = vec![Some(resolved_parent(100.0, 80.0))];
+    let panel = Size::new(170.0, 84.0);
+
+    let position = floating_position(
+        FloatingPlacement::BesideParent {
+            parent: 0,
+            top: 32.0,
+        },
+        panel,
+        window_size(),
+        area,
+        &resolved,
+    );
+
+    assert_eq!(
+        position,
+        Point::new(100.0 + 190.0 + BESIDE_PARENT_GAP, 80.0 + 32.0)
+    );
+}
+
+#[test]
+fn beside_parent_flips_left_of_parent_when_right_overflows_safety_margin() {
+    // 父浮层右缘 790,右侧 gap 4 + 子菜单宽 170 溢出安全区(782),翻到父左侧。
+    let area = window_area();
+    let resolved = vec![Some(resolved_parent(600.0, 80.0))];
+    let panel = Size::new(170.0, 84.0);
+
+    let position = floating_position(
+        FloatingPlacement::BesideParent {
+            parent: 0,
+            top: 32.0,
+        },
+        panel,
+        window_size(),
+        area,
+        &resolved,
+    );
+
+    assert_eq!(
+        position,
+        Point::new(600.0 - 170.0 - BESIDE_PARENT_GAP, 80.0 + 32.0)
+    );
+}
+
+#[test]
+fn beside_parent_clamps_bottom_into_safe_area() {
+    // 父浮层靠下且触发行偏移大:子菜单底缘钳在安全区底(472)上方 18。
+    let area = window_area();
+    let resolved = vec![Some(resolved_parent(100.0, 400.0))];
+    let panel = Size::new(170.0, 84.0);
+
+    let position = floating_position(
+        FloatingPlacement::BesideParent {
+            parent: 0,
+            top: 50.0,
+        },
+        panel,
+        window_size(),
+        area,
+        &resolved,
+    );
+
+    assert_eq!(
+        position,
+        Point::new(100.0 + 190.0 + BESIDE_PARENT_GAP, 370.0)
+    );
+    assert_eq!(position.y + panel.height, 472.0 - FLOATING_SURFACE_MARGIN);
+}
+
+#[test]
+fn beside_parent_clamps_top_into_safe_area() {
+    // 父浮层高于工具栏触发行:子菜单顶缘钳在安全区顶(72)下方 18。
+    let area = window_area();
+    let resolved = vec![Some(resolved_parent(100.0, 40.0))];
+    let panel = Size::new(170.0, 84.0);
+
+    let position = floating_position(
+        FloatingPlacement::BesideParent {
+            parent: 0,
+            top: 5.0,
+        },
+        panel,
+        window_size(),
+        area,
+        &resolved,
+    );
+
+    assert_eq!(
+        position,
+        Point::new(
+            100.0 + 190.0 + BESIDE_PARENT_GAP,
+            TOOLBAR_HEIGHT + FLOATING_SURFACE_MARGIN
+        )
     );
 }

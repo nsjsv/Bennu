@@ -499,8 +499,9 @@ impl FileBrowser {
     }
 
     fn column_blank_context_directory(&self, directory: &Path) -> Option<PathBuf> {
-        if directory == self.current_dir || self.entry_kind(directory) != Some(FileKind::Directory)
-        {
+        // 压缩包包根在真实文件系统中是文件(entry_kind=File),必须走
+        // “视作目录”共享判定,否则点击包根栏空白会清空整个栏目链。
+        if directory == self.current_dir || !self.entry_acts_as_directory(directory) {
             None
         } else {
             Some(directory.to_path_buf())

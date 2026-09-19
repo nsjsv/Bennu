@@ -807,7 +807,7 @@ impl FileBrowser {
         let Some(selected) = self.selected.clone() else {
             return Task::none();
         };
-        if self.entry_kind(&selected) != Some(FileKind::Directory) {
+        if !self.entry_acts_as_directory(&selected) {
             return Task::none();
         }
 
@@ -1279,5 +1279,28 @@ mod tests {
             )),
         );
         assert!(browser.pending_user_preferences_save.is_none());
+    }
+
+    #[test]
+    fn keyboard_expand_selected_archive_entry_opens_expansion() {
+        // 键盘 → 展开选中项与点击展开箭头共用“压缩包视作目录”判定。
+        let archive = PathBuf::from("/workspace/bundle.zip");
+        let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+        browser.current_dir = PathBuf::from("/workspace");
+        browser.view_mode = BrowserViewMode::List;
+        browser.entries = vec![DirectoryEntry::new(
+            archive.clone(),
+            FileKind::File,
+            EntryMetadata::default(),
+            false,
+            false,
+            false,
+        )]
+        .into();
+        browser.select_path(archive.clone());
+
+        drop(browser.expand_selected_list_directory());
+
+        assert!(browser.expanded_directories.contains_key(&archive));
     }
 }

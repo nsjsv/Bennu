@@ -208,3 +208,47 @@ fn control_marquee_in_upper_column_preserves_open_descendant_columns() {
     );
     assert_eq!(browser.selected_paths, HashSet::from([preserved]));
 }
+
+#[test]
+fn archive_root_column_blank_click_keeps_archive_column_chain() {
+    let current_dir = PathBuf::from("/workspace");
+    let archive = current_dir.join("bundle.zip");
+    let inner = archive.join("docs");
+    let mut browser = browser_with_entries(vec![test_entry(archive.clone(), FileKind::File)]);
+    browser.expanded_directories.insert(
+        archive.clone(),
+        loaded_directory(vec![test_entry(inner.clone(), FileKind::Directory)]),
+    );
+    browser.deepest_open_column_directory = Some(inner.clone());
+
+    drop(browser.handle_column_blank_clicked(archive.clone()));
+
+    // 包根在真实文件系统中是文件:空白点击必须收敛到包根栏,
+    // 而不是清空栏目链退回原目录。
+    assert_eq!(browser.deepest_open_column_directory, Some(archive.clone()));
+    assert_eq!(
+        crate::three_column_view::column_directories(&browser),
+        vec![current_dir, archive]
+    );
+}
+
+#[test]
+fn inside_archive_column_blank_click_collapses_to_inner_directory() {
+    let current_dir = PathBuf::from("/workspace");
+    let archive = current_dir.join("bundle.zip");
+    let inner = archive.join("docs");
+    let mut browser = browser_with_entries(vec![test_entry(archive.clone(), FileKind::File)]);
+    browser.expanded_directories.insert(
+        archive.clone(),
+        loaded_directory(vec![test_entry(inner.clone(), FileKind::Directory)]),
+    );
+    browser.deepest_open_column_directory = Some(inner.clone());
+
+    drop(browser.handle_column_blank_clicked(inner.clone()));
+
+    assert_eq!(browser.deepest_open_column_directory, Some(inner.clone()));
+    assert_eq!(
+        crate::three_column_view::column_directories(&browser),
+        vec![current_dir, archive, inner]
+    );
+}

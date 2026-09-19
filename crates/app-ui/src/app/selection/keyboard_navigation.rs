@@ -136,7 +136,7 @@ impl FileBrowser {
         let Some(parent) = selected.parent().map(Path::to_path_buf) else {
             return Task::none();
         };
-        if parent == self.current_dir || self.entry_kind(&parent) != Some(FileKind::Directory) {
+        if parent == self.current_dir || !self.entry_acts_as_directory(&parent) {
             return Task::none();
         }
 
@@ -899,5 +899,45 @@ mod tests {
         drop(browser.move_file_selection(FileSelectionDirection::Down));
 
         assert_eq!(browser.selected, Some(browser.entries[7].path.clone()));
+    }
+
+    #[test]
+    fn keyboard_parent_column_from_archive_inner_returns_to_archive_root() {
+        // 包根在文件系统中是文件:从包内栏按 ← 必须能回到包根栏,
+        // 与普通目录栏行为一致。
+        let archive = PathBuf::from("/workspace/bundle.zip");
+        let inner = archive.join("inner");
+        let (mut browser, _) = FileBrowser::new(config::default_user_config());
+        browser.current_dir = PathBuf::from("/workspace");
+        browser.view_mode = BrowserViewMode::Columns;
+        browser.entries = vec![DirectoryEntry::new(
+            archive.clone(),
+            FileKind::File,
+            EntryMetadata::default(),
+            false,
+            false,
+            false,
+        )]
+        .into();
+        browser.expanded_directories.insert(
+            archive.clone(),
+            expanded_directory(
+                vec![DirectoryEntry::new(
+                    inner.clone(),
+                    FileKind::Directory,
+                    EntryMetadata::default(),
+                    false,
+                    false,
+                    false,
+                )],
+                1.0,
+            ),
+        );
+        browser.deepest_open_column_directory = Some(inner.clone());
+        browser.select_path(inner.clone());
+
+        drop(browser.move_file_selection_to_parent_column());
+
+        assert_eq!(browser.selected.as_deref(), Some(archive.as_path()));
     }
 }

@@ -11,11 +11,11 @@ use crate::appearance::{
     navigation_icon_button_style, selected_sidebar_item_style, sidebar_bookmark_drop_slot_style,
     sidebar_style,
 };
-use crate::config;
 use crate::file_drag_hit_test_bounds::FileDragHitTestMarker;
 use crate::file_drag_hit_test_marker::track_file_drag_hit_test_marker;
-use crate::formatting::{format_file_size, format_middle_ellipsized_text};
+use crate::formatting::format_file_size;
 use crate::icons::IconSymbol;
+use crate::measured_middle_ellipsized_text::measured_middle_ellipsized_text;
 use crate::model::{
     trash_location_path, Message, ScrollbarRegion, SidebarBookmarkDropSlot, SidebarLocation,
     SidebarLocationKind, TRASH_LOCATION_LABEL,
@@ -26,9 +26,6 @@ use crate::typography::readable_text;
 
 use super::{tab_motion, themed_icon, IconTone, MENU_ICON_SIZE};
 
-const SIDEBAR_LABEL_REFERENCE_MAX_CHARS: usize = 22;
-const SIDEBAR_LABEL_MIN_CHARS: usize = 14;
-const SIDEBAR_LABEL_MAX_CHARS: usize = 44;
 const SIDEBAR_RESIZE_HANDLE_WIDTH: f32 = 6.0;
 // 卡片悬浮感靠留白 + 圆角 + 投影:窗口侧三边(上/左/下)等宽 15,
 // 右侧 4 是与内容区的间隙。卡片仍盖在终端抽屉左段上,分隔线从卡片后穿过。
@@ -259,14 +256,9 @@ fn sidebar_location_item_content<'a>(
         crate::localization::translate_current(&location.label)
     };
 
-    let item_container = container(sidebar_label(
-        sidebar_icon_symbol(location),
-        &label,
-        tone,
-        sidebar_label_max_chars(browser.sidebar_width),
-    ))
-    .padding([6, 8])
-    .width(Length::Fill);
+    let item_container = container(sidebar_label(sidebar_icon_symbol(location), &label, tone))
+        .padding([6, 8])
+        .width(Length::Fill);
     let item_container = match presentation {
         SidebarPresentation::Selected => item_container.style(selected_sidebar_item_style),
         SidebarPresentation::Hovered => item_container.style(hovered_sidebar_item_style),
@@ -387,14 +379,9 @@ fn sidebar_device_item<'a>(
     };
     let pending = browser.sidebar_devices.is_action_pending(&device.id);
 
-    let item_container = container(sidebar_device_label(
-        device,
-        pending,
-        tone,
-        sidebar_label_max_chars(browser.sidebar_width),
-    ))
-    .padding([6, 8])
-    .width(Length::Fill);
+    let item_container = container(sidebar_device_label(device, pending, tone))
+        .padding([6, 8])
+        .width(Length::Fill);
     let item_container = match presentation {
         SidebarPresentation::Selected => item_container.style(selected_sidebar_item_style),
         SidebarPresentation::Hovered => item_container.style(hovered_sidebar_item_style),
@@ -427,14 +414,9 @@ fn sidebar_network_connection_item<'a>(
     };
     let pending = browser.network_connections.is_pending(connection.id());
 
-    let item_container = container(sidebar_network_connection_label(
-        connection,
-        pending,
-        tone,
-        sidebar_label_max_chars(browser.sidebar_width),
-    ))
-    .padding([6, 8])
-    .width(Length::Fill);
+    let item_container = container(sidebar_network_connection_label(connection, pending, tone))
+        .padding([6, 8])
+        .width(Length::Fill);
     let item_container = match presentation {
         SidebarPresentation::Selected => item_container.style(selected_sidebar_item_style),
         SidebarPresentation::Hovered => item_container.style(hovered_sidebar_item_style),
@@ -480,14 +462,9 @@ fn sidebar_trash_item(browser: &FileBrowser) -> Element<'_, Message> {
         IconTone::Normal
     };
     let trash_label = crate::localization::translate_current(TRASH_LOCATION_LABEL);
-    let trash_container = container(sidebar_label(
-        IconSymbol::Trash,
-        &trash_label,
-        trash_tone,
-        sidebar_label_max_chars(browser.sidebar_width),
-    ))
-    .padding([6, 8])
-    .width(Length::Fill);
+    let trash_container = container(sidebar_label(IconSymbol::Trash, &trash_label, trash_tone))
+        .padding([6, 8])
+        .width(Length::Fill);
     let trash_container = match trash_presentation {
         SidebarPresentation::Selected => trash_container.style(selected_sidebar_item_style),
         SidebarPresentation::Hovered => trash_container.style(hovered_sidebar_item_style),
@@ -580,16 +557,10 @@ impl SidebarPresentation {
     }
 }
 
-fn sidebar_label(
-    icon: IconSymbol,
-    label: &str,
-    tone: IconTone,
-    max_chars: usize,
-) -> Row<'static, Message> {
-    let label = format_middle_ellipsized_text(label, max_chars);
+fn sidebar_label(icon: IconSymbol, label: &str, tone: IconTone) -> Row<'static, Message> {
     row![
         themed_icon(icon, tone, MENU_ICON_SIZE),
-        readable_text(label).width(Length::Fill)
+        measured_middle_ellipsized_text(label.to_owned(), 16)
     ]
     .spacing(8)
     .align_y(Alignment::Center)
@@ -599,15 +570,13 @@ fn sidebar_device_label(
     device: &SidebarDeviceEntry,
     pending: bool,
     tone: IconTone,
-    max_chars: usize,
 ) -> Row<'static, Message> {
-    let label = format_middle_ellipsized_text(&device.label, max_chars);
-    let detail = format_middle_ellipsized_text(&sidebar_device_detail(device, pending), max_chars);
+    let detail = sidebar_device_detail(device, pending);
     row![
         themed_icon(IconSymbol::HardDrive, tone, MENU_ICON_SIZE),
         column![
-            readable_text(label).size(13),
-            readable_text(detail).size(11)
+            measured_middle_ellipsized_text(device.label.clone(), 13),
+            measured_middle_ellipsized_text(detail, 11)
         ]
         .spacing(1)
         .width(Length::Fill)
@@ -620,18 +589,13 @@ fn sidebar_network_connection_label(
     connection: &SidebarNetworkConnectionEntry,
     pending: bool,
     tone: IconTone,
-    max_chars: usize,
 ) -> Row<'static, Message> {
-    let label = format_middle_ellipsized_text(&connection.label(), max_chars);
-    let detail = format_middle_ellipsized_text(
-        &sidebar_network_connection_detail(connection, pending),
-        max_chars,
-    );
+    let detail = sidebar_network_connection_detail(connection, pending);
     row![
         themed_icon(IconSymbol::Link, tone, MENU_ICON_SIZE),
         column![
-            readable_text(label).size(13),
-            readable_text(detail).size(11)
+            measured_middle_ellipsized_text(connection.label(), 13),
+            measured_middle_ellipsized_text(detail, 11)
         ]
         .spacing(1)
         .width(Length::Fill)
@@ -679,15 +643,4 @@ fn sidebar_device_detail(device: &SidebarDeviceEntry, pending: bool) -> String {
     } else {
         crate::localization::translate_current("Not mounted")
     }
-}
-
-fn sidebar_label_max_chars(sidebar_width: f32) -> usize {
-    let content_width = (sidebar_width
-        - SIDEBAR_RESIZE_HANDLE_WIDTH
-        - SIDEBAR_FLOATING_MARGIN_LEFT
-        - SIDEBAR_FLOATING_MARGIN_RIGHT)
-        .max(1.0);
-    let scaled_chars =
-        SIDEBAR_LABEL_REFERENCE_MAX_CHARS as f32 * content_width / config::DEFAULT_SIDEBAR_WIDTH;
-    (scaled_chars.round() as usize).clamp(SIDEBAR_LABEL_MIN_CHARS, SIDEBAR_LABEL_MAX_CHARS)
 }

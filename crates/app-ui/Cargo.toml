@@ -19,6 +19,8 @@ iced.workspace = true
 image.workspace = true
 libc = "0.2"
 lexopt.workspace = true
+local-send = { path = "../local-send" }
+parking_lot = "0.12"
 pulldown-cmark = "0.13.4"
 regex = "1.12.3"
 roxmltree = "0.20.0"

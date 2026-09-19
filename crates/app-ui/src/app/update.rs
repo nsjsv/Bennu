@@ -554,15 +554,14 @@ impl FileBrowser {
                 Task::none()
             }
             Message::ColumnBrowserCursorEntered(pane_id) => {
-                if self.file_drag.is_none() {
-                    self.activate_pane(pane_id);
-                }
-                self.is_cursor_over_column_browser = true;
+                // 悬停不聚焦:窗格激活只由点击/键盘驱动,悬停仅记录
+                // 光标所在的浏览内容区,供 Ctrl+Shift 分栏拖拽判定起点。
+                self.cursor_over_browser_content_pane = Some(pane_id);
                 Task::none()
             }
             Message::ColumnBrowserCursorExited(pane_id) => {
-                if pane_id == self.active_pane_id() {
-                    self.is_cursor_over_column_browser = false;
+                if self.cursor_over_browser_content_pane == Some(pane_id) {
+                    self.cursor_over_browser_content_pane = None;
                     self.clear_cursor_paste_target()
                 } else {
                     Task::none()

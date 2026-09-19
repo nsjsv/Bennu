@@ -376,7 +376,9 @@ pub(crate) struct FileBrowser {
     pub(crate) cursor_position: Point,
     pub(crate) main_window_width: f32,
     pub(crate) main_window_height: f32,
-    is_cursor_over_column_browser: bool,
+    /// 光标当前压着的浏览内容区(窗格内容不含 tab 条)。悬停不激活窗格,
+    /// 该记录只用于 Ctrl+Shift 分栏拖拽在被捕获控件上仍可判定起点。
+    cursor_over_browser_content_pane: Option<BrowserPaneId>,
     hovered_pane_id: Option<BrowserPaneId>,
     hovered_list_header_column: Option<(BrowserPaneId, ListColumnKind)>,
     /// 光标最后进入的分组索引栏:栏是事件屏障(除滚轮),滚动补偿重算
@@ -791,7 +793,7 @@ impl FileBrowser {
             cursor_position: Point::new(0.0, 0.0),
             main_window_width: MAIN_WINDOW_INITIAL_WIDTH,
             main_window_height: MAIN_WINDOW_INITIAL_HEIGHT,
-            is_cursor_over_column_browser: false,
+            cursor_over_browser_content_pane: None,
             hovered_pane_id: None,
             hovered_list_header_column: None,
             hovered_grouping_rail_pane: None,

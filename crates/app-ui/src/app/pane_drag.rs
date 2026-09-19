@@ -186,7 +186,7 @@ impl FileBrowser {
         let pointer_status_allows_start = match status {
             event::Status::Ignored => true,
             event::Status::Captured => {
-                self.is_cursor_over_column_browser && self.renaming.is_none()
+                self.cursor_over_browser_content_pane.is_some() && self.renaming.is_none()
             }
         };
         pointer_status_allows_start

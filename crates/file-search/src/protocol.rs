@@ -16,7 +16,6 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
-use crate::daemon::SearchDaemonCore;
 use crate::database::SearchDatabase;
 use crate::error::{SearchError, SearchResult};
 use crate::model::{
@@ -294,7 +293,6 @@ enum SearchServiceBackend {
         database_path: PathBuf,
         status: Arc<Mutex<IndexStatus>>,
     },
-    DaemonCore(Arc<SearchDaemonCore>),
     Runtime(Arc<dyn SearchSocketService>),
 }
 
@@ -506,24 +504,6 @@ where
     .await
 }
 
-pub async fn serve_search_socket_with_core<ShutdownFuture, ShutdownHandler>(
-    socket_path: PathBuf,
-    daemon_core: Arc<SearchDaemonCore>,
-    on_shutdown: ShutdownHandler,
-) -> SearchResult<()>
-where
-    ShutdownFuture: Future<Output = SearchResult<()>> + Send,
-    ShutdownHandler: FnOnce() -> ShutdownFuture + Send,
-{
-    let bound_socket = BoundSearchSocket::bind(socket_path)?;
-    serve_search_socket_with_backend(
-        bound_socket,
-        SearchServiceBackend::DaemonCore(daemon_core),
-        on_shutdown,
-    )
-    .await
-}
-
 pub async fn serve_bound_search_socket<ShutdownFuture, ShutdownHandler>(
     bound_socket: BoundSearchSocket,
     service: Arc<dyn SearchSocketService>,
@@ -718,9 +698,6 @@ fn service_status(backend: &SearchServiceBackend) -> SearchServiceStatus {
     match backend {
         SearchServiceBackend::DirectDatabase { status, .. } => {
             available_service_status(status.lock().expect("search status mutex poisoned").clone())
-        }
-        SearchServiceBackend::DaemonCore(daemon_core) => {
-            available_service_status(daemon_core.current_status())
         }
         SearchServiceBackend::Runtime(service) => service.status(),
     }

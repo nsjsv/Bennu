@@ -47,9 +47,9 @@ pub use protocol::{
     configure_path_preferences_via_socket, default_socket_path, path_configuration_via_socket,
     read_service_event, read_service_request, search_via_socket,
     search_via_socket_with_cancellation, serve_bound_search_socket, serve_search_socket,
-    serve_search_socket_with_core, serve_search_socket_with_status, shutdown_connected_service,
-    shutdown_via_socket, status_via_socket, version_via_socket, write_service_event,
-    write_service_request, BoundSearchSocket, SearchSocketService,
+    serve_search_socket_with_status, shutdown_connected_service, shutdown_via_socket,
+    status_via_socket, version_via_socket, write_service_event, write_service_request,
+    BoundSearchSocket, SearchSocketService,
 };
 pub use runtime_identity::{SearchRuntimeIdentity, SEARCH_RUNTIME_IDENTITY_ENV};
 pub use service_runtime::SearchServiceRuntime;

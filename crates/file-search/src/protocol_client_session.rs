@@ -283,10 +283,6 @@ fn backend_path_configuration(
         SearchServiceBackend::DirectDatabase { .. } => Err(SearchProviderFailure::Unavailable {
             message: "search path configuration requires the daemon core".to_owned(),
         }),
-        SearchServiceBackend::DaemonCore(daemon_core) => Ok((
-            daemon_core.current_path_preferences(),
-            daemon_core.current_status().path_configuration,
-        )),
         SearchServiceBackend::Runtime(service) => service.path_configuration(),
     }
 }
@@ -306,15 +302,6 @@ fn backend_configure_path_preferences(
         SearchServiceBackend::DirectDatabase { .. } => Err(SearchProviderFailure::Unavailable {
             message: "search path configuration requires the daemon core".to_owned(),
         }),
-        SearchServiceBackend::DaemonCore(daemon_core) => daemon_core
-            .configure_search_paths(expected_revision, preferences)
-            .map(|configuration| {
-                (
-                    configuration,
-                    daemon_core.current_status().path_configuration,
-                )
-            })
-            .map_err(search_provider_failure_from_error),
         SearchServiceBackend::Runtime(service) => {
             service.configure_path_preferences(expected_revision, preferences)
         }
@@ -353,9 +340,6 @@ fn open_query_reader(
             SearchDatabase::open_read_only(database_path)
                 .map_err(search_provider_failure_from_error)
         }
-        SearchServiceBackend::DaemonCore(daemon_core) => daemon_core
-            .open_query_reader()
-            .map_err(search_provider_failure_from_error),
         SearchServiceBackend::Runtime(service) => service.open_query_reader(),
     }
 }

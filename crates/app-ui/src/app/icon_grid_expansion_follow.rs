@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use file_core::{DirectoryEntry, FileKind};
+use file_core::DirectoryEntry;
 use iced::Task;
 
 use super::{icon_grid_load_context, loading_icon_grid_directory, FileBrowser};
@@ -92,7 +92,5 @@ impl FileBrowser {
 }
 
 fn root_entry_matches(entry: &DirectoryEntry, path: &Path, current_dir: &Path) -> bool {
-    entry.path == *path
-        && entry.kind == FileKind::Directory
-        && entry.path.parent() == Some(current_dir)
+    entry.path == *path && entry.expands_as_directory() && entry.path.parent() == Some(current_dir)
 }

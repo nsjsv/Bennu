@@ -1,3 +1,4 @@
+use crate::archive_extraction::is_supported_archive_path;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -66,6 +67,28 @@ mod tests {
         assert_eq!(metadata.group_name, None);
         assert_eq!(metadata.permissions_mode, None);
         assert!(!metadata.readonly);
+    }
+
+    #[test]
+    fn expands_as_directory_covers_directories_and_supported_archives() {
+        let entry = |path: &str, kind: FileKind| {
+            DirectoryEntry::new(
+                PathBuf::from(path),
+                kind,
+                EntryMetadata::default(),
+                false,
+                false,
+                false,
+            )
+        };
+
+        assert!(entry("/workspace/notes", FileKind::Directory).expands_as_directory());
+        assert!(entry("/workspace/bundle.zip", FileKind::File).expands_as_directory());
+        assert!(entry("/workspace/photos.tar.gz", FileKind::File).expands_as_directory());
+        assert!(!entry("/workspace/notes.txt", FileKind::File).expands_as_directory());
+        // 与 entry_acts_as_directory 同口径:按路径扩展名判定,不区分 symlink。
+        assert!(entry("/workspace/bundle.zip", FileKind::Symlink).expands_as_directory());
+        assert!(!entry("/workspace/link", FileKind::Symlink).expands_as_directory());
     }
 }
 
@@ -138,5 +161,11 @@ impl DirectoryEntry {
 
     pub fn name(&self) -> &OsStr {
         &self.name
+    }
+
+    /// 条目能否在视图中就地展开:真实目录,或受支持的压缩包(视作
+    /// 目录)。列表展开、图标网格 disclosure、视图切换迁移共用这一判定。
+    pub fn expands_as_directory(&self) -> bool {
+        self.kind == FileKind::Directory || is_supported_archive_path(&self.path)
     }
 }

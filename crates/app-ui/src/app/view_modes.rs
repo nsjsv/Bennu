@@ -1,7 +1,6 @@
 use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
-use file_core::FileKind;
 use iced::Task;
 
 use super::FileBrowser;
@@ -507,7 +506,7 @@ impl FileBrowser {
             };
             if !entries.iter().any(|entry| {
                 entry.path == *directory_path
-                    && entry.kind == FileKind::Directory
+                    && entry.expands_as_directory()
                     && entry.path.parent() == Some(parent)
             }) || !self
                 .expanded_directories
@@ -564,7 +563,7 @@ impl FileBrowser {
         self.clear_list_expansion_for_follow();
         if !self.entries.iter().any(|entry| {
             entry.path == root_path
-                && entry.kind == FileKind::Directory
+                && entry.expands_as_directory()
                 && entry.path.parent() == Some(self.current_dir.as_path())
         }) {
             return Task::none();
@@ -698,7 +697,7 @@ impl FileBrowser {
                 .is_some_and(|expanded| {
                     expanded.entries.iter().any(|entry| {
                         entry.path == next_path
-                            && entry.kind == FileKind::Directory
+                            && entry.expands_as_directory()
                             && entry.path.parent() == Some(waiting_for.as_path())
                     })
                 });
@@ -1086,7 +1085,7 @@ fn advance_expanded_directories(
 mod tests {
     use super::*;
 
-    use file_core::{DirectoryEntry, EntryMetadata};
+    use file_core::{DirectoryEntry, EntryMetadata, FileKind};
 
     fn test_entry(path: PathBuf) -> DirectoryEntry {
         DirectoryEntry::new(

@@ -586,7 +586,7 @@ fn list_entry_row<'a>(
         .on_right_press(Message::EntryRightClicked(pane.id, entry.path.clone()))
         .interaction(iced::mouse::Interaction::Pointer);
 
-    let row_area = if entry.kind == FileKind::Directory && !pane.is_trash_view {
+    let row_area = if entry.expands_as_directory() && !pane.is_trash_view {
         row_area.on_middle_press(Message::OpenDirectoryFromMiddleClick(
             pane.id,
             entry.path.clone(),
@@ -854,7 +854,7 @@ fn list_directory_toggle<'a>(
     geometry: &ListGeometry,
     entry: &DirectoryEntry,
 ) -> Element<'a, Message> {
-    if entry.kind != FileKind::Directory || pane.is_trash_view {
+    if !entry.expands_as_directory() || pane.is_trash_view {
         return Space::new()
             .width(Length::Fixed(geometry.toggle_width))
             .into();

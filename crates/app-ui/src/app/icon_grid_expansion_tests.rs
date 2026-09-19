@@ -760,3 +760,32 @@ fn current_directory_scan_reconciles_anchor_and_drops_removed_root() {
     ));
     assert!(browser.icon_grid_expansion.is_none());
 }
+
+#[test]
+fn archive_entry_anchors_icon_grid_disclosure() {
+    // 压缩包视作目录:点击 disclosure 箭头复用目录锚点校验。
+    let archive = PathBuf::from("/workspace/bundle.zip");
+    let mut browser = browser_with_entries(vec![entry(archive.to_str().unwrap(), FileKind::File)]);
+
+    drop(browser.toggle_icon_grid_directory(
+        BrowserPaneId::PRIMARY,
+        anchor("/workspace", "/workspace/bundle.zip", 0),
+    ));
+
+    let state = browser.icon_grid_expansion.as_ref().unwrap();
+    assert_eq!(state.root_path(), archive);
+    assert!(state.directory(&archive).is_some());
+}
+
+#[test]
+fn unsupported_file_entry_rejects_icon_grid_anchor() {
+    let text = PathBuf::from("/workspace/notes.txt");
+    let mut browser = browser_with_entries(vec![entry(text.to_str().unwrap(), FileKind::File)]);
+
+    drop(browser.toggle_icon_grid_directory(
+        BrowserPaneId::PRIMARY,
+        anchor("/workspace", "/workspace/notes.txt", 0),
+    ));
+
+    assert!(browser.icon_grid_expansion.is_none());
+}

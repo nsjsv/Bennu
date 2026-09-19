@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use file_core::{DirectoryEntry, FileKind};
+use file_core::DirectoryEntry;
 use iced::alignment::{Horizontal, Vertical};
 use iced::widget::{
     button, container, mouse_area, scrollable, text, text_input, tooltip, Column, Row, Space, Stack,
@@ -401,11 +401,11 @@ fn icon_grid_entry<'a>(
     let icon_tone = visual_state.icon_tone();
     let icon_edge = browser.user_config().icons_icon_edge();
     let tile_width = tile_width(icon_edge);
-    let is_directory = entry.kind == FileKind::Directory && !pane.is_trash_view;
-    let disclosure = is_directory
+    let is_expandable = entry.expands_as_directory() && !pane.is_trash_view;
+    let disclosure = is_expandable
         .then(|| browser.icon_grid_disclosure(pane.id, pane.current_dir, &entry.path))
         .flatten();
-    let shows_disclosure = is_directory
+    let shows_disclosure = is_expandable
         && (pane.hovered_entry == Some(&entry.path)
             || pane.is_path_selected(&entry.path)
             || disclosure.is_some());
@@ -539,7 +539,7 @@ fn icon_grid_entry<'a>(
         .on_release(Message::EntryReleased(pane.id, entry.path.clone()))
         .on_right_press(Message::EntryRightClicked(pane.id, entry.path.clone()))
         .interaction(iced::mouse::Interaction::Pointer);
-    let area = if is_directory {
+    let area = if is_expandable {
         area.on_middle_press(Message::OpenDirectoryFromMiddleClick(
             pane.id,
             entry.path.clone(),

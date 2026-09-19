@@ -10,7 +10,7 @@ mod tests;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use file_core::{DirectoryDiscoveryBatch, DirectoryEntry, FileKind};
+use file_core::{DirectoryDiscoveryBatch, DirectoryEntry};
 use iced::Task;
 
 use super::panes::BrowserPaneView;
@@ -756,7 +756,7 @@ impl FileBrowser {
         };
         entries
             .and_then(|entries| entries.get(anchor.index))
-            .is_some_and(|entry| entry.path == anchor.path && entry.kind == FileKind::Directory)
+            .is_some_and(|entry| entry.path == anchor.path && entry.expands_as_directory())
     }
 
     fn icon_grid_state_matches_active_context(&self, state: &IconGridExpansionState) -> bool {

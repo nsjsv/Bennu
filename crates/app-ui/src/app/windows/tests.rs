@@ -178,6 +178,16 @@ fn every_application_window_disables_native_decorations() {
 }
 
 #[test]
+fn transfer_window_routes_close_request_through_state_machine() {
+    let transfer = transfer_window_settings();
+
+    assert!(!transfer.decorations);
+    // 关窗要同时收尾二维码服务：close request 必须进状态机，不交给 winit。
+    assert!(!transfer.exit_on_close_request);
+    assert_eq!(transfer.platform_specific.application_id, "bennu-transfer");
+}
+
+#[test]
 fn auxiliary_windows_keep_one_content_size_across_global_chrome_layouts() {
     for layout in WindowChromeLayout::ALL {
         let mut config = config::default_user_config();

@@ -194,6 +194,10 @@ impl FileBrowser {
             .replace_custom_color_scheme(user_config.custom_color_scheme.clone());
         self.user_config = user_config;
         self.refresh_current_language();
+        // 设置页设备名输入框显示生效别名（配置值优先，缺省 hostname）。
+        self.transfer_device_alias_input = self.effective_transfer_device_alias();
+        // 常驻 LocalSend 服务随启动环境就绪后启动（此处用户配置已加载）。
+        self.start_or_restart_local_send_service();
     }
 }
 

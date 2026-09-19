@@ -34,6 +34,8 @@ mod text_preview_panel;
 mod toggle_switch;
 mod toolbar_controls;
 mod transfer_conflict;
+pub(crate) mod transfer_qr;
+pub(crate) mod transfer_window;
 mod trash_warning;
 mod window_chrome;
 mod window_control_settings;
@@ -50,6 +52,7 @@ pub(crate) use properties_window::view_properties_window;
 pub(crate) use search_panel::{search_input_id, SEARCH_RESULT_ROW_HEIGHT};
 pub(crate) use settings_window::view_settings_window;
 pub(crate) use tab_motion::translated_with_width_overflow;
+pub(crate) use transfer_window::view_transfer_window;
 
 use std::path::Path;
 
@@ -98,7 +101,7 @@ use checksum::checksum_panel;
 use convert::convert_panel;
 use floating_panels::{
     context_menu_panel, destructive_action_confirmation_panel, error_notification_panel,
-    file_drop_operation_panel, open_with_panel,
+    file_drop_operation_panel, incoming_transfer_confirmation_panel, open_with_panel,
 };
 use rendering_settings::renderer_restart_notice_panel;
 use right_preview_panel::right_preview_panel;
@@ -233,6 +236,14 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
         floating_input = BrowserFloatingInput::Modal;
         floating.push(FloatingContent {
             element: destructive_action_confirmation_panel(confirmation),
+            placement: FloatingPlacement::Center,
+            captures_pointer: true,
+        });
+    } else if let Some(incoming) = &browser.incoming_transfer {
+        // 接收确认是阻塞 Modal：优先于一切非 Modal 浮层，不与菜单/建议共存。
+        floating_input = BrowserFloatingInput::Modal;
+        floating.push(FloatingContent {
+            element: incoming_transfer_confirmation_panel(incoming),
             placement: FloatingPlacement::Center,
             captures_pointer: true,
         });
@@ -461,10 +472,10 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
     }
 
     let browser_surface = match floating_input {
-        BrowserFloatingInput::Plain => {
-            floating_surface(content, floating, floating_area(browser))
+        BrowserFloatingInput::Plain => floating_surface(content, floating, floating_area(browser)),
+        BrowserFloatingInput::Modal => {
+            modal_floating_surface(content, floating, floating_area(browser))
         }
-        BrowserFloatingInput::Modal => modal_floating_surface(content, floating, floating_area(browser)),
         BrowserFloatingInput::DismissibleBlocking => dismissable_blocking_floating_surface(
             content,
             floating,
@@ -788,9 +799,7 @@ const DRAG_PREVIEW_SUMMARY_TEXT_SIZE: f32 = 12.0;
 /// 返回预览浮层与其定位:提起条目组左上角对准最早出现的条目,使负
 /// 偏移(按住条目右下时)也能完整显示;聚合行右下角钉在指针尖上,
 /// 往指针左上展开,不挡指针也不被指针挡。
-fn drag_preview_panel(
-    browser: &FileBrowser,
-) -> Option<(Element<'_, Message>, FloatingPlacement)> {
+fn drag_preview_panel(browser: &FileBrowser) -> Option<(Element<'_, Message>, FloatingPlacement)> {
     // 临时调试:环境变量触发,绕过拖拽状态直接渲染聚合行,验证浮层渲染链。
     if std::env::var_os("FM_DEBUG_DRAG_SUMMARY").is_some() {
         let summary = crate::wayland_drag_icon::file_drag_group_summary_text(37, 12);
@@ -838,8 +847,7 @@ fn drag_preview_panel(
     // 快照数就说明有选中内容在屏幕外。此时(或包围盒超出列表可视
     // 区——它比窗口小,上下还隔着工具栏等)屏幕已铺不下选中内容,
     // 收拢为一行总数文字,不再逐个铺开。
-    let selection_overflows_screen =
-        drag.sources.len() > drag.preview_entries.len();
+    let selection_overflows_screen = drag.sources.len() > drag.preview_entries.len();
     let overflows_viewport = match browser.file_drag_viewport {
         Some(viewport) => {
             let viewport_right = viewport.x + viewport.width;
@@ -888,10 +896,7 @@ fn drag_preview_panel(
     let stack = Stack::with_children(layers)
         .width(Length::Fixed(stack_width))
         .height(Length::Fixed(stack_height));
-    Some((
-        stack.into(),
-        FloatingPlacement::Free(stack_origin),
-    ))
+    Some((stack.into(), FloatingPlacement::Free(stack_origin)))
 }
 
 /// 拖拽动作胶囊:整个拖拽期(应用内或原生拖放)跟随落点显示,文案由

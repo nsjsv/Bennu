@@ -6,6 +6,7 @@ members = [
     "crates/file-search",
     "crates/file-operation-store",
     "crates/thumbnails",
+    "crates/local-send",
 ]
 resolver = "2"
 

@@ -40,12 +40,17 @@ const DEFAULT_PROPERTIES_WIDTH: f32 = 760.0;
 const DEFAULT_PROPERTIES_HEIGHT: f32 = 560.0;
 const MIN_PROPERTIES_WIDTH: f32 = 680.0;
 const MIN_PROPERTIES_HEIGHT: f32 = 440.0;
+const DEFAULT_TRANSFER_WIDTH: f32 = 420.0;
+const DEFAULT_TRANSFER_HEIGHT: f32 = 560.0;
+const MIN_TRANSFER_WIDTH: f32 = 360.0;
+const MIN_TRANSFER_HEIGHT: f32 = 420.0;
 pub(super) const MAIN_WINDOW_INITIAL_WIDTH: f32 = 1180.0;
 pub(super) const MAIN_WINDOW_INITIAL_HEIGHT: f32 = 680.0;
 const MAIN_WINDOW_APP_ID: &str = "bennu";
 const SETTINGS_WINDOW_APP_ID: &str = "bennu-settings";
 const PROPERTIES_WINDOW_APP_ID: &str = "bennu-properties";
 const PREVIEW_WINDOW_APP_ID: &str = "bennu-preview";
+const TRANSFER_WINDOW_APP_ID: &str = "bennu-transfer";
 const PREVIEW_RESIZE_MATCH_TOLERANCE: f32 = 1.0;
 
 pub(super) fn main_window_settings() -> window::Settings {
@@ -94,6 +99,26 @@ fn properties_window_settings() -> window::Settings {
         ..window::Settings::default()
     };
     settings.platform_specific.application_id = PROPERTIES_WINDOW_APP_ID.to_owned();
+    settings.icon = crate::app_icon::startup_window_icon();
+    settings
+}
+
+fn transfer_window_settings() -> window::Settings {
+    let mut settings = window::Settings {
+        size: Size::new(
+            DEFAULT_TRANSFER_WIDTH,
+            DEFAULT_TRANSFER_HEIGHT + WINDOW_TOP_BAR_HEIGHT,
+        ),
+        min_size: Some(Size::new(
+            MIN_TRANSFER_WIDTH,
+            MIN_TRANSFER_HEIGHT + WINDOW_TOP_BAR_HEIGHT,
+        )),
+        decorations: false,
+        // 关闭请求交给状态机：关窗同时要收尾二维码服务，不能让 winit 直接关。
+        exit_on_close_request: false,
+        ..window::Settings::default()
+    };
+    settings.platform_specific.application_id = TRANSFER_WINDOW_APP_ID.to_owned();
     settings.icon = crate::app_icon::startup_window_icon();
     settings
 }
@@ -327,6 +352,8 @@ impl FileBrowser {
             crate::localization::translate_current("Properties - Bennu")
         } else if self.preview_window == Some(window) {
             crate::localization::translate_current("Preview - Bennu")
+        } else if self.transfer_window == Some(window) {
+            crate::localization::translate_current("Send to Phone - Bennu")
         } else if self.search_workspace.is_some() {
             crate::localization::translate_current("Search - Bennu")
         } else {
@@ -355,6 +382,7 @@ impl FileBrowser {
             SettingsCategory::General
             | SettingsCategory::Appearance
             | SettingsCategory::Files
+            | SettingsCategory::Transfer
             | SettingsCategory::Shortcuts
             | SettingsCategory::About => Task::none(),
         };
@@ -383,6 +411,7 @@ impl FileBrowser {
             SettingsCategory::General
             | SettingsCategory::Appearance
             | SettingsCategory::Files
+            | SettingsCategory::Transfer
             | SettingsCategory::Shortcuts
             | SettingsCategory::About => Task::none(),
         };
@@ -450,6 +479,49 @@ impl FileBrowser {
     pub(super) fn close_properties_window(&mut self) -> Task<Message> {
         self.clear_file_properties_state();
         let Some(window) = self.properties_window.take() else {
+            return Task::none();
+        };
+        self.clear_closed_window_focus(window);
+        window::close(window)
+    }
+
+    /// 打开传输窗口前清理主窗口同层输入状态（与 Properties 打开先例一致）。
+    pub(super) fn prepare_transfer_window_open(&mut self) -> Task<Message> {
+        self.context_menu = None;
+        self.open_with = None;
+        self.archive_creation = None;
+        self.archive_extraction = None;
+        self.shortcut_capture = None;
+        self.operation_queue.close_panel();
+        self.cancel_file_drag_interaction();
+        self.sidebar_bookmark_drag = None;
+        self.sidebar_bookmark_drop_slot = None;
+        self.selection_marquee = None;
+        let _ = self.cancel_address_editing();
+        self.commit_rename_if_active()
+    }
+
+    pub(super) fn ensure_transfer_window(&mut self) -> Task<Message> {
+        if let Some(window) = self.transfer_window {
+            self.focused_window = window;
+            return window::gain_focus(window);
+        }
+
+        let (window, command) = window::open(transfer_window_settings());
+        self.transfer_window = Some(window);
+        self.focused_window = window;
+        command.discard()
+    }
+
+    /// 关闭传输窗口：二维码服务随会话取消令牌收尾，状态整体清空。
+    ///
+    /// 失焦不关闭（传输期间窗口必须稳定），仅 close request / Escape /
+    /// 业务完成后的手动关闭走这里。
+    pub(super) fn close_transfer_window(&mut self) -> Task<Message> {
+        if let Some(session) = self.transfer_session.take() {
+            session.cancel.cancel();
+        }
+        let Some(window) = self.transfer_window.take() else {
             return Task::none();
         };
         self.clear_closed_window_focus(window);
@@ -735,6 +807,9 @@ impl FileBrowser {
         if self.properties_window == Some(self.focused_window) {
             return self.close_properties_window();
         }
+        if self.transfer_window == Some(self.focused_window) {
+            return self.close_transfer_window();
+        }
         if self.preview_window == Some(self.focused_window) {
             return self.close_preview_window();
         }
@@ -817,6 +892,12 @@ impl FileBrowser {
         if self.destructive_action_confirmation.is_some() {
             self.destructive_action_confirmation = None;
             return Task::none();
+        }
+
+        // 接收确认 Modal 的 Escape/外部清理按拒绝收敛：服务侧挂起会话
+        // 要及时释放，不能静默丢弃。
+        if self.incoming_transfer.is_some() {
+            return self.reject_pending_incoming_transfer();
         }
 
         if self.file_drop_prompt.is_some() {
@@ -916,6 +997,8 @@ impl FileBrowser {
             self.close_properties_window()
         } else if self.preview_window == Some(window_id) {
             self.close_preview_window()
+        } else if self.transfer_window == Some(window_id) {
+            self.close_transfer_window()
         } else {
             Task::none()
         }

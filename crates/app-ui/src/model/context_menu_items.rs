@@ -26,9 +26,10 @@ pub(crate) enum FileAreaMenuItem {
     CreateSymlink,
     Delete,
     Properties,
+    SendToPhone,
 }
 
-pub(crate) const FILE_ENTRY_MENU_ITEMS: [FileAreaMenuItem; 21] = [
+pub(crate) const FILE_ENTRY_MENU_ITEMS: [FileAreaMenuItem; 22] = [
     FileAreaMenuItem::Open,
     FileAreaMenuItem::SmartExtractHere,
     FileAreaMenuItem::ExtractToArchiveFolder,
@@ -48,6 +49,7 @@ pub(crate) const FILE_ENTRY_MENU_ITEMS: [FileAreaMenuItem; 21] = [
     FileAreaMenuItem::OpenTerminalHere,
     FileAreaMenuItem::CopyPath,
     FileAreaMenuItem::CreateSymlink,
+    FileAreaMenuItem::SendToPhone,
     FileAreaMenuItem::Delete,
     FileAreaMenuItem::Properties,
 ];
@@ -131,6 +133,7 @@ impl FileAreaMenuItem {
             Self::CreateSymlink => "Create Symbolic Link",
             Self::Delete => "Delete",
             Self::Properties => "Properties",
+            Self::SendToPhone => "Send to Phone",
         }
     }
 
@@ -157,6 +160,7 @@ impl FileAreaMenuItem {
             Self::CreateSymlink => "create_symlink",
             Self::Delete => "delete",
             Self::Properties => "properties",
+            Self::SendToPhone => "send_to_phone",
         }
     }
 
@@ -183,6 +187,7 @@ impl FileAreaMenuItem {
             "create_symlink" => Self::CreateSymlink,
             "delete" => Self::Delete,
             "properties" => Self::Properties,
+            "send_to_phone" => Self::SendToPhone,
             _ => return None,
         })
     }
@@ -193,7 +198,8 @@ impl FileAreaMenuItem {
     }
 
     /// 与 floating_panels 菜单渲染使用的图标保持一致。
-    pub(crate) fn icon(self) -> IconSymbol {        match self {
+    pub(crate) fn icon(self) -> IconSymbol {
+        match self {
             Self::Open => IconSymbol::Folder,
             Self::SmartExtractHere | Self::ExtractToArchiveFolder => IconSymbol::FileArchive,
             Self::OpenWith => IconSymbol::Monitor,
@@ -209,6 +215,7 @@ impl FileAreaMenuItem {
             Self::OpenTerminalHere => IconSymbol::Terminal,
             Self::CopyPath => IconSymbol::List,
             Self::CreateSymlink => IconSymbol::Link,
+            Self::SendToPhone => IconSymbol::Download,
             Self::Delete => IconSymbol::Trash,
             Self::Properties => IconSymbol::FileText,
         }

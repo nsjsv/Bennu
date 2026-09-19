@@ -7,6 +7,7 @@ use desktop_linux::FileClipboardOperation;
 
 use crate::app::scrollbar::{enhanced_scrollbar, scrollbar_on_scroll, ScrollbarAxis};
 use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
+use crate::app::transfer::{IncomingTransferConfirmation, TransferMessage};
 use crate::appearance::{
     context_menu_item_button_style, context_menu_style, enhanced_scrollbar_style,
     enhanced_vertical_scrollbar_direction, error_notification_style, navigation_icon_button_style,
@@ -16,10 +17,10 @@ use crate::icons::IconSymbol;
 use crate::model::{
     BrowserPaneId, ContextMenuPreferences, ContextMenuState, DestructiveActionConfirmation,
     FileAreaMenuItem, FileContextMenuExpansion, FileContextMenuState, FileDeleteAction,
-    FileDropPrompt, FileEntryMenuEntry, FileGroupingMode, FilePropertiesMessage,
-    ListColumnConfig, ListColumnKind, ListViewPreferences, Message, ScrollbarRegion,
-    ScrollbarViewport, ScrollbarVisibility, SearchContextMenuState, SearchEntryTypePreset,
-    SearchResultMenuItem, SidebarBookmarkContextMenuState, TrashMenuItem,
+    FileDropPrompt, FileEntryMenuEntry, FileGroupingMode, FilePropertiesMessage, ListColumnConfig,
+    ListColumnKind, ListViewPreferences, Message, ScrollbarRegion, ScrollbarViewport,
+    ScrollbarVisibility, SearchContextMenuState, SearchEntryTypePreset, SearchResultMenuItem,
+    SidebarBookmarkContextMenuState, TrashMenuItem,
 };
 use crate::open_with::OpenWithState;
 use crate::sidebar_devices::SidebarDeviceContextMenuState;
@@ -130,6 +131,72 @@ pub(super) fn destructive_action_confirmation_panel(
     let content = column![title_row, localized_text(body).size(13), actions]
         .spacing(12)
         .width(Length::Fill);
+
+    container(content)
+        .padding(14)
+        .width(Length::Fixed(DESTRUCTIVE_CONFIRMATION_PANEL_WIDTH))
+        .style(context_menu_style)
+        .into()
+}
+
+/// 接收确认 Modal：设备名 + 文件清单 + 记住设备 + 接受/拒绝（R7）。
+pub(super) fn incoming_transfer_confirmation_panel(
+    incoming: &IncomingTransferConfirmation,
+) -> Element<'_, Message> {
+    let summary = crate::localization::incoming_transfer_summary(
+        incoming.device.alias.clone(),
+        incoming.files.len(),
+    );
+    let mut file_list = column![].spacing(4).width(Length::Fill);
+    for file in &incoming.files {
+        file_list = file_list.push(
+            row![
+                readable_text(file.file_name.clone())
+                    .size(12)
+                    .width(Length::Fill),
+                readable_text(super::transfer_window::format_byte_size(file.size)).size(11),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
+        );
+    }
+    let remember_checkbox = checkbox(incoming.remember_device)
+        .label(crate::localization::translate_current(
+            "Remember this device",
+        ))
+        .on_toggle(|remember| {
+            Message::Transfer(TransferMessage::IncomingRememberToggled(remember))
+        });
+    let actions = row![
+        Space::new().width(Length::Fill),
+        secondary_action_button(
+            "Decline",
+            Message::Transfer(TransferMessage::IncomingConfirmed { accept: false }),
+        ),
+        primary_action_button(
+            "Accept",
+            Message::Transfer(TransferMessage::IncomingConfirmed { accept: true }),
+        ),
+    ]
+    .spacing(6)
+    .align_y(Alignment::Center);
+
+    let content = column![
+        row![
+            themed_icon(IconSymbol::Download, IconTone::Normal, MENU_ICON_SIZE),
+            readable_text("Incoming files").size(16).width(Length::Fill),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+        readable_text(summary).size(13),
+        container(scrollable(file_list))
+            .height(Length::Fixed(132.0))
+            .width(Length::Fill),
+        remember_checkbox,
+        actions,
+    ]
+    .spacing(12)
+    .width(Length::Fill);
 
     container(content)
         .padding(14)
@@ -346,16 +413,14 @@ pub(super) fn context_menu_panel<'a>(
     file_grouping: FileGroupingMode,
 ) -> Element<'a, Message> {
     match menu {
-        ContextMenuState::FileArea(menu) => {
-            file_context_menu_panel(
-                menu,
-                is_trash_view,
-                active_pane_id,
-                context_menus,
-                keyboard_modifiers,
-                file_grouping,
-            )
-        }
+        ContextMenuState::FileArea(menu) => file_context_menu_panel(
+            menu,
+            is_trash_view,
+            active_pane_id,
+            context_menus,
+            keyboard_modifiers,
+            file_grouping,
+        ),
         ContextMenuState::Search(menu) => search_context_menu_panel(menu, context_menus),
         ContextMenuState::SearchEntryTypes(_) => {
             search_entry_types_menu_panel(context_menus, selected_search_entry_types)
@@ -548,13 +613,13 @@ fn file_context_menu_panel<'a>(
                         FileAreaMenuItem::SmartExtractHere
                             | FileAreaMenuItem::ExtractToArchiveFolder
                     ),
-                    FileEntryMenuEntry::Group { members, .. } => !members
-                        .iter()
-                        .any(|item| matches!(
+                    FileEntryMenuEntry::Group { members, .. } => !members.iter().any(|item| {
+                        matches!(
                             item,
                             FileAreaMenuItem::SmartExtractHere
                                 | FileAreaMenuItem::ExtractToArchiveFolder
-                        )),
+                        )
+                    }),
                 });
             }
             entries
@@ -600,11 +665,7 @@ fn file_context_menu_panel<'a>(
             }
             FileEntryMenuEntry::Group { anchor, members } => {
                 if menu.expansion == FileContextMenuExpansion::Group(*anchor) {
-                    expanded = Some(ExpandedSubmenu::Group(
-                        row_index,
-                        *anchor,
-                        members.clone(),
-                    ));
+                    expanded = Some(ExpandedSubmenu::Group(row_index, *anchor, members.clone()));
                 }
                 let (icon, label, on_press) = match *anchor {
                     FileAreaMenuItem::Copy => {
@@ -617,8 +678,7 @@ fn file_context_menu_panel<'a>(
                     }
                     other => (other.icon(), other.label(), None),
                 };
-                menu_content =
-                    menu_content.push(group_trigger_row(*anchor, icon, label, on_press));
+                menu_content = menu_content.push(group_trigger_row(*anchor, icon, label, on_press));
                 rendered_row_count += 1;
             }
         }
@@ -638,20 +698,18 @@ fn file_context_menu_panel<'a>(
         .style(context_menu_style);
 
     let content = match expanded {
-        Some(ExpandedSubmenu::Group(row_index, anchor, members)) => Row::new()
-            .spacing(4)
-            .push(root_menu)
-            .push(submenu_slot(
+        Some(ExpandedSubmenu::Group(row_index, anchor, members)) => {
+            Row::new().spacing(4).push(root_menu).push(submenu_slot(
                 row_index,
                 group_submenu_panel(menu, anchor, &members),
-            )),
-        Some(ExpandedSubmenu::FileGrouping(row_index)) => Row::new()
-            .spacing(4)
-            .push(root_menu)
-            .push(submenu_slot(
+            ))
+        }
+        Some(ExpandedSubmenu::FileGrouping(row_index)) => {
+            Row::new().spacing(4).push(root_menu).push(submenu_slot(
                 row_index,
                 file_grouping_submenu_panel(file_grouping),
-            )),
+            ))
+        }
         None => Row::new().push(root_menu),
     };
 
@@ -677,7 +735,10 @@ fn copy_menu_action(alt_held: bool) -> (IconSymbol, &'static str, Message) {
 
 /// 重命名的动作与文案;条目菜单必有 target。
 fn rename_menu_action(menu: &FileContextMenuState) -> (IconSymbol, &'static str, Message) {
-    let path = menu.target.clone().unwrap_or_else(|| menu.paste_directory.clone());
+    let path = menu
+        .target
+        .clone()
+        .unwrap_or_else(|| menu.paste_directory.clone());
     (
         IconSymbol::Pencil,
         FileAreaMenuItem::Rename.label(),
@@ -716,26 +777,24 @@ fn file_menu_action_row(
     shift_held: bool,
 ) -> Option<Element<'static, Message>> {
     let row = match (item, &menu.target) {
-        (FileAreaMenuItem::Open, Some(path)) => {
-            menu_item(IconSymbol::Folder, item.label(), Message::OpenPath(path.clone()))
-        }
-        (FileAreaMenuItem::SmartExtractHere, _) => menu_item(
-            item.icon(),
+        (FileAreaMenuItem::Open, Some(path)) => menu_item(
+            IconSymbol::Folder,
             item.label(),
-            Message::SmartExtractSelected,
+            Message::OpenPath(path.clone()),
         ),
+        (FileAreaMenuItem::SmartExtractHere, _) => {
+            menu_item(item.icon(), item.label(), Message::SmartExtractSelected)
+        }
         (FileAreaMenuItem::ExtractToArchiveFolder, _) => menu_item(
             item.icon(),
             item.label(),
             Message::ExtractSelectedToArchiveFolder,
         ),
-        (FileAreaMenuItem::OpenWith, Some(path)) => {
-            menu_item(
-                IconSymbol::Monitor,
-                item.label(),
-                Message::OpenWithRequested(path.clone()),
-            )
-        }
+        (FileAreaMenuItem::OpenWith, Some(path)) => menu_item(
+            IconSymbol::Monitor,
+            item.label(),
+            Message::OpenWithRequested(path.clone()),
+        ),
         (FileAreaMenuItem::Copy, _) => {
             let (icon, label, message) = copy_menu_action(alt_held);
             menu_item(icon, label, message)
@@ -746,27 +805,30 @@ fn file_menu_action_row(
         (FileAreaMenuItem::Paste, _) => {
             menu_item(IconSymbol::Copy, item.label(), Message::PastePending)
         }
-        (FileAreaMenuItem::Rename, Some(path)) => {
-            menu_item(IconSymbol::Pencil, item.label(), Message::BeginRename(path.clone()))
-        }
-        (FileAreaMenuItem::OpenTerminalHere, _) => {
-            menu_item(
-                IconSymbol::Terminal,
-                item.label(),
-                Message::OpenTerminalHere(terminal_directory.to_path_buf()),
-            )
-        }
+        (FileAreaMenuItem::Rename, Some(path)) => menu_item(
+            IconSymbol::Pencil,
+            item.label(),
+            Message::BeginRename(path.clone()),
+        ),
+        (FileAreaMenuItem::OpenTerminalHere, _) => menu_item(
+            IconSymbol::Terminal,
+            item.label(),
+            Message::OpenTerminalHere(terminal_directory.to_path_buf()),
+        ),
         (FileAreaMenuItem::Delete, _) => {
             let (icon, label, message) = delete_menu_action(menu, shift_held);
             menu_item(icon, label, message)
         }
-        (FileAreaMenuItem::Properties, Some(path)) => {
-            menu_item(
-                IconSymbol::FileText,
-                item.label(),
-                Message::FileProperties(FilePropertiesMessage::Requested(path.clone())),
-            )
-        }
+        (FileAreaMenuItem::Properties, Some(path)) => menu_item(
+            IconSymbol::FileText,
+            item.label(),
+            Message::FileProperties(FilePropertiesMessage::Requested(path.clone())),
+        ),
+        (FileAreaMenuItem::SendToPhone, _) => menu_item(
+            item.icon(),
+            item.label(),
+            Message::Transfer(TransferMessage::SendToPhoneRequested),
+        ),
         // 组锚点不经普通行渲染;条目专属项不进空白菜单。
         (
             FileAreaMenuItem::NewEntry

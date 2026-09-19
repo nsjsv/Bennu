@@ -6,7 +6,8 @@ use file_operation_store::{
     StoreResult, StoredContextMenuItemEntry, StoredContextMenuLayout, StoredContextMenuLayouts,
     StoredLastSearchScope, StoredListViewColumn, StoredNetworkConnection, StoredPath,
     StoredPreviewExtensionRules, StoredShortcutBinding, StoredSidebarFavorite,
-    StoredUserPreferences, StoredWindowControlPlacement, TaskQueueStore,
+    StoredTrustedTransferDevice, StoredUserPreferences, StoredWindowControlPlacement,
+    TaskQueueStore,
 };
 
 use super::app_config::AppConfig;
@@ -18,11 +19,10 @@ use super::{
     file_operation_verification_from_config_value, list_directory_size_display_mode_config_value,
     list_directory_size_display_mode_from_config_value, normalize_preview_directory_expand_levels,
     normalize_right_preview_panel_width, normalize_right_preview_preview_ratio,
-    normalize_sidebar_width, normalize_visible_column_count,
-    sort_direction_config_value, sort_direction_from_config_value, sort_field_config_value,
-    sort_field_from_config_value, ColumnWidthAdjustMode, LaunchWindowPolicy,
-    PreviewExtensionRules, PreviewFileSizeLimits, SidebarFavoriteConfig, UiLanguageSetting,
-    UserConfig, ViewDensityLevel,
+    normalize_sidebar_width, normalize_visible_column_count, sort_direction_config_value,
+    sort_direction_from_config_value, sort_field_config_value, sort_field_from_config_value,
+    ColumnWidthAdjustMode, LaunchWindowPolicy, PreviewExtensionRules, PreviewFileSizeLimits,
+    SidebarFavoriteConfig, TrustedTransferDevice, UiLanguageSetting, UserConfig, ViewDensityLevel,
 };
 use crate::matugen_theme::{ColorSchemePreset, CustomColorScheme, ThemeMode};
 use crate::model::{
@@ -74,6 +74,9 @@ pub(crate) struct UserPreferences {
     pub(crate) color_scheme: ColorSchemePreset,
     pub(crate) custom_color_scheme: CustomColorScheme,
     pub(crate) context_menus: ContextMenuPreferences,
+    pub(crate) transfer_download_dir: Option<PathBuf>,
+    pub(crate) transfer_device_alias: Option<String>,
+    pub(crate) transfer_trusted_devices: Vec<TrustedTransferDevice>,
 }
 
 impl UserPreferences {
@@ -134,6 +137,9 @@ impl UserPreferences {
             color_scheme: config.color_scheme,
             custom_color_scheme: config.custom_color_scheme.clone(),
             context_menus: config.context_menus.clone(),
+            transfer_download_dir: config.transfer_download_dir.clone(),
+            transfer_device_alias: config.transfer_device_alias.clone(),
+            transfer_trusted_devices: config.transfer_trusted_devices.clone(),
         }
     }
 
@@ -176,6 +182,9 @@ impl UserPreferences {
         config.color_scheme = self.color_scheme;
         config.custom_color_scheme = self.custom_color_scheme.clone();
         config.context_menus = self.context_menus.clone();
+        config.transfer_download_dir = self.transfer_download_dir.clone();
+        config.transfer_device_alias = self.transfer_device_alias.clone();
+        config.transfer_trusted_devices = self.transfer_trusted_devices.clone();
     }
 
     pub(crate) fn to_stored(&self) -> StoredUserPreferences {
@@ -255,6 +264,13 @@ impl UserPreferences {
         stored.color_scheme = self.color_scheme.config_value().to_owned();
         stored.custom_color_scheme = Some(self.custom_color_scheme.to_stored());
         stored.context_menu_layouts = Some(stored_context_menu_layouts(&self.context_menus));
+        stored.transfer_download_dir = self
+            .transfer_download_dir
+            .as_ref()
+            .map(|dir| StoredPath::from_path(dir));
+        stored.transfer_device_alias = self.transfer_device_alias.clone();
+        stored.transfer_trusted_devices =
+            stored_trusted_transfer_devices(&self.transfer_trusted_devices);
         stored
     }
 
@@ -381,6 +397,14 @@ impl UserPreferences {
             color_scheme,
             custom_color_scheme,
             context_menus,
+            transfer_download_dir: stored
+                .transfer_download_dir
+                .as_ref()
+                .map(|dir| dir.to_path_buf()),
+            transfer_device_alias: stored.transfer_device_alias.clone(),
+            transfer_trusted_devices: trusted_transfer_devices_from_stored(
+                &stored.transfer_trusted_devices,
+            ),
         }
     }
 }
@@ -522,6 +546,38 @@ fn stored_sidebar_favorites(favorites: &[SidebarFavoriteConfig]) -> Vec<StoredSi
         .collect()
 }
 
+fn stored_trusted_transfer_devices(
+    devices: &[TrustedTransferDevice],
+) -> Vec<StoredTrustedTransferDevice> {
+    devices
+        .iter()
+        .map(|device| StoredTrustedTransferDevice {
+            fingerprint: device.fingerprint.clone(),
+            alias: device.alias.clone(),
+            added_at: device.added_at.clone(),
+        })
+        .collect()
+}
+
+fn trusted_transfer_devices_from_stored(
+    stored: &[StoredTrustedTransferDevice],
+) -> Vec<TrustedTransferDevice> {
+    stored
+        .iter()
+        // 空 fingerprint 无法作为信任身份,丢弃防止全设备误信任。
+        .filter(|device| !device.fingerprint.is_empty())
+        .map(|device| TrustedTransferDevice {
+            fingerprint: device.fingerprint.clone(),
+            alias: if device.alias.is_empty() {
+                device.fingerprint.clone()
+            } else {
+                device.alias.clone()
+            },
+            added_at: device.added_at.clone(),
+        })
+        .collect()
+}
+
 fn sidebar_favorites_from_stored(
     favorites: &[StoredSidebarFavorite],
 ) -> Vec<SidebarFavoriteConfig> {
@@ -569,9 +625,7 @@ fn network_connections_from_stored(
     restored
 }
 
-fn stored_context_menu_layouts(
-    preferences: &ContextMenuPreferences,
-) -> StoredContextMenuLayouts {
+fn stored_context_menu_layouts(preferences: &ContextMenuPreferences) -> StoredContextMenuLayouts {
     let values = preferences.to_config_values();
     let layout = |items: &Vec<(String, bool)>| StoredContextMenuLayout {
         items: items

@@ -13,6 +13,7 @@ mod search_paths;
 mod search_service_recovery;
 mod search_service_status;
 mod search_workspace;
+mod transfer;
 mod trash;
 
 static CURRENT_LANGUAGE: AtomicU8 = AtomicU8::new(UiLanguage::English.as_u8());
@@ -76,6 +77,10 @@ pub(crate) fn translate<'a>(language: UiLanguage, text: &'a str) -> Cow<'a, str>
         return Cow::Owned(translated);
     }
 
+    if let Some(translated) = transfer::translate(text) {
+        return Cow::Owned(translated);
+    }
+
     if let Some(translated) = exact_translation(text) {
         return Cow::Borrowed(translated);
     }
@@ -105,6 +110,45 @@ pub(crate) fn trash_tracking_warning(language: UiLanguage, warning: &str) -> Str
 
 pub(crate) fn current_trash_tracking_warning(warning: &str) -> String {
     trash::tracking_warning(current_language(), warning)
+}
+
+/// 接收完成通知正文（成功数 + 失败数），构造时按当前语言产出成品。
+pub(crate) fn transfer_receive_finished_body(received: usize, failed: usize) -> String {
+    transfer::receive_finished_body(current_language(), received, failed)
+}
+
+/// 二维码会话进度行（已传字节 + 速度），构造时产出成品。
+pub(crate) fn transfer_progress_line(
+    bytes: u64,
+    speed_bytes_per_second: u64,
+    finished: bool,
+) -> String {
+    transfer::qr_progress_line(current_language(), bytes, speed_bytes_per_second, finished)
+}
+
+/// 直推动度行（目标设备 + 文件序号 + 字节），构造时产出成品。
+pub(crate) fn direct_send_progress_line(
+    alias: String,
+    file_name: String,
+    file_index: usize,
+    total_files: usize,
+    bytes_sent: u64,
+    file_size: u64,
+) -> String {
+    transfer::direct_send_progress_line(
+        current_language(),
+        &alias,
+        &file_name,
+        file_index,
+        total_files,
+        bytes_sent,
+        file_size,
+    )
+}
+
+/// 接收确认 Modal 正文（设备名 + 文件数），构造时产出成品。
+pub(crate) fn incoming_transfer_summary(alias: String, count: usize) -> String {
+    transfer::incoming_transfer_summary(current_language(), &alias, count)
 }
 
 pub(crate) fn detect_system_language() -> UiLanguage {

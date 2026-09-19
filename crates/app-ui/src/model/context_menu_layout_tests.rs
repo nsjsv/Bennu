@@ -39,6 +39,7 @@ fn defaults_match_existing_menu_structure() {
                 members: vec![FileAreaMenuItem::NewFolderFromSelection],
             },
             FileEntryMenuEntry::Item(FileAreaMenuItem::OpenTerminalHere),
+            FileEntryMenuEntry::Item(FileAreaMenuItem::SendToPhone),
             FileEntryMenuEntry::Item(FileAreaMenuItem::Delete),
             FileEntryMenuEntry::Item(FileAreaMenuItem::Properties),
         ]
@@ -217,16 +218,13 @@ fn normalized_from_stored_appends_missing_and_drops_unknown() {
     assert!(!layout.entries[1].visible);
     // 缺失项追加且可见;总数等于全集。
     assert_eq!(layout.entries.len(), FILE_ENTRY_MENU_ITEMS.len());
-    assert!(layout
-        .entries
-        .iter()
-        .skip(2)
-        .all(|entry| entry.visible));
+    assert!(layout.entries.iter().skip(2).all(|entry| entry.visible));
 }
 
 #[test]
 fn stored_layout_without_tools_appends_it_visible_at_the_end() {
-    // 老配置没有 tools 条目:按全集顺序追加到末尾且可见,其余保持存储顺序。
+    // 老配置没有 tools/send_to_phone 条目:按全集顺序追加到末尾且可见,
+    // 其余保持存储顺序;同批缺失项也按全集相对顺序排列(tools 在前)。
     let old_items = [
         FileAreaMenuItem::Open,
         FileAreaMenuItem::OpenWith,
@@ -257,8 +255,18 @@ fn stored_layout_without_tools_appends_it_visible_at_the_end() {
         FileAreaMenuItem::from_config_value,
     );
     assert_eq!(layout.entries.len(), FILE_ENTRY_MENU_ITEMS.len());
+    // 老清单缺失的 4 项按全集相对顺序追加:
+    // SmartExtractHere、ExtractToArchiveFolder、Tools、SendToPhone。
+    assert_eq!(
+        layout.entries[old_items.len()].item,
+        FileAreaMenuItem::SmartExtractHere
+    );
+    assert_eq!(
+        layout.entries[old_items.len() + 2].item,
+        FileAreaMenuItem::Tools
+    );
     let last = layout.entries.last().unwrap();
-    assert_eq!(last.item, FileAreaMenuItem::Tools);
+    assert_eq!(last.item, FileAreaMenuItem::SendToPhone);
     assert!(last.visible);
 }
 
@@ -266,8 +274,8 @@ fn stored_layout_without_tools_appends_it_visible_at_the_end() {
 fn file_entry_settings_rows_project_groups_to_single_rows() {
     let preferences = ContextMenuPreferences::defaults();
     let rows = preferences.settings_rows(ContextMenuSettingsPage::FileEntry);
-    // 21 项中 8 个成员被收进组面板,顶级行 = 13 行。
-    assert_eq!(rows.len(), 13);
+    // 22 项中 8 个成员被收进组面板,顶级行 = 14 行。
+    assert_eq!(rows.len(), 14);
     let group_anchors: Vec<_> = rows.iter().filter_map(|row| row.group_anchor).collect();
     assert_eq!(
         group_anchors,
@@ -321,8 +329,7 @@ fn list_columns_keep_name_visible() {
         .list_column_items()
         .contains(&ListColumnKind::Name));
     assert_eq!(
-        preferences
-            .settings_rows(ContextMenuSettingsPage::ListColumns)[name_index],
+        preferences.settings_rows(ContextMenuSettingsPage::ListColumns)[name_index],
         ContextMenuSettingsRow {
             label: "Name",
             icon: IconSymbol::List,
@@ -372,7 +379,6 @@ fn config_values_round_trip() {
     let mut preferences = ContextMenuPreferences::defaults();
     preferences.trash.toggle(0);
     preferences.reorder_settings_row(ContextMenuSettingsPage::Trash, 1, 0);
-    let restored =
-        ContextMenuPreferences::from_config_values(&preferences.to_config_values());
+    let restored = ContextMenuPreferences::from_config_values(&preferences.to_config_values());
     assert_eq!(preferences, restored);
 }

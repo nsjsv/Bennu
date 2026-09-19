@@ -3,6 +3,7 @@ pub(crate) enum SettingsCategory {
     General,
     Appearance,
     Files,
+    Transfer,
     Search,
     Shortcuts,
     Logs,
@@ -10,10 +11,11 @@ pub(crate) enum SettingsCategory {
 }
 
 impl SettingsCategory {
-    pub(crate) const ALL: [Self; 7] = [
+    pub(crate) const ALL: [Self; 8] = [
         Self::General,
         Self::Appearance,
         Self::Files,
+        Self::Transfer,
         Self::Search,
         Self::Shortcuts,
         Self::Logs,
@@ -25,6 +27,7 @@ impl SettingsCategory {
             Self::General => "General",
             Self::Appearance => "Appearance",
             Self::Files => "Files",
+            Self::Transfer => "Transfer",
             Self::Search => "Search",
             Self::Shortcuts => "Shortcuts",
             Self::Logs => "Logs",

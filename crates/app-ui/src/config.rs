@@ -14,12 +14,12 @@ use crate::network_connections::SavedNetworkConnection;
 use crate::shortcuts::ShortcutConfig;
 
 mod app_config;
+#[cfg(test)]
+pub(crate) use app_config::default_app_config;
 pub(crate) use app_config::{
     load_app_config, save_app_config, save_app_config_preserving_probe_cache, AppConfig,
     RendererProbeCacheRecord,
 };
-#[cfg(test)]
-pub(crate) use app_config::default_app_config;
 pub(crate) mod column_width_adjust_mode;
 pub(crate) use column_width_adjust_mode::{
     ColumnWidthAdjustMode, DEFAULT_COLUMN_WIDTH_ADJUST_MODE,
@@ -597,6 +597,38 @@ pub(crate) struct UserConfig {
     pub(crate) launch_window_policy: LaunchWindowPolicy,
     pub(crate) column_width_adjust_mode: ColumnWidthAdjustMode,
     pub(crate) context_menus: ContextMenuPreferences,
+    /// 传输接收保存目录;None = 使用默认 ~/Downloads。
+    pub(crate) transfer_download_dir: Option<PathBuf>,
+    /// 本机对外设备显示名;None = 使用 hostname。
+    pub(crate) transfer_device_alias: Option<String>,
+    /// 信任的 LocalSend 设备;这些设备的发送请求自动接收。
+    pub(crate) transfer_trusted_devices: Vec<TrustedTransferDevice>,
+}
+
+/// 信任设备列表条目:fingerprint 是 LocalSend 协议设备身份,alias/added_at
+/// 仅用于设置页展示。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TrustedTransferDevice {
+    pub(crate) fingerprint: String,
+    pub(crate) alias: String,
+    pub(crate) added_at: String,
+}
+
+/// 本机默认对外设备名:hostname。gethostname 是 POSIX 标准接口,
+/// 失败回退固定名,不影响发现流程。
+pub(crate) fn default_transfer_device_alias() -> String {
+    let mut buffer = [0u8; 256];
+    // SAFETY: buffer 长度充足,且 gethostname 保证以 NUL 结尾或截断。
+    let result = unsafe { libc::gethostname(buffer.as_mut_ptr().cast(), buffer.len()) };
+    if result == 0 {
+        if let Ok(name) = std::ffi::CStr::from_bytes_until_nul(&buffer) {
+            let name = name.to_string_lossy().trim().to_owned();
+            if !name.is_empty() {
+                return name;
+            }
+        }
+    }
+    "Bennu".to_owned()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -660,6 +692,9 @@ pub(crate) fn default_user_config() -> UserConfig {
         column_width_adjust_mode: DEFAULT_COLUMN_WIDTH_ADJUST_MODE,
         shortcuts: ShortcutConfig::defaults(),
         context_menus: crate::model::ContextMenuPreferences::defaults(),
+        transfer_download_dir: None,
+        transfer_device_alias: None,
+        transfer_trusted_devices: Vec::new(),
     }
 }
 
@@ -706,6 +741,9 @@ pub(crate) fn ui_thread_startup_config() -> UserConfig {
         context_menus: ContextMenuPreferences::defaults(),
         launch_window_policy: DEFAULT_LAUNCH_WINDOW_POLICY,
         column_width_adjust_mode: DEFAULT_COLUMN_WIDTH_ADJUST_MODE,
+        transfer_download_dir: None,
+        transfer_device_alias: None,
+        transfer_trusted_devices: Vec::new(),
     }
 }
 

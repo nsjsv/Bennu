@@ -111,6 +111,26 @@ pub struct StoredUserPreferences {
     /// 各右键菜单的项顺序与可见性;None = 旧版本数据,读取端回退内置默认。
     #[serde(default)]
     pub context_menu_layouts: Option<StoredContextMenuLayouts>,
+    /// 传输接收保存目录;None = 未设置,读取端回退 ~/Downloads。
+    #[serde(default)]
+    pub transfer_download_dir: Option<StoredPath>,
+    /// 本机对外设备显示名;None = 未设置,读取端回退 hostname。
+    #[serde(default)]
+    pub transfer_device_alias: Option<String>,
+    /// 信任的 LocalSend 设备(按 fingerprint);空 = 无信任设备。
+    #[serde(default)]
+    pub transfer_trusted_devices: Vec<StoredTrustedTransferDevice>,
+}
+
+/// 信任设备列表条目:fingerprint 是 LocalSend 协议设备身份,alias/added_at
+/// 仅用于设置页展示。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredTrustedTransferDevice {
+    pub fingerprint: String,
+    pub alias: String,
+    /// ISO 8601 字符串;仅展示用途,解析失败不参与逻辑。
+    #[serde(default)]
+    pub added_at: String,
 }
 
 /// 最近一次搜索的范围；目录用 StoredPath 保留非 UTF-8 路径字节。
@@ -197,6 +217,9 @@ impl Default for StoredUserPreferences {
             launch_window_policy: default_launch_window_policy(),
             column_width_adjust_mode: default_column_width_adjust_mode(),
             context_menu_layouts: None,
+            transfer_download_dir: None,
+            transfer_device_alias: None,
+            transfer_trusted_devices: Vec::new(),
         }
     }
 }

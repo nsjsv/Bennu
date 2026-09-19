@@ -34,9 +34,10 @@ pub use user_preferences::{
     StoredContextMenuItemEntry, StoredContextMenuLayout, StoredContextMenuLayouts,
     StoredCustomColorScheme, StoredCustomColorSet, StoredLastSearchScope, StoredListViewColumn,
     StoredNetworkConnection, StoredPreviewExtensionRules, StoredShortcutBinding,
-    StoredSidebarFavorite, StoredUserPreferences, StoredWindowControlPlacement,
-    COLUMN_WIDTH_ADJUST_MODE_PER_COLUMN, COLUMN_WIDTH_ADJUST_MODE_UNIFORM,
-    LAUNCH_WINDOW_POLICY_MERGE_INTO_EXISTING, LAUNCH_WINDOW_POLICY_OPEN_NEW_WINDOW,
+    StoredSidebarFavorite, StoredTrustedTransferDevice, StoredUserPreferences,
+    StoredWindowControlPlacement, COLUMN_WIDTH_ADJUST_MODE_PER_COLUMN,
+    COLUMN_WIDTH_ADJUST_MODE_UNIFORM, LAUNCH_WINDOW_POLICY_MERGE_INTO_EXISTING,
+    LAUNCH_WINDOW_POLICY_OPEN_NEW_WINDOW,
 };
 
 #[cfg(test)]
@@ -681,7 +682,10 @@ impl TaskQueueStore {
             connection.execute(
                 "INSERT INTO ui_column_view_preferences (preference_key, value_real)
                  VALUES (?1, ?2)",
-                params![COLUMN_WIDTH_REFERENCE_CONTENT_WIDTH_KEY, reference_content_width],
+                params![
+                    COLUMN_WIDTH_REFERENCE_CONTENT_WIDTH_KEY,
+                    reference_content_width
+                ],
             )?;
         }
         Ok(())

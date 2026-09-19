@@ -5,11 +5,10 @@ impl FileBrowser {
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
         if !self.application_shutdown_phase.is_running() {
             return match message {
-                Message::FileOperationFinished(task_id, generation, completion) => {
-                    self.accept_application_shutdown_operation_finished(
+                Message::FileOperationFinished(task_id, generation, completion) => self
+                    .accept_application_shutdown_operation_finished(
                         task_id, generation, completion,
-                    )
-                }
+                    ),
                 Message::FileOperationPersistenceFinished(outcome) => {
                     self.accept_file_operation_persistence_finished(outcome)
                 }
@@ -210,9 +209,9 @@ impl FileBrowser {
             }
             Message::FileOperationProgressed(task_id, progress, transfer_snapshots) => {
                 self.operation_queue.note_driver_signal(task_id);
-                if let Some(error) = self
-                    .operation_queue
-                    .update_progress(task_id, progress, transfer_snapshots)
+                if let Some(error) =
+                    self.operation_queue
+                        .update_progress(task_id, progress, transfer_snapshots)
                 {
                     self.show_global_error(error);
                 }
@@ -228,7 +227,10 @@ impl FileBrowser {
             }
             Message::FileOperationFinished(task_id, generation, completion) => {
                 self.operation_queue.note_driver_signal(task_id);
-                if !self.operation_queue.driver_generation_is_current(task_id, generation) {
+                if !self
+                    .operation_queue
+                    .driver_generation_is_current(task_id, generation)
+                {
                     // 换代重启后被取消的旧驱动者迟到的终态:任务已由新驱动者接手。
                     tracing::warn!(
                         target: "app_ui::operation_supervision",
@@ -241,10 +243,7 @@ impl FileBrowser {
                 self.accept_file_operation_finished(task_id, completion)
             }
             Message::OperationSupervisionTick => {
-                if let Some(error) = self
-                    .operation_queue
-                    .supervise(std::time::Instant::now())
-                {
+                if let Some(error) = self.operation_queue.supervise(std::time::Instant::now()) {
                     self.show_global_error(error);
                 }
                 Task::none()
@@ -343,7 +342,9 @@ impl FileBrowser {
             Message::FileGroupingRailTargetSelected { pane, group_index } => {
                 self.scroll_to_file_group_target(pane, group_index)
             }
-            Message::FileGroupingRailCursorEntered(pane_id) => self.enter_file_grouping_rail(pane_id),
+            Message::FileGroupingRailCursorEntered(pane_id) => {
+                self.enter_file_grouping_rail(pane_id)
+            }
             Message::FileGroupingRailCursorExited(pane_id) => {
                 self.exit_file_grouping_rail(pane_id);
                 Task::none()
@@ -655,6 +656,7 @@ impl FileBrowser {
             Message::Checksum(message) => self.handle_checksum_message(message),
             Message::ArchiveExtraction(message) => self.handle_archive_extraction_message(message),
             Message::BatchRename(message) => self.handle_batch_rename_message(message),
+            Message::Transfer(message) => self.handle_transfer_message(message),
             Message::FileContextMenuExpansionChanged(expansion) => {
                 self.update_file_context_menu_expansion(expansion)
             }
@@ -1086,8 +1088,12 @@ impl FileBrowser {
                 ])
             }
             Message::IconGridScrolled(pane_id, offset_y, viewport) => {
-                let scrolled =
-                    self.handle_icon_grid_scrolled(pane_id, offset_y, viewport.width, viewport.height);
+                let scrolled = self.handle_icon_grid_scrolled(
+                    pane_id,
+                    offset_y,
+                    viewport.width,
+                    viewport.height,
+                );
                 self.recalculate_hovered_entry_after_icon_grid_scroll(pane_id, offset_y, viewport);
                 Task::batch([
                     scrolled,
@@ -1119,9 +1125,7 @@ impl FileBrowser {
                 self.activate_pane(pane_id);
                 self.close_tab(tab_id)
             }
-            Message::TabDragEntered(pane_id, tab_id) => {
-                self.reorder_dragged_tab(pane_id, tab_id)
-            }
+            Message::TabDragEntered(pane_id, tab_id) => self.reorder_dragged_tab(pane_id, tab_id),
             Message::TabDragFinished => {
                 self.finish_tab_drag_from_captured_release(self.main_window)
             }

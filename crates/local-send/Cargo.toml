@@ -1,0 +1,29 @@
+[package]
+name = "local-send"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+async_zip = { version = "0.0.19", features = ["deflate", "tokio"] }
+axum = "0.8"
+fast_qr = "0.14"
+futures-util = "0.3"
+getifaddrs = "0.6"
+local-ip-address = "0.6"
+mime_guess = "2.0"
+parking_lot = "0.12"
+rand = "0.9"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
+socket2 = "0.6"
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util = { workspace = true, features = ["compat", "io"] }
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

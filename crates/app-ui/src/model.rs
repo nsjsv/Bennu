@@ -95,10 +95,10 @@ pub(crate) use list_view_preferences::{
 };
 mod file_grouping;
 pub(crate) use file_grouping::{
-    active_file_group_index, date_group_key, dynamic_size_buckets, file_grouping_entry_visible,
-    file_group_rail_visible, file_group_scroll_target_offset, kind_category_group_key,
-    name_initial_group_key, partition_files_into_groups, size_group_bucket_index,
-    FileGroupingContext, FileGroupingMode, FileGroupKey, FileGroupRailEntry, FileGroupSection,
+    active_file_group_index, date_group_key, dynamic_size_buckets, file_group_rail_visible,
+    file_group_scroll_target_offset, file_grouping_entry_visible, kind_category_group_key,
+    name_initial_group_key, partition_files_into_groups, size_group_bucket_index, FileGroupKey,
+    FileGroupRailEntry, FileGroupSection, FileGroupingContext, FileGroupingMode,
 };
 mod list_directory_summary;
 pub(crate) use list_directory_summary::{
@@ -136,12 +136,11 @@ mod preview;
 pub(crate) use preview::RightPreviewPanelInfoSnapshot;
 pub(crate) use preview::{
     image_preview_size, scaled_media_size, AudioPreviewPlayback, AudioPreviewPlaybackStatus,
-    ImagePreviewContent, PreviewContent, PreviewSize, PreviewState,
-    PreviewTreeDirectoryChildren, PreviewTreeEntry, PreviewWindowChromeState,
-    PreviewWindowProfile, RemotePreviewCacheFinished, RemotePreviewCacheMessage,
-    RemotePreviewCacheProgress, RemotePreviewDownload, VideoPreviewFrame, VideoPreviewPlayback,
-    VideoPreviewPlaybackStatus, VideoPreviewSeekCompletion,
-    PREVIEW_WINDOW_INITIAL_CONTROLS_DURATION,
+    ImagePreviewContent, PreviewContent, PreviewSize, PreviewState, PreviewTreeDirectoryChildren,
+    PreviewTreeEntry, PreviewWindowChromeState, PreviewWindowProfile, RemotePreviewCacheFinished,
+    RemotePreviewCacheMessage, RemotePreviewCacheProgress, RemotePreviewDownload,
+    VideoPreviewFrame, VideoPreviewPlayback, VideoPreviewPlaybackStatus,
+    VideoPreviewSeekCompletion, PREVIEW_WINDOW_INITIAL_CONTROLS_DURATION,
 };
 mod image_preview_viewport;
 pub(crate) use image_preview_viewport::{
@@ -153,9 +152,7 @@ mod context_menu_items;
 mod context_menu_layout;
 #[cfg(test)]
 mod context_menu_layout_tests;
-pub(crate) use context_menu_items::{
-    FileAreaMenuItem, SearchResultMenuItem, TrashMenuItem,
-};
+pub(crate) use context_menu_items::{FileAreaMenuItem, SearchResultMenuItem, TrashMenuItem};
 pub(crate) use context_menu_layout::{
     ContextMenuLayoutConfigValues, ContextMenuPreferences, ContextMenuSettingsDragState,
     ContextMenuSettingsPage, ContextMenuSettingsPageStep, ContextMenuSettingsRow,
@@ -165,7 +162,7 @@ mod window_controls;
 pub(crate) use window_controls::{
     WindowChromeLayout, WindowControlKind, WindowControlMoveDirection, WindowControlPlacement,
     WindowControlSide, WindowControlVisibility, WindowControlsConfig, WindowFrameState,
-    WINDOW_TITLE_BAR_HEIGHT, WINDOW_TOP_BAR_HEIGHT, MAIN_TOOLBAR_ROW_HEIGHT,
+    MAIN_TOOLBAR_ROW_HEIGHT, WINDOW_TITLE_BAR_HEIGHT, WINDOW_TOP_BAR_HEIGHT,
 };
 mod application_logs;
 pub(crate) use application_logs::{
@@ -208,10 +205,10 @@ pub(crate) use drag::{
     BreadcrumbDropTargetBounds, DirectoryFileDragTargetBounds, FileDragBlockedDirectoryBounds,
     FileDragDropIntent, FileDragHitTestBounds, FileDragNativeDndState, FileDragPhase,
     FileDragPreviewEntry, FileDragSpringHover, FileDragSpringSource, FileDragState,
-    FileDragStationaryAction,
-    FileDropEntryTargetBounds, FileDropHitTestBounds, LastActivationClick, PaneDragPointerPress,
-    PaneDragState, PaneDropTarget, SidebarBookmarkDragState, SidebarBookmarkDropSlot,
-    SidebarFileDragTargetBounds, TabDragMode, TabDragState, TabSplitTarget,
+    FileDragStationaryAction, FileDropEntryTargetBounds, FileDropHitTestBounds,
+    LastActivationClick, PaneDragPointerPress, PaneDragState, PaneDropTarget,
+    SidebarBookmarkDragState, SidebarBookmarkDropSlot, SidebarFileDragTargetBounds, TabDragMode,
+    TabDragState, TabSplitTarget,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -562,6 +559,8 @@ pub(crate) enum Message {
     Checksum(ChecksumMessage),
     ArchiveExtraction(ArchiveExtractionMessage),
     BatchRename(BatchRenameMessage),
+    /// 本地文件传输:二维码下载会话、LocalSend 直推、接收确认与设置。
+    Transfer(crate::app::transfer::TransferMessage),
     FileContextMenuExpansionChanged(FileContextMenuExpansion),
     DeleteSelectedPermanently,
     ContextMenuPreviewExpansionChanged(Option<FileAreaMenuItem>),
@@ -710,7 +709,10 @@ pub(crate) enum Message {
         page: ContextMenuSettingsPage,
         index: usize,
     },
-    ContextMenuSettingsDragStarted { page: ContextMenuSettingsPage, index: usize },
+    ContextMenuSettingsDragStarted {
+        page: ContextMenuSettingsPage,
+        index: usize,
+    },
     ContextMenuSettingsResetRequested(ContextMenuSettingsPage),
     ContextMenuSettingsResetConfirmed(ContextMenuSettingsPage),
     ThemeModeSelected(ThemeMode),

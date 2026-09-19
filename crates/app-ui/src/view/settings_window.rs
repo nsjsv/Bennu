@@ -247,6 +247,9 @@ fn settings_category_detail(browser: &FileBrowser) -> Element<'_, Message> {
         SettingsCategory::Files => {
             files_settings_detail(browser, scrollbar_visibility, scrollbar_viewport)
         }
+        SettingsCategory::Transfer => {
+            transfer_settings_detail(browser, scrollbar_visibility, scrollbar_viewport)
+        }
         SettingsCategory::Search => {
             search_settings_detail(browser, scrollbar_visibility, scrollbar_viewport)
         }
@@ -388,6 +391,132 @@ fn files_settings_detail(
     )
 }
 
+/// 传输设置页：接收目录、设备名与信任设备管理（R9）。
+fn transfer_settings_detail(
+    browser: &FileBrowser,
+    scrollbar_visibility: ScrollbarVisibility,
+    scrollbar_viewport: Option<ScrollbarViewport>,
+) -> Element<'_, Message> {
+    settings_detail_scroller(
+        column![
+            chrome_top_spacer(browser),
+            settings_group(
+                "Receive",
+                vec![receive_directory_row(browser), device_alias_row(browser),],
+            ),
+            settings_group("Trusted devices", vec![trusted_devices_section(browser)]),
+        ]
+        .spacing(SETTINGS_GROUP_SPACING)
+        .width(Length::Fill),
+        scrollbar_visibility,
+        scrollbar_viewport,
+    )
+}
+
+/// 接收目录行：当前生效目录 + 选择按钮；缺省显示 ~/Downloads。
+fn receive_directory_row(browser: &FileBrowser) -> Element<'_, Message> {
+    let configured = browser
+        .user_config()
+        .transfer_download_dir
+        .clone()
+        .map(|dir| dir.to_string_lossy().into_owned());
+    let current = configured
+        .unwrap_or_else(|| crate::localization::translate_current("Default: ~/Downloads"));
+    let choose = button(
+        row![
+            super::themed_icon(IconSymbol::Folder, IconTone::Normal, 14.0),
+            readable_text("Choose...").size(12),
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center),
+    )
+    .on_press(Message::Transfer(
+        crate::app::transfer::TransferMessage::DownloadDirChooserPressed,
+    ))
+    .padding([6, 10])
+    .style(context_menu_button_style());
+    column![
+        row![
+            readable_text("Receive directory")
+                .size(12)
+                .width(Length::Fill),
+            readable_text(current).size(12),
+            choose,
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+        localized_text("Files received from other devices are saved to this directory",).size(11),
+    ]
+    .spacing(3)
+    .into()
+}
+
+/// 设备名行：输入 + Save（提交后重启常驻服务生效）。
+fn device_alias_row(browser: &FileBrowser) -> Element<'_, Message> {
+    let input = text_input(
+        &crate::localization::translate_current("Device name"),
+        &browser.transfer_device_alias_input,
+    )
+    .on_input(|value| {
+        Message::Transfer(crate::app::transfer::TransferMessage::DeviceAliasInputChanged(value))
+    })
+    .on_submit(Message::Transfer(
+        crate::app::transfer::TransferMessage::DeviceAliasCommitted,
+    ))
+    .padding([6, 8])
+    .size(12)
+    .width(Length::Fill);
+    let save = button(container(readable_text("Save").size(12)).padding([6, 10]))
+        .on_press(Message::Transfer(
+            crate::app::transfer::TransferMessage::DeviceAliasCommitted,
+        ))
+        .style(context_menu_button_style());
+    row![
+        readable_text("Device name").size(12).width(Length::Fill),
+        input,
+        save,
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center)
+    .into()
+}
+
+/// 信任设备组：逐行展示别名 + 移除按钮；空表给说明文案。
+fn trusted_devices_section(browser: &FileBrowser) -> Element<'_, Message> {
+    let trusted = &browser.user_config().transfer_trusted_devices;
+    if trusted.is_empty() {
+        return column![
+            localized_text("No trusted devices").size(12),
+            localized_text("Files received from trusted devices are accepted automatically",)
+                .size(11),
+        ]
+        .spacing(3)
+        .into();
+    }
+    let mut rows = Vec::with_capacity(trusted.len());
+    for device in trusted {
+        let fingerprint = device.fingerprint.clone();
+        let remove = button(readable_text("Remove").size(11))
+            .on_press(Message::Transfer(
+                crate::app::transfer::TransferMessage::TrustedDeviceRemoved(fingerprint),
+            ))
+            .padding([4, 8])
+            .style(context_menu_button_style());
+        rows.push(
+            row![
+                readable_text(device.alias.clone())
+                    .size(12)
+                    .width(Length::Fill),
+                remove,
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .into(),
+        );
+    }
+    column(rows).spacing(6).width(Length::Fill).into()
+}
+
 fn shortcut_settings_detail(
     browser: &FileBrowser,
     scrollbar_visibility: ScrollbarVisibility,
@@ -404,7 +533,6 @@ fn shortcut_settings_detail(
         scrollbar_viewport,
     )
 }
-
 fn settings_detail_scroller<'a>(
     content: Column<'a, Message>,
     scrollbar_visibility: ScrollbarVisibility,
@@ -746,10 +874,13 @@ fn column_width_adjust_mode_label(mode: ColumnWidthAdjustMode) -> &'static str {
 }
 
 fn column_width_adjust_mode_dropdown(browser: &FileBrowser) -> Element<'static, Message> {
-    let options = [ColumnWidthAdjustMode::PerColumn, ColumnWidthAdjustMode::Uniform]
-        .into_iter()
-        .map(ColumnWidthAdjustModePickOption)
-        .collect::<Vec<_>>();
+    let options = [
+        ColumnWidthAdjustMode::PerColumn,
+        ColumnWidthAdjustMode::Uniform,
+    ]
+    .into_iter()
+    .map(ColumnWidthAdjustModePickOption)
+    .collect::<Vec<_>>();
 
     pick_list(
         options,

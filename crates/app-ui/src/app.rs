@@ -3,7 +3,6 @@ mod application_shutdown;
 pub(crate) mod archive_creation;
 pub(crate) mod archive_extraction;
 pub(crate) mod archive_password;
-mod smart_extract;
 mod batch_rename;
 pub(crate) mod checksum;
 mod column_resize;
@@ -14,9 +13,9 @@ pub(crate) mod convert;
 mod desktop_activation;
 mod directory_expansion_loading;
 mod directory_metadata_demand;
+mod directory_recovery;
 mod entry_changes;
 mod entry_hover_recalc;
-mod directory_recovery;
 mod events;
 mod file_drag_edge_scroll;
 mod file_grouping_rail_scroll;
@@ -47,8 +46,8 @@ pub(crate) mod preview_state;
 mod preview_window_view;
 mod properties;
 mod remote_mounts;
-pub(crate) mod right_preview_panel;
 mod rendering_settings;
+pub(crate) mod right_preview_panel;
 mod runtime;
 pub(crate) mod scrollbar;
 mod search;
@@ -60,6 +59,7 @@ mod shortcuts;
 mod sidebar_bookmarks;
 mod sidebar_devices;
 mod sidebar_resize;
+mod smart_extract;
 pub(crate) mod smooth_scroll;
 mod split_resize;
 mod startup;
@@ -67,6 +67,8 @@ mod startup_settings;
 mod tabs;
 mod text_input_shortcuts;
 mod thumbnailing;
+pub(crate) mod transfer;
+pub(crate) mod transfer_service;
 mod trash;
 #[cfg(test)]
 mod trash_tests;
@@ -136,17 +138,17 @@ use crate::model::{
     empty_directory_entry_snapshot, AddressBarTransition, AddressEditingSession,
     ApplicationLogViewState, AudioPreviewPlayback, BatchRenameState, BreadcrumbDropTargetBounds,
     BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, BrowserViewMode,
-    ColumnBrowserViewport, ColumnEntryBounds, ContextMenuState, DestructiveActionConfirmation,
+    ColumnBrowserViewport, ColumnEntryBounds, ContextMenuSettingsDragState,
+    ContextMenuSettingsPage, ContextMenuState, DestructiveActionConfirmation,
     DirectoryCollectionPhase, DirectoryEntrySnapshot, DirectoryLoadingPlaceholder,
-    DirectoryOrderPhase, ExpandedDirectory, FileAreaMenuItem, FileDragSpringHover,
-    FileDragState, FileDropPrompt,
-    FileDropSessionState, FilePropertiesState, IconGridExpansionState, IconGridViewport,
-    ImagePreviewViewport, ListColumnKind, Message, PaneDragPointerPress, PaneDragState,
-    PendingOperation, PreviewSize, PreviewState, PreviewWindowChromeState, PreviewWindowProfile,
-    ScrollbarRegion, SearchServiceState, SelectionMarquee, ContextMenuSettingsDragState,
-    ContextMenuSettingsPage, SettingsCategory, SettingsSubpage, SidebarBookmarkDragState,
-    SidebarBookmarkDropSlot, SidebarLocation, StartupDirectoryValidationRequest, TabDragState,
-    TextPreviewDocument, TransferConflictState, TrashRefreshState, VideoPreviewPlayback,
+    DirectoryOrderPhase, ExpandedDirectory, FileAreaMenuItem, FileDragSpringHover, FileDragState,
+    FileDropPrompt, FileDropSessionState, FilePropertiesState, IconGridExpansionState,
+    IconGridViewport, ImagePreviewViewport, ListColumnKind, Message, PaneDragPointerPress,
+    PaneDragState, PendingOperation, PreviewSize, PreviewState, PreviewWindowChromeState,
+    PreviewWindowProfile, ScrollbarRegion, SearchServiceState, SelectionMarquee, SettingsCategory,
+    SettingsSubpage, SidebarBookmarkDragState, SidebarBookmarkDropSlot, SidebarLocation,
+    StartupDirectoryValidationRequest, TabDragState, TextPreviewDocument, TransferConflictState,
+    TrashRefreshState, VideoPreviewPlayback,
 };
 use crate::network_connections::{NetworkConnectionEditorState, NetworkConnectionState};
 use crate::open_with::OpenWithState;
@@ -281,6 +283,16 @@ pub(crate) struct FileBrowser {
     properties_window: Option<window::Id>,
     pub(crate) properties: Option<FilePropertiesState>,
     properties_load_generation: u64,
+    /// 发送到手机辅助窗口（bennu-transfer）。
+    pub(crate) transfer_window: Option<window::Id>,
+    /// 常驻 LocalSend 服务运行时；None = 未启动或启动失败。
+    pub(crate) transfer_runtime: Option<transfer::LocalSendRuntime>,
+    /// 二维码下载会话；与 transfer_window 同生命周期。
+    pub(crate) transfer_session: Option<transfer::TransferSessionState>,
+    /// 接收确认 Modal 状态（未信任设备请求）。
+    pub(crate) incoming_transfer: Option<transfer::IncomingTransferConfirmation>,
+    /// 设置页设备名输入缓冲。
+    pub(crate) transfer_device_alias_input: String,
     pub(crate) tabs: Vec<BrowserTab>,
     pub(crate) active_tab_id: usize,
     tab_bar_reveal: TabBarReveal,
@@ -685,6 +697,11 @@ impl FileBrowser {
             properties_window: None,
             properties: None,
             properties_load_generation: 0,
+            transfer_window: None,
+            transfer_runtime: None,
+            transfer_session: None,
+            incoming_transfer: None,
+            transfer_device_alias_input: String::new(),
             tabs: vec![initial_tab],
             active_tab_id: 0,
             tab_bar_reveal: TabBarReveal::default(),
@@ -843,6 +860,13 @@ impl FileBrowser {
         }
 
         let mut subscriptions = vec![event::listen_with(global_event_message)];
+        // 常驻 LocalSend 服务事件：单流常驻，服务重启换代时重挂。
+        if let Some(runtime) = &self.transfer_runtime {
+            subscriptions.push(transfer_service::local_send_event_subscription(
+                runtime.generation,
+                runtime.events.resubscribe(),
+            ));
+        }
         if let Some((generation, remaining)) = self.global_error_notification_countdown() {
             subscriptions.push(
                 time::every(remaining)
@@ -941,8 +965,10 @@ impl FileBrowser {
         // spring 候选存在期间:tick 驱动进度环重绘,到点触发自动打开。
         if self.file_drag_spring_hover.is_some() {
             subscriptions.push(
-                time::every(crate::app::selection::spring_open::FILE_DRAG_SPRING_OPEN_TICK_INTERVAL)
-                    .map(|_| Message::FileDragSpringOpenTick),
+                time::every(
+                    crate::app::selection::spring_open::FILE_DRAG_SPRING_OPEN_TICK_INTERVAL,
+                )
+                .map(|_| Message::FileDragSpringOpenTick),
             );
         }
 
@@ -1030,6 +1056,9 @@ impl FileBrowser {
                 self.scrollbar_viewport_for(&ScrollbarRegion::Properties),
             );
             self.view_with_window_chrome(window, "Properties", content, None)
+        } else if self.transfer_window == Some(window) {
+            let content = crate::view::view_transfer_window(self);
+            self.view_with_window_chrome(window, "Transfer", content, None)
         } else if self.preview_window == Some(window) {
             let content =
                 self.preview_window_content(self.preview_window_bottom_controls.opacity());

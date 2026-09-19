@@ -1143,9 +1143,8 @@ impl FileBrowser {
             Message::SmartExtractSelected => self.smart_extract_selected(),
             Message::SmartExtractDestinationResolved {
                 archive,
-                current_directory,
                 single_root,
-            } => self.accept_smart_extract_destination(archive, current_directory, single_root),
+            } => self.accept_smart_extract_destination(archive, single_root),
             Message::ExtractSelectedToArchiveFolder => self.extract_selected_to_archive_folder(),
             Message::TrashOpened => Task::batch([
                 self.commit_rename_if_active(),

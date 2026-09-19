@@ -291,6 +291,90 @@ async fn canceled_zip_extraction_keeps_partial_progress_and_removes_destination(
 }
 
 #[tokio::test]
+async fn zip_extraction_into_existing_destination_succeeds() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("note.txt");
+    fs::write(&source, b"content").unwrap();
+    let archive = dir.path().join("note.zip");
+    create_archive_with_progress(
+        ArchiveCreationRequest {
+            sources: vec![source],
+            target: archive.clone(),
+            format: ArchiveFormat::Zip,
+            compression_level: ArchiveCompressionLevel::Store,
+            password: None,
+        },
+        tokio_util::sync::CancellationToken::new(),
+        |_| {},
+    )
+    .await
+    .unwrap();
+
+    // 智能解压单根语义：目的地是已存在的目录（如压缩包所在文件夹）。
+    let destination = dir.path().join("already-there");
+    fs::create_dir(&destination).unwrap();
+    fs::write(destination.join("keep.txt"), b"keep").unwrap();
+
+    extract_archive_with_progress(
+        ArchiveExtractionRequest {
+            archive,
+            destination: destination.clone(),
+            password: None,
+        },
+        tokio_util::sync::CancellationToken::new(),
+        |_| {},
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(fs::read(destination.join("keep.txt")).unwrap(), b"keep");
+    assert_eq!(fs::read(destination.join("note.txt")).unwrap(), b"content");
+}
+
+#[tokio::test]
+async fn failed_zip_extraction_keeps_pre_existing_destination() {
+    let dir = tempdir().unwrap();
+    let payload_dir = dir.path().join("payload");
+    fs::create_dir(&payload_dir).unwrap();
+    fs::write(payload_dir.join("inner.txt"), b"inner").unwrap();
+    let archive = dir.path().join("payload.zip");
+    create_archive_with_progress(
+        ArchiveCreationRequest {
+            sources: vec![payload_dir],
+            target: archive.clone(),
+            format: ArchiveFormat::Zip,
+            compression_level: ArchiveCompressionLevel::Store,
+            password: None,
+        },
+        tokio_util::sync::CancellationToken::new(),
+        |_| {},
+    )
+    .await
+    .unwrap();
+
+    // 目的地已存在且内有同名普通文件，解压建目录必然失败；
+    // 目录不是本次创建的，失败后必须原样保留。
+    let destination = dir.path().join("occupied");
+    fs::create_dir(&destination).unwrap();
+    fs::write(destination.join("payload"), b"precious").unwrap();
+
+    let error = extract_archive_with_progress(
+        ArchiveExtractionRequest {
+            archive,
+            destination: destination.clone(),
+            password: None,
+        },
+        tokio_util::sync::CancellationToken::new(),
+        |_| {},
+    )
+    .await
+    .unwrap_err();
+
+    assert!(matches!(error, FileError::CreateDirectory { .. }));
+    assert_eq!(fs::read(destination.join("payload")).unwrap(), b"precious");
+}
+
+#[tokio::test]
 async fn tar_gz_extraction_does_not_emit_determinate_progress() {
     let dir = tempdir().unwrap();
     let source = dir.path().join("note.txt");

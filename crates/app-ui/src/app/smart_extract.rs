@@ -10,30 +10,36 @@ use file_core::ArchiveExtractionRequest;
 use super::FileBrowser;
 use crate::model::Message;
 
-/// 智能解压目的地：包内所有成员在同一根目录下时直接落当前目录；
-/// 否则新建「<包名>/」文件夹（已存在则追加 `(2)`、`(3)`… 序号）。
+/// 智能解压目的地：包内所有成员在同一根目录下时直接落压缩包所在文件夹
+/// （目录已存在，解压管线直接解入）；否则新建「<包名>/」文件夹
+/// （已存在则追加 `(2)`、`(3)`… 序号）。
+///
+/// 目的地固定按压缩包父目录计算而不是视图当前目录：搜索结果等视图里
+/// 右键时，视图根目录不是用户预期的解压位置。
 pub(super) fn smart_extraction_destination(
     archive: &Path,
-    current_directory: &Path,
     single_root_name: Option<String>,
     destination_exists: impl Fn(&Path) -> bool,
 ) -> PathBuf {
+    let target_directory = archive.parent().unwrap_or_else(|| Path::new("."));
     match single_root_name {
-        Some(_) => current_directory.to_path_buf(),
+        Some(_) => target_directory.to_path_buf(),
         None => {
-            let base = current_directory.join(archive_folder_name(archive));
+            let base = target_directory.join(archive_folder_name(archive));
             unique_folder_destination(base, 2, destination_exists)
         }
     }
 }
 
-/// 「解压到 <包名>/」的目的地：无条件包一层，重名自动递增。
+/// 「解压到 <包名>/」的目的地：无条件在压缩包所在文件夹包一层，重名自动递增。
 pub(super) fn archive_folder_destination(
     archive: &Path,
-    current_directory: &Path,
     destination_exists: impl Fn(&Path) -> bool,
 ) -> PathBuf {
-    let base = current_directory.join(archive_folder_name(archive));
+    let base = archive
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(archive_folder_name(archive));
     unique_folder_destination(base, 2, destination_exists)
 }
 
@@ -83,12 +89,10 @@ impl FileBrowser {
         if archives.is_empty() {
             return iced::Task::none();
         }
-        let current_directory = self.current_dir.clone();
         iced::Task::batch(
             archives
                 .into_iter()
                 .map(|archive| {
-                    let resolved_directory = current_directory.clone();
                     iced::Task::perform(
                         async move {
                             let single_root = file_core::single_root_member_name(&archive)
@@ -98,7 +102,6 @@ impl FileBrowser {
                         },
                         move |(archive, single_root)| Message::SmartExtractDestinationResolved {
                             archive,
-                            current_directory: resolved_directory.clone(),
                             single_root,
                         },
                     )
@@ -111,7 +114,6 @@ impl FileBrowser {
     pub(super) fn accept_smart_extract_destination(
         &mut self,
         archive: PathBuf,
-        current_directory: PathBuf,
         single_root: Result<Option<String>, String>,
     ) -> iced::Task<Message> {
         let single_root_name = match single_root {
@@ -128,12 +130,9 @@ impl FileBrowser {
                 None
             }
         };
-        let destination = smart_extraction_destination(
-            &archive,
-            &current_directory,
-            single_root_name,
-            |candidate| candidate.is_dir(),
-        );
+        let destination = smart_extraction_destination(&archive, single_root_name, |candidate| {
+            candidate.is_dir()
+        });
         self.begin_archive_extraction(archive, destination)
     }
 
@@ -147,14 +146,11 @@ impl FileBrowser {
         if archives.is_empty() {
             return iced::Task::none();
         }
-        let current_directory = self.current_dir.clone();
         let commands = archives
             .into_iter()
             .map(|archive| {
                 let destination =
-                    archive_folder_destination(&archive, &current_directory.clone(), |candidate| {
-                        candidate.is_dir()
-                    });
+                    archive_folder_destination(&archive, |candidate| candidate.is_dir());
                 self.begin_archive_extraction(archive, destination)
             })
             .collect::<Vec<_>>();
@@ -189,10 +185,9 @@ mod tests {
     }
 
     #[test]
-    fn single_root_extracts_directly_into_current_directory() {
+    fn single_root_extracts_into_archive_parent_directory() {
         let destination = smart_extraction_destination(
-            Path::new("/home/u/photos.zip"),
-            Path::new("/home/u/docs"),
+            Path::new("/home/u/docs/photos.zip"),
             Some("photos".to_owned()),
             no_existing,
         );
@@ -200,38 +195,27 @@ mod tests {
     }
 
     #[test]
-    fn scattered_members_create_archive_named_folder() {
-        let destination = smart_extraction_destination(
-            Path::new("/home/u/photos.zip"),
-            Path::new("/home/u/docs"),
-            None,
-            no_existing,
-        );
+    fn scattered_members_create_archive_named_folder_beside_archive() {
+        let destination =
+            smart_extraction_destination(Path::new("/home/u/docs/photos.zip"), None, no_existing);
         assert_eq!(destination, PathBuf::from("/home/u/docs/photos"));
     }
 
     #[test]
     fn duplicate_destination_appends_counter() {
-        let destination = smart_extraction_destination(
-            Path::new("/home/u/photos.zip"),
-            Path::new("/home/u/docs"),
-            None,
-            |candidate| {
+        let destination =
+            smart_extraction_destination(Path::new("/home/u/docs/photos.zip"), None, |candidate| {
                 candidate
                     .file_name()
                     .is_none_or(|name| name != "photos (3)")
-            },
-        );
+            });
         assert_eq!(destination, PathBuf::from("/home/u/docs/photos (3)"));
     }
 
     #[test]
     fn archive_folder_destination_always_wraps_a_layer() {
-        let destination = archive_folder_destination(
-            Path::new("/home/u/photos.zip"),
-            Path::new("/home/u/docs"),
-            no_existing,
-        );
+        let destination =
+            archive_folder_destination(Path::new("/home/u/docs/photos.zip"), no_existing);
         assert_eq!(destination, PathBuf::from("/home/u/docs/photos"));
     }
 }

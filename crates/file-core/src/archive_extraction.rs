@@ -221,9 +221,9 @@ fn extract_zip_archive_blocking(
         completed_entries: 0,
         total_entries: workload.entry_bytes.len(),
     });
-    create_destination_directory(&request.destination)?;
+    let destination_created = ensure_destination_directory(&request.destination)?;
     let outcome = extract_zip_entries(&request, &mut controls, &runtime, &workload, &mut progress);
-    if outcome.is_err() {
+    if outcome.is_err() && destination_created {
         let _ = fs::remove_dir_all(&request.destination);
     }
     outcome.map(|_| request.destination)
@@ -438,7 +438,7 @@ fn extract_tar_archive_blocking(
     runtime: Handle,
 ) -> Result<PathBuf, FileError> {
     archive_control_checkpoint(&mut controls, &runtime)?;
-    create_destination_directory(&request.destination)?;
+    let destination_created = ensure_destination_directory(&request.destination)?;
     let outcome = match compression {
         TarCompression::Plain => {
             let file = open_archive_file(&request.archive)?;
@@ -454,7 +454,7 @@ fn extract_tar_archive_blocking(
             )
         }
     };
-    if outcome.is_err() {
+    if outcome.is_err() && destination_created {
         let _ = fs::remove_dir_all(&request.destination);
     }
     outcome.map(|_| request.destination)
@@ -503,9 +503,9 @@ async fn extract_archive_with_seven_zip(
     for command_name in SEVEN_ZIP_COMMAND_NAMES {
         match test_seven_zip_archive(command_name, &request, &cancel).await {
             Ok(()) => {
-                create_destination_directory(&request.destination)?;
+                let destination_created = ensure_destination_directory(&request.destination)?;
                 let outcome = run_seven_zip_extract(command_name, &request, &cancel).await;
-                if outcome.is_err() {
+                if outcome.is_err() && destination_created {
                     let _ = fs::remove_dir_all(&request.destination);
                 }
                 return outcome.map(|_| request.destination);
@@ -698,11 +698,18 @@ fn archive_extraction_directory_name(archive: &Path) -> Option<OsString> {
     archive.file_stem().map(OsStr::to_os_string)
 }
 
-fn create_destination_directory(destination: &Path) -> Result<(), FileError> {
+/// 目的地允许已存在：右键智能解压的单根语义直接解入压缩包所在文件夹。
+/// 返回本次是否新建了目录——失败清理只移除自建目录，
+/// 解入已存在目录失败时必须原样保留用户数据。
+fn ensure_destination_directory(destination: &Path) -> Result<bool, FileError> {
+    if destination.is_dir() {
+        return Ok(false);
+    }
     fs::create_dir(destination).map_err(|source| FileError::CreateDirectory {
         path: destination.to_path_buf(),
         source,
-    })
+    })?;
+    Ok(true)
 }
 
 fn reject_tar_password(request: &ArchiveExtractionRequest) -> Result<(), FileError> {

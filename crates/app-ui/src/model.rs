@@ -821,10 +821,9 @@ pub(crate) enum Message {
     /// 智能解压的单根判定回流：据此计算目的地并启动既有解压流。
     SmartExtractDestinationResolved {
         archive: PathBuf,
-        current_directory: PathBuf,
         single_root: Result<Option<String>, String>,
     },
-    /// 右键「解压到 <包名>/」：无条件在当前目录建包名文件夹后逐个解压。
+    /// 右键「解压到 <包名>/」：无条件在归档旁建包名文件夹后逐个解压。
     ExtractSelectedToArchiveFolder,
     TrashOpened,
     Back,

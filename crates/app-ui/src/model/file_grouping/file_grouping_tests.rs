@@ -409,9 +409,18 @@ fn index_label_of(key: FileGroupKey, language: UiLanguage) -> String {
 
 #[test]
 fn index_labels_use_letters_for_name_initial_dimension() {
-    assert_eq!(index_label_of(name_initial_key("apple.txt"), UiLanguage::English), "A");
-    assert_eq!(index_label_of(name_initial_key("中文.txt"), UiLanguage::Chinese), "Z");
-    assert_eq!(index_label_of(name_initial_key("1file"), UiLanguage::English), "#");
+    assert_eq!(
+        index_label_of(name_initial_key("apple.txt"), UiLanguage::English),
+        "A"
+    );
+    assert_eq!(
+        index_label_of(name_initial_key("中文.txt"), UiLanguage::Chinese),
+        "Z"
+    );
+    assert_eq!(
+        index_label_of(name_initial_key("1file"), UiLanguage::English),
+        "#"
+    );
 }
 
 #[test]
@@ -451,11 +460,17 @@ fn index_labels_use_short_words_and_month_short_forms_for_dates() {
     }
     // 月份桶的短格式:英文取月名前三字母,中文"N月"。
     assert_eq!(
-        index_label_of(FileGroupKey::Date(DateBucket::Month(8)), UiLanguage::English),
+        index_label_of(
+            FileGroupKey::Date(DateBucket::Month(8)),
+            UiLanguage::English
+        ),
         "Aug"
     );
     assert_eq!(
-        index_label_of(FileGroupKey::Date(DateBucket::Month(8)), UiLanguage::Chinese),
+        index_label_of(
+            FileGroupKey::Date(DateBucket::Month(8)),
+            UiLanguage::Chinese
+        ),
         "8月"
     );
 }
@@ -498,13 +513,15 @@ fn index_labels_compress_size_ranges_with_endpoint_semantics() {
 #[test]
 fn compact_size_labels_share_compression_with_regular_size_display() {
     assert_eq!(crate::formatting::format_file_size_compact(512), "512B");
-    assert_eq!(crate::formatting::format_file_size_compact(1_258_291), "1.2M");
+    assert_eq!(
+        crate::formatting::format_file_size_compact(1_258_291),
+        "1.2M"
+    );
     assert_eq!(crate::formatting::format_file_size(1_258_291), "1.2 MB");
     // 数值部分逐字一致,仅单位缩写与空格不同。
     assert_eq!(
         crate::formatting::format_file_size_compact(47_185_920),
-        crate::formatting::format_file_size(47_185_920)
-            .replace(" MB", "M")
+        crate::formatting::format_file_size(47_185_920).replace(" MB", "M")
     );
 }
 

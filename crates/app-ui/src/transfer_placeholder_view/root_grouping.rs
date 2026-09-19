@@ -15,8 +15,8 @@ use crate::config::UiLanguage;
 use crate::localization::current_language;
 use crate::model::{
     date_group_key, dynamic_size_buckets, kind_category_group_key, name_initial_group_key,
-    partition_files_into_groups, size_group_bucket_index, FileGroupingContext, FileGroupingMode,
-    FileGroupKey, FileGroupSection,
+    partition_files_into_groups, size_group_bucket_index, FileGroupKey, FileGroupSection,
+    FileGroupingContext, FileGroupingMode,
 };
 use crate::transfer_placeholders::MergedTransferItem;
 
@@ -118,12 +118,10 @@ impl RootGrouping {
             }
             FileGroupingMode::ModifiedTime
             | FileGroupingMode::CreatedTime
-            | FileGroupingMode::AccessedTime => {
-                FileGroupKey::Date(date_group_key(
-                    self.item_group_timestamp(item, metadata_for_entry),
-                    self.now,
-                ))
-            }
+            | FileGroupingMode::AccessedTime => FileGroupKey::Date(date_group_key(
+                self.item_group_timestamp(item, metadata_for_entry),
+                self.now,
+            )),
             // for_pane_root 边界已过滤 None 模式,此处不可达;保留以穷尽匹配。
             FileGroupingMode::None => unreachable!("grouping mode None never reaches partition"),
         }
@@ -171,10 +169,7 @@ impl RootGrouping {
 /// 开关影响;两段内部都保持合并流原序。
 pub(crate) fn split_directories_first<'a>(
     merged: Vec<MergedTransferItem<'a>>,
-) -> (
-    Vec<MergedTransferItem<'a>>,
-    Vec<MergedTransferItem<'a>>,
-) {
+) -> (Vec<MergedTransferItem<'a>>, Vec<MergedTransferItem<'a>>) {
     let (directories, files): (Vec<_>, Vec<_>) =
         merged.into_iter().partition(merged_item_is_directory);
     (directories, files)

@@ -8,23 +8,21 @@ use super::super::copy::{
     copy_path_with_inspected_source, FileOperationControls, FileTransferOptions,
     TransferConflictStrategy,
 };
-use super::super::transfer_strategy::copy_regular_file_payload;
-use super::super::transfer_strategy::RegularFilePayloadCopy;
 use super::super::ensure_replace_target_does_not_contain_source_path;
 use super::super::transfer_metadata::apply_transfer_metadata_best_effort;
 use super::super::transfer_object::inspect_transfer_source;
+use super::super::transfer_strategy::copy_regular_file_payload;
+use super::super::transfer_strategy::RegularFilePayloadCopy;
 use super::{
     build_source_manifest_with_controls, fingerprint_object_with_controls, inspect_file_identity,
     plan_owned_artifact, recover_owned_artifact, remove_owned_artifact, rename_noreplace,
     sync_parent_blocking, sync_tree_blocking, verify_source_manifest_with_controls,
-    BackupCreationTransfer,
-    CommitPayload, CommitTransfer, FileIdentity, FileObjectKind,
-    ManifestCheckpointBatchUpdate, NoReplaceRenameError, OwnedArtifact,
-    OwnedArtifactKind, PreparedTransfer, ProofContext, RecoverableTransferError,
-    RecoverableTransferOperation, RecoverableTransferOutcome, SourceManifest,
-    StagedSourceLocation, StagingTransfer, TransferCheckpoint, TransferExecutionKind,
-    TransferFingerprint, TransferJournal, TransferJournalError, TransferJournalMutation,
-    TransferJournalRecord,
+    BackupCreationTransfer, CommitPayload, CommitTransfer, FileIdentity, FileObjectKind,
+    ManifestCheckpointBatchUpdate, NoReplaceRenameError, OwnedArtifact, OwnedArtifactKind,
+    PreparedTransfer, ProofContext, RecoverableTransferError, RecoverableTransferOperation,
+    RecoverableTransferOutcome, SourceManifest, StagedSourceLocation, StagingTransfer,
+    TransferCheckpoint, TransferExecutionKind, TransferFingerprint, TransferJournal,
+    TransferJournalError, TransferJournalMutation, TransferJournalRecord,
 };
 use crate::transfer_conflict::{
     available_transfer_target_path_candidate, transfer_target_metadata_if_exists,
@@ -98,7 +96,10 @@ pub async fn advance_recoverable_transfer<J: TransferJournal>(
     journal: &J,
     transfer_options: &FileTransferOptions,
 ) -> Result<TransferAdvance, RecoverableTransferError> {
-    let proof = ProofContext::new(record.request.verification, transfer_options.proof_memo.clone());
+    let proof = ProofContext::new(
+        record.request.verification,
+        transfer_options.proof_memo.clone(),
+    );
     let checkpoint = record.checkpoint.clone();
     validate_checkpoint_semantics(record, &checkpoint)?;
     if checkpoint_accepts_controls(&checkpoint) {
@@ -368,14 +369,11 @@ async fn prepare_transfer<J: TransferJournal>(
                 payload: CommitPayload::DirectSource {
                     identity: prepared.source_identity.clone(),
                 },
-                fingerprint: TransferFingerprint::Blake3(
-                    prepared.source_fingerprint.ok_or_else(|| {
-                        RecoverableTransferError::InvalidCheckpoint {
-                            message: "direct move has no preflight content fingerprint"
-                                .to_owned(),
-                        }
-                    })?,
-                ),
+                fingerprint: TransferFingerprint::Blake3(prepared.source_fingerprint.ok_or_else(
+                    || RecoverableTransferError::InvalidCheckpoint {
+                        message: "direct move has no preflight content fingerprint".to_owned(),
+                    },
+                )?),
                 backup_identity: None,
             })
         }
@@ -655,9 +653,7 @@ async fn stage_transfer<J: TransferJournal>(
                     source_hasher: None,
                 })
                 .await
-                .map_err(|error_source| {
-                    RecoverableTransferError::FileOperation(error_source)
-                })?;
+                .map_err(|error_source| RecoverableTransferError::FileOperation(error_source))?;
                 kernel_clone_used = payload_outcome.strategy
                     == crate::ops::transfer_strategy::PayloadCopyStrategy::KernelClone;
                 // 快照比对按源 mtime(2 秒桶)校验,FICLONE 只克隆数据块,
@@ -714,9 +710,9 @@ async fn stage_transfer<J: TransferJournal>(
             payload_identity: payload_identity.clone(),
         }
     } else {
-        let fingerprint =
-            proof.fingerprint_object_with_controls(&payload_path, &transfer_options.controls)
-                .await?;
+        let fingerprint = proof
+            .fingerprint_object_with_controls(&payload_path, &transfer_options.controls)
+            .await?;
         TransferFingerprint::Blake3(fingerprint)
     };
     if inspect_file_identity(&payload_path).await? != payload_identity {

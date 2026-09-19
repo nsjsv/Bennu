@@ -15,12 +15,12 @@ async fn supervision_adopts_a_foreign_nonterminal_task_with_a_free_lease() {
     let mut owner = FileOperationQueue::new();
     owner.set_store(store.clone());
     let transfers = vec![QueuedTransfer::new(source.clone(), target.clone())];
-    let FileOperationEnqueueOutcome::Queued { task_id } = owner.enqueue(
-        QueuedFileOperation::Move {
+    let FileOperationEnqueueOutcome::Queued { task_id } =
+        owner.enqueue(QueuedFileOperation::Move {
             transfers: transfers.clone(),
             verification: FileOperationVerification::BasicMetadata,
-        },
-    ) else {
+        })
+    else {
         panic!("recoverable move should enqueue");
     };
     let stored_task_id = owner.tasks()[0].stored_id.unwrap();
@@ -38,8 +38,7 @@ async fn supervision_adopts_a_foreign_nonterminal_task_with_a_free_lease() {
         FileTransferOptions::new(running.controls.clone()),
     )
     .await
-    .unwrap()
-    else {
+    .unwrap() else {
         panic!("fresh same-filesystem move should prepare a direct move intent");
     };
     let batch = run_direct_move_batch_to_durable_renamed(
@@ -50,7 +49,10 @@ async fn supervision_adopts_a_foreign_nonterminal_task_with_a_free_lease() {
     )
     .await
     .unwrap();
-    assert!(matches!(batch.as_slice(), [DirectMoveBatchRecord::Renamed(_)]));
+    assert!(matches!(
+        batch.as_slice(),
+        [DirectMoveBatchRecord::Renamed(_)]
+    ));
     assert!(tokio::fs::symlink_metadata(&source).await.is_err());
     drop(running);
     drop(journal);
@@ -85,11 +87,11 @@ async fn supervision_adopts_a_foreign_nonterminal_task_with_a_free_lease() {
     assert_eq!(tokio::fs::read(&target).await.unwrap(), b"adopt-me");
     // 终态由 UI 的 Finished 处理落账(queue.finish);认领任务以存储 id 结账。
     assert_eq!(
-        survivor.finish(
-            stored_task_id,
-            FileOperationFinish::Succeeded,
-        ),
-        (Some(crate::operation_queue::FileOperationTerminalStatus::Completed), None)
+        survivor.finish(stored_task_id, FileOperationFinish::Succeeded,),
+        (
+            Some(crate::operation_queue::FileOperationTerminalStatus::Completed),
+            None
+        )
     );
     assert!(store
         .read_transfer_recovery(stored_task_id)

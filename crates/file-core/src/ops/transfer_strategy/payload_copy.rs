@@ -76,8 +76,15 @@ pub async fn copy_regular_file_payload(
     loop {
         let outcome = match attempted {
             PayloadCopyStrategy::KernelClone => {
-                try_kernel_clone(source, target, &source_file, &target_file, bytes_total, progress)
-                    .await
+                try_kernel_clone(
+                    source,
+                    target,
+                    &source_file,
+                    &target_file,
+                    bytes_total,
+                    progress,
+                )
+                .await
             }
             PayloadCopyStrategy::KernelRange => {
                 try_kernel_range(
@@ -136,7 +143,9 @@ pub async fn copy_regular_file_payload(
 
 enum StrategyFailure {
     /// 设备/文件系统不支持该策略；目标内容已被重置为空，可降级重试。
-    UnsupportedDevice { from: PayloadCopyStrategy },
+    UnsupportedDevice {
+        from: PayloadCopyStrategy,
+    },
     Cancelled,
     ApplicationStopping,
     Io(io::Error),

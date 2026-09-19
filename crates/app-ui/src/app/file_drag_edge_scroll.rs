@@ -210,7 +210,10 @@ mod tests {
             browser.main_panes_area_top() + 5.0,
         ));
 
-        let plan = browser.file_drag_edge_scroll.clone().expect("plan expected");
+        let plan = browser
+            .file_drag_edge_scroll
+            .clone()
+            .expect("plan expected");
         assert!(matches!(plan.region, ScrollbarRegion::PaneList(_)));
         assert!(plan.offset.y < 0.0 && plan.offset.x == 0.0);
 

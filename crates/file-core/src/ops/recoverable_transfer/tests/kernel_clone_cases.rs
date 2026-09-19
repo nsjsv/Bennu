@@ -81,10 +81,7 @@ async fn basic_single_file_copy_records_kernel_clone_proof_only_when_ficlone_hit
     let cloned = ficlone_supported(directory.path());
     match completed_fingerprint(&record) {
         TransferFingerprint::KernelClone { payload_identity } => {
-            assert!(
-                cloned,
-                "克隆证明只允许出现在真实支持 FICLONE 的文件系统上"
-            );
+            assert!(cloned, "克隆证明只允许出现在真实支持 FICLONE 的文件系统上");
             let payload_target_identity =
                 crate::ops::recoverable_transfer::inspect_file_identity(&target)
                     .await
@@ -221,9 +218,7 @@ async fn kernel_clone_commit_intent_recovery_blocks_on_tampered_payload() {
     // 抓住;KernelClone 证明路径靠 size 失配抓住。两者都不得带病提交。
     let payload_path = match &record.checkpoint {
         TransferCheckpoint::CommitIntent(commit) => match &commit.payload {
-            crate::ops::CommitPayload::Artifact { artifact, .. } => {
-                artifact.plan.payload_path()
-            }
+            crate::ops::CommitPayload::Artifact { artifact, .. } => artifact.plan.payload_path(),
             crate::ops::CommitPayload::DirectSource { .. } => {
                 return;
             }

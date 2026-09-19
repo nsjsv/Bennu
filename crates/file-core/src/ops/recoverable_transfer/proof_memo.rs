@@ -44,10 +44,8 @@ pub fn memo_lookup(
 ) -> Result<Option<ObjectFingerprint>, RecoverableTransferError> {
     memo.lock()
         .map(|memo| memo.lookup(key))
-        .map_err(|poison_error| {
-            RecoverableTransferError::Journal {
-                message: format!("proof memo poisoned: {poison_error}"),
-            }
+        .map_err(|poison_error| RecoverableTransferError::Journal {
+            message: format!("proof memo poisoned: {poison_error}"),
         })
 }
 
@@ -58,9 +56,7 @@ pub fn memo_insert(
 ) -> Result<(), RecoverableTransferError> {
     memo.lock()
         .map(|mut memo| memo.insert(key, fingerprint))
-        .map_err(|poison_error| {
-            RecoverableTransferError::Journal {
-                message: format!("proof memo poisoned: {poison_error}"),
-            }
+        .map_err(|poison_error| RecoverableTransferError::Journal {
+            message: format!("proof memo poisoned: {poison_error}"),
         })
 }

@@ -146,7 +146,10 @@ fn last_search_scope_directory_restores_last_location_scope() {
         Some(LastSearchScope::Directory(PathBuf::from("/downloads"))),
     );
 
-    assert_eq!(workspace.selected_scope(), SearchDirectoryScope::LastLocation);
+    assert_eq!(
+        workspace.selected_scope(),
+        SearchDirectoryScope::LastLocation
+    );
     assert_eq!(
         workspace.query_scope(),
         SearchScope::Directory(PathBuf::from("/downloads"))
@@ -206,7 +209,10 @@ fn last_search_scope_directory_offers_last_location_from_home_too() {
         Some(LastSearchScope::Directory(PathBuf::from("/downloads"))),
     );
 
-    assert_eq!(workspace.selected_scope(), SearchDirectoryScope::LastLocation);
+    assert_eq!(
+        workspace.selected_scope(),
+        SearchDirectoryScope::LastLocation
+    );
     assert_eq!(
         workspace.available_scopes(),
         [

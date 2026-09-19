@@ -295,7 +295,10 @@ fn anchor_bottom_right_still_expands_from_cursor() {
 fn center_max_height_excludes_reserved_chrome() {
     let max_size = floating_max_size(FloatingPlacement::Center, window_size(), window_area());
 
-    assert_eq!(max_size.width, window_size().width - FLOATING_SURFACE_MARGIN * 2.0);
+    assert_eq!(
+        max_size.width,
+        window_size().width - FLOATING_SURFACE_MARGIN * 2.0
+    );
     assert_eq!(
         max_size.height,
         window_size().height - TOOLBAR_HEIGHT - BOTTOM_STRIP_HEIGHT - FLOATING_SURFACE_MARGIN * 2.0

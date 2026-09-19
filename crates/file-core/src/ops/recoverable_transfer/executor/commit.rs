@@ -13,11 +13,10 @@ use crate::ops::recoverable_transfer::{
     recover_owned_artifact, remove_empty_owned_artifact, rename_noreplace, validate_owned_artifact,
     verify_source_manifest_with_controls, BackupCreationTransfer, CommitPayload, CommitTransfer,
     CommittedTransfer, CompletedTarget, FileIdentity, FileObjectKind, NoReplaceRenameError,
-    OwnedArtifact, OwnedArtifactKind, OwnedTreeEntryDeletionIntent, PreparedTransfer,
-    ProofContext, RecoverableTransferError, RecoverableTransferOperation, RetiredSource,
-    SourceDisposition, SourceManifestEntry, SourceRetirementPlan, StagedSourceLocation,
-    TransferCheckpoint, TransferExecutionKind, TransferFingerprint, TransferJournal,
-    TransferJournalRecord,
+    OwnedArtifact, OwnedArtifactKind, OwnedTreeEntryDeletionIntent, PreparedTransfer, ProofContext,
+    RecoverableTransferError, RecoverableTransferOperation, RetiredSource, SourceDisposition,
+    SourceManifestEntry, SourceRetirementPlan, StagedSourceLocation, TransferCheckpoint,
+    TransferExecutionKind, TransferFingerprint, TransferJournal, TransferJournalRecord,
 };
 use crate::ops::FileOperationControls;
 use crate::transfer_conflict::available_transfer_target_path_candidate;
@@ -208,7 +207,9 @@ pub(super) async fn create_replace_backup<J: TransferJournal>(
                 });
             }
             if let Some(expected_fingerprint) = backup.prepared.expected_target_fingerprint {
-                if proof.fingerprint_object(&backup.prepared.resolved_target).await?
+                if proof
+                    .fingerprint_object(&backup.prepared.resolved_target)
+                    .await?
                     != expected_fingerprint
                 {
                     return Err(RecoverableTransferError::TargetConflict {
@@ -579,11 +580,13 @@ pub(super) async fn retire_source<J: TransferJournal>(
     crate::ops::recoverable_transfer::validate_owned_artifact(&artifact).await?;
     // 源退休的证明链要求全文哈希:KernelClone 证明不可能出现在 Move
     // (克隆候选已排除 Move),此处还原 Blake3 即可;若未来出现则拒绝。
-    let committed_fingerprint = retirement.committed.fingerprint.as_blake3().ok_or_else(|| {
-        RecoverableTransferError::InvalidCheckpoint {
+    let committed_fingerprint = retirement
+        .committed
+        .fingerprint
+        .as_blake3()
+        .ok_or_else(|| RecoverableTransferError::InvalidCheckpoint {
             message: "source retirement requires a content fingerprint".to_owned(),
-        }
-    })?;
+        })?;
     let prepared = PreparedTransfer {
         source_identity: manifest_root_identity(record_manifest(record)?)?.clone(),
         resolved_target: retirement.committed.final_target.clone(),
@@ -853,8 +856,7 @@ async fn advance_owned_tree_entry_deletion(
         }
         (false, true) => {
             if intent.deletion_slot_identity.is_none() {
-                if let Err(error) =
-                    verify_legacy_deletion_entry(deletion_slot, intent, proof).await
+                if let Err(error) = verify_legacy_deletion_entry(deletion_slot, intent, proof).await
                 {
                     restore_unverified_deletion_slot(
                         &entry_path,
@@ -1091,7 +1093,9 @@ pub(super) async fn verify_completed_target(
 ) -> Result<(), RecoverableTransferError> {
     let current_identity = inspect_file_identity(&completed.path).await?;
     if current_identity != completed.identity
-        || !proof.matches(&completed.path, &completed.fingerprint).await?
+        || !proof
+            .matches(&completed.path, &completed.fingerprint)
+            .await?
     {
         return Err(RecoverableTransferError::TargetConflict {
             path: completed.path.clone(),

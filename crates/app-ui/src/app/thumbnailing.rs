@@ -664,8 +664,12 @@ impl FileBrowser {
                     .enqueue_request(request, work.purpose, work.priority);
             }
             (ThumbnailLoadPolicy::CacheOnly, Some(scope)) => {
-                self.thumbnail_cache
-                    .enqueue_cached_request_for_scope(request, work.purpose, work.priority, scope);
+                self.thumbnail_cache.enqueue_cached_request_for_scope(
+                    request,
+                    work.purpose,
+                    work.priority,
+                    scope,
+                );
             }
             (ThumbnailLoadPolicy::CacheOnly, None) => {
                 self.thumbnail_cache

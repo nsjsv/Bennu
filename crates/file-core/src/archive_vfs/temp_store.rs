@@ -30,10 +30,7 @@ pub(crate) async fn materialize_innermost_archive(
 
     let cache_key = compute_cache_key(outermost, boundaries)?;
     let cache_path = cache_file_path(&cache_key, boundaries);
-    if tokio::fs::try_exists(&cache_path)
-        .await
-        .unwrap_or(false)
-    {
+    if tokio::fs::try_exists(&cache_path).await.unwrap_or(false) {
         return Ok(cache_path);
     }
 

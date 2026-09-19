@@ -522,10 +522,7 @@ fn vertical_wheel_delta(shift_pressed: bool, delta: mouse::ScrollDelta) -> Wheel
             mode: WheelScrollMode::MosAnimated,
         },
         mouse::ScrollDelta::Pixels { x: _, y } => WheelScrollDelta {
-            delta: SmoothScrollDelta {
-                x: 0.0,
-                y: -y,
-            },
+            delta: SmoothScrollDelta { x: 0.0, y: -y },
             mode: WheelScrollMode::Direct,
         },
     }
@@ -648,10 +645,7 @@ mod tests {
         assert_eq!(
             delta,
             WheelScrollDelta {
-                delta: SmoothScrollDelta {
-                    x: 30.0,
-                    y: 0.0,
-                },
+                delta: SmoothScrollDelta { x: 30.0, y: 0.0 },
                 mode: WheelScrollMode::Direct,
             }
         );

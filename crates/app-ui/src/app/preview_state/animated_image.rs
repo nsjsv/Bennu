@@ -4,8 +4,8 @@ use std::time::Duration;
 use iced::Task;
 
 use crate::animated_image_preview::{AnimatedImageFrame, AnimatedImagePreview};
-use crate::app::FileBrowser;
 use crate::app::right_preview_panel::PreviewLoadSurface;
+use crate::app::FileBrowser;
 use crate::model::{Message, PreviewContent, PreviewState};
 
 impl FileBrowser {

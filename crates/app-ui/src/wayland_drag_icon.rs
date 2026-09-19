@@ -55,7 +55,6 @@ pub(crate) struct FileDragPillPalette {
     pub(crate) content: iced::Color,
 }
 
-
 /// 系统级拖拽图像必须一次性生成位图:按提起瞬间的相对位置摆开各
 /// 选中条目的"图标 + 文件名"行,离光标越远越淡,画布装不下时收拢为
 /// `summary` 一行总数文字。Wayland 把位图左上角钉在光标上,按下点
@@ -119,12 +118,8 @@ pub(crate) fn render_wayland_file_drag_icon(
     {
         return summary_icon_bitmap(summary.expect("checked above"), palette);
     }
-    let canvas_width = canvas_width
-        .ceil()
-        .min(DRAG_ICON_CANVAS_MAX_EDGE as f32) as u32;
-    let canvas_height = canvas_height
-        .ceil()
-        .min(DRAG_ICON_CANVAS_MAX_EDGE as f32) as u32;
+    let canvas_width = canvas_width.ceil().min(DRAG_ICON_CANVAS_MAX_EDGE as f32) as u32;
+    let canvas_height = canvas_height.ceil().min(DRAG_ICON_CANVAS_MAX_EDGE as f32) as u32;
 
     let svg = entry_group_svg(canvas_width, canvas_height, &tiles, palette)?;
     let pixmap = render_svg(&svg, canvas_width, canvas_height)?;
@@ -282,8 +277,7 @@ pub(crate) fn file_drag_display_name(path: &Path) -> String {
 }
 
 fn nested_icon_svg(symbol: IconSymbol, x: f32, y: f32, content_hex: &str) -> String {
-    let raw = String::from_utf8_lossy(symbol.bytes())
-        .replace("currentColor", content_hex);
+    let raw = String::from_utf8_lossy(symbol.bytes()).replace("currentColor", content_hex);
     raw.replacen("<svg ", &format!("<svg x=\"{x}\" y=\"{y}\" "), 1)
 }
 
@@ -641,13 +635,16 @@ fill=\"{content}\">{escaped}</text></svg>",
     fn oversized_group_collapses_into_summary_bitmap() {
         let mut entries = Vec::new();
         for index in 0..24 {
-            entries.push(entry(IconSymbol::FolderSolid, "a.txt", 0.0, index as f32 * 24.0));
+            entries.push(entry(
+                IconSymbol::FolderSolid,
+                "a.txt",
+                0.0,
+                index as f32 * 24.0,
+            ));
         }
         let collapsed =
-            render_wayland_file_drag_icon(&entries, Some("3 folders, 9 files"), palette())
-                .unwrap();
-        let uncapped =
-            render_wayland_file_drag_icon(&entries, None, palette()).unwrap();
+            render_wayland_file_drag_icon(&entries, Some("3 folders, 9 files"), palette()).unwrap();
+        let uncapped = render_wayland_file_drag_icon(&entries, None, palette()).unwrap();
 
         // 有 summary 时画布收拢为一行且不超协议上限;无 summary 才按
         // 上限裁剪(保持旧行为兜底)。

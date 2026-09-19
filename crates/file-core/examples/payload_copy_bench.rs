@@ -10,22 +10,33 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use file_core::ops::{
-    copy_regular_file_payload, FileOperationControls, PayloadCopyStrategy,
-    RegularFilePayloadCopy, TransferStrategyEngine,
+    copy_regular_file_payload, FileOperationControls, PayloadCopyStrategy, RegularFilePayloadCopy,
+    TransferStrategyEngine,
 };
 use tokio_util::sync::CancellationToken;
 
 #[tokio::main]
 async fn main() {
     let mut arguments = std::env::args().skip(1);
-    let source = PathBuf::from(arguments.next().expect("用法: <source> <target> [strategy]"));
-    let target = PathBuf::from(arguments.next().expect("用法: <source> <target> [strategy]"));
-    let forced = arguments.next().filter(|name| name != "auto").map(|name| match name.as_str() {
-        "clone" => PayloadCopyStrategy::KernelClone,
-        "range" => PayloadCopyStrategy::KernelRange,
-        "user" => PayloadCopyStrategy::UserLoop,
-        other => panic!("未知策略 {other},可选 auto|clone|range|user"),
-    });
+    let source = PathBuf::from(
+        arguments
+            .next()
+            .expect("用法: <source> <target> [strategy]"),
+    );
+    let target = PathBuf::from(
+        arguments
+            .next()
+            .expect("用法: <source> <target> [strategy]"),
+    );
+    let forced = arguments
+        .next()
+        .filter(|name| name != "auto")
+        .map(|name| match name.as_str() {
+            "clone" => PayloadCopyStrategy::KernelClone,
+            "range" => PayloadCopyStrategy::KernelRange,
+            "user" => PayloadCopyStrategy::UserLoop,
+            other => panic!("未知策略 {other},可选 auto|clone|range|user"),
+        });
 
     let bytes_total = std::fs::metadata(&source).expect("读源文件").len();
     let source_device = {

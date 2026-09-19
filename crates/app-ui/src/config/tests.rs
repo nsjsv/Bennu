@@ -926,9 +926,10 @@ fn renderer_probe_cache_section_survives_a_toml_round_trip() {
     let path = temp_dir.path().join("config.toml");
     app_config::write_app_config(&path, &app_config).expect("write app config");
 
-    let loaded = app_config::load_app_config_from_dir(temp_dir.path(), app_config::default_app_config())
-        .renderer_probe_cache
-        .expect("cache survives round trip");
+    let loaded =
+        app_config::load_app_config_from_dir(temp_dir.path(), app_config::default_app_config())
+            .renderer_probe_cache
+            .expect("cache survives round trip");
     assert_eq!(loaded, stored);
 }
 
@@ -949,14 +950,15 @@ backend = "vulkan"
     )
     .expect("write damaged config");
 
-    let loaded = app_config::load_app_config_from_dir(temp_dir.path(), app_config::default_app_config());
+    let loaded =
+        app_config::load_app_config_from_dir(temp_dir.path(), app_config::default_app_config());
 
     assert_eq!(loaded.renderer_probe_cache, None);
-    assert_eq!(loaded.rendering_gpu_preference, RenderingGpuPreference::HighPerformanceGpu);
     assert_eq!(
-        loaded.thumbnail_cache_dir,
-        PathBuf::from("/tmp/thumbnails")
+        loaded.rendering_gpu_preference,
+        RenderingGpuPreference::HighPerformanceGpu
     );
+    assert_eq!(loaded.thumbnail_cache_dir, PathBuf::from("/tmp/thumbnails"));
 }
 
 #[test]

@@ -89,7 +89,10 @@ impl QueuedFileOperation {
                 sources,
                 destination,
             } => path_lines_from_extracted_archive(
-                sources.first().map(|source| source.as_path()).unwrap_or(destination.as_path()),
+                sources
+                    .first()
+                    .map(|source| source.as_path())
+                    .unwrap_or(destination.as_path()),
                 destination,
             ),
         }

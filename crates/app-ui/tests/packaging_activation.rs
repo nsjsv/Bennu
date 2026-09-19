@@ -11,17 +11,13 @@ fn repository_root() -> &'static Path {
 #[test]
 fn desktop_and_brand_activation_files_expose_local_file_manager_contract() {
     let root = repository_root();
-    let desktop_entry = fs::read_to_string(root.join("packaging/linux/bennu.desktop"))
-        .expect("read desktop entry");
-    assert!(desktop_entry
-        .lines()
-        .any(|line| line == "Exec=bennu %F"));
+    let desktop_entry =
+        fs::read_to_string(root.join("packaging/linux/bennu.desktop")).expect("read desktop entry");
+    assert!(desktop_entry.lines().any(|line| line == "Exec=bennu %F"));
     assert!(desktop_entry
         .lines()
         .any(|line| line == "MimeType=inode/directory;"));
-    assert!(desktop_entry
-        .lines()
-        .any(|line| line == "Icon=bennu"));
+    assert!(desktop_entry.lines().any(|line| line == "Icon=bennu"));
 
     let service_name = "io.github.nsjsv.Bennu.service";
     let activation_service = fs::read_to_string(root.join("packaging/linux").join(service_name))

@@ -92,13 +92,24 @@ pub enum ExtractionStatus {
     Unsupported,
     TooLarge,
     NonUtf8,
-    ReadFailed { message: String },
-    ToolUnavailable { tool: String },
-    ToolFailed { tool: String, message: String },
-    TimedOut { tool: String },
+    ReadFailed {
+        message: String,
+    },
+    ToolUnavailable {
+        tool: String,
+    },
+    ToolFailed {
+        tool: String,
+        message: String,
+    },
+    TimedOut {
+        tool: String,
+    },
     /// 已没有生产路径；保留是为了让旧索引库里存量行 JSON 仍能反序列化，
     /// 移除会让 daemon 打开旧库时把这些行的状态读成错误。
-    ResourceBudgetExceeded { tool: String },
+    ResourceBudgetExceeded {
+        tool: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -195,7 +206,9 @@ pub fn plan_content_extraction(
             timeout: DEFAULT_EXTRACTION_TIMEOUT,
         },
         Some(extension) => match zipped_xml_document_kind(extension) {
-            Some(document_kind) => ExtractionExecutionMode::ZippedXmlTextInProcess { document_kind },
+            Some(document_kind) => {
+                ExtractionExecutionMode::ZippedXmlTextInProcess { document_kind }
+            }
             None => ExtractionExecutionMode::SkipNow {
                 skip_reason: ExtractionStatus::Unsupported,
             },

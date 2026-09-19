@@ -49,7 +49,10 @@ async fn main() {
         for entry in std::fs::read_dir(target.parent().unwrap()).unwrap() {
             let entry = entry.unwrap();
             let name = entry.file_name();
-            if name.to_string_lossy().starts_with(".file-manager-transfer-") {
+            if name
+                .to_string_lossy()
+                .starts_with(".file-manager-transfer-")
+            {
                 std::fs::remove_dir_all(entry.path()).ok();
             }
         }

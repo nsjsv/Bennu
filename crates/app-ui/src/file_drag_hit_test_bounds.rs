@@ -186,7 +186,11 @@ impl widget::Operation<Message> for FileDragHitTestBoundsOperation {
         // Iced 以 content 坐标遍历滚动子树，命中快照必须还原到 surface 坐标。
         self.pending_scrollable_coordinates =
             Some(self.coordinates.scrollable_content(bounds, translation));
-        if let Some(viewport) = self.pending_scrollable_coordinates.as_ref().map(|context| context.visible_bounds) {
+        if let Some(viewport) = self
+            .pending_scrollable_coordinates
+            .as_ref()
+            .map(|context| context.visible_bounds)
+        {
             if viewport.width > 0.0 && viewport.height > 0.0 {
                 self.scrollable_viewports.push(viewport);
             }
@@ -258,12 +262,10 @@ impl widget::Operation<Message> for FileDragHitTestBoundsOperation {
 
     fn finish(&self) -> Outcome<Message> {
         let message = match self.request {
-            FileDragHitTestBoundsRequest::SelectionMarquee => {
-                Message::ColumnEntryBoundsMeasured(
-                    self.entries.clone(),
-                    self.scrollable_viewports.clone(),
-                )
-            }
+            FileDragHitTestBoundsRequest::SelectionMarquee => Message::ColumnEntryBoundsMeasured(
+                self.entries.clone(),
+                self.scrollable_viewports.clone(),
+            ),
             FileDragHitTestBoundsRequest::Breadcrumbs(generation) => {
                 Message::BreadcrumbDropTargetBoundsMeasured(generation, self.breadcrumb_targets())
             }

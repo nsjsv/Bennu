@@ -63,9 +63,7 @@ impl FileBrowser {
                 entry_exists(&directory.join(candidate))
             })
         } else {
-            unique_symlink_file_name(name, |candidate| {
-                entry_exists(&directory.join(candidate))
-            })
+            unique_symlink_file_name(name, |candidate| entry_exists(&directory.join(candidate)))
         };
         SymbolicLinkCreation {
             link_path: directory.join(link_name),
@@ -89,10 +87,7 @@ mod tests {
 
     #[test]
     fn copied_paths_join_in_visible_order_without_uri_prefix() {
-        let paths = vec![
-            PathBuf::from("/tmp/a b.txt"),
-            PathBuf::from("/tmp/第二"),
-        ];
+        let paths = vec![PathBuf::from("/tmp/a b.txt"), PathBuf::from("/tmp/第二")];
 
         let text = copied_paths_text(&paths);
 

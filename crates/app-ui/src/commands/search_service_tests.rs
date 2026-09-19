@@ -223,9 +223,7 @@ fn unit_snapshot_reports_only_the_exec_start_executable_path() {
         SearchUnitSnapshot::parse(&snapshot_text, SearchRuntimeIdentity::Release).unwrap();
     let description = snapshot.description();
 
-    assert!(
-        description.contains("ExecStartPath=/home/test/.local/share/bennu-dev/bennu-searchd")
-    );
+    assert!(description.contains("ExecStartPath=/home/test/.local/share/bennu-dev/bennu-searchd"));
     assert!(!description.contains("--api-key"));
     assert!(!description.contains("very-secret"));
 }

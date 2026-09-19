@@ -32,7 +32,13 @@ impl ImagePreviewViewport {
     /// 内容不动；锚点缺失时退化为围绕媒体区中心缩放。
     /// scale 缩到不大于 1 后图片四周已有空隙，锚点保持只会把图片推向
     /// 窗口边缘方向，因此一律归零 offset 围绕中心居中缩小。
-    pub(crate) fn apply_zoom(&mut self, multiplier: f32, anchor: Option<Point>, panel: Size, fit: Size) {
+    pub(crate) fn apply_zoom(
+        &mut self,
+        multiplier: f32,
+        anchor: Option<Point>,
+        panel: Size,
+        fit: Size,
+    ) {
         let panel_center = Point::new(panel.width / 2.0, panel.height / 2.0);
         let next_scale =
             (self.scale * multiplier).clamp(IMAGE_PREVIEW_MIN_SCALE, IMAGE_PREVIEW_MAX_SCALE);

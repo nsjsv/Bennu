@@ -122,7 +122,8 @@ pub(crate) fn spawn_terminal_session(
         .take_writer()
         .map_err(|error| format!("获取 PTY 写端失败: {error}"))?;
     let writer: PtyWriter = Arc::new(Mutex::new(writer));
-    let emulator = TerminalEmulator::new(dimensions.columns, dimensions.screen_lines, writer.clone());
+    let emulator =
+        TerminalEmulator::new(dimensions.columns, dimensions.screen_lines, writer.clone());
     Ok(TerminalSession {
         id,
         emulator,
@@ -147,7 +148,8 @@ impl TerminalSession {
         if dimensions.columns == 0 || dimensions.screen_lines == 0 {
             return;
         }
-        self.emulator.resize(dimensions.columns, dimensions.screen_lines);
+        self.emulator
+            .resize(dimensions.columns, dimensions.screen_lines);
         let _ = self.master.resize(PtySize {
             rows: dimensions.screen_lines as u16,
             cols: dimensions.columns as u16,
@@ -230,7 +232,12 @@ mod tests {
             })
             .collect();
         basenames.sort_unstable();
-        let duplicate_count = basenames.len() - basenames.iter().copied().collect::<std::collections::HashSet<_>>().len();
+        let duplicate_count = basenames.len()
+            - basenames
+                .iter()
+                .copied()
+                .collect::<std::collections::HashSet<_>>()
+                .len();
         assert_eq!(duplicate_count, 0, "duplicate shell entries: {basenames:?}");
 
         for basename in &basenames {

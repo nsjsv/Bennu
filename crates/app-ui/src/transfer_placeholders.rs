@@ -134,9 +134,10 @@ fn compare_placeholder_with_placeholder(
         SortField::Kind => placeholder_kind_rank(left.is_directory)
             .cmp(&placeholder_kind_rank(right.is_directory))
             .then_with(|| compare_names(&left.name, OsStr::new(&right.name))),
-        SortField::Modified => left.enqueued_at.cmp(&right.enqueued_at).then_with(|| {
-            compare_names(&left.name, OsStr::new(&right.name))
-        }),
+        SortField::Modified => left
+            .enqueued_at
+            .cmp(&right.enqueued_at)
+            .then_with(|| compare_names(&left.name, OsStr::new(&right.name))),
     };
     apply_sort_direction(field_ordering, sort.direction)
 }
@@ -303,7 +304,9 @@ mod tests {
 
         let placeholders = transfer_placeholders_for_directory(&queue, directory);
         assert_eq!(placeholders.len(), 2);
-        assert!(placeholders.iter().all(|placeholder| placeholder.progress.is_none()));
+        assert!(placeholders
+            .iter()
+            .all(|placeholder| placeholder.progress.is_none()));
         assert_eq!(placeholders[0].name, "b.txt");
     }
 
@@ -343,7 +346,9 @@ mod tests {
 
         let placeholders = transfer_placeholders_for_directory(&queue, directory);
         assert_eq!(placeholders.len(), 1);
-        let progress = placeholders[0].progress.expect("active transfer has a fraction");
+        let progress = placeholders[0]
+            .progress
+            .expect("active transfer has a fraction");
         assert!((progress - 0.25).abs() < 0.001, "got {progress}");
 
         // 完成态精确 1.0;排队态保持 None(空环)。
@@ -386,33 +391,51 @@ mod tests {
         let entries = [entry("/target/incoming.bin", FileKind::File, 100, None)];
         let placeholders = [placeholder("incoming.bin", false, Some(0.25))];
 
-        let merged =
-            merge_entries_with_placeholders(&entries, &placeholders, name_sort(SortDirection::Ascending));
+        let merged = merge_entries_with_placeholders(
+            &entries,
+            &placeholders,
+            name_sort(SortDirection::Ascending),
+        );
 
         assert_eq!(merged.len(), 1);
         match &merged[0] {
             MergedTransferItem::Entry { transfer, .. } => {
-                let transfer = transfer.as_ref().expect("same-name transfer decorates the entry");
+                let transfer = transfer
+                    .as_ref()
+                    .expect("same-name transfer decorates the entry");
                 assert_eq!(transfer.name, "incoming.bin");
                 assert_eq!(transfer.progress, Some(0.25));
             }
-            MergedTransferItem::Placeholder(_) => panic!("placeholder must not duplicate the entry"),
+            MergedTransferItem::Placeholder(_) => {
+                panic!("placeholder must not duplicate the entry")
+            }
         }
     }
 
     #[test]
     fn same_name_directory_placeholder_decorates_the_real_directory() {
         // 目录场景(用户报告的形态):真实目录已在列表中且逐步填充。
-        let entries = [entry("/target/Hollow Knight Silksong", FileKind::Directory, 442, None)];
+        let entries = [entry(
+            "/target/Hollow Knight Silksong",
+            FileKind::Directory,
+            442,
+            None,
+        )];
         let placeholders = [placeholder("Hollow Knight Silksong", true, None)];
 
-        let merged =
-            merge_entries_with_placeholders(&entries, &placeholders, name_sort(SortDirection::Ascending));
+        let merged = merge_entries_with_placeholders(
+            &entries,
+            &placeholders,
+            name_sort(SortDirection::Ascending),
+        );
 
         assert_eq!(merged.len(), 1);
         assert!(matches!(
             &merged[0],
-            MergedTransferItem::Entry { transfer: Some(_), .. }
+            MergedTransferItem::Entry {
+                transfer: Some(_),
+                ..
+            }
         ));
     }
 
@@ -424,8 +447,11 @@ mod tests {
         ];
         let placeholders = [placeholder("mike.txt", false, Some(0.5))];
 
-        let merged =
-            merge_entries_with_placeholders(&entries, &placeholders, name_sort(SortDirection::Ascending));
+        let merged = merge_entries_with_placeholders(
+            &entries,
+            &placeholders,
+            name_sort(SortDirection::Ascending),
+        );
 
         let labels = merged
             .iter()
@@ -507,9 +533,12 @@ mod tests {
 
         // Modified:占位键是入队时刻(晚于条目的旧时间戳),升序排最后。
         let modified = SystemTime::UNIX_EPOCH;
-        let old_entries = [entry("/target/old.txt", FileKind::File, 1, Some(
-            modified - std::time::Duration::from_secs(60),
-        ))];
+        let old_entries = [entry(
+            "/target/old.txt",
+            FileKind::File,
+            1,
+            Some(modified - std::time::Duration::from_secs(60)),
+        )];
         let modified_placeholders = [placeholder];
         let merged = merge_entries_with_placeholders(
             &old_entries,
@@ -533,8 +562,11 @@ mod tests {
             placeholder("bravo.txt", false, None),
         ];
 
-        let merged =
-            merge_entries_with_placeholders(&entries, &placeholders, name_sort(SortDirection::Ascending));
+        let merged = merge_entries_with_placeholders(
+            &entries,
+            &placeholders,
+            name_sort(SortDirection::Ascending),
+        );
 
         let labels = merged
             .iter()
@@ -555,13 +587,19 @@ mod tests {
         let entries = [entry("/target/dup.txt", FileKind::File, 1, None)];
         let placeholders = [placeholder("dup.txt", false, None)];
 
-        let merged =
-            merge_entries_with_placeholders(&entries, &placeholders, name_sort(SortDirection::Ascending));
+        let merged = merge_entries_with_placeholders(
+            &entries,
+            &placeholders,
+            name_sort(SortDirection::Ascending),
+        );
 
         assert_eq!(merged.len(), 1);
         assert!(matches!(
             merged[0],
-            MergedTransferItem::Entry { transfer: Some(_), .. }
+            MergedTransferItem::Entry {
+                transfer: Some(_),
+                ..
+            }
         ));
     }
 
@@ -588,10 +626,7 @@ mod tests {
     }
 
     fn transfer(target: &str) -> crate::operation_queue::QueuedTransfer {
-        crate::operation_queue::QueuedTransfer::new(
-            PathBuf::from("/source"),
-            PathBuf::from(target),
-        )
+        crate::operation_queue::QueuedTransfer::new(PathBuf::from("/source"), PathBuf::from(target))
     }
 
     /// 恢复式传输入队需要任务存储;测试用同步落盘的临时存储,
@@ -618,10 +653,13 @@ mod tests {
             verification: file_core::FileOperationVerification::BasicMetadata,
         }) {
             crate::operation_queue::FileOperationEnqueueOutcome::Queued { task_id } => task_id,
-            crate::operation_queue::FileOperationEnqueueOutcome::QueuedWithStorageWarning { error, .. }
-                | crate::operation_queue::FileOperationEnqueueOutcome::Rejected { error } => {
-                    panic!("copy should enqueue, got storage error: {error}")
-                }
+            crate::operation_queue::FileOperationEnqueueOutcome::QueuedWithStorageWarning {
+                error,
+                ..
+            }
+            | crate::operation_queue::FileOperationEnqueueOutcome::Rejected { error } => {
+                panic!("copy should enqueue, got storage error: {error}")
+            }
         }
     }
 
@@ -634,10 +672,13 @@ mod tests {
             verification: file_core::FileOperationVerification::BasicMetadata,
         }) {
             crate::operation_queue::FileOperationEnqueueOutcome::Queued { task_id } => task_id,
-            crate::operation_queue::FileOperationEnqueueOutcome::QueuedWithStorageWarning { error, .. }
-                | crate::operation_queue::FileOperationEnqueueOutcome::Rejected { error } => {
-                    panic!("move should enqueue, got storage error: {error}")
-                }
+            crate::operation_queue::FileOperationEnqueueOutcome::QueuedWithStorageWarning {
+                error,
+                ..
+            }
+            | crate::operation_queue::FileOperationEnqueueOutcome::Rejected { error } => {
+                panic!("move should enqueue, got storage error: {error}")
+            }
         }
     }
 }

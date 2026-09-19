@@ -268,20 +268,17 @@ fn directory_column<'a>(
 
     // 占位从操作队列按本栏目录派生,与条目按该目录的排序合入同一条
     // 渲染流后再切虚拟窗口,滚动数学与行渲染共用同一份序列。
-    let transfer_placeholders =
-        crate::transfer_placeholders::transfer_placeholders_for_directory(
-            &browser.operation_queue,
-            directory,
-        );
+    let transfer_placeholders = crate::transfer_placeholders::transfer_placeholders_for_directory(
+        &browser.operation_queue,
+        directory,
+    );
     match column_content(pane, directory) {
         ColumnContent::Entries(entries) => {
             let merged_items = crate::transfer_placeholders::merge_entries_with_placeholders(
                 entries,
                 &transfer_placeholders,
                 crate::transfer_placeholder_view::transfer_sort_for_pane_directory(
-                    browser,
-                    pane,
-                    directory,
+                    browser, pane, directory,
                 ),
             );
             let range = pane
@@ -312,10 +309,7 @@ fn directory_column<'a>(
                     break;
                 };
                 match item {
-                    crate::transfer_placeholders::MergedTransferItem::Entry {
-                        entry,
-                        transfer,
-                    } => {
+                    crate::transfer_placeholders::MergedTransferItem::Entry { entry, transfer } => {
                         content = content.push(column_entry_row(
                             browser,
                             pane,
@@ -329,9 +323,7 @@ fn directory_column<'a>(
                             ),
                         ));
                     }
-                    crate::transfer_placeholders::MergedTransferItem::Placeholder(
-                        placeholder,
-                    ) => {
+                    crate::transfer_placeholders::MergedTransferItem::Placeholder(placeholder) => {
                         content = content.push(
                             crate::transfer_placeholder_view::transfer_placeholder_column_row(
                                 placeholder,
@@ -357,9 +349,7 @@ fn directory_column<'a>(
                     &[],
                     &transfer_placeholders,
                     crate::transfer_placeholder_view::transfer_sort_for_pane_directory(
-                        browser,
-                        pane,
-                        directory,
+                        browser, pane, directory,
                     ),
                 );
                 for item in &merged_items {
@@ -621,13 +611,15 @@ fn selection_run_position_in_merged_items(
         return None;
     }
     let neighbor_selected = |offset: usize| {
-        merged_items.get(offset).is_some_and(|neighbor| match neighbor {
-            crate::transfer_placeholders::MergedTransferItem::Entry {
-                entry: neighbor_entry,
-                ..
-            } => selected_paths.contains(&neighbor_entry.path),
-            crate::transfer_placeholders::MergedTransferItem::Placeholder(_) => false,
-        })
+        merged_items
+            .get(offset)
+            .is_some_and(|neighbor| match neighbor {
+                crate::transfer_placeholders::MergedTransferItem::Entry {
+                    entry: neighbor_entry,
+                    ..
+                } => selected_paths.contains(&neighbor_entry.path),
+                crate::transfer_placeholders::MergedTransferItem::Placeholder(_) => false,
+            })
     };
     Some(SelectionRunPosition::from_neighbors(
         index.checked_sub(1).is_some_and(neighbor_selected),

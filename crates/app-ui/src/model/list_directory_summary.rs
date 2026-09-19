@@ -277,7 +277,10 @@ mod tests {
         ));
         assert_eq!(cache.summary_for_path(&path).unwrap().direct_child_count, 4);
         assert_eq!(
-            cache.summary_for_path(&path).unwrap().files_total_size_bytes,
+            cache
+                .summary_for_path(&path)
+                .unwrap()
+                .files_total_size_bytes,
             Some(256)
         );
         assert!(cache.start_request(path.clone(), false).is_none());

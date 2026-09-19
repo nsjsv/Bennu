@@ -96,12 +96,10 @@ impl FileBrowser {
                                 .map_err(|error| error.to_string());
                             (archive, single_root)
                         },
-                        move |(archive, single_root)| {
-                            Message::SmartExtractDestinationResolved {
-                                archive,
-                                current_directory: resolved_directory.clone(),
-                                single_root,
-                            }
+                        move |(archive, single_root)| Message::SmartExtractDestinationResolved {
+                            archive,
+                            current_directory: resolved_directory.clone(),
+                            single_root,
                         },
                     )
                 })
@@ -153,11 +151,10 @@ impl FileBrowser {
         let commands = archives
             .into_iter()
             .map(|archive| {
-                let destination = archive_folder_destination(
-                    &archive,
-                    &current_directory.clone(),
-                    |candidate| candidate.is_dir(),
-                );
+                let destination =
+                    archive_folder_destination(&archive, &current_directory.clone(), |candidate| {
+                        candidate.is_dir()
+                    });
                 self.begin_archive_extraction(archive, destination)
             })
             .collect::<Vec<_>>();
@@ -219,7 +216,11 @@ mod tests {
             Path::new("/home/u/photos.zip"),
             Path::new("/home/u/docs"),
             None,
-            |candidate| candidate.file_name().is_none_or(|name| name != "photos (3)"),
+            |candidate| {
+                candidate
+                    .file_name()
+                    .is_none_or(|name| name != "photos (3)")
+            },
         );
         assert_eq!(destination, PathBuf::from("/home/u/docs/photos (3)"));
     }

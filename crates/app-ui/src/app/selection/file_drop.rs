@@ -18,11 +18,10 @@ use crate::file_drag_hit_test_bounds::{
     file_drag_hit_test_bounds_command, FileDragHitTestBoundsRequest,
 };
 use crate::model::{
-    FileDragSpringSource,
-    BreadcrumbDropTargetBounds, FileDragHitTestBounds, FileDragState, FileDropLayoutRequest,
-    FileDropLayoutState, FileDropOrigin, FileDropSessionIdentity, FileDropSessionPhase,
-    FileDropSessionState, FileDropTarget, FrozenFileDropTarget, InternalFileDragSnapshot, Message,
-    TabDropDestination, TabDropHover, TabFileDropTarget,
+    BreadcrumbDropTargetBounds, FileDragHitTestBounds, FileDragSpringSource, FileDragState,
+    FileDropLayoutRequest, FileDropLayoutState, FileDropOrigin, FileDropSessionIdentity,
+    FileDropSessionPhase, FileDropSessionState, FileDropTarget, FrozenFileDropTarget,
+    InternalFileDragSnapshot, Message, TabDropDestination, TabDropHover, TabFileDropTarget,
 };
 
 const TAB_FILE_DROP_HOVER_DELAY: Duration = Duration::from_millis(500);
@@ -400,11 +399,8 @@ impl FileBrowser {
             return Task::none();
         }
         let identity = session.identity.clone();
-        let request = self.next_file_drop_layout_request(
-            identity,
-            self.active_pane_id(),
-            self.active_tab_id,
-        );
+        let request =
+            self.next_file_drop_layout_request(identity, self.active_pane_id(), self.active_tab_id);
         if let Some(session) = &mut self.file_drop_session {
             session.scroll_refresh_in_flight = Some(request.clone());
         }
@@ -544,7 +540,11 @@ impl FileBrowser {
                         .rev()
                         .find(|entry| entry.path == *directory && entry.bounds.contains(position))
                         .map(|entry| {
-                            (entry.pane_id, entry.path.clone(), FileDragSpringSource::Entry)
+                            (
+                                entry.pane_id,
+                                entry.path.clone(),
+                                FileDragSpringSource::Entry,
+                            )
                         }),
                     _ => None,
                 };

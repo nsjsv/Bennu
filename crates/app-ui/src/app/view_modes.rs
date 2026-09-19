@@ -272,17 +272,14 @@ impl FileBrowser {
                         self.user_config.columns_view_density,
                     );
                     for directory in crate::three_column_view::column_directories_for_pane(pane) {
-                        let Some(viewport) = pane.column_viewports.get(&directory).copied()
-                        else {
+                        let Some(viewport) = pane.column_viewports.get(&directory).copied() else {
                             continue;
                         };
                         // 栏内容高按合并流格子数乘积保守估计(不含面板外留白),
                         // clamp 稍紧只是不在最底部,不会二次越界;传输占位计入。
                         let merged_count =
                             crate::transfer_placeholder_view::column_transfer_item_count(
-                                self,
-                                pane,
-                                &directory,
+                                self, pane, &directory,
                             );
                         let content_height = geometry.entries_top_padding
                             + merged_count as f32 * geometry.entry_scroll_height;
@@ -1259,9 +1256,11 @@ mod tests {
         let load_generation_before = browser.directory_load_generation;
         let collection_phase_before = browser.directory_collection_phase;
 
-        drop(browser.update(crate::model::Message::FileGroupingModeSelected(
-            crate::model::FileGroupingMode::Kind,
-        )));
+        drop(
+            browser.update(crate::model::Message::FileGroupingModeSelected(
+                crate::model::FileGroupingMode::Kind,
+            )),
+        );
 
         assert_eq!(
             browser.user_config.file_grouping,
@@ -1274,9 +1273,11 @@ mod tests {
         assert!(browser.user_preferences_save_in_flight);
 
         // 重复选择同一维度不产生新的持久化写请求。
-        drop(browser.update(crate::model::Message::FileGroupingModeSelected(
-            crate::model::FileGroupingMode::Kind,
-        )));
+        drop(
+            browser.update(crate::model::Message::FileGroupingModeSelected(
+                crate::model::FileGroupingMode::Kind,
+            )),
+        );
         assert!(browser.pending_user_preferences_save.is_none());
     }
 }

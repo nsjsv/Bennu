@@ -776,13 +776,15 @@ fn internal_native_drag_moves_drive_edge_scroll_plan() {
         browser.sidebar_width + 20.0,
         browser.main_panes_area_top() + 5.0,
     );
-    drop(browser.accept_wayland_target_event(WaylandFileDropTargetEvent::Moved {
-        target_session_id,
-        position: WaylandDndDropPosition {
-            x: edge_position.x as f64,
-            y: edge_position.y as f64,
-        },
-    }));
+    drop(
+        browser.accept_wayland_target_event(WaylandFileDropTargetEvent::Moved {
+            target_session_id,
+            position: WaylandDndDropPosition {
+                x: edge_position.x as f64,
+                y: edge_position.y as f64,
+            },
+        }),
+    );
 
     assert!(browser.file_drag_edge_scroll.is_some());
 }
@@ -792,19 +794,25 @@ fn external_native_drag_hover_does_not_plan_edge_scroll() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let target_session_id = WaylandFileDropTargetSessionId::unique();
     let position = Point::new(50.0, 20.0);
-    drop(begin_external_session(&mut browser, target_session_id, position));
+    drop(begin_external_session(
+        &mut browser,
+        target_session_id,
+        position,
+    ));
 
     let edge_position = Point::new(
         browser.sidebar_width + 20.0,
         browser.main_panes_area_top() + 5.0,
     );
-    drop(browser.accept_wayland_target_event(WaylandFileDropTargetEvent::Moved {
-        target_session_id,
-        position: WaylandDndDropPosition {
-            x: edge_position.x as f64,
-            y: edge_position.y as f64,
-        },
-    }));
+    drop(
+        browser.accept_wayland_target_event(WaylandFileDropTargetEvent::Moved {
+            target_session_id,
+            position: WaylandDndDropPosition {
+                x: edge_position.x as f64,
+                y: edge_position.y as f64,
+            },
+        }),
+    );
 
     assert!(browser.file_drag_edge_scroll.is_none());
 }
@@ -817,12 +825,7 @@ fn internal_session_with_ready_layout(
     let target_session_id = WaylandFileDropTargetSessionId::unique();
     let position = Point::new(50.0, 20.0);
     install_internal_source(browser, source_session_id, vec![source]);
-    let request = begin_internal_session(
-        browser,
-        target_session_id,
-        source_session_id,
-        position,
-    );
+    let request = begin_internal_session(browser, target_session_id, source_session_id, position);
     let pane_id = browser.active_pane_id();
     drop(browser.accept_drop_layout(
         request,
@@ -933,24 +936,24 @@ fn edge_scroll_advance_plans_scroll_refresh() {
         browser.sidebar_width + 20.0,
         browser.main_panes_area_top() + 5.0,
     );
-    drop(browser.accept_wayland_target_event(WaylandFileDropTargetEvent::Moved {
-        target_session_id,
-        position: WaylandDndDropPosition {
-            x: edge_position.x as f64,
-            y: edge_position.y as f64,
-        },
-    }));
+    drop(
+        browser.accept_wayland_target_event(WaylandFileDropTargetEvent::Moved {
+            target_session_id,
+            position: WaylandDndDropPosition {
+                x: edge_position.x as f64,
+                y: edge_position.y as f64,
+            },
+        }),
+    );
     assert!(browser.file_drag_edge_scroll.is_some());
 
     drop(browser.advance_file_drag_edge_scroll());
-    assert!(
-        browser
-            .file_drop_session
-            .as_ref()
-            .expect("drop session")
-            .scroll_refresh_in_flight
-            .is_some()
-    );
+    assert!(browser
+        .file_drop_session
+        .as_ref()
+        .expect("drop session")
+        .scroll_refresh_in_flight
+        .is_some());
 }
 
 #[test]
@@ -967,14 +970,12 @@ fn external_and_iced_fallback_sessions_do_not_plan_scroll_refresh() {
         ),
     ));
     drop(browser.remeasure_file_drop_layout_after_scroll());
-    assert!(
-        browser
-            .file_drop_session
-            .as_ref()
-            .expect("drop session")
-            .scroll_refresh_in_flight
-            .is_none()
-    );
+    assert!(browser
+        .file_drop_session
+        .as_ref()
+        .expect("drop session")
+        .scroll_refresh_in_flight
+        .is_none());
 
     // iced fallback(原生 dnd 不可用)的 position 不随指针更新,
     // 滚动刷新会按过期位置重算,不参与。
@@ -989,7 +990,12 @@ fn external_and_iced_fallback_sessions_do_not_plan_scroll_refresh() {
     ));
     drop(browser.update_file_drag(Point::new(10.0, 0.0)));
     drop(browser.begin_iced_file_drop_session());
-    let request = match browser.file_drop_session.as_ref().expect("drop session").layout {
+    let request = match browser
+        .file_drop_session
+        .as_ref()
+        .expect("drop session")
+        .layout
+    {
         FileDropLayoutState::Pending(request) => request,
         FileDropLayoutState::Ready { .. } => panic!("iced session must measure layout"),
     };
@@ -1002,14 +1008,12 @@ fn external_and_iced_fallback_sessions_do_not_plan_scroll_refresh() {
         ),
     ));
     drop(browser.remeasure_file_drop_layout_after_scroll());
-    assert!(
-        browser
-            .file_drop_session
-            .as_ref()
-            .expect("drop session")
-            .scroll_refresh_in_flight
-            .is_none()
-    );
+    assert!(browser
+        .file_drop_session
+        .as_ref()
+        .expect("drop session")
+        .scroll_refresh_in_flight
+        .is_none());
 }
 
 #[test]
@@ -1034,11 +1038,14 @@ fn hard_remeasure_pending_discards_arriving_scroll_refresh() {
         directory_bounds(pane_id, "/pane/stale", rectangle(0.0, 0.0, 100.0, 100.0)),
     ));
     assert!(matches!(
-        browser.file_drop_session.as_ref().expect("drop session").layout,
+        browser
+            .file_drop_session
+            .as_ref()
+            .expect("drop session")
+            .layout,
         FileDropLayoutState::Pending(_)
     ));
 }
-
 
 #[test]
 fn iced_fallback_trash_tab_uses_drag_snapshot_paths() {

@@ -7,10 +7,10 @@ use super::direct_move::renamed_target_matches_source;
 use super::{next_recovered_path, path_exists, persist_checkpoint, sync_rename_parents};
 use crate::ops::recoverable_transfer::{
     inspect_file_identity, recover_owned_artifact, remove_incomplete_empty_artifact,
-    remove_owned_artifact_if_exists, rename_noreplace, CommitPayload, CommitTransfer,
-    FileIdentity, OwnedArtifact, PreparedTransfer, ProofContext, RecoverableTransferError,
-    StagedSourceLocation, StagingTransfer, TransferCheckpoint, TransferExecutionKind,
-    TransferFailureIntent, TransferFingerprint, TransferJournal, TransferJournalRecord,
+    remove_owned_artifact_if_exists, rename_noreplace, CommitPayload, CommitTransfer, FileIdentity,
+    OwnedArtifact, PreparedTransfer, ProofContext, RecoverableTransferError, StagedSourceLocation,
+    StagingTransfer, TransferCheckpoint, TransferExecutionKind, TransferFailureIntent,
+    TransferFingerprint, TransferJournal, TransferJournalRecord,
 };
 
 pub(super) async fn fail_recoverable_transfer<J: TransferJournal>(

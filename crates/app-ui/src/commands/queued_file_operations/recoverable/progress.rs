@@ -229,7 +229,11 @@ pub(crate) async fn send_file_operation_progress(
     progress: FileOperationProgressUpdate,
 ) {
     let _ = output
-        .send(Message::FileOperationProgressed(task_id, progress, Vec::new()))
+        .send(Message::FileOperationProgressed(
+            task_id,
+            progress,
+            Vec::new(),
+        ))
         .await;
 }
 
@@ -243,7 +247,9 @@ pub(super) async fn send_transfer_batch_progress(
 ) {
     let snapshots = batch_progress.transfer_entry_snapshots();
     let _ = output
-        .send(Message::FileOperationProgressed(task_id, progress, snapshots))
+        .send(Message::FileOperationProgressed(
+            task_id, progress, snapshots,
+        ))
         .await;
 }
 
@@ -491,8 +497,7 @@ mod tests {
         missing.manifest = None;
         let mut missing_progress = TransferBatchProgress::new(&[missing], QueuedTransferMode::Copy);
         let zero_records = vec![record(0, "/empty", &[("", 0)])];
-        let mut zero_progress =
-            TransferBatchProgress::new(&zero_records, QueuedTransferMode::Copy);
+        let mut zero_progress = TransferBatchProgress::new(&zero_records, QueuedTransferMode::Copy);
 
         assert!(matches!(
             missing_progress.complete_record(0),
@@ -565,21 +570,16 @@ mod tests {
     #[test]
     fn directory_source_snapshot_flows_from_manifest_root_kind() {
         let mut directory_record = record(0, "/source", &[("inner.txt", 10)]);
-        directory_record
-            .manifest
-            .as_mut()
-            .unwrap()
-            .entries
-            .insert(
-                0,
-                SourceManifestEntry {
-                    relative_path: PathBuf::new(),
-                    identity: FileIdentity {
-                        object_kind: FileObjectKind::Directory,
-                        ..identity(0)
-                    },
+        directory_record.manifest.as_mut().unwrap().entries.insert(
+            0,
+            SourceManifestEntry {
+                relative_path: PathBuf::new(),
+                identity: FileIdentity {
+                    object_kind: FileObjectKind::Directory,
+                    ..identity(0)
                 },
-            );
+            },
+        );
         let progress = TransferBatchProgress::new(&[directory_record], QueuedTransferMode::Copy);
 
         let snapshots = progress.transfer_entry_snapshots();

@@ -90,12 +90,13 @@ impl FileBrowser {
                 pane.current_dir.as_path(),
             );
         let metadata_for_entry = |entry: &DirectoryEntry| pane.metadata_for_entry(entry);
-        let root_grouping = root_grouping.as_ref().map(|grouping| {
-            crate::icon_grid_layout::IconGridRootGrouping {
-                grouping,
-                metadata_for_entry: &metadata_for_entry,
-            }
-        });
+        let root_grouping =
+            root_grouping
+                .as_ref()
+                .map(|grouping| crate::icon_grid_layout::IconGridRootGrouping {
+                    grouping,
+                    metadata_for_entry: &metadata_for_entry,
+                });
         IconGridLayout::with_root_transfer_placeholders(
             pane.current_dir,
             pane.entries,

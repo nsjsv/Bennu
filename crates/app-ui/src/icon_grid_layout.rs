@@ -22,7 +22,7 @@ mod root_group_plan;
 
 use interaction_geometry::IconGridEntryGeometry;
 pub(crate) use root_group_plan::IconGridRootGrouping;
-use root_group_plan::{IconGridRowsPlan, split_root_cells};
+use root_group_plan::{split_root_cells, IconGridRowsPlan};
 
 /// 展开子面板的占位注入表:目录 -> (占位, 排序)。由调用方(持有
 /// FileBrowser)一次性派生,布局保持纯几何、不触操作队列;拖放进
@@ -258,8 +258,7 @@ impl<'a> IconGridLayout<'a> {
         let expansion = expansion.filter(|state| state.context().current_dir == root_directory);
         let children_by_parent = expansion.map(index_visible_children);
         let merged = merge_entries_with_placeholders(root_entries, root_placeholders, root_sort);
-        let (root_cells, root_rows_plan) =
-            split_root_cells(merged, root_entries, root_grouping);
+        let (root_cells, root_rows_plan) = split_root_cells(merged, root_entries, root_grouping);
         // 分组开启时根单元格只含置顶目录,文件组也可能非空——两者皆空才算空态。
         let root_status = if root_cells.is_empty() && !root_rows_plan.has_any_group_cells() {
             IconGridPanelStatus::Empty
@@ -340,14 +339,11 @@ impl<'a> IconGridLayout<'a> {
         if let [IconGridFlowSegment::Rows(rows)] = self.root.flow.as_slice() {
             // 键盘导航只落在真实条目上;占位格被自然跳过。
             let entries = interaction_geometry::rows_entries(&rows.cells).collect::<Vec<_>>();
-            let current_index = current_path
-                .and_then(|current_path| entries.iter().position(|entry| entry.path == current_path));
-            let target_index = keyboard_target_index(
-                current_index,
-                direction,
-                entries.len(),
-                rows.column_count,
-            )?;
+            let current_index = current_path.and_then(|current_path| {
+                entries.iter().position(|entry| entry.path == current_path)
+            });
+            let target_index =
+                keyboard_target_index(current_index, direction, entries.len(), rows.column_count)?;
             return Some(IconGridNavigationTarget {
                 directory: rows.directory,
                 entry: entries[target_index],
@@ -579,13 +575,15 @@ fn build_panel<'a>(
                 top += height;
             }
             for group in groups {
-                flow.push(IconGridFlowSegment::GroupHeader(IconGridGroupHeaderLayout {
-                    title: group.title,
-                    index_label: group.index_label,
-                    count: group.count,
-                    top,
-                    height: ICON_GRID_GROUP_HEADER_HEIGHT,
-                }));
+                flow.push(IconGridFlowSegment::GroupHeader(
+                    IconGridGroupHeaderLayout {
+                        title: group.title,
+                        index_label: group.index_label,
+                        count: group.count,
+                        top,
+                        height: ICON_GRID_GROUP_HEADER_HEIGHT,
+                    },
+                ));
                 top += ICON_GRID_GROUP_HEADER_HEIGHT;
                 let rows = row_count_for_entries(group.cells.len(), column_count);
                 let height = rows as f32 * row_height(icon_edge);
@@ -658,10 +656,7 @@ fn expanded_panel_content<'a>(
                 )
                 .iter()
                 .map(|item| match item {
-                    crate::transfer_placeholders::MergedTransferItem::Entry {
-                        entry,
-                        transfer,
-                    } => {
+                    crate::transfer_placeholders::MergedTransferItem::Entry { entry, transfer } => {
                         let entry_index = next_entry_index;
                         next_entry_index += 1;
                         IconGridCell::Entry(IconGridEntryCell {
@@ -670,9 +665,9 @@ fn expanded_panel_content<'a>(
                             transfer: transfer.clone(),
                         })
                     }
-                    crate::transfer_placeholders::MergedTransferItem::Placeholder(
-                        placeholder,
-                    ) => IconGridCell::Placeholder(placeholder.clone()),
+                    crate::transfer_placeholders::MergedTransferItem::Placeholder(placeholder) => {
+                        IconGridCell::Placeholder(placeholder.clone())
+                    }
                 })
                 .collect(),
                 None => directory

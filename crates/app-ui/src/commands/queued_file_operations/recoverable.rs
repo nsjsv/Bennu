@@ -7,10 +7,10 @@ use file_operation_store::{
 mod progress;
 mod store_codec;
 
-use progress::{send_transfer_batch_progress, TransferBatchProgress};
 pub(super) use progress::{
     send_archive_creation_progress, send_archive_extraction_progress, send_file_operation_progress,
 };
+use progress::{send_transfer_batch_progress, TransferBatchProgress};
 
 /// Convert only durable checkpoints into UI facts. Merge children retain their
 /// child key/source/target, while the parent revision is the durable CAS that
@@ -726,13 +726,7 @@ async fn settle_recoverable_transfer_failure(
 
     if cancellation_demanded {
         return settle_cancellation_records(
-            records,
-            mode,
-            error,
-            task_id,
-            output,
-            journal,
-            controls,
+            records, mode, error, task_id, output, journal, controls,
         )
         .await;
     }
@@ -744,8 +738,7 @@ async fn settle_recoverable_transfer_failure(
     let mut settlement_error = None;
     for record in records {
         if let Err(settle_failure) =
-            file_core::settle_failed_recoverable_transfer(record, journal, error.to_string())
-                .await
+            file_core::settle_failed_recoverable_transfer(record, journal, error.to_string()).await
         {
             settlement_error.get_or_insert(settle_failure);
             break;
@@ -1457,9 +1450,7 @@ mod recoverable_transfer_tests {
         assert_eq!(renamed_moves, vec![(0, transfers.len())]);
         let first_item_completion = messages
             .iter()
-            .position(
-                |message| matches!(message, Message::FileOperationProgressed(_, _, _)),
-            )
+            .position(|message| matches!(message, Message::FileOperationProgressed(_, _, _)))
             .expect("batch should publish item completion progress");
         assert_eq!(direct_commit_batches, vec![(1, task_id, transfers.len())]);
         assert!(direct_commit_batches[0].0 < first_item_completion);

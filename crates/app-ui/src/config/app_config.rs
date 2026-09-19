@@ -202,9 +202,7 @@ pub(super) fn toml_app_config_content(config: &AppConfig) -> Result<String, toml
     }
 
     let content = toml::to_string_pretty(&document)?;
-    Ok(format!(
-        "# Bennu application configuration\n{content}"
-    ))
+    Ok(format!("# Bennu application configuration\n{content}"))
 }
 
 fn renderer_probe_cache_table(record: &RendererProbeCacheRecord) -> toml::Table {

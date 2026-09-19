@@ -28,11 +28,11 @@ pub use artifacts::{
 pub(crate) use durability::{sync_parent_blocking, sync_tree_blocking};
 pub use executor::{
     advance_recoverable_transfer, is_direct_move_segment_candidate,
-    persist_recoverable_source_manifest,
-    persist_recoverable_source_manifest_with_controls, prepare_direct_move_intent_segment,
-    run_direct_move_batch_to_durable_renamed, run_recoverable_transfer,
-    run_recoverable_transfer_to_direct_move_intent, settle_failed_recoverable_transfer,
-    DirectMoveBatchRecord, DirectMoveIntentBatchRecord, DirectMoveIntentBoundary, TransferAdvance,
+    persist_recoverable_source_manifest, persist_recoverable_source_manifest_with_controls,
+    prepare_direct_move_intent_segment, run_direct_move_batch_to_durable_renamed,
+    run_recoverable_transfer, run_recoverable_transfer_to_direct_move_intent,
+    settle_failed_recoverable_transfer, DirectMoveBatchRecord, DirectMoveIntentBatchRecord,
+    DirectMoveIntentBoundary, TransferAdvance,
 };
 pub use fingerprint::ObjectFingerprint;
 pub(crate) use fingerprint::{fingerprint_object, fingerprint_object_with_controls};
@@ -47,7 +47,7 @@ pub(crate) use manifest::{
 pub use manifest::{SourceManifest, SourceManifestEntry};
 pub(crate) use proof::ProofContext;
 pub use proof::TransferFingerprint;
-pub(crate) use proof_memo::{SharedProofMemo, ProofMemo};
+pub(crate) use proof_memo::{ProofMemo, SharedProofMemo};
 pub use protocol::{
     BackupCreationTransfer, CommitPayload, CommitTransfer, CommittedTransfer, CompletedTarget,
     ManifestCheckpointBatchUpdate, MergeChildCompletion, MergeChildOutcome, MergeTransfer,

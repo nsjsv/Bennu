@@ -49,9 +49,8 @@ impl FileBrowser {
         };
         match pane.view_mode {
             BrowserViewMode::List => {
-                let geometry = crate::list_view::ListGeometry::for_level(
-                    self.user_config().list_view_density,
-                );
+                let geometry =
+                    crate::list_view::ListGeometry::for_level(self.user_config().list_view_density);
                 // 与列表渲染同一条合并行流,组头顶点偏移和内容高都从它
                 // 累计,落点才与实际渲染一致。
                 let rows = crate::transfer_placeholder_view::build_list_transfer_rows(
@@ -210,8 +209,8 @@ mod tests {
             pane: pane_id,
             group_index: 1,
         }));
-        let max_offset = LIST_HEADER_HEIGHT + (LIST_GROUP_HEADER_HEIGHT + LIST_ROW_HEIGHT) * 2.0
-            - 100.0;
+        let max_offset =
+            LIST_HEADER_HEIGHT + (LIST_GROUP_HEADER_HEIGHT + LIST_ROW_HEIGHT) * 2.0 - 100.0;
         assert_eq!(
             browser.column_viewports.get(&root).unwrap().offset_y,
             max_offset

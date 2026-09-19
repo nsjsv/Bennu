@@ -81,15 +81,17 @@ pub(super) fn queued_operation_to_stored(operation: &QueuedFileOperation) -> Sto
                 .map(|path| StoredPath::from_path(path))
                 .collect(),
         },
-        QueuedFileOperation::CreateSymbolicLinks { links } => StoredOperation::CreateSymbolicLinks {
-            links: links
-                .iter()
-                .map(|link| StoredSymbolicLinkCreation {
-                    link_path: StoredPath::from_path(&link.link_path),
-                    target_path: StoredPath::from_path(&link.target_path),
-                })
-                .collect(),
-        },
+        QueuedFileOperation::CreateSymbolicLinks { links } => {
+            StoredOperation::CreateSymbolicLinks {
+                links: links
+                    .iter()
+                    .map(|link| StoredSymbolicLinkCreation {
+                        link_path: StoredPath::from_path(&link.link_path),
+                        target_path: StoredPath::from_path(&link.target_path),
+                    })
+                    .collect(),
+            }
+        }
         QueuedFileOperation::Move {
             transfers,
             verification,

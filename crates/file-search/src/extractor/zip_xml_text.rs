@@ -121,9 +121,7 @@ pub(crate) fn extract_zipped_xml_text(
             extract_word_document(&mut archive, max_output_bytes)
         }
         ZippedXmlDocumentKind::Spreadsheet => extract_spreadsheet(&mut archive, max_output_bytes),
-        ZippedXmlDocumentKind::Presentation => {
-            extract_presentation(&mut archive, max_output_bytes)
-        }
+        ZippedXmlDocumentKind::Presentation => extract_presentation(&mut archive, max_output_bytes),
         ZippedXmlDocumentKind::OpenDocumentText => {
             extract_open_document_text(&mut archive, max_output_bytes)
         }
@@ -140,7 +138,9 @@ fn extract_word_document(
         archive,
         "word/document.xml",
         max_output_bytes,
-        |entry, text| read_tagged_text_document(&mut Reader::from_reader(BufReader::new(entry)), text),
+        |entry, text| {
+            read_tagged_text_document(&mut Reader::from_reader(BufReader::new(entry)), text)
+        },
     );
     finish_extraction(entry_outcome)
 }
@@ -203,12 +203,10 @@ fn extract_open_document_text(
     archive: &mut ZipArchive<BufReader<fs::File>>,
     max_output_bytes: u64,
 ) -> ExtractionOutcome {
-    let entry_outcome = read_required_entry(
-        archive,
-        "content.xml",
-        max_output_bytes,
-        |entry, text| read_block_text_document(&mut Reader::from_reader(BufReader::new(entry)), text),
-    );
+    let entry_outcome =
+        read_required_entry(archive, "content.xml", max_output_bytes, |entry, text| {
+            read_block_text_document(&mut Reader::from_reader(BufReader::new(entry)), text)
+        });
     finish_extraction(entry_outcome)
 }
 
@@ -259,15 +257,15 @@ fn sort_entries_numerically(entry_names: &mut [String]) {
     entry_names.sort_by(|left, right| {
         let left_number = trailing_number(left);
         let right_number = trailing_number(right);
-        left_number
-            .cmp(&right_number)
-            .then_with(|| left.cmp(right))
+        left_number.cmp(&right_number).then_with(|| left.cmp(right))
     });
 }
 
 fn trailing_number(entry_name: &str) -> Option<u64> {
     let stem = entry_name.strip_suffix(".xml")?;
-    let digits = stem.rsplit(|character: char| !character.is_ascii_digit()).next()?;
+    let digits = stem
+        .rsplit(|character: char| !character.is_ascii_digit())
+        .next()?;
     if digits.is_empty() {
         return None;
     }
@@ -362,7 +360,10 @@ fn read_block_text_document(
 /// 无法识别的引用（自定义 DTD 实体）直接丢弃——它们在 Office 文档里不存在，
 /// 丢弃比让整个文档降级成 ReadFailed 更符合索引用途。
 fn resolved_reference(reference: &BytesRef<'_>) -> String {
-    let reference_text = reference.xml_content().map(|text| text.into_owned()).unwrap_or_default();
+    let reference_text = reference
+        .xml_content()
+        .map(|text| text.into_owned())
+        .unwrap_or_default();
     if reference.is_char_ref() {
         let code_point = if let Some(hex_digits) = reference_text.strip_prefix("#x") {
             u32::from_str_radix(hex_digits, 16).ok()
@@ -371,7 +372,10 @@ fn resolved_reference(reference: &BytesRef<'_>) -> String {
         } else {
             None
         };
-        return code_point.and_then(char::from_u32).map(String::from).unwrap_or_default();
+        return code_point
+            .and_then(char::from_u32)
+            .map(String::from)
+            .unwrap_or_default();
     }
     quick_xml::escape::resolve_xml_entity(&reference_text)
         .map(str::to_owned)

@@ -1,8 +1,8 @@
+use iced::alignment::Vertical;
 use iced::mouse::{self, Interaction, ScrollDelta};
 use iced::widget::canvas::{Frame, Geometry, Text as CanvasText};
 use iced::widget::{button, canvas, container, mouse_area, row, space, stack, text};
 use iced::{Color, Element, Length, Point, Rectangle, Size, Theme};
-use iced::alignment::Vertical;
 
 use super::emulator::TerminalCell;
 use super::session::{SessionId, TerminalSession};
@@ -220,16 +220,18 @@ fn terminal_tab_button<'a>(
         .unwrap_or(0.0);
     let tab = super::super::view::tab_motion::translated(tab, shift_offset, 0.0);
     mouse_area(tab)
-        .on_press(Message::TerminalPanel(
-            TerminalPanelMessage::TabPressed(session_id),
-        ))
+        .on_press(Message::TerminalPanel(TerminalPanelMessage::TabPressed(
+            session_id,
+        )))
         .on_middle_press(Message::TerminalPanel(
             TerminalPanelMessage::TabCloseRequested(session_id),
         ))
         .on_enter(Message::TerminalPanel(
             TerminalPanelMessage::TabDragEntered(session_id),
         ))
-        .on_release(Message::TerminalPanel(TerminalPanelMessage::TabDragFinished))
+        .on_release(Message::TerminalPanel(
+            TerminalPanelMessage::TabDragFinished,
+        ))
         .interaction(Interaction::Pointer)
         .into()
 }
@@ -288,9 +290,9 @@ fn resize_handle() -> Element<'static, Message> {
                 .width(Length::Fill)
                 .height(Length::Fixed(DIVIDER_LINE_HEIGHT))
                 .style(divider_line_style),
-            container(space::Space::new()).width(Length::Fill).height(
-                Length::Fixed(DRAG_HANDLE_HEIGHT - DIVIDER_LINE_HEIGHT),
-            ),
+            container(space::Space::new())
+                .width(Length::Fill)
+                .height(Length::Fixed(DRAG_HANDLE_HEIGHT - DIVIDER_LINE_HEIGHT),),
         ]
         .width(Length::Fill),
     )
@@ -310,12 +312,14 @@ fn collapsed_strip(browser: &FileBrowser) -> Element<'_, Message> {
             .height(Length::Fixed(BOTTOM_BAR_ICON_SIZE))
             .style(crate::appearance::icon_svg_style()),
     )
-    .on_press(Message::TerminalPanel(TerminalPanelMessage::ToggleRequested))
+    .on_press(Message::TerminalPanel(
+        TerminalPanelMessage::ToggleRequested,
+    ))
     .padding(4.0)
     .style(crate::appearance::transparent_button_style());
     // 搜索工作区替换了窗格内容,常显统计只属于文件浏览窗格。
-    let status_entries = (browser.search_workspace.is_none())
-        .then(|| browser.pane_status_strip_entries());
+    let status_entries =
+        (browser.search_workspace.is_none()).then(|| browser.pane_status_strip_entries());
     let mut content = row![].align_y(Vertical::Center);
     if let Some(entries) = status_entries {
         content = content.push(pane_status_summary_strip(
@@ -323,12 +327,10 @@ fn collapsed_strip(browser: &FileBrowser) -> Element<'_, Message> {
             browser.options.include_hidden,
         ));
     }
-    let content = content
-        .push(space::Space::new().width(Length::Fill))
-        .push(
-            icon.width(Length::Fixed(BOTTOM_BAR_HEIGHT - DIVIDER_LINE_HEIGHT))
-                .height(Length::Fixed(BOTTOM_BAR_HEIGHT - DIVIDER_LINE_HEIGHT)),
-        );
+    let content = content.push(space::Space::new().width(Length::Fill)).push(
+        icon.width(Length::Fixed(BOTTOM_BAR_HEIGHT - DIVIDER_LINE_HEIGHT))
+            .height(Length::Fixed(BOTTOM_BAR_HEIGHT - DIVIDER_LINE_HEIGHT)),
+    );
     iced::widget::column![
         container(space::Space::new())
             .width(Length::Fill)
@@ -488,11 +490,9 @@ impl canvas::Program<Message> for TerminalGrid<'_> {
             return None;
         };
         let message = match mouse_event {
-            mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                TerminalPanelMessage::GridPressed {
-                    position: cursor.position_over(bounds)?,
-                }
-            }
+            mouse::Event::ButtonPressed(mouse::Button::Left) => TerminalPanelMessage::GridPressed {
+                position: cursor.position_over(bounds)?,
+            },
             mouse::Event::CursorMoved { position } => TerminalPanelMessage::GridDragged {
                 position: Point::new(position.x - bounds.x, position.y - bounds.y),
             },
@@ -579,11 +579,7 @@ fn selection_highlight_color(theme: &Theme) -> Color {
     color
 }
 
-fn cell_text_style(
-    cell: &TerminalCell,
-    theme: &Theme,
-    highlight: Color,
-) -> (Color, iced::Font) {
+fn cell_text_style(cell: &TerminalCell, theme: &Theme, highlight: Color) -> (Color, iced::Font) {
     let palette = theme.palette();
     let mut fg = terminal_color(cell.fg, palette);
     if cell.flags.contains(Flags::INVERSE) {
@@ -615,21 +611,17 @@ fn cell_text_style(
     )
 }
 
-fn draw_cursor(
-    frame: &mut Frame,
-    row: usize,
-    column: usize,
-    shape: CursorShape,
-    color: Color,
-) {
+fn draw_cursor(frame: &mut Frame, row: usize, column: usize, shape: CursorShape, color: Color) {
     let x = column as f32 * CELL_WIDTH;
     let y = row as f32 * CELL_HEIGHT;
     match shape {
-        CursorShape::Block => frame.fill_rectangle(Point::new(x, y), Size::new(CELL_WIDTH, CELL_HEIGHT), {
-            let mut background = color;
-            background.a = 0.35;
-            background
-        }),
+        CursorShape::Block => {
+            frame.fill_rectangle(Point::new(x, y), Size::new(CELL_WIDTH, CELL_HEIGHT), {
+                let mut background = color;
+                background.a = 0.35;
+                background
+            })
+        }
         CursorShape::Underline => frame.fill_rectangle(
             Point::new(x, y + CELL_HEIGHT - 2.0),
             Size::new(CELL_WIDTH, 2.0),

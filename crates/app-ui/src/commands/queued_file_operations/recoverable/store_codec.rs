@@ -447,7 +447,9 @@ mod tests {
             outcome: MergeChildOutcome::Committed(CompletedTarget {
                 path: target.join("child"),
                 identity: identity(2),
-                fingerprint: file_core::ops::TransferFingerprint::Blake3(ObjectFingerprint([9; 32])),
+                fingerprint: file_core::ops::TransferFingerprint::Blake3(ObjectFingerprint(
+                    [9; 32],
+                )),
             }),
         };
         let checkpoint = TransferCheckpoint::Merging(MergeTransfer {

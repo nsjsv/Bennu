@@ -90,11 +90,7 @@ pub async fn build_source_manifest_with_controls(
             let mut entries = Vec::new();
             let mut subdirectories = Vec::new();
             while let Some(child) = reader.next_entry().await.map_err(|source| {
-                RecoverableTransferError::file_system(
-                    "read directory entry in",
-                    &job.path,
-                    source,
-                )
+                RecoverableTransferError::file_system("read directory entry in", &job.path, source)
             })? {
                 controls.wait_until_running().await?;
                 let relative_path = job.relative_path.join(child.file_name());
@@ -131,11 +127,11 @@ pub async fn build_source_manifest_with_controls(
         result_tx.send(Ok(result)).is_ok()
     }
 
-    let (job_tx, job_rx) =
-        tokio::sync::mpsc::channel::<DirectoryScanJob>(scan_workers);
+    let (job_tx, job_rx) = tokio::sync::mpsc::channel::<DirectoryScanJob>(scan_workers);
     let job_rx = Arc::new(tokio::sync::Mutex::new(job_rx));
-    let (result_tx, mut result_rx) =
-        tokio::sync::mpsc::unbounded_channel::<Result<DirectoryScanResult, RecoverableTransferError>>();
+    let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel::<
+        Result<DirectoryScanResult, RecoverableTransferError>,
+    >();
     let mut workers = Vec::with_capacity(scan_workers);
     for _ in 0..scan_workers {
         let job_rx = job_rx.clone();
@@ -163,20 +159,19 @@ pub async fn build_source_manifest_with_controls(
             expected_identity: root_identity,
         })
         .await
-        .map_err(|_| {
-            RecoverableTransferError::Journal {
-                message: "manifest scan workers exited before the root scan".to_owned(),
-            }
+        .map_err(|_| RecoverableTransferError::Journal {
+            message: "manifest scan workers exited before the root scan".to_owned(),
         })?;
 
     let mut outstanding = 1usize;
     let mut job_tx = Some(job_tx);
     while outstanding > 0 {
-        let result = result_rx.recv().await.ok_or_else(|| {
-            RecoverableTransferError::Journal {
+        let result = result_rx
+            .recv()
+            .await
+            .ok_or_else(|| RecoverableTransferError::Journal {
                 message: "manifest scan workers exited with scans outstanding".to_owned(),
-            }
-        })?;
+            })?;
         outstanding -= 1;
         let result = match result {
             Ok(result) => result,

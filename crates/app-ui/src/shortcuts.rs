@@ -645,8 +645,8 @@ fn normalized_character(value: &str) -> Option<char> {
     }
     // '+' 是配置里的修饰键分隔符,不能当按键;其余 ASCII 标点允许,
     // 否则 Ctrl+` 这类绑定在注册和匹配两端都会被拒。
-    let is_bindable = character.is_ascii_alphanumeric()
-        || (character.is_ascii_punctuation() && character != '+');
+    let is_bindable =
+        character.is_ascii_alphanumeric() || (character.is_ascii_punctuation() && character != '+');
     if !is_bindable {
         return None;
     }
@@ -809,10 +809,8 @@ mod tests {
     #[test]
     fn ctrl_backtick_matches_default_toggle_terminal() {
         // 回归:字符归一化曾拒绝标点,导致 Ctrl+` 注册后永远匹配不上。
-        let action = ShortcutConfig::defaults().matching_action(
-            &Key::Character("`".into()),
-            keyboard::Modifiers::CTRL,
-        );
+        let action = ShortcutConfig::defaults()
+            .matching_action(&Key::Character("`".into()), keyboard::Modifiers::CTRL);
         assert_eq!(action, Some(ShortcutAction::ToggleTerminal));
     }
 

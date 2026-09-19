@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 use iced::widget::image;
 use iced::Task;
 
-use super::FileBrowser;
 use super::right_preview_panel::PreviewLoadSurface;
+use super::FileBrowser;
 use crate::commands::{
     start_audio_preview_command, start_video_preview_audio_command, video_preview_frame_command,
     video_preview_metadata_command,

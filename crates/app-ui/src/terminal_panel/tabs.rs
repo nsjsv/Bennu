@@ -63,10 +63,8 @@ impl TabShiftAnimation {
     }
 
     pub(crate) fn shift_offset(self) -> f32 {
-        self.initial_offset * (1.0 - ease_out_cubic(elapsed_fraction(
-            self.started_at,
-            TAB_SHIFT_DURATION,
-        )))
+        self.initial_offset
+            * (1.0 - ease_out_cubic(elapsed_fraction(self.started_at, TAB_SHIFT_DURATION)))
     }
 
     fn is_finished(self) -> bool {
@@ -150,9 +148,8 @@ impl FileBrowser {
     ) -> bool {
         let columns = self.terminal_panel_grid_columns();
         // 行数按落位后的标签数取:第二个标签会让标签条出现,画布变矮。
-        let tab_strip_visible = super::view::tab_strip_visible_for_tab_count(
-            self.terminal_panel.tabs.len() + 1,
-        );
+        let tab_strip_visible =
+            super::view::tab_strip_visible_for_tab_count(self.terminal_panel.tabs.len() + 1);
         let rows = super::terminal_panel_canvas_rows(rows_height, tab_strip_visible);
         let shell = self.terminal_panel_shell();
         let session_id = self.terminal_panel.next_session_id;
@@ -220,7 +217,8 @@ impl FileBrowser {
             } else if self.terminal_panel.expanded {
                 self.terminal_panel.expanded = false;
                 self.terminal_panel.follow_target_snapshot = None;
-                self.terminal_panel.start_height_animation(super::COLLAPSED_HEIGHT);
+                self.terminal_panel
+                    .start_height_animation(super::COLLAPSED_HEIGHT);
             }
         }
         // 关到 1 个标签时标签条隐藏、画布变高,存留标签随之重算。
@@ -252,7 +250,8 @@ impl FileBrowser {
             return;
         };
         tab.has_unread_output = false;
-        tab.session.resize(super::emulator_dimensions(columns, rows));
+        tab.session
+            .resize(super::emulator_dimensions(columns, rows));
         self.terminal_panel.active_session_id = Some(session_id);
         self.terminal_panel.focused = true;
     }
@@ -306,7 +305,10 @@ impl FileBrowser {
         let Some(new_ids) = reordered_session_ids(&ids, dragged, entered) else {
             return;
         };
-        let dragged_index = ids.iter().position(|id| *id == dragged).expect("checked above");
+        let dragged_index = ids
+            .iter()
+            .position(|id| *id == dragged)
+            .expect("checked above");
         let entered_index = ids
             .iter()
             .position(|id| *id == entered)
@@ -371,9 +373,8 @@ impl FileBrowser {
         let count = self.terminal_panel.tabs.len().max(1) as f32;
         let strip_width =
             (self.main_window_width - self.sidebar_width - PANEL_HORIZONTAL_PADDING).max(1.0);
-        let shareable_width = strip_width
-            - super::view::TAB_ADD_BUTTON_SIZE
-            - super::view::TAB_STRIP_SPACING * count;
+        let shareable_width =
+            strip_width - super::view::TAB_ADD_BUTTON_SIZE - super::view::TAB_STRIP_SPACING * count;
         (shareable_width / count).max(MIN_TAB_SLOT_WIDTH)
     }
 
@@ -404,15 +405,9 @@ mod tests {
     fn reorder_moves_tab_in_both_directions() {
         let list = ids(4);
         // 向左拖(3 → 1 的位置):与主区标签同语义,先移除再按原 index 插入
-        assert_eq!(
-            reordered_session_ids(&list, 3, 1),
-            Some(vec![3, 1, 2, 4])
-        );
+        assert_eq!(reordered_session_ids(&list, 3, 1), Some(vec![3, 1, 2, 4]));
         // 向右拖(1 → 4 的位置):落在目标槽位,中间标签整体左移
-        assert_eq!(
-            reordered_session_ids(&list, 1, 4),
-            Some(vec![2, 3, 4, 1])
-        );
+        assert_eq!(reordered_session_ids(&list, 1, 4), Some(vec![2, 3, 4, 1]));
     }
 
     #[test]

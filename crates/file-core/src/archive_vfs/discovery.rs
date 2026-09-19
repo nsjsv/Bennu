@@ -65,10 +65,8 @@ pub(crate) async fn discover_archive_directory(
 
     let order = Arc::new(sort_discovered_entry_indices(&entries, &options));
     let entries = Arc::new(entries);
-    let metadata_resolver = DirectoryMetadataResolver::new(
-        virtual_directory.to_path_buf(),
-        Arc::clone(&entries),
-    );
+    let metadata_resolver =
+        DirectoryMetadataResolver::new(virtual_directory.to_path_buf(), Arc::clone(&entries));
 
     Ok(DirectoryDiscovery {
         path: virtual_directory.to_path_buf(),

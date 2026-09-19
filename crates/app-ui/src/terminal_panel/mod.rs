@@ -47,22 +47,11 @@ pub(crate) enum TerminalPanelMessage {
     TabCloseRequested(SessionId),
     TabDragEntered(SessionId),
     TabDragFinished,
-    OutputReceived {
-        session: SessionId,
-        bytes: Vec<u8>,
-    },
-    ProcessExited {
-        session: SessionId,
-    },
-    GridPressed {
-        position: Point,
-    },
-    GridDragged {
-        position: Point,
-    },
-    GridWheelScrolled {
-        lines: i32,
-    },
+    OutputReceived { session: SessionId, bytes: Vec<u8> },
+    ProcessExited { session: SessionId },
+    GridPressed { position: Point },
+    GridDragged { position: Point },
+    GridWheelScrolled { lines: i32 },
     CopySelectionRequested,
     PasteReceived(Option<String>),
 }
@@ -127,7 +116,9 @@ impl TerminalPanelState {
     }
 
     pub(crate) fn is_animating(&self) -> bool {
-        self.height_animation.is_some() || self.resize_drag.is_some() || !self.tab_shift_animations.is_empty()
+        self.height_animation.is_some()
+            || self.resize_drag.is_some()
+            || !self.tab_shift_animations.is_empty()
     }
 
     pub(crate) fn is_focused(&self) -> bool {
@@ -196,8 +187,7 @@ impl FileBrowser {
         if self.terminal_panel.expanded {
             self.terminal_panel.expanded = false;
             self.terminal_panel.focused = false;
-            self.terminal_panel
-                .start_height_animation(COLLAPSED_HEIGHT);
+            self.terminal_panel.start_height_animation(COLLAPSED_HEIGHT);
         } else {
             let target = self.terminal_panel.clamp_height_for_window(
                 self.terminal_panel.expanded_height,
@@ -222,10 +212,7 @@ impl FileBrowser {
     /// 多栏视图鼠标不在任何栏上时返回 None(保持现状,避免来回跳)。
     fn terminal_panel_follow_target(&self) -> Option<PathBuf> {
         let active_pane_id = self.pane_layout.active();
-        let pane = self
-            .panes
-            .iter()
-            .find(|pane| pane.id == active_pane_id)?;
+        let pane = self.panes.iter().find(|pane| pane.id == active_pane_id)?;
         if pane.view_mode != crate::model::BrowserViewMode::Columns {
             return Some(pane.current_dir.clone());
         }
@@ -252,7 +239,9 @@ impl FileBrowser {
         };
         active_tab.directory = directory.clone();
         let quoted = directory.to_string_lossy().replace('\'', "'\\''");
-        active_tab.session.write_input(format!("cd -- '{quoted}'\r").as_bytes());
+        active_tab
+            .session
+            .write_input(format!("cd -- '{quoted}'\r").as_bytes());
     }
 
     /// 点击终端抽屉以外的区域时把键盘焦点还给文件区;
@@ -322,8 +311,7 @@ impl FileBrowser {
         };
         let step = (animation.step + 1.0) / HEIGHT_ANIMATION_STEPS;
         let eased = ease_out_cubic(step.min(1.0));
-        self.terminal_panel.height =
-            animation.from + (animation.to - animation.from) * eased;
+        self.terminal_panel.height = animation.from + (animation.to - animation.from) * eased;
         if step >= 1.0 {
             self.terminal_panel.height = animation.to;
             self.terminal_panel.height_animation = None;
@@ -342,8 +330,7 @@ impl FileBrowser {
         let Some(drag) = self.terminal_panel.resize_drag else {
             return;
         };
-        let dragged =
-            drag.height_start + (drag.cursor_start_y - position.y);
+        let dragged = drag.height_start + (drag.cursor_start_y - position.y);
         let clamped = self
             .terminal_panel
             .clamp_height_for_window(dragged, self.main_window_height);
@@ -413,8 +400,7 @@ impl FileBrowser {
                 self.terminal_panel.focused = true;
                 self.terminal_panel.selection_drag_active = true;
                 if let Some(active_tab) = self.terminal_panel.active_tab_mut() {
-                    let (row, column) =
-                        view::grid_cell_for_position(position);
+                    let (row, column) = view::grid_cell_for_position(position);
                     active_tab.session.emulator.clear_selection();
                     active_tab.session.emulator.begin_selection(row, column);
                 }
@@ -422,8 +408,7 @@ impl FileBrowser {
             TerminalPanelMessage::GridDragged { position } => {
                 if self.terminal_panel.selection_drag_active {
                     if let Some(active_tab) = self.terminal_panel.active_tab_mut() {
-                        let (row, column) =
-                            view::grid_cell_for_position(position);
+                        let (row, column) = view::grid_cell_for_position(position);
                         active_tab.session.emulator.extend_selection(row, column);
                     }
                 }
@@ -480,9 +465,9 @@ impl FileBrowser {
         if modifiers.control() && modifiers.shift() {
             match key.as_ref() {
                 iced::keyboard::Key::Character("c") => {
-                    return Some(
-                        self.handle_terminal_panel_message(TerminalPanelMessage::CopySelectionRequested),
-                    );
+                    return Some(self.handle_terminal_panel_message(
+                        TerminalPanelMessage::CopySelectionRequested,
+                    ));
                 }
                 iced::keyboard::Key::Character("v") => {
                     return Some(iced::clipboard::read().map(|text| {

@@ -546,10 +546,7 @@ fn expansion_band_merges_transfer_placeholders_for_its_directory() {
         })
         .unwrap();
     assert_eq!(band_rows.cells.len(), 1);
-    assert!(matches!(
-        band_rows.cells[0],
-        IconGridCell::Placeholder(_)
-    ));
+    assert!(matches!(band_rows.cells[0], IconGridCell::Placeholder(_)));
     // 占位格子不产生交互事实。
     let matching = layout.interactive_paths_matching(&[PathBuf::from("/workspace/root")]);
     assert_eq!(matching.len(), 1);

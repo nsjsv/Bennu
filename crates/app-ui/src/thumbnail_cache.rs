@@ -319,10 +319,7 @@ impl ThumbnailCache {
 
     /// 同一源路径下已就绪的最大尺寸缩略图（不限请求档位）：
     /// 预览会话用它把列表阶段已生成的缩略图直接抬上屏。
-    pub(crate) fn largest_ready_for_source(
-        &self,
-        source: &Path,
-    ) -> Option<&ThumbnailHandleEntry> {
+    pub(crate) fn largest_ready_for_source(&self, source: &Path) -> Option<&ThumbnailHandleEntry> {
         self.ready
             .values()
             .filter(|entry| entry.source == source)

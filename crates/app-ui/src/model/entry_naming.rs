@@ -53,18 +53,19 @@ pub(crate) fn unique_symlink_directory_name(
 
 /// `parent` 下第一个可用的「新建文件夹( 2/3…)」目录完整路径。
 pub(crate) fn unique_gathered_folder_directory(parent: &Path) -> PathBuf {
-    let name = unique_suffixed_name(
-        OsStr::new(GATHERED_FOLDER_BASE_NAME),
-        "",
-        false,
-        |name| entry_exists(&parent.join(name)),
-    );
+    let name = unique_suffixed_name(OsStr::new(GATHERED_FOLDER_BASE_NAME), "", false, |name| {
+        entry_exists(&parent.join(name))
+    });
     parent.join(name)
 }
 
 /// 列出按占用顺序尝试的全部候选名;首个未被占用的即结果。
 /// 供异步侧逐个探测使用(执行器里没有同步 FS 可用的闭包)。
-pub(crate) fn suffixed_name_candidates(original: &OsStr, suffix: &str, split_extension: bool) -> Vec<OsString> {
+pub(crate) fn suffixed_name_candidates(
+    original: &OsStr,
+    suffix: &str,
+    split_extension: bool,
+) -> Vec<OsString> {
     let (stem, extension) = split_name(original, split_extension);
     let mut candidates = Vec::with_capacity(UNIQUE_NAME_LIMIT);
     candidates.push(composed_name(&stem, suffix, extension.as_deref()));
@@ -99,10 +100,7 @@ fn split_name(original: &OsStr, split_extension: bool) -> (OsString, Option<OsSt
     }
     let path = Path::new(original);
     match (path.file_stem(), path.extension()) {
-        (Some(stem), Some(extension)) => (
-            stem.to_os_string(),
-            Some(extension.to_os_string()),
-        ),
+        (Some(stem), Some(extension)) => (stem.to_os_string(), Some(extension.to_os_string())),
         _ => (original.to_os_string(), None),
     }
 }
@@ -123,10 +121,7 @@ mod tests {
     use std::collections::HashSet;
 
     fn taken_set<'a>(names: &'a [&'a str]) -> impl FnMut(&OsStr) -> bool + 'a {
-        let taken: HashSet<OsString> = names
-            .iter()
-            .map(|name| OsString::from(name))
-            .collect();
+        let taken: HashSet<OsString> = names.iter().map(|name| OsString::from(name)).collect();
         move |candidate: &OsStr| taken.contains(candidate)
     }
 

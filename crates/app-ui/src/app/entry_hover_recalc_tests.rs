@@ -165,11 +165,7 @@ fn icon_grid_scroll_moves_hover_to_the_cell_under_the_cursor() {
     );
     browser.hovered_entry = Some(PathBuf::from("/workspace/a.txt"));
 
-    drop(browser.update(Message::IconGridScrolled(
-        PANE_ID,
-        0.0,
-        viewport,
-    )));
+    drop(browser.update(Message::IconGridScrolled(PANE_ID, 0.0, viewport)));
 
     assert_eq!(
         browser.hovered_entry,
@@ -178,11 +174,7 @@ fn icon_grid_scroll_moves_hover_to_the_cell_under_the_cursor() {
 
     // 滚回内容内边距上(没有格子):hover 清空。
     browser.cursor_position = cursor_at(viewport, 4.0, 4.0);
-    drop(browser.update(Message::IconGridScrolled(
-        PANE_ID,
-        0.0,
-        viewport,
-    )));
+    drop(browser.update(Message::IconGridScrolled(PANE_ID, 0.0, viewport)));
     assert_eq!(browser.hovered_entry, None);
 }
 
@@ -203,15 +195,10 @@ fn icon_grid_scroll_over_group_header_clears_hover() {
     browser.cursor_position = cursor_at(
         viewport,
         ICON_GRID_CONTENT_PADDING + tile_width(edge) / 2.0,
-        ICON_GRID_CONTENT_PADDING
-            + crate::icon_grid_layout::ICON_GRID_GROUP_HEADER_HEIGHT / 2.0,
+        ICON_GRID_CONTENT_PADDING + crate::icon_grid_layout::ICON_GRID_GROUP_HEADER_HEIGHT / 2.0,
     );
 
-    drop(browser.update(Message::IconGridScrolled(
-        PANE_ID,
-        0.0,
-        viewport,
-    )));
+    drop(browser.update(Message::IconGridScrolled(PANE_ID, 0.0, viewport)));
 
     assert_eq!(browser.hovered_entry, None);
 }
@@ -223,9 +210,11 @@ fn scrolled_grid_hover_tracks_scroll_offset_from_message() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     browser.current_dir = PathBuf::from("/workspace");
     // 条目足够多:窗格宽推导的列数下,row 1 / row 2 都真实存在。
-    browser.entries = Arc::new((0..36)
-        .map(|index| file_entry(&format!("/workspace/item-{index:02}.txt")))
-        .collect());
+    browser.entries = Arc::new(
+        (0..36)
+            .map(|index| file_entry(&format!("/workspace/item-{index:02}.txt")))
+            .collect(),
+    );
     browser.view_mode = BrowserViewMode::Icons;
     let viewport = Rectangle::new(Point::new(200.0, 120.0), Size::new(600.0, 500.0));
     let edge = browser.user_config.icons_icon_edge();
@@ -243,11 +232,7 @@ fn scrolled_grid_hover_tracks_scroll_offset_from_message() {
     drop(browser.update(Message::IconGridScrolled(PANE_ID, 0.0, viewport)));
     let before = browser.hovered_entry.clone().expect("hover on row 1");
 
-    drop(browser.update(Message::IconGridScrolled(
-        PANE_ID,
-        pitch,
-        viewport,
-    )));
+    drop(browser.update(Message::IconGridScrolled(PANE_ID, pitch, viewport)));
     let after = browser.hovered_entry.clone().expect("hover on row 2");
 
     let index_of = |path: &PathBuf| {

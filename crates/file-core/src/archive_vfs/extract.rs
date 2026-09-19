@@ -8,7 +8,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::archive_extraction::archive_extraction_format_for_path;
 use crate::{
-    ArchivePassword, ArchiveExtractionFormat, ArchiveExtractionProgress, FileError,
+    ArchiveExtractionFormat, ArchiveExtractionProgress, ArchivePassword, FileError,
     FileOperationControls, SEVEN_ZIP_COMMAND_NAMES,
 };
 
@@ -79,12 +79,12 @@ pub async fn extract_archive_members_with_controls_and_progress(
                 };
                 let target = unique_destination(&target);
                 if let Some(parent) = target.parent() {
-                    tokio::fs::create_dir_all(parent)
-                        .await
-                        .map_err(|source| FileError::CreateDirectory {
+                    tokio::fs::create_dir_all(parent).await.map_err(|source| {
+                        FileError::CreateDirectory {
                             path: parent.to_path_buf(),
                             source,
-                        })?;
+                        }
+                    })?;
                 }
                 let archive_file = super::temp_store::materialize_innermost_archive(
                     &group.boundaries,
@@ -121,7 +121,8 @@ pub(crate) async fn materialize_member_for_open(
     cancellation: CancellationToken,
 ) -> Result<PathBuf, FileError> {
     let archive_file =
-        super::temp_store::materialize_innermost_archive(&resolved.boundaries, cancellation).await?;
+        super::temp_store::materialize_innermost_archive(&resolved.boundaries, cancellation)
+            .await?;
     let member = resolved.inner.to_string_lossy().into_owned();
     let destination = super::temp_store::opened_member_path(&resolved.boundaries, &resolved.inner);
     if tokio::fs::try_exists(&destination).await.unwrap_or(false) {
@@ -169,12 +170,9 @@ pub(crate) async fn extract_member(
                 ArchiveExtractionFormat::Tar => {
                     extract_tar_member(&archive_path, &member, &destination_path, TarInput::Plain)
                 }
-                ArchiveExtractionFormat::TarGz => extract_tar_member(
-                    &archive_path,
-                    &member,
-                    &destination_path,
-                    TarInput::Gzip,
-                ),
+                ArchiveExtractionFormat::TarGz => {
+                    extract_tar_member(&archive_path, &member, &destination_path, TarInput::Gzip)
+                }
                 _ => unreachable!("seven-zip formats are dispatched to the async path"),
             })
             .await
@@ -225,16 +223,14 @@ fn source_relative_member(boundaries: &[PathBuf], source: &Path) -> PathBuf {
 async fn member_tree_for_archive(
     boundaries: &[PathBuf],
 ) -> Result<super::tree::ArchiveMemberTree, FileError> {
-    let archive_file = super::temp_store::materialize_innermost_archive(
-        boundaries,
-        CancellationToken::new(),
-    )
-    .await?;
+    let archive_file =
+        super::temp_store::materialize_innermost_archive(boundaries, CancellationToken::new())
+            .await?;
     let format = archive_extraction_format_for_path(&archive_file).ok_or(
         FileError::Unsupported("archive format is not supported for member extraction"),
     )?;
-    let members = crate::archive_listing::list_archive_members_with_format(archive_file, format)
-        .await?;
+    let members =
+        crate::archive_listing::list_archive_members_with_format(archive_file, format).await?;
     Ok(super::tree::ArchiveMemberTree::build(members))
 }
 
@@ -316,10 +312,11 @@ fn extract_zip_member(
         });
     }
 
-    let mut output = std::fs::File::create(destination).map_err(|source| FileError::CreateFile {
-        path: destination.to_path_buf(),
-        source,
-    })?;
+    let mut output =
+        std::fs::File::create(destination).map_err(|source| FileError::CreateFile {
+            path: destination.to_path_buf(),
+            source,
+        })?;
     std::io::copy(&mut entry, &mut output).map_err(|source| FileError::Archive {
         path: archive.to_path_buf(),
         message: source.to_string(),
@@ -327,7 +324,11 @@ fn extract_zip_member(
     Ok(())
 }
 
-fn zip_member_lookup_error(archive: &Path, member: &str, source: &zip::result::ZipError) -> FileError {
+fn zip_member_lookup_error(
+    archive: &Path,
+    member: &str,
+    source: &zip::result::ZipError,
+) -> FileError {
     FileError::Archive {
         path: archive.to_path_buf(),
         message: format!("archive member not found: {member}: {source}"),

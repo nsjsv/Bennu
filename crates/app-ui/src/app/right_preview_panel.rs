@@ -10,8 +10,7 @@ pub(crate) const PANEL_RESIZE_HANDLE_WIDTH: f32 = 6.0;
 /// 面板内容区四周留白。
 pub(crate) const PANEL_CONTENT_PADDING: f32 = 12.0;
 /// 预览/信息区分隔条高度复用窗格分隔条宽度,手感一致。
-pub(crate) const PANEL_RATIO_DIVIDER_HEIGHT: f32 =
-    crate::model::SPLIT_DIVIDER_WIDTH;
+pub(crate) const PANEL_RATIO_DIVIDER_HEIGHT: f32 = crate::model::SPLIT_DIVIDER_WIDTH;
 /// 文件信息区保底高度;拖到极限时四行元数据仍完整可读。
 const MIN_INFO_AREA_HEIGHT: f32 = 120.0;
 /// 面板最宽不得超过窗格区宽度减去浏览器保底区;与侧栏窗口钳制同源。
@@ -172,10 +171,8 @@ impl FileBrowser {
     }
 
     fn right_preview_panel_width_for_window(&self, width: f32) -> f32 {
-        let max_width = (self.main_window_width
-            - self.sidebar_width
-            - MIN_BROWSER_AREA_WIDTH)
-            .max(1.0);
+        let max_width =
+            (self.main_window_width - self.sidebar_width - MIN_BROWSER_AREA_WIDTH).max(1.0);
         config::normalize_right_preview_panel_width(width).min(max_width)
     }
 

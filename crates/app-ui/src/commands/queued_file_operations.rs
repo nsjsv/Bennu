@@ -9,8 +9,7 @@ use file_core::{
     delete_path_permanently, extract_archive_with_controls_and_progress,
     is_direct_move_segment_candidate, is_transfer_target_available,
     persist_recoverable_source_manifest_with_controls, prepare_direct_move_intent_segment,
-    rename_path, run_direct_move_batch_to_durable_renamed,
-    run_recoverable_transfer,
+    rename_path, run_direct_move_batch_to_durable_renamed, run_recoverable_transfer,
     ArchiveCreationRequest, ArchiveExtractionRequest, CopyProgress, DirectMoveBatchRecord,
     DirectMoveIntentBatchRecord, FileError, FileOperationControls, FileOperationVerification,
     FileTransferOptions, RecoverableTransferError, RecoverableTransferOperation,
@@ -33,9 +32,9 @@ use crate::operation_queue::{
     QueuedFileOperation, QueuedTransfer, RunningFileOperation, NEW_DIRECTORY_NAME, NEW_FILE_NAME,
 };
 
+use self::extract_members::run_queued_extract_archive_members;
 use super::batch_rename_operation::run_queued_batch_rename;
 use super::convert_operation::run_queued_convert;
-use self::extract_members::run_queued_extract_archive_members;
 
 const FILE_OPERATION_CHANNEL_SIZE: usize = 32;
 const BYTE_PROGRESS_UI_INTERVAL: Duration = crate::ui_pacing::PROGRESS_UI_INTERVAL;
@@ -193,15 +192,11 @@ async fn run_queued_file_operation(
                     verification,
                 )
                 .await
-            }
+            };
         }
         QueuedFileOperation::GatherSelectionIntoNewFolder { directory, sources } => {
             run_queued_gather_selection_into_new_folder(
-                directory,
-                sources,
-                controls,
-                task_id,
-                output,
+                directory, sources, controls, task_id, output,
             )
             .await
         }
@@ -490,9 +485,8 @@ async fn create_new_entry(
             Err(error) => return Err(error.to_string()),
         }
     }
-    Err(name_taken_error.unwrap_or_else(|| {
-        format!("no available name for new entry in {}", parent.display())
-    }))
+    Err(name_taken_error
+        .unwrap_or_else(|| format!("no available name for new entry in {}", parent.display())))
 }
 
 /// 候选名被占用的错误形态:create_dir / create_new 的 AlreadyExists 就是
@@ -558,10 +552,7 @@ async fn run_queued_gather_selection_into_new_folder(
         )
         .await;
     }
-    Ok(FileOperationOutcome::GatheredIntoNewFolder {
-        directory,
-        moved,
-    })
+    Ok(FileOperationOutcome::GatheredIntoNewFolder { directory, moved })
 }
 
 async fn run_queued_ungather_new_folder(

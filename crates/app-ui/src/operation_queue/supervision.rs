@@ -115,7 +115,10 @@ impl FileOperationQueue {
         let Some(store) = self.store.clone() else {
             return None;
         };
-        if self.next_store_scan.is_some_and(|scheduled| now < scheduled) {
+        if self
+            .next_store_scan
+            .is_some_and(|scheduled| now < scheduled)
+        {
             return None;
         }
         self.next_store_scan = Some(now + STORE_SCAN_INTERVAL);

@@ -109,8 +109,7 @@ pub(super) fn collect_interactive_entries<'a>(
                                 entry,
                                 center_x: panel_left
                                     + ICON_GRID_CONTENT_PADDING
-                                    + column as f32
-                                        * (tile_width(icon_edge) + grid_gap(icon_edge))
+                                    + column as f32 * (tile_width(icon_edge) + grid_gap(icon_edge))
                                     + tile_width(icon_edge) / 2.0,
                                 center_y: top + tile_visual_height(icon_edge) / 2.0,
                                 top,
@@ -260,9 +259,10 @@ pub(super) fn find_interactive_entry_at_point<'a>(
                 // 同样不命中。
                 if column >= rows.column_count
                     || slot % column_slot >= tile_width(icon_edge)
-                    || point.y >= rows_top
-                        + local_row as f32 * row_height(icon_edge)
-                        + tile_visual_height(icon_edge)
+                    || point.y
+                        >= rows_top
+                            + local_row as f32 * row_height(icon_edge)
+                            + tile_visual_height(icon_edge)
                 {
                     continue;
                 }

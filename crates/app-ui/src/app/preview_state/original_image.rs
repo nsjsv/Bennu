@@ -6,7 +6,7 @@ use thumbnails::{ThumbnailKey, ThumbnailRequest};
 use tokio_util::sync::CancellationToken;
 
 use super::super::right_preview_panel::PreviewLoadSurface;
-use super::super::{FileBrowser, windows::image_preview_size_from_dimensions};
+use super::super::{windows::image_preview_size_from_dimensions, FileBrowser};
 use crate::commands::original_image_preview_command;
 use crate::model::{ImagePreviewContent, Message, PreviewContent, PreviewSize, PreviewState};
 use crate::thumbnail_cache::{

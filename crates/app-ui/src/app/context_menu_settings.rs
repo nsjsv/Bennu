@@ -3,7 +3,7 @@ use iced::{Point, Task};
 use super::{FileBrowser, POINTER_DRAG_ACTIVATION_DISTANCE};
 use crate::model::{
     ContextMenuSettingsDragState, ContextMenuSettingsPage, ContextMenuSettingsPageStep,
-    FileAreaMenuItem, CONTEXT_MENU_SETTINGS_ROW_PITCH, Message,
+    FileAreaMenuItem, Message, CONTEXT_MENU_SETTINGS_ROW_PITCH,
 };
 
 impl FileBrowser {
@@ -73,15 +73,21 @@ impl FileBrowser {
             return Task::none();
         }
 
-        let count = self.user_config.context_menus.settings_rows(drag.page).len();
+        let count = self
+            .user_config
+            .context_menus
+            .settings_rows(drag.page)
+            .len();
         let last_index = count.saturating_sub(1);
         let projected = (drag.source_index as f32 + delta.y / CONTEXT_MENU_SETTINGS_ROW_PITCH)
             .round()
             .clamp(0.0, last_index as f32) as usize;
         if projected != drag.current_index {
-            self.user_config
-                .context_menus
-                .reorder_settings_row(drag.page, drag.current_index, projected);
+            self.user_config.context_menus.reorder_settings_row(
+                drag.page,
+                drag.current_index,
+                projected,
+            );
             drag.current_index = projected;
             drag.order_changed = true;
         }
@@ -115,13 +121,17 @@ impl FileBrowser {
         if index != drag.current_index {
             return None;
         }
-        let count = self.user_config.context_menus.settings_rows(drag.page).len();
+        let count = self
+            .user_config
+            .context_menus
+            .settings_rows(drag.page)
+            .len();
         let cursor_offset = latest.y - origin.y;
         let layout_offset = (drag.source_index as f32 - drag.current_index as f32)
             * CONTEXT_MENU_SETTINGS_ROW_PITCH;
         let min_offset = -(drag.current_index as f32) * CONTEXT_MENU_SETTINGS_ROW_PITCH;
-        let max_offset = (count.saturating_sub(1) - drag.current_index) as f32
-            * CONTEXT_MENU_SETTINGS_ROW_PITCH;
+        let max_offset =
+            (count.saturating_sub(1) - drag.current_index) as f32 * CONTEXT_MENU_SETTINGS_ROW_PITCH;
         Some((cursor_offset + layout_offset).clamp(min_offset, max_offset))
     }
 

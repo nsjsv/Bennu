@@ -326,8 +326,18 @@ async fn batch_restore_restores_every_entry_of_the_batch() {
     create_location(&root);
     let first_original = fixture.path().join("first.txt");
     let second_original = fixture.path().join("second.txt");
-    write_entry(&root, "first", &first_original.display().to_string(), b"first");
-    write_entry(&root, "second", &second_original.display().to_string(), b"second");
+    write_entry(
+        &root,
+        "first",
+        &first_original.display().to_string(),
+        b"first",
+    );
+    write_entry(
+        &root,
+        "second",
+        &second_original.display().to_string(),
+        b"second",
+    );
     let entries = scan_home_entries(fixture.path());
     assert_eq!(entries.len(), 2);
 

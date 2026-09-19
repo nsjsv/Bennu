@@ -13,8 +13,7 @@ use crate::commands::{
 use crate::model::{
     entry_exists, unique_duplicated_directory_name, unique_duplicated_file_name,
     unique_gathered_folder_directory, BrowserViewMode, ContextMenuState,
-    DestructiveActionConfirmation, FileDropPrompt, Message, PendingOperation,
-    TransferConflictMode,
+    DestructiveActionConfirmation, FileDropPrompt, Message, PendingOperation, TransferConflictMode,
 };
 use crate::operation_queue::{QueuedFileOperation, QueuedTransfer};
 
@@ -96,8 +95,7 @@ impl FileBrowser {
             return Task::none();
         }
         let directory = self.gather_target_directory();
-        let sources =
-            gather_sources_in_directory(&self.selected_paths_for_operation(), &directory);
+        let sources = gather_sources_in_directory(&self.selected_paths_for_operation(), &directory);
         if sources.is_empty() {
             return Task::none();
         }
@@ -451,8 +449,7 @@ impl FileBrowser {
         }
         let (mode, transfers, archive_members) = match operation {
             PendingOperation::Copy(sources) => {
-                let (archive_sources, real_sources) =
-                    split_archive_member_sources(sources);
+                let (archive_sources, real_sources) = split_archive_member_sources(sources);
                 let members = (!archive_sources.is_empty()).then(|| {
                     QueuedFileOperation::ExtractArchiveMembers {
                         sources: archive_sources,
@@ -468,8 +465,7 @@ impl FileBrowser {
             }
             PendingOperation::Move(sources) => {
                 // 包内不可写，「移动」里的包内源降级为提取(复制后源无法删除)。
-                let (archive_sources, real_sources) =
-                    split_archive_member_sources(sources);
+                let (archive_sources, real_sources) = split_archive_member_sources(sources);
                 let members = (!archive_sources.is_empty()).then(|| {
                     QueuedFileOperation::ExtractArchiveMembers {
                         sources: archive_sources,
@@ -757,7 +753,10 @@ mod tests {
 
         assert_eq!(
             transfers,
-            vec![QueuedTransfer::new(outsider, PathBuf::from("/workspace/notes"))]
+            vec![QueuedTransfer::new(
+                outsider,
+                PathBuf::from("/workspace/notes")
+            )]
         );
     }
 
@@ -842,7 +841,10 @@ mod tests {
         let mut browser = browser_with_entries(&[PathBuf::from("/workspace/a.txt")]);
         browser.view_mode = BrowserViewMode::Columns;
 
-        assert_eq!(browser.paste_target_directory(), PathBuf::from("/workspace"));
+        assert_eq!(
+            browser.paste_target_directory(),
+            PathBuf::from("/workspace")
+        );
     }
 
     #[test]
@@ -853,10 +855,8 @@ mod tests {
         // 副本走复制管线,恢复日志需要任务存储。
         let state_directory = tempfile::tempdir().unwrap();
         browser.operation_queue.set_store(
-            file_operation_store::TaskQueueStore::new(
-                state_directory.path().join("state.sqlite"),
-            )
-            .unwrap(),
+            file_operation_store::TaskQueueStore::new(state_directory.path().join("state.sqlite"))
+                .unwrap(),
         );
 
         drop(browser.duplicate_selected());

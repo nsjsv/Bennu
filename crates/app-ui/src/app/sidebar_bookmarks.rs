@@ -172,7 +172,12 @@ impl FileBrowser {
         self.sidebar_bookmark_drag = None;
         self.sidebar_bookmark_drop_slot = None;
         let _ = self.cancel_address_editing();
-        if self.user_config.context_menus.sidebar_bookmark_items().is_empty() {
+        if self
+            .user_config
+            .context_menus
+            .sidebar_bookmark_items()
+            .is_empty()
+        {
             return rename_command;
         }
         self.context_menu = Some(ContextMenuState::SidebarBookmark(

@@ -14,12 +14,12 @@ use crate::transfer_conflict::{
 };
 use crate::{FileError, ScanOptions, TransferConflictStrategy};
 
+use super::batch::VerifiedTrashLocations;
 use super::catalog::{
     discover_trash_locations_from_mountinfo,
     discover_trash_locations_from_mountinfo_with_cancellation, effective_user_id,
     inspect_trash_object, trash_data_home, trash_object_identity,
 };
-use super::batch::VerifiedTrashLocations;
 use super::model::{
     TrashCommitOutcome, TrashEntry, TrashEntryIdentity, TrashLocationGuard, TrashLocationKind,
     TrashObjectIdentity, TrashObjectKind, TrashRestoreEntry, TrashTrackingWarning,
@@ -462,8 +462,7 @@ impl TrashTrackingPlan {
         };
         // 各卷的「移入前凭据快照」在批内首次触及该 scope 时准备一次;批次前
         // 已存在的条目靠它排除,批次内先前条目的产物不会进入快照。
-        let before_info_objects = if let Some(before) = scope_snapshots.get(&scope.snapshot_key())
-        {
+        let before_info_objects = if let Some(before) = scope_snapshots.get(&scope.snapshot_key()) {
             before.clone()
         } else {
             let catalog = discover_trash_locations_from_mountinfo_with_cancellation(
@@ -589,15 +588,8 @@ impl TrashTrackingPlan {
     /// 卷上 Trash 的新凭据由 trash crate 写成绝对 Path,需归一化为相对形式;
     /// 只处理本条新增的凭据,批次前已存在的条目不受影响。失败时该条与现状
     /// 一致地降级为「无撤销条目」警告。
-    fn normalize_committed_volume_info(
-        &self,
-        candidate: &TrashEntry,
-    ) -> Result<(), String> {
-        let TrashTrackingScope::Volume {
-            top_directory,
-            ..
-        } = &self.scope
-        else {
+    fn normalize_committed_volume_info(&self, candidate: &TrashEntry) -> Result<(), String> {
+        let TrashTrackingScope::Volume { top_directory, .. } = &self.scope else {
             return Ok(());
         };
         let Some(identity) = candidate.identity.as_ref() else {
@@ -631,9 +623,7 @@ impl TrashTrackingScope {
     fn snapshot_key(&self) -> String {
         match self {
             Self::Home => "home".to_owned(),
-            Self::Volume { top_directory, .. } => {
-                top_directory.to_string_lossy().into_owned()
-            }
+            Self::Volume { top_directory, .. } => top_directory.to_string_lossy().into_owned(),
         }
     }
 

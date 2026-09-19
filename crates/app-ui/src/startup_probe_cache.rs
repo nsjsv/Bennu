@@ -75,9 +75,8 @@ pub(crate) fn store_probe_completion(
             .config_value()
             .to_owned(),
         wgpu_power_preference: wgpu_power_preference.map(str::to_owned),
-        mesa_vulkan_device_select: probe_gpu_selection.map(|selection| {
-            selection.mesa_vulkan_device_select.clone()
-        }),
+        mesa_vulkan_device_select: probe_gpu_selection
+            .map(|selection| selection.mesa_vulkan_device_select.clone()),
         vulkan_loader_driver_select: probe_gpu_selection
             .and_then(|selection| selection.vulkan_loader_driver_select)
             .map(str::to_owned),
@@ -122,9 +121,7 @@ pub(crate) fn gl_fallback_restart_after_renderer_failure() -> Result<(), String>
         "renderer initialization failed; restarting with GL fallback"
     );
     let error = command.exec();
-    Err(format!(
-        "failed to restart Bennu with GL fallback: {error}"
-    ))
+    Err(format!("failed to restart Bennu with GL fallback: {error}"))
 }
 
 #[cfg(not(unix))]
@@ -154,11 +151,10 @@ fn gpu_selection_from_record(
     if !matches!(power, "low" | "high") || !valid_mesa_vulkan_device_select(mesa) {
         return None;
     }
-    let vulkan_loader_driver_select =
-        match record.vulkan_loader_driver_select.as_deref() {
-            None => None,
-            Some(value) => Some(parse_vulkan_loader_driver_select_value(value)?),
-        };
+    let vulkan_loader_driver_select = match record.vulkan_loader_driver_select.as_deref() {
+        None => None,
+        Some(value) => Some(parse_vulkan_loader_driver_select_value(value)?),
+    };
     Some(Some(RendererProbeGpuSelection {
         wgpu_power_preference: power,
         mesa_vulkan_device_select: mesa.to_owned(),
@@ -332,13 +328,9 @@ mod tests {
             assert!(cached_probe_environment(&damaged, Some(&gpu)).is_none());
         };
         damage(&|record| record.backend = "dx12".to_owned());
-        damage(&|record| {
-            record.mesa_vulkan_device_select = Some("$LD_PRELOAD!".to_owned())
-        });
+        damage(&|record| record.mesa_vulkan_device_select = Some("$LD_PRELOAD!".to_owned()));
         damage(&|record| record.wgpu_power_preference = Some("turbo".to_owned()));
-        damage(&|record| {
-            record.vulkan_loader_driver_select = Some("*everything*".to_owned())
-        });
+        damage(&|record| record.vulkan_loader_driver_select = Some("*everything*".to_owned()));
         damage(&|record| record.wgpu_power_preference = None);
         damage(&|record| record.rendering_gpu_preference = "cloud".to_owned());
     }

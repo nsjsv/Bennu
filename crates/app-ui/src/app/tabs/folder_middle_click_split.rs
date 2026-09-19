@@ -159,7 +159,10 @@ mod tests {
 
         drop(browser.open_directory_from_middle_click(PathBuf::from("/workspace/project")));
 
-        assert!(matches!(browser.pane_layout, BrowserPaneLayout::Split { .. }));
+        assert!(matches!(
+            browser.pane_layout,
+            BrowserPaneLayout::Split { .. }
+        ));
         assert!(browser.pending_browser_session_save);
     }
 

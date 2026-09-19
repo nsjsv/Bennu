@@ -239,14 +239,15 @@ where
                             }
                             if last_error.is_some() {
                                 consumer_done.store(true, std::sync::atomic::Ordering::SeqCst);
-                                return Err(last_error.map(|source| {
-                                    RecoverableTransferError::file_system(
-                                        "read fingerprint file",
-                                        &entry.path,
-                                        source,
-                                    )
-                                })
-                                .unwrap());
+                                return Err(last_error
+                                    .map(|source| {
+                                        RecoverableTransferError::file_system(
+                                            "read fingerprint file",
+                                            &entry.path,
+                                            source,
+                                        )
+                                    })
+                                    .unwrap());
                             }
                             let outcome = {
                                 let receiver = result_rx.lock().unwrap();
@@ -437,15 +438,29 @@ mod tests {
             let metadata = std::fs::symlink_metadata(&path).unwrap();
             let file_type = metadata.file_type();
             if file_type.is_file() {
-                entries.push(Entry { rel, path, kind: Kind::File { length: metadata.len() } });
+                entries.push(Entry {
+                    rel,
+                    path,
+                    kind: Kind::File {
+                        length: metadata.len(),
+                    },
+                });
                 continue;
             }
             if file_type.is_symlink() {
                 let target = std::fs::read_link(&path).unwrap();
-                entries.push(Entry { rel, path, kind: Kind::Symlink { target } });
+                entries.push(Entry {
+                    rel,
+                    path,
+                    kind: Kind::Symlink { target },
+                });
                 continue;
             }
-            entries.push(Entry { rel: rel.clone(), path: path.clone(), kind: Kind::Directory });
+            entries.push(Entry {
+                rel: rel.clone(),
+                path: path.clone(),
+                kind: Kind::Directory,
+            });
             let mut children = Vec::new();
             for entry in std::fs::read_dir(&path).unwrap() {
                 let entry = entry.unwrap();
@@ -491,8 +506,11 @@ mod tests {
             std::fs::write(root.join("aaa-small.txt"), b"small").unwrap();
         }
         for index in 0..40 {
-            std::fs::write(root.join(format!("n{index:02}.txt")), format!("content-{index}"))
-                .unwrap();
+            std::fs::write(
+                root.join(format!("n{index:02}.txt")),
+                format!("content-{index}"),
+            )
+            .unwrap();
         }
         std::fs::write(root.join("subdir").join("nested-large.bin"), &large).unwrap();
         if large_first {

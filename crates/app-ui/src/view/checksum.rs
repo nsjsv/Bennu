@@ -40,9 +40,7 @@ pub(super) fn checksum_panel(state: &ChecksumState) -> Element<'_, Message> {
     // 标题、路径与关闭按钮钉死在面板两端;中间内容用 Shrink 滚动区:
     // 窗口够高时按内容自然伸缩,窗口太矮时中间出滚动条,关闭按钮
     // 永远可见可达(iced flex 会把剩余高度传给 Shrink 子元素)。
-    let mut body = column![]
-        .spacing(SECTION_SPACING)
-        .width(Length::Fill);
+    let mut body = column![].spacing(SECTION_SPACING).width(Length::Fill);
 
     if state.files().len() > 1 {
         body = body.push(file_chip_list(state));
@@ -117,9 +115,7 @@ fn file_chip_list(state: &ChecksumState) -> Element<'static, Message> {
 /// 计算区:四行校验卡常驻渲染,取消/失败提示行挂其下。
 /// 卡片布局不随状态增删元素,否则切换文件时面板高度反复跳动。
 fn computation_section(state: &ChecksumState) -> Element<'static, Message> {
-    let mut body = column![digest_card(state)]
-        .spacing(6)
-        .width(Length::Fill);
+    let mut body = column![digest_card(state)].spacing(6).width(Length::Fill);
 
     // 计算中不渲染任何进度/取消行:该行的显隐引起面板高度抖动,值位 "—" 已表达
     // 未就绪;要中止直接关面板,dismiss_floating 会取消仍在跑的计算。
@@ -174,9 +170,9 @@ fn digest_row(
         .height(Length::Fixed(28.0))
         .style(crate::appearance::navigation_icon_button_style());
     if digest.is_some() {
-        copy_button = copy_button.on_press(Message::Checksum(
-            ChecksumMessage::HashCopyRequested(algorithm),
-        ));
+        copy_button = copy_button.on_press(Message::Checksum(ChecksumMessage::HashCopyRequested(
+            algorithm,
+        )));
     }
     row![
         readable_text(algorithm.label())

@@ -266,7 +266,9 @@ fn trash_watch_event_refreshes_snapshot_but_unrelated_paths_do_not() {
     drop(browser.reload_observed_directory(observed_changes(&watch_root.join("info"))));
     assert!(browser.trash_refresh.begin_if_idle().is_none());
 
-    drop(browser.reload_observed_directory(observed_changes(Path::new("/tmp/unrelated-directory"))));
+    drop(
+        browser.reload_observed_directory(observed_changes(Path::new("/tmp/unrelated-directory"))),
+    );
     assert!(browser.trash_refresh.begin_if_idle().is_none());
 }
 

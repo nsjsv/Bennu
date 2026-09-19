@@ -180,8 +180,13 @@ impl FileBrowser {
         if self.file_drag.is_some() {
             self.set_file_drag_target(self.directory_drop_target_for_entry(&path));
             self.note_file_drag_spring_hover(
-                (self.entry_kind(&path) == Some(FileKind::Directory))
-                    .then(|| (self.active_pane_id(), path.clone(), FileDragSpringSource::Entry)),
+                (self.entry_kind(&path) == Some(FileKind::Directory)).then(|| {
+                    (
+                        self.active_pane_id(),
+                        path.clone(),
+                        FileDragSpringSource::Entry,
+                    )
+                }),
             );
         } else if self.selection_marquee.is_none() {
             self.extend_drag_selection_to(path);
@@ -211,7 +216,10 @@ impl FileBrowser {
 
     /// 面包屑段落悬停:落点高亮/粘贴目录语义与空白区一致,但 spring
     /// 候选来源标记为面包屑(悬停导航回该级;资格 gate 统一在 note)。
-    pub(super) fn handle_breadcrumb_drop_target_hovered(&mut self, directory: PathBuf) -> Task<Message> {
+    pub(super) fn handle_breadcrumb_drop_target_hovered(
+        &mut self,
+        directory: PathBuf,
+    ) -> Task<Message> {
         self.hovered_entry = None;
         if self.file_drag.is_some() {
             self.set_file_drag_target(directory.clone());
@@ -228,7 +236,10 @@ impl FileBrowser {
 
     /// 面包屑悬停离开:仅当当前候选正是该面包屑段落时清除,避免与相邻
     /// 条目/段落的 enter 事件乱序时误杀新候选。
-    pub(super) fn handle_breadcrumb_drop_target_hover_cleared(&mut self, directory: PathBuf) -> Task<Message> {
+    pub(super) fn handle_breadcrumb_drop_target_hover_cleared(
+        &mut self,
+        directory: PathBuf,
+    ) -> Task<Message> {
         if self.file_drag.is_none() && self.cursor_paste_directory.as_ref() == Some(&directory) {
             self.cursor_paste_directory = None;
         }
@@ -794,21 +805,16 @@ impl FileBrowser {
             return None;
         }
 
-        let mut summary = summarize_selected_entries(
-            pane.entries.iter(),
-            pane.selected_paths,
-            |entry| pane.metadata_for_entry(entry).len,
-        );
+        let mut summary =
+            summarize_selected_entries(pane.entries.iter(), pane.selected_paths, |entry| {
+                pane.metadata_for_entry(entry).len
+            });
         match pane.view_mode {
             BrowserViewMode::Icons => {
-                if let Some(expansion) = self
-                    .icon_grid_expansion
-                    .as_ref()
-                    .filter(|state| {
-                        state.context().pane_id == pane.id
-                            && state.context().current_dir == *pane.current_dir
-                    })
-                {
+                if let Some(expansion) = self.icon_grid_expansion.as_ref().filter(|state| {
+                    state.context().pane_id == pane.id
+                        && state.context().current_dir == *pane.current_dir
+                }) {
                     let selected_children = pane
                         .selected_paths
                         .iter()

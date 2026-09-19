@@ -12,9 +12,7 @@
 //!    再发一次同一目标,重复定位到相同偏移是幂等的。
 
 use iced::advanced::widget::{self, Tree};
-use iced::advanced::{
-    layout, mouse, renderer, Clipboard, Layout, Shell, Widget,
-};
+use iced::advanced::{layout, mouse, renderer, Clipboard, Layout, Shell, Widget};
 use iced::widget::{button, column, container};
 use iced::{Element, Event, Length, Rectangle, Size};
 
@@ -47,8 +45,9 @@ pub(crate) fn file_grouping_rail_view(
     pane: BrowserPaneId,
 ) -> Element<'static, Message> {
     let labels = entries.iter().enumerate().map(|(index, entry)| {
-        let label: Element<'static, Message> =
-            readable_text(entry.index_label.clone()).size(RAIL_LABEL_TEXT_SIZE).into();
+        let label: Element<'static, Message> = readable_text(entry.index_label.clone())
+            .size(RAIL_LABEL_TEXT_SIZE)
+            .into();
         button(
             container(label)
                 .height(Length::Fixed(RAIL_ITEM_HEIGHT))
@@ -68,11 +67,8 @@ pub(crate) fn file_grouping_rail_view(
     });
     let labels: Element<'static, Message> = column(labels).spacing(0).into();
     // 扫动手势与事件屏障包住整个标签列;拦下的点击/移动只在此层生效。
-    let scrubber: Element<'static, Message> = Element::new(GroupingRailScrubber::new(
-        labels,
-        entries.len(),
-        pane,
-    ));
+    let scrubber: Element<'static, Message> =
+        Element::new(GroupingRailScrubber::new(labels, entries.len(), pane));
     container(scrubber)
         .width(Length::Fill)
         .height(Length::Fill)
@@ -194,20 +190,18 @@ impl Widget<Message, iced::Theme, iced::Renderer> for GroupingRailScrubber<'_> {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if let Some(position) = cursor.position_in(bounds) {
                     state.pressed = true;
-                    shell.publish(self.target_message(group_index_at_y(
-                        position.y,
-                        self.group_count,
-                    )));
+                    shell.publish(
+                        self.target_message(group_index_at_y(position.y, self.group_count)),
+                    );
                 }
             }
             Event::Mouse(mouse::Event::CursorMoved { .. }) => {
                 // 换档只在按住期间发布;未按住的悬停不产生跳组。
                 if state.pressed {
                     if let Some(position) = cursor.position_in(bounds) {
-                        shell.publish(self.target_message(group_index_at_y(
-                            position.y,
-                            self.group_count,
-                        )));
+                        shell.publish(
+                            self.target_message(group_index_at_y(position.y, self.group_count)),
+                        );
                     }
                 }
             }
@@ -273,12 +267,9 @@ impl Widget<Message, iced::Theme, iced::Renderer> for GroupingRailScrubber<'_> {
         renderer: &iced::Renderer,
         operation: &mut dyn widget::Operation,
     ) {
-        self.content.as_widget_mut().operate(
-            &mut tree.children[0],
-            layout,
-            renderer,
-            operation,
-        );
+        self.content
+            .as_widget_mut()
+            .operate(&mut tree.children[0], layout, renderer, operation);
     }
 
     fn overlay<'a>(

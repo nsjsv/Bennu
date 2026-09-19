@@ -4,8 +4,8 @@ use std::sync::Arc;
 use desktop_linux::{
     WaylandDndController, WaylandDndWindowHandle, WaylandFileDragIcon, WaylandFileDragSessionId,
 };
-use iced::Task;
 use iced::widget::image;
+use iced::Task;
 
 use super::FileBrowser;
 use crate::appearance::subtle_border_color;

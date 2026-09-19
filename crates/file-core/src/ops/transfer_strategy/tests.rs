@@ -56,7 +56,11 @@ fn parallelism_follows_device_capabilities_table() {
     assert_eq!(parallelism_case(false, false, true, 16), 12);
     assert_eq!(parallelism_case(false, false, false, 16), 8);
     assert_eq!(parallelism_case(false, false, true, 4), 4, "核数不足时封顶");
-    assert_eq!(parallelism_case(false, false, true, 1), 1, "至少保留 1 并发");
+    assert_eq!(
+        parallelism_case(false, false, true, 1),
+        1,
+        "至少保留 1 并发"
+    );
 }
 
 fn parallelism_case(is_fuse: bool, is_rotational: bool, is_nvme: bool, cpus: usize) -> usize {
@@ -83,15 +87,15 @@ async fn payload_copy_preserves_content_on_default_ladder() {
     let mut controls = running_controls();
 
     let outcome = copy_regular_file_payload(RegularFilePayloadCopy {
-            source: &source_path,
-            target: &target_path,
-            source_device,
-            bytes_total: content.len() as u64,
-            engine: &engine,
-            controls: &mut controls,
-            progress: None,
-            source_hasher: None,
-        })
+        source: &source_path,
+        target: &target_path,
+        source_device,
+        bytes_total: content.len() as u64,
+        engine: &engine,
+        controls: &mut controls,
+        progress: None,
+        source_hasher: None,
+    })
     .await
     .unwrap();
 
@@ -147,15 +151,15 @@ async fn unsupported_ladder_falls_back_to_user_loop_and_still_copies() {
 
     let target_path = directory.path().join("target.bin");
     let outcome = copy_regular_file_payload(RegularFilePayloadCopy {
-            source: &source_path,
-            target: &target_path,
-            source_device,
-            bytes_total: content.len() as u64,
-            engine: &engine,
-            controls: &mut controls,
-            progress: None,
-            source_hasher: None,
-        })
+        source: &source_path,
+        target: &target_path,
+        source_device,
+        bytes_total: content.len() as u64,
+        engine: &engine,
+        controls: &mut controls,
+        progress: None,
+        source_hasher: None,
+    })
     .await
     .unwrap();
 
@@ -177,15 +181,15 @@ async fn progress_events_are_monotonic_and_end_at_total() {
 
     let target_path = directory.path().join("target.bin");
     copy_regular_file_payload(RegularFilePayloadCopy {
-            source: &source_path,
-            target: &target_path,
-            source_device,
-            bytes_total: content.len() as u64,
-            engine: &engine,
-            controls: &mut controls,
-            progress: Some(&sender),
-            source_hasher: None,
-        })
+        source: &source_path,
+        target: &target_path,
+        source_device,
+        bytes_total: content.len() as u64,
+        engine: &engine,
+        controls: &mut controls,
+        progress: Some(&sender),
+        source_hasher: None,
+    })
     .await
     .unwrap();
     drop(sender);
@@ -208,8 +212,6 @@ async fn progress_events_are_monotonic_and_end_at_total() {
     assert_eq!(last.bytes_done, content.len() as u64);
     assert_eq!(last.bytes_total, content.len() as u64);
 }
-
-
 
 #[tokio::test]
 async fn cancel_while_paused_in_user_loop_returns_cancelled() {

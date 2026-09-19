@@ -198,15 +198,13 @@ async fn prepare_tree(
             .wait_until_running()
             .await
             .map_err(RecoverableTransferError::FileOperation)?;
-        let mut reader = tokio::fs::read_dir(&source_dir)
-            .await
-            .map_err(|source| {
-                RecoverableTransferError::file_system(
-                    "read staging source directory",
-                    &source_dir,
-                    source,
-                )
-            })?;
+        let mut reader = tokio::fs::read_dir(&source_dir).await.map_err(|source| {
+            RecoverableTransferError::file_system(
+                "read staging source directory",
+                &source_dir,
+                source,
+            )
+        })?;
         while let Some(entry) = reader.next_entry().await.map_err(|source| {
             RecoverableTransferError::file_system(
                 "read staging source entry in",

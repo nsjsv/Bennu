@@ -765,8 +765,10 @@ mod drag_session_save_tests {
 
     #[test]
     fn finishing_split_tab_drag_requests_session_save() {
-        let mut browser =
-            save_enabled_browser(vec![BrowserTab::directory(0, PathBuf::from("/workspace/left"))]);
+        let mut browser = save_enabled_browser(vec![BrowserTab::directory(
+            0,
+            PathBuf::from("/workspace/left"),
+        )]);
         browser.tab_drag = Some(TabDragState {
             source_pane_id: BrowserPaneId::PRIMARY,
             tab_id: 0,
@@ -779,14 +781,19 @@ mod drag_session_save_tests {
 
         drop(browser.finish_tab_drag());
 
-        assert!(matches!(browser.pane_layout, BrowserPaneLayout::Split { .. }));
+        assert!(matches!(
+            browser.pane_layout,
+            BrowserPaneLayout::Split { .. }
+        ));
         assert!(browser.pending_browser_session_save);
     }
 
     #[test]
     fn finishing_tab_drag_without_split_target_does_not_request_session_save() {
-        let mut browser =
-            save_enabled_browser(vec![BrowserTab::directory(0, PathBuf::from("/workspace/left"))]);
+        let mut browser = save_enabled_browser(vec![BrowserTab::directory(
+            0,
+            PathBuf::from("/workspace/left"),
+        )]);
         browser.tab_drag = Some(TabDragState {
             source_pane_id: BrowserPaneId::PRIMARY,
             tab_id: 0,

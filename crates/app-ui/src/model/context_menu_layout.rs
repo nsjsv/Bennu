@@ -5,10 +5,10 @@
 
 use super::context_menu_items::*;
 use crate::icons::IconSymbol;
-use iced::Point;
 use crate::model::{ListColumnKind, SearchEntryTypePreset};
 use crate::network_connections::SidebarNetworkConnectionAction;
 use crate::sidebar_devices::SidebarDeviceAction;
+use iced::Point;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ContextMenuEntry<I> {
     pub(crate) item: I,
@@ -270,9 +270,7 @@ impl ContextMenuPreferences {
                 .file_entry
                 .entries
                 .iter()
-                .filter(|candidate| {
-                    eligible(candidate) && group.members.contains(&candidate.item)
-                })
+                .filter(|candidate| eligible(candidate) && group.members.contains(&candidate.item))
                 .map(|candidate| candidate.item)
                 .collect();
             // 「新建...」子菜单硬编码行恒在,成员空也保持组行;
@@ -458,15 +456,19 @@ impl ContextMenuPreferences {
     ) -> Vec<ContextMenuSettingsRow> {
         match page {
             ContextMenuSettingsPage::FileEntry => self.file_entry_settings_rows(),
-            ContextMenuSettingsPage::FileBlank => {
-                settings_rows_for(&self.file_blank, FileAreaMenuItem::label, FileAreaMenuItem::icon)
-            }
+            ContextMenuSettingsPage::FileBlank => settings_rows_for(
+                &self.file_blank,
+                FileAreaMenuItem::label,
+                FileAreaMenuItem::icon,
+            ),
             ContextMenuSettingsPage::Trash => {
                 settings_rows_for(&self.trash, TrashMenuItem::label, TrashMenuItem::icon)
             }
-            ContextMenuSettingsPage::Search => {
-                settings_rows_for(&self.search, SearchResultMenuItem::label, SearchResultMenuItem::icon)
-            }
+            ContextMenuSettingsPage::Search => settings_rows_for(
+                &self.search,
+                SearchResultMenuItem::label,
+                SearchResultMenuItem::icon,
+            ),
             ContextMenuSettingsPage::SearchEntryTypes => {
                 // 该菜单本体是勾选行,无图标;设置页用占位图标,视图层按页渲染勾选框。
                 settings_rows_for(
@@ -474,7 +476,7 @@ impl ContextMenuPreferences {
                     SearchEntryTypePreset::label,
                     |_| IconSymbol::File,
                 )
-            },
+            }
             ContextMenuSettingsPage::ListColumns => self
                 .list_columns
                 .entries
@@ -489,9 +491,11 @@ impl ContextMenuPreferences {
                     group_anchor: None,
                 })
                 .collect(),
-            ContextMenuSettingsPage::SidebarBookmark => {
-                settings_rows_for(&self.sidebar_bookmark, BookmarkMenuItem::label, BookmarkMenuItem::icon)
-            }
+            ContextMenuSettingsPage::SidebarBookmark => settings_rows_for(
+                &self.sidebar_bookmark,
+                BookmarkMenuItem::label,
+                BookmarkMenuItem::icon,
+            ),
             ContextMenuSettingsPage::SidebarDevice => self
                 .sidebar_device
                 .entries
@@ -523,15 +527,14 @@ impl ContextMenuPreferences {
         }
     }
 
-    pub(crate) fn toggle_settings_row(
-        &mut self,
-        page: ContextMenuSettingsPage,
-        index: usize,
-    ) {
+    pub(crate) fn toggle_settings_row(&mut self, page: ContextMenuSettingsPage, index: usize) {
         if page == ContextMenuSettingsPage::ListColumns {
-            if self.list_columns.entries.get(index).is_some_and(|entry| {
-                entry.item == ListColumnKind::Name
-            }) {
+            if self
+                .list_columns
+                .entries
+                .get(index)
+                .is_some_and(|entry| entry.item == ListColumnKind::Name)
+            {
                 return;
             }
             self.list_columns.toggle(index);
@@ -569,7 +572,9 @@ impl ContextMenuPreferences {
             ContextMenuSettingsPage::FileBlank => self.file_blank.reordered(from, to),
             ContextMenuSettingsPage::Trash => self.trash.reordered(from, to),
             ContextMenuSettingsPage::Search => self.search.reordered(from, to),
-            ContextMenuSettingsPage::SearchEntryTypes => self.search_entry_types.reordered(from, to),
+            ContextMenuSettingsPage::SearchEntryTypes => {
+                self.search_entry_types.reordered(from, to)
+            }
             ContextMenuSettingsPage::ListColumns => self.list_columns.reordered(from, to),
             ContextMenuSettingsPage::SidebarBookmark => self.sidebar_bookmark.reordered(from, to),
             ContextMenuSettingsPage::SidebarDevice => self.sidebar_device.reordered(from, to),
@@ -594,7 +599,8 @@ impl ContextMenuPreferences {
                 self.search = ContextMenuLayout::all_visible(SEARCH_RESULT_MENU_ITEMS)
             }
             ContextMenuSettingsPage::SearchEntryTypes => {
-                self.search_entry_types = ContextMenuLayout::all_visible(SearchEntryTypePreset::MORE)
+                self.search_entry_types =
+                    ContextMenuLayout::all_visible(SearchEntryTypePreset::MORE)
             }
             ContextMenuSettingsPage::ListColumns => {
                 self.list_columns = ContextMenuLayout::all_visible(ListColumnKind::ALL)
@@ -607,9 +613,8 @@ impl ContextMenuPreferences {
                     ContextMenuLayout::all_visible(device_action_config_values::DEVICE_MENU_ITEMS)
             }
             ContextMenuSettingsPage::NetworkConnection => {
-                self.network_connection = ContextMenuLayout::all_visible(
-                    network_action_config_values::NETWORK_MENU_ITEMS,
-                )
+                self.network_connection =
+                    ContextMenuLayout::all_visible(network_action_config_values::NETWORK_MENU_ITEMS)
             }
         }
     }
@@ -686,4 +691,3 @@ fn device_settings_label(action: SidebarDeviceAction) -> &'static str {
         SidebarDeviceAction::Eject => "Eject",
     }
 }
-

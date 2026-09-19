@@ -90,27 +90,23 @@ pub(super) fn context_menu_settings_section(browser: &FileBrowser) -> Element<'_
     .into();
 
     // 文件条目页悬停组行时,成员子面板在预览面板旁边展开,与真实菜单同构。
-    let preview: Element<'static, Message> =
-        match (page, browser.context_menu_preview_expansion) {
-            (ContextMenuSettingsPage::FileEntry, Some(anchor)) => {
-                let member_rows = browser
-                    .user_config()
-                    .context_menus
-                    .file_entry_settings_member_rows(anchor);
-                if member_rows.is_empty() {
-                    menu_preview_panel(item_rows)
-                } else {
-                    row![
-                        menu_preview_panel(item_rows),
-                        member_panel(member_rows),
-                    ]
+    let preview: Element<'static, Message> = match (page, browser.context_menu_preview_expansion) {
+        (ContextMenuSettingsPage::FileEntry, Some(anchor)) => {
+            let member_rows = browser
+                .user_config()
+                .context_menus
+                .file_entry_settings_member_rows(anchor);
+            if member_rows.is_empty() {
+                menu_preview_panel(item_rows)
+            } else {
+                row![menu_preview_panel(item_rows), member_panel(member_rows),]
                     .spacing(4)
                     .align_y(Alignment::Start)
                     .into()
-                }
             }
-            _ => menu_preview_panel(item_rows),
-        };
+        }
+        _ => menu_preview_panel(item_rows),
+    };
 
     column![
         center_horizontally(page_label),
@@ -181,7 +177,9 @@ fn menu_row_separator() -> Element<'static, Message> {
 
 /// 文件条目预览的成员子面板:与真实子菜单同排版,成员行只有眼睛开关,无拖拽手柄。
 fn member_panel(rows: Vec<ContextMenuSettingsRow>) -> Element<'static, Message> {
-    let mut content = column![].spacing(CONTEXT_MENU_ITEM_SPACING).width(Length::Fill);
+    let mut content = column![]
+        .spacing(CONTEXT_MENU_ITEM_SPACING)
+        .width(Length::Fill);
     let row_count = rows.len();
     for (index, entry) in rows.into_iter().enumerate() {
         content = content.push(member_row(entry));
@@ -203,12 +201,16 @@ fn member_row(entry: ContextMenuSettingsRow) -> Element<'static, Message> {
         themed_icon(entry.icon, IconTone::Normal, CONTEXT_MENU_ICON_SIZE)
             .style(muted_icon_svg_style())
     };
-    row![menu_icon, item_label(&entry), eye_toggle_button(ContextMenuSettingsPage::FileEntry, &entry)]
-        .spacing(4)
-        .align_y(Alignment::Center)
-        .height(Length::Fixed(CONTEXT_MENU_ITEM_HEIGHT))
-        .width(Length::Fill)
-        .into()
+    row![
+        menu_icon,
+        item_label(&entry),
+        eye_toggle_button(ContextMenuSettingsPage::FileEntry, &entry)
+    ]
+    .spacing(4)
+    .align_y(Alignment::Center)
+    .height(Length::Fixed(CONTEXT_MENU_ITEM_HEIGHT))
+    .width(Length::Fill)
+    .into()
 }
 
 fn menu_row_separator_style(theme: &iced::Theme) -> iced::widget::container::Style {
@@ -282,9 +284,13 @@ fn context_menu_item_row(
         .width(Length::Fill);
     if entry.group_anchor.is_some() {
         content = content.push(
-            themed_icon(IconSymbol::ChevronRight, IconTone::Normal, CONTEXT_MENU_ICON_SIZE)
-                .width(Length::Fixed(CONTEXT_MENU_ICON_SIZE))
-                .height(Length::Fixed(CONTEXT_MENU_ICON_SIZE)),
+            themed_icon(
+                IconSymbol::ChevronRight,
+                IconTone::Normal,
+                CONTEXT_MENU_ICON_SIZE,
+            )
+            .width(Length::Fixed(CONTEXT_MENU_ICON_SIZE))
+            .height(Length::Fixed(CONTEXT_MENU_ICON_SIZE)),
         );
     }
     content = content.push(eye_toggle_button(page, entry));
@@ -312,10 +318,18 @@ fn eye_toggle_button(
     entry: &ContextMenuSettingsRow,
 ) -> Element<'static, Message> {
     let eye_icon_view = if entry.visible {
-        themed_icon(IconSymbol::Eye, IconTone::Normal, CONTEXT_MENU_EYE_ICON_SIZE)
+        themed_icon(
+            IconSymbol::Eye,
+            IconTone::Normal,
+            CONTEXT_MENU_EYE_ICON_SIZE,
+        )
     } else {
-        themed_icon(IconSymbol::EyeOff, IconTone::Normal, CONTEXT_MENU_EYE_ICON_SIZE)
-            .style(muted_icon_svg_style())
+        themed_icon(
+            IconSymbol::EyeOff,
+            IconTone::Normal,
+            CONTEXT_MENU_EYE_ICON_SIZE,
+        )
+        .style(muted_icon_svg_style())
     };
     let mut eye = mouse_area(
         container(

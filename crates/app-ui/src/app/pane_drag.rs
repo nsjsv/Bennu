@@ -6,9 +6,8 @@ use super::tabs::apply_active_tab_to_pane;
 use super::{FileBrowser, POINTER_DRAG_ACTIVATION_DISTANCE};
 use crate::app::panes::SplitOverlayBounds;
 use crate::model::{
-    BrowserPane, BrowserPaneId, BrowserPaneLayout, FileDragNativeDndState, FileDragPhase,
-    Message, PaneDragPointerPress, PaneDragState, PaneDropTarget, SelectionMarqueePhase,
-    SplitRegion,
+    BrowserPane, BrowserPaneId, BrowserPaneLayout, FileDragNativeDndState, FileDragPhase, Message,
+    PaneDragPointerPress, PaneDragState, PaneDropTarget, SelectionMarqueePhase, SplitRegion,
 };
 
 const PANE_DROP_CENTER_FRACTION: f32 = 0.28;

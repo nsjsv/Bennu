@@ -8,13 +8,13 @@ use iced::{Background, Border, Element, Length, Theme};
 use crate::app::panes::BrowserPaneView;
 use crate::app::FileBrowser;
 use crate::appearance::{
-    base_text_color, hovered_row_style, icon_svg_style,
-    open_child_row_style, selected_icon_svg_style, selected_row_style, selected_row_style_for_run,
+    base_text_color, hovered_row_style, icon_svg_style, open_child_row_style,
+    selected_icon_svg_style, selected_row_style, selected_row_style_for_run,
     warning_icon_svg_style,
 };
 use crate::config::ViewDensityLevel;
-use crate::file_entry_presentation::SelectionRunPosition;
 use crate::file_drag_spring_ring::file_drag_spring_ring;
+use crate::file_entry_presentation::SelectionRunPosition;
 use crate::icons::{file_entry_icon_symbol, IconSymbol};
 use crate::matugen_theme::ui_colors;
 use crate::model::{FileEntryContentModifier, Message};

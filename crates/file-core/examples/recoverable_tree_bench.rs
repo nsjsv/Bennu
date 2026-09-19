@@ -6,10 +6,10 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use file_core::ops::{
-    run_recoverable_transfer, FileTransferOptions, RecoverableTransferOperation, RecoverableTransferOutcome,
-    RecoverableTransferRequest, TransferConflictStrategy, TransferJournal,
-    TransferJournalFuture, TransferJournalMutation,
-    TransferJournalRecord, TransferWorkKey,
+    run_recoverable_transfer, FileTransferOptions, RecoverableTransferOperation,
+    RecoverableTransferOutcome, RecoverableTransferRequest, TransferConflictStrategy,
+    TransferJournal, TransferJournalFuture, TransferJournalMutation, TransferJournalRecord,
+    TransferWorkKey,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -60,7 +60,11 @@ async fn main() {
         // 清理上次异常退出可能残留的隐藏 staging
         for entry in std::fs::read_dir(target.parent().unwrap()).unwrap() {
             let entry = entry.unwrap();
-            if entry.file_name().to_string_lossy().starts_with(".file-manager-transfer-") {
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".file-manager-transfer-")
+            {
                 std::fs::remove_dir_all(entry.path()).ok();
             }
         }
@@ -86,9 +90,10 @@ async fn main() {
         let options = FileTransferOptions::running(CancellationToken::new());
 
         let start = Instant::now();
-        let outcome: RecoverableTransferOutcome = run_recoverable_transfer(record, &journal, options)
-            .await
-            .expect("传输失败");
+        let outcome: RecoverableTransferOutcome =
+            run_recoverable_transfer(record, &journal, options)
+                .await
+                .expect("传输失败");
         let elapsed = start.elapsed();
         assert_eq!(outcome.final_target.as_ref(), Some(&run_target));
         timings.push(elapsed);

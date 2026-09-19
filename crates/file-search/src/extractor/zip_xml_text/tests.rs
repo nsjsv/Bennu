@@ -74,10 +74,7 @@ fn extract(
         .status
 }
 
-fn extracted_text(
-    document_path: &Path,
-    document_kind: ZippedXmlDocumentKind,
-) -> String {
+fn extracted_text(document_path: &Path, document_kind: ZippedXmlDocumentKind) -> String {
     let outcome = extract_zipped_xml_text(document_path, document_kind, 4096).unwrap();
     assert_eq!(outcome.status, ExtractionStatus::Indexed);
     outcome.text.expect("indexed text must be present")
@@ -87,7 +84,10 @@ fn extracted_text(
 fn word_documents_capture_paragraph_text_with_breaks() {
     let directory = tempdir().unwrap();
     let document_path = directory.path().join("report.docx");
-    write_zip(&document_path, &[("word/document.xml", WORD_DOCUMENT_XML.to_owned())]);
+    write_zip(
+        &document_path,
+        &[("word/document.xml", WORD_DOCUMENT_XML.to_owned())],
+    );
 
     assert_eq!(
         extracted_text(&document_path, ZippedXmlDocumentKind::WordDocument),
@@ -123,7 +123,10 @@ fn presentations_order_slides_numerically_and_include_notes() {
             ("ppt/slides/slide10.xml", slide_xml("tenth slide")),
             ("ppt/slides/slide2.xml", slide_xml("second slide")),
             ("ppt/slides/slide1.xml", slide_xml("first slide")),
-            ("ppt/notesSlides/notesSlide1.xml", NOTES_SLIDE_XML.to_owned()),
+            (
+                "ppt/notesSlides/notesSlide1.xml",
+                NOTES_SLIDE_XML.to_owned(),
+            ),
         ],
     );
 
@@ -137,7 +140,10 @@ fn presentations_order_slides_numerically_and_include_notes() {
 fn open_documents_capture_block_text() {
     let directory = tempdir().unwrap();
     let document_path = directory.path().join("notes.odt");
-    write_zip(&document_path, &[("content.xml", ODT_CONTENT_XML.to_owned())]);
+    write_zip(
+        &document_path,
+        &[("content.xml", ODT_CONTENT_XML.to_owned())],
+    );
 
     assert_eq!(
         extracted_text(&document_path, ZippedXmlDocumentKind::OpenDocumentText),
@@ -166,7 +172,10 @@ fn non_office_payloads_degrade_to_read_failed() {
     let malformed_path = directory.path().join("malformed.docx");
     write_zip(
         &malformed_path,
-        &[("word/document.xml", "<w:document><w:p></w:document>".to_owned())],
+        &[(
+            "word/document.xml",
+            "<w:document><w:p></w:document>".to_owned(),
+        )],
     );
     assert!(matches!(
         extract_status(&malformed_path, ZippedXmlDocumentKind::WordDocument),
@@ -174,10 +183,7 @@ fn non_office_payloads_degrade_to_read_failed() {
     ));
 }
 
-fn extract_status(
-    document_path: &Path,
-    document_kind: ZippedXmlDocumentKind,
-) -> ExtractionStatus {
+fn extract_status(document_path: &Path, document_kind: ZippedXmlDocumentKind) -> ExtractionStatus {
     extract(document_path, document_kind, 4096)
 }
 
@@ -185,7 +191,10 @@ fn extract_status(
 fn oversized_documents_report_too_large() {
     let directory = tempdir().unwrap();
     let document_path = directory.path().join("long.docx");
-    write_zip(&document_path, &[("word/document.xml", WORD_DOCUMENT_XML.to_owned())]);
+    write_zip(
+        &document_path,
+        &[("word/document.xml", WORD_DOCUMENT_XML.to_owned())],
+    );
 
     let status = extract(&document_path, ZippedXmlDocumentKind::WordDocument, 8);
     assert_eq!(status, ExtractionStatus::TooLarge);
@@ -218,12 +227,8 @@ fn missing_zip_file_is_skipped_not_inaccessible() {
     fs::write(&document_path, b"payload").unwrap();
     fs::remove_file(&document_path).unwrap();
 
-    let outcome = extract_zipped_xml_text(
-        &document_path,
-        ZippedXmlDocumentKind::WordDocument,
-        4096,
-    )
-    .unwrap();
+    let outcome =
+        extract_zipped_xml_text(&document_path, ZippedXmlDocumentKind::WordDocument, 4096).unwrap();
 
     assert!(matches!(
         outcome.status,

@@ -127,8 +127,7 @@ impl FileBrowser {
         }
         // 图标视图:展开子条目挂在 icon_grid_expansion 的交互目录里。
         let icon_expansion = self.icon_grid_expansion.as_ref().filter(|state| {
-            state.context().pane_id == pane.id
-                && state.context().current_dir == *pane.current_dir
+            state.context().pane_id == pane.id && state.context().current_dir == *pane.current_dir
         });
         if let Some(expansion) = icon_expansion {
             for (directory_path, directory) in expansion.directories() {
@@ -206,7 +205,10 @@ impl FileBrowser {
         )
     }
 
-    fn directory_load_cancel_for_pane(&self, pane_id: BrowserPaneId) -> tokio_util::sync::CancellationToken {
+    fn directory_load_cancel_for_pane(
+        &self,
+        pane_id: BrowserPaneId,
+    ) -> tokio_util::sync::CancellationToken {
         if pane_id == self.active_pane_id() {
             self.directory_load_cancel.clone()
         } else {

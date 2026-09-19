@@ -188,8 +188,8 @@ impl FileBrowser {
         {
             return None;
         }
-        let fraction = current.since.elapsed().as_secs_f32()
-            / FILE_DRAG_SPRING_OPEN_DELAY.as_secs_f32();
+        let fraction =
+            current.since.elapsed().as_secs_f32() / FILE_DRAG_SPRING_OPEN_DELAY.as_secs_f32();
         Some(fraction.clamp(0.0, 1.0))
     }
 }
@@ -309,7 +309,10 @@ mod tests {
         let since = browser.file_drag_spring_hover.as_ref().unwrap().since;
         // 同目录重复 hover 事件(移动热路径反复触发):起点不变。
         drop(browser.handle_entry_hovered(dir_a.clone()));
-        assert_eq!(browser.file_drag_spring_hover.as_ref().unwrap().since, since);
+        assert_eq!(
+            browser.file_drag_spring_hover.as_ref().unwrap().since,
+            since
+        );
 
         // 换目录:重新计时。
         drop(browser.handle_entry_hovered(dir_b.clone()));
@@ -355,7 +358,11 @@ mod tests {
         drop(browser.handle_column_entry_clicked(file.clone()));
         drop(browser.update_file_drag(Point::new(130.0, 100.0)));
         assert_eq!(
-            browser.file_drag.as_ref().unwrap().column_directories_snapshot,
+            browser
+                .file_drag
+                .as_ref()
+                .unwrap()
+                .column_directories_snapshot,
             vec![workspace.clone()]
         );
 
@@ -389,7 +396,11 @@ mod tests {
         drop(browser.handle_file_drag_spring_open_tick());
         assert!(browser.expanded_directories.contains_key(&dir_a));
         assert_eq!(
-            browser.file_drag.as_ref().unwrap().column_directories_snapshot,
+            browser
+                .file_drag
+                .as_ref()
+                .unwrap()
+                .column_directories_snapshot,
             vec![workspace.clone(), dir_a.clone()]
         );
         assert_eq!(browser.current_dir, workspace);
@@ -497,7 +508,10 @@ mod tests {
             Instant::now() - FILE_DRAG_SPRING_OPEN_DELAY - Duration::from_millis(1);
         drop(browser.handle_file_drag_spring_open_tick());
         assert_eq!(browser.current_dir, sub);
-        assert_eq!(browser.back_stack, vec![dir_a.parent().unwrap().clone(), &dir_a]);
+        assert_eq!(
+            browser.back_stack,
+            vec![dir_a.parent().unwrap().clone(), &dir_a]
+        );
     }
 
     #[test]
@@ -564,7 +578,11 @@ mod tests {
         ));
         drop(browser.update_file_drag(Point::new(130.0, 100.0)));
         assert_eq!(
-            browser.file_drag.as_ref().unwrap().column_directories_snapshot,
+            browser
+                .file_drag
+                .as_ref()
+                .unwrap()
+                .column_directories_snapshot,
             vec![dir_a.clone(), sub.clone()]
         );
 

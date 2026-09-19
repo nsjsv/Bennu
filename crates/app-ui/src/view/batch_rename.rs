@@ -1,8 +1,8 @@
 use crate::app::scrollbar::{enhanced_scrollbar, scrollbar_on_scroll, ScrollbarAxis};
 use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
 use iced::widget::{
-    button, checkbox, column, container, mouse_area, pick_list, row, scrollable, text,
-    text_input, Column, Row, Space,
+    button, checkbox, column, container, mouse_area, pick_list, row, scrollable, text, text_input,
+    Column, Row, Space,
 };
 use iced::{Alignment, Background, Border, Color, Element, Length, Theme};
 
@@ -763,15 +763,27 @@ fn preview_rows(
     // 探针实测 400px 窗口约 43px vs 单行 28px),clip 只裁绘制不救换行。
     let header = row![
         readable_text("#").size(11).width(Length::Fixed(24.0)),
-        container(localized_text("Original name").size(11).wrapping(text::Wrapping::None))
-            .width(Length::FillPortion(3))
-            .clip(true),
-        container(localized_text("New name").size(11).wrapping(text::Wrapping::None))
-            .width(Length::FillPortion(3))
-            .clip(true),
-        container(localized_text("Status").size(11).wrapping(text::Wrapping::None))
-            .width(Length::FillPortion(1))
-            .clip(true),
+        container(
+            localized_text("Original name")
+                .size(11)
+                .wrapping(text::Wrapping::None)
+        )
+        .width(Length::FillPortion(3))
+        .clip(true),
+        container(
+            localized_text("New name")
+                .size(11)
+                .wrapping(text::Wrapping::None)
+        )
+        .width(Length::FillPortion(3))
+        .clip(true),
+        container(
+            localized_text("Status")
+                .size(11)
+                .wrapping(text::Wrapping::None)
+        )
+        .width(Length::FillPortion(1))
+        .clip(true),
     ]
     .spacing(8);
 
@@ -796,10 +808,14 @@ fn preview_row<'a>(
         .width(Length::Fixed(24.0))
         .into();
     let source_cell: Element<'a, Message> = mouse_area(
-        container(readable_text(source).size(12).wrapping(text::Wrapping::None))
-            .width(Length::FillPortion(3))
-            .padding([1, 0])
-            .clip(true),
+        container(
+            readable_text(source)
+                .size(12)
+                .wrapping(text::Wrapping::None),
+        )
+        .width(Length::FillPortion(3))
+        .padding([1, 0])
+        .clip(true),
     )
     .on_press(Message::BatchRename(
         BatchRenameMessage::PreviewDragStarted(row_state.source.clone()),
@@ -889,18 +905,18 @@ fn diff_highlighted_target(row_state: &BatchRenamePreviewRow) -> Element<'_, Mes
     let mut cells = Row::new().spacing(0);
     for (segment, changed) in segments {
         // 变更段同样单行测量,窄面板下交给外层 container.clip 裁剪。
-        cells =
-            cells.push(readable_text(segment).size(12).wrapping(text::Wrapping::None).style(
-                move |theme: &Theme| {
-                    iced::widget::text::Style {
-                        color: Some(if changed {
-                            changed_segment_color(theme)
-                        } else {
-                            base_text_color(theme)
-                        }),
-                    }
-                },
-            ));
+        cells = cells.push(
+            readable_text(segment)
+                .size(12)
+                .wrapping(text::Wrapping::None)
+                .style(move |theme: &Theme| iced::widget::text::Style {
+                    color: Some(if changed {
+                        changed_segment_color(theme)
+                    } else {
+                        base_text_color(theme)
+                    }),
+                }),
+        );
     }
 
     container(cells).clip(true).width(Length::Fill).into()

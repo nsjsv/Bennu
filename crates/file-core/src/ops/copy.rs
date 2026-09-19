@@ -127,7 +127,8 @@ pub struct FileTransferOptions {
     /// Basic 校验的运行内证明记忆;Strong 校验忽略该字段。
     pub(super) proof_memo: Option<crate::ops::recoverable_transfer::SharedProofMemo>,
     /// 按设备对缓存的搬运策略引擎(克隆/内核快拷/用户态阶梯)。
-    pub(super) strategy_engine: Option<std::sync::Arc<crate::ops::transfer_strategy::TransferStrategyEngine>>,
+    pub(super) strategy_engine:
+        Option<std::sync::Arc<crate::ops::transfer_strategy::TransferStrategyEngine>>,
 }
 
 impl FileTransferOptions {
@@ -323,19 +324,21 @@ async fn copy_file_to_target(
     let mut source_content_hasher =
         (verification == FileOperationVerification::Strong).then(blake3::Hasher::new);
     let payload_outcome = {
-        crate::ops::transfer_strategy::copy_regular_file_payload(crate::ops::transfer_strategy::RegularFilePayloadCopy {
-            source: from,
-            target: to,
-            source_device: metadata.dev(),
-            bytes_total: metadata.len(),
-            engine,
-            controls,
-            progress,
-            source_hasher: match source_content_hasher.as_mut() {
-                Some(hasher) => Some(hasher),
-                None => None,
+        crate::ops::transfer_strategy::copy_regular_file_payload(
+            crate::ops::transfer_strategy::RegularFilePayloadCopy {
+                source: from,
+                target: to,
+                source_device: metadata.dev(),
+                bytes_total: metadata.len(),
+                engine,
+                controls,
+                progress,
+                source_hasher: match source_content_hasher.as_mut() {
+                    Some(hasher) => Some(hasher),
+                    None => None,
+                },
             },
-        })
+        )
         .await
     };
     if let Err(error) = payload_outcome {
@@ -344,10 +347,7 @@ async fn copy_file_to_target(
     }
 
     if verification == FileOperationVerification::Strong {
-        let writer = fs::OpenOptions::new()
-            .write(true)
-            .open(to)
-            .await;
+        let writer = fs::OpenOptions::new().write(true).open(to).await;
         match writer {
             Ok(writer) => {
                 if let Err(source) = writer.sync_all().await {
@@ -400,9 +400,7 @@ async fn copy_file_to_target(
     Ok(())
 }
 
-fn strategy_inlined_hash(
-    outcome: &crate::ops::transfer_strategy::PayloadCopyOutcome,
-) -> bool {
+fn strategy_inlined_hash(outcome: &crate::ops::transfer_strategy::PayloadCopyOutcome) -> bool {
     outcome.strategy == crate::ops::transfer_strategy::PayloadCopyStrategy::UserLoop
 }
 
@@ -413,19 +411,24 @@ async fn hash_source_content(
     controls: &mut FileOperationControls,
     buffer: &mut [u8],
 ) -> Result<blake3::Hash, FileError> {
-    let mut reader = fs::File::open(from).await.map_err(|source| FileError::Copy {
-        from: from.to_path_buf(),
-        to: from.to_path_buf(),
-        source,
-    })?;
-    let mut hasher = blake3::Hasher::new();
-    loop {
-        controls.wait_until_running().await?;
-        let read = reader.read(buffer).await.map_err(|source| FileError::Copy {
+    let mut reader = fs::File::open(from)
+        .await
+        .map_err(|source| FileError::Copy {
             from: from.to_path_buf(),
             to: from.to_path_buf(),
             source,
         })?;
+    let mut hasher = blake3::Hasher::new();
+    loop {
+        controls.wait_until_running().await?;
+        let read = reader
+            .read(buffer)
+            .await
+            .map_err(|source| FileError::Copy {
+                from: from.to_path_buf(),
+                to: from.to_path_buf(),
+                source,
+            })?;
         if read == 0 {
             return Ok(hasher.finalize());
         }

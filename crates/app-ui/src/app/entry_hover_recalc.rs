@@ -25,9 +25,8 @@ impl FileBrowser {
         }
         let point = cursor_content_point(self.cursor_position, viewport, offset_y);
         let (next, rail_visible) = {
-            let geometry = crate::list_view::ListGeometry::for_level(
-                self.user_config().list_view_density,
-            );
+            let geometry =
+                crate::list_view::ListGeometry::for_level(self.user_config().list_view_density);
             let Some(pane) = self.pane_view(pane_id) else {
                 return;
             };
@@ -122,10 +121,7 @@ impl FileBrowser {
 /// 窗口坐标光标 → 滚动内容坐标:viewport 是 iced on_scroll 实测的
 /// 可视区窗口矩形,内容偏移加上视口内偏移即落点,滚动帧间无陈旧量。
 fn cursor_content_point(cursor: Point, viewport: Rectangle, offset_y: f32) -> Point {
-    Point::new(
-        cursor.x - viewport.x,
-        cursor.y - viewport.y + offset_y,
-    )
+    Point::new(cursor.x - viewport.x, cursor.y - viewport.y + offset_y)
 }
 
 #[cfg(test)]

@@ -22,17 +22,13 @@ pub use extract::{
 
 /// 智能解压判定：包内所有成员是否都在同一个根目录下。
 /// 单根返回根目录名；散文件/多顶层条目/空包返回 `None`。
-pub async fn single_root_member_name(
-    archive: &Path,
-) -> Result<Option<String>, crate::FileError> {
-    let format = archive_extraction_format_for_path(archive).ok_or(crate::FileError::Unsupported(
-        "archive format is not supported for listing",
-    ))?;
-    let members = crate::archive_listing::list_archive_members_with_format(
-        archive.to_path_buf(),
-        format,
-    )
-    .await?;
+pub async fn single_root_member_name(archive: &Path) -> Result<Option<String>, crate::FileError> {
+    let format = archive_extraction_format_for_path(archive).ok_or(
+        crate::FileError::Unsupported("archive format is not supported for listing"),
+    )?;
+    let members =
+        crate::archive_listing::list_archive_members_with_format(archive.to_path_buf(), format)
+            .await?;
     let tree = tree::ArchiveMemberTree::build(members);
     Ok(tree
         .single_root_name()
@@ -104,10 +100,7 @@ pub(crate) fn resolve_archive_virtual_path(path: &Path) -> Option<ResolvedArchiv
         }
     }
 
-    Some(ResolvedArchivePath {
-        boundaries,
-        inner,
-    })
+    Some(ResolvedArchivePath { boundaries, inner })
 }
 
 /// 路径的归档身份判定。详见 [`ArchivePathIdentity`]。
@@ -131,11 +124,7 @@ pub fn archive_path_identity(path: &Path) -> ArchivePathIdentity {
 /// 非虚拟路径返回 `None`（无需归一）。
 pub fn real_directory_outside_archive(path: &Path) -> Option<PathBuf> {
     let resolved = resolve_archive_virtual_path(path)?;
-    resolved
-        .boundaries
-        .first()?
-        .parent()
-        .map(Path::to_path_buf)
+    resolved.boundaries.first()?.parent().map(Path::to_path_buf)
 }
 
 /// 在路径前缀链中找到第一个「真实存在且为文件、扩展名命中归档」的前缀。
@@ -174,7 +163,8 @@ mod tests {
     fn write_sample_zip(path: &Path) {
         let file = std::fs::File::create(path).unwrap();
         let mut zip = ZipWriter::new(file);
-        zip.add_directory("photos", SimpleFileOptions::default()).unwrap();
+        zip.add_directory("photos", SimpleFileOptions::default())
+            .unwrap();
         zip.start_file("photos/1.txt", SimpleFileOptions::default())
             .unwrap();
         zip.write_all(b"hello").unwrap();
@@ -187,10 +177,7 @@ mod tests {
         let plain = workspace.path().join("plain");
         std::fs::create_dir(&plain).unwrap();
 
-        assert_eq!(
-            archive_path_identity(&plain),
-            ArchivePathIdentity::RealFile
-        );
+        assert_eq!(archive_path_identity(&plain), ArchivePathIdentity::RealFile);
         assert_eq!(
             archive_path_identity(&workspace.path().join("missing.zip/inner")),
             ArchivePathIdentity::RealFile
@@ -250,7 +237,10 @@ mod tests {
 
         let resolved = resolve_archive_virtual_path(&outer.join("inner/b.zip/x/c.txt"))
             .expect("nested archive path must resolve");
-        assert_eq!(resolved.boundaries, vec![outer.clone(), outer.join("inner/b.zip")]);
+        assert_eq!(
+            resolved.boundaries,
+            vec![outer.clone(), outer.join("inner/b.zip")]
+        );
         assert_eq!(resolved.inner, PathBuf::from("x/c.txt"));
         assert_eq!(
             archive_path_identity(&outer.join("inner/b.zip/x/c.txt")),
@@ -294,9 +284,7 @@ mod tests {
         assert_eq!(root_names, vec!["photos"]);
         assert_eq!(root_scan.entries[0].kind, FileKind::Directory);
         assert!(
-            root_scan.entries[0]
-                .metadata
-                .filesystem_availability
+            root_scan.entries[0].metadata.filesystem_availability
                 == crate::DirectoryMetadataAvailability::Complete,
             "virtual entries must ship complete metadata without fs demand"
         );
@@ -378,7 +366,10 @@ mod tests {
         zip.write_all(b"1").unwrap();
         zip.add_directory("dir", options).unwrap();
         zip.finish().unwrap();
-        assert_eq!(single_root_member_name(&scattered_path).await.unwrap(), None);
+        assert_eq!(
+            single_root_member_name(&scattered_path).await.unwrap(),
+            None
+        );
     }
 
     #[tokio::test]
@@ -388,10 +379,8 @@ mod tests {
         write_sample_zip(&archive);
 
         let destination = workspace.path().join("out");
-        let request = ArchiveMemberExtractionRequest::new(
-            vec![archive.clone()],
-            destination.clone(),
-        );
+        let request =
+            ArchiveMemberExtractionRequest::new(vec![archive.clone()], destination.clone());
         crate::extract_archive_members_with_controls_and_progress(
             request,
             crate::FileOperationControls::running(tokio_util::sync::CancellationToken::new()),
@@ -404,10 +393,8 @@ mod tests {
         assert_eq!(std::fs::read(&extracted).unwrap(), b"hello");
 
         // 二次提取同一文件夹成员：绝不覆盖，自动编号。
-        let request = ArchiveMemberExtractionRequest::new(
-            vec![archive.clone()],
-            destination.clone(),
-        );
+        let request =
+            ArchiveMemberExtractionRequest::new(vec![archive.clone()], destination.clone());
         crate::extract_archive_members_with_controls_and_progress(
             request,
             crate::FileOperationControls::running(tokio_util::sync::CancellationToken::new()),

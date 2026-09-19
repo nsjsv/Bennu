@@ -96,7 +96,8 @@ mod tests {
         selected.insert(PathBuf::from("/dir/b.txt"));
         selected.insert(PathBuf::from("/dir/d"));
 
-        let summary = summarize_selected_entries(candidates.iter(), &selected, |entry| entry.metadata.len);
+        let summary =
+            summarize_selected_entries(candidates.iter(), &selected, |entry| entry.metadata.len);
 
         assert_eq!(summary.directory_count, 2);
         assert_eq!(summary.file_count, 1);
@@ -110,7 +111,8 @@ mod tests {
         selected.insert(PathBuf::from("/dir/a.txt"));
         selected.insert(PathBuf::from("/dir/gone.txt"));
 
-        let summary = summarize_selected_entries(candidates.iter(), &selected, |entry| entry.metadata.len);
+        let summary =
+            summarize_selected_entries(candidates.iter(), &selected, |entry| entry.metadata.len);
 
         assert_eq!(summary.file_count, 1);
         assert_eq!(summary.file_total_bytes, 100);
@@ -136,7 +138,8 @@ mod tests {
         let candidates = [entry("/dir/a.txt", FileKind::File, 100)];
         let selected = HashSet::new();
 
-        let summary = summarize_selected_entries(candidates.iter(), &selected, |entry| entry.metadata.len);
+        let summary =
+            summarize_selected_entries(candidates.iter(), &selected, |entry| entry.metadata.len);
 
         assert!(summary.is_empty());
     }

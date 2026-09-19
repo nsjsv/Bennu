@@ -15,9 +15,7 @@ mod payload_copy;
 #[path = "tests.rs"]
 mod tests;
 
-pub use payload_copy::{
-    copy_regular_file_payload, PayloadCopyOutcome, RegularFilePayloadCopy,
-};
+pub use payload_copy::{copy_regular_file_payload, PayloadCopyOutcome, RegularFilePayloadCopy};
 
 /// 单个普通文件 payload 的搬运方式。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

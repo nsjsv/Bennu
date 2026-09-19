@@ -139,7 +139,12 @@ impl ArchiveMemberTree {
 
         let node = self.lookup(inner_member)?;
         let mut worklist = Vec::new();
-        if node.children.is_empty() && node.info.as_ref().is_some_and(|info| info.kind != FileKind::Directory) {
+        if node.children.is_empty()
+            && node
+                .info
+                .as_ref()
+                .is_some_and(|info| info.kind != FileKind::Directory)
+        {
             worklist.push((
                 inner_member.to_path_buf(),
                 node.info.as_ref().map(|info| info.len).unwrap_or(0),
@@ -217,11 +222,7 @@ mod tests {
 
     #[test]
     fn windows_separators_and_dot_segments_normalize() {
-        let tree = ArchiveMemberTree::build([member(
-            ".\\docs\\readme.md",
-            FileKind::File,
-            5,
-        )]);
+        let tree = ArchiveMemberTree::build([member(".\\docs\\readme.md", FileKind::File, 5)]);
 
         assert_eq!(child_names(&tree, ""), vec!["docs"]);
         assert_eq!(child_names(&tree, "docs"), vec!["readme.md"]);

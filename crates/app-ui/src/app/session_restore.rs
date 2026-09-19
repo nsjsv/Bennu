@@ -249,14 +249,15 @@ fn restored_pane_from_session(pane: BrowserPaneSession) -> Option<BrowserPane> {
     let active_expanded_directories = active_tab
         .restored_expanded_directories()
         .into_iter()
-        .filter(|(directory, _)| file_core::archive_path_identity(directory) == file_core::ArchivePathIdentity::RealFile)
+        .filter(|(directory, _)| {
+            file_core::archive_path_identity(directory) == file_core::ArchivePathIdentity::RealFile
+        })
         .collect();
     // 会话恢复不入包内：包内/包根目录归一到归档所在真实目录；包内
     // 选中与多栏展开链丢弃（真实目录中这些条目并不存在）。真实路径
     // 的选中照常恢复（CLI 显式工作区同样途经此处）。
-    let normalized_tab_directory =
-        file_core::real_directory_outside_archive(&active_tab.directory)
-            .unwrap_or_else(|| active_tab.directory.clone());
+    let normalized_tab_directory = file_core::real_directory_outside_archive(&active_tab.directory)
+        .unwrap_or_else(|| active_tab.directory.clone());
     let mut browser_pane = BrowserPane {
         id: pane.id,
         current_dir: normalized_tab_directory,
@@ -269,7 +270,9 @@ fn restored_pane_from_session(pane: BrowserPaneSession) -> Option<BrowserPane> {
         selected_paths: active_tab
             .selected_paths
             .into_iter()
-            .filter(|path| file_core::archive_path_identity(path) == file_core::ArchivePathIdentity::RealFile)
+            .filter(|path| {
+                file_core::archive_path_identity(path) == file_core::ArchivePathIdentity::RealFile
+            })
             .collect(),
         selection_anchor: None,
         deepest_open_column_directory: active_tab.deepest_open_column_directory,

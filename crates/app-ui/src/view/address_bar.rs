@@ -247,8 +247,14 @@ fn elastic_breadcrumbs<'a>(
             .style(move |theme, status| faded_button_style(theme, status, opacity, is_drop_target))
             .on_press(Message::BreadcrumbSegmentPressed(pane_id, target.clone()));
         let segment_target = mouse_area(segment_button)
-            .on_enter(Message::BreadcrumbDropTargetHovered(pane_id, target.clone()))
-            .on_exit(Message::BreadcrumbDropTargetHoverCleared(pane_id, target.clone()))
+            .on_enter(Message::BreadcrumbDropTargetHovered(
+                pane_id,
+                target.clone(),
+            ))
+            .on_exit(Message::BreadcrumbDropTargetHoverCleared(
+                pane_id,
+                target.clone(),
+            ))
             .on_release(Message::DropTargetReleased(pane_id, target.clone()));
         let segment_target: Element<'a, Message> = if registers_drop_targets {
             track_breadcrumb_drop_target(segment_target, pane_id, target)

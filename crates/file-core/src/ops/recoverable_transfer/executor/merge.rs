@@ -10,10 +10,10 @@ use super::{
 };
 use crate::ops::recoverable_transfer::{
     inspect_file_identity, verify_source_manifest, CompletedTarget, FileIdentity,
-    MergeChildCompletion, MergeChildOutcome, MergeTransfer, ProofContext,
-    RecoverableTransferError, RecoverableTransferOperation, RecoverableTransferRequest,
-    SourceManifest, TransferCheckpoint, TransferFingerprint, TransferJournal,
-    TransferJournalError, TransferJournalMutation, TransferJournalRecord, TransferWorkKey,
+    MergeChildCompletion, MergeChildOutcome, MergeTransfer, ProofContext, RecoverableTransferError,
+    RecoverableTransferOperation, RecoverableTransferRequest, SourceManifest, TransferCheckpoint,
+    TransferFingerprint, TransferJournal, TransferJournalError, TransferJournalMutation,
+    TransferJournalRecord, TransferWorkKey,
 };
 use crate::{FileTransferOptions, TransferConflictStrategy};
 
@@ -56,8 +56,10 @@ pub(super) async fn advance_merge_transfer<J: TransferJournal>(
     transfer_options: &FileTransferOptions,
     mut merge: MergeTransfer,
 ) -> Result<(), RecoverableTransferError> {
-    let proof =
-        ProofContext::new(record.request.verification, transfer_options.proof_memo.clone());
+    let proof = ProofContext::new(
+        record.request.verification,
+        transfer_options.proof_memo.clone(),
+    );
     let current_target_identity = inspect_file_identity(&record.request.requested_target).await?;
     if !current_target_identity.same_object(&merge.target_root_identity) {
         return Err(RecoverableTransferError::TargetConflict {
@@ -146,12 +148,13 @@ pub(super) async fn advance_merge_transfer<J: TransferJournal>(
     let path = record.request.requested_target.clone();
     // Merge 顶层完成事实保持 Blake3(Merge 不走克隆);Basic 子项的哈希
     // 已在各子 advance 内经 memo 去重。
-    let proof = ProofContext::new(record.request.verification, transfer_options.proof_memo.clone());
+    let proof = ProofContext::new(
+        record.request.verification,
+        transfer_options.proof_memo.clone(),
+    );
     let completed = CompletedTarget {
         identity: inspect_file_identity(&path).await?,
-        fingerprint: TransferFingerprint::Blake3(
-            proof.fingerprint_object(&path).await?,
-        ),
+        fingerprint: TransferFingerprint::Blake3(proof.fingerprint_object(&path).await?),
         path,
     };
     persist_checkpoint(record, journal, TransferCheckpoint::Completed(completed)).await

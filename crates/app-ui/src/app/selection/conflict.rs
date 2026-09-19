@@ -6,9 +6,7 @@ use file_core::TransferConflictStrategy;
 use iced::Task;
 
 use crate::app::FileBrowser;
-use crate::commands::{
-    check_transfer_conflicts_command, expand_transfer_conflict_merges_command,
-};
+use crate::commands::{check_transfer_conflicts_command, expand_transfer_conflict_merges_command};
 use crate::model::{
     entry_exists, unique_duplicated_directory_name, unique_duplicated_file_name, Message,
     TransferConflictChoice, TransferConflictItem, TransferConflictMode, TransferConflictState,
@@ -112,11 +110,9 @@ impl FileBrowser {
             .transfers
             .iter()
             .filter(|transfer| {
-                !merge_pairs
-                    .iter()
-                    .any(|(source, target)| {
-                        transfer.source == *source && transfer.target == *target
-                    })
+                !merge_pairs.iter().any(|(source, target)| {
+                    transfer.source == *source && transfer.target == *target
+                })
             })
             .cloned()
             .collect::<Vec<_>>();
@@ -321,10 +317,7 @@ mod tests {
         TransferConflictState {
             mode: TransferConflictMode::Copy,
             transfers: vec![QueuedTransfer::new(source.clone(), target.clone())],
-            conflicts: vec![file_conflict(
-                "/source/report.txt",
-                "/target/report.txt",
-            )],
+            conflicts: vec![file_conflict("/source/report.txt", "/target/report.txt")],
             current_index: 0,
             apply_to_all: false,
         }
@@ -385,8 +378,14 @@ mod tests {
 
         apply_keep_both_choice(&mut state);
 
-        assert_eq!(state.transfers[0].target, PathBuf::from("/target/report副本.txt"));
-        assert_eq!(state.transfers[1].target, PathBuf::from("/target/other.txt"));
+        assert_eq!(
+            state.transfers[0].target,
+            PathBuf::from("/target/report副本.txt")
+        );
+        assert_eq!(
+            state.transfers[1].target,
+            PathBuf::from("/target/other.txt")
+        );
     }
 
     #[test]

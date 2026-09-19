@@ -68,9 +68,9 @@ mod preview;
 pub(crate) use preview::{
     animated_image_preview_command, image_preview_dimensions_command,
     original_image_preview_command, preview_command, preview_directory_children_command,
-    right_preview_panel_info_command,
-    remote_preview_cache_command, start_audio_preview_command, start_video_preview_audio_command,
-    text_preview_chunk_command, video_preview_frame_command, video_preview_metadata_command,
+    remote_preview_cache_command, right_preview_panel_info_command, start_audio_preview_command,
+    start_video_preview_audio_command, text_preview_chunk_command, video_preview_frame_command,
+    video_preview_metadata_command,
 };
 mod properties;
 pub(crate) use properties::{
@@ -205,7 +205,11 @@ const ABOUT_REPOSITORY_URL: &str = "https://github.com/nsjsv/Bennu";
 
 pub(crate) fn open_about_repository_link_command() -> Task<Message> {
     Task::perform(
-        async { open_url(ABOUT_REPOSITORY_URL).await.map_err(|error| error.to_string()) },
+        async {
+            open_url(ABOUT_REPOSITORY_URL)
+                .await
+                .map_err(|error| error.to_string())
+        },
         Message::AboutRepositoryLinkOpened,
     )
 }
@@ -227,12 +231,11 @@ pub(crate) fn open_file_command(
                 )
                 .await
                 {
-                    Ok(materialized) => open_path_with_terminal_emulator(
-                        materialized,
-                        terminal_emulator,
-                    )
-                    .await
-                    .map_err(|error| error.to_string()),
+                    Ok(materialized) => {
+                        open_path_with_terminal_emulator(materialized, terminal_emulator)
+                            .await
+                            .map_err(|error| error.to_string())
+                    }
                     Err(error) => Err(error.to_string()),
                 };
                 (opened_path, outcome)
@@ -340,12 +343,10 @@ pub(crate) fn check_transfer_conflicts_command(
     let issued_transfers = transfers.clone();
     Task::perform(
         async move { check_transfer_conflicts(&transfers).await },
-        move |conflicts| {
-            Message::TransferConflictsChecked {
-                mode,
-                transfers: issued_transfers.clone(),
-                conflicts,
-            }
+        move |conflicts| Message::TransferConflictsChecked {
+            mode,
+            transfers: issued_transfers.clone(),
+            conflicts,
         },
     )
 }
@@ -358,12 +359,7 @@ pub(crate) fn expand_transfer_conflict_merges_command(
 ) -> Task<Message> {
     Task::perform(
         expand_transfer_conflict_merges(merge_pairs, remaining_transfers, remaining_conflicts),
-        move |expansion| {
-            Message::TransferConflictMergesExpanded {
-                mode,
-                expansion,
-            }
-        },
+        move |expansion| Message::TransferConflictMergesExpanded { mode, expansion },
     )
 }
 
@@ -713,10 +709,13 @@ mod merge_expansion_tests {
         std::fs::write(source.join("report.txt"), b"report").unwrap();
         std::fs::write(source.join("nested").join("child.txt"), b"child").unwrap();
 
-        let (transfers, conflicts) =
-            expand_transfer_conflict_merges(vec![(source.clone(), target.clone())], Vec::new(), Vec::new())
-                .await
-                .unwrap();
+        let (transfers, conflicts) = expand_transfer_conflict_merges(
+            vec![(source.clone(), target.clone())],
+            Vec::new(),
+            Vec::new(),
+        )
+        .await
+        .unwrap();
 
         // 目标目录为空:子项全部照原名落位,不产生新冲突。
         assert!(conflicts.is_empty());
@@ -744,10 +743,13 @@ mod merge_expansion_tests {
         std::fs::write(source.join("dup.txt"), b"source content").unwrap();
         std::fs::write(target.join("dup.txt"), b"target content").unwrap();
 
-        let (transfers, conflicts) =
-            expand_transfer_conflict_merges(vec![(source.clone(), target.clone())], Vec::new(), Vec::new())
-                .await
-                .unwrap();
+        let (transfers, conflicts) = expand_transfer_conflict_merges(
+            vec![(source.clone(), target.clone())],
+            Vec::new(),
+            Vec::new(),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(transfers.len(), 2);
         // 嵌套同名目录再次进冲突清单且仍可合并,逐层推进;

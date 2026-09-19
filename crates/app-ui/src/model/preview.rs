@@ -623,4 +623,3 @@ mod tests {
         assert_eq!(download.fraction(), None);
     }
 }
-

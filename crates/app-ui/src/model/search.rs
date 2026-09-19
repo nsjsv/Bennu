@@ -225,7 +225,9 @@ impl SearchRootSnapshot {
             {
                 SearchDirectoryScope::CurrentFolder
             }
-            Some(LastSearchScope::Directory(directory)) if directory.as_path() == home.as_path() => {
+            Some(LastSearchScope::Directory(directory))
+                if directory.as_path() == home.as_path() =>
+            {
                 SearchDirectoryScope::Home
             }
             Some(_) => SearchDirectoryScope::LastLocation,
@@ -246,7 +248,9 @@ impl SearchRootSnapshot {
             SearchDirectoryScope::Home | SearchDirectoryScope::AllIndexedLocations => &self.home,
             // 不变量：selected_scope == LastLocation 当且仅当 last_location 是
             // 一个不等于 current_folder/home 的目录记录。
-            SearchDirectoryScope::LastLocation => self.last_location_directory().unwrap_or(&self.home),
+            SearchDirectoryScope::LastLocation => {
+                self.last_location_directory().unwrap_or(&self.home)
+            }
         }
     }
 
@@ -312,7 +316,11 @@ impl SearchRootSnapshot {
         let last_directory = self.last_location_directory();
         if let Some(directory) = last_directory {
             if directory != self.current_folder && directory != self.home {
-                let insert_at = if self.current_folder == self.home { 0 } else { 1 };
+                let insert_at = if self.current_folder == self.home {
+                    0
+                } else {
+                    1
+                };
                 scopes.insert(insert_at, SearchDirectoryScope::LastLocation);
             }
         }

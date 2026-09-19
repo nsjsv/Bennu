@@ -43,7 +43,8 @@ impl FileBrowser {
             config::normalize_column_width(drag.width_start + position.x - drag.cursor_start_x);
         if self.user_config.column_width_adjust_mode == ColumnWidthAdjustMode::Uniform {
             for column_index in 0..self.adjustable_column_count() {
-                self.column_width_overrides.insert(column_index, resized_width);
+                self.column_width_overrides
+                    .insert(column_index, resized_width);
             }
             return;
         }
@@ -167,7 +168,9 @@ impl FileBrowser {
             return;
         }
         self.rebaseline_column_width_overrides(self.column_browser_content_width());
-        let total: f32 = (0..column_count).map(|index| self.column_width(index)).sum();
+        let total: f32 = (0..column_count)
+            .map(|index| self.column_width(index))
+            .sum();
         let uniform_width = config::normalize_column_width(total / column_count as f32);
         self.column_width_overrides = (0..column_count)
             .map(|column_index| (column_index, uniform_width))
@@ -273,10 +276,8 @@ mod tests {
         browser.main_window_width = 1_920.0;
         let saved_reference = browser.column_browser_content_width();
 
-        browser.apply_column_width_overrides(
-            HashMap::from([(0usize, 600.0)]),
-            Some(saved_reference),
-        );
+        browser
+            .apply_column_width_overrides(HashMap::from([(0usize, 600.0)]), Some(saved_reference));
         assert_close(browser.column_width(0), 600.0);
 
         browser.main_window_width = 1_000.0;

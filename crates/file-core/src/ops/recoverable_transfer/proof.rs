@@ -8,13 +8,13 @@
 
 use std::path::Path;
 
-use super::super::FileOperationVerification;
 use super::super::copy::FileOperationControls;
+use super::super::FileOperationVerification;
+use super::proof_memo::{memo_insert, memo_lookup, SharedProofMemo};
 use super::{
     fingerprint_object, fingerprint_object_with_controls, inspect_file_identity, FileIdentity,
     ObjectFingerprint, RecoverableTransferError,
 };
-use super::proof_memo::{memo_insert, memo_lookup, SharedProofMemo};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
@@ -52,10 +52,7 @@ impl ProofContext {
     }
 
     /// Strong 是显式的"宁可慢也要严"模式:memo 置空,每个检查点全文重读。
-    pub fn new(
-        verification: FileOperationVerification,
-        memo: Option<SharedProofMemo>,
-    ) -> Self {
+    pub fn new(verification: FileOperationVerification, memo: Option<SharedProofMemo>) -> Self {
         let memo = match verification {
             FileOperationVerification::BasicMetadata => memo,
             FileOperationVerification::Strong => None,

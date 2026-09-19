@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 
 use desktop_linux::{NetworkConnection, NetworkConnectionId, NetworkMountState, NetworkProtocol};
 use file_core::{
-    DirectoryEntry, DirectoryMetadataAvailability, EntryMetadata, FileKind,
-    TransferConflictItem, TransferConflictMetadata,
+    DirectoryEntry, DirectoryMetadataAvailability, EntryMetadata, FileKind, TransferConflictItem,
+    TransferConflictMetadata,
 };
 
 use super::*;
@@ -501,10 +501,8 @@ fn drifted_thumbnail_result_requeues_with_current_entry_metadata() {
     // 调度时条目元数据尚未落地（Pending：len=0），入队请求带着「空钥匙」。
     browser.entries = vec![pending_image_entry("/workspace/photo.png")].into();
     let pending_entry = browser.entries.first().unwrap().clone();
-    let request =
-        request_for_entry(&pending_entry, LIST_THUMBNAIL_EDGE).expect("pending request");
-    let scope =
-        thumbnail_scope_for_pane_directory(BrowserPaneId::PRIMARY, Path::new("/workspace"));
+    let request = request_for_entry(&pending_entry, LIST_THUMBNAIL_EDGE).expect("pending request");
+    let scope = thumbnail_scope_for_pane_directory(BrowserPaneId::PRIMARY, Path::new("/workspace"));
     browser.thumbnail_cache.enqueue_request_for_scope(
         request,
         ThumbnailPurpose::List,
@@ -525,7 +523,10 @@ fn drifted_thumbnail_result_requeues_with_current_entry_metadata() {
 
     let requeued = browser.thumbnail_cache.take_next_batch();
     assert_eq!(requeued.len(), 1);
-    assert_eq!(requeued[0].request.source, PathBuf::from("/workspace/photo.png"));
+    assert_eq!(
+        requeued[0].request.source,
+        PathBuf::from("/workspace/photo.png")
+    );
     assert_eq!(requeued[0].request.metadata.len, 10);
     assert_ne!(requeued[0].key(), stale_key);
     assert_eq!(requeued[0].purpose, work.purpose);
@@ -537,8 +538,8 @@ fn drifted_thumbnail_result_requeues_with_current_entry_metadata() {
 fn thumbnail_result_for_removed_entry_is_not_requeued() {
     let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
     browser.entries = vec![image_entry("/workspace/photo.png")].into();
-    let request = request_for_entry(browser.entries.first().unwrap(), LIST_THUMBNAIL_EDGE)
-        .expect("request");
+    let request =
+        request_for_entry(browser.entries.first().unwrap(), LIST_THUMBNAIL_EDGE).expect("request");
     browser.thumbnail_cache.enqueue_request(
         request,
         ThumbnailPurpose::List,

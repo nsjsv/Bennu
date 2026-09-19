@@ -2,8 +2,8 @@
 
 use std::sync::LazyLock;
 
-use iced::window;
 use iced::widget::image::Handle;
+use iced::window;
 
 use crate::config::default_state_database_path;
 use crate::matugen_theme::ThemeMode;
@@ -41,7 +41,8 @@ fn icon_png_for_mode(theme_mode: ThemeMode) -> &'static [u8] {
 /// 缓存键，from_bytes 每次 Id::unique()；视图每帧重建若现场造 Handle 会
 /// 让缓存永远 miss、纹理反复异步上传导致闪烁，因此这里用静态句柄保证 id 稳定。
 pub(crate) fn display_icon_handle() -> Handle {
-    static DISPLAY_HANDLE: LazyLock<Handle> = LazyLock::new(|| Handle::from_bytes(DISPLAY_ICON_PNG));
+    static DISPLAY_HANDLE: LazyLock<Handle> =
+        LazyLock::new(|| Handle::from_bytes(DISPLAY_ICON_PNG));
     DISPLAY_HANDLE.clone()
 }
 

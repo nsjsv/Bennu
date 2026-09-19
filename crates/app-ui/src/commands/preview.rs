@@ -43,19 +43,15 @@ pub(crate) fn right_preview_panel_info_command(path: PathBuf) -> Task<Message> {
     let message_path = path.clone();
     Task::perform(
         async move {
-            let snapshot = tokio::task::spawn_blocking(move || {
-                read_right_preview_panel_info(path)
-            })
-            .await
-            .map_err(|error| error.to_string())
-            .and_then(|inner| inner.map(Box::new));
+            let snapshot = tokio::task::spawn_blocking(move || read_right_preview_panel_info(path))
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|inner| inner.map(Box::new));
             snapshot
         },
-        move |snapshot| {
-            Message::RightPreviewPanelInfoLoaded {
-                path: message_path.clone(),
-                snapshot,
-            }
+        move |snapshot| Message::RightPreviewPanelInfoLoaded {
+            path: message_path.clone(),
+            snapshot,
         },
     )
 }

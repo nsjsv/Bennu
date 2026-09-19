@@ -263,22 +263,22 @@ pub(crate) fn list_browser_view<'a>(
         scrollbar_region.clone(),
         browser.smooth_scroll_shift_pressed(),
     ))
-        .id(smooth_scroll_id(&scrollbar_region))
-        .direction(enhanced_vertical_scrollbar_direction(
-            scrollbar_visibility,
-            8.0,
-        ))
-        .style(enhanced_scrollbar_style(scrollbar_visibility))
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .on_scroll(scrollbar_on_scroll(
-            scrollbar_region.clone(),
-            move |viewport: scrollable::Viewport| {
-                let offset = viewport.absolute_offset();
-                let bounds = viewport.bounds();
-                Message::ListScrolled(pane.id, offset.y, bounds)
-            },
-        ));
+    .id(smooth_scroll_id(&scrollbar_region))
+    .direction(enhanced_vertical_scrollbar_direction(
+        scrollbar_visibility,
+        8.0,
+    ))
+    .style(enhanced_scrollbar_style(scrollbar_visibility))
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .on_scroll(scrollbar_on_scroll(
+        scrollbar_region.clone(),
+        move |viewport: scrollable::Viewport| {
+            let offset = viewport.absolute_offset();
+            let bounds = viewport.bounds();
+            Message::ListScrolled(pane.id, offset.y, bounds)
+        },
+    ));
     let list_scroll = enhanced_scrollbar(
         list_scroll,
         scrollbar_visibility,
@@ -287,40 +287,38 @@ pub(crate) fn list_browser_view<'a>(
         8.0,
     );
 
-    let pane_surface: Element<'a, Message> =
-        container(list_scroll)
-            .padding(LIST_CONTENT_PADDING)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(list_panel_style)
-            .into();
+    let pane_surface: Element<'a, Message> = container(list_scroll)
+        .padding(LIST_CONTENT_PADDING)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(list_panel_style)
+        .into();
     // 索引栏叠层:分组开启且组数 ≥2 时挂在滚动区之上;当前可视区顶部
     // 所在组在渲染期由派生 offsets 与视口偏移推得,不占持久状态。栏右
     // 缘自带避开滚动条 thumb 的间隙,不会遮挡 overlay 滚动条。
-    let pane_surface: Element<'a, Message> =
-        if crate::model::file_group_rail_visible(&rail_entries) {
-            let viewport_position = pane
-                .column_viewports
-                .get(pane.current_dir)
-                .map(|viewport| viewport.offset_y)
-                .unwrap_or(0.0)
-                - LIST_HEADER_HEIGHT;
-            let active_group =
-                crate::model::active_file_group_index(&rail_entries, viewport_position);
-            Stack::with_children([
-                pane_surface,
-                crate::file_grouping_rail::file_grouping_rail_view(
-                    &rail_entries,
-                    active_group,
-                    pane.id,
-                ),
-            ])
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
-        } else {
-            pane_surface
-        };
+    let pane_surface: Element<'a, Message> = if crate::model::file_group_rail_visible(&rail_entries)
+    {
+        let viewport_position = pane
+            .column_viewports
+            .get(pane.current_dir)
+            .map(|viewport| viewport.offset_y)
+            .unwrap_or(0.0)
+            - LIST_HEADER_HEIGHT;
+        let active_group = crate::model::active_file_group_index(&rail_entries, viewport_position);
+        Stack::with_children([
+            pane_surface,
+            crate::file_grouping_rail::file_grouping_rail_view(
+                &rail_entries,
+                active_group,
+                pane.id,
+            ),
+        ])
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+    } else {
+        pane_surface
+    };
 
     mouse_area(pane_surface)
         .on_press(Message::BlankAreaPressed(pane.id))
@@ -659,15 +657,7 @@ fn list_entry_cells<'a>(
             row_content = row_content.push(list_column_gap());
         }
         row_content = row_content.push(list_entry_cell(
-            browser,
-            pane,
-            geometry,
-            entry,
-            transfer,
-            depth,
-            icon_tone,
-            &metadata,
-            column,
+            browser, pane, geometry, entry, transfer, depth, icon_tone, &metadata, column,
         ));
     }
     row_content.push(list_column_gap())

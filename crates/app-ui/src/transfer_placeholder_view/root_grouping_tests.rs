@@ -12,7 +12,7 @@ use super::*;
 use crate::config::{self, UiLanguage};
 use crate::file_entry_presentation::SelectionRunPosition;
 use crate::model::{BrowserPaneId, FileGroupingMode};
-use crate::transfer_placeholders::{TransferSortOptions, TransferPlaceholder};
+use crate::transfer_placeholders::{TransferPlaceholder, TransferSortOptions};
 
 fn file_entry(path: &str, len: u64) -> DirectoryEntry {
     DirectoryEntry::new(
@@ -75,9 +75,7 @@ fn browser_with_grouping(mode: FileGroupingMode) -> crate::app::FileBrowser {
 
 fn merged_name(item: &MergedTransferItem<'_>) -> String {
     match item {
-        MergedTransferItem::Entry { entry, .. } => {
-            entry.name().to_string_lossy().into_owned()
-        }
+        MergedTransferItem::Entry { entry, .. } => entry.name().to_string_lossy().into_owned(),
         MergedTransferItem::Placeholder(placeholder) => placeholder.name.clone(),
     }
 }
@@ -217,21 +215,21 @@ fn partition_emits_header_counts_and_reverses_sections_on_descending() {
     let pane = browser.pane_view(BrowserPaneId::PRIMARY).unwrap();
     // 划分结果借用划分器与文件段,先绑定再分区避免临时值提前释放。
     let ascending_grouping = grouping(FileGroupingMode::NameInitial, SortDirection::Ascending);
-    let ascending =
-        ascending_grouping.partition(&files, |entry| pane.metadata_for_entry(entry));
+    let ascending = ascending_grouping.partition(&files, |entry| pane.metadata_for_entry(entry));
     let ascending_titles: Vec<&str> = ascending
         .iter()
         .map(|section| section.descriptor.title.as_str())
         .collect();
     assert_eq!(ascending_titles, ["#", "A"]);
-    let ascending_counts: Vec<usize> =
-        ascending.iter().map(|section| section.items.len()).collect();
+    let ascending_counts: Vec<usize> = ascending
+        .iter()
+        .map(|section| section.items.len())
+        .collect();
     assert_eq!(ascending_counts, [1, 2]);
 
     // 降序只反转组序列,组内保持输入序(沿用现有排序)。
     let descending_grouping = grouping(FileGroupingMode::NameInitial, SortDirection::Descending);
-    let descending =
-        descending_grouping.partition(&files, |entry| pane.metadata_for_entry(entry));
+    let descending = descending_grouping.partition(&files, |entry| pane.metadata_for_entry(entry));
     let descending_titles: Vec<&str> = descending
         .iter()
         .map(|section| section.descriptor.title.as_str())
@@ -272,7 +270,10 @@ fn size_grouping_sends_unknown_placeholder_size_to_last_bucket() {
 
     // 已知尺寸 100/300/700 各成一组;未知尺寸占位归最末兜底组。
     assert_eq!(sections.len(), 3);
-    assert_eq!(sections.iter().map(|s| s.items.len()).collect::<Vec<_>>(), [1, 1, 2]);
+    assert_eq!(
+        sections.iter().map(|s| s.items.len()).collect::<Vec<_>>(),
+        [1, 1, 2]
+    );
     assert_eq!(merged_name(sections[2].items[1]), "incoming.bin");
 }
 
@@ -286,10 +287,12 @@ fn grouping_applies_only_to_pane_root_directory_and_only_when_enabled() {
         root_grouping::RootGrouping::for_pane_root(&browser, pane, pane.current_dir.as_path())
             .is_some()
     );
-    assert!(
-        root_grouping::RootGrouping::for_pane_root(&browser, pane, Path::new("/some/child/dir"))
-            .is_none()
-    );
+    assert!(root_grouping::RootGrouping::for_pane_root(
+        &browser,
+        pane,
+        Path::new("/some/child/dir")
+    )
+    .is_none());
 
     // 分组关闭(默认 None):即使当前目录也不划分,行流与既有平铺一致。
     let browser = browser_with_grouping(FileGroupingMode::None);

@@ -301,7 +301,8 @@ impl FileBrowser {
                     );
                 }
             }
-            QueuedFileOperation::Copy { transfers, .. } | QueuedFileOperation::Duplicate { transfers, .. } => {
+            QueuedFileOperation::Copy { transfers, .. }
+            | QueuedFileOperation::Duplicate { transfers, .. } => {
                 for transfer in transfers {
                     self.invalidate_list_directory_summary_subtree_and_ancestor_chain(
                         &transfer.target,

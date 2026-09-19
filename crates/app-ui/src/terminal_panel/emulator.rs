@@ -7,8 +7,8 @@ use alacritty_terminal::index::{Column, Line, Point, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::term::{Config as TermConfig, RenderableContent, Term};
-use alacritty_terminal::vte::ansi::{Color as TermColor, CursorShape, NamedColor};
 use alacritty_terminal::vte::ansi::Processor;
+use alacritty_terminal::vte::ansi::{Color as TermColor, CursorShape, NamedColor};
 
 /// 终端回看缓冲行数。
 pub(crate) const SCROLLBACK_LINES: usize = 10_000;
@@ -255,7 +255,9 @@ mod tests {
         TerminalEmulator::new(
             columns,
             rows,
-            Arc::new(Mutex::new(Box::new(std::io::sink()) as Box<dyn Write + Send>)),
+            Arc::new(Mutex::new(
+                Box::new(std::io::sink()) as Box<dyn Write + Send>
+            )),
         )
     }
 

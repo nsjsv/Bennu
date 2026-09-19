@@ -924,7 +924,10 @@ fn file_drag_activation_stays_in_app_until_cursor_leaves() {
 
     drop(browser.update_file_drag(Point::new(104.0, 100.0)));
 
-    let file_drag = browser.file_drag.as_ref().expect("drag survives activation");
+    let file_drag = browser
+        .file_drag
+        .as_ref()
+        .expect("drag survives activation");
     assert!(matches!(file_drag.phase, FileDragPhase::Dragging));
     // 窗口内必须保持应用内拖拽(原生 dnd 未请求),滚轮/shift 滚轮/
     // 边缘自动滚才有输入可用;离开窗口时才交给合成器。

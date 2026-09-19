@@ -289,10 +289,7 @@ mod tests {
         rollback_final_batch_renames(
             &[(final_first.clone(), first.clone())],
             &[
-                (
-                    dir.path().join(".bennu-batch-rename-0.tmp"),
-                    first.clone(),
-                ),
+                (dir.path().join(".bennu-batch-rename-0.tmp"), first.clone()),
                 (temp_second.clone(), second.clone()),
             ],
         )

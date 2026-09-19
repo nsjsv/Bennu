@@ -37,8 +37,7 @@ fn release_user_fragment_identifies_the_actual_override_source() {
 
 #[test]
 fn packaged_fragment_with_drop_in_names_the_drop_in_conflict() {
-    let drop_in_path =
-        "/home/test/.config/systemd/user/bennu-search.service.d/override.conf";
+    let drop_in_path = "/home/test/.config/systemd/user/bennu-search.service.d/override.conf";
     let description = release_snapshot(
         PACKAGED_RELEASE_FRAGMENT_PATH,
         drop_in_path,

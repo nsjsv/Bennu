@@ -130,9 +130,7 @@ async fn run_recoverable_transfer_to_boundary<J: TransferJournal>(
         let source_device = tokio::fs::symlink_metadata(&record.request.source)
             .await
             .ok()
-            .map(|metadata| {
-                std::os::unix::fs::MetadataExt::dev(&metadata)
-            });
+            .map(|metadata| std::os::unix::fs::MetadataExt::dev(&metadata));
         let target_parent = record
             .request
             .requested_target

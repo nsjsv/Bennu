@@ -18,10 +18,7 @@ pub(crate) struct FloatingArea {
 impl FloatingArea {
     /// 窗口高度映射成内容区的 y 起点(相对窗口顶沿)与可用高度。
     fn vertical_span(&self, surface_height: f32) -> (f32, f32) {
-        (
-            self.top,
-            (surface_height - self.top - self.bottom).max(0.0),
-        )
+        (self.top, (surface_height - self.top - self.bottom).max(0.0))
     }
 }
 
@@ -67,10 +64,7 @@ pub(crate) fn floating_surface<'a, Message>(
 where
     Message: Clone + 'a,
 {
-    let floating = floating
-        .into_iter()
-        .map(fallback_floating_scroll)
-        .collect();
+    let floating = floating.into_iter().map(fallback_floating_scroll).collect();
     Element::new(FloatingSurface {
         content: content.into(),
         floating,
@@ -88,10 +82,7 @@ pub(crate) fn modal_floating_surface<'a, Message>(
 where
     Message: Clone + 'a,
 {
-    let floating = floating
-        .into_iter()
-        .map(fallback_floating_scroll)
-        .collect();
+    let floating = floating.into_iter().map(fallback_floating_scroll).collect();
     Element::new(FloatingSurface {
         content: content.into(),
         floating,
@@ -110,10 +101,7 @@ pub(crate) fn dismissable_blocking_floating_surface<'a, Message>(
 where
     Message: Clone + 'a,
 {
-    let floating = floating
-        .into_iter()
-        .map(fallback_floating_scroll)
-        .collect();
+    let floating = floating.into_iter().map(fallback_floating_scroll).collect();
     Element::new(FloatingSurface {
         content: content.into(),
         floating,
@@ -135,10 +123,7 @@ pub(crate) fn replaceable_context_menu_floating_surface<'a, Message>(
 where
     Message: Clone + 'a,
 {
-    let floating = floating
-        .into_iter()
-        .map(fallback_floating_scroll)
-        .collect();
+    let floating = floating.into_iter().map(fallback_floating_scroll).collect();
     Element::new(FloatingSurface {
         content: content.into(),
         floating,
@@ -240,7 +225,9 @@ pub(crate) enum FloatingPlacement {
     Free(Point),
     /// 右下角钉在 anchor 上,元素往锚点左上展开;布局后按实际尺寸
     /// 反推位置,跟随锚点不做屏内回退(如拖拽聚合行挂在指针尖)。
-    AnchorBottomRight { anchor: Point },
+    AnchorBottomRight {
+        anchor: Point,
+    },
     BottomLeft {
         left: f32,
         bottom: f32,
@@ -593,9 +580,7 @@ where
             self.state, event, layout, cursor, renderer, clipboard, shell, &bounds,
         );
 
-        if self.captures_pointer
-            && should_capture_floating_overlay_event(event, cursor, bounds)
-        {
+        if self.captures_pointer && should_capture_floating_overlay_event(event, cursor, bounds) {
             shell.capture_event();
         }
     }
@@ -694,10 +679,9 @@ fn floating_position(
             area_top + (available_height - size.height) / 2.0,
         ),
         FloatingPlacement::At(position) | FloatingPlacement::Free(position) => position,
-        FloatingPlacement::AnchorBottomRight { anchor } => Point::new(
-            anchor.x - size.width,
-            anchor.y - size.height,
-        ),
+        FloatingPlacement::AnchorBottomRight { anchor } => {
+            Point::new(anchor.x - size.width, anchor.y - size.height)
+        }
         FloatingPlacement::BottomLeft { left, bottom } => {
             Point::new(left, area_bottom - bottom - size.height)
         }
@@ -718,13 +702,11 @@ fn floating_position(
     }
 
     let max_x = (surface.width - size.width - FLOATING_SURFACE_MARGIN).max(FLOATING_SURFACE_MARGIN);
-    let max_y = (area_bottom - size.height - FLOATING_SURFACE_MARGIN).max(area_top + FLOATING_SURFACE_MARGIN);
+    let max_y = (area_bottom - size.height - FLOATING_SURFACE_MARGIN)
+        .max(area_top + FLOATING_SURFACE_MARGIN);
     Point::new(
         desired.x.max(FLOATING_SURFACE_MARGIN).min(max_x),
-        desired
-            .y
-            .max(area_top + FLOATING_SURFACE_MARGIN)
-            .min(max_y),
+        desired.y.max(area_top + FLOATING_SURFACE_MARGIN).min(max_y),
     )
 }
 

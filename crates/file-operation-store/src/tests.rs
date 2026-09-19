@@ -184,10 +184,7 @@ fn delete_permanently_operation_roundtrips_through_json_and_database() {
 fn column_widths_roundtrip_replace_and_clear() {
     let (store, root) = test_store();
     store
-        .replace_column_widths(
-            HashMap::from([(0, 240.5), (2, 360.0)]),
-            Some(1_920.0),
-        )
+        .replace_column_widths(HashMap::from([(0, 240.5), (2, 360.0)]), Some(1_920.0))
         .unwrap();
 
     assert_eq!(

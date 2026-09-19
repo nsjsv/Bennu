@@ -11,9 +11,9 @@ use file_core::DirectoryEntry;
 use iced::widget::{column, container, row, Space};
 use iced::{Alignment, Element, Length, Point};
 
-use crate::appearance::list_row_style;
 use crate::app::panes::BrowserPaneView;
 use crate::app::FileBrowser;
+use crate::appearance::list_row_style;
 use crate::file_drag_spring_ring::file_drag_spring_ring;
 use crate::file_entry_view::{file_entry_symbol_icon, FileEntryIconDensity, FileEntryIconTone};
 use crate::icons::{file_entry_icon_symbol, IconSymbol};
@@ -26,8 +26,8 @@ use crate::model::{
     ListColumnConfig, ListColumnKind, Message,
 };
 use crate::transfer_placeholders::{
-    merge_entries_with_placeholders, transfer_placeholders_for_directory,
-    MergedTransferItem, TransferPlaceholder, TransferSortOptions,
+    merge_entries_with_placeholders, transfer_placeholders_for_directory, MergedTransferItem,
+    TransferPlaceholder, TransferSortOptions,
 };
 use crate::typography::readable_text;
 use crate::virtual_range::VirtualRange;
@@ -288,9 +288,7 @@ impl ListTransferRow<'_> {
     fn height(&self, row_height: f32) -> f32 {
         match self {
             Self::DirectoryStatusRow { height, .. } | Self::GroupHeader { height, .. } => *height,
-            Self::Entry { visible, .. } => {
-                row_height * visible.animation_progress.clamp(0.0, 1.0)
-            }
+            Self::Entry { visible, .. } => row_height * visible.animation_progress.clamp(0.0, 1.0),
             Self::Placeholder { .. } => row_height,
         }
     }
@@ -344,9 +342,7 @@ fn push_directory_transfer_rows<'a>(
 ) {
     let placeholders = placeholder_cache
         .entry(directory.to_path_buf())
-        .or_insert_with(|| {
-            transfer_placeholders_for_directory(&browser.operation_queue, directory)
-        })
+        .or_insert_with(|| transfer_placeholders_for_directory(&browser.operation_queue, directory))
         .clone();
     let merged = merge_entries_with_placeholders(entries, &placeholders, sort);
     // 条纹计数器按目录段各自新建:递归展开的子目录从 0 起算,组间不
@@ -627,10 +623,12 @@ pub(crate) fn selection_run_position_in_transfer_rows(
         .get(index + 1)
         .and_then(|neighbor| neighbor.entry_path())
         .is_some_and(|path| selected_paths.contains(path));
-    Some(crate::file_entry_presentation::SelectionRunPosition::from_neighbors(
-        previous_selected,
-        next_selected,
-    ))
+    Some(
+        crate::file_entry_presentation::SelectionRunPosition::from_neighbors(
+            previous_selected,
+            next_selected,
+        ),
+    )
 }
 
 /// 任一 pane 目录的排序配置:当前目录用扫描选项,其余目录用各自展开
@@ -752,11 +750,9 @@ pub(crate) fn column_transfer_item_offset(
         &placeholders,
         transfer_sort_for_pane_directory(browser, pane, directory),
     );
-    let index = merged
-        .iter()
-        .position(
-            |item| matches!(item, MergedTransferItem::Entry { entry, .. } if entry.path == path),
-        )?;
+    let index = merged.iter().position(
+        |item| matches!(item, MergedTransferItem::Entry { entry, .. } if entry.path == path),
+    )?;
     Some(index as f32 * row_pitch)
 }
 
@@ -769,8 +765,7 @@ pub(crate) fn column_transfer_item_count(
     let Some(entries) = column_directory_entries(pane, directory) else {
         return 0;
     };
-    entries.len()
-        + transfer_placeholders_for_directory(&browser.operation_queue, directory).len()
+    entries.len() + transfer_placeholders_for_directory(&browser.operation_queue, directory).len()
 }
 
 #[cfg(test)]

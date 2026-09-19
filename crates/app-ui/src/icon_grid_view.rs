@@ -70,9 +70,7 @@ pub(crate) fn icon_grid_view<'a>(
     let mut rail_entries = Vec::new();
     let content: Element<'a, Message> = match pane.current_directory_content() {
         DirectoryContentAvailability::Pending => Space::new().height(Length::Fill).into(),
-        DirectoryContentAvailability::Available([])
-            if transfer_placeholders.is_empty() =>
-        {
+        DirectoryContentAvailability::Available([]) if transfer_placeholders.is_empty() => {
             grid_message(if pane.is_trash_view {
                 "Trash is empty"
             } else {
@@ -102,22 +100,22 @@ pub(crate) fn icon_grid_view<'a>(
         scrollbar_region.clone(),
         browser.smooth_scroll_shift_pressed(),
     ))
-        .id(smooth_scroll_id(&scrollbar_region))
-        .direction(enhanced_vertical_scrollbar_direction(
-            scrollbar_visibility,
-            8.0,
-        ))
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .style(enhanced_scrollbar_style(scrollbar_visibility))
-        .on_scroll(scrollbar_on_scroll(
-            scrollbar_region.clone(),
-            move |viewport: scrollable::Viewport| {
-                let offset = viewport.absolute_offset();
-                let bounds = viewport.bounds();
-                Message::IconGridScrolled(pane_id, offset.y, bounds)
-            },
-        ));
+    .id(smooth_scroll_id(&scrollbar_region))
+    .direction(enhanced_vertical_scrollbar_direction(
+        scrollbar_visibility,
+        8.0,
+    ))
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .style(enhanced_scrollbar_style(scrollbar_visibility))
+    .on_scroll(scrollbar_on_scroll(
+        scrollbar_region.clone(),
+        move |viewport: scrollable::Viewport| {
+            let offset = viewport.absolute_offset();
+            let bounds = viewport.bounds();
+            Message::IconGridScrolled(pane_id, offset.y, bounds)
+        },
+    ));
     let grid_scroll = enhanced_scrollbar(
         grid_scroll,
         scrollbar_visibility,
@@ -133,26 +131,24 @@ pub(crate) fn icon_grid_view<'a>(
         .into();
     // 索引栏叠层:分组开启且组数 ≥2 时挂上;当前可视区顶部所在组由
     // flow 派生的 offsets 与视口偏移在渲染期推得,不占持久状态。
-    let pane_surface: Element<'a, Message> =
-        if crate::model::file_group_rail_visible(&rail_entries) {
-            let active_group = crate::model::active_file_group_index(
+    let pane_surface: Element<'a, Message> = if crate::model::file_group_rail_visible(&rail_entries)
+    {
+        let active_group =
+            crate::model::active_file_group_index(&rail_entries, pane.icon_grid_viewport.offset_y);
+        Stack::with_children([
+            pane_surface,
+            crate::file_grouping_rail::file_grouping_rail_view(
                 &rail_entries,
-                pane.icon_grid_viewport.offset_y,
-            );
-            Stack::with_children([
-                pane_surface,
-                crate::file_grouping_rail::file_grouping_rail_view(
-                    &rail_entries,
-                    active_group,
-                    pane.id,
-                ),
-            ])
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
-        } else {
-            pane_surface
-        };
+                active_group,
+                pane.id,
+            ),
+        ])
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+    } else {
+        pane_surface
+    };
 
     mouse_area(pane_surface)
         .on_press(Message::BlankAreaPressed(pane.id))
@@ -305,9 +301,7 @@ fn render_group_header<'a>(header: &IconGridGroupHeaderLayout) -> Element<'a, Me
     container(
         Row::new()
             .push(readable_text(header.title.clone()).size(GRID_GROUP_HEADER_TEXT_SIZE))
-            .push(
-                readable_text(format!("({})", header.count)).size(GRID_GROUP_HEADER_TEXT_SIZE),
-            )
+            .push(readable_text(format!("({})", header.count)).size(GRID_GROUP_HEADER_TEXT_SIZE))
             .spacing(4)
             .align_y(Alignment::Center),
     )
@@ -416,21 +410,22 @@ fn icon_grid_entry<'a>(
             || pane.is_path_selected(&entry.path)
             || disclosure.is_some());
 
-    let base_icon: Element<'a, Message> = crate::transfer_placeholder_view::entry_icon_with_transfer(
-        container(entry_thumbnail_or_icon(
-            browser,
-            entry,
-            icon_tone,
-            FileEntryIconDensity::Grid(icon_edge),
-        ))
-        .width(Length::Fixed(icon_edge as f32))
-        .height(Length::Fixed(icon_edge as f32))
-        .center_x(Length::Fixed(icon_edge as f32))
-        .center_y(Length::Fixed(icon_edge as f32))
-        .into(),
-        transfer,
-        icon_edge as f32,
-    );
+    let base_icon: Element<'a, Message> =
+        crate::transfer_placeholder_view::entry_icon_with_transfer(
+            container(entry_thumbnail_or_icon(
+                browser,
+                entry,
+                icon_tone,
+                FileEntryIconDensity::Grid(icon_edge),
+            ))
+            .width(Length::Fixed(icon_edge as f32))
+            .height(Length::Fixed(icon_edge as f32))
+            .center_x(Length::Fixed(icon_edge as f32))
+            .center_y(Length::Fixed(icon_edge as f32))
+            .into(),
+            transfer,
+            icon_edge as f32,
+        );
     let icon: Element<'a, Message> = if shows_disclosure {
         let (rotation, is_open) = disclosure.unwrap_or((0.0, false));
         let disclosure_button = button(

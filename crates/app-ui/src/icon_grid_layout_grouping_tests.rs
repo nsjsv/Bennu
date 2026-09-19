@@ -66,10 +66,7 @@ fn grouped_root_flow_accumulates_header_heights_and_reveal_math() {
             (top, count as f32)
         })
         .collect();
-    assert_eq!(
-        group_tops,
-        vec![(header_a_top, 2.0), (header_z_top, 1.0)]
-    );
+    assert_eq!(group_tops, vec![(header_a_top, 2.0), (header_z_top, 1.0)]);
     // 段序列:目录行 -> 组头A -> 组行A -> 组头Z -> 组行Z。
     assert!(matches!(flow[0], IconGridFlowSegment::Rows(_)));
     assert!(matches!(flow[1], IconGridFlowSegment::GroupHeader(_)));
@@ -196,8 +193,9 @@ fn grouped_flow_resolves_expansion_anchor_by_path_not_cell_order() {
         anchor("/workspace", "/workspace/d2", 2),
         loaded(files("/workspace/d2", 1)),
     );
-    let two_column_width =
-        ICON_GRID_CONTENT_PADDING * 2.0 + tile_width(96) * 2.0 + crate::icon_grid_geometry::ICON_GRID_GAP;
+    let two_column_width = ICON_GRID_CONTENT_PADDING * 2.0
+        + tile_width(96) * 2.0
+        + crate::icon_grid_geometry::ICON_GRID_GAP;
     let layout = IconGridLayout::new_grouped_by_name_initial(
         Path::new("/workspace"),
         &entries,

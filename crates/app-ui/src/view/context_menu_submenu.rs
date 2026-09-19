@@ -22,7 +22,10 @@ pub(super) const CONTEXT_MENU_ITEM_HEIGHT: f32 = 28.0;
 pub(super) const CONTEXT_SUBMENU_WIDTH: f32 = 170.0;
 
 /// 子菜单槽位:把子菜单面板钉在触发行右侧同行高度(行号来自结构列表,无硬编码行数)。
-pub(super) fn submenu_slot(row_index: usize, content: Element<'_, Message>) -> Element<'_, Message> {
+pub(super) fn submenu_slot(
+    row_index: usize,
+    content: Element<'_, Message>,
+) -> Element<'_, Message> {
     let trigger_top = CONTEXT_MENU_PADDING
         + row_index as f32 * (CONTEXT_MENU_ITEM_HEIGHT + CONTEXT_MENU_ITEM_SPACING);
     Column::new()
@@ -140,14 +143,16 @@ pub(super) fn file_grouping_submenu_panel(current: FileGroupingMode) -> Element<
 
 /// 分组方式选项行:标签占满 + 当前项尾部勾选标记。
 fn file_grouping_submenu_item(mode: FileGroupingMode, selected: bool) -> Element<'static, Message> {
-    let mut label = row![
-        crate::typography::readable_text(mode.label()).width(Length::Fill),
-    ]
-    .spacing(6)
-    .align_y(Alignment::Center)
-    .width(Length::Fill);
+    let mut label = row![crate::typography::readable_text(mode.label()).width(Length::Fill),]
+        .spacing(6)
+        .align_y(Alignment::Center)
+        .width(Length::Fill);
     if selected {
-        label = label.push(themed_icon(IconSymbol::Check, IconTone::Normal, MENU_ICON_SIZE));
+        label = label.push(themed_icon(
+            IconSymbol::Check,
+            IconTone::Normal,
+            MENU_ICON_SIZE,
+        ));
     }
     mouse_area(
         button(label)
@@ -163,9 +168,7 @@ fn file_grouping_submenu_item(mode: FileGroupingMode, selected: bool) -> Element
 }
 
 /// 成员行的动作映射;成员只会是组表里声明的低频项,其余变体不可达。
-fn member_menu_action(
-    member: FileAreaMenuItem,
-) -> Option<(IconSymbol, &'static str, Message)> {
+fn member_menu_action(member: FileAreaMenuItem) -> Option<(IconSymbol, &'static str, Message)> {
     let action = match member {
         FileAreaMenuItem::Duplicate => (member.icon(), member.label(), Message::DuplicateSelected),
         FileAreaMenuItem::CopyPath => (member.icon(), member.label(), Message::CopyPathSelected),

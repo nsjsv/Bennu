@@ -770,7 +770,10 @@ async fn basic_copy_and_same_filesystem_move_build_complete_post_side_effect_pro
                     fingerprint_object(&artifact.plan.payload_path())
                         .await
                         .unwrap(),
-                    commit.fingerprint.as_blake3().expect("basic copy keeps a blake3 proof")
+                    commit
+                        .fingerprint
+                        .as_blake3()
+                        .expect("basic copy keeps a blake3 proof")
                 );
                 assert!(source.exists());
                 assert!(!target.exists());

@@ -6,10 +6,10 @@ use super::super::paths::{self, PasteTargetMode};
 use super::super::wayland_dnd::WaylandFileDragRequest;
 use super::super::{FileBrowser, POINTER_DRAG_ACTIVATION_DISTANCE};
 use crate::model::{
-    entry_exists, unique_duplicated_directory_name, unique_duplicated_file_name,
-    BrowserPaneId, FileDragDropIntent, FileDragGestureId, FileDragNativeDndState, FileDragPhase,
-    FileDragState, FileDragStationaryAction, FileDropTarget, Message, SelectionMarqueeSource,
-    TabDropDestination, TransferConflictMode,
+    entry_exists, unique_duplicated_directory_name, unique_duplicated_file_name, BrowserPaneId,
+    FileDragDropIntent, FileDragGestureId, FileDragNativeDndState, FileDragPhase, FileDragState,
+    FileDragStationaryAction, FileDropTarget, Message, SelectionMarqueeSource, TabDropDestination,
+    TransferConflictMode,
 };
 use crate::operation_queue::{QueuedFileOperation, QueuedTransfer};
 
@@ -253,12 +253,9 @@ impl FileBrowser {
     ) {
         self.file_drag_viewport = viewports.iter().copied().find(|viewport| {
             bounds.iter().any(|bound| {
-                self.file_drag
-                    .as_ref()
-                    .is_some_and(|file_drag| {
-                        file_drag.sources.iter().any(|source| source == &bound.path)
-                    })
-                    && viewport.contains(bound.bounds.center())
+                self.file_drag.as_ref().is_some_and(|file_drag| {
+                    file_drag.sources.iter().any(|source| source == &bound.path)
+                }) && viewport.contains(bound.bounds.center())
             })
         });
     }
@@ -467,8 +464,7 @@ impl FileBrowser {
                 if source != target {
                     return QueuedTransfer::new(source, target);
                 }
-                let is_directory =
-                    self.entry_kind(&source) == Some(file_core::FileKind::Directory);
+                let is_directory = self.entry_kind(&source) == Some(file_core::FileKind::Directory);
                 QueuedTransfer::new(
                     source.clone(),
                     in_place_duplicate_target(&source, &target_directory, is_directory),
@@ -516,9 +512,7 @@ impl FileBrowser {
             FileDropTarget::Directory(directory) => {
                 self.file_drag_directory_capsule(&drag.sources, directory)
             }
-            FileDropTarget::Trash => {
-                Some(crate::localization::translate_current("Move to Trash"))
-            }
+            FileDropTarget::Trash => Some(crate::localization::translate_current("Move to Trash")),
             FileDropTarget::Tab(tab) => match &tab.destination {
                 TabDropDestination::Trash => {
                     Some(crate::localization::translate_current("Move to Trash"))
@@ -535,11 +529,7 @@ impl FileBrowser {
     /// 子树、已在落点目录)才隐藏——多选里混着落点目录自身时其余条目
     /// 仍可移动,照常显示;落地按同一判定跳过空操作源。复制/链接在同
     /// 落点有原位副本/链接行为,照常显示。
-    fn file_drag_directory_capsule(
-        &self,
-        sources: &[PathBuf],
-        directory: &Path,
-    ) -> Option<String> {
+    fn file_drag_directory_capsule(&self, sources: &[PathBuf], directory: &Path) -> Option<String> {
         let intent = self.file_drag_drop_intent(sources, directory);
         if intent == FileDragDropIntent::Move
             && sources
@@ -647,7 +637,9 @@ pub(super) fn safe_file_drop_target(
 }
 
 fn file_drag_directory_target_needs_fallback(sources: &[PathBuf], target: &Path) -> bool {
-    sources.iter().any(|source| paths::move_is_no_op(source, target))
+    sources
+        .iter()
+        .any(|source| paths::move_is_no_op(source, target))
 }
 
 #[cfg(test)]
@@ -681,8 +673,7 @@ mod tests {
             browser.file_drag_drop_intent(&[], &target),
             FileDragDropIntent::Move
         );
-        browser.keyboard_modifiers =
-            keyboard::Modifiers::CTRL | keyboard::Modifiers::SHIFT;
+        browser.keyboard_modifiers = keyboard::Modifiers::CTRL | keyboard::Modifiers::SHIFT;
         assert_eq!(
             browser.file_drag_drop_intent(&[], &target),
             FileDragDropIntent::Move
@@ -694,8 +685,7 @@ mod tests {
             browser.file_drag_drop_intent(&[], &target),
             FileDragDropIntent::CreateLink
         );
-        browser.keyboard_modifiers =
-            keyboard::Modifiers::CTRL | keyboard::Modifiers::ALT;
+        browser.keyboard_modifiers = keyboard::Modifiers::CTRL | keyboard::Modifiers::ALT;
         assert_eq!(
             browser.file_drag_drop_intent(&[], &target),
             FileDragDropIntent::Copy
@@ -908,8 +898,7 @@ mod tests {
         std::fs::write(&source, b"data").unwrap();
         let directory_path = directory.path().to_path_buf();
 
-        let target =
-            in_place_duplicate_target(&source, &directory_path, false);
+        let target = in_place_duplicate_target(&source, &directory_path, false);
 
         assert_eq!(target, directory.path().join("report副本.pdf"));
         assert!(!target.exists());
@@ -958,15 +947,14 @@ mod tests {
         let source = PathBuf::from("/workspace/report.txt");
         browser.selected = Some(source.clone());
         browser.cursor_position = iced::Point::new(0.0, 0.0);
-        drop(browser.start_file_drag(
-            source,
-            FileDragStationaryAction::SelectionOnly,
-            Vec::new(),
-        ));
+        drop(browser.start_file_drag(source, FileDragStationaryAction::SelectionOnly, Vec::new()));
 
         drop(browser.update_file_drag(iced::Point::new(10.0, 0.0)));
 
-        let file_drag = browser.file_drag.as_ref().expect("drag survives activation");
+        let file_drag = browser
+            .file_drag
+            .as_ref()
+            .expect("drag survives activation");
         assert!(matches!(
             file_drag.native_dnd,
             FileDragNativeDndState::Requested(_)
@@ -982,18 +970,20 @@ mod tests {
         let source = PathBuf::from("/workspace/report.txt");
         browser.selected = Some(source.clone());
         browser.cursor_position = iced::Point::new(0.0, 0.0);
-        drop(browser.start_file_drag(
-            source,
-            FileDragStationaryAction::SelectionOnly,
-            Vec::new(),
-        ));
+        drop(browser.start_file_drag(source, FileDragStationaryAction::SelectionOnly, Vec::new()));
 
         drop(browser.update_file_drag(iced::Point::new(10.0, 0.0)));
 
-        let file_drag = browser.file_drag.as_ref().expect("drag survives activation");
+        let file_drag = browser
+            .file_drag
+            .as_ref()
+            .expect("drag survives activation");
         assert_eq!(file_drag.native_dnd, FileDragNativeDndState::NotRequested);
         assert!(matches!(
-            browser.file_drop_session.as_ref().map(|session| session.identity),
+            browser
+                .file_drop_session
+                .as_ref()
+                .map(|session| session.identity),
             Some(crate::model::FileDropSessionIdentity::Iced(_))
         ));
     }

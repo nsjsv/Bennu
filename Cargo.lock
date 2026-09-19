@@ -4669,6 +4669,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "portal-backend"
+version = "0.3.5"
+dependencies = [
+ "dark-light",
+ "dirs",
+ "file-core",
+ "gio",
+ "iced",
+ "serde",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "zbus",
+]
+
+[[package]]
 name = "potential_utf"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"

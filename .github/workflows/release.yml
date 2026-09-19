@@ -93,7 +93,7 @@ jobs:
           done
 
       - name: Build release binaries
-        run: cargo build --release --locked -p "${CARGO_PACKAGE}" -p "${DAEMON_CARGO_PACKAGE}"
+        run: cargo build --release --locked -p "${CARGO_PACKAGE}" -p "${DAEMON_CARGO_PACKAGE}" -p portal-backend
 
       - name: Package release archive
         id: package

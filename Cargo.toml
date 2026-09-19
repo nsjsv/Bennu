@@ -5,6 +5,7 @@ members = [
     "crates/file-core",
     "crates/file-search",
     "crates/file-operation-store",
+    "crates/portal-backend",
     "crates/thumbnails",
     "crates/local-send",
 ]

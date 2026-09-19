@@ -64,7 +64,7 @@ require_matching_cargo_version app-ui
 require_matching_cargo_version file-search
 
 target_dir="${CARGO_TARGET_DIR:-${REPO_ROOT}/target}"
-CARGO_TARGET_DIR="${target_dir}" cargo build --release --locked -p app-ui -p file-search
+CARGO_TARGET_DIR="${target_dir}" cargo build --release --locked -p app-ui -p file-search -p portal-backend
 
 dist_dir="${REPO_ROOT}/dist"
 mkdir -p "${dist_dir}"
@@ -75,6 +75,7 @@ sed \
     -e "s|@PAYLOAD_SCRIPT@|${REPO_ROOT}/packaging/common/install-payload.sh|g" \
     -e "s|@APP_BINARY@|${target_dir}/release/app-ui|g" \
     -e "s|@DAEMON_BINARY@|${target_dir}/release/bennu-searchd|g" \
+    -e "s|@PORTAL_BINARY@|${target_dir}/release/bennu-portal|g" \
     "${REPO_ROOT}/packaging/rpm/bennu.spec.in" > "${spec_path}"
 
 rpmbuild --quiet -bb \

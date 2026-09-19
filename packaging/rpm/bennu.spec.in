@@ -18,7 +18,7 @@ optional indexed search service (bennu-search.service, enabled by the
 user via systemctl --user).
 
 %install
-bash "@PAYLOAD_SCRIPT@" "%{buildroot}" "@APP_BINARY@" "@DAEMON_BINARY@"
+bash "@PAYLOAD_SCRIPT@" "%{buildroot}" "@APP_BINARY@" "@DAEMON_BINARY@" "@PORTAL_BINARY@"
 
 %files
 %license /usr/share/licenses/bennu/LICENSE
@@ -30,5 +30,8 @@ bash "@PAYLOAD_SCRIPT@" "%{buildroot}" "@APP_BINARY@" "@DAEMON_BINARY@"
 /usr/share/icons/hicolor/512x512/apps/bennu.png
 /usr/share/bennu/matugen/bennu-colors.toml
 /usr/share/dbus-1/services/io.github.nsjsv.Bennu.service
+/usr/bin/bennu-portal
+/usr/share/dbus-1/services/org.freedesktop.impl.portal.desktop.bennu.service
+/usr/share/xdg-desktop-portal/portals/bennu.portal
 
 %changelog

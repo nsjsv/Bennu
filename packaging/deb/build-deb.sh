@@ -117,7 +117,7 @@ require_matching_cargo_version app-ui
 require_matching_cargo_version file-search
 
 target_dir="${CARGO_TARGET_DIR:-${REPO_ROOT}/target}"
-CARGO_TARGET_DIR="${target_dir}" cargo build --release --locked -p app-ui -p file-search
+CARGO_TARGET_DIR="${target_dir}" cargo build --release --locked -p app-ui -p file-search -p portal-backend
 
 dist_dir="${REPO_ROOT}/dist"
 payload_root="$(mktemp -d)"
@@ -127,7 +127,8 @@ mkdir -p "${deb_dir}/DEBIAN"
 bash "${REPO_ROOT}/packaging/common/install-payload.sh" \
     "${deb_dir}" \
     "${target_dir}/release/app-ui" \
-    "${target_dir}/release/bennu-searchd"
+    "${target_dir}/release/bennu-searchd" \
+    "${target_dir}/release/bennu-portal"
 build_control_file "${deb_dir}/DEBIAN"
 
 mkdir -p "${dist_dir}"

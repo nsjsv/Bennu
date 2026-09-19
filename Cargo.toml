@@ -49,3 +49,10 @@ lto = "fat"
 codegen-units = 1
 strip = "symbols"
 panic = "abort"
+
+# iced_graphics 0.14.0 的 `align()` 依赖 `set_size` 触发重排，但 cosmic-text
+# 0.15 对尺寸未变的 `set_size` 是 no-op，导致 `set_align` 清空的 shaping
+# 缓存不会重建，居中多行文本渲染为空（上游 master 已修，见
+# iced-rs/iced graphics/src/text.rs）。vendor 补丁与上游一致。
+[patch.crates-io]
+iced_graphics = { path = "vendor/iced_graphics" }

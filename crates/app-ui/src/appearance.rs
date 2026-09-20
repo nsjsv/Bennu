@@ -1,4 +1,4 @@
-use iced::widget::{button, scrollable, svg};
+use iced::widget::button;
 use iced::{Background, Border, Color, Shadow, Theme, Vector};
 
 mod document_preview;
@@ -26,9 +26,20 @@ pub(crate) use list_header::{
     list_header_style, ListHeaderCellVisualState,
 };
 
+// 通用样式词汇已迁至共享 crate `bennu-theme::styles`（portal 复用同一份）；
+// 这里重导出保持 crate 内调用点不变。
+pub(crate) use bennu_theme::styles::{
+    base_text_color, button_hover_surface_color, button_pressed_surface_color,
+    button_surface_color, context_menu_item_button_style, elevation_shadow_color,
+    enhanced_both_scrollbar_direction, enhanced_horizontal_scrollbar_direction,
+    enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction, error_notification_style,
+    hovered_row_style, icon_svg_style, muted_icon_svg_style, muted_text_color,
+    selected_icon_svg_style, subtle_border_color, surface_button_style,
+    transparent_icon_button_style, warning_icon_svg_style,
+};
+
 use crate::file_entry_presentation::SelectionRunPosition;
-use crate::matugen_theme::{ui_colors, AppearanceMode};
-use crate::model::{ScrollbarVisibility, SCROLLBAR_HOVER_WIDTH};
+use crate::matugen_theme::ui_colors;
 
 pub(crate) fn app_content_style(theme: &Theme) -> container::Appearance {
     let colors = ui_colors(theme);
@@ -50,6 +61,10 @@ pub(crate) fn selected_row_style_for_run(
 }
 
 fn selected_row_appearance(theme: &Theme, position: SelectionRunPosition) -> container::Appearance {
+    // 单行选中态直接用共享实现；连续选区只有首/中/尾圆角差异在本地处理。
+    if position == SelectionRunPosition::Single {
+        return bennu_theme::styles::selected_row_style(theme);
+    }
     let colors = ui_colors(theme);
     container::Appearance {
         background: Some(Background::Color(colors.primary_container)),
@@ -124,19 +139,6 @@ pub(crate) fn tab_split_overlay_style(theme: &Theme) -> container::Appearance {
     }
 }
 
-pub(crate) fn hovered_row_style(theme: &Theme) -> container::Appearance {
-    let colors = ui_colors(theme);
-    container::Appearance {
-        background: Some(Background::Color(colors.surface_container_high)),
-        text_color: Some(colors.on_surface),
-        border: Border {
-            radius: 8.0.into(),
-            ..Border::default()
-        },
-        ..container::Appearance::default()
-    }
-}
-
 pub(crate) fn navigation_icon_button_style() -> fn(&Theme, button::Status) -> button::Style {
     surface_button_style
 }
@@ -189,91 +191,6 @@ pub(crate) fn grouping_rail_button_style(
 pub(crate) fn context_menu_button_style() -> fn(&Theme, button::Status) -> button::Style {
     surface_button_style
 }
-pub(crate) fn context_menu_item_button_style() -> fn(&Theme, button::Status) -> button::Style {
-    context_menu_item_button_style_for_status
-}
-
-fn context_menu_item_button_style_for_status(
-    theme: &Theme,
-    status: button::Status,
-) -> button::Style {
-    let background = match status {
-        button::Status::Hovered => Some(Background::Color(button_hover_surface_color(theme))),
-        button::Status::Pressed => Some(Background::Color(button_pressed_surface_color(theme))),
-        button::Status::Active | button::Status::Disabled => None,
-    };
-
-    button::Style {
-        background,
-        text_color: if matches!(status, button::Status::Disabled) {
-            muted_text_color(theme)
-        } else {
-            base_text_color(theme)
-        },
-        ..button::Style::default()
-    }
-}
-
-pub(crate) fn enhanced_scrollbar_style(
-    visibility: ScrollbarVisibility,
-) -> impl Fn(&Theme, scrollable::Status) -> scrollable::Style + Clone {
-    move |theme, status| {
-        let mut style = mac_scrollbar_style(theme, status, visibility);
-        // 保留 Iced 的命中区域和拖动状态机，避免与 Canvas 滑块绘制两套视觉反馈。
-        style.vertical_rail.scroller.background = Background::Color(Color::TRANSPARENT);
-        style.vertical_rail.scroller.border = Border::default();
-        style.horizontal_rail.scroller.background = Background::Color(Color::TRANSPARENT);
-        style.horizontal_rail.scroller.border = Border::default();
-        style
-    }
-}
-
-pub(crate) fn enhanced_vertical_scrollbar_direction(
-    visibility: ScrollbarVisibility,
-    width: f32,
-) -> scrollable::Direction {
-    scrollable::Direction::Vertical(auto_hide_scrollbar_properties(
-        visibility,
-        width.max(SCROLLBAR_HOVER_WIDTH),
-    ))
-}
-
-pub(crate) fn enhanced_horizontal_scrollbar_direction(
-    visibility: ScrollbarVisibility,
-    width: f32,
-) -> scrollable::Direction {
-    scrollable::Direction::Horizontal(auto_hide_scrollbar_properties(
-        visibility,
-        width.max(SCROLLBAR_HOVER_WIDTH),
-    ))
-}
-
-pub(crate) fn enhanced_both_scrollbar_direction(
-    visibility: ScrollbarVisibility,
-    width: f32,
-) -> scrollable::Direction {
-    let bar = auto_hide_scrollbar_properties(visibility, width.max(SCROLLBAR_HOVER_WIDTH));
-    scrollable::Direction::Both {
-        vertical: bar.clone(),
-        horizontal: bar,
-    }
-}
-
-fn auto_hide_scrollbar_properties(
-    visibility: ScrollbarVisibility,
-    width: f32,
-) -> scrollable::Scrollbar {
-    let width = if visibility.opacity() <= f32::EPSILON {
-        0.0
-    } else {
-        width
-    };
-
-    scrollable::Scrollbar::new()
-        .width(width)
-        .scroller_width(width)
-}
-
 pub(crate) fn path_suggestions_style(theme: &Theme) -> container::Appearance {
     let colors = ui_colors(theme);
     container::Appearance {
@@ -338,20 +255,6 @@ pub(crate) fn preview_media_style(_theme: &Theme) -> container::Appearance {
         ..container::Appearance::default()
     }
 }
-pub(crate) fn error_notification_style(theme: &Theme) -> container::Appearance {
-    let colors = ui_colors(theme);
-    container::Appearance {
-        background: Some(Background::Color(colors.error_container)),
-        text_color: Some(colors.on_error_container),
-        border: Border {
-            color: colors.error,
-            width: 1.0,
-            radius: 12.0.into(),
-        },
-        ..container::Appearance::default()
-    }
-}
-
 pub(crate) fn column_browser_style(theme: &Theme) -> container::Appearance {
     container::Appearance {
         text_color: Some(base_text_color(theme)),
@@ -608,174 +511,6 @@ pub(crate) fn switch_thumb_off_style(theme: &Theme) -> container::Appearance {
     }
 }
 
-pub(crate) fn icon_svg_style() -> fn(&Theme, svg::Status) -> svg::Style {
-    icon_svg_style_for_status
-}
-
-pub(crate) fn selected_icon_svg_style() -> fn(&Theme, svg::Status) -> svg::Style {
-    selected_icon_svg_style_for_status
-}
-
-pub(crate) fn muted_icon_svg_style() -> fn(&Theme, svg::Status) -> svg::Style {
-    muted_icon_svg_style_for_status
-}
-
-pub(crate) fn warning_icon_svg_style() -> fn(&Theme, svg::Status) -> svg::Style {
-    warning_icon_svg_style_for_status
-}
-
-fn icon_svg_style_for_status(theme: &Theme, _status: svg::Status) -> svg::Style {
-    svg::Style {
-        color: Some(ui_colors(theme).on_surface),
-    }
-}
-
-fn selected_icon_svg_style_for_status(theme: &Theme, _status: svg::Status) -> svg::Style {
-    svg::Style {
-        color: Some(ui_colors(theme).on_primary_container),
-    }
-}
-
-fn muted_icon_svg_style_for_status(theme: &Theme, _status: svg::Status) -> svg::Style {
-    svg::Style {
-        color: Some(ui_colors(theme).on_surface_variant),
-    }
-}
-
-fn warning_icon_svg_style_for_status(theme: &Theme, _status: svg::Status) -> svg::Style {
-    svg::Style {
-        color: Some(ui_colors(theme).tertiary),
-    }
-}
-
-fn transparent_icon_button_style(theme: &Theme, status: button::Status) -> button::Style {
-    button::Style {
-        text_color: if matches!(status, button::Status::Disabled) {
-            muted_text_color(theme)
-        } else {
-            base_text_color(theme)
-        },
-        ..button::Style::default()
-    }
-}
-
-fn surface_button_style(theme: &Theme, status: button::Status) -> button::Style {
-    let background = match status {
-        button::Status::Hovered => button_hover_surface_color(theme),
-        button::Status::Pressed => button_pressed_surface_color(theme),
-        button::Status::Active | button::Status::Disabled => button_surface_color(theme),
-    };
-
-    button::Style {
-        background: Some(Background::Color(background)),
-        text_color: if matches!(status, button::Status::Disabled) {
-            muted_text_color(theme)
-        } else {
-            base_text_color(theme)
-        },
-        border: Border {
-            color: subtle_border_color(theme),
-            width: 1.0,
-            radius: 7.0.into(),
-        },
-        ..button::Style::default()
-    }
-}
-
-pub(crate) fn button_surface_color(theme: &Theme) -> Color {
-    ui_colors(theme).surface_container
-}
-
-pub(crate) fn button_hover_surface_color(theme: &Theme) -> Color {
-    ui_colors(theme).surface_container_high
-}
-
-pub(crate) fn button_pressed_surface_color(theme: &Theme) -> Color {
-    ui_colors(theme).surface_container_highest
-}
-
-fn mac_scrollbar_style(
-    theme: &Theme,
-    status: scrollable::Status,
-    visibility: ScrollbarVisibility,
-) -> scrollable::Style {
-    let mut opacity = visibility.opacity();
-
-    match status {
-        scrollable::Status::Hovered {
-            is_horizontal_scrollbar_hovered,
-            is_vertical_scrollbar_hovered,
-            ..
-        } if opacity > 0.0
-            && (is_horizontal_scrollbar_hovered || is_vertical_scrollbar_hovered) =>
-        {
-            opacity = (opacity + 0.18).min(1.0);
-        }
-        scrollable::Status::Dragged {
-            is_horizontal_scrollbar_dragged,
-            is_vertical_scrollbar_dragged,
-            ..
-        } if opacity > 0.0
-            && (is_horizontal_scrollbar_dragged || is_vertical_scrollbar_dragged) =>
-        {
-            opacity = opacity.max(0.86);
-        }
-        _ => {}
-    }
-
-    let mut style = scrollable::default(theme, status);
-    let scroller_background = mac_scrollbar_scroller_color(theme, opacity).into();
-    let rail_border = Border {
-        radius: 999.0.into(),
-        ..Border::default()
-    };
-    let scroller_border = Border {
-        radius: 999.0.into(),
-        ..Border::default()
-    };
-
-    style.vertical_rail.background = None;
-    style.vertical_rail.border = rail_border;
-    style.vertical_rail.scroller.background = scroller_background;
-    style.vertical_rail.scroller.border = scroller_border;
-    style.horizontal_rail.background = None;
-    style.horizontal_rail.border = rail_border;
-    style.horizontal_rail.scroller.background = scroller_background;
-    style.horizontal_rail.scroller.border = scroller_border;
-    style.gap = None;
-    style
-}
-
-fn mac_scrollbar_scroller_color(theme: &Theme, opacity: f32) -> Color {
-    Color {
-        a: 0.42 * opacity.clamp(0.0, 1.0),
-        ..ui_colors(theme).on_surface
-    }
-}
-
-pub(crate) fn base_text_color(theme: &Theme) -> Color {
-    ui_colors(theme).on_surface
-}
-
-pub(crate) fn muted_text_color(theme: &Theme) -> Color {
-    ui_colors(theme).on_surface_variant
-}
-
-pub(crate) fn elevation_shadow_color(theme: &Theme, alpha: f32) -> Color {
-    let colors = ui_colors(theme);
-    Color {
-        a: alpha,
-        ..match colors.mode {
-            AppearanceMode::Light => colors.on_background,
-            AppearanceMode::Dark => colors.background,
-        }
-    }
-}
-
-pub(crate) fn subtle_border_color(theme: &Theme) -> Color {
-    ui_colors(theme).outline_variant
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -784,8 +519,8 @@ mod tests {
     #[test]
     fn generated_light_and_dark_roles_drive_representative_surfaces() {
         for document in [
-            include_str!("../test-data/matugen-dark.toml"),
-            include_str!("../test-data/matugen-light.toml"),
+            include_str!("../../bennu-theme/test-data/matugen-dark.toml"),
+            include_str!("../../bennu-theme/test-data/matugen-light.toml"),
         ] {
             let theme = parse_matugen_theme(document).expect("fixture must be valid");
             let colors = ui_colors(&theme);

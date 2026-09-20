@@ -1,7 +1,7 @@
 use iced::widget::{container, text_input};
 use iced::Theme;
 
-const NAVIGATION_INPUT_RADIUS: f32 = 8.0;
+pub(crate) use bennu_theme::styles::navigation_text_input_style;
 
 pub(crate) fn address_bar_style(theme: &Theme) -> container::Style {
     let input_style = navigation_text_input_style(theme, text_input::Status::Active);
@@ -10,15 +10,6 @@ pub(crate) fn address_bar_style(theme: &Theme) -> container::Style {
         border: input_style.border,
         ..container::Style::default()
     }
-}
-
-pub(crate) fn navigation_text_input_style(
-    theme: &Theme,
-    status: text_input::Status,
-) -> text_input::Style {
-    let mut style = text_input::default(theme, status);
-    style.border.radius = NAVIGATION_INPUT_RADIUS.into();
-    style
 }
 
 #[cfg(test)]
@@ -38,7 +29,7 @@ mod tests {
         for theme in [Theme::Light, Theme::Dark] {
             for status in statuses {
                 let input_style = navigation_text_input_style(&theme, status);
-                assert_eq!(input_style.border.radius, NAVIGATION_INPUT_RADIUS.into());
+                assert_eq!(input_style.border.radius, 8.0.into());
             }
 
             let input_style = navigation_text_input_style(&theme, text_input::Status::Active);

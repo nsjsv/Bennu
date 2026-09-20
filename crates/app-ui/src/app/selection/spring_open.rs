@@ -47,7 +47,11 @@ impl FileBrowser {
     /// 允许——导航回祖先即重置栏链(拖拽栏链快照由导航路径清空,渲染
     /// 回到活链)。按候选 pane 判定:跨 pane 悬停时"当前目录"属于被
     /// 悬停的 pane,不是活动 pane。
-    fn file_drag_spring_breadcrumb_allowed(&self, pane_id: BrowserPaneId, directory: &Path) -> bool {
+    fn file_drag_spring_breadcrumb_allowed(
+        &self,
+        pane_id: BrowserPaneId,
+        directory: &Path,
+    ) -> bool {
         self.pane_view(pane_id)
             .is_some_and(|pane| directory != pane.current_dir)
     }
@@ -387,10 +391,7 @@ mod tests {
         let file = PathBuf::from("/workspace/file.txt");
         start_drag_on(&mut browser, &file);
 
-        drop(browser.handle_file_drag_entry_hovered_in_pane(
-            BrowserPaneId(1),
-            folder.clone(),
-        ));
+        drop(browser.handle_file_drag_entry_hovered_in_pane(BrowserPaneId(1), folder.clone()));
         let candidate = browser.file_drag_spring_hover.as_ref().unwrap();
         assert_eq!(candidate.directory, folder);
         assert_eq!(candidate.pane_id, BrowserPaneId(1));
@@ -407,7 +408,10 @@ mod tests {
         drop(browser.handle_file_drag_spring_open_tick());
         assert_eq!(browser.active_pane_id(), BrowserPaneId(1));
         assert_eq!(browser.current_dir, folder);
-        assert!(browser.file_drag.as_ref().is_some_and(|drag| drag.is_dragging()));
+        assert!(browser
+            .file_drag
+            .as_ref()
+            .is_some_and(|drag| drag.is_dragging()));
         assert_eq!(
             browser
                 .pane_by_id(BrowserPaneId::PRIMARY)
@@ -468,10 +472,7 @@ mod tests {
         let file = PathBuf::from("/workspace/file.txt");
         start_drag_on(&mut browser, &file);
 
-        drop(browser.handle_file_drag_entry_hovered_in_pane(
-            BrowserPaneId(1),
-            folder.clone(),
-        ));
+        drop(browser.handle_file_drag_entry_hovered_in_pane(BrowserPaneId(1), folder.clone()));
         assert!(browser.file_drag_spring_hover.is_some());
         browser.panes.retain(|pane| pane.id != BrowserPaneId(1));
 
@@ -498,10 +499,10 @@ mod tests {
 
         let file = PathBuf::from("/workspace/file.txt");
         start_drag_on(&mut browser, &file);
-        drop(browser.handle_file_drag_entry_hovered_in_pane(
-            BrowserPaneId(1),
-            trashed_folder.clone(),
-        ));
+        drop(
+            browser
+                .handle_file_drag_entry_hovered_in_pane(BrowserPaneId(1), trashed_folder.clone()),
+        );
         assert!(browser.file_drag_spring_hover.is_none());
     }
 

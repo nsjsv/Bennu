@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/app-ui",
+    "crates/bennu-theme",
     "crates/desktop-linux",
     "crates/file-core",
     "crates/file-search",

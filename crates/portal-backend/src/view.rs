@@ -1,17 +1,30 @@
-//! 选择窗口视图：导航栏（上级 + 面包屑 + 过滤器）、目录列表、
-//! SaveFile 文件名输入与确认按钮。纯展示，交互全部转成 `SessionMessage`。
+//! 选择窗口视图：导航栏（上级 + 面包屑 + 过滤器）、SaveFile 文件名输入
+//! 与确认栏、目录列表。纯展示，交互全部转成 `SessionMessage`。
+//!
+//! 视觉词汇（颜色角色、图标、按钮/行/滚动条/输入框样式）全部来自共享
+//! crate `bennu-theme`，与主程序消费同一份活动主题，保证两个进程的
+//! FileChooser 窗口看起来是同一个应用。
 
 use std::path::Path;
 
-use file_core::entry::{DirectoryEntry, FileKind};
-use iced::theme::Palette;
-use iced::widget::{button, column, container, mouse_area, pick_list, row, scrollable, text, text_input};
-use iced::widget::{Column, Row, Space};
-use iced::{alignment, Border, Color, Element, Length, Padding, Pixels, Size, Theme};
+use bennu_theme::icons::{file_entry_icon_symbol, rotated_chevron_right_view, IconSymbol};
+use bennu_theme::styles::{
+    base_text_color, enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction,
+    hovered_row_style, muted_icon_svg_style, muted_text_color, navigation_text_input_style,
+    primary_action_button_style, selected_icon_svg_style, selected_row_style, surface_button_style,
+    transparent_icon_button_style, ScrollbarVisibility,
+};
+use bennu_theme::ui_colors;
+use file_core::entry::FileKind;
+use iced::widget::Space;
+use iced::widget::{
+    button, column, container, mouse_area, pick_list, row, scrollable, text, text_input,
+};
+use iced::{alignment, mouse, Border, Color, Element, Length, Padding, Size, Theme};
 
 use crate::picker_request::PickerKind;
 use crate::picker_session::{
-    breadcrumb_chain, DirectoryListing, PickerSession, SessionMessage,
+    breadcrumb_chain, DirectoryListing, PickerRow, PickerSession, SessionMessage,
 };
 
 /// 每请求窗口的初始尺寸。
@@ -23,83 +36,118 @@ pub(crate) fn window_min_size() -> Size {
     Size::new(640.0, 420.0)
 }
 
-fn translucent(color: Color, alpha: f32) -> Color {
-    Color { a: alpha, ..color }
-}
+/// 列表滚动条静态宽度（可见的 mac 式细滚动条）。
+const LIST_SCROLLBAR_WIDTH: f32 = 10.0;
+
+/// 地址栏高度（与主程序 ADDRESS_BAR_HEIGHT 一致）。
+const ADDRESS_BAR_HEIGHT: f32 = 34.0;
+
+/// 子级行相对父级的缩进。
+const EXPANSION_INDENT: f32 = 16.0;
 
 /// 窗口内容。`emit` 由上层提供，负责把会话消息与窗口关联。
-pub(crate) fn picker_window_view<'a>(
-    session: &'a PickerSession,
-    theme: &'a Theme,
-    emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'a,
-) -> Element<'a, SessionMessage> {
-    let palette = theme.palette();
-
-    let mut layout: Column<'a, SessionMessage> = column![].spacing(8).padding(8);
-    layout = layout.push(navigation_bar(session, palette, emit.clone()));
-    if let Some(name_input) = name_input_row(session, palette, emit.clone()) {
+pub(crate) fn picker_window_view(
+    session: &PickerSession,
+    theme: &Theme,
+    address_input_id: iced::widget::Id,
+    emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'static,
+) -> Element<'static, SessionMessage> {
+    let mut layout = column![].spacing(10);
+    layout = layout.push(navigation_bar(
+        session,
+        theme,
+        address_input_id,
+        emit.clone(),
+    ));
+    if let Some(name_input) = name_input_row(session, emit.clone()) {
         layout = layout.push(name_input);
     }
-    layout = layout.push(listing_body(session, palette, emit.clone()));
-    layout = layout.push(confirm_footer(session, palette, emit));
+    layout = layout.push(listing_body(session, theme, emit.clone()));
+    layout = layout.push(confirm_footer(session, emit));
 
     container(layout)
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(|theme: &Theme| page_style(theme))
+        .padding(12)
+        .style(|theme: &Theme| container::Style {
+            background: Some(bennu_theme::ui_colors(theme).background.into()),
+            text_color: Some(base_text_color(theme)),
+            ..container::Style::default()
+        })
         .into()
 }
 
-fn page_style(theme: &Theme) -> container::Style {
-    let palette = theme.palette();
-    container::Style {
-        background: Some(palette.background.into()),
-        text_color: Some(palette.text),
-        ..container::Style::default()
-    }
-}
-
-fn navigation_bar<'a>(
-    session: &'a PickerSession,
-    palette: Palette,
-    emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'a,
-) -> Element<'a, SessionMessage> {
+fn navigation_bar(
+    session: &PickerSession,
+    theme: &Theme,
+    address_input_id: iced::widget::Id,
+    emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'static,
+) -> Element<'static, SessionMessage> {
     let up_button = button(
-        text("上级")
-            .size(14)
-            .color(palette.text)
-            .align_x(alignment::Horizontal::Center),
+        IconSymbol::ArrowUp
+            .view(16.0)
+            .style(bennu_theme::styles::icon_svg_style()),
     )
-    .padding(Padding::new(6.0))
+    .padding(6.0)
+    .style(transparent_icon_button_style)
     .on_press(emit(SessionMessage::NavigateUp));
 
-    let mut breadcrumb: Row<'a, SessionMessage> = row![].spacing(2);
-    for (position, segment) in breadcrumb_chain(session.directory()).iter().enumerate() {
-        if position > 0 {
+    // 地址栏主体：面包屑态 / 路径编辑态。整栏包一层 mouse_area，
+    // 点击空白处进入编辑（面包屑按钮捕获自身点击，不受影响）——
+    // 与主程序 address_bar_surface 同一结构。
+    let surface: Element<'static, SessionMessage> = if let Some(draft) = session.address_edit() {
+        text_input("输入路径，回车跳转", draft)
+            .id(address_input_id)
+            .on_input({
+                let emit = emit.clone();
+                move |value| emit(SessionMessage::AddressEditChanged(value))
+            })
+            .on_submit(emit(SessionMessage::AddressEditingSubmitted))
+            .size(13)
+            .padding(Padding::new(6.0).top(7.0).bottom(7.0))
+            .style(navigation_text_input_style)
+            .width(Length::Fill)
+            .into()
+    } else {
+        let mut breadcrumb = row![].spacing(2).align_y(alignment::Vertical::Center);
+        for (position, segment) in breadcrumb_chain(session.directory()).iter().enumerate() {
+            if position > 0 {
+                breadcrumb = breadcrumb.push(
+                    IconSymbol::ChevronRight
+                        .view(12.0)
+                        .style(muted_icon_svg_style()),
+                );
+            }
             breadcrumb = breadcrumb.push(
-                text("›").size(14).color(translucent(palette.text, 0.5)),
+                button(readable_label(segment_label(segment)).size(13))
+                    .padding(Padding::new(6.0).top(4.0).bottom(4.0))
+                    .style(breadcrumb_segment_style)
+                    .on_press(emit(SessionMessage::BreadcrumbActivated {
+                        ancestor: position,
+                    })),
             );
         }
-        breadcrumb = breadcrumb.push(
-            button(
-                text(segment_label(segment))
-                    .size(14)
-                    .color(palette.primary),
-            )
-            .padding(Padding::new(4.0))
-            .on_press(emit(SessionMessage::BreadcrumbActivated {
-                ancestor: position,
-            })),
-        );
-    }
+        scrollable(breadcrumb)
+            .width(Length::Fill)
+            .height(Length::Fixed(ADDRESS_BAR_HEIGHT))
+            .direction(scrollable::Direction::Horizontal(
+                scrollable::Scrollbar::default(),
+            ))
+            .into()
+    };
 
-    let mut bar: Row<'a, SessionMessage> = row![].spacing(8);
+    let address_bar = mouse_area(
+        container(surface)
+            .width(Length::Fill)
+            .height(Length::Fixed(ADDRESS_BAR_HEIGHT))
+            .align_y(alignment::Vertical::Center),
+    )
+    .on_press(emit(SessionMessage::AddressEditingStarted))
+    .interaction(mouse::Interaction::Text);
+
+    let mut bar = row![].spacing(6).align_y(alignment::Vertical::Center);
     bar = bar.push(up_button);
-    bar = bar.push(
-        scrollable(breadcrumb).direction(scrollable::Direction::Horizontal(
-            iced::widget::scrollable::Scrollbar::default(),
-        )),
-    );
+    bar = bar.push(address_bar);
 
     if session.filters().len() > 1 {
         let labels: Vec<String> = session
@@ -117,18 +165,41 @@ fn navigation_bar<'a>(
                     None => emit(SessionMessage::FilterSelectionIgnored),
                 }
             })
-            .padding(Padding::new(4.0)),
+            .text_size(13.0)
+            .padding(Padding::new(6.0)),
         );
     } else {
         bar = bar.push(Space::new().width(Length::Fill));
         bar = bar.push(
-            text(session.active_filter_label())
+            readable_label(session.active_filter_label())
                 .size(13)
-                .color(translucent(palette.text, 0.6)),
+                .color(muted_text_color(theme)),
         );
     }
 
-    container(bar).width(Length::Fill).into()
+    container(bar)
+        .width(Length::Fill)
+        .height(Length::Fixed(ADDRESS_BAR_HEIGHT))
+        .align_y(alignment::Vertical::Center)
+        .into()
+}
+
+/// 面包屑段按钮：surface 按钮的三档状态，圆角 6。
+fn breadcrumb_segment_style(theme: &Theme, status: button::Status) -> button::Style {
+    let mut style = surface_button_style(theme, status);
+    style.border.radius = 6.0.into();
+    style
+}
+
+/// 中文等非 ASCII 文案需要 Advanced shaping（与主程序 typography 同规则）。
+fn readable_label(label: String) -> iced::widget::Text<'static, Theme> {
+    let needs_advanced_shaping = !label.is_ascii();
+    let label = text(label);
+    if needs_advanced_shaping {
+        label.shaping(iced::widget::text::Shaping::Advanced)
+    } else {
+        label
+    }
 }
 
 fn segment_label(segment: &Path) -> String {
@@ -138,28 +209,21 @@ fn segment_label(segment: &Path) -> String {
         .unwrap_or_else(|| "/".to_string())
 }
 
-fn listing_body<'a>(
-    session: &'a PickerSession,
-    palette: Palette,
-    emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'a,
-) -> Element<'a, SessionMessage> {
-    let body: Element<'a, SessionMessage> = match session.listing() {
-        DirectoryListing::Pending => container(
-            text("正在读取目录…")
-                .size(14)
-                .color(translucent(palette.text, 0.6)),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .align_x(alignment::Horizontal::Center)
-        .align_y(alignment::Vertical::Center)
-        .into(),
+fn listing_body(
+    session: &PickerSession,
+    theme: &Theme,
+    emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'static,
+) -> Element<'static, SessionMessage> {
+    let body: Element<'static, SessionMessage> = match session.listing() {
+        DirectoryListing::Pending => centered_hint("正在读取目录…", 14.0, muted_text_color(theme)),
         DirectoryListing::Failed(details) => container(
             column![
-                text("目录读取失败").size(15).color(palette.danger),
-                text(details.clone())
+                readable_label("目录读取失败".to_string())
+                    .size(15)
+                    .color(ui_colors(theme).error),
+                readable_label(details.clone())
                     .size(13)
-                    .color(translucent(palette.text, 0.7)),
+                    .color(muted_text_color(theme)),
             ]
             .spacing(6),
         )
@@ -169,29 +233,29 @@ fn listing_body<'a>(
         .padding(24)
         .into(),
         DirectoryListing::Ready(_) => {
-            if session.visible().is_empty() {
-                container(
-                    text("空目录")
-                        .size(14)
-                        .color(translucent(palette.text, 0.6)),
-                )
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .align_x(alignment::Horizontal::Center)
-                .align_y(alignment::Vertical::Center)
-                .into()
+            if session.rows().is_empty() {
+                centered_hint("空目录", 14.0, muted_text_color(theme))
             } else {
-                let mut list: Column<'a, SessionMessage> = column![].spacing(2);
-                for (index, entry) in session.visible().iter().enumerate() {
+                let mut list = column![].spacing(2);
+                for (index, row) in session.rows().iter().enumerate() {
                     list = list.push(entry_row(
                         index,
-                        entry,
+                        row,
+                        theme,
                         session.selection().contains(&index),
-                        palette,
+                        session.hovered_index() == Some(index),
                         emit.clone(),
                     ));
                 }
-                scrollable(list).width(Length::Fill).height(Length::Fill).into()
+                scrollable(list)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .direction(enhanced_vertical_scrollbar_direction(
+                        ScrollbarVisibility::Visible,
+                        LIST_SCROLLBAR_WIDTH,
+                    ))
+                    .style(enhanced_scrollbar_style(ScrollbarVisibility::Visible))
+                    .into()
             }
         }
     };
@@ -199,11 +263,11 @@ fn listing_body<'a>(
         .width(Length::Fill)
         .height(Length::Fill)
         .style(|theme: &Theme| {
-            let palette = theme.palette();
+            let colors = bennu_theme::ui_colors(theme);
             container::Style {
-                background: Some(translucent(palette.background, 0.4).into()),
+                background: Some(colors.surface_container_lowest.into()),
                 border: Border {
-                    color: translucent(palette.text, 0.1),
+                    color: bennu_theme::styles::subtle_border_color(theme),
                     width: 1.0,
                     radius: 8.0.into(),
                 },
@@ -214,44 +278,87 @@ fn listing_body<'a>(
         .into()
 }
 
-fn entry_row<'a>(
+fn centered_hint(label: &str, size: f32, color: Color) -> Element<'static, SessionMessage> {
+    container(readable_label(label.to_string()).size(size).color(color))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .into()
+}
+
+fn entry_row(
     index: usize,
-    entry: &'a DirectoryEntry,
+    row: &PickerRow,
+    theme: &Theme,
     selected: bool,
-    palette: Palette,
-    emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'a,
-) -> Element<'a, SessionMessage> {
-    let badge = entry_badge(entry, palette);
+    hovered: bool,
+    emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'static,
+) -> Element<'static, SessionMessage> {
+    let entry = &row.entry;
+    let icon_tone = if selected {
+        selected_icon_svg_style()
+    } else {
+        muted_icon_svg_style()
+    };
+    let icon = file_entry_icon_symbol(entry.kind, &entry.name)
+        .view(18.0)
+        .style(icon_tone);
 
     let meta = match entry.kind {
         FileKind::Directory => "文件夹".to_string(),
         _ => readable_size(entry.metadata.len),
     };
 
-    let mut content: Row<'a, SessionMessage> = row![].spacing(8).padding(Padding::new(4.0));
-    content = content.push(badge);
-    content = content.push(text(entry.name.to_string_lossy().into_owned()).size(14));
-    content = content.push(Space::new().width(Length::Fill));
-    content = content.push(text(meta).size(12).color(translucent(palette.text, 0.55)));
-
-    let background = if selected {
-        translucent(palette.primary, 0.25)
+    // 目录行首的展开开关（访达列表语义）：箭头旋转表达展开态；文件行
+    // 用等宽占位保证名称列对齐。
+    let disclosure: Element<'static, SessionMessage> = if entry.kind == FileKind::Directory {
+        button(
+            rotated_chevron_right_view(if row.expanded { 90.0 } else { 0.0 }, 12.0)
+                .style(icon_tone),
+        )
+        .padding(2.0)
+        .style(transparent_icon_button_style)
+        .on_press(emit(SessionMessage::EntryExpandToggled { index }))
+        .into()
     } else {
-        Color::TRANSPARENT
+        Space::new()
+            .width(Length::Fixed(16.0))
+            .height(Length::Fixed(12.0))
+            .into()
     };
 
+    let mut content = row![].spacing(10).align_y(alignment::Vertical::Center);
+    content = content.push(disclosure);
+    content = content.push(icon);
+    content = content.push(readable_label(entry.name.to_string_lossy().into_owned()).size(14));
+    content = content.push(Space::new().width(Length::Fill));
+    content = content.push(readable_label(meta).size(12).color(muted_text_color(theme)));
+
+    let style = move |theme: &Theme| {
+        if selected {
+            selected_row_style(theme)
+        } else if hovered {
+            hovered_row_style(theme)
+        } else {
+            container::Style::default()
+        }
+    };
+
+    let depth_indent = row.depth as f32 * EXPANSION_INDENT;
     mouse_area(
         container(content)
             .width(Length::Fill)
-            .style(move |_| container::Style {
-                background: Some(background.into()),
-                border: Border {
-                    radius: 6.0.into(),
-                    ..Border::default()
-                },
-                ..container::Style::default()
-            }),
+            .padding(
+                Padding::new(6.0)
+                    .top(5.0)
+                    .bottom(5.0)
+                    .left(6.0 + depth_indent),
+            )
+            .style(style),
     )
+    .on_enter(emit(SessionMessage::EntryHovered { index: Some(index) }))
+    .on_exit(emit(SessionMessage::EntryHovered { index: None }))
     .on_press(emit(SessionMessage::EntryClicked {
         index,
         ctrl: false,
@@ -259,43 +366,6 @@ fn entry_row<'a>(
     }))
     .on_double_click(emit(SessionMessage::EntryDoubleClicked { index }))
     .into()
-}
-
-/// 条目徽标：目录主色，文件用扩展名缩写与次色区分。
-fn entry_badge(
-    entry: &DirectoryEntry,
-    palette: Palette,
-) -> Element<'static, SessionMessage> {
-    let (initial, tint) = match entry.kind {
-        FileKind::Directory => ("D".to_string(), palette.primary),
-        _ => {
-            let extension = entry
-                .path
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .unwrap_or("F");
-            let initial: String = extension
-                .chars()
-                .take(3)
-                .flat_map(char::to_uppercase)
-                .collect();
-            (initial, palette.success)
-        }
-    };
-    container(text(initial).size(11).color(palette.background))
-        .width(Pixels(30.0))
-        .height(Pixels(20.0))
-        .align_y(alignment::Vertical::Center)
-        .align_x(alignment::Horizontal::Center)
-        .style(move |_| container::Style {
-            background: Some(translucent(tint, 0.75).into()),
-            border: Border {
-                radius: 5.0.into(),
-                ..Border::default()
-            },
-            ..container::Style::default()
-        })
-        .into()
 }
 
 fn readable_size(bytes: u64) -> String {
@@ -316,11 +386,10 @@ fn readable_size(bytes: u64) -> String {
     }
 }
 
-fn name_input_row<'a>(
-    session: &'a PickerSession,
-    palette: Palette,
-    emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'a,
-) -> Option<Element<'a, SessionMessage>> {
+fn name_input_row(
+    session: &PickerSession,
+    emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'static,
+) -> Option<Element<'static, SessionMessage>> {
     if !matches!(session.kind(), PickerKind::SaveFile { .. }) {
         return None;
     }
@@ -331,73 +400,65 @@ fn name_input_row<'a>(
         })
         .on_submit(emit(SessionMessage::ConfirmPressed))
         .size(14)
-        .padding(Padding::new(6.0));
-    Some(
-        row![text("文件名").size(13).color(palette.text), input]
+        .padding(Padding::new(6.0).top(7.0).bottom(7.0))
+        .style(navigation_text_input_style);
+    Some(Element::from(
+        row![readable_label("文件名".to_string()).size(13), input,]
             .spacing(8)
-            .into(),
-    )
+            .align_y(alignment::Vertical::Center),
+    ))
 }
 
-fn confirm_footer<'a>(
-    session: &'a PickerSession,
-    palette: Palette,
-    emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'a,
-) -> Element<'a, SessionMessage> {
-    let mut footer: Row<'a, SessionMessage> = row![].spacing(8);
+fn confirm_footer(
+    session: &PickerSession,
+    emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'static,
+) -> Element<'static, SessionMessage> {
+    let mut layout = column![].spacing(8);
 
     if let Some(target) = session.overwrite_target() {
-        footer = footer.push(
-            text(format!(
-                "“{}” 已存在，确认覆盖？",
-                target
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_default()
-            ))
-            .size(13)
-            .color(palette.danger),
+        layout = layout.push(
+            container(
+                row![
+                    readable_label(format!(
+                        "“{}” 已存在，确认覆盖？",
+                        target
+                            .file_name()
+                            .map(|name| name.to_string_lossy().into_owned())
+                            .unwrap_or_default()
+                    ))
+                    .size(13),
+                    Space::new().width(Length::Fill),
+                    button(readable_label("换个名字".to_string()).size(13))
+                        .padding([5, 10])
+                        .style(surface_button_style)
+                        .on_press(emit(SessionMessage::OverwriteDeclined)),
+                ]
+                .spacing(10)
+                .align_y(alignment::Vertical::Center),
+            )
+            .width(Length::Fill)
+            .padding([8, 12])
+            .style(bennu_theme::styles::error_notification_style),
         );
     }
 
+    let mut footer = row![].spacing(8).align_y(alignment::Vertical::Center);
     footer = footer.push(Space::new().width(Length::Fill));
 
-    if session.overwrite_target().is_some() {
-        footer = footer.push(
-            button(
-                text("换个名字")
-                    .size(13)
-                    .color(palette.text)
-                    .align_x(alignment::Horizontal::Center),
-            )
-            .padding(Padding::new(5.0))
-            .on_press(emit(SessionMessage::OverwriteDeclined)),
-        );
-    }
+    let cancel = button(readable_label("取消".to_string()).size(13))
+        .padding([6, 14])
+        .style(surface_button_style)
+        .on_press(emit(SessionMessage::DismissPressed));
 
-    let cancel = button(
-        text("取消")
-            .size(14)
-            .color(palette.text)
-            .align_x(alignment::Horizontal::Center),
-    )
-    .padding(Padding::new(6.0))
-    .on_press(emit(SessionMessage::DismissPressed));
-
-    let mut confirm = button(
-        text(session.accept_button_label())
-            .size(14)
-            .color(palette.background)
-            .align_x(alignment::Horizontal::Center),
-    )
-    .padding(Padding::new(6.0));
+    let mut confirm = button(readable_label(session.accept_button_label()).size(13))
+        .padding([6, 14])
+        .style(primary_action_button_style());
     if session.can_confirm() {
-        confirm = confirm
-            .on_press(emit(SessionMessage::ConfirmPressed))
-            .style(button::primary);
+        confirm = confirm.on_press(emit(SessionMessage::ConfirmPressed));
     }
 
     footer = footer.push(cancel).push(confirm);
+    layout = layout.push(footer);
 
-    container(footer).width(Length::Fill).padding(Padding::new(2.0)).into()
+    container(layout).width(Length::Fill).into()
 }

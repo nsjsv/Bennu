@@ -247,8 +247,10 @@ pub(crate) struct ScrollbarViewport {
     pub(crate) content_height: f32,
 }
 
-pub(crate) const SCROLLBAR_HOVER_WIDTH: f32 = 14.0;
 pub(crate) const SCROLLBAR_MIN_THUMB_LENGTH: f32 = 28.0;
+
+// 滚动条可见性模型迁至共享 crate `bennu-theme::styles`；重导出保持调用点不变。
+pub(crate) use bennu_theme::styles::{ScrollbarVisibility, SCROLLBAR_HOVER_WIDTH};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StartupDirectoryValidationRequest {
@@ -904,34 +906,6 @@ pub(crate) enum DestructiveActionConfirmation {
     DeleteTrashEntries { entries: Vec<TrashRestoreEntry> },
     DeletePermanently { paths: Vec<PathBuf> },
     EmptyTrash,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum ScrollbarVisibility {
-    Hidden,
-    VisibleWithOpacity(f32),
-    Visible,
-}
-
-impl ScrollbarVisibility {
-    pub(crate) fn with_opacity(opacity: f32) -> Self {
-        let opacity = opacity.clamp(0.0, 1.0);
-        if opacity <= f32::EPSILON {
-            Self::Hidden
-        } else if (1.0 - opacity) <= f32::EPSILON {
-            Self::Visible
-        } else {
-            Self::VisibleWithOpacity(opacity)
-        }
-    }
-
-    pub(crate) fn opacity(self) -> f32 {
-        match self {
-            Self::Hidden => 0.0,
-            Self::VisibleWithOpacity(opacity) => opacity,
-            Self::Visible => 1.0,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

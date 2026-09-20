@@ -63,15 +63,13 @@ pub(crate) fn store_last_directory(directory: &Path) {
         let path = config_dir.join(PORTAL_MEMORY_FILE);
         // 先写临时文件再改名，读方永远不会观察到半个文件。
         let staging = config_dir.join(format!("{PORTAL_MEMORY_FILE}.new"));
-        if std::fs::write(&staging, text).is_ok()
-            && std::fs::rename(&staging, path).is_err()
-        {
+        if std::fs::write(&staging, text).is_ok() && std::fs::rename(&staging, path).is_err() {
             let _ = std::fs::remove_file(&staging);
         }
     }
 }
 
-fn app_config_dir() -> Option<PathBuf> {
+pub(crate) fn app_config_dir() -> Option<PathBuf> {
     dirs::config_dir().map(|base| base.join(APP_CONFIG_DIR))
 }
 
@@ -92,10 +90,7 @@ mod tests {
         let existing = tempfile::tempdir().unwrap();
         let remembered = tempfile::tempdir().unwrap();
         assert_eq!(
-            resolve_start_directory(
-                Some(existing.path()),
-                Some(remembered.path())
-            ),
+            resolve_start_directory(Some(existing.path()), Some(remembered.path())),
             existing.path()
         );
     }
@@ -116,10 +111,7 @@ mod tests {
     fn resolve_skips_missing_remembered_directory() {
         // 记忆路径无效时跳过该级，落到主目录。
         assert_eq!(
-            resolve_start_directory(
-                None,
-                Some(Path::new("/nonexistent-picker-memory"))
-            ),
+            resolve_start_directory(None, Some(Path::new("/nonexistent-picker-memory"))),
             dirs::home_dir().unwrap()
         );
     }

@@ -6,31 +6,31 @@ use file_operation_store::{StoredCustomColorScheme, StoredCustomColorSet};
 const MINIMUM_CONTRAST_WARNING_RATIO: f32 = 2.4;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct CustomColorAnchors {
-    pub(crate) background: Color,
-    pub(crate) surface: Color,
-    pub(crate) text: Color,
-    pub(crate) muted_text: Color,
-    pub(crate) primary: Color,
-    pub(crate) success: Color,
-    pub(crate) warning: Color,
-    pub(crate) danger: Color,
+pub struct CustomColorAnchors {
+    pub background: Color,
+    pub surface: Color,
+    pub text: Color,
+    pub muted_text: Color,
+    pub primary: Color,
+    pub success: Color,
+    pub warning: Color,
+    pub danger: Color,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct CustomColorScheme {
-    pub(crate) light: CustomColorAnchors,
-    pub(crate) dark: CustomColorAnchors,
+pub struct CustomColorScheme {
+    pub light: CustomColorAnchors,
+    pub dark: CustomColorAnchors,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ContrastWarnings {
-    pub(crate) background_text: bool,
-    pub(crate) surface_muted_text: bool,
+pub struct ContrastWarnings {
+    pub background_text: bool,
+    pub surface_muted_text: bool,
 }
 
 impl ContrastWarnings {
-    pub(crate) fn is_empty(self) -> bool {
+    pub fn is_empty(self) -> bool {
         !self.background_text && !self.surface_muted_text
     }
 }
@@ -74,7 +74,7 @@ impl UiColorRoles {
     }
 }
 
-pub(crate) fn default_custom_color_scheme() -> CustomColorScheme {
+pub fn default_custom_color_scheme() -> CustomColorScheme {
     let light = super::ui_colors(&super::fallback_theme(AppearanceMode::Light));
     let dark = super::ui_colors(&super::fallback_theme(AppearanceMode::Dark));
     CustomColorScheme {
@@ -102,7 +102,7 @@ pub(crate) fn default_custom_color_scheme() -> CustomColorScheme {
 }
 
 impl CustomColorScheme {
-    pub(crate) fn from_json(document: &str) -> Result<Self, String> {
+    pub fn from_json(document: &str) -> Result<Self, String> {
         let document = serde_json::from_str::<CustomColorDocument>(document)
             .map_err(|error| format!("invalid custom color scheme JSON: {error}"))?;
         if document.version != 1 {
@@ -115,7 +115,7 @@ impl CustomColorScheme {
         })
     }
 
-    pub(crate) fn from_stored(stored: Option<&StoredCustomColorScheme>, fallback: &Self) -> Self {
+    pub fn from_stored(stored: Option<&StoredCustomColorScheme>, fallback: &Self) -> Self {
         let Some(stored) = stored else {
             return fallback.clone();
         };
@@ -133,21 +133,21 @@ impl CustomColorScheme {
         }
     }
 
-    pub(crate) fn to_stored(&self) -> StoredCustomColorScheme {
+    pub fn to_stored(&self) -> StoredCustomColorScheme {
         StoredCustomColorScheme {
             light: Some(self.light.to_stored()),
             dark: Some(self.dark.to_stored()),
         }
     }
 
-    pub(crate) fn anchors(&self, mode: AppearanceMode) -> CustomColorAnchors {
+    pub fn anchors(&self, mode: AppearanceMode) -> CustomColorAnchors {
         match mode {
             AppearanceMode::Light => self.light,
             AppearanceMode::Dark => self.dark,
         }
     }
 
-    pub(crate) fn contrast_warnings(&self, mode: AppearanceMode) -> ContrastWarnings {
+    pub fn contrast_warnings(&self, mode: AppearanceMode) -> ContrastWarnings {
         let anchors = self.anchors(mode);
         ContrastWarnings {
             background_text: contrast_ratio(anchors.background, anchors.text)
@@ -317,7 +317,7 @@ mod tests {
             Color::from_rgb8(4, 5, 6)
         );
 
-        let matugen = parse_matugen_theme(include_str!("../../test-data/matugen-light.toml"))
+        let matugen = parse_matugen_theme(include_str!("../test-data/matugen-light.toml"))
             .expect("light matugen theme");
         let matugen_background = matugen.palette().background;
         application_theme.replace_matugen_override(Some(matugen));

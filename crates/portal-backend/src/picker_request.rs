@@ -26,20 +26,17 @@ pub(crate) struct FilterRule {
 /// 请求决定的选择模式。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PickerKind {
-    OpenFile {
-        multiple: bool,
-        directory: bool,
-    },
-    SaveFile {
-        default_name: Option<String>,
-    },
+    OpenFile { multiple: bool, directory: bool },
+    SaveFile { default_name: Option<String> },
 }
 
 impl PickerKind {
     /// 窗口标题缺省值：调用方 title 为空串时的兜底。
     pub(crate) fn default_title(&self) -> &'static str {
         match self {
-            PickerKind::OpenFile { directory: true, .. } => "选择文件夹",
+            PickerKind::OpenFile {
+                directory: true, ..
+            } => "选择文件夹",
             PickerKind::OpenFile { .. } => "选择文件",
             PickerKind::SaveFile { .. } => "另存为",
         }
@@ -83,7 +80,10 @@ impl PickerRequestSpec {
         }
 
         match &mut spec.kind {
-            PickerKind::OpenFile { multiple, directory } => {
+            PickerKind::OpenFile {
+                multiple,
+                directory,
+            } => {
                 for (key, value) in options {
                     match key.as_str() {
                         "multiple" => {
@@ -117,9 +117,9 @@ impl PickerRequestSpec {
             spec.filters = parse_filters(value);
         }
         if let Some(value) = options.get("current_filter") {
-            spec.active_filter = parse_filters(value).first().and_then(|first| {
-                spec.filters.iter().position(|rule| rule == first)
-            });
+            spec.active_filter = parse_filters(value)
+                .first()
+                .and_then(|first| spec.filters.iter().position(|rule| rule == first));
         }
         if let Some(value) = options.get("current_folder") {
             spec.start_folder = value_as_path(value);
@@ -190,9 +190,7 @@ fn parse_filters(value: &Value<'_>) -> Vec<FilterRule> {
                 _ => None,
             })
             .collect::<Vec<_>>(),
-        Value::Structure(structure) => {
-            filter_rule_from_structure(structure).into_iter().collect()
-        }
+        Value::Structure(structure) => filter_rule_from_structure(structure).into_iter().collect(),
         _ => Vec::new(),
     }
 }
@@ -231,7 +229,10 @@ fn filter_rule_from_structure(structure: &zbus::zvariant::Structure<'_>) -> Opti
     if parsed.is_empty() {
         return None;
     }
-    Some(FilterRule { name, patterns: parsed })
+    Some(FilterRule {
+        name,
+        patterns: parsed,
+    })
 }
 
 #[cfg(test)]
@@ -249,12 +250,18 @@ mod tests {
     #[test]
     fn empty_options_yields_defaults() {
         let spec = PickerRequestSpec::from_options(
-            PickerKind::OpenFile { multiple: false, directory: false },
+            PickerKind::OpenFile {
+                multiple: false,
+                directory: false,
+            },
             &options(Vec::new()),
         );
         assert_eq!(
             spec.kind,
-            PickerKind::OpenFile { multiple: false, directory: false }
+            PickerKind::OpenFile {
+                multiple: false,
+                directory: false
+            }
         );
         assert_eq!(spec.accept_label, None);
         assert!(spec.filters.is_empty());
@@ -264,7 +271,10 @@ mod tests {
     #[test]
     fn open_file_flags_parse() {
         let spec = PickerRequestSpec::from_options(
-            PickerKind::OpenFile { multiple: false, directory: false },
+            PickerKind::OpenFile {
+                multiple: false,
+                directory: false,
+            },
             &options(vec![
                 ("multiple", Value::Bool(true)),
                 ("directory", Value::Bool(true)),
@@ -273,7 +283,10 @@ mod tests {
         );
         assert_eq!(
             spec.kind,
-            PickerKind::OpenFile { multiple: true, directory: true }
+            PickerKind::OpenFile {
+                multiple: true,
+                directory: true
+            }
         );
         assert_eq!(spec.accept_label.as_deref(), Some("上传"));
     }
@@ -282,14 +295,13 @@ mod tests {
     fn save_file_default_name_parses() {
         let spec = PickerRequestSpec::from_options(
             PickerKind::SaveFile { default_name: None },
-            &options(vec![(
-                "current_name",
-                Value::Str(Str::from("报告.pdf")),
-            )]),
+            &options(vec![("current_name", Value::Str(Str::from("报告.pdf")))]),
         );
         assert_eq!(
             spec.kind,
-            PickerKind::SaveFile { default_name: Some("报告.pdf".to_string()) }
+            PickerKind::SaveFile {
+                default_name: Some("报告.pdf".to_string())
+            }
         );
     }
 
@@ -309,17 +321,26 @@ mod tests {
             Value::Array(zbus::zvariant::Array::from(b"/tmp".to_vec())),
         ] {
             let spec = PickerRequestSpec::from_options(
-                PickerKind::OpenFile { multiple: false, directory: false },
+                PickerKind::OpenFile {
+                    multiple: false,
+                    directory: false,
+                },
                 &options(vec![("current_folder", value)]),
             );
-            assert_eq!(spec.start_folder.as_deref(), Some(std::path::Path::new("/tmp")));
+            assert_eq!(
+                spec.start_folder.as_deref(),
+                Some(std::path::Path::new("/tmp"))
+            );
         }
     }
 
     #[test]
     fn current_folder_rejects_relative_text() {
         let spec = PickerRequestSpec::from_options(
-            PickerKind::OpenFile { multiple: false, directory: false },
+            PickerKind::OpenFile {
+                multiple: false,
+                directory: false,
+            },
             &options(vec![("current_folder", Value::Str(Str::from("relative")))]),
         );
         assert_eq!(spec.start_folder, None);
@@ -327,10 +348,8 @@ mod tests {
 
     #[test]
     fn filter_rules_parse_with_current_filter_index() {
-        let glob_pattern =
-            Value::Structure(zbus::zvariant::Structure::from((0u8, "*.png")));
-        let mime_pattern =
-            Value::Structure(zbus::zvariant::Structure::from((1u8, "image/jpeg")));
+        let glob_pattern = Value::Structure(zbus::zvariant::Structure::from((0u8, "*.png")));
+        let mime_pattern = Value::Structure(zbus::zvariant::Structure::from((1u8, "image/jpeg")));
         let png_rule = Value::Structure(zbus::zvariant::Structure::from((
             "PNG 图片",
             zbus::zvariant::Array::from(vec![glob_pattern]),
@@ -347,11 +366,11 @@ mod tests {
         let current = jpeg_rule;
 
         let spec = PickerRequestSpec::from_options(
-            PickerKind::OpenFile { multiple: false, directory: false },
-            &options(vec![
-                ("filters", filters),
-                ("current_filter", current),
-            ]),
+            PickerKind::OpenFile {
+                multiple: false,
+                directory: false,
+            },
+            &options(vec![("filters", filters), ("current_filter", current)]),
         );
 
         assert_eq!(spec.filters.len(), 2);
@@ -367,7 +386,10 @@ mod tests {
     fn malformed_filter_rule_is_skipped() {
         let broken = Value::Structure(zbus::zvariant::Structure::from((7u8, 9u8)));
         let spec = PickerRequestSpec::from_options(
-            PickerKind::OpenFile { multiple: false, directory: false },
+            PickerKind::OpenFile {
+                multiple: false,
+                directory: false,
+            },
             &options(vec![(
                 "filters",
                 Value::Array(zbus::zvariant::Array::from(vec![broken])),
@@ -375,7 +397,4 @@ mod tests {
         );
         assert!(spec.filters.is_empty());
     }
-
-
 }
-

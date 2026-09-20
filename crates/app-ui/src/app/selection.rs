@@ -305,12 +305,13 @@ impl FileBrowser {
             self.clear_file_drag_target_if_matching(&target_directory);
             // 仅当当前候选正是该目录条目时清除,避免与相邻条目的 enter
             // 事件乱序时误杀新候选(与面包屑 cleared 同款收敛)。
-            let cleared_spring_candidate = self
-                .file_drag_spring_hover
-                .as_ref()
-                .is_some_and(|candidate| {
-                    candidate.source == FileDragSpringSource::Entry && candidate.directory == path
-                });
+            let cleared_spring_candidate =
+                self.file_drag_spring_hover
+                    .as_ref()
+                    .is_some_and(|candidate| {
+                        candidate.source == FileDragSpringSource::Entry
+                            && candidate.directory == path
+                    });
             if cleared_spring_candidate {
                 self.note_file_drag_spring_hover(None);
             }

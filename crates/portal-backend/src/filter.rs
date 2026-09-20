@@ -94,7 +94,8 @@ fn glob_match(glob: &[char], text: &[char]) -> bool {
                     return false;
                 };
                 let mut negated = false;
-                let class = if let Some((_, stripped)) = class.split_first()
+                let class = if let Some((_, stripped)) = class
+                    .split_first()
                     .filter(|(&head, _)| head == '!' || head == '^')
                 {
                     negated = true;
@@ -162,7 +163,10 @@ mod tests {
     use super::*;
 
     fn rule(patterns: Vec<FilePattern>) -> Vec<FilterRule> {
-        vec![FilterRule { name: "测试".into(), patterns }]
+        vec![FilterRule {
+            name: "测试".into(),
+            patterns,
+        }]
     }
 
     #[test]
@@ -222,8 +226,14 @@ mod tests {
     #[test]
     fn label_joins_multiple_rules() {
         let filter = PickerFilter::from_rules(vec![
-            FilterRule { name: "图片".into(), patterns: vec![] },
-            FilterRule { name: "音频".into(), patterns: vec![] },
+            FilterRule {
+                name: "图片".into(),
+                patterns: vec![],
+            },
+            FilterRule {
+                name: "音频".into(),
+                patterns: vec![],
+            },
         ]);
         assert_eq!(filter.label(), "图片, 音频");
         assert_eq!(PickerFilter::unconstrained().label(), "所有文件");

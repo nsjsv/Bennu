@@ -66,9 +66,7 @@ impl FileChooserInterface {
             Ok(PickerResolution::Confirmed(paths)) => {
                 Ok((RESPONSE_SUCCESS, response_results(&paths)))
             }
-            Ok(PickerResolution::Cancelled) | Err(_) => {
-                Ok((RESPONSE_CANCELLED, HashMap::new()))
-            }
+            Ok(PickerResolution::Cancelled) | Err(_) => Ok((RESPONSE_CANCELLED, HashMap::new())),
         }
     }
 }
@@ -129,13 +127,18 @@ fn response_results(paths: &[std::path::PathBuf]) -> HashMap<String, Value<'stat
         .map(Value::new)
         .collect();
     let mut results = HashMap::with_capacity(1);
-    results.insert("uris".to_string(), Value::new(zbus::zvariant::Array::from(uris)));
+    results.insert(
+        "uris".to_string(),
+        Value::new(zbus::zvariant::Array::from(uris)),
+    );
     results
 }
 
 /// 路径 → `file://` URL。
 pub(crate) fn path_to_file_uri(path: &std::path::Path) -> Option<String> {
-    url::Url::from_file_path(path).ok().map(|url| url.to_string())
+    url::Url::from_file_path(path)
+        .ok()
+        .map(|url| url.to_string())
 }
 
 #[cfg(test)]

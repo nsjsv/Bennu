@@ -1,7 +1,7 @@
 use super::AppearanceMode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ColorSchemePreset {
+pub enum ColorSchemePreset {
     Default,
     Claude,
     Catppuccin,
@@ -34,7 +34,7 @@ pub(crate) enum ColorSchemePreset {
 }
 
 impl ColorSchemePreset {
-    pub(crate) const ALL: [Self; 29] = [
+    pub const ALL: [Self; 29] = [
         Self::Default,
         Self::Claude,
         Self::Catppuccin,
@@ -66,13 +66,13 @@ impl ColorSchemePreset {
         Self::Custom,
     ];
 
-    pub(crate) fn from_config_value(value: &str) -> Option<Self> {
+    pub fn from_config_value(value: &str) -> Option<Self> {
         Self::ALL
             .into_iter()
             .find(|preset| preset.config_value() == value)
     }
 
-    pub(crate) const fn config_value(self) -> &'static str {
+    pub const fn config_value(self) -> &'static str {
         match self {
             Self::Default => "default",
             Self::Claude => "claude",
@@ -106,11 +106,11 @@ impl ColorSchemePreset {
         }
     }
 
-    pub(crate) const fn label(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         self.family().label()
     }
 
-    pub(crate) const fn family(self) -> ColorSchemeFamily {
+    pub const fn family(self) -> ColorSchemeFamily {
         match self {
             Self::Default => ColorSchemeFamily::Default,
             Self::Claude => ColorSchemeFamily::Claude,
@@ -140,7 +140,7 @@ impl ColorSchemePreset {
         }
     }
 
-    pub(crate) const fn effective_for_mode(self, mode: AppearanceMode) -> Self {
+    pub const fn effective_for_mode(self, mode: AppearanceMode) -> Self {
         match (self, mode) {
             (Self::CatppuccinFrappe | Self::CatppuccinMacchiato, AppearanceMode::Light) => {
                 Self::Catppuccin
@@ -155,7 +155,7 @@ impl ColorSchemePreset {
         }
     }
 
-    pub(crate) const fn style_label(self, mode: AppearanceMode) -> &'static str {
+    pub const fn style_label(self, mode: AppearanceMode) -> &'static str {
         match self {
             Self::Catppuccin => match mode {
                 AppearanceMode::Light => "Latte",
@@ -206,7 +206,7 @@ impl ColorSchemePreset {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ColorSchemeFamily {
+pub enum ColorSchemeFamily {
     Default,
     Claude,
     Catppuccin,
@@ -225,7 +225,7 @@ pub(crate) enum ColorSchemeFamily {
 }
 
 impl ColorSchemeFamily {
-    pub(crate) const ALL: [Self; 15] = [
+    pub const ALL: [Self; 15] = [
         Self::Default,
         Self::Claude,
         Self::Catppuccin,
@@ -243,7 +243,7 @@ impl ColorSchemeFamily {
         Self::Custom,
     ];
 
-    pub(crate) const fn label(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         match self {
             Self::Default => "Default",
             Self::Claude => "Claude",
@@ -263,7 +263,7 @@ impl ColorSchemeFamily {
         }
     }
 
-    pub(crate) const fn default_preset(self) -> ColorSchemePreset {
+    pub const fn default_preset(self) -> ColorSchemePreset {
         match self {
             Self::Default => ColorSchemePreset::Default,
             Self::Claude => ColorSchemePreset::Claude,
@@ -283,7 +283,7 @@ impl ColorSchemeFamily {
         }
     }
 
-    pub(crate) const fn styles(self, mode: AppearanceMode) -> &'static [ColorSchemePreset] {
+    pub const fn styles(self, mode: AppearanceMode) -> &'static [ColorSchemePreset] {
         match (self, mode) {
             (Self::Catppuccin, AppearanceMode::Dark) => &[
                 ColorSchemePreset::CatppuccinFrappe,

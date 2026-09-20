@@ -1,4 +1,4 @@
-# Bennu 文件选择后端（xdg-desktop-portal FileChooser）
+# Bennu 文件选择后端
 
 `bennu-portal` 是独立的 xdg-desktop-portal FileChooser 后端进程。接管系统
 文件选择框后，浏览器、Flatpak 应用等走 portal 协议的软件弹出"选文件 /

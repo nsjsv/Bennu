@@ -1,29 +1,17 @@
 [package]
-name = "portal-backend"
+name = "bennu-theme"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-[[bin]]
-name = "bennu-portal"
-path = "src/main.rs"
-
 [dependencies]
-dark-light = "2.0.0"
-dirs.workspace = true
-bennu-theme = { path = "../bennu-theme" }
 file-core = { path = "../file-core" }
 file-operation-store = { path = "../file-operation-store" }
 iced.workspace = true
-gio = "=0.22.8"
 serde = { version = "1.0.228", features = ["derive"] }
-thiserror.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
 toml = "1.1.2"
-tracing.workspace = true
-tracing-subscriber.workspace = true
-url.workspace = true
-zbus.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -1,12 +1,13 @@
 use iced::widget::{button, container, row, tooltip, Button, Column};
-use iced::{Alignment, Background, Border, Color, Element, Length, Shadow, Theme, Vector};
+use iced::{Alignment, Background, Border, Color, Element, Length, Theme};
 
-use crate::appearance::{
-    base_text_color, elevation_shadow_color, muted_text_color, subtle_border_color,
-};
+use crate::appearance::{base_text_color, muted_text_color, subtle_border_color};
+use bennu_theme::styles::primary_action_button_style;
+// 破坏性确认按钮样式迁至共享库；以重导出保持 option_controls 的既有入口。
 use crate::matugen_theme::ui_colors;
 use crate::model::Message;
 use crate::typography::readable_text;
+pub(super) use bennu_theme::styles::destructive_confirmation_button_style;
 
 const SEGMENTED_CHOICE_HEIGHT: f32 = 30.0;
 const ACTION_CHOICE_HEIGHT: f32 = 58.0;
@@ -81,11 +82,6 @@ pub(super) fn action_choice_button(
         .width(Length::Fill)
         .height(Length::Fixed(ACTION_CHOICE_HEIGHT))
         .style(selectable_choice_button_style(false))
-}
-
-pub(super) fn destructive_confirmation_button_style() -> fn(&Theme, button::Status) -> button::Style
-{
-    destructive_confirmation_button_appearance
 }
 
 pub(super) fn primary_action_button(
@@ -234,77 +230,6 @@ fn selectable_choice_button_style(
     }
 }
 
-fn primary_action_button_style() -> fn(&Theme, button::Status) -> button::Style {
-    primary_action_button_appearance
-}
-
-fn primary_action_button_appearance(theme: &Theme, status: button::Status) -> button::Style {
-    let colors = ui_colors(theme);
-    let background = match status {
-        button::Status::Hovered => Color {
-            a: 0.9,
-            ..colors.primary
-        },
-        button::Status::Pressed => Color {
-            a: 0.8,
-            ..colors.primary
-        },
-        button::Status::Disabled => colors.surface_container_highest,
-        button::Status::Active => colors.primary,
-    };
-
-    button::Style {
-        background: Some(Background::Color(background)),
-        text_color: if matches!(status, button::Status::Disabled) {
-            colors.on_surface_variant
-        } else {
-            colors.on_primary
-        },
-        border: Border {
-            color: Color::TRANSPARENT,
-            width: 0.0,
-            radius: 7.0.into(),
-        },
-        shadow: action_button_shadow(theme, status),
-        ..button::Style::default()
-    }
-}
-
-fn destructive_confirmation_button_appearance(
-    theme: &Theme,
-    status: button::Status,
-) -> button::Style {
-    let colors = ui_colors(theme);
-    let background = match status {
-        button::Status::Hovered => Color {
-            a: 0.9,
-            ..colors.error
-        },
-        button::Status::Pressed => Color {
-            a: 0.8,
-            ..colors.error
-        },
-        button::Status::Disabled => colors.error_container,
-        button::Status::Active => colors.error,
-    };
-
-    button::Style {
-        background: Some(Background::Color(background)),
-        text_color: if matches!(status, button::Status::Disabled) {
-            colors.on_error_container
-        } else {
-            colors.on_error
-        },
-        border: Border {
-            color: Color::TRANSPARENT,
-            width: 0.0,
-            radius: 8.0.into(),
-        },
-        shadow: action_button_shadow(theme, status),
-        ..button::Style::default()
-    }
-}
-
 pub(super) fn secondary_action_button_style() -> fn(&Theme, button::Status) -> button::Style {
     secondary_action_button_appearance
 }
@@ -375,16 +300,4 @@ pub(super) fn panel_background_color(theme: &Theme) -> Color {
 
 pub(super) fn hover_background_color(theme: &Theme) -> Color {
     ui_colors(theme).surface_container_high
-}
-
-fn action_button_shadow(theme: &Theme, status: button::Status) -> Shadow {
-    if matches!(status, button::Status::Disabled) {
-        Shadow::default()
-    } else {
-        Shadow {
-            color: elevation_shadow_color(theme, 0.14),
-            offset: Vector::new(0.0, 1.0),
-            blur_radius: 3.0,
-        }
-    }
 }

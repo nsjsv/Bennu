@@ -427,8 +427,11 @@ mod tests {
     async fn matugen_stream_reads_initial_atomic_updates_and_deletion() {
         let directory = tempfile::tempdir().expect("create temporary config directory");
         let path = directory.path().join("matugen.toml");
-        fs::write(&path, include_str!("../../test-data/matugen-dark.toml"))
-            .expect("write initial Matugen theme");
+        fs::write(
+            &path,
+            include_str!("../../../bennu-theme/test-data/matugen-dark.toml"),
+        )
+        .expect("write initial Matugen theme");
 
         let mut stream = Box::pin(matugen_theme_stream(&path));
         let initial = next_matugen_update(&mut stream)
@@ -440,7 +443,7 @@ mod tests {
         let replacement = directory.path().join("matugen.toml.next");
         fs::write(
             &replacement,
-            include_str!("../../test-data/matugen-light.toml"),
+            include_str!("../../../bennu-theme/test-data/matugen-light.toml"),
         )
         .expect("write replacement Matugen theme");
         fs::rename(&replacement, &path).expect("atomically replace Matugen theme");

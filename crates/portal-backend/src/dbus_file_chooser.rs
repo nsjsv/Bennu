@@ -121,10 +121,12 @@ impl FileChooserInterface {
 
 /// 成功结果载荷：`uris`（`file://` URL 数组，含特殊字符百分号转义）。
 fn response_results(paths: &[std::path::PathBuf]) -> HashMap<String, Value<'static>> {
-    let uris: Vec<Value<'static>> = paths
+    // 必须从 `Vec<String>` 构造数组：`Array::from(Vec<Value>)` 的元素签名
+    // 是 `v`，会产出 `av`；portal 协议要求 `uris` 为 `as`，portal 前端按
+    // `as` 解析，签错了调用方拿不到结果。
+    let uris: Vec<String> = paths
         .iter()
         .filter_map(|path| path_to_file_uri(path))
-        .map(Value::new)
         .collect();
     let mut results = HashMap::with_capacity(1);
     results.insert(
@@ -144,6 +146,17 @@ pub(crate) fn path_to_file_uri(path: &std::path::Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn uris_signature_is_string_array() {
+        let results = response_results(&[std::path::PathBuf::from("/tmp/x.png")]);
+        let Value::Array(array) = results.get("uris").unwrap() else {
+            panic!("uris 必须是数组");
+        };
+        // 协议不变量：portal 前端按 `as` 解析 uris，签成 `av` 会导致
+        // 调用方收不到任何结果。
+        assert_eq!(array.signature().to_string(), "as");
+    }
 
     #[test]
     fn uri_escapes_special_characters() {

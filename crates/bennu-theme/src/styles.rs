@@ -102,6 +102,33 @@ pub fn selected_row_style(theme: &Theme) -> container::Style {
     }
 }
 
+/// 列表行条纹底色：奇数条纹行用浅一档 surface 区分，偶数行回到主
+/// 背景。主应用列表与 FileChooser portal 消费同一份实现；depth 目前
+/// 不参与取色，保留参数与列表行调用点签名对齐。
+pub fn list_row_style(
+    _depth: usize,
+    stripe_index: usize,
+) -> impl Fn(&Theme) -> container::Style + Clone {
+    move |theme| {
+        let colors = ui_colors(theme);
+        let is_alternate_row = stripe_index % 2 == 1;
+        let background = if is_alternate_row {
+            colors.surface_container_low
+        } else {
+            colors.background
+        };
+        container::Style {
+            background: Some(Background::Color(background)),
+            text_color: Some(base_text_color(theme)),
+            border: Border {
+                radius: if is_alternate_row { 7.0 } else { 0.0 }.into(),
+                ..Border::default()
+            },
+            ..container::Style::default()
+        }
+    }
+}
+
 /// 错误提示条：error container 底 + error 细边 + 圆角 12。
 pub fn error_notification_style(theme: &Theme) -> container::Style {
     let colors = ui_colors(theme);
@@ -496,6 +523,23 @@ mod tests {
 
             let input = navigation_text_input_style(&theme, text_input::Status::Active);
             assert_eq!(input.border.radius, 8.0.into());
+        }
+    }
+
+    #[test]
+    fn list_row_stripes_alternate_surface_tint_and_radius() {
+        for theme in [Theme::Light, Theme::Dark] {
+            let colors = ui_colors(&theme);
+            let even = list_row_style(0, 0)(&theme);
+            assert_eq!(even.background, Some(Background::Color(colors.background)));
+            assert_eq!(even.border.radius, 0.0.into());
+
+            let odd = list_row_style(0, 1)(&theme);
+            assert_eq!(
+                odd.background,
+                Some(Background::Color(colors.surface_container_low))
+            );
+            assert_eq!(odd.border.radius, 7.0.into());
         }
     }
 }

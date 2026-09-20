@@ -10,9 +10,9 @@ use std::path::Path;
 use bennu_theme::icons::{file_entry_icon_symbol, rotated_chevron_right_view, IconSymbol};
 use bennu_theme::styles::{
     base_text_color, enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction,
-    hovered_row_style, muted_icon_svg_style, muted_text_color, navigation_text_input_style,
-    primary_action_button_style, selected_icon_svg_style, selected_row_style, surface_button_style,
-    transparent_icon_button_style, ScrollbarVisibility,
+    hovered_row_style, list_row_style, muted_icon_svg_style, muted_text_color,
+    navigation_text_input_style, primary_action_button_style, selected_icon_svg_style,
+    selected_row_style, surface_button_style, transparent_icon_button_style, ScrollbarVisibility,
 };
 use bennu_theme::ui_colors;
 use file_core::entry::FileKind;
@@ -44,6 +44,10 @@ const ADDRESS_BAR_HEIGHT: f32 = 34.0;
 
 /// 子级行相对父级的缩进。
 const EXPANSION_INDENT: f32 = 16.0;
+
+/// 条目行固定高度：展开动画需要数值行高做裁剪（行高 × 进度），内容
+/// 垂直居中；取值与既有 padding 撑出的视觉高度一致。
+const ENTRY_ROW_HEIGHT: f32 = 28.0;
 
 /// 窗口内容。`emit` 由上层提供，负责把会话消息与窗口关联。
 pub(crate) fn picker_window_view(
@@ -265,7 +269,10 @@ fn listing_body(
         .style(|theme: &Theme| {
             let colors = bennu_theme::ui_colors(theme);
             container::Style {
-                background: Some(colors.surface_container_lowest.into()),
+                // 条纹偶数行画的就是 background：面板底色必须同为
+                // background，偶数行才能像主应用一样隐形（凹槽色会让
+                // 每一行都变成可见的盒子）。
+                background: Some(colors.background.into()),
                 border: Border {
                     color: bennu_theme::styles::subtle_border_color(theme),
                     width: 1.0,
@@ -310,17 +317,14 @@ fn entry_row(
         _ => readable_size(entry.metadata.len),
     };
 
-    // 目录行首的展开开关（访达列表语义）：箭头旋转表达展开态；文件行
-    // 用等宽占位保证名称列对齐。
+    // 目录行首的展开开关（访达列表语义）：箭头随自身展开进度旋转，
+    // 收起时同步转回；文件行用等宽占位保证名称列对齐。
     let disclosure: Element<'static, SessionMessage> = if entry.kind == FileKind::Directory {
-        button(
-            rotated_chevron_right_view(if row.expanded { 90.0 } else { 0.0 }, 12.0)
-                .style(icon_tone),
-        )
-        .padding(2.0)
-        .style(transparent_icon_button_style)
-        .on_press(emit(SessionMessage::EntryExpandToggled { index }))
-        .into()
+        button(rotated_chevron_right_view(row.expand_progress * 90.0, 12.0).style(icon_tone))
+            .padding(2.0)
+            .style(transparent_icon_button_style)
+            .on_press(emit(SessionMessage::EntryExpandToggled { index }))
+            .into()
     } else {
         Space::new()
             .width(Length::Fixed(16.0))
@@ -335,26 +339,25 @@ fn entry_row(
     content = content.push(Space::new().width(Length::Fill));
     content = content.push(readable_label(meta).size(12).color(muted_text_color(theme)));
 
+    // 条纹是常态底色（与主应用同一份实现），选中/悬停态在其上覆盖。
+    let stripe_style = list_row_style(row.depth, index);
     let style = move |theme: &Theme| {
         if selected {
             selected_row_style(theme)
         } else if hovered {
             hovered_row_style(theme)
         } else {
-            container::Style::default()
+            stripe_style(theme)
         }
     };
 
     let depth_indent = row.depth as f32 * EXPANSION_INDENT;
-    mouse_area(
+    let row_surface = mouse_area(
         container(content)
             .width(Length::Fill)
-            .padding(
-                Padding::new(6.0)
-                    .top(5.0)
-                    .bottom(5.0)
-                    .left(6.0 + depth_indent),
-            )
+            .height(Length::Fixed(ENTRY_ROW_HEIGHT))
+            .center_y(Length::Fixed(ENTRY_ROW_HEIGHT))
+            .padding(Padding::new(0.0).left(6.0 + depth_indent).right(6.0))
             .style(style),
     )
     .on_enter(emit(SessionMessage::EntryHovered { index: Some(index) }))
@@ -364,8 +367,21 @@ fn entry_row(
         ctrl: false,
         shift: false,
     }))
-    .on_double_click(emit(SessionMessage::EntryDoubleClicked { index }))
-    .into()
+    .on_double_click(emit(SessionMessage::EntryDoubleClicked { index }));
+
+    // 展开动画中行高按祖先级联进度裁剪；完成后走普通路径，避免
+    // 浮点残差让满高行底部留缝。
+    if row.height_progress >= 1.0 {
+        row_surface.into()
+    } else {
+        container(row_surface)
+            .width(Length::Fill)
+            .height(Length::Fixed(
+                ENTRY_ROW_HEIGHT * row.height_progress.clamp(0.0, 1.0),
+            ))
+            .clip(true)
+            .into()
+    }
 }
 
 fn readable_size(bytes: u64) -> String {

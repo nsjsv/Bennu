@@ -15,6 +15,9 @@ use crate::dbus_file_chooser::PickerResolution;
 use crate::filter::PickerFilter;
 use crate::picker_request::{FilterRule, PickerKind, PickerRequestSpec};
 
+/// 展开动画每帧步进：60Hz 下单程约 165ms，与主应用列表展开节奏一致。
+const EXPANSION_ANIMATION_STEP: f32 = 0.18;
+
 /// 目录内容加载状态（根列表与展开节点共用）。
 pub(crate) enum DirectoryListing {
     Pending,
@@ -94,12 +97,22 @@ pub(crate) struct DirectoryScanOutcome {
 pub(crate) struct PickerRow {
     pub(crate) entry: DirectoryEntry,
     pub(crate) depth: usize,
-    pub(crate) expanded: bool,
+    /// 本行自身高度比例：祖先展开进度的级联（本行不裁自己），驱动
+    /// 行高裁剪动画；根行恒 1.0。
+    pub(crate) height_progress: f32,
+    /// 本行目录自身的展开动画进度（0=未展开，1=完全展开），驱动
+    /// 箭头旋转；非目录或未展开行恒 0。
+    pub(crate) expand_progress: f32,
 }
 
 /// 一个已展开目录的子内容（访达语义：子级按父深度 +1 缩进）。
 struct ExpansionState {
     listing: DirectoryListing,
+    /// 收起动画播放中：子行保留在行列表里缩回，播完才真正移除。
+    is_collapsing: bool,
+    /// 0.0→1.0 展开；1.0→0.0 收起。与 listing 解耦：扫描完成前后
+    /// 动画都独立推进。
+    animation_progress: f32,
 }
 
 pub(crate) struct PickerSession {
@@ -375,6 +388,7 @@ impl PickerSession {
         }
         self.selection.retain(|&index| index < self.rows.len());
         self.hovered_index = self.hovered_index.filter(|&index| index < self.rows.len());
+        self.sync_row_animation();
     }
 
     fn is_allowed(&self, entry: &DirectoryEntry) -> bool {
@@ -384,13 +398,14 @@ impl PickerSession {
 
     fn append_rows(&mut self, entries: &[DirectoryEntry], depth: usize) {
         for entry in entries {
-            let expanded = self.expansions.contains_key(&entry.path);
+            let has_expansion = self.expansions.contains_key(&entry.path);
             self.rows.push(PickerRow {
                 entry: entry.clone(),
                 depth,
-                expanded,
+                height_progress: 1.0,
+                expand_progress: 0.0,
             });
-            if !expanded {
+            if !has_expansion {
                 continue;
             }
             let children =
@@ -491,8 +506,9 @@ impl PickerSession {
     }
 
     /// 目录行的展开开关（访达列表语义）：加载中忽略重复点击；再次
-    /// 点击收起。展开请求通过 `SessionEffect::ScanDirectory` 发出，
-    /// 结果由 `apply_scan` 按路径回填。
+    /// 点击进入收起动画（不立即移除）。展开请求通过
+    /// `SessionEffect::ScanDirectory` 发出，结果由 `apply_scan` 按
+    /// 路径回填。
     fn toggle_expansion(&mut self, index: usize) -> SessionEffect {
         let Some(row) = self.rows.get(index) else {
             return SessionEffect::None;
@@ -501,22 +517,97 @@ impl PickerSession {
             return SessionEffect::None;
         }
         let path = row.entry.path.clone();
-        if let Some(state) = self.expansions.get(&path) {
+        if let Some(state) = self.expansions.get_mut(&path) {
+            if state.is_collapsing {
+                // 收起动画中再点 = 反悔：恢复向展开推进（与主应用
+                // open_list_directory 同语义），进度保持当前值。
+                state.is_collapsing = false;
+                return SessionEffect::None;
+            }
             if matches!(state.listing, DirectoryListing::Pending) {
                 return SessionEffect::None;
             }
-            self.expansions.remove(&path);
-            self.refresh_rows();
+            state.is_collapsing = true;
             return SessionEffect::None;
         }
         self.expansions.insert(
             path.clone(),
             ExpansionState {
                 listing: DirectoryListing::Pending,
+                is_collapsing: false,
+                animation_progress: 0.0,
             },
         );
         self.refresh_rows();
         SessionEffect::ScanDirectory(path)
+    }
+
+    /// 推进所有展开/收起动画一帧。返回是否有变化，供上层在没有动画
+    /// 时摘除帧时钟订阅。
+    pub(crate) fn advance_animations(&mut self) -> bool {
+        let mut changed = false;
+        for state in self.expansions.values_mut() {
+            if state.is_collapsing {
+                let next = (state.animation_progress - EXPANSION_ANIMATION_STEP).max(0.0);
+                if next < state.animation_progress {
+                    state.animation_progress = next;
+                    changed = true;
+                }
+            } else if state.animation_progress < 1.0 {
+                let next = (state.animation_progress + EXPANSION_ANIMATION_STEP).min(1.0);
+                if next > state.animation_progress {
+                    state.animation_progress = next;
+                    changed = true;
+                }
+            }
+        }
+        // 收起播完的条目此刻才真正移除：行列表的结构性变化集中在这里。
+        let finished: Vec<PathBuf> = self
+            .expansions
+            .iter()
+            .filter(|(_, state)| state.is_collapsing && state.animation_progress <= f32::EPSILON)
+            .map(|(path, _)| path.clone())
+            .collect();
+        if finished.is_empty() {
+            if changed {
+                self.sync_row_animation();
+            }
+            return changed;
+        }
+        for path in &finished {
+            self.expansions.remove(path);
+        }
+        self.refresh_rows();
+        true
+    }
+
+    /// 是否存在进行中的展开/收起动画（含等待扫描的展开节点：其进度
+    /// 仍在推进，箭头需要帧时钟驱动）。
+    pub(crate) fn is_animating(&self) -> bool {
+        self.expansions
+            .values()
+            .any(|state| state.is_collapsing || state.animation_progress < 1.0)
+    }
+
+    /// 行动画字段同步：行序即 DFS 序，用深度栈维护祖先级联进度，
+    /// 避免每帧重建行列表（refresh_rows 会克隆全部条目）。
+    fn sync_row_animation(&mut self) {
+        let mut ancestors: Vec<(usize, f32)> = Vec::new();
+        for row in self.rows.iter_mut() {
+            while ancestors
+                .last()
+                .is_some_and(|(depth, _)| *depth >= row.depth)
+            {
+                ancestors.pop();
+            }
+            row.height_progress = ancestors.last().map_or(1.0, |(_, progress)| *progress);
+            if let Some(state) = self.expansions.get(&row.entry.path) {
+                row.expand_progress = state.animation_progress;
+                ancestors.push((row.depth, state.animation_progress));
+            } else {
+                row.expand_progress = 0.0;
+            }
+        }
     }
 
     /// 进入目录：派生状态（选中、锚点、悬停、展开、地址编辑）的统一

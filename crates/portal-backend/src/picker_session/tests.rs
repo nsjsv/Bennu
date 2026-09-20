@@ -454,9 +454,77 @@ fn expanding_a_directory_appends_indented_children() {
     assert_eq!(session.rows()[1].depth, 1);
     assert_eq!(session.rows()[2].depth, 0);
 
-    // 再点一次收起。
+    // 再点一次进入收起动画：子行保留并随进度缩回，播完才移除。
     session.update(SessionMessage::EntryExpandToggled { index: 0 });
+    assert_eq!(session.rows().len(), 3);
+    assert!(session.is_animating());
+    while session.is_animating() {
+        session.advance_animations();
+    }
     assert_eq!(session.rows().len(), 2);
+}
+
+#[test]
+fn expansion_animation_advances_and_holds_at_full() {
+    let (mut session, _receiver) = session(PickerKind::OpenFile {
+        multiple: false,
+        directory: false,
+    });
+    seeded_listing(&mut session, &[("sub", FileKind::Directory)]);
+    let child = session.directory().join("sub");
+    session.update(SessionMessage::EntryExpandToggled { index: 0 });
+    session.apply_scan(scan_result(&child, Ok(vec![("inner.txt", FileKind::File)])));
+
+    // 子行高度随父级展开进度级联；未推进前行高进度为 0。
+    assert_eq!(session.rows()[0].expand_progress, 0.0);
+    assert_eq!(session.rows()[1].height_progress, 0.0);
+    assert!(session.is_animating());
+
+    session.advance_animations();
+    assert!((session.rows()[0].expand_progress - 0.18).abs() < 1e-4);
+    assert!((session.rows()[1].height_progress - 0.18).abs() < 1e-4);
+
+    while session.advance_animations() {}
+    assert!((session.rows()[0].expand_progress - 1.0).abs() < 1e-4);
+    assert!((session.rows()[1].height_progress - 1.0).abs() < 1e-4);
+    assert!(!session.is_animating());
+}
+
+#[test]
+fn toggle_during_collapse_resumes_expansion() {
+    let (mut session, _receiver) = session(PickerKind::OpenFile {
+        multiple: false,
+        directory: false,
+    });
+    seeded_listing(&mut session, &[("sub", FileKind::Directory)]);
+    let child = session.directory().join("sub");
+    session.update(SessionMessage::EntryExpandToggled { index: 0 });
+    session.apply_scan(scan_result(&child, Ok(vec![("inner.txt", FileKind::File)])));
+    while session.advance_animations() {}
+
+    session.update(SessionMessage::EntryExpandToggled { index: 0 });
+    session.advance_animations();
+    let mid_collapse = session.rows()[0].expand_progress;
+    assert!(mid_collapse < 1.0);
+
+    // 收起中再点 = 反悔：进度折返向展开推进，而不是继续缩小。
+    session.update(SessionMessage::EntryExpandToggled { index: 0 });
+    session.advance_animations();
+    assert!(session.rows()[0].expand_progress > mid_collapse);
+    assert_eq!(session.rows().len(), 2);
+    while session.advance_animations() {}
+    assert_eq!(session.rows().len(), 2);
+}
+
+#[test]
+fn no_expansion_means_not_animating() {
+    let (mut session, _receiver) = session(PickerKind::OpenFile {
+        multiple: false,
+        directory: false,
+    });
+    seeded_listing(&mut session, &[("a.txt", FileKind::File)]);
+    assert!(!session.is_animating());
+    assert!(!session.advance_animations());
 }
 
 #[test]
@@ -486,7 +554,8 @@ fn loading_expansion_ignores_duplicate_toggles() {
     let again = session.update(SessionMessage::EntryExpandToggled { index: 0 });
     assert!(matches!(again, SessionEffect::None));
     assert_eq!(session.rows().len(), 1);
-    assert!(session.rows()[0].expanded);
+    // 展开标记如今由动画状态表达：Pending 节点进度仍在推进。
+    assert!(session.is_animating());
 }
 
 #[test]

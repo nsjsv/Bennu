@@ -33,7 +33,7 @@ pub(crate) use bennu_theme::styles::{
     button_surface_color, context_menu_item_button_style, elevation_shadow_color,
     enhanced_both_scrollbar_direction, enhanced_horizontal_scrollbar_direction,
     enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction, error_notification_style,
-    hovered_row_style, icon_svg_style, muted_icon_svg_style, muted_text_color,
+    hovered_row_style, icon_svg_style, list_row_style, muted_icon_svg_style, muted_text_color,
     selected_icon_svg_style, subtle_border_color, surface_button_style,
     transparent_icon_button_style, warning_icon_svg_style,
 };
@@ -273,30 +273,6 @@ pub(crate) fn list_panel_style(theme: &Theme) -> container::Appearance {
     container::Appearance {
         text_color: Some(base_text_color(theme)),
         ..container::Appearance::default()
-    }
-}
-
-pub(crate) fn list_row_style(
-    _depth: usize,
-    row_index: usize,
-) -> impl Fn(&Theme) -> container::Appearance + Clone {
-    move |theme| {
-        let colors = ui_colors(theme);
-        let is_alternate_row = row_index % 2 == 1;
-        let background = if is_alternate_row {
-            colors.surface_container_low
-        } else {
-            colors.background
-        };
-        container::Appearance {
-            background: Some(Background::Color(background)),
-            text_color: Some(base_text_color(theme)),
-            border: Border {
-                radius: if is_alternate_row { 7.0 } else { 0.0 }.into(),
-                ..Border::default()
-            },
-            ..container::Appearance::default()
-        }
     }
 }
 

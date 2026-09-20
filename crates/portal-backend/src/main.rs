@@ -27,6 +27,9 @@ const PORTAL_BUS_NAME: &str = "org.freedesktop.impl.portal.desktop.bennu";
 const PORTAL_OBJECT_PATH: &str = "/org/freedesktop/portal/desktop";
 const IDLE_EXIT_AFTER: Duration = Duration::from_secs(30);
 const IDLE_TICK_INTERVAL: Duration = Duration::from_secs(5);
+/// 展开动画帧时钟：60Hz 与主应用 ui_pacing::FRAME_INTERVAL_60HZ 同值；
+/// portal 不依赖 app-ui，本地保持同一节奏。
+const ANIMATION_FRAME_INTERVAL: Duration = Duration::from_millis(16);
 
 /// 地址栏编辑输入框的稳定 Id（进入编辑时聚焦并全选草稿）。
 const ADDRESS_INPUT_ID: &str = "portal-address-input";
@@ -44,6 +47,7 @@ enum Message {
     },
     ModifiersChanged(keyboard::Modifiers),
     IdleTick,
+    AnimationTick,
 }
 
 struct PickerDaemon {
@@ -100,6 +104,14 @@ fn update(daemon: &mut PickerDaemon, message: Message) -> Task<Message> {
             } else {
                 Task::none()
             }
+        }
+        Message::AnimationTick => {
+            // 动画帧只由用户交互（展开开关）引发，属真实活动：顶层的
+            // last_activity 续命规则对它生效，不影响空闲退出语义。
+            for session in daemon.windows.values_mut() {
+                session.advance_animations();
+            }
+            Task::none()
         }
     }
 }
@@ -266,8 +278,8 @@ fn daemon_title(daemon: &PickerDaemon, window_id: window::Id) -> String {
         .unwrap_or_else(|| "Bennu 文件选择".to_string())
 }
 
-fn subscription(_daemon: &PickerDaemon) -> Subscription<Message> {
-    Subscription::batch([
+fn subscription(daemon: &PickerDaemon) -> Subscription<Message> {
+    let mut subscriptions = vec![
         Subscription::run(bridge_events),
         window::close_events().map(Message::WindowClosed),
         iced::event::listen_with(|event, status, window_id| match event {
@@ -296,7 +308,14 @@ fn subscription(_daemon: &PickerDaemon) -> Subscription<Message> {
             _ => None,
         }),
         iced::time::every(IDLE_TICK_INTERVAL).map(|_| Message::IdleTick),
-    ])
+    ];
+    // 仅在有窗口播放展开/收起动画时订阅帧时钟，动画结束自然摘除——
+    // 与主应用按动画活跃度挂载 time::every 订阅同模式。
+    if daemon.windows.values().any(PickerSession::is_animating) {
+        subscriptions
+            .push(iced::time::every(ANIMATION_FRAME_INTERVAL).map(|_| Message::AnimationTick));
+    }
+    Subscription::batch(subscriptions)
 }
 
 /// D-Bus 桥流：首次 poll 取走全局通道，此后转发事件直到对端关闭。

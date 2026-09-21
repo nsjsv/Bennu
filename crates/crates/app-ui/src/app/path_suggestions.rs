@@ -7,8 +7,9 @@ use super::paths::completed_path_text;
 use super::FileBrowser;
 use crate::commands::path_suggestions_command;
 use crate::model::{
-    AddressBarTransition, AddressEditingSession, AddressEditingSessionId, AddressSuggestionRequest,
-    BrowserPaneId, Message, NavigationMode, PathSuggestionDirection,
+    AddressEditingSession, AddressEditingSessionId, AddressSuggestionRequest, BrowserPaneId,
+    Message, NavigationMode, PaneAddressBarTransition, PaneAddressEditingSession,
+    PathSuggestionDirection,
 };
 use crate::view::address_input_id;
 use crate::{app::smooth_scroll::smooth_scroll_id, model::ScrollbarRegion};
@@ -38,7 +39,7 @@ impl FileBrowser {
         if self
             .address_editing
             .as_ref()
-            .is_some_and(|session| session.pane_id == pane_id)
+            .is_some_and(|editing| editing.pane_id == pane_id)
         {
             return focus_address_input(pane_id);
         }
@@ -55,12 +56,11 @@ impl FileBrowser {
 
         let session_id = AddressEditingSessionId(self.next_address_editing_session_id);
         self.next_address_editing_session_id = self.next_address_editing_session_id.wrapping_add(1);
-        self.address_editing = Some(AddressEditingSession::new(
+        self.address_editing = Some(PaneAddressEditingSession {
             pane_id,
-            session_id,
-            &address_bar_directory,
-        ));
-        self.address_bar_transition = Some(AddressBarTransition::retarget(
+            session: AddressEditingSession::new(session_id, &address_bar_directory),
+        });
+        self.address_bar_transition = Some(PaneAddressBarTransition::retarget(
             self.address_bar_transition.as_ref(),
             pane_id,
             1.0,
@@ -80,13 +80,14 @@ impl FileBrowser {
             return Task::none();
         }
         let address_bar_directory = self.active_address_bar_directory();
-        let Some(session) = self
+        let Some(editing) = self
             .address_editing
             .as_mut()
-            .filter(|session| session.pane_id == pane_id)
+            .filter(|editing| editing.pane_id == pane_id)
         else {
             return Task::none();
         };
+        let session = &mut editing.session;
 
         session.draft = value;
         session.suggestions.clear();
@@ -117,7 +118,11 @@ impl FileBrowser {
             return Task::none();
         }
 
-        let Some(session) = self.address_editing.as_mut() else {
+        let Some(session) = self
+            .address_editing
+            .as_mut()
+            .map(|editing| &mut editing.session)
+        else {
             return Task::none();
         };
         session.suggestions = suggestions;
@@ -127,13 +132,14 @@ impl FileBrowser {
 
     pub(super) fn submit_address_editing(&mut self, pane_id: BrowserPaneId) -> Task<Message> {
         let address_bar_directory = self.active_address_bar_directory();
-        let Some(session) = self
+        let Some(editing) = self
             .address_editing
             .as_ref()
-            .filter(|session| session.pane_id == pane_id && pane_id == self.active_pane_id())
+            .filter(|editing| editing.pane_id == pane_id && pane_id == self.active_pane_id())
         else {
             return Task::none();
         };
+        let session = &editing.session;
 
         let selected_suggestion = session
             .suggestion_selection
@@ -152,10 +158,10 @@ impl FileBrowser {
         pane_id: BrowserPaneId,
         target: PathBuf,
     ) -> Task<Message> {
-        let suggestion_is_current = self.address_editing.as_ref().is_some_and(|session| {
-            session.pane_id == pane_id
+        let suggestion_is_current = self.address_editing.as_ref().is_some_and(|editing| {
+            editing.pane_id == pane_id
                 && pane_id == self.active_pane_id()
-                && session.suggestions.contains(&target)
+                && editing.session.suggestions.contains(&target)
         });
         if !suggestion_is_current {
             return Task::none();
@@ -169,29 +175,29 @@ impl FileBrowser {
         pane_id: BrowserPaneId,
         target: PathBuf,
     ) -> Task<Message> {
-        let Some(session) = self.take_address_editing_session(pane_id) else {
+        let Some(editing) = self.take_address_editing_session(pane_id) else {
             return Task::none();
         };
-        self.start_address_bar_exit(pane_id, session.draft);
+        self.start_address_bar_exit(pane_id, editing.session.draft);
         self.navigate_to(target, NavigationMode::RecordHistory)
     }
 
     pub(super) fn cancel_address_editing(&mut self) -> Task<Message> {
-        let Some(session) = self.address_editing.take() else {
+        let Some(editing) = self.address_editing.take() else {
             return Task::none();
         };
-        self.start_address_bar_exit(session.pane_id, session.draft);
+        self.start_address_bar_exit(editing.pane_id, editing.session.draft);
         Task::none()
     }
 
     fn take_address_editing_session(
         &mut self,
         pane_id: BrowserPaneId,
-    ) -> Option<AddressEditingSession> {
+    ) -> Option<PaneAddressEditingSession> {
         if self
             .address_editing
             .as_ref()
-            .is_some_and(|session| session.pane_id == pane_id)
+            .is_some_and(|editing| editing.pane_id == pane_id)
         {
             self.address_editing.take()
         } else {
@@ -200,7 +206,7 @@ impl FileBrowser {
     }
 
     fn start_address_bar_exit(&mut self, pane_id: BrowserPaneId, snapshot: String) {
-        self.address_bar_transition = Some(AddressBarTransition::retarget(
+        self.address_bar_transition = Some(PaneAddressBarTransition::retarget(
             self.address_bar_transition.as_ref(),
             pane_id,
             0.0,
@@ -279,8 +285,8 @@ impl FileBrowser {
     }
 
     pub(super) fn address_suggestion_keyboard_is_active(&self) -> bool {
-        self.address_editing.as_ref().is_some_and(|session| {
-            session.pane_id == self.active_pane_id() && !session.suggestions.is_empty()
+        self.address_editing.as_ref().is_some_and(|editing| {
+            editing.pane_id == self.active_pane_id() && !editing.session.suggestions.is_empty()
         })
     }
 
@@ -288,15 +294,19 @@ impl FileBrowser {
         let active_pane_id = self.active_pane_id();
         self.address_editing
             .as_mut()
-            .filter(|session| session.pane_id == active_pane_id)
+            .filter(|editing| editing.pane_id == active_pane_id)
+            .map(|editing| &mut editing.session)
     }
 
     fn address_suggestion_request_matches(&self, request: &AddressSuggestionRequest) -> bool {
         let address_bar_directory = self.active_address_bar_directory();
-        request.pane_id == self.active_pane_id()
-            && self.address_editing.as_ref().is_some_and(|session| {
-                session.matches_suggestion_request(request, &address_bar_directory)
-            })
+        let active_pane_id = self.active_pane_id();
+        self.address_editing.as_ref().is_some_and(|editing| {
+            editing.pane_id == active_pane_id
+                && editing
+                    .session
+                    .matches_suggestion_request(request, &address_bar_directory)
+        })
     }
 
     fn active_address_bar_directory(&self) -> PathBuf {
@@ -309,16 +319,13 @@ impl FileBrowser {
     pub(super) fn address_bar_transition_is_active(&self) -> bool {
         self.address_bar_transition
             .as_ref()
-            .is_some_and(|transition| !transition.is_complete())
+            .is_some_and(|owned| !owned.transition.is_complete())
     }
 
     pub(super) fn advance_address_bar_transition(&mut self) -> Task<Message> {
-        let should_remove = self
-            .address_bar_transition
-            .as_ref()
-            .is_some_and(|transition| {
-                transition.is_complete() && transition.target_fraction() <= f32::EPSILON
-            });
+        let should_remove = self.address_bar_transition.as_ref().is_some_and(|owned| {
+            owned.transition.is_complete() && owned.transition.target_fraction() <= f32::EPSILON
+        });
         if should_remove {
             self.address_bar_transition = None;
         }
@@ -418,7 +425,11 @@ mod tests {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
         browser.current_dir = PathBuf::from("/tmp");
         let _ = browser.begin_address_editing(BrowserPaneId::PRIMARY);
-        let session = browser.address_editing.as_mut().expect("editing session");
+        let session = &mut browser
+            .address_editing
+            .as_mut()
+            .expect("editing session")
+            .session;
         session.draft = "docs".to_owned();
         let request = session.next_suggestion_request(Path::new("/tmp"));
 
@@ -463,7 +474,7 @@ mod tests {
             browser
                 .address_editing
                 .as_ref()
-                .map(|session| session.draft.clone()),
+                .map(|editing| editing.session.draft.clone()),
             Some(deepest_open_directory.to_string_lossy().into_owned())
         );
 

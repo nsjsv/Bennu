@@ -6,6 +6,9 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use bennu_theme::address_bar::{
+    AddressBarTransition, AddressEditingSession, AddressSuggestionRequest,
+};
 use tokio::sync::oneshot;
 
 use file_core::entry::{DirectoryEntry, FileKind};
@@ -14,20 +17,27 @@ use crate::dbus_file_chooser::PickerResolution;
 use crate::filter::PickerFilter;
 use crate::picker_request::{FilterRule, PickerKind, PickerRequestSpec};
 
+mod address_editing;
 mod expansion;
 pub(crate) mod scan;
 pub(crate) mod scrollbar;
+pub(crate) mod suggestions;
 
 pub(crate) use scan::{scan_listing, DirectoryListing, DirectoryScanResult};
 pub(crate) use scrollbar::SessionScrollRegion;
 use scrollbar::{ScrollbarViewport, SessionScrollbarState, SmoothScrollState};
 
+pub(crate) use address_editing::PathSuggestionDirection;
 use expansion::ExpansionState;
 
 /// 状态机对外请求的效果。
 pub(crate) enum SessionEffect {
     None,
-    /// 需要扫描该目录（进入/上级/面包屑/展开/初始；结果按路径回填）。
+    /// 导航类扫描（进入/上级/面包屑/初始 begin）：main 层除扫描外还
+    /// 要把面包屑滚到当前段。与列表展开的 `ScanDirectory` 拆开，是
+    /// 为了让「滚尾」只挂在导航上——展开行不该强滚面包屑。
+    NavigateDirectory(PathBuf),
+    /// 列表展开行扫描：结果按路径回填到展开节点，不触发面包屑滚尾。
     ScanDirectory(PathBuf),
     /// 用户确认，携带选中路径。
     Confirmed(Vec<PathBuf>),
@@ -36,6 +46,16 @@ pub(crate) enum SessionEffect {
     /// 列表/面包屑内容骤变后核实滚动条溢出：布局探针回信自愈视口
     /// 缓存，塞得下则淡入被拦截。main 层翻译为探针 Task。
     VerifyScrollbarLayout,
+    /// 地址输入停笔 120ms 防抖：main 层 sleep 后回信
+    /// `AddressSuggestionInputStabilized`，会话校验凭据再发起读取。
+    StabilizeAddressInput {
+        request: AddressSuggestionRequest,
+    },
+    /// 读取目录补全建议：main 层 `Task::perform(suggestions::load)` 后
+    /// 回信 `AddressSuggestionsLoaded`。
+    LoadPathSuggestions {
+        request: AddressSuggestionRequest,
+    },
 }
 
 /// 视图事件。
@@ -58,7 +78,7 @@ pub(crate) enum SessionMessage {
     NavigateBack,
     NavigateForward,
     BreadcrumbActivated {
-        ancestor: usize,
+        target: PathBuf,
     },
     FilterSelected {
         rule: usize,
@@ -80,6 +100,28 @@ pub(crate) enum SessionMessage {
     AddressEditChanged(String),
     AddressEditingSubmitted,
     AddressEditingCancelled,
+    /// 防抖停笔回信：携带发请求时的凭据，陈旧（改稿/换目录/退出编辑
+    /// 后）回信按凭据拒收。
+    AddressSuggestionInputStabilized {
+        request: AddressSuggestionRequest,
+    },
+    /// 补全建议读取结果回信：同样按凭据拒收陈旧结果。
+    AddressSuggestionsLoaded {
+        request: AddressSuggestionRequest,
+        suggestions: Vec<PathBuf>,
+    },
+    /// 补全面板行点击：仅当路径仍在当前建议列表中才提交。
+    AddressSuggestionSelected {
+        path: PathBuf,
+    },
+    /// 键盘循环选择建议（↓/↑/Tab/Shift+Tab）。
+    MoveSuggestionSelection {
+        direction: PathSuggestionDirection,
+    },
+    /// 键盘补全：选中建议写入草稿并请求下一级建议。
+    CompleteSuggestion {
+        direction: PathSuggestionDirection,
+    },
     /// 滚轮输入（视图包装层捕获后发布）；增量换算在会话滚动子模块。
     WheelScrolled {
         region: SessionScrollRegion,
@@ -137,8 +179,16 @@ pub(crate) struct PickerSession {
     name_input: String,
     /// SaveFile 二次确认目标：非 None 时确认按钮变为"覆盖"。
     overwrite_target: Option<PathBuf>,
-    /// 地址栏编辑草稿；None = 面包屑态。
-    address_edit: Option<String>,
+    /// 地址栏编辑会话（共享层模型）；None = 面包屑态。
+    address_editing: Option<AddressEditingSession>,
+    /// 面包屑 ↔ 编辑渐变过渡；退出方向携带草稿快照供渐出帧渲染。
+    address_bar_transition: Option<AddressBarTransition>,
+    /// 面包屑 Home 段折叠基准：共享 breadcrumb_segments 用它把家目录
+    /// 收成 House 图标。
+    home_dir: PathBuf,
+    /// 编辑会话 id 发号器：防陈旧凭据的会话身份部分，跨进入/退出
+    /// 单调递增，旧会话的迟到回信永远对不上新会话。
+    next_address_editing_session_id: u64,
     /// 目录访问历史；`history_position` 指向当前目录（侧键后退/前进）。
     history: Vec<PathBuf>,
     history_position: usize,
@@ -193,7 +243,10 @@ impl PickerSession {
             hovered_index: None,
             name_input,
             overwrite_target: None,
-            address_edit: None,
+            address_editing: None,
+            address_bar_transition: None,
+            home_dir: dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")),
+            next_address_editing_session_id: 0,
             history: vec![start_directory],
             history_position: 0,
             smooth_scroll: SmoothScrollState::default(),
@@ -227,12 +280,12 @@ impl PickerSession {
         self.hovered_index
     }
 
-    pub(crate) fn address_edit(&self) -> Option<&str> {
-        self.address_edit.as_deref()
-    }
-
     pub(crate) fn filters(&self) -> &[FilterRule] {
         &self.filters
+    }
+
+    pub(crate) fn home_dir(&self) -> &Path {
+        &self.home_dir
     }
 
     pub(crate) fn active_filter_label(&self) -> String {
@@ -278,7 +331,7 @@ impl PickerSession {
 
     /// 初始进入扫描。
     pub(crate) fn begin(&mut self) -> SessionEffect {
-        SessionEffect::ScanDirectory(self.directory.clone())
+        SessionEffect::NavigateDirectory(self.directory.clone())
     }
 
     pub(crate) fn update(&mut self, message: SessionMessage) -> SessionEffect {
@@ -297,7 +350,9 @@ impl PickerSession {
             SessionMessage::NavigateUp => self.navigate_up(),
             SessionMessage::NavigateBack => self.navigate_back(),
             SessionMessage::NavigateForward => self.navigate_forward(),
-            SessionMessage::BreadcrumbActivated { ancestor } => self.navigate_breadcrumb(ancestor),
+            SessionMessage::BreadcrumbActivated { target } => {
+                self.activate_breadcrumb_target(target)
+            }
             SessionMessage::FilterSelected { rule } => {
                 if let Some(rule) = self.filters.get(rule) {
                     self.active_filter = PickerFilter::from_rules(vec![rule.clone()]);
@@ -328,23 +383,25 @@ impl PickerSession {
                 self.select_all();
                 SessionEffect::None
             }
-            SessionMessage::AddressEditingStarted => {
-                // 面包屑态才进入编辑；编辑态重复点击输入框不重置草稿。
-                if self.address_edit.is_none() {
-                    self.address_edit = Some(self.directory.to_string_lossy().into_owned());
-                }
-                SessionEffect::None
+            SessionMessage::AddressEditingStarted => self.begin_address_editing(),
+            SessionMessage::AddressEditChanged(text) => self.update_address_draft(text),
+            SessionMessage::AddressSuggestionInputStabilized { request } => {
+                self.load_stable_address_suggestions(&request)
             }
-            SessionMessage::AddressEditChanged(text) => {
-                if self.address_edit.is_some() {
-                    self.address_edit = Some(text);
-                }
-                SessionEffect::None
+            SessionMessage::AddressSuggestionsLoaded {
+                request,
+                suggestions,
+            } => self.accept_address_suggestions(&request, suggestions),
+            SessionMessage::AddressSuggestionSelected { path } => {
+                self.submit_address_suggestion(path)
             }
-            SessionMessage::AddressEditingSubmitted => self.submit_address_edit(),
-            SessionMessage::AddressEditingCancelled => {
-                self.address_edit = None;
-                SessionEffect::None
+            SessionMessage::AddressEditingSubmitted => self.submit_address_editing(),
+            SessionMessage::AddressEditingCancelled => self.cancel_address_editing(),
+            SessionMessage::MoveSuggestionSelection { direction } => {
+                self.move_path_suggestion_selection(direction)
+            }
+            SessionMessage::CompleteSuggestion { direction } => {
+                self.complete_path_suggestion(direction)
             }
             // 滚动类消息由 scrollbar 子模块处理并产出 Task，main 层在进入
             // update 前已拦截路由；此臂仅为匹配穷尽兜底。
@@ -563,11 +620,16 @@ impl PickerSession {
     }
 
     /// 是否存在进行中的展开/收起动画（含等待扫描的展开节点：其进度
-    /// 仍在推进，箭头需要帧时钟驱动）、惯性滚动或滚动条淡入淡出。
+    /// 仍在推进，箭头需要帧时钟驱动）、地址栏渐变过渡、惯性滚动或
+    /// 滚动条淡入淡出。
     pub(crate) fn is_animating(&self) -> bool {
         self.expansions
             .values()
             .any(|state| state.is_collapsing || state.animation_progress < 1.0)
+            || self
+                .address_bar_transition
+                .as_ref()
+                .is_some_and(|transition| !transition.is_complete())
             || self.smooth_scroll.is_active()
             || self.scrollbar.is_animating()
     }
@@ -582,8 +644,13 @@ impl PickerSession {
         self.selection.clear();
         self.selection_anchor = None;
         self.hovered_index = None;
-        self.address_edit = None;
-        SessionEffect::ScanDirectory(self.directory.clone())
+        // 编辑中导航（双击目录/侧键/↑←→）必须走 cancel 而不是裸清空
+        // 会话：裸清空会让进行中的过渡停在 target=1.0 永不被回收，
+        // 面包屑层 opacity=0 地址栏永久空白，且该态下 Esc 会直接关窗。
+        // cancel 无会话时是 no-op，与主软件 navigate_to 首行的
+        // cancel_address_editing 同一收口。
+        self.cancel_address_editing();
+        SessionEffect::NavigateDirectory(self.directory.clone())
     }
 
     /// 导航到新目录：记录历史（截断前进分支）并进入。
@@ -623,33 +690,6 @@ impl PickerSession {
             return SessionEffect::None;
         }
         self.begin_navigation(parent)
-    }
-
-    fn navigate_breadcrumb(&mut self, ancestor: usize) -> SessionEffect {
-        let ancestors = breadcrumb_chain(&self.directory);
-        let Some(target) = ancestors.get(ancestor) else {
-            return SessionEffect::None;
-        };
-        self.begin_navigation(target.clone())
-    }
-
-    /// 提交地址栏编辑：空草稿=取消；绝对路径直接用，相对路径拼当前
-    /// 目录（与主程序 `path_from_address_draft` 同规则）。
-    fn submit_address_edit(&mut self) -> SessionEffect {
-        let Some(draft) = self.address_edit.take() else {
-            return SessionEffect::None;
-        };
-        let trimmed = draft.trim();
-        if trimmed.is_empty() {
-            return SessionEffect::None;
-        }
-        let path = PathBuf::from(trimmed);
-        let target = if path.is_absolute() {
-            path
-        } else {
-            self.directory.join(path)
-        };
-        self.begin_navigation(target)
     }
 
     /// Ctrl+A：仅 OpenFile 多选模式响应；按模式的可选类型圈定范围。
@@ -732,18 +772,6 @@ impl PickerSession {
         }
         SessionEffect::Dismissed
     }
-}
-
-/// 面包屑链：`/home/u/Downloads` → `["/", "/home", "/home/u", "/home/u/Downloads"]`。
-pub(crate) fn breadcrumb_chain(directory: &Path) -> Vec<PathBuf> {
-    let mut chain = Vec::new();
-    let mut current = Some(directory);
-    while let Some(path) = current {
-        chain.push(path.to_path_buf());
-        current = path.parent();
-    }
-    chain.reverse();
-    chain
 }
 
 #[cfg(test)]

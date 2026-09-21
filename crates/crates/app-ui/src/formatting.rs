@@ -59,76 +59,15 @@ pub(crate) fn format_system_time(time: SystemTime) -> String {
         .expect("the static UTC timestamp format is valid")
 }
 
-pub(crate) fn format_middle_ellipsized_text(content: &str, max_chars: usize) -> String {
-    const MARKER: &str = "...";
-
-    if content.len() <= max_chars {
-        return content.to_owned();
-    }
-
-    if content.is_ascii() {
-        return format_ascii_middle_ellipsized_text(content, max_chars);
-    }
-
-    if content.chars().count() <= max_chars {
-        return content.to_owned();
-    }
-
-    if max_chars <= MARKER.len() {
-        return MARKER.chars().take(max_chars).collect();
-    }
-
-    let visible_chars = max_chars - MARKER.len();
-    let start_chars = visible_chars.div_ceil(2);
-    let end_chars = visible_chars / 2;
-    let start: String = content.chars().take(start_chars).collect();
-    let end: String = content
-        .chars()
-        .rev()
-        .take(end_chars)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
-
-    format!("{start}{MARKER}{end}")
-}
-
-fn format_ascii_middle_ellipsized_text(content: &str, max_chars: usize) -> String {
-    const MARKER: &str = "...";
-
-    if max_chars <= MARKER.len() {
-        return MARKER[..max_chars].to_owned();
-    }
-
-    let visible_chars = max_chars - MARKER.len();
-    let start_chars = visible_chars.div_ceil(2);
-    let end_chars = visible_chars / 2;
-    let mut text = String::with_capacity(max_chars);
-    text.push_str(&content[..start_chars]);
-    text.push_str(MARKER);
-    text.push_str(&content[content.len() - end_chars..]);
-    text
-}
+// 中间省略纯字符串算法已随测量文本 widget 一并下沉 bennu-theme 共享；
+// re-export 保持 crate 内引用路径不变。
+pub(crate) use bennu_theme::measured_text::format_middle_ellipsized_text;
 
 #[cfg(test)]
 mod tests {
     use std::time::{Duration, UNIX_EPOCH};
 
-    use super::{format_duration, format_middle_ellipsized_text, format_system_time};
-
-    #[test]
-    fn keeps_short_text() {
-        assert_eq!(format_middle_ellipsized_text("Documents", 16), "Documents");
-    }
-
-    #[test]
-    fn trims_long_text_from_middle() {
-        assert_eq!(
-            format_middle_ellipsized_text("very-long-directory-name", 12),
-            "very-...name"
-        );
-    }
+    use super::{format_duration, format_system_time};
 
     #[test]
     fn formats_audio_duration() {

@@ -266,7 +266,7 @@ fn replace_tab_selection(tab: &mut BrowserTab, selected_paths: &[PathBuf]) {
 mod tests {
     use std::fs;
 
-    use crate::model::{AddressEditingSession, AddressEditingSessionId};
+    use crate::model::{AddressEditingSession, AddressEditingSessionId, PaneAddressEditingSession};
     use tempfile::TempDir;
 
     use super::*;
@@ -382,11 +382,10 @@ mod tests {
         browser.current_dir = requested.clone();
         browser.tabs = vec![BrowserTab::directory(0, requested.clone())];
         browser.active_tab_id = 0;
-        browser.address_editing = Some(AddressEditingSession::new(
-            browser.active_pane_id(),
-            AddressEditingSessionId(1),
-            &requested,
-        ));
+        browser.address_editing = Some(PaneAddressEditingSession {
+            pane_id: browser.active_pane_id(),
+            session: AddressEditingSession::new(AddressEditingSessionId(1), &requested),
+        });
 
         let _task = browser.merge_desktop_workspace(workspace);
 

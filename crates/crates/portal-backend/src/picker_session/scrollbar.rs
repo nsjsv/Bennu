@@ -374,6 +374,8 @@ impl PickerSession {
     /// 帧时钟推进：展开动画 + 惯性滚动位移 + 滚动条透明度；产出的
     /// Task 由 main 层按窗口路由后批量执行。
     pub(crate) fn advance_frame(&mut self) -> Vec<Task<SessionMessage>> {
+        // 地址栏渐变过渡不产出 Task，只需在帧尾清理已播完的退出过渡。
+        self.advance_address_bar_transition();
         let expansion_frame = self.advance_animations();
         let mut tasks = vec![
             self.advance_smooth_scroll(),

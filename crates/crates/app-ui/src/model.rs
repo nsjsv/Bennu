@@ -50,9 +50,9 @@ pub(crate) use file_core::{TransferConflictItem, TransferConflictMetadata};
 
 mod address_bar;
 pub(crate) use address_bar::{
-    allocate_breadcrumb_widths, breadcrumb_segments, displayed_address_directory,
-    AddressBarTransition, AddressEditingSession, AddressEditingSessionId, AddressSuggestionRequest,
-    BreadcrumbSegment, BreadcrumbSegmentKind,
+    breadcrumb_segments, displayed_address_directory, AddressEditingSession,
+    AddressEditingSessionId, AddressSuggestionRequest, BreadcrumbSegment, BreadcrumbSegmentKind,
+    PaneAddressBarTransition, PaneAddressEditingSession,
 };
 mod entry_naming;
 pub(crate) use entry_naming::{

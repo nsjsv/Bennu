@@ -242,11 +242,13 @@ impl FileBrowser {
         let editing = self
             .address_editing
             .as_ref()
-            .filter(|session| session.pane_id == pane_id);
+            .filter(|editing| editing.pane_id == pane_id)
+            .map(|editing| &editing.session);
         let transition = self
             .address_bar_transition
             .as_ref()
-            .filter(|transition| transition.pane_id == pane_id);
+            .filter(|owned| owned.pane_id == pane_id)
+            .map(|owned| &owned.transition);
         let editing_fraction = transition
             .map(|transition| transition.fraction())
             .unwrap_or_else(|| if editing.is_some() { 1.0 } else { 0.0 });

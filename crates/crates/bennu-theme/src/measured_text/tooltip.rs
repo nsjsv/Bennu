@@ -9,7 +9,7 @@ use super::{
     MeasuredMiddleEllipsizedTextState,
 };
 
-pub(crate) fn measured_middle_ellipsized_wrapped_text_with_tooltip<'a, Message>(
+pub fn measured_middle_ellipsized_wrapped_text_with_tooltip<'a, Message>(
     content: impl Into<String>,
     size: f32,
     line_height_pixels: f32,

@@ -1,17 +1,20 @@
 use super::{
     displayed_content_is_ellipsized, fit_middle_ellipsized_by, fit_middle_ellipsized_text,
-    measured_text_fits, middle_ellipsized_candidate, middle_ellipsized_filename_candidate,
-    shaping_for_content, MeasuredMiddleEllipsizedText, MeasuredMiddleEllipsizedTextState,
-    MeasuredTextLayoutKey, MiddleEllipsisKind, ELLIPSIS_MARKER,
-};
-use crate::icon_grid_geometry::{
-    ICON_GRID_LABEL_HEIGHT, ICON_GRID_LABEL_LINE_HEIGHT_PX, ICON_GRID_LABEL_SIZE,
+    format_middle_ellipsized_text, measured_text_fits, middle_ellipsized_candidate,
+    middle_ellipsized_filename_candidate, shaping_for_content, MeasuredMiddleEllipsizedText,
+    MeasuredMiddleEllipsizedTextState, MeasuredTextLayoutKey, MiddleEllipsisKind, ELLIPSIS_MARKER,
 };
 use iced::advanced::text::{self, Paragraph as _};
 use iced::advanced::{image, layout, mouse, renderer, widget::Tree, Layout};
 use iced::{
     Background, Color, Element, Font, Length, Pixels, Point, Rectangle, Size, Theme, Transformation,
 };
+
+// 数值取自主程序图标网格标签几何(字号 14、绝对行高 17、共 3 行);测试
+// 只验证“测量→布局→绘制锚点”链路,不依赖这些具体数值,故本地钉死。
+const ICON_GRID_LABEL_HEIGHT: f32 = 51.0;
+const ICON_GRID_LABEL_LINE_HEIGHT_PX: f32 = 17.0;
+const ICON_GRID_LABEL_SIZE: f32 = 14.0;
 
 #[derive(Default)]
 struct RecordingRenderer {
@@ -383,4 +386,17 @@ fn wrapped_fit_uses_renderer_measurement_to_stay_within_three_lines() {
         shaping,
         wrapping,
     ));
+}
+
+#[test]
+fn formatted_middle_ellipsized_text_keeps_short_text() {
+    assert_eq!(format_middle_ellipsized_text("Documents", 16), "Documents");
+}
+
+#[test]
+fn formatted_middle_ellipsized_text_trims_long_text_from_middle() {
+    assert_eq!(
+        format_middle_ellipsized_text("very-long-directory-name", 12),
+        "very-...name"
+    );
 }

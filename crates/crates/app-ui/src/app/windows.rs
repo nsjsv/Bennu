@@ -856,8 +856,8 @@ impl FileBrowser {
                 if self.renaming.is_some() {
                     input_focus_checks.push(rename_input_focus_check_command());
                 }
-                if let Some(session) = &self.address_editing {
-                    input_focus_checks.push(address_input_focus_check_command(session.pane_id));
+                if let Some(editing) = &self.address_editing {
+                    input_focus_checks.push(address_input_focus_check_command(editing.pane_id));
                 }
                 if self.search_history_interaction.pointer_is_over_popup() {
                     Task::batch(input_focus_checks)

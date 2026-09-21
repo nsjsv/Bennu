@@ -14,13 +14,19 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use iced::advanced::widget::operation::{Focusable, Operation, Outcome};
 use iced::futures::Stream;
-use iced::{exit, keyboard, mouse, window, Element, Subscription, Task, Theme};
+use iced::{exit, keyboard, mouse, window, Element, Rectangle, Subscription, Task, Theme};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use bennu_theme::address_bar::AddressSuggestionRequest;
 use dbus_file_chooser::{BridgeEvent, FileChooserInterface, PickerInvocation};
+use picker_session::suggestions::{
+    load_path_suggestions, PATH_SUGGESTION_INPUT_STABILIZATION_DELAY,
+};
 use picker_session::{scan_listing, PickerSession, SessionEffect, SessionMessage};
+use picker_session::{PathSuggestionDirection, SessionScrollRegion};
 use tokio::sync::mpsc;
 
 const PORTAL_BUS_NAME: &str = "org.freedesktop.impl.portal.desktop.bennu";
@@ -30,9 +36,6 @@ const IDLE_TICK_INTERVAL: Duration = Duration::from_secs(5);
 /// 展开动画帧时钟：60Hz 与主应用 ui_pacing::FRAME_INTERVAL_60HZ 同值；
 /// portal 不依赖 app-ui，本地保持同一节奏。
 const ANIMATION_FRAME_INTERVAL: Duration = Duration::from_millis(16);
-
-/// 地址栏编辑输入框的稳定 Id（进入编辑时聚焦并全选草稿）。
-const ADDRESS_INPUT_ID: &str = "portal-address-input";
 
 /// D-Bus → UI 的通道；进程引导早期创建，subscription 首次 poll 时取走。
 static BRIDGE_SLOT: OnceLock<Mutex<Option<mpsc::Receiver<BridgeEvent>>>> = OnceLock::new();
@@ -44,8 +47,21 @@ enum Message {
     KeyPressed {
         window: window::Id,
         key: keyboard::Key,
+        modifiers: keyboard::Modifiers,
+        /// 事件是否已被焦点控件捕获：补全面板的方向键/Tab 在 captured
+        /// 下仍须生效（text_input 聚焦会捕获），其余全局动作只认 Ignored。
+        captured: bool,
     },
     ModifiersChanged(keyboard::Modifiers),
+    /// 窗口内左键按下：地址栏编辑态下用来探查输入框是否失焦。
+    WindowLeftPressed {
+        window: window::Id,
+    },
+    /// 焦点探查回信：地址输入框是否仍持焦点（失焦即取消编辑）。
+    AddressInputFocusChecked {
+        window: window::Id,
+        is_focused: bool,
+    },
     IdleTick,
     AnimationTick,
 }
@@ -92,7 +108,16 @@ fn update(daemon: &mut PickerDaemon, message: Message) -> Task<Message> {
             close_picker_window(daemon, window_id);
             Task::none()
         }
-        Message::KeyPressed { window, key } => handle_key(daemon, window, key),
+        Message::KeyPressed {
+            window,
+            key,
+            modifiers,
+            captured,
+        } => handle_key(daemon, window, key, modifiers, captured),
+        Message::WindowLeftPressed { window } => check_address_input_focus(daemon, window),
+        Message::AddressInputFocusChecked { window, is_focused } => {
+            handle_address_input_focus_checked(daemon, window, is_focused)
+        }
         Message::ModifiersChanged(modifiers) => {
             daemon.keyboard_modifiers = modifiers;
             // 滚轮轴向换算（竖向区 shift 横滚）需要 shift：视图包装层与
@@ -147,7 +172,12 @@ fn open_picker_window(daemon: &mut PickerDaemon, invocation: PickerInvocation) -
     daemon.window_by_request.insert(request_path, window_id);
 
     let scan_task = match effect {
-        SessionEffect::ScanDirectory(directory) => scan_directory_task(window_id, directory),
+        // begin() 返回导航类效果；此处只翻扫描任务——窗口 UI 尚未
+        // 构建，面包屑滚尾挂了也无效，初始深层目录的揭示由
+        // ScanReady 回填时的滚尾钩子完成。
+        SessionEffect::NavigateDirectory(directory) | SessionEffect::ScanDirectory(directory) => {
+            scan_directory_task(window_id, directory)
+        }
         _ => Task::none(),
     };
     Task::batch([
@@ -184,10 +214,30 @@ fn apply_session_message(
         },
         other => other,
     };
-    let wants_address_focus = matches!(session_message, SessionMessage::AddressEditingStarted);
+    // 根目录扫描回填（初始打开或导航完成）：面包屑已按新目录布局，
+    // 此时滚尾才有效——初始深层目录的揭示只能靠这个钩子（窗口构建
+    // 时刻 UI 还不存在，open_picker_window 里挂 scroll_to 无效）。
+    let is_root_scan_ready = matches!(
+        &session_message,
+        SessionMessage::ScanReady(result) if result.directory == session.directory()
+    );
+    // 会话消息的判别式须在 update 消费前留存；聚焦与否按 update 之后的
+    // 会话状态裁决（点面包屑当前段进编辑的判定在会话内完成，pre-state
+    // 还没有会话，提前算会漏聚焦）。
+    let may_begin_address_editing = matches!(
+        session_message,
+        SessionMessage::AddressEditingStarted | SessionMessage::BreadcrumbActivated { .. }
+    );
+    // 键盘补全把建议写入草稿后，光标必须落到草稿末尾（主软件
+    // move_cursor_to_end 同步）；仅凭 text_input 刷新不会移动光标。
+    let wants_address_cursor_end =
+        matches!(session_message, SessionMessage::CompleteSuggestion { .. });
     let effect = session.update(session_message);
+    // 进入编辑的两条路径都要聚焦 + 全选：点击地址栏空白（恒真）、
+    // 点击面包屑当前段（post-state 有会话才真）。
+    let wants_address_focus = may_begin_address_editing && session.address_editing().is_some();
     let focus_task = if wants_address_focus {
-        let input_id = iced::widget::Id::from(ADDRESS_INPUT_ID);
+        let input_id = view::address_input_id(session.request_path());
         Task::batch([
             iced::widget::operation::focus(input_id.clone()),
             iced::widget::operation::select_all(input_id),
@@ -195,12 +245,39 @@ fn apply_session_message(
     } else {
         Task::none()
     };
+    let cursor_task = if wants_address_cursor_end {
+        iced::widget::operation::move_cursor_to_end(view::address_input_id(session.request_path()))
+    } else {
+        Task::none()
+    };
+    // 根目录扫描回填的滚尾须在 session 借用结束前构造（后续
+    // Confirmed/Dismissed 分支要整体借用 daemon 记住目录）。
+    let breadcrumb_reveal_task = if is_root_scan_ready {
+        breadcrumb_scroll_to_end_task(session)
+    } else {
+        Task::none()
+    };
     let task = match effect {
-        SessionEffect::ScanDirectory(directory) => Task::batch([
+        // 导航类扫描：除扫描与布局探针外，面包屑滚到最右以揭示当前
+        // 目录段。scroll_to 可穿透 SmoothScrollArea（其 operate 转发
+        // 内层），Id 已按请求路径命名空间不会串窗。
+        SessionEffect::NavigateDirectory(directory) => Task::batch([
             scan_directory_task(window_id, directory),
-            // 内容骤变（导航/展开/初始扫描）后核实滚动条溢出。
+            breadcrumb_scroll_to_end_task(session),
             scrollbar_layout_probe_task(window_id, session),
         ]),
+        // 展开行扫描：只扫描 + 核实滚动条溢出，不滚面包屑（展开与
+        // 当前目录段无关，强滚会打断用户正在看的面包屑位置）。
+        SessionEffect::ScanDirectory(directory) => Task::batch([
+            scan_directory_task(window_id, directory),
+            scrollbar_layout_probe_task(window_id, session),
+        ]),
+        SessionEffect::StabilizeAddressInput { request } => {
+            stabilize_address_input_task(window_id, request)
+        }
+        SessionEffect::LoadPathSuggestions { request } => {
+            load_path_suggestions_task(window_id, request)
+        }
         SessionEffect::VerifyScrollbarLayout => scrollbar_layout_probe_task(window_id, session),
         SessionEffect::Confirmed(paths) => {
             tracing::info!("选择完成：{} 个条目", paths.len());
@@ -213,7 +290,7 @@ fn apply_session_message(
         }
         SessionEffect::None => Task::none(),
     };
-    Task::batch([task, focus_task])
+    Task::batch([task, focus_task, cursor_task, breadcrumb_reveal_task])
 }
 
 /// 会话产出的 Task 按所属窗口路由成全局消息。
@@ -253,6 +330,57 @@ fn scan_directory_task(window_id: window::Id, directory: std::path::PathBuf) -> 
     })
 }
 
+/// 防抖回信：停笔 120ms 后原样带回凭据；会话按凭据决定是否升级为
+/// 真正的读取请求（陈旧回信在会话侧拒收）。
+fn stabilize_address_input_task(
+    window_id: window::Id,
+    request: AddressSuggestionRequest,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            tokio::time::sleep(PATH_SUGGESTION_INPUT_STABILIZATION_DELAY).await;
+            request
+        },
+        move |request| {
+            Message::Session(
+                window_id,
+                SessionMessage::AddressSuggestionInputStabilized { request },
+            )
+        },
+    )
+}
+
+fn load_path_suggestions_task(
+    window_id: window::Id,
+    request: AddressSuggestionRequest,
+) -> Task<Message> {
+    Task::perform(
+        load_path_suggestions(request.draft.clone(), request.current_dir.clone()),
+        move |suggestions| {
+            Message::Session(
+                window_id,
+                SessionMessage::AddressSuggestionsLoaded {
+                    request,
+                    suggestions,
+                },
+            )
+        },
+    )
+}
+
+fn breadcrumb_scroll_to_end_task(session: &PickerSession) -> Task<Message> {
+    iced::widget::operation::scroll_to(
+        picker_session::scrollbar::scroll_id(
+            session.request_path(),
+            SessionScrollRegion::Breadcrumb,
+        ),
+        iced::widget::scrollable::AbsoluteOffset {
+            x: f32::MAX,
+            y: 0.0,
+        },
+    )
+}
+
 fn close_picker_window(daemon: &mut PickerDaemon, window_id: window::Id) {
     if let Some(session) = daemon.windows.remove(&window_id) {
         daemon.window_by_request.remove(session.request_path());
@@ -260,36 +388,175 @@ fn close_picker_window(daemon: &mut PickerDaemon, window_id: window::Id) {
     }
 }
 
-fn handle_key(daemon: &PickerDaemon, window: window::Id, key: keyboard::Key) -> Task<Message> {
-    if !daemon.windows.contains_key(&window) {
+fn handle_key(
+    daemon: &PickerDaemon,
+    window: window::Id,
+    key: keyboard::Key,
+    modifiers: keyboard::Modifiers,
+    captured: bool,
+) -> Task<Message> {
+    let Some(session) = daemon.windows.get(&window) else {
         return Task::none();
-    }
-    // Ctrl+A 全选：仅在文本输入未捕获时到达这里（listen_with 只转发 Ignored）。
-    if let keyboard::Key::Character(character) = &key {
-        if character.eq_ignore_ascii_case("a") && daemon.keyboard_modifiers.control() {
-            return Task::perform(async {}, move |_| {
-                Message::Session(window, SessionMessage::SelectAllPressed)
-            });
+    };
+
+    // 补全面板的方向键/Tab 优先于一切：text_input 聚焦会捕获这些键
+    //（captured=true），必须在此消费而不是等 Ignored——与主软件在
+    // 全局 handler 先查 address_suggestion_keyboard_is_active 同构。
+    if session.address_suggestion_keyboard_is_active() {
+        if let Some(message) = address_suggestion_key_message(&key, modifiers) {
+            return dispatch_session_message(window, message);
         }
     }
-    // 编辑地址时 Esc 只退出编辑，不关闭窗口。
-    let editing_address = daemon
-        .windows
-        .get(&window)
-        .is_some_and(|session| session.address_edit().is_some());
-    let escape_message = if editing_address {
-        SessionMessage::AddressEditingCancelled
-    } else {
-        SessionMessage::DismissPressed
-    };
+
+    // 编辑态 Esc 即使被 text_input 捕获也要能退出编辑；非编辑态仅
+    // Ignored 的 Esc 才关闭窗口。
+    if matches!(key, keyboard::Key::Named(keyboard::key::Named::Escape)) {
+        if session.address_editing().is_some() {
+            return dispatch_session_message(window, SessionMessage::AddressEditingCancelled);
+        }
+        if !captured {
+            return dispatch_session_message(window, SessionMessage::DismissPressed);
+        }
+        return Task::none();
+    }
+
+    // 其余全局动作（Enter 确认、Ctrl+A 全选）只认 Ignored：text_input
+    // 已用 Enter 提交草稿、用 Ctrl+A 选中文本，重复触发会互相打架。
+    if captured {
+        return Task::none();
+    }
+    if let keyboard::Key::Character(character) = &key {
+        if character.eq_ignore_ascii_case("a") && modifiers.control() {
+            return dispatch_session_message(window, SessionMessage::SelectAllPressed);
+        }
+    }
     match key {
-        keyboard::Key::Named(keyboard::key::Named::Escape) => Task::perform(async {}, move |_| {
-            Message::Session(window, escape_message.clone())
-        }),
-        keyboard::Key::Named(keyboard::key::Named::Enter) => Task::perform(async {}, move |_| {
-            Message::Session(window, SessionMessage::ConfirmPressed)
-        }),
+        keyboard::Key::Named(keyboard::key::Named::Enter) => {
+            dispatch_session_message(window, SessionMessage::ConfirmPressed)
+        }
         _ => Task::none(),
+    }
+}
+
+/// 补全面板活跃时的按键映射（主软件 handle_path_suggestion_keyboard_
+/// key 同构）：↓/无修饰 = Next，↑/无修饰 = Previous，Tab/无修饰 =
+/// 补全 Next，Shift+Tab = 补全 Previous；带其他修饰键不拦截。
+fn address_suggestion_key_message(
+    key: &keyboard::Key,
+    modifiers: keyboard::Modifiers,
+) -> Option<SessionMessage> {
+    let no_shortcut_modifiers =
+        !modifiers.alt() && !modifiers.control() && !modifiers.command() && !modifiers.shift();
+    let only_shift_modifier =
+        modifiers.shift() && !modifiers.alt() && !modifiers.control() && !modifiers.command();
+    match key.as_ref() {
+        keyboard::Key::Named(keyboard::key::Named::ArrowDown) if no_shortcut_modifiers => {
+            Some(SessionMessage::MoveSuggestionSelection {
+                direction: PathSuggestionDirection::Next,
+            })
+        }
+        keyboard::Key::Named(keyboard::key::Named::ArrowUp) if no_shortcut_modifiers => {
+            Some(SessionMessage::MoveSuggestionSelection {
+                direction: PathSuggestionDirection::Previous,
+            })
+        }
+        keyboard::Key::Named(keyboard::key::Named::Tab) if only_shift_modifier => {
+            Some(SessionMessage::CompleteSuggestion {
+                direction: PathSuggestionDirection::Previous,
+            })
+        }
+        keyboard::Key::Named(keyboard::key::Named::Tab) if no_shortcut_modifiers => {
+            Some(SessionMessage::CompleteSuggestion {
+                direction: PathSuggestionDirection::Next,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn dispatch_session_message(window: window::Id, message: SessionMessage) -> Task<Message> {
+    Task::perform(async {}, move |_| Message::Session(window, message))
+}
+
+/// 左键按下后探查地址输入框焦点：仅窗口处于编辑态时发起（主软件
+/// handle_window_pointer_pressed 里 AddressInputFocusChecked 的机制照搬
+/// ——text_input 在点击落到自身 bounds 之外时会自行失焦，控件消息先于
+/// 本 subscription 消息入队，探查时焦点已就位，结果可信）。
+fn check_address_input_focus(daemon: &PickerDaemon, window_id: window::Id) -> Task<Message> {
+    let Some(session) = daemon.windows.get(&window_id) else {
+        return Task::none();
+    };
+    if session.address_editing().is_none() {
+        return Task::none();
+    }
+    iced::advanced::widget::operate(AddressInputFocusCheck::new(
+        window_id,
+        view::address_input_id(session.request_path()),
+    ))
+}
+
+/// 探查回信：失焦且编辑会话仍在（未被同批的提交/取消消费，如点击
+/// 建议行先提交导航）才取消编辑——与主软件 AddressInputFocusChecked
+/// 处理里的 checked_session_is_current 复核同构。
+fn handle_address_input_focus_checked(
+    daemon: &mut PickerDaemon,
+    window_id: window::Id,
+    is_focused: bool,
+) -> Task<Message> {
+    if is_focused {
+        return Task::none();
+    }
+    let session_still_editing = daemon
+        .windows
+        .get(&window_id)
+        .is_some_and(|session| session.address_editing().is_some());
+    if session_still_editing {
+        apply_session_message(daemon, window_id, SessionMessage::AddressEditingCancelled)
+    } else {
+        Task::none()
+    }
+}
+
+/// 焦点探查 operation：遍历控件树读取目标输入框的焦点态（主软件
+/// windows.rs 的 TextInputFocusCheck 同构；Id 按请求路径命名空间保证
+/// 只命中本窗口的输入框）。
+struct AddressInputFocusCheck {
+    window: window::Id,
+    target: iced::widget::Id,
+    is_focused: bool,
+}
+
+impl AddressInputFocusCheck {
+    fn new(window: window::Id, target: iced::widget::Id) -> Self {
+        Self {
+            window,
+            target,
+            is_focused: false,
+        }
+    }
+}
+
+impl Operation<Message> for AddressInputFocusCheck {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<Message>)) {
+        operate(self);
+    }
+
+    fn focusable(
+        &mut self,
+        id: Option<&iced::widget::Id>,
+        _bounds: Rectangle,
+        state: &mut dyn Focusable,
+    ) {
+        if id == Some(&self.target) {
+            self.is_focused = state.is_focused();
+        }
+    }
+
+    fn finish(&self) -> Outcome<Message> {
+        Outcome::Some(Message::AddressInputFocusChecked {
+            window: self.window,
+            is_focused: self.is_focused,
+        })
     }
 }
 
@@ -297,13 +564,8 @@ fn view_picker(daemon: &PickerDaemon, window_id: window::Id) -> Element<'_, Mess
     let Some(session) = daemon.windows.get(&window_id) else {
         return iced::widget::text("").into();
     };
-    view::picker_window_view(
-        session,
-        &daemon.theme,
-        iced::widget::Id::from(ADDRESS_INPUT_ID),
-        |message| message,
-    )
-    .map(move |message| Message::Session(window_id, message))
+    view::picker_window_view(session, &daemon.theme, |message| message)
+        .map(move |message| Message::Session(window_id, message))
 }
 
 fn daemon_title(daemon: &PickerDaemon, window_id: window::Id) -> String {
@@ -319,13 +581,22 @@ fn subscription(daemon: &PickerDaemon) -> Subscription<Message> {
         Subscription::run(bridge_events),
         window::close_events().map(Message::WindowClosed),
         iced::event::listen_with(|event, status, window_id| match event {
-            iced::Event::Keyboard(keyboard::Event::KeyPressed { key, .. })
-                if matches!(status, iced::event::Status::Ignored) =>
-            {
+            // 键盘事件无差别转发（Captured 也收）：补全面板的 ↑/↓/Tab
+            // 与编辑态 Esc 都要抢在焦点控件的捕获语义之前生效；是否
+            // 尊重捕获由 handle_key 按动作分类裁决。
+            iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
                 Some(Message::KeyPressed {
                     window: window_id,
                     key,
+                    modifiers,
+                    captured: matches!(status, iced::event::Status::Captured),
                 })
+            }
+            // 左键按下（无论是否被控件捕获）都可能把焦点从地址输入框
+            // 移走：text_input 对 bounds 外的点击自行失焦。探查在
+            // update 侧按「窗口处于编辑态」过滤，非编辑窗口零开销。
+            iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                Some(Message::WindowLeftPressed { window: window_id })
             }
             // 鼠标侧键 = 后退/前进（与主程序一致，被捕获时不触发）。
             iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Back))
@@ -345,8 +616,9 @@ fn subscription(daemon: &PickerDaemon) -> Subscription<Message> {
         }),
         iced::time::every(IDLE_TICK_INTERVAL).map(|_| Message::IdleTick),
     ];
-    // 仅在有窗口播放展开/收起动画时订阅帧时钟，动画结束自然摘除——
-    // 与主应用按动画活跃度挂载 time::every 订阅同模式。
+    // 仅在有窗口播放动画（展开/收起、地址栏渐变、惯性滚动、滚动条
+    // 淡入淡出）时订阅帧时钟，动画结束自然摘除——与主应用按动画
+    // 活跃度挂载 time::every 同模式。
     if daemon.windows.values().any(PickerSession::is_animating) {
         subscriptions
             .push(iced::time::every(ANIMATION_FRAME_INTERVAL).map(|_| Message::AnimationTick));

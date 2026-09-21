@@ -343,6 +343,126 @@ pub fn navigation_text_input_style(theme: &Theme, status: text_input::Status) ->
     style
 }
 
+// ---------------------------------------------------------------------------
+// 地址栏样式组：主程序地址栏与 portal FileChooser 地址栏共用同一份视觉。
+// 值自主程序 app-ui 原样搬移，一个数值都不许漂移。
+// ---------------------------------------------------------------------------
+
+/// 地址栏外框：与导航输入框共用同一圆角框面，让编辑态输入框恰好覆盖
+/// 面包屑层而不露出第二层边框。
+pub fn address_bar_style(theme: &Theme) -> container::Style {
+    let input_style = navigation_text_input_style(theme, text_input::Status::Active);
+    container::Style {
+        background: Some(input_style.background),
+        border: input_style.border,
+        ..container::Style::default()
+    }
+}
+
+/// 透明无框按钮样式入口（地址栏面包屑段等使用）。
+pub fn transparent_button_style() -> fn(&Theme, button::Status) -> button::Style {
+    transparent_icon_button_style
+}
+
+pub fn scale_color_alpha(color: Color, opacity: f32) -> Color {
+    Color {
+        a: color.a * opacity.clamp(0.0, 1.0),
+        ..color
+    }
+}
+
+pub fn scale_background_alpha(background: Background, opacity: f32) -> Background {
+    match background {
+        Background::Color(color) => Background::Color(scale_color_alpha(color, opacity)),
+        Background::Gradient(gradient) => Background::Gradient(gradient),
+    }
+}
+
+/// 路径补全面板：浅色面 + 细边 + 圆角 8。
+pub fn path_suggestions_style(theme: &Theme) -> container::Style {
+    let colors = ui_colors(theme);
+    container::Style {
+        background: Some(Background::Color(colors.surface_container_low)),
+        text_color: Some(colors.on_surface),
+        border: Border {
+            color: subtle_border_color(theme),
+            width: 1.0,
+            radius: 8.0.into(),
+        },
+        ..container::Style::default()
+    }
+}
+
+/// 补全建议行常态：surface_container 底 + 圆角 6。
+pub fn path_suggestion_item_style(theme: &Theme) -> container::Style {
+    let colors = ui_colors(theme);
+    container::Style {
+        background: Some(Background::Color(colors.surface_container)),
+        text_color: Some(colors.on_surface),
+        border: Border {
+            radius: 6.0.into(),
+            ..Border::default()
+        },
+        ..container::Style::default()
+    }
+}
+
+/// 补全建议选中行：primary container 底 + 圆角 6。
+pub fn selected_path_suggestion_item_style(theme: &Theme) -> container::Style {
+    let colors = ui_colors(theme);
+    container::Style {
+        background: Some(Background::Color(colors.primary_container)),
+        text_color: Some(colors.on_primary_container),
+        border: Border {
+            radius: 6.0.into(),
+            ..Border::default()
+        },
+        ..container::Style::default()
+    }
+}
+
+/// 面包屑段按钮：透明底随编辑渐变淡出；拖放悬停目标复用补全选中行
+/// 的底色/描边，保证“可放置”反馈与选中语义同色。
+pub fn faded_button_style(
+    theme: &Theme,
+    status: button::Status,
+    opacity: f32,
+    is_drop_target: bool,
+) -> button::Style {
+    let mut style = transparent_icon_button_style(theme, status);
+    if is_drop_target {
+        let target_style = selected_path_suggestion_item_style(theme);
+        style.background = target_style.background;
+        if let Some(text_color) = target_style.text_color {
+            style.text_color = text_color;
+        }
+        style.border = target_style.border;
+    }
+    style.text_color = scale_color_alpha(style.text_color, opacity);
+    style.border.color = scale_color_alpha(style.border.color, opacity);
+    style.background = style
+        .background
+        .map(|background| scale_background_alpha(background, opacity));
+    style
+}
+
+/// 编辑态地址输入框：去掉边框只留底色，随过渡 fraction 淡入淡出，
+/// 与面包屑层叠时不产生第二层边框。
+pub fn faded_text_input_style(
+    theme: &Theme,
+    status: text_input::Status,
+    opacity: f32,
+) -> text_input::Style {
+    let mut style = navigation_text_input_style(theme, status);
+    style.border.width = 0.0;
+    style.border.color = Color::TRANSPARENT;
+    style.icon = scale_color_alpha(style.icon, opacity);
+    style.placeholder = scale_color_alpha(style.placeholder, opacity);
+    style.value = scale_color_alpha(style.value, opacity);
+    style.selection = scale_color_alpha(style.selection, opacity);
+    style
+}
+
 pub fn enhanced_scrollbar_style(
     visibility: ScrollbarVisibility,
 ) -> impl Fn(&Theme, scrollable::Status) -> scrollable::Style + Clone {

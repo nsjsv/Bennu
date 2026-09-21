@@ -4,6 +4,7 @@ use super::*;
 use crate::picker_request::FilePattern;
 use crate::picker_session::scan::DirectoryScanOutcome;
 use std::fs;
+mod address_editing;
 
 fn spec(kind: PickerKind, filters: Vec<FilterRule>) -> PickerRequestSpec {
     PickerRequestSpec {
@@ -123,14 +124,6 @@ fn select_all_is_ignored_outside_multi_open_mode() {
     seeded_listing(&mut session, &[("a.txt", FileKind::File)]);
     session.update(SessionMessage::SelectAllPressed);
     assert!(session.selection().is_empty());
-}
-
-#[test]
-fn breadcrumb_chain_lists_ancestors_root_first() {
-    let chain = breadcrumb_chain(Path::new("/home/u/Downloads"));
-    assert_eq!(chain.len(), 4);
-    assert_eq!(chain[0], Path::new("/"));
-    assert_eq!(chain[3], Path::new("/home/u/Downloads"));
 }
 
 #[test]
@@ -346,7 +339,7 @@ fn double_click_directory_navigates() {
         }),
     });
     let effect = session.update(SessionMessage::EntryDoubleClicked { index: 0 });
-    assert!(matches!(effect, SessionEffect::ScanDirectory(target) if target == child));
+    assert!(matches!(effect, SessionEffect::NavigateDirectory(target) if target == child));
 }
 
 #[test]
@@ -590,24 +583,6 @@ fn loading_expansion_ignores_duplicate_toggles() {
 }
 
 #[test]
-fn navigation_clears_expansions_and_address_editing() {
-    let (mut session, _receiver) = session(PickerKind::OpenFile {
-        multiple: false,
-        directory: false,
-    });
-    seeded_listing(&mut session, &[("sub", FileKind::Directory)]);
-    session.update(SessionMessage::EntryExpandToggled { index: 0 });
-    session.update(SessionMessage::AddressEditingStarted);
-    assert!(session.address_edit().is_some());
-
-    let target = session.directory().join("sub");
-    session.update(SessionMessage::EntryDoubleClicked { index: 0 });
-    assert_eq!(session.directory(), target);
-    assert!(session.address_edit().is_none());
-    assert!(matches!(session.listing(), DirectoryListing::Pending));
-}
-
-#[test]
 fn history_back_and_forward_follow_the_visit_order() {
     let (mut session, _receiver) = session(PickerKind::OpenFile {
         multiple: false,
@@ -658,7 +633,7 @@ fn new_navigation_after_back_truncates_the_forward_branch() {
     session.update(SessionMessage::EntryDoubleClicked { index: 0 });
     session.update(SessionMessage::NavigateBack);
     let forward = session.update(SessionMessage::NavigateForward);
-    assert!(matches!(forward, SessionEffect::ScanDirectory(_)));
+    assert!(matches!(forward, SessionEffect::NavigateDirectory(_)));
     session.update(SessionMessage::NavigateBack);
 
     // 回退后走新分支：前进历史被截断。
@@ -672,39 +647,5 @@ fn new_navigation_after_back_truncates_the_forward_branch() {
     let stuck = session.update(SessionMessage::NavigateForward);
     assert!(matches!(stuck, SessionEffect::None));
     let back = session.update(SessionMessage::NavigateBack);
-    assert!(matches!(back, SessionEffect::ScanDirectory(_)));
-}
-
-#[test]
-fn address_editing_prefills_navigates_and_cancels() {
-    let (mut session, _receiver) = session(PickerKind::OpenFile {
-        multiple: false,
-        directory: false,
-    });
-    seeded_listing(&mut session, &[("a", FileKind::Directory)]);
-    let start = session.directory().to_path_buf();
-
-    session.update(SessionMessage::AddressEditingStarted);
-    assert_eq!(
-        session.address_edit(),
-        Some(start.to_string_lossy().as_ref())
-    );
-
-    // 空草稿提交 = 取消编辑，留在原地。
-    session.update(SessionMessage::AddressEditChanged("  ".to_string()));
-    session.update(SessionMessage::AddressEditingSubmitted);
-    assert_eq!(session.directory(), start);
-    assert!(session.address_edit().is_none());
-
-    // 相对路径拼接当前目录；成功导航后编辑态退出。
-    session.update(SessionMessage::AddressEditingStarted);
-    session.update(SessionMessage::AddressEditChanged("a".to_string()));
-    let effect = session.update(SessionMessage::AddressEditingSubmitted);
-    assert!(matches!(effect, SessionEffect::ScanDirectory(dir) if dir == start.join("a")));
-    assert!(session.address_edit().is_none());
-
-    // 取消编辑。
-    session.update(SessionMessage::AddressEditingStarted);
-    session.update(SessionMessage::AddressEditingCancelled);
-    assert!(session.address_edit().is_none());
+    assert!(matches!(back, SessionEffect::NavigateDirectory(_)));
 }

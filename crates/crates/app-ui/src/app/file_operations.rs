@@ -442,7 +442,7 @@ impl FileBrowser {
             *path = path_after_completed_migrations(path, migrations);
         }
         if let Some(address_editing) = &mut self.address_editing {
-            for suggestion in &mut address_editing.suggestions {
+            for suggestion in &mut address_editing.session.suggestions {
                 *suggestion = path_after_completed_migrations(suggestion, migrations);
             }
         }

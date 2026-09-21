@@ -33,8 +33,10 @@ pub(crate) use bennu_theme::styles::{
     button_surface_color, context_menu_item_button_style, elevation_shadow_color,
     enhanced_both_scrollbar_direction, enhanced_horizontal_scrollbar_direction,
     enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction, error_notification_style,
-    hovered_row_style, icon_svg_style, list_row_style, muted_icon_svg_style, muted_text_color,
-    selected_icon_svg_style, subtle_border_color, surface_button_style,
+    faded_button_style, faded_text_input_style, hovered_row_style, icon_svg_style, list_row_style,
+    muted_icon_svg_style, muted_text_color, path_suggestion_item_style, path_suggestions_style,
+    scale_color_alpha, selected_icon_svg_style, selected_path_suggestion_item_style,
+    subtle_border_color, surface_button_style, transparent_button_style,
     transparent_icon_button_style, warning_icon_svg_style,
 };
 
@@ -148,10 +150,6 @@ pub(crate) fn operation_queue_indicator_button_style() -> fn(&Theme, button::Sta
     transparent_icon_button_style
 }
 
-pub(crate) fn transparent_button_style() -> fn(&Theme, button::Status) -> button::Style {
-    transparent_icon_button_style
-}
-
 /// 分组索引栏按钮:常态透明无框文本按钮(既定 UI 偏好),悬停浮起
 /// 浅色面;当前可视区所在组常亮浅色面,悬停其上再加深一档。
 pub(crate) fn grouping_rail_button_style(
@@ -190,45 +188,6 @@ pub(crate) fn grouping_rail_button_style(
 
 pub(crate) fn context_menu_button_style() -> fn(&Theme, button::Status) -> button::Style {
     surface_button_style
-}
-pub(crate) fn path_suggestions_style(theme: &Theme) -> container::Appearance {
-    let colors = ui_colors(theme);
-    container::Appearance {
-        background: Some(Background::Color(colors.surface_container_low)),
-        text_color: Some(colors.on_surface),
-        border: Border {
-            color: subtle_border_color(theme),
-            width: 1.0,
-            radius: 8.0.into(),
-        },
-        ..container::Appearance::default()
-    }
-}
-
-pub(crate) fn path_suggestion_item_style(theme: &Theme) -> container::Appearance {
-    let colors = ui_colors(theme);
-    container::Appearance {
-        background: Some(Background::Color(colors.surface_container)),
-        text_color: Some(colors.on_surface),
-        border: Border {
-            radius: 6.0.into(),
-            ..Border::default()
-        },
-        ..container::Appearance::default()
-    }
-}
-
-pub(crate) fn selected_path_suggestion_item_style(theme: &Theme) -> container::Appearance {
-    let colors = ui_colors(theme);
-    container::Appearance {
-        background: Some(Background::Color(colors.primary_container)),
-        text_color: Some(colors.on_primary_container),
-        border: Border {
-            radius: 6.0.into(),
-            ..Border::default()
-        },
-        ..container::Appearance::default()
-    }
 }
 
 pub(crate) fn preview_panel_style(theme: &Theme) -> container::Appearance {

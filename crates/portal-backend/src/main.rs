@@ -153,6 +153,10 @@ fn open_picker_window(daemon: &mut PickerDaemon, invocation: PickerInvocation) -
         decorations: true,
         ..window::Settings::default()
     };
+    // 独立 app-id 供 niri window-rule 悬浮匹配（docs/niri.md），与 app-ui
+    // 的 bennu-* 窗口家族保持同一命名约定。
+    let mut settings = settings;
+    settings.platform_specific.application_id = "bennu-filechooser".to_owned();
     let (window_id, open_task) = window::open(settings);
     daemon.windows.insert(window_id, session);
 

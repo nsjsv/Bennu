@@ -10,6 +10,8 @@ Bennu 的设置、属性和预览都是独立窗口。在 [Niri](https://github.
 | 设置 | `bennu-settings` |
 | 属性 | `bennu-properties` |
 | 预览 | `bennu-preview` |
+| 传输 | `bennu-transfer` |
+| 文件选择器（portal 进程） | `bennu-filechooser` |
 
 ## 添加 window-rule
 
@@ -20,6 +22,8 @@ window-rule {
     match app-id="bennu-settings"
     match app-id="bennu-properties"
     match app-id="bennu-preview"
+    match app-id="bennu-transfer"
+    match app-id="bennu-filechooser"
     open-floating true
 }
 ```

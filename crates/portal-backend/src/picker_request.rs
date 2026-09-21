@@ -31,7 +31,7 @@ pub(crate) enum PickerKind {
 }
 
 impl PickerKind {
-    /// 窗口标题缺省值：调用方 title 为空串时的兜底。
+    /// 窗口标题缺省值：调用方未提供 title（空串/纯空白归一化为 None）时的兜底。
     pub(crate) fn default_title(&self) -> &'static str {
         match self {
             PickerKind::OpenFile {
@@ -48,6 +48,9 @@ impl PickerKind {
 pub(crate) struct PickerRequestSpec {
     pub(crate) kind: PickerKind,
     pub(crate) accept_label: Option<String>,
+    /// 调用方 title 入参；协议里空串等价未提供，归一化为 None 走默认
+    /// 标题；纯空白串视同空串处理。仅作窗口标题显示，不参与选择语义。
+    pub(crate) title: Option<String>,
     pub(crate) filters: Vec<FilterRule>,
     pub(crate) active_filter: Option<usize>,
     /// 调用方通过 `current_folder` 指定的起始目录。
@@ -56,14 +59,17 @@ pub(crate) struct PickerRequestSpec {
 
 impl PickerRequestSpec {
     /// 从 D-Bus options 容器解析。`kind_seed` 由调用来源（OpenFile/SaveFile）
-    /// 决定；options 只补充该来源允许的标志。
+    /// 决定；options 只补充该来源允许的标志。`title` 来自方法入参而非
+    /// options（协议的 title 是独立位置参数）。
     pub(crate) fn from_options(
         kind_seed: PickerKind,
+        title: &str,
         options: &HashMap<String, Value<'_>>,
     ) -> Self {
         let mut spec = PickerRequestSpec {
             kind: kind_seed,
             accept_label: None,
+            title: (!title.trim().is_empty()).then(|| title.to_string()),
             filters: Vec::new(),
             active_filter: None,
             start_folder: None,
@@ -254,6 +260,7 @@ mod tests {
                 multiple: false,
                 directory: false,
             },
+            "",
             &options(Vec::new()),
         );
         assert_eq!(
@@ -264,8 +271,39 @@ mod tests {
             }
         );
         assert_eq!(spec.accept_label, None);
+        assert_eq!(spec.title, None);
         assert!(spec.filters.is_empty());
         assert_eq!(spec.active_filter, None);
+    }
+
+    #[test]
+    fn empty_title_normalizes_to_none() {
+        let spec = PickerRequestSpec::from_options(
+            PickerKind::SaveFile { default_name: None },
+            "",
+            &options(Vec::new()),
+        );
+        assert_eq!(spec.title, None);
+    }
+
+    #[test]
+    fn whitespace_title_normalizes_to_none() {
+        let spec = PickerRequestSpec::from_options(
+            PickerKind::SaveFile { default_name: None },
+            " ",
+            &options(Vec::new()),
+        );
+        assert_eq!(spec.title, None);
+    }
+
+    #[test]
+    fn caller_title_parses() {
+        let spec = PickerRequestSpec::from_options(
+            PickerKind::SaveFile { default_name: None },
+            "导出报告",
+            &options(Vec::new()),
+        );
+        assert_eq!(spec.title.as_deref(), Some("导出报告"));
     }
 
     #[test]
@@ -275,6 +313,7 @@ mod tests {
                 multiple: false,
                 directory: false,
             },
+            "",
             &options(vec![
                 ("multiple", Value::Bool(true)),
                 ("directory", Value::Bool(true)),
@@ -295,6 +334,7 @@ mod tests {
     fn save_file_default_name_parses() {
         let spec = PickerRequestSpec::from_options(
             PickerKind::SaveFile { default_name: None },
+            "",
             &options(vec![("current_name", Value::Str(Str::from("报告.pdf")))]),
         );
         assert_eq!(
@@ -309,6 +349,7 @@ mod tests {
     fn multiple_flag_ignored_for_save_file() {
         let spec = PickerRequestSpec::from_options(
             PickerKind::SaveFile { default_name: None },
+            "",
             &options(vec![("multiple", Value::Bool(true))]),
         );
         assert_eq!(spec.kind, PickerKind::SaveFile { default_name: None });
@@ -325,6 +366,7 @@ mod tests {
                     multiple: false,
                     directory: false,
                 },
+                "",
                 &options(vec![("current_folder", value)]),
             );
             assert_eq!(
@@ -341,6 +383,7 @@ mod tests {
                 multiple: false,
                 directory: false,
             },
+            "",
             &options(vec![("current_folder", Value::Str(Str::from("relative")))]),
         );
         assert_eq!(spec.start_folder, None);
@@ -370,6 +413,7 @@ mod tests {
                 multiple: false,
                 directory: false,
             },
+            "",
             &options(vec![("filters", filters), ("current_filter", current)]),
         );
 
@@ -390,6 +434,7 @@ mod tests {
                 multiple: false,
                 directory: false,
             },
+            "",
             &options(vec![(
                 "filters",
                 Value::Array(zbus::zvariant::Array::from(vec![broken])),

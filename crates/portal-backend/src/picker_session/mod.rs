@@ -164,6 +164,8 @@ pub(crate) struct PickerSession {
     request_path: String,
     kind: PickerKind,
     accept_label: Option<String>,
+    /// 调用方指定的窗口标题；仅作显示，空缺时回落模式默认标题。
+    title: Option<String>,
     filters: Vec<FilterRule>,
     active_filter: PickerFilter,
     directory: PathBuf,
@@ -210,6 +212,7 @@ impl PickerSession {
         let PickerRequestSpec {
             kind,
             accept_label,
+            title,
             filters,
             active_filter,
             ..
@@ -232,6 +235,7 @@ impl PickerSession {
             request_path,
             kind: kind.clone(),
             accept_label: accept_label.clone(),
+            title: title.clone(),
             filters: filters.clone(),
             active_filter,
             directory: start_directory.clone(),
@@ -294,6 +298,10 @@ impl PickerSession {
 
     pub(crate) fn kind(&self) -> &PickerKind {
         &self.kind
+    }
+
+    pub(crate) fn title(&self) -> Option<&str> {
+        self.title.as_deref()
     }
 
     pub(crate) fn name_input(&self) -> &str {

@@ -26,6 +26,7 @@ bash "@PAYLOAD_SCRIPT@" "%{buildroot}" "@APP_BINARY@" "@DAEMON_BINARY@" "@PORTAL
 /usr/bin/bennu
 /usr/lib/bennu/bennu-searchd
 /usr/lib/systemd/user/bennu-search.service
+/usr/lib/systemd/user/bennu-portal.service
 /usr/share/applications/bennu.desktop
 /usr/share/icons/hicolor/512x512/apps/bennu.png
 /usr/share/bennu/matugen/bennu-colors.toml

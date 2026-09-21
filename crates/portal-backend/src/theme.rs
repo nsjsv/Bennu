@@ -1,8 +1,9 @@
 //! FileChooser 窗口的启动主题解析。与主程序走同一条构造链路
 //! （`bennu_theme::ApplicationTheme::active`），保证两种进程呈现同一套
 //! 配色：显式预设/Custom 按存储值解析，matugen 仅在选中时生效，其余
-//! 情况回退系统深浅检测。portal 进程空闲自灭，启动解析一次即可，
-//! 不做运行期热跟随。
+//! 情况回退系统深浅检测。portal 进程常驻，主题在每次开窗时重新调用
+//! 本解析（见 main.rs 的 open_picker_window），否则会锁死在登录时刻；
+//! 窗口存续期间不做热跟随。
 
 use std::path::Path;
 

@@ -1,3 +1,4 @@
 [D-BUS Service]
 Name=org.freedesktop.impl.portal.desktop.bennu
 Exec=/usr/bin/bennu-portal
+SystemdService=bennu-portal.service

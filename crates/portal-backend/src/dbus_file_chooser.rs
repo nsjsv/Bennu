@@ -47,13 +47,14 @@ impl FileChooserInterface {
     async fn begin_invocation(
         &self,
         handle: &ObjectPath<'_>,
+        title: &str,
         options: &HashMap<String, Value<'_>>,
         kind_seed: PickerKind,
     ) -> fdo::Result<(u32, HashMap<String, Value<'_>>)> {
         let (reply_sender, reply_receiver) = oneshot::channel();
         let invocation = PickerInvocation {
             request_path: handle.to_string(),
-            spec: PickerRequestSpec::from_options(kind_seed, options),
+            spec: PickerRequestSpec::from_options(kind_seed, title, options),
             reply: reply_sender,
         };
 
@@ -80,14 +81,15 @@ impl FileChooserInterface {
         handle: ObjectPath<'_>,
         _app_id: &str,
         _parent_window: &str,
-        _title: &str,
+        title: &str,
         options: HashMap<String, Value<'_>>,
     ) -> fdo::Result<(u32, HashMap<String, Value<'_>>)> {
         let kind_seed = PickerKind::OpenFile {
             multiple: false,
             directory: false,
         };
-        self.begin_invocation(&handle, &options, kind_seed).await
+        self.begin_invocation(&handle, title, &options, kind_seed)
+            .await
     }
 
     /// 另存为：选目标目录并输入文件名。选项：current_name / current_folder /
@@ -97,11 +99,12 @@ impl FileChooserInterface {
         handle: ObjectPath<'_>,
         _app_id: &str,
         _parent_window: &str,
-        _title: &str,
+        title: &str,
         options: HashMap<String, Value<'_>>,
     ) -> fdo::Result<(u32, HashMap<String, Value<'_>>)> {
         let kind_seed = PickerKind::SaveFile { default_name: None };
-        self.begin_invocation(&handle, &options, kind_seed).await
+        self.begin_invocation(&handle, title, &options, kind_seed)
+            .await
     }
 
     /// 批量保存：本后端不支持，按协议返回显式错误。

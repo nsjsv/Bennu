@@ -23,6 +23,7 @@ DAEMON_BINARY_NAME=bennu-searchd
 ACTIVATION_SERVICE_FILE=io.github.nsjsv.Bennu.service
 PORTAL_BINARY_NAME=bennu-portal
 PORTAL_BUS_SERVICE_FILE=org.freedesktop.impl.portal.desktop.bennu.service
+PORTAL_SYSTEMD_UNIT_FILE=bennu-portal.service
 PORTAL_DECLARATION_FILE=bennu.portal
 
 install -Dm755 "${APP_BINARY}" "${PAYLOAD_DIR}/usr/bin/${APP_NAME}"
@@ -42,6 +43,9 @@ install -Dm644 "${REPO_ROOT}/packaging/matugen/README.md" \
 install -Dm644 "${REPO_ROOT}/packaging/linux/${ACTIVATION_SERVICE_FILE}" \
     "${PAYLOAD_DIR}/usr/share/dbus-1/services/${ACTIVATION_SERVICE_FILE}"
 install -Dm755 "${PORTAL_BINARY}" "${PAYLOAD_DIR}/usr/bin/${PORTAL_BINARY_NAME}"
+# 常驻 unit：Type=dbus，经 D-Bus activation（SystemdService 关联）拉起后随会话常驻。
+install -Dm644 "${REPO_ROOT}/packaging/linux/${PORTAL_SYSTEMD_UNIT_FILE}" \
+    "${PAYLOAD_DIR}/usr/lib/systemd/user/${PORTAL_SYSTEMD_UNIT_FILE}"
 install -Dm644 "${REPO_ROOT}/packaging/linux/${PORTAL_BUS_SERVICE_FILE}" \
     "${PAYLOAD_DIR}/usr/share/dbus-1/services/${PORTAL_BUS_SERVICE_FILE}"
 # 不写 UseIn：仅当用户在 portals.conf 显式选择 bennu 时才接管 FileChooser。
@@ -58,5 +62,6 @@ test -f "${PAYLOAD_DIR}/usr/share/${APP_NAME}/matugen/bennu-colors.toml"
 test -f "${PAYLOAD_DIR}/usr/share/doc/${APP_NAME}/matugen.md"
 test -f "${PAYLOAD_DIR}/usr/share/dbus-1/services/${ACTIVATION_SERVICE_FILE}"
 test -x "${PAYLOAD_DIR}/usr/bin/${PORTAL_BINARY_NAME}"
+test -f "${PAYLOAD_DIR}/usr/lib/systemd/user/${PORTAL_SYSTEMD_UNIT_FILE}"
 test -f "${PAYLOAD_DIR}/usr/share/dbus-1/services/${PORTAL_BUS_SERVICE_FILE}"
 test -f "${PAYLOAD_DIR}/usr/share/xdg-desktop-portal/portals/${PORTAL_DECLARATION_FILE}"

@@ -53,6 +53,54 @@
 删除或注释掉 portals.conf 中的 bennu 行，再重启 xdg-desktop-portal，
 系统自动回退到默认后端（如 xdg-desktop-portal-gtk）。
 
+## 常驻生命周期
+
+`bennu-portal` 常驻运行：首次拉起后不再空闲自退，后续唤出直接复用进程，
+避免每次冷启动约 2 秒的首帧延迟（代价是约 20MB 常驻内存，与
+xdg-desktop-portal-gtk 的常驻形态一致）。
+
+### 安装包版
+
+- 安装包提供 systemd user unit `bennu-portal.service`
+  （`/usr/lib/systemd/user/`，`Type=dbus`），随图形会话启停
+  （`PartOf=graphical-session.target`）。
+- D-Bus service 文件中的 `SystemdService=bennu-portal.service` 把
+  activation 交给 systemd 托管：首次文件选择请求拉起 unit，之后常驻到
+  会话结束。
+
+### 开发环境（scripts/install-bennu-dev.sh）
+
+脚本安装 dev 专用 unit `bennu-portal-dev.service`（命名对齐
+`bennu-search-dev.service` 惯例，避免遮蔽系统安装包的同名 unit）：
+
+- `ExecStart=%h/.local/bin/bennu-portal`，二进制仍由开发者手动维护；
+- 用户级 D-Bus service 文件
+  （`~/.local/share/dbus-1/services/org.freedesktop.impl.portal.desktop.bennu.service`）
+  由脚本幂等维护 `SystemdService=bennu-portal-dev.service` 一行，
+  已有手写内容（如自定义 `Exec=`）保持不变；
+- `systemctl --user enable` 挂到 `graphical-session.target`，登录自启。
+
+### 升级流程
+
+二进制更新后必须重启服务，否则旧进程继续用旧代码服务请求：
+
+    # 开发环境：先构建并复制新二进制
+    cargo build --release -p portal-backend
+    cp target/release/bennu-portal ~/.local/bin/bennu-portal
+    systemctl --user restart bennu-portal-dev
+
+    # 安装包版：deb/rpm/AUR 升级后
+    systemctl --user restart bennu-portal
+
+### 排障
+
+- 查日志：`journalctl --user -u bennu-portal`（开发环境 unit 名为
+  `bennu-portal-dev`）。
+- bus 名 `org.freedesktop.impl.portal.desktop.bennu` 被残留进程占用导致
+  新进程起不来：先 `systemctl --user stop bennu-portal`，再手动前台运行
+  `/usr/bin/bennu-portal`（开发环境为 `~/.local/bin/bennu-portal`）
+  定位原因。
+
 ## 验证
 
 直接调用后端 D-Bus 服务（不经 xdg-desktop-portal 主进程），调用会

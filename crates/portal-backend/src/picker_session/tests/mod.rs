@@ -10,6 +10,7 @@ fn spec(kind: PickerKind, filters: Vec<FilterRule>) -> PickerRequestSpec {
     PickerRequestSpec {
         kind,
         accept_label: None,
+        title: None,
         filters,
         active_filter: None,
         start_folder: None,

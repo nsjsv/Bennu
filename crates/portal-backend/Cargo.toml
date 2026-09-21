@@ -14,7 +14,23 @@ dirs.workspace = true
 bennu-theme = { path = "../bennu-theme" }
 file-core = { path = "../file-core" }
 file-operation-store = { path = "../file-operation-store" }
-iced.workspace = true
+# 软件渲染（tiny-skia）：portal 是弹完即关的闲置型进程，GPU 上下文会被
+# 驱动回收、再开窗付出 ~2.2s 重建代价（常驻+warming 均压不住，见任务
+# 09-21-filechooser-startup-latency）。CPU 渲染无上下文可回收，选择窗口
+# 的渲染量对 CPU 毫无压力。不能沿用 workspace 的 iced 定义（它带 wgpu，
+# 且 workspace feature 只能追加不能削减）。
+iced = { version = "0.14", default-features = false, features = [
+    "tokio",
+    "advanced",
+    "advanced-shaping",
+    "canvas",
+    "svg",
+    "image",
+    "x11",
+    "wayland",
+    "fira-sans",
+    "tiny-skia",
+] }
 gio = "=0.22.8"
 serde = { version = "1.0.228", features = ["derive"] }
 thiserror.workspace = true

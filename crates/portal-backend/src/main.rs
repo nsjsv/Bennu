@@ -1,6 +1,7 @@
 //! bennu-portal：Bennu 文件管理器的 xdg-desktop-portal FileChooser 后端。
-//! 进程由 D-Bus activation 按需拉起；每个 FileChooser 请求弹一个独立的
-//! 选择窗口，全部窗口关闭且空闲超时后进程退出。
+//! 进程由 D-Bus activation 拉起后常驻（对齐 xdg-desktop-portal-gtk 的
+//! 生命周期模型）；每个 FileChooser 请求弹一个独立的选择窗口，窗口全部
+//! 关闭后继续驻留，换取后续唤出的热启动速度。
 
 mod dbus_file_chooser;
 mod filter;
@@ -12,11 +13,11 @@ mod view;
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use iced::advanced::widget::operation::{Focusable, Operation, Outcome};
 use iced::futures::Stream;
-use iced::{exit, keyboard, mouse, window, Element, Rectangle, Subscription, Task, Theme};
+use iced::{keyboard, mouse, window, Element, Rectangle, Subscription, Task, Theme};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -31,8 +32,6 @@ use tokio::sync::mpsc;
 
 const PORTAL_BUS_NAME: &str = "org.freedesktop.impl.portal.desktop.bennu";
 const PORTAL_OBJECT_PATH: &str = "/org/freedesktop/portal/desktop";
-const IDLE_EXIT_AFTER: Duration = Duration::from_secs(30);
-const IDLE_TICK_INTERVAL: Duration = Duration::from_secs(5);
 /// 展开动画帧时钟：60Hz 与主应用 ui_pacing::FRAME_INTERVAL_60HZ 同值；
 /// portal 不依赖 app-ui，本地保持同一节奏。
 const ANIMATION_FRAME_INTERVAL: Duration = Duration::from_millis(16);
@@ -62,28 +61,24 @@ enum Message {
         window: window::Id,
         is_focused: bool,
     },
-    IdleTick,
     AnimationTick,
 }
 
 struct PickerDaemon {
     windows: HashMap<window::Id, PickerSession>,
-    window_by_request: HashMap<String, window::Id>,
     theme: Theme,
     keyboard_modifiers: keyboard::Modifiers,
-    last_activity: Instant,
 }
 
 impl PickerDaemon {
     fn new() -> Self {
-        // 与主程序同一主题构造链路（存储偏好 + matugen + 系统回退）。
+        // 初值只覆盖进程启动到首次开窗之间的空窗期；权威主题在每次
+        // 开窗时重解析（见 open_picker_window），构造链路与主程序一致。
         let theme = theme::resolve_startup_theme();
         PickerDaemon {
             windows: HashMap::new(),
-            window_by_request: HashMap::new(),
             theme,
             keyboard_modifiers: keyboard::Modifiers::default(),
-            last_activity: Instant::now(),
         }
     }
 }
@@ -93,10 +88,6 @@ fn boot() -> (PickerDaemon, Task<Message>) {
 }
 
 fn update(daemon: &mut PickerDaemon, message: Message) -> Task<Message> {
-    // 仅真实交互刷新活跃时间；IdleTick 自身不续命，否则空闲退出永不触发。
-    if !matches!(message, Message::IdleTick) {
-        daemon.last_activity = Instant::now();
-    }
     match message {
         Message::Bridge(BridgeEvent::Invocation(invocation)) => {
             open_picker_window(daemon, invocation)
@@ -127,18 +118,9 @@ fn update(daemon: &mut PickerDaemon, message: Message) -> Task<Message> {
             }
             Task::none()
         }
-        Message::IdleTick => {
-            if daemon.windows.is_empty() && daemon.last_activity.elapsed() > IDLE_EXIT_AFTER {
-                tracing::info!("空闲超时，bennu-portal 退出");
-                exit()
-            } else {
-                Task::none()
-            }
-        }
         Message::AnimationTick => {
-            // 动画帧只由用户交互（展开开关、滚动、滚动条显隐）引发，属
-            // 真实活动：顶层的 last_activity 续命规则对它生效，不影响
-            // 空闲退出语义。
+            // 帧时钟仅在动画活跃期间存在（见 subscription 的挂载条件），
+            // 逐窗口推进动画并批量路由产出的 Task。
             let mut frame_tasks = Vec::new();
             for (window_id, session) in daemon.windows.iter_mut() {
                 frame_tasks.extend(route_session_tasks(*window_id, session.advance_frame()));
@@ -149,6 +131,10 @@ fn update(daemon: &mut PickerDaemon, message: Message) -> Task<Message> {
 }
 
 fn open_picker_window(daemon: &mut PickerDaemon, invocation: PickerInvocation) -> Task<Message> {
+    // WHY：进程常驻后主题不能锁死在登录时刻——用户在主程序切换深浅
+    // 色后，旧主题会跟随整个会话。每次开窗重读存储偏好（本地毫秒级
+    // IO），等价于旧模型「每请求一进程、每次新鲜解析」的行为。
+    daemon.theme = theme::resolve_startup_theme();
     let PickerInvocation {
         request_path,
         spec,
@@ -157,7 +143,7 @@ fn open_picker_window(daemon: &mut PickerDaemon, invocation: PickerInvocation) -
     let remembered = location::load_last_directory();
     let start =
         location::resolve_start_directory(spec.start_folder.as_deref(), remembered.as_deref());
-    let mut session = PickerSession::new(&spec, request_path.clone(), start.clone(), reply);
+    let mut session = PickerSession::new(&spec, request_path, start.clone(), reply);
     let effect = session.begin();
 
     let settings = window::Settings {
@@ -169,7 +155,6 @@ fn open_picker_window(daemon: &mut PickerDaemon, invocation: PickerInvocation) -
     };
     let (window_id, open_task) = window::open(settings);
     daemon.windows.insert(window_id, session);
-    daemon.window_by_request.insert(request_path, window_id);
 
     let scan_task = match effect {
         // begin() 返回导航类效果；此处只翻扫描任务——窗口 UI 尚未
@@ -181,7 +166,8 @@ fn open_picker_window(daemon: &mut PickerDaemon, invocation: PickerInvocation) -
         _ => Task::none(),
     };
     Task::batch([
-        open_task.map(|_opened| Message::IdleTick),
+        // discard：开窗 Task 的输出（窗口 Id）无需消费，保留开窗副作用。
+        open_task.discard(),
         scan_task,
         window::gain_focus(window_id),
     ])
@@ -383,7 +369,6 @@ fn breadcrumb_scroll_to_end_task(session: &PickerSession) -> Task<Message> {
 
 fn close_picker_window(daemon: &mut PickerDaemon, window_id: window::Id) {
     if let Some(session) = daemon.windows.remove(&window_id) {
-        daemon.window_by_request.remove(session.request_path());
         session.window_closed();
     }
 }
@@ -572,8 +557,17 @@ fn daemon_title(daemon: &PickerDaemon, window_id: window::Id) -> String {
     daemon
         .windows
         .get(&window_id)
-        .map(|session| session.kind().default_title().to_string())
+        .map(session_window_title)
         .unwrap_or_else(|| "Bennu 文件选择".to_string())
+}
+
+/// 窗口标题：调用方显式传入 title 则跟随，空缺时回落模式默认标题。
+/// 协议规定 title 仅作显示，不参与任何选择语义。
+fn session_window_title(session: &PickerSession) -> String {
+    session
+        .title()
+        .map(str::to_string)
+        .unwrap_or_else(|| session.kind().default_title().to_string())
 }
 
 fn subscription(daemon: &PickerDaemon) -> Subscription<Message> {
@@ -614,7 +608,6 @@ fn subscription(daemon: &PickerDaemon) -> Subscription<Message> {
             }
             _ => None,
         }),
-        iced::time::every(IDLE_TICK_INTERVAL).map(|_| Message::IdleTick),
     ];
     // 仅在有窗口播放动画（展开/收起、地址栏渐变、惯性滚动、滚动条
     // 淡入淡出）时订阅帧时钟，动画结束自然摘除——与主应用按动画
@@ -732,5 +725,41 @@ fn main() {
     if let Err(error) = result {
         tracing::error!("选择窗口运行失败: {error}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::picker_request::{PickerKind, PickerRequestSpec};
+
+    fn session_with_title(title: Option<&str>) -> PickerSession {
+        let (reply, _receiver) = tokio::sync::oneshot::channel();
+        let base = tempfile::tempdir().unwrap();
+        PickerSession::new(
+            &PickerRequestSpec {
+                kind: PickerKind::SaveFile { default_name: None },
+                accept_label: None,
+                title: title.map(str::to_string),
+                filters: Vec::new(),
+                active_filter: None,
+                start_folder: None,
+            },
+            "/req/test".to_string(),
+            base.keep(),
+            reply,
+        )
+    }
+
+    #[test]
+    fn window_title_prefers_caller_title() {
+        let session = session_with_title(Some("导出报告"));
+        assert_eq!(session_window_title(&session), "导出报告");
+    }
+
+    #[test]
+    fn window_title_falls_back_to_kind_default() {
+        let session = session_with_title(None);
+        assert_eq!(session_window_title(&session), "另存为");
     }
 }

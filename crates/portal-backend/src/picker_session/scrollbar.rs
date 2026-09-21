@@ -465,6 +465,7 @@ mod tests {
                     directory: true,
                 },
                 accept_label: None,
+                title: None,
                 filters: Vec::new(),
                 active_filter: None,
                 start_folder: None,

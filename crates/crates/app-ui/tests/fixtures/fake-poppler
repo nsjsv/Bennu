@@ -1,0 +1,59 @@
+#!/bin/sh
+set -eu
+source_path=""
+for argument in "$@"; do
+    case "$argument" in
+        *.pdf) source_path="$argument" ;;
+    esac
+done
+if [ -n "$source_path" ]; then
+    : > "${source_path}.started"
+fi
+case "${source_path##*/}" in
+    valid-fake.pdf)
+        case " $* " in
+            *" -f "*)
+                printf 'Pages: 2\nEncrypted: no\nPage 1 rot: 0\nPage 1 CropBox: 0 0 600 800\nPage 2 rot: 90\nPage 2 CropBox: 0 0 400 600\n'
+                ;;
+            *) printf 'Pages: 2\nEncrypted: no\n' ;;
+        esac
+        ;;
+    failure.pdf)
+        printf 'fixture failure\001detail\n' >&2
+        exit 3
+        ;;
+    timeout.pdf)
+        exec sleep 20
+        ;;
+    output-limit.pdf)
+        head -c 4096 /dev/zero | tr '\000' x
+        ;;
+    page-fail.pdf)
+        printf 'page fixture failure\n' >&2
+        exit 4
+        ;;
+    page-block.pdf)
+        lock="${source_path}.lock"
+        while ! mkdir "$lock" 2>/dev/null; do sleep 0.01; done
+        current=0
+        [ ! -f "${source_path}.current" ] || current=$(cat "${source_path}.current")
+        current=$((current + 1))
+        printf '%s\n' "$current" > "${source_path}.current"
+        maximum=0
+        [ ! -f "${source_path}.maximum" ] || maximum=$(cat "${source_path}.maximum")
+        if [ "$current" -gt "$maximum" ]; then
+            printf '%s\n' "$current" > "${source_path}.maximum"
+        fi
+        rmdir "$lock"
+        sleep 0.15
+        while ! mkdir "$lock" 2>/dev/null; do sleep 0.01; done
+        current=$(cat "${source_path}.current")
+        printf '%s\n' "$((current - 1))" > "${source_path}.current"
+        rmdir "$lock"
+        printf 'page block complete\n' >&2
+        exit 7
+        ;;
+    *)
+        printf 'Pages: 1\nEncrypted: no\nPage 1 rot: 0\nPage 1 CropBox: 0 0 600 800\n'
+        ;;
+esac

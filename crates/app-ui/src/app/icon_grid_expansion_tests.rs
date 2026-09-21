@@ -8,8 +8,8 @@ use super::*;
 use crate::config;
 use crate::model::{
     AddressEditingSession, AddressEditingSessionId, BatchRenameMessage, ColumnEntryBounds,
-    DirectoryLoadRequest, SelectionMarquee, SelectionMarqueePhase, SelectionMarqueeScrollAnchor,
-    SelectionMarqueeSource,
+    DirectoryLoadRequest, PaneAddressEditingSession, SelectionMarquee, SelectionMarqueePhase,
+    SelectionMarqueeScrollAnchor, SelectionMarqueeSource,
 };
 use crate::shortcuts::FileSelectionDirection;
 
@@ -689,11 +689,10 @@ fn escape_cancels_address_editing_before_icon_grid_tree() {
     ));
     finish_scan(&mut browser, &root, Vec::new());
     finish_open_animation(&mut browser);
-    browser.address_editing = Some(AddressEditingSession::new(
-        BrowserPaneId::PRIMARY,
-        AddressEditingSessionId(12),
-        Path::new("/workspace"),
-    ));
+    browser.address_editing = Some(PaneAddressEditingSession {
+        pane_id: BrowserPaneId::PRIMARY,
+        session: AddressEditingSession::new(AddressEditingSessionId(12), Path::new("/workspace")),
+    });
 
     drop(browser.handle_focused_window_escape_pressed());
 

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+behavior_path="${0}.behavior"
+if [[ ! -f "$behavior_path" ]]; then
+    printf 'missing fake systemctl behavior: %s\n' "$behavior_path" >&2
+    exit 64
+fi
+
+source "$behavior_path"

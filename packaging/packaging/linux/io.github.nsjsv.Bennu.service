@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=io.github.nsjsv.Bennu
+Exec=/usr/bin/bennu --activation-service

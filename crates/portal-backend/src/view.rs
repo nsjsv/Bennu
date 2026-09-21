@@ -5,27 +5,30 @@
 //! crate `bennu-theme`，与主程序消费同一份活动主题，保证两个进程的
 //! FileChooser 窗口看起来是同一个应用。
 
-use std::path::Path;
-
-use bennu_theme::icons::{file_entry_icon_symbol, rotated_chevron_right_view, IconSymbol};
+use bennu_theme::icons::{file_entry_icon_symbol, rotated_chevron_right_view};
+use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
+use bennu_theme::smooth_scroll::SmoothScrollArea;
 use bennu_theme::styles::{
     base_text_color, enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction,
     hovered_row_style, list_row_style, muted_icon_svg_style, muted_text_color,
     navigation_text_input_style, primary_action_button_style, selected_icon_svg_style,
-    selected_row_style, surface_button_style, transparent_icon_button_style, ScrollbarVisibility,
+    selected_row_style, surface_button_style, transparent_icon_button_style,
 };
 use bennu_theme::ui_colors;
 use file_core::entry::FileKind;
 use iced::widget::Space;
-use iced::widget::{
-    button, column, container, mouse_area, pick_list, row, scrollable, text, text_input,
-};
-use iced::{alignment, mouse, Border, Color, Element, Length, Padding, Size, Theme};
+use iced::widget::{button, column, container, mouse_area, row, scrollable, text, text_input};
+use iced::{alignment, Border, Color, Element, Length, Padding, Size, Theme};
 
 use crate::picker_request::PickerKind;
+use crate::picker_session::scrollbar::{scroll_axis, scroll_id, scrollbar_on_scroll};
 use crate::picker_session::{
-    breadcrumb_chain, DirectoryListing, PickerRow, PickerSession, SessionMessage,
+    DirectoryListing, PickerRow, PickerSession, SessionMessage, SessionScrollRegion,
 };
+
+mod address_bar;
+
+pub(crate) use address_bar::address_input_id;
 
 /// 每请求窗口的初始尺寸。
 pub(crate) fn window_size() -> Size {
@@ -36,11 +39,8 @@ pub(crate) fn window_min_size() -> Size {
     Size::new(640.0, 420.0)
 }
 
-/// 列表滚动条静态宽度（可见的 mac 式细滚动条）。
-const LIST_SCROLLBAR_WIDTH: f32 = 10.0;
-
-/// 地址栏高度（与主程序 ADDRESS_BAR_HEIGHT 一致）。
-const ADDRESS_BAR_HEIGHT: f32 = 34.0;
+/// 列表滚动条静态宽度：与主软件列表一致（mac 式细滚动条）。
+const LIST_SCROLLBAR_WIDTH: f32 = 8.0;
 
 /// 子级行相对父级的缩进。
 const EXPANSION_INDENT: f32 = 16.0;
@@ -49,20 +49,29 @@ const EXPANSION_INDENT: f32 = 16.0;
 /// 垂直居中；取值与既有 padding 撑出的视觉高度一致。
 const ENTRY_ROW_HEIGHT: f32 = 28.0;
 
+/// 滚动内容包一层滚轮捕获（SmoothScrollArea）：内容先处理事件，未
+/// 被吞的滚轮按区域轴向发 `WheelScrolled`（增量换算在会话滚动子模块）。
+fn smooth_scroll_region(
+    content: impl Into<Element<'static, SessionMessage>>,
+    region: SessionScrollRegion,
+    shift_pressed: bool,
+) -> Element<'static, SessionMessage> {
+    Element::new(SmoothScrollArea::new(
+        content,
+        scroll_axis(region),
+        shift_pressed,
+        move |delta| SessionMessage::WheelScrolled { region, delta },
+    ))
+}
+
 /// 窗口内容。`emit` 由上层提供，负责把会话消息与窗口关联。
 pub(crate) fn picker_window_view(
     session: &PickerSession,
     theme: &Theme,
-    address_input_id: iced::widget::Id,
     emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'static,
 ) -> Element<'static, SessionMessage> {
     let mut layout = column![].spacing(10);
-    layout = layout.push(navigation_bar(
-        session,
-        theme,
-        address_input_id,
-        emit.clone(),
-    ));
+    layout = layout.push(address_bar::navigation_bar(session, theme, emit.clone()));
     if let Some(name_input) = name_input_row(session, emit.clone()) {
         layout = layout.push(name_input);
     }
@@ -81,120 +90,6 @@ pub(crate) fn picker_window_view(
         .into()
 }
 
-fn navigation_bar(
-    session: &PickerSession,
-    theme: &Theme,
-    address_input_id: iced::widget::Id,
-    emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'static,
-) -> Element<'static, SessionMessage> {
-    let up_button = button(
-        IconSymbol::ArrowUp
-            .view(16.0)
-            .style(bennu_theme::styles::icon_svg_style()),
-    )
-    .padding(6.0)
-    .style(transparent_icon_button_style)
-    .on_press(emit(SessionMessage::NavigateUp));
-
-    // 地址栏主体：面包屑态 / 路径编辑态。整栏包一层 mouse_area，
-    // 点击空白处进入编辑（面包屑按钮捕获自身点击，不受影响）——
-    // 与主程序 address_bar_surface 同一结构。
-    let surface: Element<'static, SessionMessage> = if let Some(draft) = session.address_edit() {
-        text_input("输入路径，回车跳转", draft)
-            .id(address_input_id)
-            .on_input({
-                let emit = emit.clone();
-                move |value| emit(SessionMessage::AddressEditChanged(value))
-            })
-            .on_submit(emit(SessionMessage::AddressEditingSubmitted))
-            .size(13)
-            .padding(Padding::new(6.0).top(7.0).bottom(7.0))
-            .style(navigation_text_input_style)
-            .width(Length::Fill)
-            .into()
-    } else {
-        let mut breadcrumb = row![].spacing(2).align_y(alignment::Vertical::Center);
-        for (position, segment) in breadcrumb_chain(session.directory()).iter().enumerate() {
-            if position > 0 {
-                breadcrumb = breadcrumb.push(
-                    IconSymbol::ChevronRight
-                        .view(12.0)
-                        .style(muted_icon_svg_style()),
-                );
-            }
-            breadcrumb = breadcrumb.push(
-                button(readable_label(segment_label(segment)).size(13))
-                    .padding(Padding::new(6.0).top(4.0).bottom(4.0))
-                    .style(breadcrumb_segment_style)
-                    .on_press(emit(SessionMessage::BreadcrumbActivated {
-                        ancestor: position,
-                    })),
-            );
-        }
-        scrollable(breadcrumb)
-            .width(Length::Fill)
-            .height(Length::Fixed(ADDRESS_BAR_HEIGHT))
-            .direction(scrollable::Direction::Horizontal(
-                scrollable::Scrollbar::default(),
-            ))
-            .into()
-    };
-
-    let address_bar = mouse_area(
-        container(surface)
-            .width(Length::Fill)
-            .height(Length::Fixed(ADDRESS_BAR_HEIGHT))
-            .align_y(alignment::Vertical::Center),
-    )
-    .on_press(emit(SessionMessage::AddressEditingStarted))
-    .interaction(mouse::Interaction::Text);
-
-    let mut bar = row![].spacing(6).align_y(alignment::Vertical::Center);
-    bar = bar.push(up_button);
-    bar = bar.push(address_bar);
-
-    if session.filters().len() > 1 {
-        let labels: Vec<String> = session
-            .filters()
-            .iter()
-            .map(|rule| rule.name.clone())
-            .collect();
-        let known_labels = labels.clone();
-        let current = Some(session.active_filter_label());
-        bar = bar.push(Space::new().width(Length::Fill));
-        bar = bar.push(
-            pick_list(labels, current, move |picked: String| {
-                match known_labels.iter().position(|label| *label == picked) {
-                    Some(rule) => emit(SessionMessage::FilterSelected { rule }),
-                    None => emit(SessionMessage::FilterSelectionIgnored),
-                }
-            })
-            .text_size(13.0)
-            .padding(Padding::new(6.0)),
-        );
-    } else {
-        bar = bar.push(Space::new().width(Length::Fill));
-        bar = bar.push(
-            readable_label(session.active_filter_label())
-                .size(13)
-                .color(muted_text_color(theme)),
-        );
-    }
-
-    container(bar)
-        .width(Length::Fill)
-        .height(Length::Fixed(ADDRESS_BAR_HEIGHT))
-        .align_y(alignment::Vertical::Center)
-        .into()
-}
-
-/// 面包屑段按钮：surface 按钮的三档状态，圆角 6。
-fn breadcrumb_segment_style(theme: &Theme, status: button::Status) -> button::Style {
-    let mut style = surface_button_style(theme, status);
-    style.border.radius = 6.0.into();
-    style
-}
-
 /// 中文等非 ASCII 文案需要 Advanced shaping（与主程序 typography 同规则）。
 fn readable_label(label: String) -> iced::widget::Text<'static, Theme> {
     let needs_advanced_shaping = !label.is_ascii();
@@ -204,13 +99,6 @@ fn readable_label(label: String) -> iced::widget::Text<'static, Theme> {
     } else {
         label
     }
-}
-
-fn segment_label(segment: &Path) -> String {
-    segment
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "/".to_string())
 }
 
 fn listing_body(
@@ -240,6 +128,8 @@ fn listing_body(
             if session.rows().is_empty() {
                 centered_hint("空目录", 14.0, muted_text_color(theme))
             } else {
+                let region = SessionScrollRegion::List;
+                let scrollbar_visibility = session.scrollbar_visibility_for(&region);
                 let mut list = column![].spacing(2);
                 for (index, row) in session.rows().iter().enumerate() {
                     list = list.push(entry_row(
@@ -251,15 +141,35 @@ fn listing_body(
                         emit.clone(),
                     ));
                 }
-                scrollable(list)
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .direction(enhanced_vertical_scrollbar_direction(
-                        ScrollbarVisibility::Visible,
-                        LIST_SCROLLBAR_WIDTH,
-                    ))
-                    .style(enhanced_scrollbar_style(ScrollbarVisibility::Visible))
-                    .into()
+                let list_scroller = scrollable(smooth_scroll_region(
+                    list,
+                    region,
+                    session.scroll_shift_pressed(),
+                ))
+                .id(scroll_id(session.request_path(), region))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .direction(enhanced_vertical_scrollbar_direction(
+                    scrollbar_visibility,
+                    LIST_SCROLLBAR_WIDTH,
+                ))
+                .style(enhanced_scrollbar_style(scrollbar_visibility))
+                .on_scroll(scrollbar_on_scroll(region, |_| {
+                    SessionMessage::ScrollbarEngaged {
+                        region: SessionScrollRegion::List,
+                    }
+                }));
+                // mac 式滚动条：透明原生拇指 + canvas 浮层拇指（此前
+                // enhanced_scrollbar_style 把原生拇指透明化而浮层缺失，
+                // 滚动条整体隐形）。
+                enhanced_scrollbar(
+                    list_scroller,
+                    scrollbar_visibility,
+                    session.scrollbar_viewport_for(&region),
+                    ScrollbarAxis::Vertical,
+                    LIST_SCROLLBAR_WIDTH,
+                )
+                .into()
             }
         }
     };

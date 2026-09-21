@@ -1,0 +1,300 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  APP_NAME: bennu
+  CARGO_PACKAGE: app-ui
+  CARGO_BINARY: app-ui
+  DAEMON_CARGO_PACKAGE: file-search
+  DAEMON_BINARY: bennu-searchd
+  SEARCH_SERVICE_UNIT: bennu-search.service
+  ACTIVATION_SERVICE_FILE: io.github.nsjsv.Bennu.service
+  ARCH: x86_64
+
+jobs:
+  linux-release:
+    name: Build Linux release
+    outputs:
+      semver: ${{ steps.metadata.outputs.semver }}
+      sha256_x86_64: ${{ steps.package.outputs.sha256_x86_64 }}
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+
+    steps:
+      - name: Install build dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            acl \
+            alsa-lib \
+            cargo \
+            dav1d \
+            fontconfig \
+            glib2 \
+            git \
+            libxkbcommon \
+            openssh \
+            pkgconf \
+            rust \
+            wayland
+
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Resolve release metadata
+        id: metadata
+        run: |
+          version="${GITHUB_REF_NAME}"
+
+          if [[ ! "${version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release version must look like vX.Y.Z"
+            exit 1
+          fi
+
+          semver="${version#v}"
+          package_dir="${APP_NAME}-${version}-${ARCH}"
+          asset_name="${package_dir}.tar.gz"
+
+          {
+            echo "version=${version}"
+            echo "semver=${semver}"
+            echo "package_dir=${package_dir}"
+            echo "asset_name=${asset_name}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Verify Cargo package version
+        run: |
+          for package_name in "${CARGO_PACKAGE}" "${DAEMON_CARGO_PACKAGE}"; do
+            package_id="$(cargo pkgid -p "${package_name}")"
+            package_version="${package_id##*#}"
+            if [[ "${package_version}" == "${package_id}" ]]; then
+              package_version="${package_id##*@}"
+            fi
+            if [[ "${package_version}" != "${{ steps.metadata.outputs.semver }}" ]]; then
+              echo "::error::${package_name} version ${package_version} does not match release ${{ steps.metadata.outputs.version }}"
+              exit 1
+            fi
+          done
+
+      - name: Build release binaries
+        run: cargo build --release --locked -p "${CARGO_PACKAGE}" -p "${DAEMON_CARGO_PACKAGE}" -p portal-backend
+
+      - name: Package release archive
+        id: package
+        run: |
+          package_dir="${{ steps.metadata.outputs.package_dir }}"
+          asset_name="${{ steps.metadata.outputs.asset_name }}"
+          payload="dist/${package_dir}"
+
+          bash packaging/common/install-payload.sh \
+            "${payload}" \
+            "target/release/${CARGO_BINARY}" \
+            "target/release/${DAEMON_BINARY}"
+
+          tar -C dist -czf "${asset_name}" "${package_dir}"
+          sha256sum "${asset_name}" > SHA256SUMS
+          read -r tarball_sha256 _ < SHA256SUMS
+          echo "sha256_x86_64=${tarball_sha256}" >> "${GITHUB_OUTPUT}"
+
+      - name: Stage Linux release assets
+        run: |
+          mkdir -p release-assets
+          cp "${{ steps.metadata.outputs.asset_name }}" SHA256SUMS release-assets/
+
+      - name: Upload Linux release assets
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-release-assets
+          path: release-assets
+          if-no-files-found: error
+
+  aur-release:
+    name: Publish AUR package
+    needs: linux-release
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+    steps:
+      - name: Install AUR dependencies
+        run: pacman -Syu --noconfirm --needed git openssh
+
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Publish AUR package
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          AUR_KNOWN_HOSTS: ${{ secrets.AUR_KNOWN_HOSTS }}
+          AUR_COMMIT_NAME: ${{ secrets.AUR_COMMIT_NAME }}
+          AUR_COMMIT_EMAIL: ${{ secrets.AUR_COMMIT_EMAIL }}
+          PKGVER: ${{ needs.linux-release.outputs.semver }}
+          SHA256_X86_64: ${{ needs.linux-release.outputs.sha256_x86_64 }}
+        run: |
+          if [[ -z "${AUR_SSH_PRIVATE_KEY}" ]]; then
+            echo "::error::AUR_SSH_PRIVATE_KEY secret is required to publish bennu-bin"
+            exit 1
+          fi
+          if [[ -z "${AUR_KNOWN_HOSTS}" ]]; then
+            echo "::error::AUR_KNOWN_HOSTS secret is required to publish bennu-bin"
+            exit 1
+          fi
+          if [[ -z "${SHA256_X86_64}" ]]; then
+            echo "::error::Release tarball SHA-256 is missing"
+            exit 1
+          fi
+
+          install -dm700 "${HOME}/.ssh"
+          ssh_key="${HOME}/.ssh/aur"
+          printf '%s\n' "${AUR_SSH_PRIVATE_KEY}" > "${ssh_key}"
+          chmod 600 "${ssh_key}"
+          printf '%s\n' "${AUR_KNOWN_HOSTS}" > "${HOME}/.ssh/known_hosts"
+          chmod 644 "${HOME}/.ssh/known_hosts"
+
+          export GIT_SSH_COMMAND="ssh -i ${ssh_key} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${HOME}/.ssh/known_hosts"
+
+          aur_workdir="$(mktemp -d)"
+          chmod 755 "${aur_workdir}"
+          aur_repo="${aur_workdir}/bennu-bin"
+          git clone "ssh://aur@aur.archlinux.org/bennu-bin.git" "${aur_repo}"
+
+          sed \
+            -e "s|@PKGVER@|${PKGVER}|g" \
+            -e "s|@SHA256_X86_64@|${SHA256_X86_64}|g" \
+            packaging/aur/bennu-bin/PKGBUILD.in > "${aur_repo}/PKGBUILD"
+
+          if grep -Eq '@PKGVER@|@SHA256_X86_64@' "${aur_repo}/PKGBUILD"; then
+            echo "::error::AUR PKGBUILD still contains template placeholders"
+            exit 1
+          fi
+
+          if ! id -u aurbuild >/dev/null 2>&1; then
+            useradd -m aurbuild
+          fi
+          srcinfo_dir="$(mktemp -d)"
+          chown aurbuild "${srcinfo_dir}"
+          install -Dm644 -o aurbuild "${aur_repo}/PKGBUILD" "${srcinfo_dir}/PKGBUILD"
+
+          srcinfo="$(runuser -u aurbuild -- bash -c 'cd "$1" && makepkg --printsrcinfo' bash "${srcinfo_dir}")"
+          printf '%s\n' "${srcinfo}" > "${aur_repo}/.SRCINFO"
+
+          git -C "${aur_repo}" config user.name "${AUR_COMMIT_NAME:-github-actions[bot]}"
+          git -C "${aur_repo}" config user.email "${AUR_COMMIT_EMAIL:-github-actions[bot]@users.noreply.github.com}"
+          git -C "${aur_repo}" add PKGBUILD .SRCINFO
+
+          if git -C "${aur_repo}" diff --cached --quiet; then
+            echo "AUR package is already up to date."
+          else
+            git -C "${aur_repo}" commit -m "Update to ${PKGVER}"
+            git -C "${aur_repo}" push
+          fi
+
+  deb-release:
+    name: Build Debian package
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Build Debian package
+        run: packaging/deb/build-deb.sh "${GITHUB_REF_NAME#v}"
+
+      - name: Stage Debian release assets
+        run: |
+          mkdir -p release-assets
+          cp dist/*.deb dist/SHA256SUMS.deb release-assets/
+
+      - name: Upload Debian release assets
+        uses: actions/upload-artifact@v7
+        with:
+          name: deb-release-assets
+          path: release-assets
+          if-no-files-found: error
+
+  rpm-release:
+    name: Build RPM package
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Build RPM package
+        run: packaging/rpm/build-rpm.sh "${GITHUB_REF_NAME#v}"
+
+      - name: Stage RPM release assets
+        run: |
+          mkdir -p release-assets
+          cp dist/x86_64/*.rpm dist/SHA256SUMS.rpm release-assets/
+
+      - name: Upload RPM release assets
+        uses: actions/upload-artifact@v7
+        with:
+          name: rpm-release-assets
+          path: release-assets
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub release
+    needs:
+      - linux-release
+      - deb-release
+      - rpm-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          pattern: "*-release-assets"
+          merge-multiple: true
+
+      - name: Publish GitHub release
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          assets=(
+            dist/bennu-v*.tar.gz
+            dist/SHA256SUMS
+            dist/bennu_*.deb
+            dist/SHA256SUMS.deb
+            dist/bennu-*.rpm
+            dist/SHA256SUMS.rpm
+          )
+
+          if ((${#assets[@]} != 6)); then
+            echo "::error::Expected six release assets, found ${#assets[@]}"
+            printf '%s\n' "${assets[@]}"
+            exit 1
+          fi
+
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" "${assets[@]}" --clobber
+          else
+            gh release create \
+              "${GITHUB_REF_NAME}" \
+              "${assets[@]}" \
+              --verify-tag \
+              --title "${GITHUB_REF_NAME}"
+          fi

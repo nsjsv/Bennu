@@ -1,0 +1,32 @@
+[package]
+name = "file-search"
+autobins = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+dirs.workspace = true
+file-core = { path = "../file-core" }
+libc = "0.2"
+notify.workspace = true
+quick-xml = "0.39.4"
+regex = "1.12.3"
+rusqlite = { version = "0.32.1", features = ["bundled"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+tokio-util.workspace = true
+tracing.workspace = true
+tracing-journald.workspace = true
+tracing-subscriber.workspace = true
+zip = "8.6.0"
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[[bin]]
+name = "bennu-searchd"
+path = "src/bin/file-searchd.rs"

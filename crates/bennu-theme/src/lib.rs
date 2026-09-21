@@ -17,7 +17,13 @@ mod catalog;
 mod custom;
 mod presets;
 
+pub mod address_bar;
+pub mod anchored_popup;
+pub mod animation;
 pub mod icons;
+pub mod measured_text;
+pub mod scrollbar;
+pub mod smooth_scroll;
 pub mod styles;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

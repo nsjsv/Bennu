@@ -1,10 +1,14 @@
 use std::path::{Path, PathBuf};
 
-use iced::advanced::{layout, renderer, widget, Clipboard, Layout, Shell, Widget};
 use iced::widget::{
     button, container, mouse_area, opaque, responsive, scrollable, stack, text_input, Column,
 };
-use iced::{mouse, Background, Color, Element, Event, Length, Point, Rectangle, Size, Theme};
+use iced::{mouse, Element, Length};
+
+use bennu_theme::address_bar::{
+    BreadcrumbMeasurement, ElasticBreadcrumbs, ADDRESS_BAR_HEIGHT, ADDRESS_TEXT_SIZE,
+    BREADCRUMB_HORIZONTAL_PADDING, BREADCRUMB_ICON_SIZE, BREADCRUMB_SEPARATOR_SIZE,
+};
 
 use crate::anchored_popup::anchored_popup;
 use crate::app::panes::BrowserPaneView;
@@ -13,33 +17,22 @@ use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
 use crate::app::FileBrowser;
 use crate::appearance::{
     address_bar_style, enhanced_horizontal_scrollbar_direction, enhanced_scrollbar_style,
-    navigation_text_input_style, path_suggestion_item_style, path_suggestions_style,
-    selected_path_suggestion_item_style, transparent_button_style,
+    faded_button_style, faded_text_input_style, path_suggestion_item_style, path_suggestions_style,
+    scale_color_alpha, selected_path_suggestion_item_style,
 };
 use crate::breadcrumb_drop_target_bounds::{
     track_breadcrumb_drop_target, track_breadcrumb_viewport,
 };
 use crate::formatting::format_middle_ellipsized_text;
 use crate::icons::IconSymbol;
-use crate::measured_middle_ellipsized_text::{
-    measured_middle_ellipsized_text, measured_text_natural_width,
-};
+use crate::measured_middle_ellipsized_text::measured_middle_ellipsized_text;
 use crate::model::{
-    allocate_breadcrumb_widths, breadcrumb_segments, BreadcrumbSegment, BreadcrumbSegmentKind,
-    BrowserPaneId, FileDropTarget, Message, ScrollbarRegion, ScrollbarViewport,
-    ScrollbarVisibility, TRASH_LOCATION_LABEL,
+    breadcrumb_segments, BreadcrumbSegment, BreadcrumbSegmentKind, BrowserPaneId, FileDropTarget,
+    Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility, TRASH_LOCATION_LABEL,
 };
 use crate::typography::readable_text;
 use crate::view::{icon_tone_style, themed_icon, IconTone};
 
-const ADDRESS_BAR_HEIGHT: f32 = 34.0;
-const ADDRESS_TEXT_SIZE: u32 = 14;
-const BREADCRUMB_ICON_SIZE: f32 = 16.0;
-const BREADCRUMB_SEPARATOR_SIZE: f32 = 13.0;
-const BREADCRUMB_SEPARATOR_WIDTH: f32 = 17.0;
-const BREADCRUMB_HOME_WIDTH: f32 = 30.0;
-const BREADCRUMB_HORIZONTAL_PADDING: f32 = 7.0;
-const BREADCRUMB_MINIMUM_TEXT_WIDTH: f32 = 58.0;
 const PATH_SUGGESTION_MAX_CHARS: usize = 72;
 
 pub(crate) fn address_input_id(pane_id: BrowserPaneId) -> iced::widget::Id {
@@ -271,11 +264,11 @@ fn elastic_breadcrumbs<'a>(
         children.push(segment_target);
     }
 
-    Element::new(ElasticBreadcrumbs {
+    Element::new(ElasticBreadcrumbs::new(
         children,
         measurements,
         viewport_width,
-    })
+    ))
 }
 
 fn path_suggestions_panel<'a>(
@@ -351,264 +344,10 @@ fn faded_icon<'a>(symbol: IconSymbol, size: f32, opacity: f32) -> Element<'a, Me
         .into()
 }
 
-fn faded_button_style(
-    theme: &Theme,
-    status: iced::widget::button::Status,
-    opacity: f32,
-    is_drop_target: bool,
-) -> iced::widget::button::Style {
-    let mut style = transparent_button_style()(theme, status);
-    if is_drop_target {
-        let target_style = selected_path_suggestion_item_style(theme);
-        style.background = target_style.background;
-        if let Some(text_color) = target_style.text_color {
-            style.text_color = text_color;
-        }
-        style.border = target_style.border;
-    }
-    style.text_color = scale_color_alpha(style.text_color, opacity);
-    style.border.color = scale_color_alpha(style.border.color, opacity);
-    style.background = style
-        .background
-        .map(|background| scale_background_alpha(background, opacity));
-    style
-}
-
-fn faded_text_input_style(
-    theme: &Theme,
-    status: iced::widget::text_input::Status,
-    opacity: f32,
-) -> iced::widget::text_input::Style {
-    let mut style = navigation_text_input_style(theme, status);
-    style.border.width = 0.0;
-    style.border.color = Color::TRANSPARENT;
-    style.icon = scale_color_alpha(style.icon, opacity);
-    style.placeholder = scale_color_alpha(style.placeholder, opacity);
-    style.value = scale_color_alpha(style.value, opacity);
-    style.selection = scale_color_alpha(style.selection, opacity);
-    style
-}
-
-fn scale_background_alpha(background: Background, opacity: f32) -> Background {
-    match background {
-        Background::Color(color) => Background::Color(scale_color_alpha(color, opacity)),
-        Background::Gradient(gradient) => Background::Gradient(gradient),
-    }
-}
-
-fn scale_color_alpha(color: iced::Color, opacity: f32) -> iced::Color {
-    iced::Color {
-        a: color.a * opacity.clamp(0.0, 1.0),
-        ..color
-    }
-}
-
-enum BreadcrumbMeasurement {
-    Home,
-    Text(String),
-}
-
-struct ElasticBreadcrumbs<'a> {
-    children: Vec<Element<'a, Message>>,
-    measurements: Vec<BreadcrumbMeasurement>,
-    viewport_width: f32,
-}
-
-impl Widget<Message, Theme, iced::Renderer> for ElasticBreadcrumbs<'_> {
-    fn children(&self) -> Vec<widget::Tree> {
-        self.children.iter().map(widget::Tree::new).collect()
-    }
-
-    fn diff(&self, tree: &mut widget::Tree) {
-        tree.diff_children(&self.children);
-    }
-
-    fn size(&self) -> Size<Length> {
-        Size::new(Length::Shrink, Length::Fixed(ADDRESS_BAR_HEIGHT))
-    }
-
-    fn layout(
-        &mut self,
-        tree: &mut widget::Tree,
-        renderer: &iced::Renderer,
-        limits: &layout::Limits,
-    ) -> layout::Node {
-        let natural_widths = self
-            .measurements
-            .iter()
-            .map(|measurement| match measurement {
-                BreadcrumbMeasurement::Home => BREADCRUMB_HOME_WIDTH,
-                BreadcrumbMeasurement::Text(label) => {
-                    measured_text_natural_width(renderer, label, ADDRESS_TEXT_SIZE)
-                        + BREADCRUMB_HORIZONTAL_PADDING * 2.0
-                }
-            })
-            .collect::<Vec<_>>();
-        let minimum_widths = self
-            .measurements
-            .iter()
-            .zip(&natural_widths)
-            .map(|(measurement, natural_width)| match measurement {
-                BreadcrumbMeasurement::Home => *natural_width,
-                BreadcrumbMeasurement::Text(_) => natural_width.min(BREADCRUMB_MINIMUM_TEXT_WIDTH),
-            })
-            .collect::<Vec<_>>();
-        let separator_total_width =
-            BREADCRUMB_SEPARATOR_WIDTH * self.measurements.len().saturating_sub(1) as f32;
-        let allocation = allocate_breadcrumb_widths(
-            &natural_widths,
-            &minimum_widths,
-            separator_total_width,
-            self.viewport_width,
-        );
-
-        let mut segment_index = 0usize;
-        let mut child_offset_x = 0.0;
-        let mut positioned_nodes = Vec::with_capacity(self.children.len());
-        for (child_index, (child, child_tree)) in
-            self.children.iter_mut().zip(&mut tree.children).enumerate()
-        {
-            let child_width = if child_index % 2 == 0 {
-                let width = allocation.segment_widths[segment_index];
-                segment_index += 1;
-                width
-            } else {
-                BREADCRUMB_SEPARATOR_WIDTH
-            };
-            let child_limits = layout::Limits::new(
-                Size::new(child_width, ADDRESS_BAR_HEIGHT),
-                Size::new(child_width, ADDRESS_BAR_HEIGHT),
-            );
-            let child_node = child
-                .as_widget_mut()
-                .layout(child_tree, renderer, &child_limits)
-                .move_to(Point::new(child_offset_x, 0.0));
-            child_offset_x += child_width;
-            positioned_nodes.push(child_node);
-        }
-
-        let resolved_height = limits
-            .resolve(
-                Length::Shrink,
-                Length::Fixed(ADDRESS_BAR_HEIGHT),
-                Size::ZERO,
-            )
-            .height;
-        layout::Node::with_children(
-            Size::new(allocation.content_width, resolved_height),
-            positioned_nodes,
-        )
-    }
-
-    fn operate(
-        &mut self,
-        tree: &mut widget::Tree,
-        layout: Layout<'_>,
-        renderer: &iced::Renderer,
-        operation: &mut dyn widget::Operation,
-    ) {
-        operation.container(None, layout.bounds());
-        operation.traverse(&mut |operation| {
-            for ((child, child_tree), child_layout) in self
-                .children
-                .iter_mut()
-                .zip(&mut tree.children)
-                .zip(layout.children())
-            {
-                child
-                    .as_widget_mut()
-                    .operate(child_tree, child_layout, renderer, operation);
-            }
-        });
-    }
-
-    fn update(
-        &mut self,
-        tree: &mut widget::Tree,
-        event: &Event,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        renderer: &iced::Renderer,
-        clipboard: &mut dyn Clipboard,
-        shell: &mut Shell<'_, Message>,
-        viewport: &Rectangle,
-    ) {
-        for ((child, child_tree), child_layout) in self
-            .children
-            .iter_mut()
-            .zip(&mut tree.children)
-            .zip(layout.children())
-        {
-            child.as_widget_mut().update(
-                child_tree,
-                event,
-                child_layout,
-                cursor,
-                renderer,
-                clipboard,
-                shell,
-                viewport,
-            );
-        }
-    }
-
-    fn mouse_interaction(
-        &self,
-        tree: &widget::Tree,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        viewport: &Rectangle,
-        renderer: &iced::Renderer,
-    ) -> mouse::Interaction {
-        self.children
-            .iter()
-            .zip(&tree.children)
-            .zip(layout.children())
-            .map(|((child, child_tree), child_layout)| {
-                child.as_widget().mouse_interaction(
-                    child_tree,
-                    child_layout,
-                    cursor,
-                    viewport,
-                    renderer,
-                )
-            })
-            .max()
-            .unwrap_or_default()
-    }
-
-    fn draw(
-        &self,
-        tree: &widget::Tree,
-        renderer: &mut iced::Renderer,
-        theme: &Theme,
-        style: &renderer::Style,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        viewport: &Rectangle,
-    ) {
-        for ((child, child_tree), child_layout) in self
-            .children
-            .iter()
-            .zip(&tree.children)
-            .zip(layout.children())
-        {
-            child.as_widget().draw(
-                child_tree,
-                renderer,
-                theme,
-                style,
-                child_layout,
-                cursor,
-                viewport,
-            );
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use iced::{Color, Theme};
 
     #[test]
     fn address_input_overlay_masks_breadcrumbs_without_drawing_a_second_border() {

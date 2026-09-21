@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Bennu
+Icon=bennu
+Exec=bennu %F
+MimeType=inode/directory;
+Categories=System;FileManager;
+Terminal=false

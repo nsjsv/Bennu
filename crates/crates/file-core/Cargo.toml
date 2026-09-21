@@ -1,0 +1,36 @@
+[package]
+name = "file-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+blake3.workspace = true
+getrandom = "0.4.2"
+filetime = "0.2.29"
+flate2 = "1.1.9"
+image.workspace = true
+libc = "0.2"
+md-5.workspace = true
+notify.workspace = true
+serde = { version = "1", features = ["derive"] }
+sha1.workspace = true
+sha2.workspace = true
+tar = "0.4.46"
+tracing.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+trash.workspace = true
+zip = "8.6.0"
+
+[target.'cfg(unix)'.dependencies]
+xattr = "1.6.1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+exacl = "0.13.0"
+rustix = { version = "1.1.4", features = ["fs"] }
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true

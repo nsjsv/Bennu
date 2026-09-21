@@ -1,0 +1,117 @@
+#!/bin/sh
+set -eu
+
+source_path=""
+output_dir=""
+previous=""
+for argument in "$@"; do
+    if [ "$previous" = "--outdir" ]; then
+        output_dir="$argument"
+    fi
+    case "$argument" in
+        *.doc|*.DOC|*.docx|*.DOCX|*.xls|*.XLS|*.xlsx|*.XLSX|*.ppt|*.PPT|*.pptx|*.PPTX|*.odt|*.ODT|*.ods|*.ODS|*.odp|*.ODP)
+            source_path="$argument"
+            ;;
+    esac
+    previous="$argument"
+done
+
+[ -n "$source_path" ]
+[ -n "$output_dir" ]
+{
+    for argument in "$@"; do
+        printf 'arg=%s\n' "$argument"
+    done
+    printf 'HOME=%s\n' "${HOME-}"
+    printf 'TMPDIR=%s\n' "${TMPDIR-}"
+    printf 'XDG_CONFIG_HOME=%s\n' "${XDG_CONFIG_HOME-}"
+    printf 'XDG_CACHE_HOME=%s\n' "${XDG_CACHE_HOME-}"
+    printf 'XDG_DATA_HOME=%s\n' "${XDG_DATA_HOME-}"
+    printf 'SAL_DISABLE_OPENCL=%s\n' "${SAL_DISABLE_OPENCL-}"
+} > "${source_path}.invocation"
+printf '%s\n' "$$" > "${source_path}.pid"
+printf 'started\n' > "${source_path}.started"
+
+name=$(basename "$source_path")
+case "$name" in
+    no-output.*)
+        exit 0
+        ;;
+    multiple-output.*)
+        printf 'pdf-a' > "$output_dir/a.pdf"
+        printf 'pdf-b' > "$output_dir/b.pdf"
+        exit 0
+        ;;
+    non-pdf-output.*)
+        printf 'text' > "$output_dir/result.txt"
+        exit 0
+        ;;
+    symlink-output.*)
+        ln -s "$source_path" "$output_dir/result.pdf"
+        exit 0
+        ;;
+    empty-output.*)
+        : > "$output_dir/result.pdf"
+        exit 0
+        ;;
+    oversized-output.*)
+        dd if=/dev/zero of="$output_dir/result.pdf" bs=2048 count=1 2>/dev/null
+        exit 0
+        ;;
+    output-escape.*)
+        external_dir=$(cat "${source_path}.external")
+        rm -rf "$output_dir"
+        ln -s "$external_dir" "$output_dir"
+        printf 'external-pdf' > "$external_dir/escaped.pdf"
+        exit 0
+        ;;
+    descendant-timeout.*|descendant-cancel.*)
+        sleep 20 &
+        printf '%s\n' "$!" > "${source_path}.pid.child"
+        wait
+        ;;
+    leader-early-exit.*)
+        sleep 20 &
+        printf '%s\n' "$!" > "${source_path}.pid.child"
+        exit 0
+        ;;
+    timeout.*|running-cancel.*)
+        exec sleep 20
+        ;;
+    output-limit.*)
+        dd if=/dev/zero bs=70000 count=1 2>/dev/null | tr '\000' x
+        exit 0
+        ;;
+    conversion-failure.*)
+        printf 'fixture conversion failure\001 detail\n' >&2
+        exit 9
+        ;;
+    holding.*|concurrency-*.*)
+        if [ "$name" = "holding.docx" ]; then
+            counter="$source_path"
+        else
+            counter="$(dirname "$source_path")/office-concurrency"
+        fi
+        lock="${counter}.counter-lock"
+        while ! mkdir "$lock" 2>/dev/null; do sleep 0.005; done
+        current=$(cat "${counter}.current" 2>/dev/null || printf '0')
+        maximum=$(cat "${counter}.maximum" 2>/dev/null || printf '0')
+        current=$((current + 1))
+        printf '%s\n' "$current" > "${counter}.current"
+        if [ "$current" -gt "$maximum" ]; then
+            printf '%s\n' "$current" > "${counter}.maximum"
+        fi
+        rmdir "$lock"
+        if [ "$name" = "holding.docx" ]; then sleep 0.25; else sleep 0.08; fi
+        while ! mkdir "$lock" 2>/dev/null; do sleep 0.005; done
+        current=$(cat "${counter}.current")
+        printf '%s\n' "$((current - 1))" > "${counter}.current"
+        rmdir "$lock"
+        exit 9
+        ;;
+    *)
+        stem=${name%.*}
+        printf 'fake-pdf' > "$output_dir/$stem.pdf"
+        exit 0
+        ;;
+esac

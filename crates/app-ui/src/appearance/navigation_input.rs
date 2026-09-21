@@ -1,20 +1,12 @@
-use iced::widget::{container, text_input};
-use iced::Theme;
-
-pub(crate) use bennu_theme::styles::navigation_text_input_style;
-
-pub(crate) fn address_bar_style(theme: &Theme) -> container::Style {
-    let input_style = navigation_text_input_style(theme, text_input::Status::Active);
-    container::Style {
-        background: Some(input_style.background),
-        border: input_style.border,
-        ..container::Style::default()
-    }
-}
+// 地址栏外框与导航输入框样式已下沉 bennu-theme 共享（portal FileChooser
+// 地址栏复用同一份视觉）；这里仅 re-export 保持 crate 内引用路径不变。
+pub(crate) use bennu_theme::styles::{address_bar_style, navigation_text_input_style};
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use iced::widget::text_input;
+    use iced::Theme;
 
     #[test]
     fn navigation_inputs_share_the_same_rounded_frame() {

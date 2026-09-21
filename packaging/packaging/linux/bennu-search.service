@@ -1,0 +1,33 @@
+[Unit]
+Description=Bennu indexed search service
+Documentation=https://github.com/nsjsv/Bennu
+ConditionControlGroupController=v2
+ConditionControlGroupController=memory
+ConditionControlGroupController=cpu
+
+[Service]
+Type=exec
+SyslogIdentifier=bennu-search
+ExecStartPre=/usr/lib/bennu/bennu-searchd --shutdown-existing
+ExecStart=/usr/lib/bennu/bennu-searchd
+
+MemoryAccounting=yes
+IOAccounting=yes
+MemoryHigh=512000000
+MemoryMax=640000000
+MemorySwapMax=0
+Slice=background.slice
+
+OOMPolicy=kill
+Restart=on-failure
+RestartSec=2s
+RestartPreventExitStatus=SIGKILL
+KillMode=control-group
+KillSignal=SIGTERM
+SendSIGKILL=yes
+TimeoutStartSec=30s
+TimeoutStopSec=30s
+UMask=0077
+
+[Install]
+WantedBy=default.target

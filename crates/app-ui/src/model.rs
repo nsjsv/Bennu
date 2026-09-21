@@ -50,9 +50,9 @@ pub(crate) use file_core::{TransferConflictItem, TransferConflictMetadata};
 
 mod address_bar;
 pub(crate) use address_bar::{
-    allocate_breadcrumb_widths, breadcrumb_segments, displayed_address_directory,
-    AddressBarTransition, AddressEditingSession, AddressEditingSessionId, AddressSuggestionRequest,
-    BreadcrumbSegment, BreadcrumbSegmentKind,
+    breadcrumb_segments, displayed_address_directory, AddressEditingSession,
+    AddressEditingSessionId, AddressSuggestionRequest, BreadcrumbSegment, BreadcrumbSegmentKind,
+    PaneAddressBarTransition, PaneAddressEditingSession,
 };
 mod entry_naming;
 pub(crate) use entry_naming::{
@@ -237,17 +237,11 @@ pub(crate) enum ScrollbarRegion {
     PreviewSqliteTables,
     PreviewSqliteData,
 }
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct ScrollbarViewport {
-    pub(crate) offset_x: f32,
-    pub(crate) offset_y: f32,
-    pub(crate) viewport_width: f32,
-    pub(crate) viewport_height: f32,
-    pub(crate) content_width: f32,
-    pub(crate) content_height: f32,
-}
-
-pub(crate) const SCROLLBAR_MIN_THUMB_LENGTH: f32 = 28.0;
+// 视口快照模型随滚动条视觉层迁至共享 crate `bennu-theme::scrollbar`；
+// 重导出保持 `crate::model::ScrollbarViewport` 路径不变。
+// SCROLLBAR_MIN_THUMB_LENGTH 亦随之下沉，但 crate 内已无直接消费者
+// （thumb 几何在共享层计算），不再经 model 转发以免死重导出。
+pub use bennu_theme::scrollbar::ScrollbarViewport;
 
 // 滚动条可见性模型迁至共享 crate `bennu-theme::styles`；重导出保持调用点不变。
 pub(crate) use bennu_theme::styles::{ScrollbarVisibility, SCROLLBAR_HOVER_WIDTH};

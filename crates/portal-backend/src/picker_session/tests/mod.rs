@@ -2,7 +2,9 @@
 
 use super::*;
 use crate::picker_request::FilePattern;
+use crate::picker_session::scan::DirectoryScanOutcome;
 use std::fs;
+mod address_editing;
 
 fn spec(kind: PickerKind, filters: Vec<FilterRule>) -> PickerRequestSpec {
     PickerRequestSpec {
@@ -122,14 +124,6 @@ fn select_all_is_ignored_outside_multi_open_mode() {
     seeded_listing(&mut session, &[("a.txt", FileKind::File)]);
     session.update(SessionMessage::SelectAllPressed);
     assert!(session.selection().is_empty());
-}
-
-#[test]
-fn breadcrumb_chain_lists_ancestors_root_first() {
-    let chain = breadcrumb_chain(Path::new("/home/u/Downloads"));
-    assert_eq!(chain.len(), 4);
-    assert_eq!(chain[0], Path::new("/"));
-    assert_eq!(chain[3], Path::new("/home/u/Downloads"));
 }
 
 #[test]
@@ -345,7 +339,7 @@ fn double_click_directory_navigates() {
         }),
     });
     let effect = session.update(SessionMessage::EntryDoubleClicked { index: 0 });
-    assert!(matches!(effect, SessionEffect::ScanDirectory(target) if target == child));
+    assert!(matches!(effect, SessionEffect::NavigateDirectory(target) if target == child));
 }
 
 #[test]
@@ -484,10 +478,40 @@ fn expansion_animation_advances_and_holds_at_full() {
     assert!((session.rows()[0].expand_progress - 0.18).abs() < 1e-4);
     assert!((session.rows()[1].height_progress - 0.18).abs() < 1e-4);
 
-    while session.advance_animations() {}
+    while session.advance_animations().changed {}
     assert!((session.rows()[0].expand_progress - 1.0).abs() < 1e-4);
     assert!((session.rows()[1].height_progress - 1.0).abs() < 1e-4);
     assert!(!session.is_animating());
+}
+
+#[test]
+fn collapse_completion_is_reported_for_scrollbar_recheck() {
+    let (mut session, _receiver) = session(PickerKind::OpenFile {
+        multiple: false,
+        directory: false,
+    });
+    seeded_listing(&mut session, &[("sub", FileKind::Directory)]);
+    let child = session.directory().join("sub");
+    session.update(SessionMessage::EntryExpandToggled { index: 0 });
+    session.apply_scan(scan_result(&child, Ok(vec![("inner.txt", FileKind::File)])));
+
+    // 纯展开阶段逐帧推进：没有任何收缩播完信号（避免每帧白探滚动条）。
+    let mut saw_expansion_frame = false;
+    while session.is_animating() {
+        assert!(!session.advance_animations().collapse_finished);
+        saw_expansion_frame = true;
+    }
+    assert!(saw_expansion_frame);
+
+    // 收起播完的那一帧必须上报 collapse_finished：行列表结构性收缩，
+    // advance_frame 据此追加滚动条布局探针（防视口缓存陈旧）。
+    session.update(SessionMessage::EntryExpandToggled { index: 0 });
+    let mut collapse_finished = false;
+    while session.is_animating() {
+        collapse_finished |= session.advance_animations().collapse_finished;
+    }
+    assert!(collapse_finished);
+    assert_eq!(session.rows().len(), 1);
 }
 
 #[test]
@@ -500,7 +524,7 @@ fn toggle_during_collapse_resumes_expansion() {
     let child = session.directory().join("sub");
     session.update(SessionMessage::EntryExpandToggled { index: 0 });
     session.apply_scan(scan_result(&child, Ok(vec![("inner.txt", FileKind::File)])));
-    while session.advance_animations() {}
+    while session.advance_animations().changed {}
 
     session.update(SessionMessage::EntryExpandToggled { index: 0 });
     session.advance_animations();
@@ -512,7 +536,7 @@ fn toggle_during_collapse_resumes_expansion() {
     session.advance_animations();
     assert!(session.rows()[0].expand_progress > mid_collapse);
     assert_eq!(session.rows().len(), 2);
-    while session.advance_animations() {}
+    while session.advance_animations().changed {}
     assert_eq!(session.rows().len(), 2);
 }
 
@@ -524,7 +548,7 @@ fn no_expansion_means_not_animating() {
     });
     seeded_listing(&mut session, &[("a.txt", FileKind::File)]);
     assert!(!session.is_animating());
-    assert!(!session.advance_animations());
+    assert!(!session.advance_animations().changed);
 }
 
 #[test]
@@ -556,24 +580,6 @@ fn loading_expansion_ignores_duplicate_toggles() {
     assert_eq!(session.rows().len(), 1);
     // 展开标记如今由动画状态表达：Pending 节点进度仍在推进。
     assert!(session.is_animating());
-}
-
-#[test]
-fn navigation_clears_expansions_and_address_editing() {
-    let (mut session, _receiver) = session(PickerKind::OpenFile {
-        multiple: false,
-        directory: false,
-    });
-    seeded_listing(&mut session, &[("sub", FileKind::Directory)]);
-    session.update(SessionMessage::EntryExpandToggled { index: 0 });
-    session.update(SessionMessage::AddressEditingStarted);
-    assert!(session.address_edit().is_some());
-
-    let target = session.directory().join("sub");
-    session.update(SessionMessage::EntryDoubleClicked { index: 0 });
-    assert_eq!(session.directory(), target);
-    assert!(session.address_edit().is_none());
-    assert!(matches!(session.listing(), DirectoryListing::Pending));
 }
 
 #[test]
@@ -627,7 +633,7 @@ fn new_navigation_after_back_truncates_the_forward_branch() {
     session.update(SessionMessage::EntryDoubleClicked { index: 0 });
     session.update(SessionMessage::NavigateBack);
     let forward = session.update(SessionMessage::NavigateForward);
-    assert!(matches!(forward, SessionEffect::ScanDirectory(_)));
+    assert!(matches!(forward, SessionEffect::NavigateDirectory(_)));
     session.update(SessionMessage::NavigateBack);
 
     // 回退后走新分支：前进历史被截断。
@@ -641,39 +647,5 @@ fn new_navigation_after_back_truncates_the_forward_branch() {
     let stuck = session.update(SessionMessage::NavigateForward);
     assert!(matches!(stuck, SessionEffect::None));
     let back = session.update(SessionMessage::NavigateBack);
-    assert!(matches!(back, SessionEffect::ScanDirectory(_)));
-}
-
-#[test]
-fn address_editing_prefills_navigates_and_cancels() {
-    let (mut session, _receiver) = session(PickerKind::OpenFile {
-        multiple: false,
-        directory: false,
-    });
-    seeded_listing(&mut session, &[("a", FileKind::Directory)]);
-    let start = session.directory().to_path_buf();
-
-    session.update(SessionMessage::AddressEditingStarted);
-    assert_eq!(
-        session.address_edit(),
-        Some(start.to_string_lossy().as_ref())
-    );
-
-    // 空草稿提交 = 取消编辑，留在原地。
-    session.update(SessionMessage::AddressEditChanged("  ".to_string()));
-    session.update(SessionMessage::AddressEditingSubmitted);
-    assert_eq!(session.directory(), start);
-    assert!(session.address_edit().is_none());
-
-    // 相对路径拼接当前目录；成功导航后编辑态退出。
-    session.update(SessionMessage::AddressEditingStarted);
-    session.update(SessionMessage::AddressEditChanged("a".to_string()));
-    let effect = session.update(SessionMessage::AddressEditingSubmitted);
-    assert!(matches!(effect, SessionEffect::ScanDirectory(dir) if dir == start.join("a")));
-    assert!(session.address_edit().is_none());
-
-    // 取消编辑。
-    session.update(SessionMessage::AddressEditingStarted);
-    session.update(SessionMessage::AddressEditingCancelled);
-    assert!(session.address_edit().is_none());
+    assert!(matches!(back, SessionEffect::NavigateDirectory(_)));
 }

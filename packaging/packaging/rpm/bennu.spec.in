@@ -1,0 +1,37 @@
+Name:           bennu
+Version:        @SEMVER@
+Release:        1%{?dist}
+Summary:        Linux desktop file manager written in Rust and Iced
+
+License:        GPL-3.0-or-later
+URL:            https://github.com/nsjsv/Bennu
+BuildArch:      x86_64
+
+# Runtime commands not covered by automatic soname dependencies.
+Requires:       wl-clipboard, xdg-utils
+Suggests:       7zip, ffmpeg, ffmpegthumbnailer, gvfs-smb, gvfs-mtp, gvfs-gphoto2, gvfs-afc, poppler-utils, libreoffice, libsecret
+
+%description
+Multi-column file manager with previews (text, Markdown, archives, PDF,
+Office, images, audio and video), virtualized large-directory views and an
+optional indexed search service (bennu-search.service, enabled by the
+user via systemctl --user).
+
+%install
+bash "@PAYLOAD_SCRIPT@" "%{buildroot}" "@APP_BINARY@" "@DAEMON_BINARY@" "@PORTAL_BINARY@"
+
+%files
+%license /usr/share/licenses/bennu/LICENSE
+%doc /usr/share/doc/bennu/matugen.md
+/usr/bin/bennu
+/usr/lib/bennu/bennu-searchd
+/usr/lib/systemd/user/bennu-search.service
+/usr/share/applications/bennu.desktop
+/usr/share/icons/hicolor/512x512/apps/bennu.png
+/usr/share/bennu/matugen/bennu-colors.toml
+/usr/share/dbus-1/services/io.github.nsjsv.Bennu.service
+/usr/bin/bennu-portal
+/usr/share/dbus-1/services/org.freedesktop.impl.portal.desktop.bennu.service
+/usr/share/xdg-desktop-portal/portals/bennu.portal
+
+%changelog

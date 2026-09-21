@@ -15,9 +15,9 @@ use crate::{
     config,
     model::{
         AddressEditingSession, AddressEditingSessionId, BrowserPaneId, BrowserViewMode,
-        ColumnEntryBounds, ContextMenuState, FileDropTarget as FileDragTarget, ScrollbarRegion,
-        SelectionMarquee, SelectionMarqueePhase, SelectionMarqueeScrollAnchor,
-        SelectionMarqueeSource,
+        ColumnEntryBounds, ContextMenuState, FileDropTarget as FileDragTarget,
+        PaneAddressEditingSession, ScrollbarRegion, SelectionMarquee, SelectionMarqueePhase,
+        SelectionMarqueeScrollAnchor, SelectionMarqueeSource,
     },
 };
 
@@ -538,15 +538,15 @@ fn clicking_child_column_blank_preserves_open_column_context() {
     .into();
     browser.selected = Some(second);
     browser.selected_paths = HashSet::from([first]);
-    browser.address_editing = Some(AddressEditingSession::new(
-        BrowserPaneId::PRIMARY,
-        AddressEditingSessionId(7),
-        &current_dir,
-    ));
+    browser.address_editing = Some(PaneAddressEditingSession {
+        pane_id: BrowserPaneId::PRIMARY,
+        session: AddressEditingSession::new(AddressEditingSessionId(7), &current_dir),
+    });
     browser
         .address_editing
         .as_mut()
         .expect("address editing session")
+        .session
         .draft = "uncommitted draft".to_owned();
 
     let command = browser.handle_column_blank_clicked(child_directory.clone());
@@ -567,7 +567,7 @@ fn clicking_child_column_blank_preserves_open_column_context() {
         browser
             .address_editing
             .as_ref()
-            .map(|session| session.draft.as_str()),
+            .map(|editing| editing.session.draft.as_str()),
         Some("uncommitted draft")
     );
 }

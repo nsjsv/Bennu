@@ -1169,7 +1169,7 @@ impl FileBrowser {
                 let checked_session_is_current = self
                     .address_editing
                     .as_ref()
-                    .is_some_and(|session| session.pane_id == pane_id);
+                    .is_some_and(|editing| editing.pane_id == pane_id);
                 if is_focused || !checked_session_is_current {
                     Task::none()
                 } else {

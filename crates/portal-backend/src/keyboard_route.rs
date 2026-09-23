@@ -540,6 +540,8 @@ mod tests {
             windows: std::collections::HashMap::new(),
             theme: bennu_theme::fallback_theme(bennu_theme::AppearanceMode::Light),
             keyboard_modifiers: keyboard::Modifiers::default(),
+            cursor_position: None,
+            sidebar_resize: std::collections::HashMap::new(),
             preview: crate::preview_host::PreviewHost::new(
                 tempfile::tempdir().unwrap().keep().join("state.sqlite"),
             ),

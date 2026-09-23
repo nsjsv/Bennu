@@ -1,5 +1,5 @@
 use iced::widget::button;
-use iced::{Background, Border, Color, Shadow, Theme, Vector};
+use iced::{Background, Border, Color, Theme};
 
 mod navigation_input;
 mod container {
@@ -33,13 +33,14 @@ pub(crate) use list_header::{
 pub(crate) use bennu_theme::styles::{
     app_content_style, base_text_color, button_hover_surface_color, button_pressed_surface_color,
     button_surface_color, context_menu_item_button_style, context_menu_style,
-    elevation_shadow_color, enhanced_horizontal_scrollbar_direction, enhanced_scrollbar_style,
+    enhanced_horizontal_scrollbar_direction, enhanced_scrollbar_style,
     enhanced_vertical_scrollbar_direction, error_notification_style, faded_button_style,
-    faded_text_input_style, hovered_row_style, icon_svg_style, list_row_style,
-    muted_icon_svg_style, muted_text_color, path_suggestion_item_style, path_suggestions_style,
-    scale_color_alpha, selected_icon_svg_style, selected_path_suggestion_item_style,
-    subtle_border_color, surface_button_style, transparent_button_style,
-    transparent_icon_button_style, warning_icon_svg_style,
+    faded_text_input_style, hovered_row_style, hovered_sidebar_item_style, icon_svg_style,
+    list_row_style, muted_icon_svg_style, muted_text_color, path_suggestion_item_style,
+    path_suggestions_style, scale_color_alpha, selected_icon_svg_style,
+    selected_path_suggestion_item_style, selected_sidebar_item_style,
+    sidebar_bookmark_drop_slot_style, sidebar_style, subtle_border_color, surface_button_style,
+    transparent_button_style, transparent_icon_button_style, warning_icon_svg_style,
 };
 
 use crate::file_entry_presentation::SelectionRunPosition;
@@ -220,44 +221,6 @@ pub(crate) fn column_resize_divider_style(theme: &Theme) -> container::Appearanc
     }
 }
 
-pub(crate) fn sidebar_style(theme: &Theme) -> container::Appearance {
-    let colors = ui_colors(theme);
-    container::Appearance {
-        background: Some(Background::Color(Color {
-            a: 0.92,
-            ..colors.surface
-        })),
-        text_color: Some(colors.on_surface),
-        border: Border {
-            color: Color {
-                a: 0.55,
-                ..colors.outline_variant
-            },
-            width: 1.0,
-            radius: 18.0.into(),
-        },
-        shadow: Shadow {
-            color: elevation_shadow_color(theme, 0.22),
-            offset: Vector::new(0.0, 10.0),
-            blur_radius: 22.0,
-        },
-        ..container::Appearance::default()
-    }
-}
-
-pub(crate) fn selected_sidebar_item_style(theme: &Theme) -> container::Appearance {
-    let colors = ui_colors(theme);
-    container::Appearance {
-        background: Some(Background::Color(colors.primary_container)),
-        text_color: Some(colors.on_primary_container),
-        border: Border {
-            radius: 8.0.into(),
-            ..Border::default()
-        },
-        ..container::Appearance::default()
-    }
-}
-
 pub(crate) fn tab_strip_style(theme: &Theme) -> container::Appearance {
     let colors = ui_colors(theme);
     container::Appearance {
@@ -292,31 +255,6 @@ pub(crate) fn selected_tab_item_style(theme: &Theme) -> container::Appearance {
             color: colors.primary,
             width: 1.0,
             radius: 12.0.into(),
-        },
-        ..container::Appearance::default()
-    }
-}
-
-pub(crate) fn hovered_sidebar_item_style(theme: &Theme) -> container::Appearance {
-    let colors = ui_colors(theme);
-    container::Appearance {
-        background: Some(Background::Color(colors.surface_container_high)),
-        text_color: Some(colors.on_surface),
-        border: Border {
-            radius: 8.0.into(),
-            ..Border::default()
-        },
-        ..container::Appearance::default()
-    }
-}
-
-pub(crate) fn sidebar_bookmark_drop_slot_style(theme: &Theme) -> container::Appearance {
-    let accent = ui_colors(theme).primary;
-    container::Appearance {
-        background: Some(Background::Color(accent)),
-        border: Border {
-            radius: 1.0.into(),
-            ..Border::default()
         },
         ..container::Appearance::default()
     }

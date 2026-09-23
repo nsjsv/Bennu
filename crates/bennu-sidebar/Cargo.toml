@@ -1,0 +1,13 @@
+[package]
+name = "bennu-sidebar"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# 图标符号（视觉词汇）来自 bennu-theme；设备/网络连接类型来自
+# desktop-linux。纯数据 + 解析 crate，禁止引入 iced 运行时依赖。
+bennu-theme = { path = "../bennu-theme" }
+desktop-linux = { path = "../desktop-linux" }
+dirs.workspace = true
+toml = "1.1.2"

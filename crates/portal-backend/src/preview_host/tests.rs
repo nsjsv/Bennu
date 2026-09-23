@@ -440,6 +440,8 @@ fn daemon_with_image_row(file_name: &str) -> (PickerDaemon, window::Id, PathBuf)
         windows: std::collections::HashMap::new(),
         theme: Theme::Light,
         keyboard_modifiers: iced::keyboard::Modifiers::default(),
+        cursor_position: None,
+        sidebar_resize: std::collections::HashMap::new(),
         preview: PreviewHost::new(PathBuf::new()),
     };
     let window = window::Id::unique();

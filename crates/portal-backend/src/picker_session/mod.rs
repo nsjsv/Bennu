@@ -24,15 +24,20 @@ mod expansion;
 mod keyboard_nav;
 pub(crate) mod scan;
 pub(crate) mod scrollbar;
+mod selection;
+mod sidebar;
 pub(crate) mod suggestions;
 pub(crate) mod thumbnails;
 
 /// 行几何唯一真值再导出：view 层行高/间距与各子模块同源（模块本身
 /// 保持私有，只放行这两个常量）。
 pub(crate) use expansion::{LIST_ROW_HEIGHT, LIST_ROW_SPACING};
-pub(crate) use scan::{scan_listing, DirectoryListing, DirectoryScanResult};
+pub(crate) use scan::{scan_listing, scan_trash_listing, DirectoryListing, DirectoryScanResult};
 pub(crate) use scrollbar::SessionScrollRegion;
 use scrollbar::{ScrollbarViewport, SessionScrollbarState, SmoothScrollState};
+pub(crate) use sidebar::{
+    load_sidebar_data, PickerSidebarData, PickerSidebarState, SidebarEntryId, TRASH_DIRECTORY,
+};
 
 pub(crate) use address_editing::PathSuggestionDirection;
 use expansion::ExpansionState;
@@ -51,6 +56,14 @@ pub(crate) enum SessionEffect {
     Confirmed(Vec<PathBuf>),
     /// 用户取消（Esc / 取消按钮）。
     Dismissed,
+    /// 窗口打开时一次性读取侧边栏数据（位置/收藏/设备/网络连接），
+    /// 与每窗重解析主题同模式；回信 `SidebarDataLoaded`。
+    LoadSidebarData,
+    /// 侧边栏未挂载设备挂载：回信 `SidebarDeviceMountFinished`。
+    MountDevice(desktop_linux::StorageDeviceId),
+    /// 侧边栏网络连接挂载（先查主程序已存凭证）：回信
+    /// `SidebarConnectionMountFinished`。
+    MountConnection(desktop_linux::NetworkConnectionId),
     /// 列表/面包屑内容骤变后核实滚动条溢出：布局探针回信自愈视口
     /// 缓存，塞得下则淡入被拦截。main 层翻译为探针 Task。
     VerifyScrollbarLayout,
@@ -183,6 +196,35 @@ pub(crate) enum SessionMessage {
         request: ThumbnailRequest,
         outcome: Result<CachedThumbnail, ThumbnailLoadFailed>,
     },
+    /// 侧边栏数据回填（窗口打开时一次性读取）。
+    SidebarDataLoaded(Box<PickerSidebarData>),
+    /// 点击位置/收藏行：导航到对应目录。
+    SidebarLocationPressed {
+        path: PathBuf,
+    },
+    /// 点击垃圾桶行：进入 trash:/// 虚拟视图。
+    SidebarTrashPressed,
+    SidebarDevicePressed {
+        id: desktop_linux::StorageDeviceId,
+    },
+    SidebarConnectionPressed {
+        id: desktop_linux::NetworkConnectionId,
+    },
+    SidebarDeviceMountFinished {
+        id: desktop_linux::StorageDeviceId,
+        mount_path: Result<PathBuf, String>,
+    },
+    SidebarConnectionMountFinished {
+        id: desktop_linux::NetworkConnectionId,
+        mount_path: Result<PathBuf, String>,
+    },
+    /// 侧边栏行悬停变化；None = 离开所有行。
+    SidebarHoverChanged {
+        entry: Option<sidebar::SidebarEntryId>,
+    },
+    /// 拖宽手柄按下：main 层拦截处理（拖宽的指针增量归 main 的指针
+    /// 簿记，iced::Point 不进会话层），本臂仅为穷尽兑底。
+    SidebarResizeStarted,
 }
 
 pub(crate) use expansion::PickerRow;
@@ -226,6 +268,8 @@ pub(crate) struct PickerSession {
     /// 滚轮 Mos 惯性状态机与滚动条显隐状态：逻辑见子模块 scrollbar。
     smooth_scroll: SmoothScrollState,
     scrollbar: SessionScrollbarState,
+    /// 侧边栏子状态（数据/宽度/拖宽/提示），见 sidebar 子模块。
+    sidebar: PickerSidebarState,
     /// 滚动轴向换算用的 shift 修饰键（main 层同步；视图与处理端同源）。
     shift_pressed: bool,
     /// 行内缩略图调度状态（就绪 LRU/在途/排队/失败 backoff），见子模块。
@@ -287,6 +331,7 @@ impl PickerSession {
             history_position: 0,
             smooth_scroll: SmoothScrollState::default(),
             scrollbar: SessionScrollbarState::default(),
+            sidebar: PickerSidebarState::default(),
             shift_pressed: false,
             thumbnails: thumbnails::SessionThumbnailState::new(
                 thumbnails::default_thumbnail_cache_dir(),
@@ -371,17 +416,23 @@ impl PickerSession {
         }
     }
 
-    /// 确认按钮是否可点。
+    /// 确认按钮是否可点：SaveFile 在回收站视图下禁止确认（无法把
+    /// 文件保存进 trash:/// 虚拟路径）。
     pub(crate) fn can_confirm(&self) -> bool {
         match &self.kind {
             PickerKind::OpenFile { .. } => !self.selection.is_empty(),
-            PickerKind::SaveFile { .. } => !self.name_input.trim().is_empty(),
+            PickerKind::SaveFile { .. } => {
+                !self.is_trash_view() && !self.name_input.trim().is_empty()
+            }
         }
     }
 
-    /// 初始进入扫描。
-    pub(crate) fn begin(&mut self) -> SessionEffect {
-        SessionEffect::NavigateDirectory(self.directory.clone())
+    /// 初始进入扫描（含侧边栏数据加载）。
+    pub(crate) fn begin(&mut self) -> Vec<SessionEffect> {
+        vec![
+            SessionEffect::LoadSidebarData,
+            SessionEffect::NavigateDirectory(self.directory.clone()),
+        ]
     }
 
     pub(crate) fn update(&mut self, message: SessionMessage) -> SessionEffect {
@@ -463,6 +514,25 @@ impl PickerSession {
             }
             SessionMessage::ThumbnailReady { request, outcome } => {
                 self.accept_thumbnail_ready(request, outcome);
+                SessionEffect::None
+            }
+            SessionMessage::SidebarDataLoaded(data) => self.accept_sidebar_data(*data),
+            SessionMessage::SidebarLocationPressed { path } => self.sidebar_location_pressed(path),
+            SessionMessage::SidebarTrashPressed => self.sidebar_trash_pressed(),
+            SessionMessage::SidebarDevicePressed { id } => self.sidebar_device_pressed(id),
+            SessionMessage::SidebarConnectionPressed { id } => self.sidebar_connection_pressed(id),
+            SessionMessage::SidebarDeviceMountFinished { id, mount_path } => {
+                self.sidebar_device_mount_finished(id, mount_path)
+            }
+            SessionMessage::SidebarConnectionMountFinished { id, mount_path } => {
+                self.sidebar_connection_mount_finished(id, mount_path)
+            }
+            SessionMessage::SidebarHoverChanged { entry } => {
+                self.sidebar_hover_changed(entry);
+                SessionEffect::None
+            }
+            SessionMessage::SidebarResizeStarted => {
+                // main 层拦截处理（拖宽状态归指针事件层）。
                 SessionEffect::None
             }
             // 滚动类消息由 scrollbar 子模块处理并产出 Task，main 层在进入
@@ -568,85 +638,6 @@ impl PickerSession {
                     });
             if let Some(children) = children {
                 self.append_rows(&children, depth + 1);
-            }
-        }
-    }
-
-    fn click_entry(&mut self, index: usize, ctrl: bool, shift: bool) {
-        let multiple = matches!(self.kind, PickerKind::OpenFile { multiple: true, .. });
-        match self.kind {
-            PickerKind::SaveFile { .. } => {
-                // SaveFile：文件点击=取其名；文件/目录都落选中集
-                // （单击选中、双击进入的桌面惯例；空格预览目标取
-                // selection_anchor，无选中则空格静默无操作）。
-                if let Some(row) = self.rows.get(index) {
-                    if row.entry.kind == FileKind::File {
-                        self.name_input = row.entry.name.to_string_lossy().into_owned();
-                        self.overwrite_target = None;
-                    }
-                }
-            }
-            PickerKind::OpenFile { directory, .. } => {
-                if let Some(row) = self.rows.get(index) {
-                    let selectable = if directory {
-                        row.entry.kind == FileKind::Directory
-                    } else {
-                        row.entry.kind == FileKind::File
-                    };
-                    if !selectable {
-                        return;
-                    }
-                }
-            }
-        }
-        if shift && multiple {
-            if let Some(anchor) = self.selection_anchor {
-                let (lo, hi) = (anchor.min(index), anchor.max(index));
-                self.selection = (lo..=hi).collect();
-            } else {
-                self.selection = vec![index];
-                self.selection_anchor = Some(index);
-            }
-        } else if ctrl && multiple {
-            if let Some(position) = self.selection.iter().position(|&i| i == index) {
-                self.selection.remove(position);
-            } else {
-                self.selection.push(index);
-                self.selection.sort_unstable();
-            }
-            self.selection_anchor = Some(index);
-        } else {
-            self.selection = vec![index];
-            self.selection_anchor = Some(index);
-        }
-    }
-
-    fn activate_entry(&mut self, index: usize) -> SessionEffect {
-        let Some(row) = self.rows.get(index) else {
-            return SessionEffect::None;
-        };
-        if row.entry.kind == FileKind::Directory {
-            return self.begin_navigation(row.entry.path.clone());
-        }
-        // 文件双击 = 选中并立即确认（桌面选择器惯例）。
-        match self.kind {
-            PickerKind::OpenFile {
-                multiple: false, ..
-            } => {
-                self.selection = vec![index];
-                self.confirm()
-            }
-            PickerKind::OpenFile { multiple: true, .. } => {
-                if !self.selection.contains(&index) {
-                    self.selection.push(index);
-                    self.selection.sort_unstable();
-                }
-                SessionEffect::None
-            }
-            PickerKind::SaveFile { .. } => {
-                self.name_input = row.entry.name.to_string_lossy().into_owned();
-                self.overwrite_target = None;
-                SessionEffect::None
             }
         }
     }
@@ -762,6 +753,10 @@ impl PickerSession {
     }
 
     fn navigate_up(&mut self) -> SessionEffect {
+        // 回收站虚拟视图没有父目录（"trash:///" 的 parent 是空路径）。
+        if self.is_trash_view() {
+            return SessionEffect::None;
+        }
         let Some(parent) = self.directory.parent().map(Path::to_path_buf) else {
             return SessionEffect::None;
         };
@@ -769,32 +764,6 @@ impl PickerSession {
             return SessionEffect::None;
         }
         self.begin_navigation(parent)
-    }
-
-    /// Ctrl+A：仅 OpenFile 多选模式响应；按模式的可选类型圈定范围。
-    fn select_all(&mut self) {
-        let PickerKind::OpenFile {
-            multiple: true,
-            directory,
-            ..
-        } = &self.kind
-        else {
-            return;
-        };
-        self.selection = self
-            .rows
-            .iter()
-            .enumerate()
-            .filter(|(_, row)| {
-                if *directory {
-                    row.entry.kind == FileKind::Directory
-                } else {
-                    row.entry.kind == FileKind::File
-                }
-            })
-            .map(|(index, _)| index)
-            .collect();
-        self.selection_anchor = self.selection.first().copied();
     }
 }
 

@@ -22,20 +22,22 @@ use iced::{mouse, Task};
 use super::{PickerSession, SessionMessage};
 use crate::scrollbar_state::{scrollbar_auto_hide_task, ScrollbarStateMachine};
 
-/// portal 的滚动区域：文件列表（竖向）与地址栏面包屑（横向）。
+/// portal 的滚动区域：文件列表（竖向）、地址栏面包屑（横向）与
+/// 侧边栏（竖向）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum SessionScrollRegion {
     List,
     Breadcrumb,
+    Sidebar,
 }
 
 /// 会话滚轮惯性状态机：区域枚举由本模块钉死。
 pub(crate) type SmoothScrollState = MosScrollState<SessionScrollRegion>;
-/// 区域 → 滚动轴向：列表竖向；面包屑是横向滚动条，主滚轮（竖向
+/// 区域 → 滚动轴向：列表/侧栏竖向；面包屑是横向滚动条，主滚轮（竖向
 /// 滚动）换算为横向增量，与主软件地址栏同语义。
 pub(crate) fn scroll_axis(region: SessionScrollRegion) -> SmoothScrollAxis {
     match region {
-        SessionScrollRegion::List => SmoothScrollAxis::Vertical,
+        SessionScrollRegion::List | SessionScrollRegion::Sidebar => SmoothScrollAxis::Vertical,
         SessionScrollRegion::Breadcrumb => SmoothScrollAxis::HorizontalFromPrimaryWheel,
     }
 }
@@ -49,6 +51,9 @@ pub(crate) fn scroll_id(request_path: &str, region: SessionScrollRegion) -> iced
         }
         SessionScrollRegion::Breadcrumb => {
             iced::widget::Id::from(format!("portal-breadcrumb#{request_path}"))
+        }
+        SessionScrollRegion::Sidebar => {
+            iced::widget::Id::from(format!("portal-sidebar#{request_path}"))
         }
     }
 }
@@ -220,6 +225,7 @@ impl PickerSession {
         vec![
             self.scrollbar_layout_probe_task(SessionScrollRegion::List),
             self.scrollbar_layout_probe_task(SessionScrollRegion::Breadcrumb),
+            self.scrollbar_layout_probe_task(SessionScrollRegion::Sidebar),
         ]
     }
 

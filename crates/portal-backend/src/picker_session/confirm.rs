@@ -10,6 +10,12 @@ use crate::picker_request::PickerKind;
 
 impl PickerSession {
     pub(crate) fn confirm(&mut self) -> SessionEffect {
+        // 回收站视图禁止 SaveFile 确认（can_confirm 已禁用按钮，这里
+        // 拦住输入框回车）：trash:/// 不是可写目标。OpenFile 照常确认，
+        // 返回条目的真实载荷路径。
+        if self.is_trash_view() && matches!(self.kind, PickerKind::SaveFile { .. }) {
+            return SessionEffect::None;
+        }
         if self.overwrite_target.is_some() {
             return self.confirm_overwrite();
         }

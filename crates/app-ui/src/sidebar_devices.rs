@@ -1,92 +1,13 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use desktop_linux::{
-    StorageDevice, StorageDeviceAccess, StorageDeviceId, StorageDeviceProviderFailure,
-    StorageDeviceRemoval, StorageDeviceSnapshot,
+    StorageDeviceAccess, StorageDeviceId, StorageDeviceProviderFailure, StorageDeviceSnapshot,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SidebarDeviceAction {
-    Mount,
-    Unmount,
-    Eject,
-}
-
-impl SidebarDeviceAction {
-    pub(crate) fn label(self, device: &SidebarDeviceEntry) -> &'static str {
-        match self {
-            Self::Mount => "Mount",
-            Self::Unmount => "Unmount",
-            Self::Eject if device.removal == Some(StorageDeviceRemoval::SafelyRemove) => {
-                "Safely Remove"
-            }
-            Self::Eject => "Eject",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SidebarDeviceEntry {
-    pub(crate) id: StorageDeviceId,
-    pub(crate) label: String,
-    pub(crate) detail: Option<String>,
-    pub(crate) size_bytes: u64,
-    pub(crate) mount_points: Vec<PathBuf>,
-    pub(crate) access: StorageDeviceAccess,
-    pub(crate) can_mount: bool,
-    pub(crate) can_unmount: bool,
-    pub(crate) removal: Option<StorageDeviceRemoval>,
-}
-
-impl SidebarDeviceEntry {
-    pub(crate) fn from_storage_device(device: StorageDevice) -> Self {
-        let mount_points = device.mount_state.mount_points().to_vec();
-        let detail = device
-            .primary_mount_path()
-            .map(|path| path.to_string_lossy().into_owned())
-            .or_else(|| {
-                device
-                    .device_path
-                    .as_ref()
-                    .map(|path| path.to_string_lossy().into_owned())
-            })
-            .filter(|detail| !detail.is_empty());
-
-        Self {
-            id: device.id,
-            label: device.label,
-            detail,
-            size_bytes: device.size_bytes,
-            mount_points,
-            access: device.access,
-            can_mount: device.can_mount,
-            can_unmount: device.can_unmount,
-            removal: device.removal,
-        }
-    }
-
-    pub(crate) fn primary_mount_path(&self) -> Option<&Path> {
-        self.mount_points.first().map(PathBuf::as_path)
-    }
-
-    pub(crate) fn is_mounted(&self) -> bool {
-        self.primary_mount_path().is_some()
-    }
-
-    pub(crate) fn available_actions(&self) -> Vec<SidebarDeviceAction> {
-        let mut actions = Vec::new();
-        if self.is_mounted() && self.can_unmount {
-            actions.push(SidebarDeviceAction::Unmount);
-        }
-        if !self.is_mounted() && self.can_mount {
-            actions.push(SidebarDeviceAction::Mount);
-        }
-        if self.removal.is_some() {
-            actions.push(SidebarDeviceAction::Eject);
-        }
-        actions
-    }
-}
+// 纯搬移：SidebarDeviceEntry/SidebarDeviceAction（含 available_actions 与
+// 最长前缀选中判定）已下沉 bennu-sidebar（portal 侧栏与主程序共用）；
+// re-export 维持 crate::sidebar_devices::* 既有路径。
+pub(crate) use bennu_sidebar::{selected_sidebar_device, SidebarDeviceAction, SidebarDeviceEntry};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SidebarDeviceActionRequest {
@@ -186,27 +107,11 @@ impl SidebarDeviceState {
     }
 }
 
-pub(crate) fn selected_sidebar_device<'a>(
-    devices: &'a [SidebarDeviceEntry],
-    current_dir: &Path,
-) -> Option<&'a SidebarDeviceEntry> {
-    devices
-        .iter()
-        .flat_map(|device| {
-            device
-                .mount_points
-                .iter()
-                .filter(move |mount_point| current_dir.starts_with(mount_point))
-                .map(move |mount_point| (device, mount_point.components().count()))
-        })
-        .max_by_key(|(_, depth)| *depth)
-        .map(|(device, _)| device)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use desktop_linux::StorageDeviceMountState;
+    use desktop_linux::{StorageDevice, StorageDeviceMountState};
+    use std::path::PathBuf;
 
     fn device(id: &str, mount_points: Vec<PathBuf>) -> SidebarDeviceEntry {
         SidebarDeviceEntry {
@@ -220,37 +125,6 @@ mod tests {
             can_unmount: true,
             removal: None,
         }
-    }
-
-    #[test]
-    fn selected_device_uses_longest_matching_mount_prefix() {
-        let devices = vec![
-            device("outer", vec![PathBuf::from("/run/media/user")]),
-            device("inner", vec![PathBuf::from("/run/media/user/photos")]),
-        ];
-
-        let selected = selected_sidebar_device(&devices, Path::new("/run/media/user/photos/raw"))
-            .expect("selected device");
-
-        assert_eq!(selected.id, StorageDeviceId::new("inner"));
-    }
-
-    #[test]
-    fn unmounted_device_offers_mount_action() {
-        let device = device("disk", Vec::new());
-
-        assert_eq!(device.available_actions(), vec![SidebarDeviceAction::Mount]);
-    }
-
-    #[test]
-    fn mounted_removable_device_offers_unmount_and_eject() {
-        let mut device = device("disk", vec![PathBuf::from("/media/disk")]);
-        device.removal = Some(StorageDeviceRemoval::Eject);
-
-        assert_eq!(
-            device.available_actions(),
-            vec![SidebarDeviceAction::Unmount, SidebarDeviceAction::Eject]
-        );
     }
 
     #[test]

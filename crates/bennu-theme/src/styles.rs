@@ -129,6 +129,75 @@ pub fn list_row_style(
     }
 }
 
+/// 侧边栏行选中态：自 app-ui appearance.rs 下沉（portal FileChooser 侧栏
+/// 与主程序共用同一视觉）。primary container 底 + 圆角 8。
+pub fn selected_sidebar_item_style(theme: &Theme) -> container::Style {
+    let colors = ui_colors(theme);
+    container::Style {
+        background: Some(Background::Color(colors.primary_container)),
+        text_color: Some(colors.on_primary_container),
+        border: Border {
+            radius: 8.0.into(),
+            ..Border::default()
+        },
+        ..container::Style::default()
+    }
+}
+
+/// 侧边栏行悬停态：自 app-ui appearance.rs 下沉。浅色面 + 圆角 8。
+pub fn hovered_sidebar_item_style(theme: &Theme) -> container::Style {
+    let colors = ui_colors(theme);
+    container::Style {
+        background: Some(Background::Color(colors.surface_container_high)),
+        text_color: Some(colors.on_surface),
+        border: Border {
+            radius: 8.0.into(),
+            ..Border::default()
+        },
+        ..container::Style::default()
+    }
+}
+
+/// 侧边栏浮动卡片面板：0.92 半透明 surface 底 + 18 圆角 + 投影，
+/// 自 app-ui appearance.rs 原样下沉（一个数值都不许漂移）。
+pub fn sidebar_style(theme: &Theme) -> container::Style {
+    let colors = ui_colors(theme);
+    container::Style {
+        background: Some(Background::Color(Color {
+            a: 0.92,
+            ..colors.surface
+        })),
+        text_color: Some(colors.on_surface),
+        border: Border {
+            color: Color {
+                a: 0.55,
+                ..colors.outline_variant
+            },
+            width: 1.0,
+            radius: 18.0.into(),
+        },
+        shadow: Shadow {
+            color: elevation_shadow_color(theme, 0.22),
+            offset: Vector::new(0.0, 10.0),
+            blur_radius: 22.0,
+        },
+        ..container::Style::default()
+    }
+}
+
+/// 收藏夹拖放插入位指示线：primary 细条，自 app-ui appearance.rs 下沉。
+pub fn sidebar_bookmark_drop_slot_style(theme: &Theme) -> container::Style {
+    let accent = ui_colors(theme).primary;
+    container::Style {
+        background: Some(Background::Color(accent)),
+        border: Border {
+            radius: 1.0.into(),
+            ..Border::default()
+        },
+        ..container::Style::default()
+    }
+}
+
 /// 错误提示条：error container 底 + error 细边 + 圆角 12。
 pub fn error_notification_style(theme: &Theme) -> container::Style {
     let colors = ui_colors(theme);

@@ -25,7 +25,9 @@ use iced::widget::{
     button, container, mouse_area, opaque, pick_list, responsive, scrollable, stack, text_input,
     Column, Space,
 };
-use iced::{mouse, Alignment, Background, Border, Color, Element, Length, Padding, Theme};
+use iced::{
+    alignment, mouse, Alignment, Background, Border, Color, Element, Length, Padding, Theme,
+};
 
 use crate::picker_session::scrollbar::{scroll_id, scrollbar_on_scroll, ScrollbarViewport};
 use crate::picker_session::{PickerSession, SessionMessage, SessionScrollRegion};
@@ -240,11 +242,24 @@ fn address_bar_surface(
 
 /// 面包屑层：共享 breadcrumb_segments 折叠 Home 段后交给弹性布局；
 /// responsive 先量视口再分配段宽，横向滚动沿用 portal 的滚动接线。
+/// 回收站是虚拟视图（trash:/// 无路径段可拆）：直接渲染静态标签，
+/// 与主程序 trash 视图地址栏语义一致。
 fn breadcrumb_layer(
     session: &PickerSession,
     opacity: f32,
     emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'static,
 ) -> Element<'static, SessionMessage> {
+    if session.is_trash_view() {
+        return container(
+            readable_label("回收站".to_string())
+                .size(ADDRESS_TEXT_SIZE as f32)
+                .width(Length::Fill),
+        )
+        .padding([7, BREADCRUMB_HORIZONTAL_PADDING as u16])
+        .height(Length::Fixed(ADDRESS_BAR_HEIGHT))
+        .align_y(alignment::Vertical::Center)
+        .into();
+    }
     let segments = breadcrumb_segments(session.directory(), session.home_dir());
     let region = SessionScrollRegion::Breadcrumb;
     let scrollbar_visibility = session.scrollbar_visibility_for(&region);

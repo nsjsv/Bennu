@@ -54,93 +54,14 @@ pub(crate) enum NetworkConnectionCredentialFallback {
     MountWithoutCredentials,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SidebarNetworkConnectionAction {
-    Connect,
-    Disconnect,
-    Edit,
-    Remove,
-}
-
-impl SidebarNetworkConnectionAction {
-    pub(crate) fn label(self) -> &'static str {
-        match self {
-            Self::Connect => "Connect",
-            Self::Disconnect => "Disconnect",
-            Self::Edit => "Edit",
-            Self::Remove => "Remove",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SavedNetworkConnection {
-    pub(crate) connection: NetworkConnection,
-    pub(crate) auto_connect: bool,
-}
-
-impl SavedNetworkConnection {
-    pub(crate) fn new(connection: NetworkConnection, auto_connect: bool) -> Self {
-        Self {
-            connection,
-            auto_connect,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct SidebarNetworkConnectionEntry {
-    pub(crate) connection: NetworkConnection,
-    pub(crate) auto_connect: bool,
-    pub(crate) state: NetworkMountState,
-    remembered_credentials: Option<NetworkMountCredentials>,
-}
-
-impl SidebarNetworkConnectionEntry {
-    fn new(saved: SavedNetworkConnection) -> Self {
-        Self {
-            connection: saved.connection,
-            auto_connect: saved.auto_connect,
-            state: NetworkMountState::Disconnected,
-            remembered_credentials: None,
-        }
-    }
-
-    pub(crate) fn id(&self) -> &NetworkConnectionId {
-        &self.connection.id
-    }
-
-    pub(crate) fn label(&self) -> String {
-        self.connection.label_or_default()
-    }
-
-    pub(crate) fn mount_path(&self) -> Option<&Path> {
-        match &self.state {
-            NetworkMountState::Mounted(path) => Some(path.as_path()),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn available_actions(&self) -> Vec<SidebarNetworkConnectionAction> {
-        match &self.state {
-            NetworkMountState::Mounted(_) => vec![
-                SidebarNetworkConnectionAction::Disconnect,
-                SidebarNetworkConnectionAction::Edit,
-                SidebarNetworkConnectionAction::Remove,
-            ],
-            NetworkMountState::Disconnected | NetworkMountState::Error(_) => [
-                SidebarNetworkConnectionAction::Connect,
-                SidebarNetworkConnectionAction::Edit,
-                SidebarNetworkConnectionAction::Remove,
-            ]
-            .to_vec(),
-            NetworkMountState::Connecting => vec![
-                SidebarNetworkConnectionAction::Edit,
-                SidebarNetworkConnectionAction::Remove,
-            ],
-        }
-    }
-}
+// 纯搬移：SavedNetworkConnection / SidebarNetworkConnectionEntry /
+// SidebarNetworkConnectionAction 数据域已下沉 bennu-sidebar（portal 侧栏
+// 与主程序共用）；re-export 维持 crate::network_connections::* 既有路径。
+// 凭据缓存字段随条目迁移后为 pub，仍由本模块 NetworkConnectionState
+// 独占读写语义不变。
+pub(crate) use bennu_sidebar::{
+    SavedNetworkConnection, SidebarNetworkConnectionAction, SidebarNetworkConnectionEntry,
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct SidebarNetworkConnectionContextMenuState {

@@ -2,6 +2,7 @@
 members = [
     "crates/app-ui",
     "crates/bennu-localization",
+    "crates/bennu-sidebar",
     "crates/bennu-subprocess",
     "crates/bennu-theme",
     "crates/bennu-preview",

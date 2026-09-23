@@ -6,6 +6,7 @@ use crate::picker_session::scan::DirectoryScanOutcome;
 use std::fs;
 mod address_editing;
 mod keyboard_nav;
+mod sidebar;
 
 fn spec(kind: PickerKind, filters: Vec<FilterRule>) -> PickerRequestSpec {
     PickerRequestSpec {
@@ -18,7 +19,7 @@ fn spec(kind: PickerKind, filters: Vec<FilterRule>) -> PickerRequestSpec {
     }
 }
 
-fn session(kind: PickerKind) -> (PickerSession, oneshot::Receiver<PickerResolution>) {
+pub(crate) fn session(kind: PickerKind) -> (PickerSession, oneshot::Receiver<PickerResolution>) {
     let (reply, receiver) = oneshot::channel();
     let base = tempfile::tempdir().unwrap();
     let session = PickerSession::new(

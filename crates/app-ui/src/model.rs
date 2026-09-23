@@ -1231,39 +1231,9 @@ pub(crate) struct SidebarBookmarkContextMenuState {
     pub(crate) position: Point,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct SidebarLocation {
-    pub(crate) label: String,
-    pub(crate) path: PathBuf,
-    pub(crate) kind: SidebarLocationKind,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SidebarLocationKind {
-    Home,
-    Desktop,
-    Documents,
-    Downloads,
-    Pictures,
-    Music,
-    Videos,
-    Bookmark,
-}
-
-impl SidebarLocationKind {
-    pub(crate) fn is_user_favorite(self) -> bool {
-        matches!(
-            self,
-            Self::Desktop
-                | Self::Documents
-                | Self::Downloads
-                | Self::Pictures
-                | Self::Music
-                | Self::Videos
-                | Self::Bookmark
-        )
-    }
-}
+// 纯搬移：SidebarLocation/SidebarLocationKind 已下沉 bennu-sidebar
+// （主程序与 portal 共用）；re-export 维持 crate::model::* 既有路径。
+pub(crate) use bennu_sidebar::{SidebarLocation, SidebarLocationKind};
 
 pub(crate) const TRASH_LOCATION_LABEL: &str = "Trash";
 

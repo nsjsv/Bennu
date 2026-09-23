@@ -12,6 +12,10 @@ path = "src/main.rs"
 dark-light = "2.0.0"
 dirs.workspace = true
 bennu-theme = { path = "../bennu-theme" }
+# 侧边栏数据单源（位置/收藏/GTK 书签/config 解析/设备与网络条目模型）
+# 与设备/网络挂载平台层：portal 侧边栏与主程序消费同一实现。
+bennu-sidebar = { path = "../bennu-sidebar" }
+desktop-linux = { path = "../desktop-linux" }
 file-core = { path = "../file-core" }
 file-operation-store = { path = "../file-operation-store" }
 # 共享预览子系统（模型/状态机/面板单源）：portal 是第二个宿主，空格

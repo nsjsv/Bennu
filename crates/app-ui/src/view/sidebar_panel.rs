@@ -18,13 +18,17 @@ use crate::icons::IconSymbol;
 use crate::measured_middle_ellipsized_text::measured_middle_ellipsized_text;
 use crate::model::{
     trash_location_path, Message, ScrollbarRegion, SidebarBookmarkDropSlot, SidebarLocation,
-    SidebarLocationKind, TRASH_LOCATION_LABEL,
+    TRASH_LOCATION_LABEL,
 };
 use crate::network_connections::{NetworkConnectionMessage, SidebarNetworkConnectionEntry};
+use crate::sidebar::sidebar_icon_symbol;
 use crate::sidebar_devices::SidebarDeviceEntry;
 use crate::typography::readable_text;
 
 use super::{tab_motion, themed_icon, IconTone, MENU_ICON_SIZE};
+
+// 设备/网络行图标符号来自共享 crate，与 portal 侧栏保持一致。
+use bennu_sidebar::{SIDEBAR_DEVICE_ICON_SYMBOL, SIDEBAR_NETWORK_CONNECTION_ICON_SYMBOL};
 
 const SIDEBAR_RESIZE_HANDLE_WIDTH: f32 = 6.0;
 // 卡片悬浮感靠留白 + 圆角 + 投影:窗口侧三边(上/左/下)等宽 15,
@@ -495,19 +499,6 @@ fn sidebar_message_row(message: &'static str) -> Element<'static, Message> {
         .into()
 }
 
-fn sidebar_icon_symbol(location: &SidebarLocation) -> IconSymbol {
-    match location.kind {
-        SidebarLocationKind::Home => IconSymbol::House,
-        SidebarLocationKind::Desktop => IconSymbol::Monitor,
-        SidebarLocationKind::Documents => IconSymbol::FileText,
-        SidebarLocationKind::Downloads => IconSymbol::Download,
-        SidebarLocationKind::Pictures => IconSymbol::FileImage,
-        SidebarLocationKind::Music => IconSymbol::Music,
-        SidebarLocationKind::Videos => IconSymbol::Video,
-        SidebarLocationKind::Bookmark => IconSymbol::Bookmark,
-    }
-}
-
 fn sidebar_presentation(browser: &FileBrowser, location: &SidebarLocation) -> SidebarPresentation {
     if !browser.is_trash_view && location.path == browser.current_dir {
         SidebarPresentation::Selected
@@ -573,7 +564,7 @@ fn sidebar_device_label(
 ) -> Row<'static, Message> {
     let detail = sidebar_device_detail(device, pending);
     row![
-        themed_icon(IconSymbol::HardDrive, tone, MENU_ICON_SIZE),
+        themed_icon(SIDEBAR_DEVICE_ICON_SYMBOL, tone, MENU_ICON_SIZE),
         column![
             measured_middle_ellipsized_text(device.label.clone(), 13),
             measured_middle_ellipsized_text(detail, 11)
@@ -592,7 +583,7 @@ fn sidebar_network_connection_label(
 ) -> Row<'static, Message> {
     let detail = sidebar_network_connection_detail(connection, pending);
     row![
-        themed_icon(IconSymbol::Link, tone, MENU_ICON_SIZE),
+        themed_icon(SIDEBAR_NETWORK_CONNECTION_ICON_SYMBOL, tone, MENU_ICON_SIZE),
         column![
             measured_middle_ellipsized_text(connection.label(), 13),
             measured_middle_ellipsized_text(detail, 11)

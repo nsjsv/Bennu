@@ -46,9 +46,14 @@ pub(crate) const DEFAULT_RENDERING_GPU_PREFERENCE: RenderingGpuPreference =
     RenderingGpuPreference::DisplayGpu;
 pub(crate) const DEFAULT_FILE_OPERATION_VERIFICATION: FileOperationVerification =
     FileOperationVerification::BasicMetadata;
-pub(crate) const DEFAULT_SIDEBAR_WIDTH: f32 = 180.0;
-pub(crate) const MIN_SIDEBAR_WIDTH: f32 = 140.0;
-pub(crate) const MAX_SIDEBAR_WIDTH: f32 = 360.0;
+
+// 纯搬移：侧边栏宽度契约（默认/夹取范围/归一化）与 SidebarFavoriteConfig
+// 已下沉 bennu-sidebar（portal 侧栏与主程序共用同一组值）；re-export 维持
+// crate::config::* 既有调用路径。
+pub(crate) use bennu_sidebar::{
+    normalize_sidebar_width, SidebarFavoriteConfig, DEFAULT_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH,
+    MIN_SIDEBAR_WIDTH,
+};
 pub(crate) const DEFAULT_RIGHT_PREVIEW_PANEL_WIDTH: f32 = 320.0;
 pub(crate) const MIN_RIGHT_PREVIEW_PANEL_WIDTH: f32 = 200.0;
 pub(crate) const MAX_RIGHT_PREVIEW_PANEL_WIDTH: f32 = 640.0;
@@ -394,12 +399,6 @@ pub(crate) fn default_transfer_device_alias() -> String {
     "Bennu".to_owned()
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SidebarFavoriteConfig {
-    pub(crate) label: String,
-    pub(crate) path: PathBuf,
-}
-
 pub(crate) fn default_state_database_path() -> PathBuf {
     let fallback_base = dirs::home_dir()
         .or_else(|| std::env::current_dir().ok())
@@ -515,14 +514,6 @@ pub(crate) fn normalize_column_width(width: f32) -> f32 {
         width.clamp(MIN_COLUMN_WIDTH, MAX_COLUMN_WIDTH)
     } else {
         MIN_COLUMN_WIDTH
-    }
-}
-
-pub(crate) fn normalize_sidebar_width(width: f32) -> f32 {
-    if width.is_finite() {
-        width.clamp(MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH)
-    } else {
-        DEFAULT_SIDEBAR_WIDTH
     }
 }
 

@@ -30,6 +30,7 @@ use crate::picker_session::{
 
 mod address_bar;
 mod preview_window;
+mod sidebar;
 mod window_drag_region;
 
 pub(crate) use address_bar::address_input_id;
@@ -66,6 +67,7 @@ fn smooth_scroll_region(
 }
 
 /// 窗口内容。`emit` 由上层提供，负责把会话消息与窗口关联。
+/// 顶层为「侧边栏 + 拖宽手柄 + 主内容」三段 row（design.md 第 3 节）。
 pub(crate) fn picker_window_view(
     session: &PickerSession,
     theme: &Theme,
@@ -79,16 +81,22 @@ pub(crate) fn picker_window_view(
     layout = layout.push(listing_body(session, theme, emit.clone()));
     layout = layout.push(confirm_footer(session, emit));
 
-    container(layout)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .padding(12)
-        .style(|theme: &Theme| container::Style {
-            background: Some(bennu_theme::ui_colors(theme).background.into()),
-            text_color: Some(base_text_color(theme)),
-            ..container::Style::default()
-        })
-        .into()
+    container(
+        row![
+            sidebar::sidebar_panel(session),
+            container(layout).width(Length::Fill).height(Length::Fill),
+        ]
+        .height(Length::Fill),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .padding(12)
+    .style(|theme: &Theme| container::Style {
+        background: Some(bennu_theme::ui_colors(theme).background.into()),
+        text_color: Some(base_text_color(theme)),
+        ..container::Style::default()
+    })
+    .into()
 }
 
 /// 中文等非 ASCII 文案需要 Advanced shaping（与主程序 typography 同规则）。

@@ -3,6 +3,7 @@
 //! 生命周期模型）；每个 FileChooser 请求弹一个独立的选择窗口，窗口全部
 //! 关闭后继续驻留，换取后续唤出的热启动速度。
 
+mod address_focus_probe;
 mod dbus_file_chooser;
 mod filter;
 mod keyboard_route;
@@ -13,6 +14,7 @@ mod picker_session;
 mod preview_host;
 mod preview_scroll;
 mod scrollbar_state;
+mod sidebar_bridge;
 mod subscriptions;
 mod theme;
 mod thumbnail_dispatch;
@@ -23,8 +25,7 @@ pub(crate) use message::Message;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use iced::advanced::widget::operation::{Focusable, Operation, Outcome};
-use iced::{keyboard, window, Element, Rectangle, Task, Theme};
+use iced::{keyboard, window, Element, Task, Theme};
 
 use bennu_theme::address_bar::AddressSuggestionRequest;
 use dbus_file_chooser::{BridgeEvent, FileChooserInterface, PickerInvocation};
@@ -32,7 +33,7 @@ use picker_session::suggestions::{
     load_path_suggestions, PATH_SUGGESTION_INPUT_STABILIZATION_DELAY,
 };
 use picker_session::SessionScrollRegion;
-use picker_session::{scan_listing, PickerSession, SessionEffect, SessionMessage};
+use picker_session::{PickerSession, SessionEffect, SessionMessage};
 use thumbnail_dispatch::spawn_thumbnail_tasks;
 use tokio::sync::mpsc;
 
@@ -49,6 +50,11 @@ struct PickerDaemon {
     windows: HashMap<window::Id, PickerSession>,
     theme: Theme,
     keyboard_modifiers: keyboard::Modifiers,
+    /// 最新指针位置（拖宽增量基准；与主程序 FileBrowser.cursor_position
+    /// 同一角色）。全部窗口的 CursorMoved 都更新，按下时读取。
+    cursor_position: Option<iced::Point>,
+    /// 进行中的侧栏拖宽：窗口 → 起点（指针 X + 起始宽度）。
+    sidebar_resize: HashMap<window::Id, sidebar_bridge::SidebarResizeDrag>,
     /// 全进程唯一的预览会话（多选择窗并发时新请求顶掉旧会话，
     /// design 决策 #3）；含预览窗焦点/请求窗簿记。
     preview: preview_host::PreviewHost,
@@ -63,6 +69,8 @@ impl PickerDaemon {
             windows: HashMap::new(),
             theme,
             keyboard_modifiers: keyboard::Modifiers::default(),
+            cursor_position: None,
+            sidebar_resize: HashMap::new(),
             preview: preview_host::PreviewHost::new(theme::state_database_path()),
         }
     }
@@ -136,13 +144,18 @@ fn update(daemon: &mut PickerDaemon, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::PreviewPointerMoved { window, position } => {
-            daemon.preview.handle_pointer_moved(window, position)
+            sidebar_bridge::handle_pointer_moved(daemon, window, position)
         }
-        Message::PreviewPointerLeft { window } => daemon.preview.handle_pointer_left(window),
+        Message::PreviewPointerLeft { window } => {
+            // 拖宽中指针离窗：拖宽终止（增量无从继续，恢复代价只是重按）。
+            daemon.sidebar_resize.remove(&window);
+            daemon.preview.handle_pointer_left(window)
+        }
         Message::PreviewPointerReleased { window } => {
             if daemon.preview.is_preview_window(window) {
                 daemon.preview.finish_window_drags()
             } else {
+                daemon.sidebar_resize.remove(&window);
                 Task::none()
             }
         }
@@ -217,7 +230,7 @@ fn open_picker_window(daemon: &mut PickerDaemon, invocation: PickerInvocation) -
     let start =
         location::resolve_start_directory(spec.start_folder.as_deref(), remembered.as_deref());
     let mut session = PickerSession::new(&spec, request_path, start.clone(), reply);
-    let effect = session.begin();
+    let effects = session.begin();
 
     let settings = window::Settings {
         size: view::window_size(),
@@ -233,21 +246,25 @@ fn open_picker_window(daemon: &mut PickerDaemon, invocation: PickerInvocation) -
     let (window_id, open_task) = window::open(settings);
     daemon.windows.insert(window_id, session);
 
-    let scan_task = match effect {
-        // begin() 返回导航类效果；此处只翻扫描任务——窗口 UI 尚未
-        // 构建，面包屑滚尾挂了也无效，初始深层目录的揭示由
-        // ScanReady 回填时的滚尾钩子完成。
-        SessionEffect::NavigateDirectory(directory) | SessionEffect::ScanDirectory(directory) => {
-            scan_directory_task(window_id, directory)
+    // begin() 声明开窗所需效果（侧栏数据加载 + 初始导航），此处统一
+    // 翻译，与 apply_session_message 同一翻译责任；开窗路径不经会话
+    // update。扫描只翻任务本身——窗口 UI 尚未构建，面包屑滚尾挂了也
+    // 无效，初始深层目录的揭示由 ScanReady 回填时的滚尾钩子完成。
+    let mut startup_tasks = vec![open_task.discard()];
+    for effect in effects {
+        match effect {
+            SessionEffect::NavigateDirectory(directory)
+            | SessionEffect::ScanDirectory(directory) => {
+                startup_tasks.push(scan_directory_task(window_id, directory));
+            }
+            SessionEffect::LoadSidebarData => {
+                startup_tasks.push(sidebar_bridge::sidebar_data_task(window_id));
+            }
+            _ => {}
         }
-        _ => Task::none(),
-    };
-    Task::batch([
-        // discard：开窗 Task 的输出（窗口 Id）无需消费，保留开窗副作用。
-        open_task.discard(),
-        scan_task,
-        window::gain_focus(window_id),
-    ])
+    }
+    startup_tasks.push(window::gain_focus(window_id));
+    Task::batch(startup_tasks)
 }
 
 fn apply_session_message(
@@ -255,6 +272,14 @@ fn apply_session_message(
     window_id: window::Id,
     session_message: SessionMessage,
 ) -> Task<Message> {
+    // 侧栏拖宽按下：在取会话借用前拦截（需读 daemon 的指针簿记定
+    // 起点，iced::Point 不进会话层），不进会话 update。
+    if matches!(session_message, SessionMessage::SidebarResizeStarted)
+        && daemon.windows.contains_key(&window_id)
+    {
+        sidebar_bridge::start_sidebar_resize(daemon, window_id);
+        return Task::none();
+    }
     let Some(session) = daemon.windows.get_mut(&window_id) else {
         return Task::none();
     };
@@ -358,6 +383,16 @@ fn apply_session_message(
             load_path_suggestions_task(window_id, request)
         }
         SessionEffect::VerifyScrollbarLayout => scrollbar_layout_probe_task(window_id, session),
+        // 侧栏数据一次性加载（打开时读一次）。
+        SessionEffect::LoadSidebarData => sidebar_bridge::sidebar_data_task(window_id),
+        // 未挂载设备：挂载回信携带目标路径/错误。
+        SessionEffect::MountDevice(id) => sidebar_bridge::mount_device_task(window_id, id),
+        // 网络连接：先查主程序已存凭证（密钥环），查不到按无 app 凭证
+        // 挂载——选择器没有凭据表单，失败只在侧栏提示（app-ui 手动连接
+        // 的 lookup 流程裁剪版）。
+        SessionEffect::MountConnection(id) => {
+            sidebar_bridge::mount_connection_task(window_id, session, id)
+        }
         // 键盘导航滚动跟随：scroll_to 可穿透 SmoothScrollArea 直达内层
         // scrollable（Id 按请求路径命名空间不会串窗）；只对 List 发布局
         // 探针——面包屑布局未变，避免无谓的面包屑滚动条淡入，探针回信
@@ -419,13 +454,28 @@ fn scrollbar_layout_probe_task(window_id: window::Id, session: &PickerSession) -
 
 fn remember_directory(daemon: &PickerDaemon, window_id: window::Id) {
     if let Some(session) = daemon.windows.get(&window_id) {
-        location::store_last_directory(session.directory());
+        // 回收站是虚拟视图：不作为下次开窗的起始目录（SaveFile 落在
+        // trash 下确认破禁，且真实路径记忆才有导航价值）。
+        if !session.is_trash_view() {
+            location::store_last_directory(session.directory());
+        }
     }
 }
 
 fn scan_directory_task(window_id: window::Id, directory: std::path::PathBuf) -> Task<Message> {
-    // 结果携带扫描目标路径：会话据此路由回根列表或展开节点。
-    Task::perform(scan_listing(directory.clone()), move |outcome| {
+    // 回收站虚拟视图：扫描走 file-core trash（行数据复用 PickerRow，
+    // 路径为 files/ 下真实载荷）。其余目录常规扫描。结果统一携带扫描
+    // 目标路径：会话据此路由回根列表或展开节点。
+    let directory_for_scan = directory.clone();
+    let is_trash_scan = directory.as_os_str() == picker_session::TRASH_DIRECTORY;
+    let scan_future = async move {
+        if is_trash_scan {
+            picker_session::scan_trash_listing().await
+        } else {
+            picker_session::scan_listing(directory_for_scan).await
+        }
+    };
+    Task::perform(scan_future, move |outcome| {
         Message::Session(
             window_id,
             SessionMessage::ScanReady(Box::new(picker_session::DirectoryScanResult {
@@ -504,7 +554,7 @@ fn check_address_input_focus(daemon: &PickerDaemon, window_id: window::Id) -> Ta
     if session.address_editing().is_none() {
         return Task::none();
     }
-    iced::advanced::widget::operate(AddressInputFocusCheck::new(
+    iced::advanced::widget::operate(address_focus_probe::AddressInputFocusCheck::new(
         window_id,
         view::address_input_id(session.request_path()),
     ))
@@ -529,49 +579,6 @@ fn handle_address_input_focus_checked(
         apply_session_message(daemon, window_id, SessionMessage::AddressEditingCancelled)
     } else {
         Task::none()
-    }
-}
-
-/// 焦点探查 operation：遍历控件树读取目标输入框的焦点态（主软件
-/// windows.rs 的 TextInputFocusCheck 同构；Id 按请求路径命名空间保证
-/// 只命中本窗口的输入框）。
-struct AddressInputFocusCheck {
-    window: window::Id,
-    target: iced::widget::Id,
-    is_focused: bool,
-}
-
-impl AddressInputFocusCheck {
-    fn new(window: window::Id, target: iced::widget::Id) -> Self {
-        Self {
-            window,
-            target,
-            is_focused: false,
-        }
-    }
-}
-
-impl Operation<Message> for AddressInputFocusCheck {
-    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<Message>)) {
-        operate(self);
-    }
-
-    fn focusable(
-        &mut self,
-        id: Option<&iced::widget::Id>,
-        _bounds: Rectangle,
-        state: &mut dyn Focusable,
-    ) {
-        if id == Some(&self.target) {
-            self.is_focused = state.is_focused();
-        }
-    }
-
-    fn finish(&self) -> Outcome<Message> {
-        Outcome::Some(Message::AddressInputFocusChecked {
-            window: self.window,
-            is_focused: self.is_focused,
-        })
     }
 }
 
@@ -778,6 +785,8 @@ mod tests {
             windows: HashMap::new(),
             theme: Theme::Light,
             keyboard_modifiers: keyboard::Modifiers::default(),
+            cursor_position: None,
+            sidebar_resize: HashMap::new(),
             preview: preview_host::PreviewHost::new(std::path::PathBuf::new()),
         }
     }

@@ -170,6 +170,7 @@ dependencies = [
  "ashpd",
  "bennu-localization",
  "bennu-preview",
+ "bennu-sidebar",
  "bennu-subprocess",
  "bennu-theme",
  "blake3",
@@ -675,6 +676,16 @@ dependencies = [
  "tokio-util",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "bennu-sidebar"
+version = "0.3.5"
+dependencies = [
+ "bennu-theme",
+ "desktop-linux",
+ "dirs",
+ "toml",
 ]
 
 [[package]]
@@ -4736,8 +4747,10 @@ name = "portal-backend"
 version = "0.3.5"
 dependencies = [
  "bennu-preview",
+ "bennu-sidebar",
  "bennu-theme",
  "dark-light",
+ "desktop-linux",
  "dirs",
  "display-renderer",
  "file-core",

@@ -8,6 +8,7 @@ license.workspace = true
 ashpd = { version = "0.10.3", default-features = false, features = ["async-std"] }
 bennu-localization = { path = "../bennu-localization" }
 bennu-preview = { path = "../bennu-preview" }
+bennu-sidebar = { path = "../bennu-sidebar" }
 bennu-subprocess = { path = "../bennu-subprocess" }
 bennu-theme = { path = "../bennu-theme" }
 blake3.workspace = true

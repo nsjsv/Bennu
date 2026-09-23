@@ -34,14 +34,14 @@ use crate::virtual_range::{initial_virtual_range, virtual_range_for_viewport, Vi
 
 pub(crate) const COLUMN_RESIZE_DIVIDER_WIDTH: f32 = 5.0;
 const COLUMN_RESIZE_LINE_WIDTH: f32 = 1.0;
-const CHEVRON_ICON_SIZE: f32 = 11.0;
-const COLUMN_CONTENT_SPACING: u32 = 2;
-const COLUMN_PADDING: [u16; 2] = [5, 5];
-const COLUMN_ENTRY_TEXT_SIZE: u32 = 13;
-pub(crate) const COLUMN_ENTRY_HEIGHT: f32 = 24.0;
-pub(crate) const COLUMN_OVERSCAN_ROWS: usize = 16;
-const COLUMN_ENTRY_SPACING: u32 = 4;
-const COLUMN_ENTRY_PADDING: [u16; 2] = [1, 4];
+const COLUMN_OVERSCAN_ROWS: usize = 16;
+
+// 多栏条目几何的唯一实现在 bennu-theme（共享单源）；本文件只保留
+// app-ui 私有的图标密度附加字段与虚拟范围换算。常量原样再导出，
+// 既有调用点的 `COLUMN_*` 路径保持不变。
+pub(crate) use bennu_theme::column_geometry::{
+    ColumnEntryGeometry, COLUMN_ENTRY_PADDING, COLUMN_ENTRY_TEXT_SIZE, COLUMN_PADDING,
+};
 
 /// 多栏条目几何按当前档位比例缩放；列宽、列间距和面板外层留白固定。
 /// `entries_top_padding` 表达 padding 加 top spacer 后首个行间距的真实首行起点。
@@ -60,28 +60,17 @@ pub(crate) struct ColumnGeometry {
 
 impl ColumnGeometry {
     pub(crate) fn for_level(level: ViewDensityLevel) -> Self {
-        let scale = level.scale();
-        // 缩放尺寸一律取整到整数像素：行槽高等整数几何让整行对齐的 viewport
-        // 运算保持精确，虚拟范围、键盘揭示与缩略图调度不会各舍入到不同行。
-        let scaled = |base: f32| (base * scale).round();
-        let entry_height = scaled(COLUMN_ENTRY_HEIGHT);
-        let content_spacing = scaled(COLUMN_CONTENT_SPACING as f32);
-        let entry_padding_vertical = scaled(COLUMN_ENTRY_PADDING[0] as f32);
-        let entry_padding_horizontal = scaled(COLUMN_ENTRY_PADDING[1] as f32);
+        // 共享几何按档位 scale 换算；icon_density 是 app-ui 私有附加字段。
+        let base = ColumnEntryGeometry::for_scale(level.scale());
         Self {
-            entry_height,
-            entry_scroll_height: entry_height + content_spacing,
-            entries_top_padding: COLUMN_PADDING[0] as f32 + content_spacing,
-            content_spacing,
-            text_size: scaled(COLUMN_ENTRY_TEXT_SIZE as f32),
-            chevron_icon_size: scaled(CHEVRON_ICON_SIZE),
-            entry_spacing: scaled(COLUMN_ENTRY_SPACING as f32),
-            entry_padding: iced::Padding {
-                top: entry_padding_vertical,
-                right: entry_padding_horizontal,
-                bottom: entry_padding_vertical,
-                left: entry_padding_horizontal,
-            },
+            entry_height: base.entry_height,
+            entry_scroll_height: base.entry_scroll_height,
+            entries_top_padding: base.entries_top_padding,
+            content_spacing: base.content_spacing,
+            text_size: base.text_size,
+            chevron_icon_size: base.chevron_icon_size,
+            entry_spacing: base.entry_spacing,
+            entry_padding: base.entry_padding,
             icon_density: FileEntryIconDensity::Column(level),
         }
     }
@@ -740,6 +729,10 @@ mod tests {
     use file_core::{DirectoryEntry, EntryMetadata, FileKind};
 
     use super::*;
+    // 回归锚点引用的共享基准常量（生产代码已不再直接使用）。
+    use bennu_theme::column_geometry::{
+        COLUMN_CONTENT_SPACING, COLUMN_ENTRY_HEIGHT, COLUMN_ENTRY_SPACING,
+    };
 
     fn test_entry(path: PathBuf, kind: FileKind) -> DirectoryEntry {
         DirectoryEntry::new(
@@ -872,7 +865,10 @@ mod tests {
             COLUMN_CONTENT_SPACING as f32
         );
         assert_eq!(default_geometry.text_size, COLUMN_ENTRY_TEXT_SIZE as f32);
-        assert_eq!(default_geometry.chevron_icon_size, CHEVRON_ICON_SIZE);
+        assert_eq!(
+            default_geometry.chevron_icon_size,
+            bennu_theme::column_geometry::COLUMN_CHEVRON_ICON_SIZE
+        );
         assert_eq!(default_geometry.entry_spacing, COLUMN_ENTRY_SPACING as f32);
 
         let level = crate::config::ViewDensityLevel::from_index(6);

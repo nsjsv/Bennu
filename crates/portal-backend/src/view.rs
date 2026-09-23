@@ -19,7 +19,7 @@ use file_core::entry::FileKind;
 use file_core::is_supported_image_path;
 use iced::widget::{button, column, container, mouse_area, row, scrollable, text, text_input};
 use iced::widget::{image, Space};
-use iced::{alignment, Border, Color, Element, Length, Padding, Size, Theme};
+use iced::{alignment, Color, Element, Length, Padding, Size, Theme};
 
 use crate::picker_request::PickerKind;
 use crate::picker_session::scrollbar::{scroll_axis, scroll_id, scrollbar_on_scroll};
@@ -75,9 +75,6 @@ pub(crate) fn picker_window_view(
 ) -> Element<'static, SessionMessage> {
     let mut layout = column![].spacing(10);
     layout = layout.push(address_bar::navigation_bar(session, theme, emit.clone()));
-    if let Some(name_input) = name_input_row(session, emit.clone()) {
-        layout = layout.push(name_input);
-    }
     layout = layout.push(listing_body(session, theme, emit.clone()));
     layout = layout.push(confirm_footer(session, emit));
 
@@ -90,7 +87,7 @@ pub(crate) fn picker_window_view(
     )
     .width(Length::Fill)
     .height(Length::Fill)
-    .padding(12)
+    .padding(7)
     .style(|theme: &Theme| container::Style {
         background: Some(bennu_theme::ui_colors(theme).background.into()),
         text_color: Some(base_text_color(theme)),
@@ -193,11 +190,6 @@ fn listing_body(
                 // background，偶数行才能像主应用一样隐形（凹槽色会让
                 // 每一行都变成可见的盒子）。
                 background: Some(colors.background.into()),
-                border: Border {
-                    color: bennu_theme::styles::subtle_border_color(theme),
-                    width: 1.0,
-                    radius: 8.0.into(),
-                },
                 ..container::Style::default()
             }
         })
@@ -342,27 +334,27 @@ fn readable_size(bytes: u64) -> String {
     }
 }
 
-fn name_input_row(
+/// SaveFile 的文件名输入框：放在确认栏（与取消/保存同一行），
+/// 占满按钮左侧空间，占位符即「文件名」。
+fn save_name_input(
     session: &PickerSession,
     emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'static,
-) -> Option<Element<'static, SessionMessage>> {
+) -> Option<iced::widget::TextInput<'static, SessionMessage>> {
     if !matches!(session.kind(), PickerKind::SaveFile { .. }) {
         return None;
     }
-    let input = text_input("文件名", session.name_input())
-        .on_input({
-            let emit = emit.clone();
-            move |value| emit(SessionMessage::NameInputChanged(value))
-        })
-        .on_submit(emit(SessionMessage::ConfirmPressed))
-        .size(14)
-        .padding(Padding::new(6.0).top(7.0).bottom(7.0))
-        .style(navigation_text_input_style);
-    Some(Element::from(
-        row![readable_label("文件名".to_string()).size(13), input,]
-            .spacing(8)
-            .align_y(alignment::Vertical::Center),
-    ))
+    Some(
+        text_input("文件名", session.name_input())
+            .on_input({
+                let emit = emit.clone();
+                move |value| emit(SessionMessage::NameInputChanged(value))
+            })
+            .on_submit(emit(SessionMessage::ConfirmPressed))
+            .size(14)
+            .width(Length::Fill)
+            .padding(Padding::new(6.0).top(7.0).bottom(7.0))
+            .style(navigation_text_input_style),
+    )
 }
 
 fn confirm_footer(
@@ -399,7 +391,12 @@ fn confirm_footer(
     }
 
     let mut footer = row![].spacing(8).align_y(alignment::Vertical::Center);
-    footer = footer.push(Space::new().width(Length::Fill));
+    // SaveFile：文件名输入框占满左侧，取消/保存贴右边。
+    if let Some(input) = save_name_input(session, emit.clone()) {
+        footer = footer.push(input);
+    } else {
+        footer = footer.push(Space::new().width(Length::Fill));
+    }
 
     let cancel = button(readable_label("取消".to_string()).size(13))
         .padding([6, 14])

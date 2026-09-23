@@ -31,11 +31,12 @@ use super::{tab_motion, themed_icon, IconTone, MENU_ICON_SIZE};
 use bennu_sidebar::{SIDEBAR_DEVICE_ICON_SYMBOL, SIDEBAR_NETWORK_CONNECTION_ICON_SYMBOL};
 
 const SIDEBAR_RESIZE_HANDLE_WIDTH: f32 = 6.0;
-// 卡片悬浮感靠留白 + 圆角 + 投影:窗口侧三边(上/左/下)等宽 15,
-// 右侧 4 是与内容区的间隙。卡片仍盖在终端抽屉左段上,分隔线从卡片后穿过。
-const SIDEBAR_FLOATING_MARGIN_LEFT: f32 = 15.0;
+// 卡片悬浮感靠留白 + 圆角 + 投影:窗口侧三边(上/左/下)等宽 7
+// (离窗沿近,与 portal 选择窗口一致),右侧 4 是与内容区的间隙。卡片
+// 仍盖在终端抽屉左段上,分隔线从卡片后穿过。
+const SIDEBAR_FLOATING_MARGIN_LEFT: f32 = 7.0;
 const SIDEBAR_FLOATING_MARGIN_RIGHT: f32 = 4.0;
-const SIDEBAR_FLOATING_MARGIN_VERTICAL: f32 = 15.0;
+const SIDEBAR_FLOATING_MARGIN_VERTICAL: f32 = 7.0;
 const SIDEBAR_BOOKMARK_DROP_SLOT_HEIGHT: f32 = 3.0;
 
 pub(crate) fn sidebar_view(browser: &FileBrowser) -> Element<'_, Message> {

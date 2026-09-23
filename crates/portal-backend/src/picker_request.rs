@@ -26,12 +26,19 @@ pub(crate) struct FilterRule {
 /// 请求决定的选择模式。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PickerKind {
-    OpenFile { multiple: bool, directory: bool },
-    SaveFile { default_name: Option<String> },
+    OpenFile {
+        multiple: bool,
+        directory: bool,
+    },
+    SaveFile {
+        default_name: Option<String>,
+    },
     /// 批量保存：调用方经 `current_names`（as）传入文件名列表，用户只
     /// 选目标目录。名字列表是调用方资产，本端永不修改；列表为空时
     /// 确认按钮禁用（与 SaveFile 空输入一致）。
-    SaveFiles { default_names: Vec<String> },
+    SaveFiles {
+        default_names: Vec<String>,
+    },
 }
 
 impl PickerKind {
@@ -246,9 +253,7 @@ fn parse_choices(value: &Value<'_>) -> Vec<PickerChoice> {
         .collect()
 }
 
-fn picker_choice_from_structure(
-    structure: &zbus::zvariant::Structure<'_>,
-) -> Option<PickerChoice> {
+fn picker_choice_from_structure(structure: &zbus::zvariant::Structure<'_>) -> Option<PickerChoice> {
     let fields = structure.fields();
     if fields.len() != 4 {
         return None;
@@ -666,12 +671,7 @@ mod tests {
             &options(vec![(
                 "choices",
                 Value::Array(zbus::zvariant::Array::from(vec![
-                    choice_value(
-                        "fmt",
-                        "格式",
-                        vec![("pdf", "PDF"), ("docx", "DOCX")],
-                        "pdf",
-                    ),
+                    choice_value("fmt", "格式", vec![("pdf", "PDF"), ("docx", "DOCX")], "pdf"),
                     choice_value("tag", "标签", vec![("a", "甲")], "b"),
                 ])),
             )]),

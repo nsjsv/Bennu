@@ -5,9 +5,12 @@
 //! 3. 仅 Ignored 的动作：Ctrl+A 全选、Enter、Backspace 上级、列表
 //!    导航与 type-ahead 字符（编辑态的 Enter/字符已被 text_input 捕获，
 //!    天然不进这里）。
+//!
 //! 从 main.rs 拆出以守住其行数上限；路由判定独立成纯函数便于单测。
 
 use iced::{keyboard, window, Task};
+
+use bennu_theme::icon_grid_geometry::IconGridDirection;
 
 use super::{Message, PickerDaemon};
 use crate::picker_session::{PathSuggestionDirection, PickerSession, SessionMessage};
@@ -155,14 +158,20 @@ fn list_navigation_message(
             })
         }
         keyboard::Key::Named(Named::Backspace) => Some(SessionMessage::NavigateUp),
-        keyboard::Key::Named(Named::ArrowUp) => Some(SessionMessage::ListCursorMoved { delta: -1 }),
+        // 方向键位移随视图模式变化（列表 ±1 行；大图上下跨列数、
+        // 左右 ±1），唯一实现见 view_mode::cursor_move_delta。
+        keyboard::Key::Named(Named::ArrowUp) => cursor_move_message(session, IconGridDirection::Up),
         keyboard::Key::Named(Named::ArrowDown) => {
-            Some(SessionMessage::ListCursorMoved { delta: 1 })
+            cursor_move_message(session, IconGridDirection::Down)
         }
-        // 仅目录行劫持折叠/展开开关；文件行透传（不产生消息）。
-        keyboard::Key::Named(Named::ArrowLeft | Named::ArrowRight) => session
-            .cursor_directory_row()
-            .map(|index| SessionMessage::EntryExpandToggled { index }),
+        // 列表：仅目录行劫持折叠/展开开关，文件行透传；大图：光标
+        // 左右移动（网格无展开语义）。
+        keyboard::Key::Named(Named::ArrowLeft) => {
+            cursor_move_message(session, IconGridDirection::Left)
+        }
+        keyboard::Key::Named(Named::ArrowRight) => {
+            cursor_move_message(session, IconGridDirection::Right)
+        }
         keyboard::Key::Named(Named::Home) => {
             Some(SessionMessage::ListCursorJumped { to_end: false })
         }
@@ -224,6 +233,20 @@ fn address_suggestion_key_message(
     }
 }
 
+/// 方向键 → 光标消息：会话给出位移量（模式感知）；列表的 ←→ 无
+/// 位移语义时回退到目录行折叠开关。
+fn cursor_move_message(
+    session: &PickerSession,
+    direction: IconGridDirection,
+) -> Option<SessionMessage> {
+    match session.cursor_move_delta(direction) {
+        Some(delta) => Some(SessionMessage::ListCursorMoved { delta }),
+        None => session
+            .cursor_directory_row()
+            .map(|index| SessionMessage::EntryExpandToggled { index }),
+    }
+}
+
 fn dispatch_session_message(window_id: window::Id, message: SessionMessage) -> Task<Message> {
     Task::perform(async {}, move |_| Message::Session(window_id, message))
 }
@@ -233,6 +256,7 @@ mod tests {
     use super::*;
     use crate::picker_request::{PickerKind, PickerRequestSpec};
     use crate::picker_session::scan::{DirectoryScanOutcome, DirectoryScanResult};
+    use crate::picker_session::PickerViewMode;
     use crate::picker_session::SessionEffect;
     use crate::PickerDaemon;
     use bennu_preview::preview::PreviewWindowProfile;
@@ -254,6 +278,7 @@ mod tests {
             },
             "/req/route".to_string(),
             base.keep(),
+            PickerViewMode::List,
             reply,
         )
     }
@@ -448,6 +473,36 @@ mod tests {
     }
 
     #[test]
+    fn grid_arrows_move_cursor_by_columns_and_list_arrows_keep_expansion_semantics() {
+        // 大图模式：↑↓ 位移 = ∓列数、←→ = ±1（不再劫持折叠开关）。
+        let mut session = picker_session(PickerKind::OpenFile {
+            multiple: false,
+            directory: false,
+        });
+        seeded(&mut session, &[("dir", FileKind::Directory)]);
+        session.update(SessionMessage::ViewModeSelected {
+            mode: crate::picker_session::PickerViewMode::Icons,
+        });
+        let plain = |key: keyboard::Key| key_message(&session, &key, no_modifiers(), false);
+        assert!(matches!(
+            plain(named(keyboard::key::Named::ArrowDown)),
+            Some(SessionMessage::ListCursorMoved { delta }) if delta > 0
+        ));
+        assert!(matches!(
+            plain(named(keyboard::key::Named::ArrowUp)),
+            Some(SessionMessage::ListCursorMoved { delta }) if delta < 0
+        ));
+        assert!(matches!(
+            plain(named(keyboard::key::Named::ArrowRight)),
+            Some(SessionMessage::ListCursorMoved { delta: 1 })
+        ));
+        assert!(matches!(
+            plain(named(keyboard::key::Named::ArrowLeft)),
+            Some(SessionMessage::ListCursorMoved { delta: -1 })
+        ));
+    }
+
+    #[test]
     fn arrows_toggle_expansion_only_on_directory_rows() {
         let mut session = picker_session(PickerKind::OpenFile {
             multiple: false,
@@ -564,6 +619,7 @@ mod tests {
             },
             "/req/space".to_string(),
             base.keep(),
+            PickerViewMode::List,
             reply,
         );
         let window_id = window::Id::unique();

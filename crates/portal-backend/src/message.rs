@@ -77,8 +77,9 @@ pub(crate) enum Message {
     PreviewPointerReleased {
         window: window::Id,
     },
-    /// 预览窗尺寸变化（pending resize 匹配 + 文档重排）。
-    PreviewWindowResized {
+    /// 任一窗口尺寸变化：选择窗刷新 List 视口缓存（大图列数取自视口宽），
+    /// 预览窗走 pending resize 匹配 + 文档重排。
+    WindowResized {
         window: window::Id,
         width: f32,
         height: f32,

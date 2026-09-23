@@ -14,20 +14,22 @@ use bennu_theme::anchored_popup::anchored_popup;
 use bennu_theme::icons::IconSymbol;
 use bennu_theme::measured_text::{format_middle_ellipsized_text, measured_middle_ellipsized_text};
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
+use bennu_theme::segmented_buttons::{
+    segmented_button, segmented_button_group, SegmentedButtonTone,
+};
 use bennu_theme::styles::ScrollbarVisibility;
 use bennu_theme::styles::{
-    address_bar_style, base_text_color, button_hover_surface_color, button_pressed_surface_color,
-    button_surface_color, faded_button_style, faded_text_input_style, icon_svg_style,
-    muted_icon_svg_style, muted_text_color, path_suggestion_item_style, path_suggestions_style,
-    scale_color_alpha, selected_path_suggestion_item_style, subtle_border_color,
+    address_bar_style, faded_button_style, faded_text_input_style, icon_svg_style,
+    muted_icon_svg_style, path_suggestion_item_style, path_suggestions_style, scale_color_alpha,
+    selected_icon_svg_style, selected_path_suggestion_item_style,
 };
 use iced::widget::{
     button, container, mouse_area, opaque, responsive, scrollable, stack, text_input, Column,
 };
-use iced::{alignment, mouse, Alignment, Background, Border, Color, Element, Length, Theme};
+use iced::{alignment, mouse, Alignment, Element, Length};
 
 use crate::picker_session::scrollbar::{scroll_id, scrollbar_on_scroll, ScrollbarViewport};
-use crate::picker_session::{PickerSession, SessionMessage, SessionScrollRegion};
+use crate::picker_session::{PickerSession, PickerViewMode, SessionMessage, SessionScrollRegion};
 
 use super::readable_label;
 
@@ -39,6 +41,9 @@ const PATH_SUGGESTION_MAX_CHARS: usize = 72;
 
 /// 导航按钮组图标尺寸：与主软件 TOOLBAR_ICON_SIZE 同值。
 const NAVIGATION_ICON_SIZE: f32 = 16.0;
+
+/// 视图切换按钮组图标尺寸：与导航组同值。
+const VIEW_MODE_ICON_SIZE: f32 = 16.0;
 
 /// 地址输入框的 widget Id：与 scrollbar::scroll_id 同风格按请求路径
 /// 命名空间——widget 操作（focus/select_all/move_cursor_to_end）遍历
@@ -52,10 +57,12 @@ pub(super) fn navigation_bar(
     session: &PickerSession,
     emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'static,
 ) -> Element<'static, SessionMessage> {
-    // 过滤器下拉在确认栏（view.rs confirm_footer），地址栏行尾只留面包屑。
+    // 过滤器下拉在确认栏（view.rs confirm_footer）；地址栏行 = 导航
+    // 按钮组 + 面包屑（Fill 推开）+ 视图模式切换组（最右）。
     let mut bar = iced::widget::row![].spacing(6).align_y(Alignment::Center);
     bar = bar.push(navigation_button_group(session, emit.clone()));
-    bar = bar.push(address_bar(session, emit));
+    bar = bar.push(address_bar(session, emit.clone()));
+    bar = bar.push(view_mode_button_group(session, emit));
 
     container(bar)
         .width(Length::Fill)
@@ -64,8 +71,7 @@ pub(super) fn navigation_bar(
         .into()
 }
 
-/// [←][→][↑] 分段按钮组：hover/pressed 底色与禁用态数值对齐主软件
-/// toolbar_segment_button；历史到头的方向按钮无 on_press 且图标 muted。
+/// [←][→][↑] 分段按钮组：历史到头的方向按钮禁用（图标 muted、无动作）。
 fn navigation_button_group(
     session: &PickerSession,
     emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'static,
@@ -86,10 +92,38 @@ fn navigation_button_group(
     .spacing(0)
     .align_y(Alignment::Center);
 
-    container(group)
-        .clip(true)
-        .style(navigation_button_group_style)
-        .into()
+    segmented_button_group(group)
+}
+
+/// 视图模式切换组（多栏/列表/大图，顺序同主软件）：多栏视图由后续
+/// 子任务实现，按钮暂不渲染。当前模式段常亮。
+fn view_mode_button_group(
+    session: &PickerSession,
+    emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'static,
+) -> Element<'static, SessionMessage> {
+    let current_mode = session.view_mode();
+    let mut group = iced::widget::row![].spacing(0).align_y(Alignment::Center);
+    for (mode, symbol) in [
+        (PickerViewMode::List, IconSymbol::List),
+        (PickerViewMode::Icons, IconSymbol::Grid),
+    ] {
+        let selected = current_mode == mode;
+        let icon_style = if selected {
+            selected_icon_svg_style()
+        } else {
+            icon_svg_style()
+        };
+        group = group.push(segmented_button(
+            symbol.view(VIEW_MODE_ICON_SIZE).style(icon_style),
+            if selected {
+                SegmentedButtonTone::Selected
+            } else {
+                SegmentedButtonTone::Normal
+            },
+            emit(SessionMessage::ViewModeSelected { mode }),
+        ));
+    }
+    segmented_button_group(group)
 }
 
 fn navigation_segment_button(
@@ -98,54 +132,16 @@ fn navigation_segment_button(
     message: SessionMessage,
 ) -> iced::widget::Button<'static, SessionMessage> {
     // 禁用态不做灰底只换 muted 图标：与主软件到头按钮的视觉一致。
-    let icon_tone = if enabled {
-        icon_svg_style()
+    let (tone, icon_style) = if enabled {
+        (SegmentedButtonTone::Normal, icon_svg_style())
     } else {
-        muted_icon_svg_style()
+        (SegmentedButtonTone::Disabled, muted_icon_svg_style())
     };
-    let mut segment = button(symbol.view(NAVIGATION_ICON_SIZE).style(icon_tone))
-        .padding([8, 10])
-        .style(navigation_segment_button_style);
-    if enabled {
-        segment = segment.on_press(message);
-    }
-    segment
-}
-
-fn navigation_segment_button_style(theme: &Theme, status: button::Status) -> button::Style {
-    let background = match status {
-        button::Status::Hovered => Some(Background::Color(button_hover_surface_color(theme))),
-        button::Status::Pressed => Some(Background::Color(button_pressed_surface_color(theme))),
-        button::Status::Active | button::Status::Disabled => None,
-    };
-
-    button::Style {
-        background,
-        text_color: if matches!(status, button::Status::Disabled) {
-            muted_text_color(theme)
-        } else {
-            base_text_color(theme)
-        },
-        border: Border {
-            color: Color::TRANSPARENT,
-            width: 0.0,
-            radius: 0.0.into(),
-        },
-        ..button::Style::default()
-    }
-}
-
-fn navigation_button_group_style(theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(button_surface_color(theme))),
-        text_color: Some(base_text_color(theme)),
-        border: Border {
-            color: subtle_border_color(theme),
-            width: 1.0,
-            radius: 7.0.into(),
-        },
-        ..container::Style::default()
-    }
+    segmented_button(
+        symbol.view(NAVIGATION_ICON_SIZE).style(icon_style),
+        tone,
+        message,
+    )
 }
 
 /// 地址栏主体：面包屑层恒在渲染，编辑态用 opaque 输入框按过渡分数
@@ -229,7 +225,7 @@ fn breadcrumb_layer(
         .align_y(alignment::Vertical::Center)
         .into();
     }
-    let segments = breadcrumb_segments(session.directory(), session.home_dir());
+    let segments = breadcrumb_segments(session.target_directory(), session.home_dir());
     let region = SessionScrollRegion::Breadcrumb;
     let scrollbar_visibility = session.scrollbar_visibility_for(&region);
     let scrollbar_viewport = session.scrollbar_viewport_for(&region);
@@ -253,6 +249,8 @@ fn breadcrumb_layer(
     .into()
 }
 
+// 参数集合是面包屑滚动区的完整配置（段 + 几何 + 滚动接线），与其它滚动区同构
+#[allow(clippy::too_many_arguments)]
 fn breadcrumb_scroller(
     segments: Vec<bennu_theme::address_bar::BreadcrumbSegment>,
     opacity: f32,
@@ -293,7 +291,6 @@ fn breadcrumb_scroller(
         ScrollbarAxis::Horizontal,
         BREADCRUMB_SCROLLBAR_WIDTH,
     )
-    .into()
 }
 
 /// 弹性面包屑：段按钮与分隔符按「段/分隔符交错」交给共享 widget 布局；

@@ -17,12 +17,17 @@ use file_core::DirectoryEntry;
 use thumbnails::ThumbnailKey;
 pub(crate) use thumbnails::{CachedThumbnail, ThumbnailRequest};
 
-use super::expansion::LIST_ROW_STRIDE;
-use super::scrollbar::{ScrollbarViewport, SessionScrollRegion};
+use super::scrollbar::SessionScrollRegion;
 use super::{PickerRow, PickerSession};
 
-/// 行内缩略图生成档位：与主软件 normal 桶（128）同 key 布局，主软件已
-/// 生成的缓存直接命中；行内只显示 18×18，无需更大档位。
+#[cfg(test)]
+use super::expansion::LIST_ROW_STRIDE;
+#[cfg(test)]
+use super::scrollbar::ScrollbarViewport;
+
+/// 行内缩略图生成档位已由 view_mode 子模块按视图模式给出（列表 128 /
+/// 大图 thumbnail_edge(96)）；本常量仅剩测试夹具使用。
+#[cfg(test)]
 const THUMBNAIL_MAX_EDGE: u32 = 128;
 /// 同时在途的生成请求数：portal 是轻量弹窗，固定 4 而不跟随核数。
 const MAX_IN_FLIGHT: usize = 4;
@@ -32,7 +37,8 @@ const READY_LIMIT: usize = 2048;
 /// 失败 backoff：损坏图回落图标后 60s 内不重试，防止重试风暴。
 const FAILURE_BACKOFF: Duration = Duration::from_secs(60);
 /// 可见区间前后各多取的行数：滚动惯性期间提前请求即将进入的行。
-const VISIBLE_MARGIN_ROWS: f32 = 8.0;
+/// 数值由 view_mode 子模块的可见窗口换算消费，保留常量单源在本模块。
+pub(super) const VISIBLE_MARGIN_ROWS: isize = 8;
 
 /// portal 缩略图磁盘缓存目录：与主软件默认配置同目录，主软件已生成
 /// 的缩略图直接命中，不重复生成。
@@ -53,7 +59,10 @@ pub(crate) struct ThumbnailLoadFailed;
 #[derive(Debug)]
 pub(crate) struct SessionThumbnailState {
     cache_dir: PathBuf,
-    ready: HashMap<PathBuf, CachedThumbnail>,
+    /// 按源路径存最新就绪图，附带其请求档位：列表 128 档就绪后切到大图
+    /// 必须能判出“档位不足”并补请求 192 档，否则大图永远显示小图。
+    /// 不用像素尺寸判定：小原图的缩略图永远达不到档位，会反复重请求。
+    ready: HashMap<PathBuf, (u32, CachedThumbnail)>,
     /// ready 的插入顺序（LRU 淘汰依据；同源重复就绪先移除旧序防重复）。
     ready_order: VecDeque<PathBuf>,
     in_flight: HashSet<ThumbnailKey>,
@@ -85,34 +94,19 @@ impl SessionThumbnailState {
         self.queued_keys.clear();
     }
 
-    /// 对可见区间内的图片行入队缺失请求。
-    fn enqueue_visible_rows(
+    /// 对可见条目索引区间内的图片行入队缺失请求。区间换算随视图模式
+    /// 几何不同（列表按行步长，大图按网格行高×列数），由 view_mode
+    /// 子模块计算后传入；edge 是请求档位（大图请求大边长）。
+    fn enqueue_visible_entries(
         &mut self,
         rows: &[PickerRow],
-        viewport: ScrollbarViewport,
+        first: usize,
+        last: usize,
+        edge: u32,
         now: Instant,
     ) {
-        let row_count = rows.len();
-        if row_count == 0 {
-            return;
-        }
         // 顺手清理过期 backoff：到期即可重试，不让表无界增长。
         self.failed_until.retain(|_, until| *until > now);
-        let first = (((viewport.offset_y / LIST_ROW_STRIDE).floor() as isize)
-            - VISIBLE_MARGIN_ROWS as isize)
-            .max(0) as usize;
-        if first >= row_count {
-            return;
-        }
-        let last = ((((viewport.offset_y + viewport.viewport_height) / LIST_ROW_STRIDE).ceil()
-            as usize)
-            // 退化视口（高度 0）时 ceil 为 0，防 usize 回绕出巨大区间。
-            .saturating_sub(1)
-            + VISIBLE_MARGIN_ROWS as usize)
-            .min(row_count - 1);
-        if last < first {
-            return;
-        }
         for row in &rows[first..=last] {
             let entry = &row.entry;
             // 仅图片：视频依赖外部 ffmpegthumbnailer，生成慢不做（prd 约定）。
@@ -126,12 +120,14 @@ impl SessionThumbnailState {
             let request = ThumbnailRequest::new(
                 &entry.path,
                 thumbnails::ThumbnailSourceMetadata::from(&entry.metadata),
-                THUMBNAIL_MAX_EDGE,
+                edge,
             );
             let key = request.key();
-            if self.ready.contains_key(&entry.path)
-                || self.in_flight.contains(&key)
-                || self.queued_keys.contains(&key)
+            let ready_covers_edge = self
+                .ready
+                .get(&entry.path)
+                .is_some_and(|(ready_edge, _)| *ready_edge >= edge);
+            if ready_covers_edge || self.in_flight.contains(&key) || self.queued_keys.contains(&key)
             {
                 continue;
             }
@@ -181,12 +177,21 @@ impl SessionThumbnailState {
         }
         match outcome {
             Ok(cached) => {
+                let edge = request.max_edge;
                 let source = request.source;
+                // 不降档：大档就绪后迟到的小档回信（切换视图前已在途）不覆盖。
+                if self
+                    .ready
+                    .get(&source)
+                    .is_some_and(|(ready_edge, _)| *ready_edge > edge)
+                {
+                    return false;
+                }
                 if let Some(position) = self.ready_order.iter().position(|path| path == &source) {
                     self.ready_order.remove(position);
                 }
                 self.ready_order.push_back(source.clone());
-                self.ready.insert(source, cached);
+                self.ready.insert(source, (edge, cached));
                 while self.ready.len() > READY_LIMIT {
                     let Some(evicted) = self.ready_order.pop_front() else {
                         break;
@@ -203,7 +208,7 @@ impl SessionThumbnailState {
     }
 
     fn ready_for(&self, source: &Path) -> Option<&CachedThumbnail> {
-        self.ready.get(source)
+        self.ready.get(source).map(|(_, cached)| cached)
     }
 
     /// 预览档位缩略图入队（预览宿主专用，主软件 thumbnail_cache
@@ -230,15 +235,19 @@ impl SessionThumbnailState {
 }
 
 impl PickerSession {
-    /// 重算可见区间并入队缺失请求。无列表视口缓存（首帧探针未回）时
-    /// 不发请求，等滚动条布局回信触发。
+    /// 重算可见区间并入队缺失请求。无列表视口缓存（首帧探针未回）或
+    /// 视口退化时不发请求，等滚动条布局回信触发。可见条目区间与请求
+    /// 档位按视图模式计算（view_mode 子模块唯一实现）。
     pub(crate) fn schedule_visible_thumbnails(&mut self) {
         let Some(viewport) = self.scrollbar_viewport_for(&SessionScrollRegion::List) else {
             return;
         };
+        let Some((first, last, edge)) = self.visible_thumbnail_window(&viewport) else {
+            return;
+        };
         let rows: &[PickerRow] = &self.rows;
         self.thumbnails
-            .enqueue_visible_rows(rows, viewport, Instant::now());
+            .enqueue_visible_entries(rows, first, last, edge, Instant::now());
     }
 
     /// main 层入口：拿走已到并发额度的请求，逐个 Task::perform 发起。
@@ -315,6 +324,7 @@ mod tests {
             },
             "/req/thumb".to_string(),
             base.keep(),
+            crate::picker_session::PickerViewMode::List,
             reply,
         );
         let entries = files
@@ -503,6 +513,12 @@ mod tests {
         assert_eq!(sources.len(), 26);
         assert_eq!(sources.first(), Some(&base.join("img032.png")));
         assert_eq!(sources.last(), Some(&base.join("img057.png")));
+        // 列表模式请求 128 档（大图 192 档的断言在 view_mode 测试）。
+        assert!(session
+            .thumbnails
+            .queued
+            .iter()
+            .all(|request| request.max_edge == THUMBNAIL_MAX_EDGE));
     }
 
     #[test]
@@ -583,5 +599,38 @@ mod tests {
                 .unwrap();
             (42..=59).contains(&index)
         }));
+    }
+
+    #[test]
+    fn icon_view_upgrades_small_ready_thumbnail_and_late_small_reply_never_downgrades() {
+        let mut session = image_session(&["photo.png"]);
+        let source = session.directory().join("photo.png");
+        install_viewport(&mut session, viewport_at(0.0, 300.0));
+
+        // 列表档就绪后切大图：就绪档位不足，必须补请求大档。
+        session.schedule_visible_thumbnails();
+        let small = session.drain_pending_thumbnail_requests().pop().unwrap();
+        assert_eq!(small.max_edge, THUMBNAIL_MAX_EDGE);
+        session.accept_thumbnail_ready(small.clone(), Ok(cached_png(&small)));
+        session.update(SessionMessage::ViewModeSelected {
+            mode: crate::picker_session::PickerViewMode::Icons,
+        });
+        session.schedule_visible_thumbnails();
+        let large = session.drain_pending_thumbnail_requests().pop().unwrap();
+        assert_eq!(large.max_edge, 192);
+        session.accept_thumbnail_ready(large.clone(), Ok(cached_png(&large)));
+        assert_eq!(session.thumbnails.ready[&source].0, 192);
+
+        // 切回列表：大档覆盖小档需求，不再请求。
+        session.update(SessionMessage::ViewModeSelected {
+            mode: crate::picker_session::PickerViewMode::List,
+        });
+        session.schedule_visible_thumbnails();
+        assert!(session.drain_pending_thumbnail_requests().is_empty());
+
+        // 迟到的小档回信不降档。
+        session.thumbnails.in_flight.insert(small.key());
+        session.accept_thumbnail_ready(small.clone(), Ok(cached_png(&small)));
+        assert_eq!(session.thumbnails.ready[&source].0, 192);
     }
 }

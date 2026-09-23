@@ -1,5 +1,7 @@
-//! 选择窗口起始目录决策与"上次目录"记忆。记忆文件复用主应用的
+//! 选择窗口起始目录与视图模式的跨窗口记忆。记忆文件复用主应用的
 //! `~/.config/bennu/` 配置目录，独立成 `portal.toml`，不与主程序配置耦合。
+//! last_directory 与 view_mode 由同一个 `store_portal_memory` 原子写回，
+//! 避免两个写者各写各的字段互相覆盖。
 
 use std::path::{Path, PathBuf};
 
@@ -8,9 +10,33 @@ use serde::{Deserialize, Serialize};
 const PORTAL_MEMORY_FILE: &str = "portal.toml";
 const APP_CONFIG_DIR: &str = "bennu";
 
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct PortalMemory {
-    last_directory: Option<PathBuf>,
+#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct PortalMemory {
+    pub(crate) last_directory: Option<PathBuf>,
+    /// 视图模式（PickerViewMode::storage_value）；serde default 保证
+    /// 旧版文件（无 view_mode 字段）照常解析。
+    #[serde(default)]
+    pub(crate) view_mode: Option<String>,
+}
+
+impl PortalMemory {
+    /// 测试辅助：从 TOML 文本解析（生产读取走 load_portal_memory）。
+    #[cfg(test)]
+    pub(crate) fn parse_for_test(text: &str) -> Self {
+        toml::from_str(text).unwrap_or_default()
+    }
+
+    /// 起始目录候选：只在绝对路径且真实存在时有效。
+    pub(crate) fn remembered_directory(&self) -> Option<&Path> {
+        self.last_directory
+            .as_deref()
+            .filter(|dir| dir.is_absolute() && dir.is_dir())
+    }
+
+    /// 存储的视图模式原始值（语义映射在 PickerViewMode::from_storage_value）。
+    pub(crate) fn stored_view_mode(&self) -> Option<&str> {
+        self.view_mode.as_deref()
+    }
 }
 
 /// 起始目录优先级：调用方 `current_folder` > 上次记忆 > 主目录。
@@ -33,35 +59,29 @@ pub(crate) fn resolve_start_directory(
     dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
 }
 
-/// 读取上次选择目录；文件缺失、损坏、路径非法均视为无记忆。
-pub(crate) fn load_last_directory() -> Option<PathBuf> {
-    let path = memory_file_path()?;
-    let text = std::fs::read_to_string(path).ok()?;
-    let memory: PortalMemory = toml::from_str(&text).ok()?;
-    memory
-        .last_directory
-        .filter(|dir| dir.is_absolute() && dir.is_dir())
+/// 读取记忆；文件缺失、损坏视为无记忆。目录有效性由 `remembered_directory`
+/// 在使用处判定。
+pub(crate) fn load_portal_memory() -> PortalMemory {
+    memory_file_path()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|text| toml::from_str::<PortalMemory>(&text).ok())
+        .unwrap_or_default()
 }
 
-/// 记录上次选择目录；同目录不重复写盘。
-pub(crate) fn store_last_directory(directory: &Path) {
+/// 整体写回记忆；内容不变不写盘。先写临时文件再改名，读方永远不会
+/// 观察到半个文件。
+pub(crate) fn store_portal_memory(memory: &PortalMemory) {
     let Some(config_dir) = app_config_dir() else {
         return;
     };
-    if let Some(current) = load_last_directory() {
-        if current == directory {
-            return;
-        }
+    if load_portal_memory() == *memory {
+        return;
     }
-    let memory = PortalMemory {
-        last_directory: Some(directory.to_path_buf()),
-    };
-    let Ok(text) = toml::to_string_pretty(&memory) else {
+    let Ok(text) = toml::to_string_pretty(memory) else {
         return;
     };
     if std::fs::create_dir_all(&config_dir).is_ok() {
         let path = config_dir.join(PORTAL_MEMORY_FILE);
-        // 先写临时文件再改名，读方永远不会观察到半个文件。
         let staging = config_dir.join(format!("{PORTAL_MEMORY_FILE}.new"));
         if std::fs::write(&staging, text).is_ok() && std::fs::rename(&staging, path).is_err() {
             let _ = std::fs::remove_file(&staging);
@@ -122,5 +142,32 @@ mod tests {
             resolve_start_directory(None, None),
             dirs::home_dir().unwrap()
         );
+    }
+
+    #[test]
+    fn legacy_file_without_view_mode_field_still_parses() {
+        // 旧版 portal.toml 只有 last_directory：serde default 保证解析
+        // 成功、视图模式缺省为无值（会话侧回落 List）。
+        let memory: PortalMemory = toml::from_str("last_directory = \"/tmp\"\n").unwrap();
+        assert_eq!(memory.last_directory.as_deref(), Some(Path::new("/tmp")));
+        assert_eq!(memory.stored_view_mode(), None);
+        assert_eq!(memory.remembered_directory(), Some(Path::new("/tmp")));
+    }
+
+    #[test]
+    fn view_mode_field_round_trips() {
+        let memory: PortalMemory =
+            toml::from_str("last_directory = \"/tmp\"\nview_mode = \"icons\"\n").unwrap();
+        assert_eq!(memory.stored_view_mode(), Some("icons"));
+
+        let written = toml::to_string_pretty(&memory).unwrap();
+        let reparsed: PortalMemory = toml::from_str(&written).unwrap();
+        assert_eq!(memory, reparsed);
+    }
+
+    #[test]
+    fn corrupted_document_falls_back_to_default() {
+        let memory: PortalMemory = toml::from_str("view_mode = [broken").unwrap_or_default();
+        assert_eq!(memory, PortalMemory::default());
     }
 }

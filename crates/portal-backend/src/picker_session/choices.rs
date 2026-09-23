@@ -13,11 +13,7 @@ impl PickerSession {
     /// 选择更新：按 id 定位覆写 selected。id 不存在静默忽略——视图只
     /// 能从现有 choice 发出消息，正常不可达，此处仅防御视图/状态错位。
     pub(crate) fn choice_selected(&mut self, id: &str, value: String) {
-        if let Some(choice) = self
-            .choices
-            .iter_mut()
-            .find(|choice| choice.id == id)
-        {
+        if let Some(choice) = self.choices.iter_mut().find(|choice| choice.id == id) {
             choice.selected = value;
         }
     }

@@ -189,9 +189,12 @@ fn scroll_region_state<'a>(
 
 /// 预览七区全为竖向滚动；shift 换算与主软件 preview 区域同语义
 /// （app-ui 的 smooth_scroll_content 传 false，轴向换算在处理端）。
+type SmoothScrollWrapFn<'a> =
+    Box<dyn Fn(Element<'a, Message, Theme>) -> Element<'a, Message, Theme> + 'a>;
+
 fn smooth_scroll_wrap<'a>(
     region: PreviewScrollRegion,
-) -> Box<dyn Fn(Element<'a, Message, Theme>) -> Element<'a, Message, Theme> + 'a> {
+) -> SmoothScrollWrapFn<'a> {
     Box::new(move |content| {
         Element::new(SmoothScrollArea::new(
             content,

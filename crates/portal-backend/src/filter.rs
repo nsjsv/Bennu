@@ -128,7 +128,7 @@ fn char_class_matches(class: &[char], ch: char) -> bool {
         if start == ']' {
             continue;
         }
-        if let (Some('-'), Some(end)) = (iter.clone().nth(0), iter.clone().nth(1)) {
+        if let (Some('-'), Some(end)) = (iter.clone().next(), iter.clone().nth(1)) {
             if end != ']' && start <= ch && ch <= end {
                 return true;
             }

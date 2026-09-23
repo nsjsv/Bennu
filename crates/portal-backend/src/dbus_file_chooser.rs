@@ -8,7 +8,7 @@ use tokio::sync::{mpsc, oneshot};
 use zbus::fdo;
 use zbus::zvariant::{ObjectPath, Value};
 
-use crate::picker_request::{FilterRule, FilePattern, PickerKind, PickerRequestSpec};
+use crate::picker_request::{FilePattern, FilterRule, PickerKind, PickerRequestSpec};
 
 /// UI 侧回传的选择结果载荷：choices 与激活过滤规则跟 paths 一起回信，
 /// 由 D-Bus 层序列化；UI 效果层（SessionEffect）不感知协议细节。
@@ -181,10 +181,7 @@ fn filter_rule_to_value(rule: &FilterRule) -> zbus::zvariant::Structure<'static>
             FilePattern::Mime(mime) => (1u32, mime.clone()),
         })
         .collect();
-    zbus::zvariant::Structure::from((
-        rule.name.clone(),
-        zbus::zvariant::Array::from(patterns),
-    ))
+    zbus::zvariant::Structure::from((rule.name.clone(), zbus::zvariant::Array::from(patterns)))
 }
 
 /// 路径 → `file://` URL。

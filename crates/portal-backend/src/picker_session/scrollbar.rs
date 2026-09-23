@@ -247,13 +247,24 @@ impl PickerSession {
         viewport: ScrollbarViewport,
     ) -> Vec<Task<SessionMessage>> {
         self.scrollbar.remember_viewport(region, viewport);
+        let mut tasks = Vec::new();
         if region == SessionScrollRegion::List {
             self.schedule_visible_thumbnails();
+            // 视图切换的主选中项揭示等到这里：缓存刚被新几何覆写。
+            if let Some(offset_y) = self.complete_view_switch_reveal() {
+                tasks.push(iced::widget::operation::scroll_to(
+                    scroll_id(&self.request_path, region),
+                    scrollable::AbsoluteOffset {
+                        x: 0.0,
+                        y: offset_y,
+                    },
+                ));
+            }
         }
-        if !scrollbar_viewport_has_overflow(viewport) {
-            return Vec::new();
+        if scrollbar_viewport_has_overflow(viewport) {
+            tasks.extend(self.start_scrollbar_reveal(region));
         }
-        self.start_scrollbar_reveal(region)
+        tasks
     }
 
     fn start_scrollbar_reveal(&mut self, region: SessionScrollRegion) -> Vec<Task<SessionMessage>> {
@@ -338,6 +349,7 @@ mod tests {
             },
             "/org/freedesktop/portal/desktop/request/test".to_string(),
             PathBuf::from("/tmp"),
+            crate::picker_session::PickerViewMode::List,
             reply,
         )
     }

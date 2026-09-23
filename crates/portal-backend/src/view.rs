@@ -18,18 +18,21 @@ use bennu_theme::styles::{
 use bennu_theme::ui_colors;
 use file_core::entry::FileKind;
 use file_core::is_supported_image_path;
-use iced::widget::{button, checkbox, column, container, mouse_area, pick_list, row, scrollable, text, text_input};
+use iced::widget::{
+    button, checkbox, column, container, mouse_area, pick_list, row, scrollable, text, text_input,
+};
 use iced::widget::{image, Space};
 use iced::{alignment, Background, Border, Color, Element, Length, Padding, Shadow, Size, Theme};
 
 use crate::picker_request::PickerKind;
 use crate::picker_session::scrollbar::{scroll_axis, scroll_id, scrollbar_on_scroll};
 use crate::picker_session::{
-    DirectoryListing, PickerRow, PickerSession, SessionMessage, SessionScrollRegion,
-    LIST_ROW_HEIGHT, LIST_ROW_SPACING,
+    DirectoryListing, PickerRow, PickerSession, PickerViewMode, SessionMessage,
+    SessionScrollRegion, LIST_ROW_HEIGHT, LIST_ROW_SPACING,
 };
 
 mod address_bar;
+mod icon_grid;
 mod preview_window;
 mod sidebar;
 mod window_drag_region;
@@ -135,49 +138,14 @@ fn listing_body(
             if session.rows().is_empty() {
                 centered_hint("空目录", 14.0, muted_text_color(theme))
             } else {
-                let region = SessionScrollRegion::List;
-                let scrollbar_visibility = session.scrollbar_visibility_for(&region);
-                let mut list = column![].spacing(LIST_ROW_SPACING);
-                for (index, row) in session.rows().iter().enumerate() {
-                    list = list.push(entry_row(
-                        index,
-                        row,
-                        session,
-                        theme,
-                        session.selection().contains(&index),
-                        session.hovered_index() == Some(index),
-                        emit.clone(),
-                    ));
-                }
-                let list_scroller = scrollable(smooth_scroll_region(
-                    list,
-                    region,
-                    session.scroll_shift_pressed(),
-                ))
-                .id(scroll_id(session.request_path(), region))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .direction(enhanced_vertical_scrollbar_direction(
-                    scrollbar_visibility,
-                    LIST_SCROLLBAR_WIDTH,
-                ))
-                .style(enhanced_scrollbar_style(scrollbar_visibility))
-                .on_scroll(scrollbar_on_scroll(region, |_| {
-                    SessionMessage::ScrollbarEngaged {
-                        region: SessionScrollRegion::List,
+                // 视图分派：列表与网格滚动接线同一套（区域、惯性、滚动
+                // 条），仅行几何不同；多栏视图由后续子任务接入。
+                match session.view_mode() {
+                    PickerViewMode::Icons => icon_grid::icon_grid_body(session, emit),
+                    PickerViewMode::List | PickerViewMode::Columns => {
+                        list_body(session, theme, emit)
                     }
-                }));
-                // mac 式滚动条：透明原生拇指 + canvas 浮层拇指（此前
-                // enhanced_scrollbar_style 把原生拇指透明化而浮层缺失，
-                // 滚动条整体隐形）。
-                enhanced_scrollbar(
-                    list_scroller,
-                    scrollbar_visibility,
-                    session.scrollbar_viewport_for(&region),
-                    ScrollbarAxis::Vertical,
-                    LIST_SCROLLBAR_WIDTH,
-                )
-                .into()
+                }
             }
         }
     };
@@ -196,6 +164,56 @@ fn listing_body(
         })
         .padding(6)
         .into()
+}
+
+/// 列表视图主体：逐行渲染（访达展开语义）+ 竖向滚动接线。
+fn list_body(
+    session: &PickerSession,
+    theme: &Theme,
+    emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'static,
+) -> Element<'static, SessionMessage> {
+    let region = SessionScrollRegion::List;
+    let scrollbar_visibility = session.scrollbar_visibility_for(&region);
+    let mut list = column![].spacing(LIST_ROW_SPACING);
+    for (index, row) in session.rows().iter().enumerate() {
+        list = list.push(entry_row(
+            index,
+            row,
+            session,
+            theme,
+            session.selection().contains(&index),
+            session.hovered_index() == Some(index),
+            emit.clone(),
+        ));
+    }
+    let list_scroller = scrollable(smooth_scroll_region(
+        list,
+        region,
+        session.scroll_shift_pressed(),
+    ))
+    .id(scroll_id(session.request_path(), region))
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .direction(enhanced_vertical_scrollbar_direction(
+        scrollbar_visibility,
+        LIST_SCROLLBAR_WIDTH,
+    ))
+    .style(enhanced_scrollbar_style(scrollbar_visibility))
+    .on_scroll(scrollbar_on_scroll(region, |_| {
+        SessionMessage::ScrollbarEngaged {
+            region: SessionScrollRegion::List,
+        }
+    }));
+    // mac 式滚动条：透明原生拇指 + canvas 浮层拇指（此前
+    // enhanced_scrollbar_style 把原生拇指透明化而浮层缺失，
+    // 滚动条整体隐形）。
+    enhanced_scrollbar(
+        list_scroller,
+        scrollbar_visibility,
+        session.scrollbar_viewport_for(&region),
+        ScrollbarAxis::Vertical,
+        LIST_SCROLLBAR_WIDTH,
+    )
 }
 
 fn centered_hint(label: &str, size: f32, color: Color) -> Element<'static, SessionMessage> {

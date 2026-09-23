@@ -13,6 +13,7 @@ mod picker_request;
 mod picker_session;
 mod preview_host;
 mod preview_scroll;
+mod renderer_env;
 mod scrollbar_state;
 mod sidebar_bridge;
 mod subscriptions;
@@ -33,15 +34,12 @@ use picker_session::suggestions::{
     load_path_suggestions, PATH_SUGGESTION_INPUT_STABILIZATION_DELAY,
 };
 use picker_session::SessionScrollRegion;
-use picker_session::{PickerSession, SessionEffect, SessionMessage};
+use picker_session::{PickerSession, PickerViewMode, SessionEffect, SessionMessage};
 use thumbnail_dispatch::spawn_thumbnail_tasks;
 use tokio::sync::mpsc;
 
 const PORTAL_BUS_NAME: &str = "org.freedesktop.impl.portal.desktop.bennu";
 const PORTAL_OBJECT_PATH: &str = "/org/freedesktop/portal/desktop";
-/// iced fallback 候选链：GPU（wgpu）→ 软件渲染。GPU 首选由
-/// [`apply_renderer_environment`] 钉在驱动显示器的 GPU（通常为核显）。
-const PORTAL_ICED_BACKEND_CANDIDATES: &str = "wgpu,tiny-skia";
 
 /// D-Bus → UI 的通道；进程引导早期创建，subscription 首次 poll 时取走。
 static BRIDGE_SLOT: OnceLock<Mutex<Option<mpsc::Receiver<BridgeEvent>>>> = OnceLock::new();
@@ -161,11 +159,19 @@ fn update(daemon: &mut PickerDaemon, message: Message) -> Task<Message> {
         }
         Message::PreviewSqliteDragFinished => daemon.preview.finish_window_drags(),
         Message::PreviewCloseFocused => daemon.preview.close_focused_preview(),
-        Message::PreviewWindowResized {
+        Message::WindowResized {
             window,
             width,
             height,
-        } => preview_host::handle_window_resized(daemon, window, width, height),
+        } => match daemon.windows.get(&window) {
+            // 大图列数取自 List 视口宽缓存：resize 不发 on_scroll，必须探针
+            // 回写，否则拉宽窗口列数要等下次滚动才更新。
+            Some(session) => Task::batch(route_session_tasks(
+                window,
+                [session.scrollbar_layout_probe_task(SessionScrollRegion::List)],
+            )),
+            None => preview_host::handle_window_resized(daemon, window, width, height),
+        },
         Message::PreviewWheelScrolled { region, delta } => daemon
             .preview
             .scroll
@@ -226,10 +232,15 @@ fn open_picker_window(daemon: &mut PickerDaemon, invocation: PickerInvocation) -
         spec,
         reply,
     } = invocation;
-    let remembered = location::load_last_directory();
-    let start =
-        location::resolve_start_directory(spec.start_folder.as_deref(), remembered.as_deref());
-    let mut session = PickerSession::new(&spec, request_path, start.clone(), reply);
+    // 记忆一次读入（目录 + 视图模式）：旧版文件无 view_mode 字段时
+    // serde default 缺省，会话侧回落列表视图。
+    let memory = location::load_portal_memory();
+    let start = location::resolve_start_directory(
+        spec.start_folder.as_deref(),
+        memory.remembered_directory(),
+    );
+    let view_mode = PickerViewMode::from_storage_value(memory.stored_view_mode());
+    let mut session = PickerSession::new(&spec, request_path, start.clone(), view_mode, reply);
     let effects = session.begin();
 
     let settings = window::Settings {
@@ -354,8 +365,7 @@ fn apply_session_message(
     } else {
         Task::none()
     };
-    // 根目录扫描回填的滚尾须在 session 借用结束前构造（后续
-    // Confirmed/Dismissed 分支要整体借用 daemon 记住目录）。
+    // 根目录扫描回填的滚尾。
     let breadcrumb_reveal_task = if is_root_scan_ready {
         breadcrumb_scroll_to_end_task(session)
     } else {
@@ -415,13 +425,9 @@ fn apply_session_message(
         ]),
         SessionEffect::Confirmed(paths) => {
             tracing::info!("选择完成：{} 个条目", paths.len());
-            remember_directory(daemon, window_id);
             window::close(window_id)
         }
-        SessionEffect::Dismissed => {
-            remember_directory(daemon, window_id);
-            window::close(window_id)
-        }
+        SessionEffect::Dismissed => window::close(window_id),
         SessionEffect::None => Task::none(),
     };
     Task::batch([
@@ -452,14 +458,22 @@ fn scrollbar_layout_probe_task(window_id: window::Id, session: &PickerSession) -
     ))
 }
 
-fn remember_directory(daemon: &PickerDaemon, window_id: window::Id) {
-    if let Some(session) = daemon.windows.get(&window_id) {
-        // 回收站是虚拟视图：不作为下次开窗的起始目录（SaveFile 落在
-        // trash 下确认破禁，且真实路径记忆才有导航价值）。
-        if !session.is_trash_view() {
-            location::store_last_directory(session.directory());
-        }
-    }
+fn remember_portal_memory(session: &PickerSession) {
+    // last_directory 与 view_mode 同一写入函数整体落盘，避免两个写者
+    // 互相覆盖字段。回收站是虚拟视图：不作为下次开窗的起始目录
+    //（SaveFile 落在 trash 下确认破禁，且真实路径记忆才有导航价值），
+    // 保留旧记忆的目录，只更新视图模式。
+    let previous = location::load_portal_memory();
+    let last_directory = if session.is_trash_view() {
+        previous.last_directory
+    } else {
+        Some(session.target_directory().to_path_buf())
+    };
+    let memory = location::PortalMemory {
+        last_directory,
+        view_mode: Some(session.view_mode().storage_value().to_owned()),
+    };
+    location::store_portal_memory(&memory);
 }
 
 fn scan_directory_task(window_id: window::Id, directory: std::path::PathBuf) -> Task<Message> {
@@ -539,6 +553,9 @@ fn breadcrumb_scroll_to_end_task(session: &PickerSession) -> Task<Message> {
 
 fn close_picker_window(daemon: &mut PickerDaemon, window_id: window::Id) {
     if let Some(session) = daemon.windows.remove(&window_id) {
+        // 所有关窗路径（确认/取消/窗口管理器关闭）都汇到这里：记忆在
+        // 此单点写回，点 X 关窗也记住视图模式。
+        remember_portal_memory(&session);
         session.window_closed();
     }
 }
@@ -625,34 +642,8 @@ async fn build_portal_connection(
         .await
 }
 
-/// 在任何 iced/wgpu 初始化前定下渲染链：核显 → 独显 → 软件渲染。
-///
-/// - `ICED_BACKEND=wgpu,tiny-skia`：iced fallback 依次尝试 GPU、软件渲染。
-/// - GPU 首选钉住驱动显示器的 GPU（与主软件 DisplayGpu 偏好同配方：
-///   power pref + MESA 设备选择 + loader ICD 过滤）。笔记本上即核显，
-///   且必然已上电；独显 NVIDIA 冷初始化实测 ~2.2s，必须排除在首选外。
-/// - 检测失败时仅设 `WGPU_POWER_PREF=low`，让 wgpu 自行排序（有核显选核显）。
-/// - 已存在的环境变量不覆盖：保留运维/实验入口（如强制软渲染排障）。
-fn apply_renderer_environment() {
-    if std::env::var_os("ICED_BACKEND").is_none() {
-        std::env::set_var("ICED_BACKEND", PORTAL_ICED_BACKEND_CANDIDATES);
-    }
-    if std::env::var_os("WGPU_POWER_PREF").is_none() {
-        match display_renderer::detect_display_renderer_gpu() {
-            Some(gpu) => {
-                std::env::set_var("WGPU_POWER_PREF", gpu.class().wgpu_power_preference());
-                std::env::set_var("MESA_VK_DEVICE_SELECT", gpu.mesa_vulkan_device_select());
-                if let Some(loader_select) = gpu.vulkan_loader_driver_select() {
-                    std::env::set_var("VK_LOADER_DRIVERS_SELECT", loader_select);
-                }
-            }
-            None => std::env::set_var("WGPU_POWER_PREF", "low"),
-        }
-    }
-}
-
 fn main() {
-    apply_renderer_environment();
+    renderer_env::apply_renderer_environment();
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -724,6 +715,7 @@ mod tests {
             },
             "/req/test".to_string(),
             base.keep(),
+            PickerViewMode::List,
             reply,
         )
     }

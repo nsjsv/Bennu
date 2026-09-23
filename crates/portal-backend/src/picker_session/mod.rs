@@ -21,6 +21,7 @@ use crate::picker_request::{FilterRule, PickerChoice, PickerKind, PickerRequestS
 mod address_editing;
 mod choices;
 mod confirm;
+mod effects;
 mod expansion;
 mod keyboard_nav;
 pub(crate) mod scan;
@@ -29,6 +30,7 @@ mod selection;
 mod sidebar;
 pub(crate) mod suggestions;
 pub(crate) mod thumbnails;
+mod view_mode;
 
 /// 行几何唯一真值再导出：view 层行高/间距与各子模块同源（模块本身
 /// 保持私有，只放行这两个常量）。
@@ -41,49 +43,10 @@ pub(crate) use sidebar::{
 };
 
 pub(crate) use address_editing::PathSuggestionDirection;
+pub(crate) use effects::SessionEffect;
 use expansion::ExpansionState;
 use keyboard_nav::KeyboardNavState;
-
-/// 状态机对外请求的效果。
-pub(crate) enum SessionEffect {
-    None,
-    /// 导航类扫描（进入/上级/面包屑/初始 begin）：main 层除扫描外还
-    /// 要把面包屑滚到当前段。与列表展开的 `ScanDirectory` 拆开，是
-    /// 为了让「滚尾」只挂在导航上——展开行不该强滚面包屑。
-    NavigateDirectory(PathBuf),
-    /// 列表展开行扫描：结果按路径回填到展开节点，不触发面包屑滚尾。
-    ScanDirectory(PathBuf),
-    /// 用户确认，携带选中路径。
-    Confirmed(Vec<PathBuf>),
-    /// 用户取消（Esc / 取消按钮）。
-    Dismissed,
-    /// 窗口打开时一次性读取侧边栏数据（位置/收藏/设备/网络连接），
-    /// 与每窗重解析主题同模式；回信 `SidebarDataLoaded`。
-    LoadSidebarData,
-    /// 侧边栏未挂载设备挂载：回信 `SidebarDeviceMountFinished`。
-    MountDevice(desktop_linux::StorageDeviceId),
-    /// 侧边栏网络连接挂载（先查主程序已存凭证）：回信
-    /// `SidebarConnectionMountFinished`。
-    MountConnection(desktop_linux::NetworkConnectionId),
-    /// 列表/面包屑内容骤变后核实滚动条溢出：布局探针回信自愈视口
-    /// 缓存，塞得下则淡入被拦截。main 层翻译为探针 Task。
-    VerifyScrollbarLayout,
-    /// 地址输入停笔 120ms 防抖：main 层 sleep 后回信
-    /// `AddressSuggestionInputStabilized`，会话校验凭据再发起读取。
-    StabilizeAddressInput {
-        request: AddressSuggestionRequest,
-    },
-    /// 读取目录补全建议：main 层 `Task::perform(suggestions::load)` 后
-    /// 回信 `AddressSuggestionsLoaded`。
-    LoadPathSuggestions {
-        request: AddressSuggestionRequest,
-    },
-    /// 键盘导航滚动跟随：把列表滚动到绝对 Y 偏移（贴边值）。main 层
-    /// 翻译为 scroll_to + List 布局探针（联动滚动条显隐与视口缓存）。
-    ScrollListTo {
-        offset_y: f32,
-    },
-}
+pub(crate) use view_mode::{PickerViewMode, ICON_GRID_EDGE};
 
 /// 视图事件。
 #[derive(Debug, Clone)]
@@ -134,6 +97,10 @@ pub(crate) enum SessionMessage {
     ListPageMoved {
         pages: isize,
     },
+    /// 视图模式切换（导航栏分段按钮）；语义见 view_mode 子模块。
+    ViewModeSelected {
+        mode: PickerViewMode,
+    },
     /// type-ahead 字符输入（无 ctrl/alt/command 修饰的字符键）。
     TypeAheadChar {
         ch: char,
@@ -169,7 +136,10 @@ pub(crate) enum SessionMessage {
     },
     /// choices 控件变更（下拉选中/复选开关）：按 id 定位覆写选中值，
     /// 见 choices 子模块；id 不存在静默忽略。
-    ChoiceSelected { id: String, value: String },
+    ChoiceSelected {
+        id: String,
+        value: String,
+    },
     /// 滚轮输入（视图包装层捕获后发布）；增量换算在会话滚动子模块。
     WheelScrolled {
         region: SessionScrollRegion,
@@ -283,6 +253,11 @@ pub(crate) struct PickerSession {
     shift_pressed: bool,
     /// 行内缩略图调度状态（就绪 LRU/在途/排队/失败 backoff），见子模块。
     thumbnails: thumbnails::SessionThumbnailState,
+    /// 视图模式（列表/大图/多栏）；跨窗口记忆见 location 子模块。
+    view_mode: PickerViewMode,
+    /// 视图切换后待揭示的主选中项：切换瞬间视口缓存仍是旧视图几何，
+    /// 推迟到 List 探针回信（新几何就位）再滚动；按路径记，行集已变则丢弃。
+    pending_view_switch_reveal: Option<PathBuf>,
     reply: Option<oneshot::Sender<PickerResolution>>,
 }
 
@@ -291,6 +266,7 @@ impl PickerSession {
         invocation_spec: &PickerRequestSpec,
         request_path: String,
         start_directory: PathBuf,
+        view_mode: PickerViewMode,
         reply: oneshot::Sender<PickerResolution>,
     ) -> Self {
         let PickerRequestSpec {
@@ -347,6 +323,8 @@ impl PickerSession {
             thumbnails: thumbnails::SessionThumbnailState::new(
                 thumbnails::default_thumbnail_cache_dir(),
             ),
+            view_mode,
+            pending_view_switch_reveal: None,
             reply: Some(reply),
         }
     }
@@ -431,7 +409,7 @@ impl PickerSession {
     /// 文件保存进 trash:/// 虚拟路径）。
     pub(crate) fn can_confirm(&self) -> bool {
         match &self.kind {
-            PickerKind::OpenFile { .. } => !self.selection.is_empty(),
+            PickerKind::OpenFile { .. } => !self.selected_paths().is_empty(),
             PickerKind::SaveFile { .. } => {
                 !self.is_trash_view() && !self.name_input.trim().is_empty()
             }
@@ -503,6 +481,7 @@ impl PickerSession {
             SessionMessage::ListCursorMoved { delta } => self.move_list_cursor(delta),
             SessionMessage::ListCursorJumped { to_end } => self.jump_list_cursor(to_end),
             SessionMessage::ListPageMoved { pages } => self.move_list_page(pages),
+            SessionMessage::ViewModeSelected { mode } => self.select_view_mode(mode),
             SessionMessage::TypeAheadChar { ch } => self.push_type_ahead_char(ch),
             SessionMessage::TypeAheadReset => {
                 self.reset_type_ahead();

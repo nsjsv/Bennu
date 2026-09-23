@@ -58,12 +58,9 @@ impl PickerSession {
         }
         match &self.kind {
             PickerKind::OpenFile { .. } => {
-                let mut paths: Vec<PathBuf> = self
-                    .selection
-                    .iter()
-                    .filter_map(|&index| self.rows.get(index))
-                    .map(|row| row.entry.path.clone())
-                    .collect();
+                // 选中集唯一读取口（target_directory/selected_paths，见
+                // view_mode 子模块）：大图与列表同语义。
+                let mut paths = self.selected_paths();
                 paths.sort_unstable();
                 paths.dedup();
                 if paths.is_empty() {
@@ -79,7 +76,7 @@ impl PickerSession {
                 // 补全在 join+exists 之前：覆盖确认文案与实际落盘名字
                 // 一致（"照片"+已有"照片.png"须触发覆盖确认）。
                 let completed = complete_extension(name, self.active_filter.active_rule());
-                let target = self.directory.join(completed);
+                let target = self.target_directory().join(completed);
                 if target.exists() {
                     self.overwrite_targets = vec![target];
                     return SessionEffect::None;
@@ -106,13 +103,11 @@ impl PickerSession {
         }
     }
 
-    /// SaveFiles 的全部确认目标：目录 / 每个名字（名字列表是调用方
-    /// 资产，永不改写）。
+    /// SaveFiles 的全部确认目标：目标目录 / 每个名字（名字列表是调用
+    /// 方资产，永不改写）。
     fn batch_targets(&self, names: &[String]) -> Vec<PathBuf> {
-        names
-            .iter()
-            .map(|name| self.directory.join(name))
-            .collect()
+        let directory = self.target_directory().to_path_buf();
+        names.iter().map(|name| directory.join(name)).collect()
     }
 
     fn confirm_overwrite(&mut self) -> SessionEffect {

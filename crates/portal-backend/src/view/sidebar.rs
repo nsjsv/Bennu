@@ -130,7 +130,7 @@ fn location_item(
     is_favorite: bool,
 ) -> Element<'static, SessionMessage> {
     let id = SidebarEntryId::Location(location.path.clone());
-    let selected = !session.is_trash_view() && location.path == session.directory();
+    let selected = !session.is_trash_view() && location.path == session.target_directory();
     let hovered = session.sidebar().hovered.as_ref() == Some(&id);
     let tone = if selected {
         IconTone::Selected
@@ -192,7 +192,7 @@ fn device_item(
     let id = SidebarEntryId::Device(device.id.clone());
     // 当前目录所属设备高亮：最长挂载点前缀命中（共享判定，与主程序同源）。
     let selected = !session.is_trash_view()
-        && selected_sidebar_device(&session.sidebar().devices, session.directory())
+        && selected_sidebar_device(&session.sidebar().devices, session.target_directory())
             .is_some_and(|selected| selected.id == device.id);
     let tone = if selected {
         IconTone::Selected
@@ -232,7 +232,7 @@ fn connection_item(
     let selected = !session.is_trash_view()
         && connection
             .mount_path()
-            .is_some_and(|mount_path| session.directory().starts_with(mount_path));
+            .is_some_and(|mount_path| session.target_directory().starts_with(mount_path));
     let tone = if selected {
         IconTone::Selected
     } else {

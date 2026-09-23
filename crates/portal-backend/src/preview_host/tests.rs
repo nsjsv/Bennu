@@ -421,6 +421,7 @@ fn daemon_with_image_row(file_name: &str) -> (PickerDaemon, window::Id, PathBuf)
         },
         "/req/preview".to_string(),
         base.keep(),
+        crate::picker_session::PickerViewMode::List,
         reply,
     );
     let path = session.directory().join(file_name);

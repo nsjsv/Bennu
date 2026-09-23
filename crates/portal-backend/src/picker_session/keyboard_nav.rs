@@ -8,7 +8,6 @@ use std::time::{Duration, Instant};
 
 use file_core::entry::FileKind;
 
-use super::expansion::{LIST_ROW_HEIGHT, LIST_ROW_STRIDE};
 use super::scrollbar::SessionScrollRegion;
 use super::{PickerKind, PickerSession, SessionEffect};
 
@@ -54,9 +53,9 @@ impl KeyboardNavState {
 
     /// 追加一个字符；截止已过则先重置再追加（惰性过期，无需定时器）。
     fn push_type_ahead(&mut self, ch: char, now: Instant) {
-        if !self
+        if self
             .type_ahead_deadline
-            .is_some_and(|deadline| deadline > now)
+            .is_none_or(|deadline| deadline <= now)
         {
             self.type_ahead.clear();
         }
@@ -92,7 +91,8 @@ impl PickerSession {
         self.place_list_cursor(if to_end { row_count - 1 } else { 0 })
     }
 
-    /// PageUp/PageDown 按视口行数翻页。
+    /// PageUp/PageDown 按视口行数翻页（步长随视图模式：列表按行，
+    /// 大图按行×列数，见 view_mode 子模块）。
     pub(crate) fn move_list_page(&mut self, pages: isize) -> SessionEffect {
         self.keyboard_nav.clear_type_ahead();
         self.move_list_cursor_by_rows(pages.saturating_mul(self.list_page_rows()))
@@ -181,18 +181,26 @@ impl PickerSession {
         self.scroll_list_to_cursor()
     }
 
-    /// 翻页步长（行）：视口高度 / 行步长，至少 1 行；无视口缓存回落
-    /// 10 行（首帧探针未回时 PageUp/Down 仍可用）。
+    /// 视图切换后的主选中项揭示：只落光标并滚动跟随，不改选中集
+    /// （多选集在切换后必须完整保留，与键盘移动的单选语义解耦）。
+    pub(super) fn reveal_cursor_on(&mut self, index: usize) -> SessionEffect {
+        self.keyboard_nav.cursor = Some(index);
+        self.scroll_list_to_cursor()
+    }
+
+    /// 翻页步长（条目数）：视口高度按当前视图步长换算，至少 1 条；
+    /// 无视口缓存（首帧探针未回）时回落 10 行（PageUp/Down 仍可用）。
     fn list_page_rows(&self) -> isize {
         self.scrollbar_viewport_for(&SessionScrollRegion::List)
-            .map(|viewport| (viewport.viewport_height / LIST_ROW_STRIDE).max(1.0) as isize)
+            .map(|viewport| self.page_step_entries(viewport.viewport_height))
             .unwrap_or(PAGE_FALLBACK_ROWS)
     }
 
-    /// 光标行滚入视野：行矩形 [cursor×步长, cursor×步长+行高) 不在视口
-    /// 时把偏移贴到对应边缘（上方贴顶/下方贴底），经 SessionEffect 交给
-    /// main 层执行 scroll_to（即时到位，不触发惯性）。无视口缓存（首帧
-    /// 探针未回）时跳过——缓存就位后下一次移动即可跟随。
+    /// 光标条目滚入视野：条目矩形不在视口时把偏移贴到对应边缘（上
+    /// 方贴顶/下方贴底），经 SessionEffect 交给 main 层执行 scroll_to
+    /// （即时到位，不触发惯性）。无视口缓存（首帧探针未回）时跳过
+    /// ——缓存就位后下一次移动即可跟随。行矩形按视图模式几何计算
+    /// （cursor_row_span）。
     fn scroll_list_to_cursor(&mut self) -> SessionEffect {
         let Some(cursor) = self.keyboard_nav.cursor else {
             return SessionEffect::None;
@@ -200,8 +208,8 @@ impl PickerSession {
         let Some(viewport) = self.scrollbar_viewport_for(&SessionScrollRegion::List) else {
             return SessionEffect::None;
         };
-        let row_top = cursor as f32 * LIST_ROW_STRIDE;
-        let row_bottom = row_top + LIST_ROW_HEIGHT;
+        let (row_top, row_height) = self.cursor_row_span(cursor);
+        let row_bottom = row_top + row_height;
         let target = if row_top < viewport.offset_y {
             row_top
         } else if row_bottom > viewport.offset_y + viewport.viewport_height {

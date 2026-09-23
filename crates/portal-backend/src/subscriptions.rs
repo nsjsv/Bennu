@@ -57,9 +57,9 @@ pub(crate) fn subscription(daemon: &PickerDaemon) -> Subscription<Message> {
             iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 Some(Message::PreviewPointerReleased { window: window_id })
             }
-            // 预览窗 resize 跟进（pending resize 匹配语义）。
+            // 窗口 resize：选择窗刷新网格列数，预览窗跟进 pending resize。
             iced::Event::Window(iced::window::Event::Resized(size)) => {
-                Some(Message::PreviewWindowResized {
+                Some(Message::WindowResized {
                     window: window_id,
                     width: size.width,
                     height: size.height,

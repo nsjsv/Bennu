@@ -6,11 +6,12 @@
 
 use bennu_theme::column_geometry::{ColumnEntryGeometry, COLUMN_ENTRY_TEXT_SIZE, COLUMN_PADDING};
 use bennu_theme::icons::{file_entry_icon_symbol, IconSymbol};
+use bennu_theme::measured_text::measured_middle_ellipsized_text;
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use bennu_theme::styles::{
     enhanced_horizontal_scrollbar_direction, enhanced_scrollbar_style,
     enhanced_vertical_scrollbar_direction, hovered_row_style, muted_icon_svg_style,
-    selected_icon_svg_style, selected_row_style, subtle_border_color,
+    open_child_row_style, selected_icon_svg_style, selected_row_style, subtle_border_color,
 };
 use file_core::entry::FileKind;
 use file_core::is_supported_image_path;
@@ -22,12 +23,14 @@ use crate::picker_session::{
     PickerSession, SessionMessage, SessionScrollRegion, COLUMNS_SCALE, MIN_LANE_WIDTH,
 };
 
-use super::{readable_label, smooth_scroll_region};
+use super::smooth_scroll_region;
 
 /// 多栏滚动条静态宽度：与列表同值（mac 式细滚动条）。
 const COLUMNS_SCROLLBAR_WIDTH: f32 = 8.0;
 /// 行内图标/缩略图边长：与列表行同尺寸（prd：行内小缩略图同列表）。
 const LANE_ICON_EDGE: f32 = 18.0;
+/// 空栏占位数：与主软件 DEFAULT_VISIBLE_COLUMN_COUNT 同值。
+const MIN_VISIBLE_LANES: usize = 3;
 
 /// 多栏主体：横向栏容器 + 逐栏。栏宽由会话按栏容器视口宽给出
 /// （÷ 可见栏数，最小 96；首帧探针未回时按估算基准）。
@@ -37,8 +40,11 @@ pub(super) fn columns_body(
 ) -> Element<'static, SessionMessage> {
     let lane_width = session.columns_lane_width();
     let lane_count = session.columns_chain().len();
+    // 与主软件同规则：可见栏数 = max(栏链长， 3)，空档用空栏占位，
+    // 否则首屏只有一条孤栏、窗口右侧大片空白。
+    let visible_lane_count = lane_count.max(MIN_VISIBLE_LANES);
     let mut rail = row![].height(Length::Fill);
-    for lane in 0..lane_count {
+    for lane in 0..visible_lane_count {
         if lane > 0 {
             // 1px 栏间分隔线（subtle 边框色）。
             rail = rail.push(
@@ -51,7 +57,11 @@ pub(super) fn columns_body(
                     }),
             );
         }
-        rail = rail.push(lane_view(session, lane, lane_width, emit.clone()));
+        if lane < lane_count {
+            rail = rail.push(lane_view(session, lane, lane_width, emit.clone()));
+        } else {
+            rail = rail.push(empty_lane(lane_width));
+        }
     }
 
     let region = SessionScrollRegion::ColumnsRail;
@@ -81,6 +91,14 @@ pub(super) fn columns_body(
         ScrollbarAxis::Horizontal,
         COLUMNS_SCROLLBAR_WIDTH,
     )
+}
+
+/// 空栏占位：无行、无交互，仅撑出等宽栏面（主软件 empty_column 同构）。
+fn empty_lane(lane_width: f32) -> Element<'static, SessionMessage> {
+    container(Space::new().height(Length::Fill))
+        .width(Length::Fixed(lane_width.max(MIN_LANE_WIDTH)))
+        .height(Length::Fill)
+        .into()
 }
 
 /// 单栏：纵向滚动的过滤条目行。栏头无 chrome，行几何来自共享
@@ -145,6 +163,11 @@ fn lane_entry_row(
     let geometry = ColumnEntryGeometry::for_scale(COLUMNS_SCALE);
     let selected = session.columns_row_highlighted(lane, index);
     let hovered = session.columns_hovered(lane) == Some(index);
+    // 已打开子栏：本行目录正是下一栏的内容（主软件 active_child 同义）；
+    // 视觉优先级与主软件 from_entry_context 一致：选中 > 悬停 > 已打开。
+    let open_child = !selected
+        && !hovered
+        && session.columns_chain().get(lane + 1) == Some(&entry.path);
     let icon_tone = if selected {
         selected_icon_svg_style()
     } else {
@@ -185,7 +208,13 @@ fn lane_entry_row(
 
     let content = row![
         icon,
-        readable_label(entry.name.to_string_lossy().into_owned()).size(COLUMN_ENTRY_TEXT_SIZE,),
+        // 中间省略与主软件同源（长名不换行不溢栏）：
+        // measured_middle_ellipsized_text 是 bennu-theme 唯一实现。
+        container(measured_middle_ellipsized_text(
+            entry.name.to_string_lossy().into_owned(),
+            COLUMN_ENTRY_TEXT_SIZE,
+        ))
+        .width(Length::Fill),
         trailing
     ]
     .spacing(geometry.entry_spacing)
@@ -197,6 +226,8 @@ fn lane_entry_row(
             selected_row_style(theme)
         } else if hovered {
             hovered_row_style(theme)
+        } else if open_child {
+            open_child_row_style(theme)
         } else {
             container::Style::default()
         }

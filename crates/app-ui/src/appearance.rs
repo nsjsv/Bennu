@@ -35,8 +35,8 @@ pub(crate) use bennu_theme::styles::{
     context_menu_style, enhanced_horizontal_scrollbar_direction, enhanced_scrollbar_style,
     enhanced_vertical_scrollbar_direction, error_notification_style, faded_button_style,
     faded_text_input_style, hovered_row_style, hovered_sidebar_item_style, icon_svg_style,
-    list_row_style, muted_icon_svg_style, muted_text_color, path_suggestion_item_style,
-    path_suggestions_style, scale_color_alpha, selected_icon_svg_style,
+    list_row_style, muted_icon_svg_style, muted_text_color, open_child_row_style,
+    path_suggestion_item_style, path_suggestions_style, scale_color_alpha, selected_icon_svg_style,
     selected_path_suggestion_item_style, selected_sidebar_item_style,
     sidebar_bookmark_drop_slot_style, sidebar_style, subtle_border_color, surface_button_style,
     transparent_button_style, transparent_icon_button_style, warning_icon_svg_style,
@@ -78,20 +78,6 @@ fn selected_run_radius(position: SelectionRunPosition) -> iced::border::Radius {
         SelectionRunPosition::First => iced::border::Radius::default().top(8.0),
         SelectionRunPosition::Middle => iced::border::Radius::default(),
         SelectionRunPosition::Last => iced::border::Radius::default().bottom(8.0),
-    }
-}
-
-pub(crate) fn open_child_row_style(theme: &Theme) -> container::Appearance {
-    let colors = ui_colors(theme);
-    container::Appearance {
-        background: Some(Background::Color(colors.surface_container_high)),
-        text_color: Some(colors.on_surface),
-        border: Border {
-            color: colors.outline,
-            width: 1.0,
-            radius: 8.0.into(),
-        },
-        ..container::Appearance::default()
     }
 }
 

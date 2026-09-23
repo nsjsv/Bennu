@@ -102,6 +102,22 @@ pub fn selected_row_style(theme: &Theme) -> container::Style {
     }
 }
 
+/// 多栏视图「已打开子栏」行态：中性高面 + 描边，与选中/悬停区分。
+/// 主软件（app-ui）与 portal 消费同一份实现。
+pub fn open_child_row_style(theme: &Theme) -> container::Style {
+    let colors = ui_colors(theme);
+    container::Style {
+        background: Some(Background::Color(colors.surface_container_high)),
+        text_color: Some(colors.on_surface),
+        border: Border {
+            color: colors.outline,
+            width: 1.0,
+            radius: 8.0.into(),
+        },
+        ..container::Style::default()
+    }
+}
+
 /// 列表行条纹底色：奇数条纹行用浅一档 surface 区分，偶数行回到主
 /// 背景。主应用列表与 FileChooser portal 消费同一份实现；depth 目前
 /// 不参与取色，保留参数与列表行调用点签名对齐。

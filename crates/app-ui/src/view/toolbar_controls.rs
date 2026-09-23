@@ -1,15 +1,15 @@
-use iced::widget::{button, container, row, Button, Row};
-use iced::{Alignment, Background, Border, Color, Element, Theme};
+use iced::widget::{row, Button, Row};
+use iced::Element;
+
+use bennu_theme::icons::{themed_icon, IconSymbol, IconTone};
+use bennu_theme::segmented_buttons::{
+    segmented_button, segmented_button_group, SegmentedButtonTone,
+};
 
 use crate::app::panes::BrowserPaneView;
-use crate::appearance::{
-    base_text_color, button_hover_surface_color, button_pressed_surface_color,
-    button_surface_color, muted_text_color, subtle_border_color,
-};
-use crate::icons::IconSymbol;
 use crate::model::{BrowserPaneId, BrowserViewMode, Message};
 
-use super::{themed_icon, IconTone, TOOLBAR_ICON_SIZE, VIEW_MODE_ICON_SIZE};
+use super::{TOOLBAR_ICON_SIZE, VIEW_MODE_ICON_SIZE};
 
 pub(super) fn navigation_button_group(pane_id: BrowserPaneId) -> Element<'static, Message> {
     toolbar_button_group(row![
@@ -73,10 +73,7 @@ pub(super) fn right_preview_panel_toggle_button(is_open: bool) -> Element<'stati
 }
 
 fn toolbar_button_group(content: Row<'static, Message>) -> Element<'static, Message> {
-    container(content.spacing(0).align_y(Alignment::Center))
-        .clip(true)
-        .style(toolbar_button_group_style)
-        .into()
+    segmented_button_group(content)
 }
 
 fn view_mode_button(
@@ -98,54 +95,16 @@ fn view_mode_button(
     )
 }
 
+/// 语义色调（图标着色）映射为按钮交互状态：选中段常亮、其余可点。
 fn toolbar_segment_button(
     icon: IconSymbol,
     tone: IconTone,
     message: Message,
     icon_size: f32,
 ) -> Button<'static, Message> {
-    button(themed_icon(icon, tone, icon_size))
-        .on_press(message)
-        .padding([8, 10])
-        .style(toolbar_segment_button_style())
-}
-
-fn toolbar_segment_button_style() -> fn(&Theme, button::Status) -> button::Style {
-    toolbar_segment_button_appearance
-}
-
-fn toolbar_segment_button_appearance(theme: &Theme, status: button::Status) -> button::Style {
-    let background = match status {
-        button::Status::Hovered => Some(Background::Color(button_hover_surface_color(theme))),
-        button::Status::Pressed => Some(Background::Color(button_pressed_surface_color(theme))),
-        button::Status::Active | button::Status::Disabled => None,
+    let interaction = match tone {
+        IconTone::Selected => SegmentedButtonTone::Selected,
+        IconTone::Normal | IconTone::Warning => SegmentedButtonTone::Normal,
     };
-
-    button::Style {
-        background,
-        text_color: if matches!(status, button::Status::Disabled) {
-            muted_text_color(theme)
-        } else {
-            base_text_color(theme)
-        },
-        border: Border {
-            color: Color::TRANSPARENT,
-            width: 0.0,
-            radius: 0.0.into(),
-        },
-        ..button::Style::default()
-    }
-}
-
-fn toolbar_button_group_style(theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(button_surface_color(theme))),
-        text_color: Some(base_text_color(theme)),
-        border: Border {
-            color: subtle_border_color(theme),
-            width: 1.0,
-            radius: 7.0.into(),
-        },
-        ..container::Style::default()
-    }
+    segmented_button(themed_icon(icon, tone, icon_size), interaction, message)
 }

@@ -31,9 +31,8 @@ pub(crate) use list_header::{
 // 通用样式词汇已迁至共享 crate `bennu-theme::styles`（portal 复用同一份）；
 // 这里重导出保持 crate 内调用点不变。
 pub(crate) use bennu_theme::styles::{
-    app_content_style, base_text_color, button_hover_surface_color, button_pressed_surface_color,
-    button_surface_color, context_menu_item_button_style, context_menu_style,
-    enhanced_horizontal_scrollbar_direction, enhanced_scrollbar_style,
+    app_content_style, base_text_color, button_hover_surface_color, context_menu_item_button_style,
+    context_menu_style, enhanced_horizontal_scrollbar_direction, enhanced_scrollbar_style,
     enhanced_vertical_scrollbar_direction, error_notification_style, faded_button_style,
     faded_text_input_style, hovered_row_style, hovered_sidebar_item_style, icon_svg_style,
     list_row_style, muted_icon_svg_style, muted_text_color, path_suggestion_item_style,

@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use crate::icon_grid_geometry::{tile_visual_height, tile_width};
 use crate::model::{BrowserPaneId, IconGridExpansionContext, IconGridExpansionSessionId};
 use crate::transfer_placeholders::{TransferPlaceholder, TransferSortOptions};
+use bennu_theme::icon_grid_geometry::ICON_GRID_GAP;
 use file_core::{DirectoryEntry, FileKind};
 
 use super::tests::{anchor, entry, expansion, files, first_band, loaded};
@@ -193,9 +194,7 @@ fn grouped_flow_resolves_expansion_anchor_by_path_not_cell_order() {
         anchor("/workspace", "/workspace/d2", 2),
         loaded(files("/workspace/d2", 1)),
     );
-    let two_column_width = ICON_GRID_CONTENT_PADDING * 2.0
-        + tile_width(96) * 2.0
-        + crate::icon_grid_geometry::ICON_GRID_GAP;
+    let two_column_width = ICON_GRID_CONTENT_PADDING * 2.0 + tile_width(96) * 2.0 + ICON_GRID_GAP;
     let layout = IconGridLayout::new_grouped_by_name_initial(
         Path::new("/workspace"),
         &entries,

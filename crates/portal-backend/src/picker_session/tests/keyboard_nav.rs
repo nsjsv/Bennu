@@ -58,10 +58,11 @@ fn cursor_moves_follow_click_selection_rules_in_single_file_mode() {
     assert_eq!(session.list_cursor(), Some(0));
     assert_eq!(session.selection(), &[0]);
 
-    // ↓ 到目录行：光标前进，选中集不动（文件模式目录不可选）。
+    // ↓ 到目录行：光标前进，旧选中集熄灭（文件模式目录不可选；
+    // 保留旧选中会与光标行双高亮）。
     session.update(SessionMessage::ListCursorMoved { delta: 1 });
     assert_eq!(session.list_cursor(), Some(1));
-    assert_eq!(session.selection(), &[0]);
+    assert!(session.selection().is_empty());
 
     session.update(SessionMessage::ListCursorMoved { delta: 1 });
     assert_eq!(session.list_cursor(), Some(2));
@@ -75,7 +76,7 @@ fn cursor_moves_follow_click_selection_rules_in_single_file_mode() {
 }
 
 #[test]
-fn first_cursor_press_lands_on_selection_head_and_resets_multi_selection() {
+fn click_records_cursor_and_arrow_moves_from_last_click() {
     let (mut session, _receiver) = session(PickerKind::OpenFile {
         multiple: true,
         directory: false,
@@ -86,6 +87,7 @@ fn first_cursor_press_lands_on_selection_head_and_resets_multi_selection() {
             ("a", FileKind::File),
             ("b", FileKind::File),
             ("c", FileKind::File),
+            ("d", FileKind::File),
         ],
     );
     session.update(SessionMessage::EntryClicked {
@@ -99,16 +101,17 @@ fn first_cursor_press_lands_on_selection_head_and_resets_multi_selection() {
         shift: false,
     });
     assert_eq!(session.selection(), &[0, 2]);
+    // 点击即落光标：最后点击行=键盘导航起点（资源管理器语义）。
+    assert_eq!(session.list_cursor(), Some(2));
 
-    // 首次按键落在选中集首行，本次不位移。
     session.update(SessionMessage::ListCursorMoved { delta: 1 });
-    assert_eq!(session.list_cursor(), Some(0));
+    assert_eq!(session.list_cursor(), Some(3));
     // 多选模式下光标移动重置选中集为光标行（资源管理器语义；shift
     // 范围扩展不在本任务范围）。
-    assert_eq!(session.selection(), &[0]);
-    session.update(SessionMessage::ListCursorMoved { delta: 1 });
-    assert_eq!(session.list_cursor(), Some(1));
-    assert_eq!(session.selection(), &[1]);
+    assert_eq!(session.selection(), &[3]);
+    session.update(SessionMessage::ListCursorMoved { delta: -1 });
+    assert_eq!(session.list_cursor(), Some(2));
+    assert_eq!(session.selection(), &[2]);
 }
 
 #[test]
@@ -129,6 +132,40 @@ fn cursor_movement_respects_directory_mode_gating() {
     session.update(SessionMessage::ListCursorMoved { delta: 1 });
     assert_eq!(session.list_cursor(), Some(1));
     assert_eq!(session.selection(), &[1]);
+}
+
+#[test]
+fn cursor_row_stays_highlighted_when_not_selectable() {
+    // 文件模式下的目录行：点击与方向键都不落选中集，但高亮必须跟随
+    // 光标（否则纯目录页里点击/方向键全部隐身）。
+    let (mut session, _receiver) = session(PickerKind::OpenFile {
+        multiple: false,
+        directory: false,
+    });
+    seeded_listing(
+        &mut session,
+        &[("dir", FileKind::Directory), ("a.txt", FileKind::File)],
+    );
+
+    session.update(SessionMessage::EntryClicked {
+        index: 0,
+        ctrl: false,
+        shift: false,
+    });
+    assert!(session.selection().is_empty());
+    assert!(session.row_highlighted(0));
+
+    session.update(SessionMessage::ListCursorMoved { delta: 1 });
+    assert_eq!(session.selection(), &[1]);
+    // 光标移走后高亮跟随：第 0 行既非选中也非光标，熄灭。
+    assert!(!session.row_highlighted(0));
+    assert!(session.row_highlighted(1));
+
+    // 反向：从文件移回文件夹，旧文件的选中集必须熄灭（否则双高亮）。
+    session.update(SessionMessage::ListCursorMoved { delta: -1 });
+    assert!(session.selection().is_empty());
+    assert!(session.row_highlighted(0));
+    assert!(!session.row_highlighted(1));
 }
 
 #[test]

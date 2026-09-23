@@ -33,6 +33,11 @@ impl PickerSession {
                         row.entry.kind == FileKind::File
                     };
                     if !selectable {
+                        // 单击/光标落在不可选行：位置照记，但上一次选中集
+                        // 必须熄灭（资源管理器语义），否则文件选中+文件夹
+                        // 光标出现双高亮。
+                        self.selection.clear();
+                        self.selection_anchor = None;
                         return;
                     }
                 }

@@ -2,6 +2,7 @@
 //! 挂载交互（防重入/成功导航/失败提示）、SaveFile 回收站确认禁用。
 
 use super::*;
+use crate::picker_session::sidebar::PickerSidebarData;
 use bennu_sidebar::{
     SavedNetworkConnection, SidebarDeviceEntry, SidebarLocation, SidebarLocationKind,
     SidebarNetworkConnectionEntry,

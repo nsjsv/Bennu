@@ -95,8 +95,7 @@ fn navigation_button_group(
     segmented_button_group(group)
 }
 
-/// 视图模式切换组（多栏/列表/大图，顺序同主软件）：多栏视图由后续
-/// 子任务实现，按钮暂不渲染。当前模式段常亮。
+/// 视图模式切换组（多栏/列表/大图，顺序同主软件）：当前模式段常亮。
 fn view_mode_button_group(
     session: &PickerSession,
     emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'static,
@@ -104,6 +103,7 @@ fn view_mode_button_group(
     let current_mode = session.view_mode();
     let mut group = iced::widget::row![].spacing(0).align_y(Alignment::Center);
     for (mode, symbol) in [
+        (PickerViewMode::Columns, IconSymbol::Columns),
         (PickerViewMode::List, IconSymbol::List),
         (PickerViewMode::Icons, IconSymbol::Grid),
     ] {

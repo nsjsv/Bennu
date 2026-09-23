@@ -8,8 +8,6 @@
 //! 内所有窗口的控件树，widget Id 必须带会话命名空间（请求路径），
 //! 才能保证只命中本窗口的滚动容器。
 
-// ScrollbarViewport 需经本模块再导出给 mod.rs 的消息定义。
-pub(crate) use bennu_theme::scrollbar::ScrollbarViewport;
 use bennu_theme::scrollbar::{scrollbar_layout_probe, scrollbar_viewport_has_overflow};
 use bennu_theme::smooth_scroll::{
     wheel_delta_for_axis, MosScrollState, SmoothScrollAxis, WheelScrollMode,
@@ -19,26 +17,34 @@ use iced::advanced::widget as advanced_widget;
 use iced::widget::scrollable;
 use iced::{mouse, Task};
 
-use super::{PickerSession, SessionMessage};
+use super::{PickerSession, PickerViewMode, SessionMessage};
 use crate::scrollbar_state::{scrollbar_auto_hide_task, ScrollbarStateMachine};
 
-/// portal 的滚动区域：文件列表（竖向）、地址栏面包屑（横向）与
-/// 侧边栏（竖向）。
+/// portal 的滚动区域：文件列表（竖向）、地址栏面包屑（横向）、
+/// 侧边栏（竖向），以及多栏视图的横向栏容器与逐栏纵向滚动。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum SessionScrollRegion {
     List,
     Breadcrumb,
     Sidebar,
+    /// 多栏视图横向栏容器。
+    ColumnsRail,
+    /// 多栏第 lane 栏的纵向滚动（region 以栏序号区分，逐栏各自滚动）。
+    ColumnsLane(usize),
 }
 
 /// 会话滚轮惯性状态机：区域枚举由本模块钉死。
 pub(crate) type SmoothScrollState = MosScrollState<SessionScrollRegion>;
-/// 区域 → 滚动轴向：列表/侧栏竖向；面包屑是横向滚动条，主滚轮（竖向
-/// 滚动）换算为横向增量，与主软件地址栏同语义。
+/// 区域 → 滚动轴向：列表/侧栏/多栏栏竖向；面包屑与多栏栏容器是横向
+/// 滚动条，主滚轮（竖向滚动）换算为横向增量，与主软件地址栏同语义。
 pub(crate) fn scroll_axis(region: SessionScrollRegion) -> SmoothScrollAxis {
     match region {
-        SessionScrollRegion::List | SessionScrollRegion::Sidebar => SmoothScrollAxis::Vertical,
-        SessionScrollRegion::Breadcrumb => SmoothScrollAxis::HorizontalFromPrimaryWheel,
+        SessionScrollRegion::List
+        | SessionScrollRegion::Sidebar
+        | SessionScrollRegion::ColumnsLane(_) => SmoothScrollAxis::Vertical,
+        SessionScrollRegion::Breadcrumb | SessionScrollRegion::ColumnsRail => {
+            SmoothScrollAxis::HorizontalFromPrimaryWheel
+        }
     }
 }
 
@@ -55,8 +61,16 @@ pub(crate) fn scroll_id(request_path: &str, region: SessionScrollRegion) -> iced
         SessionScrollRegion::Sidebar => {
             iced::widget::Id::from(format!("portal-sidebar#{request_path}"))
         }
+        SessionScrollRegion::ColumnsRail => {
+            iced::widget::Id::from(format!("portal-columns-rail#{request_path}"))
+        }
+        SessionScrollRegion::ColumnsLane(lane) => {
+            iced::widget::Id::from(format!("portal-column-{lane}#{request_path}"))
+        }
     }
 }
+// ScrollbarViewport 需经本模块再导出给 mod.rs 的消息定义。
+pub(crate) use bennu_theme::scrollbar::ScrollbarViewport;
 
 impl SessionMessage {
     /// 滚动/滚动条类消息由滚动子模块处理并产出 Task，不经
@@ -131,10 +145,18 @@ impl PickerSession {
     /// 纠偏）；同时打断滚轮惯性——键盘滚动即时到位，不允许惯性把
     /// 偏移再拉走。
     pub(crate) fn record_keyboard_list_scroll(&mut self, offset_y: f32) {
-        if let Some(mut viewport) = self.scrollbar.viewport_for(&SessionScrollRegion::List) {
+        self.record_keyboard_scroll(SessionScrollRegion::List, offset_y);
+    }
+
+    /// 多栏键盘揭示的同款收口（逐栏视口缓存）。
+    pub(crate) fn record_keyboard_lane_scroll(&mut self, lane: usize, offset_y: f32) {
+        self.record_keyboard_scroll(SessionScrollRegion::ColumnsLane(lane), offset_y);
+    }
+
+    fn record_keyboard_scroll(&mut self, region: SessionScrollRegion, offset_y: f32) {
+        if let Some(mut viewport) = self.scrollbar.viewport_for(&region) {
             viewport.offset_y = offset_y;
-            self.scrollbar
-                .remember_viewport(SessionScrollRegion::List, viewport);
+            self.scrollbar.remember_viewport(region, viewport);
         }
         self.smooth_scroll.stop();
     }
@@ -159,9 +181,11 @@ impl PickerSession {
                 event,
             } => {
                 self.scrollbar.remember_viewport(region, viewport);
-                // 列表视口更新：可见区间变化，重算缩略图请求（main 层
+                // 列表/多栏栏视口更新：可见区间变化，重算缩略图请求（main 层
                 // 在本入口返回后统一 drain 发起）。
-                if region == SessionScrollRegion::List {
+                if region == SessionScrollRegion::List
+                    || matches!(region, SessionScrollRegion::ColumnsLane(_))
+                {
                     self.schedule_visible_thumbnails();
                 }
                 self.handle_scroll_message(*event)
@@ -218,15 +242,23 @@ impl PickerSession {
         vec![self.scrollbar_layout_probe_task(region)]
     }
 
-    /// 内容骤变后（导航/展开/扫描回填/过滤切换）核实两个区域的溢出：
-    /// 只探测不预设显示意图，无溢出仅自愈缓存。main 层翻译
-    /// `SessionEffect::VerifyScrollbarLayout` 时调用。
+    /// 内容骤变后（导航/展开/扫描回填/过滤切换）核实滚动区域溢出：
+    /// 只探测不预设显示意图，无溢出仅自愈缓存。多栏视图下追加栏容
+    /// 器与各栏（逐栏视口缓存驱动键盘揭示与缩略图可见区间）。
     pub(crate) fn scrollbar_layout_probe_tasks(&self) -> Vec<Task<SessionMessage>> {
-        vec![
-            self.scrollbar_layout_probe_task(SessionScrollRegion::List),
-            self.scrollbar_layout_probe_task(SessionScrollRegion::Breadcrumb),
-            self.scrollbar_layout_probe_task(SessionScrollRegion::Sidebar),
-        ]
+        let mut regions = vec![
+            SessionScrollRegion::List,
+            SessionScrollRegion::Breadcrumb,
+            SessionScrollRegion::Sidebar,
+        ];
+        if self.view_mode() == PickerViewMode::Columns {
+            regions.push(SessionScrollRegion::ColumnsRail);
+            regions.extend((0..self.columns_chain().len()).map(SessionScrollRegion::ColumnsLane));
+        }
+        regions
+            .into_iter()
+            .map(|region| self.scrollbar_layout_probe_task(region))
+            .collect()
     }
 
     pub(crate) fn scrollbar_layout_probe_task(
@@ -260,6 +292,9 @@ impl PickerSession {
                     },
                 ));
             }
+        } else if matches!(region, SessionScrollRegion::ColumnsLane(_)) {
+            // 栏视口缓存就位：各栏可见区间重算。
+            self.schedule_visible_thumbnails();
         }
         if scrollbar_viewport_has_overflow(viewport) {
             tasks.extend(self.start_scrollbar_reveal(region));

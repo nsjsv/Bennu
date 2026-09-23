@@ -18,7 +18,8 @@ use thumbnails::ThumbnailKey;
 pub(crate) use thumbnails::{CachedThumbnail, ThumbnailRequest};
 
 use super::scrollbar::SessionScrollRegion;
-use super::{PickerRow, PickerSession};
+use super::view_mode::LIST_THUMBNAIL_EDGE;
+use super::{PickerRow, PickerSession, PickerViewMode};
 
 #[cfg(test)]
 use super::expansion::LIST_ROW_STRIDE;
@@ -94,9 +95,10 @@ impl SessionThumbnailState {
         self.queued_keys.clear();
     }
 
-    /// 对可见条目索引区间内的图片行入队缺失请求。区间换算随视图模式
-    /// 几何不同（列表按行步长，大图按网格行高×列数），由 view_mode
-    /// 子模块计算后传入；edge 是请求档位（大图请求大边长）。
+    /// 对可见条目索引区间内的图片行入队缺失请求。条目集由调用方给
+    /// 出（列表 = 扁平行，多栏 = 栏内过滤条目），区间换算随视图模式
+    /// 几何不同，由 view_mode/columns 子模块计算后传入；edge 是请求
+    /// 档位（大图请求大边长）。
     fn enqueue_visible_entries(
         &mut self,
         rows: &[PickerRow],
@@ -105,10 +107,53 @@ impl SessionThumbnailState {
         edge: u32,
         now: Instant,
     ) {
+        self.enqueue_visible_range(
+            rows.len(),
+            |index| rows.get(index).map(|row| &row.entry),
+            first,
+            last,
+            edge,
+            now,
+        );
+    }
+
+    /// 多栏变体：直接对栏内过滤条目入队（避免逐帧克隆整栏）。
+    pub(super) fn enqueue_visible_lane_entries(
+        &mut self,
+        entries: &[DirectoryEntry],
+        first: usize,
+        last: usize,
+        edge: u32,
+        now: Instant,
+    ) {
+        self.enqueue_visible_range(
+            entries.len(),
+            |index| entries.get(index),
+            first,
+            last,
+            edge,
+            now,
+        );
+    }
+
+    /// 可见区间入队的共享实现：条目经闭包按索引取（两种行模型共用
+    /// 同一套缓存目录源拒绝/档位去重/backoff 规则）。
+    fn enqueue_visible_range<'a>(
+        &'a mut self,
+        count: usize,
+        entry_at: impl Fn(usize) -> Option<&'a DirectoryEntry>,
+        first: usize,
+        last: usize,
+        edge: u32,
+        now: Instant,
+    ) {
         // 顺手清理过期 backoff：到期即可重试，不让表无界增长。
         self.failed_until.retain(|_, until| *until > now);
-        for row in &rows[first..=last] {
-            let entry = &row.entry;
+        let last = last.min(count.saturating_sub(1));
+        for index in first..=last {
+            let Some(entry) = entry_at(index) else {
+                continue;
+            };
             // 仅图片：视频依赖外部 ffmpegthumbnailer，生成慢不做（prd 约定）。
             if entry.kind != FileKind::File || !file_core::is_supported_image_path(&entry.path) {
                 continue;
@@ -235,10 +280,33 @@ impl SessionThumbnailState {
 }
 
 impl PickerSession {
-    /// 重算可见区间并入队缺失请求。无列表视口缓存（首帧探针未回）或
-    /// 视口退化时不发请求，等滚动条布局回信触发。可见条目区间与请求
-    /// 档位按视图模式计算（view_mode 子模块唯一实现）。
+    /// 重算可见区间并入队缺失请求。无视口缓存（首帧探针未回）或
+    /// 视口退化时不发请求，等滚动条布局回信触发。可见区间与请求档
+    /// 位按视图模式计算：列表/大图用 List 视口；多栏逐栏用各自栏
+    /// 视口（行内小缩略图同列表档位）。
     pub(crate) fn schedule_visible_thumbnails(&mut self) {
+        if self.view_mode() == PickerViewMode::Columns {
+            for lane in 0..self.columns_chain().len() {
+                let Some(viewport) =
+                    self.scrollbar_viewport_for(&SessionScrollRegion::ColumnsLane(lane))
+                else {
+                    continue;
+                };
+                let Some((first, last)) = self.columns_visible_window(lane, &viewport) else {
+                    continue;
+                };
+                let entries: Vec<DirectoryEntry> =
+                    self.column_entries_iter(lane).cloned().collect();
+                self.thumbnails.enqueue_visible_lane_entries(
+                    &entries,
+                    first,
+                    last,
+                    LIST_THUMBNAIL_EDGE,
+                    Instant::now(),
+                );
+            }
+            return;
+        }
         let Some(viewport) = self.scrollbar_viewport_for(&SessionScrollRegion::List) else {
             return;
         };

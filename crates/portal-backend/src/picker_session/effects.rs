@@ -45,4 +45,15 @@ pub(crate) enum SessionEffect {
     ScrollListTo {
         offset_y: f32,
     },
+    /// 多栏打开新栏需要扫描：main 层翻译为扫描 + 横向栏容器滚到最右
+    /// （新栏自动可见）+ 布局探针。
+    ColumnScanAndReveal(PathBuf),
+    /// 多栏栏链延伸（无需扫描，内容已有缓存）：横向栏容器滚到最右。
+    ScrollColumnsRailToEnd,
+    /// 多栏键盘揭示：把第 lane 栏滚到绝对 Y 偏移。main 层翻译为
+    /// scroll_to + 该栏布局探针。
+    ScrollColumnLaneTo {
+        lane: usize,
+        offset_y: f32,
+    },
 }

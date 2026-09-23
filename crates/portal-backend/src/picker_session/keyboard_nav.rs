@@ -6,15 +6,16 @@
 
 use std::time::{Duration, Instant};
 
+use bennu_theme::icon_grid_geometry::IconGridDirection;
 use file_core::entry::FileKind;
 
 use super::scrollbar::SessionScrollRegion;
-use super::{PickerKind, PickerSession, SessionEffect};
+use super::{PickerKind, PickerSession, PickerViewMode, SessionEffect, SessionMessage};
 
 /// type-ahead 截止时长：约 1s 无后续输入即重置缓冲（资源管理器惯例）。
 const TYPE_AHEAD_RESET_AFTER: Duration = Duration::from_millis(1000);
 /// 视口缓存缺失（首帧探针未回）时的翻页步长回落值（行）。
-const PAGE_FALLBACK_ROWS: isize = 10;
+pub(super) const PAGE_FALLBACK_ROWS: isize = 10;
 
 /// 键盘导航状态。
 #[derive(Debug, Default)]
@@ -63,7 +64,7 @@ impl KeyboardNavState {
         self.type_ahead_deadline = Some(now + TYPE_AHEAD_RESET_AFTER);
     }
 
-    fn clear_type_ahead(&mut self) {
+    pub(crate) fn clear_type_ahead(&mut self) {
         self.type_ahead.clear();
         self.type_ahead_deadline = None;
     }
@@ -72,17 +73,32 @@ impl KeyboardNavState {
     fn type_ahead_needle(&self) -> String {
         self.type_ahead.to_lowercase()
     }
+
+    /// 追加一个字符并返回当前缓冲的小写匹配串（列表与多栏 type-ahead
+    /// 共用的入口：缓冲归 keyboard_nav，匹配范围由调用方按焦点行集
+    /// 决定）。
+    pub(crate) fn advance_type_ahead(&mut self, ch: char) -> String {
+        self.push_type_ahead(ch, Instant::now());
+        self.type_ahead_needle()
+    }
 }
 
 impl PickerSession {
-    /// ↑/↓ 移动光标（列表键同时清空 type-ahead 缓冲）。
+    /// ↑/↓ 移动光标（列表键同时清空 type-ahead 缓冲）。多栏下作用于
+    /// 焦点栏（语义见 columns 子模块）。
     pub(crate) fn move_list_cursor(&mut self, delta: isize) -> SessionEffect {
+        if self.view_mode() == PickerViewMode::Columns {
+            return self.columns_move_cursor(delta);
+        }
         self.keyboard_nav.clear_type_ahead();
         self.move_list_cursor_by_rows(delta)
     }
 
     /// Home/End 跳列表首/尾。
     pub(crate) fn jump_list_cursor(&mut self, to_end: bool) -> SessionEffect {
+        if self.view_mode() == PickerViewMode::Columns {
+            return self.columns_jump_cursor(to_end);
+        }
         self.keyboard_nav.clear_type_ahead();
         let row_count = self.rows.len();
         if row_count == 0 {
@@ -94,15 +110,20 @@ impl PickerSession {
     /// PageUp/PageDown 按视口行数翻页（步长随视图模式：列表按行，
     /// 大图按行×列数，见 view_mode 子模块）。
     pub(crate) fn move_list_page(&mut self, pages: isize) -> SessionEffect {
+        if self.view_mode() == PickerViewMode::Columns {
+            return self.columns_page_cursor(pages);
+        }
         self.keyboard_nav.clear_type_ahead();
         self.move_list_cursor_by_rows(pages.saturating_mul(self.list_page_rows()))
     }
 
     /// type-ahead 字符输入：累积收窄并跳首个匹配行；无匹配保持原位且
-    /// 不清缓冲（用户可能处在更长输入的中间态）。
+    /// 不清缓冲（用户可能处在更长输入的中间态）。多栏下匹配焦点栏。
     pub(crate) fn push_type_ahead_char(&mut self, ch: char) -> SessionEffect {
-        self.keyboard_nav.push_type_ahead(ch, Instant::now());
-        let needle = self.keyboard_nav.type_ahead_needle();
+        let needle = self.keyboard_nav.advance_type_ahead(ch);
+        if self.view_mode() == PickerViewMode::Columns {
+            return self.columns_type_ahead_match(needle);
+        }
         let matched = self.rows.iter().position(|row| {
             row.entry
                 .name
@@ -147,10 +168,10 @@ impl PickerSession {
         }
     }
 
-    /// Enter 的激活目标：光标在目录行且当前模式不是“选目录”时，Enter
-    /// 进入该目录（复用双击激活）；其余 Enter 走确认路径（多选保持
-    /// 选中集）。
-    pub(crate) fn keyboard_enter_directory_row(&self) -> Option<usize> {
+    /// Enter 的激活目标消息：光标在目录行且当前模式不是“选目录”时，
+    /// 返回激活该行的消息（列表 = 双击进入；多栏 = 打开子栏）；其余
+    /// None → 调用方走确认路径（多选保持选中集）。
+    pub(crate) fn keyboard_enter_activation(&self) -> Option<SessionMessage> {
         if matches!(
             self.kind,
             PickerKind::OpenFile {
@@ -160,7 +181,33 @@ impl PickerSession {
         ) {
             return None;
         }
+        if self.view_mode() == PickerViewMode::Columns {
+            let lane = self.columns.focused();
+            let index = self.columns_cursor(lane)?;
+            let entry = self.column_entry(lane, index)?;
+            (entry.kind == FileKind::Directory)
+                .then_some(SessionMessage::ColumnEntryDoubleClicked { lane, index })
+        } else {
+            self.cursor_directory_row()
+                .map(|index| SessionMessage::EntryDoubleClicked { index })
+        }
+    }
+
+    /// ←/→ 无光标位移语义时的二级动作（view_mode 模式分派的键盘侧）：
+    /// 列表 = 目录行折叠开关；多栏 = 焦点在父子栏之间移动。
+    pub(crate) fn arrow_secondary_action(
+        &self,
+        direction: IconGridDirection,
+    ) -> Option<SessionMessage> {
+        if self.view_mode() == PickerViewMode::Columns {
+            return match direction {
+                IconGridDirection::Left => Some(SessionMessage::ColumnsBackwardRequested),
+                IconGridDirection::Right => Some(SessionMessage::ColumnsForwardRequested),
+                _ => None,
+            };
+        }
         self.cursor_directory_row()
+            .map(|index| SessionMessage::EntryExpandToggled { index })
     }
 
     /// 按位移行数移动光标；空列表 no-op。首次键盘移动落在当前选中首行

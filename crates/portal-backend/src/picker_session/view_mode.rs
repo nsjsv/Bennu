@@ -7,16 +7,18 @@
 use std::path::Path;
 
 use bennu_theme::icon_grid_geometry::{self, IconGridDirection};
+use file_core::entry::{DirectoryEntry, FileKind};
 
 use super::expansion::{LIST_ROW_HEIGHT, LIST_ROW_STRIDE};
 use super::scrollbar::{ScrollbarViewport, SessionScrollRegion};
 use super::thumbnails::VISIBLE_MARGIN_ROWS;
-use super::{PickerSession, SessionEffect};
+use super::{DirectoryListing, PickerSession, SessionEffect};
 
 /// portal 大图固定默认档图标边长（主软件 DEFAULT_ICON_GRID_SIZE 同值）。
 pub(crate) const ICON_GRID_EDGE: u32 = 96;
-/// 列表行内缩略图请求档位：与主软件 normal 桶同 key 布局。
-const LIST_THUMBNAIL_EDGE: u32 = 128;
+/// 列表行内缩略图请求档位：与主软件 normal 桶同 key 布局（多栏栏内
+/// 小缩略图同档）。
+pub(super) const LIST_THUMBNAIL_EDGE: u32 = 128;
 /// 列表视口宽度未测量（首帧探针未回）时的列数估算基准：窗口默认宽。
 const FALLBACK_VIEWPORT_WIDTH: f32 = 820.0;
 
@@ -27,16 +29,15 @@ pub(crate) enum PickerViewMode {
     #[default]
     List,
     Icons,
-    #[allow(dead_code)] // 多栏视图子任务 2 放开；先占住持久化枚举值。
     Columns,
 }
 
 impl PickerViewMode {
-    /// portal.toml 的 view_mode 字段值 → 模式。未知值与 Columns 一律
-    /// 回落 List：子任务 2 放开前不渲染半成品视图。
+    /// portal.toml 的 view_mode 字段值 → 模式。未知值回落 List。
     pub(crate) fn from_storage_value(value: Option<&str>) -> Self {
         match value {
             Some("icons") => Self::Icons,
+            Some("columns") => Self::Columns,
             _ => Self::List,
         }
     }
@@ -56,17 +57,20 @@ impl PickerSession {
     }
 
     /// 确认/保存/记忆的目标目录唯一读取口：列表与大图 = 浏览目录；
-    /// 多栏视图落地后改为焦点栏目录（子任务 2 只改这一处）。
+    /// 多栏 = 焦点栏目录。
     pub(crate) fn target_directory(&self) -> &Path {
         match self.view_mode {
-            PickerViewMode::List | PickerViewMode::Icons | PickerViewMode::Columns => {
-                &self.directory
-            }
+            PickerViewMode::List | PickerViewMode::Icons => &self.directory,
+            PickerViewMode::Columns => self.columns.focused_directory(),
         }
     }
 
-    /// 确认集唯一读取口：选中行路径（大图与列表共用行索引语义）。
+    /// 确认集唯一读取口：列表/大图 = 选中行路径；多栏 = 最右有选中
+    /// 项那一栏的选中路径（多选时为该栏选中集）。
     pub(crate) fn selected_paths(&self) -> Vec<std::path::PathBuf> {
+        if self.view_mode == PickerViewMode::Columns {
+            return self.columns_rightmost_selection_paths();
+        }
         self.selection
             .iter()
             .filter_map(|&index| self.rows.get(index))
@@ -74,30 +78,69 @@ impl PickerSession {
             .collect()
     }
 
-    /// 视图切换：进入大图清空目录展开（行集合回到根条目，深层选中
-    /// 丢弃、根级选中保留）；悬停与 type-ahead 缓冲作废；主选中项在
-    /// 新几何的探针回信后揭示（`complete_view_switch_reveal`）。
+    /// 空格预览目标条目唯一读取口：列表/大图 = 主选中行；多栏 = 焦
+    /// 点栏锚点条目（preview_host 经此取目标，禁止自读行模型）。
+    pub(crate) fn preview_target_entry(&self) -> Option<&DirectoryEntry> {
+        if self.view_mode() == PickerViewMode::Columns {
+            let lane = self.columns.focused();
+            let index = self
+                .columns_anchor(lane)
+                .or_else(|| self.columns_selection(lane).first().copied())?;
+            return self.column_entry(lane, index);
+        }
+        self.rows.get(self.selection_anchor?).map(|row| &row.entry)
+    }
+
+    /// 视图切换（design §2，与主软件 view-switch 契约对齐的精简版）：
+    /// 选中集一律按路径承接（多栏离开时取焦点栏选中集；否则根级选
+    /// 中，深层丢弃）；离开多栏时目录 = 焦点栏目录、其扫描内容上移
+    /// 为根列表；进入多栏时栏链 = [当前目录]（单选目录追加子栏）；
+    /// 展开/悬停/type-ahead 作废；List/Icons 的主选中项在新几何的探
+    /// 针回信后揭示。
     pub(crate) fn select_view_mode(&mut self, mode: PickerViewMode) -> SessionEffect {
         if mode == self.view_mode {
             return SessionEffect::None;
         }
-        self.view_mode = mode;
-        // 根级选中按路径保留（行索引随展开行收缩整体位移，按索引截
-        // 断会错杀根级选中）；depth > 0 的深层选中丢弃。
-        let kept_root_paths: Vec<std::path::PathBuf> = self
-            .selection
-            .iter()
-            .filter_map(|&index| self.rows.get(index))
-            .filter(|row| row.depth == 0)
-            .map(|row| row.entry.path.clone())
-            .collect();
+        let from_columns = self.view_mode == PickerViewMode::Columns;
+        // 选中按路径快照（行索引随行集重建位移，路径才跨模式稳定）。
+        let carried_paths: Vec<std::path::PathBuf> = if from_columns {
+            self.columns_focused_selection_paths()
+        } else {
+            self.selection
+                .iter()
+                .filter_map(|&index| self.rows.get(index))
+                .filter(|row| row.depth == 0)
+                .map(|row| row.entry.path.clone())
+                .collect()
+        };
+        if from_columns {
+            // 离开多栏：目录 = 焦点栏目录；焦点栏扫描内容上移为根列表
+            // （扫描在途时保持 Pending，回信按新目录回填根列表）。
+            let focused = self.columns.focused_directory().to_path_buf();
+            if focused != self.directory {
+                self.listing = self
+                    .expansions
+                    .remove(&focused)
+                    .map(|state| state.listing)
+                    .unwrap_or(DirectoryListing::Pending);
+                self.directory = focused;
+                // 列表视口缓存对新目录是新几何，失效等探针回信。
+                self.scrollbar
+                    .invalidate_viewport(SessionScrollRegion::List);
+            }
+        }
         self.expansions.clear();
         self.refresh_rows();
+        self.view_mode = mode;
+        if mode == PickerViewMode::Columns {
+            return self.begin_columns_chain(carried_paths);
+        }
+        // 目标 List/Icons：路径映射回新行集合（深层行不存在的自然丢弃）。
         self.selection = self
             .rows
             .iter()
             .enumerate()
-            .filter(|(_, row)| kept_root_paths.contains(&row.entry.path))
+            .filter(|(_, row)| carried_paths.contains(&row.entry.path))
             .map(|(index, _)| index)
             .collect();
         self.selection_anchor = self.selection.first().copied();
@@ -111,6 +154,31 @@ impl PickerSession {
             .map(|&index| self.rows[index].entry.path.clone());
         // 行几何随模式整体更换：核实滚动条溢出并刷新视口缓存（探针
         // 回信按新几何重算缩略图可见区间并完成主选中项揭示）。
+        SessionEffect::VerifyScrollbarLayout
+    }
+
+    /// 进入多栏：栏链 = [当前目录]，承接的选中路径映射为第 0 栏选中；
+    /// 承接集为单个目录时追加其子栏（扫描随打开效果发起）。
+    fn begin_columns_chain(&mut self, carried_paths: Vec<std::path::PathBuf>) -> SessionEffect {
+        self.columns.reset(self.directory.clone());
+        self.hovered_index = None;
+        self.keyboard_nav.reset();
+        // 列表几何的揭示不再适用：多栏由栏探针回信重新校准视口。
+        self.pending_view_switch_reveal = None;
+        let selection: Vec<usize> = carried_paths
+            .iter()
+            .filter_map(|path| self.column_entries_iter(0).position(|e| &e.path == path))
+            .collect();
+        let anchor = selection.first().copied();
+        self.columns.set_selection(0, selection, anchor);
+        if let (true, Some(anchor)) = (carried_paths.len() == 1, anchor) {
+            if let Some(entry) = self.column_entry(0, anchor) {
+                if entry.kind == FileKind::Directory && !self.is_trash_view() {
+                    let directory = entry.path.clone();
+                    return self.columns_open_child(0, directory);
+                }
+            }
+        }
         SessionEffect::VerifyScrollbarLayout
     }
 
@@ -316,13 +384,14 @@ mod tests {
             ),
             PickerViewMode::Icons
         );
-        // Columns 已持久化但视图未放开：回落 List 避免半成品视图。
+        // Columns 已放开：持久化值直接承接多栏视图。
         assert_eq!(
             PickerViewMode::from_storage_value(
                 storage_value_of("view_mode = \"columns\"\n").as_deref()
             ),
-            PickerViewMode::List
+            PickerViewMode::Columns
         );
+        assert_eq!(PickerViewMode::Columns.storage_value(), "columns");
         assert_eq!(
             PickerViewMode::from_storage_value(
                 storage_value_of("view_mode = \"gibberish\"\n").as_deref()

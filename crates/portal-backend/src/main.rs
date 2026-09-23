@@ -17,6 +17,7 @@ mod renderer_env;
 mod scrollbar_state;
 mod sidebar_bridge;
 mod subscriptions;
+mod tasks;
 mod theme;
 mod thumbnail_dispatch;
 mod view;
@@ -28,13 +29,14 @@ use std::sync::{Mutex, OnceLock};
 
 use iced::{keyboard, window, Element, Task, Theme};
 
-use bennu_theme::address_bar::AddressSuggestionRequest;
 use dbus_file_chooser::{BridgeEvent, FileChooserInterface, PickerInvocation};
-use picker_session::suggestions::{
-    load_path_suggestions, PATH_SUGGESTION_INPUT_STABILIZATION_DELAY,
-};
 use picker_session::SessionScrollRegion;
 use picker_session::{PickerSession, PickerViewMode, SessionEffect, SessionMessage};
+use tasks::{
+    breadcrumb_scroll_to_end_task, columns_rail_scroll_to_end_task, load_path_suggestions_task,
+    route_session_tasks, scan_directory_task, scrollbar_layout_probe_task,
+    stabilize_address_input_task,
+};
 use thumbnail_dispatch::spawn_thumbnail_tasks;
 use tokio::sync::mpsc;
 
@@ -164,12 +166,10 @@ fn update(daemon: &mut PickerDaemon, message: Message) -> Task<Message> {
             width,
             height,
         } => match daemon.windows.get(&window) {
-            // 大图列数取自 List 视口宽缓存：resize 不发 on_scroll，必须探针
-            // 回写，否则拉宽窗口列数要等下次滚动才更新。
-            Some(session) => Task::batch(route_session_tasks(
-                window,
-                [session.scrollbar_layout_probe_task(SessionScrollRegion::List)],
-            )),
+            // 大图列数取自 List 视口宽缓存；多栏栏宽取自 ColumnsRail：
+            // resize 不发 on_scroll，必须探针回写，否则拉宽窗口列数/
+            // 栏宽要等下次滚动才更新。
+            Some(session) => scrollbar_layout_probe_task(window, session),
             None => preview_host::handle_window_resized(daemon, window, width, height),
         },
         Message::PreviewWheelScrolled { region, delta } => daemon
@@ -324,6 +324,17 @@ fn apply_session_message(
             ctrl: daemon.keyboard_modifiers.control(),
             shift: daemon.keyboard_modifiers.shift(),
         },
+        SessionMessage::ColumnEntryClicked {
+            lane,
+            index,
+            ctrl: _,
+            shift: _,
+        } => SessionMessage::ColumnEntryClicked {
+            lane,
+            index,
+            ctrl: daemon.keyboard_modifiers.control(),
+            shift: daemon.keyboard_modifiers.shift(),
+        },
         other => other,
     };
     // 根目录扫描回填（初始打开或导航完成）：面包屑已按新目录布局，
@@ -386,6 +397,35 @@ fn apply_session_message(
             scan_directory_task(window_id, directory),
             scrollbar_layout_probe_task(window_id, session),
         ]),
+        // 多栏打开新栏需要扫描：扫描 + 横向滚到最右 + 探针（新栏视
+        // 口缓存驱动键盘揭示与缩略图）。
+        SessionEffect::ColumnScanAndReveal(directory) => Task::batch([
+            scan_directory_task(window_id, directory),
+            columns_rail_scroll_to_end_task(session),
+            scrollbar_layout_probe_task(window_id, session),
+        ]),
+        // 多栏栏链延伸但无需扫描（内容已有缓存）：只横向滚到最右。
+        SessionEffect::ScrollColumnsRailToEnd => Task::batch([
+            columns_rail_scroll_to_end_task(session),
+            scrollbar_layout_probe_task(window_id, session),
+        ]),
+        // 多栏键盘揭示：该栏 scroll_to + 布局探针（同步视口缓存）。
+        SessionEffect::ScrollColumnLaneTo { lane, offset_y } => Task::batch([
+            iced::widget::operation::scroll_to(
+                picker_session::scrollbar::scroll_id(
+                    session.request_path(),
+                    SessionScrollRegion::ColumnsLane(lane),
+                ),
+                iced::widget::scrollable::AbsoluteOffset {
+                    x: 0.0,
+                    y: offset_y,
+                },
+            ),
+            Task::batch(route_session_tasks(
+                window_id,
+                [session.scrollbar_layout_probe_task(SessionScrollRegion::ColumnsLane(lane))],
+            )),
+        ]),
         SessionEffect::StabilizeAddressInput { request } => {
             stabilize_address_input_task(window_id, request)
         }
@@ -440,24 +480,6 @@ fn apply_session_message(
     ])
 }
 
-/// 会话产出的 Task 按所属窗口路由成全局消息。
-fn route_session_tasks(
-    window_id: window::Id,
-    tasks: impl IntoIterator<Item = Task<SessionMessage>>,
-) -> impl Iterator<Item = Task<Message>> {
-    tasks
-        .into_iter()
-        .map(move |task| task.map(move |message| Message::Session(window_id, message)))
-}
-
-/// 布局探针 Task：核实两个滚动区域的溢出并按窗口路由回信。
-fn scrollbar_layout_probe_task(window_id: window::Id, session: &PickerSession) -> Task<Message> {
-    Task::batch(route_session_tasks(
-        window_id,
-        session.scrollbar_layout_probe_tasks(),
-    ))
-}
-
 fn remember_portal_memory(session: &PickerSession) {
     // last_directory 与 view_mode 同一写入函数整体落盘，避免两个写者
     // 互相覆盖字段。回收站是虚拟视图：不作为下次开窗的起始目录
@@ -474,81 +496,6 @@ fn remember_portal_memory(session: &PickerSession) {
         view_mode: Some(session.view_mode().storage_value().to_owned()),
     };
     location::store_portal_memory(&memory);
-}
-
-fn scan_directory_task(window_id: window::Id, directory: std::path::PathBuf) -> Task<Message> {
-    // 回收站虚拟视图：扫描走 file-core trash（行数据复用 PickerRow，
-    // 路径为 files/ 下真实载荷）。其余目录常规扫描。结果统一携带扫描
-    // 目标路径：会话据此路由回根列表或展开节点。
-    let directory_for_scan = directory.clone();
-    let is_trash_scan = directory.as_os_str() == picker_session::TRASH_DIRECTORY;
-    let scan_future = async move {
-        if is_trash_scan {
-            picker_session::scan_trash_listing().await
-        } else {
-            picker_session::scan_listing(directory_for_scan).await
-        }
-    };
-    Task::perform(scan_future, move |outcome| {
-        Message::Session(
-            window_id,
-            SessionMessage::ScanReady(Box::new(picker_session::DirectoryScanResult {
-                directory: directory.clone(),
-                outcome,
-            })),
-        )
-    })
-}
-
-/// 防抖回信：停笔 120ms 后原样带回凭据；会话按凭据决定是否升级为
-/// 真正的读取请求（陈旧回信在会话侧拒收）。
-fn stabilize_address_input_task(
-    window_id: window::Id,
-    request: AddressSuggestionRequest,
-) -> Task<Message> {
-    Task::perform(
-        async move {
-            tokio::time::sleep(PATH_SUGGESTION_INPUT_STABILIZATION_DELAY).await;
-            request
-        },
-        move |request| {
-            Message::Session(
-                window_id,
-                SessionMessage::AddressSuggestionInputStabilized { request },
-            )
-        },
-    )
-}
-
-fn load_path_suggestions_task(
-    window_id: window::Id,
-    request: AddressSuggestionRequest,
-) -> Task<Message> {
-    Task::perform(
-        load_path_suggestions(request.draft.clone(), request.current_dir.clone()),
-        move |suggestions| {
-            Message::Session(
-                window_id,
-                SessionMessage::AddressSuggestionsLoaded {
-                    request,
-                    suggestions,
-                },
-            )
-        },
-    )
-}
-
-fn breadcrumb_scroll_to_end_task(session: &PickerSession) -> Task<Message> {
-    iced::widget::operation::scroll_to(
-        picker_session::scrollbar::scroll_id(
-            session.request_path(),
-            SessionScrollRegion::Breadcrumb,
-        ),
-        iced::widget::scrollable::AbsoluteOffset {
-            x: f32::MAX,
-            y: 0.0,
-        },
-    )
 }
 
 fn close_picker_window(daemon: &mut PickerDaemon, window_id: window::Id) {

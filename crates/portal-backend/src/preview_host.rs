@@ -410,13 +410,14 @@ impl PreviewHost {
     }
 }
 
-/// 从选择窗会话提取空格预览目标：主选中行（最后交互行）。
+/// 从选择窗会话提取空格预览目标：预览目标条目唯一读取口（列表/大
+/// 图 = 主选中行；多栏 = 焦点栏锚点条目，见 view_mode 子模块）。
 pub(crate) fn preview_selection(session: &PickerSession) -> Option<PreviewSelection> {
-    let row = session.rows().get(session.primary_selected_row()?)?;
+    let entry = session.preview_target_entry()?;
     Some(PreviewSelection {
-        path: row.entry.path.clone(),
-        kind: row.entry.kind,
-        file_bytes: row.entry.metadata.len,
+        path: entry.path.clone(),
+        kind: entry.kind,
+        file_bytes: entry.metadata.len,
     })
 }
 

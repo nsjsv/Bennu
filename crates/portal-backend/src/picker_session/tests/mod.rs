@@ -5,6 +5,7 @@ use crate::picker_request::FilePattern;
 use crate::picker_session::scan::DirectoryScanOutcome;
 use std::fs;
 mod address_editing;
+mod columns;
 mod confirm_reply;
 mod keyboard_nav;
 mod sidebar;

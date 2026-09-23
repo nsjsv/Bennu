@@ -32,6 +32,7 @@ use crate::picker_session::{
 };
 
 mod address_bar;
+mod columns;
 mod icon_grid;
 mod preview_window;
 mod sidebar;
@@ -138,13 +139,12 @@ fn listing_body(
             if session.rows().is_empty() {
                 centered_hint("空目录", 14.0, muted_text_color(theme))
             } else {
-                // 视图分派：列表与网格滚动接线同一套（区域、惯性、滚动
-                // 条），仅行几何不同；多栏视图由后续子任务接入。
+                // 视图分派：列表/网格/多栏滚动接线同一套（区域、惯性、
+                // 滚动条），仅行几何不同。
                 match session.view_mode() {
                     PickerViewMode::Icons => icon_grid::icon_grid_body(session, emit),
-                    PickerViewMode::List | PickerViewMode::Columns => {
-                        list_body(session, theme, emit)
-                    }
+                    PickerViewMode::Columns => columns::columns_body(session, emit),
+                    PickerViewMode::List => list_body(session, theme, emit),
                 }
             }
         }

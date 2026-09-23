@@ -150,10 +150,10 @@ fn list_navigation_message(
     }
     match key {
         keyboard::Key::Named(Named::Enter) => {
-            // 光标在目录行（非选目录模式）→ 复用双击激活（进入目录）；
-            // 其余 → 确认（多选保持选中集）。
-            Some(match session.keyboard_enter_directory_row() {
-                Some(index) => SessionMessage::EntryDoubleClicked { index },
+            // 光标在目录行（非选目录模式）→ 复用双击激活（列表进入目
+            // 录；多栏打开子栏）；其余 → 确认（多选保持选中集）。
+            Some(match session.keyboard_enter_activation() {
+                Some(activation) => activation,
                 None => SessionMessage::ConfirmPressed,
             })
         }
@@ -165,7 +165,8 @@ fn list_navigation_message(
             cursor_move_message(session, IconGridDirection::Down)
         }
         // 列表：仅目录行劫持折叠/展开开关，文件行透传；大图：光标
-        // 左右移动（网格无展开语义）。
+        // 左右移动；多栏：父子栏之间的焦点移动（← 回父栏、→ 进入
+        // 选中目录）。
         keyboard::Key::Named(Named::ArrowLeft) => {
             cursor_move_message(session, IconGridDirection::Left)
         }
@@ -233,17 +234,15 @@ fn address_suggestion_key_message(
     }
 }
 
-/// 方向键 → 光标消息：会话给出位移量（模式感知）；列表的 ←→ 无
-/// 位移语义时回退到目录行折叠开关。
+/// 方向键 → 光标消息：会话给出位移量（模式感知）；无位移语义时的
+/// 二级动作也由会话仲裁（列表 = 目录行折叠开关；多栏 = 父子栏移动）。
 fn cursor_move_message(
     session: &PickerSession,
     direction: IconGridDirection,
 ) -> Option<SessionMessage> {
     match session.cursor_move_delta(direction) {
         Some(delta) => Some(SessionMessage::ListCursorMoved { delta }),
-        None => session
-            .cursor_directory_row()
-            .map(|index| SessionMessage::EntryExpandToggled { index }),
+        None => session.arrow_secondary_action(direction),
     }
 }
 

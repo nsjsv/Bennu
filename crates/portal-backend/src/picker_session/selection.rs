@@ -1,71 +1,98 @@
 //! 条目点击/双击/全选的选中语义（从 mod.rs 拆出控制行数）：
 //! SaveFile 取名、OpenFile 按模式过滤可选类型、shift/ctrl 多选。
 
-use file_core::entry::FileKind;
+use file_core::entry::{DirectoryEntry, FileKind};
 
-use super::{PickerSession, SessionEffect};
+use super::{PickerSession, PickerViewMode, SessionEffect};
 use crate::picker_request::PickerKind;
 
 impl PickerSession {
+    /// 点击/键盘落行的模式门控与 SaveFile 名字同步（列表与多栏共用）：
+    /// 返回 false = 该行在当前请求模式下不可选（选中集由调用方按各
+    /// 自的行模型清空）。
+    pub(super) fn entry_click_gating(&mut self, entry: &DirectoryEntry) -> bool {
+        match &self.kind {
+            PickerKind::SaveFile { .. } => {
+                // SaveFile：文件点击 = 取其名（桌面惯例；空格预览目标
+                // 取 selection_anchor，无选中则静默无操作）。
+                if entry.kind == FileKind::File {
+                    self.name_input = entry.name.to_string_lossy().into_owned();
+                    self.overwrite_targets.clear();
+                }
+                true
+            }
+            PickerKind::OpenFile { directory, .. } => {
+                if *directory {
+                    entry.kind == FileKind::Directory
+                } else {
+                    entry.kind == FileKind::File
+                }
+            }
+            // SaveFiles 只选目录：点击仅高亮（落到底部通用选中逻辑），
+            // 名字列表是调用方资产，不可被点击改写。
+            PickerKind::SaveFiles { .. } => true,
+        }
+    }
+
+    /// 单击选中集算术（列表与多栏共用）：shift 区间 / ctrl 翻转 /
+    /// 普通单选；锚点语义同列表。
+    pub(super) fn selection_after_click(
+        current: &[usize],
+        anchor: Option<usize>,
+        index: usize,
+        ctrl: bool,
+        shift: bool,
+        multiple: bool,
+    ) -> (Vec<usize>, Option<usize>) {
+        if shift && multiple {
+            if let Some(anchor) = anchor {
+                let (lo, hi) = (anchor.min(index), anchor.max(index));
+                ((lo..=hi).collect(), Some(anchor))
+            } else {
+                (vec![index], Some(index))
+            }
+        } else if ctrl && multiple {
+            let mut selection = current.to_vec();
+            if let Some(position) = selection.iter().position(|&i| i == index) {
+                selection.remove(position);
+            } else {
+                selection.push(index);
+                selection.sort_unstable();
+            }
+            (selection, Some(index))
+        } else {
+            (vec![index], Some(index))
+        }
+    }
+
     pub(super) fn click_entry(&mut self, index: usize, ctrl: bool, shift: bool) {
         // 点击即落光标（鼠标落点=键盘导航位置，Enter/翻页/type-ahead 同源）。
         // 必须在可选性门控之前：文件模式下点目录不落选中集，但位置
         // 仍要可见，否则纯目录页里点击/方向键全部隐身。
         self.place_cursor(index);
         let multiple = matches!(self.kind, PickerKind::OpenFile { multiple: true, .. });
-        match self.kind {
-            PickerKind::SaveFile { .. } => {
-                // SaveFile：文件点击=取其名；文件/目录都落选中集
-                // （单击选中、双击进入的桌面惯例；空格预览目标取
-                // selection_anchor，无选中则空格静默无操作）。
-                if let Some(row) = self.rows.get(index) {
-                    if row.entry.kind == FileKind::File {
-                        self.name_input = row.entry.name.to_string_lossy().into_owned();
-                        self.overwrite_targets.clear();
-                    }
-                }
+        // 克隆条目终结行借用：门控要改写会话状态（SaveFile 名字）。
+        let clicked = self.rows.get(index).map(|row| row.entry.clone());
+        if let Some(entry) = clicked {
+            if !self.entry_click_gating(&entry) {
+                // 单击/光标落在不可选行：位置照记，但上一次选中集
+                // 必须熄灭（资源管理器语义），否则文件选中+文件夹
+                // 光标出现双高亮。
+                self.selection.clear();
+                self.selection_anchor = None;
+                return;
             }
-            PickerKind::OpenFile { directory, .. } => {
-                if let Some(row) = self.rows.get(index) {
-                    let selectable = if directory {
-                        row.entry.kind == FileKind::Directory
-                    } else {
-                        row.entry.kind == FileKind::File
-                    };
-                    if !selectable {
-                        // 单击/光标落在不可选行：位置照记，但上一次选中集
-                        // 必须熄灭（资源管理器语义），否则文件选中+文件夹
-                        // 光标出现双高亮。
-                        self.selection.clear();
-                        self.selection_anchor = None;
-                        return;
-                    }
-                }
-            }
-            // SaveFiles 只选目录：点击仅高亮（落到底部通用选中逻辑），
-            // 名字列表是调用方资产，不可被点击改写。
-            PickerKind::SaveFiles { .. } => {}
         }
-        if shift && multiple {
-            if let Some(anchor) = self.selection_anchor {
-                let (lo, hi) = (anchor.min(index), anchor.max(index));
-                self.selection = (lo..=hi).collect();
-            } else {
-                self.selection = vec![index];
-                self.selection_anchor = Some(index);
-            }
-        } else if ctrl && multiple {
-            if let Some(position) = self.selection.iter().position(|&i| i == index) {
-                self.selection.remove(position);
-            } else {
-                self.selection.push(index);
-                self.selection.sort_unstable();
-            }
-            self.selection_anchor = Some(index);
-        } else {
-            self.selection = vec![index];
-            self.selection_anchor = Some(index);
-        }
+        let (selection, anchor) = Self::selection_after_click(
+            &self.selection,
+            self.selection_anchor,
+            index,
+            ctrl,
+            shift,
+            multiple,
+        );
+        self.selection = selection;
+        self.selection_anchor = anchor;
     }
 
     /// 行高亮：显式选中集，或键盘光标所在行。光标在可选行上时两者
@@ -108,6 +135,7 @@ impl PickerSession {
     }
 
     /// Ctrl+A：仅 OpenFile 多选模式响应；按模式的可选类型圈定范围。
+    /// 多栏下作用域 = 焦点栏（选中集不跨栏）。
     pub(super) fn select_all(&mut self) {
         let PickerKind::OpenFile {
             multiple: true,
@@ -117,6 +145,10 @@ impl PickerSession {
         else {
             return;
         };
+        if self.view_mode() == PickerViewMode::Columns {
+            self.columns_select_all(*directory);
+            return;
+        }
         self.selection = self
             .rows
             .iter()

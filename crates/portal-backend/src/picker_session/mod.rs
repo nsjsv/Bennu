@@ -6,13 +6,10 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use bennu_theme::address_bar::{
-    AddressBarTransition, AddressEditingSession, AddressSuggestionRequest,
-};
+use bennu_theme::address_bar::{AddressBarTransition, AddressEditingSession};
 use tokio::sync::oneshot;
 
 use file_core::entry::{DirectoryEntry, FileKind};
-use thumbnails::{CachedThumbnail, ThumbnailLoadFailed, ThumbnailRequest};
 
 use crate::dbus_file_chooser::PickerResolution;
 use crate::filter::PickerFilter;
@@ -20,10 +17,12 @@ use crate::picker_request::{FilterRule, PickerChoice, PickerKind, PickerRequestS
 
 mod address_editing;
 mod choices;
+mod columns;
 mod confirm;
 mod effects;
 mod expansion;
 mod keyboard_nav;
+mod messages;
 pub(crate) mod scan;
 pub(crate) mod scrollbar;
 mod selection;
@@ -32,174 +31,24 @@ pub(crate) mod suggestions;
 pub(crate) mod thumbnails;
 mod view_mode;
 
+/// 多栏栏几何常量再导出：view 层与 columns 子模块同源。
+pub(crate) use columns::{COLUMNS_SCALE, MIN_LANE_WIDTH};
+
 /// 行几何唯一真值再导出：view 层行高/间距与各子模块同源（模块本身
 /// 保持私有，只放行这两个常量）。
 pub(crate) use expansion::{LIST_ROW_HEIGHT, LIST_ROW_SPACING};
 pub(crate) use scan::{scan_listing, scan_trash_listing, DirectoryListing, DirectoryScanResult};
 pub(crate) use scrollbar::SessionScrollRegion;
-use scrollbar::{ScrollbarViewport, SessionScrollbarState, SmoothScrollState};
-pub(crate) use sidebar::{
-    load_sidebar_data, PickerSidebarData, PickerSidebarState, SidebarEntryId, TRASH_DIRECTORY,
-};
+use scrollbar::{SessionScrollbarState, SmoothScrollState};
+pub(crate) use sidebar::{load_sidebar_data, PickerSidebarState, SidebarEntryId, TRASH_DIRECTORY};
 
 pub(crate) use address_editing::PathSuggestionDirection;
+use columns::ColumnsState;
 pub(crate) use effects::SessionEffect;
 use expansion::ExpansionState;
 use keyboard_nav::KeyboardNavState;
+pub(crate) use messages::SessionMessage;
 pub(crate) use view_mode::{PickerViewMode, ICON_GRID_EDGE};
-
-/// 视图事件。
-#[derive(Debug, Clone)]
-pub(crate) enum SessionMessage {
-    ScanReady(Box<DirectoryScanResult>),
-    EntryClicked {
-        index: usize,
-        ctrl: bool,
-        shift: bool,
-    },
-    EntryDoubleClicked {
-        index: usize,
-    },
-    /// 目录行的展开/收起开关（访达列表语义）。
-    EntryExpandToggled {
-        index: usize,
-    },
-    NavigateUp,
-    NavigateBack,
-    NavigateForward,
-    BreadcrumbActivated {
-        target: PathBuf,
-    },
-    FilterSelected {
-        rule: usize,
-    },
-    NameInputChanged(String),
-    ConfirmPressed,
-    DismissPressed,
-    OverwriteDeclined,
-    /// 下拉选择值不在已知规则中（视图与状态不一致的兜底，正常不可达）。
-    FilterSelectionIgnored,
-    /// 指针悬停变化；None = 离开所有行。索引以当前扁平化行列表为准。
-    EntryHovered {
-        index: Option<usize>,
-    },
-    /// Ctrl+A 全选可选中条目（仅 OpenFile 多选模式有意义）。
-    SelectAllPressed,
-    /// 键盘列表光标移动（↑/↓）；语义实现见 keyboard_nav 子模块。
-    ListCursorMoved {
-        delta: isize,
-    },
-    /// 键盘跳转列表首/尾（Home/End）。
-    ListCursorJumped {
-        to_end: bool,
-    },
-    /// 键盘按视口行数翻页（PageUp/PageDown）。
-    ListPageMoved {
-        pages: isize,
-    },
-    /// 视图模式切换（导航栏分段按钮）；语义见 view_mode 子模块。
-    ViewModeSelected {
-        mode: PickerViewMode,
-    },
-    /// type-ahead 字符输入（无 ctrl/alt/command 修饰的字符键）。
-    TypeAheadChar {
-        ch: char,
-    },
-    /// 清空 type-ahead 缓冲（Esc 优先级：缓冲非空时先于关窗）。
-    TypeAheadReset,
-    /// 点击地址栏空白处进入路径编辑（草稿预填当前目录）。
-    AddressEditingStarted,
-    AddressEditChanged(String),
-    AddressEditingSubmitted,
-    AddressEditingCancelled,
-    /// 防抖停笔回信：携带发请求时的凭据，陈旧（改稿/换目录/退出编辑
-    /// 后）回信按凭据拒收。
-    AddressSuggestionInputStabilized {
-        request: AddressSuggestionRequest,
-    },
-    /// 补全建议读取结果回信：同样按凭据拒收陈旧结果。
-    AddressSuggestionsLoaded {
-        request: AddressSuggestionRequest,
-        suggestions: Vec<PathBuf>,
-    },
-    /// 补全面板行点击：仅当路径仍在当前建议列表中才提交。
-    AddressSuggestionSelected {
-        path: PathBuf,
-    },
-    /// 键盘循环选择建议（↓/↑/Tab/Shift+Tab）。
-    MoveSuggestionSelection {
-        direction: PathSuggestionDirection,
-    },
-    /// 键盘补全：选中建议写入草稿并请求下一级建议。
-    CompleteSuggestion {
-        direction: PathSuggestionDirection,
-    },
-    /// choices 控件变更（下拉选中/复选开关）：按 id 定位覆写选中值，
-    /// 见 choices 子模块；id 不存在静默忽略。
-    ChoiceSelected {
-        id: String,
-        value: String,
-    },
-    /// 滚轮输入（视图包装层捕获后发布）；增量换算在会话滚动子模块。
-    WheelScrolled {
-        region: SessionScrollRegion,
-        delta: iced::mouse::ScrollDelta,
-    },
-    /// 布局探针回信：当帧滚动区布局（含溢出裁决依据）。
-    ScrollbarLayoutVerified {
-        region: SessionScrollRegion,
-        viewport: ScrollbarViewport,
-    },
-    /// 滚动条视口回传（on_scroll 持续刷缓存），内层事件继续按滚动消息路由。
-    ScrollbarViewportChanged {
-        region: SessionScrollRegion,
-        viewport: ScrollbarViewport,
-        event: Box<SessionMessage>,
-    },
-    /// 滚动条被直接交互（拖动/轨道点击）触发的视口回传内层事件。
-    ScrollbarEngaged {
-        region: SessionScrollRegion,
-    },
-    /// 650ms 无输入的 auto-hide 回信；代数不匹配（期间又有滚动）则忽略。
-    ScrollbarAutoHideElapsed {
-        generation: u64,
-    },
-    /// 缩略图加载回信（main 层 drain 出队后 Task::perform 的结果）；
-    /// key 已不在 in_flight 的迟到回信（换目录后）由会话直接丢弃。
-    ThumbnailReady {
-        request: ThumbnailRequest,
-        outcome: Result<CachedThumbnail, ThumbnailLoadFailed>,
-    },
-    /// 侧边栏数据回填（窗口打开时一次性读取）。
-    SidebarDataLoaded(Box<PickerSidebarData>),
-    /// 点击位置/收藏行：导航到对应目录。
-    SidebarLocationPressed {
-        path: PathBuf,
-    },
-    /// 点击垃圾桶行：进入 trash:/// 虚拟视图。
-    SidebarTrashPressed,
-    SidebarDevicePressed {
-        id: desktop_linux::StorageDeviceId,
-    },
-    SidebarConnectionPressed {
-        id: desktop_linux::NetworkConnectionId,
-    },
-    SidebarDeviceMountFinished {
-        id: desktop_linux::StorageDeviceId,
-        mount_path: Result<PathBuf, String>,
-    },
-    SidebarConnectionMountFinished {
-        id: desktop_linux::NetworkConnectionId,
-        mount_path: Result<PathBuf, String>,
-    },
-    /// 侧边栏行悬停变化；None = 离开所有行。
-    SidebarHoverChanged {
-        entry: Option<sidebar::SidebarEntryId>,
-    },
-    /// 拖宽手柄按下：main 层拦截处理（拖宽的指针增量归 main 的指针
-    /// 簿记，iced::Point 不进会话层），本臂仅为穷尽兑底。
-    SidebarResizeStarted,
-}
 
 pub(crate) use expansion::PickerRow;
 
@@ -255,6 +104,8 @@ pub(crate) struct PickerSession {
     thumbnails: thumbnails::SessionThumbnailState,
     /// 视图模式（列表/大图/多栏）；跨窗口记忆见 location 子模块。
     view_mode: PickerViewMode,
+    /// 多栏视图状态（栏链/焦点栏/逐栏光标选中），语义见 columns 子模块。
+    columns: ColumnsState,
     /// 视图切换后待揭示的主选中项：切换瞬间视口缓存仍是旧视图几何，
     /// 推迟到 List 探针回信（新几何就位）再滚动；按路径记，行集已变则丢弃。
     pending_view_switch_reveal: Option<PathBuf>,
@@ -314,7 +165,7 @@ impl PickerSession {
             address_bar_transition: None,
             home_dir: dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")),
             next_address_editing_session_id: 0,
-            history: vec![start_directory],
+            history: vec![start_directory.clone()],
             history_position: 0,
             smooth_scroll: SmoothScrollState::default(),
             scrollbar: SessionScrollbarState::default(),
@@ -324,6 +175,7 @@ impl PickerSession {
                 thumbnails::default_thumbnail_cache_dir(),
             ),
             view_mode,
+            columns: ColumnsState::new(start_directory.clone()),
             pending_view_switch_reveal: None,
             reply: Some(reply),
         }
@@ -353,6 +205,9 @@ impl PickerSession {
 
     /// 空格预览的目标行（主软件 `selected` 的对齐物）：最后交互行——
     /// 单击/键盘光标都落锚；悬停不作依据（纯键盘操作没有悬停）。
+    /// 运行时预览目标唯一读取口是 view_mode 子模块的
+    /// `preview_target_entry`；本行号查询仅测试断言用。
+    #[cfg(test)]
     pub(crate) fn primary_selected_row(&self) -> Option<usize> {
         self.selection_anchor
             .filter(|&index| index < self.rows.len())
@@ -484,6 +339,21 @@ impl PickerSession {
             SessionMessage::ListCursorJumped { to_end } => self.jump_list_cursor(to_end),
             SessionMessage::ListPageMoved { pages } => self.move_list_page(pages),
             SessionMessage::ViewModeSelected { mode } => self.select_view_mode(mode),
+            SessionMessage::ColumnEntryClicked {
+                lane,
+                index,
+                ctrl,
+                shift,
+            } => self.columns_entry_clicked(lane, index, ctrl, shift),
+            SessionMessage::ColumnEntryDoubleClicked { lane, index } => {
+                self.columns_entry_double_clicked(lane, index)
+            }
+            SessionMessage::ColumnEntryHovered { lane, index } => {
+                self.columns_set_hovered(lane, index);
+                SessionEffect::None
+            }
+            SessionMessage::ColumnsBackwardRequested => self.columns_backward(),
+            SessionMessage::ColumnsForwardRequested => self.columns_forward(),
             SessionMessage::TypeAheadChar { ch } => self.push_type_ahead_char(ch),
             SessionMessage::TypeAheadReset => {
                 self.reset_type_ahead();
@@ -601,6 +471,10 @@ impl PickerSession {
         // 键盘光标与悬停同规则：行集变化后必须重新验证，越界回退到
         // 最近合法行（空列表清空）。
         self.keyboard_nav.revalidate_cursor(self.rows.len());
+        if self.view_mode == PickerViewMode::Columns {
+            // 多栏：行集重建同样要重验逐栏光标/选中/悬停索引。
+            self.columns_revalidate_lane_indices();
+        }
         self.sync_row_animation();
         // 行集重建即重算可见区间：扫描回填/展开/过滤都在此触发缩略图
         // 请求的积攒，main 层随后 drain 发起。
@@ -712,6 +586,9 @@ impl PickerSession {
         self.hovered_index = None;
         // 键盘光标与 type-ahead 缓冲随目录作废。
         self.keyboard_nav.reset();
+        // 多栏视图：导航即重置栏链为新目录一栏（面包屑/侧边栏/后退
+        // 前进/地址栏导航统一经此处收口，prd R9）。
+        self.columns_reset_for_navigation();
         // 在途/排队请求作废：迟到回信按 key 找不到在途记录即丢弃；就绪
         // 表保留（返回原目录即时显示）。
         self.thumbnails.clear_pending();

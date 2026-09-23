@@ -372,11 +372,14 @@ fn enter_and_arrow_targets_depend_on_cursor_row_kind() {
     );
     file_session.update(SessionMessage::ListCursorMoved { delta: 1 });
     file_session.update(SessionMessage::ListCursorMoved { delta: 1 });
-    assert_eq!(file_session.keyboard_enter_directory_row(), Some(1));
+    assert!(matches!(
+        file_session.keyboard_enter_activation(),
+        Some(SessionMessage::EntryDoubleClicked { index: 1 })
+    ));
     assert_eq!(file_session.cursor_directory_row(), Some(1));
     // 文件行：Enter 走确认、←/→ 不劫持。
     file_session.update(SessionMessage::ListCursorMoved { delta: -1 });
-    assert_eq!(file_session.keyboard_enter_directory_row(), None);
+    assert!(file_session.keyboard_enter_activation().is_none());
     assert_eq!(file_session.cursor_directory_row(), None);
 
     // 选目录模式：目录行的 Enter 也走确认（选中目录而非进入）。
@@ -386,7 +389,7 @@ fn enter_and_arrow_targets_depend_on_cursor_row_kind() {
     });
     seeded_listing(&mut dir_session, &[("dir", FileKind::Directory)]);
     dir_session.update(SessionMessage::ListCursorMoved { delta: 1 });
-    assert_eq!(dir_session.keyboard_enter_directory_row(), None);
+    assert!(dir_session.keyboard_enter_activation().is_none());
     assert_eq!(dir_session.cursor_directory_row(), Some(0));
 }
 

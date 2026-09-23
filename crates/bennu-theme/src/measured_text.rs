@@ -131,6 +131,8 @@ struct MeasuredTextLayoutKey<Font> {
 }
 
 impl<Font: PartialEq> MeasuredTextLayoutKey<Font> {
+    // 参数集合即 iced 文本布局的完整输入，拆结构体只会把同一组字段搬家
+    #[allow(clippy::too_many_arguments)]
     fn new(
         content: &str,
         bounds: Size<f32>,
@@ -155,6 +157,7 @@ impl<Font: PartialEq> MeasuredTextLayoutKey<Font> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn matches(
         &self,
         content: &str,
@@ -242,7 +245,10 @@ where
             let line_height = self.line_height;
             let shaping = shaping_for_content(&self.content);
             let display_bounds = Size::new(bounds.width, bounds.height);
-            let layout_key_matches = text_state.layout_key.as_ref().map_or(false, |key| {
+            let layout_key_matches = text_state
+                .layout_key
+                .as_ref()
+                .is_some_and(|key| {
                 key.matches(
                     &self.content,
                     display_bounds,
@@ -332,6 +338,8 @@ where
     )
 }
 
+// 参数集合即 iced 文本测量的完整输入，与 MeasuredTextLayoutKey 字段一一对应
+#[allow(clippy::too_many_arguments)]
 fn fit_middle_ellipsized_text<Renderer>(
     content: &str,
     available_width: f32,
@@ -424,6 +432,7 @@ fn fit_middle_ellipsized_by(
 
     best
 }
+#[allow(clippy::too_many_arguments)]
 fn measured_text_fits<Renderer>(
     content: &str,
     available_width: f32,

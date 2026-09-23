@@ -155,7 +155,7 @@ pub struct StoredContextMenuLayouts {
 /// 空格预览偏好段的存储形态：legacy 全局上限（max_preview_file_bytes，
 /// 只读迁移，新代码写 None）、分类型大小上限、后缀规则与目录展开层级。
 /// 字段声明顺序即序列化顺序，冻结为既有文档布局，不得重排。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct StoredPreviewPreferences {
     #[serde(default)]
     pub max_preview_file_bytes: Option<u64>,
@@ -179,23 +179,6 @@ pub struct StoredPreviewPreferences {
     pub preview_extension_rules: Option<StoredPreviewExtensionRules>,
     #[serde(default)]
     pub preview_directory_expand_levels: Option<u8>,
-}
-
-impl Default for StoredPreviewPreferences {
-    fn default() -> Self {
-        Self {
-            max_preview_file_bytes: None,
-            preview_text_size_bytes: None,
-            preview_image_size_bytes: None,
-            preview_video_size_bytes: None,
-            preview_audio_size_bytes: None,
-            preview_archive_size_bytes: None,
-            preview_document_size_bytes: None,
-            preview_sqlite_size_bytes: None,
-            preview_extension_rules: None,
-            preview_directory_expand_levels: None,
-        }
-    }
 }
 
 impl Default for StoredUserPreferences {

@@ -58,7 +58,7 @@ impl super::PreviewEngine {
                         self.text_preview_generation = self.text_preview_generation.wrapping_add(1);
                         self.text_preview_document = Some(TextPreviewDocument::new_initial(
                             path.clone(),
-                            &rendered,
+                            rendered,
                             *format,
                             self.text_preview_generation,
                             *next_offset,
@@ -151,7 +151,8 @@ impl super::PreviewEngine {
         };
         // 原图 RGBA 缓冲区可能很大，不能让释放最后一个句柄阻塞 UI 更新线程。
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-            let _ = runtime.spawn_blocking(release);
+            // 释放属即发即弃：join 句柄仅命名以防 must_use，不等待完成
+            let _release_join = runtime.spawn_blocking(release);
         } else {
             release();
         }

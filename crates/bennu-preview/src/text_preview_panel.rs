@@ -24,6 +24,8 @@ const MARKDOWN_MIN_BODY_SCROLL_HEIGHT: f32 = 120.0;
 const TEXT_PREVIEW_LIMIT_NOTICE_RESERVED_HEIGHT: f32 = 30.0;
 const TEXT_PREVIEW_MIN_BODY_SCROLL_HEIGHT: f32 = 120.0;
 const TEXT_PREVIEW_SCROLLBAR_WIDTH: f32 = 6.0;
+// 参数即文本预览面板的完整输入（渲染产物 + 文档 + 接线），与调用点一一对应
+#[allow(clippy::too_many_arguments)]
 pub fn text_preview_panel<'a, Message>(
     rendered: &'a str,
     format: TextPreviewFormat,
@@ -168,6 +170,8 @@ fn text_preview_external_notice_is_visible(
             .unwrap_or(false)
     })
 }
+// 参数与 text_preview_panel 同源，保持镜像签名
+#[allow(clippy::too_many_arguments)]
 fn markdown_text_preview_body<'a, Message>(
     rendered: &'a str,
     document: Option<&'a TextPreviewDocument>,

@@ -31,6 +31,8 @@ const SQLITE_SCROLLBAR_WIDTH: f32 = 6.0;
 const SQLITE_RESIZE_HANDLE_WIDTH: f32 = 6.0;
 
 // ponytail: 200 行 × 每列直接渲染 widget，表列数极大（数百列）时才需要虚拟化。
+// 参数即 sqlite 预览面板的完整输入（数据 + 状态 + 滚动接线），拆结构体只是搬家
+#[allow(clippy::too_many_arguments)]
 pub fn sqlite_preview_panel<'a, Message>(
     preview: &'a SqliteDatabasePreview,
     state: Option<&'a SqlitePreviewState>,
@@ -73,6 +75,8 @@ where
         .into()
 }
 
+// 参数与 sqlite_preview_panel 同源（数据 + 状态 + 接线），保持镜像签名
+#[allow(clippy::too_many_arguments)]
 fn tables_tab<'a, Message>(
     preview: &'a SqliteDatabasePreview,
     state: Option<&'a SqlitePreviewState>,
@@ -355,7 +359,7 @@ where
         .height(Length::Fill)
         .into()
     } else {
-        scroller.into()
+        scroller
     }
 }
 

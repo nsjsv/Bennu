@@ -134,7 +134,7 @@ impl super::PreviewEngine {
                 let generation = state.generation;
                 let path = state.path.clone();
                 state.sql_running = true;
-                return sqlite_sql_command(path, sql, generation);
+                sqlite_sql_command(path, sql, generation)
             }
             SqlitePreviewMessage::TableSelected(table) => {
                 let Some(state) = self.active_sqlite_preview_mut() else {

@@ -113,7 +113,7 @@ pub(super) fn press(
         }
     }
     state.is_focused = true;
-    state.last_click = Some(click.clone());
+    state.last_click = Some(click);
     state.drag_click = Some(kind);
     state.drag_press = Some(position);
     state.drag_active = false;

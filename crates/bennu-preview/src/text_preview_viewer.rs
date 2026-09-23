@@ -239,7 +239,7 @@ where
                     text_editor::Binding::<Message>::from_key_press(text_editor::KeyPress {
                         key: key.clone(),
                         modified_key: modified_key.clone(),
-                        physical_key: physical_key.clone(),
+                        physical_key: *physical_key,
                         modifiers: *modifiers,
                         text: text.clone(),
                         status: text_editor::Status::Focused {
@@ -476,9 +476,7 @@ fn update_retained_text_lines_for_size(
                     return Some(previous.remove(position));
                 }
             }
-            let Some(text) = document.line(visible_line.line_index) else {
-                return None;
-            };
+            let text = document.line(visible_line.line_index)?;
             let paragraph = text_line_paragraph(text, text_width, visible_line.height);
             // 段落真实换行高度回填行高表（只增不减）。
             note_measured_line_height(
@@ -509,23 +507,23 @@ fn update_retained_line_numbers_for_size(
 
     state.retained_line_numbers = visible_lines
         .iter()
-        .filter_map(|visible_line| {
+        .map(|visible_line| {
             if !width_changed {
                 if let Some(position) = previous
                     .iter()
                     .position(|retained| retained.line_index == visible_line.line_index)
                 {
-                    return Some(previous.remove(position));
+                    return previous.remove(position);
                 }
             }
-            Some(TextPreviewLineNumber {
+            TextPreviewLineNumber {
                 line_index: visible_line.line_index,
                 paragraph: line_number_paragraph(
                     visible_line.line_index + 1,
                     digit_count,
                     gutter_width,
                 ),
-            })
+            }
         })
         .collect();
     state.retained_line_number_digit_count = digit_count;

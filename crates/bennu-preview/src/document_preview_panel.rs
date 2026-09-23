@@ -98,5 +98,5 @@ where
         ScrollbarAxis::Vertical,
         DOCUMENT_SCROLLBAR_WIDTH,
     );
-    scroller.into()
+    scroller
 }

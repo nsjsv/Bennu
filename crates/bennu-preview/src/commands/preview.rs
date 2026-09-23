@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use file_core::{CopyProgress, FileKind, ScanOptions};
@@ -200,14 +200,14 @@ fn should_send_remote_preview_progress(last_sent_at: Option<Instant>, now: Insta
 
 async fn send_remote_preview_progress(
     output: &mut IcedSender<PreviewMessage>,
-    source_path: &PathBuf,
+    source_path: &Path,
     generation: u64,
     progress: CopyProgress,
 ) {
     let _ = output
         .send(PreviewMessage::RemotePreviewCache(
             RemotePreviewCacheMessage::Progress(RemotePreviewCacheProgress {
-                source_path: source_path.clone(),
+                source_path: source_path.to_path_buf(),
                 generation,
                 bytes_done: progress.bytes_done,
                 bytes_total: progress.bytes_total,

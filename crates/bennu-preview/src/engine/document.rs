@@ -142,9 +142,7 @@ impl super::PreviewEngine {
         {
             return None;
         }
-        let Some(document) = self.active_document_preview_mut() else {
-            return None;
-        };
+        let document = self.active_document_preview_mut()?;
         if (document.content_height() - content_height).abs() > DOCUMENT_CONTENT_HEIGHT_TOLERANCE
             || !document.update_viewport(&key, offset_y, viewport_height)
         {

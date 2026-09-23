@@ -30,6 +30,8 @@ const VIDEO_VOLUME_SLIDER_PORTION: u16 = 1;
 const VIDEO_CONTROL_SLIDER_GAP: f32 = 14.0;
 const VIDEO_VOLUME_ICON_GAP: f32 = 6.0;
 
+// 参数即视频面板的完整输入（路径 + 帧 + 播放态 + 接线），拆结构体只是搬家
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn video_preview_panel<Message>(
     path: &Path,
     frame: Option<&image::Handle>,
@@ -117,7 +119,7 @@ pub(crate) fn video_controls_opacity_for_playback(
     playback: Option<&VideoPreviewPlayback>,
     opacity: f32,
 ) -> f32 {
-    if playback.map_or(false, |playback| playback.seek_completion.is_some()) {
+    if playback.is_some_and(|playback| playback.seek_completion.is_some()) {
         1.0
     } else {
         opacity.clamp(0.0, 1.0)

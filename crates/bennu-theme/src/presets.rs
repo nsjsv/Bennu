@@ -162,6 +162,8 @@ pub(super) fn palette(preset: ColorSchemePreset, mode: AppearanceMode) -> Preset
     }
 }
 
+// 8 个色值参数是调色板的完整描述，分组反而更难对齐预置表里的字面量
+#[allow(clippy::too_many_arguments)]
 const fn colors(
     background: u32,
     surface: u32,

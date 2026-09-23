@@ -11,13 +11,16 @@ use iced::{Element, Theme};
 use bennu_theme::scrollbar::ScrollbarViewport;
 use bennu_theme::styles::ScrollbarVisibility;
 
+/// smooth-scroll 包装闭包类型：面板内容进出宿主捕获层。
+type SmoothScrollWrap<'a, Message> =
+    Box<dyn Fn(Element<'a, Message, Theme>) -> Element<'a, Message, Theme> + 'a>;
+
 pub struct ScrollRegionWiring<'a, Message>
 where
     Message: 'a,
 {
     /// 把面板内容包进宿主的 smooth-scroll 捕获层（滚轮惯性管线）。
-    pub smooth_scroll_wrap:
-        Box<dyn Fn(Element<'a, Message, Theme>) -> Element<'a, Message, Theme> + 'a>,
+    pub smooth_scroll_wrap: SmoothScrollWrap<'a, Message>,
     /// 几何宿主 scrollable 的部件 id（scroll_by 操作目标）。
     pub scrollable_id: iced::widget::Id,
     /// 视口回传闭包：宿主在内部合成 ScrollbarViewportChanged 与面板事件。

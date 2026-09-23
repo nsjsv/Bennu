@@ -179,9 +179,7 @@ impl<Message> canvas::Program<Message> for ScrollbarOverlay {
             state.animation_started_at = Some(now);
         }
 
-        let Some(started_at) = state.animation_started_at else {
-            return None;
-        };
+        let started_at = state.animation_started_at?;
 
         let progress = (now.saturating_duration_since(started_at).as_secs_f32()
             / SCROLLBAR_HOVER_DURATION.as_secs_f32())

@@ -60,9 +60,8 @@ pub async fn extract_archive_members_with_controls_and_progress(
                 message: format!("archive member not found: {}", inner.display()),
             })?;
             let total_entries = worklist.len();
-            let mut completed_entries = 0;
             let mut completed_bytes = 0;
-            for (member_path, len) in worklist {
+            for (completed_index, (member_path, len)) in worklist.into_iter().enumerate() {
                 let relative = member_path
                     .strip_prefix(&inner)
                     .ok()
@@ -99,12 +98,11 @@ pub async fn extract_archive_members_with_controls_and_progress(
                     request.password.as_ref(),
                 )
                 .await?;
-                completed_entries += 1;
                 completed_bytes += len;
                 progress(ArchiveExtractionProgress {
                     completed_bytes,
                     total_bytes: 0,
-                    completed_entries,
+                    completed_entries: completed_index + 1,
                     total_entries,
                 });
             }

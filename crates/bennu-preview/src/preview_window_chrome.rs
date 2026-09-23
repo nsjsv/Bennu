@@ -250,6 +250,8 @@ where
 /// 预览浮动窗口内容：媒体内容之上叠加顶部控制层（渐变 + 左控制组 +
 /// 固定按钮 + 右控制组），整层包宿主注入的拖动面包装（标题拖动/双击
 /// 最大化）。窗口控制动作消息与拖动面是宿主窗口管理语义，经闭包注入。
+// 参数集合是窗口 chrome 的完整配置（内容 + 控制配置 + 消息闭包对），镜像宿主调用点
+#[allow(clippy::too_many_arguments)]
 pub fn floating_preview_window_content<'a, Message>(
     content: Element<'a, Message>,
     config: &WindowControlsConfig,

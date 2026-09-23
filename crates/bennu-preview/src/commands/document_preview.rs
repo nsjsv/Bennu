@@ -372,6 +372,8 @@ async fn read_rendered_page(
     })
 }
 
+// 参数即一次 poppler 子进程调用的完整配置（程序 + 限制 + 双取消源）
+#[allow(clippy::too_many_arguments)]
 async fn run_poppler_command(
     program: &Path,
     arguments: &[OsString],

@@ -30,6 +30,8 @@ use crate::text_preview_panel::text_preview_panel;
 use crate::video_preview_panel::video_preview_panel;
 
 /// 预览窗口/右侧停靠面板共用入口：无预览会话时显示空态提示。
+// 参数集合是共享预览状态到视图的完整投影，镜像 bennu-preview 内部各面板签名
+#[allow(clippy::too_many_arguments)]
 pub fn view_preview_window<'a, Message>(
     preview: Option<&'a PreviewState>,
     text_preview_document: Option<&'a TextPreviewDocument>,

@@ -653,7 +653,7 @@ async fn stage_transfer<J: TransferJournal>(
                     source_hasher: None,
                 })
                 .await
-                .map_err(|error_source| RecoverableTransferError::FileOperation(error_source))?;
+                .map_err(RecoverableTransferError::FileOperation)?;
                 kernel_clone_used = payload_outcome.strategy
                     == crate::ops::transfer_strategy::PayloadCopyStrategy::KernelClone;
                 // 快照比对按源 mtime(2 秒桶)校验,FICLONE 只克隆数据块,

@@ -138,7 +138,7 @@ fn load_sqlite_table_data_blocking(path: &Path, table: &str) -> Result<SqliteTab
     let mut query_rows = statement.query([]).map_err(sqlite_error)?;
     let mut rows: Vec<Vec<SqliteCellValue>> = Vec::new();
     while let Some(row) = query_rows.next().map_err(sqlite_error)? {
-        rows.push(row_values(&row).map_err(sqlite_error)?);
+        rows.push(row_values(row).map_err(sqlite_error)?);
     }
     let truncated = rows.len() > SQLITE_ROW_LIMIT;
     rows.truncate(SQLITE_ROW_LIMIT);
@@ -160,7 +160,7 @@ fn run_sqlite_sql_blocking(path: &Path, sql: &str) -> Result<SqlQueryOutcome, St
     let mut query_rows = statement.query([]).map_err(sqlite_error)?;
     let mut rows: Vec<Vec<SqliteCellValue>> = Vec::new();
     while let Some(row) = query_rows.next().map_err(sqlite_error)? {
-        rows.push(row_values(&row).map_err(sqlite_error)?);
+        rows.push(row_values(row).map_err(sqlite_error)?);
     }
     let truncated = rows.len() > SQLITE_ROW_LIMIT;
     rows.truncate(SQLITE_ROW_LIMIT);

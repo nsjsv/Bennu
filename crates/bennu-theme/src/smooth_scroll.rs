@@ -271,7 +271,6 @@ impl<Message: 'static> Widget<Message, iced::Theme, iced::Renderer>
                     shell.publish((self.on_wheel)(*delta));
                     shell.capture_event();
                     shell.request_redraw();
-                    return;
                 }
             }
         }

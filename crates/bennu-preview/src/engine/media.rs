@@ -234,12 +234,8 @@ impl super::PreviewEngine {
     /// 跳转失败时返回错误串：播放状态内的 error 已由引擎落位，全局
     /// 错误通知属宿主通知域，由宿主转发层展示。
     pub fn seek_audio_preview_playback(&mut self, position_seconds: f32) -> Option<String> {
-        let Some(playback) = self.audio_preview.as_mut() else {
-            return None;
-        };
-        let Some(runtime) = playback.runtime.as_ref() else {
-            return None;
-        };
+        let playback = self.audio_preview.as_mut()?;
+        let runtime = playback.runtime.as_ref()?;
 
         let position = Duration::from_secs_f32(position_seconds.max(0.0));
         match runtime.seek_to(position) {

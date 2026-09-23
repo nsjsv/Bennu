@@ -629,3 +629,62 @@ fn lane_visible_window_maps_offsets_with_lane_geometry() {
     assert_eq!(first, 31);
     assert_eq!(last, 57);
 }
+
+#[test]
+fn emphasis_only_lives_in_focused_lane() {
+    // 栏链上父层级行不亮强调色：高亮只归焦点栏，父层级的被点开
+    // 目录行走 open_child 态（视觉层职责）。
+    let (mut session, _rx) = open_file_session(false);
+    let (adir, _bdir, _deep) = seeded_root(&mut session);
+
+    session.update(SessionMessage::ColumnEntryClicked {
+        lane: 0,
+        index: 0,
+        ctrl: false,
+        shift: false,
+    });
+    scan(&mut session, &adir, &[("deep", FileKind::Directory)]);
+
+    // 点击把焦点推进到子栏（lane1）；cursor 留在 lane0 但 lane0 已非
+    // 焦点栏：父层级不亮（open_child 灰态由视觉层画），新栏无选中
+    // 无光标也不亮。绿只归焦点栏里的真选中。
+    assert_eq!(session.columns.focused(), 1);
+    assert!(!session.columns_row_highlighted(0, 0));
+    assert!(!session.columns_row_highlighted(1, 0));
+}
+
+#[test]
+fn lane_click_clears_other_lanes_selection() {
+    // 跨栏点击重置：选中集只允许存在于一栏（design 决策）。
+    let (mut session, _rx) = open_file_session(true);
+    let (adir, _bdir, deep) = seeded_root(&mut session);
+
+    // lane0 点 adir 开子栏；回填后 lane1 选中 note.txt。
+    session.update(SessionMessage::ColumnEntryClicked {
+        lane: 0,
+        index: 0,
+        ctrl: false,
+        shift: false,
+    });
+    scan(&mut session, &adir, &[("deep", FileKind::Directory), ("note.txt", FileKind::File)]);
+    session.update(SessionMessage::ColumnEntryClicked {
+        lane: 1,
+        index: 1,
+        ctrl: false,
+        shift: false,
+    });
+    assert_eq!(session.columns_rightmost_selection_paths(), &[adir.join("note.txt")]);
+
+    // 点回 lane0 的 bdir：lane1 选中熄灭；文件模式下 bdir 不可选，
+    // 选中集整体为空（目录导航不等于选中）。
+    let root = session.directory().to_path_buf();
+    scan(&mut session, &root, &[("adir", FileKind::Directory), ("bdir", FileKind::Directory)]);
+    session.update(SessionMessage::ColumnEntryClicked {
+        lane: 0,
+        index: 1,
+        ctrl: false,
+        shift: false,
+    });
+    assert!(session.columns_rightmost_selection_paths().is_empty());
+    let _ = deep;
+}

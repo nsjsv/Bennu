@@ -166,6 +166,16 @@ impl ColumnsState {
         }
     }
 
+    /// 跨栏点击重置：选中集只允许存在于一栏（design 决策），点击切栏
+    /// 时其余栏的选中集与锚点全部熄灭。
+    fn clear_selection_except(&mut self, lane: usize) {
+        for other in 0..self.lanes.len() {
+            if other != lane {
+                self.clear_selection(other);
+            }
+        }
+    }
+
     fn set_hovered(&mut self, lane: usize, index: Option<usize>) {
         if let Some(state) = self.lanes.get_mut(lane) {
             state.hovered = index;
@@ -237,6 +247,12 @@ impl PickerSession {
     /// 行高亮 = 本栏选中集 ∪ 本栏键盘光标（唯一高亮规则，与列表
     /// `row_highlighted` 同一契约）。
     pub(crate) fn columns_row_highlighted(&self, lane: usize, index: usize) -> bool {
+        // 强调色只归焦点栏：父层级的被点开目录行走 open_child 态
+        // （主软件语义），非焦点栏的残留光标/选中不亮，否则栏链每层
+        // 都是绿的。
+        if lane != self.columns.focused() {
+            return false;
+        }
         self.columns.selection(lane).contains(&index) || self.columns.cursor(lane) == Some(index)
     }
 
@@ -296,6 +312,9 @@ impl PickerSession {
             return SessionEffect::None;
         };
         self.columns.set_focus(lane);
+        // 选中集只允许存在于一栏：切栏即清其它栏（design 决策），
+        // 否则旧栏残留选中在焦点回移时复活成第二个强调色。
+        self.columns.clear_selection_except(lane);
         self.columns.place_cursor(lane, index);
         self.columns_apply_click_semantics(lane, index, ctrl, shift, &entry);
         if entry.kind == FileKind::Directory && !self.is_trash_view() {
@@ -456,6 +475,8 @@ impl PickerSession {
             return SessionEffect::None;
         };
         self.columns.set_focus(lane);
+        // 同 columns_entry_clicked：跨栏落点重置其它栏选中集。
+        self.columns.clear_selection_except(lane);
         self.columns.place_cursor(lane, index);
         self.columns_apply_click_semantics(lane, index, false, false, &entry);
         self.columns_reveal_cursor(lane)

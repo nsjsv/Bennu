@@ -1,5 +1,5 @@
 //! 地址栏视图：导航按钮组（后退/前进/上级）+ 面包屑 ↔ 编辑渐变主体 +
-//! 路径补全浮层 + 过滤器。拼装结构从主软件 `view/address_bar.rs` 裁掉
+//! 路径补全浮层。拼装结构从主软件 `view/address_bar.rs` 裁掉
 //! 拖放/trash/主软件滚动区特判后移植；消息换 `SessionMessage`，视觉
 //! 词汇（弹性面包屑、样式、图标）全部来自 bennu-theme 共享层。
 
@@ -22,12 +22,9 @@ use bennu_theme::styles::{
     scale_color_alpha, selected_path_suggestion_item_style, subtle_border_color,
 };
 use iced::widget::{
-    button, container, mouse_area, opaque, pick_list, responsive, scrollable, stack, text_input,
-    Column, Space,
+    button, container, mouse_area, opaque, responsive, scrollable, stack, text_input, Column,
 };
-use iced::{
-    alignment, mouse, Alignment, Background, Border, Color, Element, Length, Padding, Theme,
-};
+use iced::{alignment, mouse, Alignment, Background, Border, Color, Element, Length, Theme};
 
 use crate::picker_session::scrollbar::{scroll_id, scrollbar_on_scroll, ScrollbarViewport};
 use crate::picker_session::{PickerSession, SessionMessage, SessionScrollRegion};
@@ -53,40 +50,12 @@ pub(crate) fn address_input_id(request_path: &str) -> iced::widget::Id {
 
 pub(super) fn navigation_bar(
     session: &PickerSession,
-    theme: &Theme,
     emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'static,
 ) -> Element<'static, SessionMessage> {
+    // 过滤器下拉在确认栏（view.rs confirm_footer），地址栏行尾只留面包屑。
     let mut bar = iced::widget::row![].spacing(6).align_y(Alignment::Center);
     bar = bar.push(navigation_button_group(session, emit.clone()));
-    bar = bar.push(address_bar(session, emit.clone()));
-
-    if session.filters().len() > 1 {
-        let labels: Vec<String> = session
-            .filters()
-            .iter()
-            .map(|rule| rule.name.clone())
-            .collect();
-        let known_labels = labels.clone();
-        let current = Some(session.active_filter_label());
-        bar = bar.push(Space::new().width(Length::Fill));
-        bar = bar.push(
-            pick_list(labels, current, move |picked: String| {
-                match known_labels.iter().position(|label| *label == picked) {
-                    Some(rule) => emit(SessionMessage::FilterSelected { rule }),
-                    None => emit(SessionMessage::FilterSelectionIgnored),
-                }
-            })
-            .text_size(13.0)
-            .padding(Padding::new(6.0)),
-        );
-    } else {
-        bar = bar.push(Space::new().width(Length::Fill));
-        bar = bar.push(
-            readable_label(session.active_filter_label())
-                .size(13)
-                .color(muted_text_color(theme)),
-        );
-    }
+    bar = bar.push(address_bar(session, emit));
 
     container(bar)
         .width(Length::Fill)

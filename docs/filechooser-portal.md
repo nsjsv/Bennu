@@ -78,7 +78,18 @@ xdg-desktop-portal-gtk 的常驻形态一致）。
   （`~/.local/share/dbus-1/services/org.freedesktop.impl.portal.desktop.bennu.service`）
   由脚本幂等维护 `SystemdService=bennu-portal-dev.service` 一行，
   已有手写内容（如自定义 `Exec=`）保持不变；
+- portal 进程在启动第一步设定渲染链（核显 → 独显 → 软件渲染）：
+  `ICED_BACKEND=wgpu,tiny-skia`，并把 wgpu 首选钉在驱动显示器的 GPU（与主软件
+  DisplayGpu 偏好同配方：`WGPU_POWER_PREF` + `MESA_VK_DEVICE_SELECT` +
+  `VK_LOADER_DRIVERS_SELECT`，检测逻辑在独立 crate `display-renderer`，
+  纯 sysfs 读取）。已存在的同名环境变量不覆盖，保留运维/实验入口。共享主题库
+  renderer-neutral，renderer 选择由各进程自己负责，避免 systemd、
+  D-Bus activation 和手动启动出现不同结果；
 - `systemctl --user enable` 挂到 `graphical-session.target`，登录自启。
+
+这个设置只选择 portal 的 renderer，不创建隐藏窗口，也不改变每次请求创建真实选择
+窗口的语义。安装包和 dev unit 不重复声明环境变量，避免 renderer 选择分散在多个
+启动入口。
 
 ### 升级流程
 

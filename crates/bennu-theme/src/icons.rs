@@ -5,6 +5,8 @@ use file_core::FileKind;
 use iced::widget::{svg, Svg};
 use iced::{Length, Theme};
 
+use crate::styles::{icon_svg_style, selected_icon_svg_style, warning_icon_svg_style};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IconSymbol {
     ArrowDown,
@@ -227,6 +229,28 @@ impl IconSymbol {
             Self::Volume2 => VOLUME_2_ICON,
         }
     }
+}
+
+/// 图标语义色调：常规/选中/警示三档，主程序视图与 portal 同源消费。
+#[derive(Debug, Clone, Copy)]
+pub enum IconTone {
+    Normal,
+    Selected,
+    Warning,
+}
+
+/// 色调 → svg 着色样式函数（自主程序 app-ui view.rs 原样搬移）。
+pub fn icon_tone_style(tone: IconTone) -> fn(&Theme, svg::Status) -> svg::Style {
+    match tone {
+        IconTone::Normal => icon_svg_style(),
+        IconTone::Selected => selected_icon_svg_style(),
+        IconTone::Warning => warning_icon_svg_style(),
+    }
+}
+
+/// 按语义色调渲染的图标（自主程序 app-ui view.rs 原样搬移）。
+pub fn themed_icon(symbol: IconSymbol, tone: IconTone, size: f32) -> Svg<'static, Theme> {
+    symbol.view(size).style(icon_tone_style(tone))
 }
 
 const CHEVRON_RIGHT_ICON: &[u8] = include_bytes!("../assets/icons/lucide/chevron-right.svg");

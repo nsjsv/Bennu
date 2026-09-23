@@ -14,11 +14,13 @@ use crate::animated_image_preview::{
 use crate::config;
 use crate::model::{
     BrowserPaneId, BrowserPaneLayout, BrowserViewMode, LoadedOperationStore, Message,
-    PreviewContent, PreviewSize, PreviewState, PreviewWindowChromeState, SettingsCategory,
+    PreviewContent, PreviewSize, PreviewState, PreviewWindowProfile, SettingsCategory,
     SettingsSubpage, SplitAxis, WindowChromeLayout, WindowFrameState, WINDOW_TOP_BAR_HEIGHT,
 };
 use crate::operation_history::FileOperationCompletion;
 use crate::operation_queue::{QueuedFileOperation, QueuedTransfer};
+use bennu_preview::engine::preview_window_settings;
+use bennu_preview::preview::PreviewWindowChromeState;
 
 const FLOAT_TOLERANCE: f32 = 0.01;
 
@@ -165,6 +167,7 @@ fn every_application_window_disables_native_decorations() {
     let preview = preview_window_settings(
         PreviewWindowProfile::Regular,
         default_preview_size(PreviewWindowProfile::Regular),
+        &preview_window_identity(),
     );
 
     assert!(!main.decorations);
@@ -205,7 +208,11 @@ fn auxiliary_windows_keep_one_content_size_across_global_chrome_layouts() {
         );
 
         let content_size = default_preview_size(PreviewWindowProfile::Regular);
-        let preview = preview_window_settings(PreviewWindowProfile::Regular, content_size);
+        let preview = preview_window_settings(
+            PreviewWindowProfile::Regular,
+            content_size,
+            &preview_window_identity(),
+        );
         assert_close(preview.size.width, content_size.width);
         assert_close(preview.size.height, content_size.height);
     }

@@ -656,7 +656,10 @@ mod tests {
         assert_eq!(
             environment,
             HashMap::from([
-                (ICED_BACKEND_ENV.to_owned(), Some("wgpu".to_owned())),
+                (
+                    ICED_BACKEND_ENV.to_owned(),
+                    Some("wgpu,tiny-skia".to_owned())
+                ),
                 (MESA_VK_DEVICE_SELECT_ENV.to_owned(), None),
                 (
                     WGPU_BACKEND_ENV.to_owned(),
@@ -673,7 +676,10 @@ mod tests {
         for backend in [StartupRenderingBackend::Vulkan, StartupRenderingBackend::Gl] {
             let environment = StartupRenderingEnvironment::fast_default(backend);
 
-            assert_eq!(environment.variable_value(ICED_BACKEND_ENV), Some("wgpu"));
+            assert_eq!(
+                environment.variable_value(ICED_BACKEND_ENV),
+                Some("wgpu,tiny-skia")
+            );
             assert_eq!(
                 environment.variable_value(WGPU_BACKEND_ENV),
                 Some(backend.environment_value())
@@ -704,7 +710,10 @@ mod tests {
             StartupRenderingBackend::Vulkan,
         );
 
-        assert_eq!(environment.variable_value(ICED_BACKEND_ENV), Some("wgpu"));
+        assert_eq!(
+            environment.variable_value(ICED_BACKEND_ENV),
+            Some("wgpu,tiny-skia")
+        );
         assert_eq!(environment.variable_value(WGPU_BACKEND_ENV), Some("vulkan"));
         assert_eq!(environment.variable_value(WGPU_POWER_PREF_ENV), Some("low"));
         assert_eq!(
@@ -792,7 +801,10 @@ mod tests {
             StartupRenderingBackend::Gl,
         );
 
-        assert_eq!(environment.variable_value(ICED_BACKEND_ENV), Some("wgpu"));
+        assert_eq!(
+            environment.variable_value(ICED_BACKEND_ENV),
+            Some("wgpu,tiny-skia")
+        );
         assert_eq!(environment.variable_value(WGPU_BACKEND_ENV), Some("gl"));
         assert_eq!(
             environment.variable_value(WGPU_POWER_PREF_ENV),
@@ -808,7 +820,10 @@ mod tests {
             StartupRenderingBackend::Gl,
         );
 
-        assert_eq!(environment.variable_value(ICED_BACKEND_ENV), Some("wgpu"));
+        assert_eq!(
+            environment.variable_value(ICED_BACKEND_ENV),
+            Some("wgpu,tiny-skia")
+        );
         assert_eq!(environment.variable_value(WGPU_BACKEND_ENV), Some("gl"));
         assert_eq!(
             environment.variable_value(WGPU_POWER_PREF_ENV),
@@ -869,7 +884,7 @@ mod tests {
         let environment =
             StartupRenderingEnvironment::fast_default(StartupRenderingBackend::Vulkan);
         let mut current_environment = HashMap::new();
-        current_environment.insert(ICED_BACKEND_ENV, Some("wgpu"));
+        current_environment.insert(ICED_BACKEND_ENV, Some("wgpu,tiny-skia"));
         current_environment.insert(WGPU_BACKEND_ENV, Some("vulkan"));
         current_environment.insert(WGPU_POWER_PREF_ENV, Some("none"));
         current_environment.insert(MESA_VK_DEVICE_SELECT_ENV, None);

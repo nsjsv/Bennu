@@ -1,0 +1,79 @@
+[package]
+name = "bennu-preview"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# 渲染器 feature 由宿主决定（app-ui=wgpu、portal-backend=tiny-skia），
+# workspace 的 iced 定义带 wgpu 且 feature 只能追加不能削减，故此处单独
+# 声明最小 feature：本 crate 模型层只需要 core 类型（Point/Size/mouse），
+# 不得把渲染器（wgpu/tiny-skia）强加给任何宿主——feature 会与宿主并集，
+# 追加 tiny-skia 会把宿主的默认 Compositor 换成 fallback 组合。
+# x11/wayland 必须开：iced 无条件依赖 iced_winit，Linux 上无平台 feature
+# 的 winit 直接编译失败；tokio 是 iced 强制的 executor 选择，两个宿主
+# 都用 tokio，feature 与宿主并集不会引入第二套运行时。代价是单独
+# release 构建本 crate 会触发
+# iced_renderer "no renderer" 的 compile_error，但本 crate 从不脱离宿主
+# 单独 release（宿主必然带渲染器 feature，联合构建即恢复）。
+iced = { version = "0.14", default-features = false, features = [
+    "x11",
+    "wayland",
+    "tokio",
+    # image/svg 是 widget 层 feature（iced::widget::image/svg 模块与 Handle
+    # 类型），不是渲染器选择：迁移进来的预览模型持有 image::Handle /
+    # svg::Handle。workspace 的 iced 定义本就含这两个 feature，联合构建
+    # 时 feature 并集不变，宿主渲染器不受影响。
+    "image",
+    "svg",
+] }
+# 预览运行时依赖（版本与 app-ui 原声明一致，随模块一并下沉）：
+# rodio=音频预览输出；tokio=spawn_blocking 音频/动图解码线程池。
+rodio = "0.22.2"
+tokio.workspace = true
+# 动图预览：image=GIF 帧解码（workspace 定义含 gif codec）；gif=跳帧
+# 元数据巡检（Duration 上限判定）。
+image.workspace = true
+gif = "0.14.2"
+# 文档预览模型：tokio-util=渲染取消令牌；tempfile/url=LibreOffice 会话
+# 隔离工作区（私有临时目录与 UserInstallation URL）。
+tokio-util.workspace = true
+tempfile.workspace = true
+url.workspace = true
+# 预览聚合模型：file-core=目录条目/文件种类；bennu-theme=缓动算法单源
+# （见 src/animation.rs 注释）。
+file-core = { path = "../file-core" }
+bennu-theme = { path = "../bennu-theme" }
+# 预览偏好存储 DTO 与 USER_PREFERENCES_KEY 单源：serde 定义必须住在
+# 本 crate 之下的最低层（bennu-preview → bennu-theme →
+# file-operation-store，放宿主侧会成环）；「存储形态 → 域类型」的迁移
+# 组合语义在本 crate preview_config，两个宿主（app-ui/portal）共用。
+file-operation-store = { path = "../file-operation-store" }
+# 命令/加载层随迁依赖（版本与 app-ui 原声明一致）：
+# thumbnails=图片尺寸探测/EXIF 方向换算；resvg+roxmltree=SVG 原图预览；
+# blake3=远程缓存条目签名；dirs=缓存目录默认位置；rusqlite(bundled)=
+# SQLite 预览只读加载层。
+thumbnails = { path = "../thumbnails" }
+resvg.workspace = true
+roxmltree = "0.20.0"
+blake3.workspace = true
+dirs.workspace = true
+rusqlite = { version = "0.32.1", features = ["bundled"] }
+# preview_config 从主软件 state.sqlite 的 JSON 载荷解析预览偏好段。
+serde_json.workspace = true
+# libc=文档工具子进程按进程组终止（SIGKILL/-pgid）；bennu-subprocess=
+# 受限子进程输出读取（document_preview/process 与 app-ui 日志查询共用
+# 边界，spec：.trellis/spec/app-ui/bounded-child-output.md）。
+libc = "0.2"
+bennu-subprocess = { path = "../bennu-subprocess" }
+# 面板文本辅助的翻译单源（translate_current）。
+bennu-localization = { path = "../bennu-localization" }
+# Markdown 预览渲染（自 app-ui 随面板下沉，版本与 app-ui 原声明一致）。
+pulldown-cmark = "0.13.4"
+# tracing=图片预览视口交互的调试日志（迁移自 app-ui，target 名不变）。
+tracing.workspace = true
+
+[dev-dependencies]
+# 仅测试用：把 Task 还原成动作流断言窗口/输出动作（自 app-ui 迁入的
+# 初始 chrome 计时命令测试依赖）。
+iced_runtime = "0.14"

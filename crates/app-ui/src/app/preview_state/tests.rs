@@ -59,7 +59,7 @@ fn original_result_replaces_loading_preview_with_raster_content() {
         browser.accept_original_image_preview(path.clone(), generation, Ok(raster_result()));
 
     assert!(matches!(
-        browser.preview,
+        &browser.preview,
         Some(PreviewState::Ready(PreviewContent::Image(
             ImagePreviewContent::OriginalRaster {
                 width: 4,
@@ -90,7 +90,7 @@ fn original_result_replaces_thumbnail_placeholder() {
         browser.accept_original_image_preview(path.clone(), generation, Ok(raster_result()));
 
     assert!(matches!(
-        browser.preview,
+        &browser.preview,
         Some(PreviewState::Ready(PreviewContent::Image(
             ImagePreviewContent::OriginalRaster {
                 placeholder_handle,
@@ -141,8 +141,8 @@ fn original_failure_preserves_path_for_retry() {
 
     drop(browser.retry_image_preview(path.clone()));
     assert!(matches!(
-        browser.preview,
-        Some(PreviewState::Loading(current)) if current == path
+        &browser.preview,
+        Some(PreviewState::Loading(current)) if current == &path
     ));
 }
 
@@ -271,13 +271,15 @@ fn directory_preview_content(root: &Path, names: &[(&str, FileKind)]) -> Preview
                 FileKind::Directory => directory_entry_at(&path),
                 _ => file_entry_at(&path),
             };
-            crate::model::PreviewTreeEntry::from_directory_entry(index, entry, 0, None)
+            bennu_preview::preview::PreviewTreeEntry::from_directory_entry(index, entry, 0, None)
         })
         .collect();
     PreviewContent::Directory { entries }
 }
 
-fn ready_directory_entries(browser: &FileBrowser) -> &Vec<crate::model::PreviewTreeEntry> {
+fn ready_directory_entries(
+    browser: &FileBrowser,
+) -> &Vec<bennu_preview::preview::PreviewTreeEntry> {
     match &browser.preview {
         Some(PreviewState::Ready(PreviewContent::Directory { entries, .. })) => entries,
         _ => panic!("directory preview expected"),

@@ -3,10 +3,35 @@
 
 use std::path::PathBuf;
 
+use file_core::entry::DirectoryEntry;
+
 use super::{DirectoryListing, PickerSession};
+
+/// 列表行高与行间距：行几何常量的唯一真值（PickerRow 所在地），view/
+/// thumbnails/keyboard_nav 共用，消除各自硬编码的漂移。
+pub(crate) const LIST_ROW_HEIGHT: f32 = 28.0;
+/// 列表行间距：view.rs 列容器的 spacing 同值。
+pub(crate) const LIST_ROW_SPACING: f32 = 2.0;
+/// 列表行几何步长：行高 + 列间距。滚动
+/// 偏移按行数累积成 offset = index × 步长，必须用步长而不是裸行高换算
+/// ——间距会随行数累积成漂移，深滚动位置下可见余量会被它吃掉。
+pub(crate) const LIST_ROW_STRIDE: f32 = LIST_ROW_HEIGHT + LIST_ROW_SPACING;
 
 /// 展开动画每帧步进：60Hz 下单程约 165ms，与主应用列表展开节奏一致。
 const EXPANSION_ANIMATION_STEP: f32 = 0.18;
+
+/// 扁平化后的可见行：根条目与已展开子级按深度排列。行模型与展开
+/// 动画字段（height/expand_progress）同属行几何语义，放本模块。
+pub(crate) struct PickerRow {
+    pub(crate) entry: DirectoryEntry,
+    pub(crate) depth: usize,
+    /// 本行自身高度比例：祖先展开进度的级联（本行不裁自己），驱动
+    /// 行高裁剪动画；根行恒 1.0。
+    pub(crate) height_progress: f32,
+    /// 本行目录自身的展开动画进度（0=未展开，1=完全展开），驱动
+    /// 箭头旋转；非目录或未展开行恒 0。
+    pub(crate) expand_progress: f32,
+}
 
 /// 一个已展开目录的子内容（访达语义：子级按父深度 +1 缩进）。
 pub(crate) struct ExpansionState {

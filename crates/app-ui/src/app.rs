@@ -97,7 +97,12 @@ use iced::keyboard;
 use iced::window;
 use iced::{time, Element, Point, Subscription, Task, Theme};
 
-use crate::animated_image_preview::animated_image_preview_subscription;
+// 媒体预览流式订阅（自本 crate 订阅桥下沉 bennu-preview 后直连）：
+// 输出 PreviewMessage，经 Message::Preview 包装回流引擎。
+use bennu_preview::animated_image_preview::animated_image_preview_subscription;
+use bennu_preview::engine::{audio_preview_tick_subscription, video_preview_tick_subscription};
+use bennu_preview::video_preview::video_preview_subscription;
+
 use crate::app::application_shutdown::ApplicationShutdownPhase;
 use crate::app::archive_creation::ArchiveCreationState;
 use crate::app::archive_extraction::ArchiveExtractionState;
@@ -105,9 +110,6 @@ use crate::app::checksum::ChecksumState;
 use crate::app::column_resize::ColumnResizeDrag;
 use crate::app::convert::ConvertState;
 use crate::app::events::global_event_message;
-use crate::app::preview_state::PendingPreviewThumbnailDisplay;
-use crate::app::preview_state::SqlitePreviewState;
-use crate::app::preview_state::SqliteTablesResizeDrag;
 use crate::app::runtime::{
     desktop_activation_subscription, directory_watch_subscription, matugen_theme_subscription,
     sidebar_device_refresh_subscription, system_theme_command, wayland_file_dnd_subscription,
@@ -130,25 +132,22 @@ use crate::commands::{
 };
 use crate::config;
 use crate::config::UiLanguage;
-use crate::document_preview::PendingDocumentPreview;
 use crate::localization;
 use crate::matugen_theme::{fallback_theme, AppearanceMode, ApplicationTheme};
 use crate::model::search::SearchWorkspaceState;
 use crate::model::{
-    empty_directory_entry_snapshot, ApplicationLogViewState, AudioPreviewPlayback,
-    BatchRenameState, BreadcrumbDropTargetBounds, BrowserPane, BrowserPaneId, BrowserPaneLayout,
-    BrowserTab, BrowserViewMode, ColumnBrowserViewport, ColumnEntryBounds,
-    ContextMenuSettingsDragState, ContextMenuSettingsPage, ContextMenuState,
-    DestructiveActionConfirmation, DirectoryCollectionPhase, DirectoryEntrySnapshot,
-    DirectoryLoadingPlaceholder, DirectoryOrderPhase, ExpandedDirectory, FileAreaMenuItem,
-    FileDragSpringHover, FileDragState, FileDropPrompt, FileDropSessionState, FilePropertiesState,
-    IconGridExpansionState, IconGridViewport, ImagePreviewViewport, ListColumnKind, Message,
-    PaneAddressBarTransition, PaneAddressEditingSession, PaneDragPointerPress, PaneDragState,
-    PendingOperation, PreviewSize, PreviewState, PreviewWindowChromeState, PreviewWindowProfile,
+    empty_directory_entry_snapshot, ApplicationLogViewState, BatchRenameState,
+    BreadcrumbDropTargetBounds, BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab,
+    BrowserViewMode, ColumnBrowserViewport, ColumnEntryBounds, ContextMenuSettingsDragState,
+    ContextMenuSettingsPage, ContextMenuState, DestructiveActionConfirmation,
+    DirectoryCollectionPhase, DirectoryEntrySnapshot, DirectoryLoadingPlaceholder,
+    DirectoryOrderPhase, ExpandedDirectory, FileAreaMenuItem, FileDragSpringHover, FileDragState,
+    FileDropPrompt, FileDropSessionState, FilePropertiesState, IconGridExpansionState,
+    IconGridViewport, ListColumnKind, Message, PaneAddressBarTransition, PaneAddressEditingSession,
+    PaneDragPointerPress, PaneDragState, PendingOperation, PreviewState, PreviewWindowProfile,
     ScrollbarRegion, SearchServiceState, SelectionMarquee, SettingsCategory, SettingsSubpage,
     SidebarBookmarkDragState, SidebarBookmarkDropSlot, SidebarLocation,
-    StartupDirectoryValidationRequest, TabDragState, TextPreviewDocument, TransferConflictState,
-    TrashRefreshState, VideoPreviewPlayback,
+    StartupDirectoryValidationRequest, TabDragState, TransferConflictState, TrashRefreshState,
 };
 use crate::network_connections::{NetworkConnectionEditorState, NetworkConnectionState};
 use crate::open_with::OpenWithState;
@@ -159,7 +158,6 @@ use crate::sidebar_devices::SidebarDeviceState;
 use crate::startup_rendering::StartupRenderingEnvironment;
 use crate::startup_trace;
 use crate::thumbnail_cache::{ColumnViewport, ThumbnailCache};
-use crate::video_preview::video_preview_subscription;
 use crate::view::{
     auxiliary_window_content, floating_preview_window_content, view_browser,
     view_properties_window, view_settings_window, window_resize_frame,
@@ -168,7 +166,6 @@ const DOUBLE_CLICK_THRESHOLD: Duration = Duration::from_millis(500);
 const POINTER_DRAG_ACTIVATION_DISTANCE: f32 = 3.0;
 const PREVIEW_TREE_ANIMATION_INTERVAL: Duration = crate::ui_pacing::FRAME_INTERVAL_60HZ;
 const OPERATION_PROGRESS_ANIMATION_INTERVAL: Duration = Duration::from_millis(80);
-const AUDIO_PREVIEW_TICK_INTERVAL: Duration = Duration::from_millis(250);
 const NETWORK_STATUS_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 const SEARCH_SERVICE_STATUS_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 const APPLICATION_LOG_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
@@ -201,47 +198,22 @@ pub(crate) struct FileBrowser {
     pub(crate) hovered_sidebar_device: Option<StorageDeviceId>,
     pub(crate) hovered_network_connection: Option<NetworkConnectionId>,
     cursor_paste_directory: Option<PathBuf>,
-    pub(crate) preview: Option<PreviewState>,
-    pending_document_preview: Option<PendingDocumentPreview>,
-    document_preview_generation: u64,
-    remote_preview_download_cancel: Option<tokio_util::sync::CancellationToken>,
-    pub(crate) text_preview_document: Option<TextPreviewDocument>,
-    animated_image_preview_generation: u64,
-    original_image_preview_generation: u64,
-    original_image_preview_cancel: Option<tokio_util::sync::CancellationToken>,
-    pending_preview_thumbnail_display: Option<PendingPreviewThumbnailDisplay>,
-    remote_preview_download_generation: u64,
-    text_preview_generation: u64,
+    /// 预览状态机聚合体（bennu-preview）：原散在本结构上的 28 个预览
+    /// 字段已迁入引擎；经下方 Deref 垫片透出，未迁 impl 块/视图/测试的
+    /// `self.preview` 等字段访问零改动。仍留宿主的预览相关字段是
+    /// `right_preview_panel_*` 四个（见结构体后段，类型在未迁的
+    /// right_preview_panel 视图模块）。
+    pub(crate) preview_engine: bennu_preview::engine::PreviewEngine,
     directory_load_generation: u64,
-    pub(crate) sqlite_preview: Option<SqlitePreviewState>,
-    sqlite_preview_generation: u64,
-    sqlite_tables_resize_drag: Option<SqliteTablesResizeDrag>,
     directory_load_cancel: Option<tokio_util::sync::CancellationToken>,
     next_directory_metadata_request_generation: u64,
     directory_metadata_in_flight: HashSet<DirectoryMetadataDemandKey>,
     selection_metadata_signature: u64,
-    pub(crate) audio_preview: Option<AudioPreviewPlayback>,
-    pub(crate) video_preview: Option<VideoPreviewPlayback>,
-    pub(crate) preview_size: PreviewSize,
-    pub(crate) text_preview_content_height: f32,
-    pending_preview_resize: Option<PreviewSize>,
-    preview_window_profile: PreviewWindowProfile,
-    preview_window_pinned: bool,
-    // 当前预览窗口展示的目标路径；Ready 态的目录/归档/原图变体不携带路径，
-    // 空格 toggle 需要它判断“预览的仍是当前选中项”。
-    preview_shown_path: Option<PathBuf>,
-    preview_window_chrome: PreviewWindowChromeState,
-    preview_window_bottom_controls: PreviewWindowChromeState,
-    preview_window_drag_active: bool,
-    preview_window_pointer_y: Option<f32>,
-    preview_image_viewport: ImagePreviewViewport,
-    preview_window_initial_chrome_generation: u64,
     main_window: window::Id,
     maximized_windows: HashSet<window::Id>,
     wayland_dnd: Option<wayland_dnd::WaylandDndRuntime>,
     x11_dnd: Option<x11_dnd::X11DndRuntime>,
     file_manager_activation: Option<Arc<DesktopActivationRuntime>>,
-    preview_window: Option<window::Id>,
     focused_window: window::Id,
     system_focused_window: Option<window::Id>,
     pub(crate) thumbnail_cache: ThumbnailCache,
@@ -273,7 +245,6 @@ pub(crate) struct FileBrowser {
     pub(crate) right_preview_preview_ratio: f32,
     pub(crate) right_preview_panel_info: Option<crate::model::RightPreviewPanelInfoSnapshot>,
     right_preview_ratio_resize_drag: Option<right_preview_panel::RightPreviewPanelRatioDrag>,
-    preview_load_surface: right_preview_panel::PreviewLoadSurface,
     pub(crate) renaming: Option<PathBuf>,
     pending_created_entry_rename: Option<PathBuf>,
     pub(crate) pending_operation: Option<PendingOperation>,
@@ -416,6 +387,29 @@ pub(crate) struct FileBrowser {
     next_list_expansion_follow_session_id: u64,
     application_theme: ApplicationTheme,
     application_shutdown_phase: ApplicationShutdownPhase,
+}
+
+// 迁移期组合垫片：预览字段与状态机方法已聚合进 bennu-preview 的
+// PreviewEngine（preview_state impl 块全部迁毕），FileBrowser 经 Deref
+// 透出，让未迁视图/宿主运行时/测试的 `self.preview` 等字段访问与引擎
+// 方法解析保持零改动（FileBrowser 自身方法与字段优先）。垫片收缩
+// 清单（批 4b-2 盘点）：view/preview_panel 等六个视图约 200 处、
+// app 运行时（update/pointer_interactions/window_chrome/shortcuts/
+// application_shutdown/windows）约 80 处、app-ui 侧测试约 30 处——
+// 视图组（批 5）迁移后随视图一并消除（任务 design.md「组合转发，
+// 不保留平行副本」）。
+impl std::ops::Deref for FileBrowser {
+    type Target = bennu_preview::engine::PreviewEngine;
+
+    fn deref(&self) -> &Self::Target {
+        &self.preview_engine
+    }
+}
+
+impl std::ops::DerefMut for FileBrowser {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.preview_engine
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -569,6 +563,13 @@ impl FileBrowser {
         let initial_search_service_request = search_service.begin_initial_status_request();
         let mut initial_tab = BrowserTab::directory(0, placeholder_dir.clone());
         initial_tab.view_mode = initial_view_mode;
+        // 引擎配置快照自 UserConfig 填充（此后每次偏好持久化同步刷新，
+        // 见 config_persistence.rs），预览域行为参数单一来源仍是持久化层。
+        let preview_engine_config = bennu_preview::engine::PreviewEngineConfig {
+            directory_expand_levels: user_config.preview_directory_expand_levels,
+            extension_rules: user_config.preview_extension_rules.clone(),
+            size_limits: user_config.preview_size_limits,
+        };
         let initial_pane = BrowserPane {
             id: BrowserPaneId::PRIMARY,
             current_dir: placeholder_dir.clone(),
@@ -615,45 +616,21 @@ impl FileBrowser {
             hovered_sidebar_device: None,
             hovered_network_connection: None,
             cursor_paste_directory: None,
-            preview: None,
-            pending_document_preview: None,
-            document_preview_generation: 0,
-            remote_preview_download_cancel: None,
-            text_preview_document: None,
-            animated_image_preview_generation: 0,
-            original_image_preview_generation: 0,
-            original_image_preview_cancel: None,
-            pending_preview_thumbnail_display: None,
-            remote_preview_download_generation: 0,
-            text_preview_generation: 0,
+            preview_engine: bennu_preview::engine::PreviewEngine::new(
+                preview_engine_config,
+                default_preview_size(PreviewWindowProfile::Regular),
+                windows::preview_window_identity(),
+            ),
             directory_load_generation: 0,
             directory_load_cancel: None,
             next_directory_metadata_request_generation: 1,
             directory_metadata_in_flight: HashSet::new(),
             selection_metadata_signature: 0,
-            audio_preview: None,
-            sqlite_tables_resize_drag: None,
-            sqlite_preview: None,
-            sqlite_preview_generation: 0,
-            video_preview: None,
-            preview_size: default_preview_size(PreviewWindowProfile::Regular),
-            text_preview_content_height: 0.0,
-            pending_preview_resize: None,
-            preview_window_profile: PreviewWindowProfile::Regular,
-            preview_window_pinned: false,
-            preview_shown_path: None,
-            preview_window_chrome: PreviewWindowChromeState::default(),
-            preview_window_bottom_controls: PreviewWindowChromeState::default(),
-            preview_window_drag_active: false,
-            preview_window_pointer_y: None,
-            preview_image_viewport: ImagePreviewViewport::default(),
-            preview_window_initial_chrome_generation: 0,
             main_window,
             maximized_windows: HashSet::new(),
             wayland_dnd: None,
             x11_dnd: None,
             file_manager_activation,
-            preview_window: None,
             focused_window: main_window,
             system_focused_window: None,
             thumbnail_cache: ThumbnailCache::new(user_config.thumbnail_cache_dir.clone()),
@@ -689,7 +666,6 @@ impl FileBrowser {
             ),
             right_preview_panel_info: None,
             right_preview_ratio_resize_drag: None,
-            preview_load_surface: right_preview_panel::PreviewLoadSurface::StandaloneWindow,
             renaming: None,
             pending_created_entry_rename: None,
             pending_operation: None,
@@ -1001,23 +977,23 @@ impl FileBrowser {
         }
 
         if self.audio_preview_is_active() {
-            subscriptions
-                .push(time::every(AUDIO_PREVIEW_TICK_INTERVAL).map(|_| Message::AudioPreviewTick));
+            subscriptions.push(audio_preview_tick_subscription().map(Message::Preview));
         }
 
         if self.video_preview_is_active() {
-            subscriptions
-                .push(time::every(AUDIO_PREVIEW_TICK_INTERVAL).map(|_| Message::VideoPreviewTick));
+            subscriptions.push(video_preview_tick_subscription().map(Message::Preview));
         }
 
         if let Some((path, generation, position)) = self.active_animated_image_preview_stream() {
-            subscriptions.push(animated_image_preview_subscription(
-                path, generation, position,
-            ));
+            subscriptions.push(
+                animated_image_preview_subscription(path, generation, position)
+                    .map(Message::Preview),
+            );
         }
 
         if let Some((path, generation, position)) = self.active_video_preview_stream() {
-            subscriptions.push(video_preview_subscription(path, generation, position));
+            subscriptions
+                .push(video_preview_subscription(path, generation, position).map(Message::Preview));
         }
 
         Subscription::batch(subscriptions)

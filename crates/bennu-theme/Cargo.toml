@@ -7,7 +7,19 @@ license.workspace = true
 [dependencies]
 file-core = { path = "../file-core" }
 file-operation-store = { path = "../file-operation-store" }
-iced.workspace = true
+# 这里只声明主题/部件编译所需的 iced core、widget 和平台 feature；renderer
+# 由宿主选择。继承 workspace 的 wgpu 会让 tiny-skia portal 变成 WGPU fallback。
+iced = { version = "0.14", default-features = false, features = [
+    "tokio",
+    "advanced",
+    "advanced-shaping",
+    "canvas",
+    "svg",
+    "image",
+    "x11",
+    "wayland",
+    "fira-sans",
+] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json.workspace = true
 tokio.workspace = true

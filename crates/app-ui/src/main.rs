@@ -28,7 +28,9 @@ mod animation;
 mod app;
 mod app_icon;
 mod appearance;
-mod audio_preview;
+// 纯搬移：音频预览运行时已下沉 bennu-preview，re-export 维持
+// crate::audio_preview::* 既有调用路径。
+pub(crate) use bennu_preview::audio_preview;
 mod breadcrumb_drop_target_bounds;
 mod column_entry_bounds;
 mod command_line;
@@ -61,31 +63,30 @@ mod operation_progress;
 mod operation_queue;
 mod operation_queue_display;
 mod operation_queue_view;
+// 纯搬移：原图预览解码管线已下沉 bennu-preview，此文件为 re-export 垫片。
 mod original_image_preview;
+// 纯搬移：空格预览分类/加载管线已下沉 bennu-preview，此文件为 re-export 垫片。
 mod preview;
-mod remote_preview_cache;
 mod runtime_logging;
 mod selection_marquee;
 mod selection_summary;
 mod shortcuts;
 mod sidebar;
 mod sidebar_devices;
-mod sqlite_preview;
 mod startup_probe_cache;
 mod startup_rendering;
 mod startup_trace;
 mod terminal_panel;
-mod text_preview;
-mod text_preview_loading;
-mod text_preview_viewer;
+// 纯搬移：文本预览模型已下沉 bennu-preview，re-export 维持
+// crate::text_preview::* 既有调用路径（model.rs 的 Message 变体、
+// commands/preview.rs 的命令适配层经由本路径消费）。
+pub(crate) use bennu_preview::text_preview;
 mod three_column_view;
 mod thumbnail_cache;
 mod transfer_placeholder_view;
 mod transfer_placeholders;
-mod translated_surface;
 mod typography;
 mod ui_pacing;
-mod video_preview;
 mod view;
 mod virtual_range;
 mod visible_entries;

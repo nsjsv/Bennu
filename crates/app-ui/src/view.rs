@@ -9,10 +9,8 @@ mod checksum;
 mod context_menu_settings;
 mod context_menu_submenu;
 mod convert;
-mod document_preview_panel;
 mod file_operation_verification_settings;
 mod floating_panels;
-mod markdown_preview;
 mod network_connections;
 mod network_settings;
 mod option_controls;
@@ -27,10 +25,8 @@ mod settings_group;
 mod settings_window;
 mod shortcut_settings;
 mod sidebar_panel;
-mod sqlite_preview_panel;
 mod tab_bar;
 pub(crate) mod tab_motion;
-mod text_preview_panel;
 mod toggle_switch;
 mod toolbar_controls;
 mod transfer_conflict;
@@ -67,8 +63,7 @@ use crate::app::smooth_scroll::smooth_scroll_id;
 use crate::app::FileBrowser;
 use crate::appearance::{
     app_content_style, column_resize_divider_style, faded_drag_preview_label_style,
-    faded_drag_preview_pill_style, icon_svg_style, selected_icon_svg_style,
-    selected_tab_item_style, tab_split_overlay_style, warning_icon_svg_style,
+    faded_drag_preview_pill_style, selected_tab_item_style, tab_split_overlay_style,
 };
 use crate::file_drag_hit_test_bounds::FileDragHitTestMarker;
 use crate::file_drag_hit_test_marker::track_file_drag_hit_test_marker;
@@ -93,10 +88,13 @@ use crate::three_column_view::column_browser_view;
 use crate::typography::readable_text;
 
 use self::network_connections::network_connection_editor_panel;
+// 图标色调词汇已下沉 bennu-theme（主程序与 portal 同源）；这里重导出
+// 保持 view 子模块 `use super::{…}` 调用点不变。
 use address_bar::address_bar;
 use archive_creation::archive_creation_panel;
 use archive_extraction::archive_extraction_panel;
 use batch_rename::batch_rename_panel;
+pub(super) use bennu_theme::icons::{icon_tone_style, themed_icon, IconTone};
 use checksum::checksum_panel;
 use convert::convert_panel;
 use floating_panels::{
@@ -1060,10 +1058,6 @@ fn tab_title_text(directory: &Path, is_trash_view: bool) -> String {
     format_middle_ellipsized_text(&title, TAB_LABEL_MAX_CHARS)
 }
 
-pub(super) fn themed_icon(symbol: IconSymbol, tone: IconTone, size: f32) -> Svg<'static, Theme> {
-    symbol.view(size).style(icon_tone_style(tone))
-}
-
 /// 图标颜色向背景色褪色(fade 0=原色,1=完全融入背景):拖拽堆叠的
 /// 后层用它做出深浅层次。
 pub(super) fn faded_themed_icon(
@@ -1089,21 +1083,4 @@ fn mix_color(from: iced::Color, to: iced::Color, t: f32) -> iced::Color {
         b: from.b + (to.b - from.b) * t,
         a: from.a,
     }
-}
-
-pub(super) fn icon_tone_style(
-    tone: IconTone,
-) -> fn(&Theme, iced::widget::svg::Status) -> iced::widget::svg::Style {
-    match tone {
-        IconTone::Normal => icon_svg_style(),
-        IconTone::Selected => selected_icon_svg_style(),
-        IconTone::Warning => warning_icon_svg_style(),
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(super) enum IconTone {
-    Normal,
-    Selected,
-    Warning,
 }

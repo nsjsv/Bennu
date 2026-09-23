@@ -95,6 +95,13 @@ impl FileBrowser {
     }
 
     pub(super) fn persist_user_preferences_command(&mut self) -> Task<Message> {
+        // 预览域设置（展开层数/后缀规则/大小上限）的变都以持久化收尾，
+        // 这里是引擎配置快照的唯一刷新点，保证引擎读到落盘值。
+        self.preview_engine.config = bennu_preview::engine::PreviewEngineConfig {
+            directory_expand_levels: self.user_config.preview_directory_expand_levels,
+            extension_rules: self.user_config.preview_extension_rules.clone(),
+            size_limits: self.user_config.preview_size_limits,
+        };
         let preferences = self.user_config.user_preferences();
         if self.user_preferences_save_in_flight {
             self.pending_user_preferences_save = Some(preferences);

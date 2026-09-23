@@ -51,7 +51,7 @@ fn detected_mode() -> bennu_theme::AppearanceMode {
     }
 }
 
-fn state_database_path() -> std::path::PathBuf {
+pub(crate) fn state_database_path() -> std::path::PathBuf {
     // 与主程序 config::default_state_database_path 同一约定：
     // $XDG_DATA_HOME/bennu/state.sqlite。
     let fallback_base = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));

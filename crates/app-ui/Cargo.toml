@@ -6,6 +6,9 @@ license.workspace = true
 
 [dependencies]
 ashpd = { version = "0.10.3", default-features = false, features = ["async-std"] }
+bennu-localization = { path = "../bennu-localization" }
+bennu-preview = { path = "../bennu-preview" }
+bennu-subprocess = { path = "../bennu-subprocess" }
 bennu-theme = { path = "../bennu-theme" }
 blake3.workspace = true
 chrono.workspace = true
@@ -15,18 +18,14 @@ dirs.workspace = true
 file-core = { path = "../file-core" }
 file-search = { path = "../file-search" }
 file-operation-store = { path = "../file-operation-store" }
-gif = "0.14.2"
 iced.workspace = true
 image.workspace = true
 libc = "0.2"
 lexopt.workspace = true
 local-send = { path = "../local-send" }
 parking_lot = "0.12"
-pulldown-cmark = "0.13.4"
 regex = "1.12.3"
-roxmltree = "0.20.0"
 resvg.workspace = true
-rodio = "0.22.2"
 rustix.workspace = true
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json.workspace = true

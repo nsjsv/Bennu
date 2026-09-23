@@ -18,28 +18,13 @@ pub const COLUMN_WIDTH_ADJUST_MODE_UNIFORM: &str = "uniform";
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StoredUserPreferences {
     pub network_list_thumbnail_downloads_enabled: bool,
-    #[serde(default)]
-    pub max_preview_file_bytes: Option<u64>,
-    #[serde(default)]
-    pub preview_text_size_bytes: Option<u64>,
-    #[serde(default)]
-    pub preview_image_size_bytes: Option<u64>,
-    #[serde(default)]
-    pub preview_video_size_bytes: Option<u64>,
-    #[serde(default)]
-    pub preview_audio_size_bytes: Option<u64>,
-    #[serde(default)]
-    pub preview_archive_size_bytes: Option<u64>,
-    #[serde(default)]
-    pub preview_document_size_bytes: Option<u64>,
-    #[serde(default)]
-    pub preview_sqlite_size_bytes: Option<u64>,
-    /// 空格预览的分类型后缀规则；None 表示旧版本数据，读取端回退内置
-    /// 默认列表。单类型内 None 同样回退默认，空列表是合法用户选择。
-    #[serde(default)]
-    pub preview_extension_rules: Option<StoredPreviewExtensionRules>,
-    #[serde(default)]
-    pub preview_directory_expand_levels: Option<u8>,
+    /// 空格预览偏好（大小上限/后缀规则/目录展开层级）。serde flatten 保持
+    /// 键在文档顶层、顺序与 null 形态不变（JSON 字节级兼容）；「存储形态
+    /// → 域类型」的迁移组合语义单源在 bennu-preview::preview_config。
+    /// 结构必须住在 file-operation-store：bennu-preview 经 bennu-theme 依赖
+    /// 本 crate，serde 定义放宿主侧会成环。
+    #[serde(flatten)]
+    pub preview: StoredPreviewPreferences,
     pub show_hidden_files: bool,
     #[serde(default = "default_language_setting")]
     pub language_setting: String,
@@ -167,10 +152,38 @@ pub struct StoredContextMenuLayouts {
     pub network_connection: StoredContextMenuLayout,
 }
 
-impl Default for StoredUserPreferences {
+/// 空格预览偏好段的存储形态：legacy 全局上限（max_preview_file_bytes，
+/// 只读迁移，新代码写 None）、分类型大小上限、后缀规则与目录展开层级。
+/// 字段声明顺序即序列化顺序，冻结为既有文档布局，不得重排。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StoredPreviewPreferences {
+    #[serde(default)]
+    pub max_preview_file_bytes: Option<u64>,
+    #[serde(default)]
+    pub preview_text_size_bytes: Option<u64>,
+    #[serde(default)]
+    pub preview_image_size_bytes: Option<u64>,
+    #[serde(default)]
+    pub preview_video_size_bytes: Option<u64>,
+    #[serde(default)]
+    pub preview_audio_size_bytes: Option<u64>,
+    #[serde(default)]
+    pub preview_archive_size_bytes: Option<u64>,
+    #[serde(default)]
+    pub preview_document_size_bytes: Option<u64>,
+    #[serde(default)]
+    pub preview_sqlite_size_bytes: Option<u64>,
+    /// 空格预览的分类型后缀规则；None 表示旧版本数据，读取端回退内置
+    /// 默认列表。单类型内 None 同样回退默认，空列表是合法用户选择。
+    #[serde(default)]
+    pub preview_extension_rules: Option<StoredPreviewExtensionRules>,
+    #[serde(default)]
+    pub preview_directory_expand_levels: Option<u8>,
+}
+
+impl Default for StoredPreviewPreferences {
     fn default() -> Self {
         Self {
-            network_list_thumbnail_downloads_enabled: false,
             max_preview_file_bytes: None,
             preview_text_size_bytes: None,
             preview_image_size_bytes: None,
@@ -181,6 +194,15 @@ impl Default for StoredUserPreferences {
             preview_sqlite_size_bytes: None,
             preview_extension_rules: None,
             preview_directory_expand_levels: None,
+        }
+    }
+}
+
+impl Default for StoredUserPreferences {
+    fn default() -> Self {
+        Self {
+            network_list_thumbnail_downloads_enabled: false,
+            preview: StoredPreviewPreferences::default(),
             show_hidden_files: false,
             language_setting: default_language_setting(),
             sidebar_width: 180.0,
@@ -438,16 +460,19 @@ mod launch_window_policy_tests {
         let parsed: StoredUserPreferences =
             serde_json::from_value(json).expect("deserialize preferences");
 
-        assert_eq!(parsed.preview_extension_rules, None);
+        assert_eq!(parsed.preview.preview_extension_rules, None);
     }
 
     #[test]
     fn preview_extension_rules_roundtrip_preserves_empty_lists() {
         let stored = StoredUserPreferences {
-            preview_extension_rules: Some(StoredPreviewExtensionRules {
-                text: Some(Vec::new()),
-                ..StoredPreviewExtensionRules::default()
-            }),
+            preview: StoredPreviewPreferences {
+                preview_extension_rules: Some(StoredPreviewExtensionRules {
+                    text: Some(Vec::new()),
+                    ..StoredPreviewExtensionRules::default()
+                }),
+                ..StoredPreviewPreferences::default()
+            },
             ..StoredUserPreferences::default()
         };
         let json = serde_json::to_value(&stored).expect("serialize preferences");
@@ -455,6 +480,7 @@ mod launch_window_policy_tests {
             serde_json::from_value(json).expect("deserialize preferences");
 
         let rules = parsed
+            .preview
             .preview_extension_rules
             .expect("stored preview rules");
         assert_eq!(rules.text, Some(Vec::new()));

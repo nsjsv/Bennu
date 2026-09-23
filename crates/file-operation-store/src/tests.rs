@@ -521,7 +521,7 @@ fn user_preferences_roundtrip_replace() {
     let (store, root) = test_store();
     assert_eq!(store.read_user_preferences().unwrap(), None);
     let defaults = StoredUserPreferences::default();
-    assert_eq!(defaults.preview_text_size_bytes, None);
+    assert_eq!(defaults.preview.preview_text_size_bytes, None);
     assert_eq!(
         (
             defaults.columns_view_density,
@@ -532,8 +532,11 @@ fn user_preferences_roundtrip_replace() {
     );
     let first = StoredUserPreferences {
         network_list_thumbnail_downloads_enabled: true,
-        max_preview_file_bytes: None,
-        preview_text_size_bytes: Some(8 * 1024 * 1024),
+        preview: StoredPreviewPreferences {
+            max_preview_file_bytes: None,
+            preview_text_size_bytes: Some(8 * 1024 * 1024),
+            ..StoredPreviewPreferences::default()
+        },
         show_hidden_files: true,
         language_setting: "chinese".to_owned(),
         sidebar_width: 248.0,
@@ -771,8 +774,8 @@ fn legacy_user_preferences_ignore_removed_search_fields() {
     assert!(preferences.network_list_thumbnail_downloads_enabled);
     assert_eq!(preferences.language_setting, "chinese");
     assert_eq!(preferences.icon_grid_size, 96);
-    assert_eq!(preferences.max_preview_file_bytes, Some(4194304));
-    assert_eq!(preferences.preview_text_size_bytes, None);
+    assert_eq!(preferences.preview.max_preview_file_bytes, Some(4194304));
+    assert_eq!(preferences.preview.preview_text_size_bytes, None);
     let _ = fs::remove_dir_all(root);
 }
 

@@ -1,0 +1,13 @@
+[package]
+name = "display-renderer"
+version = "0.3.5"
+edition = "2021"
+
+# 独立于 desktop-linux 的轻量 crate：portal-backend 与 app-ui 共用的显示
+# GPU 检测（纯 sysfs/proc 读取），避免 portal 为一个检测函数拖进
+# wayland/x11/udisks2 全家桶。
+
+[dependencies]
+
+[dev-dependencies]
+tempfile = "3"

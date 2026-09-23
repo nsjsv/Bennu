@@ -5,9 +5,9 @@ use file_core::FileOperationVerification;
 use file_operation_store::{
     StoreResult, StoredContextMenuItemEntry, StoredContextMenuLayout, StoredContextMenuLayouts,
     StoredLastSearchScope, StoredListViewColumn, StoredNetworkConnection, StoredPath,
-    StoredPreviewExtensionRules, StoredShortcutBinding, StoredSidebarFavorite,
-    StoredTrustedTransferDevice, StoredUserPreferences, StoredWindowControlPlacement,
-    TaskQueueStore,
+    StoredPreviewExtensionRules, StoredPreviewPreferences, StoredShortcutBinding,
+    StoredSidebarFavorite, StoredTrustedTransferDevice, StoredUserPreferences,
+    StoredWindowControlPlacement, TaskQueueStore,
 };
 
 use super::app_config::AppConfig;
@@ -17,12 +17,12 @@ use super::{
     app_config_dir_path, browser_view_mode_config_value, browser_view_mode_from_config_value,
     default_state_database_path, default_user_config, file_operation_verification_config_value,
     file_operation_verification_from_config_value, list_directory_size_display_mode_config_value,
-    list_directory_size_display_mode_from_config_value, normalize_preview_directory_expand_levels,
-    normalize_right_preview_panel_width, normalize_right_preview_preview_ratio,
-    normalize_sidebar_width, normalize_visible_column_count, sort_direction_config_value,
-    sort_direction_from_config_value, sort_field_config_value, sort_field_from_config_value,
-    ColumnWidthAdjustMode, LaunchWindowPolicy, PreviewExtensionRules, PreviewFileSizeLimits,
-    SidebarFavoriteConfig, TrustedTransferDevice, UiLanguageSetting, UserConfig, ViewDensityLevel,
+    list_directory_size_display_mode_from_config_value, normalize_right_preview_panel_width,
+    normalize_right_preview_preview_ratio, normalize_sidebar_width, normalize_visible_column_count,
+    sort_direction_config_value, sort_direction_from_config_value, sort_field_config_value,
+    sort_field_from_config_value, ColumnWidthAdjustMode, LaunchWindowPolicy, PreviewExtensionRules,
+    PreviewFileSizeLimits, SidebarFavoriteConfig, TrustedTransferDevice, UiLanguageSetting,
+    UserConfig, ViewDensityLevel,
 };
 use crate::matugen_theme::{ColorSchemePreset, CustomColorScheme, ThemeMode};
 use crate::model::{
@@ -34,6 +34,10 @@ use crate::model::{
 };
 use crate::network_connections::SavedNetworkConnection;
 use crate::shortcuts::ShortcutConfig;
+use bennu_preview::preview_config::{
+    preview_directory_expand_levels_from_stored, preview_extension_rules_from_stored,
+    preview_size_limits_from_stored,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct UserPreferences {
@@ -191,24 +195,28 @@ impl UserPreferences {
         let mut stored = StoredUserPreferences::default();
         stored.network_list_thumbnail_downloads_enabled =
             self.network_list_thumbnail_downloads_enabled;
-        stored.max_preview_file_bytes = None;
-        stored.preview_text_size_bytes = Some(self.preview_size_limits.text_bytes);
-        stored.preview_image_size_bytes = Some(self.preview_size_limits.image_bytes);
-        stored.preview_video_size_bytes = Some(self.preview_size_limits.video_bytes);
-        stored.preview_audio_size_bytes = Some(self.preview_size_limits.audio_bytes);
-        stored.preview_archive_size_bytes = Some(self.preview_size_limits.archive_bytes);
-        stored.preview_document_size_bytes = Some(self.preview_size_limits.document_bytes);
-        stored.preview_sqlite_size_bytes = Some(self.preview_size_limits.sqlite_bytes);
-        stored.preview_extension_rules = Some(StoredPreviewExtensionRules {
-            text: Some(self.preview_extension_rules.text.clone()),
-            image: Some(self.preview_extension_rules.image.clone()),
-            video: Some(self.preview_extension_rules.video.clone()),
-            audio: Some(self.preview_extension_rules.audio.clone()),
-            sqlite: Some(self.preview_extension_rules.sqlite.clone()),
-            archive: Some(self.preview_extension_rules.archive.clone()),
-            document: Some(self.preview_extension_rules.document.clone()),
-        });
-        stored.preview_directory_expand_levels = Some(self.preview_directory_expand_levels);
+        // 新代码写分类型键，legacy 全局键写 None（只读迁移，见
+        // bennu-preview::preview_config 的迁移语义）。
+        stored.preview = StoredPreviewPreferences {
+            max_preview_file_bytes: None,
+            preview_text_size_bytes: Some(self.preview_size_limits.text_bytes),
+            preview_image_size_bytes: Some(self.preview_size_limits.image_bytes),
+            preview_video_size_bytes: Some(self.preview_size_limits.video_bytes),
+            preview_audio_size_bytes: Some(self.preview_size_limits.audio_bytes),
+            preview_archive_size_bytes: Some(self.preview_size_limits.archive_bytes),
+            preview_document_size_bytes: Some(self.preview_size_limits.document_bytes),
+            preview_sqlite_size_bytes: Some(self.preview_size_limits.sqlite_bytes),
+            preview_extension_rules: Some(StoredPreviewExtensionRules {
+                text: Some(self.preview_extension_rules.text.clone()),
+                image: Some(self.preview_extension_rules.image.clone()),
+                video: Some(self.preview_extension_rules.video.clone()),
+                audio: Some(self.preview_extension_rules.audio.clone()),
+                sqlite: Some(self.preview_extension_rules.sqlite.clone()),
+                archive: Some(self.preview_extension_rules.archive.clone()),
+                document: Some(self.preview_extension_rules.document.clone()),
+            }),
+            preview_directory_expand_levels: Some(self.preview_directory_expand_levels),
+        };
         stored.show_hidden_files = self.show_hidden_files;
         stored.language_setting = self.language_setting.config_value().to_owned();
         stored.sidebar_width = f64::from(normalize_sidebar_width(self.sidebar_width));
@@ -312,16 +320,17 @@ impl UserPreferences {
         Self {
             network_list_thumbnail_downloads_enabled: stored
                 .network_list_thumbnail_downloads_enabled,
-            preview_size_limits: preview_size_limits_from_stored(&stored, &default_preferences),
-            preview_directory_expand_levels: stored.preview_directory_expand_levels.map_or(
-                default_preferences.preview_directory_expand_levels,
-                normalize_preview_directory_expand_levels,
+            preview_size_limits: preview_size_limits_from_stored(
+                &stored.preview,
+                default_preferences.preview_size_limits,
             ),
-            // 每类型独立回退：None 是旧版本数据或缺失类型；空列表是
-            // 用户显式清空，必须原样保留。
+            preview_directory_expand_levels: preview_directory_expand_levels_from_stored(
+                &stored.preview,
+                default_preferences.preview_directory_expand_levels,
+            ),
             preview_extension_rules: preview_extension_rules_from_stored(
-                &stored,
-                &default_preferences,
+                &stored.preview,
+                &default_preferences.preview_extension_rules,
             ),
             show_hidden_files: stored.show_hidden_files,
             language_setting: UiLanguageSetting::from_config_value(&stored.language_setting)
@@ -406,70 +415,6 @@ impl UserPreferences {
                 &stored.transfer_trusted_devices,
             ),
         }
-    }
-}
-
-fn preview_extension_rules_from_stored(
-    stored: &StoredUserPreferences,
-    default: &UserPreferences,
-) -> PreviewExtensionRules {
-    let fallback = &default.preview_extension_rules;
-    let Some(stored_rules) = &stored.preview_extension_rules else {
-        return fallback.clone();
-    };
-    let per_type = |stored: &Option<Vec<String>>, default_extensions: &Vec<String>| {
-        stored.clone().unwrap_or_else(|| default_extensions.clone())
-    };
-    PreviewExtensionRules {
-        text: per_type(&stored_rules.text, &fallback.text),
-        image: per_type(&stored_rules.image, &fallback.image),
-        video: per_type(&stored_rules.video, &fallback.video),
-        audio: per_type(&stored_rules.audio, &fallback.audio),
-        sqlite: per_type(&stored_rules.sqlite, &fallback.sqlite),
-        archive: per_type(&stored_rules.archive, &fallback.archive),
-        document: per_type(&stored_rules.document, &fallback.document),
-    }
-}
-
-fn preview_size_limits_from_stored(
-    stored: &StoredUserPreferences,
-    default: &UserPreferences,
-) -> PreviewFileSizeLimits {
-    let legacy_global_limit = stored.max_preview_file_bytes;
-    let limit = |stored_bytes: Option<u64>, default_bytes: u64| {
-        stored_bytes
-            .or(legacy_global_limit)
-            .unwrap_or(default_bytes)
-    };
-    PreviewFileSizeLimits {
-        text_bytes: limit(
-            stored.preview_text_size_bytes,
-            default.preview_size_limits.text_bytes,
-        ),
-        image_bytes: limit(
-            stored.preview_image_size_bytes,
-            default.preview_size_limits.image_bytes,
-        ),
-        video_bytes: limit(
-            stored.preview_video_size_bytes,
-            default.preview_size_limits.video_bytes,
-        ),
-        audio_bytes: limit(
-            stored.preview_audio_size_bytes,
-            default.preview_size_limits.audio_bytes,
-        ),
-        archive_bytes: limit(
-            stored.preview_archive_size_bytes,
-            default.preview_size_limits.archive_bytes,
-        ),
-        document_bytes: limit(
-            stored.preview_document_size_bytes,
-            default.preview_size_limits.document_bytes,
-        ),
-        sqlite_bytes: limit(
-            stored.preview_sqlite_size_bytes,
-            default.preview_size_limits.sqlite_bytes,
-        ),
     }
 }
 

@@ -1,30 +1,15 @@
-use iced::alignment::{Horizontal, Vertical};
-use iced::widget::{button, container, mouse_area, tooltip, Column, Row, Space, Stack};
-use iced::{mouse, window, Background, Element, Length};
+use iced::widget::{container, mouse_area, Column, Row, Space, Stack};
+use iced::{mouse, window, Element, Length};
 
-use crate::appearance::{
-    context_menu_style, floating_window_close_button_style, floating_window_control_button_style,
-    preview_window_top_gradient_style, window_close_button_style, window_control_button_style,
-    window_title_bar_style, window_top_bar_style,
-};
-use crate::icons::IconSymbol;
-use crate::matugen_theme::ui_colors;
+use crate::appearance::{window_title_bar_style, window_top_bar_style};
 use crate::model::{
-    Message, PreviewWindowChromeState, WindowChromeLayout, WindowControlKind, WindowControlSide,
-    WindowControlsConfig, WindowFrameState, WINDOW_TITLE_BAR_HEIGHT, WINDOW_TOP_BAR_HEIGHT,
+    Message, WindowChromeLayout, WindowControlKind, WindowControlSide, WindowControlsConfig,
+    WindowFrameState, WINDOW_TITLE_BAR_HEIGHT, WINDOW_TOP_BAR_HEIGHT,
 };
 
-use super::{themed_icon, window_drag_region::window_drag_region, IconTone};
-use crate::typography::{localized_text, readable_text};
+use super::window_drag_region::window_drag_region;
+use crate::typography::localized_text;
 
-const WINDOW_CONTROL_WIDTH: f32 = 36.0;
-const WINDOW_CONTROL_HEIGHT: f32 = 32.0;
-const WINDOW_CONTROL_ICON_SIZE: f32 = 12.0;
-const WINDOW_CONTROL_VERTICAL_PADDING: f32 =
-    (WINDOW_CONTROL_HEIGHT - WINDOW_CONTROL_ICON_SIZE) / 2.0;
-const WINDOW_CONTROL_HORIZONTAL_PADDING: f32 =
-    (WINDOW_CONTROL_WIDTH - WINDOW_CONTROL_ICON_SIZE) / 2.0;
-const WINDOW_CONTROL_SPACING: f32 = 2.0;
 const WINDOW_TITLE_SIDE_RESERVE: u16 = 116;
 const WINDOW_RESIZE_EDGE_WIDTH: f32 = 5.0;
 const WINDOW_RESIZE_CORNER_WIDTH: f32 = 11.0;
@@ -68,10 +53,15 @@ impl MainPaneWindowChromeRole {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-enum WindowControlPresentation {
-    Standard,
-    Floating { opacity: f32 },
+// 窗口控制按钮机件（按钮/工具提示/浮动呈现）已下沉
+// bennu-preview::preview_window_chrome（预览浮动 chrome 迁移），此处薄
+// 包装映射宿主窗口管理消息，维持 crate 内调用点签名不变。
+fn host_window_control_message(kind: WindowControlKind, window: window::Id) -> Message {
+    match kind {
+        WindowControlKind::Minimize => Message::WindowMinimizeRequested(window),
+        WindowControlKind::MaximizeRestore => Message::WindowMaximizeToggled(window),
+        WindowControlKind::Close => Message::AuxiliaryWindowCloseRequested(window),
+    }
 }
 
 pub(crate) fn window_control_group(
@@ -80,12 +70,12 @@ pub(crate) fn window_control_group(
     window: window::Id,
     frame_state: WindowFrameState,
 ) -> Element<'static, Message> {
-    window_control_group_with_presentation(
+    bennu_preview::preview_window_chrome::window_control_group(
         config,
         side,
         window,
         frame_state,
-        WindowControlPresentation::Standard,
+        &host_window_control_message,
     )
 }
 
@@ -96,110 +86,14 @@ pub(crate) fn floating_window_control_group(
     frame_state: WindowFrameState,
     opacity: f32,
 ) -> Element<'static, Message> {
-    window_control_group_with_presentation(
+    bennu_preview::preview_window_chrome::floating_window_control_group(
         config,
         side,
         window,
         frame_state,
-        WindowControlPresentation::Floating {
-            opacity: opacity.clamp(0.0, 1.0),
-        },
+        opacity,
+        &host_window_control_message,
     )
-}
-
-fn window_control_group_with_presentation(
-    config: &WindowControlsConfig,
-    side: WindowControlSide,
-    window: window::Id,
-    frame_state: WindowFrameState,
-    presentation: WindowControlPresentation,
-) -> Element<'static, Message> {
-    let mut controls = Row::new()
-        .spacing(WINDOW_CONTROL_SPACING)
-        .height(Length::Fixed(WINDOW_CONTROL_HEIGHT));
-    for placement in config
-        .placements_on(side)
-        .filter(|placement| placement.visibility().is_visible())
-    {
-        controls = controls.push(window_control_button(
-            placement.kind(),
-            window,
-            frame_state,
-            presentation,
-        ));
-    }
-    controls.into()
-}
-
-fn window_control_button(
-    kind: WindowControlKind,
-    window: window::Id,
-    frame_state: WindowFrameState,
-    presentation: WindowControlPresentation,
-) -> Element<'static, Message> {
-    let (icon, label, message) = match kind {
-        WindowControlKind::Minimize => (
-            IconSymbol::Minus,
-            "Minimize",
-            Message::WindowMinimizeRequested(window),
-        ),
-        WindowControlKind::MaximizeRestore => match frame_state {
-            WindowFrameState::Restored => (
-                IconSymbol::Square,
-                "Maximize",
-                Message::WindowMaximizeToggled(window),
-            ),
-            WindowFrameState::Maximized => (
-                IconSymbol::RestoreWindow,
-                "Restore",
-                Message::WindowMaximizeToggled(window),
-            ),
-        },
-        WindowControlKind::Close => (
-            IconSymbol::Close,
-            "Close",
-            Message::AuxiliaryWindowCloseRequested(window),
-        ),
-    };
-    let (style, opacity): (fn(&iced::Theme, button::Status) -> button::Style, f32) =
-        match (presentation, kind) {
-            (WindowControlPresentation::Floating { opacity }, WindowControlKind::Close) => {
-                (floating_window_close_button_style, opacity)
-            }
-            (WindowControlPresentation::Floating { opacity }, _) => {
-                (floating_window_control_button_style, opacity)
-            }
-            (WindowControlPresentation::Standard, WindowControlKind::Close) => {
-                (window_close_button_style, 1.0)
-            }
-            (WindowControlPresentation::Standard, _) => (window_control_button_style, 1.0),
-        };
-    let control =
-        button(themed_icon(icon, IconTone::Normal, WINDOW_CONTROL_ICON_SIZE).opacity(opacity))
-            .on_press(message)
-            .padding([
-                WINDOW_CONTROL_VERTICAL_PADDING,
-                WINDOW_CONTROL_HORIZONTAL_PADDING,
-            ])
-            .width(Length::Fixed(WINDOW_CONTROL_WIDTH))
-            .height(Length::Fixed(WINDOW_CONTROL_HEIGHT))
-            .style(move |theme, status| {
-                let mut style = style(theme, status);
-                style.background = style
-                    .background
-                    .map(|background| background.scale_alpha(opacity));
-                style.text_color = style.text_color.scale_alpha(opacity);
-                style
-            });
-
-    tooltip(
-        control,
-        container(readable_text(label).size(11))
-            .padding([5, 7])
-            .style(context_menu_style),
-        tooltip::Position::Bottom,
-    )
-    .into()
 }
 
 pub(crate) fn auxiliary_window_content<'a>(
@@ -239,61 +133,17 @@ pub(crate) fn floating_preview_window_content<'a>(
     chrome_opacity: f32,
     pinned: bool,
 ) -> Element<'a, Message> {
-    let chrome_opacity = chrome_opacity.clamp(0.0, 1.0);
-    let top_bar: Element<'a, Message> = if chrome_opacity > f32::EPSILON {
-        let controls = Row::new()
-            .spacing(10)
-            .padding(iced::Padding {
-                top: 6.0,
-                right: 8.0,
-                bottom: 10.0,
-                left: 8.0,
-            })
-            .align_y(iced::Alignment::Center)
-            .push(floating_window_control_group(
-                config,
-                WindowControlSide::Left,
-                window,
-                frame_state,
-                chrome_opacity,
-            ))
-            .push(preview_pin_button(
-                pinned,
-                WindowControlPresentation::Floating {
-                    opacity: chrome_opacity,
-                },
-            ))
-            .push(Space::new().width(Length::Fill))
-            .push(floating_window_control_group(
-                config,
-                WindowControlSide::Right,
-                window,
-                frame_state,
-                chrome_opacity,
-            ))
-            .width(Length::Fill)
-            .height(Length::Fixed(PreviewWindowChromeState::REVEAL_HEIGHT));
-        let gradient = container(Space::new())
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(move |theme| preview_window_top_gradient_style(theme, chrome_opacity));
-
-        Stack::with_children([gradient.into(), controls.into()])
-            .width(Length::Fill)
-            .height(Length::Fixed(PreviewWindowChromeState::REVEAL_HEIGHT))
-            .into()
-    } else {
-        container(Space::new())
-            .width(Length::Fill)
-            .height(Length::Fixed(PreviewWindowChromeState::REVEAL_HEIGHT))
-            .into()
-    };
-    let drag_surface = window_drag_region(top_bar, window);
-
-    Stack::with_children([content, drag_surface])
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+    bennu_preview::preview_window_chrome::floating_preview_window_content(
+        content,
+        config,
+        window,
+        frame_state,
+        chrome_opacity,
+        pinned,
+        &host_window_control_message,
+        // 标题拖动面（拖动/双击最大化）是宿主窗口管理语义，闭包注入。
+        move |top_bar| window_drag_region(top_bar, window),
+    )
 }
 
 fn window_content_with_top_bar<'a>(
@@ -343,9 +193,8 @@ fn window_top_bar(
         ));
     // 固定按钮放标题旁边：紧跟左侧控制组，位于标题左侧。
     if let Some(pinned) = preview_pin {
-        content = content.push(preview_pin_button(
+        content = content.push(bennu_preview::preview_window_chrome::preview_pin_button(
             pinned,
-            WindowControlPresentation::Standard,
         ));
     }
     let content = content
@@ -439,9 +288,8 @@ fn separate_window_title_bar(
         ));
     // 标题居中覆盖；固定按钮紧跟左侧控制组，落在标题左侧。
     if let Some(pinned) = preview_pin {
-        controls = controls.push(preview_pin_button(
+        controls = controls.push(bennu_preview::preview_window_chrome::preview_pin_button(
             pinned,
-            WindowControlPresentation::Standard,
         ));
     }
     let controls = controls
@@ -459,53 +307,6 @@ fn separate_window_title_bar(
         .width(Length::Fill)
         .height(Length::Fixed(height))
         .into()
-}
-
-// 预览固定按钮：固定时用主题 primary 高亮，点击发送 PreviewWindowPinToggled。
-fn preview_pin_button(
-    pinned: bool,
-    presentation: WindowControlPresentation,
-) -> Element<'static, Message> {
-    let (base_style, opacity): (fn(&iced::Theme, button::Status) -> button::Style, f32) =
-        match presentation {
-            WindowControlPresentation::Floating { opacity } => (
-                floating_window_control_button_style,
-                opacity.clamp(0.0, 1.0),
-            ),
-            WindowControlPresentation::Standard => (window_control_button_style, 1.0),
-        };
-    let control = button(
-        themed_icon(IconSymbol::Pin, IconTone::Normal, WINDOW_CONTROL_ICON_SIZE).opacity(opacity),
-    )
-    .on_press(Message::PreviewWindowPinToggled)
-    .padding([
-        WINDOW_CONTROL_VERTICAL_PADDING,
-        WINDOW_CONTROL_HORIZONTAL_PADDING,
-    ])
-    .width(Length::Fixed(WINDOW_CONTROL_WIDTH))
-    .height(Length::Fixed(WINDOW_CONTROL_HEIGHT))
-    .style(move |theme, status| {
-        let mut style = base_style(theme, status);
-        if pinned {
-            let colors = ui_colors(theme);
-            style.background = Some(Background::Color(colors.primary));
-            style.text_color = colors.on_primary;
-        }
-        style.background = style
-            .background
-            .map(|background| background.scale_alpha(opacity));
-        style.text_color = style.text_color.scale_alpha(opacity);
-        style
-    });
-
-    tooltip(
-        control,
-        container(readable_text(if pinned { "Unpin" } else { "Pin" }).size(11))
-            .padding([5, 7])
-            .style(context_menu_style),
-        tooltip::Position::Bottom,
-    )
-    .into()
 }
 
 pub(crate) fn window_resize_frame<'a>(
@@ -539,6 +340,7 @@ fn window_resize_zone(
     window: window::Id,
     direction: window::Direction,
 ) -> Element<'static, Message> {
+    use iced::alignment::{Horizontal, Vertical};
     let (width, height, horizontal, vertical, interaction) = match direction {
         window::Direction::North => (
             Length::Fill,

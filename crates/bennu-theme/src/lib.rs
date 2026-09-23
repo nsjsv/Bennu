@@ -22,9 +22,13 @@ pub mod anchored_popup;
 pub mod animation;
 pub mod icons;
 pub mod measured_text;
+pub mod preview_styles;
 pub mod scrollbar;
 pub mod smooth_scroll;
 pub mod styles;
+pub mod translated_surface;
+pub mod window_chrome_styles;
+pub mod window_controls;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppearanceMode {

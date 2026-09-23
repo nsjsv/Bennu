@@ -1,14 +1,12 @@
 //! 会话级滚动状态机：Mos 惯性（复用 `bennu_theme::smooth_scroll`）与
 //! mac 式滚动条显隐（主软件 `app/scrollbar.rs` 状态机的小型移植）。
-//! 视觉层、滚轮换算与布局探针都在 bennu-theme 共享层，这里只保留
-//! 显隐状态、代数戳防旧、视口缓存自愈与消息路由。
+//! 显隐状态机本体在 crate 级 `scrollbar_state`（区域泛化，预览窗滚动
+//! 管线共用）；本模块保留会话侧差异——区域枚举、widget id 命名空间与
+//! 消息路由。
 //!
 //! 多窗口约束：iced 0.14 的 widget 操作（operate/scroll_by）作用于进程
 //! 内所有窗口的控件树，widget Id 必须带会话命名空间（请求路径），
 //! 才能保证只命中本窗口的滚动容器。
-
-use std::collections::HashMap;
-use std::time::{Duration, Instant};
 
 // ScrollbarViewport 需经本模块再导出给 mod.rs 的消息定义。
 pub(crate) use bennu_theme::scrollbar::ScrollbarViewport;
@@ -22,15 +20,7 @@ use iced::widget::scrollable;
 use iced::{mouse, Task};
 
 use super::{PickerSession, SessionMessage};
-
-/// 滚动条淡入时长：与主软件 reveal 节奏一致。
-const SCROLLBAR_REVEAL_DURATION: Duration = Duration::from_millis(96);
-/// 滚动条淡出时长：与主软件 hide 节奏一致。
-const SCROLLBAR_HIDE_DURATION: Duration = Duration::from_millis(300);
-/// 淡入起始透明度下限：滚动中途反向时滑块不从零闪现。
-const SCROLLBAR_MIN_REVEAL_OPACITY: f32 = 0.12;
-/// 无输入后自动隐藏的延迟：与主软件一致。
-const SCROLLBAR_AUTO_HIDE_DURATION: Duration = Duration::from_millis(650);
+use crate::scrollbar_state::{scrollbar_auto_hide_task, ScrollbarStateMachine};
 
 /// portal 的滚动区域：文件列表（竖向）与地址栏面包屑（横向）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -41,7 +31,6 @@ pub(crate) enum SessionScrollRegion {
 
 /// 会话滚轮惯性状态机：区域枚举由本模块钉死。
 pub(crate) type SmoothScrollState = MosScrollState<SessionScrollRegion>;
-
 /// 区域 → 滚动轴向：列表竖向；面包屑是横向滚动条，主滚轮（竖向
 /// 滚动）换算为横向增量，与主软件地址栏同语义。
 pub(crate) fn scroll_axis(region: SessionScrollRegion) -> SmoothScrollAxis {
@@ -79,47 +68,9 @@ impl SessionMessage {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-enum ScrollbarOpacityAnimation {
-    Revealing {
-        started_at: Instant,
-        initial_opacity: f32,
-    },
-    Hiding {
-        started_at: Instant,
-        initial_opacity: f32,
-    },
-}
-
 /// mac 式滚动条显隐状态（主软件 ScrollbarState 的两区域移植）：
-/// 单活跃区域、代数戳防旧 hide、视口快照按区域缓存。
-#[derive(Debug)]
-pub(crate) struct SessionScrollbarState {
-    active_region: Option<SessionScrollRegion>,
-    visibility: ScrollbarVisibility,
-    auto_hide_generation: u64,
-    animation: Option<ScrollbarOpacityAnimation>,
-    viewport_by_region: HashMap<SessionScrollRegion, ScrollbarViewport>,
-}
-
-impl Default for SessionScrollbarState {
-    fn default() -> Self {
-        Self {
-            active_region: None,
-            visibility: ScrollbarVisibility::Hidden,
-            auto_hide_generation: 0,
-            animation: None,
-            viewport_by_region: HashMap::new(),
-        }
-    }
-}
-
-impl SessionScrollbarState {
-    /// 滚动条淡入/淡出是否在播放（帧时钟挂载条件之一）。
-    pub(crate) fn is_animating(&self) -> bool {
-        self.animation.is_some()
-    }
-}
+/// 状态机本体在 scrollbar_state，这里按会话区域实例化。
+pub(crate) type SessionScrollbarState = ScrollbarStateMachine<SessionScrollRegion>;
 
 /// `Scrollable::on_scroll` 回调包装：快照视口并发 `ScrollbarViewportChanged`，
 /// 内层事件继续按滚动消息路由（与主软件同名适配同构）。
@@ -160,18 +111,27 @@ impl PickerSession {
         &self,
         region: &SessionScrollRegion,
     ) -> ScrollbarVisibility {
-        if self.scrollbar.active_region.as_ref() == Some(region) {
-            self.scrollbar.visibility
-        } else {
-            ScrollbarVisibility::Hidden
-        }
+        self.scrollbar.visibility_for(region)
     }
 
     pub(crate) fn scrollbar_viewport_for(
         &self,
         region: &SessionScrollRegion,
     ) -> Option<ScrollbarViewport> {
-        self.scrollbar.viewport_by_region.get(region).copied()
+        self.scrollbar.viewport_for(region)
+    }
+
+    /// 键盘导航滚动跟随的偏移写入收口：程序化 scroll_to 不回发
+    /// on_scroll，视口缓存在此同步（真实几何由随后的布局探针回信
+    /// 纠偏）；同时打断滚轮惯性——键盘滚动即时到位，不允许惯性把
+    /// 偏移再拉走。
+    pub(crate) fn record_keyboard_list_scroll(&mut self, offset_y: f32) {
+        if let Some(mut viewport) = self.scrollbar.viewport_for(&SessionScrollRegion::List) {
+            viewport.offset_y = offset_y;
+            self.scrollbar
+                .remember_viewport(SessionScrollRegion::List, viewport);
+        }
+        self.smooth_scroll.stop();
     }
 
     /// 滚动类消息入口（main 层以 `is_scroll_message` 把关后路由）：
@@ -193,7 +153,12 @@ impl PickerSession {
                 viewport,
                 event,
             } => {
-                self.scrollbar.viewport_by_region.insert(region, viewport);
+                self.scrollbar.remember_viewport(region, viewport);
+                // 列表视口更新：可见区间变化，重算缩略图请求（main 层
+                // 在本入口返回后统一 drain 发起）。
+                if region == SessionScrollRegion::List {
+                    self.schedule_visible_thumbnails();
+                }
                 self.handle_scroll_message(*event)
             }
             SessionMessage::ScrollbarEngaged { region } => self.show_scrollbars_temporarily(region),
@@ -258,7 +223,10 @@ impl PickerSession {
         ]
     }
 
-    fn scrollbar_layout_probe_task(&self, region: SessionScrollRegion) -> Task<SessionMessage> {
+    pub(crate) fn scrollbar_layout_probe_task(
+        &self,
+        region: SessionScrollRegion,
+    ) -> Task<SessionMessage> {
         let request_path = self.request_path.clone();
         advanced_widget::operate(scrollbar_layout_probe(
             scroll_id(&request_path, region),
@@ -272,7 +240,10 @@ impl PickerSession {
         region: SessionScrollRegion,
         viewport: ScrollbarViewport,
     ) -> Vec<Task<SessionMessage>> {
-        self.scrollbar.viewport_by_region.insert(region, viewport);
+        self.scrollbar.remember_viewport(region, viewport);
+        if region == SessionScrollRegion::List {
+            self.schedule_visible_thumbnails();
+        }
         if !scrollbar_viewport_has_overflow(viewport) {
             return Vec::new();
         }
@@ -280,47 +251,14 @@ impl PickerSession {
     }
 
     fn start_scrollbar_reveal(&mut self, region: SessionScrollRegion) -> Vec<Task<SessionMessage>> {
-        let scrollbar = &mut self.scrollbar;
-        scrollbar.active_region = Some(region);
-        // 代数戳：每次 reveal 重排 auto-hide，旧延迟回信凭不匹配被丢弃。
-        scrollbar.auto_hide_generation = scrollbar.auto_hide_generation.wrapping_add(1);
-
-        let current_opacity = scrollbar.visibility.opacity();
-        if (1.0 - current_opacity) <= f32::EPSILON {
-            scrollbar.visibility = ScrollbarVisibility::Visible;
-            scrollbar.animation = None;
-        } else if !matches!(
-            scrollbar.animation,
-            Some(ScrollbarOpacityAnimation::Revealing { .. })
-        ) {
-            let initial_opacity = current_opacity.max(SCROLLBAR_MIN_REVEAL_OPACITY);
-            scrollbar.visibility = ScrollbarVisibility::with_opacity(initial_opacity);
-            scrollbar.animation = Some(ScrollbarOpacityAnimation::Revealing {
-                started_at: Instant::now(),
-                initial_opacity,
-            });
-        }
-
-        vec![scrollbar_auto_hide_task(scrollbar.auto_hide_generation)]
+        let generation = self.scrollbar.start_reveal(region);
+        vec![scrollbar_auto_hide_task(generation, |generation| {
+            SessionMessage::ScrollbarAutoHideElapsed { generation }
+        })]
     }
 
     fn start_scrollbar_hide(&mut self, generation: u64) {
-        if self.scrollbar.auto_hide_generation != generation {
-            return;
-        }
-
-        let initial_opacity = self.scrollbar.visibility.opacity();
-        if initial_opacity <= f32::EPSILON {
-            self.scrollbar.active_region = None;
-            self.scrollbar.visibility = ScrollbarVisibility::Hidden;
-            self.scrollbar.animation = None;
-            return;
-        }
-
-        self.scrollbar.animation = Some(ScrollbarOpacityAnimation::Hiding {
-            started_at: Instant::now(),
-            initial_opacity,
-        });
+        self.scrollbar.start_hide(generation);
     }
 
     fn advance_smooth_scroll(&mut self) -> Task<SessionMessage> {
@@ -347,27 +285,7 @@ impl PickerSession {
     }
 
     fn advance_scrollbar_animation(&mut self) -> Task<SessionMessage> {
-        let Some(animation) = self.scrollbar.animation else {
-            return Task::none();
-        };
-
-        let still_active = match animation {
-            ScrollbarOpacityAnimation::Revealing {
-                started_at,
-                initial_opacity,
-            } => advance_scrollbar_reveal(&mut self.scrollbar, started_at, initial_opacity),
-            ScrollbarOpacityAnimation::Hiding {
-                started_at,
-                initial_opacity,
-            } => advance_scrollbar_hide(&mut self.scrollbar, started_at, initial_opacity),
-        };
-
-        if !still_active {
-            self.scrollbar.active_region = None;
-            self.scrollbar.visibility = ScrollbarVisibility::Hidden;
-            self.scrollbar.animation = None;
-        }
-
+        self.scrollbar.advance_animation();
         Task::none()
     }
 
@@ -388,65 +306,6 @@ impl PickerSession {
         }
         tasks
     }
-}
-
-/// 650ms 无输入后回信 auto-hide；回信携带代数，重排后的旧回信被丢弃。
-fn scrollbar_auto_hide_task(generation: u64) -> Task<SessionMessage> {
-    Task::perform(
-        async move {
-            tokio::time::sleep(SCROLLBAR_AUTO_HIDE_DURATION).await;
-            generation
-        },
-        |generation| SessionMessage::ScrollbarAutoHideElapsed { generation },
-    )
-}
-
-fn advance_scrollbar_reveal(
-    scrollbar: &mut SessionScrollbarState,
-    started_at: Instant,
-    initial_opacity: f32,
-) -> bool {
-    let progress = elapsed_fraction(started_at, SCROLLBAR_REVEAL_DURATION);
-    if progress >= 1.0 {
-        scrollbar.visibility = ScrollbarVisibility::Visible;
-        scrollbar.animation = None;
-        return true;
-    }
-
-    let opacity = initial_opacity + (1.0 - initial_opacity) * ease_out_cubic(progress);
-    scrollbar.visibility = ScrollbarVisibility::with_opacity(opacity);
-    true
-}
-
-fn advance_scrollbar_hide(
-    scrollbar: &mut SessionScrollbarState,
-    started_at: Instant,
-    initial_opacity: f32,
-) -> bool {
-    let progress = elapsed_fraction(started_at, SCROLLBAR_HIDE_DURATION);
-    if progress >= 1.0 {
-        return false;
-    }
-
-    let opacity = initial_opacity * (1.0 - smoothstep(progress));
-    scrollbar.visibility = ScrollbarVisibility::with_opacity(opacity);
-    true
-}
-
-fn elapsed_fraction(started_at: Instant, duration: Duration) -> f32 {
-    (started_at.elapsed().as_secs_f32() / duration.as_secs_f32()).clamp(0.0, 1.0)
-}
-
-// 与主软件动画模块同式的缓动：视觉节奏保持一致，不为单个纯函数
-// 把 app-ui 的动画模块拖进依赖。
-fn ease_out_cubic(progress: f32) -> f32 {
-    let progress = progress.clamp(0.0, 1.0);
-    1.0 - (1.0 - progress).powi(3)
-}
-
-fn smoothstep(progress: f32) -> f32 {
-    let progress = progress.clamp(0.0, 1.0);
-    progress * progress * (3.0 - 2.0 * progress)
 }
 
 #[cfg(test)]
@@ -495,15 +354,6 @@ mod tests {
     }
 
     #[test]
-    fn reveal_and_hide_curves_keep_endpoints() {
-        assert_eq!(ease_out_cubic(0.0), 0.0);
-        assert_eq!(ease_out_cubic(1.0), 1.0);
-        assert_eq!(smoothstep(0.0), 0.0);
-        assert!((smoothstep(0.5) - 0.5).abs() <= f32::EPSILON);
-        assert_eq!(smoothstep(1.0), 1.0);
-    }
-
-    #[test]
     fn verified_viewport_with_overflow_reveals_scrollbar() {
         let mut session = test_session();
 
@@ -527,8 +377,7 @@ mod tests {
         // 预置过期缓存：旧布局曾溢出，真实布局已塞得下。
         session
             .scrollbar
-            .viewport_by_region
-            .insert(SessionScrollRegion::List, overflowing_viewport());
+            .remember_viewport(SessionScrollRegion::List, overflowing_viewport());
 
         session.handle_scroll_message(SessionMessage::ScrollbarLayoutVerified {
             region: SessionScrollRegion::List,
@@ -566,12 +415,14 @@ mod tests {
     fn hide_animation_runs_to_completion_and_clears_state() {
         let mut session = test_session();
         drop(session.start_scrollbar_reveal(SessionScrollRegion::List));
-        let generation = session.scrollbar.auto_hide_generation;
+        let generation = session.scrollbar.auto_hide_generation();
 
         session.start_scrollbar_hide(generation);
         assert!(session.is_animating());
         // 淡出按真实时间推进：等过 300ms 后再推一帧，动画必须收尾。
-        std::thread::sleep(SCROLLBAR_HIDE_DURATION + Duration::from_millis(10));
+        std::thread::sleep(
+            crate::scrollbar_state::SCROLLBAR_HIDE_DURATION + std::time::Duration::from_millis(10),
+        );
         drop(session.advance_frame());
 
         assert_eq!(

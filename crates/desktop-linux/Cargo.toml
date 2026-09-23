@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+display-renderer = { path = "../display-renderer" }
 smithay-client-toolkit = { version = "=0.19.2", default-features = false, features = ["calloop"] }
 thiserror.workspace = true
 tokio.workspace = true

@@ -16,19 +16,24 @@ use bennu_theme::styles::{
 };
 use bennu_theme::ui_colors;
 use file_core::entry::FileKind;
-use iced::widget::Space;
+use file_core::is_supported_image_path;
 use iced::widget::{button, column, container, mouse_area, row, scrollable, text, text_input};
+use iced::widget::{image, Space};
 use iced::{alignment, Border, Color, Element, Length, Padding, Size, Theme};
 
 use crate::picker_request::PickerKind;
 use crate::picker_session::scrollbar::{scroll_axis, scroll_id, scrollbar_on_scroll};
 use crate::picker_session::{
     DirectoryListing, PickerRow, PickerSession, SessionMessage, SessionScrollRegion,
+    LIST_ROW_HEIGHT, LIST_ROW_SPACING,
 };
 
 mod address_bar;
+mod preview_window;
+mod window_drag_region;
 
 pub(crate) use address_bar::address_input_id;
+pub(crate) use preview_window::preview_window_view;
 
 /// 每请求窗口的初始尺寸。
 pub(crate) fn window_size() -> Size {
@@ -44,10 +49,6 @@ const LIST_SCROLLBAR_WIDTH: f32 = 8.0;
 
 /// 子级行相对父级的缩进。
 const EXPANSION_INDENT: f32 = 16.0;
-
-/// 条目行固定高度：展开动画需要数值行高做裁剪（行高 × 进度），内容
-/// 垂直居中；取值与既有 padding 撑出的视觉高度一致。
-const ENTRY_ROW_HEIGHT: f32 = 28.0;
 
 /// 滚动内容包一层滚轮捕获（SmoothScrollArea）：内容先处理事件，未
 /// 被吞的滚轮按区域轴向发 `WheelScrolled`（增量换算在会话滚动子模块）。
@@ -130,11 +131,12 @@ fn listing_body(
             } else {
                 let region = SessionScrollRegion::List;
                 let scrollbar_visibility = session.scrollbar_visibility_for(&region);
-                let mut list = column![].spacing(2);
+                let mut list = column![].spacing(LIST_ROW_SPACING);
                 for (index, row) in session.rows().iter().enumerate() {
                     list = list.push(entry_row(
                         index,
                         row,
+                        session,
                         theme,
                         session.selection().contains(&index),
                         session.hovered_index() == Some(index),
@@ -207,6 +209,7 @@ fn centered_hint(label: &str, size: f32, color: Color) -> Element<'static, Sessi
 fn entry_row(
     index: usize,
     row: &PickerRow,
+    session: &PickerSession,
     theme: &Theme,
     selected: bool,
     hovered: bool,
@@ -218,9 +221,28 @@ fn entry_row(
     } else {
         muted_icon_svg_style()
     };
-    let icon = file_entry_icon_symbol(entry.kind, &entry.name)
-        .view(18.0)
-        .style(icon_tone);
+    // 图片行有就绪缩略图时用行内 PNG 替换类型图标（18×18 与图标槽同
+    // 尺寸；image 默认 ContentFit::Contain 保持纵横比）。Handle::from_path
+    // 只持路径不驻留像素，每帧重建成本可忽略。
+    let icon: Element<'static, SessionMessage> =
+        if entry.kind == FileKind::File && is_supported_image_path(&entry.path) {
+            match session.thumbnail_ready(&entry.path) {
+                Some(cached) => image(image::Handle::from_path(&cached.output))
+                    .width(Length::Fixed(18.0))
+                    .height(Length::Fixed(18.0))
+                    .into(),
+                // 未就绪/失败 backoff 期间保持类型图标占位。
+                None => file_entry_icon_symbol(entry.kind, &entry.name)
+                    .view(18.0)
+                    .style(icon_tone)
+                    .into(),
+            }
+        } else {
+            file_entry_icon_symbol(entry.kind, &entry.name)
+                .view(18.0)
+                .style(icon_tone)
+                .into()
+        };
 
     let meta = match entry.kind {
         FileKind::Directory => "文件夹".to_string(),
@@ -265,8 +287,8 @@ fn entry_row(
     let row_surface = mouse_area(
         container(content)
             .width(Length::Fill)
-            .height(Length::Fixed(ENTRY_ROW_HEIGHT))
-            .center_y(Length::Fixed(ENTRY_ROW_HEIGHT))
+            .height(Length::Fixed(LIST_ROW_HEIGHT))
+            .center_y(Length::Fixed(LIST_ROW_HEIGHT))
             .padding(Padding::new(0.0).left(6.0 + depth_indent).right(6.0))
             .style(style),
     )
@@ -287,7 +309,7 @@ fn entry_row(
         container(row_surface)
             .width(Length::Fill)
             .height(Length::Fixed(
-                ENTRY_ROW_HEIGHT * row.height_progress.clamp(0.0, 1.0),
+                LIST_ROW_HEIGHT * row.height_progress.clamp(0.0, 1.0),
             ))
             .clip(true)
             .into()

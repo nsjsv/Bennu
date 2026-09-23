@@ -5,69 +5,53 @@
 
 mod dbus_file_chooser;
 mod filter;
+mod keyboard_route;
 mod location;
+mod message;
 mod picker_request;
 mod picker_session;
+mod preview_host;
+mod preview_scroll;
+mod scrollbar_state;
+mod subscriptions;
 mod theme;
+mod thumbnail_dispatch;
 mod view;
+
+pub(crate) use message::Message;
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
 
 use iced::advanced::widget::operation::{Focusable, Operation, Outcome};
-use iced::futures::Stream;
-use iced::{keyboard, mouse, window, Element, Rectangle, Subscription, Task, Theme};
-use std::pin::Pin;
-use std::task::{Context, Poll};
+use iced::{keyboard, window, Element, Rectangle, Task, Theme};
 
 use bennu_theme::address_bar::AddressSuggestionRequest;
 use dbus_file_chooser::{BridgeEvent, FileChooserInterface, PickerInvocation};
 use picker_session::suggestions::{
     load_path_suggestions, PATH_SUGGESTION_INPUT_STABILIZATION_DELAY,
 };
+use picker_session::SessionScrollRegion;
 use picker_session::{scan_listing, PickerSession, SessionEffect, SessionMessage};
-use picker_session::{PathSuggestionDirection, SessionScrollRegion};
+use thumbnail_dispatch::spawn_thumbnail_tasks;
 use tokio::sync::mpsc;
 
 const PORTAL_BUS_NAME: &str = "org.freedesktop.impl.portal.desktop.bennu";
 const PORTAL_OBJECT_PATH: &str = "/org/freedesktop/portal/desktop";
-/// 展开动画帧时钟：60Hz 与主应用 ui_pacing::FRAME_INTERVAL_60HZ 同值；
-/// portal 不依赖 app-ui，本地保持同一节奏。
-const ANIMATION_FRAME_INTERVAL: Duration = Duration::from_millis(16);
+/// iced fallback 候选链：GPU（wgpu）→ 软件渲染。GPU 首选由
+/// [`apply_renderer_environment`] 钉在驱动显示器的 GPU（通常为核显）。
+const PORTAL_ICED_BACKEND_CANDIDATES: &str = "wgpu,tiny-skia";
 
 /// D-Bus → UI 的通道；进程引导早期创建，subscription 首次 poll 时取走。
 static BRIDGE_SLOT: OnceLock<Mutex<Option<mpsc::Receiver<BridgeEvent>>>> = OnceLock::new();
-
-enum Message {
-    Bridge(BridgeEvent),
-    Session(window::Id, SessionMessage),
-    WindowClosed(window::Id),
-    KeyPressed {
-        window: window::Id,
-        key: keyboard::Key,
-        modifiers: keyboard::Modifiers,
-        /// 事件是否已被焦点控件捕获：补全面板的方向键/Tab 在 captured
-        /// 下仍须生效（text_input 聚焦会捕获），其余全局动作只认 Ignored。
-        captured: bool,
-    },
-    ModifiersChanged(keyboard::Modifiers),
-    /// 窗口内左键按下：地址栏编辑态下用来探查输入框是否失焦。
-    WindowLeftPressed {
-        window: window::Id,
-    },
-    /// 焦点探查回信：地址输入框是否仍持焦点（失焦即取消编辑）。
-    AddressInputFocusChecked {
-        window: window::Id,
-        is_focused: bool,
-    },
-    AnimationTick,
-}
 
 struct PickerDaemon {
     windows: HashMap<window::Id, PickerSession>,
     theme: Theme,
     keyboard_modifiers: keyboard::Modifiers,
+    /// 全进程唯一的预览会话（多选择窗并发时新请求顶掉旧会话，
+    /// design 决策 #3）；含预览窗焦点/请求窗簿记。
+    preview: preview_host::PreviewHost,
 }
 
 impl PickerDaemon {
@@ -79,6 +63,7 @@ impl PickerDaemon {
             windows: HashMap::new(),
             theme,
             keyboard_modifiers: keyboard::Modifiers::default(),
+            preview: preview_host::PreviewHost::new(theme::state_database_path()),
         }
     }
 }
@@ -89,7 +74,16 @@ fn boot() -> (PickerDaemon, Task<Message>) {
 
 fn update(daemon: &mut PickerDaemon, message: Message) -> Task<Message> {
     match message {
-        Message::Bridge(BridgeEvent::Invocation(invocation)) => {
+        Message::Bridge(bridge_event) => {
+            // 桥事件携带一次性 reply sender，本体不可 Clone；Message 的
+            // Clone bound 是 iced 面板/控件的静态要求，桥事件从不进控件
+            // 树，Arc 包裹即可满足。
+            // Arc 拆包：桥事件在消息队列里独占所有权，try_unwrap 必成。
+            let bridge_event = match std::sync::Arc::try_unwrap(bridge_event) {
+                Ok(event) => event,
+                Err(_) => unreachable!("桥事件独占所有权"),
+            };
+            let BridgeEvent::Invocation(invocation) = bridge_event;
             open_picker_window(daemon, invocation)
         }
         Message::Session(window_id, session_message) => {
@@ -97,14 +91,15 @@ fn update(daemon: &mut PickerDaemon, message: Message) -> Task<Message> {
         }
         Message::WindowClosed(window_id) => {
             close_picker_window(daemon, window_id);
-            Task::none()
+            // 预览窗被外部关闭或请求窗先亡：预览会话一并收尾。
+            daemon.preview.handle_window_closed(window_id)
         }
         Message::KeyPressed {
             window,
             key,
             modifiers,
             captured,
-        } => handle_key(daemon, window, key, modifiers, captured),
+        } => keyboard_route::handle_key(daemon, window, key, modifiers, captured),
         Message::WindowLeftPressed { window } => check_address_input_focus(daemon, window),
         Message::AddressInputFocusChecked { window, is_focused } => {
             handle_address_input_focus_checked(daemon, window, is_focused)
@@ -118,13 +113,91 @@ fn update(daemon: &mut PickerDaemon, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+        Message::PreviewSpacePressed { source } => {
+            preview_host::handle_space_pressed(daemon, source)
+        }
+        Message::Preview(preview_message) => {
+            preview_host::handle_preview_message(daemon, preview_message)
+        }
+        Message::PreviewWindowControl { window, kind } => {
+            daemon.preview.handle_window_control(window, kind)
+        }
+        Message::PreviewWindowTitlePressed {
+            window,
+            double_click,
+        } => daemon
+            .preview
+            .handle_title_bar_pressed(window, double_click),
+        Message::PreviewWindowResizeEdgePressed { window, direction } => {
+            daemon.preview.handle_resize_edge_pressed(window, direction)
+        }
+        Message::PreviewWindowMaximizeObserved { window, maximized } => {
+            daemon.preview.accept_maximize_observed(window, maximized);
+            Task::none()
+        }
+        Message::PreviewPointerMoved { window, position } => {
+            daemon.preview.handle_pointer_moved(window, position)
+        }
+        Message::PreviewPointerLeft { window } => daemon.preview.handle_pointer_left(window),
+        Message::PreviewPointerReleased { window } => {
+            if daemon.preview.is_preview_window(window) {
+                daemon.preview.finish_window_drags()
+            } else {
+                Task::none()
+            }
+        }
+        Message::PreviewSqliteDragFinished => daemon.preview.finish_window_drags(),
+        Message::PreviewCloseFocused => daemon.preview.close_focused_preview(),
+        Message::PreviewWindowResized {
+            window,
+            width,
+            height,
+        } => preview_host::handle_window_resized(daemon, window, width, height),
+        Message::PreviewWheelScrolled { region, delta } => daemon
+            .preview
+            .scroll
+            .handle_wheel_scrolled(region, daemon.keyboard_modifiers.shift(), delta),
+        Message::PreviewScrollbarLayoutVerified { region, viewport } => daemon
+            .preview
+            .scroll
+            .handle_layout_verified(region, viewport),
+        Message::PreviewScrollbarViewportChanged {
+            region,
+            viewport,
+            event,
+        } => {
+            // 视口快照先写缓存（thumb 位置跟随），内层事件回流引擎/
+            // 宿主回退路由（选择窗 ScrollbarViewportChanged 同构）。
+            daemon.preview.scroll.remember_viewport(region, viewport);
+            preview_host::handle_preview_message(daemon, *event)
+        }
+        Message::PreviewScrollbarAutoHideElapsed { generation } => {
+            daemon.preview.scroll.handle_auto_hide_elapsed(generation);
+            Task::none()
+        }
+        Message::WindowFocused(window) => {
+            // 预览窗 Esc 分层/失焦关闭（步骤 3）读这份焦点簿记。
+            daemon.preview.focused_window = Some(window);
+            Task::none()
+        }
+        Message::WindowUnfocused(window) => {
+            // 只清匹配来源的焦点：迟到的离开事件不得清掉新窗口焦点。
+            if daemon.preview.focused_window == Some(window) {
+                daemon.preview.focused_window = None;
+            }
+            // 预览窗失焦且未钉住 → 自动关闭（主软件 handle_window_
+            // unfocused 同语义；关闭内部带焦点回请求窗）。
+            daemon.preview.handle_window_unfocused(window)
+        }
         Message::AnimationTick => {
             // 帧时钟仅在动画活跃期间存在（见 subscription 的挂载条件），
-            // 逐窗口推进动画并批量路由产出的 Task。
+            // 逐窗口推进动画并批量路由产出的 Task；预览窗（chrome 淡入
+            // 淡出/预览树/惯性滚动/滚动条）一并推进。
             let mut frame_tasks = Vec::new();
             for (window_id, session) in daemon.windows.iter_mut() {
                 frame_tasks.extend(route_session_tasks(*window_id, session.advance_frame()));
             }
+            frame_tasks.push(daemon.preview.advance_frame());
             Task::batch(frame_tasks)
         }
     }
@@ -185,11 +258,24 @@ fn apply_session_message(
     let Some(session) = daemon.windows.get_mut(&window_id) else {
         return Task::none();
     };
+    // 预览首帧/档位升级回流：缩略图回信先抄送预览宿主（引擎按等待
+    // 标记与当前展示判定收货，迟到小图不回退），与会话行内显示互不
+    // 影响（主软件 accept_preview_thumbnail_ready 的 Purpose::Preview
+    // 分支对齐；预览属全进程，不按未窗过濾）。
+    let preview_thumbnail_task = match &session_message {
+        SessionMessage::ThumbnailReady { request, outcome } => daemon
+            .preview
+            .accept_session_thumbnail_outcome(request, outcome),
+        _ => Task::none(),
+    };
     // 滚动/滚动条消息由会话滚动子模块处理并批量产出 Task（视口回传
     // 内嵌的会话事件也在子模块内递归路由），不经会话效果路径。
     if session_message.is_scroll_message() {
         let tasks = session.handle_scroll_message(session_message);
-        return Task::batch(route_session_tasks(window_id, tasks));
+        // 滚动路径不经 SessionEffect：缩略图请求同样在这里 drain 发起
+        //（滚动正是视口更新 → 新行进入可见区间的触发源）。
+        let thumbnail_tasks = spawn_thumbnail_tasks(window_id, session);
+        return Task::batch(route_session_tasks(window_id, tasks).chain(thumbnail_tasks));
     }
     // 修饰键语义由这里合成：视图只报裸点击。
     let session_message = match session_message {
@@ -223,6 +309,9 @@ fn apply_session_message(
     let wants_address_cursor_end =
         matches!(session_message, SessionMessage::CompleteSuggestion { .. });
     let effect = session.update(session_message);
+    // 会话消息统一收口处的缩略图泵：ThumbnailReady 回信处理完也走到这
+    // 里再 drain，腾出的并发额度自然补位，无需定时器。
+    let thumbnail_tasks = spawn_thumbnail_tasks(window_id, session);
     // 进入编辑的两条路径都要聚焦 + 全选：点击地址栏空白（恒真）、
     // 点击面包屑当前段（post-state 有会话才真）。
     let wants_address_focus = may_begin_address_editing && session.address_editing().is_some();
@@ -269,6 +358,26 @@ fn apply_session_message(
             load_path_suggestions_task(window_id, request)
         }
         SessionEffect::VerifyScrollbarLayout => scrollbar_layout_probe_task(window_id, session),
+        // 键盘导航滚动跟随：scroll_to 可穿透 SmoothScrollArea 直达内层
+        // scrollable（Id 按请求路径命名空间不会串窗）；只对 List 发布局
+        // 探针——面包屑布局未变，避免无谓的面包屑滚动条淡入，探针回信
+        // 同时核实溢出联动滚动条显隐并纠偏视口缓存。
+        SessionEffect::ScrollListTo { offset_y } => Task::batch([
+            iced::widget::operation::scroll_to(
+                picker_session::scrollbar::scroll_id(
+                    session.request_path(),
+                    SessionScrollRegion::List,
+                ),
+                iced::widget::scrollable::AbsoluteOffset {
+                    x: 0.0,
+                    y: offset_y,
+                },
+            ),
+            Task::batch(route_session_tasks(
+                window_id,
+                [session.scrollbar_layout_probe_task(SessionScrollRegion::List)],
+            )),
+        ]),
         SessionEffect::Confirmed(paths) => {
             tracing::info!("选择完成：{} 个条目", paths.len());
             remember_directory(daemon, window_id);
@@ -280,7 +389,14 @@ fn apply_session_message(
         }
         SessionEffect::None => Task::none(),
     };
-    Task::batch([task, focus_task, cursor_task, breadcrumb_reveal_task])
+    Task::batch([
+        task,
+        focus_task,
+        cursor_task,
+        breadcrumb_reveal_task,
+        Task::batch(thumbnail_tasks),
+        preview_thumbnail_task,
+    ])
 }
 
 /// 会话产出的 Task 按所属窗口路由成全局消息。
@@ -377,96 +493,6 @@ fn close_picker_window(daemon: &mut PickerDaemon, window_id: window::Id) {
     }
 }
 
-fn handle_key(
-    daemon: &PickerDaemon,
-    window: window::Id,
-    key: keyboard::Key,
-    modifiers: keyboard::Modifiers,
-    captured: bool,
-) -> Task<Message> {
-    let Some(session) = daemon.windows.get(&window) else {
-        return Task::none();
-    };
-
-    // 补全面板的方向键/Tab 优先于一切：text_input 聚焦会捕获这些键
-    //（captured=true），必须在此消费而不是等 Ignored——与主软件在
-    // 全局 handler 先查 address_suggestion_keyboard_is_active 同构。
-    if session.address_suggestion_keyboard_is_active() {
-        if let Some(message) = address_suggestion_key_message(&key, modifiers) {
-            return dispatch_session_message(window, message);
-        }
-    }
-
-    // 编辑态 Esc 即使被 text_input 捕获也要能退出编辑；非编辑态仅
-    // Ignored 的 Esc 才关闭窗口。
-    if matches!(key, keyboard::Key::Named(keyboard::key::Named::Escape)) {
-        if session.address_editing().is_some() {
-            return dispatch_session_message(window, SessionMessage::AddressEditingCancelled);
-        }
-        if !captured {
-            return dispatch_session_message(window, SessionMessage::DismissPressed);
-        }
-        return Task::none();
-    }
-
-    // 其余全局动作（Enter 确认、Ctrl+A 全选）只认 Ignored：text_input
-    // 已用 Enter 提交草稿、用 Ctrl+A 选中文本，重复触发会互相打架。
-    if captured {
-        return Task::none();
-    }
-    if let keyboard::Key::Character(character) = &key {
-        if character.eq_ignore_ascii_case("a") && modifiers.control() {
-            return dispatch_session_message(window, SessionMessage::SelectAllPressed);
-        }
-    }
-    match key {
-        keyboard::Key::Named(keyboard::key::Named::Enter) => {
-            dispatch_session_message(window, SessionMessage::ConfirmPressed)
-        }
-        _ => Task::none(),
-    }
-}
-
-/// 补全面板活跃时的按键映射（主软件 handle_path_suggestion_keyboard_
-/// key 同构）：↓/无修饰 = Next，↑/无修饰 = Previous，Tab/无修饰 =
-/// 补全 Next，Shift+Tab = 补全 Previous；带其他修饰键不拦截。
-fn address_suggestion_key_message(
-    key: &keyboard::Key,
-    modifiers: keyboard::Modifiers,
-) -> Option<SessionMessage> {
-    let no_shortcut_modifiers =
-        !modifiers.alt() && !modifiers.control() && !modifiers.command() && !modifiers.shift();
-    let only_shift_modifier =
-        modifiers.shift() && !modifiers.alt() && !modifiers.control() && !modifiers.command();
-    match key.as_ref() {
-        keyboard::Key::Named(keyboard::key::Named::ArrowDown) if no_shortcut_modifiers => {
-            Some(SessionMessage::MoveSuggestionSelection {
-                direction: PathSuggestionDirection::Next,
-            })
-        }
-        keyboard::Key::Named(keyboard::key::Named::ArrowUp) if no_shortcut_modifiers => {
-            Some(SessionMessage::MoveSuggestionSelection {
-                direction: PathSuggestionDirection::Previous,
-            })
-        }
-        keyboard::Key::Named(keyboard::key::Named::Tab) if only_shift_modifier => {
-            Some(SessionMessage::CompleteSuggestion {
-                direction: PathSuggestionDirection::Previous,
-            })
-        }
-        keyboard::Key::Named(keyboard::key::Named::Tab) if no_shortcut_modifiers => {
-            Some(SessionMessage::CompleteSuggestion {
-                direction: PathSuggestionDirection::Next,
-            })
-        }
-        _ => None,
-    }
-}
-
-fn dispatch_session_message(window: window::Id, message: SessionMessage) -> Task<Message> {
-    Task::perform(async {}, move |_| Message::Session(window, message))
-}
-
 /// 左键按下后探查地址输入框焦点：仅窗口处于编辑态时发起（主软件
 /// handle_window_pointer_pressed 里 AddressInputFocusChecked 的机制照搬
 /// ——text_input 在点击落到自身 bounds 之外时会自行失焦，控件消息先于
@@ -550,7 +576,12 @@ impl Operation<Message> for AddressInputFocusCheck {
 }
 
 fn view_picker(daemon: &PickerDaemon, window_id: window::Id) -> Element<'_, Message> {
+    if daemon.preview.is_preview_window(window_id) {
+        // 预览窗视图适配层（面板 + 滚动接线 + chrome + 拖动面 + resize）。
+        return view::preview_window_view(daemon, window_id);
+    }
     let Some(session) = daemon.windows.get(&window_id) else {
+        // 拾取窗之外的未知窗口安全空白。
         return iced::widget::text("").into();
     };
     view::picker_window_view(session, &daemon.theme, |message| message)
@@ -558,6 +589,9 @@ fn view_picker(daemon: &PickerDaemon, window_id: window::Id) -> Element<'_, Mess
 }
 
 fn daemon_title(daemon: &PickerDaemon, window_id: window::Id) -> String {
+    if daemon.preview.is_preview_window(window_id) {
+        return "预览".to_owned();
+    }
     daemon
         .windows
         .get(&window_id)
@@ -574,103 +608,6 @@ fn session_window_title(session: &PickerSession) -> String {
         .unwrap_or_else(|| session.kind().default_title().to_string())
 }
 
-fn subscription(daemon: &PickerDaemon) -> Subscription<Message> {
-    let mut subscriptions = vec![
-        Subscription::run(bridge_events),
-        window::close_events().map(Message::WindowClosed),
-        iced::event::listen_with(|event, status, window_id| match event {
-            // 键盘事件无差别转发（Captured 也收）：补全面板的 ↑/↓/Tab
-            // 与编辑态 Esc 都要抢在焦点控件的捕获语义之前生效；是否
-            // 尊重捕获由 handle_key 按动作分类裁决。
-            iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
-                Some(Message::KeyPressed {
-                    window: window_id,
-                    key,
-                    modifiers,
-                    captured: matches!(status, iced::event::Status::Captured),
-                })
-            }
-            // 左键按下（无论是否被控件捕获）都可能把焦点从地址输入框
-            // 移走：text_input 对 bounds 外的点击自行失焦。探查在
-            // update 侧按「窗口处于编辑态」过滤，非编辑窗口零开销。
-            iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                Some(Message::WindowLeftPressed { window: window_id })
-            }
-            // 鼠标侧键 = 后退/前进（与主程序一致，被捕获时不触发）。
-            iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Back))
-                if matches!(status, iced::event::Status::Ignored) =>
-            {
-                Some(Message::Session(window_id, SessionMessage::NavigateBack))
-            }
-            iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Forward))
-                if matches!(status, iced::event::Status::Ignored) =>
-            {
-                Some(Message::Session(window_id, SessionMessage::NavigateForward))
-            }
-            iced::Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
-                Some(Message::ModifiersChanged(modifiers))
-            }
-            _ => None,
-        }),
-    ];
-    // 仅在有窗口播放动画（展开/收起、地址栏渐变、惯性滚动、滚动条
-    // 淡入淡出）时订阅帧时钟，动画结束自然摘除——与主应用按动画
-    // 活跃度挂载 time::every 同模式。
-    if daemon.windows.values().any(PickerSession::is_animating) {
-        subscriptions
-            .push(iced::time::every(ANIMATION_FRAME_INTERVAL).map(|_| Message::AnimationTick));
-    }
-    Subscription::batch(subscriptions)
-}
-
-/// D-Bus 桥流：首次 poll 取走全局通道，此后转发事件直到对端关闭。
-struct BridgeEvents {
-    source: BridgeSource,
-}
-
-enum BridgeSource {
-    NotTaken,
-    Live(mpsc::Receiver<BridgeEvent>),
-    Ended,
-}
-
-fn bridge_events() -> BridgeEvents {
-    BridgeEvents {
-        source: BridgeSource::NotTaken,
-    }
-}
-
-impl Stream for BridgeEvents {
-    type Item = Message;
-
-    fn poll_next(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let stream = &mut *self;
-        loop {
-            match &mut stream.source {
-                BridgeSource::NotTaken => match take_bridge_receiver() {
-                    Some(receiver) => stream.source = BridgeSource::Live(receiver),
-                    // 引导顺序保证订阅开始前 receiver 已放入；兜底直接结束。
-                    None => stream.source = BridgeSource::Ended,
-                },
-                BridgeSource::Live(receiver) => {
-                    return receiver
-                        .poll_recv(context)
-                        .map(|event| event.map(Message::Bridge))
-                }
-                BridgeSource::Ended => return Poll::Ready(None),
-            }
-        }
-    }
-}
-
-fn take_bridge_receiver() -> Option<mpsc::Receiver<BridgeEvent>> {
-    BRIDGE_SLOT
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-        .ok()
-        .and_then(|mut guard| guard.take())
-}
-
 async fn build_portal_connection(
     bridge_sender: mpsc::Sender<BridgeEvent>,
 ) -> zbus::Result<zbus::Connection> {
@@ -681,7 +618,34 @@ async fn build_portal_connection(
         .await
 }
 
+/// 在任何 iced/wgpu 初始化前定下渲染链：核显 → 独显 → 软件渲染。
+///
+/// - `ICED_BACKEND=wgpu,tiny-skia`：iced fallback 依次尝试 GPU、软件渲染。
+/// - GPU 首选钉住驱动显示器的 GPU（与主软件 DisplayGpu 偏好同配方：
+///   power pref + MESA 设备选择 + loader ICD 过滤）。笔记本上即核显，
+///   且必然已上电；独显 NVIDIA 冷初始化实测 ~2.2s，必须排除在首选外。
+/// - 检测失败时仅设 `WGPU_POWER_PREF=low`，让 wgpu 自行排序（有核显选核显）。
+/// - 已存在的环境变量不覆盖：保留运维/实验入口（如强制软渲染排障）。
+fn apply_renderer_environment() {
+    if std::env::var_os("ICED_BACKEND").is_none() {
+        std::env::set_var("ICED_BACKEND", PORTAL_ICED_BACKEND_CANDIDATES);
+    }
+    if std::env::var_os("WGPU_POWER_PREF").is_none() {
+        match display_renderer::detect_display_renderer_gpu() {
+            Some(gpu) => {
+                std::env::set_var("WGPU_POWER_PREF", gpu.class().wgpu_power_preference());
+                std::env::set_var("MESA_VK_DEVICE_SELECT", gpu.mesa_vulkan_device_select());
+                if let Some(loader_select) = gpu.vulkan_loader_driver_select() {
+                    std::env::set_var("VK_LOADER_DRIVERS_SELECT", loader_select);
+                }
+            }
+            None => std::env::set_var("WGPU_POWER_PREF", "low"),
+        }
+    }
+}
+
 fn main() {
+    apply_renderer_environment();
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -723,7 +687,7 @@ fn main() {
 
     let result = iced::daemon(boot, update, view_picker)
         .title(daemon_title)
-        .subscription(subscription)
+        .subscription(subscriptions::subscription)
         .theme(|daemon: &PickerDaemon, _| daemon.theme.clone())
         .run();
     if let Err(error) = result {
@@ -736,6 +700,7 @@ fn main() {
 mod tests {
     use super::*;
     use crate::picker_request::{PickerKind, PickerRequestSpec};
+    use crate::subscriptions::active_media_streams;
 
     fn session_with_title(title: Option<&str>) -> PickerSession {
         let (reply, _receiver) = tokio::sync::oneshot::channel();
@@ -765,5 +730,55 @@ mod tests {
     fn window_title_falls_back_to_kind_default() {
         let session = session_with_title(None);
         assert_eq!(session_window_title(&session), "另存为");
+    }
+
+    #[test]
+    fn media_streams_gated_by_engine_activity() {
+        // 空闲引擎：四路媒体订阅全部不挂载。
+        let daemon = test_daemon();
+        let media = active_media_streams(&daemon.preview.engine);
+        assert!(!media.audio_tick);
+        assert!(!media.video_tick);
+        assert!(media.animated_image.is_none());
+        assert!(media.video.is_none());
+    }
+
+    #[test]
+    fn media_streams_active_while_video_preview_is_playing() {
+        // 视频播放中：进度 tick 与帧流两路同时挂载（携带路径+代数+
+        // 起播位置，帧流订阅身份的三大要素）。
+        let mut daemon = test_daemon();
+        let path = std::path::PathBuf::from("/tmp/movie.mp4");
+        daemon.preview.engine.preview = Some(bennu_preview::preview::PreviewState::Ready(
+            bennu_preview::preview::PreviewContent::Video {
+                path: path.clone(),
+                frame: None,
+                width: 640,
+                height: 360,
+                duration: None,
+            },
+        ));
+        daemon.preview.engine.video_preview = Some(
+            bennu_preview::preview::VideoPreviewPlayback::playing(path.clone(), None),
+        );
+
+        let media = active_media_streams(&daemon.preview.engine);
+        assert!(!media.audio_tick);
+        assert!(media.video_tick);
+        assert!(media
+            .video
+            .is_some_and(|(stream_path, _, _)| stream_path == path));
+        assert!(media.animated_image.is_none());
+    }
+
+    /// 测试专用 daemon：绕过 new() 的主题解析（需 tokio reactor），
+    /// 预览库路径指向空（配置回落默认，隔离测试机配置）。
+    fn test_daemon() -> PickerDaemon {
+        PickerDaemon {
+            windows: HashMap::new(),
+            theme: Theme::Light,
+            keyboard_modifiers: keyboard::Modifiers::default(),
+            preview: preview_host::PreviewHost::new(std::path::PathBuf::new()),
+        }
     }
 }

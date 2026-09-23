@@ -54,8 +54,6 @@ mod directory_metadata;
 pub(crate) use directory_metadata::load_directory_metadata_command;
 mod desktop_notifications;
 pub(crate) use desktop_notifications::publish_desktop_notification_command;
-mod document_preview;
-pub(crate) use document_preview::{prepare_document_command, render_document_page_command};
 mod list_directory_summary;
 pub(crate) use list_directory_summary::load_list_directory_summary_command;
 mod network_connections;
@@ -67,10 +65,8 @@ pub(crate) use network_connections::{
 mod preview;
 pub(crate) use preview::{
     animated_image_preview_command, image_preview_dimensions_command,
-    original_image_preview_command, preview_command, preview_directory_children_command,
-    remote_preview_cache_command, right_preview_panel_info_command, start_audio_preview_command,
-    start_video_preview_audio_command, text_preview_chunk_command, video_preview_frame_command,
-    video_preview_metadata_command,
+    original_image_preview_command, preview_command, right_preview_panel_info_command,
+    start_audio_preview_command,
 };
 mod properties;
 pub(crate) use properties::{

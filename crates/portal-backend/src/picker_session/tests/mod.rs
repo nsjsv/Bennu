@@ -5,6 +5,7 @@ use crate::picker_request::FilePattern;
 use crate::picker_session::scan::DirectoryScanOutcome;
 use std::fs;
 mod address_editing;
+mod keyboard_nav;
 
 fn spec(kind: PickerKind, filters: Vec<FilterRule>) -> PickerRequestSpec {
     PickerRequestSpec {
@@ -649,4 +650,34 @@ fn new_navigation_after_back_truncates_the_forward_branch() {
     assert!(matches!(stuck, SessionEffect::None));
     let back = session.update(SessionMessage::NavigateBack);
     assert!(matches!(back, SessionEffect::NavigateDirectory(_)));
+}
+
+#[test]
+fn save_file_click_selects_file_and_directory_rows() {
+    let (mut session, _receiver) = session(PickerKind::SaveFile { default_name: None });
+    seeded_listing(
+        &mut session,
+        &[("模板.txt", FileKind::File), ("dir", FileKind::Directory)],
+    );
+
+    // 文件点击：选中集 + anchor + 名字同步填入，预览目标可得。
+    session.update(SessionMessage::EntryClicked {
+        index: 0,
+        ctrl: false,
+        shift: false,
+    });
+    assert_eq!(session.selection(), &[0]);
+    assert_eq!(session.primary_selected_row(), Some(0));
+    assert_eq!(session.name_input(), "模板.txt");
+
+    // 目录点击：同样选中（单击选中、双击进入），预览目标可得。
+    session.update(SessionMessage::EntryClicked {
+        index: 1,
+        ctrl: false,
+        shift: false,
+    });
+    assert_eq!(session.selection(), &[1]);
+    assert_eq!(session.primary_selected_row(), Some(1));
+    // 目录不改名字（既有行为）。
+    assert_eq!(session.name_input(), "模板.txt");
 }

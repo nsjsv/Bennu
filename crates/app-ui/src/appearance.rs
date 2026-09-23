@@ -1,7 +1,6 @@
 use iced::widget::button;
 use iced::{Background, Border, Color, Shadow, Theme, Vector};
 
-mod document_preview;
 mod navigation_input;
 mod container {
     pub use iced::widget::container::*;
@@ -11,15 +10,18 @@ mod icon_grid;
 mod list_header;
 mod window_chrome;
 
-pub(crate) use document_preview::document_page_style;
 pub(crate) use icon_grid::icon_grid_expansion_panel_style;
 pub(crate) use navigation_input::{address_bar_style, navigation_text_input_style};
-pub(crate) use window_chrome::{
-    floating_window_close_button_style, floating_window_control_button_style,
-    preview_window_bottom_gradient_style, preview_window_top_gradient_style,
-    window_close_button_style, window_control_button_style, window_title_bar_style,
-    window_top_bar_style,
-};
+// 顶栏/标题栏容器样式只被宿主辅助窗口 chrome 消费，留在这里；四枚
+// 窗口控制按钮样式（标准/浮动）已下沉 bennu-theme::window_chrome_styles
+// （预览浮动 chrome 迁移需要，随 bennu-preview 的 chrome 机件消费），
+// app-ui 侧不再有直接调用点。
+pub(crate) use window_chrome::{window_title_bar_style, window_top_bar_style};
+
+// 导航按钮样式已下沉 bennu-theme（与导航输入框同组词汇）；预览/文档
+// 视觉词汇在 bennu-theme::preview_styles（面板本体已随 bennu-preview
+// 迁移，经 bennu-theme 路径直接消费，app-ui 侧无剩余调用点）。
+pub(crate) use bennu_theme::styles::navigation_icon_button_style;
 
 pub(crate) use list_header::{
     group_header_style, list_header_cell_style, list_header_reorder_indicator_style,
@@ -29,11 +31,11 @@ pub(crate) use list_header::{
 // 通用样式词汇已迁至共享 crate `bennu-theme::styles`（portal 复用同一份）；
 // 这里重导出保持 crate 内调用点不变。
 pub(crate) use bennu_theme::styles::{
-    base_text_color, button_hover_surface_color, button_pressed_surface_color,
-    button_surface_color, context_menu_item_button_style, elevation_shadow_color,
-    enhanced_both_scrollbar_direction, enhanced_horizontal_scrollbar_direction,
-    enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction, error_notification_style,
-    faded_button_style, faded_text_input_style, hovered_row_style, icon_svg_style, list_row_style,
+    app_content_style, base_text_color, button_hover_surface_color, button_pressed_surface_color,
+    button_surface_color, context_menu_item_button_style, context_menu_style,
+    elevation_shadow_color, enhanced_horizontal_scrollbar_direction, enhanced_scrollbar_style,
+    enhanced_vertical_scrollbar_direction, error_notification_style, faded_button_style,
+    faded_text_input_style, hovered_row_style, icon_svg_style, list_row_style,
     muted_icon_svg_style, muted_text_color, path_suggestion_item_style, path_suggestions_style,
     scale_color_alpha, selected_icon_svg_style, selected_path_suggestion_item_style,
     subtle_border_color, surface_button_style, transparent_button_style,
@@ -42,15 +44,6 @@ pub(crate) use bennu_theme::styles::{
 
 use crate::file_entry_presentation::SelectionRunPosition;
 use crate::matugen_theme::ui_colors;
-
-pub(crate) fn app_content_style(theme: &Theme) -> container::Appearance {
-    let colors = ui_colors(theme);
-    container::Appearance {
-        background: Some(Background::Color(colors.background)),
-        text_color: Some(colors.on_background),
-        ..container::Appearance::default()
-    }
-}
 
 pub(crate) fn selected_row_style(theme: &Theme) -> container::Appearance {
     selected_row_style_for_run(SelectionRunPosition::Single)(theme)
@@ -141,10 +134,6 @@ pub(crate) fn tab_split_overlay_style(theme: &Theme) -> container::Appearance {
     }
 }
 
-pub(crate) fn navigation_icon_button_style() -> fn(&Theme, button::Status) -> button::Style {
-    surface_button_style
-}
-
 pub(crate) fn operation_queue_indicator_button_style() -> fn(&Theme, button::Status) -> button::Style
 {
     transparent_icon_button_style
@@ -200,17 +189,6 @@ pub(crate) fn preview_panel_style(theme: &Theme) -> container::Appearance {
             width: 1.0,
             radius: 14.0.into(),
         },
-        ..container::Appearance::default()
-    }
-}
-pub(crate) fn preview_media_style(_theme: &Theme) -> container::Appearance {
-    container::Appearance {
-        background: Some(Background::Color(Color {
-            r: 0.0,
-            g: 0.0,
-            b: 0.0,
-            a: 1.0,
-        })),
         ..container::Appearance::default()
     }
 }
@@ -339,20 +317,6 @@ pub(crate) fn sidebar_bookmark_drop_slot_style(theme: &Theme) -> container::Appe
         border: Border {
             radius: 1.0.into(),
             ..Border::default()
-        },
-        ..container::Appearance::default()
-    }
-}
-
-pub(crate) fn context_menu_style(theme: &Theme) -> container::Appearance {
-    let colors = ui_colors(theme);
-    container::Appearance {
-        background: Some(Background::Color(colors.surface_container_low)),
-        text_color: Some(colors.on_surface),
-        border: Border {
-            color: subtle_border_color(theme),
-            width: 1.0,
-            radius: 8.0.into(),
         },
         ..container::Appearance::default()
     }
@@ -497,7 +461,10 @@ mod tests {
             assert_eq!(error.text_color, Some(colors.on_error_container));
             assert_eq!(error.border.color, colors.error);
 
-            let close = window_close_button_style(&theme, button::Status::Hovered);
+            let close = bennu_theme::window_chrome_styles::window_close_button_style(
+                &theme,
+                button::Status::Hovered,
+            );
             assert_eq!(close.background, Some(Background::Color(colors.error)));
             assert_eq!(close.text_color, colors.on_error);
 
@@ -511,23 +478,6 @@ mod tests {
                 switch_off.background,
                 Some(Background::Color(colors.on_surface))
             );
-        }
-    }
-
-    #[test]
-    fn preview_media_surface_is_opaque_black_without_border() {
-        for theme in [Theme::Light, Theme::Dark] {
-            let style = preview_media_style(&theme);
-            assert_eq!(
-                style.background,
-                Some(Background::Color(Color {
-                    r: 0.0,
-                    g: 0.0,
-                    b: 0.0,
-                    a: 1.0,
-                }))
-            );
-            assert_eq!(style.border, Border::default());
         }
     }
 }

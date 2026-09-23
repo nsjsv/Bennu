@@ -1,0 +1,10 @@
+[package]
+name = "bennu-localization"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# 零第三方依赖：文案表是纯 std 静态数据（match 表 + AtomicU8 当前语言），
+# 保持无依赖可让任意宿主（app-ui、bennu-preview、portal）零成本共用，
+# 也从结构上杜绝对本 crate 注入 UI/存储依赖的反向耦合。
+[dependencies]

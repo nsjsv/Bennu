@@ -168,6 +168,9 @@ version = "0.3.5"
 dependencies = [
  "alacritty_terminal",
  "ashpd",
+ "bennu-localization",
+ "bennu-preview",
+ "bennu-subprocess",
  "bennu-theme",
  "blake3",
  "chrono",
@@ -178,7 +181,6 @@ dependencies = [
  "file-core",
  "file-operation-store",
  "file-search",
- "gif 0.14.2",
  "iced",
  "iced_runtime",
  "image",
@@ -187,11 +189,8 @@ dependencies = [
  "local-send",
  "parking_lot",
  "portable-pty",
- "pulldown-cmark",
  "regex",
  "resvg",
- "rodio",
- "roxmltree",
  "rusqlite",
  "rustix 1.1.4",
  "serde",
@@ -643,6 +642,47 @@ name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
+
+[[package]]
+name = "bennu-localization"
+version = "0.3.5"
+
+[[package]]
+name = "bennu-preview"
+version = "0.3.5"
+dependencies = [
+ "bennu-localization",
+ "bennu-subprocess",
+ "bennu-theme",
+ "blake3",
+ "dirs",
+ "file-core",
+ "file-operation-store",
+ "gif 0.14.2",
+ "iced",
+ "iced_runtime",
+ "image",
+ "libc",
+ "pulldown-cmark",
+ "resvg",
+ "rodio",
+ "roxmltree",
+ "rusqlite",
+ "serde_json",
+ "tempfile",
+ "thumbnails",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "bennu-subprocess"
+version = "0.3.5"
+dependencies = [
+ "tokio",
+]
 
 [[package]]
 name = "bennu-theme"
@@ -1521,6 +1561,7 @@ dependencies = [
 name = "desktop-linux"
 version = "0.3.5"
 dependencies = [
+ "display-renderer",
  "gio",
  "smithay-client-toolkit 0.19.2",
  "tempfile",
@@ -1593,6 +1634,13 @@ checksum = "1e0e367e4e7da84520dedcac1901e4da967309406d1e51017ae1abfb97adbd38"
 dependencies = [
  "bitflags 2.11.1",
  "objc2 0.6.4",
+]
+
+[[package]]
+name = "display-renderer"
+version = "0.3.5"
+dependencies = [
+ "tempfile",
 ]
 
 [[package]]
@@ -4687,9 +4735,11 @@ dependencies = [
 name = "portal-backend"
 version = "0.3.5"
 dependencies = [
+ "bennu-preview",
  "bennu-theme",
  "dark-light",
  "dirs",
+ "display-renderer",
  "file-core",
  "file-operation-store",
  "gio",
@@ -4697,6 +4747,7 @@ dependencies = [
  "serde",
  "tempfile",
  "thiserror 1.0.69",
+ "thumbnails",
  "tokio",
  "toml",
  "tracing",

@@ -42,10 +42,7 @@ use crate::sidebar_devices::{
 use crate::startup_rendering::StartupRenderingEnvironmentStatus;
 use crate::thumbnail_cache::ThumbnailLoadOutcome;
 
-pub(crate) use crate::text_preview::{
-    MarkdownPreviewMode, TextPreviewChunk, TextPreviewDocument, TextPreviewFormat,
-    TextPreviewLineLimitNotice,
-};
+pub(crate) use crate::text_preview::{MarkdownPreviewMode, TextPreviewChunk, TextPreviewDocument};
 pub(crate) use file_core::{TransferConflictItem, TransferConflictMetadata};
 
 mod address_bar;
@@ -127,25 +124,24 @@ pub(crate) use properties::{
     FilePropertiesRequest, FilePropertiesSnapshot, FilePropertiesState, FilePropertiesTargetSet,
     PermissionBatchOutcome, PermissionBatchPathFailure,
 };
-mod sqlite_preview;
-pub(crate) use sqlite_preview::{
-    SqlQueryOutcome, SqliteCellValue, SqliteDatabasePreview, SqlitePreviewMessage,
-    SqlitePreviewTab, SqliteTableData, SqliteTableSummary, SQLITE_ROW_LIMIT,
+// 纯搬移：SQLite 预览模型类型已下沉 bennu-preview，此处 re-export 维持
+// crate::model::SqlitePreviewMessage 等既有调用路径不变。
+pub(crate) use bennu_preview::sqlite_preview::{SqlitePreviewMessage, SqlitePreviewTab};
+// 纯搬移：预览聚合模型已下沉 bennu-preview，此处 re-export 维持
+// crate::model::PreviewState 等既有调用路径不变。
+pub(crate) use bennu_preview::preview::{
+    AudioPreviewPlayback, ImagePreviewContent, PreviewContent, PreviewSize, PreviewState,
+    PreviewWindowProfile, RemotePreviewCacheFinished, RemotePreviewCacheMessage,
+    RightPreviewPanelInfoSnapshot, VideoPreviewFrame, VideoPreviewPlayback,
 };
-mod preview;
-pub(crate) use preview::RightPreviewPanelInfoSnapshot;
-pub(crate) use preview::{
-    image_preview_size, scaled_media_size, AudioPreviewPlayback, AudioPreviewPlaybackStatus,
-    ImagePreviewContent, PreviewContent, PreviewSize, PreviewState, PreviewTreeDirectoryChildren,
-    PreviewTreeEntry, PreviewWindowChromeState, PreviewWindowProfile, RemotePreviewCacheFinished,
-    RemotePreviewCacheMessage, RemotePreviewCacheProgress, RemotePreviewDownload,
-    VideoPreviewFrame, VideoPreviewPlayback, VideoPreviewPlaybackStatus,
-    VideoPreviewSeekCompletion, PREVIEW_WINDOW_INITIAL_CONTROLS_DURATION,
+// 纯搬移：视口模型已下沉 bennu-preview，此处 re-export 维持
+// crate::model::ImagePreviewViewport 既有调用路径不变。
+pub(crate) use bennu_preview::image_preview_viewport::{
+    ImagePreviewViewport, PreviewImageViewportMessage,
 };
-mod image_preview_viewport;
-pub(crate) use image_preview_viewport::{
-    image_preview_zoom_multiplier, ImagePreviewViewport, PreviewImageViewportMessage,
-};
+// 预览子系统自有消息类型（命令层/状态机的输出契约）经此 re-export，
+// 宿主经 Message::Preview 单一包裹变体路由。
+pub(crate) use bennu_preview::preview_message::PreviewMessage;
 mod settings;
 pub(crate) use settings::{SettingsCategory, SettingsSubpage};
 mod context_menu_items;
@@ -331,6 +327,9 @@ pub(crate) fn display_entries_in_discovery_order(
 #[derive(Debug, Clone)]
 pub(crate) enum Message {
     StartupEnvironmentLoaded(Box<StartupEnvironment>),
+    /// 预览子系统包裹变体：下沉后的命令层/状态机输出 PreviewMessage，
+    /// 宿主经它路由（迁移期机械映射回既有散装变体，视图组迁移后收拢）。
+    Preview(PreviewMessage),
     TerminalPanel(crate::terminal_panel::TerminalPanelMessage),
     SidebarLocationsLoaded(Vec<SidebarLocation>),
     SidebarDevicesLoaded(StorageDeviceSnapshot),
@@ -515,7 +514,7 @@ pub(crate) enum Message {
     RightPreviewPanelRatioResizeStarted,
     RightPreviewPanelInfoLoaded {
         path: PathBuf,
-        snapshot: Result<Box<crate::model::preview::RightPreviewPanelInfoSnapshot>, String>,
+        snapshot: Result<Box<crate::model::RightPreviewPanelInfoSnapshot>, String>,
     },
     SqliteTablesResizeStarted,
     SplitResizeStarted,
@@ -881,6 +880,189 @@ pub(crate) enum Message {
     TransferConflictChoiceSelected(TransferConflictChoice),
     TransferConflictApplyToAllToggled,
     TransferConflictCancelRequested,
+}
+
+// 迁移期机械映射：Message::Preview(pm) 在 update 入口解包后经本函数
+// 转发到既有散装变体的处理分支（零行为变化）；PreviewEngine 状态机组
+// 与视图组迁移完成后，处理分支改为直接吃 PreviewMessage，本函数随之
+// 删除。变体与 design.md 附录 A 基线一一对应
+// （ContextMenuPreviewExpansionChanged 属右键菜单设置域，不在此列）。
+impl From<PreviewMessage> for Message {
+    fn from(message: PreviewMessage) -> Self {
+        match message {
+            PreviewMessage::PreviewLoaded(path, outcome) => Message::PreviewLoaded(path, outcome),
+            PreviewMessage::DocumentPreview(inner) => Message::DocumentPreview(inner),
+            PreviewMessage::SqlitePreview(inner) => Message::SqlitePreview(inner),
+            PreviewMessage::RemotePreviewCache(inner) => Message::RemotePreviewCache(inner),
+            PreviewMessage::AnimatedImagePreviewLoaded(path, generation, outcome) => {
+                Message::AnimatedImagePreviewLoaded(path, generation, outcome)
+            }
+            PreviewMessage::OriginalImagePreviewLoaded(path, generation, outcome) => {
+                Message::OriginalImagePreviewLoaded(path, generation, outcome)
+            }
+            PreviewMessage::RetryImagePreview(path) => Message::RetryImagePreview(path),
+            PreviewMessage::PreviewDirectoryChildrenLoaded(path, outcome) => {
+                Message::PreviewDirectoryChildrenLoaded(path, outcome)
+            }
+            PreviewMessage::TextPreviewContentScrolled {
+                lines,
+                viewport_height,
+            } => Message::TextPreviewContentScrolled {
+                lines,
+                viewport_height,
+            },
+            PreviewMessage::TextPreviewViewerScrolled {
+                lines,
+                offset_y,
+                viewport_height,
+            } => Message::TextPreviewViewerScrolled {
+                lines,
+                offset_y,
+                viewport_height,
+            },
+            PreviewMessage::TextPreviewViewportSynced {
+                offset_y,
+                viewport_height,
+            } => Message::TextPreviewViewportSynced {
+                offset_y,
+                viewport_height,
+            },
+            PreviewMessage::TextPreviewContentHeightChanged(content_height) => {
+                Message::TextPreviewContentHeightChanged(content_height)
+            }
+            PreviewMessage::TextPreviewChunkLoaded {
+                path,
+                generation,
+                start_offset,
+                outcome,
+            } => Message::TextPreviewChunkLoaded {
+                path,
+                generation,
+                start_offset,
+                outcome,
+            },
+            PreviewMessage::MarkdownPreviewScrolled {
+                offset_y,
+                viewport_height,
+                content_height,
+            } => Message::MarkdownPreviewScrolled {
+                offset_y,
+                viewport_height,
+                content_height,
+            },
+            PreviewMessage::MarkdownPreviewModeSelected(mode) => {
+                Message::MarkdownPreviewModeSelected(mode)
+            }
+            PreviewMessage::ImagePreviewDimensionsLoaded(path, generation, outcome) => {
+                Message::ImagePreviewDimensionsLoaded(path, generation, outcome)
+            }
+            PreviewMessage::PreviewImageViewport(inner) => Message::PreviewImageViewport(inner),
+            PreviewMessage::AnimatedImageFrameLoaded(frame) => {
+                Message::AnimatedImageFrameLoaded(frame)
+            }
+            PreviewMessage::AnimatedImagePreviewFinished(path, generation) => {
+                Message::AnimatedImagePreviewFinished(path, generation)
+            }
+            PreviewMessage::AnimatedImagePreviewFailed(path, generation, error) => {
+                Message::AnimatedImagePreviewFailed(path, generation, error)
+            }
+            PreviewMessage::AnimatedImageSeekRequested(position) => {
+                Message::AnimatedImageSeekRequested(position)
+            }
+            PreviewMessage::AnimatedImageSeekCommitted => Message::AnimatedImageSeekCommitted,
+            PreviewMessage::AudioPreviewPlaybackToggled => Message::AudioPreviewPlaybackToggled,
+            PreviewMessage::AudioPreviewStarted(path, outcome) => {
+                Message::AudioPreviewStarted(path, outcome)
+            }
+            PreviewMessage::AudioPreviewSeekRequested(position) => {
+                Message::AudioPreviewSeekRequested(position)
+            }
+            PreviewMessage::AudioPreviewVolumeChanged(volume) => {
+                Message::AudioPreviewVolumeChanged(volume)
+            }
+            PreviewMessage::AudioPreviewTick => Message::AudioPreviewTick,
+            PreviewMessage::VideoPreviewPlaybackToggled => Message::VideoPreviewPlaybackToggled,
+            PreviewMessage::VideoPreviewAudioStarted(path, generation, outcome) => {
+                Message::VideoPreviewAudioStarted(path, generation, outcome)
+            }
+            PreviewMessage::VideoPreviewMetadataLoaded(path, outcome) => {
+                Message::VideoPreviewMetadataLoaded(path, outcome)
+            }
+            PreviewMessage::VideoPreviewSeekRequested(position) => {
+                Message::VideoPreviewSeekRequested(position)
+            }
+            PreviewMessage::VideoPreviewSeekCommitted => Message::VideoPreviewSeekCommitted,
+            PreviewMessage::VideoPreviewVolumeChanged(volume) => {
+                Message::VideoPreviewVolumeChanged(volume)
+            }
+            PreviewMessage::VideoPreviewTick => Message::VideoPreviewTick,
+            PreviewMessage::VideoPreviewFrameLoaded(frame) => {
+                Message::VideoPreviewFrameLoaded(frame)
+            }
+            PreviewMessage::VideoPreviewSeekFrameFailed(path, generation, position, error) => {
+                Message::VideoPreviewSeekFrameFailed(path, generation, position, error)
+            }
+            PreviewMessage::VideoPreviewFinished(path, generation) => {
+                Message::VideoPreviewFinished(path, generation)
+            }
+            PreviewMessage::VideoPreviewFailed(path, generation, error) => {
+                Message::VideoPreviewFailed(path, generation, error)
+            }
+            PreviewMessage::PreviewTreeDirectoryToggled(entry_id) => {
+                Message::PreviewTreeDirectoryToggled(entry_id)
+            }
+            PreviewMessage::PreviewTreeAnimationTick => Message::PreviewTreeAnimationTick,
+            PreviewMessage::RightPreviewPanelResizeStarted => {
+                Message::RightPreviewPanelResizeStarted
+            }
+            PreviewMessage::RightPreviewPanelRatioResizeStarted => {
+                Message::RightPreviewPanelRatioResizeStarted
+            }
+            PreviewMessage::RightPreviewPanelInfoLoaded { path, snapshot } => {
+                Message::RightPreviewPanelInfoLoaded { path, snapshot }
+            }
+            PreviewMessage::SqliteTablesResizeStarted => Message::SqliteTablesResizeStarted,
+            PreviewMessage::ToggleRightPreviewPanel => Message::ToggleRightPreviewPanel,
+            PreviewMessage::PreviewWindowPinToggled => Message::PreviewWindowPinToggled,
+            PreviewMessage::PreviewSizeLimitInputChanged(kind_index, value) => {
+                Message::PreviewSizeLimitInputChanged(kind_index, value)
+            }
+            PreviewMessage::PreviewSizeLimitInputCommitted(kind_index) => {
+                Message::PreviewSizeLimitInputCommitted(kind_index)
+            }
+            PreviewMessage::PreviewDirectoryExpandLevelsInputChanged(value) => {
+                Message::PreviewDirectoryExpandLevelsInputChanged(value)
+            }
+            PreviewMessage::PreviewDirectoryExpandLevelsInputCommitted => {
+                Message::PreviewDirectoryExpandLevelsInputCommitted
+            }
+            PreviewMessage::PreviewExtensionInputChanged(kind_index, value) => {
+                Message::PreviewExtensionInputChanged(kind_index, value)
+            }
+            PreviewMessage::PreviewExtensionInputCommitted(kind_index) => {
+                Message::PreviewExtensionInputCommitted(kind_index)
+            }
+            PreviewMessage::PreviewExtensionExpandToggled(kind_index) => {
+                Message::PreviewExtensionExpandToggled(kind_index)
+            }
+            PreviewMessage::PreviewExtensionRemoved(kind_index, extension) => {
+                Message::PreviewExtensionRemoved(kind_index, extension)
+            }
+            PreviewMessage::PreviewExtensionResetRequested(kind_index) => {
+                Message::PreviewExtensionResetRequested(kind_index)
+            }
+            PreviewMessage::PreviewExtensionResetConfirmed(kind_index) => {
+                Message::PreviewExtensionResetConfirmed(kind_index)
+            }
+            PreviewMessage::PreviewWindowInitialChromeElapsed(generation) => {
+                Message::PreviewWindowInitialChromeElapsed(generation)
+            }
+            PreviewMessage::SqlitePreviewTablesScrolled => Message::SqlitePreviewTablesScrolled,
+            PreviewMessage::SqlitePreviewDataScrolled => Message::SqlitePreviewDataScrolled,
+            PreviewMessage::PreviewDirectoryScrolled => Message::PreviewDirectoryScrolled,
+            PreviewMessage::PreviewArchiveScrolled => Message::PreviewArchiveScrolled,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

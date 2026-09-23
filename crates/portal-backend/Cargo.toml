@@ -14,11 +14,15 @@ dirs.workspace = true
 bennu-theme = { path = "../bennu-theme" }
 file-core = { path = "../file-core" }
 file-operation-store = { path = "../file-operation-store" }
-# 软件渲染（tiny-skia）：portal 是弹完即关的闲置型进程，GPU 上下文会被
-# 驱动回收、再开窗付出 ~2.2s 重建代价（常驻+warming 均压不住，见任务
-# 09-21-filechooser-startup-latency）。CPU 渲染无上下文可回收，选择窗口
-# 的渲染量对 CPU 毫无压力。不能沿用 workspace 的 iced 定义（它带 wgpu，
-# 且 workspace feature 只能追加不能削减）。
+# 共享预览子系统（模型/状态机/面板单源）：portal 是第二个宿主，空格
+# 预览的守卫/窗口/回流全走本 crate；其 iced 声明不带渲染器 feature，
+# 与本 crate 自行声明的 wgpu+tiny-skia 并集不改变渲染链。
+bennu-preview = { path = "../bennu-preview" }
+# 渲染链：核显 → 独显 → 软件渲染（iced fallback 按 ICED_BACKEND 候选依次
+# 尝试）。wgpu 首选钉住驱动显示器的 GPU（通常为核显且必然已上电；纯 GPU
+# 初始化冷首窗实测 ~130ms，独显 NVIDIA 则 ~2.2s，必须避免），GPU 整体不可
+# 用时退 tiny-skia（~50ms，兼作滚动卡顿时的兑底选项）。不能沿用 workspace
+# 的 iced 定义：它无 wgpu/tiny-skia 的组合控制，feature 只能追加不能削减。
 iced = { version = "0.14", default-features = false, features = [
     "tokio",
     "advanced",
@@ -30,7 +34,10 @@ iced = { version = "0.14", default-features = false, features = [
     "wayland",
     "fira-sans",
     "tiny-skia",
+    "wgpu",
 ] }
+display-renderer = { path = "../display-renderer" }
+thumbnails = { path = "../thumbnails" }
 gio = "=0.22.8"
 serde = { version = "1.0.228", features = ["derive"] }
 thiserror.workspace = true

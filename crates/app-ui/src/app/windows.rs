@@ -4,34 +4,29 @@ use iced::widget::scrollable;
 use iced::{event, mouse, window, Rectangle, Size, Task};
 
 use super::FileBrowser;
-use crate::app::runtime::preview_window_initial_chrome_command;
 use crate::app::smooth_scroll::smooth_scroll_id;
 use crate::model::{
-    Message, PreviewContent, PreviewSize, PreviewState, PreviewWindowProfile, ScrollbarRegion,
-    SettingsCategory, SettingsSubpage, WINDOW_TOP_BAR_HEIGHT,
+    Message, ScrollbarRegion, SettingsCategory, SettingsSubpage, WINDOW_TOP_BAR_HEIGHT,
 };
 use crate::view::{address_input_id, rename_input_id};
 
-const DEFAULT_PREVIEW_WIDTH: f32 = 720.0;
-const DEFAULT_PREVIEW_HEIGHT: f32 = 900.0;
-const MIN_PREVIEW_WIDTH: f32 = 420.0;
-const MIN_PREVIEW_HEIGHT: f32 = 260.0;
-const DEFAULT_IMAGE_PREVIEW_WIDTH: f32 = 748.0;
-const DEFAULT_IMAGE_PREVIEW_HEIGHT: f32 = 636.0;
-const MIN_IMAGE_PREVIEW_WIDTH: f32 = 360.0;
-const MIN_IMAGE_PREVIEW_HEIGHT: f32 = 260.0;
-const IMAGE_PREVIEW_INITIAL_FIT_MAX_WIDTH: f32 = 1080.0;
-const IMAGE_PREVIEW_INITIAL_FIT_MAX_HEIGHT: f32 = 940.0;
-const DEFAULT_AUDIO_PREVIEW_WIDTH: f32 = 780.0;
-const DEFAULT_AUDIO_PREVIEW_HEIGHT: f32 = 168.0;
-const MIN_AUDIO_PREVIEW_WIDTH: f32 = 560.0;
-const MIN_AUDIO_PREVIEW_HEIGHT: f32 = 136.0;
-const DEFAULT_VIDEO_PREVIEW_WIDTH: f32 = 748.0;
-const DEFAULT_VIDEO_PREVIEW_HEIGHT: f32 = 501.0;
-const MIN_VIDEO_PREVIEW_WIDTH: f32 = 360.0;
-const MIN_VIDEO_PREVIEW_HEIGHT: f32 = 320.0;
-const VIDEO_PREVIEW_INITIAL_FIT_MAX_WIDTH: f32 = 1080.0;
-const VIDEO_PREVIEW_INITIAL_FIT_MAX_HEIGHT: f32 = 940.0;
+// 预览窗口机械（设置/尺寸档位常量/开关适配状态机/初始 chrome 计时）
+// 已迁 bennu-preview 的 PreviewEngine（engine/windows.rs）；此处
+// re-export 维持本模块与 windows/tests 的既有调用路径。
+pub(crate) use bennu_preview::engine::{
+    default_preview_size, image_preview_size_from_dimensions, preview_content_size_from_window,
+    preview_size_matches, preview_window_size_for_content,
+};
+// 仅供 windows/tests 使用的尺寸档位纯函数（自引擎 re-export，保持测试
+// 既有调用路径）。
+use bennu_preview::engine::PreviewWindowIdentity;
+#[cfg(test)]
+pub(crate) use bennu_preview::engine::{
+    animated_image_preview_size_from_dimensions, clamp_preview_size_to_minimum,
+    image_preview_initial_fit_max_size, preview_min_size, video_preview_initial_fit_max_size,
+    video_preview_size_from_frame,
+};
+
 const DEFAULT_SETTINGS_WIDTH: f32 = 760.0;
 const DEFAULT_SETTINGS_HEIGHT: f32 = 560.0;
 const MIN_SETTINGS_WIDTH: f32 = 640.0;
@@ -49,9 +44,15 @@ pub(super) const MAIN_WINDOW_INITIAL_HEIGHT: f32 = 680.0;
 const MAIN_WINDOW_APP_ID: &str = "bennu";
 const SETTINGS_WINDOW_APP_ID: &str = "bennu-settings";
 const PROPERTIES_WINDOW_APP_ID: &str = "bennu-properties";
-const PREVIEW_WINDOW_APP_ID: &str = "bennu-preview";
 const TRANSFER_WINDOW_APP_ID: &str = "bennu-transfer";
-const PREVIEW_RESIZE_MATCH_TOLERANCE: f32 = 1.0;
+/// 预览窗口的宿主身份：app id 与启动图标是 app-ui 进程属性，开窗
+/// Settings 由引擎按此身份构造。
+pub(crate) fn preview_window_identity() -> PreviewWindowIdentity {
+    PreviewWindowIdentity {
+        app_id: "bennu-preview".to_owned(),
+        icon: crate::app_icon::startup_window_icon(),
+    }
+}
 
 pub(super) fn main_window_settings() -> window::Settings {
     let mut settings = window::Settings {
@@ -121,57 +122,6 @@ fn transfer_window_settings() -> window::Settings {
     settings.platform_specific.application_id = TRANSFER_WINDOW_APP_ID.to_owned();
     settings.icon = crate::app_icon::startup_window_icon();
     settings
-}
-
-fn preview_window_settings(profile: PreviewWindowProfile, size: PreviewSize) -> window::Settings {
-    let size = clamp_preview_size_to_minimum(profile, size);
-    let min_size = preview_min_size(profile);
-    let mut settings = window::Settings {
-        size: preview_window_size_for_content(size),
-        min_size: Some(preview_window_size_for_content(PreviewSize {
-            width: min_size.width,
-            height: min_size.height,
-        })),
-        decorations: false,
-        exit_on_close_request: true,
-        ..window::Settings::default()
-    };
-    settings.platform_specific.application_id = PREVIEW_WINDOW_APP_ID.to_owned();
-    settings.icon = crate::app_icon::startup_window_icon();
-    settings
-}
-
-fn preview_window_size_for_content(content_size: PreviewSize) -> Size {
-    Size::new(content_size.width, content_size.height)
-}
-
-fn preview_content_size_from_window(
-    profile: PreviewWindowProfile,
-    width: f32,
-    height: f32,
-) -> PreviewSize {
-    clamp_preview_size_to_minimum(profile, PreviewSize { width, height })
-}
-
-pub(super) fn default_preview_size(profile: PreviewWindowProfile) -> PreviewSize {
-    match profile {
-        PreviewWindowProfile::Regular => PreviewSize {
-            width: DEFAULT_PREVIEW_WIDTH,
-            height: DEFAULT_PREVIEW_HEIGHT,
-        },
-        PreviewWindowProfile::Image => PreviewSize {
-            width: DEFAULT_IMAGE_PREVIEW_WIDTH,
-            height: DEFAULT_IMAGE_PREVIEW_HEIGHT,
-        },
-        PreviewWindowProfile::Audio => PreviewSize {
-            width: DEFAULT_AUDIO_PREVIEW_WIDTH,
-            height: DEFAULT_AUDIO_PREVIEW_HEIGHT,
-        },
-        PreviewWindowProfile::Video => PreviewSize {
-            width: DEFAULT_VIDEO_PREVIEW_WIDTH,
-            height: DEFAULT_VIDEO_PREVIEW_HEIGHT,
-        },
-    }
 }
 
 enum TextInputFocusCheckResult {
@@ -247,91 +197,6 @@ fn search_input_focus_check_command(
         crate::view::search_input_id(),
         TextInputFocusCheckResult::Search(request),
     ))
-}
-
-fn clamp_preview_size_to_minimum(profile: PreviewWindowProfile, size: PreviewSize) -> PreviewSize {
-    let min_size = preview_min_size(profile);
-    PreviewSize {
-        width: size.width.max(min_size.width),
-        height: size.height.max(min_size.height),
-    }
-}
-
-fn preview_min_size(profile: PreviewWindowProfile) -> Size {
-    match profile {
-        PreviewWindowProfile::Regular => Size::new(MIN_PREVIEW_WIDTH, MIN_PREVIEW_HEIGHT),
-        PreviewWindowProfile::Image => Size::new(MIN_IMAGE_PREVIEW_WIDTH, MIN_IMAGE_PREVIEW_HEIGHT),
-        PreviewWindowProfile::Audio => Size::new(MIN_AUDIO_PREVIEW_WIDTH, MIN_AUDIO_PREVIEW_HEIGHT),
-        PreviewWindowProfile::Video => Size::new(MIN_VIDEO_PREVIEW_WIDTH, MIN_VIDEO_PREVIEW_HEIGHT),
-    }
-}
-
-fn image_preview_initial_fit_max_size() -> Size {
-    Size::new(
-        IMAGE_PREVIEW_INITIAL_FIT_MAX_WIDTH,
-        IMAGE_PREVIEW_INITIAL_FIT_MAX_HEIGHT,
-    )
-}
-
-fn video_preview_initial_fit_max_size() -> Size {
-    Size::new(
-        VIDEO_PREVIEW_INITIAL_FIT_MAX_WIDTH,
-        VIDEO_PREVIEW_INITIAL_FIT_MAX_HEIGHT,
-    )
-}
-
-pub(super) fn image_preview_size_from_dimensions(width: u32, height: u32) -> PreviewSize {
-    let max_size = image_preview_initial_fit_max_size();
-    let image_width = width as f32;
-    let image_height = height as f32;
-    let scale = (max_size.width / image_width)
-        .min(max_size.height / image_height)
-        .min(1.0);
-
-    PreviewSize {
-        width: image_width * scale,
-        height: image_height * scale,
-    }
-}
-
-fn animated_image_preview_size_from_dimensions(width: u32, height: u32) -> PreviewSize {
-    let min_size = preview_min_size(PreviewWindowProfile::Image);
-    let image_width = width as f32;
-    let image_height = height as f32;
-    let scale_to_maximum = (IMAGE_PREVIEW_INITIAL_FIT_MAX_WIDTH / image_width)
-        .min(IMAGE_PREVIEW_INITIAL_FIT_MAX_HEIGHT / image_height);
-    let scale_to_minimum = (min_size.width / image_width).max(min_size.height / image_height);
-    if scale_to_minimum > scale_to_maximum {
-        return PreviewSize {
-            width: min_size.width,
-            height: min_size.height,
-        };
-    }
-
-    let scale = scale_to_minimum.max(scale_to_maximum.min(1.0));
-    PreviewSize {
-        width: image_width * scale,
-        height: image_height * scale,
-    }
-}
-
-fn video_preview_size_from_frame(width: u32, height: u32) -> PreviewSize {
-    let max_size = video_preview_initial_fit_max_size();
-    let frame_width = width as f32;
-    let frame_height = height as f32;
-    let scale = (max_size.width / frame_width)
-        .min(max_size.height / frame_height)
-        .min(1.0);
-
-    PreviewSize {
-        width: frame_width * scale,
-        height: frame_height * scale,
-    }
-}
-
-fn preview_size_matches(actual: PreviewSize, expected: PreviewSize) -> bool {
-    (actual.width - expected.width).abs() <= PREVIEW_RESIZE_MATCH_TOLERANCE
-        && (actual.height - expected.height).abs() <= PREVIEW_RESIZE_MATCH_TOLERANCE
 }
 
 impl FileBrowser {
@@ -528,39 +393,15 @@ impl FileBrowser {
         window::close(window)
     }
 
-    pub(super) fn ensure_preview_window(&mut self, profile: PreviewWindowProfile) -> Task<Message> {
-        let size = clamp_preview_size_to_minimum(profile, default_preview_size(profile));
-        self.preview_window_profile = profile;
-        self.preview_size = size;
-        self.pending_preview_resize = Some(size);
-
-        if let Some(window) = self.preview_window {
-            self.reset_preview_window_bottom_controls();
+    /// 预览窗口机械已迁 PreviewEngine（engine/windows.rs）；宿主转发层
+    /// 只补引擎不持有的宿主簿记：焦点登记（含引擎内部路径的出口同步）
+    /// 与关闭时的焦点/滚动条视口收尾。
+    /// 引擎呈现预览窗口后把它登记为应用焦点；引擎不持有宿主焦点簿记，
+    /// 经 take_pending 同步（引擎内部路径由 update 出口统一兜底）。
+    pub(super) fn sync_preview_window_focus(&mut self) {
+        if let Some(window) = self.preview_engine.take_pending_preview_window_focus() {
             self.focused_window = window;
-            let initial_chrome = self.start_preview_window_initial_chrome();
-            let min_size = preview_min_size(profile);
-            let resize = window::set_min_size(
-                window,
-                Some(preview_window_size_for_content(PreviewSize {
-                    width: min_size.width,
-                    height: min_size.height,
-                })),
-            )
-            .chain(window::resize(
-                window,
-                preview_window_size_for_content(size),
-            ));
-            return Task::batch([resize, window::gain_focus(window), initial_chrome]);
         }
-
-        self.preview_window_drag_active = false;
-        self.preview_window_pointer_y = None;
-        self.reset_preview_window_bottom_controls();
-        let initial_chrome = self.start_preview_window_initial_chrome();
-        let (window, command) = window::open(preview_window_settings(profile, size));
-        self.preview_window = Some(window);
-        self.focused_window = window;
-        Task::batch([command.discard(), initial_chrome])
     }
 
     pub(super) fn handle_captured_preview_shortcut(&mut self) -> Task<Message> {
@@ -572,190 +413,32 @@ impl FileBrowser {
     }
 
     pub(super) fn toggle_preview_window_pin(&mut self) -> Task<Message> {
-        self.preview_window_pinned = !self.preview_window_pinned;
-        Task::none()
+        self.preview_engine
+            .toggle_preview_window_pin()
+            .map(Message::Preview)
     }
 
+    #[cfg(test)]
     pub(super) fn open_image_preview_window_for_dimensions(
         &mut self,
         width: u32,
         height: u32,
     ) -> Task<Message> {
-        if width == 0 || height == 0 {
-            return self.open_image_preview_error_window();
-        }
-        self.update_preview_window(
-            PreviewWindowProfile::Image,
-            image_preview_size_from_dimensions(width, height),
-        )
-    }
-    pub(super) fn open_animated_image_preview_window_for_dimensions(
-        &mut self,
-        width: u32,
-        height: u32,
-    ) -> Task<Message> {
-        self.update_preview_window(
-            PreviewWindowProfile::Image,
-            animated_image_preview_size_from_dimensions(width, height),
-        )
-    }
-
-    pub(super) fn open_image_preview_window_with_default_size(&mut self) -> Task<Message> {
-        self.update_preview_window(
-            PreviewWindowProfile::Image,
-            default_preview_size(PreviewWindowProfile::Image),
-        )
-    }
-
-    pub(super) fn open_image_preview_error_window(&mut self) -> Task<Message> {
-        self.open_image_preview_window_with_default_size()
-    }
-
-    fn update_preview_window(
-        &mut self,
-        profile: PreviewWindowProfile,
-        size: PreviewSize,
-    ) -> Task<Message> {
-        self.preview_window_profile = profile;
-        self.preview_size = clamp_preview_size_to_minimum(profile, size);
-        self.pending_preview_resize = Some(self.preview_size);
-
-        if let Some(window) = self.preview_window {
-            self.reset_preview_window_bottom_controls();
-            self.focused_window = window;
-            let min_size = preview_min_size(profile);
-            let initial_chrome = self.start_preview_window_initial_chrome();
-            let resize = window::set_min_size(
-                window,
-                Some(preview_window_size_for_content(PreviewSize {
-                    width: min_size.width,
-                    height: min_size.height,
-                })),
-            )
-            .chain(window::resize(
-                window,
-                preview_window_size_for_content(self.preview_size),
-            ));
-            return Task::batch([resize, window::gain_focus(window), initial_chrome]);
-        }
-
-        self.preview_window_drag_active = false;
-        self.preview_window_pointer_y = None;
-        self.reset_preview_window_bottom_controls();
-        let initial_chrome = self.start_preview_window_initial_chrome();
-        let (window, command) = window::open(preview_window_settings(profile, self.preview_size));
-        self.preview_window = Some(window);
-        self.focused_window = window;
-        Task::batch([command.discard(), initial_chrome])
-    }
-
-    fn preview_window_has_bottom_media_controls(&self) -> bool {
-        match self.preview.as_ref() {
-            Some(PreviewState::Ready(PreviewContent::Video { .. })) => true,
-            Some(PreviewState::Ready(PreviewContent::AnimatedImage(preview))) => {
-                preview.playback_duration().is_some()
-            }
-            _ => false,
-        }
-    }
-
-    fn reset_preview_window_bottom_controls(&mut self) {
-        self.preview_window_bottom_controls.reset_hidden();
-        self.refresh_preview_window_bottom_controls();
-    }
-
-    pub(super) fn refresh_preview_window_bottom_controls(&mut self) {
-        if !self.preview_window_has_bottom_media_controls() {
-            self.preview_window_bottom_controls.reset_hidden();
-            return;
-        }
-
-        if let Some(pointer_y) = self.preview_window_pointer_y {
-            self.preview_window_bottom_controls
-                .update_for_bottom_cursor_y(pointer_y, self.preview_size.height);
-        }
-    }
-
-    pub(super) fn fit_preview_window_to_video_frame(
-        &mut self,
-        width: u32,
-        height: u32,
-    ) -> Task<Message> {
-        if width == 0 || height == 0 {
-            return Task::none();
-        }
-
-        self.update_preview_window(
-            PreviewWindowProfile::Video,
-            video_preview_size_from_frame(width, height),
-        )
-    }
-
-    // 文本与 SQLite 预览使用标准窗口壳（标题栏 + 控制按钮）；媒体类内容保持悬浮 chrome。
-    pub(crate) fn preview_window_uses_window_chrome(&self) -> bool {
-        matches!(
-            self.preview,
-            Some(PreviewState::Ready(PreviewContent::Text { .. }))
-                | Some(PreviewState::Ready(PreviewContent::Sqlite(_)))
-        )
-    }
-
-    fn start_preview_window_initial_chrome(&mut self) -> Task<Message> {
-        if self.preview_window_uses_window_chrome() {
-            return Task::none();
-        }
-
-        self.cancel_preview_window_initial_chrome_hide();
-        self.preview_window_chrome.start_reveal();
-        if self.preview_window_has_bottom_media_controls() {
-            self.preview_window_bottom_controls.start_reveal();
-        } else {
-            self.preview_window_bottom_controls.reset_hidden();
-        }
-        preview_window_initial_chrome_command(self.preview_window_initial_chrome_generation)
-    }
-
-    pub(super) fn cancel_preview_window_initial_chrome_hide(&mut self) {
-        self.preview_window_initial_chrome_generation = self
-            .preview_window_initial_chrome_generation
-            .wrapping_add(1);
-    }
-
-    pub(super) fn hide_preview_window_initial_chrome(&mut self, generation: u64) {
-        if generation != self.preview_window_initial_chrome_generation {
-            return;
-        }
-        if self.preview_window_uses_window_chrome() {
-            return;
-        }
-        self.preview_window_chrome.start_hide();
-        if !self.preview_window_has_bottom_media_controls() {
-            self.preview_window_bottom_controls.reset_hidden();
-        } else if self.preview_window_pointer_y.is_some() {
-            self.refresh_preview_window_bottom_controls();
-        } else {
-            self.preview_window_bottom_controls.start_hide();
-        }
+        let command = self
+            .preview_engine
+            .open_image_preview_window_for_dimensions(width, height);
+        self.sync_preview_window_focus();
+        command.map(Message::Preview)
     }
 
     pub(super) fn close_preview_window(&mut self) -> Task<Message> {
-        // 先复位固定，保证 clear_preview 的固定守卫不会跳过内容清理。
-        self.preview_window_pinned = false;
-        self.preview_shown_path = None;
-        self.clear_preview();
+        let (closed_window, command) = self.preview_engine.close_preview_window();
         self.forget_scrollbar_viewport(&ScrollbarRegion::PreviewSqliteTables);
         self.forget_scrollbar_viewport(&ScrollbarRegion::PreviewSqliteData);
-        self.pending_preview_resize = None;
-        self.preview_window_drag_active = false;
-        self.preview_window_pointer_y = None;
-        self.cancel_preview_window_initial_chrome_hide();
-        self.preview_window_chrome.reset_hidden();
-        self.preview_window_bottom_controls.reset_hidden();
-        let Some(window) = self.preview_window.take() else {
-            return Task::none();
-        };
-        self.clear_closed_window_focus(window);
-        window::close(window)
+        if let Some(window) = closed_window {
+            self.clear_closed_window_focus(window);
+        }
+        command.map(Message::Preview)
     }
 
     fn clear_closed_window_focus(&mut self, window: window::Id) {
@@ -787,7 +470,7 @@ impl FileBrowser {
         if window == self.main_window {
             self.search_history_interaction.reset();
         }
-        if self.preview_window == Some(window) && !self.preview_window_pinned {
+        if self.preview_engine.should_close_unfocused_window(window) {
             self.close_preview_window()
         } else {
             Task::none()

@@ -1,8 +1,12 @@
 [workspace]
 members = [
     "crates/app-ui",
+    "crates/bennu-localization",
+    "crates/bennu-subprocess",
     "crates/bennu-theme",
+    "crates/bennu-preview",
     "crates/desktop-linux",
+    "crates/display-renderer",
     "crates/file-core",
     "crates/file-search",
     "crates/file-operation-store",
@@ -22,7 +26,7 @@ repository = ""
 blake3 = "1.8.5"
 chrono = "0.4.44"
 dirs = "5.0"
-iced = { version = "0.14", default-features = false, features = ["tokio", "advanced", "advanced-shaping", "canvas", "svg", "image", "x11", "wayland", "fira-sans", "wgpu"] }
+iced = { version = "0.14", default-features = false, features = ["tokio", "advanced", "advanced-shaping", "canvas", "svg", "image", "x11", "wayland", "fira-sans", "wgpu", "tiny-skia"] }
 image = { version = "0.25", default-features = false, features = ["avif-native", "bmp", "gif", "ico", "jpeg", "png", "tiff", "webp"] }
 lexopt = "0.3.1"
 md-5 = "0.10"

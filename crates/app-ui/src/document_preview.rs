@@ -1,22 +1,14 @@
-mod format;
-mod model;
-mod pdfinfo;
-mod resources;
-mod workspace;
-
-pub(crate) use format::{
-    document_preview_format_for_path, DocumentPreviewFormat, OfficeDocumentFormat,
+// 纯搬移：文档预览模型已下沉 bennu-preview，re-export 维持
+// crate::document_preview::* 既有调用路径（含 app-ui 测试用的渲染键类型）。
+// 显式列出消费中的符号（不用 glob：glob re-export 不触发 unused 告警，
+// 会掩盖孤儿，步骤 7 收尾时据此删掉了 13 个无消费者的符号）。
+pub(crate) use bennu_preview::document_preview::{
+    DocumentPageRenderOutcome, DocumentPrepareOutcome, DocumentPreviewMessage, DocumentViewportKey,
 };
-pub(crate) use model::{
-    document_viewport_height, DocumentPageRenderOutcome, DocumentPageRenderRequest,
-    DocumentPageRenderResult, DocumentPageView, DocumentPrepareOutcome, DocumentPrepareRequest,
-    DocumentPreviewMessage, DocumentPreviewRequestKey, DocumentScaleAxis, DocumentViewportKey,
-    PagedDocumentPreview, PendingDocumentPreview, PreparedDocumentPreview,
-};
+// 以下符号仅 app-ui 测试构造文档会话时消费，非测试构建下按需门控
+// 避免未用告警。
 #[cfg(test)]
-pub(crate) use model::{
-    DocumentPageRenderPlan, DocumentPageRequestKey, DocumentPageSize, DocumentRenderKey,
+pub(crate) use bennu_preview::document_preview::{
+    DocumentPageRenderResult, DocumentPageRequestKey, DocumentPageSize, DocumentPageView,
+    DocumentPreviewWorkspace, PreparedDocumentPreview,
 };
-pub(crate) use pdfinfo::{parse_pdfinfo_pages, parse_pdfinfo_summary};
-pub(crate) use resources::{MAX_DOCUMENT_PAGE_EDGE, MAX_DOCUMENT_PAGE_PIXELS};
-pub(crate) use workspace::{DocumentPreviewWorkspace, OfficeDocumentPreviewWorkspace};

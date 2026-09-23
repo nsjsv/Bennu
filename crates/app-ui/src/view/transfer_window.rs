@@ -33,23 +33,6 @@ fn display_address(url: &str) -> &str {
         .unwrap_or(url)
 }
 
-/// 字节量的短格式展示（进度行与文件清单共用）。
-pub(crate) fn format_byte_size(bytes: u64) -> String {
-    const KIB: f64 = 1024.0;
-    const MIB: f64 = 1024.0 * KIB;
-    const GIB: f64 = 1024.0 * MIB;
-    let bytes = bytes as f64;
-    if bytes >= GIB {
-        format!("{:.1} GB", bytes / GIB)
-    } else if bytes >= MIB {
-        format!("{:.1} MB", bytes / MIB)
-    } else if bytes >= KIB {
-        format!("{:.1} KB", bytes / KIB)
-    } else {
-        format!("{bytes} B")
-    }
-}
-
 pub(crate) fn view_transfer_window(browser: &FileBrowser) -> Element<'_, Message> {
     let mut content = column![].spacing(TRANSFER_CARD_SPACING).width(Length::Fill);
     match &browser.transfer_session {

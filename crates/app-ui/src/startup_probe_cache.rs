@@ -205,7 +205,7 @@ mod tests {
         power: &str,
     ) -> HashMap<&'static str, Option<&str>> {
         HashMap::from([
-            (ICED_BACKEND_ENV, Some("wgpu")),
+            (ICED_BACKEND_ENV, Some("wgpu,tiny-skia")),
             (WGPU_BACKEND_ENV, Some(backend.environment_value())),
             (WGPU_POWER_PREF_ENV, Some(power)),
             (MESA_VK_DEVICE_SELECT_ENV, Some("1002:15bf!")),
@@ -276,7 +276,7 @@ mod tests {
         assert!(environment_matches(
             &cached,
             &HashMap::from([
-                (ICED_BACKEND_ENV, Some("wgpu")),
+                (ICED_BACKEND_ENV, Some("wgpu,tiny-skia")),
                 (WGPU_BACKEND_ENV, Some("vulkan")),
                 (WGPU_POWER_PREF_ENV, Some("none")),
                 (MESA_VK_DEVICE_SELECT_ENV, None),

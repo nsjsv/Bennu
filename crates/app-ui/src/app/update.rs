@@ -30,6 +30,51 @@ impl FileBrowser {
                 _ => Task::none(),
             };
         }
+        // 预览子系统包裹变体优先直连 PreviewEngine：已迁消息在引擎内
+        // 处理，Task 以 Message::Preview 回流闭环；引擎返回 None 的变体
+        // 经 From 机械映射（见 model.rs）回散装分支，迁移期零行为变化。
+        // 两条路径都收敛到 dispatch，出口收敛钩子保持单次执行。
+        let command = match message {
+            Message::Preview(preview_message) => {
+                match self.preview_engine.handle(preview_message.clone()) {
+                    Some(task) => task.map(Message::Preview),
+                    None => self.dispatch(Message::from(preview_message)),
+                }
+            }
+            other => self.dispatch(other),
+        };
+        // 任何消息处理后都检查活动窗格目录是否变化,让内嵌终端即时跟随
+        // (前进/后退/侧边栏跳转等入口太多,统一在出口收敛)。
+        self.follow_terminal_panel_directory();
+        // D1 单点收敛:面板开启时让预览状态跟上活动窗格选中项。
+        // 覆盖点击/键盘/删除/改名/tab 切换/窗格切换/目录导航/启动偏好加载
+        // 的全部路径;面板关闭时是空操作。
+        let right_preview_panel_command = self.sync_right_preview_panel();
+        // 选中统计的大小需求:选中入口(点击/框选/键盘/全选/粘贴回显等)
+        // 太多,统一在出口按选中签名收敛,变化时补一次选中条目元数据调度。
+        let selection_metadata_command = self.schedule_selected_metadata_if_selection_changed();
+        // 视口越界自愈:条目集骤减后记录的滚动偏移可能超出新内容,
+        // 出口统一重钉,防止虚拟列表渲染出整屏空白。
+        let viewport_clamp_command = self.clamp_viewports_to_content();
+        // 驱动者签发单点收敛:入队/恢复/认领/监督换代后由此统一发出
+        // Task::stream 驱动者,任何消息路径都不必各自处理。
+        let driver_launch_command = self.poll_driver_command();
+        // 引擎内部路径（消息直达 PreviewEngine）呈现预览窗口后，把
+        // 登记的焦点请求同步进宿主焦点簿记；宿主转发路径已就地同步，
+        // 此处 take 幂等，只兜住绕过转发的引擎调用。
+        self.sync_preview_window_focus();
+        Task::batch([
+            command,
+            right_preview_panel_command,
+            selection_metadata_command,
+            viewport_clamp_command,
+            driver_launch_command,
+        ])
+    }
+
+    /// 散装消息的分派体：自 update 的主 match 提出（预览包裹变体已在
+    /// update 入口经引擎或 From 收敛，不会到达这里）。
+    fn dispatch(&mut self, message: Message) -> Task<Message> {
         let command = match message {
             Message::StartupEnvironmentLoaded(startup_environment) => {
                 self.accept_startup_environment(*startup_environment)
@@ -1250,30 +1295,11 @@ impl FileBrowser {
             | Message::TransferConflictCancelRequested => {
                 self.apply_transfer_conflict_message(message)
             }
+            // 入口已把 Preview 包裹收敛为引擎 Task 或散装变体（见
+            // update 的入口分派）；此臂仅为穷尽性占位。
+            Message::Preview(_) => unreachable!("preview wrapper is unpacked at update entry"),
         };
-        // 任何消息处理后都检查活动窗格目录是否变化,让内嵌终端即时跟随
-        // (前进/后退/侧边栏跳转等入口太多,统一在出口收敛)。
-        self.follow_terminal_panel_directory();
-        // D1 单点收敛:面板开启时让预览状态跟上活动窗格选中项。
-        // 覆盖点击/键盘/删除/改名/tab 切换/窗格切换/目录导航/启动偏好加载
-        // 的全部路径;面板关闭时是空操作。
-        let right_preview_panel_command = self.sync_right_preview_panel();
-        // 选中统计的大小需求:选中入口(点击/框选/键盘/全选/粘贴回显等)
-        // 太多,统一在出口按选中签名收敛,变化时补一次选中条目元数据调度。
-        let selection_metadata_command = self.schedule_selected_metadata_if_selection_changed();
-        // 视口越界自愈:条目集骤减后记录的滚动偏移可能超出新内容,
-        // 出口统一重钉,防止虚拟列表渲染出整屏空白。
-        let viewport_clamp_command = self.clamp_viewports_to_content();
-        // 驱动者签发单点收敛:入队/恢复/认领/监督换代后由此统一发出
-        // Task::stream 驱动者,任何消息路径都不必各自处理。
-        let driver_launch_command = self.poll_driver_command();
-        Task::batch([
-            command,
-            right_preview_panel_command,
-            selection_metadata_command,
-            viewport_clamp_command,
-            driver_launch_command,
-        ])
+        command
     }
 }
 

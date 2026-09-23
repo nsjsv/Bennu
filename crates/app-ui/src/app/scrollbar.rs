@@ -23,8 +23,7 @@ const SCROLLBAR_MIN_REVEAL_OPACITY: f32 = 0.12;
 // 读取，与主软件 `crate::matugen_theme::ui_colors`（即 `bennu_theme::*`
 // 的重导出）同源，视觉零变化。
 pub(crate) use bennu_theme::scrollbar::{
-    enhanced_scrollbar, enhanced_scrollbar_both, scrollbar_layout_probe,
-    scrollbar_viewport_has_overflow, ScrollbarAxis,
+    enhanced_scrollbar, scrollbar_layout_probe, scrollbar_viewport_has_overflow, ScrollbarAxis,
 };
 
 #[derive(Debug, Clone, Copy)]

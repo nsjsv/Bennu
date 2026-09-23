@@ -12,8 +12,9 @@ use super::*;
 use crate::config;
 use crate::document_preview::{
     DocumentPageRenderResult, DocumentPageRequestKey, DocumentPageSize, DocumentPageView,
-    DocumentPreviewFormat, DocumentPreviewWorkspace, PreparedDocumentPreview,
+    DocumentPrepareOutcome, DocumentPreviewWorkspace, PreparedDocumentPreview,
 };
+use crate::model::PreviewState;
 
 #[derive(Default)]
 struct RecordedScrollOffset {

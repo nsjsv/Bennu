@@ -1,6 +1,6 @@
 mod desktop_entries;
 mod desktop_notifications;
-pub mod display_renderer;
+pub use display_renderer;
 pub mod file_clipboard;
 mod file_manager_activation;
 mod gvfs_devices;

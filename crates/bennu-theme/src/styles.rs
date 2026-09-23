@@ -144,6 +144,33 @@ pub fn error_notification_style(theme: &Theme) -> container::Style {
     }
 }
 
+/// 应用内容底：窗口级背景色 + 默认正文色。自 app-ui appearance.rs
+/// 下沉（预览面板 surface 消费）；app-ui re-export 维持调用路径。
+pub fn app_content_style(theme: &Theme) -> container::Style {
+    let colors = ui_colors(theme);
+    container::Style {
+        background: Some(Background::Color(colors.background)),
+        text_color: Some(colors.on_background),
+        ..container::Style::default()
+    }
+}
+
+/// 右键菜单/工具提示底：surface container + 细边 + 圆角 8。自 app-ui
+/// appearance.rs 下沉（窗口控制按钮工具提示消费）；app-ui re-export。
+pub fn context_menu_style(theme: &Theme) -> container::Style {
+    let colors = ui_colors(theme);
+    container::Style {
+        background: Some(Background::Color(colors.surface_container_low)),
+        text_color: Some(colors.on_surface),
+        border: Border {
+            color: subtle_border_color(theme),
+            width: 1.0,
+            radius: 8.0.into(),
+        },
+        ..container::Style::default()
+    }
+}
+
 /// 透明无框按钮：只染文字色，禁用时转 muted。
 pub fn transparent_icon_button_style(theme: &Theme, status: button::Status) -> button::Style {
     button::Style {
@@ -341,6 +368,12 @@ pub fn navigation_text_input_style(theme: &Theme, status: text_input::Status) ->
     let mut style = text_input::default(theme, status);
     style.border.radius = 8.0.into();
     style
+}
+
+/// 导航栏图标按钮样式入口：与 surface 按钮同一视觉（自主程序
+/// app-ui 原样搬移，保持主程序与 portal 图标按钮同源）。
+pub fn navigation_icon_button_style() -> fn(&Theme, button::Status) -> button::Style {
+    surface_button_style
 }
 
 // ---------------------------------------------------------------------------

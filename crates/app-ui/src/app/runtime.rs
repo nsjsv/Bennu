@@ -15,7 +15,7 @@ use super::events::system_theme;
 use super::FileBrowser;
 use crate::command_line::ApplicationLaunchRequest;
 use crate::matugen_theme::{fallback_theme, read_matugen_theme_file, AppearanceMode};
-use crate::model::{Message, X11DndMessage, PREVIEW_WINDOW_INITIAL_CONTROLS_DURATION};
+use crate::model::{Message, X11DndMessage};
 use crate::startup_rendering::StartupRenderingEnvironment;
 use crate::startup_trace;
 
@@ -390,21 +390,10 @@ pub(super) fn scrollbar_auto_hide_command(generation: u64) -> Task<Message> {
     )
 }
 
-pub(super) fn preview_window_initial_chrome_command(generation: u64) -> Task<Message> {
-    Task::perform(
-        async move {
-            tokio::time::sleep(PREVIEW_WINDOW_INITIAL_CONTROLS_DURATION).await;
-            generation
-        },
-        Message::PreviewWindowInitialChromeElapsed,
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::matugen_theme::{ui_colors, AppearanceMode};
-    use crate::model::PREVIEW_WINDOW_INITIAL_CONTROLS_DURATION;
     use iced::futures::StreamExt;
     use iced::Theme;
     use std::fs;
@@ -464,27 +453,5 @@ mod tests {
             .await
             .expect("deletion must be accepted")
             .is_none());
-    }
-
-    #[tokio::test]
-    async fn preview_window_initial_controls_command_waits_for_configured_duration() {
-        let mut task = iced_runtime::task::into_stream(preview_window_initial_chrome_command(7))
-            .expect("initial controls task stream");
-        assert!(
-            tokio::time::timeout(PREVIEW_WINDOW_INITIAL_CONTROLS_DURATION / 2, task.next())
-                .await
-                .is_err()
-        );
-        let message = tokio::time::timeout(
-            PREVIEW_WINDOW_INITIAL_CONTROLS_DURATION + Duration::from_millis(100),
-            task.next(),
-        )
-        .await
-        .expect("initial controls timer timed out")
-        .expect("initial controls task ended");
-        assert!(matches!(
-            message,
-            iced_runtime::Action::Output(Message::PreviewWindowInitialChromeElapsed(7))
-        ));
     }
 }

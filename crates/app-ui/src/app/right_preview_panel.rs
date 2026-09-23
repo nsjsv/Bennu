@@ -20,15 +20,10 @@ const MIN_PANEL_CONTENT_WIDTH: f32 = 120.0;
 /// 高度估算下限,防止极端小窗时出现负值尺寸。
 const MIN_PANEL_CONTENT_HEIGHT: f32 = 160.0;
 
-/// 当前预览会话由哪个呈现面发起。加载管线的窗口尺寸/聚焦动作只归
-/// 独立窗口会话所有;面板会话绝不弹出、缩放或抢占 Space 独立窗口。
-/// 异步加载回流(图片尺寸、视频帧、加载失败等)无法从消息参数得知
-/// 发起方,因此必须在会话开始时记入状态。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PreviewLoadSurface {
-    StandaloneWindow,
-    RightDockedPanel,
-}
+// 会话呈现面类型已随预览状态机下沉 bennu-preview（engine 的
+// PreviewLoadSurface）；此处 re-export 维持 crate::app::right_preview_panel::
+// 调用路径（keyboard_navigation / preview_state / 测试）。
+pub(crate) use bennu_preview::engine::PreviewLoadSurface;
 
 /// 面板左缘拖拽的起始锚点:指针横坐标与拖拽开始时的面板宽度。
 #[derive(Debug, Clone, Copy)]
@@ -79,7 +74,9 @@ impl FileBrowser {
         let info_command = self.refresh_right_preview_panel_info(path.clone());
         // 包内成员不进面板预览:虚拟路径读不了文件,按只读浏览语义
         // 与目录目标同款清空为空态,不发起加载也不弹错。
-        if file_core::archive_path_identity(&path) != file_core::ArchivePathIdentity::RealFile {
+        // 归档文件本身是 BrowsingRoot 但仍是真实文件,照常进面板预览。
+        if file_core::archive_path_identity(&path) == file_core::ArchivePathIdentity::InsideArchive
+        {
             self.preview_shown_path = Some(path);
             if self.preview.is_some() {
                 self.clear_preview();
@@ -313,24 +310,11 @@ impl FileBrowser {
         &mut self,
         profile: PreviewWindowProfile,
     ) -> Task<Message> {
-        match self.preview_load_surface {
-            PreviewLoadSurface::StandaloneWindow => self.ensure_preview_window(profile),
-            PreviewLoadSurface::RightDockedPanel => Task::none(),
-        }
-    }
-
-    /// 与 [`Self::preview_window_presentation_command`] 同一边界的异步回流
-    /// 形态:窗口缺失时补开,仅对独立窗口会话生效。
-    pub(super) fn ensure_preview_window_for_standalone_load(
-        &mut self,
-        profile: PreviewWindowProfile,
-    ) -> Task<Message> {
-        if self.preview_load_surface == PreviewLoadSurface::StandaloneWindow
-            && self.preview_window.is_none()
-        {
-            return self.ensure_preview_window(profile);
-        }
-        Task::none()
+        let command = self
+            .preview_engine
+            .preview_window_presentation_command(profile);
+        self.sync_preview_window_focus();
+        command.map(Message::Preview)
     }
 
     /// 当前预览表面的媒体区视口尺寸:独立窗口会话沿用窗口尺寸,

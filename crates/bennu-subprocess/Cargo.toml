@@ -1,0 +1,10 @@
+[package]
+name = "bennu-subprocess"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# 受限子进程输出读取只需要 tokio 的 AsyncRead 生态（io-util/macros 等
+# feature 随 workspace 定义一起启用，与本 crate 单一职责无冲突）。
+tokio.workspace = true

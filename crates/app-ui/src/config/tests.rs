@@ -737,11 +737,11 @@ fn normalizes_legacy_sidebar_width_from_config() {
 fn maps_rendering_gpu_preferences_to_iced_backend() {
     assert_eq!(
         RenderingGpuPreference::DisplayGpu.iced_backend_candidates(),
-        "wgpu"
+        "wgpu,tiny-skia"
     );
     assert_eq!(
         RenderingGpuPreference::HighPerformanceGpu.iced_backend_candidates(),
-        "wgpu"
+        "wgpu,tiny-skia"
     );
 }
 
@@ -897,9 +897,13 @@ fn preview_extension_rules_roundtrip_through_stored_preferences() {
 
     // 单类型缺失时该类型回退默认，其他类型保留用户值。
     let mut stored = config.user_preferences().to_stored();
-    let mut rules = stored.preview_extension_rules.take().expect("stored rules");
+    let mut rules = stored
+        .preview
+        .preview_extension_rules
+        .take()
+        .expect("stored rules");
     rules.text = None;
-    stored.preview_extension_rules = Some(rules);
+    stored.preview.preview_extension_rules = Some(rules);
     let restored = UserPreferences::from_stored(stored, &default);
     assert_eq!(
         restored.preview_extension_rules.text,

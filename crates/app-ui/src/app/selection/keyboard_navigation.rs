@@ -337,7 +337,7 @@ impl FileBrowser {
         // 空格 toggle 的对象是键盘选中项;悬停不作门控——纯键盘操作没有
         // hovered_entry,若沿用“悬停才开”会让键盘用户永远开不了预览。
         if self.standalone_preview_session_active()
-            && self.preview_shown_path.as_deref() == self.selected.as_deref()
+            && self.preview_engine.preview_shown_path.as_deref() == self.selected.as_deref()
         {
             self.context_menu = None;
             return self.close_preview_window();
@@ -351,7 +351,7 @@ impl FileBrowser {
     /// preview.is_some() 会把面板加载误判成“独立窗口已显示”，导致面板
     /// 开着时按 Space 打不开独立窗口；补上窗口存在性即回到原语义。
     fn standalone_preview_session_active(&self) -> bool {
-        self.preview_window.is_some() && self.preview.is_some()
+        self.preview_engine.preview_window.is_some() && self.preview_engine.preview.is_some()
     }
 
     pub(crate) fn open_path(&mut self, path: PathBuf) -> Task<Message> {
@@ -446,16 +446,17 @@ impl FileBrowser {
         self.context_menu = None;
         // 包内成员按空格完全无动作:虚拟路径读不了文件,加载必然失败
         // 并弹「could not read image」全局错误;按只读浏览语义静默忽略。
+        // 归档文件本身是 BrowsingRoot 但仍是真实文件,归档预览照常发起。
         if self.selected.as_deref().is_some_and(|path| {
-            file_core::archive_path_identity(path) != file_core::ArchivePathIdentity::RealFile
+            file_core::archive_path_identity(path) == file_core::ArchivePathIdentity::InsideArchive
         }) {
             return Task::none();
         }
         // 空格驱动的加载会话面向独立窗口:异步回流时窗口尺寸/聚焦动作
         // 全部照旧;面板发起的会话经 sync_right_preview_panel 另行标注。
-        self.preview_load_surface = PreviewLoadSurface::StandaloneWindow;
+        self.preview_engine.preview_load_surface = PreviewLoadSurface::StandaloneWindow;
         // 内部“先关后开”会复位固定状态；切换预览内容时必须保留用户设定的固定。
-        let pinned = self.preview_window_pinned;
+        let pinned = self.preview_engine.preview_window_pinned;
         let close_window_command = self.close_preview_window();
 
         // 悬停在条目上但没有选中项：无操作。
@@ -464,7 +465,7 @@ impl FileBrowser {
         };
 
         let kind = self.entry_kind(&path).unwrap_or(FileKind::Other);
-        self.preview_shown_path = Some(path.clone());
+        self.preview_engine.preview_shown_path = Some(path.clone());
         if kind == FileKind::File {
             // 门禁放在远程下载与大小检查之前：不可预览的远程文件不值得下载，
             // 也不应误报“文件太大”。
@@ -474,7 +475,7 @@ impl FileBrowser {
             )
             .is_none()
             {
-                self.preview_window_pinned = pinned;
+                self.preview_engine.preview_window_pinned = pinned;
                 return close_window_command.chain(self.show_unpreviewable_file_preview());
             }
             if let Some(command) = self.reject_oversized_file_preview(&path) {
@@ -482,11 +483,11 @@ impl FileBrowser {
             }
         }
         if kind == FileKind::File && self.path_is_remote_mount(&path) {
-            self.preview_window_pinned = pinned;
+            self.preview_engine.preview_window_pinned = pinned;
             return close_window_command.chain(self.start_remote_preview_download(path));
         }
 
-        self.preview_window_pinned = pinned;
+        self.preview_engine.preview_window_pinned = pinned;
         close_window_command.chain(self.open_preview_for_resolved_path(path, kind))
     }
 
@@ -495,7 +496,7 @@ impl FileBrowser {
         let window_command =
             self.preview_window_presentation_command(PreviewWindowProfile::Regular);
         self.clear_preview();
-        self.preview = Some(PreviewState::Error(
+        self.preview_engine.preview = Some(PreviewState::Error(
             "No preview available for this file type.".to_owned(),
         ));
         window_command
@@ -508,7 +509,7 @@ impl FileBrowser {
     ) -> Task<Message> {
         // 新预览会话不复用上一个文件的缩放/平移；同会话内的
         // 缩略图→原图替换不经过这里，视口得以保留。
-        self.preview_image_viewport = ImagePreviewViewport::default();
+        self.preview_engine.preview_image_viewport = ImagePreviewViewport::default();
         if kind == FileKind::File {
             // 预览会话的诞生边界：远程下载回流与本地入口共用这一道门，
             // 文本兜底同样受白名单约束。
@@ -527,7 +528,7 @@ impl FileBrowser {
         let window_command =
             self.preview_window_presentation_command(PreviewWindowProfile::Regular);
         self.clear_preview();
-        self.preview = Some(PreviewState::Loading(path.clone()));
+        self.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
         self.clear_global_error();
         let max_file_bytes = self.preview_file_size_limit_for(&path);
         Task::batch([
@@ -551,7 +552,7 @@ impl FileBrowser {
         match classification {
             crate::preview::PreviewPathKind::Document => self.start_document_preview(path),
             crate::preview::PreviewPathKind::AnimatedImage => {
-                self.preview = Some(PreviewState::Loading(path.clone()));
+                self.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
                 self.clear_global_error();
                 let max_file_bytes = self.preview_file_size_limit_for(&path);
                 let generation = self.next_animated_image_preview_generation();
@@ -561,7 +562,7 @@ impl FileBrowser {
                 ])
             }
             crate::preview::PreviewPathKind::Image => {
-                self.preview = Some(PreviewState::Loading(path.clone()));
+                self.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
                 self.clear_global_error();
                 let generation = self.next_original_image_preview_generation();
                 Task::batch([
@@ -570,7 +571,7 @@ impl FileBrowser {
                 ])
             }
             crate::preview::PreviewPathKind::Video => {
-                self.preview = Some(PreviewState::Loading(path.clone()));
+                self.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
                 self.clear_global_error();
                 let max_file_bytes = self.preview_file_size_limit_for(&path);
                 preview_command(
@@ -585,9 +586,10 @@ impl FileBrowser {
                 let window_command =
                     self.preview_window_presentation_command(PreviewWindowProfile::Audio);
                 self.clear_preview();
-                self.preview = Some(PreviewState::Loading(path.clone()));
+                self.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
                 self.clear_global_error();
-                self.audio_preview = Some(AudioPreviewPlayback::loading(path.clone()));
+                self.preview_engine.audio_preview =
+                    Some(AudioPreviewPlayback::loading(path.clone()));
                 let max_file_bytes = self.preview_file_size_limit_for(&path);
                 Task::batch([
                     window_command,
@@ -608,7 +610,7 @@ impl FileBrowser {
                 let window_command =
                     self.preview_window_presentation_command(PreviewWindowProfile::Regular);
                 self.clear_preview();
-                self.preview = Some(PreviewState::Loading(path.clone()));
+                self.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
                 self.clear_global_error();
                 let max_file_bytes = self.preview_file_size_limit_for(&path);
                 Task::batch([
@@ -637,7 +639,7 @@ impl FileBrowser {
         let window_command =
             self.preview_window_presentation_command(PreviewWindowProfile::Regular);
         self.clear_preview();
-        self.preview = Some(PreviewState::Error(format!(
+        self.preview_engine.preview = Some(PreviewState::Error(format!(
             "File is too large to preview ({}). Maximum preview size is {}.",
             format_file_size(file_bytes),
             format_file_size(max_bytes)
@@ -899,6 +901,46 @@ mod tests {
         drop(browser.move_file_selection(FileSelectionDirection::Down));
 
         assert_eq!(browser.selected, Some(browser.entries[7].path.clone()));
+    }
+
+    #[test]
+    fn space_preview_opens_archive_root_but_not_inner_members() {
+        // 回归:e2e5b29d 起 BrowsingRoot 被 `!= RealFile` 误拦,空格选中
+        // 压缩包完全无反应。归档文件本身仍是真实文件,照常进预览;
+        // 只有包内成员(InsideArchive)保持静默无动作。身份判定逐前缀
+        // stat 真实文件系统,须用 tempdir 里的真 .zip(内容不校验)。
+        let workspace = tempfile::tempdir().unwrap();
+        let archive = workspace.path().join("bundle.zip");
+        std::fs::write(&archive, b"stub").unwrap();
+
+        let (mut browser, _) = FileBrowser::new(config::default_user_config());
+        browser.current_dir = workspace.path().to_path_buf();
+        browser.entries = vec![DirectoryEntry::new(
+            archive.clone(),
+            FileKind::File,
+            EntryMetadata::default(),
+            false,
+            false,
+            false,
+        )]
+        .into();
+        browser.select_path(archive.clone());
+        drop(browser.request_preview());
+
+        assert!(
+            matches!(browser.preview_engine.preview, Some(PreviewState::Loading(ref path)) if path == &archive),
+            "归档文件本身应进入 Loading 预览会话"
+        );
+
+        // 包内成员:虚拟路径读不了文件,静默无动作,不改变预览状态。
+        let (mut inner_browser, _) = FileBrowser::new(config::default_user_config());
+        inner_browser.select_path(archive.join("inner.txt"));
+        drop(inner_browser.request_preview());
+
+        assert!(
+            inner_browser.preview_engine.preview.is_none(),
+            "包内成员按空格应保持静默无动作"
+        );
     }
 
     #[test]

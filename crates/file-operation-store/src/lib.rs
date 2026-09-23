@@ -33,11 +33,11 @@ mod user_preferences;
 pub use user_preferences::{
     StoredContextMenuItemEntry, StoredContextMenuLayout, StoredContextMenuLayouts,
     StoredCustomColorScheme, StoredCustomColorSet, StoredLastSearchScope, StoredListViewColumn,
-    StoredNetworkConnection, StoredPreviewExtensionRules, StoredShortcutBinding,
-    StoredSidebarFavorite, StoredTrustedTransferDevice, StoredUserPreferences,
-    StoredWindowControlPlacement, COLUMN_WIDTH_ADJUST_MODE_PER_COLUMN,
+    StoredNetworkConnection, StoredPreviewExtensionRules, StoredPreviewPreferences,
+    StoredShortcutBinding, StoredSidebarFavorite, StoredTrustedTransferDevice,
+    StoredUserPreferences, StoredWindowControlPlacement, COLUMN_WIDTH_ADJUST_MODE_PER_COLUMN,
     COLUMN_WIDTH_ADJUST_MODE_UNIFORM, LAUNCH_WINDOW_POLICY_MERGE_INTO_EXISTING,
-    LAUNCH_WINDOW_POLICY_OPEN_NEW_WINDOW,
+    LAUNCH_WINDOW_POLICY_OPEN_NEW_WINDOW, USER_PREFERENCES_KEY,
 };
 
 #[cfg(test)]

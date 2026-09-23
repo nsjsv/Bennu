@@ -10,12 +10,12 @@ use crate::appearance::{
 };
 use crate::formatting::format_middle_ellipsized_text;
 use crate::model::{Message, ScrollbarRegion, ScrollbarVisibility};
-use crate::operation_progress::{
-    active_indeterminate_track_handle, static_indeterminate_track_handle,
-};
 use crate::operation_queue::{FileOperationQueue, FileOperationStatus, FileOperationTask};
 use crate::operation_queue_display::{file_operation_progress_text, FileOperationPathLines};
 use crate::typography::readable_text;
+use bennu_preview::operation_progress::{
+    active_indeterminate_track_handle, static_indeterminate_track_handle,
+};
 
 pub(crate) const OPERATION_QUEUE_PANEL_WIDTH: f32 = 360.0;
 pub(crate) const OPERATION_QUEUE_PANEL_BOTTOM: f32 = 18.0;

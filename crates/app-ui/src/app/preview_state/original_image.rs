@@ -1,18 +1,25 @@
+//! 原图预览状态机已迁 bennu-preview 的 PreviewEngine
+//! （engine/original_image.rs：代际失效/验收、缩略图等待标记）；此处
+//! 保留与宿主列表缩略图管线（thumbnail_cache 入队/泵送、目录条目查询）
+//! 与宿主通知域耦合的档位刷新/尺寸入口，以及返回宿主 Task 的同名薄
+//! 转发（任务附录 A：列表缩略图子系统不随预览窗口下沉）。
+
 use std::path::PathBuf;
 
 use file_core::DirectoryEntry;
 use iced::Task;
-use thumbnails::{ThumbnailKey, ThumbnailRequest};
+use thumbnails::ThumbnailRequest;
 use tokio_util::sync::CancellationToken;
 
-use super::super::right_preview_panel::PreviewLoadSurface;
-use super::super::{windows::image_preview_size_from_dimensions, FileBrowser};
+use super::super::windows::image_preview_size_from_dimensions;
+use super::super::FileBrowser;
 use crate::commands::original_image_preview_command;
 use crate::model::{ImagePreviewContent, Message, PreviewContent, PreviewSize, PreviewState};
 use crate::thumbnail_cache::{
     request_for_entry, ThumbnailHandleEntry, ThumbnailPriority, ThumbnailPurpose,
     PREVIEW_THUMBNAIL_MAX_EDGE,
 };
+use bennu_preview::engine::PendingPreviewThumbnailDisplay;
 
 #[cfg(test)]
 mod tests;
@@ -40,115 +47,18 @@ impl OriginalImagePreviewRequest {
     }
 }
 
-/// 预览档位缩略图的展示占位标记：原图已并行加载,该标记只决定
-/// 磁盘缓存探测结果到达时是否替换 Loading 展示,与原图启动无关。
-#[derive(Debug)]
-pub(in crate::app) struct PendingPreviewThumbnailDisplay {
-    path: PathBuf,
-    generation: u64,
-    thumbnail_key: ThumbnailKey,
-}
-
 impl FileBrowser {
-    pub(super) fn invalidate_original_image_preview(&mut self) {
-        self.pending_preview_thumbnail_display = None;
-        if let Some(cancellation) = self.original_image_preview_cancel.take() {
-            cancellation.cancel();
-        }
-        self.original_image_preview_generation =
-            self.original_image_preview_generation.wrapping_add(1);
-    }
-
-    pub(in crate::app) fn next_original_image_preview_generation(&mut self) -> u64 {
-        self.invalidate_original_image_preview();
-        self.original_image_preview_cancel = Some(CancellationToken::new());
-        self.original_image_preview_generation
-    }
-
     pub(in crate::app) fn accept_original_image_preview(
         &mut self,
         path: PathBuf,
         generation: u64,
         outcome: Result<crate::original_image_preview::OriginalImagePreview, String>,
     ) -> Task<Message> {
-        let active_preview = matches!(
-            &self.preview,
-            Some(PreviewState::Loading(current)) if current == &path
-        ) || matches!(
-            &self.preview,
-            Some(PreviewState::Ready(PreviewContent::Image(
-                ImagePreviewContent::Thumbnail { path: current, .. }
-            ))) if current == &path
-        );
-        if generation != self.original_image_preview_generation || !active_preview {
-            return Task::none();
-        }
-        self.pending_preview_thumbnail_display = None;
-        // 独立窗口会话在内容就绪后按内容尺寸补开/适配窗口;
-        // 面板会话始终不动窗口,内容按面板视口渲染。
-        let presents_in_window = self.preview_load_surface == PreviewLoadSurface::StandaloneWindow;
-        let window_is_missing = self.preview_window.is_none();
-
-        match outcome {
-            Ok(crate::original_image_preview::OriginalImagePreview::Raster {
-                raster_handle,
-                placeholder_handle: decoded_placeholder_handle,
-                width,
-                height,
-            }) => {
-                let placeholder_handle = match &self.preview {
-                    Some(PreviewState::Ready(PreviewContent::Image(
-                        ImagePreviewContent::Thumbnail { handle, .. },
-                    ))) => handle.clone(),
-                    _ => decoded_placeholder_handle,
-                };
-                self.preview = Some(PreviewState::Ready(PreviewContent::Image(
-                    ImagePreviewContent::OriginalRaster {
-                        raster_handle,
-                        placeholder_handle,
-                        width,
-                        height,
-                    },
-                )));
-                if presents_in_window && window_is_missing {
-                    self.open_image_preview_window_for_dimensions(width, height)
-                } else {
-                    Task::none()
-                }
-            }
-            Ok(crate::original_image_preview::OriginalImagePreview::Svg {
-                handle,
-                width,
-                height,
-                has_intrinsic_size,
-            }) => {
-                let window_command = if presents_in_window {
-                    if has_intrinsic_size {
-                        self.open_image_preview_window_for_dimensions(width, height)
-                    } else {
-                        self.open_image_preview_window_with_default_size()
-                    }
-                } else {
-                    Task::none()
-                };
-                self.preview = Some(PreviewState::Ready(PreviewContent::Image(
-                    ImagePreviewContent::OriginalSvg {
-                        handle,
-                        width,
-                        height,
-                    },
-                )));
-                window_command
-            }
-            Err(error) => {
-                self.preview = Some(PreviewState::ImageError { path, error });
-                if presents_in_window && window_is_missing {
-                    self.open_image_preview_error_window()
-                } else {
-                    Task::none()
-                }
-            }
-        }
+        let command = self
+            .preview_engine
+            .accept_original_image_preview(path, generation, outcome);
+        self.sync_preview_window_focus();
+        command.map(Message::Preview)
     }
 
     pub(in crate::app) fn retry_image_preview(&mut self, path: PathBuf) -> Task<Message> {
@@ -186,7 +96,7 @@ impl FileBrowser {
             );
             let ready_max_edge = ready.max_edge;
             original.placeholder_handle = Some(ready.handle.clone());
-            self.preview = Some(PreviewState::Ready(thumbnail_preview_content(
+            self.preview_engine.preview = Some(PreviewState::Ready(thumbnail_preview_content(
                 entry.path, ready,
             )));
             // 已有缩略图明显小于预览档位时,并行生成预览档位缩略图升级展示
@@ -216,11 +126,12 @@ impl FileBrowser {
             ThumbnailPriority::Preview,
         );
         if waits_for_thumbnail {
-            self.pending_preview_thumbnail_display = Some(PendingPreviewThumbnailDisplay {
-                path: original.path.clone(),
-                generation: original.generation,
-                thumbnail_key: request.key(),
-            });
+            self.preview_engine.pending_preview_thumbnail_display =
+                Some(PendingPreviewThumbnailDisplay::new(
+                    original.path.clone(),
+                    original.generation,
+                    request.key(),
+                ));
         }
         Task::batch([self.pump_thumbnail_queue(), original.load_command()])
     }
@@ -234,7 +145,7 @@ impl FileBrowser {
             return Task::none();
         };
         if let Some(ready) = self.thumbnail_cache.ready_for_request(&request).cloned() {
-            self.preview = Some(PreviewState::Ready(thumbnail_preview_content(
+            self.preview_engine.preview = Some(PreviewState::Ready(thumbnail_preview_content(
                 entry.path, ready,
             )));
             return Task::none();
@@ -247,42 +158,31 @@ impl FileBrowser {
         self.pump_thumbnail_queue()
     }
 
-    fn pending_preview_thumbnail_display_matches(&self, request: &ThumbnailRequest) -> bool {
-        let Some(pending) = self.pending_preview_thumbnail_display.as_ref() else {
-            return false;
-        };
-        // 标记仅在展示仍处于 Loading 时成立;缩略图/原图上屏即清除,
-        // 迟到的探测结果不允许回退已替换的展示内容。
-        matches!(
-            &self.preview,
-            Some(PreviewState::Loading(current)) if current == &pending.path
-        ) && pending.path == request.source
-            && pending.thumbnail_key == request.key()
-            && pending.generation == self.original_image_preview_generation
-    }
-
     pub(in crate::app) fn accept_preview_thumbnail_ready(
         &mut self,
         request: &ThumbnailRequest,
         ready: ThumbnailHandleEntry,
     ) -> Task<Message> {
-        if self.pending_preview_thumbnail_display_matches(request) {
-            self.pending_preview_thumbnail_display = None;
-            self.preview = Some(PreviewState::Ready(thumbnail_preview_content(
+        if self
+            .preview_engine
+            .pending_preview_thumbnail_display_matches(request)
+        {
+            self.preview_engine.pending_preview_thumbnail_display = None;
+            self.preview_engine.preview = Some(PreviewState::Ready(thumbnail_preview_content(
                 request.source.clone(),
                 ready,
             )));
             return Task::none();
         }
         let current_max_edge =
-            match &self.preview {
+            match &self.preview_engine.preview {
                 Some(PreviewState::Ready(PreviewContent::Image(
                     ImagePreviewContent::Thumbnail { path, max_edge, .. },
                 ))) if path == &request.source => Some(*max_edge),
                 _ => None,
             };
         if current_max_edge.is_some_and(|max_edge| ready.max_edge >= max_edge) {
-            self.preview = Some(PreviewState::Ready(thumbnail_preview_content(
+            self.preview_engine.preview = Some(PreviewState::Ready(thumbnail_preview_content(
                 request.source.clone(),
                 ready,
             )));
@@ -294,20 +194,26 @@ impl FileBrowser {
         &mut self,
         request: &ThumbnailRequest,
     ) {
-        if self.pending_preview_thumbnail_display_matches(request) {
-            self.pending_preview_thumbnail_display = None;
+        if self
+            .preview_engine
+            .pending_preview_thumbnail_display_matches(request)
+        {
+            self.preview_engine.pending_preview_thumbnail_display = None;
         }
     }
 
     pub(in crate::app) fn refresh_preview_thumbnail_for_size(&mut self) -> Task<Message> {
-        let Some((path, max_edge)) = self.preview.as_ref().and_then(|preview| match preview {
-            PreviewState::Ready(PreviewContent::Image(ImagePreviewContent::Thumbnail {
-                path,
-                max_edge,
-                ..
-            })) => Some((path.clone(), *max_edge)),
-            _ => None,
-        }) else {
+        let Some((path, max_edge)) =
+            self.preview_engine
+                .preview
+                .as_ref()
+                .and_then(|preview| match preview {
+                    PreviewState::Ready(PreviewContent::Image(
+                        ImagePreviewContent::Thumbnail { path, max_edge, .. },
+                    )) => Some((path.clone(), *max_edge)),
+                    _ => None,
+                })
+        else {
             return Task::none();
         };
         let desired_edge = self.preview_thumbnail_edge();
@@ -334,9 +240,10 @@ impl FileBrowser {
         generation: u64,
         dimensions: Result<(u32, u32), String>,
     ) -> Task<Message> {
-        let active_preview_loading = generation == self.original_image_preview_generation
+        let active_preview_loading = generation
+            == self.preview_engine.original_image_preview_generation
             && matches!(
-                &self.preview,
+                &self.preview_engine.preview,
                 Some(PreviewState::Loading(current)) if current == &path
             );
         if !active_preview_loading {
@@ -380,12 +287,19 @@ impl FileBrowser {
             max_file_bytes: self.user_config.preview_size_limits.image_bytes,
             placeholder_handle: None,
             cancellation: self
+                .preview_engine
                 .original_image_preview_cancel
                 .clone()
                 .expect("image preview generation must own cancellation"),
         };
-        let window_command = if self.preview_load_surface == PreviewLoadSurface::StandaloneWindow {
-            self.open_image_preview_window_for_dimensions(width, height)
+        let window_command = if self.preview_engine.preview_load_surface
+            == bennu_preview::engine::PreviewLoadSurface::StandaloneWindow
+        {
+            let command = self
+                .preview_engine
+                .open_image_preview_window_for_dimensions(width, height);
+            self.sync_preview_window_focus();
+            command.map(Message::Preview)
         } else {
             Task::none()
         };
@@ -404,17 +318,19 @@ impl FileBrowser {
     /// (全局错误提示 + 关闭预览窗口);面板会话改以可重试的错误态呈现。
     fn fail_image_preview_dimensions(&mut self, path: PathBuf, error: String) -> Task<Message> {
         self.show_global_error(error.clone());
-        match self.preview_load_surface {
-            PreviewLoadSurface::StandaloneWindow => self.close_preview_window(),
-            PreviewLoadSurface::RightDockedPanel => {
-                self.preview = Some(PreviewState::ImageError { path, error });
+        match self.preview_engine.preview_load_surface {
+            bennu_preview::engine::PreviewLoadSurface::StandaloneWindow => {
+                self.close_preview_window()
+            }
+            bennu_preview::engine::PreviewLoadSurface::RightDockedPanel => {
+                self.preview_engine.preview = Some(PreviewState::ImageError { path, error });
                 Task::none()
             }
         }
     }
 
     fn preview_thumbnail_edge(&self) -> u32 {
-        preview_thumbnail_edge_for_size(self.preview_size)
+        preview_thumbnail_edge_for_size(self.preview_engine.preview_size)
     }
 }
 

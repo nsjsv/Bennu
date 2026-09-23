@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use desktop_linux::{DisplayRendererGpu, TerminalEmulator};
 use file_core::{FileOperationVerification, SortDirection, SortField};
@@ -60,37 +60,6 @@ pub(crate) const MAX_COLUMN_WIDTH: f32 = 960.0;
 pub(crate) const MIN_VISIBLE_COLUMN_COUNT: usize = 3;
 pub(crate) const DEFAULT_VISIBLE_COLUMN_COUNT: usize = 3;
 pub(crate) const MAX_VISIBLE_COLUMN_COUNT: usize = 5;
-pub(crate) const PREVIEW_FILE_SIZE_UNIT_BYTES: u64 = 1024 * 1024;
-pub(crate) const DEFAULT_PREVIEW_TEXT_SIZE_BYTES: u64 = 25 * PREVIEW_FILE_SIZE_UNIT_BYTES;
-pub(crate) const DEFAULT_PREVIEW_IMAGE_SIZE_BYTES: u64 = 100 * PREVIEW_FILE_SIZE_UNIT_BYTES;
-pub(crate) const DEFAULT_PREVIEW_VIDEO_SIZE_BYTES: u64 = 1024 * PREVIEW_FILE_SIZE_UNIT_BYTES;
-pub(crate) const DEFAULT_PREVIEW_AUDIO_SIZE_BYTES: u64 = 200 * PREVIEW_FILE_SIZE_UNIT_BYTES;
-pub(crate) const DEFAULT_PREVIEW_ARCHIVE_SIZE_BYTES: u64 = 25 * PREVIEW_FILE_SIZE_UNIT_BYTES;
-pub(crate) const DEFAULT_PREVIEW_SQLITE_SIZE_BYTES: u64 = 100 * PREVIEW_FILE_SIZE_UNIT_BYTES;
-pub(crate) const DEFAULT_PREVIEW_DOCUMENT_SIZE_BYTES: u64 = 100 * PREVIEW_FILE_SIZE_UNIT_BYTES;
-pub(crate) const MIN_PREVIEW_DIRECTORY_EXPAND_LEVELS: u8 = 0;
-pub(crate) const MAX_PREVIEW_DIRECTORY_EXPAND_LEVELS: u8 = 3;
-pub(crate) const DEFAULT_PREVIEW_DIRECTORY_EXPAND_LEVELS: u8 = 1;
-/// 空格预览各类型的默认后缀表，镜像各预览类型的内置判定；
-/// 后缀以小写、无前导点的规范形态存储。替换式语义：用户可增删，
-/// 删除即该后缀不再按此类型预览。
-pub(crate) const DEFAULT_PREVIEW_TEXT_EXTENSIONS: [&str; 22] = [
-    "txt", "md", "log", "conf", "ini", "yaml", "yml", "json", "xml", "toml", "sh", "py", "js",
-    "ts", "c", "cpp", "h", "rs", "java", "css", "html", "csv",
-];
-pub(crate) const DEFAULT_PREVIEW_IMAGE_EXTENSIONS: [&str; 11] = [
-    "avif", "bmp", "gif", "ico", "jpg", "jpeg", "png", "svg", "tif", "tiff", "webp",
-];
-pub(crate) const DEFAULT_PREVIEW_VIDEO_EXTENSIONS: [&str; 6] =
-    ["mp4", "m4v", "mkv", "mov", "webm", "avi"];
-pub(crate) const DEFAULT_PREVIEW_AUDIO_EXTENSIONS: [&str; 7] =
-    ["mp3", "wav", "flac", "ogg", "oga", "m4a", "aac"];
-pub(crate) const DEFAULT_PREVIEW_SQLITE_EXTENSIONS: [&str; 4] = ["db", "sqlite", "sqlite3", "db3"];
-pub(crate) const DEFAULT_PREVIEW_ARCHIVE_EXTENSIONS: [&str; 6] =
-    ["zip", "tar", "tar.gz", "tgz", "7z", "rar"];
-pub(crate) const DEFAULT_PREVIEW_DOCUMENT_EXTENSIONS: [&str; 10] = [
-    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp",
-];
 pub(crate) const DEFAULT_SEARCH_MAX_EXTRACT_BYTES: u64 = 8 * 1024 * 1024;
 pub(crate) const DEFAULT_ICON_GRID_SIZE: u32 = 96;
 pub(crate) const MIN_ICON_GRID_SIZE: u32 = 64;
@@ -157,27 +126,11 @@ impl UserConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum UiLanguage {
-    English,
-    Chinese,
-}
-
-impl UiLanguage {
-    pub(crate) const fn as_u8(self) -> u8 {
-        match self {
-            Self::English => 0,
-            Self::Chinese => 1,
-        }
-    }
-
-    pub(crate) const fn from_u8(value: u8) -> Self {
-        match value {
-            1 => Self::Chinese,
-            _ => Self::English,
-        }
-    }
-}
+// 纯搬移：UiLanguage 枚举本体已下沉 bennu-localization（翻译表按它
+// 分派，语言设置解析在此仍需引用），re-export 维持
+// crate::config::UiLanguage 既有路径；TOML 存取（UiLanguageSetting）
+// 属 app-ui 存储域，留在本文件。
+pub(crate) use bennu_localization::UiLanguage;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum UiLanguageSetting {
@@ -237,7 +190,7 @@ impl RenderingGpuPreference {
 
     pub(crate) fn iced_backend_candidates(self) -> &'static str {
         match self {
-            Self::DisplayGpu | Self::HighPerformanceGpu => "wgpu",
+            Self::DisplayGpu | Self::HighPerformanceGpu => "wgpu,tiny-skia",
         }
     }
 
@@ -350,206 +303,16 @@ pub(crate) fn list_directory_size_display_mode_config_value(
     mode.config_value()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PreviewFileSizeKind {
-    Text,
-    Image,
-    Video,
-    Audio,
-    Archive,
-    Document,
-    Sqlite,
-}
-
-impl PreviewFileSizeKind {
-    pub(crate) const ALL: [PreviewFileSizeKind; 7] = [
-        Self::Text,
-        Self::Image,
-        Self::Video,
-        Self::Audio,
-        Self::Archive,
-        Self::Document,
-        Self::Sqlite,
-    ];
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct PreviewFileSizeLimits {
-    pub(crate) text_bytes: u64,
-    pub(crate) image_bytes: u64,
-    pub(crate) video_bytes: u64,
-    pub(crate) audio_bytes: u64,
-    pub(crate) archive_bytes: u64,
-    pub(crate) document_bytes: u64,
-    pub(crate) sqlite_bytes: u64,
-}
-
-impl PreviewFileSizeLimits {
-    pub(crate) fn with_default_limits() -> Self {
-        Self {
-            text_bytes: DEFAULT_PREVIEW_TEXT_SIZE_BYTES,
-            image_bytes: DEFAULT_PREVIEW_IMAGE_SIZE_BYTES,
-            video_bytes: DEFAULT_PREVIEW_VIDEO_SIZE_BYTES,
-            audio_bytes: DEFAULT_PREVIEW_AUDIO_SIZE_BYTES,
-            archive_bytes: DEFAULT_PREVIEW_ARCHIVE_SIZE_BYTES,
-            document_bytes: DEFAULT_PREVIEW_DOCUMENT_SIZE_BYTES,
-            sqlite_bytes: DEFAULT_PREVIEW_SQLITE_SIZE_BYTES,
-        }
-    }
-
-    pub(crate) fn limit(self, kind: PreviewFileSizeKind) -> u64 {
-        match kind {
-            PreviewFileSizeKind::Text => self.text_bytes,
-            PreviewFileSizeKind::Image => self.image_bytes,
-            PreviewFileSizeKind::Video => self.video_bytes,
-            PreviewFileSizeKind::Audio => self.audio_bytes,
-            PreviewFileSizeKind::Archive => self.archive_bytes,
-            PreviewFileSizeKind::Document => self.document_bytes,
-            PreviewFileSizeKind::Sqlite => self.sqlite_bytes,
-        }
-    }
-
-    pub(crate) fn set_limit(&mut self, kind: PreviewFileSizeKind, bytes: u64) {
-        match kind {
-            PreviewFileSizeKind::Text => self.text_bytes = bytes,
-            PreviewFileSizeKind::Image => self.image_bytes = bytes,
-            PreviewFileSizeKind::Video => self.video_bytes = bytes,
-            PreviewFileSizeKind::Audio => self.audio_bytes = bytes,
-            PreviewFileSizeKind::Archive => self.archive_bytes = bytes,
-            PreviewFileSizeKind::Document => self.document_bytes = bytes,
-            PreviewFileSizeKind::Sqlite => self.sqlite_bytes = bytes,
-        }
-    }
-
-    /// 迁移时用旧的全局单值上限同时填充全部六个类型。
-    pub(crate) fn from_legacy_global_bytes(bytes: u64) -> Self {
-        Self {
-            text_bytes: bytes,
-            image_bytes: bytes,
-            video_bytes: bytes,
-            audio_bytes: bytes,
-            archive_bytes: bytes,
-            document_bytes: bytes,
-            sqlite_bytes: bytes,
-        }
-    }
-}
-
-pub(crate) fn normalize_preview_directory_expand_levels(levels: u8) -> u8 {
-    levels.clamp(
-        MIN_PREVIEW_DIRECTORY_EXPAND_LEVELS,
-        MAX_PREVIEW_DIRECTORY_EXPAND_LEVELS,
-    )
-}
-
-/// 把用户输入规范成可匹配的后缀：去首尾空白、去前导点、转小写。
-/// 含内部空白（如 "my ext"）永远无法命中真实文件名，直接拒绝。
-/// 复合后缀（如 tar.gz）保留内部点。
-pub(crate) fn normalize_preview_extension(raw: &str) -> Option<String> {
-    let trimmed = raw.trim().trim_start_matches('.');
-    if trimmed.is_empty() || trimmed.contains(char::is_whitespace) {
-        return None;
-    }
-    Some(trimmed.to_lowercase())
-}
-
-/// 空格预览的分类型后缀规则：每个类型的列表完全决定该类型识别哪些
-/// 后缀（替换式）。匹配按文件名 `ends_with` 进行，天然覆盖 tar.gz
-/// 这类复合后缀；大小写不敏感，与各渲染器行为保持一致。
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct PreviewExtensionRules {
-    pub(crate) text: Vec<String>,
-    pub(crate) image: Vec<String>,
-    pub(crate) video: Vec<String>,
-    pub(crate) audio: Vec<String>,
-    pub(crate) sqlite: Vec<String>,
-    pub(crate) archive: Vec<String>,
-    pub(crate) document: Vec<String>,
-}
-
-impl PreviewExtensionRules {
-    pub(crate) fn default_rules() -> Self {
-        Self {
-            text: default_extensions(&DEFAULT_PREVIEW_TEXT_EXTENSIONS),
-            image: default_extensions(&DEFAULT_PREVIEW_IMAGE_EXTENSIONS),
-            video: default_extensions(&DEFAULT_PREVIEW_VIDEO_EXTENSIONS),
-            audio: default_extensions(&DEFAULT_PREVIEW_AUDIO_EXTENSIONS),
-            sqlite: default_extensions(&DEFAULT_PREVIEW_SQLITE_EXTENSIONS),
-            archive: default_extensions(&DEFAULT_PREVIEW_ARCHIVE_EXTENSIONS),
-            document: default_extensions(&DEFAULT_PREVIEW_DOCUMENT_EXTENSIONS),
-        }
-    }
-
-    pub(crate) fn matches(&self, kind: PreviewFileSizeKind, path: &Path) -> bool {
-        extensions_match(self.list(kind), path)
-    }
-
-    pub(crate) fn list(&self, kind: PreviewFileSizeKind) -> &Vec<String> {
-        match kind {
-            PreviewFileSizeKind::Text => &self.text,
-            PreviewFileSizeKind::Image => &self.image,
-            PreviewFileSizeKind::Video => &self.video,
-            PreviewFileSizeKind::Audio => &self.audio,
-            PreviewFileSizeKind::Archive => &self.archive,
-            PreviewFileSizeKind::Document => &self.document,
-            PreviewFileSizeKind::Sqlite => &self.sqlite,
-        }
-    }
-
-    pub(crate) fn list_mut(&mut self, kind: PreviewFileSizeKind) -> &mut Vec<String> {
-        match kind {
-            PreviewFileSizeKind::Text => &mut self.text,
-            PreviewFileSizeKind::Image => &mut self.image,
-            PreviewFileSizeKind::Video => &mut self.video,
-            PreviewFileSizeKind::Audio => &mut self.audio,
-            PreviewFileSizeKind::Archive => &mut self.archive,
-            PreviewFileSizeKind::Document => &mut self.document,
-            PreviewFileSizeKind::Sqlite => &mut self.sqlite,
-        }
-    }
-
-    pub(crate) fn set_list(&mut self, kind: PreviewFileSizeKind, extensions: Vec<String>) {
-        *self.list_mut(kind) = extensions;
-    }
-
-    pub(crate) fn default_list(kind: PreviewFileSizeKind) -> Vec<String> {
-        let builtin: &[&str] = match kind {
-            PreviewFileSizeKind::Text => &DEFAULT_PREVIEW_TEXT_EXTENSIONS,
-            PreviewFileSizeKind::Image => &DEFAULT_PREVIEW_IMAGE_EXTENSIONS,
-            PreviewFileSizeKind::Video => &DEFAULT_PREVIEW_VIDEO_EXTENSIONS,
-            PreviewFileSizeKind::Audio => &DEFAULT_PREVIEW_AUDIO_EXTENSIONS,
-            PreviewFileSizeKind::Archive => &DEFAULT_PREVIEW_ARCHIVE_EXTENSIONS,
-            PreviewFileSizeKind::Document => &DEFAULT_PREVIEW_DOCUMENT_EXTENSIONS,
-            PreviewFileSizeKind::Sqlite => &DEFAULT_PREVIEW_SQLITE_EXTENSIONS,
-        };
-        default_extensions(builtin)
-    }
-}
-
-fn default_extensions(builtin: &[&str]) -> Vec<String> {
-    builtin
-        .iter()
-        .map(|extension| (*extension).to_owned())
-        .collect()
-}
-
-fn extensions_match(extensions: &[String], path: &Path) -> bool {
-    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-    let file_name = file_name.to_lowercase();
-    extensions
-        .iter()
-        .any(|candidate| file_name.ends_with(&format!(".{candidate}")))
-}
-
-pub(crate) fn preview_size_limit_mib(bytes: u64) -> u64 {
-    bytes.div_ceil(PREVIEW_FILE_SIZE_UNIT_BYTES)
-}
-
-pub(crate) fn preview_size_limit_bytes_from_mib(mib: u64) -> Option<u64> {
-    mib.checked_mul(PREVIEW_FILE_SIZE_UNIT_BYTES)
-}
+// 纯搬移：预览配置域（分类型大小上限/后缀规则/目录展开层级及其默认值
+// 与归一化函数）已下沉 bennu-preview（preview_config 模块）；re-export
+// 维持 crate::config::* 既有调用路径，TOML 键解析/写出仍在本 crate
+// 存储域（user_preferences/legacy_toml）。
+pub(crate) use bennu_preview::preview_config::{
+    normalize_preview_directory_expand_levels, normalize_preview_extension,
+    preview_size_limit_bytes_from_mib, preview_size_limit_mib, PreviewExtensionRules,
+    PreviewFileSizeKind, PreviewFileSizeLimits, DEFAULT_PREVIEW_DIRECTORY_EXPAND_LEVELS,
+    MAX_PREVIEW_DIRECTORY_EXPAND_LEVELS,
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct UserConfig {

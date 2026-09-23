@@ -12,23 +12,31 @@ use bennu_theme::address_bar::{
 use tokio::sync::oneshot;
 
 use file_core::entry::{DirectoryEntry, FileKind};
+use thumbnails::{CachedThumbnail, ThumbnailLoadFailed, ThumbnailRequest};
 
 use crate::dbus_file_chooser::PickerResolution;
 use crate::filter::PickerFilter;
 use crate::picker_request::{FilterRule, PickerKind, PickerRequestSpec};
 
 mod address_editing;
+mod confirm;
 mod expansion;
+mod keyboard_nav;
 pub(crate) mod scan;
 pub(crate) mod scrollbar;
 pub(crate) mod suggestions;
+pub(crate) mod thumbnails;
 
+/// 行几何唯一真值再导出：view 层行高/间距与各子模块同源（模块本身
+/// 保持私有，只放行这两个常量）。
+pub(crate) use expansion::{LIST_ROW_HEIGHT, LIST_ROW_SPACING};
 pub(crate) use scan::{scan_listing, DirectoryListing, DirectoryScanResult};
 pub(crate) use scrollbar::SessionScrollRegion;
 use scrollbar::{ScrollbarViewport, SessionScrollbarState, SmoothScrollState};
 
 pub(crate) use address_editing::PathSuggestionDirection;
 use expansion::ExpansionState;
+use keyboard_nav::KeyboardNavState;
 
 /// 状态机对外请求的效果。
 pub(crate) enum SessionEffect {
@@ -55,6 +63,11 @@ pub(crate) enum SessionEffect {
     /// 回信 `AddressSuggestionsLoaded`。
     LoadPathSuggestions {
         request: AddressSuggestionRequest,
+    },
+    /// 键盘导航滚动跟随：把列表滚动到绝对 Y 偏移（贴边值）。main 层
+    /// 翻译为 scroll_to + List 布局探针（联动滚动条显隐与视口缓存）。
+    ScrollListTo {
+        offset_y: f32,
     },
 }
 
@@ -95,6 +108,24 @@ pub(crate) enum SessionMessage {
     },
     /// Ctrl+A 全选可选中条目（仅 OpenFile 多选模式有意义）。
     SelectAllPressed,
+    /// 键盘列表光标移动（↑/↓）；语义实现见 keyboard_nav 子模块。
+    ListCursorMoved {
+        delta: isize,
+    },
+    /// 键盘跳转列表首/尾（Home/End）。
+    ListCursorJumped {
+        to_end: bool,
+    },
+    /// 键盘按视口行数翻页（PageUp/PageDown）。
+    ListPageMoved {
+        pages: isize,
+    },
+    /// type-ahead 字符输入（无 ctrl/alt/command 修饰的字符键）。
+    TypeAheadChar {
+        ch: char,
+    },
+    /// 清空 type-ahead 缓冲（Esc 优先级：缓冲非空时先于关窗）。
+    TypeAheadReset,
     /// 点击地址栏空白处进入路径编辑（草稿预填当前目录）。
     AddressEditingStarted,
     AddressEditChanged(String),
@@ -146,19 +177,15 @@ pub(crate) enum SessionMessage {
     ScrollbarAutoHideElapsed {
         generation: u64,
     },
+    /// 缩略图加载回信（main 层 drain 出队后 Task::perform 的结果）；
+    /// key 已不在 in_flight 的迟到回信（换目录后）由会话直接丢弃。
+    ThumbnailReady {
+        request: ThumbnailRequest,
+        outcome: Result<CachedThumbnail, ThumbnailLoadFailed>,
+    },
 }
 
-/// 扁平化后的可见行：根条目与已展开子级按深度排列。
-pub(crate) struct PickerRow {
-    pub(crate) entry: DirectoryEntry,
-    pub(crate) depth: usize,
-    /// 本行自身高度比例：祖先展开进度的级联（本行不裁自己），驱动
-    /// 行高裁剪动画；根行恒 1.0。
-    pub(crate) height_progress: f32,
-    /// 本行目录自身的展开动画进度（0=未展开，1=完全展开），驱动
-    /// 箭头旋转；非目录或未展开行恒 0。
-    pub(crate) expand_progress: f32,
-}
+pub(crate) use expansion::PickerRow;
 
 pub(crate) struct PickerSession {
     request_path: String,
@@ -178,6 +205,8 @@ pub(crate) struct PickerSession {
     selection_anchor: Option<usize>,
     /// 指针悬停的行索引；导航/刷新后必须重新验证或清空。
     hovered_index: Option<usize>,
+    /// 键盘列表导航状态（光标行 + type-ahead 缓冲），见子模块。
+    keyboard_nav: KeyboardNavState,
     name_input: String,
     /// SaveFile 二次确认目标：非 None 时确认按钮变为"覆盖"。
     overwrite_target: Option<PathBuf>,
@@ -199,6 +228,8 @@ pub(crate) struct PickerSession {
     scrollbar: SessionScrollbarState,
     /// 滚动轴向换算用的 shift 修饰键（main 层同步；视图与处理端同源）。
     shift_pressed: bool,
+    /// 行内缩略图调度状态（就绪 LRU/在途/排队/失败 backoff），见子模块。
+    thumbnails: thumbnails::SessionThumbnailState,
     reply: Option<oneshot::Sender<PickerResolution>>,
 }
 
@@ -245,6 +276,7 @@ impl PickerSession {
             selection: Vec::new(),
             selection_anchor: None,
             hovered_index: None,
+            keyboard_nav: KeyboardNavState::default(),
             name_input,
             overwrite_target: None,
             address_editing: None,
@@ -256,6 +288,9 @@ impl PickerSession {
             smooth_scroll: SmoothScrollState::default(),
             scrollbar: SessionScrollbarState::default(),
             shift_pressed: false,
+            thumbnails: thumbnails::SessionThumbnailState::new(
+                thumbnails::default_thumbnail_cache_dir(),
+            ),
             reply: Some(reply),
         }
     }
@@ -278,6 +313,13 @@ impl PickerSession {
 
     pub(crate) fn selection(&self) -> &[usize] {
         &self.selection
+    }
+
+    /// 空格预览的目标行（主软件 `selected` 的对齐物）：最后交互行——
+    /// 单击/键盘光标都落锚；悬停不作依据（纯键盘操作没有悬停）。
+    pub(crate) fn primary_selected_row(&self) -> Option<usize> {
+        self.selection_anchor
+            .filter(|&index| index < self.rows.len())
     }
 
     pub(crate) fn hovered_index(&self) -> Option<usize> {
@@ -391,6 +433,14 @@ impl PickerSession {
                 self.select_all();
                 SessionEffect::None
             }
+            SessionMessage::ListCursorMoved { delta } => self.move_list_cursor(delta),
+            SessionMessage::ListCursorJumped { to_end } => self.jump_list_cursor(to_end),
+            SessionMessage::ListPageMoved { pages } => self.move_list_page(pages),
+            SessionMessage::TypeAheadChar { ch } => self.push_type_ahead_char(ch),
+            SessionMessage::TypeAheadReset => {
+                self.reset_type_ahead();
+                SessionEffect::None
+            }
             SessionMessage::AddressEditingStarted => self.begin_address_editing(),
             SessionMessage::AddressEditChanged(text) => self.update_address_draft(text),
             SessionMessage::AddressSuggestionInputStabilized { request } => {
@@ -411,6 +461,10 @@ impl PickerSession {
             SessionMessage::CompleteSuggestion { direction } => {
                 self.complete_path_suggestion(direction)
             }
+            SessionMessage::ThumbnailReady { request, outcome } => {
+                self.accept_thumbnail_ready(request, outcome);
+                SessionEffect::None
+            }
             // 滚动类消息由 scrollbar 子模块处理并产出 Task，main 层在进入
             // update 前已拦截路由；此臂仅为匹配穷尽兜底。
             SessionMessage::WheelScrolled { .. }
@@ -428,7 +482,7 @@ impl PickerSession {
         }
     }
 
-    fn apply_scan(&mut self, result: DirectoryScanResult) {
+    pub(crate) fn apply_scan(&mut self, result: DirectoryScanResult) {
         let DirectoryScanResult { directory, outcome } = result;
         if directory == self.directory {
             match outcome {
@@ -473,7 +527,13 @@ impl PickerSession {
         }
         self.selection.retain(|&index| index < self.rows.len());
         self.hovered_index = self.hovered_index.filter(|&index| index < self.rows.len());
+        // 键盘光标与悬停同规则：行集变化后必须重新验证，越界回退到
+        // 最近合法行（空列表清空）。
+        self.keyboard_nav.revalidate_cursor(self.rows.len());
         self.sync_row_animation();
+        // 行集重建即重算可见区间：扫描回填/展开/过滤都在此触发缩略图
+        // 请求的积攒，main 层随后 drain 发起。
+        self.schedule_visible_thumbnails();
     }
 
     fn is_allowed(&self, entry: &DirectoryEntry) -> bool {
@@ -516,14 +576,15 @@ impl PickerSession {
         let multiple = matches!(self.kind, PickerKind::OpenFile { multiple: true, .. });
         match self.kind {
             PickerKind::SaveFile { .. } => {
-                // SaveFile：文件点击=取其名；目录不进选中集。
+                // SaveFile：文件点击=取其名；文件/目录都落选中集
+                // （单击选中、双击进入的桌面惯例；空格预览目标取
+                // selection_anchor，无选中则空格静默无操作）。
                 if let Some(row) = self.rows.get(index) {
                     if row.entry.kind == FileKind::File {
                         self.name_input = row.entry.name.to_string_lossy().into_owned();
                         self.overwrite_target = None;
                     }
                 }
-                return;
             }
             PickerKind::OpenFile { directory, .. } => {
                 if let Some(row) = self.rows.get(index) {
@@ -649,9 +710,19 @@ impl PickerSession {
         self.listing = DirectoryListing::Pending;
         self.expansions.clear();
         self.rows.clear();
+        // 列表内容整体更换：旧视口缓存对新目录是错误几何，不清会让
+        // ScanReady 按旧 offset 对新目录错误区间入队；清掉等探针回信
+        // （NavigateDirectory 附带布局探针）重填。
+        self.scrollbar
+            .invalidate_viewport(SessionScrollRegion::List);
         self.selection.clear();
         self.selection_anchor = None;
         self.hovered_index = None;
+        // 键盘光标与 type-ahead 缓冲随目录作废。
+        self.keyboard_nav.reset();
+        // 在途/排队请求作废：迟到回信按 key 找不到在途记录即丢弃；就绪
+        // 表保留（返回原目录即时显示）。
+        self.thumbnails.clear_pending();
         // 编辑中导航（双击目录/侧键/↑←→）必须走 cancel 而不是裸清空
         // 会话：裸清空会让进行中的过渡停在 target=1.0 永不被回收，
         // 面包屑层 opacity=0 地址栏永久空白，且该态下 Esc 会直接关窗。
@@ -724,61 +795,6 @@ impl PickerSession {
             .map(|(index, _)| index)
             .collect();
         self.selection_anchor = self.selection.first().copied();
-    }
-
-    fn confirm(&mut self) -> SessionEffect {
-        if self.overwrite_target.is_some() {
-            return self.confirm_overwrite();
-        }
-        match &self.kind {
-            PickerKind::OpenFile { .. } => {
-                let mut paths: Vec<PathBuf> = self
-                    .selection
-                    .iter()
-                    .filter_map(|&index| self.rows.get(index))
-                    .map(|row| row.entry.path.clone())
-                    .collect();
-                paths.sort_unstable();
-                paths.dedup();
-                if paths.is_empty() {
-                    return SessionEffect::None;
-                }
-                self.reply_confirmed(paths)
-            }
-            PickerKind::SaveFile { .. } => {
-                let name = self.name_input.trim();
-                if name.is_empty() {
-                    return SessionEffect::None;
-                }
-                let target = self.directory.join(name);
-                if target.exists() {
-                    self.overwrite_target = Some(target);
-                    return SessionEffect::None;
-                }
-                self.reply_confirmed(vec![target])
-            }
-        }
-    }
-
-    fn confirm_overwrite(&mut self) -> SessionEffect {
-        let Some(target) = self.overwrite_target.take() else {
-            return SessionEffect::None;
-        };
-        self.reply_confirmed(vec![target])
-    }
-
-    fn reply_confirmed(&mut self, paths: Vec<PathBuf>) -> SessionEffect {
-        if let Some(reply) = self.reply.take() {
-            let _ = reply.send(PickerResolution::Confirmed(paths.clone()));
-        }
-        SessionEffect::Confirmed(paths)
-    }
-
-    fn finish_cancelled(&mut self) -> SessionEffect {
-        if let Some(reply) = self.reply.take() {
-            let _ = reply.send(PickerResolution::Cancelled);
-        }
-        SessionEffect::Dismissed
     }
 }
 

@@ -127,9 +127,14 @@ impl PickerSession {
     }
 
     /// 键盘光标行（测试观察口；运行时路由不需要读取光标本身）。
-    #[cfg(test)]
     pub(crate) fn list_cursor(&self) -> Option<usize> {
         self.keyboard_nav.cursor
+    }
+
+    /// 光标记录收口：键盘落点与鼠标点击统一走这里（滚动跟随由调用方
+    /// 决定）。不碰选中集——非可选行的位置可见性靠 row_highlighted。
+    pub(crate) fn place_cursor(&mut self, index: usize) {
+        self.keyboard_nav.cursor = Some(index);
     }
 
     /// ←/→ 折叠开关的目标行：光标所在行是目录行时返回索引（任意模式；
@@ -174,9 +179,8 @@ impl PickerSession {
     }
 
     /// 光标落行：复用 click_entry 的单击选中规则（三模式门控 + SaveFile
-    /// 文件名同步与鼠标同源），再记录光标并滚动跟随。
+    /// 文件名同步与鼠标同源；光标记录也在其中），再滚动跟随。
     fn place_list_cursor(&mut self, target: usize) -> SessionEffect {
-        self.keyboard_nav.cursor = Some(target);
         self.click_entry(target, false, false);
         self.scroll_list_to_cursor()
     }
@@ -184,7 +188,7 @@ impl PickerSession {
     /// 视图切换后的主选中项揭示：只落光标并滚动跟随，不改选中集
     /// （多选集在切换后必须完整保留，与键盘移动的单选语义解耦）。
     pub(super) fn reveal_cursor_on(&mut self, index: usize) -> SessionEffect {
-        self.keyboard_nav.cursor = Some(index);
+        self.place_cursor(index);
         self.scroll_list_to_cursor()
     }
 

@@ -48,7 +48,7 @@ pub(super) fn icon_grid_body(
                 index,
                 row,
                 session,
-                session.selection().contains(&index),
+                session.row_highlighted(index),
                 session.hovered_index() == Some(index),
                 emit.clone(),
             ));

@@ -345,6 +345,8 @@ impl PickerSession {
         &self.rows
     }
 
+    /// 选中集直读：仅测试断言用；视图高亮走 row_highlighted（选中∪光标）。
+    #[cfg(test)]
     pub(crate) fn selection(&self) -> &[usize] {
         &self.selection
     }

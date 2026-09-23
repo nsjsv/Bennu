@@ -181,7 +181,7 @@ fn list_body(
             row,
             session,
             theme,
-            session.selection().contains(&index),
+            session.row_highlighted(index),
             session.hovered_index() == Some(index),
             emit.clone(),
         ));

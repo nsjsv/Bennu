@@ -8,6 +8,10 @@ use crate::picker_request::PickerKind;
 
 impl PickerSession {
     pub(super) fn click_entry(&mut self, index: usize, ctrl: bool, shift: bool) {
+        // 点击即落光标（鼠标落点=键盘导航位置，Enter/翻页/type-ahead 同源）。
+        // 必须在可选性门控之前：文件模式下点目录不落选中集，但位置
+        // 仍要可见，否则纯目录页里点击/方向键全部隐身。
+        self.place_cursor(index);
         let multiple = matches!(self.kind, PickerKind::OpenFile { multiple: true, .. });
         match self.kind {
             PickerKind::SaveFile { .. } => {
@@ -57,6 +61,12 @@ impl PickerSession {
             self.selection = vec![index];
             self.selection_anchor = Some(index);
         }
+    }
+
+    /// 行高亮：显式选中集，或键盘光标所在行。光标在可选行上时两者
+    /// 重合；在不可选行（文件模式下的目录）上时靠光标保持可见。
+    pub(crate) fn row_highlighted(&self, index: usize) -> bool {
+        self.selection.contains(&index) || self.list_cursor() == Some(index)
     }
 
     pub(super) fn activate_entry(&mut self, index: usize) -> SessionEffect {

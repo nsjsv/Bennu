@@ -126,13 +126,14 @@ fn tile(
         };
 
     // 文件名最多 3 行：容器高度钉在共享标签几何上并裁剪溢出。
+    // iced 0.14 container 默认左上对齐，水平居中必须显式设在容器上
+    // （文字自身宽度 Shrink，文字级 align_x 无空间可居中）。
     let label = container(
-        readable_label(entry.name.to_string_lossy().into_owned())
-            .size(label_size(ICON_EDGE))
-            .align_x(alignment::Horizontal::Center),
+        readable_label(entry.name.to_string_lossy().into_owned()).size(label_size(ICON_EDGE)),
     )
     .width(Length::Fill)
     .height(Length::Fixed(label_height(ICON_EDGE)))
+    .align_x(alignment::Horizontal::Center)
     .align_y(alignment::Vertical::Top)
     .clip(true);
 

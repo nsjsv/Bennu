@@ -16,9 +16,10 @@ use thumbnails::{CachedThumbnail, ThumbnailLoadFailed, ThumbnailRequest};
 
 use crate::dbus_file_chooser::PickerResolution;
 use crate::filter::PickerFilter;
-use crate::picker_request::{FilterRule, PickerKind, PickerRequestSpec};
+use crate::picker_request::{FilterRule, PickerChoice, PickerKind, PickerRequestSpec};
 
 mod address_editing;
+mod choices;
 mod confirm;
 mod expansion;
 mod keyboard_nav;
@@ -166,6 +167,9 @@ pub(crate) enum SessionMessage {
     CompleteSuggestion {
         direction: PathSuggestionDirection,
     },
+    /// choices 控件变更（下拉选中/复选开关）：按 id 定位覆写选中值，
+    /// 见 choices 子模块；id 不存在静默忽略。
+    ChoiceSelected { id: String, value: String },
     /// 滚轮输入（视图包装层捕获后发布）；增量换算在会话滚动子模块。
     WheelScrolled {
         region: SessionScrollRegion,
@@ -250,8 +254,13 @@ pub(crate) struct PickerSession {
     /// 键盘列表导航状态（光标行 + type-ahead 缓冲），见子模块。
     keyboard_nav: KeyboardNavState,
     name_input: String,
-    /// SaveFile 二次确认目标：非 None 时确认按钮变为"覆盖"。
-    overwrite_target: Option<PathBuf>,
+    /// 调用方 choices 选项（选中值由 ChoiceSelected 簿记，回信时按
+    /// 顺序回传）；三种模式都可携带。
+    choices: Vec<PickerChoice>,
+    /// SaveFile/SaveFiles 二次确认目标集：非空时确认按钮变为"覆盖"。
+    /// SaveFile 场景即长度 1；SaveFiles 只装冲突子集（确认后仍返回
+    /// 全部目标）。
+    overwrite_targets: Vec<PathBuf>,
     /// 地址栏编辑会话（共享层模型）；None = 面包屑态。
     address_editing: Option<AddressEditingSession>,
     /// 面包屑 ↔ 编辑渐变过渡；退出方向携带草稿快照供渐出帧渲染。
@@ -290,6 +299,7 @@ impl PickerSession {
             title,
             filters,
             active_filter,
+            choices,
             ..
         } = invocation_spec;
         let active_filter = active_filter
@@ -322,7 +332,8 @@ impl PickerSession {
             hovered_index: None,
             keyboard_nav: KeyboardNavState::default(),
             name_input,
-            overwrite_target: None,
+            choices: choices.clone(),
+            overwrite_targets: Vec::new(),
             address_editing: None,
             address_bar_transition: None,
             home_dir: dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")),
@@ -395,8 +406,8 @@ impl PickerSession {
         &self.name_input
     }
 
-    pub(crate) fn overwrite_target(&self) -> Option<&Path> {
-        self.overwrite_target.as_deref()
+    pub(crate) fn overwrite_targets(&self) -> &[PathBuf] {
+        &self.overwrite_targets
     }
 
     /// 确认按钮文案：调用方 accept_label 优先，缺省按模式定。
@@ -406,11 +417,11 @@ impl PickerSession {
         }
         match &self.kind {
             PickerKind::OpenFile { .. } => "打开".to_string(),
-            PickerKind::SaveFile { .. } => {
-                if self.overwrite_target.is_some() {
-                    "覆盖".to_string()
-                } else {
+            PickerKind::SaveFile { .. } | PickerKind::SaveFiles { .. } => {
+                if self.overwrite_targets.is_empty() {
                     "保存".to_string()
+                } else {
+                    "覆盖".to_string()
                 }
             }
         }
@@ -423,6 +434,11 @@ impl PickerSession {
             PickerKind::OpenFile { .. } => !self.selection.is_empty(),
             PickerKind::SaveFile { .. } => {
                 !self.is_trash_view() && !self.name_input.trim().is_empty()
+            }
+            // 名字列表是调用方资产：非空即可确认，目标目录仅在回收站
+            // 视图下禁用（与 SaveFile 同一守卫语义）。
+            PickerKind::SaveFiles { default_names } => {
+                !self.is_trash_view() && !default_names.is_empty()
             }
         }
     }
@@ -465,13 +481,13 @@ impl PickerSession {
             SessionMessage::NameInputChanged(text) => {
                 self.name_input = text;
                 // 改名后覆盖确认失效，需对新名字重新判定。
-                self.overwrite_target = None;
+                self.overwrite_targets.clear();
                 SessionEffect::None
             }
             SessionMessage::ConfirmPressed => self.confirm(),
             SessionMessage::DismissPressed => self.finish_cancelled(),
             SessionMessage::OverwriteDeclined => {
-                self.overwrite_target = None;
+                self.overwrite_targets.clear();
                 SessionEffect::None
             }
             SessionMessage::FilterSelectionIgnored => SessionEffect::None,
@@ -511,6 +527,10 @@ impl PickerSession {
             }
             SessionMessage::CompleteSuggestion { direction } => {
                 self.complete_path_suggestion(direction)
+            }
+            SessionMessage::ChoiceSelected { id, value } => {
+                self.choice_selected(&id, value);
+                SessionEffect::None
             }
             SessionMessage::ThumbnailReady { request, outcome } => {
                 self.accept_thumbnail_ready(request, outcome);

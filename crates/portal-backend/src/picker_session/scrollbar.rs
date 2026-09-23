@@ -334,6 +334,7 @@ mod tests {
                 filters: Vec::new(),
                 active_filter: None,
                 start_folder: None,
+                choices: Vec::new(),
             },
             "/org/freedesktop/portal/desktop/request/test".to_string(),
             PathBuf::from("/tmp"),

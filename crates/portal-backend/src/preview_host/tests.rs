@@ -417,6 +417,7 @@ fn daemon_with_image_row(file_name: &str) -> (PickerDaemon, window::Id, PathBuf)
             filters: Vec::new(),
             active_filter: None,
             start_folder: None,
+            choices: Vec::new(),
         },
         "/req/preview".to_string(),
         base.keep(),

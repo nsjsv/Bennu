@@ -144,7 +144,7 @@ fn trash_navigation_scans_and_openfile_confirms_payload_path() {
     );
     assert!(matches!(
         receiver.try_recv(),
-        Ok(PickerResolution::Confirmed(paths)) if paths.len() == 1
+        Ok(PickerResolution::Confirmed(payload)) if payload.paths.len() == 1
     ));
 }
 

@@ -311,6 +311,7 @@ mod tests {
                 filters: Vec::new(),
                 active_filter: None,
                 start_folder: None,
+                choices: Vec::new(),
             },
             "/req/thumb".to_string(),
             base.keep(),

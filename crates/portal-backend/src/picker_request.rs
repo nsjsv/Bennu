@@ -3,7 +3,7 @@
 //! 请求失败。
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use zbus::zvariant::Value;
 
@@ -28,6 +28,10 @@ pub(crate) struct FilterRule {
 pub(crate) enum PickerKind {
     OpenFile { multiple: bool, directory: bool },
     SaveFile { default_name: Option<String> },
+    /// 批量保存：调用方经 `current_names`（as）传入文件名列表，用户只
+    /// 选目标目录。名字列表是调用方资产，本端永不修改；列表为空时
+    /// 确认按钮禁用（与 SaveFile 空输入一致）。
+    SaveFiles { default_names: Vec<String> },
 }
 
 impl PickerKind {
@@ -38,7 +42,7 @@ impl PickerKind {
                 directory: true, ..
             } => "选择文件夹",
             PickerKind::OpenFile { .. } => "选择文件",
-            PickerKind::SaveFile { .. } => "另存为",
+            PickerKind::SaveFile { .. } | PickerKind::SaveFiles { .. } => "另存为",
         }
     }
 }
@@ -55,6 +59,22 @@ pub(crate) struct PickerRequestSpec {
     pub(crate) active_filter: Option<usize>,
     /// 调用方通过 `current_folder` 指定的起始目录。
     pub(crate) start_folder: Option<PathBuf>,
+    /// 调用方 `choices` 选项（下拉/复选）；三种模式都解析，选中值由
+    /// 会话簿记，确认时按请求顺序回传。
+    pub(crate) choices: Vec<PickerChoice>,
+}
+
+/// 调用方经 `choices`（协议 `a(ssa(ss)s)`）传入的单个选项。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PickerChoice {
+    pub(crate) id: String,
+    pub(crate) label: String,
+    /// (value, label)；空 = 协议 boolean 形态（复选框，值恒为
+    /// "true"/"false"）。
+    pub(crate) options: Vec<(String, String)>,
+    /// 选中值：初值 = 调用方 current_value；不在 options 里仍保留，
+    /// 原样回传由调用方裁决。
+    pub(crate) selected: String,
 }
 
 impl PickerRequestSpec {
@@ -73,6 +93,7 @@ impl PickerRequestSpec {
             filters: Vec::new(),
             active_filter: None,
             start_folder: None,
+            choices: Vec::new(),
         };
 
         for (key, value) in options {
@@ -80,7 +101,6 @@ impl PickerRequestSpec {
                 "accept_label" => spec.accept_label = value_as_str(value),
                 "handle_token" => {}
                 "modal" => {}
-                "choices" => {}
                 _ => {}
             }
         }
@@ -115,6 +135,13 @@ impl PickerRequestSpec {
                     }
                 }
             }
+            PickerKind::SaveFiles { default_names } => {
+                for (key, value) in options {
+                    if key == "current_names" {
+                        *default_names = current_names_from_value(value);
+                    }
+                }
+            }
         }
 
         // 顺序敏感：current_filter 的索引解析依赖 filters 先就位，
@@ -129,6 +156,9 @@ impl PickerRequestSpec {
         }
         if let Some(value) = options.get("current_folder") {
             spec.start_folder = value_as_path(value);
+        }
+        if let Some(value) = options.get("choices") {
+            spec.choices = parse_choices(value);
         }
 
         spec
@@ -149,6 +179,31 @@ fn value_as_bool(value: &Value<'_>) -> Option<bool> {
         Value::Bool(flag) => Some(*flag),
         _ => None,
     }
+}
+
+/// `as` 型 option 取值：字符串数组。数组元素同样可能被 variant 包裹
+/// （av 陷阱），逐个解包后再取字符串；非数组容器按空处理。
+fn value_as_string_list(value: &Value<'_>) -> Vec<String> {
+    let Value::Array(array) = unwrap_variant(value) else {
+        return Vec::new();
+    };
+    array
+        .iter()
+        .filter_map(|item| value_as_str(unwrap_variant(item)))
+        .collect()
+}
+
+/// SaveFiles 的 `current_names`（as，调用方文件名列表）：逐条归一为
+/// 非空 basename。协议约定传纯文件名；防御性丢弃空名与带路径分量的
+/// 条目（选目录不是 SaveFiles 的语义）。
+fn current_names_from_value(value: &Value<'_>) -> Vec<String> {
+    value_as_string_list(value)
+        .into_iter()
+        .filter_map(|name| {
+            let base = Path::new(&name).file_name()?.to_string_lossy().into_owned();
+            (!base.is_empty()).then_some(base)
+        })
+        .collect()
 }
 
 /// `ay`（字节数组）按路径解析；`s` 也接受。路径必须以 `/` 开头才有效，
@@ -174,6 +229,61 @@ fn value_as_path(value: &Value<'_>) -> Option<PathBuf> {
         }
         _ => None,
     }
+}
+
+/// 解析 `choices`（`a(ssa(ss)s)`）。畸形条目跳过（与 filters 同策略：
+/// 单个解析失败不使整个请求失败）。
+fn parse_choices(value: &Value<'_>) -> Vec<PickerChoice> {
+    let Value::Array(array) = unwrap_variant(value) else {
+        return Vec::new();
+    };
+    array
+        .iter()
+        .filter_map(|item| match unwrap_variant(item) {
+            Value::Structure(structure) => picker_choice_from_structure(structure),
+            _ => None,
+        })
+        .collect()
+}
+
+fn picker_choice_from_structure(
+    structure: &zbus::zvariant::Structure<'_>,
+) -> Option<PickerChoice> {
+    let fields = structure.fields();
+    if fields.len() != 4 {
+        return None;
+    }
+    let id = value_as_str(unwrap_variant(&fields[0]))?;
+    if id.is_empty() {
+        return None;
+    }
+    let label = value_as_str(unwrap_variant(&fields[1]))?;
+    let Value::Array(options_array) = unwrap_variant(&fields[2]) else {
+        return None;
+    };
+    let options = options_array
+        .iter()
+        .filter_map(|option| match unwrap_variant(option) {
+            Value::Structure(option_structure) => {
+                let option_fields = option_structure.fields();
+                if option_fields.len() != 2 {
+                    return None;
+                }
+                Some((
+                    value_as_str(unwrap_variant(&option_fields[0]))?,
+                    value_as_str(unwrap_variant(&option_fields[1]))?,
+                ))
+            }
+            _ => None,
+        })
+        .collect();
+    let selected = value_as_str(unwrap_variant(&fields[3]))?;
+    Some(PickerChoice {
+        id,
+        label,
+        options,
+        selected,
+    })
 }
 
 /// 解析 `a(sa(us))` 形态的过滤器列表；`current_filter` 是其单元素退化
@@ -219,9 +329,12 @@ fn filter_rule_from_structure(structure: &zbus::zvariant::Structure<'_>) -> Opti
         if pattern_fields.len() != 2 {
             continue;
         }
+        // 协议的模式类型码是 `u`（u32）：真实调用方按 (sa(us)) 发送，
+        // zvariant 反序列化为 Value::U32；之前的 Value::U8 分支对应 D-Bus
+        // `y`，只会匹配协议外的字节型载荷，导致真实过滤器被整条丢弃。
         let kind = match unwrap_variant(&pattern_fields[0]) {
-            Value::U8(0) => FilePattern::Glob,
-            Value::U8(1) => FilePattern::Mime,
+            Value::U32(0) => FilePattern::Glob,
+            Value::U32(1) => FilePattern::Mime,
             _ => continue,
         };
         let Some(text) = value_as_str(unwrap_variant(&pattern_fields[1])) else {
@@ -391,8 +504,8 @@ mod tests {
 
     #[test]
     fn filter_rules_parse_with_current_filter_index() {
-        let glob_pattern = Value::Structure(zbus::zvariant::Structure::from((0u8, "*.png")));
-        let mime_pattern = Value::Structure(zbus::zvariant::Structure::from((1u8, "image/jpeg")));
+        let glob_pattern = Value::Structure(zbus::zvariant::Structure::from((0u32, "*.png")));
+        let mime_pattern = Value::Structure(zbus::zvariant::Structure::from((1u32, "image/jpeg")));
         let png_rule = Value::Structure(zbus::zvariant::Structure::from((
             "PNG 图片",
             zbus::zvariant::Array::from(vec![glob_pattern]),
@@ -441,5 +554,215 @@ mod tests {
             )]),
         );
         assert!(spec.filters.is_empty());
+    }
+
+    /// 构造一条 `a(ssa(ss)s)` 里的 choice 结构。
+    fn choice_value(
+        id: &str,
+        label: &str,
+        opts: Vec<(&str, &str)>,
+        selected: &str,
+    ) -> Value<'static> {
+        let options = zbus::zvariant::Array::from(
+            opts.into_iter()
+                .map(|(value, text)| {
+                    Value::Structure(zbus::zvariant::Structure::from((
+                        value.to_string(),
+                        text.to_string(),
+                    )))
+                })
+                .collect::<Vec<_>>(),
+        );
+        Value::Structure(zbus::zvariant::Structure::from((
+            id.to_string(),
+            label.to_string(),
+            options,
+            selected.to_string(),
+        )))
+    }
+
+    #[test]
+    fn current_names_parse_into_save_files_kind() {
+        let spec = PickerRequestSpec::from_options(
+            PickerKind::SaveFiles {
+                default_names: Vec::new(),
+            },
+            "",
+            &options(vec![(
+                "current_names",
+                Value::Array(zbus::zvariant::Array::from(vec![
+                    "a.txt".to_string(),
+                    "b.txt".to_string(),
+                ])),
+            )]),
+        );
+        assert_eq!(
+            spec.kind,
+            PickerKind::SaveFiles {
+                default_names: vec!["a.txt".to_string(), "b.txt".to_string()]
+            }
+        );
+    }
+
+    #[test]
+    fn current_names_empty_array_yields_empty_list() {
+        let spec = PickerRequestSpec::from_options(
+            PickerKind::SaveFiles {
+                default_names: vec!["stale".to_string()],
+            },
+            "",
+            &options(vec![(
+                "current_names",
+                Value::Array(zbus::zvariant::Array::from(Vec::<String>::new())),
+            )]),
+        );
+        assert_eq!(
+            spec.kind,
+            PickerKind::SaveFiles {
+                default_names: Vec::new()
+            }
+        );
+    }
+
+    #[test]
+    fn current_names_rejects_non_array_and_keeps_basenames() {
+        // 非 as 容器拒绝（保持空列表）；带路径分量/空条目归一后丢弃。
+        let spec = PickerRequestSpec::from_options(
+            PickerKind::SaveFiles {
+                default_names: Vec::new(),
+            },
+            "",
+            &options(vec![
+                ("current_names", Value::Str(Str::from("not-an-array"))),
+                (
+                    "current_names",
+                    Value::Array(zbus::zvariant::Array::from(vec![
+                        "/tmp/a.txt".to_string(),
+                        String::new(),
+                    ])),
+                ),
+            ]),
+        );
+        // HashMap 迭代顺序随机：两种取值可能，但归一结果都合法。
+        match &spec.kind {
+            PickerKind::SaveFiles { default_names } => {
+                assert!(
+                    default_names.is_empty() || default_names == &["a.txt".to_string()],
+                    "非预期归一结果：{default_names:?}"
+                );
+            }
+            other => panic!("kind 被 current_names 改写：{other:?}"),
+        }
+    }
+
+    #[test]
+    fn choices_parse_dropdown_form() {
+        let spec = PickerRequestSpec::from_options(
+            PickerKind::OpenFile {
+                multiple: false,
+                directory: false,
+            },
+            "",
+            &options(vec![(
+                "choices",
+                Value::Array(zbus::zvariant::Array::from(vec![
+                    choice_value(
+                        "fmt",
+                        "格式",
+                        vec![("pdf", "PDF"), ("docx", "DOCX")],
+                        "pdf",
+                    ),
+                    choice_value("tag", "标签", vec![("a", "甲")], "b"),
+                ])),
+            )]),
+        );
+        assert_eq!(spec.choices.len(), 2);
+        assert_eq!(spec.choices[0].id, "fmt");
+        assert_eq!(spec.choices[0].label, "格式");
+        assert_eq!(
+            spec.choices[0].options,
+            vec![
+                ("pdf".to_string(), "PDF".to_string()),
+                ("docx".to_string(), "DOCX".to_string())
+            ]
+        );
+        assert_eq!(spec.choices[0].selected, "pdf");
+        // current_value 不在 options 里仍保留（原样回传由调用方裁决）。
+        assert_eq!(spec.choices[1].selected, "b");
+    }
+
+    #[test]
+    fn choices_parse_boolean_form_and_variant_wrapped_value() {
+        let spec = PickerRequestSpec::from_options(
+            PickerKind::SaveFile { default_name: None },
+            "",
+            &options(vec![
+                // a{sv} 取值可能整体包在 variant 里（av 陷阱）。
+                (
+                    "choices",
+                    Value::Value(Box::new(Value::Array(zbus::zvariant::Array::from(vec![
+                        choice_value("compress", "压缩", Vec::new(), "true"),
+                    ])))),
+                ),
+            ]),
+        );
+        assert_eq!(spec.choices.len(), 1);
+        assert_eq!(spec.choices[0].id, "compress");
+        assert!(spec.choices[0].options.is_empty());
+        assert_eq!(spec.choices[0].selected, "true");
+    }
+
+    #[test]
+    fn malformed_choice_entries_are_skipped() {
+        let spec = PickerRequestSpec::from_options(
+            PickerKind::OpenFile {
+                multiple: false,
+                directory: false,
+            },
+            "",
+            &options(vec![(
+                "choices",
+                Value::Array(zbus::zvariant::Array::from(vec![
+                    Value::U8(7),
+                    Value::Structure(zbus::zvariant::Structure::from((
+                        "bad".to_string(),
+                        1u8,
+                        2u8,
+                    ))),
+                    choice_value("ok", "可用", Vec::new(), "false"),
+                ])),
+            )]),
+        );
+        assert_eq!(spec.choices.len(), 1);
+        assert_eq!(spec.choices[0].id, "ok");
+    }
+
+    #[test]
+    fn choices_parse_for_all_modes() {
+        for kind_seed in [
+            PickerKind::OpenFile {
+                multiple: false,
+                directory: false,
+            },
+            PickerKind::SaveFile { default_name: None },
+            PickerKind::SaveFiles {
+                default_names: Vec::new(),
+            },
+        ] {
+            let spec = PickerRequestSpec::from_options(
+                kind_seed,
+                "",
+                &options(vec![(
+                    "choices",
+                    Value::Array(zbus::zvariant::Array::from(vec![choice_value(
+                        "fmt",
+                        "格式",
+                        vec![("pdf", "PDF")],
+                        "pdf",
+                    )])),
+                )]),
+            );
+            assert_eq!(spec.choices.len(), 1, "三种模式都要解析 choices");
+        }
     }
 }

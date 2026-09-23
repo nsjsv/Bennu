@@ -17,7 +17,7 @@ impl PickerSession {
                 if let Some(row) = self.rows.get(index) {
                     if row.entry.kind == FileKind::File {
                         self.name_input = row.entry.name.to_string_lossy().into_owned();
-                        self.overwrite_target = None;
+                        self.overwrite_targets.clear();
                     }
                 }
             }
@@ -33,6 +33,9 @@ impl PickerSession {
                     }
                 }
             }
+            // SaveFiles 只选目录：点击仅高亮（落到底部通用选中逻辑），
+            // 名字列表是调用方资产，不可被点击改写。
+            PickerKind::SaveFiles { .. } => {}
         }
         if shift && multiple {
             if let Some(anchor) = self.selection_anchor {
@@ -80,9 +83,12 @@ impl PickerSession {
             }
             PickerKind::SaveFile { .. } => {
                 self.name_input = row.entry.name.to_string_lossy().into_owned();
-                self.overwrite_target = None;
+                self.overwrite_targets.clear();
                 SessionEffect::None
             }
+            // SaveFiles 双击文件不确认：返回集是调用方名字列表，与
+            // 单个条目无关（目录双击在 match 之前已走导航）。
+            PickerKind::SaveFiles { .. } => SessionEffect::None,
         }
     }
 

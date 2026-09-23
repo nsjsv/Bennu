@@ -37,6 +37,13 @@ impl PickerFilter {
         }
     }
 
+    /// 当前激活的单条规则（confirm 回信装 current_filter 载荷用）。
+    /// active_filter 恒由单规则构造（见 PickerSession::new），first
+    /// 即唯一规则；无过滤 = None。
+    pub(crate) fn active_rule(&self) -> Option<&FilterRule> {
+        self.rules.first()
+    }
+
     /// 目录永远放行；隐藏文件一律不放行（与桌面文件选择器惯例一致）；
     /// 其余条目按任一规则命中放行。
     pub(crate) fn entry_allowed(&self, name: &str, kind: FileKind, is_hidden: bool) -> bool {

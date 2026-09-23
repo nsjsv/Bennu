@@ -7,9 +7,20 @@
 ## 支持范围
 
 - `OpenFile`：单选/多选（`multiple`）、选文件夹（`directory`）、文件类型
-  过滤（`filters` / `current_filter`）、自定义确认文案（`accept_label`）
-- `SaveFile`：默认文件名（`current_name`）、覆盖二次确认
-- `SaveFiles`：不支持（显式返回 NotSupported）
+  过滤（`filters` / `current_filter`）、自定义确认文案（`accept_label`）、
+  `choices` 选项（下拉/复选）、响应回传 `choices` 与 `current_filter`
+- `SaveFile`：默认文件名（`current_name`）、覆盖二次确认、按激活过滤
+  规则自动补全扩展名（确认瞬间补全：输入“照片”+ `*.png` 过滤 →
+  存为 `照片.png`；已带扩展名或无匹配 glob 则保持不变）、`choices`、
+  响应回传 `choices` 与 `current_filter`
+- `SaveFiles`：批量另存（`current_names` 文件名列表只读展示，用户只选
+  目标目录，确认返回 `目录/每个名字` 的完整路径列表）；目标目录存在
+  同名文件时二次覆盖确认；列表为空或回收站视图下禁用确认
+- `choices`（三种模式）：非空选项列表渲染下拉框，空选项列表（协议的
+  boolean 形态）渲染复选框；确认响应的 `choices` 键回传全部
+  `(id, 选中值)`
+- `current_filter`：调用方传了 `filters` 时，响应携带 `(sa(us))` 形态的
+  `current_filter`（确认时激活的规则）；未传则不带该键
 - 起始目录优先级：调用方 `current_folder` > 上次记忆（`~/.config/bennu/portal.toml`）
   > 主目录
 

@@ -720,6 +720,7 @@ mod tests {
                 filters: Vec::new(),
                 active_filter: None,
                 start_folder: None,
+                choices: Vec::new(),
             },
             "/req/test".to_string(),
             base.keep(),

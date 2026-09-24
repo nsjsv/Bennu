@@ -165,9 +165,8 @@ fn lane_entry_row(
     let hovered = session.columns_hovered(lane) == Some(index);
     // 已打开子栏：本行目录正是下一栏的内容（主软件 active_child 同义）；
     // 视觉优先级与主软件 from_entry_context 一致：选中 > 悬停 > 已打开。
-    let open_child = !selected
-        && !hovered
-        && session.columns_chain().get(lane + 1) == Some(&entry.path);
+    let open_child =
+        !selected && !hovered && session.columns_chain().get(lane + 1) == Some(&entry.path);
     let icon_tone = if selected {
         selected_icon_svg_style()
     } else {

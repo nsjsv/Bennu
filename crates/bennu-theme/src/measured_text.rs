@@ -245,10 +245,7 @@ where
             let line_height = self.line_height;
             let shaping = shaping_for_content(&self.content);
             let display_bounds = Size::new(bounds.width, bounds.height);
-            let layout_key_matches = text_state
-                .layout_key
-                .as_ref()
-                .is_some_and(|key| {
+            let layout_key_matches = text_state.layout_key.as_ref().is_some_and(|key| {
                 key.matches(
                     &self.content,
                     display_bounds,

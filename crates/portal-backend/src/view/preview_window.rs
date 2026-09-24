@@ -192,9 +192,7 @@ fn scroll_region_state<'a>(
 type SmoothScrollWrapFn<'a> =
     Box<dyn Fn(Element<'a, Message, Theme>) -> Element<'a, Message, Theme> + 'a>;
 
-fn smooth_scroll_wrap<'a>(
-    region: PreviewScrollRegion,
-) -> SmoothScrollWrapFn<'a> {
+fn smooth_scroll_wrap<'a>(region: PreviewScrollRegion) -> SmoothScrollWrapFn<'a> {
     Box::new(move |content| {
         Element::new(SmoothScrollArea::new(
             content,

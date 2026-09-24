@@ -666,19 +666,30 @@ fn lane_click_clears_other_lanes_selection() {
         ctrl: false,
         shift: false,
     });
-    scan(&mut session, &adir, &[("deep", FileKind::Directory), ("note.txt", FileKind::File)]);
+    scan(
+        &mut session,
+        &adir,
+        &[("deep", FileKind::Directory), ("note.txt", FileKind::File)],
+    );
     session.update(SessionMessage::ColumnEntryClicked {
         lane: 1,
         index: 1,
         ctrl: false,
         shift: false,
     });
-    assert_eq!(session.columns_rightmost_selection_paths(), &[adir.join("note.txt")]);
+    assert_eq!(
+        session.columns_rightmost_selection_paths(),
+        &[adir.join("note.txt")]
+    );
 
     // 点回 lane0 的 bdir：lane1 选中熄灭；文件模式下 bdir 不可选，
     // 选中集整体为空（目录导航不等于选中）。
     let root = session.directory().to_path_buf();
-    scan(&mut session, &root, &[("adir", FileKind::Directory), ("bdir", FileKind::Directory)]);
+    scan(
+        &mut session,
+        &root,
+        &[("adir", FileKind::Directory), ("bdir", FileKind::Directory)],
+    );
     session.update(SessionMessage::ColumnEntryClicked {
         lane: 0,
         index: 1,

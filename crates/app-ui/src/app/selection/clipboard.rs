@@ -517,7 +517,10 @@ impl FileBrowser {
 }
 
 /// 只收纳「parent 等于目标目录」的选中项;parent 不一致的跨栏选中项留在原地。
-fn gather_sources_in_directory(selected: &[PathBuf], directory: &Path) -> Vec<PathBuf> {
+pub(in crate::app) fn gather_sources_in_directory(
+    selected: &[PathBuf],
+    directory: &Path,
+) -> Vec<PathBuf> {
     selected
         .iter()
         .filter(|path| path.parent() == Some(directory))

@@ -155,6 +155,7 @@ fn operation_supports_desktop_notification(operation: &QueuedFileOperation) -> b
         | QueuedFileOperation::Convert { .. } => true,
         QueuedFileOperation::Rename { .. }
         | QueuedFileOperation::CreateDirectory { .. }
+        | QueuedFileOperation::CreateDirectories { .. }
         | QueuedFileOperation::CreateEmptyFile { .. } => false,
     }
 }

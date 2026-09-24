@@ -288,6 +288,16 @@ impl FileBrowser {
                     self.invalidate_list_directory_summary_subtree_and_ancestor_chain(&path);
                 }
             }
+            QueuedFileOperation::CreateDirectories {
+                parent,
+                gather_sources,
+                ..
+            } => {
+                self.invalidate_list_directory_summary_subtree_and_ancestor_chain(parent);
+                for source in gather_sources {
+                    self.invalidate_list_directory_summary_subtree_and_ancestor_chain(source);
+                }
+            }
             QueuedFileOperation::Trash { paths }
             | QueuedFileOperation::DeletePermanently { paths } => {
                 for path in paths {

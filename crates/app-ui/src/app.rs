@@ -1,3 +1,4 @@
+mod advanced_new_folder;
 mod application_logs;
 mod application_shutdown;
 pub(crate) mod archive_creation;
@@ -136,17 +137,17 @@ use crate::localization;
 use crate::matugen_theme::{fallback_theme, AppearanceMode, ApplicationTheme};
 use crate::model::search::SearchWorkspaceState;
 use crate::model::{
-    empty_directory_entry_snapshot, ApplicationLogViewState, BatchRenameState,
-    BreadcrumbDropTargetBounds, BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab,
-    BrowserViewMode, ColumnBrowserViewport, ColumnEntryBounds, ContextMenuSettingsDragState,
-    ContextMenuSettingsPage, ContextMenuState, DestructiveActionConfirmation,
-    DirectoryCollectionPhase, DirectoryEntrySnapshot, DirectoryLoadingPlaceholder,
-    DirectoryOrderPhase, ExpandedDirectory, FileAreaMenuItem, FileDragSpringHover, FileDragState,
-    FileDropPrompt, FileDropSessionState, FilePropertiesState, IconGridExpansionState,
-    IconGridViewport, ListColumnKind, Message, PaneAddressBarTransition, PaneAddressEditingSession,
-    PaneDragPointerPress, PaneDragState, PendingOperation, PreviewState, PreviewWindowProfile,
-    ScrollbarRegion, SearchServiceState, SelectionMarquee, SettingsCategory, SettingsSubpage,
-    SidebarBookmarkDragState, SidebarBookmarkDropSlot, SidebarLocation,
+    empty_directory_entry_snapshot, AdvancedNewFolderAfter, AdvancedNewFolderState,
+    ApplicationLogViewState, BatchRenameState, BreadcrumbDropTargetBounds, BrowserPane,
+    BrowserPaneId, BrowserPaneLayout, BrowserTab, BrowserViewMode, ColumnBrowserViewport,
+    ColumnEntryBounds, ContextMenuSettingsDragState, ContextMenuSettingsPage, ContextMenuState,
+    DestructiveActionConfirmation, DirectoryCollectionPhase, DirectoryEntrySnapshot,
+    DirectoryLoadingPlaceholder, DirectoryOrderPhase, ExpandedDirectory, FileAreaMenuItem,
+    FileDragSpringHover, FileDragState, FileDropPrompt, FileDropSessionState, FilePropertiesState,
+    IconGridExpansionState, IconGridViewport, ListColumnKind, Message, PaneAddressBarTransition,
+    PaneAddressEditingSession, PaneDragPointerPress, PaneDragState, PendingOperation, PreviewState,
+    PreviewWindowProfile, ScrollbarRegion, SearchServiceState, SelectionMarquee, SettingsCategory,
+    SettingsSubpage, SidebarBookmarkDragState, SidebarBookmarkDropSlot, SidebarLocation,
     StartupDirectoryValidationRequest, TabDragState, TransferConflictState, TrashRefreshState,
 };
 use crate::network_connections::{NetworkConnectionEditorState, NetworkConnectionState};
@@ -230,6 +231,9 @@ pub(crate) struct FileBrowser {
     pub(crate) checksum: Option<ChecksumState>,
     pub(crate) archive_extraction: Option<ArchiveExtractionState>,
     pub(crate) batch_rename: Option<BatchRenameState>,
+    pub(crate) advanced_new_folder: Option<AdvancedNewFolderState>,
+    /// 确认时选定的收尾动作(创建后进入/新标签进入),完成边界消费一次。
+    pending_advanced_new_folder_after: Option<AdvancedNewFolderAfter>,
     pub(crate) sidebar_locations: Vec<SidebarLocation>,
     pub(crate) sidebar_devices: SidebarDeviceState,
     pub(crate) network_connections: NetworkConnectionState,
@@ -647,6 +651,8 @@ impl FileBrowser {
             checksum: None,
             archive_extraction: None,
             batch_rename: None,
+            advanced_new_folder: None,
+            pending_advanced_new_folder_after: None,
             sidebar_locations: Vec::new(),
             sidebar_devices: SidebarDeviceState::loading(),
             network_connections: NetworkConnectionState::default(),

@@ -22,6 +22,18 @@ pub(super) fn queued_operation_to_stored(operation: &QueuedFileOperation) -> Sto
         QueuedFileOperation::CreateDirectory { parent } => StoredOperation::CreateDirectory {
             parent: StoredPath::from_path(parent),
         },
+        QueuedFileOperation::CreateDirectories {
+            parent,
+            names,
+            gather_sources,
+        } => StoredOperation::CreateDirectories {
+            parent: StoredPath::from_path(parent),
+            names: names.clone(),
+            gather_sources: gather_sources
+                .iter()
+                .map(|path| StoredPath::from_path(path))
+                .collect(),
+        },
         QueuedFileOperation::CreateEmptyFile { parent } => StoredOperation::CreateEmptyFile {
             parent: StoredPath::from_path(parent),
         },

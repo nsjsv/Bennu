@@ -104,6 +104,10 @@ pub(crate) use list_directory_summary::{
 };
 mod file_entry_content_modifier;
 pub(crate) use file_entry_content_modifier::FileEntryContentModifier;
+mod advanced_new_folder;
+pub(crate) use advanced_new_folder::{
+    AdvancedNewFolderAfter, AdvancedNewFolderMessage, AdvancedNewFolderMode, AdvancedNewFolderState,
+};
 mod batch_rename;
 pub(crate) use batch_rename::{
     same_parent, BatchRenameCaseRule, BatchRenameExtensionMode, BatchRenameInsertMode,
@@ -554,6 +558,7 @@ pub(crate) enum Message {
     Checksum(ChecksumMessage),
     ArchiveExtraction(ArchiveExtractionMessage),
     BatchRename(BatchRenameMessage),
+    AdvancedNewFolder(AdvancedNewFolderMessage),
     /// 本地文件传输:二维码下载会话、LocalSend 直推、接收确认与设置。
     Transfer(crate::app::transfer::TransferMessage),
     FileContextMenuExpansionChanged(FileContextMenuExpansion),

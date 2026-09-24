@@ -6,7 +6,9 @@ use file_core::ResolvedEntryChange;
 
 use super::FileBrowser;
 use crate::commands::file_operation_driver_task;
-use crate::model::{IconGridExpansionMigration, Message};
+use crate::model::{
+    AdvancedNewFolderAfter, BrowserViewMode, IconGridExpansionMigration, Message, NavigationMode,
+};
 use crate::operation_history::{
     path_after_completed_migrations, CompletedPathMigration, FileOperationCompletion,
     FileOperationOutcome, PendingHistoryOperation,
@@ -24,6 +26,15 @@ fn outcome_created_path(outcome: &FileOperationOutcome) -> Option<PathBuf> {
     match outcome {
         FileOperationOutcome::CreateDirectory { path }
         | FileOperationOutcome::CreateEmptyFile { path } => Some(path.clone()),
+        // 完成后重命名落点 = 第一个叶子链的绝对路径(嵌套链含中间段)。
+        FileOperationOutcome::CreateDirectories { parent, leaves, .. } => {
+            leaves.first().map(|leaf| {
+                leaf.split('/')
+                    .map(str::trim)
+                    .filter(|segment| !segment.is_empty())
+                    .fold(parent.clone(), |current, segment| current.join(segment))
+            })
+        }
         FileOperationOutcome::GatheredIntoNewFolder { directory, .. } => Some(directory.clone()),
         _ => None,
     }
@@ -256,8 +267,35 @@ impl FileBrowser {
             })
             .flatten();
 
-        if let Some(path) = created_path {
-            self.pending_created_entry_rename = Some(path);
+        // 高级新建的收尾动作(进入/新标签进入)替代默认的重命名态;
+        // 历史重放不消费收尾意图;创建失败时丢弃,避免遗留到无关操作。
+        let mut tasks: Vec<Task<Message>> = Vec::new();
+        let is_create_directories = completed_operation.as_ref().is_some_and(|operation| {
+            matches!(operation, QueuedFileOperation::CreateDirectories { .. })
+        });
+        let after = if !is_history_replay && is_create_directories {
+            self.pending_advanced_new_folder_after.take()
+        } else {
+            None
+        }
+        .filter(|_| completed_successfully);
+        match (after, created_path.clone()) {
+            (Some(AdvancedNewFolderAfter::Enter), Some(path)) => {
+                // 多栏视图:在另一栏打开新文件夹;其他视图:直接进入。
+                if self.view_mode == BrowserViewMode::Columns {
+                    tasks.push(self.open_column_for_directory(path));
+                } else {
+                    tasks.push(self.navigate_to(path, NavigationMode::RecordHistory));
+                }
+            }
+            (Some(AdvancedNewFolderAfter::EnterInNewTab), Some(path)) => {
+                tasks.push(self.open_directory_in_new_tab(path));
+            }
+            (_, _) => {
+                if let Some(path) = created_path {
+                    self.pending_created_entry_rename = Some(path);
+                }
+            }
         }
 
         // 复制副本对齐 Finder:成功后整批选中新副本(撤销重放不抢焦点)。
@@ -348,6 +386,7 @@ impl FileBrowser {
             trash_batch_rescan_task,
             self.continue_file_operation_persistence(),
         ])
+        .chain(Task::batch(tasks))
     }
 
     pub(super) fn accept_file_operation_persistence_finished(

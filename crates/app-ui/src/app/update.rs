@@ -1234,7 +1234,14 @@ impl FileBrowser {
             Message::BeginRename(path) => self.begin_rename(path),
             Message::OpenTerminalHere(directory) => self.open_terminal_here(directory),
             Message::RenameSelected => self.commit_rename(),
-            Message::CreateDirectory(directory) => self.create_directory_in(directory),
+            Message::CreateDirectory(directory) => {
+                if self.keyboard_modifiers.shift() {
+                    self.open_advanced_new_folder(directory)
+                } else {
+                    self.create_directory_in(directory)
+                }
+            }
+            Message::AdvancedNewFolder(message) => self.handle_advanced_new_folder_message(message),
             Message::CreateEmptyFile(directory) => self.create_empty_file_in(directory),
             Message::TrashSelected => self.trash_selected(),
             Message::RestoreSelected => self.restore_selected(),

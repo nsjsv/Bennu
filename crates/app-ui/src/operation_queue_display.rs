@@ -39,6 +39,15 @@ impl QueuedFileOperation {
                 parent,
                 &crate::localization::translate_current(NEW_DIRECTORY_NAME),
             ),
+            Self::CreateDirectories { parent, names, .. } => match names.as_slice() {
+                [] => FileOperationPathLines::empty(),
+                [first, ..] => FileOperationPathLines::from_paths(
+                    &parent.join(first),
+                    &parent.join(first),
+                    parent_path(&parent.join(first)),
+                    names.len(),
+                ),
+            },
             Self::CreateEmptyFile { parent } => created_entry_path_lines(
                 parent,
                 &crate::localization::translate_current(NEW_FILE_NAME),

@@ -1,5 +1,6 @@
 mod about_settings;
 mod address_bar;
+mod advanced_new_folder;
 mod application_logs;
 mod archive_creation;
 mod archive_extraction;
@@ -91,6 +92,7 @@ use self::network_connections::network_connection_editor_panel;
 // 图标色调词汇已下沉 bennu-theme（主程序与 portal 同源）；这里重导出
 // 保持 view 子模块 `use super::{…}` 调用点不变。
 use address_bar::address_bar;
+use advanced_new_folder::advanced_new_folder_panel;
 use archive_creation::archive_creation_panel;
 use archive_extraction::archive_extraction_panel;
 use batch_rename::batch_rename_panel;
@@ -274,6 +276,13 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
                 browser.scrollbar_visibility_for(&ScrollbarRegion::BatchRenamePreview),
                 browser.scrollbar_viewport_for(&ScrollbarRegion::BatchRenamePreview),
             ),
+            placement: FloatingPlacement::Center,
+            captures_pointer: true,
+        });
+    } else if let Some(advanced_new_folder) = &browser.advanced_new_folder {
+        floating_input = BrowserFloatingInput::Modal;
+        floating.push(FloatingContent {
+            element: advanced_new_folder_panel(advanced_new_folder),
             placement: FloatingPlacement::Center,
             captures_pointer: true,
         });

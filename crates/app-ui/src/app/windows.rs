@@ -618,6 +618,11 @@ impl FileBrowser {
             return Task::none();
         }
 
+        if self.advanced_new_folder.is_some() {
+            self.advanced_new_folder = None;
+            return Task::none();
+        }
+
         if self.network_connection_editor.is_some() {
             self.network_connection_editor = None;
             return Task::none();

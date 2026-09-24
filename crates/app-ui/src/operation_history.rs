@@ -48,6 +48,14 @@ pub(crate) enum FileOperationOutcome {
     CreateDirectory {
         path: PathBuf,
     },
+    /// 高级新建文件夹成果：叶子路径（含嵌套段）+ 撤销回收的顶层新目录
+    /// 集合 + 整批移入第一个目录的条目。
+    CreateDirectories {
+        parent: PathBuf,
+        leaves: Vec<String>,
+        top_level: Vec<PathBuf>,
+        moved: Vec<CompletedTransfer>,
+    },
     CreateEmptyFile {
         path: PathBuf,
     },
@@ -202,6 +210,7 @@ impl FileOperationOutcome {
                 .collect(),
             Self::NoHistory
             | Self::CreateDirectory { .. }
+            | Self::CreateDirectories { .. }
             | Self::CreateEmptyFile { .. }
             | Self::Trash { .. }
             | Self::Restore { .. }
@@ -294,6 +303,15 @@ pub(crate) enum FileOperationHistoryItem {
     },
     CreateDirectory {
         path: PathBuf,
+    },
+    /// 高级新建文件夹成果。撤销 = 整批进回收站（与单建 CreateDirectory
+    /// 同语义，一条 undo 完事且数据无损）；移入过条目后源路径已变，
+    /// 重做不再可用。
+    CreateDirectories {
+        parent: PathBuf,
+        leaves: Vec<String>,
+        top_level: Vec<PathBuf>,
+        moved: Vec<CompletedTransfer>,
     },
     CreateEmptyFile {
         path: PathBuf,
@@ -507,6 +525,18 @@ impl FileOperationHistoryItem {
             FileOperationOutcome::CreateDirectory { path } => {
                 Some(Self::CreateDirectory { path: path.clone() })
             }
+            FileOperationOutcome::CreateDirectories {
+                parent,
+                leaves,
+                top_level,
+                moved,
+            } if !top_level.is_empty() => Some(Self::CreateDirectories {
+                parent: parent.clone(),
+                leaves: leaves.clone(),
+                top_level: top_level.clone(),
+                moved: moved.clone(),
+            }),
+            FileOperationOutcome::CreateDirectories { .. } => None,
             FileOperationOutcome::CreateEmptyFile { path } => {
                 Some(Self::CreateEmptyFile { path: path.clone() })
             }
@@ -565,6 +595,14 @@ impl FileOperationHistoryItem {
                     paths: vec![path.clone()],
                 })
             }
+            // 批量新建与单建同语义：本次新建的顶层目录整批进回收站
+            //（嵌套链只回收顶层，复用的已有目录与空壳不残留）。
+            Self::CreateDirectories { top_level, .. } if !top_level.is_empty() => {
+                Some(QueuedFileOperation::Trash {
+                    paths: top_level.clone(),
+                })
+            }
+            Self::CreateDirectories { .. } => None,
             Self::Trash {
                 restore_entries, ..
             } if !restore_entries.is_empty() => Some(QueuedFileOperation::Restore {
@@ -601,6 +639,18 @@ impl FileOperationHistoryItem {
             }),
             Self::CreateDirectory { path } => create_directory_operation(path),
             Self::CreateEmptyFile { path } => create_empty_file_operation(path),
+            // 移入过条目后源路径已变，重做不可用；纯创建时按原叶子链重建。
+            Self::CreateDirectories {
+                parent,
+                leaves,
+                moved,
+                ..
+            } if moved.is_empty() => Some(QueuedFileOperation::CreateDirectories {
+                parent: parent.clone(),
+                names: leaves.clone(),
+                gather_sources: Vec::new(),
+            }),
+            Self::CreateDirectories { .. } => None,
             Self::Trash { original_paths, .. } => Some(QueuedFileOperation::Trash {
                 paths: original_paths.clone(),
             }),
@@ -662,6 +712,10 @@ fn create_directory_operation(path: &Path) -> Option<QueuedFileOperation> {
         .map(Path::to_path_buf)
         .map(|parent| QueuedFileOperation::CreateDirectory { parent })
 }
+
+/// 从成果目录列表反推批量重建操作：名字取各目录末段，父目录取首项父目录。
+// 原反推函数已删:嵌套链无法从目录列表反推,redo 直接重放原叶子路径
+// (见 redo_operation 的 CreateDirectories 分支)。
 
 fn create_empty_file_operation(path: &Path) -> Option<QueuedFileOperation> {
     path.parent()

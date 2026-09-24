@@ -141,6 +141,14 @@ async fn run_queued_file_operation(
         QueuedFileOperation::CreateDirectory { parent } => {
             run_queued_create_directory(parent, controls, task_id, output).await
         }
+        QueuedFileOperation::CreateDirectories {
+            parent,
+            names,
+            gather_sources,
+        } => {
+            run_queued_create_directories(parent, names, gather_sources, controls, task_id, output)
+                .await
+        }
         QueuedFileOperation::CreateEmptyFile { parent } => {
             run_queued_create_empty_file(parent, controls, task_id, output).await
         }
@@ -432,6 +440,126 @@ async fn run_queued_create_directory(
     )
     .await;
     Ok(FileOperationOutcome::CreateDirectory { path })
+}
+
+async fn run_queued_create_directories(
+    parent: PathBuf,
+    names: Vec<String>,
+    gather_sources: Vec<PathBuf>,
+    mut controls: FileOperationControls,
+    task_id: u64,
+    output: &mut IcedSender<Message>,
+) -> Result<FileOperationOutcome, String> {
+    controls
+        .wait_until_running()
+        .await
+        .map_err(|error| error.to_string())?;
+    let total = names.len() + gather_sources.len();
+    // names 是相对 parent 的叶子路径,段间 '/' 表达嵌套链;
+    // created 收集本次真正新建的目录(含中间段),撤销时只回收
+    // 互相不包含的顶层新目录,复用的已有目录和空壳不残留。
+    let mut created: Vec<PathBuf> = Vec::new();
+    for (index, name) in names.iter().enumerate() {
+        let segments: Vec<&str> = name
+            .split('/')
+            .map(str::trim)
+            .filter(|segment| !segment.is_empty())
+            .collect();
+        let mut current = parent.clone();
+        for (segment_index, segment) in segments.iter().enumerate() {
+            let is_leaf = segment_index + 1 == segments.len();
+            if is_leaf {
+                // 叶子段走单建同一套候选循环:预览已错开,这里由
+                // AlreadyExists 原子裁决兜底磁盘重名与极端竞争。
+                let directory =
+                    create_new_entry(current.clone(), segment, NewEntryKind::Directory).await?;
+                created.push(directory);
+            } else {
+                let next = current.join(segment);
+                match create_directory(&next).await {
+                    Ok(directory) => created.push(directory),
+                    // 中间段已存在:复用现有目录继续往里建。
+                    Err(error) if create_entry_name_taken(&error) => {}
+                    Err(error) => return Err(error.to_string()),
+                }
+                current = next;
+            }
+        }
+        send_file_operation_progress(
+            output,
+            task_id,
+            FileOperationProgressUpdate::IndeterminateItems {
+                completed: index + 1,
+                total,
+            },
+        )
+        .await;
+    }
+    let top_level = top_level_directories(&created);
+
+    let mut moved = Vec::with_capacity(gather_sources.len());
+    if let Some(directory) = leaves_directory(&parent, names.first()) {
+        for (index, source) in gather_sources.iter().enumerate() {
+            controls
+                .wait_until_running()
+                .await
+                .map_err(|error| error.to_string())?;
+            let name = source
+                .file_name()
+                .map(std::ffi::OsStr::to_os_string)
+                .ok_or_else(|| format!("missing file name for {}", source.display()))?;
+            let target = directory.join(name);
+            // 源与目标同在一个父目录树下,rename 原子完成且必同盘。
+            tokio::fs::rename(source, &target)
+                .await
+                .map_err(|error| error.to_string())?;
+            moved.push(CompletedTransfer {
+                source: source.clone(),
+                target,
+            });
+            send_file_operation_progress(
+                output,
+                task_id,
+                FileOperationProgressUpdate::IndeterminateItems {
+                    completed: names.len() + index + 1,
+                    total,
+                },
+            )
+            .await;
+        }
+    }
+    Ok(FileOperationOutcome::CreateDirectories {
+        parent,
+        leaves: names,
+        top_level,
+        moved,
+    })
+}
+
+/// 撤销回收集:新建目录里去掉是另一个新建目录后代的项,
+/// 让顶层目录整棵进回收站,不留下空壳中间层。
+fn top_level_directories(created: &[PathBuf]) -> Vec<PathBuf> {
+    created
+        .iter()
+        .filter(|path| {
+            !created
+                .iter()
+                .any(|other| *other != **path && path.strip_prefix(other).is_ok())
+        })
+        .cloned()
+        .collect()
+}
+
+/// 第一个叶子路径对应的绝对目录(移入落点/完成后重命名落点)。
+fn leaves_directory(parent: &Path, first_leaf: Option<&String>) -> Option<PathBuf> {
+    first_leaf.map(|leaf| {
+        leaf.split('/')
+            .map(str::trim)
+            .filter(|segment| !segment.is_empty())
+            .fold(parent.to_path_buf(), |current, segment| {
+                current.join(segment)
+            })
+    })
 }
 
 async fn run_queued_create_empty_file(

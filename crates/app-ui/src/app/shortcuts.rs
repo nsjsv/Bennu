@@ -3,7 +3,7 @@ use iced::{event, Task};
 
 use super::text_input_shortcuts;
 use super::FileBrowser;
-use crate::model::{Message, PathSuggestionDirection};
+use crate::model::{AdvancedNewFolderMessage, Message, PathSuggestionDirection};
 use crate::shortcuts::{
     FileBrowserShortcutOwnership, KeyBinding, ShortcutAction, ShortcutBindingId,
     ShortcutCaptureState, ShortcutConfig, ShortcutRoutingContext,
@@ -30,6 +30,15 @@ impl FileBrowser {
         // 终端面板聚焦时键盘归 PTY;除宿主保留键外不进入文件管理器快捷键路由。
         if let Some(task) = self.terminal_panel_keyboard_input(&key, modifiers) {
             return task;
+        }
+
+        // 高级新建文件夹弹窗:Ctrl+Enter 快捷创建,优先于内容快捷键路由;
+        // 编辑器把 Ctrl+Enter 当换行捕获,但事件仍会到达全局路由层。
+        if self.advanced_new_folder.is_some()
+            && matches!(key.as_ref(), keyboard::Key::Named(key::Named::Enter))
+            && modifiers.control()
+        {
+            return self.handle_advanced_new_folder_message(AdvancedNewFolderMessage::Confirmed);
         }
 
         if let Some(command) = self.handle_path_suggestion_keyboard_key(&key, modifiers) {

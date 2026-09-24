@@ -287,6 +287,12 @@ pub enum StoredOperation {
     CreateDirectory {
         parent: StoredPath,
     },
+    /// 高级新建文件夹：一次创建多个目录，可选把选中条目移入第一个。
+    CreateDirectories {
+        parent: StoredPath,
+        names: Vec<String>,
+        gather_sources: Vec<StoredPath>,
+    },
     CreateEmptyFile {
         parent: StoredPath,
     },
@@ -353,6 +359,7 @@ impl StoredOperation {
             Self::Rename { .. } => "rename",
             Self::BatchRename { .. } => "batch_rename",
             Self::CreateDirectory { .. } => "create_directory",
+            Self::CreateDirectories { .. } => "create_directories",
             Self::CreateEmptyFile { .. } => "create_empty_file",
             Self::Trash { .. } => "trash",
             Self::Restore { .. } => "restore",

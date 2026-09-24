@@ -67,6 +67,13 @@ pub(crate) enum QueuedFileOperation {
     CreateDirectory {
         parent: PathBuf,
     },
+    /// 高级新建文件夹：批量创建多个目录（名字由弹窗预生成），
+    /// 非空 gather_sources 在创建完成后整批移入第一个目录。
+    CreateDirectories {
+        parent: PathBuf,
+        names: Vec<String>,
+        gather_sources: Vec<PathBuf>,
+    },
     CreateEmptyFile {
         parent: PathBuf,
     },
@@ -173,6 +180,7 @@ impl QueuedFileOperation {
             Self::Rename { .. } => "Rename",
             Self::BatchRename { .. } => "Batch Rename",
             Self::CreateDirectory { .. } => "New Folder",
+            Self::CreateDirectories { .. } => "New Folders",
             Self::CreateEmptyFile { .. } => "New File",
             Self::Trash { .. } => "Move to Trash",
             Self::Restore { .. } => "Restore",
@@ -195,6 +203,10 @@ impl QueuedFileOperation {
     pub(crate) fn created_path(&self) -> Option<PathBuf> {
         match self {
             Self::CreateDirectory { parent } => Some(parent.join(NEW_DIRECTORY_NAME)),
+            // 预览里第一个目录就是后续移入/重命名态的落点。
+            Self::CreateDirectories { parent, names, .. } => {
+                names.first().map(|name| parent.join(name))
+            }
             Self::CreateEmptyFile { parent } => Some(parent.join(NEW_FILE_NAME)),
             // 收纳文件夹在入队侧已按命名规则确定路径,完成后照常进入重命名态。
             Self::GatherSelectionIntoNewFolder { directory, .. } => Some(directory.clone()),

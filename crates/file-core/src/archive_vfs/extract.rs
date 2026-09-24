@@ -62,21 +62,13 @@ pub async fn extract_archive_members_with_controls_and_progress(
             })?;
             let total_entries = worklist.len();
             let mut completed_bytes = 0;
+            // 落地锚点必须保留被拖成员自身这一层名字：文件夹成员 A 的
+            // 子孙要落成 目标/A/<子结构>，而不是把 A 剥掉、把子项散在
+            // 目标顶层（同时 A 自己只剩一个空目录，PRD 验收明确禁止）。
+            // 对文件成员而言锚点就是 目标/文件名，与既有拖文件行为一致。
+            let anchor = member_anchor(&destination, &inner);
             for (completed_index, (member_path, len)) in worklist.into_iter().enumerate() {
-                let relative = member_path
-                    .strip_prefix(&inner)
-                    .ok()
-                    .filter(|relative| !relative.as_os_str().is_empty())
-                    .map(Path::to_path_buf);
-                let target = match &relative {
-                    Some(relative) => destination.join(relative),
-                    None => destination.join(
-                        member_path
-                            .file_name()
-                            .map(PathBuf::from)
-                            .unwrap_or_else(|| PathBuf::from("member")),
-                    ),
-                };
+                let target = member_target(&anchor, &inner, &member_path);
                 let target = unique_destination(&target);
                 if let Some(parent) = target.parent() {
                     tokio::fs::create_dir_all(parent).await.map_err(|source| {
@@ -240,6 +232,32 @@ fn member_worklist(
     inner_member: &Path,
 ) -> Option<Vec<(PathBuf, u64)>> {
     tree.worklist_under(inner_member)
+}
+
+/// 成员提取的落地锚点：目标目录下保留被拖成员自身这一层名字。
+/// 拖/粘贴文件夹成员 A 时子孙要落成 目标/A/<子结构>，而不是把 A
+/// 剥掉、子项散在目标顶层；整包提取（source 即归档本身，成员路径
+/// 为空）的既有语义是把包内容直接解到目标目录，多套一层会破坏
+/// 粘贴 zip 的行为，因此空成员锚回 destination。
+fn member_anchor(destination: &Path, inner_member: &Path) -> PathBuf {
+    match inner_member.file_name() {
+        Some(name) => destination.join(name),
+        None => destination.to_path_buf(),
+    }
+}
+
+/// 工作清单条目的落地目标：子孙条目锚在 目标/<成员名>/ 下（保留
+/// 文件夹成员自身这层）；根条目 / 文件成员本身直接落锚点。
+fn member_target(anchor: &Path, inner_member: &Path, member_path: &Path) -> PathBuf {
+    let relative = member_path
+        .strip_prefix(inner_member)
+        .ok()
+        .filter(|relative| !relative.as_os_str().is_empty())
+        .map(Path::to_path_buf);
+    match relative {
+        Some(relative) => anchor.join(relative),
+        None => anchor.to_path_buf(),
+    }
 }
 
 /// 目标重名自动追加 ` (n)`：包内成员落地绝不覆盖既有内容。
@@ -525,6 +543,107 @@ async fn extract_member_with_seven_zip(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::archive_listing::ArchiveListingEntry;
+    use crate::archive_vfs::tree::ArchiveMemberTree;
+    use crate::FileKind;
+
+    fn member(path: &str, kind: FileKind, len: u64) -> ArchiveListingEntry {
+        ArchiveListingEntry {
+            path: path.to_owned(),
+            kind,
+            len,
+            modified: None,
+        }
+    }
+
+    /// 把工作清单映射为落地目标的测试辅助：直接复用生产纯函数。
+    fn worklist_targets(
+        tree: &ArchiveMemberTree,
+        destination: &Path,
+        inner: &Path,
+    ) -> Vec<PathBuf> {
+        let anchor = member_anchor(destination, inner);
+        member_worklist(tree, inner)
+            .unwrap()
+            .iter()
+            .map(|(member_path, _)| member_target(&anchor, inner, member_path))
+            .collect()
+    }
+
+    /// PRD 验收：拖/粘贴顶层文件夹成员必须保留该文件夹自身作为根，
+    /// 得到 目标/A/<子结构>，而不是把 A 剥掉、子项散在目标顶层。
+    #[test]
+    fn top_level_folder_member_keeps_itself_as_root() {
+        let tree = ArchiveMemberTree::build([
+            member("A/", FileKind::Directory, 0),
+            member("A/2026-09/x.jpg", FileKind::File, 3),
+            member("A/readme.txt", FileKind::File, 1),
+        ]);
+        let inner = Path::new("A");
+
+        let targets = worklist_targets(&tree, Path::new("/dest"), inner);
+
+        // worklist 按 BTreeMap 字典序遍历，比对前先排序消除顺序敏感。
+        let mut actual = targets.clone();
+        actual.sort();
+        assert_eq!(
+            actual,
+            vec![
+                PathBuf::from("/dest/A/2026-09/x.jpg"),
+                PathBuf::from("/dest/A/readme.txt"),
+            ]
+        );
+        // 目标顶层不允许出现 A 的子项散落（只有 A 自身这一层）。
+        assert!(targets
+            .iter()
+            .all(|target| target.starts_with("/dest/A")
+                && target.parent() != Some(Path::new("/dest"))));
+    }
+
+    /// PRD 验收：拖嵌套子文件夹 A/B 得到 目标/B/…，
+    /// 锚点取成员自身文件名 B，而不是整条内部路径 A/B。
+    #[test]
+    fn nested_folder_member_anchors_at_its_own_name() {
+        let tree = ArchiveMemberTree::build([
+            member("A/B/", FileKind::Directory, 0),
+            member("A/B/y.jpg", FileKind::File, 5),
+            member("A/B/sub/w.txt", FileKind::File, 2),
+        ]);
+        let inner = Path::new("A/B");
+
+        let targets = worklist_targets(&tree, Path::new("/dest"), inner);
+
+        let mut actual = targets;
+        actual.sort();
+        assert_eq!(
+            actual,
+            vec![
+                PathBuf::from("/dest/B/sub/w.txt"),
+                PathBuf::from("/dest/B/y.jpg"),
+            ]
+        );
+    }
+
+    /// PRD 验收：拖文件成员行为不变，仍直接落为 目标/文件名。
+    #[test]
+    fn file_member_lands_directly_under_its_name() {
+        let tree = ArchiveMemberTree::build([member("a.txt", FileKind::File, 4)]);
+        let inner = Path::new("a.txt");
+
+        let targets = worklist_targets(&tree, Path::new("/dest"), inner);
+
+        assert_eq!(targets, vec![PathBuf::from("/dest/a.txt")]);
+    }
+
+    /// 整包提取（source 即归档本身，成员路径为空）沿用既有语义：
+    /// 包内容直接解到目标目录，不额外套一层归档文件名的目录。
+    #[test]
+    fn whole_archive_extraction_anchors_at_destination_itself() {
+        assert_eq!(
+            member_anchor(Path::new("/dest"), Path::new("")),
+            PathBuf::from("/dest")
+        );
+    }
 
     /// zip 8.x 对加密条目无密码调用 by_name 会立即返回
     /// UnsupportedArchive(PASSWORD_REQUIRED);必须归为「需要密码」,

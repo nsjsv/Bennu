@@ -141,6 +141,18 @@ impl FileBrowser {
         if self.is_trash_view || paths.is_empty() {
             return WaylandFileDragRequest::Unavailable;
         }
+        // 包内成员是应用内虚拟路径,外部应用拿到的只是一串不存在的
+        // 文件名,拖出去必然失败。不把虚拟路径交给外部:返回
+        // Unavailable 让调用方回退应用内拖拽,窗口内松手仍走提取管线。
+        if paths.iter().any(|path| {
+            file_core::archive_path_identity(path) != file_core::ArchivePathIdentity::RealFile
+        }) {
+            tracing::debug!(
+                path_count = paths.len(),
+                "Wayland file drag skipped because a source is inside an archive"
+            );
+            return WaylandFileDragRequest::Unavailable;
+        }
         let Some(runtime) = &self.wayland_dnd else {
             tracing::debug!(
                 path_count = paths.len(),
@@ -296,5 +308,30 @@ mod tests {
         // 拖拽取消后(无手势):迟到结果同样无处落,不 panic。
         browser.cancel_file_drag_interaction();
         drop(browser.accept_wayland_drag_icon_ready(second_gesture, Ok(test_icon())));
+    }
+
+    #[test]
+    fn archive_member_paths_are_never_handed_to_native_drag() {
+        let mut browser = browser_with_wayland_runtime();
+        let directory = tempfile::tempdir().unwrap();
+        // 归档边界只需真实存在的归档文件,成员按路径形态判定。
+        let archive = directory.path().join("docs.zip");
+        std::fs::write(&archive, b"payload").unwrap();
+        let member = archive.join("photos/1.txt");
+
+        // 包内成员不发起原生交接:返回 Unavailable,调用方回退应用内
+        // 拖拽,窗口内落地仍走提取管线。
+        assert!(matches!(
+            browser.request_wayland_file_drag(vec![member]),
+            WaylandFileDragRequest::Unavailable
+        ));
+
+        // 真实路径不受影响,照常请求原生会话。
+        let real = directory.path().join("report.txt");
+        std::fs::write(&real, b"data").unwrap();
+        assert!(matches!(
+            browser.request_wayland_file_drag(vec![real]),
+            WaylandFileDragRequest::Requested(_)
+        ));
     }
 }

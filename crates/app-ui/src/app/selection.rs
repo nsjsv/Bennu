@@ -21,9 +21,13 @@ mod clipboard;
 // 高级新建文件夹复用同一收纳谓词，与「用选中项新建文件夹」同语义。
 pub(in crate::app) use clipboard::gather_sources_in_directory;
 #[cfg(test)]
+mod clipboard_tests;
+#[cfg(test)]
 mod column_gesture_tests;
 mod conflict;
 mod drag;
+#[cfg(test)]
+mod drag_tests;
 mod entry_actions;
 mod file_drop;
 mod file_drop_target;

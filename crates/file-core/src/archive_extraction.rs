@@ -9,6 +9,7 @@ use tokio::runtime::Handle;
 use tokio_util::sync::CancellationToken;
 use zip::result::ZipError;
 
+use crate::archive_listing::split_volume_hint;
 use crate::{ArchivePassword, FileError, FileOperationControls, SEVEN_ZIP_COMMAND_NAMES};
 
 const ARCHIVE_EXTRACTION_BUFFER_SIZE: usize = 1024 * 1024;
@@ -656,6 +657,12 @@ fn seven_zip_error(
         format!("7z exited with status {status}")
     } else {
         combined_output
+    };
+    // 分卷后续卷在这里只报裸的 Headers Error:与列表失败同一套文件名
+    // 启发式,补一句「请打开第一个卷」的提示。
+    let message = match split_volume_hint(&request.archive) {
+        Some(hint) => format!("{message}; {hint}"),
+        None => message,
     };
     FileError::Archive {
         path: request.archive.clone(),

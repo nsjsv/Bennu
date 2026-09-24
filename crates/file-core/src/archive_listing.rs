@@ -250,6 +250,12 @@ async fn read_seven_zip_members(
         } else {
             format!("could not list {format_label} archive with {command_name}: {stderr}")
         };
+        // 分卷后续卷在这里报 Headers Error:按文件名启发式补一句
+        // 「这是分卷的后续卷,请打开第一个卷」的提示。
+        let message = match split_volume_hint(path) {
+            Some(hint) => format!("{message}; {hint}"),
+            None => message,
+        };
         return Err(FileError::Archive {
             path: path.to_path_buf(),
             message,
@@ -347,6 +353,46 @@ fn archive_format_label(format: ArchiveExtractionFormat) -> &'static str {
     }
 }
 
+/// 分卷后续卷在 7z 眼里是残缺包,只报 Headers Error,报错信息对用户
+/// 没有指向性。列表与提取两处错误包装共用这个提示文案,拼接为
+/// "...; this is a continuation volume ..."。文案与 FileError 其余消息
+/// 同为英文。
+const SPLIT_VOLUME_CONTINUATION_HINT: &str =
+    "this is a continuation volume of a split archive, open the first volume (e.g. part1) instead";
+
+// ponytail: 文件名启发式,不解析 7z 报错语义——7z 对后续卷只给裸的
+// Headers Error,没有可判别的结构化输出,文件名形态是唯一可用信号。
+/// 新式分卷 `xxx.partN.rar`:N≥2 是后续卷,part1 与普通 `xxx.rar` 是
+/// 首卷/单卷。老式分卷首卷是 `.rar`,后续从 `.r00` 起按
+/// `.rNN/.sNN/.tNN/.uNN/.vNN` 两位数字递进,命中即后续卷。
+pub(crate) fn split_volume_hint(path: &Path) -> Option<&'static str> {
+    let file_name = path.file_name()?.to_string_lossy();
+    let lower = file_name.to_ascii_lowercase();
+
+    if let Some(stem) = lower.strip_suffix(".rar") {
+        let is_continuation = stem
+            .rsplit_once(".part")
+            .and_then(|(_, digits)| digits.parse::<u32>().ok())
+            .is_some_and(|number| number >= 2);
+        return is_continuation.then_some(SPLIT_VOLUME_CONTINUATION_HINT);
+    }
+
+    // 老式后缀恰为三段:单字母 r→v 加两位数字;其余(.zip/.txt/.r000)
+    // 都不是后续卷。
+    let (_, extension) = lower.rsplit_once('.')?;
+    let mut bytes = extension.bytes();
+    match (bytes.next(), bytes.next(), bytes.next(), bytes.next()) {
+        (Some(kind), Some(tens), Some(ones), None)
+            if matches!(kind, b'r' | b's' | b't' | b'u' | b'v')
+                && tens.is_ascii_digit()
+                && ones.is_ascii_digit() =>
+        {
+            Some(SPLIT_VOLUME_CONTINUATION_HINT)
+        }
+        _ => None,
+    }
+}
+
 fn open_archive_file(path: &Path) -> Result<File, FileError> {
     File::open(path).map_err(|source| FileError::Archive {
         path: path.to_path_buf(),
@@ -424,6 +470,41 @@ Attributes = A_ -rw-r--r--
         assert_eq!(members[1].kind, FileKind::File);
         assert_eq!(members[2].path, "docs\\guide.md");
         assert_eq!(members[2].kind, FileKind::File);
+    }
+
+    #[test]
+    fn split_volume_hint_flags_continuation_volumes_only() {
+        let hint = |name: &str| split_volume_hint(Path::new(name));
+
+        // 新式:part2 起是后续卷;part1 与普通 rar 不是。
+        assert_eq!(
+            hint("/tmp/movie.part2.rar"),
+            Some(SPLIT_VOLUME_CONTINUATION_HINT)
+        );
+        assert_eq!(
+            hint("/tmp/movie.part10.rar"),
+            Some(SPLIT_VOLUME_CONTINUATION_HINT)
+        );
+        assert_eq!(
+            hint("/tmp/MOVIE.PART3.RAR"),
+            Some(SPLIT_VOLUME_CONTINUATION_HINT)
+        );
+        assert_eq!(hint("/tmp/movie.part1.rar"), None);
+        assert_eq!(hint("/tmp/movie.rar"), None);
+
+        // 老式:首卷是 .rar,后续从 .r00 起按 r→v 五组两位数字递进。
+        assert_eq!(hint("/tmp/movie.r00"), Some(SPLIT_VOLUME_CONTINUATION_HINT));
+        assert_eq!(hint("/tmp/movie.s17"), Some(SPLIT_VOLUME_CONTINUATION_HINT));
+        assert_eq!(hint("/tmp/movie.v99"), Some(SPLIT_VOLUME_CONTINUATION_HINT));
+
+        // 非分卷文件名不提示。
+        assert_eq!(hint("/tmp/movie.zip"), None);
+        assert_eq!(hint("/tmp/movie.txt"), None);
+        assert_eq!(hint("/tmp/movie.r000"), None);
+        assert_eq!(hint("/tmp/movie.part2x.rar"), None);
+
+        // 无扩展名:早退返回 None,不 panic。
+        assert_eq!(hint("/tmp/noext"), None);
     }
 }
 

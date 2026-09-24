@@ -509,6 +509,8 @@ fn column_entry_row<'a>(
     let icon_tone = visual_state.icon_tone();
 
     let name: Element<'a, Message> = if pane.renaming == Some(&entry.path) {
+        // 行槽高固定 24px（基准档），不显式压缩输入框时 iced 默认字号 16
+        // 加默认 padding 5 会撑到 ~31px 溢出行槽，边框盖住文字。
         text_input(
             &crate::localization::translate_current("File name"),
             pane.rename_input,
@@ -517,6 +519,8 @@ fn column_entry_row<'a>(
         .on_input(Message::RenameInputChanged)
         .on_submit(Message::RenameSelected)
         .style(entry_text_input_style(modifier))
+        .padding([2, 4])
+        .size(geometry.text_size as u32)
         .width(Length::Fill)
         .into()
     } else {

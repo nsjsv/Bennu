@@ -346,6 +346,13 @@ pub enum StoredOperation {
         destination: StoredPath,
         password_required: bool,
     },
+    /// 包内成员提取是一次性动作,不可重启恢复;存储只保留事实记录,
+    /// 密码本体绝不落盘,只记是否需要密码(比照 ExtractArchive)。
+    ExtractArchiveMembers {
+        sources: Vec<StoredPath>,
+        destination: StoredPath,
+        password_required: bool,
+    },
     /// 格式转换任务;转换不可恢复,存储只保留历史展示所需的源与目标扩展名。
     Convert {
         sources: Vec<StoredPath>,
@@ -373,6 +380,7 @@ impl StoredOperation {
             Self::CreateSymbolicLinks { .. } => "create_symbolic_links",
             Self::CreateArchive { .. } => "create_archive",
             Self::ExtractArchive { .. } => "extract_archive",
+            Self::ExtractArchiveMembers { .. } => "extract_archive_members",
             Self::Convert { .. } => "convert",
         }
     }

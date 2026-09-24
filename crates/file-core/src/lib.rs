@@ -10,6 +10,7 @@ pub mod media;
 pub mod mount_table;
 pub mod ops;
 pub mod scan;
+pub mod seven_zip_password;
 pub mod sort;
 pub mod transfer_conflict;
 pub mod trash_bin;

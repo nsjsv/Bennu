@@ -400,7 +400,7 @@ fn move_drag_of_archive_members_extracts_into_target_directory() {
     assert_eq!(browser.operation_queue.tasks().len(), 1);
     assert!(matches!(
         &browser.operation_queue.tasks()[0].operation,
-        QueuedFileOperation::ExtractArchiveMembers { sources, destination: target }
+        QueuedFileOperation::ExtractArchiveMembers { sources, destination: target, password: None }
             if sources == &vec![member.clone()] && target == &destination
     ));
 }

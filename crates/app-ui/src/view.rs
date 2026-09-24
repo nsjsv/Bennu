@@ -4,6 +4,7 @@ mod advanced_new_folder;
 mod application_logs;
 mod archive_creation;
 mod archive_extraction;
+mod archive_member_password;
 mod auxiliary_window_layout;
 mod batch_rename;
 mod checksum;
@@ -95,6 +96,7 @@ use address_bar::address_bar;
 use advanced_new_folder::advanced_new_folder_panel;
 use archive_creation::archive_creation_panel;
 use archive_extraction::archive_extraction_panel;
+use archive_member_password::archive_member_password_panel;
 use batch_rename::batch_rename_panel;
 pub(super) use bennu_theme::icons::{icon_tone_style, themed_icon, IconTone};
 use checksum::checksum_panel;
@@ -265,6 +267,14 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
         floating_input = BrowserFloatingInput::Modal;
         floating.push(FloatingContent {
             element: archive_extraction_panel(archive_extraction),
+            placement: FloatingPlacement::Center,
+            captures_pointer: true,
+        });
+    } else if let Some(member_password) = &browser.archive_member_password {
+        // 与整包解压弹窗同一层级的模态:二者互斥,入口处已清理对方。
+        floating_input = BrowserFloatingInput::Modal;
+        floating.push(FloatingContent {
+            element: archive_member_password_panel(member_password),
             placement: FloatingPlacement::Center,
             captures_pointer: true,
         });

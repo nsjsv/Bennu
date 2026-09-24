@@ -2,11 +2,12 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
 use crate::archive_extraction::archive_extraction_format_for_path;
+use crate::seven_zip_password::seven_zip_password_error;
 use crate::{
     ArchiveExtractionFormat, ArchiveExtractionProgress, ArchivePassword, FileError,
     FileOperationControls, SEVEN_ZIP_COMMAND_NAMES,
@@ -297,12 +298,7 @@ fn extract_zip_member(
         Some(password) => archive_handle.by_name_decrypt(member, password.as_str().as_bytes()),
         None => archive_handle.by_name(member),
     };
-    let mut entry = opened.map_err(|source| match source {
-        zip::result::ZipError::InvalidPassword => FileError::ArchiveInvalidPassword {
-            path: archive.to_path_buf(),
-        },
-        source => zip_member_lookup_error(archive, member, &source),
-    })?;
+    let mut entry = opened.map_err(|source| zip_member_open_error(archive, member, &source))?;
     if entry.is_dir() {
         return Err(FileError::Archive {
             path: archive.to_path_buf(),
@@ -320,6 +316,30 @@ fn extract_zip_member(
         message: source.to_string(),
     })?;
     Ok(())
+}
+
+fn zip_member_open_error(
+    archive: &Path,
+    member: &str,
+    source: &zip::result::ZipError,
+) -> FileError {
+    match source {
+        // 密码错:by_name_decrypt 打开时即校验 ZipCrypto/AES 验证字节。
+        zip::result::ZipError::InvalidPassword => FileError::ArchiveInvalidPassword {
+            path: archive.to_path_buf(),
+        },
+        // zip 8.x 对加密条目无密码调用 by_name 会立即报这个错误
+        // (UnsupportedArchive(PASSWORD_REQUIRED)),直接归入需要密码,
+        // 不能落到「成员未找到」的普通包装里误导用户。
+        zip::result::ZipError::UnsupportedArchive(message)
+            if *message == zip::result::ZipError::PASSWORD_REQUIRED =>
+        {
+            FileError::ArchivePasswordRequired {
+                path: archive.to_path_buf(),
+            }
+        }
+        source => zip_member_lookup_error(archive, member, source),
+    }
 }
 
 fn zip_member_lookup_error(
@@ -436,6 +456,17 @@ async fn extract_member_with_seven_zip(
                 message: format!("{command_name} produced no stdout"),
             });
         };
+        // stderr 必须与 stdout 拷贝并发读尽:7z 往 stderr 写诊断的同时
+        // stdout 一直在流式输出,等 stdout 读完再收 stderr 会因管道写端
+        // 阻塞互相卡死。stdout 是载荷流不参与错误分类,诊断只看 stderr。
+        // 收尾放进独立任务,便于拷贝中断时先杀 7z 再等 stderr EOF。
+        let stderr_task = child.stderr.take().map(|mut stderr| {
+            tokio::spawn(async move {
+                let mut stderr_bytes = Vec::new();
+                let _ = stderr.read_to_end(&mut stderr_bytes).await;
+                stderr_bytes
+            })
+        });
         let mut output = tokio::fs::File::create(destination)
             .await
             .map_err(|source| FileError::CreateFile {
@@ -443,17 +474,41 @@ async fn extract_member_with_seven_zip(
                 source,
             })?;
         let copy_outcome = tokio::io::copy(&mut stdout, &mut output).await;
+        if copy_outcome.is_err() {
+            // stdout 拷贝中断(目标盘写满等)时 7z 会因 stdout 管道塞满而
+            // 永不退出,stderr 也就永不 EOF:必须杀掉子进程,下面的
+            // stderr 收尾任务才能结束,否则本函数在 await 上卡死。
+            let _ = child.start_kill();
+        }
         output.flush().await.ok();
-        copy_outcome.map_err(|source| FileError::Archive {
-            path: archive.to_path_buf(),
-            message: source.to_string(),
-        })?;
+        let stderr_bytes = match stderr_task {
+            Some(task) => task.await.unwrap_or_default(),
+            None => Vec::new(),
+        };
+        if let Err(source) = copy_outcome {
+            // 半成品目标文件同理必须清掉,不让重试触发 ` (2)` 改名。
+            let _ = tokio::fs::remove_file(destination).await;
+            return Err(FileError::Archive {
+                path: archive.to_path_buf(),
+                message: source.to_string(),
+            });
+        }
 
         let exit = child.wait().await.map_err(|source| FileError::Archive {
             path: archive.to_path_buf(),
             message: source.to_string(),
         })?;
         if !exit.success() {
+            // 目标文件是本次用 File::create 造出来的半成品(密码错误时
+            // 通常为空文件):留着会让重试触发 unique_destination 的
+            // ` (2)` 改名,必须清掉让重试沿用原名。只删本次失败新建的
+            // 目标,不触碰既有文件(既有重名早被 unique_destination 避开)。
+            let _ = tokio::fs::remove_file(destination).await;
+            let stderr_text = String::from_utf8_lossy(&stderr_bytes);
+            if let Some(error) = seven_zip_password_error(&stderr_text, password.is_some(), archive)
+            {
+                return Err(error);
+            }
             return Err(FileError::Archive {
                 path: archive.to_path_buf(),
                 message: format!("{command_name} exited with status {exit}"),
@@ -465,4 +520,43 @@ async fn extract_member_with_seven_zip(
     Err(FileError::Unsupported(
         "7z, 7zz or 7za command is required to extract this archive",
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// zip 8.x 对加密条目无密码调用 by_name 会立即返回
+    /// UnsupportedArchive(PASSWORD_REQUIRED);必须归为「需要密码」,
+    /// 不能落到「成员未找到」的普通包装里,否则上层弹不出密码框。
+    #[test]
+    fn zip_member_open_without_password_maps_to_password_required() {
+        let archive = PathBuf::from("/tmp/docs.zip");
+        let error = zip_member_open_error(
+            &archive,
+            "secret.txt",
+            &zip::result::ZipError::UnsupportedArchive(zip::result::ZipError::PASSWORD_REQUIRED),
+        );
+
+        assert!(matches!(
+            error,
+            FileError::ArchivePasswordRequired { path } if path == archive
+        ));
+    }
+
+    /// 密码错在 by_name_decrypt 打开时即被验证字节拦下,归为密码无效。
+    #[test]
+    fn zip_member_open_with_wrong_password_maps_to_invalid_password() {
+        let archive = PathBuf::from("/tmp/docs.zip");
+        let error = zip_member_open_error(
+            &archive,
+            "secret.txt",
+            &zip::result::ZipError::InvalidPassword,
+        );
+
+        assert!(matches!(
+            error,
+            FileError::ArchiveInvalidPassword { path } if path == archive
+        ));
+    }
 }

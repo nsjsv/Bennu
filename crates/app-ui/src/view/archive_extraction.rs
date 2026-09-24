@@ -63,24 +63,34 @@ pub(super) fn archive_extraction_panel(state: &ArchiveExtractionState) -> Elemen
 }
 
 fn archive_password_input(state: &ArchiveExtractionState) -> Element<'_, Message> {
+    archive_password_input_field(
+        state.password(),
+        state.is_waiting_for_password(),
+        |password| Message::ArchiveExtraction(ArchiveExtractionMessage::PasswordChanged(password)),
+        Message::ArchiveExtraction(ArchiveExtractionMessage::Submitted),
+    )
+}
+
+/// 整包解压与成员密码弹窗共享的密码输入框:同一套样式与提交行为,
+/// 消息由调用方闭包各自包装,避免两处弹窗各抄一份输入框。
+pub(super) fn archive_password_input_field(
+    draft: &ArchivePasswordDraft,
+    editable: bool,
+    on_changed: impl Fn(ArchivePasswordDraft) -> Message + 'static,
+    on_submitted: Message,
+) -> Element<'_, Message> {
     let mut password_input = text_input(
         &crate::localization::translate_current("Password"),
-        state.password().as_str(),
+        draft.as_str(),
     )
     .secure(true)
     .padding([6, 8])
     .size(14)
     .width(Length::Fill);
-    if state.is_waiting_for_password() {
+    if editable {
         password_input = password_input
-            .on_input(|password| {
-                Message::ArchiveExtraction(ArchiveExtractionMessage::PasswordChanged(
-                    ArchivePasswordDraft::new(password),
-                ))
-            })
-            .on_submit(Message::ArchiveExtraction(
-                ArchiveExtractionMessage::Submitted,
-            ));
+            .on_input(move |password| on_changed(ArchivePasswordDraft::new(password)))
+            .on_submit(on_submitted);
     }
 
     Column::new()

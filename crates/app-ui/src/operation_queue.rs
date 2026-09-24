@@ -129,9 +129,11 @@ pub(crate) enum QueuedFileOperation {
         request: ArchiveExtractionRequest,
     },
     /// 包内成员复制/拖出到真实目录:按成员提取落地,不覆盖既有内容。
+    /// 密码只存在内存里供本次重试使用,不参与持久化。
     ExtractArchiveMembers {
         sources: Vec<PathBuf>,
         destination: PathBuf,
+        password: Option<ArchivePassword>,
     },
     Convert {
         requests: Vec<ConversionRequest>,

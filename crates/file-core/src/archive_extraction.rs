@@ -10,6 +10,8 @@ use tokio_util::sync::CancellationToken;
 use zip::result::ZipError;
 
 use crate::archive_listing::split_volume_hint;
+// 密码错误分类收口在独立模块:与 archive_vfs::extract 的成员级提取共用。
+use crate::seven_zip_password::seven_zip_password_error;
 use crate::{ArchivePassword, FileError, FileOperationControls, SEVEN_ZIP_COMMAND_NAMES};
 
 const ARCHIVE_EXTRACTION_BUFFER_SIZE: usize = 1024 * 1024;
@@ -642,16 +644,12 @@ fn seven_zip_error(
     } else {
         format!("{stdout}\n{stderr}")
     };
-    let lower = combined_output.to_ascii_lowercase();
-    if lower.contains("password") || lower.contains("encrypted") {
-        if request.password.is_some() {
-            return FileError::ArchiveInvalidPassword {
-                path: request.archive.clone(),
-            };
-        }
-        return FileError::ArchivePasswordRequired {
-            path: request.archive.clone(),
-        };
+    if let Some(error) = seven_zip_password_error(
+        &combined_output,
+        request.password.is_some(),
+        &request.archive,
+    ) {
+        return error;
     }
     let message = if combined_output.is_empty() {
         format!("7z exited with status {status}")

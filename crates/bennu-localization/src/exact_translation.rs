@@ -419,6 +419,8 @@ pub(crate) fn translate(text: &str) -> Option<&'static str> {
         "No selected items" => Some("没有已选择的项目"),
         "Checking..." => Some("正在检查..."),
         "Extract" => Some("解压"),
+        // 成员密码弹窗 Open 重试在途的按钮文案。
+        "Opening..." => Some("正在打开..."),
         "Checking password..." => Some("正在检查密码..."),
         "Enter the archive password to continue." => Some("请输入归档密码以继续。"),
         "Checking archive..." => Some("正在检查归档..."),

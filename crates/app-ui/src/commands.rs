@@ -19,6 +19,7 @@ use iced::Task;
 
 use tokio_util::sync::CancellationToken;
 
+use crate::app::archive_member_password::ArchiveMemberPasswordAction;
 use crate::config;
 use crate::model::{
     AddressSuggestionRequest, BrowserPaneId, LoadedOperationStore, Message, PendingOperation,
@@ -39,7 +40,10 @@ pub(crate) use application_logs::application_logs_command;
 mod application_shutdown;
 pub(crate) use application_shutdown::commit_application_shutdown_command;
 mod archive_extraction;
-pub(crate) use archive_extraction::inspect_archive_extraction_command;
+pub(crate) use archive_extraction::{
+    inspect_archive_extraction_command, open_archive_member_with_password_command,
+    MemberOpenOutcome,
+};
 mod batch_rename_operation;
 mod bounded_child_output;
 mod browser_session;
@@ -220,7 +224,11 @@ pub(crate) fn open_file_command(
         let opened_path = path.clone();
         return Task::perform(
             async move {
-                let outcome = match file_core::materialize_archive_member_for_open(
+                // FileError 在此处分类:密码类失败转弹窗请求(不再落进
+                // OpenFileFinished 的字符串错误里,否则无法再识别);其余
+                // 错误照旧走原路径。首次物化不带密码,弹窗提交后才带密码
+                // 重试。
+                match file_core::materialize_archive_member_for_open(
                     &path,
                     None,
                     CancellationToken::new(),
@@ -228,15 +236,34 @@ pub(crate) fn open_file_command(
                 .await
                 {
                     Ok(materialized) => {
-                        open_path_with_terminal_emulator(materialized, terminal_emulator)
-                            .await
-                            .map_err(|error| error.to_string())
+                        let outcome =
+                            open_path_with_terminal_emulator(materialized, terminal_emulator)
+                                .await
+                                .map_err(|error| error.to_string());
+                        MemberOpenOutcome::Opened(outcome)
                     }
-                    Err(error) => Err(error.to_string()),
-                };
-                (opened_path, outcome)
+                    Err(file_core::FileError::ArchivePasswordRequired { .. }) => {
+                        MemberOpenOutcome::PasswordRequired {
+                            invalid_retry: false,
+                        }
+                    }
+                    Err(file_core::FileError::ArchiveInvalidPassword { .. }) => {
+                        MemberOpenOutcome::PasswordRequired {
+                            invalid_retry: true,
+                        }
+                    }
+                    Err(error) => MemberOpenOutcome::Opened(Err(error.to_string())),
+                }
             },
-            move |(opened_path, result)| Message::OpenFileFinished(opened_path, result),
+            move |outcome| match outcome {
+                MemberOpenOutcome::Opened(result) => Message::OpenFileFinished(opened_path, result),
+                MemberOpenOutcome::PasswordRequired { invalid_retry } => {
+                    Message::ArchiveMemberPasswordRequested {
+                        action: ArchiveMemberPasswordAction::Open { path: opened_path },
+                        invalid_retry,
+                    }
+                }
+            },
         );
     }
 

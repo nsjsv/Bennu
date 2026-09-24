@@ -3,6 +3,9 @@ mod application_logs;
 mod application_shutdown;
 pub(crate) mod archive_creation;
 pub(crate) mod archive_extraction;
+pub(crate) mod archive_member_password;
+#[cfg(test)]
+mod archive_member_password_tests;
 pub(crate) mod archive_password;
 mod batch_rename;
 pub(crate) mod checksum;
@@ -230,6 +233,7 @@ pub(crate) struct FileBrowser {
     pub(crate) convert: Option<ConvertState>,
     pub(crate) checksum: Option<ChecksumState>,
     pub(crate) archive_extraction: Option<ArchiveExtractionState>,
+    pub(crate) archive_member_password: Option<archive_member_password::ArchiveMemberPasswordState>,
     pub(crate) batch_rename: Option<BatchRenameState>,
     pub(crate) advanced_new_folder: Option<AdvancedNewFolderState>,
     /// 确认时选定的收尾动作(创建后进入/新标签进入),完成边界消费一次。
@@ -650,6 +654,7 @@ impl FileBrowser {
             convert: None,
             checksum: None,
             archive_extraction: None,
+            archive_member_password: None,
             batch_rename: None,
             advanced_new_folder: None,
             pending_advanced_new_folder_after: None,

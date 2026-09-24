@@ -429,6 +429,8 @@ impl FileBrowser {
             (!archive_sources.is_empty()).then(|| QueuedFileOperation::ExtractArchiveMembers {
                 sources: archive_sources,
                 destination: target_directory.clone(),
+                // 首次入队不带密码:密码错误分类后由弹窗通道补齐重试。
+                password: None,
             });
 
         let mode = intent.conflict_mode();

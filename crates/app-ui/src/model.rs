@@ -24,6 +24,9 @@ use iced::{event, mouse, window, Point, Theme};
 use crate::animated_image_preview::{AnimatedImageFrame, AnimatedImagePreview};
 use crate::app::archive_creation::ArchiveCreationMessage;
 use crate::app::archive_extraction::ArchiveExtractionMessage;
+use crate::app::archive_member_password::{
+    ArchiveMemberPasswordAction, ArchiveMemberPasswordMessage,
+};
 use crate::app::checksum::ChecksumMessage;
 use crate::app::convert::ConvertMessage;
 use crate::audio_preview::AudioPreviewRuntime;
@@ -557,6 +560,13 @@ pub(crate) enum Message {
     Convert(ConvertMessage),
     Checksum(ChecksumMessage),
     ArchiveExtraction(ArchiveExtractionMessage),
+    /// 成员密码弹窗的内部流转(输入/提交/Open 重试终态)。
+    ArchiveMemberPassword(ArchiveMemberPasswordMessage),
+    /// 成员提取队列失败/双击物化失败判定为密码问题:请求打开密码弹窗。
+    ArchiveMemberPasswordRequested {
+        action: ArchiveMemberPasswordAction,
+        invalid_retry: bool,
+    },
     BatchRename(BatchRenameMessage),
     AdvancedNewFolder(AdvancedNewFolderMessage),
     /// 本地文件传输:二维码下载会话、LocalSend 直推、接收确认与设置。

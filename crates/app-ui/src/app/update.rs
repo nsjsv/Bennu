@@ -699,6 +699,13 @@ impl FileBrowser {
             Message::Convert(message) => self.handle_convert_message(message),
             Message::Checksum(message) => self.handle_checksum_message(message),
             Message::ArchiveExtraction(message) => self.handle_archive_extraction_message(message),
+            Message::ArchiveMemberPassword(message) => {
+                self.handle_archive_member_password_message(message)
+            }
+            Message::ArchiveMemberPasswordRequested {
+                action,
+                invalid_retry,
+            } => self.request_archive_member_password(action, invalid_retry),
             Message::BatchRename(message) => self.handle_batch_rename_message(message),
             Message::Transfer(message) => self.handle_transfer_message(message),
             Message::FileContextMenuExpansionChanged(expansion) => {

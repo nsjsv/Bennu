@@ -456,6 +456,8 @@ impl FileBrowser {
                     QueuedFileOperation::ExtractArchiveMembers {
                         sources: archive_sources,
                         destination: paste_directory.clone(),
+                        // 首次入队不带密码:密码错误分类后由弹窗通道补齐重试。
+                        password: None,
                     }
                 });
                 let transfers =
@@ -472,6 +474,8 @@ impl FileBrowser {
                     QueuedFileOperation::ExtractArchiveMembers {
                         sources: archive_sources,
                         destination: paste_directory.clone(),
+                        // 首次入队不带密码:密码错误分类后由弹窗通道补齐重试。
+                        password: None,
                     }
                 });
                 let transfers = move_paste_transfers(&paste_directory, &real_sources);

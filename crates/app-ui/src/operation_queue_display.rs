@@ -97,6 +97,7 @@ impl QueuedFileOperation {
             Self::ExtractArchiveMembers {
                 sources,
                 destination,
+                ..
             } => path_lines_from_extracted_archive(
                 sources
                     .first()

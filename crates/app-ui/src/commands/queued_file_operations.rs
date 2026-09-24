@@ -261,9 +261,17 @@ async fn run_queued_file_operation(
         QueuedFileOperation::ExtractArchiveMembers {
             sources,
             destination,
+            password,
         } => {
-            run_queued_extract_archive_members(sources, destination, controls, task_id, output)
-                .await
+            run_queued_extract_archive_members(
+                sources,
+                destination,
+                password,
+                controls,
+                task_id,
+                output,
+            )
+            .await
         }
         QueuedFileOperation::Convert { requests } => {
             run_queued_convert(requests, controls, task_id, output).await

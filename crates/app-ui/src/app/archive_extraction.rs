@@ -201,5 +201,8 @@ impl FileBrowser {
         let _ = self.cancel_address_editing();
         self.renaming = None;
         self.clear_global_error();
+        // 成员密码弹窗与整包解压弹窗同为模态,二者互斥:任何一个打开时
+        // 都要把另一个清掉。成员密码弹窗入口也复用本方法完成同一清理。
+        self.archive_member_password = None;
     }
 }

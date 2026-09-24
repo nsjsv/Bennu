@@ -133,8 +133,20 @@ pub(super) fn queued_operation_to_stored(operation: &QueuedFileOperation) -> Sto
             destination: StoredPath::from_path(&request.destination),
             password_required: request.password.is_some(),
         },
-        // 成员提取是一次性动作,不参与重启恢复;落盘时记为空操作。
-        QueuedFileOperation::ExtractArchiveMembers { .. } => StoredOperation::EmptyTrash,
+        // 成员提取是一次性动作,不参与重启恢复(恢复侧仍返回 None);
+        // 落盘只记事实,密码本体绝不入库存,比照 ExtractArchive 只存布尔。
+        QueuedFileOperation::ExtractArchiveMembers {
+            sources,
+            destination,
+            password,
+        } => StoredOperation::ExtractArchiveMembers {
+            sources: sources
+                .iter()
+                .map(|path| StoredPath::from_path(path))
+                .collect(),
+            destination: StoredPath::from_path(destination),
+            password_required: password.is_some(),
+        },
         QueuedFileOperation::Convert { requests } => StoredOperation::Convert {
             sources: requests
                 .iter()

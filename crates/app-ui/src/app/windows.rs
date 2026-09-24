@@ -613,6 +613,11 @@ impl FileBrowser {
             return Task::none();
         }
 
+        if self.archive_member_password.is_some() {
+            self.archive_member_password = None;
+            return Task::none();
+        }
+
         if self.batch_rename.is_some() {
             self.batch_rename = None;
             return Task::none();

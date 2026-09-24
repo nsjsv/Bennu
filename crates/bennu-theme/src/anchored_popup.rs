@@ -14,6 +14,23 @@ where
     Element::new(AnchoredPopup {
         anchor: anchor.into(),
         popup,
+        expanding: false,
+    })
+}
+
+/// 向下展开的变体:弹层不受锚点宽度限制(内容自然定宽),右缘对齐锚点,
+/// 空间不足也不翻到上方(顶多被窗口下缘钳住)。适合按钮旁的动作菜单。
+pub fn anchored_popup_expanding<'a, Message>(
+    anchor: impl Into<Element<'a, Message>>,
+    popup: Option<Element<'a, Message>>,
+) -> Element<'a, Message>
+where
+    Message: 'a,
+{
+    Element::new(AnchoredPopup {
+        anchor: anchor.into(),
+        popup,
+        expanding: true,
     })
 }
 
@@ -23,6 +40,8 @@ where
 {
     anchor: Element<'a, Message, Theme, Renderer>,
     popup: Option<Element<'a, Message, Theme, Renderer>>,
+    /// 展开模式:弹层自然宽度、右对齐锚点、强制向下。
+    expanding: bool,
 }
 
 impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
@@ -167,6 +186,7 @@ where
                 popup,
                 state: popup_tree,
                 anchor_bounds,
+                expanding: self.expanding,
             })));
         }
 
@@ -181,6 +201,7 @@ where
     popup: &'b mut Element<'a, Message, Theme, Renderer>,
     state: &'b mut widget::Tree,
     anchor_bounds: Rectangle,
+    expanding: bool,
 }
 
 impl<'a, 'b, Message, Theme, Renderer> overlay::Overlay<Message, Theme, Renderer>
@@ -195,20 +216,30 @@ where
         let below_y = self.anchor_bounds.y + self.anchor_bounds.height + POPUP_GAP;
         let space_below = (bounds.height - below_y).max(0.0);
         let space_above = (self.anchor_bounds.y - POPUP_GAP).max(0.0);
-        let show_below = space_below >= space_above;
+        let show_below = if self.expanding {
+            true
+        } else {
+            space_below >= space_above
+        };
         let max_height = if show_below { space_below } else { space_above };
-        let limits = layout::Limits::new(Size::ZERO, Size::new(target_width, max_height))
-            .width(target_width);
+        let limits = if self.expanding {
+            // 展开模式:弹层自然宽度,只受窗口宽度约束。
+            layout::Limits::new(Size::ZERO, Size::new(bounds.width, max_height))
+        } else {
+            layout::Limits::new(Size::ZERO, Size::new(target_width, max_height)).width(target_width)
+        };
         let node = self
             .popup
             .as_widget_mut()
             .layout(self.state, renderer, &limits);
         let size = node.size();
-        let x = self
-            .anchor_bounds
-            .x
-            .max(0.0)
-            .min((bounds.width - size.width).max(0.0));
+        let desired_x = if self.expanding {
+            // 右缘对齐锚点右缘。
+            self.anchor_bounds.x + self.anchor_bounds.width - size.width
+        } else {
+            self.anchor_bounds.x
+        };
+        let x = desired_x.max(0.0).min((bounds.width - size.width).max(0.0));
         let desired_y = if show_below {
             below_y
         } else {

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Single source of truth for the release payload layout.
-# Shared by the Arch tar.gz job, the deb job and the rpm job so the
+# Shared by the Arch tar.xz job, the deb job and the rpm job so the
 # file list can never drift between package formats.
 #
 # Usage: install-payload.sh <payload-dir> <app-binary> <daemon-binary> <portal-binary>

@@ -33,7 +33,7 @@ optdepends=(
 )
 provides=('file-manager')
 conflicts=('file-manager')
-source_x86_64=("https://github.com/nsjsv/Bennu/releases/download/v${pkgver}/bennu-v${pkgver}-x86_64.tar.gz")
+source_x86_64=("https://github.com/nsjsv/Bennu/releases/download/v${pkgver}/bennu-v${pkgver}-x86_64.tar.xz")
 sha256sums_x86_64=('@SHA256_X86_64@')
 
 package() {

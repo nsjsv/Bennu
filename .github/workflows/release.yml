@@ -23,6 +23,7 @@ env:
   CARGO_BINARY: app-ui
   DAEMON_CARGO_PACKAGE: file-search
   DAEMON_BINARY: bennu-searchd
+  PORTAL_BINARY: bennu-portal
   SEARCH_SERVICE_UNIT: bennu-search.service
   ACTIVATION_SERVICE_FILE: io.github.nsjsv.Bennu.service
   ARCH: x86_64
@@ -69,7 +70,7 @@ jobs:
 
           semver="${version#v}"
           package_dir="${APP_NAME}-${version}-${ARCH}"
-          asset_name="${package_dir}.tar.gz"
+          asset_name="${package_dir}.tar.xz"
 
           {
             echo "version=${version}"
@@ -105,9 +106,12 @@ jobs:
           bash packaging/common/install-payload.sh \
             "${payload}" \
             "target/release/${CARGO_BINARY}" \
-            "target/release/${DAEMON_BINARY}"
+            "target/release/${DAEMON_BINARY}" \
+            "target/release/${PORTAL_BINARY}"
 
-          tar -C dist -czf "${asset_name}" "${package_dir}"
+          # xz -T0 多线程压缩：压缩率优于 gzip（76MB 二进制 20MB 级），
+          # 耗时由并行度抵消；makepkg 与 GNU tar 原生识别 .tar.xz。
+          XZ_OPT="-9 -T0" tar -C dist -cJf "${asset_name}" "${package_dir}"
           sha256sum "${asset_name}" > SHA256SUMS
           read -r tarball_sha256 _ < SHA256SUMS
           echo "sha256_x86_64=${tarball_sha256}" >> "${GITHUB_OUTPUT}"
@@ -275,7 +279,7 @@ jobs:
         run: |
           shopt -s nullglob
           assets=(
-            dist/bennu-v*.tar.gz
+            dist/bennu-v*.tar.xz
             dist/SHA256SUMS
             dist/bennu_*.deb
             dist/SHA256SUMS.deb

@@ -27,7 +27,7 @@ repository = ""
 blake3 = "1.8.5"
 chrono = "0.4.44"
 dirs = "5.0"
-iced = { version = "0.14", default-features = false, features = ["tokio", "advanced", "advanced-shaping", "canvas", "svg", "image", "x11", "wayland", "fira-sans", "wgpu", "tiny-skia"] }
+iced = { version = "0.14", default-features = false, features = ["tokio", "advanced", "advanced-shaping", "canvas", "svg", "image-without-codecs", "x11", "wayland", "fira-sans", "wgpu", "tiny-skia"] }
 image = { version = "0.25", default-features = false, features = ["avif-native", "bmp", "gif", "ico", "jpeg", "png", "tiff", "webp"] }
 lexopt = "0.3.1"
 md-5 = "0.10"

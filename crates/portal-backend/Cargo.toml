@@ -33,7 +33,7 @@ iced = { version = "0.14", default-features = false, features = [
     "advanced-shaping",
     "canvas",
     "svg",
-    "image",
+    "image-without-codecs",
     "x11",
     "wayland",
     "fira-sans",

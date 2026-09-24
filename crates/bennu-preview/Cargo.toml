@@ -20,11 +20,12 @@ iced = { version = "0.14", default-features = false, features = [
     "x11",
     "wayland",
     "tokio",
-    # image/svg 是 widget 层 feature（iced::widget::image/svg 模块与 Handle
-    # 类型），不是渲染器选择：迁移进来的预览模型持有 image::Handle /
-    # svg::Handle。workspace 的 iced 定义本就含这两个 feature，联合构建
-    # 时 feature 并集不变，宿主渲染器不受影响。
-    "image",
+    # image-without-codecs/svg 是 widget 层 feature（iced::widget::image/svg 模块
+    # 与 Handle 类型），不是渲染器选择：迁移进来的预览模型持有 image::Handle /
+    # svg::Handle。不能开 iced 的 image feature：它强制 image/default，把
+    # rav1e（AV1 编码器）、OpenEXR 等无用编解码器拉进最终二进制；解码器由
+    # workspace 的 image 声明（avif-native=dav1d 等）统一供给。
+    "image-without-codecs",
     "svg",
 ] }
 # 预览运行时依赖（版本与 app-ui 原声明一致，随模块一并下沉）：

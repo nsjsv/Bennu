@@ -540,10 +540,7 @@ fn icon_grid_entry<'a>(
         .on_right_press(Message::EntryRightClicked(pane.id, entry.path.clone()))
         .interaction(iced::mouse::Interaction::Pointer);
     let area = if is_expandable {
-        area.on_middle_press(Message::OpenDirectoryFromMiddleClick(
-            pane.id,
-            entry.path.clone(),
-        ))
+        area.on_middle_press(crate::model::entry_middle_press_message(pane.id, entry))
     } else {
         area
     };

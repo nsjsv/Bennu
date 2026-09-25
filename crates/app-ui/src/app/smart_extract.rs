@@ -110,6 +110,37 @@ impl FileBrowser {
         )
     }
 
+    /// 中键点击压缩包条目的解压入口：与右键智能解压同一套入口契约
+    /// （先清右键菜单、同一守卫），随后走同一条单根判定流，只是来源是
+    /// 单条目而不是选中集合——不清选中集，中键解压不改变现有选择。
+    /// 被点击 pane 的激活在 update 分支完成，守卫因此按点击 pane 判定。
+    pub(super) fn extract_archive_from_middle_click(
+        &mut self,
+        archive: PathBuf,
+    ) -> iced::Task<Message> {
+        self.context_menu = None;
+        if self.is_trash_view || self.current_directory_is_inside_archive() {
+            return iced::Task::none();
+        }
+        // 视图入口按 kind 路由，扩展名判定在状态边界兜底：非压缩包
+        // 路径没有解压语义，静默吞掉而不是带着错误请求走完后续流。
+        if !file_core::is_supported_archive_path(&archive) {
+            return iced::Task::none();
+        }
+        iced::Task::perform(
+            async move {
+                let single_root = file_core::single_root_member_name(&archive)
+                    .await
+                    .map_err(|error| error.to_string());
+                (archive, single_root)
+            },
+            move |(archive, single_root)| Message::SmartExtractDestinationResolved {
+                archive,
+                single_root,
+            },
+        )
+    }
+
     /// 智能解压判定回流：按单根/多根计算目的地后启动既有解压流。
     pub(super) fn accept_smart_extract_destination(
         &mut self,
@@ -179,6 +210,7 @@ impl FileBrowser {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::BrowserPaneId;
 
     fn no_existing(_: &Path) -> bool {
         false
@@ -217,5 +249,70 @@ mod tests {
         let destination =
             archive_folder_destination(Path::new("/home/u/docs/photos.zip"), no_existing);
         assert_eq!(destination, PathBuf::from("/home/u/docs/photos"));
+    }
+
+    fn browser() -> FileBrowser {
+        FileBrowser::new(crate::config::default_user_config()).0
+    }
+
+    #[test]
+    fn extract_archive_from_middle_click_noops_in_trash_view() {
+        let mut browser = browser();
+        browser.is_trash_view = true;
+
+        drop(browser.extract_archive_from_middle_click(PathBuf::from("/workspace/bundle.zip")));
+
+        // 与右键智能解压同规：回收站视图里中键解压不成立，无动作；
+        // 菜单清空与守卫判定同属入口契约，守卫拒绝时也已生效。
+        assert!(browser.archive_extraction.is_none());
+        assert!(browser.context_menu.is_none());
+    }
+
+    #[test]
+    fn extract_archive_from_middle_click_noops_inside_archive() {
+        let mut browser = browser();
+        // 把当前目录指到压缩包路径上即可让 archive_path_identity 判定
+        // 进入包内/包根语义，无需真实文件存在。
+        browser.current_dir = PathBuf::from("/workspace/bundle.zip");
+
+        drop(browser.extract_archive_from_middle_click(PathBuf::from("/workspace/bundle.zip")));
+
+        // 包内只读：解压目的地落在虚拟路径上没有意义，无动作。
+        assert!(browser.archive_extraction.is_none());
+    }
+
+    #[test]
+    fn extract_archive_from_middle_click_noops_for_non_archive_path() {
+        let mut browser = browser();
+
+        drop(browser.extract_archive_from_middle_click(PathBuf::from("/workspace/notes.txt")));
+
+        // 视图层按 kind 路由后，状态边界仍按扩展名兜底：非压缩包
+        // 路径没有解压语义，不得进入 inspect 流。
+        assert!(browser.archive_extraction.is_none());
+    }
+
+    #[test]
+    fn archive_middle_press_activates_clicked_pane_before_guard() {
+        let mut browser = browser();
+        // Ctrl+中键先造出双栏布局，激活态落在新建的 SECOND pane。
+        browser.keyboard_modifiers = iced::keyboard::Modifiers::CTRL;
+        drop(browser.update(Message::OpenDirectoryFromMiddleClick(
+            BrowserPaneId::PRIMARY,
+            PathBuf::from("/workspace/project"),
+        )));
+        assert!(matches!(
+            browser.pane_layout,
+            crate::model::BrowserPaneLayout::Split { .. }
+        ));
+
+        drop(browser.update(Message::ArchiveMiddlePressed(
+            BrowserPaneId::PRIMARY,
+            PathBuf::from("/workspace/bundle.zip"),
+        )));
+
+        // 守卫读 FileBrowser 级状态，必须先切回被点击的 PRIMARY 才判定；
+        // 否则双栏下会用另一栏的回收站/包内上下文误拒或误放行。
+        assert_eq!(browser.active_pane_id(), BrowserPaneId::PRIMARY);
     }
 }

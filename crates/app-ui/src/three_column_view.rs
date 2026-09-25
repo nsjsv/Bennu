@@ -576,10 +576,7 @@ fn column_entry_row<'a>(
         .interaction(iced::mouse::Interaction::Pointer);
 
     let row_area = if browser.entry_acts_as_directory(&entry.path) && !pane.is_trash_view {
-        row_area.on_middle_press(Message::OpenDirectoryFromMiddleClick(
-            pane.id,
-            entry.path.clone(),
-        ))
+        row_area.on_middle_press(crate::model::entry_middle_press_message(pane.id, entry))
     } else {
         row_area
     };

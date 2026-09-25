@@ -587,10 +587,7 @@ fn list_entry_row<'a>(
         .interaction(iced::mouse::Interaction::Pointer);
 
     let row_area = if entry.expands_as_directory() && !pane.is_trash_view {
-        row_area.on_middle_press(Message::OpenDirectoryFromMiddleClick(
-            pane.id,
-            entry.path.clone(),
-        ))
+        row_area.on_middle_press(crate::model::entry_middle_press_message(pane.id, entry))
     } else {
         row_area
     };

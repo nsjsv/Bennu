@@ -1162,6 +1162,13 @@ impl FileBrowser {
                     self.open_directory_from_middle_click(path),
                 ])
             }
+            Message::ArchiveMiddlePressed(pane_id, path) => {
+                // 智能解压守卫读 FileBrowser 级状态（回收站/包内），该状态
+                // 跟随激活 pane；先激活被点击 pane，守卫才按真实点击上下文
+                // 判定，与右键 EntryRightClicked 的入口契约一致。
+                self.activate_pane(pane_id);
+                self.extract_archive_from_middle_click(path)
+            }
             Message::OpenTrashInNewTab(pane_id) => {
                 self.activate_pane(pane_id);
                 Task::batch([self.commit_rename_if_active(), self.open_trash_in_new_tab()])

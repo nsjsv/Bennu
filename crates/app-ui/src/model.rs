@@ -11,7 +11,7 @@ use desktop_linux::{
 use file_core::FileOperationVerification;
 use file_core::{
     DirectoryDiscovery, DirectoryDiscoveryBatch, DirectoryEntry, DirectoryMetadataResolution,
-    TrashRestoreEntry, TrashScan,
+    FileKind, TrashRestoreEntry, TrashScan,
 };
 use file_operation_store::TaskQueueStore;
 use file_search::{
@@ -812,6 +812,12 @@ pub(crate) enum Message {
     IconGridScrolled(BrowserPaneId, f32, iced::Rectangle),
     ColumnResizeStarted(BrowserPaneId, usize),
     OpenDirectoryFromMiddleClick(BrowserPaneId, PathBuf),
+    /// 中键点击压缩包条目：直接按右键「智能解压」规则解压，替代旧的开
+    /// 新标签页浏览——压缩包对中键而言是待解压的文件而不是可下钻目录。
+    /// 携带 pane id 是因为智能解压守卫读 FileBrowser 级状态（回收站/包
+    /// 内），该状态跟随激活 pane；update 分支先激活被点击 pane 再解压，
+    /// 守卫才能按真实点击上下文判定，与右键 EntryRightClicked 同一契约。
+    ArchiveMiddlePressed(BrowserPaneId, PathBuf),
     OpenTrashInNewTab(BrowserPaneId),
     TabPressed(BrowserPaneId, usize),
     TabCloseRequested(BrowserPaneId, usize),
@@ -896,6 +902,24 @@ pub(crate) enum Message {
     TransferConflictApplyToAllToggled,
     TransferConflictCancelRequested,
 }
+
+/// 条目中键按压的消息路由契约：真实目录沿用「开新标签/分屏」；其余
+/// 条目（入口 gate 已保证是受支持压缩包）改为直接智能解压。按 kind
+/// 而非扩展名判定——.zip 后缀的真实目录必须继续按目录处理，目录语义
+/// 优先于压缩包扩展名。
+pub(crate) fn entry_middle_press_message(
+    pane_id: BrowserPaneId,
+    entry: &DirectoryEntry,
+) -> Message {
+    if entry.kind == FileKind::Directory {
+        Message::OpenDirectoryFromMiddleClick(pane_id, entry.path.clone())
+    } else {
+        Message::ArchiveMiddlePressed(pane_id, entry.path.clone())
+    }
+}
+
+#[cfg(test)]
+mod middle_press_routing_tests;
 
 // 迁移期机械映射：Message::Preview(pm) 在 update 入口解包后经本函数
 // 转发到既有散装变体的处理分支（零行为变化）；PreviewEngine 状态机组

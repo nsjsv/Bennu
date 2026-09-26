@@ -20,3 +20,9 @@ wl-clipboard-rs.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+
+# 主程序包是整个 workspace 发版的“代表包”：唯一的 tag 在这里打，
+# 其余 crate 的 tag 在根 Cargo.toml [workspace.metadata.release] 里关闭。
+[package.metadata.release]
+tag = true
+tag-name = "v{{version}}"

@@ -1,6 +1,6 @@
 [package]
 name = "display-renderer"
-version = "0.3.5"
+version.workspace = true
 edition = "2021"
 
 # 独立于 desktop-linux 的轻量 crate：portal-backend 与 app-ui 共用的显示

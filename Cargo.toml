@@ -23,6 +23,17 @@ edition = "2021"
 license = "GPL-3.0-or-later"
 repository = ""
 
+# 发版用 cargo-release（见 AGENTS.md 发版流程）：默认 dry-run，--execute 后
+# 改 workspace 版本、同步 Cargo.lock、生成 release commit、打轻量 tag。
+# 不自动 push，由人工 git push --follow-tags 触发 Release CI。
+[workspace.metadata.release]
+publish = false
+push = false
+consolidate-commits = true
+tag = false                                 # 默认每个子 crate 一个 tag（name-vX.Y.Z），关闭
+pre-release-commit-message = "chore(release): prepare v{{version}}"
+tag-message = ""
+
 [workspace.dependencies]
 blake3 = "1.8.5"
 chrono = "0.4.44"

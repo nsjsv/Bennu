@@ -486,8 +486,7 @@ async fn write_zip_stream(
     items: &[(String, QrSource)],
     shared: &Arc<QrShared>,
 ) -> std::io::Result<()> {
-    let zip_error =
-        |error: async_zip::error::ZipError| std::io::Error::new(std::io::ErrorKind::Other, error);
+    let zip_error = |error: async_zip::error::ZipError| std::io::Error::other(error);
     let mut writer = async_zip::tokio::write::ZipFileWriter::with_tokio(sink);
     for (prefix, source) in items {
         match source {

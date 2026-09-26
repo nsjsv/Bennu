@@ -221,6 +221,9 @@ async fn prepare_items(items: Vec<PathBuf>) -> Result<Vec<PreparedFile>, LocalSe
     Ok(prepared)
 }
 
+// 九个参数各自来自会话状态、单文件 prepare 结果与进度通道的不同来源，
+// 且调用点只有一个；为迎合 lint 聚合成参数结构只会多一层无意义的中转映射。
+#[allow(clippy::too_many_arguments)]
 async fn upload_one(
     client: &reqwest::Client,
     base: &str,
@@ -298,7 +301,7 @@ async fn zip_directory_to_memory(dir: &Path, top_level: &str) -> Result<Vec<u8>,
     fn zip_error(path: PathBuf, error: async_zip::error::ZipError) -> LocalSendError {
         LocalSendError::Io {
             path: Some(path),
-            source: std::io::Error::new(std::io::ErrorKind::Other, error),
+            source: std::io::Error::other(error),
         }
     }
     let mut buffer = Vec::new();

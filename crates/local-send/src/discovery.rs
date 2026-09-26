@@ -278,7 +278,7 @@ async fn run_listener(
             event = "localsend_multicast_join_failed",
             "join multicast failed"
         );
-        let _ = events.send(ServiceEvent::ServiceError(format!("加入组播组失败")));
+        let _ = events.send(ServiceEvent::ServiceError("加入组播组失败".to_string()));
         return;
     }
 

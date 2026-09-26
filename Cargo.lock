@@ -146,7 +146,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "app-ui"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "alacritty_terminal",
  "ashpd",
@@ -559,11 +559,11 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "bennu-localization"
-version = "0.3.5"
+version = "0.3.6"
 
 [[package]]
 name = "bennu-preview"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "bennu-localization",
  "bennu-subprocess",
@@ -593,7 +593,7 @@ dependencies = [
 
 [[package]]
 name = "bennu-sidebar"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "bennu-theme",
  "desktop-linux",
@@ -603,14 +603,14 @@ dependencies = [
 
 [[package]]
 name = "bennu-subprocess"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "tokio",
 ]
 
 [[package]]
 name = "bennu-theme"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "file-core",
  "file-operation-store",
@@ -1443,7 +1443,7 @@ dependencies = [
 
 [[package]]
 name = "desktop-linux"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "display-renderer",
  "gio",
@@ -1522,7 +1522,7 @@ dependencies = [
 
 [[package]]
 name = "display-renderer"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "tempfile",
 ]
@@ -1752,7 +1752,7 @@ dependencies = [
 
 [[package]]
 name = "file-core"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "blake3",
  "exacl",
@@ -1781,7 +1781,7 @@ dependencies = [
 
 [[package]]
 name = "file-operation-store"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "rusqlite",
  "rustix 1.1.4",
@@ -1792,7 +1792,7 @@ dependencies = [
 
 [[package]]
 name = "file-search"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "dirs",
  "file-core",
@@ -3343,7 +3343,7 @@ dependencies = [
 
 [[package]]
 name = "local-send"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "async_zip",
  "axum",
@@ -4489,7 +4489,7 @@ dependencies = [
 
 [[package]]
 name = "portal-backend"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "bennu-preview",
  "bennu-sidebar",
@@ -5948,7 +5948,7 @@ dependencies = [
 
 [[package]]
 name = "thumbnails"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "blake3",
  "file-core",

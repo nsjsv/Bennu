@@ -19,19 +19,6 @@ pub(super) struct TransferSourceObject {
     pub(super) metadata: std::fs::Metadata,
 }
 
-impl TransferSourceObject {
-    pub(super) fn is_directory(&self) -> bool {
-        matches!(self.kind, TransferSourceKind::Directory)
-    }
-
-    pub(super) fn progress_bytes_total(&self) -> u64 {
-        match self.kind {
-            TransferSourceKind::RegularFile | TransferSourceKind::Directory => self.metadata.len(),
-            TransferSourceKind::SymbolicLink { .. } => 0,
-        }
-    }
-}
-
 pub(super) async fn inspect_transfer_source(
     path: &Path,
 ) -> Result<TransferSourceObject, FileError> {

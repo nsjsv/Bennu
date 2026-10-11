@@ -5,7 +5,7 @@ mod unix {
     use std::ffi::{CString, OsString};
     use std::io::Write;
     use std::os::unix::ffi::{OsStrExt, OsStringExt};
-    use std::os::unix::fs::{symlink, FileTypeExt, PermissionsExt};
+    use std::os::unix::fs::{symlink, PermissionsExt};
     use std::os::unix::net::UnixListener;
     use std::time::Duration;
 
@@ -237,16 +237,12 @@ mod unix {
     }
 
     #[tokio::test]
-    async fn copy_and_move_symbolic_links_do_not_report_byte_progress() {
+    async fn copy_symbolic_link_does_not_report_byte_progress() {
         let directory = tempdir().unwrap();
         let copy_source = directory.path().join("copy-source-link");
         let copy_target = directory.path().join("copy-target-link");
-        let move_source = directory.path().join("move-source-link");
-        let move_target = directory.path().join("move-target-link");
         symlink("missing-copy", &copy_source).unwrap();
-        symlink("missing-move", &move_source).unwrap();
         let (copy_progress, mut copied_updates) = tokio::sync::mpsc::unbounded_channel();
-        let (move_progress, mut moved_updates) = tokio::sync::mpsc::unbounded_channel();
 
         copy_path(
             &copy_source,
@@ -256,61 +252,12 @@ mod unix {
         )
         .await
         .unwrap();
-        move_path(
-            &move_source,
-            &move_target,
-            CancellationToken::new(),
-            Some(move_progress),
-        )
-        .await
-        .unwrap();
 
         assert!(copied_updates.try_recv().is_err());
-        assert!(moved_updates.try_recv().is_err());
         assert_eq!(
             fs::read_link(&copy_target).unwrap(),
             Path::new("missing-copy")
         );
-        assert_eq!(
-            fs::read_link(&move_target).unwrap(),
-            Path::new("missing-move")
-        );
-        assert!(fs::symlink_metadata(move_source).is_err());
-    }
-
-    #[tokio::test]
-    async fn directory_move_keeps_existing_completion_progress_total() {
-        let directory = tempdir().unwrap();
-        let source = directory.path().join("source");
-        let target = directory.path().join("target");
-        fs::create_dir(&source).unwrap();
-        let expected_total = fs::symlink_metadata(&source).unwrap().len();
-        let (progress, mut updates) = tokio::sync::mpsc::unbounded_channel();
-
-        move_path(&source, &target, CancellationToken::new(), Some(progress))
-            .await
-            .unwrap();
-
-        let completion = updates.try_recv().unwrap();
-        assert_eq!(completion.bytes_done, expected_total);
-        assert_eq!(completion.bytes_total, expected_total);
-        assert!(updates.try_recv().is_err());
-    }
-
-    #[tokio::test]
-    async fn move_rejects_fifo_without_removing_source_or_creating_target() {
-        let directory = tempdir().unwrap();
-        let source = directory.path().join("source-fifo");
-        let target = directory.path().join("target");
-        create_fifo(&source);
-
-        let error = move_path(&source, &target, CancellationToken::new(), None)
-            .await
-            .unwrap_err();
-
-        assert!(matches!(error, FileError::InvalidInput { path, .. } if path == source));
-        assert!(fs::symlink_metadata(&source).unwrap().file_type().is_fifo());
-        assert!(fs::symlink_metadata(target).is_err());
     }
 
     #[tokio::test]

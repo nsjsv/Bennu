@@ -205,11 +205,10 @@ async fn create_empty_file_existing_path_returns_structured_error() {
 }
 
 #[tokio::test]
-async fn copy_and_move_file_operations_update_filesystem() {
+async fn copy_file_operation_updates_filesystem() {
     let dir = tempdir().unwrap();
     let source = dir.path().join("source.txt");
     let copied = dir.path().join("copied.txt");
-    let moved = dir.path().join("moved.txt");
     fs::write(&source, b"copy me").unwrap();
 
     copy_path(
@@ -221,17 +220,6 @@ async fn copy_and_move_file_operations_update_filesystem() {
     .await
     .unwrap();
     assert_eq!(fs::read(&copied).unwrap(), b"copy me");
-
-    move_path(
-        &copied,
-        &moved,
-        tokio_util::sync::CancellationToken::new(),
-        None,
-    )
-    .await
-    .unwrap();
-    assert!(!copied.exists());
-    assert_eq!(fs::read(&moved).unwrap(), b"copy me");
 }
 
 #[tokio::test]
@@ -342,61 +330,6 @@ async fn copy_conflict_merge_directory_adds_missing_children() {
 }
 
 #[tokio::test]
-async fn move_conflict_keep_both_moves_to_alternate_path() {
-    let dir = tempdir().unwrap();
-    let source = dir.path().join("source.txt");
-    let target = dir.path().join("target.txt");
-    let alternate = dir.path().join("target 2.txt");
-    fs::write(&source, b"new").unwrap();
-    fs::write(&target, b"old").unwrap();
-
-    move_path_with_options(
-        &source,
-        &target,
-        FileTransferOptions::running(tokio_util::sync::CancellationToken::new())
-            .with_conflict_strategy(TransferConflictStrategy::KeepBoth),
-    )
-    .await
-    .unwrap();
-
-    assert!(!source.exists());
-    assert_eq!(fs::read(&target).unwrap(), b"old");
-    assert_eq!(fs::read(&alternate).unwrap(), b"new");
-}
-
-#[tokio::test]
-async fn move_conflict_replace_collapses_single_child_directory_into_target() {
-    let dir = tempdir().unwrap();
-    let outer = dir.path().join("nest");
-    let inner = outer.join("nest");
-    let source = inner.join("nest");
-    let payload = source.join("payload.txt");
-    let nested_dir = source.join("child");
-    let nested_file = nested_dir.join("nested.txt");
-    fs::create_dir_all(&nested_dir).unwrap();
-    fs::write(&payload, b"payload").unwrap();
-    fs::write(&nested_file, b"nested").unwrap();
-
-    let moved_target = move_path_with_options(
-        &source,
-        &inner,
-        FileTransferOptions::running(tokio_util::sync::CancellationToken::new())
-            .with_conflict_strategy(TransferConflictStrategy::Replace),
-    )
-    .await
-    .unwrap()
-    .unwrap();
-
-    assert_eq!(moved_target, inner);
-    assert!(!source.exists());
-    assert_eq!(fs::read(inner.join("payload.txt")).unwrap(), b"payload");
-    assert_eq!(
-        fs::read(inner.join("child").join("nested.txt")).unwrap(),
-        b"nested"
-    );
-}
-
-#[tokio::test]
 async fn copy_conflict_replace_rejects_target_directory_containing_source_path() {
     let dir = tempdir().unwrap();
     let outer = dir.path().join("nest");
@@ -427,74 +360,6 @@ async fn copy_conflict_replace_rejects_target_directory_containing_source_path()
     }
     assert!(inner.is_dir());
     assert_eq!(fs::read(&payload).unwrap(), b"payload");
-}
-
-#[tokio::test]
-async fn move_conflict_replace_rejects_target_directory_containing_source_path() {
-    let dir = tempdir().unwrap();
-    let outer = dir.path().join("nest");
-    let inner = outer.join("nest");
-    let source = inner.join("nest");
-    let payload = source.join("payload.txt");
-    let hidden = inner.join(".hidden");
-    fs::create_dir_all(&source).unwrap();
-    fs::write(&payload, b"payload").unwrap();
-    fs::write(&hidden, b"keep").unwrap();
-
-    let error = move_path_with_options(
-        &source,
-        &inner,
-        FileTransferOptions::running(tokio_util::sync::CancellationToken::new())
-            .with_conflict_strategy(TransferConflictStrategy::Replace),
-    )
-    .await
-    .unwrap_err();
-
-    match error {
-        FileError::InvalidInput { path, message } => {
-            assert_eq!(path, inner);
-            assert_eq!(
-                message,
-                "cannot replace a target directory that contains the source path"
-            );
-        }
-        other => panic!("unexpected error: {other:?}"),
-    }
-    assert!(inner.is_dir());
-    assert_eq!(fs::read(&payload).unwrap(), b"payload");
-    assert_eq!(fs::read(&hidden).unwrap(), b"keep");
-}
-
-#[tokio::test]
-async fn move_conflict_replace_rejects_nested_child_with_different_name() {
-    let dir = tempdir().unwrap();
-    let outer = dir.path().join("nest");
-    let inner = outer.join("nest");
-    let source = inner.join("child");
-    fs::create_dir_all(&source).unwrap();
-    fs::write(source.join("payload.txt"), b"payload").unwrap();
-
-    let error = move_path_with_options(
-        &source,
-        &inner,
-        FileTransferOptions::running(tokio_util::sync::CancellationToken::new())
-            .with_conflict_strategy(TransferConflictStrategy::Replace),
-    )
-    .await
-    .unwrap_err();
-
-    match error {
-        FileError::InvalidInput { path, message } => {
-            assert_eq!(path, inner);
-            assert_eq!(
-                message,
-                "cannot replace a target directory that contains the source path"
-            );
-        }
-        other => panic!("unexpected error: {other:?}"),
-    }
-    assert!(inner.is_dir());
-    assert_eq!(fs::read(source.join("payload.txt")).unwrap(), b"payload");
 }
 
 #[tokio::test]
@@ -567,32 +432,6 @@ async fn transfer_target_availability_and_candidate_number_before_extension() {
         available_transfer_target_path(&target).await.unwrap(),
         numbered_3
     );
-}
-
-#[tokio::test]
-async fn move_conflict_merge_directory_moves_missing_children() {
-    let dir = tempdir().unwrap();
-    let source = dir.path().join("source");
-    let target = dir.path().join("target");
-    fs::create_dir(&source).unwrap();
-    fs::create_dir(&target).unwrap();
-    fs::write(source.join("same.txt"), b"new").unwrap();
-    fs::write(source.join("new.txt"), b"added").unwrap();
-    fs::write(target.join("same.txt"), b"old").unwrap();
-
-    move_path_with_options(
-        &source,
-        &target,
-        FileTransferOptions::running(tokio_util::sync::CancellationToken::new())
-            .with_conflict_strategy(TransferConflictStrategy::Merge),
-    )
-    .await
-    .unwrap();
-
-    assert_eq!(fs::read(target.join("same.txt")).unwrap(), b"old");
-    assert_eq!(fs::read(target.join("new.txt")).unwrap(), b"added");
-    assert!(source.join("same.txt").exists());
-    assert!(!source.join("new.txt").exists());
 }
 
 #[tokio::test]

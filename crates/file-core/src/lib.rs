@@ -74,7 +74,8 @@ pub use ops::{
     SourceManifestEntry, SourceRetirementPlan, StagedSourceLocation, StagingTransfer,
     TransferCheckpoint, TransferCheckpointSwap, TransferConflictStrategy, TransferExecutionKind,
     TransferFailureIntent, TransferJournal, TransferJournalError, TransferJournalFuture,
-    TransferJournalMutation, TransferJournalRecord, TransferWorkKey, VideoTargetFormat,
+    TransferJournalMutation, TransferJournalRecord, TransferWorkKey, UnrestoredBatchRename,
+    VideoTargetFormat,
 };
 pub use scan::{
     discover_directory_with_progress, is_hidden_name, scan_directory, scan_directory_with_progress,

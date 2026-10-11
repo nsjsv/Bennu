@@ -1,3 +1,5 @@
+use crate::UiLanguage;
+
 pub(super) fn translate(text: &str) -> Option<String> {
     let exact = match text {
         "Batch Rename" => "批量重命名",
@@ -83,4 +85,40 @@ pub(super) fn translate(text: &str) -> Option<String> {
         _ => return None,
     };
     Some(exact.to_owned())
+}
+
+/// 批量重命名回滚后仍未恢复原名的一个条目:原名、此刻所在位置、恢复失败原因。
+pub struct UnrestoredRenameText {
+    pub original: String,
+    pub current: String,
+    pub reason: String,
+}
+
+/// 构造时按当前语言产出成品:条目清单放在最前,任务行中间省略时仍能看到
+/// 第一个条目的位置,完整文本经任务"复制详情"取得。
+pub(super) fn incomplete_message(
+    language: UiLanguage,
+    cause: &str,
+    unrestored: &[UnrestoredRenameText],
+) -> String {
+    match language {
+        UiLanguage::English => {
+            let items = unrestored
+                .iter()
+                .map(|item| format!("{} → {} ({})", item.original, item.current, item.reason))
+                .collect::<Vec<_>>()
+                .join("; ");
+            format!(
+                "Batch rename failed and some items could not get their original names back: {items}. Original error: {cause}"
+            )
+        }
+        UiLanguage::Chinese => {
+            let items = unrestored
+                .iter()
+                .map(|item| format!("{} → {}（{}）", item.original, item.current, item.reason))
+                .collect::<Vec<_>>()
+                .join("；");
+            format!("批量重命名失败，部分项目未能恢复原名：{items}。原始错误：{cause}")
+        }
+    }
 }

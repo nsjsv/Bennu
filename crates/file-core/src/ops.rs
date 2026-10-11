@@ -40,7 +40,9 @@ pub use recoverable_transfer::{
 mod transfer_metadata;
 mod transfer_object;
 mod transfer_strategy;
-pub use batch_rename::{batch_rename_paths, BatchRenameItem, CompletedBatchRename};
+pub use batch_rename::{
+    batch_rename_paths, BatchRenameItem, CompletedBatchRename, UnrestoredBatchRename,
+};
 pub use copy::{
     copy_path, copy_path_with_options, CopyProgress, FileOperationControls, FileOperationRunState,
     FileOperationVerification, FileTransferOptions, ProgressSender, TransferConflictStrategy,

@@ -186,3 +186,38 @@ fn translates_known_dynamic_text() {
         assert_eq!(translate(UiLanguage::Chinese, text), expected);
     }
 }
+
+fn unrestored_renames() -> Vec<UnrestoredRenameText> {
+    vec![
+        UnrestoredRenameText {
+            original: "/docs/a.txt".to_owned(),
+            current: "/docs/.bennu-batch-rename-0.tmp".to_owned(),
+            reason: "permission denied".to_owned(),
+        },
+        UnrestoredRenameText {
+            original: "/docs/b.txt".to_owned(),
+            current: "/docs/x.txt".to_owned(),
+            reason: "busy".to_owned(),
+        },
+    ]
+}
+
+#[test]
+fn batch_rename_incomplete_lists_every_unrestored_location_in_english() {
+    assert_eq!(
+        batch_rename::incomplete_message(UiLanguage::English, "disk full", &unrestored_renames()),
+        "Batch rename failed and some items could not get their original names back: \
+         /docs/a.txt → /docs/.bennu-batch-rename-0.tmp (permission denied); \
+         /docs/b.txt → /docs/x.txt (busy). Original error: disk full"
+    );
+}
+
+#[test]
+fn batch_rename_incomplete_lists_every_unrestored_location_in_chinese() {
+    assert_eq!(
+        batch_rename::incomplete_message(UiLanguage::Chinese, "disk full", &unrestored_renames()),
+        "批量重命名失败，部分项目未能恢复原名：\
+         /docs/a.txt → /docs/.bennu-batch-rename-0.tmp（permission denied）；\
+         /docs/b.txt → /docs/x.txt（busy）。原始错误：disk full"
+    );
+}

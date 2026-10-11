@@ -20,6 +20,8 @@ mod search_workspace;
 mod transfer;
 mod trash;
 
+pub use batch_rename::UnrestoredRenameText;
+
 /// 界面语言。自 app-ui config.rs 下沉：翻译表按它分派，语言设置
 /// （UiLanguageSetting 与 TOML 存取）仍属 app-ui 存储域，经 re-export
 /// 同源引用本枚举，避免两侧各持一份定义产生分叉。
@@ -158,6 +160,15 @@ pub fn trash_tracking_warning(language: UiLanguage, warning: &str) -> String {
 
 pub fn current_trash_tracking_warning(warning: &str) -> String {
     trash::tracking_warning(current_language(), warning)
+}
+
+/// 批量重命名失败且有条目未恢复原名时的任务错误文案，构造时按给定语言产出成品。
+pub fn batch_rename_incomplete(
+    language: UiLanguage,
+    cause: &str,
+    unrestored: &[UnrestoredRenameText],
+) -> String {
+    batch_rename::incomplete_message(language, cause, unrestored)
 }
 
 /// 接收完成通知正文（成功数 + 失败数），构造时按当前语言产出成品。

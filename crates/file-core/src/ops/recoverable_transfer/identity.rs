@@ -13,6 +13,19 @@ pub enum FileObjectKind {
     SymbolicLink,
 }
 
+impl FileObjectKind {
+    /// 普通文件的 size 是内容长度,符号链接的 size 是目标路径长度,跨文件系统
+    /// 一致;目录的 st_size 是各文件系统自己的记账(btrfs 按名字字节、ext4 按块、
+    /// tmpfs 按条目、exFAT 按簇),跨文件系统复制后必然不同,不代表内容。目录
+    /// 内容由源清单与指纹逐条证明,口径与 fingerprint.rs 的 Directory 条目一致。
+    fn size_is_content(self) -> bool {
+        match self {
+            Self::RegularFile | Self::SymbolicLink => true,
+            Self::Directory => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FileIdentity {
     pub device: u64,
@@ -54,11 +67,12 @@ impl FileIdentity {
         )
     }
 
-    /// 判断副本身份是否仍对应源快照:kind/size/符号链接精确相等,
-    /// mtime 按 2 秒桶量化后相等(见 STAGING_MTIME_GRANULARITY_SECONDS)。
+    /// 判断副本身份是否仍对应源快照:kind/符号链接精确相等,size 仅在代表内容
+    /// 时精确相等(见 FileObjectKind::size_is_content),mtime 按 2 秒桶量化后
+    /// 相等(见 STAGING_MTIME_GRANULARITY_SECONDS)。
     pub fn matches_staging_snapshot(&self, snapshot: &Self) -> bool {
         self.object_kind == snapshot.object_kind
-            && self.size == snapshot.size
+            && (!self.object_kind.size_is_content() || self.size == snapshot.size)
             && self
                 .modified_seconds
                 .div_euclid(STAGING_MTIME_GRANULARITY_SECONDS)
@@ -146,6 +160,28 @@ mod tests {
         let mut payload = identity(100, 0);
         payload.size = 2;
         assert!(!payload.matches_staging_snapshot(&identity(100, 0)));
+    }
+
+    // 实测样本:同一目录在 overlay 上 size=8,复制到 tmpfs 后 size=60,
+    // mtime 已恢复一致,必须仍认定为同一快照。
+    #[test]
+    fn directory_size_difference_across_filesystems_matches_snapshot() {
+        let mut source = identity(100, 0);
+        source.object_kind = FileObjectKind::Directory;
+        source.size = 8;
+        let mut payload = source.clone();
+        payload.size = 60;
+        assert!(payload.matches_staging_snapshot(&source));
+    }
+
+    #[test]
+    fn symlink_target_length_mismatch_rejects_snapshot() {
+        let mut snapshot = identity(100, 0);
+        snapshot.object_kind = FileObjectKind::SymbolicLink;
+        snapshot.symbolic_link_target = Some(PathBuf::from("target"));
+        let mut payload = snapshot.clone();
+        payload.size = 7;
+        assert!(!payload.matches_staging_snapshot(&snapshot));
     }
 
     #[test]

@@ -47,6 +47,7 @@ pub(super) async fn commit_transfer<J: TransferJournal>(
                 prepared: commit.prepared,
                 payload: commit.payload,
                 fingerprint: backup_fingerprint,
+                metadata_loss: commit.metadata_loss,
             }),
         )
         .await;
@@ -254,6 +255,7 @@ pub(super) async fn create_replace_backup<J: TransferJournal>(
             payload: backup.payload,
             fingerprint: TransferFingerprint::Blake3(backup.fingerprint),
             backup_identity: Some(backup_identity),
+            metadata_loss: backup.metadata_loss,
         }),
     )
     .await
@@ -352,6 +354,7 @@ async fn committed_transfer(
         backup_fingerprint: commit.prepared.expected_target_fingerprint,
         backup_cleanup_index: 0,
         backup_cleanup_intent: None,
+        metadata_loss: commit.metadata_loss.clone(),
     })
 }
 
@@ -1084,6 +1087,7 @@ pub(super) fn completed_target(committed: &CommittedTransfer) -> CompletedTarget
         path: committed.final_target.clone(),
         identity: committed.target_identity.clone(),
         fingerprint: committed.fingerprint.clone(),
+        metadata_loss: committed.metadata_loss.clone(),
     }
 }
 

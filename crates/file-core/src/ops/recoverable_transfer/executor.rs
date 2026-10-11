@@ -9,7 +9,8 @@ use super::super::copy::{
     TransferConflictStrategy,
 };
 use super::super::ensure_replace_target_does_not_contain_source_path;
-use super::super::transfer_metadata::apply_transfer_metadata_best_effort;
+use super::super::metadata_loss::MetadataLossSummary;
+use super::super::transfer_metadata::apply_transfer_metadata;
 use super::super::transfer_object::inspect_transfer_source;
 use super::super::transfer_strategy::copy_regular_file_payload;
 use super::super::transfer_strategy::RegularFilePayloadCopy;
@@ -171,6 +172,7 @@ pub async fn advance_recoverable_transfer<J: TransferJournal>(
             Ok(TransferAdvance::Complete(RecoverableTransferOutcome {
                 source: record.request.source.clone(),
                 final_target: Some(completed.path),
+                metadata_loss: completed.metadata_loss,
             }))
         }
         TransferCheckpoint::CancelIntent(previous) => {
@@ -188,6 +190,7 @@ pub async fn advance_recoverable_transfer<J: TransferJournal>(
         TransferCheckpoint::Skipped => Ok(TransferAdvance::Complete(RecoverableTransferOutcome {
             source: record.request.source.clone(),
             final_target: None,
+            metadata_loss: MetadataLossSummary::default(),
         })),
     }
 }
@@ -375,6 +378,8 @@ async fn prepare_transfer<J: TransferJournal>(
                     },
                 )?),
                 backup_identity: None,
+                // 同盘 rename 不改动元数据,没有可丢的。
+                metadata_loss: MetadataLossSummary::default(),
             })
         }
         (TransferExecutionKind::CopyToStage | TransferExecutionKind::MoveToStage, _) => {
@@ -597,13 +602,17 @@ async fn stage_transfer<J: TransferJournal>(
         && kernel_clone_staging_candidate(record, &staging)
         && transfer_options.strategy_engine.is_some();
     let mut kernel_clone_used = false;
-    let source_location = if payload_exists {
+    // 暂存时发现的元数据问题;rename 进暂存区的对象元数据原样保留,没有可丢的。
+    let (source_location, staged_metadata_loss) = if payload_exists {
         let payload_identity = inspect_file_identity(&payload_path).await?;
         if staging.prepared.execution == TransferExecutionKind::MoveToStage
             && !source_exists
             && payload_identity.same_object(&staging.prepared.source_identity)
         {
-            StagedSourceLocation::ArtifactPayload
+            (
+                StagedSourceLocation::ArtifactPayload,
+                MetadataLossSummary::default(),
+            )
         } else if source_exists {
             remove_owned_artifact(&staging.artifact).await?;
             let mut prepared = staging.prepared;
@@ -660,28 +669,30 @@ async fn stage_transfer<J: TransferJournal>(
                 // payload 的时间戳仍是克隆时刻——必须像普通路径一样在提交
                 // 前恢复源元数据,保真与快照校验都依赖它。
                 let clone_source = inspect_transfer_source(&record.request.source).await?;
-                apply_transfer_metadata_best_effort(
-                    &record.request.source,
-                    &payload_path,
-                    &clone_source,
-                )
-                .await;
-                StagedSourceLocation::OriginalPath
+                let lost =
+                    apply_transfer_metadata(&record.request.source, &payload_path, &clone_source)
+                        .await?;
+                let mut metadata_loss = MetadataLossSummary::default();
+                metadata_loss.record(&payload_path, lost);
+                (StagedSourceLocation::OriginalPath, metadata_loss)
             }
-            TransferExecutionKind::CopyToStage => {
-                copy_to_payload(record, transfer_options, &payload_path).await?;
-                StagedSourceLocation::OriginalPath
-            }
+            TransferExecutionKind::CopyToStage => (
+                StagedSourceLocation::OriginalPath,
+                copy_to_payload(record, transfer_options, &payload_path).await?,
+            ),
             TransferExecutionKind::MoveToStage => {
                 match rename_noreplace(&record.request.source, &payload_path) {
                     Ok(()) => {
                         sync_rename_parents(&record.request.source, &payload_path).await?;
-                        StagedSourceLocation::ArtifactPayload
+                        (
+                            StagedSourceLocation::ArtifactPayload,
+                            MetadataLossSummary::default(),
+                        )
                     }
-                    Err(NoReplaceRenameError::CrossDevice) => {
-                        copy_to_payload(record, transfer_options, &payload_path).await?;
-                        StagedSourceLocation::OriginalPath
-                    }
+                    Err(NoReplaceRenameError::CrossDevice) => (
+                        StagedSourceLocation::OriginalPath,
+                        copy_to_payload(record, transfer_options, &payload_path).await?,
+                    ),
                     Err(error) => {
                         return Err(
                             error.into_transfer_error(&record.request.source, &payload_path)
@@ -732,6 +743,8 @@ async fn stage_transfer<J: TransferJournal>(
     if !payload_identity.matches_staging_snapshot(&staging.prepared.source_identity) {
         return Err(RecoverableTransferError::SourceChanged { path: payload_path });
     }
+    let metadata_loss =
+        staged_metadata_loss.rebased(&payload_path, &staging.prepared.resolved_target);
     let payload = CommitPayload::Artifact {
         artifact: staging.artifact,
         payload_identity,
@@ -748,6 +761,7 @@ async fn stage_transfer<J: TransferJournal>(
                     message: "replace staging produced a non-content fingerprint".to_owned(),
                 }
             })?,
+            metadata_loss,
         })
     } else {
         TransferCheckpoint::CommitIntent(CommitTransfer {
@@ -755,6 +769,7 @@ async fn stage_transfer<J: TransferJournal>(
             payload,
             fingerprint: payload_fingerprint,
             backup_identity: None,
+            metadata_loss,
         })
     };
     persist_checkpoint(record, journal, checkpoint).await
@@ -778,7 +793,7 @@ async fn copy_to_payload(
     record: &TransferJournalRecord,
     transfer_options: &FileTransferOptions,
     payload_path: &Path,
-) -> Result<(), RecoverableTransferError> {
+) -> Result<MetadataLossSummary, RecoverableTransferError> {
     let source_object = inspect_transfer_source(&record.request.source).await?;
 
     // 目录树且有引擎:并行 staging(两阶段);其余保持原串行路径。
@@ -788,15 +803,14 @@ async fn copy_to_payload(
         crate::ops::TransferSourceKind::Directory
     ) {
         if let Some(engine) = transfer_options.strategy_engine.as_ref() {
-            staging_parallel::copy_tree_to_payload_parallel(
+            return staging_parallel::copy_tree_to_payload_parallel(
                 &record.request.source,
                 payload_path,
                 engine,
                 &transfer_options.controls,
                 transfer_options.progress.as_ref(),
             )
-            .await?;
-            return Ok(());
+            .await;
         }
     }
 
@@ -804,19 +818,19 @@ async fn copy_to_payload(
         .with_optional_progress(transfer_options.progress.clone())
         .with_conflict_strategy(TransferConflictStrategy::Fail)
         .with_verification(record.request.verification);
-    let copied_target = copy_path_with_inspected_source(
+    let copied = copy_path_with_inspected_source(
         &record.request.source,
         payload_path,
         &source_object,
         options,
     )
     .await?;
-    if copied_target.as_deref() != Some(payload_path) {
+    if copied.target.as_deref() != Some(payload_path) {
         return Err(RecoverableTransferError::InvalidCheckpoint {
             message: "staging copy returned no target".to_owned(),
         });
     }
-    Ok(())
+    Ok(copied.metadata_loss)
 }
 
 fn record_manifest(

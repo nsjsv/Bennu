@@ -8,6 +8,7 @@ use super::{
     advance_recoverable_transfer, install_manifest_and_checkpoint, persist_checkpoint,
     persist_merge_completion, record_manifest, sync_parent, TransferAdvance,
 };
+use crate::ops::metadata_loss::MetadataLossSummary;
 use crate::ops::recoverable_transfer::{
     inspect_file_identity, verify_source_manifest, CompletedTarget, FileIdentity,
     MergeChildCompletion, MergeChildOutcome, MergeTransfer, ProofContext, RecoverableTransferError,
@@ -152,10 +153,18 @@ pub(super) async fn advance_merge_transfer<J: TransferJournal>(
         record.request.verification,
         transfer_options.proof_memo.clone(),
     );
+    // 根是已存在的目标目录,按规范不覆盖它的元数据,摘要只来自各子项。
+    let mut metadata_loss = MetadataLossSummary::default();
+    for completion in &merge.completed_children {
+        if let MergeChildOutcome::Committed(completed) = &completion.outcome {
+            metadata_loss.absorb(completed.metadata_loss.clone());
+        }
+    }
     let completed = CompletedTarget {
         identity: inspect_file_identity(&path).await?,
         fingerprint: TransferFingerprint::Blake3(proof.fingerprint_object(&path).await?),
         path,
+        metadata_loss,
     };
     persist_checkpoint(record, journal, TransferCheckpoint::Completed(completed)).await
 }
@@ -273,7 +282,9 @@ fn terminal_child_completion(
     child: &TransferJournalRecord,
 ) -> Result<MergeChildCompletion, RecoverableTransferError> {
     let outcome = match &child.checkpoint {
-        TransferCheckpoint::Completed(completed) => MergeChildOutcome::Committed(completed.clone()),
+        TransferCheckpoint::Completed(completed) => {
+            MergeChildOutcome::Committed(Box::new(completed.clone()))
+        }
         TransferCheckpoint::Skipped => MergeChildOutcome::Skipped,
         _ => {
             return Err(RecoverableTransferError::InvalidCheckpoint {

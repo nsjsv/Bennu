@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use bennu_localization::{LostAttributeKind, LostAttributesText, UiLanguage};
 use file_core::{
-    BatchRenameItem, CompletedBatchRename, FileOperationVerification, TransferConflictStrategy,
-    TrashRestoreEntry,
+    BatchRenameItem, CompletedBatchRename, FileOperationVerification, MetadataKind,
+    MetadataLossSummary, TransferConflictStrategy, TrashRestoreEntry,
 };
 
 use crate::operation_queue::{QueuedFileOperation, QueuedTransfer};
@@ -68,12 +69,17 @@ pub(crate) enum FileOperationOutcome {
         entries: Vec<TrashRestoreEntry>,
         restored_paths: Vec<PathBuf>,
     },
+    /// 不可重放的复制(例如目标冲突按 Replace/Merge 处理)也走这里而不是
+    /// `NoHistory`,否则完成提示所需的 `metadata_loss` 会随之丢失。
     Copy {
         transfers: Vec<CompletedTransfer>,
+        history_eligibility: FileOperationHistoryEligibility,
+        metadata_loss: MetadataLossSummary,
     },
     Move {
         transfers: Vec<CompletedTransfer>,
         history_eligibility: FileOperationHistoryEligibility,
+        metadata_loss: MetadataLossSummary,
     },
     /// 用选中项新建文件夹的成果:新目录连同整批移入的条目一起撤销/重做。
     GatheredIntoNewFolder {
@@ -145,8 +151,12 @@ impl FileOperationCompletion {
 }
 
 impl FileOperationOutcome {
-    pub(crate) fn completion_warning(&self) -> Option<String> {
+    pub(crate) fn completion_warning(&self, language: UiLanguage) -> Option<String> {
         const MAX_TRACKING_WARNING_DETAILS: usize = 5;
+
+        if let Self::Copy { metadata_loss, .. } | Self::Move { metadata_loss, .. } = self {
+            return metadata_loss_warning(metadata_loss, language);
+        }
 
         if let Self::Convert { failures } = self {
             if failures.is_empty() {
@@ -192,7 +202,45 @@ impl FileOperationOutcome {
             details.join("; ")
         ))
     }
+}
 
+/// 内容已复制成功、但部分元数据没能保留时的完成提示;摘要里的样本数已由
+/// file-core 按界面展示上限截断,其余条目只计数。
+fn metadata_loss_warning(
+    metadata_loss: &MetadataLossSummary,
+    language: UiLanguage,
+) -> Option<String> {
+    if metadata_loss.is_empty() {
+        return None;
+    }
+    let details = metadata_loss
+        .samples
+        .iter()
+        .map(|sample| LostAttributesText {
+            name: sample.path.file_name().map_or_else(
+                || sample.path.display().to_string(),
+                |name| name.to_string_lossy().into_owned(),
+            ),
+            kinds: sample
+                .kinds
+                .iter()
+                .map(|kind| match kind {
+                    MetadataKind::Permissions => LostAttributeKind::Permissions,
+                    MetadataKind::ExtendedAttributes => LostAttributeKind::ExtendedAttributes,
+                    MetadataKind::AccessControlList => LostAttributeKind::AccessControlList,
+                })
+                .collect(),
+        })
+        .collect::<Vec<_>>();
+    let remaining = metadata_loss
+        .affected_entries
+        .saturating_sub(details.len() as u64);
+    Some(bennu_localization::metadata_loss_warning(
+        language, &details, remaining,
+    ))
+}
+
+impl FileOperationOutcome {
     pub(crate) fn completed_path_migrations(&self) -> Vec<CompletedPathMigration> {
         match self {
             Self::Rename { from, to } => {
@@ -561,13 +609,18 @@ impl FileOperationHistoryItem {
                 restored_paths: restored_paths.clone(),
             }),
             FileOperationOutcome::Restore { .. } => None,
-            FileOperationOutcome::Copy { transfers } if !transfers.is_empty() => Some(Self::Copy {
+            FileOperationOutcome::Copy {
+                transfers,
+                history_eligibility: FileOperationHistoryEligibility::Replayable,
+                ..
+            } if !transfers.is_empty() => Some(Self::Copy {
                 transfers: transfers.clone(),
             }),
             FileOperationOutcome::Copy { .. } => None,
             FileOperationOutcome::Move {
                 transfers,
                 history_eligibility: FileOperationHistoryEligibility::Replayable,
+                ..
             } if !transfers.is_empty() => Some(Self::Move {
                 transfers: transfers.clone(),
             }),

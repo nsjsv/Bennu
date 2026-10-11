@@ -84,6 +84,7 @@ fn non_replayable_move_still_reports_completed_path_migration() {
     let outcome = FileOperationOutcome::Move {
         transfers: vec![transfer("/workspace/old", "/archive/old")],
         history_eligibility: FileOperationHistoryEligibility::NotReplayable,
+        metadata_loss: Default::default(),
     };
     let migrations = outcome.completed_path_migrations();
     let mut history = FileOperationHistory::new();
@@ -230,7 +231,9 @@ fn trash_tracking_warning_does_not_create_undo_from_historical_paths() {
     history.accept_completed(7, &outcome);
 
     assert!(history.take_undo_operation().is_none());
-    assert!(outcome.completion_warning().is_some());
+    assert!(outcome
+        .completion_warning(bennu_localization::UiLanguage::English)
+        .is_some());
 }
 
 #[test]
@@ -246,12 +249,117 @@ fn trash_tracking_warning_bounds_rendered_details() {
         entries: Vec::new(),
         tracking_warnings,
     }
-    .completion_warning()
+    .completion_warning(bennu_localization::UiLanguage::English)
     .expect("tracking warning");
 
     assert!(warning.contains("/workspace/item-4"));
     assert!(!warning.contains("/workspace/item-5"));
     assert!(warning.ends_with("... (+3)"));
+}
+
+fn metadata_loss_on(paths: &[&str]) -> MetadataLossSummary {
+    let mut summary = MetadataLossSummary::default();
+    for path in paths {
+        summary.record(
+            Path::new(path),
+            std::collections::BTreeSet::from([
+                MetadataKind::Permissions,
+                MetadataKind::ExtendedAttributes,
+            ]),
+        );
+    }
+    summary
+}
+
+fn copy_outcome(
+    history_eligibility: FileOperationHistoryEligibility,
+    metadata_loss: MetadataLossSummary,
+) -> FileOperationOutcome {
+    FileOperationOutcome::Copy {
+        transfers: vec![transfer("/workspace/a.txt", "/usb/a.txt")],
+        history_eligibility,
+        metadata_loss,
+    }
+}
+
+#[test]
+fn copy_without_metadata_loss_has_no_warning() {
+    let outcome = copy_outcome(
+        FileOperationHistoryEligibility::Replayable,
+        MetadataLossSummary::default(),
+    );
+    assert!(outcome
+        .completion_warning(bennu_localization::UiLanguage::English)
+        .is_none());
+}
+
+#[test]
+fn copy_metadata_loss_warns_and_keeps_undo_history() {
+    let outcome = copy_outcome(
+        FileOperationHistoryEligibility::Replayable,
+        metadata_loss_on(&["/usb/a.txt"]),
+    );
+    let mut history = FileOperationHistory::new();
+    history.accept_completed(11, &outcome);
+
+    assert_eq!(
+        outcome
+            .completion_warning(bennu_localization::UiLanguage::English)
+            .as_deref(),
+        Some(
+            "Some file attributes could not be preserved: a.txt (permissions, extended attributes)"
+        )
+    );
+    assert!(history.take_undo_operation().is_some());
+}
+
+#[test]
+fn non_replayable_copy_still_warns_without_undo_history() {
+    let outcome = copy_outcome(
+        FileOperationHistoryEligibility::NotReplayable,
+        metadata_loss_on(&["/usb/a.txt"]),
+    );
+    let mut history = FileOperationHistory::new();
+    history.accept_completed(12, &outcome);
+
+    assert!(outcome
+        .completion_warning(bennu_localization::UiLanguage::English)
+        .is_some());
+    assert!(history.take_undo_operation().is_none());
+}
+
+#[test]
+fn move_metadata_loss_warning_counts_entries_beyond_samples() {
+    let paths = (0..7)
+        .map(|index| format!("/usb/file-{index}.txt"))
+        .collect::<Vec<_>>();
+    let outcome = FileOperationOutcome::Move {
+        transfers: vec![transfer("/workspace/dir", "/usb/dir")],
+        history_eligibility: FileOperationHistoryEligibility::Replayable,
+        metadata_loss: metadata_loss_on(&paths.iter().map(String::as_str).collect::<Vec<_>>()),
+    };
+
+    let warning = outcome
+        .completion_warning(bennu_localization::UiLanguage::English)
+        .expect("metadata loss warning");
+
+    assert!(warning.contains("file-4.txt (permissions, extended attributes)"));
+    assert!(!warning.contains("file-5.txt"));
+    assert!(warning.ends_with("... (+2)"));
+}
+
+#[test]
+fn metadata_loss_warning_is_built_in_chinese() {
+    let outcome = copy_outcome(
+        FileOperationHistoryEligibility::Replayable,
+        metadata_loss_on(&["/usb/a.txt"]),
+    );
+    assert_eq!(
+        outcome
+            .completion_warning(bennu_localization::UiLanguage::Chinese)
+            .as_deref(),
+        Some("部分文件属性未能保留：a.txt（权限、扩展属性）")
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]

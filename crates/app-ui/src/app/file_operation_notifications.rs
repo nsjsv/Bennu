@@ -37,7 +37,9 @@ impl FileBrowser {
         let notification_completion = match terminal_status {
             FileOperationTerminalStatus::Completed => {
                 let warning = match completion {
-                    FileOperationCompletion::Succeeded(outcome) => outcome.completion_warning(),
+                    FileOperationCompletion::Succeeded(outcome) => {
+                        outcome.completion_warning(crate::localization::current_language())
+                    }
                     _ => None,
                 };
                 match warning {

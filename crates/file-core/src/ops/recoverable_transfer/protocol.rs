@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 
 use super::super::copy::{FileOperationVerification, TransferConflictStrategy};
+use super::super::metadata_loss::MetadataLossSummary;
 use super::{
     ArtifactOwner, FileIdentity, ObjectFingerprint, OwnedArtifact, OwnedArtifactPlan,
     SourceManifest, SourceManifestEntry, TransferFingerprint,
@@ -97,6 +98,11 @@ pub struct CommitTransfer {
     pub fingerprint: TransferFingerprint,
     #[serde(default)]
     pub backup_identity: Option<FileIdentity>,
+    /// 暂存时发现、已换算到最终位置的元数据问题,沿检查点一路带到 Completed,
+    /// 崩溃恢复后完成时照样能提示。旧版本写入的检查点没有该字段——旧版本把
+    /// 这类失败吞掉了,"没有记录"是唯一能得到的事实,所以缺省为空。
+    #[serde(default, skip_serializing_if = "MetadataLossSummary::is_empty")]
+    pub metadata_loss: MetadataLossSummary,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -110,6 +116,9 @@ pub struct BackupCreationTransfer {
     pub prepared: PreparedTransfer,
     pub payload: CommitPayload,
     pub fingerprint: ObjectFingerprint,
+    /// 见 `CommitTransfer::metadata_loss`。
+    #[serde(default, skip_serializing_if = "MetadataLossSummary::is_empty")]
+    pub metadata_loss: MetadataLossSummary,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -135,6 +144,9 @@ pub struct CommittedTransfer {
     pub backup_cleanup_index: usize,
     #[serde(default)]
     pub backup_cleanup_intent: Option<OwnedTreeEntryDeletionIntent>,
+    /// 见 `CommitTransfer::metadata_loss`。
+    #[serde(default, skip_serializing_if = "MetadataLossSummary::is_empty")]
+    pub metadata_loss: MetadataLossSummary,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -170,7 +182,9 @@ pub struct OwnedTreeEntryDeletionIntent {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "outcome", content = "fields", rename_all = "snake_case")]
 pub enum MergeChildOutcome {
-    Committed(CompletedTarget),
+    /// 装箱:完成记录携带元数据摘要后远大于 `Skipped`;serde 对 `Box<T>` 的
+    /// 编码与 `T` 相同,已持久化的 JSON 不受影响。
+    Committed(Box<CompletedTarget>),
     Skipped,
 }
 
@@ -210,6 +224,9 @@ pub struct CompletedTarget {
     pub path: PathBuf,
     pub identity: FileIdentity,
     pub fingerprint: TransferFingerprint,
+    /// 见 `CommitTransfer::metadata_loss`;Merge 的根完成记录汇总全部子项。
+    #[serde(default, skip_serializing_if = "MetadataLossSummary::is_empty")]
+    pub metadata_loss: MetadataLossSummary,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -387,4 +404,5 @@ pub trait TransferJournal: Send + Sync {
 pub struct RecoverableTransferOutcome {
     pub source: PathBuf,
     pub final_target: Option<PathBuf>,
+    pub metadata_loss: MetadataLossSummary,
 }

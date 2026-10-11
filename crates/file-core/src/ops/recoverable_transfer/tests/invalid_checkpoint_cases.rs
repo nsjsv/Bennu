@@ -72,6 +72,7 @@ async fn copy_cannot_execute_move_direct_from_corrupted_checkpoint() {
         },
         fingerprint: TransferFingerprint::Blake3(source_fingerprint),
         backup_identity: None,
+        metadata_loss: Default::default(),
     });
     journal
         .commit(TransferJournalMutation::InstallManifestAndCheckpoint {

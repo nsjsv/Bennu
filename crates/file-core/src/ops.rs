@@ -11,6 +11,7 @@ mod batch_rename;
 mod convert;
 mod copy;
 mod copy_verification;
+mod metadata_loss;
 mod recoverable_transfer;
 pub use convert::{
     available_conversion_encoders, convert_file_with_controls, locate_media_tool, media_duration,
@@ -44,8 +45,12 @@ pub use batch_rename::{
     batch_rename_paths, BatchRenameItem, CompletedBatchRename, UnrestoredBatchRename,
 };
 pub use copy::{
-    copy_path, copy_path_with_options, CopyProgress, FileOperationControls, FileOperationRunState,
-    FileOperationVerification, FileTransferOptions, ProgressSender, TransferConflictStrategy,
+    copy_path, copy_path_with_options, CopiedTarget, CopyProgress, FileOperationControls,
+    FileOperationRunState, FileOperationVerification, FileTransferOptions, ProgressSender,
+    TransferConflictStrategy,
+};
+pub use metadata_loss::{
+    MetadataKind, MetadataLossSample, MetadataLossSummary, METADATA_LOSS_SAMPLE_LIMIT,
 };
 use transfer_object::{TransferSourceKind, TransferSourceObject};
 pub use transfer_strategy::{

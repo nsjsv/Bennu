@@ -2,6 +2,7 @@ use super::commit::verify_prepared_source_with_controls;
 use super::{
     path_exists, persist_checkpoint, sync_rename_parents, target_parent, wait_until_running,
 };
+use crate::ops::metadata_loss::MetadataLossSummary;
 use crate::ops::recoverable_transfer::{
     inspect_file_identity, plan_owned_artifact, rename_noreplace, CommittedTransfer,
     NoReplaceRenameError, OwnedArtifactKind, PreparedTransfer, ProofContext,
@@ -212,6 +213,8 @@ pub(super) async fn advance_direct_move_renamed<J: TransferJournal>(
             backup_fingerprint: None,
             backup_cleanup_index: 0,
             backup_cleanup_intent: None,
+            // 同盘 rename 不改动元数据,没有可丢的。
+            metadata_loss: MetadataLossSummary::default(),
         }),
     )
     .await

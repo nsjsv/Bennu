@@ -77,6 +77,9 @@ pub use ops::{
     TransferJournalMutation, TransferJournalRecord, TransferWorkKey, UnrestoredBatchRename,
     VideoTargetFormat,
 };
+pub use ops::{
+    CopiedTarget, MetadataKind, MetadataLossSample, MetadataLossSummary, METADATA_LOSS_SAMPLE_LIMIT,
+};
 pub use scan::{
     discover_directory_with_progress, is_hidden_name, scan_directory, scan_directory_with_progress,
     DirectoryDiscovery, DirectoryDiscoveryBatch, DirectoryScan, DirectoryScanBatch, FileError,

@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use file_core::{
-    copy_path_with_options, FileOperationVerification, FileTransferOptions, ProgressSender,
-    TransferConflictStrategy,
+    copy_path_with_options, CopiedTarget, FileOperationVerification, FileTransferOptions,
+    ProgressSender, TransferConflictStrategy,
 };
 use tokio::fs;
 use tokio_util::sync::CancellationToken;
@@ -104,7 +104,12 @@ pub async fn cache_remote_preview_file(
         .with_progress_sender(progress)
         .with_conflict_strategy(TransferConflictStrategy::Replace)
         .with_verification(FileOperationVerification::BasicMetadata);
-    copy_path_with_options(&request.source_path, &cache_path, transfer_options)
+    // 预览缓存只需要文件内容:权限/扩展属性/ACL 与缓存语义无关,所以不采用
+    // metadata_loss;修改时间没能恢复仍然作为错误返回。
+    let CopiedTarget {
+        target: _,
+        metadata_loss: _,
+    } = copy_path_with_options(&request.source_path, &cache_path, transfer_options)
         .await
         .map_err(|error| format!("could not download remote preview file: {error}"))?;
     // 下载新增文件后再次清理，保证总量始终在预算内。

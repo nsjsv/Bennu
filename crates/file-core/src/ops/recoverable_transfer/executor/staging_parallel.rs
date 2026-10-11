@@ -8,12 +8,14 @@
 //! - 崩溃语义不变:partial payload 本就是"清理后整项重做"。
 //! - 树级内容证明(身份→哈希→身份/memo)仍由 stage_transfer 在聚合后执行。
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tokio::sync::mpsc;
 
-use crate::ops::transfer_metadata::apply_transfer_metadata_best_effort;
+use crate::ops::metadata_loss::{MetadataKind, MetadataLossSummary};
+use crate::ops::transfer_metadata::apply_transfer_metadata;
 use crate::ops::transfer_object::{inspect_transfer_source, TransferSourceKind};
 use crate::ops::transfer_strategy::{
     copy_regular_file_payload, RegularFilePayloadCopy, TransferStrategyEngine,
@@ -36,11 +38,12 @@ struct StagedDirectoryEntry {
     source_object: crate::ops::TransferSourceObject,
 }
 
-/// worker 间的共享终态:首个错误或累计完成数。
+/// worker 间的共享终态:首个错误、累计完成数与没能保留的元数据。
 #[derive(Default)]
 struct StagingProgress {
     error: Option<RecoverableTransferError>,
     files_copied: u64,
+    metadata_loss: MetadataLossSummary,
 }
 
 impl StagingProgress {
@@ -51,14 +54,15 @@ impl StagingProgress {
     }
 }
 
-/// 把 source_root 完整搬运到 payload_root(payload 必须已存在且为空)。
+/// 把 source_root 完整搬运到 payload_root(payload 必须已存在且为空),
+/// 返回内容已搬运成功、但没能保留下来的元数据。
 pub(super) async fn copy_tree_to_payload_parallel(
     source_root: &Path,
     payload_root: &Path,
     engine: &Arc<TransferStrategyEngine>,
     controls: &FileOperationControls,
     progress: Option<&crate::ops::ProgressSender>,
-) -> Result<(), RecoverableTransferError> {
+) -> Result<MetadataLossSummary, RecoverableTransferError> {
     let mut directories: Vec<StagedDirectoryEntry> = Vec::new();
     let mut files: Vec<StagedFileEntry> = Vec::new();
 
@@ -122,13 +126,17 @@ pub(super) async fn copy_tree_to_payload_parallel(
                         .record_error(RecoverableTransferError::FileOperation(error));
                     break;
                 }
-                if let Err(error) =
-                    copy_staged_file(&entry, &engine, &controls, progress.as_ref()).await
-                {
-                    progress_state.lock().await.record_error(error);
-                    break;
+                match copy_staged_file(&entry, &engine, &controls, progress.as_ref()).await {
+                    Ok(lost) => {
+                        let mut state = progress_state.lock().await;
+                        state.files_copied += 1;
+                        state.metadata_loss.record(&entry.payload, lost);
+                    }
+                    Err(error) => {
+                        progress_state.lock().await.record_error(error);
+                        break;
+                    }
                 }
-                progress_state.lock().await.files_copied += 1;
             }
         }));
     }
@@ -159,27 +167,31 @@ pub(super) async fn copy_tree_to_payload_parallel(
         dispatch_error
     };
 
-    let progress_state_error = progress_state.lock().await.error.take();
-    if let Some(error) = dispatch_error.or(progress_state_error) {
-        return Err(error);
-    }
+    let mut metadata_loss = {
+        let mut state = progress_state.lock().await;
+        if let Some(error) = dispatch_error.or(state.error.take()) {
+            return Err(error);
+        }
+        std::mem::take(&mut state.metadata_loss)
+    };
 
     // 阶段三:目录元数据后序恢复。
     let mut controls = controls.clone();
     for directory in directories.iter().rev() {
-        apply_transfer_metadata_best_effort(
+        let lost = apply_transfer_metadata(
             &directory.source,
             &directory.payload,
             &directory.source_object,
         )
-        .await;
+        .await?;
+        metadata_loss.record(&directory.payload, lost);
         controls
             .wait_until_running()
             .await
             .map_err(RecoverableTransferError::FileOperation)?;
     }
 
-    Ok(())
+    Ok(metadata_loss)
 }
 
 async fn prepare_tree(
@@ -274,7 +286,7 @@ async fn copy_staged_file(
     engine: &Arc<TransferStrategyEngine>,
     controls: &FileOperationControls,
     progress: Option<&crate::ops::ProgressSender>,
-) -> Result<(), RecoverableTransferError> {
+) -> Result<BTreeSet<MetadataKind>, RecoverableTransferError> {
     let source_object = inspect_transfer_source(&entry.source)
         .await
         .map_err(RecoverableTransferError::FileOperation)?;
@@ -304,6 +316,5 @@ async fn copy_staged_file(
             path: entry.payload.clone(),
         });
     }
-    apply_transfer_metadata_best_effort(&entry.source, &entry.payload, &source_object).await;
-    Ok(())
+    Ok(apply_transfer_metadata(&entry.source, &entry.payload, &source_object).await?)
 }

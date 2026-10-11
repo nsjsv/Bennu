@@ -350,6 +350,7 @@ fn moved_renames_migrate_paths_before_terminal_completion() {
             }],
             history_eligibility:
                 crate::operation_history::FileOperationHistoryEligibility::Replayable,
+            metadata_loss: Default::default(),
         }),
     ));
     drop(browser.update(direct_move_commit_message(
@@ -691,6 +692,7 @@ fn rejected_recoverable_history_replay_returns_item_to_original_stack() {
             }],
             history_eligibility:
                 crate::operation_history::FileOperationHistoryEligibility::Replayable,
+            metadata_loss: Default::default(),
         },
     );
     let (operation, pending_history) = browser
@@ -938,4 +940,25 @@ fn finished_directory_delete_operation_clears_cached_descendant_summaries() {
         .list_directory_summary_cache
         .summary_for_path(&unrelated)
         .is_some());
+}
+
+#[test]
+fn copy_with_metadata_loss_finishes_as_success_with_warning() {
+    let mut metadata_loss = file_core::MetadataLossSummary::default();
+    metadata_loss.record(
+        std::path::Path::new("/usb/a.txt"),
+        std::collections::BTreeSet::from([file_core::MetadataKind::Permissions]),
+    );
+    let completion = FileOperationCompletion::Succeeded(FileOperationOutcome::Copy {
+        transfers: Vec::new(),
+        history_eligibility:
+            crate::operation_history::FileOperationHistoryEligibility::NotReplayable,
+        metadata_loss,
+    });
+
+    // 文案语言取决于全局当前语言,两种语言下文件名都会原样出现。
+    assert!(matches!(
+        queue_finish_from_completion(&completion),
+        FileOperationFinish::SucceededWithWarning(warning) if warning.contains("a.txt")
+    ));
 }

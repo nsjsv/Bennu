@@ -352,7 +352,7 @@ pub(super) async fn run_queued_transfers(
         .collect::<Vec<_>>();
     let mut batch_progress = TransferBatchProgress::new(&progress_records, mode);
 
-    let mut completed = Vec::new();
+    let mut completed = SettledTransfers::default();
     let mut intent_records: Vec<(usize, TransferJournalRecord)> = Vec::new();
     for (index, record) in prepared.into_iter().enumerate() {
         match record {
@@ -375,7 +375,7 @@ pub(super) async fn run_queued_transfers(
                     return settle_recoverable_transfer_failure(
                         mode,
                         error,
-                        completed,
+                        completed.transfers,
                         stored_task_id,
                         task_id,
                         output,
@@ -400,7 +400,7 @@ pub(super) async fn run_queued_transfers(
                     return settle_recoverable_transfer_failure(
                         mode,
                         error,
-                        completed,
+                        completed.transfers,
                         stored_task_id,
                         task_id,
                         output,
@@ -427,7 +427,7 @@ pub(super) async fn run_queued_transfers(
         return settle_recoverable_transfer_failure(
             mode,
             error,
-            completed,
+            completed.transfers,
             stored_task_id,
             task_id,
             output,
@@ -437,24 +437,23 @@ pub(super) async fn run_queued_transfers(
         .await;
     }
 
-    match mode {
-        QueuedTransferMode::Copy
-            if history_eligibility == FileOperationHistoryEligibility::Replayable =>
-        {
-            FileOperationCompletion::Succeeded(FileOperationOutcome::Copy {
-                transfers: completed,
-            })
-        }
-        QueuedTransferMode::Copy => {
-            FileOperationCompletion::Succeeded(FileOperationOutcome::NoHistory)
-        }
-        QueuedTransferMode::Move => {
-            FileOperationCompletion::Succeeded(FileOperationOutcome::Move {
-                transfers: completed,
-                history_eligibility,
-            })
-        }
-    }
+    let SettledTransfers {
+        transfers,
+        metadata_loss,
+    } = completed;
+    let outcome = match mode {
+        QueuedTransferMode::Copy => FileOperationOutcome::Copy {
+            transfers,
+            history_eligibility,
+            metadata_loss,
+        },
+        QueuedTransferMode::Move => FileOperationOutcome::Move {
+            transfers,
+            history_eligibility,
+            metadata_loss,
+        },
+    };
+    FileOperationCompletion::Succeeded(outcome)
 }
 
 async fn prepare_queued_transfer_records(
@@ -559,7 +558,7 @@ async fn settle_intent_segment(
     task_id: u64,
     output: &mut IcedSender<Message>,
     batch_progress: &mut TransferBatchProgress,
-    completed: &mut Vec<CompletedTransfer>,
+    completed: &mut SettledTransfers,
 ) -> Result<(), RecoverableTransferError> {
     let records_with_index = std::mem::take(intent_records);
     if records_with_index.is_empty() {
@@ -651,7 +650,7 @@ async fn run_not_applicable_record(
     task_id: u64,
     output: &mut IcedSender<Message>,
     batch_progress: &mut TransferBatchProgress,
-    completed: &mut Vec<CompletedTransfer>,
+    completed: &mut SettledTransfers,
 ) -> Result<(), RecoverableTransferError> {
     if let Some(commit) = durable_direct_move_commit(&record, None) {
         send_durable_direct_move_commits(output, task_id, &[(index, record.clone())]).await;
@@ -764,7 +763,7 @@ async fn settle_cancellation_records(
 ) -> FileOperationCompletion {
     let mut batch_progress = TransferBatchProgress::new(&records, mode);
     let settlement_options = FileTransferOptions::new(controls.clone());
-    let mut settled_completed = Vec::new();
+    let mut settled_completed = SettledTransfers::default();
     let mut settlement_error = None;
     for (record_index, record) in records.into_iter().enumerate() {
         if durable_direct_move_commit(&record, None).is_some() {
@@ -814,7 +813,9 @@ async fn settle_cancellation_records(
         }
         _ => error,
     };
-    recoverable_transfer_failure(mode, error, settled_completed)
+    // 取消/失败的任务以错误收尾,完成提示只属于成功的任务;这里只需要已提交
+    // 的路径做迁移,元数据摘要不再展示。
+    recoverable_transfer_failure(mode, error, settled_completed.transfers)
 }
 
 fn recoverable_transfer_failure(
@@ -890,7 +891,7 @@ async fn complete_durable_direct_move_segment(
     task_id: u64,
     output: &mut IcedSender<Message>,
     batch_progress: &mut TransferBatchProgress,
-    completed: &mut Vec<CompletedTransfer>,
+    completed: &mut SettledTransfers,
 ) -> Result<(), RecoverableTransferError> {
     let mut first_settlement_error = None;
     for (index, record) in std::mem::take(records) {
@@ -927,16 +928,28 @@ async fn complete_durable_direct_move_segment(
     }
 }
 
+/// 已完成的传输:路径迁移与撤销历史用的成对路径,加上内容已提交、但没能
+/// 保留下来的元数据(任务成功收尾时变成完成提示)。
+#[derive(Debug, Default)]
+struct SettledTransfers {
+    transfers: Vec<CompletedTransfer>,
+    metadata_loss: file_core::MetadataLossSummary,
+}
+
 fn accept_recoverable_transfer_outcome(
     outcome: RecoverableTransferOutcome,
-    completed: &mut Vec<CompletedTransfer>,
+    completed: &mut SettledTransfers,
 ) {
-    if let RecoverableTransferOutcome {
+    let RecoverableTransferOutcome {
         source,
-        final_target: Some(target),
-    } = outcome
-    {
-        completed.push(CompletedTransfer { source, target });
+        final_target,
+        metadata_loss,
+    } = outcome;
+    completed.metadata_loss.absorb(metadata_loss);
+    if let Some(target) = final_target {
+        completed
+            .transfers
+            .push(CompletedTransfer { source, target });
     }
 }
 
@@ -1632,7 +1645,7 @@ mod recoverable_transfer_tests {
             .await
             .unwrap();
 
-        let mut completed = Vec::new();
+        let mut completed = SettledTransfers::default();
         assert!(matches!(
             complete_durable_direct_move_segment(
                 &mut durable_direct_moves,
@@ -1648,7 +1661,7 @@ mod recoverable_transfer_tests {
             Err(RecoverableTransferError::RecoveryBlocked { .. })
         ));
         assert_eq!(
-            completed,
+            completed.transfers,
             vec![
                 CompletedTransfer {
                     source: transfers[0].source.clone(),
@@ -2021,6 +2034,7 @@ mod recoverable_transfer_tests {
         let FileOperationCompletion::Succeeded(FileOperationOutcome::Move {
             transfers,
             history_eligibility: FileOperationHistoryEligibility::Replayable,
+            ..
         }) = completion
         else {
             panic!("expected resumed move completion");
@@ -2121,7 +2135,7 @@ mod recoverable_transfer_tests {
         )
         .await;
 
-        let FileOperationCompletion::Succeeded(FileOperationOutcome::Copy { transfers }) =
+        let FileOperationCompletion::Succeeded(FileOperationOutcome::Copy { transfers, .. }) =
             completion
         else {
             panic!("expected resumed copy completion");

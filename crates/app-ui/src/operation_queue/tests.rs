@@ -268,6 +268,7 @@ fn completed_checkpoint(path: &std::path::Path) -> TransferCheckpoint {
         fingerprint: file_core::ops::TransferFingerprint::Blake3(file_core::ObjectFingerprint(
             [8; 32],
         )),
+        metadata_loss: Default::default(),
     })
 }
 

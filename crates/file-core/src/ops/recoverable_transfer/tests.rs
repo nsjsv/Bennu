@@ -826,6 +826,7 @@ mod direct_move_cases;
 mod invalid_checkpoint_cases;
 mod kernel_clone_cases;
 mod merge_and_control_cases;
+mod metadata_loss_cases;
 mod payload_integrity_cases;
 mod recovery_cases;
 mod replacement_backup_cases;

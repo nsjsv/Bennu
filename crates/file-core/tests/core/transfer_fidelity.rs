@@ -12,8 +12,14 @@ mod unix {
     use super::*;
     use tokio_util::sync::CancellationToken;
 
+    /// 保真测试的复制入口:复制成功时元数据必须全部保留,不能有丢失记录。
     async fn copy(source: &Path, target: &Path) -> Result<(), FileError> {
-        copy_path(source, target, CancellationToken::new(), None).await
+        let metadata_loss = copy_path(source, target, CancellationToken::new(), None).await?;
+        assert!(
+            metadata_loss.is_empty(),
+            "metadata was not preserved: {metadata_loss:?}"
+        );
+        Ok(())
     }
 
     #[tokio::test]
@@ -281,7 +287,7 @@ mod unix {
         .await
         .unwrap();
 
-        assert!(copied_target.is_none());
+        assert!(copied_target.target.is_none());
         assert!(fs::symlink_metadata(&target_link)
             .unwrap()
             .file_type()

@@ -422,6 +422,7 @@ mod tests {
                 identity: identity(1),
             },
             fingerprint: ObjectFingerprint([7; 32]),
+            metadata_loss: Default::default(),
         });
 
         let stored = encode_checkpoint(&checkpoint).unwrap();
@@ -444,13 +445,14 @@ mod tests {
         let completion = MergeChildCompletion {
             parent_key: parent_key.clone(),
             child_key,
-            outcome: MergeChildOutcome::Committed(CompletedTarget {
+            outcome: MergeChildOutcome::Committed(Box::new(CompletedTarget {
                 path: target.join("child"),
                 identity: identity(2),
                 fingerprint: file_core::ops::TransferFingerprint::Blake3(ObjectFingerprint(
                     [9; 32],
                 )),
-            }),
+                metadata_loss: Default::default(),
+            })),
         };
         let checkpoint = TransferCheckpoint::Merging(MergeTransfer {
             target_root_identity: identity(1),

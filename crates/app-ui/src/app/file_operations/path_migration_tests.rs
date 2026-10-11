@@ -125,6 +125,7 @@ fn cross_directory_move_invalidates_source_and_preserves_target_tab_tree() {
             }],
             history_eligibility:
                 crate::operation_history::FileOperationHistoryEligibility::Replayable,
+            metadata_loss: Default::default(),
         }),
     ));
 

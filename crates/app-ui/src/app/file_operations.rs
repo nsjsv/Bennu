@@ -86,10 +86,12 @@ pub(super) fn queue_finish_from_completion(
     completion: &FileOperationCompletion,
 ) -> FileOperationFinish {
     match completion {
-        FileOperationCompletion::Succeeded(outcome) => match outcome.completion_warning() {
-            Some(warning) => FileOperationFinish::SucceededWithWarning(warning),
-            None => FileOperationFinish::Succeeded,
-        },
+        FileOperationCompletion::Succeeded(outcome) => {
+            match outcome.completion_warning(crate::localization::current_language()) {
+                Some(warning) => FileOperationFinish::SucceededWithWarning(warning),
+                None => FileOperationFinish::Succeeded,
+            }
+        }
         FileOperationCompletion::Canceled(_) => FileOperationFinish::Canceled,
         FileOperationCompletion::Failed { error, .. } => FileOperationFinish::Failed(error.clone()),
         FileOperationCompletion::RecoveryInterrupted(error, _) => {

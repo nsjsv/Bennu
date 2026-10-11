@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
@@ -14,11 +15,20 @@ use crate::FileError;
 use super::copy_verification::{
     verify_copied_directory, verify_copied_file, verify_copied_symbolic_link,
 };
-use super::transfer_metadata::apply_transfer_metadata_best_effort;
+use super::metadata_loss::{MetadataKind, MetadataLossSummary};
+use super::transfer_metadata::apply_transfer_metadata;
 use super::transfer_object::{inspect_transfer_source, TransferSourceKind, TransferSourceObject};
 use super::{already_exists_error, ensure_replace_target_does_not_contain_source_path};
 
 const COPY_BUFFER_SIZE: usize = 1024 * 1024;
+
+/// 一次复制的结果:`target` 为 `None` 表示冲突策略跳过了本次复制;
+/// `metadata_loss` 是内容已复制成功、但没能保留下来的元数据。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopiedTarget {
+    pub target: Option<PathBuf>,
+    pub metadata_loss: MetadataLossSummary,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CopyProgress {
@@ -192,21 +202,21 @@ pub async fn copy_path(
     to: impl AsRef<Path>,
     cancel: CancellationToken,
     progress: Option<ProgressSender>,
-) -> Result<(), FileError> {
+) -> Result<MetadataLossSummary, FileError> {
     copy_path_with_options(
         from,
         to,
         FileTransferOptions::running(cancel).with_optional_progress(progress),
     )
     .await
-    .map(|_| ())
+    .map(|copied| copied.metadata_loss)
 }
 
 pub async fn copy_path_with_options(
     from: impl AsRef<Path>,
     to: impl AsRef<Path>,
     transfer_options: FileTransferOptions,
-) -> Result<Option<PathBuf>, FileError> {
+) -> Result<CopiedTarget, FileError> {
     copy_path_with_transfer_options(from, to, transfer_options).await
 }
 
@@ -214,7 +224,7 @@ async fn copy_path_with_transfer_options(
     from: impl AsRef<Path>,
     to: impl AsRef<Path>,
     transfer_options: FileTransferOptions,
-) -> Result<Option<PathBuf>, FileError> {
+) -> Result<CopiedTarget, FileError> {
     let from = from.as_ref().to_path_buf();
     let to = to.as_ref().to_path_buf();
     let mut controls = transfer_options.controls.clone();
@@ -229,7 +239,7 @@ pub(super) async fn copy_path_with_inspected_source(
     to: &Path,
     source_object: &TransferSourceObject,
     transfer_options: FileTransferOptions,
-) -> Result<Option<PathBuf>, FileError> {
+) -> Result<CopiedTarget, FileError> {
     let mut controls = transfer_options.controls;
     let progress = transfer_options.progress;
     let conflict_strategy = transfer_options.conflict_strategy;
@@ -239,10 +249,13 @@ pub(super) async fn copy_path_with_inspected_source(
     let Some(to) =
         prepare_copy_target(from, to, &source_object.metadata, conflict_strategy).await?
     else {
-        return Ok(None);
+        return Ok(CopiedTarget {
+            target: None,
+            metadata_loss: MetadataLossSummary::default(),
+        });
     };
 
-    match &source_object.kind {
+    let metadata_loss = match &source_object.kind {
         TransferSourceKind::Directory => {
             copy_directory(
                 from,
@@ -254,11 +267,11 @@ pub(super) async fn copy_path_with_inspected_source(
                 verification,
                 transfer_options.strategy_engine.as_deref(),
             )
-            .await?;
+            .await?
         }
         TransferSourceKind::RegularFile => {
             let mut buffer = vec![0; COPY_BUFFER_SIZE];
-            copy_file_to_target(
+            let lost = copy_file_to_target(
                 FileCopyTarget {
                     from,
                     to: &to,
@@ -271,13 +284,25 @@ pub(super) async fn copy_path_with_inspected_source(
                 &mut buffer,
             )
             .await?;
+            single_entry_metadata_loss(&to, lost)
         }
         TransferSourceKind::SymbolicLink { .. } => {
-            copy_symbolic_link_to_target(from, &to, source_object, &mut controls).await?;
+            let lost =
+                copy_symbolic_link_to_target(from, &to, source_object, &mut controls).await?;
+            single_entry_metadata_loss(&to, lost)
         }
-    }
+    };
 
-    Ok(Some(to))
+    Ok(CopiedTarget {
+        target: Some(to),
+        metadata_loss,
+    })
+}
+
+fn single_entry_metadata_loss(target: &Path, lost: BTreeSet<MetadataKind>) -> MetadataLossSummary {
+    let mut summary = MetadataLossSummary::default();
+    summary.record(target, lost);
+    summary
 }
 
 /// 单个普通文件落到目标的请求集合;引擎未注入时按设备现场探测。
@@ -294,7 +319,7 @@ async fn copy_file_to_target(
     controls: &mut FileOperationControls,
     progress: Option<&ProgressSender>,
     buffer: &mut [u8],
-) -> Result<(), FileError> {
+) -> Result<BTreeSet<MetadataKind>, FileError> {
     let FileCopyTarget {
         from,
         to,
@@ -391,13 +416,19 @@ async fn copy_file_to_target(
         return Err(error);
     }
 
-    apply_transfer_metadata_best_effort(from, to, source_object).await;
+    let lost = match apply_transfer_metadata(from, to, source_object).await {
+        Ok(lost) => lost,
+        Err(error) => {
+            let _ = fs::remove_file(to).await;
+            return Err(error);
+        }
+    };
     if let Err(error) = controls.wait_until_running().await {
         let _ = fs::remove_file(to).await;
         return Err(error);
     }
 
-    Ok(())
+    Ok(lost)
 }
 
 fn strategy_inlined_hash(outcome: &crate::ops::transfer_strategy::PayloadCopyOutcome) -> bool {
@@ -442,7 +473,7 @@ async fn copy_symbolic_link_to_target(
     to: &Path,
     source_object: &TransferSourceObject,
     controls: &mut FileOperationControls,
-) -> Result<(), FileError> {
+) -> Result<BTreeSet<MetadataKind>, FileError> {
     let TransferSourceKind::SymbolicLink {
         target: link_target,
     } = &source_object.kind
@@ -460,8 +491,9 @@ async fn copy_symbolic_link_to_target(
     let completion = async {
         verify_copied_symbolic_link(from, to, link_target).await?;
         controls.wait_until_running().await?;
-        apply_transfer_metadata_best_effort(from, to, source_object).await;
-        controls.wait_until_running().await
+        let lost = apply_transfer_metadata(from, to, source_object).await?;
+        controls.wait_until_running().await?;
+        Ok(lost)
     }
     .await;
 
@@ -477,7 +509,7 @@ async fn copy_symbolic_link_to_target(
     _to: &Path,
     _source_object: &TransferSourceObject,
     _controls: &mut FileOperationControls,
-) -> Result<(), FileError> {
+) -> Result<BTreeSet<MetadataKind>, FileError> {
     Err(FileError::InvalidInput {
         path: from.to_path_buf(),
         message: "cannot transfer symbolic links on this platform".to_owned(),
@@ -506,7 +538,7 @@ async fn copy_directory(
     conflict_strategy: TransferConflictStrategy,
     verification: FileOperationVerification,
     strategy_engine: Option<&crate::ops::transfer_strategy::TransferStrategyEngine>,
-) -> Result<(), FileError> {
+) -> Result<MetadataLossSummary, FileError> {
     if to.starts_with(from) {
         return Err(FileError::InvalidInput {
             path: to.to_path_buf(),
@@ -555,8 +587,9 @@ async fn copy_directory_contents(
     conflict_strategy: TransferConflictStrategy,
     verification: FileOperationVerification,
     strategy_engine: Option<&crate::ops::transfer_strategy::TransferStrategyEngine>,
-) -> Result<(), FileError> {
+) -> Result<MetadataLossSummary, FileError> {
     let mut buffer = vec![0; COPY_BUFFER_SIZE];
+    let mut metadata_loss = MetadataLossSummary::default();
 
     while let Some(step) = pending_steps.pop() {
         controls.wait_until_running().await?;
@@ -567,7 +600,8 @@ async fn copy_directory_contents(
                 target,
                 source_object,
             } => {
-                apply_transfer_metadata_best_effort(&source, &target, &source_object).await;
+                let lost = apply_transfer_metadata(&source, &target, &source_object).await?;
+                metadata_loss.record(&target, lost);
                 controls.wait_until_running().await?;
                 continue;
             }
@@ -633,7 +667,7 @@ async fn copy_directory_contents(
                     });
                 }
                 TransferSourceKind::RegularFile => {
-                    copy_file_to_target(
+                    let lost = copy_file_to_target(
                         FileCopyTarget {
                             from: &source_child,
                             to: &target_child,
@@ -646,21 +680,23 @@ async fn copy_directory_contents(
                         &mut buffer,
                     )
                     .await?;
+                    metadata_loss.record(&target_child, lost);
                 }
                 TransferSourceKind::SymbolicLink { .. } => {
-                    copy_symbolic_link_to_target(
+                    let lost = copy_symbolic_link_to_target(
                         &source_child,
                         &target_child,
                         &source_object,
                         controls,
                     )
                     .await?;
+                    metadata_loss.record(&target_child, lost);
                 }
             }
         }
     }
 
-    Ok(())
+    Ok(metadata_loss)
 }
 
 async fn prepare_copy_target(

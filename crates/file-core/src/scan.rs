@@ -462,6 +462,12 @@ pub enum FileError {
         #[source]
         source: std::io::Error,
     },
+    #[error("could not preserve timestamps for {path:?}: {source}")]
+    PreserveTimes {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("could not delete {path:?}: {source}")]
     Delete {
         path: PathBuf,

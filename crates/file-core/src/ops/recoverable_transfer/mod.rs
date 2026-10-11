@@ -9,7 +9,7 @@ mod executor;
 mod fingerprint;
 mod identity;
 mod manifest;
-mod path_codec;
+pub(crate) mod path_codec;
 mod proof;
 mod proof_memo;
 mod protocol;

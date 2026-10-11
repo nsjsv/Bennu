@@ -12,6 +12,7 @@ mod document_preview;
 mod exact_translation;
 mod file_operation_notifications;
 mod index_status;
+mod metadata_loss;
 mod properties;
 mod search_paths;
 mod search_service_recovery;
@@ -21,6 +22,7 @@ mod transfer;
 mod trash;
 
 pub use batch_rename::UnrestoredRenameText;
+pub use metadata_loss::{LostAttributeKind, LostAttributesText};
 
 /// 界面语言。自 app-ui config.rs 下沉：翻译表按它分派，语言设置
 /// （UiLanguageSetting 与 TOML 存取）仍属 app-ui 存储域，经 re-export
@@ -169,6 +171,15 @@ pub fn batch_rename_incomplete(
     unrestored: &[UnrestoredRenameText],
 ) -> String {
     batch_rename::incomplete_message(language, cause, unrestored)
+}
+
+/// 复制/移动内容已成功、但部分元数据没能保留时的完成提示，构造时按给定语言产出成品。
+pub fn metadata_loss_warning(
+    language: UiLanguage,
+    details: &[LostAttributesText],
+    remaining: u64,
+) -> String {
+    metadata_loss::warning(language, details, remaining)
 }
 
 /// 接收完成通知正文（成功数 + 失败数），构造时按当前语言产出成品。

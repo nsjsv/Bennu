@@ -14,6 +14,11 @@ use crate::SearchIndexConfig;
 
 use super::*;
 
+/// 测试把搜索路径偏好文件放在数据库旁边,不碰真实的用户配置目录。
+fn search_path_file_beside(database_path: &Path) -> PathBuf {
+    database_path.with_file_name("search-paths.json")
+}
+
 fn snapshot_for(phase: DaemonLifecyclePhase) -> DaemonLifecycleSnapshot {
     DaemonLifecycleSnapshot {
         phase,
@@ -127,7 +132,8 @@ fn retry_repairs_a_damaged_sidecar_without_advancing_the_revision() {
     let sidecar = database_path.with_file_name("search-paths.json");
     fs::write(&sidecar, b"not-json").unwrap();
     let core = SearchDaemonCore::new(
-        database_path,
+        database_path.clone(),
+        search_path_file_beside(&database_path),
         SearchIndexConfig {
             roots: vec![home],
             ..SearchIndexConfig::default()
@@ -157,6 +163,7 @@ fn failed_transition_retries_the_same_desired_revision() {
     let database_path = directory.path().join("search.sqlite");
     let core = SearchDaemonCore::new(
         database_path.clone(),
+        search_path_file_beside(&database_path),
         SearchIndexConfig {
             roots: vec![home],
             ..SearchIndexConfig::default()
@@ -223,6 +230,7 @@ fn missing_root_is_saved_and_a_status_poll_activates_it_after_creation() {
     let database_path = directory.path().join("search.sqlite");
     let core = SearchDaemonCore::new(
         database_path.clone(),
+        search_path_file_beside(&database_path),
         SearchIndexConfig {
             roots: vec![home],
             ..SearchIndexConfig::default()
@@ -304,6 +312,7 @@ fn mount_replacement_hides_retains_recrawls_and_explicit_removal_purges() {
     let database_path = directory.path().join("search.sqlite");
     let core = SearchDaemonCore::new(
         database_path.clone(),
+        search_path_file_beside(&database_path),
         SearchIndexConfig {
             roots: vec![home],
             ..SearchIndexConfig::default()
@@ -414,6 +423,7 @@ fn removing_an_exclusion_explicitly_recrawls_the_newly_included_frontier() {
     let database_path = directory.path().join("search.sqlite");
     let core = SearchDaemonCore::new(
         database_path.clone(),
+        search_path_file_beside(&database_path),
         SearchIndexConfig {
             roots: vec![home.clone()],
             ..SearchIndexConfig::default()
@@ -718,7 +728,8 @@ fn concurrent_core_shutdown_joins_worker_once() {
     let database_path = directory.path().join("search.sqlite");
     let core = Arc::new(
         SearchDaemonCore::new(
-            database_path,
+            database_path.clone(),
+            search_path_file_beside(&database_path),
             SearchIndexConfig {
                 roots: Vec::new(),
                 ..SearchIndexConfig::default()
@@ -749,7 +760,12 @@ fn daemon_rejects_configuration_outside_the_service_budget_before_opening_databa
         ..SearchIndexConfig::default()
     };
 
-    assert!(SearchDaemonCore::new(database_path.clone(), invalid).is_err());
+    assert!(SearchDaemonCore::new(
+        database_path.clone(),
+        search_path_file_beside(&database_path),
+        invalid
+    )
+    .is_err());
     assert!(!database_path.exists());
 }
 
@@ -759,7 +775,8 @@ fn corruption_recovery_stays_degraded_until_the_rebuild_cycle_finishes() {
     let database_path = directory.path().join("search.sqlite");
     fs::write(&database_path, b"not a sqlite database").unwrap();
     let core = SearchDaemonCore::new(
-        database_path,
+        database_path.clone(),
+        search_path_file_beside(&database_path),
         SearchIndexConfig {
             roots: Vec::new(),
             ..SearchIndexConfig::default()
@@ -815,7 +832,8 @@ fn startup_maintenance_leaves_full_text_compaction_to_automerge() {
     assert!(segment_count() > 1);
 
     let core = SearchDaemonCore::new(
-        database_path,
+        database_path.clone(),
+        search_path_file_beside(&database_path),
         SearchIndexConfig {
             roots: Vec::new(),
             ..SearchIndexConfig::default()

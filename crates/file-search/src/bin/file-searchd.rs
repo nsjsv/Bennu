@@ -245,10 +245,15 @@ fn is_file_searchd_executable_path(executable_path: &Path) -> bool {
 async fn serve(socket_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     let mut terminate_signal = signal(SignalKind::terminate())?;
     let database_path = database_path()?;
+    let search_path_file = search_path_file()?;
     let bound_socket = BoundSearchSocket::bind(socket_path)?;
     let shutdown_socket_path = bound_socket.path().to_path_buf();
     let service_runtime = Arc::new(SearchServiceRuntime::new());
-    service_runtime.start_in_background(database_path, SearchIndexConfig::default());
+    service_runtime.start_in_background(
+        database_path,
+        search_path_file,
+        SearchIndexConfig::default(),
+    );
 
     tracing::info!(
         target: "file_search::daemon",
@@ -288,6 +293,11 @@ fn database_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
     // 守护进程独立启动，同样要在读索引前完成改名迁移。
     file_core::data_dir_migration::migrate_legacy_data_dir(&base);
     Ok(base.join("bennu").join("search.sqlite"))
+}
+
+fn search_path_file() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let config_directory = dirs::config_dir().ok_or("could not find XDG config directory")?;
+    Ok(file_search::search_path_file_in(&config_directory))
 }
 
 #[cfg(test)]

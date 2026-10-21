@@ -51,10 +51,11 @@ impl SearchServiceRuntime {
     pub fn start_in_background(
         self: &Arc<Self>,
         database_path: PathBuf,
+        search_path_file: PathBuf,
         config: SearchIndexConfig,
     ) {
         self.spawn_initializer(move |runtime| {
-            runtime.initialize_core(database_path, config);
+            runtime.initialize_core(database_path, search_path_file, config);
         });
     }
 
@@ -122,8 +123,13 @@ impl SearchServiceRuntime {
         }
     }
 
-    fn initialize_core(self: &Arc<Self>, database_path: PathBuf, config: SearchIndexConfig) {
-        let daemon_core = match SearchDaemonCore::new(database_path, config) {
+    fn initialize_core(
+        self: &Arc<Self>,
+        database_path: PathBuf,
+        search_path_file: PathBuf,
+        config: SearchIndexConfig,
+    ) {
+        let daemon_core = match SearchDaemonCore::new(database_path, search_path_file, config) {
             Ok(daemon_core) => Arc::new(daemon_core),
             Err(error) => {
                 self.record_initialization_failure(error.to_string());
@@ -373,6 +379,11 @@ mod tests {
 
     use super::*;
 
+    /// 测试把搜索路径偏好文件放在数据库旁边,不碰真实的用户配置目录。
+    fn search_path_file_beside(database_path: &std::path::Path) -> PathBuf {
+        database_path.with_file_name("search-paths.json")
+    }
+
     fn empty_root_config() -> SearchIndexConfig {
         SearchIndexConfig {
             roots: Vec::new(),
@@ -430,8 +441,14 @@ mod tests {
         drop(database);
 
         let runtime = Arc::new(SearchServiceRuntime::new());
-        let daemon_core =
-            Arc::new(SearchDaemonCore::new(database_path, empty_root_config()).unwrap());
+        let daemon_core = Arc::new(
+            SearchDaemonCore::new(
+                database_path.clone(),
+                search_path_file_beside(&database_path),
+                empty_root_config(),
+            )
+            .unwrap(),
+        );
         let maintenance_entered = Arc::new(Barrier::new(2));
         let maintenance_release = Arc::new(Barrier::new(2));
         let finish_thread = {
@@ -488,7 +505,11 @@ mod tests {
             move |runtime| {
                 initializer_entered.wait();
                 initializer_release.wait();
-                runtime.initialize_core(database_path, empty_root_config());
+                runtime.initialize_core(
+                    database_path.clone(),
+                    search_path_file_beside(&database_path),
+                    empty_root_config(),
+                );
                 initializer_finished_tx.send(()).unwrap();
             }
         });
@@ -540,7 +561,11 @@ mod tests {
         let directory = tempdir().unwrap();
         let runtime = Arc::new(SearchServiceRuntime::new());
 
-        runtime.initialize_core(directory.path().to_path_buf(), empty_root_config());
+        runtime.initialize_core(
+            directory.path().to_path_buf(),
+            directory.path().join("search-paths.json"),
+            empty_root_config(),
+        );
 
         let status = runtime.status();
         assert!(matches!(status.phase, SearchServicePhase::Failed { .. }));
@@ -561,8 +586,14 @@ mod tests {
         drop(database);
 
         let runtime = Arc::new(SearchServiceRuntime::new());
-        let daemon_core =
-            Arc::new(SearchDaemonCore::new(database_path, empty_root_config()).unwrap());
+        let daemon_core = Arc::new(
+            SearchDaemonCore::new(
+                database_path.clone(),
+                search_path_file_beside(&database_path),
+                empty_root_config(),
+            )
+            .unwrap(),
+        );
         assert!(runtime.finish_initialization(daemon_core));
 
         let status = runtime.status();
@@ -587,8 +618,12 @@ mod tests {
         let directory = tempdir().unwrap();
         let runtime = Arc::new(SearchServiceRuntime::new());
         let daemon_core = Arc::new(
-            SearchDaemonCore::new(directory.path().join("search.sqlite"), empty_root_config())
-                .unwrap(),
+            SearchDaemonCore::new(
+                directory.path().join("search.sqlite"),
+                directory.path().join("search-paths.json"),
+                empty_root_config(),
+            )
+            .unwrap(),
         );
         assert!(runtime.finish_initialization(Arc::clone(&daemon_core)));
 
@@ -631,7 +666,11 @@ mod tests {
             move |runtime| {
                 initializer_entered.wait();
                 initializer_release.wait();
-                runtime.initialize_core(database_path, empty_root_config());
+                runtime.initialize_core(
+                    database_path.clone(),
+                    search_path_file_beside(&database_path),
+                    empty_root_config(),
+                );
                 initializer_finished_tx.send(()).unwrap();
             }
         });

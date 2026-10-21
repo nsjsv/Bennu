@@ -269,7 +269,13 @@ pub struct SearchDaemonCore {
 }
 
 impl SearchDaemonCore {
-    pub fn new(database_path: PathBuf, config: SearchIndexConfig) -> SearchResult<Self> {
+    /// `search_path_file` 是搜索路径偏好文件的位置,由调用方解析(正式入口见
+    /// `bin/file-searchd.rs`,位置规则见 `search_path_file_in`)。
+    pub fn new(
+        database_path: PathBuf,
+        search_path_file: PathBuf,
+        config: SearchIndexConfig,
+    ) -> SearchResult<Self> {
         config
             .validate()
             .map_err(SearchError::InvalidConfiguration)?;
@@ -283,8 +289,7 @@ impl SearchDaemonCore {
         let home_directory = config.roots.first().cloned();
         let path_store = home_directory
             .as_ref()
-            .map(|_| search_path_store_for_database(&database_path))
-            .transpose()?;
+            .map(|_| SearchPathStore::at(search_path_file));
         let managed_index_open = ManagedSearchIndex::new(database_path.clone()).open()?;
         let recovery_rebuild_message = managed_index_open.recovery_notice.as_ref().map(|notice| {
             let message = notice.message();
@@ -825,18 +830,6 @@ impl Drop for SearchDaemonCore {
     fn drop(&mut self) {
         let _ = self.shutdown();
     }
-}
-
-#[cfg(test)]
-fn search_path_store_for_database(database_path: &Path) -> SearchResult<SearchPathStore> {
-    Ok(SearchPathStore::at(
-        database_path.with_file_name("search-paths.json"),
-    ))
-}
-
-#[cfg(not(test))]
-fn search_path_store_for_database(_database_path: &Path) -> SearchResult<SearchPathStore> {
-    SearchPathStore::from_environment()
 }
 
 fn initialize_path_configuration(

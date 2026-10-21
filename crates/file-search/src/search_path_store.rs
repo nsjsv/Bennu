@@ -1,6 +1,6 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
@@ -10,11 +10,17 @@ use crate::VersionedSearchPathPreferences;
 
 const SEARCH_PATH_FORMAT_VERSION: u32 = 1;
 const SEARCH_PATH_SIDECAR_MAX_BYTES: u64 = 1_048_576;
-#[cfg(not(test))]
 const SEARCH_PATH_CONFIG_DIRECTORY: &str = "bennu";
-#[cfg(not(test))]
 const SEARCH_PATH_CONFIG_FILE: &str = "search-paths.json";
 static TEMPORARY_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// 搜索路径偏好文件在用户配置目录下的位置。配置目录属于外部环境,由守护进程
+/// 入口解析一次后经 `SearchDaemonCore::new` 显式传入,核心不自己读环境。
+pub fn search_path_file_in(config_directory: &Path) -> PathBuf {
+    config_directory
+        .join(SEARCH_PATH_CONFIG_DIRECTORY)
+        .join(SEARCH_PATH_CONFIG_FILE)
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct StoredSearchPathPreferences {
@@ -29,20 +35,6 @@ pub(crate) struct SearchPathStore {
 }
 
 impl SearchPathStore {
-    #[cfg(not(test))]
-    pub(crate) fn from_environment() -> SearchResult<Self> {
-        let config_directory = dirs::config_dir().ok_or_else(|| {
-            SearchError::InvalidConfiguration(
-                "application configuration directory is unavailable".to_owned(),
-            )
-        })?;
-        Ok(Self::at(
-            config_directory
-                .join(SEARCH_PATH_CONFIG_DIRECTORY)
-                .join(SEARCH_PATH_CONFIG_FILE),
-        ))
-    }
-
     pub(crate) fn at(path: PathBuf) -> Self {
         Self { path }
     }
@@ -225,6 +217,14 @@ mod tests {
 
     use super::*;
     use crate::SearchPathPreferences;
+
+    #[test]
+    fn search_path_file_lives_in_the_bennu_config_directory() {
+        assert_eq!(
+            search_path_file_in(Path::new("/home/user/.config")),
+            PathBuf::from("/home/user/.config/bennu/search-paths.json")
+        );
+    }
 
     #[test]
     fn missing_sidecar_is_distinct_from_a_damaged_sidecar() {

@@ -24,7 +24,7 @@ use tokio_util::sync::CancellationToken;
 use super::transfer_service::service_config;
 use super::FileBrowser;
 use crate::config::{default_transfer_device_alias, TrustedTransferDevice};
-use crate::model::Message;
+use crate::model::{sanitized_application_log_detail, Message};
 use crate::view::transfer_qr::qr_image_handle;
 
 /// 传输子消息：`Message::Transfer` 的载荷。
@@ -51,6 +51,7 @@ pub(crate) enum TransferMessage {
     },
     DirectSendFinished {
         fingerprint: String,
+        alias: String,
         outcome: Result<(), String>,
     },
     // ---- 接收确认（R7） ----
@@ -261,9 +262,10 @@ impl FileBrowser {
             }
             TransferMessage::DirectSendFinished {
                 fingerprint,
+                alias,
                 outcome,
             } => {
-                self.accept_direct_send_finished(fingerprint, outcome);
+                self.accept_direct_send_finished(fingerprint, &alias, outcome);
                 iced::Task::none()
             }
             TransferMessage::IncomingRememberToggled(remember) => {
@@ -372,7 +374,17 @@ impl FileBrowser {
         state.file_size = progress.file_size;
     }
 
-    fn accept_direct_send_finished(&mut self, fingerprint: String, outcome: Result<(), String>) {
+    fn accept_direct_send_finished(
+        &mut self,
+        fingerprint: String,
+        alias: &str,
+        outcome: Result<(), String>,
+    ) {
+        // 先记日志再找显示槽：窗口已关或显示槽已被新直推顶替时，
+        // 这次失败不会再出现在界面上，日志是它唯一的记录。
+        if let Err(error) = &outcome {
+            record_direct_send_failure(alias, error);
+        }
         let Some(session) = self.transfer_session.as_mut() else {
             return;
         };
@@ -667,6 +679,7 @@ fn direct_send_command(
     display_alias: String,
 ) -> iced::Task<Message> {
     let fingerprint = target.fingerprint.clone();
+    let alias = target.alias.clone();
     iced::Task::stream(
         iced::stream::channel(16, async move |mut output| {
             let (progress_tx, mut progress_rx) = tokio::sync::mpsc::channel::<SendProgress>(16);
@@ -704,6 +717,7 @@ fn direct_send_command(
                         let _ = output
                             .send(TransferMessage::DirectSendFinished {
                                 fingerprint,
+                                alias,
                                 outcome,
                             })
                             .await;
@@ -719,12 +733,23 @@ fn direct_send_command(
             let _ = output
                 .send(TransferMessage::DirectSendFinished {
                     fingerprint,
+                    alias,
                     outcome,
                 })
                 .await;
         })
         .map(Message::Transfer),
     )
+}
+
+fn record_direct_send_failure(alias: &str, error: &str) {
+    tracing::error!(
+        target: "app_ui::transfer",
+        event = "localsend_direct_send_failed",
+        error = %sanitized_application_log_detail(error),
+        "LocalSend direct send to {} failed",
+        sanitized_application_log_detail(alias)
+    );
 }
 
 /// 设置页接收目录选择（ashpd 目录选择器，复用搜索路径选择先例）。

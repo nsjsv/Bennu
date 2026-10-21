@@ -43,7 +43,7 @@ pub enum LocalSendError {
     TransferFile { file_name: String, reason: String },
 
     /// 网络请求失败。
-    #[error("network request to {endpoint} failed: {source}")]
+    #[error("network request to {endpoint} failed: {}", error_chain_text(.source))]
     Request {
         endpoint: &'static str,
         source: reqwest::Error,
@@ -63,6 +63,21 @@ pub enum LocalSendError {
     /// 定时器意外结束（服务内部任务提前退出）。
     #[error("local-send service task terminated unexpectedly")]
     ServiceTaskTerminated,
+}
+
+/// 把错误及其 source 链拼成一行（`a: b: c`）。
+///
+/// reqwest 0.12 的 `Display` 只写顶层（`error sending request for url (…)`），
+/// 连接被拒、超时、TLS 失败等真正原因只在 `source()` 链里；不拼链就会丢原因。
+pub(crate) fn error_chain_text(error: &(dyn std::error::Error + 'static)) -> String {
+    let mut text = error.to_string();
+    let mut cause = error.source();
+    while let Some(current) = cause {
+        text.push_str(": ");
+        text.push_str(&current.to_string());
+        cause = current.source();
+    }
+    text
 }
 
 impl From<std::io::Error> for LocalSendError {

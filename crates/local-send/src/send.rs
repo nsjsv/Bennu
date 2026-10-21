@@ -12,7 +12,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, ReadBuf};
 use tokio::sync::mpsc;
 
 use crate::device::{DeviceInfo, FileMetadata, PrepareUploadRequest, PrepareUploadResponse};
-use crate::error::LocalSendError;
+use crate::error::{error_chain_text, LocalSendError};
 
 /// 单请求连接超时：局域网内握手超过 5s 视为对端不可达；总时长不设限（大文件）。
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -274,7 +274,7 @@ async fn upload_one(
         .body(body)
         .send()
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| error_chain_text(&error))?;
     if !response.status().is_success() {
         return Err(format!("HTTP {}", response.status()));
     }
@@ -457,7 +457,7 @@ mod tests {
         assert_eq!(mime_of("b.unknownext"), "application/octet-stream");
     }
 
-    // 端到端发送测试见 tests 与 receive 联动（A4），此处只覆盖纯函数。
+    // 端到端成功路径见 integration 与 receive 联动（A4）；这里覆盖纯函数与失败文本。
     #[tokio::test]
     async fn zip_directory_produces_valid_archive() {
         let dir = tempfile::tempdir().unwrap();
@@ -480,5 +480,118 @@ mod tests {
         }
         assert!(names.contains(&"folder/a.txt".to_string()));
         assert!(names.contains(&"folder/sub/b.bin".to_string()));
+    }
+
+    fn target_at(address: std::net::SocketAddr) -> DeviceInfo {
+        DeviceInfo {
+            alias: "Phone".into(),
+            version: "2.0".into(),
+            fingerprint: "phone-fp".into(),
+            device_model: None,
+            device_type: None,
+            download: None,
+            port: address.port(),
+            protocol: "http".into(),
+            address: Some(address.ip()),
+        }
+    }
+
+    fn one_file(dir: &tempfile::TempDir) -> Vec<PathBuf> {
+        let file = dir.path().join("one.txt");
+        std::fs::write(&file, b"x").unwrap();
+        vec![file]
+    }
+
+    /// 读完一个带 content-length 的请求再回响应：未读数据留在内核缓冲时
+    /// 关闭连接会发 RST，客户端可能读不到响应。
+    async fn read_http_request(stream: &mut tokio::net::TcpStream) {
+        let mut request = Vec::new();
+        let mut chunk = [0u8; 1024];
+        loop {
+            let read = stream.read(&mut chunk).await.unwrap();
+            assert_ne!(read, 0, "client closed before sending the whole request");
+            request.extend_from_slice(&chunk[..read]);
+            let Some(head_end) = request.windows(4).position(|window| window == b"\r\n\r\n") else {
+                continue;
+            };
+            let head = String::from_utf8_lossy(&request[..head_end]).to_ascii_lowercase();
+            let body_len: usize = head
+                .lines()
+                .find_map(|line| line.strip_prefix("content-length:"))
+                .map_or(0, |value| value.trim().parse().unwrap());
+            if request.len() >= head_end + 4 + body_len {
+                return;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn prepare_upload_failure_text_keeps_every_cause() {
+        // 绑定后立即释放：拿到一个确定无人监听的本机端口。
+        let address = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+
+        let error = send_to_device(&target_at(address), one_file(&dir), "TestPC")
+            .await
+            .unwrap_err();
+
+        let LocalSendError::Request {
+            endpoint: "prepare-upload",
+            source,
+        } = &error
+        else {
+            panic!("expected a prepare-upload request error, got {error:?}");
+        };
+        let text = error.to_string();
+        let mut layer: Option<&(dyn std::error::Error + 'static)> = Some(source);
+        while let Some(current) = layer {
+            assert!(
+                text.contains(&current.to_string()),
+                "{text:?} lost {current}"
+            );
+            layer = current.source();
+        }
+        let refused = std::net::TcpStream::connect(address)
+            .unwrap_err()
+            .to_string();
+        assert!(text.contains(&refused), "{text:?} lost {refused:?}");
+    }
+
+    #[tokio::test]
+    async fn upload_failure_reason_keeps_the_connection_cause() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        // 只应答一次 prepare-upload，且先关监听再回响应：随后的 upload 连接必然被拒。
+        let responder = tokio::spawn(async move {
+            use tokio::io::AsyncWriteExt;
+            let (mut stream, _) = listener.accept().await.unwrap();
+            drop(listener);
+            read_http_request(&mut stream).await;
+            let body = r#"{"sessionId":"session","files":{"0":"token"}}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+            stream.shutdown().await.unwrap();
+        });
+        let dir = tempfile::tempdir().unwrap();
+
+        let error = send_to_device(&target_at(address), one_file(&dir), "TestPC")
+            .await
+            .unwrap_err();
+        responder.await.unwrap();
+
+        let LocalSendError::TransferFile { reason, .. } = &error else {
+            panic!("expected an upload failure, got {error:?}");
+        };
+        let refused = std::net::TcpStream::connect(address)
+            .unwrap_err()
+            .to_string();
+        assert!(reason.contains(&refused), "{reason:?} lost {refused:?}");
     }
 }

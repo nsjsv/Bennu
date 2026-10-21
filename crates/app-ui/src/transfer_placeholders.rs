@@ -240,6 +240,7 @@ mod tests {
     use file_core::{DirectoryEntry, EntryMetadata, FileKind, SortDirection, SortField};
 
     use super::*;
+    use crate::operation_queue::test_persistence::{attach_store, enqueue_persisted};
 
     fn entry(path: &str, kind: FileKind, len: u64, modified: Option<SystemTime>) -> DirectoryEntry {
         DirectoryEntry::new(
@@ -629,15 +630,14 @@ mod tests {
         crate::operation_queue::QueuedTransfer::new(PathBuf::from("/source"), PathBuf::from(target))
     }
 
-    /// 恢复式传输入队需要任务存储;测试用同步落盘的临时存储,
-    /// TempDir 由测试绑定到用例结束。
+    /// 恢复式传输入队需要任务存储;TempDir 由测试绑定到用例结束。
     fn placeholder_test_queue() -> (FileOperationQueue, tempfile::TempDir) {
         let directory = tempfile::tempdir().unwrap();
         let store =
             file_operation_store::TaskQueueStore::new(directory.path().join("state.sqlite"))
                 .unwrap();
         let mut queue = FileOperationQueue::new();
-        queue.set_store(store);
+        attach_store(&mut queue, store);
         (queue, directory)
     }
 
@@ -648,37 +648,25 @@ mod tests {
         for transfer in &mut transfers {
             transfer.conflict_strategy = file_core::TransferConflictStrategy::Fail;
         }
-        match queue.enqueue(crate::operation_queue::QueuedFileOperation::Copy {
-            transfers,
-            verification: file_core::FileOperationVerification::BasicMetadata,
-        }) {
-            crate::operation_queue::FileOperationEnqueueOutcome::Queued { task_id } => task_id,
-            crate::operation_queue::FileOperationEnqueueOutcome::QueuedWithStorageWarning {
-                error,
-                ..
-            }
-            | crate::operation_queue::FileOperationEnqueueOutcome::Rejected { error } => {
-                panic!("copy should enqueue, got storage error: {error}")
-            }
-        }
+        enqueue_persisted(
+            queue,
+            crate::operation_queue::QueuedFileOperation::Copy {
+                transfers,
+                verification: file_core::FileOperationVerification::BasicMetadata,
+            },
+        )
     }
 
     fn enqueue_move(
         queue: &mut FileOperationQueue,
         transfers: Vec<crate::operation_queue::QueuedTransfer>,
     ) -> u64 {
-        match queue.enqueue(crate::operation_queue::QueuedFileOperation::Move {
-            transfers,
-            verification: file_core::FileOperationVerification::BasicMetadata,
-        }) {
-            crate::operation_queue::FileOperationEnqueueOutcome::Queued { task_id } => task_id,
-            crate::operation_queue::FileOperationEnqueueOutcome::QueuedWithStorageWarning {
-                error,
-                ..
-            }
-            | crate::operation_queue::FileOperationEnqueueOutcome::Rejected { error } => {
-                panic!("move should enqueue, got storage error: {error}")
-            }
-        }
+        enqueue_persisted(
+            queue,
+            crate::operation_queue::QueuedFileOperation::Move {
+                transfers,
+                verification: file_core::FileOperationVerification::BasicMetadata,
+            },
+        )
     }
 }

@@ -299,6 +299,7 @@ fn path_parent_text(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::operation_queue::test_persistence::queued_task_id;
     use file_core::FileOperationVerification;
 
     #[test]
@@ -325,23 +326,17 @@ mod tests {
             "/workspace/destination/another-very-long-directory-name-that-must-remain-complete",
         );
         let mut queue = crate::operation_queue::FileOperationQueue::new();
-        assert!(queue
-            .enqueue(QueuedFileOperation::CreateDirectory {
-                parent: long_parent.clone(),
-            })
-            .error()
-            .is_none());
-        let task_id = queue.tasks()[0].id;
+        let task_id = queued_task_id(queue.enqueue(QueuedFileOperation::CreateDirectory {
+            parent: long_parent.clone(),
+        }));
         let full_error =
             "a complete diagnostic that is intentionally longer than the task row error limit"
                 .repeat(3);
         assert_eq!(
-            queue
-                .finish(
-                    task_id,
-                    crate::operation_queue::FileOperationFinish::Failed(full_error.clone()),
-                )
-                .0,
+            queue.finish(
+                task_id,
+                crate::operation_queue::FileOperationFinish::Failed(full_error.clone()),
+            ),
             Some(crate::operation_queue::FileOperationTerminalStatus::Failed)
         );
 

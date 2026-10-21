@@ -252,11 +252,7 @@ impl FileBrowser {
     ) -> Task<Message> {
         let completed_operation = self.operation_queue.operation(task_id).cloned();
         let queue_outcome = queue_finish_from_completion(&completion);
-        let (terminal_status, storage_error) = self.operation_queue.finish(task_id, queue_outcome);
-        if let Some(error) = storage_error {
-            self.show_global_error(error);
-        }
-        let Some(terminal_status) = terminal_status else {
+        let Some(terminal_status) = self.operation_queue.finish(task_id, queue_outcome) else {
             return Task::none();
         };
 
@@ -610,13 +606,6 @@ impl FileBrowser {
         self.clear_global_error();
         match self.operation_queue.enqueue(operation) {
             FileOperationEnqueueOutcome::Queued { task_id } => {
-                if let Some(pending_history) = pending_history {
-                    self.operation_history
-                        .track_pending(task_id, pending_history);
-                }
-            }
-            FileOperationEnqueueOutcome::QueuedWithStorageWarning { task_id, error } => {
-                self.show_global_error(error);
                 if let Some(pending_history) = pending_history {
                     self.operation_history
                         .track_pending(task_id, pending_history);

@@ -1059,6 +1059,7 @@ mod recoverable_transfer_tests {
     use std::sync::Arc;
 
     use super::*;
+    use crate::operation_queue::test_persistence::{assert_persisted, attach_store};
     use crate::operation_queue::{
         FileOperationEnqueueOutcome, FileOperationFinish, FileOperationQueue,
     };
@@ -1214,7 +1215,7 @@ mod recoverable_transfer_tests {
         ];
         let store = TaskQueueStore::new(directory.path().join("state.sqlite")).unwrap();
         let mut queue = FileOperationQueue::new();
-        queue.set_store(store.clone());
+        attach_store(&mut queue, store.clone());
         let FileOperationEnqueueOutcome::Queued { task_id } =
             queue.enqueue(QueuedFileOperation::Copy {
                 transfers: transfers.clone(),
@@ -1223,6 +1224,7 @@ mod recoverable_transfer_tests {
         else {
             panic!("recoverable copy should enqueue");
         };
+        assert_persisted(&mut queue);
         let running = queue.active_subscription().unwrap();
         let (mut output, mut messages) = iced::futures::channel::mpsc::channel(32);
 
@@ -1277,7 +1279,7 @@ mod recoverable_transfer_tests {
         let transfers = vec![QueuedTransfer::new(source.clone(), target.clone())];
         let store = TaskQueueStore::new(directory.path().join("state.sqlite")).unwrap();
         let mut queue = FileOperationQueue::new();
-        queue.set_store(store.clone());
+        attach_store(&mut queue, store.clone());
         let FileOperationEnqueueOutcome::Queued { task_id } =
             queue.enqueue(QueuedFileOperation::Copy {
                 transfers: transfers.clone(),
@@ -1286,6 +1288,7 @@ mod recoverable_transfer_tests {
         else {
             panic!("recoverable copy should enqueue");
         };
+        assert_persisted(&mut queue);
         let running = queue.active_subscription().unwrap();
         let stored_task_id = running.stored_id.unwrap();
         let stored_task_id = running.stored_id.unwrap();
@@ -1310,11 +1313,9 @@ mod recoverable_transfer_tests {
 
         assert_eq!(
             queue.finish(task_id, FileOperationFinish::RecoveryBlocked(error)),
-            (
-                Some(crate::operation_queue::FileOperationTerminalStatus::Failed),
-                None
-            )
+            Some(crate::operation_queue::FileOperationTerminalStatus::Failed)
         );
+        assert_persisted(&mut queue);
         assert_eq!(
             store.read_task(stored_task_id).unwrap().unwrap().status,
             file_operation_store::StoredTaskStatus::Failed
@@ -1335,7 +1336,7 @@ mod recoverable_transfer_tests {
         let transfers = vec![QueuedTransfer::new(source.clone(), target.clone())];
         let store = TaskQueueStore::new(directory.path().join("state.sqlite")).unwrap();
         let mut queue = FileOperationQueue::new();
-        queue.set_store(store);
+        attach_store(&mut queue, store);
         let FileOperationEnqueueOutcome::Queued { task_id } =
             queue.enqueue(QueuedFileOperation::Move {
                 transfers: transfers.clone(),
@@ -1344,6 +1345,7 @@ mod recoverable_transfer_tests {
         else {
             panic!("recoverable move should enqueue");
         };
+        assert_persisted(&mut queue);
         let running = queue.active_subscription().unwrap();
         let (mut output, messages) = iced::futures::channel::mpsc::channel(32);
 
@@ -1396,7 +1398,7 @@ mod recoverable_transfer_tests {
         }
         let store = TaskQueueStore::new(directory.path().join("state.sqlite")).unwrap();
         let mut queue = FileOperationQueue::new();
-        queue.set_store(store);
+        attach_store(&mut queue, store);
         let FileOperationEnqueueOutcome::Queued { task_id } =
             queue.enqueue(QueuedFileOperation::Move {
                 transfers: transfers.clone(),
@@ -1405,6 +1407,7 @@ mod recoverable_transfer_tests {
         else {
             panic!("recoverable move should enqueue");
         };
+        assert_persisted(&mut queue);
         let running = queue.active_subscription().unwrap();
         let (mut output, messages) = iced::futures::channel::mpsc::channel(64);
 
@@ -1514,7 +1517,7 @@ mod recoverable_transfer_tests {
         ];
         let store = TaskQueueStore::new(directory.path().join("state.sqlite")).unwrap();
         let mut queue = FileOperationQueue::new();
-        queue.set_store(store);
+        attach_store(&mut queue, store);
         let FileOperationEnqueueOutcome::Queued { task_id } =
             queue.enqueue(QueuedFileOperation::Move {
                 transfers: transfers.clone(),
@@ -1523,6 +1526,7 @@ mod recoverable_transfer_tests {
         else {
             panic!("recoverable move should enqueue");
         };
+        assert_persisted(&mut queue);
         let running = queue.active_subscription().unwrap();
         let (mut output, _messages) = iced::futures::channel::mpsc::channel(64);
 
@@ -1574,7 +1578,7 @@ mod recoverable_transfer_tests {
         }
         let store = TaskQueueStore::new(directory.path().join("state.sqlite")).unwrap();
         let mut queue = FileOperationQueue::new();
-        queue.set_store(store.clone());
+        attach_store(&mut queue, store.clone());
         let FileOperationEnqueueOutcome::Queued { task_id } =
             queue.enqueue(QueuedFileOperation::Move {
                 transfers: transfers.clone(),
@@ -1583,6 +1587,7 @@ mod recoverable_transfer_tests {
         else {
             panic!("recoverable move should enqueue");
         };
+        assert_persisted(&mut queue);
         let running = queue.active_subscription().unwrap();
         let stored_task_id = running.stored_id.unwrap();
         let stored_task_id = running.stored_id.unwrap();
@@ -1717,7 +1722,7 @@ mod recoverable_transfer_tests {
         }];
         let store = TaskQueueStore::new(directory.path().join("state.sqlite")).unwrap();
         let mut queue = FileOperationQueue::new();
-        queue.set_store(store);
+        attach_store(&mut queue, store);
         let FileOperationEnqueueOutcome::Queued { task_id } =
             queue.enqueue(QueuedFileOperation::Move {
                 transfers: transfers.clone(),
@@ -1726,6 +1731,7 @@ mod recoverable_transfer_tests {
         else {
             panic!("recoverable merge move should enqueue");
         };
+        assert_persisted(&mut queue);
         let running = queue.active_subscription().unwrap();
         let (mut output, messages) = iced::futures::channel::mpsc::channel(32);
 
@@ -1779,7 +1785,7 @@ mod recoverable_transfer_tests {
         let transfers = vec![QueuedTransfer::new(source.clone(), target.clone())];
         let store = TaskQueueStore::new(directory.path().join("state.sqlite")).unwrap();
         let mut queue = FileOperationQueue::new();
-        queue.set_store(store.clone());
+        attach_store(&mut queue, store.clone());
         let FileOperationEnqueueOutcome::Queued { task_id } =
             queue.enqueue(QueuedFileOperation::Move {
                 transfers: transfers.clone(),
@@ -1788,6 +1794,7 @@ mod recoverable_transfer_tests {
         else {
             panic!("recoverable move should enqueue");
         };
+        assert_persisted(&mut queue);
         let running = queue.active_subscription().unwrap();
         let stored_task_id = running.stored_id.unwrap();
         let stored_task_id = running.stored_id.unwrap();
@@ -1863,7 +1870,7 @@ mod recoverable_transfer_tests {
         tokio::fs::write(&source, b"direct-move").await.unwrap();
         let store = TaskQueueStore::new(directory.path().join("state.sqlite")).unwrap();
         let mut queue = FileOperationQueue::new();
-        queue.set_store(store.clone());
+        attach_store(&mut queue, store.clone());
         let FileOperationEnqueueOutcome::Queued { task_id } =
             queue.enqueue(QueuedFileOperation::Move {
                 transfers: vec![QueuedTransfer::new(source, target.clone())],
@@ -1872,6 +1879,7 @@ mod recoverable_transfer_tests {
         else {
             panic!("recoverable move should enqueue");
         };
+        assert_persisted(&mut queue);
         let running = queue.active_subscription().unwrap();
         let stored_task_id = running.stored_id.unwrap();
         let stored_task_id = running.stored_id.unwrap();
@@ -1915,7 +1923,7 @@ mod recoverable_transfer_tests {
         }];
         let store = TaskQueueStore::new(directory.path().join("replace-state.sqlite")).unwrap();
         let mut queue = FileOperationQueue::new();
-        queue.set_store(store.clone());
+        attach_store(&mut queue, store.clone());
         let FileOperationEnqueueOutcome::Queued { task_id } =
             queue.enqueue(QueuedFileOperation::Copy {
                 transfers: transfers.clone(),
@@ -1924,6 +1932,7 @@ mod recoverable_transfer_tests {
         else {
             panic!("recoverable replace copy should enqueue");
         };
+        assert_persisted(&mut queue);
         let running = queue.active_subscription().unwrap();
         let stored_task_id = running.stored_id.unwrap();
         let stored_task_id = running.stored_id.unwrap();
@@ -1947,11 +1956,9 @@ mod recoverable_transfer_tests {
 
         assert_eq!(
             queue.finish(task_id, FileOperationFinish::Succeeded),
-            (
-                Some(crate::operation_queue::FileOperationTerminalStatus::Completed),
-                None
-            )
+            Some(crate::operation_queue::FileOperationTerminalStatus::Completed)
         );
+        assert_persisted(&mut queue);
         assert!(store
             .read_transfer_recovery(stored_task_id)
             .unwrap()
@@ -1980,7 +1987,7 @@ mod recoverable_transfer_tests {
         ];
         let store = TaskQueueStore::new(directory.path().join("move-state.sqlite")).unwrap();
         let mut original_queue = FileOperationQueue::new();
-        original_queue.set_store(store.clone());
+        attach_store(&mut original_queue, store.clone());
         assert!(matches!(
             original_queue.enqueue(QueuedFileOperation::Move {
                 transfers: transfers.clone(),
@@ -1989,6 +1996,7 @@ mod recoverable_transfer_tests {
             FileOperationEnqueueOutcome::Queued { .. }
         ));
         let task_id = original_queue.tasks()[0].id;
+        assert_persisted(&mut original_queue);
         let running = original_queue.active_subscription().unwrap();
         let stored_task_id = running.stored_id.unwrap();
         let mut records = load_recoverable_transfer_records(store.clone(), stored_task_id)
@@ -2048,11 +2056,9 @@ mod recoverable_transfer_tests {
         assert!(tokio::fs::symlink_metadata(&second_source).await.is_err());
         assert_eq!(
             restored_queue.finish(stored_task_id, FileOperationFinish::Succeeded),
-            (
-                Some(crate::operation_queue::FileOperationTerminalStatus::Completed),
-                None
-            )
+            Some(crate::operation_queue::FileOperationTerminalStatus::Completed)
         );
+        assert_persisted(&mut restored_queue);
         assert!(store
             .read_transfer_recovery(stored_task_id)
             .unwrap()
@@ -2081,7 +2087,7 @@ mod recoverable_transfer_tests {
         ];
         let store = TaskQueueStore::new(directory.path().join("state.sqlite")).unwrap();
         let mut original_queue = FileOperationQueue::new();
-        original_queue.set_store(store.clone());
+        attach_store(&mut original_queue, store.clone());
         assert!(matches!(
             original_queue.enqueue(QueuedFileOperation::Copy {
                 transfers: transfers.clone(),
@@ -2090,6 +2096,7 @@ mod recoverable_transfer_tests {
             FileOperationEnqueueOutcome::Queued { .. }
         ));
         let task_id = original_queue.tasks()[0].id;
+        assert_persisted(&mut original_queue);
         let running = original_queue.active_subscription().unwrap();
         let stored_task_id = running.stored_id.unwrap();
         let mut records = load_recoverable_transfer_records(store.clone(), stored_task_id)
@@ -2151,11 +2158,9 @@ mod recoverable_transfer_tests {
         );
         assert_eq!(
             restored_queue.finish(stored_task_id, FileOperationFinish::Succeeded),
-            (
-                Some(crate::operation_queue::FileOperationTerminalStatus::Completed),
-                None
-            )
+            Some(crate::operation_queue::FileOperationTerminalStatus::Completed)
         );
+        assert_persisted(&mut restored_queue);
         assert_eq!(
             store.read_task(stored_task_id).unwrap().unwrap().status,
             file_operation_store::StoredTaskStatus::Completed

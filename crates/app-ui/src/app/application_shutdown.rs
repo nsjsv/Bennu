@@ -228,22 +228,12 @@ impl FileBrowser {
                 FileOperationCompletion::RecoveryInterrupted(_, _)
             )
         {
-            let (_, _, persisted_terminal_stored_id) =
-                self.operation_queue.finish_for_application_shutdown(
-                    task_id,
-                    queue_finish_from_completion(&completion),
-                );
-            if let Some(stored_task_id) = persisted_terminal_stored_id {
-                if let ApplicationShutdownPhase::Draining(drain) =
-                    &mut self.application_shutdown_phase
-                {
-                    if let Some(commit) = &mut drain.commit {
-                        commit
-                            .interrupted_recoverable_tasks
-                            .retain(|task| task.task_id != stored_task_id);
-                    }
-                }
-            }
+            // 终态写库完成后,回执经 accept_file_operation_persistence_progress
+            // 把该任务移出 interrupted_recoverable_tasks。
+            self.operation_queue.finish_for_application_shutdown(
+                task_id,
+                queue_finish_from_completion(&completion),
+            );
         }
 
         let ApplicationShutdownPhase::Draining(drain) = &mut self.application_shutdown_phase else {

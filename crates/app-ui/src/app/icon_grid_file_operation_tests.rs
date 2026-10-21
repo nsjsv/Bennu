@@ -10,6 +10,7 @@ use crate::model::{
     IconGridExpansionContext, IconGridExpansionSessionId, IconGridExpansionState,
 };
 use crate::operation_history::{FileOperationCompletion, FileOperationOutcome};
+use crate::operation_queue::test_persistence::queued_task_id;
 use crate::operation_queue::QueuedFileOperation;
 
 fn loaded_directory() -> ExpandedDirectory {
@@ -84,15 +85,11 @@ fn completed_root_rename_migrates_temporary_icon_grid_tree() {
         },
     ));
 
-    assert!(browser
-        .operation_queue
-        .enqueue(QueuedFileOperation::Rename {
-            path: root.clone(),
-            new_name: "renamed".into(),
-        })
-        .error()
-        .is_none());
-    let task_id = browser.operation_queue.tasks().last().unwrap().id;
+    let rename = QueuedFileOperation::Rename {
+        path: root.clone(),
+        new_name: "renamed".into(),
+    };
+    let task_id = queued_task_id(browser.operation_queue.enqueue(rename));
 
     drop(browser.accept_file_operation_finished(
         task_id,
@@ -207,14 +204,9 @@ fn successful_trash_prunes_deleted_icon_grid_branch_before_reload() {
         loaded_directory(),
     ));
     browser.icon_grid_expansion = Some(state);
-    assert!(browser
-        .operation_queue
-        .enqueue(QueuedFileOperation::Trash {
-            paths: vec![branch.clone()],
-        })
-        .error()
-        .is_none());
-    let task_id = browser.operation_queue.tasks().last().unwrap().id;
+    let task_id = queued_task_id(browser.operation_queue.enqueue(QueuedFileOperation::Trash {
+        paths: vec![branch.clone()],
+    }));
 
     drop(browser.accept_file_operation_finished(
         task_id,

@@ -13,7 +13,10 @@ async fn supervision_adopts_a_foreign_nonterminal_task_with_a_free_lease() {
 
     let store = TaskQueueStore::new(directory.path().join("state.sqlite")).unwrap();
     let mut owner = FileOperationQueue::new();
-    owner.set_store(store.clone());
+    attach_store(&mut owner, store.clone());
+    // 两个实例同时在跑:幸存者启动时库里还没有任务,启动恢复不会提前接走它。
+    let mut survivor = FileOperationQueue::new();
+    attach_store(&mut survivor, store.clone());
     let transfers = vec![QueuedTransfer::new(source.clone(), target.clone())];
     let FileOperationEnqueueOutcome::Queued { task_id } =
         owner.enqueue(QueuedFileOperation::Move {
@@ -23,6 +26,7 @@ async fn supervision_adopts_a_foreign_nonterminal_task_with_a_free_lease() {
     else {
         panic!("recoverable move should enqueue");
     };
+    assert_persisted(&mut owner);
     let stored_task_id = owner.tasks()[0].stored_id.unwrap();
 
     // 模拟死亡驱动者留下的中间态:rename 已落盘,journal 停在 durable renamed。
@@ -59,9 +63,8 @@ async fn supervision_adopts_a_foreign_nonterminal_task_with_a_free_lease() {
     drop(owner);
 
     // 幸存实例:内存为空,监督 tick 扫 store 认领并推进到 Running。
-    let mut survivor = FileOperationQueue::new();
-    survivor.set_store(store.clone());
     assert!(survivor.supervise(std::time::Instant::now()).is_none());
+    assert_persisted(&mut survivor);
     assert_eq!(survivor.tasks().len(), 1);
     assert_eq!(survivor.tasks()[0].status, FileOperationStatus::Running);
     assert_eq!(survivor.tasks()[0].stored_id, Some(stored_task_id));
@@ -88,11 +91,9 @@ async fn supervision_adopts_a_foreign_nonterminal_task_with_a_free_lease() {
     // 终态由 UI 的 Finished 处理落账(queue.finish);认领任务以存储 id 结账。
     assert_eq!(
         survivor.finish(stored_task_id, FileOperationFinish::Succeeded,),
-        (
-            Some(crate::operation_queue::FileOperationTerminalStatus::Completed),
-            None
-        )
+        Some(crate::operation_queue::FileOperationTerminalStatus::Completed)
     );
+    assert_persisted(&mut survivor);
     assert!(store
         .read_transfer_recovery(stored_task_id)
         .unwrap()

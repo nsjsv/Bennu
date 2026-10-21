@@ -51,7 +51,7 @@ async fn sqlite_cross_filesystem_move_resumes_from_identified_retirement_artifac
     let transfers = vec![QueuedTransfer::new(source.clone(), target.clone())];
     let store = TaskQueueStore::new(source_directory.path().join("state.sqlite")).unwrap();
     let mut original_queue = FileOperationQueue::new();
-    original_queue.set_store(store.clone());
+    attach_store(&mut original_queue, store.clone());
     let FileOperationEnqueueOutcome::Queued { task_id } =
         original_queue.enqueue(QueuedFileOperation::Move {
             transfers: transfers.clone(),
@@ -60,6 +60,7 @@ async fn sqlite_cross_filesystem_move_resumes_from_identified_retirement_artifac
     else {
         panic!("recoverable cross-filesystem move should enqueue");
     };
+    assert_persisted(&mut original_queue);
     let running = original_queue.active_subscription().unwrap();
     let stored_task_id = running.stored_id.unwrap();
     let record = load_recoverable_transfer_records(store.clone(), stored_task_id)
@@ -89,11 +90,9 @@ async fn sqlite_cross_filesystem_move_resumes_from_identified_retirement_artifac
             task_id,
             FileOperationFinish::RecoveryInterrupted(error.to_string()),
         ),
-        (
-            Some(crate::operation_queue::FileOperationTerminalStatus::Failed),
-            None
-        )
+        Some(crate::operation_queue::FileOperationTerminalStatus::Failed)
     );
+    assert_persisted(&mut original_queue);
     let persisted = load_recoverable_transfer_records(store.clone(), stored_task_id)
         .await
         .unwrap()
@@ -127,11 +126,9 @@ async fn sqlite_cross_filesystem_move_resumes_from_identified_retirement_artifac
     assert_eq!(tokio::fs::read(&target).await.unwrap(), b"cross-device");
     assert_eq!(
         restored_queue.finish(stored_task_id, FileOperationFinish::Succeeded),
-        (
-            Some(crate::operation_queue::FileOperationTerminalStatus::Completed),
-            None
-        )
+        Some(crate::operation_queue::FileOperationTerminalStatus::Completed)
     );
+    assert_persisted(&mut restored_queue);
     assert!(store
         .read_transfer_recovery(stored_task_id)
         .unwrap()

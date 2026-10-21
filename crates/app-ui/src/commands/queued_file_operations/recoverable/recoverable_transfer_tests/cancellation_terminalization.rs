@@ -19,11 +19,9 @@ fn assert_canceled_task_finalizes(
 ) {
     assert_eq!(
         queue.finish(task_id, FileOperationFinish::Canceled),
-        (
-            Some(crate::operation_queue::FileOperationTerminalStatus::Canceled),
-            None
-        )
+        Some(crate::operation_queue::FileOperationTerminalStatus::Canceled)
     );
+    assert_persisted(queue);
     assert_eq!(
         store.read_task(stored_task_id).unwrap().unwrap().status,
         file_operation_store::StoredTaskStatus::Canceled
@@ -49,7 +47,7 @@ async fn cancellation_before_manifest_preparation_terminalizes_every_record() {
     }
     let store = TaskQueueStore::new(directory.path().join("copy-state.sqlite")).unwrap();
     let mut queue = FileOperationQueue::new();
-    queue.set_store(store.clone());
+    attach_store(&mut queue, store.clone());
     let FileOperationEnqueueOutcome::Queued { task_id } =
         queue.enqueue(QueuedFileOperation::Copy {
             transfers: transfers.clone(),
@@ -58,9 +56,11 @@ async fn cancellation_before_manifest_preparation_terminalizes_every_record() {
     else {
         panic!("recoverable copy should enqueue");
     };
+    assert_persisted(&mut queue);
     let running = queue.active_subscription().unwrap();
     let stored_task_id = running.stored_id.unwrap();
-    assert!(queue.cancel(task_id).is_none());
+    queue.cancel(task_id);
+    assert_persisted(&mut queue);
     let (mut output, _messages) = iced::futures::channel::mpsc::channel(64);
 
     let completion = run_queued_transfers(
@@ -98,7 +98,7 @@ async fn cancellation_after_direct_move_intents_terminalizes_every_record() {
     }
     let store = TaskQueueStore::new(directory.path().join("move-state.sqlite")).unwrap();
     let mut queue = FileOperationQueue::new();
-    queue.set_store(store.clone());
+    attach_store(&mut queue, store.clone());
     let FileOperationEnqueueOutcome::Queued { task_id } =
         queue.enqueue(QueuedFileOperation::Move {
             transfers: transfers.clone(),
@@ -107,6 +107,7 @@ async fn cancellation_after_direct_move_intents_terminalizes_every_record() {
     else {
         panic!("recoverable move should enqueue");
     };
+    assert_persisted(&mut queue);
     let running = queue.active_subscription().unwrap();
     let stored_task_id = running.stored_id.unwrap();
     let controls = running.controls.clone();
@@ -136,7 +137,8 @@ async fn cancellation_after_direct_move_intents_terminalizes_every_record() {
                 file_core::TransferCheckpoint::DirectMoveIntent(_)
             ))
     );
-    assert!(queue.cancel(task_id).is_none());
+    queue.cancel(task_id);
+    assert_persisted(&mut queue);
     let (mut output, _messages) = iced::futures::channel::mpsc::channel(64);
 
     let completion = run_queued_transfers(

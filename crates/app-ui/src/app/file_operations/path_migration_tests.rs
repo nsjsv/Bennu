@@ -10,6 +10,7 @@ use crate::model::{
     SplitAxis,
 };
 use crate::operation_history::FileOperationOutcome;
+use crate::operation_queue::test_persistence::{attach_store, enqueue_persisted};
 
 fn directory_entry(path: &str) -> DirectoryEntry {
     DirectoryEntry::new(
@@ -94,27 +95,21 @@ fn cross_directory_move_invalidates_source_and_preserves_target_tab_tree() {
     };
     browser.apply_pane_browsing_snapshot(target_pane);
     let operation_directory = tempfile::tempdir().expect("create operation directory");
-    browser.operation_queue.set_store(
+    attach_store(
+        &mut browser.operation_queue,
         file_operation_store::TaskQueueStore::new(operation_directory.path().join("state.sqlite"))
             .expect("create operation store"),
     );
-    assert!(browser
-        .operation_queue
-        .enqueue(QueuedFileOperation::Move {
+    let task_id = enqueue_persisted(
+        &mut browser.operation_queue,
+        QueuedFileOperation::Move {
             transfers: vec![crate::operation_queue::QueuedTransfer::new(
                 source_path.clone(),
                 target_path.clone(),
             )],
             verification: file_core::FileOperationVerification::default(),
-        })
-        .error()
-        .is_none());
-    let task_id = browser
-        .operation_queue
-        .tasks()
-        .last()
-        .expect("queued move")
-        .id;
+        },
+    );
 
     drop(browser.accept_file_operation_finished(
         task_id,

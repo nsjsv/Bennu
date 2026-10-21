@@ -11,6 +11,7 @@ use crate::model::{
     IconGridExpansionContext, IconGridExpansionSessionId, IconGridExpansionState, NavigationMode,
 };
 use crate::operation_history::{FileOperationCompletion, FileOperationOutcome};
+use crate::operation_queue::test_persistence::queued_task_id;
 use crate::operation_queue::QueuedFileOperation;
 
 fn test_entry(path: PathBuf, kind: FileKind) -> DirectoryEntry {
@@ -47,24 +48,15 @@ fn loaded_directory(entries: Vec<DirectoryEntry>) -> ExpandedDirectory {
 }
 
 fn finish_queued_rename(browser: &mut FileBrowser, from: PathBuf, to: PathBuf) {
-    assert!(browser
-        .operation_queue
-        .enqueue(QueuedFileOperation::Rename {
-            path: from.clone(),
-            new_name: to
-                .file_name()
-                .expect("rename target name")
-                .to_string_lossy()
-                .into_owned(),
-        })
-        .error()
-        .is_none());
-    let task_id = browser
-        .operation_queue
-        .tasks()
-        .last()
-        .expect("queued rename")
-        .id;
+    let rename = QueuedFileOperation::Rename {
+        path: from.clone(),
+        new_name: to
+            .file_name()
+            .expect("rename target name")
+            .to_string_lossy()
+            .into_owned(),
+    };
+    let task_id = queued_task_id(browser.operation_queue.enqueue(rename));
     drop(browser.accept_file_operation_finished(
         task_id,
         FileOperationCompletion::Succeeded(FileOperationOutcome::Rename { from, to }),

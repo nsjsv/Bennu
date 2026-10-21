@@ -10,8 +10,34 @@ use crate::model::{
     ListDirectorySummary, SplitAxis,
 };
 use crate::operation_history::FileOperationOutcome;
+use crate::operation_queue::test_persistence::{attach_store, enqueue_persisted, queued_task_id};
 use crate::shortcuts::FileSelectionDirection;
 use crate::thumbnail_cache::ColumnViewport;
+use iced::futures::StreamExt;
+
+/// 按正式版跑完界面入队产生的写库:Task 在后台执行,回执交给 update 处理
+/// `FileOperationPersistenceFinished` 的同一个函数,它再签发下一条请求。
+/// 入队 Task 只含写库请求;出现别的动作说明入队路径变了,直接失败。
+async fn enqueue_file_operation_persisted(
+    browser: &mut FileBrowser,
+    operation: QueuedFileOperation,
+) {
+    let mut pending = vec![browser.enqueue_file_operation(operation)];
+    while let Some(task) = pending.pop() {
+        let Some(mut stream) = iced_runtime::task::into_stream(task) else {
+            continue;
+        };
+        while let Some(action) = stream.next().await {
+            let iced_runtime::Action::Output(Message::FileOperationPersistenceFinished(outcome)) =
+                action
+            else {
+                panic!("enqueue produced an action other than file operation persistence");
+            };
+            pending.push(browser.accept_file_operation_persistence_finished(outcome));
+        }
+    }
+    assert!(browser.operation_queue.persistence_is_idle());
+}
 
 fn remember_summary(browser: &mut FileBrowser, path: &std::path::Path, count: usize, size: u64) {
     browser
@@ -34,24 +60,15 @@ fn remember_summary(browser: &mut FileBrowser, path: &std::path::Path, count: us
 }
 
 fn finish_queued_rename(browser: &mut FileBrowser, from: PathBuf, to: PathBuf) {
-    assert!(browser
-        .operation_queue
-        .enqueue(QueuedFileOperation::Rename {
-            path: from.clone(),
-            new_name: to
-                .file_name()
-                .expect("rename target name")
-                .to_string_lossy()
-                .into_owned(),
-        })
-        .error()
-        .is_none());
-    let task_id = browser
-        .operation_queue
-        .tasks()
-        .last()
-        .expect("queued rename")
-        .id;
+    let rename = QueuedFileOperation::Rename {
+        path: from.clone(),
+        new_name: to
+            .file_name()
+            .expect("rename target name")
+            .to_string_lossy()
+            .into_owned(),
+    };
+    let task_id = queued_task_id(browser.operation_queue.enqueue(rename));
     drop(browser.accept_file_operation_finished(
         task_id,
         FileOperationCompletion::Succeeded(FileOperationOutcome::Rename { from, to }),
@@ -127,7 +144,8 @@ fn loaded_expanded_directory() -> ExpandedDirectory {
 fn file_operation_events_preserve_queue_panel_visibility() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let operation_directory = tempfile::tempdir().expect("create operation directory");
-    browser.operation_queue.set_store(
+    attach_store(
+        &mut browser.operation_queue,
         file_operation_store::TaskQueueStore::new(operation_directory.path().join("state.sqlite"))
             .expect("create operation store"),
     );
@@ -259,19 +277,11 @@ fn completed_background_operation_preserves_active_rename_history() {
 
     drop(browser.begin_rename(edited_path.clone()));
     drop(browser.apply_rename_input_change(String::from("report-draft.txt")));
-    assert!(browser
-        .operation_queue
-        .enqueue(QueuedFileOperation::DeletePermanently {
+    let task_id = queued_task_id(browser.operation_queue.enqueue(
+        QueuedFileOperation::DeletePermanently {
             paths: vec![PathBuf::from("/workspace/obsolete.txt")],
-        })
-        .error()
-        .is_none());
-    let task_id = browser
-        .operation_queue
-        .tasks()
-        .last()
-        .expect("queued task")
-        .id;
+        },
+    ));
 
     drop(browser.accept_file_operation_finished(
         task_id,
@@ -289,20 +299,11 @@ fn duplicate_completion_is_rejected_before_history_side_effects() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let source = PathBuf::from("/workspace/old.txt");
     let destination = PathBuf::from("/workspace/new.txt");
-    assert!(browser
-        .operation_queue
-        .enqueue(QueuedFileOperation::Rename {
-            path: source.clone(),
-            new_name: "new.txt".to_owned(),
-        })
-        .error()
-        .is_none());
-    let task_id = browser
-        .operation_queue
-        .tasks()
-        .last()
-        .expect("queued rename")
-        .id;
+    let rename = QueuedFileOperation::Rename {
+        path: source.clone(),
+        new_name: "new.txt".to_owned(),
+    };
+    let task_id = queued_task_id(browser.operation_queue.enqueue(rename));
     let completion = FileOperationCompletion::Succeeded(FileOperationOutcome::Rename {
         from: source,
         to: destination,
@@ -315,24 +316,29 @@ fn duplicate_completion_is_rejected_before_history_side_effects() {
     assert!(browser.operation_history.take_undo_operation().is_none());
 }
 
-#[test]
-fn moved_renames_migrate_paths_before_terminal_completion() {
+#[tokio::test]
+async fn moved_renames_migrate_paths_before_terminal_completion() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let workspace = tempfile::tempdir().unwrap();
     let source = workspace.path().join("old");
     let destination = workspace.path().join("new");
     browser.current_dir = source.join("nested");
     browser.sync_active_tab_state();
-    browser.operation_queue.set_store(
+    attach_store(
+        &mut browser.operation_queue,
         file_operation_store::TaskQueueStore::new(workspace.path().join("state.sqlite")).unwrap(),
     );
-    drop(browser.enqueue_file_operation(QueuedFileOperation::Move {
-        transfers: vec![crate::operation_queue::QueuedTransfer::new(
-            source.clone(),
-            destination.clone(),
-        )],
-        verification: file_core::FileOperationVerification::BasicMetadata,
-    }));
+    enqueue_file_operation_persisted(
+        &mut browser,
+        QueuedFileOperation::Move {
+            transfers: vec![crate::operation_queue::QueuedTransfer::new(
+                source.clone(),
+                destination.clone(),
+            )],
+            verification: file_core::FileOperationVerification::BasicMetadata,
+        },
+    )
+    .await;
     let task_id = browser.operation_queue.tasks().last().unwrap().id;
 
     drop(browser.update(direct_move_renamed_batch_message(vec![(
@@ -362,8 +368,8 @@ fn moved_renames_migrate_paths_before_terminal_completion() {
     assert_eq!(browser.current_dir, destination.join("nested"));
 }
 
-#[test]
-fn moved_renames_batch_migrates_all_paths_with_one_pane_and_search_refresh() {
+#[tokio::test]
+async fn moved_renames_batch_migrates_all_paths_with_one_pane_and_search_refresh() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let workspace = tempfile::tempdir().unwrap();
     let first_source = workspace.path().join("first-old");
@@ -376,19 +382,27 @@ fn moved_renames_batch_migrates_all_paths_with_one_pane_and_search_refresh() {
     browser.renaming = Some(second_source.join("report.txt"));
     browser.sync_active_tab_state();
     drop(browser.update_search_input("report".to_owned()));
-    browser.operation_queue.set_store(
+    attach_store(
+        &mut browser.operation_queue,
         file_operation_store::TaskQueueStore::new(workspace.path().join("state.sqlite")).unwrap(),
     );
-    drop(browser.enqueue_file_operation(QueuedFileOperation::Move {
-        transfers: vec![
-            crate::operation_queue::QueuedTransfer::new(first_source.clone(), first_target.clone()),
-            crate::operation_queue::QueuedTransfer::new(
-                second_source.clone(),
-                second_target.clone(),
-            ),
-        ],
-        verification: file_core::FileOperationVerification::BasicMetadata,
-    }));
+    enqueue_file_operation_persisted(
+        &mut browser,
+        QueuedFileOperation::Move {
+            transfers: vec![
+                crate::operation_queue::QueuedTransfer::new(
+                    first_source.clone(),
+                    first_target.clone(),
+                ),
+                crate::operation_queue::QueuedTransfer::new(
+                    second_source.clone(),
+                    second_target.clone(),
+                ),
+            ],
+            verification: file_core::FileOperationVerification::BasicMetadata,
+        },
+    )
+    .await;
     let task_id = browser.operation_queue.tasks().last().unwrap().id;
     let pane_generation = browser.directory_load_generation;
     let search_generation = browser.search_workspace.as_ref().unwrap().run.generation;
@@ -521,14 +535,11 @@ fn completed_non_migration_operation_restarts_active_search_workspace() {
     browser.sync_active_tab_state();
     drop(browser.submit_search());
     let first_generation = browser.search_workspace.as_ref().unwrap().run.generation;
-    assert!(browser
-        .operation_queue
-        .enqueue(QueuedFileOperation::DeletePermanently {
+    let task_id = queued_task_id(browser.operation_queue.enqueue(
+        QueuedFileOperation::DeletePermanently {
             paths: vec![root.path().join("obsolete.txt")],
-        })
-        .error()
-        .is_none());
-    let task_id = browser.operation_queue.tasks().last().unwrap().id;
+        },
+    ));
 
     drop(browser.accept_file_operation_finished(
         task_id,
@@ -731,28 +742,22 @@ fn failed_move_migrates_paths_for_completed_transfers_only() {
     browser.current_dir = source.join("nested");
     browser.sync_active_tab_state();
     let operation_directory = tempfile::tempdir().unwrap();
-    browser.operation_queue.set_store(
+    attach_store(
+        &mut browser.operation_queue,
         file_operation_store::TaskQueueStore::new(operation_directory.path().join("state.sqlite"))
             .unwrap(),
     );
 
-    assert!(browser
-        .operation_queue
-        .enqueue(QueuedFileOperation::Move {
+    let task_id = enqueue_persisted(
+        &mut browser.operation_queue,
+        QueuedFileOperation::Move {
             transfers: vec![crate::operation_queue::QueuedTransfer::new(
                 source.clone(),
                 destination.clone(),
             )],
             verification: file_core::FileOperationVerification::default(),
-        })
-        .error()
-        .is_none());
-    let task_id = browser
-        .operation_queue
-        .tasks()
-        .last()
-        .expect("queued move")
-        .id;
+        },
+    );
 
     drop(browser.accept_file_operation_finished(
         task_id,
@@ -817,14 +822,9 @@ fn successful_trash_focuses_next_entry_after_keyboard_selection() {
     drop(browser.move_file_selection(FileSelectionDirection::Down));
     assert_eq!(browser.selected, Some(deleted.clone()));
 
-    assert!(browser
-        .operation_queue
-        .enqueue(QueuedFileOperation::Trash {
-            paths: vec![deleted.clone()],
-        })
-        .error()
-        .is_none());
-    let task_id = browser.operation_queue.tasks().last().unwrap().id;
+    let task_id = queued_task_id(browser.operation_queue.enqueue(QueuedFileOperation::Trash {
+        paths: vec![deleted.clone()],
+    }));
 
     drop(browser.accept_file_operation_finished(
         task_id,
@@ -854,19 +854,11 @@ fn finished_delete_operation_only_invalidates_affected_directory_chain() {
     remember_summary(&mut browser, &current_dir, 2, 2048);
     remember_summary(&mut browser, &unrelated, 1, 512);
 
-    assert!(browser
-        .operation_queue
-        .enqueue(QueuedFileOperation::DeletePermanently {
+    let task_id = queued_task_id(browser.operation_queue.enqueue(
+        QueuedFileOperation::DeletePermanently {
             paths: vec![deleted_child],
-        })
-        .error()
-        .is_none());
-    let task_id = browser
-        .operation_queue
-        .tasks()
-        .last()
-        .expect("queued task")
-        .id;
+        },
+    ));
 
     drop(browser.accept_file_operation_finished(
         task_id,
@@ -905,19 +897,11 @@ fn finished_directory_delete_operation_clears_cached_descendant_summaries() {
     remember_summary(&mut browser, &deleted_descendant, 1, 256);
     remember_summary(&mut browser, &unrelated, 1, 512);
 
-    assert!(browser
-        .operation_queue
-        .enqueue(QueuedFileOperation::DeletePermanently {
+    let task_id = queued_task_id(browser.operation_queue.enqueue(
+        QueuedFileOperation::DeletePermanently {
             paths: vec![deleted_directory],
-        })
-        .error()
-        .is_none());
-    let task_id = browser
-        .operation_queue
-        .tasks()
-        .last()
-        .expect("queued task")
-        .id;
+        },
+    ));
 
     drop(browser.accept_file_operation_finished(
         task_id,

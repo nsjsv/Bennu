@@ -189,7 +189,7 @@ async fn run_real_directory_move_batch_trace(
 
     let store = TaskQueueStore::new(store_root.join("state.sqlite")).unwrap();
     let mut queue = FileOperationQueue::new();
-    queue.set_store_with_deferred_persistence(store);
+    attach_store(&mut queue, store);
 
     let trace_started = Instant::now();
     let acceptance_started = Instant::now();
@@ -321,7 +321,7 @@ async fn run_scenario(
     let store = TaskQueueStore::new(scenario_root.join("state.sqlite")).unwrap();
     let transfer = QueuedTransfer::new(source.clone(), target.clone());
     let mut queue = FileOperationQueue::new();
-    queue.set_store_with_deferred_persistence(store);
+    attach_store(&mut queue, store);
 
     let database_path = scenario_root.join("state.sqlite");
     let (writer_ready_tx, writer_ready_rx) = std::sync::mpsc::channel();
@@ -343,8 +343,7 @@ async fn run_scenario(
     let outcome = queue.enqueue(operation.queued_operation(transfer.clone(), verification.value));
     let acceptance_finished = Instant::now();
     let _local_task_id = match outcome {
-        FileOperationEnqueueOutcome::Queued { task_id }
-        | FileOperationEnqueueOutcome::QueuedWithStorageWarning { task_id, .. } => task_id,
+        FileOperationEnqueueOutcome::Queued { task_id } => task_id,
         FileOperationEnqueueOutcome::Rejected { error } => {
             panic!("harness enqueue failed: {error}")
         }
@@ -554,7 +553,7 @@ async fn run_move_batch_visibility_scenario(scenario_root: &Path) {
 
     let store = TaskQueueStore::new(scenario_root.join("state.sqlite")).unwrap();
     let mut queue = FileOperationQueue::new();
-    queue.set_store(store);
+    attach_store(&mut queue, store);
     let FileOperationEnqueueOutcome::Queued { task_id } =
         queue.enqueue(QueuedFileOperation::Move {
             transfers: transfers.clone(),
@@ -563,6 +562,7 @@ async fn run_move_batch_visibility_scenario(scenario_root: &Path) {
     else {
         panic!("batch visibility harness enqueue failed");
     };
+    assert_persisted(&mut queue);
     let running = queue
         .active_subscription()
         .expect("batch runner must be observable");

@@ -12,6 +12,7 @@ use crate::model::{
     BrowserViewMode, DestructiveActionConfirmation, FileDragStationaryAction, FileDropTarget,
     FileEntryContentModifier, PendingOperation,
 };
+use crate::operation_queue::test_persistence::attach_store;
 use crate::operation_queue::{QueuedFileOperation, QueuedTransfer};
 use desktop_linux::{NetworkConnection, NetworkConnectionId, NetworkMountState, NetworkProtocol};
 use file_core::{DirectoryEntry, EntryMetadata, FileKind};
@@ -305,7 +306,8 @@ fn duplicate_selected_enqueues_in_place_copies_for_whole_selection() {
     let mut browser = browser_with_entries(&[report.clone(), notes.clone()]);
     // 副本走复制管线,恢复日志需要任务存储。
     let state_directory = tempfile::tempdir().unwrap();
-    browser.operation_queue.set_store(
+    attach_store(
+        &mut browser.operation_queue,
         file_operation_store::TaskQueueStore::new(state_directory.path().join("state.sqlite"))
             .unwrap(),
     );

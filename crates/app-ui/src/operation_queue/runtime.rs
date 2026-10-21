@@ -243,16 +243,8 @@ impl FileOperationQueue {
                                 &sanitized_application_log_detail(&error),
                             );
                             acceptance.rejected_task_id = Some(ui_task_id);
-                            #[cfg(test)]
-                            if self.persist_synchronously_for_tests {
-                                let task = &mut self.tasks[position];
-                                task.status = FileOperationStatus::Failed;
-                                task.error = Some(error);
-                                task.is_read = self.is_panel_open;
-                            } else {
-                                self.tasks.remove(position);
-                            }
-                            #[cfg(not(test))]
+                            // 没有持久日志就不能承诺崩溃恢复:任务直接移除(fail-closed),
+                            // 错误经回执交给调用方显示。
                             self.tasks.remove(position);
                         } else if self.tasks[position].status == FileOperationStatus::Canceled {
                             acceptance.canceled_before_start_task_id = Some(ui_task_id);
@@ -408,19 +400,5 @@ impl FileOperationQueue {
             error: task.error.clone(),
             persistence,
         });
-    }
-
-    #[cfg(test)]
-    pub(super) fn complete_test_persistence(&mut self) -> Option<String> {
-        if !self.persist_synchronously_for_tests {
-            return None;
-        }
-        let mut storage_error = None;
-        while let Some(request) = self.take_next_persistence_request() {
-            let outcome = execute_file_operation_persistence(request);
-            let acceptance = self.accept_persistence_outcome(outcome);
-            storage_error = combine_storage_errors(storage_error, acceptance.error);
-        }
-        storage_error
     }
 }

@@ -25,7 +25,7 @@ async fn prepare_failure_settles_journal_and_finalizes_failed_task() {
     ];
     let store = TaskQueueStore::new(directory.path().join("state.sqlite")).unwrap();
     let mut queue = FileOperationQueue::new();
-    queue.set_store(store.clone());
+    attach_store(&mut queue, store.clone());
     let FileOperationEnqueueOutcome::Queued { task_id } =
         queue.enqueue(QueuedFileOperation::Move {
             transfers: transfers.clone(),
@@ -34,6 +34,7 @@ async fn prepare_failure_settles_journal_and_finalizes_failed_task() {
     else {
         panic!("recoverable move should enqueue");
     };
+    assert_persisted(&mut queue);
     let running = queue.active_subscription().unwrap();
     let stored_task_id = running.stored_id.unwrap();
     let (mut output, _messages) = iced::futures::channel::mpsc::channel(64);
@@ -73,11 +74,9 @@ async fn prepare_failure_settles_journal_and_finalizes_failed_task() {
     )));
     assert_eq!(
         queue.finish(task_id, FileOperationFinish::Failed(error.clone())),
-        (
-            Some(crate::operation_queue::FileOperationTerminalStatus::Failed),
-            None
-        )
+        Some(crate::operation_queue::FileOperationTerminalStatus::Failed)
     );
+    assert_persisted(&mut queue);
     assert_eq!(
         store.read_task(stored_task_id).unwrap().unwrap().status,
         file_operation_store::StoredTaskStatus::Failed

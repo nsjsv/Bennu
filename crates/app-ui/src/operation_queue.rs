@@ -37,11 +37,6 @@ pub(crate) const NEW_FILE_NAME: &str = "New File";
 
 const LOCAL_TASK_ID_START: u64 = 1 << 63;
 
-#[cfg(test)]
-std::thread_local! {
-    static RECORDED_FILE_OPERATION_FAILURES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
 fn record_file_operation_failure(task_id: u64, operation: &str, log_error: &str) {
     tracing::error!(
         target: "app_ui::file_operations",
@@ -51,8 +46,6 @@ fn record_file_operation_failure(task_id: u64, operation: &str, log_error: &str)
         error = %log_error,
         "file operation failed"
     );
-    #[cfg(test)]
-    RECORDED_FILE_OPERATION_FAILURES.with(|count| count.set(count.get() + 1));
 }
 
 #[derive(Debug, Clone)]
@@ -322,20 +315,10 @@ pub(crate) enum FileOperationFinish {
     RecoveryBlocked(String),
 }
 
+/// 入队只决定任务能否开始;写库结果经 `accept_persistence_outcome` 的回执返回。
 pub(crate) enum FileOperationEnqueueOutcome {
     Queued { task_id: u64 },
-    QueuedWithStorageWarning { task_id: u64, error: String },
     Rejected { error: String },
-}
-
-impl FileOperationEnqueueOutcome {
-    #[cfg(test)]
-    pub(crate) fn error(&self) -> Option<&str> {
-        match self {
-            Self::Queued { .. } => None,
-            Self::QueuedWithStorageWarning { error, .. } | Self::Rejected { error } => Some(error),
-        }
-    }
 }
 
 pub(crate) struct FileOperationTask {
@@ -419,8 +402,6 @@ pub(crate) struct FileOperationQueue {
     store: Option<TaskQueueStore>,
     /// 下次允许扫 store 认领外来任务的时刻(监督节流)。
     next_store_scan: Option<std::time::Instant>,
-    #[cfg(test)]
-    persist_synchronously_for_tests: bool,
 }
 
 impl FileOperationQueue {
@@ -435,16 +416,10 @@ impl FileOperationQueue {
             is_panel_open: false,
             store: None,
             next_store_scan: None,
-            #[cfg(test)]
-            persist_synchronously_for_tests: false,
         }
     }
 
     pub(crate) fn set_store_and_restore(&mut self, store: TaskQueueStore) -> Option<String> {
-        #[cfg(test)]
-        {
-            self.persist_synchronously_for_tests = true;
-        }
         let restore_coordinator = match store.try_acquire_recoverable_restore_coordinator() {
             Ok(Some(restore_coordinator)) => restore_coordinator,
             Ok(None) => {
@@ -472,27 +447,11 @@ impl FileOperationQueue {
         }
         drop(restore_coordinator);
 
-        let storage_error = combine_storage_errors(storage_error, self.start_next());
-        #[cfg(test)]
-        return combine_storage_errors(storage_error, self.complete_test_persistence());
-        #[cfg(not(test))]
-        storage_error
+        combine_storage_errors(storage_error, self.start_next())
     }
 
     pub(crate) fn task_queue_store(&self) -> Option<&TaskQueueStore> {
         self.store.as_ref()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn set_store(&mut self, store: TaskQueueStore) {
-        self.store = Some(store);
-        self.persist_synchronously_for_tests = true;
-    }
-
-    #[cfg(test)]
-    pub(crate) fn set_store_with_deferred_persistence(&mut self, store: TaskQueueStore) {
-        self.store = Some(store);
-        self.persist_synchronously_for_tests = false;
     }
 
     pub(crate) fn tasks(&self) -> &[FileOperationTask] {
@@ -584,35 +543,9 @@ impl FileOperationQueue {
         }
         let _ = self.start_next();
 
-        #[cfg(test)]
-        let persistence_error = self.complete_test_persistence();
-        #[cfg(not(test))]
-        let persistence_error = None;
-
-        #[cfg(test)]
-        let returned_id = self.tasks.last().map(|task| task.id).unwrap_or(id);
-        #[cfg(not(test))]
-        let returned_id = id;
-
-        if let Some(error) = persistence_error {
-            if requires_recovery_journal
-                && self
-                    .tasks
-                    .iter()
-                    .find(|task| task.id == id)
-                    .is_some_and(|task| task.status == FileOperationStatus::Failed)
-            {
-                self.tasks.retain(|task| task.id != id);
-                return FileOperationEnqueueOutcome::Rejected { error };
-            }
-            return FileOperationEnqueueOutcome::QueuedWithStorageWarning {
-                task_id: returned_id,
-                error,
-            };
-        }
-        FileOperationEnqueueOutcome::Queued {
-            task_id: returned_id,
-        }
+        // 写库结果经 accept_persistence_outcome 的回执返回:初始写库失败时
+        // 可恢复任务在那里被移除并报告 rejected_task_id。
+        FileOperationEnqueueOutcome::Queued { task_id: id }
     }
 
     pub(crate) fn active_subscription(&self) -> Option<RunningFileOperation> {
@@ -694,7 +627,7 @@ impl FileOperationQueue {
         self.tasks.iter().any(|task| task.status.is_terminal())
     }
 
-    pub(crate) fn clear_terminal_task(&mut self, id: u64) -> Option<String> {
+    pub(crate) fn clear_terminal_task(&mut self, id: u64) {
         let task_ids = self
             .tasks
             .iter()
@@ -709,7 +642,7 @@ impl FileOperationQueue {
         self.clear_terminal_task_ids(&task_ids)
     }
 
-    pub(crate) fn clear_terminal_tasks(&mut self) -> Option<String> {
+    pub(crate) fn clear_terminal_tasks(&mut self) {
         let task_ids = self
             .tasks
             .iter()
@@ -740,9 +673,9 @@ impl FileOperationQueue {
             })
     }
 
-    fn clear_terminal_task_ids(&mut self, task_ids: &BTreeSet<u64>) -> Option<String> {
+    fn clear_terminal_task_ids(&mut self, task_ids: &BTreeSet<u64>) {
         if task_ids.is_empty() {
-            return None;
+            return;
         }
         let persisted = self
             .tasks
@@ -757,7 +690,7 @@ impl FileOperationQueue {
         self.tasks
             .retain(|task| !task_ids.contains(&task.id) || persisted_ui_ids.contains(&task.id));
         if persisted.is_empty() {
-            return None;
+            return;
         }
 
         self.pending_deletions
@@ -776,10 +709,6 @@ impl FileOperationQueue {
                 .map(|(ui_task_id, _)| *ui_task_id)
                 .collect(),
         });
-        #[cfg(test)]
-        return self.complete_test_persistence();
-        #[cfg(not(test))]
-        None
     }
 
     pub(crate) fn update_progress(
@@ -809,44 +738,20 @@ impl FileOperationQueue {
         &mut self,
         id: u64,
         outcome: FileOperationFinish,
-    ) -> (Option<FileOperationTerminalStatus>, Option<String>) {
+    ) -> Option<FileOperationTerminalStatus> {
         let terminal_status = self.finish_without_advancing_queue(id, outcome);
         let _ = self.start_next();
-        #[cfg(test)]
-        let storage_error = self.complete_test_persistence();
-        #[cfg(not(test))]
-        let storage_error = None;
-        (terminal_status, storage_error)
+        terminal_status
     }
 
+    /// 关机期间不再启动下一个任务;终态写库完成后由回执的
+    /// `persisted_recoverable_terminal_stored_id` 推进关机流程。
     pub(crate) fn finish_for_application_shutdown(
         &mut self,
         id: u64,
         outcome: FileOperationFinish,
-    ) -> (
-        Option<FileOperationTerminalStatus>,
-        Option<String>,
-        Option<u64>,
     ) {
-        #[cfg(test)]
-        let recoverable_stored_id = self
-            .tasks
-            .iter()
-            .find(|task| task.id == id && task.operation.uses_recovery_journal())
-            .and_then(|task| task.stored_id);
-        let terminal_status = self.finish_without_advancing_queue(id, outcome);
-        #[cfg(test)]
-        let storage_error = self.complete_test_persistence();
-        #[cfg(not(test))]
-        let storage_error = None;
-        #[cfg(test)]
-        let persisted_terminal_stored_id = storage_error
-            .is_none()
-            .then_some(recoverable_stored_id)
-            .flatten();
-        #[cfg(not(test))]
-        let persisted_terminal_stored_id = None;
-        (terminal_status, storage_error, persisted_terminal_stored_id)
+        self.finish_without_advancing_queue(id, outcome);
     }
 
     fn finish_without_advancing_queue(
@@ -975,8 +880,10 @@ impl FileOperationQueue {
         Some(terminal_status)
     }
 
-    pub(crate) fn toggle_pause(&mut self, id: u64) -> Option<String> {
-        let position = self.tasks.iter().position(|task| task.id == id)?;
+    pub(crate) fn toggle_pause(&mut self, id: u64) {
+        let Some(position) = self.tasks.iter().position(|task| task.id == id) else {
+            return;
+        };
         match self.tasks[position].status {
             FileOperationStatus::Running => {
                 let task = &mut self.tasks[position];
@@ -992,16 +899,14 @@ impl FileOperationQueue {
                 task.last_driver_signal = Some(std::time::Instant::now());
                 self.queue_task_status(position);
             }
-            _ => return None,
+            _ => {}
         }
-        #[cfg(test)]
-        return self.complete_test_persistence();
-        #[cfg(not(test))]
-        None
     }
 
-    pub(crate) fn cancel(&mut self, id: u64) -> Option<String> {
-        let position = self.tasks.iter().position(|task| task.id == id)?;
+    pub(crate) fn cancel(&mut self, id: u64) {
+        let Some(position) = self.tasks.iter().position(|task| task.id == id) else {
+            return;
+        };
 
         match self.tasks[position].status {
             FileOperationStatus::Pending
@@ -1037,14 +942,10 @@ impl FileOperationQueue {
             FileOperationStatus::Canceling
             | FileOperationStatus::Failed
             | FileOperationStatus::Completed
-            | FileOperationStatus::Canceled => return None,
+            | FileOperationStatus::Canceled => return,
         }
 
         let _ = self.start_next();
-        #[cfg(test)]
-        return self.complete_test_persistence();
-        #[cfg(not(test))]
-        None
     }
 
     pub(crate) fn begin_application_shutdown(&mut self) -> FileOperationShutdownDisposition {
@@ -1244,5 +1145,7 @@ fn stored_status_is_terminal(status: StoredTaskStatus) -> bool {
 
 #[cfg(test)]
 mod progress_tests;
+#[cfg(test)]
+pub(crate) mod test_persistence;
 #[cfg(test)]
 mod tests;

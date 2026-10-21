@@ -18,6 +18,7 @@ use crate::model::{
     SettingsSubpage, SplitAxis, WindowChromeLayout, WindowFrameState, WINDOW_TOP_BAR_HEIGHT,
 };
 use crate::operation_history::FileOperationCompletion;
+use crate::operation_queue::test_persistence::enqueue_persisted;
 use crate::operation_queue::{QueuedFileOperation, QueuedTransfer};
 use bennu_preview::engine::preview_window_settings;
 use bennu_preview::preview::PreviewWindowChromeState;
@@ -138,22 +139,33 @@ fn assert_close(actual: f32, expected: f32) {
     );
 }
 
-async fn shutdown_actions(task: Task<Message>) -> Vec<ShutdownAction> {
-    let Some(mut stream) = iced_runtime::task::into_stream(task) else {
-        return Vec::new();
-    };
+/// 文件操作写库回执像运行时一样立即交回 `update`;其余输出只记录,
+/// 由测试逐条发送,以便断言关机每一步。
+async fn shutdown_actions(
+    browser: &mut FileBrowser,
+    start: impl FnOnce(&mut FileBrowser) -> Task<Message>,
+) -> Vec<ShutdownAction> {
+    let mut pending = vec![start(browser)];
     let mut actions = Vec::new();
-    while let Some(action) = stream.next().await {
-        match action {
-            Action::Window(iced_runtime::window::Action::Close(window)) => {
-                actions.push(ShutdownAction::WindowClosed(window));
+    while let Some(task) = pending.pop() {
+        let Some(mut stream) = iced_runtime::task::into_stream(task) else {
+            continue;
+        };
+        while let Some(action) = stream.next().await {
+            match action {
+                Action::Window(iced_runtime::window::Action::Close(window)) => {
+                    actions.push(ShutdownAction::WindowClosed(window));
+                }
+                Action::Output(Message::ApplicationShutdownPersisted(result)) => {
+                    assert_eq!(result, Ok(()));
+                    actions.push(ShutdownAction::PersistenceFinished);
+                }
+                Action::Output(message @ Message::FileOperationPersistenceFinished(_)) => {
+                    pending.push(browser.update(message));
+                }
+                Action::Exit => actions.push(ShutdownAction::Exit),
+                _ => {}
             }
-            Action::Output(Message::ApplicationShutdownPersisted(result)) => {
-                assert_eq!(result, Ok(()));
-                actions.push(ShutdownAction::PersistenceFinished);
-            }
-            Action::Exit => actions.push(ShutdownAction::Exit),
-            _ => {}
         }
     }
     actions
@@ -705,7 +717,10 @@ async fn idle_shutdown_closes_every_window_and_exits_after_one_outcome() {
     browser.properties_window = Some(properties_window);
     browser.preview_window = Some(preview_window);
 
-    let shutdown = shutdown_actions(browser.close_auxiliary_window(browser.main_window)).await;
+    let shutdown = shutdown_actions(&mut browser, |browser| {
+        browser.close_auxiliary_window(browser.main_window)
+    })
+    .await;
     let closed = shutdown
         .iter()
         .filter_map(|action| match action {
@@ -725,21 +740,20 @@ async fn idle_shutdown_closes_every_window_and_exits_after_one_outcome() {
     assert!(!shutdown.contains(&ShutdownAction::PersistenceFinished));
     assert!(!shutdown.contains(&ShutdownAction::Exit));
     for window in [settings_window, properties_window, preview_window] {
-        assert!(
-            shutdown_actions(browser.update(Message::ApplicationWindowClosed(window)))
-                .await
-                .is_empty()
-        );
+        assert!(shutdown_actions(&mut browser, |browser| browser
+            .update(Message::ApplicationWindowClosed(window)))
+        .await
+        .is_empty());
     }
-    let persisted =
-        shutdown_actions(browser.update(Message::ApplicationWindowClosed(browser.main_window)))
-            .await;
+    let persisted = shutdown_actions(&mut browser, |browser| {
+        browser.update(Message::ApplicationWindowClosed(browser.main_window))
+    })
+    .await;
     assert_eq!(persisted, vec![ShutdownAction::PersistenceFinished]);
-    assert!(
-        shutdown_actions(browser.close_auxiliary_window(browser.main_window))
-            .await
-            .is_empty()
-    );
+    assert!(shutdown_actions(&mut browser, |browser| browser
+        .close_auxiliary_window(browser.main_window))
+    .await
+    .is_empty());
     assert!(
         observed_window_actions(browser.update(Message::AuxiliaryWindowResized(
             browser.main_window,
@@ -751,27 +765,31 @@ async fn idle_shutdown_closes_every_window_and_exits_after_one_outcome() {
     );
 
     assert_eq!(
-        shutdown_actions(browser.update(Message::ApplicationShutdownPersisted(Ok(())))).await,
+        shutdown_actions(&mut browser, |browser| browser
+            .update(Message::ApplicationShutdownPersisted(Ok(()))))
+        .await,
         vec![ShutdownAction::Exit]
     );
-    assert!(
-        shutdown_actions(browser.update(Message::ApplicationShutdownPersisted(Ok(()))))
-            .await
-            .is_empty()
-    );
+    assert!(shutdown_actions(&mut browser, |browser| browser
+        .update(Message::ApplicationShutdownPersisted(Ok(()))))
+    .await
+    .is_empty());
 }
 
 #[tokio::test]
 async fn observed_main_window_close_starts_persistence_without_a_second_close_action() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
 
-    let shutdown =
-        shutdown_actions(browser.update(Message::ApplicationWindowClosed(browser.main_window)))
-            .await;
+    let shutdown = shutdown_actions(&mut browser, |browser| {
+        browser.update(Message::ApplicationWindowClosed(browser.main_window))
+    })
+    .await;
 
     assert_eq!(shutdown, vec![ShutdownAction::PersistenceFinished]);
     assert_eq!(
-        shutdown_actions(browser.update(Message::ApplicationShutdownPersisted(Ok(())))).await,
+        shutdown_actions(&mut browser, |browser| browser
+            .update(Message::ApplicationShutdownPersisted(Ok(()))))
+        .await,
         vec![ShutdownAction::Exit]
     );
 }
@@ -781,8 +799,10 @@ async fn close_command_completion_is_a_bounded_missing_event_fallback() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     drop(browser.close_auxiliary_window(browser.main_window));
 
-    let persisted =
-        shutdown_actions(browser.update(Message::ApplicationWindowCloseCommandsFinished)).await;
+    let persisted = shutdown_actions(&mut browser, |browser| {
+        browser.update(Message::ApplicationWindowCloseCommandsFinished)
+    })
+    .await;
 
     assert_eq!(persisted, vec![ShutdownAction::PersistenceFinished]);
 }
@@ -811,14 +831,15 @@ async fn shutdown_waits_for_old_preferences_save_then_commits_latest_search_hist
         .record_submission("latest");
 
     drop(browser.close_auxiliary_window(browser.main_window));
-    assert!(shutdown_actions(
-        browser.update(Message::ApplicationWindowClosed(browser.main_window)),
-    )
+    assert!(shutdown_actions(&mut browser, |browser| browser
+        .update(Message::ApplicationWindowClosed(browser.main_window)))
     .await
     .is_empty());
 
     assert_eq!(
-        shutdown_actions(browser.update(Message::UserPreferencesSaved(Ok(())))).await,
+        shutdown_actions(&mut browser, |browser| browser
+            .update(Message::UserPreferencesSaved(Ok(()))))
+        .await,
         vec![ShutdownAction::PersistenceFinished]
     );
     assert_eq!(
@@ -852,16 +873,21 @@ async fn final_shutdown_session_waits_for_an_older_save_outcome() {
     browser.sync_active_tab_state();
     browser.browser_session_saves_in_flight = 1;
 
-    let initial = shutdown_actions(browser.close_auxiliary_window(browser.main_window)).await;
+    let initial = shutdown_actions(&mut browser, |browser| {
+        browser.close_auxiliary_window(browser.main_window)
+    })
+    .await;
     assert!(initial.contains(&ShutdownAction::WindowClosed(browser.main_window)));
     assert!(!initial.contains(&ShutdownAction::PersistenceFinished));
-    assert!(shutdown_actions(
-        browser.update(Message::ApplicationWindowClosed(browser.main_window)),
-    )
+    assert!(shutdown_actions(&mut browser, |browser| browser
+        .update(Message::ApplicationWindowClosed(browser.main_window)))
     .await
     .is_empty());
 
-    let persisted = shutdown_actions(browser.update(Message::BrowserSessionSaved(Ok(())))).await;
+    let persisted = shutdown_actions(&mut browser, |browser| {
+        browser.update(Message::BrowserSessionSaved(Ok(())))
+    })
+    .await;
     assert_eq!(persisted, vec![ShutdownAction::PersistenceFinished]);
     let stored = store.read_browser_session().unwrap().unwrap();
     assert_eq!(
@@ -882,23 +908,26 @@ async fn recoverable_runner_ack_precedes_one_shutdown_transaction_and_exit() {
         column_width_reference_content_width: None,
         classified_startup_session: None,
     })));
-    let enqueue = browser.operation_queue.enqueue(QueuedFileOperation::Copy {
-        transfers: vec![QueuedTransfer::new(
-            temp_dir.path().join("source"),
-            temp_dir.path().join("target"),
-        )],
-        verification: file_core::FileOperationVerification::BasicMetadata,
-    });
-    assert!(enqueue.error().is_none());
-    let task_id = browser.operation_queue.tasks()[0].id;
+    let task_id = enqueue_persisted(
+        &mut browser.operation_queue,
+        QueuedFileOperation::Copy {
+            transfers: vec![QueuedTransfer::new(
+                temp_dir.path().join("source"),
+                temp_dir.path().join("target"),
+            )],
+            verification: file_core::FileOperationVerification::BasicMetadata,
+        },
+    );
 
-    let initial = shutdown_actions(browser.close_auxiliary_window(browser.main_window)).await;
+    let initial = shutdown_actions(&mut browser, |browser| {
+        browser.close_auxiliary_window(browser.main_window)
+    })
+    .await;
     let stored_task_id = browser.operation_queue.tasks()[0].stored_id.unwrap();
     assert!(initial.contains(&ShutdownAction::WindowClosed(browser.main_window)));
     assert!(!initial.contains(&ShutdownAction::PersistenceFinished));
-    assert!(shutdown_actions(
-        browser.update(Message::ApplicationWindowClosed(browser.main_window)),
-    )
+    assert!(shutdown_actions(&mut browser, |browser| browser
+        .update(Message::ApplicationWindowClosed(browser.main_window)))
     .await
     .is_empty());
     assert!(store
@@ -906,11 +935,16 @@ async fn recoverable_runner_ack_precedes_one_shutdown_transaction_and_exit() {
         .unwrap()
         .is_none());
 
-    let persisted = shutdown_actions(browser.update(Message::FileOperationFinished(
-        task_id,
-        0,
-        FileOperationCompletion::RecoveryInterrupted("application stopping".to_owned(), Vec::new()),
-    )))
+    let persisted = shutdown_actions(&mut browser, |browser| {
+        browser.update(Message::FileOperationFinished(
+            task_id,
+            0,
+            FileOperationCompletion::RecoveryInterrupted(
+                "application stopping".to_owned(),
+                Vec::new(),
+            ),
+        ))
+    })
     .await;
     assert_eq!(persisted, vec![ShutdownAction::PersistenceFinished]);
     assert_eq!(
@@ -928,7 +962,9 @@ async fn recoverable_runner_ack_precedes_one_shutdown_transaction_and_exit() {
         .is_none());
 
     assert_eq!(
-        shutdown_actions(browser.update(Message::ApplicationShutdownPersisted(Ok(())))).await,
+        shutdown_actions(&mut browser, |browser| browser
+            .update(Message::ApplicationShutdownPersisted(Ok(()))))
+        .await,
         vec![ShutdownAction::Exit]
     );
     assert!(store
@@ -949,29 +985,29 @@ async fn terminal_recoverable_completion_is_not_rewritten_as_recovery_pending() 
         column_width_reference_content_width: None,
         classified_startup_session: None,
     })));
-    assert!(browser
-        .operation_queue
-        .enqueue(QueuedFileOperation::Copy {
+    let task_id = enqueue_persisted(
+        &mut browser.operation_queue,
+        QueuedFileOperation::Copy {
             transfers: vec![QueuedTransfer::new(
                 temp_dir.path().join("source"),
                 temp_dir.path().join("target"),
             )],
             verification: file_core::FileOperationVerification::BasicMetadata,
-        })
-        .error()
-        .is_none());
-    let task_id = browser.operation_queue.tasks()[0].id;
+        },
+    );
 
     drop(browser.close_auxiliary_window(browser.main_window));
     drop(browser.update(Message::ApplicationWindowClosed(browser.main_window)));
-    let persisted = shutdown_actions(browser.update(Message::FileOperationFinished(
-        task_id,
-        0,
-        FileOperationCompletion::RecoveryBlocked {
-            error: "manual recovery required".to_owned(),
-            completed_move_transfers: Vec::new(),
-        },
-    )))
+    let persisted = shutdown_actions(&mut browser, |browser| {
+        browser.update(Message::FileOperationFinished(
+            task_id,
+            0,
+            FileOperationCompletion::RecoveryBlocked {
+                error: "manual recovery required".to_owned(),
+                completed_move_transfers: Vec::new(),
+            },
+        ))
+    })
     .await;
 
     assert_eq!(persisted, vec![ShutdownAction::PersistenceFinished]);
@@ -1008,18 +1044,24 @@ async fn close_all_windows_saves_browser_session_before_exit() {
     browser.deepest_open_column_directory = Some(deepest.clone());
     browser.sync_active_tab_state();
 
-    let shutdown = shutdown_actions(browser.close_auxiliary_window(browser.main_window)).await;
+    let shutdown = shutdown_actions(&mut browser, |browser| {
+        browser.close_auxiliary_window(browser.main_window)
+    })
+    .await;
     assert!(shutdown.contains(&ShutdownAction::WindowClosed(browser.main_window)));
     assert!(!shutdown.contains(&ShutdownAction::PersistenceFinished));
     assert!(!shutdown.contains(&ShutdownAction::Exit));
 
-    let persisted =
-        shutdown_actions(browser.update(Message::ApplicationWindowClosed(browser.main_window)))
-            .await;
+    let persisted = shutdown_actions(&mut browser, |browser| {
+        browser.update(Message::ApplicationWindowClosed(browser.main_window))
+    })
+    .await;
     assert_eq!(persisted, vec![ShutdownAction::PersistenceFinished]);
 
-    let exit =
-        shutdown_actions(browser.update(Message::ApplicationShutdownPersisted(Ok(())))).await;
+    let exit = shutdown_actions(&mut browser, |browser| {
+        browser.update(Message::ApplicationShutdownPersisted(Ok(())))
+    })
+    .await;
     assert_eq!(exit, vec![ShutdownAction::Exit]);
 
     let stored_session = store

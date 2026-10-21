@@ -393,6 +393,7 @@ fn indicator_svg(ring: QueueIndicatorRing, badge: QueueIndicatorBadge) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::operation_queue::test_persistence::queued_task_id;
 
     #[test]
     fn indicator_hides_progress_ring_for_completed_only_tasks() {
@@ -423,24 +424,16 @@ mod tests {
     #[test]
     fn task_panel_displays_newest_first_without_changing_fifo_runner() {
         let mut queue = FileOperationQueue::new();
-        assert!(queue
-            .enqueue(
-                crate::operation_queue::QueuedFileOperation::CreateDirectory {
-                    parent: std::path::PathBuf::from("/first"),
-                }
-            )
-            .error()
-            .is_none());
-        let first_id = queue.tasks()[0].id;
-        assert!(queue
-            .enqueue(
-                crate::operation_queue::QueuedFileOperation::CreateDirectory {
-                    parent: std::path::PathBuf::from("/second"),
-                }
-            )
-            .error()
-            .is_none());
-        let second_id = queue.tasks()[1].id;
+        let first_id = queued_task_id(queue.enqueue(
+            crate::operation_queue::QueuedFileOperation::CreateDirectory {
+                parent: std::path::PathBuf::from("/first"),
+            },
+        ));
+        let second_id = queued_task_id(queue.enqueue(
+            crate::operation_queue::QueuedFileOperation::CreateDirectory {
+                parent: std::path::PathBuf::from("/second"),
+            },
+        ));
 
         let displayed_ids = operation_queue_display_tasks(&queue)
             .map(|task| task.id)

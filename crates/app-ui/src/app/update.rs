@@ -316,15 +316,11 @@ impl FileBrowser {
                 Task::none()
             }
             Message::FileOperationPauseToggled(task_id) => {
-                if let Some(error) = self.operation_queue.toggle_pause(task_id) {
-                    self.show_global_error(error);
-                }
+                self.operation_queue.toggle_pause(task_id);
                 self.continue_file_operation_persistence()
             }
             Message::FileOperationCancelRequested(task_id) => {
-                if let Some(error) = self.operation_queue.cancel(task_id) {
-                    self.show_global_error(error);
-                }
+                self.operation_queue.cancel(task_id);
                 self.continue_file_operation_persistence()
             }
             Message::FileOperationDetailsCopyRequested(task_id) => self
@@ -341,15 +337,11 @@ impl FileBrowser {
                 .map(iced::clipboard::write)
                 .unwrap_or_else(Task::none),
             Message::FileOperationClearRequested(task_id) => {
-                if let Some(error) = self.operation_queue.clear_terminal_task(task_id) {
-                    self.show_global_error(error);
-                }
+                self.operation_queue.clear_terminal_task(task_id);
                 self.continue_file_operation_persistence()
             }
             Message::FileOperationClearFinishedRequested => {
-                if let Some(error) = self.operation_queue.clear_terminal_tasks() {
-                    self.show_global_error(error);
-                }
+                self.operation_queue.clear_terminal_tasks();
                 self.continue_file_operation_persistence()
             }
             Message::PreviewTreeDirectoryToggled(entry_id) => {

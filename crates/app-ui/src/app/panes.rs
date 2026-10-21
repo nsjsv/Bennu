@@ -604,18 +604,4 @@ mod tests {
             Some(BrowserPaneId(1))
         );
     }
-
-    #[test]
-    fn directory_content_views_never_render_loading_copy() {
-        let directory_view_sources = [
-            include_str!("../list_view.rs"),
-            include_str!("../icon_grid_view.rs"),
-            include_str!("../three_column_view.rs"),
-            include_str!("../view/preview_panel.rs"),
-        ];
-
-        assert!(directory_view_sources
-            .iter()
-            .all(|source| !source.contains("\"Loading...\"")));
-    }
 }

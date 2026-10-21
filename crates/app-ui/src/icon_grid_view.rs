@@ -547,14 +547,17 @@ fn icon_grid_entry<'a>(
     track_column_entry_bounds(area, pane.id, entry.path.clone())
 }
 
-fn panel_status(status: IconGridPanelStatus) -> Element<'static, Message> {
-    let label = match status {
-        IconGridPanelStatus::Loading => "",
+/// 加载中不显示文字:目录通常瞬间加载完,文字一闪而过反而像闪烁。
+fn panel_status_label(status: IconGridPanelStatus) -> &'static str {
+    match status {
+        IconGridPanelStatus::Loading | IconGridPanelStatus::Loaded => "",
         IconGridPanelStatus::Empty => "No items",
         IconGridPanelStatus::Error => "Could not load folder",
-        IconGridPanelStatus::Loaded => "",
-    };
-    container(readable_text(label).size(ICON_GRID_LABEL_SIZE))
+    }
+}
+
+fn panel_status(status: IconGridPanelStatus) -> Element<'static, Message> {
+    container(readable_text(panel_status_label(status)).size(ICON_GRID_LABEL_SIZE))
         .width(Length::Fill)
         .height(Length::Fixed(ICON_GRID_STATUS_HEIGHT))
         .center_x(Length::Fill)
@@ -571,4 +574,24 @@ fn grid_message(message: &'static str) -> Element<'static, Message> {
 
 fn vertical_spacer(height: f32) -> Element<'static, Message> {
     Space::new().height(Length::Fixed(height.max(0.0))).into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loading_panel_shows_no_status_text() {
+        assert_eq!(panel_status_label(IconGridPanelStatus::Loading), "");
+        assert_eq!(panel_status_label(IconGridPanelStatus::Loaded), "");
+    }
+
+    #[test]
+    fn empty_and_failed_panels_explain_their_state() {
+        assert_eq!(panel_status_label(IconGridPanelStatus::Empty), "No items");
+        assert_eq!(
+            panel_status_label(IconGridPanelStatus::Error),
+            "Could not load folder"
+        );
+    }
 }

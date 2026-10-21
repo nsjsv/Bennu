@@ -20,6 +20,10 @@ pub enum LocalSendError {
     #[error("target device has no known address; it must come from device discovery")]
     AddressUnknown,
 
+    /// 设备身份文件内容不合法（不是一张证书加一把配对私钥）。
+    #[error("LocalSend identity file {} is invalid ({reason}); delete it to create a new identity", path.display())]
+    InvalidIdentity { path: PathBuf, reason: String },
+
     /// 请求的资源路径不存在或不是常规文件。
     #[error("path does not exist or is not a regular file: {}", path.display())]
     InvalidPath { path: PathBuf },

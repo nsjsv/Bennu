@@ -9,6 +9,7 @@
 //! - 信任判定回调读共享指纹快照；持久化仍归 UserPreferences。
 
 use std::collections::HashSet;
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -339,7 +340,10 @@ impl FileBrowser {
         if paths.is_empty() {
             return iced::Task::none();
         }
-        let display_alias = self.effective_transfer_device_alias();
+        // 直推要出示的设备身份归常驻服务；设备列表本身也只在服务运行时存在。
+        let Some(runtime) = self.transfer_runtime.as_ref() else {
+            return iced::Task::none();
+        };
         let Some(session) = self.transfer_session.as_mut() else {
             return iced::Task::none();
         };
@@ -353,7 +357,9 @@ impl FileBrowser {
             file_size: 0,
             outcome: None,
         });
-        direct_send_command(device, paths, display_alias)
+        let (progress_tx, progress_rx) = tokio::sync::mpsc::channel::<SendProgress>(16);
+        let send = runtime.handle.send_to_device(&device, paths, progress_tx);
+        direct_send_command(device.fingerprint, device.alias, send, progress_rx)
     }
 
     fn accept_direct_send_progress(&mut self, fingerprint: String, progress: SendProgress) {
@@ -674,25 +680,15 @@ fn qr_transfer_session_command(
 
 /// LocalSend 直推：进度经 mpsc 进入同一事件流，终态单独回执。
 fn direct_send_command(
-    target: DeviceInfo,
-    items: Vec<PathBuf>,
-    display_alias: String,
+    fingerprint: String,
+    alias: String,
+    send: impl Future<Output = Result<(), LocalSendError>> + Send + 'static,
+    mut progress_rx: tokio::sync::mpsc::Receiver<SendProgress>,
 ) -> iced::Task<Message> {
-    let fingerprint = target.fingerprint.clone();
-    let alias = target.alias.clone();
     iced::Task::stream(
         iced::stream::channel(16, async move |mut output| {
-            let (progress_tx, mut progress_rx) = tokio::sync::mpsc::channel::<SendProgress>(16);
-            // 进度通道满时 send_to_device 内部丢进度，不会阻塞传输本身。
-            let mut send_task = tokio::spawn(async move {
-                local_send::send_to_device_with_progress(
-                    &target,
-                    items,
-                    &display_alias,
-                    progress_tx,
-                )
-                .await
-            });
+            // 进度通道满时服务内部丢进度，不会阻塞传输本身。
+            let mut send_task = tokio::spawn(send);
             loop {
                 tokio::select! {
                     biased;

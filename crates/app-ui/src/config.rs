@@ -400,13 +400,15 @@ pub(crate) fn default_transfer_device_alias() -> String {
 }
 
 pub(crate) fn default_state_database_path() -> PathBuf {
+    app_data_dir_path().join(STATE_DATABASE_FILE_NAME)
+}
+
+/// 应用数据目录（`~/.local/share/bennu`）；状态数据库与 LocalSend 设备身份共用这一取法。
+pub(crate) fn app_data_dir_path() -> PathBuf {
     let fallback_base = dirs::home_dir()
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."));
-    dirs::data_dir()
-        .unwrap_or(fallback_base)
-        .join(APP_DIR_NAME)
-        .join(STATE_DATABASE_FILE_NAME)
+    dirs::data_dir().unwrap_or(fallback_base).join(APP_DIR_NAME)
 }
 
 pub(crate) fn default_user_config() -> UserConfig {

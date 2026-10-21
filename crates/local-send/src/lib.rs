@@ -1,7 +1,9 @@
 //! local-send：LocalSend v2 协议层 + 二维码下载服务。
 //!
 //! 纯协议/服务层，只依赖 tokio 生态，不依赖 iced；app-ui 通过本文件暴露的
-//! 窄接口消费（design.md 的公共 API 契约，只增不改形）。
+//! 窄接口消费。公共 API 原则上只增不改形；例外是设备身份（2026-10）：本机
+//! fingerprint 必须等于出示的客户端证书哈希，旧接口让调用方自填 fingerprint、
+//! 直推每次另造身份，表达不了这条约束，所以 `ServiceConfig` 与直推入口改了形。
 //!
 //! 全部服务任务要求在 tokio 运行时上下文中使用（app-ui 的 iced tokio executor
 //! 已在 update/命令上下文进入 tokio runtime，见 design.md 阶段 A 结论）。
@@ -9,6 +11,7 @@
 mod device;
 mod discovery;
 mod error;
+mod identity;
 mod qr;
 mod receive;
 mod send;
@@ -16,6 +19,7 @@ mod send;
 #[cfg(test)]
 mod integration;
 
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -25,7 +29,10 @@ use tokio::sync::{broadcast, mpsc, watch, Mutex};
 pub use device::{Announce, DeviceInfo, FileMetadata, PrepareUploadRequest, PrepareUploadResponse};
 pub use error::LocalSendError;
 pub use qr::{QrDownloadHandle, QrItem, QrSource};
-pub use send::{send_to_device, send_to_device_with_progress, SendProgress};
+pub use send::SendProgress;
+
+use identity::DeviceIdentity;
+use send::DirectSender;
 
 /// 常驻服务事件流（broadcast 容量有界；积压时 UI 收到 `Lagged` 应整体刷新）。
 const EVENT_CAPACITY: usize = 128;
@@ -33,14 +40,19 @@ const EVENT_CAPACITY: usize = 128;
 /// 信任判定回调：UI 注入（UserPreferences 的信任设备表），服务只查询不存储。
 pub type TrustPredicate = Arc<dyn Fn(&DeviceInfo) -> bool + Send + Sync>;
 
-/// 常驻服务配置（design.md 契约）。
+/// 常驻服务配置：只含调用方真正拥有的字段；协议字段（version、fingerprint、
+/// port、protocol）由服务按设备身份组装，调用方无从传入与身份不符的 fingerprint。
 pub struct ServiceConfig {
-    /// 本机对外设备信息（alias 默认 hostname）。
-    pub device: DeviceInfo,
+    /// 本机对外别名（announce、register、prepare-upload 共用）。
+    pub alias: String,
+    /// LocalSend 官方设备类型词表中的取值（桌面端为 `computer`）。
+    pub device_type: Option<String>,
     /// 接收端 HTTP 监听端口（53317）。
     pub listen_port: u16,
     /// 接收文件保存目录。
     pub download_dir: PathBuf,
+    /// 设备身份文件（证书 + 私钥 PEM）：不存在时生成；内容不合法或读写失败时服务不启动。
+    pub identity_path: PathBuf,
     /// 信任设备查询回调。
     pub is_trusted: TrustPredicate,
 }
@@ -92,10 +104,11 @@ pub enum ServiceEvent {
     ServiceError(String),
 }
 
-/// 常驻服务句柄：确认回写、手动刷新与关停；drop 不会停服务（常驻语义，随应用退出）。
+/// 常驻服务句柄：直推、确认回写、手动刷新与关停；drop 不会停服务（常驻语义，随应用退出）。
 pub struct ServiceHandle {
     commands: mpsc::UnboundedSender<ServiceCommand>,
     shutdown_tx: watch::Sender<bool>,
+    sender: DirectSender,
 }
 
 /// UI → 常驻服务的命令（经无界通道路由到各服务任务）。
@@ -111,6 +124,21 @@ enum ServiceCommand {
 }
 
 impl ServiceHandle {
+    /// 直推文件清单到目标设备，出示本机设备身份。
+    ///
+    /// 返回的 future 自带客户端与本机设备信息的克隆，不借用句柄，可直接
+    /// `tokio::spawn`；进度通道满时丢弃进度，不反压传输。
+    pub fn send_to_device(
+        &self,
+        target: &DeviceInfo,
+        items: Vec<PathBuf>,
+        progress: mpsc::Sender<SendProgress>,
+    ) -> impl Future<Output = Result<(), LocalSendError>> + Send + 'static {
+        let sender = self.sender.clone();
+        let target = target.clone();
+        async move { sender.send(&target, items, progress).await }
+    }
+
     /// 确认 Modal 回写：接受未信任设备的请求；remember=true 同时补入内存信任集。
     /// 持久化信任设备归 app-ui。
     pub fn accept_session(&self, session_id: &str, remember: bool) {
@@ -147,31 +175,30 @@ pub struct LocalSendService;
 impl LocalSendService {
     /// 启动常驻服务：UDP 组播发现 + 接收端 HTTP。
     ///
-    /// 绑定失败不返回 Err：按 N2 发一次 `ServiceError` 事件后保持惰性，
-    /// UI 只需展示错误，服务不重试（避免与已运行的 LocalSend 实例冲突风暴）。
-    /// 必须在 tokio 运行时上下文中调用。
+    /// 设备身份不可用（文件内容不合法或读写失败）时返回 Err，此时还没有绑定
+    /// 任何端口、没有启动任何任务。端口绑定失败不返回 Err：按 N2 发一次
+    /// `ServiceError` 事件后保持惰性，UI 只需展示错误，服务不重试（避免与已运行的
+    /// LocalSend 实例冲突风暴）。必须在 tokio 运行时上下文中调用。
     pub fn start(
         config: ServiceConfig,
     ) -> Result<(ServiceHandle, broadcast::Receiver<ServiceEvent>), LocalSendError> {
+        let identity = DeviceIdentity::load_or_create(&config.identity_path)?;
+        let own_device = own_device_info(
+            config.alias,
+            config.device_type,
+            config.listen_port,
+            &identity,
+        );
+        let client = peer_client(&identity)?;
+
         let (events, events_rx) = broadcast::channel(EVENT_CAPACITY);
         let devices = Arc::new(Mutex::new(discovery::DeviceTable::default()));
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
-        let client = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(5))
-            // LocalSend 证书是自签名且无 CA 校验（规范 §2，安全性靠
-            // fingerprint 记忆）；官方客户端同样接受自签名证书。
-            .danger_accept_invalid_certs(true)
-            .build()
-            .map_err(|source| LocalSendError::Request {
-                endpoint: "client",
-                source,
-            })?;
-
         // sweeper 的手动刷新通知：命令路由收到 RefreshDevices 时 notify 一次。
         let sweeper_notify = Arc::new(tokio::sync::Notify::new());
         discovery::spawn(
-            config.device.clone(),
+            own_device.clone(),
             Arc::clone(&devices),
             events.clone(),
             client.clone(),
@@ -181,7 +208,7 @@ impl LocalSendService {
 
         // 接收端 HTTP：绑定失败同样走 ServiceError 事件而非 Err。
         let receive_state = Arc::new(receive::ReceiveState::new(
-            config.device.clone(),
+            own_device.clone(),
             config.download_dir,
             config.is_trusted,
             Arc::clone(&devices),
@@ -245,10 +272,49 @@ impl LocalSendService {
             ServiceHandle {
                 commands: command_tx,
                 shutdown_tx,
+                sender: DirectSender::new(client, own_device),
             },
             events_rx,
         ))
     }
+}
+
+/// 本机对外设备信息：fingerprint 只取自设备身份，announce、register、
+/// prepare-upload 都用这一份。
+pub(crate) fn own_device_info(
+    alias: String,
+    device_type: Option<String>,
+    listen_port: u16,
+    identity: &DeviceIdentity,
+) -> DeviceInfo {
+    DeviceInfo {
+        alias,
+        version: "2.0".to_owned(),
+        fingerprint: identity.fingerprint().to_owned(),
+        device_model: None,
+        device_type,
+        download: None,
+        port: listen_port,
+        protocol: "http".to_owned(),
+        address: None,
+    }
+}
+
+/// 唯一的出站客户端：直推、legacy 扫描、register 回应共用，全部出示设备身份。
+pub(crate) fn peer_client(identity: &DeviceIdentity) -> Result<reqwest::Client, LocalSendError> {
+    reqwest::Client::builder()
+        // 局域网内握手超过 5s 视为对端不可达；总时长不设限（大文件直推）。
+        .connect_timeout(Duration::from_secs(5))
+        // LocalSend 证书是自签名且无 CA 校验（规范 §2，安全性靠 fingerprint
+        // 记忆）；官方客户端同样接受自签名证书，否则 HTTPS 设备全部握手失败。
+        .danger_accept_invalid_certs(true)
+        // 新版官方 App 对 HTTPS 强制客户端证书，并以证书哈希识别发送方。
+        .identity(identity.reqwest_identity()?)
+        .build()
+        .map_err(|source| LocalSendError::Request {
+            endpoint: "client",
+            source,
+        })
 }
 
 /// 二维码下载服务门面。
@@ -269,9 +335,8 @@ impl QrDownloadServer {
     }
 }
 
-/// 生成 16 字节随机 hex id（会话/令牌/一次性指纹）。app-ui 需要为本机
-/// 设备信息生成 fingerprint（阶段 B 补记：pub 化属于只增不改形）。
-pub fn random_id() -> String {
+/// 生成 16 字节随机 hex id（会话 id、上传令牌、下载令牌）。
+pub(crate) fn random_id() -> String {
     use rand::RngCore;
     let mut bytes = [0u8; 16];
     rand::rng().fill_bytes(&mut bytes);
@@ -295,5 +360,29 @@ mod tests {
     fn qr_matrix_encodes_url() {
         let code = qr_matrix("http://192.168.1.5:49152/abcdef");
         assert!(code.size >= 21);
+    }
+
+    // 普通 #[test] 没有 tokio 运行时：若身份检查晚于 spawn 任务，这里会直接 panic。
+    #[test]
+    fn start_refuses_an_invalid_identity_before_touching_the_network() {
+        let dir = tempfile::tempdir().unwrap();
+        let identity_path = dir.path().join("localsend-identity.pem");
+        std::fs::write(&identity_path, b"broken").unwrap();
+        let config = ServiceConfig {
+            alias: "TestPC".to_owned(),
+            device_type: None,
+            listen_port: 0,
+            download_dir: dir.path().to_path_buf(),
+            identity_path: identity_path.clone(),
+            is_trusted: Arc::new(|_| false),
+        };
+
+        let error = LocalSendService::start(config).err().unwrap();
+
+        assert!(
+            matches!(error, LocalSendError::InvalidIdentity { .. }),
+            "{error:?}"
+        );
+        assert_eq!(std::fs::read(&identity_path).unwrap(), b"broken");
     }
 }

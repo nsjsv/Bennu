@@ -12,6 +12,8 @@ use crate::discovery::DeviceTable;
 use crate::receive::{router as receive_router, ReceiveState};
 use crate::{QrDownloadServer, QrEvent, QrItem, QrSource, ServiceEvent};
 
+mod mtls;
+
 const TEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 fn own_device() -> DeviceInfo {
@@ -511,9 +513,9 @@ async fn send_to_device_transfers_files_and_directory_zip() {
     };
     let (progress_tx, mut progress_rx) = tokio::sync::mpsc::channel(64);
     let items = vec![source.path().join("one.txt"), dir.clone()];
-    crate::send_to_device_with_progress(&target, items, "TestPC", progress_tx)
-        .await
-        .unwrap();
+    let identity_dir = tempfile::tempdir().unwrap();
+    let (sender, _) = crate::send::sender_with_new_identity(identity_dir.path());
+    sender.send(&target, items, progress_tx).await.unwrap();
 
     // 接收端：一个普通文件 + 一个目录 zip。
     let event = wait_for(&mut server.events, |e| {
@@ -562,7 +564,9 @@ async fn send_to_device_requires_discovered_address() {
     let source = tempfile::tempdir().unwrap();
     let file = source.path().join("one.txt");
     std::fs::write(&file, b"x").unwrap();
-    let result = crate::send_to_device(&target, vec![file], "TestPC").await;
+    let (sender, _) = crate::send::sender_with_new_identity(source.path());
+    let (progress, _) = tokio::sync::mpsc::channel(1);
+    let result = sender.send(&target, vec![file], progress).await;
     assert!(matches!(result, Err(crate::LocalSendError::AddressUnknown)));
 }
 

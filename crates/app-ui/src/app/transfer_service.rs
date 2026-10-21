@@ -1,10 +1,9 @@
-//! 常驻 LocalSend 服务的装配层：事件订阅、服务配置与本机设备信息。
+//! 常驻 LocalSend 服务的装配层：事件订阅与服务配置。
 //!
 //! 从 transfer.rs 拆出的服务接线职责：状态机只消费这里的产物，
 //! 不直接接触协议装配细节。
 
 use std::collections::HashSet;
-use std::net::IpAddr;
 use std::sync::Arc;
 
 use iced::futures::SinkExt;
@@ -18,6 +17,8 @@ use crate::model::Message;
 
 /// LocalSend 协议固定端口（PRD R6）。
 pub(crate) const LOCAL_SEND_PORT: u16 = 53317;
+/// 设备身份文件（证书 + 私钥，权限 600），放在应用数据目录下。
+const LOCAL_SEND_IDENTITY_FILE_NAME: &str = "localsend-identity.pem";
 
 /// 常驻服务事件订阅键：仅以 generation 参与去重，种子接收端不参与比较。
 pub(crate) struct LocalSendEventKey {
@@ -97,30 +98,16 @@ pub(crate) fn service_config(
         !device.fingerprint.is_empty() && trusted.read().contains(&device.fingerprint)
     });
     ServiceConfig {
-        device: local_device_info(user_config),
-        listen_port: LOCAL_SEND_PORT,
-        download_dir: transfer_download_dir(user_config),
-        is_trusted,
-    }
-}
-
-/// 本机对外设备信息：HTTP 明文模式下 fingerprint 为随机串（协议合法）。
-fn local_device_info(user_config: &crate::config::UserConfig) -> DeviceInfo {
-    DeviceInfo {
         alias: user_config
             .transfer_device_alias
             .clone()
             .filter(|alias| !alias.trim().is_empty())
             .unwrap_or_else(default_transfer_device_alias),
-        version: "2.0".to_owned(),
-        // 阶段 A 补记 8：随机 16 字节 hex id，随进程生命周期。
-        fingerprint: local_send::random_id(),
-        device_model: None,
         // LocalSend 官方设备类型词表中的桌面端取值。
         device_type: Some("computer".to_owned()),
-        download: None,
-        port: LOCAL_SEND_PORT,
-        protocol: "http".to_owned(),
-        address: None::<IpAddr>,
+        listen_port: LOCAL_SEND_PORT,
+        download_dir: transfer_download_dir(user_config),
+        identity_path: crate::config::app_data_dir_path().join(LOCAL_SEND_IDENTITY_FILE_NAME),
+        is_trusted,
     }
 }

@@ -333,12 +333,7 @@ async fn reply_register(
     else {
         return;
     };
-    let result = client
-        .post(url.clone())
-        .timeout(REGISTER_TIMEOUT)
-        .json(own_device)
-        .send()
-        .await;
+    let result = post_register(client, &url, own_device, REGISTER_TIMEOUT).await;
     if result.is_ok() {
         return;
     }
@@ -347,6 +342,23 @@ async fn reply_register(
     if let Ok(payload) = encode_announce(own_device, false) {
         let _ = socket.send_to(&payload, source).await;
     }
+}
+
+/// register 出站请求：announce 回应与 legacy 扫描共用，请求体就是本机设备信息。
+/// 官方接收端在 TLS 下只接受 fingerprint 与客户端证书哈希一致的登记，所以必须经
+/// 服务唯一的出站客户端（出示设备身份）发出。
+pub(crate) async fn post_register(
+    client: &reqwest::Client,
+    url: &str,
+    own_device: &DeviceInfo,
+    timeout: Duration,
+) -> reqwest::Result<reqwest::Response> {
+    client
+        .post(url)
+        .timeout(timeout)
+        .json(own_device)
+        .send()
+        .await
 }
 
 /// 对每个局域网候选 IPv4 各发一份组播 announce：不同接口可达不同网段。
@@ -434,25 +446,18 @@ async fn run_http_sweeper(
         .map(|(_, ip)| ip)
         .collect();
     loop {
-        let payload = match serde_json::to_vec(&own_device) {
-            Ok(payload) => payload,
-            Err(_) => return,
-        };
         let targets = sweep_targets(&own_ips);
         if !targets.is_empty() {
             // 官方 App 默认 HTTPS（自签名），部分设备显式用 HTTP；扫描时
             // 无先验协议，双协议并发探测（幂等登记，重复响应无害）。
+            let (client, own_device) = (&client, &own_device);
             let responses = targets.iter().flat_map(|target| {
                 ["https", "http"].map(|scheme| {
-                    let request = client
-                        .post(format!(
-                            "{scheme}://{target}:{}{REGISTER_PATH}",
-                            own_device.port
-                        ))
-                        .timeout(SWEEP_TIMEOUT)
-                        .body(payload.clone())
-                        .send();
-                    async move { (*target, scheme, request.await) }
+                    let url = format!("{scheme}://{target}:{}{REGISTER_PATH}", own_device.port);
+                    async move {
+                        let response = post_register(client, &url, own_device, SWEEP_TIMEOUT).await;
+                        (*target, scheme, response)
+                    }
                 })
             });
             let results = futures_util::future::join_all(responses).await;

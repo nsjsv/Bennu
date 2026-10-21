@@ -6,7 +6,6 @@
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use std::time::Duration;
 
 use tokio::io::{AsyncRead, AsyncReadExt, ReadBuf};
 use tokio::sync::mpsc;
@@ -14,8 +13,6 @@ use tokio::sync::mpsc;
 use crate::device::{DeviceInfo, FileMetadata, PrepareUploadRequest, PrepareUploadResponse};
 use crate::error::{error_chain_text, LocalSendError};
 
-/// 单请求连接超时：局域网内握手超过 5s 视为对端不可达；总时长不设限（大文件）。
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// 直推进度事件的节流步长。
 const PROGRESS_STEP: u64 = 1024 * 1024;
 
@@ -58,129 +55,104 @@ impl PreparedFile {
     }
 }
 
-/// LocalSend v2 契约入口：直推文件清单到目标设备。
-pub async fn send_to_device(
-    target: &DeviceInfo,
-    items: Vec<PathBuf>,
-    display_alias: &str,
-) -> Result<(), LocalSendError> {
-    send_to_device_inner(target, items, display_alias, None).await
+/// 直推客户端：服务唯一的出站客户端（出示设备身份）+ 本机设备信息。
+#[derive(Clone)]
+pub(crate) struct DirectSender {
+    client: reqwest::Client,
+    own_device: DeviceInfo,
 }
 
-/// 带进度通道的直推变体；通道满时进度被丢弃（UI 只需要最新值）。
-pub async fn send_to_device_with_progress(
-    target: &DeviceInfo,
-    items: Vec<PathBuf>,
-    display_alias: &str,
-    progress: mpsc::Sender<SendProgress>,
-) -> Result<(), LocalSendError> {
-    send_to_device_inner(target, items, display_alias, Some(progress)).await
-}
-
-async fn send_to_device_inner(
-    target: &DeviceInfo,
-    items: Vec<PathBuf>,
-    display_alias: &str,
-    progress: Option<mpsc::Sender<SendProgress>>,
-) -> Result<(), LocalSendError> {
-    let base = target
-        .http_base_url()
-        .ok_or(LocalSendError::AddressUnknown)?;
-    let prepared = prepare_items(items).await?;
-    if prepared.is_empty() {
-        return Ok(());
+impl DirectSender {
+    pub(crate) fn new(client: reqwest::Client, own_device: DeviceInfo) -> Self {
+        Self { client, own_device }
     }
 
-    let client = reqwest::Client::builder()
-        .connect_timeout(CONNECT_TIMEOUT)
-        // LocalSend 证书是自签名且无 CA 校验（规范 §2，安全性靠 fingerprint
-        // 记忆）；官方客户端同样接受自签名证书，否则 HTTPS 设备全部握手失败。
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|source| LocalSendError::Request {
-            endpoint: "client",
-            source,
-        })?;
+    /// 直推文件清单到目标设备；进度通道满时丢弃进度（UI 只需要最新值）。
+    pub(crate) async fn send(
+        &self,
+        target: &DeviceInfo,
+        items: Vec<PathBuf>,
+        progress: mpsc::Sender<SendProgress>,
+    ) -> Result<(), LocalSendError> {
+        let base = target
+            .http_base_url()
+            .ok_or(LocalSendError::AddressUnknown)?;
+        let prepared = prepare_items(items).await?;
+        if prepared.is_empty() {
+            return Ok(());
+        }
+        let client = &self.client;
 
-    // 一次性发送方身份：契约只传 alias，指纹逐次随机生成即可。
-    let mut files = std::collections::HashMap::new();
-    for (index, item) in prepared.iter().enumerate() {
-        files.insert(
-            index.to_string(),
-            FileMetadata {
-                id: index.to_string(),
-                file_name: item.file_name().to_string(),
-                size: item.size(),
-                file_type: Some(mime_of(item.file_name()).to_string()),
-                sha256: None,
-            },
-        );
-    }
-    let request = PrepareUploadRequest {
-        info: DeviceInfo {
-            alias: display_alias.to_string(),
-            version: "2.0".into(),
-            fingerprint: crate::random_id(),
-            device_model: None,
-            device_type: None,
-            download: None,
-            port: 0,
-            protocol: "http".into(),
-            address: None,
-        },
-        files,
-    };
-
-    let endpoint = "prepare-upload";
-    let url = format!("{base}/api/localsend/v2/{endpoint}");
-    let response = client
-        .post(&url)
-        .json(&request)
-        .send()
-        .await
-        .map_err(|source| LocalSendError::Request { endpoint, source })?;
-    if !response.status().is_success() {
-        return Err(LocalSendError::PeerRejected {
-            status: response.status(),
-            endpoint,
-        });
-    }
-    let prepared_response: PrepareUploadResponse = response
-        .json()
-        .await
-        .map_err(|source| LocalSendError::Request { endpoint, source })?;
-    let session_id = prepared_response.session_id;
-
-    // 逐文件上传；任一失败 → cancel 会话并返回失败汇总。
-    for (index, item) in prepared.iter().enumerate() {
-        let Some(token) = prepared_response.files.get(&index.to_string()) else {
-            cancel_session(&client, &base, &session_id).await;
-            return Err(LocalSendError::PeerProtocol {
-                endpoint: "prepare-upload",
-                reason: format!("missing token for fileId {index}"),
-            });
+        let mut files = std::collections::HashMap::new();
+        for (index, item) in prepared.iter().enumerate() {
+            files.insert(
+                index.to_string(),
+                FileMetadata {
+                    id: index.to_string(),
+                    file_name: item.file_name().to_string(),
+                    size: item.size(),
+                    file_type: Some(mime_of(item.file_name()).to_string()),
+                    sha256: None,
+                },
+            );
+        }
+        let request = PrepareUploadRequest {
+            // 官方接收端以客户端证书哈希识别发送方，自报的身份必须是同一个设备身份。
+            info: self.own_device.clone(),
+            files,
         };
-        let result = upload_one(
-            &client,
-            &base,
-            &session_id,
-            &index.to_string(),
-            token,
-            item,
-            &progress,
-            index,
-            prepared.len(),
-        )
-        .await;
-        if let Err(reason) = result {
-            cancel_session(&client, &base, &session_id).await;
-            return Err(LocalSendError::TransferFile {
-                file_name: item.file_name().to_string(),
-                reason,
+
+        let endpoint = "prepare-upload";
+        let url = format!("{base}/api/localsend/v2/{endpoint}");
+        let response = client
+            .post(&url)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|source| LocalSendError::Request { endpoint, source })?;
+        if !response.status().is_success() {
+            return Err(LocalSendError::PeerRejected {
+                status: response.status(),
+                endpoint,
             });
         }
+        let prepared_response: PrepareUploadResponse = response
+            .json()
+            .await
+            .map_err(|source| LocalSendError::Request { endpoint, source })?;
+        let session_id = prepared_response.session_id;
+
+        // 逐文件上传；任一失败 → cancel 会话并返回失败汇总。
+        for (index, item) in prepared.iter().enumerate() {
+            let Some(token) = prepared_response.files.get(&index.to_string()) else {
+                cancel_session(client, &base, &session_id).await;
+                return Err(LocalSendError::PeerProtocol {
+                    endpoint: "prepare-upload",
+                    reason: format!("missing token for fileId {index}"),
+                });
+            };
+            let result = upload_one(
+                client,
+                &base,
+                &session_id,
+                &index.to_string(),
+                token,
+                item,
+                &progress,
+                index,
+                prepared.len(),
+            )
+            .await;
+            if let Err(reason) = result {
+                cancel_session(client, &base, &session_id).await;
+                return Err(LocalSendError::TransferFile {
+                    file_name: item.file_name().to_string(),
+                    reason,
+                });
+            }
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 /// 枚举并准备全部条目；目录 → 内存 zip（顶层保留目录名）。
@@ -231,7 +203,7 @@ async fn upload_one(
     file_id: &str,
     token: &str,
     item: &PreparedFile,
-    progress: &Option<mpsc::Sender<SendProgress>>,
+    progress: &mpsc::Sender<SendProgress>,
     index: usize,
     total: usize,
 ) -> Result<(), String> {
@@ -386,23 +358,21 @@ fn mime_of(file_name: &str) -> &'static str {
 }
 
 fn emit_progress(
-    progress: &Option<mpsc::Sender<SendProgress>>,
+    progress: &mpsc::Sender<SendProgress>,
     file_name: &str,
     file_index: usize,
     total_files: usize,
     bytes_sent: u64,
     file_size: u64,
 ) {
-    if let Some(progress) = progress {
-        // try_send：通道满即丢弃进度（UI 只需要最新值，不允许反压传输）。
-        let _ = progress.try_send(SendProgress {
-            file_name: file_name.to_string(),
-            file_index,
-            total_files,
-            bytes_sent,
-            file_size,
-        });
-    }
+    // try_send：通道满即丢弃进度（UI 只需要最新值，不允许反压传输）。
+    let _ = progress.try_send(SendProgress {
+        file_name: file_name.to_string(),
+        file_index,
+        total_files,
+        bytes_sent,
+        file_size,
+    });
 }
 
 /// 计数 AsyncRead：透传读取并在节流步长处投递进度。
@@ -414,7 +384,7 @@ struct CountingReader {
     file_size: u64,
     file_index: usize,
     total_files: usize,
-    progress: Option<mpsc::Sender<SendProgress>>,
+    progress: mpsc::Sender<SendProgress>,
 }
 
 impl AsyncRead for CountingReader {
@@ -444,6 +414,17 @@ impl AsyncRead for CountingReader {
         }
         result
     }
+}
+
+/// 测试用直推客户端：在 `dir` 里新建设备身份，按服务同样的方式组装；
+/// 返回客户端与身份 fingerprint。
+#[cfg(test)]
+pub(crate) fn sender_with_new_identity(dir: &Path) -> (DirectSender, String) {
+    let identity =
+        crate::identity::DeviceIdentity::load_or_create(&dir.join("identity.pem")).unwrap();
+    let own_device = crate::own_device_info("TestPC".to_owned(), None, 53317, &identity);
+    let sender = DirectSender::new(crate::peer_client(&identity).unwrap(), own_device);
+    (sender, identity.fingerprint().to_owned())
 }
 
 #[cfg(test)]
@@ -534,8 +515,11 @@ mod tests {
             .local_addr()
             .unwrap();
         let dir = tempfile::tempdir().unwrap();
+        let (sender, _) = sender_with_new_identity(dir.path());
+        let (progress, _) = mpsc::channel(1);
 
-        let error = send_to_device(&target_at(address), one_file(&dir), "TestPC")
+        let error = sender
+            .send(&target_at(address), one_file(&dir), progress)
             .await
             .unwrap_err();
 
@@ -580,8 +564,11 @@ mod tests {
             stream.shutdown().await.unwrap();
         });
         let dir = tempfile::tempdir().unwrap();
+        let (sender, _) = sender_with_new_identity(dir.path());
+        let (progress, _) = mpsc::channel(1);
 
-        let error = send_to_device(&target_at(address), one_file(&dir), "TestPC")
+        let error = sender
+            .send(&target_at(address), one_file(&dir), progress)
             .await
             .unwrap_err();
         responder.await.unwrap();

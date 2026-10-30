@@ -34,3 +34,5 @@ rustix = { version = "1.1.4", features = ["fs"] }
 [dev-dependencies]
 serde_json.workspace = true
 tempfile.workspace = true
+# 仅测试用：捕获日志事件，断言退回轮询时有警告。
+tracing-subscriber.workspace = true

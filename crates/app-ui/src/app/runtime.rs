@@ -149,16 +149,26 @@ pub(super) fn x11_file_dnd_subscription(
 fn directory_watch_stream(path: &PathBuf) -> impl iced::futures::Stream<Item = Message> + 'static {
     let path = path.clone();
     iced::stream::channel(DIRECTORY_WATCH_CHANNEL_SIZE, async move |mut output| {
-        if let Ok(mut watcher) = watch_directory(path, DIRECTORY_WATCH_DEBOUNCE) {
-            while let Some(change) = watcher.recv().await {
-                if output
-                    .send(Message::ObservedDirectoryChanges(change))
-                    .await
-                    .is_err()
-                {
-                    break;
+        match watch_directory(&path, DIRECTORY_WATCH_DEBOUNCE) {
+            Ok(mut watcher) => {
+                while let Some(change) = watcher.recv().await {
+                    if output
+                        .send(Message::ObservedDirectoryChanges(change))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
                 }
             }
+            // 连轮询都起不来说明目录本身读不到；目录加载会报出真实原因，这里只留记录。
+            Err(error) => tracing::warn!(
+                target: "app_ui::directory_watch",
+                event = "directory_watch_unavailable",
+                path = %path.display(),
+                %error,
+                "directory changes will not be followed"
+            ),
         }
 
         iced::futures::future::pending().await

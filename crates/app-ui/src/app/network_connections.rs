@@ -19,7 +19,7 @@ use crate::network_connections::{
 impl FileBrowser {
     pub(crate) fn network_connection_is_selected(&self, id: &NetworkConnectionId) -> bool {
         self.network_connections
-            .selected_connection_id(&self.current_dir)
+            .selected_connection_id(&self.tab().current_dir)
             .is_some_and(|selected_id| selected_id == id)
     }
 
@@ -216,7 +216,7 @@ impl FileBrowser {
         self.context_menu = Some(ContextMenuState::NetworkConnection(
             SidebarNetworkConnectionContextMenuState {
                 connection,
-                position: self.cursor_position,
+                position: self.cursor_or_origin(),
             },
         ));
         rename_command

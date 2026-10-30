@@ -124,6 +124,37 @@ impl FileBrowser {
         self.pane_layout.active()
     }
 
+    pub(crate) fn active_tab_id(&self) -> usize {
+        self.pane().active_tab_id
+    }
+
+    /// 活动窗格。`pane_layout.active()` 必指向 `panes` 里的一项，是布局的
+    /// 不变量（创建、拆分、合并、会话恢复各自保证一次）。
+    pub(crate) fn pane(&self) -> &BrowserPane {
+        let active = self.active_pane_id();
+        self.panes
+            .iter()
+            .find(|pane| pane.id == active)
+            .expect("the active pane exists")
+    }
+
+    pub(crate) fn pane_mut(&mut self) -> &mut BrowserPane {
+        let active = self.active_pane_id();
+        self.panes
+            .iter_mut()
+            .find(|pane| pane.id == active)
+            .expect("the active pane exists")
+    }
+
+    /// 活动窗格的活动标签：浏览状态唯一的那份。
+    pub(crate) fn tab(&self) -> &BrowserTab {
+        self.pane().tab()
+    }
+
+    pub(crate) fn tab_mut(&mut self) -> &mut BrowserTab {
+        self.pane_mut().tab_mut()
+    }
+
     /// 窗格区的窗口 y 起点:全窗工具栏顶栏横贯后,窗格从它下方开始。
     pub(super) fn main_panes_area_top(&self) -> f32 {
         crate::model::MAIN_TOOLBAR_ROW_HEIGHT
@@ -175,67 +206,45 @@ impl FileBrowser {
     }
 
     pub(crate) fn pane_view(&self, pane_id: BrowserPaneId) -> Option<BrowserPaneView<'_>> {
+        let pane = self.pane_by_id(pane_id)?;
+        let tab = pane.tab();
+        let is_active = pane_id == self.active_pane_id();
         let (address_editing, address_transition_fraction, address_exit_snapshot) =
             self.address_bar_presentation(pane_id);
-        if pane_id == self.active_pane_id() {
-            return Some(BrowserPaneView {
-                id: pane_id,
-                current_dir: &self.current_dir,
-                is_trash_view: self.is_trash_view,
-                entries: &self.entries,
-                directory_discovery: self.directory_discovery.as_ref(),
-                directory_loading_placeholder: self.directory_loading_placeholder.as_ref(),
-                selected: self.selected.as_ref(),
-                selected_paths: &self.selected_paths,
-                deepest_open_column_directory: self.deepest_open_column_directory.as_ref(),
-                hovered_entry: self.hovered_entry.as_ref(),
-                expanded_directories: &self.expanded_directories,
-                column_viewports: &self.column_viewports,
-                icon_grid_viewport: self.icon_grid_viewport_for(pane_id, &self.current_dir),
-                view_mode: self.view_mode,
-                tabs: &self.tabs,
-                active_tab_id: self.active_tab_id,
-                tab_animations: Some(&self.tab_animations),
-                address_editing,
-                address_transition_fraction,
-                address_exit_snapshot,
-                directory_collection_phase: self.directory_collection_phase,
-                renaming: self.renaming.as_ref(),
-                rename_input: &self.rename_input,
-                rename_hint: self.rename_hint(),
-                file_drag: self.file_drag.as_ref(),
-                tab_bar_reveal_fraction: self.tab_bar_reveal_fraction(),
-            });
-        }
-
-        let pane = self.pane_by_id(pane_id)?;
+        // hover、重命名、文件拖拽和标签动画只属于活动窗格的交互，其它窗格静态呈现。
         Some(BrowserPaneView {
-            id: pane.id,
-            current_dir: &pane.current_dir,
-            is_trash_view: pane.is_trash_view,
-            entries: &pane.entries,
-            directory_discovery: pane.directory_discovery.as_ref(),
+            id: pane_id,
+            current_dir: &tab.current_dir,
+            is_trash_view: tab.is_trash_view,
+            entries: &tab.entries,
+            directory_discovery: tab.directory_discovery.as_ref(),
             directory_loading_placeholder: pane.directory_loading_placeholder.as_ref(),
-            selected: pane.selected.as_ref(),
-            selected_paths: &pane.selected_paths,
-            deepest_open_column_directory: pane.deepest_open_column_directory.as_ref(),
-            hovered_entry: None,
-            expanded_directories: &pane.expanded_directories,
+            selected: tab.selected.as_ref(),
+            selected_paths: &tab.selected_paths,
+            deepest_open_column_directory: tab.deepest_open_column_directory.as_ref(),
+            hovered_entry: self.hovered_entry.as_ref().filter(|_| is_active),
+            expanded_directories: &tab.expanded_directories,
             column_viewports: &pane.column_viewports,
-            icon_grid_viewport: self.icon_grid_viewport_for(pane_id, &pane.current_dir),
-            view_mode: pane.view_mode,
+            icon_grid_viewport: self.icon_grid_viewport_for(pane_id, &tab.current_dir),
+            view_mode: tab.view_mode,
             tabs: &pane.tabs,
             active_tab_id: pane.active_tab_id,
-            tab_animations: None,
+            tab_animations: is_active.then_some(&self.tab_animations),
             address_editing,
             address_transition_fraction,
             address_exit_snapshot,
-            directory_collection_phase: pane.directory_collection_phase,
-            renaming: None,
-            rename_input: "",
-            rename_hint: None,
-            file_drag: None,
-            tab_bar_reveal_fraction: if pane.tabs.len() > 1 { 1.0 } else { 0.0 },
+            directory_collection_phase: tab.directory_collection_phase,
+            renaming: self.renaming.as_ref().filter(|_| is_active),
+            rename_input: if is_active { &self.rename_input } else { "" },
+            rename_hint: if is_active { self.rename_hint() } else { None },
+            file_drag: self.file_drag.as_ref().filter(|_| is_active),
+            tab_bar_reveal_fraction: if is_active {
+                self.tab_bar_reveal_fraction()
+            } else if pane.tabs.len() > 1 {
+                1.0
+            } else {
+                0.0
+            },
         })
     }
 
@@ -305,28 +314,15 @@ impl FileBrowser {
         viewport
     }
 
-    pub(super) fn sync_active_pane_state(&mut self) {
-        let snapshot = self.capture_active_pane_snapshot();
-        if let Some(pane) = self.pane_by_id_mut(snapshot.id) {
-            *pane = snapshot;
-        } else {
-            self.panes.push(snapshot);
-        }
-    }
-
     pub(super) fn activate_pane(&mut self, pane_id: BrowserPaneId) {
         if pane_id == self.active_pane_id() || self.pane_by_id(pane_id).is_none() {
             return;
         }
 
         self.clear_icon_grid_expansion_for_context_change();
-        self.sync_active_tab_state();
-        let Some(next_pane) = self.pane_by_id(pane_id).cloned() else {
-            return;
-        };
         let _ = self.cancel_address_editing();
         self.pane_layout = self.pane_layout.with_active(pane_id);
-        self.restore_pane_snapshot(next_pane);
+        self.reset_active_pane_context();
     }
 
     pub(super) fn new_pane_id(&mut self) -> BrowserPaneId {
@@ -404,37 +400,16 @@ impl FileBrowser {
         Some(bounds)
     }
 
-    pub(super) fn capture_active_pane_snapshot(&self) -> BrowserPane {
-        BrowserPane {
-            id: self.active_pane_id(),
-            current_dir: self.current_dir.clone(),
-            is_trash_view: self.is_trash_view,
-            entries: self.entries.clone(),
-            directory_discovery: self.directory_discovery.clone(),
-            directory_loading_placeholder: self.directory_loading_placeholder.clone(),
-            trash_entries: self.trash_entries.clone(),
-            selected: self.selected.clone(),
-            selected_paths: self.selected_paths.clone(),
-            selection_anchor: self.selection_anchor.clone(),
-            deepest_open_column_directory: self.deepest_open_column_directory.clone(),
-            expanded_directories: self.expanded_directories.clone(),
-            view_mode: self.view_mode,
-            column_browser_viewport: self.column_browser_viewport,
-            column_viewports: self.column_viewports.clone(),
-            tabs: self.tabs.clone(),
-            active_tab_id: self.active_tab_id,
-            directory_load_generation: self.directory_load_generation,
-            directory_load_cancel: self.directory_load_cancel.clone(),
-            back_stack: self.back_stack.clone(),
-            forward_stack: self.forward_stack.clone(),
-            directory_collection_phase: self.directory_collection_phase,
-            directory_order_phase: self.directory_order_phase,
-        }
-    }
-
-    pub(super) fn restore_pane_snapshot(&mut self, pane: BrowserPane) {
+    /// 活动窗格换了（切换、拆分、合并、恢复会话）之后，清掉只属于上一个
+    /// 窗格的交互状态。浏览状态不需要搬运：它本来就只在各窗格自己手里。
+    pub(super) fn reset_active_pane_context(&mut self) {
         self.clear_icon_grid_expansion();
-        self.apply_pane_browsing_snapshot(pane);
+        self.entries_replaced();
+        self.tab_bar_reveal = if self.pane().tabs.len() > 1 {
+            TabBarReveal::Visible
+        } else {
+            TabBarReveal::Hidden
+        };
         self.tab_animations.clear();
         self.hovered_entry = None;
         self.cursor_paste_directory = None;
@@ -444,36 +419,7 @@ impl FileBrowser {
         self.column_resize_drag = None;
         self.pending_keyboard_column_focus = None;
         self.last_activation_click = None;
-    }
-
-    pub(super) fn apply_pane_browsing_snapshot(&mut self, pane: BrowserPane) {
-        self.current_dir = pane.current_dir;
-        self.is_trash_view = pane.is_trash_view;
-        self.set_entries(pane.entries);
-        self.directory_discovery = pane.directory_discovery;
-        self.directory_loading_placeholder = pane.directory_loading_placeholder;
-        self.trash_entries = pane.trash_entries;
-        self.selected = pane.selected;
-        self.selected_paths = pane.selected_paths;
-        self.selection_anchor = pane.selection_anchor;
-        self.deepest_open_column_directory = pane.deepest_open_column_directory;
-        self.expanded_directories = pane.expanded_directories;
-        self.view_mode = pane.view_mode;
-        self.column_browser_viewport = pane.column_browser_viewport;
-        self.column_viewports = pane.column_viewports;
-        self.tabs = pane.tabs;
-        self.active_tab_id = pane.active_tab_id;
-        self.directory_load_generation = pane.directory_load_generation;
-        self.directory_load_cancel = pane.directory_load_cancel;
-        self.back_stack = pane.back_stack;
-        self.forward_stack = pane.forward_stack;
-        self.directory_collection_phase = pane.directory_collection_phase;
-        self.directory_order_phase = pane.directory_order_phase;
-        self.tab_bar_reveal = if self.tabs.len() > 1 {
-            TabBarReveal::Visible
-        } else {
-            TabBarReveal::Hidden
-        };
+        self.follow_terminal_panel_directory();
     }
 
     pub(super) fn split_content_width(&self) -> f32 {
@@ -494,8 +440,9 @@ mod tests {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
         let pane_id = browser.active_pane_id();
 
-        Arc::make_mut(&mut browser.entries).clear();
-        browser.directory_collection_phase = crate::model::DirectoryCollectionPhase::Discovering;
+        Arc::make_mut(&mut browser.tab_mut().entries).clear();
+        browser.tab_mut().directory_collection_phase =
+            crate::model::DirectoryCollectionPhase::Discovering;
         assert!(matches!(
             browser
                 .pane_view(pane_id)
@@ -504,7 +451,8 @@ mod tests {
             DirectoryContentAvailability::Pending
         ));
 
-        browser.directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
+        browser.tab_mut().directory_collection_phase =
+            crate::model::DirectoryCollectionPhase::Ready;
         let DirectoryContentAvailability::Available(entries) = browser
             .pane_view(pane_id)
             .expect("active pane")
@@ -514,8 +462,9 @@ mod tests {
         };
         assert!(entries.is_empty());
 
-        browser.directory_collection_phase = crate::model::DirectoryCollectionPhase::Discovering;
-        Arc::make_mut(&mut browser.entries).push(DirectoryEntry::new(
+        browser.tab_mut().directory_collection_phase =
+            crate::model::DirectoryCollectionPhase::Discovering;
+        Arc::make_mut(&mut browser.tab_mut().entries).push(DirectoryEntry::new(
             PathBuf::from("/streamed.txt"),
             FileKind::File,
             EntryMetadata::default(),
@@ -534,10 +483,17 @@ mod tests {
     }
 
     #[test]
-    fn tab_and_pane_snapshots_share_directory_entries() {
+    fn browsing_state_has_one_owner_and_every_reader_sees_it_at_once() {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.entries = Arc::new(vec![DirectoryEntry::new(
-            PathBuf::from("/report.txt"),
+        let second_pane_id = BrowserPaneId(1);
+        let mut second_tab = BrowserTab::directory(7, PathBuf::from("/second"));
+        second_tab.selected = Some(PathBuf::from("/second/b.txt"));
+        browser
+            .panes
+            .push(BrowserPane::new(second_pane_id, second_tab));
+        browser.tab_mut().current_dir = PathBuf::from("/first");
+        browser.tab_mut().entries = Arc::new(vec![DirectoryEntry::new(
+            PathBuf::from("/first/a.txt"),
             FileKind::File,
             EntryMetadata::default(),
             false,
@@ -545,16 +501,23 @@ mod tests {
             false,
         )]);
 
-        browser.sync_active_tab_state();
-        let active_tab = browser
-            .tabs
-            .iter()
-            .find(|tab| tab.id == browser.active_tab_id)
-            .expect("active tab");
-        assert!(Arc::ptr_eq(&browser.entries, &active_tab.entries));
+        // 没有任何同步调用：活动窗格的视图、访问器和窗格表读到的是同一份。
+        let active = browser.pane_view(browser.active_pane_id()).expect("active");
+        assert_eq!(active.current_dir, &PathBuf::from("/first"));
+        assert_eq!(active.entries.len(), 1);
+        assert!(Arc::ptr_eq(
+            &browser.tab().entries,
+            &browser.panes[0].tabs[0].entries
+        ));
 
-        let pane = browser.capture_active_pane_snapshot();
-        assert!(Arc::ptr_eq(&browser.entries, &pane.entries));
+        let inactive = browser.pane_view(second_pane_id).expect("inactive");
+        assert_eq!(inactive.current_dir, &PathBuf::from("/second"));
+        assert_eq!(inactive.selected, Some(&PathBuf::from("/second/b.txt")));
+
+        // 切换窗格只换引用，两边状态原样保留。
+        browser.pane_layout = browser.pane_layout.with_active(second_pane_id);
+        assert_eq!(browser.tab().current_dir, PathBuf::from("/second"));
+        assert_eq!(browser.panes[0].tab().current_dir, PathBuf::from("/first"));
     }
 
     #[test]

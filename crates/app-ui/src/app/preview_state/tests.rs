@@ -17,7 +17,7 @@ fn browser_with_image(path: &Path) -> FileBrowser {
     let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
     let mut metadata = EntryMetadata::default();
     metadata.len = 1;
-    browser.entries = vec![DirectoryEntry::new(
+    browser.tab_mut().entries = vec![DirectoryEntry::new(
         path.to_path_buf(),
         FileKind::File,
         metadata,

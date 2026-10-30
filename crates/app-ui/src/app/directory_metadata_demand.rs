@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use file_core::{
@@ -55,13 +54,10 @@ impl FileBrowser {
         if pane.selected_paths.is_empty() {
             return Task::none();
         }
-        let root_generation = if pane_id == self.active_pane_id() {
-            self.directory_load_generation
-        } else {
-            self.pane_by_id(pane_id)
-                .map(|pane| pane.directory_load_generation)
-                .unwrap_or_default()
-        };
+        let root_generation = self
+            .pane_by_id(pane_id)
+            .map(|pane| pane.directory_load_generation)
+            .unwrap_or_default();
         let root_context = DirectoryMetadataLoadContext::Root {
             pane_id,
             path: pane.current_dir.clone(),
@@ -176,27 +172,9 @@ impl FileBrowser {
         Task::batch(tasks)
     }
 
-    /// 选中集合签名:排序后哈希保证同一集合签名稳定;签名变化才补调度,
-    /// 让每条消息出口处的检查在选中未变时零成本通过。
-    pub(super) fn schedule_selected_metadata_if_selection_changed(&mut self) -> Task<Message> {
-        use std::hash::{Hash, Hasher};
-
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        {
-            let mut paths: Vec<&PathBuf> = self.selected_paths.iter().collect();
-            paths.sort();
-            paths.hash(&mut hasher);
-        }
-        for pane in &self.panes {
-            let mut paths: Vec<&PathBuf> = pane.selected_paths.iter().collect();
-            paths.sort();
-            paths.hash(&mut hasher);
-        }
-        let signature = hasher.finish();
-        if self.selection_metadata_signature == signature {
-            return Task::none();
-        }
-        self.selection_metadata_signature = signature;
+    /// 所有窗格选中条目的大小需求。选中集合变化的转换调用；重复调度由
+    /// in-flight 去重兜住，所以调用方不必先判断选中是否真的变了。
+    pub(super) fn schedule_selected_metadata_for_all_panes(&mut self) -> Task<Message> {
         let pane_ids: Vec<BrowserPaneId> = self.panes.iter().map(|pane| pane.id).collect();
         Task::batch(
             pane_ids
@@ -210,13 +188,9 @@ impl FileBrowser {
         &self,
         pane_id: BrowserPaneId,
     ) -> tokio_util::sync::CancellationToken {
-        if pane_id == self.active_pane_id() {
-            self.directory_load_cancel.clone()
-        } else {
-            self.pane_by_id(pane_id)
-                .and_then(|pane| pane.directory_load_cancel.clone())
-        }
-        .unwrap_or_default()
+        self.pane_by_id(pane_id)
+            .and_then(|pane| pane.directory_load_cancel.clone())
+            .unwrap_or_default()
     }
 
     fn schedule_list_visible_directory_metadata(
@@ -224,20 +198,11 @@ impl FileBrowser {
         pane_id: BrowserPaneId,
         viewport_override: Option<ColumnViewport>,
     ) -> Task<Message> {
-        let root_generation = if pane_id == self.active_pane_id() {
-            self.directory_load_generation
-        } else {
-            self.pane_by_id(pane_id)
-                .map(|pane| pane.directory_load_generation)
-                .unwrap_or_default()
-        };
-        let root_cancellation = if pane_id == self.active_pane_id() {
-            self.directory_load_cancel.clone()
-        } else {
-            self.pane_by_id(pane_id)
-                .and_then(|pane| pane.directory_load_cancel.clone())
-        }
-        .unwrap_or_default();
+        let root_generation = self
+            .pane_by_id(pane_id)
+            .map(|pane| pane.directory_load_generation)
+            .unwrap_or_default();
+        let root_cancellation = self.directory_load_cancel_for_pane(pane_id);
         let window_height = self.main_window_height;
         let sources = {
             let Some(pane) = self.pane_view(pane_id) else {
@@ -383,18 +348,18 @@ impl FileBrowser {
     }
 
     fn ensure_expanded_metadata_cancellation_tokens(&mut self, pane_id: BrowserPaneId) {
-        let expanded_directories = if pane_id == self.active_pane_id() {
-            &mut self.expanded_directories
-        } else {
-            let Some(pane) = self.pane_by_id_mut(pane_id) else {
-                return;
-            };
-            &mut pane.expanded_directories
+        let Some(pane) = self.pane_by_id_mut(pane_id) else {
+            return;
         };
-        for expanded in expanded_directories.values_mut().filter(|expanded| {
-            matches!(expanded.status, ExpandedDirectoryStatus::Loaded)
-                && expanded.directory_discovery.is_some()
-        }) {
+        for expanded in pane
+            .tab_mut()
+            .expanded_directories
+            .values_mut()
+            .filter(|expanded| {
+                matches!(expanded.status, ExpandedDirectoryStatus::Loaded)
+                    && expanded.directory_discovery.is_some()
+            })
+        {
             if expanded.load_cancel.is_none() {
                 expanded.load_cancel = Some(tokio_util::sync::CancellationToken::new());
             }
@@ -465,29 +430,15 @@ impl FileBrowser {
             field: self.options.sort_field,
             direction: self.options.sort_direction,
         };
+        let Some(pane) = self.pane_by_id_mut(context.pane_id()) else {
+            return;
+        };
         match context {
-            DirectoryMetadataLoadContext::Root { pane_id, .. }
-                if *pane_id == self.active_pane_id() =>
-            {
-                self.directory_order_phase = phase;
+            DirectoryMetadataLoadContext::Root { .. } => {
+                pane.tab_mut().directory_order_phase = phase;
             }
-            DirectoryMetadataLoadContext::Root { pane_id, .. } => {
-                if let Some(pane) = self.pane_by_id_mut(*pane_id) {
-                    pane.directory_order_phase = phase;
-                }
-            }
-            DirectoryMetadataLoadContext::Expanded { pane_id, path, .. }
-                if *pane_id == self.active_pane_id() =>
-            {
-                if let Some(expanded) = self.expanded_directories.get_mut(path) {
-                    expanded.directory_order_phase = phase;
-                }
-            }
-            DirectoryMetadataLoadContext::Expanded { pane_id, path, .. } => {
-                if let Some(expanded) = self
-                    .pane_by_id_mut(*pane_id)
-                    .and_then(|pane| pane.expanded_directories.get_mut(path))
-                {
+            DirectoryMetadataLoadContext::Expanded { path, .. } => {
+                if let Some(expanded) = pane.tab_mut().expanded_directories.get_mut(path) {
                     expanded.directory_order_phase = phase;
                 }
             }
@@ -540,48 +491,29 @@ impl FileBrowser {
         &self,
         request: &DirectoryMetadataLoadRequest,
     ) -> bool {
+        let Some(pane) = self.pane_by_id(request.context.pane_id()) else {
+            return false;
+        };
+        let tab = pane.tab();
         match &request.context {
             DirectoryMetadataLoadContext::Root {
-                pane_id,
                 path,
                 collection_generation,
-            } if *pane_id == self.active_pane_id() => {
-                path == &self.current_dir
-                    && *collection_generation == self.directory_load_generation
-                    && self.directory_discovery.is_some()
-            }
-            DirectoryMetadataLoadContext::Root {
-                pane_id,
-                path,
-                collection_generation,
-            } => self.pane_by_id(*pane_id).is_some_and(|pane| {
-                path == &pane.current_dir
+                ..
+            } => {
+                path == &tab.current_dir
                     && *collection_generation == pane.directory_load_generation
-                    && pane.directory_discovery.is_some()
-            }),
-            DirectoryMetadataLoadContext::Expanded {
-                pane_id,
-                path,
-                load_generation,
-            } if *pane_id == self.active_pane_id() => {
-                self.expanded_directories.get(path).is_some_and(|expanded| {
-                    *load_generation == expanded.load_generation
-                        && matches!(expanded.status, ExpandedDirectoryStatus::Loaded)
-                        && expanded.directory_discovery.is_some()
-                })
+                    && tab.directory_discovery.is_some()
             }
             DirectoryMetadataLoadContext::Expanded {
-                pane_id,
                 path,
                 load_generation,
-            } => self
-                .pane_by_id(*pane_id)
-                .and_then(|pane| pane.expanded_directories.get(path))
-                .is_some_and(|expanded| {
-                    *load_generation == expanded.load_generation
-                        && matches!(expanded.status, ExpandedDirectoryStatus::Loaded)
-                        && expanded.directory_discovery.is_some()
-                }),
+                ..
+            } => tab.expanded_directories.get(path).is_some_and(|expanded| {
+                *load_generation == expanded.load_generation
+                    && matches!(expanded.status, ExpandedDirectoryStatus::Loaded)
+                    && expanded.directory_discovery.is_some()
+            }),
         }
     }
 
@@ -606,46 +538,15 @@ impl FileBrowser {
         request_generation: u64,
     ) -> Task<Message> {
         let base_options = self.options.clone();
-        if pane_id != self.active_pane_id() {
-            let Some(pane) = self.pane_by_id_mut(pane_id) else {
-                return Task::none();
-            };
-            let crate::model::DirectoryOrderPhase::WaitingForMetadata {
-                request_generation: expected_generation,
-                field,
-                direction,
-            } = pane.directory_order_phase
-            else {
-                return Task::none();
-            };
-            if request_generation != expected_generation {
-                return Task::none();
-            }
-            let options = file_core::ScanOptions {
-                sort_field: field,
-                sort_direction: direction,
-                ..base_options.clone()
-            };
-            let Some(discovery) = pane.directory_discovery.as_mut() else {
-                return Task::none();
-            };
-            if !discovered_sort_is_ready(&discovery.entries, &options) {
-                return Task::none();
-            }
-            discovery.order = Arc::new(sort_discovered_entry_indices(&discovery.entries, &options));
-            pane.entries = Arc::new(crate::model::display_entries_in_discovery_order(discovery));
-            pane.directory_order_phase =
-                crate::model::DirectoryOrderPhase::Ready { field, direction };
-            pane.sync_active_tab_state();
-            // 条目元数据从 Pending 落地为真实值，缩略图缓存 key 随之漂移；
-            // 重建后必须用新条目重新调度，否则缩略图要等 hover/滚动才出现。
-            return self.schedule_thumbnail_refresh_for_pane(pane_id);
-        }
+        let Some(pane) = self.pane_by_id_mut(pane_id) else {
+            return Task::none();
+        };
+        let tab = pane.tab_mut();
         let crate::model::DirectoryOrderPhase::WaitingForMetadata {
             request_generation: expected_generation,
             field,
             direction,
-        } = self.directory_order_phase
+        } = tab.directory_order_phase
         else {
             return Task::none();
         };
@@ -657,28 +558,29 @@ impl FileBrowser {
             sort_direction: direction,
             ..base_options
         };
-        let display_entries = {
-            let Some(discovery) = self.directory_discovery.as_mut() else {
-                return Task::none();
-            };
-            if !discovered_sort_is_ready(&discovery.entries, &options) {
-                return Task::none();
-            }
-            discovery.order = Arc::new(sort_discovered_entry_indices(&discovery.entries, &options));
-            Arc::new(crate::model::display_entries_in_discovery_order(discovery))
+        let Some(discovery) = tab.directory_discovery.as_mut() else {
+            return Task::none();
         };
-        self.set_entries(display_entries);
-        self.directory_order_phase = crate::model::DirectoryOrderPhase::Ready { field, direction };
-        crate::startup_trace::mark_once("initial_directory_requested_sort_ready");
-        crate::startup_trace::mark_once("initial_directory_ready");
-        self.sync_active_tab_state();
-        // 同非活动窗格分支：元数据落地重建条目后，缩略图 key 漂移，必须重调度。
+        if !discovered_sort_is_ready(&discovery.entries, &options) {
+            return Task::none();
+        }
+        discovery.order = Arc::new(sort_discovered_entry_indices(&discovery.entries, &options));
+        tab.entries = Arc::new(crate::model::display_entries_in_discovery_order(discovery));
+        tab.directory_order_phase = crate::model::DirectoryOrderPhase::Ready { field, direction };
+        let entry_count = tab.entries.len();
+        self.entries_replaced();
+        if pane_id == self.active_pane_id() {
+            crate::startup_trace::mark_once("initial_directory_requested_sort_ready");
+            crate::startup_trace::mark_once("initial_directory_ready");
+        }
+        // 条目元数据从 Pending 落地为真实值，缩略图缓存 key 随之漂移；
+        // 重建后必须用新条目重新调度，否则缩略图要等 hover/滚动才出现。
         tracing::info!(
             target: "app_ui::entry_changes",
-            entries = self.entries.len(),
+            entries = entry_count,
             "metadata commit rebuilt root entries; rescheduling thumbnails"
         );
-        self.schedule_thumbnail_refresh()
+        self.schedule_thumbnail_refresh_for_pane(pane_id)
     }
 
     fn commit_expanded_metadata_sort_if_ready(
@@ -688,28 +590,17 @@ impl FileBrowser {
         request_generation: u64,
     ) -> Task<Message> {
         let base_options = self.options.clone();
-        if pane_id != self.active_pane_id() {
-            let Some(pane) = self.pane_by_id_mut(pane_id) else {
-                return Task::none();
-            };
-            let Some(expanded) = pane.expanded_directories.get_mut(path) else {
-                return Task::none();
-            };
-            if !commit_expanded_metadata_sort(expanded, request_generation, &base_options) {
-                return Task::none();
-            }
-            pane.sync_active_tab_state();
-            // 展开目录条目元数据落地同样漂移缩略图 key，重调度整个窗格可见范围。
-            return self.schedule_thumbnail_refresh_for_pane(pane_id);
-        }
-        let Some(expanded) = self.expanded_directories.get_mut(path) else {
+        let Some(expanded) = self
+            .pane_by_id_mut(pane_id)
+            .and_then(|pane| pane.tab_mut().expanded_directories.get_mut(path))
+        else {
             return Task::none();
         };
         if !commit_expanded_metadata_sort(expanded, request_generation, &base_options) {
             return Task::none();
         }
-        self.sync_active_tab_state();
-        self.schedule_thumbnail_refresh()
+        // 展开目录条目元数据落地同样漂移缩略图 key，重调度整个窗格可见范围。
+        self.schedule_thumbnail_refresh_for_pane(pane_id)
     }
 }
 
@@ -789,9 +680,9 @@ mod tests {
         let options = ScanOptions::default();
         let (directory, discovery) = discovered_fixture(300, options.clone()).await;
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.view_mode = BrowserViewMode::List;
+        browser.tab_mut().view_mode = BrowserViewMode::List;
         browser.options = options;
-        browser.current_dir = directory.path().to_path_buf();
+        browser.tab_mut().current_dir = directory.path().to_path_buf();
         let request = browser.next_directory_load_request(directory.path().to_path_buf());
 
         drop(browser.accept_directory_discovery(
@@ -818,9 +709,9 @@ mod tests {
         };
         let (directory, discovery) = discovered_fixture(300, options.clone()).await;
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.view_mode = BrowserViewMode::List;
+        browser.tab_mut().view_mode = BrowserViewMode::List;
         browser.options = options;
-        browser.current_dir = directory.path().to_path_buf();
+        browser.tab_mut().current_dir = directory.path().to_path_buf();
         let request = browser.next_directory_load_request(directory.path().to_path_buf());
 
         drop(browser.accept_directory_discovery(
@@ -836,7 +727,7 @@ mod tests {
                     DirectoryMetadataLoadContext::Root {
                         collection_generation,
                         ..
-                    } if collection_generation == browser.directory_load_generation
+                    } if collection_generation == browser.pane().directory_load_generation
                 )
         }));
     }
@@ -850,9 +741,9 @@ mod tests {
         };
         let (directory, discovery) = discovered_fixture(0, options.clone()).await;
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.view_mode = BrowserViewMode::List;
+        browser.tab_mut().view_mode = BrowserViewMode::List;
         browser.options = options;
-        browser.current_dir = directory.path().to_path_buf();
+        browser.tab_mut().current_dir = directory.path().to_path_buf();
         let request = browser.next_directory_load_request(directory.path().to_path_buf());
 
         drop(browser.accept_directory_discovery(
@@ -861,10 +752,10 @@ mod tests {
         ));
 
         assert_eq!(
-            browser.directory_collection_phase,
+            browser.tab().directory_collection_phase,
             crate::model::DirectoryCollectionPhase::Ready
         );
-        assert!(browser.directory_order_phase.is_ready());
+        assert!(browser.tab().directory_order_phase.is_ready());
         assert!(browser.directory_metadata_in_flight.is_empty());
     }
 
@@ -899,9 +790,9 @@ mod tests {
         .await
         .unwrap();
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.view_mode = BrowserViewMode::List;
+        browser.tab_mut().view_mode = BrowserViewMode::List;
         browser.options = options;
-        browser.current_dir = directory.path().to_path_buf();
+        browser.tab_mut().current_dir = directory.path().to_path_buf();
         let load_request = browser.next_directory_load_request(directory.path().to_path_buf());
         let collection_generation = load_request.generation;
 
@@ -910,12 +801,12 @@ mod tests {
             crate::model::PrebuiltDirectoryDiscovery::build(discovery),
         ));
         assert_eq!(
-            browser.directory_collection_phase,
+            browser.tab().directory_collection_phase,
             crate::model::DirectoryCollectionPhase::Ready
         );
         let crate::model::DirectoryOrderPhase::WaitingForMetadata {
             request_generation, ..
-        } = browser.directory_order_phase
+        } = browser.tab().directory_order_phase
         else {
             panic!("size order must wait for metadata");
         };
@@ -946,7 +837,7 @@ mod tests {
             Ok(stale_resolution),
         ));
         assert!(matches!(
-            browser.directory_order_phase,
+            browser.tab().directory_order_phase,
             crate::model::DirectoryOrderPhase::WaitingForMetadata {
                 request_generation: expected,
                 ..
@@ -979,9 +870,10 @@ mod tests {
             Ok(resolution),
         ));
 
-        assert!(browser.directory_order_phase.is_ready());
+        assert!(browser.tab().directory_order_phase.is_ready());
         assert_eq!(
             browser
+                .tab()
                 .entries
                 .iter()
                 .map(|entry| entry.name.to_string_lossy().into_owned())
@@ -995,9 +887,9 @@ mod tests {
         let options = ScanOptions::default();
         let (directory, discovery) = discovered_fixture(1, options.clone()).await;
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.view_mode = BrowserViewMode::List;
+        browser.tab_mut().view_mode = BrowserViewMode::List;
         browser.options = options;
-        browser.current_dir = directory.path().to_path_buf();
+        browser.tab_mut().current_dir = directory.path().to_path_buf();
         let load_request = browser.next_directory_load_request(directory.path().to_path_buf());
         let stale_collection_generation = load_request.generation;
         drop(browser.accept_directory_discovery(
@@ -1007,8 +899,9 @@ mod tests {
 
         let replacement = directory.path().join("replacement");
         std::fs::create_dir(&replacement).unwrap();
-        browser.current_dir = replacement.clone();
-        browser.directory_collection_phase = crate::model::DirectoryCollectionPhase::Discovering;
+        browser.tab_mut().current_dir = replacement.clone();
+        browser.tab_mut().directory_collection_phase =
+            crate::model::DirectoryCollectionPhase::Discovering;
         let _ = browser.next_directory_load_request(replacement);
         drop(browser.accept_directory_metadata_resolution(
             DirectoryMetadataLoadRequest {
@@ -1035,10 +928,10 @@ mod tests {
         ));
 
         assert_eq!(
-            browser.directory_collection_phase,
+            browser.tab().directory_collection_phase,
             crate::model::DirectoryCollectionPhase::Discovering
         );
-        assert!(browser.directory_discovery.is_none());
+        assert!(browser.tab().directory_discovery.is_none());
     }
 
     #[tokio::test]
@@ -1046,9 +939,9 @@ mod tests {
         let options = ScanOptions::default();
         let (directory, discovery) = discovered_fixture(2, options.clone()).await;
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.view_mode = BrowserViewMode::List;
+        browser.tab_mut().view_mode = BrowserViewMode::List;
         browser.options = options;
-        browser.current_dir = directory.path().to_path_buf();
+        browser.tab_mut().current_dir = directory.path().to_path_buf();
         for column in [
             ListColumnKind::Modified,
             ListColumnKind::Size,
@@ -1088,9 +981,9 @@ mod tests {
         let options = ScanOptions::default();
         let (directory, discovery) = discovered_fixture(2, options.clone()).await;
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.view_mode = BrowserViewMode::Columns;
+        browser.tab_mut().view_mode = BrowserViewMode::Columns;
         browser.options = options;
-        browser.current_dir = directory.path().to_path_buf();
+        browser.tab_mut().current_dir = directory.path().to_path_buf();
         let load_request = browser.next_directory_load_request(directory.path().to_path_buf());
         drop(browser.accept_directory_discovery(
             load_request,
@@ -1105,7 +998,7 @@ mod tests {
         // 列表与多栏共用 column_viewports 键位:这里预置多栏当前列滚到
         // 很深处的旧记录。切换后列表从顶部开始,demand 必须按列表真实
         // 起始视口取范围,而不是沿用该记录(否则首屏行日期一直显示 "-")。
-        browser.column_viewports.insert(
+        browser.pane_mut().column_viewports.insert(
             directory.path().to_path_buf(),
             ColumnViewport {
                 offset_y: 100_000.0,
@@ -1145,8 +1038,8 @@ mod tests {
         .await
         .unwrap();
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.view_mode = BrowserViewMode::List;
-        browser.current_dir = root.path().to_path_buf();
+        browser.tab_mut().view_mode = BrowserViewMode::List;
+        browser.tab_mut().current_dir = root.path().to_path_buf();
         let load_request = browser.next_directory_load_request(root.path().to_path_buf());
         drop(browser.accept_directory_discovery(
             load_request,
@@ -1154,7 +1047,7 @@ mod tests {
         ));
         let expanded_entries =
             crate::model::display_entries_in_discovery_order(&expanded_discovery);
-        browser.expanded_directories.insert(
+        browser.tab_mut().expanded_directories.insert(
             expanded_path.clone(),
             crate::model::ExpandedDirectory {
                 entries: expanded_entries,
@@ -1219,8 +1112,8 @@ mod tests {
         .unwrap();
         let resolver = discovery.metadata_resolver.clone();
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.view_mode = BrowserViewMode::List;
-        browser.current_dir = directory.path().to_path_buf();
+        browser.tab_mut().view_mode = BrowserViewMode::List;
+        browser.tab_mut().current_dir = directory.path().to_path_buf();
         let load_request = browser.next_directory_load_request(directory.path().to_path_buf());
         let collection_generation = load_request.generation;
         drop(browser.accept_directory_discovery(
@@ -1277,9 +1170,9 @@ mod tests {
         .unwrap();
         let resolver = discovery.metadata_resolver.clone();
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.view_mode = BrowserViewMode::List;
+        browser.tab_mut().view_mode = BrowserViewMode::List;
         browser.options = options;
-        browser.current_dir = directory.path().to_path_buf();
+        browser.tab_mut().current_dir = directory.path().to_path_buf();
 
         // 预占全部解码槽位：commit 内部的 pump 取不走新请求，才能断言入队结果。
         let max_slots = std::thread::available_parallelism()
@@ -1313,17 +1206,17 @@ mod tests {
         ));
         // 权威扫描提交后条目元数据是 Pending，自动调度的缩略图请求基于空值 key。
         assert_eq!(
-            browser.entries[0].metadata.filesystem_availability,
+            browser.tab().entries[0].metadata.filesystem_availability,
             file_core::DirectoryMetadataAvailability::Pending
         );
         let stale_key = crate::thumbnail_cache::request_for_entry(
-            &browser.entries[0],
+            &browser.tab().entries[0],
             crate::thumbnail_cache::LIST_THUMBNAIL_EDGE,
         )
         .expect("pending request")
         .key();
 
-        let expected_generation = match browser.directory_order_phase {
+        let expected_generation = match browser.tab().directory_order_phase {
             crate::model::DirectoryOrderPhase::WaitingForMetadata {
                 request_generation, ..
             } => request_generation,
@@ -1356,11 +1249,11 @@ mod tests {
 
         // 排序提交重建条目后元数据落地，且必须已经用真实 key 重新入队缩略图。
         assert_eq!(
-            browser.entries[0].metadata.filesystem_availability,
+            browser.tab().entries[0].metadata.filesystem_availability,
             file_core::DirectoryMetadataAvailability::Complete
         );
         let current_request = crate::thumbnail_cache::request_for_entry(
-            &browser.entries[0],
+            &browser.tab().entries[0],
             crate::thumbnail_cache::LIST_THUMBNAIL_EDGE,
         )
         .expect("current request");
@@ -1372,5 +1265,88 @@ mod tests {
         assert_eq!(requeued[0].request.source, image_path);
         assert_eq!(requeued[0].request.metadata.len, 64);
         assert_eq!(requeued[0].key(), current_request.key());
+    }
+
+    // ---- 选中统计的大小需求：每个选择入口自己发出，不靠 update 出口兜底 ----
+    //
+    // 多栏视图下目录加载不产生文件系统 demand，所以选中前 in-flight 为空；
+    // 被选中的第 250 个条目远在任何可见范围之外，只能靠选中入口的调度拿到。
+
+    async fn browser_with_loaded_columns() -> (tempfile::TempDir, FileBrowser, PathBuf, usize) {
+        let options = ScanOptions::default();
+        let (directory, discovery) = discovered_fixture(300, options.clone()).await;
+        let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+        browser.tab_mut().view_mode = BrowserViewMode::Columns;
+        browser.options = options;
+        browser.tab_mut().current_dir = directory.path().to_path_buf();
+        let request = browser.next_directory_load_request(directory.path().to_path_buf());
+        drop(browser.accept_directory_discovery(
+            request,
+            crate::model::PrebuiltDirectoryDiscovery::build(discovery),
+        ));
+        browser.directory_metadata_in_flight.clear();
+        let target = directory.path().join("file-0250.dat");
+        let index = browser
+            .tab()
+            .entries
+            .iter()
+            .find(|entry| entry.path == target)
+            .and_then(|entry| entry.discovery_index)
+            .expect("the fixture entry has a discovery index");
+        (directory, browser, target, index)
+    }
+
+    fn filesystem_demand_exists(browser: &FileBrowser, index: usize) -> bool {
+        browser.directory_metadata_in_flight.iter().any(|key| {
+            key.requirement == DirectoryMetadataRequirement::Filesystem
+                && matches!(key.context, DirectoryMetadataLoadContext::Root { .. })
+                && key.index == index
+        })
+    }
+
+    #[tokio::test]
+    async fn clicking_an_entry_demands_its_metadata() {
+        let (_directory, mut browser, target, index) = browser_with_loaded_columns().await;
+
+        drop(browser.handle_column_entry_clicked(target));
+
+        assert!(filesystem_demand_exists(&browser, index));
+    }
+
+    #[tokio::test]
+    async fn keyboard_selection_demands_its_metadata() {
+        let (_directory, mut browser, target, index) = browser_with_loaded_columns().await;
+
+        drop(browser.select_path_from_keyboard(target));
+
+        assert!(filesystem_demand_exists(&browser, index));
+    }
+
+    #[tokio::test]
+    async fn right_click_selection_demands_its_metadata() {
+        let (_directory, mut browser, target, index) = browser_with_loaded_columns().await;
+
+        drop(browser.handle_entry_right_clicked(target));
+
+        assert!(filesystem_demand_exists(&browser, index));
+    }
+
+    #[tokio::test]
+    async fn select_all_demands_every_selected_entry() {
+        let (_directory, mut browser, _target, index) = browser_with_loaded_columns().await;
+
+        drop(browser.select_all_in_file_selection_scope());
+
+        assert!(filesystem_demand_exists(&browser, index));
+    }
+
+    #[tokio::test]
+    async fn drag_selecting_over_an_entry_demands_its_metadata() {
+        let (_directory, mut browser, target, index) = browser_with_loaded_columns().await;
+        browser.drag_selection_anchor = Some(target.clone());
+
+        drop(browser.handle_entry_hovered(target));
+
+        assert!(filesystem_demand_exists(&browser, index));
     }
 }

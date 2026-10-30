@@ -107,7 +107,6 @@ impl FileBrowser {
 
     fn merge_desktop_workspace(&mut self, workspace: LocalWorkspaceRequest) -> Task<Message> {
         let prepare_workspace_merge = self.prepare_desktop_workspace_merge();
-        self.sync_active_tab_state();
         let original_active_pane_id = self.active_pane_id();
         let occupied_tab_ids = self
             .panes
@@ -118,7 +117,7 @@ impl FileBrowser {
             &workspace,
             &self.panes,
             original_active_pane_id,
-            self.active_tab_id,
+            self.active_tab_id(),
             &occupied_tab_ids,
             self.next_tab_id,
         );
@@ -146,7 +145,7 @@ impl FileBrowser {
                 DesktopTabPlacement::Append => {
                     let mut tab =
                         BrowserTab::directory(tab_merge.tab_id, tab_merge.directory.clone());
-                    tab.view_mode = pane.view_mode;
+                    tab.view_mode = pane.tab().view_mode;
                     replace_tab_selection(&mut tab, &tab_merge.selected_paths);
                     pane.tabs.push(tab);
                     appended_tab_ids.push(tab_merge.tab_id);
@@ -155,11 +154,7 @@ impl FileBrowser {
         }
         self.next_tab_id = plan.next_tab_id;
 
-        let updated_active_pane = self
-            .pane_by_id(original_active_pane_id)
-            .expect("active pane remains available")
-            .clone();
-        self.restore_pane_snapshot(updated_active_pane);
+        self.reset_active_pane_context();
         if first_target_pane_id != original_active_pane_id {
             self.activate_pane(first_target_pane_id);
         }
@@ -170,16 +165,7 @@ impl FileBrowser {
         }
         self.sync_tab_bar_visibility();
 
-        let activate_first_target = if first_target_tab_id == self.active_tab_id {
-            let first_tab = self
-                .tabs
-                .iter()
-                .find(|tab| tab.id == first_target_tab_id)
-                .expect("first target tab exists")
-                .clone();
-            self.selected = first_tab.selected;
-            self.selected_paths = first_tab.selected_paths;
-            self.selection_anchor = first_tab.selection_anchor;
+        let activate_first_target = if first_target_tab_id == self.active_tab_id() {
             self.reload_current()
         } else {
             self.select_tab(first_target_tab_id)
@@ -216,7 +202,7 @@ fn desktop_workspace_merge_plan(
                     .find(|tab| {
                         tab.id == active_tab_id
                             && !tab.is_trash_view
-                            && tab.directory == requested_tab.directory()
+                            && tab.current_dir == requested_tab.directory()
                     })
                     .map(|tab| (pane.id, tab))
             })
@@ -225,7 +211,7 @@ fn desktop_workspace_merge_plan(
                     pane.tabs
                         .iter()
                         .find(|tab| {
-                            !tab.is_trash_view && tab.directory == requested_tab.directory()
+                            !tab.is_trash_view && tab.current_dir == requested_tab.directory()
                         })
                         .map(|tab| (pane.id, tab))
                 })
@@ -287,13 +273,11 @@ mod tests {
         ])
         .expect("classify workspace");
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.current_dir = second.clone();
-        browser.tabs = vec![
+        browser.pane_mut().tabs = vec![
             BrowserTab::directory(5, first.clone()),
             BrowserTab::directory(7, second.clone()),
         ];
-        browser.active_tab_id = 7;
-        browser.sync_active_tab_state();
+        browser.pane_mut().active_tab_id = 7;
         let active_pane_id = browser.active_pane_id();
 
         let plan = desktop_workspace_merge_plan(
@@ -339,16 +323,12 @@ mod tests {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
         let primary = crate::model::BrowserPaneId::PRIMARY;
         let secondary = crate::model::BrowserPaneId(1);
-        browser.current_dir = active_directory.clone();
-        browser.tabs = vec![BrowserTab::directory(0, active_directory.clone())];
-        browser.active_tab_id = 0;
-        browser.sync_active_tab_state();
-        let mut secondary_pane = browser.capture_active_pane_snapshot();
-        secondary_pane.id = secondary;
-        secondary_pane.current_dir = inactive_directory.clone();
-        secondary_pane.tabs = vec![BrowserTab::directory(5, inactive_directory.clone())];
-        secondary_pane.active_tab_id = 5;
-        browser.panes.push(secondary_pane);
+        browser.pane_mut().tabs = vec![BrowserTab::directory(0, active_directory.clone())];
+        browser.pane_mut().active_tab_id = 0;
+        browser.panes.push(crate::model::BrowserPane::new(
+            secondary,
+            BrowserTab::directory(5, inactive_directory.clone()),
+        ));
         browser.pane_layout = crate::model::BrowserPaneLayout::Split {
             axis: crate::model::SplitAxis::Horizontal,
             first: primary,
@@ -361,12 +341,12 @@ mod tests {
         let _task = browser.merge_desktop_workspace(workspace);
 
         assert_eq!(browser.active_pane_id(), secondary);
-        assert_eq!(browser.active_tab_id, 5);
-        assert_eq!(browser.selected_paths, HashSet::from([selected]));
+        assert_eq!(browser.active_tab_id(), 5);
+        assert_eq!(browser.tab().selected_paths, HashSet::from([selected]));
         let primary_pane = browser.pane_by_id(primary).expect("primary pane");
         assert_eq!(primary_pane.tabs.len(), 2);
-        assert_eq!(primary_pane.tabs[0].directory, active_directory);
-        assert_eq!(primary_pane.tabs[1].directory, missing_directory);
+        assert_eq!(primary_pane.tabs[0].current_dir, active_directory);
+        assert_eq!(primary_pane.tabs[1].current_dir, missing_directory);
         assert_eq!(primary_pane.tabs[1].id, 6);
         assert_eq!(browser.next_tab_id, 7);
     }
@@ -379,9 +359,8 @@ mod tests {
         let workspace = LocalWorkspaceRequest::from_cli_paths(vec![requested.clone()])
             .expect("classify workspace");
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.current_dir = requested.clone();
-        browser.tabs = vec![BrowserTab::directory(0, requested.clone())];
-        browser.active_tab_id = 0;
+        browser.pane_mut().tabs = vec![BrowserTab::directory(0, requested.clone())];
+        browser.pane_mut().active_tab_id = 0;
         browser.address_editing = Some(PaneAddressEditingSession {
             pane_id: browser.active_pane_id(),
             session: AddressEditingSession::new(AddressEditingSessionId(1), &requested),
@@ -404,21 +383,21 @@ mod tests {
         let workspace = LocalWorkspaceRequest::from_cli_paths(vec![selected.clone()])
             .expect("classify workspace");
         let (mut browser, _task) = FileBrowser::new(crate::config::ui_thread_startup_config());
-        browser.current_dir = requested.clone();
-        browser.tabs = vec![
+        browser.pane_mut().tabs = vec![
             BrowserTab::directory(0, requested.clone()),
             BrowserTab::directory(1, untouched.clone()),
         ];
-        browser.active_tab_id = 0;
+        browser.pane_mut().active_tab_id = 0;
         browser.next_tab_id = 2;
-        let untouched_before = browser.tabs[1].clone();
+        let untouched_before = browser.pane().tabs[1].clone();
 
         let _task = browser.merge_desktop_workspace(workspace);
 
-        assert_eq!(browser.tabs.len(), 2);
-        assert_eq!(browser.tabs[0].selected, Some(selected.clone()));
-        assert_eq!(browser.tabs[0].selected_paths, HashSet::from([selected]));
-        assert_eq!(browser.tabs[1].directory, untouched_before.directory);
-        assert_eq!(browser.tabs[1].back_stack, untouched_before.back_stack);
+        let tabs = &browser.pane().tabs;
+        assert_eq!(tabs.len(), 2);
+        assert_eq!(tabs[0].selected, Some(selected.clone()));
+        assert_eq!(tabs[0].selected_paths, HashSet::from([selected]));
+        assert_eq!(tabs[1].current_dir, untouched_before.current_dir);
+        assert_eq!(tabs[1].back_stack, untouched_before.back_stack);
     }
 }

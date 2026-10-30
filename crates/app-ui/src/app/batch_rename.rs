@@ -31,7 +31,7 @@ impl FileBrowser {
 
     pub(super) fn batch_rename_available_for_selection(&self) -> bool {
         let paths = self.selected_paths_for_operation();
-        !self.is_trash_view && paths.len() > 1 && same_parent(&paths)
+        !self.tab().is_trash_view && paths.len() > 1 && same_parent(&paths)
     }
 
     fn open_batch_rename_selected(&mut self) -> Task<Message> {
@@ -158,12 +158,12 @@ mod tests {
         assert_ne!(first_name.as_bytes(), second_name.as_bytes());
         assert_eq!(first_name.to_string_lossy(), second_name.to_string_lossy());
         let (mut browser, _) = FileBrowser::new(config::ui_thread_startup_config());
-        browser.entries = vec![
+        browser.tab_mut().entries = vec![
             file_entry(first_path.clone()),
             file_entry(second_path.clone()),
         ]
         .into();
-        browser.selected_paths = HashSet::from([first_path.clone(), second_path.clone()]);
+        browser.tab_mut().selected_paths = HashSet::from([first_path.clone(), second_path.clone()]);
 
         drop(browser.handle_batch_rename_message(BatchRenameMessage::OpenSelected));
 
@@ -184,12 +184,12 @@ mod tests {
         fs::write(&first_path, b"first").expect("create first source");
         fs::write(&second_path, b"second").expect("create second source");
         let (mut browser, _) = FileBrowser::new(config::ui_thread_startup_config());
-        browser.entries = vec![
+        browser.tab_mut().entries = vec![
             file_entry(first_path.clone()),
             file_entry(second_path.clone()),
         ]
         .into();
-        browser.selected_paths = HashSet::from([first_path.clone(), second_path.clone()]);
+        browser.tab_mut().selected_paths = HashSet::from([first_path.clone(), second_path.clone()]);
 
         drop(browser.handle_batch_rename_message(BatchRenameMessage::OpenSelected));
         assert!(browser.batch_rename.is_some());

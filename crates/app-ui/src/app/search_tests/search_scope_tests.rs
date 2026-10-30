@@ -19,8 +19,8 @@ fn columns_search_uses_last_pointer_clicked_column_instead_of_keyboard_focus() {
     std::fs::write(&child_file, "child").unwrap();
 
     let mut browser = browser_for_search_tests(root.path().to_path_buf());
-    browser.view_mode = BrowserViewMode::Columns;
-    browser.entries = vec![
+    browser.tab_mut().view_mode = BrowserViewMode::Columns;
+    browser.tab_mut().entries = vec![
         DirectoryEntry::new(
             root_file.clone(),
             FileKind::File,
@@ -39,7 +39,7 @@ fn columns_search_uses_last_pointer_clicked_column_instead_of_keyboard_focus() {
         ),
     ]
     .into();
-    browser.expanded_directories.insert(
+    browser.tab_mut().expanded_directories.insert(
         project.clone(),
         ExpandedDirectory {
             entries: vec![DirectoryEntry::new(
@@ -64,7 +64,7 @@ fn columns_search_uses_last_pointer_clicked_column_instead_of_keyboard_focus() {
             },
         },
     );
-    browser.deepest_open_column_directory = Some(project.clone());
+    browser.tab_mut().deepest_open_column_directory = Some(project.clone());
 
     drop(browser.handle_column_entry_clicked(root_file));
     drop(browser.select_path_from_keyboard(child_file));
@@ -130,7 +130,7 @@ fn switching_directory_scope_restarts_with_frozen_roots_and_rejects_stale_result
     ));
     drop(browser.press_search_result(old_current_hit));
 
-    browser.current_dir = navigated_folder;
+    browser.tab_mut().current_dir = navigated_folder;
     drop(browser.select_search_directory_scope(SearchDirectoryScope::Home));
     let stale_home_request = pending_indexed_request(&browser);
     {

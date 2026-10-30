@@ -1,3 +1,4 @@
+use super::entry_hover_recalc::ScrolledView;
 use super::global_error::GlobalErrorSource;
 use super::FileBrowser;
 use crate::model::{Message, NavigationMode, ScrollbarRegion as Region};
@@ -32,29 +33,12 @@ impl FileBrowser {
             };
         }
         let command = self.dispatch(message);
-        // 任何消息处理后都检查活动窗格目录是否变化,让内嵌终端即时跟随
-        // (前进/后退/侧边栏跳转等入口太多,统一在出口收敛)。
-        self.follow_terminal_panel_directory();
         // D1 单点收敛:面板开启时让预览状态跟上活动窗格选中项。
-        // 覆盖点击/键盘/删除/改名/tab 切换/窗格切换/目录导航/启动偏好加载
-        // 的全部路径;面板关闭时是空操作。
+        // 面板与 Space 预览共用引擎的 preview 槽,而 clear_preview 被 30 多个
+        // 交互入口(拖拽起手、菜单、选择变化……)顺手调用,面板内容随时可能被
+        // 清掉;不把槽拆开,就只能在出口重新对齐一次。面板关闭时是空操作。
         let right_preview_panel_command = self.sync_right_preview_panel();
-        // 选中统计的大小需求:选中入口(点击/框选/键盘/全选/粘贴回显等)
-        // 太多,统一在出口按选中签名收敛,变化时补一次选中条目元数据调度。
-        let selection_metadata_command = self.schedule_selected_metadata_if_selection_changed();
-        // 视口越界自愈:条目集骤减后记录的滚动偏移可能超出新内容,
-        // 出口统一重钉,防止虚拟列表渲染出整屏空白。
-        let viewport_clamp_command = self.clamp_viewports_to_content();
-        // 驱动者签发单点收敛:入队/恢复/认领/监督换代后由此统一发出
-        // Task::stream 驱动者,任何消息路径都不必各自处理。
-        let driver_launch_command = self.poll_driver_command();
-        Task::batch([
-            command,
-            right_preview_panel_command,
-            selection_metadata_command,
-            viewport_clamp_command,
-            driver_launch_command,
-        ])
+        Task::batch([command, right_preview_panel_command])
     }
 
     /// 消息分派体：自 update 的主 match 提出，出口收敛钩子只在 update 里执行一次。
@@ -175,11 +159,13 @@ impl FileBrowser {
                 if let Some(error) = self.operation_queue.supervise(std::time::Instant::now()) {
                     self.show_global_error(error);
                 }
-                Task::none()
+                self.launch_ready_driver()
             }
-            Message::FileOperationPersistenceFinished(outcome) => {
-                self.accept_file_operation_persistence_finished(outcome)
-            }
+            Message::FileOperationPersistenceFinished(outcome) => Task::batch([
+                self.accept_file_operation_persistence_finished(outcome),
+                // 写库回执给可恢复任务配上存储 id，它此刻才具备启动条件。
+                self.launch_ready_driver(),
+            ]),
             Message::OperationProgressAnimationTick => {
                 self.operation_progress_animation_frame =
                     self.operation_progress_animation_frame.wrapping_add(1);
@@ -205,7 +191,10 @@ impl FileBrowser {
             }
             Message::FileOperationCancelRequested(task_id) => {
                 self.operation_queue.cancel(task_id);
-                self.continue_file_operation_persistence()
+                Task::batch([
+                    self.continue_file_operation_persistence(),
+                    self.launch_ready_driver(),
+                ])
             }
             Message::FileOperationDetailsCopyRequested(task_id) => self
                 .operation_queue
@@ -432,7 +421,7 @@ impl FileBrowser {
                 self.start_right_preview_panel_ratio_resize_drag()
             }
             Message::ToggleRightPreviewPanel => self.toggle_right_preview_panel(),
-            Message::SplitResizeStarted => self.start_split_resize(self.cursor_position),
+            Message::SplitResizeStarted => self.start_split_resize(self.cursor_or_origin()),
             Message::TerminalPanel(message) => self.handle_terminal_panel_message(message),
             Message::CursorMoved { window, position } => {
                 self.update_pointer_motion(window, position)
@@ -502,7 +491,7 @@ impl FileBrowser {
             Message::KeyboardModifiersChanged(modifiers) => {
                 self.keyboard_modifiers = modifiers;
                 if self.promote_ctrl_shift_pane_drag_from_active_pointer_drag() {
-                    self.update_pane_drag(self.cursor_position);
+                    self.update_pane_drag(self.cursor_or_origin());
                 }
                 Task::none()
             }
@@ -969,7 +958,12 @@ impl FileBrowser {
             ]),
             Message::ListScrolled(pane_id, offset_y, viewport) => {
                 let scrolled = self.handle_list_scrolled(pane_id, offset_y, viewport.height);
-                self.recalculate_hovered_entry_after_list_scroll(pane_id, offset_y, viewport);
+                self.recalculate_hovered_entry_after_scroll(
+                    pane_id,
+                    ScrolledView::List,
+                    offset_y,
+                    viewport,
+                );
                 Task::batch([
                     scrolled,
                     self.show_scrollbars_temporarily(Region::PaneList(pane_id)),
@@ -990,7 +984,12 @@ impl FileBrowser {
                     viewport.width,
                     viewport.height,
                 );
-                self.recalculate_hovered_entry_after_icon_grid_scroll(pane_id, offset_y, viewport);
+                self.recalculate_hovered_entry_after_scroll(
+                    pane_id,
+                    ScrolledView::IconGrid,
+                    offset_y,
+                    viewport,
+                );
                 Task::batch([
                     scrolled,
                     self.show_scrollbars_temporarily(Region::PaneIcons(pane_id)),

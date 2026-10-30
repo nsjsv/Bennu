@@ -129,14 +129,9 @@ impl ViewDensityLevel {
 }
 
 impl UserConfig {
-    /// Icons 视图活动几何的唯一读取入口；`icon_grid_size` 字段只保留兼容镜像用途。
+    /// Icons 视图活动几何的唯一读取入口：图标大小只以档位保存。
     pub(crate) fn icons_icon_edge(&self) -> u32 {
         self.icons_view_density.icon_grid_size()
-    }
-
-    pub(crate) fn set_icons_view_density(&mut self, level: ViewDensityLevel) {
-        self.icons_view_density = level;
-        self.icon_grid_size = level.icon_grid_size();
     }
 }
 
@@ -353,7 +348,6 @@ pub(crate) struct UserConfig {
     pub(crate) browser_view_mode: BrowserViewMode,
     pub(crate) visible_column_count: usize,
     pub(crate) window_controls: crate::model::WindowControlsConfig,
-    pub(crate) icon_grid_size: u32,
     pub(crate) columns_view_density: ViewDensityLevel,
     pub(crate) list_view_density: ViewDensityLevel,
     pub(crate) icons_view_density: ViewDensityLevel,
@@ -434,7 +428,6 @@ pub(crate) fn default_user_config() -> UserConfig {
         browser_view_mode: BrowserViewMode::Columns,
         visible_column_count: DEFAULT_VISIBLE_COLUMN_COUNT,
         window_controls: crate::model::WindowControlsConfig::default(),
-        icon_grid_size: DEFAULT_ICON_GRID_SIZE,
         columns_view_density: ViewDensityLevel::DEFAULT,
         list_view_density: ViewDensityLevel::DEFAULT,
         icons_view_density: ViewDensityLevel::DEFAULT,
@@ -482,7 +475,6 @@ pub(crate) fn ui_thread_startup_config() -> UserConfig {
         browser_view_mode: BrowserViewMode::Columns,
         visible_column_count: DEFAULT_VISIBLE_COLUMN_COUNT,
         window_controls: crate::model::WindowControlsConfig::default(),
-        icon_grid_size: DEFAULT_ICON_GRID_SIZE,
         columns_view_density: ViewDensityLevel::DEFAULT,
         list_view_density: ViewDensityLevel::DEFAULT,
         icons_view_density: ViewDensityLevel::DEFAULT,

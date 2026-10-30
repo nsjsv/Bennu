@@ -263,7 +263,7 @@ impl FileBrowser {
         self.terminal_panel.tab_drag = Some(TerminalTabDrag {
             session_id,
             phase: TerminalTabDragPhase::WaitingForMovement {
-                origin: self.cursor_position,
+                origin: self.cursor_or_origin(),
             },
         });
     }

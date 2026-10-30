@@ -142,8 +142,11 @@ impl FileBrowser {
             }
         };
         self.clear_file_drop_visuals();
-        let request =
-            self.next_file_drop_layout_request(identity, self.active_pane_id(), self.active_tab_id);
+        let request = self.next_file_drop_layout_request(
+            identity,
+            self.active_pane_id(),
+            self.active_tab_id(),
+        );
         self.file_drop_session = Some(FileDropSessionState {
             identity,
             origin,

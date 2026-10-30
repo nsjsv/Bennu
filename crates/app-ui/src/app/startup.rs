@@ -35,7 +35,7 @@ impl FileBrowser {
         let configured_startup_request = self.configured_startup_session_plan_request(&home);
         let explicit_startup_session = self
             .application_launch_request
-            .explicit_browser_session(self.view_mode);
+            .explicit_browser_session(self.tab().view_mode);
         let startup_command = if let Some(session) = explicit_startup_session {
             self.apply_startup_session_plan(StartupSessionPlan::Session(session), &home)
         } else {
@@ -117,6 +117,7 @@ impl FileBrowser {
                     session_command,
                     self.maybe_flush_pending_browser_session_save(),
                     self.continue_file_operation_persistence(),
+                    self.launch_ready_driver(),
                 ]);
             }
             Err(error) => {
@@ -149,7 +150,7 @@ impl FileBrowser {
         self.options.include_hidden = user_config.show_hidden_files;
         self.options.sort_field = user_config.list_view_preferences.sort().field;
         self.options.sort_direction = user_config.list_view_preferences.sort().direction;
-        self.view_mode = user_config.browser_view_mode;
+        self.tab_mut().view_mode = user_config.browser_view_mode;
         self.preview_size_limit_mib_inputs =
             crate::config::preview_size_limit_mib_inputs(&user_config.preview_size_limits);
         self.preview_size_limit_mib_errors = [const { None }; 7];
@@ -380,11 +381,11 @@ mod tests {
             temp_dir.path().join("state.sqlite"),
         )));
 
-        assert_eq!(browser.current_dir, home);
-        assert!(!browser.is_trash_view);
+        assert_eq!(browser.tab().current_dir, home);
+        assert!(!browser.tab().is_trash_view);
         assert_eq!(browser.current_error(), None);
-        assert!(browser.directory_collection_phase.is_discovering());
-        assert_eq!(browser.tabs.len(), 1);
+        assert!(browser.tab().directory_collection_phase.is_discovering());
+        assert_eq!(browser.pane().tabs.len(), 1);
         assert_eq!(browser.pane_layout.active(), BrowserPaneId::PRIMARY);
     }
 
@@ -403,16 +404,16 @@ mod tests {
             user_config,
             temp_dir.path().join("state.sqlite"),
         )));
-        assert_ne!(browser.current_dir, workspace);
+        assert_ne!(browser.tab().current_dir, workspace);
         let classified = classify_startup_session(
             browser.startup_session_plan_request(&home),
             SavedBrowserSession::Missing,
         );
         drop(browser.accept_startup_plan(classified));
 
-        assert_eq!(browser.current_dir, workspace);
+        assert_eq!(browser.tab().current_dir, workspace);
         assert_eq!(browser.current_error(), None);
-        assert!(browser.directory_collection_phase.is_discovering());
+        assert!(browser.tab().directory_collection_phase.is_discovering());
     }
 
     #[test]
@@ -437,7 +438,7 @@ mod tests {
         );
         drop(browser.accept_startup_plan(classified));
 
-        assert_eq!(browser.current_dir, home);
+        assert_eq!(browser.tab().current_dir, home);
         assert!(browser
             .current_error()
             .is_some_and(|error| error.contains("Could not open startup directory")));
@@ -478,7 +479,7 @@ mod tests {
             )),
         ))));
 
-        assert_eq!(browser.current_dir, previous);
+        assert_eq!(browser.tab().current_dir, previous);
         assert!(browser.user_config.save_view_state);
     }
 
@@ -571,8 +572,8 @@ mod tests {
             )),
         ))));
 
-        assert_eq!(browser.current_dir, right);
-        assert_eq!(browser.view_mode, BrowserViewMode::List);
+        assert_eq!(browser.tab().current_dir, right);
+        assert_eq!(browser.tab().view_mode, BrowserViewMode::List);
         assert!(matches!(
             browser.pane_layout,
             BrowserPaneLayout::Split {
@@ -589,7 +590,7 @@ mod tests {
             .expect("left pane restored");
         assert_eq!(left_pane.active_tab_id, 2);
         assert_eq!(left_pane.tabs.len(), 2);
-        assert!(left_pane.expanded_directories.contains_key(&expanded));
+        assert!(left_pane.tab().expanded_directories.contains_key(&expanded));
         assert_eq!(
             left_pane.column_browser_viewport,
             ColumnBrowserViewport {
@@ -653,16 +654,18 @@ mod tests {
             )),
         ))));
 
-        assert_eq!(browser.current_dir, home.clone());
+        assert_eq!(browser.tab().current_dir, home.clone());
         assert_eq!(
-            browser.deepest_open_column_directory.as_ref(),
+            browser.tab().deepest_open_column_directory.as_ref(),
             Some(&source)
         );
         assert!(browser
+            .tab()
             .expanded_directories
             .get(&project)
             .is_some_and(|expanded| matches!(expanded.status, ExpandedDirectoryStatus::Loading)));
         assert!(browser
+            .tab()
             .expanded_directories
             .get(&source)
             .is_some_and(|expanded| matches!(expanded.status, ExpandedDirectoryStatus::Loading)));
@@ -818,7 +821,7 @@ mod tests {
             PathBuf::from("/tmp/state.sqlite"),
         )));
 
-        assert_eq!(browser.current_dir, PathBuf::from("/home/user"));
+        assert_eq!(browser.tab().current_dir, PathBuf::from("/home/user"));
         assert!(browser.network_connections.is_pending(&auto_id));
         assert!(!browser.network_connections.is_pending(&manual_id));
         assert!(matches!(

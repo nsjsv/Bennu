@@ -82,12 +82,12 @@ impl FileBrowser {
         match target {
             ViewDensityTarget::Columns => self.user_config.columns_view_density = next,
             ViewDensityTarget::List => self.user_config.list_view_density = next,
-            // icon_grid_size 是旧配置的兼容镜像，必须与档位同步写回。
-            ViewDensityTarget::Icons => self.user_config.set_icons_view_density(next),
+            ViewDensityTarget::Icons => self.user_config.icons_view_density = next,
         }
         // 换档改变可见范围，三种视图统一重新调度可见缩略图。
         Task::batch([
             self.persist_user_preferences_command(),
+            self.clamp_visible_pane_viewports(),
             self.schedule_thumbnail_refresh(),
         ])
     }

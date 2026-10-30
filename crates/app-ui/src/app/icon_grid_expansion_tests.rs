@@ -26,10 +26,10 @@ fn entry(path: &str, kind: FileKind) -> DirectoryEntry {
 
 fn browser_with_entries(entries: Vec<DirectoryEntry>) -> FileBrowser {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = PathBuf::from("/workspace");
-    browser.entries = entries.into();
-    browser.view_mode = BrowserViewMode::Icons;
-    browser.directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
+    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().entries = entries.into();
+    browser.tab_mut().view_mode = BrowserViewMode::Icons;
+    browser.tab_mut().directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
     browser
 }
 
@@ -97,7 +97,7 @@ fn toggle_creates_nonpersistent_icon_grid_request_context() {
         request.context,
         DirectoryExpansionLoadContext::IconGrid { .. }
     ));
-    assert!(browser.expanded_directories.is_empty());
+    assert!(browser.tab().expanded_directories.is_empty());
 }
 
 #[test]
@@ -227,7 +227,7 @@ fn top_level_switch_closes_old_root_before_loading_new_root() {
     let closing = browser.icon_grid_expansion.as_ref().unwrap();
     assert_eq!(closing.root_path(), alpha);
     assert_eq!(closing.pending_root().unwrap().path, beta);
-    assert_eq!(browser.selected, Some(alpha.clone()));
+    assert_eq!(browser.tab().selected, Some(alpha.clone()));
 
     finish_open_animation(&mut browser);
     let replacement = browser.icon_grid_expansion.as_ref().unwrap();
@@ -314,7 +314,7 @@ fn arrow_collapse_uses_root_fallback_but_outside_dismissal_does_not() {
         BrowserPaneId::PRIMARY,
         anchor("/workspace", "/workspace/root", 0),
     ));
-    assert_eq!(browser.selected, Some(root.clone()));
+    assert_eq!(browser.tab().selected, Some(root.clone()));
 
     finish_open_animation(&mut browser);
     drop(browser.toggle_icon_grid_directory(
@@ -329,8 +329,8 @@ fn arrow_collapse_uses_root_fallback_but_outside_dismissal_does_not() {
     finish_open_animation(&mut browser);
     browser.select_path(child);
     drop(browser.dismiss_icon_grid_expansion_from_outside());
-    assert_eq!(browser.selected, None);
-    assert!(browser.selected_paths.is_empty());
+    assert_eq!(browser.tab().selected, None);
+    assert!(browser.tab().selected_paths.is_empty());
 }
 
 #[test]
@@ -358,7 +358,7 @@ fn view_mode_switch_cancels_icon_grid_load_and_keeps_direct_selection_only() {
 
     assert!(cancellation.is_cancelled());
     assert!(browser.icon_grid_expansion.is_none());
-    assert_eq!(browser.selected, Some(root));
+    assert_eq!(browser.tab().selected, Some(root));
 }
 
 #[test]
@@ -389,21 +389,21 @@ fn icon_grid_panel_selection_scope_is_consistent_across_click_range_and_select_a
     browser.keyboard_modifiers = keyboard::Modifiers::SHIFT;
     drop(browser.handle_flat_entry_clicked(second.clone()));
     assert_eq!(
-        browser.selected_paths,
+        browser.tab().selected_paths,
         HashSet::from([first.clone(), second.clone()])
     );
 
     browser.keyboard_modifiers = keyboard::Modifiers::CTRL;
     drop(browser.handle_flat_entry_clicked(root.clone()));
     assert_eq!(
-        browser.selected_paths,
+        browser.tab().selected_paths,
         HashSet::from([first.clone(), second.clone(), root.clone()])
     );
 
     browser.keyboard_modifiers = keyboard::Modifiers::default();
     drop(browser.handle_flat_entry_clicked(first.clone()));
     drop(browser.select_all_in_file_selection_scope());
-    assert_eq!(browser.selected_paths, HashSet::from([first, second]));
+    assert_eq!(browser.tab().selected_paths, HashSet::from([first, second]));
     assert!(browser
         .icon_grid_expansion
         .as_ref()
@@ -430,8 +430,8 @@ fn batch_rename_resolves_selected_entries_from_icon_grid_expansion() {
         ],
     );
     finish_open_animation(&mut browser);
-    browser.selected = Some(second.clone());
-    browser.selected_paths = HashSet::from([first, second]);
+    browser.tab_mut().selected = Some(second.clone());
+    browser.tab_mut().selected_paths = HashSet::from([first, second]);
 
     drop(browser.handle_batch_rename_message(BatchRenameMessage::OpenSelected));
 
@@ -459,8 +459,8 @@ fn shift_click_across_icon_grid_panels_selects_only_the_target_panel_entry() {
     browser.keyboard_modifiers = keyboard::Modifiers::SHIFT;
     drop(browser.handle_flat_entry_clicked(root.clone()));
 
-    assert_eq!(browser.selected_paths, HashSet::from([root.clone()]));
-    assert_eq!(browser.selection_anchor, Some(root.clone()));
+    assert_eq!(browser.tab().selected_paths, HashSet::from([root.clone()]));
+    assert_eq!(browser.tab().selection_anchor, Some(root.clone()));
     assert!(browser
         .icon_grid_expansion
         .as_ref()
@@ -517,8 +517,8 @@ fn icon_grid_panel_marquee_ignores_intersecting_entries_from_other_panels() {
         bounds(child.clone()),
     ]));
 
-    assert_eq!(browser.selected_paths, HashSet::from([child]));
-    assert!(!browser.selected_paths.contains(&outside));
+    assert_eq!(browser.tab().selected_paths, HashSet::from([child]));
+    assert!(!browser.tab().selected_paths.contains(&outside));
 }
 
 #[test]
@@ -546,8 +546,11 @@ fn outside_icon_grid_entry_closes_tree_and_cleans_hidden_rename_before_selection
 
     drop(browser.handle_flat_entry_clicked(outside.clone()));
 
-    assert_eq!(browser.selected_paths, HashSet::from([outside.clone()]));
-    assert_eq!(browser.selected, Some(outside));
+    assert_eq!(
+        browser.tab().selected_paths,
+        HashSet::from([outside.clone()])
+    );
+    assert_eq!(browser.tab().selected, Some(outside));
     assert!(browser.renaming.is_none());
     assert_eq!(browser.rename_input, "outside.txt");
     assert!(
@@ -583,7 +586,7 @@ fn icon_grid_keyboard_navigation_crosses_band_and_updates_panel_scope() {
 
     drop(browser.move_file_selection(FileSelectionDirection::Down));
 
-    assert_eq!(browser.selected, Some(child.clone()));
+    assert_eq!(browser.tab().selected, Some(child.clone()));
     assert_eq!(
         browser
             .icon_grid_expansion
@@ -593,7 +596,7 @@ fn icon_grid_keyboard_navigation_crosses_band_and_updates_panel_scope() {
         root
     );
     drop(browser.select_all_in_file_selection_scope());
-    assert_eq!(browser.selected_paths, HashSet::from([child]));
+    assert_eq!(browser.tab().selected_paths, HashSet::from([child]));
 }
 
 #[test]
@@ -664,8 +667,8 @@ fn escape_closes_floating_state_before_icon_grid_tree() {
     );
 
     drop(browser.handle_focused_window_escape_pressed());
-    assert_eq!(browser.selected, Some(root.clone()));
-    assert_eq!(browser.selected_paths, HashSet::from([root.clone()]));
+    assert_eq!(browser.tab().selected, Some(root.clone()));
+    assert_eq!(browser.tab().selected_paths, HashSet::from([root.clone()]));
     assert!(
         browser
             .icon_grid_expansion
@@ -720,7 +723,7 @@ fn current_directory_scan_reconciles_anchor_and_drops_removed_root() {
         BrowserPaneId::PRIMARY,
         anchor("/workspace", "/workspace/root", 1),
     ));
-    let generation = browser.directory_load_generation;
+    let generation = browser.pane().directory_load_generation;
 
     drop(browser.accept_complete_directory_fixture(
         DirectoryLoadRequest {

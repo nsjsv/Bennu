@@ -89,9 +89,9 @@ fn icon_request(
 
 fn browser_with_root(root_contents: ExpandedDirectory) -> FileBrowser {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = PathBuf::from("/workspace");
-    browser.view_mode = BrowserViewMode::Icons;
-    browser.entries = vec![entry("/workspace/root", FileKind::Directory)].into();
+    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().view_mode = BrowserViewMode::Icons;
+    browser.tab_mut().entries = vec![entry("/workspace/root", FileKind::Directory)].into();
     browser.icon_grid_expansion = Some(IconGridExpansionState::new(
         root_context(),
         root_anchor(),
@@ -200,7 +200,7 @@ fn observed_path_refreshes_icon_and_persistent_directory_owners() {
         ExpandedDirectoryStatus::Loaded,
         ROOT_GENERATION,
     ));
-    browser.expanded_directories.insert(
+    browser.tab_mut().expanded_directories.insert(
         root.clone(),
         expanded(Vec::new(), ExpandedDirectoryStatus::Loaded, 3),
     );
@@ -217,6 +217,7 @@ fn observed_path_refreshes_icon_and_persistent_directory_owners() {
     );
     assert_eq!(
         browser
+            .tab()
             .expanded_directories
             .get(&root)
             .map(|directory| directory.load_generation),
@@ -233,7 +234,7 @@ fn icons_entry_lookup_never_reads_hidden_persistent_children() {
         ExpandedDirectoryStatus::Loaded,
         ROOT_GENERATION,
     ));
-    browser.expanded_directories.insert(
+    browser.tab_mut().expanded_directories.insert(
         root,
         expanded(vec![hidden.clone()], ExpandedDirectoryStatus::Loaded, 2),
     );
@@ -261,7 +262,7 @@ fn icons_entry_lookup_never_reads_hidden_persistent_children() {
 #[test]
 fn icon_navigation_does_not_snapshot_hidden_persistent_rows() {
     let mut browser = browser_with_loaded_root();
-    browser.expanded_directories.insert(
+    browser.tab_mut().expanded_directories.insert(
         PathBuf::from("/workspace/hidden"),
         expanded(
             vec![entry("/workspace/hidden/file.txt", FileKind::File)],
@@ -275,7 +276,7 @@ fn icon_navigation_does_not_snapshot_hidden_persistent_rows() {
         NavigationMode::RecordHistory,
     ));
 
-    assert!(browser.directory_loading_placeholder.is_none());
+    assert!(browser.pane().directory_loading_placeholder.is_none());
 }
 
 #[test]
@@ -286,9 +287,9 @@ fn refreshing_icon_subtree_removes_selection_before_entries_leave_layout() {
         ExpandedDirectoryStatus::Loaded,
         ROOT_GENERATION,
     ));
-    browser.selected = Some(hidden.clone());
-    browser.selected_paths.insert(hidden.clone());
-    browser.selection_anchor = Some(hidden.clone());
+    browser.tab_mut().selected = Some(hidden.clone());
+    browser.tab_mut().selected_paths.insert(hidden.clone());
+    browser.tab_mut().selection_anchor = Some(hidden.clone());
     browser.pending_created_entry_rename = Some(hidden.clone());
     browser.preview_engine.preview = Some(crate::model::PreviewState::Loading(hidden));
 
@@ -297,9 +298,9 @@ fn refreshing_icon_subtree_removes_selection_before_entries_leave_layout() {
         .expect("interactive root refresh");
 
     assert!(command.units() > 0);
-    assert!(browser.selected_paths.is_empty());
-    assert_eq!(browser.selected, None);
-    assert_eq!(browser.selection_anchor, None);
+    assert!(browser.tab().selected_paths.is_empty());
+    assert_eq!(browser.tab().selected, None);
+    assert_eq!(browser.tab().selection_anchor, None);
     assert_eq!(browser.pending_created_entry_rename, None);
     assert!(browser.preview_engine.preview.is_none());
     let root = browser
@@ -386,9 +387,9 @@ fn dropping_icon_state_clears_hidden_selection_and_rename_state() {
         ExpandedDirectoryStatus::Loaded,
         ROOT_GENERATION,
     ));
-    browser.selected = Some(hidden.clone());
-    browser.selected_paths.insert(hidden.clone());
-    browser.selection_anchor = Some(hidden.clone());
+    browser.tab_mut().selected = Some(hidden.clone());
+    browser.tab_mut().selected_paths.insert(hidden.clone());
+    browser.tab_mut().selection_anchor = Some(hidden.clone());
     browser.drag_selection_anchor = Some(hidden.clone());
     browser.renaming = Some(hidden.clone());
     browser.pending_created_entry_rename = Some(hidden.clone());
@@ -398,9 +399,9 @@ fn dropping_icon_state_clears_hidden_selection_and_rename_state() {
     browser.clear_icon_grid_expansion();
 
     assert!(browser.icon_grid_expansion.is_none());
-    assert!(browser.selected_paths.is_empty());
-    assert_eq!(browser.selected, None);
-    assert_eq!(browser.selection_anchor, None);
+    assert!(browser.tab().selected_paths.is_empty());
+    assert_eq!(browser.tab().selected, None);
+    assert_eq!(browser.tab().selection_anchor, None);
     assert_eq!(browser.drag_selection_anchor, None);
     assert_eq!(browser.renaming, None);
     assert_eq!(browser.pending_created_entry_rename, None);

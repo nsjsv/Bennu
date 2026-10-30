@@ -15,8 +15,7 @@ impl FileBrowser {
             && self.user_config.startup_location_policy.saves_view_state()
     }
 
-    pub(super) fn browser_session_snapshot(&mut self) -> BrowserSessionSnapshot {
-        self.sync_active_tab_state();
+    pub(super) fn browser_session_snapshot(&self) -> BrowserSessionSnapshot {
         let panes = self
             .panes
             .iter()

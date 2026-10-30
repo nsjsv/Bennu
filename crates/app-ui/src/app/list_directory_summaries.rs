@@ -44,41 +44,18 @@ impl FileBrowser {
 
         let display_mode = self.user_config.list_directory_size_display_mode;
         let sort_direction = self.options.sort_direction;
-        let active_pane_id = self.active_pane_id();
-        let mut sorted_active_pane = false;
-
-        if self.view_mode == BrowserViewMode::List && !self.is_trash_view {
-            resort_list_state_by_displayed_size(
-                Arc::make_mut(&mut self.entries),
-                &mut self.expanded_directories,
-                &self.list_directory_summary_cache,
-                display_mode,
-                sort_direction,
-            );
-            self.sync_active_tab_state();
-            sorted_active_pane = true;
-        }
-
-        for pane in self
-            .panes
-            .iter_mut()
-            .filter(|pane| pane.id != active_pane_id)
-        {
-            if pane.view_mode != BrowserViewMode::List || pane.is_trash_view {
+        for pane in &mut self.panes {
+            let tab = pane.tab_mut();
+            if tab.view_mode != BrowserViewMode::List || tab.is_trash_view {
                 continue;
             }
             resort_list_state_by_displayed_size(
-                Arc::make_mut(&mut pane.entries),
-                &mut pane.expanded_directories,
+                Arc::make_mut(&mut tab.entries),
+                &mut tab.expanded_directories,
                 &self.list_directory_summary_cache,
                 display_mode,
                 sort_direction,
             );
-            pane.sync_active_tab_state();
-        }
-
-        if sorted_active_pane {
-            self.sync_active_pane_state();
         }
     }
 
@@ -242,17 +219,10 @@ impl FileBrowser {
     // 各级已展开目录），删除不在任何根之下的键。在导航级时机调用，
     // 保证缓存键集合不随浏览过的目录数量无限增长（内存上界机制）。
     pub(super) fn prune_list_directory_summaries_to_live_roots(&mut self) {
-        let active_pane_id = self.active_pane_id();
         let mut roots: Vec<PathBuf> = Vec::new();
-        for pane in &self.panes {
-            let (current_dir, tabs, expanded_directories) = if pane.id == active_pane_id {
-                (&self.current_dir, &self.tabs, &self.expanded_directories)
-            } else {
-                (&pane.current_dir, &pane.tabs, &pane.expanded_directories)
-            };
-            roots.push(current_dir.clone());
-            roots.extend(tabs.iter().map(|tab| tab.directory.clone()));
-            roots.extend(expanded_directories.keys().cloned());
+        for tab in self.panes.iter().flat_map(|pane| &pane.tabs) {
+            roots.push(tab.current_dir.clone());
+            roots.extend(tab.expanded_directories.keys().cloned());
         }
         self.list_directory_summary_cache.retain_roots(&roots);
     }
@@ -772,11 +742,11 @@ mod tests {
     #[test]
     fn status_strip_reports_deepest_open_column_in_columns_mode() {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
-        browser.view_mode = BrowserViewMode::Columns;
+        browser.tab_mut().view_mode = BrowserViewMode::Columns;
         let root = PathBuf::from("/workspace");
         let column = root.join("sub");
-        browser.current_dir = root.clone();
-        browser.deepest_open_column_directory = Some(column.clone());
+        browser.tab_mut().current_dir = root.clone();
+        browser.tab_mut().deepest_open_column_directory = Some(column.clone());
         remember_summary(&mut browser, &root, 10, 1000);
         remember_summary(&mut browser, &column, 4, 256);
 
@@ -794,11 +764,11 @@ mod tests {
         let smaller = root.join("a");
         let larger = root.join("b");
 
-        browser.current_dir = root;
-        browser.view_mode = BrowserViewMode::List;
+        browser.tab_mut().current_dir = root;
+        browser.tab_mut().view_mode = BrowserViewMode::List;
         browser.options.sort_field = SortField::Size;
         browser.options.sort_direction = SortDirection::Ascending;
-        browser.entries = vec![
+        browser.tab_mut().entries = vec![
             test_entry(larger.clone(), FileKind::Directory, 0),
             test_entry(smaller.clone(), FileKind::Directory, 0),
             test_entry(PathBuf::from("/workspace/file.bin"), FileKind::File, 9),
@@ -811,6 +781,7 @@ mod tests {
 
         assert_eq!(
             browser
+                .tab()
                 .entries
                 .iter()
                 .map(|entry| entry.path.clone())

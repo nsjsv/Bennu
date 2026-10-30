@@ -138,7 +138,7 @@ impl FileBrowser {
         &mut self,
         paths: Vec<PathBuf>,
     ) -> WaylandFileDragRequest {
-        if self.is_trash_view || paths.is_empty() {
+        if self.tab().is_trash_view || paths.is_empty() {
             return WaylandFileDragRequest::Unavailable;
         }
         // 包内成员是应用内虚拟路径,外部应用拿到的只是一串不存在的
@@ -262,8 +262,8 @@ mod tests {
 
     fn browser_with_pressed_drag(browser: &mut FileBrowser) {
         let source = PathBuf::from("/workspace/report.txt");
-        browser.selected = Some(source.clone());
-        browser.cursor_position = iced::Point::new(0.0, 0.0);
+        browser.tab_mut().selected = Some(source.clone());
+        browser.cursor_position = Some(iced::Point::new(0.0, 0.0));
         drop(browser.start_file_drag(source, FileDragStationaryAction::SelectionOnly, Vec::new()));
     }
 

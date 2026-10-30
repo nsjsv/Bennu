@@ -10,10 +10,9 @@ use std::time::Duration;
 use super::*;
 use crate::config;
 use crate::model::{
-    BrowserPaneId, BrowserPaneLayout, BrowserViewMode, LoadedOperationStore, Message,
-    PreviewContent, PreviewMessage, PreviewSize, PreviewState, PreviewWindowProfile,
-    SettingsCategory, SettingsSubpage, SplitAxis, WindowChromeLayout, WindowFrameState,
-    WINDOW_TOP_BAR_HEIGHT,
+    BrowserViewMode, LoadedOperationStore, Message, PreviewContent, PreviewMessage, PreviewSize,
+    PreviewState, PreviewWindowProfile, SettingsCategory, SettingsSubpage, WindowChromeLayout,
+    WindowFrameState, WINDOW_TOP_BAR_HEIGHT,
 };
 use crate::operation_history::FileOperationCompletion;
 use crate::operation_queue::test_persistence::enqueue_persisted;
@@ -1076,8 +1075,7 @@ async fn final_shutdown_session_waits_for_an_older_save_outcome() {
     })));
     let final_directory = temp_dir.path().join("final-directory");
     fs::create_dir_all(&final_directory).unwrap();
-    browser.current_dir = final_directory.clone();
-    browser.sync_active_tab_state();
+    browser.tab_mut().current_dir = final_directory.clone();
     browser.browser_session_saves_in_flight = 1;
 
     let initial = shutdown_actions(&mut browser, |browser| {
@@ -1246,10 +1244,9 @@ async fn close_all_windows_saves_browser_session_before_exit() {
         classified_startup_session: None,
     })));
 
-    browser.current_dir = root.clone();
-    browser.view_mode = BrowserViewMode::Columns;
-    browser.deepest_open_column_directory = Some(deepest.clone());
-    browser.sync_active_tab_state();
+    browser.tab_mut().current_dir = root.clone();
+    browser.tab_mut().view_mode = BrowserViewMode::Columns;
+    browser.tab_mut().deepest_open_column_directory = Some(deepest.clone());
 
     let shutdown = shutdown_actions(&mut browser, |browser| {
         browser.close_auxiliary_window(browser.main_window)
@@ -1526,7 +1523,7 @@ fn request_preview_toggles_closed_for_same_target() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     browser.preview_engine.preview_window = Some(window::Id::unique());
     browser.hovered_entry = Some(path.clone());
-    browser.selected = Some(path.clone());
+    browser.tab_mut().selected = Some(path.clone());
     browser.preview_engine.preview_shown_path = Some(path);
     browser.preview_engine.preview = Some(PreviewState::Loading(PathBuf::from("clip.mp4")));
 
@@ -1547,7 +1544,7 @@ fn pinned_space_switches_to_newly_selected_file_and_keeps_pin() {
 
     let next = PathBuf::from("second.png");
     browser.hovered_entry = Some(next.clone());
-    browser.selected = Some(next.clone());
+    browser.tab_mut().selected = Some(next.clone());
 
     drop(browser.request_preview());
 

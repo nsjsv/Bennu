@@ -1,16 +1,14 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use file_core::{SortDirection, SortField};
 use iced::Task;
 
 use super::global_error::GlobalErrorSource;
 use super::FileBrowser;
 use crate::commands::load_directory_command;
 use crate::model::{
-    empty_directory_entry_snapshot, BrowserPane, BrowserPaneId, BrowserPaneLayout,
-    BrowserPaneSession, BrowserSessionSnapshot, BrowserTabSession, ClassifiedStartupSession,
-    ColumnBrowserViewport, DirectoryCollectionPhase, DirectoryOrderPhase, Message,
+    BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserPaneSession, BrowserSessionSnapshot,
+    BrowserTab, BrowserTabSession, ClassifiedStartupSession, ColumnBrowserViewport, Message,
     StartupSessionPlan, StartupSessionPlanRequest, StartupSessionSource,
 };
 use crate::thumbnail_cache::ColumnViewport;
@@ -102,36 +100,28 @@ impl FileBrowser {
         directory: PathBuf,
         error: Option<String>,
     ) -> Task<Message> {
-        self.current_dir = directory.clone();
-        self.is_trash_view = false;
-        self.set_entries(empty_directory_entry_snapshot());
-        self.directory_loading_placeholder = None;
-        self.trash_entries.clear();
-        self.deepest_open_column_directory = None;
-        self.expanded_directories.clear();
-        self.column_browser_viewport = ColumnBrowserViewport::default();
-        self.column_viewports.clear();
+        // 启动目录替换整个窗格集合；窗格对象本身保留，让加载代号继续单调递增，
+        // 旧请求的迟到响应不会撞上新一轮的代号。
+        let mut tab = BrowserTab::directory(0, directory.clone());
+        tab.view_mode = self.tab().view_mode;
+        self.panes.retain(|pane| pane.id == BrowserPaneId::PRIMARY);
+        let pane = self
+            .pane_by_id_mut(BrowserPaneId::PRIMARY)
+            .expect("startup runs with the primary pane");
+        pane.tabs = vec![tab];
+        pane.active_tab_id = 0;
+        pane.reset_directory_view();
         self.icon_grid_viewports.clear();
-        self.back_stack.clear();
-        self.forward_stack.clear();
-        self.directory_collection_phase = DirectoryCollectionPhase::Discovering;
+        self.pane_layout = BrowserPaneLayout::Single {
+            active: BrowserPaneId::PRIMARY,
+        };
+        self.reset_active_pane_context();
         // 换到启动目录：上一处目录的加载错误过时了；启动目录本身的问题是一条不归来源的提示。
         self.retract_global_error(GlobalErrorSource::DirectoryLoad);
         if let Some(error) = error {
             self.show_global_error(error);
         }
-        self.tabs = vec![{
-            let mut tab = crate::model::BrowserTab::directory(0, directory.clone());
-            tab.view_mode = self.view_mode;
-            tab
-        }];
-        self.active_tab_id = 0;
-        self.pane_layout = BrowserPaneLayout::Single {
-            active: BrowserPaneId::PRIMARY,
-        };
-        self.panes = vec![self.capture_active_pane_snapshot()];
-        let request = self.next_directory_load_request(directory);
-        let cancellation = self.directory_load_cancellation(&request);
+        let (request, cancellation) = self.begin_directory_load(BrowserPaneId::PRIMARY, directory);
         load_directory_command(request, self.options.clone(), cancellation)
     }
 
@@ -155,21 +145,11 @@ impl FileBrowser {
         }
         self.next_tab_id = next_tab_id_after_restore(&restored_panes);
         self.next_pane_id = next_pane_id_after_restore(&restored_panes);
-        self.panes = restored_panes.clone();
-        self.icon_grid_viewports.clear();
         self.pane_layout = sanitize_layout(layout, &restored_panes);
-        let active_pane_id = self.pane_layout.active();
-        let active_pane = restored_panes
-            .iter()
-            .find(|pane| pane.id == active_pane_id)
-            .or_else(|| restored_panes.first())
-            .cloned()
-            .expect("restored panes is non-empty");
-        self.pane_layout = self.pane_layout.with_active(active_pane.id);
-        self.restore_pane_snapshot(active_pane);
-        self.directory_collection_phase = DirectoryCollectionPhase::Discovering;
+        self.panes = restored_panes;
+        self.icon_grid_viewports.clear();
+        self.reset_active_pane_context();
         self.retract_global_error(GlobalErrorSource::DirectoryLoad);
-        self.sync_active_pane_state();
 
         Task::batch([
             self.reload_visible_panes(),
@@ -239,72 +219,31 @@ fn restored_pane_from_session(pane: BrowserPaneSession) -> Option<BrowserPane> {
         .or_else(|| restored_tabs.first())
         .cloned()
         .expect("restored tabs is non-empty");
-    let tabs = restored_tabs
-        .iter()
-        .map(|tab| {
-            let mut restored = BrowserTabSession::to_browser_tab(tab);
-            if let Some(real_directory) =
-                file_core::real_directory_outside_archive(&restored.directory)
-            {
-                restored.directory = real_directory;
-            }
-            restored
-        })
-        .collect::<Vec<_>>();
-    let active_expanded_directories = active_tab
-        .restored_expanded_directories()
-        .into_iter()
-        .filter(|(directory, _)| {
-            file_core::archive_path_identity(directory) == file_core::ArchivePathIdentity::RealFile
-        })
-        .collect();
-    // 会话恢复不入包内：包内/包根目录归一到归档所在真实目录；包内
-    // 选中与多栏展开链丢弃（真实目录中这些条目并不存在）。真实路径
-    // 的选中照常恢复（CLI 显式工作区同样途经此处）。
-    let normalized_tab_directory = file_core::real_directory_outside_archive(&active_tab.directory)
-        .unwrap_or_else(|| active_tab.directory.clone());
-    let mut browser_pane = BrowserPane {
-        id: pane.id,
-        current_dir: normalized_tab_directory,
-        is_trash_view: active_tab.is_trash_view,
-        entries: Vec::new().into(),
-        directory_discovery: None,
-        directory_loading_placeholder: None,
-        trash_entries: Vec::new(),
-        selected: restored_selection(active_tab.selected.clone()),
-        selected_paths: active_tab
-            .selected_paths
-            .into_iter()
-            .filter(|path| {
-                file_core::archive_path_identity(path) == file_core::ArchivePathIdentity::RealFile
-            })
-            .collect(),
-        selection_anchor: None,
-        deepest_open_column_directory: active_tab.deepest_open_column_directory,
-        expanded_directories: active_expanded_directories,
-        view_mode: active_tab.view_mode,
-        column_browser_viewport: sanitize_column_browser_viewport(pane.column_browser_viewport),
-        column_viewports: sanitize_column_viewports(pane.column_viewports),
-        tabs,
-        active_tab_id: active_tab.id,
-        directory_load_generation: 0,
-        directory_load_cancel: None,
-        back_stack: active_tab.back_stack,
-        forward_stack: active_tab.forward_stack,
-        directory_collection_phase: DirectoryCollectionPhase::Discovering,
-        directory_order_phase: DirectoryOrderPhase::Ready {
-            field: SortField::Name,
-            direction: SortDirection::Ascending,
-        },
-    };
-    browser_pane.sync_active_tab_state();
-    Some(browser_pane)
+    let tabs = restored_tabs.iter().map(restored_tab).collect();
+    let mut restored = BrowserPane::with_tabs(pane.id, tabs, active_tab.id);
+    restored.column_browser_viewport =
+        sanitize_column_browser_viewport(pane.column_browser_viewport);
+    restored.column_viewports = sanitize_column_viewports(pane.column_viewports);
+    Some(restored)
 }
 
-fn restored_selection(selected: Option<PathBuf>) -> Option<PathBuf> {
-    let selected = selected?;
-    (file_core::archive_path_identity(&selected) == file_core::ArchivePathIdentity::RealFile)
-        .then_some(selected)
+/// 会话恢复不入包内：包内/包根目录归一到归档所在真实目录；包内选中与
+/// 多栏展开链丢弃（真实目录中这些条目并不存在）。真实路径的选中照常
+/// 恢复（CLI 显式工作区同样途经此处）。
+fn restored_tab(session: &BrowserTabSession) -> BrowserTab {
+    let is_real_file = |path: &Path| {
+        file_core::archive_path_identity(path) == file_core::ArchivePathIdentity::RealFile
+    };
+    let mut tab = session.to_browser_tab();
+    if let Some(real_directory) = file_core::real_directory_outside_archive(&tab.current_dir) {
+        tab.current_dir = real_directory;
+    }
+    tab.selected = tab.selected.take().filter(|path| is_real_file(path));
+    tab.selected_paths.retain(|path| is_real_file(path));
+    tab.selection_anchor = None;
+    tab.expanded_directories
+        .retain(|directory, _| is_real_file(directory));
+    tab
 }
 
 fn sanitize_column_browser_viewport(viewport: ColumnBrowserViewport) -> ColumnBrowserViewport {

@@ -48,14 +48,15 @@ use drag::resolve_file_drag_target;
 
 impl FileBrowser {
     pub(crate) fn is_path_selected(&self, path: &Path) -> bool {
-        self.selected_paths.contains(path)
+        self.tab().selected_paths.contains(path)
     }
 
     pub(super) fn select_path(&mut self, path: PathBuf) {
         self.cancel_expansion_follow_plans();
-        self.selected_paths.clear();
-        self.selected_paths.insert(path.clone());
-        self.selection_anchor = Some(path.clone());
+        let tab = self.tab_mut();
+        tab.selected_paths.clear();
+        tab.selected_paths.insert(path.clone());
+        tab.selection_anchor = Some(path.clone());
         self.pending_keyboard_column_focus = None;
         self.focus_path(path);
     }
@@ -70,8 +71,9 @@ impl FileBrowser {
             return;
         };
         self.cancel_expansion_follow_plans();
-        self.selected_paths = paths.into_iter().collect();
-        self.selection_anchor = Some(anchor);
+        let tab = self.tab_mut();
+        tab.selected_paths = paths.into_iter().collect();
+        tab.selection_anchor = Some(anchor);
         self.pending_keyboard_column_focus = None;
         self.focus_path(primary);
     }
@@ -124,26 +126,27 @@ impl FileBrowser {
         let mut drag_start_command = Task::none();
 
         if self.keyboard_modifiers.shift() {
-            let anchor = self
+            let tab = self.tab();
+            let anchor = tab
                 .selection_anchor
                 .clone()
-                .or_else(|| self.selected.clone())
+                .or_else(|| tab.selected.clone())
                 .unwrap_or_else(|| path.clone());
             let range_anchor =
                 self.select_range(anchor, path.clone(), self.keyboard_modifiers.control());
-            self.selection_anchor = Some(range_anchor.clone());
+            self.tab_mut().selection_anchor = Some(range_anchor.clone());
             self.drag_selection_anchor = Some(range_anchor);
         } else if self.keyboard_modifiers.control() {
             self.toggle_path_selection(path.clone());
-            self.selection_anchor = Some(path.clone());
+            self.tab_mut().selection_anchor = Some(path.clone());
             self.drag_selection_anchor = Some(path.clone());
             self.cancel_file_drag_interaction();
         } else {
-            if was_selected && self.is_trash_view {
+            if was_selected && self.tab().is_trash_view {
                 self.select_path(path.clone());
             } else if was_selected {
                 self.focus_path(path.clone());
-                self.selection_anchor = Some(path.clone());
+                self.tab_mut().selection_anchor = Some(path.clone());
             } else {
                 self.select_path(path.clone());
             }
@@ -173,6 +176,7 @@ impl FileBrowser {
             rename_command,
             action_command,
             drag_start_command,
+            self.schedule_selected_metadata_for_all_panes(),
             self.schedule_thumbnail_refresh(),
             self.request_browser_session_save(),
         ])
@@ -182,7 +186,7 @@ impl FileBrowser {
         // hover 是鼠标移动热路径：先保证条目索引可用，避免每次悬停线性扫描。
         self.refresh_entry_index();
         self.hovered_entry = Some(path.clone());
-        self.cursor_paste_directory = Some(self.entry_parent_directory(&path));
+        self.set_cursor_paste_directory(self.entry_parent_directory(&path));
         if self.file_drag.is_some() {
             self.set_file_drag_target(self.directory_drop_target_for_entry(&path));
             self.note_file_drag_spring_hover(
@@ -197,13 +201,16 @@ impl FileBrowser {
         } else if self.selection_marquee.is_none() {
             self.extend_drag_selection_to(path);
         }
-        self.schedule_thumbnail_refresh()
+        Task::batch([
+            self.schedule_selected_metadata_for_all_panes(),
+            self.schedule_thumbnail_refresh(),
+        ])
     }
 
     pub(super) fn handle_entry_hover_cleared(&mut self, path: PathBuf) -> Task<Message> {
         if self.hovered_entry.as_ref() == Some(&path) {
             self.hovered_entry = None;
-            self.cursor_paste_directory = Some(self.entry_parent_directory(&path));
+            self.set_cursor_paste_directory(self.entry_parent_directory(&path));
             self.note_file_drag_spring_hover(None);
         }
         Task::none()
@@ -215,7 +222,7 @@ impl FileBrowser {
         if self.file_drag.is_some() {
             self.set_file_drag_target(directory);
         } else {
-            self.cursor_paste_directory = Some(directory);
+            self.set_cursor_paste_directory(directory);
         }
         Task::none()
     }
@@ -235,7 +242,7 @@ impl FileBrowser {
                 FileDragSpringSource::Breadcrumb,
             )));
         } else {
-            self.cursor_paste_directory = Some(directory);
+            self.set_cursor_paste_directory(directory);
         }
         Task::none()
     }
@@ -406,7 +413,7 @@ impl FileBrowser {
     }
 
     pub(super) fn handle_entry_right_clicked(&mut self, path: PathBuf) -> Task<Message> {
-        if self.view_mode == BrowserViewMode::Columns {
+        if self.tab().view_mode == BrowserViewMode::Columns {
             self.record_pointer_clicked_column(self.entry_parent_directory(&path));
         }
         let expansion_command = self.prepare_icon_grid_entry_interaction(&path);
@@ -427,7 +434,7 @@ impl FileBrowser {
                 can_batch_rename,
                 can_create_symlink,
                 delete_action,
-                position: self.cursor_position,
+                position: self.cursor_or_origin(),
                 expansion: FileContextMenuExpansion::None,
                 // 分组方式入口只属于空白菜单,条目菜单一律不带。
                 grouping_entry_visible: false,
@@ -436,7 +443,11 @@ impl FileBrowser {
                 inside_archive: self.current_directory_is_inside_archive(),
             }));
         }
-        Task::batch([expansion_command, rename_command])
+        Task::batch([
+            expansion_command,
+            rename_command,
+            self.schedule_selected_metadata_for_all_panes(),
+        ])
     }
 
     pub(super) fn handle_column_blank_right_clicked(
@@ -448,15 +459,16 @@ impl FileBrowser {
     }
 
     pub(super) fn handle_blank_area_right_clicked(&mut self, directory: PathBuf) -> Task<Message> {
-        let expansion_command =
-            if self.view_mode == BrowserViewMode::Icons && directory == self.current_dir {
-                self.dismiss_icon_grid_expansion_from_outside()
-            } else {
-                if let Some(state) = self.icon_grid_expansion.as_mut() {
-                    state.set_selection_directory(&directory);
-                }
-                Task::none()
-            };
+        let expansion_command = if self.tab().view_mode == BrowserViewMode::Icons
+            && directory == self.tab().current_dir
+        {
+            self.dismiss_icon_grid_expansion_from_outside()
+        } else {
+            if let Some(state) = self.icon_grid_expansion.as_mut() {
+                state.set_selection_directory(&directory);
+            }
+            Task::none()
+        };
         let rename_command = self.commit_rename_if_active();
         self.preview_engine.clear_preview();
         self.drag_selection_anchor = None;
@@ -469,11 +481,11 @@ impl FileBrowser {
                 can_batch_rename: false,
                 can_create_symlink: false,
                 delete_action: FileDeleteAction::MoveToTrash,
-                position: self.cursor_position,
+                position: self.cursor_or_origin(),
                 expansion: FileContextMenuExpansion::None,
                 // 按打开菜单那一刻的视图模式定死入口可见性,后续视图
                 // 切换不会让已打开的菜单中途长出入口。
-                grouping_entry_visible: file_grouping_entry_visible(self.view_mode),
+                grouping_entry_visible: file_grouping_entry_visible(self.tab().view_mode),
                 selection_archives: Vec::new(),
                 inside_archive: self.current_directory_is_inside_archive(),
             }));
@@ -489,7 +501,7 @@ impl FileBrowser {
         can_batch_rename: bool,
     ) -> bool {
         let menus = &self.user_config.context_menus;
-        if self.is_trash_view {
+        if self.tab().is_trash_view {
             !menus.trash_items(has_target).is_empty()
         } else if has_target {
             !menus
@@ -529,7 +541,7 @@ impl FileBrowser {
     fn column_blank_context_directory(&self, directory: &Path) -> Option<PathBuf> {
         // 压缩包包根在真实文件系统中是文件(entry_kind=File),必须走
         // “视作目录”共享判定,否则点击包根栏空白会清空整个栏目链。
-        if directory == self.current_dir || !self.entry_acts_as_directory(directory) {
+        if directory == self.tab().current_dir || !self.entry_acts_as_directory(directory) {
             None
         } else {
             Some(directory.to_path_buf())
@@ -545,20 +557,19 @@ impl FileBrowser {
     }
 
     pub(super) fn set_deepest_open_column_directory(&mut self, directory: Option<PathBuf>) {
-        self.deepest_open_column_directory = directory.filter(|directory| {
-            directory != &self.current_dir && directory.starts_with(self.current_dir.as_path())
+        let tab = self.tab_mut();
+        tab.deepest_open_column_directory = directory.filter(|directory| {
+            directory != &tab.current_dir && directory.starts_with(tab.current_dir.as_path())
         });
     }
 
     fn clear_file_selection(&mut self) {
-        self.selected_paths.clear();
-        self.selected = None;
-        self.selection_anchor = None;
+        self.tab_mut().clear_selection();
         self.rename_input.clear();
     }
 
     fn clear_column_blank_selection_context(&mut self) {
-        self.deepest_open_column_directory = None;
+        self.tab_mut().deepest_open_column_directory = None;
         self.clear_file_selection();
     }
 
@@ -568,34 +579,36 @@ impl FileBrowser {
         }
         self.cancel_expansion_follow_plans();
         let paths = self.select_all_selection_scope_paths();
-        self.selected_paths = paths.iter().cloned().collect::<HashSet<_>>();
-        self.selection_anchor = paths.first().cloned();
+        let tab = self.tab_mut();
+        tab.selected_paths = paths.iter().cloned().collect::<HashSet<_>>();
+        tab.selection_anchor = paths.first().cloned();
         if let Some(path) = paths.first().cloned() {
             self.focus_path(path);
         } else {
-            self.selected = None;
+            self.tab_mut().selected = None;
             self.rename_input.clear();
         }
         self.preview_engine.clear_preview();
         self.context_menu = None;
-        Task::none()
+        self.schedule_selected_metadata_for_all_panes()
     }
 
     fn select_all_selection_scope_paths(&self) -> Vec<PathBuf> {
-        if self.is_trash_view {
+        let tab = self.tab();
+        if tab.is_trash_view {
             return self.visible_entry_paths();
         }
 
-        if self.view_mode == BrowserViewMode::Icons {
+        if tab.view_mode == BrowserViewMode::Icons {
             let directory = self
                 .icon_grid_expansion
                 .as_ref()
                 .map(|state| state.selection_directory())
-                .unwrap_or(self.current_dir.as_path());
+                .unwrap_or(tab.current_dir.as_path());
             return self.entry_paths_in_directory(directory);
         }
 
-        if self.view_mode == BrowserViewMode::Columns {
+        if tab.view_mode == BrowserViewMode::Columns {
             return self.entry_paths_in_directory(&self.column_select_all_directory());
         }
 
@@ -615,11 +628,12 @@ impl FileBrowser {
             return directory;
         }
 
-        self.selected
+        let tab = self.tab();
+        tab.selected
             .as_deref()
             .and_then(Path::parent)
             .map(Path::to_path_buf)
-            .unwrap_or_else(|| self.current_dir.clone())
+            .unwrap_or_else(|| tab.current_dir.clone())
     }
 
     fn focused_rendered_column_directory(&self) -> Option<PathBuf> {
@@ -648,6 +662,12 @@ impl FileBrowser {
 
     fn record_pointer_clicked_column(&mut self, directory: PathBuf) {
         self.last_pointer_clicked_column_directory = Some(directory);
+    }
+
+    /// 多栏下悬停的栏就是终端的跟随目标，悬停换栏时终端随之 cd。
+    fn set_cursor_paste_directory(&mut self, directory: PathBuf) {
+        self.cursor_paste_directory = Some(directory);
+        self.follow_terminal_panel_directory();
     }
 
     /// 多栏视图下鼠标悬停的栏目录;终端目录跟随等跨模块场景使用。
@@ -680,7 +700,8 @@ impl FileBrowser {
 
     /// 选中集合中的压缩包条目（真实目录语义），供解压菜单批量消费。
     pub(super) fn archive_selection_paths(&self) -> Vec<PathBuf> {
-        self.selected_paths
+        self.tab()
+            .selected_paths
             .iter()
             .filter(|path| is_supported_archive_path(path))
             .cloned()
@@ -689,7 +710,7 @@ impl FileBrowser {
 
     /// 当前浏览目录是否位于压缩包内部（含包根），包内只读门控的单一判定。
     pub(super) fn current_directory_is_inside_archive(&self) -> bool {
-        file_core::archive_path_identity(&self.current_dir)
+        file_core::archive_path_identity(&self.tab().current_dir)
             != file_core::ArchivePathIdentity::RealFile
     }
 
@@ -749,7 +770,7 @@ impl FileBrowser {
     pub(in crate::app) fn entry_parent_directory(&self, path: &Path) -> PathBuf {
         path.parent()
             .map(Path::to_path_buf)
-            .unwrap_or_else(|| self.current_dir.clone())
+            .unwrap_or_else(|| self.tab().current_dir.clone())
     }
 
     fn select_context_menu_target(&mut self, path: PathBuf) {
@@ -758,21 +779,23 @@ impl FileBrowser {
         }
 
         self.cancel_expansion_follow_plans();
-        self.selected_paths.clear();
-        self.selected_paths.insert(path.clone());
-        self.selection_anchor = Some(path);
+        let tab = self.tab_mut();
+        tab.selected_paths.clear();
+        tab.selected_paths.insert(path.clone());
+        tab.selection_anchor = Some(path);
     }
 
     fn toggle_path_selection(&mut self, path: PathBuf) {
-        if self.selected_paths.remove(&path) {
-            self.selected = self.last_visible_selected_path();
-            if let Some(selected) = self.selected.clone() {
+        if self.tab_mut().selected_paths.remove(&path) {
+            let remaining = self.last_visible_selected_path();
+            self.tab_mut().selected = remaining.clone();
+            if let Some(selected) = remaining {
                 self.focus_path(selected);
             } else {
                 self.rename_input.clear();
             }
         } else {
-            self.selected_paths.insert(path.clone());
+            self.tab_mut().selected_paths.insert(path.clone());
             self.focus_path(path);
         }
         self.preview_engine.clear_preview();
@@ -792,12 +815,11 @@ impl FileBrowser {
                 anchor
             };
         if !preserve_existing {
-            self.selected_paths.clear();
+            self.tab_mut().selected_paths.clear();
         }
 
-        for path in self.visible_range_paths(&effective_anchor, &target) {
-            self.selected_paths.insert(path);
-        }
+        let range = self.visible_range_paths(&effective_anchor, &target);
+        self.tab_mut().selected_paths.extend(range);
 
         self.focus_path(target);
         effective_anchor
@@ -805,22 +827,22 @@ impl FileBrowser {
 
     fn select_drag_range(&mut self, anchor: PathBuf, target: PathBuf, preserve_existing: bool) {
         if !preserve_existing {
-            self.selected_paths.clear();
+            self.tab_mut().selected_paths.clear();
         }
 
-        for path in self.visible_range_paths(&anchor, &target) {
-            self.selected_paths.insert(path);
-        }
+        let range = self.visible_range_paths(&anchor, &target);
+        self.tab_mut().selected_paths.extend(range);
     }
 
     pub(super) fn selected_paths_for_operation(&self) -> Vec<PathBuf> {
+        let tab = self.tab();
         let mut paths = self
             .visible_entry_paths()
             .into_iter()
-            .filter(|path| self.selected_paths.contains(path))
+            .filter(|path| tab.selected_paths.contains(path))
             .collect::<Vec<_>>();
         if paths.is_empty() {
-            if let Some(path) = self.selected.clone() {
+            if let Some(path) = tab.selected.clone() {
                 paths.push(path);
             }
         }
@@ -879,19 +901,19 @@ impl FileBrowser {
         &mut self,
         removed_paths: &[PathBuf],
     ) -> Task<Message> {
-        let Some(selected) = self.selected.clone() else {
+        let Some(selected) = self.tab().selected.clone() else {
             return Task::none();
         };
         if !Self::path_is_removed_by_file_operation(&selected, removed_paths) {
             return Task::none();
         }
 
-        let paths = match self.view_mode {
+        let paths = match self.tab().view_mode {
             BrowserViewMode::Columns => {
                 let directory = selected
                     .parent()
                     .map(Path::to_path_buf)
-                    .unwrap_or_else(|| self.current_dir.clone());
+                    .unwrap_or_else(|| self.tab().current_dir.clone());
                 self.entry_paths_in_directory(&directory)
             }
             BrowserViewMode::Icons | BrowserViewMode::List => self.visible_entry_paths(),
@@ -914,7 +936,7 @@ impl FileBrowser {
             return Task::none();
         };
 
-        if self.view_mode == BrowserViewMode::Icons {
+        if self.tab().view_mode == BrowserViewMode::Icons {
             let target_directory = self.entry_parent_directory(&target);
             if let Some(state) = self.icon_grid_expansion.as_mut() {
                 state.set_selection_directory(&target_directory);
@@ -946,7 +968,8 @@ impl FileBrowser {
 
     fn selected_trash_entries_for_operation(&self) -> Vec<file_core::TrashRestoreEntry> {
         let paths = self.selected_paths_for_operation();
-        self.trash_entries
+        self.tab()
+            .trash_entries
             .iter()
             .filter(|trash_entry| paths.iter().any(|path| path == &trash_entry.trash_path))
             .map(|trash_entry| trash_entry.restore_entry())
@@ -957,13 +980,13 @@ impl FileBrowser {
         self.visible_entry_paths()
             .into_iter()
             .rev()
-            .find(|path| self.selected_paths.contains(path))
+            .find(|path| self.tab().selected_paths.contains(path))
     }
 
     fn focus_path(&mut self, path: PathBuf) {
         self.pending_keyboard_column_focus = None;
         self.update_rename_input(&path);
-        self.selected = Some(path);
+        self.tab_mut().selected = Some(path);
         self.preview_engine.clear_preview();
         self.context_menu = None;
     }

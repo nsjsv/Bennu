@@ -128,7 +128,7 @@ pub(crate) fn pane_session_from_live(pane: &BrowserPane) -> BrowserPaneSession {
 pub(crate) fn tab_session_from_live(tab: &BrowserTab) -> BrowserTabSession {
     BrowserTabSession {
         id: tab.id,
-        directory: tab.directory.clone(),
+        directory: tab.current_dir.clone(),
         is_trash_view: tab.is_trash_view,
         selected: tab.selected.clone(),
         selected_paths: tab.selected_paths.clone(),

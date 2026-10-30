@@ -40,6 +40,8 @@ mod network_connections;
 mod network_settings;
 mod open_with;
 mod pane_drag;
+#[cfg(test)]
+mod pane_lifecycle_tests;
 pub(crate) mod panes;
 mod path_suggestions;
 mod paths;
@@ -69,6 +71,8 @@ mod split_resize;
 mod startup;
 mod startup_settings;
 mod tabs;
+#[cfg(test)]
+mod terminal_follow_tests;
 mod text_input_shortcuts;
 mod thumbnailing;
 pub(crate) mod transfer;
@@ -95,7 +99,7 @@ use desktop_linux::{
     DesktopActivationEvent, DesktopActivationRuntime, NetworkConnectionId, StorageDeviceId,
     TerminalEmulator,
 };
-use file_core::{DirectoryDiscovery, DirectoryMetadataRequirement, ScanOptions, TrashEntry};
+use file_core::{DirectoryMetadataRequirement, ScanOptions};
 use iced::event;
 use iced::keyboard;
 use iced::window;
@@ -142,12 +146,10 @@ use crate::config;
 use crate::config::UiLanguage;
 use crate::model::search::SearchWorkspaceState;
 use crate::model::{
-    empty_directory_entry_snapshot, AdvancedNewFolderAfter, AdvancedNewFolderState,
-    ApplicationLogViewState, BatchRenameState, BreadcrumbDropTargetBounds, BrowserPane,
-    BrowserPaneId, BrowserPaneLayout, BrowserTab, BrowserViewMode, ColumnBrowserViewport,
+    AdvancedNewFolderAfter, AdvancedNewFolderState, ApplicationLogViewState, BatchRenameState,
+    BreadcrumbDropTargetBounds, BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab,
     ColumnEntryBounds, ContextMenuSettingsDragState, ContextMenuSettingsPage, ContextMenuState,
-    DestructiveActionConfirmation, DirectoryCollectionPhase, DirectoryEntrySnapshot,
-    DirectoryLoadingPlaceholder, DirectoryOrderPhase, ExpandedDirectory, FileAreaMenuItem,
+    DestructiveActionConfirmation, DirectoryEntrySnapshot, DirectoryOrderPhase, FileAreaMenuItem,
     FileDragSpringHover, FileDragState, FileDropPrompt, FileDropSessionState, FilePropertiesState,
     IconGridExpansionState, IconGridViewport, ListColumnKind, Message, PaneAddressBarTransition,
     PaneAddressEditingSession, PaneDragPointerPress, PaneDragState, PendingOperation, PreviewState,
@@ -163,7 +165,7 @@ use crate::shortcuts::ShortcutCaptureState;
 use crate::sidebar_devices::SidebarDeviceState;
 use crate::startup_rendering::StartupRenderingEnvironment;
 use crate::startup_trace;
-use crate::thumbnail_cache::{ColumnViewport, ThumbnailCache};
+use crate::thumbnail_cache::ThumbnailCache;
 use crate::view::{
     auxiliary_window_content, floating_preview_window_content, view_browser,
     view_properties_window, view_settings_window, window_resize_frame,
@@ -185,20 +187,13 @@ struct DirectoryMetadataDemandKey {
 
 pub(crate) struct FileBrowser {
     pub(crate) home_dir: PathBuf,
-    pub(crate) current_dir: PathBuf,
-    pub(crate) is_trash_view: bool,
-    pub(crate) entries: DirectoryEntrySnapshot,
-    /// 主列表条目索引：仅随 [`Self::set_entries`] 失效，hover 热路径 O(1) 查找用。
+    /// 活动标签主列表的条目索引缓存（hover 热路径 O(1) 查找）。以快照指针
+    /// 校验有效性；原地改写条目的路径必须自己清空它。
     entry_index: Option<(DirectoryEntrySnapshot, HashMap<PathBuf, usize>)>,
-    pub(crate) directory_discovery: Option<DirectoryDiscovery>,
-    pub(crate) directory_loading_placeholder: Option<DirectoryLoadingPlaceholder>,
-    pub(crate) trash_entries: Vec<TrashEntry>,
     pub(crate) trash_refresh: TrashRefreshState,
     /// 回收站批量任务运行期间,watcher 触发的回收站重扫被挂起,只置此标记;
     /// 批量任务终结时统一补刷一次,避免逐条全量重扫的平方级风暴。
     trash_batch_rescan_pending: bool,
-    pub(crate) selected: Option<PathBuf>,
-    selected_paths: HashSet<PathBuf>,
     pub(crate) hovered_entry: Option<PathBuf>,
     pub(crate) hovered_sidebar: Option<PathBuf>,
     pub(crate) hovered_sidebar_device: Option<StorageDeviceId>,
@@ -209,11 +204,8 @@ pub(crate) struct FileBrowser {
     /// `right_preview_panel_*` 四个（见结构体后段，类型在 right_preview_panel
     /// 视图模块）。
     pub(crate) preview_engine: bennu_preview::engine::PreviewEngine,
-    directory_load_generation: u64,
-    directory_load_cancel: Option<tokio_util::sync::CancellationToken>,
     next_directory_metadata_request_generation: u64,
     directory_metadata_in_flight: HashSet<DirectoryMetadataDemandKey>,
-    selection_metadata_signature: u64,
     main_window: window::Id,
     maximized_windows: HashSet<window::Id>,
     wayland_dnd: Option<wayland_dnd::WaylandDndRuntime>,
@@ -222,8 +214,6 @@ pub(crate) struct FileBrowser {
     focused_window: window::Id,
     system_focused_window: Option<window::Id>,
     pub(crate) thumbnail_cache: ThumbnailCache,
-    pub(crate) column_browser_viewport: ColumnBrowserViewport,
-    pub(crate) column_viewports: HashMap<PathBuf, ColumnViewport>,
     icon_grid_viewports: HashMap<BrowserPaneId, PaneIconGridViewport>,
     pub(crate) icon_grid_expansion: Option<IconGridExpansionState>,
     list_expansion_follow: Option<view_modes::ListExpansionFollowPlan>,
@@ -273,10 +263,10 @@ pub(crate) struct FileBrowser {
     pub(crate) incoming_transfer: Option<transfer::IncomingTransferConfirmation>,
     /// 设置页设备名输入缓冲。
     pub(crate) transfer_device_alias_input: String,
-    pub(crate) tabs: Vec<BrowserTab>,
-    pub(crate) active_tab_id: usize,
     tab_bar_reveal: TabBarReveal,
     pub(crate) tab_animations: HashMap<usize, TabAnimationState>,
+    /// 全部窗格；浏览状态只存在这里（窗格→标签），活动窗格由 `pane_layout`
+    /// 指向，没有第二份工作副本。
     pub(crate) panes: Vec<BrowserPane>,
     pub(crate) pane_layout: BrowserPaneLayout,
     tab_drag: Option<TabDragState>,
@@ -340,24 +330,22 @@ pub(crate) struct FileBrowser {
     pub(crate) search_workspace: Option<SearchWorkspaceState>,
     pub(crate) search_history_interaction: crate::model::SearchHistoryInteraction,
     next_search_workspace_session_id: u64,
-    pub(crate) deepest_open_column_directory: Option<PathBuf>,
     focused_column_directory: Option<PathBuf>,
     last_pointer_clicked_column_directory: Option<PathBuf>,
-    pub(crate) expanded_directories: HashMap<PathBuf, ExpandedDirectory>,
-    pub(crate) view_mode: BrowserViewMode,
     pub(crate) rename_input: String,
     rename_input_history: file_operations::RenameInputHistory,
     /// 执行端拒绝本次重命名的原因。只在 `begin_rename` 开始会话、输入变化、
     /// 被拒重开这三处改写，读取经 `rename_hint` 且要求会话仍在进行，
     /// 所以不会把上一次会话的原因带到新会话。
     rename_rejection: Option<crate::operation_history::RenameRejection>,
-    pub(crate) directory_collection_phase: DirectoryCollectionPhase,
-    pub(crate) directory_order_phase: DirectoryOrderPhase,
     global_error_notification: Option<global_error::GlobalErrorNotification>,
     next_global_error_notification_generation: u64,
     pub(crate) application_logs: ApplicationLogViewState,
     system_language: UiLanguage,
-    pub(crate) cursor_position: Point,
+    /// 最近一次指针事件给出的窗口坐标；`None` = 还没有收到过任何指针事件。
+    /// 读取方需要"光标确实在某处"的事实时（hover 重算）必须判 `None`；只在
+    /// 指针手势里取起点的读取方经 [`Self::cursor_or_origin`]。
+    pub(crate) cursor_position: Option<Point>,
     pub(crate) main_window_width: f32,
     pub(crate) main_window_height: f32,
     /// 光标当前压着的浏览内容区(窗格内容不含 tab 条)。悬停不激活窗格,
@@ -371,7 +359,6 @@ pub(crate) struct FileBrowser {
     hovered_grouping_rail_pane: Option<BrowserPaneId>,
     pub(crate) keyboard_modifiers: keyboard::Modifiers,
     pub(crate) shortcut_capture: Option<ShortcutCaptureState>,
-    selection_anchor: Option<PathBuf>,
     drag_selection_anchor: Option<PathBuf>,
     column_return_targets: HashMap<PathBuf, PathBuf>,
     pending_keyboard_column_focus: Option<PendingKeyboardColumnFocus>,
@@ -396,8 +383,6 @@ pub(crate) struct FileBrowser {
     scrollbar: ScrollbarState,
     smooth_scroll: MosScrollState,
     file_drag_edge_scroll: Option<file_drag_edge_scroll::FileDragEdgeScroll>,
-    back_stack: Vec<PathBuf>,
-    forward_stack: Vec<PathBuf>,
     next_tab_id: usize,
     next_pane_id: u64,
     next_icon_grid_expansion_session_id: u64,
@@ -424,6 +409,13 @@ impl FileBrowser {
         &self.user_config
     }
 
+    /// 指针手势（拖拽起点、弹出菜单锚点）只会由指针事件触发，此时坐标必已
+    /// 记录；键盘等没有指针的入口触发时退回窗口原点，这是整个应用唯一把
+    /// "未知"折成坐标的地方。
+    pub(crate) fn cursor_or_origin(&self) -> Point {
+        self.cursor_position.unwrap_or(Point::ORIGIN)
+    }
+
     pub(crate) fn active_language(&self) -> UiLanguage {
         self.user_config
             .language_setting
@@ -448,6 +440,8 @@ impl FileBrowser {
         self.preview_engine.preview_window_bottom_controls.advance();
         self.advance_terminal_panel_height_animation();
         self.advance_terminal_tab_shift_animations();
+        // 动画帧改变布局（终端面板高度、标签栏出现、列表折叠、图标展开），
+        // 逐帧把视口收进新内容。
         Task::batch([
             self.advance_smooth_scroll_animation(),
             self.advance_scrollbar_animation(),
@@ -458,6 +452,7 @@ impl FileBrowser {
             self.advance_list_directory_animations(),
             self.advance_icon_grid_expansion_animation(),
             self.advance_sidebar_bookmark_motion(),
+            self.clamp_visible_pane_viewports(),
         ])
     }
 
@@ -556,6 +551,10 @@ impl FileBrowser {
         let initial_search_service_request = search_service.begin_initial_status_request();
         let mut initial_tab = BrowserTab::directory(0, placeholder_dir.clone());
         initial_tab.view_mode = initial_view_mode;
+        initial_tab.directory_order_phase = DirectoryOrderPhase::Ready {
+            field: options.sort_field,
+            direction: options.sort_direction,
+        };
         // 引擎配置快照自 UserConfig 填充（此后每次偏好持久化同步刷新，
         // 见 config_persistence.rs），预览域行为参数单一来源仍是持久化层。
         let preview_engine_config = bennu_preview::engine::PreviewEngineConfig {
@@ -563,47 +562,12 @@ impl FileBrowser {
             extension_rules: user_config.preview_extension_rules.clone(),
             size_limits: user_config.preview_size_limits,
         };
-        let initial_pane = BrowserPane {
-            id: BrowserPaneId::PRIMARY,
-            current_dir: placeholder_dir.clone(),
-            is_trash_view: false,
-            entries: empty_directory_entry_snapshot(),
-            directory_discovery: None,
-            directory_loading_placeholder: None,
-            trash_entries: Vec::new(),
-            selected: None,
-            selected_paths: HashSet::new(),
-            selection_anchor: None,
-            deepest_open_column_directory: None,
-            expanded_directories: HashMap::new(),
-            view_mode: initial_view_mode,
-            column_browser_viewport: ColumnBrowserViewport::default(),
-            column_viewports: HashMap::new(),
-            tabs: vec![initial_tab.clone()],
-            active_tab_id: initial_tab.id,
-            directory_load_generation: 0,
-            directory_load_cancel: None,
-            back_stack: Vec::new(),
-            forward_stack: Vec::new(),
-            directory_collection_phase: DirectoryCollectionPhase::Discovering,
-            directory_order_phase: DirectoryOrderPhase::Ready {
-                field: options.sort_field,
-                direction: options.sort_direction,
-            },
-        };
+        let initial_pane = BrowserPane::new(BrowserPaneId::PRIMARY, initial_tab);
         let mut browser = Self {
-            home_dir: placeholder_dir.clone(),
-            current_dir: placeholder_dir.clone(),
-            is_trash_view: false,
-            entries: empty_directory_entry_snapshot(),
+            home_dir: placeholder_dir,
             entry_index: None,
-            directory_discovery: None,
-            directory_loading_placeholder: None,
-            trash_entries: Vec::new(),
             trash_refresh: TrashRefreshState::default(),
             trash_batch_rescan_pending: false,
-            selected: None,
-            selected_paths: HashSet::new(),
             hovered_entry: None,
             hovered_sidebar: None,
             hovered_sidebar_device: None,
@@ -614,11 +578,8 @@ impl FileBrowser {
                 default_preview_size(PreviewWindowProfile::Regular),
                 windows::preview_window_identity(),
             ),
-            directory_load_generation: 0,
-            directory_load_cancel: None,
             next_directory_metadata_request_generation: 1,
             directory_metadata_in_flight: HashSet::new(),
-            selection_metadata_signature: 0,
             main_window,
             maximized_windows: HashSet::new(),
             wayland_dnd: None,
@@ -627,8 +588,6 @@ impl FileBrowser {
             focused_window: main_window,
             system_focused_window: None,
             thumbnail_cache: ThumbnailCache::new(thumbnails::thumbnail_cache_dir()),
-            column_browser_viewport: ColumnBrowserViewport::default(),
-            column_viewports: HashMap::new(),
             icon_grid_viewports: HashMap::new(),
             icon_grid_expansion: None,
             list_expansion_follow: None,
@@ -676,8 +635,6 @@ impl FileBrowser {
             transfer_session: None,
             incoming_transfer: None,
             transfer_device_alias_input: String::new(),
-            tabs: vec![initial_tab],
-            active_tab_id: 0,
             tab_bar_reveal: TabBarReveal::default(),
             tab_animations: HashMap::new(),
             panes: vec![initial_pane],
@@ -744,26 +701,18 @@ impl FileBrowser {
             search_workspace: None,
             search_history_interaction: crate::model::SearchHistoryInteraction::default(),
             next_search_workspace_session_id: 1,
-            deepest_open_column_directory: None,
             focused_column_directory: None,
             last_pointer_clicked_column_directory: None,
-            expanded_directories: HashMap::new(),
-            view_mode: initial_view_mode,
             rename_input: String::new(),
             rename_input_history: file_operations::RenameInputHistory::default(),
             rename_rejection: None,
-            directory_collection_phase: DirectoryCollectionPhase::Discovering,
-            directory_order_phase: DirectoryOrderPhase::Ready {
-                field: options.sort_field,
-                direction: options.sort_direction,
-            },
             global_error_notification: None,
             next_global_error_notification_generation: 0,
             application_logs: ApplicationLogViewState::new(
                 crate::runtime_logging::journald_initialization_warning(),
             ),
             system_language: UiLanguage::English,
-            cursor_position: Point::new(0.0, 0.0),
+            cursor_position: None,
             main_window_width: MAIN_WINDOW_INITIAL_WIDTH,
             main_window_height: MAIN_WINDOW_INITIAL_HEIGHT,
             cursor_over_browser_content_pane: None,
@@ -772,7 +721,6 @@ impl FileBrowser {
             hovered_grouping_rail_pane: None,
             keyboard_modifiers: keyboard::Modifiers::default(),
             shortcut_capture: None,
-            selection_anchor: None,
             drag_selection_anchor: None,
             column_return_targets: HashMap::new(),
             pending_keyboard_column_focus: None,
@@ -795,8 +743,6 @@ impl FileBrowser {
             scrollbar: ScrollbarState::default(),
             smooth_scroll: MosScrollState::default(),
             file_drag_edge_scroll: None,
-            back_stack: Vec::new(),
-            forward_stack: Vec::new(),
             next_tab_id: 1,
             next_pane_id: 1,
             next_icon_grid_expansion_session_id: 1,
@@ -874,17 +820,11 @@ impl FileBrowser {
             ));
         }
 
-        if !self.directory_collection_phase.is_discovering() && !self.is_trash_view {
-            let watched_directories = std::iter::once(self.current_dir.clone())
-                .chain(self.expanded_directories.keys().cloned())
-                .chain(self.icon_grid_expansion_watch_directories())
-                .collect::<HashSet<_>>();
-            subscriptions.extend(
-                watched_directories
-                    .into_iter()
-                    .map(directory_watch_subscription),
-            );
-        }
+        subscriptions.extend(
+            self.watched_directories()
+                .into_iter()
+                .map(directory_watch_subscription),
+        );
 
         if self.settings_window.is_some()
             && self.selected_settings_category == crate::model::SettingsCategory::Search
@@ -1071,8 +1011,8 @@ impl FileBrowser {
             }
         } else if window == self.main_window {
             startup_trace::mark_once("first_main_window_view");
-            if !self.directory_collection_phase.is_discovering()
-                && self.directory_order_phase.is_ready()
+            if !self.tab().directory_collection_phase.is_discovering()
+                && self.tab().directory_order_phase.is_ready()
             {
                 startup_trace::mark_once("first_browser_view_after_initial_load");
             }

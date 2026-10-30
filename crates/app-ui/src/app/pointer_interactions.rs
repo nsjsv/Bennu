@@ -71,7 +71,7 @@ impl FileBrowser {
     ) -> Task<Message> {
         if self.preview_engine.preview_window == Some(window) {
             if self.preview_engine.preview_window_uses_window_chrome() {
-                self.cursor_position = position;
+                self.cursor_position = Some(position);
                 self.preview_engine
                     .update_sqlite_tables_resize_drag(position);
                 return Task::none();
@@ -93,7 +93,7 @@ impl FileBrowser {
         if window != self.main_window {
             return Task::none();
         }
-        self.cursor_position = position;
+        self.cursor_position = Some(position);
         self.promote_ctrl_shift_pane_drag_from_active_pointer_drag();
         self.update_tab_drag(position);
         self.update_pane_drag(position);
@@ -114,6 +114,19 @@ impl FileBrowser {
         } else {
             Task::none()
         };
-        Task::batch([file_drag_command, selection_command])
+        // 面板边界拖拽逐帧改变窗格的宽高，视口跟着收。
+        let pane_resize_command = if self.pane_boundary_drag_is_active() {
+            self.clamp_visible_pane_viewports()
+        } else {
+            Task::none()
+        };
+        Task::batch([file_drag_command, selection_command, pane_resize_command])
+    }
+
+    fn pane_boundary_drag_is_active(&self) -> bool {
+        self.sidebar_resize_drag.is_some()
+            || self.split_resize_drag.is_some()
+            || self.right_preview_panel_resize_drag.is_some()
+            || self.terminal_panel.is_resizing()
     }
 }

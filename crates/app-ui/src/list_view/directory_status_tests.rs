@@ -22,11 +22,11 @@ fn browser_with_expanded_directory(
     child_entries: Vec<DirectoryEntry>,
 ) -> FileBrowser {
     let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-    browser.current_dir = PathBuf::from("/workspace");
-    browser.directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
-    let expanded_path = browser.current_dir.join("project");
-    browser.entries = vec![test_directory_entry(expanded_path.clone())].into();
-    browser.expanded_directories.insert(
+    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
+    let expanded_path = browser.tab().current_dir.join("project");
+    browser.tab_mut().entries = vec![test_directory_entry(expanded_path.clone())].into();
+    browser.tab_mut().expanded_directories.insert(
         expanded_path,
         ExpandedDirectory {
             entries: child_entries,

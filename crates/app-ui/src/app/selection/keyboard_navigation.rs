@@ -33,7 +33,7 @@ impl FileBrowser {
         if !self.file_browser_content_shortcuts_enabled() {
             return Task::none();
         }
-        let Some(path) = self.selected.clone() else {
+        let Some(path) = self.tab().selected.clone() else {
             return Task::none();
         };
         self.activate_path(path)
@@ -47,15 +47,15 @@ impl FileBrowser {
             return Task::none();
         }
 
-        if self.view_mode == BrowserViewMode::Icons {
+        if self.tab().view_mode == BrowserViewMode::Icons {
             return self.move_file_selection_in_icon_grid(direction);
         }
 
         match direction {
-            FileSelectionDirection::Up if self.view_mode == BrowserViewMode::List => {
+            FileSelectionDirection::Up if self.tab().view_mode == BrowserViewMode::List => {
                 self.move_file_selection_in_visible_list(SelectionStep::Previous)
             }
-            FileSelectionDirection::Down if self.view_mode == BrowserViewMode::List => {
+            FileSelectionDirection::Down if self.tab().view_mode == BrowserViewMode::List => {
                 self.move_file_selection_in_visible_list(SelectionStep::Next)
             }
             FileSelectionDirection::Up => {
@@ -64,10 +64,10 @@ impl FileBrowser {
             FileSelectionDirection::Down => {
                 self.move_file_selection_vertically(SelectionStep::Next)
             }
-            FileSelectionDirection::Left if self.view_mode == BrowserViewMode::List => {
+            FileSelectionDirection::Left if self.tab().view_mode == BrowserViewMode::List => {
                 self.collapse_selected_list_directory_or_select_parent()
             }
-            FileSelectionDirection::Right if self.view_mode == BrowserViewMode::List => {
+            FileSelectionDirection::Right if self.tab().view_mode == BrowserViewMode::List => {
                 self.expand_selected_list_directory()
             }
             FileSelectionDirection::Left => self.move_file_selection_to_parent_column(),
@@ -88,7 +88,7 @@ impl FileBrowser {
         };
         let Some((target, target_directory)) = self.pane_view(pane_id).and_then(|pane| {
             let layout = self.icon_grid_layout_for_pane(pane);
-            let target = layout.keyboard_target(self.selected.as_deref(), direction)?;
+            let target = layout.keyboard_target(self.tab().selected.as_deref(), direction)?;
             Some((target.entry.path.clone(), target.directory.to_path_buf()))
         }) else {
             return Task::none();
@@ -104,7 +104,8 @@ impl FileBrowser {
 
     fn move_file_selection_in_visible_list(&mut self, step: SelectionStep) -> Task<Message> {
         let paths = self.visible_entry_paths();
-        let Some(target) = stepped_selection_target(&paths, self.selected.as_deref(), step) else {
+        let Some(target) = stepped_selection_target(&paths, self.tab().selected.as_deref(), step)
+        else {
             return Task::none();
         };
 
@@ -116,13 +117,15 @@ impl FileBrowser {
         let directory = self
             .focused_rendered_column_directory()
             .or_else(|| {
-                self.selected
+                self.tab()
+                    .selected
                     .as_ref()
                     .and_then(|path| path.parent().map(Path::to_path_buf))
             })
-            .unwrap_or_else(|| self.current_dir.clone());
+            .unwrap_or_else(|| self.tab().current_dir.clone());
         let paths = self.entry_paths_in_directory(&directory);
-        let Some(target) = stepped_selection_target(&paths, self.selected.as_deref(), step) else {
+        let Some(target) = stepped_selection_target(&paths, self.tab().selected.as_deref(), step)
+        else {
             return Task::none();
         };
 
@@ -131,13 +134,13 @@ impl FileBrowser {
     }
 
     fn move_file_selection_to_parent_column(&mut self) -> Task<Message> {
-        let Some(selected) = self.selected.clone() else {
+        let Some(selected) = self.tab().selected.clone() else {
             return Task::none();
         };
         let Some(parent) = selected.parent().map(Path::to_path_buf) else {
             return Task::none();
         };
-        if parent == self.current_dir || !self.entry_acts_as_directory(&parent) {
+        if parent == self.tab().current_dir || !self.entry_acts_as_directory(&parent) {
             return Task::none();
         }
 
@@ -148,7 +151,7 @@ impl FileBrowser {
     }
 
     fn move_file_selection_to_child_column(&mut self) -> Task<Message> {
-        let Some(selected) = self.selected.clone() else {
+        let Some(selected) = self.tab().selected.clone() else {
             return self.move_file_selection_vertically(SelectionStep::Next);
         };
         if !self.entry_acts_as_directory(&selected) {
@@ -192,7 +195,7 @@ impl FileBrowser {
         }
 
         self.pending_keyboard_column_focus = None;
-        if self.selected.as_deref() != Some(directory) {
+        if self.tab().selected.as_deref() != Some(directory) {
             return Task::none();
         }
 
@@ -221,7 +224,8 @@ impl FileBrowser {
     }
 
     fn directory_children_are_loading(&self, directory: &Path) -> bool {
-        self.expanded_directories
+        self.tab()
+            .expanded_directories
             .get(directory)
             .is_some_and(|expanded| matches!(expanded.status, ExpandedDirectoryStatus::Loading))
     }
@@ -236,16 +240,19 @@ impl FileBrowser {
     }
 
     pub(crate) fn select_path_from_keyboard(&mut self, path: PathBuf) -> Task<Message> {
-        if self.view_mode == BrowserViewMode::Columns {
+        if self.tab().view_mode == BrowserViewMode::Columns {
             self.focused_column_directory = Some(self.entry_parent_directory(&path));
         }
         self.select_path(path.clone());
-        self.selection_anchor = Some(path.clone());
+        self.tab_mut().selection_anchor = Some(path.clone());
         self.drag_selection_anchor = None;
         self.selection_marquee = None;
         self.cancel_file_drag_interaction();
         self.pending_keyboard_column_focus = None;
-        self.reveal_keyboard_selection(&path)
+        Task::batch([
+            self.schedule_selected_metadata_for_all_panes(),
+            self.reveal_keyboard_selection(&path),
+        ])
     }
 
     fn reveal_keyboard_selection(&self, path: &Path) -> Task<Message> {
@@ -266,7 +273,7 @@ impl FileBrowser {
 
     fn keyboard_selection_scroll(&self, path: &Path) -> Option<(ScrollbarRegion, f32)> {
         let pane_id = self.active_pane_id();
-        Some(match self.view_mode {
+        Some(match self.tab().view_mode {
             BrowserViewMode::Icons => {
                 let pane = self.pane_view(pane_id)?;
                 let viewport = pane.icon_grid_viewport;
@@ -277,7 +284,7 @@ impl FileBrowser {
                 )
             }
             BrowserViewMode::List => {
-                let viewport = self.column_viewports.get(&self.current_dir)?;
+                let viewport = self.pane().column_viewports.get(&self.tab().current_dir)?;
                 let geometry =
                     crate::list_view::ListGeometry::for_level(self.user_config.list_view_density);
                 // 键盘跟随与列表渲染消费同一合并行流(含占位/状态行),
@@ -307,7 +314,7 @@ impl FileBrowser {
             }
             BrowserViewMode::Columns => {
                 let directory = self.entry_parent_directory(path);
-                let viewport = self.column_viewports.get(&directory)?;
+                let viewport = self.pane().column_viewports.get(&directory)?;
                 // 多栏渲染的是占位合入后的合并序列,行偏移按同一序列推算。
                 let pane = self.pane_view(pane_id)?;
                 let geometry = crate::three_column_view::ColumnGeometry::for_level(
@@ -338,7 +345,7 @@ impl FileBrowser {
         // 空格 toggle 的对象是键盘选中项;悬停不作门控——纯键盘操作没有
         // hovered_entry,若沿用“悬停才开”会让键盘用户永远开不了预览。
         if self.standalone_preview_session_active()
-            && self.preview_engine.preview_shown_path.as_deref() == self.selected.as_deref()
+            && self.preview_engine.preview_shown_path.as_deref() == self.tab().selected.as_deref()
         {
             self.context_menu = None;
             return self.close_preview_window();
@@ -361,10 +368,10 @@ impl FileBrowser {
     }
 
     pub(crate) fn activate_path(&mut self, path: PathBuf) -> Task<Message> {
-        if self.is_trash_view {
-            if !self.selected_paths.contains(&path) {
+        if self.tab().is_trash_view {
+            if !self.tab().selected_paths.contains(&path) {
                 self.select_path(path);
-            } else if self.selected.as_deref() != Some(path.as_path()) {
+            } else if self.tab().selected.as_deref() != Some(path.as_path()) {
                 self.focus_path(path);
             }
             return self.restore_selected();
@@ -383,14 +390,14 @@ impl FileBrowser {
 
     pub(crate) fn open_terminal_here(&mut self, directory: PathBuf) -> Task<Message> {
         self.context_menu = None;
-        if self.is_trash_view {
+        if self.tab().is_trash_view {
             return Task::none();
         }
         open_terminal_command(directory, self.terminal_emulator)
     }
 
     pub(crate) fn open_column_for_directory(&mut self, path: PathBuf) -> Task<Message> {
-        if self.is_trash_view {
+        if self.tab().is_trash_view {
             return Task::none();
         }
 
@@ -399,11 +406,10 @@ impl FileBrowser {
         }
         self.set_deepest_open_column_directory(Some(path.clone()));
 
-        if let Some(expanded) = self.expanded_directories.get_mut(&path) {
+        if let Some(expanded) = self.tab_mut().expanded_directories.get_mut(&path) {
             expanded.is_expanded = true;
             expanded.is_collapsing = false;
             expanded.animation_progress = 1.0;
-            self.sync_active_tab_state();
             return Task::batch([
                 self.focus_latest_column(),
                 self.request_browser_session_save(),
@@ -433,8 +439,7 @@ impl FileBrowser {
             path.clone(),
             &mut expanded,
         );
-        self.expanded_directories.insert(path, expanded);
-        self.sync_active_tab_state();
+        self.tab_mut().expanded_directories.insert(path, expanded);
         Task::batch([
             load_expanded_directory_command(request, self.options.clone(), cancellation),
             self.focus_latest_column(),
@@ -448,7 +453,7 @@ impl FileBrowser {
         // 包内成员按空格完全无动作:虚拟路径读不了文件,加载必然失败
         // 并弹「could not read image」全局错误;按只读浏览语义静默忽略。
         // 归档文件本身是 BrowsingRoot 但仍是真实文件,归档预览照常发起。
-        if self.selected.as_deref().is_some_and(|path| {
+        if self.tab().selected.as_deref().is_some_and(|path| {
             file_core::archive_path_identity(path) == file_core::ArchivePathIdentity::InsideArchive
         }) {
             return Task::none();
@@ -461,7 +466,7 @@ impl FileBrowser {
         let close_window_command = self.close_preview_window();
 
         // 悬停在条目上但没有选中项：无操作。
-        let Some(path) = self.selected.clone() else {
+        let Some(path) = self.tab().selected.clone() else {
             return Task::none();
         };
 
@@ -722,17 +727,18 @@ mod tests {
         viewport_height: f32,
     ) -> FileBrowser {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
-        browser.current_dir = PathBuf::from("/workspace");
-        browser.view_mode = view_mode;
-        browser.entries = (0..3).map(entry).collect::<Vec<_>>().into();
-        browser.column_viewports.insert(
-            browser.current_dir.clone(),
+        browser.tab_mut().current_dir = PathBuf::from("/workspace");
+        browser.tab_mut().view_mode = view_mode;
+        browser.tab_mut().entries = (0..3).map(entry).collect::<Vec<_>>().into();
+        let current_dir = browser.tab().current_dir.clone();
+        browser.pane_mut().column_viewports.insert(
+            current_dir,
             ColumnViewport {
                 offset_y: 0.0,
                 height: viewport_height,
             },
         );
-        browser.select_path(browser.entries[0].path.clone());
+        browser.select_path(browser.tab().entries[0].path.clone());
         browser
     }
 
@@ -753,7 +759,7 @@ mod tests {
         ] {
             let browser = browser_for_vertical_keyboard_navigation(view_mode, viewport_height);
             let (_, scroll_delta) = browser
-                .keyboard_selection_scroll(&browser.entries[1].path)
+                .keyboard_selection_scroll(&browser.tab().entries[1].path)
                 .expect("second row has a scroll target");
 
             assert_eq!(scroll_delta, expected_delta, "wrong delta in {view_mode:?}");
@@ -764,7 +770,7 @@ mod tests {
     fn list_keyboard_reveal_counts_status_and_animation_rows() {
         let mut browser = browser_for_vertical_keyboard_navigation(BrowserViewMode::List, 500.0);
         let directory = DirectoryEntry::new(
-            browser.current_dir.join("directory"),
+            browser.tab().current_dir.join("directory"),
             FileKind::Directory,
             EntryMetadata::default(),
             false,
@@ -772,8 +778,9 @@ mod tests {
             false,
         );
         let sibling = entry(1);
-        browser.entries = vec![directory.clone(), sibling.clone()].into();
+        browser.tab_mut().entries = vec![directory.clone(), sibling.clone()].into();
         browser
+            .tab_mut()
             .expanded_directories
             .insert(directory.path.clone(), expanded_directory(Vec::new(), 1.0));
 
@@ -809,6 +816,7 @@ mod tests {
             false,
         );
         browser
+            .tab_mut()
             .expanded_directories
             .insert(directory.path.clone(), expanded_directory(vec![child], 0.5));
 
@@ -829,7 +837,10 @@ mod tests {
         let widget_actions =
             widget_action_count(browser.move_file_selection(FileSelectionDirection::Down)).await;
 
-        assert_eq!(browser.selected, Some(browser.entries[1].path.clone()));
+        assert_eq!(
+            browser.tab().selected,
+            Some(browser.tab().entries[1].path.clone())
+        );
         assert_eq!(widget_actions, 1);
     }
 
@@ -843,7 +854,10 @@ mod tests {
         let widget_actions =
             widget_action_count(browser.move_file_selection(FileSelectionDirection::Down)).await;
 
-        assert_eq!(browser.selected, Some(browser.entries[1].path.clone()));
+        assert_eq!(
+            browser.tab().selected,
+            Some(browser.tab().entries[1].path.clone())
+        );
         assert_eq!(widget_actions, 1);
     }
 
@@ -856,7 +870,10 @@ mod tests {
                 widget_action_count(browser.move_file_selection(FileSelectionDirection::Down))
                     .await;
 
-            assert_eq!(browser.selected, Some(browser.entries[1].path.clone()));
+            assert_eq!(
+                browser.tab().selected,
+                Some(browser.tab().entries[1].path.clone())
+            );
             assert_eq!(widget_actions, 0, "unexpected scroll in {view_mode:?}");
         }
     }
@@ -864,33 +881,42 @@ mod tests {
     #[test]
     fn icon_grid_keyboard_navigation_uses_current_column_count() {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
-        browser.current_dir = PathBuf::from("/workspace");
-        browser.view_mode = BrowserViewMode::Icons;
+        browser.tab_mut().current_dir = PathBuf::from("/workspace");
+        browser.tab_mut().view_mode = BrowserViewMode::Icons;
         browser.main_window_width = 500.0;
         browser.sidebar_width = 0.0;
-        browser.entries = (0..8).map(entry).collect::<Vec<_>>().into();
-        browser.select_path(browser.entries[1].path.clone());
+        browser.tab_mut().entries = (0..8).map(entry).collect::<Vec<_>>().into();
+        browser.select_path(browser.tab().entries[1].path.clone());
 
         drop(browser.move_file_selection(FileSelectionDirection::Down));
-        assert_eq!(browser.selected, Some(browser.entries[4].path.clone()));
+        assert_eq!(
+            browser.tab().selected,
+            Some(browser.tab().entries[4].path.clone())
+        );
 
         drop(browser.move_file_selection(FileSelectionDirection::Left));
-        assert_eq!(browser.selected, Some(browser.entries[3].path.clone()));
+        assert_eq!(
+            browser.tab().selected,
+            Some(browser.tab().entries[3].path.clone())
+        );
     }
 
     #[test]
     fn icon_grid_keyboard_navigation_clamps_in_incomplete_last_row() {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
-        browser.current_dir = PathBuf::from("/workspace");
-        browser.view_mode = BrowserViewMode::Icons;
+        browser.tab_mut().current_dir = PathBuf::from("/workspace");
+        browser.tab_mut().view_mode = BrowserViewMode::Icons;
         browser.main_window_width = 500.0;
         browser.sidebar_width = 0.0;
-        browser.entries = (0..8).map(entry).collect::<Vec<_>>().into();
-        browser.select_path(browser.entries[5].path.clone());
+        browser.tab_mut().entries = (0..8).map(entry).collect::<Vec<_>>().into();
+        browser.select_path(browser.tab().entries[5].path.clone());
 
         drop(browser.move_file_selection(FileSelectionDirection::Down));
 
-        assert_eq!(browser.selected, Some(browser.entries[7].path.clone()));
+        assert_eq!(
+            browser.tab().selected,
+            Some(browser.tab().entries[7].path.clone())
+        );
     }
 
     #[test]
@@ -904,8 +930,8 @@ mod tests {
         std::fs::write(&archive, b"stub").unwrap();
 
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
-        browser.current_dir = workspace.path().to_path_buf();
-        browser.entries = vec![DirectoryEntry::new(
+        browser.tab_mut().current_dir = workspace.path().to_path_buf();
+        browser.tab_mut().entries = vec![DirectoryEntry::new(
             archive.clone(),
             FileKind::File,
             EntryMetadata::default(),
@@ -940,9 +966,9 @@ mod tests {
         let archive = PathBuf::from("/workspace/bundle.zip");
         let inner = archive.join("inner");
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
-        browser.current_dir = PathBuf::from("/workspace");
-        browser.view_mode = BrowserViewMode::Columns;
-        browser.entries = vec![DirectoryEntry::new(
+        browser.tab_mut().current_dir = PathBuf::from("/workspace");
+        browser.tab_mut().view_mode = BrowserViewMode::Columns;
+        browser.tab_mut().entries = vec![DirectoryEntry::new(
             archive.clone(),
             FileKind::File,
             EntryMetadata::default(),
@@ -951,7 +977,7 @@ mod tests {
             false,
         )]
         .into();
-        browser.expanded_directories.insert(
+        browser.tab_mut().expanded_directories.insert(
             archive.clone(),
             expanded_directory(
                 vec![DirectoryEntry::new(
@@ -965,11 +991,11 @@ mod tests {
                 1.0,
             ),
         );
-        browser.deepest_open_column_directory = Some(inner.clone());
+        browser.tab_mut().deepest_open_column_directory = Some(inner.clone());
         browser.select_path(inner.clone());
 
         drop(browser.move_file_selection_to_parent_column());
 
-        assert_eq!(browser.selected.as_deref(), Some(archive.as_path()));
+        assert_eq!(browser.tab().selected.as_deref(), Some(archive.as_path()));
     }
 }

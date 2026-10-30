@@ -39,10 +39,10 @@ fn browser_with_search_selection() -> (FileBrowser, Vec<PathBuf>) {
     std::fs::write(&second, "second").unwrap();
 
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = root;
-    browser.directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
-    browser.sync_active_tab_state();
+    browser.tab_mut().current_dir = root;
+    browser.tab_mut().directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
     browser
+        .tab_mut()
         .selected_paths
         .insert(PathBuf::from("/underlying-browser-selection"));
     drop(browser.update_search_input("selection".to_owned()));
@@ -77,9 +77,9 @@ fn search_shortcut_context_blocks_hidden_pane_actions_and_routes_supported_comma
     let (mut browser, search_paths) = browser_with_search_selection();
     let underlying_path = search_paths[0].parent().unwrap().join("underlying.txt");
     std::fs::write(&underlying_path, "underlying").unwrap();
-    browser.selected = Some(underlying_path.clone());
-    browser.selected_paths.insert(underlying_path);
-    let current_dir = browser.current_dir.clone();
+    browser.tab_mut().selected = Some(underlying_path.clone());
+    browser.tab_mut().selected_paths.insert(underlying_path);
+    let current_dir = browser.tab().current_dir.clone();
 
     for action in [
         ShortcutAction::RenameSelected,
@@ -93,7 +93,7 @@ fn search_shortcut_context_blocks_hidden_pane_actions_and_routes_supported_comma
     assert!(browser.renaming.is_none());
     assert!(browser.properties_window.is_none());
     assert!(browser.preview_engine.preview_window.is_none());
-    assert_eq!(browser.current_dir, current_dir);
+    assert_eq!(browser.tab().current_dir, current_dir);
 
     drop(browser.invoke_shortcut(ShortcutAction::Copy));
     assert!(matches!(
@@ -122,11 +122,10 @@ fn navigation_behind_workspace_keeps_the_frozen_root_until_explicit_close() {
     std::fs::write(&selected, "selected").unwrap();
 
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = first_directory.clone();
-    browser.view_mode = BrowserViewMode::List;
-    browser.selected = Some(selected.clone());
-    browser.selected_paths.insert(selected.clone());
-    browser.sync_active_tab_state();
+    browser.tab_mut().current_dir = first_directory.clone();
+    browser.tab_mut().view_mode = BrowserViewMode::List;
+    browser.tab_mut().selected = Some(selected.clone());
+    browser.tab_mut().selected_paths.insert(selected.clone());
     drop(browser.submit_search());
 
     drop(browser.navigate_to(second_directory.clone(), NavigationMode::RecordHistory));
@@ -147,8 +146,8 @@ fn navigation_behind_workspace_keeps_the_frozen_root_until_explicit_close() {
     ));
 
     drop(browser.close_search_workspace());
-    assert_eq!(browser.current_dir, second_directory);
-    assert_eq!(browser.view_mode, BrowserViewMode::List);
+    assert_eq!(browser.tab().current_dir, second_directory);
+    assert_eq!(browser.tab().view_mode, BrowserViewMode::List);
 }
 
 #[test]
@@ -208,7 +207,7 @@ fn shift_delete_menu_action_requests_permanent_delete_confirmation() {
 #[test]
 fn right_click_targets_search_selection_without_mutating_underlying_selection() {
     let (mut browser, expected_paths) = browser_with_search_selection();
-    let third = browser.current_dir.join("third.txt");
+    let third = browser.tab().current_dir.join("third.txt");
     drop(browser.update_search_input("third".to_owned()));
     drop(browser.submit_search());
     let request = browser
@@ -240,8 +239,9 @@ fn right_click_targets_search_selection_without_mutating_underlying_selection() 
         browser.context_menu,
         Some(ContextMenuState::Search(ref menu)) if menu.target == third
     ));
-    assert_eq!(browser.selected_paths.len(), 1);
+    assert_eq!(browser.tab().selected_paths.len(), 1);
     assert!(browser
+        .tab()
         .selected_paths
         .contains(Path::new("/underlying-browser-selection")));
 }

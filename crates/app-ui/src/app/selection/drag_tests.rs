@@ -130,8 +130,8 @@ fn drag_action_capsule_label_follows_target_and_intent() {
     assert!(browser.file_drag_action_capsule_label().is_none());
 
     // entries 为空时 sources 回退到 self.selected。
-    browser.selected = Some(source.clone());
-    browser.cursor_position = iced::Point::new(0.0, 0.0);
+    browser.tab_mut().selected = Some(source.clone());
+    browser.cursor_position = Some(iced::Point::new(0.0, 0.0));
     drop(browser.start_file_drag(
         source.clone(),
         FileDragStationaryAction::SelectionOnly,
@@ -229,7 +229,7 @@ fn drag_action_capsule_shows_when_batch_partially_no_op() {
     browser.file_drag = Some(crate::model::FileDragState {
         gesture_id: crate::model::FileDragGestureId(1),
         source_pane_id: browser.active_pane_id(),
-        source_tab_id: browser.active_tab_id,
+        source_tab_id: browser.active_tab_id(),
         sources: vec![folder.clone(), sibling.clone()],
         pressed_path: sibling.clone(),
         bookmark_source: None,
@@ -375,8 +375,8 @@ fn activation_hands_file_drag_to_native_wayland_session() {
         controller: desktop_linux::WaylandDndController::new(),
     });
     let source = PathBuf::from("/workspace/report.txt");
-    browser.selected = Some(source.clone());
-    browser.cursor_position = iced::Point::new(0.0, 0.0);
+    browser.tab_mut().selected = Some(source.clone());
+    browser.cursor_position = Some(iced::Point::new(0.0, 0.0));
     drop(browser.start_file_drag(source, FileDragStationaryAction::SelectionOnly, Vec::new()));
 
     drop(browser.update_file_drag(iced::Point::new(10.0, 0.0)));
@@ -398,8 +398,8 @@ fn activation_hands_file_drag_to_native_wayland_session() {
 fn activation_without_wayland_runtime_falls_back_to_iced_drag() {
     let (mut browser, _) = crate::app::FileBrowser::new(crate::config::default_user_config());
     let source = PathBuf::from("/workspace/report.txt");
-    browser.selected = Some(source.clone());
-    browser.cursor_position = iced::Point::new(0.0, 0.0);
+    browser.tab_mut().selected = Some(source.clone());
+    browser.cursor_position = Some(iced::Point::new(0.0, 0.0));
     drop(browser.start_file_drag(source, FileDragStationaryAction::SelectionOnly, Vec::new()));
 
     drop(browser.update_file_drag(iced::Point::new(10.0, 0.0)));
@@ -422,8 +422,8 @@ fn activation_without_wayland_runtime_falls_back_to_iced_drag() {
 fn preview_offsets_fill_while_waiting_for_movement() {
     let (mut browser, _) = crate::app::FileBrowser::new(crate::config::default_user_config());
     let source = PathBuf::from("/workspace/report.txt");
-    browser.selected = Some(source.clone());
-    browser.cursor_position = iced::Point::new(20.0, 30.0);
+    browser.tab_mut().selected = Some(source.clone());
+    browser.cursor_position = Some(iced::Point::new(20.0, 30.0));
     drop(browser.start_file_drag(
         source.clone(),
         FileDragStationaryAction::SelectionOnly,

@@ -45,8 +45,10 @@ pub struct StoredUserPreferences {
     pub terminal_shell: Option<String>,
     pub file_operation_verification: String,
     pub browser_view_mode: String,
-    #[serde(default = "default_icon_grid_size")]
-    pub icon_grid_size: u32,
+    /// 旧版本用边长而不是档位保存图标大小。只读：`icons_view_density` 缺失时
+    /// 由读取端换算成档位，写回时不再出现这个键。
+    #[serde(default, skip_serializing)]
+    pub icon_grid_size: Option<u32>,
     #[serde(default)]
     pub columns_view_density: Option<u8>,
     #[serde(default)]
@@ -197,7 +199,7 @@ impl Default for StoredUserPreferences {
             terminal_shell: None,
             file_operation_verification: "basic_metadata".to_owned(),
             browser_view_mode: "columns".to_owned(),
-            icon_grid_size: default_icon_grid_size(),
+            icon_grid_size: None,
             columns_view_density: Some(DEFAULT_VIEW_DENSITY_INDEX),
             list_view_density: Some(DEFAULT_VIEW_DENSITY_INDEX),
             icons_view_density: Some(DEFAULT_VIEW_DENSITY_INDEX),
@@ -362,10 +364,6 @@ fn default_color_scheme() -> String {
 
 fn default_language_setting() -> String {
     "system".to_owned()
-}
-
-fn default_icon_grid_size() -> u32 {
-    96
 }
 
 fn default_visible_column_count() -> u32 {

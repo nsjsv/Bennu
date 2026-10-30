@@ -8,7 +8,7 @@ use crate::operation_history::{
     CompletedPathMigration,
 };
 
-use super::browser_panes::migrate_directory_entries;
+use super::path_migration::migrate_directory_entries;
 use super::{
     BrowserPaneId, ExpandedDirectory, ExpandedDirectoryStatus, IconGridExpansionSessionId,
 };

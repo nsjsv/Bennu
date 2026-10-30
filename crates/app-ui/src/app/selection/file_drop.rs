@@ -33,8 +33,11 @@ impl FileBrowser {
         position: Point,
     ) -> Task<Message> {
         self.clear_file_drop_visuals();
-        let request =
-            self.next_file_drop_layout_request(identity, self.active_pane_id(), self.active_tab_id);
+        let request = self.next_file_drop_layout_request(
+            identity,
+            self.active_pane_id(),
+            self.active_tab_id(),
+        );
         self.file_drop_session = Some(FileDropSessionState {
             identity,
             origin: FileDropOrigin::External,
@@ -63,7 +66,7 @@ impl FileBrowser {
             return Task::none();
         }
         session.position = Some(position);
-        self.cursor_position = position;
+        self.cursor_position = Some(position);
         // 内部原生拖放没有指针移动事件,边缘自动滚改由 Moved 事件重算;
         // 外部拖入悬停不自动滚(与现状一致)。
         if matches!(session.origin, FileDropOrigin::Internal(_)) {
@@ -100,7 +103,7 @@ impl FileBrowser {
         session.tab_hover = None;
         if let Some(position) = position {
             session.position = Some(position);
-            self.cursor_position = position;
+            self.cursor_position = Some(position);
         } else {
             session.position = None;
             session.frozen_drop_target = Some(FrozenFileDropTarget::Rejected);
@@ -149,14 +152,17 @@ impl FileBrowser {
             return Task::none();
         };
         let identity = FileDropSessionIdentity::Iced(file_drag.gesture_id);
-        let request =
-            self.next_file_drop_layout_request(identity, self.active_pane_id(), self.active_tab_id);
+        let request = self.next_file_drop_layout_request(
+            identity,
+            self.active_pane_id(),
+            self.active_tab_id(),
+        );
         self.file_drop_session = Some(FileDropSessionState {
             identity,
             origin: FileDropOrigin::Internal(snapshot),
             phase: FileDropSessionPhase::Hovering,
             layout: FileDropLayoutState::Pending(request),
-            position: Some(self.cursor_position),
+            position: self.cursor_position,
             hovered_target: None,
             tab_hover: None,
             hover_generation: 0,
@@ -222,7 +228,7 @@ impl FileBrowser {
         if !pending_matches && !scroll_refresh_matches {
             return Task::none();
         }
-        if self.active_pane_id() != request.pane_id || self.active_tab_id != request.tab_id {
+        if self.active_pane_id() != request.pane_id || self.active_tab_id() != request.tab_id {
             // 硬失效期间 pane/tab 已切换说明会话上下文作废,整段取消;
             // 滚动刷新是拖拽中的后台换代,上下文不变,不一致只说明过期。
             if pending_matches {
@@ -372,7 +378,7 @@ impl FileBrowser {
     }
 
     pub(in crate::app) fn remeasure_active_file_drop_layout(&mut self) -> Task<Message> {
-        self.request_file_drop_layout_measurement(self.active_pane_id(), self.active_tab_id)
+        self.request_file_drop_layout_measurement(self.active_pane_id(), self.active_tab_id())
     }
 
     /// 滚动偏移变化是软失效:条目映射不变,只有屏幕坐标过期。保持
@@ -399,8 +405,11 @@ impl FileBrowser {
             return Task::none();
         }
         let identity = session.identity.clone();
-        let request =
-            self.next_file_drop_layout_request(identity, self.active_pane_id(), self.active_tab_id);
+        let request = self.next_file_drop_layout_request(
+            identity,
+            self.active_pane_id(),
+            self.active_tab_id(),
+        );
         if let Some(session) = &mut self.file_drop_session {
             session.scroll_refresh_in_flight = Some(request.clone());
         }
@@ -730,12 +739,9 @@ impl FileBrowser {
     }
 
     fn tab_file_drop_target_is_selectable(&self, target: &TabFileDropTarget) -> bool {
-        let tab = if target.pane_id == self.active_pane_id() {
-            self.tabs.iter().find(|tab| tab.id == target.tab_id)
-        } else {
-            self.pane_by_id(target.pane_id)
-                .and_then(|pane| pane.tabs.iter().find(|tab| tab.id == target.tab_id))
-        };
+        let tab = self
+            .pane_by_id(target.pane_id)
+            .and_then(|pane| pane.tabs.iter().find(|tab| tab.id == target.tab_id));
         tab.is_some_and(|tab| {
             !self.tab_is_closing_for_file_drop(target.tab_id)
                 && tab.file_drop_destination() == target.destination
@@ -743,7 +749,7 @@ impl FileBrowser {
     }
 
     fn tab_file_drop_target_is_current(&self, target: &TabFileDropTarget) -> bool {
-        target.pane_id == self.active_pane_id() && target.tab_id == self.active_tab_id
+        target.pane_id == self.active_pane_id() && target.tab_id == self.active_tab_id()
     }
 
     fn update_file_drop_visuals(&mut self, target: Option<&FileDropTarget>) {

@@ -449,7 +449,7 @@ fn sidebar_network_connection_item<'a>(
 
 fn sidebar_trash_item(browser: &FileBrowser) -> Element<'_, Message> {
     let trash_path = trash_location_path();
-    let trash_presentation = if browser.is_trash_view {
+    let trash_presentation = if browser.tab().is_trash_view {
         SidebarPresentation::Selected
     } else if browser.hovered_sidebar.as_ref() == Some(&trash_path) {
         SidebarPresentation::Hovered
@@ -496,7 +496,7 @@ fn sidebar_message_row(message: String) -> Element<'static, Message> {
 }
 
 fn sidebar_presentation(browser: &FileBrowser, location: &SidebarLocation) -> SidebarPresentation {
-    if !browser.is_trash_view && location.path == browser.current_dir {
+    if !browser.tab().is_trash_view && location.path == browser.tab().current_dir {
         SidebarPresentation::Selected
     } else if browser.hovered_sidebar.as_ref() == Some(&location.path) {
         SidebarPresentation::Hovered

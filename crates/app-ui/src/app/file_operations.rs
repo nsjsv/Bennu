@@ -277,7 +277,7 @@ impl FileBrowser {
         match (after, created_path.clone()) {
             (Some(AdvancedNewFolderAfter::Enter), Some(path)) => {
                 // 多栏视图:在另一栏打开新文件夹;其他视图:直接进入。
-                if self.view_mode == BrowserViewMode::Columns {
+                if self.tab().view_mode == BrowserViewMode::Columns {
                     tasks.push(self.open_column_for_directory(path));
                 } else {
                     tasks.push(self.navigate_to(path, NavigationMode::RecordHistory));
@@ -423,6 +423,7 @@ impl FileBrowser {
             pane_reload_task,
             trash_batch_rescan_task,
             self.continue_file_operation_persistence(),
+            self.launch_ready_driver(),
         ])
         .chain(Task::batch(tasks))
     }
@@ -464,8 +465,10 @@ impl FileBrowser {
             .unwrap_or_else(Task::none)
     }
 
-    /// update 出口统一签发驱动者(Task::stream);无待签发任务时为空操作。
-    pub(super) fn poll_driver_command(&mut self) -> Task<Message> {
+    /// 队列状态转换后签发驱动者(Task::stream)。凡是能让任务进入
+    /// Running/Canceling 的入口（入队、终结、取消、写库回执、监督 tick、
+    /// 启动恢复）都在转换当处调用；无待签发任务时为空操作。
+    pub(super) fn launch_ready_driver(&mut self) -> Task<Message> {
         self.operation_queue
             .poll_driver_launch()
             .map(file_operation_driver_task)
@@ -496,14 +499,10 @@ impl FileBrowser {
             self.clear_icon_grid_expansion();
         }
 
-        self.sync_active_tab_state();
         for pane in &mut self.panes {
-            pane.sync_active_tab_state();
             pane.migrate_completed_paths(migrations);
         }
-        if let Some(active_pane) = self.pane_by_id(self.active_pane_id()).cloned() {
-            self.apply_pane_browsing_snapshot(active_pane);
-        }
+        self.entries_replaced();
         self.column_return_targets = self
             .column_return_targets
             .drain()
@@ -526,11 +525,16 @@ impl FileBrowser {
             }
         }
 
-        Task::none()
+        self.follow_terminal_panel_directory();
+        self.clamp_visible_pane_viewports()
     }
 
     pub(super) fn commit_rename(&mut self) -> Task<Message> {
-        let Some(path) = self.renaming.clone().or_else(|| self.selected.clone()) else {
+        let Some(path) = self
+            .renaming
+            .clone()
+            .or_else(|| self.tab().selected.clone())
+        else {
             return Task::none();
         };
 
@@ -611,7 +615,7 @@ impl FileBrowser {
     }
 
     pub(super) fn begin_rename(&mut self, path: PathBuf) -> Task<Message> {
-        if self.is_trash_view {
+        if self.tab().is_trash_view {
             return Task::none();
         }
 
@@ -627,7 +631,7 @@ impl FileBrowser {
         if !self.file_browser_content_shortcuts_enabled() {
             return Task::none();
         }
-        let Some(path) = self.selected.clone() else {
+        let Some(path) = self.tab().selected.clone() else {
             return Task::none();
         };
         self.begin_rename(path)
@@ -709,7 +713,10 @@ impl FileBrowser {
                 }
             }
         }
-        self.continue_file_operation_persistence()
+        Task::batch([
+            self.continue_file_operation_persistence(),
+            self.launch_ready_driver(),
+        ])
     }
     fn focus_after_file_operation_removal(
         &mut self,
@@ -749,6 +756,8 @@ fn focus_rename_input_command() -> Task<Message> {
 
 #[cfg(test)]
 mod created_entry_tests;
+#[cfg(test)]
+mod driver_launch_tests;
 #[cfg(test)]
 mod path_migration_tests;
 #[cfg(test)]

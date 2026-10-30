@@ -34,7 +34,7 @@ pub(super) fn tab_bar<'a>(
             browser,
             pane.id,
             tab.id,
-            tab.directory.as_path(),
+            tab.current_dir.as_path(),
             tab.is_trash_view,
             tab.file_drop_destination(),
             tab.id == pane.active_tab_id,

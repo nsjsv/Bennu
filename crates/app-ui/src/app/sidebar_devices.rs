@@ -13,7 +13,7 @@ use crate::sidebar_devices::{
 impl FileBrowser {
     pub(crate) fn sidebar_device_is_selected(&self, id: &StorageDeviceId) -> bool {
         self.sidebar_devices
-            .selected_device_id(&self.current_dir)
+            .selected_device_id(&self.tab().current_dir)
             .is_some_and(|selected_id| selected_id == id)
     }
 
@@ -119,7 +119,7 @@ impl FileBrowser {
             self.context_menu = Some(ContextMenuState::SidebarDevice(
                 SidebarDeviceContextMenuState {
                     device,
-                    position: self.cursor_position,
+                    position: self.cursor_or_origin(),
                 },
             ));
         }

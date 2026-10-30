@@ -166,13 +166,12 @@ fn invalid_theme_selection_falls_back_to_current_defaults() {
 }
 
 #[test]
-fn density_levels_roundtrip_independently_with_icon_mirror() {
+fn density_levels_roundtrip_independently() {
     let default = default_user_config();
     let mut config = default.clone();
     config.columns_view_density = ViewDensityLevel::from_index(1);
     config.list_view_density = ViewDensityLevel::from_index(4);
     config.icons_view_density = ViewDensityLevel::from_index(6);
-    config.icon_grid_size = config.icons_view_density.icon_grid_size();
 
     let stored = config.user_preferences().to_stored();
     assert_eq!(
@@ -180,54 +179,61 @@ fn density_levels_roundtrip_independently_with_icon_mirror() {
             stored.columns_view_density,
             stored.list_view_density,
             stored.icons_view_density,
-            stored.icon_grid_size,
         ),
-        (Some(1), Some(4), Some(6), 160)
+        (Some(1), Some(4), Some(6))
     );
 
     let restored = UserPreferences::from_stored(stored, &default).preferences;
     assert_eq!(restored.columns_view_density.index(), 1);
     assert_eq!(restored.list_view_density.index(), 4);
     assert_eq!(restored.icons_view_density.index(), 6);
-    assert_eq!(restored.icon_grid_size, 160);
 }
 
 #[test]
 fn density_boundary_migrates_legacy_values_and_clamps_new_indexes() {
     let default = default_user_config();
-    let mut legacy_config = default.clone();
-    legacy_config.icon_grid_size = 160;
-    assert_eq!(
-        legacy_config.user_preferences().icons_view_density.index(),
-        6
-    );
 
     let mut stored = default.user_preferences().to_stored();
     stored.columns_view_density = None;
     stored.list_view_density = None;
     stored.icons_view_density = None;
-    stored.icon_grid_size = 120;
+    stored.icon_grid_size = Some(120);
     let migrated = UserPreferences::from_stored(stored, &default).preferences;
     assert_eq!(migrated.columns_view_density, ViewDensityLevel::DEFAULT);
     assert_eq!(migrated.list_view_density, ViewDensityLevel::DEFAULT);
     assert_eq!(migrated.icons_view_density.index(), 4);
-    assert_eq!(migrated.icon_grid_size, 128);
 
     let mut stored = migrated.to_stored();
     stored.columns_view_density = Some(u8::MAX);
     stored.list_view_density = Some(0);
     stored.icons_view_density = Some(u8::MAX);
-    stored.icon_grid_size = 64;
     let normalized = UserPreferences::from_stored(stored, &default).preferences;
     assert_eq!(normalized.columns_view_density.index(), 8);
     assert_eq!(normalized.list_view_density.index(), 0);
     assert_eq!(normalized.icons_view_density.index(), 8);
-    assert_eq!(normalized.to_stored().icon_grid_size, 192);
 
     let mut stored = normalized.to_stored();
     stored.icons_view_density = Some(1);
-    stored.icon_grid_size = 192;
+    stored.icon_grid_size = Some(192);
     let preferred = UserPreferences::from_stored(stored, &default).preferences;
     assert_eq!(preferred.icons_view_density.index(), 1);
-    assert_eq!(preferred.icon_grid_size, 80);
+}
+
+#[test]
+fn legacy_icon_grid_size_is_read_but_never_written_back() {
+    let default = default_user_config();
+    let mut legacy = serde_json::to_value(default.user_preferences().to_stored())
+        .expect("serialize stored preferences");
+    let object = legacy.as_object_mut().expect("preferences object");
+    object.remove("icons_view_density");
+    object.insert("icon_grid_size".to_owned(), 160.into());
+    let stored: StoredUserPreferences =
+        serde_json::from_value(legacy).expect("legacy preferences parse");
+
+    let migrated = UserPreferences::from_stored(stored, &default).preferences;
+    assert_eq!(migrated.icons_view_density.index(), 6);
+
+    let rewritten = serde_json::to_value(migrated.to_stored()).expect("serialize migrated");
+    assert!(rewritten.get("icon_grid_size").is_none());
+    assert_eq!(rewritten["icons_view_density"], 6);
 }

@@ -43,9 +43,9 @@ fn loaded_directory(entries: Vec<DirectoryEntry>) -> ExpandedDirectory {
 
 fn browser_with_entries(entries: Vec<DirectoryEntry>) -> FileBrowser {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = PathBuf::from("/workspace");
-    browser.directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
-    browser.entries = entries.into();
+    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
+    browser.tab_mut().entries = entries.into();
     browser
 }
 
@@ -59,7 +59,7 @@ fn dragging_upper_column_entry_preserves_open_descendant_columns_after_release()
         test_entry(source.clone(), FileKind::File),
         test_entry(project.clone(), FileKind::Directory),
     ]);
-    browser.expanded_directories.insert(
+    browser.tab_mut().expanded_directories.insert(
         project.clone(),
         loaded_directory(vec![test_entry(
             source_directory.clone(),
@@ -67,15 +67,16 @@ fn dragging_upper_column_entry_preserves_open_descendant_columns_after_release()
         )]),
     );
     browser
+        .tab_mut()
         .expanded_directories
         .insert(source_directory.clone(), loaded_directory(Vec::new()));
-    browser.deepest_open_column_directory = Some(source_directory.clone());
+    browser.tab_mut().deepest_open_column_directory = Some(source_directory.clone());
     let open_columns = vec![root, project, source_directory.clone()];
 
     drop(browser.handle_column_entry_clicked(source));
 
     assert_eq!(
-        browser.deepest_open_column_directory,
+        browser.tab().deepest_open_column_directory,
         Some(source_directory.clone())
     );
     assert_eq!(
@@ -91,7 +92,7 @@ fn dragging_upper_column_entry_preserves_open_descendant_columns_after_release()
     drop(browser.finish_drag_selection(None));
 
     assert_eq!(
-        browser.deepest_open_column_directory,
+        browser.tab().deepest_open_column_directory,
         Some(source_directory)
     );
     assert_eq!(
@@ -107,18 +108,18 @@ fn stationary_upper_column_click_commits_new_column_context_on_release() {
     let project = root.join("project");
     let source_directory = project.join("src");
     let mut browser = browser_with_entries(vec![test_entry(source.clone(), FileKind::File)]);
-    browser.deepest_open_column_directory = Some(source_directory.clone());
+    browser.tab_mut().deepest_open_column_directory = Some(source_directory.clone());
 
     drop(browser.handle_column_entry_clicked(source));
 
     assert_eq!(
-        browser.deepest_open_column_directory,
+        browser.tab().deepest_open_column_directory,
         Some(source_directory)
     );
 
     drop(browser.finish_drag_selection(None));
 
-    assert_eq!(browser.deepest_open_column_directory, None);
+    assert_eq!(browser.tab().deepest_open_column_directory, None);
     assert_eq!(
         crate::three_column_view::column_directories(&browser),
         vec![root]
@@ -137,7 +138,7 @@ fn ctrl_and_shift_upper_column_selection_preserve_open_descendant_columns() {
         test_entry(second.clone(), FileKind::File),
         test_entry(project, FileKind::Directory),
     ]);
-    browser.deepest_open_column_directory = Some(source_directory.clone());
+    browser.tab_mut().deepest_open_column_directory = Some(source_directory.clone());
     browser.select_path(first.clone());
 
     browser.keyboard_modifiers = keyboard::Modifiers::CTRL;
@@ -146,7 +147,7 @@ fn ctrl_and_shift_upper_column_selection_preserve_open_descendant_columns() {
     drop(browser.handle_column_entry_clicked(first));
 
     assert_eq!(
-        browser.deepest_open_column_directory,
+        browser.tab().deepest_open_column_directory,
         Some(source_directory)
     );
 }
@@ -157,7 +158,7 @@ fn dragging_upper_column_blank_preserves_open_descendant_columns() {
     let project = current_dir.join("project");
     let source_directory = project.join("src");
     let mut browser = browser_with_entries(vec![test_entry(project.clone(), FileKind::Directory)]);
-    browser.deepest_open_column_directory = Some(source_directory.clone());
+    browser.tab_mut().deepest_open_column_directory = Some(source_directory.clone());
 
     drop(browser.start_column_blank_selection_marquee(current_dir.clone()));
     browser
@@ -169,7 +170,7 @@ fn dragging_upper_column_blank_preserves_open_descendant_columns() {
     drop(browser.finish_drag_selection(None));
 
     assert_eq!(
-        browser.deepest_open_column_directory,
+        browser.tab().deepest_open_column_directory,
         Some(source_directory.clone())
     );
     assert_eq!(
@@ -188,9 +189,9 @@ fn control_marquee_in_upper_column_preserves_open_descendant_columns() {
         test_entry(preserved.clone(), FileKind::File),
         test_entry(project.clone(), FileKind::Directory),
     ]);
-    browser.deepest_open_column_directory = Some(source_directory.clone());
-    browser.selected = Some(preserved.clone());
-    browser.selected_paths = HashSet::from([preserved.clone()]);
+    browser.tab_mut().deepest_open_column_directory = Some(source_directory.clone());
+    browser.tab_mut().selected = Some(preserved.clone());
+    browser.tab_mut().selected_paths = HashSet::from([preserved.clone()]);
     browser.keyboard_modifiers = keyboard::Modifiers::CTRL;
 
     drop(browser.start_column_blank_selection_marquee(project));
@@ -203,10 +204,10 @@ fn control_marquee_in_upper_column_preserves_open_descendant_columns() {
     drop(browser.finish_drag_selection(None));
 
     assert_eq!(
-        browser.deepest_open_column_directory,
+        browser.tab().deepest_open_column_directory,
         Some(source_directory)
     );
-    assert_eq!(browser.selected_paths, HashSet::from([preserved]));
+    assert_eq!(browser.tab().selected_paths, HashSet::from([preserved]));
 }
 
 #[test]
@@ -215,17 +216,20 @@ fn archive_root_column_blank_click_keeps_archive_column_chain() {
     let archive = current_dir.join("bundle.zip");
     let inner = archive.join("docs");
     let mut browser = browser_with_entries(vec![test_entry(archive.clone(), FileKind::File)]);
-    browser.expanded_directories.insert(
+    browser.tab_mut().expanded_directories.insert(
         archive.clone(),
         loaded_directory(vec![test_entry(inner.clone(), FileKind::Directory)]),
     );
-    browser.deepest_open_column_directory = Some(inner.clone());
+    browser.tab_mut().deepest_open_column_directory = Some(inner.clone());
 
     drop(browser.handle_column_blank_clicked(archive.clone()));
 
     // 包根在真实文件系统中是文件:空白点击必须收敛到包根栏,
     // 而不是清空栏目链退回原目录。
-    assert_eq!(browser.deepest_open_column_directory, Some(archive.clone()));
+    assert_eq!(
+        browser.tab().deepest_open_column_directory,
+        Some(archive.clone())
+    );
     assert_eq!(
         crate::three_column_view::column_directories(&browser),
         vec![current_dir, archive]
@@ -238,15 +242,18 @@ fn inside_archive_column_blank_click_collapses_to_inner_directory() {
     let archive = current_dir.join("bundle.zip");
     let inner = archive.join("docs");
     let mut browser = browser_with_entries(vec![test_entry(archive.clone(), FileKind::File)]);
-    browser.expanded_directories.insert(
+    browser.tab_mut().expanded_directories.insert(
         archive.clone(),
         loaded_directory(vec![test_entry(inner.clone(), FileKind::Directory)]),
     );
-    browser.deepest_open_column_directory = Some(inner.clone());
+    browser.tab_mut().deepest_open_column_directory = Some(inner.clone());
 
     drop(browser.handle_column_blank_clicked(inner.clone()));
 
-    assert_eq!(browser.deepest_open_column_directory, Some(inner.clone()));
+    assert_eq!(
+        browser.tab().deepest_open_column_directory,
+        Some(inner.clone())
+    );
     assert_eq!(
         crate::three_column_view::column_directories(&browser),
         vec![current_dir, archive, inner]

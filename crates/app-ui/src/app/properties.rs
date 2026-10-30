@@ -420,7 +420,7 @@ mod tests {
         let first = PathBuf::from("/workspace/first");
         let second = PathBuf::from("/workspace/second");
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.entries = vec![
+        browser.tab_mut().entries = vec![
             file_core::DirectoryEntry::new(
                 first.clone(),
                 FileKind::File,
@@ -439,8 +439,9 @@ mod tests {
             ),
         ]
         .into();
-        browser.selected = Some(first.clone());
-        browser.selected_paths = std::collections::HashSet::from([first.clone(), second.clone()]);
+        browser.tab_mut().selected = Some(first.clone());
+        browser.tab_mut().selected_paths =
+            std::collections::HashSet::from([first.clone(), second.clone()]);
 
         let _command = browser.open_selected_file_properties();
 

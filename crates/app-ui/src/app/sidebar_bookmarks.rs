@@ -147,10 +147,10 @@ impl FileBrowser {
             .unwrap_or(0);
         self.sidebar_bookmark_drag = Some(SidebarBookmarkDragState {
             path,
-            origin: self.cursor_position,
+            origin: self.cursor_or_origin(),
             source_index,
             phase: FileDragPhase::WaitingForMovement {
-                origin: self.cursor_position,
+                origin: self.cursor_or_origin(),
             },
             order_changed: false,
         });
@@ -181,7 +181,7 @@ impl FileBrowser {
         self.context_menu = Some(ContextMenuState::SidebarBookmark(
             SidebarBookmarkContextMenuState {
                 path,
-                position: self.cursor_position,
+                position: self.cursor_or_origin(),
             },
         ));
         rename_command
@@ -371,7 +371,7 @@ impl FileBrowser {
     }
 
     fn dragged_sidebar_bookmark_offset_for(&self, drag: &SidebarBookmarkDragState) -> f32 {
-        let cursor_offset = self.cursor_position.y - drag.origin.y;
+        let cursor_offset = self.cursor_or_origin().y - drag.origin.y;
         let favorites = self.sidebar_favorite_locations();
         let current_index = favorites
             .iter()

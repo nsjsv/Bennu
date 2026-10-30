@@ -97,7 +97,7 @@ impl FileBrowser {
             session.tab_hover = None;
             session.frozen_drop_target = None;
         }
-        self.request_file_drop_layout_measurement(self.active_pane_id(), self.active_tab_id)
+        self.request_file_drop_layout_measurement(self.active_pane_id(), self.active_tab_id())
     }
 
     pub(in crate::app) fn cancel_x11_file_drop_session(&mut self) {

@@ -133,7 +133,7 @@ mod tests {
         });
         browser.tab_drag = Some(TabDragState {
             source_pane_id: browser.active_pane_id(),
-            tab_id: browser.active_tab_id,
+            tab_id: browser.active_tab_id(),
             phase: FileDragPhase::Dragging,
             mode: TabDragMode::Reorder,
             split_target: None,
@@ -146,7 +146,7 @@ mod tests {
         browser.file_drag = Some(FileDragState {
             gesture_id: crate::model::FileDragGestureId(1),
             source_pane_id: browser.active_pane_id(),
-            source_tab_id: browser.active_tab_id,
+            source_tab_id: browser.active_tab_id(),
             sources: vec![path.clone()],
             pressed_path: path.clone(),
             bookmark_source: None,

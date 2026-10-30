@@ -9,7 +9,7 @@ use crate::model::Message;
 impl FileBrowser {
     pub(in crate::app) fn start_sqlite_tables_resize_drag(&mut self) -> Task<Message> {
         self.preview_engine
-            .start_sqlite_tables_resize_drag(self.cursor_position.x)
+            .start_sqlite_tables_resize_drag(self.cursor_or_origin().x)
             .map(Message::Preview)
     }
 

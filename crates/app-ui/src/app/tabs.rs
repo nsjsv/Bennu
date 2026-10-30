@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -6,9 +5,8 @@ use iced::Task;
 
 use super::FileBrowser;
 use crate::model::{
-    BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, ColumnBrowserViewport,
-    FileDragPhase, Message, NavigationMode, SplitAxis, SplitRegion, TabDragMode, TabDragState,
-    TabSplitTarget,
+    BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, BrowserViewMode, FileDragPhase,
+    Message, NavigationMode, SplitAxis, SplitRegion, TabDragMode, TabDragState, TabSplitTarget,
 };
 
 mod animation;
@@ -63,62 +61,24 @@ impl FileBrowser {
             return None;
         }
 
-        let tab = if drag.source_pane_id == self.active_pane_id() {
-            self.tabs.iter().find(|tab| tab.id == drag.tab_id)?
-        } else {
-            self.pane_by_id(drag.source_pane_id)?
-                .tabs
-                .iter()
-                .find(|tab| tab.id == drag.tab_id)?
-        };
+        let tab = self
+            .pane_by_id(drag.source_pane_id)?
+            .tabs
+            .iter()
+            .find(|tab| tab.id == drag.tab_id)?;
 
         Some(TabDragPreview {
-            directory: tab.directory.as_path(),
+            directory: tab.current_dir.as_path(),
             is_trash_view: tab.is_trash_view,
         })
     }
 
-    pub(super) fn sync_active_tab_state(&mut self) {
-        let Some(tab) = self
-            .tabs
-            .iter_mut()
-            .find(|tab| tab.id == self.active_tab_id)
-        else {
-            return;
-        };
-
-        tab.directory = self.current_dir.clone();
-        tab.is_trash_view = self.is_trash_view;
-        tab.entries = self.entries.clone();
-        tab.trash_entries = self.trash_entries.clone();
-        tab.selected = self.selected.clone();
-        tab.selected_paths = self.selected_paths.clone();
-        tab.selection_anchor = self.selection_anchor.clone();
-        tab.deepest_open_column_directory = self.deepest_open_column_directory.clone();
-        tab.expanded_directories = self.expanded_directories.clone();
-        tab.view_mode = self.view_mode;
-        tab.back_stack = self.back_stack.clone();
-        tab.forward_stack = self.forward_stack.clone();
-        self.sync_active_pane_state();
-    }
-
     pub(super) fn open_directory_in_new_tab(&mut self, directory: PathBuf) -> Task<Message> {
-        self.clear_icon_grid_expansion_for_context_change();
-        let cancel_address_editing = self.cancel_address_editing();
-        self.sync_active_tab_state();
-        self.context_menu = None;
-        self.preview_engine.clear_preview();
-
-        let tab_id = self.next_tab_id;
-        self.next_tab_id += 1;
-        self.tabs
-            .push(BrowserTab::directory(tab_id, directory.clone()));
-        self.start_tab_intro_animation(tab_id);
-
-        self.sync_tab_bar_visibility();
-        self.active_tab_id = tab_id;
-        self.back_stack.clear();
-        self.forward_stack.clear();
+        let cancel_address_editing = self.add_tab_and_activate(|id, view_mode| {
+            let mut tab = BrowserTab::directory(id, directory.clone());
+            tab.view_mode = view_mode;
+            tab
+        });
         Task::batch([
             cancel_address_editing,
             self.navigate_to(directory, NavigationMode::KeepHistory),
@@ -127,26 +87,39 @@ impl FileBrowser {
     }
 
     pub(super) fn open_trash_in_new_tab(&mut self) -> Task<Message> {
-        self.clear_icon_grid_expansion_for_context_change();
-        let cancel_address_editing = self.cancel_address_editing();
-        self.sync_active_tab_state();
-        self.context_menu = None;
-        self.preview_engine.clear_preview();
-
-        let tab_id = self.next_tab_id;
-        self.next_tab_id += 1;
-        self.tabs.push(BrowserTab::trash(tab_id));
-        self.start_tab_intro_animation(tab_id);
-
-        self.sync_tab_bar_visibility();
-        self.active_tab_id = tab_id;
-        self.back_stack.clear();
-        self.forward_stack.clear();
+        let cancel_address_editing = self.add_tab_and_activate(|id, view_mode| {
+            let mut tab = BrowserTab::trash(id);
+            tab.view_mode = view_mode;
+            tab
+        });
         Task::batch([
             cancel_address_editing,
             self.open_trash_view(NavigationMode::KeepHistory),
             self.request_browser_session_save(),
         ])
+    }
+
+    /// 在活动窗格末尾新增标签并切过去。新标签沿用当前标签的视图模式，
+    /// 目录由调用方随后导航。
+    fn add_tab_and_activate(
+        &mut self,
+        new_tab: impl FnOnce(usize, BrowserViewMode) -> BrowserTab,
+    ) -> Task<Message> {
+        self.clear_icon_grid_expansion_for_context_change();
+        let cancel_address_editing = self.cancel_address_editing();
+        self.context_menu = None;
+        self.preview_engine.clear_preview();
+
+        let tab_id = self.next_tab_id;
+        self.next_tab_id += 1;
+        let view_mode = self.tab().view_mode;
+        let pane = self.pane_mut();
+        pane.tabs.push(new_tab(tab_id, view_mode));
+        pane.activate_tab(tab_id);
+        self.start_tab_intro_animation(tab_id);
+        self.sync_tab_bar_visibility();
+        self.follow_terminal_panel_directory();
+        cancel_address_editing
     }
 
     pub(in crate::app) fn finish_tab_drag_from_captured_release(
@@ -161,8 +134,7 @@ impl FileBrowser {
     }
 
     pub(super) fn select_tab(&mut self, tab_id: usize) -> Task<Message> {
-        if tab_id == self.active_tab_id {
-            self.sync_active_tab_state();
+        if tab_id == self.pane().active_tab_id {
             return Task::none();
         }
         let Some(cancel_address_editing) = self.apply_tab_selection(tab_id) else {
@@ -194,30 +166,16 @@ impl FileBrowser {
     }
 
     fn apply_tab_selection(&mut self, tab_id: usize) -> Option<Task<Message>> {
-        if self.tab_is_closing(tab_id) {
+        if self.tab_is_closing(tab_id) || !self.pane().tabs.iter().any(|tab| tab.id == tab_id) {
             return None;
         }
-        let tab = self.tabs.iter().find(|tab| tab.id == tab_id).cloned()?;
 
         self.clear_icon_grid_expansion_for_context_change();
         let cancel_address_editing = self.cancel_address_editing();
-        self.sync_active_tab_state();
-        self.active_tab_id = tab.id;
+        self.pane_mut().activate_tab(tab_id);
+        self.entries_replaced();
         self.clear_column_interaction_context();
-        self.is_trash_view = tab.is_trash_view;
-        self.set_entries(tab.entries);
-        self.directory_discovery = tab.directory_discovery;
-        self.directory_loading_placeholder = None;
-        self.trash_entries = tab.trash_entries;
-        self.selected = tab.selected;
-        self.selected_paths = tab.selected_paths;
-        self.selection_anchor = tab.selection_anchor;
-        self.deepest_open_column_directory = tab.deepest_open_column_directory;
-        self.expanded_directories = tab.expanded_directories;
-        self.view_mode = tab.view_mode;
-        self.back_stack = tab.back_stack;
-        self.forward_stack = tab.forward_stack;
-        self.current_dir = tab.directory;
+        self.follow_terminal_panel_directory();
         Some(cancel_address_editing)
     }
 
@@ -226,10 +184,10 @@ impl FileBrowser {
             return Task::none();
         }
 
-        let Some(closing_index) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
+        let Some(closing_index) = self.pane().tabs.iter().position(|tab| tab.id == tab_id) else {
             return Task::none();
         };
-        let was_active = tab_id == self.active_tab_id;
+        let was_active = tab_id == self.pane().active_tab_id;
         self.invalidate_file_drop_for_tab_close();
 
         let drag_finish_task = if self
@@ -261,7 +219,7 @@ impl FileBrowser {
     pub(super) fn start_tab_drag(&mut self, pane_id: BrowserPaneId, tab_id: usize) {
         if pane_id != self.active_pane_id()
             || self.tab_is_closing(tab_id)
-            || !self.tabs.iter().any(|tab| tab.id == tab_id)
+            || !self.pane().tabs.iter().any(|tab| tab.id == tab_id)
         {
             return;
         }
@@ -275,7 +233,7 @@ impl FileBrowser {
             source_pane_id: pane_id,
             tab_id,
             phase: FileDragPhase::WaitingForMovement {
-                origin: self.cursor_position,
+                origin: self.cursor_or_origin(),
             },
             mode,
             split_target: None,
@@ -304,10 +262,11 @@ impl FileBrowser {
             return Task::none();
         }
 
-        let Some(dragged_index) = self.tabs.iter().position(|tab| tab.id == dragged_tab_id) else {
+        let tabs = &self.pane().tabs;
+        let Some(dragged_index) = tabs.iter().position(|tab| tab.id == dragged_tab_id) else {
             return self.finish_tab_drag();
         };
-        let Some(entered_index) = self.tabs.iter().position(|tab| tab.id == entered_tab_id) else {
+        let Some(entered_index) = tabs.iter().position(|tab| tab.id == entered_tab_id) else {
             return Task::none();
         };
 
@@ -318,10 +277,10 @@ impl FileBrowser {
             -self.tab_reorder_slot_width()
         };
 
-        let dragged_tab = self.tabs.remove(dragged_index);
-        self.tabs.insert(entered_index, dragged_tab);
+        let tabs = &mut self.pane_mut().tabs;
+        let dragged_tab = tabs.remove(dragged_index);
+        tabs.insert(entered_index, dragged_tab);
         self.start_tab_reorder_animations(shifted_tab_ids, shift_offset);
-        self.sync_active_pane_state();
         // 标签顺序属于会话模型；重排落点必须标记保存，否则重启后顺序回退。
         self.request_browser_session_save()
     }
@@ -374,8 +333,6 @@ impl FileBrowser {
         tab_id: usize,
         region: SplitRegion,
     ) {
-        self.sync_active_tab_state();
-
         match self.pane_layout {
             BrowserPaneLayout::Single { .. } => {
                 self.split_single_pane_with_tab(source_pane_id, tab_id, region)
@@ -408,8 +365,7 @@ impl FileBrowser {
         let Some(tab) = self.detach_or_copy_tab(source_pane_id, tab_id) else {
             return;
         };
-        let destination = pane_from_tab(destination_id, tab);
-        self.panes.push(destination.clone());
+        self.panes.push(BrowserPane::new(destination_id, tab));
 
         let (first, second) = if region.places_dragged_first() {
             (destination_id, source_pane_id)
@@ -423,7 +379,7 @@ impl FileBrowser {
             active: destination_id,
             first_portion: 500,
         };
-        self.restore_pane_snapshot(destination);
+        self.reset_active_pane_context();
     }
 
     fn move_tab_to_split_side(
@@ -450,8 +406,7 @@ impl FileBrowser {
         if destination_id == source_pane_id {
             if let Some(source) = self.pane_by_id_mut(source_pane_id) {
                 if source.tabs.iter().any(|tab| tab.id == tab_id) {
-                    source.active_tab_id = tab_id;
-                    apply_active_tab_to_pane(source);
+                    source.activate_tab(tab_id);
                 }
             }
         } else {
@@ -459,9 +414,9 @@ impl FileBrowser {
                 return;
             };
             if let Some(destination) = self.pane_by_id_mut(destination_id) {
-                destination.tabs.push(tab.clone());
-                destination.active_tab_id = tab.id;
-                apply_tab_to_pane(destination, &tab);
+                let tab_id = tab.id;
+                destination.tabs.push(tab);
+                destination.activate_tab(tab_id);
             }
         }
 
@@ -487,9 +442,7 @@ impl FileBrowser {
             },
         };
 
-        if let Some(destination) = self.pane_by_id(destination_id).cloned() {
-            self.restore_pane_snapshot(destination);
-        }
+        self.reset_active_pane_context();
     }
 
     fn detach_or_copy_tab(
@@ -506,8 +459,8 @@ impl FileBrowser {
                 let tab = source.tabs.remove(tab_index);
                 if source.active_tab_id == tab_id {
                     let adjacent_index = tab_index.min(source.tabs.len() - 1);
-                    source.active_tab_id = source.tabs[adjacent_index].id;
-                    apply_active_tab_to_pane(source);
+                    let adjacent_id = source.tabs[adjacent_index].id;
+                    source.activate_tab(adjacent_id);
                 }
                 return Some(tab);
             }
@@ -520,7 +473,7 @@ impl FileBrowser {
     }
 
     pub(super) fn sync_tab_bar_visibility(&mut self) {
-        if self.tabs.len() > 1 {
+        if self.pane().tabs.len() > 1 {
             self.reveal_tab_bar();
         } else {
             self.hide_tab_bar();
@@ -606,8 +559,9 @@ impl FileBrowser {
         }
 
         for tab_id in closed_tab_ids {
-            if let Some(tab_index) = self.tabs.iter().position(|tab| tab.id == tab_id) {
-                self.tabs.remove(tab_index);
+            let tabs = &mut self.pane_mut().tabs;
+            if let Some(tab_index) = tabs.iter().position(|tab| tab.id == tab_id) {
+                tabs.remove(tab_index);
             }
             self.tab_animations.remove(&tab_id);
             if self
@@ -621,7 +575,6 @@ impl FileBrowser {
         }
 
         self.sync_tab_bar_visibility();
-        self.sync_active_pane_state();
         // 标签关闭后存活树变化：裁剪摘要缓存（内存上界机制）。
         self.prune_list_directory_summaries_to_live_roots();
     }
@@ -631,13 +584,14 @@ impl FileBrowser {
         dragged_index: usize,
         entered_index: usize,
     ) -> Vec<usize> {
+        let tabs = &self.pane().tabs;
         if dragged_index < entered_index {
-            self.tabs[dragged_index + 1..=entered_index]
+            tabs[dragged_index + 1..=entered_index]
                 .iter()
                 .map(|tab| tab.id)
                 .collect()
         } else {
-            self.tabs[entered_index..dragged_index]
+            tabs[entered_index..dragged_index]
                 .iter()
                 .map(|tab| tab.id)
                 .collect()
@@ -655,97 +609,42 @@ impl FileBrowser {
     }
 
     fn open_tab_count(&self) -> usize {
-        self.tabs
+        self.pane()
+            .tabs
             .iter()
             .filter(|tab| !self.tab_is_closing(tab.id))
             .count()
     }
 
     fn adjacent_open_tab_id(&self, closing_index: usize, closing_tab_id: usize) -> Option<usize> {
-        self.tabs[..closing_index]
+        let tabs = &self.pane().tabs;
+        tabs[..closing_index]
             .iter()
             .rev()
-            .chain(self.tabs[closing_index + 1..].iter())
+            .chain(tabs[closing_index + 1..].iter())
             .find(|tab| tab.id != closing_tab_id && !self.tab_is_closing(tab.id))
             .map(|tab| tab.id)
     }
 
     fn prune_tab_animations(&mut self) {
-        let visible_tab_ids = self.tabs.iter().map(|tab| tab.id).collect::<Vec<_>>();
+        let visible_tab_ids = self
+            .pane()
+            .tabs
+            .iter()
+            .map(|tab| tab.id)
+            .collect::<Vec<_>>();
         self.tab_animations.retain(|tab_id, animation| {
             visible_tab_ids.contains(tab_id) && animation.is_animating()
         });
     }
 
     fn tab_reorder_slot_width(&self) -> f32 {
-        let tab_count = self.tabs.len().max(1) as f32;
+        let tab_count = self.pane().tabs.len().max(1) as f32;
         let available_width = self.pane_content_width()
             - TAB_REORDER_HORIZONTAL_PADDING
             - TAB_REORDER_SPACING * (tab_count - 1.0);
         (available_width / tab_count).max(TAB_REORDER_MIN_SLOT_WIDTH)
     }
-}
-
-fn pane_from_tab(pane_id: BrowserPaneId, tab: BrowserTab) -> BrowserPane {
-    let mut pane = BrowserPane {
-        id: pane_id,
-        current_dir: tab.directory.clone(),
-        is_trash_view: tab.is_trash_view,
-        entries: tab.entries.clone(),
-        directory_discovery: tab.directory_discovery.clone(),
-        directory_loading_placeholder: None,
-        trash_entries: tab.trash_entries.clone(),
-        selected: tab.selected.clone(),
-        selected_paths: tab.selected_paths.clone(),
-        selection_anchor: tab.selection_anchor.clone(),
-        deepest_open_column_directory: tab.deepest_open_column_directory.clone(),
-        expanded_directories: tab.expanded_directories.clone(),
-        view_mode: tab.view_mode,
-        column_browser_viewport: ColumnBrowserViewport::default(),
-        column_viewports: HashMap::new(),
-        tabs: vec![tab.clone()],
-        active_tab_id: tab.id,
-        directory_load_generation: 0,
-        directory_load_cancel: None,
-        back_stack: tab.back_stack.clone(),
-        forward_stack: tab.forward_stack.clone(),
-        directory_collection_phase: tab.directory_collection_phase,
-        directory_order_phase: tab.directory_order_phase,
-    };
-    pane.sync_active_tab_state();
-    pane
-}
-
-pub(super) fn apply_active_tab_to_pane(pane: &mut BrowserPane) {
-    let Some(tab) = pane
-        .tabs
-        .iter()
-        .find(|tab| tab.id == pane.active_tab_id)
-        .cloned()
-    else {
-        return;
-    };
-    apply_tab_to_pane(pane, &tab);
-}
-
-pub(super) fn apply_tab_to_pane(pane: &mut BrowserPane, tab: &BrowserTab) {
-    pane.current_dir = tab.directory.clone();
-    pane.is_trash_view = tab.is_trash_view;
-    pane.entries = tab.entries.clone();
-    pane.directory_discovery = tab.directory_discovery.clone();
-    pane.directory_loading_placeholder = None;
-    pane.trash_entries = tab.trash_entries.clone();
-    pane.selected = tab.selected.clone();
-    pane.selected_paths = tab.selected_paths.clone();
-    pane.selection_anchor = tab.selection_anchor.clone();
-    pane.deepest_open_column_directory = tab.deepest_open_column_directory.clone();
-    pane.expanded_directories = tab.expanded_directories.clone();
-    pane.view_mode = tab.view_mode;
-    pane.back_stack = tab.back_stack.clone();
-    pane.forward_stack = tab.forward_stack.clone();
-    pane.directory_collection_phase = tab.directory_collection_phase;
-    pane.directory_order_phase = tab.directory_order_phase;
-    pane.sync_active_tab_state();
 }
 
 #[cfg(test)]
@@ -758,8 +657,9 @@ mod drag_session_save_tests {
         config.startup_location_policy = config::StartupLocationPolicy::PreviousSession;
         config.save_view_state = config.startup_location_policy.saves_view_state();
         let (mut browser, _) = FileBrowser::new(config);
-        browser.active_tab_id = tabs[0].id;
-        browser.tabs = tabs;
+        let pane = browser.pane_mut();
+        pane.active_tab_id = tabs[0].id;
+        pane.tabs = tabs;
         browser
     }
 
@@ -827,7 +727,7 @@ mod drag_session_save_tests {
 
         drop(browser.reorder_dragged_tab(BrowserPaneId::PRIMARY, 0));
 
-        assert_eq!(browser.tabs[0].id, 1);
+        assert_eq!(browser.pane().tabs[0].id, 1);
         assert!(browser.pending_browser_session_save);
     }
 }

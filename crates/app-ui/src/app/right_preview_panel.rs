@@ -48,7 +48,10 @@ impl FileBrowser {
             self.right_preview_ratio_resize_drag = None;
         }
         self.user_config.right_preview_panel_open = self.right_preview_panel_open;
-        self.persist_user_preferences_command()
+        Task::batch([
+            self.persist_user_preferences_command(),
+            self.clamp_visible_pane_viewports(),
+        ])
     }
 
     /// D1 单点收敛:面板开启 ⇒ preview 状态与预览目标(活动窗格 `selected`,
@@ -62,7 +65,7 @@ impl FileBrowser {
         if !self.right_preview_panel_open {
             return Task::none();
         }
-        let Some(path) = self.selected.clone() else {
+        let Some(path) = self.tab().selected.clone() else {
             // 目标为空:清掉内容显示空态。clear_preview 自带固定守卫,
             // pin 住的独立窗口预览不会被此处误清。
             self.right_preview_panel_info = None;
@@ -129,7 +132,7 @@ impl FileBrowser {
         snapshot: Result<Box<crate::model::RightPreviewPanelInfoSnapshot>, String>,
     ) {
         // 只有快照仍对应当前预览目标才落地,防陈旧回写。
-        if self.selected.as_deref() != Some(path) {
+        if self.tab().selected.as_deref() != Some(path) {
             return;
         }
         self.right_preview_panel_info = match snapshot {
@@ -143,7 +146,7 @@ impl FileBrowser {
             return Task::none();
         }
         self.right_preview_panel_resize_drag = Some(RightPreviewPanelResizeDrag {
-            cursor_start_x: self.cursor_position.x,
+            cursor_start_x: self.cursor_or_origin().x,
             width_start: self.right_preview_panel_width,
         });
         self.drag_selection_anchor = None;
@@ -180,7 +183,7 @@ impl FileBrowser {
             return Task::none();
         }
         self.right_preview_ratio_resize_drag = Some(RightPreviewPanelRatioDrag {
-            cursor_start_y: self.cursor_position.y,
+            cursor_start_y: self.cursor_or_origin().y,
             ratio_start: self.right_preview_panel_effective_preview_ratio(),
         });
         self.drag_selection_anchor = None;
@@ -377,8 +380,8 @@ mod tests {
     fn sync_loads_selected_target_only_while_panel_is_open() {
         let path = PathBuf::from("/workspace/report.txt");
         let mut browser = panel_open_browser();
-        browser.entries = Arc::new(vec![test_file_entry(&path)]);
-        browser.selected = Some(path.clone());
+        browser.tab_mut().entries = Arc::new(vec![test_file_entry(&path)]);
+        browser.tab_mut().selected = Some(path.clone());
 
         drop(browser.sync_right_preview_panel());
 
@@ -419,10 +422,10 @@ mod tests {
         // 清空 → 再选中 A”时若只比较路径会误判“已一致”,面板停留在空态。
         let path = PathBuf::from("/workspace/report.txt");
         let mut browser = panel_open_browser();
-        browser.entries = Arc::new(vec![test_file_entry(&path)]);
+        browser.tab_mut().entries = Arc::new(vec![test_file_entry(&path)]);
         browser.preview_engine.preview_shown_path = Some(path.clone());
         browser.preview_engine.preview = None;
-        browser.selected = Some(path.clone());
+        browser.tab_mut().selected = Some(path.clone());
 
         drop(browser.sync_right_preview_panel());
 
@@ -438,7 +441,7 @@ mod tests {
         // 信息区仍显示目录条目;目标必须登记,否则每轮 update 重复清空。
         let folder = PathBuf::from("/workspace/Projects");
         let mut browser = panel_open_browser();
-        browser.entries = Arc::new(vec![DirectoryEntry::new(
+        browser.tab_mut().entries = Arc::new(vec![DirectoryEntry::new(
             folder.clone(),
             FileKind::Directory,
             EntryMetadata::default(),
@@ -446,7 +449,7 @@ mod tests {
             false,
             false,
         )]);
-        browser.selected = Some(folder.clone());
+        browser.tab_mut().selected = Some(folder.clone());
         browser.preview_engine.preview = Some(PreviewState::Error("previous".to_owned()));
 
         drop(browser.sync_right_preview_panel());
@@ -468,7 +471,7 @@ mod tests {
         let folder = PathBuf::from("/workspace/Projects");
         let file = PathBuf::from("/workspace/Projects/main.rs");
         let mut browser = panel_open_browser();
-        browser.entries = Arc::new(vec![
+        browser.tab_mut().entries = Arc::new(vec![
             DirectoryEntry::new(
                 folder.clone(),
                 FileKind::Directory,
@@ -479,11 +482,11 @@ mod tests {
             ),
             test_file_entry(&file),
         ]);
-        browser.selected = Some(folder);
+        browser.tab_mut().selected = Some(folder);
         drop(browser.sync_right_preview_panel());
         assert!(browser.preview_engine.preview.is_none());
 
-        browser.selected = Some(file.clone());
+        browser.tab_mut().selected = Some(file.clone());
         drop(browser.sync_right_preview_panel());
         assert!(matches!(
             browser.preview_engine.preview,
@@ -499,7 +502,7 @@ mod tests {
         browser.preview_engine.preview = Some(PreviewState::Ready(PreviewContent::Directory {
             entries: Vec::new(),
         }));
-        browser.selected = Some(path);
+        browser.tab_mut().selected = Some(path);
 
         drop(browser.sync_right_preview_panel());
 
@@ -513,7 +516,7 @@ mod tests {
     fn resize_drag_clamps_width_to_configured_bounds() {
         let mut browser = panel_open_browser();
         browser.right_preview_panel_width = 320.0;
-        browser.cursor_position = Point::new(600.0, 0.0);
+        browser.cursor_position = Some(Point::new(600.0, 0.0));
         drop(browser.start_right_preview_panel_resize_drag());
         // 指针右移 400px:宽度应收窄并夹在下限。
         browser.update_right_preview_panel_resize_drag(Point::new(1000.0, 0.0));
@@ -545,7 +548,7 @@ mod tests {
     fn ratio_drag_clamps_to_configured_bounds() {
         let mut browser = panel_open_browser();
         browser.right_preview_preview_ratio = 0.7;
-        browser.cursor_position = Point::new(0.0, 400.0);
+        browser.cursor_position = Some(Point::new(0.0, 400.0));
         drop(browser.start_right_preview_panel_ratio_resize_drag());
         // 指针大幅上移:比例压到存储下限。
         browser.update_right_preview_panel_ratio_resize_drag(Point::new(0.0, -100.0));
@@ -602,9 +605,10 @@ mod tests {
         let first = PathBuf::from("/workspace/a.txt");
         let second = PathBuf::from("/workspace/b.txt");
         let mut browser = panel_open_browser();
-        browser.entries = Arc::new(vec![test_file_entry(&first), test_file_entry(&second)]);
-        browser.selected_paths = HashSet::from([first.clone(), second.clone()]);
-        browser.selected = Some(second.clone());
+        browser.tab_mut().entries =
+            Arc::new(vec![test_file_entry(&first), test_file_entry(&second)]);
+        browser.tab_mut().selected_paths = HashSet::from([first.clone(), second.clone()]);
+        browser.tab_mut().selected = Some(second.clone());
 
         drop(browser.sync_right_preview_panel());
 
@@ -617,8 +621,8 @@ mod tests {
         // preview.is_some() 会误判“已显示”而永远打不开独立窗口。
         let path = PathBuf::from("/workspace/report.txt");
         let mut browser = panel_open_browser();
-        browser.entries = Arc::new(vec![test_file_entry(&path)]);
-        browser.selected = Some(path.clone());
+        browser.tab_mut().entries = Arc::new(vec![test_file_entry(&path)]);
+        browser.tab_mut().selected = Some(path.clone());
         browser.hovered_entry = Some(path.clone());
         drop(browser.sync_right_preview_panel());
         assert!(browser.preview_engine.preview.is_some());
@@ -638,7 +642,7 @@ mod tests {
     fn space_closes_active_standalone_preview_window() {
         let path = PathBuf::from("/workspace/report.txt");
         let mut browser = panel_open_browser();
-        browser.selected = Some(path.clone());
+        browser.tab_mut().selected = Some(path.clone());
         browser.hovered_entry = Some(path.clone());
         browser.preview_engine.preview_shown_path = Some(path.clone());
         browser.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
@@ -656,8 +660,8 @@ mod tests {
         // 开独立窗口;面板会话(无独立窗口)不被清空,而是切到独立窗口。
         let path = PathBuf::from("/workspace/report.txt");
         let mut browser = panel_open_browser();
-        browser.entries = Arc::new(vec![test_file_entry(&path)]);
-        browser.selected = Some(path.clone());
+        browser.tab_mut().entries = Arc::new(vec![test_file_entry(&path)]);
+        browser.tab_mut().selected = Some(path.clone());
         browser.preview_engine.preview_shown_path = Some(path.clone());
         browser.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
 

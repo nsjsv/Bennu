@@ -45,7 +45,7 @@ impl FileBrowser {
         }
 
         self.activate_pane(pane_id);
-        if self.is_trash_view {
+        if self.tab().is_trash_view {
             return Task::none();
         }
 
@@ -423,7 +423,7 @@ mod tests {
     #[test]
     fn cancellation_rejects_debounce_and_loaded_results() {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.current_dir = PathBuf::from("/tmp");
+        browser.tab_mut().current_dir = PathBuf::from("/tmp");
         let _ = browser.begin_address_editing(BrowserPaneId::PRIMARY);
         let session = &mut browser
             .address_editing
@@ -464,9 +464,9 @@ mod tests {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
         let current_dir = PathBuf::from("/workspace");
         let deepest_open_directory = current_dir.join("project/src");
-        browser.current_dir = current_dir;
-        browser.view_mode = crate::model::BrowserViewMode::Columns;
-        browser.deepest_open_column_directory = Some(deepest_open_directory.clone());
+        browser.tab_mut().current_dir = current_dir;
+        browser.tab_mut().view_mode = crate::model::BrowserViewMode::Columns;
+        browser.tab_mut().deepest_open_column_directory = Some(deepest_open_directory.clone());
 
         let _ = browser.begin_address_editing(BrowserPaneId::PRIMARY);
 
@@ -481,13 +481,16 @@ mod tests {
         let _ = browser.update_address_draft(BrowserPaneId::PRIMARY, "child".to_owned());
         let _ = browser.submit_address_editing(BrowserPaneId::PRIMARY);
 
-        assert_eq!(browser.current_dir, deepest_open_directory.join("child"));
+        assert_eq!(
+            browser.tab().current_dir,
+            deepest_open_directory.join("child")
+        );
     }
 
     #[test]
     fn trash_view_never_begins_address_editing() {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.is_trash_view = true;
+        browser.tab_mut().is_trash_view = true;
 
         let _ = browser.begin_address_editing(BrowserPaneId::PRIMARY);
 

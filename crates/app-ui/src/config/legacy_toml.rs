@@ -136,7 +136,6 @@ pub(super) fn parse_toml_user_config(content: &str, default: UserConfig) -> User
         .and_then(|size| u32::try_from(size).ok())
     {
         config.icons_view_density = ViewDensityLevel::from_icon_grid_size(size);
-        config.icon_grid_size = config.icons_view_density.icon_grid_size();
     }
     if let Some(level) = parse_toml_view_density(&document, COLUMNS_VIEW_DENSITY_KEY) {
         config.columns_view_density = level;
@@ -146,7 +145,6 @@ pub(super) fn parse_toml_user_config(content: &str, default: UserConfig) -> User
     }
     if let Some(level) = parse_toml_view_density(&document, ICONS_VIEW_DENSITY_KEY) {
         config.icons_view_density = level;
-        config.icon_grid_size = level.icon_grid_size();
     }
     startup::apply_toml_startup_config(&mut config, &document);
     if let Some(table) = document.get(SHORTCUTS_KEY).and_then(toml::Value::as_table) {

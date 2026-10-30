@@ -69,7 +69,6 @@ fn ctrl_wheel_on_icon_grid_changes_level_without_starting_scroll() {
 
     assert_eq!(browser.user_config.icons_view_density.index(), 3);
     assert_eq!(browser.user_config.icons_icon_edge(), 112);
-    assert_eq!(browser.user_config.icon_grid_size, 112);
     assert!(!browser.smooth_scroll.is_active());
 }
 

@@ -17,7 +17,7 @@ impl FileBrowser {
         }
 
         self.sidebar_resize_drag = Some(SidebarResizeDrag {
-            cursor_start_x: self.cursor_position.x,
+            cursor_start_x: self.cursor_or_origin().x,
             width_start: self.sidebar_width,
         });
         self.drag_selection_anchor = None;

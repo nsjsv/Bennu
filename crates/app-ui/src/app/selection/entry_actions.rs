@@ -29,7 +29,7 @@ impl FileBrowser {
     /// 目标一律绝对路径;gvfs 等远程挂载路径由菜单 gating 拦下。
     pub(in crate::app) fn create_symlinks_for_selection(&mut self) -> Task<Message> {
         self.context_menu = None;
-        if self.is_trash_view {
+        if self.tab().is_trash_view {
             return Task::none();
         }
         let sources = self.active_file_selection();

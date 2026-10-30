@@ -185,7 +185,7 @@ impl FileBrowser {
             );
         }
 
-        if anchor.parent_directory == self.current_dir {
+        if anchor.parent_directory == self.tab().current_dir {
             if self.icon_grid_expansion.is_some() {
                 let (hidden_paths, closed_immediately, fallback) = {
                     let state = self
@@ -229,14 +229,14 @@ impl FileBrowser {
     fn start_icon_grid_root(&mut self, anchor: IconGridExpansionAnchor) -> Task<Message> {
         let pane_id = self.active_pane_id();
         if !self.icon_grid_anchor_is_valid(pane_id, &anchor)
-            || anchor.parent_directory != self.current_dir
+            || anchor.parent_directory != self.tab().current_dir
         {
             return Task::none();
         }
 
         let context = IconGridExpansionContext {
             pane_id,
-            current_dir: self.current_dir.clone(),
+            current_dir: self.tab().current_dir.clone(),
             session_id: self.next_icon_grid_expansion_session_id(),
         };
         let mut expanded = loading_icon_grid_directory();
@@ -332,14 +332,14 @@ impl FileBrowser {
     }
 
     pub(super) fn prepare_icon_grid_entry_interaction(&mut self, path: &Path) -> Task<Message> {
-        if self.view_mode != BrowserViewMode::Icons {
+        if self.tab().view_mode != BrowserViewMode::Icons {
             return Task::none();
         }
         self.cancel_expansion_follow_plans();
         let parent_directory = path
             .parent()
             .map(Path::to_path_buf)
-            .unwrap_or_else(|| self.current_dir.clone());
+            .unwrap_or_else(|| self.tab().current_dir.clone());
         let path_belongs_to_tree = self.icon_grid_expansion.as_mut().is_some_and(|state| {
             let belongs = state.contains_tree_path(path);
             state.set_selection_directory(&parent_directory);
@@ -561,7 +561,7 @@ impl FileBrowser {
 
     pub(super) fn reconcile_icon_grid_root_after_scan(&mut self, entries: &[DirectoryEntry]) {
         let pane_id = self.active_pane_id();
-        let current_dir = self.current_dir.clone();
+        let current_dir = self.tab().current_dir.clone();
         let root_removed = self
             .icon_grid_expansion
             .as_mut()
@@ -578,9 +578,10 @@ impl FileBrowser {
     }
 
     pub(super) fn retain_icon_grid_visible_selection(&mut self) {
-        if self.selected.is_none()
-            && self.selected_paths.is_empty()
-            && self.selection_anchor.is_none()
+        let tab = self.tab();
+        if tab.selected.is_none()
+            && tab.selected_paths.is_empty()
+            && tab.selection_anchor.is_none()
             && self.drag_selection_anchor.is_none()
             && self.pending_created_entry_rename.is_none()
             && self.renaming.is_none()
@@ -589,18 +590,18 @@ impl FileBrowser {
         }
 
         let mut tracked_paths = Vec::with_capacity(
-            self.selected_paths.len()
-                + usize::from(self.selected.is_some())
-                + usize::from(self.selection_anchor.is_some())
+            tab.selected_paths.len()
+                + usize::from(tab.selected.is_some())
+                + usize::from(tab.selection_anchor.is_some())
                 + usize::from(self.drag_selection_anchor.is_some())
                 + usize::from(self.pending_created_entry_rename.is_some())
                 + usize::from(self.renaming.is_some()),
         );
-        if let Some(path) = &self.selected {
+        if let Some(path) = &tab.selected {
             tracked_paths.push(path.clone());
         }
-        tracked_paths.extend(self.selected_paths.iter().cloned());
-        if let Some(path) = &self.selection_anchor {
+        tracked_paths.extend(tab.selected_paths.iter().cloned());
+        if let Some(path) = &tab.selection_anchor {
             tracked_paths.push(path.clone());
         }
         if let Some(path) = &self.drag_selection_anchor {
@@ -619,28 +620,26 @@ impl FileBrowser {
                 let layout = self.icon_grid_layout_for_pane(pane);
                 layout.interactive_paths_matching(&tracked_paths)
             })
-            .unwrap_or_else(|| {
-                self.entries
-                    .iter()
-                    .map(|entry| entry.path.clone())
-                    .collect()
-            });
-        let primary_selection_was_hidden = self
+            .unwrap_or_else(|| tab.entries.iter().map(|entry| entry.path.clone()).collect());
+        let tab = self.tab_mut();
+        let primary_selection_was_hidden = tab
             .selected
             .as_ref()
             .is_some_and(|path| !visible_paths.contains(path));
-        self.selected_paths
+        tab.selected_paths
             .retain(|path| visible_paths.contains(path));
         if primary_selection_was_hidden {
-            self.selected = self.selected_paths.iter().min().cloned();
-            self.preview_engine.clear_preview();
+            tab.selected = tab.selected_paths.iter().min().cloned();
         }
-        if self
+        if tab
             .selection_anchor
             .as_ref()
-            .is_some_and(|path| !self.selected_paths.contains(path))
+            .is_some_and(|path| !tab.selected_paths.contains(path))
         {
-            self.selection_anchor = None;
+            tab.selection_anchor = None;
+        }
+        if primary_selection_was_hidden {
+            self.preview_engine.clear_preview();
         }
         if self
             .drag_selection_anchor
@@ -725,8 +724,8 @@ impl FileBrowser {
             return false;
         };
         *pane_id == self.active_pane_id()
-            && self.view_mode == BrowserViewMode::Icons
-            && current_dir == &self.current_dir
+            && self.tab().view_mode == BrowserViewMode::Icons
+            && current_dir == &self.tab().current_dir
             && self.icon_grid_expansion.as_ref().is_some_and(|state| {
                 state.matches_context(*pane_id, current_dir, *session_id)
                     && state.accepts_directory_load(&request.path)
@@ -742,14 +741,15 @@ impl FileBrowser {
         pane_id: BrowserPaneId,
         anchor: &IconGridExpansionAnchor,
     ) -> bool {
+        let tab = self.tab();
         if pane_id != self.active_pane_id()
-            || self.view_mode != BrowserViewMode::Icons
-            || self.is_trash_view
+            || tab.view_mode != BrowserViewMode::Icons
+            || tab.is_trash_view
         {
             return false;
         }
-        let entries = if anchor.parent_directory == self.current_dir {
-            Some(self.entries.as_slice())
+        let entries = if anchor.parent_directory == tab.current_dir {
+            Some(tab.entries.as_slice())
         } else {
             self.icon_grid_expansion
                 .as_ref()
@@ -761,9 +761,9 @@ impl FileBrowser {
     }
 
     fn icon_grid_state_matches_active_context(&self, state: &IconGridExpansionState) -> bool {
-        self.view_mode == BrowserViewMode::Icons
+        self.tab().view_mode == BrowserViewMode::Icons
             && state.context().pane_id == self.active_pane_id()
-            && state.context().current_dir == self.current_dir
+            && state.context().current_dir == self.tab().current_dir
     }
 
     fn next_icon_grid_expansion_session_id(&mut self) -> IconGridExpansionSessionId {
@@ -779,10 +779,11 @@ impl FileBrowser {
         fallback: PathBuf,
     ) {
         self.remove_hidden_icon_grid_selection(hidden_paths);
-        if self.selected_paths.is_empty() {
-            self.selected_paths.insert(fallback.clone());
-            self.selected = Some(fallback.clone());
-            self.selection_anchor = Some(fallback);
+        let tab = self.tab_mut();
+        if tab.selected_paths.is_empty() {
+            tab.selected_paths.insert(fallback.clone());
+            tab.selected = Some(fallback.clone());
+            tab.selection_anchor = Some(fallback);
         }
     }
 
@@ -795,22 +796,25 @@ impl FileBrowser {
             .iter()
             .map(PathBuf::as_path)
             .collect::<HashSet<_>>();
-        let primary_selection_was_hidden = self
+        let tab = self.tab_mut();
+        let primary_selection_was_hidden = tab
             .selected
             .as_ref()
             .is_some_and(|path| hidden_paths.contains(path.as_path()));
-        self.selected_paths
+        tab.selected_paths
             .retain(|path| !hidden_paths.contains(path.as_path()));
         if primary_selection_was_hidden {
-            self.selected = self.selected_paths.iter().min().cloned();
-            self.preview_engine.clear_preview();
+            tab.selected = tab.selected_paths.iter().min().cloned();
         }
-        if self
+        if tab
             .selection_anchor
             .as_ref()
             .is_some_and(|path| hidden_paths.contains(path.as_path()))
         {
-            self.selection_anchor = None;
+            tab.selection_anchor = None;
+        }
+        if primary_selection_was_hidden {
+            self.preview_engine.clear_preview();
         }
         if self
             .drag_selection_anchor

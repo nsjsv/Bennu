@@ -115,6 +115,21 @@ impl TerminalPanelState {
         self.height
     }
 
+    pub(crate) fn is_resizing(&self) -> bool {
+        self.resize_drag.is_some()
+    }
+
+    /// 不启动 shell 就展开面板，用来测文件区转换是否更新跟随目标。
+    #[cfg(test)]
+    pub(crate) fn expand_without_shell(&mut self) {
+        self.expanded = true;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn followed_directory(&self) -> Option<&std::path::Path> {
+        self.follow_target_snapshot.as_deref()
+    }
+
     pub(crate) fn is_animating(&self) -> bool {
         self.height_animation.is_some()
             || self.resize_drag.is_some()
@@ -204,6 +219,7 @@ impl FileBrowser {
             }
             self.terminal_panel.expanded = true;
             self.terminal_panel.start_height_animation(target);
+            self.follow_terminal_panel_directory();
         }
         Task::none()
     }
@@ -211,25 +227,25 @@ impl FileBrowser {
     /// 终端跟随的目标目录:多栏视图取鼠标悬停的栏,其余视图取活动窗格目录。
     /// 多栏视图鼠标不在任何栏上时返回 None(保持现状,避免来回跳)。
     fn terminal_panel_follow_target(&self) -> Option<PathBuf> {
-        let active_pane_id = self.pane_layout.active();
-        let pane = self.panes.iter().find(|pane| pane.id == active_pane_id)?;
-        if pane.view_mode != crate::model::BrowserViewMode::Columns {
-            return Some(pane.current_dir.clone());
+        let tab = self.tab();
+        if tab.view_mode != crate::model::BrowserViewMode::Columns {
+            return Some(tab.current_dir.clone());
         }
         self.pointer_hovered_column_directory()
     }
 
-    /// 活动窗格目录变化时向**激活标签**的 shell 注入 cd;前进/后退/侧边栏跳转统一跟随。
-    /// 切换标签不注入:各标签保住自己的目录,否则每个标签都会被拉回文件区目录。
-    /// 快照在面板收起时清空,让下次展开立即同步一次。
+    /// 跟随目标可能变化的转换（导航、窗格/标签切换、视图模式切换、路径迁移、
+    /// 多栏悬停、面板展开）在返回前调用:目标变了就向**激活标签**的 shell
+    /// 注入 cd。切换终端标签不注入:各标签保住自己的目录,否则每个标签都会被
+    /// 拉回文件区目录。快照在面板收起时清空,让下次展开立即同步一次。
     pub(crate) fn follow_terminal_panel_directory(&mut self) {
-        let Some(directory) = self.terminal_panel_follow_target() else {
-            return;
-        };
         if !self.terminal_panel.expanded {
             self.terminal_panel.follow_target_snapshot = None;
             return;
         }
+        let Some(directory) = self.terminal_panel_follow_target() else {
+            return;
+        };
         if self.terminal_panel.follow_target_snapshot.as_ref() == Some(&directory) {
             return;
         }
@@ -255,7 +271,7 @@ impl FileBrowser {
         } else {
             self.main_window_height - view::BOTTOM_BAR_HEIGHT
         };
-        if self.cursor_position.y < drawer_top {
+        if self.cursor_or_origin().y < drawer_top {
             self.terminal_panel.focused = false;
             if let Some(active_tab) = self.terminal_panel.active_tab_mut() {
                 active_tab.session.emulator.clear_selection();
@@ -273,12 +289,7 @@ impl FileBrowser {
     }
 
     fn terminal_panel_spawn_directory(&self) -> PathBuf {
-        let active_pane_id = self.pane_layout.active();
-        self.panes
-            .iter()
-            .find(|pane| pane.id == active_pane_id)
-            .map(|pane| pane.current_dir.clone())
-            .unwrap_or_else(|| self.current_dir.clone())
+        self.tab().current_dir.clone()
     }
 
     /// 内容区宽度能容纳的终端列数(抽屉在侧边栏占位右侧)。
@@ -345,7 +356,7 @@ impl FileBrowser {
             return;
         }
         self.terminal_panel.resize_drag = Some(PanelResizeDrag {
-            cursor_start_y: self.cursor_position.y,
+            cursor_start_y: self.cursor_or_origin().y,
             height_start: self.terminal_panel.height,
         });
     }

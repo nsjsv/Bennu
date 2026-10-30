@@ -261,7 +261,7 @@ impl FileBrowser {
         }
         self.context_menu = Some(ContextMenuState::SearchEntryTypes(
             SearchEntryTypeMenuState {
-                position: self.cursor_position,
+                position: self.cursor_or_origin(),
             },
         ));
         Task::none()
@@ -381,7 +381,7 @@ impl FileBrowser {
         if self.search_workspace.is_some() {
             return Ok(());
         }
-        if self.is_trash_view {
+        if self.tab().is_trash_view {
             return Err(tr!("Search is available from a local folder"));
         }
         let root = self.current_search_directory();
@@ -660,7 +660,7 @@ impl FileBrowser {
         if !self.user_config.context_menus.search_items().is_empty() {
             self.context_menu = Some(ContextMenuState::Search(SearchContextMenuState {
                 target: path,
-                position: self.cursor_position,
+                position: self.cursor_or_origin(),
             }));
         }
         Task::none()
@@ -943,14 +943,12 @@ impl FileBrowser {
     }
 
     fn current_search_directory(&self) -> PathBuf {
-        if self.view_mode == BrowserViewMode::Columns {
+        if self.tab().view_mode == BrowserViewMode::Columns {
             if let Some(directory) = self.last_pointer_clicked_rendered_column_directory() {
                 return directory;
             }
         }
-        self.pane_by_id(self.active_pane_id())
-            .map(|pane| pane.current_dir.clone())
-            .unwrap_or_else(|| self.current_dir.clone())
+        self.tab().current_dir.clone()
     }
 }
 

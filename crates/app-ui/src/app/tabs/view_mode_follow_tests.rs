@@ -74,9 +74,9 @@ fn navigation_cancels_icons_to_list_follow_before_old_load_completes() {
     let target = project.join("main.rs");
     let destination = PathBuf::from("/elsewhere");
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = root.clone();
-    browser.entries = vec![test_entry(project.clone(), FileKind::Directory)].into();
-    browser.view_mode = BrowserViewMode::Icons;
+    browser.tab_mut().current_dir = root.clone();
+    browser.tab_mut().entries = vec![test_entry(project.clone(), FileKind::Directory)].into();
+    browser.tab_mut().view_mode = BrowserViewMode::Icons;
     browser.icon_grid_expansion = Some(IconGridExpansionState::new(
         IconGridExpansionContext {
             pane_id: BrowserPaneId::PRIMARY,
@@ -90,8 +90,8 @@ fn navigation_cancels_icons_to_list_follow_before_old_load_completes() {
         },
         loaded_directory(vec![test_entry(target.clone(), FileKind::File)]),
     ));
-    browser.selected = Some(target.clone());
-    browser.selected_paths = HashSet::from([target]);
+    browser.tab_mut().selected = Some(target.clone());
+    browser.tab_mut().selected_paths = HashSet::from([target]);
     drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::List));
     let request = list_request(&browser, &project);
 
@@ -105,10 +105,10 @@ fn navigation_cancels_icons_to_list_follow_before_old_load_completes() {
         }),
     ));
 
-    assert_eq!(browser.current_dir, destination);
+    assert_eq!(browser.tab().current_dir, destination);
     assert!(browser.list_expansion_follow.is_none());
-    assert!(browser.expanded_directories.is_empty());
-    assert_eq!(browser.selected, None);
+    assert!(browser.tab().expanded_directories.is_empty());
+    assert_eq!(browser.tab().selected, None);
 }
 
 struct NestedIconSelection {
@@ -127,13 +127,13 @@ fn nested_icon_selection() -> NestedIconSelection {
     let target = source.join("main.rs");
     let other = root.join("other.txt");
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = root.clone();
-    browser.entries = vec![
+    browser.tab_mut().current_dir = root.clone();
+    browser.tab_mut().entries = vec![
         test_entry(project.clone(), FileKind::Directory),
         test_entry(other.clone(), FileKind::File),
     ]
     .into();
-    browser.view_mode = BrowserViewMode::Icons;
+    browser.tab_mut().view_mode = BrowserViewMode::Icons;
     let mut expansion = IconGridExpansionState::new(
         IconGridExpansionContext {
             pane_id: BrowserPaneId::PRIMARY,
@@ -156,8 +156,8 @@ fn nested_icon_selection() -> NestedIconSelection {
         loaded_directory(vec![test_entry(target.clone(), FileKind::File)]),
     ));
     browser.icon_grid_expansion = Some(expansion);
-    browser.selected = Some(target.clone());
-    browser.selected_paths = HashSet::from([target.clone()]);
+    browser.tab_mut().selected = Some(target.clone());
+    browser.tab_mut().selected_paths = HashSet::from([target.clone()]);
     NestedIconSelection {
         browser,
         root,
@@ -182,7 +182,7 @@ fn completed_path_migration_cancels_icons_to_list_follow() {
     finish_queued_rename(&mut browser, project.clone(), renamed_project);
 
     assert!(browser.list_expansion_follow.is_none());
-    assert!(!browser.expanded_directories.contains_key(&project));
+    assert!(!browser.tab().expanded_directories.contains_key(&project));
     drop(browser.accept_complete_expanded_directory_fixture(
         stale_request,
         Ok(DirectoryScan {
@@ -191,7 +191,7 @@ fn completed_path_migration_cancels_icons_to_list_follow() {
             skipped: Vec::new(),
         }),
     ));
-    assert!(!browser.expanded_directories.contains_key(&project));
+    assert!(!browser.tab().expanded_directories.contains_key(&project));
 }
 
 #[test]
@@ -202,19 +202,19 @@ fn completed_path_migration_cancels_list_to_icons_follow() {
     let source = project.join("src");
     let target = source.join("main.rs");
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = root;
-    browser.view_mode = BrowserViewMode::List;
-    browser.entries = vec![test_entry(project.clone(), FileKind::Directory)].into();
-    browser.expanded_directories.insert(
+    browser.tab_mut().current_dir = root;
+    browser.tab_mut().view_mode = BrowserViewMode::List;
+    browser.tab_mut().entries = vec![test_entry(project.clone(), FileKind::Directory)].into();
+    browser.tab_mut().expanded_directories.insert(
         project.clone(),
         loaded_directory(vec![test_entry(source.clone(), FileKind::Directory)]),
     );
-    browser.expanded_directories.insert(
+    browser.tab_mut().expanded_directories.insert(
         source,
         loaded_directory(vec![test_entry(target.clone(), FileKind::File)]),
     );
-    browser.selected = Some(target.clone());
-    browser.selected_paths = HashSet::from([target]);
+    browser.tab_mut().selected = Some(target.clone());
+    browser.tab_mut().selected_paths = HashSet::from([target]);
     drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::Icons));
     assert!(browser
         .icon_grid_expansion
@@ -267,8 +267,8 @@ fn stale_list_follow_session_cannot_write_into_restarted_same_path_and_generatio
         loaded_directory(vec![test_entry(target.clone(), FileKind::File)]),
     ));
     browser.icon_grid_expansion = Some(expansion);
-    browser.selected = Some(target.clone());
-    browser.selected_paths = HashSet::from([target]);
+    browser.tab_mut().selected = Some(target.clone());
+    browser.tab_mut().selected_paths = HashSet::from([target]);
     drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::List));
     let current_request = list_request(&browser, &project);
     assert_eq!(stale_request.path, current_request.path);
@@ -285,6 +285,7 @@ fn stale_list_follow_session_cannot_write_into_restarted_same_path_and_generatio
     ));
 
     assert!(browser
+        .tab()
         .expanded_directories
         .get(&project)
         .is_some_and(|expanded| matches!(expanded.status, ExpandedDirectoryStatus::Loading)));
@@ -319,6 +320,7 @@ fn browser_tree_request_cannot_write_into_list_follow_owned_node() {
     ));
 
     assert!(browser
+        .tab()
         .expanded_directories
         .get(&project)
         .is_some_and(|expanded| matches!(expanded.status, ExpandedDirectoryStatus::Loading)));
@@ -332,7 +334,7 @@ fn browser_tree_request_cannot_write_into_list_follow_owned_node() {
             skipped: Vec::new(),
         }),
     ));
-    assert!(browser.expanded_directories.contains_key(&source));
+    assert!(browser.tab().expanded_directories.contains_key(&source));
 }
 
 #[test]
@@ -341,19 +343,20 @@ fn stale_nested_selection_does_not_start_list_to_icons_follow() {
     let project = root.join("project");
     let stale_target = project.join("removed.txt");
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = root;
-    browser.entries = vec![test_entry(project.clone(), FileKind::Directory)].into();
-    browser.view_mode = BrowserViewMode::List;
+    browser.tab_mut().current_dir = root;
+    browser.tab_mut().entries = vec![test_entry(project.clone(), FileKind::Directory)].into();
+    browser.tab_mut().view_mode = BrowserViewMode::List;
     browser
+        .tab_mut()
         .expanded_directories
         .insert(project, loaded_directory(Vec::new()));
-    browser.selected = Some(stale_target.clone());
-    browser.selected_paths = HashSet::from([stale_target]);
+    browser.tab_mut().selected = Some(stale_target.clone());
+    browser.tab_mut().selected_paths = HashSet::from([stale_target]);
 
     drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::Icons));
 
     assert!(browser.icon_grid_expansion.is_none());
-    assert!(browser.selected.is_none());
+    assert!(browser.tab().selected.is_none());
 }
 
 #[test]
@@ -369,6 +372,7 @@ fn select_all_cancels_icons_to_list_follow() {
     drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::List));
     let request = list_request(&browser, &project);
     let cancellation = browser
+        .tab()
         .expanded_directories
         .get(&project)
         .and_then(|expanded| expanded.load_cancel.clone())
@@ -376,7 +380,7 @@ fn select_all_cancels_icons_to_list_follow() {
 
     drop(browser.select_all_in_file_selection_scope());
     assert!(cancellation.is_cancelled());
-    assert!(!browser.expanded_directories.contains_key(&project));
+    assert!(!browser.tab().expanded_directories.contains_key(&project));
     drop(browser.accept_complete_expanded_directory_fixture(
         request,
         Ok(DirectoryScan {
@@ -387,9 +391,9 @@ fn select_all_cancels_icons_to_list_follow() {
     ));
 
     assert!(browser.list_expansion_follow.is_none());
-    assert!(!browser.expanded_directories.contains_key(&project));
-    assert!(!browser.expanded_directories.contains_key(&source));
-    assert!(browser.selected_paths.contains(&other));
+    assert!(!browser.tab().expanded_directories.contains_key(&project));
+    assert!(!browser.tab().expanded_directories.contains_key(&source));
+    assert!(browser.tab().selected_paths.contains(&other));
 }
 
 #[test]
@@ -417,6 +421,7 @@ fn watcher_refresh_keeps_current_list_follow_session_and_rejects_prior_generatio
         }),
     ));
     assert!(browser
+        .tab()
         .expanded_directories
         .get(&project)
         .is_some_and(|expanded| matches!(expanded.status, ExpandedDirectoryStatus::Loading)));
@@ -429,7 +434,7 @@ fn watcher_refresh_keeps_current_list_follow_session_and_rejects_prior_generatio
             skipped: Vec::new(),
         }),
     ));
-    assert!(browser.expanded_directories.contains_key(&source));
+    assert!(browser.tab().expanded_directories.contains_key(&source));
 }
 
 #[test]
@@ -440,23 +445,23 @@ fn select_all_cancels_list_to_icons_follow() {
     let target = source.join("main.rs");
     let other = root.join("other.txt");
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = root;
-    browser.entries = vec![
+    browser.tab_mut().current_dir = root;
+    browser.tab_mut().entries = vec![
         test_entry(project.clone(), FileKind::Directory),
         test_entry(other.clone(), FileKind::File),
     ]
     .into();
-    browser.view_mode = BrowserViewMode::List;
-    browser.expanded_directories.insert(
+    browser.tab_mut().view_mode = BrowserViewMode::List;
+    browser.tab_mut().expanded_directories.insert(
         project.clone(),
         loaded_directory(vec![test_entry(source.clone(), FileKind::Directory)]),
     );
-    browser.expanded_directories.insert(
+    browser.tab_mut().expanded_directories.insert(
         source.clone(),
         loaded_directory(vec![test_entry(target.clone(), FileKind::File)]),
     );
-    browser.selected = Some(target.clone());
-    browser.selected_paths = HashSet::from([target]);
+    browser.tab_mut().selected = Some(target.clone());
+    browser.tab_mut().selected_paths = HashSet::from([target]);
     drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::Icons));
     let request = {
         let state = browser
@@ -492,7 +497,7 @@ fn select_all_cancels_list_to_icons_follow() {
         .icon_grid_expansion
         .as_ref()
         .is_some_and(|state| !state.has_follow_plan() && state.directory(&source).is_none()));
-    assert!(browser.selected_paths.contains(&other));
+    assert!(browser.tab().selected_paths.contains(&other));
 }
 
 fn observed_changes(directory: &std::path::Path) -> file_core::DirectoryEntryChanges {

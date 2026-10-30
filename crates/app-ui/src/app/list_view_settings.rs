@@ -81,7 +81,7 @@ impl FileBrowser {
         self.sidebar_bookmark_drop_slot = None;
         let _ = self.cancel_address_editing();
         self.context_menu = Some(ContextMenuState::ListColumns(ListColumnMenuState {
-            position: self.cursor_position,
+            position: self.cursor_or_origin(),
         }));
         rename_command
     }
@@ -134,7 +134,7 @@ impl FileBrowser {
             .unwrap_or(0.0);
         self.list_column_resize_drag = Some(ListColumnResizeDrag {
             kind: column,
-            cursor_start_x: self.cursor_position.x,
+            cursor_start_x: self.cursor_or_origin().x,
             width_start,
         });
         self.list_column_reorder_drag = None;
@@ -158,7 +158,7 @@ impl FileBrowser {
         self.list_column_reorder_drag = Some(ListColumnReorderDrag {
             kind: column,
             phase: FileDragPhase::WaitingForMovement {
-                origin: self.cursor_position,
+                origin: self.cursor_or_origin(),
             },
             drop_target: None,
         });
@@ -276,7 +276,6 @@ impl FileBrowser {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
     use std::path::{Path, PathBuf};
 
     use file_core::{DirectoryEntry, EntryMetadata, FileKind, SortDirection, SortField};
@@ -284,10 +283,9 @@ mod tests {
     use super::*;
     use crate::config;
     use crate::model::{
-        BrowserPane, BrowserPaneLayout, BrowserTab, BrowserViewMode, ColumnBrowserViewport,
-        ExpandedDirectory, ExpandedDirectoryStatus, ListDirectorySummary, SplitAxis,
+        BrowserPane, BrowserPaneLayout, BrowserTab, BrowserViewMode, ExpandedDirectory,
+        ExpandedDirectoryStatus, ListDirectorySummary, SplitAxis,
     };
-    use crate::thumbnail_cache::ColumnViewport;
 
     fn test_entry(path: PathBuf, kind: FileKind) -> DirectoryEntry {
         DirectoryEntry::new(
@@ -322,35 +320,9 @@ mod tests {
         }
     }
 
-    fn pane_from_tab_for_test(pane_id: BrowserPaneId, tab: BrowserTab) -> BrowserPane {
-        BrowserPane {
-            id: pane_id,
-            current_dir: tab.directory.clone(),
-            is_trash_view: tab.is_trash_view,
-            entries: tab.entries.clone(),
-            directory_discovery: tab.directory_discovery.clone(),
-            directory_loading_placeholder: None,
-            trash_entries: tab.trash_entries.clone(),
-            selected: tab.selected.clone(),
-            selected_paths: tab.selected_paths.clone(),
-            selection_anchor: tab.selection_anchor.clone(),
-            deepest_open_column_directory: tab.deepest_open_column_directory.clone(),
-            expanded_directories: tab.expanded_directories.clone(),
-            view_mode: tab.view_mode,
-            column_browser_viewport: ColumnBrowserViewport::default(),
-            column_viewports: HashMap::<PathBuf, ColumnViewport>::new(),
-            tabs: vec![tab.clone()],
-            active_tab_id: tab.id,
-            directory_load_generation: 0,
-            directory_load_cancel: None,
-            back_stack: tab.back_stack.clone(),
-            forward_stack: tab.forward_stack.clone(),
-            directory_collection_phase: crate::model::DirectoryCollectionPhase::Ready,
-            directory_order_phase: crate::model::DirectoryOrderPhase::Ready {
-                field: file_core::SortField::Name,
-                direction: file_core::SortDirection::Ascending,
-            },
-        }
+    fn pane_from_tab_for_test(pane_id: BrowserPaneId, mut tab: BrowserTab) -> BrowserPane {
+        tab.directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
+        BrowserPane::new(pane_id, tab)
     }
 
     fn remember_summary(browser: &mut FileBrowser, path: &Path, count: usize, size: u64) {
@@ -412,22 +384,13 @@ mod tests {
         let inactive_child = inactive_dir.join("guides");
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
 
-        browser.current_dir = active_root.clone();
-        browser.view_mode = BrowserViewMode::List;
-        browser.directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
-        browser.entries = vec![test_entry(active_dir.clone(), FileKind::Directory)].into();
-        browser.expanded_directories.insert(
+        let mut active_tab = BrowserTab::directory(0, active_root);
+        active_tab.view_mode = BrowserViewMode::List;
+        active_tab.entries = vec![test_entry(active_dir.clone(), FileKind::Directory)].into();
+        active_tab.expanded_directories.insert(
             active_dir.clone(),
             loaded_directory(vec![test_entry(active_child.clone(), FileKind::Directory)]),
         );
-
-        let mut active_tab = BrowserTab::directory(0, active_root);
-        active_tab.view_mode = BrowserViewMode::List;
-        active_tab.entries = browser.entries.clone();
-        active_tab.expanded_directories = browser.expanded_directories.clone();
-        active_tab.selected_paths = HashSet::new();
-        browser.tabs = vec![active_tab.clone()];
-        browser.active_tab_id = active_tab.id;
 
         let mut inactive_tab = BrowserTab::directory(1, inactive_root);
         inactive_tab.view_mode = BrowserViewMode::List;
@@ -465,10 +428,11 @@ mod tests {
 
         assert_eq!(browser.options.sort_field, SortField::Size);
         assert_eq!(browser.options.sort_direction, SortDirection::Ascending);
-        assert_eq!(browser.directory_load_generation, 1);
-        assert!(browser.directory_collection_phase.is_discovering());
+        assert_eq!(browser.pane().directory_load_generation, 1);
+        assert!(browser.tab().directory_collection_phase.is_discovering());
         assert_eq!(
             browser
+                .tab()
                 .expanded_directories
                 .get(&active_dir)
                 .expect("active expanded directory")
@@ -477,6 +441,7 @@ mod tests {
         );
         assert!(matches!(
             browser
+                .tab()
                 .expanded_directories
                 .get(&active_dir)
                 .expect("active expanded directory")
@@ -486,9 +451,13 @@ mod tests {
 
         let inactive_pane = browser.pane_by_id(BrowserPaneId(1)).expect("inactive pane");
         assert_eq!(inactive_pane.directory_load_generation, 1);
-        assert!(inactive_pane.directory_collection_phase.is_discovering());
+        assert!(inactive_pane
+            .tab()
+            .directory_collection_phase
+            .is_discovering());
         assert_eq!(
             inactive_pane
+                .tab()
                 .expanded_directories
                 .get(&inactive_dir)
                 .expect("inactive expanded directory")
@@ -497,6 +466,7 @@ mod tests {
         );
         assert!(matches!(
             inactive_pane
+                .tab()
                 .expanded_directories
                 .get(&inactive_dir)
                 .expect("inactive expanded directory")
@@ -522,10 +492,11 @@ mod tests {
         let root = PathBuf::from("/workspace");
         let directory = root.join("project");
 
-        browser.current_dir = root;
-        browser.view_mode = BrowserViewMode::List;
-        browser.directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
-        browser.entries = vec![test_entry(directory.clone(), FileKind::Directory)].into();
+        browser.tab_mut().current_dir = root;
+        browser.tab_mut().view_mode = BrowserViewMode::List;
+        browser.tab_mut().directory_collection_phase =
+            crate::model::DirectoryCollectionPhase::Ready;
+        browser.tab_mut().entries = vec![test_entry(directory.clone(), FileKind::Directory)].into();
         remember_summary(&mut browser, &directory, 2, 2048);
 
         drop(browser.select_list_sort_column(ListColumnKind::Size));
@@ -591,7 +562,7 @@ mod tests {
     #[test]
     fn dragging_list_header_without_reorder_does_not_change_sort() {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
-        let origin = browser.cursor_position;
+        let origin = browser.cursor_or_origin();
 
         drop(browser.start_list_column_reorder_drag(BrowserPaneId::PRIMARY, ListColumnKind::Size));
         browser.update_list_column_reorder_drag(iced::Point {
@@ -607,7 +578,7 @@ mod tests {
     #[test]
     fn dragging_list_header_keeps_column_order_stable_until_release() {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
-        let origin = browser.cursor_position;
+        let origin = browser.cursor_or_origin();
 
         drop(browser.start_list_column_reorder_drag(BrowserPaneId::PRIMARY, ListColumnKind::Size));
         browser.update_list_column_reorder_drag(iced::Point {
@@ -653,7 +624,7 @@ mod tests {
     #[test]
     fn leaving_list_header_target_before_release_cancels_reorder() {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
-        let origin = browser.cursor_position;
+        let origin = browser.cursor_or_origin();
 
         drop(browser.start_list_column_reorder_drag(BrowserPaneId::PRIMARY, ListColumnKind::Size));
         browser.update_list_column_reorder_drag(iced::Point {
@@ -685,7 +656,7 @@ mod tests {
     #[test]
     fn list_column_reorder_feedback_only_appears_after_drag_activation() {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
-        let origin = browser.cursor_position;
+        let origin = browser.cursor_or_origin();
 
         drop(browser.start_list_column_reorder_drag(BrowserPaneId::PRIMARY, ListColumnKind::Size));
 
@@ -726,7 +697,7 @@ mod tests {
     #[test]
     fn entering_target_before_drag_activation_still_reorders_after_activation() {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
-        let origin = browser.cursor_position;
+        let origin = browser.cursor_or_origin();
 
         drop(browser.start_list_column_reorder_drag(BrowserPaneId::PRIMARY, ListColumnKind::Size));
         drop(browser.enter_list_column_reorder_target(ListColumnKind::Modified));
@@ -784,7 +755,7 @@ mod tests {
     #[test]
     fn leaving_target_before_drag_activation_does_not_leave_stale_reorder_target() {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
-        let origin = browser.cursor_position;
+        let origin = browser.cursor_or_origin();
 
         drop(browser.start_list_column_reorder_drag(BrowserPaneId::PRIMARY, ListColumnKind::Size));
         drop(browser.enter_list_column_reorder_target(ListColumnKind::Modified));

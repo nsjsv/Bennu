@@ -206,13 +206,13 @@ impl FileBrowser {
     ) -> Task<Message> {
         self.sidebar_bookmark_drop_slot = None;
         self.file_drop_session = None;
-        if self.is_trash_view {
+        if self.tab().is_trash_view {
             self.file_drag = None;
             return Task::none();
         }
 
         let source_pane_id = self.active_pane_id();
-        let source_tab_id = self.active_tab_id;
+        let source_tab_id = self.active_tab_id();
         let sources = self.selected_paths_for_operation();
         let bookmark_source = (sources.len() == 1
             && self.entry_kind(&sources[0]) == Some(file_core::FileKind::Directory))
@@ -227,11 +227,11 @@ impl FileBrowser {
             bookmark_source,
             stationary_action,
             phase: FileDragPhase::WaitingForMovement {
-                origin: self.cursor_position,
+                origin: self.cursor_or_origin(),
             },
             native_dnd: FileDragNativeDndState::NotRequested,
             column_directories_snapshot,
-            press_origin: self.cursor_position,
+            press_origin: self.cursor_or_origin(),
             preview_entries: Vec::new(),
             wayland_drag_icon: None,
         });
@@ -363,7 +363,7 @@ impl FileBrowser {
     }
 
     pub(super) fn file_drag_drop_directory_at_cursor(&self) -> Option<PathBuf> {
-        let pane_id = self.pane_id_at_position(self.cursor_position)?;
+        let pane_id = self.pane_id_at_position(self.cursor_position?)?;
         if pane_id == self.active_pane_id() {
             return None;
         }

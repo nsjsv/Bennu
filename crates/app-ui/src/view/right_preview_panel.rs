@@ -91,10 +91,11 @@ fn right_preview_info_content(browser: &FileBrowser) -> Element<'_, Message> {
     let snapshot = browser
         .right_preview_panel_info
         .as_ref()
-        .filter(|snapshot| Some(snapshot.path.as_path()) == browser.selected.as_deref());
+        .filter(|snapshot| Some(snapshot.path.as_path()) == browser.tab().selected.as_deref());
     let name = match snapshot {
         Some(snapshot) => format_middle_ellipsized_text(&snapshot.name.to_string_lossy(), 48),
         None => browser
+            .tab()
             .selected
             .as_ref()
             .map(|path| format_middle_ellipsized_text(&fallback_name(path), 48))

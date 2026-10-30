@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use file_core::{
-    DirectoryDiscovery, DirectoryEntry, DirectoryMetadataRequirement, SortDirection, SortField,
-    TrashEntry,
+    DirectoryDiscovery, DirectoryEntry, DirectoryMetadataRequirement, ResolvedEntryChange,
+    SortDirection, SortField, TrashEntry,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -15,6 +15,12 @@ use crate::operation_history::{
 };
 use crate::thumbnail_cache::ColumnViewport;
 
+use super::path_migration::{
+    cancel_and_clear_expanded_directories, detach_directory_discovery, migrate_directory_entries,
+    migrate_directory_entry, migrate_expanded_directories, migrate_optional_path,
+    migrate_path_list, migrate_path_map_keys, migrate_path_set,
+    retain_optional_path_outside_subtree,
+};
 use super::{displayed_address_directory, TabDropDestination};
 
 pub(crate) type DirectoryEntrySnapshot = Arc<Vec<DirectoryEntry>>;
@@ -270,14 +276,195 @@ pub(crate) struct DirectoryLoadingPlaceholderEntry {
     pub(crate) trailing_status_height: f32,
 }
 
+/// 窗格：一组标签，加上只属于窗格自己的加载与滚动状态。浏览状态（目录、
+/// 条目、选择、历史……）只存在于标签里；窗格同一时刻只加载活动标签，所以
+/// 加载代号、取消令牌、占位和滚动视口跟着窗格走。「活动标签」只是
+/// `active_tab_id` 这个引用，`tab()` 取到的就是唯一的那份。
 #[derive(Debug, Clone)]
 pub(crate) struct BrowserPane {
     pub(crate) id: BrowserPaneId,
+    pub(crate) tabs: Vec<BrowserTab>,
+    pub(crate) active_tab_id: usize,
+    pub(crate) directory_loading_placeholder: Option<DirectoryLoadingPlaceholder>,
+    pub(crate) column_browser_viewport: ColumnBrowserViewport,
+    pub(crate) column_viewports: HashMap<PathBuf, ColumnViewport>,
+    pub(crate) directory_load_generation: u64,
+    pub(crate) directory_load_cancel: Option<CancellationToken>,
+}
+
+/// 标签迁移路径后对窗格层面的影响，由窗格对其活动标签落实。
+#[derive(Clone, Copy, Default)]
+struct TabMigrationEffect {
+    load_interrupted: bool,
+    cached_tree: CachedTreeEffect,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum CachedTreeEffect {
+    #[default]
+    Kept,
+    Invalidated,
+    PathsMigrated,
+}
+
+impl BrowserPane {
+    pub(crate) fn new(id: BrowserPaneId, tab: BrowserTab) -> Self {
+        let active_tab_id = tab.id;
+        Self::with_tabs(id, vec![tab], active_tab_id)
+    }
+
+    /// 调用方保证 `active_tab_id` 在 `tabs` 里（窗格的不变量）。
+    pub(crate) fn with_tabs(
+        id: BrowserPaneId,
+        tabs: Vec<BrowserTab>,
+        active_tab_id: usize,
+    ) -> Self {
+        debug_assert!(tabs.iter().any(|tab| tab.id == active_tab_id));
+        Self {
+            id,
+            active_tab_id,
+            tabs,
+            directory_loading_placeholder: None,
+            column_browser_viewport: ColumnBrowserViewport::default(),
+            column_viewports: HashMap::new(),
+            directory_load_generation: 0,
+            directory_load_cancel: None,
+        }
+    }
+
+    /// 窗格的活动标签。「`active_tab_id` 必在 `tabs` 里」是窗格的不变量，
+    /// 由新建、关闭、拆分、合并、会话恢复这几个改变标签集合的入口维护。
+    pub(crate) fn tab(&self) -> &BrowserTab {
+        self.tabs
+            .iter()
+            .find(|tab| tab.id == self.active_tab_id)
+            .expect("a pane owns its active tab")
+    }
+
+    pub(crate) fn tab_mut(&mut self) -> &mut BrowserTab {
+        let active_tab_id = self.active_tab_id;
+        self.tabs
+            .iter_mut()
+            .find(|tab| tab.id == active_tab_id)
+            .expect("a pane owns its active tab")
+    }
+
+    /// 切换活动标签。占位属于离开的那个目录，不带给新标签。
+    pub(crate) fn activate_tab(&mut self, tab_id: usize) {
+        debug_assert!(self.tabs.iter().any(|tab| tab.id == tab_id));
+        self.active_tab_id = tab_id;
+        self.directory_loading_placeholder = None;
+    }
+
+    /// 开始活动标签的一次目录加载：作废上一次（取消令牌、换代号），迟到的
+    /// 响应按代号被拒收。
+    pub(crate) fn begin_directory_load(
+        &mut self,
+        path: PathBuf,
+    ) -> (DirectoryLoadRequest, CancellationToken) {
+        self.cancel_directory_load();
+        let cancellation = CancellationToken::new();
+        self.directory_load_cancel = Some(cancellation.clone());
+        let request = DirectoryLoadRequest {
+            pane_id: self.id,
+            path,
+            generation: self.directory_load_generation,
+        };
+        (request, cancellation)
+    }
+
+    /// 作废进行中的加载但不发起新的：令牌取消、代号前进、丢弃半成品 discovery。
+    pub(crate) fn cancel_directory_load(&mut self) {
+        if let Some(cancel) = self.directory_load_cancel.take() {
+            cancel.cancel();
+        }
+        self.directory_load_generation = self.directory_load_generation.wrapping_add(1);
+        self.tab_mut().directory_discovery = None;
+    }
+
+    pub(crate) fn migrate_completed_paths(&mut self, migrations: &[CompletedPathMigration]) {
+        let active_tab_id = self.active_tab_id;
+        let mut active_effect = TabMigrationEffect::default();
+        for tab in &mut self.tabs {
+            let effect = tab.migrate_completed_paths(migrations);
+            if tab.id == active_tab_id {
+                active_effect = effect;
+            }
+        }
+        if active_effect.load_interrupted {
+            self.cancel_current_directory_load();
+        }
+        match active_effect.cached_tree {
+            CachedTreeEffect::Kept => {}
+            CachedTreeEffect::Invalidated => self.reset_directory_view(),
+            CachedTreeEffect::PathsMigrated => {
+                if let Some(placeholder) = &mut self.directory_loading_placeholder {
+                    for placeholder_entry in &mut placeholder.entries {
+                        migrate_directory_entry(&mut placeholder_entry.entry, migrations);
+                    }
+                }
+                migrate_path_map_keys(&mut self.column_viewports, migrations);
+            }
+        }
+    }
+
+    pub(crate) fn recover_from_unavailable_directory(
+        &mut self,
+        unavailable_directory: &Path,
+        parent_directory: PathBuf,
+    ) {
+        let tab = self.tab_mut();
+        tab.forget_history_into(unavailable_directory, &parent_directory);
+        tab.current_dir = parent_directory;
+        tab.is_trash_view = false;
+        tab.trash_entries.clear();
+        tab.invalidate_cached_directory_tree();
+        tab.directory_collection_phase = DirectoryCollectionPhase::Discovering;
+        tab.directory_discovery = None;
+        self.reset_directory_view();
+    }
+
+    pub(crate) fn discard_unavailable_directory_subtree(&mut self, unavailable_directory: &Path) {
+        self.tab_mut()
+            .discard_unavailable_directory_subtree(unavailable_directory);
+        self.directory_loading_placeholder = None;
+        self.column_viewports
+            .retain(|path, _| !path.starts_with(unavailable_directory));
+    }
+
+    fn cancel_current_directory_load(&mut self) {
+        if let Some(cancellation) = self.directory_load_cancel.take() {
+            cancellation.cancel();
+        }
+        // File-operation callers synchronously schedule the replacement load; that
+        // request owns the single generation advance for the whole commit batch.
+        let tab = self.tab_mut();
+        detach_directory_discovery(
+            Arc::make_mut(&mut tab.entries).as_mut_slice(),
+            &mut tab.directory_discovery,
+            &mut tab.directory_order_phase,
+        );
+        tab.directory_collection_phase = DirectoryCollectionPhase::Ready;
+    }
+
+    /// 活动标签换了目录或缓存的目录树作废时，窗格自己持有的那部分：占位与
+    /// 多栏滚动位置。
+    pub(crate) fn reset_directory_view(&mut self) {
+        self.directory_loading_placeholder = None;
+        self.column_browser_viewport = ColumnBrowserViewport::default();
+        self.column_viewports.clear();
+    }
+}
+
+/// 一个标签的全部浏览状态。每个标签只存一份：活动窗格的活动标签与其它
+/// 标签没有区别，只是被引用得更多。
+#[derive(Debug, Clone)]
+pub(crate) struct BrowserTab {
+    pub(crate) id: usize,
     pub(crate) current_dir: PathBuf,
     pub(crate) is_trash_view: bool,
     pub(crate) entries: DirectoryEntrySnapshot,
     pub(crate) directory_discovery: Option<DirectoryDiscovery>,
-    pub(crate) directory_loading_placeholder: Option<DirectoryLoadingPlaceholder>,
     pub(crate) trash_entries: Vec<TrashEntry>,
     pub(crate) selected: Option<PathBuf>,
     pub(crate) selected_paths: HashSet<PathBuf>,
@@ -285,46 +472,152 @@ pub(crate) struct BrowserPane {
     pub(crate) deepest_open_column_directory: Option<PathBuf>,
     pub(crate) expanded_directories: HashMap<PathBuf, ExpandedDirectory>,
     pub(crate) view_mode: BrowserViewMode,
-    pub(crate) column_browser_viewport: ColumnBrowserViewport,
-    pub(crate) column_viewports: HashMap<PathBuf, ColumnViewport>,
-    pub(crate) tabs: Vec<BrowserTab>,
-    pub(crate) active_tab_id: usize,
-    pub(crate) directory_load_generation: u64,
-    pub(crate) directory_load_cancel: Option<CancellationToken>,
     pub(crate) back_stack: Vec<PathBuf>,
     pub(crate) forward_stack: Vec<PathBuf>,
     pub(crate) directory_collection_phase: DirectoryCollectionPhase,
     pub(crate) directory_order_phase: DirectoryOrderPhase,
+    /// 目录 → 它正在被扫描时到达、还没落到列表上的变化。
+    pub(crate) pending_changes: HashMap<PathBuf, PendingDirectoryChanges>,
 }
 
-impl BrowserPane {
-    pub(crate) fn sync_active_tab_state(&mut self) {
-        let Some(tab) = self
-            .tabs
-            .iter_mut()
-            .find(|tab| tab.id == self.active_tab_id)
-        else {
-            return;
-        };
+/// 一次扫描期间到达的目录变化，按到达顺序排队，等这次扫描落地后重放到结果上。
+/// 扫描读到的是启动那一刻的磁盘状态，期间的变化不排队就会被快照覆盖。
+#[derive(Debug, Clone)]
+pub(crate) struct PendingDirectoryChanges {
+    /// 排队时该目录那次扫描的代号。换了新扫描（代号前进）这份就作废：新扫描
+    /// 读到的已是这些变化之后的磁盘状态，重放只会把旧事件再套一遍。靠代号
+    /// 比对失效，所有重新发起扫描的入口就不必各自记得清队列。
+    scan_generation: u64,
+    changes: Vec<ResolvedEntryChange>,
+}
 
-        tab.directory = self.current_dir.clone();
-        tab.is_trash_view = self.is_trash_view;
-        tab.entries = self.entries.clone();
-        tab.directory_discovery = self.directory_discovery.clone();
-        tab.trash_entries = self.trash_entries.clone();
-        tab.selected = self.selected.clone();
-        tab.selected_paths = self.selected_paths.clone();
-        tab.selection_anchor = self.selection_anchor.clone();
-        tab.deepest_open_column_directory = self.deepest_open_column_directory.clone();
-        tab.expanded_directories = self.expanded_directories.clone();
-        tab.view_mode = self.view_mode;
-        tab.back_stack = self.back_stack.clone();
-        tab.forward_stack = self.forward_stack.clone();
-        tab.directory_collection_phase = self.directory_collection_phase;
-        tab.directory_order_phase = self.directory_order_phase;
+impl BrowserTab {
+    pub(crate) fn file_drop_destination(&self) -> TabDropDestination {
+        if self.is_trash_view {
+            return TabDropDestination::Trash;
+        }
+
+        TabDropDestination::Directory(
+            displayed_address_directory(
+                &self.current_dir,
+                self.view_mode,
+                self.deepest_open_column_directory.as_ref(),
+            )
+            .to_path_buf(),
+        )
     }
 
-    pub(crate) fn migrate_completed_paths(&mut self, migrations: &[CompletedPathMigration]) {
+    pub(crate) fn directory(id: usize, directory: PathBuf) -> Self {
+        Self {
+            id,
+            current_dir: directory,
+            is_trash_view: false,
+            entries: empty_directory_entry_snapshot(),
+            directory_discovery: None,
+            trash_entries: Vec::new(),
+            selected: None,
+            selected_paths: HashSet::new(),
+            selection_anchor: None,
+            deepest_open_column_directory: None,
+            expanded_directories: HashMap::new(),
+            view_mode: BrowserViewMode::Columns,
+            back_stack: Vec::new(),
+            forward_stack: Vec::new(),
+            directory_collection_phase: DirectoryCollectionPhase::Discovering,
+            directory_order_phase: DirectoryOrderPhase::Ready {
+                field: SortField::Name,
+                direction: SortDirection::Ascending,
+            },
+            pending_changes: HashMap::new(),
+        }
+    }
+
+    pub(crate) fn queue_changes_during_scan(
+        &mut self,
+        directory: &Path,
+        scan_generation: u64,
+        changes: &[ResolvedEntryChange],
+    ) {
+        let pending = self
+            .pending_changes
+            .entry(directory.to_path_buf())
+            .or_insert_with(|| PendingDirectoryChanges {
+                scan_generation,
+                changes: Vec::new(),
+            });
+        if pending.scan_generation != scan_generation {
+            pending.scan_generation = scan_generation;
+            pending.changes.clear();
+        }
+        pending.changes.extend_from_slice(changes);
+    }
+
+    /// 取走 `scan_generation` 这次扫描期间排队的变化。调用方已确认这次扫描
+    /// 就是该目录当前的扫描，所以其它代号的队列属于被取代的扫描，直接丢弃。
+    pub(crate) fn take_changes_queued_during_scan(
+        &mut self,
+        directory: &Path,
+        scan_generation: u64,
+    ) -> Vec<ResolvedEntryChange> {
+        let changes = self
+            .pending_changes
+            .remove(directory)
+            .filter(|pending| pending.scan_generation == scan_generation)
+            .map(|pending| pending.changes)
+            .unwrap_or_default();
+        // 队列只属于标签仍在显示的目录；导航走开后遗留的队列在此清掉。
+        let current_dir = &self.current_dir;
+        let expanded_directories = &self.expanded_directories;
+        self.pending_changes.retain(|queued_directory, _| {
+            queued_directory == current_dir || expanded_directories.contains_key(queued_directory)
+        });
+        changes
+    }
+
+    pub(crate) fn trash(id: usize) -> Self {
+        let mut tab = Self::directory(id, super::trash_location_path());
+        tab.is_trash_view = true;
+        tab
+    }
+
+    /// 目录消失后让历史不再指向它（及其子树），也不让「后退」落回 `landing`
+    /// 自己。
+    pub(crate) fn forget_history_into(&mut self, unavailable_directory: &Path, landing: &Path) {
+        self.back_stack
+            .retain(|path| !path.starts_with(unavailable_directory));
+        while self.back_stack.last().is_some_and(|path| path == landing) {
+            self.back_stack.pop();
+        }
+        self.forward_stack
+            .retain(|path| !path.starts_with(unavailable_directory));
+    }
+
+    /// 离开当前目录树：取消展开目录的加载，清空展开状态与多栏链。
+    pub(crate) fn close_expanded_directories(&mut self) {
+        self.deepest_open_column_directory = None;
+        cancel_and_clear_expanded_directories(&mut self.expanded_directories);
+    }
+
+    pub(crate) fn clear_selection(&mut self) {
+        self.selected = None;
+        self.selected_paths.clear();
+        self.selection_anchor = None;
+    }
+
+    /// 只保留仍是主列表直接条目的选择（切换到/离开图标视图时展开内容不再可见）。
+    pub(crate) fn retain_direct_entry_selection(&mut self) {
+        retain_direct_entry_selection(
+            &self.entries,
+            &mut self.selected,
+            &mut self.selected_paths,
+            &mut self.selection_anchor,
+        );
+    }
+
+    fn migrate_completed_paths(
+        &mut self,
+        migrations: &[CompletedPathMigration],
+    ) -> TabMigrationEffect {
         let original_directory = self.current_dir.clone();
         let migrated_directory = path_after_completed_migrations(&original_directory, migrations);
         let directory_was_migrated = migrated_directory != original_directory;
@@ -336,47 +629,48 @@ impl BrowserPane {
             completed_migrations_have_source_in_directory_tree(&original_directory, migrations);
 
         self.current_dir = migrated_directory;
-        if directory_was_migrated || directory_tree_was_touched {
-            self.cancel_current_directory_load();
-        }
-        if !directory_was_migrated && migration_left_directory_tree {
+        let cached_tree = if !directory_was_migrated && migration_left_directory_tree {
             self.invalidate_cached_directory_tree();
+            CachedTreeEffect::Invalidated
         } else if directory_was_migrated || migration_has_source_in_directory_tree {
             self.migrate_cached_directory_tree_paths(migrations);
-        }
+            CachedTreeEffect::PathsMigrated
+        } else {
+            CachedTreeEffect::Kept
+        };
         migrate_path_list(&mut self.back_stack, migrations);
         migrate_path_list(&mut self.forward_stack, migrations);
-        for tab in &mut self.tabs {
-            tab.migrate_completed_paths(migrations);
+        TabMigrationEffect {
+            load_interrupted: directory_was_migrated || directory_tree_was_touched,
+            cached_tree,
         }
     }
 
-    pub(crate) fn recover_from_unavailable_directory(
-        &mut self,
-        unavailable_directory: &Path,
-        parent_directory: PathBuf,
-    ) {
-        self.current_dir = parent_directory;
-        self.is_trash_view = false;
-        self.trash_entries.clear();
-        self.invalidate_cached_directory_tree();
-        self.back_stack
-            .retain(|path| !path.starts_with(unavailable_directory));
-        while self
-            .back_stack
-            .last()
-            .is_some_and(|path| path == &self.current_dir)
-        {
-            self.back_stack.pop();
-        }
-        self.forward_stack
-            .retain(|path| !path.starts_with(unavailable_directory));
-        self.directory_collection_phase = DirectoryCollectionPhase::Discovering;
+    fn migrate_cached_directory_tree_paths(&mut self, migrations: &[CompletedPathMigration]) {
+        detach_directory_discovery(
+            Arc::make_mut(&mut self.entries).as_mut_slice(),
+            &mut self.directory_discovery,
+            &mut self.directory_order_phase,
+        );
+        migrate_directory_entries(Arc::make_mut(&mut self.entries).as_mut_slice(), migrations);
+        migrate_optional_path(&mut self.selected, migrations);
+        migrate_path_set(&mut self.selected_paths, migrations);
+        migrate_optional_path(&mut self.selection_anchor, migrations);
+        migrate_optional_path(&mut self.deepest_open_column_directory, migrations);
+        migrate_expanded_directories(&mut self.expanded_directories, migrations);
+    }
+
+    fn invalidate_cached_directory_tree(&mut self) {
+        self.entries = empty_directory_entry_snapshot();
         self.directory_discovery = None;
-        self.sync_active_tab_state();
+        self.selected = None;
+        self.selected_paths.clear();
+        self.selection_anchor = None;
+        self.deepest_open_column_directory = None;
+        cancel_and_clear_expanded_directories(&mut self.expanded_directories);
     }
 
-    pub(crate) fn discard_unavailable_directory_subtree(&mut self, unavailable_directory: &Path) {
+    fn discard_unavailable_directory_subtree(&mut self, unavailable_directory: &Path) {
         detach_directory_discovery(
             Arc::make_mut(&mut self.entries).as_mut_slice(),
             &mut self.directory_discovery,
@@ -384,7 +678,6 @@ impl BrowserPane {
         );
         Arc::make_mut(&mut self.entries)
             .retain(|entry| !entry.path.starts_with(unavailable_directory));
-        self.directory_loading_placeholder = None;
         retain_optional_path_outside_subtree(&mut self.selected, unavailable_directory);
         self.selected_paths
             .retain(|path| !path.starts_with(unavailable_directory));
@@ -431,184 +724,6 @@ impl BrowserPane {
                 }
                 directory_remains_available
             });
-        self.column_viewports
-            .retain(|path, _| !path.starts_with(unavailable_directory));
-        self.sync_active_tab_state();
-    }
-
-    fn cancel_current_directory_load(&mut self) {
-        if let Some(cancellation) = self.directory_load_cancel.take() {
-            cancellation.cancel();
-        }
-        // File-operation callers synchronously schedule the replacement load; that
-        // request owns the single generation advance for the whole commit batch.
-        detach_directory_discovery(
-            Arc::make_mut(&mut self.entries).as_mut_slice(),
-            &mut self.directory_discovery,
-            &mut self.directory_order_phase,
-        );
-        self.directory_collection_phase = DirectoryCollectionPhase::Ready;
-    }
-
-    fn migrate_cached_directory_tree_paths(&mut self, migrations: &[CompletedPathMigration]) {
-        detach_directory_discovery(
-            Arc::make_mut(&mut self.entries).as_mut_slice(),
-            &mut self.directory_discovery,
-            &mut self.directory_order_phase,
-        );
-        migrate_directory_entries(Arc::make_mut(&mut self.entries).as_mut_slice(), migrations);
-        if let Some(placeholder) = &mut self.directory_loading_placeholder {
-            for placeholder_entry in &mut placeholder.entries {
-                migrate_directory_entry(&mut placeholder_entry.entry, migrations);
-            }
-        }
-        migrate_optional_path(&mut self.selected, migrations);
-        migrate_path_set(&mut self.selected_paths, migrations);
-        migrate_optional_path(&mut self.selection_anchor, migrations);
-        migrate_optional_path(&mut self.deepest_open_column_directory, migrations);
-        migrate_expanded_directories(&mut self.expanded_directories, migrations);
-        migrate_path_map_keys(&mut self.column_viewports, migrations);
-    }
-
-    fn invalidate_cached_directory_tree(&mut self) {
-        self.entries = empty_directory_entry_snapshot();
-        self.directory_discovery = None;
-        self.directory_loading_placeholder = None;
-        self.selected = None;
-        self.selected_paths.clear();
-        self.selection_anchor = None;
-        self.deepest_open_column_directory = None;
-        cancel_and_clear_expanded_directories(&mut self.expanded_directories);
-        self.column_browser_viewport = ColumnBrowserViewport::default();
-        self.column_viewports.clear();
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct BrowserTab {
-    pub(crate) id: usize,
-    pub(crate) directory: PathBuf,
-    pub(crate) is_trash_view: bool,
-    pub(crate) entries: DirectoryEntrySnapshot,
-    pub(crate) directory_discovery: Option<DirectoryDiscovery>,
-    pub(crate) trash_entries: Vec<TrashEntry>,
-    pub(crate) selected: Option<PathBuf>,
-    pub(crate) selected_paths: HashSet<PathBuf>,
-    pub(crate) selection_anchor: Option<PathBuf>,
-    pub(crate) deepest_open_column_directory: Option<PathBuf>,
-    pub(crate) expanded_directories: HashMap<PathBuf, ExpandedDirectory>,
-    pub(crate) view_mode: BrowserViewMode,
-    pub(crate) back_stack: Vec<PathBuf>,
-    pub(crate) forward_stack: Vec<PathBuf>,
-    pub(crate) directory_collection_phase: DirectoryCollectionPhase,
-    pub(crate) directory_order_phase: DirectoryOrderPhase,
-}
-
-impl BrowserTab {
-    pub(crate) fn file_drop_destination(&self) -> TabDropDestination {
-        if self.is_trash_view {
-            return TabDropDestination::Trash;
-        }
-
-        TabDropDestination::Directory(
-            displayed_address_directory(
-                &self.directory,
-                self.view_mode,
-                self.deepest_open_column_directory.as_ref(),
-            )
-            .to_path_buf(),
-        )
-    }
-
-    pub(crate) fn directory(id: usize, directory: PathBuf) -> Self {
-        Self {
-            id,
-            directory,
-            is_trash_view: false,
-            entries: empty_directory_entry_snapshot(),
-            directory_discovery: None,
-            trash_entries: Vec::new(),
-            selected: None,
-            selected_paths: HashSet::new(),
-            selection_anchor: None,
-            deepest_open_column_directory: None,
-            expanded_directories: HashMap::new(),
-            view_mode: BrowserViewMode::Columns,
-            back_stack: Vec::new(),
-            forward_stack: Vec::new(),
-            directory_collection_phase: DirectoryCollectionPhase::Discovering,
-            directory_order_phase: DirectoryOrderPhase::Ready {
-                field: SortField::Name,
-                direction: SortDirection::Ascending,
-            },
-        }
-    }
-
-    pub(crate) fn trash(id: usize) -> Self {
-        Self {
-            id,
-            directory: super::trash_location_path(),
-            is_trash_view: true,
-            entries: empty_directory_entry_snapshot(),
-            directory_discovery: None,
-            trash_entries: Vec::new(),
-            selected: None,
-            selected_paths: HashSet::new(),
-            selection_anchor: None,
-            deepest_open_column_directory: None,
-            expanded_directories: HashMap::new(),
-            view_mode: BrowserViewMode::Columns,
-            back_stack: Vec::new(),
-            forward_stack: Vec::new(),
-            directory_collection_phase: DirectoryCollectionPhase::Discovering,
-            directory_order_phase: DirectoryOrderPhase::Ready {
-                field: SortField::Name,
-                direction: SortDirection::Ascending,
-            },
-        }
-    }
-
-    fn migrate_completed_paths(&mut self, migrations: &[CompletedPathMigration]) {
-        let original_directory = self.directory.clone();
-        let migrated_directory = path_after_completed_migrations(&original_directory, migrations);
-        let directory_was_migrated = migrated_directory != original_directory;
-        let migration_left_directory_tree =
-            completed_migrations_leave_directory_tree(&original_directory, migrations);
-        let migration_has_source_in_directory_tree =
-            completed_migrations_have_source_in_directory_tree(&original_directory, migrations);
-
-        self.directory = migrated_directory;
-        if !directory_was_migrated && migration_left_directory_tree {
-            self.invalidate_cached_directory_tree();
-        } else if directory_was_migrated || migration_has_source_in_directory_tree {
-            self.migrate_cached_directory_tree_paths(migrations);
-        }
-        migrate_path_list(&mut self.back_stack, migrations);
-        migrate_path_list(&mut self.forward_stack, migrations);
-    }
-
-    fn migrate_cached_directory_tree_paths(&mut self, migrations: &[CompletedPathMigration]) {
-        detach_directory_discovery(
-            Arc::make_mut(&mut self.entries).as_mut_slice(),
-            &mut self.directory_discovery,
-            &mut self.directory_order_phase,
-        );
-        migrate_directory_entries(Arc::make_mut(&mut self.entries).as_mut_slice(), migrations);
-        migrate_optional_path(&mut self.selected, migrations);
-        migrate_path_set(&mut self.selected_paths, migrations);
-        migrate_optional_path(&mut self.selection_anchor, migrations);
-        migrate_optional_path(&mut self.deepest_open_column_directory, migrations);
-        migrate_expanded_directories(&mut self.expanded_directories, migrations);
-    }
-
-    fn invalidate_cached_directory_tree(&mut self) {
-        self.entries = empty_directory_entry_snapshot();
-        self.directory_discovery = None;
-        self.selected = None;
-        self.selected_paths.clear();
-        self.selection_anchor = None;
-        self.deepest_open_column_directory = None;
-        cancel_and_clear_expanded_directories(&mut self.expanded_directories);
     }
 }
 
@@ -664,125 +779,4 @@ pub(crate) fn retain_direct_entry_selection(
     {
         *selection_anchor = None;
     }
-}
-
-pub(super) fn migrate_directory_entries(
-    entries: &mut [DirectoryEntry],
-    migrations: &[CompletedPathMigration],
-) {
-    for entry in entries {
-        migrate_directory_entry(entry, migrations);
-    }
-}
-
-fn migrate_directory_entry(entry: &mut DirectoryEntry, migrations: &[CompletedPathMigration]) {
-    let migrated_path = path_after_completed_migrations(&entry.path, migrations);
-    if migrated_path == entry.path {
-        return;
-    }
-    entry.name = migrated_path
-        .file_name()
-        .unwrap_or_else(|| migrated_path.as_os_str())
-        .to_os_string();
-    entry.path = migrated_path;
-}
-
-fn migrate_optional_path(path: &mut Option<PathBuf>, migrations: &[CompletedPathMigration]) {
-    if let Some(path) = path {
-        *path = path_after_completed_migrations(path, migrations);
-    }
-}
-
-fn retain_optional_path_outside_subtree(path: &mut Option<PathBuf>, subtree: &Path) {
-    if path
-        .as_ref()
-        .is_some_and(|candidate| candidate.starts_with(subtree))
-    {
-        *path = None;
-    }
-}
-
-fn migrate_path_list(paths: &mut [PathBuf], migrations: &[CompletedPathMigration]) {
-    for path in paths {
-        *path = path_after_completed_migrations(path, migrations);
-    }
-}
-
-fn migrate_path_set(paths: &mut HashSet<PathBuf>, migrations: &[CompletedPathMigration]) {
-    *paths = paths
-        .drain()
-        .map(|path| path_after_completed_migrations(&path, migrations))
-        .collect();
-}
-
-fn migrate_path_map_keys<Value>(
-    paths: &mut HashMap<PathBuf, Value>,
-    migrations: &[CompletedPathMigration],
-) {
-    *paths = paths
-        .drain()
-        .map(|(path, value)| (path_after_completed_migrations(&path, migrations), value))
-        .collect();
-}
-
-fn detach_directory_discovery(
-    entries: &mut [DirectoryEntry],
-    discovery: &mut Option<DirectoryDiscovery>,
-    order_phase: &mut DirectoryOrderPhase,
-) {
-    if let Some(discovery) = discovery.take() {
-        for entry in entries {
-            let Some(index) = entry.discovery_index.take() else {
-                continue;
-            };
-            let Some(discovered) = discovery.entries.get(index) else {
-                continue;
-            };
-            let materialized = discovered.display_entry();
-            entry.metadata = materialized.metadata;
-            entry.is_broken_symlink = materialized.is_broken_symlink;
-        }
-    }
-    if let DirectoryOrderPhase::WaitingForMetadata {
-        field, direction, ..
-    } = *order_phase
-    {
-        *order_phase = DirectoryOrderPhase::Ready { field, direction };
-    }
-}
-
-fn migrate_expanded_directories(
-    directories: &mut HashMap<PathBuf, ExpandedDirectory>,
-    migrations: &[CompletedPathMigration],
-) {
-    *directories = directories
-        .drain()
-        .filter_map(|(path, mut directory)| {
-            if let Some(cancellation) = directory.load_cancel.take() {
-                cancellation.cancel();
-            }
-            if matches!(directory.status, ExpandedDirectoryStatus::Loading) {
-                return None;
-            }
-            detach_directory_discovery(
-                &mut directory.entries,
-                &mut directory.directory_discovery,
-                &mut directory.directory_order_phase,
-            );
-            migrate_directory_entries(&mut directory.entries, migrations);
-            Some((
-                path_after_completed_migrations(&path, migrations),
-                directory,
-            ))
-        })
-        .collect();
-}
-
-fn cancel_and_clear_expanded_directories(directories: &mut HashMap<PathBuf, ExpandedDirectory>) {
-    for directory in directories.values_mut() {
-        if let Some(cancellation) = directory.load_cancel.take() {
-            cancellation.cancel();
-        }
-    }
-    directories.clear();
 }

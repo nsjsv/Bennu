@@ -224,7 +224,7 @@ impl FileBrowser {
     }
 
     fn open_archive_creation(&mut self) -> Task<Message> {
-        if self.is_trash_view {
+        if self.tab().is_trash_view {
             return Task::none();
         }
 
@@ -233,7 +233,7 @@ impl FileBrowser {
             return Task::none();
         }
 
-        let target_directory = archive_target_directory(&sources, &self.current_dir);
+        let target_directory = archive_target_directory(&sources, &self.tab().current_dir);
         let single_source_kind = match sources.as_slice() {
             [source] => self.entry_kind(source),
             _ => None,

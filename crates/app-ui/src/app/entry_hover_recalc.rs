@@ -13,108 +13,109 @@ use iced::{Point, Rectangle};
 use super::FileBrowser;
 use crate::model::BrowserPaneId;
 
+/// 滚动的是哪种视图:两者只有命中几何不同,门槛、屏障判断和写入是同一套。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ScrolledView {
+    List,
+    IconGrid,
+}
+
+/// 内容落点下的条目,以及该视图此刻是否带分组索引栏。
+struct ContentHit {
+    entry: Option<PathBuf>,
+    rail_visible: bool,
+}
+
 impl FileBrowser {
-    pub(super) fn recalculate_hovered_entry_after_list_scroll(
+    pub(super) fn recalculate_hovered_entry_after_scroll(
         &mut self,
         pane_id: BrowserPaneId,
+        view: ScrolledView,
         offset_y: f32,
         viewport: Rectangle,
     ) {
-        if !self.hover_recalc_gate(pane_id, viewport) {
+        let Some(cursor) = self.hover_recalc_cursor(pane_id, viewport) else {
+            return;
+        };
+        let Some(hit) = self.content_hit(
+            pane_id,
+            view,
+            cursor_content_point(cursor, viewport, offset_y),
+        ) else {
+            return;
+        };
+        // 光标仍压在索引栏上:栏外无条目可指,维持事件通道留下的 None
+        // (进入栏时已显式清过)。栏消失时屏障由条目/分组变化的转换清除。
+        if hit.rail_visible && self.hovered_grouping_rail_pane == Some(pane_id) {
             return;
         }
-        let point = cursor_content_point(self.cursor_position, viewport, offset_y);
-        let (next, rail_visible) = {
-            let geometry =
-                crate::list_view::ListGeometry::for_level(self.user_config().list_view_density);
-            let Some(pane) = self.pane_view(pane_id) else {
-                return;
-            };
-            // 与列表渲染同一条合并行流:命中高度、表头留量、组头/占位
-            // 行的跳过规则全部来自它,不另算一套偏移。
-            let rows = crate::transfer_placeholder_view::build_list_transfer_rows(
-                self,
-                pane,
-                geometry.row_height,
-            );
-            let rail_visible = crate::model::file_group_rail_visible(
-                &crate::transfer_placeholder_view::list_file_group_rail_entries(
-                    &rows,
+        // 等值守卫风格:重算只写"光标正下方条目"这一个事实,值未变化时
+        // 不产生任何状态扰动。
+        if self.hovered_entry != hit.entry {
+            self.hovered_entry = hit.entry;
+        }
+    }
+
+    fn content_hit(
+        &self,
+        pane_id: BrowserPaneId,
+        view: ScrolledView,
+        point: Point,
+    ) -> Option<ContentHit> {
+        let pane = self.pane_view(pane_id)?;
+        Some(match view {
+            ScrolledView::List => {
+                let geometry =
+                    crate::list_view::ListGeometry::for_level(self.user_config().list_view_density);
+                // 与列表渲染同一条合并行流:命中高度、表头留量、组头/占位
+                // 行的跳过规则全部来自它,不另算一套偏移。
+                let rows = crate::transfer_placeholder_view::build_list_transfer_rows(
+                    self,
+                    pane,
                     geometry.row_height,
-                ),
-            );
-            let next = crate::transfer_placeholder_view::list_entry_path_at_point(
-                &rows,
-                geometry.row_height,
-                crate::list_view::LIST_HEADER_HEIGHT,
-                point,
-            )
-            .map(Path::to_path_buf);
-            (next, rail_visible)
-        };
-        if self.rail_barrier_covers_cursor(pane_id, rail_visible) {
-            // 光标仍压在索引栏上:栏外无条目可指,维持事件通道留下的
-            // None(进入栏时已显式清过)。
-            return;
-        }
-        self.apply_recalculated_hover(next);
-    }
-
-    pub(super) fn recalculate_hovered_entry_after_icon_grid_scroll(
-        &mut self,
-        pane_id: BrowserPaneId,
-        offset_y: f32,
-        viewport: Rectangle,
-    ) {
-        if !self.hover_recalc_gate(pane_id, viewport) {
-            return;
-        }
-        let point = cursor_content_point(self.cursor_position, viewport, offset_y);
-        let (next, rail_visible) = {
-            let Some(pane) = self.pane_view(pane_id) else {
-                return;
-            };
-            let layout = self.icon_grid_layout_for_pane(pane);
-            // 网格无表头,flow 段顶点即内容偏移;命中几何与渲染瓦片同源。
-            let rail_visible =
-                crate::model::file_group_rail_visible(&layout.root().file_group_rail_entries());
-            let next = layout.entry_path_at_point(point).map(Path::to_path_buf);
-            (next, rail_visible)
-        };
-        if self.rail_barrier_covers_cursor(pane_id, rail_visible) {
-            return;
-        }
-        self.apply_recalculated_hover(next);
-    }
-
-    /// 索引栏事件屏障的门控:栏已随分组关闭/目录切换消失时,屏障事实
-    /// 过期、就地自愈清除;栏仍在且光标在栏上时,滚动补偿不得越过屏障
-    /// 去命中下层条目。
-    fn rail_barrier_covers_cursor(&mut self, pane_id: BrowserPaneId, rail_visible: bool) -> bool {
-        if !rail_visible {
-            self.hovered_grouping_rail_pane = None;
-            return false;
-        }
-        self.hovered_grouping_rail_pane == Some(pane_id)
+                );
+                ContentHit {
+                    rail_visible: crate::model::file_group_rail_visible(
+                        &crate::transfer_placeholder_view::list_file_group_rail_entries(
+                            &rows,
+                            geometry.row_height,
+                        ),
+                    ),
+                    entry: crate::transfer_placeholder_view::list_entry_path_at_point(
+                        &rows,
+                        geometry.row_height,
+                        crate::list_view::LIST_HEADER_HEIGHT,
+                        point,
+                    )
+                    .map(Path::to_path_buf),
+                }
+            }
+            ScrolledView::IconGrid => {
+                let layout = self.icon_grid_layout_for_pane(pane);
+                // 网格无表头,flow 段顶点即内容偏移;命中几何与渲染瓦片同源。
+                ContentHit {
+                    rail_visible: crate::model::file_group_rail_visible(
+                        &layout.root().file_group_rail_entries(),
+                    ),
+                    entry: layout.entry_path_at_point(point).map(Path::to_path_buf),
+                }
+            }
+        })
     }
 
     /// 补偿路径的统一门槛:只服务活动窗格(hovered_entry 是活动窗格的
     /// 单一状态,非活动窗格滚动不参与);拖拽期间 hover 由拖拽落点通道
-    /// 所有,不在此混写;光标没有落在这个视口里 = 该 pane 无光标记录
-    /// (含光标初值 (0,0) 的陈旧记录),不动作,绝不误清事件通道的结果。
-    fn hover_recalc_gate(&self, pane_id: BrowserPaneId, viewport: Rectangle) -> bool {
-        pane_id == self.active_pane_id()
-            && self.file_drag.is_none()
-            && self.file_drop_session.is_none()
-            && viewport.contains(self.cursor_position)
-    }
-
-    /// 等值守卫风格:重算只写"光标正下方条目"这一个事实,值未变化时
-    /// 不产生任何状态扰动。
-    fn apply_recalculated_hover(&mut self, next: Option<PathBuf>) {
-        if self.hovered_entry != next {
-            self.hovered_entry = next;
+    /// 所有,不在此混写;光标未知或没有落在这个视口里则不动作,绝不误清
+    /// 事件通道的结果。通过时返回用于换算的光标位置。
+    fn hover_recalc_cursor(&self, pane_id: BrowserPaneId, viewport: Rectangle) -> Option<Point> {
+        if pane_id != self.active_pane_id()
+            || self.file_drag.is_some()
+            || self.file_drop_session.is_some()
+        {
+            return None;
         }
+        self.cursor_position
+            .filter(|cursor| viewport.contains(*cursor))
     }
 }
 

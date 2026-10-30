@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -10,8 +9,13 @@ use tokio_util::sync::CancellationToken;
 
 use super::super::FileBrowser;
 use crate::config;
-use crate::model::{BrowserPaneId, BrowserPaneLayout, BrowserViewMode, SplitAxis};
+use crate::model::{
+    BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, BrowserViewMode,
+    DirectoryCollectionPhase, DirectoryExpansionLoadContext, DirectoryLoadRequest,
+    ExpandedDirectoryStatus, PrebuiltDirectoryDiscovery, SplitAxis,
+};
 use crate::operation_history::CompletedTransfer;
+use crate::thumbnail_cache::ColumnViewport;
 
 async fn discovery_for(path: &std::path::Path) -> DirectoryDiscovery {
     discover_directory_with_progress(
@@ -26,6 +30,7 @@ async fn discovery_for(path: &std::path::Path) -> DirectoryDiscovery {
 
 fn entry_paths(browser: &FileBrowser) -> Vec<String> {
     browser
+        .tab()
         .entries
         .iter()
         .map(|entry| entry.name().to_string_lossy().into_owned())
@@ -58,11 +63,11 @@ async fn added_entries_land_in_sorted_position() {
     std::fs::write(workspace.path().join("a.txt"), b"a").unwrap();
     std::fs::write(workspace.path().join("c.txt"), b"c").unwrap();
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = workspace.path().to_path_buf();
-    browser.sync_active_tab_state();
-    browser.directory_discovery = Some(discovery_for(workspace.path()).await);
+    browser.tab_mut().current_dir = workspace.path().to_path_buf();
+    browser.tab_mut().directory_discovery = Some(discovery_for(workspace.path()).await);
+    browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Ready;
     browser.set_entries(Arc::new(crate::model::display_entries_in_discovery_order(
-        browser.directory_discovery.as_ref().unwrap(),
+        browser.tab().directory_discovery.as_ref().unwrap(),
     )));
 
     std::fs::write(workspace.path().join("b.txt"), b"b").unwrap();
@@ -71,9 +76,10 @@ async fn added_entries_land_in_sorted_position() {
 
     assert_eq!(entry_paths(&browser), vec!["a.txt", "b.txt", "c.txt"]);
     // discovery 与显示列表同步：新增条目进入 discovery 且带正确的 discovery_index。
-    let discovery = browser.directory_discovery.as_ref().unwrap();
+    let discovery = browser.tab().directory_discovery.as_ref().unwrap();
     assert_eq!(discovery.entries.len(), 3);
     assert!(browser
+        .tab()
         .entries
         .iter()
         .enumerate()
@@ -86,12 +92,12 @@ async fn removed_entries_drop_out_and_clear_selection() {
     std::fs::write(workspace.path().join("a.txt"), b"a").unwrap();
     std::fs::write(workspace.path().join("b.txt"), b"b").unwrap();
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = workspace.path().to_path_buf();
-    browser.sync_active_tab_state();
-    browser.view_mode = BrowserViewMode::List;
-    browser.directory_discovery = Some(discovery_for(workspace.path()).await);
+    browser.tab_mut().current_dir = workspace.path().to_path_buf();
+    browser.tab_mut().view_mode = BrowserViewMode::List;
+    browser.tab_mut().directory_discovery = Some(discovery_for(workspace.path()).await);
+    browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Ready;
     browser.set_entries(Arc::new(crate::model::display_entries_in_discovery_order(
-        browser.directory_discovery.as_ref().unwrap(),
+        browser.tab().directory_discovery.as_ref().unwrap(),
     )));
     let removed_path = workspace.path().join("a.txt");
     browser.select_path(removed_path.clone());
@@ -104,8 +110,8 @@ async fn removed_entries_drop_out_and_clear_selection() {
     ));
 
     assert_eq!(entry_paths(&browser), vec!["b.txt"]);
-    assert!(!browser.selected_paths.contains(&removed_path));
-    assert_eq!(browser.selected, None);
+    assert!(!browser.tab().selected_paths.contains(&removed_path));
+    assert_eq!(browser.tab().selected, None);
 }
 
 #[tokio::test]
@@ -113,11 +119,11 @@ async fn same_directory_rename_moves_entry_in_place() {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::write(workspace.path().join("old.txt"), b"x").unwrap();
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = workspace.path().to_path_buf();
-    browser.sync_active_tab_state();
-    browser.directory_discovery = Some(discovery_for(workspace.path()).await);
+    browser.tab_mut().current_dir = workspace.path().to_path_buf();
+    browser.tab_mut().directory_discovery = Some(discovery_for(workspace.path()).await);
+    browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Ready;
     browser.set_entries(Arc::new(crate::model::display_entries_in_discovery_order(
-        browser.directory_discovery.as_ref().unwrap(),
+        browser.tab().directory_discovery.as_ref().unwrap(),
     )));
 
     let from = workspace.path().join("old.txt");
@@ -148,14 +154,13 @@ async fn cross_directory_move_updates_both_expanded_lists_without_trespass() {
     std::fs::create_dir_all(&target_dir).unwrap();
     std::fs::write(source_dir.join("moved.txt"), b"x").unwrap();
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = workspace.path().to_path_buf();
-    browser.sync_active_tab_state();
+    browser.tab_mut().current_dir = workspace.path().to_path_buf();
     // 多栏视图场景：两个目录都在 expanded_directories 中显示。
-    browser.expanded_directories.insert(
+    browser.tab_mut().expanded_directories.insert(
         source_dir.clone(),
         expanded_loaded(discovery_for(&source_dir).await),
     );
-    browser.expanded_directories.insert(
+    browser.tab_mut().expanded_directories.insert(
         target_dir.clone(),
         expanded_loaded(discovery_for(&target_dir).await),
     );
@@ -172,8 +177,8 @@ async fn cross_directory_move_updates_both_expanded_lists_without_trespass() {
     ));
     drop(browser.apply_entry_changes(&target_dir, &[added(target.clone())]));
 
-    let source_entries = &browser.expanded_directories[&source_dir].entries;
-    let target_entries = &browser.expanded_directories[&target_dir].entries;
+    let source_entries = &browser.tab().expanded_directories[&source_dir].entries;
+    let target_entries = &browser.tab().expanded_directories[&target_dir].entries;
     assert!(source_entries.iter().all(|entry| entry.path != source));
     assert!(target_entries.iter().any(|entry| entry.path == target));
     // 目标条目不得混入源目录列表（父目录错误的幽灵条目）。
@@ -206,11 +211,11 @@ async fn hidden_additions_are_ignored_when_hidden_files_are_excluded() {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::write(workspace.path().join("a.txt"), b"a").unwrap();
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = workspace.path().to_path_buf();
-    browser.sync_active_tab_state();
-    browser.directory_discovery = Some(discovery_for(workspace.path()).await);
+    browser.tab_mut().current_dir = workspace.path().to_path_buf();
+    browser.tab_mut().directory_discovery = Some(discovery_for(workspace.path()).await);
+    browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Ready;
     browser.set_entries(Arc::new(crate::model::display_entries_in_discovery_order(
-        browser.directory_discovery.as_ref().unwrap(),
+        browser.tab().directory_discovery.as_ref().unwrap(),
     )));
 
     std::fs::write(workspace.path().join(".hidden"), b"h").unwrap();
@@ -223,11 +228,10 @@ async fn hidden_additions_are_ignored_when_hidden_files_are_excluded() {
 #[test]
 fn rescan_required_or_missing_targets_fall_back_to_full_reload() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = PathBuf::from("/tmp/somewhere");
-    browser.sync_active_tab_state();
+    browser.tab_mut().current_dir = PathBuf::from("/tmp/somewhere");
 
     // RescanRequired 必须返回 None 以触发全量重扫兜底。
-    let current_dir = browser.current_dir.clone();
+    let current_dir = browser.tab().current_dir.clone();
     assert!(browser
         .apply_entry_changes(&current_dir, &[ResolvedEntryChange::RescanRequired])
         .is_none());
@@ -247,11 +251,11 @@ async fn transfer_reconciliation_requires_source_gone_and_target_visible() {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::write(workspace.path().join("kept.txt"), b"k").unwrap();
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = workspace.path().to_path_buf();
-    browser.sync_active_tab_state();
-    browser.directory_discovery = Some(discovery_for(workspace.path()).await);
+    browser.tab_mut().current_dir = workspace.path().to_path_buf();
+    browser.tab_mut().directory_discovery = Some(discovery_for(workspace.path()).await);
+    browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Ready;
     browser.set_entries(Arc::new(crate::model::display_entries_in_discovery_order(
-        browser.directory_discovery.as_ref().unwrap(),
+        browser.tab().directory_discovery.as_ref().unwrap(),
     )));
 
     let moved_out = workspace.path().join("kept.txt");
@@ -274,41 +278,35 @@ async fn transfer_reconciliation_requires_source_gone_and_target_visible() {
     assert!(browser.transfers_are_reflected_in_visible_directories(&[(moved_out, moved_in)]));
 }
 
-// ---- 跨面板（分栏）场景：增量应用与对账的作用域是「所有可见面板」----
+// ---- 跨面板（分栏）场景：增量应用与对账的作用域是「所有窗格的所有标签」----
 //
-// 这些用例断言的是被修复的不变量本身：任何一个可见面板显示的目录都必须
-// 能命中增量应用目标、都必须参与对账。它们不是只覆盖某条触发路径，因此
-// 移动完成入口（accept_file_operation_moves_renamed）与 watcher 入口
+// 这些用例断言的是不变量本身：任何一个窗格（含后台标签）显示的目录都必须
+// 命中增量应用目标，可见面板都必须参与对账。它们不是只覆盖某条触发路径，
+// 因此移动完成入口（accept_file_operation_moves_renamed）与 watcher 入口
 // （直接调 apply_entry_changes）分别有用例证明走的是同一共享不变量。
 
-/// 分栏浏览器：活动面板（PRIMARY，由顶层镜像代表）浏览 active_dir，
-/// 非活动面板（BrowserPaneId(1)，状态独立持有）浏览 inactive_dir。
-/// 两者的 discovery 与显示列表都来自真实目录扫描，保证增量应用路径与
-/// 生产一致：应用目标枚举、discovery 重建、tab 回写全部走真实数据。
+/// 分栏浏览器：活动窗格（PRIMARY）浏览 active_dir，另一窗格
+/// （BrowserPaneId(1)）浏览 inactive_dir。两者的 discovery 与显示列表都
+/// 来自真实目录扫描，保证增量应用路径与生产一致。
 async fn split_browser_with_panes(active_dir: &Path, inactive_dir: &Path) -> FileBrowser {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = active_dir.to_path_buf();
-    browser.sync_active_tab_state();
-    browser.directory_discovery = Some(discovery_for(active_dir).await);
+    browser.tab_mut().current_dir = active_dir.to_path_buf();
+    browser.tab_mut().directory_discovery = Some(discovery_for(active_dir).await);
+    browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Ready;
     browser.set_entries(Arc::new(crate::model::display_entries_in_discovery_order(
-        browser.directory_discovery.as_ref().unwrap(),
+        browser.tab().directory_discovery.as_ref().unwrap(),
     )));
 
-    // 非活动面板由镜像快照改造而来：覆盖目录与扫描数据后，它与活动镜像
-    // 互不共享可变状态 —— 这正是生产中 split 之后两个面板的关系。
-    let mut inactive = browser.capture_active_pane_snapshot();
-    inactive.id = BrowserPaneId(1);
-    inactive.current_dir = inactive_dir.to_path_buf();
-    inactive.directory_discovery = Some(discovery_for(inactive_dir).await);
-    inactive.entries = crate::model::display_entries_in_discovery_order(
-        inactive.directory_discovery.as_ref().unwrap(),
+    let mut inactive_tab = BrowserTab::directory(1, inactive_dir.to_path_buf());
+    inactive_tab.directory_discovery = Some(discovery_for(inactive_dir).await);
+    inactive_tab.directory_collection_phase = DirectoryCollectionPhase::Ready;
+    inactive_tab.entries = crate::model::display_entries_in_discovery_order(
+        inactive_tab.directory_discovery.as_ref().unwrap(),
     )
     .into();
-    inactive.selected = None;
-    inactive.selected_paths = HashSet::new();
-    inactive.selection_anchor = None;
-    inactive.sync_active_tab_state();
-    browser.panes.push(inactive);
+    browser
+        .panes
+        .push(BrowserPane::new(BrowserPaneId(1), inactive_tab));
     browser.pane_layout = BrowserPaneLayout::Split {
         axis: SplitAxis::Horizontal,
         first: BrowserPaneId::PRIMARY,
@@ -323,15 +321,15 @@ fn pane_entry_names(browser: &FileBrowser, pane_id: BrowserPaneId) -> Vec<String
     browser
         .pane_by_id(pane_id)
         .expect("inactive pane must exist")
+        .tab()
         .entries
         .iter()
         .map(|entry| entry.name().to_string_lossy().into_owned())
         .collect()
 }
 
-/// 跨面板移动、活动面板 = 源侧：移动完成入口必须同时更新两侧。
-/// 修复前增量只作用于活动镜像，目标面板（非活动）的列表永久陈旧 ——
-/// 正是用户报告的 bug 方向之一。
+/// 跨面板移动、活动面板 = 源侧：移动完成入口必须同时更新两侧，
+/// 目标面板（非活动）的列表不能停留陈旧。
 #[tokio::test]
 async fn cross_pane_move_updates_active_source_and_inactive_target() {
     let workspace = tempfile::tempdir().unwrap();
@@ -353,9 +351,8 @@ async fn cross_pane_move_updates_active_source_and_inactive_target() {
         }]),
     );
 
-    // 源面板（活动镜像）移除源条目：这是修复前唯一生效的一侧。
     assert_eq!(entry_paths(&browser), Vec::<String>::new());
-    // 目标面板（非活动）插入目标条目：不变量 —— 增量必须命中所有可见面板。
+    // 目标面板（非活动）插入目标条目：不变量 —— 增量必须命中所有窗格。
     assert_eq!(
         pane_entry_names(&browser, BrowserPaneId(1)),
         vec!["moved.txt"]
@@ -364,10 +361,9 @@ async fn cross_pane_move_updates_active_source_and_inactive_target() {
     assert!(browser.transfers_are_reflected_in_visible_directories(&[(source, target)]));
 }
 
-/// 跨面板移动、活动面板 = 目标侧：修复前 find_discovered_entry 只查活动
-/// 镜像，找不到非活动面板里的源条目导致整批移动被跳过，两个面板一起
-/// 陈旧。修复后不仅双向视图更新，源面板的选中集合也必须随源条目移除
-/// 一并清理，且 tab 快照同步回写（切走再切回不回到陈旧列表）。
+/// 跨面板移动、活动面板 = 目标侧：find_discovered_entry 必须能查到非活动
+/// 面板里的源条目，否则整批移动被跳过、两个面板一起陈旧。源面板的选中
+/// 集合也必须随源条目移除一并清理。
 #[tokio::test]
 async fn cross_pane_move_updates_inactive_source_and_active_target() {
     let workspace = tempfile::tempdir().unwrap();
@@ -382,10 +378,10 @@ async fn cross_pane_move_updates_inactive_source_and_active_target() {
     let target = target_dir.join("moved.txt");
     // 源面板（非活动）预先选中被移走的条目：移动后选中必须一并清理。
     {
-        let pane = browser.pane_by_id_mut(BrowserPaneId(1)).unwrap();
-        pane.selected = Some(source.clone());
-        pane.selected_paths.insert(source.clone());
-        pane.selection_anchor = Some(source.clone());
+        let tab = browser.pane_by_id_mut(BrowserPaneId(1)).unwrap().tab_mut();
+        tab.selected = Some(source.clone());
+        tab.selected_paths.insert(source.clone());
+        tab.selection_anchor = Some(source.clone());
     }
 
     std::fs::rename(&source, &target).unwrap();
@@ -396,27 +392,18 @@ async fn cross_pane_move_updates_inactive_source_and_active_target() {
         }]),
     );
 
-    // 目标面板（活动镜像）插入目标条目。
     assert_eq!(entry_paths(&browser), vec!["moved.txt"]);
-    // 源面板（非活动）移除源条目，选中集合/锚点同步清理 —— 与活动镜像
-    // 的增量应用语义保持一致，不允许面板之间出现两套选中清理规则。
-    let pane = browser.pane_by_id(BrowserPaneId(1)).unwrap();
-    assert!(pane.entries.iter().all(|entry| entry.path != source));
-    assert_eq!(pane.selected, None);
-    assert!(pane.selected_paths.is_empty());
-    assert_eq!(pane.selection_anchor, None);
-    // pane.sync_active_tab_state() 必须把新列表回写活动标签页。
-    let tab = pane
-        .tabs
-        .iter()
-        .find(|tab| tab.id == pane.active_tab_id)
-        .expect("active tab must exist");
+    // 源面板（非活动）移除源条目，选中集合/锚点同步清理；活动与否不改变
+    // 清理规则。
+    let tab = browser.pane_by_id(BrowserPaneId(1)).unwrap().tab();
     assert!(tab.entries.iter().all(|entry| entry.path != source));
+    assert_eq!(tab.selected, None);
+    assert!(tab.selected_paths.is_empty());
+    assert_eq!(tab.selection_anchor, None);
 }
 
-/// 对账不变量：源父目录仅被非活动面板显示且仍含源条目时必须判「未反映」。
-/// 修复前 displayed_entries_for 只认活动镜像，「无从核对」被误判为通过，
-/// 全量兜底永不触发 —— 这正是 bug 中两面板永久陈旧的另一半原因。
+/// 对账不变量：源父目录仅被非活动面板显示且仍含源条目时必须判「未反映」，
+/// 否则「无从核对」被误判为通过，全量兜底永不触发。
 #[tokio::test]
 async fn reconciliation_fails_when_source_parent_only_visible_in_inactive_pane() {
     let workspace = tempfile::tempdir().unwrap();
@@ -493,4 +480,277 @@ async fn watcher_event_updates_directory_displayed_only_by_inactive_pane() {
         pane_entry_names(&browser, BrowserPaneId(1)),
         vec!["external.txt"]
     );
+}
+
+/// 后台标签（同一窗格里未激活的标签）与活动标签显示同一目录时，增量
+/// 各应用一次：切回后台标签时列表已是最新，不依赖切换时的重扫。
+#[tokio::test]
+async fn changes_reach_background_tab_showing_the_same_directory() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("a.txt"), b"a").unwrap();
+    let mut browser = split_browser_with_panes(workspace.path(), workspace.path()).await;
+    let mut background_tab = BrowserTab::directory(9, workspace.path().to_path_buf());
+    background_tab.directory_discovery = Some(discovery_for(workspace.path()).await);
+    background_tab.directory_collection_phase = DirectoryCollectionPhase::Ready;
+    background_tab.entries = crate::model::display_entries_in_discovery_order(
+        background_tab.directory_discovery.as_ref().unwrap(),
+    )
+    .into();
+    browser.pane_mut().tabs.push(background_tab);
+
+    std::fs::write(workspace.path().join("fresh.txt"), b"f").unwrap();
+    let task = browser.apply_entry_changes(
+        workspace.path(),
+        &[added(workspace.path().join("fresh.txt"))],
+    );
+
+    assert!(task.is_some());
+    for pane in &browser.panes {
+        for tab in &pane.tabs {
+            assert!(
+                tab.entries
+                    .iter()
+                    .any(|entry| entry.path.ends_with("fresh.txt")),
+                "pane {:?} tab {} missed the change",
+                pane.id,
+                tab.id
+            );
+        }
+    }
+}
+
+/// 增量删除让内容缩短时，停在旧内容底部的视口要在同一转换里收回来，
+/// 否则虚拟列表按旧偏移渲染出整屏空白。
+#[tokio::test]
+async fn incremental_removals_reclamp_a_viewport_left_past_the_content() {
+    let workspace = tempfile::tempdir().unwrap();
+    for index in 0..5 {
+        std::fs::write(workspace.path().join(format!("f{index}.txt")), b"x").unwrap();
+    }
+    let (mut browser, _) = FileBrowser::new(config::default_user_config());
+    browser.tab_mut().current_dir = workspace.path().to_path_buf();
+    browser.tab_mut().view_mode = BrowserViewMode::List;
+    browser.tab_mut().directory_discovery = Some(discovery_for(workspace.path()).await);
+    browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Ready;
+    browser.set_entries(Arc::new(crate::model::display_entries_in_discovery_order(
+        browser.tab().directory_discovery.as_ref().unwrap(),
+    )));
+    browser.pane_mut().column_viewports.insert(
+        workspace.path().to_path_buf(),
+        ColumnViewport {
+            offset_y: 22000.0,
+            height: 800.0,
+        },
+    );
+
+    let removals = (0..3)
+        .map(|index| removed(workspace.path().join(format!("f{index}.txt"))))
+        .collect::<Vec<_>>();
+    drop(browser.apply_entry_changes(workspace.path(), &removals));
+
+    assert_eq!(
+        browser.pane().column_viewports[workspace.path()].offset_y,
+        0.0
+    );
+}
+
+// ---- 扫描期间到达的变化：排队，落地后按到达顺序重放 ----
+//
+// 扫描读到的是启动那一刻的磁盘，期间的变化若直接改旧列表，会被落地的结果
+// 整体覆盖。这里断言的不变量：扫描中不碰列表、落地后补上、顺序与到达一致、
+// 被新扫描取代的队列不再重放。
+
+/// 让当前目录开始一次扫描，并取得「启动那一刻」的磁盘快照。
+async fn start_current_scan(
+    browser: &mut FileBrowser,
+    directory: &Path,
+) -> (DirectoryLoadRequest, DirectoryDiscovery) {
+    browser.tab_mut().current_dir = directory.to_path_buf();
+    browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Discovering;
+    let request = browser.next_directory_load_request(directory.to_path_buf());
+    (request, discovery_for(directory).await)
+}
+
+fn removed(path: PathBuf) -> ResolvedEntryChange {
+    ResolvedEntryChange::Removed { path }
+}
+
+#[tokio::test]
+async fn changes_during_a_scan_are_applied_after_it_lands() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("a.txt"), b"a").unwrap();
+    std::fs::write(workspace.path().join("b.txt"), b"b").unwrap();
+    let (mut browser, _) = FileBrowser::new(config::default_user_config());
+    let (request, snapshot) = start_current_scan(&mut browser, workspace.path()).await;
+
+    std::fs::write(workspace.path().join("c.txt"), b"c").unwrap();
+    std::fs::remove_file(workspace.path().join("a.txt")).unwrap();
+    let added_c = added(workspace.path().join("c.txt"));
+    assert!(browser
+        .apply_entry_changes(workspace.path(), &[added_c])
+        .is_some());
+    assert!(browser
+        .apply_entry_changes(workspace.path(), &[removed(workspace.path().join("a.txt"))])
+        .is_some());
+    // 扫描没落地之前，增量不碰列表。
+    assert!(entry_paths(&browser).is_empty());
+
+    drop(browser.accept_directory_discovery(request, PrebuiltDirectoryDiscovery::build(snapshot)));
+
+    assert_eq!(entry_paths(&browser), vec!["b.txt", "c.txt"]);
+    assert!(browser.tab().pending_changes.is_empty());
+}
+
+#[tokio::test]
+async fn queued_changes_replay_in_arrival_order() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("a.txt"), b"a").unwrap();
+    let (mut browser, _) = FileBrowser::new(config::default_user_config());
+    let (request, snapshot) = start_current_scan(&mut browser, workspace.path()).await;
+
+    // 先出现再消失：反过来重放会留下 c.txt。
+    let c = workspace.path().join("c.txt");
+    std::fs::write(&c, b"c").unwrap();
+    drop(browser.apply_entry_changes(workspace.path(), &[added(c.clone())]));
+    std::fs::remove_file(&c).unwrap();
+    drop(browser.apply_entry_changes(workspace.path(), &[removed(c)]));
+
+    drop(browser.accept_directory_discovery(request, PrebuiltDirectoryDiscovery::build(snapshot)));
+
+    assert_eq!(entry_paths(&browser), vec!["a.txt"]);
+}
+
+#[tokio::test]
+async fn rescan_required_during_a_scan_still_falls_back_to_full_reload() {
+    let workspace = tempfile::tempdir().unwrap();
+    let (mut browser, _) = FileBrowser::new(config::default_user_config());
+    let _scan = start_current_scan(&mut browser, workspace.path()).await;
+
+    assert!(browser
+        .apply_entry_changes(workspace.path(), &[ResolvedEntryChange::RescanRequired])
+        .is_none());
+}
+
+#[tokio::test]
+async fn a_newer_scan_discards_changes_queued_for_the_older_one() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("a.txt"), b"a").unwrap();
+    let (mut browser, _) = FileBrowser::new(config::default_user_config());
+    let _superseded = start_current_scan(&mut browser, workspace.path()).await;
+    let c = workspace.path().join("c.txt");
+    std::fs::write(&c, b"c").unwrap();
+    drop(browser.apply_entry_changes(workspace.path(), &[added(c.clone())]));
+
+    // c.txt 在第二次扫描启动前已经没了：第二次扫描读到的磁盘早于旧队列
+    // 里的事件之后，重放旧事件会把已删除的文件重新变出来。
+    std::fs::remove_file(&c).unwrap();
+    let (request, snapshot) = start_current_scan(&mut browser, workspace.path()).await;
+    drop(browser.accept_directory_discovery(request, PrebuiltDirectoryDiscovery::build(snapshot)));
+
+    assert_eq!(entry_paths(&browser), vec!["a.txt"]);
+    assert!(browser.tab().pending_changes.is_empty());
+}
+
+#[tokio::test]
+async fn scan_in_a_pane_without_focus_queues_and_replays_its_own_changes() {
+    let workspace = tempfile::tempdir().unwrap();
+    let active_dir = workspace.path().join("active");
+    let other_dir = workspace.path().join("other");
+    std::fs::create_dir_all(&active_dir).unwrap();
+    std::fs::create_dir_all(&other_dir).unwrap();
+    std::fs::write(other_dir.join("a.txt"), b"a").unwrap();
+    let mut browser = split_browser_with_panes(&active_dir, &other_dir).await;
+    let other_pane = BrowserPaneId(1);
+    browser
+        .pane_by_id_mut(other_pane)
+        .unwrap()
+        .tab_mut()
+        .directory_collection_phase = DirectoryCollectionPhase::Discovering;
+    let (request, _cancel) = browser.begin_directory_load(other_pane, other_dir.clone());
+    let snapshot = discovery_for(&other_dir).await;
+
+    std::fs::write(other_dir.join("b.txt"), b"b").unwrap();
+    drop(browser.apply_entry_changes(&other_dir, &[added(other_dir.join("b.txt"))]));
+    assert_eq!(pane_entry_names(&browser, other_pane), vec!["a.txt"]);
+
+    drop(browser.accept_directory_discovery(request, PrebuiltDirectoryDiscovery::build(snapshot)));
+
+    assert_eq!(
+        pane_entry_names(&browser, other_pane),
+        vec!["a.txt", "b.txt"]
+    );
+}
+
+/// 监听范围 = 所有可见窗格的目录：扫描期间不拆订阅，否则期间的变化没人收；
+/// 非活动窗格的目录也要监听，回收站视图不走文件监听。
+#[tokio::test]
+async fn watched_directories_cover_every_visible_pane_even_while_scanning() {
+    let workspace = tempfile::tempdir().unwrap();
+    let active_dir = workspace.path().join("active");
+    let other_dir = workspace.path().join("other");
+    std::fs::create_dir_all(&active_dir).unwrap();
+    std::fs::create_dir_all(&other_dir).unwrap();
+    let mut browser = split_browser_with_panes(&active_dir, &other_dir).await;
+    for pane in &mut browser.panes {
+        pane.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Discovering;
+    }
+
+    let watched = browser.watched_directories();
+    assert!(watched.contains(&active_dir));
+    assert!(watched.contains(&other_dir));
+
+    browser
+        .pane_by_id_mut(BrowserPaneId(1))
+        .unwrap()
+        .tab_mut()
+        .is_trash_view = true;
+    assert!(!browser.watched_directories().contains(&other_dir));
+}
+
+#[tokio::test]
+async fn changes_during_an_expanded_directory_scan_are_applied_after_it_lands() {
+    let workspace = tempfile::tempdir().unwrap();
+    let child = workspace.path().join("child");
+    std::fs::create_dir_all(&child).unwrap();
+    std::fs::write(child.join("a.txt"), b"a").unwrap();
+    let (mut browser, _) = FileBrowser::new(config::default_user_config());
+    browser.tab_mut().current_dir = workspace.path().to_path_buf();
+    browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Ready;
+    let snapshot = discovery_for(&child).await;
+    let mut expanded = expanded_loaded(snapshot.clone());
+    expanded.status = ExpandedDirectoryStatus::Loading;
+    expanded.entries.clear();
+    expanded.directory_discovery = None;
+    let (request, _cancel) = FileBrowser::next_expanded_directory_load_request(
+        DirectoryExpansionLoadContext::BrowserTree {
+            pane_id: BrowserPaneId::PRIMARY,
+        },
+        child.clone(),
+        &mut expanded,
+    );
+    browser
+        .tab_mut()
+        .expanded_directories
+        .insert(child.clone(), expanded);
+
+    std::fs::write(child.join("b.txt"), b"b").unwrap();
+    assert!(browser
+        .apply_entry_changes(&child, &[added(child.join("b.txt"))])
+        .is_some());
+    assert!(browser.tab().expanded_directories[&child]
+        .entries
+        .is_empty());
+
+    drop(browser.accept_expanded_directory_discovery(
+        request,
+        Ok(PrebuiltDirectoryDiscovery::build(snapshot)),
+    ));
+
+    let names = browser.tab().expanded_directories[&child]
+        .entries
+        .iter()
+        .map(|entry| entry.name().to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(names, vec!["a.txt", "b.txt"]);
+    assert!(browser.tab().pending_changes.is_empty());
 }

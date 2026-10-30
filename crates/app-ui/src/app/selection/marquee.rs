@@ -60,7 +60,7 @@ impl FileBrowser {
         self.drag_selection_anchor = None;
         self.cancel_file_drag_interaction();
         let preserve_existing = self.keyboard_modifiers.control();
-        let base_selection = self.selected_paths.clone();
+        let base_selection = self.tab().selected_paths.clone();
         if matches!(&source, SelectionMarqueeSource::PaneBlank) && !preserve_existing {
             self.set_deepest_open_column_directory(None);
         }
@@ -77,11 +77,12 @@ impl FileBrowser {
             }
         }
         self.record_pane_drag_pointer_press();
+        let origin = self.cursor_or_origin();
         let scroll_anchor = self.selection_marquee_scroll_anchor(&source);
         self.selection_marquee = Some(SelectionMarquee {
-            gesture_origin: self.cursor_position,
-            start: self.cursor_position,
-            current: self.cursor_position,
+            gesture_origin: origin,
+            start: origin,
+            current: origin,
             source,
             phase: SelectionMarqueePhase::WaitingForMovement,
             scroll_anchor,
@@ -95,28 +96,28 @@ impl FileBrowser {
         &self,
         source: &SelectionMarqueeSource,
     ) -> SelectionMarqueeScrollAnchor {
-        let pane_id = self.active_pane_id();
-        match self.view_mode {
+        let pane = self.pane();
+        let pane_id = pane.id;
+        let current_dir = &pane.tab().current_dir;
+        match pane.tab().view_mode {
             BrowserViewMode::List => SelectionMarqueeScrollAnchor::List {
                 pane_id,
-                offset_y: self
+                offset_y: pane
                     .column_viewports
-                    .get(&self.current_dir)
+                    .get(current_dir)
                     .map_or(0.0, |viewport| viewport.offset_y),
             },
             BrowserViewMode::Icons => SelectionMarqueeScrollAnchor::Icons {
                 pane_id,
-                offset_y: self
-                    .icon_grid_viewport_for(pane_id, &self.current_dir)
-                    .offset_y,
+                offset_y: self.icon_grid_viewport_for(pane_id, current_dir).offset_y,
             },
             BrowserViewMode::Columns => match source {
                 SelectionMarqueeSource::ColumnBlank { directory } => {
                     SelectionMarqueeScrollAnchor::Column {
                         pane_id,
                         directory: directory.clone(),
-                        browser_offset_x: self.column_browser_viewport.offset_x,
-                        directory_offset_y: self
+                        browser_offset_x: pane.column_browser_viewport.offset_x,
+                        directory_offset_y: pane
                             .column_viewports
                             .get(directory)
                             .map_or(0.0, |viewport| viewport.offset_y),
@@ -126,7 +127,7 @@ impl FileBrowser {
                 | SelectionMarqueeSource::IconGridPanel { .. } => {
                     SelectionMarqueeScrollAnchor::ColumnBrowser {
                         pane_id,
-                        offset_x: self.column_browser_viewport.offset_x,
+                        offset_x: pane.column_browser_viewport.offset_x,
                     }
                 }
             },
@@ -177,8 +178,8 @@ impl FileBrowser {
         let marquee_rectangle = marquee.rectangle();
         let icon_grid_panel_directory = match &marquee.source {
             SelectionMarqueeSource::IconGridPanel { directory } => Some(directory.as_path()),
-            SelectionMarqueeSource::PaneBlank if self.view_mode == BrowserViewMode::Icons => {
-                Some(self.current_dir.as_path())
+            SelectionMarqueeSource::PaneBlank if self.tab().view_mode == BrowserViewMode::Icons => {
+                Some(self.tab().current_dir.as_path())
             }
             SelectionMarqueeSource::PaneBlank | SelectionMarqueeSource::ColumnBlank { .. } => None,
         };
@@ -204,14 +205,15 @@ impl FileBrowser {
             }
         }
 
-        self.selected_paths = next_selection;
-        self.selected = self.last_visible_selected_path();
-        if let Some(selected) = self.selected.clone() {
+        self.tab_mut().selected_paths = next_selection;
+        let selected = self.last_visible_selected_path();
+        self.tab_mut().selected = selected.clone();
+        if let Some(selected) = selected {
             self.update_rename_input(&selected);
         } else {
             self.rename_input.clear();
         }
-        Task::none()
+        self.schedule_selected_metadata_for_all_panes()
     }
 }
 

@@ -33,10 +33,8 @@ fn browser_for_search_tests(root: PathBuf) -> FileBrowser {
         tempdir().unwrap().keep()
     };
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = root.clone();
-    browser.directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
-    let pane_id = browser.active_pane_id();
-    browser.pane_by_id_mut(pane_id).unwrap().current_dir = root;
+    browser.tab_mut().current_dir = root.clone();
+    browser.tab_mut().directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
     browser
 }
 
@@ -141,9 +139,7 @@ fn real_query_records_last_scope_and_restores_it_on_next_workspace() {
     );
 
     drop(browser.close_search_workspace());
-    browser.current_dir = elsewhere.clone();
-    let pane_id = browser.active_pane_id();
-    browser.pane_by_id_mut(pane_id).unwrap().current_dir = elsewhere;
+    browser.tab_mut().current_dir = elsewhere;
     stabilize_search_input(&mut browser, "report");
 
     let workspace = browser.search_workspace.as_ref().unwrap();
@@ -200,7 +196,7 @@ fn selecting_history_preserves_root_and_invalidates_stable_input_request() {
         .user_config
         .search_history
         .record_submission("report");
-    browser.current_dir = tempdir().unwrap().keep();
+    browser.tab_mut().current_dir = tempdir().unwrap().keep();
 
     drop(browser.select_search_history_keyword("report".to_owned()));
 
@@ -259,7 +255,7 @@ fn opening_search_workspace_clears_file_view_pointer_interactions() {
         base_selection: HashSet::new(),
         preserve_existing: false,
     });
-    browser.drag_selection_anchor = Some(browser.current_dir.join("anchor.txt"));
+    browser.drag_selection_anchor = Some(browser.tab().current_dir.join("anchor.txt"));
 
     drop(browser.submit_search());
 
@@ -285,7 +281,7 @@ fn service_status_is_independent_from_search_workspace_lifecycle() {
 #[test]
 fn workspace_freezes_root_while_nonempty_input_stays_scoped() {
     let mut browser = browser_for_search_tests(PathBuf::from("/workspace-a"));
-    let frozen_root = browser.current_dir.clone();
+    let frozen_root = browser.tab().current_dir.clone();
     drop(browser.submit_search());
     let empty_generation = browser.search_workspace.as_ref().unwrap().run.generation;
     assert!(browser
@@ -296,7 +292,7 @@ fn workspace_freezes_root_while_nonempty_input_stays_scoped() {
         .active_query
         .is_none());
 
-    browser.current_dir = tempdir().unwrap().keep();
+    browser.tab_mut().current_dir = tempdir().unwrap().keep();
     stabilize_search_input(&mut browser, "later");
 
     let workspace = browser.search_workspace.as_ref().unwrap();
@@ -823,6 +819,7 @@ fn reopening_workspace_rejects_old_session_and_clears_type_menu() {
 fn search_selection_does_not_mutate_browser_selection() {
     let mut browser = browser_for_search_tests(PathBuf::from("/workspace"));
     browser
+        .tab_mut()
         .selected_paths
         .insert(PathBuf::from("/workspace/browser.txt"));
     stabilize_search_input(&mut browser, "selection");
@@ -849,8 +846,9 @@ fn search_selection_does_not_mutate_browser_selection() {
         browser.active_search_selection().unwrap(),
         vec![first, second]
     );
-    assert_eq!(browser.selected_paths.len(), 1);
+    assert_eq!(browser.tab().selected_paths.len(), 1);
     assert!(browser
+        .tab()
         .selected_paths
         .contains(Path::new("/workspace/browser.txt")));
 }
@@ -868,9 +866,9 @@ fn opening_containing_directory_closes_workspace_and_reveals_result() {
     drop(browser.open_search_containing_directory(path.clone()));
 
     assert!(browser.search_workspace.is_none());
-    assert_eq!(browser.current_dir, parent);
-    assert_eq!(browser.selected.as_ref(), Some(&path));
-    assert!(browser.selected_paths.contains(&path));
+    assert_eq!(browser.tab().current_dir, parent);
+    assert_eq!(browser.tab().selected.as_ref(), Some(&path));
+    assert!(browser.tab().selected_paths.contains(&path));
 }
 
 #[test]
@@ -913,7 +911,7 @@ fn activating_non_utf8_directory_preserves_native_path_and_closes_workspace() {
 
     drop(browser.activate_search_path(path.clone()));
 
-    assert_eq!(browser.current_dir, path);
+    assert_eq!(browser.tab().current_dir, path);
     assert!(browser.search_workspace.is_none());
 }
 

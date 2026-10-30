@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use file_core::{DirectoryEntry, EntryMetadata, FileKind, ScanWarning, TrashEntry, TrashScan};
@@ -6,40 +5,11 @@ use file_core::{DirectoryEntry, EntryMetadata, FileKind, ScanWarning, TrashEntry
 use super::FileBrowser;
 use crate::config;
 use crate::model::{
-    BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, ColumnBrowserViewport,
-    NavigationMode, SplitAxis,
+    BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, NavigationMode, SplitAxis,
 };
-use crate::thumbnail_cache::ColumnViewport;
 
 fn pane_from_tab(pane_id: BrowserPaneId, tab: BrowserTab) -> BrowserPane {
-    BrowserPane {
-        id: pane_id,
-        current_dir: tab.directory.clone(),
-        is_trash_view: tab.is_trash_view,
-        entries: tab.entries.clone(),
-        directory_discovery: tab.directory_discovery.clone(),
-        directory_loading_placeholder: None,
-        trash_entries: tab.trash_entries.clone(),
-        selected: tab.selected.clone(),
-        selected_paths: tab.selected_paths.clone(),
-        selection_anchor: tab.selection_anchor.clone(),
-        deepest_open_column_directory: tab.deepest_open_column_directory.clone(),
-        expanded_directories: tab.expanded_directories.clone(),
-        view_mode: tab.view_mode,
-        column_browser_viewport: ColumnBrowserViewport::default(),
-        column_viewports: HashMap::<PathBuf, ColumnViewport>::new(),
-        tabs: vec![tab.clone()],
-        active_tab_id: tab.id,
-        directory_load_generation: 0,
-        directory_load_cancel: None,
-        back_stack: Vec::new(),
-        forward_stack: Vec::new(),
-        directory_collection_phase: crate::model::DirectoryCollectionPhase::Discovering,
-        directory_order_phase: crate::model::DirectoryOrderPhase::Ready {
-            field: file_core::SortField::Name,
-            direction: file_core::SortDirection::Ascending,
-        },
-    }
+    BrowserPane::new(pane_id, tab)
 }
 
 #[test]
@@ -80,11 +50,11 @@ fn opening_trash_projects_the_cached_snapshot_without_a_loading_placeholder() {
 
     drop(browser.open_trash_view(NavigationMode::RecordHistory));
 
-    assert!(browser.is_trash_view);
-    assert!(!browser.directory_collection_phase.is_discovering());
-    assert!(browser.directory_loading_placeholder.is_none());
-    assert_eq!(browser.entries.len(), 1);
-    assert_eq!(browser.entries[0].path, trash_path);
+    assert!(browser.tab().is_trash_view);
+    assert!(!browser.tab().directory_collection_phase.is_discovering());
+    assert!(browser.pane().directory_loading_placeholder.is_none());
+    assert_eq!(browser.tab().entries.len(), 1);
+    assert_eq!(browser.tab().entries[0].path, trash_path);
 }
 
 #[test]
@@ -158,8 +128,8 @@ fn completed_refresh_removes_unmounted_entries_and_selection_from_all_trash_pane
         active: primary_id,
         first_portion: 500,
     };
-    browser.panes = vec![primary.clone(), secondary];
-    browser.restore_pane_snapshot(primary);
+    browser.panes = vec![primary, secondary];
+    browser.reset_active_pane_context();
     let request = browser.trash_refresh.begin_if_idle().unwrap();
 
     drop(browser.accept_trash_refresh_completion(
@@ -171,17 +141,14 @@ fn completed_refresh_removes_unmounted_entries_and_selection_from_all_trash_pane
     ));
 
     for pane in &browser.panes {
-        assert!(pane.entries.is_empty());
-        assert!(pane.trash_entries.is_empty());
-        assert!(pane.selected.is_none());
-        assert!(pane.selected_paths.is_empty());
-        assert!(pane.selection_anchor.is_none());
-        assert!(!pane.directory_collection_phase.is_discovering());
+        let tab = pane.tab();
+        assert!(tab.entries.is_empty());
+        assert!(tab.trash_entries.is_empty());
+        assert!(tab.selected.is_none());
+        assert!(tab.selected_paths.is_empty());
+        assert!(tab.selection_anchor.is_none());
+        assert!(!tab.directory_collection_phase.is_discovering());
     }
-    assert!(browser.entries.is_empty());
-    assert!(browser.selected.is_none());
-    assert!(browser.selected_paths.is_empty());
-    assert!(browser.selection_anchor.is_none());
 }
 
 #[test]
@@ -202,8 +169,8 @@ fn completed_refresh_survives_initiating_tab_close_and_updates_other_trash_pane(
         active: primary_id,
         first_portion: 500,
     };
-    browser.panes = vec![primary_trash.clone(), secondary_trash];
-    browser.restore_pane_snapshot(primary_trash);
+    browser.panes = vec![primary_trash, secondary_trash];
+    browser.reset_active_pane_context();
 
     let request = browser
         .trash_refresh
@@ -214,8 +181,8 @@ fn completed_refresh_survives_initiating_tab_close_and_updates_other_trash_pane(
         primary_id,
         BrowserTab::directory(3, PathBuf::from("/workspace")),
     );
-    browser.panes[0] = primary_directory.clone();
-    browser.restore_pane_snapshot(primary_directory);
+    browser.panes[0] = primary_directory;
+    browser.reset_active_pane_context();
 
     let entry = TrashEntry::from_historical_entry(
         trashed_path.clone(),
@@ -240,9 +207,9 @@ fn completed_refresh_survives_initiating_tab_close_and_updates_other_trash_pane(
     ));
 
     let secondary = browser.pane_by_id(secondary_id).expect("secondary pane");
-    assert_eq!(secondary.trash_entries.len(), 1);
-    assert_eq!(secondary.selected.as_ref(), Some(&trashed_path));
-    assert!(secondary.selected_paths.contains(&trashed_path));
+    assert_eq!(secondary.tab().trash_entries.len(), 1);
+    assert_eq!(secondary.tab().selected.as_ref(), Some(&trashed_path));
+    assert!(secondary.tab().selected_paths.contains(&trashed_path));
     assert_eq!(
         browser
             .trash_refresh
@@ -257,7 +224,7 @@ fn completed_refresh_survives_initiating_tab_close_and_updates_other_trash_pane(
 #[test]
 fn trash_watch_event_refreshes_snapshot_but_unrelated_paths_do_not() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.is_trash_view = true;
+    browser.tab_mut().is_trash_view = true;
     let watch_root = file_core::trash_bin::trash_watch_directories()
         .into_iter()
         .next()
@@ -275,7 +242,7 @@ fn trash_watch_event_refreshes_snapshot_but_unrelated_paths_do_not() {
 #[test]
 fn trash_watch_event_during_batch_operation_defers_rescan_until_it_finishes() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.is_trash_view = true;
+    browser.tab_mut().is_trash_view = true;
     let watch_root = file_core::trash_bin::trash_watch_directories()
         .into_iter()
         .next()

@@ -6,8 +6,8 @@ use tokio_util::sync::CancellationToken;
 use super::*;
 use crate::config;
 use crate::model::{
-    BrowserPaneId, BrowserPaneLayout, BrowserTab, ExpandedDirectory, ExpandedDirectoryStatus,
-    SplitAxis,
+    BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, ExpandedDirectory,
+    ExpandedDirectoryStatus, SplitAxis,
 };
 use crate::operation_history::FileOperationOutcome;
 use crate::operation_queue::test_persistence::{attach_store, enqueue_persisted};
@@ -55,37 +55,26 @@ fn cross_directory_move_invalidates_source_and_preserves_target_tab_tree() {
     let source_tab_id = 20;
     let target_tab_id = 21;
 
-    let mut source_pane = browser.capture_active_pane_snapshot();
-    source_pane.id = source_pane_id;
-    source_pane.current_dir = source_directory.clone();
-    source_pane.entries = vec![directory_entry("/source/item")].into();
-    source_pane.selected = Some(source_path.clone());
-    source_pane.deepest_open_column_directory = Some(source_path.clone());
-    source_pane.expanded_directories.insert(
+    let mut source_tab = BrowserTab::directory(source_tab_id, source_directory);
+    source_tab.entries = vec![directory_entry("/source/item")].into();
+    source_tab.selected = Some(source_path.clone());
+    source_tab.deepest_open_column_directory = Some(source_path.clone());
+    source_tab.expanded_directories.insert(
         source_path.clone(),
         loading_expanded_directory(source_load_cancellation.clone()),
     );
-    source_pane.tabs = vec![BrowserTab::directory(source_tab_id, source_directory)];
-    source_pane.active_tab_id = source_tab_id;
-    source_pane.sync_active_tab_state();
+    let source_pane = BrowserPane::new(source_pane_id, source_tab);
 
-    let mut target_pane = browser.capture_active_pane_snapshot();
-    target_pane.current_dir = target_directory.clone();
-    target_pane.entries = vec![directory_entry("/target/existing")].into();
-    target_pane.deepest_open_column_directory = Some(target_expanded_directory.clone());
-    target_pane.expanded_directories.insert(
+    let mut target_tab = BrowserTab::directory(target_tab_id, target_directory.clone());
+    target_tab.entries = vec![directory_entry("/target/existing")].into();
+    target_tab.deepest_open_column_directory = Some(target_expanded_directory.clone());
+    target_tab.expanded_directories.insert(
         target_expanded_directory.clone(),
         loading_expanded_directory(target_load_cancellation.clone()),
     );
-    target_pane.tabs = vec![BrowserTab::directory(
-        target_tab_id,
-        target_directory.clone(),
-    )];
-    target_pane.active_tab_id = target_tab_id;
-    target_pane.sync_active_tab_state();
+    let target_pane = BrowserPane::new(BrowserPaneId::PRIMARY, target_tab);
 
-    browser.panes[0] = target_pane.clone();
-    browser.panes.push(source_pane);
+    browser.panes = vec![target_pane, source_pane];
     browser.pane_layout = BrowserPaneLayout::Split {
         axis: SplitAxis::Horizontal,
         first: BrowserPaneId::PRIMARY,
@@ -93,7 +82,6 @@ fn cross_directory_move_invalidates_source_and_preserves_target_tab_tree() {
         active: BrowserPaneId::PRIMARY,
         first_portion: 500,
     };
-    browser.apply_pane_browsing_snapshot(target_pane);
     let operation_directory = tempfile::tempdir().expect("create operation directory");
     attach_store(
         &mut browser.operation_queue,
@@ -124,27 +112,24 @@ fn cross_directory_move_invalidates_source_and_preserves_target_tab_tree() {
         }),
     ));
 
-    assert_eq!(browser.current_dir, target_directory);
-    assert_eq!(browser.entries.len(), 1);
+    assert_eq!(browser.tab().current_dir, target_directory);
+    assert_eq!(browser.tab().entries.len(), 1);
     assert_eq!(
-        browser.deepest_open_column_directory,
+        browser.tab().deepest_open_column_directory,
         Some(target_expanded_directory.clone())
     );
     let refreshed_target = browser
+        .tab()
         .expanded_directories
         .get(&target_expanded_directory)
         .expect("target expansion survives reload scheduling");
     assert!(refreshed_target.load_generation > 1);
     assert!(target_load_cancellation.is_cancelled());
-    assert!(browser.directory_load_generation > 0);
+    assert!(browser.pane().directory_load_generation > 0);
 
     let source_pane = browser
         .pane_by_id(source_pane_id)
         .expect("source pane survives");
-    assert!(source_pane.entries.is_empty());
-    assert!(source_pane.selected.is_none());
-    assert!(source_pane.deepest_open_column_directory.is_none());
-    assert!(source_pane.expanded_directories.is_empty());
     let source_tab = source_pane.tabs.first().expect("source tab survives");
     assert!(source_tab.entries.is_empty());
     assert!(source_tab.selected.is_none());
@@ -155,14 +140,6 @@ fn cross_directory_move_invalidates_source_and_preserves_target_tab_tree() {
     let target_pane = browser
         .pane_by_id(BrowserPaneId::PRIMARY)
         .expect("target pane survives");
-    assert_eq!(target_pane.entries.len(), 1);
-    assert_eq!(
-        target_pane.deepest_open_column_directory.as_ref(),
-        Some(&target_expanded_directory)
-    );
-    assert!(target_pane
-        .expanded_directories
-        .contains_key(&target_expanded_directory));
     let target_tab = target_pane.tabs.first().expect("target tab survives");
     assert_eq!(target_tab.entries.len(), 1);
     assert_eq!(

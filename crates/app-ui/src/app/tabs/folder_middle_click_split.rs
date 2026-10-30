@@ -2,9 +2,8 @@ use std::path::PathBuf;
 
 use iced::Task;
 
-use super::{apply_tab_to_pane, pane_from_tab};
 use crate::app::FileBrowser;
-use crate::model::{BrowserPaneId, BrowserPaneLayout, BrowserTab, Message, SplitAxis};
+use crate::model::{BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, Message, SplitAxis};
 
 impl FileBrowser {
     pub(in crate::app) fn open_directory_from_middle_click(
@@ -29,7 +28,6 @@ impl FileBrowser {
     }
 
     fn open_directory_in_split(&mut self, directory: PathBuf, axis: SplitAxis) -> Task<Message> {
-        self.sync_active_tab_state();
         self.context_menu = None;
         self.preview_engine.clear_preview();
 
@@ -54,10 +52,8 @@ impl FileBrowser {
             first_portion,
         };
 
-        if let Some(destination) = self.pane_by_id(destination_id).cloned() {
-            self.restore_pane_snapshot(destination);
-            self.sync_tab_bar_visibility();
-        }
+        self.reset_active_pane_context();
+        self.sync_tab_bar_visibility();
         Task::batch([
             self.reload_current(),
             self.request_breadcrumb_drop_target_bounds_measurement(),
@@ -90,11 +86,11 @@ impl FileBrowser {
 
     fn put_directory_tab_in_pane(&mut self, pane_id: BrowserPaneId, tab: BrowserTab) {
         if let Some(pane) = self.pane_by_id_mut(pane_id) {
-            pane.tabs.push(tab.clone());
-            pane.active_tab_id = tab.id;
-            apply_tab_to_pane(pane, &tab);
+            let tab_id = tab.id;
+            pane.tabs.push(tab);
+            pane.activate_tab(tab_id);
         } else {
-            self.panes.push(pane_from_tab(pane_id, tab));
+            self.panes.push(BrowserPane::new(pane_id, tab));
         }
     }
 }
@@ -123,8 +119,8 @@ mod tests {
                 active: BrowserPaneId::PRIMARY
             }
         ));
-        assert_eq!(browser.tabs.len(), 2);
-        assert_eq!(browser.current_dir, directory);
+        assert_eq!(browser.pane().tabs.len(), 2);
+        assert_eq!(browser.tab().current_dir, directory);
     }
 
     #[test]
@@ -181,11 +177,12 @@ mod tests {
         assert_eq!(axis, expected_axis);
         assert_eq!(first, BrowserPaneId::PRIMARY);
         assert_eq!(active, second);
-        assert_eq!(browser.current_dir, directory);
+        assert_eq!(browser.tab().current_dir, directory);
         assert_eq!(
             browser
                 .pane_by_id(second)
                 .expect("split destination pane")
+                .tab()
                 .current_dir,
             directory
         );

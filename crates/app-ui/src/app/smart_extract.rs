@@ -82,7 +82,7 @@ impl FileBrowser {
     /// 单根，判定结果回流后计算目的地并走既有 inspect→密码→入队 流。
     pub(super) fn smart_extract_selected(&mut self) -> iced::Task<Message> {
         self.context_menu = None;
-        if self.is_trash_view || self.current_directory_is_inside_archive() {
+        if self.tab().is_trash_view || self.current_directory_is_inside_archive() {
             return iced::Task::none();
         }
         let archives = self.archive_selection_paths();
@@ -119,7 +119,7 @@ impl FileBrowser {
         archive: PathBuf,
     ) -> iced::Task<Message> {
         self.context_menu = None;
-        if self.is_trash_view || self.current_directory_is_inside_archive() {
+        if self.tab().is_trash_view || self.current_directory_is_inside_archive() {
             return iced::Task::none();
         }
         // 视图入口按 kind 路由，扩展名判定在状态边界兜底：非压缩包
@@ -170,7 +170,7 @@ impl FileBrowser {
     /// 右键「解压到 <包名>/」入口：无条件包一层后走既有解压流。
     pub(super) fn extract_selected_to_archive_folder(&mut self) -> iced::Task<Message> {
         self.context_menu = None;
-        if self.is_trash_view || self.current_directory_is_inside_archive() {
+        if self.tab().is_trash_view || self.current_directory_is_inside_archive() {
             return iced::Task::none();
         }
         let archives = self.archive_selection_paths();
@@ -258,7 +258,7 @@ mod tests {
     #[test]
     fn extract_archive_from_middle_click_noops_in_trash_view() {
         let mut browser = browser();
-        browser.is_trash_view = true;
+        browser.tab_mut().is_trash_view = true;
 
         drop(browser.extract_archive_from_middle_click(PathBuf::from("/workspace/bundle.zip")));
 
@@ -273,7 +273,7 @@ mod tests {
         let mut browser = browser();
         // 把当前目录指到压缩包路径上即可让 archive_path_identity 判定
         // 进入包内/包根语义，无需真实文件存在。
-        browser.current_dir = PathBuf::from("/workspace/bundle.zip");
+        browser.tab_mut().current_dir = PathBuf::from("/workspace/bundle.zip");
 
         drop(browser.extract_archive_from_middle_click(PathBuf::from("/workspace/bundle.zip")));
 

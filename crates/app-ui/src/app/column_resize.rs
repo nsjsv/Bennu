@@ -24,7 +24,7 @@ impl FileBrowser {
         self.rebaseline_column_width_overrides(self.column_browser_content_width());
         self.column_resize_drag = Some(ColumnResizeDrag {
             column_index,
-            cursor_start_x: self.cursor_position.x,
+            cursor_start_x: self.cursor_or_origin().x,
             width_start: self.column_width(column_index),
         });
         self.drag_selection_anchor = None;

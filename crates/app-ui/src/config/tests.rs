@@ -208,7 +208,7 @@ fn user_preferences_round_trip_through_sqlite() {
     config
         .window_controls
         .move_to_side(WindowControlKind::Close, WindowControlSide::Left);
-    config.icon_grid_size = 160;
+    config.icons_view_density = ViewDensityLevel::from_index(6);
     config
         .list_view_preferences
         .set_column_visible(ListColumnKind::Kind, false);
@@ -274,7 +274,7 @@ fn user_preferences_round_trip_through_sqlite() {
     assert!(loaded.save_view_state);
     assert_eq!(loaded.browser_view_mode, BrowserViewMode::List);
     assert_eq!(loaded.window_controls, config.window_controls);
-    assert_eq!(loaded.icon_grid_size, 160);
+    assert_eq!(loaded.icons_view_density.icon_grid_size(), 160);
     let loaded_columns = loaded
         .list_view_preferences
         .columns()
@@ -516,19 +516,21 @@ fn stored_icon_grid_size_is_normalized_at_config_boundary() {
     let default = default_user_config();
     let mut stored = default.user_preferences().to_stored();
     stored.icons_view_density = None;
-    stored.icon_grid_size = 1;
+    stored.icon_grid_size = Some(1);
     assert_eq!(
         UserPreferences::from_stored(stored.clone(), &default)
             .preferences
-            .icon_grid_size,
+            .icons_view_density
+            .icon_grid_size(),
         MIN_ICON_GRID_SIZE
     );
 
-    stored.icon_grid_size = u32::MAX;
+    stored.icon_grid_size = Some(u32::MAX);
     assert_eq!(
         UserPreferences::from_stored(stored, &default)
             .preferences
-            .icon_grid_size,
+            .icons_view_density
+            .icon_grid_size(),
         MAX_ICON_GRID_SIZE
     );
 }
@@ -562,7 +564,10 @@ fn legacy_icon_grid_preferences_are_loaded_and_normalized() {
     );
 
     assert_eq!(parsed.browser_view_mode, BrowserViewMode::Icons);
-    assert_eq!(parsed.icon_grid_size, MAX_ICON_GRID_SIZE);
+    assert_eq!(
+        parsed.icons_view_density.icon_grid_size(),
+        MAX_ICON_GRID_SIZE
+    );
     assert_eq!(parsed.icons_view_density.index(), 8);
 
     let parsed = legacy_toml::parse_toml_user_config(
@@ -574,9 +579,8 @@ fn legacy_icon_grid_preferences_are_loaded_and_normalized() {
             parsed.columns_view_density.index(),
             parsed.list_view_density.index(),
             parsed.icons_view_density.index(),
-            parsed.icon_grid_size,
         ),
-        (8, 0, 4, 128)
+        (8, 0, 4)
     );
 }
 
@@ -683,7 +687,10 @@ save_view_state = "maybe"
         default.file_operation_verification
     );
     assert_eq!(parsed.browser_view_mode, default.browser_view_mode);
-    assert_eq!(parsed.icon_grid_size, MIN_ICON_GRID_SIZE);
+    assert_eq!(
+        parsed.icons_view_density.icon_grid_size(),
+        MIN_ICON_GRID_SIZE
+    );
     assert_eq!(
         parsed.startup_location_policy,
         default.startup_location_policy
@@ -716,7 +723,10 @@ fn default_user_config_keeps_expected_preview_defaults() {
     assert_eq!(config.preview_size_limits.document_bytes, 100 * 1024 * 1024);
     assert_eq!(config.preview_directory_expand_levels, 1);
     assert_eq!(config.startup_location_policy, StartupLocationPolicy::Home);
-    assert_eq!(config.icon_grid_size, DEFAULT_ICON_GRID_SIZE);
+    assert_eq!(
+        config.icons_view_density.icon_grid_size(),
+        DEFAULT_ICON_GRID_SIZE
+    );
     assert_eq!(config.visible_column_count, DEFAULT_VISIBLE_COLUMN_COUNT);
     assert!(!config.save_view_state);
     assert_eq!(

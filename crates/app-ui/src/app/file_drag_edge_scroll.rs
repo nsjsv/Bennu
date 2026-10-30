@@ -57,7 +57,8 @@ impl FileBrowser {
         }
         let pane_id = self.pane_id_at_position(position)?;
         let pane_bounds = self.pane_bounds(pane_id)?;
-        let (region, offset) = match self.view_mode {
+        let view_mode = self.pane_by_id(pane_id)?.tab().view_mode;
+        let (region, offset) = match view_mode {
             BrowserViewMode::Columns => {
                 let (direction, step) = edge_approach(
                     position.x,
@@ -76,7 +77,7 @@ impl FileBrowser {
                     position.y,
                     (pane_bounds.y, pane_bounds.y + pane_bounds.height),
                 )?;
-                let region = match self.view_mode {
+                let region = match view_mode {
                     BrowserViewMode::Icons => ScrollbarRegion::PaneIcons(pane_id),
                     _ => ScrollbarRegion::PaneList(pane_id),
                 };
@@ -188,11 +189,11 @@ mod tests {
     #[test]
     fn edge_plan_points_up_near_top_in_list_view() {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.view_mode = BrowserViewMode::List;
+        browser.tab_mut().view_mode = BrowserViewMode::List;
         browser.file_drag = Some(FileDragState {
             gesture_id: crate::model::FileDragGestureId(1),
             source_pane_id: browser.active_pane_id(),
-            source_tab_id: browser.active_tab_id,
+            source_tab_id: browser.active_tab_id(),
             sources: vec![std::path::PathBuf::from("/tmp/a.txt")],
             pressed_path: std::path::PathBuf::from("/tmp/a.txt"),
             bookmark_source: None,
@@ -227,7 +228,7 @@ mod tests {
         // 原生拖放的 Moved 事件负责重算计划,原生会话本身不再阻断规划;
         // 应用内拖拽与原生拖放共用同一套边缘自动滚。
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.view_mode = BrowserViewMode::List;
+        browser.tab_mut().view_mode = BrowserViewMode::List;
         let session_id = desktop_linux::WaylandDndController::new()
             .start_file_drag(
                 vec![std::path::PathBuf::from("/tmp/a.txt")],
@@ -238,7 +239,7 @@ mod tests {
         browser.file_drag = Some(FileDragState {
             gesture_id: crate::model::FileDragGestureId(1),
             source_pane_id: browser.active_pane_id(),
-            source_tab_id: browser.active_tab_id,
+            source_tab_id: browser.active_tab_id(),
             sources: vec![std::path::PathBuf::from("/tmp/a.txt")],
             pressed_path: std::path::PathBuf::from("/tmp/a.txt"),
             bookmark_source: None,

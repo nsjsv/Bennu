@@ -334,22 +334,18 @@ impl FileBrowser {
         self.maximized_windows.clear();
         self.discard_search_workspace();
         self.invalidate_startup_directory_validation();
-        if let Some(cancellation) = self.directory_load_cancel.take() {
-            cancellation.cancel();
-        }
         for pane in &mut self.panes {
             if let Some(cancellation) = pane.directory_load_cancel.take() {
                 cancellation.cancel();
             }
-            for expanded in pane.expanded_directories.values_mut() {
+            for expanded in pane
+                .tabs
+                .iter_mut()
+                .flat_map(|tab| tab.expanded_directories.values_mut())
+            {
                 if let Some(cancellation) = expanded.load_cancel.take() {
                     cancellation.cancel();
                 }
-            }
-        }
-        for expanded in self.expanded_directories.values_mut() {
-            if let Some(cancellation) = expanded.load_cancel.take() {
-                cancellation.cancel();
             }
         }
         self.directory_metadata_in_flight.clear();

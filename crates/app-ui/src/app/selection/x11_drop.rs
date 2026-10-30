@@ -21,7 +21,7 @@ use crate::operation_queue::QueuedFileOperation;
 fn x11_multi_file_directory_drop_opens_one_existing_prompt() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let clipboard_directory = PathBuf::from("/workspace/clipboard-level");
-    browser.deepest_open_column_directory = Some(clipboard_directory.clone());
+    browser.tab_mut().deepest_open_column_directory = Some(clipboard_directory.clone());
     let id = X11FileDropTargetSessionId::unique();
     let request = begin_session(&mut browser, id, position(1, 40, 40), 1.0, 1);
     let destination = PathBuf::from("/workspace/destination");
@@ -229,7 +229,7 @@ fn x11_tab_hover_uses_shared_boundary_and_continues_on_new_page() {
         .expect("X11 session")
         .tab_hover = Some(hover.clone());
     drop(browser.accept_tab_hover_elapsed(hover));
-    assert_eq!(browser.active_tab_id, target.tab_id);
+    assert_eq!(browser.active_tab_id(), target.tab_id);
 
     let switched_request = match browser
         .file_drop_session
@@ -311,10 +311,10 @@ fn add_inactive_directory_tab(
     browser: &mut FileBrowser,
     directory: impl Into<PathBuf>,
 ) -> TabFileDropTarget {
-    let original_tab_id = browser.active_tab_id;
+    let original_tab_id = browser.active_tab_id();
     let directory = directory.into();
     drop(browser.open_directory_in_new_tab(directory.clone()));
-    let target_tab_id = browser.active_tab_id;
+    let target_tab_id = browser.active_tab_id();
     drop(browser.select_tab(original_tab_id));
     TabFileDropTarget {
         pane_id: browser.active_pane_id(),
@@ -324,9 +324,9 @@ fn add_inactive_directory_tab(
 }
 
 fn add_inactive_trash_tab(browser: &mut FileBrowser) -> TabFileDropTarget {
-    let original_tab_id = browser.active_tab_id;
+    let original_tab_id = browser.active_tab_id();
     drop(browser.open_trash_in_new_tab());
-    let target_tab_id = browser.active_tab_id;
+    let target_tab_id = browser.active_tab_id();
     drop(browser.select_tab(original_tab_id));
     TabFileDropTarget {
         pane_id: browser.active_pane_id(),

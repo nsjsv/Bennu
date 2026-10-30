@@ -2,11 +2,10 @@ use std::path::Path;
 
 use iced::{event, Point, Task};
 
-use super::tabs::apply_active_tab_to_pane;
 use super::{FileBrowser, POINTER_DRAG_ACTIVATION_DISTANCE};
 use crate::app::panes::SplitOverlayBounds;
 use crate::model::{
-    BrowserPane, BrowserPaneId, BrowserPaneLayout, FileDragNativeDndState, FileDragPhase, Message,
+    BrowserPaneId, BrowserPaneLayout, FileDragNativeDndState, FileDragPhase, Message,
     PaneDragPointerPress, PaneDragState, PaneDropTarget, SelectionMarqueePhase, SplitRegion,
 };
 
@@ -52,12 +51,11 @@ impl FileBrowser {
             return false;
         }
 
-        self.sync_active_tab_state();
         self.pane_drag_pointer_press = None;
         self.pane_drag = Some(PaneDragState {
             source_pane_id,
             phase: FileDragPhase::WaitingForMovement {
-                origin: self.cursor_position,
+                origin: self.cursor_or_origin(),
             },
             target: None,
         });
@@ -79,7 +77,6 @@ impl FileBrowser {
             return false;
         }
 
-        self.sync_active_tab_state();
         self.pane_drag_pointer_press = None;
         self.cancel_file_drag_interaction();
         self.selection_marquee = None;
@@ -100,7 +97,7 @@ impl FileBrowser {
                 .is_some()
                 .then_some(PaneDragPointerPress {
                     source_pane_id,
-                    origin: self.cursor_position,
+                    origin: self.cursor_or_origin(),
                 });
     }
 
@@ -160,10 +157,9 @@ impl FileBrowser {
             return None;
         }
 
-        let pane = self.pane_by_id(drag.source_pane_id)?;
-        let tab = pane.tabs.iter().find(|tab| tab.id == pane.active_tab_id)?;
+        let tab = self.pane_by_id(drag.source_pane_id)?.tab();
         Some(PaneDragPreview {
-            directory: tab.directory.as_path(),
+            directory: tab.current_dir.as_path(),
             is_trash_view: tab.is_trash_view,
         })
     }
@@ -285,7 +281,6 @@ impl FileBrowser {
             return;
         };
 
-        self.sync_active_tab_state();
         let (first, second) = if region.places_dragged_first() {
             (source_pane_id, other_pane_id)
         } else {
@@ -303,9 +298,7 @@ impl FileBrowser {
             },
         };
 
-        if let Some(source) = self.pane_by_id(source_pane_id).cloned() {
-            self.restore_pane_snapshot(source);
-        }
+        self.reset_active_pane_context();
     }
 
     fn merge_dragged_pane_into_target(
@@ -317,27 +310,26 @@ impl FileBrowser {
             return;
         }
 
-        self.sync_active_tab_state();
-        let Some(source) = self.pane_by_id(source_pane_id).cloned() else {
+        if self.pane_by_id(target_pane_id).is_none() {
             return;
-        };
-        let Some(mut target) = self.pane_by_id(target_pane_id).cloned() else {
+        }
+        let Some(source_index) = self.panes.iter().position(|pane| pane.id == source_pane_id)
+        else {
             return;
         };
 
-        merge_pane_tabs(&mut target, source);
-        self.panes.retain(|pane| pane.id != source_pane_id);
+        let source = self.panes.remove(source_index);
         self.icon_grid_viewports.remove(&source_pane_id);
-        if let Some(target_slot) = self.pane_by_id_mut(target_pane_id) {
-            *target_slot = target.clone();
-        } else {
-            self.panes.push(target.clone());
-        }
+        let target = self
+            .pane_by_id_mut(target_pane_id)
+            .expect("the target pane was checked above");
+        target.tabs.extend(source.tabs);
+        target.activate_tab(source.active_tab_id);
 
         self.pane_layout = BrowserPaneLayout::Single {
             active: target_pane_id,
         };
-        self.restore_pane_snapshot(target);
+        self.reset_active_pane_context();
     }
 
     fn pane_drag_content_bounds(&self) -> PaneDragContentBounds {
@@ -452,46 +444,38 @@ fn other_split_pane_id(
     }
 }
 
-fn merge_pane_tabs(target: &mut BrowserPane, source: BrowserPane) {
-    let source_active_tab_id = source.active_tab_id;
-    target.tabs.extend(source.tabs);
-    target.active_tab_id = source_active_tab_id;
-    apply_active_tab_to_pane(target);
-}
-
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashSet;
     use std::path::PathBuf;
 
-    use file_core::TrashEntry;
     use iced::{keyboard, Point};
 
     use super::*;
     use crate::config;
     use crate::model::{
-        BrowserTab, BrowserViewMode, ColumnBrowserViewport, FileDragState, Message,
+        BrowserPane, BrowserTab, DirectoryCollectionPhase, FileDragState, Message,
         SelectionMarquee, SelectionMarqueeSource, SplitAxis,
     };
-    use crate::thumbnail_cache::ColumnViewport;
 
     fn split_browser_for_test() -> FileBrowser {
         split_browser_for_test_with(config::default_user_config())
     }
 
+    fn loaded_tab(id: usize, directory: PathBuf) -> BrowserTab {
+        let mut tab = BrowserTab::directory(id, directory);
+        tab.directory_collection_phase = DirectoryCollectionPhase::Ready;
+        tab
+    }
+
     fn split_browser_for_test_with(config: config::UserConfig) -> FileBrowser {
-        let left_directory = PathBuf::from("/workspace/left");
-        let right_directory = PathBuf::from("/workspace/right");
-        let left_tab = BrowserTab::directory(0, left_directory.clone());
-        let right_tab = BrowserTab::directory(1, right_directory);
+        let left_tab = loaded_tab(0, PathBuf::from("/workspace/left"));
+        let right_tab = loaded_tab(1, PathBuf::from("/workspace/right"));
         let (mut browser, _) = FileBrowser::new(config);
 
         browser.sidebar_width = 0.0;
         browser.main_window_width = 200.0;
         browser.main_window_height = 100.0;
-        browser.current_dir = left_directory;
-        browser.tabs = vec![left_tab.clone()];
-        browser.active_tab_id = left_tab.id;
         browser.pane_layout = BrowserPaneLayout::Split {
             axis: SplitAxis::Horizontal,
             first: BrowserPaneId::PRIMARY,
@@ -500,41 +484,10 @@ mod tests {
             first_portion: 500,
         };
         browser.panes = vec![
-            pane_from_tab_for_test(BrowserPaneId::PRIMARY, left_tab),
-            pane_from_tab_for_test(BrowserPaneId(1), right_tab),
+            BrowserPane::new(BrowserPaneId::PRIMARY, left_tab),
+            BrowserPane::new(BrowserPaneId(1), right_tab),
         ];
         browser
-    }
-
-    fn pane_from_tab_for_test(pane_id: BrowserPaneId, tab: BrowserTab) -> BrowserPane {
-        BrowserPane {
-            id: pane_id,
-            current_dir: tab.directory.clone(),
-            is_trash_view: tab.is_trash_view,
-            entries: tab.entries.clone(),
-            directory_discovery: tab.directory_discovery.clone(),
-            directory_loading_placeholder: None,
-            trash_entries: Vec::<TrashEntry>::new(),
-            selected: tab.selected.clone(),
-            selected_paths: tab.selected_paths.clone(),
-            selection_anchor: tab.selection_anchor.clone(),
-            deepest_open_column_directory: tab.deepest_open_column_directory.clone(),
-            expanded_directories: tab.expanded_directories.clone(),
-            view_mode: BrowserViewMode::Columns,
-            column_browser_viewport: ColumnBrowserViewport::default(),
-            column_viewports: HashMap::<PathBuf, ColumnViewport>::new(),
-            tabs: vec![tab.clone()],
-            active_tab_id: tab.id,
-            directory_load_generation: 0,
-            directory_load_cancel: None,
-            back_stack: tab.back_stack.clone(),
-            forward_stack: tab.forward_stack.clone(),
-            directory_collection_phase: crate::model::DirectoryCollectionPhase::Ready,
-            directory_order_phase: crate::model::DirectoryOrderPhase::Ready {
-                field: file_core::SortField::Name,
-                direction: file_core::SortDirection::Ascending,
-            },
-        }
     }
 
     fn ctrl_shift_modifiers() -> keyboard::Modifiers {
@@ -608,11 +561,11 @@ mod tests {
     fn ctrl_shift_during_file_drag_promotes_to_pane_drag() {
         let mut browser = split_browser_for_test();
         let source = PathBuf::from("/workspace/left/report.txt");
-        browser.cursor_position = Point::new(190.0, 50.0);
+        browser.cursor_position = Some(Point::new(190.0, 50.0));
         browser.file_drag = Some(FileDragState {
             gesture_id: crate::model::FileDragGestureId(1),
             source_pane_id: browser.active_pane_id(),
-            source_tab_id: browser.active_tab_id,
+            source_tab_id: browser.active_tab_id(),
             sources: vec![source.clone()],
             pressed_path: source,
             bookmark_source: None,
@@ -641,12 +594,12 @@ mod tests {
     fn ctrl_shift_during_marquee_drag_promotes_to_pane_drag() {
         let mut browser = split_browser_for_test();
         let anchor = PathBuf::from("/workspace/left/report.txt");
-        browser.cursor_position = Point::new(190.0, 50.0);
+        browser.cursor_position = Some(Point::new(190.0, 50.0));
         browser.drag_selection_anchor = Some(anchor);
         browser.selection_marquee = Some(SelectionMarquee {
             gesture_origin: Point::new(10.0, 10.0),
             start: Point::new(10.0, 10.0),
-            current: browser.cursor_position,
+            current: browser.cursor_or_origin(),
             source: SelectionMarqueeSource::PaneBlank,
             phase: SelectionMarqueePhase::Selecting,
             scroll_anchor: crate::model::SelectionMarqueeScrollAnchor::List {
@@ -674,11 +627,12 @@ mod tests {
     fn ctrl_shift_during_column_placeholder_press_promotes_to_pane_drag() {
         let mut browser = split_browser_for_test();
         let selected_path = PathBuf::from("/workspace/left/report.txt");
-        browser.selected = Some(selected_path.clone());
-        browser.selected_paths = HashSet::from([selected_path.clone()]);
-        browser.selection_anchor = Some(selected_path);
-        browser.deepest_open_column_directory = Some(PathBuf::from("/workspace/left/src"));
-        browser.cursor_position = Point::new(10.0, 50.0);
+        browser.tab_mut().selected = Some(selected_path.clone());
+        browser.tab_mut().selected_paths = HashSet::from([selected_path.clone()]);
+        browser.tab_mut().selection_anchor = Some(selected_path);
+        browser.tab_mut().deepest_open_column_directory =
+            Some(PathBuf::from("/workspace/left/src"));
+        browser.cursor_position = Some(Point::new(10.0, 50.0));
 
         drop(browser.update(Message::ColumnPlaceholderPressed(BrowserPaneId::PRIMARY)));
         drop(browser.update(Message::CursorMoved {
@@ -694,10 +648,11 @@ mod tests {
         assert!(browser.pane_drag_pointer_press.is_none());
         assert!(browser.selection_marquee.is_none());
         assert_eq!(
-            browser.deepest_open_column_directory,
+            browser.tab().deepest_open_column_directory,
             Some(PathBuf::from("/workspace/left/src"))
         );
         assert!(browser
+            .tab()
             .selected_paths
             .contains(&PathBuf::from("/workspace/left/report.txt")));
         let pane_drag = browser.pane_drag.as_ref().expect("pane drag starts");

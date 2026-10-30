@@ -120,14 +120,19 @@ fn explicit_workspace_replaces_previous_session_without_persisting_it() {
         temp_dir.path().join("state.sqlite"),
     )));
 
-    assert_eq!(browser.current_dir, first);
-    assert_eq!(browser.tabs.len(), 2);
-    assert_eq!(browser.tabs[0].directory, first);
-    assert_eq!(browser.tabs[0].selected.as_ref(), Some(&selected_file));
-    assert!(browser.tabs[0].selected_paths.contains(&selected_file));
-    assert_eq!(browser.tabs[0].view_mode, BrowserViewMode::Icons);
-    assert_eq!(browser.tabs[1].directory, second);
-    assert_eq!(browser.active_tab_id, 0);
+    assert_eq!(browser.tab().current_dir, first);
+    assert_eq!(browser.pane().tabs.len(), 2);
+    assert_eq!(browser.pane().tabs[0].current_dir, first);
+    assert_eq!(
+        browser.pane().tabs[0].selected.as_ref(),
+        Some(&selected_file)
+    );
+    assert!(browser.pane().tabs[0]
+        .selected_paths
+        .contains(&selected_file));
+    assert_eq!(browser.pane().tabs[0].view_mode, BrowserViewMode::Icons);
+    assert_eq!(browser.pane().tabs[1].current_dir, second);
+    assert_eq!(browser.active_tab_id(), 0);
     assert!(!browser.should_save_browser_session());
 
     let old_snapshot = BrowserSessionSnapshot {
@@ -147,9 +152,9 @@ fn explicit_workspace_replaces_previous_session_without_persisting_it() {
         Some(classify_previous_session(home, old_snapshot)),
     ))));
 
-    assert_eq!(browser.current_dir, first);
-    assert_eq!(browser.tabs.len(), 2);
-    assert_eq!(browser.tabs[1].directory, second);
+    assert_eq!(browser.tab().current_dir, first);
+    assert_eq!(browser.pane().tabs.len(), 2);
+    assert_eq!(browser.pane().tabs[1].current_dir, second);
     assert!(!browser.should_save_browser_session());
     drop(browser.request_browser_session_save());
     assert!(!browser.pending_browser_session_save);
@@ -174,6 +179,11 @@ fn restored_workspace_reserves_identifiers_for_new_tabs() {
     )));
     drop(browser.open_directory_in_new_tab(third));
 
-    let tab_ids = browser.tabs.iter().map(|tab| tab.id).collect::<Vec<_>>();
+    let tab_ids = browser
+        .pane()
+        .tabs
+        .iter()
+        .map(|tab| tab.id)
+        .collect::<Vec<_>>();
     assert_eq!(tab_ids, vec![0, 1, 2]);
 }

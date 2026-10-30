@@ -106,7 +106,7 @@ impl FileBrowser {
     /// 「建完移入」候选（与「用选中项新建文件夹」同一收纳语义）。
     pub(super) fn open_advanced_new_folder(&mut self, directory: PathBuf) -> Task<Message> {
         self.context_menu = None;
-        if self.is_trash_view || self.search_workspace.is_some() {
+        if self.tab().is_trash_view || self.search_workspace.is_some() {
             return Task::none();
         }
         let taken_names = self

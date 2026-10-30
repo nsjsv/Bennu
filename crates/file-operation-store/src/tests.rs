@@ -639,7 +639,7 @@ fn user_preferences_roundtrip_replace() {
         terminal_emulator: "ghostty".to_owned(),
         file_operation_verification: "strong".to_owned(),
         browser_view_mode: "list".to_owned(),
-        icon_grid_size: 160,
+        icon_grid_size: None,
         columns_view_density: Some(1),
         list_view_density: Some(4),
         icons_view_density: Some(6),
@@ -743,7 +743,6 @@ fn legacy_user_preferences_without_optional_fields_get_defaults() {
     object.remove("list_sort_field");
     object.remove("list_sort_direction");
     object.remove("list_directory_size_display_mode");
-    object.remove("icon_grid_size");
     object.remove("columns_view_density");
     object.remove("list_view_density");
     object.remove("icons_view_density");
@@ -774,7 +773,7 @@ fn legacy_user_preferences_without_optional_fields_get_defaults() {
     assert_eq!(preferences.list_sort_direction, "ascending");
     assert_eq!(preferences.list_directory_size_display_mode, "item_count");
     assert_eq!(preferences.language_setting, "system");
-    assert_eq!(preferences.icon_grid_size, 96);
+    assert_eq!(preferences.icon_grid_size, None);
     assert_eq!(preferences.columns_view_density, None);
     assert_eq!(preferences.list_view_density, None);
     assert_eq!(preferences.icons_view_density, None);
@@ -835,7 +834,7 @@ fn legacy_user_preferences_ignore_removed_search_fields() {
 
     assert!(preferences.network_list_thumbnail_downloads_enabled);
     assert_eq!(preferences.language_setting, "chinese");
-    assert_eq!(preferences.icon_grid_size, 96);
+    assert_eq!(preferences.icon_grid_size, None);
     assert_eq!(preferences.preview.max_preview_file_bytes, Some(4194304));
     assert_eq!(preferences.preview.preview_text_size_bytes, None);
     let _ = fs::remove_dir_all(root);

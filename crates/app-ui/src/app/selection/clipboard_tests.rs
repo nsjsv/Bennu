@@ -42,14 +42,14 @@ fn test_entry_with_kind(path: &Path, kind: FileKind) -> DirectoryEntry {
 
 fn browser_with_entries(paths: &[PathBuf]) -> FileBrowser {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = PathBuf::from("/workspace");
-    browser.entries = paths
+    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().entries = paths
         .iter()
         .map(|path| test_entry(path))
         .collect::<Vec<_>>()
         .into();
-    browser.selected_paths = paths.iter().cloned().collect::<HashSet<_>>();
-    browser.selected = paths.first().cloned();
+    browser.tab_mut().selected_paths = paths.iter().cloned().collect::<HashSet<_>>();
+    browser.tab_mut().selected = paths.first().cloned();
     browser
 }
 
@@ -75,8 +75,8 @@ fn entry_hover_uses_current_level_for_paste_and_directory_for_drop() {
     let source = current_dir.join("report.txt");
     let directory = current_dir.join("project");
     let mut browser = browser_with_entries(std::slice::from_ref(&source));
-    browser.view_mode = BrowserViewMode::List;
-    browser.entries = vec![
+    browser.tab_mut().view_mode = BrowserViewMode::List;
+    browser.tab_mut().entries = vec![
         test_entry(&source),
         test_entry_with_kind(&directory, FileKind::Directory),
     ]
@@ -87,7 +87,7 @@ fn entry_hover_uses_current_level_for_paste_and_directory_for_drop() {
     drop(browser.handle_entry_hovered(source.clone()));
     assert_eq!(browser.paste_target_directory(), current_dir);
 
-    browser.cursor_position = iced::Point::new(0.0, 0.0);
+    browser.cursor_position = Some(iced::Point::new(0.0, 0.0));
     drop(browser.start_file_drag(source, FileDragStationaryAction::SelectionOnly, Vec::new()));
     drop(browser.update_file_drag(iced::Point::new(10.0, 0.0)));
     drop(browser.handle_entry_hovered(directory.clone()));
@@ -137,15 +137,15 @@ fn new_clipboard_operation_replaces_cut_visual_membership() {
     let first = PathBuf::from("/workspace/first.txt");
     let second = PathBuf::from("/workspace/second.txt");
     let mut browser = browser_with_entries(&[first.clone(), second.clone()]);
-    browser.selected_paths = HashSet::from([first.clone()]);
+    browser.tab_mut().selected_paths = HashSet::from([first.clone()]);
     drop(browser.move_selected());
     assert_eq!(
         browser.file_entry_content_modifier(&first),
         FileEntryContentModifier::Cut
     );
 
-    browser.selected = Some(second.clone());
-    browser.selected_paths = HashSet::from([second.clone()]);
+    browser.tab_mut().selected = Some(second.clone());
+    browser.tab_mut().selected_paths = HashSet::from([second.clone()]);
     drop(browser.move_selected());
     assert_eq!(
         browser.file_entry_content_modifier(&first),
@@ -273,8 +273,8 @@ fn mixed_local_and_network_delete_is_rejected() {
 fn columns_keyboard_paste_targets_focused_column_not_pointer_hover() {
     let project = PathBuf::from("/workspace/project");
     let mut browser = browser_with_entries(&[PathBuf::from("/workspace/a.txt")]);
-    browser.view_mode = BrowserViewMode::Columns;
-    browser.deepest_open_column_directory = Some(project.clone());
+    browser.tab_mut().view_mode = BrowserViewMode::Columns;
+    browser.tab_mut().deepest_open_column_directory = Some(project.clone());
     browser.focused_column_directory = Some(project.clone());
     browser.cursor_paste_directory = Some(PathBuf::from("/workspace"));
 
@@ -285,8 +285,8 @@ fn columns_keyboard_paste_targets_focused_column_not_pointer_hover() {
 fn columns_keyboard_paste_falls_back_to_deepest_open_column_without_focus() {
     let project = PathBuf::from("/workspace/project");
     let mut browser = browser_with_entries(&[PathBuf::from("/workspace/a.txt")]);
-    browser.view_mode = BrowserViewMode::Columns;
-    browser.deepest_open_column_directory = Some(project.clone());
+    browser.tab_mut().view_mode = BrowserViewMode::Columns;
+    browser.tab_mut().deepest_open_column_directory = Some(project.clone());
     browser.cursor_paste_directory = Some(PathBuf::from("/workspace"));
 
     assert_eq!(browser.paste_target_directory(), project);
@@ -295,7 +295,7 @@ fn columns_keyboard_paste_falls_back_to_deepest_open_column_without_focus() {
 #[test]
 fn columns_keyboard_paste_falls_back_to_current_dir_when_nothing_open() {
     let mut browser = browser_with_entries(&[PathBuf::from("/workspace/a.txt")]);
-    browser.view_mode = BrowserViewMode::Columns;
+    browser.tab_mut().view_mode = BrowserViewMode::Columns;
 
     assert_eq!(
         browser.paste_target_directory(),
@@ -376,10 +376,10 @@ fn duplicate_completion_selects_the_copies_actually_created() {
     ));
 
     assert_eq!(
-        browser.selected_paths,
+        browser.tab().selected_paths,
         HashSet::from([first_copy, second_copy.clone()])
     );
-    assert_eq!(browser.selected, Some(second_copy));
+    assert_eq!(browser.tab().selected, Some(second_copy));
 }
 
 #[test]
@@ -400,7 +400,7 @@ fn new_folder_from_selection_enqueues_one_undoable_move_batch() {
     let workspace = tempfile::tempdir().unwrap();
     let report = workspace.path().join("report.txt");
     let mut browser = browser_with_entries(std::slice::from_ref(&report));
-    browser.current_dir = workspace.path().to_path_buf();
+    browser.tab_mut().current_dir = workspace.path().to_path_buf();
 
     drop(browser.new_folder_from_selection());
 

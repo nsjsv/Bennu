@@ -141,9 +141,9 @@ fn tab_bounds(target: TabFileDropTarget, bounds: Rectangle) -> crate::model::Fil
 }
 
 fn add_inactive_directory_tab(browser: &mut FileBrowser, directory: PathBuf) -> TabFileDropTarget {
-    let original_tab_id = browser.active_tab_id;
+    let original_tab_id = browser.active_tab_id();
     drop(browser.open_directory_in_new_tab(directory.clone()));
-    let target_tab_id = browser.active_tab_id;
+    let target_tab_id = browser.active_tab_id();
     drop(browser.select_tab(original_tab_id));
     TabFileDropTarget {
         pane_id: browser.active_pane_id(),
@@ -153,9 +153,9 @@ fn add_inactive_directory_tab(browser: &mut FileBrowser, directory: PathBuf) -> 
 }
 
 fn add_inactive_trash_tab(browser: &mut FileBrowser) -> TabFileDropTarget {
-    let original_tab_id = browser.active_tab_id;
+    let original_tab_id = browser.active_tab_id();
     drop(browser.open_trash_in_new_tab());
-    let target_tab_id = browser.active_tab_id;
+    let target_tab_id = browser.active_tab_id();
     drop(browser.select_tab(original_tab_id));
     TabFileDropTarget {
         pane_id: browser.active_pane_id(),
@@ -196,7 +196,7 @@ fn install_internal_source(
     browser.file_drag = Some(FileDragState {
         gesture_id: FileDragGestureId(1),
         source_pane_id: browser.active_pane_id(),
-        source_tab_id: browser.active_tab_id,
+        source_tab_id: browser.active_tab_id(),
         pressed_path: sources[0].clone(),
         sources,
         bookmark_source: None,
@@ -413,7 +413,7 @@ fn tab_hover_threshold_is_500ms_and_switch_invalidates_old_layout() {
     ));
 
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    let original_tab_id = browser.active_tab_id;
+    let original_tab_id = browser.active_tab_id();
     let target = add_inactive_directory_tab(&mut browser, PathBuf::from("/workspace/hover"));
     let target_session_id = WaylandFileDropTargetSessionId::unique();
     let position = Point::new(50.0, 20.0);
@@ -450,8 +450,8 @@ fn tab_hover_threshold_is_500ms_and_switch_invalidates_old_layout() {
 
     drop(browser.accept_tab_hover_elapsed(hover));
 
-    assert_ne!(browser.active_tab_id, original_tab_id);
-    assert_eq!(browser.active_tab_id, target.tab_id);
+    assert_ne!(browser.active_tab_id(), original_tab_id);
+    assert_eq!(browser.active_tab_id(), target.tab_id);
     let switched_request = match browser
         .file_drop_session
         .as_ref()
@@ -489,7 +489,7 @@ fn tab_hover_threshold_is_500ms_and_switch_invalidates_old_layout() {
     ));
 
     let reloaded_directory = PathBuf::from("/workspace/hover");
-    let directory_load_generation = browser.directory_load_generation;
+    let directory_load_generation = browser.pane().directory_load_generation;
     drop(browser.accept_complete_directory_fixture(
         DirectoryLoadRequest {
             pane_id: target.pane_id,
@@ -552,6 +552,7 @@ fn trash_tab_uses_dropped_paths_instead_of_live_trash_selection() {
     let position = Point::new(50.0, 20.0);
     let dropped_path = PathBuf::from("/tmp/dropped.txt");
     browser
+        .tab_mut()
         .selected_paths
         .insert(PathBuf::from("/tmp/unrelated.txt"));
     let request = begin_external_session(&mut browser, target_session_id, position);
@@ -604,7 +605,7 @@ fn internal_wayland_trash_tab_uses_frozen_source_paths() {
 #[test]
 fn closing_tab_after_physical_drop_rejects_late_payload() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    let original_tab_id = browser.active_tab_id;
+    let original_tab_id = browser.active_tab_id();
     let target = add_inactive_directory_tab(&mut browser, PathBuf::from("/workspace/closing"));
     let target_session_id = WaylandFileDropTargetSessionId::unique();
     let position = Point::new(50.0, 20.0);
@@ -621,7 +622,7 @@ fn closing_tab_after_physical_drop_rejects_late_payload() {
         position,
     )));
 
-    assert_eq!(browser.active_tab_id, original_tab_id);
+    assert_eq!(browser.active_tab_id(), original_tab_id);
     assert!(browser.file_drop_prompt.is_none());
     assert!(browser.file_drop_session.is_none());
 }
@@ -720,9 +721,9 @@ async fn iced_fallback_tab_release_uses_same_internal_dispatch() {
 
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let target = add_inactive_directory_tab(&mut browser, destination.clone());
-    browser.entries = vec![test_entry(&source)].into();
-    browser.selected_paths.insert(source.clone());
-    browser.cursor_position = Point::new(0.0, 0.0);
+    browser.tab_mut().entries = vec![test_entry(&source)].into();
+    browser.tab_mut().selected_paths.insert(source.clone());
+    browser.cursor_position = Some(Point::new(0.0, 0.0));
     drop(browser.start_file_drag(
         source.clone(),
         crate::model::FileDragStationaryAction::SelectionOnly,
@@ -980,9 +981,9 @@ fn external_and_iced_fallback_sessions_do_not_plan_scroll_refresh() {
     // iced fallback(原生 dnd 不可用)的 position 不随指针更新,
     // 滚动刷新会按过期位置重算,不参与。
     let source = PathBuf::from("/tmp/fallback.txt");
-    browser.entries = vec![test_entry(&source)].into();
-    browser.selected_paths.insert(source.clone());
-    browser.cursor_position = Point::new(50.0, 20.0);
+    browser.tab_mut().entries = vec![test_entry(&source)].into();
+    browser.tab_mut().selected_paths.insert(source.clone());
+    browser.cursor_position = Some(Point::new(50.0, 20.0));
     drop(browser.start_file_drag(
         source.clone(),
         crate::model::FileDragStationaryAction::SelectionOnly,
@@ -1052,9 +1053,9 @@ fn iced_fallback_trash_tab_uses_drag_snapshot_paths() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let target = add_inactive_trash_tab(&mut browser);
     let source = PathBuf::from("/tmp/iced-trash.txt");
-    browser.entries = vec![test_entry(&source)].into();
-    browser.selected_paths.insert(source.clone());
-    browser.cursor_position = Point::new(0.0, 0.0);
+    browser.tab_mut().entries = vec![test_entry(&source)].into();
+    browser.tab_mut().selected_paths.insert(source.clone());
+    browser.cursor_position = Some(Point::new(0.0, 0.0));
     drop(browser.start_file_drag(
         source.clone(),
         crate::model::FileDragStationaryAction::SelectionOnly,

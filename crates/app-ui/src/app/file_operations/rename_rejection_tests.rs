@@ -19,9 +19,9 @@ fn file_entry(path: &PathBuf) -> DirectoryEntry {
 
 fn browser_showing(paths: &[&PathBuf]) -> FileBrowser {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = PathBuf::from("/workspace");
-    browser.directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
-    browser.entries = paths
+    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
+    browser.tab_mut().entries = paths
         .iter()
         .map(|path| file_entry(path))
         .collect::<Vec<_>>()
@@ -104,7 +104,7 @@ fn rejected_user_rename_reopens_editor_with_attempted_name_and_reason() {
     drop(browser.accept_file_operation_finished(task_id, rejected_rename(&report, "notes.txt")));
 
     assert_eq!(browser.renaming, Some(report.clone()));
-    assert_eq!(browser.selected, Some(report));
+    assert_eq!(browser.tab().selected, Some(report));
     assert_eq!(browser.rename_input, "notes.txt");
     assert_eq!(browser.rename_hint(), Some(RenameRejection::NameTaken));
     assert_eq!(browser.current_error(), None);

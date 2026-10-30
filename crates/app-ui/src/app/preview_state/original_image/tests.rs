@@ -17,7 +17,7 @@ use bennu_preview::animated_image_preview::{
 fn preview_thumbnail_refresh_skips_same_edge_window_resize() {
     let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
     let image_entry = image_entry("/workspace/vector.svg");
-    browser.entries = vec![image_entry.clone()].into();
+    browser.tab_mut().entries = vec![image_entry.clone()].into();
     browser.preview_engine.preview_size = PreviewSize {
         width: 640.0,
         height: 480.0,
@@ -41,7 +41,7 @@ fn preview_thumbnail_refresh_skips_same_edge_window_resize() {
 fn preview_thumbnail_refresh_keeps_current_image_visible() {
     let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
     let image_entry = image_entry("/workspace/vector.svg");
-    browser.entries = vec![image_entry.clone()].into();
+    browser.tab_mut().entries = vec![image_entry.clone()].into();
     browser.preview_engine.preview_size = PreviewSize {
         width: 1400.0,
         height: 1000.0,
@@ -144,7 +144,7 @@ fn ready_listing_thumbnail_shows_immediately_and_starts_original() {
     let path = PathBuf::from("/workspace/photo.png");
     let image_entry = image_entry(path.to_string_lossy().as_ref());
     let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
-    browser.entries = vec![image_entry.clone()].into();
+    browser.tab_mut().entries = vec![image_entry.clone()].into();
     browser.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
     let generation = browser
         .preview_engine
@@ -184,7 +184,7 @@ fn small_ready_thumbnail_upgrades_when_preview_thumbnail_arrives() {
     let path = PathBuf::from("/workspace/photo.png");
     let image_entry = image_entry(path.to_string_lossy().as_ref());
     let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
-    browser.entries = vec![image_entry.clone()].into();
+    browser.tab_mut().entries = vec![image_entry.clone()].into();
     browser.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
     let generation = browser
         .preview_engine
@@ -223,7 +223,7 @@ fn cold_cache_starts_original_and_display_upgrades_from_generated_thumbnail() {
     let path = PathBuf::from("/workspace/photo.png");
     let image_entry = image_entry(path.to_string_lossy().as_ref());
     let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
-    browser.entries = vec![image_entry.clone()].into();
+    browser.tab_mut().entries = vec![image_entry.clone()].into();
     browser.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
     let generation = browser
         .preview_engine
@@ -262,7 +262,7 @@ fn failed_preview_thumbnail_keeps_window_open_while_original_loads() {
     let path = PathBuf::from("/workspace/photo.png");
     let image_entry = image_entry(path.to_string_lossy().as_ref());
     let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
-    browser.entries = vec![image_entry.clone()].into();
+    browser.tab_mut().entries = vec![image_entry.clone()].into();
     browser.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
     let generation = browser
         .preview_engine
@@ -291,7 +291,7 @@ fn stale_preview_thumbnail_key_cannot_consume_current_request() {
     let path = PathBuf::from("/workspace/photo.png");
     let image_entry = image_entry(path.to_string_lossy().as_ref());
     let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
-    browser.entries = vec![image_entry.clone()].into();
+    browser.tab_mut().entries = vec![image_entry.clone()].into();
     browser.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
     let generation = browser
         .preview_engine
@@ -329,14 +329,14 @@ fn expected_thumbnail_for_removed_entry_falls_back_to_original_result_window() {
     let path = PathBuf::from("/workspace/photo.png");
     let image_entry = image_entry(path.to_string_lossy().as_ref());
     let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
-    browser.entries = vec![image_entry.clone()].into();
+    browser.tab_mut().entries = vec![image_entry.clone()].into();
     browser.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
     let generation = browser
         .preview_engine
         .next_original_image_preview_generation();
     let request = preview_request(&image_entry, 320, 240);
     drop(browser.accept_image_preview_dimensions(path.clone(), generation, Ok((320, 240))));
-    browser.entries = Vec::new().into();
+    browser.tab_mut().entries = Vec::new().into();
 
     let fallback_command =
         browser.accept_thumbnail_batch(vec![ready_preview_outcome(request, 320, 240)]);
@@ -388,7 +388,7 @@ fn late_smaller_preview_thumbnail_does_not_replace_larger_thumbnail() {
     let path = PathBuf::from("/workspace/photo.png");
     let image_entry = image_entry(path.to_string_lossy().as_ref());
     let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
-    browser.entries = vec![image_entry.clone()].into();
+    browser.tab_mut().entries = vec![image_entry.clone()].into();
     browser.preview_engine.preview = Some(PreviewState::Ready(PreviewContent::Image(
         ImagePreviewContent::Thumbnail {
             path,
@@ -416,7 +416,7 @@ fn late_thumbnail_result_does_not_replace_original_preview() {
     let path = PathBuf::from("/workspace/photo.png");
     let image_entry = image_entry(path.to_string_lossy().as_ref());
     let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
-    browser.entries = vec![image_entry.clone()].into();
+    browser.tab_mut().entries = vec![image_entry.clone()].into();
     browser.preview_engine.preview = Some(PreviewState::Ready(PreviewContent::Image(
         ImagePreviewContent::OriginalRaster {
             raster_handle: iced::widget::image::Handle::from_rgba(4, 3, vec![255; 48]),

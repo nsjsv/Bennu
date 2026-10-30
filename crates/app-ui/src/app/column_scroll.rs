@@ -82,13 +82,10 @@ impl FileBrowser {
         let Some(viewport) = column_browser_viewport_from_scroll(offset_x, width) else {
             return Task::none();
         };
-        if pane_id == self.active_pane_id() {
-            self.column_browser_viewport = viewport;
-        } else if let Some(pane) = self.pane_by_id_mut(pane_id) {
-            pane.column_browser_viewport = viewport;
-        } else {
+        let Some(pane) = self.pane_by_id_mut(pane_id) else {
             return Task::none();
-        }
+        };
+        pane.column_browser_viewport = viewport;
         Task::batch([
             self.sync_selection_marquee_scroll(ScrollbarRegion::ColumnBrowser(pane_id), offset_x),
             self.request_browser_session_save(),
@@ -125,9 +122,6 @@ impl FileBrowser {
         &self,
         pane_id: BrowserPaneId,
     ) -> Option<ColumnBrowserViewport> {
-        if pane_id == self.active_pane_id() {
-            return Some(self.column_browser_viewport);
-        }
         self.pane_by_id(pane_id)
             .map(|pane| pane.column_browser_viewport)
     }
@@ -149,7 +143,7 @@ impl FileBrowser {
         let directory = path
             .parent()
             .map(Path::to_path_buf)
-            .unwrap_or_else(|| self.current_dir.clone());
+            .unwrap_or_else(|| self.tab().current_dir.clone());
         column_directories(self)
             .iter()
             .position(|column_directory| column_directory == &directory)
@@ -259,7 +253,7 @@ mod tests {
         drop(browser.handle_column_browser_scrolled(BrowserPaneId::PRIMARY, 245.0, 820.0));
 
         assert_eq!(
-            browser.column_browser_viewport,
+            browser.pane().column_browser_viewport,
             ColumnBrowserViewport {
                 offset_x: 245.0,
                 width: 820.0,

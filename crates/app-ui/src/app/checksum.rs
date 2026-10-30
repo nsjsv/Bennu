@@ -271,7 +271,7 @@ impl FileBrowser {
     }
 
     fn open_checksum(&mut self) -> Task<Message> {
-        if self.is_trash_view {
+        if self.tab().is_trash_view {
             return Task::none();
         }
         let files: Vec<PathBuf> = self

@@ -685,6 +685,7 @@ impl FileBrowser {
             self.main_window_width = width.max(1.0);
             self.main_window_height = height.max(1.0);
             return Task::batch([
+                self.clamp_visible_pane_viewports(),
                 self.request_breadcrumb_drop_target_bounds_measurement(),
                 self.schedule_thumbnail_refresh(),
             ]);

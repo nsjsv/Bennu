@@ -18,10 +18,10 @@ fn entry(path: &str, kind: FileKind) -> DirectoryEntry {
 
 fn browser_with_entries(entries: Vec<DirectoryEntry>) -> FileBrowser {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = PathBuf::from("/workspace");
-    browser.entries = entries.into();
-    browser.view_mode = BrowserViewMode::Icons;
-    browser.directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
+    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().entries = entries.into();
+    browser.tab_mut().view_mode = BrowserViewMode::Icons;
+    browser.tab_mut().directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
     browser
 }
 
@@ -124,7 +124,7 @@ fn nested_sibling_switch_closes_old_before_loading_new() {
         browser.icon_grid_disclosure(BrowserPaneId::PRIMARY, Path::new("/workspace"), &beta),
         Some((0.0, false))
     );
-    assert_eq!(browser.selected, Some(alpha.clone()));
+    assert_eq!(browser.tab().selected, Some(alpha.clone()));
 
     finish_open_animation(&mut browser);
 

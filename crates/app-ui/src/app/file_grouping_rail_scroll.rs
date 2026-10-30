@@ -170,9 +170,9 @@ mod tests {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
         let root = PathBuf::from("/workspace");
         let pane_id = BrowserPaneId::PRIMARY;
-        browser.view_mode = BrowserViewMode::List;
-        browser.current_dir = root.clone();
-        browser.entries = Arc::new(vec![
+        browser.tab_mut().view_mode = BrowserViewMode::List;
+        browser.tab_mut().current_dir = root.clone();
+        browser.tab_mut().entries = Arc::new(vec![
             file_entry("/workspace/a.txt"),
             file_entry("/workspace/z.txt"),
         ]);
@@ -185,7 +185,7 @@ mod tests {
         let (mut browser, root, pane_id) = grouped_list_browser();
         // 行流:[组头A(32), a(46), 组头Z(32), z(46)],内容 156 + 表头 32;
         // 视口高 100 时可支撑的最大偏移 = 188 - 100 = 88。
-        browser.column_viewports.insert(
+        browser.pane_mut().column_viewports.insert(
             root.clone(),
             ColumnViewport {
                 offset_y: 0.0,
@@ -200,7 +200,7 @@ mod tests {
         // 组A顶点 0 + 表头留量 32 = 32;ListScrolled 同款状态写入必须发生
         // (scroll_to 不回发 on_scroll,高亮与滚动条靠这次回写活过来)。
         assert_eq!(
-            browser.column_viewports.get(&root).unwrap().offset_y,
+            browser.pane().column_viewports.get(&root).unwrap().offset_y,
             LIST_HEADER_HEIGHT
         );
 
@@ -212,7 +212,7 @@ mod tests {
         let max_offset =
             LIST_HEADER_HEIGHT + (LIST_GROUP_HEADER_HEIGHT + LIST_ROW_HEIGHT) * 2.0 - 100.0;
         assert_eq!(
-            browser.column_viewports.get(&root).unwrap().offset_y,
+            browser.pane().column_viewports.get(&root).unwrap().offset_y,
             max_offset
         );
     }
@@ -220,7 +220,7 @@ mod tests {
     #[test]
     fn rail_target_message_scrolls_icon_grid_and_writes_back_viewport_state() {
         let (mut browser, root, pane_id) = grouped_list_browser();
-        browser.view_mode = BrowserViewMode::Icons;
+        browser.tab_mut().view_mode = BrowserViewMode::Icons;
         // 预置网格视口(高度 120):IconGridScrolled 的状态写入出口。
         drop(browser.handle_icon_grid_scrolled(pane_id, 0.0, 600.0, 120.0));
 

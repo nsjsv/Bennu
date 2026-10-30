@@ -6,8 +6,8 @@ use file_search::SearchScope;
 use super::*;
 use crate::config;
 use crate::model::{
-    BrowserPaneId, BrowserPaneLayout, BrowserTab, ExpandedDirectory, ExpandedDirectoryStatus,
-    ListDirectorySummary, SplitAxis,
+    BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, ExpandedDirectory,
+    ExpandedDirectoryStatus, ListDirectorySummary, SplitAxis,
 };
 use crate::operation_history::FileOperationOutcome;
 use crate::operation_queue::test_persistence::{attach_store, enqueue_persisted, queued_task_id};
@@ -321,8 +321,7 @@ async fn moved_renames_migrate_paths_before_terminal_completion() {
     let workspace = tempfile::tempdir().unwrap();
     let source = workspace.path().join("old");
     let destination = workspace.path().join("new");
-    browser.current_dir = source.join("nested");
-    browser.sync_active_tab_state();
+    browser.tab_mut().current_dir = source.join("nested");
     attach_store(
         &mut browser.operation_queue,
         file_operation_store::TaskQueueStore::new(workspace.path().join("state.sqlite")).unwrap(),
@@ -345,7 +344,7 @@ async fn moved_renames_migrate_paths_before_terminal_completion() {
         destination.clone(),
     )])));
 
-    assert_eq!(browser.current_dir, destination.join("nested"));
+    assert_eq!(browser.tab().current_dir, destination.join("nested"));
     drop(browser.accept_file_operation_finished(
         task_id,
         FileOperationCompletion::Succeeded(FileOperationOutcome::Move {
@@ -364,7 +363,7 @@ async fn moved_renames_migrate_paths_before_terminal_completion() {
         workspace.path().join("stale"),
         2,
     )));
-    assert_eq!(browser.current_dir, destination.join("nested"));
+    assert_eq!(browser.tab().current_dir, destination.join("nested"));
 }
 
 #[tokio::test]
@@ -377,9 +376,8 @@ async fn moved_renames_batch_migrates_all_paths_with_one_pane_and_search_refresh
     let second_target = workspace.path().join("second-new");
     std::fs::create_dir_all(first_source.join("nested")).unwrap();
     std::fs::create_dir_all(&second_source).unwrap();
-    browser.current_dir = first_source.join("nested");
+    browser.tab_mut().current_dir = first_source.join("nested");
     browser.renaming = Some(second_source.join("report.txt"));
-    browser.sync_active_tab_state();
     drop(browser.update_search_input("report".to_owned()));
     attach_store(
         &mut browser.operation_queue,
@@ -403,7 +401,7 @@ async fn moved_renames_batch_migrates_all_paths_with_one_pane_and_search_refresh
     )
     .await;
     let task_id = browser.operation_queue.tasks().last().unwrap().id;
-    let pane_generation = browser.directory_load_generation;
+    let pane_generation = browser.pane().directory_load_generation;
     let search_generation = browser.search_workspace.as_ref().unwrap().run.generation;
 
     drop(browser.update(direct_move_renamed_batch_message(vec![
@@ -411,11 +409,11 @@ async fn moved_renames_batch_migrates_all_paths_with_one_pane_and_search_refresh
         (second_source, second_target.clone()),
     ])));
 
-    assert_eq!(browser.current_dir, first_target.join("nested"));
+    assert_eq!(browser.tab().current_dir, first_target.join("nested"));
     assert_eq!(browser.renaming, Some(second_target.join("report.txt")));
     // renamed 走增量应用：路径迁移照常，但不触发全量重扫（generation 不变）。
     // 目录未在 discovery 中显示时跳过立即应用，由 watcher 与对账兜底。
-    assert_eq!(browser.directory_load_generation, pane_generation);
+    assert_eq!(browser.pane().directory_load_generation, pane_generation);
     assert_eq!(
         browser.search_workspace.as_ref().unwrap().run.generation,
         search_generation + 1
@@ -431,12 +429,12 @@ async fn moved_renames_batch_migrates_all_paths_with_one_pane_and_search_refresh
             2,
         )],
     )));
-    assert_eq!(browser.directory_load_generation, pane_generation);
+    assert_eq!(browser.pane().directory_load_generation, pane_generation);
     assert_eq!(
         browser.search_workspace.as_ref().unwrap().run.generation,
         search_generation + 1
     );
-    assert_eq!(browser.current_dir, first_target.join("nested"));
+    assert_eq!(browser.tab().current_dir, first_target.join("nested"));
 }
 
 #[tokio::test]
@@ -451,30 +449,28 @@ async fn direct_move_batch_rejects_late_scan_when_current_directory_path_is_unch
         .unwrap();
 
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = current_directory.clone();
-    browser.sync_active_tab_state();
+    browser.tab_mut().current_dir = current_directory.clone();
     let stale_request = browser.next_directory_load_request(current_directory.clone());
 
     drop(browser.migrate_completed_paths(&[CompletedPathMigration::new(source, target)]));
     drop(browser.reload_visible_panes_after_file_operation());
 
-    assert_eq!(browser.current_dir, current_directory);
+    assert_eq!(browser.tab().current_dir, current_directory);
     assert_eq!(
-        browser.directory_load_generation,
+        browser.pane().directory_load_generation,
         stale_request.generation + 1
     );
-    assert!(browser.entries.is_empty());
+    assert!(browser.tab().entries.is_empty());
 
     drop(browser.accept_complete_directory_fixture(stale_request, stale_scan));
-    assert!(browser.entries.is_empty());
+    assert!(browser.tab().entries.is_empty());
 }
 
 #[test]
 fn direct_move_commit_during_shutdown_does_not_migrate_paths() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let source = PathBuf::from("/workspace/old");
-    browser.current_dir = source.join("nested");
-    browser.sync_active_tab_state();
+    browser.tab_mut().current_dir = source.join("nested");
     browser.application_shutdown_phase =
         crate::app::application_shutdown::ApplicationShutdownPhase::ClosingWindows;
 
@@ -485,7 +481,7 @@ fn direct_move_commit_during_shutdown_does_not_migrate_paths() {
         2,
     )));
 
-    assert_eq!(browser.current_dir, source.join("nested"));
+    assert_eq!(browser.tab().current_dir, source.join("nested"));
 }
 
 #[test]
@@ -495,9 +491,8 @@ fn completed_path_migration_updates_inline_rename_and_restarts_frozen_root_searc
     let source = workspace.path().join("old");
     let destination = workspace.path().join("new");
     std::fs::create_dir_all(source.join("nested")).unwrap();
-    browser.current_dir = source.join("nested");
+    browser.tab_mut().current_dir = source.join("nested");
     browser.renaming = Some(source.join("nested/report.txt"));
-    browser.sync_active_tab_state();
     drop(browser.update_search_input("report".to_owned()));
     let previous_search_generation = browser.search_workspace.as_ref().unwrap().run.generation;
 
@@ -530,8 +525,7 @@ fn completed_path_migration_updates_inline_rename_and_restarts_frozen_root_searc
 fn completed_non_migration_operation_restarts_active_search_workspace() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let root = tempfile::tempdir().unwrap();
-    browser.current_dir = root.path().to_path_buf();
-    browser.sync_active_tab_state();
+    browser.tab_mut().current_dir = root.path().to_path_buf();
     drop(browser.submit_search());
     let first_generation = browser.search_workspace.as_ref().unwrap().run.generation;
     let task_id = queued_task_id(browser.operation_queue.enqueue(
@@ -553,25 +547,34 @@ fn completed_rename_migrates_another_pane_hidden_tab_history_and_columns() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let source = PathBuf::from("/workspace/old");
     let destination = PathBuf::from("/workspace/new");
-    browser.current_dir = PathBuf::from("/workspace/active");
+    browser.tab_mut().current_dir = PathBuf::from("/workspace/active");
     browser
         .column_return_targets
         .insert(source.join("column"), source.join("column/child"));
-    browser.sync_active_tab_state();
 
     let active_tab_id = 10;
     let hidden_tab_id = 11;
-    let mut inactive_pane = browser.capture_active_pane_snapshot();
-    inactive_pane.id = BrowserPaneId(1);
-    inactive_pane.current_dir = source.join("nested");
-    inactive_pane.selected = Some(source.join("nested/file.txt"));
-    inactive_pane
+    let mut active_tab = BrowserTab::directory(active_tab_id, source.join("nested"));
+    active_tab.selected = Some(source.join("nested/file.txt"));
+    active_tab
         .selected_paths
         .insert(source.join("nested/file.txt"));
-    inactive_pane.deepest_open_column_directory = Some(source.join("nested"));
-    inactive_pane
+    active_tab.deepest_open_column_directory = Some(source.join("nested"));
+    active_tab
         .expanded_directories
         .insert(source.join("nested"), loaded_expanded_directory());
+    active_tab.back_stack = vec![source.join("back"), PathBuf::from("/workspace/old-copy")];
+    active_tab.forward_stack = vec![source.join("forward")];
+    let mut hidden_tab = BrowserTab::directory(hidden_tab_id, source.join("hidden"));
+    hidden_tab
+        .expanded_directories
+        .insert(source.join("hidden/expanded"), loaded_expanded_directory());
+    hidden_tab.back_stack.push(source.join("hidden/back"));
+    let mut inactive_pane = BrowserPane::with_tabs(
+        BrowserPaneId(1),
+        vec![active_tab, hidden_tab],
+        active_tab_id,
+    );
     inactive_pane.column_viewports.insert(
         source.join("nested"),
         ColumnViewport {
@@ -579,21 +582,6 @@ fn completed_rename_migrates_another_pane_hidden_tab_history_and_columns() {
             height: 300.0,
         },
     );
-    inactive_pane.back_stack = vec![source.join("back"), PathBuf::from("/workspace/old-copy")];
-    inactive_pane.forward_stack = vec![source.join("forward")];
-    inactive_pane.tabs = vec![
-        BrowserTab::directory(active_tab_id, source.join("nested")),
-        {
-            let mut hidden_tab = BrowserTab::directory(hidden_tab_id, source.join("hidden"));
-            hidden_tab
-                .expanded_directories
-                .insert(source.join("hidden/expanded"), loaded_expanded_directory());
-            hidden_tab.back_stack.push(source.join("hidden/back"));
-            hidden_tab
-        },
-    ];
-    inactive_pane.active_tab_id = active_tab_id;
-    inactive_pane.sync_active_tab_state();
     browser.panes.push(inactive_pane);
     browser.pane_layout = BrowserPaneLayout::Split {
         axis: SplitAxis::Horizontal,
@@ -605,21 +593,25 @@ fn completed_rename_migrates_another_pane_hidden_tab_history_and_columns() {
 
     finish_queued_rename(&mut browser, source, destination.clone());
 
-    assert_eq!(browser.current_dir, PathBuf::from("/workspace/active"));
-    let migrated_pane = browser.pane_by_id(BrowserPaneId(1)).expect("inactive pane");
-    assert_eq!(migrated_pane.current_dir, destination.join("nested"));
     assert_eq!(
-        migrated_pane.back_stack,
+        browser.tab().current_dir,
+        PathBuf::from("/workspace/active")
+    );
+    let migrated_pane = browser.pane_by_id(BrowserPaneId(1)).expect("inactive pane");
+    let migrated_tab = migrated_pane.tab();
+    assert_eq!(migrated_tab.current_dir, destination.join("nested"));
+    assert_eq!(
+        migrated_tab.back_stack,
         vec![
             destination.join("back"),
             PathBuf::from("/workspace/old-copy")
         ]
     );
     assert_eq!(
-        migrated_pane.forward_stack,
+        migrated_tab.forward_stack,
         vec![destination.join("forward")]
     );
-    assert!(migrated_pane
+    assert!(migrated_tab
         .expanded_directories
         .contains_key(&destination.join("nested")));
     assert!(migrated_pane
@@ -631,7 +623,7 @@ fn completed_rename_migrates_another_pane_hidden_tab_history_and_columns() {
         .iter()
         .find(|tab| tab.id == hidden_tab_id)
         .expect("hidden tab");
-    assert_eq!(hidden_tab.directory, destination.join("hidden"));
+    assert_eq!(hidden_tab.current_dir, destination.join("hidden"));
     assert_eq!(hidden_tab.back_stack, vec![destination.join("hidden/back")]);
     assert!(hidden_tab
         .expanded_directories
@@ -649,11 +641,10 @@ fn undo_and_redo_reuse_success_completion_path_migration() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let source = PathBuf::from("/workspace/old");
     let destination = PathBuf::from("/workspace/new");
-    browser.current_dir = source.join("nested");
-    browser.sync_active_tab_state();
+    browser.tab_mut().current_dir = source.join("nested");
 
     finish_queued_rename(&mut browser, source.clone(), destination.clone());
-    assert_eq!(browser.current_dir, destination.join("nested"));
+    assert_eq!(browser.tab().current_dir, destination.join("nested"));
 
     drop(browser.undo_file_operation());
     let undo_task_id = browser
@@ -669,7 +660,7 @@ fn undo_and_redo_reuse_success_completion_path_migration() {
             to: source.clone(),
         }),
     ));
-    assert_eq!(browser.current_dir, source.join("nested"));
+    assert_eq!(browser.tab().current_dir, source.join("nested"));
 
     drop(browser.redo_file_operation());
     let redo_task_id = browser
@@ -685,7 +676,7 @@ fn undo_and_redo_reuse_success_completion_path_migration() {
             to: destination.clone(),
         }),
     ));
-    assert_eq!(browser.current_dir, destination.join("nested"));
+    assert_eq!(browser.tab().current_dir, destination.join("nested"));
 }
 
 #[test]
@@ -738,8 +729,7 @@ fn failed_move_migrates_paths_for_completed_transfers_only() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let source = PathBuf::from("/workspace/old");
     let destination = PathBuf::from("/archive/old");
-    browser.current_dir = source.join("nested");
-    browser.sync_active_tab_state();
+    browser.tab_mut().current_dir = source.join("nested");
     let operation_directory = tempfile::tempdir().unwrap();
     attach_store(
         &mut browser.operation_queue,
@@ -774,7 +764,7 @@ fn failed_move_migrates_paths_for_completed_transfers_only() {
         },
     ));
 
-    assert_eq!(browser.current_dir, destination.join("nested"));
+    assert_eq!(browser.tab().current_dir, destination.join("nested"));
     assert_eq!(
         browser
             .operation_queue
@@ -791,10 +781,10 @@ fn successful_trash_focuses_next_entry_after_keyboard_selection() {
     let first = PathBuf::from("/workspace/first.txt");
     let deleted = PathBuf::from("/workspace/deleted.txt");
     let next = PathBuf::from("/workspace/next.txt");
-    browser.current_dir = PathBuf::from("/workspace");
-    browser.view_mode = crate::model::BrowserViewMode::Columns;
-    browser.directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
-    browser.entries = vec![
+    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().view_mode = crate::model::BrowserViewMode::Columns;
+    browser.tab_mut().directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
+    browser.tab_mut().entries = vec![
         file_core::DirectoryEntry::new(
             first.clone(),
             file_core::FileKind::File,
@@ -824,7 +814,7 @@ fn successful_trash_focuses_next_entry_after_keyboard_selection() {
 
     browser.select_path(first);
     drop(browser.move_file_selection(FileSelectionDirection::Down));
-    assert_eq!(browser.selected, Some(deleted.clone()));
+    assert_eq!(browser.tab().selected, Some(deleted.clone()));
 
     let task_id = queued_task_id(browser.operation_queue.enqueue(QueuedFileOperation::Trash {
         paths: vec![deleted.clone()],
@@ -838,8 +828,8 @@ fn successful_trash_focuses_next_entry_after_keyboard_selection() {
         }),
     ));
 
-    assert_eq!(browser.selected, Some(next.clone()));
-    assert_eq!(browser.selected_paths, HashSet::from([next]));
+    assert_eq!(browser.tab().selected, Some(next.clone()));
+    assert_eq!(browser.tab().selected_paths, HashSet::from([next]));
 }
 
 #[test]
@@ -847,7 +837,7 @@ fn untrashable_items_stay_selected_and_ask_to_delete_permanently() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let trashed = PathBuf::from("/workspace/trashed.txt");
     let kept = PathBuf::from("/workspace/kept.txt");
-    browser.entries = [&trashed, &kept]
+    browser.tab_mut().entries = [&trashed, &kept]
         .into_iter()
         .map(|path| {
             file_core::DirectoryEntry::new(
@@ -874,7 +864,7 @@ fn untrashable_items_stay_selected_and_ask_to_delete_permanently() {
         }),
     ));
 
-    assert_eq!(browser.selected, Some(kept.clone()));
+    assert_eq!(browser.tab().selected, Some(kept.clone()));
     assert!(matches!(
         &browser.destructive_action_confirmation,
         Some(DestructiveActionConfirmation::DeleteUntrashable { paths }) if paths == &vec![kept.clone()]
@@ -894,8 +884,8 @@ fn finished_delete_operation_only_invalidates_affected_directory_chain() {
     let deleted_child = current_dir.join("todo.txt");
     let unrelated = root.join("archive");
 
-    browser.current_dir = current_dir.clone();
-    browser.directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
+    browser.tab_mut().current_dir = current_dir.clone();
+    browser.tab_mut().directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
 
     remember_summary(&mut browser, &root, 3, 4096);
     remember_summary(&mut browser, &current_dir, 2, 2048);
@@ -935,8 +925,8 @@ fn finished_directory_delete_operation_clears_cached_descendant_summaries() {
     let deleted_descendant = deleted_directory.join("nested");
     let unrelated = root.join("archive");
 
-    browser.current_dir = current_dir.clone();
-    browser.directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
+    browser.tab_mut().current_dir = current_dir.clone();
+    browser.tab_mut().directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
 
     remember_summary(&mut browser, &root, 3, 4096);
     remember_summary(&mut browser, &current_dir, 2, 2048);

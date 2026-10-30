@@ -54,15 +54,16 @@ mod entry_naming;
 pub(crate) use entry_naming::invalid_entry_name_label;
 mod browser_panes;
 pub(crate) use browser_panes::{
-    empty_directory_entry_snapshot, retain_direct_entry_selection, BrowserPane, BrowserPaneId,
-    BrowserPaneLayout, BrowserTab, BrowserViewMode, ColumnBrowserViewport,
-    DirectoryCollectionPhase, DirectoryEntrySnapshot, DirectoryExpansionLoadContext,
-    DirectoryLoadFailure, DirectoryLoadRequest, DirectoryLoadingPlaceholder,
-    DirectoryLoadingPlaceholderEntry, DirectoryMetadataLoadContext, DirectoryMetadataLoadFailure,
-    DirectoryMetadataLoadRequest, DirectoryOrderPhase, ExpandedDirectory,
-    ExpandedDirectoryLoadRequest, ExpandedDirectoryStatus, IconGridExpansionSessionId,
-    IconGridViewport, ListExpansionFollowSessionId, SplitAxis, SplitRegion,
+    empty_directory_entry_snapshot, BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab,
+    BrowserViewMode, ColumnBrowserViewport, DirectoryCollectionPhase, DirectoryEntrySnapshot,
+    DirectoryExpansionLoadContext, DirectoryLoadFailure, DirectoryLoadRequest,
+    DirectoryLoadingPlaceholder, DirectoryLoadingPlaceholderEntry, DirectoryMetadataLoadContext,
+    DirectoryMetadataLoadFailure, DirectoryMetadataLoadRequest, DirectoryOrderPhase,
+    ExpandedDirectory, ExpandedDirectoryLoadRequest, ExpandedDirectoryStatus,
+    IconGridExpansionSessionId, IconGridViewport, ListExpansionFollowSessionId, SplitAxis,
+    SplitRegion,
 };
+mod path_migration;
 mod split_layout;
 pub(crate) use split_layout::{SPLIT_DIVIDER_WIDTH, SPLIT_PORTION_TOTAL};
 mod trash;

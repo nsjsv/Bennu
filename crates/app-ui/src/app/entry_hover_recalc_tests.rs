@@ -1,6 +1,6 @@
 // hover 滚动补偿的单元测试:hovered_entry 恒等于光标正下方的条目。
 // 覆盖:滚动后 hover 跟随光标所在行、落点在组头/表尾空白 → None、
-// 无光标记录(光标不在视口内)不动作、索引栏进入清空且屏障存续期间
+// 光标未知或不在视口内不动作、索引栏进入清空且屏障存续期间
 // 滚动补偿不命中、大图网格同构。
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -36,21 +36,21 @@ fn file_entry(path: &str) -> DirectoryEntry {
 
 fn list_browser(paths: &[&str]) -> FileBrowser {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = PathBuf::from("/workspace");
-    browser.entries = Arc::new(paths.iter().map(|path| file_entry(path)).collect());
-    browser.view_mode = BrowserViewMode::List;
+    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().entries = Arc::new(paths.iter().map(|path| file_entry(path)).collect());
+    browser.tab_mut().view_mode = BrowserViewMode::List;
     browser
 }
 
 /// 列表内容坐标(含表头留量)对应的窗口光标位置:行流 y + 视口原点。
-fn cursor_at_content_y(content_y: f32) -> Point {
+fn cursor_at_content_y(content_y: f32) -> Option<Point> {
     let viewport = list_viewport();
-    Point::new(viewport.x + 100.0, viewport.y + content_y)
+    Some(Point::new(viewport.x + 100.0, viewport.y + content_y))
 }
 
 /// 网格内容坐标 → 窗口光标位置。
-fn cursor_at(viewport: Rectangle, x: f32, y: f32) -> Point {
-    Point::new(viewport.x + x, viewport.y + y)
+fn cursor_at(viewport: Rectangle, x: f32, y: f32) -> Option<Point> {
+    Some(Point::new(viewport.x + x, viewport.y + y))
 }
 
 #[test]
@@ -62,6 +62,25 @@ fn list_scroll_moves_hover_to_the_entry_under_the_cursor() {
 
     drop(browser.update(Message::ListScrolled(PANE_ID, 0.0, list_viewport())));
 
+    assert_eq!(
+        browser.hovered_entry,
+        Some(PathBuf::from("/workspace/b.txt"))
+    );
+}
+
+#[test]
+fn pointer_motion_records_the_position_that_scroll_recalc_reads() {
+    let mut browser = list_browser(&["/workspace/a.txt", "/workspace/b.txt", "/workspace/c.txt"]);
+    let position = cursor_at_content_y(LIST_HEADER_HEIGHT + 1.5 * LIST_ROW_HEIGHT)
+        .expect("a position inside the list viewport");
+
+    drop(browser.update(Message::CursorMoved {
+        window: browser.main_window,
+        position,
+    }));
+    assert_eq!(browser.cursor_position, Some(position));
+
+    drop(browser.update(Message::ListScrolled(PANE_ID, 0.0, list_viewport())));
     assert_eq!(
         browser.hovered_entry,
         Some(PathBuf::from("/workspace/b.txt"))
@@ -102,13 +121,29 @@ fn list_scroll_over_group_header_clears_hover() {
 }
 
 #[test]
-fn list_scroll_without_cursor_record_keeps_event_channel_hover() {
+fn list_scroll_with_cursor_outside_viewport_keeps_event_channel_hover() {
     let mut browser = list_browser(&["/workspace/a.txt", "/workspace/b.txt"]);
     browser.hovered_entry = Some(PathBuf::from("/workspace/a.txt"));
-    // 光标在视口之外(陈旧初值或在别的窗格):等值守卫语义,不动作。
-    browser.cursor_position = Point::new(10.0, 10.0);
+    // 光标在视口之外(例如在别的窗格):等值守卫语义,不动作。
+    browser.cursor_position = Some(Point::new(10.0, 10.0));
 
     drop(browser.update(Message::ListScrolled(PANE_ID, 0.0, list_viewport())));
+
+    assert_eq!(
+        browser.hovered_entry,
+        Some(PathBuf::from("/workspace/a.txt"))
+    );
+}
+
+#[test]
+fn scroll_before_any_pointer_event_keeps_event_channel_hover() {
+    let mut browser = list_browser(&["/workspace/a.txt", "/workspace/b.txt"]);
+    browser.hovered_entry = Some(PathBuf::from("/workspace/a.txt"));
+    assert_eq!(browser.cursor_position, None);
+    // 视口盖住窗口原点：旧的 (0,0) 初值会被当成真实光标而重算 hover。
+    let viewport_over_origin = Rectangle::new(Point::new(0.0, 0.0), Size::new(600.0, 500.0));
+
+    drop(browser.update(Message::ListScrolled(PANE_ID, 0.0, viewport_over_origin)));
 
     assert_eq!(
         browser.hovered_entry,
@@ -144,16 +179,33 @@ fn grouping_rail_enter_clears_hover_and_blocks_scroll_recalc() {
     );
 }
 
+/// 索引栏随分组出现/消失，消失的栏发不出 exit：条目或分组一变，屏障就
+/// 在那次转换里作废，滚动补偿之后不会被一个已经不存在的栏挡住。
+#[test]
+fn rail_barrier_is_dropped_when_entries_or_grouping_change() {
+    let mut browser = list_browser(&["/workspace/a.txt", "/workspace/b.txt"]);
+
+    browser.hovered_grouping_rail_pane = Some(PANE_ID);
+    browser.entries_replaced();
+    assert_eq!(browser.hovered_grouping_rail_pane, None);
+
+    browser.hovered_grouping_rail_pane = Some(PANE_ID);
+    drop(browser.update(Message::FileGroupingModeSelected(
+        FileGroupingMode::NameInitial,
+    )));
+    assert_eq!(browser.hovered_grouping_rail_pane, None);
+}
+
 #[test]
 fn icon_grid_scroll_moves_hover_to_the_cell_under_the_cursor() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = PathBuf::from("/workspace");
-    browser.entries = Arc::new(vec![
+    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().entries = Arc::new(vec![
         file_entry("/workspace/a.txt"),
         file_entry("/workspace/b.txt"),
         file_entry("/workspace/c.txt"),
     ]);
-    browser.view_mode = BrowserViewMode::Icons;
+    browser.tab_mut().view_mode = BrowserViewMode::Icons;
     let viewport = Rectangle::new(Point::new(200.0, 120.0), Size::new(600.0, 500.0));
     assert!(column_count_for_width(viewport.width, 96) >= 2);
     let edge = browser.user_config.icons_icon_edge();
@@ -181,12 +233,12 @@ fn icon_grid_scroll_moves_hover_to_the_cell_under_the_cursor() {
 #[test]
 fn icon_grid_scroll_over_group_header_clears_hover() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = PathBuf::from("/workspace");
-    browser.entries = Arc::new(vec![
+    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().entries = Arc::new(vec![
         file_entry("/workspace/apple.txt"),
         file_entry("/workspace/zebra.txt"),
     ]);
-    browser.view_mode = BrowserViewMode::Icons;
+    browser.tab_mut().view_mode = BrowserViewMode::Icons;
     browser.user_config.file_grouping = FileGroupingMode::NameInitial;
     let viewport = Rectangle::new(Point::new(200.0, 120.0), Size::new(600.0, 500.0));
     let edge = browser.user_config.icons_icon_edge();
@@ -208,14 +260,14 @@ fn scrolled_grid_hover_tracks_scroll_offset_from_message() {
     // 同一光标位置,不同滚动偏移落在不同格子上:补偿用消息里的
     // offset_y 换算内容落点,而不是视口内的固定行。
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().current_dir = PathBuf::from("/workspace");
     // 条目足够多:窗格宽推导的列数下,row 1 / row 2 都真实存在。
-    browser.entries = Arc::new(
+    browser.tab_mut().entries = Arc::new(
         (0..36)
             .map(|index| file_entry(&format!("/workspace/item-{index:02}.txt")))
             .collect(),
     );
-    browser.view_mode = BrowserViewMode::Icons;
+    browser.tab_mut().view_mode = BrowserViewMode::Icons;
     let viewport = Rectangle::new(Point::new(200.0, 120.0), Size::new(600.0, 500.0));
     let edge = browser.user_config.icons_icon_edge();
     // 布局的列数由窗格内容宽推导(icon_grid_viewport_for 会把测量宽
@@ -237,6 +289,7 @@ fn scrolled_grid_hover_tracks_scroll_offset_from_message() {
 
     let index_of = |path: &PathBuf| {
         browser
+            .tab()
             .entries
             .iter()
             .position(|entry| &entry.path == path)

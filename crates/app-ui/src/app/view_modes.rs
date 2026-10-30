@@ -51,7 +51,11 @@ impl FileBrowser {
             return Task::none();
         }
         self.user_config.file_grouping = mode;
-        self.persist_user_preferences_command()
+        self.hovered_grouping_rail_pane = None;
+        Task::batch([
+            self.persist_user_preferences_command(),
+            self.clamp_visible_pane_viewports(),
+        ])
     }
 
     pub(super) fn select_browser_view_mode(
@@ -60,11 +64,11 @@ impl FileBrowser {
         view_mode: BrowserViewMode,
     ) -> Task<Message> {
         self.activate_pane(pane_id);
-        if self.view_mode == view_mode {
+        if self.tab().view_mode == view_mode {
             return Task::none();
         }
 
-        let previous_mode = self.view_mode;
+        let previous_mode = self.tab().view_mode;
         let list_to_icons = (previous_mode == BrowserViewMode::List
             && view_mode == BrowserViewMode::Icons)
             .then(|| self.list_expansion_transfer())
@@ -93,7 +97,7 @@ impl FileBrowser {
             }
             _ => Task::none(),
         };
-        self.view_mode = view_mode;
+        self.tab_mut().view_mode = view_mode;
         if let Some(transfer) = list_to_icons {
             transition_command =
                 self.start_icon_grid_expansion_follow(transfer.chain, transfer.target_selection);
@@ -114,7 +118,7 @@ impl FileBrowser {
         self.column_resize_drag = None;
         self.file_entry_bounds.clear();
         self.user_config.browser_view_mode = view_mode;
-        self.sync_active_tab_state();
+        self.follow_terminal_panel_directory();
         let (list_metadata_command, list_directory_summary_command) =
             if view_mode == BrowserViewMode::List {
                 (
@@ -136,13 +140,14 @@ impl FileBrowser {
             self.persist_user_preferences_command(),
             self.schedule_thumbnail_refresh(),
             self.request_browser_session_save(),
+            self.clamp_pane_viewports(&[pane_id]),
         ])
     }
 
     /// 视图切换后让主选中项在新视图中可见；切到多栏时同时横向滚到选中列。
     fn reveal_selected_after_view_switch(&mut self) -> Task<Message> {
         self.pending_view_switch_reveal = None;
-        let Some(path) = self.selected.clone() else {
+        let Some(path) = self.tab().selected.clone() else {
             return Task::none();
         };
         let pane_id = self.active_pane_id();
@@ -154,7 +159,7 @@ impl FileBrowser {
                 Task::none()
             }
         };
-        let horizontal = if self.view_mode == BrowserViewMode::Columns {
+        let horizontal = if self.tab().view_mode == BrowserViewMode::Columns {
             self.focus_column_containing_path(&path)
         } else {
             Task::none()
@@ -171,7 +176,7 @@ impl FileBrowser {
         let geometry =
             crate::list_view::ListGeometry::for_level(self.user_config.list_view_density);
         let pane_id = self.active_pane_id();
-        let anchor = self.selected.as_ref().and_then(|path| {
+        let anchor = self.tab().selected.as_ref().and_then(|path| {
             // 列表渲染的是"真实条目+传输占位+状态行"的合并行流,reveal
             // 落点必须按同一条流推算,占位行在选中项上方时不漏算。
             let pane = self.pane_view(pane_id)?;
@@ -188,7 +193,7 @@ impl FileBrowser {
                     LIST_HEADER_HEIGHT,
                 )?;
             Some(reveal_target_y(
-                self.column_viewports.get(&self.current_dir),
+                self.pane().column_viewports.get(&self.tab().current_dir),
                 item_offset,
                 item_height,
             ))
@@ -199,12 +204,16 @@ impl FileBrowser {
         }
     }
 
-    /// 视口越界自愈:条目集骤减(切换"显示隐藏文件"、文件操作、增量更新
-    /// 等)后,记录的滚动偏移可能超过新内容可支撑的最大偏移,虚拟列表按
-    /// 旧偏移算出的可见区间落在内容之外,渲染出整屏空白("列表内容消失")。
-    /// 出口统一把三种视图的越界视口重钉到内容尾部,并同步 iced 的真实
-    /// 滚动位置。
-    pub(super) fn clamp_viewports_to_content(&mut self) -> Task<Message> {
+    /// 窗格内容高度或视口高度变了（条目集合替换/增量/展开目录内容变化/
+    /// 路径迁移、窗口与窗格尺寸、密度、分组）之后，记录的滚动偏移可能超过
+    /// 新内容可支撑的最大偏移，虚拟列表按旧偏移算出的可见区间落在内容之外，
+    /// 渲染出整屏空白（"列表内容消失"）。引起变化的转换在返回前调用它，
+    /// 把越界视口重钉到内容尾部，并同步 iced 的真实滚动位置。
+    pub(super) fn clamp_visible_pane_viewports(&mut self) -> Task<Message> {
+        self.clamp_pane_viewports(&self.pane_layout.visible_pane_ids())
+    }
+
+    pub(super) fn clamp_pane_viewports(&mut self, pane_ids: &[BrowserPaneId]) -> Task<Message> {
         #[derive(Debug)]
         enum Reclamp {
             Shared {
@@ -220,9 +229,8 @@ impl FileBrowser {
             },
         }
 
-        let pane_ids: Vec<_> = self.panes.iter().map(|pane| pane.id).collect();
         let mut pending = Vec::new();
-        for pane_id in pane_ids {
+        for &pane_id in pane_ids {
             let Some(pane) = self.pane_view(pane_id) else {
                 continue;
             };
@@ -326,10 +334,8 @@ impl FileBrowser {
                     directory,
                     viewport,
                 } => {
-                    if pane_id == self.active_pane_id() {
-                        self.column_viewports.insert(directory, viewport);
-                    } else if let Some(pane_snapshot) = self.pane_by_id_mut(pane_id) {
-                        pane_snapshot.column_viewports.insert(directory, viewport);
+                    if let Some(pane) = self.pane_by_id_mut(pane_id) {
+                        pane.column_viewports.insert(directory, viewport);
                     }
                     commands.push(iced::widget::operation::scroll_to(
                         smooth_scroll_id(&region),
@@ -376,7 +382,7 @@ impl FileBrowser {
     /// 主选中项在当前视图中的纵向定位任务；目录内容尚未就绪时返回 None。
     pub(super) fn view_switch_reveal_scroll(&self, path: &Path) -> Option<Task<Message>> {
         let pane_id = self.active_pane_id();
-        let (region, target_y) = match self.view_mode {
+        let (region, target_y) = match self.tab().view_mode {
             BrowserViewMode::Icons => {
                 let pane = self.pane_view(pane_id)?;
                 let viewport = pane.icon_grid_viewport;
@@ -405,7 +411,7 @@ impl FileBrowser {
                         geometry.row_height,
                         LIST_HEADER_HEIGHT,
                     )?;
-                let viewport = self.column_viewports.get(&self.current_dir);
+                let viewport = self.pane().column_viewports.get(&self.tab().current_dir);
                 (
                     ScrollbarRegion::PaneList(pane_id),
                     reveal_target_y(viewport, item_offset, item_height),
@@ -426,7 +432,7 @@ impl FileBrowser {
                         path,
                         geometry.entry_scroll_height,
                     )?;
-                let viewport = self.column_viewports.get(&directory);
+                let viewport = self.pane().column_viewports.get(&directory);
                 (
                     ScrollbarRegion::Column { pane_id, directory },
                     reveal_target_y(viewport, item_offset, geometry.entry_height),
@@ -443,12 +449,7 @@ impl FileBrowser {
     }
 
     pub(super) fn retain_direct_entry_selection(&mut self) {
-        crate::model::retain_direct_entry_selection(
-            &self.entries,
-            &mut self.selected,
-            &mut self.selected_paths,
-            &mut self.selection_anchor,
-        );
+        self.tab_mut().retain_direct_entry_selection();
     }
 
     pub(super) fn cancel_expansion_follow_plans(&mut self) {
@@ -462,19 +463,23 @@ impl FileBrowser {
         let Some(plan) = self.list_expansion_follow.take() else {
             return;
         };
-        if let Some(mut expanded) = self.expanded_directories.remove(&plan.waiting_for) {
+        if let Some(mut expanded) = self
+            .tab_mut()
+            .expanded_directories
+            .remove(&plan.waiting_for)
+        {
             Self::cancel_expanded_directory_load(&mut expanded);
         }
     }
 
     fn list_expansion_transfer(&self) -> Option<DirectoryExpansionTransfer> {
-        let target_selection = self.selected.clone()?;
-        if target_selection == self.current_dir || !target_selection.starts_with(&self.current_dir)
-        {
+        let tab = self.tab();
+        let target_selection = tab.selected.clone()?;
+        if target_selection == tab.current_dir || !target_selection.starts_with(&tab.current_dir) {
             return None;
         }
 
-        let selected_is_expanded_directory = self
+        let selected_is_expanded_directory = tab
             .expanded_directories
             .get(&target_selection)
             .is_some_and(list_directory_is_followable);
@@ -484,7 +489,7 @@ impl FileBrowser {
             target_selection.parent()?.to_path_buf()
         };
         let mut chain = Vec::new();
-        while current != self.current_dir {
+        while current != tab.current_dir {
             chain.push(current.clone());
             current = current.parent()?.to_path_buf();
         }
@@ -493,12 +498,12 @@ impl FileBrowser {
             return None;
         }
 
-        let mut parent = self.current_dir.as_path();
+        let mut parent = tab.current_dir.as_path();
         for directory_path in &chain {
-            let entries = if parent == self.current_dir {
-                self.entries.as_slice()
+            let entries = if parent == tab.current_dir {
+                tab.entries.as_slice()
             } else {
-                self.expanded_directories
+                tab.expanded_directories
                     .get(parent)
                     .filter(|expanded| list_directory_is_followable(expanded))?
                     .entries
@@ -508,7 +513,7 @@ impl FileBrowser {
                 entry.path == *directory_path
                     && entry.expands_as_directory()
                     && entry.path.parent() == Some(parent)
-            }) || !self
+            }) || !tab
                 .expanded_directories
                 .get(directory_path)
                 .is_some_and(list_directory_is_followable)
@@ -519,10 +524,10 @@ impl FileBrowser {
         }
 
         let target_parent = target_selection.parent()?;
-        let target_entries = if target_parent == self.current_dir {
-            self.entries.as_slice()
+        let target_entries = if target_parent == tab.current_dir {
+            tab.entries.as_slice()
         } else {
-            self.expanded_directories
+            tab.expanded_directories
                 .get(target_parent)
                 .filter(|expanded| list_directory_is_followable(expanded))?
                 .entries
@@ -541,7 +546,7 @@ impl FileBrowser {
     }
 
     fn icon_grid_expansion_transfer(&self) -> Option<DirectoryExpansionTransfer> {
-        let target_selection = self.selected.clone()?;
+        let target_selection = self.tab().selected.clone()?;
         let chain = self
             .icon_grid_expansion
             .as_ref()?
@@ -561,10 +566,11 @@ impl FileBrowser {
             return Task::none();
         };
         self.clear_list_expansion_for_follow();
-        if !self.entries.iter().any(|entry| {
+        let tab = self.tab();
+        if !tab.entries.iter().any(|entry| {
             entry.path == root_path
                 && entry.expands_as_directory()
-                && entry.path.parent() == Some(self.current_dir.as_path())
+                && entry.path.parent() == Some(tab.current_dir.as_path())
         }) {
             return Task::none();
         }
@@ -572,8 +578,8 @@ impl FileBrowser {
         let mut expanded = loading_list_directory();
         let session_id = self.next_list_expansion_follow_session_id();
         let pane_id = self.active_pane_id();
-        let tab_id = self.active_tab_id;
-        let current_dir = self.current_dir.clone();
+        let tab_id = self.pane().active_tab_id;
+        let current_dir = self.tab().current_dir.clone();
         let (request, cancellation) = Self::next_expanded_directory_load_request(
             DirectoryExpansionLoadContext::ListFollow {
                 pane_id,
@@ -584,7 +590,8 @@ impl FileBrowser {
             root_path.clone(),
             &mut expanded,
         );
-        self.expanded_directories
+        self.tab_mut()
+            .expanded_directories
             .insert(root_path.clone(), expanded);
         chain.remove(0);
         self.list_expansion_follow = Some(ListExpansionFollowPlan {
@@ -601,10 +608,11 @@ impl FileBrowser {
 
     fn clear_list_expansion_for_follow(&mut self) {
         self.list_expansion_follow = None;
-        for expanded in self.expanded_directories.values_mut() {
+        let expanded_directories = &mut self.tab_mut().expanded_directories;
+        for expanded in expanded_directories.values_mut() {
             Self::cancel_expanded_directory_load(expanded);
         }
-        self.expanded_directories.clear();
+        expanded_directories.clear();
     }
 
     pub(super) fn expanded_directory_load_context(
@@ -615,11 +623,12 @@ impl FileBrowser {
         let Some(plan) = self.list_expansion_follow.as_ref() else {
             return DirectoryExpansionLoadContext::BrowserTree { pane_id };
         };
-        if self.view_mode == BrowserViewMode::List
+        let tab = self.tab();
+        if tab.view_mode == BrowserViewMode::List
             && pane_id == plan.pane_id
             && self.active_pane_id() == plan.pane_id
-            && self.active_tab_id == plan.tab_id
-            && self.current_dir == plan.current_dir
+            && self.pane().active_tab_id == plan.tab_id
+            && tab.current_dir == plan.current_dir
             && path == plan.waiting_for
         {
             DirectoryExpansionLoadContext::ListFollow {
@@ -651,10 +660,10 @@ impl FileBrowser {
                 && *tab_id == plan.tab_id
                 && current_dir == &plan.current_dir
                 && *session_id == plan.session_id
-        ) && self.view_mode == BrowserViewMode::List
+        ) && self.tab().view_mode == BrowserViewMode::List
             && self.active_pane_id() == plan.pane_id
-            && self.active_tab_id == plan.tab_id
-            && self.current_dir == plan.current_dir
+            && self.pane().active_tab_id == plan.tab_id
+            && self.tab().current_dir == plan.current_dir
             && request.path == plan.waiting_for
     }
 
@@ -663,7 +672,7 @@ impl FileBrowser {
         &self,
     ) -> Option<ExpandedDirectoryLoadRequest> {
         let plan = self.list_expansion_follow.as_ref()?;
-        let expanded = self.expanded_directories.get(&plan.waiting_for)?;
+        let expanded = self.tab().expanded_directories.get(&plan.waiting_for)?;
         Some(ExpandedDirectoryLoadRequest {
             context: DirectoryExpansionLoadContext::ListFollow {
                 pane_id: plan.pane_id,
@@ -691,6 +700,7 @@ impl FileBrowser {
         if let Some(next_path) = plan.remaining_directories.front().cloned() {
             let waiting_for = plan.waiting_for.clone();
             let next_is_direct_directory = self
+                .tab()
                 .expanded_directories
                 .get(&waiting_for)
                 .filter(|expanded| list_directory_is_followable(expanded))
@@ -718,7 +728,8 @@ impl FileBrowser {
                 next_path.clone(),
                 &mut expanded,
             );
-            self.expanded_directories
+            self.tab_mut()
+                .expanded_directories
                 .insert(next_path.clone(), expanded);
             let plan = self
                 .list_expansion_follow
@@ -735,10 +746,11 @@ impl FileBrowser {
 
         let target_selection = plan.target_selection.clone();
         self.list_expansion_follow = None;
+        let tab = self.tab();
         if crate::visible_entries::entry_is_visible(
             &target_selection,
-            &self.entries,
-            &self.expanded_directories,
+            &tab.entries,
+            &tab.expanded_directories,
         ) {
             self.select_path(target_selection.clone());
             match self.view_switch_reveal_scroll(&target_selection) {
@@ -761,32 +773,23 @@ impl FileBrowser {
     }
 
     fn selected_is_direct_entry(&self) -> bool {
-        self.selected
+        let tab = self.tab();
+        tab.selected
             .as_ref()
-            .is_some_and(|selected| self.entries.iter().any(|entry| entry.path == *selected))
+            .is_some_and(|selected| tab.entries.iter().any(|entry| entry.path == *selected))
     }
 
     pub(super) fn list_directory_animation_is_active(&self) -> bool {
-        self.expanded_directories
-            .values()
-            .any(expanded_directory_is_animating)
-            || self.panes.iter().any(|pane| {
-                pane.expanded_directories
-                    .values()
-                    .any(expanded_directory_is_animating)
-            })
+        self.panes.iter().flat_map(|pane| &pane.tabs).any(|tab| {
+            tab.expanded_directories
+                .values()
+                .any(expanded_directory_is_animating)
+        })
     }
 
     pub(super) fn advance_list_directory_animations(&mut self) -> Task<Message> {
-        let active_changed = advance_expanded_directories(&mut self.expanded_directories);
-        for pane in &mut self.panes {
-            let pane_changed = advance_expanded_directories(&mut pane.expanded_directories);
-            if pane_changed {
-                pane.sync_active_tab_state();
-            }
-        }
-        if active_changed {
-            self.sync_active_tab_state();
+        for tab in self.panes.iter_mut().flat_map(|pane| &mut pane.tabs) {
+            advance_expanded_directories(&mut tab.expanded_directories);
         }
         Task::none()
     }
@@ -803,7 +806,7 @@ impl FileBrowser {
 
     pub(super) fn expand_selected_list_directory(&mut self) -> Task<Message> {
         self.cancel_expansion_follow_plans();
-        let Some(selected) = self.selected.clone() else {
+        let Some(selected) = self.tab().selected.clone() else {
             return Task::none();
         };
         if !self.entry_acts_as_directory(&selected) {
@@ -811,6 +814,7 @@ impl FileBrowser {
         }
 
         if self
+            .tab()
             .expanded_directories
             .get(&selected)
             .is_some_and(|expanded| expanded.is_expanded && !expanded.is_collapsing)
@@ -826,11 +830,12 @@ impl FileBrowser {
 
     pub(super) fn collapse_selected_list_directory_or_select_parent(&mut self) -> Task<Message> {
         self.cancel_expansion_follow_plans();
-        let Some(selected) = self.selected.clone() else {
+        let Some(selected) = self.tab().selected.clone() else {
             return Task::none();
         };
 
         if self
+            .tab()
             .expanded_directories
             .get(&selected)
             .is_some_and(|expanded| expanded.is_expanded && !expanded.is_collapsing)
@@ -841,28 +846,29 @@ impl FileBrowser {
         let Some(parent) = selected.parent().map(Path::to_path_buf) else {
             return Task::none();
         };
-        if parent == self.current_dir {
+        let tab = self.tab();
+        if parent == tab.current_dir {
             return Task::none();
         }
         if !crate::visible_entries::entry_is_visible(
             &parent,
-            &self.entries,
-            &self.expanded_directories,
+            &tab.entries,
+            &tab.expanded_directories,
         ) {
             return Task::none();
         }
 
         let scroll_task = self.select_path_from_keyboard(parent);
-        self.sync_active_tab_state();
         Task::batch([scroll_task, self.schedule_thumbnail_refresh()])
     }
 
     fn toggle_list_directory_for_path(&mut self, path: PathBuf) -> Task<Message> {
-        if self.is_trash_view || !self.entry_acts_as_directory(&path) {
+        if self.tab().is_trash_view || !self.entry_acts_as_directory(&path) {
             return Task::none();
         }
 
         if self
+            .tab()
             .expanded_directories
             .get(&path)
             .is_some_and(|expanded| expanded.is_expanded && !expanded.is_collapsing)
@@ -874,12 +880,11 @@ impl FileBrowser {
     }
 
     fn collapse_list_directory(&mut self, path: PathBuf) -> Task<Message> {
-        if let Some(expanded) = self.expanded_directories.get_mut(&path) {
+        if let Some(expanded) = self.tab_mut().expanded_directories.get_mut(&path) {
             Self::cancel_expanded_directory_load(expanded);
             expanded.is_collapsing = true;
             expanded.animation_progress = expanded.animation_progress.clamp(0.0, 1.0);
         }
-        self.sync_active_tab_state();
         Task::batch([
             self.schedule_thumbnail_refresh(),
             self.request_browser_session_save(),
@@ -887,11 +892,10 @@ impl FileBrowser {
     }
 
     fn open_list_directory(&mut self, path: PathBuf) -> Task<Message> {
-        if let Some(expanded) = self.expanded_directories.get_mut(&path) {
+        if let Some(expanded) = self.tab_mut().expanded_directories.get_mut(&path) {
             expanded.is_expanded = true;
             expanded.is_collapsing = false;
             expanded.animation_progress = expanded.animation_progress.clamp(0.0, 1.0);
-            self.sync_active_tab_state();
             return Task::batch([
                 self.schedule_thumbnail_refresh(),
                 self.request_browser_session_save(),
@@ -920,8 +924,7 @@ impl FileBrowser {
             path.clone(),
             &mut expanded,
         );
-        self.expanded_directories.insert(path, expanded);
-        self.sync_active_tab_state();
+        self.tab_mut().expanded_directories.insert(path, expanded);
         Task::batch([
             load_expanded_directory_command(request, self.options.clone(), cancellation),
             self.schedule_thumbnail_refresh(),
@@ -930,11 +933,12 @@ impl FileBrowser {
     }
 
     fn first_visible_child_path(&self, directory: &Path) -> Option<PathBuf> {
+        let tab = self.tab();
         crate::visible_entries::visible_child_paths(
             directory,
-            &self.current_dir,
-            &self.entries,
-            &self.expanded_directories,
+            &tab.current_dir,
+            &tab.entries,
+            &tab.expanded_directories,
         )
         .into_iter()
         .next()
@@ -943,22 +947,24 @@ impl FileBrowser {
     fn sync_expanded_directories_to_open_columns(&mut self) {
         let retained_paths = crate::three_column_view::column_directories(self)
             .into_iter()
-            .filter(|path| path != &self.current_dir)
+            .filter(|path| path != &self.tab().current_dir)
             .collect::<HashSet<_>>();
-        self.expanded_directories.retain(|path, expanded| {
-            if retained_paths.contains(path) {
-                expanded.is_expanded = true;
-                expanded.is_collapsing = false;
-                expanded.animation_progress = 1.0;
-                return true;
-            }
-            Self::cancel_expanded_directory_load(expanded);
-            false
-        });
+        self.tab_mut()
+            .expanded_directories
+            .retain(|path, expanded| {
+                if retained_paths.contains(path) {
+                    expanded.is_expanded = true;
+                    expanded.is_collapsing = false;
+                    expanded.animation_progress = 1.0;
+                    return true;
+                }
+                Self::cancel_expanded_directory_load(expanded);
+                false
+            });
     }
 
     fn sync_open_column_directory_to_list_selection(&mut self) -> Task<Message> {
-        let selected = self.selected.clone();
+        let selected = self.tab().selected.clone();
         let selected_is_directory = selected
             .as_deref()
             .map(|path| self.entry_acts_as_directory(path));
@@ -993,7 +999,7 @@ impl FileBrowser {
             return Task::none();
         }
         self.pending_view_switch_reveal = None;
-        if self.selected.as_deref() != Some(path.as_path()) {
+        if self.tab().selected.as_deref() != Some(path.as_path()) {
             return Task::none();
         }
         match self.view_switch_reveal_scroll(&path) {
@@ -1054,31 +1060,20 @@ fn expanded_directory_is_animating(expanded: &ExpandedDirectory) -> bool {
 
 fn advance_expanded_directories(
     expanded_directories: &mut std::collections::HashMap<PathBuf, ExpandedDirectory>,
-) -> bool {
-    let mut changed = false;
+) {
     for expanded in expanded_directories.values_mut() {
         if expanded.is_collapsing {
-            let next_progress =
+            expanded.animation_progress =
                 (expanded.animation_progress - LIST_DIRECTORY_ANIMATION_STEP).max(0.0);
-            if (next_progress - expanded.animation_progress).abs() > f32::EPSILON {
-                expanded.animation_progress = next_progress;
-                changed = true;
-            }
             if expanded.animation_progress <= f32::EPSILON {
                 expanded.is_expanded = false;
                 expanded.is_collapsing = false;
-                changed = true;
             }
         } else if expanded.is_expanded && expanded.animation_progress < 1.0 {
-            let next_progress =
+            expanded.animation_progress =
                 (expanded.animation_progress + LIST_DIRECTORY_ANIMATION_STEP).min(1.0);
-            if (next_progress - expanded.animation_progress).abs() > f32::EPSILON {
-                expanded.animation_progress = next_progress;
-                changed = true;
-            }
         }
     }
-    changed
 }
 
 #[cfg(test)]
@@ -1086,6 +1081,22 @@ mod tests {
     use super::*;
 
     use file_core::{DirectoryEntry, EntryMetadata, FileKind};
+
+    /// 目录重扫落地：内容换成 `count` 个条目。
+    fn land_scan(browser: &mut FileBrowser, root: &Path, count: usize) {
+        let request = browser.next_directory_load_request(root.to_path_buf());
+        let entries = (0..count)
+            .map(|index| test_entry(root.join(format!("item-{index}"))))
+            .collect();
+        drop(browser.accept_complete_directory_fixture(
+            request,
+            file_core::DirectoryScan {
+                path: root.to_path_buf(),
+                entries,
+                skipped: Vec::new(),
+            },
+        ));
+    }
 
     fn test_entry(path: PathBuf) -> DirectoryEntry {
         DirectoryEntry::new(
@@ -1116,13 +1127,13 @@ mod tests {
     fn list_viewport_offset_is_reclamped_when_entries_shrink_below_it() {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
         let root = PathBuf::from("/workspace");
-        browser.current_dir = root.clone();
-        browser.view_mode = BrowserViewMode::List;
-        browser.entries = (0..500)
+        browser.tab_mut().current_dir = root.clone();
+        browser.tab_mut().view_mode = BrowserViewMode::List;
+        browser.tab_mut().entries = (0..500)
             .map(|index| test_entry(root.join(format!("item-{index}"))))
             .collect::<Vec<_>>()
             .into();
-        browser.column_viewports.insert(
+        browser.pane_mut().column_viewports.insert(
             root.clone(),
             ColumnViewport {
                 offset_y: 22000.0,
@@ -1130,17 +1141,11 @@ mod tests {
             },
         );
 
-        // 模拟关闭"显示隐藏文件"后的条目骤减:滚动偏移仍停在旧内容的底部。
-        browser.entries = (0..5)
-            .map(|index| test_entry(root.join(format!("item-{index}"))))
-            .collect::<Vec<_>>()
-            .into();
-
-        drop(browser.update(crate::model::Message::ThemeModeSelected(
-            bennu_theme::ThemeMode::Dark,
-        )));
+        // 关闭"显示隐藏文件"后重扫落地,条目骤减:滚动偏移仍停在旧内容的底部。
+        land_scan(&mut browser, &root, 5);
 
         let clamped = browser
+            .pane()
             .column_viewports
             .get(&root)
             .expect("viewport stays recorded");
@@ -1153,13 +1158,13 @@ mod tests {
     fn columns_viewport_offset_is_reclamped_when_entries_shrink_below_it() {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
         let root = PathBuf::from("/workspace");
-        browser.current_dir = root.clone();
-        browser.view_mode = BrowserViewMode::Columns;
-        browser.entries = (0..200)
+        browser.tab_mut().current_dir = root.clone();
+        browser.tab_mut().view_mode = BrowserViewMode::Columns;
+        browser.tab_mut().entries = (0..200)
             .map(|index| test_entry(root.join(format!("item-{index}"))))
             .collect::<Vec<_>>()
             .into();
-        browser.column_viewports.insert(
+        browser.pane_mut().column_viewports.insert(
             root.clone(),
             ColumnViewport {
                 offset_y: 8000.0,
@@ -1169,16 +1174,10 @@ mod tests {
 
         // 关闭"显示隐藏文件"后栏条目骤减,旧偏移落在内容之外,
         // 对应首栏显示尾部条目、其余栏空白的截图症状。
-        browser.entries = (0..5)
-            .map(|index| test_entry(root.join(format!("item-{index}"))))
-            .collect::<Vec<_>>()
-            .into();
-
-        drop(browser.update(crate::model::Message::ThemeModeSelected(
-            bennu_theme::ThemeMode::Dark,
-        )));
+        land_scan(&mut browser, &root, 5);
 
         let clamped = browser
+            .pane()
             .column_viewports
             .get(&root)
             .expect("viewport stays recorded");
@@ -1189,9 +1188,9 @@ mod tests {
     fn icons_viewport_offset_is_reclamped_when_entries_shrink_below_it() {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
         let root = PathBuf::from("/workspace");
-        browser.current_dir = root.clone();
-        browser.view_mode = BrowserViewMode::Icons;
-        browser.entries = (0..5)
+        browser.tab_mut().current_dir = root.clone();
+        browser.tab_mut().view_mode = BrowserViewMode::Icons;
+        browser.tab_mut().entries = (0..5)
             .map(|index| test_entry(root.join(format!("item-{index}"))))
             .collect::<Vec<_>>()
             .into();
@@ -1207,9 +1206,7 @@ mod tests {
             },
         );
 
-        drop(browser.update(crate::model::Message::ThemeModeSelected(
-            bennu_theme::ThemeMode::Dark,
-        )));
+        land_scan(&mut browser, &root, 5);
 
         let clamped = browser
             .icon_grid_viewports
@@ -1222,12 +1219,13 @@ mod tests {
     fn list_viewport_within_new_content_is_left_untouched() {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
         let root = PathBuf::from("/workspace");
-        browser.view_mode = BrowserViewMode::List;
-        browser.entries = (0..500)
+        browser.tab_mut().current_dir = root.clone();
+        browser.tab_mut().view_mode = BrowserViewMode::List;
+        browser.tab_mut().entries = (0..500)
             .map(|index| test_entry(root.join(format!("item-{index}"))))
             .collect::<Vec<_>>()
             .into();
-        browser.column_viewports.insert(
+        browser.pane_mut().column_viewports.insert(
             root.clone(),
             ColumnViewport {
                 offset_y: 4600.0,
@@ -1235,11 +1233,10 @@ mod tests {
             },
         );
 
-        drop(browser.update(crate::model::Message::ThemeModeSelected(
-            bennu_theme::ThemeMode::Dark,
-        )));
+        land_scan(&mut browser, &root, 500);
 
         let viewport = browser
+            .pane()
             .column_viewports
             .get(&root)
             .expect("viewport stays recorded");
@@ -1248,12 +1245,38 @@ mod tests {
     }
 
     #[test]
+    fn animation_frames_reclamp_viewports_to_the_shrinking_content() {
+        let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+        let root = PathBuf::from("/workspace");
+        browser.tab_mut().current_dir = root.clone();
+        browser.tab_mut().view_mode = BrowserViewMode::List;
+        browser.tab_mut().entries = (0..5)
+            .map(|index| test_entry(root.join(format!("item-{index}"))))
+            .collect::<Vec<_>>()
+            .into();
+        browser.pane_mut().column_viewports.insert(
+            root.clone(),
+            ColumnViewport {
+                offset_y: 22000.0,
+                height: 800.0,
+            },
+        );
+
+        // 终端面板收起、标签栏出现、列表折叠这些动画都改变内容或视口高度，
+        // 逐帧推进时视口跟着收。
+        drop(browser.advance_window_animation_frame());
+
+        assert_eq!(browser.pane().column_viewports[&root].offset_y, 0.0);
+    }
+
+    #[test]
     fn selecting_file_grouping_updates_config_without_touching_directory_loading() {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.view_mode = BrowserViewMode::List;
-        browser.directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
-        let load_generation_before = browser.directory_load_generation;
-        let collection_phase_before = browser.directory_collection_phase;
+        browser.tab_mut().view_mode = BrowserViewMode::List;
+        browser.tab_mut().directory_collection_phase =
+            crate::model::DirectoryCollectionPhase::Ready;
+        let load_generation_before = browser.pane().directory_load_generation;
+        let collection_phase_before = browser.tab().directory_collection_phase;
 
         drop(
             browser.update(crate::model::Message::FileGroupingModeSelected(
@@ -1266,8 +1289,14 @@ mod tests {
             crate::model::FileGroupingMode::Kind
         );
         // 分组是纯视图概念:目录加载代数与收集阶段必须原封不动。
-        assert_eq!(browser.directory_load_generation, load_generation_before);
-        assert_eq!(browser.directory_collection_phase, collection_phase_before);
+        assert_eq!(
+            browser.pane().directory_load_generation,
+            load_generation_before
+        );
+        assert_eq!(
+            browser.tab().directory_collection_phase,
+            collection_phase_before
+        );
         // 选择即走用户偏好持久化出口(与视图模式切换同一通道)。
         assert!(browser.user_preferences_save_in_flight);
 
@@ -1285,9 +1314,9 @@ mod tests {
         // 键盘 → 展开选中项与点击展开箭头共用“压缩包视作目录”判定。
         let archive = PathBuf::from("/workspace/bundle.zip");
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.current_dir = PathBuf::from("/workspace");
-        browser.view_mode = BrowserViewMode::List;
-        browser.entries = vec![DirectoryEntry::new(
+        browser.tab_mut().current_dir = PathBuf::from("/workspace");
+        browser.tab_mut().view_mode = BrowserViewMode::List;
+        browser.tab_mut().entries = vec![DirectoryEntry::new(
             archive.clone(),
             FileKind::File,
             EntryMetadata::default(),
@@ -1300,6 +1329,6 @@ mod tests {
 
         drop(browser.expand_selected_list_directory());
 
-        assert!(browser.expanded_directories.contains_key(&archive));
+        assert!(browser.tab().expanded_directories.contains_key(&archive));
     }
 }

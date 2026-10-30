@@ -21,7 +21,7 @@ use crate::operation_queue::{new_directory_name, QueuedFileOperation, QueuedTran
 impl FileBrowser {
     pub(in crate::app) fn copy_selected(&mut self) -> Task<Message> {
         self.context_menu = None;
-        if self.search_workspace.is_none() && self.is_trash_view {
+        if self.search_workspace.is_none() && self.tab().is_trash_view {
             return Task::none();
         }
         let paths = self.active_file_selection();
@@ -37,7 +37,7 @@ impl FileBrowser {
 
     pub(in crate::app) fn move_selected(&mut self) -> Task<Message> {
         self.context_menu = None;
-        if self.search_workspace.is_none() && self.is_trash_view {
+        if self.search_workspace.is_none() && self.tab().is_trash_view {
             return Task::none();
         }
         let paths = self.active_file_selection();
@@ -55,7 +55,7 @@ impl FileBrowser {
     /// 目标名按共享命名规则起名;完成后由 accept_file_operation_finished 选中副本。
     pub(in crate::app) fn duplicate_selected(&mut self) -> Task<Message> {
         self.context_menu = None;
-        if self.search_workspace.is_none() && self.is_trash_view {
+        if self.search_workspace.is_none() && self.tab().is_trash_view {
             return Task::none();
         }
         let sources = self.active_file_selection();
@@ -79,7 +79,7 @@ impl FileBrowser {
     /// 把 parent 等于该目录的选中项整批移入;跨栏选中项留在原地。
     pub(in crate::app) fn new_folder_from_selection(&mut self) -> Task<Message> {
         self.context_menu = None;
-        if self.search_workspace.is_some() || self.is_trash_view {
+        if self.search_workspace.is_some() || self.tab().is_trash_view {
             return Task::none();
         }
         let directory = self.gather_target_directory();
@@ -119,17 +119,17 @@ impl FileBrowser {
     /// 与 keyboard_paste_directory 同源的「活动栏」语义:多栏取聚焦已渲染栏,
     /// 列表/图标视图就是当前目录。
     fn gather_target_directory(&self) -> PathBuf {
-        if self.view_mode != BrowserViewMode::Columns {
-            return self.current_dir.clone();
+        if self.tab().view_mode != BrowserViewMode::Columns {
+            return self.tab().current_dir.clone();
         }
         self.focused_rendered_column_directory()
-            .or_else(|| self.deepest_open_column_directory.clone())
-            .unwrap_or_else(|| self.current_dir.clone())
+            .or_else(|| self.tab().deepest_open_column_directory.clone())
+            .unwrap_or_else(|| self.tab().current_dir.clone())
     }
 
     pub(in crate::app) fn trash_selected(&mut self) -> Task<Message> {
         self.context_menu = None;
-        if self.search_workspace.is_none() && self.is_trash_view {
+        if self.search_workspace.is_none() && self.tab().is_trash_view {
             return self.delete_selected_trash_entries();
         }
         self.trash_explicit_paths(self.active_file_selection())
@@ -180,7 +180,7 @@ impl FileBrowser {
 
     pub(in crate::app) fn restore_selected(&mut self) -> Task<Message> {
         self.context_menu = None;
-        if !self.is_trash_view {
+        if !self.tab().is_trash_view {
             return Task::none();
         }
 
@@ -206,7 +206,7 @@ impl FileBrowser {
 
     pub(in crate::app) fn empty_trash_requested(&mut self) -> Task<Message> {
         self.context_menu = None;
-        if !self.is_trash_view || self.trash_entries.is_empty() {
+        if !self.tab().is_trash_view || self.tab().trash_entries.is_empty() {
             return Task::none();
         }
         self.request_destructive_action_confirmation(DestructiveActionConfirmation::EmptyTrash);
@@ -257,7 +257,7 @@ impl FileBrowser {
 
     pub(in crate::app) fn create_directory_in(&mut self, directory: PathBuf) -> Task<Message> {
         self.context_menu = None;
-        if self.is_trash_view {
+        if self.tab().is_trash_view {
             return Task::none();
         }
         self.preview_engine.clear_preview();
@@ -269,7 +269,7 @@ impl FileBrowser {
 
     pub(in crate::app) fn create_empty_file_in(&mut self, directory: PathBuf) -> Task<Message> {
         self.context_menu = None;
-        if self.is_trash_view {
+        if self.tab().is_trash_view {
             return Task::none();
         }
         self.preview_engine.clear_preview();
@@ -280,7 +280,7 @@ impl FileBrowser {
     }
 
     pub(in crate::app) fn paste_pending(&mut self) -> Task<Message> {
-        if self.is_trash_view {
+        if self.tab().is_trash_view {
             self.context_menu = None;
             return Task::none();
         }
@@ -517,15 +517,15 @@ impl FileBrowser {
     /// 不看指针悬停;无聚焦时回退最深打开栏,再回退当前目录。搜索结果浮层下
     /// 浏览器栏不是粘贴语境,保持指针回退。列表/图标单目录,悬停父目录即当前目录。
     fn keyboard_paste_directory(&self) -> PathBuf {
-        if self.view_mode != BrowserViewMode::Columns || self.search_workspace.is_some() {
+        if self.tab().view_mode != BrowserViewMode::Columns || self.search_workspace.is_some() {
             return self
                 .cursor_paste_directory
                 .clone()
-                .unwrap_or_else(|| self.current_dir.clone());
+                .unwrap_or_else(|| self.tab().current_dir.clone());
         }
         self.focused_rendered_column_directory()
-            .or_else(|| self.deepest_open_column_directory.clone())
-            .unwrap_or_else(|| self.current_dir.clone())
+            .or_else(|| self.tab().deepest_open_column_directory.clone())
+            .unwrap_or_else(|| self.tab().current_dir.clone())
     }
 }
 

@@ -59,7 +59,6 @@ pub(crate) struct UserPreferences {
     pub(crate) browser_view_mode: BrowserViewMode,
     pub(crate) visible_column_count: usize,
     pub(crate) window_controls: WindowControlsConfig,
-    pub(crate) icon_grid_size: u32,
     pub(crate) columns_view_density: ViewDensityLevel,
     pub(crate) list_view_density: ViewDensityLevel,
     pub(crate) icons_view_density: ViewDensityLevel,
@@ -84,20 +83,7 @@ pub(crate) struct UserPreferences {
 }
 
 impl UserPreferences {
-    fn icons_view_density_from_user_config(config: &UserConfig) -> ViewDensityLevel {
-        // 旧调用点可能只更新 icon_grid_size，默认档位时仍需由兼容字段迁移。
-        let legacy_level = ViewDensityLevel::from_icon_grid_size(config.icon_grid_size);
-        if config.icons_view_density == ViewDensityLevel::DEFAULT
-            && legacy_level != ViewDensityLevel::DEFAULT
-        {
-            legacy_level
-        } else {
-            config.icons_view_density
-        }
-    }
-
     pub(crate) fn from_user_config(config: &UserConfig) -> Self {
-        let icons_view_density = Self::icons_view_density_from_user_config(config);
         Self {
             network_list_thumbnail_downloads_enabled: config
                 .network_list_thumbnail_downloads_enabled,
@@ -122,10 +108,9 @@ impl UserPreferences {
             browser_view_mode: config.browser_view_mode,
             visible_column_count: normalize_visible_column_count(config.visible_column_count),
             window_controls: config.window_controls.clone(),
-            icon_grid_size: icons_view_density.icon_grid_size(),
             columns_view_density: config.columns_view_density,
             list_view_density: config.list_view_density,
-            icons_view_density,
+            icons_view_density: config.icons_view_density,
             list_view_preferences: config.list_view_preferences.clone(),
             list_directory_size_display_mode: config.list_directory_size_display_mode,
             file_grouping: config.file_grouping,
@@ -170,7 +155,6 @@ impl UserPreferences {
         config.columns_view_density = self.columns_view_density;
         config.list_view_density = self.list_view_density;
         config.icons_view_density = self.icons_view_density;
-        config.icon_grid_size = self.icons_view_density.icon_grid_size();
         config.list_view_preferences = self.list_view_preferences.clone();
         config.list_directory_size_display_mode = self.list_directory_size_display_mode;
         config.file_grouping = self.file_grouping;
@@ -245,7 +229,6 @@ impl UserPreferences {
         stored.columns_view_density = Some(self.columns_view_density.index());
         stored.list_view_density = Some(self.list_view_density.index());
         stored.icons_view_density = Some(self.icons_view_density.index());
-        stored.icon_grid_size = self.icons_view_density.icon_grid_size();
         stored.list_view_columns = stored_list_view_columns(&self.list_view_preferences);
         stored.list_sort_field =
             sort_field_config_value(self.list_view_preferences.sort().field).to_owned();
@@ -340,7 +323,12 @@ impl UserPreferences {
         let icons_view_density = stored
             .icons_view_density
             .map(ViewDensityLevel::from_index)
-            .unwrap_or_else(|| ViewDensityLevel::from_icon_grid_size(stored.icon_grid_size));
+            .or_else(|| {
+                stored
+                    .icon_grid_size
+                    .map(ViewDensityLevel::from_icon_grid_size)
+            })
+            .unwrap_or(default_preferences.icons_view_density);
         // None = 旧版本数据未持久化过分组设置，不算读不懂；有值但不认识才算。
         let file_grouping = match stored.file_grouping.as_deref() {
             Some(value) => unrecognized.value_or_default(
@@ -412,7 +400,6 @@ impl UserPreferences {
                 stored.visible_column_count as usize,
             ),
             window_controls,
-            icon_grid_size: icons_view_density.icon_grid_size(),
             columns_view_density,
             list_view_density,
             icons_view_density,

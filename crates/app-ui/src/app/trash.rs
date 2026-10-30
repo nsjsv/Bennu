@@ -4,7 +4,7 @@ use iced::Task;
 use super::FileBrowser;
 use crate::commands::load_trash_command;
 use crate::model::{
-    trash_location_path, BrowserPane, BrowserTab, DirectoryCollectionPhase, Message,
+    trash_location_path, BrowserTab, DirectoryCollectionPhase, Message,
     TrashRefreshCompletionDecision,
 };
 
@@ -26,7 +26,7 @@ impl FileBrowser {
             Err(error) => {
                 self.finish_trash_views_loading();
                 self.trash_refresh.record_error(error);
-                return if self.is_trash_view {
+                return if self.tab().is_trash_view {
                     self.remeasure_active_file_drop_layout()
                 } else {
                     Task::none()
@@ -44,14 +44,16 @@ impl FileBrowser {
             .into_iter()
             .filter(|pane_id| {
                 self.pane_by_id(*pane_id)
-                    .is_some_and(|pane| pane.is_trash_view)
+                    .is_some_and(|pane| pane.tab().is_trash_view)
             })
             .collect::<Vec<_>>();
+        let clamp_command = self.clamp_pane_viewports(&trash_pane_ids);
         let thumbnail_commands = trash_pane_ids
             .into_iter()
             .map(|pane_id| self.schedule_thumbnail_refresh_for_pane(pane_id))
+            .chain(std::iter::once(clamp_command))
             .collect::<Vec<_>>();
-        let remeasure_drop_layout = if self.is_trash_view {
+        let remeasure_drop_layout = if self.tab().is_trash_view {
             self.remeasure_active_file_drop_layout()
         } else {
             Task::none()
@@ -65,32 +67,22 @@ impl FileBrowser {
     }
 
     fn apply_trash_snapshot_to_all_views(&mut self, entries: &[TrashEntry]) {
-        self.sync_active_pane_state();
         for pane in &mut self.panes {
-            for tab in &mut pane.tabs {
-                if tab.is_trash_view {
-                    apply_trash_snapshot_to_tab(tab, entries);
-                }
+            for tab in pane.tabs.iter_mut().filter(|tab| tab.is_trash_view) {
+                apply_trash_snapshot_to_tab(tab, entries);
             }
-            if pane.is_trash_view {
-                apply_trash_snapshot_to_pane(pane, entries);
+            if pane.tab().is_trash_view {
+                pane.directory_loading_placeholder = None;
             }
         }
-        if let Some(active_pane) = self.pane_by_id(self.active_pane_id()).cloned() {
-            self.apply_pane_browsing_snapshot(active_pane);
-        }
+        self.entries_replaced();
     }
 
     fn finish_trash_views_loading(&mut self) {
-        if self.is_trash_view {
-            self.directory_collection_phase = DirectoryCollectionPhase::Ready;
-            self.directory_loading_placeholder = None;
-        }
         for pane in &mut self.panes {
-            if pane.is_trash_view {
-                pane.directory_collection_phase = DirectoryCollectionPhase::Ready;
+            if pane.tab().is_trash_view {
+                pane.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Ready;
                 pane.directory_loading_placeholder = None;
-                pane.sync_active_tab_state();
             }
         }
     }
@@ -111,12 +103,10 @@ impl FileBrowser {
     }
 
     pub(super) fn has_trash_tab(&self) -> bool {
-        self.is_trash_view
-            || self
-                .panes
-                .iter()
-                .flat_map(|pane| pane.tabs.iter())
-                .any(|tab| tab.is_trash_view)
+        self.panes
+            .iter()
+            .flat_map(|pane| pane.tabs.iter())
+            .any(|tab| tab.is_trash_view)
     }
 
     pub(super) fn refresh_trash_snapshot_for_trash_tabs(&mut self) -> Task<Message> {
@@ -136,52 +126,15 @@ impl FileBrowser {
     }
 }
 
-fn apply_trash_snapshot_to_pane(pane: &mut BrowserPane, entries: &[TrashEntry]) {
-    pane.current_dir = trash_location_path();
-    pane.trash_entries = entries.to_vec();
-    pane.entries = entries
-        .iter()
-        .map(|trash_entry| trash_entry.entry.clone())
-        .collect::<Vec<_>>()
-        .into();
-    crate::model::retain_direct_entry_selection(
-        &pane.entries,
-        &mut pane.selected,
-        &mut pane.selected_paths,
-        &mut pane.selection_anchor,
-    );
-    pane.directory_loading_placeholder = None;
-    pane.deepest_open_column_directory = None;
-    for expanded in pane.expanded_directories.values_mut() {
-        if let Some(cancellation) = expanded.load_cancel.take() {
-            cancellation.cancel();
-        }
-    }
-    pane.expanded_directories.clear();
-    pane.directory_collection_phase = DirectoryCollectionPhase::Ready;
-    pane.sync_active_tab_state();
-}
-
 fn apply_trash_snapshot_to_tab(tab: &mut BrowserTab, entries: &[TrashEntry]) {
-    tab.directory = trash_location_path();
+    tab.current_dir = trash_location_path();
     tab.trash_entries = entries.to_vec();
     tab.entries = entries
         .iter()
         .map(|trash_entry| trash_entry.entry.clone())
         .collect::<Vec<_>>()
         .into();
-    crate::model::retain_direct_entry_selection(
-        &tab.entries,
-        &mut tab.selected,
-        &mut tab.selected_paths,
-        &mut tab.selection_anchor,
-    );
-    tab.deepest_open_column_directory = None;
-    for expanded in tab.expanded_directories.values_mut() {
-        if let Some(cancellation) = expanded.load_cancel.take() {
-            cancellation.cancel();
-        }
-    }
-    tab.expanded_directories.clear();
+    tab.retain_direct_entry_selection();
+    tab.close_expanded_directories();
     tab.directory_collection_phase = DirectoryCollectionPhase::Ready;
 }

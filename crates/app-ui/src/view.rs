@@ -340,7 +340,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
                 // 盖在窗口之上,窗口内元素盖不过它;胶囊钉在光标左上(位图
                 // 从不占据的象限)才真正可见。与聚合行同一锚定约定。
                 placement: FloatingPlacement::AnchorBottomRight {
-                    anchor: browser.cursor_position,
+                    anchor: browser.cursor_or_origin(),
                 },
                 captures_pointer: false,
             });
@@ -375,7 +375,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
             .unwrap_or_default();
         let panels = context_menu_panel(
             context_menu,
-            browser.is_trash_view,
+            browser.tab().is_trash_view,
             browser.active_pane_id(),
             browser.keyboard_modifiers,
             &browser.user_config().context_menus,
@@ -433,7 +433,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
     if let Some(tab_preview) = tab_drag_preview_panel(browser) {
         floating.push(FloatingContent {
             element: tab_preview,
-            placement: FloatingPlacement::Free(drag_preview_position(browser.cursor_position)),
+            placement: FloatingPlacement::Free(drag_preview_position(browser.cursor_or_origin())),
             captures_pointer: true,
         });
     }
@@ -441,7 +441,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
     if let Some(pane_preview) = pane_drag_preview_panel(browser) {
         floating.push(FloatingContent {
             element: pane_preview,
-            placement: FloatingPlacement::Free(drag_preview_position(browser.cursor_position)),
+            placement: FloatingPlacement::Free(drag_preview_position(browser.cursor_or_origin())),
             captures_pointer: true,
         });
     }
@@ -453,7 +453,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
                 .width(Length::Fixed(TAB_DRAG_PREVIEW_WIDTH))
                 .style(selected_tab_item_style)
                 .into(),
-            placement: FloatingPlacement::Free(drag_preview_position(browser.cursor_position)),
+            placement: FloatingPlacement::Free(drag_preview_position(browser.cursor_or_origin())),
             captures_pointer: true,
         });
     }
@@ -874,10 +874,8 @@ fn drag_preview_panel(browser: &FileBrowser) -> Option<(Element<'_, Message>, Fl
         .map(|offset| offset.y - origin_y)
         .fold(0.0_f32, f32::max)
         + DRAG_PREVIEW_PILL_HEIGHT;
-    let stack_origin = Point::new(
-        browser.cursor_position.x + origin_x,
-        browser.cursor_position.y + origin_y,
-    );
+    let cursor = browser.cursor_or_origin();
+    let stack_origin = Point::new(cursor.x + origin_x, cursor.y + origin_y);
     // 列表是虚拟化的,bounds 快照只覆盖屏幕上可见的行:选中数超过
     // 快照数就说明有选中内容在屏幕外。此时(或包围盒超出列表可视
     // 区——它比窗口小,上下还隔着工具栏等)屏幕已铺不下选中内容,
@@ -906,7 +904,7 @@ fn drag_preview_panel(browser: &FileBrowser) -> Option<(Element<'_, Message>, Fl
         return Some((
             drag_preview_summary_row(&summary),
             FloatingPlacement::AnchorBottomRight {
-                anchor: browser.cursor_position,
+                anchor: browser.cursor_or_origin(),
             },
         ));
     }

@@ -49,14 +49,10 @@ impl FileBrowser {
             offset_y: offset_y.max(0.0),
             height: height.max(1.0),
         };
-        if pane_id == self.active_pane_id() {
-            self.column_viewports.insert(directory.clone(), viewport);
-        } else {
-            let Some(pane) = self.pane_by_id_mut(pane_id) else {
-                return Task::none();
-            };
-            pane.column_viewports.insert(directory.clone(), viewport);
-        }
+        let Some(pane) = self.pane_by_id_mut(pane_id) else {
+            return Task::none();
+        };
+        pane.column_viewports.insert(directory.clone(), viewport);
         self.schedule_column_directory_thumbnails_for_pane(
             pane_id,
             &directory,
@@ -84,9 +80,7 @@ impl FileBrowser {
         let Some(directory) = self.pane_view(pane_id).map(|pane| pane.current_dir.clone()) else {
             return Task::none();
         };
-        if pane_id == self.active_pane_id() {
-            self.column_viewports.insert(directory, viewport);
-        } else if let Some(pane) = self.pane_by_id_mut(pane_id) {
+        if let Some(pane) = self.pane_by_id_mut(pane_id) {
             pane.column_viewports.insert(directory, viewport);
         }
         self.schedule_visible_list_thumbnail_range_for_pane(pane_id, Some(viewport));
@@ -243,7 +237,7 @@ impl FileBrowser {
             return;
         }
 
-        if let Some(path) = self.selected.clone() {
+        if let Some(path) = self.tab().selected.clone() {
             if let Some(entry) = self.entry_for_path(&path).cloned() {
                 self.enqueue_list_thumbnail_for_entry(
                     &entry,
@@ -552,26 +546,12 @@ impl FileBrowser {
         pane_id: BrowserPaneId,
         directory: &Path,
     ) -> Option<&[DirectoryEntry]> {
-        if pane_id == self.active_pane_id() {
-            return self.entries_for_directory(directory);
+        let tab = self.pane_by_id(pane_id)?.tab();
+        if directory == tab.current_dir {
+            return Some(&tab.entries);
         }
 
-        let pane = self.pane_by_id(pane_id)?;
-        if directory == pane.current_dir {
-            return Some(&pane.entries);
-        }
-
-        pane.expanded_directories
-            .get(directory)
-            .map(|expanded| expanded.entries.as_slice())
-    }
-
-    fn entries_for_directory(&self, directory: &Path) -> Option<&[DirectoryEntry]> {
-        if directory == self.current_dir {
-            return Some(&self.entries);
-        }
-
-        self.expanded_directories
+        tab.expanded_directories
             .get(directory)
             .map(|expanded| expanded.entries.as_slice())
     }
@@ -614,10 +594,6 @@ impl FileBrowser {
         pane_id: BrowserPaneId,
         directory: &Path,
     ) -> Option<ColumnViewport> {
-        if pane_id == self.active_pane_id() {
-            return self.column_viewports.get(directory).copied();
-        }
-
         self.pane_by_id(pane_id)
             .and_then(|pane| pane.column_viewports.get(directory).copied())
     }
@@ -707,16 +683,17 @@ fn thumbnail_request_matches_entry(entry: &DirectoryEntry, request: &ThumbnailRe
 }
 
 fn thumbnail_request_matches_pane(pane: &BrowserPane, request: &ThumbnailRequest) -> bool {
-    let entry = match pane.view_mode {
-        BrowserViewMode::Icons => pane
+    let tab = pane.tab();
+    let entry = match tab.view_mode {
+        BrowserViewMode::Icons => tab
             .entries
             .iter()
             .find(|entry| entry.path == request.source),
-        BrowserViewMode::Columns | BrowserViewMode::List => pane
+        BrowserViewMode::Columns | BrowserViewMode::List => tab
             .entries
             .iter()
             .chain(
-                pane.expanded_directories
+                tab.expanded_directories
                     .values()
                     .flat_map(|expanded| expanded.entries.iter()),
             )

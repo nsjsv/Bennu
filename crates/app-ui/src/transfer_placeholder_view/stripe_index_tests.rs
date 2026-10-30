@@ -54,8 +54,8 @@ fn browser_with_entries(
     let mut user_config = config::default_user_config();
     user_config.file_grouping = grouping;
     let (mut browser, _) = FileBrowser::new(user_config);
-    browser.current_dir = PathBuf::from("/workspace");
-    browser.entries = Arc::new(entries);
+    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().entries = Arc::new(entries);
     browser
 }
 
@@ -87,13 +87,13 @@ fn build_rows_with_placeholders(
         crate::list_view::ListGeometry::for_level(browser.user_config().list_view_density)
             .row_height;
     let mut placeholder_cache = HashMap::new();
-    placeholder_cache.insert(browser.current_dir.clone(), placeholders);
+    placeholder_cache.insert(browser.tab().current_dir.clone(), placeholders);
     let mut rows = Vec::new();
     push_directory_transfer_rows(
         browser,
         pane,
-        &browser.entries,
-        browser.current_dir.as_path(),
+        &browser.tab().entries,
+        browser.tab().current_dir.as_path(),
         transfer_sort_for_root(browser),
         0,
         1.0,
@@ -172,9 +172,9 @@ fn expanded_directory_segments_restart_stripes_at_zero() {
         file_entry("/workspace/f.txt"),
     ];
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = PathBuf::from("/workspace");
-    browser.entries = Arc::new(root_children.to_vec());
-    browser.expanded_directories.insert(
+    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().entries = Arc::new(root_children.to_vec());
+    browser.tab_mut().expanded_directories.insert(
         PathBuf::from("/workspace/project"),
         expanded(
             vec![
@@ -199,9 +199,9 @@ fn expansion_status_row_does_not_consume_stripe() {
         file_entry("/workspace/f.txt"),
     ];
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.current_dir = PathBuf::from("/workspace");
-    browser.entries = Arc::new(root_children.to_vec());
-    browser.expanded_directories.insert(
+    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().entries = Arc::new(root_children.to_vec());
+    browser.tab_mut().expanded_directories.insert(
         PathBuf::from("/workspace/project"),
         expanded(Vec::new(), ExpandedDirectoryStatus::Error),
     );

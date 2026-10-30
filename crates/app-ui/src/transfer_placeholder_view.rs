@@ -248,11 +248,11 @@ pub(crate) fn transfer_sort_for_expanded(
 /// 列表视图的合并行流:真实条目行、展开状态行与传输占位行交错,
 /// 一次性摊平后供虚拟范围计算与行渲染共用。
 ///
-/// 条纹相位不变量:stripe_index 在行流构建期按"每个目录段一个计数器、
-/// 仅 Entry 行自增"赋值,组头/状态行/占位行只透传当前值(不自增)。
-/// 旧实现用合并流的绝对下标,任何 chrome 行插入都翻转奇偶相位,条纹
-/// 呈不连续随机分布;这里把相位所有权收回条目序,chrome 行插拔不再
-/// 影响任何条目的条纹。
+/// 条纹相位不变量:整条行流共用一个计数器,按屏幕自上而下的顺序,
+/// 条目/占位/展开状态行各消耗一个序号,只有组头行透传(它是分隔
+/// chrome,不算数据行)。旧实现每个展开目录段各自从 0 起算,子段结束
+/// 后根段接着旧值继续,展开处出现连续两行同色;QTreeView 的
+/// alternatingRowColors 同样按可见行全局交替。
 pub(crate) enum ListTransferRow<'a> {
     Entry {
         visible: VisibleEntry<'a>,
@@ -313,6 +313,7 @@ pub(crate) fn build_list_transfer_rows<'a>(
 ) -> Vec<ListTransferRow<'a>> {
     let mut placeholder_cache: HashMap<PathBuf, Vec<TransferPlaceholder>> = HashMap::new();
     let mut rows = Vec::new();
+    let mut stripe_index = 0usize;
     push_directory_transfer_rows(
         browser,
         pane,
@@ -323,6 +324,7 @@ pub(crate) fn build_list_transfer_rows<'a>(
         1.0,
         row_height,
         &mut placeholder_cache,
+        &mut stripe_index,
         &mut rows,
     );
     rows
@@ -339,6 +341,7 @@ fn push_directory_transfer_rows<'a>(
     animation_progress: f32,
     row_height: f32,
     placeholder_cache: &mut HashMap<PathBuf, Vec<TransferPlaceholder>>,
+    stripe_index: &mut usize,
     rows: &mut Vec<ListTransferRow<'a>>,
 ) {
     let placeholders = placeholder_cache
@@ -346,9 +349,6 @@ fn push_directory_transfer_rows<'a>(
         .or_insert_with(|| transfer_placeholders_for_directory(&browser.operation_queue, directory))
         .clone();
     let merged = merge_entries_with_placeholders(entries, &placeholders, sort);
-    // 条纹计数器按目录段各自新建:递归展开的子目录从 0 起算,组间不
-    // 重置(本段计数器跨组延续),chrome 行插拔不消耗序号。
-    let mut stripe_index = 0usize;
     // 分组只作用于当前目录(根);展开子目录递归进入时 directory 已经
     // 是子目录路径,天然不等于 current_dir,走平铺分支保持展开内容不分组。
     let Some(grouping) = root_grouping::RootGrouping::for_pane_root(browser, pane, directory)
@@ -362,7 +362,7 @@ fn push_directory_transfer_rows<'a>(
                 animation_progress,
                 row_height,
                 placeholder_cache,
-                &mut stripe_index,
+                stripe_index,
                 rows,
             );
         }
@@ -380,7 +380,7 @@ fn push_directory_transfer_rows<'a>(
             animation_progress,
             row_height,
             placeholder_cache,
-            &mut stripe_index,
+            stripe_index,
             rows,
         );
     }
@@ -400,7 +400,7 @@ fn push_directory_transfer_rows<'a>(
                 animation_progress,
                 row_height,
                 placeholder_cache,
-                &mut stripe_index,
+                stripe_index,
                 rows,
             );
         }
@@ -409,9 +409,7 @@ fn push_directory_transfer_rows<'a>(
 
 /// 单个合并项的行摊平:条目行后紧跟其展开子行,占位行直接入流。
 /// 组头行不经过此处——它不属于任何合并项,由分组划分单独插入。
-/// stripe_index 是所在目录段的条纹计数器:Entry 与占位行都消耗序号
-/// (占位若透传,会与下一真实行同相,出现连续同色两行);展开状态行
-/// 在子段创建前同样透传。
+/// stripe_index 是整条行流共用的条纹计数器(见 ListTransferRow)。
 #[allow(clippy::too_many_arguments)]
 fn push_list_transfer_item<'a>(
     browser: &FileBrowser,
@@ -490,6 +488,7 @@ fn push_expansion_transfer_rows<'a>(
             height: row_height * expanded.animation_progress.clamp(0.0, 1.0),
             stripe_index: *stripe_index,
         });
+        *stripe_index += 1;
     }
     if !matches!(expanded.status, ExpandedDirectoryStatus::Loaded) {
         return;
@@ -505,6 +504,7 @@ fn push_expansion_transfer_rows<'a>(
         child_progress,
         row_height,
         placeholder_cache,
+        stripe_index,
         rows,
     );
 }

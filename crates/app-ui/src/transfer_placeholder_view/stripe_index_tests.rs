@@ -1,6 +1,6 @@
 // 条纹相位不变量的单元测试:与实现分文件以守住单文件 800 行约束。
-// 覆盖:组头/占位/状态行插入不改变后续条目的条纹序号、展开子目录段
-// 各自从 0 起算、组间不重置、None 模式下序号 == 原条目序(回归锚点)、
+// 覆盖:组头不消耗序号、占位/状态行各占一个序号、展开子目录与根目录
+// 共用一个计数器、组间不重置、None 模式下序号 == 原条目序(回归锚点)、
 // 占位插入前后同一行条纹不变(修复传输期条纹跳变的老缺陷)。
 // 占位注入直接预置行流构建器的占位缓存,与渲染走同一条合并路径,
 // 不需要为测试拼装真实操作队列任务。
@@ -99,6 +99,7 @@ fn build_rows_with_placeholders(
         1.0,
         row_height,
         &mut placeholder_cache,
+        &mut 0,
         &mut rows,
     );
     rows
@@ -164,9 +165,9 @@ fn group_headers_neither_consume_nor_reset_stripes() {
 }
 
 #[test]
-fn expanded_directory_segments_restart_stripes_at_zero() {
-    // 展开子目录是新的目录段:子条目各自从 0 起算;根段计数器在递归
-    // 前后延续,f.txt 的序号不受展开内容多少影响。
+fn expanded_directories_continue_the_visible_row_stripes() {
+    // 用户报告:子段从 0 重新起算时,展开处与其后的根条目出现连续两行
+    // 同色。嵌套两层展开后,所有可见行仍须严格一深一浅交替。
     let root_children = [
         directory_entry("/workspace/project"),
         file_entry("/workspace/f.txt"),
@@ -178,22 +179,29 @@ fn expanded_directory_segments_restart_stripes_at_zero() {
         PathBuf::from("/workspace/project"),
         expanded(
             vec![
-                file_entry("/workspace/project/one.rs"),
+                directory_entry("/workspace/project/src"),
                 file_entry("/workspace/project/two.rs"),
             ],
             ExpandedDirectoryStatus::Loaded,
         ),
     );
+    browser.tab_mut().expanded_directories.insert(
+        PathBuf::from("/workspace/project/src"),
+        expanded(
+            vec![file_entry("/workspace/project/src/main.rs")],
+            ExpandedDirectoryStatus::Loaded,
+        ),
+    );
     let rows = build_rows(&browser);
 
-    // project(0) | one.rs(0) two.rs(1) 子段起算 | f.txt(1) 根段延续。
-    assert_eq!(stripe_sequence(&rows), [0, 0, 1, 1]);
+    // project | src | main.rs | two.rs | f.txt
+    assert_eq!(stripe_sequence(&rows), [0, 1, 2, 3, 4]);
 }
 
 #[test]
-fn expansion_status_row_does_not_consume_stripe() {
-    // Error 状态行插在目录行与后续条目之间:状态行透传当前计数器,
-    // 后续条目的条纹序号不变。
+fn expansion_status_row_consumes_its_own_stripe() {
+    // Error 状态行是一条可见行:与条目一样占一个序号,否则它会与
+    // 下一条目同色。
     let root_children = [
         directory_entry("/workspace/project"),
         file_entry("/workspace/f.txt"),
@@ -207,7 +215,7 @@ fn expansion_status_row_does_not_consume_stripe() {
     );
     let rows = build_rows(&browser);
 
-    assert_eq!(stripe_sequence(&rows), [0, 1, 1]);
+    assert_eq!(stripe_sequence(&rows), [0, 1, 2]);
 }
 
 #[test]

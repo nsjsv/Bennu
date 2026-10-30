@@ -3,6 +3,7 @@
 //! （portal 视觉词汇契约：禁本地配色）。滚动遵守接线契约：widget id
 //! 按请求路径命名空间（`SessionScrollRegion::Sidebar`）。
 
+use bennu_preview::formatting::format_file_size;
 use bennu_sidebar::entries::selected_sidebar_device;
 use bennu_sidebar::{
     sidebar_icon_symbol, SidebarDeviceEntry, SidebarLocation, SidebarLocationKind,
@@ -179,7 +180,7 @@ fn device_detail(device: &SidebarDeviceEntry, mounting: bool) -> String {
             .clone()
             .unwrap_or_else(|| "已挂载".to_string())
     } else if device.size_bytes > 0 {
-        format!("未挂载 · {}", super::readable_size(device.size_bytes))
+        format!("未挂载 · {}", format_file_size(device.size_bytes))
     } else {
         "未挂载".to_string()
     }

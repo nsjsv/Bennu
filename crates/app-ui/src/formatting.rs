@@ -7,10 +7,9 @@ use time::OffsetDateTime;
 const UTC_TIMESTAMP_FORMAT: &[FormatItem<'static>] =
     format_description!("[year]-[month]-[day] [hour]:[minute]:[second] UTC");
 
-// 纯搬移：容量格式化（含紧凑变体与共享压缩核心）已下沉 bennu-preview
-// （预览命令层超限文案引用）；re-export 维持 crate::formatting::* 既有
-// 调用路径。
-pub(crate) use bennu_preview::formatting::{format_file_size, format_file_size_compact};
+// 文件大小只有 bennu_localization 一份实现；re-export 维持 crate::formatting::*
+// 既有调用路径。
+pub(crate) use bennu_localization::{format_file_size, format_file_size_compact};
 
 pub(crate) fn format_system_time(time: SystemTime) -> String {
     OffsetDateTime::from(time)

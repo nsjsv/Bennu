@@ -257,14 +257,14 @@ fn size_key_title_shows_range_or_single_value() {
         min_bytes: 2048,
         max_bytes: 2048,
     };
-    assert_eq!(single.title(english), "2.0 KB");
+    assert_eq!(single.title(english), "2.0 KiB");
     let range = FileGroupKey::Size {
         bucket_index: 1,
         bucket_count: 3,
         min_bytes: 1024,
         max_bytes: 45 * 1024 * 1024,
     };
-    assert_eq!(range.title(english), "1.0 KB ~ 45 MB");
+    assert_eq!(range.title(english), "1.0 KiB ~ 45.0 MiB");
 }
 
 #[test]
@@ -484,7 +484,7 @@ fn index_labels_compress_size_ranges_with_endpoint_semantics() {
         min_bytes: 1_258_291,
         max_bytes: 47_185_920,
     };
-    assert_eq!(index_label_of(middle, UiLanguage::English), "1.2M~45M");
+    assert_eq!(index_label_of(middle, UiLanguage::English), "1.2M~45.0M");
     // 首桶 ≤ 上界;末桶 ≥ 下界;边界外尺寸也归属端点桶,标注真实。
     let first = FileGroupKey::Size {
         bucket_index: 0,
@@ -508,21 +508,6 @@ fn index_labels_compress_size_ranges_with_endpoint_semantics() {
         max_bytes: 1024,
     };
     assert_eq!(index_label_of(single, UiLanguage::English), "1.0K");
-}
-
-#[test]
-fn compact_size_labels_share_compression_with_regular_size_display() {
-    assert_eq!(crate::formatting::format_file_size_compact(512), "512B");
-    assert_eq!(
-        crate::formatting::format_file_size_compact(1_258_291),
-        "1.2M"
-    );
-    assert_eq!(crate::formatting::format_file_size(1_258_291), "1.2 MB");
-    // 数值部分逐字一致,仅单位缩写与空格不同。
-    assert_eq!(
-        crate::formatting::format_file_size_compact(47_185_920),
-        crate::formatting::format_file_size(47_185_920).replace(" MB", "M")
-    );
 }
 
 #[test]

@@ -55,23 +55,30 @@ impl UiLanguage {
 
 static CURRENT_LANGUAGE: AtomicU8 = AtomicU8::new(UiLanguage::English.as_u8());
 
-/// 字节量的短格式展示（传输进度行与文件清单共用）。自 app-ui
-/// view/transfer_window.rs 随传输词条下沉：transfer 进度行在文案表
-/// 内消费它，留在视图层会让本 crate 反向依赖宿主 UI。
-pub fn format_byte_size(bytes: u64) -> String {
-    const KIB: f64 = 1024.0;
-    const MIB: f64 = 1024.0 * KIB;
-    const GIB: f64 = 1024.0 * MIB;
-    let bytes = bytes as f64;
-    if bytes >= GIB {
-        format!("{:.1} GB", bytes / GIB)
-    } else if bytes >= MIB {
-        format!("{:.1} MB", bytes / MIB)
-    } else if bytes >= KIB {
-        format!("{:.1} KB", bytes / KIB)
-    } else {
-        format!("{bytes} B")
+/// 全应用唯一的文件大小写法，同 KDE `KFormat::formatByteSize` 的默认：1024 进制、
+/// IEC 单位、一位小数（"14.3 MiB"）；不到 1 KiB 写字节数（"123 B"）。放在本 crate
+/// 是因为它最底层，主窗口、文件选择器、传输窗口和扫码页都能用到。
+pub fn format_file_size(bytes: u64) -> String {
+    format_size_with_units(bytes, ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"], " ")
+}
+
+/// 宽度受限的短标签（分组索引栏）：数值口径与 [`format_file_size`] 相同，单位缩成
+/// 一个字母、不留空格（"14.3M"）。
+pub fn format_file_size_compact(bytes: u64) -> String {
+    format_size_with_units(bytes, ["B", "K", "M", "G", "T", "P", "E"], "")
+}
+
+fn format_size_with_units(bytes: u64, units: [&str; 7], separator: &str) -> String {
+    if bytes < 1024 {
+        return format!("{bytes}{separator}{}", units[0]);
     }
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < units.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    format!("{value:.1}{separator}{}", units[unit])
 }
 
 pub fn set_current_language(language: UiLanguage) {

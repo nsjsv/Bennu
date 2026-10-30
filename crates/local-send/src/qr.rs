@@ -16,6 +16,7 @@ use axum::http::{header, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
+use bennu_localization::format_file_size;
 use parking_lot::Mutex;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, DuplexStream};
 use tokio::sync::broadcast;
@@ -386,9 +387,9 @@ async fn index_page(
     let mut rows = String::new();
     for (index, item) in shared.items.iter().enumerate() {
         let size_text = if item.size.complete {
-            format_size(item.size.bytes)
+            format_file_size(item.size.bytes)
         } else {
-            format!("≥ {}", format_size(item.size.bytes))
+            format!("≥ {}", format_file_size(item.size.bytes))
         };
         // 目录条目没有单文件链接，指向整包 zip。
         let href = match item.source {
@@ -617,21 +618,6 @@ fn html_escape(text: &str) -> String {
         .replace('"', "&quot;")
 }
 
-fn format_size(size: u64) -> String {
-    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
-    let mut value = size as f64;
-    let mut unit = 0;
-    while value >= 1024.0 && unit < UNITS.len() - 1 {
-        value /= 1024.0;
-        unit += 1;
-    }
-    if unit == 0 {
-        format!("{size} B")
-    } else {
-        format!("{value:.1} {}", UNITS[unit])
-    }
-}
-
 /// 计数 AsyncRead：透传文件字节并累计到共享计数器；EOF 即标记条目完整下载。
 struct CountingReader {
     inner: tokio::fs::File,
@@ -708,10 +694,8 @@ mod tests {
     }
 
     #[test]
-    fn html_escape_and_size_format() {
+    fn html_escape_escapes_markup() {
         assert_eq!(html_escape("<a&b>"), "&lt;a&amp;b&gt;");
-        assert_eq!(format_size(512), "512 B");
-        assert_eq!(format_size(2048), "2.0 KiB");
     }
 
     #[test]

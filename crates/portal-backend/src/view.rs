@@ -5,6 +5,7 @@
 //! crate `bennu-theme`，与主程序消费同一份活动主题，保证两个进程的
 //! FileChooser 窗口看起来是同一个应用。
 
+use bennu_preview::formatting::format_file_size;
 use bennu_theme::icons::{file_entry_icon_symbol, rotated_chevron_right_view};
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use bennu_theme::smooth_scroll::SmoothScrollArea;
@@ -265,7 +266,7 @@ fn entry_row(
 
     let meta = match entry.kind {
         FileKind::Directory => "文件夹".to_string(),
-        _ => readable_size(entry.metadata.len),
+        _ => format_file_size(entry.metadata.len),
     };
 
     // 目录行首的展开开关（访达列表语义）：箭头随自身展开进度旋转，
@@ -332,24 +333,6 @@ fn entry_row(
             ))
             .clip(true)
             .into()
-    }
-}
-
-fn readable_size(bytes: u64) -> String {
-    const UNIT: f64 = 1024.0;
-    let mut value = bytes as f64;
-    let mut unit = "B";
-    for candidate in ["KB", "MB", "GB", "TB"] {
-        if value < UNIT {
-            break;
-        }
-        value /= UNIT;
-        unit = candidate;
-    }
-    if unit == "B" {
-        format!("{bytes} B")
-    } else {
-        format!("{value:.1} {unit}")
     }
 }
 

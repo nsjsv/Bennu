@@ -8,6 +8,7 @@ repository.workspace = true
 [dependencies]
 async_zip = { version = "0.0.19", features = ["deflate", "tokio"] }
 axum = "0.8"
+bennu-localization = { path = "../bennu-localization" }
 fast_qr = "0.14"
 futures-util = "0.3"
 getifaddrs = "0.6"

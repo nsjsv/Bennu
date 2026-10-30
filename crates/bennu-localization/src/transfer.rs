@@ -1,8 +1,6 @@
 //! 本地文件传输词条：菜单项、传输窗口、接收确认 Modal、设置页与通知。
 
-// 下沉调整：UiLanguage 与 format_byte_size 原经 crate::config /
-// crate::view::transfer_window 引用 app-ui，现均为本 crate 根项。
-use crate::format_byte_size;
+use crate::format_file_size;
 use crate::UiLanguage;
 
 pub(super) fn translate(text: &str) -> Option<String> {
@@ -82,14 +80,14 @@ pub(super) fn qr_progress_line(
     speed_bytes_per_second: u64,
     finished: bool,
 ) -> String {
-    let sent = format_byte_size(bytes);
+    let sent = format_file_size(bytes);
     if finished {
         return match language {
             UiLanguage::English => format!("Sent {sent}"),
             UiLanguage::Chinese => format!("已发送 {sent}"),
         };
     }
-    let speed = format_byte_size(speed_bytes_per_second);
+    let speed = format_file_size(speed_bytes_per_second);
     match language {
         UiLanguage::English => format!("Sent {sent} ({speed}/s)"),
         UiLanguage::Chinese => format!("已发送 {sent}（{speed}/秒）"),
@@ -106,8 +104,8 @@ pub(super) fn direct_send_progress_line(
     bytes_sent: u64,
     file_size: u64,
 ) -> String {
-    let sent = format_byte_size(bytes_sent);
-    let size = format_byte_size(file_size);
+    let sent = format_file_size(bytes_sent);
+    let size = format_file_size(file_size);
     match language {
         UiLanguage::English => format!(
             "Sending to {alias}: {file_name} ({file_index}/{total_files}, {sent} of {size})"

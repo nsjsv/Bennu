@@ -3428,6 +3428,7 @@ version = "0.3.6"
 dependencies = [
  "async_zip",
  "axum",
+ "bennu-localization",
  "fast_qr",
  "futures-util",
  "getifaddrs",

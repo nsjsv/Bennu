@@ -159,7 +159,7 @@ pub(super) fn incoming_transfer_confirmation_panel(
                 readable_text(file.file_name.clone())
                     .size(12)
                     .width(Length::Fill),
-                readable_text(bennu_localization::format_byte_size(file.size)).size(11),
+                readable_text(bennu_localization::format_file_size(file.size)).size(11),
             ]
             .spacing(8)
             .align_y(Alignment::Center),

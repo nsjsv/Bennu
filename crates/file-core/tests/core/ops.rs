@@ -443,20 +443,14 @@ async fn transfer_conflict_check_marks_directories_mergeable() {
 }
 
 #[tokio::test]
-async fn transfer_target_availability_and_candidate_number_before_extension() {
+async fn transfer_target_availability_reports_taken_and_free_paths() {
     let dir = tempdir().unwrap();
     let target = dir.path().join("target.txt");
-    let numbered_2 = dir.path().join("target 2.txt");
-    let numbered_3 = dir.path().join("target 3.txt");
+    let free = dir.path().join("target 2.txt");
     fs::write(&target, b"old").unwrap();
-    fs::write(&numbered_2, b"old copy").unwrap();
 
     assert!(!is_transfer_target_available(&target).await.unwrap());
-    assert!(is_transfer_target_available(&numbered_3).await.unwrap());
-    assert_eq!(
-        available_transfer_target_path(&target).await.unwrap(),
-        numbered_3
-    );
+    assert!(is_transfer_target_available(&free).await.unwrap());
 }
 
 #[tokio::test]

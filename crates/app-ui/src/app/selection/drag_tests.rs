@@ -255,6 +255,39 @@ fn alt_drag_release_queues_symlinks_into_target_directory() {
     }
 }
 
+#[tokio::test]
+async fn ctrl_drag_inside_same_directory_queues_an_in_place_duplicate() {
+    use iced::futures::StreamExt;
+
+    let (mut browser, _) = crate::app::FileBrowser::new(crate::config::default_user_config());
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("report.pdf");
+    std::fs::write(&source, b"data").unwrap();
+    browser.keyboard_modifiers = keyboard::Modifiers::CTRL;
+
+    let task = browser.move_dragged_files(vec![source.clone()], directory.path().to_path_buf());
+
+    let mut stream = iced_runtime::task::into_stream(task).expect("conflict check task");
+    let mut checked_transfers = None;
+    while let Some(action) = stream.next().await {
+        if let iced_runtime::Action::Output(crate::model::Message::TransferConflictsChecked {
+            transfers,
+            ..
+        }) = action
+        {
+            checked_transfers = Some(transfers);
+        }
+    }
+    let transfers = checked_transfers.expect("drop reached the conflict check");
+    assert_eq!(transfers.len(), 1);
+    assert_eq!(transfers[0].source, source);
+    assert_eq!(transfers[0].target, directory.path().join("report副本.pdf"));
+    assert_eq!(
+        transfers[0].conflict_strategy,
+        file_core::TransferConflictStrategy::KeepBoth
+    );
+}
+
 #[test]
 fn ctrl_drag_inside_same_directory_plans_in_place_duplicate() {
     let (browser, _) = crate::app::FileBrowser::new(crate::config::default_user_config());

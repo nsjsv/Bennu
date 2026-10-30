@@ -2,7 +2,9 @@ use std::collections::HashSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use file_core::numbered_duplicate_name;
+use file_core::TransferConflictStrategy;
+
+use crate::operation_queue::QueuedTransfer;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum PasteTargetMode {
@@ -22,27 +24,31 @@ pub(super) fn completed_path_text(path: &Path) -> String {
     text
 }
 
-pub(super) fn transfer_targets(
+/// 粘贴/拖放到 `directory` 的传输，目标沿用源名。同一批里目标重名的后来者目标
+/// 不变、策略设为 KeepBoth，由引擎提交时续编号——界面不替它起名。
+pub(super) fn transfers_into_directory(
     directory: &Path,
     sources: &[PathBuf],
     mode: PasteTargetMode,
-) -> Vec<(PathBuf, PathBuf)> {
+) -> Vec<QueuedTransfer> {
     let mut reserved_targets = HashSet::new();
     sources
         .iter()
         .map(|source| {
-            let candidate = child_path(directory, source);
-            if mode == PasteTargetMode::Move && candidate == *source {
-                reserved_targets.insert(candidate.clone());
-                return (source.clone(), source.clone());
+            let target = child_path(directory, source);
+            let transfer = QueuedTransfer::new(source.clone(), target.clone());
+            if mode == PasteTargetMode::Move && target == *source {
+                reserved_targets.insert(target);
+                return transfer;
             }
-            let target = if reserved_targets.contains(&candidate) {
-                unique_alternate_path(&candidate, &mut reserved_targets)
+            if reserved_targets.insert(target) {
+                transfer
             } else {
-                reserved_targets.insert(candidate.clone());
-                candidate
-            };
-            (source.clone(), target)
+                QueuedTransfer {
+                    conflict_strategy: TransferConflictStrategy::KeepBoth,
+                    ..transfer
+                }
+            }
         })
         .collect()
 }
@@ -69,33 +75,6 @@ fn transfer_source_name(source: &Path) -> OsString {
         .unwrap_or_else(|| OsString::from("item"))
 }
 
-pub(super) fn unique_alternate_path(
-    target: &Path,
-    reserved_targets: &mut HashSet<PathBuf>,
-) -> PathBuf {
-    if !reserved_targets.contains(target) {
-        let target = target.to_path_buf();
-        reserved_targets.insert(target.clone());
-        return target;
-    }
-
-    let parent = target.parent().unwrap_or_else(|| Path::new(""));
-    let name = target
-        .file_name()
-        .map(OsString::from)
-        .unwrap_or_else(|| OsString::from("item"));
-
-    for index in 2..1001 {
-        let candidate = parent.join(numbered_duplicate_name(&name, index));
-        if !reserved_targets.contains(&candidate) {
-            reserved_targets.insert(candidate.clone());
-            return candidate;
-        }
-    }
-
-    target.to_path_buf()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -116,5 +95,39 @@ mod tests {
         ));
         // 落点目录外的条目:可移动。
         assert!(!move_is_no_op(outsider, target_directory));
+    }
+
+    #[test]
+    fn later_sources_with_the_same_name_keep_their_target_and_let_the_engine_number_them() {
+        let sources = [
+            PathBuf::from("/a/report.pdf"),
+            PathBuf::from("/b/report.pdf"),
+            PathBuf::from("/c/notes.txt"),
+        ];
+
+        let transfers =
+            transfers_into_directory(Path::new("/target"), &sources, PasteTargetMode::Copy);
+
+        let planned = transfers
+            .iter()
+            .map(|transfer| (transfer.target.clone(), transfer.conflict_strategy))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            planned,
+            [
+                (
+                    PathBuf::from("/target/report.pdf"),
+                    TransferConflictStrategy::Fail
+                ),
+                (
+                    PathBuf::from("/target/report.pdf"),
+                    TransferConflictStrategy::KeepBoth
+                ),
+                (
+                    PathBuf::from("/target/notes.txt"),
+                    TransferConflictStrategy::Fail
+                ),
+            ]
+        );
     }
 }

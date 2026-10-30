@@ -11,9 +11,8 @@ use desktop_linux::{
 };
 use file_core::{
     check_transfer_conflicts as check_core_transfer_conflicts,
-    create_file_with_contents_at_available_name, numbered_duplicate_name,
-    scan_trash_with_cancellation, ScanOptions, TransferConflictCheck, TransferConflictItem,
-    TransferConflictStrategy, TrashScan,
+    create_file_with_contents_at_available_name, scan_trash_with_cancellation, ScanOptions,
+    TransferConflictCheck, TransferConflictItem, TransferConflictStrategy, TrashScan,
 };
 use file_operation_store::{StoreError, TaskQueueStore};
 use iced::Task;
@@ -417,14 +416,17 @@ async fn expand_transfer_conflict_merges(
             let Some(name) = child_source.file_name() else {
                 continue;
             };
-            let candidate = target_directory.join(name);
-            let child_target = if reserved_targets.contains(&candidate) {
-                unique_reserved_target(&candidate, &reserved_targets)
+            let child_target = target_directory.join(name);
+            let child_transfer = QueuedTransfer::new(child_source, child_target.clone());
+            // 批内已有同名目标的后来者:目标不变,由引擎提交时续编号。
+            child_transfers.push(if reserved_targets.insert(child_target) {
+                child_transfer
             } else {
-                candidate
-            };
-            reserved_targets.insert(child_target.clone());
-            child_transfers.push(QueuedTransfer::new(child_source, child_target));
+                QueuedTransfer {
+                    conflict_strategy: TransferConflictStrategy::KeepBoth,
+                    ..child_transfer
+                }
+            });
         }
     }
 
@@ -432,22 +434,6 @@ async fn expand_transfer_conflict_merges(
     transfers.extend(child_transfers);
     conflicts.extend(new_conflicts);
     Ok((transfers, conflicts))
-}
-
-/// 批内目标撞名时的后备名;与磁盘是否占用无关,那由冲突检查统一裁决。
-fn unique_reserved_target(target: &Path, reserved: &std::collections::HashSet<PathBuf>) -> PathBuf {
-    let parent = target.parent().map(Path::to_path_buf).unwrap_or_default();
-    let name = target
-        .file_name()
-        .map(std::ffi::OsStr::to_os_string)
-        .unwrap_or_else(|| std::ffi::OsString::from("item"));
-    for index in 2..1001 {
-        let candidate = parent.join(numbered_duplicate_name(&name, index));
-        if !reserved.contains(&candidate) {
-            return candidate;
-        }
-    }
-    target.to_path_buf()
 }
 
 /// 只有还没定策略（`Fail`）的传输需要问用户；带着 `KeepBoth` 等策略入场的

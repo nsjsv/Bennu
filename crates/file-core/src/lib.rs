@@ -104,8 +104,8 @@ pub use sort::{
     sort_discovered_entry_indices, sort_entries, SortDirection, SortField,
 };
 pub use transfer_conflict::{
-    available_transfer_target_path, check_transfer_conflicts, is_transfer_target_available,
-    numbered_duplicate_name, TransferConflictCheck, TransferConflictItem, TransferConflictMetadata,
+    check_transfer_conflicts, is_transfer_target_available, TransferConflictCheck,
+    TransferConflictItem, TransferConflictMetadata,
 };
 pub use trash_bin::{
     delete_trash_entry, empty_trash, empty_trash_with_cancellation, restore_trash_entry,

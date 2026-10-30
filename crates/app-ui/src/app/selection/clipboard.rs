@@ -465,11 +465,11 @@ impl FileBrowser {
                         password: None,
                     }
                 });
-                let transfers =
-                    paths::transfer_targets(&paste_directory, &real_sources, PasteTargetMode::Copy)
-                        .into_iter()
-                        .map(|(source, target)| QueuedTransfer::new(source, target))
-                        .collect::<Vec<_>>();
+                let transfers = paths::transfers_into_directory(
+                    &paste_directory,
+                    &real_sources,
+                    PasteTargetMode::Copy,
+                );
                 (TransferConflictMode::Copy, transfers, members)
             }
             PendingOperation::Move(sources) => {
@@ -562,9 +562,8 @@ pub(super) fn move_paste_transfers(
     paste_directory: &Path,
     sources: &[PathBuf],
 ) -> Vec<QueuedTransfer> {
-    paths::transfer_targets(paste_directory, sources, PasteTargetMode::Move)
+    paths::transfers_into_directory(paste_directory, sources, PasteTargetMode::Move)
         .into_iter()
-        .filter(|(source, _)| !paths::move_is_no_op(source, paste_directory))
-        .map(|(source, target)| QueuedTransfer::new(source, target))
+        .filter(|transfer| !paths::move_is_no_op(&transfer.source, paste_directory))
         .collect()
 }

@@ -5,9 +5,7 @@ use std::time::SystemTime;
 
 use tokio::fs;
 
-use crate::entry_naming::{
-    composed_entry_name, entry_name_candidates, split_entry_name, EntryNameKind,
-};
+use crate::entry_naming::{entry_name_candidates, EntryNameKind};
 use crate::FileError;
 
 const TRANSFER_CONFLICT_METADATA_CONCURRENCY: usize = 8;
@@ -88,10 +86,6 @@ pub async fn is_transfer_target_available(path: impl AsRef<Path>) -> Result<bool
         .map_err(|source| FileError::Metadata { path, source })
 }
 
-pub async fn available_transfer_target_path(path: impl AsRef<Path>) -> Result<PathBuf, FileError> {
-    first_available_entry_path(path.as_ref(), EntryNameKind::File).await
-}
-
 pub(crate) async fn transfer_target_metadata_if_exists(
     path: &Path,
 ) -> io::Result<Option<std::fs::Metadata>> {
@@ -160,12 +154,6 @@ fn entry_parent_and_name(path: &Path) -> Result<(PathBuf, OsString), FileError> 
     }
 }
 
-/// app-ui 批内撞名仍按序号直接取名；编号规则与 `entry_naming` 共用同一份拆分与拼接。
-pub fn numbered_duplicate_name(name: &std::ffi::OsStr, number: usize) -> OsString {
-    let (stem, extension) = split_entry_name(name, EntryNameKind::File);
-    composed_entry_name(&stem, &format!(" {number}"), extension.as_deref())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,37 +211,5 @@ mod tests {
             outcome,
             Err(FileError::EntryNameCandidatesExhausted { .. })
         ));
-    }
-
-    #[test]
-    fn duplicate_number_goes_between_name_and_extension() {
-        assert_eq!(
-            numbered_duplicate_name(std::ffi::OsStr::new("Screenshot.png"), 2),
-            OsString::from("Screenshot 2.png")
-        );
-    }
-
-    #[test]
-    fn duplicate_number_increments_for_each_taken_candidate() {
-        assert_eq!(
-            numbered_duplicate_name(std::ffi::OsStr::new("report.pdf"), 3),
-            OsString::from("report 3.pdf")
-        );
-    }
-
-    #[test]
-    fn extensionless_names_take_the_number_directly() {
-        assert_eq!(
-            numbered_duplicate_name(std::ffi::OsStr::new("notes"), 2),
-            OsString::from("notes 2")
-        );
-    }
-
-    #[test]
-    fn hidden_extensionless_files_use_whole_name_as_stem() {
-        assert_eq!(
-            numbered_duplicate_name(std::ffi::OsStr::new(".bashrc"), 2),
-            OsString::from(".bashrc 2")
-        );
     }
 }

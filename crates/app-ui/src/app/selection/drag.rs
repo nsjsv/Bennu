@@ -433,28 +433,26 @@ impl FileBrowser {
             });
 
         let mode = intent.conflict_mode();
-        let transfer_targets =
-            paths::transfer_targets(&target_directory, &real_sources, PasteTargetMode::Move);
+        let planned_transfers = paths::transfers_into_directory(
+            &target_directory,
+            &real_sources,
+            PasteTargetMode::Move,
+        );
         let transfers = if real_sources.is_empty() {
             Task::none()
         } else if mode == TransferConflictMode::Copy {
-            self.copy_dragged_files(transfer_targets, target_directory.clone())
+            self.copy_dragged_files(planned_transfers, target_directory.clone())
         } else {
             // 空操作源(落点目录自身/自身子树/已在落点目录)逐个跳过而非整
             // 批拒绝:多选里混着落点目录自身时其余条目照常移动,全部空操作
             // 才无事发生。与 file_drag_directory_capsule 的显示条件同判定。
-            let movable = transfer_targets
+            let transfers = planned_transfers
                 .into_iter()
-                .filter(|(source, _)| !paths::move_is_no_op(source, &target_directory))
+                .filter(|transfer| !paths::move_is_no_op(&transfer.source, &target_directory))
                 .collect::<Vec<_>>();
-            if movable.is_empty() {
+            if transfers.is_empty() {
                 Task::none()
             } else {
-                let transfers = movable
-                    .into_iter()
-                    .map(|(source, target)| QueuedTransfer::new(source, target))
-                    .collect::<Vec<_>>();
-
                 let open_drop_target = if real_sources
                     .first()
                     .and_then(|source| source.parent())
@@ -484,25 +482,26 @@ impl FileBrowser {
     /// 与 KeepBoth),其余目标沿用源名;把条目拖进自身子树仍然拒绝。
     fn copy_dragged_files(
         &mut self,
-        transfer_targets: Vec<(PathBuf, PathBuf)>,
+        planned_transfers: Vec<QueuedTransfer>,
         target_directory: PathBuf,
     ) -> Task<Message> {
-        if transfer_targets
-            .iter()
-            .any(|(source, target)| target.starts_with(source))
-        {
+        // 落点就是源本身(同目录拖放)时是原位副本;落进源的子树仍然拒绝。
+        if planned_transfers.iter().any(|transfer| {
+            transfer.source != transfer.target && transfer.target.starts_with(&transfer.source)
+        }) {
             return Task::none();
         }
-        let transfers = transfer_targets
+        let transfers = planned_transfers
             .into_iter()
-            .map(|(source, target)| {
-                if source != target {
-                    return QueuedTransfer::new(source, target);
+            .map(|transfer| {
+                if transfer.source != transfer.target {
+                    return transfer;
                 }
-                let parent = source
+                let parent = transfer
+                    .source
                     .parent()
                     .map_or_else(|| target_directory.clone(), Path::to_path_buf);
-                self.duplicate_transfer(&source, &parent)
+                self.duplicate_transfer(&transfer.source, &parent)
             })
             .collect::<Vec<_>>();
         self.enqueue_or_confirm_transfers(TransferConflictMode::Copy, transfers)

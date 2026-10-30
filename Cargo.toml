@@ -24,17 +24,18 @@ version = "0.3.7"
 edition = "2021"
 license = "GPL-3.0-or-later"
 repository = ""
-
-# 发版用 cargo-release（见 AGENTS.md 发版流程）：默认 dry-run，--execute 后
-# 改 workspace 版本、同步 Cargo.lock、生成 release commit、打轻量 tag。
-# 不自动 push，由人工 git push --follow-tags 触发 Release CI。
-[workspace.metadata.release]
+# 应用内部 crate，永不上 crates.io；用 Cargo 原生字段，cargo-release 与
+# cargo publish 都会遵守。
 publish = false
+
+# 发版用 cargo-release（见 AGENTS.md 发版流程），只在私有仓库改版本号：
+# 改 workspace 版本、同步 Cargo.lock、生成 release commit。tag 只在开源库
+# 同步后手动打并推送（Release CI 只在开源库触发），所以这里不打 tag、不 push。
+[workspace.metadata.release]
 push = false
 consolidate-commits = true
-tag = false                                 # 默认每个子 crate 一个 tag（name-vX.Y.Z），关闭
+tag = false
 pre-release-commit-message = "chore(release): prepare v{{version}}"
-tag-message = ""
 
 [workspace.dependencies]
 blake3 = "1.8.5"

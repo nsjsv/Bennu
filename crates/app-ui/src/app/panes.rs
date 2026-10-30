@@ -422,8 +422,15 @@ impl FileBrowser {
         self.follow_terminal_panel_directory();
     }
 
+    /// 窗格区实际宽度。右侧预览面板与窗格同排挤占宽度：网格列数、分屏、
+    /// 多栏都按这个宽度排，漏减面板会让最右侧内容排到面板底下被盖住（#2）。
     pub(super) fn split_content_width(&self) -> f32 {
-        (self.main_window_width - self.sidebar_width).max(1.0)
+        let preview_panel_width = if self.right_preview_panel_open {
+            self.right_preview_panel_effective_width()
+        } else {
+            0.0
+        };
+        (self.main_window_width - self.sidebar_width - preview_panel_width).max(1.0)
     }
 }
 
@@ -518,6 +525,31 @@ mod tests {
         browser.pane_layout = browser.pane_layout.with_active(second_pane_id);
         assert_eq!(browser.tab().current_dir, PathBuf::from("/second"));
         assert_eq!(browser.panes[0].tab().current_dir, PathBuf::from("/first"));
+    }
+
+    #[test]
+    fn open_preview_panel_narrows_the_pane_width_it_sits_beside() {
+        // #2：网格列数按窗格宽度排；面板开着却没扣掉，最右边几列就排到面板底下被盖住。
+        let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+        browser.main_window_width = 1_200.0;
+        browser.sidebar_width = 180.0;
+        assert_eq!(browser.pane_content_width(), 1_020.0);
+
+        browser.right_preview_panel_open = true;
+        let panel_width = browser.right_preview_panel_effective_width();
+        assert!(panel_width > 0.0);
+        assert_eq!(browser.pane_content_width(), 1_020.0 - panel_width);
+
+        browser.pane_layout = BrowserPaneLayout::Split {
+            axis: SplitAxis::Horizontal,
+            first: BrowserPaneId::PRIMARY,
+            second: BrowserPaneId(1),
+            active: BrowserPaneId::PRIMARY,
+            first_portion: 500,
+        };
+        let split_total = browser.pane_content_width_for(BrowserPaneId::PRIMARY)
+            + browser.pane_content_width_for(BrowserPaneId(1));
+        assert!(split_total <= 1_020.0 - panel_width + 0.5);
     }
 
     #[test]

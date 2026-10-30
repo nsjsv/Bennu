@@ -80,11 +80,9 @@ impl FileBrowser {
     }
 
     fn column_browser_content_width(&self) -> f32 {
-        column_browser_content_width_for_window(
-            self.main_window_width,
-            self.sidebar_width,
-            self.user_config.visible_column_count,
-        )
+        let divider_width =
+            COLUMN_RESIZE_DIVIDER_WIDTH * (self.user_config.visible_column_count - 1) as f32;
+        (self.split_content_width() - divider_width).max(1.0)
     }
 
     /// 把全部 override 换算到新的参考内容宽度,显示宽度保持不变。
@@ -194,15 +192,6 @@ impl FileBrowser {
     }
 }
 
-fn column_browser_content_width_for_window(
-    main_window_width: f32,
-    sidebar_width: f32,
-    visible_column_count: usize,
-) -> f32 {
-    let divider_width = COLUMN_RESIZE_DIVIDER_WIDTH * (visible_column_count - 1) as f32;
-    (main_window_width - sidebar_width - divider_width).max(1.0)
-}
-
 fn scale_column_width_to_content_width(
     width: f32,
     reference_content_width: f32,
@@ -249,12 +238,26 @@ mod tests {
     }
 
     #[test]
-    fn column_browser_content_width_excludes_sidebar_slot() {
-        let visible_column_count = 3;
-        let divider_width = COLUMN_RESIZE_DIVIDER_WIDTH * (visible_column_count - 1) as f32;
-        let width = column_browser_content_width_for_window(900.0, 180.0, visible_column_count);
+    fn column_browser_content_width_excludes_sidebar_and_open_preview_panel() {
+        let (mut browser, _) = FileBrowser::new(config::default_user_config());
+        browser.main_window_width = 1_200.0;
+        browser.sidebar_width = 180.0;
+        let divider_width =
+            COLUMN_RESIZE_DIVIDER_WIDTH * (browser.user_config.visible_column_count - 1) as f32;
 
-        assert_close(width, 900.0 - 180.0 - divider_width);
+        assert_close(
+            browser.column_browser_content_width(),
+            1_200.0 - 180.0 - divider_width,
+        );
+
+        // #2：面板与窗格同排，打开后多栏必须让出面板宽度，不能排到它底下。
+        browser.right_preview_panel_open = true;
+        let panel_width = browser.right_preview_panel_effective_width();
+        assert!(panel_width > 0.0);
+        assert_close(
+            browser.column_browser_content_width(),
+            1_200.0 - 180.0 - panel_width - divider_width,
+        );
     }
 
     #[test]

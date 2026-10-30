@@ -37,14 +37,14 @@ async fn prepare_failure_settles_journal_and_finalizes_failed_task() {
     assert_persisted(&mut queue);
     let running = queue.active_subscription().unwrap();
     let stored_task_id = running.stored_id.unwrap();
-    let (mut output, _messages) = iced::futures::channel::mpsc::channel(64);
+    let (output, _messages) = tokio::sync::mpsc::channel(64);
 
     let completion = run_queued_transfers(
         transfers.clone(),
         running.controls,
         running.stored_id.unwrap(),
         task_id,
-        &mut output,
+        &output,
         running.store,
         QueuedTransferMode::Move,
         FileOperationVerification::BasicMetadata,
@@ -155,7 +155,7 @@ async fn an_unbuildable_progress_manifest_is_logged_and_the_real_error_still_sur
     };
     assert_persisted(&mut queue);
     let running = queue.active_subscription().unwrap();
-    let (mut output, messages) = iced::futures::channel::mpsc::channel(64);
+    let (output, mut events) = tokio::sync::mpsc::channel(64);
     let unavailable_manifests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let subscriber = tracing_subscriber::registry().with(FileOperationEventCounter {
         event_name: "progress_manifest_unavailable",
@@ -170,7 +170,7 @@ async fn an_unbuildable_progress_manifest_is_logged_and_the_real_error_still_sur
             running.controls,
             running.stored_id.unwrap(),
             task_id,
-            &mut output,
+            &output,
             running.store,
             QueuedTransferMode::Copy,
             FileOperationVerification::BasicMetadata,
@@ -191,9 +191,13 @@ async fn an_unbuildable_progress_manifest_is_logged_and_the_real_error_still_sur
         error.contains("could not read directory"),
         "unexpected diagnostic: {error}"
     );
-    let messages = messages.collect::<Vec<_>>().await;
-    assert!(!messages.iter().any(|message| matches!(
-        message,
-        Message::FileOperationProgressed(_, FileOperationProgressUpdate::Bytes { .. }, _)
-    )));
+    while let Some(event) = events.recv().await {
+        assert!(!matches!(
+            event,
+            FileOperationEvent::Progressed {
+                update: FileOperationProgressUpdate::Bytes { .. },
+                ..
+            }
+        ));
+    }
 }

@@ -269,7 +269,7 @@ pub(super) async fn run_queued_transfers(
     controls: FileOperationControls,
     stored_task_id: u64,
     task_id: u64,
-    output: &mut IcedSender<Message>,
+    output: &FileOperationEventSender,
     store: Option<TaskQueueStore>,
     mode: QueuedTransferMode,
     verification: FileOperationVerification,
@@ -593,7 +593,7 @@ async fn settle_intent_segment(
     journal: &TaskQueueTransferJournal,
     options: &FileTransferOptions,
     task_id: u64,
-    output: &mut IcedSender<Message>,
+    output: &FileOperationEventSender,
     batch_progress: &mut TransferBatchProgress,
     completed: &mut SettledTransfers,
 ) -> Result<(), RecoverableTransferError> {
@@ -609,12 +609,12 @@ async fn settle_intent_segment(
     // rename 全部完成后立即上报 UI（同一条 output channel，先于 durable commits），
     // 让列表刷新不等 parent fsync 与 journal 落盘。通道满时等界面取走：列表增量、
     // 路径迁移和搜索刷新都靠这条消息，丢了就再也补不回来。
-    let mut renamed_output = output.clone();
+    let renamed_output = output.clone();
     let report_renamed = |moves: Vec<(PathBuf, PathBuf)>| async move {
         // 只有界面那头的流已关闭才会失败；那时没人接收，驱动者由队列监督换代，
         // 与 FileOperationFinished 的发送同样处理。
         let _ = renamed_output
-            .send(Message::FileOperationMovesRenamed {
+            .send(FileOperationEvent::MovesRenamed {
                 task_id,
                 moves: moves
                     .into_iter()
@@ -684,7 +684,7 @@ async fn run_not_applicable_record(
     journal: &TaskQueueTransferJournal,
     options: &FileTransferOptions,
     task_id: u64,
-    output: &mut IcedSender<Message>,
+    output: &FileOperationEventSender,
     batch_progress: &mut TransferBatchProgress,
     completed: &mut SettledTransfers,
 ) -> Result<(), RecoverableTransferError> {
@@ -730,7 +730,7 @@ async fn settle_recoverable_transfer_failure(
     completed: SettledTransfers,
     stored_task_id: u64,
     task_id: u64,
-    output: &mut IcedSender<Message>,
+    output: &FileOperationEventSender,
     journal: &TaskQueueTransferJournal,
     controls: &FileOperationControls,
 ) -> FileOperationCompletion {
@@ -799,7 +799,7 @@ async fn settle_cancellation_records(
     history_eligibility: FileOperationHistoryEligibility,
     error: RecoverableTransferError,
     task_id: u64,
-    output: &mut IcedSender<Message>,
+    output: &FileOperationEventSender,
     journal: &TaskQueueTransferJournal,
     controls: &FileOperationControls,
 ) -> FileOperationCompletion {
@@ -925,7 +925,7 @@ async fn complete_durable_direct_move_segment(
     journal: &TaskQueueTransferJournal,
     options: &FileTransferOptions,
     task_id: u64,
-    output: &mut IcedSender<Message>,
+    output: &FileOperationEventSender,
     batch_progress: &mut TransferBatchProgress,
     completed: &mut SettledTransfers,
 ) -> Result<(), RecoverableTransferError> {
@@ -1004,7 +1004,7 @@ async fn run_recoverable_record_with_progress(
     journal: &TaskQueueTransferJournal,
     options: &FileTransferOptions,
     task_id: u64,
-    output: &mut IcedSender<Message>,
+    output: &FileOperationEventSender,
     record_index: usize,
     batch_progress: &mut TransferBatchProgress,
 ) -> Result<RecoverableTransferOutcome, RecoverableTransferError> {
@@ -1044,7 +1044,7 @@ async fn run_recoverable_record_with_progress(
 }
 
 async fn send_durable_direct_move_commits(
-    output: &mut IcedSender<Message>,
+    output: &FileOperationEventSender,
     task_id: u64,
     records: &[(usize, TransferJournalRecord)],
 ) {
@@ -1056,7 +1056,7 @@ async fn send_durable_direct_move_commits(
 }
 
 async fn send_durable_direct_move_commit_values(
-    output: &mut IcedSender<Message>,
+    output: &FileOperationEventSender,
     task_id: u64,
     commits: Vec<DurableDirectMoveCommit>,
 ) {
@@ -1064,7 +1064,7 @@ async fn send_durable_direct_move_commit_values(
         return;
     }
     let _ = output
-        .send(Message::FileOperationDirectMovesCommitted { task_id, commits })
+        .send(FileOperationEvent::DirectMovesCommitted { task_id, commits })
         .await;
 }
 
@@ -1078,7 +1078,7 @@ fn history_safe_transfer(transfer: &QueuedTransfer) -> bool {
 }
 
 async fn send_copy_progress(
-    output: &mut IcedSender<Message>,
+    output: &FileOperationEventSender,
     task_id: u64,
     record_index: usize,
     progress: CopyProgress,
@@ -1097,7 +1097,6 @@ mod recoverable_transfer_tests {
     use super::*;
     use file_operations::test_persistence::{assert_persisted, attach_store};
     use file_operations::{FileOperationEnqueueOutcome, FileOperationFinish, FileOperationQueue};
-    use iced::futures::StreamExt;
 
     use file_core::{
         persist_recoverable_source_manifest_with_controls,
@@ -1116,11 +1115,22 @@ mod recoverable_transfer_tests {
         _records: &[TransferJournalRecord],
     ) -> (
         TaskQueueTransferJournal,
-        iced::futures::channel::mpsc::UnboundedReceiver<()>,
+        tokio::sync::mpsc::UnboundedReceiver<()>,
     ) {
-        let (sender, receiver) = iced::futures::channel::mpsc::unbounded();
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
         drop(sender);
         (task_queue_transfer_journal(store, controls), receiver)
+    }
+
+    /// 发送端都已丢弃后,按到达顺序取出通道里剩下的全部事件。
+    async fn drained_events(
+        mut events: tokio::sync::mpsc::Receiver<FileOperationEvent>,
+    ) -> Vec<FileOperationEvent> {
+        let mut drained = Vec::new();
+        while let Some(event) = events.recv().await {
+            drained.push(event);
+        }
+        drained
     }
 
     #[derive(Clone)]
@@ -1263,14 +1273,14 @@ mod recoverable_transfer_tests {
         };
         assert_persisted(&mut queue);
         let running = queue.active_subscription().unwrap();
-        let (mut output, mut messages) = iced::futures::channel::mpsc::channel(32);
+        let (output, messages) = tokio::sync::mpsc::channel(32);
 
         let completion = run_queued_transfers(
             transfers,
             running.controls,
             running.stored_id.unwrap(),
             task_id,
-            &mut output,
+            &output,
             running.store,
             QueuedTransferMode::Copy,
             FileOperationVerification::BasicMetadata,
@@ -1283,17 +1293,18 @@ mod recoverable_transfer_tests {
             FileOperationCompletion::Succeeded(FileOperationOutcome::Copy { .. })
         ));
         let mut byte_updates = Vec::new();
-        while let Some(message) = messages.next().await {
-            if let Message::FileOperationProgressed(
-                id,
-                FileOperationProgressUpdate::Bytes {
-                    completed_bytes,
-                    total_bytes,
-                    completed_items,
-                    total_items,
-                },
-                _,
-            ) = message
+        for event in drained_events(messages).await {
+            if let FileOperationEvent::Progressed {
+                task_id: id,
+                update:
+                    FileOperationProgressUpdate::Bytes {
+                        completed_bytes,
+                        total_bytes,
+                        completed_items,
+                        total_items,
+                    },
+                ..
+            } = event
             {
                 assert_eq!(id, task_id);
                 byte_updates.push((completed_bytes, total_bytes, completed_items, total_items));
@@ -1329,14 +1340,14 @@ mod recoverable_transfer_tests {
         let running = queue.active_subscription().unwrap();
         let stored_task_id = running.stored_id.unwrap();
         let stored_task_id = running.stored_id.unwrap();
-        let (mut output, _messages) = iced::futures::channel::mpsc::channel(8);
+        let (output, _messages) = tokio::sync::mpsc::channel(8);
 
         let completion = run_queued_transfers(
             transfers,
             running.controls,
             running.stored_id.unwrap(),
             task_id,
-            &mut output,
+            &output,
             running.store,
             QueuedTransferMode::Copy,
             FileOperationVerification::Strong,
@@ -1384,14 +1395,14 @@ mod recoverable_transfer_tests {
         };
         assert_persisted(&mut queue);
         let running = queue.active_subscription().unwrap();
-        let (mut output, messages) = iced::futures::channel::mpsc::channel(32);
+        let (output, messages) = tokio::sync::mpsc::channel(32);
 
         let completion = run_queued_transfers(
             transfers,
             running.controls,
             running.stored_id.unwrap(),
             task_id,
-            &mut output,
+            &output,
             running.store,
             QueuedTransferMode::Move,
             FileOperationVerification::BasicMetadata,
@@ -1399,10 +1410,10 @@ mod recoverable_transfer_tests {
         .await;
         drop(output);
         assert!(matches!(completion, FileOperationCompletion::Succeeded(_)));
-        let messages = messages.collect::<Vec<_>>().await;
+        let messages = drained_events(messages).await;
         assert!(messages.iter().any(|message| matches!(
             message,
-            Message::FileOperationDirectMovesCommitted {
+            FileOperationEvent::DirectMovesCommitted {
                 task_id: committed_task_id,
                 commits,
             } if *committed_task_id == task_id
@@ -1446,14 +1457,14 @@ mod recoverable_transfer_tests {
         };
         assert_persisted(&mut queue);
         let running = queue.active_subscription().unwrap();
-        let (mut output, messages) = iced::futures::channel::mpsc::channel(64);
+        let (output, messages) = tokio::sync::mpsc::channel(64);
 
         let completion = run_queued_transfers(
             transfers.clone(),
             running.controls,
             running.stored_id.unwrap(),
             task_id,
-            &mut output,
+            &output,
             running.store,
             QueuedTransferMode::Move,
             FileOperationVerification::BasicMetadata,
@@ -1479,12 +1490,12 @@ mod recoverable_transfer_tests {
                 .collect::<Vec<_>>()
         );
 
-        let messages = messages.collect::<Vec<_>>().await;
+        let messages = drained_events(messages).await;
         let direct_commit_batches = messages
             .iter()
             .enumerate()
             .filter_map(|(position, message)| match message {
-                Message::FileOperationDirectMovesCommitted {
+                FileOperationEvent::DirectMovesCommitted {
                     task_id: committed_task_id,
                     commits,
                 } => Some((position, *committed_task_id, commits.len())),
@@ -1496,21 +1507,21 @@ mod recoverable_transfer_tests {
             .iter()
             .enumerate()
             .filter_map(|(position, message)| match message {
-                Message::FileOperationMovesRenamed { moves, .. } => Some((position, moves.len())),
+                FileOperationEvent::MovesRenamed { moves, .. } => Some((position, moves.len())),
                 _ => None,
             })
             .collect::<Vec<_>>();
         assert_eq!(renamed_moves, vec![(0, transfers.len())]);
         let first_item_completion = messages
             .iter()
-            .position(|message| matches!(message, Message::FileOperationProgressed(_, _, _)))
+            .position(|message| matches!(message, FileOperationEvent::Progressed { .. }))
             .expect("batch should publish item completion progress");
         assert_eq!(direct_commit_batches, vec![(1, task_id, transfers.len())]);
         assert!(direct_commit_batches[0].0 < first_item_completion);
         let direct_commit_batch = messages
             .iter()
             .find_map(|message| match message {
-                Message::FileOperationDirectMovesCommitted {
+                FileOperationEvent::DirectMovesCommitted {
                     task_id: committed_task_id,
                     commits,
                 } => Some((*committed_task_id, commits)),
@@ -1560,7 +1571,7 @@ mod recoverable_transfer_tests {
         };
         assert_persisted(&mut queue);
         let running = queue.active_subscription().unwrap();
-        let (mut output, mut messages) = iced::futures::channel::mpsc::channel(0);
+        let (output, mut messages) = tokio::sync::mpsc::channel(1);
 
         let run = {
             let transfers = transfers.clone();
@@ -1570,7 +1581,7 @@ mod recoverable_transfer_tests {
                     running.controls,
                     running.stored_id.unwrap(),
                     task_id,
-                    &mut output,
+                    &output,
                     running.store,
                     QueuedTransferMode::Move,
                     FileOperationVerification::BasicMetadata,
@@ -1582,7 +1593,7 @@ mod recoverable_transfer_tests {
         };
         let slow_ui = async move {
             let mut received = Vec::new();
-            while let Some(message) = messages.next().await {
+            while let Some(message) = messages.recv().await {
                 tokio::time::sleep(std::time::Duration::from_millis(5)).await;
                 received.push(message);
             }
@@ -1599,15 +1610,13 @@ mod recoverable_transfer_tests {
             .position(|message| {
                 matches!(
                     message,
-                    Message::FileOperationMovesRenamed { moves, .. } if moves.len() == transfers.len()
+                    FileOperationEvent::MovesRenamed { moves, .. } if moves.len() == transfers.len()
                 )
             })
             .expect("the renamed moves must reach the UI");
         let committed = received
             .iter()
-            .position(|message| {
-                matches!(message, Message::FileOperationDirectMovesCommitted { .. })
-            })
+            .position(|message| matches!(message, FileOperationEvent::DirectMovesCommitted { .. }))
             .expect("the durable commit must reach the UI");
         assert!(renamed < committed);
     }
@@ -1643,14 +1652,14 @@ mod recoverable_transfer_tests {
         };
         assert_persisted(&mut queue);
         let running = queue.active_subscription().unwrap();
-        let (mut output, _messages) = iced::futures::channel::mpsc::channel(64);
+        let (output, _messages) = tokio::sync::mpsc::channel(64);
 
         let completion = run_queued_transfers(
             transfers,
             running.controls,
             running.stored_id.unwrap(),
             task_id,
-            &mut output,
+            &output,
             running.store,
             QueuedTransferMode::Move,
             FileOperationVerification::BasicMetadata,
@@ -1721,7 +1730,7 @@ mod recoverable_transfer_tests {
             .unwrap();
         }
         let mut batch_progress = TransferBatchProgress::new(&records, QueuedTransferMode::Move);
-        let (mut output, _messages) = iced::futures::channel::mpsc::channel(64);
+        let (output, _messages) = tokio::sync::mpsc::channel(64);
         let mut durable_direct_moves = Vec::new();
         let mut intent_records = Vec::new();
         for (index, record) in records.into_iter().enumerate() {
@@ -1773,7 +1782,7 @@ mod recoverable_transfer_tests {
                 &journal,
                 &FileTransferOptions::new(running.controls.clone()),
                 task_id,
-                &mut output,
+                &output,
                 &mut batch_progress,
                 &mut completed,
             )
@@ -1848,14 +1857,14 @@ mod recoverable_transfer_tests {
         };
         assert_persisted(&mut queue);
         let running = queue.active_subscription().unwrap();
-        let (mut output, messages) = iced::futures::channel::mpsc::channel(32);
+        let (output, messages) = tokio::sync::mpsc::channel(32);
 
         let completion = run_queued_transfers(
             transfers,
             running.controls,
             running.stored_id.unwrap(),
             task_id,
-            &mut output,
+            &output,
             running.store,
             QueuedTransferMode::Move,
             FileOperationVerification::BasicMetadata,
@@ -1863,10 +1872,10 @@ mod recoverable_transfer_tests {
         .await;
         drop(output);
         assert!(matches!(completion, FileOperationCompletion::Succeeded(_)));
-        let messages = messages.collect::<Vec<_>>().await;
+        let messages = drained_events(messages).await;
         assert!(messages.iter().any(|message| matches!(
             message,
-            Message::FileOperationDirectMovesCommitted {
+            FileOperationEvent::DirectMovesCommitted {
                 task_id: committed_task_id,
                 commits,
             } if *committed_task_id == task_id
@@ -1938,13 +1947,13 @@ mod recoverable_transfer_tests {
             bennu_state::StoredTransferCheckpointKind::DirectMoveRenamed
         );
 
-        let (mut output, messages) = iced::futures::channel::mpsc::channel(32);
+        let (output, messages) = tokio::sync::mpsc::channel(32);
         let completion = run_queued_transfers(
             transfers,
             running.controls,
             running.stored_id.unwrap(),
             task_id,
-            &mut output,
+            &output,
             running.store,
             QueuedTransferMode::Move,
             FileOperationVerification::BasicMetadata,
@@ -1952,14 +1961,13 @@ mod recoverable_transfer_tests {
         .await;
         drop(output);
         assert!(matches!(completion, FileOperationCompletion::Succeeded(_)));
-        let commits = messages
-            .collect::<Vec<_>>()
+        let commits = drained_events(messages)
             .await
             .into_iter()
             .filter(|message| {
                 matches!(
                     message,
-                    Message::FileOperationDirectMovesCommitted {
+                    FileOperationEvent::DirectMovesCommitted {
                         task_id: committed_task_id,
                         commits,
                     } if *committed_task_id == task_id
@@ -2051,14 +2059,14 @@ mod recoverable_transfer_tests {
         let running = queue.active_subscription().unwrap();
         let stored_task_id = running.stored_id.unwrap();
         let stored_task_id = running.stored_id.unwrap();
-        let (mut output, _messages) = iced::futures::channel::mpsc::channel(32);
+        let (output, _messages) = tokio::sync::mpsc::channel(32);
 
         let completion = run_queued_transfers(
             transfers,
             running.controls,
             running.stored_id.unwrap(),
             task_id,
-            &mut output,
+            &output,
             running.store,
             QueuedTransferMode::Copy,
             FileOperationVerification::Strong,
@@ -2118,7 +2126,7 @@ mod recoverable_transfer_tests {
             .await
             .unwrap();
         let journal = task_queue_transfer_journal(store.clone(), running.controls.clone());
-        let (mut output, _messages) = iced::futures::channel::mpsc::channel(64);
+        let (output, _messages) = tokio::sync::mpsc::channel(64);
         let mut batch_progress = TransferBatchProgress::new(&records, QueuedTransferMode::Move);
 
         run_recoverable_record_with_progress(
@@ -2127,7 +2135,7 @@ mod recoverable_transfer_tests {
             &journal,
             &FileTransferOptions::new(running.controls.clone()),
             task_id,
-            &mut output,
+            &output,
             0,
             &mut batch_progress,
         )
@@ -2147,7 +2155,7 @@ mod recoverable_transfer_tests {
             restored_running.controls,
             restored_running.stored_id.unwrap(),
             task_id,
-            &mut output,
+            &output,
             restored_running.store,
             QueuedTransferMode::Move,
             FileOperationVerification::BasicMetadata,
@@ -2218,7 +2226,7 @@ mod recoverable_transfer_tests {
             .await
             .unwrap();
         let journal = task_queue_transfer_journal(store.clone(), running.controls.clone());
-        let (mut output, _messages) = iced::futures::channel::mpsc::channel(64);
+        let (output, _messages) = tokio::sync::mpsc::channel(64);
         let mut batch_progress = TransferBatchProgress::new(&records, QueuedTransferMode::Copy);
 
         run_recoverable_record_with_progress(
@@ -2227,7 +2235,7 @@ mod recoverable_transfer_tests {
             &journal,
             &FileTransferOptions::new(running.controls.clone()),
             task_id,
-            &mut output,
+            &output,
             0,
             &mut batch_progress,
         )
@@ -2250,7 +2258,7 @@ mod recoverable_transfer_tests {
             restored_running.controls,
             restored_running.stored_id.unwrap(),
             task_id,
-            &mut output,
+            &output,
             restored_running.store,
             QueuedTransferMode::Copy,
             FileOperationVerification::BasicMetadata,

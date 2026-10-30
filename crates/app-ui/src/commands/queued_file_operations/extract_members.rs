@@ -6,14 +6,10 @@ use file_core::{
     extract_archive_members_with_controls_and_progress, ArchiveMemberExtractionRequest,
     ArchivePassword, FileError, FileOperationControls,
 };
-use iced::futures::SinkExt;
 
-use crate::app::archive_member_password::ArchiveMemberPasswordAction;
-use crate::model::Message;
-use file_operations::FileOperationOutcome;
-use file_operations::FileOperationProgressUpdate;
-
-type IcedSender = iced::futures::channel::mpsc::Sender<Message>;
+use file_operations::{
+    FileOperationEvent, FileOperationEventSender, FileOperationOutcome, FileOperationProgressUpdate,
+};
 
 pub(crate) async fn run_queued_extract_archive_members(
     sources: Vec<PathBuf>,
@@ -21,14 +17,14 @@ pub(crate) async fn run_queued_extract_archive_members(
     password: Option<ArchivePassword>,
     controls: FileOperationControls,
     task_id: u64,
-    output: &mut IcedSender,
+    output: &FileOperationEventSender,
 ) -> Result<FileOperationOutcome, String> {
     let _ = output
-        .send(Message::FileOperationProgressed(
+        .send(FileOperationEvent::Progressed {
             task_id,
-            FileOperationProgressUpdate::Indeterminate,
-            Vec::new(),
-        ))
+            update: FileOperationProgressUpdate::Indeterminate,
+            entries: Vec::new(),
+        })
         .await;
     let request = ArchiveMemberExtractionRequest::new(sources.clone(), destination.clone())
         .with_password(password);
@@ -47,11 +43,9 @@ pub(crate) async fn run_queued_extract_archive_members(
             ) {
                 let invalid_retry = matches!(error, FileError::ArchiveInvalidPassword { .. });
                 let _ = output
-                    .send(Message::ArchiveMemberPasswordRequested {
-                        action: ArchiveMemberPasswordAction::Extract {
-                            sources,
-                            destination,
-                        },
+                    .send(FileOperationEvent::ArchiveMemberPasswordRequested {
+                        sources,
+                        destination,
                         invalid_retry,
                     })
                     .await;

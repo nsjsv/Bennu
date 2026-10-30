@@ -82,12 +82,12 @@ fn direct_move_commit_message(
 ) -> Message {
     Message::FileOperationDirectMovesCommitted {
         task_id,
-        commits: vec![crate::commands::DurableDirectMoveCommit::for_test(
-            file_core::TransferWorkKey::top_level(0),
+        commits: vec![file_operations::DurableDirectMoveCommit {
+            work_key: file_core::TransferWorkKey::top_level(0),
             source,
             target,
             checkpoint_revision,
-        )],
+        }],
     }
 }
 
@@ -100,12 +100,12 @@ fn direct_move_commit_batch_message(
         commits: commits
             .into_iter()
             .map(|(transfer_index, source, target, checkpoint_revision)| {
-                crate::commands::DurableDirectMoveCommit::for_test(
-                    file_core::TransferWorkKey::top_level(transfer_index as u64),
+                file_operations::DurableDirectMoveCommit {
+                    work_key: file_core::TransferWorkKey::top_level(transfer_index as u64),
                     source,
                     target,
                     checkpoint_revision,
-                )
+                }
             })
             .collect(),
     }

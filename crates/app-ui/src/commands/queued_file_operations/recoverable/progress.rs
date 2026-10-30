@@ -5,12 +5,10 @@ use file_core::{
     ArchiveCreationProgress, ArchiveExtractionProgress, CopyProgress, FileObjectKind,
     SourceManifest, TransferJournalRecord,
 };
-use iced::futures::channel::mpsc::Sender as IcedSender;
-use iced::futures::SinkExt;
 
-use crate::model::Message;
 use file_operations::{
-    FileOperationProgressUpdate, TransferEntrySnapshot, TransferEntrySnapshotState,
+    FileOperationEvent, FileOperationEventSender, FileOperationProgressUpdate,
+    TransferEntrySnapshot, TransferEntrySnapshotState,
 };
 
 use super::super::QueuedTransferMode;
@@ -188,7 +186,7 @@ pub(super) fn drain_latest_copy_progress(
 }
 
 pub(crate) async fn send_archive_creation_progress(
-    output: &mut IcedSender<Message>,
+    output: &FileOperationEventSender,
     task_id: u64,
     progress: ArchiveCreationProgress,
 ) {
@@ -206,7 +204,7 @@ pub(crate) async fn send_archive_creation_progress(
 }
 
 pub(crate) async fn send_archive_extraction_progress(
-    output: &mut IcedSender<Message>,
+    output: &FileOperationEventSender,
     task_id: u64,
     progress: ArchiveExtractionProgress,
 ) {
@@ -224,32 +222,34 @@ pub(crate) async fn send_archive_extraction_progress(
 }
 
 pub(crate) async fn send_file_operation_progress(
-    output: &mut IcedSender<Message>,
+    output: &FileOperationEventSender,
     task_id: u64,
     progress: FileOperationProgressUpdate,
 ) {
     let _ = output
-        .send(Message::FileOperationProgressed(
+        .send(FileOperationEvent::Progressed {
             task_id,
-            progress,
-            Vec::new(),
-        ))
+            update: progress,
+            entries: Vec::new(),
+        })
         .await;
 }
 
 /// 传输批次的进度消息:聚合更新与逐条目占位快照同行发送,快照全量
 /// 替换 UI 侧任务状态,占位行由此保持单一事实源。
 pub(super) async fn send_transfer_batch_progress(
-    output: &mut IcedSender<Message>,
+    output: &FileOperationEventSender,
     task_id: u64,
     batch_progress: &TransferBatchProgress,
     progress: FileOperationProgressUpdate,
 ) {
-    let snapshots = batch_progress.transfer_entry_snapshots();
+    let entries = batch_progress.transfer_entry_snapshots();
     let _ = output
-        .send(Message::FileOperationProgressed(
-            task_id, progress, snapshots,
-        ))
+        .send(FileOperationEvent::Progressed {
+            task_id,
+            update: progress,
+            entries,
+        })
         .await;
 }
 

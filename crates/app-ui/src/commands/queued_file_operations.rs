@@ -15,16 +15,14 @@ use file_core::{
     DirectMoveIntentBatchRecord, FileError, FileOperationControls, FileOperationVerification,
     FileTransferOptions, RecoverableTransferError, RecoverableTransferOperation,
     RecoverableTransferOutcome, SymbolicLinkRequest, TransferConflictStrategy, TransferJournal,
-    TransferJournalError, TransferJournalMutation, TransferJournalRecord, TransferWorkKey,
-    TrashRestoreEntry, TrashVerificationBatch,
+    TransferJournalError, TransferJournalMutation, TransferJournalRecord, TrashRestoreEntry,
+    TrashVerificationBatch,
 };
-use iced::futures::channel::mpsc::Sender as IcedSender;
-use iced::futures::SinkExt;
 
-use crate::model::Message;
 use file_operations::FileOperationProgressUpdate;
 use file_operations::{
-    new_directory_name, new_file_name, QueuedFileOperation, QueuedTransfer, RunningFileOperation,
+    new_directory_name, new_file_name, DurableDirectMoveCommit, FileOperationEvent,
+    FileOperationEventSender, QueuedFileOperation, QueuedTransfer, RunningFileOperation,
 };
 use file_operations::{
     CompletedTransfer, FileOperationCompletion, FileOperationHistoryEligibility,
@@ -40,33 +38,7 @@ use self::step_pacer::QueuedStepPacer;
 use super::batch_rename_operation::{rename_failure_text, run_queued_batch_rename};
 use super::convert_operation::run_queued_convert;
 
-const FILE_OPERATION_CHANNEL_SIZE: usize = 32;
 const BYTE_PROGRESS_UI_INTERVAL: Duration = file_core::PROGRESS_REPORT_INTERVAL;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DurableDirectMoveCommit {
-    pub(crate) work_key: TransferWorkKey,
-    pub(crate) source: PathBuf,
-    pub(crate) target: PathBuf,
-    pub(crate) checkpoint_revision: u64,
-}
-
-#[cfg(test)]
-impl DurableDirectMoveCommit {
-    pub(crate) fn for_test(
-        work_key: TransferWorkKey,
-        source: PathBuf,
-        target: PathBuf,
-        checkpoint_revision: u64,
-    ) -> Self {
-        Self {
-            work_key,
-            source,
-            target,
-            checkpoint_revision,
-        }
-    }
-}
 
 fn should_send_byte_progress(last_sent_at: Option<Instant>, now: Instant) -> bool {
     match last_sent_at {
@@ -75,45 +47,21 @@ fn should_send_byte_progress(last_sent_at: Option<Instant>, now: Instant) -> boo
     }
 }
 
-/// 驱动者是 `Task::stream`:一次性托付给执行器跑到流结束,不进订阅 hash 名册,
-/// 不会被 subscription() 重评估静默回收。驱动者死亡由队列监督检测并换代重启,
-/// 见 `operation_queue::supervision`。
-pub(crate) fn file_operation_driver_task(task: RunningFileOperation) -> iced::Task<Message> {
-    iced::Task::stream(iced::stream::channel(
-        FILE_OPERATION_CHANNEL_SIZE,
-        async move |mut output| {
-            let RunningFileOperation {
-                id: task_id,
-                stored_id,
-                operation,
-                controls,
-                store,
-                generation,
-            } = task;
-            let result = run_queued_file_operation(
-                operation,
-                controls,
-                store,
-                stored_id,
-                task_id,
-                &mut output,
-            )
-            .await;
-            let _ = output
-                .send(Message::FileOperationFinished(task_id, generation, result))
-                .await;
-        },
-    ))
-}
-
-async fn run_queued_file_operation(
-    operation: QueuedFileOperation,
-    controls: FileOperationControls,
-    store: Option<TaskQueueStore>,
-    stored_task_id: Option<u64>,
-    task_id: u64,
-    output: &mut IcedSender<Message>,
+/// 跑完一个任务,进度类事件经 `events` 汇报,终态作为返回值交回。
+/// `events` 在返回时随之关闭,接收方据此知道事件已发完。
+pub(crate) async fn run_file_operation(
+    task: RunningFileOperation,
+    events: FileOperationEventSender,
 ) -> FileOperationCompletion {
+    let RunningFileOperation {
+        id: task_id,
+        stored_id: stored_task_id,
+        operation,
+        controls,
+        store,
+        generation: _,
+    } = task;
+    let output = &events;
     let result = match operation {
         QueuedFileOperation::Rename { path, new_name } => {
             return run_queued_rename(path, new_name, controls, task_id, output).await;
@@ -297,7 +245,7 @@ async fn run_queued_extract_archive(
     request: ArchiveExtractionRequest,
     controls: FileOperationControls,
     task_id: u64,
-    output: &mut IcedSender<Message>,
+    output: &FileOperationEventSender,
 ) -> Result<FileOperationOutcome, String> {
     send_file_operation_progress(output, task_id, FileOperationProgressUpdate::Indeterminate).await;
     let (progress_sender, mut progress_receiver) = tokio::sync::watch::channel(None);
@@ -351,7 +299,7 @@ async fn run_queued_create_archive(
     password: Option<file_core::ArchivePassword>,
     controls: FileOperationControls,
     task_id: u64,
-    output: &mut IcedSender<Message>,
+    output: &FileOperationEventSender,
 ) -> Result<FileOperationOutcome, String> {
     send_file_operation_progress(output, task_id, FileOperationProgressUpdate::Indeterminate).await;
 
@@ -411,7 +359,7 @@ async fn run_queued_rename(
     new_name: OsString,
     mut controls: FileOperationControls,
     task_id: u64,
-    output: &mut IcedSender<Message>,
+    output: &FileOperationEventSender,
 ) -> FileOperationCompletion {
     send_file_operation_progress(output, task_id, FileOperationProgressUpdate::Indeterminate).await;
     if let Err(error) = controls.wait_until_running().await {
@@ -452,7 +400,7 @@ async fn run_queued_create_directory(
     parent: PathBuf,
     mut controls: FileOperationControls,
     task_id: u64,
-    output: &mut IcedSender<Message>,
+    output: &FileOperationEventSender,
 ) -> Result<FileOperationOutcome, String> {
     controls
         .wait_until_running()
@@ -478,7 +426,7 @@ async fn run_queued_create_empty_file(
     parent: PathBuf,
     mut controls: FileOperationControls,
     task_id: u64,
-    output: &mut IcedSender<Message>,
+    output: &FileOperationEventSender,
 ) -> Result<FileOperationOutcome, String> {
     controls
         .wait_until_running()
@@ -503,7 +451,7 @@ async fn run_queued_create_symbolic_links(
     links: Vec<file_operations::SymbolicLinkCreation>,
     mut controls: FileOperationControls,
     task_id: u64,
-    output: &mut IcedSender<Message>,
+    output: &FileOperationEventSender,
 ) -> Result<FileOperationOutcome, String> {
     let requests = links
         .into_iter()
@@ -525,7 +473,7 @@ async fn run_queued_trash(
     paths: Vec<PathBuf>,
     mut controls: FileOperationControls,
     task_id: u64,
-    output: &mut IcedSender<Message>,
+    output: &FileOperationEventSender,
 ) -> FileOperationCompletion {
     let total = paths.len();
     let mut entries = Vec::new();
@@ -579,7 +527,7 @@ async fn run_queued_restore(
     entries: Vec<TrashRestoreEntry>,
     mut controls: FileOperationControls,
     task_id: u64,
-    output: &mut IcedSender<Message>,
+    output: &FileOperationEventSender,
 ) -> Result<FileOperationOutcome, String> {
     let total = entries.len();
     let mut restored_paths = Vec::with_capacity(total);
@@ -614,7 +562,7 @@ async fn run_queued_delete_trash_entries(
     entries: Vec<TrashRestoreEntry>,
     mut controls: FileOperationControls,
     task_id: u64,
-    output: &mut IcedSender<Message>,
+    output: &FileOperationEventSender,
 ) -> Result<FileOperationOutcome, String> {
     let total = entries.len();
     let batch = TrashVerificationBatch::new();
@@ -644,7 +592,7 @@ async fn run_queued_delete_permanently(
     paths: Vec<PathBuf>,
     mut controls: FileOperationControls,
     task_id: u64,
-    output: &mut IcedSender<Message>,
+    output: &FileOperationEventSender,
 ) -> Result<FileOperationOutcome, String> {
     let total = paths.len();
     for (index, path) in paths.into_iter().enumerate() {
@@ -671,7 +619,7 @@ async fn run_queued_delete_permanently(
 async fn run_queued_empty_trash(
     mut controls: FileOperationControls,
     task_id: u64,
-    output: &mut IcedSender<Message>,
+    output: &FileOperationEventSender,
 ) -> Result<FileOperationOutcome, String> {
     send_file_operation_progress(output, task_id, FileOperationProgressUpdate::Indeterminate).await;
     controls

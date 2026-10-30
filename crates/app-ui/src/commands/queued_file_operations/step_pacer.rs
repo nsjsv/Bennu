@@ -1,23 +1,21 @@
 use std::future::Future;
 
 use file_core::{EntryStepPacer, FileError, FileOperationControls};
-use iced::futures::channel::mpsc::Sender as IcedSender;
 
 use super::send_file_operation_progress;
-use crate::model::Message;
-use file_operations::FileOperationProgressUpdate;
+use file_operations::{FileOperationEventSender, FileOperationProgressUpdate};
 
 /// file-core 多条目操作的每一步前等任务暂停结束、遇取消报错；每一步后把条目进度发给任务行。
 pub(super) struct QueuedStepPacer<'a> {
     controls: &'a mut FileOperationControls,
-    output: &'a mut IcedSender<Message>,
+    output: &'a FileOperationEventSender,
     task_id: u64,
 }
 
 impl<'a> QueuedStepPacer<'a> {
     pub(super) fn new(
         controls: &'a mut FileOperationControls,
-        output: &'a mut IcedSender<Message>,
+        output: &'a FileOperationEventSender,
         task_id: u64,
     ) -> Self {
         Self {

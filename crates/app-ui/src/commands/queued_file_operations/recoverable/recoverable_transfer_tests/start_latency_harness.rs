@@ -1,19 +1,17 @@
 use super::*;
 
-use crate::model::Message;
 use bennu_state::TaskQueueStore;
 use file_operations::{
     execute_file_operation_persistence, FileOperationEnqueueOutcome, FileOperationQueue,
     QueuedFileOperation, QueuedTransfer,
 };
-use iced::futures::channel::mpsc;
-use iced::futures::StreamExt;
 use rusqlite::Connection;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tokio::sync::mpsc;
 
 const CORPUS_SIZE: usize = 256 * 1024 * 1024;
 const WRITER_LOCK: Duration = Duration::from_millis(250);
@@ -244,14 +242,14 @@ async fn run_real_directory_move_batch_trace(
         }
     });
 
-    let (mut output, _messages) = mpsc::channel(32);
+    let (output, _messages) = mpsc::channel(32);
     let runner_started = Instant::now();
     let completion = run_queued_transfers(
         transfers.clone(),
         running.controls,
         stored_task_id,
         running.id,
-        &mut output,
+        &output,
         running.store,
         QueuedTransferMode::Move,
         FileOperationVerification::BasicMetadata,
@@ -383,7 +381,7 @@ async fn run_scenario(
     let task_id = running.id;
     let controls = running.controls;
     let store = running.store;
-    let (mut output, mut messages) = mpsc::channel(32);
+    let (output, mut messages) = mpsc::channel(32);
     let first_side_effect = Arc::new(Mutex::new(None));
     let observed_side_effect = Arc::clone(&first_side_effect);
     let observed_source = source.clone();
@@ -448,7 +446,7 @@ async fn run_scenario(
             controls,
             stored_task_id,
             task_id,
-            &mut output,
+            &output,
             store,
             operation.queued_mode(),
             verification.value,
@@ -456,9 +454,8 @@ async fn run_scenario(
         .await
     });
     let mut first_progress = None;
-    while let Some(message) = messages.next().await {
-        if matches!(message, Message::FileOperationProgressed(_, _, _)) && first_progress.is_none()
-        {
+    while let Some(event) = messages.recv().await {
+        if matches!(event, FileOperationEvent::Progressed { .. }) && first_progress.is_none() {
             first_progress = Some(Instant::now());
         }
     }
@@ -594,14 +591,14 @@ async fn run_move_batch_visibility_scenario(scenario_root: &Path) {
         }
     });
 
-    let (mut output, _messages) = mpsc::channel(32);
+    let (output, _messages) = mpsc::channel(32);
     let runner_started = Instant::now();
     let completion = run_queued_transfers(
         transfers.clone(),
         running.controls,
         stored_task_id,
         task_id,
-        &mut output,
+        &output,
         running.store,
         QueuedTransferMode::Move,
         FileOperationVerification::BasicMetadata,

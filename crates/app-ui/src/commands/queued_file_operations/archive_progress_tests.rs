@@ -1,17 +1,21 @@
-use iced::futures::StreamExt;
 use tokio_util::sync::CancellationToken;
 
 use super::*;
 
 async fn collected_progress_updates(
-    receiver: &mut iced::futures::channel::mpsc::Receiver<Message>,
+    receiver: &mut tokio::sync::mpsc::Receiver<FileOperationEvent>,
     task_id: u64,
 ) -> Vec<FileOperationProgressUpdate> {
     let mut updates = Vec::new();
-    while let Some(message) = receiver.next().await {
-        if let Message::FileOperationProgressed(id, progress, _) = message {
+    while let Some(event) = receiver.recv().await {
+        if let FileOperationEvent::Progressed {
+            task_id: id,
+            update,
+            ..
+        } = event
+        {
             assert_eq!(id, task_id);
-            updates.push(progress);
+            updates.push(update);
         }
     }
     updates
@@ -25,7 +29,7 @@ async fn queued_zip_creation_emits_real_source_byte_progress() {
     tokio::fs::write(&small, vec![1_u8; 10]).await.unwrap();
     tokio::fs::write(&large, vec![2_u8; 990]).await.unwrap();
     let task_id = 81;
-    let (mut output, mut messages) = iced::futures::channel::mpsc::channel(32);
+    let (output, mut messages) = tokio::sync::mpsc::channel(32);
 
     let outcome = run_queued_create_archive(
         vec![small, large],
@@ -35,7 +39,7 @@ async fn queued_zip_creation_emits_real_source_byte_progress() {
         None,
         FileOperationControls::running(CancellationToken::new()),
         task_id,
-        &mut output,
+        &output,
     )
     .await;
     drop(output);
@@ -109,13 +113,13 @@ async fn queued_zip_extraction_emits_bytes_but_tar_gz_remains_indeterminate() {
             password: None,
         };
         let task_id = 90 + index as u64;
-        let (mut output, mut messages) = iced::futures::channel::mpsc::channel(32);
+        let (output, mut messages) = tokio::sync::mpsc::channel(32);
 
         let outcome = run_queued_extract_archive(
             request,
             FileOperationControls::running(CancellationToken::new()),
             task_id,
-            &mut output,
+            &output,
         )
         .await;
         drop(output);

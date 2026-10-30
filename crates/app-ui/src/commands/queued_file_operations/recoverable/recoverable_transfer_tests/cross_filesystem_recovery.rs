@@ -110,13 +110,13 @@ async fn sqlite_cross_filesystem_move_resumes_from_identified_retirement_artifac
         .set_store_and_restore(store.clone())
         .is_none());
     let restored_running = restored_queue.active_subscription().unwrap();
-    let (mut output, _messages) = iced::futures::channel::mpsc::channel(32);
+    let (output, _messages) = tokio::sync::mpsc::channel(32);
     let completion = run_queued_transfers(
         transfers,
         restored_running.controls,
         restored_running.stored_id.unwrap(),
         task_id,
-        &mut output,
+        &output,
         restored_running.store,
         QueuedTransferMode::Move,
         FileOperationVerification::Strong,

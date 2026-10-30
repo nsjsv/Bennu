@@ -61,14 +61,14 @@ async fn cancellation_before_manifest_preparation_terminalizes_every_record() {
     let stored_task_id = running.stored_id.unwrap();
     queue.cancel(task_id);
     assert_persisted(&mut queue);
-    let (mut output, _messages) = iced::futures::channel::mpsc::channel(64);
+    let (output, _messages) = tokio::sync::mpsc::channel(64);
 
     let completion = run_queued_transfers(
         transfers.clone(),
         running.controls,
         running.stored_id.unwrap(),
         task_id,
-        &mut output,
+        &output,
         running.store,
         QueuedTransferMode::Copy,
         FileOperationVerification::BasicMetadata,
@@ -144,14 +144,14 @@ async fn cancellation_after_direct_move_intents_terminalizes_every_record() {
     );
     queue.cancel(task_id);
     assert_persisted(&mut queue);
-    let (mut output, _messages) = iced::futures::channel::mpsc::channel(64);
+    let (output, _messages) = tokio::sync::mpsc::channel(64);
 
     let completion = run_queued_transfers(
         transfers.clone(),
         running.controls,
         running.stored_id.unwrap(),
         task_id,
-        &mut output,
+        &output,
         running.store,
         QueuedTransferMode::Move,
         FileOperationVerification::BasicMetadata,

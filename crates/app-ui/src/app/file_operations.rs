@@ -107,7 +107,7 @@ impl FileBrowser {
     pub(super) fn accept_file_operation_direct_moves_committed(
         &mut self,
         task_id: u64,
-        commits: Vec<crate::commands::DurableDirectMoveCommit>,
+        commits: Vec<file_operations::DurableDirectMoveCommit>,
     ) -> Task<Message> {
         let mut migrations = Vec::with_capacity(commits.len());
         for commit in commits {

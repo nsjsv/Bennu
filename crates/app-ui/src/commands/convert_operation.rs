@@ -1,18 +1,16 @@
 use std::path::Path;
 
 use file_core::{convert_file_with_controls, ConversionRequest, FileError, FileOperationControls};
-use iced::futures::channel::mpsc::Sender as IcedSender;
-use iced::futures::SinkExt;
 
-use crate::model::Message;
-use file_operations::FileOperationOutcome;
-use file_operations::FileOperationProgressUpdate;
+use file_operations::{
+    FileOperationEvent, FileOperationEventSender, FileOperationOutcome, FileOperationProgressUpdate,
+};
 
 pub(super) async fn run_queued_convert(
     requests: Vec<ConversionRequest>,
     mut controls: FileOperationControls,
     task_id: u64,
-    output: &mut IcedSender<Message>,
+    output: &FileOperationEventSender,
 ) -> Result<FileOperationOutcome, String> {
     controls
         .wait_until_running()
@@ -58,16 +56,16 @@ fn source_display(path: &Path) -> String {
 }
 
 async fn send_convert_progress(
-    output: &mut IcedSender<Message>,
+    output: &FileOperationEventSender,
     task_id: u64,
     completed: usize,
     total: usize,
 ) {
     let _ = output
-        .send(Message::FileOperationProgressed(
+        .send(FileOperationEvent::Progressed {
             task_id,
-            FileOperationProgressUpdate::IndeterminateItems { completed, total },
-            Vec::new(),
-        ))
+            update: FileOperationProgressUpdate::IndeterminateItems { completed, total },
+            entries: Vec::new(),
+        })
         .await;
 }

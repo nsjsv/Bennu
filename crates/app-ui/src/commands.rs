@@ -54,6 +54,8 @@ mod directory_loading;
 pub(crate) use directory_loading::{load_directory_command, load_expanded_directory_command};
 mod directory_metadata;
 pub(crate) use directory_metadata::load_directory_metadata_command;
+mod file_operation_driver;
+pub(crate) use file_operation_driver::file_operation_driver_task;
 mod file_operation_persistence;
 pub(crate) use file_operation_persistence::file_operation_persistence_command;
 mod desktop_notifications;
@@ -78,7 +80,6 @@ pub(crate) use properties::{
     set_file_properties_permissions_command, FilePropertiesPermissionTargets,
 };
 mod queued_file_operations;
-pub(crate) use queued_file_operations::{file_operation_driver_task, DurableDirectMoveCommit};
 mod search;
 pub(crate) use search::{
     directory_fallback_search_command, search_command, search_with_scope_root_check_command,

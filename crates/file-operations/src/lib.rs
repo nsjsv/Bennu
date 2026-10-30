@@ -5,10 +5,15 @@
 #[macro_use]
 extern crate bennu_localization;
 
+mod events;
 mod outcome;
 mod progress;
 mod queue;
 
+pub use events::{
+    DurableDirectMoveCommit, FileOperationEvent, FileOperationEventSender,
+    FILE_OPERATION_EVENT_CAPACITY,
+};
 pub use outcome::{
     completed_migrations_cross_directory_tree_boundary,
     completed_migrations_have_source_in_directory_tree, completed_migrations_leave_directory_tree,

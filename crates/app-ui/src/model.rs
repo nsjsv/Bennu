@@ -377,7 +377,7 @@ pub(crate) enum Message {
     ),
     FileOperationDirectMovesCommitted {
         task_id: u64,
-        commits: Vec<crate::commands::DurableDirectMoveCommit>,
+        commits: Vec<file_operations::DurableDirectMoveCommit>,
     },
     FileOperationMovesRenamed {
         task_id: u64,

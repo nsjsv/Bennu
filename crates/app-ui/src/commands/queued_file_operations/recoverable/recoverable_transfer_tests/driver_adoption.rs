@@ -72,13 +72,13 @@ async fn supervision_adopts_a_foreign_nonterminal_task_with_a_free_lease() {
     let launch = survivor.poll_driver_launch().unwrap();
     assert_eq!(launch.id, stored_task_id);
     assert_eq!(launch.generation, 0);
-    let (mut output, _messages) = iced::futures::channel::mpsc::channel(32);
+    let (output, _messages) = tokio::sync::mpsc::channel(32);
     let completion = run_queued_transfers(
         transfers,
         launch.controls,
         launch.stored_id.unwrap(),
         stored_task_id,
-        &mut output,
+        &output,
         launch.store,
         QueuedTransferMode::Move,
         FileOperationVerification::BasicMetadata,

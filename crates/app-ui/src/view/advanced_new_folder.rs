@@ -18,7 +18,7 @@ use crate::model::{
     AdvancedNewFolderMode, AdvancedNewFolderState, Message, PlannedFolder, PlannedFolderStatus,
     ScrollbarVisibility,
 };
-use crate::typography::{localized_text, readable_text};
+use crate::typography::readable_text;
 
 use super::option_controls::{secondary_action_button, segmented_choice_row, SegmentedChoice};
 
@@ -32,7 +32,7 @@ pub(super) fn advanced_new_folder_panel(state: &AdvancedNewFolderState) -> Eleme
 
     let mode_row = segmented_choice_row(vec![
         SegmentedChoice {
-            label: "Name list",
+            label: tr!("Name list"),
             selected: state.mode == AdvancedNewFolderMode::NameList,
             message: Message::AdvancedNewFolder(AdvancedNewFolderMessage::ModeSelected(
                 AdvancedNewFolderMode::NameList,
@@ -40,7 +40,7 @@ pub(super) fn advanced_new_folder_panel(state: &AdvancedNewFolderState) -> Eleme
             tooltip: None,
         },
         SegmentedChoice {
-            label: "Numbered",
+            label: tr!("Numbered"),
             selected: state.mode == AdvancedNewFolderMode::Numbered,
             message: Message::AdvancedNewFolder(AdvancedNewFolderMessage::ModeSelected(
                 AdvancedNewFolderMode::Numbered,
@@ -62,13 +62,13 @@ pub(super) fn advanced_new_folder_panel(state: &AdvancedNewFolderState) -> Eleme
         .style(name_editor_frame_style)
         .into(),
         AdvancedNewFolderMode::Numbered => row![
-            number_input_column("Prefix", &state.prefix, |prefix| {
+            number_input_column(tr!("Prefix"), &state.prefix, |prefix| {
                 Message::AdvancedNewFolder(AdvancedNewFolderMessage::PrefixChanged(prefix))
             }),
-            number_input_column("Start", &state.start_number, |start| {
+            number_input_column(tr!("Start"), &state.start_number, |start| {
                 Message::AdvancedNewFolder(AdvancedNewFolderMessage::StartNumberChanged(start))
             }),
-            number_input_column("Count", &state.count, |count| {
+            number_input_column(tr!("Count"), &state.count, |count| {
                 Message::AdvancedNewFolder(AdvancedNewFolderMessage::CountChanged(count))
             }),
         ]
@@ -84,7 +84,7 @@ pub(super) fn advanced_new_folder_panel(state: &AdvancedNewFolderState) -> Eleme
                 checkbox(state.gather).on_toggle(|gather| {
                     Message::AdvancedNewFolder(AdvancedNewFolderMessage::GatherToggled(gather))
                 }),
-                readable_text("Move selected items into the first folder").size(12),
+                readable_text(tr!("Move selected items into the first folder")).size(12),
             ]
             .spacing(8)
             .align_y(Alignment::Center)
@@ -93,7 +93,7 @@ pub(super) fn advanced_new_folder_panel(state: &AdvancedNewFolderState) -> Eleme
     };
 
     let preview_rows: Element<'_, Message> = if planned.is_empty() {
-        readable_text("No folders to create").size(12).into()
+        readable_text(tr!("No folders to create")).size(12).into()
     } else {
         let mut rows = Column::new().spacing(2);
         for folder in &planned {
@@ -117,19 +117,19 @@ pub(super) fn advanced_new_folder_panel(state: &AdvancedNewFolderState) -> Eleme
     );
 
     let mut content_column = column![
-        localized_text("Advanced New Folder").size(16),
+        readable_text(tr!("Advanced New Folder")).size(16),
         mode_row,
         editor,
     ];
     if let Some(gather_row) = gather_row {
         content_column = content_column.push(gather_row);
     }
-    content_column = content_column.push(readable_text("Folders").size(12));
+    content_column = content_column.push(readable_text(tr!("Folders")).size(12));
     content_column = content_column.push(preview_rows);
     let action_row = row![
         Space::new().width(Length::Fill),
         secondary_action_button(
-            "Cancel",
+            tr!("Cancel"),
             Message::AdvancedNewFolder(AdvancedNewFolderMessage::Cancel),
         ),
         apply,
@@ -154,14 +154,13 @@ pub(super) fn advanced_new_folder_panel(state: &AdvancedNewFolderState) -> Eleme
 }
 
 fn number_input_column<'a>(
-    label: &'static str,
+    label: String,
     value: &'a str,
     on_input: impl Fn(String) -> Message + 'a,
 ) -> Element<'a, Message> {
-    let translated = crate::localization::translate_current(label);
     column![
-        readable_text(label).size(11),
-        text_input(&translated, value)
+        readable_text(label.clone()).size(11),
+        text_input(&label, value)
             .on_input(on_input)
             .padding([6, 8])
             .size(13)
@@ -194,7 +193,7 @@ fn create_split_button(
                 }
             })
     };
-    let primary_section = button(readable_text("Create").size(12))
+    let primary_section = button(readable_text(tr!("Create")).size(12))
         .padding(iced::Padding {
             top: 6.0,
             right: 4.0,
@@ -319,11 +318,11 @@ fn split_button_container_style(
 
 /// 收尾动作菜单:创建后进入 / 新标签进入。鼠标移出菜单即收起。
 /// 按翻译后文字估菜单宽度:全角≈字号、半角≈0.55 字号,加内边距余量。
-fn advanced_menu_width(labels: &[&str], font_size: f32, padding: f32) -> f32 {
+fn advanced_menu_width(labels: &[String], font_size: f32, padding: f32) -> f32 {
     let max_units = labels
         .iter()
         .map(|label| {
-            crate::localization::translate_current(label)
+            label
                 .chars()
                 .map(|ch| if ch.is_ascii() { 0.55 } else { 1.0 })
                 .sum::<f32>()
@@ -333,18 +332,19 @@ fn advanced_menu_width(labels: &[&str], font_size: f32, padding: f32) -> f32 {
 }
 
 fn after_create_menu(disabled: bool) -> Element<'static, Message> {
-    let labels = ["Enter after creation", "Open in new tab after creation"];
+    let choices = [
+        (tr!("Enter after creation"), AdvancedNewFolderAfter::Enter),
+        (
+            tr!("Open in new tab after creation"),
+            AdvancedNewFolderAfter::EnterInNewTab,
+        ),
+    ];
     // 容器宽 = 最长项文字宽:各项 Fill 后等宽,整行都是可点热区。
+    let labels = choices.clone().map(|(label, _)| label);
     let width = advanced_menu_width(&labels, 12.0, 44.0);
     let mut items = Column::new().spacing(2);
     if !disabled {
-        for (label, after) in [
-            ("Enter after creation", AdvancedNewFolderAfter::Enter),
-            (
-                "Open in new tab after creation",
-                AdvancedNewFolderAfter::EnterInNewTab,
-            ),
-        ] {
+        for (label, after) in choices {
             items = items.push(
                 button(readable_text(label).size(12))
                     .padding([5, 10])
@@ -385,7 +385,9 @@ fn planned_folder_row<'a>(folder: &PlannedFolder) -> Element<'a, Message> {
 fn planned_folder_reason<'a>(status: &PlannedFolderStatus) -> Option<Element<'a, Message>> {
     match status {
         PlannedFolderStatus::AsRequested => None,
-        PlannedFolderStatus::AutoRenamed => Some(readable_text("Auto-renamed").size(11).into()),
+        PlannedFolderStatus::AutoRenamed => {
+            Some(readable_text(tr!("Auto-renamed")).size(11).into())
+        }
         PlannedFolderStatus::InvalidName(reason) => Some(
             readable_text(invalid_entry_name_label(*reason))
                 .size(11)
@@ -393,7 +395,7 @@ fn planned_folder_reason<'a>(status: &PlannedFolderStatus) -> Option<Element<'a,
         ),
         PlannedFolderStatus::UnreadableParent(error) => Some(
             row![
-                readable_text("Cannot read the parent folder").size(11),
+                readable_text(tr!("Cannot read the parent folder")).size(11),
                 readable_text(error.clone()).size(11),
             ]
             .spacing(6)

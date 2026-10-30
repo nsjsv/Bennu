@@ -9,7 +9,7 @@ use crate::matugen_theme::ui_colors;
 use crate::model::{
     Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility, SettingsSubpage,
 };
-use crate::typography::{localized_text, readable_text};
+use crate::typography::readable_text;
 
 use super::auxiliary_window_layout::auxiliary_detail_scroller;
 use super::network_settings::preview_size_limit_rows;
@@ -38,7 +38,7 @@ pub(super) fn preview_extension_rows(browser: &FileBrowser) -> Element<'_, Messa
 
 /// Files 分类里的预览设置入口：一行导航条，点击进入预览二级页面。
 pub(super) fn preview_settings_entry_card() -> Element<'static, Message> {
-    let open = navigation_setting_row("Preview settings")
+    let open = navigation_setting_row(tr!("Preview settings"))
         .on_press(Message::SettingsSubpageOpened(SettingsSubpage::Preview));
     settings_card(vec![open.into()])
 }
@@ -52,7 +52,7 @@ pub(super) fn preview_settings_subpage_detail(
     let back = button(
         row![
             themed_icon(IconSymbol::ArrowLeft, IconTone::Normal, 13.0),
-            readable_text("Back").size(12),
+            readable_text(tr!("Back")).size(12),
         ]
         .spacing(6)
         .align_y(Alignment::Center),
@@ -85,13 +85,13 @@ fn preview_extension_row(
     kind: config::PreviewFileSizeKind,
 ) -> Element<'_, Message> {
     let label = match kind {
-        config::PreviewFileSizeKind::Text => "Text Preview Extensions",
-        config::PreviewFileSizeKind::Image => "Image Preview Extensions",
-        config::PreviewFileSizeKind::Video => "Video Preview Extensions",
-        config::PreviewFileSizeKind::Audio => "Audio Preview Extensions",
-        config::PreviewFileSizeKind::Archive => "Archive Preview Extensions",
-        config::PreviewFileSizeKind::Document => "Document Preview Extensions",
-        config::PreviewFileSizeKind::Sqlite => "SQLite Preview Extensions",
+        config::PreviewFileSizeKind::Text => tr!("Text Preview Extensions"),
+        config::PreviewFileSizeKind::Image => tr!("Image Preview Extensions"),
+        config::PreviewFileSizeKind::Video => tr!("Video Preview Extensions"),
+        config::PreviewFileSizeKind::Audio => tr!("Audio Preview Extensions"),
+        config::PreviewFileSizeKind::Archive => tr!("Archive Preview Extensions"),
+        config::PreviewFileSizeKind::Document => tr!("Document Preview Extensions"),
+        config::PreviewFileSizeKind::Sqlite => tr!("SQLite Preview Extensions"),
     };
     let expanded = browser.preview_extension_expanded[kind_index];
     let extensions = browser.user_config().preview_extension_rules.list(kind);
@@ -104,7 +104,7 @@ fn preview_extension_row(
         let toggle = button(
             row![
                 rotated_chevron_right_view(90.0, 13.0).style(icon_tone_style(IconTone::Normal)),
-                readable_text(label).size(12),
+                readable_text(label.clone()).size(12),
             ]
             .spacing(6)
             .align_y(Alignment::Center),
@@ -116,11 +116,11 @@ fn preview_extension_row(
         // 重置原地二次确认：第一次进入待确认态，第二次真正恢复默认；
         // 折叠该行或改点其他类型即撤销。
         let reset = if browser.preview_extension_reset_confirmation == Some(kind_index) {
-            button(container(localized_text("Click Again to Reset").size(12)).padding([6, 10]))
+            button(container(readable_text(tr!("Click Again to Reset")).size(12)).padding([6, 10]))
                 .on_press(Message::PreviewExtensionResetConfirmed(kind_index))
                 .style(destructive_confirmation_button_style())
         } else {
-            button(container(readable_text("Reset").size(12)).padding([6, 10]))
+            button(container(readable_text(tr!("Reset")).size(12)).padding([6, 10]))
                 .on_press(Message::PreviewExtensionResetRequested(kind_index))
                 .style(context_menu_button_style())
         };
@@ -131,7 +131,7 @@ fn preview_extension_row(
             .padding([6, 8])
             .size(12)
             .width(Length::Fixed(110.0));
-        let add = button(container(readable_text("Add").size(12)).padding([6, 10]))
+        let add = button(container(readable_text(tr!("Add")).size(12)).padding([6, 10]))
             .on_press(Message::PreviewExtensionInputCommitted(kind_index))
             .style(context_menu_button_style());
         header = header.push(input).push(add);
@@ -165,7 +165,7 @@ fn preview_extension_row(
         );
     }
     if let Some(error) = &browser.preview_extension_input_errors[kind_index] {
-        content = content.push(localized_text(error).size(11).width(Length::Fill));
+        content = content.push(readable_text(error.clone()).size(11).width(Length::Fill));
     }
 
     info_setting_row(content.into())
@@ -209,7 +209,7 @@ fn chip_remove_button_style() -> impl Fn(&Theme, button::Status) -> button::Styl
 
 /// 折叠行的只读标签：仅预览，不带删除。
 fn extension_chip(extension: &str) -> Element<'static, Message> {
-    container(readable_text(extension).size(11))
+    container(readable_text(extension.to_owned()).size(11))
         .padding([2, 6])
         .style(chip_container_style)
         .into()
@@ -217,7 +217,7 @@ fn extension_chip(extension: &str) -> Element<'static, Message> {
 
 /// 展开区的标签：带删除按钮，可单个移除。
 fn removable_extension_chip(kind_index: usize, extension: &str) -> Element<'_, Message> {
-    let remove = button(readable_text("×").size(11))
+    let remove = button(readable_text("×".to_owned()).size(11))
         .padding([2, 6])
         .style(chip_remove_button_style())
         .on_press(Message::PreviewExtensionRemoved(
@@ -225,7 +225,7 @@ fn removable_extension_chip(kind_index: usize, extension: &str) -> Element<'_, M
             extension.to_owned(),
         ));
     container(
-        row![readable_text(extension).size(11), remove]
+        row![readable_text(extension.to_owned()).size(11), remove]
             .spacing(2)
             .align_y(Alignment::Center),
     )

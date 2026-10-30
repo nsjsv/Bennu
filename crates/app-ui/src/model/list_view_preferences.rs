@@ -29,17 +29,17 @@ impl ListColumnKind {
         Self::Created,
     ];
 
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::Name => "Name",
-            Self::Modified => "Modified Time",
-            Self::Size => "Size",
-            Self::Kind => "Kind",
-            Self::Owner => "Owner",
-            Self::Group => "Group",
-            Self::Permissions => "Permissions",
-            Self::Accessed => "Accessed Time",
-            Self::Created => "Created Time",
+            Self::Name => tr!("Name"),
+            Self::Modified => tr!("Modified Time"),
+            Self::Size => tr!("Size"),
+            Self::Kind => tr!("Kind"),
+            Self::Owner => tr!("Owner"),
+            Self::Group => tr!("Group"),
+            Self::Permissions => tr!("Permissions"),
+            Self::Accessed => tr!("Accessed Time"),
+            Self::Created => tr!("Created Time"),
         }
     }
 

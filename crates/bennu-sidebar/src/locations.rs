@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use bennu_localization::tr;
 use bennu_theme::icons::IconSymbol;
 use desktop_linux::parse_file_uri_list;
 
@@ -23,6 +24,23 @@ pub enum SidebarLocationKind {
     Music,
     Videos,
     Bookmark,
+}
+
+impl SidebarLocation {
+    /// 主目录和 XDG 用户目录显示系统名字（同 GNOME），书签显示它自己的名字。
+    /// `label` 只是书签名，不拿来当文案查。
+    pub fn display_label(&self) -> String {
+        match self.kind {
+            SidebarLocationKind::Home => tr!("Home"),
+            SidebarLocationKind::Desktop => tr!("Desktop"),
+            SidebarLocationKind::Documents => tr!("Documents"),
+            SidebarLocationKind::Downloads => tr!("Downloads"),
+            SidebarLocationKind::Pictures => tr!("Pictures"),
+            SidebarLocationKind::Music => tr!("Music"),
+            SidebarLocationKind::Videos => tr!("Videos"),
+            SidebarLocationKind::Bookmark => self.label.clone(),
+        }
+    }
 }
 
 impl SidebarLocationKind {

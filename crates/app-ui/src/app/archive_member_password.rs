@@ -70,7 +70,7 @@ impl ArchiveMemberPasswordState {
         Self {
             action,
             password: ArchivePasswordDraft::new(String::new()),
-            validation_error: invalid_retry.then(|| "Incorrect password. Try again.".to_owned()),
+            validation_error: invalid_retry.then(|| tr!("Incorrect password. Try again.")),
             phase: ArchiveMemberPasswordPhase::WaitingForPassword,
         }
     }
@@ -165,7 +165,7 @@ impl FileBrowser {
             return Task::none();
         }
         let Some(password) = state.archive_password() else {
-            state.wait_for_password(Some("Enter the archive password.".to_owned()));
+            state.wait_for_password(Some(tr!("Enter the archive password.")));
             return Task::none();
         };
 
@@ -221,7 +221,7 @@ impl FileBrowser {
                 Task::none()
             }
             ArchiveMemberOpenOutcome::InvalidPassword => {
-                state.wait_for_password(Some("Incorrect password. Try again.".to_owned()));
+                state.wait_for_password(Some(tr!("Incorrect password. Try again.")));
                 Task::none()
             }
             ArchiveMemberOpenOutcome::Failed(error) => {

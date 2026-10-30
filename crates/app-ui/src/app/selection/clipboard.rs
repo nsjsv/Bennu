@@ -14,9 +14,9 @@ use crate::commands::{
 };
 use crate::model::{
     BrowserViewMode, ContextMenuState, DestructiveActionConfirmation, FileDropPrompt, Message,
-    PendingOperation, TransferConflictMode, GATHERED_FOLDER_BASE_NAME,
+    PendingOperation, TransferConflictMode,
 };
-use crate::operation_queue::{QueuedFileOperation, QueuedTransfer};
+use crate::operation_queue::{new_directory_name, QueuedFileOperation, QueuedTransfer};
 
 impl FileBrowser {
     pub(in crate::app) fn copy_selected(&mut self) -> Task<Message> {
@@ -93,13 +93,14 @@ impl FileBrowser {
         self.cancel_file_drag_interaction();
         // 首选名被占用时执行端原子创建并续编号（新建文件夹 2、3…），这里不查磁盘。
         self.enqueue_file_operation(QueuedFileOperation::GatherSelectionIntoNewFolder {
-            directory: directory.join(GATHERED_FOLDER_BASE_NAME),
+            directory: directory.join(new_directory_name()),
             sources,
         })
     }
 
-    /// 副本传输：首选名 `名字副本(.扩展名)`，策略 `KeepBoth`——首选名被占用时
-    /// 由复制引擎续编号（`名字副本 2`），界面不查磁盘。复制副本与同目录拖放副本共用。
+    /// 副本传输：首选名 `名字副本(.扩展名)`（英文界面 `名字 copy`，同访达），策略
+    /// `KeepBoth`——首选名被占用时由复制引擎续编号（`名字副本 2`），界面不查磁盘。
+    /// 复制副本与同目录拖放副本共用。
     pub(in crate::app) fn duplicate_transfer(
         &self,
         source: &Path,
@@ -108,7 +109,7 @@ impl FileBrowser {
         let name = source
             .file_name()
             .unwrap_or_else(|| std::ffi::OsStr::new("item"));
-        let preferred = entry_name_with_suffix(name, self.entry_name_kind(source), "副本");
+        let preferred = entry_name_with_suffix(name, self.entry_name_kind(source), &tr!(" copy"));
         QueuedTransfer {
             conflict_strategy: TransferConflictStrategy::KeepBoth,
             ..QueuedTransfer::new(source.to_path_buf(), parent.join(preferred))
@@ -168,10 +169,9 @@ impl FileBrowser {
                 Task::none()
             }
             (false, false) => {
-                self.show_global_error(
+                self.show_global_error(tr!(
                     "Delete local and remote items separately so local files can use Trash"
-                        .to_owned(),
-                );
+                ));
                 Task::none()
             }
             (true, true) => Task::none(),
@@ -348,9 +348,9 @@ impl FileBrowser {
             || self.file_drop_prompt.is_some()
             || self.transfer_conflict.is_some()
         {
-            self.show_global_error(
-                "Finish the current file operation prompt before dropping files".to_owned(),
-            );
+            self.show_global_error(tr!(
+                "Finish the current file operation prompt before dropping files"
+            ));
             return Task::none();
         }
         self.context_menu = None;

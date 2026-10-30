@@ -31,7 +31,7 @@ pub(super) fn submenu_top(row_index: usize) -> f32 {
 pub(super) fn group_trigger_row(
     anchor: FileAreaMenuItem,
     icon: IconSymbol,
-    label: &'static str,
+    label: String,
     on_press: Option<Message>,
 ) -> Element<'static, Message> {
     let mut button = button(menu_label_with_chevron(icon, label))
@@ -61,13 +61,13 @@ pub(super) fn group_submenu_panel(
         content = content
             .push(submenu_item(
                 IconSymbol::File,
-                "New File",
+                tr!("New File"),
                 Message::CreateEmptyFile(menu.paste_directory.clone()),
                 anchor,
             ))
             .push(submenu_item(
                 IconSymbol::Folder,
-                "New Folder",
+                tr!("New Folder"),
                 Message::CreateDirectory(menu.paste_directory.clone()),
                 anchor,
             ));
@@ -93,7 +93,7 @@ pub(super) fn group_submenu_panel(
 /// 单击无动作,与组锚点行同一交互。
 pub(super) fn file_grouping_trigger_row() -> Element<'static, Message> {
     mouse_area(
-        button(menu_label_with_chevron(IconSymbol::List, "Group By"))
+        button(menu_label_with_chevron(IconSymbol::List, tr!("Group By")))
             .width(Length::Fill)
             .height(Length::Fixed(CONTEXT_MENU_ITEM_HEIGHT))
             .style(context_menu_item_button_style()),
@@ -161,7 +161,7 @@ fn file_grouping_submenu_item(mode: FileGroupingMode, selected: bool) -> Element
 }
 
 /// 成员行的动作映射;成员只会是组表里声明的低频项,其余变体不可达。
-fn member_menu_action(member: FileAreaMenuItem) -> Option<(IconSymbol, &'static str, Message)> {
+fn member_menu_action(member: FileAreaMenuItem) -> Option<(IconSymbol, String, Message)> {
     let action = match member {
         FileAreaMenuItem::Duplicate => (member.icon(), member.label(), Message::DuplicateSelected),
         FileAreaMenuItem::CopyPath => (member.icon(), member.label(), Message::CopyPathSelected),
@@ -203,7 +203,7 @@ fn member_menu_action(member: FileAreaMenuItem) -> Option<(IconSymbol, &'static 
 /// 子菜单成员行:悬停保持本组展开。
 fn submenu_item(
     icon: IconSymbol,
-    label: &'static str,
+    label: String,
     message: Message,
     anchor: FileAreaMenuItem,
 ) -> Element<'static, Message> {
@@ -220,7 +220,7 @@ fn submenu_item(
     .into()
 }
 
-fn menu_label(icon: IconSymbol, label: &'static str) -> Row<'static, Message> {
+fn menu_label(icon: IconSymbol, label: String) -> Row<'static, Message> {
     row![
         themed_icon(icon, IconTone::Normal, MENU_ICON_SIZE),
         crate::typography::readable_text(label),
@@ -230,7 +230,7 @@ fn menu_label(icon: IconSymbol, label: &'static str) -> Row<'static, Message> {
     .width(Length::Fill)
 }
 
-fn menu_label_with_chevron(icon: IconSymbol, label: &'static str) -> Row<'static, Message> {
+fn menu_label_with_chevron(icon: IconSymbol, label: String) -> Row<'static, Message> {
     row![
         themed_icon(icon, IconTone::Normal, MENU_ICON_SIZE),
         crate::typography::readable_text(label).width(Length::Fill),

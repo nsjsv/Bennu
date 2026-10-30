@@ -194,7 +194,7 @@ impl FileBrowser {
     fn queue_search_path(&mut self, kind: SearchPathEntryKind, path: PathBuf) -> Task<Message> {
         if !path.is_absolute() {
             self.search_service.path_settings.failure =
-                Some("Search locations must be absolute paths".to_owned());
+                Some(tr!("Search locations must be absolute paths"));
             return Task::none();
         }
         let mut preferences = self.search_service.path_settings.draft.clone();

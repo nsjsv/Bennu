@@ -111,10 +111,10 @@ pub(crate) enum FilePropertiesCategory {
 impl FilePropertiesCategory {
     pub(crate) const ALL: [Self; 2] = [Self::Information, Self::Permissions];
 
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::Information => "File Information",
-            Self::Permissions => "Permissions",
+            Self::Information => tr!("File Information"),
+            Self::Permissions => tr!("Permissions"),
         }
     }
 }
@@ -314,11 +314,11 @@ pub(crate) enum FilePropertiesPermissionAccess {
 impl FilePropertiesPermissionAccess {
     pub(crate) const ALL: [Self; 3] = [Self::Read, Self::Write, Self::Execute];
 
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::Read => "Read",
-            Self::Write => "Write",
-            Self::Execute => "Execute",
+            Self::Read => tr!("Read"),
+            Self::Write => tr!("Write"),
+            Self::Execute => tr!("Execute"),
         }
     }
 

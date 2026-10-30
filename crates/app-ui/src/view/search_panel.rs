@@ -25,7 +25,7 @@ use crate::model::{
     Message, ScrollbarRegion, SearchDateField, SearchDatePreset, SearchDirectoryScope,
     SearchEntryTypePreset, SearchResultCompletion, SearchSizePreset, SEARCH_RESULT_TOTAL_LIMIT,
 };
-use crate::typography::{localized_text, readable_text};
+use crate::typography::readable_text;
 use crate::virtual_range::{initial_virtual_range, virtual_range_for_viewport};
 
 use super::option_controls::{
@@ -53,7 +53,7 @@ struct SearchDateFieldOption(SearchDateField);
 
 impl fmt::Display for SearchDateFieldOption {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&crate::localization::translate_current(self.0.label()))
+        formatter.write_str(&self.0.label())
     }
 }
 
@@ -62,7 +62,7 @@ struct SearchDatePresetOption(SearchDatePreset);
 
 impl fmt::Display for SearchDatePresetOption {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&crate::localization::translate_current(self.0.label()))
+        formatter.write_str(&self.0.label())
     }
 }
 
@@ -71,7 +71,7 @@ struct SearchSizePresetOption(SearchSizePreset);
 
 impl fmt::Display for SearchSizePresetOption {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&crate::localization::translate_current(self.0.label()))
+        formatter.write_str(&self.0.label())
     }
 }
 
@@ -116,17 +116,14 @@ pub(super) fn search_input_panel(browser: &FileBrowser) -> Element<'_, Message> 
         .as_ref()
         .map(|workspace| workspace.input.as_str())
         .unwrap_or_default();
-    let input = iced::widget::text_input(
-        &crate::localization::translate_current("Search"),
-        input_value,
-    )
-    .id(search_input_id())
-    .on_input(Message::SearchInputChanged)
-    .on_submit(Message::SearchSubmitted)
-    .padding([8, 10])
-    .size(15)
-    .style(navigation_text_input_style)
-    .width(Length::Fill);
+    let input = iced::widget::text_input(&tr!("Search"), input_value)
+        .id(search_input_id())
+        .on_input(Message::SearchInputChanged)
+        .on_submit(Message::SearchSubmitted)
+        .padding([8, 10])
+        .size(15)
+        .style(navigation_text_input_style)
+        .width(Length::Fill);
     let content = if input_value.is_empty() {
         row![input].spacing(4).align_y(Alignment::Center)
     } else {
@@ -137,7 +134,7 @@ pub(super) fn search_input_panel(browser: &FileBrowser) -> Element<'_, Message> 
                     .on_press(Message::SearchKeywordCleared)
                     .padding([8, 8])
                     .style(navigation_icon_button_style()),
-                tooltip_label("Clear search text"),
+                tooltip_label(tr!("Clear search text")),
                 tooltip::Position::Bottom,
             )
         ]
@@ -155,7 +152,7 @@ pub(super) fn search_input_panel(browser: &FileBrowser) -> Element<'_, Message> 
 fn search_history_panel(browser: &FileBrowser) -> Element<'_, Message> {
     let mut history = Column::new()
         .push(
-            container(localized_text("Recent searches").size(12))
+            container(readable_text(tr!("Recent searches")).size(12))
                 .padding([6, 8])
                 .width(Length::Fill),
         )
@@ -166,16 +163,11 @@ fn search_history_panel(browser: &FileBrowser) -> Element<'_, Message> {
         history = history.push(search_history_row(keyword));
     }
     history = history.push(
-        button(
-            readable_text(crate::localization::translate_current(
-                "Clear search history",
-            ))
-            .size(12),
-        )
-        .on_press(Message::SearchHistoryCleared)
-        .padding([6, 8])
-        .width(Length::Fill)
-        .style(transparent_button_style()),
+        button(readable_text(tr!("Clear search history")).size(12))
+            .on_press(Message::SearchHistoryCleared)
+            .padding([6, 8])
+            .width(Length::Fill)
+            .style(transparent_button_style()),
     );
 
     let region = ScrollbarRegion::SearchHistory;
@@ -224,7 +216,7 @@ fn search_history_row(keyword: &str) -> Element<'static, Message> {
             .on_press(Message::SearchHistoryKeywordRemoved(keyword.to_owned()))
             .padding([6, 7])
             .style(navigation_icon_button_style()),
-        tooltip_label("Remove from search history"),
+        tooltip_label(tr!("Remove from search history")),
         tooltip::Position::Bottom,
     );
 
@@ -240,7 +232,7 @@ fn search_history_row(keyword: &str) -> Element<'static, Message> {
 
 pub(super) fn search_results_view(browser: &FileBrowser) -> Element<'_, Message> {
     let Some(workspace) = browser.search_workspace.as_ref() else {
-        return container(readable_text("")).into();
+        return container(Space::new()).into();
     };
     let mut rows = Column::new().spacing(0).width(Length::Fill);
     let range = if workspace.window.viewport_height > 0.0 {
@@ -281,17 +273,17 @@ pub(super) fn search_results_view(browser: &FileBrowser) -> Element<'_, Message>
         rows = rows.push(search_message(failure.clone()));
     }
     if workspace.window.is_loading {
-        rows = rows.push(search_message("Searching..."));
+        rows = rows.push(search_message(tr!("Searching...")));
     } else if workspace.window.hits.is_empty() && workspace.window.failure.is_none() {
-        rows = rows.push(search_message("No search results"));
+        rows = rows.push(search_message(tr!("No search results")));
     }
     if !workspace.window.is_loading {
         if let Some(completion) = workspace.window.completion {
             rows = rows.push(search_completion_message(completion));
         }
         if workspace.window.truncated {
-            rows = rows.push(search_message(format!(
-                "Result limit reached ({}); the oldest results were dropped. Narrow the search to see more.",
+            rows = rows.push(search_message(tr!(
+                "Result limit reached (%1); the oldest results were dropped. Narrow the search to see more.",
                 SEARCH_RESULT_TOTAL_LIMIT
             )));
         }
@@ -347,10 +339,10 @@ fn search_workspace_toolbar(browser: &FileBrowser) -> Element<'_, Message> {
         .expect("search toolbar requires an active workspace");
     let root_label = if workspace.root.selected_scope() == SearchDirectoryScope::AllIndexedLocations
     {
-        "Search in all indexed locations".to_owned()
+        tr!("Search in all indexed locations")
     } else {
-        format!(
-            "Search in {}",
+        tr!(
+            "Search in %1",
             format_middle_ellipsized_text(&workspace.root.path().to_string_lossy(), 72)
         )
     };
@@ -390,13 +382,13 @@ fn search_workspace_toolbar_layout(
 ) -> Element<'static, Message> {
     let header = row![
         themed_icon(IconSymbol::Search, IconTone::Normal, 15.0),
-        localized_text(root_label).size(13).width(Length::Fill),
+        readable_text(root_label).size(13).width(Length::Fill),
         tooltip(
             button(themed_icon(IconSymbol::Close, IconTone::Normal, 13.0))
                 .on_press(Message::SearchWorkspaceClosed)
                 .padding([6, 8])
                 .style(navigation_icon_button_style()),
-            tooltip_label("Close search"),
+            tooltip_label(tr!("Close search")),
             tooltip::Position::Bottom,
         )
     ]
@@ -470,7 +462,7 @@ fn search_entry_type_button(
         } else {
             IconTone::Normal
         },
-        crate::localization::translate_current(entry_type.label()),
+        entry_type.label(),
         Message::SearchEntryTypeToggled(entry_type),
     )
     .width(Length::FillPortion(1))
@@ -487,7 +479,7 @@ fn custom_extension_button(filters: &SearchFilterPresetState) -> Element<'static
         } else {
             IconTone::Normal
         },
-        crate::localization::translate_current("Custom"),
+        tr!("Custom"),
         Message::SearchCustomExtensionsToggled,
     )
     .width(Length::FillPortion(1))
@@ -497,15 +489,12 @@ fn custom_extension_button(filters: &SearchFilterPresetState) -> Element<'static
 
 fn custom_extension_input_row(filters: &SearchFilterPresetState) -> Element<'static, Message> {
     container(
-        iced::widget::text_input(
-            &crate::localization::translate_current("e.g. pdf, docx"),
-            &filters.custom_extensions,
-        )
-        .on_input(Message::SearchCustomExtensionsChanged)
-        .padding([5, 8])
-        .size(12)
-        .style(navigation_text_input_style)
-        .width(Length::Fill),
+        iced::widget::text_input(&tr!("e.g. pdf, docx"), &filters.custom_extensions)
+            .on_input(Message::SearchCustomExtensionsChanged)
+            .padding([5, 8])
+            .size(12)
+            .style(navigation_text_input_style)
+            .width(Length::Fill),
     )
     .width(Length::Fill)
     .into()
@@ -640,13 +629,13 @@ fn search_text_scope_filter(filters: &SearchFilterPresetState) -> Element<'stati
     let name_only_selected = regex_mode || filters.text_scope == SearchTextScope::NameOnly;
     let choices = vec![
         SegmentedChoice {
-            label: "Name & content",
+            label: tr!("Name & content"),
             selected: name_content_selected,
             message: Message::SearchTextScopeSelected(SearchTextScope::NameAndContent),
             tooltip: None,
         },
         SegmentedChoice {
-            label: "Name only",
+            label: tr!("Name only"),
             selected: name_only_selected,
             message: Message::SearchTextScopeSelected(SearchTextScope::NameOnly),
             tooltip: None,
@@ -711,26 +700,20 @@ fn custom_size_input_is_expanded(filters: &SearchFilterPresetState) -> bool {
 fn custom_size_input_row(filters: &SearchFilterPresetState) -> Element<'static, Message> {
     container(
         row![
-            readable_text("Min size").size(12),
-            iced::widget::text_input(
-                &crate::localization::translate_current("e.g. 10MB"),
-                &filters.custom_size_min,
-            )
-            .on_input(Message::SearchCustomSizeMinChanged)
-            .padding([5, 8])
-            .size(12)
-            .style(navigation_text_input_style)
-            .width(Length::Fill),
-            readable_text("Max size").size(12),
-            iced::widget::text_input(
-                &crate::localization::translate_current("e.g. 2 GB"),
-                &filters.custom_size_max,
-            )
-            .on_input(Message::SearchCustomSizeMaxChanged)
-            .padding([5, 8])
-            .size(12)
-            .style(navigation_text_input_style)
-            .width(Length::Fill),
+            readable_text(tr!("Min size")).size(12),
+            iced::widget::text_input(&tr!("e.g. 10MB"), &filters.custom_size_min)
+                .on_input(Message::SearchCustomSizeMinChanged)
+                .padding([5, 8])
+                .size(12)
+                .style(navigation_text_input_style)
+                .width(Length::Fill),
+            readable_text(tr!("Max size")).size(12),
+            iced::widget::text_input(&tr!("e.g. 2 GB"), &filters.custom_size_max)
+                .on_input(Message::SearchCustomSizeMaxChanged)
+                .padding([5, 8])
+                .size(12)
+                .style(navigation_text_input_style)
+                .width(Length::Fill),
         ]
         .spacing(6)
         .align_y(Alignment::Center),
@@ -742,12 +725,9 @@ fn custom_size_input_row(filters: &SearchFilterPresetState) -> Element<'static, 
 fn search_filter_commands(filters: &SearchFilterPresetState) -> Element<'static, Message> {
     let selected_more_type_count = filters.selected_more_type_count();
     let more_label = if selected_more_type_count == 0 {
-        crate::localization::translate_current("More")
+        tr!("More")
     } else {
-        format!(
-            "{} ({selected_more_type_count})",
-            crate::localization::translate_current("More")
-        )
+        tr!("More (%1)", selected_more_type_count)
     };
     let regex_mode = filters.match_mode == SearchMatchMode::Regex;
     let mut commands = row![
@@ -758,7 +738,7 @@ fn search_filter_commands(filters: &SearchFilterPresetState) -> Element<'static,
             } else {
                 IconTone::Normal
             },
-            crate::localization::translate_current("Regex"),
+            tr!("Regex"),
             Message::SearchRegexToggled,
         )
         .style(segmented_choice_button_style(regex_mode)),
@@ -781,7 +761,7 @@ fn search_filter_commands(filters: &SearchFilterPresetState) -> Element<'static,
             search_filter_button(
                 IconSymbol::Close,
                 IconTone::Normal,
-                crate::localization::translate_current("Reset filters"),
+                tr!("Reset filters"),
                 Message::SearchFiltersReset,
             )
             .style(segmented_choice_button_style(false)),
@@ -808,12 +788,12 @@ fn search_filter_button(
 
 fn search_selection_actions(selected: Vec<std::path::PathBuf>) -> Element<'static, Message> {
     let mut actions = row![
-        search_action_button(IconSymbol::Copy, "Copy", Message::CopySelected),
-        search_action_button(IconSymbol::ArrowRight, "Cut", Message::MoveSelected),
-        search_action_button(IconSymbol::Trash, "Trash", Message::TrashSelected),
+        search_action_button(IconSymbol::Copy, tr!("Copy"), Message::CopySelected),
+        search_action_button(IconSymbol::ArrowRight, tr!("Cut"), Message::MoveSelected),
+        search_action_button(IconSymbol::Trash, tr!("Trash"), Message::TrashSelected),
         search_action_button(
             IconSymbol::TriangleAlert,
-            "Delete",
+            tr!("Delete"),
             Message::SearchDeletePermanentlySelected,
         ),
     ]
@@ -822,7 +802,7 @@ fn search_selection_actions(selected: Vec<std::path::PathBuf>) -> Element<'stati
     if let [path] = selected.as_slice() {
         actions = actions.push(search_action_button(
             IconSymbol::FolderOpen,
-            "Open folder",
+            tr!("Open folder"),
             Message::SearchOpenContainingDirectory(path.clone()),
         ));
     }
@@ -834,7 +814,7 @@ fn search_selection_actions(selected: Vec<std::path::PathBuf>) -> Element<'stati
 
 fn search_action_button(
     icon: IconSymbol,
-    label: &'static str,
+    label: String,
     message: Message,
 ) -> Element<'static, Message> {
     tooltip(
@@ -854,9 +834,11 @@ fn search_content_degraded_notice() -> Element<'static, Message> {
     container(
         row![
             themed_icon(IconSymbol::TriangleAlert, IconTone::Warning, 14.0),
-            localized_text("Content indexing is unavailable; matching file names only.")
-                .size(12)
-                .width(Length::Fill),
+            readable_text(tr!(
+                "Content indexing is unavailable; matching file names only."
+            ))
+            .size(12)
+            .width(Length::Fill),
         ]
         .spacing(8)
         .align_y(Alignment::Center),
@@ -868,7 +850,7 @@ fn search_content_degraded_notice() -> Element<'static, Message> {
 }
 fn search_regex_notice() -> Element<'static, Message> {
     container(
-        localized_text("Regex mode matches file names only.")
+        readable_text(tr!("Regex mode matches file names only."))
             .size(12)
             .width(Length::Fill),
     )
@@ -880,18 +862,17 @@ fn search_regex_notice() -> Element<'static, Message> {
 
 fn search_completion_message(completion: SearchResultCompletion) -> Element<'static, Message> {
     match completion {
-        SearchResultCompletion::Complete => container(readable_text("")).into(),
-        SearchResultCompletion::MoreAvailable => search_message("Scroll to load more results"),
-        SearchResultCompletion::Partial { inspected_entries } => search_message(format!(
-            "Partial results after inspecting {inspected_entries} entries"
+        SearchResultCompletion::Complete => container(Space::new()).into(),
+        SearchResultCompletion::MoreAvailable => search_message(tr!("Scroll to load more results")),
+        SearchResultCompletion::Partial { inspected_entries } => search_message(tr!(
+            "Partial results after inspecting %1 entries",
+            inspected_entries
         )),
     }
 }
 
-fn search_message(
-    message: impl crate::typography::ReadableTextContent,
-) -> Element<'static, Message> {
-    container(localized_text(message).size(14))
+fn search_message(message: String) -> Element<'static, Message> {
+    container(readable_text(message).size(14))
         .padding([14, 12])
         .width(Length::Fill)
         .style(list_row_style(0, 0))
@@ -955,8 +936,8 @@ fn search_result_row(
         .into()
 }
 
-fn tooltip_label(label: &'static str) -> Element<'static, Message> {
-    container(localized_text(label).size(11))
+fn tooltip_label(label: String) -> Element<'static, Message> {
+    container(readable_text(label).size(11))
         .padding([5, 7])
         .style(context_menu_style)
         .into()

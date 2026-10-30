@@ -30,7 +30,9 @@ const NOTICE_ICON_SIZE: f32 = 14.0;
 pub(super) fn convert_panel(state: &ConvertState) -> Element<'_, Message> {
     let title = row![
         themed_icon(IconSymbol::FileImage, IconTone::Normal, MENU_ICON_SIZE),
-        readable_text("Convert Format").size(16).width(Length::Fill),
+        readable_text(tr!("Convert Format"))
+            .size(16)
+            .width(Length::Fill),
     ]
     .spacing(8)
     .align_y(Alignment::Center);
@@ -53,9 +55,7 @@ pub(super) fn convert_panel(state: &ConvertState) -> Element<'_, Message> {
         content = content.push(notice);
     }
     if let Some(error) = state.validation_error() {
-        content = content.push(container(
-            readable_text(crate::localization::translate_current(error)).size(12),
-        ));
+        content = content.push(container(readable_text(error.to_owned()).size(12)));
     }
     content = content.push(actions(state));
 
@@ -80,13 +80,13 @@ fn image_section<'a>(
     })];
 
     if formats.is_empty() {
-        rows.push(info_setting_row(lossless_note_text(
-            "ffmpeg is missing; WebP and AVIF are unavailable.",
-        )));
+        rows.push(info_setting_row(note_text(tr!(
+            "ffmpeg is missing; WebP and AVIF are unavailable."
+        ))));
     } else if image_format_is_lossless(options.target_format()) {
-        rows.push(info_setting_row(lossless_note_text(
-            "This format is lossless; quality and target size do not apply.",
-        )));
+        rows.push(info_setting_row(note_text(tr!(
+            "This format is lossless; quality and target size do not apply."
+        ))));
     } else if options.target_format() == ImageTargetFormat::Gif {
         // GIF 调色板编码只有档位语义,没有质量/体积模式之分。
         rows.push(quality_preset_row(options.preset(), |preset| {
@@ -106,7 +106,7 @@ fn image_section<'a>(
     ));
 
     section(
-        "Images",
+        tr!("Images"),
         state.image_source_count(),
         IconSymbol::FileImage,
         rows,
@@ -127,9 +127,9 @@ fn video_section<'a>(
     })];
 
     if formats.is_empty() {
-        rows.push(info_setting_row(lossless_note_text(
-            "Install ffmpeg to convert videos.",
-        )));
+        rows.push(info_setting_row(note_text(tr!(
+            "Install ffmpeg to convert videos."
+        ))));
     } else if options.target_format() == VideoTargetFormat::Gif {
         // GIF 调色板编码只有档位语义,没有质量/体积模式之分。
         rows.push(quality_preset_row(options.preset(), |preset| {
@@ -153,13 +153,13 @@ fn video_section<'a>(
             Message::Convert(ConvertMessage::VideoCustomWidthToggled),
         ));
         rows.push(labeled_setting_row(
-            "Frame rate",
+            tr!("Frame rate"),
             segmented_choice_row(fps_choices(options.fps_override())),
         ));
     }
 
     section(
-        "Videos",
+        tr!("Videos"),
         state.video_source_count(),
         IconSymbol::Video,
         rows,
@@ -180,13 +180,13 @@ fn audio_section<'a>(
     })];
 
     if formats.is_empty() {
-        rows.push(info_setting_row(lossless_note_text(
-            "Install ffmpeg to convert audio files.",
-        )));
+        rows.push(info_setting_row(note_text(tr!(
+            "Install ffmpeg to convert audio files."
+        ))));
     } else if audio_format_is_lossless(options.target_format()) {
-        rows.push(info_setting_row(lossless_note_text(
-            "This format is lossless; quality and target size do not apply.",
-        )));
+        rows.push(info_setting_row(note_text(tr!(
+            "This format is lossless; quality and target size do not apply."
+        ))));
     } else {
         rows.push(mode_row(options.mode(), |mode| {
             Message::Convert(ConvertMessage::AudioModeSelected(mode))
@@ -200,10 +200,10 @@ fn audio_section<'a>(
         ));
     }
     rows.push(labeled_setting_row(
-        "Channels",
+        tr!("Channels"),
         segmented_choice_row(vec![
             SegmentedChoice {
-                label: "Keep",
+                label: tr!("Keep"),
                 selected: options.channels() == file_core::AudioChannelSpec::Keep,
                 message: Message::Convert(ConvertMessage::AudioChannelsSelected(
                     file_core::AudioChannelSpec::Keep,
@@ -211,7 +211,7 @@ fn audio_section<'a>(
                 tooltip: None,
             },
             SegmentedChoice {
-                label: "Mono",
+                label: tr!("Mono"),
                 selected: options.channels() == file_core::AudioChannelSpec::Mono,
                 message: Message::Convert(ConvertMessage::AudioChannelsSelected(
                     file_core::AudioChannelSpec::Mono,
@@ -221,22 +221,26 @@ fn audio_section<'a>(
         ]),
     ));
 
-    section("Audio", state.audio_source_count(), IconSymbol::Music, rows)
+    section(
+        tr!("Audio"),
+        state.audio_source_count(),
+        IconSymbol::Music,
+        rows,
+    )
 }
 
 /// 分区:muted 标题 + 卡片行组;与设置窗口的分组观感一致。
 fn section<'a>(
-    title: &'static str,
+    title: String,
     count: usize,
     icon: IconSymbol,
     rows: Vec<Element<'a, Message>>,
 ) -> Element<'a, Message> {
-    let localized_title = crate::localization::translate_current(title);
     column![
         container(
             row![
                 themed_icon(icon, IconTone::Normal, NOTICE_ICON_SIZE),
-                readable_text(format!("{localized_title} · {count}")).size(12),
+                readable_text(format!("{title} · {count}")).size(12),
             ]
             .spacing(6)
             .align_y(Alignment::Center),
@@ -260,7 +264,7 @@ where
     F: Copy + PartialEq + std::fmt::Display + 'static,
 {
     labeled_setting_row(
-        "Format",
+        tr!("Format"),
         pick_list(formats.to_vec(), Some(selected), message)
             .width(Length::Fixed(FORMAT_PICK_WIDTH))
             .text_size(12)
@@ -288,16 +292,16 @@ fn mode_row(
     message: impl Fn(ConvertMode) -> Message + 'static,
 ) -> Element<'static, Message> {
     labeled_setting_row(
-        "Mode",
+        tr!("Mode"),
         segmented_choice_row(vec![
             SegmentedChoice {
-                label: "Quality",
+                label: tr!("Quality"),
                 selected: mode == ConvertMode::Quality,
                 message: message(ConvertMode::Quality),
                 tooltip: None,
             },
             SegmentedChoice {
-                label: "Target size",
+                label: tr!("Target size"),
                 selected: mode == ConvertMode::TargetSize,
                 message: message(ConvertMode::TargetSize),
                 tooltip: None,
@@ -309,7 +313,7 @@ fn mode_row(
 fn image_quality_row(options: &ImageConvertOptions) -> Element<'static, Message> {
     match options.mode() {
         ConvertMode::Quality => labeled_setting_row(
-            "Level",
+            tr!("Level"),
             row![
                 slider(1..=100, options.quality(), |value| Message::Convert(
                     ConvertMessage::ImageQualityChanged(value)
@@ -334,7 +338,7 @@ fn quality_preset_row(
     preset_message: impl Fn(ConversionQualityPreset) -> Message + 'static,
 ) -> Element<'static, Message> {
     labeled_setting_row(
-        "Quality",
+        tr!("Quality"),
         segmented_choice_row(
             QUALITY_PRESETS
                 .iter()
@@ -363,11 +367,11 @@ fn preset_or_size_row(
     }
 }
 
-fn preset_label(preset: ConversionQualityPreset) -> &'static str {
+fn preset_label(preset: ConversionQualityPreset) -> String {
     match preset {
-        ConversionQualityPreset::Low => "Low",
-        ConversionQualityPreset::Medium => "Medium",
-        ConversionQualityPreset::High => "High",
+        ConversionQualityPreset::Low => tr!("Low"),
+        ConversionQualityPreset::Medium => tr!("Medium"),
+        ConversionQualityPreset::High => tr!("High"),
     }
 }
 
@@ -376,7 +380,7 @@ fn target_size_row(
     size_message: impl Fn(String) -> Message + 'static,
 ) -> Element<'static, Message> {
     labeled_setting_row(
-        "Target size per file",
+        tr!("Target size per file"),
         text_input("500KB / 2MB", target_size_text)
             .on_input(size_message)
             .padding([6, 8])
@@ -397,25 +401,26 @@ fn resize_row(
         .iter()
         .copied()
         .map(|percent| SegmentedChoice {
-            label: percent_label(percent),
+            label: format!("{percent}%"),
             selected: !selection.uses_custom_width() && selection.percent() == percent,
             message: percent_message(percent),
             tooltip: None,
         })
         .collect();
     choices.push(SegmentedChoice {
-        label: "Custom",
+        label: tr!("Custom"),
         selected: selection.uses_custom_width(),
         message: custom_toggle,
         tooltip: None,
     });
 
-    // 行标签用 "Resize" 而非 "Size":该行是缩放百分比选择,裸 "Size"
-    // 要留给文件大小语义(中文"大小"),避免词条被尺寸语义遮蔽。
-    let mut rows = vec![labeled_setting_row("Resize", segmented_choice_row(choices))];
+    let mut rows = vec![labeled_setting_row(
+        tr!("Resize"),
+        segmented_choice_row(choices),
+    )];
     if selection.uses_custom_width() {
         rows.push(labeled_setting_row(
-            "Width",
+            tr!("Width"),
             text_input("1920", selection.custom_width_text())
                 .on_input(custom_changed)
                 .padding([6, 8])
@@ -431,23 +436,15 @@ fn resize_row(
     }
 }
 
-fn percent_label(percent: u8) -> &'static str {
-    match percent {
-        50 => "50%",
-        75 => "75%",
-        _ => "100%",
-    }
-}
-
 fn fps_choices(selected: Option<u32>) -> Vec<SegmentedChoice> {
     let mut choices = vec![SegmentedChoice {
-        label: "Keep",
+        label: tr!("Keep"),
         selected: selected.is_none(),
         message: Message::Convert(ConvertMessage::VideoFpsSelected(None)),
         tooltip: None,
     }];
     choices.extend(FPS_CHOICES.iter().copied().map(|fps| SegmentedChoice {
-        label: fps_label(fps),
+        label: format!("{fps}fps"),
         selected: selected == Some(fps),
         message: Message::Convert(ConvertMessage::VideoFpsSelected(Some(fps))),
         tooltip: None,
@@ -455,21 +452,13 @@ fn fps_choices(selected: Option<u32>) -> Vec<SegmentedChoice> {
     choices
 }
 
-fn fps_label(fps: u32) -> &'static str {
-    match fps {
-        24 => "24fps",
-        30 => "30fps",
-        _ => "60fps",
-    }
-}
-
 fn ffmpeg_notice(state: &ConvertState) -> Option<Element<'static, Message>> {
     let message = if !state.ffmpeg_probed() {
-        "Checking ffmpeg availability..."
+        tr!("Checking ffmpeg availability...")
     } else if state.ffmpeg_available() {
         return None;
     } else {
-        "ffmpeg is missing; video, audio, WebP and AVIF conversion is disabled. Install ffmpeg to enable them."
+        tr!("ffmpeg is missing; video, audio, WebP and AVIF conversion is disabled. Install ffmpeg to enable them.")
     };
     Some(
         row![
@@ -478,9 +467,7 @@ fn ffmpeg_notice(state: &ConvertState) -> Option<Element<'static, Message>> {
                 IconTone::Normal,
                 NOTICE_ICON_SIZE
             ),
-            readable_text(crate::localization::translate_current(message))
-                .size(12)
-                .width(Length::Fill),
+            readable_text(message).size(12).width(Length::Fill),
         ]
         .spacing(6)
         .align_y(Alignment::Center)
@@ -488,22 +475,20 @@ fn ffmpeg_notice(state: &ConvertState) -> Option<Element<'static, Message>> {
     )
 }
 
-fn lossless_note_text(message: &'static str) -> Element<'static, Message> {
-    readable_text(crate::localization::translate_current(message))
-        .size(12)
-        .into()
+fn note_text(message: String) -> Element<'static, Message> {
+    readable_text(message).size(12).into()
 }
 
 fn actions(state: &ConvertState) -> Element<'static, Message> {
     let convert_button = if state.can_submit() {
-        primary_action_button("Convert", Message::Convert(ConvertMessage::Submitted))
+        primary_action_button(tr!("Convert"), Message::Convert(ConvertMessage::Submitted))
     } else {
-        inactive_primary_action_button("Convert")
+        inactive_primary_action_button(tr!("Convert"))
     };
 
     row![
         Space::new().width(Length::Fill),
-        secondary_action_button("Cancel", Message::DismissFloating),
+        secondary_action_button(tr!("Cancel"), Message::DismissFloating),
         convert_button,
     ]
     .spacing(6)
@@ -512,17 +497,10 @@ fn actions(state: &ConvertState) -> Element<'static, Message> {
 }
 
 fn source_summary(state: &ConvertState) -> Element<'static, Message> {
-    let summary = if crate::localization::current_language_is_chinese() {
-        format!(
-            "{} 个项目 · 输出到原目录,保留原文件,重名自动追加序号",
-            state.source_count()
-        )
-    } else {
-        format!(
-            "{} items · Converted files are written next to the originals; existing files are never replaced.",
-            state.source_count()
-        )
-    };
+    let summary = tr!(
+        "%1 items · Converted files are written next to the originals; existing files are never replaced.",
+        state.source_count()
+    );
     container(readable_text(summary).size(11).width(Length::Fill))
         .width(Length::Fill)
         .style(muted_container_style)

@@ -299,7 +299,7 @@ impl FileBrowser {
                 connection,
                 completion,
                 fallback,
-                Some(format!("Could not load saved network password: {error}")),
+                Some(tr!("Could not load saved network password: %1", error)),
             ),
         }
     }
@@ -347,7 +347,7 @@ impl FileBrowser {
         result: Result<(), String>,
     ) -> Task<Message> {
         if let Err(error) = result {
-            self.show_global_error(format!("Could not remove saved network password: {error}"));
+            self.show_global_error(tr!("Could not remove saved network password: %1", error));
         }
         Task::none()
     }
@@ -409,7 +409,7 @@ impl FileBrowser {
                 {
                     return Task::none();
                 }
-                self.show_global_error(format!("Could not connect network location: {error}"));
+                self.show_global_error(tr!("Could not connect network location: %1", error));
                 clear_command
             }
         }
@@ -439,7 +439,7 @@ impl FileBrowser {
             Err(error) => {
                 let id = expected_connection.id;
                 self.network_connections.pending_actions.remove(&id);
-                self.show_global_error(format!("Could not disconnect network location: {error}"));
+                self.show_global_error(tr!("Could not disconnect network location: %1", error));
                 Task::none()
             }
         }
@@ -539,7 +539,7 @@ impl FileBrowser {
             };
         if editor.password_is_filled() && connection.username().is_none() {
             if let Some(editor) = &mut self.network_connection_editor {
-                editor.error = Some("Username is required when a password is provided".to_owned());
+                editor.error = Some(tr!("Username is required when a password is provided"));
             }
             return Task::none();
         }

@@ -23,6 +23,7 @@ use crate::file_drag_hit_test_marker::track_file_drag_hit_test_marker;
 use crate::file_entry_view::{
     entry_text_input_style, entry_thumbnail_or_icon, FileEntryIconDensity, FileEntryVisualState,
 };
+use crate::formatting::empty_directory_message;
 use crate::icon_grid_geometry::{
     grid_gap, icon_label_spacing, label_height, label_line_height, label_size, row_height,
     tile_padding_horizontal, tile_padding_vertical, tile_visual_height, tile_width,
@@ -71,11 +72,7 @@ pub(crate) fn icon_grid_view<'a>(
     let content: Element<'a, Message> = match pane.current_directory_content() {
         DirectoryContentAvailability::Pending => Space::new().height(Length::Fill).into(),
         DirectoryContentAvailability::Available([]) if transfer_placeholders.is_empty() => {
-            grid_message(if pane.is_trash_view {
-                "Trash is empty"
-            } else {
-                "No items"
-            })
+            grid_message(empty_directory_message(pane.is_trash_view))
         }
         DirectoryContentAvailability::Available(_) => {
             let layout =
@@ -444,9 +441,9 @@ fn icon_grid_entry<'a>(
         .height(Length::Fixed(DISCLOSURE_BUTTON_SIZE))
         .style(navigation_icon_button_style());
         let label = if is_open {
-            "Collapse folder"
+            tr!("Collapse folder")
         } else {
-            "Expand folder"
+            tr!("Expand folder")
         };
         let disclosure_button = tooltip(
             disclosure_button,
@@ -471,17 +468,14 @@ fn icon_grid_entry<'a>(
     let label: Element<'a, Message> = if pane.renaming == Some(&entry.path) {
         rename_field(
             container(
-                text_input(
-                    &crate::localization::translate_current("File name"),
-                    pane.rename_input,
-                )
-                .id(rename_input_id())
-                .on_input(Message::RenameInputChanged)
-                .on_submit(Message::RenameSelected)
-                .style(entry_text_input_style(content_modifier))
-                .padding(4)
-                .size(label_size(icon_edge))
-                .width(Length::Fill),
+                text_input(&tr!("File name"), pane.rename_input)
+                    .id(rename_input_id())
+                    .on_input(Message::RenameInputChanged)
+                    .on_submit(Message::RenameSelected)
+                    .style(entry_text_input_style(content_modifier))
+                    .padding(4)
+                    .size(label_size(icon_edge))
+                    .width(Length::Fill),
             )
             .height(Length::Fixed(label_height(icon_edge)))
             .clip(true),
@@ -551,11 +545,11 @@ fn icon_grid_entry<'a>(
 }
 
 /// 加载中不显示文字:目录通常瞬间加载完,文字一闪而过反而像闪烁。
-fn panel_status_label(status: IconGridPanelStatus) -> &'static str {
+fn panel_status_label(status: IconGridPanelStatus) -> String {
     match status {
-        IconGridPanelStatus::Loading | IconGridPanelStatus::Loaded => "",
-        IconGridPanelStatus::Empty => "No items",
-        IconGridPanelStatus::Error => "Could not load folder",
+        IconGridPanelStatus::Loading | IconGridPanelStatus::Loaded => String::new(),
+        IconGridPanelStatus::Empty => tr!("No items"),
+        IconGridPanelStatus::Error => tr!("Could not load folder"),
     }
 }
 
@@ -568,7 +562,7 @@ fn panel_status(status: IconGridPanelStatus) -> Element<'static, Message> {
         .into()
 }
 
-fn grid_message(message: &'static str) -> Element<'static, Message> {
+fn grid_message(message: String) -> Element<'static, Message> {
     container(readable_text(message).size(ICON_GRID_LABEL_SIZE))
         .padding(GRID_PADDING)
         .width(Length::Fill)

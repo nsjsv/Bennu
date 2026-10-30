@@ -331,7 +331,7 @@ fn list_columns_keep_name_visible() {
     assert_eq!(
         preferences.settings_rows(ContextMenuSettingsPage::ListColumns)[name_index],
         ContextMenuSettingsRow {
-            label: "Name",
+            label: "Name".to_owned(),
             icon: IconSymbol::List,
             visible: true,
             locked: true,

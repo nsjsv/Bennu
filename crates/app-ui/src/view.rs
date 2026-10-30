@@ -79,7 +79,7 @@ use crate::icons::IconSymbol;
 use crate::list_view::list_browser_view;
 use crate::model::{
     BrowserPaneId, BrowserPaneLayout, BrowserViewMode, Message, ScrollbarRegion, SplitAxis,
-    WindowChromeLayout, WindowControlSide, TRASH_LOCATION_LABEL,
+    WindowChromeLayout, WindowControlSide,
 };
 use crate::operation_queue_view::{
     operation_queue_indicator, operation_queue_panel, OPERATION_QUEUE_INDICATOR_BOTTOM,
@@ -184,7 +184,7 @@ pub(crate) fn column_browser_scroll_id(pane_id: BrowserPaneId) -> iced::widget::
     smooth_scroll_id(&ScrollbarRegion::ColumnBrowser(pane_id))
 }
 
-pub(super) fn auxiliary_window_message(message: &'static str) -> Element<'static, Message> {
+pub(super) fn auxiliary_window_message(message: String) -> Element<'static, Message> {
     container(readable_text(message).size(14))
         .padding(18)
         .width(Length::Fill)
@@ -1082,7 +1082,7 @@ fn tab_title_content<'a>(
 
 fn tab_title_text(directory: &Path, is_trash_view: bool) -> String {
     if is_trash_view {
-        return crate::localization::translate_current(TRASH_LOCATION_LABEL);
+        return tr!("Trash");
     }
 
     let title = directory

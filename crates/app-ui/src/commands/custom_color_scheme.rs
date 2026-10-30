@@ -12,8 +12,8 @@ pub(crate) fn custom_color_scheme_import_command() -> Task<Message> {
 }
 
 async fn choose_custom_color_scheme_file() -> Result<Option<String>, String> {
-    let title = crate::localization::translate_current("Import custom color scheme");
-    let accept_label = crate::localization::translate_current("Import");
+    let title = tr!("Import custom color scheme");
+    let accept_label = tr!("Import");
     let request = ashpd::desktop::file_chooser::SelectedFiles::open_file()
         .title(title.as_str())
         .accept_label(accept_label.as_str())

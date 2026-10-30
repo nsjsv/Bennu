@@ -11,7 +11,7 @@ use crate::appearance::{
     app_content_style, context_menu_button_style, context_menu_style, preview_panel_style,
     selected_sidebar_item_style,
 };
-use crate::formatting::{format_file_size, format_system_time};
+use crate::formatting::{format_file_size, format_system_time, item_count_label};
 use crate::icons::{file_entry_icon_symbol, IconSymbol};
 use crate::model::{
     FilePropertiesAggregateSnapshot, FilePropertiesCategory, FilePropertiesDirectoryContents,
@@ -20,7 +20,7 @@ use crate::model::{
     FilePropertiesPermissions, FilePropertiesPresentation, FilePropertiesSnapshot,
     FilePropertiesState, Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility,
 };
-use crate::typography::{localized_text, readable_text};
+use crate::typography::readable_text;
 
 use super::auxiliary_window_layout::{
     auxiliary_detail_scroller, auxiliary_sidebar, auxiliary_sidebar_button, auxiliary_split_window,
@@ -38,7 +38,7 @@ pub(crate) fn view_properties_window(
     scrollbar_viewport: Option<ScrollbarViewport>,
 ) -> Element<'_, Message> {
     let Some(properties) = properties else {
-        return auxiliary_window_message("No properties are available.");
+        return auxiliary_window_message(tr!("No properties are available."));
     };
 
     let target_label = properties_target_label(properties);
@@ -60,16 +60,13 @@ pub(crate) fn view_properties_window(
 fn properties_target_label(properties: &FilePropertiesState) -> String {
     match properties.targets.single_path() {
         Some(path) => display_path(path),
-        None => crate::localization::translate_current(&format!(
-            "{} items",
-            properties.targets.paths().len()
-        )),
+        None => item_count_label(properties.targets.paths().len()),
     }
 }
 
 fn properties_loading_view(target_label: String) -> Element<'static, Message> {
     let content = column![
-        readable_text("Loading properties...").size(16),
+        readable_text(tr!("Loading properties...")).size(16),
         readable_text(target_label).size(13)
     ]
     .spacing(8)
@@ -89,7 +86,7 @@ fn aggregate_properties_loading_view(
     scrollbar_viewport: Option<ScrollbarViewport>,
 ) -> Element<'_, Message> {
     let content = column![
-        readable_text("Calculating...").size(13),
+        readable_text(tr!("Calculating...")).size(13),
         aggregate_properties_information_detail(snapshot, scrollbar_visibility, scrollbar_viewport),
     ]
     .spacing(8)
@@ -106,9 +103,9 @@ fn aggregate_properties_loading_view(
 
 fn properties_error_view<'a>(target_label: String, error: &'a str) -> Element<'a, Message> {
     let content = column![
-        readable_text("Could not load properties").size(16),
+        readable_text(tr!("Could not load properties")).size(16),
         readable_text(target_label).size(13),
-        localized_text(error).size(13)
+        readable_text(error.to_owned()).size(13)
     ]
     .spacing(8)
     .padding(24)
@@ -155,7 +152,7 @@ fn properties_split_view<'a>(
 fn properties_category_sidebar(selected: FilePropertiesCategory) -> Element<'static, Message> {
     let mut categories = Column::new()
         .spacing(6)
-        .push(readable_text("Properties").size(18))
+        .push(readable_text(tr!("Properties")).size(18))
         .push(Space::new().height(Length::Fixed(6.0)));
 
     for category in FilePropertiesCategory::ALL {
@@ -196,24 +193,27 @@ fn properties_information_detail(
 
     let mut details = Column::new()
         .spacing(10)
-        .push(property_row("Name", display_name(&snapshot.name)))
-        .push(property_row("Type", file_kind_label(snapshot.kind)))
-        .push(property_row("Location", display_path(&snapshot.location)))
+        .push(property_row(tr!("Name"), display_name(&snapshot.name)))
+        .push(property_row(tr!("Type"), file_kind_label(snapshot.kind)))
         .push(property_row(
-            "Created",
+            tr!("Location"),
+            display_path(&snapshot.location),
+        ))
+        .push(property_row(
+            tr!("Created"),
             display_optional_time(snapshot.created),
         ))
         .push(property_row(
-            "Modified",
+            tr!("Modified"),
             display_optional_time(snapshot.modified),
         ))
         .push(property_row(
-            "Accessed",
+            tr!("Accessed"),
             display_optional_time(snapshot.accessed),
         ))
-        .push(property_row("Size", display_size(snapshot.size_bytes)))
+        .push(property_row(tr!("Size"), display_size(snapshot.size_bytes)))
         .push(property_row(
-            "Size on disk",
+            tr!("Size on disk"),
             display_size(snapshot.disk_size_bytes),
         ));
 
@@ -223,19 +223,16 @@ fn properties_information_detail(
             let label = contents
                 .as_ref()
                 .map(display_contents)
-                .unwrap_or_else(|| crate::localization::translate_current("Calculating..."));
-            details = details.push(property_row("Contents", label));
+                .unwrap_or_else(|| tr!("Calculating..."));
+            details = details.push(property_row(tr!("Contents"), label));
         }
         FilePropertiesDirectoryContentsState::Loaded(contents) => {
-            details = details.push(property_row("Contents", display_contents(contents)));
+            details = details.push(property_row(tr!("Contents"), display_contents(contents)));
         }
         FilePropertiesDirectoryContentsState::Failed(error) => {
             details = details.push(property_row(
-                "Contents",
-                format!(
-                    "{} ({error})",
-                    crate::localization::translate_current("Unavailable")
-                ),
+                tr!("Contents"),
+                tr!("Unavailable (%1)", error),
             ));
         }
     }
@@ -255,7 +252,7 @@ fn aggregate_properties_information_detail(
     let header = row![
         themed_icon(IconSymbol::File, IconTone::Normal, PROPERTIES_ICON_SIZE),
         column![
-            localized_text(format!("{} items", snapshot.target_count)).size(18),
+            readable_text(item_count_label(snapshot.target_count)).size(18),
             readable_text(aggregate_type_label(snapshot)).size(13)
         ]
         .spacing(4)
@@ -267,25 +264,44 @@ fn aggregate_properties_information_detail(
         .common_parent
         .as_deref()
         .map(display_path)
-        .unwrap_or_else(|| crate::localization::translate_current("Multiple locations"));
-    let counts = aggregate_target_counts(snapshot);
-    let contents = aggregate_contents_counts(snapshot);
+        .unwrap_or_else(|| tr!("Multiple locations"));
+    let counts = tr!(
+        "%1 files, %2 folders, %3 links, %4 other",
+        snapshot.file_count,
+        snapshot.directory_count,
+        snapshot.symlink_count,
+        snapshot.other_count
+    );
+    let contents = with_unreadable_contents_note(
+        tr!(
+            "%1 files, %2 folders",
+            snapshot.recursive_contents.file_count,
+            snapshot.recursive_contents.directory_count
+        ),
+        snapshot.recursive_contents.unreadable_entries,
+    );
     let details = column![
-        property_row("Selected", snapshot.target_count.to_string()),
-        property_row("Types", counts),
-        property_row("Location", location),
-        property_row("Created", aggregate_optional_time(snapshot.common_created)),
+        property_row(tr!("Selected"), snapshot.target_count.to_string()),
+        property_row(tr!("Types"), counts),
+        property_row(tr!("Location"), location),
         property_row(
-            "Modified",
+            tr!("Created"),
+            aggregate_optional_time(snapshot.common_created)
+        ),
+        property_row(
+            tr!("Modified"),
             aggregate_optional_time(snapshot.common_modified)
         ),
         property_row(
-            "Accessed",
+            tr!("Accessed"),
             aggregate_optional_time(snapshot.common_accessed)
         ),
-        property_row("Size", display_size(snapshot.total_size_bytes)),
-        property_row("Size on disk", display_size(snapshot.total_disk_size_bytes)),
-        property_row("Contents", contents),
+        property_row(tr!("Size"), display_size(snapshot.total_size_bytes)),
+        property_row(
+            tr!("Size on disk"),
+            display_size(snapshot.total_disk_size_bytes)
+        ),
+        property_row(tr!("Contents"), contents),
     ]
     .spacing(10);
 
@@ -296,54 +312,19 @@ fn aggregate_properties_information_detail(
     )
 }
 
-fn aggregate_target_counts(snapshot: &FilePropertiesAggregateSnapshot) -> String {
-    if crate::localization::current_language_is_chinese() {
-        format!(
-            "{} 个文件，{} 个文件夹，{} 个链接，{} 个其它项目",
-            snapshot.file_count,
-            snapshot.directory_count,
-            snapshot.symlink_count,
-            snapshot.other_count
-        )
-    } else {
-        format!(
-            "{} files, {} folders, {} links, {} other",
-            snapshot.file_count,
-            snapshot.directory_count,
-            snapshot.symlink_count,
-            snapshot.other_count
-        )
-    }
-}
-
-fn aggregate_contents_counts(snapshot: &FilePropertiesAggregateSnapshot) -> String {
-    let counts = if crate::localization::current_language_is_chinese() {
-        format!(
-            "{} 个文件，{} 个文件夹",
-            snapshot.recursive_contents.file_count, snapshot.recursive_contents.directory_count
-        )
-    } else {
-        format!(
-            "{} files, {} folders",
-            snapshot.recursive_contents.file_count, snapshot.recursive_contents.directory_count
-        )
-    };
-    with_unreadable_contents_note(counts, snapshot.recursive_contents.unreadable_entries)
-}
-
-fn aggregate_type_label(snapshot: &FilePropertiesAggregateSnapshot) -> &'static str {
+fn aggregate_type_label(snapshot: &FilePropertiesAggregateSnapshot) -> String {
     match snapshot.common_kind {
-        Some(FileKind::Directory) => "Folders",
-        Some(FileKind::File) => "Files",
-        Some(FileKind::Symlink) => "Symbolic Links",
-        Some(FileKind::Other) => "Other Items",
-        None => "Multiple Item Types",
+        Some(FileKind::Directory) => tr!("Folders"),
+        Some(FileKind::File) => tr!("Files"),
+        Some(FileKind::Symlink) => tr!("Symbolic Links"),
+        Some(FileKind::Other) => tr!("Other Items"),
+        None => tr!("Multiple Item Types"),
     }
 }
 
 fn aggregate_optional_time(time: Option<SystemTime>) -> String {
     time.map(format_system_time)
-        .unwrap_or_else(|| crate::localization::translate_current("Mixed or unavailable"))
+        .unwrap_or_else(|| tr!("Mixed or unavailable"))
 }
 
 fn properties_permissions_detail<'a>(
@@ -389,10 +370,10 @@ fn properties_permissions_detail<'a>(
 
 fn permissions_header(permissions: Option<FilePropertiesPermissions>) -> Element<'static, Message> {
     let title = column![
-        readable_text("Sharing & Permissions").size(20),
-        readable_text(
+        readable_text(tr!("Sharing & Permissions")).size(20),
+        readable_text(tr!(
             "Choose who can read, write, or execute this item. Changes save immediately."
-        )
+        ))
         .size(12)
     ]
     .spacing(4)
@@ -432,7 +413,7 @@ fn displayed_permissions(
 
 fn permissions_mode_badge(permissions: FilePropertiesPermissions) -> Element<'static, Message> {
     column![
-        readable_text("Current mode").size(11),
+        readable_text(tr!("Current mode")).size(11),
         readable_text(display_permissions(permissions)).size(12)
     ]
     .spacing(2)
@@ -460,8 +441,8 @@ fn permissions_people_panel(
 
 fn permissions_table_header() -> Element<'static, Message> {
     row![
-        readable_text("Name").size(11).width(Length::Fill),
-        readable_text("Privilege")
+        readable_text(tr!("Name")).size(11).width(Length::Fill),
+        readable_text(tr!("Privilege"))
             .size(11)
             .width(Length::Fixed(PERMISSION_PRIVILEGE_WIDTH))
     ]
@@ -563,7 +544,7 @@ fn permission_access_button(
 fn apply_permissions_to_enclosed_items_button(
     update: &FilePropertiesPermissionUpdate,
 ) -> Element<'static, Message> {
-    let label = container(readable_text("Apply to Enclosed Items").size(13))
+    let label = container(readable_text(tr!("Apply to Enclosed Items")).size(13))
         .padding([8, 12])
         .width(Length::Fill);
     let button = button(label)
@@ -584,8 +565,8 @@ fn apply_permissions_to_enclosed_items_button(
 fn permissions_unavailable_panel() -> Element<'static, Message> {
     container(
         column![
-            readable_text("Permissions are read-only").size(14),
-            readable_text("Permission editing is unavailable for this item.").size(12)
+            readable_text(tr!("Permissions are read-only")).size(14),
+            readable_text(tr!("Permission editing is unavailable for this item.")).size(12)
         ]
         .spacing(4),
     )
@@ -600,24 +581,23 @@ fn permissions_status_panel(
 ) -> Option<Element<'static, Message>> {
     let message = match update {
         FilePropertiesPermissionUpdate::Idle => return None,
-        FilePropertiesPermissionUpdate::SavingCurrentItem { .. } => {
-            "Saving permissions...".to_owned()
-        }
+        FilePropertiesPermissionUpdate::SavingCurrentItem { .. } => tr!("Saving permissions..."),
         FilePropertiesPermissionUpdate::SavingTargetSet { .. } => {
-            "Saving permissions for selected items...".to_owned()
+            tr!("Saving permissions for selected items...")
         }
         FilePropertiesPermissionUpdate::ApplyingToEnclosedItems { .. } => {
-            "Applying permissions to enclosed items...".to_owned()
+            tr!("Applying permissions to enclosed items...")
         }
         FilePropertiesPermissionUpdate::TargetSetCompleted {
             succeeded_count,
             failures,
         } => {
             if failures.is_empty() {
-                format!("Updated permissions for {succeeded_count} items.")
+                tr!("Updated permissions for %1 items.", succeeded_count)
             } else {
-                format!(
-                    "Updated {succeeded_count} items; {} items failed. {}",
+                tr!(
+                    "Updated %1 items; %2 items failed. %3",
+                    succeeded_count,
                     failures.len(),
                     failures
                         .iter()
@@ -628,12 +608,12 @@ fn permissions_status_panel(
             }
         }
         FilePropertiesPermissionUpdate::Failed(error) => {
-            format!("Could not update permissions: {error}")
+            tr!("Could not update permissions: %1", error)
         }
     };
 
     Some(
-        container(localized_text(message).size(12))
+        container(readable_text(message).size(12))
             .padding([8, 12])
             .width(Length::Fill)
             .style(preview_panel_style)
@@ -641,39 +621,39 @@ fn permissions_status_panel(
     )
 }
 
-fn permission_subject_label(class: FilePropertiesPermissionClass) -> &'static str {
+fn permission_subject_label(class: FilePropertiesPermissionClass) -> String {
     match class {
-        FilePropertiesPermissionClass::Owner => "Owner",
-        FilePropertiesPermissionClass::Group => "Group",
-        FilePropertiesPermissionClass::Others => "Everyone",
+        FilePropertiesPermissionClass::Owner => tr!("Owner"),
+        FilePropertiesPermissionClass::Group => tr!("Group"),
+        FilePropertiesPermissionClass::Others => tr!("Everyone"),
     }
 }
 
-fn permission_subject_description(class: FilePropertiesPermissionClass) -> &'static str {
+fn permission_subject_description(class: FilePropertiesPermissionClass) -> String {
     match class {
-        FilePropertiesPermissionClass::Owner => "Primary user",
-        FilePropertiesPermissionClass::Group => "Assigned group",
-        FilePropertiesPermissionClass::Others => "Other users",
+        FilePropertiesPermissionClass::Owner => tr!("Primary user"),
+        FilePropertiesPermissionClass::Group => tr!("Assigned group"),
+        FilePropertiesPermissionClass::Others => tr!("Other users"),
     }
 }
 
 fn permission_privilege_label(
     class: FilePropertiesPermissionClass,
     permissions: FilePropertiesPermissions,
-) -> &'static str {
+) -> String {
     match (
         permissions.contains(class, FilePropertiesPermissionAccess::Read),
         permissions.contains(class, FilePropertiesPermissionAccess::Write),
         permissions.contains(class, FilePropertiesPermissionAccess::Execute),
     ) {
-        (true, true, true) => "Read, Write & Execute",
-        (true, true, false) => "Read & Write",
-        (true, false, true) => "Read & Execute",
-        (true, false, false) => "Read only",
-        (false, true, true) => "Write & Execute",
-        (false, true, false) => "Write only",
-        (false, false, true) => "Execute only",
-        (false, false, false) => "No access",
+        (true, true, true) => tr!("Read, Write & Execute"),
+        (true, true, false) => tr!("Read & Write"),
+        (true, false, true) => tr!("Read & Execute"),
+        (true, false, false) => tr!("Read only"),
+        (false, true, true) => tr!("Write & Execute"),
+        (false, true, false) => tr!("Write only"),
+        (false, false, true) => tr!("Execute only"),
+        (false, false, false) => tr!("No access"),
     }
 }
 
@@ -694,7 +674,7 @@ fn permission_symbolic_segment(
         .collect()
 }
 
-fn property_row(label: &'static str, value: String) -> Element<'static, Message> {
+fn property_row(label: String, value: String) -> Element<'static, Message> {
     row![
         readable_text(label).width(Length::Fixed(PROPERTIES_LABEL_WIDTH)),
         readable_text(value).width(Length::Fill)
@@ -714,33 +694,20 @@ fn display_path(path: &Path) -> String {
 
 fn display_optional_time(time: Option<SystemTime>) -> String {
     time.map(format_system_time)
-        .unwrap_or_else(|| crate::localization::translate_current("Unavailable"))
+        .unwrap_or_else(|| tr!("Unavailable"))
 }
 
 fn display_size(bytes: u64) -> String {
-    if crate::localization::current_language_is_chinese() {
-        format!("{}（{bytes} 字节）", format_file_size(bytes))
-    } else {
-        format!("{} ({bytes} bytes)", format_file_size(bytes))
-    }
+    tr!("%1 (%2 bytes)", format_file_size(bytes), bytes)
 }
 
 fn display_contents(contents: &FilePropertiesDirectoryContents) -> String {
-    let counts = if crate::localization::current_language_is_chinese() {
-        format!(
-            "{} 个文件，{} 个文件夹，总计 {}",
-            contents.file_count,
-            contents.directory_count,
-            format_file_size(contents.total_size_bytes)
-        )
-    } else {
-        format!(
-            "{} files, {} folders, total {}",
-            contents.file_count,
-            contents.directory_count,
-            format_file_size(contents.total_size_bytes)
-        )
-    };
+    let counts = tr!(
+        "%1 files, %2 folders, total %3",
+        contents.file_count,
+        contents.directory_count,
+        format_file_size(contents.total_size_bytes)
+    );
     with_unreadable_contents_note(counts, contents.unreadable_entries)
 }
 
@@ -748,10 +715,8 @@ fn display_contents(contents: &FilePropertiesDirectoryContents) -> String {
 fn with_unreadable_contents_note(counts: String, unreadable_entries: u64) -> String {
     if unreadable_entries == 0 {
         counts
-    } else if crate::localization::current_language_is_chinese() {
-        format!("{counts}（部分内容无法读取）")
     } else {
-        format!("{counts} (some contents unreadable)")
+        tr!("%1 (some contents unreadable)", counts)
     }
 }
 

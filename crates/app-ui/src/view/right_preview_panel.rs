@@ -109,13 +109,13 @@ fn right_preview_info_content(browser: &FileBrowser) -> Element<'_, Message> {
         _ => "—".to_owned(),
     };
     let info_rows = column![
-        info_row("Name", name),
-        info_row("Type", type_label),
-        info_row("Size", size_label),
-        info_row("Location", location_label(snapshot)),
-        info_row("Modified", optional_time(snapshot.map(|s| s.modified))),
-        info_row("Created", optional_time(snapshot.map(|s| s.created))),
-        info_row("Accessed", optional_time(snapshot.map(|s| s.accessed))),
+        info_row(tr!("Name"), name),
+        info_row(tr!("Type"), type_label),
+        info_row(tr!("Size"), size_label),
+        info_row(tr!("Location"), location_label(snapshot)),
+        info_row(tr!("Modified"), optional_time(snapshot.map(|s| s.modified))),
+        info_row(tr!("Created"), optional_time(snapshot.map(|s| s.created))),
+        info_row(tr!("Accessed"), optional_time(snapshot.map(|s| s.accessed))),
     ]
     .spacing(6)
     .width(Length::Fill);
@@ -152,22 +152,14 @@ fn optional_time(time: Option<Option<std::time::SystemTime>>) -> String {
 
 /// 与属性窗口的体积措辞一致:本地化单位 + 原始字节数。
 fn display_size(bytes: u64) -> String {
-    if crate::localization::current_language_is_chinese() {
-        format!(
-            "{}（{} 字节）",
-            crate::formatting::format_file_size(bytes),
-            bytes
-        )
-    } else {
-        format!(
-            "{} ({} bytes)",
-            crate::formatting::format_file_size(bytes),
-            bytes
-        )
-    }
+    tr!(
+        "%1 (%2 bytes)",
+        crate::formatting::format_file_size(bytes),
+        bytes
+    )
 }
 
-fn info_row(label: &'static str, value: String) -> Element<'static, Message> {
+fn info_row(label: String, value: String) -> Element<'static, Message> {
     row![
         crate::typography::readable_text(label)
             .size(13)

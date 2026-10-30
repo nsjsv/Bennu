@@ -32,7 +32,9 @@ const NOTICE_ICON_SIZE: f32 = 14.0;
 pub(super) fn checksum_panel(state: &ChecksumState) -> Element<'_, Message> {
     let title = row![
         themed_icon(IconSymbol::Hash, IconTone::Normal, MENU_ICON_SIZE),
-        readable_text("File Checksum").size(16).width(Length::Fill),
+        readable_text(tr!("File Checksum"))
+            .size(16)
+            .width(Length::Fill),
     ]
     .spacing(8)
     .align_y(Alignment::Center);
@@ -60,7 +62,7 @@ pub(super) fn checksum_panel(state: &ChecksumState) -> Element<'_, Message> {
         scrollable(body).width(Length::Fill).height(Length::Shrink),
         row![
             Space::new().width(Length::Fill),
-            secondary_action_button("Close", Message::DismissFloating),
+            secondary_action_button(tr!("Close"), Message::DismissFloating),
         ]
         .align_y(Alignment::Center),
     ]
@@ -121,12 +123,9 @@ fn computation_section(state: &ChecksumState) -> Element<'static, Message> {
     // 未就绪;要中止直接关面板,dismiss_floating 会取消仍在跑的计算。
     let status_line: Option<Element<'static, Message>> = match state.computation() {
         ChecksumComputation::Computing { .. } | ChecksumComputation::Completed(_) => None,
-        ChecksumComputation::Canceled => Some(
-            retry_notice(crate::localization::translate_current(
-                "Checksum computation canceled",
-            ))
-            .into(),
-        ),
+        ChecksumComputation::Canceled => {
+            Some(retry_notice(tr!("Checksum computation canceled")).into())
+        }
         ChecksumComputation::Failed(error) => Some(retry_notice(error.clone()).into()),
     };
     if let Some(line) = status_line {
@@ -175,7 +174,7 @@ fn digest_row(
         )));
     }
     row![
-        readable_text(algorithm.label())
+        readable_text(algorithm.label().to_owned())
             .size(12)
             .width(Length::Fixed(64.0)),
         readable_text(value_text).size(12).width(Length::Fill),
@@ -188,22 +187,21 @@ fn digest_row(
 }
 
 fn verify_section(state: &ChecksumState) -> Element<'static, Message> {
-    let mut rows = vec![text_input(
-        &crate::localization::translate_current("Paste expected checksum"),
-        state.expected_text(),
-    )
-    .on_input(|text| Message::Checksum(ChecksumMessage::ExpectedValueChanged(text)))
-    .padding([6, 8])
-    .size(13)
-    .width(Length::Fill)
-    .into()];
+    let mut rows = vec![
+        text_input(&tr!("Paste expected checksum"), state.expected_text())
+            .on_input(|text| Message::Checksum(ChecksumMessage::ExpectedValueChanged(text)))
+            .padding([6, 8])
+            .size(13)
+            .width(Length::Fill)
+            .into(),
+    ];
 
     if let Some(verdict) = expected_value_verdict_line(state.expected_value_verdict()) {
         rows.push(verdict);
     }
 
     let mut load_row = row![secondary_action_button(
-        "Load checksum file...",
+        tr!("Load checksum file..."),
         Message::Checksum(ChecksumMessage::ChecksumFileLoadPressed)
     )]
     .spacing(8)
@@ -235,28 +233,27 @@ fn verify_section(state: &ChecksumState) -> Element<'static, Message> {
 fn expected_value_verdict_line(
     verdict: ChecksumExpectedVerdict,
 ) -> Option<Element<'static, Message>> {
-    let localize = crate::localization::translate_current;
     let line = match verdict {
         ChecksumExpectedVerdict::Empty => return None,
         ChecksumExpectedVerdict::Invalid => verdict_line(
             IconSymbol::TriangleAlert,
             IconTone::Normal,
-            localize("Enter a valid hex checksum."),
+            tr!("Enter a valid hex checksum."),
         )
         .into(),
         ChecksumExpectedVerdict::Pending => {
-            muted_info_line(localize("Waiting for the computation to finish...")).into()
+            muted_info_line(tr!("Waiting for the computation to finish...")).into()
         }
         ChecksumExpectedVerdict::NoMatch => verdict_line(
             IconSymbol::TriangleAlert,
             IconTone::Warning,
-            localize("No checksum matches the expected value."),
+            tr!("No checksum matches the expected value."),
         )
         .into(),
         ChecksumExpectedVerdict::Matched(algorithms) => verdict_line(
             IconSymbol::Check,
             IconTone::Normal,
-            matched_text(&localize("Checksum matches"), &algorithms),
+            tr!("Checksum matches (%1)", algorithm_labels(&algorithms)),
         )
         .into(),
     };
@@ -264,54 +261,52 @@ fn expected_value_verdict_line(
 }
 
 fn checksum_file_verdict_line(verdict: ChecksumFileVerdict) -> Element<'static, Message> {
-    let localize = crate::localization::translate_current;
     match verdict {
         ChecksumFileVerdict::Pending => {
-            muted_info_line(localize("Waiting for the computation to finish...")).into()
+            muted_info_line(tr!("Waiting for the computation to finish...")).into()
         }
         ChecksumFileVerdict::BareMatched => verdict_line(
             IconSymbol::Check,
             IconTone::Normal,
-            localize("Checksum file value matches."),
+            tr!("Checksum file value matches."),
         )
         .into(),
         ChecksumFileVerdict::BareMismatch => verdict_line(
             IconSymbol::TriangleAlert,
             IconTone::Warning,
-            localize("Checksum file value does not match."),
+            tr!("Checksum file value does not match."),
         )
         .into(),
         ChecksumFileVerdict::EntryMatched => verdict_line(
             IconSymbol::Check,
             IconTone::Normal,
-            localize("File entry in the checksum file matches."),
+            tr!("File entry in the checksum file matches."),
         )
         .into(),
         ChecksumFileVerdict::EntryMismatch => verdict_line(
             IconSymbol::TriangleAlert,
             IconTone::Warning,
-            localize("File entry in the checksum file does not match."),
+            tr!("File entry in the checksum file does not match."),
         )
         .into(),
         ChecksumFileVerdict::EntryNotFound => {
-            muted_info_line(localize("The checksum file has no entry for this file.")).into()
+            muted_info_line(tr!("The checksum file has no entry for this file.")).into()
         }
     }
 }
 
-fn matched_text(prefix: &str, algorithms: &[ChecksumAlgorithm]) -> String {
-    let labels = algorithms
+fn algorithm_labels(algorithms: &[ChecksumAlgorithm]) -> String {
+    algorithms
         .iter()
         .map(|algorithm| algorithm.label())
         .collect::<Vec<_>>()
-        .join(" / ");
-    format!("{prefix} ({labels})")
+        .join(" / ")
 }
 
 /// 分区:muted 标题 + 卡片行组;与设置窗口的分组观感一致。
 fn section(body: Element<'static, Message>) -> Element<'static, Message> {
     column![
-        container(readable_text("Verify"))
+        container(readable_text(tr!("Verify")))
             .width(Length::Fill)
             .style(muted_container_style),
         body,
@@ -330,7 +325,10 @@ fn retry_notice(message: String) -> iced::widget::Row<'static, Message> {
             NOTICE_ICON_SIZE
         ),
         readable_text(message).size(12).width(Length::Fill),
-        secondary_action_button("Retry", Message::Checksum(ChecksumMessage::RetryPressed)),
+        secondary_action_button(
+            tr!("Retry"),
+            Message::Checksum(ChecksumMessage::RetryPressed)
+        ),
     ]
     .spacing(6)
     .align_y(Alignment::Center)

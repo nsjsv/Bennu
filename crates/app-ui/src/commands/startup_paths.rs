@@ -61,8 +61,8 @@ pub(crate) fn classify_startup_session(
             } else {
                 StartupSessionPlan::Directory {
                     directory: request.home.clone(),
-                    error: Some(format!(
-                        "Could not open startup directory {}; opening the home directory.",
+                    error: Some(tr!(
+                        "Could not open startup directory %1; opening the home directory.",
                         custom_directory.to_string_lossy()
                     )),
                 }

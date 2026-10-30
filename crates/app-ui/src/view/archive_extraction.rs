@@ -7,7 +7,7 @@ use crate::appearance::context_menu_style;
 use crate::formatting::format_middle_ellipsized_text;
 use crate::icons::IconSymbol;
 use crate::model::Message;
-use crate::typography::{localized_text, readable_text};
+use crate::typography::readable_text;
 
 use super::option_controls::{
     inactive_primary_action_button, primary_action_button, secondary_action_button,
@@ -20,7 +20,7 @@ const ARCHIVE_PATH_MAX_CHARS: usize = 72;
 pub(super) fn archive_extraction_panel(state: &ArchiveExtractionState) -> Element<'_, Message> {
     let title = row![
         themed_icon(IconSymbol::FileArchive, IconTone::Normal, MENU_ICON_SIZE),
-        readable_text("Extract Archive")
+        readable_text(tr!("Extract Archive"))
             .size(16)
             .width(Length::Fill),
     ]
@@ -39,7 +39,7 @@ pub(super) fn archive_extraction_panel(state: &ArchiveExtractionState) -> Elemen
             readable_text(destination_summary(state)).size(12),
             readable_text(status_text(state)).size(13),
             archive_password_input(state),
-            localized_text(validation_error).size(12),
+            readable_text(validation_error).size(12),
             archive_extraction_actions(state),
         ]
     } else {
@@ -48,7 +48,7 @@ pub(super) fn archive_extraction_panel(state: &ArchiveExtractionState) -> Elemen
             readable_text(archive_summary(state)).size(12),
             readable_text(destination_summary(state)).size(12),
             readable_text(status_text(state)).size(13),
-            localized_text(validation_error).size(12),
+            readable_text(validation_error).size(12),
             archive_extraction_actions(state),
         ]
     }
@@ -79,14 +79,11 @@ pub(super) fn archive_password_input_field(
     on_changed: impl Fn(ArchivePasswordDraft) -> Message + 'static,
     on_submitted: Message,
 ) -> Element<'_, Message> {
-    let mut password_input = text_input(
-        &crate::localization::translate_current("Password"),
-        draft.as_str(),
-    )
-    .secure(true)
-    .padding([6, 8])
-    .size(14)
-    .width(Length::Fill);
+    let mut password_input = text_input(&tr!("Password"), draft.as_str())
+        .secure(true)
+        .padding([6, 8])
+        .size(14)
+        .width(Length::Fill);
     if editable {
         password_input = password_input
             .on_input(move |password| on_changed(ArchivePasswordDraft::new(password)))
@@ -95,18 +92,18 @@ pub(super) fn archive_password_input_field(
 
     Column::new()
         .spacing(4)
-        .push(readable_text("Password").size(12))
+        .push(readable_text(tr!("Password")).size(12))
         .push(password_input)
         .into()
 }
 
 fn archive_extraction_actions(state: &ArchiveExtractionState) -> Element<'_, Message> {
     let extract_label = if state.is_checking_password() {
-        "Checking..."
+        tr!("Checking...")
     } else if state.is_inspecting() {
-        "Checking"
+        tr!("Checking")
     } else {
-        "Extract"
+        tr!("Extract")
     };
     let extract_button = if state.is_waiting_for_password() && state.can_submit_password() {
         primary_action_button(
@@ -119,7 +116,7 @@ fn archive_extraction_actions(state: &ArchiveExtractionState) -> Element<'_, Mes
 
     row![
         Space::new().width(Length::Fill),
-        secondary_action_button("Cancel", Message::DismissFloating),
+        secondary_action_button(tr!("Cancel"), Message::DismissFloating),
         extract_button,
     ]
     .spacing(6)
@@ -128,35 +125,31 @@ fn archive_extraction_actions(state: &ArchiveExtractionState) -> Element<'_, Mes
 }
 
 fn archive_summary(state: &ArchiveExtractionState) -> String {
-    let archive = format_middle_ellipsized_text(
-        state.request().archive.to_string_lossy().as_ref(),
-        ARCHIVE_PATH_MAX_CHARS,
-    );
-    if crate::localization::current_language_is_chinese() {
-        format!("归档：{archive}")
-    } else {
-        format!("Archive: {archive}")
-    }
+    tr!(
+        "Archive: %1",
+        format_middle_ellipsized_text(
+            state.request().archive.to_string_lossy().as_ref(),
+            ARCHIVE_PATH_MAX_CHARS,
+        )
+    )
 }
 
 fn destination_summary(state: &ArchiveExtractionState) -> String {
-    let destination = format_middle_ellipsized_text(
-        state.request().destination.to_string_lossy().as_ref(),
-        ARCHIVE_PATH_MAX_CHARS,
-    );
-    if crate::localization::current_language_is_chinese() {
-        format!("目标目录：{destination}")
-    } else {
-        format!("Destination: {destination}")
-    }
+    tr!(
+        "Destination: %1",
+        format_middle_ellipsized_text(
+            state.request().destination.to_string_lossy().as_ref(),
+            ARCHIVE_PATH_MAX_CHARS,
+        )
+    )
 }
 
-fn status_text(state: &ArchiveExtractionState) -> &'static str {
+fn status_text(state: &ArchiveExtractionState) -> String {
     if state.is_checking_password() {
-        "Checking password..."
+        tr!("Checking password...")
     } else if state.is_waiting_for_password() {
-        "Enter the archive password to continue."
+        tr!("Enter the archive password to continue.")
     } else {
-        "Checking archive..."
+        tr!("Checking archive...")
     }
 }

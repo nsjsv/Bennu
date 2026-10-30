@@ -16,7 +16,7 @@ use crate::model::{
     SearchPathEntryKind, SearchServiceDiagnosticKind, SearchServiceIncident,
     SearchServiceIncidentState, SearchServiceRecoveryAction, SearchServiceRecoveryState,
 };
-use crate::typography::{localized_text, readable_text};
+use crate::typography::readable_text;
 
 use super::auxiliary_window_layout::auxiliary_detail_scroller;
 use super::option_controls::destructive_confirmation_button_style;
@@ -34,13 +34,13 @@ pub(super) fn search_settings_detail(
 ) -> Element<'_, Message> {
     let content = column![
         chrome_top_spacer(browser),
-        settings_group("Indexed locations", indexed_location_rows(browser)),
-        settings_group("Excluded locations", excluded_location_rows(browser)),
-        settings_group("Content indexing", content_indexing_rows(browser)),
-        settings_group("Status overview", status_overview_rows(browser)),
-        settings_group("Index progress", index_progress_rows(browser)),
-        settings_group("Recent issues", recent_issue_rows(browser)),
-        settings_group("Service recovery", service_recovery_rows(browser)),
+        settings_group(tr!("Indexed locations"), indexed_location_rows(browser)),
+        settings_group(tr!("Excluded locations"), excluded_location_rows(browser)),
+        settings_group(tr!("Content indexing"), content_indexing_rows(browser)),
+        settings_group(tr!("Status overview"), status_overview_rows(browser)),
+        settings_group(tr!("Index progress"), index_progress_rows(browser)),
+        settings_group(tr!("Recent issues"), recent_issue_rows(browser)),
+        settings_group(tr!("Service recovery"), service_recovery_rows(browser)),
     ]
     .spacing(SETTINGS_GROUP_SPACING)
     .width(Length::Fill);
@@ -57,14 +57,14 @@ pub(super) fn search_settings_detail(
 fn indexed_location_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
     let settings = &browser.search_service.path_settings;
     if settings.confirmed.is_none() {
-        return vec![status_notice("Loading indexed locations...")];
+        return vec![status_notice(tr!("Loading indexed locations..."))];
     }
 
     let mut rows = path_configuration_state_rows(browser);
     if settings.draft.custom_roots.is_empty() {
-        rows.push(status_notice(
-            "Home is indexed by default. Add another location here.",
-        ));
+        rows.push(status_notice(tr!(
+            "Home is indexed by default. Add another location here."
+        )));
     } else {
         rows.extend(settings.draft.custom_roots.iter().map(|path| {
             search_path_row(
@@ -88,16 +88,20 @@ fn indexed_location_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
 fn excluded_location_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
     let settings = &browser.search_service.path_settings;
     if settings.confirmed.is_none() {
-        return vec![status_notice("Loading excluded locations...")];
+        return vec![status_notice(tr!("Loading excluded locations..."))];
     }
 
     let mut rows = Vec::new();
     if settings.draft.exclusions.is_empty() {
-        rows.push(status_notice("No additional locations are excluded."));
+        rows.push(status_notice(tr!("No additional locations are excluded.")));
     } else {
-        rows.extend(settings.draft.exclusions.iter().map(|path| {
-            search_path_row(path, SearchPathEntryKind::Exclusion, "Excluded".to_owned())
-        }));
+        rows.extend(
+            settings
+                .draft
+                .exclusions
+                .iter()
+                .map(|path| search_path_row(path, SearchPathEntryKind::Exclusion, tr!("Excluded"))),
+        );
     }
     rows.push(search_path_input_row(
         SearchPathEntryKind::Exclusion,
@@ -126,7 +130,7 @@ fn path_picker_failure_notice(
 fn path_configuration_state_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
     let settings = &browser.search_service.path_settings;
     if settings.apply_in_flight {
-        return vec![status_notice("Applying search location changes...")];
+        return vec![status_notice(tr!("Applying search location changes..."))];
     }
     if let Some(message) = settings.failure.as_ref() {
         return vec![path_configuration_failure_row(message)];
@@ -143,7 +147,7 @@ fn path_configuration_state_rows(browser: &FileBrowser) -> Vec<Element<'_, Messa
     match &status.phase {
         SearchPathConfigurationPhase::Ready => Vec::new(),
         SearchPathConfigurationPhase::Applying => {
-            vec![status_notice("Applying search location changes...")]
+            vec![status_notice(tr!("Applying search location changes..."))]
         }
         SearchPathConfigurationPhase::Failed { message } => {
             vec![path_configuration_failure_row(message)]
@@ -151,13 +155,14 @@ fn path_configuration_state_rows(browser: &FileBrowser) -> Vec<Element<'_, Messa
     }
 }
 
-fn path_configuration_failure_row(message: &str) -> Element<'_, Message> {
+/// 搜索服务给的原话只作详情，外层一句译文（不翻原话，也不拿它来判断）。
+fn path_configuration_failure_row(detail: &str) -> Element<'_, Message> {
     info_setting_row(
         row![
-            localized_text(message.to_owned())
+            readable_text(tr!("Could not apply search locations: %1", detail))
                 .size(11)
                 .width(Length::Fill),
-            button(readable_text("Retry").size(11))
+            button(readable_text(tr!("Retry")).size(11))
                 .on_press(Message::SearchPathConfigurationRetryPressed)
                 .padding([5, 9])
                 .style(context_menu_button_style()),
@@ -183,16 +188,12 @@ fn configured_root_status(browser: &FileBrowser, path: &std::path::Path) -> Stri
                 .find(|root| root.path == path)
         })
     else {
-        return "Waiting for status".to_owned();
+        return tr!("Waiting for status");
     };
     match &root.availability {
-        SearchRootAvailability::Available => "Available".to_owned(),
-        SearchRootAvailability::Unavailable { message } => {
-            format!("Unavailable: {message}")
-        }
-        SearchRootAvailability::MountChanged { message } => {
-            format!("Storage changed: {message}")
-        }
+        SearchRootAvailability::Available => tr!("Available"),
+        SearchRootAvailability::Unavailable { message } => tr!("Unavailable: %1", message),
+        SearchRootAvailability::MountChanged { message } => tr!("Storage changed: %1", message),
     }
 }
 
@@ -205,10 +206,10 @@ fn search_path_row<'a>(
     info_setting_row(
         row![
             column![
-                localized_text(format_middle_ellipsized_text(&path.to_string_lossy(), 72,))
+                readable_text(format_middle_ellipsized_text(&path.to_string_lossy(), 72,))
                     .size(12)
                     .width(Length::Fill),
-                localized_text(status).size(10).width(Length::Fill),
+                readable_text(status).size(10).width(Length::Fill),
             ]
             .spacing(2)
             .width(Length::Fill),
@@ -217,7 +218,7 @@ fn search_path_row<'a>(
                     .on_press(Message::SearchPathEntryRemoved(kind, remove_path))
                     .padding([7, 8])
                     .style(navigation_icon_button_style()),
-                path_tooltip("Remove location"),
+                path_tooltip(tr!("Remove location")),
                 tooltip::Position::Left,
             ),
         ]
@@ -233,16 +234,13 @@ fn search_path_input_row(
     value: &str,
     picker_in_flight: bool,
 ) -> Element<'_, Message> {
-    let input = text_input(
-        &crate::localization::translate_current("Absolute path"),
-        value,
-    )
-    .on_input(move |value| Message::SearchPathInputChanged(kind, value))
-    .on_submit(Message::SearchPathInputCommitted(kind))
-    .padding([7, 9])
-    .size(12)
-    .style(navigation_text_input_style)
-    .width(Length::Fill);
+    let input = text_input(&tr!("Absolute path"), value)
+        .on_input(move |value| Message::SearchPathInputChanged(kind, value))
+        .on_submit(Message::SearchPathInputCommitted(kind))
+        .padding([7, 9])
+        .size(12)
+        .style(navigation_text_input_style)
+        .width(Length::Fill);
     let chooser = button(themed_icon(IconSymbol::FolderOpen, IconTone::Normal, 13.0))
         .padding([8, 9])
         .style(navigation_icon_button_style());
@@ -256,7 +254,7 @@ fn search_path_input_row(
             input,
             tooltip(
                 chooser,
-                path_tooltip("Choose directory"),
+                path_tooltip(tr!("Choose directory")),
                 tooltip::Position::Left,
             ),
         ]
@@ -267,7 +265,7 @@ fn search_path_input_row(
     )
 }
 
-fn path_tooltip(label: &'static str) -> Element<'static, Message> {
+fn path_tooltip(label: String) -> Element<'static, Message> {
     container(readable_text(label).size(11))
         .padding([4, 6])
         .into()
@@ -276,14 +274,14 @@ fn path_tooltip(label: &'static str) -> Element<'static, Message> {
 fn content_indexing_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
     vec![
         toggle_setting_row(
-            "Index File Contents",
+            tr!("Index File Contents"),
             None,
             browser.user_config().search_content_indexing_enabled,
             Message::SearchContentIndexingToggled,
         ),
         info_setting_row(
-            localized_text(format!(
-                "Maximum content extraction: {}",
+            readable_text(tr!(
+                "Maximum content extraction: %1",
                 format_file_size(browser.user_config().search_max_extract_bytes)
             ))
             .size(12)
@@ -297,15 +295,16 @@ fn status_overview_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
     let mut rows = Vec::new();
 
     match &service.endpoint {
-        SearchEndpointState::Starting => rows.push(status_notice(
-            "Checking the search service. Status will update automatically.",
-        )),
+        SearchEndpointState::Starting => rows.push(status_notice(tr!(
+            "Checking the search service. Status will update automatically."
+        ))),
         SearchEndpointState::Connected => {}
         SearchEndpointState::Rechecking {
             consecutive_failures,
             ..
-        } => rows.push(status_notice(format!(
-            "Connection is unstable. Rechecking automatically ({consecutive_failures}/3); showing the last confirmed status."
+        } => rows.push(status_notice(tr!(
+            "Connection is unstable. Rechecking automatically (%1/3); showing the last confirmed status.",
+            consecutive_failures
         ))),
         SearchEndpointState::Unavailable { diagnostic } => {
             rows.push(diagnostic_notice(diagnostic.kind));
@@ -316,22 +315,19 @@ fn status_overview_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
         rows.extend(confirmed_status_summary_rows(status));
         if let Some(confirmed_at) = service.last_confirmed_at {
             rows.push(info_setting_row(
-                localized_text(format!(
-                    "Last confirmed: {}",
-                    format_system_time(confirmed_at)
-                ))
-                .size(11)
-                .into(),
+                readable_text(tr!("Last confirmed: %1", format_system_time(confirmed_at)))
+                    .size(11)
+                    .into(),
             ));
         }
     } else {
         rows.extend([
             summary_value_row(
-                "Service",
+                tr!("Service"),
                 endpoint_without_snapshot_label(&service.endpoint),
             ),
-            summary_value_row("Indexed search", "Waiting for service status"),
-            summary_value_row("Index maintenance", "Not initialized"),
+            summary_value_row(tr!("Indexed search"), tr!("Waiting for service status")),
+            summary_value_row(tr!("Index maintenance"), tr!("Not initialized")),
         ]);
     }
 
@@ -340,57 +336,57 @@ fn status_overview_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
 
 fn confirmed_status_summary_rows(status: &SearchServiceStatus) -> Vec<Element<'static, Message>> {
     vec![
-        summary_value_row("Service", service_phase_label(&status.phase)),
+        summary_value_row(tr!("Service"), service_phase_label(&status.phase)),
         summary_value_row(
-            "Indexed search",
+            tr!("Indexed search"),
             query_availability_label(&status.query_availability),
         ),
-        summary_value_row("Index maintenance", index_maintenance_label(status)),
+        summary_value_row(tr!("Index maintenance"), index_maintenance_label(status)),
     ]
 }
 
-fn service_phase_label(phase: &SearchServicePhase) -> &'static str {
+fn service_phase_label(phase: &SearchServicePhase) -> String {
     match phase {
-        SearchServicePhase::Starting => "Starting",
-        SearchServicePhase::Ready => "Running",
-        SearchServicePhase::Degraded { .. } => "Needs attention",
-        SearchServicePhase::Failed { .. } => "Unavailable",
-        SearchServicePhase::ShuttingDown => "Stopping",
+        SearchServicePhase::Starting => tr!("Starting"),
+        SearchServicePhase::Ready => tr!("Running"),
+        SearchServicePhase::Degraded { .. } => tr!("Needs attention"),
+        SearchServicePhase::Failed { .. } => tr!("Unavailable"),
+        SearchServicePhase::ShuttingDown => tr!("Stopping"),
     }
 }
 
-fn query_availability_label(availability: &IndexedQueryAvailability) -> &'static str {
+fn query_availability_label(availability: &IndexedQueryAvailability) -> String {
     match availability {
-        IndexedQueryAvailability::Available => "Available",
-        IndexedQueryAvailability::Unavailable { .. } => "Temporarily unavailable",
+        IndexedQueryAvailability::Available => tr!("Available"),
+        IndexedQueryAvailability::Unavailable { .. } => tr!("Temporarily unavailable"),
     }
 }
 
-fn index_maintenance_label(status: &SearchServiceStatus) -> &'static str {
+fn index_maintenance_label(status: &SearchServiceStatus) -> String {
     let Some(index_status) = status.index_status.as_ref() else {
-        return "Not initialized";
+        return tr!("Not initialized");
     };
     match index_status.health {
-        IndexHealth::Healthy => "Healthy",
-        IndexHealth::Degraded { .. } => "Needs attention",
-        IndexHealth::Error { .. } => "Unavailable",
+        IndexHealth::Healthy => tr!("Healthy"),
+        IndexHealth::Degraded { .. } => tr!("Needs attention"),
+        IndexHealth::Error { .. } => tr!("Unavailable"),
     }
 }
 
-fn endpoint_without_snapshot_label(endpoint: &SearchEndpointState) -> &'static str {
+fn endpoint_without_snapshot_label(endpoint: &SearchEndpointState) -> String {
     match endpoint {
-        SearchEndpointState::Starting => "Checking",
-        SearchEndpointState::Connected => "Running",
-        SearchEndpointState::Rechecking { .. } => "Rechecking",
-        SearchEndpointState::Unavailable { .. } => "Unavailable",
+        SearchEndpointState::Starting => tr!("Checking"),
+        SearchEndpointState::Connected => tr!("Running"),
+        SearchEndpointState::Rechecking { .. } => tr!("Rechecking"),
+        SearchEndpointState::Unavailable { .. } => tr!("Unavailable"),
     }
 }
 
 fn diagnostic_notice(kind: SearchServiceDiagnosticKind) -> Element<'static, Message> {
     info_setting_row(
         column![
-            localized_text(diagnostic_title(kind)).size(13),
-            localized_text(diagnostic_recommendation(kind))
+            readable_text(diagnostic_title(kind)).size(13),
+            readable_text(diagnostic_recommendation(kind))
                 .size(11)
                 .width(Length::Fill),
         ]
@@ -400,39 +396,33 @@ fn diagnostic_notice(kind: SearchServiceDiagnosticKind) -> Element<'static, Mess
     )
 }
 
-fn status_notice(message: impl Into<String>) -> Element<'static, Message> {
-    info_setting_row(
-        localized_text(message.into())
-            .size(11)
-            .width(Length::Fill)
-            .into(),
-    )
+fn status_notice(message: String) -> Element<'static, Message> {
+    info_setting_row(readable_text(message).size(11).width(Length::Fill).into())
 }
 
-fn summary_value_row(label: &'static str, value: impl Into<String>) -> Element<'static, Message> {
+fn summary_value_row(label: String, value: String) -> Element<'static, Message> {
     labeled_setting_row(
         label,
-        localized_text(value.into())
-            .size(12)
-            .width(Length::Shrink)
-            .into(),
+        readable_text(value).size(12).width(Length::Shrink).into(),
     )
 }
 
 fn index_progress_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
     let Some(status) = browser.search_service.confirmed_status.as_ref() else {
-        return vec![status_notice(
-            "Index progress will appear after the service responds.",
-        )];
+        return vec![status_notice(tr!(
+            "Index progress will appear after the service responds."
+        ))];
     };
     let Some(index_status) = status.index_status.as_ref() else {
-        return vec![status_notice("The index has not been initialized yet.")];
+        return vec![status_notice(tr!(
+            "The index has not been initialized yet."
+        ))];
     };
 
     let mut rows = vec![
-        summary_value_row("Index phase", index_phase_label(&index_status.phase)),
+        summary_value_row(tr!("Index phase"), index_phase_label(&index_status.phase)),
         summary_value_row(
-            "Indexed items",
+            tr!("Indexed items"),
             format_count(index_status.visible_indexed_files),
         ),
     ];
@@ -442,11 +432,11 @@ fn index_progress_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
             changed_entries,
         } => {
             rows.push(summary_value_row(
-                "Checked items",
+                tr!("Checked items"),
                 format_count(*checked_entries),
             ));
             rows.push(summary_value_row(
-                "Changed items",
+                tr!("Changed items"),
                 format_count(*changed_entries),
             ));
         }
@@ -455,16 +445,16 @@ fn index_progress_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
             current_scope,
         } => {
             rows.push(summary_value_row(
-                "Scanned items",
+                tr!("Scanned items"),
                 format_count(*scanned_entries),
             ));
             rows.push(summary_value_row(
-                "Current location",
+                tr!("Current location"),
                 current_scope.to_string_lossy().into_owned(),
             ));
         }
         IndexPhase::Applying { pending_mutations } => rows.push(summary_value_row(
-            "Pending changes",
+            tr!("Pending changes"),
             format_count(*pending_mutations),
         )),
         IndexPhase::Starting | IndexPhase::Complete | IndexPhase::Failed { .. } => {}
@@ -472,22 +462,22 @@ fn index_progress_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
     rows
 }
 
-fn index_phase_label(phase: &IndexPhase) -> &'static str {
+fn index_phase_label(phase: &IndexPhase) -> String {
     match phase {
-        IndexPhase::Starting => "Starting",
-        IndexPhase::Checking { .. } => "Checking existing files",
-        IndexPhase::Crawling { .. } => "Scanning files",
-        IndexPhase::Applying { .. } => "Applying changes",
-        IndexPhase::Complete => "Up to date",
-        IndexPhase::Failed { .. } => "Failed",
+        IndexPhase::Starting => tr!("Starting"),
+        IndexPhase::Checking { .. } => tr!("Checking existing files"),
+        IndexPhase::Crawling { .. } => tr!("Scanning files"),
+        IndexPhase::Applying { .. } => tr!("Applying changes"),
+        IndexPhase::Complete => tr!("Up to date"),
+        IndexPhase::Failed { .. } => tr!("Failed"),
     }
 }
 
 fn recent_issue_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
     if browser.search_service.incidents.is_empty() {
-        return vec![status_notice(
-            "No search service issues detected during this app session.",
-        )];
+        return vec![status_notice(tr!(
+            "No search service issues detected during this app session."
+        ))];
     }
 
     browser
@@ -500,51 +490,50 @@ fn recent_issue_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
 
 fn issue_row(incident: &SearchServiceIncident) -> Element<'_, Message> {
     let state_label = match incident.state {
-        SearchServiceIncidentState::Current => "Current issue",
-        SearchServiceIncidentState::Recovered => "Recovered",
+        SearchServiceIncidentState::Current => tr!("Current issue"),
+        SearchServiceIncidentState::Recovered => tr!("Recovered"),
     };
     let occurrence_label = if incident.occurrence_count == 1 {
-        "Occurred once".to_owned()
+        tr!("Occurred once")
     } else {
-        format!("Occurred {} times", incident.occurrence_count)
+        tr!("Occurred %1 times", incident.occurrence_count)
     };
-    let metadata = format!(
-        "{} · {} · {}: {} · {}: {}",
-        crate::localization::translate_current(state_label),
-        crate::localization::translate_current(&occurrence_label),
-        crate::localization::translate_current("First"),
+    let metadata = tr!(
+        "%1 · %2 · First: %3 · Latest: %4",
+        state_label,
+        occurrence_label,
         format_system_time(incident.first_seen),
-        crate::localization::translate_current("Latest"),
-        format_system_time(incident.last_seen),
+        format_system_time(incident.last_seen)
     );
     let detail_button_label = if incident.technical_detail_expanded {
-        "Hide technical details"
+        tr!("Hide technical details")
     } else {
-        "Show technical details"
+        tr!("Show technical details")
     };
     let detail_button =
-        button(container(localized_text(detail_button_label).size(11)).padding([4, 8]))
+        button(container(readable_text(detail_button_label).size(11)).padding([4, 8]))
             .on_press(Message::SearchServiceIncidentDetailsToggled(incident.kind))
             .style(context_menu_button_style());
 
     let mut content = Column::new()
         .spacing(4)
         .width(Length::Fill)
-        .push(localized_text(diagnostic_title(incident.kind)).size(13))
-        .push(localized_text(diagnostic_recommendation(incident.kind)).size(11))
+        .push(readable_text(diagnostic_title(incident.kind)).size(13))
+        .push(readable_text(diagnostic_recommendation(incident.kind)).size(11))
         .push(readable_text(metadata).size(10))
         .push(detail_button);
 
     if incident.technical_detail_expanded {
-        let copy_button =
-            button(container(localized_text("Copy technical details").size(11)).padding([4, 8]))
-                .on_press(Message::SearchServiceIncidentDetailsCopyRequested(
-                    incident.kind,
-                ))
-                .style(context_menu_button_style());
+        let copy_button = button(
+            container(readable_text(tr!("Copy technical details")).size(11)).padding([4, 8]),
+        )
+        .on_press(Message::SearchServiceIncidentDetailsCopyRequested(
+            incident.kind,
+        ))
+        .style(context_menu_button_style());
         content = content
             .push(
-                readable_text(&incident.technical_detail)
+                readable_text(incident.technical_detail.clone())
                     .size(10)
                     .width(Length::Fill),
             )
@@ -558,8 +547,8 @@ fn service_recovery_rows(browser: &FileBrowser) -> Vec<Element<'static, Message>
     let recovery = &browser.search_service.recovery;
     let recovery_is_running = recovery.is_running();
     let restart_row = action_setting_row(
-        "Restart Index Service",
-        "Gracefully stop and restart the managed service.",
+        tr!("Restart Index Service"),
+        tr!("Gracefully stop and restart the managed service."),
     );
     let restart_row = if recovery_is_running {
         restart_row
@@ -569,14 +558,14 @@ fn service_recovery_rows(browser: &FileBrowser) -> Vec<Element<'static, Message>
 
     let force_restart_row = if *recovery == SearchServiceRecoveryState::ConfirmingForceRestart {
         action_setting_row(
-            "Click Again to Force Restart",
-            "Current indexing work will stop. Index data and settings will be kept.",
+            tr!("Click Again to Force Restart"),
+            tr!("Current indexing work will stop. Index data and settings will be kept."),
         )
         .style(destructive_confirmation_button_style())
     } else {
         action_setting_row(
-            "Force Restart",
-            "Use only when the managed service is unresponsive.",
+            tr!("Force Restart"),
+            tr!("Use only when the managed service is unresponsive."),
         )
     };
     let force_restart_row = if recovery_is_running {
@@ -593,81 +582,83 @@ fn service_recovery_rows(browser: &FileBrowser) -> Vec<Element<'static, Message>
     rows
 }
 
-fn recovery_status_text(state: &SearchServiceRecoveryState) -> Option<&'static str> {
+fn recovery_status_text(state: &SearchServiceRecoveryState) -> Option<String> {
     match state {
         SearchServiceRecoveryState::Idle | SearchServiceRecoveryState::ConfirmingForceRestart => {
             None
         }
         SearchServiceRecoveryState::Running(SearchServiceRecoveryAction::Restart) => {
-            Some("Restarting index service...")
+            Some(tr!("Restarting index service..."))
         }
         SearchServiceRecoveryState::Running(SearchServiceRecoveryAction::ForceRestart) => {
-            Some("Force restarting index service...")
+            Some(tr!("Force restarting index service..."))
         }
         SearchServiceRecoveryState::Succeeded(SearchServiceRecoveryAction::Restart) => {
-            Some("Index service restarted successfully.")
+            Some(tr!("Index service restarted successfully."))
         }
         SearchServiceRecoveryState::Succeeded(SearchServiceRecoveryAction::ForceRestart) => {
-            Some("Index service force restarted successfully.")
+            Some(tr!("Index service force restarted successfully."))
         }
-        SearchServiceRecoveryState::Failed { .. } => {
-            Some("Index service restart failed. See Recent Issues for technical details.")
-        }
+        SearchServiceRecoveryState::Failed { .. } => Some(tr!(
+            "Index service restart failed. See Recent Issues for technical details."
+        )),
     }
 }
 
-fn diagnostic_title(kind: SearchServiceDiagnosticKind) -> &'static str {
+fn diagnostic_title(kind: SearchServiceDiagnosticKind) -> String {
     match kind {
-        SearchServiceDiagnosticKind::EndpointTimedOut => "Search service response is delayed",
-        SearchServiceDiagnosticKind::EndpointUnavailable => "Cannot reach the search service",
-        SearchServiceDiagnosticKind::ServiceChanging => "Search service is changing",
-        SearchServiceDiagnosticKind::ServiceUnverified => "Cannot verify the search service",
-        SearchServiceDiagnosticKind::EndpointInvalid => "Search service connection is inconsistent",
+        SearchServiceDiagnosticKind::EndpointTimedOut => tr!("Search service response is delayed"),
+        SearchServiceDiagnosticKind::EndpointUnavailable => tr!("Cannot reach the search service"),
+        SearchServiceDiagnosticKind::ServiceChanging => tr!("Search service is changing"),
+        SearchServiceDiagnosticKind::ServiceUnverified => tr!("Cannot verify the search service"),
+        SearchServiceDiagnosticKind::EndpointInvalid => {
+            tr!("Search service connection is inconsistent")
+        }
         SearchServiceDiagnosticKind::ComponentIncompatible => {
-            "Search service components do not match"
+            tr!("Search service components do not match")
         }
-        SearchServiceDiagnosticKind::RecoveryFailed => "Could not restart the search service",
-        SearchServiceDiagnosticKind::ServiceDegraded => "Search service needs attention",
-        SearchServiceDiagnosticKind::ServiceFailed => "Search service stopped working",
+        SearchServiceDiagnosticKind::RecoveryFailed => tr!("Could not restart the search service"),
+        SearchServiceDiagnosticKind::ServiceDegraded => tr!("Search service needs attention"),
+        SearchServiceDiagnosticKind::ServiceFailed => tr!("Search service stopped working"),
         SearchServiceDiagnosticKind::IndexedQueriesUnavailable => {
-            "Indexed search is temporarily unavailable"
+            tr!("Indexed search is temporarily unavailable")
         }
-        SearchServiceDiagnosticKind::IndexFailed => "Index update failed",
+        SearchServiceDiagnosticKind::IndexFailed => tr!("Index update failed"),
         SearchServiceDiagnosticKind::IndexMaintenanceDegraded => {
-            "Index maintenance needs attention"
+            tr!("Index maintenance needs attention")
         }
-        SearchServiceDiagnosticKind::IndexMaintenanceFailed => "Index maintenance stopped",
+        SearchServiceDiagnosticKind::IndexMaintenanceFailed => tr!("Index maintenance stopped"),
     }
 }
 
-fn diagnostic_recommendation(kind: SearchServiceDiagnosticKind) -> &'static str {
+fn diagnostic_recommendation(kind: SearchServiceDiagnosticKind) -> String {
     match kind {
         SearchServiceDiagnosticKind::EndpointTimedOut
         | SearchServiceDiagnosticKind::EndpointUnavailable
-        | SearchServiceDiagnosticKind::ServiceChanging => {
+        | SearchServiceDiagnosticKind::ServiceChanging => tr!(
             "Wait for automatic rechecking. If the problem continues, restart the index service."
-        }
-        SearchServiceDiagnosticKind::ServiceUnverified => {
+        ),
+        SearchServiceDiagnosticKind::ServiceUnverified => tr!(
             "Review the technical details. Restart the index service if the problem continues."
-        }
+        ),
         SearchServiceDiagnosticKind::EndpointInvalid => {
-            "Restart the index service to establish a verified connection."
+            tr!("Restart the index service to establish a verified connection.")
         }
         SearchServiceDiagnosticKind::ComponentIncompatible => {
-            "Reinstall the search components from the current Bennu package."
+            tr!("Reinstall the search components from the current Bennu package.")
         }
-        SearchServiceDiagnosticKind::RecoveryFailed => {
+        SearchServiceDiagnosticKind::RecoveryFailed => tr!(
             "Review the technical details. Use force restart only if the service remains unresponsive."
-        }
+        ),
         SearchServiceDiagnosticKind::ServiceDegraded
         | SearchServiceDiagnosticKind::IndexedQueriesUnavailable
         | SearchServiceDiagnosticKind::IndexMaintenanceDegraded => {
-            "Search may use a slower fallback while the service recovers."
+            tr!("Search may use a slower fallback while the service recovers.")
         }
         SearchServiceDiagnosticKind::ServiceFailed
         | SearchServiceDiagnosticKind::IndexFailed
         | SearchServiceDiagnosticKind::IndexMaintenanceFailed => {
-            "Restart the index service. Existing index data and settings will be kept."
+            tr!("Restart the index service. Existing index data and settings will be kept.")
         }
     }
 }

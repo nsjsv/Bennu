@@ -48,13 +48,13 @@ impl FileBrowser {
             Ok(mib) => mib,
             Err(_) => {
                 self.preview_size_limit_mib_errors[kind_index] =
-                    Some("Enter a whole number of MiB (0 = unlimited).".to_owned());
+                    Some(tr!("Enter a whole number of MiB (0 = unlimited)."));
                 return Task::none();
             }
         };
         let Some(bytes) = config::preview_size_limit_bytes_from_mib(mib) else {
             self.preview_size_limit_mib_errors[kind_index] =
-                Some("Enter a smaller preview size.".to_owned());
+                Some(tr!("Enter a smaller preview size."));
             return Task::none();
         };
 
@@ -85,12 +85,12 @@ impl FileBrowser {
             .parse::<u8>()
         else {
             self.preview_directory_expand_levels_error =
-                Some("Enter a whole number from 0 to 3.".to_owned());
+                Some(tr!("Enter a whole number from 0 to 3."));
             return Task::none();
         };
         if levels > config::MAX_PREVIEW_DIRECTORY_EXPAND_LEVELS {
             self.preview_directory_expand_levels_error =
-                Some("Enter a whole number from 0 to 3.".to_owned());
+                Some(tr!("Enter a whole number from 0 to 3."));
             return Task::none();
         }
 

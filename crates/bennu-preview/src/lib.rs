@@ -55,8 +55,8 @@ pub mod text_preview_loading;
 // 滚动几何宿主（smooth_scroll/ScrollbarRegion）仍留 app-ui，部件经
 // 调用方注入的闭包输出事件（见 spec text-preview-scrolling-guidelines）。
 pub mod text_preview_viewer;
-// 面板文本构造辅助（readable_text/localized_text 单源，翻译经
-// bennu-localization），app-ui typography re-export 维持调用路径。
+// 面板文本构造辅助（readable_text 单源；只收成品字符串，文案由调用方
+// 经 tr! 取得），app-ui typography re-export 维持调用路径。
 pub mod panel_text;
 // Markdown 预览渲染面板（pulldown-cmark 收集器 + 块视图），滚动接线经
 // scroll_wiring 由宿主注入。

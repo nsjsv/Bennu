@@ -382,11 +382,11 @@ impl FileBrowser {
             return Ok(());
         }
         if self.is_trash_view {
-            return Err("Search is available from a local folder".to_owned());
+            return Err(tr!("Search is available from a local folder"));
         }
         let root = self.current_search_directory();
         if self.path_is_remote_mount(&root) {
-            return Err("Search is unavailable for remote folders".to_owned());
+            return Err(tr!("Search is unavailable for remote folders"));
         }
         let session_id = SearchWorkspaceSessionId(self.next_search_workspace_session_id);
         self.next_search_workspace_session_id =
@@ -435,7 +435,7 @@ impl FileBrowser {
         if let SearchMatchMode::Regex = match_mode {
             if let Err(SearchError::InvalidQuery(message)) = match_mode.name_regex(&terms) {
                 if let Some(workspace) = self.search_workspace.as_mut() {
-                    workspace.reject_query(format!("Invalid regular expression: {message}"));
+                    workspace.reject_query(tr!("Invalid regular expression: %1", message));
                 }
                 return Task::none();
             }
@@ -486,9 +486,9 @@ impl FileBrowser {
         if !root_is_available {
             let message = match &query.scope {
                 SearchScope::Directory(root) => {
-                    format!("Search root is unavailable: {}", root.display())
+                    tr!("Search root is unavailable: %1", root.display())
                 }
-                _ => "Search root is unavailable".to_owned(),
+                _ => tr!("Search root is unavailable"),
             };
             if let Some(workspace) = self.search_workspace.as_mut() {
                 workspace.reject_query(message);
@@ -754,12 +754,12 @@ impl FileBrowser {
 
     pub(super) fn open_search_containing_directory(&mut self, path: PathBuf) -> Task<Message> {
         let Some(parent) = path.parent().map(Path::to_path_buf) else {
-            self.fail_search_workspace("The result has no containing directory".to_owned());
+            self.fail_search_workspace(tr!("The result has no containing directory"));
             return Task::none();
         };
         if !parent.is_dir() {
-            self.fail_search_workspace(format!(
-                "Containing directory is unavailable: {}",
+            self.fail_search_workspace(tr!(
+                "Containing directory is unavailable: %1",
                 parent.display()
             ));
             return Task::none();

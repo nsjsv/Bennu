@@ -22,11 +22,6 @@ const ABOUT_ICON_SIZE: f32 = 140.0;
 /// 品牌展示名，不做翻译。
 const APP_DISPLAY_NAME: &str = "Bennu";
 
-const LICENSE_DESCRIPTION: &str =
-    "Bennu is free software released under the GNU General Public License, version 3 or later.";
-const REPOSITORY_ROW_TITLE: &str = "GitHub repository";
-const REPOSITORY_ROW_DESCRIPTION: &str = "Report issues or browse the source code in your browser.";
-
 /// 关于分类页详情：三张卡片从上到下，滚动行为与其他分类页一致。
 pub(super) fn about_settings_detail(
     browser: &FileBrowser,
@@ -37,9 +32,9 @@ pub(super) fn about_settings_detail(
         chrome_top_spacer(browser),
         app_identity_row(),
         settings_group(
-            "License",
+            tr!("License"),
             vec![info_setting_row(muted_setting_text(
-                LICENSE_DESCRIPTION,
+                tr!("Bennu is free software released under the GNU General Public License, version 3 or later."),
                 11
             ))],
         ),
@@ -59,11 +54,7 @@ pub(super) fn about_settings_detail(
 
 fn app_identity_row() -> Element<'static, Message> {
     let icon_size = ABOUT_ICON_SIZE;
-    let version = format!(
-        "{} {}",
-        crate::localization::translate_current("Version"),
-        env!("CARGO_PKG_VERSION")
-    );
+    let version = tr!("Version %1", env!("CARGO_PKG_VERSION"));
     // 草图复刻：图标、名称、版本竖排居中。图标位图四角透明，用同色白底
     // 容器垫平（底色取自 512 源的贴片底色），圆角比例与源图一致。
     column![
@@ -83,7 +74,7 @@ fn app_identity_row() -> Element<'static, Message> {
             },
             ..iced::widget::container::Style::default()
         }),
-        readable_text(APP_DISPLAY_NAME).size(15),
+        readable_text(APP_DISPLAY_NAME.to_owned()).size(15),
         text(version)
             .size(11)
             .style(|theme: &Theme| iced::widget::text::Style {
@@ -98,10 +89,13 @@ fn app_identity_row() -> Element<'static, Message> {
 
 fn repository_link_row() -> Element<'static, Message> {
     let labels = column![
-        readable_text(REPOSITORY_ROW_TITLE)
+        readable_text(tr!("GitHub repository"))
             .size(12)
             .width(Length::Fill),
-        muted_setting_text(REPOSITORY_ROW_DESCRIPTION, 11),
+        muted_setting_text(
+            tr!("Report issues or browse the source code in your browser."),
+            11
+        ),
     ]
     .spacing(2)
     .width(Length::Fill);

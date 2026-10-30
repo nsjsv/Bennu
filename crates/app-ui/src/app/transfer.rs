@@ -536,9 +536,16 @@ impl FileBrowser {
         if self.system_focused_window.is_some() || (saved_paths.is_empty() && failed.is_empty()) {
             return iced::Task::none();
         }
-        let summary = crate::localization::translate_current("Files received");
-        let body =
-            crate::localization::transfer_receive_finished_body(saved_paths.len(), failed.len());
+        let summary = tr!("Files received");
+        let body = if failed.is_empty() {
+            tr!("Received %1 file(s).", saved_paths.len())
+        } else {
+            tr!(
+                "Received %1 file(s), %2 failed.",
+                saved_paths.len(),
+                failed.len()
+            )
+        };
         crate::commands::publish_desktop_notification_command(summary, body)
     }
 
@@ -756,8 +763,8 @@ fn download_dir_chooser_command() -> iced::Task<Message> {
 }
 
 async fn choose_download_directory() -> Result<Option<PathBuf>, String> {
-    let title = crate::localization::translate_current("Choose receive directory");
-    let accept_label = crate::localization::translate_current("Select");
+    let title = tr!("Choose receive directory");
+    let accept_label = tr!("Select");
     let request = ashpd::desktop::file_chooser::SelectedFiles::open_file()
         .title(title.as_str())
         .accept_label(accept_label.as_str())
@@ -777,14 +784,14 @@ async fn choose_download_directory() -> Result<Option<PathBuf>, String> {
         .first()
         .map(|uri| {
             uri.to_file_path()
-                .map_err(|_| "the selected location is not a local directory".to_owned())
+                .map_err(|_| tr!("the selected location is not a local directory"))
         })
         .transpose()
 }
 
 /// 服务启动失败的用户可见文案（保留底层错误）。
 fn transfer_service_start_failed(error: &LocalSendError) -> String {
-    crate::localization::translate_current(&format!("Could not start transfer service: {error}"))
+    tr!("Could not start transfer service: %1", error)
 }
 
 #[cfg(test)]

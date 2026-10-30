@@ -31,7 +31,7 @@ pub(super) fn transfer_conflict_panel<'a>(
     thumbnail_cache: &'a ThumbnailCache,
 ) -> Element<'a, Message> {
     let Some(conflict) = state.current_conflict() else {
-        return container(readable_text("No pending conflicts").size(14))
+        return container(readable_text(tr!("No pending conflicts")).size(14))
             .padding(14)
             .width(Length::Fixed(TRANSFER_CONFLICT_PANEL_WIDTH))
             .style(context_menu_style)
@@ -62,9 +62,7 @@ pub(super) fn transfer_conflict_panel<'a>(
     );
 
     let apply_to_all = checkbox(state.apply_to_all)
-        .label(crate::localization::translate_current(
-            "Apply this action to all files and folders",
-        ))
+        .label(tr!("Apply this action to all files and folders"))
         .on_toggle(|_| Message::TransferConflictApplyToAllToggled)
         .size(18)
         .text_size(14)
@@ -73,20 +71,20 @@ pub(super) fn transfer_conflict_panel<'a>(
     // 「合并」只在源与目标都是目录时提供(与冲突项 can_merge 同源)。
     let merge_offered = conflict.can_merge();
     let mut actions = row![
-        conflict_action_button("Cancel", Message::TransferConflictCancelRequested),
+        conflict_action_button(tr!("Cancel"), Message::TransferConflictCancelRequested),
         Space::new().width(Length::Fill),
         conflict_action_button(
-            "Skip",
+            tr!("Skip"),
             Message::TransferConflictChoiceSelected(TransferConflictChoice::Skip),
         ),
         Space::new().width(Length::Fill),
         conflict_action_button(
-            "Keep Both",
+            tr!("Keep Both"),
             Message::TransferConflictChoiceSelected(TransferConflictChoice::KeepBoth),
         ),
         Space::new().width(Length::Fill),
         conflict_action_button(
-            "Replace",
+            tr!("Replace"),
             Message::TransferConflictChoiceSelected(TransferConflictChoice::Replace),
         ),
     ]
@@ -96,7 +94,7 @@ pub(super) fn transfer_conflict_panel<'a>(
         actions = actions
             .push(Space::new().width(Length::Fill))
             .push(conflict_action_button(
-                "Merge",
+                tr!("Merge"),
                 Message::TransferConflictChoiceSelected(TransferConflictChoice::Merge),
             ));
     }
@@ -130,12 +128,10 @@ fn conflict_title(conflict: &TransferConflictItem) -> String {
         .or_else(|| conflict.source.file_name())
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "item".to_owned());
-    let file_name = format_middle_ellipsized_text(&file_name, TRANSFER_CONFLICT_NAME_MAX_CHARS);
-    if crate::localization::current_language_is_chinese() {
-        format!("此文件夹已包含名为“{file_name}”的文件。")
-    } else {
-        format!("This folder already contains a file named \"{file_name}\".")
-    }
+    tr!(
+        "This folder already contains a file named \"%1\".",
+        format_middle_ellipsized_text(&file_name, TRANSFER_CONFLICT_NAME_MAX_CHARS)
+    )
 }
 
 fn conflict_count_label(state: &TransferConflictState) -> Element<'_, Message> {
@@ -193,62 +189,28 @@ fn conflict_section_title(section_kind: ConflictFileSectionKind, path: &Path) ->
 
     match section_kind {
         ConflictFileSectionKind::Existing => {
-            if crate::localization::current_language_is_chinese() {
-                format!("替换“{directory}”中的现有文件")
-            } else {
-                format!("Replace the existing file in \"{directory}\"")
-            }
+            tr!("Replace the existing file in \"%1\"", directory)
         }
-        ConflictFileSectionKind::Incoming => {
-            if crate::localization::current_language_is_chinese() {
-                "使用以下文件？".to_owned()
-            } else {
-                "Use the following file?".to_owned()
-            }
-        }
+        ConflictFileSectionKind::Incoming => tr!("Use the following file?"),
     }
 }
 
 fn conflict_size_label(metadata: &TransferConflictMetadata) -> String {
     if metadata.is_directory {
-        if crate::localization::current_language_is_chinese() {
-            "大小：文件夹".to_owned()
-        } else {
-            "Size: folder".to_owned()
-        }
+        tr!("Size: folder")
     } else {
-        if crate::localization::current_language_is_chinese() {
-            format!(
-                "大小：{}（{} 字节）",
-                format_file_size(metadata.len),
-                metadata.len
-            )
-        } else {
-            format!(
-                "Size: {} ({} bytes)",
-                format_file_size(metadata.len),
-                metadata.len
-            )
-        }
+        tr!(
+            "Size: %1 (%2 bytes)",
+            format_file_size(metadata.len),
+            metadata.len
+        )
     }
 }
 
 fn conflict_modified_label(modified: Option<SystemTime>) -> String {
     modified
-        .map(|time| {
-            if crate::localization::current_language_is_chinese() {
-                format!("修改时间：{}", format_system_time(time))
-            } else {
-                format!("Modified: {}", format_system_time(time))
-            }
-        })
-        .unwrap_or_else(|| {
-            if crate::localization::current_language_is_chinese() {
-                "修改时间：未知".to_owned()
-            } else {
-                "Modified: unknown".to_owned()
-            }
-        })
+        .map(|time| tr!("Modified: %1", format_system_time(time)))
+        .unwrap_or_else(|| tr!("Modified: unknown"))
 }
 
 fn conflict_icon(conflict: &TransferConflictItem) -> Svg<'static, Theme> {
@@ -301,7 +263,7 @@ fn conflict_icon_symbol(metadata: &TransferConflictMetadata, path: &Path) -> Ico
     }
 }
 
-fn conflict_action_button(label: &'static str, message: Message) -> Button<'static, Message> {
+fn conflict_action_button(label: String, message: Message) -> Button<'static, Message> {
     button(
         container(readable_text(label).size(14))
             .width(Length::Fill)

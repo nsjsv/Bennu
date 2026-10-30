@@ -129,7 +129,7 @@ pub(crate) fn transfer_placeholder_list_row(
             .align_y(Alignment::Center)
             .width(list_column_width(column.width))
             .into(),
-            _ => container(readable_text("-").size(geometry.text_size))
+            _ => container(readable_text("-".to_owned()).size(geometry.text_size))
                 .width(list_column_width(column.width))
                 .clip(true)
                 .into(),
@@ -260,7 +260,7 @@ pub(crate) enum ListTransferRow<'a> {
         stripe_index: usize,
     },
     DirectoryStatusRow {
-        message: &'static str,
+        status: VisibleEntryStatusRow,
         depth: usize,
         height: f32,
         stripe_index: usize,
@@ -483,12 +483,8 @@ fn push_expansion_transfer_rows<'a>(
         return;
     };
     if let Some(status) = crate::visible_entries::visible_entry_status_row(expanded) {
-        let message = match status {
-            VisibleEntryStatusRow::Error => "Could not load",
-            VisibleEntryStatusRow::Empty => "No items",
-        };
         rows.push(ListTransferRow::DirectoryStatusRow {
-            message,
+            status,
             depth: depth + 1,
             height: row_height * expanded.animation_progress.clamp(0.0, 1.0),
             stripe_index: *stripe_index,

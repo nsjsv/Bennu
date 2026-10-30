@@ -158,18 +158,10 @@ font-size=\"{SUMMARY_TEXT_SIZE}\" fill=\"{content}\">{escaped}</text></svg>",
 
 /// 聚合行文案,窗口内预览与拖出位图共用同一份措辞。
 pub(crate) fn file_drag_group_summary_text(folder_count: usize, file_count: usize) -> String {
-    if crate::localization::current_language_is_chinese() {
-        match (folder_count, file_count) {
-            (0, files) => format!("{files} 个文件"),
-            (folders, 0) => format!("{folders} 个文件夹"),
-            (folders, files) => format!("{folders} 个文件夹,{files} 个文件"),
-        }
-    } else {
-        match (folder_count, file_count) {
-            (0, files) => format!("{files} files"),
-            (folders, 0) => format!("{folders} folders"),
-            (folders, files) => format!("{folders} folders, {files} files"),
-        }
+    match (folder_count, file_count) {
+        (0, files) => tr!("%1 files", files),
+        (folders, 0) => tr!("%1 folders", folders),
+        (folders, files) => tr!("%1 folders, %2 files", folders, files),
     }
 }
 

@@ -13,7 +13,7 @@ const SEGMENTED_CHOICE_HEIGHT: f32 = 30.0;
 const ACTION_CHOICE_HEIGHT: f32 = 58.0;
 
 pub(super) struct SegmentedChoice {
-    pub(super) label: &'static str,
+    pub(super) label: String,
     pub(super) selected: bool,
     pub(super) message: Message,
     /// 悬停补充说明（如"上次位置"档的完整路径）；None = 无。
@@ -59,8 +59,8 @@ pub(super) fn inactive_segmented_choice_row(
         .into()
 }
 pub(super) fn action_choice_row(
-    title: &'static str,
-    description: &'static str,
+    title: String,
+    description: String,
     message: Message,
 ) -> Element<'static, Message> {
     action_choice_button(title, description)
@@ -68,10 +68,7 @@ pub(super) fn action_choice_row(
         .into()
 }
 
-pub(super) fn action_choice_button(
-    title: &'static str,
-    description: &'static str,
-) -> Button<'static, Message> {
+pub(super) fn action_choice_button(title: String, description: String) -> Button<'static, Message> {
     let labels = Column::new()
         .spacing(2)
         .push(readable_text(title).size(12).width(Length::Fill))
@@ -84,26 +81,20 @@ pub(super) fn action_choice_button(
         .style(selectable_choice_button_style(false))
 }
 
-pub(super) fn primary_action_button(
-    label: &'static str,
-    message: Message,
-) -> Button<'static, Message> {
+pub(super) fn primary_action_button(label: String, message: Message) -> Button<'static, Message> {
     button(readable_text(label).size(12))
         .on_press(message)
         .padding([6, 12])
         .style(primary_action_button_style())
 }
 
-pub(super) fn inactive_primary_action_button(label: &'static str) -> Button<'static, Message> {
+pub(super) fn inactive_primary_action_button(label: String) -> Button<'static, Message> {
     button(readable_text(label).size(12))
         .padding([6, 12])
         .style(primary_action_button_style())
 }
 
-pub(super) fn secondary_action_button(
-    label: &'static str,
-    message: Message,
-) -> Button<'static, Message> {
+pub(super) fn secondary_action_button(label: String, message: Message) -> Button<'static, Message> {
     button(readable_text(label).size(12))
         .on_press(message)
         .padding([6, 12])

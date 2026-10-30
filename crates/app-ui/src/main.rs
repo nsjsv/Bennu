@@ -22,6 +22,10 @@
     clippy::useless_conversion
 )]
 
+// 几乎每个视图文件都写界面文案，tr!/tr_in! 在整个 crate 里直接可用。
+#[macro_use]
+extern crate bennu_localization;
+
 mod anchored_popup;
 mod animated_image_preview;
 mod animation;

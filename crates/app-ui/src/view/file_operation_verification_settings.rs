@@ -16,8 +16,10 @@ pub(super) fn file_operation_verification_options(
     };
 
     toggle_setting_row(
-        "Strong Verification",
-        Some("Compare copied file content hashes after standard metadata checks."),
+        tr!("Strong Verification"),
+        Some(tr!(
+            "Compare copied file content hashes after standard metadata checks."
+        )),
         is_strong,
         Message::FileOperationVerificationSelected(next_verification),
     )

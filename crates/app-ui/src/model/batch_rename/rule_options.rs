@@ -35,18 +35,18 @@ impl BatchRenameSortMode {
 
 impl fmt::Display for BatchRenameSortMode {
     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-        output.write_str(&crate::localization::translate_current(match self {
-            Self::SelectionOrder => "Selection order",
-            Self::NaturalAscending => "Natural",
-            Self::NameAscending => "Name A-Z",
-            Self::NameDescending => "Name Z-A",
-            Self::ModifiedAscending => "Modified old-new",
-            Self::ModifiedDescending => "Modified new-old",
-            Self::Random => "Random",
-            Self::ExtensionAscending => "Extension A-Z",
-            Self::ExtensionDescending => "Extension Z-A",
-            Self::Reverse => "Reverse",
-        }))
+        output.write_str(&match self {
+            Self::SelectionOrder => tr!("Selection order"),
+            Self::NaturalAscending => tr!("Natural"),
+            Self::NameAscending => tr!("Name A-Z"),
+            Self::NameDescending => tr!("Name Z-A"),
+            Self::ModifiedAscending => tr!("Modified old-new"),
+            Self::ModifiedDescending => tr!("Modified new-old"),
+            Self::Random => tr!("Random"),
+            Self::ExtensionAscending => tr!("Extension A-Z"),
+            Self::ExtensionDescending => tr!("Extension Z-A"),
+            Self::Reverse => tr!("Reverse"),
+        })
     }
 }
 
@@ -69,17 +69,21 @@ impl BatchRenameExtensionMode {
             Self::Uppercase,
         ]
     }
+
+    pub(crate) fn label(self) -> String {
+        match self {
+            Self::Preserve => tr!("Preserve"),
+            Self::Remove => tr!("Remove"),
+            Self::Replace => tr!("Replace"),
+            Self::Lowercase => tr!("lowercase"),
+            Self::Uppercase => tr!("UPPERCASE"),
+        }
+    }
 }
 
 impl fmt::Display for BatchRenameExtensionMode {
     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-        output.write_str(&crate::localization::translate_current(match self {
-            Self::Preserve => "Preserve",
-            Self::Remove => "Remove",
-            Self::Replace => "Replace",
-            Self::Lowercase => "lowercase",
-            Self::Uppercase => "UPPERCASE",
-        }))
+        output.write_str(&self.label())
     }
 }
 
@@ -117,12 +121,12 @@ impl BatchRenameReplaceScope {
 
 impl fmt::Display for BatchRenameReplaceScope {
     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-        output.write_str(&crate::localization::translate_current(match self {
-            Self::All => "All",
-            Self::First => "First",
-            Self::Last => "Last",
-            Self::Range => "Range",
-        }))
+        output.write_str(&match self {
+            Self::All => tr!("All"),
+            Self::First => tr!("First"),
+            Self::Last => tr!("Last"),
+            Self::Range => tr!("Range"),
+        })
     }
 }
 
@@ -146,12 +150,12 @@ impl BatchRenameInsertMode {
 
 impl fmt::Display for BatchRenameInsertMode {
     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-        output.write_str(&crate::localization::translate_current(match self {
-            Self::Before => "Before",
-            Self::After => "After",
-            Self::Position => "Position",
-            Self::AfterAnchor => "After text",
-        }))
+        output.write_str(&match self {
+            Self::Before => tr!("Before"),
+            Self::After => tr!("After"),
+            Self::Position => tr!("Position"),
+            Self::AfterAnchor => tr!("After text"),
+        })
     }
 }
 
@@ -174,10 +178,10 @@ impl BatchRenameSliceMode {
 
 impl fmt::Display for BatchRenameSliceMode {
     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-        output.write_str(&crate::localization::translate_current(match self {
-            Self::Position => "Position",
-            Self::AfterAnchor => "After text",
-        }))
+        output.write_str(&match self {
+            Self::Position => tr!("Position"),
+            Self::AfterAnchor => tr!("After text"),
+        })
     }
 }
 
@@ -195,16 +199,20 @@ impl BatchRenameRandomMode {
     pub(crate) fn options() -> Vec<Self> {
         vec![Self::Off, Self::ReplaceStem, Self::Prefix, Self::Suffix]
     }
+
+    pub(crate) fn label(self) -> String {
+        match self {
+            Self::Off => tr!("Off"),
+            Self::ReplaceStem => tr!("Replace stem"),
+            Self::Prefix => tr!("Prefix"),
+            Self::Suffix => tr!("Suffix"),
+        }
+    }
 }
 
 impl fmt::Display for BatchRenameRandomMode {
     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-        output.write_str(&crate::localization::translate_current(match self {
-            Self::Off => "Off",
-            Self::ReplaceStem => "Replace stem",
-            Self::Prefix => "Prefix",
-            Self::Suffix => "Suffix",
-        }))
+        output.write_str(&self.label())
     }
 }
 
@@ -228,28 +236,24 @@ impl BatchRenameRemoveMode {
 
 impl fmt::Display for BatchRenameRemoveMode {
     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-        output.write_str(&crate::localization::translate_current(match self {
-            Self::TextAndRange => "Text / Range",
-            Self::CharacterClasses => "Character classes",
-        }))
+        output.write_str(&match self {
+            Self::TextAndRange => tr!("Text / Range"),
+            Self::CharacterClasses => tr!("Character classes"),
+        })
     }
 }
 
 impl BatchRenameRemoveClass {
     fn localized_label(self, language: crate::config::UiLanguage) -> String {
-        crate::localization::translate(
-            language,
-            match self {
-                Self::Lowercase => "Lowercase",
-                Self::Uppercase => "Uppercase",
-                Self::Digits => "Digits",
-                Self::Symbols => "Symbols",
-                Self::Brackets => "Brackets",
-                Self::Whitespace => "Whitespace",
-                Self::Hanzi => "Hanzi",
-            },
-        )
-        .into_owned()
+        match self {
+            Self::Lowercase => tr_in!(language, "Lowercase"),
+            Self::Uppercase => tr_in!(language, "Uppercase"),
+            Self::Digits => tr_in!(language, "Digits"),
+            Self::Symbols => tr_in!(language, "Symbols"),
+            Self::Brackets => tr_in!(language, "Brackets"),
+            Self::Whitespace => tr_in!(language, "Whitespace"),
+            Self::Hanzi => tr_in!(language, "Hanzi"),
+        }
     }
 }
 
@@ -287,20 +291,20 @@ impl BatchRenameCaseRule {
         ]
     }
 
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::Unchanged => "Keep case",
-            Self::Lowercase => "lowercase",
-            Self::Uppercase => "UPPERCASE",
-            Self::TitleCase => "Title Case",
-            Self::InvertCase => "Invert Case",
+            Self::Unchanged => tr!("Keep case"),
+            Self::Lowercase => tr!("lowercase"),
+            Self::Uppercase => tr!("UPPERCASE"),
+            Self::TitleCase => tr!("Title Case"),
+            Self::InvertCase => tr!("Invert Case"),
         }
     }
 }
 
 impl fmt::Display for BatchRenameCaseRule {
     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-        output.write_str(&crate::localization::translate_current(self.label()))
+        output.write_str(&self.label())
     }
 }
 

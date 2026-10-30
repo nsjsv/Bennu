@@ -64,7 +64,7 @@ impl FileBrowser {
         self.invalidate_startup_directory_validation();
         let trimmed = self.startup_custom_directory_input.trim();
         if trimmed.is_empty() {
-            self.startup_custom_directory_error = Some("Enter a directory path.".to_owned());
+            self.startup_custom_directory_error = Some(tr!("Enter a directory path."));
             return Task::none();
         }
         let request = StartupDirectoryValidationRequest {
@@ -103,8 +103,7 @@ impl FileBrowser {
                 self.persist_user_preferences_command()
             }
             StartupDirectoryAvailability::Unavailable => {
-                self.startup_custom_directory_error =
-                    Some("Choose an existing directory.".to_owned());
+                self.startup_custom_directory_error = Some(tr!("Choose an existing directory."));
                 Task::none()
             }
         }

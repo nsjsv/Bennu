@@ -26,8 +26,9 @@ impl FileBrowser {
         let Some(extension) =
             config::normalize_preview_extension(&self.preview_extension_inputs[kind_index])
         else {
-            self.preview_extension_input_errors[kind_index] =
-                Some("Enter an extension like txt (a leading dot is optional).".to_owned());
+            self.preview_extension_input_errors[kind_index] = Some(tr!(
+                "Enter an extension like txt (a leading dot is optional)."
+            ));
             return Task::none();
         };
         // 重复后缀不算错误：清空输入框表示本次添加已完成。

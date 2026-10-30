@@ -110,30 +110,30 @@ pub(crate) fn file_entry_group_of(
 }
 
 impl FileAreaMenuItem {
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::Open => "Open",
-            Self::SmartExtractHere => "Smart Extract Here",
-            Self::ExtractToArchiveFolder => "Extract to Archive Folder",
-            Self::OpenWith => "Open with",
-            Self::Copy => "Copy",
-            Self::Duplicate => "Duplicate",
-            Self::Move => "Move",
-            Self::Tools => "Tools",
-            Self::CreateArchive => "Create Archive...",
-            Self::ConvertFormat => "Convert Format...",
-            Self::FileChecksum => "File Checksum...",
-            Self::Paste => "Paste",
-            Self::Rename => "Rename",
-            Self::BatchRename => "Batch Rename...",
-            Self::NewEntry => "New...",
-            Self::NewFolderFromSelection => "New Folder with Selection",
-            Self::OpenTerminalHere => "Open Terminal Here",
-            Self::CopyPath => "Copy Path",
-            Self::CreateSymlink => "Create Symbolic Link",
-            Self::Delete => "Delete",
-            Self::Properties => "Properties",
-            Self::SendToPhone => "Send to Phone",
+            Self::Open => tr!("Open"),
+            Self::SmartExtractHere => tr!("Smart Extract Here"),
+            Self::ExtractToArchiveFolder => tr!("Extract to Archive Folder"),
+            Self::OpenWith => tr!("Open with"),
+            Self::Copy => tr!("Copy"),
+            Self::Duplicate => tr!("Duplicate"),
+            Self::Move => tr!("Move"),
+            Self::Tools => tr!("Tools"),
+            Self::CreateArchive => tr!("Create Archive..."),
+            Self::ConvertFormat => tr!("Convert Format..."),
+            Self::FileChecksum => tr!("File Checksum..."),
+            Self::Paste => tr!("Paste"),
+            Self::Rename => tr!("Rename"),
+            Self::BatchRename => tr!("Batch Rename..."),
+            Self::NewEntry => tr!("New..."),
+            Self::NewFolderFromSelection => tr!("New Folder with Selection"),
+            Self::OpenTerminalHere => tr!("Open Terminal Here"),
+            Self::CopyPath => tr!("Copy Path"),
+            Self::CreateSymlink => tr!("Create Symbolic Link"),
+            Self::Delete => tr!("Delete"),
+            Self::Properties => tr!("Properties"),
+            Self::SendToPhone => tr!("Send to Phone"),
         }
     }
 
@@ -238,12 +238,12 @@ pub(crate) const TRASH_MENU_ITEMS: [TrashMenuItem; 4] = [
 ];
 
 impl TrashMenuItem {
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::Restore => "Restore",
-            Self::DeletePermanently => "Delete Permanently",
-            Self::Properties => "Properties",
-            Self::EmptyTrash => "Empty Trash",
+            Self::Restore => tr!("Restore"),
+            Self::DeletePermanently => tr!("Delete Permanently"),
+            Self::Properties => tr!("Properties"),
+            Self::EmptyTrash => tr!("Empty Trash"),
         }
     }
 
@@ -293,13 +293,13 @@ pub(crate) const SEARCH_RESULT_MENU_ITEMS: [SearchResultMenuItem; 5] = [
 ];
 
 impl SearchResultMenuItem {
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::OpenContainingFolder => "Open Containing Folder",
-            Self::Copy => "Copy",
-            Self::Cut => "Cut",
-            Self::MoveToTrash => "Move to Trash",
-            Self::DeletePermanently => "Delete Permanently",
+            Self::OpenContainingFolder => tr!("Open Containing Folder"),
+            Self::Copy => tr!("Copy"),
+            Self::Cut => tr!("Cut"),
+            Self::MoveToTrash => tr!("Move to Trash"),
+            Self::DeletePermanently => tr!("Delete Permanently"),
         }
     }
 
@@ -343,9 +343,9 @@ pub(crate) const BOOKMARK_MENU_ITEMS: [BookmarkMenuItem; 1] =
     [BookmarkMenuItem::RemoveFromFavorites];
 
 impl BookmarkMenuItem {
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::RemoveFromFavorites => "Remove from Favorites",
+            Self::RemoveFromFavorites => tr!("Remove from Favorites"),
         }
     }
 

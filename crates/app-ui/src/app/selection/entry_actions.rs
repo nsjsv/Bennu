@@ -59,7 +59,7 @@ impl FileBrowser {
             .unwrap_or_else(|| std::ffi::OsStr::new("item"));
         let name_kind = self.entry_name_kind(source);
         SymbolicLinkCreation {
-            link_path: directory.join(entry_name_with_suffix(name, name_kind, "链接")),
+            link_path: directory.join(entry_name_with_suffix(name, name_kind, &tr!(" link"))),
             name_kind,
             target_path: source.to_path_buf(),
         }

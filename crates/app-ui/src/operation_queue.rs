@@ -33,8 +33,14 @@ pub(crate) use persistence_worker::{
     TaskStatePersistence,
 };
 
-pub(crate) const NEW_DIRECTORY_NAME: &str = "New Folder";
-pub(crate) const NEW_FILE_NAME: &str = "New File";
+/// 新建、收纳时的首选名，跟界面语言（同 GNOME、KDE）；被占用时 file-core 续编号。
+pub(crate) fn new_directory_name() -> String {
+    tr!("New Folder")
+}
+
+pub(crate) fn new_file_name() -> String {
+    tr!("New File")
+}
 
 const LOCAL_TASK_ID_START: u64 = 1 << 63;
 
@@ -175,39 +181,45 @@ impl QueuedFileOperation {
         )
     }
 
-    pub(crate) fn title(&self) -> &'static str {
+    pub(crate) fn title(&self) -> String {
+        self.title_in(crate::localization::current_language())
+    }
+
+    pub(crate) fn title_in(&self, language: crate::config::UiLanguage) -> String {
         match self {
-            Self::Rename { .. } => "Rename",
-            Self::BatchRename { .. } => "Batch Rename",
-            Self::CreateDirectory { .. } => "New Folder",
-            Self::CreateDirectories { .. } => "New Folders",
-            Self::CreateEmptyFile { .. } => "New File",
-            Self::Trash { .. } => "Move to Trash",
-            Self::Restore { .. } => "Restore",
-            Self::DeleteTrashEntries { .. } => "Delete Permanently",
-            Self::DeletePermanently { .. } => "Delete Permanently",
-            Self::EmptyTrash => "Empty Trash",
-            Self::Copy { .. } => "Copy",
-            Self::Duplicate { .. } => "Duplicate",
-            Self::Move { .. } => "Move",
-            Self::GatherSelectionIntoNewFolder { .. } => "New Folder with Selection",
-            Self::UngatherNewFolder { .. } => "New Folder with Selection",
-            Self::CreateSymbolicLinks { .. } => "Create Symbolic Link",
-            Self::CreateArchive { .. } => "Create Archive",
-            Self::ExtractArchive { .. } => "Extract Archive",
-            Self::ExtractArchiveMembers { .. } => "Extract Archive",
-            Self::Convert { .. } => "Convert Format",
+            Self::Rename { .. } => tr_in!(language, "Rename"),
+            Self::BatchRename { .. } => tr_in!(language, "Batch Rename"),
+            Self::CreateDirectory { .. } => tr_in!(language, "New Folder"),
+            Self::CreateDirectories { .. } => tr_in!(language, "New Folders"),
+            Self::CreateEmptyFile { .. } => tr_in!(language, "New File"),
+            Self::Trash { .. } => tr_in!(language, "Move to Trash"),
+            Self::Restore { .. } => tr_in!(language, "Restore"),
+            Self::DeleteTrashEntries { .. } => tr_in!(language, "Delete Permanently"),
+            Self::DeletePermanently { .. } => tr_in!(language, "Delete Permanently"),
+            Self::EmptyTrash => tr_in!(language, "Empty Trash"),
+            Self::Copy { .. } => tr_in!(language, "Copy"),
+            Self::Duplicate { .. } => tr_in!(language, "Duplicate"),
+            Self::Move { .. } => tr_in!(language, "Move"),
+            Self::GatherSelectionIntoNewFolder { .. } | Self::UngatherNewFolder { .. } => {
+                tr_in!(language, "New Folder with Selection")
+            }
+            Self::CreateSymbolicLinks { .. } => tr_in!(language, "Create Symbolic Link"),
+            Self::CreateArchive { .. } => tr_in!(language, "Create Archive"),
+            Self::ExtractArchive { .. } | Self::ExtractArchiveMembers { .. } => {
+                tr_in!(language, "Extract Archive")
+            }
+            Self::Convert { .. } => tr_in!(language, "Convert Format"),
         }
     }
 
     pub(crate) fn created_path(&self) -> Option<PathBuf> {
         match self {
-            Self::CreateDirectory { parent } => Some(parent.join(NEW_DIRECTORY_NAME)),
+            Self::CreateDirectory { parent } => Some(parent.join(new_directory_name())),
             // 预览里第一个目录就是后续移入/重命名态的落点。
             Self::CreateDirectories { parent, names, .. } => {
                 names.first().map(|name| parent.join(name))
             }
-            Self::CreateEmptyFile { parent } => Some(parent.join(NEW_FILE_NAME)),
+            Self::CreateEmptyFile { parent } => Some(parent.join(new_file_name())),
             // 收纳文件夹在入队侧已按命名规则确定路径,完成后照常进入重命名态。
             Self::GatherSelectionIntoNewFolder { directory, .. } => Some(directory.clone()),
             _ => None,
@@ -275,15 +287,15 @@ pub(crate) enum FileOperationTerminalStatus {
 }
 
 impl FileOperationStatus {
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::Pending => "Pending",
-            Self::Running => "Running",
-            Self::Paused => "Paused",
-            Self::Canceling => "Canceling",
-            Self::Failed => "Failed",
-            Self::Completed => "Completed",
-            Self::Canceled => "Canceled",
+            Self::Pending => tr!("Pending"),
+            Self::Running => tr!("Running"),
+            Self::Paused => tr!("Paused"),
+            Self::Canceling => tr!("Canceling"),
+            Self::Failed => tr!("Failed"),
+            Self::Completed => tr!("Completed"),
+            Self::Canceled => tr!("Canceled"),
         }
     }
 
@@ -351,11 +363,11 @@ pub(crate) struct FileOperationTask {
 }
 
 impl FileOperationTask {
-    pub(crate) fn status_label(&self) -> &'static str {
+    pub(crate) fn status_label(&self) -> String {
         if self.status == FileOperationStatus::Running
             && self.execution_phase == Some(FileOperationExecutionPhase::Preparing)
         {
-            "Preparing"
+            tr!("Preparing")
         } else {
             self.status.label()
         }
@@ -817,7 +829,7 @@ impl FileOperationQueue {
             FileOperationFinish::Failed(error) => {
                 let task = &mut self.tasks[position];
                 let log_error = sanitized_application_log_detail(&error);
-                record_file_operation_failure(id, task.operation.title(), &log_error);
+                record_file_operation_failure(id, &task.operation.title(), &log_error);
                 task.status = FileOperationStatus::Failed;
                 task.error = Some(error);
                 task.is_read = self.is_panel_open;
@@ -829,7 +841,7 @@ impl FileOperationQueue {
             FileOperationFinish::RecoveryInterrupted(error) => {
                 let task = &mut self.tasks[position];
                 let log_error = sanitized_application_log_detail(&error);
-                record_file_operation_failure(id, task.operation.title(), &log_error);
+                record_file_operation_failure(id, &task.operation.title(), &log_error);
                 task.status = FileOperationStatus::Failed;
                 task.error = Some(error);
                 task.is_read = self.is_panel_open;
@@ -841,7 +853,7 @@ impl FileOperationQueue {
             FileOperationFinish::RecoveryBlocked(error) => {
                 let task = &mut self.tasks[position];
                 let log_error = sanitized_application_log_detail(&error);
-                record_file_operation_failure(id, task.operation.title(), &log_error);
+                record_file_operation_failure(id, &task.operation.title(), &log_error);
                 task.status = FileOperationStatus::Failed;
                 task.error = Some(error);
                 task.is_read = self.is_panel_open;

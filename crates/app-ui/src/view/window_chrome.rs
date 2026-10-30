@@ -8,7 +8,7 @@ use crate::model::{
 };
 
 use super::window_drag_region::window_drag_region;
-use crate::typography::localized_text;
+use crate::typography::readable_text;
 
 const WINDOW_TITLE_SIDE_RESERVE: u16 = 116;
 const WINDOW_RESIZE_EDGE_WIDTH: f32 = 5.0;
@@ -97,7 +97,7 @@ pub(crate) fn floating_window_control_group(
 }
 
 pub(crate) fn auxiliary_window_content<'a>(
-    integrated_title: &'static str,
+    integrated_title: String,
     separate_title: String,
     content: Element<'a, Message>,
     config: &WindowControlsConfig,
@@ -147,7 +147,7 @@ pub(crate) fn floating_preview_window_content<'a>(
 }
 
 fn window_content_with_top_bar<'a>(
-    title: &'static str,
+    title: String,
     content: Element<'a, Message>,
     config: &WindowControlsConfig,
     window: window::Id,
@@ -170,7 +170,7 @@ fn window_content_with_top_bar<'a>(
 }
 
 fn window_top_bar(
-    title: &'static str,
+    title: String,
     config: &WindowControlsConfig,
     window: window::Id,
     frame_state: WindowFrameState,
@@ -198,7 +198,7 @@ fn window_top_bar(
         ));
     }
     let content = content
-        .push(localized_text(title).size(16))
+        .push(readable_text(title).size(16))
         .push(Space::new().width(Length::Fill))
         .push(window_control_group(
             config,
@@ -271,7 +271,7 @@ fn separate_window_title_bar(
         .height(Length::Fixed(height))
         .style(window_title_bar_style);
     let drag_surface = window_drag_region(drag_surface.into(), window);
-    let title = container(localized_text(title).size(13))
+    let title = container(readable_text(title).size(13))
         .padding([0, WINDOW_TITLE_SIDE_RESERVE])
         .center_x(Length::Fill)
         .center_y(Length::Fixed(height))

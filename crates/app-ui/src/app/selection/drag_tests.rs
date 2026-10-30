@@ -5,7 +5,8 @@ use std::path::PathBuf;
 
 use iced::keyboard;
 
-use super::drag::safe_file_drop_target;
+use super::drag::{file_drag_transfer_label, safe_file_drop_target};
+use crate::config::UiLanguage;
 use crate::model::{
     FileDragDropIntent, FileDragNativeDndState, FileDragStationaryAction, FileDropTarget,
     SidebarBookmarkDropSlot,
@@ -13,6 +14,30 @@ use crate::model::{
 use crate::operation_queue::QueuedFileOperation;
 use crate::sidebar_devices::SidebarDeviceEntry;
 use desktop_linux::{StorageDeviceAccess, StorageDeviceId};
+
+/// 文件夹名只是填进句式的参数：叫 "Trash"、"Copy to x" 也不会被当成文案翻译。
+#[test]
+fn drag_capsule_shows_folder_names_as_they_are() {
+    for name in ["Trash", "Copy to x", "Settings"] {
+        let directory = PathBuf::from("/tmp").join(name);
+        assert_eq!(
+            file_drag_transfer_label(FileDragDropIntent::Move, &directory, UiLanguage::Chinese),
+            format!("移动到{name}")
+        );
+        assert_eq!(
+            file_drag_transfer_label(FileDragDropIntent::Copy, &directory, UiLanguage::English),
+            format!("Copy to {name}")
+        );
+        assert_eq!(
+            file_drag_transfer_label(
+                FileDragDropIntent::CreateLink,
+                &directory,
+                UiLanguage::Chinese
+            ),
+            format!("创建链接到{name}")
+        );
+    }
+}
 
 #[test]
 fn drag_drop_intent_follows_live_modifiers() {
@@ -249,7 +274,7 @@ fn alt_drag_release_queues_symlinks_into_target_directory() {
         QueuedFileOperation::CreateSymbolicLinks { links } => {
             assert_eq!(links.len(), 1);
             assert_eq!(links[0].target_path, source);
-            assert_eq!(links[0].link_path, target.join("report链接.pdf"));
+            assert_eq!(links[0].link_path, target.join("report link.pdf"));
         }
         other => panic!("expected symlink creation, got {other:?}"),
     }
@@ -281,7 +306,10 @@ async fn ctrl_drag_inside_same_directory_queues_an_in_place_duplicate() {
     let transfers = checked_transfers.expect("drop reached the conflict check");
     assert_eq!(transfers.len(), 1);
     assert_eq!(transfers[0].source, source);
-    assert_eq!(transfers[0].target, directory.path().join("report副本.pdf"));
+    assert_eq!(
+        transfers[0].target,
+        directory.path().join("report copy.pdf")
+    );
     assert_eq!(
         transfers[0].conflict_strategy,
         file_core::TransferConflictStrategy::KeepBoth
@@ -295,11 +323,11 @@ fn ctrl_drag_inside_same_directory_plans_in_place_duplicate() {
     let source = directory.path().join("report.pdf");
     std::fs::write(&source, b"data").unwrap();
     // 首选副本名已被占用：界面不查磁盘，照样给首选名，由复制引擎按 KeepBoth 续编号。
-    std::fs::write(directory.path().join("report副本.pdf"), b"older copy").unwrap();
+    std::fs::write(directory.path().join("report copy.pdf"), b"older copy").unwrap();
 
     let transfer = browser.duplicate_transfer(&source, directory.path());
 
-    assert_eq!(transfer.target, directory.path().join("report副本.pdf"));
+    assert_eq!(transfer.target, directory.path().join("report copy.pdf"));
     assert_eq!(
         transfer.conflict_strategy,
         file_core::TransferConflictStrategy::KeepBoth

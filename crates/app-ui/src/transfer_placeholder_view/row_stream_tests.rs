@@ -76,7 +76,7 @@ fn content_height_counts_placeholder_and_animated_rows() {
         },
         placeholder_row("incoming.txt"),
         ListTransferRow::DirectoryStatusRow {
-            message: "No items",
+            status: crate::visible_entries::VisibleEntryStatusRow::Empty,
             depth: 1,
             height: 40.0,
             stripe_index: 1,

@@ -412,7 +412,7 @@ impl ContextMenuSettingsDragState {
 /// 对文件条目页与行号不同,其余页恒等);group_anchor 标记组行(带 ▸ 与悬停成员面板)。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ContextMenuSettingsRow {
-    pub(crate) label: &'static str,
+    pub(crate) label: String,
     pub(crate) icon: IconSymbol,
     pub(crate) visible: bool,
     pub(crate) locked: bool,
@@ -421,17 +421,17 @@ pub(crate) struct ContextMenuSettingsRow {
 }
 
 impl ContextMenuSettingsPage {
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::FileEntry => "File entry menu",
-            Self::FileBlank => "Blank area menu",
-            Self::Trash => "Trash menu",
-            Self::Search => "Search results menu",
-            Self::SearchEntryTypes => "Search type filters",
-            Self::ListColumns => "List columns menu",
-            Self::SidebarBookmark => "Favorites menu",
-            Self::SidebarDevice => "Devices menu",
-            Self::NetworkConnection => "Network menu",
+            Self::FileEntry => tr!("File entry menu"),
+            Self::FileBlank => tr!("Blank area menu"),
+            Self::Trash => tr!("Trash menu"),
+            Self::Search => tr!("Search results menu"),
+            Self::SearchEntryTypes => tr!("Search type filters"),
+            Self::ListColumns => tr!("List columns menu"),
+            Self::SidebarBookmark => tr!("Favorites menu"),
+            Self::SidebarDevice => tr!("Devices menu"),
+            Self::NetworkConnection => tr!("Network menu"),
         }
     }
 
@@ -622,7 +622,7 @@ impl ContextMenuPreferences {
 
 fn settings_rows_for<I: Copy + PartialEq>(
     layout: &ContextMenuLayout<I>,
-    label: impl Fn(I) -> &'static str,
+    label: impl Fn(I) -> String,
     icon: impl Fn(I) -> IconSymbol,
 ) -> Vec<ContextMenuSettingsRow> {
     layout
@@ -684,10 +684,10 @@ impl ContextMenuPreferences {
     }
 }
 
-fn device_settings_label(action: SidebarDeviceAction) -> &'static str {
+fn device_settings_label(action: SidebarDeviceAction) -> String {
     match action {
-        SidebarDeviceAction::Mount => "Mount",
-        SidebarDeviceAction::Unmount => "Unmount",
-        SidebarDeviceAction::Eject => "Eject",
+        SidebarDeviceAction::Mount => tr!("Mount"),
+        SidebarDeviceAction::Unmount => tr!("Unmount"),
+        SidebarDeviceAction::Eject => tr!("Eject"),
     }
 }

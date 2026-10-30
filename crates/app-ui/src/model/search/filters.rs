@@ -1,8 +1,8 @@
 use chrono::{DateTime, Datelike, Duration, NaiveDate, TimeZone};
 use file_search::{
-    normalize_extension_tokens, normalize_size_range, MimePattern, SearchEntryTypeRule,
-    SearchFileKind, SearchFilters, SearchMatchMode, SearchTextScope, SizeRange, TimeRange,
-    SIZE_UNIT_BYTES,
+    normalize_extension_tokens, normalize_size_range, FilterInputError, MimePattern,
+    SearchEntryTypeRule, SearchFileKind, SearchFilters, SearchMatchMode, SearchTextScope,
+    SizeRange, TimeRange, SIZE_UNIT_BYTES,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,19 +33,19 @@ impl SearchEntryTypePreset {
     ];
     pub(crate) const MORE: [Self; 3] = [Self::Files, Self::Archives, Self::Links];
 
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::Spreadsheets => "Spreadsheets",
-            Self::Video => "Video",
-            Self::Images => "Images",
-            Self::Text => "Text",
-            Self::Documents => "Documents",
-            Self::Folders => "Folders",
-            Self::Audio => "Audio",
-            Self::Pdf => "PDF",
-            Self::Files => "Files",
-            Self::Archives => "Archives",
-            Self::Links => "Links",
+            Self::Spreadsheets => tr!("Spreadsheets"),
+            Self::Video => tr!("Video"),
+            Self::Images => tr!("Images"),
+            Self::Text => tr!("Text"),
+            Self::Documents => tr!("Documents"),
+            Self::Folders => tr!("Folders"),
+            Self::Audio => tr!("Audio"),
+            Self::Pdf => "PDF".to_owned(),
+            Self::Files => tr!("Files"),
+            Self::Archives => tr!("Archives"),
+            Self::Links => tr!("Links"),
         }
     }
 
@@ -106,11 +106,11 @@ pub(crate) enum SearchDateField {
 impl SearchDateField {
     pub(crate) const ALL: [Self; 3] = [Self::Accessed, Self::Modified, Self::Created];
 
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::Accessed => "Accessed",
-            Self::Modified => "Modified",
-            Self::Created => "Created",
+            Self::Accessed => tr!("Accessed"),
+            Self::Modified => tr!("Modified"),
+            Self::Created => tr!("Created"),
         }
     }
 }
@@ -135,14 +135,14 @@ impl SearchDatePreset {
         Self::PastYear,
     ];
 
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::Any => "Any time",
-            Self::Today => "Today",
-            Self::Yesterday => "Yesterday",
-            Self::PastSevenDays => "Past 7 days",
-            Self::PastThirtyDays => "Past 30 days",
-            Self::PastYear => "Past year",
+            Self::Any => tr!("Any time"),
+            Self::Today => tr!("Today"),
+            Self::Yesterday => tr!("Yesterday"),
+            Self::PastSevenDays => tr!("Past 7 days"),
+            Self::PastThirtyDays => tr!("Past 30 days"),
+            Self::PastYear => tr!("Past year"),
         }
     }
 }
@@ -175,17 +175,17 @@ impl SearchSizePreset {
         Self::Custom,
     ];
 
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::Any => "Any size",
-            Self::Empty => "Empty (0 B)",
-            Self::Tiny => "Tiny (0-16 KB)",
-            Self::Small => "Small (16 KB-1 MB)",
-            Self::Medium => "Medium (1-128 MB)",
-            Self::Large => "Large (128 MB-1 GB)",
-            Self::Huge => "Huge (1-4 GB)",
-            Self::Gigantic => "Gigantic (>4 GB)",
-            Self::Custom => "Custom",
+            Self::Any => tr!("Any size"),
+            Self::Empty => tr!("Empty (0 B)"),
+            Self::Tiny => tr!("Tiny (0-16 KB)"),
+            Self::Small => tr!("Small (16 KB-1 MB)"),
+            Self::Medium => tr!("Medium (1-128 MB)"),
+            Self::Large => tr!("Large (128 MB-1 GB)"),
+            Self::Huge => tr!("Huge (1-4 GB)"),
+            Self::Gigantic => tr!("Gigantic (>4 GB)"),
+            Self::Custom => tr!("Custom"),
         }
     }
 
@@ -338,10 +338,12 @@ impl SearchFilterPresetState {
             }
         }
         let date_range = date_range_at(self.date_preset, now)?;
-        let extensions = normalize_extension_tokens(&self.custom_extensions)?;
+        let extensions = normalize_extension_tokens(&self.custom_extensions)
+            .map_err(filter_input_error_message)?;
         let size = match self.size_preset {
             SearchSizePreset::Custom => {
-                normalize_size_range(&self.custom_size_min, &self.custom_size_max)?
+                normalize_size_range(&self.custom_size_min, &self.custom_size_max)
+                    .map_err(filter_input_error_message)?
             }
             preset => preset.range(),
         };
@@ -359,6 +361,23 @@ impl SearchFilterPresetState {
             extensions,
             size,
         })
+    }
+}
+
+fn filter_input_error_message(error: FilterInputError) -> String {
+    match error {
+        FilterInputError::InvalidSizeRange { min, max } => {
+            tr!("Invalid size range: %1 - %2", min, max)
+        }
+        FilterInputError::UnknownSizeUnit(unit) => tr!("Unknown size unit: %1", unit),
+        FilterInputError::InvalidSizeValue(value) => tr!("Invalid size value: %1", value),
+        FilterInputError::SizeTooLarge(value) => tr!("Size value is too large: %1", value),
+        FilterInputError::InvalidExtension(extension) => {
+            tr!("Invalid file extension: %1", extension)
+        }
+        FilterInputError::TooManyExtensions { limit } => {
+            tr!("Too many file extensions (limit is %1)", limit)
+        }
     }
 }
 

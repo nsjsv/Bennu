@@ -184,12 +184,12 @@ pub(crate) enum SearchDirectoryScope {
 }
 
 impl SearchDirectoryScope {
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::CurrentFolder => "Current folder",
-            Self::LastLocation => "Last location",
-            Self::Home => "Home",
-            Self::AllIndexedLocations => "All indexed locations",
+            Self::CurrentFolder => tr!("Current folder"),
+            Self::LastLocation => tr!("Last location"),
+            Self::Home => tr!("Home"),
+            Self::AllIndexedLocations => tr!("All indexed locations"),
         }
     }
 }

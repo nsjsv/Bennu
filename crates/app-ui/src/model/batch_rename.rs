@@ -102,19 +102,19 @@ impl BatchRenameRuleKind {
         Self::List,
     ];
 
-    pub(crate) fn label_key(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::Template => "Template",
-            Self::Replace => "Replace",
-            Self::Insert => "Insert",
-            Self::Slice => "Slice",
-            Self::Remove => "Remove characters",
-            Self::Case => "Letter case",
-            Self::Sequence => "Numbering",
-            Self::Random => "Random",
-            Self::Extension => "Extension",
-            Self::Regex => "Regex",
-            Self::List => "List",
+            Self::Template => tr!("Template"),
+            Self::Replace => tr!("Replace"),
+            Self::Insert => tr!("Insert"),
+            Self::Slice => tr!("Slice"),
+            Self::Remove => tr!("Remove characters"),
+            Self::Case => tr!("Letter case"),
+            Self::Sequence => tr!("Numbering"),
+            Self::Random => tr!("Random"),
+            Self::Extension => tr!("Extension"),
+            Self::Regex => tr!("Regex"),
+            Self::List => tr!("List"),
         }
     }
 }
@@ -374,19 +374,20 @@ impl BatchRenameTemplateToken {
         Self::Random,
     ];
 
-    pub(crate) fn label_key(self) -> &'static str {
-        match self {
-            Self::CurrentName => "Current name",
-            Self::CurrentStem => "Current name without extension",
-            Self::CurrentExtension => "Current extension",
-            Self::OriginalName => "Original name",
-            Self::OriginalNameWithoutExtension => "Name without extension",
-            Self::OriginalExtension => "Extension",
-            Self::Number1 => "Number 1,2,3",
-            Self::Number01 => "Number 01,02,03",
-            Self::Number001 => "Number 001,002,003",
-            Self::Random => "Random characters",
-        }
+    fn label_in(self, language: crate::config::UiLanguage) -> String {
+        let name = match self {
+            Self::CurrentName => tr_in!(language, "Current name"),
+            Self::CurrentStem => tr_in!(language, "Current name without extension"),
+            Self::CurrentExtension => tr_in!(language, "Current extension"),
+            Self::OriginalName => tr_in!(language, "Original name"),
+            Self::OriginalNameWithoutExtension => tr_in!(language, "Name without extension"),
+            Self::OriginalExtension => tr_in!(language, "Extension"),
+            Self::Number1 => tr_in!(language, "Number 1,2,3"),
+            Self::Number01 => tr_in!(language, "Number 01,02,03"),
+            Self::Number001 => tr_in!(language, "Number 001,002,003"),
+            Self::Random => tr_in!(language, "Random characters"),
+        };
+        format!("[{name}]")
     }
 
     pub(crate) fn engine_token(self) -> &'static str {
@@ -405,23 +406,14 @@ impl BatchRenameTemplateToken {
     }
 
     pub(crate) fn label(self) -> String {
-        format!(
-            "[{}]",
-            crate::localization::translate_current(self.label_key())
-        )
+        self.label_in(crate::localization::current_language())
     }
 
     // 模板串按插入时的界面语言存储，渲染端必须同时识别中英两种标签
     pub(crate) fn localized_labels(self) -> [String; 2] {
         [
-            format!("[{}]", self.label_key()),
-            format!(
-                "[{}]",
-                crate::localization::translate(
-                    crate::config::UiLanguage::Chinese,
-                    self.label_key(),
-                )
-            ),
+            self.label_in(crate::config::UiLanguage::English),
+            self.label_in(crate::config::UiLanguage::Chinese),
         ]
     }
 }
@@ -927,14 +919,14 @@ impl fmt::Display for BatchRenameSourceNameError {
 }
 
 impl BatchRenamePreviewStatus {
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::Ready => "Ready",
-            Self::Unchanged => "Unchanged",
+            Self::Ready => tr!("Ready"),
+            Self::Unchanged => tr!("Unchanged"),
             Self::InvalidName(reason) => super::invalid_entry_name_label(reason),
-            Self::DuplicateTarget => "Duplicate target",
-            Self::ExistingTarget => "Already exists",
-            Self::RuleError => "Rule error",
+            Self::DuplicateTarget => tr!("Duplicate target"),
+            Self::ExistingTarget => tr!("Already exists"),
+            Self::RuleError => tr!("Rule error"),
         }
     }
 }

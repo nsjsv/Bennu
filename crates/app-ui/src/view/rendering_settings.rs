@@ -17,7 +17,7 @@ pub(super) fn rendering_gpu_preference_row(
     preference: RenderingGpuPreference,
 ) -> Element<'static, Message> {
     toggle_setting_row(
-        "Discrete GPU",
+        tr!("Discrete GPU"),
         None,
         matches!(preference, RenderingGpuPreference::HighPerformanceGpu),
         Message::RenderingGpuPreferenceSelected(next_rendering_gpu_preference(preference)),
@@ -27,7 +27,7 @@ pub(super) fn rendering_gpu_preference_row(
 pub(super) fn renderer_restart_notice_panel() -> Element<'static, Message> {
     let title = row![
         themed_icon(IconSymbol::TriangleAlert, IconTone::Warning, MENU_ICON_SIZE),
-        readable_text("Restart Required")
+        readable_text(tr!("Restart Required"))
             .size(16)
             .width(Length::Fill),
     ]
@@ -36,8 +36,8 @@ pub(super) fn renderer_restart_notice_panel() -> Element<'static, Message> {
 
     let actions = row![
         Space::new().width(Length::Fill),
-        primary_action_button("Restart", Message::RendererRestartRequested),
-        secondary_action_button("OK", Message::RendererRestartNoticeDismissed),
+        primary_action_button(tr!("Restart"), Message::RendererRestartRequested),
+        secondary_action_button(tr!("OK"), Message::RendererRestartNoticeDismissed),
     ]
     .spacing(6)
     .align_y(Alignment::Center);
@@ -45,7 +45,10 @@ pub(super) fn renderer_restart_notice_panel() -> Element<'static, Message> {
     container(
         column![
             title,
-            readable_text("Rendering GPU preference changes require restarting Bennu.").size(13),
+            readable_text(tr!(
+                "Rendering GPU preference changes require restarting Bennu."
+            ))
+            .size(13),
             actions,
         ]
         .spacing(12)

@@ -413,9 +413,9 @@ fn checksum_compute_command(
         let result = match compute_handle.await {
             Ok(Ok(digests)) => Ok(digests),
             Ok(Err(file_core::FileError::Cancelled)) => Err(ChecksumFailure::Canceled),
-            Ok(Err(error)) => Err(ChecksumFailure::Message(format!(
-                "{}: {error}",
-                crate::localization::translate_current("Failed to compute checksum")
+            Ok(Err(error)) => Err(ChecksumFailure::Message(tr!(
+                "Failed to compute checksum: %1",
+                error
             ))),
             Err(join_error) => Err(ChecksumFailure::Message(join_error.to_string())),
         };
@@ -445,8 +445,8 @@ fn checksum_file_pick_command() -> Task<Message> {
 
 async fn choose_checksum_file() -> ChecksumMessage {
     let load = async {
-        let title = crate::localization::translate_current("Load checksum file");
-        let accept_label = crate::localization::translate_current("Load");
+        let title = tr!("Load checksum file");
+        let accept_label = tr!("Load");
         let request = ashpd::desktop::file_chooser::SelectedFiles::open_file()
             .title(title.as_str())
             .accept_label(accept_label.as_str())

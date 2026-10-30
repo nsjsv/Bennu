@@ -470,11 +470,7 @@ fn divider_line_style(theme: &Theme) -> iced::widget::container::Style {
 }
 
 fn disconnected_notice_text(reason: &str) -> String {
-    if crate::localization::current_language_is_chinese() {
-        format!("已断开:{reason}")
-    } else {
-        format!("Disconnected: {reason}")
-    }
+    tr!("Disconnected: %1", reason)
 }
 
 fn disconnected_notice(reason: &str) -> Element<'static, Message> {

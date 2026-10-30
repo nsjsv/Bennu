@@ -158,7 +158,7 @@ impl FileOperationQueue {
             stored_task_id: id,
             status: StoredTaskStatus::Failed,
             progress,
-            error: Some("Task was interrupted and cannot safely resume".to_owned()),
+            error: Some(tr!("Task was interrupted and cannot safely resume")),
             persistence: TaskStatePersistence::Update,
         });
     }
@@ -238,7 +238,7 @@ impl FileOperationQueue {
                         if requires_recovery_journal {
                             record_file_operation_failure(
                                 ui_task_id,
-                                self.tasks[position].operation.title(),
+                                &self.tasks[position].operation.title(),
                                 &sanitized_application_log_detail(&error),
                             );
                             acceptance.rejected_task_id = Some(ui_task_id);

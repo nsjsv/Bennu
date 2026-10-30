@@ -131,13 +131,13 @@ pub(crate) fn view_preview_window<'a>(
         |mode| {
             segmented_choice_row(vec![
                 SegmentedChoice {
-                    label: "Rendered",
+                    label: tr!("Rendered"),
                     selected: mode == MarkdownPreviewMode::Rendered,
                     message: Message::MarkdownPreviewModeSelected(MarkdownPreviewMode::Rendered),
                     tooltip: None,
                 },
                 SegmentedChoice {
-                    label: "Raw",
+                    label: tr!("Raw"),
                     selected: mode == MarkdownPreviewMode::Raw,
                     message: Message::MarkdownPreviewModeSelected(MarkdownPreviewMode::Raw),
                     tooltip: None,
@@ -157,7 +157,7 @@ fn sqlite_tabs_row(state: Option<&SqlitePreviewState>) -> Element<'static, Messa
         .unwrap_or(SqlitePreviewTab::Tables);
     segmented_choice_row(vec![
         SegmentedChoice {
-            label: "Table Data",
+            label: tr!("Table Data"),
             selected: active_tab == SqlitePreviewTab::Tables,
             message: Message::SqlitePreview(SqlitePreviewMessage::TabSelected(
                 SqlitePreviewTab::Tables,
@@ -165,7 +165,7 @@ fn sqlite_tabs_row(state: Option<&SqlitePreviewState>) -> Element<'static, Messa
             tooltip: None,
         },
         SegmentedChoice {
-            label: "SQL Query",
+            label: tr!("SQL Query"),
             selected: active_tab == SqlitePreviewTab::Sql,
             message: Message::SqlitePreview(SqlitePreviewMessage::TabSelected(
                 SqlitePreviewTab::Sql,

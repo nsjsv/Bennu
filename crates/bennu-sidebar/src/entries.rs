@@ -4,6 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
+use bennu_localization::tr;
 use bennu_theme::icons::IconSymbol;
 use desktop_linux::{
     NetworkConnection, NetworkConnectionId, NetworkMountCredentials, NetworkMountState,
@@ -25,14 +26,14 @@ pub enum SidebarDeviceAction {
 }
 
 impl SidebarDeviceAction {
-    pub fn label(self, device: &SidebarDeviceEntry) -> &'static str {
+    pub fn label(self, device: &SidebarDeviceEntry) -> String {
         match self {
-            Self::Mount => "Mount",
-            Self::Unmount => "Unmount",
+            Self::Mount => tr!("Mount"),
+            Self::Unmount => tr!("Unmount"),
             Self::Eject if device.removal == Some(StorageDeviceRemoval::SafelyRemove) => {
-                "Safely Remove"
+                tr!("Safely Remove")
             }
-            Self::Eject => "Eject",
+            Self::Eject => tr!("Eject"),
         }
     }
 }
@@ -127,12 +128,12 @@ pub enum SidebarNetworkConnectionAction {
 }
 
 impl SidebarNetworkConnectionAction {
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Self::Connect => "Connect",
-            Self::Disconnect => "Disconnect",
-            Self::Edit => "Edit",
-            Self::Remove => "Remove",
+            Self::Connect => tr!("Connect"),
+            Self::Disconnect => tr!("Disconnect"),
+            Self::Edit => tr!("Edit"),
+            Self::Remove => tr!("Remove"),
         }
     }
 }

@@ -95,7 +95,7 @@ fn markdown_block_view<Message: 'static>(block: MarkdownBlock) -> Element<'stati
             markdown_code_block_view(language, content)
         }
         MarkdownBlock::Quote { depth, content } => markdown_quote_view(depth, content),
-        MarkdownBlock::Rule => readable_text("-----")
+        MarkdownBlock::Rule => readable_text("-----".to_owned())
             .size(MARKDOWN_BODY_TEXT_SIZE)
             .width(Length::Fill)
             .into(),
@@ -156,7 +156,7 @@ fn markdown_quote_view<Message: 'static>(
         Space::new().width(Length::Fixed(
             depth.saturating_sub(1) as f32 * MARKDOWN_LIST_INDENT
         )),
-        readable_text(">").size(MARKDOWN_BODY_TEXT_SIZE),
+        readable_text(">".to_owned()).size(MARKDOWN_BODY_TEXT_SIZE),
         readable_text(content)
             .size(MARKDOWN_BODY_TEXT_SIZE)
             .width(Length::Fill),

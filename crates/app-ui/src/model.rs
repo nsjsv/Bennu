@@ -55,7 +55,7 @@ pub(crate) use address_bar::{
     PaneAddressBarTransition, PaneAddressEditingSession,
 };
 mod entry_naming;
-pub(crate) use entry_naming::{invalid_entry_name_label, GATHERED_FOLDER_BASE_NAME};
+pub(crate) use entry_naming::invalid_entry_name_label;
 mod browser_panes;
 pub(crate) use browser_panes::{
     empty_directory_entry_snapshot, retain_direct_entry_selection, BrowserPane, BrowserPaneId,
@@ -1235,11 +1235,11 @@ pub(crate) enum FileDeleteAction {
 }
 
 impl FileDeleteAction {
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::MoveToTrash => "Move to Trash",
-            Self::DeletePermanently => "Delete Permanently",
-            Self::MixedSelection => "Delete",
+            Self::MoveToTrash => tr!("Move to Trash"),
+            Self::DeletePermanently => tr!("Delete Permanently"),
+            Self::MixedSelection => tr!("Delete"),
         }
     }
 }
@@ -1263,8 +1263,6 @@ pub(crate) struct SidebarBookmarkContextMenuState {
 // 纯搬移：SidebarLocation/SidebarLocationKind 已下沉 bennu-sidebar
 // （主程序与 portal 共用）；re-export 维持 crate::model::* 既有路径。
 pub(crate) use bennu_sidebar::{SidebarLocation, SidebarLocationKind};
-
-pub(crate) const TRASH_LOCATION_LABEL: &str = "Trash";
 
 pub(crate) fn trash_location_path() -> PathBuf {
     PathBuf::from("trash:///")

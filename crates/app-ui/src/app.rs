@@ -1032,7 +1032,7 @@ impl FileBrowser {
     fn view_with_window_chrome<'a>(
         &'a self,
         window: window::Id,
-        integrated_title: &'static str,
+        integrated_title: String,
         content: Element<'a, Message>,
         preview_pin: Option<bool>,
     ) -> Element<'a, Message> {
@@ -1058,17 +1058,17 @@ impl FileBrowser {
                 self.scrollbar_visibility_for(&ScrollbarRegion::Properties),
                 self.scrollbar_viewport_for(&ScrollbarRegion::Properties),
             );
-            self.view_with_window_chrome(window, "Properties", content, None)
+            self.view_with_window_chrome(window, tr!("Properties"), content, None)
         } else if self.transfer_window == Some(window) {
             let content = crate::view::view_transfer_window(self);
-            self.view_with_window_chrome(window, "Transfer", content, None)
+            self.view_with_window_chrome(window, tr!("Transfer"), content, None)
         } else if self.preview_window == Some(window) {
             let content =
                 self.preview_window_content(self.preview_window_bottom_controls.opacity());
             if self.preview_window_uses_window_chrome() {
                 self.view_with_window_chrome(
                     window,
-                    "Preview",
+                    tr!("Preview"),
                     content,
                     Some(self.preview_window_pinned),
                 )
@@ -1093,7 +1093,7 @@ impl FileBrowser {
             }
             view_browser(self)
         } else {
-            iced::widget::container(crate::typography::readable_text("Closing window..."))
+            iced::widget::container(crate::typography::readable_text(tr!("Closing window...")))
                 .width(iced::Length::Fill)
                 .height(iced::Length::Fill)
                 .into()

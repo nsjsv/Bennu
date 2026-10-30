@@ -2,8 +2,7 @@ use std::fmt;
 
 use desktop_linux::{TerminalEmulator, TERMINAL_EMULATOR_OPTIONS};
 use iced::widget::{
-    button, column, container, pick_list, row, stack, svg, text, text_input, Button, Column, Space,
-    Svg,
+    button, column, container, pick_list, row, stack, svg, text_input, Button, Column, Space, Svg,
 };
 use iced::{window, Alignment, Element, Length, Theme};
 
@@ -19,7 +18,7 @@ use crate::model::{
     SettingsSubpage, WindowChromeLayout, WindowControlSide, WindowFrameState,
     WINDOW_TITLE_BAR_HEIGHT, WINDOW_TOP_BAR_HEIGHT,
 };
-use crate::typography::{localized_text, readable_text};
+use crate::typography::readable_text;
 
 use super::about_settings::about_settings_detail;
 use super::application_logs::application_logs_settings_detail;
@@ -68,12 +67,14 @@ pub(super) fn chrome_top_spacer(browser: &FileBrowser) -> Element<'static, Messa
 struct TerminalEmulatorPickOption(TerminalEmulator);
 
 impl fmt::Display for TerminalEmulatorPickOption {
+    /// 终端名是产品名，不翻译；只有"自动"是界面文案。
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&crate::localization::translate_current(self.0.label()))
+        match self.0 {
+            TerminalEmulator::Automatic => formatter.write_str(&tr!("Auto")),
+            emulator => formatter.write_str(emulator.label()),
+        }
     }
 }
-
-const SYSTEM_DEFAULT_SHELL_LABEL: &str = "System default";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TerminalShellPickOption(String);
@@ -81,9 +82,7 @@ struct TerminalShellPickOption(String);
 impl fmt::Display for TerminalShellPickOption {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.0.is_empty() {
-            return formatter.write_str(&crate::localization::translate_current(
-                SYSTEM_DEFAULT_SHELL_LABEL,
-            ));
+            return formatter.write_str(&tr!("System default"));
         }
         formatter.write_str(
             std::path::Path::new(&self.0)
@@ -100,9 +99,7 @@ struct LanguageSettingPickOption(UiLanguageSetting);
 
 impl fmt::Display for LanguageSettingPickOption {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&crate::localization::translate_current(
-            language_setting_label(self.0),
-        ))
+        formatter.write_str(&language_setting_label(self.0))
     }
 }
 
@@ -111,9 +108,7 @@ struct StartupLocationPickOption(StartupLocationPolicy);
 
 impl fmt::Display for StartupLocationPickOption {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&crate::localization::translate_current(
-            startup_location_label(self.0),
-        ))
+        formatter.write_str(&startup_location_label(self.0))
     }
 }
 
@@ -122,9 +117,7 @@ struct LaunchWindowPickOption(LaunchWindowPolicy);
 
 impl fmt::Display for LaunchWindowPickOption {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&crate::localization::translate_current(
-            launch_window_label(self.0),
-        ))
+        formatter.write_str(&launch_window_label(self.0))
     }
 }
 
@@ -133,9 +126,7 @@ struct VisibleColumnCountPickOption(usize);
 
 impl fmt::Display for VisibleColumnCountPickOption {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&crate::localization::translate_current(
-            visible_column_count_label(self.0),
-        ))
+        formatter.write_str(&visible_column_count_label(self.0))
     }
 }
 
@@ -144,9 +135,7 @@ struct ColumnWidthAdjustModePickOption(ColumnWidthAdjustMode);
 
 impl fmt::Display for ColumnWidthAdjustModePickOption {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&crate::localization::translate_current(
-            column_width_adjust_mode_label(self.0),
-        ))
+        formatter.write_str(&column_width_adjust_mode_label(self.0))
     }
 }
 
@@ -211,7 +200,7 @@ fn settings_window_controls_chrome(
 
 fn settings_category_sidebar(selected: SettingsCategory) -> Element<'static, Message> {
     let mut categories = Column::new()
-        .push(readable_text("Settings").size(16))
+        .push(readable_text(tr!("Settings")).size(16))
         .spacing(4);
     for category in SettingsCategory::ALL {
         categories = categories.push(settings_category_button(category, selected));
@@ -271,19 +260,19 @@ fn general_settings_detail(
     scrollbar_viewport: Option<ScrollbarViewport>,
 ) -> Element<'_, Message> {
     let mut rows = vec![
-        labeled_setting_row("Language", language_setting_dropdown(browser)),
-        labeled_setting_row("Startup location", startup_location_dropdown(browser)),
-        labeled_setting_row("Launch behavior", launch_window_dropdown(browser)),
+        labeled_setting_row(tr!("Language"), language_setting_dropdown(browser)),
+        labeled_setting_row(tr!("Startup location"), startup_location_dropdown(browser)),
+        labeled_setting_row(tr!("Launch behavior"), launch_window_dropdown(browser)),
     ];
     if browser.user_config().startup_location_policy == StartupLocationPolicy::CustomDirectory {
         rows.push(startup_custom_directory_row(browser));
     }
     rows.push(labeled_setting_row(
-        "Terminal",
+        tr!("Terminal"),
         terminal_emulator_dropdown(browser.terminal_emulator),
     ));
     rows.push(labeled_setting_row(
-        "Shell",
+        tr!("Shell"),
         terminal_shell_dropdown(browser.user_config().terminal_shell.clone()),
     ));
 
@@ -305,32 +294,32 @@ fn appearance_settings_detail(
         column![
             chrome_top_spacer(browser),
             settings_group(
-                "Theme",
+                tr!("Theme"),
                 vec![
-                    labeled_setting_row("Mode", theme_mode_selector(browser)),
+                    labeled_setting_row(tr!("Mode"), theme_mode_selector(browser)),
                     color_scheme_setting_row(browser),
                     custom_color_scheme_import_row(browser),
                 ],
             ),
             settings_group(
-                "Window controls",
+                tr!("Window controls"),
                 vec![window_control_settings_row(browser)]
             ),
             settings_group(
-                "Columns view",
+                tr!("Columns view"),
                 vec![
                     labeled_setting_row(
-                        "Column width",
+                        tr!("Column width"),
                         column_width_adjust_mode_dropdown(browser),
                     ),
                     labeled_setting_row(
-                        "Visible columns",
+                        tr!("Visible columns"),
                         visible_column_count_dropdown(browser),
                     ),
                 ],
             ),
             settings_group(
-                "Rendering",
+                tr!("Rendering"),
                 vec![rendering_gpu_preference_row(
                     browser.rendering_gpu_preference
                 )],
@@ -352,16 +341,16 @@ fn files_settings_detail(
         column![
             chrome_top_spacer(browser),
             settings_group(
-                "File display",
+                tr!("File display"),
                 vec![
                     toggle_setting_row(
-                        "Show Hidden Files",
+                        tr!("Show Hidden Files"),
                         None,
                         browser.options.include_hidden,
                         Message::ShowHiddenFilesToggled,
                     ),
                     toggle_setting_row(
-                        "Show Recursive Folder Size In List View",
+                        tr!("Show Recursive Folder Size In List View"),
                         None,
                         browser
                             .user_config()
@@ -372,17 +361,17 @@ fn files_settings_detail(
                 ],
             ),
             settings_group(
-                "Context menus",
+                tr!("Context menus"),
                 vec![context_menu_settings_section(browser)],
             ),
             preview_settings_entry_card(),
             settings_group(
-                "Verification",
+                tr!("Verification"),
                 vec![file_operation_verification_options(
                     browser.file_operation_verification(),
                 )],
             ),
-            settings_group("Network", vec![network_thumbnails_row(browser)]),
+            settings_group(tr!("Network"), vec![network_thumbnails_row(browser)]),
         ]
         .spacing(SETTINGS_GROUP_SPACING)
         .width(Length::Fill),
@@ -401,10 +390,13 @@ fn transfer_settings_detail(
         column![
             chrome_top_spacer(browser),
             settings_group(
-                "Receive",
+                tr!("Receive"),
                 vec![receive_directory_row(browser), device_alias_row(browser),],
             ),
-            settings_group("Trusted devices", vec![trusted_devices_section(browser)]),
+            settings_group(
+                tr!("Trusted devices"),
+                vec![trusted_devices_section(browser)]
+            ),
         ]
         .spacing(SETTINGS_GROUP_SPACING)
         .width(Length::Fill),
@@ -420,12 +412,11 @@ fn receive_directory_row(browser: &FileBrowser) -> Element<'_, Message> {
         .transfer_download_dir
         .clone()
         .map(|dir| dir.to_string_lossy().into_owned());
-    let current = configured
-        .unwrap_or_else(|| crate::localization::translate_current("Default: ~/Downloads"));
+    let current = configured.unwrap_or_else(|| tr!("Default: ~/Downloads"));
     let choose = button(
         row![
             super::themed_icon(IconSymbol::Folder, IconTone::Normal, 14.0),
-            readable_text("Choose...").size(12),
+            readable_text(tr!("Choose...")).size(12),
         ]
         .spacing(6)
         .align_y(Alignment::Center),
@@ -437,7 +428,7 @@ fn receive_directory_row(browser: &FileBrowser) -> Element<'_, Message> {
     .style(context_menu_button_style());
     column![
         row![
-            readable_text("Receive directory")
+            readable_text(tr!("Receive directory"))
                 .size(12)
                 .width(Length::Fill),
             readable_text(current).size(12),
@@ -445,7 +436,10 @@ fn receive_directory_row(browser: &FileBrowser) -> Element<'_, Message> {
         ]
         .spacing(8)
         .align_y(Alignment::Center),
-        localized_text("Files received from other devices are saved to this directory",).size(11),
+        readable_text(tr!(
+            "Files received from other devices are saved to this directory"
+        ))
+        .size(11),
     ]
     .spacing(3)
     .into()
@@ -453,26 +447,25 @@ fn receive_directory_row(browser: &FileBrowser) -> Element<'_, Message> {
 
 /// 设备名行：输入 + Save（提交后重启常驻服务生效）。
 fn device_alias_row(browser: &FileBrowser) -> Element<'_, Message> {
-    let input = text_input(
-        &crate::localization::translate_current("Device name"),
-        &browser.transfer_device_alias_input,
-    )
-    .on_input(|value| {
-        Message::Transfer(crate::app::transfer::TransferMessage::DeviceAliasInputChanged(value))
-    })
-    .on_submit(Message::Transfer(
-        crate::app::transfer::TransferMessage::DeviceAliasCommitted,
-    ))
-    .padding([6, 8])
-    .size(12)
-    .width(Length::Fill);
-    let save = button(container(readable_text("Save").size(12)).padding([6, 10]))
+    let input = text_input(&tr!("Device name"), &browser.transfer_device_alias_input)
+        .on_input(|value| {
+            Message::Transfer(crate::app::transfer::TransferMessage::DeviceAliasInputChanged(value))
+        })
+        .on_submit(Message::Transfer(
+            crate::app::transfer::TransferMessage::DeviceAliasCommitted,
+        ))
+        .padding([6, 8])
+        .size(12)
+        .width(Length::Fill);
+    let save = button(container(readable_text(tr!("Save")).size(12)).padding([6, 10]))
         .on_press(Message::Transfer(
             crate::app::transfer::TransferMessage::DeviceAliasCommitted,
         ))
         .style(context_menu_button_style());
     row![
-        readable_text("Device name").size(12).width(Length::Fill),
+        readable_text(tr!("Device name"))
+            .size(12)
+            .width(Length::Fill),
         input,
         save,
     ]
@@ -486,9 +479,11 @@ fn trusted_devices_section(browser: &FileBrowser) -> Element<'_, Message> {
     let trusted = &browser.user_config().transfer_trusted_devices;
     if trusted.is_empty() {
         return column![
-            localized_text("No trusted devices").size(12),
-            localized_text("Files received from trusted devices are accepted automatically",)
-                .size(11),
+            readable_text(tr!("No trusted devices")).size(12),
+            readable_text(tr!(
+                "Files received from trusted devices are accepted automatically"
+            ))
+            .size(11),
         ]
         .spacing(3)
         .into();
@@ -496,7 +491,7 @@ fn trusted_devices_section(browser: &FileBrowser) -> Element<'_, Message> {
     let mut rows = Vec::with_capacity(trusted.len());
     for device in trusted {
         let fingerprint = device.fingerprint.clone();
-        let remove = button(readable_text("Remove").size(11))
+        let remove = button(readable_text(tr!("Remove")).size(11))
             .on_press(Message::Transfer(
                 crate::app::transfer::TransferMessage::TrustedDeviceRemoved(fingerprint),
             ))
@@ -569,7 +564,7 @@ fn theme_mode_selector(browser: &FileBrowser) -> Element<'static, Message> {
 fn color_scheme_setting_row(browser: &FileBrowser) -> Element<'_, Message> {
     container(
         column![
-            readable_text("Color scheme").size(12),
+            readable_text(tr!("Color scheme")).size(12),
             color_scheme_grid(browser),
         ]
         .spacing(8),
@@ -583,7 +578,7 @@ fn custom_color_scheme_import_row(browser: &FileBrowser) -> Element<'_, Message>
     let import = button(
         row![
             super::themed_icon(IconSymbol::Download, IconTone::Normal, 14.0),
-            readable_text("Import JSON").size(12),
+            readable_text(tr!("Import JSON")).size(12),
         ]
         .spacing(6)
         .align_y(Alignment::Center),
@@ -592,7 +587,7 @@ fn custom_color_scheme_import_row(browser: &FileBrowser) -> Element<'_, Message>
     .padding([6, 10])
     .style(context_menu_button_style());
     let mut content = column![row![
-        readable_text("Custom color scheme")
+        readable_text(tr!("Custom color scheme"))
             .size(12)
             .width(Length::Fill),
         import,
@@ -614,11 +609,7 @@ fn custom_color_scheme_import_row(browser: &FileBrowser) -> Element<'_, Message>
         content = content.push(
             row![
                 super::themed_icon(IconSymbol::TriangleAlert, IconTone::Warning, 13.0),
-                text(format!(
-                    "{}: {error}",
-                    crate::localization::translate_current("Import failed")
-                ))
-                .size(11),
+                readable_text(tr!("Import failed: %1", error)).size(11),
             ]
             .spacing(5)
             .align_y(Alignment::Center),
@@ -630,14 +621,14 @@ fn custom_color_scheme_import_row(browser: &FileBrowser) -> Element<'_, Message>
 
 fn custom_color_scheme_contrast_warning(warnings: ContrastWarnings) -> Element<'static, Message> {
     let label = match (warnings.background_text, warnings.surface_muted_text) {
-        (true, true) => "Custom colors have low text contrast",
-        (true, false) => "Background and text contrast is below 2.4:1",
-        (false, true) => "Surface and muted text contrast is below 2.4:1",
+        (true, true) => tr!("Custom colors have low text contrast"),
+        (true, false) => tr!("Background and text contrast is below 2.4:1"),
+        (false, true) => tr!("Surface and muted text contrast is below 2.4:1"),
         (false, false) => return Space::new().into(),
     };
     row![
         super::themed_icon(IconSymbol::TriangleAlert, IconTone::Warning, 13.0),
-        localized_text(label).size(11),
+        readable_text(label).size(11),
     ]
     .spacing(5)
     .align_y(Alignment::Center)
@@ -686,7 +677,7 @@ fn color_scheme_family_card(
     };
     let is_selected = selected.family() == family;
     // 展开箭头放在标题右侧，整组居中；单样式家族不渲染箭头。
-    let mut title = row![localized_text(family.label()).size(11)]
+    let mut title = row![readable_text(family.display_label()).size(11)]
         .spacing(4)
         .align_y(Alignment::Center);
     if family.styles(mode).len() > 1 {
@@ -731,7 +722,7 @@ fn color_scheme_style_row(
     for preset in family.styles(mode) {
         let is_selected = selected == *preset;
         // 勾放在标题右侧，整组居中；未选中不渲染勾。
-        let mut label = row![localized_text(preset.style_label(mode)).size(10)]
+        let mut label = row![readable_text(preset.style_label(mode)).size(10)]
             .spacing(4)
             .align_y(Alignment::Center);
         if is_selected {
@@ -789,19 +780,20 @@ fn color_hex(color: iced::Color) -> String {
     )
 }
 
-fn language_setting_label(setting: UiLanguageSetting) -> &'static str {
+/// 语言名用它自己的写法（同 GNOME、KDE），不随界面语言翻译。
+fn language_setting_label(setting: UiLanguageSetting) -> String {
     match setting {
-        UiLanguageSetting::System => "Auto",
-        UiLanguageSetting::English => "English",
-        UiLanguageSetting::Chinese => "中文",
+        UiLanguageSetting::System => tr!("Auto"),
+        UiLanguageSetting::English => "English".to_owned(),
+        UiLanguageSetting::Chinese => "中文".to_owned(),
     }
 }
 
-fn startup_location_label(policy: StartupLocationPolicy) -> &'static str {
+fn startup_location_label(policy: StartupLocationPolicy) -> String {
     match policy {
-        StartupLocationPolicy::Home => "Home directory",
-        StartupLocationPolicy::CustomDirectory => "Custom directory",
-        StartupLocationPolicy::PreviousSession => "Previous state",
+        StartupLocationPolicy::Home => tr!("Home directory"),
+        StartupLocationPolicy::CustomDirectory => tr!("Custom directory"),
+        StartupLocationPolicy::PreviousSession => tr!("Previous state"),
     }
 }
 
@@ -851,25 +843,21 @@ fn startup_location_dropdown(browser: &FileBrowser) -> Element<'static, Message>
     .into()
 }
 
-fn launch_window_label(policy: LaunchWindowPolicy) -> &'static str {
+fn launch_window_label(policy: LaunchWindowPolicy) -> String {
     match policy {
-        LaunchWindowPolicy::MergeIntoExisting => "Merge into existing window",
-        LaunchWindowPolicy::OpenNewWindow => "Open a new window",
+        LaunchWindowPolicy::MergeIntoExisting => tr!("Merge into existing window"),
+        LaunchWindowPolicy::OpenNewWindow => tr!("Open a new window"),
     }
 }
 
-fn visible_column_count_label(count: usize) -> &'static str {
-    match count {
-        4 => "4 columns",
-        5 => "5 columns",
-        _ => "3 columns",
-    }
+fn visible_column_count_label(count: usize) -> String {
+    tr!("%1 columns", count)
 }
 
-fn column_width_adjust_mode_label(mode: ColumnWidthAdjustMode) -> &'static str {
+fn column_width_adjust_mode_label(mode: ColumnWidthAdjustMode) -> String {
     match mode {
-        ColumnWidthAdjustMode::Uniform => "All columns together",
-        ColumnWidthAdjustMode::PerColumn => "Adjust each column separately",
+        ColumnWidthAdjustMode::Uniform => tr!("All columns together"),
+        ColumnWidthAdjustMode::PerColumn => tr!("Adjust each column separately"),
     }
 }
 
@@ -980,20 +968,17 @@ fn terminal_shell_dropdown(selected: String) -> Element<'static, Message> {
 }
 
 fn startup_custom_directory_row(browser: &FileBrowser) -> Element<'_, Message> {
-    let input = text_input(
-        &crate::localization::translate_current("Directory"),
-        &browser.startup_custom_directory_input,
-    )
-    .on_input(Message::StartupCustomDirectoryInputChanged)
-    .on_submit(Message::StartupCustomDirectoryCommitted)
-    .padding([6, 8])
-    .size(12)
-    .width(Length::Fill);
-    let save = button(container(readable_text("Save").size(12)).padding([6, 10]))
+    let input = text_input(&tr!("Directory"), &browser.startup_custom_directory_input)
+        .on_input(Message::StartupCustomDirectoryInputChanged)
+        .on_submit(Message::StartupCustomDirectoryCommitted)
+        .padding([6, 8])
+        .size(12)
+        .width(Length::Fill);
+    let save = button(container(readable_text(tr!("Save")).size(12)).padding([6, 10]))
         .on_press(Message::StartupCustomDirectoryCommitted)
         .style(context_menu_button_style());
     let mut content = column![row![
-        readable_text("Custom Startup Directory")
+        readable_text(tr!("Custom Startup Directory"))
             .size(12)
             .width(Length::FillPortion(2)),
         input,
@@ -1003,7 +988,7 @@ fn startup_custom_directory_row(browser: &FileBrowser) -> Element<'_, Message> {
     .align_y(Alignment::Center)]
     .spacing(3);
     if let Some(error) = &browser.startup_custom_directory_error {
-        content = content.push(localized_text(error).size(11).width(Length::Fill));
+        content = content.push(readable_text(error.clone()).size(11).width(Length::Fill));
     }
     info_setting_row(content.into())
 }

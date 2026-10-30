@@ -6,7 +6,6 @@ use time::OffsetDateTime;
 
 use crate::config::UiLanguage;
 use crate::formatting::{format_file_size, format_file_size_compact};
-use crate::localization::translate;
 use crate::model::BrowserViewMode;
 
 /// 分组方式菜单入口的视图门控：分组只在列表/大图视图生效，
@@ -35,17 +34,15 @@ pub(crate) enum FileGroupingMode {
 }
 
 impl FileGroupingMode {
-    /// 菜单文案的英文 key；None 的语义是"无分组"，文案即 "None"。
-    /// 中文词条由 localization::exact_translation 在接入菜单时补齐。
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::None => "None",
-            Self::NameInitial => "Name",
-            Self::Kind => "Kind",
-            Self::Size => "Size",
-            Self::ModifiedTime => "Date Modified",
-            Self::CreatedTime => "Date Created",
-            Self::AccessedTime => "Date Accessed",
+            Self::None => tr!("None"),
+            Self::NameInitial => tr!("Name"),
+            Self::Kind => tr!("Kind"),
+            Self::Size => tr!("Size"),
+            Self::ModifiedTime => tr!("Date Modified"),
+            Self::CreatedTime => tr!("Date Created"),
+            Self::AccessedTime => tr!("Date Accessed"),
         }
     }
 
@@ -112,16 +109,15 @@ impl KindCategory {
     }
 
     fn title(self, language: UiLanguage) -> String {
-        let key = match self {
-            Self::Images => "Images",
-            Self::Videos => "Videos",
-            Self::Audio => "Audio",
-            Self::Documents => "Documents",
-            Self::Archives => "Archives",
-            Self::Applications => "Applications",
-            Self::Other => "Other",
-        };
-        translate(language, key).into_owned()
+        match self {
+            Self::Images => tr_in!(language, "Images"),
+            Self::Videos => tr_in!(language, "Videos"),
+            Self::Audio => tr_in!(language, "Audio"),
+            Self::Documents => tr_in!(language, "Documents"),
+            Self::Archives => tr_in!(language, "Archives"),
+            Self::Applications => tr_in!(language, "Applications"),
+            Self::Other => tr_in!(language, "Other"),
+        }
     }
 }
 
@@ -153,11 +149,11 @@ impl DateBucket {
 
     fn title(self, language: UiLanguage) -> String {
         match self {
-            Self::Today => translate(language, "Today").into_owned(),
-            Self::Yesterday => translate(language, "Yesterday").into_owned(),
-            Self::ThisWeek => translate(language, "This Week").into_owned(),
-            Self::ThisMonth => translate(language, "This Month").into_owned(),
-            Self::Earlier => translate(language, "Earlier").into_owned(),
+            Self::Today => tr_in!(language, "Today"),
+            Self::Yesterday => tr_in!(language, "Yesterday"),
+            Self::ThisWeek => tr_in!(language, "This Week"),
+            Self::ThisMonth => tr_in!(language, "This Month"),
+            Self::Earlier => tr_in!(language, "Earlier"),
             Self::Month(month) => month_group_title(language, month),
         }
     }

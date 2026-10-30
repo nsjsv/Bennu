@@ -20,7 +20,7 @@ const ROW_PADDING: [u16; 2] = [8, 12];
 const ROW_CONTENT_INSET: u16 = CARD_PADDING + ROW_PADDING[1];
 
 pub(super) fn settings_group<'a>(
-    header: &'static str,
+    header: String,
     rows: Vec<Element<'a, Message>>,
 ) -> Element<'a, Message> {
     column![settings_group_header(header), settings_card(rows)]
@@ -47,8 +47,8 @@ pub(super) fn settings_card<'a>(rows: Vec<Element<'a, Message>>) -> Element<'a, 
 }
 
 pub(super) fn toggle_setting_row(
-    title: &'static str,
-    description: Option<&'static str>,
+    title: String,
+    description: Option<String>,
     is_on: bool,
     message: Message,
 ) -> Element<'static, Message> {
@@ -73,7 +73,7 @@ pub(super) fn toggle_setting_row(
 }
 
 pub(super) fn labeled_setting_row<'a>(
-    label: &'static str,
+    label: String,
     control: Element<'a, Message>,
 ) -> Element<'a, Message> {
     container(
@@ -86,10 +86,7 @@ pub(super) fn labeled_setting_row<'a>(
     .into()
 }
 
-pub(super) fn action_setting_row(
-    title: &'static str,
-    description: &'static str,
-) -> Button<'static, Message> {
+pub(super) fn action_setting_row(title: String, description: String) -> Button<'static, Message> {
     let labels = Column::new()
         .spacing(2)
         .width(Length::Fill)
@@ -103,7 +100,7 @@ pub(super) fn action_setting_row(
 }
 
 /// 进入二级页面的导航行：左标题右箭头，整行可点。
-pub(super) fn navigation_setting_row(title: &'static str) -> Button<'static, Message> {
+pub(super) fn navigation_setting_row(title: String) -> Button<'static, Message> {
     let content = row![
         readable_text(title).size(12).width(Length::Fill),
         themed_icon(IconSymbol::ChevronRight, IconTone::Normal, 13.0),
@@ -124,14 +121,14 @@ pub(super) fn info_setting_row(content: Element<'_, Message>) -> Element<'_, Mes
         .into()
 }
 
-pub(super) fn muted_setting_text(label: &'static str, size: u32) -> Element<'static, Message> {
+pub(super) fn muted_setting_text(label: String, size: u32) -> Element<'static, Message> {
     container(readable_text(label).size(size).width(Length::Fill))
         .width(Length::Fill)
         .style(muted_text_style)
         .into()
 }
 
-fn settings_group_header(header: &'static str) -> Element<'static, Message> {
+fn settings_group_header(header: String) -> Element<'static, Message> {
     container(readable_text(header).size(12).width(Length::Fill))
         .padding([0, ROW_CONTENT_INSET])
         .width(Length::Fill)

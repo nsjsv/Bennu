@@ -5,14 +5,16 @@ use crate::app::FileBrowser;
 use crate::appearance::context_menu_button_style;
 use crate::config;
 use crate::model::Message;
-use crate::typography::{localized_text, readable_text};
+use crate::typography::readable_text;
 
 use super::settings_group::{info_setting_row, toggle_setting_row};
 
 pub(super) fn network_thumbnails_row(browser: &FileBrowser) -> Element<'static, Message> {
     toggle_setting_row(
-        "Remote List Thumbnails",
-        Some("When enabled, images and videos on remote locations may use more data."),
+        tr!("Remote List Thumbnails"),
+        Some(tr!(
+            "When enabled, images and videos on remote locations may use more data."
+        )),
         browser.remote_list_thumbnail_downloads_enabled(),
         Message::NetworkListThumbnailDownloadsToggled,
     )
@@ -33,13 +35,13 @@ fn preview_size_limit_row(
     kind: config::PreviewFileSizeKind,
 ) -> Element<'_, Message> {
     let label = match kind {
-        config::PreviewFileSizeKind::Text => "Max Text Preview",
-        config::PreviewFileSizeKind::Image => "Max Image Preview",
-        config::PreviewFileSizeKind::Video => "Max Video Preview",
-        config::PreviewFileSizeKind::Audio => "Max Audio Preview",
-        config::PreviewFileSizeKind::Archive => "Max Archive Preview",
-        config::PreviewFileSizeKind::Document => "Max Document Preview",
-        config::PreviewFileSizeKind::Sqlite => "Max SQLite Preview",
+        config::PreviewFileSizeKind::Text => tr!("Max Text Preview"),
+        config::PreviewFileSizeKind::Image => tr!("Max Image Preview"),
+        config::PreviewFileSizeKind::Video => tr!("Max Video Preview"),
+        config::PreviewFileSizeKind::Audio => tr!("Max Audio Preview"),
+        config::PreviewFileSizeKind::Archive => tr!("Max Archive Preview"),
+        config::PreviewFileSizeKind::Document => tr!("Max Document Preview"),
+        config::PreviewFileSizeKind::Sqlite => tr!("Max SQLite Preview"),
     };
     let input = text_input("0", &browser.preview_size_limit_mib_inputs[kind_index])
         .on_input(move |value| Message::PreviewSizeLimitInputChanged(kind_index, value))
@@ -47,14 +49,14 @@ fn preview_size_limit_row(
         .padding([6, 8])
         .size(12)
         .width(Length::Fixed(120.0));
-    let save = button(container(readable_text("Save").size(12)).padding([6, 10]))
+    let save = button(container(readable_text(tr!("Save")).size(12)).padding([6, 10]))
         .on_press(Message::PreviewSizeLimitInputCommitted(kind_index))
         .style(context_menu_button_style());
 
     let mut content = column![row![
         readable_text(label).size(12).width(Length::Fill),
         input,
-        readable_text("MiB").size(12),
+        readable_text("MiB".to_owned()).size(12),
         save,
     ]
     .spacing(8)
@@ -63,15 +65,15 @@ fn preview_size_limit_row(
 
     if browser.user_config().preview_size_limits.limit(kind) == 0 {
         content = content.push(
-            localized_text(
-                "Size is unlimited: previewing very large files may use a lot of memory.",
-            )
+            readable_text(tr!(
+                "Size is unlimited: previewing very large files may use a lot of memory."
+            ))
             .size(11)
             .width(Length::Fill),
         );
     }
     if let Some(error) = &browser.preview_size_limit_mib_errors[kind_index] {
-        content = content.push(localized_text(error).size(11).width(Length::Fill));
+        content = content.push(readable_text(error.clone()).size(11).width(Length::Fill));
     }
 
     info_setting_row(content.into())
@@ -84,16 +86,16 @@ fn preview_directory_expand_levels_row(browser: &FileBrowser) -> Element<'_, Mes
         .padding([6, 8])
         .size(12)
         .width(Length::Fixed(120.0));
-    let save = button(container(readable_text("Save").size(12)).padding([6, 10]))
+    let save = button(container(readable_text(tr!("Save")).size(12)).padding([6, 10]))
         .on_press(Message::PreviewDirectoryExpandLevelsInputCommitted)
         .style(context_menu_button_style());
 
     let mut content = column![row![
-        readable_text("Preview Expand Levels")
+        readable_text(tr!("Preview Expand Levels"))
             .size(12)
             .width(Length::Fill),
         input,
-        readable_text("levels").size(12),
+        readable_text(tr!("levels")).size(12),
         save,
     ]
     .spacing(8)
@@ -101,7 +103,7 @@ fn preview_directory_expand_levels_row(browser: &FileBrowser) -> Element<'_, Mes
     .spacing(3);
 
     if let Some(error) = &browser.preview_directory_expand_levels_error {
-        content = content.push(localized_text(error).size(11).width(Length::Fill));
+        content = content.push(readable_text(error.clone()).size(11).width(Length::Fill));
     }
 
     info_setting_row(content.into())

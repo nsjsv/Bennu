@@ -273,7 +273,7 @@ impl FileBrowser {
     pub(crate) fn right_preview_panel_content(&self) -> Element<'_, Message> {
         if self.preview.is_none() {
             return container_centered(
-                crate::typography::localized_text("Select an item to preview").size(14),
+                crate::typography::readable_text(tr!("Select an item to preview")).size(14),
             );
         }
         crate::view::view_preview_window(

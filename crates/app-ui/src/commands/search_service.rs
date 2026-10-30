@@ -108,8 +108,8 @@ fn path_configuration_diagnostic(error: file_search::SearchError) -> SearchServi
 }
 
 async fn choose_search_directory() -> Result<Option<PathBuf>, String> {
-    let title = crate::localization::translate_current("Select a search location");
-    let accept_label = crate::localization::translate_current("Select");
+    let title = tr!("Select a search location");
+    let accept_label = tr!("Select");
     let request = ashpd::desktop::file_chooser::SelectedFiles::open_file()
         .title(title.as_str())
         .accept_label(accept_label.as_str())
@@ -131,7 +131,7 @@ fn selected_search_directory(uris: &[url::Url]) -> Result<Option<PathBuf>, Strin
     uris.first()
         .map(|uri| {
             uri.to_file_path()
-                .map_err(|_| "the selected location is not a local directory".to_owned())
+                .map_err(|_| tr!("the selected location is not a local directory"))
         })
         .transpose()
 }

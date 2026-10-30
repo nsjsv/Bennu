@@ -2,6 +2,7 @@
 
 pub(super) const ENTRIES: &[(&str, &str)] = &[
     // 面板与窗口
+    ("Select an item to preview", "请选择一个项目进行预览"),
     ("Select a file and press Space to load preview", "选择一个文件并按空格键加载预览"),
     ("Loading preview...", "正在加载预览..."),
     ("No preview available for this file type.", "无法预览此文件类型。"),

@@ -90,8 +90,9 @@ impl FileBrowser {
     ) -> Task<Message> {
         self.apply_single_startup_directory(
             home.to_path_buf(),
-            Some(format!(
-                "Failed to restore saved view state: {error}; opening the home directory."
+            Some(tr!(
+                "Failed to restore saved view state: %1; opening the home directory.",
+                error
             )),
         )
     }
@@ -147,10 +148,9 @@ impl FileBrowser {
         if restored_panes.is_empty() {
             return self.apply_single_startup_directory(
                 home.to_path_buf(),
-                Some(
+                Some(tr!(
                     "Saved view state could not be restored; opening the home directory."
-                        .to_owned(),
-                ),
+                )),
             );
         }
         self.next_tab_id = next_tab_id_after_restore(&restored_panes);

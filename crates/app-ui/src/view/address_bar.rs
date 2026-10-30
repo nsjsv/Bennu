@@ -28,7 +28,7 @@ use crate::icons::IconSymbol;
 use crate::measured_middle_ellipsized_text::measured_middle_ellipsized_text;
 use crate::model::{
     breadcrumb_segments, BreadcrumbSegment, BreadcrumbSegmentKind, BrowserPaneId, FileDropTarget,
-    Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility, TRASH_LOCATION_LABEL,
+    Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility,
 };
 use crate::typography::readable_text;
 use crate::view::{icon_tone_style, themed_icon, IconTone};
@@ -47,7 +47,7 @@ pub(crate) fn address_bar<'a>(
         let content = container(
             iced::widget::row![
                 themed_icon(IconSymbol::Trash, IconTone::Normal, BREADCRUMB_ICON_SIZE),
-                readable_text(TRASH_LOCATION_LABEL).size(16),
+                readable_text(tr!("Trash")).size(16),
             ]
             .spacing(8)
             .align_y(iced::Alignment::Center),
@@ -69,17 +69,14 @@ pub(crate) fn address_bar<'a>(
     );
 
     let anchor: Element<'a, Message> = if let Some(session) = pane.address_editing {
-        let input = text_input(
-            &crate::localization::translate_current("Path"),
-            &session.draft,
-        )
-        .id(address_input_id(pane.id))
-        .on_input(move |value| Message::AddressDraftChanged(pane.id, value))
-        .on_submit(Message::AddressEditingSubmitted(pane.id))
-        .padding([7, 10])
-        .size(16)
-        .style(move |theme, status| faded_text_input_style(theme, status, editing_fraction))
-        .width(Length::Fill);
+        let input = text_input(&tr!("Path"), &session.draft)
+            .id(address_input_id(pane.id))
+            .on_input(move |value| Message::AddressDraftChanged(pane.id, value))
+            .on_submit(Message::AddressEditingSubmitted(pane.id))
+            .padding([7, 10])
+            .size(16)
+            .style(move |theme, status| faded_text_input_style(theme, status, editing_fraction))
+            .width(Length::Fill);
 
         stack([breadcrumbs, opaque(input)])
             .width(Length::Fill)

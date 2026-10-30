@@ -639,6 +639,7 @@ dependencies = [
 name = "bennu-sidebar"
 version = "0.3.6"
 dependencies = [
+ "bennu-localization",
  "bennu-theme",
  "desktop-linux",
  "dirs",
@@ -658,6 +659,7 @@ dependencies = [
 name = "bennu-theme"
 version = "0.3.6"
 dependencies = [
+ "bennu-localization",
  "file-core",
  "file-operation-store",
  "iced",

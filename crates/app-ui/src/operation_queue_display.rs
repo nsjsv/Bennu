@@ -2,11 +2,10 @@ use std::path::{Path, PathBuf};
 
 use file_core::TrashRestoreEntry;
 
-use crate::config::UiLanguage;
 use crate::formatting::format_file_size;
 use crate::operation_queue::{
-    FileOperationStatus, FileOperationTask, QueuedFileOperation, QueuedTransfer,
-    NEW_DIRECTORY_NAME, NEW_FILE_NAME,
+    new_directory_name, new_file_name, FileOperationStatus, FileOperationTask, QueuedFileOperation,
+    QueuedTransfer,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,10 +34,9 @@ impl QueuedFileOperation {
                     items.len(),
                 ),
             },
-            Self::CreateDirectory { parent } => created_entry_path_lines(
-                parent,
-                &crate::localization::translate_current(NEW_DIRECTORY_NAME),
-            ),
+            Self::CreateDirectory { parent } => {
+                created_entry_path_lines(parent, &new_directory_name())
+            }
             Self::CreateDirectories { parent, names, .. } => match names.as_slice() {
                 [] => FileOperationPathLines::empty(),
                 [first, ..] => FileOperationPathLines::from_paths(
@@ -48,10 +46,7 @@ impl QueuedFileOperation {
                     names.len(),
                 ),
             },
-            Self::CreateEmptyFile { parent } => created_entry_path_lines(
-                parent,
-                &crate::localization::translate_current(NEW_FILE_NAME),
-            ),
+            Self::CreateEmptyFile { parent } => created_entry_path_lines(parent, &new_file_name()),
             Self::Trash { paths } | Self::DeletePermanently { paths } => {
                 path_lines_from_paths(paths)
             }
@@ -59,9 +54,9 @@ impl QueuedFileOperation {
                 path_lines_from_trash_originals(entries)
             }
             Self::EmptyTrash => FileOperationPathLines {
-                file_name: "Trash".to_owned(),
-                original_path: "Trash".to_owned(),
-                directory_path: "Trash".to_owned(),
+                file_name: tr!("Trash"),
+                original_path: tr!("Trash"),
+                directory_path: tr!("Trash"),
                 total_items: 1,
             },
             Self::Copy { transfers, .. }
@@ -127,18 +122,15 @@ impl FileOperationPathLines {
 
     fn empty() -> Self {
         Self {
-            file_name: "No items".to_owned(),
-            original_path: "No items".to_owned(),
-            directory_path: "No items".to_owned(),
+            file_name: tr!("No items"),
+            original_path: tr!("No items"),
+            directory_path: tr!("No items"),
             total_items: 0,
         }
     }
 }
 
-pub(crate) fn file_operation_progress_text(
-    task: &FileOperationTask,
-    language: UiLanguage,
-) -> Option<String> {
+pub(crate) fn file_operation_progress_text(task: &FileOperationTask) -> Option<String> {
     let byte_detail = task.progress.bytes().map(|(completed_bytes, total_bytes)| {
         format!(
             "{} / {}",
@@ -146,13 +138,10 @@ pub(crate) fn file_operation_progress_text(
             format_file_size(total_bytes)
         )
     });
-    let item_detail = task.progress.items().map(|(completed_items, total_items)| {
-        if language == UiLanguage::Chinese {
-            format!("{completed_items} / {total_items} 项")
-        } else {
-            format!("{completed_items} / {total_items} items")
-        }
-    });
+    let item_detail = task
+        .progress
+        .items()
+        .map(|(completed_items, total_items)| tr!("%1 / %2 items", completed_items, total_items));
 
     match (byte_detail, item_detail) {
         (Some(bytes), Some(items)) => Some(format!("{bytes} | {items}")),
@@ -164,47 +153,34 @@ pub(crate) fn file_operation_progress_text(
                 FileOperationStatus::Running | FileOperationStatus::Canceling
             ) =>
         {
-            Some(crate::localization::translate(language, "Processing...").into_owned())
+            Some(tr!("Processing..."))
         }
         (None, None) => None,
     }
 }
 
-pub(crate) fn file_operation_copy_text(task: &FileOperationTask, language: UiLanguage) -> String {
+pub(crate) fn file_operation_copy_text(task: &FileOperationTask) -> String {
     let paths = task.operation.path_lines();
-    let translate = |text| crate::localization::translate(language, text).into_owned();
-    let progress = file_operation_progress_text(task, language).unwrap_or_else(|| {
+    let progress = file_operation_progress_text(task).unwrap_or_else(|| {
         task.progress
             .fraction()
             .map(|fraction| format!("{:.0}%", fraction * 100.0))
-            .unwrap_or_else(|| translate("Indeterminate"))
+            .unwrap_or_else(|| tr!("Indeterminate"))
     });
     let mut lines = vec![
-        format!(
-            "{}: {}",
-            translate("Task"),
-            translate(task.operation.title())
-        ),
-        format!("{}: {}", translate("File name"), paths.file_name),
-        format!("{}: {}", translate("Items"), paths.total_items),
-        format!("{}: {}", translate("Original"), paths.original_path),
-        format!("{}: {}", translate("Directory"), paths.directory_path),
-        format!(
-            "{}: {}",
-            translate("Status"),
-            translate(task.status_label())
-        ),
-        format!("{}: {progress}", translate("Progress")),
+        tr!("Task: %1", task.operation.title()),
+        tr!("File name: %1", paths.file_name),
+        tr!("Items: %1", paths.total_items),
+        tr!("Original: %1", paths.original_path),
+        tr!("Directory: %1", paths.directory_path),
+        tr!("Status: %1", task.status_label()),
+        tr!("Progress: %1", progress),
     ];
     if let Some(warning) = task.completion_warning.as_deref() {
-        lines.push(format!(
-            "{}: {}",
-            translate("Warning"),
-            crate::localization::translate(language, warning)
-        ));
+        lines.push(tr!("Warning: %1", warning));
     }
     if let Some(error) = task.error.as_deref() {
-        lines.push(format!("{}: {}", translate("Error"), translate(error)));
+        lines.push(tr!("Error: %1", error));
     }
     lines.join("\n")
 }
@@ -341,7 +317,7 @@ mod tests {
             Some(crate::operation_queue::FileOperationTerminalStatus::Failed)
         );
 
-        let copied = file_operation_copy_text(&queue.tasks()[0], UiLanguage::English);
+        let copied = file_operation_copy_text(&queue.tasks()[0]);
 
         assert!(copied.contains(long_parent.to_string_lossy().as_ref()));
         assert!(copied.contains("Status: Failed"));

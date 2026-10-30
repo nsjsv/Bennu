@@ -1,4 +1,4 @@
-use bennu_localization::{UiLanguage, UnrestoredRenameText};
+use bennu_localization::UiLanguage;
 use file_core::{batch_rename_paths, BatchRenameItem, FileError, FileOperationControls};
 
 use crate::operation_history::FileOperationOutcome;
@@ -19,26 +19,34 @@ pub(super) async fn run_queued_batch_rename(
 
 /// 回滚没能恢复原名的条目必须逐个告诉用户它们现在在哪里,否则停在隐藏
 /// 临时名上的文件在默认视图里等于"消失";其余失败沿用错误原文。
+/// 条目清单放在最前：任务行中间省略时仍能看到第一个条目的位置，完整文本经任务
+/// "复制详情"取得。
 fn batch_rename_failure_text(error: &FileError, language: UiLanguage) -> String {
-    match incomplete_rename_texts(error) {
-        Some((cause, unrestored)) => {
-            bennu_localization::batch_rename_incomplete(language, &cause, &unrestored)
-        }
+    match incomplete_rename_texts(error, language) {
+        Some((cause, items)) => tr_in!(
+            language,
+            "Batch rename failed and some items could not get their original names back: %1. Original error: %2",
+            items,
+            cause
+        ),
         None => error.to_string(),
     }
 }
 
 /// 单个重命名两步改名后没能放回原名时同理，必须说出条目此刻在哪里。
 pub(super) fn rename_failure_text(error: &FileError, language: UiLanguage) -> String {
-    match incomplete_rename_texts(error) {
-        Some((cause, unrestored)) => {
-            bennu_localization::rename_incomplete(language, &cause, &unrestored)
-        }
+    match incomplete_rename_texts(error, language) {
+        Some((cause, items)) => tr_in!(
+            language,
+            "Rename failed and the item could not get its original name back: %1. Original error: %2",
+            items,
+            cause
+        ),
         None => error.to_string(),
     }
 }
 
-fn incomplete_rename_texts(error: &FileError) -> Option<(String, Vec<UnrestoredRenameText>)> {
+fn incomplete_rename_texts(error: &FileError, language: UiLanguage) -> Option<(String, String)> {
     // 改名不新建目录，回滚报告里不会有残留目录。
     let FileError::EntryMovesIncomplete {
         cause, unrestored, ..
@@ -46,15 +54,20 @@ fn incomplete_rename_texts(error: &FileError) -> Option<(String, Vec<UnrestoredR
     else {
         return None;
     };
-    let unrestored = unrestored
+    let items = unrestored
         .iter()
-        .map(|item| UnrestoredRenameText {
-            original: item.original.display().to_string(),
-            current: item.current.display().to_string(),
-            reason: item.error.to_string(),
+        .map(|item| {
+            tr_in!(
+                language,
+                "%1 → %2 (%3)",
+                item.original.display(),
+                item.current.display(),
+                item.error
+            )
         })
-        .collect();
-    Some((cause.to_string(), unrestored))
+        .collect::<Vec<_>>()
+        .join(&tr_in!(language, "; "));
+    Some((cause.to_string(), items))
 }
 
 #[cfg(test)]

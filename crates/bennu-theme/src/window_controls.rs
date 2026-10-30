@@ -4,6 +4,8 @@
 
 use std::collections::HashSet;
 
+use bennu_localization::tr;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WindowControlKind {
     Minimize,
@@ -14,11 +16,11 @@ pub enum WindowControlKind {
 impl WindowControlKind {
     pub const ALL: [Self; 3] = [Self::Minimize, Self::MaximizeRestore, Self::Close];
 
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Self::Minimize => "Minimize",
-            Self::MaximizeRestore => "Maximize / Restore",
-            Self::Close => "Close",
+            Self::Minimize => tr!("Minimize"),
+            Self::MaximizeRestore => tr!("Maximize / Restore"),
+            Self::Close => tr!("Close"),
         }
     }
 
@@ -57,10 +59,10 @@ pub enum WindowControlSide {
 impl WindowControlSide {
     pub const ALL: [Self; 2] = [Self::Left, Self::Right];
 
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Self::Left => "Left",
-            Self::Right => "Right",
+            Self::Left => tr!("Left"),
+            Self::Right => tr!("Right"),
         }
     }
 
@@ -130,10 +132,10 @@ pub enum WindowChromeLayout {
 impl WindowChromeLayout {
     pub const ALL: [Self; 2] = [Self::IntegratedNavigation, Self::SeparateTitleBar];
 
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Self::IntegratedNavigation => "Integrated navigation",
-            Self::SeparateTitleBar => "Separate title bar",
+            Self::IntegratedNavigation => tr!("Integrated navigation"),
+            Self::SeparateTitleBar => tr!("Separate title bar"),
         }
     }
 

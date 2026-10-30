@@ -329,12 +329,7 @@ impl FileBrowser {
                 .tasks()
                 .iter()
                 .find(|task| task.id == task_id)
-                .map(|task| {
-                    crate::operation_queue_display::file_operation_copy_text(
-                        task,
-                        crate::localization::current_language(),
-                    )
-                })
+                .map(crate::operation_queue_display::file_operation_copy_text)
                 .map(iced::clipboard::write)
                 .unwrap_or_else(Task::none),
             Message::FileOperationClearRequested(task_id) => {

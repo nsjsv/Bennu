@@ -21,7 +21,7 @@ pub(super) fn shortcut_settings_section(browser: &FileBrowser) -> Element<'_, Me
     }
 
     let mut section = column![muted_setting_text(
-        "Click a shortcut, then press the replacement keys.",
+        tr!("Click a shortcut, then press the replacement keys."),
         12,
     )]
     .spacing(6)
@@ -40,7 +40,7 @@ fn shortcut_binding_row(
 ) -> Element<'static, Message> {
     let is_capturing = capture.is_some_and(|capture| capture.binding_id == binding.id);
     let binding_label = if is_capturing {
-        crate::localization::translate_current("Press keys...")
+        tr!("Press keys...")
     } else {
         binding.binding.config_value()
     };
@@ -57,7 +57,7 @@ fn shortcut_binding_row(
             )
             .on_press(Message::ShortcutCaptureStarted(binding.id))
             .style(context_menu_button_style()),
-            button(readable_text("Reset").size(12))
+            button(readable_text(tr!("Reset")).size(12))
                 .on_press(Message::ShortcutBindingReset(binding.id))
                 .padding([6, 10])
                 .style(context_menu_button_style()),
@@ -73,37 +73,21 @@ fn shortcut_binding_row(
 
 fn shortcut_capture_feedback(capture: &ShortcutCaptureState) -> Element<'static, Message> {
     let message = if capture.unsupported_key {
-        crate::localization::translate_current(
-            "Unsupported shortcut. Use a letter, number, function key, arrow, or named edit key.",
-        )
+        tr!("Unsupported shortcut. Use a letter, number, function key, arrow, or named edit key.")
     } else if let Some(conflict) = capture.conflict_binding_id {
         let rejected = capture
             .rejected_binding
             .as_ref()
             .map(|binding| binding.config_value())
-            .unwrap_or_else(|| crate::localization::translate_current("Shortcut"));
-        if crate::localization::current_language_is_chinese() {
-            format!(
-                "{rejected} 与 {} 冲突。",
-                crate::localization::translate_current(conflict.label())
-            )
-        } else {
-            format!("{rejected} conflicts with {}.", conflict.label())
-        }
+            .unwrap_or_else(|| tr!("Shortcut"));
+        tr!("%1 conflicts with %2.", rejected, conflict.label())
     } else {
-        if crate::localization::current_language_is_chinese() {
-            format!(
-                "正在监听 {}...",
-                crate::localization::translate_current(capture.binding_id.label())
-            )
-        } else {
-            format!("Listening for {}...", capture.binding_id.label())
-        }
+        tr!("Listening for %1...", capture.binding_id.label())
     };
 
     row![
         readable_text(message).size(12).width(Length::Fill),
-        button(readable_text("Cancel").size(12))
+        button(readable_text(tr!("Cancel")).size(12))
             .on_press(Message::ShortcutCaptureCanceled)
             .padding([6, 10])
             .style(context_menu_button_style()),

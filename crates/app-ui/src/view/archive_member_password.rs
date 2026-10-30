@@ -11,7 +11,7 @@ use crate::app::archive_member_password::{
 use crate::appearance::context_menu_style;
 use crate::icons::IconSymbol;
 use crate::model::Message;
-use crate::typography::{localized_text, readable_text};
+use crate::typography::readable_text;
 
 use super::option_controls::{
     inactive_primary_action_button, primary_action_button, secondary_action_button,
@@ -41,7 +41,7 @@ pub(super) fn archive_member_password_panel(
 
     let content = column![
         title,
-        readable_text("Enter the archive password to continue.").size(13),
+        readable_text(tr!("Enter the archive password to continue.")).size(13),
         archive_password_input_field(
             state.password(),
             state.can_submit_password(),
@@ -50,7 +50,7 @@ pub(super) fn archive_member_password_panel(
             ),
             Message::ArchiveMemberPassword(ArchiveMemberPasswordMessage::Submitted),
         ),
-        localized_text(validation_error).size(12),
+        readable_text(validation_error).size(12),
         archive_member_password_actions(state),
     ]
     .spacing(10)
@@ -63,20 +63,19 @@ pub(super) fn archive_member_password_panel(
         .into()
 }
 
-/// 标题按动作区分:提取动作复用「解压归档」,打开动作显示「打开」;
-/// 都是既有静态词条,不新增文案 key。
-fn summary_title(state: &ArchiveMemberPasswordState) -> &'static str {
+/// 标题按动作区分:提取动作复用「解压归档」,打开动作显示「打开」。
+fn summary_title(state: &ArchiveMemberPasswordState) -> String {
     match state.action() {
-        ArchiveMemberPasswordAction::Extract { .. } => "Extract Archive",
-        ArchiveMemberPasswordAction::Open { .. } => "Open",
+        ArchiveMemberPasswordAction::Extract { .. } => tr!("Extract Archive"),
+        ArchiveMemberPasswordAction::Open { .. } => tr!("Open"),
     }
 }
 
 fn archive_member_password_actions(state: &ArchiveMemberPasswordState) -> Element<'_, Message> {
     let (submit_label, submitting_label) = match state.action() {
-        ArchiveMemberPasswordAction::Extract { .. } => ("Extract", "Extract"),
+        ArchiveMemberPasswordAction::Extract { .. } => (tr!("Extract"), tr!("Extract")),
         // 打开动作在重试在途时显示进行中;提取提交即入队,无在途态。
-        ArchiveMemberPasswordAction::Open { .. } => ("Open", "Opening..."),
+        ArchiveMemberPasswordAction::Open { .. } => (tr!("Open"), tr!("Opening...")),
     };
     let submit_button = if state.can_submit_password() {
         primary_action_button(
@@ -89,7 +88,7 @@ fn archive_member_password_actions(state: &ArchiveMemberPasswordState) -> Elemen
 
     row![
         Space::new().width(Length::Fill),
-        secondary_action_button("Cancel", Message::DismissFloating),
+        secondary_action_button(tr!("Cancel"), Message::DismissFloating),
         submit_button,
     ]
     .spacing(6)

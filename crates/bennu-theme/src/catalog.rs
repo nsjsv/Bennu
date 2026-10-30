@@ -1,3 +1,5 @@
+use bennu_localization::tr;
+
 use super::AppearanceMode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -155,22 +157,24 @@ impl ColorSchemePreset {
         }
     }
 
-    pub const fn style_label(self, mode: AppearanceMode) -> &'static str {
-        match self {
+    /// 设置页里样式的名字：配色自带的专名照原样，通用词（硬、柔和、默认……）翻译。
+    pub fn style_label(self, mode: AppearanceMode) -> String {
+        let proper_name = match self {
+            Self::EverforestHard | Self::GruvboxHard => return tr!("Hard"),
+            Self::Everforest | Self::Gruvbox => return tr!("Medium"),
+            Self::EverforestSoft | Self::GruvboxSoft => return tr!("Soft"),
+            Self::GitHub => return tr!("Default"),
+            Self::GitHubDimmed => return tr!("Dimmed"),
+            Self::GitHubHighContrast => return tr!("High contrast"),
+            Self::GitHubColorblind => return tr!("Colorblind"),
+            Self::GitHubTritanopia => return tr!("Tritanopia"),
+            Self::Custom => return tr!("Custom"),
             Self::Catppuccin => match mode {
                 AppearanceMode::Light => "Latte",
                 AppearanceMode::Dark => "Mocha",
             },
             Self::CatppuccinFrappe => "Frappé",
             Self::CatppuccinMacchiato => "Macchiato",
-            Self::EverforestHard | Self::GruvboxHard => "Hard",
-            Self::Everforest | Self::Gruvbox => "Medium",
-            Self::EverforestSoft | Self::GruvboxSoft => "Soft",
-            Self::GitHub => "Default",
-            Self::GitHubDimmed => "Dimmed",
-            Self::GitHubHighContrast => "High contrast",
-            Self::GitHubColorblind => "Colorblind",
-            Self::GitHubTritanopia => "Tritanopia",
             Self::Dracula => match mode {
                 AppearanceMode::Light => "Alucard",
                 AppearanceMode::Dark => "Dracula",
@@ -199,9 +203,9 @@ impl ColorSchemePreset {
             Self::RosePineMoon => "Moon",
             Self::TokyoNightStorm => "Storm",
             Self::TokyoNightMoon => "Moon",
-            Self::Custom => "Custom",
-            _ => self.family().label(),
-        }
+            _ => return self.family().display_label(),
+        };
+        proper_name.to_owned()
     }
 }
 
@@ -260,6 +264,15 @@ impl ColorSchemeFamily {
             Self::TokyoNight => "Tokyo Night",
             Self::Matugen => "Matugen",
             Self::Custom => "Custom",
+        }
+    }
+
+    /// 设置页里的名字。`label` 是主题的固定名，不随语言变。
+    pub fn display_label(self) -> String {
+        match self {
+            Self::Default => tr!("Default"),
+            Self::Custom => tr!("Custom"),
+            family => family.label().to_owned(),
         }
     }
 

@@ -32,7 +32,7 @@ pub(super) fn window_control_settings_row(browser: &FileBrowser) -> Element<'_, 
     let mut content = Column::new()
         .spacing(8)
         .width(Length::Fill)
-        .push(muted_setting_text("Window layout", 12))
+        .push(muted_setting_text(tr!("Window layout"), 12))
         .push(window_layout_selector(browser));
     for side in WindowControlSide::ALL {
         if let Some(group) = side_control_group(browser, side) {
@@ -42,7 +42,7 @@ pub(super) fn window_control_settings_row(browser: &FileBrowser) -> Element<'_, 
     info_setting_row(
         content
             .push(secondary_action_button(
-                "Restore defaults",
+                tr!("Restore defaults"),
                 Message::WindowControlsReset,
             ))
             .into(),
@@ -86,8 +86,8 @@ fn side_control_group(
         .width(Length::Fill)
         .push(muted_setting_text(
             match side {
-                WindowControlSide::Left => "Left side",
-                WindowControlSide::Right => "Right side",
+                WindowControlSide::Left => tr!("Left side"),
+                WindowControlSide::Right => tr!("Right side"),
             },
             12,
         ));
@@ -175,14 +175,14 @@ fn reorder_arrow_button(
 fn visibility_control(placement: WindowControlPlacement) -> Element<'static, Message> {
     match window_control_visibility_control(placement) {
         WindowControlVisibilityControl::AlwaysVisible => {
-            container(readable_text("Always visible").size(11))
+            container(readable_text(tr!("Always visible")).size(11))
                 .width(Length::Fixed(WINDOW_CONTROL_VISIBILITY_WIDTH))
                 .center_x(Length::Fill)
                 .into()
         }
         WindowControlVisibilityControl::Toggle { visible } => {
             let content = row![
-                readable_text("Show").size(11).width(Length::Fill),
+                readable_text(tr!("Show")).size(11).width(Length::Fill),
                 switch_control(visible),
             ]
             .spacing(6)

@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use bennu_localization::{ResetSettingsText, SettingsSourceText, UiLanguage};
+use bennu_localization::UiLanguage;
 
 /// 出问题的是哪一份数据。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,41 +54,76 @@ impl SettingsRecovery {
     }
 
     pub(crate) fn message(&self, language: UiLanguage) -> String {
+        use SettingsSource::{AppConfig, Preferences};
         match self {
             Self::Restored {
                 source,
                 reset,
                 backup,
             } => {
-                let reset = match reset {
-                    ResetSettings::All => ResetSettingsText::All,
-                    ResetSettings::Keys(keys) => ResetSettingsText::Keys(keys),
-                };
-                bennu_localization::settings_restored(
-                    language,
-                    source.text(),
-                    reset,
-                    &backup.display().to_string(),
-                )
+                let backup = backup.display();
+                match (source, reset) {
+                    (Preferences, ResetSettings::All) => tr_in!(
+                        language,
+                        "Settings could not be read and were reset to defaults. The original settings were backed up to %1.",
+                        backup
+                    ),
+                    (Preferences, ResetSettings::Keys(keys)) => tr_in!(
+                        language,
+                        "Some settings could not be read and were reset to defaults: %1. The original settings were backed up to %2.",
+                        keys.join(&tr_in!(language, ", ")),
+                        backup
+                    ),
+                    (AppConfig, ResetSettings::All) => tr_in!(
+                        language,
+                        "The configuration file could not be read and was reset to defaults. The original file was backed up to %1.",
+                        backup
+                    ),
+                    (AppConfig, ResetSettings::Keys(keys)) => tr_in!(
+                        language,
+                        "Some configuration entries could not be read and were reset to defaults: %1. The original file was backed up to %2.",
+                        keys.join(&tr_in!(language, ", ")),
+                        backup
+                    ),
+                }
             }
-            Self::NotBackedUp { source, error } => {
-                bennu_localization::settings_not_backed_up(language, source.text(), error)
-            }
-            Self::Unavailable { source, error } => {
-                bennu_localization::settings_unavailable(language, source.text(), error)
-            }
-            Self::MigrationNotSaved { error } => {
-                bennu_localization::settings_migration_not_saved(language, error)
-            }
-        }
-    }
-}
-
-impl SettingsSource {
-    fn text(self) -> SettingsSourceText {
-        match self {
-            Self::Preferences => SettingsSourceText::Preferences,
-            Self::AppConfig => SettingsSourceText::AppConfig,
+            Self::NotBackedUp {
+                source: Preferences,
+                error,
+            } => tr_in!(
+                language,
+                "Settings could not be read, and the original settings could not be backed up (%1). Changes to settings will not be saved this time.",
+                error
+            ),
+            Self::NotBackedUp {
+                source: AppConfig,
+                error,
+            } => tr_in!(
+                language,
+                "The configuration file could not be read, and the original file could not be backed up (%1). Changes will not be written to it this time.",
+                error
+            ),
+            Self::Unavailable {
+                source: Preferences,
+                error,
+            } => tr_in!(
+                language,
+                "Settings could not be loaded (%1). Defaults are in use and changes will not be saved this time.",
+                error
+            ),
+            Self::Unavailable {
+                source: AppConfig,
+                error,
+            } => tr_in!(
+                language,
+                "The configuration file could not be loaded (%1). Defaults are in use and changes will not be written to it this time.",
+                error
+            ),
+            Self::MigrationNotSaved { error } => tr_in!(
+                language,
+                "Settings from the old configuration file could not be saved (%1). They are in use for this session.",
+                error
+            ),
         }
     }
 }

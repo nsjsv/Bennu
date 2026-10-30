@@ -545,11 +545,9 @@ impl FileBrowser {
             FileDropTarget::Directory(directory) => {
                 self.file_drag_directory_capsule(&drag.sources, directory)
             }
-            FileDropTarget::Trash => Some(crate::localization::translate_current("Move to Trash")),
+            FileDropTarget::Trash => Some(tr!("Move to Trash")),
             FileDropTarget::Tab(tab) => match &tab.destination {
-                TabDropDestination::Trash => {
-                    Some(crate::localization::translate_current("Move to Trash"))
-                }
+                TabDropDestination::Trash => Some(tr!("Move to Trash")),
                 TabDropDestination::Directory(directory) => {
                     self.file_drag_directory_capsule(&drag.sources, directory)
                 }
@@ -571,7 +569,11 @@ impl FileBrowser {
         {
             return None;
         }
-        Some(file_drag_transfer_label(intent, directory))
+        Some(file_drag_transfer_label(
+            intent,
+            directory,
+            self.active_language(),
+        ))
     }
 
     pub(crate) fn extend_drag_selection_to(&mut self, path: PathBuf) {
@@ -586,16 +588,18 @@ impl FileBrowser {
     }
 }
 
-/// 拖放意图的胶囊文案:目录名拼进英文 key 后按当前语言翻译,中文由
-/// dynamic_translation 的前缀规则还原语序。
-fn file_drag_transfer_label(intent: FileDragDropIntent, directory: &Path) -> String {
+/// 拖放意图的胶囊文案:先取句式再填目录名,目录叫什么都原样显示。
+pub(super) fn file_drag_transfer_label(
+    intent: FileDragDropIntent,
+    directory: &Path,
+    language: crate::config::UiLanguage,
+) -> String {
     let name = display_directory_name(directory);
-    let key = match intent {
-        FileDragDropIntent::Copy => format!("Copy to {name}"),
-        FileDragDropIntent::CreateLink => format!("Create link to {name}"),
-        FileDragDropIntent::Move => format!("Move to {name}"),
-    };
-    crate::localization::translate_current(&key)
+    match intent {
+        FileDragDropIntent::Copy => tr_in!(language, "Copy to %1", name),
+        FileDragDropIntent::CreateLink => tr_in!(language, "Create link to %1", name),
+        FileDragDropIntent::Move => tr_in!(language, "Move to %1", name),
+    }
 }
 
 /// 落点显示名:file_name 为空(如根目录"/")时退回完整路径。

@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+bennu-localization = { path = "../bennu-localization" }
 file-core = { path = "../file-core" }
 file-operation-store = { path = "../file-operation-store" }
 # 这里只声明主题/部件编译所需的 iced core、widget 和平台 feature；renderer

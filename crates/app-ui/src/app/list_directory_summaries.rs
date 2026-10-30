@@ -11,7 +11,7 @@ use iced::Task;
 
 use super::FileBrowser;
 use crate::commands::load_list_directory_summary_command;
-use crate::formatting::format_file_size;
+use crate::formatting::{format_file_size, item_count_label};
 use crate::model::{
     displayed_address_directory, BrowserPaneId, BrowserViewMode, ExpandedDirectory,
     ExpandedDirectoryStatus, ListDirectorySizeDisplayMode, ListDirectorySummaryCache,
@@ -400,9 +400,7 @@ impl FileBrowser {
         };
 
         match self.user_config.list_directory_size_display_mode {
-            ListDirectorySizeDisplayMode::ItemCount => {
-                list_item_count_text(summary.direct_child_count)
-            }
+            ListDirectorySizeDisplayMode::ItemCount => item_count_label(summary.direct_child_count),
             ListDirectorySizeDisplayMode::RecursiveTotalSize => summary
                 .recursive_total_size
                 .map(RecursiveTotalSize::display_text)
@@ -678,14 +676,6 @@ fn apply_sort_direction(ordering: Ordering, sort_direction: SortDirection) -> Or
     match sort_direction {
         SortDirection::Ascending => ordering,
         SortDirection::Descending => ordering.reverse(),
-    }
-}
-
-fn list_item_count_text(count: usize) -> String {
-    if count == 1 {
-        "1 item".to_owned()
-    } else {
-        format!("{count} items")
     }
 }
 

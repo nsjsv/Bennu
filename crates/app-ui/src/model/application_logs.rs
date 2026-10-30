@@ -19,12 +19,12 @@ pub(crate) enum ApplicationLogLevel {
 impl ApplicationLogLevel {
     pub(crate) const ALL: [Self; 4] = [Self::Error, Self::Warning, Self::Info, Self::Debug];
 
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::Error => "Error",
-            Self::Warning => "Warning",
-            Self::Info => "Info",
-            Self::Debug => "Debug",
+            Self::Error => tr!("Error"),
+            Self::Warning => tr!("Warning"),
+            Self::Info => tr!("Info"),
+            Self::Debug => tr!("Debug"),
         }
     }
 
@@ -49,10 +49,10 @@ pub(crate) enum ApplicationLogSource {
 }
 
 impl ApplicationLogSource {
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::App => "App",
-            Self::SearchService => "Search Service",
+            Self::App => tr!("App"),
+            Self::SearchService => tr!("Search Service"),
         }
     }
 }

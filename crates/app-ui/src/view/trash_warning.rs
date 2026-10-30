@@ -5,10 +5,9 @@ use crate::app::FileBrowser;
 use crate::appearance::transparent_button_style;
 use crate::formatting::format_middle_ellipsized_text;
 use crate::icons::IconSymbol;
-use crate::localization;
 use crate::matugen_theme::ui_colors;
 use crate::model::Message;
-use crate::typography::{localized_text, readable_text};
+use crate::typography::readable_text;
 
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};
 
@@ -42,8 +41,8 @@ pub(super) fn trash_warning_panel(browser: &FileBrowser) -> Option<Element<'_, M
 
     let expanded = browser.trash_refresh.warning_details_expanded();
     let summary_text = refresh_error.map_or_else(
-        || localization::trash_warning_summary(warnings.len()),
-        localization::trash_refresh_failed,
+        || tr!("Trash loaded with %1 warning(s)", warnings.len()),
+        |error| tr!("Trash refresh failed: %1", error),
     );
     let mut summary = row![
         themed_icon(IconSymbol::TriangleAlert, IconTone::Warning, MENU_ICON_SIZE),
@@ -54,12 +53,12 @@ pub(super) fn trash_warning_panel(browser: &FileBrowser) -> Option<Element<'_, M
     .width(Length::Fill);
     if !warnings.is_empty() {
         let action_label = if expanded {
-            "Hide warning details"
+            tr!("Hide warning details")
         } else {
-            "Show warning details"
+            tr!("Show warning details")
         };
         summary = summary.push(
-            button(localized_text(action_label).size(11))
+            button(readable_text(action_label).size(11))
                 .padding([4, 6])
                 .style(transparent_button_style())
                 .on_press(Message::TrashWarningsToggled),
@@ -81,8 +80,9 @@ pub(super) fn trash_warning_panel(browser: &FileBrowser) -> Option<Element<'_, M
         }
         if warnings.len() > MAX_VISIBLE_WARNING_DETAILS {
             content = content.push(
-                readable_text(localization::trash_additional_warning_count(
-                    warnings.len() - MAX_VISIBLE_WARNING_DETAILS,
+                readable_text(tr!(
+                    "%1 more warning(s)",
+                    warnings.len() - MAX_VISIBLE_WARNING_DETAILS
                 ))
                 .size(11),
             );

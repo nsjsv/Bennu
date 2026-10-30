@@ -52,8 +52,9 @@ pub(crate) const FPS_CHOICES: [u32; 3] = [60, 30, 24];
 
 const DEFAULT_TARGET_SIZE_TEXT: &str = "1MB";
 const DEFAULT_IMAGE_QUALITY: u8 = 80;
-const FFMPEG_MISSING_MESSAGE: &str =
-    "ffmpeg is missing for the selected target format. Install ffmpeg and retry.";
+fn ffmpeg_missing() -> String {
+    tr!("ffmpeg is missing for the selected target format. Install ffmpeg and retry.")
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ConvertMode {
@@ -93,7 +94,7 @@ impl ResizeSelection {
             .parse::<u32>()
             .ok()
             .filter(|width| *width > 0)
-            .ok_or_else(|| "Enter a custom width in pixels.".to_owned())?;
+            .ok_or_else(|| tr!("Enter a custom width in pixels."))?;
         Ok(ResizeSpec::Width(width))
     }
 
@@ -641,7 +642,7 @@ impl ConvertState {
         let mut requests = Vec::new();
         if let Some(options) = &self.image {
             if !self.encoders.supports_lossy_image(options.target_format) {
-                return Err(FFMPEG_MISSING_MESSAGE.to_owned());
+                return Err(ffmpeg_missing());
             }
             let quality = match options.target_format {
                 ImageTargetFormat::Png
@@ -673,7 +674,7 @@ impl ConvertState {
         }
         if let Some(options) = &self.video {
             if !self.encoders.supports_video(options.target_format) {
-                return Err(FFMPEG_MISSING_MESSAGE.to_owned());
+                return Err(ffmpeg_missing());
             }
             // GIF 调色板编码只有档位语义,固定走质量模式。
             let quality = if options.target_format == VideoTargetFormat::Gif {
@@ -699,7 +700,7 @@ impl ConvertState {
         }
         if let Some(options) = &self.audio {
             if !self.encoders.supports_audio(options.target_format) {
-                return Err(FFMPEG_MISSING_MESSAGE.to_owned());
+                return Err(ffmpeg_missing());
             }
             let quality = match options.target_format {
                 AudioTargetFormat::Flac | AudioTargetFormat::Wav => QualitySpec::Lossless,
@@ -725,7 +726,7 @@ impl ConvertState {
             }
         }
         if requests.is_empty() {
-            return Err("Select at least one convertible file.".to_owned());
+            return Err(tr!("Select at least one convertible file."));
         }
         Ok(requests)
     }
@@ -752,7 +753,7 @@ fn parse_target_size_text(text: &str) -> Result<u64, String> {
         .ok()
         .filter(|value| *value > 0)
         .map(|value| value.saturating_mul(multiplier))
-        .ok_or_else(|| "Enter a target size like 500KB or 2MB.".to_owned())
+        .ok_or_else(|| tr!("Enter a target size like 500KB or 2MB."))
 }
 
 #[cfg(test)]

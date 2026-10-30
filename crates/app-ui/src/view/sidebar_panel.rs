@@ -18,7 +18,6 @@ use crate::icons::IconSymbol;
 use crate::measured_middle_ellipsized_text::measured_middle_ellipsized_text;
 use crate::model::{
     trash_location_path, Message, ScrollbarRegion, SidebarBookmarkDropSlot, SidebarLocation,
-    TRASH_LOCATION_LABEL,
 };
 use crate::network_connections::{NetworkConnectionMessage, SidebarNetworkConnectionEntry};
 use crate::sidebar::sidebar_icon_symbol;
@@ -41,7 +40,7 @@ const SIDEBAR_BOOKMARK_DROP_SLOT_HEIGHT: f32 = 3.0;
 
 pub(crate) fn sidebar_view(browser: &FileBrowser) -> Element<'_, Message> {
     let sidebar_header = row![
-        readable_text("Places").size(16).width(Length::Fill),
+        readable_text(tr!("Places")).size(16).width(Length::Fill),
         button(themed_icon(
             IconSymbol::Settings,
             IconTone::Normal,
@@ -71,7 +70,7 @@ pub(crate) fn sidebar_view(browser: &FileBrowser) -> Element<'_, Message> {
         .collect::<Vec<_>>();
     let can_drop_bookmark = browser.can_drop_sidebar_bookmark();
     if can_drop_bookmark || !favorite_locations.is_empty() {
-        let favorites_label = sidebar_section_label("Favorites");
+        let favorites_label = sidebar_section_label(tr!("Favorites"));
         sidebar = sidebar.push(if can_drop_bookmark && favorite_locations.is_empty() {
             track_file_drag_hit_test_marker(
                 favorites_label,
@@ -162,7 +161,7 @@ fn append_sidebar_devices<'a>(
         return sidebar;
     }
 
-    sidebar = sidebar.push(sidebar_section_label("Devices"));
+    sidebar = sidebar.push(sidebar_section_label(tr!("Devices")));
     for device in &browser.sidebar_devices.devices {
         sidebar = sidebar.push(sidebar_device_item(browser, device));
     }
@@ -172,7 +171,7 @@ fn append_sidebar_devices<'a>(
     {
         sidebar = sidebar.push(sidebar_message_row(message));
     } else if browser.sidebar_devices.devices.is_empty() && browser.sidebar_devices.is_loading {
-        sidebar = sidebar.push(sidebar_message_row("Loading devices..."));
+        sidebar = sidebar.push(sidebar_message_row(tr!("Loading devices...")));
     }
 
     sidebar
@@ -188,9 +187,9 @@ fn append_sidebar_network_connections<'a>(
     }
 
     if browser.network_connections.entries.is_empty() {
-        sidebar = sidebar.push(sidebar_message_row("No saved connections"));
+        sidebar = sidebar.push(sidebar_message_row(tr!("No saved connections")));
     } else if browser.network_connections.unavailable.is_some() {
-        sidebar = sidebar.push(sidebar_message_row("Network status unavailable"));
+        sidebar = sidebar.push(sidebar_message_row(tr!("Network status unavailable")));
     }
 
     sidebar
@@ -198,7 +197,7 @@ fn append_sidebar_network_connections<'a>(
 
 fn sidebar_network_section_header() -> Element<'static, Message> {
     row![
-        container(readable_text("Network").size(12))
+        container(readable_text(tr!("Network")).size(12))
             .padding([4, 8])
             .width(Length::Fill),
         button(themed_icon(
@@ -255,11 +254,7 @@ fn sidebar_location_item_content<'a>(
         IconTone::Normal
     };
     let is_favorite = favorite_index.is_some();
-    let label = if is_favorite {
-        location.label.clone()
-    } else {
-        crate::localization::translate_current(&location.label)
-    };
+    let label = location.display_label();
 
     let item_container = container(sidebar_label(sidebar_icon_symbol(location), &label, tone))
         .padding([6, 8])
@@ -361,14 +356,14 @@ enum SidebarBookmarkDropLineAlignment {
 
 fn sidebar_device_provider_failure_message(
     failures: &[desktop_linux::StorageDeviceProviderFailure],
-) -> Option<&'static str> {
+) -> Option<String> {
     match failures {
         [] => None,
         [failure] => Some(match failure.provider {
-            desktop_linux::StorageDeviceProvider::Udisks => "UDisks devices unavailable",
-            desktop_linux::StorageDeviceProvider::Gvfs => "GVfs devices unavailable",
+            desktop_linux::StorageDeviceProvider::Udisks => tr!("UDisks devices unavailable"),
+            desktop_linux::StorageDeviceProvider::Gvfs => tr!("GVfs devices unavailable"),
         }),
-        _ => Some("Some device providers unavailable"),
+        _ => Some(tr!("Some device providers unavailable")),
     }
 }
 
@@ -466,7 +461,7 @@ fn sidebar_trash_item(browser: &FileBrowser) -> Element<'_, Message> {
     } else {
         IconTone::Normal
     };
-    let trash_label = crate::localization::translate_current(TRASH_LOCATION_LABEL);
+    let trash_label = tr!("Trash");
     let trash_container = container(sidebar_label(IconSymbol::Trash, &trash_label, trash_tone))
         .padding([6, 8])
         .width(Length::Fill);
@@ -486,14 +481,14 @@ fn sidebar_trash_item(browser: &FileBrowser) -> Element<'_, Message> {
         .into()
 }
 
-fn sidebar_section_label(label: &'static str) -> Element<'static, Message> {
+fn sidebar_section_label(label: String) -> Element<'static, Message> {
     container(readable_text(label).size(12))
         .padding([4, 8])
         .width(Length::Fill)
         .into()
 }
 
-fn sidebar_message_row(message: &'static str) -> Element<'static, Message> {
+fn sidebar_message_row(message: String) -> Element<'static, Message> {
     container(readable_text(message).size(12))
         .padding([4, 8])
         .width(Length::Fill)
@@ -601,38 +596,25 @@ fn sidebar_network_connection_detail(
     pending: bool,
 ) -> String {
     if pending {
-        crate::localization::translate_current("Working...")
+        tr!("Working...")
     } else {
         match &connection.state {
-            desktop_linux::NetworkMountState::Disconnected => {
-                crate::localization::translate_current("Not connected")
-            }
-            desktop_linux::NetworkMountState::Connecting => {
-                crate::localization::translate_current("Connecting...")
-            }
+            desktop_linux::NetworkMountState::Disconnected => tr!("Not connected"),
+            desktop_linux::NetworkMountState::Connecting => tr!("Connecting..."),
             desktop_linux::NetworkMountState::Mounted(path) => path.to_string_lossy().into_owned(),
-            desktop_linux::NetworkMountState::Error(_) => {
-                crate::localization::translate_current("Connection error")
-            }
+            desktop_linux::NetworkMountState::Error(_) => tr!("Connection error"),
         }
     }
 }
 
 fn sidebar_device_detail(device: &SidebarDeviceEntry, pending: bool) -> String {
     if pending {
-        crate::localization::translate_current("Working...")
+        tr!("Working...")
     } else if device.is_mounted() {
-        device
-            .detail
-            .clone()
-            .unwrap_or_else(|| crate::localization::translate_current("Mounted"))
+        device.detail.clone().unwrap_or_else(|| tr!("Mounted"))
     } else if device.size_bytes > 0 {
-        if crate::localization::current_language_is_chinese() {
-            format!("未挂载 · {}", format_file_size(device.size_bytes))
-        } else {
-            format!("Not mounted · {}", format_file_size(device.size_bytes))
-        }
+        tr!("Not mounted · %1", format_file_size(device.size_bytes))
     } else {
-        crate::localization::translate_current("Not mounted")
+        tr!("Not mounted")
     }
 }

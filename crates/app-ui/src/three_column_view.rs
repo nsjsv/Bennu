@@ -22,6 +22,7 @@ use crate::file_entry_view::{
     entry_text_input_style, entry_thumbnail_or_icon, themed_icon, FileEntryIconDensity,
     FileEntryVisualState,
 };
+use crate::formatting::empty_directory_message;
 use crate::icons::IconSymbol;
 use crate::input_blocking_space::input_blocking_space;
 use crate::measured_middle_ellipsized_text::measured_middle_ellipsized_text;
@@ -329,12 +330,7 @@ fn directory_column<'a>(
         ColumnContent::Pending => {}
         ColumnContent::Empty => {
             if transfer_placeholders.is_empty() {
-                let message = if pane.is_trash_view {
-                    "Trash is empty"
-                } else {
-                    "No items"
-                };
-                content = content.push(column_message(message));
+                content = content.push(column_message(empty_directory_message(pane.is_trash_view)));
             } else {
                 let merged_items = crate::transfer_placeholders::merge_entries_with_placeholders(
                     &[],
@@ -481,7 +477,7 @@ fn column_resize_divider(pane_id: BrowserPaneId, column_index: usize) -> Element
         .into()
 }
 
-fn column_message(message: &'static str) -> Element<'static, Message> {
+fn column_message(message: String) -> Element<'static, Message> {
     // 空目录提示属于面板 chrome，保持基础字号，不随密度档位缩放。
     container(readable_text(message).size(COLUMN_ENTRY_TEXT_SIZE))
         .padding(COLUMN_ENTRY_PADDING)
@@ -514,17 +510,14 @@ fn column_entry_row<'a>(
         // 行槽高固定 24px（基准档），不显式压缩输入框时 iced 默认字号 16
         // 加默认 padding 5 会撑到 ~31px 溢出行槽，边框盖住文字。
         rename_field(
-            text_input(
-                &crate::localization::translate_current("File name"),
-                pane.rename_input,
-            )
-            .id(rename_input_id())
-            .on_input(Message::RenameInputChanged)
-            .on_submit(Message::RenameSelected)
-            .style(entry_text_input_style(modifier))
-            .padding([2, 4])
-            .size(geometry.text_size as u32)
-            .width(Length::Fill),
+            text_input(&tr!("File name"), pane.rename_input)
+                .id(rename_input_id())
+                .on_input(Message::RenameInputChanged)
+                .on_submit(Message::RenameSelected)
+                .style(entry_text_input_style(modifier))
+                .padding([2, 4])
+                .size(geometry.text_size as u32)
+                .width(Length::Fill),
             pane.rename_hint,
             browser.active_language(),
         )

@@ -57,23 +57,16 @@ pub(crate) fn operation_queue_panel(
     scrollbar_viewport: Option<crate::model::ScrollbarViewport>,
     animation_frame: u8,
 ) -> Element<'_, Message> {
-    let mut header = row![readable_text("Tasks").size(16).width(Length::Fill)]
+    let mut header = row![readable_text(tr!("Tasks")).size(16).width(Length::Fill)]
         .spacing(8)
         .align_y(Alignment::Center);
     if queue.has_terminal_tasks() {
         header = header.push(task_control_button(
-            "Clear Finished",
+            tr!("Clear Finished"),
             Message::FileOperationClearFinishedRequested,
         ));
     }
-    let header = header.push(
-        readable_text(if crate::localization::current_language_is_chinese() {
-            format!("{} 个任务", queue.task_count())
-        } else {
-            format!("{} tasks", queue.task_count())
-        })
-        .size(12),
-    );
+    let header = header.push(readable_text(tr!("%1 tasks", queue.task_count())).size(12));
 
     let mut tasks = column![].spacing(6);
     if queue.tasks().is_empty() {
@@ -132,8 +125,16 @@ fn operation_task_row(task: &FileOperationTask, animation_frame: u8) -> Element<
     .align_y(Alignment::Center);
 
     let paths = column![
-        readable_text(path_line_text("Original", &path_lines.original_path)).size(11),
-        readable_text(path_line_text("Directory", &path_lines.directory_path)).size(11),
+        readable_text(tr!(
+            "Original: %1",
+            format_middle_ellipsized_text(&path_lines.original_path, TASK_PATH_MAX_CHARS)
+        ))
+        .size(11),
+        readable_text(tr!(
+            "Directory: %1",
+            format_middle_ellipsized_text(&path_lines.directory_path, TASK_PATH_MAX_CHARS)
+        ))
+        .size(11),
     ]
     .spacing(2)
     .width(Length::Fill);
@@ -162,24 +163,21 @@ fn operation_task_row(task: &FileOperationTask, animation_frame: u8) -> Element<
         .spacing(4)
         .width(Length::Fill);
 
-    if let Some(detail) =
-        file_operation_progress_text(task, crate::localization::current_language())
-    {
+    if let Some(detail) = file_operation_progress_text(task) {
         body = body.push(readable_text(detail).size(11).width(Length::Fill));
     }
 
     if let Some(warning) = task.completion_warning.as_deref() {
         body = body.push(
-            readable_text(crate::localization::translate_current(warning))
+            readable_text(warning.to_owned())
                 .size(11)
                 .width(Length::Fill),
         );
     }
 
     if let Some(error) = task.error.as_deref() {
-        let error = crate::localization::translate_current(error);
         body = body.push(
-            readable_text(format_middle_ellipsized_text(&error, TASK_ERROR_MAX_CHARS))
+            readable_text(format_middle_ellipsized_text(error, TASK_ERROR_MAX_CHARS))
                 .size(11)
                 .width(Length::Fill),
         );
@@ -198,10 +196,9 @@ fn operation_task_row(task: &FileOperationTask, animation_frame: u8) -> Element<
     item.into()
 }
 
-fn operation_title_text(title: &str, path_lines: &FileOperationPathLines) -> String {
+fn operation_title_text(title: String, path_lines: &FileOperationPathLines) -> String {
     let file_name = format_middle_ellipsized_text(&path_lines.file_name, TASK_FILE_NAME_MAX_CHARS);
     let more_count = path_lines.total_items.saturating_sub(1);
-    let title = crate::localization::translate_current(title);
     if more_count == 0 {
         format!("{title} - {file_name}")
     } else {
@@ -209,13 +206,8 @@ fn operation_title_text(title: &str, path_lines: &FileOperationPathLines) -> Str
     }
 }
 
-fn path_line_text(label: &'static str, path: &str) -> String {
-    let path = format_middle_ellipsized_text(path, TASK_PATH_MAX_CHARS);
-    format!("{}: {path}", crate::localization::translate_current(label))
-}
-
 fn empty_queue_row() -> Element<'static, Message> {
-    container(readable_text("No tasks").size(13).width(Length::Fill))
+    container(readable_text(tr!("No tasks")).size(13).width(Length::Fill))
         .padding(10)
         .width(Length::Fill)
         .style(path_suggestion_item_style)
@@ -224,8 +216,8 @@ fn empty_queue_row() -> Element<'static, Message> {
 
 fn operation_task_controls(task: &FileOperationTask) -> Element<'static, Message> {
     let pause_label = match task.status {
-        FileOperationStatus::Paused => "Resume",
-        _ => "Pause",
+        FileOperationStatus::Paused => tr!("Resume"),
+        _ => tr!("Pause"),
     };
     let can_pause = matches!(
         task.status,
@@ -237,7 +229,7 @@ fn operation_task_controls(task: &FileOperationTask) -> Element<'static, Message
     );
 
     let mut controls = row![task_control_button(
-        "Copy Details",
+        tr!("Copy Details"),
         Message::FileOperationDetailsCopyRequested(task.id),
     )]
     .spacing(6)
@@ -250,13 +242,13 @@ fn operation_task_controls(task: &FileOperationTask) -> Element<'static, Message
     }
     if can_cancel {
         controls = controls.push(task_control_button(
-            "Cancel",
+            tr!("Cancel"),
             Message::FileOperationCancelRequested(task.id),
         ));
     }
     if task.status.is_terminal() {
         controls = controls.push(task_control_button(
-            "Clear",
+            tr!("Clear"),
             Message::FileOperationClearRequested(task.id),
         ));
     }
@@ -264,7 +256,7 @@ fn operation_task_controls(task: &FileOperationTask) -> Element<'static, Message
     controls.into()
 }
 
-fn task_control_button(label: &'static str, message: Message) -> Element<'static, Message> {
+fn task_control_button(label: String, message: Message) -> Element<'static, Message> {
     button(readable_text(label).size(12))
         .on_press(message)
         .padding([4, 8])

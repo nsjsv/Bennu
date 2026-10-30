@@ -142,7 +142,7 @@ impl FileBrowser {
             return Task::none();
         }
         let Some(password) = state.archive_password() else {
-            state.wait_for_password(Some("Enter the archive password.".to_owned()));
+            state.wait_for_password(Some(tr!("Enter the archive password.")));
             return Task::none();
         };
 
@@ -175,7 +175,7 @@ impl FileBrowser {
                 Task::none()
             }
             ArchiveExtractionInspection::InvalidPassword => {
-                state.wait_for_password(Some("Incorrect password. Try again.".to_owned()));
+                state.wait_for_password(Some(tr!("Incorrect password. Try again.")));
                 self.archive_extraction = Some(state);
                 Task::none()
             }

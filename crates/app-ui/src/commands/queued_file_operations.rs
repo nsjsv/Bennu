@@ -21,7 +21,6 @@ use file_operation_store::TaskQueueStore;
 use iced::futures::channel::mpsc::Sender as IcedSender;
 use iced::futures::SinkExt;
 
-use crate::localization::translate_current;
 use crate::model::Message;
 use crate::operation_history::{
     CompletedTransfer, FileOperationCompletion, FileOperationHistoryEligibility,
@@ -29,7 +28,7 @@ use crate::operation_history::{
 };
 use crate::operation_progress::FileOperationProgressUpdate;
 use crate::operation_queue::{
-    QueuedFileOperation, QueuedTransfer, RunningFileOperation, NEW_DIRECTORY_NAME, NEW_FILE_NAME,
+    new_directory_name, new_file_name, QueuedFileOperation, QueuedTransfer, RunningFileOperation,
 };
 
 use self::entry_gathering::{
@@ -459,11 +458,10 @@ async fn run_queued_create_directory(
         .wait_until_running()
         .await
         .map_err(|error| error.to_string())?;
-    // 基名跟随界面语言；被占用时 file-core 原子创建并续编号（基名 2、基名 3…）。
-    let path =
-        create_directory_at_available_name(parent.join(translate_current(NEW_DIRECTORY_NAME)))
-            .await
-            .map_err(|error| error.to_string())?;
+    // 被占用时 file-core 原子创建并续编号（基名 2、基名 3…）。
+    let path = create_directory_at_available_name(parent.join(new_directory_name()))
+        .await
+        .map_err(|error| error.to_string())?;
     send_file_operation_progress(
         output,
         task_id,
@@ -486,7 +484,7 @@ async fn run_queued_create_empty_file(
         .wait_until_running()
         .await
         .map_err(|error| error.to_string())?;
-    let path = create_empty_file_at_available_name(parent.join(translate_current(NEW_FILE_NAME)))
+    let path = create_empty_file_at_available_name(parent.join(new_file_name()))
         .await
         .map_err(|error| error.to_string())?;
     send_file_operation_progress(

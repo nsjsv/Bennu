@@ -26,8 +26,6 @@ pub(crate) const ARCHIVE_COMPRESSION_LEVELS: [ArchiveCompressionLevel; 4] = [
     ArchiveCompressionLevel::Maximum,
 ];
 
-const DEFAULT_ARCHIVE_NAME: &str = "Archive";
-
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct ArchiveCreationState {
     sources: Vec<PathBuf>,
@@ -101,8 +99,7 @@ impl ArchiveCreationState {
 
     pub(crate) fn target_path(&self) -> Result<PathBuf, String> {
         let name = self.file_name.trim();
-        validate_entry_name(OsStr::new(name))
-            .map_err(|reason| archive_name_error(reason).to_owned())?;
+        validate_entry_name(OsStr::new(name)).map_err(archive_name_error)?;
 
         Ok(self
             .target_directory
@@ -307,16 +304,15 @@ impl FileBrowser {
                 self.enqueue_file_operation(operation)
             }
             Ok(false) => {
-                state.stop_target_check_with_error(
-                    "That archive already exists. Choose another name.".to_owned(),
-                );
+                state.stop_target_check_with_error(tr!(
+                    "That archive already exists. Choose another name."
+                ));
                 self.archive_creation = Some(state);
                 Task::none()
             }
             Err(error) => {
-                state.stop_target_check_with_error(format!(
-                    "Could not check archive target: {error}"
-                ));
+                state
+                    .stop_target_check_with_error(tr!("Could not check archive target: %1", error));
                 self.archive_creation = Some(state);
                 Task::none()
             }
@@ -324,22 +320,23 @@ impl FileBrowser {
     }
 }
 
-pub(crate) fn archive_format_label(format: ArchiveFormat) -> &'static str {
+pub(crate) fn archive_format_label(format: ArchiveFormat) -> String {
     match format {
         ArchiveFormat::Zip => "zip",
         ArchiveFormat::SevenZip => "7z",
         ArchiveFormat::TarGz => "tar.gz",
     }
+    .to_owned()
 }
 
 pub(crate) fn archive_compression_level_label(
     compression_level: ArchiveCompressionLevel,
-) -> &'static str {
+) -> String {
     match compression_level {
-        ArchiveCompressionLevel::Store => "No compression",
-        ArchiveCompressionLevel::Fast => "Fast",
-        ArchiveCompressionLevel::Balanced => "Balanced",
-        ArchiveCompressionLevel::Maximum => "Maximum",
+        ArchiveCompressionLevel::Store => tr!("No compression"),
+        ArchiveCompressionLevel::Fast => tr!("Fast"),
+        ArchiveCompressionLevel::Balanced => tr!("Balanced"),
+        ArchiveCompressionLevel::Maximum => tr!("Maximum"),
     }
 }
 
@@ -367,23 +364,28 @@ fn default_archive_name(sources: &[PathBuf], single_source_kind: Option<FileKind
             .file_name()
             .and_then(|name| name.to_str())
             .filter(|name| !name.is_empty())
-            .unwrap_or(DEFAULT_ARCHIVE_NAME)
-            .to_owned()
+            .map(str::to_owned)
+            .unwrap_or_else(default_archive_base_name)
     } else {
-        DEFAULT_ARCHIVE_NAME.to_owned()
+        default_archive_base_name()
     }
+}
+
+/// 多选或取不到名字时的默认名，跟界面语言（同副本、新建文件夹）。
+fn default_archive_base_name() -> String {
+    tr!("Archive")
 }
 
 /// 名字规则与重命名、新建一致（`validate_entry_name`）：Linux 上 `\` 是普通字符，
 /// 不当作路径分隔符拒绝。校验的是用户输入的基名，所以 `.`、`..` 仍然被拒。
-fn archive_name_error(reason: InvalidEntryName) -> &'static str {
+fn archive_name_error(reason: InvalidEntryName) -> String {
     match reason {
-        InvalidEntryName::Empty => "Enter an archive name.",
+        InvalidEntryName::Empty => tr!("Enter an archive name."),
         InvalidEntryName::CurrentDirectory | InvalidEntryName::ParentDirectory => {
-            "\".\" and \"..\" cannot be used as names."
+            tr!("\".\" and \"..\" cannot be used as names.")
         }
-        InvalidEntryName::ContainsSlash => "Archive name cannot contain path separators.",
-        InvalidEntryName::ContainsNul => "Names cannot contain NUL characters.",
+        InvalidEntryName::ContainsSlash => tr!("Archive name cannot contain path separators."),
+        InvalidEntryName::ContainsNul => tr!("Names cannot contain NUL characters."),
     }
 }
 

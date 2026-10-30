@@ -21,7 +21,7 @@ pub(super) fn application_logs_settings_detail(
     let mut content = column![
         chrome_top_spacer(browser),
         settings_group(
-            "Display level",
+            tr!("Display level"),
             vec![info_setting_row(log_threshold_choices(
                 browser.application_logs.threshold,
             ))],
@@ -32,27 +32,29 @@ pub(super) fn application_logs_settings_detail(
 
     let mut entries = Column::new().spacing(4).width(Length::Fill);
     if let Some(warning) = browser.application_logs.journald_warning.as_ref() {
-        entries = entries.push(readable_text(warning).size(12).width(Length::Fill));
+        entries = entries.push(readable_text(warning.clone()).size(12).width(Length::Fill));
     }
     if let Some(error) = browser.application_logs.load_error.as_ref() {
-        entries = entries.push(readable_text(error).size(12).width(Length::Fill));
+        entries = entries.push(readable_text(error.clone()).size(12).width(Length::Fill));
     }
     if browser.application_logs.is_loading() {
-        entries = entries.push(readable_text("Loading logs...").size(12));
+        entries = entries.push(readable_text(tr!("Loading logs...")).size(12));
     }
 
     let mut visible_count = 0;
     for entry in browser.application_logs.visible_entries() {
         visible_count += 1;
-        let level = crate::localization::translate_current(entry.level.label());
-        let source = crate::localization::translate_current(entry.source.label());
         let metadata = format!(
-            "{}  ·  {level}  ·  {source}",
-            format_system_time(entry.timestamp)
+            "{}  ·  {}  ·  {}",
+            format_system_time(entry.timestamp),
+            entry.level.label(),
+            entry.source.label()
         );
         let log_entry = column![
             readable_text(metadata).size(11),
-            readable_text(&entry.message).size(12).width(Length::Fill),
+            readable_text(entry.message.clone())
+                .size(12)
+                .width(Length::Fill),
         ]
         .spacing(2)
         .width(Length::Fill);
@@ -62,7 +64,7 @@ pub(super) fn application_logs_settings_detail(
         && !browser.application_logs.is_loading()
         && browser.application_logs.load_error.is_none()
     {
-        entries = entries.push(readable_text("No logs for this level.").size(13));
+        entries = entries.push(readable_text(tr!("No logs for this level.")).size(13));
     }
     content = content.push(entries);
 

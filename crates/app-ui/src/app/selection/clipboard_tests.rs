@@ -328,8 +328,8 @@ fn duplicate_selected_enqueues_in_place_copies_for_whole_selection() {
         &browser.operation_queue.tasks()[0].operation,
         QueuedFileOperation::Duplicate { transfers, .. }
             if transfers == &vec![
-                keep_both(&report, "/workspace/report副本.pdf"),
-                keep_both(&notes, "/workspace/notes副本"),
+                keep_both(&report, "/workspace/report copy.pdf"),
+                keep_both(&notes, "/workspace/notes copy"),
             ]
     ));
 }
@@ -408,7 +408,7 @@ fn new_folder_from_selection_enqueues_one_undoable_move_batch() {
     assert!(matches!(
         &browser.operation_queue.tasks()[0].operation,
         QueuedFileOperation::GatherSelectionIntoNewFolder { directory, sources }
-            if directory == &workspace.path().join("新建文件夹")
+            if directory == &workspace.path().join("New Folder")
                 && sources == &vec![report.clone()]
     ));
 }

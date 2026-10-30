@@ -76,11 +76,11 @@ impl ThemeMode {
         }
     }
 
-    pub const fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Self::Light => "Light",
-            Self::Dark => "Dark",
-            Self::Automatic => "Automatic",
+            Self::Light => bennu_localization::tr!("Light"),
+            Self::Dark => bennu_localization::tr!("Dark"),
+            Self::Automatic => bennu_localization::tr!("Automatic"),
         }
     }
 

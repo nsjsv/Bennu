@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use bennu_localization::{KeptFolderText, LostAttributeKind, LostAttributesText, UiLanguage};
+use bennu_localization::UiLanguage;
 use file_core::{
     BatchRenameItem, CompletedBatchRename, FileError, FileOperationVerification, InvalidEntryName,
     MetadataKind, MetadataLossSummary, TransferConflictStrategy, TrashRestoreEntry,
@@ -149,21 +149,23 @@ impl RenameRejection {
     }
 
     pub(crate) fn message(self, language: UiLanguage) -> String {
-        let text = match self {
-            Self::NameTaken => "A file or folder with this name already exists.",
-            Self::InvalidName(InvalidEntryName::Empty) => "Enter a name.",
+        match self {
+            Self::NameTaken => tr_in!(language, "A file or folder with this name already exists."),
+            Self::InvalidName(InvalidEntryName::Empty) => tr_in!(language, "Enter a name."),
             Self::InvalidName(
                 InvalidEntryName::CurrentDirectory | InvalidEntryName::ParentDirectory,
-            ) => "\".\" and \"..\" cannot be used as names.",
-            Self::InvalidName(InvalidEntryName::ContainsSlash) => "Names cannot contain \"/\".",
+            ) => tr_in!(language, "\".\" and \"..\" cannot be used as names."),
+            Self::InvalidName(InvalidEntryName::ContainsSlash) => {
+                tr_in!(language, "Names cannot contain \"/\".")
+            }
             Self::InvalidName(InvalidEntryName::ContainsNul) => {
-                "Names cannot contain NUL characters."
+                tr_in!(language, "Names cannot contain NUL characters.")
             }
-            Self::SafeRenameUnsupported => {
+            Self::SafeRenameUnsupported => tr_in!(
+                language,
                 "This file system cannot rename without risking an overwrite, so nothing was changed."
-            }
-        };
-        bennu_localization::translate(language, text).into_owned()
+            ),
+        }
     }
 }
 
@@ -210,13 +212,12 @@ impl FileOperationOutcome {
             }
             let kept = kept_directories
                 .iter()
-                .map(|folder| KeptFolderText {
-                    path: folder.path.display().to_string(),
-                    reason: folder.reason.clone(),
-                })
+                .map(|folder| tr_in!(language, "%1 (%2)", folder.path.display(), folder.reason))
                 .collect::<Vec<_>>();
-            return Some(bennu_localization::kept_new_folders_warning(
-                language, &kept,
+            return Some(tr_in!(
+                language,
+                "Items were moved back, but these new folders could not be removed: %1",
+                kept.join(&tr_in!(language, "; "))
             ));
         }
 
@@ -233,11 +234,12 @@ impl FileOperationOutcome {
             .collect::<Vec<_>>();
         let remaining = failures.len().saturating_sub(MAX_CONVERT_FAILURE_DETAILS);
         if remaining > 0 {
-            details.push(format!("... (+{remaining})"));
+            details.push(tr_in!(language, "... (+%1)", remaining));
         }
-        Some(format!(
-            "Some files could not be converted: {}",
-            details.join("; ")
+        Some(tr_in!(
+            language,
+            "Some files could not be converted: %1",
+            details.join(&tr_in!(language, "; "))
         ))
     }
 }
@@ -251,30 +253,37 @@ fn metadata_loss_warning(
     if metadata_loss.is_empty() {
         return None;
     }
-    let details = metadata_loss
+    let mut items = metadata_loss
         .samples
         .iter()
-        .map(|sample| LostAttributesText {
-            name: sample.path.file_name().map_or_else(
+        .map(|sample| {
+            let name = sample.path.file_name().map_or_else(
                 || sample.path.display().to_string(),
                 |name| name.to_string_lossy().into_owned(),
-            ),
-            kinds: sample
+            );
+            let kinds = sample
                 .kinds
                 .iter()
                 .map(|kind| match kind {
-                    MetadataKind::Permissions => LostAttributeKind::Permissions,
-                    MetadataKind::ExtendedAttributes => LostAttributeKind::ExtendedAttributes,
-                    MetadataKind::AccessControlList => LostAttributeKind::AccessControlList,
+                    MetadataKind::Permissions => tr_in!(language, "permissions"),
+                    MetadataKind::ExtendedAttributes => tr_in!(language, "extended attributes"),
+                    MetadataKind::AccessControlList => tr_in!(language, "access control list"),
                 })
-                .collect(),
+                .collect::<Vec<_>>()
+                .join(&tr_in!(language, ", "));
+            tr_in!(language, "%1 (%2)", name, kinds)
         })
         .collect::<Vec<_>>();
     let remaining = metadata_loss
         .affected_entries
-        .saturating_sub(details.len() as u64);
-    Some(bennu_localization::metadata_loss_warning(
-        language, &details, remaining,
+        .saturating_sub(items.len() as u64);
+    if remaining > 0 {
+        items.push(tr_in!(language, "... (+%1)", remaining));
+    }
+    Some(tr_in!(
+        language,
+        "Some file attributes could not be preserved: %1",
+        items.join(&tr_in!(language, "; "))
     ))
 }
 

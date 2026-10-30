@@ -21,7 +21,7 @@ use crate::model::{
     BatchRenameSortMode, BatchRenameState, BatchRenameTemplateToken, Message, ScrollbarRegion,
     ScrollbarViewport, ScrollbarVisibility,
 };
-use crate::typography::{localized_text, readable_text};
+use crate::typography::readable_text;
 
 use super::batch_rename_preview_name_input_id;
 use super::option_controls::{
@@ -46,15 +46,17 @@ pub(super) fn batch_rename_panel(
     scrollbar_viewport: Option<ScrollbarViewport>,
 ) -> Element<'_, Message> {
     let header = row![
-        localized_text("Batch Rename").size(16).width(Length::Fill),
-        localized_text("Items").size(12),
+        readable_text(tr!("Batch Rename"))
+            .size(16)
+            .width(Length::Fill),
+        readable_text(tr!("Items")).size(12),
         readable_text(state.items.len().to_string()).size(12),
     ]
     .spacing(8)
     .align_y(Alignment::Center);
 
     let sort_row = row![
-        localized_text("Sort order")
+        readable_text(tr!("Sort order"))
             .size(12)
             .width(Length::Fixed(84.0)),
         pick_list(
@@ -118,7 +120,7 @@ fn rules_section(state: &BatchRenameState) -> Element<'_, Message> {
     }
 
     let chips_area: Element<'_, Message> = if state.rules.is_empty() {
-        localized_text("No rules yet. Add a rule to rename files.")
+        readable_text(tr!("No rules yet. Add a rule to rename files."))
             .size(12)
             .into()
     } else {
@@ -134,8 +136,8 @@ fn rules_section(state: &BatchRenameState) -> Element<'_, Message> {
 
     let add_button = button(
         row![
-            readable_text("+").size(13),
-            localized_text("Add rule").size(12),
+            readable_text("+".to_owned()).size(13),
+            readable_text(tr!("Add rule")).size(12),
         ]
         .spacing(4)
         .align_y(Alignment::Center),
@@ -151,7 +153,7 @@ fn rules_section(state: &BatchRenameState) -> Element<'_, Message> {
     };
 
     column![
-        section_title("Rules"),
+        section_title(tr!("Rules")),
         chips_area,
         anchored_popup(add_button, add_menu),
     ]
@@ -163,7 +165,7 @@ fn add_rule_menu() -> Element<'static, Message> {
     let mut items = Column::new().spacing(2);
     for kind in BatchRenameRuleKind::ALL {
         items = items.push(
-            button(readable_text(kind.label_key()).size(12))
+            button(readable_text(kind.label()).size(12))
                 .padding([5, 10])
                 .width(Length::Fill)
                 .style(context_menu_item_button_style())
@@ -196,7 +198,7 @@ fn rule_chip_row(
         .style(rule_chip_style(is_selected))
         .on_press(Message::BatchRename(BatchRenameMessage::RuleSelected(id)));
 
-    let move_up = button(readable_text("↑").size(12))
+    let move_up = button(readable_text("↑".to_owned()).size(12))
         .padding([4, 7])
         .style(chip_action_button_style());
     let move_up = if is_first {
@@ -205,7 +207,7 @@ fn rule_chip_row(
         move_up.on_press(Message::BatchRename(BatchRenameMessage::RuleMoved(id, -1)))
     };
 
-    let move_down = button(readable_text("↓").size(12))
+    let move_down = button(readable_text("↓".to_owned()).size(12))
         .padding([4, 7])
         .style(chip_action_button_style());
     let move_down = if is_last {
@@ -214,7 +216,7 @@ fn rule_chip_row(
         move_down.on_press(Message::BatchRename(BatchRenameMessage::RuleMoved(id, 1)))
     };
 
-    let remove = button(readable_text("×").size(12))
+    let remove = button(readable_text("×".to_owned()).size(12))
         .padding([4, 7])
         .style(chip_action_button_style())
         .on_press(Message::BatchRename(BatchRenameMessage::RuleRemoved(id)));
@@ -234,50 +236,23 @@ fn rule_chip_row(
 }
 
 fn rule_summary(rule: &BatchRenameRule) -> String {
-    let label = crate::localization::translate_current(rule.params.kind().label_key());
+    let label = rule.params.kind().label();
     match &rule.params {
-        BatchRenameRuleParams::Template(params) => format!(
-            "{label}: {}",
-            crate::localization::translate_current(&params.template)
-        ),
+        BatchRenameRuleParams::Template(params) => format!("{label}: {}", params.template),
         BatchRenameRuleParams::Replace(params) => {
             format!("{label}: {} → {}", params.find, params.replacement)
         }
         BatchRenameRuleParams::Insert(params) => format!("{label}: {}", params.text),
         BatchRenameRuleParams::Slice(_) => label,
         BatchRenameRuleParams::Remove(params) => format!("{label}: {}", params.text),
-        BatchRenameRuleParams::Case(params) => {
-            format!(
-                "{label}: {}",
-                crate::localization::translate_current(params.label())
-            )
-        }
+        BatchRenameRuleParams::Case(params) => format!("{label}: {}", params.label()),
         BatchRenameRuleParams::Sequence(params) => {
             let padding = params.padding_input.trim().parse::<usize>().unwrap_or(2);
             format!("{label}: {}{:0padding$}+", params.prefix, 1)
         }
-        BatchRenameRuleParams::Random(params) => {
-            format!(
-                "{label}: {}",
-                crate::localization::translate_current(match params.mode {
-                    crate::model::BatchRenameRandomMode::Off => "Off",
-                    crate::model::BatchRenameRandomMode::ReplaceStem => "Replace stem",
-                    crate::model::BatchRenameRandomMode::Prefix => "Prefix",
-                    crate::model::BatchRenameRandomMode::Suffix => "Suffix",
-                })
-            )
-        }
+        BatchRenameRuleParams::Random(params) => format!("{label}: {}", params.mode.label()),
         BatchRenameRuleParams::Extension(params) => {
-            format!(
-                "{label}: {}",
-                crate::localization::translate_current(match params.mode {
-                    BatchRenameExtensionMode::Preserve => "Preserve",
-                    BatchRenameExtensionMode::Remove => "Remove",
-                    BatchRenameExtensionMode::Replace => "Replace",
-                    BatchRenameExtensionMode::Lowercase => "lowercase",
-                    BatchRenameExtensionMode::Uppercase => "UPPERCASE",
-                })
-            )
+            format!("{label}: {}", params.mode.label())
         }
         BatchRenameRuleParams::Regex(params) => format!("{label}: {}", params.pattern),
         BatchRenameRuleParams::List(params) => {
@@ -303,7 +278,7 @@ fn selected_rule_editor(state: &BatchRenameState) -> Element<'_, Message> {
         BatchRenameRuleParams::Slice(params) => slice_editor(rule.id, params),
         BatchRenameRuleParams::Remove(params) => remove_editor(rule.id, params),
         BatchRenameRuleParams::Case(params) => column![
-            section_title("Letter case"),
+            section_title(tr!("Letter case")),
             pick_list(
                 crate::model::BatchRenameCaseRule::options(),
                 Some(*params),
@@ -317,7 +292,7 @@ fn selected_rule_editor(state: &BatchRenameState) -> Element<'_, Message> {
         .into(),
         BatchRenameRuleParams::Sequence(params) => sequence_editor(rule.id, params),
         BatchRenameRuleParams::Random(params) => column![
-            section_title("Random"),
+            section_title(tr!("Random")),
             row![
                 pick_list(
                     crate::model::BatchRenameRandomMode::options(),
@@ -329,13 +304,13 @@ fn selected_rule_editor(state: &BatchRenameState) -> Element<'_, Message> {
                 .width(Length::Fill)
                 .text_size(12)
                 .padding([5, 8]),
-                input_column("Length", &params.length_input, move |value| {
+                input_column(tr!("Length"), &params.length_input, move |value| {
                     Message::BatchRename(BatchRenameMessage::RandomLengthChanged(rule.id, value))
                 }),
             ]
             .spacing(8)
             .align_y(Alignment::Center),
-            input_column("Alphabet", &params.alphabet, move |value| {
+            input_column(tr!("Alphabet"), &params.alphabet, move |value| {
                 Message::BatchRename(BatchRenameMessage::RandomAlphabetChanged(rule.id, value))
             }),
         ]
@@ -352,13 +327,13 @@ fn selected_rule_editor(state: &BatchRenameState) -> Element<'_, Message> {
             .width(Length::Fill)
             .text_size(12)
             .padding([5, 8]);
-            let controls = column![section_title("Extension")];
+            let controls = column![section_title(tr!("Extension"))];
             if params.mode == BatchRenameExtensionMode::Replace {
                 controls
                     .push(
                         row![
                             mode,
-                            input_column("New extension", &params.replacement, move |value| {
+                            input_column(tr!("New extension"), &params.replacement, move |value| {
                                 Message::BatchRename(
                                     BatchRenameMessage::ExtensionReplacementChanged(rule.id, value),
                                 )
@@ -374,12 +349,12 @@ fn selected_rule_editor(state: &BatchRenameState) -> Element<'_, Message> {
             }
         }
         BatchRenameRuleParams::Regex(params) => column![
-            section_title("Regex"),
+            section_title(tr!("Regex")),
             row![
-                input_column("Pattern", &params.pattern, move |value| {
+                input_column(tr!("Pattern"), &params.pattern, move |value| {
                     Message::BatchRename(BatchRenameMessage::RegexPatternChanged(rule.id, value))
                 }),
-                input_column("Replacement", &params.replacement, move |value| {
+                input_column(tr!("Replacement"), &params.replacement, move |value| {
                     Message::BatchRename(BatchRenameMessage::RegexReplacementChanged(
                         rule.id, value,
                     ))
@@ -391,8 +366,8 @@ fn selected_rule_editor(state: &BatchRenameState) -> Element<'_, Message> {
         .spacing(6)
         .into(),
         BatchRenameRuleParams::List(params) => column![
-            section_title("List"),
-            input_column("Names", &params.names, move |value| {
+            section_title(tr!("List")),
+            input_column(tr!("Names"), &params.names, move |value| {
                 Message::BatchRename(BatchRenameMessage::ListNamesChanged(rule.id, value))
             }),
         ]
@@ -411,7 +386,7 @@ fn template_editor<'a>(
     id: u64,
     params: &'a crate::model::BatchRenameTemplateRule,
 ) -> Element<'a, Message> {
-    let token_button = button(localized_text("Tokens").size(12))
+    let token_button = button(readable_text(tr!("Tokens")).size(12))
         .padding([6, 10])
         .style(add_rule_button_style())
         .on_press(Message::BatchRename(
@@ -442,9 +417,9 @@ fn template_editor<'a>(
     };
 
     column![
-        section_title("Template"),
+        section_title(tr!("Template")),
         row![
-            input_column("Template", &params.template, move |value| {
+            input_column(tr!("Template"), &params.template, move |value| {
                 Message::BatchRename(BatchRenameMessage::TemplateChanged(id, value))
             }),
             anchored_popup(token_button, token_menu),
@@ -458,7 +433,7 @@ fn template_editor<'a>(
 
 fn replace_editor<'a>(id: u64, params: &'a BatchRenameReplaceRule) -> Element<'a, Message> {
     let mut controls = column![
-        section_title("Replace"),
+        section_title(tr!("Replace")),
         pick_list(
             crate::model::BatchRenameReplaceScope::options(),
             Some(params.scope),
@@ -468,10 +443,10 @@ fn replace_editor<'a>(id: u64, params: &'a BatchRenameReplaceRule) -> Element<'a
         .text_size(12)
         .padding([5, 8]),
         row![
-            input_column("Find", &params.find, move |value| {
+            input_column(tr!("Find"), &params.find, move |value| {
                 Message::BatchRename(BatchRenameMessage::ReplaceFindChanged(id, value))
             }),
-            input_column("With", &params.replacement, move |value| {
+            input_column(tr!("With"), &params.replacement, move |value| {
                 Message::BatchRename(BatchRenameMessage::ReplaceWithChanged(id, value))
             }),
         ]
@@ -481,12 +456,24 @@ fn replace_editor<'a>(id: u64, params: &'a BatchRenameReplaceRule) -> Element<'a
     if params.scope == BatchRenameReplaceScope::Range {
         controls = controls.push(
             row![
-                input_column("Range start", &params.range_start_input, move |value| {
-                    Message::BatchRename(BatchRenameMessage::ReplaceRangeStartChanged(id, value))
-                }),
-                input_column("Range length", &params.range_length_input, move |value| {
-                    Message::BatchRename(BatchRenameMessage::ReplaceRangeLengthChanged(id, value))
-                }),
+                input_column(
+                    tr!("Range start"),
+                    &params.range_start_input,
+                    move |value| {
+                        Message::BatchRename(BatchRenameMessage::ReplaceRangeStartChanged(
+                            id, value,
+                        ))
+                    }
+                ),
+                input_column(
+                    tr!("Range length"),
+                    &params.range_length_input,
+                    move |value| {
+                        Message::BatchRename(BatchRenameMessage::ReplaceRangeLengthChanged(
+                            id, value,
+                        ))
+                    }
+                ),
             ]
             .spacing(8)
             .align_y(Alignment::Center),
@@ -496,7 +483,7 @@ fn replace_editor<'a>(id: u64, params: &'a BatchRenameReplaceRule) -> Element<'a
     controls
         .push(
             checkbox(params.ignore_case)
-                .label(crate::localization::translate_current("Ignore case"))
+                .label(tr!("Ignore case"))
                 .on_toggle(move |value| {
                     Message::BatchRename(BatchRenameMessage::ReplaceIgnoreCaseToggled(id, value))
                 }),
@@ -509,7 +496,7 @@ fn insert_editor<'a>(
     id: u64,
     params: &'a crate::model::BatchRenameInsertRule,
 ) -> Element<'a, Message> {
-    let mut fields = row![input_column("Text", &params.text, move |value| {
+    let mut fields = row![input_column(tr!("Text"), &params.text, move |value| {
         Message::BatchRename(BatchRenameMessage::InsertTextChanged(id, value))
     })]
     .spacing(8)
@@ -517,7 +504,7 @@ fn insert_editor<'a>(
     match params.mode {
         BatchRenameInsertMode::Position => {
             fields = fields.push(input_column(
-                "Position",
+                tr!("Position"),
                 &params.position_input,
                 move |value| {
                     Message::BatchRename(BatchRenameMessage::InsertPositionChanged(id, value))
@@ -525,15 +512,19 @@ fn insert_editor<'a>(
             ));
         }
         BatchRenameInsertMode::AfterAnchor => {
-            fields = fields.push(input_column("After text", &params.anchor, move |value| {
-                Message::BatchRename(BatchRenameMessage::InsertAnchorChanged(id, value))
-            }));
+            fields = fields.push(input_column(
+                tr!("After text"),
+                &params.anchor,
+                move |value| {
+                    Message::BatchRename(BatchRenameMessage::InsertAnchorChanged(id, value))
+                },
+            ));
         }
         BatchRenameInsertMode::Before | BatchRenameInsertMode::After => {}
     }
 
     let mut controls = column![
-        section_title("Insert"),
+        section_title(tr!("Insert")),
         pick_list(
             crate::model::BatchRenameInsertMode::options(),
             Some(params.mode),
@@ -547,7 +538,7 @@ fn insert_editor<'a>(
     if params.mode != BatchRenameInsertMode::Before {
         controls = controls.push(
             checkbox(params.ignore_extension)
-                .label(crate::localization::translate_current("Ignore extension"))
+                .label(tr!("Ignore extension"))
                 .on_toggle(move |value| {
                     Message::BatchRename(BatchRenameMessage::InsertIgnoreExtensionToggled(
                         id, value,
@@ -565,19 +556,19 @@ fn slice_editor<'a>(
 ) -> Element<'a, Message> {
     let location = match params.mode {
         BatchRenameSliceMode::Position => {
-            input_column("Start", &params.start_input, move |value| {
+            input_column(tr!("Start"), &params.start_input, move |value| {
                 Message::BatchRename(BatchRenameMessage::SliceStartChanged(id, value))
             })
         }
         BatchRenameSliceMode::AfterAnchor => {
-            input_column("After text", &params.anchor, move |value| {
+            input_column(tr!("After text"), &params.anchor, move |value| {
                 Message::BatchRename(BatchRenameMessage::SliceAnchorChanged(id, value))
             })
         }
     };
 
     column![
-        section_title("Slice"),
+        section_title(tr!("Slice")),
         pick_list(
             crate::model::BatchRenameSliceMode::options(),
             Some(params.mode),
@@ -588,7 +579,7 @@ fn slice_editor<'a>(
         .padding([5, 8]),
         row![
             location,
-            input_column("Length", &params.length_input, move |value| {
+            input_column(tr!("Length"), &params.length_input, move |value| {
                 Message::BatchRename(BatchRenameMessage::SliceLengthChanged(id, value))
             }),
         ]
@@ -605,14 +596,14 @@ fn remove_editor<'a>(
 ) -> Element<'a, Message> {
     let mode_controls: Element<'a, Message> = match params.mode {
         BatchRenameRemoveMode::TextAndRange => column![
-            input_column("Text", &params.text, move |value| {
+            input_column(tr!("Text"), &params.text, move |value| {
                 Message::BatchRename(BatchRenameMessage::RemoveTextChanged(id, value))
             }),
             row![
-                input_column("Start", &params.start_input, move |value| {
+                input_column(tr!("Start"), &params.start_input, move |value| {
                     Message::BatchRename(BatchRenameMessage::RemoveStartChanged(id, value))
                 }),
-                input_column("Length", &params.length_input, move |value| {
+                input_column(tr!("Length"), &params.length_input, move |value| {
                     Message::BatchRename(BatchRenameMessage::RemoveLengthChanged(id, value))
                 }),
             ]
@@ -643,7 +634,7 @@ fn remove_editor<'a>(
     };
 
     column![
-        section_title("Remove characters"),
+        section_title(tr!("Remove characters")),
         pick_list(
             crate::model::BatchRenameRemoveMode::options(),
             Some(params.mode),
@@ -676,18 +667,18 @@ fn sequence_editor<'a>(
     params: &'a crate::model::BatchRenameSequenceRule,
 ) -> Element<'a, Message> {
     column![
-        section_title("Numbering"),
+        section_title(tr!("Numbering")),
         row![
-            input_column("Prefix", &params.prefix, move |value| {
+            input_column(tr!("Prefix"), &params.prefix, move |value| {
                 Message::BatchRename(BatchRenameMessage::SequencePrefixChanged(id, value))
             }),
-            input_column("Start", &params.start_input, move |value| {
+            input_column(tr!("Start"), &params.start_input, move |value| {
                 Message::BatchRename(BatchRenameMessage::SequenceStartChanged(id, value))
             }),
-            input_column("Step", &params.step_input, move |value| {
+            input_column(tr!("Step"), &params.step_input, move |value| {
                 Message::BatchRename(BatchRenameMessage::SequenceStepChanged(id, value))
             }),
-            input_column("Padding", &params.padding_input, move |value| {
+            input_column(tr!("Padding"), &params.padding_input, move |value| {
                 Message::BatchRename(BatchRenameMessage::SequencePaddingChanged(id, value))
             }),
         ]
@@ -695,14 +686,14 @@ fn sequence_editor<'a>(
         .align_y(Alignment::Center),
         row![
             checkbox(params.include_original_stem)
-                .label(crate::localization::translate_current("Original stem"))
+                .label(tr!("Original stem"))
                 .on_toggle(move |value| {
                     Message::BatchRename(BatchRenameMessage::SequenceIncludeOriginalToggled(
                         id, value,
                     ))
                 }),
             checkbox(params.preserve_extension)
-                .label(crate::localization::translate_current("Extension"))
+                .label(tr!("Extension"))
                 .on_toggle(move |value| {
                     Message::BatchRename(BatchRenameMessage::SequencePreserveExtensionToggled(
                         id, value,
@@ -762,23 +753,25 @@ fn preview_rows(
     // iced 默认 Word 换行,窄面板压窄列时会把行高撑到两倍以上(无头布局
     // 探针实测 400px 窗口约 43px vs 单行 28px),clip 只裁绘制不救换行。
     let header = row![
-        readable_text("#").size(11).width(Length::Fixed(24.0)),
+        readable_text("#".to_owned())
+            .size(11)
+            .width(Length::Fixed(24.0)),
         container(
-            localized_text("Original name")
+            readable_text(tr!("Original name"))
                 .size(11)
                 .wrapping(text::Wrapping::None)
         )
         .width(Length::FillPortion(3))
         .clip(true),
         container(
-            localized_text("New name")
+            readable_text(tr!("New name"))
                 .size(11)
                 .wrapping(text::Wrapping::None)
         )
         .width(Length::FillPortion(3))
         .clip(true),
         container(
-            localized_text("Status")
+            readable_text(tr!("Status"))
                 .size(11)
                 .wrapping(text::Wrapping::None)
         )
@@ -787,7 +780,7 @@ fn preview_rows(
     ]
     .spacing(8);
 
-    column![section_title("Preview"), header, scroller]
+    column![section_title(tr!("Preview")), header, scroller]
         .spacing(6)
         .into()
 }
@@ -823,19 +816,16 @@ fn preview_row<'a>(
     .interaction(iced::mouse::Interaction::Grab)
     .into();
     let target_cell: Element<'a, Message> = if is_editing {
-        text_input(
-            &crate::localization::translate_current("New name"),
-            editing_input,
-        )
-        .id(batch_rename_preview_name_input_id(&row_state.source))
-        .on_input(|value| Message::BatchRename(BatchRenameMessage::PreviewNameChanged(value)))
-        .on_submit(Message::BatchRename(
-            BatchRenameMessage::PreviewNameEditCommitted,
-        ))
-        .padding([5, 6])
-        .size(12)
-        .width(Length::FillPortion(3))
-        .into()
+        text_input(&tr!("New name"), editing_input)
+            .id(batch_rename_preview_name_input_id(&row_state.source))
+            .on_input(|value| Message::BatchRename(BatchRenameMessage::PreviewNameChanged(value)))
+            .on_submit(Message::BatchRename(
+                BatchRenameMessage::PreviewNameEditCommitted,
+            ))
+            .padding([5, 6])
+            .size(12)
+            .width(Length::FillPortion(3))
+            .into()
     } else {
         mouse_area(
             container(diff_highlighted_target(row_state))
@@ -1018,14 +1008,20 @@ fn status_color(theme: &Theme, status: crate::model::BatchRenamePreviewStatus) -
 
 fn action_row(state: &BatchRenameState) -> Element<'static, Message> {
     let apply = if state.can_apply() {
-        primary_action_button("Apply", Message::BatchRename(BatchRenameMessage::Apply))
+        primary_action_button(
+            tr!("Apply"),
+            Message::BatchRename(BatchRenameMessage::Apply),
+        )
     } else {
-        inactive_primary_action_button("Apply")
+        inactive_primary_action_button(tr!("Apply"))
     };
 
     row![
         Space::new().width(Length::Fill),
-        secondary_action_button("Cancel", Message::BatchRename(BatchRenameMessage::Cancel)),
+        secondary_action_button(
+            tr!("Cancel"),
+            Message::BatchRename(BatchRenameMessage::Cancel)
+        ),
         apply,
     ]
     .spacing(8)
@@ -1034,13 +1030,13 @@ fn action_row(state: &BatchRenameState) -> Element<'static, Message> {
 }
 
 fn input_column<'a>(
-    label: &'static str,
+    label: String,
     value: &'a str,
     on_input: impl Fn(String) -> Message + 'a,
 ) -> Element<'a, Message> {
     column![
-        readable_text(translate_current(label)).size(11),
-        text_input(&translate_current(label), value)
+        readable_text(label.clone()).size(11),
+        text_input(&label, value)
             .on_input(on_input)
             .padding([6, 8])
             .size(13)
@@ -1051,11 +1047,7 @@ fn input_column<'a>(
     .into()
 }
 
-fn translate_current(label: &'static str) -> String {
-    crate::localization::translate_current(label)
-}
-
-fn section_title(label: &'static str) -> Element<'static, Message> {
+fn section_title(label: String) -> Element<'static, Message> {
     readable_text(label).size(12).into()
 }
 

@@ -351,15 +351,14 @@ fn eye_toggle_button(
     eye.into()
 }
 
-/// 菜单项名:与真实菜单一样走本地化;隐藏时删除线并沿用容器淡化色。
+/// 菜单项名:与真实菜单同一份文案;隐藏时删除线并沿用容器淡化色。
 fn item_label(entry: &ContextMenuSettingsRow) -> Element<'static, Message> {
-    let translated_label = crate::localization::translate_current(entry.label);
     if entry.visible {
-        readable_text(translated_label)
+        readable_text(entry.label.clone())
             .size(CONTEXT_MENU_LABEL_SIZE)
             .into()
     } else {
-        rich_text![settings_span(translated_label).strikethrough(true)]
+        rich_text![settings_span(entry.label.clone()).strikethrough(true)]
             .size(CONTEXT_MENU_LABEL_SIZE)
             .into()
     }
@@ -379,13 +378,13 @@ fn pager_button(icon: IconSymbol, message: Message) -> Button<'static, Message> 
 fn reset_row(browser: &FileBrowser, page: ContextMenuSettingsPage) -> Element<'_, Message> {
     let reset: Element<'static, Message> = if browser.context_menu_reset_confirmation == Some(page)
     {
-        button(container(readable_text("Click Again to Reset").size(12)).padding([6, 10]))
+        button(container(readable_text(tr!("Click Again to Reset")).size(12)).padding([6, 10]))
             .on_press(Message::ContextMenuSettingsResetConfirmed(page))
             .style(destructive_confirmation_button_style())
             .into()
     } else {
         secondary_action_button(
-            "Restore defaults",
+            tr!("Restore defaults"),
             Message::ContextMenuSettingsResetRequested(page),
         )
         .into()

@@ -6,7 +6,6 @@ use super::FileBrowser;
 use crate::commands::publish_desktop_notification_command;
 use crate::config::UiLanguage;
 use crate::formatting::format_middle_ellipsized_text;
-use crate::localization;
 use crate::model::{sanitized_application_log_detail, Message};
 use crate::operation_history::FileOperationCompletion;
 use crate::operation_queue::{FileOperationTerminalStatus, QueuedFileOperation};
@@ -108,36 +107,31 @@ fn file_operation_notification_text(
         return None;
     }
 
-    let summary_source = match &completion {
+    let title = operation.title_in(language);
+    let summary = match &completion {
         FileOperationNotificationCompletion::Completed
         | FileOperationNotificationCompletion::CompletedWithWarning(_) => {
-            format!("{} completed", operation.title())
+            tr_in!(language, "%1 completed", title)
         }
-        FileOperationNotificationCompletion::Failed(_) => {
-            format!("{} failed", operation.title())
-        }
+        FileOperationNotificationCompletion::Failed(_) => tr_in!(language, "%1 failed", title),
     };
-    let summary = localization::translate(language, &summary_source).into_owned();
     let path_lines = operation.path_lines();
     let item_summary = if matches!(operation, QueuedFileOperation::EmptyTrash) {
-        localization::translate(language, "Trash").into_owned()
+        tr_in!(language, "Trash")
     } else if path_lines.total_items == 1 {
         format_middle_ellipsized_text(&path_lines.file_name, NOTIFICATION_FILE_NAME_MAX_CHARS)
     } else {
-        localization::translate(language, &format!("{} items", path_lines.total_items)).into_owned()
+        tr_in!(language, "%1 items", path_lines.total_items)
     };
     let body = match completion {
         FileOperationNotificationCompletion::Completed => item_summary,
-        FileOperationNotificationCompletion::CompletedWithWarning(warning) => {
-            let warning = localization::translate(language, &warning);
-            format!(
-                "{item_summary}\n{}",
-                format_middle_ellipsized_text(&warning, NOTIFICATION_FAILURE_REASON_MAX_CHARS,)
-            )
-        }
+        FileOperationNotificationCompletion::CompletedWithWarning(warning) => format!(
+            "{item_summary}\n{}",
+            format_middle_ellipsized_text(&warning, NOTIFICATION_FAILURE_REASON_MAX_CHARS)
+        ),
         FileOperationNotificationCompletion::Failed(error) => format!(
             "{item_summary}\n{}",
-            notification_failure_reason(&error, language)
+            bounded_notification_failure_reason(&error)
         ),
     };
 
@@ -169,22 +163,11 @@ fn operation_supports_desktop_notification(operation: &QueuedFileOperation) -> b
     }
 }
 
-fn notification_failure_reason(error: &str, language: UiLanguage) -> String {
-    let normalized = error.split_whitespace().collect::<Vec<_>>().join(" ");
-    let candidate = normalized
-        .rsplit_once(": ")
-        .map(|(_, reason)| reason)
-        .unwrap_or(normalized.as_str())
-        .trim();
-    if candidate.is_empty() || candidate.contains('/') || candidate.contains('\\') {
-        return localization::translate(language, "See the task queue for details.").into_owned();
-    }
-    bounded_notification_failure_reason(candidate)
-}
-
-fn bounded_notification_failure_reason(reason: &str) -> String {
+/// 同 KDE 作业通知：失败原因就是任务的完整错误，压成一行、太长才截断。
+fn bounded_notification_failure_reason(error: &str) -> String {
+    let reason = error.split_whitespace().collect::<Vec<_>>().join(" ");
     if reason.chars().count() <= NOTIFICATION_FAILURE_REASON_MAX_CHARS {
-        return reason.to_owned();
+        return reason;
     }
 
     let mut bounded = reason
@@ -344,39 +327,27 @@ mod tests {
     }
 
     #[test]
-    fn failed_notification_keeps_reason_without_full_paths() {
+    fn failed_notification_shows_the_whole_error_on_one_line() {
         let operation = copy_operation(&[("/home/user/report.txt", "/tmp/report.txt")]);
-        let notification = file_operation_notification_text(
+        let error = "could not copy \"/home/user/report.txt\" to \"/tmp/report.txt\":\n  Permission denied (os error 13)";
+        let english = file_operation_notification_text(
             &operation,
-            FileOperationNotificationCompletion::Failed(
-                "could not copy \"/home/user/report.txt\" to \"/tmp/report.txt\": Permission denied (os error 13)".into(),
-            ),
+            FileOperationNotificationCompletion::Failed(error.into()),
             UiLanguage::English,
         )
         .expect("failed notification");
-
-        assert_eq!(notification.summary, "Copy failed");
-        assert_eq!(
-            notification.body,
-            "report.txt\nPermission denied (os error 13)"
-        );
-        assert!(!notification.body.contains("/home/user"));
-        assert!(!notification.body.contains("/tmp"));
-    }
-
-    #[test]
-    fn path_like_failure_reason_uses_localized_fallback() {
-        let operation = copy_operation(&[("/tmp/report.txt", "/var/tmp/report.txt")]);
-        let notification = file_operation_notification_text(
+        let chinese = file_operation_notification_text(
             &operation,
-            FileOperationNotificationCompletion::Failed(
-                "backend: inspect /run/user/1000/bus".into(),
-            ),
+            FileOperationNotificationCompletion::Failed(error.into()),
             UiLanguage::Chinese,
         )
         .expect("failed notification");
 
-        assert_eq!(notification.body, "report.txt\n请在任务队列中查看详情。");
+        let reason = "could not copy \"/home/user/report.txt\" to \"/tmp/report.txt\": Permission denied (os error 13)";
+        assert_eq!(english.summary, "Copy failed");
+        assert_eq!(english.body, format!("report.txt\n{reason}"));
+        assert_eq!(chinese.summary, "复制失败");
+        assert_eq!(chinese.body, format!("report.txt\n{reason}"));
     }
 
     #[test]

@@ -103,7 +103,7 @@ impl FileOperationQueue {
             target: "app_ui::operation_supervision",
             task_id = task.id,
             generation = task.driver_generation,
-            operation = task.operation.title(),
+            operation = %task.operation.title(),
             "driver showed no signal; restarting from recovery journal"
         );
     }

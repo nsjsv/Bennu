@@ -212,17 +212,17 @@ impl FileBrowser {
 
     pub(crate) fn window_title(&self, window: window::Id) -> String {
         if self.settings_window == Some(window) {
-            crate::localization::translate_current("Settings - Bennu")
+            tr!("Settings - Bennu")
         } else if self.properties_window == Some(window) {
-            crate::localization::translate_current("Properties - Bennu")
+            tr!("Properties - Bennu")
         } else if self.preview_window == Some(window) {
-            crate::localization::translate_current("Preview - Bennu")
+            tr!("Preview - Bennu")
         } else if self.transfer_window == Some(window) {
-            crate::localization::translate_current("Send to Phone - Bennu")
+            tr!("Send to Phone - Bennu")
         } else if self.search_workspace.is_some() {
-            crate::localization::translate_current("Search - Bennu")
+            tr!("Search - Bennu")
         } else {
-            crate::localization::translate_current("Bennu")
+            "Bennu".to_owned()
         }
     }
 

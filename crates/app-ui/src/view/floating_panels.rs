@@ -13,6 +13,7 @@ use crate::appearance::{
     enhanced_vertical_scrollbar_direction, error_notification_style, navigation_icon_button_style,
 };
 use crate::formatting::format_middle_ellipsized_text;
+use crate::formatting::item_count_label;
 use crate::icons::IconSymbol;
 use crate::model::{
     BrowserPaneId, ContextMenuPreferences, ContextMenuState, DestructiveActionConfirmation,
@@ -24,7 +25,7 @@ use crate::model::{
 };
 use crate::open_with::OpenWithState;
 use crate::sidebar_devices::SidebarDeviceContextMenuState;
-use crate::typography::{localized_text, readable_text};
+use crate::typography::readable_text;
 
 use super::context_menu_submenu::{
     file_grouping_submenu_panel, file_grouping_trigger_row, group_submenu_panel, group_trigger_row,
@@ -47,8 +48,7 @@ const CONTEXT_MENU_WIDTH: f32 = 190.0;
 const LIST_COLUMN_MENU_WIDTH: f32 = 230.0;
 const LIST_COLUMN_VISIBILITY_BUTTON_HEIGHT: f32 = 28.0;
 pub(super) fn error_notification_panel(error: &str, generation: u64) -> Element<'_, Message> {
-    let message = crate::localization::translate_current(error);
-    let message = format_middle_ellipsized_text(&message, ERROR_NOTIFICATION_MAX_CHARS);
+    let message = format_middle_ellipsized_text(error, ERROR_NOTIFICATION_MAX_CHARS);
     let close_button = button(themed_icon(IconSymbol::Close, IconTone::Normal, 13.0))
         .on_press(Message::GlobalErrorNotificationDismissed(generation))
         .padding(4)
@@ -79,42 +79,35 @@ pub(super) fn error_notification_panel(error: &str, generation: u64) -> Element<
 pub(super) fn destructive_action_confirmation_panel(
     confirmation: &DestructiveActionConfirmation,
 ) -> Element<'_, Message> {
-    let item_label = |item_count: usize| {
-        if item_count == 1 {
-            "1 item".to_owned()
-        } else {
-            format!("{item_count} items")
-        }
-    };
     let (title, body, confirm_label) = match confirmation {
         DestructiveActionConfirmation::DeleteTrashEntries { entries } => (
-            "Delete Permanently?",
-            format!(
-                "Delete {} from Trash permanently? This cannot be undone.",
-                item_label(entries.len())
+            tr!("Delete Permanently?"),
+            tr!(
+                "Delete %1 from Trash permanently? This cannot be undone.",
+                item_count_label(entries.len())
             ),
-            "Delete Permanently",
+            tr!("Delete Permanently"),
         ),
         DestructiveActionConfirmation::DeletePermanently { paths } => (
-            "Delete Permanently?",
-            format!(
-                "Delete {} permanently? This cannot be undone.",
-                item_label(paths.len())
+            tr!("Delete Permanently?"),
+            tr!(
+                "Delete %1 permanently? This cannot be undone.",
+                item_count_label(paths.len())
             ),
-            "Delete Permanently",
+            tr!("Delete Permanently"),
         ),
         DestructiveActionConfirmation::DeleteUntrashable { paths } => (
-            "Can't Move to Trash",
-            format!(
-                "{} can't be moved to Trash here. Delete permanently? This cannot be undone.",
-                item_label(paths.len())
+            tr!("Can't Move to Trash"),
+            tr!(
+                "%1 can't be moved to Trash here. Delete permanently? This cannot be undone.",
+                item_count_label(paths.len())
             ),
-            "Delete Permanently",
+            tr!("Delete Permanently"),
         ),
         DestructiveActionConfirmation::EmptyTrash => (
-            "Empty Trash?",
-            "Delete all items in Trash permanently? This cannot be undone.".to_owned(),
-            "Empty Trash",
+            tr!("Empty Trash?"),
+            tr!("Delete all items in Trash permanently? This cannot be undone."),
+            tr!("Empty Trash"),
         ),
     };
 
@@ -127,13 +120,13 @@ pub(super) fn destructive_action_confirmation_panel(
 
     let actions = row![
         Space::new().width(Length::Fill),
-        secondary_action_button("Cancel", Message::DestructiveActionCanceled),
+        secondary_action_button(tr!("Cancel"), Message::DestructiveActionCanceled),
         primary_action_button(confirm_label, Message::DestructiveActionConfirmed),
     ]
     .spacing(6)
     .align_y(Alignment::Center);
 
-    let content = column![title_row, localized_text(body).size(13), actions]
+    let content = column![title_row, readable_text(body).size(13), actions]
         .spacing(12)
         .width(Length::Fill);
 
@@ -148,9 +141,10 @@ pub(super) fn destructive_action_confirmation_panel(
 pub(super) fn incoming_transfer_confirmation_panel(
     incoming: &IncomingTransferConfirmation,
 ) -> Element<'_, Message> {
-    let summary = crate::localization::incoming_transfer_summary(
-        incoming.device.alias.clone(),
-        incoming.files.len(),
+    let summary = tr!(
+        "%1 wants to send %2 item(s)",
+        incoming.device.alias,
+        incoming.files.len()
     );
     let mut file_list = column![].spacing(4).width(Length::Fill);
     for file in &incoming.files {
@@ -166,20 +160,18 @@ pub(super) fn incoming_transfer_confirmation_panel(
         );
     }
     let remember_checkbox = checkbox(incoming.remember_device)
-        .label(crate::localization::translate_current(
-            "Remember this device",
-        ))
+        .label(tr!("Remember this device"))
         .on_toggle(|remember| {
             Message::Transfer(TransferMessage::IncomingRememberToggled(remember))
         });
     let actions = row![
         Space::new().width(Length::Fill),
         secondary_action_button(
-            "Decline",
+            tr!("Decline"),
             Message::Transfer(TransferMessage::IncomingConfirmed { accept: false }),
         ),
         primary_action_button(
-            "Accept",
+            tr!("Accept"),
             Message::Transfer(TransferMessage::IncomingConfirmed { accept: true }),
         ),
     ]
@@ -189,7 +181,9 @@ pub(super) fn incoming_transfer_confirmation_panel(
     let content = column![
         row![
             themed_icon(IconSymbol::Download, IconTone::Normal, MENU_ICON_SIZE),
-            readable_text("Incoming files").size(16).width(Length::Fill),
+            readable_text(tr!("Incoming files"))
+                .size(16)
+                .width(Length::Fill),
         ]
         .spacing(8)
         .align_y(Alignment::Center),
@@ -211,12 +205,6 @@ pub(super) fn incoming_transfer_confirmation_panel(
 }
 
 pub(super) fn file_drop_operation_panel(prompt: &FileDropPrompt) -> Element<'_, Message> {
-    let item_count = prompt.paths.len();
-    let item_label = if item_count == 1 {
-        "1 item".to_owned()
-    } else {
-        format!("{item_count} items")
-    };
     let destination = format_middle_ellipsized_text(
         prompt.paste_directory.to_string_lossy().as_ref(),
         FILE_DROP_PATH_MAX_CHARS,
@@ -224,20 +212,22 @@ pub(super) fn file_drop_operation_panel(prompt: &FileDropPrompt) -> Element<'_, 
 
     let title = row![
         themed_icon(IconSymbol::ArrowRight, IconTone::Normal, MENU_ICON_SIZE),
-        readable_text("Drop Files").size(16).width(Length::Fill),
+        readable_text(tr!("Drop Files"))
+            .size(16)
+            .width(Length::Fill),
     ]
     .spacing(8)
     .align_y(Alignment::Center);
 
     let operation_choices = column![
         action_choice_row(
-            "Move",
-            "Move files into the current folder.",
+            tr!("Move"),
+            tr!("Move files into the current folder."),
             Message::FileDropOperationSelected(FileClipboardOperation::Move),
         ),
         action_choice_row(
-            "Copy",
-            "Copy files into the current folder.",
+            tr!("Copy"),
+            tr!("Copy files into the current folder."),
             Message::FileDropOperationSelected(FileClipboardOperation::Copy),
         ),
     ]
@@ -245,13 +235,17 @@ pub(super) fn file_drop_operation_panel(prompt: &FileDropPrompt) -> Element<'_, 
 
     let actions = row![
         Space::new().width(Length::Fill),
-        secondary_action_button("Cancel", Message::FileDropCancelled),
+        secondary_action_button(tr!("Cancel"), Message::FileDropCancelled),
     ]
     .align_y(Alignment::Center);
 
     let content = column![
         title,
-        localized_text(format!("{item_label} will be added to:")).size(13),
+        readable_text(tr!(
+            "%1 will be added to:",
+            item_count_label(prompt.paths.len())
+        ))
+        .size(13),
         readable_text(destination).size(12).width(Length::Fill),
         operation_choices,
         actions,
@@ -277,7 +271,7 @@ pub(super) fn open_with_panel(
     );
     let title = row![
         themed_icon(IconSymbol::Monitor, IconTone::Normal, MENU_ICON_SIZE),
-        readable_text("Open With").size(16).width(Length::Fill),
+        readable_text(tr!("Open With")).size(16).width(Length::Fill),
     ]
     .spacing(8)
     .align_y(Alignment::Center);
@@ -288,8 +282,8 @@ pub(super) fn open_with_panel(
 
     if let Some(fallback_error) = state.fallback_error() {
         content = content.push(
-            localized_text(format!(
-                "Default open failed: {}",
+            readable_text(tr!(
+                "Default open failed: %1",
                 format_middle_ellipsized_text(fallback_error, OPEN_WITH_ERROR_MAX_CHARS)
             ))
             .size(12),
@@ -302,7 +296,7 @@ pub(super) fn open_with_panel(
 
     match state {
         OpenWithState::Loading { .. } => {
-            content = content.push(readable_text("Loading applications...").size(13));
+            content = content.push(readable_text(tr!("Loading applications...")).size(13));
         }
         OpenWithState::Ready { .. } => {
             content = content
@@ -313,9 +307,7 @@ pub(super) fn open_with_panel(
                 ))
                 .push(
                     checkbox(state.set_default_selected())
-                        .label(crate::localization::translate_current(
-                            "Set as default application",
-                        ))
+                        .label(tr!("Set as default application"))
                         .on_toggle(Message::OpenWithDefaultApplicationToggled),
                 );
         }
@@ -324,7 +316,7 @@ pub(super) fn open_with_panel(
     content = content.push(
         row![
             Space::new().width(Length::Fill),
-            secondary_action_button("Cancel", Message::DismissFloating),
+            secondary_action_button(tr!("Cancel"), Message::DismissFloating),
         ]
         .align_y(Alignment::Center),
     );
@@ -344,11 +336,7 @@ fn open_with_application_list(
     let mut applications = Column::new().spacing(4);
     for application in state.applications() {
         let label = if application.is_default {
-            format!(
-                "{} {}",
-                application.name,
-                crate::localization::translate_current("(default)")
-            )
+            tr!("%1 (default)", application.name)
         } else {
             application.name.clone()
         };
@@ -398,7 +386,7 @@ fn open_with_application_list(
     )
 }
 
-fn action_label(icon: IconSymbol, label: &'static str, size: f32) -> Row<'static, Message> {
+fn action_label(icon: IconSymbol, label: String, size: f32) -> Row<'static, Message> {
     row![
         themed_icon(icon, IconTone::Normal, size),
         crate::typography::readable_text(label)
@@ -474,7 +462,7 @@ fn search_entry_types_menu_panel<'a>(
     for entry_type in context_menus.search_entry_type_items() {
         content = content.push(
             checkbox(selected_entry_types.contains(&entry_type))
-                .label(crate::localization::translate_current(entry_type.label()))
+                .label(entry_type.label())
                 .on_toggle(move |_| Message::SearchEntryTypeToggled(entry_type))
                 .size(16)
                 .text_size(13)
@@ -563,11 +551,11 @@ fn list_column_menu_row(column: &ListColumnConfig) -> Element<'static, Message> 
 
 fn list_column_visibility_button(column: &ListColumnConfig) -> Button<'static, Message> {
     let label = if column.kind == ListColumnKind::Name {
-        "Required"
+        tr!("Required")
     } else if column.visible {
-        "Hide"
+        tr!("Hide")
     } else {
-        "Show"
+        tr!("Show")
     };
     let button = button(
         container(readable_text(label).size(12))
@@ -740,7 +728,7 @@ fn file_context_menu_panel<'a>(
 }
 
 /// 复制的动作与文案:按住 Alt 时实时切换为复制路径。
-fn copy_menu_action(alt_held: bool) -> (IconSymbol, &'static str, Message) {
+fn copy_menu_action(alt_held: bool) -> (IconSymbol, String, Message) {
     if alt_held {
         (
             IconSymbol::List,
@@ -757,7 +745,7 @@ fn copy_menu_action(alt_held: bool) -> (IconSymbol, &'static str, Message) {
 }
 
 /// 重命名的动作与文案;条目菜单必有 target。
-fn rename_menu_action(menu: &FileContextMenuState) -> (IconSymbol, &'static str, Message) {
+fn rename_menu_action(menu: &FileContextMenuState) -> (IconSymbol, String, Message) {
     let path = menu
         .target
         .clone()
@@ -774,7 +762,7 @@ fn rename_menu_action(menu: &FileContextMenuState) -> (IconSymbol, &'static str,
 fn delete_menu_action(
     menu: &FileContextMenuState,
     shift_held: bool,
-) -> (IconSymbol, &'static str, Message) {
+) -> (IconSymbol, String, Message) {
     if shift_held && menu.delete_action == FileDeleteAction::MoveToTrash {
         (
             IconSymbol::Trash,
@@ -868,7 +856,7 @@ fn file_menu_action_row(
     Some(row)
 }
 
-fn menu_item(icon: IconSymbol, label: &'static str, message: Message) -> Element<'static, Message> {
+fn menu_item(icon: IconSymbol, label: String, message: Message) -> Element<'static, Message> {
     mouse_area(menu_button(icon, label, message))
         .on_enter(Message::FileContextMenuExpansionChanged(
             FileContextMenuExpansion::None,
@@ -902,7 +890,8 @@ fn sidebar_device_context_menu_panel<'a>(
     let mut menu_content = iced::widget::Column::new().spacing(4).padding(8);
     let actions = menu.device.available_actions();
     if actions.is_empty() {
-        menu_content = menu_content.push(readable_text("No device actions available").size(12));
+        menu_content =
+            menu_content.push(readable_text(tr!("No device actions available")).size(12));
     } else {
         for action in context_menus.sidebar_device_items(actions) {
             menu_content = menu_content.push(menu_button(
@@ -966,11 +955,7 @@ fn trash_context_menu_panel<'a>(
         .into()
 }
 
-fn menu_button(
-    icon: IconSymbol,
-    label: &'static str,
-    message: Message,
-) -> Button<'static, Message> {
+fn menu_button(icon: IconSymbol, label: String, message: Message) -> Button<'static, Message> {
     button(menu_label(icon, label))
         .on_press(message)
         .width(Length::Fill)
@@ -978,6 +963,6 @@ fn menu_button(
         .style(context_menu_item_button_style())
 }
 
-fn menu_label(icon: IconSymbol, label: &'static str) -> Row<'static, Message> {
+fn menu_label(icon: IconSymbol, label: String) -> Row<'static, Message> {
     action_label(icon, label, MENU_ICON_SIZE).width(Length::Fill)
 }

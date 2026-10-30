@@ -11,6 +11,24 @@ const UTC_TIMESTAMP_FORMAT: &[FormatItem<'static>] =
 // 既有调用路径。
 pub(crate) use bennu_localization::{format_file_size, format_file_size_compact};
 
+/// "1 item" / "3 items"：确认框、拖放、通知、目录摘要共用。
+pub(crate) fn item_count_label(count: usize) -> String {
+    if count == 1 {
+        tr!("1 item")
+    } else {
+        tr!("%1 items", count)
+    }
+}
+
+/// 列表、大图、多栏三种视图的空目录提示。
+pub(crate) fn empty_directory_message(is_trash_view: bool) -> String {
+    if is_trash_view {
+        tr!("Trash is empty")
+    } else {
+        tr!("No items")
+    }
+}
+
 pub(crate) fn format_system_time(time: SystemTime) -> String {
     OffsetDateTime::from(time)
         .format(UTC_TIMESTAMP_FORMAT)

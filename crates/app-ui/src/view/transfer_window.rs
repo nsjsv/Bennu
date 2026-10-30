@@ -8,9 +8,8 @@ use crate::app::transfer::{
 };
 use crate::app::FileBrowser;
 use crate::appearance::{context_menu_button_style, context_menu_style};
-use crate::formatting::format_middle_ellipsized_text;
+use crate::formatting::{format_file_size, format_middle_ellipsized_text};
 use crate::icons::IconSymbol;
-use crate::localization::translate_current;
 use crate::model::Message;
 use crate::typography::readable_text;
 use local_send::DeviceInfo;
@@ -45,7 +44,7 @@ pub(crate) fn view_transfer_window(browser: &FileBrowser) -> Element<'_, Message
         }
         // 窗口 id 存在但会话已清空：渲染占位避免空白（窗口规范要求）。
         None => {
-            content = content.push(status_line("Preparing download link..."));
+            content = content.push(status_line(tr!("Preparing download link...")));
         }
     }
     container(content)
@@ -60,11 +59,11 @@ fn session_card(session: &TransferSessionState) -> Element<'_, Message> {
     let mut card = column![].spacing(10).width(Length::Fill);
     match &session.phase {
         TransferSessionPhase::Preparing => {
-            card = card.push(status_line("Preparing download link..."));
+            card = card.push(status_line(tr!("Preparing download link...")));
         }
         TransferSessionPhase::Failed(error) => {
             card = card
-                .push(status_line("Could not start download service"))
+                .push(status_line(tr!("Could not start download service")))
                 .push(readable_text(error.clone()).size(12));
         }
         TransferSessionPhase::Ready { urls, selected, qr } => {
@@ -85,14 +84,15 @@ fn session_card(session: &TransferSessionState) -> Element<'_, Message> {
                     }
                     if let Some(url) = urls.get(*index) {
                         card = card.push(
-                            readable_text(translate_current(&format!(
-                                "Scan the code or open the link on your phone: {url}"
-                            )))
+                            readable_text(tr!(
+                                "Scan the code or open the link on your phone: %1",
+                                url
+                            ))
                             .size(11),
                         );
                     }
                     card = card.push(
-                        button(readable_text("Choose another address").size(12))
+                        button(readable_text(tr!("Choose another address")).size(12))
                             .on_press(Message::Transfer(TransferMessage::QrAddressListRequested))
                             .padding([5, 12])
                             .style(context_menu_button_style()),
@@ -100,7 +100,7 @@ fn session_card(session: &TransferSessionState) -> Element<'_, Message> {
                 }
                 _ => {
                     // 未选地址：展示本机全部候选地址，点击后才生成二维码。
-                    card = card.push(status_line("Choose an address your phone can reach"));
+                    card = card.push(status_line(tr!("Choose an address your phone can reach")));
                     for (index, url) in urls.iter().enumerate() {
                         let address = display_address(url).to_owned();
                         card = card.push(
@@ -117,24 +117,30 @@ fn session_card(session: &TransferSessionState) -> Element<'_, Message> {
             }
             card = card.push(match session.finished {
                 // finished 只会记录终态事件；Connected/Progress 不会进入该槽。
-                Some(local_send::QrEvent::TimedOut) => status_line("Transfer timed out"),
-                Some(_) => status_line("Transfer finished"),
-                None if session.connected => status_line("Connected. Sending files..."),
-                None => status_line("Waiting for a phone to scan..."),
+                Some(local_send::QrEvent::TimedOut) => status_line(tr!("Transfer timed out")),
+                Some(_) => status_line(tr!("Transfer finished")),
+                None if session.connected => status_line(tr!("Connected. Sending files...")),
+                None => status_line(tr!("Waiting for a phone to scan...")),
             });
             if session.bytes_sent > 0 {
-                card = card.push(
-                    readable_text(crate::localization::transfer_progress_line(
-                        session.bytes_sent,
-                        session.speed_bytes_per_second,
-                        session.finished.is_some(),
-                    ))
-                    .size(12),
-                );
+                card = card.push(readable_text(qr_progress_line(session)).size(12));
             }
         }
     }
     card_container(card)
+}
+
+fn qr_progress_line(session: &TransferSessionState) -> String {
+    let sent = format_file_size(session.bytes_sent);
+    if session.finished.is_some() {
+        tr!("Sent %1", sent)
+    } else {
+        tr!(
+            "Sent %1 (%2/s)",
+            sent,
+            format_file_size(session.speed_bytes_per_second)
+        )
+    }
 }
 
 /// LocalSend 设备直推列表卡片。
@@ -146,7 +152,7 @@ fn device_list_card(browser: &FileBrowser) -> Element<'_, Message> {
         .map(|runtime| runtime.devices.as_slice())
         .unwrap_or(&[]);
     if devices.is_empty() {
-        list = list.push(status_line("No nearby devices found"));
+        list = list.push(status_line(tr!("No nearby devices found")));
     } else {
         for device in devices {
             list = list.push(device_row(device));
@@ -154,7 +160,7 @@ fn device_list_card(browser: &FileBrowser) -> Element<'_, Message> {
     }
     // 标题 + 手动刷新：立即清空快照并触发一轮子网扫描（不等 10s 周期）。
     let header = row![
-        readable_text("Nearby LocalSend devices")
+        readable_text(tr!("Nearby LocalSend devices"))
             .size(13)
             .width(Length::Fill),
         button(themed_icon(
@@ -199,7 +205,7 @@ fn device_row(device: &DeviceInfo) -> Element<'_, Message> {
     } else {
         format!("{alias} ({subtitle})", alias = device.alias)
     };
-    let send_button = button(readable_text("Send").size(12))
+    let send_button = button(readable_text(tr!("Send")).size(12))
         .on_press(Message::Transfer(TransferMessage::SendToDevicePressed(
             device.clone(),
         )))
@@ -216,17 +222,18 @@ fn device_row(device: &DeviceInfo) -> Element<'_, Message> {
 
 fn direct_send_card(state: &DirectSendState) -> Element<'_, Message> {
     let detail: String = match &state.outcome {
-        Some(Ok(())) => translate_current(&format!("Sent to {}", state.alias)),
-        Some(Err(error)) => translate_current(&format!("Send to {} failed: {error}", state.alias)),
-        None if state.total_files > 0 => crate::localization::direct_send_progress_line(
-            state.alias.clone(),
-            state.file_name.clone(),
+        Some(Ok(())) => tr!("Sent to %1", state.alias),
+        Some(Err(error)) => tr!("Send to %1 failed: %2", state.alias, error),
+        None if state.total_files > 0 => tr!(
+            "Sending to %1: %2 (%3/%4, %5 of %6)",
+            state.alias,
+            state.file_name,
             state.file_index,
             state.total_files,
-            state.bytes_sent,
-            state.file_size,
+            format_file_size(state.bytes_sent),
+            format_file_size(state.file_size)
         ),
-        None => translate_current(&format!("Sending to {}...", state.alias)),
+        None => tr!("Sending to %1...", state.alias),
     };
     card_container(
         row![
@@ -243,7 +250,7 @@ fn direct_send_card(state: &DirectSendState) -> Element<'_, Message> {
     )
 }
 
-fn status_line(label: &'static str) -> Element<'static, Message> {
+fn status_line(label: String) -> Element<'static, Message> {
     row![
         Space::new().width(Length::Fill),
         readable_text(label).size(13),

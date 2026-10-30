@@ -94,11 +94,23 @@ pub struct SizeRange {
     pub max_bytes: Option<u64>,
 }
 
+/// 自定义大小、后缀输入被拒绝的原因。只带用户输入的原文，
+/// 提示句由界面层按界面语言给出：本 crate 也被守护进程使用，不依赖文案表。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FilterInputError {
+    InvalidSizeRange { min: String, max: String },
+    UnknownSizeUnit(String),
+    InvalidSizeValue(String),
+    SizeTooLarge(String),
+    InvalidExtension(String),
+    TooManyExtensions { limit: usize },
+}
+
 /// 单个大小文本的唯一解析入口：UI 预检与查询构造共用同一语义。
 /// 规则：正十进制数（允许小数）+ 可选单位 `B/KB/MB/GB`（大小写不敏感、
 /// 数字与单位间允许空白）；省略单位按字节；负数、非法字符、未知单位、
 /// 溢出都报错。
-pub fn parse_size_text(input: &str) -> Result<u64, String> {
+pub fn parse_size_text(input: &str) -> Result<u64, FilterInputError> {
     let text = input.trim();
     let Some(digits_end) = text
         .char_indices()
@@ -114,7 +126,10 @@ pub fn parse_size_text(input: &str) -> Result<u64, String> {
 
 /// 自定义大小范围的唯一归一化入口：两侧全空 = 不限；单侧空按缺省
 /// （min 缺省 0，max 缺省 None）；最小值大于最大值非法。
-pub fn normalize_size_range(min_text: &str, max_text: &str) -> Result<Option<SizeRange>, String> {
+pub fn normalize_size_range(
+    min_text: &str,
+    max_text: &str,
+) -> Result<Option<SizeRange>, FilterInputError> {
     let min_text = min_text.trim();
     let max_text = max_text.trim();
     if min_text.is_empty() && max_text.is_empty() {
@@ -131,7 +146,10 @@ pub fn normalize_size_range(min_text: &str, max_text: &str) -> Result<Option<Siz
         Some(parse_size_text(max_text)?)
     };
     if max_bytes.is_some_and(|max_bytes| min_bytes > max_bytes) {
-        return Err(format!("Invalid size range: {min_text} - {max_text}"));
+        return Err(FilterInputError::InvalidSizeRange {
+            min: min_text.to_owned(),
+            max: max_text.to_owned(),
+        });
     }
     Ok(Some(SizeRange {
         min_bytes,
@@ -139,19 +157,19 @@ pub fn normalize_size_range(min_text: &str, max_text: &str) -> Result<Option<Siz
     }))
 }
 
-fn size_unit_multiplier(unit: &str) -> Result<u64, String> {
+fn size_unit_multiplier(unit: &str) -> Result<u64, FilterInputError> {
     match unit.to_ascii_lowercase().as_str() {
         "" | "b" => Ok(1),
         "kb" => Ok(SIZE_UNIT_BYTES),
         "mb" => Ok(SIZE_UNIT_BYTES * SIZE_UNIT_BYTES),
         "gb" => Ok(SIZE_UNIT_BYTES * SIZE_UNIT_BYTES * SIZE_UNIT_BYTES),
-        other => Err(format!("Unknown size unit: {other}")),
+        other => Err(FilterInputError::UnknownSizeUnit(other.to_owned())),
     }
 }
 
-fn parse_size_bytes(number_text: &str, multiplier: u64) -> Result<u64, String> {
-    let invalid = || format!("Invalid size value: {number_text}");
-    let overflow = || format!("Size value is too large: {number_text}");
+fn parse_size_bytes(number_text: &str, multiplier: u64) -> Result<u64, FilterInputError> {
+    let invalid = || FilterInputError::InvalidSizeValue(number_text.to_owned());
+    let overflow = || FilterInputError::SizeTooLarge(number_text.to_owned());
     let (integer_text, fractional_text) = match number_text.split_once('.') {
         Some((integer_text, fractional_text)) => (integer_text, fractional_text),
         None => (number_text, ""),
@@ -198,7 +216,7 @@ pub(crate) fn extension_token_is_valid(token: &str) -> bool {
 /// 自定义后缀的唯一解析入口：UI 预检与两条执行路径共用同一语义。
 /// 容错规则：逗号/空白分隔、前后点号可省略、按搜索文本规则规范化（大小写、变音不敏感）、
 /// 按序去重。
-pub fn normalize_extension_tokens(input: &str) -> Result<Vec<String>, String> {
+pub fn normalize_extension_tokens(input: &str) -> Result<Vec<String>, FilterInputError> {
     let mut tokens = Vec::new();
     for raw in input.split(|c: char| c == ',' || c.is_whitespace()) {
         let normalized = crate::text_matching::normalize_search_text(raw);
@@ -207,16 +225,16 @@ pub fn normalize_extension_tokens(input: &str) -> Result<Vec<String>, String> {
             continue;
         }
         if !extension_token_is_valid(&token) {
-            return Err(format!("Invalid file extension: {raw}"));
+            return Err(FilterInputError::InvalidExtension(raw.to_owned()));
         }
         if !tokens.contains(&token) {
             tokens.push(token);
         }
     }
     if tokens.len() > MAX_QUERY_EXTENSIONS {
-        return Err(format!(
-            "Too many file extensions (limit is {MAX_QUERY_EXTENSIONS})"
-        ));
+        return Err(FilterInputError::TooManyExtensions {
+            limit: MAX_QUERY_EXTENSIONS,
+        });
     }
     Ok(tokens)
 }

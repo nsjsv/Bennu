@@ -123,8 +123,9 @@ impl FileBrowser {
                 ]);
             }
             Err(error) => {
-                self.show_global_error(format!(
-                    "Failed to initialize file operation queue storage: {error}"
+                self.show_global_error(tr!(
+                    "Failed to initialize file operation queue storage: %1",
+                    error
                 ));
                 if self.previous_session_plan_request(&self.home_dir).is_some() {
                     let home_dir = self.home_dir.clone();

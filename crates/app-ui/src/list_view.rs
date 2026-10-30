@@ -19,7 +19,7 @@ use crate::file_entry_view::{
     entry_text_input_style, entry_thumbnail_or_icon, FileEntryIconDensity, FileEntryIconTone,
     FileEntryVisualState,
 };
-use crate::formatting::format_system_time;
+use crate::formatting::{empty_directory_message, format_system_time};
 use crate::icons::rotated_chevron_right_view;
 use crate::measured_middle_ellipsized_text::measured_middle_ellipsized_text;
 use crate::model::{
@@ -156,11 +156,7 @@ pub(crate) fn list_browser_view<'a>(
             )
         });
         if pane.entries.is_empty() && !has_placeholders {
-            rows = rows.push(list_message(if pane.is_trash_view {
-                "Trash is empty"
-            } else {
-                "No items"
-            }));
+            rows = rows.push(list_message(empty_directory_message(pane.is_trash_view)));
         } else {
             let range = pane
                 .column_viewports
@@ -217,11 +213,19 @@ pub(crate) fn list_browser_view<'a>(
                         ));
                     }
                     crate::transfer_placeholder_view::ListTransferRow::DirectoryStatusRow {
-                        message,
+                        status,
                         depth,
                         height,
                         stripe_index,
                     } => {
+                        let message = match status {
+                            crate::visible_entries::VisibleEntryStatusRow::Error => {
+                                tr!("Could not load")
+                            }
+                            crate::visible_entries::VisibleEntryStatusRow::Empty => {
+                                tr!("No items")
+                            }
+                        };
                         rows = rows.push(list_directory_status_row(
                             message,
                             *depth,
@@ -477,7 +481,7 @@ fn list_column_resize_divider(
         .into()
 }
 
-fn list_message(message: &'static str) -> Element<'static, Message> {
+fn list_message(message: String) -> Element<'static, Message> {
     container(readable_text(message).size(LIST_ROW_TEXT_SIZE))
         .padding(LIST_ROW_PADDING)
         .width(Length::Fill)
@@ -511,7 +515,7 @@ fn list_group_header_row(
 }
 
 fn list_directory_status_row(
-    message: &'static str,
+    message: String,
     depth: usize,
     stripe_index: usize,
     height: f32,
@@ -814,15 +818,12 @@ fn list_name_cell<'a>(
     let toggle = list_directory_toggle(pane, geometry, entry);
     let name: Element<'a, Message> = if pane.renaming == Some(&entry.path) {
         rename_field(
-            text_input(
-                &crate::localization::translate_current("File name"),
-                pane.rename_input,
-            )
-            .id(rename_input_id())
-            .on_input(Message::RenameInputChanged)
-            .on_submit(Message::RenameSelected)
-            .style(entry_text_input_style(modifier))
-            .width(Length::Fill),
+            text_input(&tr!("File name"), pane.rename_input)
+                .id(rename_input_id())
+                .on_input(Message::RenameInputChanged)
+                .on_submit(Message::RenameSelected)
+                .style(entry_text_input_style(modifier))
+                .width(Length::Fill),
             pane.rename_hint,
             browser.active_language(),
         )
@@ -877,22 +878,16 @@ fn list_directory_toggle<'a>(
     .interaction(iced::mouse::Interaction::Pointer)
     .into()
 }
-fn kind_text(entry: &DirectoryEntry) -> std::borrow::Cow<'static, str> {
-    let kind = match entry.kind {
-        FileKind::Directory => "Folder",
-        FileKind::File => "File",
-        FileKind::Symlink if entry.is_broken_symlink => "Broken Link",
-        FileKind::Symlink => "Link",
-        FileKind::Other => "Other",
-    };
-    // 直接借用翻译结果：英文原文零分配，中文仅一次小分配。
-    crate::localization::translate(crate::localization::current_language(), kind)
+fn kind_text(entry: &DirectoryEntry) -> String {
+    match entry.kind {
+        FileKind::Directory => tr!("Folder"),
+        FileKind::File => tr!("File"),
+        FileKind::Symlink if entry.is_broken_symlink => tr!("Broken Link"),
+        FileKind::Symlink => tr!("Link"),
+        FileKind::Other => tr!("Other"),
+    }
 }
-fn text_cell(
-    text: impl crate::typography::ReadableTextContent,
-    geometry: &ListGeometry,
-    width: f32,
-) -> Element<'static, Message> {
+fn text_cell(text: String, geometry: &ListGeometry, width: f32) -> Element<'static, Message> {
     container(readable_text(text).size(geometry.text_size))
         .width(list_column_width(width))
         .clip(true)

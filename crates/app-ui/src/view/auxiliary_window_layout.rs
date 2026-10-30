@@ -68,7 +68,7 @@ pub(super) fn auxiliary_full_height_sidebar<'a>(
 }
 
 pub(super) fn auxiliary_sidebar_button(
-    label: &'static str,
+    label: String,
     selected: bool,
     message: Message,
 ) -> Button<'static, Message> {

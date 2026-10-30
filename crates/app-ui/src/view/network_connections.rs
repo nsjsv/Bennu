@@ -36,13 +36,10 @@ pub(super) fn network_connection_editor_panel(
     ]
     .spacing(8)
     .align_y(Alignment::Center);
-    let mut label_input = text_input(
-        &crate::localization::translate_current("Name"),
-        &editor.label,
-    )
-    .padding([6, 8])
-    .size(14);
-    let mut uri_input = text_input(&crate::localization::translate_current("URI"), &editor.uri)
+    let mut label_input = text_input(&tr!("Name"), &editor.label)
+        .padding([6, 8])
+        .size(14);
+    let mut uri_input = text_input("URI", &editor.uri)
         .on_submit(Message::NetworkConnection(
             NetworkConnectionMessage::EditorSaved,
         ))
@@ -64,33 +61,31 @@ pub(super) fn network_connection_editor_panel(
         .push(label_input)
         .push(uri_input)
         .push(
-            text_input(
-                &crate::localization::translate_current("Username"),
-                &editor.username,
-            )
-            .on_input(|value| {
-                Message::NetworkConnection(NetworkConnectionMessage::EditorUsernameChanged(value))
-            })
-            .on_submit(Message::NetworkConnection(
-                NetworkConnectionMessage::EditorSaved,
-            ))
-            .padding([6, 8])
-            .size(14),
+            text_input(&tr!("Username"), &editor.username)
+                .on_input(|value| {
+                    Message::NetworkConnection(NetworkConnectionMessage::EditorUsernameChanged(
+                        value,
+                    ))
+                })
+                .on_submit(Message::NetworkConnection(
+                    NetworkConnectionMessage::EditorSaved,
+                ))
+                .padding([6, 8])
+                .size(14),
         )
         .push(
-            text_input(
-                &crate::localization::translate_current("Password"),
-                &editor.password,
-            )
-            .secure(true)
-            .on_input(|value| {
-                Message::NetworkConnection(NetworkConnectionMessage::EditorPasswordChanged(value))
-            })
-            .on_submit(Message::NetworkConnection(
-                NetworkConnectionMessage::EditorSaved,
-            ))
-            .padding([6, 8])
-            .size(14),
+            text_input(&tr!("Password"), &editor.password)
+                .secure(true)
+                .on_input(|value| {
+                    Message::NetworkConnection(NetworkConnectionMessage::EditorPasswordChanged(
+                        value,
+                    ))
+                })
+                .on_submit(Message::NetworkConnection(
+                    NetworkConnectionMessage::EditorSaved,
+                ))
+                .padding([6, 8])
+                .size(14),
         );
 
     if editor.mode != NetworkConnectionEditorMode::Connect {
@@ -98,10 +93,9 @@ pub(super) fn network_connection_editor_panel(
     }
 
     if let Some(error) = &editor.error {
-        let error = crate::localization::translate_current(error);
         content = content.push(
             readable_text(format_middle_ellipsized_text(
-                &error,
+                error,
                 NETWORK_EDITOR_ERROR_MAX_CHARS,
             ))
             .size(12),
@@ -112,7 +106,7 @@ pub(super) fn network_connection_editor_panel(
         row![
             Space::new().width(Length::Fill),
             secondary_action_button(
-                "Cancel",
+                tr!("Cancel"),
                 Message::NetworkConnection(NetworkConnectionMessage::EditorCanceled),
             ),
             primary_action_button(
@@ -133,7 +127,7 @@ pub(super) fn network_connection_editor_panel(
 
 fn editor_auto_connect_button(is_on: bool) -> Button<'static, Message> {
     let content = row![
-        readable_text("Connect on startup")
+        readable_text(tr!("Connect on startup"))
             .size(12)
             .width(Length::Fill),
         switch_control(is_on),
@@ -149,30 +143,31 @@ fn editor_auto_connect_button(is_on: bool) -> Button<'static, Message> {
         .style(context_menu_button_style())
 }
 
-fn editor_title(mode: NetworkConnectionEditorMode) -> &'static str {
+fn editor_title(mode: NetworkConnectionEditorMode) -> String {
     match mode {
-        NetworkConnectionEditorMode::Add => "Add Network Connection",
-        NetworkConnectionEditorMode::Edit => "Edit Network Connection",
-        NetworkConnectionEditorMode::Connect => "Connect Network Location",
+        NetworkConnectionEditorMode::Add => tr!("Add Network Connection"),
+        NetworkConnectionEditorMode::Edit => tr!("Edit Network Connection"),
+        NetworkConnectionEditorMode::Connect => tr!("Connect Network Location"),
     }
 }
 
-fn editor_primary_action_label(editor: &NetworkConnectionEditorState) -> &'static str {
+fn editor_primary_action_label(editor: &NetworkConnectionEditorState) -> String {
     match editor.mode {
-        NetworkConnectionEditorMode::Connect => "Connect",
+        NetworkConnectionEditorMode::Connect => tr!("Connect"),
         NetworkConnectionEditorMode::Add | NetworkConnectionEditorMode::Edit
             if editor.password_is_filled() =>
         {
-            "Save & Connect"
+            tr!("Save & Connect")
         }
-        NetworkConnectionEditorMode::Add | NetworkConnectionEditorMode::Edit => "Save",
+        NetworkConnectionEditorMode::Add | NetworkConnectionEditorMode::Edit => tr!("Save"),
     }
 }
 
+/// 协议名不翻译。
 fn protocol_selector(selected: desktop_linux::NetworkProtocol) -> Element<'static, Message> {
     segmented_choice_row(vec![
         SegmentedChoice {
-            label: "SMB",
+            label: "SMB".to_owned(),
             selected: selected == desktop_linux::NetworkProtocol::Smb,
             message: Message::NetworkConnection(NetworkConnectionMessage::EditorProtocolSelected(
                 desktop_linux::NetworkProtocol::Smb,
@@ -180,7 +175,7 @@ fn protocol_selector(selected: desktop_linux::NetworkProtocol) -> Element<'stati
             tooltip: None,
         },
         SegmentedChoice {
-            label: "WebDAV",
+            label: "WebDAV".to_owned(),
             selected: selected == desktop_linux::NetworkProtocol::WebDav,
             message: Message::NetworkConnection(NetworkConnectionMessage::EditorProtocolSelected(
                 desktop_linux::NetworkProtocol::WebDav,
@@ -188,7 +183,7 @@ fn protocol_selector(selected: desktop_linux::NetworkProtocol) -> Element<'stati
             tooltip: None,
         },
         SegmentedChoice {
-            label: "SFTP",
+            label: "SFTP".to_owned(),
             selected: selected == desktop_linux::NetworkProtocol::Sftp,
             message: Message::NetworkConnection(NetworkConnectionMessage::EditorProtocolSelected(
                 desktop_linux::NetworkProtocol::Sftp,
@@ -240,7 +235,7 @@ fn network_connection_menu_button(
 
 fn network_connection_menu_label(
     icon: IconSymbol,
-    label: &'static str,
+    label: String,
 ) -> iced::widget::Row<'static, Message> {
     row![
         themed_icon(icon, IconTone::Normal, MENU_ICON_SIZE),

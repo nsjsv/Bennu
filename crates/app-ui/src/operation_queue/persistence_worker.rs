@@ -272,5 +272,5 @@ fn persistence_effect(
 }
 
 fn storage_error(error: impl std::fmt::Display) -> String {
-    format!("File operation queue storage failed: {error}")
+    tr!("File operation queue storage failed: %1", error)
 }

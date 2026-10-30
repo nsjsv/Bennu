@@ -22,16 +22,16 @@ impl SettingsCategory {
         Self::About,
     ];
 
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::General => "General",
-            Self::Appearance => "Appearance",
-            Self::Files => "Files",
-            Self::Transfer => "Transfer",
-            Self::Search => "Search",
-            Self::Shortcuts => "Shortcuts",
-            Self::Logs => "Logs",
-            Self::About => "About",
+            Self::General => tr!("General"),
+            Self::Appearance => tr!("Appearance"),
+            Self::Files => tr!("Files"),
+            Self::Transfer => tr!("Transfer"),
+            Self::Search => tr!("Search"),
+            Self::Shortcuts => tr!("Shortcuts"),
+            Self::Logs => tr!("Logs"),
+            Self::About => tr!("About"),
         }
     }
 }

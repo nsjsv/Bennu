@@ -281,7 +281,7 @@ async fn batch_direct_move_renames_every_record_before_the_batch_commit() {
         records,
         &journal,
         &running_transfer_options(),
-        &mut |_| {},
+        |_| async {},
     )
     .await
     .unwrap();
@@ -349,7 +349,7 @@ async fn batch_direct_move_recovers_after_a_crash_between_renames() {
         records,
         &journal,
         &running_transfer_options(),
-        &mut |_| {},
+        |_| async {},
     )
     .await
     .unwrap();

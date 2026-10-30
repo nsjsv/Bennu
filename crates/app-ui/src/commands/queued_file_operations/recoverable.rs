@@ -569,26 +569,25 @@ async fn settle_intent_segment(
         .into_iter()
         .map(|(_, record)| record)
         .collect();
-    let batch = {
-        // rename 全部完成后立即上报 UI（同一条 output channel，先于 durable commits），
-        // 让列表刷新不等 parent fsync 与 journal 落盘。
-        let renamed_output = output.clone();
-        let mut on_renamed = |moves: Vec<(PathBuf, PathBuf)>| {
-            let _ = renamed_output
-                .clone()
-                .try_send(Message::FileOperationMovesRenamed {
-                    task_id,
-                    moves: moves
-                        .into_iter()
-                        .map(|(source, target)| CompletedTransfer { source, target })
-                        .collect(),
-                });
-        };
-        let batch =
-            run_direct_move_batch_to_durable_renamed(records, journal, options, &mut on_renamed)
-                .await?;
-        batch
+    // rename 全部完成后立即上报 UI（同一条 output channel，先于 durable commits），
+    // 让列表刷新不等 parent fsync 与 journal 落盘。通道满时等界面取走：列表增量、
+    // 路径迁移和搜索刷新都靠这条消息，丢了就再也补不回来。
+    let mut renamed_output = output.clone();
+    let report_renamed = |moves: Vec<(PathBuf, PathBuf)>| async move {
+        // 只有界面那头的流已关闭才会失败；那时没人接收，驱动者由队列监督换代，
+        // 与 FileOperationFinished 的发送同样处理。
+        let _ = renamed_output
+            .send(Message::FileOperationMovesRenamed {
+                task_id,
+                moves: moves
+                    .into_iter()
+                    .map(|(source, target)| CompletedTransfer { source, target })
+                    .collect(),
+            })
+            .await;
     };
+    let batch =
+        run_direct_move_batch_to_durable_renamed(records, journal, options, report_renamed).await?;
 
     let mut durable_direct_moves = Vec::new();
     let mut diverged = Vec::new();
@@ -1497,6 +1496,84 @@ mod recoverable_transfer_tests {
         }
     }
 
+    /// 通道没有余量、界面又取得慢时，"已重命名"也要等到送达，并且仍在 durable 提交之前。
+    #[tokio::test]
+    async fn renamed_moves_reach_a_slow_ui_through_a_full_channel() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut transfers = Vec::new();
+        for index in 0..3 {
+            let source = directory.path().join(format!("source-{index}"));
+            let target = directory.path().join(format!("target-{index}"));
+            tokio::fs::write(&source, format!("content-{index}"))
+                .await
+                .unwrap();
+            transfers.push(QueuedTransfer::new(source, target));
+        }
+        let store = TaskQueueStore::new(directory.path().join("state.sqlite")).unwrap();
+        let mut queue = FileOperationQueue::new();
+        attach_store(&mut queue, store);
+        let FileOperationEnqueueOutcome::Queued { task_id } =
+            queue.enqueue(QueuedFileOperation::Move {
+                transfers: transfers.clone(),
+                verification: FileOperationVerification::BasicMetadata,
+            })
+        else {
+            panic!("recoverable move should enqueue");
+        };
+        assert_persisted(&mut queue);
+        let running = queue.active_subscription().unwrap();
+        let (mut output, mut messages) = iced::futures::channel::mpsc::channel(0);
+
+        let run = {
+            let transfers = transfers.clone();
+            async move {
+                let completion = run_queued_transfers(
+                    transfers,
+                    running.controls,
+                    running.stored_id.unwrap(),
+                    task_id,
+                    &mut output,
+                    running.store,
+                    QueuedTransferMode::Move,
+                    FileOperationVerification::BasicMetadata,
+                )
+                .await;
+                drop(output);
+                completion
+            }
+        };
+        let slow_ui = async move {
+            let mut received = Vec::new();
+            while let Some(message) = messages.next().await {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                received.push(message);
+            }
+            received
+        };
+        let (completion, received) = tokio::join!(run, slow_ui);
+
+        assert!(matches!(
+            completion,
+            FileOperationCompletion::Succeeded(FileOperationOutcome::Move { .. })
+        ));
+        let renamed = received
+            .iter()
+            .position(|message| {
+                matches!(
+                    message,
+                    Message::FileOperationMovesRenamed { moves, .. } if moves.len() == transfers.len()
+                )
+            })
+            .expect("the renamed moves must reach the UI");
+        let committed = received
+            .iter()
+            .position(|message| {
+                matches!(message, Message::FileOperationDirectMovesCommitted { .. })
+            })
+            .expect("the durable commit must reach the UI");
+        assert!(renamed < committed);
+    }
+
     #[tokio::test]
     async fn direct_move_segment_settles_visible_items_before_later_conflict() {
         let directory = tempfile::tempdir().unwrap();
@@ -1631,7 +1708,7 @@ mod recoverable_transfer_tests {
             records,
             &journal,
             &FileTransferOptions::new(running.controls.clone()),
-            &mut |_| {},
+            |_| async {},
         )
         .await
         .unwrap();

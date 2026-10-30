@@ -49,7 +49,7 @@ async fn supervision_adopts_a_foreign_nonterminal_task_with_a_free_lease() {
         vec![record],
         &journal,
         &FileTransferOptions::new(running.controls.clone()),
-        &mut |_| {},
+        |_| async {},
     )
     .await
     .unwrap();

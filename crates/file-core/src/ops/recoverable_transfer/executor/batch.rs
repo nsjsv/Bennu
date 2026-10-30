@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::future::Future;
 use std::path::PathBuf;
 
 use super::direct_move::{
@@ -43,16 +44,22 @@ enum RenameOutcome {
 // Keep the input order while moving the durable boundary out of the per-item
 // loop. A business failure belongs to one record; journal failure or shutdown
 // stops the whole segment because continuing would lose recovery ownership.
-// `on_renamed` fires after every rename in the batch has already happened on
-// the filesystem but before any durability work (parent fsync, journal CAS):
-// the moves are real facts at that point, so callers may surface them to the
-// UI without waiting for the recoverable-transfer commit.
-pub async fn run_direct_move_batch_to_durable_renamed<J: TransferJournal>(
+// `report_renamed` runs once, after every rename in the batch has already
+// happened on the filesystem but before any durability work (parent fsync,
+// journal CAS): the moves are real facts at that point, so callers may surface
+// them to the UI without waiting for the recoverable-transfer commit. It is
+// awaited so a caller can wait for room to deliver them instead of dropping them.
+pub async fn run_direct_move_batch_to_durable_renamed<J, ReportRenamed, Reported>(
     records: Vec<TransferJournalRecord>,
     journal: &J,
     transfer_options: &FileTransferOptions,
-    on_renamed: &mut (dyn FnMut(Vec<(PathBuf, PathBuf)>) + Send),
-) -> Result<Vec<DirectMoveBatchRecord>, RecoverableTransferError> {
+    report_renamed: ReportRenamed,
+) -> Result<Vec<DirectMoveBatchRecord>, RecoverableTransferError>
+where
+    J: TransferJournal,
+    ReportRenamed: FnOnce(Vec<(PathBuf, PathBuf)>) -> Reported + Send,
+    Reported: Future<Output = ()> + Send,
+{
     let mut outcomes: Vec<Option<RenameOutcome>> = Vec::with_capacity(records.len());
     let mut renamed_moves: Vec<(PathBuf, PathBuf)> = Vec::new();
 
@@ -120,7 +127,7 @@ pub async fn run_direct_move_batch_to_durable_renamed<J: TransferJournal>(
 
     if !renamed_positions.is_empty() {
         if !renamed_moves.is_empty() {
-            on_renamed(std::mem::take(&mut renamed_moves));
+            report_renamed(std::mem::take(&mut renamed_moves)).await;
         }
         for parent in parents {
             sync_parent(&parent).await?;

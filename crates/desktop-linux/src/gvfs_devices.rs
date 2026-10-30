@@ -1,13 +1,9 @@
-use std::io;
 use std::path::PathBuf;
-use std::sync::{Arc, LazyLock};
-use std::thread;
 
-use gio::glib::MainContext;
 use gio::prelude::{DriveExt, FileExt, MountExt, VolumeExt, VolumeMonitorExt};
 use thiserror::Error;
-use tokio::sync::{mpsc, oneshot};
 
+use crate::gio_runtime::{run_on_gio_thread, GioRuntimeError};
 use crate::gvfs_paths::{default_gvfs_fuse_root, resolve_gvfs_mount_path, GvfsMountPathError};
 use crate::storage_devices::{
     StorageDevice, StorageDeviceAccess, StorageDeviceId, StorageDeviceMountState,
@@ -15,19 +11,9 @@ use crate::storage_devices::{
 };
 
 #[derive(Debug, Error)]
-pub enum GvfsDeviceRuntimeStartError {
-    #[error("could not start the GVfs device thread: {0}")]
-    Thread(#[source] io::Error),
-    #[error("the GVfs device thread stopped during initialization")]
-    InitializationStopped,
-}
-
-#[derive(Debug, Error)]
 pub enum GvfsDeviceError {
-    #[error("could not start the GVfs device runtime: {0}")]
-    RuntimeStart(#[source] Arc<GvfsDeviceRuntimeStartError>),
-    #[error("the GVfs device runtime stopped before replying")]
-    RuntimeStopped,
+    #[error(transparent)]
+    Runtime(#[from] GioRuntimeError),
     #[error("GVfs volume {identity:?} is no longer available")]
     VolumeUnavailable { identity: String },
     #[error("GVfs device action is unavailable: {0}")]
@@ -51,42 +37,6 @@ pub enum GvfsDeviceError {
     },
 }
 
-struct GvfsDeviceRuntime {
-    request_sender: mpsc::UnboundedSender<GvfsDeviceRequest>,
-}
-
-enum GvfsDeviceRequest {
-    Load {
-        response: oneshot::Sender<Result<Vec<StorageDevice>, GvfsDeviceError>>,
-    },
-    Mount {
-        identity: String,
-        response: oneshot::Sender<Result<PathBuf, GvfsDeviceError>>,
-    },
-    Unmount {
-        identity: String,
-        response: oneshot::Sender<Result<(), GvfsDeviceError>>,
-    },
-    Remove {
-        identity: String,
-        response: oneshot::Sender<Result<(), GvfsDeviceError>>,
-    },
-    #[cfg(test)]
-    InspectContext {
-        response: oneshot::Sender<GvfsRuntimeProbe>,
-    },
-}
-
-#[cfg(test)]
-#[derive(Debug)]
-struct GvfsRuntimeProbe {
-    thread_id: thread::ThreadId,
-    has_thread_default_context: bool,
-}
-
-static GVFS_DEVICE_RUNTIME: LazyLock<Result<GvfsDeviceRuntime, Arc<GvfsDeviceRuntimeStartError>>> =
-    LazyLock::new(|| GvfsDeviceRuntime::start().map_err(Arc::new));
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct GvfsVolumeFacts {
     identity: String,
@@ -95,99 +45,32 @@ struct GvfsVolumeFacts {
     activation_root_is_native: Option<bool>,
 }
 
-impl GvfsDeviceRuntime {
-    fn start() -> Result<Self, GvfsDeviceRuntimeStartError> {
-        let (request_sender, request_receiver) = mpsc::unbounded_channel();
-        let (startup_sender, startup_receiver) = std::sync::mpsc::sync_channel(1);
-        thread::Builder::new()
-            .name("bennu-gvfs-devices".to_owned())
-            .spawn(move || {
-                let context = MainContext::new();
-                context.block_on(async move {
-                    let monitor = gio::VolumeMonitor::get();
-                    if startup_sender.send(()).is_err() {
-                        return;
-                    }
-                    run_gvfs_device_requests(monitor, request_receiver).await;
-                });
-            })
-            .map_err(GvfsDeviceRuntimeStartError::Thread)?;
-        startup_receiver
-            .recv()
-            .map_err(|_| GvfsDeviceRuntimeStartError::InitializationStopped)?;
-        Ok(Self { request_sender })
-    }
-}
-
-fn gvfs_device_runtime() -> Result<&'static GvfsDeviceRuntime, GvfsDeviceError> {
-    match &*GVFS_DEVICE_RUNTIME {
-        Ok(runtime) => Ok(runtime),
-        Err(source) => Err(GvfsDeviceError::RuntimeStart(source.clone())),
-    }
-}
-
-async fn request_gvfs_device<T>(
-    build_request: impl FnOnce(oneshot::Sender<Result<T, GvfsDeviceError>>) -> GvfsDeviceRequest,
-) -> Result<T, GvfsDeviceError> {
-    let runtime = gvfs_device_runtime()?;
-    let (response_sender, response_receiver) = oneshot::channel();
-    runtime
-        .request_sender
-        .send(build_request(response_sender))
-        .map_err(|_| GvfsDeviceError::RuntimeStopped)?;
-    response_receiver
-        .await
-        .map_err(|_| GvfsDeviceError::RuntimeStopped)?
-}
-
 pub(super) async fn load_gvfs_storage_devices() -> Result<Vec<StorageDevice>, GvfsDeviceError> {
-    request_gvfs_device(|response| GvfsDeviceRequest::Load { response }).await
+    run_on_gio_thread(|monitor| async move { load_gvfs_storage_devices_on_context(&monitor) })
+        .await?
 }
 
 pub(super) async fn mount_gvfs_storage_device(
     identity: String,
 ) -> Result<PathBuf, GvfsDeviceError> {
-    request_gvfs_device(|response| GvfsDeviceRequest::Mount { identity, response }).await
+    run_on_gio_thread(move |monitor| async move {
+        mount_gvfs_storage_device_on_context(&monitor, identity).await
+    })
+    .await?
 }
 
 pub(super) async fn unmount_gvfs_storage_device(identity: String) -> Result<(), GvfsDeviceError> {
-    request_gvfs_device(|response| GvfsDeviceRequest::Unmount { identity, response }).await
+    run_on_gio_thread(move |monitor| async move {
+        unmount_gvfs_storage_device_on_context(&monitor, identity).await
+    })
+    .await?
 }
 
 pub(super) async fn remove_gvfs_storage_device(identity: String) -> Result<(), GvfsDeviceError> {
-    request_gvfs_device(|response| GvfsDeviceRequest::Remove { identity, response }).await
-}
-
-async fn run_gvfs_device_requests(
-    monitor: gio::VolumeMonitor,
-    mut request_receiver: mpsc::UnboundedReceiver<GvfsDeviceRequest>,
-) {
-    while let Some(request) = request_receiver.recv().await {
-        match request {
-            GvfsDeviceRequest::Load { response } => {
-                let _ = response.send(load_gvfs_storage_devices_on_context(&monitor));
-            }
-            GvfsDeviceRequest::Mount { identity, response } => {
-                let outcome = mount_gvfs_storage_device_on_context(&monitor, identity).await;
-                let _ = response.send(outcome);
-            }
-            GvfsDeviceRequest::Unmount { identity, response } => {
-                let outcome = unmount_gvfs_storage_device_on_context(&monitor, identity).await;
-                let _ = response.send(outcome);
-            }
-            GvfsDeviceRequest::Remove { identity, response } => {
-                let outcome = remove_gvfs_storage_device_on_context(&monitor, identity).await;
-                let _ = response.send(outcome);
-            }
-            #[cfg(test)]
-            GvfsDeviceRequest::InspectContext { response } => {
-                let _ = response.send(GvfsRuntimeProbe {
-                    thread_id: thread::current().id(),
-                    has_thread_default_context: MainContext::thread_default().is_some(),
-                });
-            }
-        }
-    }
+    run_on_gio_thread(move |monitor| async move {
+        remove_gvfs_storage_device_on_context(&monitor, identity).await
+    })
+    .await?
 }
 
 fn load_gvfs_storage_devices_on_context(
@@ -483,28 +366,6 @@ fn gio_error(identity: String, source: gio::glib::Error) -> GvfsDeviceError {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    async fn inspect_gvfs_runtime() -> GvfsRuntimeProbe {
-        let runtime = gvfs_device_runtime().expect("GVfs runtime");
-        let (response_sender, response_receiver) = oneshot::channel();
-        runtime
-            .request_sender
-            .send(GvfsDeviceRequest::InspectContext {
-                response: response_sender,
-            })
-            .expect("send context inspection");
-        response_receiver.await.expect("context inspection")
-    }
-
-    #[tokio::test]
-    async fn gio_operations_reuse_one_thread_default_context() {
-        let first = inspect_gvfs_runtime().await;
-        let second = inspect_gvfs_runtime().await;
-
-        assert!(first.has_thread_default_context);
-        assert!(second.has_thread_default_context);
-        assert_eq!(first.thread_id, second.thread_id);
-    }
 
     #[test]
     fn mount_location_matches_equal_root_or_default_location() {

@@ -3,6 +3,7 @@ mod desktop_notifications;
 pub use display_renderer;
 pub mod file_clipboard;
 mod file_manager_activation;
+mod gio_runtime;
 mod gvfs_devices;
 mod gvfs_paths;
 pub mod network_mounts;

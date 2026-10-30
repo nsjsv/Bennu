@@ -22,6 +22,7 @@ impl FileBrowser {
                 self.confirm_advanced_new_folder()
             }
             AdvancedNewFolderMessage::ConfirmedWithAfter(after) => {
+                self.update_advanced_new_folder(|state| state.after_menu_open = false);
                 self.pending_advanced_new_folder_after = Some(after);
                 self.confirm_advanced_new_folder()
             }
@@ -57,36 +58,11 @@ impl FileBrowser {
                 Task::none()
             }
             AdvancedNewFolderMessage::AfterMenuOpenChanged(open) => {
-                if open {
-                    self.open_advanced_new_folder_menu();
-                } else {
-                    self.close_advanced_new_folder_menu();
-                }
-                Task::none()
-            }
-            AdvancedNewFolderMessage::MenuHoverChanged(hover) => {
-                if hover {
-                    self.open_advanced_new_folder_menu();
-                } else {
-                    return self.schedule_advanced_new_folder_menu_close();
-                }
+                self.update_advanced_new_folder(|state| state.after_menu_open = open);
                 Task::none()
             }
             AdvancedNewFolderMessage::SplitButtonHoverChanged(hover) => {
                 self.update_advanced_new_folder(|state| state.split_button_hover = hover);
-                if hover {
-                    self.open_advanced_new_folder_menu();
-                } else {
-                    return self.schedule_advanced_new_folder_menu_close();
-                }
-                Task::none()
-            }
-            AdvancedNewFolderMessage::MenuCloseTick(generation) => {
-                self.update_advanced_new_folder(|state| {
-                    if state.after_menu_open && state.menu_generation == generation {
-                        state.after_menu_open = false;
-                    }
-                });
                 Task::none()
             }
             AdvancedNewFolderMessage::NestedNamesProbed { prefix, listing } => {
@@ -159,42 +135,6 @@ impl FileBrowser {
         }
     }
 
-    /// 展开菜单并作废待执行的延迟关闭。
-    fn open_advanced_new_folder_menu(&mut self) {
-        self.update_advanced_new_folder(|state| {
-            state.menu_generation += 1;
-            state.after_menu_open = true;
-        });
-    }
-
-    fn close_advanced_new_folder_menu(&mut self) {
-        self.update_advanced_new_folder(|state| {
-            state.after_menu_open = false;
-            state.menu_generation += 1;
-        });
-    }
-
-    /// 离开按钮/菜单后延迟关闭:期间重新悬停(代际自增)则本次失效,
-    /// 让鼠标从按钮跨到菜单的间隙不闪关。
-    fn schedule_advanced_new_folder_menu_close(&mut self) -> Task<Message> {
-        let Some(state) = &mut self.advanced_new_folder else {
-            return Task::none();
-        };
-        if !state.after_menu_open {
-            return Task::none();
-        }
-        state.menu_generation += 1;
-        let generation = state.menu_generation;
-        Task::perform(
-            async move {
-                // 光标从按钮跨到菜单的宽限期,期间重新悬停会使本任务失效。
-                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-                Message::AdvancedNewFolder(AdvancedNewFolderMessage::MenuCloseTick(generation))
-            },
-            |message| message,
-        )
-    }
-
     fn confirm_advanced_new_folder(&mut self) -> Task<Message> {
         let Some(state) = self.advanced_new_folder.take() else {
             return Task::none();
@@ -248,6 +188,7 @@ async fn directory_names(path: &Path) -> std::io::Result<HashSet<String>> {
 mod tests {
     use super::*;
     use crate::config;
+    use crate::model::AdvancedNewFolderAfter;
 
     #[tokio::test]
     async fn a_missing_parent_is_empty_and_an_unreadable_one_is_reported() {
@@ -284,5 +225,70 @@ mod tests {
 
         assert!(browser.advanced_new_folder.is_some());
         assert!(browser.operation_queue.tasks().is_empty());
+    }
+
+    fn menu_open(browser: &FileBrowser) -> bool {
+        browser
+            .advanced_new_folder
+            .as_ref()
+            .is_some_and(|state| state.after_menu_open)
+    }
+
+    #[test]
+    fn hovering_the_split_button_does_not_open_the_menu() {
+        let (mut browser, _) = FileBrowser::new(config::default_user_config());
+        drop(browser.open_advanced_new_folder(PathBuf::from("/workspace")));
+
+        drop(browser.handle_advanced_new_folder_message(
+            AdvancedNewFolderMessage::SplitButtonHoverChanged(true),
+        ));
+        assert!(!menu_open(&browser));
+
+        drop(browser.handle_advanced_new_folder_message(
+            AdvancedNewFolderMessage::AfterMenuOpenChanged(true),
+        ));
+        assert!(menu_open(&browser));
+        // 离开按钮不再定时收起，菜单留到点外面、选完或 Esc。
+        drop(browser.handle_advanced_new_folder_message(
+            AdvancedNewFolderMessage::SplitButtonHoverChanged(false),
+        ));
+        assert!(menu_open(&browser));
+    }
+
+    #[test]
+    fn escape_closes_the_open_menu_before_the_dialog() {
+        let (mut browser, _) = FileBrowser::new(config::default_user_config());
+        drop(browser.open_advanced_new_folder(PathBuf::from("/workspace")));
+        drop(browser.handle_advanced_new_folder_message(
+            AdvancedNewFolderMessage::AfterMenuOpenChanged(true),
+        ));
+
+        drop(browser.dismiss_floating());
+        assert!(browser.advanced_new_folder.is_some());
+        assert!(!menu_open(&browser));
+
+        drop(browser.dismiss_floating());
+        assert!(browser.advanced_new_folder.is_none());
+    }
+
+    #[test]
+    fn choosing_an_after_action_closes_the_menu_even_if_the_dialog_stays() {
+        let (mut browser, _) = FileBrowser::new(config::default_user_config());
+        drop(browser.open_advanced_new_folder(PathBuf::from("/workspace")));
+        browser
+            .advanced_new_folder
+            .as_mut()
+            .expect("dialog opened")
+            .draft = "ok\n..".to_owned();
+        drop(browser.handle_advanced_new_folder_message(
+            AdvancedNewFolderMessage::AfterMenuOpenChanged(true),
+        ));
+
+        drop(browser.handle_advanced_new_folder_message(
+            AdvancedNewFolderMessage::ConfirmedWithAfter(AdvancedNewFolderAfter::Enter),
+        ));
+
+        assert!(browser.advanced_new_folder.is_some());
+        assert!(!menu_open(&browser));
     }
 }

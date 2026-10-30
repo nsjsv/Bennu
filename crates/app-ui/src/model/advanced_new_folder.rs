@@ -81,10 +81,8 @@ pub(crate) struct AdvancedNewFolderState {
     pub(crate) gather: bool,
     /// 建完移入的候选源(目标目录下的选中项);空 = 无移入能力。
     pub(crate) gather_sources: Vec<PathBuf>,
-    /// 创建按钮旁的下拉菜单是否展开(hover/点击切换)。
+    /// 创建按钮旁的下拉菜单是否展开(点箭头打开,点菜单外/选完/Esc 关闭)。
     pub(crate) after_menu_open: bool,
-    /// 菜单代际:每次展开/取消待关闭时自增,使过期的延迟关闭任务失效。
-    pub(crate) menu_generation: u64,
     /// 鼠标悬停在分裂按钮上(整个按钮统一提亮)。
     pub(crate) split_button_hover: bool,
     /// 打开弹窗时 directory 已有的条目名,plan() 用它错开磁盘重名。
@@ -111,7 +109,6 @@ impl AdvancedNewFolderState {
             gather: !gather_sources.is_empty(),
             gather_sources,
             after_menu_open: false,
-            menu_generation: 0,
             split_button_hover: false,
             taken_names: existing_names,
             taken_deep: HashMap::new(),
@@ -301,14 +298,10 @@ pub(crate) enum AdvancedNewFolderMessage {
     StartNumberChanged(String),
     CountChanged(String),
     GatherToggled(bool),
-    /// 箭头点击切换菜单显隐。
+    /// 点箭头打开菜单;点菜单外关闭。
     AfterMenuOpenChanged(bool),
-    /// 鼠标进入/离开菜单区域:进入取消待关闭,离开安排延迟关闭。
-    MenuHoverChanged(bool),
-    /// 鼠标进入/离开分裂按钮:进入展开菜单,离开安排延迟关闭。
+    /// 鼠标进入/离开分裂按钮:只管整体提亮。
     SplitButtonHoverChanged(bool),
-    /// 延迟关闭检查:代际匹配才真正收起菜单。
-    MenuCloseTick(u64),
     /// 带收尾动作的确认(创建后进入 / 新标签进入)。
     ConfirmedWithAfter(AdvancedNewFolderAfter),
     /// 嵌套链父目录的内容探测回执:预览据此提前标注叶子段磁盘重名或读不了。
@@ -340,7 +333,6 @@ mod tests {
             gather: false,
             gather_sources: Vec::new(),
             after_menu_open: false,
-            menu_generation: 0,
             split_button_hover: false,
             taken_names: taken.iter().map(|name| name.to_string()).collect(),
             taken_deep: HashMap::new(),

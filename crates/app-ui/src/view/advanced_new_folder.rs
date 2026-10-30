@@ -6,7 +6,7 @@ use iced::widget::{
 };
 use iced::{Alignment, Background, Border, Color, Element, Length};
 
-use crate::anchored_popup::anchored_popup_expanding;
+use crate::anchored_popup::{anchored_popup_expanding, dismiss_on_outside_press};
 use crate::appearance::{
     context_menu_item_button_style, context_menu_style, enhanced_scrollbar_style,
     enhanced_vertical_scrollbar_direction, muted_text_color, subtle_border_color,
@@ -178,7 +178,6 @@ fn create_split_button(
     menu_open: bool,
     button_hover: bool,
 ) -> Element<'static, Message> {
-    let close = Message::AdvancedNewFolder(AdvancedNewFolderMessage::AfterMenuOpenChanged(false));
     let arrow_icon = move || {
         IconSymbol::ArrowDown
             .view(11.0)
@@ -220,15 +219,17 @@ fn create_split_button(
         .style(move |theme, status| {
             split_button_section_style(theme, status, disabled, menu_open, button_hover)
         });
-    let open = Message::AdvancedNewFolder(AdvancedNewFolderMessage::AfterMenuOpenChanged(true));
-    let arrow_section: Element<'static, Message> =
-        if disabled {
-            Element::from(mouse_area(arrow_button.on_press(close.clone())).on_enter(close))
-        } else {
-            Element::from(mouse_area(arrow_button).on_enter(open).on_press(
-                Message::AdvancedNewFolder(AdvancedNewFolderMessage::AfterMenuOpenChanged(true)),
+    let arrow_section = mouse_area(arrow_button);
+    // 菜单开着时点箭头交给菜单的"点外面就关"；这里再发打开会让它马上重开。
+    let arrow_section: Element<'static, Message> = if disabled || menu_open {
+        arrow_section.into()
+    } else {
+        arrow_section
+            .on_press(Message::AdvancedNewFolder(
+                AdvancedNewFolderMessage::AfterMenuOpenChanged(true),
             ))
-        };
+            .into()
+    };
     let highlight = button_hover || menu_open;
     mouse_area(
         container(
@@ -316,7 +317,7 @@ fn split_button_container_style(
     }
 }
 
-/// 收尾动作菜单:创建后进入 / 新标签进入。鼠标移出菜单即收起。
+/// 收尾动作菜单:创建后进入 / 新标签进入。点菜单外即收起。
 /// 按翻译后文字估菜单宽度:全角≈字号、半角≈0.55 字号,加内边距余量。
 fn advanced_menu_width(labels: &[String], font_size: f32, padding: f32) -> f32 {
     let max_units = labels
@@ -356,14 +357,10 @@ fn after_create_menu(disabled: bool) -> Element<'static, Message> {
             );
         }
     }
-    mouse_area(container(items).padding(4).style(context_menu_style))
-        .on_enter(Message::AdvancedNewFolder(
-            AdvancedNewFolderMessage::MenuHoverChanged(true),
-        ))
-        .on_exit(Message::AdvancedNewFolder(
-            AdvancedNewFolderMessage::MenuHoverChanged(false),
-        ))
-        .into()
+    dismiss_on_outside_press(
+        container(items).padding(4).style(context_menu_style),
+        Message::AdvancedNewFolder(AdvancedNewFolderMessage::AfterMenuOpenChanged(false)),
+    )
 }
 
 /// 预览一行：被自动错开的整行淡化、不能创建的整行标错，尾部小字说明原因。

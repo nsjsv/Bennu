@@ -623,8 +623,13 @@ impl FileBrowser {
             return Task::none();
         }
 
-        if self.advanced_new_folder.is_some() {
-            self.advanced_new_folder = None;
+        if let Some(state) = &mut self.advanced_new_folder {
+            // 同 GTK：Esc 先收起展开的菜单，再按一次才关对话框。
+            if state.after_menu_open {
+                state.after_menu_open = false;
+            } else {
+                self.advanced_new_folder = None;
+            }
             return Task::none();
         }
 

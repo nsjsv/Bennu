@@ -28,11 +28,11 @@ pub(crate) fn load_svg_dimensions(source: &Path) -> Result<(u32, u32), Thumbnail
     ))
 }
 
+/// 矢量图按档的边长渲染（小图也放大，矢量不会糊）。
 pub(crate) fn render_svg_thumbnail(
     source: &Path,
-    output: &Path,
     max_edge: u32,
-) -> Result<(u32, u32), ThumbnailError> {
+) -> Result<image::RgbaImage, ThumbnailError> {
     let tree = load_svg_tree(source)?;
     let source_size = tree.size();
     let scale = svg_thumbnail_scale(source_size.width(), source_size.height(), max_edge);
@@ -41,7 +41,6 @@ pub(crate) fn render_svg_thumbnail(
     tracing::debug!(
         target: "thumbnails",
         source = ?source,
-        output = ?output,
         source_width = source_size.width(),
         source_height = source_size.height(),
         scale,
@@ -61,14 +60,18 @@ pub(crate) fn render_svg_thumbnail(
         Transform::from_scale(scale, scale),
         &mut pixmap.as_mut(),
     );
-    pixmap
-        .save_png(output)
-        .map_err(|source_error| ThumbnailError::WriteSvgThumbnail {
-            path: output.to_path_buf(),
-            source: svg_png_error_to_io_error(source_error),
-        })?;
-
-    Ok((width, height))
+    // tiny-skia 存的是预乘 alpha，PNG 要直通 alpha。
+    let pixels = pixmap
+        .pixels()
+        .iter()
+        .flat_map(|pixel| {
+            let color = pixel.demultiply();
+            [color.red(), color.green(), color.blue(), color.alpha()]
+        })
+        .collect();
+    image::RgbaImage::from_raw(width, height, pixels).ok_or_else(|| ThumbnailError::RenderSvg {
+        path: source.to_path_buf(),
+    })
 }
 
 fn load_svg_tree(source: &Path) -> Result<Tree, ThumbnailError> {
@@ -119,8 +122,4 @@ fn svg_thumbnail_scale(width: f32, height: f32, max_edge: u32) -> f32 {
 
 fn round_svg_dimension(value: f32) -> u32 {
     value.round().max(1.0) as u32
-}
-
-fn svg_png_error_to_io_error(error: impl std::error::Error) -> std::io::Error {
-    std::io::Error::other(error.to_string())
 }

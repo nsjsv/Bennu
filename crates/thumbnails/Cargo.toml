@@ -8,6 +8,9 @@ license.workspace = true
 blake3.workspace = true
 file-core = { path = "../file-core" }
 image.workspace = true
+md-5.workspace = true
+# 与 image 用的同一版本；image 的 PNG 编码器写不了 Thumb::* 文本块。
+png = "0.18"
 resvg.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

@@ -6,18 +6,18 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use image::{metadata::Orientation, ImageDecoder};
 use thiserror::Error;
-use tokio::fs;
 
+mod cache_format;
 mod svg;
 
-const CACHE_FORMAT_EXTENSION: &str = "png";
-const THUMBNAILER_VERSION: u8 = 4;
+pub use cache_format::{file_uri, LARGEST_THUMBNAIL_EDGE};
+use cache_format::{
+    remove_temporary_file, thumbnail_file_path, valid_thumbnail_dimensions, write_thumbnail,
+    ThumbnailBucket,
+};
+
 const VIDEO_THUMBNAIL_SEEK_TIME: &str = "00:00:01";
 const VIDEO_THUMBNAILER_DETAIL_CHAR_LIMIT: usize = 1_000;
-const THUMBNAIL_NORMAL_DIR: &str = "normal";
-const THUMBNAIL_LARGE_DIR: &str = "large";
-const THUMBNAIL_X_LARGE_DIR: &str = "x-large";
-const THUMBNAIL_XX_LARGE_DIR: &str = "xx-large";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ThumbnailMediaKind {
@@ -25,15 +25,8 @@ enum ThumbnailMediaKind {
     Video,
 }
 
-impl ThumbnailMediaKind {
-    fn cache_tag(self) -> &'static [u8] {
-        match self {
-            Self::Image => b"image",
-            Self::Video => b"video",
-        }
-    }
-}
-
+/// 本进程内认缩略图条目用：源路径、大小、修改时间和尺寸档相同就是同一项。
+/// 磁盘上的文件名另按规范算（见 `cache_format`）。
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ThumbnailKey(String);
 
@@ -75,29 +68,17 @@ impl ThumbnailRequest {
     }
 
     pub fn key(&self) -> ThumbnailKey {
-        let media_kind =
-            thumbnail_media_kind_for_path(&self.source).unwrap_or(ThumbnailMediaKind::Image);
-        thumbnail_key(self, media_kind)
+        let mut hasher = blake3::Hasher::new();
+        update_hash(&mut hasher, request_path_bytes(&self.source));
+        update_hash(&mut hasher, &self.metadata.len.to_le_bytes());
+        update_system_time_hash(&mut hasher, self.metadata.modified);
+        update_hash(&mut hasher, &self.bucket().edge().to_le_bytes());
+        ThumbnailKey(hasher.finalize().to_hex().to_string())
     }
-}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ThumbnailOptions {
-    pub max_edge: u32,
-}
-
-impl Default for ThumbnailOptions {
-    fn default() -> Self {
-        Self { max_edge: 256 }
+    fn bucket(&self) -> ThumbnailBucket {
+        ThumbnailBucket::for_edge(self.max_edge)
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Thumbnail {
-    pub source: PathBuf,
-    pub output: PathBuf,
-    pub width: u32,
-    pub height: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,20 +97,8 @@ pub enum ThumbnailError {
     UnsupportedFormat { path: PathBuf },
     #[error("thumbnail source {path:?} is inside thumbnail cache directory {cache_dir:?}")]
     SourceInsideCacheDirectory { path: PathBuf, cache_dir: PathBuf },
-    #[error("could not create thumbnail cache directory {path:?}: {source}")]
-    CreateCacheDirectory {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
     #[error("thumbnail task failed: {0}")]
     Join(String),
-    #[error("could not read cached thumbnail {path:?}: {source}")]
-    ReadCachedThumbnail {
-        path: PathBuf,
-        #[source]
-        source: image::ImageError,
-    },
     #[error("could not read image {path:?}: {source}")]
     ReadImage {
         path: PathBuf,
@@ -150,22 +119,15 @@ pub enum ThumbnailError {
     },
     #[error("could not render SVG image {path:?}")]
     RenderSvg { path: PathBuf },
-    #[error("could not write SVG thumbnail {path:?}: {source}")]
-    WriteSvgThumbnail {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("could not write thumbnail {path:?}: {source}")]
-    WriteImage {
+    #[error("could not read the frame the video thumbnailer wrote to {path:?}: {source}")]
+    ReadVideoFrame {
         path: PathBuf,
         #[source]
         source: image::ImageError,
     },
-    #[error("could not move thumbnail {from:?} to {to:?}: {source}")]
-    RenameThumbnail {
-        from: PathBuf,
-        to: PathBuf,
+    #[error("could not write thumbnail {path:?}: {source}")]
+    WriteThumbnail {
+        path: PathBuf,
         #[source]
         source: std::io::Error,
     },
@@ -209,161 +171,168 @@ pub fn path_is_in_thumbnail_cache(cache_dir: impl AsRef<Path>, path: impl AsRef<
     path.as_ref().starts_with(cache_dir)
 }
 
+/// 请求在缓存里对应的位置。
+struct CacheSlot {
+    media_kind: ThumbnailMediaKind,
+    key: ThumbnailKey,
+    uri: String,
+    output: PathBuf,
+}
+
+impl CacheSlot {
+    fn for_request(cache_dir: &Path, request: &ThumbnailRequest) -> Result<Self, ThumbnailError> {
+        let media_kind = thumbnail_media_kind_for_path(&request.source).ok_or_else(|| {
+            ThumbnailError::UnsupportedFormat {
+                path: request.source.clone(),
+            }
+        })?;
+        if path_is_in_thumbnail_cache(cache_dir, &request.source) {
+            return Err(ThumbnailError::SourceInsideCacheDirectory {
+                path: request.source.clone(),
+                cache_dir: cache_dir.to_path_buf(),
+            });
+        }
+        let uri = file_uri(&request.source);
+        Ok(Self {
+            media_kind,
+            key: request.key(),
+            output: thumbnail_file_path(cache_dir, &uri, request.bucket()),
+            uri,
+        })
+    }
+
+    /// 磁盘上有对得上的缩略图（不论是谁写的）时返回它。
+    async fn cached(
+        self,
+        request: ThumbnailRequest,
+    ) -> Result<Result<CachedThumbnail, Self>, ThumbnailError> {
+        let output = self.output.clone();
+        let uri = self.uri.clone();
+        let metadata = request.metadata;
+        let dimensions = tokio::task::spawn_blocking(move || {
+            valid_thumbnail_dimensions(&output, &uri, metadata)
+        })
+        .await
+        .map_err(|source| ThumbnailError::Join(source.to_string()))?;
+        Ok(match dimensions {
+            Some((width, height)) => Ok(CachedThumbnail {
+                key: self.key,
+                source: request.source,
+                output: self.output,
+                width,
+                height,
+                cache_hit: true,
+            }),
+            None => Err(self),
+        })
+    }
+}
+
 pub async fn load_or_generate_thumbnail(
     cache_dir: impl AsRef<Path>,
     request: ThumbnailRequest,
 ) -> Result<CachedThumbnail, ThumbnailError> {
-    let media_kind = thumbnail_media_kind_for_path(&request.source).ok_or_else(|| {
-        ThumbnailError::UnsupportedFormat {
-            path: request.source.clone(),
+    let started_at = Instant::now();
+    let slot = CacheSlot::for_request(cache_dir.as_ref(), &request)?;
+    tracing::debug!(
+        target: "thumbnails",
+        source = ?request.source,
+        output = ?slot.output,
+        media_kind = ?slot.media_kind,
+        max_edge = request.max_edge,
+        "thumbnail requested"
+    );
+    let slot = match slot.cached(request.clone()).await? {
+        Ok(cached) => {
+            tracing::debug!(
+                target: "thumbnails",
+                source = ?cached.source,
+                output = ?cached.output,
+                width = cached.width,
+                height = cached.height,
+                elapsed_ms = started_at.elapsed().as_millis(),
+                "thumbnail cache hit"
+            );
+            return Ok(cached);
         }
-    })?;
-    load_or_generate_thumbnail_with_kind(cache_dir, request, media_kind).await
+        Err(slot) => slot,
+    };
+    // 图片解码和外部视频缩略图命令都会阻塞，必须留在 blocking 线程池。
+    tokio::task::spawn_blocking(move || generate_thumbnail_blocking(request, slot))
+        .await
+        .map_err(|source| ThumbnailError::Join(source.to_string()))?
 }
 
 pub async fn load_cached_thumbnail(
     cache_dir: impl AsRef<Path>,
     request: ThumbnailRequest,
 ) -> Result<Option<CachedThumbnail>, ThumbnailError> {
-    let media_kind = thumbnail_media_kind_for_path(&request.source).ok_or_else(|| {
-        ThumbnailError::UnsupportedFormat {
-            path: request.source.clone(),
+    let slot = CacheSlot::for_request(cache_dir.as_ref(), &request)?;
+    Ok(slot.cached(request).await?.ok())
+}
+
+/// 按档的边长生成（不按请求的边长），写成规范的 PNG 后原子替换旧文件。
+fn generate_thumbnail_blocking(
+    request: ThumbnailRequest,
+    slot: CacheSlot,
+) -> Result<CachedThumbnail, ThumbnailError> {
+    let edge = request.bucket().edge();
+    let temporary = temporary_output_path(&slot.output);
+    let image = match slot.media_kind {
+        ThumbnailMediaKind::Image if is_svg_path(&request.source) => {
+            svg::render_svg_thumbnail(&request.source, edge)?
         }
+        ThumbnailMediaKind::Image => raster_thumbnail(&request.source, edge)?,
+        ThumbnailMediaKind::Video => video_thumbnail(&request.source, &temporary, edge)?,
+    };
+    write_thumbnail(
+        &image,
+        &slot.output,
+        &temporary,
+        &slot.uri,
+        request.metadata,
+    )
+    .map_err(|source| ThumbnailError::WriteThumbnail {
+        path: slot.output.clone(),
+        source,
     })?;
-    let cache_dir = cache_dir.as_ref();
-    if path_is_in_thumbnail_cache(cache_dir, &request.source) {
-        return Err(ThumbnailError::SourceInsideCacheDirectory {
-            path: request.source,
-            cache_dir: cache_dir.to_path_buf(),
-        });
-    }
-    let key = thumbnail_key(&request, media_kind);
-    let output = cached_thumbnail_output_path(cache_dir, &key, request.max_edge);
-    match cached_thumbnail_dimensions(output.clone()).await {
-        Ok((width, height)) => Ok(Some(CachedThumbnail {
-            key,
-            source: request.source,
-            output,
-            width,
-            height,
-            cache_hit: true,
-        })),
-        Err(_) => Ok(None),
-    }
+    Ok(CachedThumbnail {
+        key: slot.key,
+        source: request.source,
+        output: slot.output,
+        width: image.width(),
+        height: image.height(),
+        cache_hit: false,
+    })
 }
 
-pub async fn load_or_generate_image_thumbnail(
-    cache_dir: impl AsRef<Path>,
-    request: ThumbnailRequest,
-) -> Result<CachedThumbnail, ThumbnailError> {
-    if !file_core::is_supported_image_path(&request.source) {
-        return Err(ThumbnailError::UnsupportedFormat {
-            path: request.source,
-        });
-    }
-    load_or_generate_thumbnail_with_kind(cache_dir, request, ThumbnailMediaKind::Image).await
+/// 比这一档小的原图不放大（同 gnome-desktop），显示时再缩放。
+fn raster_thumbnail(source: &Path, edge: u32) -> Result<image::RgbaImage, ThumbnailError> {
+    let (image, orientation) = decode_raster_with_orientation(source)?;
+    let mut thumbnail = if image.width() > edge || image.height() > edge {
+        image.thumbnail(edge, edge)
+    } else {
+        image
+    };
+    thumbnail.apply_orientation(orientation);
+    Ok(thumbnail.to_rgba8())
 }
 
-async fn load_or_generate_thumbnail_with_kind(
-    cache_dir: impl AsRef<Path>,
-    request: ThumbnailRequest,
-    media_kind: ThumbnailMediaKind,
-) -> Result<CachedThumbnail, ThumbnailError> {
-    let started_at = Instant::now();
-    let cache_dir = cache_dir.as_ref();
-    if path_is_in_thumbnail_cache(cache_dir, &request.source) {
-        return Err(ThumbnailError::SourceInsideCacheDirectory {
-            path: request.source,
-            cache_dir: cache_dir.to_path_buf(),
-        });
-    }
-    let key = thumbnail_key(&request, media_kind);
-    let output = cached_thumbnail_output_path(cache_dir, &key, request.max_edge);
-    tracing::debug!(
-        target: "thumbnails",
-        source = ?request.source,
-        output = ?output,
-        key = key.as_str(),
-        media_kind = ?media_kind,
-        max_edge = request.max_edge,
-        "thumbnail requested"
-    );
-
-    match cached_thumbnail_dimensions(output.clone()).await {
-        Ok((width, height)) => {
-            tracing::debug!(
-                target: "thumbnails",
-                source = ?request.source,
-                output = ?output,
-                key = key.as_str(),
-                max_edge = request.max_edge,
-                width,
-                height,
-                elapsed_ms = started_at.elapsed().as_millis(),
-                "thumbnail cache hit"
-            );
-            return Ok(CachedThumbnail {
-                key,
-                source: request.source,
-                output,
-                width,
-                height,
-                cache_hit: true,
-            });
-        }
-        Err(_) => {
-            let _ = fs::remove_file(&output).await;
-        }
-    }
-
-    generate_cached_thumbnail(request, output, key, media_kind).await
-}
-
-fn cached_thumbnail_output_path(cache_dir: &Path, key: &ThumbnailKey, max_edge: u32) -> PathBuf {
-    cache_dir.join(thumbnail_bucket_dir(max_edge)).join(format!(
-        "{}.{}",
-        key.as_str(),
-        CACHE_FORMAT_EXTENSION
-    ))
-}
-
-fn thumbnail_bucket_dir(max_edge: u32) -> &'static str {
-    match max_edge {
-        0..=128 => THUMBNAIL_NORMAL_DIR,
-        129..=256 => THUMBNAIL_LARGE_DIR,
-        257..=512 => THUMBNAIL_X_LARGE_DIR,
-        _ => THUMBNAIL_XX_LARGE_DIR,
-    }
-}
-
-pub async fn generate_image_thumbnail(
-    source: impl AsRef<Path>,
-    output: impl AsRef<Path>,
-    options: ThumbnailOptions,
-) -> Result<Thumbnail, ThumbnailError> {
-    let source = source.as_ref().to_path_buf();
-    let output = output.as_ref().to_path_buf();
-
-    if let Some(parent) = output.parent() {
-        fs::create_dir_all(parent).await.map_err(|source| {
-            ThumbnailError::CreateCacheDirectory {
-                path: parent.to_path_buf(),
-                source,
-            }
-        })?;
-    }
-
-    tracing::debug!(
-        target: "thumbnails",
-        source = ?source,
-        output = ?output,
-        max_edge = options.max_edge,
-        "generate image thumbnail requested"
-    );
-
-    tokio::task::spawn_blocking(move || generate_image_thumbnail_blocking(source, output, options))
-        .await
-        .map_err(|source| ThumbnailError::Join(source.to_string()))?
+/// 视频缩略图命令只会写普通 PNG：先写到临时位置，读回后再按规范写一遍。
+fn video_thumbnail(
+    source: &Path,
+    scratch: &Path,
+    edge: u32,
+) -> Result<image::RgbaImage, ThumbnailError> {
+    run_video_thumbnailer(source, scratch, edge)?;
+    let frame = image::open(scratch);
+    remove_temporary_file(scratch);
+    frame
+        .map(|frame| frame.to_rgba8())
+        .map_err(|source| ThumbnailError::ReadVideoFrame {
+            path: scratch.to_path_buf(),
+            source,
+        })
 }
 
 pub async fn load_image_dimensions(source: impl AsRef<Path>) -> Result<(u32, u32), ThumbnailError> {
@@ -407,187 +376,6 @@ fn load_image_dimensions_blocking(source: PathBuf) -> Result<(u32, u32), Thumbna
     let dimensions = decoder.dimensions();
     let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
     Ok(oriented_image_dimensions(dimensions, orientation))
-}
-
-async fn cached_thumbnail_dimensions(path: PathBuf) -> Result<(u32, u32), ThumbnailError> {
-    tokio::task::spawn_blocking(move || {
-        image::image_dimensions(&path)
-            .map_err(|source| ThumbnailError::ReadCachedThumbnail { path, source })
-    })
-    .await
-    .map_err(|source| ThumbnailError::Join(source.to_string()))?
-}
-
-async fn generate_cached_thumbnail(
-    request: ThumbnailRequest,
-    output: PathBuf,
-    key: ThumbnailKey,
-    media_kind: ThumbnailMediaKind,
-) -> Result<CachedThumbnail, ThumbnailError> {
-    if let Some(parent) = output.parent() {
-        fs::create_dir_all(parent).await.map_err(|source| {
-            ThumbnailError::CreateCacheDirectory {
-                path: parent.to_path_buf(),
-                source,
-            }
-        })?;
-    }
-
-    let temporary_output = temporary_output_path(&output);
-    // 图片解码和外部视频缩略图命令都会阻塞，必须留在 blocking 线程池。
-    tokio::task::spawn_blocking(move || match media_kind {
-        ThumbnailMediaKind::Image => {
-            generate_cached_image_thumbnail_blocking(request, temporary_output, output, key)
-        }
-        ThumbnailMediaKind::Video => {
-            generate_cached_video_thumbnail_blocking(request, temporary_output, output, key)
-        }
-    })
-    .await
-    .map_err(|source| ThumbnailError::Join(source.to_string()))?
-}
-
-fn generate_cached_image_thumbnail_blocking(
-    request: ThumbnailRequest,
-    temporary_output: PathBuf,
-    output: PathBuf,
-    key: ThumbnailKey,
-) -> Result<CachedThumbnail, ThumbnailError> {
-    let source = request.source;
-    if is_svg_path(&source) {
-        let started_at = Instant::now();
-        tracing::debug!(
-            target: "thumbnails",
-            source = ?source,
-            output = ?temporary_output,
-            max_edge = request.max_edge,
-            "SVG thumbnail render started"
-        );
-        let (width, height) =
-            svg::render_svg_thumbnail(&source, &temporary_output, request.max_edge)?;
-        tracing::debug!(
-            target: "thumbnails",
-            source = ?source,
-            output = ?temporary_output,
-            width,
-            height,
-            elapsed_ms = started_at.elapsed().as_millis(),
-            "SVG thumbnail render finished"
-        );
-        return finish_cached_thumbnail(key, source, temporary_output, output, width, height);
-    }
-
-    let (image, orientation) = decode_raster_with_orientation(&source)?;
-    let mut thumbnail = image.thumbnail(request.max_edge, request.max_edge);
-    thumbnail.apply_orientation(orientation);
-    let width = thumbnail.width();
-    let height = thumbnail.height();
-
-    thumbnail
-        .save_with_format(&temporary_output, image::ImageFormat::Png)
-        .map_err(|source_error| ThumbnailError::WriteImage {
-            path: temporary_output.clone(),
-            source: source_error,
-        })?;
-
-    finish_cached_thumbnail(key, source, temporary_output, output, width, height)
-}
-
-fn generate_cached_video_thumbnail_blocking(
-    request: ThumbnailRequest,
-    temporary_output: PathBuf,
-    output: PathBuf,
-    key: ThumbnailKey,
-) -> Result<CachedThumbnail, ThumbnailError> {
-    let source = request.source;
-    run_video_thumbnailer(&source, &temporary_output, request.max_edge)?;
-    let (width, height) = image::image_dimensions(&temporary_output).map_err(|source_error| {
-        ThumbnailError::ReadCachedThumbnail {
-            path: temporary_output.clone(),
-            source: source_error,
-        }
-    })?;
-
-    finish_cached_thumbnail(key, source, temporary_output, output, width, height)
-}
-
-fn finish_cached_thumbnail(
-    key: ThumbnailKey,
-    source: PathBuf,
-    temporary_output: PathBuf,
-    output: PathBuf,
-    width: u32,
-    height: u32,
-) -> Result<CachedThumbnail, ThumbnailError> {
-    std::fs::rename(&temporary_output, &output).map_err(|source_error| {
-        ThumbnailError::RenameThumbnail {
-            from: temporary_output.clone(),
-            to: output.clone(),
-            source: source_error,
-        }
-    })?;
-
-    Ok(CachedThumbnail {
-        key,
-        source,
-        output,
-        width,
-        height,
-        cache_hit: false,
-    })
-}
-
-fn generate_image_thumbnail_blocking(
-    source: PathBuf,
-    output: PathBuf,
-    options: ThumbnailOptions,
-) -> Result<Thumbnail, ThumbnailError> {
-    if is_svg_path(&source) {
-        let started_at = Instant::now();
-        tracing::debug!(
-            target: "thumbnails",
-            source = ?source,
-            output = ?output,
-            max_edge = options.max_edge,
-            "SVG direct thumbnail render started"
-        );
-        let (width, height) = svg::render_svg_thumbnail(&source, &output, options.max_edge)?;
-        tracing::debug!(
-            target: "thumbnails",
-            source = ?source,
-            output = ?output,
-            width,
-            height,
-            elapsed_ms = started_at.elapsed().as_millis(),
-            "SVG direct thumbnail render finished"
-        );
-        return Ok(Thumbnail {
-            source,
-            output,
-            width,
-            height,
-        });
-    }
-
-    let (image, orientation) = decode_raster_with_orientation(&source)?;
-    let mut thumbnail = image.thumbnail(options.max_edge, options.max_edge);
-    thumbnail.apply_orientation(orientation);
-    let width = thumbnail.width();
-    let height = thumbnail.height();
-
-    thumbnail
-        .save(&output)
-        .map_err(|source_error| ThumbnailError::WriteImage {
-            path: output.clone(),
-            source: source_error,
-        })?;
-
-    Ok(Thumbnail {
-        source,
-        output,
-        width,
-        height,
-    })
 }
 
 fn open_raster_decoder(source: &Path) -> Result<impl ImageDecoder, ThumbnailError> {
@@ -771,6 +559,7 @@ fn is_svg_path(path: &Path) -> bool {
         .is_some_and(|extension| extension.eq_ignore_ascii_case("svg"))
 }
 
+/// 与成品同目录，名字以 `.png` 结尾：崩溃留下的也会被定期清理按时间删掉。
 fn temporary_output_path(output: &Path) -> PathBuf {
     let parent = output.parent().unwrap_or_else(|| Path::new("."));
     let stem = output
@@ -781,24 +570,7 @@ fn temporary_output_path(output: &Path) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .unwrap_or(0);
-    parent.join(format!(
-        ".{stem}.{}.{}.tmp.{CACHE_FORMAT_EXTENSION}",
-        std::process::id(),
-        unique
-    ))
-}
-
-fn thumbnail_key(request: &ThumbnailRequest, media_kind: ThumbnailMediaKind) -> ThumbnailKey {
-    let mut hasher = blake3::Hasher::new();
-    update_hash(&mut hasher, b"file-manager-thumbnail");
-    update_hash(&mut hasher, &[THUMBNAILER_VERSION]);
-    update_hash(&mut hasher, media_kind.cache_tag());
-    update_hash(&mut hasher, request_path_bytes(&request.source));
-    update_hash(&mut hasher, &request.metadata.len.to_le_bytes());
-    update_system_time_hash(&mut hasher, request.metadata.modified);
-    update_hash(&mut hasher, &request.max_edge.to_le_bytes());
-    update_hash(&mut hasher, CACHE_FORMAT_EXTENSION.as_bytes());
-    ThumbnailKey(hasher.finalize().to_hex().to_string())
+    parent.join(format!(".{stem}.{}.{}.tmp.png", std::process::id(), unique))
 }
 
 #[cfg(unix)]

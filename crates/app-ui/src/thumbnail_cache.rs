@@ -11,7 +11,8 @@ pub(crate) const LIST_THUMBNAIL_SIZE: f32 = 42.0;
 pub(crate) const COLUMN_THUMBNAIL_EDGE: u32 = 48;
 pub(crate) const COLUMN_THUMBNAIL_SIZE: f32 = 18.0;
 pub(crate) const TRANSFER_CONFLICT_THUMBNAIL_EDGE: u32 = 96;
-pub(crate) const PREVIEW_THUMBNAIL_MAX_EDGE: u32 = 2048;
+/// 规范最大一档；预览更大时先用它，再载原图。
+pub(crate) const PREVIEW_THUMBNAIL_MAX_EDGE: u32 = thumbnails::LARGEST_THUMBNAIL_EDGE;
 
 /// 内存就绪缩略图上限：Handle 仅持路径不驻留像素，2048 项内存成本可忽略。
 const MAX_READY_THUMBNAILS: usize = 2048;

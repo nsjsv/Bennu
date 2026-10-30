@@ -1,10 +1,13 @@
 use image::ImageEncoder;
+use std::ffi::OsString;
+use std::os::unix::ffi::OsStringExt;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, UNIX_EPOCH};
 
 use thumbnails::{
-    generate_image_thumbnail, is_supported_thumbnail_path, load_cached_thumbnail,
-    load_image_dimensions, load_or_generate_image_thumbnail, load_or_generate_thumbnail,
-    path_is_in_thumbnail_cache, thumbnail_cache_dir, ThumbnailError, ThumbnailOptions,
+    file_uri, is_supported_thumbnail_path, load_cached_thumbnail, load_image_dimensions,
+    load_or_generate_thumbnail, path_is_in_thumbnail_cache, thumbnail_cache_dir, ThumbnailError,
     ThumbnailRequest, ThumbnailSourceMetadata,
 };
 
@@ -14,70 +17,146 @@ const AVIF_FIXTURE: &str = concat!(
 );
 
 #[tokio::test]
-async fn generate_image_thumbnail_writes_small_image() {
+async fn thumbnail_is_written_where_and_how_the_freedesktop_spec_says() {
     let dir = tempfile::tempdir().unwrap();
-    let source = dir.path().join("source.png");
-    let output = dir.path().join("cache/thumb.png");
-    let image = image::RgbImage::new(64, 32);
-    image.save(&source).unwrap();
-
-    let thumbnail = generate_image_thumbnail(&source, &output, ThumbnailOptions { max_edge: 16 })
-        .await
-        .unwrap();
-
-    assert_eq!(thumbnail.source, source);
-    assert_eq!(thumbnail.output, output);
-    assert!(thumbnail.width <= 16);
-    assert!(thumbnail.height <= 16);
-    assert!(thumbnail.output.exists());
-}
-
-#[tokio::test]
-async fn load_or_generate_image_thumbnail_reuses_cache() {
-    let dir = tempfile::tempdir().unwrap();
-    let source = dir.path().join("source.png");
+    let source = dir.path().join("My Photos (1).png");
     let cache_dir = dir.path().join("cache");
-    let image = image::RgbImage::new(64, 32);
-    image.save(&source).unwrap();
-    let request = thumbnail_request(&source, 16);
+    image::RgbImage::new(300, 150).save(&source).unwrap();
+    let request = thumbnail_request(&source, 96);
 
-    let first = load_or_generate_image_thumbnail(&cache_dir, request.clone())
+    let first = load_or_generate_thumbnail(&cache_dir, request.clone())
         .await
         .unwrap();
-    let second = load_or_generate_image_thumbnail(&cache_dir, request)
+    let second = load_or_generate_thumbnail(&cache_dir, request)
         .await
         .unwrap();
 
+    let uri = file_uri(&source);
+    assert_eq!(first.output, cache_dir.join("normal").join(md5_name(&uri)));
+    assert_eq!((first.width, first.height), (128, 64));
     assert!(!first.cache_hit);
     assert!(second.cache_hit);
-    assert_eq!(first.key, second.key);
     assert_eq!(first.output, second.output);
+    let texts = png_texts(&first.output);
+    let source_metadata = std::fs::metadata(&source).unwrap();
+    assert_eq!(text(&texts, "Thumb::URI"), Some(uri.as_str()));
+    assert_eq!(
+        text(&texts, "Thumb::MTime"),
+        Some(unix_seconds(&source_metadata).to_string().as_str())
+    );
+    assert_eq!(
+        text(&texts, "Thumb::Size"),
+        Some(source_metadata.len().to_string().as_str())
+    );
+    assert_eq!(mode(&first.output), 0o600);
+    assert_eq!(mode(&cache_dir.join("normal")), 0o700);
 }
 
 #[tokio::test]
-async fn load_cached_thumbnail_reads_existing_cache_only() {
+async fn requests_land_in_the_four_spec_sizes() {
     let dir = tempfile::tempdir().unwrap();
-    let source = dir.path().join("source.png");
+    let source = dir.path().join("wide.png");
     let cache_dir = dir.path().join("cache");
-    let image = image::RgbImage::new(64, 32);
-    image.save(&source).unwrap();
-    let request = thumbnail_request(&source, 16);
-    let generated = load_or_generate_image_thumbnail(&cache_dir, request.clone())
+    image::RgbImage::new(2000, 1000).save(&source).unwrap();
+
+    for (max_edge, bucket, width) in [
+        (48, "normal", 128),
+        (200, "large", 256),
+        (300, "x-large", 512),
+        (2048, "xx-large", 1024),
+    ] {
+        let thumbnail =
+            load_or_generate_thumbnail(&cache_dir, thumbnail_request(&source, max_edge))
+                .await
+                .unwrap();
+        assert!(
+            thumbnail.output.starts_with(cache_dir.join(bucket)),
+            "{max_edge}"
+        );
+        assert_eq!(thumbnail.width, width, "{max_edge}");
+    }
+}
+
+#[tokio::test]
+async fn changed_source_is_regenerated_in_place() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("photo.png");
+    let cache_dir = dir.path().join("cache");
+    image::RgbImage::new(64, 32).save(&source).unwrap();
+    let first = load_or_generate_thumbnail(&cache_dir, thumbnail_request(&source, 64))
         .await
         .unwrap();
 
-    let cached = load_cached_thumbnail(&cache_dir, request)
-        .await
-        .unwrap()
-        .expect("cached thumbnail");
-
-    assert!(cached.cache_hit);
-    assert_eq!(cached.key, generated.key);
-    assert_eq!(cached.output, generated.output);
+    image::RgbImage::new(40, 40).save(&source).unwrap();
+    let file = std::fs::File::options().write(true).open(&source).unwrap();
+    file.set_modified(UNIX_EPOCH + Duration::from_secs(2_000_000_000))
+        .unwrap();
+    let request = thumbnail_request(&source, 64);
     assert_eq!(
-        (cached.width, cached.height),
-        (generated.width, generated.height)
+        load_cached_thumbnail(&cache_dir, request.clone())
+            .await
+            .unwrap(),
+        None
     );
+    let second = load_or_generate_thumbnail(&cache_dir, request)
+        .await
+        .unwrap();
+
+    assert!(!second.cache_hit);
+    assert_eq!(second.output, first.output);
+    assert_ne!(second.key, first.key);
+    assert_eq!((second.width, second.height), (40, 40));
+    assert_eq!(
+        text(&png_texts(&second.output), "Thumb::MTime"),
+        Some("2000000000")
+    );
+}
+
+#[tokio::test]
+async fn thumbnail_written_by_another_program_is_used_as_is() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("photo.png");
+    let cache_dir = dir.path().join("cache");
+    image::RgbImage::new(640, 480).save(&source).unwrap();
+    let uri = file_uri(&source);
+    let foreign = cache_dir.join("large").join(md5_name(&uri));
+    std::fs::create_dir_all(foreign.parent().unwrap()).unwrap();
+    let mtime = unix_seconds(&std::fs::metadata(&source).unwrap());
+    write_png_with_texts(
+        &foreign,
+        (7, 5),
+        &[
+            ("Thumb::URI", uri.as_str()),
+            ("Thumb::MTime", &format!("{mtime}.123456")),
+            ("Software", "GNOME::ThumbnailFactory"),
+        ],
+    );
+
+    let thumbnail = load_or_generate_thumbnail(&cache_dir, thumbnail_request(&source, 200))
+        .await
+        .unwrap();
+
+    assert!(thumbnail.cache_hit);
+    assert_eq!(thumbnail.output, foreign);
+    assert_eq!((thumbnail.width, thumbnail.height), (7, 5));
+}
+
+#[test]
+fn file_uri_escapes_like_glib() {
+    assert_eq!(
+        file_uri(Path::new("/home/u/My Photos (1)/#1 100%.jpg")),
+        "file:///home/u/My%20Photos%20(1)/%231%20100%25.jpg"
+    );
+    assert_eq!(
+        file_uri(Path::new("/srv/a!$&'*+,;=:@~_-.b")),
+        "file:///srv/a!$&'*+,%3B=:@~_-.b"
+    );
+    assert_eq!(
+        file_uri(Path::new("/图片/a?b[c].png")),
+        "file:///%E5%9B%BE%E7%89%87/a%3Fb%5Bc%5D.png"
+    );
+    let non_utf8 = PathBuf::from(OsString::from_vec(b"/tmp/\xff.png".to_vec()));
+    assert_eq!(file_uri(&non_utf8), "file:///tmp/%FF.png");
 }
 
 #[tokio::test]
@@ -85,11 +164,11 @@ async fn load_cached_thumbnail_miss_does_not_create_cache() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("source.png");
     let cache_dir = dir.path().join("cache");
-    let image = image::RgbImage::new(64, 32);
-    image.save(&source).unwrap();
-    let request = thumbnail_request(&source, 16);
+    image::RgbImage::new(64, 32).save(&source).unwrap();
 
-    let cached = load_cached_thumbnail(&cache_dir, request).await.unwrap();
+    let cached = load_cached_thumbnail(&cache_dir, thumbnail_request(&source, 16))
+        .await
+        .unwrap();
 
     assert!(cached.is_none());
     assert!(!cache_dir.exists());
@@ -101,8 +180,7 @@ async fn load_or_generate_thumbnail_rejects_cache_directory_source() {
     let cache_dir = dir.path().join("cache");
     std::fs::create_dir_all(&cache_dir).unwrap();
     let source = cache_dir.join("generated.png");
-    let image = image::RgbImage::new(64, 32);
-    image.save(&source).unwrap();
+    image::RgbImage::new(64, 32).save(&source).unwrap();
     let request = thumbnail_request(&source, 16);
 
     let error = load_or_generate_thumbnail(&cache_dir, request)
@@ -118,24 +196,23 @@ async fn load_or_generate_thumbnail_rejects_cache_directory_source() {
 }
 
 #[tokio::test]
-async fn load_or_generate_image_thumbnail_reads_bmp_source() {
+async fn small_bitmaps_are_not_upscaled() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("source.bmp");
     let cache_dir = dir.path().join("cache");
-    let image = image::RgbImage::new(48, 24);
-    image
+    image::RgbImage::new(48, 24)
         .save_with_format(&source, image::ImageFormat::Bmp)
         .unwrap();
-    let request = thumbnail_request(&source, 12);
 
-    let thumbnail = load_or_generate_image_thumbnail(&cache_dir, request)
+    let thumbnail = load_or_generate_thumbnail(&cache_dir, thumbnail_request(&source, 12))
         .await
         .unwrap();
 
-    assert_eq!(thumbnail.source, source);
-    assert!(thumbnail.width <= 12);
-    assert!(thumbnail.height <= 12);
-    assert!(thumbnail.output.exists());
+    assert_eq!((thumbnail.width, thumbnail.height), (48, 24));
+    assert_eq!(
+        image::image_dimensions(&thumbnail.output).unwrap(),
+        (48, 24)
+    );
 }
 
 #[tokio::test]
@@ -147,103 +224,75 @@ async fn avif_dimensions_thumbnail_and_cache_use_bitmap_decoder() {
 
     assert_eq!(load_image_dimensions(source).await.unwrap(), (16, 8));
 
-    let first = load_or_generate_image_thumbnail(&cache_dir, request.clone())
+    let first = load_or_generate_thumbnail(&cache_dir, request.clone())
         .await
         .unwrap();
-    let second = load_or_generate_image_thumbnail(&cache_dir, request)
+    let second = load_or_generate_thumbnail(&cache_dir, request)
         .await
         .unwrap();
 
-    assert_eq!((first.width, first.height), (8, 4));
-    assert_eq!(image::image_dimensions(&first.output).unwrap(), (8, 4));
+    assert_eq!((first.width, first.height), (16, 8));
     assert!(!first.cache_hit);
     assert!(second.cache_hit);
-    assert_eq!(first.key, second.key);
-    assert_eq!(first.output, second.output);
 }
 
 #[tokio::test]
-async fn load_or_generate_image_thumbnail_renders_svg_source() {
+async fn svg_is_rendered_at_the_bucket_size_with_spec_metadata() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("source.svg");
     let cache_dir = dir.path().join("cache");
-    write_svg_image(&source);
-    let request = thumbnail_request(&source, 20);
+    write_sized_svg_image(&source, 80, 40);
 
-    let thumbnail = load_or_generate_image_thumbnail(&cache_dir, request)
+    let thumbnail = load_or_generate_thumbnail(&cache_dir, thumbnail_request(&source, 20))
         .await
         .unwrap();
 
-    assert_eq!(thumbnail.source, source);
-    assert_eq!((thumbnail.width, thumbnail.height), (20, 10));
-    assert!(thumbnail.output.exists());
+    assert_eq!((thumbnail.width, thumbnail.height), (128, 64));
     assert_eq!(
         image::image_dimensions(&thumbnail.output).unwrap(),
-        (20, 10)
+        (128, 64)
     );
-}
-
-#[tokio::test]
-async fn load_or_generate_image_thumbnail_upscales_small_svg_source() {
-    let dir = tempfile::tempdir().unwrap();
-    let source = dir.path().join("small.svg");
-    let cache_dir = dir.path().join("cache");
-    write_sized_svg_image(&source, 24, 24);
-    let request = thumbnail_request(&source, 128);
-
-    let thumbnail = load_or_generate_image_thumbnail(&cache_dir, request)
-        .await
-        .unwrap();
-
-    assert_eq!(thumbnail.source, source);
-    assert_eq!((thumbnail.width, thumbnail.height), (128, 128));
     assert_eq!(
-        image::image_dimensions(&thumbnail.output).unwrap(),
-        (128, 128)
+        text(&png_texts(&thumbnail.output), "Thumb::URI"),
+        Some(file_uri(&source).as_str())
     );
+    let pixel = image::open(&thumbnail.output).unwrap().to_rgba8()[(0, 0)];
+    assert_eq!(pixel.0, [0x33, 0x66, 0xcc, 0xff]);
 }
 
 #[tokio::test]
 async fn load_image_dimensions_reads_source_size() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("source.png");
-    let image = image::RgbImage::new(37, 19);
-    image.save(&source).unwrap();
+    image::RgbImage::new(37, 19).save(&source).unwrap();
 
-    let dimensions = load_image_dimensions(&source).await.unwrap();
-
-    assert_eq!(dimensions, (37, 19));
+    assert_eq!(load_image_dimensions(&source).await.unwrap(), (37, 19));
 }
 
 #[tokio::test]
 async fn dimensions_and_thumbnail_honor_exif_rotation() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("rotated.jpg");
-    let output = dir.path().join("rotated-thumbnail.png");
+    let cache_dir = dir.path().join("cache");
     write_exif_rotated_jpeg(&source, 4, 2);
 
     let dimensions = load_image_dimensions(&source).await.unwrap();
-    let thumbnail = generate_image_thumbnail(&source, &output, ThumbnailOptions { max_edge: 64 })
+    let thumbnail = load_or_generate_thumbnail(&cache_dir, thumbnail_request(&source, 64))
         .await
         .unwrap();
 
     assert_eq!(dimensions, (2, 4));
-    assert!(thumbnail.height > thumbnail.width);
-    assert_eq!(
-        image::image_dimensions(&thumbnail.output).unwrap(),
-        (thumbnail.width, thumbnail.height)
-    );
+    assert_eq!((thumbnail.width, thumbnail.height), (2, 4));
+    assert_eq!(image::image_dimensions(&thumbnail.output).unwrap(), (2, 4));
 }
 
 #[tokio::test]
 async fn load_image_dimensions_reads_svg_size() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("source.svg");
-    write_svg_image(&source);
+    write_sized_svg_image(&source, 80, 40);
 
-    let dimensions = load_image_dimensions(&source).await.unwrap();
-
-    assert_eq!(dimensions, (80, 40));
+    assert_eq!(load_image_dimensions(&source).await.unwrap(), (80, 40));
 }
 
 #[test]
@@ -320,8 +369,61 @@ fn thumbnail_request(source: &Path, max_edge: u32) -> ThumbnailRequest {
     )
 }
 
-fn write_svg_image(path: &Path) {
-    write_sized_svg_image(path, 80, 40);
+fn md5_name(uri: &str) -> String {
+    use md5::{Digest, Md5};
+    let digest = Md5::digest(uri.as_bytes());
+    digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>()
+        + ".png"
+}
+
+fn unix_seconds(metadata: &std::fs::Metadata) -> u64 {
+    metadata
+        .modified()
+        .unwrap()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
+
+fn mode(path: &Path) -> u32 {
+    std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+}
+
+fn png_texts(path: &Path) -> Vec<(String, String)> {
+    let file = std::io::BufReader::new(std::fs::File::open(path).unwrap());
+    let reader = png::Decoder::new(file).read_info().unwrap();
+    reader
+        .info()
+        .uncompressed_latin1_text
+        .iter()
+        .map(|chunk| (chunk.keyword.clone(), chunk.text.clone()))
+        .collect()
+}
+
+fn text<'a>(texts: &'a [(String, String)], key: &str) -> Option<&'a str> {
+    texts
+        .iter()
+        .find(|(keyword, _)| keyword == key)
+        .map(|(_, text)| text.as_str())
+}
+
+fn write_png_with_texts(path: &Path, (width, height): (u32, u32), texts: &[(&str, &str)]) {
+    let file = std::io::BufWriter::new(std::fs::File::create(path).unwrap());
+    let mut encoder = png::Encoder::new(file, width, height);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    for (keyword, text) in texts {
+        encoder
+            .add_ztxt_chunk((*keyword).to_owned(), (*text).to_owned())
+            .unwrap();
+    }
+    let mut writer = encoder.write_header().unwrap();
+    writer
+        .write_image_data(&vec![0; (width * height * 4) as usize])
+        .unwrap();
 }
 
 fn write_sized_svg_image(path: &Path, width: u32, height: u32) {

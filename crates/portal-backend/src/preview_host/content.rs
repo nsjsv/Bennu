@@ -26,10 +26,10 @@ use crate::{Message, PickerDaemon};
 
 use super::PreviewHost;
 
-/// 预览档位缩略图的最小/最大边长与升级阈值（主软件同值：512/2048/
+/// 预览档位缩略图的最小/最大边长与升级阈值（主软件同值：512/1024/
 /// 128；PREVIEW_THUMBNAIL_MAX_EDGE 主软件在 thumbnail_cache.rs）。
 const PREVIEW_THUMBNAIL_MIN_EDGE: u32 = 512;
-const PREVIEW_THUMBNAIL_MAX_EDGE: u32 = 2048;
+const PREVIEW_THUMBNAIL_MAX_EDGE: u32 = thumbnails::LARGEST_THUMBNAIL_EDGE;
 const PREVIEW_RESIZE_EXTRA_PIXELS: u32 = 128;
 
 /// Message::Preview 的 update 入口（app-ui update.rs:38 模式）：引擎
@@ -140,7 +140,7 @@ fn preview_thumbnail_request(entry: &DirectoryEntry, max_edge: u32) -> Option<Th
 }
 
 /// 预览档位边长（主软件 preview_thumbnail_edge_for_size 同式）：窗口
-/// 内容尺寸长边，钳在 [512, 2048]。
+/// 内容尺寸长边，钳在 [512, 1024]。
 pub(super) fn preview_thumbnail_edge_for_size(size: PreviewSize) -> u32 {
     size.width
         .max(size.height)

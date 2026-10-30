@@ -29,6 +29,8 @@ use crate::QrEvent;
 pub(crate) const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(600);
 /// 进度/生命周期事件通道容量。
 const EVENT_CAPACITY: usize = 64;
+/// 传输中报进度的间隔；窗口用相邻两次的差算速度。
+const PROGRESS_INTERVAL: Duration = Duration::from_secs(1);
 /// zip 流的进程内缓冲窗口（duplex 管道，提供下载背压）。
 const DUPLEX_BUFFER: usize = 64 * 1024;
 
@@ -73,11 +75,36 @@ struct QrShared {
     downloaded: Mutex<HashSet<usize>>,
     last_activity: Mutex<Instant>,
     connected: AtomicBool,
+    /// 响应开始/结束、条目下载完时唤醒监控任务；Notify 会留着许可，不丢通知。
+    changed: tokio::sync::Notify,
 }
 
 impl QrShared {
     fn touch(&self) {
         *self.last_activity.lock() = Instant::now();
+    }
+
+    fn begin_response(&self) {
+        self.touch();
+        self.notify_connected();
+        self.active.fetch_add(1, Ordering::Relaxed);
+        self.changed.notify_one();
+    }
+
+    fn end_response(&self) {
+        self.active.fetch_sub(1, Ordering::Relaxed);
+        self.touch();
+        self.changed.notify_one();
+    }
+
+    fn mark_downloaded(&self, indices: impl IntoIterator<Item = usize>) {
+        self.downloaded.lock().extend(indices);
+        self.changed.notify_one();
+    }
+
+    fn all_downloaded(&self) -> bool {
+        let downloaded = self.downloaded.lock();
+        !downloaded.is_empty() && downloaded.len() == self.items.len()
     }
 
     /// Connected 只发一次：首个扫码请求即建立连接。
@@ -95,8 +122,7 @@ struct ActiveGuard {
 
 impl Drop for ActiveGuard {
     fn drop(&mut self) {
-        self.shared.active.fetch_sub(1, Ordering::Relaxed);
-        self.shared.touch();
+        self.shared.end_response();
     }
 }
 
@@ -198,6 +224,7 @@ pub(crate) async fn start_with_idle_timeout(
         downloaded: Mutex::new(HashSet::new()),
         last_activity: Mutex::new(Instant::now()),
         connected: AtomicBool::new(false),
+        changed: tokio::sync::Notify::new(),
     });
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
@@ -236,42 +263,52 @@ async fn shutdown_watch(mut rx: tokio::sync::watch::Receiver<bool>) {
     }
 }
 
-/// 监控任务：节流进度事件 + 全部下载完成 → Finished + 空闲超时 → TimedOut；
-/// 两个终态都必须真正关停 HTTP 服务（R4：传完/超时后端口不再监听）。
+/// 监控任务：全部下载完成 → 立刻 Finished；空闲到点 → TimedOut；两个终态都
+/// 必须真正关停 HTTP 服务（R4：传完/超时后端口不再监听）。传输中每秒报一次
+/// 进度，窗口据此算速度（同 KIO 每秒更新速度）。
 async fn run_monitor(
     shared: Arc<QrShared>,
     idle_timeout: Duration,
     shutdown_tx: tokio::sync::watch::Sender<bool>,
     server_abort: tokio::task::AbortHandle,
 ) {
-    let mut last_bytes = 0u64;
-    let mut last_active = false;
+    let mut reported = (0u64, false);
     loop {
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        let bytes = shared.bytes_sent.load(Ordering::Relaxed);
-        let active = shared.active.load(Ordering::Relaxed) > 0;
-        if bytes != last_bytes || active != last_active {
-            last_bytes = bytes;
-            last_active = active;
+        let progress = (
+            shared.bytes_sent.load(Ordering::Relaxed),
+            shared.active.load(Ordering::Relaxed) > 0,
+        );
+        if progress != reported {
+            reported = progress;
             let _ = shared.events.send(QrEvent::Progress {
-                bytes_sent: bytes,
-                active,
+                bytes_sent: progress.0,
+                active: progress.1,
             });
         }
-        {
-            let downloaded = shared.downloaded.lock();
-            if !downloaded.is_empty() && downloaded.len() == shared.items.len() {
-                let _ = shared.events.send(QrEvent::Finished);
-                stop_server(&shutdown_tx, &server_abort);
-                return;
-            }
+        if shared.all_downloaded() {
+            let _ = shared.events.send(QrEvent::Finished);
+            stop_server(&shutdown_tx, &server_abort);
+            return;
         }
-        if !active {
-            let last = *shared.last_activity.lock();
-            if last.elapsed() >= idle_timeout {
-                let _ = shared.events.send(QrEvent::TimedOut);
-                stop_server(&shutdown_tx, &server_abort);
-                return;
+        let changed = shared.changed.notified();
+        if progress.1 {
+            tokio::select! {
+                _ = changed => {}
+                _ = tokio::time::sleep(PROGRESS_INTERVAL) => {}
+            }
+            continue;
+        }
+        let idle_deadline = *shared.last_activity.lock() + idle_timeout;
+        tokio::select! {
+            _ = changed => {}
+            _ = tokio::time::sleep_until(idle_deadline.into()) => {
+                if shared.active.load(Ordering::Relaxed) == 0
+                    && shared.last_activity.lock().elapsed() >= idle_timeout
+                {
+                    let _ = shared.events.send(QrEvent::TimedOut);
+                    stop_server(&shutdown_tx, &server_abort);
+                    return;
+                }
             }
         }
     }
@@ -428,9 +465,7 @@ async fn serve_file(
         Ok(file) => file,
         Err(_) => return StatusCode::NOT_FOUND.into_response(),
     };
-    shared.touch();
-    shared.notify_connected();
-    shared.active.fetch_add(1, Ordering::Relaxed);
+    shared.begin_response();
 
     // CountingReader 读到 EOF 时登记"已下载"；ActiveGuard 在流结束时回收计数。
     let reader = CountingReader {
@@ -458,9 +493,7 @@ async fn serve_zip(
     if !check_token(&shared, &token) {
         return StatusCode::NOT_FOUND.into_response();
     }
-    shared.touch();
-    shared.notify_connected();
-    shared.active.fetch_add(1, Ordering::Relaxed);
+    shared.begin_response();
 
     // zip 流式写进程内管道：async_zip 产出 → duplex → HTTP body，无临时文件。
     let (tx, rx) = tokio::io::duplex(DUPLEX_BUFFER);
@@ -480,14 +513,10 @@ async fn serve_zip(
             }
         } else {
             // 完整写出 zip = 全部条目已交付（duplex 背压保证消费完才算成功）。
-            let mut downloaded = zip_shared.downloaded.lock();
-            for index in 0..zip_shared.items.len() {
-                downloaded.insert(index);
-            }
+            zip_shared.mark_downloaded(0..zip_shared.items.len());
         }
         let _ = tx.shutdown().await;
-        zip_shared.active.fetch_sub(1, Ordering::Relaxed);
-        zip_shared.touch();
+        zip_shared.end_response();
     });
 
     let zip_name = if shared.items.len() == 1 {
@@ -646,7 +675,7 @@ impl AsyncRead for CountingReader {
             } else if !this.done {
                 // Ok(0) = EOF：条目完整交付。
                 this.done = true;
-                this.shared.downloaded.lock().insert(this.index);
+                this.shared.mark_downloaded([this.index]);
             }
         }
         result

@@ -700,10 +700,15 @@ async fn qr_serves_index_files_and_zip_then_finishes() {
     assert!(contents.contains(&("alpha.txt".to_string(), b"AAA".to_vec())));
     assert!(contents.contains(&("docs/readme.md".to_string(), b"hello zip".to_vec())));
 
-    // 全部条目下载完成 → Finished（监控任务 1s 轮询）。
-    wait_for(&mut events, |e| matches!(e, QrEvent::Finished)).await;
+    // 全部条目下载完成 → 当场 Finished，不等定时检查。
+    tokio::time::timeout(
+        Duration::from_millis(200),
+        wait_for(&mut events, |e| matches!(e, QrEvent::Finished)),
+    )
+    .await
+    .expect("finished right after the last download");
     // 传完自动关：端口不再监听（A4 验收口径）。
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(tokio::net::TcpStream::connect(("127.0.0.1", port))
         .await
         .is_err());

@@ -11,15 +11,12 @@ use std::task::{Context, Poll};
 use bennu_preview::animated_image_preview::animated_image_preview_subscription;
 use bennu_preview::engine::{audio_preview_tick_subscription, video_preview_tick_subscription};
 use bennu_preview::video_preview::video_preview_subscription;
+use bennu_theme::animation::FRAME_INTERVAL_60HZ;
 use tokio::sync::mpsc;
 
 use crate::dbus_file_chooser::BridgeEvent;
 use crate::picker_session::{PickerSession, SessionMessage};
 use crate::{Message, PickerDaemon};
-
-/// 展开动画帧时钟：60Hz 与主应用 ui_pacing::FRAME_INTERVAL_60HZ 同值；
-/// portal 不依赖 app-ui，本地保持同一节奏。
-const ANIMATION_FRAME_INTERVAL: Duration = Duration::from_millis(16);
 
 pub(crate) fn subscription(daemon: &PickerDaemon) -> Subscription<Message> {
     let mut subscriptions = vec![
@@ -94,8 +91,7 @@ pub(crate) fn subscription(daemon: &PickerDaemon) -> Subscription<Message> {
     // 滚动条淡入淡出；预览窗：chrome/底部控件淡入淡出、预览树展开、
     // 惯性滚动、滚动条淡入淡出）时订阅帧时钟，动画结束自然摘除。
     if daemon.windows.values().any(PickerSession::is_animating) || daemon.preview.is_animating() {
-        subscriptions
-            .push(iced::time::every(ANIMATION_FRAME_INTERVAL).map(|_| Message::AnimationTick));
+        subscriptions.push(iced::time::every(FRAME_INTERVAL_60HZ).map(|_| Message::AnimationTick));
     }
     // 媒体播放/帧流订阅（主软件 app.rs 的 gating 模式：读引擎活跃态，
     // 播放结束/会话切换自然摘除）：音频/视频进度 tick（250ms）与动图/

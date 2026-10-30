@@ -22,7 +22,7 @@ use crate::text_preview_loading::load_text_preview_chunk;
 use crate::video_preview::{inspect_video_preview_metadata, load_video_preview_frame};
 
 const NETWORK_PREVIEW_CACHE_CHANNEL_SIZE: usize = 16;
-const NETWORK_PREVIEW_PROGRESS_UI_INTERVAL: Duration = crate::ui_pacing::PROGRESS_UI_INTERVAL;
+const NETWORK_PREVIEW_PROGRESS_UI_INTERVAL: Duration = file_core::PROGRESS_REPORT_INTERVAL;
 
 pub fn preview_command(
     path: PathBuf,

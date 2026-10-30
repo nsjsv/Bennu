@@ -1,5 +1,8 @@
 use std::time::{Duration, Instant};
 
+/// 60Hz 单帧步进：动画帧间隔与高频 UI 提示节流统一引用此值，避免各处硬编码漂移。
+pub const FRAME_INTERVAL_60HZ: Duration = Duration::from_millis(16);
+
 pub fn elapsed_fraction_at(started_at: Instant, now: Instant, duration: Duration) -> f32 {
     if duration.is_zero() {
         return 1.0;

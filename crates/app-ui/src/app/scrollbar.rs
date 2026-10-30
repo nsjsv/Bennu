@@ -9,10 +9,9 @@ use super::smooth_scroll::smooth_scroll_id;
 use super::FileBrowser;
 use crate::animation::elapsed_fraction as scrollbar_animation_progress;
 use crate::model::{Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility};
-use bennu_theme::animation::ease_out_cubic;
+use bennu_theme::animation::{ease_out_cubic, FRAME_INTERVAL_60HZ};
 
-pub(super) const SCROLLBAR_ANIMATION_INTERVAL: Duration =
-    bennu_preview::ui_pacing::FRAME_INTERVAL_60HZ;
+pub(super) const SCROLLBAR_ANIMATION_INTERVAL: Duration = FRAME_INTERVAL_60HZ;
 
 const SCROLLBAR_REVEAL_DURATION: Duration = Duration::from_millis(96);
 const SCROLLBAR_HIDE_DURATION: Duration = Duration::from_millis(300);

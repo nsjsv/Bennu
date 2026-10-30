@@ -47,6 +47,20 @@ pub fn format_file_size_compact(bytes: u64) -> String {
     format_size_with_units(bytes, ["B", "K", "M", "G", "T", "P", "E"], "")
 }
 
+/// 音视频/动图预览的播放时长文案（H:MM:SS / M:SS），纯数字不随语言变化。
+pub fn format_duration(duration: std::time::Duration) -> String {
+    let total_seconds = duration.as_secs();
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds % 3600) / 60;
+    let seconds = total_seconds % 60;
+
+    if hours > 0 {
+        format!("{hours}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes}:{seconds:02}")
+    }
+}
+
 fn format_size_with_units(bytes: u64, units: [&str; 7], separator: &str) -> String {
     if bytes < 1024 {
         return format!("{bytes}{separator}{}", units[0]);

@@ -36,9 +36,6 @@ pub mod preview_message;
 // 容量格式化纯函数自 app-ui formatting.rs 下沉（预览超限文案引用），
 // app-ui formatting.rs re-export 维持 35 处调用路径。
 pub mod formatting;
-// UI 节拍常量自 app-ui 下沉（预览命令层引用 PROGRESS_UI_INTERVAL），
-// app-ui ui_pacing.rs re-export 维持非预览消费者路径。
-pub mod ui_pacing;
 // 空格预览的路径分类与内容加载管线自 app-ui preview.rs 下沉。
 pub mod preview_loading;
 // 纯搬移：原图预览解码管线（光栅/SVG）自 app-ui 下沉。

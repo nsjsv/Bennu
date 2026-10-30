@@ -172,7 +172,7 @@ use crate::view::{
 };
 const DOUBLE_CLICK_THRESHOLD: Duration = Duration::from_millis(500);
 const POINTER_DRAG_ACTIVATION_DISTANCE: f32 = 3.0;
-const PREVIEW_TREE_ANIMATION_INTERVAL: Duration = bennu_preview::ui_pacing::FRAME_INTERVAL_60HZ;
+const PREVIEW_TREE_ANIMATION_INTERVAL: Duration = bennu_theme::animation::FRAME_INTERVAL_60HZ;
 const OPERATION_PROGRESS_ANIMATION_INTERVAL: Duration = Duration::from_millis(80);
 const NETWORK_STATUS_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 const SEARCH_SERVICE_STATUS_REFRESH_INTERVAL: Duration = Duration::from_secs(1);

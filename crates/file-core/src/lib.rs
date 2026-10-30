@@ -1,3 +1,7 @@
+/// 后台工作向界面上报进度的最短间隔：进度条不需要 60Hz，100ms 已足够平滑。
+/// 文件操作执行器与网络预览下载共用这一个值，避免各自硬编码后漂移。
+pub const PROGRESS_REPORT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
+
 pub mod app_dirs;
 pub mod archive;
 pub mod archive_extraction;

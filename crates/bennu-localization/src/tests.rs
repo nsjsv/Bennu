@@ -1,6 +1,15 @@
 use super::*;
 
 #[test]
+fn playback_durations_are_written_as_clock_times() {
+    assert_eq!(format_duration(std::time::Duration::from_secs(65)), "1:05");
+    assert_eq!(
+        format_duration(std::time::Duration::from_secs(3661)),
+        "1:01:01"
+    );
+}
+
+#[test]
 fn file_sizes_are_written_the_kde_way() {
     for (bytes, regular, compact) in [
         (0, "0 B", "0B"),

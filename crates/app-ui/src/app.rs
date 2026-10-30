@@ -842,12 +842,23 @@ impl FileBrowser {
         browser.refresh_column_width_reference_content_width();
         startup_trace::mark_once("file_browser_new_ready");
         let startup_rendering_environment = browser.startup_rendering_environment.clone();
+        let thumbnail_cache_trimming =
+            browser
+                .thumbnail_cache
+                .cache_dir()
+                .map_or_else(Task::none, |cache_dir| {
+                    Task::future(thumbnails::keep_thumbnail_cache_trimmed(
+                        cache_dir.to_path_buf(),
+                    ))
+                    .discard()
+                });
         (
             browser,
             Task::batch([
                 startup_environment_command(startup_rendering_environment),
                 system_theme_command(),
                 ensure_search_service_command(initial_search_service_request),
+                thumbnail_cache_trimming,
             ]),
         )
     }

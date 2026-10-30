@@ -8,6 +8,7 @@ use image::{metadata::Orientation, ImageDecoder};
 use thiserror::Error;
 
 mod cache_format;
+mod purge;
 mod svg;
 
 pub use cache_format::{file_uri, LARGEST_THUMBNAIL_EDGE};
@@ -15,6 +16,7 @@ use cache_format::{
     remove_temporary_file, thumbnail_file_path, valid_thumbnail_dimensions, write_thumbnail,
     ThumbnailBucket,
 };
+pub use purge::keep_thumbnail_cache_trimmed;
 
 const VIDEO_THUMBNAIL_SEEK_TIME: &str = "00:00:01";
 const VIDEO_THUMBNAILER_DETAIL_CHAR_LIMIT: usize = 1_000;

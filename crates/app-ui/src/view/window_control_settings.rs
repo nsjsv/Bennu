@@ -3,12 +3,12 @@ use iced::{Alignment, Border, Element, Length, Theme};
 
 use crate::app::FileBrowser;
 use crate::appearance::{context_menu_button_style, subtle_border_color};
-use crate::icons::IconSymbol;
 use crate::model::{
     Message, WindowChromeLayout, WindowControlKind, WindowControlMoveDirection,
     WindowControlPlacement, WindowControlSide,
 };
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
+use bennu_theme::icons::IconSymbol;
 
 use super::option_controls::{secondary_action_button, segmented_choice_row, SegmentedChoice};
 use super::settings_group::{info_setting_row, muted_setting_text};

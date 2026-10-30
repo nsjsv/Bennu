@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
-use crate::animation::{ease_out_cubic, elapsed_fraction as animation_progress};
+use crate::animation::elapsed_fraction as animation_progress;
+use bennu_theme::animation::ease_out_cubic;
 
 const TAB_BAR_REVEAL_DURATION: Duration = Duration::from_millis(180);
 const TAB_BAR_HIDE_DURATION: Duration = Duration::from_millis(140);

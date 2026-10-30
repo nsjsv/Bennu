@@ -11,14 +11,14 @@ use crate::appearance::context_menu_button_style;
 use crate::config::{
     ColumnWidthAdjustMode, LaunchWindowPolicy, StartupLocationPolicy, UiLanguageSetting,
 };
-use crate::icons::{rotated_chevron_right_view, IconSymbol};
-use crate::matugen_theme::{ColorSchemeFamily, ColorSchemePreset, ContrastWarnings, ThemeMode};
 use crate::model::{
     Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility, SettingsCategory,
     SettingsSubpage, WindowChromeLayout, WindowControlSide, WindowFrameState,
     WINDOW_TITLE_BAR_HEIGHT, WINDOW_TOP_BAR_HEIGHT,
 };
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
+use bennu_theme::icons::{rotated_chevron_right_view, IconSymbol};
+use bennu_theme::{ColorSchemeFamily, ColorSchemePreset, ContrastWarnings, ThemeMode};
 
 use super::about_settings::about_settings_detail;
 use super::application_logs::application_logs_settings_detail;
@@ -667,7 +667,7 @@ fn color_scheme_grid(browser: &FileBrowser) -> Element<'_, Message> {
 fn color_scheme_family_card(
     browser: &FileBrowser,
     family: ColorSchemeFamily,
-    mode: crate::matugen_theme::AppearanceMode,
+    mode: bennu_theme::AppearanceMode,
     selected: ColorSchemePreset,
 ) -> Element<'static, Message> {
     let preview_preset = if selected.family() == family {
@@ -715,7 +715,7 @@ fn color_scheme_family_card(
 fn color_scheme_style_row(
     browser: &FileBrowser,
     family: ColorSchemeFamily,
-    mode: crate::matugen_theme::AppearanceMode,
+    mode: bennu_theme::AppearanceMode,
     selected: ColorSchemePreset,
 ) -> Element<'static, Message> {
     let mut styles = row![].spacing(6).width(Length::Fill);

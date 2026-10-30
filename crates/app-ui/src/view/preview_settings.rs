@@ -4,12 +4,12 @@ use iced::{Alignment, Background, Border, Color, Element, Length, Theme};
 use crate::app::FileBrowser;
 use crate::appearance::{context_menu_button_style, muted_text_color, subtle_border_color};
 use crate::config;
-use crate::icons::rotated_chevron_right_view;
-use crate::matugen_theme::ui_colors;
 use crate::model::{
     Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility, SettingsSubpage,
 };
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
+use bennu_theme::icons::rotated_chevron_right_view;
+use bennu_theme::ui_colors;
 
 use super::auxiliary_window_layout::auxiliary_detail_scroller;
 use super::network_settings::preview_size_limit_rows;

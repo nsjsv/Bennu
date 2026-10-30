@@ -5,7 +5,7 @@ use crate::app::FileBrowser;
 use crate::appearance::context_menu_button_style;
 use crate::config;
 use crate::model::Message;
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
 
 use super::settings_group::{info_setting_row, toggle_setting_row};
 

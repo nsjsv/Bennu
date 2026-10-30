@@ -10,13 +10,13 @@ use crate::appearance::{
     context_menu_button_style, navigation_icon_button_style, navigation_text_input_style,
 };
 use crate::formatting::{format_file_size, format_middle_ellipsized_text, format_system_time};
-use crate::icons::IconSymbol;
 use crate::model::{
     Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility, SearchEndpointState,
     SearchPathEntryKind, SearchServiceDiagnosticKind, SearchServiceIncident,
     SearchServiceIncidentState, SearchServiceRecoveryAction, SearchServiceRecoveryState,
 };
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
+use bennu_theme::icons::IconSymbol;
 
 use super::auxiliary_window_layout::auxiliary_detail_scroller;
 use super::option_controls::destructive_confirmation_button_style;

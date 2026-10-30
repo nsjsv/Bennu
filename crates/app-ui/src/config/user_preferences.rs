@@ -24,9 +24,6 @@ use super::{
     PreviewFileSizeLimits, SidebarFavoriteConfig, TrustedTransferDevice, UiLanguageSetting,
     UserConfig, ViewDensityLevel,
 };
-use crate::matugen_theme::{
-    default_custom_color_scheme, ColorSchemePreset, CustomColorScheme, ThemeMode,
-};
 use crate::model::{
     list_column_kind_config_value, list_column_kind_from_config_value, BrowserViewMode,
     ContextMenuLayoutConfigValues, ContextMenuPreferences, FileGroupingMode, LastSearchScope,
@@ -40,6 +37,7 @@ use bennu_preview::preview_config::{
     preview_directory_expand_levels_from_stored, preview_extension_rules_from_stored,
     preview_size_limits_from_stored,
 };
+use bennu_theme::{default_custom_color_scheme, ColorSchemePreset, CustomColorScheme, ThemeMode};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct UserPreferences {

@@ -1,7 +1,7 @@
 use iced::{Background, Theme};
 
 use super::container;
-use crate::matugen_theme::ui_colors;
+use bennu_theme::ui_colors;
 
 pub(crate) fn icon_grid_expansion_panel_style(
     depth: usize,

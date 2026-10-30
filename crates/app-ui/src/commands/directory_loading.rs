@@ -14,7 +14,7 @@ use crate::model::{
 use crate::startup_trace;
 
 /// 目录加载 UI 提示节流：对齐 60Hz 帧步进，提示密度与渲染节奏一致。
-const DIRECTORY_HINT_MIN_INTERVAL: Duration = crate::ui_pacing::FRAME_INTERVAL_60HZ;
+const DIRECTORY_HINT_MIN_INTERVAL: Duration = bennu_preview::ui_pacing::FRAME_INTERVAL_60HZ;
 const DIRECTORY_LOAD_CHANNEL_SIZE: usize = 8;
 
 #[derive(Debug, Default)]

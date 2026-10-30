@@ -6,7 +6,7 @@ use iced::widget::image::Handle;
 use iced::window;
 
 use crate::config::{default_state_database_path, read_user_preferences_without_repair};
-use crate::matugen_theme::ThemeMode;
+use bennu_theme::ThemeMode;
 
 const DARK_ICON_PNG: &[u8] = include_bytes!("../assets/app-icon-dark.png");
 const LIGHT_ICON_PNG: &[u8] = include_bytes!("../assets/app-icon-light.png");

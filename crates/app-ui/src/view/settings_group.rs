@@ -2,9 +2,9 @@ use iced::widget::{button, column, container, row, Button, Column, Space};
 use iced::{Alignment, Background, Border, Color, Element, Length, Theme};
 
 use crate::appearance::{base_text_color, muted_text_color, subtle_border_color};
-use crate::matugen_theme::ui_colors;
 use crate::model::Message;
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
+use bennu_theme::ui_colors;
 
 use super::option_controls::hover_background_color;
 use super::toggle_switch::switch_control;

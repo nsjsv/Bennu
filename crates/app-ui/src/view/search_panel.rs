@@ -7,7 +7,6 @@ use iced::widget::{
 };
 use iced::{Alignment, Element, Length};
 
-use crate::anchored_popup::anchored_popup;
 use crate::app::scrollbar::{enhanced_scrollbar, scrollbar_on_scroll, ScrollbarAxis};
 use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
 use crate::app::FileBrowser;
@@ -19,14 +18,15 @@ use crate::appearance::{
 };
 use crate::file_entry_view::{file_entry_symbol_icon, FileEntryIconTone, FileEntryVisualState};
 use crate::formatting::{format_file_size, format_middle_ellipsized_text};
-use crate::icons::IconSymbol;
 use crate::model::search::SearchFilterPresetState;
 use crate::model::{
     Message, ScrollbarRegion, SearchDateField, SearchDatePreset, SearchDirectoryScope,
     SearchEntryTypePreset, SearchResultCompletion, SearchSizePreset, SEARCH_RESULT_TOTAL_LIMIT,
 };
-use crate::typography::readable_text;
 use crate::virtual_range::{initial_virtual_range, virtual_range_for_viewport};
+use bennu_preview::panel_text::readable_text;
+use bennu_theme::anchored_popup::anchored_popup;
+use bennu_theme::icons::IconSymbol;
 
 use super::option_controls::{
     inactive_segmented_choice_row, segmented_choice_button_style, segmented_choice_row,

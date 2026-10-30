@@ -9,9 +9,9 @@ use crate::app::archive_member_password::{
     ArchiveMemberPasswordAction, ArchiveMemberPasswordMessage, ArchiveMemberPasswordState,
 };
 use crate::appearance::context_menu_style;
-use crate::icons::IconSymbol;
 use crate::model::Message;
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
+use bennu_theme::icons::IconSymbol;
 
 use super::option_controls::{
     inactive_primary_action_button, primary_action_button, secondary_action_button,

@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use bennu_preview::preview_loading::{classify_preview_path, PreviewPathKind};
 use file_core::{is_supported_archive_path, FileKind};
 use iced::Task;
 
@@ -469,12 +470,7 @@ impl FileBrowser {
         if kind == FileKind::File {
             // 门禁放在远程下载与大小检查之前：不可预览的远程文件不值得下载，
             // 也不应误报“文件太大”。
-            if crate::preview::classify_preview_path(
-                &path,
-                &self.user_config.preview_extension_rules,
-            )
-            .is_none()
-            {
+            if classify_preview_path(&path, &self.user_config.preview_extension_rules).is_none() {
                 self.preview_engine.preview_window_pinned = pinned;
                 return close_window_command.chain(self.show_unpreviewable_file_preview());
             }
@@ -513,10 +509,8 @@ impl FileBrowser {
         if kind == FileKind::File {
             // 预览会话的诞生边界：远程下载回流与本地入口共用这一道门，
             // 文本兜底同样受白名单约束。
-            let classification = crate::preview::classify_preview_path(
-                &path,
-                &self.user_config.preview_extension_rules,
-            );
+            let classification =
+                classify_preview_path(&path, &self.user_config.preview_extension_rules);
             let Some(classification) = classification else {
                 return self.show_unpreviewable_file_preview();
             };
@@ -547,11 +541,11 @@ impl FileBrowser {
     fn start_classified_preview(
         &mut self,
         path: PathBuf,
-        classification: crate::preview::PreviewPathKind,
+        classification: PreviewPathKind,
     ) -> Task<Message> {
         match classification {
-            crate::preview::PreviewPathKind::Document => self.start_document_preview(path),
-            crate::preview::PreviewPathKind::AnimatedImage => {
+            PreviewPathKind::Document => self.start_document_preview(path),
+            PreviewPathKind::AnimatedImage => {
                 self.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
                 self.retract_global_error(GlobalErrorSource::Preview);
                 let max_file_bytes = self.preview_file_size_limit_for(&path);
@@ -561,7 +555,7 @@ impl FileBrowser {
                     self.request_browser_session_save(),
                 ])
             }
-            crate::preview::PreviewPathKind::Image => {
+            PreviewPathKind::Image => {
                 self.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
                 self.retract_global_error(GlobalErrorSource::Preview);
                 let generation = self.preview_engine.next_original_image_preview_generation();
@@ -570,7 +564,7 @@ impl FileBrowser {
                     self.request_browser_session_save(),
                 ])
             }
-            crate::preview::PreviewPathKind::Video => {
+            PreviewPathKind::Video => {
                 self.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
                 self.retract_global_error(GlobalErrorSource::Preview);
                 let max_file_bytes = self.preview_file_size_limit_for(&path);
@@ -582,7 +576,7 @@ impl FileBrowser {
                     max_file_bytes,
                 )
             }
-            crate::preview::PreviewPathKind::Audio => {
+            PreviewPathKind::Audio => {
                 let window_command =
                     self.preview_window_presentation_command(PreviewWindowProfile::Audio);
                 self.preview_engine.clear_preview();
@@ -604,9 +598,7 @@ impl FileBrowser {
                     self.request_browser_session_save(),
                 ])
             }
-            crate::preview::PreviewPathKind::Archive
-            | crate::preview::PreviewPathKind::Sqlite
-            | crate::preview::PreviewPathKind::Text => {
+            PreviewPathKind::Archive | PreviewPathKind::Sqlite | PreviewPathKind::Text => {
                 let window_command =
                     self.preview_window_presentation_command(PreviewWindowProfile::Regular);
                 self.preview_engine.clear_preview();

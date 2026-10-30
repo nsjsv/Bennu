@@ -34,12 +34,12 @@ use crate::icon_grid_layout::{
     IconGridPanelLayout, IconGridPanelStatus, IconGridRowsLayout, ICON_GRID_GROUP_HEADER_HEIGHT,
     ICON_GRID_STATUS_HEIGHT,
 };
-use crate::icons::rotated_chevron_right_view;
 use crate::input_blocking_space::input_blocking_space;
-use crate::measured_middle_ellipsized_text::measured_middle_ellipsized_wrapped_text_with_tooltip;
 use crate::model::{IconGridExpansionAnchor, IconGridViewport, Message, ScrollbarRegion};
-use crate::typography::readable_text;
 use crate::view::{rename_field, rename_input_id};
+use bennu_preview::panel_text::readable_text;
+use bennu_theme::icons::rotated_chevron_right_view;
+use bennu_theme::measured_text::measured_middle_ellipsized_wrapped_text_with_tooltip;
 
 const GRID_PADDING: f32 = ICON_GRID_CONTENT_PADDING;
 const DISCLOSURE_BUTTON_SIZE: f32 = 24.0;

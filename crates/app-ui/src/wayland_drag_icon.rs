@@ -5,7 +5,7 @@ use desktop_linux::WaylandFileDragIcon;
 use resvg::tiny_skia::Pixmap;
 use resvg::usvg::{fontdb, Options, Tree};
 
-use crate::icons::IconSymbol;
+use bennu_theme::icons::IconSymbol;
 
 // Wayland 协议把拖拽图标位图的左上角钉在光标上;画布因此以光标为
 // 原点向右下展开。协议对 icon surface 没有硬性尺寸限制,512 是为

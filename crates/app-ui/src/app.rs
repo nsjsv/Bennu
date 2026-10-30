@@ -107,6 +107,9 @@ use bennu_preview::animated_image_preview::animated_image_preview_subscription;
 use bennu_preview::engine::{audio_preview_tick_subscription, video_preview_tick_subscription};
 use bennu_preview::video_preview::video_preview_subscription;
 
+use bennu_preview::preview_loading::{classify_preview_path, PreviewPathKind};
+use bennu_theme::{fallback_theme, AppearanceMode, ApplicationTheme};
+
 use crate::app::application_shutdown::ApplicationShutdownPhase;
 use crate::app::archive_creation::ArchiveCreationState;
 use crate::app::archive_extraction::ArchiveExtractionState;
@@ -136,8 +139,6 @@ use crate::commands::{
 };
 use crate::config;
 use crate::config::UiLanguage;
-use crate::localization;
-use crate::matugen_theme::{fallback_theme, AppearanceMode, ApplicationTheme};
 use crate::model::search::SearchWorkspaceState;
 use crate::model::{
     empty_directory_entry_snapshot, AdvancedNewFolderAfter, AdvancedNewFolderState,
@@ -168,7 +169,7 @@ use crate::view::{
 };
 const DOUBLE_CLICK_THRESHOLD: Duration = Duration::from_millis(500);
 const POINTER_DRAG_ACTIVATION_DISTANCE: f32 = 3.0;
-const PREVIEW_TREE_ANIMATION_INTERVAL: Duration = crate::ui_pacing::FRAME_INTERVAL_60HZ;
+const PREVIEW_TREE_ANIMATION_INTERVAL: Duration = bennu_preview::ui_pacing::FRAME_INTERVAL_60HZ;
 const OPERATION_PROGRESS_ANIMATION_INTERVAL: Duration = Duration::from_millis(80);
 const NETWORK_STATUS_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 const SEARCH_SERVICE_STATUS_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
@@ -332,7 +333,7 @@ pub(crate) struct FileBrowser {
     /// 设置页文件条目预览中悬停展开的组锚点;None = 无展开。
     pub(crate) context_menu_preview_expansion: Option<FileAreaMenuItem>,
     pub(crate) settings_subpage: Option<SettingsSubpage>,
-    pub(crate) expanded_color_scheme_family: Option<crate::matugen_theme::ColorSchemeFamily>,
+    pub(crate) expanded_color_scheme_family: Option<bennu_theme::ColorSchemeFamily>,
     pub(crate) custom_color_scheme_import_error: Option<String>,
     pub(crate) search_service: SearchServiceState,
     pub(crate) search_workspace: Option<SearchWorkspaceState>,
@@ -428,14 +429,14 @@ impl FileBrowser {
             .resolve(self.system_language)
     }
 
-    pub(crate) fn active_appearance_mode(&self) -> crate::matugen_theme::AppearanceMode {
+    pub(crate) fn active_appearance_mode(&self) -> bennu_theme::AppearanceMode {
         self.application_theme
             .effective_mode(self.user_config.theme_mode)
     }
 
     pub(crate) fn theme_preview_colors(
         &self,
-        color_scheme: crate::matugen_theme::ColorSchemePreset,
+        color_scheme: bennu_theme::ColorSchemePreset,
     ) -> [iced::Color; 3] {
         self.application_theme
             .preview_colors(self.user_config.theme_mode, color_scheme)
@@ -460,7 +461,7 @@ impl FileBrowser {
     }
 
     fn refresh_current_language(&self) {
-        localization::set_current_language(self.active_language());
+        bennu_localization::set_current_language(self.active_language());
     }
 
     pub(crate) fn file_operation_verification(&self) -> file_core::FileOperationVerification {
@@ -474,10 +475,9 @@ impl FileBrowser {
     pub(crate) fn preview_file_size_limit_for(&self, path: &Path) -> u64 {
         // 调用点都位于预览门禁之后，分类必然成功；`None` 只可能来自
         // 门禁外的元数据查询，按文本上限处理是安全的兜底。
-        let size_kind =
-            crate::preview::classify_preview_path(path, &self.user_config.preview_extension_rules)
-                .map(crate::preview::PreviewPathKind::file_size_kind)
-                .unwrap_or(crate::config::PreviewFileSizeKind::Text);
+        let size_kind = classify_preview_path(path, &self.user_config.preview_extension_rules)
+            .map(PreviewPathKind::file_size_kind)
+            .unwrap_or(crate::config::PreviewFileSizeKind::Text);
         self.user_config.preview_size_limits.limit(size_kind)
     }
 
@@ -1077,10 +1077,12 @@ impl FileBrowser {
             }
             view_browser(self)
         } else {
-            iced::widget::container(crate::typography::readable_text(tr!("Closing window...")))
-                .width(iced::Length::Fill)
-                .height(iced::Length::Fill)
-                .into()
+            iced::widget::container(bennu_preview::panel_text::readable_text(tr!(
+                "Closing window..."
+            )))
+            .width(iced::Length::Fill)
+            .height(iced::Length::Fill)
+            .into()
         }
     }
 }

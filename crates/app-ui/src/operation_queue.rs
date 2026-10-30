@@ -182,7 +182,7 @@ impl QueuedFileOperation {
     }
 
     pub(crate) fn title(&self) -> String {
-        self.title_in(crate::localization::current_language())
+        self.title_in(bennu_localization::current_language())
     }
 
     pub(crate) fn title_in(&self, language: crate::config::UiLanguage) -> String {

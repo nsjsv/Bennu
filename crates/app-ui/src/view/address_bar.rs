@@ -10,7 +10,6 @@ use bennu_theme::address_bar::{
     BREADCRUMB_HORIZONTAL_PADDING, BREADCRUMB_ICON_SIZE, BREADCRUMB_SEPARATOR_SIZE,
 };
 
-use crate::anchored_popup::anchored_popup;
 use crate::app::panes::BrowserPaneView;
 use crate::app::scrollbar::{enhanced_scrollbar, scrollbar_on_scroll, ScrollbarAxis};
 use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
@@ -24,14 +23,15 @@ use crate::breadcrumb_drop_target_bounds::{
     track_breadcrumb_drop_target, track_breadcrumb_viewport,
 };
 use crate::formatting::format_middle_ellipsized_text;
-use crate::icons::IconSymbol;
-use crate::measured_middle_ellipsized_text::measured_middle_ellipsized_text;
 use crate::model::{
     breadcrumb_segments, BreadcrumbSegment, BreadcrumbSegmentKind, BrowserPaneId, FileDropTarget,
     Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility,
 };
-use crate::typography::readable_text;
 use crate::view::{icon_tone_style, themed_icon, IconTone};
+use bennu_preview::panel_text::readable_text;
+use bennu_theme::anchored_popup::anchored_popup;
+use bennu_theme::icons::IconSymbol;
+use bennu_theme::measured_text::measured_middle_ellipsized_text;
 
 const PATH_SUGGESTION_MAX_CHARS: usize = 72;
 

@@ -75,7 +75,6 @@ use crate::floating_surface::{
 };
 use crate::formatting::format_middle_ellipsized_text;
 use crate::icon_grid_view::icon_grid_view;
-use crate::icons::IconSymbol;
 use crate::list_view::list_browser_view;
 use crate::model::{
     BrowserPaneId, BrowserPaneLayout, BrowserViewMode, Message, ScrollbarRegion, SplitAxis,
@@ -87,7 +86,8 @@ use crate::operation_queue_view::{
 };
 use crate::selection_marquee::selection_marquee_layer;
 use crate::three_column_view::column_browser_view;
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
+use bennu_theme::icons::IconSymbol;
 
 use self::network_connections::network_connection_editor_panel;
 // 图标色调词汇已下沉 bennu-theme（主程序与 portal 同源）；这里重导出
@@ -173,7 +173,7 @@ pub(crate) fn rename_field<'a>(
             .style(crate::appearance::rename_hint_style)
             .into()
     });
-    crate::anchored_popup::anchored_popup(input, popup)
+    bennu_theme::anchored_popup::anchored_popup(input, popup)
 }
 
 pub(crate) fn batch_rename_preview_name_input_id(path: &Path) -> iced::widget::Id {
@@ -1092,7 +1092,7 @@ pub(super) fn faded_themed_icon(
     symbol.view(size).style(move |theme, status| {
         let mut style = icon_tone_style(tone)(theme, status);
         if let Some(color) = style.color.as_mut() {
-            let background = crate::matugen_theme::ui_colors(theme).background;
+            let background = bennu_theme::ui_colors(theme).background;
             *color = mix_color(*color, background, fade);
         }
         style

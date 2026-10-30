@@ -8,7 +8,7 @@ use crate::appearance::{
     selected_sidebar_item_style, sidebar_style, transparent_button_style,
 };
 use crate::model::{Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility};
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
 
 use super::sidebar_panel::sidebar_floating_panel_margin;
 

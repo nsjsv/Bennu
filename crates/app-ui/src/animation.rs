@@ -1,10 +1,9 @@
 use std::time::{Duration, Instant};
 
-// 时间进度/缓动算法已下沉 bennu-theme 共享（portal FileChooser 复用）；
-// re-export 保持 crate 内引用路径不变。elapsed_fraction 是“取当前时刻”
-// 的便捷封装，只被主程序动画调用点使用，随留本地。
-pub(crate) use bennu_theme::animation::{ease_out_cubic, elapsed_fraction_at};
+use bennu_theme::animation::elapsed_fraction_at;
 
+// 共享层的 elapsed_fraction_at 带 now 参数以便测试注入时钟；主程序的
+// 动画调用点总是取当前时刻，在这里收口。
 pub(crate) fn elapsed_fraction(started_at: Instant, duration: Duration) -> f32 {
     elapsed_fraction_at(started_at, Instant::now(), duration)
 }

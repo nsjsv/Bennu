@@ -1,8 +1,8 @@
 use iced::keyboard;
 use iced::{event, mouse, window, Event, Theme};
 
-use crate::matugen_theme::{fallback_theme, AppearanceMode};
 use crate::model::{Message, X11DndMessage};
+use bennu_theme::{fallback_theme, AppearanceMode};
 
 pub(super) fn global_event_message(
     event: Event,

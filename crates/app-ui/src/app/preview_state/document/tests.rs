@@ -10,11 +10,11 @@ use tempfile::tempdir;
 
 use super::*;
 use crate::config;
-use crate::document_preview::{
+use crate::model::PreviewState;
+use bennu_preview::document_preview::{
     DocumentPageRenderResult, DocumentPageRequestKey, DocumentPageSize, DocumentPageView,
     DocumentPrepareOutcome, DocumentPreviewWorkspace, PreparedDocumentPreview,
 };
-use crate::model::PreviewState;
 
 #[derive(Default)]
 struct RecordedScrollOffset {

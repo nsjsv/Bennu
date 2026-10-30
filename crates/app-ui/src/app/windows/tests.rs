@@ -8,9 +8,6 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use super::*;
-use crate::animated_image_preview::{
-    AnimatedImageFrame, AnimatedImagePlayback, AnimatedImagePreview,
-};
 use crate::config;
 use crate::model::{
     BrowserPaneId, BrowserPaneLayout, BrowserViewMode, LoadedOperationStore, Message,
@@ -20,6 +17,9 @@ use crate::model::{
 use crate::operation_history::FileOperationCompletion;
 use crate::operation_queue::test_persistence::enqueue_persisted;
 use crate::operation_queue::{QueuedFileOperation, QueuedTransfer};
+use bennu_preview::animated_image_preview::{
+    AnimatedImageFrame, AnimatedImagePlayback, AnimatedImagePreview,
+};
 use bennu_preview::engine::preview_window_settings;
 use bennu_preview::preview::PreviewWindowChromeState;
 
@@ -746,8 +746,7 @@ fn maximized_observation_is_isolated_and_removed_when_window_closes() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let settings_window = window::Id::unique();
     browser.settings_window = Some(settings_window);
-    browser.expanded_color_scheme_family =
-        Some(crate::matugen_theme::ColorSchemeFamily::Everforest);
+    browser.expanded_color_scheme_family = Some(bennu_theme::ColorSchemeFamily::Everforest);
 
     drop(browser.accept_window_maximized_observation(settings_window, WindowFrameState::Maximized));
     assert!(browser.maximized_windows.contains(&settings_window));

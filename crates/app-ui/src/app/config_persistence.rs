@@ -5,8 +5,8 @@ use crate::commands::{
     custom_color_scheme_import_command, save_app_config_command, save_user_preferences_command,
 };
 use crate::config;
-use crate::matugen_theme::{ColorSchemeFamily, ColorSchemePreset, CustomColorScheme};
 use crate::model::Message;
+use bennu_theme::{ColorSchemeFamily, ColorSchemePreset, CustomColorScheme};
 
 impl FileBrowser {
     pub(super) fn select_color_scheme_family(
@@ -50,7 +50,7 @@ impl FileBrowser {
 
     pub(super) fn select_theme_mode(
         &mut self,
-        theme_mode: crate::matugen_theme::ThemeMode,
+        theme_mode: bennu_theme::ThemeMode,
     ) -> Task<Message> {
         if self.user_config.color_scheme == ColorSchemePreset::Matugen
             || self.user_config.theme_mode == theme_mode
@@ -220,7 +220,7 @@ mod tests {
     #[test]
     fn color_scheme_family_selection_uses_one_persisted_preset_and_toggles_styles() {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
-        browser.user_config.theme_mode = crate::matugen_theme::ThemeMode::Dark;
+        browser.user_config.theme_mode = bennu_theme::ThemeMode::Dark;
 
         drop(browser.select_color_scheme_family(ColorSchemeFamily::Catppuccin));
         assert_eq!(
@@ -254,21 +254,21 @@ mod tests {
     #[test]
     fn theme_mode_selection_clears_styles_and_matugen_keeps_its_mode() {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
-        browser.user_config.theme_mode = crate::matugen_theme::ThemeMode::Dark;
+        browser.user_config.theme_mode = bennu_theme::ThemeMode::Dark;
         browser.expanded_color_scheme_family = Some(ColorSchemeFamily::Everforest);
 
-        drop(browser.select_theme_mode(crate::matugen_theme::ThemeMode::Light));
+        drop(browser.select_theme_mode(bennu_theme::ThemeMode::Light));
         assert_eq!(
             browser.user_config.theme_mode,
-            crate::matugen_theme::ThemeMode::Light
+            bennu_theme::ThemeMode::Light
         );
         assert_eq!(browser.expanded_color_scheme_family, None);
 
         browser.user_config.color_scheme = ColorSchemePreset::Matugen;
-        drop(browser.select_theme_mode(crate::matugen_theme::ThemeMode::Dark));
+        drop(browser.select_theme_mode(bennu_theme::ThemeMode::Dark));
         assert_eq!(
             browser.user_config.theme_mode,
-            crate::matugen_theme::ThemeMode::Light
+            bennu_theme::ThemeMode::Light
         );
     }
 

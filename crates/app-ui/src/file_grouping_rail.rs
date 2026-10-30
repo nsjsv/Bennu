@@ -17,7 +17,7 @@ use iced::widget::{button, column, container};
 use iced::{Element, Event, Length, Rectangle, Size};
 
 use crate::model::{BrowserPaneId, FileGroupRailEntry, Message};
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
 
 /// 每个索引项的固定行高:点击/扫动把纵向位置换算成组序的几何依据,
 /// 标签在其中垂直居中,行高不随文字自适应。

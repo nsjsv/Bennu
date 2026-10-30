@@ -9,9 +9,9 @@ use crate::app::checksum::{
 };
 use crate::appearance::{context_menu_style, muted_text_color};
 use crate::formatting::format_middle_ellipsized_text;
-use crate::icons::IconSymbol;
 use crate::model::Message;
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
+use bennu_theme::icons::IconSymbol;
 
 use super::option_controls::secondary_action_button;
 use super::settings_group::settings_card;

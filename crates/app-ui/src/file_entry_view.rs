@@ -15,12 +15,12 @@ use crate::appearance::{
 use crate::config::ViewDensityLevel;
 use crate::file_drag_spring_ring::file_drag_spring_ring;
 use crate::file_entry_presentation::SelectionRunPosition;
-use crate::icons::{file_entry_icon_symbol, IconSymbol};
-use crate::matugen_theme::ui_colors;
 use crate::model::{FileEntryContentModifier, Message};
 use crate::thumbnail_cache::{
     COLUMN_THUMBNAIL_EDGE, COLUMN_THUMBNAIL_SIZE, LIST_THUMBNAIL_EDGE, LIST_THUMBNAIL_SIZE,
 };
+use bennu_theme::icons::{file_entry_icon_symbol, IconSymbol};
+use bennu_theme::ui_colors;
 
 pub(crate) const ENTRY_ICON_SIZE: f32 = 18.0;
 const COLUMN_ENTRY_ICON_SIZE: f32 = 16.0;
@@ -165,7 +165,7 @@ impl FileBrowser {
             Some(entry) if entry.kind == FileKind::Symlink && entry.is_broken_symlink => {
                 IconSymbol::TriangleAlert
             }
-            Some(entry) => crate::icons::file_kind_solid_symbol(entry.kind),
+            Some(entry) => bennu_theme::icons::file_kind_solid_symbol(entry.kind),
             None => IconSymbol::FileSolid,
         }
     }

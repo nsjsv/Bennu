@@ -25,12 +25,12 @@ use crate::model::{
     StartupEnvironment, StartupSessionPlanRequest, TransferConflictMode,
 };
 use crate::operation_queue::QueuedTransfer;
-use crate::sidebar::{home_sidebar_location, sidebar_locations};
 use crate::startup_rendering::{StartupRenderingEnvironment, StartupRenderingEnvironmentStatus};
 use crate::startup_trace;
 use crate::thumbnail_cache::{
     ThumbnailLoadOutcome, ThumbnailLoadPolicy, ThumbnailLoadResult, ThumbnailWork,
 };
+use bennu_sidebar::{home_sidebar_location, sidebar_locations};
 
 mod archive_creation;
 pub(crate) use archive_creation::check_archive_target_command;
@@ -44,7 +44,6 @@ pub(crate) use archive_extraction::{
     MemberOpenOutcome,
 };
 mod batch_rename_operation;
-mod bounded_child_output;
 mod browser_session;
 mod config_persistence;
 mod convert_operation;
@@ -493,7 +492,7 @@ async fn startup_environment_with(
         );
     StartupEnvironment {
         home: file_core::app_dirs::home_dir(),
-        system_language: crate::localization::detect_system_language(),
+        system_language: bennu_localization::detect_system_language(),
         user_config: settings.user_config,
         settings_recoveries: settings.settings_recoveries,
         state_database_path: config::default_state_database_path(),

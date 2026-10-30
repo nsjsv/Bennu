@@ -26,8 +26,6 @@
 #[macro_use]
 extern crate bennu_localization;
 
-mod anchored_popup;
-mod animated_image_preview;
 mod animation;
 mod app;
 mod app_icon;
@@ -41,7 +39,6 @@ mod command_line;
 mod commands;
 mod config;
 mod directory_summary;
-mod document_preview;
 mod file_drag_hit_test_bounds;
 mod file_drag_hit_test_marker;
 mod file_drag_spring_ring;
@@ -53,12 +50,8 @@ mod formatting;
 mod icon_grid_geometry;
 mod icon_grid_layout;
 mod icon_grid_view;
-mod icons;
 mod input_blocking_space;
 mod list_view;
-mod localization;
-mod matugen_theme;
-mod measured_middle_ellipsized_text;
 mod model;
 mod network_connections;
 mod open_with;
@@ -67,15 +60,10 @@ mod operation_progress;
 mod operation_queue;
 mod operation_queue_display;
 mod operation_queue_view;
-// 纯搬移：原图预览解码管线已下沉 bennu-preview，此文件为 re-export 垫片。
-mod original_image_preview;
-// 纯搬移：空格预览分类/加载管线已下沉 bennu-preview，此文件为 re-export 垫片。
-mod preview;
 mod runtime_logging;
 mod selection_marquee;
 mod selection_summary;
 mod shortcuts;
-mod sidebar;
 mod sidebar_devices;
 mod startup_probe_cache;
 mod startup_rendering;
@@ -89,8 +77,6 @@ mod three_column_view;
 mod thumbnail_cache;
 mod transfer_placeholder_view;
 mod transfer_placeholders;
-mod typography;
-mod ui_pacing;
 mod view;
 mod virtual_range;
 mod visible_entries;

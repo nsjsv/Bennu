@@ -161,7 +161,7 @@ fn display_size(bytes: u64) -> String {
 
 fn info_row(label: String, value: String) -> Element<'static, Message> {
     row![
-        crate::typography::readable_text(label)
+        bennu_preview::panel_text::readable_text(label)
             .size(13)
             .style(|theme| iced::widget::text::Style {
                 color: Some(muted_text_color(theme)),

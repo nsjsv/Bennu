@@ -7,6 +7,11 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
+use bennu_preview::panel_text::readable_text;
+use bennu_theme::icons::{file_entry_icon_symbol, IconSymbol};
+use bennu_theme::measured_text::{
+    measured_middle_ellipsized_centered_text, measured_middle_ellipsized_text,
+};
 use file_core::DirectoryEntry;
 use iced::widget::{column, container, row, Space};
 use iced::{Alignment, Element, Length, Point};
@@ -16,11 +21,7 @@ use crate::app::FileBrowser;
 use crate::appearance::list_row_style;
 use crate::file_drag_spring_ring::file_drag_spring_ring;
 use crate::file_entry_view::{file_entry_symbol_icon, FileEntryIconDensity, FileEntryIconTone};
-use crate::icons::{file_entry_icon_symbol, IconSymbol};
 use crate::list_view::{ListGeometry, LIST_GROUP_HEADER_HEIGHT};
-use crate::measured_middle_ellipsized_text::{
-    measured_middle_ellipsized_centered_text, measured_middle_ellipsized_text,
-};
 use crate::model::{
     DirectoryOrderPhase, ExpandedDirectory, ExpandedDirectoryStatus, FileEntryContentModifier,
     ListColumnConfig, ListColumnKind, Message,
@@ -29,7 +30,6 @@ use crate::transfer_placeholders::{
     merge_entries_with_placeholders, transfer_placeholders_for_directory, MergedTransferItem,
     TransferPlaceholder, TransferSortOptions,
 };
-use crate::typography::readable_text;
 use crate::virtual_range::VirtualRange;
 use crate::visible_entries::{VisibleEntry, VisibleEntryStatusRow};
 

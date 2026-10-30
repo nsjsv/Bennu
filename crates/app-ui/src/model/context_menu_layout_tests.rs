@@ -1,6 +1,6 @@
 use super::context_menu_items::*;
 use super::context_menu_layout::*;
-use crate::icons::IconSymbol;
+use bennu_theme::icons::IconSymbol;
 
 use super::*;
 

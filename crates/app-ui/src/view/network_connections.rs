@@ -5,13 +5,13 @@ use crate::appearance::{
     context_menu_button_style, context_menu_item_button_style, context_menu_style,
 };
 use crate::formatting::format_middle_ellipsized_text;
-use crate::icons::IconSymbol;
 use crate::model::{ContextMenuPreferences, Message};
 use crate::network_connections::{
     NetworkConnectionEditorMode, NetworkConnectionEditorState, NetworkConnectionMessage,
     SidebarNetworkConnectionAction, SidebarNetworkConnectionContextMenuState,
 };
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
+use bennu_theme::icons::IconSymbol;
 
 use super::option_controls::{
     primary_action_button, secondary_action_button, segmented_choice_row, SegmentedChoice,
@@ -239,7 +239,7 @@ fn network_connection_menu_label(
 ) -> iced::widget::Row<'static, Message> {
     row![
         themed_icon(icon, IconTone::Normal, MENU_ICON_SIZE),
-        crate::typography::readable_text(label)
+        readable_text(label)
     ]
     .spacing(6)
     .align_y(Alignment::Center)

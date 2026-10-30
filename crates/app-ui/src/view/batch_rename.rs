@@ -6,14 +6,12 @@ use iced::widget::{
 };
 use iced::{Alignment, Background, Border, Color, Element, Length, Theme};
 
-use crate::anchored_popup::anchored_popup;
 use crate::appearance::{
     base_text_color, context_menu_item_button_style, context_menu_style, dragged_row_style,
     enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction, muted_text_color,
     path_suggestion_item_style, subtle_border_color,
 };
 use crate::formatting::format_middle_ellipsized_text;
-use crate::matugen_theme::ui_colors;
 use crate::model::{
     BatchRenameExtensionMode, BatchRenameInsertMode, BatchRenameMessage, BatchRenamePreviewRow,
     BatchRenameRemoveClass, BatchRenameRemoveMode, BatchRenameReplaceRule, BatchRenameReplaceScope,
@@ -21,7 +19,9 @@ use crate::model::{
     BatchRenameSortMode, BatchRenameState, BatchRenameTemplateToken, Message, ScrollbarRegion,
     ScrollbarViewport, ScrollbarVisibility,
 };
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
+use bennu_theme::anchored_popup::anchored_popup;
+use bennu_theme::ui_colors;
 
 use super::batch_rename_preview_name_input_id;
 use super::option_controls::{

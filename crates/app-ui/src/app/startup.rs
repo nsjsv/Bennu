@@ -9,8 +9,8 @@ use crate::config::UserConfig;
 use crate::model::{
     LoadedOperationStore, Message, SidebarLocation, StartupEnvironment, StartupSessionPlan,
 };
-use crate::sidebar::{home_sidebar_location, sidebar_favorite_configs};
 use crate::startup_trace;
+use bennu_sidebar::{home_sidebar_location, sidebar_favorite_configs};
 
 impl FileBrowser {
     pub(super) fn accept_startup_environment(
@@ -189,7 +189,6 @@ mod tests {
     use crate::app::FileBrowser;
     use crate::commands::classify_startup_session;
     use crate::config::{self, StartupLocationPolicy};
-    use crate::matugen_theme::{ColorSchemePreset, ThemeMode};
     use crate::model::{
         BrowserPaneId, BrowserPaneLayout, BrowserPaneSession, BrowserSessionSnapshot,
         BrowserTabSession, BrowserViewMode, ClassifiedStartupSession, ColumnBrowserViewport,
@@ -201,6 +200,7 @@ mod tests {
     use crate::startup_rendering::{
         StartupRenderingEnvironment, StartupRenderingEnvironmentStatus,
     };
+    use bennu_theme::{ColorSchemePreset, ThemeMode};
     use desktop_linux::{
         NetworkConnection, NetworkConnectionId, NetworkMountState, NetworkProtocol,
     };

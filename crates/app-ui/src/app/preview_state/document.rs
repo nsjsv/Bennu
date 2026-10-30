@@ -11,8 +11,10 @@ use iced::Task;
 use crate::app::global_error::GlobalErrorSource;
 use crate::app::smooth_scroll::smooth_scroll_id;
 use crate::app::FileBrowser;
-use crate::document_preview::{DocumentPageRenderOutcome, DocumentPreviewMessage};
 use crate::model::{Message, ScrollbarRegion};
+use bennu_preview::document_preview::{
+    DocumentPageRenderOutcome, DocumentPrepareOutcome, DocumentPreviewMessage, DocumentViewportKey,
+};
 
 impl FileBrowser {
     pub(in crate::app) fn handle_document_preview_message(
@@ -53,7 +55,7 @@ impl FileBrowser {
 
     pub(in crate::app) fn accept_document_preview_prepared(
         &mut self,
-        outcome: crate::document_preview::DocumentPrepareOutcome,
+        outcome: DocumentPrepareOutcome,
     ) -> Task<Message> {
         // 先取几何快照再借用引擎：方法实参求值借用整个 &self，与接收者
         // 的 &mut preview_engine 字段借用重叠，先绑定局部值隔开两者。
@@ -79,7 +81,7 @@ impl FileBrowser {
 
     pub(in crate::app) fn handle_document_preview_scrolled(
         &mut self,
-        key: crate::document_preview::DocumentViewportKey,
+        key: DocumentViewportKey,
         offset_y: f32,
         viewport_height: f32,
         content_height: f32,

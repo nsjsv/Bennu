@@ -9,9 +9,9 @@ use crate::app::transfer::{
 use crate::app::FileBrowser;
 use crate::appearance::{context_menu_button_style, context_menu_style};
 use crate::formatting::{format_file_size, format_middle_ellipsized_text};
-use crate::icons::IconSymbol;
 use crate::model::Message;
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
+use bennu_theme::icons::IconSymbol;
 use local_send::DeviceInfo;
 
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};

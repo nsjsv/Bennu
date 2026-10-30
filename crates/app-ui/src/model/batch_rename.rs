@@ -406,7 +406,7 @@ impl BatchRenameTemplateToken {
     }
 
     pub(crate) fn label(self) -> String {
-        self.label_in(crate::localization::current_language())
+        self.label_in(bennu_localization::current_language())
     }
 
     // 模板串按插入时的界面语言存储，渲染端必须同时识别中英两种标签

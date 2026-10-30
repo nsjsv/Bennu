@@ -3,14 +3,14 @@ use std::path::PathBuf;
 use file_core::{DirectoryEntry, EntryMetadata, FileKind};
 
 use super::*;
-use crate::animated_image_preview::{
-    AnimatedImageFrame, AnimatedImagePlayback, AnimatedImagePreview,
-};
 use crate::config::ui_thread_startup_config;
 use crate::model::{ImagePreviewContent, PreviewContent, PreviewState};
 use crate::thumbnail_cache::{
     ThumbnailLoadOutcome, ThumbnailLoadPolicy, ThumbnailLoadResult, ThumbnailPriority,
     ThumbnailPurpose, ThumbnailWork, LIST_THUMBNAIL_EDGE,
+};
+use bennu_preview::animated_image_preview::{
+    AnimatedImageFrame, AnimatedImagePlayback, AnimatedImagePreview,
 };
 
 #[test]
@@ -356,7 +356,7 @@ fn expected_thumbnail_for_removed_entry_falls_back_to_original_result_window() {
         path,
         generation,
         Ok(
-            crate::original_image_preview::OriginalImagePreview::Raster {
+            bennu_preview::original_image_preview::OriginalImagePreview::Raster {
                 raster_handle: iced::widget::image::Handle::from_rgba(4, 3, vec![0; 48]),
                 placeholder_handle: iced::widget::image::Handle::from_rgba(
                     1,

@@ -7,10 +7,12 @@ use iced::Task;
 use super::runtime::scrollbar_auto_hide_command;
 use super::smooth_scroll::smooth_scroll_id;
 use super::FileBrowser;
-use crate::animation::{ease_out_cubic, elapsed_fraction as scrollbar_animation_progress};
+use crate::animation::elapsed_fraction as scrollbar_animation_progress;
 use crate::model::{Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility};
+use bennu_theme::animation::ease_out_cubic;
 
-pub(super) const SCROLLBAR_ANIMATION_INTERVAL: Duration = crate::ui_pacing::FRAME_INTERVAL_60HZ;
+pub(super) const SCROLLBAR_ANIMATION_INTERVAL: Duration =
+    bennu_preview::ui_pacing::FRAME_INTERVAL_60HZ;
 
 const SCROLLBAR_REVEAL_DURATION: Duration = Duration::from_millis(96);
 const SCROLLBAR_HIDE_DURATION: Duration = Duration::from_millis(300);
@@ -20,8 +22,7 @@ const SCROLLBAR_MIN_REVEAL_OPACITY: f32 = 0.12;
 // 展开动画 + 布局探针 + 视口快照模型）已下沉到共享 crate
 // `bennu-theme::scrollbar`（portal-backend 复用同一实现）；这里重导出，
 // 调用点保持原名零改动。拇指颜色经共享层内部 `bennu_theme::ui_colors`
-// 读取，与主软件 `crate::matugen_theme::ui_colors`（即 `bennu_theme::*`
-// 的重导出）同源，视觉零变化。
+// 读取，与主软件 `bennu_theme::ui_colors` 同源，视觉零变化。
 pub(crate) use bennu_theme::scrollbar::{
     enhanced_scrollbar, scrollbar_layout_probe, scrollbar_viewport_has_overflow, ScrollbarAxis,
 };

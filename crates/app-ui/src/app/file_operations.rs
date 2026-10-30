@@ -83,7 +83,7 @@ pub(super) fn queue_finish_from_completion(
 ) -> FileOperationFinish {
     match completion {
         FileOperationCompletion::Succeeded(outcome) => {
-            match outcome.completion_warning(crate::localization::current_language()) {
+            match outcome.completion_warning(bennu_localization::current_language()) {
                 Some(warning) => FileOperationFinish::SucceededWithWarning(warning),
                 None => FileOperationFinish::Succeeded,
             }
@@ -97,7 +97,7 @@ pub(super) fn queue_finish_from_completion(
             FileOperationFinish::RecoveryBlocked(error.clone())
         }
         FileOperationCompletion::RenameRejected { reason, .. } => {
-            FileOperationFinish::Failed(reason.message(crate::localization::current_language()))
+            FileOperationFinish::Failed(reason.message(bennu_localization::current_language()))
         }
     }
 }

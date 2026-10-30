@@ -8,12 +8,12 @@ use iced::Task;
 use serde_json::{Map, Value};
 use tokio::process::Command;
 
-use super::bounded_child_output::{read_bounded_child_output, BoundedChildOutput};
 use crate::model::{
     bounded_application_log_message, ApplicationLogEntry, ApplicationLogLevel,
     ApplicationLogRequest, ApplicationLogSource, Message, APPLICATION_LOG_ENTRY_LIMIT,
     APP_JOURNAL_IDENTIFIER, SEARCH_JOURNAL_IDENTIFIER,
 };
+use bennu_subprocess::{read_bounded_child_output, BoundedChildOutput};
 
 const APPLICATION_LOG_QUERY_TIMEOUT: Duration = Duration::from_secs(1);
 const APPLICATION_LOG_STDOUT_BYTE_LIMIT: usize = 1_048_576;

@@ -12,13 +12,13 @@ use file_core::{DirectoryEntry, EntryMetadata, FileKind, SortDirection};
 use crate::app::panes::BrowserPaneView;
 use crate::app::FileBrowser;
 use crate::config::UiLanguage;
-use crate::localization::current_language;
 use crate::model::{
     date_group_key, dynamic_size_buckets, kind_category_group_key, name_initial_group_key,
     partition_files_into_groups, size_group_bucket_index, FileGroupKey, FileGroupSection,
     FileGroupingContext, FileGroupingMode,
 };
 use crate::transfer_placeholders::MergedTransferItem;
+use bennu_localization::current_language;
 
 /// 根目录分组划分器的全部入参:模式、与根排序同源的方向、组标题
 /// 本地化语言、日期桶锚点(每次渲染取一次,同帧行流键一致)。

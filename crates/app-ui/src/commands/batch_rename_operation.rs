@@ -12,7 +12,7 @@ pub(super) async fn run_queued_batch_rename(
         .await
         .map_err(|error| error.to_string())?;
     let renames = batch_rename_paths(items).await.map_err(|error| {
-        batch_rename_failure_text(&error, crate::localization::current_language())
+        batch_rename_failure_text(&error, bennu_localization::current_language())
     })?;
     Ok(FileOperationOutcome::BatchRename { renames })
 }

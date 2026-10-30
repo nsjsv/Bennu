@@ -14,7 +14,6 @@ use crate::appearance::{
 };
 use crate::formatting::format_middle_ellipsized_text;
 use crate::formatting::item_count_label;
-use crate::icons::IconSymbol;
 use crate::model::{
     BrowserPaneId, ContextMenuPreferences, ContextMenuState, DestructiveActionConfirmation,
     FileAreaMenuItem, FileContextMenuExpansion, FileContextMenuState, FileDeleteAction,
@@ -25,7 +24,8 @@ use crate::model::{
 };
 use crate::open_with::OpenWithState;
 use crate::sidebar_devices::SidebarDeviceContextMenuState;
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
+use bennu_theme::icons::IconSymbol;
 
 use super::context_menu_submenu::{
     file_grouping_submenu_panel, file_grouping_trigger_row, group_submenu_panel, group_trigger_row,
@@ -389,7 +389,7 @@ fn open_with_application_list(
 fn action_label(icon: IconSymbol, label: String, size: f32) -> Row<'static, Message> {
     row![
         themed_icon(icon, IconTone::Normal, size),
-        crate::typography::readable_text(label)
+        readable_text(label)
     ]
     .spacing(6)
     .align_y(Alignment::Center)

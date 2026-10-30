@@ -20,6 +20,7 @@ use crate::thumbnail_cache::{
     PREVIEW_THUMBNAIL_MAX_EDGE,
 };
 use bennu_preview::engine::PendingPreviewThumbnailDisplay;
+use bennu_preview::original_image_preview::OriginalImagePreview;
 
 #[cfg(test)]
 mod tests;
@@ -52,7 +53,7 @@ impl FileBrowser {
         &mut self,
         path: PathBuf,
         generation: u64,
-        outcome: Result<crate::original_image_preview::OriginalImagePreview, String>,
+        outcome: Result<OriginalImagePreview, String>,
     ) -> Task<Message> {
         let command = self
             .preview_engine

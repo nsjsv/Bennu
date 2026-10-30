@@ -259,7 +259,7 @@ impl BatchRenameRemoveClass {
 
 impl fmt::Display for BatchRenameRemoveClass {
     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-        output.write_str(&self.localized_label(crate::localization::current_language()))
+        output.write_str(&self.localized_label(bennu_localization::current_language()))
     }
 }
 

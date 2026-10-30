@@ -1,7 +1,6 @@
 //! UI 节拍常量：跨模块共享的帧步进与进度刷新周期，避免各处硬编码漂移。
-//! 自 app-ui 下沉（预览命令层引用 PROGRESS_UI_INTERVAL；app-ui 经
-//! ui_pacing.rs re-export 维持 crate::ui_pacing::* 路径，非预览消费者
-//! 不变）。
+//! 预览命令层引用 PROGRESS_UI_INTERVAL，app-ui 的滚动条、目录加载、传输
+//! 进度等非预览消费者也直接引用这里，不再各自定义。
 
 use std::time::Duration;
 

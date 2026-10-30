@@ -7,12 +7,12 @@ use crate::app::FileBrowser;
 use crate::appearance::{
     context_menu_item_button_style, context_menu_style, muted_icon_svg_style, subtle_border_color,
 };
-use crate::icons::IconSymbol;
 use crate::model::{
     ContextMenuSettingsPage, ContextMenuSettingsPageStep, ContextMenuSettingsRow, Message,
     CONTEXT_MENU_SETTINGS_PAGES,
 };
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
+use bennu_theme::icons::IconSymbol;
 
 use super::option_controls::{destructive_confirmation_button_style, secondary_action_button};
 use super::tab_motion::translated;

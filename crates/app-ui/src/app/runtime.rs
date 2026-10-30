@@ -14,10 +14,10 @@ use iced::{Subscription, Task};
 use super::events::system_theme;
 use super::FileBrowser;
 use crate::command_line::ApplicationLaunchRequest;
-use crate::matugen_theme::{fallback_theme, read_matugen_theme_file, AppearanceMode};
 use crate::model::{Message, X11DndMessage};
 use crate::startup_rendering::StartupRenderingEnvironment;
 use crate::startup_trace;
+use bennu_theme::{fallback_theme, read_matugen_theme_file, AppearanceMode};
 
 const DIRECTORY_WATCH_DEBOUNCE: Duration = Duration::from_millis(250);
 const DIRECTORY_WATCH_CHANNEL_SIZE: usize = 8;
@@ -403,7 +403,7 @@ pub(super) fn scrollbar_auto_hide_command(generation: u64) -> Task<Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::matugen_theme::{ui_colors, AppearanceMode};
+    use bennu_theme::{ui_colors, AppearanceMode};
     use iced::futures::StreamExt;
     use iced::Theme;
     use std::fs;

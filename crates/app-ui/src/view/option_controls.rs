@@ -4,10 +4,10 @@ use iced::{Alignment, Background, Border, Color, Element, Length, Theme};
 use crate::appearance::{base_text_color, muted_text_color, subtle_border_color};
 use bennu_theme::styles::primary_action_button_style;
 // 破坏性确认按钮样式迁至共享库；以重导出保持 option_controls 的既有入口。
-use crate::matugen_theme::ui_colors;
 use crate::model::Message;
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
 pub(super) use bennu_theme::styles::destructive_confirmation_button_style;
+use bennu_theme::ui_colors;
 
 const SEGMENTED_CHOICE_HEIGHT: f32 = 30.0;
 const ACTION_CHOICE_HEIGHT: f32 = 58.0;

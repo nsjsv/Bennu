@@ -12,7 +12,6 @@ use crate::appearance::{
     selected_sidebar_item_style,
 };
 use crate::formatting::{format_file_size, format_system_time, item_count_label};
-use crate::icons::{file_entry_icon_symbol, IconSymbol};
 use crate::model::{
     FilePropertiesAggregateSnapshot, FilePropertiesCategory, FilePropertiesDirectoryContents,
     FilePropertiesDirectoryContentsState, FilePropertiesLoadState, FilePropertiesMessage,
@@ -20,7 +19,8 @@ use crate::model::{
     FilePropertiesPermissions, FilePropertiesPresentation, FilePropertiesSnapshot,
     FilePropertiesState, Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility,
 };
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
+use bennu_theme::icons::{file_entry_icon_symbol, IconSymbol};
 
 use super::auxiliary_window_layout::{
     auxiliary_detail_scroller, auxiliary_sidebar, auxiliary_sidebar_button, auxiliary_split_window,

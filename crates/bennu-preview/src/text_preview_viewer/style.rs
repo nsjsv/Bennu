@@ -1,7 +1,5 @@
 use iced::{Color, Theme};
 
-// app-ui 的 matugen_theme 是 bennu-theme 的纯 re-export 垫片，
-// 这里直接取单源，视觉取值不变。
 use bennu_theme::ui_colors;
 
 pub(super) fn viewer_background_color(theme: &Theme) -> Color {

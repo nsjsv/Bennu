@@ -1321,7 +1321,7 @@ impl FileBrowser {
 mod theme_selection_tests {
     use super::*;
     use crate::config;
-    use crate::matugen_theme::{ColorSchemePreset, ThemeMode};
+    use bennu_theme::{ColorSchemePreset, ThemeMode};
 
     #[test]
     fn built_in_theme_selection_updates_the_active_theme() {

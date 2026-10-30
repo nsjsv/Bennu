@@ -9,12 +9,12 @@ use iced::Task;
 
 use super::FileBrowser;
 use crate::appearance::subtle_border_color;
-use crate::matugen_theme::ui_colors;
 use crate::model::{FileDragGestureId, Message};
 use crate::wayland_drag_icon::{
     file_drag_display_name, file_drag_group_summary_text, render_wayland_file_drag_icon,
     FileDragIconEntry, FileDragPillPalette,
 };
+use bennu_theme::ui_colors;
 
 /// 拖出位图中光标与单胶囊回退内容之间的缝隙。
 const DRAG_ICON_CURSOR_GAP: f32 = 6.0;

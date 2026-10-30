@@ -29,8 +29,8 @@ fn browser_with_image(path: &Path) -> FileBrowser {
     browser
 }
 
-fn raster_result() -> crate::original_image_preview::OriginalImagePreview {
-    crate::original_image_preview::OriginalImagePreview::Raster {
+fn raster_result() -> bennu_preview::original_image_preview::OriginalImagePreview {
+    bennu_preview::original_image_preview::OriginalImagePreview::Raster {
         raster_handle: image::Handle::from_rgba(4, 3, vec![0; 48]),
         placeholder_handle: image::Handle::from_rgba(1, 1, vec![0, 0, 0, 255]),
         width: 4,

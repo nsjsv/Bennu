@@ -1,7 +1,7 @@
 use iced::{Background, Border, Color, Theme};
 
 use super::{base_text_color, button_hover_surface_color, container};
-use crate::matugen_theme::ui_colors;
+use bennu_theme::ui_colors;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ListHeaderCellVisualState {

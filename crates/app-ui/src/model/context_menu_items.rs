@@ -1,7 +1,7 @@
 //! 右键菜单项的词表:每类菜单的项枚举、全集顺序、展示文案与存储字符串转换。
 
-use crate::icons::IconSymbol;
 use crate::model::SearchEntryTypePreset;
+use bennu_theme::icons::IconSymbol;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FileAreaMenuItem {
@@ -396,8 +396,8 @@ pub(crate) mod device_action_config_values {
 }
 
 pub(crate) mod network_action_config_values {
-    use crate::icons::IconSymbol;
     use crate::network_connections::SidebarNetworkConnectionAction;
+    use bennu_theme::icons::IconSymbol;
 
     pub(crate) fn network_config_value(action: SidebarNetworkConnectionAction) -> &'static str {
         match action {

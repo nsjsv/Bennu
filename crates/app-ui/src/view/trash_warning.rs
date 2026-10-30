@@ -4,10 +4,10 @@ use iced::{Alignment, Background, Border, Element, Length, Theme};
 use crate::app::FileBrowser;
 use crate::appearance::transparent_button_style;
 use crate::formatting::format_middle_ellipsized_text;
-use crate::icons::IconSymbol;
-use crate::matugen_theme::ui_colors;
 use crate::model::Message;
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
+use bennu_theme::icons::IconSymbol;
+use bennu_theme::ui_colors;
 
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};
 
@@ -100,7 +100,7 @@ pub(super) fn trash_warning_panel(browser: &FileBrowser) -> Option<Element<'_, M
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::matugen_theme::{parse_matugen_theme, ui_colors};
+    use bennu_theme::{parse_matugen_theme, ui_colors};
 
     #[test]
     fn trash_warning_uses_tertiary_roles_in_both_modes() {

@@ -254,10 +254,7 @@ fn early_readers_use_readable_settings_and_leave_damage_for_startup() {
 
     let preferences = read_user_preferences_without_repair(&database).unwrap();
 
-    assert_eq!(
-        preferences.theme_mode,
-        crate::matugen_theme::ThemeMode::Dark
-    );
+    assert_eq!(preferences.theme_mode, bennu_theme::ThemeMode::Dark);
     assert_eq!(
         preferences.launch_window_policy,
         LaunchWindowPolicy::MergeIntoExisting

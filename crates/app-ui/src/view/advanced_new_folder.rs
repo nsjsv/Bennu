@@ -6,19 +6,19 @@ use iced::widget::{
 };
 use iced::{Alignment, Background, Border, Color, Element, Length};
 
-use crate::anchored_popup::{anchored_popup_expanding, dismiss_on_outside_press};
 use crate::appearance::{
     context_menu_item_button_style, context_menu_style, enhanced_scrollbar_style,
     enhanced_vertical_scrollbar_direction, muted_text_color, subtle_border_color,
 };
-use crate::icons::IconSymbol;
-use crate::matugen_theme::ui_colors;
 use crate::model::{
     invalid_entry_name_label, AdvancedNewFolderAfter, AdvancedNewFolderMessage,
     AdvancedNewFolderMode, AdvancedNewFolderState, Message, PlannedFolder, PlannedFolderStatus,
     ScrollbarVisibility,
 };
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
+use bennu_theme::anchored_popup::{anchored_popup_expanding, dismiss_on_outside_press};
+use bennu_theme::icons::IconSymbol;
+use bennu_theme::ui_colors;
 
 use super::option_controls::{secondary_action_button, segmented_choice_row, SegmentedChoice};
 

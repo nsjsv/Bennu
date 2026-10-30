@@ -14,15 +14,15 @@ use crate::appearance::{
 use crate::file_drag_hit_test_bounds::FileDragHitTestMarker;
 use crate::file_drag_hit_test_marker::track_file_drag_hit_test_marker;
 use crate::formatting::format_file_size;
-use crate::icons::IconSymbol;
-use crate::measured_middle_ellipsized_text::measured_middle_ellipsized_text;
 use crate::model::{
     trash_location_path, Message, ScrollbarRegion, SidebarBookmarkDropSlot, SidebarLocation,
 };
 use crate::network_connections::{NetworkConnectionMessage, SidebarNetworkConnectionEntry};
-use crate::sidebar::sidebar_icon_symbol;
 use crate::sidebar_devices::SidebarDeviceEntry;
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
+use bennu_sidebar::sidebar_icon_symbol;
+use bennu_theme::icons::IconSymbol;
+use bennu_theme::measured_text::measured_middle_ellipsized_text;
 
 use super::{tab_motion, themed_icon, IconTone, MENU_ICON_SIZE};
 

@@ -3,15 +3,13 @@ use std::path::PathBuf;
 use desktop_linux::{DisplayRendererGpu, TerminalEmulator};
 use file_core::{FileOperationVerification, SortDirection, SortField};
 
-use crate::matugen_theme::{
-    default_custom_color_scheme, ColorSchemePreset, CustomColorScheme, ThemeMode,
-};
 use crate::model::{
     BrowserViewMode, ContextMenuPreferences, FileGroupingMode, LastSearchScope,
     ListDirectorySizeDisplayMode, SearchHistory,
 };
 use crate::network_connections::SavedNetworkConnection;
 use crate::shortcuts::ShortcutConfig;
+use bennu_theme::{default_custom_color_scheme, ColorSchemePreset, CustomColorScheme, ThemeMode};
 
 mod app_config;
 pub(crate) use app_config::{

@@ -8,7 +8,7 @@ use crate::model::{
 };
 
 use super::window_drag_region::window_drag_region;
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
 
 const WINDOW_TITLE_SIDE_RESERVE: u16 = 116;
 const WINDOW_RESIZE_EDGE_WIDTH: f32 = 5.0;

@@ -8,11 +8,12 @@ use crate::app::archive_creation::ArchiveCreationMessage;
 use crate::app::checksum::ChecksumMessage;
 use crate::app::convert::ConvertMessage;
 use crate::appearance::{context_menu_item_button_style, context_menu_style};
-use crate::icons::IconSymbol;
 use crate::model::{
     BatchRenameMessage, FileAreaMenuItem, FileContextMenuExpansion, FileContextMenuState,
     FileGroupingMode, Message,
 };
+use bennu_preview::panel_text::readable_text;
+use bennu_theme::icons::IconSymbol;
 
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};
 
@@ -136,7 +137,7 @@ pub(super) fn file_grouping_submenu_panel(current: FileGroupingMode) -> Element<
 
 /// 分组方式选项行:标签占满 + 当前项尾部勾选标记。
 fn file_grouping_submenu_item(mode: FileGroupingMode, selected: bool) -> Element<'static, Message> {
-    let mut label = row![crate::typography::readable_text(mode.label()).width(Length::Fill),]
+    let mut label = row![readable_text(mode.label()).width(Length::Fill),]
         .spacing(6)
         .align_y(Alignment::Center)
         .width(Length::Fill);
@@ -223,7 +224,7 @@ fn submenu_item(
 fn menu_label(icon: IconSymbol, label: String) -> Row<'static, Message> {
     row![
         themed_icon(icon, IconTone::Normal, MENU_ICON_SIZE),
-        crate::typography::readable_text(label),
+        readable_text(label),
     ]
     .spacing(6)
     .align_y(Alignment::Center)
@@ -233,7 +234,7 @@ fn menu_label(icon: IconSymbol, label: String) -> Row<'static, Message> {
 fn menu_label_with_chevron(icon: IconSymbol, label: String) -> Row<'static, Message> {
     row![
         themed_icon(icon, IconTone::Normal, MENU_ICON_SIZE),
-        crate::typography::readable_text(label).width(Length::Fill),
+        readable_text(label).width(Length::Fill),
         themed_icon(IconSymbol::ChevronRight, IconTone::Normal, MENU_ICON_SIZE),
     ]
     .spacing(6)

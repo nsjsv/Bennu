@@ -2,7 +2,7 @@ use iced::widget::container;
 use iced::{Background, Border, Color, Theme};
 
 use super::{base_text_color, subtle_border_color};
-use crate::matugen_theme::ui_colors;
+use bennu_theme::ui_colors;
 
 pub(crate) fn window_top_bar_style(theme: &Theme) -> container::Style {
     container::Style {

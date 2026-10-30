@@ -20,14 +20,14 @@ use crate::file_entry_view::{
     FileEntryVisualState,
 };
 use crate::formatting::{empty_directory_message, format_system_time};
-use crate::icons::rotated_chevron_right_view;
-use crate::measured_middle_ellipsized_text::measured_middle_ellipsized_text;
 use crate::model::{
     BrowserPaneId, DirectoryLoadingPlaceholderEntry, FilePropertiesPermissions, ListColumnConfig,
     ListColumnKind, Message, ScrollbarRegion,
 };
-use crate::typography::readable_text;
 use crate::view::{rename_field, rename_input_id};
+use bennu_preview::panel_text::readable_text;
+use bennu_theme::icons::rotated_chevron_right_view;
+use bennu_theme::measured_text::measured_middle_ellipsized_text;
 
 const LIST_ROW_TEXT_SIZE: u32 = 15;
 const LIST_HEADER_TEXT_SIZE: u32 = 12;

@@ -23,17 +23,17 @@ use crate::file_entry_view::{
     FileEntryVisualState,
 };
 use crate::formatting::empty_directory_message;
-use crate::icons::IconSymbol;
 use crate::input_blocking_space::input_blocking_space;
-use crate::measured_middle_ellipsized_text::measured_middle_ellipsized_text;
 use crate::model::{
     BrowserPaneId, BrowserPaneLayout, ExpandedDirectoryStatus, Message, ScrollbarRegion, SplitAxis,
 };
-use crate::typography::readable_text;
 use crate::view::{
     column_browser_scroll_id, rename_field, rename_input_id, translated_with_width_overflow,
 };
 use crate::virtual_range::{initial_virtual_range, virtual_range_for_viewport, VirtualRange};
+use bennu_preview::panel_text::readable_text;
+use bennu_theme::icons::IconSymbol;
+use bennu_theme::measured_text::measured_middle_ellipsized_text;
 
 pub(crate) const COLUMN_RESIZE_DIVIDER_WIDTH: f32 = 5.0;
 const COLUMN_RESIZE_LINE_WIDTH: f32 = 1.0;

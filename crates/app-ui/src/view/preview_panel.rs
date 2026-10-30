@@ -9,7 +9,6 @@ use iced::Element;
 
 use crate::app::scrollbar::scrollbar_on_scroll;
 use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
-use crate::document_preview::DocumentPreviewMessage;
 use crate::model::{
     AudioPreviewPlayback, ImagePreviewViewport, MarkdownPreviewMode, Message, PreviewContent,
     PreviewSize, PreviewState, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility,
@@ -17,7 +16,7 @@ use crate::model::{
 };
 use crate::view::option_controls::{segmented_choice_row, SegmentedChoice};
 use bennu_preview::document_preview::{
-    DocumentPreviewRequestKey, DocumentRenderKey, DocumentViewportKey,
+    DocumentPreviewMessage, DocumentPreviewRequestKey, DocumentRenderKey, DocumentViewportKey,
 };
 use bennu_preview::engine::SqlitePreviewState;
 

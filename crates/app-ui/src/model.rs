@@ -2,6 +2,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use bennu_preview::animated_image_preview::{AnimatedImageFrame, AnimatedImagePreview};
+use bennu_preview::document_preview::DocumentPreviewMessage;
+use bennu_preview::original_image_preview::OriginalImagePreview;
+use bennu_theme::{ColorSchemeFamily, ColorSchemePreset, ThemeMode};
 use desktop_linux::{
     DesktopActivationEvent, DesktopClipboardContent, FileClipboardOperation,
     OpenWithApplicationList, StorageDeviceId, StorageDeviceSnapshot, TerminalEmulator,
@@ -21,7 +25,6 @@ use file_search::{
 use iced::keyboard;
 use iced::{event, mouse, window, Point, Theme};
 
-use crate::animated_image_preview::{AnimatedImageFrame, AnimatedImagePreview};
 use crate::app::archive_creation::ArchiveCreationMessage;
 use crate::app::archive_extraction::ArchiveExtractionMessage;
 use crate::app::archive_member_password::{
@@ -31,8 +34,6 @@ use crate::app::checksum::ChecksumMessage;
 use crate::app::convert::ConvertMessage;
 use crate::audio_preview::AudioPreviewRuntime;
 use crate::config::{RenderingGpuPreference, UiLanguage, UiLanguageSetting, UserConfig};
-use crate::document_preview::DocumentPreviewMessage;
-use crate::matugen_theme::{ColorSchemeFamily, ColorSchemePreset, ThemeMode};
 use crate::network_connections::{
     NetworkConnectionMessage, SidebarNetworkConnectionContextMenuState,
 };
@@ -152,17 +153,16 @@ mod context_menu_items;
 mod context_menu_layout;
 #[cfg(test)]
 mod context_menu_layout_tests;
+pub(crate) use bennu_theme::window_controls::{
+    WindowChromeLayout, WindowControlKind, WindowControlMoveDirection, WindowControlPlacement,
+    WindowControlSide, WindowControlVisibility, WindowControlsConfig, WindowFrameState,
+    MAIN_TOOLBAR_ROW_HEIGHT, WINDOW_TITLE_BAR_HEIGHT, WINDOW_TOP_BAR_HEIGHT,
+};
 pub(crate) use context_menu_items::{FileAreaMenuItem, SearchResultMenuItem, TrashMenuItem};
 pub(crate) use context_menu_layout::{
     ContextMenuLayoutConfigValues, ContextMenuPreferences, ContextMenuSettingsDragState,
     ContextMenuSettingsPage, ContextMenuSettingsPageStep, ContextMenuSettingsRow,
     FileEntryMenuEntry, CONTEXT_MENU_SETTINGS_PAGES, CONTEXT_MENU_SETTINGS_ROW_PITCH,
-};
-mod window_controls;
-pub(crate) use window_controls::{
-    WindowChromeLayout, WindowControlKind, WindowControlMoveDirection, WindowControlPlacement,
-    WindowControlSide, WindowControlVisibility, WindowControlsConfig, WindowFrameState,
-    MAIN_TOOLBAR_ROW_HEIGHT, WINDOW_TITLE_BAR_HEIGHT, WINDOW_TOP_BAR_HEIGHT,
 };
 mod application_logs;
 pub(crate) use application_logs::{
@@ -374,11 +374,7 @@ pub(crate) enum Message {
     SqlitePreview(SqlitePreviewMessage),
     RemotePreviewCache(RemotePreviewCacheMessage),
     AnimatedImagePreviewLoaded(PathBuf, u64, Result<AnimatedImagePreview, String>),
-    OriginalImagePreviewLoaded(
-        PathBuf,
-        u64,
-        Result<crate::original_image_preview::OriginalImagePreview, String>,
-    ),
+    OriginalImagePreviewLoaded(PathBuf, u64, Result<OriginalImagePreview, String>),
     RetryImagePreview(PathBuf),
     FileProperties(FilePropertiesMessage),
     PreviewDirectoryChildrenLoaded(PathBuf, Result<Vec<DirectoryEntry>, String>),

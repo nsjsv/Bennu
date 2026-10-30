@@ -5,9 +5,9 @@ use crate::app::archive_extraction::{ArchiveExtractionMessage, ArchiveExtraction
 use crate::app::archive_password::ArchivePasswordDraft;
 use crate::appearance::context_menu_style;
 use crate::formatting::format_middle_ellipsized_text;
-use crate::icons::IconSymbol;
 use crate::model::Message;
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
+use bennu_theme::icons::IconSymbol;
 
 use super::option_controls::{
     inactive_primary_action_button, primary_action_button, secondary_action_button,

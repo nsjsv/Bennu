@@ -1137,7 +1137,7 @@ mod tests {
             .into();
 
         drop(browser.update(crate::model::Message::ThemeModeSelected(
-            crate::matugen_theme::ThemeMode::Dark,
+            bennu_theme::ThemeMode::Dark,
         )));
 
         let clamped = browser
@@ -1175,7 +1175,7 @@ mod tests {
             .into();
 
         drop(browser.update(crate::model::Message::ThemeModeSelected(
-            crate::matugen_theme::ThemeMode::Dark,
+            bennu_theme::ThemeMode::Dark,
         )));
 
         let clamped = browser
@@ -1208,7 +1208,7 @@ mod tests {
         );
 
         drop(browser.update(crate::model::Message::ThemeModeSelected(
-            crate::matugen_theme::ThemeMode::Dark,
+            bennu_theme::ThemeMode::Dark,
         )));
 
         let clamped = browser
@@ -1236,7 +1236,7 @@ mod tests {
         );
 
         drop(browser.update(crate::model::Message::ThemeModeSelected(
-            crate::matugen_theme::ThemeMode::Dark,
+            bennu_theme::ThemeMode::Dark,
         )));
 
         let viewport = browser

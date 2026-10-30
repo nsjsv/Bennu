@@ -8,7 +8,7 @@ use std::time::Duration;
 use file_search::SearchRuntimeIdentity;
 use tokio::process::Command;
 
-use super::bounded_child_output::read_bounded_child_output;
+use bennu_subprocess::read_bounded_child_output;
 
 const SEARCH_CONTROL_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(1);
 /// 比 unit 的 TimeoutStopSec + TimeoutStartSec（30 + 30 秒）多留一点：超时由

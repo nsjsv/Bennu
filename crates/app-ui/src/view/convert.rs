@@ -9,9 +9,9 @@ use crate::app::convert::{
     RESIZE_PERCENT_CHOICES, VIDEO_TARGET_FORMATS,
 };
 use crate::appearance::{context_menu_style, muted_text_color};
-use crate::icons::IconSymbol;
 use crate::model::Message;
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
+use bennu_theme::icons::IconSymbol;
 
 use super::option_controls::{
     inactive_primary_action_button, primary_action_button, secondary_action_button,

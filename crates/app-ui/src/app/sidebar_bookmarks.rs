@@ -5,16 +5,14 @@ use file_core::FileKind;
 use iced::{Point, Task};
 
 use super::{FileBrowser, POINTER_DRAG_ACTIVATION_DISTANCE};
-use crate::animation::{
-    ease_out_cubic as sidebar_bookmark_ease_out_cubic,
-    elapsed_fraction as sidebar_bookmark_animation_progress,
-};
+use crate::animation::elapsed_fraction as sidebar_bookmark_animation_progress;
 use crate::model::{
     ContextMenuState, FileDragPhase, FileDropTarget, Message, NavigationMode,
     SidebarBookmarkContextMenuState, SidebarBookmarkDragState, SidebarBookmarkDropSlot,
     SidebarLocation, SidebarLocationKind,
 };
-use crate::sidebar::sidebar_favorite_configs;
+use bennu_sidebar::sidebar_favorite_configs;
+use bennu_theme::animation::ease_out_cubic as sidebar_bookmark_ease_out_cubic;
 
 #[cfg(test)]
 mod tests;

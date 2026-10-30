@@ -9,9 +9,9 @@ use std::path::PathBuf;
 use iced::Task;
 
 use super::FileBrowser;
-use crate::animated_image_preview::AnimatedImagePreview;
 use crate::app::global_error::GlobalErrorSource;
 use crate::model::Message;
+use bennu_preview::animated_image_preview::{AnimatedImageFrame, AnimatedImagePreview};
 
 impl FileBrowser {
     pub(in crate::app) fn accept_animated_image_preview_loaded(
@@ -37,7 +37,7 @@ impl FileBrowser {
 
     pub(in crate::app) fn accept_animated_image_frame(
         &mut self,
-        frame: crate::animated_image_preview::AnimatedImageFrame,
+        frame: AnimatedImageFrame,
     ) -> Task<Message> {
         self.preview_engine
             .accept_animated_image_frame(frame)

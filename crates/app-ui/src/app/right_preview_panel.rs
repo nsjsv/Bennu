@@ -276,7 +276,7 @@ impl FileBrowser {
         let preview_engine = &self.preview_engine;
         if preview_engine.preview.is_none() {
             return container_centered(
-                crate::typography::readable_text(tr!("Select an item to preview")).size(14),
+                bennu_preview::panel_text::readable_text(tr!("Select an item to preview")).size(14),
             );
         }
         crate::view::view_preview_window(

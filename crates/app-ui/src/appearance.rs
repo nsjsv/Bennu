@@ -43,7 +43,7 @@ pub(crate) use bennu_theme::styles::{
 };
 
 use crate::file_entry_presentation::SelectionRunPosition;
-use crate::matugen_theme::ui_colors;
+use bennu_theme::ui_colors;
 
 /// 重命名输入框下方的原因提示：错误配色，与 tooltip 同款小圆角。
 pub(crate) fn rename_hint_style(theme: &Theme) -> container::Appearance {
@@ -351,7 +351,7 @@ pub(crate) fn switch_thumb_off_style(theme: &Theme) -> container::Appearance {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::matugen_theme::{parse_matugen_theme, ui_colors};
+    use bennu_theme::{parse_matugen_theme, ui_colors};
 
     #[test]
     fn generated_light_and_dark_roles_drive_representative_surfaces() {

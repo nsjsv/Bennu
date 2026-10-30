@@ -10,8 +10,8 @@ use std::f32::consts::TAU;
 use iced::widget::canvas;
 use iced::{Element, Length, Point, Rectangle, Theme};
 
-use crate::matugen_theme::ui_colors;
 use crate::model::Message;
+use bennu_theme::ui_colors;
 
 const RING_STROKE_WIDTH: f32 = 2.0;
 /// 进度弧用折线逼近:整圆 64 段,3 秒内视觉连续。

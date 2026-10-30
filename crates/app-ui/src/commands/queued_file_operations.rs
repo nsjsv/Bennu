@@ -41,7 +41,7 @@ use super::batch_rename_operation::{rename_failure_text, run_queued_batch_rename
 use super::convert_operation::run_queued_convert;
 
 const FILE_OPERATION_CHANNEL_SIZE: usize = 32;
-const BYTE_PROGRESS_UI_INTERVAL: Duration = crate::ui_pacing::PROGRESS_UI_INTERVAL;
+const BYTE_PROGRESS_UI_INTERVAL: Duration = bennu_preview::ui_pacing::PROGRESS_UI_INTERVAL;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DurableDirectMoveCommit {
@@ -428,7 +428,7 @@ async fn run_queued_rename(
                 },
                 None => FileOperationCompletion::from_result(Err(rename_failure_text(
                     &error,
-                    crate::localization::current_language(),
+                    bennu_localization::current_language(),
                 ))),
             };
         }

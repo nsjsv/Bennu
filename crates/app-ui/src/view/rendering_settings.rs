@@ -3,9 +3,9 @@ use iced::{Alignment, Element, Length};
 
 use crate::appearance::context_menu_style;
 use crate::config::RenderingGpuPreference;
-use crate::icons::IconSymbol;
 use crate::model::Message;
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
+use bennu_theme::icons::IconSymbol;
 
 use super::option_controls::{primary_action_button, secondary_action_button};
 use super::settings_group::toggle_setting_row;

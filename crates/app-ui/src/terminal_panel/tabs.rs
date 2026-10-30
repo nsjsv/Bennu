@@ -12,8 +12,9 @@ use super::session::{SessionId, TerminalSession};
 use super::{
     FileBrowser, MIN_PANEL_HEIGHT, PANEL_HORIZONTAL_PADDING, TERMINAL_TAB_DRAG_ACTIVATION_DISTANCE,
 };
-use crate::animation::{ease_out_cubic, elapsed_fraction};
+use crate::animation::elapsed_fraction;
 use crate::model::Message;
+use bennu_theme::animation::ease_out_cubic;
 
 /// 单个终端标签:一个 PTY 会话 + 标签条展示所需的元数据。
 pub(crate) struct TerminalTab {

@@ -3,7 +3,7 @@
 use crate::app::FileBrowser;
 use crate::appearance::muted_text_color;
 use crate::model::{Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility};
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
 use iced::widget::{button, column, container, image, row, text};
 use iced::{Alignment, Background, Border, Color, Element, Length, Theme};
 

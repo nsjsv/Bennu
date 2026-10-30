@@ -5,7 +5,7 @@ use crate::app::FileBrowser;
 use crate::appearance::context_menu_button_style;
 use crate::model::Message;
 use crate::shortcuts::{ShortcutBinding, ShortcutCaptureState};
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
 
 use super::settings_group::{muted_setting_text, settings_card};
 

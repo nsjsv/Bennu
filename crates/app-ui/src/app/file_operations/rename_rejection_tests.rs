@@ -122,7 +122,7 @@ fn assert_rejection_only_on_task_row(browser: &FileBrowser, task_id: u64) {
         .iter()
         .find(|task| task.id == task_id)
         .expect("finished task stays in the queue");
-    let message = RenameRejection::NameTaken.message(crate::localization::current_language());
+    let message = RenameRejection::NameTaken.message(bennu_localization::current_language());
     assert_eq!(task.error.as_deref(), Some(message.as_str()));
     assert_eq!(browser.current_error(), None);
 }

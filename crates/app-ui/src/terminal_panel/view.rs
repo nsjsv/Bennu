@@ -8,10 +8,10 @@ use super::emulator::TerminalCell;
 use super::session::{SessionId, TerminalSession};
 use super::{FileBrowser, TerminalPanelMessage, PANEL_HORIZONTAL_PADDING};
 use crate::formatting::format_middle_ellipsized_text;
-use crate::icons::IconSymbol;
 use crate::model::Message;
 use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::vte::ansi::{Color as TermColor, CursorShape, NamedColor};
+use bennu_theme::icons::IconSymbol;
 
 /// 终端字号;等宽字体在 cosmic-text 下的 advance 约 0.6em。
 pub(crate) const FONT_SIZE: f32 = 14.0;

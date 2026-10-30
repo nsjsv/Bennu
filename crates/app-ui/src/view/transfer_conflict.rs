@@ -7,7 +7,6 @@ use iced::{Alignment, Element, Length, Theme};
 
 use crate::appearance::context_menu_style;
 use crate::formatting::{format_file_size, format_middle_ellipsized_text, format_system_time};
-use crate::icons::{file_entry_icon_symbol, IconSymbol};
 use crate::model::{
     Message, TransferConflictChoice, TransferConflictItem, TransferConflictMetadata,
     TransferConflictState,
@@ -15,7 +14,8 @@ use crate::model::{
 use crate::thumbnail_cache::{
     request_for_transfer_conflict_path, ThumbnailCache, TRANSFER_CONFLICT_THUMBNAIL_EDGE,
 };
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
+use bennu_theme::icons::{file_entry_icon_symbol, IconSymbol};
 
 use super::option_controls::secondary_action_button_style;
 use super::{themed_icon, IconTone};

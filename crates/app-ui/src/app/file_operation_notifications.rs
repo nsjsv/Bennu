@@ -39,7 +39,7 @@ impl FileBrowser {
             FileOperationTerminalStatus::Completed => {
                 let warning = match completion {
                     FileOperationCompletion::Succeeded(outcome) => {
-                        outcome.completion_warning(crate::localization::current_language())
+                        outcome.completion_warning(bennu_localization::current_language())
                     }
                     _ => None,
                 };

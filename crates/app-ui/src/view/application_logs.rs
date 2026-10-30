@@ -6,7 +6,7 @@ use crate::formatting::format_system_time;
 use crate::model::{
     ApplicationLogLevel, Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility,
 };
-use crate::typography::readable_text;
+use bennu_preview::panel_text::readable_text;
 
 use super::auxiliary_window_layout::auxiliary_detail_scroller;
 use super::option_controls::{segmented_choice_row, SegmentedChoice};

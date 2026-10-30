@@ -362,6 +362,7 @@ mod tests {
     use std::sync::{mpsc, Arc, Barrier};
     use std::time::Duration;
 
+    use file_search::{shutdown_via_socket, status_via_socket, version_via_socket};
     use tempfile::tempdir;
 
     use crate::database::{
@@ -372,10 +373,7 @@ mod tests {
         IndexHealth, IndexPhase, IndexedQueryAvailability, SearchFileKind, SearchQuery,
         SearchServicePhase,
     };
-    use crate::protocol::{
-        serve_bound_search_socket, shutdown_via_socket, status_via_socket, version_via_socket,
-        BoundSearchSocket, SearchSocketService,
-    };
+    use crate::protocol::{serve_bound_search_socket, BoundSearchSocket, SearchSocketService};
 
     use super::*;
 
@@ -530,7 +528,7 @@ mod tests {
                 .await
                 .expect("Version should not wait for initialization")
                 .unwrap();
-        assert_eq!(protocol, crate::PROTOCOL_VERSION);
+        assert_eq!(protocol, crate::model::PROTOCOL_VERSION);
         assert_eq!(
             status_via_socket(&socket_path).await.unwrap().phase,
             SearchServicePhase::Starting

@@ -17,7 +17,7 @@ dark-light = "2.0.0"
 desktop-linux = { path = "../desktop-linux" }
 file-core = { path = "../file-core" }
 file-search = { path = "../file-search" }
-file-operation-store = { path = "../file-operation-store" }
+bennu-state = { path = "../bennu-state" }
 iced.workspace = true
 image.workspace = true
 libc = "0.2"

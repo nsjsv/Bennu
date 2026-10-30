@@ -2,8 +2,8 @@ use super::test_persistence::{
     assert_persisted, attach_store, drain_persistence_errors, enqueue_persisted, queued_task_id,
 };
 use super::*;
+use bennu_state::StoredProgress;
 use file_core::TransferCheckpoint;
-use file_operation_store::StoredProgress;
 use std::time::{Duration, Instant};
 
 fn sample_operation() -> QueuedFileOperation {
@@ -20,6 +20,19 @@ fn sample_transfer_operation() -> QueuedFileOperation {
         )],
         verification: FileOperationVerification::BasicMetadata,
     }
+}
+
+/// 让之后对任务表的 `INSERT`/`DELETE` 失败，模拟存储变得不可用。存储对库持有长连接，
+/// 换掉库文件影响不到它，所以用触发器注入。
+fn reject_task_queue_writes(database_path: &std::path::Path, statement: &str) {
+    rusqlite::Connection::open(database_path)
+        .unwrap()
+        .execute_batch(&format!(
+            "CREATE TRIGGER reject_task_queue_{statement}
+             BEFORE {statement} ON task_queue
+             BEGIN SELECT RAISE(ABORT, 'injected storage failure'); END;"
+        ))
+        .unwrap();
 }
 
 #[test]
@@ -174,8 +187,7 @@ fn failed_recoverable_insert_removes_transient_task_without_starting_it() {
         .take_next_persistence_request()
         .expect("insert must be available");
 
-    std::fs::remove_file(&database_path).unwrap();
-    std::fs::create_dir(&database_path).unwrap();
+    reject_task_queue_writes(&database_path, "INSERT");
     let acceptance = queue.accept_persistence_outcome(execute_file_operation_persistence(request));
 
     assert!(acceptance.error.is_some());
@@ -195,8 +207,7 @@ fn canceling_task_stays_canceling_when_insert_fails() {
     queue.cancel(task_id);
     assert_eq!(queue.tasks()[0].status, FileOperationStatus::Canceling);
     let request = queue.take_next_persistence_request().unwrap();
-    std::fs::remove_file(&database_path).unwrap();
-    std::fs::create_dir(&database_path).unwrap();
+    reject_task_queue_writes(&database_path, "INSERT");
 
     let acceptance = queue.accept_persistence_outcome(execute_file_operation_persistence(request));
 
@@ -214,8 +225,7 @@ fn shutdown_canceling_task_stays_canceling_when_insert_fails() {
     queue.enqueue(sample_operation());
     let request = queue.take_next_persistence_request().unwrap();
     queue.begin_application_shutdown();
-    std::fs::remove_file(&database_path).unwrap();
-    std::fs::create_dir(&database_path).unwrap();
+    reject_task_queue_writes(&database_path, "INSERT");
 
     let acceptance = queue.accept_persistence_outcome(execute_file_operation_persistence(request));
 
@@ -277,15 +287,11 @@ fn persist_terminal_checkpoint(
     checkpoint: &TransferCheckpoint,
 ) {
     let kind = match checkpoint {
-        TransferCheckpoint::Completed(_) => {
-            file_operation_store::StoredTransferCheckpointKind::Completed
-        }
-        TransferCheckpoint::Failed { .. } => {
-            file_operation_store::StoredTransferCheckpointKind::Failed
-        }
+        TransferCheckpoint::Completed(_) => bennu_state::StoredTransferCheckpointKind::Completed,
+        TransferCheckpoint::Failed { .. } => bennu_state::StoredTransferCheckpointKind::Failed,
         _ => panic!("test terminal checkpoint must be completed or failed"),
     };
-    let checkpoint = file_operation_store::StoredTransferCheckpoint::new(
+    let checkpoint = bennu_state::StoredTransferCheckpoint::new(
         kind,
         serde_json::to_string(checkpoint).unwrap(),
     )
@@ -293,7 +299,7 @@ fn persist_terminal_checkpoint(
     store
         .compare_and_swap_transfer_checkpoint(
             task_id,
-            &file_operation_store::StoredTransferWorkKey::top_level(0),
+            &bennu_state::StoredTransferWorkKey::top_level(0),
             0,
             &checkpoint,
         )
@@ -330,7 +336,7 @@ fn recoverable_transfer_enqueue_atomically_creates_journal() {
     assert_eq!(snapshot.journal_entries.len(), 1);
     assert_eq!(
         snapshot.journal_entries[0].checkpoint.kind,
-        file_operation_store::StoredTransferCheckpointKind::AwaitingManifest
+        bennu_state::StoredTransferCheckpointKind::AwaitingManifest
     );
     assert!(queue.active_subscription().unwrap().store.is_some());
 }
@@ -416,14 +422,13 @@ fn clearing_all_terminal_tasks_keeps_memory_when_persisted_delete_fails() {
         Some(FileOperationTerminalStatus::Completed)
     );
     assert_persisted(&mut queue);
-    std::fs::remove_file(&database_path).unwrap();
-    std::fs::create_dir(&database_path).unwrap();
+    reject_task_queue_writes(&database_path, "DELETE");
 
     queue.clear_terminal_tasks();
     let error = drain_persistence_errors(&mut queue)
         .into_iter()
         .next()
-        .expect("invalid database path must fail bulk deletion");
+        .expect("a failing database must fail bulk deletion");
 
     assert!(error.contains("File operation queue storage failed"));
     assert_eq!(
@@ -478,14 +483,13 @@ fn clearing_keeps_terminal_task_when_persisted_delete_fails() {
         Some(FileOperationTerminalStatus::Completed)
     );
     assert_persisted(&mut queue);
-    std::fs::remove_file(&database_path).unwrap();
-    std::fs::create_dir(&database_path).unwrap();
+    reject_task_queue_writes(&database_path, "DELETE");
 
     queue.clear_terminal_task(task_id);
     let error = drain_persistence_errors(&mut queue)
         .into_iter()
         .next()
-        .expect("invalid database path must fail deletion");
+        .expect("a failing database must fail deletion");
 
     assert!(error.contains("File operation queue storage failed"));
     assert_eq!(queue.tasks().len(), 1);
@@ -1125,9 +1129,10 @@ fn finished_tasks_stay_until_queue_is_cleared() {
     let disposition = queue.begin_application_shutdown();
     assert!(disposition.waiting_for_operation_ids.is_empty());
     store
-        .commit_application_shutdown(file_operation_store::StoredApplicationShutdown {
-            browser_session: file_operation_store::StoredBrowserSessionShutdown::Skip,
-            user_preferences: None,
+        .database()
+        .commit_application_shutdown(bennu_state::StoredApplicationShutdown {
+            browser_session: bennu_state::StoredBrowserSessionShutdown::Skip,
+            user_preferences: None::<crate::config::StoredUserPreferences>,
             interrupted_recoverable_tasks: disposition.interrupted_recoverable_tasks,
             transient_task_ids: disposition.transient_task_ids,
         })

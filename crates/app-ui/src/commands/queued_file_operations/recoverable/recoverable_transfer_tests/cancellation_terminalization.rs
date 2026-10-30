@@ -24,7 +24,7 @@ fn assert_canceled_task_finalizes(
     assert_persisted(queue);
     assert_eq!(
         store.read_task(stored_task_id).unwrap().unwrap().status,
-        file_operation_store::StoredTaskStatus::Canceled
+        bennu_state::StoredTaskStatus::Canceled
     );
     assert!(store
         .read_transfer_recovery(stored_task_id)

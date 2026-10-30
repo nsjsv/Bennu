@@ -7,13 +7,13 @@ use unicase::UniCase;
 use unicode_segmentation::UnicodeSegmentation;
 
 /// 名称子串进索引的最短字数（trigram）。更短的词由调用方直接扫规范化名称。
-pub(crate) const NAME_INDEX_GRAM_CHARACTERS: usize = 3;
+pub const NAME_INDEX_GRAM_CHARACTERS: usize = 3;
 
 /// NFKD → Unicode 完整大小写折叠 → 去组合变音符号 → NFC。
 ///
 /// 全角字母与半角一致、"ß" 与 "ss" 一致、"Ärger" 与 "arger" 一致；最后重新组合，
 /// 韩文音节与日文浊音仍是一个字。结果幂等。
-pub(crate) fn normalize_search_text(text: &str) -> String {
+pub fn normalize_search_text(text: &str) -> String {
     let decomposed = DecomposingNormalizerBorrowed::new_nfkd().normalize(text);
     let folded = UniCase::new(decomposed.as_ref()).to_folded_case();
     let unaccented = folded
@@ -36,10 +36,10 @@ fn is_combining_diacritic(character: char) -> bool {
 
 /// 普通模式的查询词：整串规范化后按空白切分（规范化可能产生空白，所以先规范化再切）。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SearchTerms(Vec<String>);
+pub struct SearchTerms(Vec<String>);
 
 impl SearchTerms {
-    pub(crate) fn parse(raw: &str) -> Self {
+    pub fn parse(raw: &str) -> Self {
         Self(
             normalize_search_text(raw)
                 .split_whitespace()
@@ -48,16 +48,16 @@ impl SearchTerms {
         )
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &str> {
+    pub fn iter(&self) -> impl Iterator<Item = &str> {
         self.0.iter().map(String::as_str)
     }
 
     /// 名称匹配：每个词都是规范化名称的子串。
-    pub(crate) fn all_in_name(&self, search_name: &str) -> bool {
+    pub fn all_in_name(&self, search_name: &str) -> bool {
         self.iter().all(|term| search_name.contains(term))
     }
 }
@@ -65,7 +65,7 @@ impl SearchTerms {
 /// 规范化名称进索引的文本：每个连续 3 字的 UTF-8 字节写成十六进制，作一个 token。
 /// 十六进制只含 `[0-9a-f]`，分词器把它当成一个词；短语查询要求位置相邻，所以
 /// "名称包含某词"与"该词的 trigram 短语命中"完全等价。
-pub(crate) fn name_index_text(search_name: &str) -> String {
+pub fn name_index_text(search_name: &str) -> String {
     let characters = search_name.chars().collect::<Vec<_>>();
     characters
         .windows(NAME_INDEX_GRAM_CHARACTERS)
@@ -75,7 +75,7 @@ pub(crate) fn name_index_text(search_name: &str) -> String {
 }
 
 /// 已规范化的查询词在名称索引里的短语（token 以空格分隔）。不满 3 个字时为 None。
-pub(crate) fn name_term_tokens(term: &str) -> Option<String> {
+pub fn name_term_tokens(term: &str) -> Option<String> {
     let tokens = name_index_text(term);
     (!tokens.is_empty()).then_some(tokens)
 }
@@ -95,14 +95,14 @@ fn hex_gram(gram: &[char]) -> String {
 
 /// 内容里的一个词：规范化后的文本，以及它在原文里起始的字符序号（摘要定位用）。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ContentToken {
-    pub(crate) text: String,
-    pub(crate) char_start: usize,
+pub struct ContentToken {
+    pub text: String,
+    pub char_start: usize,
 }
 
 /// 内容按词切：字母数字开头的字素连成一个词；汉字、假名、泰文等不用空格分词的文字
 /// 每个字单独成词（不带词典，"度报"也能命中"年度报告"）。每个词再规范化。
-pub(crate) fn content_tokens(text: &str) -> Vec<ContentToken> {
+pub fn content_tokens(text: &str) -> Vec<ContentToken> {
     let mut tokens = Vec::new();
     let mut word = String::new();
     let mut word_start = 0;
@@ -168,7 +168,7 @@ fn is_unsegmented_script(character: char) -> bool {
 }
 
 /// 内容进索引的文本：规范化后的词以空格连接。分词器配置为只在空格处切，看到的词与这里一致。
-pub(crate) fn content_index_text(text: &str) -> String {
+pub fn content_index_text(text: &str) -> String {
     content_tokens(text)
         .into_iter()
         .map(|token| token.text)
@@ -177,13 +177,13 @@ pub(crate) fn content_index_text(text: &str) -> String {
 }
 
 /// 查询词在内容里的短语（token 以空格分隔）。词里没有可索引的字（如只有标点）时为 None。
-pub(crate) fn content_term_tokens(term: &str) -> Option<String> {
+pub fn content_term_tokens(term: &str) -> Option<String> {
     let tokens = content_index_text(term);
     (!tokens.is_empty()).then_some(tokens)
 }
 
 /// 查询词在原文里第一次按内容规则命中的字符序号（相邻 token 序列与该词的 token 相同）。
-pub(crate) fn locate_content_term(text: &str, term: &str) -> Option<usize> {
+pub fn locate_content_term(text: &str, term: &str) -> Option<usize> {
     let wanted = content_tokens(term)
         .into_iter()
         .map(|token| token.text)
@@ -204,7 +204,7 @@ pub(crate) fn locate_content_term(text: &str, term: &str) -> Option<usize> {
 }
 
 /// FTS5 短语字面量：整体加双引号，内部双引号写两遍。
-pub(crate) fn fts_phrase(tokens: &str) -> String {
+pub fn fts_phrase(tokens: &str) -> String {
     format!("\"{}\"", tokens.replace('"', "\"\""))
 }
 

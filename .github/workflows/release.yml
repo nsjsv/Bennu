@@ -21,7 +21,7 @@ env:
   APP_NAME: bennu
   CARGO_PACKAGE: app-ui
   CARGO_BINARY: app-ui
-  DAEMON_CARGO_PACKAGE: file-search
+  DAEMON_CARGO_PACKAGE: file-search-daemon
   DAEMON_BINARY: bennu-searchd
   PORTAL_BINARY: bennu-portal
   SEARCH_SERVICE_UNIT: bennu-search.service

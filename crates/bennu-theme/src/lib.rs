@@ -94,7 +94,10 @@ impl ThemeMode {
 }
 
 pub use catalog::{ColorSchemeFamily, ColorSchemePreset};
-pub use custom::{default_custom_color_scheme, ContrastWarnings, CustomColorScheme};
+pub use custom::{
+    default_custom_color_scheme, ContrastWarnings, CustomColorScheme, StoredCustomColorScheme,
+    StoredCustomColorSet,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct UiColorRoles {

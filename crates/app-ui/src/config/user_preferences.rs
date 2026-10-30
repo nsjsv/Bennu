@@ -1,14 +1,11 @@
 use std::path::PathBuf;
 
+use bennu_preview::preview_config::{StoredPreviewExtensionRules, StoredPreviewPreferences};
+use bennu_state::{
+    StoreResult, StoredNetworkConnection, StoredPath, StoredSidebarFavorite, UserSettingsStore,
+};
 use desktop_linux::TerminalEmulator;
 use file_core::FileOperationVerification;
-use file_operation_store::{
-    StoreResult, StoredContextMenuItemEntry, StoredContextMenuLayout, StoredContextMenuLayouts,
-    StoredLastSearchScope, StoredListViewColumn, StoredNetworkConnection, StoredPath,
-    StoredPreviewExtensionRules, StoredPreviewPreferences, StoredShortcutBinding,
-    StoredSidebarFavorite, StoredTrustedTransferDevice, StoredUserPreferences,
-    StoredWindowControlPlacement, TaskQueueStore,
-};
 
 use super::app_config::AppConfig;
 use super::startup::StartupLocationPolicy;
@@ -21,8 +18,11 @@ use super::{
     normalize_right_preview_preview_ratio, normalize_sidebar_width, normalize_visible_column_count,
     sort_direction_config_value, sort_direction_from_config_value, sort_field_config_value,
     sort_field_from_config_value, ColumnWidthAdjustMode, LaunchWindowPolicy, PreviewExtensionRules,
-    PreviewFileSizeLimits, SidebarFavoriteConfig, TrustedTransferDevice, UiLanguageSetting,
-    UserConfig, ViewDensityLevel,
+    PreviewFileSizeLimits, SidebarFavoriteConfig, StoredContextMenuItemEntry,
+    StoredContextMenuLayout, StoredContextMenuLayouts, StoredLastSearchScope, StoredListViewColumn,
+    StoredShortcutBinding, StoredTrustedTransferDevice, StoredUserPreferences,
+    StoredWindowControlPlacement, TrustedTransferDevice, UiLanguageSetting, UserConfig,
+    ViewDensityLevel,
 };
 use crate::model::{
     list_column_kind_config_value, list_column_kind_from_config_value, BrowserViewMode,
@@ -483,7 +483,7 @@ impl UserConfig {
 }
 
 pub(crate) fn save_user_preferences(
-    store: &TaskQueueStore,
+    store: &UserSettingsStore,
     preferences: &UserPreferences,
 ) -> StoreResult<()> {
     store.replace_user_preferences(&preferences.to_stored())

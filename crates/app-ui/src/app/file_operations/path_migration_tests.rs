@@ -85,7 +85,7 @@ fn cross_directory_move_invalidates_source_and_preserves_target_tab_tree() {
     let operation_directory = tempfile::tempdir().expect("create operation directory");
     attach_store(
         &mut browser.operation_queue,
-        file_operation_store::TaskQueueStore::new(operation_directory.path().join("state.sqlite"))
+        bennu_state::TaskQueueStore::new(operation_directory.path().join("state.sqlite"))
             .expect("create operation store"),
     );
     let task_id = enqueue_persisted(

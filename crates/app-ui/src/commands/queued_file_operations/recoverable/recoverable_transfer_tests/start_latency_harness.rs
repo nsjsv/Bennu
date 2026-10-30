@@ -5,7 +5,7 @@ use crate::operation_queue::{
     execute_file_operation_persistence, FileOperationEnqueueOutcome, FileOperationQueue,
     QueuedFileOperation, QueuedTransfer,
 };
-use file_operation_store::TaskQueueStore;
+use bennu_state::TaskQueueStore;
 use iced::futures::channel::mpsc;
 use iced::futures::StreamExt;
 use rusqlite::Connection;

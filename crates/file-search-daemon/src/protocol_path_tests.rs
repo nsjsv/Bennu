@@ -17,9 +17,10 @@ use crate::model::{
 };
 use crate::{SearchPathPreferences, VersionedSearchPathPreferences};
 
-use super::{
-    read_service_event, read_service_request, search_via_socket, serve_search_socket,
-    write_service_event, write_service_request,
+use super::serve_search_socket;
+use file_search::{
+    read_service_event, read_service_request, search_via_socket, write_service_event,
+    write_service_request,
 };
 
 fn indexed_file(path: PathBuf) -> IndexedFile {

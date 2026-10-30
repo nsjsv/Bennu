@@ -26,9 +26,7 @@ use bennu_preview::engine::{
 };
 use bennu_preview::image_preview_viewport::ImagePreviewViewport;
 use bennu_preview::preview::{AudioPreviewPlayback, PreviewState, PreviewWindowProfile};
-use bennu_preview::preview_config::{
-    load_preview_preferences_from_state_database, PreviewFileSizeKind, PreviewPreferences,
-};
+use bennu_preview::preview_config::{PreviewFileSizeKind, PreviewPreferences};
 use bennu_preview::preview_loading::{
     classify_preview_path, file_too_large_to_preview, PreviewPathKind,
 };
@@ -40,8 +38,10 @@ use crate::preview_scroll::PreviewScrollPipeline;
 use crate::{Message, PickerDaemon};
 
 mod content;
+mod settings;
 
 pub(crate) use content::{handle_preview_message, handle_window_resized};
+use settings::load_preview_preferences;
 
 /// 预览窗的 WM 身份：沿用 portal 窗口家族的 bennu-filechooser 前缀
 /// （app-ui 侧对应物是 bennu-preview）。
@@ -388,8 +388,8 @@ impl PreviewHost {
     /// 会话级偏好重读：读主软件 state.sqlite 的预览段，失败回落共享
     /// crate 默认并记日志；引擎快照同步刷新。
     fn refresh_session_preferences(&mut self) {
-        self.preferences = load_preview_preferences_from_state_database(&self.preferences_database)
-            .unwrap_or_else(|error| {
+        self.preferences =
+            load_preview_preferences(&self.preferences_database).unwrap_or_else(|error| {
                 tracing::warn!(
                     target: "portal::preview",
                     error = %error,

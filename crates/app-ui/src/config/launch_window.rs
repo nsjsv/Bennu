@@ -1,6 +1,4 @@
-use file_operation_store::{
-    LAUNCH_WINDOW_POLICY_MERGE_INTO_EXISTING, LAUNCH_WINDOW_POLICY_OPEN_NEW_WINDOW,
-};
+use super::{LAUNCH_WINDOW_POLICY_MERGE_INTO_EXISTING, LAUNCH_WINDOW_POLICY_OPEN_NEW_WINDOW};
 
 /// 二次启动进程的行为：把打开请求转发给主实例合并，或自己独立运行成新窗口。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

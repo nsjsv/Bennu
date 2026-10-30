@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use bennu_state::BrowserSessionStore;
 use iced::Task;
 
 use super::FileBrowser;
@@ -32,7 +33,11 @@ impl FileBrowser {
             self.pending_browser_session_save = false;
             return Task::none();
         }
-        let Some(store) = self.operation_queue.task_queue_store().cloned() else {
+        let Some(store) = self
+            .operation_queue
+            .state_database()
+            .map(BrowserSessionStore::from)
+        else {
             self.pending_browser_session_save = true;
             return Task::none();
         };
@@ -54,7 +59,11 @@ impl FileBrowser {
             self.pending_browser_session_save = false;
             return Task::none();
         }
-        let Some(store) = self.operation_queue.task_queue_store().cloned() else {
+        let Some(store) = self
+            .operation_queue
+            .state_database()
+            .map(BrowserSessionStore::from)
+        else {
             return Task::none();
         };
         self.last_browser_session_save = Some(Instant::now());
@@ -62,10 +71,7 @@ impl FileBrowser {
         self.start_browser_session_save(store)
     }
 
-    fn start_browser_session_save(
-        &mut self,
-        store: file_operation_store::TaskQueueStore,
-    ) -> Task<Message> {
+    fn start_browser_session_save(&mut self, store: BrowserSessionStore) -> Task<Message> {
         let snapshot = self.browser_session_snapshot();
         self.browser_session_saves_in_flight += 1;
         save_browser_session_command(store, snapshot)

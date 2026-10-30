@@ -1,39 +1,27 @@
-mod config;
-mod crawler;
-mod daemon;
-mod database;
-mod error;
-mod extractor;
+//! 搜索的客户端与两端共享的约定：模型、线协议、目录回退搜索、路径配置与运行身份。
+//! 数据库、爬虫、内容提取、socket 服务端和 `bennu-searchd` 在 file-search-daemon，主程序不链接它们。
+//!
+//! 目录遍历（`filesystem`）、文本匹配（`text_matching`）、路径编码、过滤语义、配置与错误类型以
+//! `pub mod` 公开给守护进程：回退搜索与索引查询必须按同一套规则判定，守护进程要直接引用这份实现，
+//! 而不是复制一份。
+
+pub mod config;
+pub mod error;
 mod fallback;
-mod filesystem;
-mod filter_semantics;
-mod logging;
-mod managed_search_index;
-mod model;
-mod path_encoding;
-mod protocol;
+pub mod filesystem;
+pub mod filter_semantics;
+pub mod model;
+pub mod path_encoding;
+pub mod protocol;
 mod runtime_identity;
-#[cfg(test)]
-mod search_parity_tests;
-mod search_path_store;
-mod service_runtime;
-mod text_matching;
-mod writer;
+pub mod search_path_store;
+pub mod text_matching;
 
 pub use config::{
     SearchExcludeRules, SearchIndexConfig, SearchPathDecision, SearchPathPolicy,
     SearchPathPreferences, VersionedSearchPathPreferences,
 };
-pub use crawler::{IndexMaintenanceProgress, RebuildStats, SearchIndexer};
-pub use daemon::SearchDaemonCore;
-pub use database::{
-    EntryStageProgress, FileSignature, IndexedEntryStageState, IndexedFile, KnownEntryState,
-    SearchDatabase,
-};
 pub use error::{SearchError, SearchResult};
-pub use extractor::{
-    extract_content, extract_with_system_command, CommandSpec, ExtractionOutcome, ExtractionStatus,
-};
 pub use fallback::{
     search_directory_fallback, DirectoryFallbackCompletion, DirectoryFallbackLimits,
 };
@@ -50,12 +38,8 @@ pub use model::{
 pub use protocol::{
     configure_path_preferences_via_socket, default_socket_path, path_configuration_via_socket,
     read_service_event, read_service_request, search_via_socket,
-    search_via_socket_with_cancellation, serve_bound_search_socket, serve_search_socket,
-    serve_search_socket_with_status, shutdown_connected_service, shutdown_via_socket,
+    search_via_socket_with_cancellation, shutdown_connected_service, shutdown_via_socket,
     status_via_socket, version_via_socket, write_service_event, write_service_request,
-    BoundSearchSocket, SearchSocketService,
 };
 pub use runtime_identity::{SearchRuntimeIdentity, SEARCH_RUNTIME_IDENTITY_ENV};
 pub use search_path_store::{load_search_path_preferences, search_path_file_in};
-pub use service_runtime::SearchServiceRuntime;
-pub use writer::IndexWriter;

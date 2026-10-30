@@ -125,6 +125,7 @@ fn rebuild_schema_eight_database_with_operations(
     };
     if let Err(error) = workspace.finish_committed() {
         tracing::warn!(
+            target: "file_search::database::storage_rebuild",
             database_path = ?database_path,
             error = %error,
             "schema 10 已提交，但迁移 workspace 清理将在下次启动重试"

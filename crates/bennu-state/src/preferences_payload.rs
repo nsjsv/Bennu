@@ -1,21 +1,29 @@
 //! 设置这一行 JSON 的读写规则（参照 GNOME dconf 与 KDE KConfig）：
 //! 读没有任何副作用，读不懂的项逐项回落默认值；写时保留本版本不认识的键，
 //! 整份读不懂的旧数据先备份再覆盖。
+//!
+//! 设置文档有哪些字段是应用的事，存储层只认"一个 JSON 对象"：文档类型由调用方给
+//! （主程序与文件选择器各自只关心自己用到的键），所以这里的读写对文档类型泛型。
 
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OptionalExtension};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 use serde_json::{Map, Value};
 
-use crate::user_preferences::{StoredUserPreferences, USER_PREFERENCES_KEY};
-use crate::{current_time_ms, StoreResult, TaskQueueStore};
+use crate::database::current_time_ms;
+use crate::{StoreResult, UserSettingsStore};
+
+/// 设置文档所在行的键。
+pub const USER_PREFERENCES_KEY: &str = "main";
 
 /// 读出的设置，读不懂的部分已换成默认值。
 #[derive(Debug, Clone, PartialEq)]
-pub struct UserPreferencesRead {
-    pub preferences: StoredUserPreferences,
+pub struct UserPreferencesRead<T> {
+    pub preferences: T,
     /// 原始载荷：有读不懂的部分时，主程序据此备份。
     pub raw_payload: String,
     pub unreadable: Option<UnreadablePreferences>,
@@ -29,30 +37,33 @@ pub enum UnreadablePreferences {
     Keys(Vec<String>),
 }
 
-impl TaskQueueStore {
+impl UserSettingsStore {
     /// `defaults` 是调用方自己的默认设置：读不懂的项、旧版本没有的项用它补。存储层
     /// 不知道程序的默认值（比如启动目录取主目录），所以由调用方给。
-    pub fn read_user_preferences(
+    pub fn read_user_preferences<T>(
         &self,
-        defaults: &StoredUserPreferences,
-    ) -> StoreResult<Option<UserPreferencesRead>> {
-        let connection = self.connection()?;
+        defaults: &T,
+    ) -> StoreResult<Option<UserPreferencesRead<T>>>
+    where
+        T: Serialize + DeserializeOwned + Clone,
+    {
+        let connection = self.database.read();
         Ok(read_payload(&connection)?
             .map(|raw_payload| decode_user_preferences(raw_payload, defaults)))
     }
 
-    pub fn replace_user_preferences(&self, preferences: &StoredUserPreferences) -> StoreResult<()> {
-        let connection = self.connection()?;
+    pub fn replace_user_preferences<T: Serialize>(&self, preferences: &T) -> StoreResult<()> {
+        let connection = self.database.write();
         write_user_preferences(&connection, self.db_path(), preferences)
     }
 
     /// 主程序启动修复：先把读不懂的原始载荷另存成数据库所在目录下的文件，再写入
     /// 修复后的设置（原始载荷是 JSON 对象时，其中本版本不认识的键照样保留）。备份
     /// 失败返回 Err，什么都不写；备份成功后写回的结果单独交给调用方。
-    pub fn replace_unreadable_user_preferences(
+    pub fn replace_unreadable_user_preferences<T: Serialize>(
         &self,
         raw_payload: &str,
-        repaired: &StoredUserPreferences,
+        repaired: &T,
     ) -> StoreResult<UnreadablePreferencesBackup> {
         let path = back_up_payload(self.db_path(), raw_payload)?;
         Ok(UnreadablePreferencesBackup {
@@ -70,16 +81,16 @@ pub struct UnreadablePreferencesBackup {
     pub write_back: StoreResult<()>,
 }
 
-fn write_repaired_payload(
-    store: &TaskQueueStore,
+fn write_repaired_payload<T: Serialize>(
+    store: &UserSettingsStore,
     raw_payload: &str,
-    repaired: &StoredUserPreferences,
+    repaired: &T,
 ) -> StoreResult<()> {
     let mut payload = payload_object(repaired)?;
     if let Ok(Value::Object(original)) = serde_json::from_str::<Value>(raw_payload) {
         keep_unknown_keys(&mut payload, original);
     }
-    upsert_payload(&store.connection()?, payload)
+    upsert_payload(&store.database.write(), payload)
 }
 
 fn read_payload(connection: &Connection) -> StoreResult<Option<String>> {
@@ -92,10 +103,10 @@ fn read_payload(connection: &Connection) -> StoreResult<Option<String>> {
         .optional()?)
 }
 
-fn decode_user_preferences(
-    raw_payload: String,
-    defaults: &StoredUserPreferences,
-) -> UserPreferencesRead {
+fn decode_user_preferences<T>(raw_payload: String, defaults: &T) -> UserPreferencesRead<T>
+where
+    T: Serialize + DeserializeOwned + Clone,
+{
     let (preferences, unreadable) = match serde_json::from_str(&raw_payload) {
         Ok(preferences) => (preferences, None),
         Err(_) => salvage(&raw_payload, defaults),
@@ -111,10 +122,10 @@ fn decode_user_preferences(
 /// 代入试解析，能解析的保留；数组键整体不行时逐个元素试（一条坏掉的网络连接不连累
 /// 其余）。缺失的键用默认值、不算读不懂（旧版本没有这一项）；不认识的键在这里
 /// 忽略，写时原样保留。
-fn salvage(
-    raw_payload: &str,
-    defaults: &StoredUserPreferences,
-) -> (StoredUserPreferences, Option<UnreadablePreferences>) {
+fn salvage<T>(raw_payload: &str, defaults: &T) -> (T, Option<UnreadablePreferences>)
+where
+    T: Serialize + DeserializeOwned + Clone,
+{
     let Ok(Value::Object(stored)) = serde_json::from_str::<Value>(raw_payload) else {
         return (defaults.clone(), Some(UnreadablePreferences::Whole));
     };
@@ -124,14 +135,14 @@ fn salvage(
         if !merged.contains_key(&key) {
             continue;
         }
-        if accepts(&merged, &key, &value) {
+        if accepts::<T>(&merged, &key, &value) {
             merged.insert(key, value);
             continue;
         }
         if let Value::Array(items) = value {
             let readable_items = items
                 .into_iter()
-                .filter(|item| accepts(&merged, &key, &Value::Array(vec![item.clone()])))
+                .filter(|item| accepts::<T>(&merged, &key, &Value::Array(vec![item.clone()])))
                 .collect();
             merged.insert(key.clone(), Value::Array(readable_items));
         }
@@ -146,19 +157,19 @@ fn salvage(
     )
 }
 
-fn accepts(base: &Map<String, Value>, key: &str, value: &Value) -> bool {
+fn accepts<T: DeserializeOwned>(base: &Map<String, Value>, key: &str, value: &Value) -> bool {
     let mut candidate = base.clone();
     candidate.insert(key.to_owned(), value.clone());
-    serde_json::from_value::<StoredUserPreferences>(Value::Object(candidate)).is_ok()
+    serde_json::from_value::<T>(Value::Object(candidate)).is_ok()
 }
 
 /// 写设置的唯一入口（单独保存与关闭程序时的事务共用）。现有一行里本版本不认识的
 /// 键原样并入新载荷，降级使用不会丢掉新版本写下的设置；现有一行整份读不懂时，
 /// 没有先备份就不覆盖它。
-pub(crate) fn write_user_preferences(
+pub(crate) fn write_user_preferences<T: Serialize>(
     connection: &Connection,
     db_path: &Path,
-    preferences: &StoredUserPreferences,
+    preferences: &T,
 ) -> StoreResult<()> {
     let mut payload = payload_object(preferences)?;
     if let Some(existing) = read_payload(connection)? {
@@ -172,10 +183,10 @@ pub(crate) fn write_user_preferences(
     upsert_payload(connection, payload)
 }
 
-fn payload_object(preferences: &StoredUserPreferences) -> StoreResult<Map<String, Value>> {
+fn payload_object<T: Serialize>(preferences: &T) -> StoreResult<Map<String, Value>> {
     match serde_json::to_value(preferences)? {
         Value::Object(object) => Ok(object),
-        _ => unreachable!("StoredUserPreferences serializes to a JSON object"),
+        _ => unreachable!("a settings document serializes to a JSON object"),
     }
 }
 

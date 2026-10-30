@@ -79,7 +79,7 @@ async fn prepare_failure_settles_journal_and_finalizes_failed_task() {
     assert_persisted(&mut queue);
     assert_eq!(
         store.read_task(stored_task_id).unwrap().unwrap().status,
-        file_operation_store::StoredTaskStatus::Failed
+        bennu_state::StoredTaskStatus::Failed
     );
     assert!(store
         .read_transfer_recovery(stored_task_id)

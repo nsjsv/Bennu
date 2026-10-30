@@ -201,13 +201,13 @@ mod tests {
     use crate::startup_rendering::{
         StartupRenderingEnvironment, StartupRenderingEnvironmentStatus,
     };
+    use bennu_state::{
+        StoredFileOperationVerification, StoredOperation, StoredPath, StoredTransfer,
+        StoredTransferConflictStrategy, TaskQueueStore, TRANSFER_JOURNAL_VERSION,
+    };
     use bennu_theme::{ColorSchemePreset, ThemeMode};
     use desktop_linux::{
         NetworkConnection, NetworkConnectionId, NetworkMountState, NetworkProtocol,
-    };
-    use file_operation_store::{
-        StoredFileOperationVerification, StoredOperation, StoredPath, StoredTransfer,
-        StoredTransferConflictStrategy, TaskQueueStore, TRANSFER_JOURNAL_VERSION,
     };
     use tempfile::TempDir;
 

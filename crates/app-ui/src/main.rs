@@ -118,6 +118,10 @@ fn main() -> std::process::ExitCode {
     };
     startup_trace::begin_launch_from_env();
 
+    // 进程里所有读写状态库的地方共用这一份连接；句柄全部释放后再打开会重新建表。
+    // 打开失败不在这里处理：各读取方拿不到库时会各自按场景报告并回退。
+    let _state_database = bennu_state::StateDatabase::open(config::default_state_database_path());
+
     let activation_paths = application_launch_request
         .as_ref()
         .map(command_line::ApplicationLaunchRequest::activation_paths)

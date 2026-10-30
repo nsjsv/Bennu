@@ -11,8 +11,9 @@ bennu-localization = { path = "../bennu-localization" }
 bennu-theme = { path = "../bennu-theme" }
 desktop-linux = { path = "../desktop-linux" }
 dirs.workspace = true
+serde = { version = "1.0.228", features = ["derive"] }
 # 收藏与网络连接存在主程序的设置行里（state.sqlite）。
-file-operation-store = { path = "../file-operation-store" }
+bennu-state = { path = "../bennu-state" }
 toml = "1.1.2"
 
 [dev-dependencies]

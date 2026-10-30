@@ -146,7 +146,7 @@ cargo run --locked -p app-ui
 Build release binaries for the app and the search daemon:
 
 ```bash
-cargo build --release --locked -p app-ui -p file-search
+cargo build --release --locked -p app-ui -p file-search-daemon
 ./target/release/app-ui
 ```
 

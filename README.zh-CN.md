@@ -146,7 +146,7 @@ cargo run --locked -p app-ui
 构建 release 版 App 和搜索 daemon：
 
 ```bash
-cargo build --release --locked -p app-ui -p file-search
+cargo build --release --locked -p app-ui -p file-search-daemon
 ./target/release/app-ui
 ```
 

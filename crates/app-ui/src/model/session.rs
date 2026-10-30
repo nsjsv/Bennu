@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use file_operation_store::{
+use bennu_state::{
     StoredBrowserPane, StoredBrowserPaneLayout, StoredBrowserSession, StoredBrowserTab,
     StoredBrowserViewMode, StoredColumnBrowserViewport, StoredColumnViewport, StoredPath,
     StoredSplitAxis,

@@ -2,7 +2,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use file_operation_store::{StoredUserPreferences, TaskQueueStore, USER_PREFERENCES_KEY};
+use bennu_state::{UserSettingsStore, USER_PREFERENCES_KEY};
 use serde_json::{json, Value};
 
 use super::app_config::{self, default_app_config};
@@ -14,7 +14,7 @@ use super::*;
 /// 数据库里放一行原始设置，模拟坏数据或新版本写下的值。
 fn database_with_preferences(directory: &Path, payload: &str) -> PathBuf {
     let database = directory.join("state.sqlite");
-    TaskQueueStore::new(&database).expect("create store");
+    UserSettingsStore::new(&database).expect("create store");
     rusqlite::Connection::open(&database)
         .expect("open database")
         .execute(
@@ -49,7 +49,7 @@ fn restored(recovery: Option<SettingsRecovery>) -> (ResetSettings, PathBuf) {
 }
 
 fn stored_row_is_readable(database: &Path) -> bool {
-    TaskQueueStore::new(database)
+    UserSettingsStore::new(database)
         .unwrap()
         .read_user_preferences(&StoredUserPreferences::default())
         .unwrap()
@@ -152,7 +152,7 @@ fn make_read_only(database: &Path) {
 }
 
 fn stored_raw_payload(database: &Path) -> String {
-    TaskQueueStore::new(database)
+    UserSettingsStore::new(database)
         .unwrap()
         .read_user_preferences(&StoredUserPreferences::default())
         .unwrap()
@@ -217,7 +217,7 @@ fn damaged_settings_that_were_backed_up_but_not_rewritten_still_allow_saving() {
 fn settings_that_could_not_be_migrated_are_reported() {
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("state.sqlite");
-    TaskQueueStore::new(&database).expect("create store");
+    UserSettingsStore::new(&database).expect("create store");
     make_read_only(&database);
 
     let loaded = load_user_config_from_sources(default_app_config(), &database, None);
@@ -247,7 +247,7 @@ fn early_readers_use_readable_settings_and_leave_damage_for_startup() {
     let directory = tempfile::tempdir().unwrap();
     let payload = default_payload_with(json!({
         "theme_mode": "dark",
-        "launch_window_policy": file_operation_store::LAUNCH_WINDOW_POLICY_MERGE_INTO_EXISTING,
+        "launch_window_policy": LAUNCH_WINDOW_POLICY_MERGE_INTO_EXISTING,
         "show_hidden_files": "yes",
     }));
     let database = database_with_preferences(directory.path(), &payload);
@@ -291,7 +291,7 @@ fn an_unreadable_legacy_config_is_not_migrated_and_blocks_saving() {
             ..
         })
     ));
-    let stored = TaskQueueStore::new(&database)
+    let stored = UserSettingsStore::new(&database)
         .unwrap()
         .read_user_preferences(&StoredUserPreferences::default())
         .unwrap();

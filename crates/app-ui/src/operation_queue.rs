@@ -3,14 +3,14 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use bennu_state::{
+    RecoverableTaskRunnerLease, StateDatabase, StoredInterruptedRecoverableTask, StoredOperation,
+    StoredTask, StoredTaskStatus, TaskQueueStore,
+};
 use file_core::{
     ArchiveCompressionLevel, ArchiveExtractionRequest, ArchiveFormat, ArchivePassword,
     BatchRenameItem, ConversionRequest, EntryNameKind, FileOperationControls,
     FileOperationRunState, FileOperationVerification, TransferConflictStrategy, TrashRestoreEntry,
-};
-use file_operation_store::{
-    RecoverableTaskRunnerLease, StoredInterruptedRecoverableTask, StoredOperation, StoredTask,
-    StoredTaskStatus, TaskQueueStore,
 };
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
@@ -461,8 +461,9 @@ impl FileOperationQueue {
         storage_error
     }
 
-    pub(crate) fn task_queue_store(&self) -> Option<&TaskQueueStore> {
-        self.store.as_ref()
+    /// 进程的状态库句柄：设置、浏览会话与关机提交各自从它派生存储，不再各开一份连接。
+    pub(crate) fn state_database(&self) -> Option<StateDatabase> {
+        self.store.as_ref().map(|store| store.database().clone())
     }
 
     pub(crate) fn tasks(&self) -> &[FileOperationTask] {

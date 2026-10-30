@@ -38,7 +38,15 @@ pub(crate) use settings_recovery::ResetSettings;
 pub(crate) use settings_recovery::{SettingsPersistence, SettingsRecovery, SettingsSource};
 #[cfg(test)]
 mod settings_recovery_tests;
+mod stored_preferences;
 mod unrecognized_settings;
+pub(crate) use stored_preferences::{
+    StoredContextMenuItemEntry, StoredContextMenuLayout, StoredContextMenuLayouts,
+    StoredLastSearchScope, StoredListViewColumn, StoredShortcutBinding,
+    StoredTrustedTransferDevice, StoredUserPreferences, StoredWindowControlPlacement,
+    COLUMN_WIDTH_ADJUST_MODE_PER_COLUMN, COLUMN_WIDTH_ADJUST_MODE_UNIFORM,
+    LAUNCH_WINDOW_POLICY_MERGE_INTO_EXISTING, LAUNCH_WINDOW_POLICY_OPEN_NEW_WINDOW,
+};
 mod user_config_loading;
 pub(crate) use user_config_loading::{
     load_user_config_for_app_config, read_user_preferences_without_repair,

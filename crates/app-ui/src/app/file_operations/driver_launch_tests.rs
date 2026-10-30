@@ -71,7 +71,7 @@ async fn persistence_receipt_launches_the_recoverable_task_it_unblocks() {
     let operation_directory = tempfile::tempdir().expect("create operation directory");
     attach_store(
         &mut browser.operation_queue,
-        file_operation_store::TaskQueueStore::new(operation_directory.path().join("state.sqlite"))
+        bennu_state::TaskQueueStore::new(operation_directory.path().join("state.sqlite"))
             .expect("create operation store"),
     );
 

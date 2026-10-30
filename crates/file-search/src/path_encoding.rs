@@ -50,7 +50,7 @@ fn path_from_wire(encoded: WirePath) -> PathBuf {
     }
 }
 
-pub(crate) fn storage_bytes(path: &Path) -> Vec<u8> {
+pub fn storage_bytes(path: &Path) -> Vec<u8> {
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStrExt;
@@ -72,7 +72,7 @@ pub(crate) fn storage_bytes(path: &Path) -> Vec<u8> {
     }
 }
 
-pub(crate) fn path_from_storage(bytes: Vec<u8>) -> PathBuf {
+pub fn path_from_storage(bytes: Vec<u8>) -> PathBuf {
     #[cfg(unix)]
     {
         use std::ffi::OsString;
@@ -100,17 +100,17 @@ pub(crate) fn path_from_storage(bytes: Vec<u8>) -> PathBuf {
     }
 }
 
-pub(crate) mod serde_path {
+pub mod serde_path {
     use super::*;
 
-    pub(crate) fn serialize<S>(path: &Path, serializer: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(path: &Path, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         wire_path(path).serialize(serializer)
     }
 
-    pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<PathBuf, D::Error>
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<PathBuf, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -118,10 +118,10 @@ pub(crate) mod serde_path {
     }
 }
 
-pub(crate) mod serde_path_vec {
+pub mod serde_path_vec {
     use super::*;
 
-    pub(crate) fn serialize<S>(paths: &[PathBuf], serializer: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(paths: &[PathBuf], serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -132,7 +132,7 @@ pub(crate) mod serde_path_vec {
             .serialize(serializer)
     }
 
-    pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<Vec<PathBuf>, D::Error>
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<PathBuf>, D::Error>
     where
         D: Deserializer<'de>,
     {

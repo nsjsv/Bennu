@@ -5,7 +5,7 @@
 //! 这里调用的是同样三个函数,只是两步之间不插入其它操作,等价于"持久化先于下一个
 //! 用户动作完成"。需要观察"请求已排队、尚未完成"中间态的测试,直接手动调用这三步。
 
-use file_operation_store::TaskQueueStore;
+use bennu_state::TaskQueueStore;
 
 use super::{
     execute_file_operation_persistence, FileOperationEnqueueOutcome, FileOperationQueue,

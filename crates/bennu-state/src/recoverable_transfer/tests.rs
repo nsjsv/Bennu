@@ -63,24 +63,25 @@ fn persist_initial_checkpoint(
 }
 
 #[test]
-fn connection_enables_durable_journal_settings() {
+fn connections_enable_durable_journal_settings() {
     let directory = tempdir().unwrap();
     let store = TaskQueueStore::new(directory.path().join("state.sqlite")).unwrap();
-    let connection = store.connection().unwrap();
 
-    let journal_mode: String = connection
-        .pragma_query_value(None, "journal_mode", |row| row.get(0))
-        .unwrap();
-    let synchronous: i64 = connection
-        .pragma_query_value(None, "synchronous", |row| row.get(0))
-        .unwrap();
-    let foreign_keys: i64 = connection
-        .pragma_query_value(None, "foreign_keys", |row| row.get(0))
-        .unwrap();
+    for connection in [store.database.write(), store.database.read()] {
+        let journal_mode: String = connection
+            .pragma_query_value(None, "journal_mode", |row| row.get(0))
+            .unwrap();
+        let synchronous: i64 = connection
+            .pragma_query_value(None, "synchronous", |row| row.get(0))
+            .unwrap();
+        let foreign_keys: i64 = connection
+            .pragma_query_value(None, "foreign_keys", |row| row.get(0))
+            .unwrap();
 
-    assert_eq!(journal_mode, "wal");
-    assert_eq!(synchronous, 2);
-    assert_eq!(foreign_keys, 1);
+        assert_eq!(journal_mode, "wal");
+        assert_eq!(synchronous, 2);
+        assert_eq!(foreign_keys, 1);
+    }
 }
 
 #[test]
@@ -158,7 +159,7 @@ fn startup_failure_marking_preserves_recoverable_task_state() {
 fn task_and_initial_transfer_journal_commit_atomically() {
     let directory = tempdir().unwrap();
     let store = TaskQueueStore::new(directory.path().join("state.sqlite")).unwrap();
-    let connection = store.connection().unwrap();
+    let connection = rusqlite::Connection::open(store.db_path()).unwrap();
     connection
         .execute_batch(
             "CREATE TRIGGER reject_transfer_journal
@@ -176,7 +177,7 @@ fn task_and_initial_transfer_journal_commit_atomically() {
     )]);
     assert!(store.insert_recoverable_transfer_task(&operation).is_err());
 
-    let connection = store.connection().unwrap();
+    let connection = rusqlite::Connection::open(store.db_path()).unwrap();
     let task_count: i64 = connection
         .query_row("SELECT COUNT(*) FROM task_queue", [], |row| row.get(0))
         .unwrap();
@@ -333,7 +334,7 @@ fn replacement_manifest_and_checkpoint_commit_atomically() {
         identity: identity(22),
     }];
     let checkpoint = StoredTransferCheckpoint::awaiting_manifest();
-    let connection = store.connection().unwrap();
+    let connection = rusqlite::Connection::open(store.db_path()).unwrap();
     connection
         .execute_batch(
             "CREATE TRIGGER reject_replacement_manifest
@@ -447,7 +448,7 @@ fn merge_completion_and_cursor_commit_atomically_and_reload_identity_fact() {
         r#"{"state":"merging","fields":{"cursor":1}}"#.to_owned(),
     )
     .unwrap();
-    let connection = store.connection().unwrap();
+    let connection = rusqlite::Connection::open(store.db_path()).unwrap();
     connection
         .execute_batch(
             "CREATE TRIGGER reject_merge_completion
@@ -636,7 +637,7 @@ fn terminal_finalize_rolls_back_task_state_when_cleanup_fails() {
     )]);
     let task_id = store.insert_recoverable_transfer_task(&operation).unwrap();
     persist_initial_checkpoint(&store, task_id, &completed_checkpoint());
-    let connection = store.connection().unwrap();
+    let connection = rusqlite::Connection::open(store.db_path()).unwrap();
     connection
         .execute_batch(
             "CREATE TRIGGER reject_recovery_cleanup
@@ -746,7 +747,7 @@ fn deleting_task_cascades_recovery_rows() {
 
     store.delete_task(task_id).unwrap();
 
-    let connection = store.connection().unwrap();
+    let connection = rusqlite::Connection::open(store.db_path()).unwrap();
     let journal_count: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM transfer_journal WHERE task_id = ?1",

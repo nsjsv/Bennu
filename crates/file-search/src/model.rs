@@ -205,7 +205,7 @@ pub const MAX_QUERY_EXTENSIONS: usize = 16;
 
 /// 扩展名 token 的唯一字符白名单：字母数字与 `. - +`。
 /// 拒绝空白与 `%` `_` 等通配符，使 SQL 端 LIKE 拼接无需转义。
-pub(crate) fn extension_token_is_valid(token: &str) -> bool {
+pub fn extension_token_is_valid(token: &str) -> bool {
     !token.is_empty()
         && token.len() <= MAX_EXTENSION_TOKEN_BYTES
         && token

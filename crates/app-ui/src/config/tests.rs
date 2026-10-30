@@ -1,13 +1,11 @@
 use std::fs;
 use std::path::PathBuf;
 
+use bennu_state::{StoredNetworkConnection, UserSettingsStore};
 use desktop_linux::{
     DisplayRendererGpu, NetworkConnection, NetworkConnectionId, NetworkProtocol, TerminalEmulator,
 };
 use file_core::{FileOperationVerification, SortDirection, SortField};
-use file_operation_store::{
-    StoredNetworkConnection, StoredUserPreferences, StoredWindowControlPlacement, TaskQueueStore,
-};
 
 use crate::model::{
     BrowserViewMode, LastSearchScope, ListColumnKind, ListDirectorySizeDisplayMode,
@@ -171,7 +169,7 @@ fn writes_app_config_without_user_preferences() {
 fn user_preferences_round_trip_through_sqlite() {
     let temp_dir = tempfile::tempdir().expect("create temp state dir");
     let state_database_path = temp_dir.path().join("state.sqlite");
-    let store = TaskQueueStore::new(&state_database_path).expect("create state store");
+    let store = UserSettingsStore::new(&state_database_path).expect("create state store");
     let app_config = AppConfig {
         rendering_gpu_preference: RenderingGpuPreference::HighPerformanceGpu,
         search_content_indexing_enabled: false,
@@ -382,17 +380,17 @@ fn stored_preferences_drop_removed_list_columns_and_restore_supported_defaults()
     let default = default_user_config();
     let mut stored = default.user_preferences().to_stored();
     stored.list_view_columns = vec![
-        file_operation_store::StoredListViewColumn {
+        StoredListViewColumn {
             kind: "name".to_owned(),
             width: 280.0,
             visible: true,
         },
-        file_operation_store::StoredListViewColumn {
+        StoredListViewColumn {
             kind: "extension".to_owned(),
             width: 150.0,
             visible: true,
         },
-        file_operation_store::StoredListViewColumn {
+        StoredListViewColumn {
             kind: "size".to_owned(),
             width: 88.0,
             visible: true,
@@ -638,9 +636,9 @@ network_connections = [
         "Ctrl+Alt+L"
     );
 
-    let store = TaskQueueStore::new(&state_database_path).expect("open migrated store");
+    let store = UserSettingsStore::new(&state_database_path).expect("open migrated store");
     let stored = store
-        .read_user_preferences(&file_operation_store::StoredUserPreferences::default())
+        .read_user_preferences(&StoredUserPreferences::default())
         .expect("read migrated preferences")
         .expect("migrated preferences")
         .preferences;

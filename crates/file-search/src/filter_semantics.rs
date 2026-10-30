@@ -1,6 +1,6 @@
 //! 过滤条件（类型、MIME、后缀、大小、时间）的唯一语义：本地回退按条目事实判断，
-//! 索引查询拼成同义的 SQL 条件。两份实现放在一起，共用 `filter_semantics_tests` 的
-//! 测试矩阵，改一边必须同时改另一边。
+//! 索引查询拼成同义的 SQL 条件。两份实现放在一起，共用 file-search-daemon 里
+//! `filter_semantics_tests` 的测试矩阵（需要真实数据库），改一边必须同时改另一边。
 
 use rusqlite::types::Value;
 
@@ -9,18 +9,18 @@ use crate::model::{
 };
 
 /// 判断过滤条件所需的条目事实，全部来自同一次观察。`search_name` 是规范化后的名称。
-pub(crate) struct EntryFacts<'a> {
-    pub(crate) search_name: &'a str,
-    pub(crate) kind: SearchFileKind,
-    pub(crate) mime_type: Option<&'a str>,
-    pub(crate) size: u64,
-    pub(crate) modified_ms: Option<i64>,
-    pub(crate) accessed_ms: Option<i64>,
-    pub(crate) created_ms: Option<i64>,
+pub struct EntryFacts<'a> {
+    pub search_name: &'a str,
+    pub kind: SearchFileKind,
+    pub mime_type: Option<&'a str>,
+    pub size: u64,
+    pub modified_ms: Option<i64>,
+    pub accessed_ms: Option<i64>,
+    pub created_ms: Option<i64>,
 }
 
 impl SearchFilters {
-    pub(crate) fn matches(&self, entry: &EntryFacts<'_>) -> bool {
+    pub fn matches(&self, entry: &EntryFacts<'_>) -> bool {
         (self.entry_type_rules.is_empty()
             || self
                 .entry_type_rules
@@ -34,7 +34,7 @@ impl SearchFilters {
     }
 
     /// 与 `matches` 同义的 SQL 条件（以 ` AND …` 追加），列取自 `files` 的别名 `f`。
-    pub(crate) fn append_sql(&self, sql: &mut String, values: &mut Vec<Value>) {
+    pub fn append_sql(&self, sql: &mut String, values: &mut Vec<Value>) {
         append_entry_type_rules_sql(sql, values, &self.entry_type_rules);
         append_extensions_sql(sql, values, &self.extensions);
         append_size_sql(sql, values, self.size);
@@ -177,7 +177,3 @@ fn time_matches(range: Option<TimeRange>, value: Option<i64>) -> bool {
         value.is_some_and(|value| value >= range.start_ms && value <= range.end_ms)
     })
 }
-
-#[cfg(test)]
-#[path = "filter_semantics_tests.rs"]
-mod tests;

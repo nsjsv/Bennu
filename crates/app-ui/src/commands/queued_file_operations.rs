@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::time::{Duration, Instant};
 
+use bennu_state::TaskQueueStore;
 use file_core::{
     create_archive_with_controls_and_progress, create_directory_at_available_name,
     create_empty_file_at_available_name, create_symbolic_links, delete_path_permanently,
@@ -17,7 +18,6 @@ use file_core::{
     TransferJournalError, TransferJournalMutation, TransferJournalRecord, TransferWorkKey,
     TrashRestoreEntry, TrashVerificationBatch,
 };
-use file_operation_store::TaskQueueStore;
 use iced::futures::channel::mpsc::Sender as IcedSender;
 use iced::futures::SinkExt;
 

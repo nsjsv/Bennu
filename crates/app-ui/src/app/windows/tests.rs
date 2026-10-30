@@ -1,4 +1,4 @@
-use file_operation_store::TaskQueueStore;
+use bennu_state::{BrowserSessionStore, TaskQueueStore, UserSettingsStore};
 use iced::futures::StreamExt;
 use iced::Task;
 use iced_runtime::Action;
@@ -1019,7 +1019,7 @@ async fn shutdown_waits_for_old_preferences_save_then_commits_latest_search_hist
         TaskQueueStore::new(temp_dir.path().join("state.sqlite")).expect("create state store");
     let mut old_preferences = config::default_user_config().user_preferences().to_stored();
     old_preferences.search_history = vec!["old".to_owned()];
-    store
+    UserSettingsStore::from(store.database().clone())
         .replace_user_preferences(&old_preferences)
         .expect("store old preferences");
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
@@ -1048,8 +1048,8 @@ async fn shutdown_waits_for_old_preferences_save_then_commits_latest_search_hist
         vec![ShutdownAction::PersistenceFinished]
     );
     assert_eq!(
-        store
-            .read_user_preferences(&file_operation_store::StoredUserPreferences::default())
+        UserSettingsStore::from(store.database().clone())
+            .read_user_preferences(&config::StoredUserPreferences::default())
             .unwrap()
             .unwrap()
             .preferences
@@ -1094,7 +1094,10 @@ async fn final_shutdown_session_waits_for_an_older_save_outcome() {
     })
     .await;
     assert_eq!(persisted, vec![ShutdownAction::PersistenceFinished]);
-    let stored = store.read_browser_session().unwrap().unwrap();
+    let stored = BrowserSessionStore::from(store.database().clone())
+        .read_browser_session()
+        .unwrap()
+        .unwrap();
     assert_eq!(
         stored.panes[0].tabs[0].directory.to_path_buf(),
         final_directory
@@ -1154,7 +1157,7 @@ async fn recoverable_runner_ack_precedes_one_shutdown_transaction_and_exit() {
     assert_eq!(persisted, vec![ShutdownAction::PersistenceFinished]);
     assert_eq!(
         store.read_task(stored_task_id).unwrap().unwrap().status,
-        file_operation_store::StoredTaskStatus::RecoveryPending
+        bennu_state::StoredTaskStatus::RecoveryPending
     );
     assert!(!store
         .read_transfer_recovery(stored_task_id)
@@ -1219,7 +1222,7 @@ async fn terminal_recoverable_completion_is_not_rewritten_as_recovery_pending() 
     let stored_task_id = browser.operation_queue.tasks()[0].stored_id.unwrap();
     assert_eq!(
         store.read_task(stored_task_id).unwrap().unwrap().status,
-        file_operation_store::StoredTaskStatus::Failed
+        bennu_state::StoredTaskStatus::Failed
     );
 }
 
@@ -1268,7 +1271,7 @@ async fn close_all_windows_saves_browser_session_before_exit() {
     .await;
     assert_eq!(exit, vec![ShutdownAction::Exit]);
 
-    let stored_session = store
+    let stored_session = BrowserSessionStore::from(store.database().clone())
         .read_browser_session()
         .expect("read browser session")
         .expect("browser session should be stored");

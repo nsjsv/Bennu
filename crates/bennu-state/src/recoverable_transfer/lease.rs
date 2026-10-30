@@ -35,7 +35,7 @@ fn lock_file_name(database_path: &Path, suffix: &str) -> OsString {
     let mut file_name = database_path
         .file_name()
         .map(ToOwned::to_owned)
-        .unwrap_or_else(|| OsString::from("file-operation-store"));
+        .unwrap_or_else(|| OsString::from("bennu-state"));
     file_name.push(suffix);
     file_name
 }

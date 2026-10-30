@@ -1,15 +1,15 @@
 use std::collections::BTreeMap;
 
-use file_core::{
-    FileIdentity, FileObjectKind, FileOperationVerification, MergeChildCompletion,
-    RecoverableTransferOperation, RecoverableTransferRequest, SourceManifest, SourceManifestEntry,
-    TransferCheckpoint, TransferConflictStrategy, TransferJournalRecord, TransferWorkKey,
-};
-use file_operation_store::{
+use bennu_state::{
     StoreError, StoreResult, StoredFileIdentity, StoredFileObjectKind,
     StoredFileOperationVerification, StoredManifestEntry, StoredMergeChildCompletion, StoredPath,
     StoredTransferCheckpoint, StoredTransferCheckpointKind, StoredTransferConflictStrategy,
     StoredTransferOperation, StoredTransferRecoverySnapshot, StoredTransferWorkKey,
+};
+use file_core::{
+    FileIdentity, FileObjectKind, FileOperationVerification, MergeChildCompletion,
+    RecoverableTransferOperation, RecoverableTransferRequest, SourceManifest, SourceManifestEntry,
+    TransferCheckpoint, TransferConflictStrategy, TransferJournalRecord, TransferWorkKey,
 };
 
 pub(super) fn encode_work_key(key: &TransferWorkKey) -> StoredTransferWorkKey {
@@ -335,7 +335,7 @@ mod tests {
         TransferExecutionKind,
     };
 
-    use file_operation_store::StoredTransferJournalEntry;
+    use bennu_state::StoredTransferJournalEntry;
 
     use super::*;
 

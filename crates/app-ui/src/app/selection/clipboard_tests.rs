@@ -312,8 +312,7 @@ fn duplicate_selected_enqueues_in_place_copies_for_whole_selection() {
     let state_directory = tempfile::tempdir().unwrap();
     attach_store(
         &mut browser.operation_queue,
-        file_operation_store::TaskQueueStore::new(state_directory.path().join("state.sqlite"))
-            .unwrap(),
+        bennu_state::TaskQueueStore::new(state_directory.path().join("state.sqlite")).unwrap(),
     );
 
     drop(browser.duplicate_selected());
@@ -342,8 +341,7 @@ fn duplicate_completion_selects_the_copies_actually_created() {
     let state_directory = tempfile::tempdir().unwrap();
     attach_store(
         &mut browser.operation_queue,
-        file_operation_store::TaskQueueStore::new(state_directory.path().join("state.sqlite"))
-            .unwrap(),
+        bennu_state::TaskQueueStore::new(state_directory.path().join("state.sqlite")).unwrap(),
     );
     let duplicate = QueuedFileOperation::Duplicate {
         transfers: vec![

@@ -3,11 +3,9 @@
 
 use std::path::Path;
 
+use bennu_state::{StoreResult, StoredNetworkConnection, StoredSidebarFavorite, UserSettingsStore};
 use desktop_linux::{NetworkConnection, NetworkConnectionId, NetworkProtocol};
-use file_operation_store::{
-    StoreResult, StoredNetworkConnection, StoredSidebarFavorite, StoredUserPreferences,
-    TaskQueueStore,
-};
+use serde::{Deserialize, Serialize};
 
 use crate::config::{SidebarConfig, SidebarFavoriteConfig};
 use crate::saved_connections::SavedNetworkConnection;
@@ -44,11 +42,18 @@ pub fn network_connections_from_stored(
         .collect()
 }
 
+/// 设置文档里侧边栏用到的两个键；文档的其余键与本模块无关。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct SidebarSettings {
+    sidebar_favorites: Option<Vec<StoredSidebarFavorite>>,
+    network_connections: Vec<StoredNetworkConnection>,
+}
+
 /// 文件选择器每次打开窗口读一次：只读，不备份、不写（备份与提示归主程序启动加载）。
 /// 还没有设置行时为默认——没设收藏，由调用方回落默认用户目录与 GTK 书签。
 pub fn read_sidebar_config(state_database_path: &Path) -> StoreResult<SidebarConfig> {
-    let Some(read) = TaskQueueStore::new(state_database_path)?
-        .read_user_preferences(&StoredUserPreferences::default())?
+    let Some(read) = UserSettingsStore::new(state_database_path)?
+        .read_user_preferences(&SidebarSettings::default())?
     else {
         return Ok(SidebarConfig::default());
     };
@@ -66,7 +71,7 @@ pub fn read_sidebar_config(state_database_path: &Path) -> StoreResult<SidebarCon
 mod tests {
     use std::path::PathBuf;
 
-    use file_operation_store::StoredPath;
+    use bennu_state::StoredPath;
 
     use super::*;
 
@@ -84,9 +89,9 @@ mod tests {
     fn the_sidebar_shows_the_favorites_and_connections_saved_by_the_main_program() {
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("state.sqlite");
-        TaskQueueStore::new(&database)
+        UserSettingsStore::new(&database)
             .unwrap()
-            .replace_user_preferences(&StoredUserPreferences {
+            .replace_user_preferences(&SidebarSettings {
                 sidebar_favorites: Some(vec![StoredSidebarFavorite {
                     label: "Projects".to_owned(),
                     path: StoredPath::from_path(Path::new("/srv/projects")),
@@ -95,7 +100,6 @@ mod tests {
                     stored_connection("nas", "smb", "smb://server/share"),
                     stored_connection("bad", "ftp", "ftp://server"),
                 ],
-                ..StoredUserPreferences::default()
             })
             .unwrap();
 

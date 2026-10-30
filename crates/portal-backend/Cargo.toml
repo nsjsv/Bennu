@@ -16,7 +16,7 @@ bennu-theme = { path = "../bennu-theme" }
 bennu-sidebar = { path = "../bennu-sidebar" }
 desktop-linux = { path = "../desktop-linux" }
 file-core = { path = "../file-core" }
-file-operation-store = { path = "../file-operation-store" }
+bennu-state = { path = "../bennu-state" }
 # 共享预览子系统（模型/状态机/面板单源）：portal 是第二个宿主，空格
 # 预览的守卫/窗口/回流全走本 crate；其 iced 声明不带渲染器 feature，
 # 与本 crate 自行声明的 wgpu+tiny-skia 并集不改变渲染链。

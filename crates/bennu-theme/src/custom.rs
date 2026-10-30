@@ -1,9 +1,38 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::{AppearanceMode, Color, UiColorRoles};
-use file_operation_store::{StoredCustomColorScheme, StoredCustomColorSet};
 
 const MINIMUM_CONTRAST_WARNING_RATIO: f32 = 2.4;
+
+/// 自定义配色在设置文档里的存储形态。字段名与缺省值即磁盘格式，旧设置行必须原样可读；
+/// 存储层只认"一个 JSON 对象"，这份形态由配色所有者定义。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredCustomColorScheme {
+    #[serde(default)]
+    pub light: Option<StoredCustomColorSet>,
+    #[serde(default)]
+    pub dark: Option<StoredCustomColorSet>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct StoredCustomColorSet {
+    #[serde(default)]
+    pub background: String,
+    #[serde(default)]
+    pub surface: String,
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub muted_text: String,
+    #[serde(default)]
+    pub primary: String,
+    #[serde(default)]
+    pub success: String,
+    #[serde(default)]
+    pub warning: String,
+    #[serde(default)]
+    pub danger: String,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CustomColorAnchors {

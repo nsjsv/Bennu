@@ -1,0 +1,32 @@
+[package]
+name = "file-search-daemon"
+autobins = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# 搜索守护进程：索引数据库、爬虫、内容提取、写入线程、socket 服务端与 bennu-searchd。
+# 主程序只依赖客户端 file-search，不链接本 crate。
+[dependencies]
+file-core = { path = "../file-core" }
+file-search = { path = "../file-search" }
+libc = "0.2"
+notify.workspace = true
+quick-xml = "0.39.4"
+rusqlite = { version = "0.32.1", features = ["bundled"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+tokio-util.workspace = true
+tracing.workspace = true
+tracing-journald.workspace = true
+tracing-subscriber.workspace = true
+zip = "8.6.0"
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[[bin]]
+name = "bennu-searchd"
+path = "src/bin/file-searchd.rs"

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use bennu_state::UserSettingsStore;
 use iced::{Point, Task};
 
 use crate::app::FileBrowser;
@@ -132,13 +133,13 @@ impl FileBrowser {
     }
 
     pub(super) fn persist_column_width_overrides_command(&self) -> Task<Message> {
-        let Some(task_queue_store) = self.operation_queue.task_queue_store().cloned() else {
+        let Some(database) = self.operation_queue.state_database() else {
             return Task::none();
         };
         let reference_content_width = (!self.column_width_overrides.is_empty())
             .then_some(self.column_width_reference_content_width);
         save_column_width_overrides_command(
-            task_queue_store,
+            UserSettingsStore::from(database),
             self.column_width_overrides.clone(),
             reference_content_width,
         )

@@ -41,16 +41,16 @@ struct StoredSearchPathPreferences {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct SearchPathStore {
+pub struct SearchPathStore {
     path: PathBuf,
 }
 
 impl SearchPathStore {
-    pub(crate) fn at(path: PathBuf) -> Self {
+    pub fn at(path: PathBuf) -> Self {
         Self { path }
     }
 
-    pub(crate) fn load(&self) -> SearchResult<Option<VersionedSearchPathPreferences>> {
+    pub fn load(&self) -> SearchResult<Option<VersionedSearchPathPreferences>> {
         let mut options = OpenOptions::new();
         options.read(true);
         #[cfg(unix)]
@@ -105,7 +105,7 @@ impl SearchPathStore {
         }))
     }
 
-    pub(crate) fn replace(&self, versioned: &VersionedSearchPathPreferences) -> SearchResult<()> {
+    pub fn replace(&self, versioned: &VersionedSearchPathPreferences) -> SearchResult<()> {
         let stored = StoredSearchPathPreferences {
             format_version: SEARCH_PATH_FORMAT_VERSION,
             revision: versioned.revision,

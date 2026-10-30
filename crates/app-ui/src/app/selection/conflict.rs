@@ -266,8 +266,7 @@ mod tests {
         let state_directory = tempfile::tempdir().unwrap();
         crate::operation_queue::test_persistence::attach_store(
             &mut browser.operation_queue,
-            file_operation_store::TaskQueueStore::new(state_directory.path().join("state.sqlite"))
-                .unwrap(),
+            bennu_state::TaskQueueStore::new(state_directory.path().join("state.sqlite")).unwrap(),
         );
         browser.transfer_conflict = Some(state);
         (browser, state_directory)

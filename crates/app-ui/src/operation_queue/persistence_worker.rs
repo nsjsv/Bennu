@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use file_operation_store::{
+use bennu_state::{
     RecoverableTaskRunnerLease, StoredOperation, StoredProgress, StoredTaskStatus, TaskQueueStore,
 };
 use iced::Task;

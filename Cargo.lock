@@ -153,6 +153,7 @@ dependencies = [
  "bennu-localization",
  "bennu-preview",
  "bennu-sidebar",
+ "bennu-state",
  "bennu-subprocess",
  "bennu-theme",
  "blake3",
@@ -161,7 +162,6 @@ dependencies = [
  "dark-light",
  "desktop-linux",
  "file-core",
- "file-operation-store",
  "file-search",
  "iced",
  "iced_runtime",
@@ -614,7 +614,6 @@ dependencies = [
  "bennu-theme",
  "blake3",
  "file-core",
- "file-operation-store",
  "gif 0.14.2",
  "iced",
  "iced_runtime",
@@ -625,6 +624,7 @@ dependencies = [
  "rodio",
  "roxmltree",
  "rusqlite",
+ "serde",
  "serde_json",
  "tempfile",
  "thumbnails",
@@ -640,12 +640,24 @@ name = "bennu-sidebar"
 version = "0.3.6"
 dependencies = [
  "bennu-localization",
+ "bennu-state",
  "bennu-theme",
  "desktop-linux",
  "dirs",
- "file-operation-store",
+ "serde",
  "tempfile",
  "toml",
+]
+
+[[package]]
+name = "bennu-state"
+version = "0.3.6"
+dependencies = [
+ "rusqlite",
+ "rustix 1.1.4",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -661,7 +673,6 @@ version = "0.3.6"
 dependencies = [
  "bennu-localization",
  "file-core",
- "file-operation-store",
  "iced",
  "serde",
  "serde_json",
@@ -1860,17 +1871,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "file-operation-store"
-version = "0.3.6"
-dependencies = [
- "rusqlite",
- "rustix 1.1.4",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
 name = "file-search"
 version = "0.3.6"
 dependencies = [
@@ -1878,7 +1878,6 @@ dependencies = [
  "icu_normalizer",
  "libc",
  "notify",
- "quick-xml",
  "regex",
  "rusqlite",
  "serde",
@@ -1888,10 +1887,28 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
- "tracing-journald",
- "tracing-subscriber",
  "unicase",
  "unicode-segmentation",
+]
+
+[[package]]
+name = "file-search-daemon"
+version = "0.3.6"
+dependencies = [
+ "file-core",
+ "file-search",
+ "libc",
+ "notify",
+ "quick-xml",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-journald",
+ "tracing-subscriber",
  "zip",
 ]
 
@@ -4616,12 +4633,12 @@ dependencies = [
  "bennu-localization",
  "bennu-preview",
  "bennu-sidebar",
+ "bennu-state",
  "bennu-theme",
  "dark-light",
  "desktop-linux",
  "display-renderer",
  "file-core",
- "file-operation-store",
  "gio",
  "iced",
  "rusqlite",

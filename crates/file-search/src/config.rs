@@ -6,11 +6,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::path_encoding::serde_path_vec;
 
-pub(crate) const MAX_CONFIGURED_ROOTS: usize = 32;
-pub(crate) const MAX_CONFIGURED_EXCLUDED_PATHS: usize = 256;
-pub(crate) const MAX_CONFIGURED_PATH_BYTES: usize = 4_096;
-pub(crate) const MAX_CONFIGURED_TOTAL_PATH_BYTES: usize = 262_144;
-pub(crate) const MAX_EXTRACT_BYTES: u64 = 2_000_000;
+pub const MAX_CONFIGURED_ROOTS: usize = 32;
+pub const MAX_CONFIGURED_EXCLUDED_PATHS: usize = 256;
+pub const MAX_CONFIGURED_PATH_BYTES: usize = 4_096;
+pub const MAX_CONFIGURED_TOTAL_PATH_BYTES: usize = 262_144;
+pub const MAX_EXTRACT_BYTES: u64 = 2_000_000;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SearchPathPreferences {
@@ -34,9 +34,9 @@ pub enum SearchPathDecision<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SearchPathPolicyChange {
-    pub(crate) affected_scopes: Vec<PathBuf>,
-    pub(crate) newly_included_frontiers: Vec<PathBuf>,
+pub struct SearchPathPolicyChange {
+    pub affected_scopes: Vec<PathBuf>,
+    pub newly_included_frontiers: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -126,7 +126,7 @@ impl SearchPathPolicy {
         }
     }
 
-    pub(crate) fn change_to(&self, next: &Self) -> SearchPathPolicyChange {
+    pub fn change_to(&self, next: &Self) -> SearchPathPolicyChange {
         let mut changed_boundaries = Vec::new();
         for boundary in self
             .roots
@@ -282,7 +282,7 @@ impl Default for SearchIndexConfig {
 }
 
 impl SearchIndexConfig {
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), String> {
         if self.roots.len() > MAX_CONFIGURED_ROOTS + 1 {
             return Err(format!(
                 "configured effective search roots exceed the {} entry limit",
@@ -323,13 +323,13 @@ impl SearchIndexConfig {
         Ok(())
     }
 
-    pub(crate) fn available_roots(&self) -> impl Iterator<Item = &PathBuf> {
+    pub fn available_roots(&self) -> impl Iterator<Item = &PathBuf> {
         self.roots
             .iter()
             .filter(|root| !self.unavailable_roots.contains(root))
     }
 
-    pub(crate) fn owning_root(&self, path: &Path) -> Option<&Path> {
+    pub fn owning_root(&self, path: &Path) -> Option<&Path> {
         self.roots
             .iter()
             .filter(|root| path.starts_with(root))
@@ -337,7 +337,7 @@ impl SearchIndexConfig {
             .map(PathBuf::as_path)
     }
 
-    pub(crate) fn path_is_available(&self, path: &Path) -> bool {
+    pub fn path_is_available(&self, path: &Path) -> bool {
         self.owning_root(path).is_some_and(|root| {
             !self
                 .unavailable_roots
@@ -346,7 +346,7 @@ impl SearchIndexConfig {
         })
     }
 
-    pub(crate) fn search_path_policy(&self) -> Result<Option<SearchPathPolicy>, String> {
+    pub fn search_path_policy(&self) -> Result<Option<SearchPathPolicy>, String> {
         let Some(home) = self.roots.first() else {
             return Ok(None);
         };
@@ -362,7 +362,7 @@ impl SearchIndexConfig {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SearchTraversalDecision {
+pub enum SearchTraversalDecision {
     Included,
     Excluded,
     DelegatedToNestedRoot,
@@ -399,7 +399,7 @@ impl SearchExcludeRules {
         })
     }
 
-    pub(crate) fn from_index_config(config: &SearchIndexConfig) -> Result<Self, String> {
+    pub fn from_index_config(config: &SearchIndexConfig) -> Result<Self, String> {
         Ok(Self {
             policy: match config.search_path_policy()? {
                 Some(policy) => SearchExclusionPolicy::IndexedRoots(policy),
@@ -408,11 +408,7 @@ impl SearchExcludeRules {
         })
     }
 
-    pub(crate) fn traversal_decision(
-        &self,
-        active_root: &Path,
-        path: &Path,
-    ) -> SearchTraversalDecision {
+    pub fn traversal_decision(&self, active_root: &Path, path: &Path) -> SearchTraversalDecision {
         match &self.policy {
             SearchExclusionPolicy::IndexedRoots(policy) => match policy.decision(path) {
                 SearchPathDecision::Included { owning_root } if owning_root == active_root => {
@@ -443,7 +439,7 @@ impl SearchExcludeRules {
         }
     }
 
-    pub(crate) fn directory_traversal_decision(
+    pub fn directory_traversal_decision(
         &self,
         active_root: &Path,
         path: &Path,

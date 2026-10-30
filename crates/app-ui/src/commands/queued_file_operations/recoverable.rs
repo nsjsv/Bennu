@@ -1,5 +1,5 @@
 use super::*;
-use file_operation_store::{
+use bennu_state::{
     StoredManifestCheckpointBatchUpdate, StoredTransferCheckpointSwap,
     TransferManifestCheckpointUpdate,
 };
@@ -245,9 +245,9 @@ impl TaskQueueTransferJournal {
     }
 }
 
-fn store_journal_error(error: file_operation_store::StoreError) -> TransferJournalError {
+fn store_journal_error(error: bennu_state::StoreError) -> TransferJournalError {
     match error {
-        file_operation_store::StoreError::StaleTransferRevision { .. } => {
+        bennu_state::StoreError::StaleTransferRevision { .. } => {
             TransferJournalError::StaleRevision
         }
         error => TransferJournalError::Storage(error.to_string()),
@@ -1357,7 +1357,7 @@ mod recoverable_transfer_tests {
         assert_persisted(&mut queue);
         assert_eq!(
             store.read_task(stored_task_id).unwrap().unwrap().status,
-            file_operation_store::StoredTaskStatus::Failed
+            bennu_state::StoredTaskStatus::Failed
         );
         assert!(!store
             .read_transfer_recovery(stored_task_id)
@@ -1937,7 +1937,7 @@ mod recoverable_transfer_tests {
         let snapshot = store.read_transfer_recovery(stored_task_id).unwrap();
         assert_eq!(
             snapshot.journal_entries[0].checkpoint.kind,
-            file_operation_store::StoredTransferCheckpointKind::DirectMoveRenamed
+            bennu_state::StoredTransferCheckpointKind::DirectMoveRenamed
         );
 
         let (mut output, messages) = iced::futures::channel::mpsc::channel(32);
@@ -2018,7 +2018,7 @@ mod recoverable_transfer_tests {
         let snapshot = store.read_transfer_recovery(stored_task_id).unwrap();
         assert_eq!(
             snapshot.journal_entries[0].checkpoint.kind,
-            file_operation_store::StoredTransferCheckpointKind::Completed
+            bennu_state::StoredTransferCheckpointKind::Completed
         );
         assert_eq!(tokio::fs::read(target).await.unwrap(), b"direct-move");
     }
@@ -2280,7 +2280,7 @@ mod recoverable_transfer_tests {
         assert_persisted(&mut restored_queue);
         assert_eq!(
             store.read_task(stored_task_id).unwrap().unwrap().status,
-            file_operation_store::StoredTaskStatus::Completed
+            bennu_state::StoredTaskStatus::Completed
         );
         assert!(store
             .read_transfer_recovery(stored_task_id)

@@ -3,7 +3,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use file_operation_store::TaskQueueStore;
+use bennu_state::TaskQueueStore;
 use tempfile::TempDir;
 
 use super::FileBrowser;

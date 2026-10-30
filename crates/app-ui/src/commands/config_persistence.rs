@@ -1,4 +1,4 @@
-use file_operation_store::TaskQueueStore;
+use bennu_state::UserSettingsStore;
 use iced::Task;
 
 use crate::config;
@@ -10,10 +10,10 @@ pub(crate) fn save_app_config_command(app_config: config::AppConfig) -> Task<Mes
 
 pub(crate) fn save_user_preferences_command(
     preferences: config::UserPreferences,
-    task_queue_store: Option<TaskQueueStore>,
+    settings_store: Option<UserSettingsStore>,
 ) -> Task<Message> {
     Task::perform(
-        persist_user_preferences(preferences, task_queue_store),
+        persist_user_preferences(preferences, settings_store),
         Message::UserPreferencesSaved,
     )
 }
@@ -27,12 +27,12 @@ async fn persist_app_config(app_config: config::AppConfig) -> Result<(), String>
 
 async fn persist_user_preferences(
     preferences: config::UserPreferences,
-    task_queue_store: Option<TaskQueueStore>,
+    settings_store: Option<UserSettingsStore>,
 ) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let store = match task_queue_store {
+        let store = match settings_store {
             Some(store) => store,
-            None => TaskQueueStore::new(config::default_state_database_path())?,
+            None => UserSettingsStore::new(config::default_state_database_path())?,
         };
         config::save_user_preferences(&store, &preferences)
     })

@@ -1,3 +1,4 @@
+use bennu_state::UserSettingsStore;
 use iced::Task;
 
 use super::FileBrowser;
@@ -132,7 +133,9 @@ impl FileBrowser {
     ) -> Task<Message> {
         save_user_preferences_command(
             preferences,
-            self.operation_queue.task_queue_store().cloned(),
+            self.operation_queue
+                .state_database()
+                .map(UserSettingsStore::from),
         )
     }
 

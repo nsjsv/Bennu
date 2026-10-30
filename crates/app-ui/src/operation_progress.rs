@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use file_operation_store::StoredProgress;
+use bennu_state::StoredProgress;
 
 // 纯搬移：字节进度分数与远程下载面板随预览模型下沉 bennu-preview，
 // 此处 re-export 维持 crate::operation_progress::* 调用路径单源

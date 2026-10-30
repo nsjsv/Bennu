@@ -5,13 +5,13 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
+use file_search::{search_directory_fallback, DirectoryFallbackLimits};
 use tempfile::tempdir;
 use tokio_util::sync::CancellationToken;
 
 use crate::config::SearchExcludeRules;
 use crate::database::{EntryStageProgress, IndexedEntryStageState, IndexedFile, SearchDatabase};
 use crate::extractor::ExtractionStatus;
-use crate::fallback::{search_directory_fallback, DirectoryFallbackLimits};
 use crate::filesystem::{display_name, file_time_ms, mime_type_for_path};
 use crate::model::{
     SearchFileKind, SearchFilters, SearchMatchMode, SearchQuery, SearchScope, SearchTextScope,

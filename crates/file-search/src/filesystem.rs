@@ -11,20 +11,20 @@ use crate::error::{SearchError, SearchResult};
 use crate::model::SearchFileKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TraversalDepth {
+pub enum TraversalDepth {
     DirectChildren,
     Recursive,
 }
 
 #[derive(Debug)]
-pub(crate) struct FilesystemEntry {
+pub struct FilesystemEntry {
     path: PathBuf,
     metadata: Metadata,
     kind: SearchFileKind,
 }
 
 #[derive(Debug)]
-pub(crate) enum FilesystemObservation<T> {
+pub enum FilesystemObservation<T> {
     Complete(T),
     Inaccessible { scope: PathBuf },
     Missing { scope: PathBuf },
@@ -33,27 +33,27 @@ pub(crate) enum FilesystemObservation<T> {
 }
 
 #[derive(Debug)]
-pub(crate) enum TraversalEvent {
+pub enum TraversalEvent {
     Entry(FilesystemEntry),
     Observation(FilesystemObservation<PathBuf>),
 }
 
 impl FilesystemEntry {
-    pub(crate) fn path(&self) -> &Path {
+    pub fn path(&self) -> &Path {
         &self.path
     }
 
-    pub(crate) fn metadata(&self) -> &Metadata {
+    pub fn metadata(&self) -> &Metadata {
         &self.metadata
     }
 
-    pub(crate) fn kind(&self) -> SearchFileKind {
+    pub fn kind(&self) -> SearchFileKind {
         self.kind
     }
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct LocalFilesystemBoundary {
+pub struct LocalFilesystemBoundary {
     root: PathBuf,
     root_device: u64,
     rules: SearchExcludeRules,
@@ -61,7 +61,7 @@ pub(crate) struct LocalFilesystemBoundary {
 
 impl LocalFilesystemBoundary {
     #[cfg(test)]
-    pub(crate) fn open(root: &Path, rules: &SearchExcludeRules) -> SearchResult<Self> {
+    pub fn open(root: &Path, rules: &SearchExcludeRules) -> SearchResult<Self> {
         match Self::observe(root, rules)? {
             FilesystemObservation::Complete(boundary) => Ok(boundary),
             FilesystemObservation::Inaccessible { scope } => Err(SearchError::Inaccessible {
@@ -89,7 +89,7 @@ impl LocalFilesystemBoundary {
         }
     }
 
-    pub(crate) fn observe(
+    pub fn observe(
         root: &Path,
         rules: &SearchExcludeRules,
     ) -> SearchResult<FilesystemObservation<Self>> {
@@ -114,7 +114,7 @@ impl LocalFilesystemBoundary {
         }))
     }
 
-    pub(crate) fn inspect_path(
+    pub fn inspect_path(
         &self,
         path: &Path,
     ) -> SearchResult<FilesystemObservation<FilesystemEntry>> {
@@ -209,7 +209,7 @@ impl LocalFilesystemBoundary {
         })
     }
 
-    pub(crate) fn walk_root(
+    pub fn walk_root(
         &self,
         depth: TraversalDepth,
         cancellation: &CancellationToken,
@@ -231,7 +231,7 @@ impl LocalFilesystemBoundary {
         )))
     }
 
-    pub(crate) fn walk_directory(
+    pub fn walk_directory(
         &self,
         directory: &Path,
         depth: TraversalDepth,
@@ -292,7 +292,7 @@ impl LocalFilesystemBoundary {
     }
 }
 
-pub(crate) fn observe_path(path: &Path) -> SearchResult<FilesystemObservation<FilesystemEntry>> {
+pub fn observe_path(path: &Path) -> SearchResult<FilesystemObservation<FilesystemEntry>> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(source) => return classify_path_error(path, source),
@@ -304,7 +304,7 @@ pub(crate) fn observe_path(path: &Path) -> SearchResult<FilesystemObservation<Fi
     }))
 }
 
-pub(crate) struct LocalTreeWalker {
+pub struct LocalTreeWalker {
     boundary: LocalFilesystemBoundary,
     depth: TraversalDepth,
     cancellation: CancellationToken,
@@ -334,7 +334,7 @@ impl LocalTreeWalker {
         }
     }
 
-    pub(crate) fn next_event(&mut self) -> SearchResult<Option<TraversalEvent>> {
+    pub fn next_event(&mut self) -> SearchResult<Option<TraversalEvent>> {
         if let Some(pending_event) = self.pending_event.take() {
             return Ok(Some(pending_event));
         }
@@ -434,7 +434,7 @@ impl LocalTreeWalker {
     }
 }
 
-pub(crate) fn ensure_not_cancelled(cancellation: &CancellationToken) -> SearchResult<()> {
+pub fn ensure_not_cancelled(cancellation: &CancellationToken) -> SearchResult<()> {
     if cancellation.is_cancelled() {
         Err(SearchError::Cancelled)
     } else {
@@ -442,19 +442,19 @@ pub(crate) fn ensure_not_cancelled(cancellation: &CancellationToken) -> SearchRe
     }
 }
 
-pub(crate) fn display_name(path: &Path) -> String {
+pub fn display_name(path: &Path) -> String {
     path.file_name()
         .and_then(OsStr::to_str)
         .map(str::to_owned)
         .unwrap_or_else(|| path.to_string_lossy().into_owned())
 }
 
-pub(crate) fn file_time_ms(time: Option<SystemTime>) -> Option<i64> {
+pub fn file_time_ms(time: Option<SystemTime>) -> Option<i64> {
     time.and_then(|time| time.duration_since(UNIX_EPOCH).ok())
         .map(|duration| duration.as_millis() as i64)
 }
 
-pub(crate) fn mime_type_for_path(path: &Path) -> Option<String> {
+pub fn mime_type_for_path(path: &Path) -> Option<String> {
     let extension = path.extension()?.to_str()?.to_ascii_lowercase();
     let mime_type = match extension.as_str() {
         "txt" | "rs" | "toml" | "json" | "yaml" | "yml" | "log" => "text/plain",

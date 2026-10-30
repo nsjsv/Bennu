@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use bennu_state::TaskQueueStore;
 use bennu_theme::{ColorSchemeFamily, ColorSchemePreset, ThemeMode};
 use desktop_linux::{
     DesktopActivationEvent, DesktopClipboardContent, FileClipboardOperation,
@@ -13,7 +14,6 @@ use file_core::{
     DirectoryDiscovery, DirectoryDiscoveryBatch, DirectoryEntry, DirectoryMetadataResolution,
     FileKind, TrashRestoreEntry, TrashScan,
 };
-use file_operation_store::TaskQueueStore;
 use file_search::{
     SearchHit, SearchPathConfigurationStatus, SearchPathPreferences, SearchServiceStatus,
     SearchTextScope, VersionedSearchPathPreferences,

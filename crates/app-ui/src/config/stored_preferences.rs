@@ -1,27 +1,30 @@
-use serde::{Deserialize, Serialize};
+//! 设置文档在 `state.sqlite` 里的存储形态。字段名、缺省值与旧数据兼容规则一字不改：
+//! 用户磁盘上的旧设置行必须原样可读。存储层（bennu-state）只认"一个 JSON 对象"，
+//! 字段有哪些是这里的事。
+
 use std::path::Path;
 
-use crate::StoredPath;
+use bennu_preview::preview_config::StoredPreviewPreferences;
+use bennu_state::{StoredNetworkConnection, StoredPath, StoredSidebarFavorite};
+use bennu_theme::StoredCustomColorScheme;
+use serde::{Deserialize, Serialize};
 
-pub const USER_PREFERENCES_KEY: &str = "main";
 const DEFAULT_VIEW_DENSITY_INDEX: u8 = 2;
 
 /// StoredUserPreferences.launch_window_policy 的合法取值。
-pub const LAUNCH_WINDOW_POLICY_MERGE_INTO_EXISTING: &str = "merge_into_existing";
-pub const LAUNCH_WINDOW_POLICY_OPEN_NEW_WINDOW: &str = "open_new_window";
+pub(crate) const LAUNCH_WINDOW_POLICY_MERGE_INTO_EXISTING: &str = "merge_into_existing";
+pub(crate) const LAUNCH_WINDOW_POLICY_OPEN_NEW_WINDOW: &str = "open_new_window";
 
 /// StoredUserPreferences.column_width_adjust_mode 的合法取值。
-pub const COLUMN_WIDTH_ADJUST_MODE_PER_COLUMN: &str = "per_column";
-pub const COLUMN_WIDTH_ADJUST_MODE_UNIFORM: &str = "uniform";
+pub(crate) const COLUMN_WIDTH_ADJUST_MODE_PER_COLUMN: &str = "per_column";
+pub(crate) const COLUMN_WIDTH_ADJUST_MODE_UNIFORM: &str = "uniform";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct StoredUserPreferences {
+pub(crate) struct StoredUserPreferences {
     pub network_list_thumbnail_downloads_enabled: bool,
     /// 空格预览偏好（大小上限/后缀规则/目录展开层级）。serde flatten 保持
     /// 键在文档顶层、顺序与 null 形态不变（JSON 字节级兼容）；「存储形态
     /// → 域类型」的迁移组合语义单源在 bennu-preview::preview_config。
-    /// 结构必须住在 file-operation-store：bennu-preview 经 bennu-theme 依赖
-    /// 本 crate，serde 定义放宿主侧会成环。
     #[serde(flatten)]
     pub preview: StoredPreviewPreferences,
     pub show_hidden_files: bool,
@@ -111,7 +114,7 @@ pub struct StoredUserPreferences {
 /// 信任设备列表条目:fingerprint 是 LocalSend 协议设备身份,alias/added_at
 /// 仅用于设置页展示。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StoredTrustedTransferDevice {
+pub(crate) struct StoredTrustedTransferDevice {
     pub fingerprint: String,
     pub alias: String,
     /// ISO 8601 字符串;仅展示用途,解析失败不参与逻辑。
@@ -122,26 +125,26 @@ pub struct StoredTrustedTransferDevice {
 /// 最近一次搜索的范围；目录用 StoredPath 保留非 UTF-8 路径字节。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum StoredLastSearchScope {
+pub(crate) enum StoredLastSearchScope {
     Global,
     Directory { path: StoredPath },
 }
 
 /// 一份右键菜单的有序项列表;id 为 app 层定义的稳定字符串。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StoredContextMenuLayout {
+pub(crate) struct StoredContextMenuLayout {
     pub items: Vec<StoredContextMenuItemEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StoredContextMenuItemEntry {
+pub(crate) struct StoredContextMenuItemEntry {
     pub id: String,
     pub visible: bool,
 }
 
 /// 9 份可配置右键菜单的存储形态,字段与 app 层菜单页一一对应。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StoredContextMenuLayouts {
+pub(crate) struct StoredContextMenuLayouts {
     pub file_entry: StoredContextMenuLayout,
     pub file_blank: StoredContextMenuLayout,
     pub trash: StoredContextMenuLayout,
@@ -151,35 +154,6 @@ pub struct StoredContextMenuLayouts {
     pub sidebar_bookmark: StoredContextMenuLayout,
     pub sidebar_device: StoredContextMenuLayout,
     pub network_connection: StoredContextMenuLayout,
-}
-
-/// 空格预览偏好段的存储形态：legacy 全局上限（max_preview_file_bytes，
-/// 只读迁移，新代码写 None）、分类型大小上限、后缀规则与目录展开层级。
-/// 字段声明顺序即序列化顺序，冻结为既有文档布局，不得重排。
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct StoredPreviewPreferences {
-    #[serde(default)]
-    pub max_preview_file_bytes: Option<u64>,
-    #[serde(default)]
-    pub preview_text_size_bytes: Option<u64>,
-    #[serde(default)]
-    pub preview_image_size_bytes: Option<u64>,
-    #[serde(default)]
-    pub preview_video_size_bytes: Option<u64>,
-    #[serde(default)]
-    pub preview_audio_size_bytes: Option<u64>,
-    #[serde(default)]
-    pub preview_archive_size_bytes: Option<u64>,
-    #[serde(default)]
-    pub preview_document_size_bytes: Option<u64>,
-    #[serde(default)]
-    pub preview_sqlite_size_bytes: Option<u64>,
-    /// 空格预览的分类型后缀规则；None 表示旧版本数据，读取端回退内置
-    /// 默认列表。单类型内 None 同样回退默认，空列表是合法用户选择。
-    #[serde(default)]
-    pub preview_extension_rules: Option<StoredPreviewExtensionRules>,
-    #[serde(default)]
-    pub preview_directory_expand_levels: Option<u8>,
 }
 
 impl Default for StoredUserPreferences {
@@ -230,52 +204,6 @@ impl Default for StoredUserPreferences {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct StoredPreviewExtensionRules {
-    #[serde(default)]
-    pub text: Option<Vec<String>>,
-    #[serde(default)]
-    pub image: Option<Vec<String>>,
-    #[serde(default)]
-    pub video: Option<Vec<String>>,
-    #[serde(default)]
-    pub audio: Option<Vec<String>>,
-    #[serde(default)]
-    pub sqlite: Option<Vec<String>>,
-    #[serde(default)]
-    pub archive: Option<Vec<String>>,
-    #[serde(default)]
-    pub document: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StoredCustomColorScheme {
-    #[serde(default)]
-    pub light: Option<StoredCustomColorSet>,
-    #[serde(default)]
-    pub dark: Option<StoredCustomColorSet>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct StoredCustomColorSet {
-    #[serde(default)]
-    pub background: String,
-    #[serde(default)]
-    pub surface: String,
-    #[serde(default)]
-    pub text: String,
-    #[serde(default)]
-    pub muted_text: String,
-    #[serde(default)]
-    pub primary: String,
-    #[serde(default)]
-    pub success: String,
-    #[serde(default)]
-    pub warning: String,
-    #[serde(default)]
-    pub danger: String,
-}
-
 /// 新装/旧数据缺字段的默认策略：每次触发启动都打开新窗口。
 fn default_launch_window_policy() -> String {
     LAUNCH_WINDOW_POLICY_OPEN_NEW_WINDOW.to_owned()
@@ -287,36 +215,21 @@ fn default_column_width_adjust_mode() -> String {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StoredWindowControlPlacement {
+pub(crate) struct StoredWindowControlPlacement {
     pub kind: String,
     pub side: String,
     pub visible: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct StoredListViewColumn {
+pub(crate) struct StoredListViewColumn {
     pub kind: String,
     pub width: f64,
     pub visible: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StoredSidebarFavorite {
-    pub label: String,
-    pub path: StoredPath,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StoredNetworkConnection {
-    pub id: String,
-    pub label: String,
-    pub protocol: String,
-    pub uri: String,
-    pub auto_connect: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StoredShortcutBinding {
+pub(crate) struct StoredShortcutBinding {
     pub action_key: String,
     pub binding: String,
 }
@@ -386,7 +299,13 @@ fn default_stored_window_controls() -> Vec<StoredWindowControlPlacement> {
 }
 
 #[cfg(test)]
-mod launch_window_policy_tests {
+#[path = "stored_preferences_tests.rs"]
+mod persistence_tests;
+
+#[cfg(test)]
+mod tests {
+    use bennu_preview::preview_config::StoredPreviewExtensionRules;
+
     use super::*;
 
     #[test]

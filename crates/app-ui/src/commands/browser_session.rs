@@ -1,17 +1,17 @@
-use file_operation_store::{StoreError, StoreResult, TaskQueueStore};
+use bennu_state::{BrowserSessionStore, StoreError, StoreResult};
 
 use crate::model::{
     snapshot_from_stored, snapshot_to_stored, BrowserSessionSnapshot, SavedBrowserSession,
 };
 
 pub(super) async fn persist_browser_session(
-    task_queue_store: TaskQueueStore,
+    session_store: BrowserSessionStore,
     snapshot: BrowserSessionSnapshot,
 ) -> Result<(), String> {
     let Some(stored) = snapshot_to_stored(snapshot) else {
         return Ok(());
     };
-    tokio::task::spawn_blocking(move || task_queue_store.replace_browser_session(&stored))
+    tokio::task::spawn_blocking(move || session_store.replace_browser_session(&stored))
         .await
         .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())
@@ -19,7 +19,7 @@ pub(super) async fn persist_browser_session(
 
 /// 读不懂的会话只记日志、原样留在库里，下次保存会话时覆盖（同 Firefox、Dolphin）。
 pub(super) fn read_saved_browser_session(
-    store: &TaskQueueStore,
+    store: &BrowserSessionStore,
 ) -> StoreResult<SavedBrowserSession> {
     match store.read_browser_session() {
         Ok(None) => Ok(SavedBrowserSession::Missing),
@@ -46,7 +46,7 @@ mod tests {
     fn an_unreadable_session_is_reported_as_such_and_left_in_place() {
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("state.sqlite");
-        let store = TaskQueueStore::new(&database).unwrap();
+        let store = BrowserSessionStore::new(&database).unwrap();
         rusqlite::Connection::open(&database)
             .unwrap()
             .execute(
@@ -74,7 +74,7 @@ mod tests {
     #[test]
     fn no_saved_session_is_missing() {
         let directory = tempfile::tempdir().unwrap();
-        let store = TaskQueueStore::new(directory.path().join("state.sqlite")).unwrap();
+        let store = BrowserSessionStore::new(directory.path().join("state.sqlite")).unwrap();
 
         assert!(matches!(
             read_saved_browser_session(&store),

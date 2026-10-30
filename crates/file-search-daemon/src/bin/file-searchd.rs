@@ -6,10 +6,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use file_search::{
-    daemon_build_id, read_service_event, serve_bound_search_socket, shutdown_connected_service,
-    shutdown_via_socket, write_service_request, BoundSearchSocket, SearchIndexConfig,
-    SearchRuntimeIdentity, SearchServiceEvent, SearchServiceRequest, SearchServiceRuntime,
-    SearchSocketService, PROTOCOL_VERSION,
+    daemon_build_id, read_service_event, shutdown_connected_service, shutdown_via_socket,
+    write_service_request, SearchIndexConfig, SearchRuntimeIdentity, SearchServiceEvent,
+    SearchServiceRequest, PROTOCOL_VERSION,
+};
+use file_search_daemon::{
+    serve_bound_search_socket, BoundSearchSocket, SearchServiceRuntime, SearchSocketService,
 };
 use tokio::net::UnixStream;
 use tokio::signal::unix::{signal, SignalKind};

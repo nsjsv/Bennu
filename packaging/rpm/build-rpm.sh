@@ -61,10 +61,10 @@ install_rust_toolchain() {
 install_build_dependencies
 install_rust_toolchain
 require_matching_cargo_version app-ui
-require_matching_cargo_version file-search
+require_matching_cargo_version file-search-daemon
 
 target_dir="${CARGO_TARGET_DIR:-${REPO_ROOT}/target}"
-CARGO_TARGET_DIR="${target_dir}" cargo build --release --locked -p app-ui -p file-search -p portal-backend
+CARGO_TARGET_DIR="${target_dir}" cargo build --release --locked -p app-ui -p file-search-daemon -p portal-backend
 
 dist_dir="${REPO_ROOT}/dist"
 mkdir -p "${dist_dir}"

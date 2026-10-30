@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
+use bennu_state::{BrowserSessionStore, StateDatabase, TaskQueueStore, UserSettingsStore};
 use desktop_linux::{
     open_path_with_application, open_path_with_terminal_emulator, open_terminal_at_directory,
     open_url, open_with_applications, read_desktop_clipboard, write_file_clipboard,
@@ -13,7 +14,6 @@ use file_core::{
     create_file_with_contents_at_available_name, scan_trash_with_cancellation, ScanOptions,
     TransferConflictCheck, TransferConflictItem, TransferConflictStrategy, TrashScan,
 };
-use file_operation_store::TaskQueueStore;
 use iced::Task;
 
 use tokio_util::sync::CancellationToken;
@@ -136,13 +136,13 @@ pub(crate) fn operation_store_command(
 }
 
 pub(crate) fn save_column_width_overrides_command(
-    task_queue_store: TaskQueueStore,
+    settings_store: UserSettingsStore,
     column_width_overrides: HashMap<usize, f32>,
     reference_content_width: Option<f32>,
 ) -> Task<Message> {
     Task::perform(
         persist_column_width_overrides(
-            task_queue_store,
+            settings_store,
             column_width_overrides,
             reference_content_width,
         ),
@@ -151,11 +151,11 @@ pub(crate) fn save_column_width_overrides_command(
 }
 
 pub(crate) fn save_browser_session_command(
-    task_queue_store: TaskQueueStore,
+    session_store: BrowserSessionStore,
     snapshot: crate::model::BrowserSessionSnapshot,
 ) -> Task<Message> {
     Task::perform(
-        browser_session::persist_browser_session(task_queue_store, snapshot),
+        browser_session::persist_browser_session(session_store, snapshot),
         Message::BrowserSessionSaved,
     )
 }
@@ -530,22 +530,25 @@ async fn load_operation_store(
     startup_session_request: Option<StartupSessionPlanRequest>,
 ) -> Result<LoadedOperationStore, String> {
     let store_outcome = tokio::task::spawn_blocking(move || {
-        let store = TaskQueueStore::new(path)?;
-        let saved_session = browser_session::read_saved_browser_session(&store)?;
-        let column_width_overrides = store
+        let database = StateDatabase::open(path)?;
+        let saved_session = browser_session::read_saved_browser_session(
+            &BrowserSessionStore::from(database.clone()),
+        )?;
+        let settings_store = UserSettingsStore::from(database.clone());
+        let column_width_overrides = settings_store
             .read_column_widths()?
             .into_iter()
             .map(|(column_index, width)| {
                 (column_index, config::normalize_column_width(width as f32))
             })
             .collect();
-        let column_width_reference_content_width = store
+        let column_width_reference_content_width = settings_store
             .read_column_width_reference_content_width()?
             .map(|width| width as f32);
         let classified_startup_session = startup_session_request
             .map(|request| startup_paths::classify_startup_session(request, saved_session));
-        Ok::<LoadedOperationStore, file_operation_store::StoreError>(LoadedOperationStore {
-            task_queue_store: store,
+        Ok::<LoadedOperationStore, bennu_state::StoreError>(LoadedOperationStore {
+            task_queue_store: TaskQueueStore::from(database),
             column_width_overrides,
             column_width_reference_content_width,
             classified_startup_session,
@@ -557,7 +560,7 @@ async fn load_operation_store(
 }
 
 async fn persist_column_width_overrides(
-    task_queue_store: TaskQueueStore,
+    settings_store: UserSettingsStore,
     column_width_overrides: HashMap<usize, f32>,
     reference_content_width: Option<f32>,
 ) -> Result<(), String> {
@@ -572,7 +575,7 @@ async fn persist_column_width_overrides(
         .collect();
     let stored_reference = reference_content_width.map(f64::from);
     tokio::task::spawn_blocking(move || {
-        task_queue_store.replace_column_widths(stored_widths, stored_reference)
+        settings_store.replace_column_widths(stored_widths, stored_reference)
     })
     .await
     .map_err(|error| error.to_string())?

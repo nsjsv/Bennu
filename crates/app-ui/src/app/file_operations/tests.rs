@@ -145,7 +145,7 @@ fn file_operation_events_preserve_queue_panel_visibility() {
     let operation_directory = tempfile::tempdir().expect("create operation directory");
     attach_store(
         &mut browser.operation_queue,
-        file_operation_store::TaskQueueStore::new(operation_directory.path().join("state.sqlite"))
+        bennu_state::TaskQueueStore::new(operation_directory.path().join("state.sqlite"))
             .expect("create operation store"),
     );
 
@@ -324,7 +324,7 @@ async fn moved_renames_migrate_paths_before_terminal_completion() {
     browser.tab_mut().current_dir = source.join("nested");
     attach_store(
         &mut browser.operation_queue,
-        file_operation_store::TaskQueueStore::new(workspace.path().join("state.sqlite")).unwrap(),
+        bennu_state::TaskQueueStore::new(workspace.path().join("state.sqlite")).unwrap(),
     );
     enqueue_file_operation_persisted(
         &mut browser,
@@ -381,7 +381,7 @@ async fn moved_renames_batch_migrates_all_paths_with_one_pane_and_search_refresh
     drop(browser.update_search_input("report".to_owned()));
     attach_store(
         &mut browser.operation_queue,
-        file_operation_store::TaskQueueStore::new(workspace.path().join("state.sqlite")).unwrap(),
+        bennu_state::TaskQueueStore::new(workspace.path().join("state.sqlite")).unwrap(),
     );
     enqueue_file_operation_persisted(
         &mut browser,
@@ -733,8 +733,7 @@ fn failed_move_migrates_paths_for_completed_transfers_only() {
     let operation_directory = tempfile::tempdir().unwrap();
     attach_store(
         &mut browser.operation_queue,
-        file_operation_store::TaskQueueStore::new(operation_directory.path().join("state.sqlite"))
-            .unwrap(),
+        bennu_state::TaskQueueStore::new(operation_directory.path().join("state.sqlite")).unwrap(),
     );
 
     let task_id = enqueue_persisted(

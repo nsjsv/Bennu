@@ -17,11 +17,15 @@ use crate::model::{
 };
 
 use super::{
-    read_service_event, read_service_request, read_service_request_before, search_via_socket,
-    search_via_socket_with_cancellation, serve_bound_search_socket, serve_search_socket,
-    shutdown_via_socket, status_via_socket, validate_wire_query, version_via_socket,
-    write_service_event, write_service_request, BoundSearchSocket, SearchSocketService,
-    MAX_ACTIVE_CLIENTS, MAX_QUERY_ENTRY_TYPE_RULES, MAX_QUERY_TERMS_BYTES, MAX_REQUEST_FRAME_BYTES,
+    read_service_request_before, serve_bound_search_socket, serve_search_socket,
+    validate_wire_query, BoundSearchSocket, SearchSocketService, MAX_ACTIVE_CLIENTS,
+    MAX_QUERY_ENTRY_TYPE_RULES, MAX_QUERY_TERMS_BYTES,
+};
+use file_search::protocol::MAX_REQUEST_FRAME_BYTES;
+use file_search::{
+    read_service_event, read_service_request, search_via_socket,
+    search_via_socket_with_cancellation, shutdown_via_socket, status_via_socket,
+    version_via_socket, write_service_event, write_service_request,
 };
 
 struct UnavailableSearchService;
@@ -167,7 +171,7 @@ fn wire_query_validation_rejects_resource_amplifying_fields() {
     assert!(validate_wire_query(&query).is_err());
 
     query.limit = 50;
-    query.filters.modified = Some(crate::TimeRange {
+    query.filters.modified = Some(crate::model::TimeRange {
         start_ms: 2,
         end_ms: 1,
     });

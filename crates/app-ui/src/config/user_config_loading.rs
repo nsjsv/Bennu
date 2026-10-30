@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use file_operation_store::{StoreResult, TaskQueueStore, UnreadablePreferences};
+use bennu_state::{StoreResult, UnreadablePreferences, UserSettingsStore};
 
 use super::app_config::AppConfig;
 use super::legacy_toml;
@@ -36,7 +36,7 @@ pub(super) fn load_user_config_from_sources(
         }),
     };
 
-    let store = match TaskQueueStore::new(state_database_path) {
+    let store = match UserSettingsStore::new(state_database_path) {
         Ok(store) => store,
         Err(error) => return unavailable(default, error.to_string()),
     };
@@ -82,7 +82,7 @@ pub(crate) fn read_user_preferences_without_repair(
     state_database_path: &Path,
 ) -> StoreResult<UserPreferences> {
     let default = default_user_config();
-    let read = TaskQueueStore::new(state_database_path)?
+    let read = UserSettingsStore::new(state_database_path)?
         .read_user_preferences(&default.user_preferences().to_stored())?;
     Ok(match read {
         Some(read) => UserPreferences::from_stored(read.preferences, &default).preferences,
@@ -113,7 +113,7 @@ fn reset_settings(
 /// 备份失败时原数据不动，本次也不再写回设置。备份成功而写回失败只记日志：
 /// 原数据已有备份，之后照常保存会再写回。
 fn repair_user_preferences(
-    store: &TaskQueueStore,
+    store: &UserSettingsStore,
     raw_payload: &str,
     config: &UserConfig,
     reset: ResetSettings,

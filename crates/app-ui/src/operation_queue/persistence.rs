@@ -1,11 +1,11 @@
-use file_core::{
-    ArchiveCompressionLevel, ArchiveFormat, BatchRenameItem, FileOperationVerification,
-    TransferConflictStrategy, TrashRestoreEntry,
-};
-use file_operation_store::{
+use bennu_state::{
     StoredArchiveCompressionLevel, StoredArchiveFormat, StoredBatchRenameItem, StoredFileName,
     StoredFileOperationVerification, StoredOperation, StoredPath, StoredSymbolicLinkCreation,
     StoredTransfer, StoredTransferConflictStrategy, StoredTrashEntry, TRANSFER_JOURNAL_VERSION,
+};
+use file_core::{
+    ArchiveCompressionLevel, ArchiveFormat, BatchRenameItem, FileOperationVerification,
+    TransferConflictStrategy, TrashRestoreEntry,
 };
 
 use super::{QueuedFileOperation, QueuedTransfer};

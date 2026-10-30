@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use file_operation_store::StoredProgress;
+use bennu_state::StoredProgress;
 
 use super::*;
 

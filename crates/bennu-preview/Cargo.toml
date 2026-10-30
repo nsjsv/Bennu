@@ -45,11 +45,6 @@ url.workspace = true
 # （见 src/animation.rs 注释）。
 file-core = { path = "../file-core" }
 bennu-theme = { path = "../bennu-theme" }
-# 预览偏好存储 DTO 与 USER_PREFERENCES_KEY 单源：serde 定义必须住在
-# 本 crate 之下的最低层（bennu-preview → bennu-theme →
-# file-operation-store，放宿主侧会成环）；「存储形态 → 域类型」的迁移
-# 组合语义在本 crate preview_config，两个宿主（app-ui/portal）共用。
-file-operation-store = { path = "../file-operation-store" }
 # 命令/加载层随迁依赖（版本与 app-ui 原声明一致）：
 # thumbnails=图片尺寸探测/EXIF 方向换算；resvg+roxmltree=SVG 原图预览；
 # blake3=远程缓存条目签名；dirs=缓存目录默认位置；rusqlite(bundled)=
@@ -59,7 +54,9 @@ resvg.workspace = true
 roxmltree = "0.20.0"
 blake3.workspace = true
 rusqlite = { version = "0.32.1", features = ["bundled"] }
-# preview_config 从主软件 state.sqlite 的 JSON 载荷解析预览偏好段。
+# preview_config 定义预览偏好段在设置文档里的存储形态（serde）；
+# 「存储形态 → 域类型」的迁移组合语义也在那里，app-ui 与 portal 共用。
+serde = { version = "1.0.228", features = ["derive"] }
 serde_json.workspace = true
 # libc=文档工具子进程按进程组终止（SIGKILL/-pgid）；bennu-subprocess=
 # 受限子进程输出读取（document_preview/process 与 app-ui 日志查询共用

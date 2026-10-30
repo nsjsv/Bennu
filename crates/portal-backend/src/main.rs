@@ -599,6 +599,10 @@ fn main() {
         .with_writer(std::io::stderr)
         .init();
 
+    // 主题、侧边栏、预览偏好都读主程序的状态库，整个进程共用这一份连接。
+    // 打开失败不在这里处理：各读取方拿不到库时会各自记日志并回退默认值。
+    let _state_database = bennu_state::StateDatabase::open(theme::state_database_path());
+
     let (bridge_sender, bridge_receiver) = mpsc::channel(16);
     let _ = BRIDGE_SLOT.set(Mutex::new(Some(bridge_receiver)));
 

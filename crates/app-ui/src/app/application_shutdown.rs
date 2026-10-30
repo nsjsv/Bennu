@@ -1,8 +1,6 @@
 use std::collections::{BTreeSet, HashSet};
 
-use file_operation_store::{
-    StoredApplicationShutdown, StoredBrowserSessionShutdown, TaskQueueStore,
-};
+use bennu_state::{StateDatabase, StoredApplicationShutdown, StoredBrowserSessionShutdown};
 use iced::{window, Task};
 
 use super::file_operations::queue_finish_from_completion;
@@ -28,8 +26,8 @@ pub(super) enum ApplicationShutdownPhase {
 
 pub(super) struct ApplicationShutdownDrain {
     waiting_for_operation_ids: BTreeSet<u64>,
-    store: Option<TaskQueueStore>,
-    commit: Option<StoredApplicationShutdown>,
+    store: Option<StateDatabase>,
+    commit: Option<StoredApplicationShutdown<config::StoredUserPreferences>>,
     persistence_started: bool,
     pending_window_ids: HashSet<window::Id>,
 }
@@ -63,7 +61,7 @@ impl FileBrowser {
         } else {
             StoredBrowserSessionShutdown::Skip
         };
-        let store = self.operation_queue.task_queue_store().cloned();
+        let store = self.operation_queue.state_database();
         let user_preferences_need_final_commit = store.is_some()
             || self.user_preferences_save_in_flight
             || self.pending_user_preferences_save.is_some();

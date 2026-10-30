@@ -108,7 +108,7 @@ impl TaskQueueStore {
         operation: &StoredOperation,
     ) -> StoreResult<ClaimedRecoverableTask> {
         let seeds = recoverable_transfer_seeds(operation)?;
-        let mut connection = self.connection()?;
+        let mut connection = self.database.write();
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let now = current_time_ms();
         let payload_json = serde_json::to_string(operation)?;
@@ -164,14 +164,14 @@ impl TaskQueueStore {
         &self,
         task_id: u64,
     ) -> StoreResult<Option<RecoverableTaskRunnerLease>> {
-        try_acquire_lock(recoverable_task_runner_lock_path(&self.db_path, task_id))
+        try_acquire_lock(recoverable_task_runner_lock_path(self.db_path(), task_id))
             .map(|lock_file| lock_file.map(|_lock_file| RecoverableTaskRunnerLease { _lock_file }))
     }
 
     pub fn try_acquire_recoverable_restore_coordinator(
         &self,
     ) -> StoreResult<Option<RecoverableRestoreCoordinatorLease>> {
-        try_acquire_lock(recoverable_restore_coordinator_lock_path(&self.db_path)).map(
+        try_acquire_lock(recoverable_restore_coordinator_lock_path(self.db_path())).map(
             |lock_file| {
                 lock_file.map(|_lock_file| RecoverableRestoreCoordinatorLease { _lock_file })
             },
@@ -182,7 +182,7 @@ impl TaskQueueStore {
         &self,
         task_id: u64,
     ) -> StoreResult<StoredTransferRecoverySnapshot> {
-        let mut connection = self.connection()?;
+        let mut connection = self.database.read();
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Deferred)?;
         let sqlite_task_id = sqlite_index(task_id)?;
         let mut statement = transaction.prepare(
@@ -361,7 +361,7 @@ impl TaskQueueStore {
             return Ok(None);
         }
 
-        let mut connection = self.connection()?;
+        let mut connection = self.database.write();
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let next_revision =
             expected_revision
@@ -434,7 +434,7 @@ impl TaskQueueStore {
         if updates.is_empty() {
             return Ok(Vec::new());
         }
-        let mut connection = self.connection()?;
+        let mut connection = self.database.write();
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let mut revisions = Vec::with_capacity(updates.len());
         for update in updates {
@@ -529,7 +529,7 @@ impl TaskQueueStore {
                 .ok_or(StoreError::InvalidRecoverableOperation(
                     "transfer revision overflow",
                 ))?;
-        let connection = self.connection()?;
+        let connection = self.database.write();
         let updated = update_checkpoint(
             &connection,
             task_id,
@@ -549,7 +549,7 @@ impl TaskQueueStore {
         if swaps.is_empty() {
             return Ok(Vec::new());
         }
-        let mut connection = self.connection()?;
+        let mut connection = self.database.write();
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let mut revisions = Vec::with_capacity(swaps.len());
         for swap in swaps {
@@ -601,7 +601,7 @@ impl TaskQueueStore {
                 .ok_or(StoreError::InvalidRecoverableOperation(
                     "transfer revision overflow",
                 ))?;
-        let mut connection = self.connection()?;
+        let mut connection = self.database.write();
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let updated = update_checkpoint(
             &transaction,
@@ -642,7 +642,7 @@ impl TaskQueueStore {
                 "only completed, canceled, or failed transfers can discard recovery details",
             ));
         }
-        let mut connection = self.connection()?;
+        let mut connection = self.database.write();
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let sqlite_task_id = sqlite_index(task_id)?;
         let journal_rows: i64 = transaction.query_row(
@@ -695,7 +695,7 @@ impl TaskQueueStore {
     }
 
     pub fn delete_transfer_recovery(&self, task_id: u64) -> StoreResult<()> {
-        let mut connection = self.connection()?;
+        let mut connection = self.database.write();
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let sqlite_task_id = sqlite_index(task_id)?;
         transaction.execute(

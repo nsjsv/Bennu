@@ -3,9 +3,9 @@ use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use file_search::{
-    status_via_socket, version_via_socket, IndexedQueryAvailability, SearchDatabase,
-    SearchServicePhase,
+    status_via_socket, version_via_socket, IndexedQueryAvailability, SearchServicePhase,
 };
+use file_search_daemon::SearchDatabase;
 use tempfile::{tempdir, TempDir};
 use tokio::io::AsyncReadExt;
 use tokio::net::UnixStream;

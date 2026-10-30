@@ -2,11 +2,14 @@
 
 use std::path::{Path, PathBuf};
 
-use super::*;
 use crate::database::{EntryStageProgress, IndexedEntryStageState, IndexedFile, SearchDatabase};
 use crate::extractor::ExtractionStatus;
-use crate::model::SearchQuery;
+use crate::model::{
+    MimePattern, SearchEntryTypeRule, SearchFileKind, SearchFilters, SearchQuery, SizeRange,
+    TimeRange,
+};
 use crate::text_matching::normalize_search_text;
+use file_search::filter_semantics::EntryFacts;
 
 pub(crate) struct FilterCase {
     pub(crate) label: &'static str,

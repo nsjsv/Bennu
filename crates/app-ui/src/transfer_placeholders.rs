@@ -634,8 +634,7 @@ mod tests {
     fn placeholder_test_queue() -> (FileOperationQueue, tempfile::TempDir) {
         let directory = tempfile::tempdir().unwrap();
         let store =
-            file_operation_store::TaskQueueStore::new(directory.path().join("state.sqlite"))
-                .unwrap();
+            bennu_state::TaskQueueStore::new(directory.path().join("state.sqlite")).unwrap();
         let mut queue = FileOperationQueue::new();
         attach_store(&mut queue, store);
         (queue, directory)

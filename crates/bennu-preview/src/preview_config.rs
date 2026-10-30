@@ -1,15 +1,59 @@
 //! 空格预览的配置域：分类型大小上限、后缀规则与目录展开层级，以及
 //! 「存储形态 → 域类型」的迁移组合语义（含 legacy 全局上限 seeding），
 //! app-ui 与 portal 两宿主单源共用。serde 存储结构
-//! `StoredPreviewPreferences` 因 bennu-theme → file-operation-store 的
-//! 依赖边住在 file-operation-store（全宿主可见的最低层）；portal 经
-//! `load_preview_preferences_from_state_database` 只读直拉主软件
-//! state.sqlite，失败由调用方回落本模块默认规则。
+//! `StoredPreviewPreferences` 由本 crate 定义（设置文档在宿主侧，预览段是其中
+//! 一块 flatten 的键）；读哪个库、怎么读是宿主的事，本 crate 不依赖存储层。
 
 use std::path::Path;
 
-use file_operation_store::{StoredPreviewPreferences, USER_PREFERENCES_KEY};
-use rusqlite::OptionalExtension;
+use serde::{Deserialize, Serialize};
+
+/// 空格预览偏好段的存储形态：legacy 全局上限（max_preview_file_bytes，
+/// 只读迁移，新代码写 None）、分类型大小上限、后缀规则与目录展开层级。
+/// 字段声明顺序即序列化顺序，冻结为既有文档布局，不得重排。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct StoredPreviewPreferences {
+    #[serde(default)]
+    pub max_preview_file_bytes: Option<u64>,
+    #[serde(default)]
+    pub preview_text_size_bytes: Option<u64>,
+    #[serde(default)]
+    pub preview_image_size_bytes: Option<u64>,
+    #[serde(default)]
+    pub preview_video_size_bytes: Option<u64>,
+    #[serde(default)]
+    pub preview_audio_size_bytes: Option<u64>,
+    #[serde(default)]
+    pub preview_archive_size_bytes: Option<u64>,
+    #[serde(default)]
+    pub preview_document_size_bytes: Option<u64>,
+    #[serde(default)]
+    pub preview_sqlite_size_bytes: Option<u64>,
+    /// 空格预览的分类型后缀规则；None 表示旧版本数据，读取端回退内置
+    /// 默认列表。单类型内 None 同样回退默认，空列表是合法用户选择。
+    #[serde(default)]
+    pub preview_extension_rules: Option<StoredPreviewExtensionRules>,
+    #[serde(default)]
+    pub preview_directory_expand_levels: Option<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct StoredPreviewExtensionRules {
+    #[serde(default)]
+    pub text: Option<Vec<String>>,
+    #[serde(default)]
+    pub image: Option<Vec<String>>,
+    #[serde(default)]
+    pub video: Option<Vec<String>>,
+    #[serde(default)]
+    pub audio: Option<Vec<String>>,
+    #[serde(default)]
+    pub sqlite: Option<Vec<String>>,
+    #[serde(default)]
+    pub archive: Option<Vec<String>>,
+    #[serde(default)]
+    pub document: Option<Vec<String>>,
+}
 
 pub const PREVIEW_FILE_SIZE_UNIT_BYTES: u64 = 1024 * 1024;
 pub const DEFAULT_PREVIEW_TEXT_SIZE_BYTES: u64 = 25 * PREVIEW_FILE_SIZE_UNIT_BYTES;
@@ -335,37 +379,12 @@ pub fn preview_preferences_from_stored(stored: &StoredPreviewPreferences) -> Pre
     }
 }
 
-/// portal 只读入口：从主软件 state.sqlite 的 user_preferences 载荷拉取
-/// 预览偏好段并解析为域类型。只读打开（绝不写主软件库）；只解析
-/// preview 键、其余偏好键忽略，主软件后续增删字段不会波及 portal。
-/// 文件不存在/无行/裁剪载荷损坏一律返回 Err，调用方回落共享 crate 默认。
-pub fn load_preview_preferences_from_state_database(
-    database_path: &Path,
-) -> Result<PreviewPreferences, String> {
-    let connection = crate::sqlite_preview::open_read_only(database_path)?;
-    let payload_json = connection
-        .query_row(
-            "SELECT payload_json FROM user_preferences WHERE preference_key = ?1",
-            rusqlite::params![USER_PREFERENCES_KEY],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()
-        .map_err(|error| format!("Could not read user preferences: {error}"))?;
-    let Some(payload_json) = payload_json else {
-        return Err("No stored user preferences row".to_owned());
-    };
-    let stored: StoredPreviewPreferences = serde_json::from_str(&payload_json)
-        .map_err(|error| format!("Invalid user preferences payload: {error}"))?;
-    Ok(preview_preferences_from_stored(&stored))
-}
-
 #[cfg(test)]
 mod stored_preferences_migration_tests {
     use super::*;
-    use file_operation_store::{StoredPreviewExtensionRules, StoredUserPreferences};
 
     /// 下沉前（平铺字段时代）整份用户偏好文档样本：仅含无 serde 缺省的
-    /// 必需键 + 全部 preview 键，字段名与旧 StoredUserPreferences 逐字一致。
+    /// 必需键 + 全部 preview 键，字段名与旧设置文档逐字一致。
     const LEGACY_DOCUMENT: &str = r#"{
         "network_list_thumbnail_downloads_enabled": false,
         "max_preview_file_bytes": 4194304,
@@ -401,17 +420,12 @@ mod stored_preferences_migration_tests {
 
     #[test]
     fn legacy_document_resolves_per_kind_limits_with_legacy_global_seeding() {
-        let stored: StoredUserPreferences =
-            serde_json::from_str(LEGACY_DOCUMENT).expect("legacy document parses");
-        // 同一文档按「只取 preview 段」解析（loader 的视角）与整份解析等价。
-        let segment: StoredPreviewPreferences = serde_json::from_str(LEGACY_DOCUMENT)
+        // 整份设置文档里只取 preview 段解析（loader 的视角）。
+        let stored: StoredPreviewPreferences = serde_json::from_str(LEGACY_DOCUMENT)
             .expect("legacy document parses as preview segment");
-        assert_eq!(stored.preview, segment);
 
-        let limits = preview_size_limits_from_stored(
-            &stored.preview,
-            PreviewFileSizeLimits::with_default_limits(),
-        );
+        let limits =
+            preview_size_limits_from_stored(&stored, PreviewFileSizeLimits::with_default_limits());
         // null（缺失）类型吃 legacy 全局值，显式分类型键覆盖全局值。
         assert_eq!(limits.text_bytes, 4194304);
         assert_eq!(limits.image_bytes, 1048576);
@@ -421,13 +435,10 @@ mod stored_preferences_migration_tests {
         assert_eq!(limits.document_bytes, 4194304);
         assert_eq!(limits.sqlite_bytes, 4194304);
 
-        let preferences = preview_preferences_from_stored(&stored.preview);
+        let preferences = preview_preferences_from_stored(&stored);
         assert_eq!(
             preferences.size_limits,
-            preview_size_limits_from_stored(
-                &stored.preview,
-                PreviewFileSizeLimits::with_default_limits()
-            )
+            preview_size_limits_from_stored(&stored, PreviewFileSizeLimits::with_default_limits())
         );
         assert_eq!(preferences.directory_expand_levels, 2);
     }
@@ -479,131 +490,5 @@ mod stored_preferences_migration_tests {
         assert_eq!(levels(Some(3)), 3);
         // 越界存值归一化夹住，与 app-ui 历史行为一致。
         assert_eq!(levels(Some(9)), 3);
-    }
-
-    /// 字节级兼容门：flatten 组合后的默认序列化必须与下沉前的平铺布局
-    /// 逐字一致（字段名、顺序、null 形态），否则旧库新读/新写旧读都会
-    /// 出现语义外的裁剪差异。布局变更必须经迁移评审，不许静默改。
-    #[test]
-    fn stored_user_preferences_default_json_layout_is_frozen() {
-        const FROZEN_DEFAULT_JSON: &str = "{\"network_list_thumbnail_downloads_enabled\":false,\"max_preview_file_bytes\":null,\"preview_text_size_bytes\":null,\"preview_image_size_bytes\":null,\"preview_video_size_bytes\":null,\"preview_audio_size_bytes\":null,\"preview_archive_size_bytes\":null,\"preview_document_size_bytes\":null,\"preview_sqlite_size_bytes\":null,\"preview_extension_rules\":null,\"preview_directory_expand_levels\":null,\"show_hidden_files\":false,\"language_setting\":\"system\",\"sidebar_width\":180.0,\"right_preview_panel_open\":false,\"right_preview_panel_width\":null,\"right_preview_preview_ratio\":null,\"sidebar_favorites\":null,\"network_connections\":[],\"terminal_emulator\":\"automatic\",\"terminal_shell\":null,\"file_operation_verification\":\"basic_metadata\",\"browser_view_mode\":\"columns\",\"columns_view_density\":2,\"list_view_density\":2,\"icons_view_density\":2,\"visible_column_count\":3,\"startup_location\":\"home\",\"startup_custom_directory\":{\"encoding\":\"unix_bytes\",\"bytes\":[]},\"save_view_state\":false,\"shortcuts\":[],\"list_view_columns\":[{\"kind\":\"name\",\"width\":320.0,\"visible\":true},{\"kind\":\"modified\",\"width\":168.0,\"visible\":true},{\"kind\":\"size\",\"width\":96.0,\"visible\":true},{\"kind\":\"kind\",\"width\":96.0,\"visible\":true},{\"kind\":\"owner\",\"width\":120.0,\"visible\":false},{\"kind\":\"group\",\"width\":120.0,\"visible\":false},{\"kind\":\"permissions\",\"width\":128.0,\"visible\":false},{\"kind\":\"accessed\",\"width\":168.0,\"visible\":false},{\"kind\":\"created\",\"width\":168.0,\"visible\":false}],\"list_sort_field\":\"name\",\"list_sort_direction\":\"ascending\",\"list_directory_size_display_mode\":\"item_count\",\"file_grouping\":null,\"window_chrome_layout\":\"integrated_navigation\",\"window_controls\":[{\"kind\":\"minimize\",\"side\":\"right\",\"visible\":true},{\"kind\":\"maximize_restore\",\"side\":\"right\",\"visible\":true},{\"kind\":\"close\",\"side\":\"right\",\"visible\":true}],\"search_history\":[],\"last_search_scope\":null,\"theme_mode\":\"automatic\",\"color_scheme\":\"default\",\"custom_color_scheme\":null,\"launch_window_policy\":\"open_new_window\",\"column_width_adjust_mode\":\"per_column\",\"context_menu_layouts\":null,\"transfer_download_dir\":null,\"transfer_device_alias\":null,\"transfer_trusted_devices\":[]}";
-        let serialized = serde_json::to_string(&StoredUserPreferences::default())
-            .expect("serialize stored preferences");
-        assert_eq!(serialized, FROZEN_DEFAULT_JSON);
-    }
-
-    #[test]
-    fn full_legacy_document_roundtrips_through_stored_user_preferences() {
-        let parsed: StoredUserPreferences =
-            serde_json::from_str(LEGACY_DOCUMENT).expect("legacy document parses");
-        let serialized = serde_json::to_string(&parsed).expect("serialize roundtrip");
-        // 读旧写新字节等值：旧文档重新落盘不产生任何布局差异。
-        let reparsed: StoredUserPreferences =
-            serde_json::from_str(&serialized).expect("reparsed roundtrip");
-        assert_eq!(parsed, reparsed);
-        assert_eq!(
-            serde_json::to_string(&reparsed).expect("serialize reparsed"),
-            serialized
-        );
-        assert_eq!(parsed.preview.preview_directory_expand_levels, Some(2));
-        assert_eq!(
-            parsed
-                .preview
-                .preview_extension_rules
-                .as_ref()
-                .and_then(|rules| rules.text.clone()),
-            Some(vec!["txt".to_owned(), "log".to_owned()])
-        );
-    }
-}
-
-#[cfg(test)]
-mod state_database_loader_tests {
-    use super::*;
-    use std::path::PathBuf;
-
-    fn fixture_database(payload: Option<&str>) -> (tempfile::TempDir, PathBuf) {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("state.sqlite");
-        let connection = rusqlite::Connection::open(&path).expect("fixture database");
-        connection
-            .execute(
-                "CREATE TABLE user_preferences (
-                     preference_key TEXT PRIMARY KEY,
-                     payload_json TEXT NOT NULL,
-                     updated_at_ms INTEGER NOT NULL
-                 )",
-                [],
-            )
-            .expect("user_preferences table");
-        if let Some(payload) = payload {
-            connection
-                .execute(
-                    "INSERT INTO user_preferences (preference_key, payload_json, updated_at_ms)
-                     VALUES (?1, ?2, 0)",
-                    rusqlite::params![USER_PREFERENCES_KEY, payload],
-                )
-                .expect("fixture row");
-        }
-        (dir, path)
-    }
-
-    #[test]
-    fn loader_resolves_stored_payload_with_legacy_migration() {
-        let payload = r#"{
-            "network_list_thumbnail_downloads_enabled": false,
-            "max_preview_file_bytes": 4194304,
-            "preview_text_size_bytes": null,
-            "preview_image_size_bytes": 1048576,
-            "preview_extension_rules": {"text": ["md"], "image": []},
-            "preview_directory_expand_levels": 2,
-            "show_hidden_files": false,
-            "sidebar_width": 180.0,
-            "sidebar_favorites": null,
-            "network_connections": [],
-            "terminal_emulator": "automatic",
-            "file_operation_verification": "basic_metadata",
-            "browser_view_mode": "columns",
-            "startup_location": "home",
-            "startup_custom_directory": {"encoding": "unix_bytes", "bytes": []},
-            "save_view_state": false,
-            "shortcuts": []
-        }"#;
-        let (_dir, path) = fixture_database(Some(payload));
-
-        let preferences = load_preview_preferences_from_state_database(&path)
-            .expect("loader resolves stored payload");
-
-        assert_eq!(preferences.size_limits.text_bytes, 4194304);
-        assert_eq!(preferences.size_limits.image_bytes, 1048576);
-        assert_eq!(preferences.size_limits.video_bytes, 4194304);
-        assert_eq!(preferences.extension_rules.text, vec!["md".to_owned()]);
-        assert_eq!(preferences.extension_rules.image, Vec::<String>::new());
-        assert_eq!(
-            preferences.extension_rules.video,
-            PreviewExtensionRules::default_rules().video
-        );
-        assert_eq!(preferences.directory_expand_levels, 2);
-    }
-
-    #[test]
-    fn loader_falls_back_to_error_on_missing_or_corrupt_state() {
-        // 文件不存在。
-        let missing_file = PathBuf::from("/nonexistent-bennu-preview-fixture/state.sqlite");
-        assert!(load_preview_preferences_from_state_database(&missing_file).is_err());
-
-        // 库在但没表（schema 未初始化）。
-        let dir = tempfile::tempdir().expect("temp dir");
-        let empty_path = dir.path().join("state.sqlite");
-        let _ = rusqlite::Connection::open(&empty_path).expect("empty database");
-        assert!(load_preview_preferences_from_state_database(&empty_path).is_err());
-
-        // 表在但没行（主软件从未保存过偏好）。
-        let (_dir, no_row) = fixture_database(None);
-        assert!(load_preview_preferences_from_state_database(&no_row).is_err());
-
-        // 载荷损坏。
-        let (_dir, corrupt) = fixture_database(Some("not json"));
-        assert!(load_preview_preferences_from_state_database(&corrupt).is_err());
     }
 }

@@ -7,12 +7,13 @@
 
 use std::path::Path;
 
+use bennu_state::UserSettingsStore;
 use bennu_theme::{
     default_custom_color_scheme, fallback_theme, parse_matugen_theme, ApplicationTheme,
-    ColorSchemePreset, CustomColorScheme, ThemeMode,
+    ColorSchemePreset, CustomColorScheme, StoredCustomColorScheme, ThemeMode,
 };
-use file_operation_store::TaskQueueStore;
 use iced::Theme;
+use serde::{Deserialize, Serialize};
 
 /// 从主程序状态库读出的外观偏好（解析失败视为未设置）。
 pub(crate) struct StoredAppearance {
@@ -54,12 +55,40 @@ pub(crate) fn state_database_path() -> std::path::PathBuf {
     file_core::app_dirs::app_data_dir().join("state.sqlite")
 }
 
+/// 设置文档里外观用到的三个键，缺省值与主程序的设置文档一致（旧数据没有这些键）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AppearanceSettings {
+    #[serde(default = "default_theme_mode")]
+    theme_mode: String,
+    #[serde(default = "default_color_scheme")]
+    color_scheme: String,
+    #[serde(default)]
+    custom_color_scheme: Option<StoredCustomColorScheme>,
+}
+
+impl Default for AppearanceSettings {
+    fn default() -> Self {
+        Self {
+            theme_mode: default_theme_mode(),
+            color_scheme: default_color_scheme(),
+            custom_color_scheme: None,
+        }
+    }
+}
+
+fn default_theme_mode() -> String {
+    "automatic".to_owned()
+}
+
+fn default_color_scheme() -> String {
+    "default".to_owned()
+}
+
 /// 只读：读不懂的项已由存储层换成默认值；读出错时记日志、按未设置处理，不备份、不写
 /// （主程序启动时会备份并提示）。
 fn read_stored_appearance(db_path: &Path) -> Option<StoredAppearance> {
-    let read = TaskQueueStore::new(db_path).and_then(|store| {
-        store.read_user_preferences(&file_operation_store::StoredUserPreferences::default())
-    });
+    let read = UserSettingsStore::new(db_path)
+        .and_then(|store| store.read_user_preferences(&AppearanceSettings::default()));
     let stored = match read {
         Ok(read) => read?.preferences,
         Err(error) => {
@@ -177,14 +206,14 @@ mod tests {
     fn a_damaged_setting_keeps_the_stored_theme_and_leaves_the_database_alone() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let database = directory.path().join("state.sqlite");
-        TaskQueueStore::new(&database).expect("create store");
+        UserSettingsStore::new(&database).expect("create store");
         let payload = r#"{"theme_mode":"dark","color_scheme":"nord","show_hidden_files":"yes"}"#;
         let stored_payload = || -> String {
             rusqlite::Connection::open(&database)
                 .unwrap()
                 .query_row(
                     "SELECT payload_json FROM user_preferences WHERE preference_key = ?1",
-                    [file_operation_store::USER_PREFERENCES_KEY],
+                    [bennu_state::USER_PREFERENCES_KEY],
                     |row| row.get(0),
                 )
                 .unwrap()
@@ -194,7 +223,7 @@ mod tests {
             .execute(
                 "INSERT INTO user_preferences (preference_key, payload_json, updated_at_ms)
                  VALUES (?1, ?2, 1)",
-                [file_operation_store::USER_PREFERENCES_KEY, payload],
+                [bennu_state::USER_PREFERENCES_KEY, payload],
             )
             .unwrap();
 

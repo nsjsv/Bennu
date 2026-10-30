@@ -1,34 +1,27 @@
 [package]
 name = "file-search"
-autobins = false
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+# 客户端与两端共享的约定；守护进程（数据库、爬虫、内容提取、bennu-searchd）在 file-search-daemon。
+# rusqlite/notify 只为共享的 SearchError 变体与过滤条件的 SQL 参数类型服务，客户端不打开数据库。
 [dependencies]
 file-core = { path = "../file-core" }
 icu_normalizer = { version = "2.2.0", default-features = false, features = ["compiled_data"] }
 libc = "0.2"
 notify.workspace = true
-quick-xml = "0.39.4"
 regex = "1.12.3"
 rusqlite = { version = "0.32.1", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["signal"] }
+tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
-tracing-journald.workspace = true
-tracing-subscriber.workspace = true
 unicase = "2.9.0"
 unicode-segmentation = "1.13.2"
-zip = "8.6.0"
 
 [dev-dependencies]
 tempfile.workspace = true
-
-[[bin]]
-name = "bennu-searchd"
-path = "src/bin/file-searchd.rs"

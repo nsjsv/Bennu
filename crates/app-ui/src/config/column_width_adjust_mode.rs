@@ -1,4 +1,4 @@
-use file_operation_store::{COLUMN_WIDTH_ADJUST_MODE_PER_COLUMN, COLUMN_WIDTH_ADJUST_MODE_UNIFORM};
+use super::{COLUMN_WIDTH_ADJUST_MODE_PER_COLUMN, COLUMN_WIDTH_ADJUST_MODE_UNIFORM};
 
 /// 多栏视图拖动分隔条时的栏宽联动方式:每栏独立调宽,或所有栏保持等宽一起变。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

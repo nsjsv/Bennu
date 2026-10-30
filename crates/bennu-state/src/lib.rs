@@ -11,7 +11,6 @@ mod recoverable_transfer;
 mod shutdown;
 mod stored_path;
 mod task_queue;
-mod user_preferences;
 mod user_settings;
 
 pub use browser_session::{
@@ -40,7 +39,6 @@ pub use task_queue::{
     StoredInterruptedRecoverableTask, StoredOperation, StoredProgress, StoredSymbolicLinkCreation,
     StoredTask, StoredTaskStatus, StoredTransfer, StoredTrashEntry, TaskQueueStore,
 };
-pub use user_preferences::{StoredNetworkConnection, StoredSidebarFavorite};
 pub use user_settings::UserSettingsStore;
 
 pub(crate) use database::current_time_ms;

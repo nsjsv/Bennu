@@ -1,7 +1,8 @@
 use std::fs;
 use std::path::PathBuf;
 
-use bennu_state::{StoredNetworkConnection, UserSettingsStore};
+use bennu_sidebar::StoredNetworkConnection;
+use bennu_state::UserSettingsStore;
 use desktop_linux::{
     DisplayRendererGpu, NetworkConnection, NetworkConnectionId, NetworkProtocol, TerminalEmulator,
 };

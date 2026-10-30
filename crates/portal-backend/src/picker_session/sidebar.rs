@@ -10,8 +10,8 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use bennu_sidebar::{
-    normalize_sidebar_width, read_sidebar_config, sidebar_locations, SidebarConfig,
-    SidebarDeviceEntry, SidebarLocation, SidebarNetworkConnectionEntry, DEFAULT_SIDEBAR_WIDTH,
+    normalize_sidebar_width, sidebar_locations, SidebarConfig, SidebarDeviceEntry, SidebarLocation,
+    SidebarNetworkConnectionEntry, DEFAULT_SIDEBAR_WIDTH,
 };
 use desktop_linux::{
     load_network_mount_states, load_storage_devices, NetworkConnection, NetworkConnectionId,
@@ -19,6 +19,7 @@ use desktop_linux::{
 };
 
 use super::{PickerSession, SessionEffect};
+use crate::sidebar_settings::read_sidebar_config;
 
 /// 回收站虚拟视图的当前目录标识（与主程序 `trash_location_path` 同值）。
 pub(crate) const TRASH_DIRECTORY: &str = "trash:///";

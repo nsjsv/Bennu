@@ -1,9 +1,8 @@
 use std::path::PathBuf;
 
 use bennu_preview::preview_config::{StoredPreviewExtensionRules, StoredPreviewPreferences};
-use bennu_state::{
-    StoreResult, StoredNetworkConnection, StoredPath, StoredSidebarFavorite, UserSettingsStore,
-};
+use bennu_sidebar::{StoredNetworkConnection, StoredSidebarFavorite};
+use bennu_state::{StoreResult, StoredPath, UserSettingsStore};
 use desktop_linux::TerminalEmulator;
 use file_core::FileOperationVerification;
 

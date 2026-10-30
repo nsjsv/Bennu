@@ -5,7 +5,8 @@
 use std::path::Path;
 
 use bennu_preview::preview_config::StoredPreviewPreferences;
-use bennu_state::{StoredNetworkConnection, StoredPath, StoredSidebarFavorite};
+use bennu_sidebar::{StoredNetworkConnection, StoredSidebarFavorite};
+use bennu_state::StoredPath;
 use bennu_theme::StoredCustomColorScheme;
 use serde::{Deserialize, Serialize};
 

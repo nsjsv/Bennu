@@ -6,9 +6,7 @@
 use bennu_preview::formatting::format_file_size;
 use bennu_sidebar::entries::selected_sidebar_device;
 use bennu_sidebar::{
-    sidebar_icon_symbol, SidebarDeviceEntry, SidebarLocation, SidebarLocationKind,
-    SidebarNetworkConnectionEntry, SIDEBAR_DEVICE_ICON_SYMBOL,
-    SIDEBAR_NETWORK_CONNECTION_ICON_SYMBOL,
+    SidebarDeviceEntry, SidebarLocation, SidebarLocationKind, SidebarNetworkConnectionEntry,
 };
 use bennu_theme::icons::{icon_tone_style, IconSymbol, IconTone};
 use bennu_theme::measured_text::measured_middle_ellipsized_text;
@@ -56,6 +54,21 @@ fn sidebar_row_style(selected: bool, hovered: bool) -> fn(&Theme) -> container::
         hovered_sidebar_item_style
     } else {
         |_| container::Style::default()
+    }
+}
+
+/// 位置行图标。与主程序侧栏同一张映射：侧边栏数据 crate 不依赖图标词汇，
+/// 没有同时能看到两种类型的共享 crate，为一张 8 行的表不值得再建一个。
+fn location_icon_symbol(location: &SidebarLocation) -> IconSymbol {
+    match location.kind {
+        SidebarLocationKind::Home => IconSymbol::House,
+        SidebarLocationKind::Desktop => IconSymbol::Monitor,
+        SidebarLocationKind::Documents => IconSymbol::FileText,
+        SidebarLocationKind::Downloads => IconSymbol::Download,
+        SidebarLocationKind::Pictures => IconSymbol::FileImage,
+        SidebarLocationKind::Music => IconSymbol::Music,
+        SidebarLocationKind::Videos => IconSymbol::Video,
+        SidebarLocationKind::Bookmark => IconSymbol::Bookmark,
     }
 }
 
@@ -145,7 +158,7 @@ fn location_item(
         location_label(location)
     };
     sidebar_item(
-        sidebar_label(sidebar_icon_symbol(location), label, tone, 16),
+        sidebar_label(location_icon_symbol(location), label, tone, 16),
         selected,
         hovered,
         SessionMessage::SidebarLocationPressed {
@@ -202,7 +215,7 @@ fn device_item(
     };
     sidebar_item(
         sidebar_detailed_label(
-            SIDEBAR_DEVICE_ICON_SYMBOL,
+            IconSymbol::HardDrive,
             device.label.clone(),
             device_detail(device, session.sidebar_device_is_mounting(&device.id)),
             tone,
@@ -245,12 +258,7 @@ fn connection_item(
         connection_detail(connection)
     };
     sidebar_item(
-        sidebar_detailed_label(
-            SIDEBAR_NETWORK_CONNECTION_ICON_SYMBOL,
-            connection.label(),
-            detail,
-            tone,
-        ),
+        sidebar_detailed_label(IconSymbol::Link, connection.label(), detail, tone),
         selected,
         session.sidebar().hovered.as_ref() == Some(&id),
         SessionMessage::SidebarConnectionPressed {

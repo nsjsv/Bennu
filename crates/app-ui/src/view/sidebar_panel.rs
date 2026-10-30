@@ -20,14 +20,26 @@ use crate::model::{
 use crate::network_connections::{NetworkConnectionMessage, SidebarNetworkConnectionEntry};
 use crate::sidebar_devices::SidebarDeviceEntry;
 use bennu_preview::panel_text::readable_text;
-use bennu_sidebar::sidebar_icon_symbol;
+use bennu_sidebar::SidebarLocationKind;
 use bennu_theme::icons::IconSymbol;
 use bennu_theme::measured_text::measured_middle_ellipsized_text;
 
 use super::{tab_motion, themed_icon, IconTone, MENU_ICON_SIZE};
 
-// 设备/网络行图标符号来自共享 crate，与 portal 侧栏保持一致。
-use bennu_sidebar::{SIDEBAR_DEVICE_ICON_SYMBOL, SIDEBAR_NETWORK_CONNECTION_ICON_SYMBOL};
+/// 位置行图标。侧边栏数据 crate 不依赖图标词汇，映射由两个宿主的视图各持一份
+/// （portal 侧栏同一张表）：没有同时能看到两种类型的共享 crate，为一张 8 行的表不值得再建一个。
+fn location_icon_symbol(location: &SidebarLocation) -> IconSymbol {
+    match location.kind {
+        SidebarLocationKind::Home => IconSymbol::House,
+        SidebarLocationKind::Desktop => IconSymbol::Monitor,
+        SidebarLocationKind::Documents => IconSymbol::FileText,
+        SidebarLocationKind::Downloads => IconSymbol::Download,
+        SidebarLocationKind::Pictures => IconSymbol::FileImage,
+        SidebarLocationKind::Music => IconSymbol::Music,
+        SidebarLocationKind::Videos => IconSymbol::Video,
+        SidebarLocationKind::Bookmark => IconSymbol::Bookmark,
+    }
+}
 
 const SIDEBAR_RESIZE_HANDLE_WIDTH: f32 = 6.0;
 // 卡片悬浮感靠留白 + 圆角 + 投影:窗口侧三边(上/左/下)等宽 7
@@ -256,7 +268,7 @@ fn sidebar_location_item_content<'a>(
     let is_favorite = favorite_index.is_some();
     let label = location.display_label();
 
-    let item_container = container(sidebar_label(sidebar_icon_symbol(location), &label, tone))
+    let item_container = container(sidebar_label(location_icon_symbol(location), &label, tone))
         .padding([6, 8])
         .width(Length::Fill);
     let item_container = match presentation {
@@ -560,7 +572,7 @@ fn sidebar_device_label(
 ) -> Row<'static, Message> {
     let detail = sidebar_device_detail(device, pending);
     row![
-        themed_icon(SIDEBAR_DEVICE_ICON_SYMBOL, tone, MENU_ICON_SIZE),
+        themed_icon(IconSymbol::HardDrive, tone, MENU_ICON_SIZE),
         column![
             measured_middle_ellipsized_text(device.label.clone(), 13),
             measured_middle_ellipsized_text(detail, 11)
@@ -579,7 +591,7 @@ fn sidebar_network_connection_label(
 ) -> Row<'static, Message> {
     let detail = sidebar_network_connection_detail(connection, pending);
     row![
-        themed_icon(SIDEBAR_NETWORK_CONNECTION_ICON_SYMBOL, tone, MENU_ICON_SIZE),
+        themed_icon(IconSymbol::Link, tone, MENU_ICON_SIZE),
         column![
             measured_middle_ellipsized_text(connection.label(), 13),
             measured_middle_ellipsized_text(detail, 11)

@@ -1,8 +1,8 @@
 //! 侧边栏数据单源：主程序 app-ui 与 FileChooser portal（portal-backend）
 //! 共用同一份位置/收藏/GTK 书签计算、设置行里收藏与网络连接的解释、设备与
 //! 网络连接条目视图模型。本 crate 只承载纯数据与解析（spec 代码组织规则：
-//! 不 import iced 运行时类型）；图标符号借用 bennu-theme::icons，视觉词汇
-//! 单源不破。
+//! 不 import iced 运行时类型）；位置/设备对应哪个图标是视图层的事，由两个宿主的
+//! 侧边栏视图各自用 bennu-theme 的图标词汇映射。
 
 pub mod config;
 pub mod entries;
@@ -16,16 +16,16 @@ pub use config::{
 };
 pub use entries::{
     selected_sidebar_device, SidebarDeviceAction, SidebarDeviceEntry,
-    SidebarNetworkConnectionAction, SidebarNetworkConnectionEntry, SIDEBAR_DEVICE_ICON_SYMBOL,
-    SIDEBAR_NETWORK_CONNECTION_ICON_SYMBOL,
+    SidebarNetworkConnectionAction, SidebarNetworkConnectionEntry,
 };
 pub use locations::{
-    home_sidebar_location, sidebar_favorite_configs, sidebar_icon_symbol, sidebar_locations,
-    SidebarLocation, SidebarLocationKind,
+    home_sidebar_location, sidebar_favorite_configs, sidebar_locations, SidebarLocation,
+    SidebarLocationKind,
 };
 pub use saved_connections::SavedNetworkConnection;
 pub use stored::{
-    network_connections_from_stored, read_sidebar_config, sidebar_favorites_from_stored,
+    network_connections_from_stored, sidebar_favorites_from_stored, StoredNetworkConnection,
+    StoredSidebarFavorite,
 };
 
 /// 侧边栏宽度契约：主程序持久化宽度与 portal 每窗独立宽度共用同一组

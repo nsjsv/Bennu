@@ -5,18 +5,12 @@
 use std::path::{Path, PathBuf};
 
 use bennu_localization::tr;
-use bennu_theme::icons::IconSymbol;
 use desktop_linux::{
     NetworkConnection, NetworkConnectionId, NetworkMountCredentials, NetworkMountState,
     StorageDevice, StorageDeviceAccess, StorageDeviceId, StorageDeviceRemoval,
 };
 
 use crate::saved_connections::SavedNetworkConnection;
-
-/// 设备/网络行图标符号：主程序侧栏固定 HardDrive/Link；集中成常量让
-/// portal 侧栏取同一符号，两进程图标不漂移。
-pub const SIDEBAR_DEVICE_ICON_SYMBOL: IconSymbol = IconSymbol::HardDrive;
-pub const SIDEBAR_NETWORK_CONNECTION_ICON_SYMBOL: IconSymbol = IconSymbol::Link;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SidebarDeviceAction {

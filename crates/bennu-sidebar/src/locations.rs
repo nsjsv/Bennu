@@ -2,7 +2,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use bennu_localization::tr;
-use bennu_theme::icons::IconSymbol;
 use desktop_linux::parse_file_uri_list;
 
 use crate::config::SidebarFavoriteConfig;
@@ -55,19 +54,6 @@ impl SidebarLocationKind {
                 | Self::Videos
                 | Self::Bookmark
         )
-    }
-}
-
-pub fn sidebar_icon_symbol(location: &SidebarLocation) -> IconSymbol {
-    match location.kind {
-        SidebarLocationKind::Home => IconSymbol::House,
-        SidebarLocationKind::Desktop => IconSymbol::Monitor,
-        SidebarLocationKind::Documents => IconSymbol::FileText,
-        SidebarLocationKind::Downloads => IconSymbol::Download,
-        SidebarLocationKind::Pictures => IconSymbol::FileImage,
-        SidebarLocationKind::Music => IconSymbol::Music,
-        SidebarLocationKind::Videos => IconSymbol::Video,
-        SidebarLocationKind::Bookmark => IconSymbol::Bookmark,
     }
 }
 
@@ -328,20 +314,5 @@ mod tests {
 
         assert_eq!(configs.len(), 1);
         assert_eq!(configs[0].path, downloads);
-    }
-
-    #[test]
-    fn icon_symbol_follows_location_kind() {
-        let symbol = |kind| {
-            sidebar_icon_symbol(&SidebarLocation {
-                label: String::new(),
-                path: PathBuf::new(),
-                kind,
-            })
-        };
-
-        assert_eq!(symbol(SidebarLocationKind::Home), IconSymbol::House);
-        assert_eq!(symbol(SidebarLocationKind::Downloads), IconSymbol::Download);
-        assert_eq!(symbol(SidebarLocationKind::Bookmark), IconSymbol::Bookmark);
     }
 }

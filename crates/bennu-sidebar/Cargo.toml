@@ -5,16 +5,12 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-# 图标符号（视觉词汇）来自 bennu-theme；设备/网络连接类型来自
-# desktop-linux。纯数据 + 解析 crate，禁止引入 iced 运行时依赖。
+# 设备/网络连接类型来自 desktop-linux。纯数据 + 解析 crate，禁止引入 iced 运行时依赖，
+# 所以不依赖 bennu-theme（图标词汇在那里，映射由宿主视图负责）。
 bennu-localization = { path = "../bennu-localization" }
-bennu-theme = { path = "../bennu-theme" }
 desktop-linux = { path = "../desktop-linux" }
 dirs.workspace = true
 serde = { version = "1.0.228", features = ["derive"] }
-# 收藏与网络连接存在主程序的设置行里（state.sqlite）。
+# 收藏的路径用 bennu-state 的 StoredPath 保存（非 UTF-8 路径字节不丢）。
 bennu-state = { path = "../bennu-state" }
 toml = "1.1.2"
-
-[dev-dependencies]
-tempfile.workspace = true

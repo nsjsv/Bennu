@@ -3,9 +3,8 @@
 use std::path::Path;
 
 use bennu_preview::preview_config::StoredPreviewPreferences;
-use bennu_state::{
-    StoredNetworkConnection, StoredSidebarFavorite, UserSettingsStore, USER_PREFERENCES_KEY,
-};
+use bennu_sidebar::{StoredNetworkConnection, StoredSidebarFavorite};
+use bennu_state::{UserSettingsStore, USER_PREFERENCES_KEY};
 use bennu_theme::{StoredCustomColorScheme, StoredCustomColorSet};
 use rusqlite::{params, Connection};
 

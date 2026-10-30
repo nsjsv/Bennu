@@ -16,6 +16,7 @@ mod preview_scroll;
 mod renderer_env;
 mod scrollbar_state;
 mod sidebar_bridge;
+mod sidebar_settings;
 mod subscriptions;
 mod tasks;
 mod theme;

@@ -49,7 +49,6 @@ network_connections = [
         default_user_config(),
     );
 
-    assert_eq!(parsed.thumbnail_cache_dir, PathBuf::from("/tmp/thumbnails"));
     assert!(parsed.network_list_thumbnail_downloads_enabled);
     assert_eq!(
         parsed.preview_size_limits,
@@ -99,7 +98,6 @@ fn app_config_toml_contains_only_startup_level_keys() {
     let temp_dir = tempfile::tempdir().expect("create temp config dir");
     let path = temp_dir.path().join("config.toml");
     let app_config = AppConfig {
-        thumbnail_cache_dir: PathBuf::from("/tmp/thumbnails"),
         rendering_gpu_preference: RenderingGpuPreference::HighPerformanceGpu,
         search_content_indexing_enabled: false,
         search_max_extract_bytes: 4096,
@@ -111,13 +109,7 @@ fn app_config_toml_contains_only_startup_level_keys() {
         .parse::<toml::Table>()
         .unwrap();
 
-    assert_eq!(document.len(), 4);
-    assert_eq!(
-        document
-            .get("thumbnail_cache_dir")
-            .and_then(toml::Value::as_str),
-        Some("/tmp/thumbnails")
-    );
+    assert_eq!(document.len(), 3);
     assert_eq!(
         document
             .get("rendering_backend")
@@ -160,7 +152,6 @@ fn writes_app_config_without_user_preferences() {
     let temp_dir = tempfile::tempdir().expect("create temp config dir");
     let path = temp_dir.path().join("config.toml");
     let app_config = AppConfig {
-        thumbnail_cache_dir: temp_dir.path().join("thumbnails"),
         rendering_gpu_preference: RenderingGpuPreference::DisplayGpu,
         search_content_indexing_enabled: true,
         search_max_extract_bytes: 8192,
@@ -183,7 +174,6 @@ fn user_preferences_round_trip_through_sqlite() {
     let state_database_path = temp_dir.path().join("state.sqlite");
     let store = TaskQueueStore::new(&state_database_path).expect("create state store");
     let app_config = AppConfig {
-        thumbnail_cache_dir: PathBuf::from("/var/cache/bennu/thumbs"),
         rendering_gpu_preference: RenderingGpuPreference::HighPerformanceGpu,
         search_content_indexing_enabled: false,
         search_max_extract_bytes: 1234,
@@ -268,7 +258,6 @@ fn user_preferences_round_trip_through_sqlite() {
     assert_eq!(loaded.recovery, None);
     let loaded = loaded.config;
 
-    assert_eq!(loaded.thumbnail_cache_dir, app_config.thumbnail_cache_dir);
     assert_eq!(
         loaded.rendering_gpu_preference,
         app_config.rendering_gpu_preference
@@ -972,10 +961,6 @@ backend = "vulkan"
     assert_eq!(
         loaded.config.rendering_gpu_preference,
         RenderingGpuPreference::HighPerformanceGpu
-    );
-    assert_eq!(
-        loaded.config.thumbnail_cache_dir,
-        PathBuf::from("/tmp/thumbnails")
     );
 }
 

@@ -190,9 +190,23 @@ pub fn is_supported_thumbnail_path(path: impl AsRef<Path>) -> bool {
     thumbnail_media_kind_for_path(path.as_ref()).is_some()
 }
 
+/// freedesktop 缩略图规范的共享缓存目录，主程序和文件选择器都只从这里取。
+/// `XDG_CACHE_HOME` 只认绝对路径（规范要求），否则用 `$HOME/.cache`；两者都没有时
+/// 返回 `None`，调用方不生成缩略图，而不是写到相对路径里。
+pub fn thumbnail_cache_dir() -> Option<PathBuf> {
+    let cache_home = std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .filter(|home| !home.is_empty())
+                .map(|home| PathBuf::from(home).join(".cache"))
+        })?;
+    Some(cache_home.join("thumbnails"))
+}
+
 pub fn path_is_in_thumbnail_cache(cache_dir: impl AsRef<Path>, path: impl AsRef<Path>) -> bool {
-    let cache_dir = cache_dir.as_ref();
-    !cache_dir.as_os_str().is_empty() && path.as_ref().starts_with(cache_dir)
+    path.as_ref().starts_with(cache_dir)
 }
 
 pub async fn load_or_generate_thumbnail(

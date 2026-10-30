@@ -781,8 +781,8 @@ mod startup_environment_tests {
             config::SettingsRecovery::Unavailable { error, .. } if error.contains("settings loader bug")
         )));
         assert_eq!(
-            environment.user_config.thumbnail_cache_dir,
-            config::default_user_config().thumbnail_cache_dir
+            environment.user_config.startup_custom_directory,
+            config::default_user_config().startup_custom_directory
         );
     }
 }

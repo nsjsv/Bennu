@@ -1,11 +1,11 @@
 use image::ImageEncoder;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use thumbnails::{
     generate_image_thumbnail, is_supported_thumbnail_path, load_cached_thumbnail,
     load_image_dimensions, load_or_generate_image_thumbnail, load_or_generate_thumbnail,
-    path_is_in_thumbnail_cache, ThumbnailError, ThumbnailOptions, ThumbnailRequest,
-    ThumbnailSourceMetadata,
+    path_is_in_thumbnail_cache, thumbnail_cache_dir, ThumbnailError, ThumbnailOptions,
+    ThumbnailRequest, ThumbnailSourceMetadata,
 };
 
 const AVIF_FIXTURE: &str = concat!(
@@ -286,7 +286,26 @@ fn thumbnail_cache_path_matches_cache_dir_descendants_only() {
         cache_dir,
         "/tmp/bennu/thumbnails-extra/generated.png"
     ));
-    assert!(!path_is_in_thumbnail_cache("", "generated.png"));
+}
+
+#[test]
+fn cache_location_follows_the_freedesktop_rules() {
+    std::env::set_var("XDG_CACHE_HOME", "/xdg/cache");
+    std::env::set_var("HOME", "/home/user");
+    assert_eq!(
+        thumbnail_cache_dir(),
+        Some(PathBuf::from("/xdg/cache/thumbnails"))
+    );
+
+    std::env::set_var("XDG_CACHE_HOME", "relative/cache");
+    assert_eq!(
+        thumbnail_cache_dir(),
+        Some(PathBuf::from("/home/user/.cache/thumbnails"))
+    );
+
+    std::env::remove_var("XDG_CACHE_HOME");
+    std::env::remove_var("HOME");
+    assert_eq!(thumbnail_cache_dir(), None);
 }
 
 fn thumbnail_request(source: &Path, max_edge: u32) -> ThumbnailRequest {

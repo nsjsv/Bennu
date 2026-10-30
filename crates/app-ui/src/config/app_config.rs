@@ -1,9 +1,8 @@
-//! config.toml 里归用户设置的四个键。文件的读写规则见 `config_file`，探针缓存段见
+//! config.toml 里归用户设置的三个键。文件的读写规则见 `config_file`，探针缓存段见
 //! `renderer_probe_cache`。
 
-use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::config_file::{
     back_up_config_file, config_file_path, read_config_file, required_config_file_path,
@@ -12,14 +11,12 @@ use super::config_file::{
 use super::settings_recovery::{ResetSettings, SettingsRecovery, SettingsSource};
 use super::{default_user_config, RenderingGpuPreference, UserConfig};
 
-const THUMBNAIL_CACHE_DIR_KEY: &str = "thumbnail_cache_dir";
 const RENDERING_BACKEND_KEY: &str = "rendering_backend";
 const SEARCH_CONTENT_INDEXING_ENABLED_KEY: &str = "search_content_indexing_enabled";
 const SEARCH_MAX_EXTRACT_BYTES_KEY: &str = "search_max_extract_bytes";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AppConfig {
-    pub(crate) thumbnail_cache_dir: PathBuf,
     pub(crate) rendering_gpu_preference: RenderingGpuPreference,
     pub(crate) search_content_indexing_enabled: bool,
     pub(crate) search_max_extract_bytes: u64,
@@ -28,7 +25,6 @@ pub(crate) struct AppConfig {
 impl AppConfig {
     pub(crate) fn from_user_config(config: &UserConfig) -> Self {
         Self {
-            thumbnail_cache_dir: config.thumbnail_cache_dir.clone(),
             rendering_gpu_preference: config.rendering_gpu_preference,
             search_content_indexing_enabled: config.search_content_indexing_enabled,
             search_max_extract_bytes: config.search_max_extract_bytes,
@@ -36,7 +32,6 @@ impl AppConfig {
     }
 
     pub(crate) fn apply_to_user_config(&self, config: &mut UserConfig) {
-        config.thumbnail_cache_dir = self.thumbnail_cache_dir.clone();
         config.rendering_gpu_preference = self.rendering_gpu_preference;
         config.search_content_indexing_enabled = self.search_content_indexing_enabled;
         config.search_max_extract_bytes = self.search_max_extract_bytes;
@@ -158,7 +153,7 @@ fn repair_app_config(
     }
 }
 
-/// 只写这四个键，文件里其余的键（探针缓存段、本版本不认识的键）原样保留；现有
+/// 只写这三个键，文件里其余的键（探针缓存段、本版本不认识的键）原样保留；现有
 /// 文件读不懂时先备份再写。
 pub(crate) fn save_app_config(config: &AppConfig) -> io::Result<()> {
     save_app_config_at(&required_config_file_path()?, config)
@@ -174,9 +169,6 @@ pub(super) fn save_app_config_at(path: &Path, config: &AppConfig) -> io::Result<
         }
     };
     insert_app_config_keys(&mut document, config);
-    if let Some(parent) = config.thumbnail_cache_dir.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
     write_config_file(path, &document)
 }
 
@@ -189,17 +181,6 @@ struct InterpretedAppConfig {
 fn app_config_from_document(document: &toml::Table) -> InterpretedAppConfig {
     let mut config = default_app_config();
     let mut unreadable = Vec::new();
-    if let Some(path) = read_key(
-        document,
-        THUMBNAIL_CACHE_DIR_KEY,
-        &mut unreadable,
-        toml::Value::as_str,
-    ) {
-        // 空路径当作没设置（与旧版读取一致）。
-        if !path.is_empty() {
-            config.thumbnail_cache_dir = PathBuf::from(path);
-        }
-    }
     if let Some(preference) = read_key(document, RENDERING_BACKEND_KEY, &mut unreadable, |value| {
         value
             .as_str()
@@ -246,10 +227,6 @@ fn read_key<'a, T>(
 }
 
 fn insert_app_config_keys(document: &mut toml::Table, config: &AppConfig) {
-    document.insert(
-        THUMBNAIL_CACHE_DIR_KEY.to_owned(),
-        toml::Value::String(config.thumbnail_cache_dir.to_string_lossy().into_owned()),
-    );
     document.insert(
         RENDERING_BACKEND_KEY.to_owned(),
         toml::Value::String(config.rendering_gpu_preference.config_value().to_owned()),

@@ -161,8 +161,6 @@ impl FileBrowser {
 
     fn apply_loaded_user_config(&mut self, mut user_config: UserConfig) {
         user_config.save_view_state = user_config.startup_location_policy.saves_view_state();
-        self.thumbnail_cache
-            .set_cache_dir(user_config.thumbnail_cache_dir.clone());
         self.sidebar_width = self.sidebar_width_for_window(user_config.sidebar_width);
         self.right_preview_panel_open = user_config.right_preview_panel_open;
         self.right_preview_panel_width = crate::config::normalize_right_preview_panel_width(

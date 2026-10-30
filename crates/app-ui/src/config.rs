@@ -333,7 +333,6 @@ pub(crate) use bennu_preview::preview_config::{
 
 #[derive(Debug, Clone)]
 pub(crate) struct UserConfig {
-    pub(crate) thumbnail_cache_dir: PathBuf,
     pub(crate) network_list_thumbnail_downloads_enabled: bool,
     pub(crate) preview_size_limits: PreviewFileSizeLimits,
     pub(crate) preview_directory_expand_levels: u8,
@@ -425,9 +424,7 @@ pub(crate) fn app_data_dir_path() -> PathBuf {
 
 pub(crate) fn default_user_config() -> UserConfig {
     let fallback_base = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    let cache_base = dirs::cache_dir().unwrap_or_else(|| fallback_base.clone());
     UserConfig {
-        thumbnail_cache_dir: cache_base.join("thumbnails"),
         network_list_thumbnail_downloads_enabled: false,
         preview_size_limits: PreviewFileSizeLimits::with_default_limits(),
         preview_directory_expand_levels: DEFAULT_PREVIEW_DIRECTORY_EXPAND_LEVELS,
@@ -476,7 +473,6 @@ pub(crate) fn default_user_config() -> UserConfig {
 
 pub(crate) fn ui_thread_startup_config() -> UserConfig {
     UserConfig {
-        thumbnail_cache_dir: PathBuf::new(),
         network_list_thumbnail_downloads_enabled: false,
         preview_size_limits: PreviewFileSizeLimits::with_default_limits(),
         preview_directory_expand_levels: DEFAULT_PREVIEW_DIRECTORY_EXPAND_LEVELS,

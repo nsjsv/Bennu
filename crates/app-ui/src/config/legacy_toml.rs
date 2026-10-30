@@ -1,6 +1,6 @@
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use desktop_linux::TerminalEmulator;
 
@@ -11,7 +11,6 @@ use super::{
     PreviewFileSizeKind, PreviewFileSizeLimits, UserConfig, ViewDensityLevel, CONFIG_FILE_NAME,
 };
 
-const THUMBNAIL_CACHE_DIR_KEY: &str = "thumbnail_cache_dir";
 const NETWORK_LIST_THUMBNAIL_DOWNLOADS_ENABLED_KEY: &str =
     "network_list_thumbnail_downloads_enabled";
 const MAX_PREVIEW_FILE_BYTES_KEY: &str = "max_preview_file_bytes";
@@ -68,9 +67,6 @@ pub(super) fn parse_toml_user_config(content: &str, default: UserConfig) -> User
     };
 
     let mut config = default;
-    if let Some(value) = toml_string(&document, THUMBNAIL_CACHE_DIR_KEY) {
-        config.thumbnail_cache_dir = PathBuf::from(value);
-    }
     if let Some(value) = document
         .get(NETWORK_LIST_THUMBNAIL_DOWNLOADS_ENABLED_KEY)
         .and_then(toml::Value::as_bool)

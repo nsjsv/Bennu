@@ -41,14 +41,6 @@ const FAILURE_BACKOFF: Duration = Duration::from_secs(60);
 /// 数值由 view_mode 子模块的可见窗口换算消费，保留常量单源在本模块。
 pub(super) const VISIBLE_MARGIN_ROWS: isize = 8;
 
-/// portal 缩略图磁盘缓存目录：与主软件默认配置同目录，主软件已生成
-/// 的缩略图直接命中，不重复生成。
-pub(crate) fn default_thumbnail_cache_dir() -> PathBuf {
-    dirs::cache_dir()
-        .map(|dir| dir.join("thumbnails"))
-        .unwrap_or_default()
-}
-
 /// 回信失败标记。`ThumbnailError` 不实现 Clone，而 SessionMessage 必须
 /// 整体 Clone（iced widget 的 Element 转换要求 Message: Clone）；错误
 /// 细节由 main 层在边界用 tracing 记录一次，会话层只需要"失败"事实
@@ -59,7 +51,9 @@ pub(crate) struct ThumbnailLoadFailed;
 /// 缩略图调度状态：就绪表（LRU）、在途集合、排队队列、失败 backoff。
 #[derive(Debug)]
 pub(crate) struct SessionThumbnailState {
-    cache_dir: PathBuf,
+    /// 与主程序同一个位置（`thumbnails::thumbnail_cache_dir`）；`None` 时什么都不排，
+    /// 行内显示图标。
+    cache_dir: Option<PathBuf>,
     /// 按源路径存最新就绪图，附带其请求档位：列表 128 档就绪后切到大图
     /// 必须能判出“档位不足”并补请求 192 档，否则大图永远显示小图。
     /// 不用像素尺寸判定：小原图的缩略图永远达不到档位，会反复重请求。
@@ -74,7 +68,7 @@ pub(crate) struct SessionThumbnailState {
 }
 
 impl SessionThumbnailState {
-    pub(crate) fn new(cache_dir: PathBuf) -> Self {
+    pub(crate) fn new(cache_dir: Option<PathBuf>) -> Self {
         Self {
             cache_dir,
             ready: HashMap::new(),
@@ -158,8 +152,7 @@ impl SessionThumbnailState {
             if entry.kind != FileKind::File || !file_core::is_supported_image_path(&entry.path) {
                 continue;
             }
-            // spec 合同：缓存目录内的源文件拒绝入队，防止"缓存的缓存"。
-            if thumbnails::path_is_in_thumbnail_cache(&self.cache_dir, &entry.path) {
+            if !self.can_cache(&entry.path) {
                 continue;
             }
             let request = ThumbnailRequest::new(
@@ -198,14 +191,6 @@ impl SessionThumbnailState {
             drained.push(request);
         }
         drained
-    }
-
-    /// 环境异常（解析不出缓存目录）下放弃排队请求：只清排队，不动
-    /// 在途——与 drain 不同，这些请求从未发起，不能占在途额度。
-    fn clear_pending_requests(&mut self) {
-        for request in self.queued.drain(..) {
-            self.queued_keys.remove(&request.key());
-        }
     }
 
     /// 接受回信。key 已不在 in_flight（换目录清空后的迟到回信）则整体
@@ -252,6 +237,13 @@ impl SessionThumbnailState {
         }
     }
 
+    /// 有缓存目录，且源文件不在缓存目录里（不给缩略图做缩略图）。
+    fn can_cache(&self, source: &Path) -> bool {
+        self.cache_dir
+            .as_ref()
+            .is_some_and(|cache_dir| !thumbnails::path_is_in_thumbnail_cache(cache_dir, source))
+    }
+
     fn ready_for(&self, source: &Path) -> Option<&CachedThumbnail> {
         self.ready.get(source).map(|(_, cached)| cached)
     }
@@ -263,7 +255,7 @@ impl SessionThumbnailState {
     /// 新入队）——宿主以此决定 `pending_preview_thumbnail_display` 标记；
     /// backoff 或缓存目录源返回 false（不等缩略图，原图解码兜底）。
     fn enqueue_preview_request(&mut self, request: ThumbnailRequest) -> bool {
-        if thumbnails::path_is_in_thumbnail_cache(&self.cache_dir, &request.source) {
+        if !self.can_cache(&request.source) {
             return false;
         }
         let key = request.key();
@@ -323,12 +315,6 @@ impl PickerSession {
         self.thumbnails.drain_due_requests()
     }
 
-    /// main 层入口：解析不出缓存目录等环境异常时，放弃排队请求且不占
-    /// 在途额度（这些请求从未发起）。
-    pub(crate) fn clear_pending_thumbnail_requests(&mut self) {
-        self.thumbnails.clear_pending_requests();
-    }
-
     /// ThumbnailReady 回信处理：迟到回信由状态层按 in_flight 丢弃。
     pub(crate) fn accept_thumbnail_ready(
         &mut self,
@@ -359,8 +345,8 @@ impl PickerSession {
     }
 
     /// 缩略图磁盘缓存目录（main 层发起加载时使用；与主软件共享）。
-    pub(crate) fn thumbnail_cache_dir(&self) -> &Path {
-        &self.thumbnails.cache_dir
+    pub(crate) fn thumbnail_cache_dir(&self) -> Option<&Path> {
+        self.thumbnails.cache_dir.as_deref()
     }
 }
 
@@ -625,7 +611,7 @@ mod tests {
         });
         // 把缓存目录指到当前目录：其中的"图片"必须被拒（spec 合同），
         // 非图片与目录行同样不入队。
-        session.thumbnails.cache_dir = session.directory().to_path_buf();
+        session.thumbnails.cache_dir = Some(session.directory().to_path_buf());
         install_viewport(&mut session, viewport_at(0.0, 300.0));
 
         session.schedule_visible_thumbnails();

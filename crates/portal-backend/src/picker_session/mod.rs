@@ -171,9 +171,7 @@ impl PickerSession {
             scrollbar: SessionScrollbarState::default(),
             sidebar: PickerSidebarState::default(),
             shift_pressed: false,
-            thumbnails: thumbnails::SessionThumbnailState::new(
-                thumbnails::default_thumbnail_cache_dir(),
-            ),
+            thumbnails: thumbnails::SessionThumbnailState::new(::thumbnails::thumbnail_cache_dir()),
             view_mode,
             columns: ColumnsState::new(start_directory.clone()),
             pending_view_switch_reveal: None,

@@ -370,6 +370,7 @@ fn an_unparseable_config_file_is_backed_up_and_reset() {
 fn an_unreadable_config_key_is_reset_and_the_rest_is_kept() {
     let directory = tempfile::tempdir().unwrap();
     let original = "thumbnail_cache_dir = \"/tmp/thumbs\"\n\
+                    search_content_indexing_enabled = false\n\
                     rendering_backend = \"quantum\"\n\
                     search_max_extract_bytes = -5\n\
                     from_a_newer_version = 7\n";
@@ -386,10 +387,7 @@ fn an_unreadable_config_key_is_reset_and_the_rest_is_kept() {
         ])
     );
     assert_eq!(fs::read_to_string(backup).unwrap(), original);
-    assert_eq!(
-        loaded.config.thumbnail_cache_dir,
-        PathBuf::from("/tmp/thumbs")
-    );
+    assert!(!loaded.config.search_content_indexing_enabled);
     assert_eq!(
         loaded.config.rendering_gpu_preference,
         default_app_config().rendering_gpu_preference
@@ -400,6 +398,11 @@ fn an_unreadable_config_key_is_reset_and_the_rest_is_kept() {
     assert_eq!(
         config_document(&path)["from_a_newer_version"].as_integer(),
         Some(7)
+    );
+    // 已删掉的旧键当作不认识的键原样保留。
+    assert_eq!(
+        config_document(&path)["thumbnail_cache_dir"].as_str(),
+        Some("/tmp/thumbs")
     );
 }
 

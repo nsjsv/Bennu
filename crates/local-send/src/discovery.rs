@@ -340,7 +340,9 @@ async fn reply_register(
     // HTTP 不可达（对端未开 HTTP 或防火墙）：协议允许退化 UDP 回 announce:false。
     tracing::debug!(event = "localsend_register_http_failed", %url, "register via http failed, falling back to udp");
     if let Ok(payload) = encode_announce(own_device, false) {
-        let _ = socket.send_to(&payload, source).await;
+        if let Err(error) = socket.send_to(&payload, source).await {
+            tracing::debug!(event = "localsend_udp_reply_failed", %source, %error, "udp announce reply failed");
+        }
     }
 }
 

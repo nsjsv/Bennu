@@ -221,11 +221,18 @@ impl LocalSendService {
         tokio::spawn(async move {
             match tokio::net::TcpListener::bind(("0.0.0.0", port)).await {
                 Ok(listener) => {
-                    let _ = axum::serve(
+                    // serve 只在监听套接字出错时返回；之后再也收不到文件，必须让界面知道。
+                    if let Err(error) = axum::serve(
                         listener,
                         router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
                     )
-                    .await;
+                    .await
+                    {
+                        tracing::error!(event = "localsend_tcp_serve_failed", %error, port, "tcp receive service stopped");
+                        let _ = service_events.send(ServiceEvent::ServiceError(format!(
+                            "接收服务已停止（TCP 端口 {port}）: {error}"
+                        )));
+                    }
                 }
                 Err(error) => {
                     // N2：端口被占（如另一 LocalSend 实例）只报一次，不重试。

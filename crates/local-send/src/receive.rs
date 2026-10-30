@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -321,13 +321,13 @@ async fn upload(
         Some(dest) => dest,
         None => match unique_destination(&state.download_dir, &file_name).await {
             Ok(dest) => {
-                if let Ok(mut sessions) = state.sessions.try_lock() {
-                    if let Some(slot) = sessions
-                        .get_mut(&query.session_id)
-                        .and_then(|s| s.files.get_mut(&query.file_id))
-                    {
-                        slot.dest = Some(dest.clone());
-                    }
+                // 必须登记成功：发送方重传时要写回同一个文件，否则会另起一个名字、留下半成品。
+                let mut sessions = state.sessions.lock().await;
+                if let Some(slot) = sessions
+                    .get_mut(&query.session_id)
+                    .and_then(|s| s.files.get_mut(&query.file_id))
+                {
+                    slot.dest = Some(dest.clone());
                 }
                 dest
             }
@@ -422,12 +422,17 @@ async fn stream_to_file(
                 format!("read body failed: {error}"),
             )
         })?;
-        file.write_all(&chunk).await.map_err(|error| {
-            (
+        if let Err(error) = file.write_all(&chunk).await {
+            return Err(fail_upload(
+                state,
+                query,
+                dest,
+                "write failed",
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("write failed: {error}"),
             )
-        })?;
+            .await);
+        }
         if let Some(hasher) = hasher.as_mut() {
             hasher.update(&chunk);
         }
@@ -437,36 +442,45 @@ async fn stream_to_file(
             emit_progress(state, query, &meta.file_name, received, meta.size);
         }
     }
-    let _ = file.sync_data().await;
+    // 写入经 tokio 的后台缓冲，磁盘错误可能到这里才冒出来；没落盘就不能报接收成功。
+    if let Err(error) = file.sync_data().await {
+        return Err(fail_upload(
+            state,
+            query,
+            dest,
+            "write failed",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("write failed: {error}"),
+        )
+        .await);
+    }
 
     // 协议 v2.2：声明了 sha256 但不匹配 → 422，删除半成品。
     if let (Some(expected), Some(hasher)) = (&meta.sha256, hasher) {
         let actual = format!("{:x}", hasher.finalize());
         if !actual.eq_ignore_ascii_case(expected) {
-            let _ = tokio::fs::remove_file(dest).await;
-            mark_slot_failed(
+            return Err(fail_upload(
                 state,
-                &query.session_id,
-                &query.file_id,
+                query,
+                dest,
                 "checksum mismatch",
-            )
-            .await;
-            finish_if_complete(state, &query.session_id).await;
-            return Err((
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "checksum mismatch".to_string(),
-            ));
+            )
+            .await);
         }
     }
 
     if meta.size != received {
-        let _ = tokio::fs::remove_file(dest).await;
-        mark_slot_failed(state, &query.session_id, &query.file_id, "size mismatch").await;
-        finish_if_complete(state, &query.session_id).await;
-        return Err((
+        return Err(fail_upload(
+            state,
+            query,
+            dest,
+            "size mismatch",
             StatusCode::BAD_REQUEST,
             format!("size mismatch: expected {} bytes", meta.size),
-        ));
+        )
+        .await);
     }
 
     {
@@ -497,6 +511,30 @@ fn emit_progress(
         received,
         total,
     });
+}
+
+/// 这个文件收不成了：删掉半成品、把文件槽标成失败、会话到终态就收尾，返回给发送方的错误。
+async fn fail_upload(
+    state: &Arc<ReceiveState>,
+    query: &UploadQuery,
+    dest: &Path,
+    reason: &'static str,
+    status: StatusCode,
+    message: String,
+) -> UploadFailure {
+    if let Err(error) = tokio::fs::remove_file(dest).await {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            tracing::warn!(
+                event = "localsend_partial_file_not_removed",
+                path = %dest.display(),
+                %error,
+                "could not remove a partially received file"
+            );
+        }
+    }
+    mark_slot_failed(state, &query.session_id, &query.file_id, reason).await;
+    finish_if_complete(state, &query.session_id).await;
+    (status, message)
 }
 
 async fn mark_slot_failed(
@@ -614,4 +652,136 @@ async fn cancel(
 struct CancelQuery {
     #[serde(rename = "sessionId")]
     session_id: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::response::IntoResponse;
+
+    use super::*;
+
+    const SESSION: &str = "session";
+    const FILE: &str = "file";
+    const TOKEN: &str = "token";
+
+    fn receive_state(
+        download_dir: PathBuf,
+        file_name: &str,
+        size: u64,
+    ) -> (Arc<ReceiveState>, broadcast::Receiver<ServiceEvent>) {
+        let (events, events_rx) = broadcast::channel(16);
+        let state = Arc::new(ReceiveState::new(
+            DeviceInfo {
+                alias: "TestPC".into(),
+                version: "2.0".into(),
+                fingerprint: "own-fp".into(),
+                device_model: None,
+                device_type: None,
+                download: None,
+                port: 53317,
+                protocol: "http".into(),
+                address: None,
+            },
+            download_dir,
+            Arc::new(|_| true),
+            Arc::new(Mutex::new(crate::discovery::DeviceTable::default())),
+            events,
+            CONFIRM_TIMEOUT,
+        ));
+        let slot = FileSlot {
+            meta: FileMetadata {
+                id: FILE.into(),
+                file_name: file_name.into(),
+                size,
+                file_type: None,
+                sha256: None,
+            },
+            token: TOKEN.into(),
+            dest: None,
+            received: 0,
+            outcome: SlotOutcome::Pending,
+        };
+        state.sessions.try_lock().unwrap().insert(
+            SESSION.into(),
+            Session {
+                files: HashMap::from([(FILE.to_owned(), slot)]),
+                finished_emitted: false,
+            },
+        );
+        (state, events_rx)
+    }
+
+    async fn upload_status(state: &Arc<ReceiveState>, body: Body) -> StatusCode {
+        let query = UploadQuery {
+            session_id: SESSION.into(),
+            file_id: FILE.into(),
+            token: TOKEN.into(),
+        };
+        upload(State(Arc::clone(state)), Query(query), body)
+            .await
+            .into_response()
+            .status()
+    }
+
+    /// /dev/full 能打开，写入时报 ENOSPC：等同于写到一半磁盘满了。
+    #[tokio::test]
+    async fn a_file_that_cannot_reach_the_disk_fails_instead_of_reporting_success() {
+        let full = PathBuf::from("/dev/full");
+        if !full.exists() {
+            return;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let (state, mut events) = receive_state(directory.path().to_path_buf(), "note.txt", 5);
+        state
+            .sessions
+            .lock()
+            .await
+            .get_mut(SESSION)
+            .unwrap()
+            .files
+            .get_mut(FILE)
+            .unwrap()
+            .dest = Some(full);
+
+        assert_eq!(
+            upload_status(&state, Body::from("hello")).await,
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        let ServiceEvent::ReceiveFinished {
+            saved_paths,
+            failed,
+            ..
+        } = events.recv().await.unwrap()
+        else {
+            panic!("the session should finish with the failed file");
+        };
+        assert!(saved_paths.is_empty());
+        let expected = vec![("note.txt".to_owned(), "write failed".to_owned())];
+        assert_eq!(failed, expected);
+    }
+
+    /// 第一次上传中途断了：落盘路径已经登记，重传写回同一个文件，不会另起名字留下半成品。
+    #[tokio::test]
+    async fn an_interrupted_upload_is_retried_into_the_same_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let (state, _events) = receive_state(directory.path().to_path_buf(), "note.txt", 5);
+        let broken_body = Body::from_stream(futures_util::stream::iter(vec![
+            Ok(axum::body::Bytes::from_static(b"he")),
+            Err(std::io::Error::other("connection dropped")),
+        ]));
+
+        assert_eq!(
+            upload_status(&state, broken_body).await,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            upload_status(&state, Body::from("hello")).await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            std::fs::read(directory.path().join("note.txt")).unwrap(),
+            b"hello"
+        );
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
 }

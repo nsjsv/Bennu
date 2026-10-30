@@ -185,6 +185,7 @@ pub(crate) fn translate(text: &str) -> Option<&'static str> {
         "Folders" => Some("文件夹"),
         "No folders to create" => Some("没有要创建的文件夹"),
         "Auto-renamed" => Some("已自动改名"),
+        "Cannot read the parent folder" => Some("无法读取上级文件夹"),
         "Enter after creation" => Some("创建后进入"),
         "Open in new tab after creation" => Some("创建后在新标签页进入"),
         "Move selected items into the first folder" => Some("把选中项移入第一个文件夹"),

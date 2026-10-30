@@ -55,7 +55,7 @@ pub(crate) use address_bar::{
     PaneAddressBarTransition, PaneAddressEditingSession,
 };
 mod entry_naming;
-pub(crate) use entry_naming::GATHERED_FOLDER_BASE_NAME;
+pub(crate) use entry_naming::{invalid_entry_name_label, GATHERED_FOLDER_BASE_NAME};
 mod browser_panes;
 pub(crate) use browser_panes::{
     empty_directory_entry_snapshot, retain_direct_entry_selection, BrowserPane, BrowserPaneId,
@@ -105,7 +105,8 @@ mod file_entry_content_modifier;
 pub(crate) use file_entry_content_modifier::FileEntryContentModifier;
 mod advanced_new_folder;
 pub(crate) use advanced_new_folder::{
-    AdvancedNewFolderAfter, AdvancedNewFolderMessage, AdvancedNewFolderMode, AdvancedNewFolderState,
+    AdvancedNewFolderAfter, AdvancedNewFolderMessage, AdvancedNewFolderMode,
+    AdvancedNewFolderState, NestedParentListing, PlannedFolder, PlannedFolderStatus,
 };
 mod batch_rename;
 pub(crate) use batch_rename::{

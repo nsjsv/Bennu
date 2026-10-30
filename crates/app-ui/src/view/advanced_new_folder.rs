@@ -14,8 +14,9 @@ use crate::appearance::{
 use crate::icons::IconSymbol;
 use crate::matugen_theme::ui_colors;
 use crate::model::{
-    AdvancedNewFolderAfter, AdvancedNewFolderMessage, AdvancedNewFolderMode,
-    AdvancedNewFolderState, Message, ScrollbarVisibility,
+    invalid_entry_name_label, AdvancedNewFolderAfter, AdvancedNewFolderMessage,
+    AdvancedNewFolderMode, AdvancedNewFolderState, Message, PlannedFolder, PlannedFolderStatus,
+    ScrollbarVisibility,
 };
 use crate::typography::{localized_text, readable_text};
 
@@ -95,20 +96,8 @@ pub(super) fn advanced_new_folder_panel(state: &AdvancedNewFolderState) -> Eleme
         readable_text("No folders to create").size(12).into()
     } else {
         let mut rows = Column::new().spacing(2);
-        for (name, renamed) in &planned {
-            let mut name_row = row![readable_text(name.clone()).size(13)].spacing(8);
-            if *renamed {
-                // 撞车被自动错开的名字整行淡化,尾部小字说明原因。
-                name_row = name_row.push(
-                    container(readable_text("Auto-renamed").size(11)).style(auto_renamed_style),
-                );
-            }
-            let name_row = name_row.align_y(Alignment::Center);
-            rows = rows.push(if *renamed {
-                Element::from(container(name_row).style(auto_renamed_style))
-            } else {
-                Element::from(name_row)
-            });
+        for folder in &planned {
+            rows = rows.push(planned_folder_row(folder));
         }
         scrollable(rows)
             .height(Length::Fixed(PREVIEW_HEIGHT))
@@ -120,8 +109,9 @@ pub(super) fn advanced_new_folder_panel(state: &AdvancedNewFolderState) -> Eleme
             .into()
     };
 
+    let cannot_create = !state.can_confirm();
     let apply = create_split_button(
-        planned.is_empty(),
+        cannot_create,
         state.after_menu_open,
         state.split_button_hover,
     );
@@ -148,7 +138,7 @@ pub(super) fn advanced_new_folder_panel(state: &AdvancedNewFolderState) -> Eleme
     .align_y(Alignment::Center);
     let after_menu: Option<Element<'_, Message>> = state
         .after_menu_open
-        .then(|| after_create_menu(planned.is_empty()));
+        .then(|| after_create_menu(cannot_create));
     let actions = anchored_popup_expanding(action_row, after_menu);
     content_column = content_column.push(actions);
     let content = content_column.spacing(12).width(Length::Fill);
@@ -374,6 +364,50 @@ fn after_create_menu(disabled: bool) -> Element<'static, Message> {
             AdvancedNewFolderMessage::MenuHoverChanged(false),
         ))
         .into()
+}
+
+/// 预览一行：被自动错开的整行淡化、不能创建的整行标错，尾部小字说明原因。
+fn planned_folder_row<'a>(folder: &PlannedFolder) -> Element<'a, Message> {
+    let mut name_row = row![readable_text(folder.path.clone()).size(13)].spacing(8);
+    if let Some(reason) = planned_folder_reason(&folder.status) {
+        name_row = name_row.push(reason);
+    }
+    let name_row = container(name_row.align_y(Alignment::Center));
+    match &folder.status {
+        PlannedFolderStatus::AsRequested => name_row.into(),
+        PlannedFolderStatus::AutoRenamed => name_row.style(auto_renamed_style).into(),
+        PlannedFolderStatus::InvalidName(_) | PlannedFolderStatus::UnreadableParent(_) => {
+            name_row.style(problem_row_style).into()
+        }
+    }
+}
+
+fn planned_folder_reason<'a>(status: &PlannedFolderStatus) -> Option<Element<'a, Message>> {
+    match status {
+        PlannedFolderStatus::AsRequested => None,
+        PlannedFolderStatus::AutoRenamed => Some(readable_text("Auto-renamed").size(11).into()),
+        PlannedFolderStatus::InvalidName(reason) => Some(
+            readable_text(invalid_entry_name_label(*reason))
+                .size(11)
+                .into(),
+        ),
+        PlannedFolderStatus::UnreadableParent(error) => Some(
+            row![
+                readable_text("Cannot read the parent folder").size(11),
+                readable_text(error.clone()).size(11),
+            ]
+            .spacing(6)
+            .into(),
+        ),
+    }
+}
+
+/// 不能创建的行（非法名、父目录读不了）:错误色提示。
+fn problem_row_style(theme: &iced::Theme) -> iced::widget::container::Style {
+    iced::widget::container::Style {
+        text_color: Some(ui_colors(theme).error),
+        ..Default::default()
+    }
 }
 
 /// 被自动错开的名字:整行淡化提示。

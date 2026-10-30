@@ -931,12 +931,7 @@ impl BatchRenamePreviewStatus {
         match self {
             Self::Ready => "Ready",
             Self::Unchanged => "Unchanged",
-            Self::InvalidName(InvalidEntryName::Empty) => "Empty name",
-            Self::InvalidName(
-                InvalidEntryName::CurrentDirectory | InvalidEntryName::ParentDirectory,
-            ) => "Reserved name",
-            Self::InvalidName(InvalidEntryName::ContainsSlash) => "Contains \"/\"",
-            Self::InvalidName(InvalidEntryName::ContainsNul) => "Contains NUL",
+            Self::InvalidName(reason) => super::invalid_entry_name_label(reason),
             Self::DuplicateTarget => "Duplicate target",
             Self::ExistingTarget => "Already exists",
             Self::RuleError => "Rule error",

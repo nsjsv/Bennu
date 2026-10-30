@@ -1,12 +1,14 @@
 //! 高级新建文件夹弹窗的应用层：打开、更新草稿、确认入队。
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use iced::Task;
 
 use super::FileBrowser;
-use crate::model::{AdvancedNewFolderMessage, AdvancedNewFolderState, Message};
+use crate::model::{
+    AdvancedNewFolderMessage, AdvancedNewFolderState, Message, NestedParentListing,
+};
 use crate::operation_queue::QueuedFileOperation;
 
 impl FileBrowser {
@@ -87,9 +89,9 @@ impl FileBrowser {
                 });
                 Task::none()
             }
-            AdvancedNewFolderMessage::NestedNamesProbed { prefix, names } => {
+            AdvancedNewFolderMessage::NestedNamesProbed { prefix, listing } => {
                 self.update_advanced_new_folder(|state| {
-                    state.taken_deep.insert(prefix, names);
+                    state.taken_deep.insert(prefix, listing);
                 });
                 Task::none()
             }
@@ -113,17 +115,10 @@ impl FileBrowser {
                 .fold(parent.clone(), |current, segment| current.join(segment));
             Task::perform(
                 async move {
-                    let mut names = HashSet::new();
-                    if let Ok(mut entries) = tokio::fs::read_dir(path).await {
-                        while let Ok(Some(entry)) = entries.next_entry().await {
-                            if let Some(name) = entry.file_name().to_str() {
-                                names.insert(name.to_owned());
-                            }
-                        }
-                    }
+                    let listing = nested_parent_listing(&path).await;
                     Message::AdvancedNewFolder(AdvancedNewFolderMessage::NestedNamesProbed {
                         prefix,
-                        names,
+                        listing,
                     })
                 },
                 |message| message,
@@ -204,10 +199,11 @@ impl FileBrowser {
         let Some(state) = self.advanced_new_folder.take() else {
             return Task::none();
         };
-        let names = state.plan();
-        if names.is_empty() {
+        let Some(names) = state.plan() else {
+            // 有不能创建的行（非法名、父目录读不了）：弹窗留着，问题已在预览里标出。
+            self.advanced_new_folder = Some(state);
             return Task::none();
-        }
+        };
         let gather_sources = if state.gather {
             state.gather_sources
         } else {
@@ -221,5 +217,72 @@ impl FileBrowser {
             names,
             gather_sources,
         })
+    }
+}
+
+/// 嵌套链父目录的现有名字。目录还不存在时为空（会由本次新建）；其它读错误如实
+/// 记下，预览据此标出该行，不当作空目录（那样会漏掉重名）。
+async fn nested_parent_listing(path: &Path) -> NestedParentListing {
+    match directory_names(path).await {
+        Ok(names) => NestedParentListing::Names(names),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            NestedParentListing::Names(HashSet::new())
+        }
+        Err(error) => NestedParentListing::Unreadable(error.to_string()),
+    }
+}
+
+async fn directory_names(path: &Path) -> std::io::Result<HashSet<String>> {
+    let mut names = HashSet::new();
+    let mut entries = tokio::fs::read_dir(path).await?;
+    while let Some(entry) = entries.next_entry().await? {
+        // 非 UTF-8 名字不可能与输入框里的名字相同。
+        if let Some(name) = entry.file_name().to_str() {
+            names.insert(name.to_owned());
+        }
+    }
+    Ok(names)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config;
+
+    #[tokio::test]
+    async fn a_missing_parent_is_empty_and_an_unreadable_one_is_reported() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("existing")).unwrap();
+        std::fs::write(root.path().join("existing/taken"), b"").unwrap();
+        std::fs::write(root.path().join("file.txt"), b"not a folder").unwrap();
+
+        assert_eq!(
+            nested_parent_listing(&root.path().join("existing")).await,
+            NestedParentListing::Names(HashSet::from(["taken".to_owned()]))
+        );
+        assert_eq!(
+            nested_parent_listing(&root.path().join("missing")).await,
+            NestedParentListing::Names(HashSet::new())
+        );
+        assert!(matches!(
+            nested_parent_listing(&root.path().join("file.txt")).await,
+            NestedParentListing::Unreadable(_)
+        ));
+    }
+
+    #[test]
+    fn confirming_with_a_row_that_cannot_be_created_keeps_the_dialog_open() {
+        let (mut browser, _) = FileBrowser::new(config::default_user_config());
+        drop(browser.open_advanced_new_folder(PathBuf::from("/workspace")));
+        browser
+            .advanced_new_folder
+            .as_mut()
+            .expect("dialog opened")
+            .draft = "ok\n..".to_owned();
+
+        drop(browser.handle_advanced_new_folder_message(AdvancedNewFolderMessage::Confirmed));
+
+        assert!(browser.advanced_new_folder.is_some());
+        assert!(browser.operation_queue.tasks().is_empty());
     }
 }

@@ -6,8 +6,43 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::path::PathBuf;
 
-use file_core::{entry_name_candidates, EntryNameKind};
+use file_core::{entry_name_candidates, validate_entry_name, EntryNameKind, InvalidEntryName};
 use iced::widget::text_editor;
+
+/// 预览里一行的状态。后两种会让创建失败或无法判断会不会建错，确认因此禁用。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PlannedFolderStatus {
+    AsRequested,
+    /// 与磁盘或批内重名，已按"名字 2"错开。
+    AutoRenamed,
+    /// 某一段名字不能用（`.`、`..`、含 NUL）。
+    InvalidName(InvalidEntryName),
+    /// 嵌套链的父目录读不到内容，无法判断重名；附读错误原文。
+    UnreadableParent(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlannedFolder {
+    /// 相对目标目录的叶子路径，段间 `/` 表示嵌套。
+    pub(crate) path: String,
+    pub(crate) status: PlannedFolderStatus,
+}
+
+impl PlannedFolder {
+    fn creatable(&self) -> bool {
+        matches!(
+            self.status,
+            PlannedFolderStatus::AsRequested | PlannedFolderStatus::AutoRenamed
+        )
+    }
+}
+
+/// 嵌套链父目录的内容探测结果。目录还不存在算作空（会由本次新建）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum NestedParentListing {
+    Names(HashSet<String>),
+    Unreadable(String),
+}
 
 /// 编号模式的数量上限:批量建目录是显式动作,500 足够覆盖
 /// 整理场景,同时防误输入 100000 之类的值拖垮队列。
@@ -56,7 +91,7 @@ pub(crate) struct AdvancedNewFolderState {
     taken_names: HashSet<String>,
     /// 嵌套链父目录的内容快照(key = 相对前缀,如 "test" 或 "a/b"),
     /// 由应用层异步探测回填;plan() 用它错开嵌套叶子段的磁盘重名。
-    pub(crate) taken_deep: HashMap<String, HashSet<String>>,
+    pub(crate) taken_deep: HashMap<String, NestedParentListing>,
 }
 
 impl AdvancedNewFolderState {
@@ -118,32 +153,47 @@ impl AdvancedNewFolderState {
             .collect()
     }
 
-    /// 批内与磁盘重名错开后的最终叶子路径。
-    pub(crate) fn plan(&self) -> Vec<String> {
-        self.plan_detailed()
-            .into_iter()
-            .map(|(name, _)| name)
-            .collect()
+    /// 批内与磁盘重名错开后的最终叶子路径；有不能创建的行时为 None。
+    pub(crate) fn plan(&self) -> Option<Vec<String>> {
+        let planned = self.plan_detailed();
+        (!planned.is_empty() && planned.iter().all(PlannedFolder::creatable))
+            .then(|| planned.into_iter().map(|folder| folder.path).collect())
     }
 
-    /// (最终叶子路径, 是否被自动错开):预览用它标注哪些名字撞了车。
+    /// 能否确认创建：至少一行，且每一行都能按预览建出来。
+    pub(crate) fn can_confirm(&self) -> bool {
+        self.plan().is_some()
+    }
+
+    /// 每一行的最终叶子路径与状态，预览据此标注撞车与问题行。
     /// - 单段行沿用共享命名规则错开磁盘与批内重名(名字、名字 2...);
     /// - 多段行(嵌套链)的中间段允许复用已有目录,只有完整叶子路径在
-    ///   批内重复时才错开最后一段。
+    ///   批内重复时才错开最后一段;
+    /// - 每一段都按执行端的 `validate_entry_name` 校验。
     /// 执行侧逐段创建,AlreadyExists 裁决兜底磁盘深层重名与极端竞争。
-    pub(crate) fn plan_detailed(&self) -> Vec<(String, bool)> {
+    pub(crate) fn plan_detailed(&self) -> Vec<PlannedFolder> {
         let requested = match self.mode {
             AdvancedNewFolderMode::NameList => self.listed_names(),
             AdvancedNewFolderMode::Numbered => self.numbered_names(),
         };
         let mut taken = self.taken_names.clone();
-        let mut planned_leaves: Vec<(String, bool)> = Vec::with_capacity(requested.len());
+        let mut planned_leaves: Vec<PlannedFolder> = Vec::with_capacity(requested.len());
         for name in requested {
             let segments: Vec<&str> = name
                 .split('/')
                 .map(str::trim)
                 .filter(|segment| !segment.is_empty())
                 .collect();
+            if let Some(reason) = segments
+                .iter()
+                .find_map(|segment| validate_entry_name(OsStr::new(segment)).err())
+            {
+                planned_leaves.push(PlannedFolder {
+                    path: segments.join("/"),
+                    status: PlannedFolderStatus::InvalidName(reason),
+                });
+                continue;
+            }
             match segments.as_slice() {
                 [] => continue,
                 [single] => {
@@ -155,9 +205,13 @@ impl AdvancedNewFolderState {
                     } else {
                         (*single).to_owned()
                     };
-                    let renamed = name != *single;
+                    let status = if name == *single {
+                        PlannedFolderStatus::AsRequested
+                    } else {
+                        PlannedFolderStatus::AutoRenamed
+                    };
                     taken.insert(name.clone());
-                    planned_leaves.push((name, renamed));
+                    planned_leaves.push(PlannedFolder { path: name, status });
                 }
                 _ => {
                     // 嵌套链:中间段复用已有目录,叶子段对磁盘(深层探测)
@@ -166,15 +220,25 @@ impl AdvancedNewFolderState {
                     let prefix = head.join("/");
                     let leaf_last = last[0];
                     let leaf = segments.join("/");
-                    let mut occupied: HashSet<String> =
-                        self.taken_deep.get(&prefix).cloned().unwrap_or_default();
-                    for (seen, _) in &planned_leaves {
-                        if let Some((seen_head, seen_last)) = seen.rsplit_once('/') {
+                    let mut occupied: HashSet<String> = match self.taken_deep.get(&prefix) {
+                        Some(NestedParentListing::Names(names)) => names.clone(),
+                        Some(NestedParentListing::Unreadable(error)) => {
+                            planned_leaves.push(PlannedFolder {
+                                path: leaf,
+                                status: PlannedFolderStatus::UnreadableParent(error.clone()),
+                            });
+                            continue;
+                        }
+                        // 还没探测回来:先按无重名显示,探测后预览刷新。
+                        None => HashSet::new(),
+                    };
+                    for seen in &planned_leaves {
+                        if let Some((seen_head, seen_last)) = seen.path.rsplit_once('/') {
                             if seen_head == prefix {
                                 occupied.insert(seen_last.to_owned());
                             }
                         } else if prefix.is_empty() {
-                            occupied.insert(seen.clone());
+                            occupied.insert(seen.path.clone());
                         }
                     }
                     let leaf = if occupied.contains(leaf_last) {
@@ -192,8 +256,12 @@ impl AdvancedNewFolderState {
                     } else {
                         leaf
                     };
-                    let renamed = leaf != segments.join("/");
-                    planned_leaves.push((leaf, renamed));
+                    let status = if leaf == segments.join("/") {
+                        PlannedFolderStatus::AsRequested
+                    } else {
+                        PlannedFolderStatus::AutoRenamed
+                    };
+                    planned_leaves.push(PlannedFolder { path: leaf, status });
                 }
             }
         }
@@ -243,10 +311,10 @@ pub(crate) enum AdvancedNewFolderMessage {
     MenuCloseTick(u64),
     /// 带收尾动作的确认(创建后进入 / 新标签进入)。
     ConfirmedWithAfter(AdvancedNewFolderAfter),
-    /// 嵌套链父目录的内容探测回执:预览据此提前标注叶子段磁盘重名。
+    /// 嵌套链父目录的内容探测回执:预览据此提前标注叶子段磁盘重名或读不了。
     NestedNamesProbed {
         prefix: String,
-        names: HashSet<String>,
+        listing: NestedParentListing,
     },
     Confirmed,
     Cancel,
@@ -279,11 +347,24 @@ mod tests {
         }
     }
 
+    fn planned_names(advanced: &AdvancedNewFolderState) -> Vec<String> {
+        advanced
+            .plan()
+            .expect("every planned folder can be created")
+    }
+
+    fn planned(path: &str, status: PlannedFolderStatus) -> PlannedFolder {
+        PlannedFolder {
+            path: path.to_owned(),
+            status,
+        }
+    }
+
     #[test]
     fn listed_names_drop_blank_lines_and_trim() {
         let mut advanced = state("/tmp", AdvancedNewFolderMode::NameList, &[]);
         advanced.draft = "照片\n\n  影像  \r\n".to_owned();
-        assert_eq!(advanced.plan(), vec!["照片", "影像"]);
+        assert_eq!(planned_names(&advanced), vec!["照片", "影像"]);
     }
 
     #[test]
@@ -291,7 +372,7 @@ mod tests {
         let mut advanced = state("/tmp", AdvancedNewFolderMode::NameList, &[]);
         advanced.editor_content = text_editor::Content::with_text("照片\n影像");
         advanced.draft = advanced.editor_content.text();
-        assert_eq!(advanced.plan(), vec!["照片", "影像"]);
+        assert_eq!(planned_names(&advanced), vec!["照片", "影像"]);
     }
 
     #[test]
@@ -300,12 +381,12 @@ mod tests {
         advanced.prefix = "项目".to_owned();
         advanced.start_number = "1".to_owned();
         advanced.count = "10".to_owned();
-        let planned = advanced.plan();
+        let planned = planned_names(&advanced);
         assert_eq!(planned.first().map(String::as_str), Some("项目01"));
         assert_eq!(planned.last().map(String::as_str), Some("项目10"));
 
         advanced.count = "101".to_owned();
-        let planned = advanced.plan();
+        let planned = planned_names(&advanced);
         assert_eq!(planned.first().map(String::as_str), Some("项目001"));
         assert_eq!(planned.len(), 101);
     }
@@ -314,7 +395,7 @@ mod tests {
     fn plan_duplicates_within_batch_get_shared_suffix_rule() {
         let mut advanced = state("/tmp", AdvancedNewFolderMode::NameList, &[]);
         advanced.draft = "照片\n照片\n照片".to_owned();
-        assert_eq!(advanced.plan(), vec!["照片", "照片 2", "照片 3"]);
+        assert_eq!(planned_names(&advanced), vec!["照片", "照片 2", "照片 3"]);
     }
 
     #[test]
@@ -325,7 +406,7 @@ mod tests {
             &["新建文件夹", "新建文件夹 2"],
         );
         advanced.draft = "新建文件夹".to_owned();
-        assert_eq!(advanced.plan(), vec!["新建文件夹 3"]);
+        assert_eq!(planned_names(&advanced), vec!["新建文件夹 3"]);
     }
 
     #[test]
@@ -333,7 +414,7 @@ mod tests {
         let mut advanced = state("/tmp", AdvancedNewFolderMode::Numbered, &[]);
         advanced.start_number = "abc".to_owned();
         advanced.count = "0".to_owned();
-        assert_eq!(advanced.plan(), vec!["01"]);
+        assert_eq!(planned_names(&advanced), vec!["01"]);
     }
 
     #[test]
@@ -344,10 +425,10 @@ mod tests {
         assert_eq!(
             detailed,
             vec![
-                ("已占用 2".to_owned(), true),
-                ("新名字".to_owned(), false),
-                ("a/b".to_owned(), false),
-                ("a/b 2".to_owned(), true),
+                planned("已占用 2", PlannedFolderStatus::AutoRenamed),
+                planned("新名字", PlannedFolderStatus::AsRequested),
+                planned("a/b", PlannedFolderStatus::AsRequested),
+                planned("a/b 2", PlannedFolderStatus::AutoRenamed),
             ]
         );
     }
@@ -355,13 +436,14 @@ mod tests {
     #[test]
     fn nested_leaf_conflicts_with_deep_disk_entry_get_renamed() {
         let mut advanced = state("/tmp", AdvancedNewFolderMode::NameList, &["test"]);
-        advanced
-            .taken_deep
-            .insert("test".to_owned(), ["test".to_owned()].into_iter().collect());
+        advanced.taken_deep.insert(
+            "test".to_owned(),
+            NestedParentListing::Names(["test".to_owned()].into_iter().collect()),
+        );
         advanced.draft = "test/test".to_owned();
         assert_eq!(
             advanced.plan_detailed(),
-            vec![("test/test 2".to_owned(), true)]
+            vec![planned("test/test 2", PlannedFolderStatus::AutoRenamed)]
         );
 
         // 快照还没探测回来:不乱改,等探测后预览刷新。
@@ -369,22 +451,85 @@ mod tests {
         unprobed.draft = "test/test".to_owned();
         assert_eq!(
             unprobed.plan_detailed(),
-            vec![("test/test".to_owned(), false)]
+            vec![planned("test/test", PlannedFolderStatus::AsRequested)]
         );
+    }
+
+    #[test]
+    fn dot_segments_and_nul_are_flagged_and_block_creation() {
+        for (line, reason) in [
+            ("..", InvalidEntryName::ParentDirectory),
+            ("a/./b", InvalidEntryName::CurrentDirectory),
+            ("a/../b", InvalidEntryName::ParentDirectory),
+            ("nul\0name", InvalidEntryName::ContainsNul),
+        ] {
+            let mut advanced = state("/tmp", AdvancedNewFolderMode::NameList, &[]);
+            advanced.draft = format!("ok\n{line}");
+
+            assert_eq!(
+                advanced.plan_detailed()[1].status,
+                PlannedFolderStatus::InvalidName(reason),
+                "{line:?}"
+            );
+            assert!(!advanced.can_confirm(), "{line:?}");
+            assert_eq!(advanced.plan(), None, "{line:?}");
+        }
+    }
+
+    #[test]
+    fn a_numbered_prefix_that_climbs_out_is_flagged() {
+        let mut advanced = state("/tmp", AdvancedNewFolderMode::Numbered, &[]);
+        advanced.prefix = "../".to_owned();
+
+        assert!(advanced.plan_detailed().iter().all(|folder| folder.status
+            == PlannedFolderStatus::InvalidName(InvalidEntryName::ParentDirectory)));
+        assert!(!advanced.can_confirm());
+    }
+
+    #[test]
+    fn a_nested_line_under_an_unreadable_parent_is_flagged_and_blocks_creation() {
+        let mut advanced = state("/tmp", AdvancedNewFolderMode::NameList, &["locked"]);
+        advanced.taken_deep.insert(
+            "locked".to_owned(),
+            NestedParentListing::Unreadable("Permission denied (os error 13)".to_owned()),
+        );
+        advanced.draft = "fine\nlocked/inner".to_owned();
+
+        assert_eq!(
+            advanced.plan_detailed(),
+            vec![
+                planned("fine", PlannedFolderStatus::AsRequested),
+                planned(
+                    "locked/inner",
+                    PlannedFolderStatus::UnreadableParent(
+                        "Permission denied (os error 13)".to_owned()
+                    )
+                ),
+            ]
+        );
+        assert!(!advanced.can_confirm());
+    }
+
+    #[test]
+    fn an_empty_plan_cannot_be_confirmed() {
+        let advanced = state("/tmp", AdvancedNewFolderMode::NameList, &[]);
+
+        assert_eq!(advanced.plan(), None);
+        assert!(!advanced.can_confirm());
     }
 
     #[test]
     fn nested_paths_stay_as_slash_separated_leaves() {
         let mut advanced = state("/tmp", AdvancedNewFolderMode::NameList, &[]);
         advanced.draft = " 123 / 345 / 678 \n纯名字".to_owned();
-        assert_eq!(advanced.plan(), vec!["123/345/678", "纯名字"]);
+        assert_eq!(planned_names(&advanced), vec!["123/345/678", "纯名字"]);
     }
 
     #[test]
     fn duplicate_nested_leaves_get_last_segment_suffixed() {
         let mut advanced = state("/tmp", AdvancedNewFolderMode::NameList, &[]);
         advanced.draft = "a/b\na/b\na/c".to_owned();
-        assert_eq!(advanced.plan(), vec!["a/b", "a/b 2", "a/c"]);
+        assert_eq!(planned_names(&advanced), vec!["a/b", "a/b 2", "a/c"]);
     }
 
     #[test]
@@ -392,6 +537,6 @@ mod tests {
         // 磁盘已有 123:嵌套行首段应复用而不是整条错开。
         let mut advanced = state("/tmp", AdvancedNewFolderMode::NameList, &["123"]);
         advanced.draft = "123/345".to_owned();
-        assert_eq!(advanced.plan(), vec!["123/345"]);
+        assert_eq!(planned_names(&advanced), vec!["123/345"]);
     }
 }

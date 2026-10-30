@@ -132,13 +132,17 @@ pub(crate) fn view_preview_window<'a>(
                 SegmentedChoice {
                     label: tr!("Rendered"),
                     selected: mode == MarkdownPreviewMode::Rendered,
-                    message: Message::MarkdownPreviewModeSelected(MarkdownPreviewMode::Rendered),
+                    message: Message::Preview(PreviewMessage::MarkdownPreviewModeSelected(
+                        MarkdownPreviewMode::Rendered,
+                    )),
                     tooltip: None,
                 },
                 SegmentedChoice {
                     label: tr!("Raw"),
                     selected: mode == MarkdownPreviewMode::Raw,
-                    message: Message::MarkdownPreviewModeSelected(MarkdownPreviewMode::Raw),
+                    message: Message::Preview(PreviewMessage::MarkdownPreviewModeSelected(
+                        MarkdownPreviewMode::Raw,
+                    )),
                     tooltip: None,
                 },
             ])
@@ -158,16 +162,16 @@ fn sqlite_tabs_row(state: Option<&SqlitePreviewState>) -> Element<'static, Messa
         SegmentedChoice {
             label: tr!("Table Data"),
             selected: active_tab == SqlitePreviewTab::Tables,
-            message: Message::SqlitePreview(SqlitePreviewMessage::TabSelected(
-                SqlitePreviewTab::Tables,
+            message: Message::Preview(PreviewMessage::SqlitePreview(
+                SqlitePreviewMessage::TabSelected(SqlitePreviewTab::Tables),
             )),
             tooltip: None,
         },
         SegmentedChoice {
             label: tr!("SQL Query"),
             selected: active_tab == SqlitePreviewTab::Sql,
-            message: Message::SqlitePreview(SqlitePreviewMessage::TabSelected(
-                SqlitePreviewTab::Sql,
+            message: Message::Preview(PreviewMessage::SqlitePreview(
+                SqlitePreviewMessage::TabSelected(SqlitePreviewTab::Sql),
             )),
             tooltip: None,
         },
@@ -182,7 +186,7 @@ fn directory_scroll_wiring() -> ScrollRegionWiring<'static, Message> {
         scrollable_id: smooth_scroll_id(&ScrollbarRegion::PreviewDirectory),
         on_scroll: Box::new(scrollbar_on_scroll(
             ScrollbarRegion::PreviewDirectory,
-            |_| Message::PreviewDirectoryScrolled,
+            |_| Message::Preview(PreviewMessage::PreviewDirectoryScrolled),
         )),
     }
 }
@@ -194,7 +198,7 @@ fn archive_scroll_wiring() -> ScrollRegionWiring<'static, Message> {
         }),
         scrollable_id: smooth_scroll_id(&ScrollbarRegion::PreviewArchive),
         on_scroll: Box::new(scrollbar_on_scroll(ScrollbarRegion::PreviewArchive, |_| {
-            Message::PreviewArchiveScrolled
+            Message::Preview(PreviewMessage::PreviewArchiveScrolled)
         })),
     }
 }
@@ -229,12 +233,14 @@ fn document_scroll_wiring(preview: Option<&PreviewState>) -> ScrollRegionWiring<
         on_scroll: Box::new(scrollbar_on_scroll(
             ScrollbarRegion::PreviewDocument,
             move |viewport| {
-                Message::DocumentPreview(DocumentPreviewMessage::Scrolled {
-                    key: key.clone(),
-                    offset_y: viewport.absolute_offset().y,
-                    viewport_height: viewport.bounds().height,
-                    content_height: viewport.content_bounds().height,
-                })
+                Message::Preview(PreviewMessage::DocumentPreview(
+                    DocumentPreviewMessage::Scrolled {
+                        key: key.clone(),
+                        offset_y: viewport.absolute_offset().y,
+                        viewport_height: viewport.bounds().height,
+                        content_height: viewport.content_bounds().height,
+                    },
+                ))
             },
         )),
     }
@@ -252,9 +258,11 @@ fn text_scroll_wiring<'a>() -> ScrollRegionWiring<'a, Message> {
         scrollable_id: smooth_scroll_id(&ScrollbarRegion::TextPreview),
         on_scroll: Box::new(scrollbar_on_scroll(
             ScrollbarRegion::TextPreview,
-            |viewport| Message::TextPreviewViewportSynced {
-                offset_y: viewport.absolute_offset().y,
-                viewport_height: viewport.bounds().height,
+            |viewport| {
+                Message::Preview(PreviewMessage::TextPreviewViewportSynced {
+                    offset_y: viewport.absolute_offset().y,
+                    viewport_height: viewport.bounds().height,
+                })
             },
         )),
     }
@@ -273,11 +281,11 @@ fn markdown_scroll_wiring<'a>() -> ScrollRegionWiring<'a, Message> {
                 let offset = viewport.absolute_offset();
                 let bounds = viewport.bounds();
                 let content_bounds = viewport.content_bounds();
-                Message::MarkdownPreviewScrolled {
+                Message::Preview(PreviewMessage::MarkdownPreviewScrolled {
                     offset_y: offset.y,
                     viewport_height: bounds.height,
                     content_height: content_bounds.height,
-                }
+                })
             },
         )),
     }
@@ -293,7 +301,7 @@ fn sqlite_tables_scroll_wiring<'a>() -> ScrollRegionWiring<'a, Message> {
         scrollable_id: smooth_scroll_id(&ScrollbarRegion::PreviewSqliteTables),
         on_scroll: Box::new(scrollbar_on_scroll(
             ScrollbarRegion::PreviewSqliteTables,
-            |_| Message::SqlitePreviewTablesScrolled,
+            |_| Message::Preview(PreviewMessage::SqlitePreviewTablesScrolled),
         )),
     }
 }
@@ -306,7 +314,7 @@ fn sqlite_data_scroll_wiring<'a>() -> ScrollRegionWiring<'a, Message> {
         scrollable_id: smooth_scroll_id(&ScrollbarRegion::PreviewSqliteData),
         on_scroll: Box::new(scrollbar_on_scroll(
             ScrollbarRegion::PreviewSqliteData,
-            |_| Message::SqlitePreviewDataScrolled,
+            |_| Message::Preview(PreviewMessage::SqlitePreviewDataScrolled),
         )),
     }
 }

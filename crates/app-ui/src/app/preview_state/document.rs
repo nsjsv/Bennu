@@ -48,7 +48,6 @@ impl FileBrowser {
             .preview_engine
             .start_document_preview(path, max_file_bytes);
         self.retract_global_error(GlobalErrorSource::Preview);
-        self.sync_preview_window_focus();
         let session_save = self.request_browser_session_save();
         Task::batch([command.map(Message::Preview), session_save])
     }
@@ -61,13 +60,9 @@ impl FileBrowser {
         // 的 &mut preview_engine 字段借用重叠，先绑定局部值隔开两者。
         let layout_size = self.preview_surface_viewport();
         let scroll_region_id = smooth_scroll_id(&ScrollbarRegion::PreviewDocument);
-        let command = self.preview_engine.accept_document_preview_prepared(
-            outcome,
-            layout_size,
-            scroll_region_id,
-        );
-        self.sync_preview_window_focus();
-        command.map(Message::Preview)
+        self.preview_engine
+            .accept_document_preview_prepared(outcome, layout_size, scroll_region_id)
+            .map(Message::Preview)
     }
 
     pub(in crate::app) fn accept_document_page_rendered(

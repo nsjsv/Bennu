@@ -11,8 +11,9 @@ use super::*;
 use crate::config;
 use crate::model::{
     BrowserPaneId, BrowserPaneLayout, BrowserViewMode, LoadedOperationStore, Message,
-    PreviewContent, PreviewSize, PreviewState, PreviewWindowProfile, SettingsCategory,
-    SettingsSubpage, SplitAxis, WindowChromeLayout, WindowFrameState, WINDOW_TOP_BAR_HEIGHT,
+    PreviewContent, PreviewMessage, PreviewSize, PreviewState, PreviewWindowProfile,
+    SettingsCategory, SettingsSubpage, SplitAxis, WindowChromeLayout, WindowFrameState,
+    WINDOW_TOP_BAR_HEIGHT,
 };
 use crate::operation_history::FileOperationCompletion;
 use crate::operation_queue::test_persistence::enqueue_persisted;
@@ -98,6 +99,35 @@ async fn observed_window_actions(task: Task<Message>) -> Vec<ObservedWindowActio
             }
             Action::Output(Message::WindowMaximizedObserved(window, frame_state)) => {
                 actions.push(ObservedWindowAction::FrameObserved(window, frame_state));
+            }
+            _ => {}
+        }
+    }
+    actions
+}
+
+/// 与运行时一致：开窗任务发出的 PreviewWindowPresented 回到 update 之后，
+/// 宿主的焦点簿记才跟上引擎状态。收到它就停止，不等待后面的计时任务。
+async fn deliver_window_presented(
+    browser: &mut FileBrowser,
+    task: Task<Message>,
+) -> Vec<ObservedWindowAction> {
+    let mut stream = iced_runtime::task::into_stream(task).expect("window task stream");
+    let mut actions = Vec::new();
+    while let Some(action) = stream.next().await {
+        match action {
+            Action::Window(iced_runtime::window::Action::Open(window, _, sender)) => {
+                sender.send(window).expect("send opened window id");
+                actions.push(ObservedWindowAction::Open(window));
+            }
+            Action::Window(iced_runtime::window::Action::Close(window)) => {
+                actions.push(ObservedWindowAction::Close(window));
+            }
+            Action::Output(
+                message @ Message::Preview(PreviewMessage::PreviewWindowPresented(_)),
+            ) => {
+                drop(browser.update(message));
+                break;
             }
             _ => {}
         }
@@ -704,8 +734,11 @@ async fn image_dimension_update_reuses_existing_preview_window() {
     let preview_window = window::Id::unique();
     browser.preview_engine.preview_window = Some(preview_window);
 
-    let actions =
-        observed_window_actions(browser.open_image_preview_window_for_dimensions(1600, 900)).await;
+    let task = browser
+        .preview_engine
+        .open_image_preview_window_for_dimensions(1600, 900)
+        .map(Message::Preview);
+    let actions = deliver_window_presented(&mut browser, task).await;
 
     assert_eq!(browser.preview_engine.preview_window, Some(preview_window));
     assert_eq!(browser.focused_window, preview_window);
@@ -721,11 +754,50 @@ async fn image_dimension_update_reuses_existing_preview_window() {
     }));
 }
 
+#[tokio::test]
+async fn a_message_that_opens_the_preview_window_moves_host_focus_to_it() {
+    let (mut browser, _) = FileBrowser::new(config::default_user_config());
+    let path = PathBuf::from("/workspace/broken.bin");
+    browser.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
+
+    let task = browser.update(Message::Preview(PreviewMessage::PreviewLoaded(
+        path,
+        Err("unreadable".to_owned()),
+    )));
+    let actions = deliver_window_presented(&mut browser, task).await;
+
+    let opened = actions.iter().find_map(|action| match action {
+        ObservedWindowAction::Open(window) => Some(*window),
+        _ => None,
+    });
+    assert_eq!(browser.preview_engine.preview_window, opened);
+    assert_eq!(Some(browser.focused_window), opened);
+}
+
+#[test]
+fn a_presented_message_for_a_window_that_is_already_gone_keeps_host_focus() {
+    let (mut browser, _) = FileBrowser::new(config::default_user_config());
+    let focused_before = browser.focused_window;
+    browser.preview_engine.preview_window = Some(window::Id::unique());
+
+    drop(
+        browser.update(Message::Preview(PreviewMessage::PreviewWindowPresented(
+            window::Id::unique(),
+        ))),
+    );
+
+    assert_eq!(browser.focused_window, focused_before);
+}
+
 #[test]
 fn preview_window_opens_with_controls_visible() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
 
-    drop(browser.open_image_preview_window_for_dimensions(748, 499));
+    drop(
+        browser
+            .preview_engine
+            .open_image_preview_window_for_dimensions(748, 499),
+    );
 
     assert!(browser
         .preview_engine

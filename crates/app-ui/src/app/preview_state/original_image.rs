@@ -55,11 +55,9 @@ impl FileBrowser {
         generation: u64,
         outcome: Result<OriginalImagePreview, String>,
     ) -> Task<Message> {
-        let command = self
-            .preview_engine
-            .accept_original_image_preview(path, generation, outcome);
-        self.sync_preview_window_focus();
-        command.map(Message::Preview)
+        self.preview_engine
+            .accept_original_image_preview(path, generation, outcome)
+            .map(Message::Preview)
     }
 
     pub(in crate::app) fn retry_image_preview(&mut self, path: PathBuf) -> Task<Message> {
@@ -297,11 +295,9 @@ impl FileBrowser {
         let window_command = if self.preview_engine.preview_load_surface
             == bennu_preview::engine::PreviewLoadSurface::StandaloneWindow
         {
-            let command = self
-                .preview_engine
-                .open_image_preview_window_for_dimensions(width, height);
-            self.sync_preview_window_focus();
-            command.map(Message::Preview)
+            self.preview_engine
+                .open_image_preview_window_for_dimensions(width, height)
+                .map(Message::Preview)
         } else {
             Task::none()
         };

@@ -141,7 +141,6 @@ impl PreviewHost {
         } else {
             self.open_preview(source, selection)
         };
-        self.sync_focused_window();
         task.map(Message::Preview)
     }
 
@@ -400,13 +399,6 @@ impl PreviewHost {
             });
         let preferences = &self.preferences;
         self.engine.config = Self::engine_config(preferences);
-    }
-
-    /// 引擎呈现预览窗口后的焦点簿记（引擎登记、宿主认领，幂等）。
-    fn sync_focused_window(&mut self) {
-        if let Some(window) = self.engine.take_pending_preview_window_focus() {
-            self.focused_window = Some(window);
-        }
     }
 }
 

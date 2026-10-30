@@ -30,9 +30,6 @@ mod animation;
 mod app;
 mod app_icon;
 mod appearance;
-// 纯搬移：音频预览运行时已下沉 bennu-preview，re-export 维持
-// crate::audio_preview::* 既有调用路径。
-pub(crate) use bennu_preview::audio_preview;
 mod breadcrumb_drop_target_bounds;
 mod column_entry_bounds;
 mod command_line;

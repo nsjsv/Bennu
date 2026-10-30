@@ -1,15 +1,14 @@
 //! 预览子系统自有消息类型：两个宿主（app-ui / portal-backend）的顶层
 //! Message 体系不同，共享状态机与命令层必须以本枚举为输出契约，宿主经
 //! `Task::map` 包进各自 Message（iced 官方组合手段，见任务 design.md
-//! 「PreviewMessage 独立枚举」）。变体与 app-ui 既有散装 preview 变体
-//! 一一对应（design.md 附录 A 基线 62 个中的 61 个；
-//! `ContextMenuPreviewExpansionChanged` 携带 app-ui 右键菜单词表
-//! `FileAreaMenuItem`，属设置窗口右键菜单域而非预览域，不随迁）。
+//! 「PreviewMessage 独立枚举」）。只放两个宿主可能共有的预览消息；仅 app-ui
+//! 设置窗口/停靠面板发出的输入域消息直接定义在 app-ui 的 Message 上。
 
 use std::path::PathBuf;
 use std::time::Duration;
 
 use file_core::DirectoryEntry;
+use iced::window;
 
 use crate::animated_image_preview::{AnimatedImageFrame, AnimatedImagePreview};
 use crate::audio_preview::AudioPreviewRuntime;
@@ -83,25 +82,15 @@ pub enum PreviewMessage {
     VideoPreviewFailed(PathBuf, u64, String),
     PreviewTreeDirectoryToggled(usize),
     PreviewTreeAnimationTick,
-    RightPreviewPanelResizeStarted,
-    RightPreviewPanelRatioResizeStarted,
     RightPreviewPanelInfoLoaded {
         path: PathBuf,
         snapshot: Result<Box<RightPreviewPanelInfoSnapshot>, String>,
     },
     SqliteTablesResizeStarted,
-    ToggleRightPreviewPanel,
     PreviewWindowPinToggled,
-    PreviewSizeLimitInputChanged(usize, String),
-    PreviewSizeLimitInputCommitted(usize),
-    PreviewDirectoryExpandLevelsInputChanged(String),
-    PreviewDirectoryExpandLevelsInputCommitted,
-    PreviewExtensionInputChanged(usize, String),
-    PreviewExtensionInputCommitted(usize),
-    PreviewExtensionExpandToggled(usize),
-    PreviewExtensionRemoved(usize, String),
-    PreviewExtensionResetRequested(usize),
-    PreviewExtensionResetConfirmed(usize),
+    /// 引擎呈现（开启或复用）预览窗口时随任务发出：宿主的焦点簿记
+    /// （focused_window）不归引擎所有，由宿主认领。
+    PreviewWindowPresented(window::Id),
     PreviewWindowInitialChromeElapsed(u64),
     SqlitePreviewTablesScrolled,
     SqlitePreviewDataScrolled,

@@ -1,6 +1,5 @@
-//! 预览树交互已迁 bennu-preview 的 PreviewEngine（engine/tree.rs，impl
-//! 块与纯函数逐字节保真）；此处保留同名薄转发并注入宿主扫描选项
-//! （目录会话状态非预览域所有）。
+//! 预览树交互在 bennu-preview 的 PreviewEngine（engine/tree.rs）；此处注入
+//! 宿主扫描选项（目录会话状态非预览域所有）。
 
 use std::path::PathBuf;
 
@@ -34,12 +33,6 @@ impl FileBrowser {
                 options,
                 expand_levels,
             )
-            .map(Message::Preview)
-    }
-
-    pub(in crate::app) fn advance_preview_tree_animation(&mut self) -> Task<Message> {
-        self.preview_engine
-            .advance_preview_tree_animation()
             .map(Message::Preview)
     }
 }

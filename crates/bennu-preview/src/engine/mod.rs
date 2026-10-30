@@ -79,10 +79,6 @@ pub struct PreviewEngine {
     /// 预览窗口的宿主进程身份（应用 id 与启动图标）：开窗 Task 由引擎
     /// 产出，但窗口归属宿主进程，身份由宿主构造引擎时注入。
     pub window_identity: PreviewWindowIdentity,
-    /// 引擎呈现预览窗口后把它登记为待同步焦点；宿主焦点簿记
-    /// （focused_window）不归引擎所有，由宿主在转发层或 update 出口
-    /// take 走并写入自己的焦点状态。
-    pending_focus_window: Option<Id>,
 }
 
 /// 当前预览会话由哪个呈现面发起。加载管线的窗口尺寸/聚焦动作只归
@@ -145,96 +141,86 @@ impl PreviewEngine {
             pending_preview_thumbnail_display: None,
             preview_load_surface: PreviewLoadSurface::StandaloneWindow,
             window_identity,
-            pending_focus_window: None,
         }
     }
 
-    /// 取走「预览窗口应成为应用焦点」的登记（一次性）。宿主在预览
-    /// 窗口呈现转发后与 update 出口各同步一次，保证引擎内部路径
-    /// （消息直达引擎）与宿主转发路径的焦点簿记行为一致。
-    pub fn take_pending_preview_window_focus(&mut self) -> Option<Id> {
-        self.pending_focus_window.take()
-    }
-
-    /// 处理已迁入引擎的 [`PreviewMessage`] 变体。返回 `None` 表示该变体
-    /// 的处理仍在宿主散装分支（迁移期回退路径），宿主负责经
-    /// `From<PreviewMessage>` 机械映射后走既有分支；随 impl 块分批迁入，
-    /// None 的变体逐渐减少直至清零。
-    pub fn handle(&mut self, message: PreviewMessage) -> Option<Task<PreviewMessage>> {
-        match message {
-            PreviewMessage::SqlitePreview(inner) => Some(self.handle_sqlite_preview_message(inner)),
+    /// 处理只依赖引擎自身状态的 [`PreviewMessage`] 变体。需要宿主参数
+    /// （扫描选项、视口几何、滚动管线）或宿主通知域的变体原样经 `Err`
+    /// 还给宿主：每个变体只有一个处理者，且无需为转交而克隆消息。消息体
+    /// 较大，装箱后 `Err` 不会撑大每次调用的返回值。
+    pub fn handle(
+        &mut self,
+        message: PreviewMessage,
+    ) -> Result<Task<PreviewMessage>, Box<PreviewMessage>> {
+        let task = match message {
+            PreviewMessage::SqlitePreview(inner) => self.handle_sqlite_preview_message(inner),
             PreviewMessage::TextPreviewContentScrolled {
                 lines,
                 viewport_height,
-            } => Some(self.handle_text_preview_content_scrolled(lines, viewport_height)),
+            } => self.handle_text_preview_content_scrolled(lines, viewport_height),
             PreviewMessage::TextPreviewChunkLoaded {
                 path,
                 generation,
                 start_offset,
                 outcome,
-            } => Some(self.accept_text_preview_chunk(path, generation, start_offset, outcome)),
-            PreviewMessage::PreviewTreeAnimationTick => Some(self.advance_preview_tree_animation()),
-            PreviewMessage::PreviewWindowPinToggled => Some(self.toggle_preview_window_pin()),
+            } => self.accept_text_preview_chunk(path, generation, start_offset, outcome),
+            PreviewMessage::PreviewTreeAnimationTick => self.advance_preview_tree_animation(),
+            PreviewMessage::PreviewWindowPinToggled => self.toggle_preview_window_pin(),
             PreviewMessage::PreviewWindowInitialChromeElapsed(generation) => {
                 self.hide_preview_window_initial_chrome(generation);
-                Some(Task::none())
+                Task::none()
             }
             PreviewMessage::AnimatedImageFrameLoaded(frame) => {
-                Some(self.accept_animated_image_frame(frame))
+                self.accept_animated_image_frame(frame)
             }
             PreviewMessage::AnimatedImagePreviewFinished(path, generation) => {
-                Some(self.accept_animated_image_preview_finished(path, generation))
+                self.accept_animated_image_preview_finished(path, generation)
             }
             PreviewMessage::AnimatedImagePreviewFailed(path, generation, error) => {
-                Some(self.accept_animated_image_preview_error(path, generation, error))
+                self.accept_animated_image_preview_error(path, generation, error)
             }
             PreviewMessage::AnimatedImageSeekRequested(position) => {
-                Some(self.seek_animated_image_preview(position))
+                self.seek_animated_image_preview(position)
             }
-            PreviewMessage::AnimatedImageSeekCommitted => {
-                Some(self.commit_animated_image_preview_seek())
-            }
-            PreviewMessage::AudioPreviewPlaybackToggled => {
-                Some(self.toggle_audio_preview_playback())
-            }
+            PreviewMessage::AnimatedImageSeekCommitted => self.commit_animated_image_preview_seek(),
+            PreviewMessage::AudioPreviewPlaybackToggled => self.toggle_audio_preview_playback(),
             PreviewMessage::AudioPreviewStarted(path, playback_outcome) => {
-                Some(self.accept_audio_preview_started(path, playback_outcome))
+                self.accept_audio_preview_started(path, playback_outcome)
             }
             PreviewMessage::AudioPreviewVolumeChanged(volume) => {
-                Some(self.change_audio_preview_volume(volume))
+                self.change_audio_preview_volume(volume)
             }
-            PreviewMessage::AudioPreviewTick => Some(self.update_audio_preview_playback()),
-            PreviewMessage::VideoPreviewPlaybackToggled => {
-                Some(self.toggle_video_preview_playback())
-            }
+            PreviewMessage::AudioPreviewTick => self.update_audio_preview_playback(),
+            PreviewMessage::VideoPreviewPlaybackToggled => self.toggle_video_preview_playback(),
             PreviewMessage::VideoPreviewAudioStarted(path, generation, audio_outcome) => {
-                Some(self.accept_video_preview_audio_started(path, generation, audio_outcome))
+                self.accept_video_preview_audio_started(path, generation, audio_outcome)
             }
             PreviewMessage::VideoPreviewMetadataLoaded(path, metadata_outcome) => {
-                Some(self.accept_video_preview_metadata(path, metadata_outcome))
+                self.accept_video_preview_metadata(path, metadata_outcome)
             }
             PreviewMessage::VideoPreviewSeekRequested(position) => {
-                Some(self.seek_video_preview_playback(position))
+                self.seek_video_preview_playback(position)
             }
-            PreviewMessage::VideoPreviewSeekCommitted => Some(self.commit_video_preview_seek()),
+            PreviewMessage::VideoPreviewSeekCommitted => self.commit_video_preview_seek(),
             PreviewMessage::VideoPreviewVolumeChanged(volume) => {
-                Some(self.change_video_preview_volume(volume))
+                self.change_video_preview_volume(volume)
             }
-            PreviewMessage::VideoPreviewTick => Some(self.update_video_preview_playback()),
+            PreviewMessage::VideoPreviewTick => self.update_video_preview_playback(),
             PreviewMessage::VideoPreviewFrameLoaded(frame) => {
-                Some(self.accept_video_preview_frame(frame))
+                self.accept_video_preview_frame(frame)
             }
             PreviewMessage::VideoPreviewSeekFrameFailed(path, generation, position, error) => {
-                Some(self.accept_video_preview_seek_frame_error(path, generation, position, error))
+                self.accept_video_preview_seek_frame_error(path, generation, position, error)
             }
             PreviewMessage::VideoPreviewFinished(path, generation) => {
-                Some(self.accept_video_preview_finished(path, generation))
+                self.accept_video_preview_finished(path, generation)
             }
             PreviewMessage::VideoPreviewFailed(path, generation, error) => {
-                Some(self.accept_video_preview_error(path, generation, error))
+                self.accept_video_preview_error(path, generation, error)
             }
-            _ => None,
-        }
+            host_message => return Err(Box::new(host_message)),
+        };
+        Ok(task)
     }
 }
 
@@ -262,3 +248,92 @@ pub use windows::{
     preview_window_settings, preview_window_size_for_content, video_preview_initial_fit_max_size,
     video_preview_size_from_frame, PreviewWindowIdentity,
 };
+
+#[cfg(test)]
+mod tests {
+    use iced::futures::StreamExt;
+    use std::path::PathBuf;
+
+    use super::*;
+    use crate::preview::PreviewWindowProfile;
+
+    fn engine() -> PreviewEngine {
+        PreviewEngine::new(
+            PreviewEngineConfig {
+                directory_expand_levels: 1,
+                extension_rules: Default::default(),
+                size_limits: PreviewFileSizeLimits::with_default_limits(),
+            },
+            default_preview_size(PreviewWindowProfile::Regular),
+            PreviewWindowIdentity {
+                app_id: "bennu-preview-tests".to_owned(),
+                icon: None,
+            },
+        )
+    }
+
+    fn returned_to_host(engine: &mut PreviewEngine, message: PreviewMessage) -> PreviewMessage {
+        match engine.handle(message) {
+            Err(message) => *message,
+            Ok(_) => panic!("the engine handled a host-owned message"),
+        }
+    }
+
+    #[test]
+    fn messages_that_need_the_host_come_back_unchanged() {
+        let mut engine = engine();
+        let window = Id::unique();
+        let path = PathBuf::from("/tmp/photo.png");
+
+        for message in [
+            PreviewMessage::SqliteTablesResizeStarted,
+            PreviewMessage::SqlitePreviewTablesScrolled,
+            PreviewMessage::PreviewDirectoryScrolled,
+            PreviewMessage::TextPreviewContentHeightChanged(12.0),
+        ] {
+            returned_to_host(&mut engine, message);
+        }
+        assert!(matches!(
+            returned_to_host(&mut engine, PreviewMessage::PreviewWindowPresented(window)),
+            PreviewMessage::PreviewWindowPresented(returned) if returned == window
+        ));
+        assert!(matches!(
+            returned_to_host(&mut engine, PreviewMessage::RetryImagePreview(path.clone())),
+            PreviewMessage::RetryImagePreview(returned) if returned == path
+        ));
+    }
+
+    #[test]
+    fn engine_owned_messages_are_handled_in_place() {
+        let mut engine = engine();
+
+        assert!(engine
+            .handle(PreviewMessage::PreviewWindowPinToggled)
+            .is_ok());
+        assert!(engine.preview_window_pinned);
+        assert!(engine.handle(PreviewMessage::AudioPreviewTick).is_ok());
+    }
+
+    #[tokio::test]
+    async fn presenting_an_existing_window_announces_it_to_the_host() {
+        let mut engine = engine();
+        let window = Id::unique();
+        engine.preview_window = Some(window);
+
+        let (_, task) = engine.ensure_preview_window(PreviewWindowProfile::Regular);
+        let mut stream = iced_runtime::task::into_stream(task).expect("presentation task stream");
+        let mut announced = false;
+        while let Some(action) = stream.next().await {
+            if matches!(
+                action,
+                iced_runtime::Action::Output(PreviewMessage::PreviewWindowPresented(presented))
+                    if presented == window
+            ) {
+                announced = true;
+                break;
+            }
+        }
+
+        assert!(announced);
+    }
+}

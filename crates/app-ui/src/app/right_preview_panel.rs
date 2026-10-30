@@ -313,11 +313,9 @@ impl FileBrowser {
         &mut self,
         profile: PreviewWindowProfile,
     ) -> Task<Message> {
-        let command = self
-            .preview_engine
-            .preview_window_presentation_command(profile);
-        self.sync_preview_window_focus();
-        command.map(Message::Preview)
+        self.preview_engine
+            .preview_window_presentation_command(profile)
+            .map(Message::Preview)
     }
 
     /// 当前预览表面的媒体区视口尺寸:独立窗口会话沿用窗口尺寸,

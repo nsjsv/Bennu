@@ -108,6 +108,7 @@ use bennu_preview::engine::{audio_preview_tick_subscription, video_preview_tick_
 use bennu_preview::video_preview::video_preview_subscription;
 
 use bennu_preview::preview_loading::{classify_preview_path, PreviewPathKind};
+use bennu_preview::preview_message::PreviewMessage;
 use bennu_theme::{fallback_theme, AppearanceMode, ApplicationTheme};
 
 use crate::app::application_shutdown::ApplicationShutdownPhase;
@@ -954,7 +955,7 @@ impl FileBrowser {
         if self.preview_engine.preview_tree_animation_is_active() {
             subscriptions.push(
                 time::every(PREVIEW_TREE_ANIMATION_INTERVAL)
-                    .map(|_| Message::PreviewTreeAnimationTick),
+                    .map(|_| Message::Preview(PreviewMessage::PreviewTreeAnimationTick)),
             );
         }
 

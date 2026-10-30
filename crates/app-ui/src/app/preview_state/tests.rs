@@ -10,7 +10,7 @@ use crate::app::FileBrowser;
 use crate::config::ui_thread_startup_config;
 use crate::model::{
     ImagePreviewContent, ImagePreviewViewport, Message, PreviewContent,
-    PreviewImageViewportMessage, PreviewState,
+    PreviewImageViewportMessage, PreviewMessage, PreviewState,
 };
 
 fn browser_with_image(path: &Path) -> FileBrowser {
@@ -426,9 +426,11 @@ fn image_viewport_messages_are_ignored_without_a_ready_image_preview() {
     browser.preview_engine.preview = Some(PreviewState::Loading(path));
     browser.preview_engine.preview_image_viewport.panning = true;
 
-    drop(browser.update(Message::PreviewImageViewport(
-        PreviewImageViewportMessage::Zoomed(mouse::ScrollDelta::Lines { x: 0.0, y: 3.0 }),
-    )));
+    drop(
+        browser.update(Message::Preview(PreviewMessage::PreviewImageViewport(
+            PreviewImageViewportMessage::Zoomed(mouse::ScrollDelta::Lines { x: 0.0, y: 3.0 }),
+        ))),
+    );
 
     assert_eq!(browser.preview_engine.preview_image_viewport.scale, 1.0);
 }
@@ -442,21 +444,60 @@ fn zoom_and_reset_update_the_viewport_for_ready_image_previews() {
         image::Handle::from_rgba(1, 1, vec![0, 0, 0, 255]),
     )));
 
-    drop(browser.update(Message::PreviewImageViewport(
-        PreviewImageViewportMessage::PointerMoved(Point::new(300.0, 200.0)),
-    )));
-    drop(browser.update(Message::PreviewImageViewport(
-        PreviewImageViewportMessage::Zoomed(mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 }),
-    )));
+    drop(
+        browser.update(Message::Preview(PreviewMessage::PreviewImageViewport(
+            PreviewImageViewportMessage::PointerMoved(Point::new(300.0, 200.0)),
+        ))),
+    );
+    drop(
+        browser.update(Message::Preview(PreviewMessage::PreviewImageViewport(
+            PreviewImageViewportMessage::Zoomed(mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 }),
+        ))),
+    );
 
     assert!(browser.preview_engine.preview_image_viewport.scale > 1.0);
     assert!(browser.preview_engine.preview_image_viewport.is_zoomed());
 
-    drop(browser.update(Message::PreviewImageViewport(
-        PreviewImageViewportMessage::ResetRequested,
-    )));
+    drop(
+        browser.update(Message::Preview(PreviewMessage::PreviewImageViewport(
+            PreviewImageViewportMessage::ResetRequested,
+        ))),
+    );
     assert_eq!(
         browser.preview_engine.preview_image_viewport,
         ImagePreviewViewport::default()
     );
+}
+
+// 引擎经 Err 还回的变体必须都有宿主处理者，否则宿主的 unreachable 分支会 panic。
+// 载荷复杂的变体（文档、远程缓存、加载结果）由各自的流程测试覆盖。
+#[test]
+fn every_message_the_engine_returns_has_a_host_handler() {
+    let path = PathBuf::from("/workspace/photo.png");
+    let mut browser = browser_with_image(&path);
+
+    for message in [
+        PreviewMessage::SqliteTablesResizeStarted,
+        PreviewMessage::SqlitePreviewTablesScrolled,
+        PreviewMessage::SqlitePreviewDataScrolled,
+        PreviewMessage::PreviewDirectoryScrolled,
+        PreviewMessage::PreviewArchiveScrolled,
+        PreviewMessage::TextPreviewContentHeightChanged(12.0),
+        PreviewMessage::TextPreviewViewportSynced {
+            offset_y: 0.0,
+            viewport_height: 100.0,
+        },
+        PreviewMessage::TextPreviewViewerScrolled {
+            lines: 1,
+            offset_y: 0.0,
+            viewport_height: 100.0,
+        },
+        PreviewMessage::MarkdownPreviewModeSelected(crate::model::MarkdownPreviewMode::Raw),
+        PreviewMessage::PreviewTreeDirectoryToggled(0),
+        PreviewMessage::AudioPreviewSeekRequested(0.0),
+        PreviewMessage::PreviewImageViewport(PreviewImageViewportMessage::ResetRequested),
+        PreviewMessage::PreviewWindowPresented(iced::window::Id::unique()),
+    ] {
+        drop(browser.update(Message::Preview(message)));
+    }
 }

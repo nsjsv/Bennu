@@ -32,32 +32,27 @@ const PREVIEW_THUMBNAIL_MIN_EDGE: u32 = 512;
 const PREVIEW_THUMBNAIL_MAX_EDGE: u32 = thumbnails::LARGEST_THUMBNAIL_EDGE;
 const PREVIEW_RESIZE_EXTRA_PIXELS: u32 = 128;
 
-/// Message::Preview 的 update 入口（app-ui update.rs:38 模式）：引擎
-/// 直连变体优先；None 回退经本层路由到宿主侧接收器；剩余变体随
-/// 步骤 3/4 接入，当前安全丢弃。
+/// Message::Preview 的 update 入口：引擎自足的变体由引擎处理，其余
+/// 经 `Err` 还回后路由到宿主侧接收器；portal 无对应物的变体安全丢弃。
 pub(crate) fn handle_preview_message(
     daemon: &mut PickerDaemon,
     message: PreviewMessage,
 ) -> Task<Message> {
-    let task = match message {
+    match message {
         // 尺寸探测回流需要会话缩略图体系（Task 已是 Message 域：含缩略
-        // 图泵送），在进入引擎前拦截并提前返回。
+        // 图泵送），不经引擎。
         PreviewMessage::ImagePreviewDimensionsLoaded(path, generation, outcome) => {
-            let task =
-                PreviewHost::accept_image_preview_dimensions(daemon, path, generation, outcome);
-            daemon.preview.sync_focused_window();
-            return task;
+            PreviewHost::accept_image_preview_dimensions(daemon, path, generation, outcome)
         }
         other => {
             let host = &mut daemon.preview;
-            match host.engine.handle(other.clone()) {
-                Some(task) => task,
-                None => host.route_engine_fallback(other),
-            }
+            let task = match host.engine.handle(other) {
+                Ok(task) => task,
+                Err(host_message) => host.route_engine_fallback(*host_message),
+            };
+            task.map(Message::Preview)
         }
-    };
-    daemon.preview.sync_focused_window();
-    task.map(Message::Preview)
+    }
 }
 
 /// 预览窗尺寸变化的 update 入口（main.rs 直转）：pending resize 匹配
@@ -274,8 +269,7 @@ impl PreviewHost {
         self.close_preview_session()
     }
 
-    /// 引擎不处理变体的回退路由（app-ui 散装分支的对齐物：视图/滚动/
-    /// 宿主簿记留在宿主侧的部分）。
+    /// 引擎不处理变体的宿主路由（视图/滚动/宿主簿记留在宿主侧的部分）。
     pub(super) fn route_engine_fallback(
         &mut self,
         message: PreviewMessage,
@@ -405,6 +399,13 @@ impl PreviewHost {
                 .scroll
                 .layout_probe_task(PreviewScrollRegion::SqliteData)
                 .discard(),
+            // 窗口在消息回到宿主前已被关掉时，焦点簿记不能指向已死窗口。
+            PreviewMessage::PreviewWindowPresented(window) => {
+                if self.engine.preview_window == Some(window) {
+                    self.focused_window = Some(window);
+                }
+                Task::none()
+            }
             // 远程下载/右侧面板/设置输入域变体 portal 无对应物（远程管线
             // 不移植、无停靠面板与设置窗），持续丢弃。
             _ => Task::none(),

@@ -31,19 +31,7 @@ impl FileBrowser {
                 _ => Task::none(),
             };
         }
-        // 预览子系统包裹变体优先直连 PreviewEngine：已迁消息在引擎内
-        // 处理，Task 以 Message::Preview 回流闭环；引擎返回 None 的变体
-        // 经 From 机械映射（见 model.rs）回散装分支，迁移期零行为变化。
-        // 两条路径都收敛到 dispatch，出口收敛钩子保持单次执行。
-        let command = match message {
-            Message::Preview(preview_message) => {
-                match self.preview_engine.handle(preview_message.clone()) {
-                    Some(task) => task.map(Message::Preview),
-                    None => self.dispatch(Message::from(preview_message)),
-                }
-            }
-            other => self.dispatch(other),
-        };
+        let command = self.dispatch(message);
         // 任何消息处理后都检查活动窗格目录是否变化,让内嵌终端即时跟随
         // (前进/后退/侧边栏跳转等入口太多,统一在出口收敛)。
         self.follow_terminal_panel_directory();
@@ -60,10 +48,6 @@ impl FileBrowser {
         // 驱动者签发单点收敛:入队/恢复/认领/监督换代后由此统一发出
         // Task::stream 驱动者,任何消息路径都不必各自处理。
         let driver_launch_command = self.poll_driver_command();
-        // 引擎内部路径（消息直达 PreviewEngine）呈现预览窗口后，把
-        // 登记的焦点请求同步进宿主焦点簿记；宿主转发路径已就地同步，
-        // 此处 take 幂等，只兜住绕过转发的引擎调用。
-        self.sync_preview_window_focus();
         Task::batch([
             command,
             right_preview_panel_command,
@@ -73,13 +57,13 @@ impl FileBrowser {
         ])
     }
 
-    /// 散装消息的分派体：自 update 的主 match 提出（预览包裹变体已在
-    /// update 入口经引擎或 From 收敛，不会到达这里）。
+    /// 消息分派体：自 update 的主 match 提出，出口收敛钩子只在 update 里执行一次。
     fn dispatch(&mut self, message: Message) -> Task<Message> {
         let command = match message {
             Message::StartupEnvironmentLoaded(startup_environment) => {
                 self.accept_startup_environment(*startup_environment)
             }
+            Message::Preview(preview_message) => self.handle_preview_message(preview_message),
             Message::SidebarLocationsLoaded(sidebar_locations) => {
                 self.accept_sidebar_locations(sidebar_locations)
             }
@@ -149,109 +133,8 @@ impl FileBrowser {
                 self.show_global_error_from(GlobalErrorSource::Launch, error);
                 Task::none()
             }
-            Message::PreviewLoaded(path, outcome) => self.accept_preview(path, outcome),
-            Message::DocumentPreview(message) => self.handle_document_preview_message(message),
-            Message::SqlitePreview(message) => self.handle_sqlite_preview_message(message),
-            Message::SqliteTablesResizeStarted => self.start_sqlite_tables_resize_drag(),
-            Message::RemotePreviewCache(message) => {
-                self.accept_remote_preview_cache_message(message)
-            }
-            Message::AnimatedImagePreviewLoaded(path, generation, preview_outcome) => {
-                self.accept_animated_image_preview_loaded(path, generation, preview_outcome)
-            }
-            Message::OriginalImagePreviewLoaded(path, generation, outcome) => {
-                self.accept_original_image_preview(path, generation, outcome)
-            }
-            Message::RetryImagePreview(path) => self.retry_image_preview(path),
-            Message::PreviewImageViewport(message) => self.update_preview_image_viewport(message),
             Message::FileProperties(properties_message) => {
                 self.accept_file_properties_message(properties_message)
-            }
-            Message::PreviewDirectoryChildrenLoaded(parent_path, children_outcome) => {
-                self.accept_preview_directory_children(parent_path, children_outcome)
-            }
-            Message::TextPreviewContentScrolled {
-                lines,
-                viewport_height,
-            } => self.handle_text_preview_content_scrolled(lines, viewport_height),
-            Message::TextPreviewViewerScrolled {
-                lines,
-                offset_y,
-                viewport_height,
-            } => self.handle_text_preview_viewer_scrolled(lines, offset_y, viewport_height),
-            Message::TextPreviewViewportSynced {
-                offset_y,
-                viewport_height,
-            } => self.handle_text_preview_viewport_synced(offset_y, viewport_height),
-            Message::TextPreviewContentHeightChanged(content_height) => {
-                self.preview_engine.text_preview_content_height = content_height;
-                Task::none()
-            }
-            Message::TextPreviewChunkLoaded {
-                path,
-                generation,
-                start_offset,
-                outcome,
-            } => self.accept_text_preview_chunk(path, generation, start_offset, outcome),
-            Message::MarkdownPreviewScrolled {
-                offset_y,
-                viewport_height,
-                content_height,
-            } => Task::batch([
-                self.show_scrollbars_temporarily(Region::MarkdownPreview),
-                self.handle_markdown_preview_scrolled(offset_y, viewport_height, content_height),
-            ]),
-            Message::MarkdownPreviewModeSelected(mode) => {
-                if let Some(document) = self.preview_engine.text_preview_document.as_mut() {
-                    document.select_markdown_preview_mode(mode);
-                }
-                Task::none()
-            }
-            Message::ImagePreviewDimensionsLoaded(path, generation, dimensions_outcome) => {
-                self.accept_image_preview_dimensions(path, generation, dimensions_outcome)
-            }
-            Message::AnimatedImageFrameLoaded(frame) => self.accept_animated_image_frame(frame),
-            Message::AnimatedImagePreviewFinished(path, generation) => {
-                self.accept_animated_image_preview_finished(path, generation)
-            }
-            Message::AnimatedImagePreviewFailed(path, generation, error) => {
-                self.accept_animated_image_preview_error(path, generation, error)
-            }
-            Message::AnimatedImageSeekRequested(position) => {
-                self.seek_animated_image_preview(position)
-            }
-            Message::AnimatedImageSeekCommitted => self.commit_animated_image_preview_seek(),
-            Message::AudioPreviewPlaybackToggled => self.toggle_audio_preview_playback(),
-            Message::AudioPreviewStarted(path, playback_outcome) => {
-                self.accept_audio_preview_started(path, playback_outcome)
-            }
-            Message::AudioPreviewSeekRequested(position) => {
-                self.seek_audio_preview_playback(position)
-            }
-            Message::AudioPreviewVolumeChanged(volume) => self.change_audio_preview_volume(volume),
-            Message::AudioPreviewTick => self.update_audio_preview_playback(),
-            Message::VideoPreviewPlaybackToggled => self.toggle_video_preview_playback(),
-            Message::VideoPreviewAudioStarted(path, generation, audio_outcome) => {
-                self.accept_video_preview_audio_started(path, generation, audio_outcome)
-            }
-            Message::VideoPreviewMetadataLoaded(path, metadata_outcome) => {
-                self.accept_video_preview_metadata(path, metadata_outcome)
-            }
-            Message::VideoPreviewSeekRequested(position) => {
-                self.seek_video_preview_playback(position)
-            }
-            Message::VideoPreviewSeekCommitted => self.commit_video_preview_seek(),
-            Message::VideoPreviewVolumeChanged(volume) => self.change_video_preview_volume(volume),
-            Message::VideoPreviewTick => self.update_video_preview_playback(),
-            Message::VideoPreviewFrameLoaded(frame) => self.accept_video_preview_frame(frame),
-            Message::VideoPreviewSeekFrameFailed(path, generation, position, error) => {
-                self.accept_video_preview_seek_frame_error(path, generation, position, error)
-            }
-            Message::VideoPreviewFinished(path, generation) => {
-                self.accept_video_preview_finished(path, generation)
-            }
-            Message::VideoPreviewFailed(path, generation, error) => {
-                self.accept_video_preview_error(path, generation, error)
             }
             Message::FileOperationProgressed(task_id, progress, transfer_snapshots) => {
                 self.operation_queue.note_driver_signal(task_id);
@@ -340,10 +223,6 @@ impl FileBrowser {
                 self.operation_queue.clear_terminal_tasks();
                 self.continue_file_operation_persistence()
             }
-            Message::PreviewTreeDirectoryToggled(entry_id) => {
-                self.toggle_preview_tree_directory(entry_id)
-            }
-            Message::PreviewTreeAnimationTick => self.advance_preview_tree_animation(),
             Message::ThumbnailBatchLoaded(outcomes) => self.accept_thumbnail_batch(outcomes),
             Message::BrowserViewModeSelected(pane_id, view_mode) => {
                 self.select_browser_view_mode(pane_id, view_mode)
@@ -552,10 +431,6 @@ impl FileBrowser {
             Message::RightPreviewPanelRatioResizeStarted => {
                 self.start_right_preview_panel_ratio_resize_drag()
             }
-            Message::RightPreviewPanelInfoLoaded { path, snapshot } => {
-                self.accept_right_preview_panel_info(&path, snapshot);
-                Task::none()
-            }
             Message::ToggleRightPreviewPanel => self.toggle_right_preview_panel(),
             Message::SplitResizeStarted => self.start_split_resize(self.cursor_position),
             Message::TerminalPanel(message) => self.handle_terminal_panel_message(message),
@@ -705,7 +580,6 @@ impl FileBrowser {
             Message::DestructiveActionConfirmed => self.confirm_destructive_action(),
             Message::DestructiveActionCanceled => self.cancel_destructive_action(),
             Message::AuxiliaryWindowCloseRequested(window) => self.close_auxiliary_window(window),
-            Message::PreviewWindowPinToggled => self.toggle_preview_window_pin(),
             Message::AuxiliaryWindowResized(window, width, height) => {
                 let resize_command = self.handle_auxiliary_window_resized(window, width, height);
                 Task::batch([resize_command, self.observe_window_maximized(window)])
@@ -1066,19 +940,8 @@ impl FileBrowser {
                 Task::none()
             }
             Message::WindowChromeAnimationTick => self.advance_window_animation_frame(),
-            Message::PreviewWindowInitialChromeElapsed(generation) => {
-                self.preview_engine
-                    .hide_preview_window_initial_chrome(generation);
-                Task::none()
-            }
             Message::SidebarScrolled => self.show_scrollbars_temporarily(Region::Sidebar),
             Message::SettingsScrolled => self.show_scrollbars_temporarily(Region::Settings),
-            Message::SqlitePreviewTablesScrolled => {
-                self.show_scrollbars_temporarily(Region::PreviewSqliteTables)
-            }
-            Message::SqlitePreviewDataScrolled => {
-                self.show_scrollbars_temporarily(Region::PreviewSqliteData)
-            }
             Message::PropertiesScrolled => self.show_scrollbars_temporarily(Region::Properties),
             Message::OpenWithApplicationsScrolled => {
                 self.show_scrollbars_temporarily(Region::OpenWithApplications)
@@ -1091,12 +954,6 @@ impl FileBrowser {
             }
             Message::SearchHistoryScrolled => {
                 self.show_scrollbars_temporarily(Region::SearchHistory)
-            }
-            Message::PreviewDirectoryScrolled => {
-                self.show_scrollbars_temporarily(Region::PreviewDirectory)
-            }
-            Message::PreviewArchiveScrolled => {
-                self.show_scrollbars_temporarily(Region::PreviewArchive)
             }
             Message::ColumnBrowserScrolled(pane_id, offset_x, width) => Task::batch([
                 self.show_scrollbars_temporarily(Region::ColumnBrowser(pane_id)),
@@ -1309,9 +1166,6 @@ impl FileBrowser {
             | Message::TransferConflictCancelRequested => {
                 self.apply_transfer_conflict_message(message)
             }
-            // 入口已把 Preview 包裹收敛为引擎 Task 或散装变体（见
-            // update 的入口分派）；此臂仅为穷尽性占位。
-            Message::Preview(_) => unreachable!("preview wrapper is unpacked at update entry"),
         };
         command
     }

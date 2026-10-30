@@ -197,8 +197,8 @@ fn preview_window_initial_chrome_command(generation: u64) -> Task<PreviewMessage
 }
 
 impl PreviewEngine {
-    /// 呈现/聚焦预览窗口。返回窗口 id 供宿主完成焦点簿记（引擎不持有
-    /// 宿主焦点状态，同时登记 pending_focus 供引擎内部路径出口同步）。
+    /// 呈现/聚焦预览窗口。宿主焦点簿记不归引擎所有，窗口呈现时随任务
+    /// 发出 [`PreviewMessage::PreviewWindowPresented`]，由宿主的消息处理者认领。
     pub fn ensure_preview_window(
         &mut self,
         profile: PreviewWindowProfile,
@@ -210,7 +210,6 @@ impl PreviewEngine {
 
         if let Some(window) = self.preview_window {
             self.reset_preview_window_bottom_controls();
-            self.pending_focus_window = Some(window);
             let initial_chrome = self.start_preview_window_initial_chrome();
             let min_size = preview_min_size(profile);
             let resize = window::set_min_size(
@@ -226,7 +225,12 @@ impl PreviewEngine {
             ));
             return (
                 window,
-                Task::batch([resize, window::gain_focus(window), initial_chrome]),
+                Task::batch([
+                    resize,
+                    window::gain_focus(window),
+                    initial_chrome,
+                    Task::done(PreviewMessage::PreviewWindowPresented(window)),
+                ]),
             );
         }
 
@@ -240,8 +244,14 @@ impl PreviewEngine {
             &self.window_identity,
         ));
         self.preview_window = Some(window);
-        self.pending_focus_window = Some(window);
-        (window, Task::batch([command.discard(), initial_chrome]))
+        (
+            window,
+            Task::batch([
+                command.discard(),
+                initial_chrome,
+                Task::done(PreviewMessage::PreviewWindowPresented(window)),
+            ]),
+        )
     }
 
     pub fn toggle_preview_window_pin(&mut self) -> Task<PreviewMessage> {
@@ -299,7 +309,6 @@ impl PreviewEngine {
 
         if let Some(window) = self.preview_window {
             self.reset_preview_window_bottom_controls();
-            self.pending_focus_window = Some(window);
             let min_size = preview_min_size(profile);
             let initial_chrome = self.start_preview_window_initial_chrome();
             let resize = window::set_min_size(
@@ -315,7 +324,12 @@ impl PreviewEngine {
             ));
             return (
                 window,
-                Task::batch([resize, window::gain_focus(window), initial_chrome]),
+                Task::batch([
+                    resize,
+                    window::gain_focus(window),
+                    initial_chrome,
+                    Task::done(PreviewMessage::PreviewWindowPresented(window)),
+                ]),
             );
         }
 
@@ -329,8 +343,14 @@ impl PreviewEngine {
             &self.window_identity,
         ));
         self.preview_window = Some(window);
-        self.pending_focus_window = Some(window);
-        (window, Task::batch([command.discard(), initial_chrome]))
+        (
+            window,
+            Task::batch([
+                command.discard(),
+                initial_chrome,
+                Task::done(PreviewMessage::PreviewWindowPresented(window)),
+            ]),
+        )
     }
 
     fn preview_window_has_bottom_media_controls(&self) -> bool {

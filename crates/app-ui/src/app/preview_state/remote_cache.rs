@@ -24,7 +24,6 @@ impl FileBrowser {
             .preview_engine
             .start_remote_preview_download(source_path, max_file_bytes);
         self.retract_global_error(GlobalErrorSource::Preview);
-        self.sync_preview_window_focus();
         command.map(Message::Preview)
     }
 
@@ -56,10 +55,7 @@ impl FileBrowser {
             Some(RemotePreviewCacheCompletion::OpenLocalCache(cache_path)) => {
                 self.open_preview_for_resolved_path(cache_path, FileKind::File)
             }
-            Some(RemotePreviewCacheCompletion::Failed(command)) => {
-                self.sync_preview_window_focus();
-                command.map(Message::Preview)
-            }
+            Some(RemotePreviewCacheCompletion::Failed(command)) => command.map(Message::Preview),
         }
     }
 }

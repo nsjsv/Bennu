@@ -393,17 +393,6 @@ impl FileBrowser {
         window::close(window)
     }
 
-    /// 预览窗口机械已迁 PreviewEngine（engine/windows.rs）；宿主转发层
-    /// 只补引擎不持有的宿主簿记：焦点登记（含引擎内部路径的出口同步）
-    /// 与关闭时的焦点/滚动条视口收尾。
-    /// 引擎呈现预览窗口后把它登记为应用焦点；引擎不持有宿主焦点簿记，
-    /// 经 take_pending 同步（引擎内部路径由 update 出口统一兜底）。
-    pub(super) fn sync_preview_window_focus(&mut self) {
-        if let Some(window) = self.preview_engine.take_pending_preview_window_focus() {
-            self.focused_window = window;
-        }
-    }
-
     pub(super) fn handle_captured_preview_shortcut(&mut self) -> Task<Message> {
         if self.preview_engine.preview_window == Some(self.focused_window) {
             self.close_preview_window()
@@ -412,25 +401,7 @@ impl FileBrowser {
         }
     }
 
-    pub(super) fn toggle_preview_window_pin(&mut self) -> Task<Message> {
-        self.preview_engine
-            .toggle_preview_window_pin()
-            .map(Message::Preview)
-    }
-
-    #[cfg(test)]
-    pub(super) fn open_image_preview_window_for_dimensions(
-        &mut self,
-        width: u32,
-        height: u32,
-    ) -> Task<Message> {
-        let command = self
-            .preview_engine
-            .open_image_preview_window_for_dimensions(width, height);
-        self.sync_preview_window_focus();
-        command.map(Message::Preview)
-    }
-
+    /// 宿主在预览窗口关闭时补引擎不持有的簿记：焦点与滚动条视口收尾。
     pub(super) fn close_preview_window(&mut self) -> Task<Message> {
         let (closed_window, command) = self.preview_engine.close_preview_window();
         self.forget_scrollbar_viewport(&ScrollbarRegion::PreviewSqliteTables);

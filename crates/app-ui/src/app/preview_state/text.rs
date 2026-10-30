@@ -1,26 +1,13 @@
-//! 文本/Markdown 预览的内容滚动与分块加载已迁 bennu-preview 的
-//! PreviewEngine（engine/text.rs，逐字节保真）；此处保留同名薄转发，
-//! 以及两个依赖宿主视图层（smooth_scroll 滚动几何宿主、
-//! text_preview_viewer 部件 id）的方法——它们随视图组迁移再下沉。
-
-use std::path::PathBuf;
+//! 文本/Markdown 预览的内容滚动与分块加载在 bennu-preview 的 PreviewEngine
+//! （engine/text.rs）；此处只留两个依赖宿主视图层（smooth_scroll 滚动几何
+//! 宿主、text_preview_viewer 部件 id）的方法——它们随视图组迁移再下沉。
 
 use iced::Task;
 
 use super::FileBrowser;
-use crate::model::{Message, ScrollbarRegion, TextPreviewChunk};
+use crate::model::{Message, ScrollbarRegion};
 
 impl FileBrowser {
-    pub(in crate::app) fn handle_text_preview_content_scrolled(
-        &mut self,
-        lines: i32,
-        viewport_height: f32,
-    ) -> Task<Message> {
-        self.preview_engine
-            .handle_text_preview_content_scrolled(lines, viewport_height)
-            .map(Message::Preview)
-    }
-
     pub(in crate::app) fn handle_text_preview_viewer_scrolled(
         &mut self,
         lines: i32,
@@ -60,37 +47,15 @@ impl FileBrowser {
             },
         )
     }
-
-    pub(in crate::app) fn handle_markdown_preview_scrolled(
-        &mut self,
-        offset_y: f32,
-        viewport_height: f32,
-        content_height: f32,
-    ) -> Task<Message> {
-        self.preview_engine
-            .handle_markdown_preview_scrolled(offset_y, viewport_height, content_height)
-            .map(Message::Preview)
-    }
-
-    pub(in crate::app) fn accept_text_preview_chunk(
-        &mut self,
-        path: PathBuf,
-        generation: u64,
-        start_offset: u64,
-        outcome: Result<TextPreviewChunk, String>,
-    ) -> Task<Message> {
-        self.preview_engine
-            .accept_text_preview_chunk(path, generation, start_offset, outcome)
-            .map(Message::Preview)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config;
-    use crate::model::{PreviewContent, PreviewState, TextPreviewDocument};
-    use crate::text_preview::TextPreviewFormat;
+    use crate::model::{PreviewContent, PreviewMessage, PreviewState, TextPreviewDocument};
+    use crate::text_preview::{TextPreviewChunk, TextPreviewFormat};
+    use std::path::PathBuf;
     use std::sync::Arc;
 
     fn browser_with_loading_text_preview() -> (FileBrowser, PathBuf) {
@@ -127,18 +92,20 @@ mod tests {
     fn stale_text_preview_chunk_generation_is_ignored() {
         let (mut browser, path) = browser_with_loading_text_preview();
 
-        drop(browser.accept_text_preview_chunk(
-            path,
-            0,
-            100,
-            Ok(TextPreviewChunk {
+        drop(
+            browser.handle_preview_message(PreviewMessage::TextPreviewChunkLoaded {
+                path,
+                generation: 0,
                 start_offset: 100,
-                content: "stale".to_owned(),
-                line_count: 1,
-                next_offset: None,
-                line_limit_notice: None,
+                outcome: Ok(TextPreviewChunk {
+                    start_offset: 100,
+                    content: "stale".to_owned(),
+                    line_count: 1,
+                    next_offset: None,
+                    line_limit_notice: None,
+                }),
             }),
-        ));
+        );
 
         let document = browser
             .preview_engine
@@ -152,18 +119,20 @@ mod tests {
     fn stale_text_preview_chunk_path_is_ignored() {
         let (mut browser, _path) = browser_with_loading_text_preview();
 
-        drop(browser.accept_text_preview_chunk(
-            PathBuf::from("/tmp/other.txt"),
-            1,
-            100,
-            Ok(TextPreviewChunk {
+        drop(
+            browser.handle_preview_message(PreviewMessage::TextPreviewChunkLoaded {
+                path: PathBuf::from("/tmp/other.txt"),
+                generation: 1,
                 start_offset: 100,
-                content: "stale".to_owned(),
-                line_count: 1,
-                next_offset: None,
-                line_limit_notice: None,
+                outcome: Ok(TextPreviewChunk {
+                    start_offset: 100,
+                    content: "stale".to_owned(),
+                    line_count: 1,
+                    next_offset: None,
+                    line_limit_notice: None,
+                }),
             }),
-        ));
+        );
 
         let document = browser
             .preview_engine

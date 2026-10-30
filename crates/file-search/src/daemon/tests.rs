@@ -199,6 +199,107 @@ fn failed_transition_retries_the_same_desired_revision() {
     core.shutdown().unwrap();
 }
 
+#[test]
+fn maintenance_keeps_running_after_a_failed_configuration_change() {
+    let directory = tempdir().unwrap();
+    let home = directory.path().join("home");
+    fs::create_dir(&home).unwrap();
+    fs::write(home.join("before-change-note.txt"), "before").unwrap();
+    let database_path = directory.path().join("search.sqlite");
+    let core = SearchDaemonCore::new(
+        database_path.clone(),
+        search_path_file_beside(&database_path),
+        SearchIndexConfig {
+            roots: vec![home.clone()],
+            ..SearchIndexConfig::default()
+        },
+    )
+    .unwrap();
+    core.start_index_maintenance().unwrap();
+    wait_for_global_hit_count(&database_path, "before-change-note", 1);
+
+    // 只让路径配置的写入失败；表结构不动，重启后的全量检查和监听照常打开数据库。
+    Connection::open(&database_path)
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER reject_path_configuration_insert
+                 BEFORE INSERT ON search_path_configuration
+                 BEGIN SELECT RAISE(ABORT, 'injected path configuration failure'); END;
+             CREATE TRIGGER reject_path_configuration_update
+                 BEFORE UPDATE ON search_path_configuration
+                 BEGIN SELECT RAISE(ABORT, 'injected path configuration failure'); END;",
+        )
+        .unwrap();
+    assert!(core
+        .configure_search_paths(
+            0,
+            SearchPathPreferences {
+                custom_roots: Vec::new(),
+                exclusions: vec![home.join("private")],
+            },
+        )
+        .is_err());
+    assert!(matches!(
+        core.current_status().path_configuration.phase,
+        SearchPathConfigurationPhase::Failed { .. }
+    ));
+
+    fs::write(home.join("after-failure-note.txt"), "after").unwrap();
+    wait_for_global_hit_count(&database_path, "after-failure-note", 1);
+    core.shutdown().unwrap();
+}
+
+#[test]
+fn restarting_maintenance_clears_a_previous_watch_failure() {
+    let directory = tempdir().unwrap();
+    let home = directory.path().join("home");
+    let later = directory.path().join("later");
+    fs::create_dir(&home).unwrap();
+    let database_path = directory.path().join("search.sqlite");
+    let core = SearchDaemonCore::new(
+        database_path.clone(),
+        search_path_file_beside(&database_path),
+        SearchIndexConfig {
+            roots: vec![home],
+            ..SearchIndexConfig::default()
+        },
+    )
+    .unwrap();
+    core.configure_search_paths(
+        0,
+        SearchPathPreferences {
+            custom_roots: vec![later.clone()],
+            exclusions: Vec::new(),
+        },
+    )
+    .unwrap();
+    core.start_index_maintenance().unwrap();
+    core.lifecycle_snapshot
+        .lock()
+        .unwrap()
+        .record_maintenance_failure("watch backend unavailable".to_owned());
+
+    fs::create_dir(&later).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let status = core.current_status();
+        if matches!(
+            status.path_configuration.roots[0].availability,
+            SearchRootAvailability::Available
+        ) && status.health == IndexHealth::Healthy
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "restart after the root appeared kept the old watch failure: {:?}",
+            status.health
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+    core.shutdown().unwrap();
+}
+
 #[cfg(unix)]
 #[test]
 fn symlink_root_is_reported_unavailable_at_the_status_boundary() {

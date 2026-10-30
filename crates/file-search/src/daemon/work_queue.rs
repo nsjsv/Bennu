@@ -266,6 +266,30 @@ impl DaemonWorkQueue {
         }
     }
 
+    /// 每轮维护的队列：全量检查排第一，新纳入的前沿目录紧随其后。
+    pub(super) fn starting_with_full_check(
+        roots: Vec<PathBuf>,
+        newly_included_frontiers: Vec<PathBuf>,
+    ) -> Self {
+        let mut queue = Self::new(roots);
+        let pending_work = &mut queue
+            .state
+            .get_mut()
+            .expect("search daemon work queue mutex poisoned")
+            .pending_work;
+        let now = Instant::now();
+        pending_work.absorb_request(DaemonWorkRequest::StartupCheck, now);
+        if !newly_included_frontiers.is_empty() {
+            pending_work.absorb_request(
+                DaemonWorkRequest::ChangedPaths {
+                    changed_paths: newly_included_frontiers,
+                },
+                now,
+            );
+        }
+        queue
+    }
+
     pub(super) fn enqueue(&self, work_request: DaemonWorkRequest) -> SearchResult<()> {
         let mut state = self
             .state

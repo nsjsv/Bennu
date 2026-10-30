@@ -1,9 +1,6 @@
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
-use std::thread;
-
-use tokio_util::sync::CancellationToken;
 
 use crate::crawler::IndexMaintenanceProgress;
 use crate::database::{SearchDatabase, SearchRootMount};
@@ -17,11 +14,11 @@ use crate::model::{
 use crate::search_path_store::SearchPathStore;
 use crate::writer::IndexWriter;
 use crate::{
-    SearchIndexConfig, SearchIndexer, SearchPathPolicy, SearchPathPreferences,
-    VersionedSearchPathPreferences,
+    SearchIndexConfig, SearchPathPolicy, SearchPathPreferences, VersionedSearchPathPreferences,
 };
 
 mod bounded_paths;
+mod maintenance;
 mod memory;
 mod root_mount;
 mod watch_budget_patrol;
@@ -31,12 +28,11 @@ mod work_queue;
 
 #[cfg(test)]
 use self::bounded_paths::BoundedPathSet;
-use self::memory::release_allocator_idle_pages;
+use self::maintenance::{spawn_active_maintenance, stop_active_maintenance, ActiveMaintenance};
 use self::root_mount::observe_root_mounts;
 use self::watch_coverage::WatchCoverageHealth;
 #[cfg(test)]
 use self::watch_ingress::changed_paths_from_watch_event;
-use self::watch_ingress::{DaemonWatchIngress, DaemonWatchIngressBootstrap};
 #[cfg(test)]
 use self::work_queue::{
     dirty_root_retry_delay, PendingDaemonWork, DIRTY_ROOT_QUIET_WINDOW, DIRTY_ROOT_RETRY_BASE,
@@ -230,13 +226,6 @@ enum DaemonRuntimePhase {
     Stopped,
 }
 
-struct ActiveMaintenance {
-    work_queue: Arc<DaemonWorkQueue>,
-    crawl_cancellation: CancellationToken,
-    worker_join: thread::JoinHandle<SearchResult<()>>,
-    watch_ingress: Option<DaemonWatchIngress>,
-}
-
 #[derive(Default)]
 struct DaemonRuntimeState {
     phase: DaemonRuntimePhase,
@@ -336,7 +325,7 @@ impl SearchDaemonCore {
             .operation_serialization
             .lock()
             .expect("search daemon operation mutex poisoned");
-        let (config, pending_frontiers) = {
+        {
             let mut runtime_state = self
                 .runtime_state
                 .lock()
@@ -344,60 +333,10 @@ impl SearchDaemonCore {
             match runtime_state.phase {
                 DaemonRuntimePhase::Maintaining => return Ok(()),
                 DaemonRuntimePhase::Stopped => return Err(daemon_core_stopped()),
-                DaemonRuntimePhase::Created => {
-                    runtime_state.maintenance_requested = true;
-                    let path_configuration = self
-                        .path_configuration
-                        .lock()
-                        .expect("search path configuration mutex poisoned");
-                    (
-                        path_configuration.effective_config.clone(),
-                        path_configuration.pending_frontiers.clone(),
-                    )
-                }
-            }
-        };
-
-        let (maintenance, maintenance_failure) = spawn_active_maintenance(
-            Arc::clone(&self.writer),
-            config,
-            pending_frontiers,
-            self.database_path.clone(),
-            Arc::clone(&self.lifecycle_snapshot),
-            Arc::clone(&self.directory_snapshot_epoch),
-        )?;
-        {
-            let mut runtime_state = self
-                .runtime_state
-                .lock()
-                .expect("search daemon runtime mutex poisoned");
-            if matches!(runtime_state.phase, DaemonRuntimePhase::Stopped) {
-                drop(runtime_state);
-                stop_active_maintenance(maintenance)?;
-                return Err(daemon_core_stopped());
-            }
-            runtime_state.phase = DaemonRuntimePhase::Maintaining;
-            runtime_state.maintenance = Some(maintenance);
-            self.path_configuration
-                .lock()
-                .expect("search path configuration mutex poisoned")
-                .pending_frontiers
-                .clear();
-        }
-
-        match maintenance_failure {
-            Some(error) => {
-                self.record_maintenance_failure(error.to_string());
-                Err(error)
-            }
-            None => {
-                self.lifecycle_snapshot
-                    .lock()
-                    .expect("search daemon lifecycle mutex poisoned")
-                    .clear_maintenance_failure();
-                Ok(())
+                DaemonRuntimePhase::Created => runtime_state.maintenance_requested = true,
             }
         }
+        self.start_maintenance()
     }
 
     pub fn current_status(&self) -> IndexStatus {
@@ -460,7 +399,7 @@ impl SearchDaemonCore {
         let policy = SearchPathPolicy::new(home_directory.clone(), preferences)
             .map_err(SearchError::InvalidConfiguration)?;
         let normalized_preferences = policy.preferences().clone();
-        let (next, previous_mounts, previous_config, previous_policy) = {
+        let (next, previous_mounts, previous_policy) = {
             let path_configuration = self
                 .path_configuration
                 .lock()
@@ -491,7 +430,6 @@ impl SearchDaemonCore {
             (
                 next,
                 path_configuration.mounts.clone(),
-                path_configuration.effective_config.clone(),
                 path_configuration.policy.clone(),
             )
         };
@@ -510,29 +448,11 @@ impl SearchDaemonCore {
             self.update_path_configuration_status(path_configuration_status(&path_configuration));
         }
 
-        let (should_maintain, previous_maintenance) = {
-            let mut runtime_state = self
-                .runtime_state
-                .lock()
-                .expect("search daemon runtime mutex poisoned");
-            (
-                runtime_state.maintenance_requested,
-                runtime_state.maintenance.take(),
-            )
-        };
-        if let Some(maintenance) = previous_maintenance {
-            if let Err(error) = stop_active_maintenance(maintenance) {
-                self.fail_path_configuration(error.to_string());
-                self.restore_maintenance_after_failed_transition(should_maintain, previous_config);
-                return Err(error);
-            }
-        }
-
         let policy_change = previous_policy
             .as_ref()
             .map(|previous| previous.change_to(&policy))
             .unwrap_or_else(|| policy.change_to(&policy));
-        let transition = (|| {
+        self.replace_maintenance(|| {
             let observed_mounts = observe_root_mounts(policy.roots())?;
             let invalidated_roots =
                 invalidated_roots(policy.roots(), &previous_mounts, &observed_mounts);
@@ -548,74 +468,21 @@ impl SearchDaemonCore {
                 invalidated_roots,
                 policy_change.affected_scopes.clone(),
             )?;
-            Ok::<_, SearchError>((mounts, unavailable_roots, effective_config))
-        })();
-        let (mounts, unavailable_roots, effective_config) = match transition {
-            Ok(transition) => transition,
-            Err(error) => {
-                self.fail_path_configuration(error.to_string());
-                self.restore_maintenance_after_failed_transition(should_maintain, previous_config);
-                return Err(error);
-            }
-        };
 
-        {
             let mut path_configuration = self
                 .path_configuration
                 .lock()
                 .expect("search path configuration mutex poisoned");
             path_configuration.effective = next.clone();
-            path_configuration.policy = Some(policy);
-            path_configuration.effective_config = effective_config.clone();
+            path_configuration.policy = Some(policy.clone());
+            path_configuration.effective_config = effective_config;
             path_configuration.mounts = mounts;
             path_configuration.unavailable_roots = unavailable_roots;
             path_configuration.pending_frontiers = policy_change.newly_included_frontiers.clone();
             path_configuration.phase = SearchPathConfigurationPhase::Applying;
             self.update_path_configuration_status(path_configuration_status(&path_configuration));
-        }
-
-        if should_maintain {
-            match spawn_active_maintenance(
-                Arc::clone(&self.writer),
-                effective_config,
-                policy_change.newly_included_frontiers.clone(),
-                self.database_path.clone(),
-                Arc::clone(&self.lifecycle_snapshot),
-                Arc::clone(&self.directory_snapshot_epoch),
-            ) {
-                Ok((maintenance, maintenance_failure)) => {
-                    let mut runtime_state = self
-                        .runtime_state
-                        .lock()
-                        .expect("search daemon runtime mutex poisoned");
-                    runtime_state.phase = DaemonRuntimePhase::Maintaining;
-                    runtime_state.maintenance = Some(maintenance);
-                    drop(runtime_state);
-                    self.path_configuration
-                        .lock()
-                        .expect("search path configuration mutex poisoned")
-                        .pending_frontiers
-                        .clear();
-                    match maintenance_failure {
-                        Some(error) => self.record_maintenance_failure(error.to_string()),
-                        None => self
-                            .lifecycle_snapshot
-                            .lock()
-                            .expect("search daemon lifecycle mutex poisoned")
-                            .clear_maintenance_failure(),
-                    }
-                }
-                Err(error) => {
-                    self.runtime_state
-                        .lock()
-                        .expect("search daemon runtime mutex poisoned")
-                        .phase = DaemonRuntimePhase::Created;
-                    self.fail_path_configuration(error.to_string());
-                    self.record_maintenance_failure(error.to_string());
-                    return Err(error);
-                }
-            }
-        }
+            Ok(())
+        })?;
         Ok(next)
     }
 
@@ -624,7 +491,7 @@ impl SearchDaemonCore {
             .operation_serialization
             .lock()
             .expect("search daemon operation mutex poisoned");
-        let (policy, effective, previous_mounts, previous_unavailable, effective_config) = {
+        let (policy, effective, previous_mounts, previous_unavailable) = {
             let path_configuration = self
                 .path_configuration
                 .lock()
@@ -637,7 +504,6 @@ impl SearchDaemonCore {
                 path_configuration.effective.clone(),
                 path_configuration.mounts.clone(),
                 path_configuration.unavailable_roots.clone(),
-                path_configuration.effective_config.clone(),
             )
         };
         let observed_mounts = observe_root_mounts(policy.roots())?;
@@ -663,74 +529,25 @@ impl SearchDaemonCore {
 
         let next_effective_config =
             index_config_for_policy(&self.base_config, &policy, current_unavailable.clone());
-        let (should_maintain, maintenance) = {
-            let mut runtime_state = self
-                .runtime_state
-                .lock()
-                .expect("search daemon runtime mutex poisoned");
-            (
-                runtime_state.maintenance_requested,
-                runtime_state.maintenance.take(),
-            )
-        };
-        if let Some(maintenance) = maintenance {
-            if let Err(error) = stop_active_maintenance(maintenance) {
-                self.fail_path_configuration(error.to_string());
-                self.restore_maintenance_after_failed_transition(should_maintain, effective_config);
-                return Err(error);
-            }
-        }
-        if let Err(error) = self.writer.apply_path_configuration_transition(
-            effective,
-            policy.clone(),
-            mounts.clone(),
-            invalidated,
-            Vec::new(),
-        ) {
-            self.fail_path_configuration(error.to_string());
-            self.restore_maintenance_after_failed_transition(should_maintain, effective_config);
-            return Err(error);
-        }
-        {
+        self.replace_maintenance(|| {
+            self.writer.apply_path_configuration_transition(
+                effective,
+                policy.clone(),
+                mounts.clone(),
+                invalidated,
+                Vec::new(),
+            )?;
             let mut path_configuration = self
                 .path_configuration
                 .lock()
                 .expect("search path configuration mutex poisoned");
             path_configuration.mounts = mounts;
             path_configuration.unavailable_roots = current_unavailable;
-            path_configuration.effective_config = next_effective_config.clone();
+            path_configuration.effective_config = next_effective_config;
             path_configuration.phase = SearchPathConfigurationPhase::Applying;
             self.update_path_configuration_status(path_configuration_status(&path_configuration));
-        }
-        if should_maintain {
-            match spawn_active_maintenance(
-                Arc::clone(&self.writer),
-                next_effective_config,
-                Vec::new(),
-                self.database_path.clone(),
-                Arc::clone(&self.lifecycle_snapshot),
-                Arc::clone(&self.directory_snapshot_epoch),
-            ) {
-                Ok((maintenance, maintenance_failure)) => {
-                    self.runtime_state
-                        .lock()
-                        .expect("search daemon runtime mutex poisoned")
-                        .maintenance = Some(maintenance);
-                    if let Some(error) = maintenance_failure {
-                        self.record_maintenance_failure(error.to_string());
-                    }
-                }
-                Err(error) => {
-                    self.runtime_state
-                        .lock()
-                        .expect("search daemon runtime mutex poisoned")
-                        .phase = DaemonRuntimePhase::Created;
-                    self.record_maintenance_failure(error.to_string());
-                    return Err(error);
-                }
-            }
-        }
-        Ok(())
+            Ok(())
+        })
     }
 
     pub fn open_query_reader(&self) -> SearchResult<SearchDatabase> {
@@ -750,19 +567,15 @@ impl SearchDaemonCore {
             .operation_serialization
             .lock()
             .expect("search daemon operation mutex poisoned");
-        let maintenance = {
+        {
             let mut runtime_state = self
                 .runtime_state
                 .lock()
                 .expect("search daemon runtime mutex poisoned");
             runtime_state.phase = DaemonRuntimePhase::Stopped;
             runtime_state.maintenance_requested = false;
-            runtime_state.maintenance.take()
-        };
-        let maintenance_outcome = match maintenance {
-            Some(maintenance) => stop_active_maintenance(maintenance),
-            None => Ok(()),
-        };
+        }
+        let maintenance_outcome = self.stop_maintenance();
         self.writer.cancel_index_maintenance();
         let writer_outcome = self.writer.shutdown();
         maintenance_outcome.and(writer_outcome)
@@ -787,33 +600,50 @@ impl SearchDaemonCore {
         self.update_path_configuration_status(status);
     }
 
-    fn restore_maintenance_after_failed_transition(
-        &self,
-        should_maintain: bool,
-        config: SearchIndexConfig,
-    ) {
-        if !should_maintain {
-            return;
-        }
+    /// 唯一启动维护的地方。配置和新纳入的前沿目录都从路径配置里取，调用方没有参数可传错；
+    /// 启动成功与失败后的状态也只在这里更新。
+    fn start_maintenance(&self) -> SearchResult<()> {
+        let (config, newly_included_frontiers) = {
+            let path_configuration = self
+                .path_configuration
+                .lock()
+                .expect("search path configuration mutex poisoned");
+            (
+                path_configuration.effective_config.clone(),
+                path_configuration.pending_frontiers.clone(),
+            )
+        };
         match spawn_active_maintenance(
             Arc::clone(&self.writer),
             config,
-            Vec::new(),
+            newly_included_frontiers,
             self.database_path.clone(),
             Arc::clone(&self.lifecycle_snapshot),
             Arc::clone(&self.directory_snapshot_epoch),
         ) {
-            Ok((maintenance, maintenance_failure)) => {
-                let mut runtime_state = self
-                    .runtime_state
-                    .lock()
-                    .expect("search daemon runtime mutex poisoned");
-                runtime_state.phase = DaemonRuntimePhase::Maintaining;
-                runtime_state.maintenance = Some(maintenance);
-                drop(runtime_state);
-                if let Some(error) = maintenance_failure {
-                    self.record_maintenance_failure(error.to_string());
+            Ok((maintenance, watch_failure)) => {
+                {
+                    let mut runtime_state = self
+                        .runtime_state
+                        .lock()
+                        .expect("search daemon runtime mutex poisoned");
+                    runtime_state.phase = DaemonRuntimePhase::Maintaining;
+                    runtime_state.maintenance = Some(maintenance);
                 }
+                self.path_configuration
+                    .lock()
+                    .expect("search path configuration mutex poisoned")
+                    .pending_frontiers
+                    .clear();
+                let mut lifecycle = self
+                    .lifecycle_snapshot
+                    .lock()
+                    .expect("search daemon lifecycle mutex poisoned");
+                match watch_failure {
+                    Some(error) => lifecycle.record_maintenance_failure(error.to_string()),
+                    None => lifecycle.clear_maintenance_failure(),
+                }
+                Ok(())
             }
             Err(error) => {
                 self.runtime_state
@@ -821,8 +651,53 @@ impl SearchDaemonCore {
                     .expect("search daemon runtime mutex poisoned")
                     .phase = DaemonRuntimePhase::Created;
                 self.record_maintenance_failure(error.to_string());
+                // 新的搜索位置要靠维护才能生效，维护起不来就是这次应用失败了。
+                let applying = matches!(
+                    self.path_configuration
+                        .lock()
+                        .expect("search path configuration mutex poisoned")
+                        .phase,
+                    SearchPathConfigurationPhase::Applying
+                );
+                if applying {
+                    self.fail_path_configuration(error.to_string());
+                }
+                Err(error)
             }
         }
+    }
+
+    /// 唯一停止维护的地方。
+    fn stop_maintenance(&self) -> SearchResult<()> {
+        let maintenance = self
+            .runtime_state
+            .lock()
+            .expect("search daemon runtime mutex poisoned")
+            .maintenance
+            .take();
+        maintenance.map_or(Ok(()), stop_active_maintenance)
+    }
+
+    /// 配置变更与挂载变化共用：先停维护，再应用变化，原来在维护就重启。变化失败时
+    /// `transition` 没改路径配置，重启用的自然还是旧配置。
+    fn replace_maintenance(
+        &self,
+        transition: impl FnOnce() -> SearchResult<()>,
+    ) -> SearchResult<()> {
+        let restart = self
+            .runtime_state
+            .lock()
+            .expect("search daemon runtime mutex poisoned")
+            .maintenance_requested;
+        let transition = self.stop_maintenance().and_then(|()| transition());
+        if let Err(error) = &transition {
+            self.fail_path_configuration(error.to_string());
+        }
+        if !restart {
+            return transition;
+        }
+        let restarted = self.start_maintenance();
+        transition.and(restarted)
     }
 }
 
@@ -1169,278 +1044,6 @@ fn root_statuses_from_mount_observation(
             }
         })
         .collect()
-}
-
-fn spawn_active_maintenance(
-    writer: Arc<IndexWriter>,
-    config: SearchIndexConfig,
-    newly_included_frontiers: Vec<PathBuf>,
-    database_path: PathBuf,
-    lifecycle_snapshot: Arc<Mutex<DaemonLifecycleSnapshot>>,
-    directory_snapshot_epoch: Arc<AtomicU64>,
-) -> SearchResult<(ActiveMaintenance, Option<SearchError>)> {
-    let work_queue = Arc::new(DaemonWorkQueue::new(
-        config.available_roots().cloned().collect(),
-    ));
-    let crawl_cancellation = CancellationToken::new();
-    let worker_join = spawn_daemon_worker(
-        writer,
-        config.clone(),
-        Arc::clone(&lifecycle_snapshot),
-        Arc::clone(&work_queue),
-        Arc::clone(&directory_snapshot_epoch),
-        crawl_cancellation.clone(),
-    )?;
-    let (watch_ingress, maintenance_failure) = match DaemonWatchIngressBootstrap::establish(
-        config,
-        database_path,
-        directory_snapshot_epoch,
-    )
-    .and_then(|bootstrap| bootstrap.spawn(Arc::clone(&work_queue), lifecycle_snapshot))
-    {
-        Ok(watch_ingress) => (Some(watch_ingress), None),
-        Err(error) => (None, Some(error)),
-    };
-    if let Err(error) = work_queue.enqueue(DaemonWorkRequest::StartupCheck) {
-        crawl_cancellation.cancel();
-        work_queue.begin_shutdown();
-        let _ = worker_join.join();
-        return Err(error);
-    }
-    if !newly_included_frontiers.is_empty() {
-        if let Err(error) = work_queue.enqueue(DaemonWorkRequest::ChangedPaths {
-            changed_paths: newly_included_frontiers,
-        }) {
-            crawl_cancellation.cancel();
-            work_queue.begin_shutdown();
-            let _ = worker_join.join();
-            return Err(error);
-        }
-    }
-    Ok((
-        ActiveMaintenance {
-            work_queue,
-            crawl_cancellation,
-            worker_join,
-            watch_ingress,
-        },
-        maintenance_failure,
-    ))
-}
-
-fn stop_active_maintenance(maintenance: ActiveMaintenance) -> SearchResult<()> {
-    if let Some(watch_ingress) = maintenance.watch_ingress {
-        watch_ingress.shutdown();
-    }
-    maintenance.crawl_cancellation.cancel();
-    maintenance.work_queue.begin_shutdown();
-    maintenance
-        .worker_join
-        .join()
-        .map_err(|_| SearchError::WorkerFailed("search daemon worker thread panicked".to_owned()))?
-}
-
-fn spawn_daemon_worker(
-    writer: Arc<IndexWriter>,
-    config: SearchIndexConfig,
-    lifecycle_snapshot: Arc<Mutex<DaemonLifecycleSnapshot>>,
-    work_queue: Arc<DaemonWorkQueue>,
-    directory_snapshot_epoch: Arc<AtomicU64>,
-    crawl_cancellation: CancellationToken,
-) -> SearchResult<thread::JoinHandle<SearchResult<()>>> {
-    thread::Builder::new()
-        .name("file-search-daemon-core".to_owned())
-        .spawn(move || {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|error| {
-                    SearchError::WorkerFailed(format!(
-                        "could not create search daemon runtime: {error}"
-                    ))
-                })?;
-            loop {
-                let work_request = work_queue.wait_for_next_work();
-                if matches!(work_request, DaemonWorkRequest::Shutdown) {
-                    break;
-                }
-                let dirty_roots = match &work_request {
-                    DaemonWorkRequest::DirtyRootRecovery { roots } => Some(roots.clone()),
-                    _ => None,
-                };
-                let watch_budget_patrol =
-                    matches!(&work_request, DaemonWorkRequest::WatchBudgetPatrol { .. });
-                let succeeded = run_index_maintenance(
-                    &runtime,
-                    Arc::clone(&writer),
-                    &config,
-                    Arc::clone(&lifecycle_snapshot),
-                    &directory_snapshot_epoch,
-                    work_request,
-                    &crawl_cancellation,
-                );
-                if watch_budget_patrol {
-                    work_queue.finish_watch_budget_patrol();
-                }
-                if let Some(roots) = dirty_roots {
-                    work_queue.finish_dirty_root_recovery(&roots, succeeded);
-                }
-            }
-            Ok(())
-        })
-        .map_err(|error| {
-            SearchError::WorkerFailed(format!("could not spawn search daemon worker: {error}"))
-        })
-}
-
-fn run_index_maintenance(
-    runtime: &tokio::runtime::Runtime,
-    writer: Arc<IndexWriter>,
-    config: &SearchIndexConfig,
-    lifecycle_snapshot: Arc<Mutex<DaemonLifecycleSnapshot>>,
-    directory_snapshot_epoch: &AtomicU64,
-    work_request: DaemonWorkRequest,
-    crawl_cancellation: &CancellationToken,
-) -> bool {
-    let work_label = work_request_label(&work_request);
-    let high_frequency_maintenance = matches!(
-        &work_request,
-        DaemonWorkRequest::ChangedPaths { .. } | DaemonWorkRequest::WatchBudgetPatrol { .. }
-    );
-    lifecycle_snapshot
-        .lock()
-        .expect("search daemon lifecycle mutex poisoned")
-        .begin_checking();
-
-    let maintenance_outcome = runtime.block_on(async {
-        let indexer = SearchIndexer::new(Arc::clone(&writer), config.clone());
-        let progress_snapshot = Arc::clone(&lifecycle_snapshot);
-        let on_progress = move |progress| {
-            progress_snapshot
-                .lock()
-                .expect("search daemon lifecycle mutex poisoned")
-                .apply_progress(progress);
-        };
-
-        let stats = match work_request {
-            DaemonWorkRequest::StartupCheck => {
-                indexer
-                    .rebuild_with_progress_cancelled(crawl_cancellation, on_progress)
-                    .await?
-            }
-            DaemonWorkRequest::ChangedPaths { changed_paths } => {
-                indexer
-                    .rebuild_paths_with_progress_cancelled(
-                        changed_paths,
-                        crawl_cancellation,
-                        on_progress,
-                    )
-                    .await?
-            }
-            DaemonWorkRequest::CoverageRepair { scopes } => {
-                indexer
-                    .repair_scopes_with_progress_cancelled(scopes, crawl_cancellation, on_progress)
-                    .await?
-            }
-            DaemonWorkRequest::WatchBudgetPatrol { directories } => {
-                indexer
-                    .patrol_unwatched_directories_with_progress_cancelled(
-                        directories,
-                        crawl_cancellation,
-                        on_progress,
-                    )
-                    .await?
-            }
-            DaemonWorkRequest::DirtyRootRecovery { roots } => {
-                indexer
-                    .recover_dirty_roots_with_progress_cancelled(
-                        roots,
-                        crawl_cancellation,
-                        on_progress,
-                    )
-                    .await?
-            }
-            DaemonWorkRequest::Shutdown => return Ok::<_, SearchError>((Default::default(), 0)),
-        };
-        let total = writer.count()?;
-        Ok::<_, SearchError>((stats, total))
-    });
-    release_allocator_idle_pages();
-    let mut snapshot = lifecycle_snapshot
-        .lock()
-        .expect("search daemon lifecycle mutex poisoned");
-    match maintenance_outcome {
-        Ok((stats, total)) => {
-            if stats.directory_snapshots_changed > 0 {
-                directory_snapshot_epoch.fetch_add(1, Ordering::AcqRel);
-            }
-            if high_frequency_maintenance {
-                tracing::debug!(
-                    target: "file_search::daemon",
-                    event = "index_maintenance_completed",
-                    maintenance = %work_label,
-                    checked = stats.checked,
-                    changed = stats.changed,
-                    reindexed = stats.reindexed,
-                    directories_enumerated = stats.directories_enumerated,
-                    database_mutations = stats.database_mutations,
-                    content_reads = stats.content_reads,
-                    indexed_files = total,
-                    "index maintenance completed"
-                );
-            } else {
-                tracing::info!(
-                    target: "file_search::daemon",
-                    event = "index_maintenance_completed",
-                    maintenance = %work_label,
-                    checked = stats.checked,
-                    changed = stats.changed,
-                    reindexed = stats.reindexed,
-                    directories_enumerated = stats.directories_enumerated,
-                    database_mutations = stats.database_mutations,
-                    content_reads = stats.content_reads,
-                    indexed_files = total,
-                    "index maintenance completed"
-                );
-            }
-            snapshot.finish_watch_cycle(total);
-            true
-        }
-        Err(_) if crawl_cancellation.is_cancelled() => false,
-        Err(SearchError::Cancelled) => false,
-        Err(error) => {
-            let error = error.to_string();
-            let log_error = bounded_search_log_detail(&error);
-            tracing::error!(
-                target: "file_search::daemon",
-                event = "index_maintenance_failed",
-                maintenance = %work_label,
-                error = %log_error,
-                "index maintenance failed"
-            );
-            snapshot.record_error(error);
-            false
-        }
-    }
-}
-
-fn work_request_label(work_request: &DaemonWorkRequest) -> String {
-    match work_request {
-        DaemonWorkRequest::StartupCheck => "startup check".to_owned(),
-        DaemonWorkRequest::ChangedPaths { changed_paths } => {
-            format!("changed path batch ({})", changed_paths.len())
-        }
-        DaemonWorkRequest::CoverageRepair { scopes } => {
-            format!("coverage repair ({})", scopes.len())
-        }
-        DaemonWorkRequest::WatchBudgetPatrol { directories } => {
-            format!("watch budget patrol ({})", directories.len())
-        }
-        DaemonWorkRequest::DirtyRootRecovery { roots } => {
-            format!("dirty root recovery ({})", roots.len())
-        }
-        DaemonWorkRequest::Shutdown => "shutdown".to_owned(),
-    }
 }
 
 fn daemon_core_stopped() -> SearchError {

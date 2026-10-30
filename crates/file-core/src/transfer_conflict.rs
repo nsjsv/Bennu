@@ -5,6 +5,9 @@ use std::time::SystemTime;
 
 use tokio::fs;
 
+use crate::entry_naming::{
+    composed_entry_name, entry_name_candidates, split_entry_name, EntryNameKind,
+};
 use crate::FileError;
 
 const TRANSFER_CONFLICT_METADATA_CONCURRENCY: usize = 8;
@@ -86,20 +89,7 @@ pub async fn is_transfer_target_available(path: impl AsRef<Path>) -> Result<bool
 }
 
 pub async fn available_transfer_target_path(path: impl AsRef<Path>) -> Result<PathBuf, FileError> {
-    let path = path.as_ref().to_path_buf();
-    if is_transfer_target_available(&path).await? {
-        return Ok(path);
-    }
-
-    let (parent, name) = transfer_target_parent_and_name(&path);
-    for index in 2..1001 {
-        let candidate = transfer_target_copy_candidate(&parent, &name, index);
-        if is_transfer_target_available(&candidate).await? {
-            return Ok(candidate);
-        }
-    }
-
-    Ok(path)
+    first_available_entry_path(path.as_ref(), EntryNameKind::File).await
 }
 
 pub(crate) async fn transfer_target_metadata_if_exists(
@@ -112,23 +102,26 @@ pub(crate) async fn transfer_target_metadata_if_exists(
     }
 }
 
-pub(crate) async fn available_transfer_target_path_candidate(path: &Path) -> io::Result<PathBuf> {
-    if transfer_target_metadata_if_exists(path).await?.is_none() {
-        return Ok(path.to_path_buf());
-    }
-
-    let (parent, name) = transfer_target_parent_and_name(path);
-    for index in 2..1001 {
-        let candidate = transfer_target_copy_candidate(&parent, &name, index);
-        if transfer_target_metadata_if_exists(&candidate)
-            .await?
-            .is_none()
-        {
-            return Ok(candidate);
+/// "保留两者"的目标选择：从请求的名字开始沿共享候选序列找第一个未被占用的路径。
+/// 这里只是选候选，调用方随后用不覆盖的原语落名，期间被抢占时由各自协议重选；
+/// 读不到某个候选的信息时不能当作可用，否则会把读失败的位置当成空位。
+pub(crate) async fn first_available_entry_path(
+    requested: &Path,
+    kind: EntryNameKind,
+) -> Result<PathBuf, FileError> {
+    let (parent, name) = entry_parent_and_name(requested)?;
+    for candidate in entry_name_candidates(&name, kind) {
+        let path = parent.join(candidate);
+        match transfer_target_metadata_if_exists(&path).await {
+            Ok(None) => return Ok(path),
+            Ok(Some(_)) => {}
+            Err(source) => return Err(FileError::Metadata { path, source }),
         }
     }
-
-    Ok(path.to_path_buf())
+    Err(FileError::EntryNameCandidatesExhausted {
+        directory: parent,
+        base: name,
+    })
 }
 
 async fn transfer_conflict(transfer: TransferConflictCheck) -> Option<TransferConflictItem> {
@@ -157,43 +150,80 @@ fn transfer_conflict_metadata(metadata: std::fs::Metadata) -> TransferConflictMe
     }
 }
 
-fn transfer_target_parent_and_name(path: &Path) -> (PathBuf, OsString) {
-    let parent = path.parent().unwrap_or_else(|| Path::new("")).to_path_buf();
-    let name = path
-        .file_name()
-        .map(OsString::from)
-        .unwrap_or_else(|| OsString::from("item"));
-    (parent, name)
-}
-
-/// 重名自动改名的候选名:序号插在扩展名之前,保住扩展名,
-/// 文件格式识别才不受影响(`Screenshot.png` 被占用 → `Screenshot 2.png`)。
-/// 无扩展名与 `.bashrc` 这类隐藏文件整体视作主名,序号直接尾追,
-/// 扩展名拆分语义与 app-ui `entry_naming` 的 `split_name` 一致。
-pub fn numbered_duplicate_name(name: &std::ffi::OsStr, number: usize) -> OsString {
-    let path = Path::new(name);
-    match (path.file_stem(), path.extension()) {
-        (Some(stem), Some(extension)) => {
-            let mut candidate = stem.to_os_string();
-            candidate.push(format!(" {number}."));
-            candidate.push(extension);
-            candidate
-        }
-        _ => {
-            let mut candidate = name.to_os_string();
-            candidate.push(format!(" {number}"));
-            candidate
-        }
+fn entry_parent_and_name(path: &Path) -> Result<(PathBuf, OsString), FileError> {
+    match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) => Ok((parent.to_path_buf(), name.to_os_string())),
+        _ => Err(FileError::InvalidInput {
+            path: path.to_path_buf(),
+            message: "target path has no file name".to_owned(),
+        }),
     }
 }
 
-fn transfer_target_copy_candidate(parent: &Path, name: &std::ffi::OsStr, index: usize) -> PathBuf {
-    parent.join(numbered_duplicate_name(name, index))
+/// app-ui 批内撞名仍按序号直接取名；编号规则与 `entry_naming` 共用同一份拆分与拼接。
+pub fn numbered_duplicate_name(name: &std::ffi::OsStr, number: usize) -> OsString {
+    let (stem, extension) = split_entry_name(name, EntryNameKind::File);
+    composed_entry_name(&stem, &format!(" {number}"), extension.as_deref())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn first_available_path_numbers_files_before_the_extension() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("a.txt"), b"taken").unwrap();
+        std::fs::write(directory.path().join("a 2.txt"), b"taken").unwrap();
+
+        let path = first_available_entry_path(&directory.path().join("a.txt"), EntryNameKind::File)
+            .await
+            .unwrap();
+
+        assert_eq!(path, directory.path().join("a 3.txt"));
+    }
+
+    #[tokio::test]
+    async fn first_available_path_numbers_directories_after_the_whole_name() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::create_dir(directory.path().join("photos.2024")).unwrap();
+
+        let path = first_available_entry_path(
+            &directory.path().join("photos.2024"),
+            EntryNameKind::Directory,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(path, directory.path().join("photos.2024 2"));
+    }
+
+    #[tokio::test]
+    async fn unreadable_candidates_are_errors_not_free_names() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("file.txt");
+        std::fs::write(&file, b"not a directory").unwrap();
+
+        let outcome = first_available_entry_path(&file.join("child"), EntryNameKind::File).await;
+
+        assert!(matches!(outcome, Err(FileError::Metadata { .. })));
+    }
+
+    #[tokio::test]
+    async fn exhausted_candidates_are_errors_not_the_conflicting_name() {
+        let directory = tempfile::tempdir().unwrap();
+        for name in entry_name_candidates(std::ffi::OsStr::new("a.txt"), EntryNameKind::File) {
+            std::fs::write(directory.path().join(name), b"taken").unwrap();
+        }
+
+        let outcome =
+            first_available_entry_path(&directory.path().join("a.txt"), EntryNameKind::File).await;
+
+        assert!(matches!(
+            outcome,
+            Err(FileError::EntryNameCandidatesExhausted { .. })
+        ));
+    }
 
     #[test]
     fn duplicate_number_goes_between_name_and_extension() {

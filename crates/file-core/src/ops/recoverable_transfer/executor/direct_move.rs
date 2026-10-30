@@ -9,8 +9,8 @@ use crate::ops::recoverable_transfer::{
     RecoverableTransferError, RenamedDirectMove, SourceDisposition, TransferCheckpoint,
     TransferExecutionKind, TransferFingerprint, TransferJournal, TransferJournalRecord,
 };
-use crate::transfer_conflict::available_transfer_target_path_candidate;
-use crate::{FileTransferOptions, TransferConflictStrategy};
+use crate::transfer_conflict::first_available_entry_path;
+use crate::{EntryNameKind, FileTransferOptions, TransferConflictStrategy};
 
 /// Result of the rename-only step of a Basic DirectMove intent.
 pub(super) enum DirectMoveRenameStep {
@@ -224,16 +224,11 @@ async fn select_keep_both_candidate(
     record: &TransferJournalRecord,
     mut prepared: PreparedTransfer,
 ) -> Result<PreparedTransfer, RecoverableTransferError> {
-    prepared.resolved_target =
-        available_transfer_target_path_candidate(&record.request.requested_target)
-            .await
-            .map_err(|source| {
-                RecoverableTransferError::file_system(
-                    "select keep-both target for",
-                    &record.request.requested_target,
-                    source,
-                )
-            })?;
+    prepared.resolved_target = first_available_entry_path(
+        &record.request.requested_target,
+        EntryNameKind::from(prepared.source_identity.object_kind),
+    )
+    .await?;
     Ok(prepared)
 }
 

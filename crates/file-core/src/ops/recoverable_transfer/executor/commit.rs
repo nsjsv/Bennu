@@ -19,7 +19,8 @@ use crate::ops::recoverable_transfer::{
     TransferExecutionKind, TransferFingerprint, TransferJournal, TransferJournalRecord,
 };
 use crate::ops::FileOperationControls;
-use crate::transfer_conflict::available_transfer_target_path_candidate;
+use crate::transfer_conflict::first_available_entry_path;
+use crate::EntryNameKind;
 
 pub(super) async fn commit_transfer<J: TransferJournal>(
     record: &mut TransferJournalRecord,
@@ -74,16 +75,11 @@ pub(super) async fn commit_transfer<J: TransferJournal>(
         verify_expected_backup(&commit, expected_target_identity, proof).await?;
     } else if target_exists {
         if record.request.conflict_strategy == crate::TransferConflictStrategy::KeepBoth {
-            commit.prepared.resolved_target =
-                available_transfer_target_path_candidate(&record.request.requested_target)
-                    .await
-                    .map_err(|source| {
-                        RecoverableTransferError::file_system(
-                            "select keep-both target for",
-                            &record.request.requested_target,
-                            source,
-                        )
-                    })?;
+            commit.prepared.resolved_target = first_available_entry_path(
+                &record.request.requested_target,
+                EntryNameKind::from(commit.prepared.source_identity.object_kind),
+            )
+            .await?;
             persist_checkpoint(record, journal, TransferCheckpoint::CommitIntent(commit)).await?;
             return Ok(());
         }
@@ -115,16 +111,11 @@ pub(super) async fn commit_transfer<J: TransferJournal>(
         Err(NoReplaceRenameError::TargetExists)
             if record.request.conflict_strategy == crate::TransferConflictStrategy::KeepBoth =>
         {
-            commit.prepared.resolved_target =
-                available_transfer_target_path_candidate(&record.request.requested_target)
-                    .await
-                    .map_err(|source| {
-                        RecoverableTransferError::file_system(
-                            "select keep-both target for",
-                            &record.request.requested_target,
-                            source,
-                        )
-                    })?;
+            commit.prepared.resolved_target = first_available_entry_path(
+                &record.request.requested_target,
+                EntryNameKind::from(commit.prepared.source_identity.object_kind),
+            )
+            .await?;
             persist_checkpoint(record, journal, TransferCheckpoint::CommitIntent(commit)).await?;
             return Ok(());
         }

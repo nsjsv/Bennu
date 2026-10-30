@@ -306,6 +306,31 @@ async fn copy_conflict_keep_both_writes_alternate_path() {
 }
 
 #[tokio::test]
+async fn copy_conflict_keep_both_numbers_a_dotted_directory_after_its_whole_name() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("source");
+    let target = dir.path().join("photos.2024");
+    fs::create_dir(&source).unwrap();
+    fs::write(source.join("new.txt"), b"new").unwrap();
+    fs::create_dir(&target).unwrap();
+
+    copy_path_with_options(
+        &source,
+        &target,
+        FileTransferOptions::running(tokio_util::sync::CancellationToken::new())
+            .with_conflict_strategy(TransferConflictStrategy::KeepBoth),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        fs::read(dir.path().join("photos.2024 2").join("new.txt")).unwrap(),
+        b"new"
+    );
+    assert!(!dir.path().join("photos 2.2024").exists());
+}
+
+#[tokio::test]
 async fn copy_conflict_merge_directory_adds_missing_children() {
     let dir = tempdir().unwrap();
     let source = dir.path().join("source");

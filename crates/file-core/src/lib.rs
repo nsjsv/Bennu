@@ -6,6 +6,7 @@ pub mod checksum;
 pub mod data_dir_migration;
 pub mod directory_metadata;
 pub mod entry;
+pub mod entry_naming;
 pub mod media;
 pub mod mount_table;
 pub mod ops;
@@ -48,6 +49,10 @@ pub use directory_metadata::{
     DiscoveredDirectoryEntry,
 };
 pub use entry::{DirectoryEntry, DirectoryMetadataAvailability, EntryMetadata, FileKind};
+pub use entry_naming::{
+    entry_name_candidates, entry_name_with_suffix, validate_entry_name, EntryNameCandidates,
+    EntryNameKind, InvalidEntryName, ENTRY_NAME_LAST_CANDIDATE_NUMBER,
+};
 pub use media::{
     is_supported_audio_extension, is_supported_audio_path, is_supported_image_extension,
     is_supported_image_path, is_supported_video_extension, is_supported_video_path,

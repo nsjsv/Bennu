@@ -25,9 +25,8 @@ use super::{
     TransferCheckpoint, TransferExecutionKind, TransferFingerprint, TransferJournal,
     TransferJournalError, TransferJournalMutation, TransferJournalRecord,
 };
-use crate::transfer_conflict::{
-    available_transfer_target_path_candidate, transfer_target_metadata_if_exists,
-};
+use crate::transfer_conflict::{first_available_entry_path, transfer_target_metadata_if_exists};
+use crate::EntryNameKind;
 
 mod batch;
 mod commit;
@@ -260,15 +259,11 @@ async fn prepare_transfer<J: TransferJournal>(
                 return Ok(());
             }
             TransferConflictStrategy::KeepBoth => (
-                available_transfer_target_path_candidate(&record.request.requested_target)
-                    .await
-                    .map_err(|source| {
-                        RecoverableTransferError::file_system(
-                            "select keep-both target for",
-                            &record.request.requested_target,
-                            source,
-                        )
-                    })?,
+                first_available_entry_path(
+                    &record.request.requested_target,
+                    EntryNameKind::from(source_identity.object_kind),
+                )
+                .await?,
                 None,
                 None,
                 None,
@@ -473,15 +468,11 @@ async fn compute_direct_move_intent(
     let resolved_target = match (target_exists, record.request.conflict_strategy) {
         (false, _) => record.request.requested_target.clone(),
         (true, TransferConflictStrategy::KeepBoth) => {
-            available_transfer_target_path_candidate(&record.request.requested_target)
-                .await
-                .map_err(|source| {
-                    RecoverableTransferError::file_system(
-                        "select keep-both target for",
-                        &record.request.requested_target,
-                        source,
-                    )
-                })?
+            first_available_entry_path(
+                &record.request.requested_target,
+                EntryNameKind::from(source_identity.object_kind),
+            )
+            .await?
         }
         (true, _) => return Ok(None),
     };

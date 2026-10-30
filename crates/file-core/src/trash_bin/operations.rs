@@ -9,10 +9,8 @@ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 
 use tokio_util::sync::CancellationToken;
 
-use crate::transfer_conflict::{
-    available_transfer_target_path_candidate, transfer_target_metadata_if_exists,
-};
-use crate::{FileError, ScanOptions, TransferConflictStrategy};
+use crate::transfer_conflict::{first_available_entry_path, transfer_target_metadata_if_exists};
+use crate::{EntryNameKind, FileError, ScanOptions, TransferConflictStrategy};
 
 use super::batch::VerifiedTrashLocations;
 use super::catalog::{
@@ -120,14 +118,18 @@ pub(super) async fn prepare_restore_target(
             Ok(RestoreTarget::MoveNoReplace(target.clone()))
         }
         TransferConflictStrategy::Skip => Ok(RestoreTarget::Skip),
-        TransferConflictStrategy::KeepBoth => available_transfer_target_path_candidate(target)
-            .await
-            .map(RestoreTarget::MoveNoReplace)
-            .map_err(|source| FileError::Move {
-                from: entry.trash_path.clone(),
-                to: target.clone(),
-                source,
-            }),
+        TransferConflictStrategy::KeepBoth => {
+            // 编号按被还原的条目是不是目录决定，与复制的"保留两者"同一规则。
+            let restored_metadata = tokio::fs::symlink_metadata(&entry.trash_path)
+                .await
+                .map_err(|source| FileError::Metadata {
+                    path: entry.trash_path.clone(),
+                    source,
+                })?;
+            first_available_entry_path(target, EntryNameKind::of_metadata(&restored_metadata))
+                .await
+                .map(RestoreTarget::MoveNoReplace)
+        }
         TransferConflictStrategy::Merge => {
             let source_metadata = tokio::fs::symlink_metadata(&entry.trash_path)
                 .await

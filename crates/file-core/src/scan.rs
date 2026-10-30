@@ -494,6 +494,8 @@ pub enum FileError {
     ArchiveInvalidPassword { path: PathBuf },
     #[error("invalid input for {path:?}: {message}")]
     InvalidInput { path: PathBuf, message: String },
+    #[error("no available name based on {base:?} in {directory:?}")]
+    EntryNameCandidatesExhausted { directory: PathBuf, base: OsString },
     #[error("operation cancelled")]
     Cancelled,
     #[error("application is stopping")]

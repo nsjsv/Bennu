@@ -7,10 +7,8 @@ use tokio::io::AsyncReadExt;
 use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 
-use crate::transfer_conflict::{
-    available_transfer_target_path_candidate, transfer_target_metadata_if_exists,
-};
-use crate::FileError;
+use crate::transfer_conflict::{first_available_entry_path, transfer_target_metadata_if_exists};
+use crate::{EntryNameKind, FileError};
 
 use super::copy_verification::{
     verify_copied_directory, verify_copied_file, verify_copied_symbolic_link,
@@ -732,14 +730,11 @@ async fn prepare_copy_target(
             Ok(Some(to.to_path_buf()))
         }
         TransferConflictStrategy::Skip => Ok(None),
-        TransferConflictStrategy::KeepBoth => available_transfer_target_path_candidate(to)
-            .await
-            .map(Some)
-            .map_err(|source| FileError::Copy {
-                from: from.to_path_buf(),
-                to: to.to_path_buf(),
-                source,
-            }),
+        TransferConflictStrategy::KeepBoth => {
+            first_available_entry_path(to, EntryNameKind::of_metadata(source_metadata))
+                .await
+                .map(Some)
+        }
         TransferConflictStrategy::Merge => {
             if source_metadata.is_dir() && target_metadata.is_dir() {
                 Ok(Some(to.to_path_buf()))

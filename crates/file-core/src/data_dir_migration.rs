@@ -14,8 +14,7 @@ pub const LEGACY_DATA_DIR_NAME: &str = "file-manager";
 pub const DATA_DIR_NAME: &str = "bennu";
 
 /// 把 XDG 数据目录下的 `file-manager/` 搬移为 `bennu/`（若需要）。
-/// `data_base_dir` 传入 `dirs::data_dir()` 的结果，由调用方解析——
-/// 本 crate 不依赖 dirs。
+/// `data_base_dir` 传入 `app_dirs::user_data_dir()`。
 pub fn migrate_legacy_data_dir(data_base_dir: &Path) {
     migrate_legacy_dir(
         &data_base_dir.join(LEGACY_DATA_DIR_NAME),

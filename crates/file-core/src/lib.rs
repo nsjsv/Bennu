@@ -1,3 +1,4 @@
+pub mod app_dirs;
 pub mod archive;
 pub mod archive_extraction;
 pub mod archive_listing;

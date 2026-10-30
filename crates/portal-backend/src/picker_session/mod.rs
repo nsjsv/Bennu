@@ -163,7 +163,7 @@ impl PickerSession {
             overwrite_targets: Vec::new(),
             address_editing: None,
             address_bar_transition: None,
-            home_dir: dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")),
+            home_dir: file_core::app_dirs::home_dir(),
             next_address_editing_session_id: 0,
             history: vec![start_directory.clone()],
             history_position: 0,

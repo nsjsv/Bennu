@@ -14,8 +14,6 @@ use bennu_theme::{
 use file_operation_store::TaskQueueStore;
 use iced::Theme;
 
-use crate::location;
-
 /// 从主程序状态库读出的外观偏好（解析失败视为未设置）。
 pub(crate) struct StoredAppearance {
     pub(crate) theme_mode: ThemeMode,
@@ -52,13 +50,8 @@ fn detected_mode() -> bennu_theme::AppearanceMode {
 }
 
 pub(crate) fn state_database_path() -> std::path::PathBuf {
-    // 与主程序 config::default_state_database_path 同一约定：
-    // $XDG_DATA_HOME/bennu/state.sqlite。
-    let fallback_base = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-    dirs::data_dir()
-        .unwrap_or(fallback_base)
-        .join("bennu")
-        .join("state.sqlite")
+    // 与主程序 config::default_state_database_path 同一个文件。
+    file_core::app_dirs::app_data_dir().join("state.sqlite")
 }
 
 /// 只读：读不懂的项已由存储层换成默认值；读出错时记日志、按未设置处理，不备份、不写
@@ -88,7 +81,7 @@ fn read_stored_appearance(db_path: &Path) -> Option<StoredAppearance> {
 }
 
 fn load_matugen_override() -> Option<Theme> {
-    let path = location::app_config_dir()?.join("matugen.toml");
+    let path = file_core::app_dirs::app_config_dir().join("matugen.toml");
     let document = std::fs::read_to_string(path).ok()?;
     parse_matugen_theme(&document).ok()
 }

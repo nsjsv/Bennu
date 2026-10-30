@@ -6,10 +6,7 @@ use super::app_config::AppConfig;
 use super::legacy_toml;
 use super::settings_recovery::{ResetSettings, SettingsRecovery, SettingsSource};
 use super::unrecognized_settings::UnrecognizedSettings;
-use super::{
-    app_config_dir_path, default_state_database_path, default_user_config, UserConfig,
-    UserPreferences,
-};
+use super::{default_state_database_path, default_user_config, UserConfig, UserPreferences};
 
 /// 启动时读到的设置，以及读的过程中要告诉用户的事。
 #[derive(Debug)]
@@ -20,8 +17,8 @@ pub(crate) struct LoadedUserConfig {
 
 pub(crate) fn load_user_config_for_app_config(app_config: AppConfig) -> LoadedUserConfig {
     let state_database_path = default_state_database_path();
-    let config_dir = app_config_dir_path();
-    load_user_config_from_sources(app_config, &state_database_path, config_dir.as_deref())
+    let config_dir = file_core::app_dirs::app_config_dir();
+    load_user_config_from_sources(app_config, &state_database_path, Some(&config_dir))
 }
 
 pub(super) fn load_user_config_from_sources(

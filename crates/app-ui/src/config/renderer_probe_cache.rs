@@ -6,8 +6,7 @@ use std::io;
 use std::path::Path;
 
 use super::config_file::{
-    config_file_path, read_config_file, required_config_file_path, write_config_file,
-    ConfigFileContent,
+    config_file_path, read_config_file, write_config_file, ConfigFileContent,
 };
 
 const RENDERER_PROBE_CACHE_KEY: &str = "renderer_probe_cache";
@@ -26,15 +25,15 @@ pub(crate) struct RendererProbeCacheRecord {
 }
 
 pub(crate) fn load_renderer_probe_cache() -> Option<RendererProbeCacheRecord> {
-    load_renderer_probe_cache_at(&config_file_path()?)
+    load_renderer_probe_cache_at(&config_file_path())
 }
 
 pub(crate) fn save_renderer_probe_cache(record: &RendererProbeCacheRecord) -> io::Result<()> {
-    save_renderer_probe_cache_at(&required_config_file_path()?, record)
+    save_renderer_probe_cache_at(&config_file_path(), record)
 }
 
 pub(crate) fn clear_renderer_probe_cache() -> io::Result<()> {
-    clear_renderer_probe_cache_at(&required_config_file_path()?)
+    clear_renderer_probe_cache_at(&config_file_path())
 }
 
 pub(super) fn load_renderer_probe_cache_at(path: &Path) -> Option<RendererProbeCacheRecord> {

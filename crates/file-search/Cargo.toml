@@ -7,7 +7,6 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-dirs.workspace = true
 file-core = { path = "../file-core" }
 icu_normalizer = { version = "2.2.0", default-features = false, features = ["compiled_data"] }
 libc = "0.2"

@@ -4,8 +4,6 @@
 //! `apply_session_message` 收口处（滚动与 update 两条路径都覆盖），
 //! 而不是新增 SessionEffect 变体。
 
-use std::path::Path;
-
 use iced::{window, Task};
 
 use crate::picker_session::thumbnails::ThumbnailLoadFailed;
@@ -19,10 +17,7 @@ pub(crate) fn spawn_thumbnail_tasks(
     window_id: window::Id,
     session: &mut PickerSession,
 ) -> Vec<Task<Message>> {
-    // 没有缓存目录时入队已全部拒掉，这里不会有活。
-    let Some(cache_dir) = session.thumbnail_cache_dir().map(Path::to_path_buf) else {
-        return Vec::new();
-    };
+    let cache_dir = session.thumbnail_cache_dir().to_path_buf();
     session
         .drain_pending_thumbnail_requests()
         .into_iter()

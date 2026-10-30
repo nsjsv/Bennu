@@ -75,7 +75,7 @@ pub(crate) struct PickerSidebarData {
 /// → 位置/收藏计算 → 设备快照 + 网络挂载状态批量查询。任何一步失败都降级为空集
 /// （portal 常驻进程不能因配置/系统异常 panic），设置读不了时记日志。
 pub(crate) async fn load_sidebar_data() -> PickerSidebarData {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+    let home = file_core::app_dirs::home_dir();
     let config = match read_sidebar_config(&crate::theme::state_database_path()) {
         Ok(config) => config,
         Err(error) => {

@@ -10,7 +10,6 @@ path = "src/main.rs"
 
 [dependencies]
 dark-light = "2.0.0"
-dirs.workspace = true
 bennu-theme = { path = "../bennu-theme" }
 # 侧边栏数据单源（位置/收藏/GTK 书签/config 解析/设备与网络条目模型）
 # 与设备/网络挂载平台层：portal 侧边栏与主程序消费同一实现。

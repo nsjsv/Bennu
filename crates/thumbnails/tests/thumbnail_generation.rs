@@ -343,18 +343,14 @@ fn cache_location_follows_the_freedesktop_rules() {
     std::env::set_var("HOME", "/home/user");
     assert_eq!(
         thumbnail_cache_dir(),
-        Some(PathBuf::from("/xdg/cache/thumbnails"))
+        PathBuf::from("/xdg/cache/thumbnails")
     );
 
     std::env::set_var("XDG_CACHE_HOME", "relative/cache");
     assert_eq!(
         thumbnail_cache_dir(),
-        Some(PathBuf::from("/home/user/.cache/thumbnails"))
+        PathBuf::from("/home/user/.cache/thumbnails")
     );
-
-    std::env::remove_var("XDG_CACHE_HOME");
-    std::env::remove_var("HOME");
-    assert_eq!(thumbnail_cache_dir(), None);
 }
 
 fn thumbnail_request(source: &Path, max_edge: u32) -> ThumbnailRequest {

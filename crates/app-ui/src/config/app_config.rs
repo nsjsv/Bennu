@@ -5,8 +5,7 @@ use std::io;
 use std::path::Path;
 
 use super::config_file::{
-    back_up_config_file, config_file_path, read_config_file, required_config_file_path,
-    write_config_file, ConfigFileContent,
+    back_up_config_file, config_file_path, read_config_file, write_config_file, ConfigFileContent,
 };
 use super::settings_recovery::{ResetSettings, SettingsRecovery, SettingsSource};
 use super::{default_user_config, RenderingGpuPreference, UserConfig};
@@ -45,10 +44,7 @@ pub(crate) fn default_app_config() -> AppConfig {
 /// 界面起来之前的读取方（渲染探针、GL 兜底重启）用：只读，读不了、读不懂的项用
 /// 默认值。备份与提示归启动加载（`load_and_repair_app_config`）。
 pub(crate) fn load_app_config() -> AppConfig {
-    match config_file_path() {
-        Some(path) => load_app_config_at(&path),
-        None => default_app_config(),
-    }
+    load_app_config_at(&config_file_path())
 }
 
 pub(super) fn load_app_config_at(path: &Path) -> AppConfig {
@@ -72,13 +68,7 @@ pub(crate) struct LoadedAppConfig {
 /// 启动加载，规则与设置相同：读不懂的项恢复默认，原文件先备份再写回修复后的键；
 /// 读不了时用默认值、本次不写回。
 pub(crate) fn load_and_repair_app_config() -> LoadedAppConfig {
-    match config_file_path() {
-        Some(path) => load_and_repair_app_config_at(&path),
-        None => LoadedAppConfig {
-            config: default_app_config(),
-            recovery: None,
-        },
-    }
+    load_and_repair_app_config_at(&config_file_path())
 }
 
 pub(super) fn load_and_repair_app_config_at(path: &Path) -> LoadedAppConfig {
@@ -156,7 +146,7 @@ fn repair_app_config(
 /// 只写这三个键，文件里其余的键（探针缓存段、本版本不认识的键）原样保留；现有
 /// 文件读不懂时先备份再写。
 pub(crate) fn save_app_config(config: &AppConfig) -> io::Result<()> {
-    save_app_config_at(&required_config_file_path()?, config)
+    save_app_config_at(&config_file_path(), config)
 }
 
 pub(super) fn save_app_config_at(path: &Path, config: &AppConfig) -> io::Result<()> {

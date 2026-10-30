@@ -8,7 +8,6 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 const PORTAL_MEMORY_FILE: &str = "portal.toml";
-const APP_CONFIG_DIR: &str = "bennu";
 
 #[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct PortalMemory {
@@ -56,14 +55,14 @@ pub(crate) fn resolve_start_directory(
             return remembered.to_path_buf();
         }
     }
-    dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
+    file_core::app_dirs::home_dir()
 }
 
 /// 读取记忆；文件缺失、损坏视为无记忆。目录有效性由 `remembered_directory`
 /// 在使用处判定。
 pub(crate) fn load_portal_memory() -> PortalMemory {
-    memory_file_path()
-        .and_then(|path| std::fs::read_to_string(path).ok())
+    std::fs::read_to_string(file_core::app_dirs::app_config_dir().join(PORTAL_MEMORY_FILE))
+        .ok()
         .and_then(|text| toml::from_str::<PortalMemory>(&text).ok())
         .unwrap_or_default()
 }
@@ -71,9 +70,7 @@ pub(crate) fn load_portal_memory() -> PortalMemory {
 /// 整体写回记忆；内容不变不写盘。先写临时文件再改名，读方永远不会
 /// 观察到半个文件。
 pub(crate) fn store_portal_memory(memory: &PortalMemory) {
-    let Some(config_dir) = app_config_dir() else {
-        return;
-    };
+    let config_dir = file_core::app_dirs::app_config_dir();
     if load_portal_memory() == *memory {
         return;
     }
@@ -87,14 +84,6 @@ pub(crate) fn store_portal_memory(memory: &PortalMemory) {
             let _ = std::fs::remove_file(&staging);
         }
     }
-}
-
-pub(crate) fn app_config_dir() -> Option<PathBuf> {
-    dirs::config_dir().map(|base| base.join(APP_CONFIG_DIR))
-}
-
-fn memory_file_path() -> Option<PathBuf> {
-    app_config_dir().map(|dir| dir.join(PORTAL_MEMORY_FILE))
 }
 
 #[cfg(test)]
@@ -132,7 +121,7 @@ mod tests {
         // 记忆路径无效时跳过该级，落到主目录。
         assert_eq!(
             resolve_start_directory(None, Some(Path::new("/nonexistent-picker-memory"))),
-            dirs::home_dir().unwrap()
+            file_core::app_dirs::home_dir()
         );
     }
 
@@ -140,7 +129,7 @@ mod tests {
     fn resolve_final_fallback_is_home() {
         assert_eq!(
             resolve_start_directory(None, None),
-            dirs::home_dir().unwrap()
+            file_core::app_dirs::home_dir()
         );
     }
 

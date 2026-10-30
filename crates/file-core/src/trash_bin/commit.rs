@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::catalog::{
     effective_user_id, inspect_directory, inspect_trash_object, probe_home_location,
-    probe_volume_location, trash_data_home, DirectoryExpectation,
+    probe_volume_location, DirectoryExpectation,
 };
 use super::model::{
     OriginalPathBase, TrashEntryIdentity, TrashLocationGuard, TrashLocationKind, TrashRestoreEntry,
@@ -55,7 +55,7 @@ impl TrashCommitContext {
             source,
         })?;
         Ok(Self {
-            data_home: trash_data_home()?,
+            data_home: crate::app_dirs::user_data_dir(),
             uid: effective_user_id(),
             mounts: parse_mountinfo(&mountinfo).mounts,
         })

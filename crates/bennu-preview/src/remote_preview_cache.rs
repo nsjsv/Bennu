@@ -43,13 +43,7 @@ impl RemotePreviewCacheRequest {
 }
 
 pub fn default_remote_preview_cache_dir() -> PathBuf {
-    let fallback_base = dirs::home_dir()
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."));
-    dirs::cache_dir()
-        .unwrap_or(fallback_base)
-        .join("bennu")
-        .join("network-preview")
+    file_core::app_dirs::app_cache_dir().join("network-preview")
 }
 
 pub async fn cache_remote_preview_file(

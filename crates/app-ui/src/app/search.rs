@@ -882,7 +882,7 @@ impl FileBrowser {
 
         let generation = workspace.run.generation;
         Task::perform(
-            read_directory_fallback_preferences(dirs::config_dir()),
+            read_directory_fallback_preferences(file_core::app_dirs::user_config_dir()),
             move |outcome| {
                 Message::SearchDirectoryFallbackConfigurationLoaded(
                     generation,

@@ -98,13 +98,11 @@ fn main() -> std::process::ExitCode {
     let _ = unsafe { libc::mallopt(libc::M_ARENA_MAX, 1) };
     // 改名迁移必须在任何状态数据库/配置读取之前执行（含窗口图标
     // 的 stored_theme_mode 读取）。
-    if let Some(data_dir) = dirs::data_dir() {
-        file_core::data_dir_migration::migrate_legacy_data_dir(&data_dir);
-    }
+    file_core::data_dir_migration::migrate_legacy_data_dir(&file_core::app_dirs::user_data_dir());
     // 搜索路径配置与 matugen 输出在配置目录，同样需要搬移。
-    if let Some(config_dir) = dirs::config_dir() {
-        file_core::data_dir_migration::migrate_legacy_config_dir(&config_dir);
-    }
+    file_core::data_dir_migration::migrate_legacy_config_dir(
+        &file_core::app_dirs::user_config_dir(),
+    );
     let action = match command_line::parse_process_arguments() {
         Ok(action) => action,
         Err(error) => {

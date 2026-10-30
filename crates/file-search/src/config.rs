@@ -271,9 +271,8 @@ pub struct SearchIndexConfig {
 
 impl Default for SearchIndexConfig {
     fn default() -> Self {
-        let roots = dirs::home_dir().into_iter().collect();
         Self {
-            roots,
+            roots: vec![file_core::app_dirs::home_dir()],
             excluded_paths: Vec::new(),
             unavailable_roots: Vec::new(),
             content_indexing_enabled: true,

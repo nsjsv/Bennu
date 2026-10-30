@@ -25,7 +25,7 @@ fn packaged_release_definition_has_no_override_guidance() {
 
 #[test]
 fn release_user_fragment_identifies_the_actual_override_source() {
-    let fragment_path = expected_user_fragment(SearchRuntimeIdentity::Release).unwrap();
+    let fragment_path = expected_user_fragment(SearchRuntimeIdentity::Release);
     let fragment_text = fragment_path.to_string_lossy();
     let description =
         release_snapshot(&fragment_text, "", PACKAGED_RELEASE_EXEC_START_PATH).description();

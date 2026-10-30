@@ -160,7 +160,6 @@ dependencies = [
  "chrono-tz",
  "dark-light",
  "desktop-linux",
- "dirs",
  "file-core",
  "file-operation-store",
  "file-search",
@@ -614,7 +613,6 @@ dependencies = [
  "bennu-subprocess",
  "bennu-theme",
  "blake3",
- "dirs",
  "file-core",
  "file-operation-store",
  "gif 0.14.2",
@@ -1833,6 +1831,7 @@ version = "0.3.6"
 dependencies = [
  "blake3",
  "chrono",
+ "dirs",
  "exacl",
  "filetime",
  "flate2",
@@ -1872,7 +1871,6 @@ dependencies = [
 name = "file-search"
 version = "0.3.6"
 dependencies = [
- "dirs",
  "file-core",
  "icu_normalizer",
  "libc",
@@ -4617,7 +4615,6 @@ dependencies = [
  "bennu-theme",
  "dark-light",
  "desktop-linux",
- "dirs",
  "display-renderer",
  "file-core",
  "file-operation-store",

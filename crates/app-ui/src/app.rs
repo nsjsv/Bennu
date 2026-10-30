@@ -579,14 +579,6 @@ impl FileBrowser {
         let initial_search_service_request = search_service.begin_initial_status_request();
         let mut initial_tab = BrowserTab::directory(0, placeholder_dir.clone());
         initial_tab.view_mode = initial_view_mode;
-        let thumbnail_cache_dir = thumbnails::thumbnail_cache_dir();
-        if thumbnail_cache_dir.is_none() {
-            tracing::warn!(
-                target: "app_ui::thumbnail",
-                event = "thumbnail_cache_unavailable",
-                "neither XDG_CACHE_HOME nor HOME is set; thumbnails are disabled"
-            );
-        }
         // 引擎配置快照自 UserConfig 填充（此后每次偏好持久化同步刷新，
         // 见 config_persistence.rs），预览域行为参数单一来源仍是持久化层。
         let preview_engine_config = bennu_preview::engine::PreviewEngineConfig {
@@ -657,7 +649,7 @@ impl FileBrowser {
             file_manager_activation,
             focused_window: main_window,
             system_focused_window: None,
-            thumbnail_cache: ThumbnailCache::new(thumbnail_cache_dir),
+            thumbnail_cache: ThumbnailCache::new(thumbnails::thumbnail_cache_dir()),
             column_browser_viewport: ColumnBrowserViewport::default(),
             column_viewports: HashMap::new(),
             icon_grid_viewports: HashMap::new(),
@@ -842,16 +834,10 @@ impl FileBrowser {
         browser.refresh_column_width_reference_content_width();
         startup_trace::mark_once("file_browser_new_ready");
         let startup_rendering_environment = browser.startup_rendering_environment.clone();
-        let thumbnail_cache_trimming =
-            browser
-                .thumbnail_cache
-                .cache_dir()
-                .map_or_else(Task::none, |cache_dir| {
-                    Task::future(thumbnails::keep_thumbnail_cache_trimmed(
-                        cache_dir.to_path_buf(),
-                    ))
-                    .discard()
-                });
+        let thumbnail_cache_trimming = Task::future(thumbnails::keep_thumbnail_cache_trimmed(
+            browser.thumbnail_cache.cache_dir().to_path_buf(),
+        ))
+        .discard();
         (
             browser,
             Task::batch([
@@ -894,9 +880,7 @@ impl FileBrowser {
             );
         }
         subscriptions.push(sidebar_device_refresh_subscription());
-        if let Some(path) = config::matugen_theme_file_path() {
-            subscriptions.push(matugen_theme_subscription(path));
-        }
+        subscriptions.push(matugen_theme_subscription(config::matugen_theme_file_path()));
         if let Some(runtime) = &self.file_manager_activation {
             subscriptions.push(desktop_activation_subscription(Arc::clone(runtime)));
         }

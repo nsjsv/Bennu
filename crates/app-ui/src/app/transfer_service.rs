@@ -76,11 +76,7 @@ pub(crate) fn transfer_download_dir(user_config: &crate::config::UserConfig) -> 
     let dir = user_config
         .transfer_download_dir
         .clone()
-        .unwrap_or_else(|| {
-            dirs::home_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join("Downloads")
-        });
+        .unwrap_or_else(|| file_core::app_dirs::home_dir().join("Downloads"));
     // 目录不存在时尽力创建；失败由每次写入的 per-file 错误暴露。
     if let Err(error) = std::fs::create_dir_all(&dir) {
         warn!(event = "transfer_download_dir_create_failed", %error, "create download dir failed");
@@ -107,7 +103,7 @@ pub(crate) fn service_config(
         device_type: Some("computer".to_owned()),
         listen_port: LOCAL_SEND_PORT,
         download_dir: transfer_download_dir(user_config),
-        identity_path: crate::config::app_data_dir_path().join(LOCAL_SEND_IDENTITY_FILE_NAME),
+        identity_path: file_core::app_dirs::app_data_dir().join(LOCAL_SEND_IDENTITY_FILE_NAME),
         is_trusted,
     }
 }

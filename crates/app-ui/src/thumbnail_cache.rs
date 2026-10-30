@@ -101,8 +101,7 @@ pub(crate) enum ThumbnailScope {
 
 #[derive(Debug)]
 pub(crate) struct ThumbnailCache {
-    /// `None`：找不到缓存目录，什么都不排，行内显示图标。
-    cache_dir: Option<PathBuf>,
+    cache_dir: PathBuf,
     ready: HashMap<ThumbnailKey, ThumbnailHandleEntry>,
     ready_order: VecDeque<ThumbnailKey>,
     queued: HashMap<ThumbnailKey, ThumbnailWork>,
@@ -112,7 +111,7 @@ pub(crate) struct ThumbnailCache {
 }
 
 impl ThumbnailCache {
-    pub(crate) fn new(cache_dir: Option<PathBuf>) -> Self {
+    pub(crate) fn new(cache_dir: PathBuf) -> Self {
         Self {
             cache_dir,
             ready: HashMap::new(),
@@ -124,8 +123,8 @@ impl ThumbnailCache {
         }
     }
 
-    pub(crate) fn cache_dir(&self) -> Option<&Path> {
-        self.cache_dir.as_deref()
+    pub(crate) fn cache_dir(&self) -> &Path {
+        &self.cache_dir
     }
 
     pub(crate) fn enqueue_request(
@@ -340,11 +339,9 @@ impl ThumbnailCache {
             && (load_policy == ThumbnailLoadPolicy::CacheOnly || !self.failure_is_active(key))
     }
 
-    /// 有缓存目录，且源文件不在缓存目录里（不给缩略图做缩略图）。
+    /// 源文件不在缓存目录里（不给缩略图做缩略图）。
     fn can_cache(&self, request: &ThumbnailRequest) -> bool {
-        self.cache_dir.as_ref().is_some_and(|cache_dir| {
-            !thumbnails::path_is_in_thumbnail_cache(cache_dir, &request.source)
-        })
+        !thumbnails::path_is_in_thumbnail_cache(&self.cache_dir, &request.source)
     }
 
     fn take_highest_priority_work(&mut self) -> Option<ThumbnailWork> {
@@ -458,7 +455,7 @@ mod tests {
 
     #[test]
     fn cache_only_work_dispatches_with_its_policy_intact() {
-        let mut cache = ThumbnailCache::new(Some(PathBuf::from("cache")));
+        let mut cache = ThumbnailCache::new(PathBuf::from("cache"));
         let request = thumbnail_request("photo.png", 1);
 
         let waits = cache.enqueue_cached_request(
@@ -488,7 +485,7 @@ mod tests {
 
     #[test]
     fn preview_work_uses_extra_slot_when_list_work_fills_normal_slots() {
-        let mut cache = ThumbnailCache::new(Some(PathBuf::from("cache")));
+        let mut cache = ThumbnailCache::new(PathBuf::from("cache"));
         for index in 0..max_in_flight() {
             cache.enqueue_request(
                 thumbnail_request(&format!("list-{index}.png"), index as u64),
@@ -520,7 +517,7 @@ mod tests {
 
     #[test]
     fn preview_extra_slot_allows_only_one_preview_work() {
-        let mut cache = ThumbnailCache::new(Some(PathBuf::from("cache")));
+        let mut cache = ThumbnailCache::new(PathBuf::from("cache"));
         for index in 0..max_in_flight() {
             cache.enqueue_request(
                 thumbnail_request(&format!("list-{index}.png"), index as u64),
@@ -548,7 +545,7 @@ mod tests {
 
     #[test]
     fn pruning_scope_removes_only_stale_queued_work() {
-        let mut cache = ThumbnailCache::new(Some(PathBuf::from("cache")));
+        let mut cache = ThumbnailCache::new(PathBuf::from("cache"));
         let scope = ThumbnailScope::PaneDirectory {
             pane_id: 1,
             directory: PathBuf::from("/workspace"),
@@ -589,7 +586,7 @@ mod tests {
 
     #[test]
     fn queue_rejects_sources_inside_thumbnail_cache_dir() {
-        let mut cache = ThumbnailCache::new(Some(PathBuf::from("/cache/thumbnails")));
+        let mut cache = ThumbnailCache::new(PathBuf::from("/cache/thumbnails"));
         cache.enqueue_request(
             thumbnail_request("/cache/thumbnails/generated.png", 1),
             ThumbnailPurpose::List,
@@ -614,20 +611,8 @@ mod tests {
     }
 
     #[test]
-    fn nothing_is_queued_without_a_cache_directory() {
-        let mut cache = ThumbnailCache::new(None);
-
-        assert!(!cache.enqueue_request(
-            thumbnail_request("photo.png", 1),
-            ThumbnailPurpose::Preview,
-            ThumbnailPriority::Visible,
-        ));
-        assert!(cache.take_next_batch().is_empty());
-    }
-
-    #[test]
     fn ready_cache_trims_oldest_entries() {
-        let mut cache = ThumbnailCache::new(Some(PathBuf::from("cache")));
+        let mut cache = ThumbnailCache::new(PathBuf::from("cache"));
         let first_request = thumbnail_request("image-0.png", 0);
         let second_request = thumbnail_request("image-1.png", 1);
         let newest_request = thumbnail_request("image-newest.png", 9999);
@@ -649,7 +634,7 @@ mod tests {
 
     #[test]
     fn failure_entries_expire_after_backoff_window() {
-        let mut cache = ThumbnailCache::new(Some(PathBuf::from("cache")));
+        let mut cache = ThumbnailCache::new(PathBuf::from("cache"));
         let key = thumbnail_request("broken.png", 1).key();
         cache.mark_failure(key.clone());
 

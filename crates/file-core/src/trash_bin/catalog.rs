@@ -34,9 +34,8 @@ pub(super) fn discover_trash_locations(
     cancellation: &tokio_util::sync::CancellationToken,
 ) -> Result<TrashLocationCatalog, FileError> {
     check_cancellation(cancellation)?;
-    let data_home = trash_data_home()?;
     discover_trash_locations_from_mountinfo_read(
-        &data_home,
+        &crate::app_dirs::user_data_dir(),
         effective_user_id(),
         fs::read(MOUNTINFO_PATH),
         cancellation,
@@ -515,31 +514,16 @@ pub(super) fn trash_object_identity(metadata: &fs::Metadata) -> TrashObjectIdent
     }
 }
 
-pub(super) fn trash_data_home() -> Result<PathBuf, FileError> {
-    std::env::var_os("XDG_DATA_HOME")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share")))
-        .ok_or(FileError::Unsupported(
-            "trash requires HOME or XDG_DATA_HOME",
-        ))
-}
-
 /// Home trash directories worth watching for change-driven refresh: the
 /// trash root plus its `info` and `files` children. Watching the root also
-/// captures creation and removal of the child directories. Empty when
-/// HOME/XDG_DATA_HOME is unavailable.
+/// captures creation and removal of the child directories.
 pub fn trash_watch_directories() -> Vec<PathBuf> {
-    trash_data_home()
-        .map(|data_home| {
-            let trash_root = data_home.join("Trash");
-            vec![
-                trash_root.clone(),
-                trash_root.join("info"),
-                trash_root.join("files"),
-            ]
-        })
-        .unwrap_or_default()
+    let trash_root = crate::app_dirs::user_data_dir().join("Trash");
+    vec![
+        trash_root.clone(),
+        trash_root.join("info"),
+        trash_root.join("files"),
+    ]
 }
 
 pub(super) fn effective_user_id() -> u32 {

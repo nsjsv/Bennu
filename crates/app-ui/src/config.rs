@@ -48,7 +48,6 @@ pub(crate) use user_config_loading::{
 mod user_preferences;
 pub(crate) use user_preferences::{save_user_preferences, UserPreferences};
 
-const APP_DIR_NAME: &str = "bennu";
 pub(super) const CONFIG_FILE_NAME: &str = "config.toml";
 const MATUGEN_THEME_FILE_NAME: &str = "matugen.toml";
 const STATE_DATABASE_FILE_NAME: &str = "state.sqlite";
@@ -411,19 +410,10 @@ pub(crate) fn default_transfer_device_alias() -> String {
 }
 
 pub(crate) fn default_state_database_path() -> PathBuf {
-    app_data_dir_path().join(STATE_DATABASE_FILE_NAME)
-}
-
-/// 应用数据目录（`~/.local/share/bennu`）；状态数据库与 LocalSend 设备身份共用这一取法。
-pub(crate) fn app_data_dir_path() -> PathBuf {
-    let fallback_base = dirs::home_dir()
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."));
-    dirs::data_dir().unwrap_or(fallback_base).join(APP_DIR_NAME)
+    file_core::app_dirs::app_data_dir().join(STATE_DATABASE_FILE_NAME)
 }
 
 pub(crate) fn default_user_config() -> UserConfig {
-    let fallback_base = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     UserConfig {
         network_list_thumbnail_downloads_enabled: false,
         preview_size_limits: PreviewFileSizeLimits::with_default_limits(),
@@ -459,7 +449,7 @@ pub(crate) fn default_user_config() -> UserConfig {
         list_directory_size_display_mode: ListDirectorySizeDisplayMode::ItemCount,
         file_grouping: FileGroupingMode::None,
         startup_location_policy: StartupLocationPolicy::Home,
-        startup_custom_directory: fallback_base.clone(),
+        startup_custom_directory: file_core::app_dirs::home_dir(),
         save_view_state: false,
         launch_window_policy: DEFAULT_LAUNCH_WINDOW_POLICY,
         column_width_adjust_mode: DEFAULT_COLUMN_WIDTH_ADJUST_MODE,
@@ -556,16 +546,12 @@ pub(crate) fn normalize_visible_column_count(count: usize) -> usize {
     count.clamp(MIN_VISIBLE_COLUMN_COUNT, MAX_VISIBLE_COLUMN_COUNT)
 }
 
-pub(super) fn app_config_dir_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|path| path.join(APP_DIR_NAME))
-}
-
 pub(crate) fn preview_size_limit_mib_inputs(limits: &PreviewFileSizeLimits) -> [String; 7] {
     PreviewFileSizeKind::ALL.map(|kind| preview_size_limit_mib(limits.limit(kind)).to_string())
 }
 
-pub(crate) fn matugen_theme_file_path() -> Option<PathBuf> {
-    app_config_dir_path().map(|path| path.join(MATUGEN_THEME_FILE_NAME))
+pub(crate) fn matugen_theme_file_path() -> PathBuf {
+    file_core::app_dirs::app_config_dir().join(MATUGEN_THEME_FILE_NAME)
 }
 
 pub(crate) fn toml_string<'a>(document: &'a toml::Table, key: &str) -> Option<&'a str> {

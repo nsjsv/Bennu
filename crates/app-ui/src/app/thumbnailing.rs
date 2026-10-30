@@ -221,10 +221,6 @@ impl FileBrowser {
     }
 
     pub(super) fn pump_thumbnail_queue(&mut self) -> Task<Message> {
-        // 没有缓存目录时入队已全部拒掉，这里不会有活。
-        let Some(cache_dir) = self.thumbnail_cache.cache_dir().map(Path::to_path_buf) else {
-            return Task::none();
-        };
         let works = self.thumbnail_cache.take_next_batch();
         if works.is_empty() {
             return Task::none();
@@ -234,7 +230,7 @@ impl FileBrowser {
             count = works.len(),
             "thumbnail batch scheduled"
         );
-        thumbnail_batch_command(cache_dir, works)
+        thumbnail_batch_command(self.thumbnail_cache.cache_dir().to_path_buf(), works)
     }
 
     fn schedule_interaction_thumbnails(&mut self) {

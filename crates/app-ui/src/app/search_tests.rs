@@ -508,10 +508,9 @@ fn unavailable_before_first_batch_switches_to_directory_fallback() {
 #[tokio::test]
 async fn directory_fallback_starts_without_the_search_service() {
     let config_directory = tempdir().unwrap();
-    let preferences = crate::commands::read_directory_fallback_preferences(Some(
-        config_directory.path().to_path_buf(),
-    ))
-    .await;
+    let preferences =
+        crate::commands::read_directory_fallback_preferences(config_directory.path().to_path_buf())
+            .await;
     let mut browser = browser_for_search_tests(PathBuf::from("/workspace"));
     stabilize_search_input(&mut browser, "report");
     let request = pending_indexed_request(&browser);
@@ -541,10 +540,9 @@ async fn unreadable_search_exclusions_stop_the_directory_fallback() {
     let sidecar = file_search::search_path_file_in(config_directory.path());
     std::fs::create_dir_all(sidecar.parent().unwrap()).unwrap();
     std::fs::write(&sidecar, b"{").unwrap();
-    let preferences = crate::commands::read_directory_fallback_preferences(Some(
-        config_directory.path().to_path_buf(),
-    ))
-    .await;
+    let preferences =
+        crate::commands::read_directory_fallback_preferences(config_directory.path().to_path_buf())
+            .await;
     let mut browser = browser_for_search_tests(PathBuf::from("/workspace"));
     stabilize_search_input(&mut browser, "report");
     let request = pending_indexed_request(&browser);

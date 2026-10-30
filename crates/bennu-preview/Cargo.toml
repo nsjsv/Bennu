@@ -58,7 +58,6 @@ thumbnails = { path = "../thumbnails" }
 resvg.workspace = true
 roxmltree = "0.20.0"
 blake3.workspace = true
-dirs.workspace = true
 rusqlite = { version = "0.32.1", features = ["bundled"] }
 # preview_config 从主软件 state.sqlite 的 JSON 载荷解析预览偏好段。
 serde_json.workspace = true

@@ -503,7 +503,7 @@ async fn startup_environment_with(
             &startup_rendering_environment,
         );
     StartupEnvironment {
-        home: home_directory(),
+        home: file_core::app_dirs::home_dir(),
         system_language: crate::localization::detect_system_language(),
         user_config: settings.user_config,
         settings_recoveries: settings.settings_recoveries,
@@ -535,18 +535,6 @@ fn settings_after_load_crash(error: &str) -> LoadedStartupSettings {
         })
         .collect(),
     }
-}
-
-/// 同 GLib `g_get_home_dir`：$HOME 与用户数据库都取不到时用 "/"，并留一条警告。
-fn home_directory() -> PathBuf {
-    dirs::home_dir().unwrap_or_else(|| {
-        tracing::warn!(
-            target: "app_ui::startup",
-            event = "home_directory_unavailable",
-            "home directory could not be determined; using /"
-        );
-        PathBuf::from("/")
-    })
 }
 
 async fn delayed_thumbnail_refresh(directory: PathBuf) -> PathBuf {
@@ -758,7 +746,7 @@ mod startup_environment_tests {
         )
         .await;
 
-        assert_eq!(environment.home, home_directory());
+        assert_eq!(environment.home, file_core::app_dirs::home_dir());
         assert_eq!(
             environment.state_database_path,
             config::default_state_database_path()

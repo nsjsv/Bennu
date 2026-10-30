@@ -664,7 +664,7 @@ impl SearchUnitSnapshot {
         }
         if self.runtime_identity == SearchRuntimeIdentity::Release
             && expected_user_fragment(SearchRuntimeIdentity::Release)
-                .is_some_and(|path| path == Path::new(&self.fragment_path))
+                == Path::new(&self.fragment_path)
         {
             return SearchUnitDefinitionSource::UserOverride;
         }
@@ -683,7 +683,7 @@ impl SearchUnitSnapshot {
             }
             SearchRuntimeIdentity::Development => {
                 expected_user_fragment(SearchRuntimeIdentity::Development)
-                    .is_some_and(|path| path == Path::new(&self.fragment_path))
+                    == Path::new(&self.fragment_path)
                     && expected_development_exec_start()
                         .is_some_and(|path| path == Path::new(&self.exec_start_path))
             }
@@ -769,12 +769,10 @@ fn display_optional_text(value: &str) -> &str {
     }
 }
 
-fn expected_user_fragment(runtime_identity: SearchRuntimeIdentity) -> Option<PathBuf> {
-    Some(
-        dirs::config_dir()?
-            .join("systemd/user")
-            .join(runtime_identity.systemd_unit()),
-    )
+fn expected_user_fragment(runtime_identity: SearchRuntimeIdentity) -> PathBuf {
+    file_core::app_dirs::user_config_dir()
+        .join("systemd/user")
+        .join(runtime_identity.systemd_unit())
 }
 
 fn expected_development_exec_start() -> Option<PathBuf> {

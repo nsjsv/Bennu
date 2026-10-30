@@ -51,9 +51,8 @@ pub(crate) struct ThumbnailLoadFailed;
 /// 缩略图调度状态：就绪表（LRU）、在途集合、排队队列、失败 backoff。
 #[derive(Debug)]
 pub(crate) struct SessionThumbnailState {
-    /// 与主程序同一个位置（`thumbnails::thumbnail_cache_dir`）；`None` 时什么都不排，
-    /// 行内显示图标。
-    cache_dir: Option<PathBuf>,
+    /// 与主程序同一个位置（`thumbnails::thumbnail_cache_dir`）。
+    cache_dir: PathBuf,
     /// 按源路径存最新就绪图，附带其请求档位：列表 128 档就绪后切到大图
     /// 必须能判出“档位不足”并补请求 192 档，否则大图永远显示小图。
     /// 不用像素尺寸判定：小原图的缩略图永远达不到档位，会反复重请求。
@@ -68,7 +67,7 @@ pub(crate) struct SessionThumbnailState {
 }
 
 impl SessionThumbnailState {
-    pub(crate) fn new(cache_dir: Option<PathBuf>) -> Self {
+    pub(crate) fn new(cache_dir: PathBuf) -> Self {
         Self {
             cache_dir,
             ready: HashMap::new(),
@@ -237,11 +236,9 @@ impl SessionThumbnailState {
         }
     }
 
-    /// 有缓存目录，且源文件不在缓存目录里（不给缩略图做缩略图）。
+    /// 源文件不在缓存目录里（不给缩略图做缩略图）。
     fn can_cache(&self, source: &Path) -> bool {
-        self.cache_dir
-            .as_ref()
-            .is_some_and(|cache_dir| !thumbnails::path_is_in_thumbnail_cache(cache_dir, source))
+        !thumbnails::path_is_in_thumbnail_cache(&self.cache_dir, source)
     }
 
     fn ready_for(&self, source: &Path) -> Option<&CachedThumbnail> {
@@ -345,8 +342,8 @@ impl PickerSession {
     }
 
     /// 缩略图磁盘缓存目录（main 层发起加载时使用；与主软件共享）。
-    pub(crate) fn thumbnail_cache_dir(&self) -> Option<&Path> {
-        self.thumbnails.cache_dir.as_deref()
+    pub(crate) fn thumbnail_cache_dir(&self) -> &Path {
+        &self.thumbnails.cache_dir
     }
 }
 
@@ -611,7 +608,7 @@ mod tests {
         });
         // 把缓存目录指到当前目录：其中的"图片"必须被拒（spec 合同），
         // 非图片与目录行同样不入队。
-        session.thumbnails.cache_dir = Some(session.directory().to_path_buf());
+        session.thumbnails.cache_dir = session.directory().to_path_buf();
         install_viewport(&mut session, viewport_at(0.0, 300.0));
 
         session.schedule_visible_thumbnails();

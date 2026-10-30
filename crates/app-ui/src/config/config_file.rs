@@ -7,7 +7,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::{app_config_dir_path, CONFIG_FILE_NAME};
+use super::CONFIG_FILE_NAME;
 
 pub(super) enum ConfigFileContent {
     Missing,
@@ -21,18 +21,8 @@ pub(super) enum ConfigFileContent {
     },
 }
 
-pub(super) fn config_file_path() -> Option<PathBuf> {
-    app_config_dir_path().map(|path| path.join(CONFIG_FILE_NAME))
-}
-
-/// 写入方用：没有配置目录就没处可写，报错给调用方。
-pub(super) fn required_config_file_path() -> io::Result<PathBuf> {
-    config_file_path().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::NotFound,
-            "application configuration directory is unavailable",
-        )
-    })
+pub(super) fn config_file_path() -> PathBuf {
+    file_core::app_dirs::app_config_dir().join(CONFIG_FILE_NAME)
 }
 
 pub(super) fn read_config_file(path: &Path) -> io::Result<ConfigFileContent> {

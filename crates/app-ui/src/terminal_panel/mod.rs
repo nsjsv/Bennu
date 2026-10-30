@@ -394,7 +394,14 @@ impl FileBrowser {
                 }
             }
             TerminalPanelMessage::ProcessExited { session } => {
-                return self.close_terminal_tab(session);
+                // 已断开的会话留着"已断开"提示和已有输出，由用户自己关；正常退出照旧关标签。
+                let disconnected =
+                    self.terminal_panel.tabs.iter().any(|tab| {
+                        tab.session.id == session && tab.session.disconnected().is_some()
+                    });
+                if !disconnected {
+                    return self.close_terminal_tab(session);
+                }
             }
             TerminalPanelMessage::GridPressed { position } => {
                 self.terminal_panel.focused = true;

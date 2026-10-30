@@ -94,12 +94,26 @@ pub(crate) fn terminal_panel_area(browser: &FileBrowser) -> Element<'_, Message>
             let focused = browser.terminal_panel.is_focused();
             let session = &active_tab.session;
             let tab_strip_visible = browser.terminal_panel.tab_strip_visible();
-            let terminal_canvas = canvas(TerminalGrid { session, focused })
-                .width(Length::Fill)
-                .height(Length::Fill);
+            let terminal_canvas: Element<'_, Message> = match session.disconnected() {
+                None => canvas(TerminalGrid { session, focused })
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into(),
+                // 保留已有输出,底部压一条"已断开"提示(同 GNOME Terminal 的提示条)。
+                Some(reason) => stack![
+                    canvas(TerminalGrid { session, focused })
+                        .width(Length::Fill)
+                        .height(Length::Fill),
+                    container(disconnected_notice(reason))
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .align_y(Vertical::Bottom),
+                ]
+                .into(),
+            };
             // 单标签时标签条隐藏、画布吃满其高度,加号悬浮在画布右上角。
             let canvas_area: Element<'_, Message> = if tab_strip_visible {
-                terminal_canvas.into()
+                terminal_canvas
             } else {
                 stack![
                     terminal_canvas,
@@ -451,6 +465,31 @@ fn divider_line_style(theme: &Theme) -> iced::widget::container::Style {
         background: Some(iced::Background::Color(
             crate::appearance::subtle_border_color(theme),
         )),
+        ..iced::widget::container::Style::default()
+    }
+}
+
+fn disconnected_notice_text(reason: &str) -> String {
+    if crate::localization::current_language_is_chinese() {
+        format!("已断开:{reason}")
+    } else {
+        format!("Disconnected: {reason}")
+    }
+}
+
+fn disconnected_notice(reason: &str) -> Element<'static, Message> {
+    container(text(disconnected_notice_text(reason)).size(12))
+        .width(Length::Fill)
+        .padding([4, 10])
+        .style(disconnected_notice_style)
+        .into()
+}
+
+fn disconnected_notice_style(theme: &Theme) -> iced::widget::container::Style {
+    let palette = theme.extended_palette();
+    iced::widget::container::Style {
+        background: Some(iced::Background::Color(palette.danger.weak.color)),
+        text_color: Some(palette.danger.weak.text),
         ..iced::widget::container::Style::default()
     }
 }

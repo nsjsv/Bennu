@@ -1,13 +1,13 @@
 use std::io::Read;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use portable_pty::native_pty_system;
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize};
 
 use iced::futures::SinkExt;
 
-use super::emulator::{PtyWriter, TerminalDimensions, TerminalEmulator};
+use super::emulator::{PtyInput, TerminalDimensions, TerminalEmulator};
 use super::TerminalPanelMessage;
 
 /// 一次会话的稳定标识;subscription 与消息用它匹配输出归属。
@@ -16,7 +16,7 @@ pub(crate) type SessionId = u64;
 pub(crate) struct TerminalSession {
     pub(crate) id: SessionId,
     pub(crate) emulator: TerminalEmulator,
-    writer: PtyWriter,
+    input: Arc<PtyInput>,
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send + Sync>,
     exited: bool,
@@ -121,13 +121,16 @@ pub(crate) fn spawn_terminal_session(
         .master
         .take_writer()
         .map_err(|error| format!("获取 PTY 写端失败: {error}"))?;
-    let writer: PtyWriter = Arc::new(Mutex::new(writer));
-    let emulator =
-        TerminalEmulator::new(dimensions.columns, dimensions.screen_lines, writer.clone());
+    let input = PtyInput::new(writer);
+    let emulator = TerminalEmulator::new(
+        dimensions.columns,
+        dimensions.screen_lines,
+        Arc::clone(&input),
+    );
     Ok(TerminalSession {
         id,
         emulator,
-        writer,
+        input,
         master: pair.master,
         child,
         exited: false,
@@ -136,12 +139,12 @@ pub(crate) fn spawn_terminal_session(
 
 impl TerminalSession {
     pub(crate) fn write_input(&self, bytes: &[u8]) {
-        let Ok(mut writer) = self.writer.lock() else {
-            return;
-        };
-        if writer.write_all(bytes).is_ok() {
-            let _ = writer.flush();
-        }
+        self.input.write(bytes);
+    }
+
+    /// 写不进去的原因;有值时会话已断开,界面显示"已断开"且不再接受输入。
+    pub(crate) fn disconnected(&self) -> Option<&str> {
+        self.input.failure()
     }
 
     pub(crate) fn resize(&mut self, dimensions: TerminalDimensions) {
@@ -150,12 +153,20 @@ impl TerminalSession {
         }
         self.emulator
             .resize(dimensions.columns, dimensions.screen_lines);
-        let _ = self.master.resize(PtySize {
+        // 尺寸没同步过去只影响换行排版,会话照常可用。
+        if let Err(error) = self.master.resize(PtySize {
             rows: dimensions.screen_lines as u16,
             cols: dimensions.columns as u16,
             pixel_width: 0,
             pixel_height: 0,
-        });
+        }) {
+            tracing::warn!(
+                target: "app_ui::terminal",
+                event = "terminal_resize_failed",
+                %error,
+                "terminal size could not be sent to the shell"
+            );
+        }
     }
 
     /// 订阅输出时克隆读端;dup 出的 fd 与原读端共享内核缓冲,重订阅不丢数据。
@@ -216,6 +227,71 @@ pub(crate) fn terminal_output_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 写端已断：每次写都失败。
+    struct BrokenPty;
+
+    impl std::io::Write for BrokenPty {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::from_raw_os_error(libc::EIO))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn shell_session(id: SessionId) -> TerminalSession {
+        spawn_terminal_session(
+            id,
+            "/bin/sh",
+            &std::env::temp_dir(),
+            TerminalDimensions {
+                columns: 80,
+                screen_lines: 24,
+            },
+        )
+        .expect("spawn shell")
+    }
+
+    #[test]
+    fn exit_closes_a_connected_tab_but_keeps_a_disconnected_one() {
+        if !Path::new("/bin/sh").exists() {
+            return;
+        }
+        let (mut browser, _) = crate::app::FileBrowser::new(crate::config::default_user_config());
+        let connected = shell_session(1);
+        let mut disconnected = shell_session(2);
+        disconnected.input = PtyInput::new(Box::new(BrokenPty));
+        disconnected.write_input(b"ls\r");
+        assert!(disconnected.disconnected().is_some());
+        for session in [connected, disconnected] {
+            browser
+                .terminal_panel
+                .tabs
+                .push(super::super::tabs::TerminalTab {
+                    session,
+                    directory: std::env::temp_dir(),
+                    has_unread_output: false,
+                });
+        }
+
+        for session in [1, 2] {
+            let exited = TerminalPanelMessage::ProcessExited { session };
+            drop(browser.handle_terminal_panel_message(exited));
+        }
+
+        let remaining: Vec<SessionId> = browser
+            .terminal_panel
+            .tabs
+            .iter()
+            .map(|tab| tab.session.id)
+            .collect();
+        assert_eq!(remaining, vec![2]);
+        for mut tab in browser.terminal_panel.tabs.drain(..) {
+            tab.session.terminate();
+        }
+    }
 
     #[test]
     fn scanned_shells_are_deduplicated_and_interactive_only() {

@@ -13,8 +13,49 @@ use alacritty_terminal::vte::ansi::{Color as TermColor, CursorShape, NamedColor}
 /// 终端回看缓冲行数。
 pub(crate) const SCROLLBACK_LINES: usize = 10_000;
 
-/// PTY 写端;终端应答(DA/光标查询等)与用户输入共用。
-pub(crate) type PtyWriter = Arc<Mutex<Box<dyn Write + Send>>>;
+/// PTY 写端的唯一持有者;终端应答(DA/光标查询等)与用户输入都经它写。
+/// 第一次写不进去就记下原因、记一条日志,此后的写入直接丢弃:会话已经断了,
+/// 界面据此显示"已断开"(同 GNOME Terminal 子进程结束后的提示条)。
+pub(crate) struct PtyInput {
+    writer: Mutex<Box<dyn Write + Send>>,
+    failure: std::sync::OnceLock<String>,
+}
+
+impl PtyInput {
+    pub(crate) fn new(writer: Box<dyn Write + Send>) -> Arc<Self> {
+        Arc::new(Self {
+            writer: Mutex::new(writer),
+            failure: std::sync::OnceLock::new(),
+        })
+    }
+
+    pub(crate) fn write(&self, bytes: &[u8]) {
+        if self.failure.get().is_some() {
+            return;
+        }
+        let outcome = match self.writer.lock() {
+            Ok(mut writer) => writer
+                .write_all(bytes)
+                .and_then(|()| writer.flush())
+                .map_err(|error| error.to_string()),
+            Err(_) => Err("terminal input writer is unusable".to_owned()),
+        };
+        if let Err(reason) = outcome {
+            tracing::error!(
+                target: "app_ui::terminal",
+                event = "terminal_write_failed",
+                error = %reason,
+                "terminal input could not be written; the session is disconnected"
+            );
+            let _ = self.failure.set(reason);
+        }
+    }
+
+    /// 写不进去的原因;`None` 表示会话还能接受输入。
+    pub(crate) fn failure(&self) -> Option<&str> {
+        self.failure.get().map(String::as_str)
+    }
+}
 
 /// alacritty [`Term`] 只认 `Dimensions` 实现;`total_lines` 由 scrollback 常量决定。
 #[derive(Debug, Clone, Copy)]
@@ -37,18 +78,15 @@ impl Dimensions for TerminalDimensions {
     }
 }
 
-/// Term 事件沉淀点:PTY 回写直接写入写端;其余事件(标题/铃响)第一版忽略。
+/// Term 事件沉淀点:PTY 回写经同一个 `PtyInput`;其余事件(标题/铃响)第一版忽略。
 struct EventProxy {
-    writer: PtyWriter,
+    input: Arc<PtyInput>,
 }
 
 impl EventListener for EventProxy {
     fn send_event(&self, event: Event) {
         if let Event::PtyWrite(text) = event {
-            if let Ok(mut writer) = self.writer.lock() {
-                let _ = writer.write_all(text.as_bytes());
-                let _ = writer.flush();
-            }
+            self.input.write(text.as_bytes());
         }
     }
 }
@@ -76,14 +114,14 @@ pub(crate) struct TerminalEmulator {
 }
 
 impl TerminalEmulator {
-    pub(crate) fn new(columns: usize, rows: usize, writer: PtyWriter) -> Self {
+    pub(crate) fn new(columns: usize, rows: usize, input: Arc<PtyInput>) -> Self {
         let dimensions = TerminalDimensions {
             columns,
             screen_lines: rows,
         };
         let mut config = TermConfig::default();
         config.scrolling_history = SCROLLBACK_LINES;
-        let term = Term::new(config, &dimensions, EventProxy { writer });
+        let term = Term::new(config, &dimensions, EventProxy { input });
         Self {
             term,
             processor: Processor::new(),
@@ -252,13 +290,63 @@ mod tests {
     use super::*;
 
     fn emulator(columns: usize, rows: usize) -> TerminalEmulator {
-        TerminalEmulator::new(
-            columns,
-            rows,
-            Arc::new(Mutex::new(
-                Box::new(std::io::sink()) as Box<dyn Write + Send>
-            )),
-        )
+        TerminalEmulator::new(columns, rows, PtyInput::new(Box::new(std::io::sink())))
+    }
+
+    /// 写端已断（如 shell 那头关了 PTY）：每次写都失败，并记下被调用了几次。
+    struct BrokenPty(Arc<std::sync::atomic::AtomicUsize>);
+
+    impl Write for BrokenPty {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err(std::io::Error::from_raw_os_error(libc::EIO))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_failed_write_disconnects_the_session_and_is_logged_once() {
+        use tracing_subscriber::layer::SubscriberExt;
+
+        struct ErrorCounter(Arc<std::sync::atomic::AtomicUsize>);
+        impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for ErrorCounter {
+            fn on_event(
+                &self,
+                event: &tracing::Event<'_>,
+                _: tracing_subscriber::layer::Context<'_, S>,
+            ) {
+                if *event.metadata().level() == tracing::Level::ERROR {
+                    self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
+        }
+
+        let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let errors = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let input = PtyInput::new(Box::new(BrokenPty(Arc::clone(&attempts))));
+        let subscriber = tracing_subscriber::registry().with(ErrorCounter(Arc::clone(&errors)));
+
+        tracing::subscriber::with_default(subscriber, || {
+            input.write(b"ls\r");
+            input.write(b"pwd\r");
+        });
+
+        assert!(input.failure().is_some());
+        // 断开以后不再去写、也不再重复报。
+        assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(errors.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_working_pty_stays_connected() {
+        let input = PtyInput::new(Box::new(std::io::sink()));
+
+        input.write(b"ls\r");
+
+        assert!(input.failure().is_none());
     }
 
     #[test]

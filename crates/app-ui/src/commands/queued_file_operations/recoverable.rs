@@ -533,9 +533,10 @@ async fn persist_manifest_for_progress(
         return Ok(record);
     }
     let mut manifest_controls = controls.clone();
-    if manifest_controls.wait_until_running().await.is_err() {
-        return Ok(record);
-    }
+    manifest_controls
+        .wait_until_running()
+        .await
+        .map_err(RecoverableTransferError::FileOperation)?;
     match persist_recoverable_source_manifest_with_controls(
         &mut record,
         journal,
@@ -545,8 +546,25 @@ async fn persist_manifest_for_progress(
     {
         Ok(()) => Ok(record),
         Err(error @ RecoverableTransferError::Journal { .. })
-        | Err(error @ RecoverableTransferError::RecoveryRequired { .. }) => Err(error),
-        Err(_) => Ok(record),
+        | Err(error @ RecoverableTransferError::RecoveryRequired { .. })
+        | Err(
+            error @ RecoverableTransferError::FileOperation(
+                file_core::FileError::Cancelled | file_core::FileError::ApplicationStopping,
+            ),
+        ) => Err(error),
+        Err(error) => {
+            // 这份清单只为提前算出进度总量。建不出来时这一项的进度显示为未知；
+            // 推进到它时会重新建清单，真正的错误在那里报给用户。
+            let log_error = crate::model::sanitized_application_log_detail(&error.to_string());
+            tracing::warn!(
+                target: "app_ui::file_operations",
+                event = "progress_manifest_unavailable",
+                source = %record.request.source.display(),
+                error = %log_error,
+                "transfer progress manifest could not be built; progress is unknown"
+            );
+            Ok(record)
+        }
     }
 }
 

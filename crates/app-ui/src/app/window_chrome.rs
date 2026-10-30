@@ -21,7 +21,7 @@ impl FileBrowser {
             && (window == self.main_window
                 || self.settings_window == Some(window)
                 || self.properties_window == Some(window)
-                || self.preview_window == Some(window))
+                || self.preview_engine.preview_window == Some(window))
     }
 
     pub(super) fn minimize_window(&self, window: window::Id) -> Task<Message> {
@@ -63,10 +63,11 @@ impl FileBrowser {
     }
 
     pub(super) fn start_window_drag(&mut self, window: window::Id) -> Task<Message> {
-        if self.preview_window == Some(window) {
-            self.cancel_preview_window_initial_chrome_hide();
-            self.preview_window_drag_active = true;
-            self.preview_window_chrome.start_reveal();
+        if self.preview_engine.preview_window == Some(window) {
+            let preview_engine = &mut self.preview_engine;
+            preview_engine.cancel_preview_window_initial_chrome_hide();
+            preview_engine.preview_window_drag_active = true;
+            preview_engine.preview_window_chrome.start_reveal();
         }
         window::drag(window)
     }

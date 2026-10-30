@@ -40,6 +40,7 @@ impl ScrollableOperation for RecordedScrollOffset {
 fn prepare_current_document(browser: &mut FileBrowser, source: PathBuf, page_count: usize) {
     drop(browser.start_document_preview(source.clone()));
     let key = browser
+        .preview_engine
         .pending_document_preview
         .as_ref()
         .unwrap()
@@ -61,6 +62,7 @@ async fn prepared_document_resets_stable_scrollable_before_page_commands() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     drop(browser.start_document_preview(source.clone()));
     let key = browser
+        .preview_engine
         .pending_document_preview
         .as_ref()
         .unwrap()
@@ -94,6 +96,7 @@ async fn prepared_document_resets_stable_scrollable_before_page_commands() {
     assert_eq!(recorded.y, Some(0.0));
     assert_eq!(
         browser
+            .preview_engine
             .active_document_preview_mut()
             .unwrap()
             .viewport_offset(),
@@ -110,11 +113,13 @@ fn stale_and_invalid_scrolls_do_not_change_scrollbar_state() {
     drop(browser.start_scrollbar_reveal(ScrollbarRegion::Sidebar));
 
     let mut stale_key = browser
+        .preview_engine
         .active_document_preview_mut()
         .unwrap()
         .viewport_key();
     stale_key.layout_generation = stale_key.layout_generation.wrapping_add(1);
     let content_height = browser
+        .preview_engine
         .active_document_preview_mut()
         .unwrap()
         .content_height();
@@ -134,6 +139,7 @@ fn stale_and_invalid_scrolls_do_not_change_scrollbar_state() {
     );
 
     let current_key = browser
+        .preview_engine
         .active_document_preview_mut()
         .unwrap()
         .viewport_key();
@@ -165,11 +171,12 @@ fn office_document_dispatch_enters_the_typed_document_pipeline() {
     drop(browser.open_preview_for_resolved_path(source.clone(), FileKind::File));
 
     assert!(matches!(
-        browser.preview,
+        browser.preview_engine.preview,
         Some(PreviewState::Loading(ref path)) if path == &source
     ));
     assert_eq!(
         browser
+            .preview_engine
             .pending_document_preview
             .as_ref()
             .unwrap()
@@ -177,7 +184,7 @@ fn office_document_dispatch_enters_the_typed_document_pipeline() {
             .source_path,
         source
     );
-    assert!(browser.text_preview_document.is_none());
+    assert!(browser.preview_engine.text_preview_document.is_none());
 }
 
 #[test]
@@ -186,6 +193,7 @@ fn office_prepare_failure_stays_local_and_never_falls_back_to_text() {
     let source = PathBuf::from("/tmp/broken.docx");
     drop(browser.start_document_preview(source));
     let key = browser
+        .preview_engine
         .pending_document_preview
         .as_ref()
         .unwrap()
@@ -200,10 +208,10 @@ fn office_prepare_failure_stays_local_and_never_falls_back_to_text() {
     );
 
     assert!(matches!(
-        browser.preview,
+        browser.preview_engine.preview,
         Some(PreviewState::Error(ref error)) if error.contains("Office document")
     ));
-    assert!(browser.text_preview_document.is_none());
+    assert!(browser.preview_engine.text_preview_document.is_none());
     assert!(browser.current_error().is_none());
 }
 
@@ -216,14 +224,16 @@ fn same_path_reopen_rejects_old_prepare_generation() {
 
     drop(browser.start_document_preview(source.clone()));
     let first = browser
+        .preview_engine
         .pending_document_preview
         .as_ref()
         .unwrap()
         .key
         .clone();
-    browser.clear_preview();
+    browser.preview_engine.clear_preview();
     drop(browser.start_document_preview(source.clone()));
     let second = browser
+        .preview_engine
         .pending_document_preview
         .as_ref()
         .unwrap()
@@ -238,11 +248,16 @@ fn same_path_reopen_rejects_old_prepare_generation() {
         )),
     );
     assert!(matches!(
-        browser.preview,
+        browser.preview_engine.preview,
         Some(PreviewState::Loading(ref path)) if path == &source
     ));
     assert_eq!(
-        browser.pending_document_preview.as_ref().unwrap().key,
+        browser
+            .preview_engine
+            .pending_document_preview
+            .as_ref()
+            .unwrap()
+            .key,
         second
     );
 }
@@ -255,20 +270,22 @@ fn clear_preview_cancels_pending_and_ready_document_tokens() {
 
     drop(browser.start_document_preview(source.clone()));
     let pending_token = browser
+        .preview_engine
         .pending_document_preview
         .as_ref()
         .unwrap()
         .cancellation
         .clone();
-    browser.clear_preview();
+    browser.preview_engine.clear_preview();
     assert!(pending_token.is_cancelled());
 
     prepare_current_document(&mut browser, source, 2);
     let ready_token = browser
+        .preview_engine
         .active_document_preview_mut()
         .unwrap()
         .document_cancellation();
-    browser.clear_preview();
+    browser.preview_engine.clear_preview();
     assert!(ready_token.is_cancelled());
 }
 
@@ -280,6 +297,7 @@ fn stale_page_and_scroll_are_rejected_after_width_bucket_resize() {
     prepare_current_document(&mut browser, source.clone(), 8);
 
     let old_viewport_key = browser
+        .preview_engine
         .active_document_preview_mut()
         .unwrap()
         .viewport_key();
@@ -287,9 +305,12 @@ fn stale_page_and_scroll_are_rejected_after_width_bucket_resize() {
         render: old_viewport_key.render.clone(),
         page_index: 0,
     };
-    browser.preview_size.width = 1100.0;
+    browser.preview_engine.preview_size.width = 1100.0;
     drop(browser.resize_document_preview());
-    let resized = browser.active_document_preview_mut().unwrap();
+    let resized = browser
+        .preview_engine
+        .active_document_preview_mut()
+        .unwrap();
     assert_ne!(resized.render_key(), old_page_key.render);
     let offset_after_resize = resized.viewport_offset();
     let content_height = resized.content_height();
@@ -312,7 +333,10 @@ fn stale_page_and_scroll_are_rejected_after_width_bucket_resize() {
         content_height,
     ));
 
-    let document = browser.active_document_preview_mut().unwrap();
+    let document = browser
+        .preview_engine
+        .active_document_preview_mut()
+        .unwrap();
     assert_eq!(document.viewport_offset(), offset_after_resize);
     assert!(!matches!(document.page_view(0), DocumentPageView::Ready(_)));
 }
@@ -324,6 +348,7 @@ fn repeated_same_size_resize_keeps_document_viewport_key() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     prepare_current_document(&mut browser, source, 4);
     let old_key = browser
+        .preview_engine
         .active_document_preview_mut()
         .unwrap()
         .viewport_key();
@@ -332,6 +357,7 @@ fn repeated_same_size_resize_keeps_document_viewport_key() {
 
     assert_eq!(
         browser
+            .preview_engine
             .active_document_preview_mut()
             .unwrap()
             .viewport_key(),
@@ -347,12 +373,16 @@ fn height_resize_advances_only_layout_generation_and_rejects_old_widget_event() 
     prepare_current_document(&mut browser, source, 12);
 
     let old_key = browser
+        .preview_engine
         .active_document_preview_mut()
         .unwrap()
         .viewport_key();
-    browser.preview_size.height += 120.0;
+    browser.preview_engine.preview_size.height += 120.0;
     drop(browser.resize_document_preview());
-    let document = browser.active_document_preview_mut().unwrap();
+    let document = browser
+        .preview_engine
+        .active_document_preview_mut()
+        .unwrap();
     let new_key = document.viewport_key();
     let stable_offset = document.viewport_offset();
     let content_height = document.content_height();
@@ -367,6 +397,7 @@ fn height_resize_advances_only_layout_generation_and_rejects_old_widget_event() 
     ));
     assert_eq!(
         browser
+            .preview_engine
             .active_document_preview_mut()
             .unwrap()
             .viewport_offset(),
@@ -381,7 +412,10 @@ fn page_failure_stays_local_and_does_not_touch_global_error() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     prepare_current_document(&mut browser, source, 2);
     let key = {
-        let document = browser.active_document_preview_mut().unwrap();
+        let document = browser
+            .preview_engine
+            .active_document_preview_mut()
+            .unwrap();
         DocumentPageRequestKey {
             render: document.render_key(),
             page_index: document.current_render_pages()[0],
@@ -397,7 +431,11 @@ fn page_failure_stays_local_and_does_not_touch_global_error() {
 
     assert!(browser.current_error().is_none());
     assert!(matches!(
-        browser.active_document_preview_mut().unwrap().page_view(0),
+        browser
+            .preview_engine
+            .active_document_preview_mut()
+            .unwrap()
+            .page_view(0),
         DocumentPageView::Error(_)
     ));
 }

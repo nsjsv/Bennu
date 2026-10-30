@@ -215,7 +215,7 @@ impl FileBrowser {
             tr!("Settings - Bennu")
         } else if self.properties_window == Some(window) {
             tr!("Properties - Bennu")
-        } else if self.preview_window == Some(window) {
+        } else if self.preview_engine.preview_window == Some(window) {
             tr!("Preview - Bennu")
         } else if self.transfer_window == Some(window) {
             tr!("Send to Phone - Bennu")
@@ -405,7 +405,7 @@ impl FileBrowser {
     }
 
     pub(super) fn handle_captured_preview_shortcut(&mut self) -> Task<Message> {
-        if self.preview_window == Some(self.focused_window) {
+        if self.preview_engine.preview_window == Some(self.focused_window) {
             self.close_preview_window()
         } else {
             Task::none()
@@ -493,7 +493,7 @@ impl FileBrowser {
         if self.transfer_window == Some(self.focused_window) {
             return self.close_transfer_window();
         }
-        if self.preview_window == Some(self.focused_window) {
+        if self.preview_engine.preview_window == Some(self.focused_window) {
             return self.close_preview_window();
         }
         if self.address_editing.is_some() {
@@ -519,7 +519,7 @@ impl FileBrowser {
             self.dismiss_global_error();
         }
 
-        if self.preview_window == Some(self.focused_window) {
+        if self.preview_engine.preview_window == Some(self.focused_window) {
             return Task::none();
         }
 
@@ -564,7 +564,9 @@ impl FileBrowser {
             _ => Task::none(),
         };
 
-        if self.preview_window.is_some() && !self.preview_window_pinned {
+        if self.preview_engine.preview_window.is_some()
+            && !self.preview_engine.preview_window_pinned
+        {
             Task::batch([self.close_preview_window(), pointer_command])
         } else {
             pointer_command
@@ -693,7 +695,7 @@ impl FileBrowser {
             self.close_settings_window()
         } else if self.properties_window == Some(window_id) {
             self.close_properties_window()
-        } else if self.preview_window == Some(window_id) {
+        } else if self.preview_engine.preview_window == Some(window_id) {
             self.close_preview_window()
         } else if self.transfer_window == Some(window_id) {
             self.close_transfer_window()
@@ -717,13 +719,17 @@ impl FileBrowser {
             ]);
         }
 
-        if self.preview_window == Some(window) {
-            let resized_size =
-                preview_content_size_from_window(self.preview_window_profile, width, height);
-            if let Some(pending_size) = self.pending_preview_resize {
+        if self.preview_engine.preview_window == Some(window) {
+            let preview_engine = &mut self.preview_engine;
+            let resized_size = preview_content_size_from_window(
+                preview_engine.preview_window_profile,
+                width,
+                height,
+            );
+            if let Some(pending_size) = preview_engine.pending_preview_resize {
                 if preview_size_matches(resized_size, pending_size) {
-                    self.pending_preview_resize = None;
-                    self.preview_size = resized_size;
+                    preview_engine.pending_preview_resize = None;
+                    preview_engine.preview_size = resized_size;
                 } else {
                     tracing::debug!(
                         target: "app_ui::preview",
@@ -737,14 +743,14 @@ impl FileBrowser {
                     return window::resize(window, preview_window_size_for_content(pending_size));
                 }
             } else {
-                self.preview_size = resized_size;
+                preview_engine.preview_size = resized_size;
             }
-            self.refresh_preview_window_bottom_controls();
+            preview_engine.refresh_preview_window_bottom_controls();
             tracing::debug!(
                 target: "app_ui::preview",
                 window = ?window,
-                width = self.preview_size.width,
-                height = self.preview_size.height,
+                width = preview_engine.preview_size.width,
+                height = preview_engine.preview_size.height,
                 "preview window resized"
             );
             return Task::batch([

@@ -30,15 +30,20 @@ impl FileBrowser {
         self.finish_terminal_panel_pointer_interaction();
         // 任何窗口里的左键释放都结束图片平移；面板内释放由
         // mouse_area 的 PanEnded 先行处理，这里只是兜底。
-        self.preview_image_viewport.panning = false;
-        if self.preview_window == Some(window) && self.preview_window_drag_active {
-            self.preview_window_drag_active = false;
-            if let Some(pointer_y) = self.preview_window_pointer_y {
-                self.preview_window_chrome.update_for_cursor_y(pointer_y);
-                self.refresh_preview_window_bottom_controls();
+        let preview_engine = &mut self.preview_engine;
+        preview_engine.preview_image_viewport.panning = false;
+        if preview_engine.preview_window == Some(window)
+            && preview_engine.preview_window_drag_active
+        {
+            preview_engine.preview_window_drag_active = false;
+            if let Some(pointer_y) = preview_engine.preview_window_pointer_y {
+                preview_engine
+                    .preview_window_chrome
+                    .update_for_cursor_y(pointer_y);
+                preview_engine.refresh_preview_window_bottom_controls();
             } else {
-                self.preview_window_chrome.start_hide();
-                self.preview_window_bottom_controls.start_hide();
+                preview_engine.preview_window_chrome.start_hide();
+                preview_engine.preview_window_bottom_controls.start_hide();
             }
         }
         Task::batch([
@@ -64,17 +69,21 @@ impl FileBrowser {
         window: window::Id,
         position: Point,
     ) -> Task<Message> {
-        if self.preview_window == Some(window) {
-            if self.preview_window_uses_window_chrome() {
+        if self.preview_engine.preview_window == Some(window) {
+            if self.preview_engine.preview_window_uses_window_chrome() {
                 self.cursor_position = position;
-                self.update_sqlite_tables_resize_drag(position);
+                self.preview_engine
+                    .update_sqlite_tables_resize_drag(position);
                 return Task::none();
             }
-            self.cancel_preview_window_initial_chrome_hide();
-            self.preview_window_pointer_y = Some(position.y);
-            self.refresh_preview_window_bottom_controls();
-            if !self.preview_window_drag_active {
-                self.preview_window_chrome.update_for_cursor_y(position.y);
+            let preview_engine = &mut self.preview_engine;
+            preview_engine.cancel_preview_window_initial_chrome_hide();
+            preview_engine.preview_window_pointer_y = Some(position.y);
+            preview_engine.refresh_preview_window_bottom_controls();
+            if !preview_engine.preview_window_drag_active {
+                preview_engine
+                    .preview_window_chrome
+                    .update_for_cursor_y(position.y);
             }
             return Task::none();
         }

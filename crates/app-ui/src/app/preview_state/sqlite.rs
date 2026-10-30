@@ -1,9 +1,6 @@
 //! SQLite 预览交互已迁 bennu-preview 的 PreviewEngine（engine/sqlite.rs，
 //! impl 块逐字节保真）；此处保留同名薄转发：Task 返回值经
 //! `.map(Message::Preview)` 包装，update.rs 调用点零改动。
-//! active_sqlite_preview_mut / clear_sqlite_preview /
-//! update_sqlite_tables_resize_drag 的签名不含宿主消息，经 FileBrowser
-//! 的 Deref 垫片直接命中引擎同名方法，无需转发。
 
 use iced::Task;
 

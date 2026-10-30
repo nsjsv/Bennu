@@ -854,7 +854,7 @@ fn focused_preview_window_blocks_file_select_all_fallback() {
     let second = PathBuf::from("/workspace/second.txt");
     let mut browser = browser_with_entries(&[first, second]);
     let preview_window = window::Id::unique();
-    browser.preview_window = Some(preview_window);
+    browser.preview_engine.preview_window = Some(preview_window);
     browser.focused_window = preview_window;
 
     drop(browser.select_all_in_file_selection_scope());

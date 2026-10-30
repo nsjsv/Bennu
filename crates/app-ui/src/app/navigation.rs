@@ -772,7 +772,7 @@ impl FileBrowser {
         self.column_return_targets.clear();
         self.pending_keyboard_column_focus = None;
         self.pending_view_switch_reveal = None;
-        self.clear_preview();
+        self.preview_engine.clear_preview();
         self.context_menu = None;
         self.renaming = None;
         self.selection_marquee = None;
@@ -789,7 +789,7 @@ impl FileBrowser {
         self.cursor_paste_directory = None;
         self.last_activation_click = None;
         self.pending_keyboard_column_focus = None;
-        self.clear_preview();
+        self.preview_engine.clear_preview();
         self.context_menu = None;
         self.renaming = None;
         self.selection_marquee = None;

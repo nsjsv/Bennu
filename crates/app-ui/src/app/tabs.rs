@@ -107,7 +107,7 @@ impl FileBrowser {
         let cancel_address_editing = self.cancel_address_editing();
         self.sync_active_tab_state();
         self.context_menu = None;
-        self.clear_preview();
+        self.preview_engine.clear_preview();
 
         let tab_id = self.next_tab_id;
         self.next_tab_id += 1;
@@ -131,7 +131,7 @@ impl FileBrowser {
         let cancel_address_editing = self.cancel_address_editing();
         self.sync_active_tab_state();
         self.context_menu = None;
-        self.clear_preview();
+        self.preview_engine.clear_preview();
 
         let tab_id = self.next_tab_id;
         self.next_tab_id += 1;

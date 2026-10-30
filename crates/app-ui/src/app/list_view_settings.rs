@@ -71,7 +71,7 @@ impl FileBrowser {
         self.activate_pane(pane_id);
         self.clear_list_header_hover_in_pane(pane_id);
         let rename_command = self.commit_rename_if_active();
-        self.clear_preview();
+        self.preview_engine.clear_preview();
         self.operation_queue.close_panel();
         self.open_with = None;
         self.cancel_file_drag_interaction();
@@ -140,7 +140,7 @@ impl FileBrowser {
         self.list_column_reorder_drag = None;
         self.drag_selection_anchor = None;
         self.selection_marquee = None;
-        self.clear_preview();
+        self.preview_engine.clear_preview();
         self.context_menu = None;
         Task::none()
     }
@@ -168,7 +168,7 @@ impl FileBrowser {
         self.selection_marquee = None;
         self.sidebar_bookmark_drag = None;
         self.sidebar_bookmark_drop_slot = None;
-        self.clear_preview();
+        self.preview_engine.clear_preview();
         self.context_menu = None;
         Task::none()
     }

@@ -633,7 +633,7 @@ impl FileBrowser {
             .retain(|path| visible_paths.contains(path));
         if primary_selection_was_hidden {
             self.selected = self.selected_paths.iter().min().cloned();
-            self.clear_preview();
+            self.preview_engine.clear_preview();
         }
         if self
             .selection_anchor
@@ -803,7 +803,7 @@ impl FileBrowser {
             .retain(|path| !hidden_paths.contains(path.as_path()));
         if primary_selection_was_hidden {
             self.selected = self.selected_paths.iter().min().cloned();
-            self.clear_preview();
+            self.preview_engine.clear_preview();
         }
         if self
             .selection_anchor

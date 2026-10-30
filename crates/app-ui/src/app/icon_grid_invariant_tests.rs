@@ -290,7 +290,7 @@ fn refreshing_icon_subtree_removes_selection_before_entries_leave_layout() {
     browser.selected_paths.insert(hidden.clone());
     browser.selection_anchor = Some(hidden.clone());
     browser.pending_created_entry_rename = Some(hidden.clone());
-    browser.preview = Some(crate::model::PreviewState::Loading(hidden));
+    browser.preview_engine.preview = Some(crate::model::PreviewState::Loading(hidden));
 
     let command = browser
         .reload_observed_icon_grid_directory(Path::new("/workspace/root"))
@@ -301,7 +301,7 @@ fn refreshing_icon_subtree_removes_selection_before_entries_leave_layout() {
     assert_eq!(browser.selected, None);
     assert_eq!(browser.selection_anchor, None);
     assert_eq!(browser.pending_created_entry_rename, None);
-    assert!(browser.preview.is_none());
+    assert!(browser.preview_engine.preview.is_none());
     let root = browser
         .icon_grid_expansion
         .as_ref()
@@ -393,7 +393,7 @@ fn dropping_icon_state_clears_hidden_selection_and_rename_state() {
     browser.renaming = Some(hidden.clone());
     browser.pending_created_entry_rename = Some(hidden.clone());
     browser.rename_input = "hidden.txt".to_owned();
-    browser.preview = Some(crate::model::PreviewState::Loading(hidden));
+    browser.preview_engine.preview = Some(crate::model::PreviewState::Loading(hidden));
 
     browser.clear_icon_grid_expansion();
 
@@ -405,7 +405,7 @@ fn dropping_icon_state_clears_hidden_selection_and_rename_state() {
     assert_eq!(browser.renaming, None);
     assert_eq!(browser.pending_created_entry_rename, None);
     assert!(browser.rename_input.is_empty());
-    assert!(browser.preview.is_none());
+    assert!(browser.preview_engine.preview.is_none());
 }
 
 fn observed_changes(directory: &std::path::Path) -> file_core::DirectoryEntryChanges {

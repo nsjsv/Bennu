@@ -383,7 +383,7 @@ impl FileBrowser {
     pub(super) fn handle_column_blank_clicked(&mut self, directory: PathBuf) -> Task<Message> {
         self.focus_column_from_pointer_click(directory.clone());
         let rename_command = self.commit_rename_if_active();
-        self.clear_preview();
+        self.preview_engine.clear_preview();
         self.context_menu = None;
         self.drag_selection_anchor = None;
         self.selection_marquee = None;
@@ -395,7 +395,7 @@ impl FileBrowser {
 
     pub(super) fn handle_column_placeholder_pressed(&mut self) -> Task<Message> {
         let rename_command = self.commit_rename_if_active();
-        self.clear_preview();
+        self.preview_engine.clear_preview();
         self.context_menu = None;
         self.drag_selection_anchor = None;
         self.selection_marquee = None;
@@ -413,7 +413,7 @@ impl FileBrowser {
         let rename_command = self.commit_rename_if_active();
         self.select_context_menu_target(path.clone());
         let delete_action = self.file_delete_action_for_selection();
-        self.clear_preview();
+        self.preview_engine.clear_preview();
         self.drag_selection_anchor = None;
         self.cancel_file_drag_interaction();
         let target_is_directory = self.entry_kind(&path) == Some(FileKind::Directory);
@@ -458,7 +458,7 @@ impl FileBrowser {
                 Task::none()
             };
         let rename_command = self.commit_rename_if_active();
-        self.clear_preview();
+        self.preview_engine.clear_preview();
         self.drag_selection_anchor = None;
         self.selection_marquee = None;
         if self.file_area_menu_is_visible(false, false, false) {
@@ -576,7 +576,7 @@ impl FileBrowser {
             self.selected = None;
             self.rename_input.clear();
         }
-        self.clear_preview();
+        self.preview_engine.clear_preview();
         self.context_menu = None;
         Task::none()
     }
@@ -775,7 +775,7 @@ impl FileBrowser {
             self.selected_paths.insert(path.clone());
             self.focus_path(path);
         }
-        self.clear_preview();
+        self.preview_engine.clear_preview();
         self.context_menu = None;
     }
 
@@ -898,7 +898,7 @@ impl FileBrowser {
         };
         let Some(selected_index) = paths.iter().position(|path| path == &selected) else {
             self.clear_file_selection();
-            self.clear_preview();
+            self.preview_engine.clear_preview();
             return Task::none();
         };
 
@@ -910,7 +910,7 @@ impl FileBrowser {
             .cloned();
         let Some(target) = target else {
             self.clear_file_selection();
-            self.clear_preview();
+            self.preview_engine.clear_preview();
             return Task::none();
         };
 
@@ -964,7 +964,7 @@ impl FileBrowser {
         self.pending_keyboard_column_focus = None;
         self.update_rename_input(&path);
         self.selected = Some(path);
-        self.clear_preview();
+        self.preview_engine.clear_preview();
         self.context_menu = None;
     }
 

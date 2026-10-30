@@ -202,11 +202,10 @@ pub(crate) struct FileBrowser {
     pub(crate) hovered_sidebar_device: Option<StorageDeviceId>,
     pub(crate) hovered_network_connection: Option<NetworkConnectionId>,
     cursor_paste_directory: Option<PathBuf>,
-    /// 预览状态机聚合体（bennu-preview）：原散在本结构上的 28 个预览
-    /// 字段已迁入引擎；经下方 Deref 垫片透出，未迁 impl 块/视图/测试的
-    /// `self.preview` 等字段访问零改动。仍留宿主的预览相关字段是
-    /// `right_preview_panel_*` 四个（见结构体后段，类型在未迁的
-    /// right_preview_panel 视图模块）。
+    /// 预览状态机聚合体（bennu-preview）：预览会话、窗口与媒体播放状态都在
+    /// 引擎里，宿主一律经本字段显式访问。仍留宿主的预览相关字段是
+    /// `right_preview_panel_*` 四个（见结构体后段，类型在 right_preview_panel
+    /// 视图模块）。
     pub(crate) preview_engine: bennu_preview::engine::PreviewEngine,
     directory_load_generation: u64,
     directory_load_cancel: Option<tokio_util::sync::CancellationToken>,
@@ -405,29 +404,6 @@ pub(crate) struct FileBrowser {
     application_shutdown_phase: ApplicationShutdownPhase,
 }
 
-// 迁移期组合垫片：预览字段与状态机方法已聚合进 bennu-preview 的
-// PreviewEngine（preview_state impl 块全部迁毕），FileBrowser 经 Deref
-// 透出，让未迁视图/宿主运行时/测试的 `self.preview` 等字段访问与引擎
-// 方法解析保持零改动（FileBrowser 自身方法与字段优先）。垫片收缩
-// 清单（批 4b-2 盘点）：view/preview_panel 等六个视图约 200 处、
-// app 运行时（update/pointer_interactions/window_chrome/shortcuts/
-// application_shutdown/windows）约 80 处、app-ui 侧测试约 30 处——
-// 视图组（批 5）迁移后随视图一并消除（任务 design.md「组合转发，
-// 不保留平行副本」）。
-impl std::ops::Deref for FileBrowser {
-    type Target = bennu_preview::engine::PreviewEngine;
-
-    fn deref(&self) -> &Self::Target {
-        &self.preview_engine
-    }
-}
-
-impl std::ops::DerefMut for FileBrowser {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.preview_engine
-    }
-}
-
 #[derive(Debug, Clone)]
 struct PaneIconGridViewport {
     directory: PathBuf,
@@ -466,8 +442,8 @@ impl FileBrowser {
     }
 
     pub(crate) fn advance_window_animation_frame(&mut self) -> Task<Message> {
-        self.preview_window_chrome.advance();
-        self.preview_window_bottom_controls.advance();
+        self.preview_engine.preview_window_chrome.advance();
+        self.preview_engine.preview_window_bottom_controls.advance();
         self.advance_terminal_panel_height_animation();
         self.advance_terminal_tab_shift_animations();
         Task::batch([
@@ -953,7 +929,7 @@ impl FileBrowser {
         subscriptions.push(self.terminal_output_subscription());
 
         let remote_preview_progress_is_indeterminate = matches!(
-            self.preview.as_ref(),
+            self.preview_engine.preview.as_ref(),
             Some(PreviewState::DownloadingRemoteFile(download)) if download.fraction().is_none()
         );
         if self.operation_queue.has_active_indeterminate_progress()
@@ -975,15 +951,18 @@ impl FileBrowser {
             );
         }
 
-        if self.preview_tree_animation_is_active() {
+        if self.preview_engine.preview_tree_animation_is_active() {
             subscriptions.push(
                 time::every(PREVIEW_TREE_ANIMATION_INTERVAL)
                     .map(|_| Message::PreviewTreeAnimationTick),
             );
         }
 
-        if self.preview_window_chrome.is_animating()
-            || self.preview_window_bottom_controls.is_animating()
+        if self.preview_engine.preview_window_chrome.is_animating()
+            || self
+                .preview_engine
+                .preview_window_bottom_controls
+                .is_animating()
             || self.scrollbar_animation_is_active()
             || self.smooth_scroll_animation_is_active()
             || self.file_drag_edge_scroll_is_active()
@@ -1001,22 +980,26 @@ impl FileBrowser {
             );
         }
 
-        if self.audio_preview_is_active() {
+        if self.preview_engine.audio_preview_is_active() {
             subscriptions.push(audio_preview_tick_subscription().map(Message::Preview));
         }
 
-        if self.video_preview_is_active() {
+        if self.preview_engine.video_preview_is_active() {
             subscriptions.push(video_preview_tick_subscription().map(Message::Preview));
         }
 
-        if let Some((path, generation, position)) = self.active_animated_image_preview_stream() {
+        if let Some((path, generation, position)) =
+            self.preview_engine.active_animated_image_preview_stream()
+        {
             subscriptions.push(
                 animated_image_preview_subscription(path, generation, position)
                     .map(Message::Preview),
             );
         }
 
-        if let Some((path, generation, position)) = self.active_video_preview_stream() {
+        if let Some((path, generation, position)) =
+            self.preview_engine.active_video_preview_stream()
+        {
             subscriptions
                 .push(video_preview_subscription(path, generation, position).map(Message::Preview));
         }
@@ -1062,15 +1045,16 @@ impl FileBrowser {
         } else if self.transfer_window == Some(window) {
             let content = crate::view::view_transfer_window(self);
             self.view_with_window_chrome(window, tr!("Transfer"), content, None)
-        } else if self.preview_window == Some(window) {
-            let content =
-                self.preview_window_content(self.preview_window_bottom_controls.opacity());
-            if self.preview_window_uses_window_chrome() {
+        } else if self.preview_engine.preview_window == Some(window) {
+            let content = self.preview_window_content(
+                self.preview_engine.preview_window_bottom_controls.opacity(),
+            );
+            if self.preview_engine.preview_window_uses_window_chrome() {
                 self.view_with_window_chrome(
                     window,
                     tr!("Preview"),
                     content,
-                    Some(self.preview_window_pinned),
+                    Some(self.preview_engine.preview_window_pinned),
                 )
             } else {
                 let frame_state = self.window_frame_state(window);
@@ -1079,8 +1063,8 @@ impl FileBrowser {
                     &self.user_config.window_controls,
                     window,
                     frame_state,
-                    self.preview_window_chrome.opacity(),
-                    self.preview_window_pinned,
+                    self.preview_engine.preview_window_chrome.opacity(),
+                    self.preview_engine.preview_window_pinned,
                 );
                 window_resize_frame(content, window, frame_state)
             }

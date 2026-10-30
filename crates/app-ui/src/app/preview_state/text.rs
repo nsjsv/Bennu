@@ -100,8 +100,8 @@ mod tests {
             .map(|line_number| format!("line {line_number}"))
             .collect::<Vec<_>>()
             .join("\n");
-        browser.text_preview_generation = 1;
-        browser.preview = Some(PreviewState::Ready(PreviewContent::Text {
+        browser.preview_engine.text_preview_generation = 1;
+        browser.preview_engine.preview = Some(PreviewState::Ready(PreviewContent::Text {
             path: path.clone(),
             rendered: Arc::from(content.as_str()),
             format: TextPreviewFormat::Plain,
@@ -119,7 +119,7 @@ mod tests {
             None,
         );
         document.scroll_by(21, 400.0).expect("chunk request");
-        browser.text_preview_document = Some(document);
+        browser.preview_engine.text_preview_document = Some(document);
         (browser, path)
     }
 
@@ -140,7 +140,11 @@ mod tests {
             }),
         ));
 
-        let document = browser.text_preview_document.as_ref().expect("document");
+        let document = browser
+            .preview_engine
+            .text_preview_document
+            .as_ref()
+            .expect("document");
         assert!(!document.content().contains("stale"));
     }
 
@@ -161,7 +165,11 @@ mod tests {
             }),
         ));
 
-        let document = browser.text_preview_document.as_ref().expect("document");
+        let document = browser
+            .preview_engine
+            .text_preview_document
+            .as_ref()
+            .expect("document");
         assert!(!document.content().contains("stale"));
     }
 }

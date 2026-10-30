@@ -113,7 +113,7 @@ impl FileBrowser {
             && self.network_connection_editor.is_none()
             && self.settings_window != Some(self.focused_window)
             && self.properties_window != Some(self.focused_window)
-            && self.preview_window != Some(self.focused_window)
+            && self.preview_engine.preview_window != Some(self.focused_window)
             && self.renaming.is_none()
             && self.shortcut_capture.is_none()
             && !self.operation_queue.is_panel_open()

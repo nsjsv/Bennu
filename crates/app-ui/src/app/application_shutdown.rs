@@ -95,7 +95,7 @@ impl FileBrowser {
             pending_window_ids.insert(properties_window);
             close_commands.push(window::close(properties_window));
         }
-        if let Some(preview_window) = self.preview_window.take() {
+        if let Some(preview_window) = self.preview_engine.preview_window.take() {
             pending_window_ids.insert(preview_window);
             close_commands.push(window::close(preview_window));
         }
@@ -357,7 +357,7 @@ impl FileBrowser {
         self.archive_creation = None;
         self.archive_extraction = None;
         self.cancel_file_drag_interaction();
-        self.clear_preview();
-        self.pending_preview_resize = None;
+        self.preview_engine.clear_preview();
+        self.preview_engine.pending_preview_resize = None;
     }
 }

@@ -55,7 +55,7 @@ impl FileBrowser {
                 None
             }
         };
-        self.clear_preview();
+        self.preview_engine.clear_preview();
         self.context_menu = None;
         self.drag_selection_anchor = None;
         self.cancel_file_drag_interaction();

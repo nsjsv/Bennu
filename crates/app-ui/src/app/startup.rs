@@ -604,9 +604,9 @@ mod tests {
                 .map(|viewport| (viewport.offset_y, viewport.height)),
             Some((12.0, 240.0))
         );
-        assert!(browser.preview.is_none());
+        assert!(browser.preview_engine.preview.is_none());
         assert!(browser.properties.is_none());
-        assert!(browser.preview_window.is_none());
+        assert!(browser.preview_engine.preview_window.is_none());
         assert!(browser.properties_window.is_none());
         assert!(browser.settings_window.is_none());
     }

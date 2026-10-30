@@ -31,7 +31,7 @@ impl FileBrowser {
     fn open_directory_in_split(&mut self, directory: PathBuf, axis: SplitAxis) -> Task<Message> {
         self.sync_active_tab_state();
         self.context_menu = None;
-        self.clear_preview();
+        self.preview_engine.clear_preview();
 
         let source_id = self.active_pane_id();
         let destination_id = self.middle_click_split_destination_pane_id(source_id);

@@ -4,9 +4,6 @@
 //! 改动。宿主域差异以转发层补齐——全局错误通知（accept_preview 就绪
 //! 分支与音频跳转失败）经验收结论/错误串回传，目录展开的扫描选项与
 //! 展开层数实时读取 user_config 传入（引擎配置快照只随持久化刷新）。
-//! clear_preview / clear_audio_preview / active_video_preview_stream /
-//! audio_preview_is_active / video_preview_is_active 的签名不含宿主
-//! 消息，经 FileBrowser 的 Deref 垫片直接命中引擎同名方法。
 
 use std::path::PathBuf;
 use std::time::Duration;

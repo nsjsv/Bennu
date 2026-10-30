@@ -248,55 +248,73 @@ fn preview_resize_uses_the_full_client_area_without_chrome_offset() {
 fn preview_controls_follow_only_the_preview_window_top_region() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let preview_window = window::Id::unique();
-    browser.preview_window = Some(preview_window);
+    browser.preview_engine.preview_window = Some(preview_window);
 
     drop(browser.update(Message::CursorMoved {
         window: preview_window,
         position: iced::Point::new(8.0, PreviewWindowChromeState::REVEAL_HEIGHT),
     }));
-    assert!(browser.preview_window_chrome.target_is_visible());
+    assert!(browser
+        .preview_engine
+        .preview_window_chrome
+        .target_is_visible());
 
     drop(browser.update(Message::CursorMoved {
         window: browser.main_window,
         position: iced::Point::new(8.0, 8.0),
     }));
-    assert!(browser.preview_window_chrome.target_is_visible());
+    assert!(browser
+        .preview_engine
+        .preview_window_chrome
+        .target_is_visible());
 
     drop(browser.update(Message::CursorMoved {
         window: preview_window,
         position: iced::Point::new(8.0, PreviewWindowChromeState::REVEAL_HEIGHT + 1.0),
     }));
-    assert!(!browser.preview_window_chrome.target_is_visible());
+    assert!(!browser
+        .preview_engine
+        .preview_window_chrome
+        .target_is_visible());
 
     drop(browser.update(Message::CursorMoved {
         window: preview_window,
         position: iced::Point::new(8.0, PreviewWindowChromeState::REVEAL_HEIGHT),
     }));
-    assert!(browser.preview_window_chrome.target_is_visible());
+    assert!(browser
+        .preview_engine
+        .preview_window_chrome
+        .target_is_visible());
     drop(browser.update(Message::CursorLeft {
         window: browser.main_window,
     }));
-    assert!(browser.preview_window_chrome.target_is_visible());
+    assert!(browser
+        .preview_engine
+        .preview_window_chrome
+        .target_is_visible());
 
     drop(browser.update(Message::CursorLeft {
         window: preview_window,
     }));
-    assert!(!browser.preview_window_chrome.target_is_visible());
+    assert!(!browser
+        .preview_engine
+        .preview_window_chrome
+        .target_is_visible());
 }
 #[test]
 fn preview_top_and_bottom_controls_have_independent_pointer_regions() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let preview_window = window::Id::unique();
-    browser.preview_window = Some(preview_window);
-    browser.preview_window_profile = PreviewWindowProfile::Video;
-    browser.preview = Some(PreviewState::Ready(PreviewContent::Video {
+    browser.preview_engine.preview_window = Some(preview_window);
+    browser.preview_engine.preview_window_profile = PreviewWindowProfile::Video;
+    browser.preview_engine.preview = Some(PreviewState::Ready(PreviewContent::Video {
         path: PathBuf::from("clip.mp4"),
         frame: None,
         width: 320,
         height: 180,
         duration: Some(Duration::from_secs(10)),
     }));
-    browser.preview_size = PreviewSize {
+    browser.preview_engine.preview_size = PreviewSize {
         width: 640.0,
         height: 700.0,
     };
@@ -305,42 +323,60 @@ fn preview_top_and_bottom_controls_have_independent_pointer_regions() {
         window: preview_window,
         position: iced::Point::new(8.0, 64.0),
     }));
-    assert!(browser.preview_window_chrome.target_is_visible());
-    assert!(!browser.preview_window_bottom_controls.target_is_visible());
+    assert!(browser
+        .preview_engine
+        .preview_window_chrome
+        .target_is_visible());
+    assert!(!browser
+        .preview_engine
+        .preview_window_bottom_controls
+        .target_is_visible());
 
     drop(browser.update(Message::CursorMoved {
         window: preview_window,
         position: iced::Point::new(8.0, 636.0),
     }));
-    assert!(!browser.preview_window_chrome.target_is_visible());
-    assert!(browser.preview_window_bottom_controls.target_is_visible());
+    assert!(!browser
+        .preview_engine
+        .preview_window_chrome
+        .target_is_visible());
+    assert!(browser
+        .preview_engine
+        .preview_window_bottom_controls
+        .target_is_visible());
 
     drop(browser.update(Message::CursorMoved {
         window: preview_window,
         position: iced::Point::new(8.0, 635.9),
     }));
-    assert!(!browser.preview_window_bottom_controls.target_is_visible());
+    assert!(!browser
+        .preview_engine
+        .preview_window_bottom_controls
+        .target_is_visible());
 
     drop(browser.update(Message::CursorLeft {
         window: preview_window,
     }));
-    assert!(!browser.preview_window_bottom_controls.target_is_visible());
+    assert!(!browser
+        .preview_engine
+        .preview_window_bottom_controls
+        .target_is_visible());
 }
 
 #[test]
 fn preview_bottom_controls_reset_when_preview_closes() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let preview_window = window::Id::unique();
-    browser.preview_window = Some(preview_window);
-    browser.preview_window_profile = PreviewWindowProfile::Video;
-    browser.preview = Some(PreviewState::Ready(PreviewContent::Video {
+    browser.preview_engine.preview_window = Some(preview_window);
+    browser.preview_engine.preview_window_profile = PreviewWindowProfile::Video;
+    browser.preview_engine.preview = Some(PreviewState::Ready(PreviewContent::Video {
         path: PathBuf::from("clip.mp4"),
         frame: None,
         width: 320,
         height: 180,
         duration: Some(Duration::from_secs(10)),
     }));
-    browser.preview_size = PreviewSize {
+    browser.preview_engine.preview_size = PreviewSize {
         width: 640.0,
         height: 700.0,
     };
@@ -349,26 +385,32 @@ fn preview_bottom_controls_reset_when_preview_closes() {
         window: preview_window,
         position: iced::Point::new(8.0, 636.0),
     }));
-    assert!(browser.preview_window_bottom_controls.target_is_visible());
+    assert!(browser
+        .preview_engine
+        .preview_window_bottom_controls
+        .target_is_visible());
 
     drop(browser.close_preview_window());
-    assert!(!browser.preview_window_bottom_controls.target_is_visible());
+    assert!(!browser
+        .preview_engine
+        .preview_window_bottom_controls
+        .target_is_visible());
 }
 
 #[test]
 fn preview_bottom_controls_retarget_after_client_height_changes() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let preview_window = window::Id::unique();
-    browser.preview_window = Some(preview_window);
-    browser.preview_window_profile = PreviewWindowProfile::Video;
-    browser.preview = Some(PreviewState::Ready(PreviewContent::Video {
+    browser.preview_engine.preview_window = Some(preview_window);
+    browser.preview_engine.preview_window_profile = PreviewWindowProfile::Video;
+    browser.preview_engine.preview = Some(PreviewState::Ready(PreviewContent::Video {
         path: PathBuf::from("clip.mp4"),
         frame: None,
         width: 320,
         height: 180,
         duration: Some(Duration::from_secs(10)),
     }));
-    browser.preview_size = PreviewSize {
+    browser.preview_engine.preview_size = PreviewSize {
         width: 640.0,
         height: 700.0,
     };
@@ -377,11 +419,17 @@ fn preview_bottom_controls_retarget_after_client_height_changes() {
         window: preview_window,
         position: iced::Point::new(8.0, 636.0),
     }));
-    assert!(browser.preview_window_bottom_controls.target_is_visible());
+    assert!(browser
+        .preview_engine
+        .preview_window_bottom_controls
+        .target_is_visible());
 
-    browser.pending_preview_resize = None;
+    browser.preview_engine.pending_preview_resize = None;
     drop(browser.handle_auxiliary_window_resized(preview_window, 640.0, 500.0));
-    assert!(!browser.preview_window_bottom_controls.target_is_visible());
+    assert!(!browser
+        .preview_engine
+        .preview_window_bottom_controls
+        .target_is_visible());
 }
 
 #[test]
@@ -389,13 +437,13 @@ fn initial_preview_chrome_hides_only_without_pointer_interaction() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let preview_window = window::Id::unique();
 
-    browser.preview_window = Some(preview_window);
-    browser.preview_window_profile = PreviewWindowProfile::Video;
-    browser.preview_size = PreviewSize {
+    browser.preview_engine.preview_window = Some(preview_window);
+    browser.preview_engine.preview_window_profile = PreviewWindowProfile::Video;
+    browser.preview_engine.preview_size = PreviewSize {
         width: 640.0,
         height: 700.0,
     };
-    browser.preview = Some(PreviewState::Ready(PreviewContent::Video {
+    browser.preview_engine.preview = Some(PreviewState::Ready(PreviewContent::Video {
         path: PathBuf::from("clip.mp4"),
         frame: None,
         width: 320,
@@ -403,33 +451,69 @@ fn initial_preview_chrome_hides_only_without_pointer_interaction() {
         duration: Some(Duration::from_secs(10)),
     }));
 
-    drop(browser.start_preview_window_initial_chrome());
-    assert!(browser.preview_window_chrome.target_is_visible());
-    assert!(browser.preview_window_bottom_controls.target_is_visible());
-    let initial_generation = browser.preview_window_initial_chrome_generation;
-    browser.hide_preview_window_initial_chrome(initial_generation);
-    assert!(!browser.preview_window_chrome.target_is_visible());
-    assert!(!browser.preview_window_bottom_controls.target_is_visible());
+    drop(browser.preview_engine.start_preview_window_initial_chrome());
+    assert!(browser
+        .preview_engine
+        .preview_window_chrome
+        .target_is_visible());
+    assert!(browser
+        .preview_engine
+        .preview_window_bottom_controls
+        .target_is_visible());
+    let initial_generation = browser
+        .preview_engine
+        .preview_window_initial_chrome_generation;
+    browser
+        .preview_engine
+        .hide_preview_window_initial_chrome(initial_generation);
+    assert!(!browser
+        .preview_engine
+        .preview_window_chrome
+        .target_is_visible());
+    assert!(!browser
+        .preview_engine
+        .preview_window_bottom_controls
+        .target_is_visible());
 
-    drop(browser.start_preview_window_initial_chrome());
-    let stale_generation = browser.preview_window_initial_chrome_generation;
+    drop(browser.preview_engine.start_preview_window_initial_chrome());
+    let stale_generation = browser
+        .preview_engine
+        .preview_window_initial_chrome_generation;
     drop(browser.update(Message::CursorMoved {
         window: preview_window,
         position: iced::Point::new(8.0, 636.0),
     }));
-    assert!(browser.preview_window_bottom_controls.target_is_visible());
-    browser.hide_preview_window_initial_chrome(stale_generation);
-    assert!(browser.preview_window_bottom_controls.target_is_visible());
+    assert!(browser
+        .preview_engine
+        .preview_window_bottom_controls
+        .target_is_visible());
+    browser
+        .preview_engine
+        .hide_preview_window_initial_chrome(stale_generation);
+    assert!(browser
+        .preview_engine
+        .preview_window_bottom_controls
+        .target_is_visible());
 
-    let current_generation = browser.preview_window_initial_chrome_generation;
-    browser.hide_preview_window_initial_chrome(current_generation);
-    assert!(browser.preview_window_bottom_controls.target_is_visible());
+    let current_generation = browser
+        .preview_engine
+        .preview_window_initial_chrome_generation;
+    browser
+        .preview_engine
+        .hide_preview_window_initial_chrome(current_generation);
+    assert!(browser
+        .preview_engine
+        .preview_window_bottom_controls
+        .target_is_visible());
 
     drop(browser.update(Message::CursorMoved {
         window: preview_window,
         position: iced::Point::new(8.0, 635.9),
     }));
-    assert!(!browser.preview_window_bottom_controls.target_is_visible());
+    assert!(!browser
+        .preview_engine
+        .preview_window_bottom_controls
+        .target_is_visible());
 }
 
 fn animated_preview_for_window(duration: Option<Duration>) -> AnimatedImagePreview {
@@ -457,46 +541,79 @@ fn animated_image_bottom_controls_follow_video_visibility_rules() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let preview_window = window::Id::unique();
 
-    browser.preview_window = Some(preview_window);
-    browser.preview_window_profile = PreviewWindowProfile::Image;
-    browser.preview_size = PreviewSize {
+    browser.preview_engine.preview_window = Some(preview_window);
+    browser.preview_engine.preview_window_profile = PreviewWindowProfile::Image;
+    browser.preview_engine.preview_size = PreviewSize {
         width: 640.0,
         height: 700.0,
     };
-    browser.preview = Some(PreviewState::Ready(PreviewContent::AnimatedImage(
+    browser.preview_engine.preview = Some(PreviewState::Ready(PreviewContent::AnimatedImage(
         animated_preview_for_window(Some(Duration::from_secs(10))),
     )));
 
-    drop(browser.start_preview_window_initial_chrome());
-    assert!(browser.preview_window_chrome.target_is_visible());
-    assert!(browser.preview_window_bottom_controls.target_is_visible());
-    let initial_generation = browser.preview_window_initial_chrome_generation;
-    browser.hide_preview_window_initial_chrome(initial_generation);
-    assert!(!browser.preview_window_bottom_controls.target_is_visible());
+    drop(browser.preview_engine.start_preview_window_initial_chrome());
+    assert!(browser
+        .preview_engine
+        .preview_window_chrome
+        .target_is_visible());
+    assert!(browser
+        .preview_engine
+        .preview_window_bottom_controls
+        .target_is_visible());
+    let initial_generation = browser
+        .preview_engine
+        .preview_window_initial_chrome_generation;
+    browser
+        .preview_engine
+        .hide_preview_window_initial_chrome(initial_generation);
+    assert!(!browser
+        .preview_engine
+        .preview_window_bottom_controls
+        .target_is_visible());
 
-    drop(browser.start_preview_window_initial_chrome());
-    let stale_generation = browser.preview_window_initial_chrome_generation;
+    drop(browser.preview_engine.start_preview_window_initial_chrome());
+    let stale_generation = browser
+        .preview_engine
+        .preview_window_initial_chrome_generation;
     drop(browser.update(Message::CursorMoved {
         window: preview_window,
         position: iced::Point::new(8.0, 636.0),
     }));
-    browser.hide_preview_window_initial_chrome(stale_generation);
-    assert!(browser.preview_window_bottom_controls.target_is_visible());
+    browser
+        .preview_engine
+        .hide_preview_window_initial_chrome(stale_generation);
+    assert!(browser
+        .preview_engine
+        .preview_window_bottom_controls
+        .target_is_visible());
 
-    let current_generation = browser.preview_window_initial_chrome_generation;
-    browser.hide_preview_window_initial_chrome(current_generation);
-    assert!(browser.preview_window_bottom_controls.target_is_visible());
+    let current_generation = browser
+        .preview_engine
+        .preview_window_initial_chrome_generation;
+    browser
+        .preview_engine
+        .hide_preview_window_initial_chrome(current_generation);
+    assert!(browser
+        .preview_engine
+        .preview_window_bottom_controls
+        .target_is_visible());
     drop(browser.update(Message::CursorMoved {
         window: preview_window,
         position: iced::Point::new(8.0, 635.9),
     }));
-    assert!(!browser.preview_window_bottom_controls.target_is_visible());
+    assert!(!browser
+        .preview_engine
+        .preview_window_bottom_controls
+        .target_is_visible());
 
-    browser.preview = Some(PreviewState::Ready(PreviewContent::AnimatedImage(
+    browser.preview_engine.preview = Some(PreviewState::Ready(PreviewContent::AnimatedImage(
         animated_preview_for_window(None),
     )));
-    drop(browser.start_preview_window_initial_chrome());
-    assert!(!browser.preview_window_bottom_controls.target_is_visible());
+    drop(browser.preview_engine.start_preview_window_initial_chrome());
+    assert!(!browser
+        .preview_engine
+        .preview_window_bottom_controls
+        .target_is_visible());
 }
 
 #[test]
@@ -525,8 +642,8 @@ fn main_window_left_click_clears_global_error_for_captured_and_ignored_events() 
 fn preview_controls_stay_visible_while_the_window_is_dragged() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let preview_window = window::Id::unique();
-    browser.preview_window = Some(preview_window);
-    browser.preview_window_chrome.start_reveal();
+    browser.preview_engine.preview_window = Some(preview_window);
+    browser.preview_engine.preview_window_chrome.start_reveal();
 
     drop(browser.update(Message::WindowDragRequested(preview_window)));
     drop(browser.update(Message::CursorMoved {
@@ -536,7 +653,10 @@ fn preview_controls_stay_visible_while_the_window_is_dragged() {
     drop(browser.update(Message::CursorLeft {
         window: preview_window,
     }));
-    assert!(browser.preview_window_chrome.target_is_visible());
+    assert!(browser
+        .preview_engine
+        .preview_window_chrome
+        .target_is_visible());
 
     drop(browser.update(Message::WindowPointerReleased {
         window: preview_window,
@@ -546,15 +666,18 @@ fn preview_controls_stay_visible_while_the_window_is_dragged() {
         window: preview_window,
         position: iced::Point::new(8.0, PreviewWindowChromeState::REVEAL_HEIGHT + 1.0),
     }));
-    assert!(!browser.preview_window_chrome.target_is_visible());
+    assert!(!browser
+        .preview_engine
+        .preview_window_chrome
+        .target_is_visible());
 }
 
 #[test]
 fn preview_bottom_controls_hide_after_drag_without_pointer_position() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let preview_window = window::Id::unique();
-    browser.preview_window = Some(preview_window);
-    browser.preview = Some(PreviewState::Ready(PreviewContent::Video {
+    browser.preview_engine.preview_window = Some(preview_window);
+    browser.preview_engine.preview = Some(PreviewState::Ready(PreviewContent::Video {
         path: PathBuf::from("clip.mp4"),
         frame: None,
         width: 320,
@@ -562,28 +685,34 @@ fn preview_bottom_controls_hide_after_drag_without_pointer_position() {
         duration: Some(Duration::from_secs(10)),
     }));
 
-    drop(browser.start_preview_window_initial_chrome());
+    drop(browser.preview_engine.start_preview_window_initial_chrome());
     drop(browser.update(Message::WindowDragRequested(preview_window)));
     drop(browser.update(Message::WindowPointerReleased {
         window: preview_window,
         status: iced::event::Status::Captured,
     }));
 
-    assert!(!browser.preview_window_bottom_controls.target_is_visible());
+    assert!(!browser
+        .preview_engine
+        .preview_window_bottom_controls
+        .target_is_visible());
 }
 
 #[tokio::test]
 async fn image_dimension_update_reuses_existing_preview_window() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let preview_window = window::Id::unique();
-    browser.preview_window = Some(preview_window);
+    browser.preview_engine.preview_window = Some(preview_window);
 
     let actions =
         observed_window_actions(browser.open_image_preview_window_for_dimensions(1600, 900)).await;
 
-    assert_eq!(browser.preview_window, Some(preview_window));
+    assert_eq!(browser.preview_engine.preview_window, Some(preview_window));
     assert_eq!(browser.focused_window, preview_window);
-    assert_eq!(browser.preview_window_profile, PreviewWindowProfile::Image);
+    assert_eq!(
+        browser.preview_engine.preview_window_profile,
+        PreviewWindowProfile::Image
+    );
     assert!(actions.iter().all(|action| {
         !matches!(
             action,
@@ -598,12 +727,18 @@ fn preview_window_opens_with_controls_visible() {
 
     drop(browser.open_image_preview_window_for_dimensions(748, 499));
 
-    assert!(browser.preview_window_chrome.target_is_visible());
-    assert_close(browser.preview_size.width, 748.0);
-    assert_close(browser.preview_size.height, 499.0);
+    assert!(browser
+        .preview_engine
+        .preview_window_chrome
+        .target_is_visible());
+    assert_close(browser.preview_engine.preview_size.width, 748.0);
+    assert_close(browser.preview_engine.preview_size.height, 499.0);
 
     drop(browser.close_preview_window());
-    assert!(!browser.preview_window_chrome.target_is_visible());
+    assert!(!browser
+        .preview_engine
+        .preview_window_chrome
+        .target_is_visible());
 }
 
 #[test]
@@ -715,7 +850,7 @@ async fn idle_shutdown_closes_every_window_and_exits_after_one_outcome() {
     let preview_window = window::Id::unique();
     browser.settings_window = Some(settings_window);
     browser.properties_window = Some(properties_window);
-    browser.preview_window = Some(preview_window);
+    browser.preview_engine.preview_window = Some(preview_window);
 
     let shutdown = shutdown_actions(&mut browser, |browser| {
         browser.close_auxiliary_window(browser.main_window)
@@ -1236,8 +1371,8 @@ fn video_preview_size_fits_large_portrait_frame_to_max_height() {
 fn pinned_preview_survives_main_window_pointer_press() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let preview_window = window::Id::unique();
-    browser.preview_window = Some(preview_window);
-    browser.preview_window_pinned = true;
+    browser.preview_engine.preview_window = Some(preview_window);
+    browser.preview_engine.preview_window_pinned = true;
 
     drop(browser.update(Message::WindowPointerPressed {
         window: browser.main_window,
@@ -1245,14 +1380,14 @@ fn pinned_preview_survives_main_window_pointer_press() {
         status: iced::event::Status::Ignored,
     }));
 
-    assert_eq!(browser.preview_window, Some(preview_window));
-    assert!(browser.preview_window_pinned);
+    assert_eq!(browser.preview_engine.preview_window, Some(preview_window));
+    assert!(browser.preview_engine.preview_window_pinned);
 }
 
 #[test]
 fn unpinned_preview_closes_on_main_window_pointer_press() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.preview_window = Some(window::Id::unique());
+    browser.preview_engine.preview_window = Some(window::Id::unique());
 
     drop(browser.update(Message::WindowPointerPressed {
         window: browser.main_window,
@@ -1260,22 +1395,22 @@ fn unpinned_preview_closes_on_main_window_pointer_press() {
         status: iced::event::Status::Ignored,
     }));
 
-    assert!(browser.preview_window.is_none());
+    assert!(browser.preview_engine.preview_window.is_none());
 }
 
 #[test]
 fn pinned_preview_content_survives_interaction_clears_until_closed() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.preview_window = Some(window::Id::unique());
-    browser.preview_window_pinned = true;
-    browser.preview = Some(PreviewState::Loading(PathBuf::from("photo.png")));
+    browser.preview_engine.preview_window = Some(window::Id::unique());
+    browser.preview_engine.preview_window_pinned = true;
+    browser.preview_engine.preview = Some(PreviewState::Loading(PathBuf::from("photo.png")));
 
-    browser.clear_preview();
-    assert!(browser.preview.is_some());
+    browser.preview_engine.clear_preview();
+    assert!(browser.preview_engine.preview.is_some());
 
     drop(browser.close_preview_window());
-    assert!(browser.preview.is_none());
-    assert!(!browser.preview_window_pinned);
+    assert!(browser.preview_engine.preview.is_none());
+    assert!(!browser.preview_engine.preview_window_pinned);
 }
 
 #[test]
@@ -1284,23 +1419,23 @@ fn request_preview_without_hover_or_preview_is_noop() {
 
     drop(browser.request_preview());
 
-    assert!(browser.preview.is_none());
-    assert!(browser.preview_window.is_none());
+    assert!(browser.preview_engine.preview.is_none());
+    assert!(browser.preview_engine.preview_window.is_none());
 }
 
 #[test]
 fn request_preview_without_hover_closes_open_preview() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.preview_window = Some(window::Id::unique());
-    browser.preview_window_pinned = true;
-    browser.preview_shown_path = Some(PathBuf::from("photo.png"));
-    browser.preview = Some(PreviewState::Loading(PathBuf::from("photo.png")));
+    browser.preview_engine.preview_window = Some(window::Id::unique());
+    browser.preview_engine.preview_window_pinned = true;
+    browser.preview_engine.preview_shown_path = Some(PathBuf::from("photo.png"));
+    browser.preview_engine.preview = Some(PreviewState::Loading(PathBuf::from("photo.png")));
 
     drop(browser.request_preview());
 
-    assert!(browser.preview.is_none());
-    assert!(browser.preview_window.is_none());
-    assert!(!browser.preview_window_pinned);
+    assert!(browser.preview_engine.preview.is_none());
+    assert!(browser.preview_engine.preview_window.is_none());
+    assert!(!browser.preview_engine.preview_window_pinned);
 }
 
 #[test]
@@ -1310,34 +1445,34 @@ fn request_preview_with_hover_but_no_selection_is_noop() {
 
     drop(browser.request_preview());
 
-    assert!(browser.preview.is_none());
-    assert!(browser.preview_window.is_none());
+    assert!(browser.preview_engine.preview.is_none());
+    assert!(browser.preview_engine.preview_window.is_none());
 }
 
 #[test]
 fn request_preview_toggles_closed_for_same_target() {
     let path = PathBuf::from("clip.mp4");
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.preview_window = Some(window::Id::unique());
+    browser.preview_engine.preview_window = Some(window::Id::unique());
     browser.hovered_entry = Some(path.clone());
     browser.selected = Some(path.clone());
-    browser.preview_shown_path = Some(path);
-    browser.preview = Some(PreviewState::Loading(PathBuf::from("clip.mp4")));
+    browser.preview_engine.preview_shown_path = Some(path);
+    browser.preview_engine.preview = Some(PreviewState::Loading(PathBuf::from("clip.mp4")));
 
     drop(browser.request_preview());
 
-    assert!(browser.preview.is_none());
-    assert!(browser.preview_window.is_none());
-    assert!(!browser.preview_window_pinned);
+    assert!(browser.preview_engine.preview.is_none());
+    assert!(browser.preview_engine.preview_window.is_none());
+    assert!(!browser.preview_engine.preview_window_pinned);
 }
 
 #[test]
 fn pinned_space_switches_to_newly_selected_file_and_keeps_pin() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.preview_window = Some(window::Id::unique());
-    browser.preview_window_pinned = true;
-    browser.preview_shown_path = Some(PathBuf::from("first.png"));
-    browser.preview = Some(PreviewState::Loading(PathBuf::from("first.png")));
+    browser.preview_engine.preview_window = Some(window::Id::unique());
+    browser.preview_engine.preview_window_pinned = true;
+    browser.preview_engine.preview_shown_path = Some(PathBuf::from("first.png"));
+    browser.preview_engine.preview = Some(PreviewState::Loading(PathBuf::from("first.png")));
 
     let next = PathBuf::from("second.png");
     browser.hovered_entry = Some(next.clone());
@@ -1345,36 +1480,41 @@ fn pinned_space_switches_to_newly_selected_file_and_keeps_pin() {
 
     drop(browser.request_preview());
 
-    assert_eq!(browser.preview_shown_path.as_deref(), Some(next.as_path()));
+    assert_eq!(
+        browser.preview_engine.preview_shown_path.as_deref(),
+        Some(next.as_path())
+    );
     assert!(matches!(
-        &browser.preview,
+        &browser.preview_engine.preview,
         Some(PreviewState::Loading(path)) if path == &next
     ));
-    assert!(browser.preview_window.is_some());
-    assert!(browser.preview_window_pinned);
+    assert!(browser.preview_engine.preview_window.is_some());
+    assert!(browser.preview_engine.preview_window_pinned);
 }
 
 #[test]
 fn pinned_preview_survives_preview_window_unfocus() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let preview_window = window::Id::unique();
-    browser.preview_window = Some(preview_window);
-    browser.preview_window_pinned = true;
+    browser.preview_engine.preview_window = Some(preview_window);
+    browser.preview_engine.preview_window_pinned = true;
 
     drop(browser.update(Message::WindowUnfocused(preview_window)));
 
-    assert_eq!(browser.preview_window, Some(preview_window));
-    assert!(browser.preview_window_pinned);
+    assert_eq!(browser.preview_engine.preview_window, Some(preview_window));
+    assert!(browser.preview_engine.preview_window_pinned);
 }
 
 #[test]
 fn unpinned_preview_closes_when_preview_window_unfocuses() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.preview_window = Some(window::Id::unique());
+    browser.preview_engine.preview_window = Some(window::Id::unique());
 
-    drop(browser.update(Message::WindowUnfocused(browser.preview_window.unwrap())));
+    drop(browser.update(Message::WindowUnfocused(
+        browser.preview_engine.preview_window.unwrap(),
+    )));
 
-    assert!(browser.preview_window.is_none());
+    assert!(browser.preview_engine.preview_window.is_none());
 }
 
 #[test]

@@ -184,7 +184,7 @@ impl FileBrowser {
                 viewport_height,
             } => self.handle_text_preview_viewport_synced(offset_y, viewport_height),
             Message::TextPreviewContentHeightChanged(content_height) => {
-                self.text_preview_content_height = content_height;
+                self.preview_engine.text_preview_content_height = content_height;
                 Task::none()
             }
             Message::TextPreviewChunkLoaded {
@@ -202,7 +202,7 @@ impl FileBrowser {
                 self.handle_markdown_preview_scrolled(offset_y, viewport_height, content_height),
             ]),
             Message::MarkdownPreviewModeSelected(mode) => {
-                if let Some(document) = self.text_preview_document.as_mut() {
+                if let Some(document) = self.preview_engine.text_preview_document.as_mut() {
                     document.select_markdown_preview_mode(mode);
                 }
                 Task::none()
@@ -563,16 +563,18 @@ impl FileBrowser {
                 self.update_pointer_motion(window, position)
             }
             Message::CursorLeft { window } => {
-                if self.preview_window == Some(window) {
-                    self.cancel_preview_window_initial_chrome_hide();
-                    self.preview_window_pointer_y = None;
+                if self.preview_engine.preview_window == Some(window) {
+                    let preview_engine = &mut self.preview_engine;
+                    preview_engine.cancel_preview_window_initial_chrome_hide();
+                    preview_engine.preview_window_pointer_y = None;
                     // 指针带着按下的左键离开预览窗口时，窗口外收不到
                     // release，就地结束平移，避免回进窗口后误跳偏移。
-                    self.preview_image_viewport.panning = false;
-                    self.preview_window_bottom_controls.start_hide();
-                    if !self.preview_window_drag_active && !self.preview_window_uses_window_chrome()
+                    preview_engine.preview_image_viewport.panning = false;
+                    preview_engine.preview_window_bottom_controls.start_hide();
+                    if !preview_engine.preview_window_drag_active
+                        && !preview_engine.preview_window_uses_window_chrome()
                     {
-                        self.preview_window_chrome.start_hide();
+                        preview_engine.preview_window_chrome.start_hide();
                     }
                     return Task::none();
                 }
@@ -1065,7 +1067,8 @@ impl FileBrowser {
             }
             Message::WindowChromeAnimationTick => self.advance_window_animation_frame(),
             Message::PreviewWindowInitialChromeElapsed(generation) => {
-                self.hide_preview_window_initial_chrome(generation);
+                self.preview_engine
+                    .hide_preview_window_initial_chrome(generation);
                 Task::none()
             }
             Message::SidebarScrolled => self.show_scrollbars_temporarily(Region::Sidebar),

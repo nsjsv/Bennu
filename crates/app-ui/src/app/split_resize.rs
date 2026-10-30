@@ -26,7 +26,7 @@ impl FileBrowser {
         let portion_at_press = self.pane_layout.effective_split_portions(axis_extent).0;
 
         self.clear_pointer_driven_interaction_state();
-        self.clear_preview();
+        self.preview_engine.clear_preview();
         self.context_menu = None;
         self.split_resize_drag = Some(SplitResizeDrag {
             axis,

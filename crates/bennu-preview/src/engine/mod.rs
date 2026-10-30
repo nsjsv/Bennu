@@ -32,9 +32,8 @@ pub struct PreviewEngineConfig {
     pub size_limits: PreviewFileSizeLimits,
 }
 
-/// 预览状态机聚合体。字段可见性放宽为 pub 是迁移期需要：宿主 FileBrowser
-/// 经 Deref 垫片访问字段（未迁 impl 块/视图/测试零改动），剩余 impl 块
-/// 迁入后随垫片一并收紧。
+/// 预览状态机聚合体。字段为 pub：两个宿主的视图直接读状态，宿主在少数
+/// 窗口/指针入口直接改状态。
 pub struct PreviewEngine {
     /// 当前无引擎内消费者：宿主全部实时读 user_config 传参（测试直改
     /// user_config 必须立即生效，快照做不到）。字段保留是给 portal 接入

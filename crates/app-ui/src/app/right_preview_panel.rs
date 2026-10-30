@@ -66,8 +66,8 @@ impl FileBrowser {
             // 目标为空:清掉内容显示空态。clear_preview 自带固定守卫,
             // pin 住的独立窗口预览不会被此处误清。
             self.right_preview_panel_info = None;
-            if self.preview.is_some() {
-                self.clear_preview();
+            if self.preview_engine.preview.is_some() {
+                self.preview_engine.clear_preview();
             }
             return Task::none();
         };
@@ -77,9 +77,9 @@ impl FileBrowser {
         // 归档文件本身是 BrowsingRoot 但仍是真实文件,照常进面板预览。
         if file_core::archive_path_identity(&path) == file_core::ArchivePathIdentity::InsideArchive
         {
-            self.preview_shown_path = Some(path);
-            if self.preview.is_some() {
-                self.clear_preview();
+            self.preview_engine.preview_shown_path = Some(path);
+            if self.preview_engine.preview.is_some() {
+                self.preview_engine.clear_preview();
             }
             return info_command;
         }
@@ -87,21 +87,23 @@ impl FileBrowser {
         if kind == FileKind::Directory {
             // 目录目标:清空内容并登记目标。必须连同“已一致”判定一起
             // 登记,否则收敛点每轮 update 都会重复清空/重载。
-            self.preview_shown_path = Some(path);
-            if self.preview.is_some() {
-                self.clear_preview();
+            self.preview_engine.preview_shown_path = Some(path);
+            if self.preview_engine.preview.is_some() {
+                self.preview_engine.clear_preview();
             }
             return info_command;
         }
         // 必须同时校验 preview 非空:clear_preview 不重置 preview_shown_path,
         // “选中 A → 点空白清空 → 再选中 A”时路径相等但内容已丢失,必须重载。
-        if self.preview.is_some() && self.preview_shown_path.as_deref() == Some(path.as_path()) {
+        if self.preview_engine.preview.is_some()
+            && self.preview_engine.preview_shown_path.as_deref() == Some(path.as_path())
+        {
             return info_command;
         }
-        self.preview_load_surface = PreviewLoadSurface::RightDockedPanel;
+        self.preview_engine.preview_load_surface = PreviewLoadSurface::RightDockedPanel;
         // open_preview_for_resolved_path 不登记目标路径(Space 流程由
         // open_preview 预先写入);面板流程在此等价登记,保证会话目标可查。
-        self.preview_shown_path = Some(path.clone());
+        self.preview_engine.preview_shown_path = Some(path.clone());
         Task::batch([
             self.open_preview_for_resolved_path(path, kind),
             info_command,
@@ -271,19 +273,20 @@ impl FileBrowser {
     /// 控件透明度归属预览窗口的指针跟踪状态,面板会话永远等不到
     /// 悬停显隐事件,强制复用会让面板视频/动图没有可操作的控件。
     pub(crate) fn right_preview_panel_content(&self) -> Element<'_, Message> {
-        if self.preview.is_none() {
+        let preview_engine = &self.preview_engine;
+        if preview_engine.preview.is_none() {
             return container_centered(
                 crate::typography::readable_text(tr!("Select an item to preview")).size(14),
             );
         }
         crate::view::view_preview_window(
-            self.preview.as_ref(),
-            self.text_preview_document.as_ref(),
-            self.sqlite_preview.as_ref(),
+            preview_engine.preview.as_ref(),
+            preview_engine.text_preview_document.as_ref(),
+            preview_engine.sqlite_preview.as_ref(),
             self.right_preview_panel_viewport(),
-            &self.preview_image_viewport,
-            self.audio_preview.as_ref(),
-            self.video_preview.as_ref(),
+            &preview_engine.preview_image_viewport,
+            preview_engine.audio_preview.as_ref(),
+            preview_engine.video_preview.as_ref(),
             1.0,
             self.operation_progress_animation_frame,
             self.scrollbar_visibility_for(&ScrollbarRegion::PreviewDirectory),
@@ -294,7 +297,7 @@ impl FileBrowser {
             self.scrollbar_viewport_for(&ScrollbarRegion::PreviewDocument),
             self.scrollbar_visibility_for(&ScrollbarRegion::TextPreview),
             self.scrollbar_viewport_for(&ScrollbarRegion::TextPreview),
-            self.text_preview_content_height,
+            preview_engine.text_preview_content_height,
             self.scrollbar_visibility_for(&ScrollbarRegion::MarkdownPreview),
             self.scrollbar_viewport_for(&ScrollbarRegion::MarkdownPreview),
             self.scrollbar_visibility_for(&ScrollbarRegion::PreviewSqliteTables),
@@ -321,8 +324,8 @@ impl FileBrowser {
     /// 面板会话用面板估算值。预览内容的排版与缩放钳制共用这一个来源,
     /// 保证视图渲染基准与交互消息的处理基准一致。
     pub(super) fn preview_surface_viewport(&self) -> PreviewSize {
-        match self.preview_load_surface {
-            PreviewLoadSurface::StandaloneWindow => self.preview_size,
+        match self.preview_engine.preview_load_surface {
+            PreviewLoadSurface::StandaloneWindow => self.preview_engine.preview_size,
             PreviewLoadSurface::RightDockedPanel => self.right_preview_panel_viewport(),
         }
     }
@@ -381,10 +384,16 @@ mod tests {
 
         drop(browser.sync_right_preview_panel());
 
-        assert_eq!(browser.preview_shown_path, Some(path.clone()));
-        assert!(matches!(browser.preview, Some(PreviewState::Loading(_))));
         assert_eq!(
-            browser.preview_load_surface,
+            browser.preview_engine.preview_shown_path,
+            Some(path.clone())
+        );
+        assert!(matches!(
+            browser.preview_engine.preview,
+            Some(PreviewState::Loading(_))
+        ));
+        assert_eq!(
+            browser.preview_engine.preview_load_surface,
             PreviewLoadSurface::RightDockedPanel
         );
 
@@ -392,18 +401,18 @@ mod tests {
         let mut closed_browser = browser;
         closed_browser.right_preview_panel_open = false;
         drop(closed_browser.sync_right_preview_panel());
-        assert_eq!(closed_browser.preview_shown_path, Some(path));
+        assert_eq!(closed_browser.preview_engine.preview_shown_path, Some(path));
     }
 
     #[test]
     fn sync_with_no_target_clears_stale_preview_content() {
         let mut browser = panel_open_browser();
-        browser.preview = Some(PreviewState::Error("stale".to_owned()));
-        browser.preview_shown_path = Some(PathBuf::from("/workspace/report.txt"));
+        browser.preview_engine.preview = Some(PreviewState::Error("stale".to_owned()));
+        browser.preview_engine.preview_shown_path = Some(PathBuf::from("/workspace/report.txt"));
 
         drop(browser.sync_right_preview_panel());
 
-        assert!(browser.preview.is_none());
+        assert!(browser.preview_engine.preview.is_none());
     }
 
     #[test]
@@ -413,13 +422,16 @@ mod tests {
         let path = PathBuf::from("/workspace/report.txt");
         let mut browser = panel_open_browser();
         browser.entries = Arc::new(vec![test_file_entry(&path)]);
-        browser.preview_shown_path = Some(path.clone());
-        browser.preview = None;
+        browser.preview_engine.preview_shown_path = Some(path.clone());
+        browser.preview_engine.preview = None;
         browser.selected = Some(path.clone());
 
         drop(browser.sync_right_preview_panel());
 
-        assert!(matches!(browser.preview, Some(PreviewState::Loading(_))));
+        assert!(matches!(
+            browser.preview_engine.preview,
+            Some(PreviewState::Loading(_))
+        ));
     }
 
     #[test]
@@ -437,17 +449,20 @@ mod tests {
             false,
         )]);
         browser.selected = Some(folder.clone());
-        browser.preview = Some(PreviewState::Error("previous".to_owned()));
+        browser.preview_engine.preview = Some(PreviewState::Error("previous".to_owned()));
 
         drop(browser.sync_right_preview_panel());
 
-        assert_eq!(browser.preview_shown_path, Some(folder.clone()));
-        assert!(browser.preview.is_none());
+        assert_eq!(
+            browser.preview_engine.preview_shown_path,
+            Some(folder.clone())
+        );
+        assert!(browser.preview_engine.preview.is_none());
 
         // 再次收敛必须原样空操作(不重载、不清守卫外的状态)。
         drop(browser.sync_right_preview_panel());
-        assert!(browser.preview.is_none());
-        assert_eq!(browser.preview_shown_path, Some(folder));
+        assert!(browser.preview_engine.preview.is_none());
+        assert_eq!(browser.preview_engine.preview_shown_path, Some(folder));
     }
 
     #[test]
@@ -468,19 +483,22 @@ mod tests {
         ]);
         browser.selected = Some(folder);
         drop(browser.sync_right_preview_panel());
-        assert!(browser.preview.is_none());
+        assert!(browser.preview_engine.preview.is_none());
 
         browser.selected = Some(file.clone());
         drop(browser.sync_right_preview_panel());
-        assert!(matches!(browser.preview, Some(PreviewState::Loading(_))));
+        assert!(matches!(
+            browser.preview_engine.preview,
+            Some(PreviewState::Loading(_))
+        ));
     }
 
     #[test]
     fn sync_keeps_ready_preview_when_target_already_matches() {
         let path = PathBuf::from("/workspace/report.txt");
         let mut browser = panel_open_browser();
-        browser.preview_shown_path = Some(path.clone());
-        browser.preview = Some(PreviewState::Ready(PreviewContent::Directory {
+        browser.preview_engine.preview_shown_path = Some(path.clone());
+        browser.preview_engine.preview = Some(PreviewState::Ready(PreviewContent::Directory {
             entries: Vec::new(),
         }));
         browser.selected = Some(path);
@@ -488,7 +506,7 @@ mod tests {
         drop(browser.sync_right_preview_panel());
 
         assert!(matches!(
-            browser.preview,
+            browser.preview_engine.preview,
             Some(PreviewState::Ready(PreviewContent::Directory { .. }))
         ));
     }
@@ -592,7 +610,7 @@ mod tests {
 
         drop(browser.sync_right_preview_panel());
 
-        assert_eq!(browser.preview_shown_path, Some(second));
+        assert_eq!(browser.preview_engine.preview_shown_path, Some(second));
     }
 
     #[test]
@@ -605,17 +623,17 @@ mod tests {
         browser.selected = Some(path.clone());
         browser.hovered_entry = Some(path.clone());
         drop(browser.sync_right_preview_panel());
-        assert!(browser.preview.is_some());
-        assert!(browser.preview_window.is_none());
+        assert!(browser.preview_engine.preview.is_some());
+        assert!(browser.preview_engine.preview_window.is_none());
 
         drop(browser.request_preview());
 
         assert_eq!(
-            browser.preview_load_surface,
+            browser.preview_engine.preview_load_surface,
             PreviewLoadSurface::StandaloneWindow
         );
-        assert!(browser.preview_window.is_some());
-        assert_eq!(browser.preview_shown_path, Some(path));
+        assert!(browser.preview_engine.preview_window.is_some());
+        assert_eq!(browser.preview_engine.preview_shown_path, Some(path));
     }
 
     #[test]
@@ -624,14 +642,14 @@ mod tests {
         let mut browser = panel_open_browser();
         browser.selected = Some(path.clone());
         browser.hovered_entry = Some(path.clone());
-        browser.preview_shown_path = Some(path.clone());
-        browser.preview = Some(PreviewState::Loading(path.clone()));
-        browser.preview_window = Some(iced::window::Id::unique());
+        browser.preview_engine.preview_shown_path = Some(path.clone());
+        browser.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
+        browser.preview_engine.preview_window = Some(iced::window::Id::unique());
 
         drop(browser.request_preview());
 
-        assert!(browser.preview_window.is_none());
-        assert!(browser.preview.is_none());
+        assert!(browser.preview_engine.preview_window.is_none());
+        assert!(browser.preview_engine.preview.is_none());
     }
 
     #[test]
@@ -642,16 +660,16 @@ mod tests {
         let mut browser = panel_open_browser();
         browser.entries = Arc::new(vec![test_file_entry(&path)]);
         browser.selected = Some(path.clone());
-        browser.preview_shown_path = Some(path.clone());
-        browser.preview = Some(PreviewState::Loading(path.clone()));
+        browser.preview_engine.preview_shown_path = Some(path.clone());
+        browser.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
 
         drop(browser.request_preview());
 
         assert_eq!(
-            browser.preview_load_surface,
+            browser.preview_engine.preview_load_surface,
             PreviewLoadSurface::StandaloneWindow
         );
-        assert!(browser.preview_window.is_some());
-        assert_eq!(browser.preview_shown_path, Some(path));
+        assert!(browser.preview_engine.preview_window.is_some());
+        assert_eq!(browser.preview_engine.preview_shown_path, Some(path));
     }
 }

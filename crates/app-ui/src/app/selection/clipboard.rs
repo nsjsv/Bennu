@@ -87,7 +87,7 @@ impl FileBrowser {
         if sources.is_empty() {
             return Task::none();
         }
-        self.clear_preview();
+        self.preview_engine.clear_preview();
         self.renaming = None;
         self.drag_selection_anchor = None;
         self.cancel_file_drag_interaction();
@@ -260,7 +260,7 @@ impl FileBrowser {
         if self.is_trash_view {
             return Task::none();
         }
-        self.clear_preview();
+        self.preview_engine.clear_preview();
         self.renaming = None;
         self.drag_selection_anchor = None;
         self.cancel_file_drag_interaction();
@@ -272,7 +272,7 @@ impl FileBrowser {
         if self.is_trash_view {
             return Task::none();
         }
-        self.clear_preview();
+        self.preview_engine.clear_preview();
         self.renaming = None;
         self.drag_selection_anchor = None;
         self.cancel_file_drag_interaction();

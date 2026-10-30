@@ -495,7 +495,7 @@ impl FileBrowser {
     fn show_unpreviewable_file_preview(&mut self) -> Task<Message> {
         let window_command =
             self.preview_window_presentation_command(PreviewWindowProfile::Regular);
-        self.clear_preview();
+        self.preview_engine.clear_preview();
         self.preview_engine.preview = Some(PreviewState::Error(bennu_localization::tr!(
             "No preview available for this file type."
         )));
@@ -527,7 +527,7 @@ impl FileBrowser {
         // Symlink/Other 的错误仍由 load_preview 边界返回。
         let window_command =
             self.preview_window_presentation_command(PreviewWindowProfile::Regular);
-        self.clear_preview();
+        self.preview_engine.clear_preview();
         self.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
         self.retract_global_error(GlobalErrorSource::Preview);
         let max_file_bytes = self.preview_file_size_limit_for(&path);
@@ -555,7 +555,7 @@ impl FileBrowser {
                 self.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
                 self.retract_global_error(GlobalErrorSource::Preview);
                 let max_file_bytes = self.preview_file_size_limit_for(&path);
-                let generation = self.next_animated_image_preview_generation();
+                let generation = self.preview_engine.next_animated_image_preview_generation();
                 Task::batch([
                     animated_image_preview_command(path, generation, max_file_bytes),
                     self.request_browser_session_save(),
@@ -564,7 +564,7 @@ impl FileBrowser {
             crate::preview::PreviewPathKind::Image => {
                 self.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
                 self.retract_global_error(GlobalErrorSource::Preview);
-                let generation = self.next_original_image_preview_generation();
+                let generation = self.preview_engine.next_original_image_preview_generation();
                 Task::batch([
                     image_preview_dimensions_command(path, generation),
                     self.request_browser_session_save(),
@@ -585,7 +585,7 @@ impl FileBrowser {
             crate::preview::PreviewPathKind::Audio => {
                 let window_command =
                     self.preview_window_presentation_command(PreviewWindowProfile::Audio);
-                self.clear_preview();
+                self.preview_engine.clear_preview();
                 self.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
                 self.retract_global_error(GlobalErrorSource::Preview);
                 self.preview_engine.audio_preview =
@@ -609,7 +609,7 @@ impl FileBrowser {
             | crate::preview::PreviewPathKind::Text => {
                 let window_command =
                     self.preview_window_presentation_command(PreviewWindowProfile::Regular);
-                self.clear_preview();
+                self.preview_engine.clear_preview();
                 self.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
                 self.retract_global_error(GlobalErrorSource::Preview);
                 let max_file_bytes = self.preview_file_size_limit_for(&path);
@@ -638,7 +638,7 @@ impl FileBrowser {
 
         let window_command =
             self.preview_window_presentation_command(PreviewWindowProfile::Regular);
-        self.clear_preview();
+        self.preview_engine.clear_preview();
         self.preview_engine.preview = Some(PreviewState::Error(
             bennu_preview::preview_loading::file_too_large_to_preview(file_bytes, max_bytes),
         ));

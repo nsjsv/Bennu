@@ -149,7 +149,7 @@ impl FileBrowser {
         } else {
             Vec::new()
         };
-        self.clear_preview();
+        self.preview_engine.clear_preview();
         self.renaming = None;
         self.cancel_file_drag_interaction();
         self.enqueue_file_operation(QueuedFileOperation::CreateDirectories {

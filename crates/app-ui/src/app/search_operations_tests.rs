@@ -92,7 +92,7 @@ fn search_shortcut_context_blocks_hidden_pane_actions_and_routes_supported_comma
     }
     assert!(browser.renaming.is_none());
     assert!(browser.properties_window.is_none());
-    assert!(browser.preview_window.is_none());
+    assert!(browser.preview_engine.preview_window.is_none());
     assert_eq!(browser.current_dir, current_dir);
 
     drop(browser.invoke_shortcut(ShortcutAction::Copy));

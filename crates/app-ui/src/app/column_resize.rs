@@ -29,7 +29,7 @@ impl FileBrowser {
         });
         self.drag_selection_anchor = None;
         self.selection_marquee = None;
-        self.clear_preview();
+        self.preview_engine.clear_preview();
         self.context_menu = None;
         Task::none()
     }

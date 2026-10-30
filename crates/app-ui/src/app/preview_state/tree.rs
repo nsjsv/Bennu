@@ -1,7 +1,6 @@
 //! 预览树交互已迁 bennu-preview 的 PreviewEngine（engine/tree.rs，impl
 //! 块与纯函数逐字节保真）；此处保留同名薄转发并注入宿主扫描选项
-//! （目录会话状态非预览域所有）。preview_tree_animation_is_active 经
-//! FileBrowser 的 Deref 垫片直接命中引擎同名方法。
+//! （目录会话状态非预览域所有）。
 
 use std::path::PathBuf;
 

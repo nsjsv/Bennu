@@ -101,7 +101,7 @@ impl FileBrowser {
             return rename_command;
         };
 
-        self.clear_preview();
+        self.preview_engine.clear_preview();
         self.operation_queue.close_panel();
         self.cancel_file_drag_interaction();
         self.selection_marquee = None;

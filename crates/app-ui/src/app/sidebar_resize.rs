@@ -25,7 +25,7 @@ impl FileBrowser {
         self.cancel_file_drag_interaction();
         self.sidebar_bookmark_drag = None;
         self.sidebar_bookmark_drop_slot = None;
-        self.clear_preview();
+        self.preview_engine.clear_preview();
         self.context_menu = None;
         Task::none()
     }

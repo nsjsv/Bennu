@@ -10,7 +10,7 @@ use iced::Task;
 
 use super::FileBrowser;
 use crate::model::Message;
-use crate::operation_queue::QueuedFileOperation;
+use file_operations::QueuedFileOperation;
 
 pub(crate) const IMAGE_TARGET_FORMATS: [ImageTargetFormat; 9] = [
     ImageTargetFormat::Jpeg,

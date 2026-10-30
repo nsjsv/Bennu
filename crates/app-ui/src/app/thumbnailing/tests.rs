@@ -16,7 +16,7 @@ use crate::model::{
     TransferConflictState,
 };
 use crate::network_connections::NetworkConnectionState;
-use crate::operation_queue::QueuedTransfer;
+use file_operations::QueuedTransfer;
 
 #[test]
 fn missing_viewport_schedules_list_thumbnails_for_full_window_height() {

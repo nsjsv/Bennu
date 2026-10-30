@@ -9,7 +9,7 @@ use super::FileBrowser;
 use crate::model::{
     AdvancedNewFolderMessage, AdvancedNewFolderState, Message, NestedParentListing,
 };
-use crate::operation_queue::QueuedFileOperation;
+use file_operations::QueuedFileOperation;
 
 impl FileBrowser {
     pub(super) fn handle_advanced_new_folder_message(

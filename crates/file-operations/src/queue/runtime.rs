@@ -5,19 +5,19 @@ use bennu_state::StoredProgress;
 use super::*;
 
 #[derive(Debug, Clone)]
-pub(crate) enum PersistedShutdownFileOperation {
+pub enum PersistedShutdownFileOperation {
     Recoverable(StoredInterruptedRecoverableTask),
     Transient(u64),
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct FileOperationPersistenceAcceptance {
-    pub(crate) error: Option<String>,
-    pub(crate) task_id_remap: Option<(u64, u64)>,
-    pub(crate) rejected_task_id: Option<u64>,
-    pub(crate) canceled_before_start_task_id: Option<u64>,
-    pub(crate) persisted_recoverable_terminal_stored_id: Option<u64>,
-    pub(crate) persisted_shutdown_operation: Option<PersistedShutdownFileOperation>,
+pub struct FileOperationPersistenceAcceptance {
+    pub error: Option<String>,
+    pub task_id_remap: Option<(u64, u64)>,
+    pub rejected_task_id: Option<u64>,
+    pub canceled_before_start_task_id: Option<u64>,
+    pub persisted_recoverable_terminal_stored_id: Option<u64>,
+    pub persisted_shutdown_operation: Option<PersistedShutdownFileOperation>,
 }
 
 impl FileOperationQueue {
@@ -186,9 +186,7 @@ impl FileOperationQueue {
             .push_back(FileOperationPersistenceRequest { request_id, action });
     }
 
-    pub(crate) fn take_next_persistence_request(
-        &mut self,
-    ) -> Option<FileOperationPersistenceRequest> {
+    pub fn take_next_persistence_request(&mut self) -> Option<FileOperationPersistenceRequest> {
         if self.persistence_in_flight.is_some() {
             return None;
         }
@@ -197,11 +195,11 @@ impl FileOperationQueue {
         Some(request)
     }
 
-    pub(crate) fn persistence_is_idle(&self) -> bool {
+    pub fn persistence_is_idle(&self) -> bool {
         self.persistence_in_flight.is_none() && self.persistence_requests.is_empty()
     }
 
-    pub(crate) fn accept_persistence_outcome(
+    pub fn accept_persistence_outcome(
         &mut self,
         persistence_outcome: FileOperationPersistenceOutcome,
     ) -> FileOperationPersistenceAcceptance {

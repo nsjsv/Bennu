@@ -21,7 +21,7 @@ use crate::model::{
     FileDropSessionIdentity, Message, TabDropDestination, TabFileDropTarget,
     TabFileDropTargetBounds, TransferConflictMode,
 };
-use crate::operation_queue::{QueuedFileOperation, QueuedTransfer};
+use file_operations::{QueuedFileOperation, QueuedTransfer};
 
 fn rectangle(x: f32, y: f32, width: f32, height: f32) -> Rectangle {
     Rectangle::new(Point::new(x, y), Size::new(width, height))

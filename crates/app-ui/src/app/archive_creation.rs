@@ -12,7 +12,7 @@ use super::archive_password::ArchivePasswordDraft;
 use super::FileBrowser;
 use crate::commands::check_archive_target_command;
 use crate::model::Message;
-use crate::operation_queue::QueuedFileOperation;
+use file_operations::QueuedFileOperation;
 
 pub(crate) const ARCHIVE_FORMATS: [ArchiveFormat; 3] = [
     ArchiveFormat::Zip,

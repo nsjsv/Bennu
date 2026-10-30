@@ -16,7 +16,7 @@ use crate::model::{
     BrowserViewMode, ContextMenuState, DestructiveActionConfirmation, FileDropPrompt, Message,
     PendingOperation, TransferConflictMode,
 };
-use crate::operation_queue::{new_directory_name, QueuedFileOperation, QueuedTransfer};
+use file_operations::{new_directory_name, QueuedFileOperation, QueuedTransfer};
 
 impl FileBrowser {
     pub(in crate::app) fn copy_selected(&mut self) -> Task<Message> {

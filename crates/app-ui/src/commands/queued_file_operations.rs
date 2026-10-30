@@ -22,10 +22,10 @@ use iced::futures::channel::mpsc::Sender as IcedSender;
 use iced::futures::SinkExt;
 
 use crate::model::Message;
-use crate::operation_queue::{
+use file_operations::FileOperationProgressUpdate;
+use file_operations::{
     new_directory_name, new_file_name, QueuedFileOperation, QueuedTransfer, RunningFileOperation,
 };
-use file_operations::FileOperationProgressUpdate;
 use file_operations::{
     CompletedTransfer, FileOperationCompletion, FileOperationHistoryEligibility,
     FileOperationOutcome, RenameRejection,
@@ -500,7 +500,7 @@ async fn run_queued_create_empty_file(
 }
 
 async fn run_queued_create_symbolic_links(
-    links: Vec<crate::operation_queue::SymbolicLinkCreation>,
+    links: Vec<file_operations::SymbolicLinkCreation>,
     mut controls: FileOperationControls,
     task_id: u64,
     output: &mut IcedSender<Message>,

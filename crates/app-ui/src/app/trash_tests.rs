@@ -248,7 +248,7 @@ fn trash_watch_event_during_batch_operation_defers_rescan_until_it_finishes() {
         .next()
         .expect("home trash watch root");
 
-    drop(browser.enqueue_file_operation(crate::operation_queue::QueuedFileOperation::EmptyTrash));
+    drop(browser.enqueue_file_operation(file_operations::QueuedFileOperation::EmptyTrash));
 
     // 批量任务运行中:watcher 事件只记脏,不发起重扫。
     drop(browser.reload_observed_directory(observed_changes(&watch_root.join("info"))));

@@ -288,7 +288,7 @@ mod tests {
     use super::*;
     use crate::config;
     use crate::model::trash_location_path;
-    use crate::operation_queue::QueuedFileOperation;
+    use file_operations::QueuedFileOperation;
 
     fn test_entry(path: &Path) -> DirectoryEntry {
         DirectoryEntry::new(

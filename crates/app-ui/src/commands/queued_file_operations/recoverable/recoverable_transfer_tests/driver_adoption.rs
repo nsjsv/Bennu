@@ -1,5 +1,5 @@
 use super::*;
-use crate::operation_queue::FileOperationStatus;
+use file_operations::FileOperationStatus;
 
 /// 监督认领的不变量:其他实例死亡后遗留的非终态任务(runner 租约空闲),
 /// 由幸存实例的监督 tick 认领,并从 journal 断点(直移 rename 已发生、
@@ -90,7 +90,7 @@ async fn supervision_adopts_a_foreign_nonterminal_task_with_a_free_lease() {
     // 终态由 UI 的 Finished 处理落账(queue.finish);认领任务以存储 id 结账。
     assert_eq!(
         survivor.finish(stored_task_id, FileOperationFinish::Succeeded,),
-        Some(crate::operation_queue::FileOperationTerminalStatus::Completed)
+        Some(file_operations::FileOperationTerminalStatus::Completed)
     );
     assert_persisted(&mut survivor);
     assert!(store

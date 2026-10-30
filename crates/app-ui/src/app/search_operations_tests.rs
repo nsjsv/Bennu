@@ -9,8 +9,8 @@ use crate::model::{
     BrowserViewMode, ContextMenuState, DestructiveActionConfirmation, IndexedSearchOutcome,
     NavigationMode, PendingOperation,
 };
-use crate::operation_queue::QueuedFileOperation;
 use crate::shortcuts::ShortcutAction;
+use file_operations::QueuedFileOperation;
 
 fn search_hit(path: PathBuf) -> SearchHit {
     SearchHit {

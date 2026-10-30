@@ -1095,10 +1095,8 @@ mod recoverable_transfer_tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::operation_queue::test_persistence::{assert_persisted, attach_store};
-    use crate::operation_queue::{
-        FileOperationEnqueueOutcome, FileOperationFinish, FileOperationQueue,
-    };
+    use file_operations::test_persistence::{assert_persisted, attach_store};
+    use file_operations::{FileOperationEnqueueOutcome, FileOperationFinish, FileOperationQueue};
     use iced::futures::StreamExt;
 
     use file_core::{
@@ -1352,7 +1350,7 @@ mod recoverable_transfer_tests {
 
         assert_eq!(
             queue.finish(task_id, FileOperationFinish::RecoveryBlocked(error)),
-            Some(crate::operation_queue::FileOperationTerminalStatus::Failed)
+            Some(file_operations::FileOperationTerminalStatus::Failed)
         );
         assert_persisted(&mut queue);
         assert_eq!(
@@ -2073,7 +2071,7 @@ mod recoverable_transfer_tests {
 
         assert_eq!(
             queue.finish(task_id, FileOperationFinish::Succeeded),
-            Some(crate::operation_queue::FileOperationTerminalStatus::Completed)
+            Some(file_operations::FileOperationTerminalStatus::Completed)
         );
         assert_persisted(&mut queue);
         assert!(store
@@ -2173,7 +2171,7 @@ mod recoverable_transfer_tests {
         assert!(tokio::fs::symlink_metadata(&second_source).await.is_err());
         assert_eq!(
             restored_queue.finish(stored_task_id, FileOperationFinish::Succeeded),
-            Some(crate::operation_queue::FileOperationTerminalStatus::Completed)
+            Some(file_operations::FileOperationTerminalStatus::Completed)
         );
         assert_persisted(&mut restored_queue);
         assert!(store
@@ -2275,7 +2273,7 @@ mod recoverable_transfer_tests {
         );
         assert_eq!(
             restored_queue.finish(stored_task_id, FileOperationFinish::Succeeded),
-            Some(crate::operation_queue::FileOperationTerminalStatus::Completed)
+            Some(file_operations::FileOperationTerminalStatus::Completed)
         );
         assert_persisted(&mut restored_queue);
         assert_eq!(

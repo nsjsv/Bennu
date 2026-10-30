@@ -7,7 +7,7 @@ use file_core::{
 };
 use file_operations::{CompletedTransfer, FileOperationHistoryEligibility, FileOperationOutcome};
 
-use crate::operation_queue::{QueuedFileOperation, QueuedTransfer};
+use file_operations::{QueuedFileOperation, QueuedTransfer};
 
 #[derive(Debug, Clone)]
 pub(crate) struct PendingHistoryOperation {

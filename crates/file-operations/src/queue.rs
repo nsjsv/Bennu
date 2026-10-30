@@ -7,6 +7,7 @@ use bennu_state::{
     RecoverableTaskRunnerLease, StateDatabase, StoredInterruptedRecoverableTask, StoredOperation,
     StoredTask, StoredTaskStatus, TaskQueueStore,
 };
+use file_core::log_detail::sanitized_application_log_detail;
 use file_core::{
     ArchiveCompressionLevel, ArchiveExtractionRequest, ArchiveFormat, ArchivePassword,
     BatchRenameItem, ConversionRequest, EntryNameKind, FileOperationControls,
@@ -15,8 +16,7 @@ use file_core::{
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
-use crate::model::sanitized_application_log_detail;
-use file_operations::{
+use crate::progress::{
     FileOperationProgress, FileOperationProgressUpdate, TransferEntrySnapshot,
     TransferEntrySnapshotState,
 };
@@ -24,21 +24,19 @@ use file_operations::{
 mod persistence;
 use persistence::{queued_operation_from_stored, queued_operation_to_stored};
 mod persistence_worker;
-#[cfg(test)]
-pub(crate) use persistence_worker::execute_file_operation_persistence;
-pub(crate) use persistence_worker::{
-    file_operation_persistence_command, FileOperationPersistenceAction,
-    FileOperationPersistenceCompletion, FileOperationPersistenceOutcome,
-    FileOperationPersistenceRequest, PersistedFileOperation, PersistenceEffect,
-    TaskStatePersistence,
+pub use persistence_worker::{
+    execute_file_operation_persistence, run_file_operation_persistence,
+    FileOperationPersistenceAction, FileOperationPersistenceCompletion,
+    FileOperationPersistenceOutcome, FileOperationPersistenceRequest, PersistedFileOperation,
+    PersistenceEffect, TaskStatePersistence,
 };
 
 /// 新建、收纳时的首选名，跟界面语言（同 GNOME、KDE）；被占用时 file-core 续编号。
-pub(crate) fn new_directory_name() -> String {
+pub fn new_directory_name() -> String {
     tr!("New Folder")
 }
 
-pub(crate) fn new_file_name() -> String {
+pub fn new_file_name() -> String {
     tr!("New File")
 }
 
@@ -56,7 +54,7 @@ fn record_file_operation_failure(task_id: u64, operation: &str, log_error: &str)
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum QueuedFileOperation {
+pub enum QueuedFileOperation {
     Rename {
         path: PathBuf,
         new_name: OsString,
@@ -143,23 +141,23 @@ pub(crate) enum QueuedFileOperation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SymbolicLinkCreation {
+pub struct SymbolicLinkCreation {
     /// 首选链接路径；被占用时执行端按"名字 2"续编号，按 `name_kind` 决定是否拆扩展名。
-    pub(crate) link_path: PathBuf,
-    pub(crate) name_kind: EntryNameKind,
+    pub link_path: PathBuf,
+    pub name_kind: EntryNameKind,
     /// 符号链接目标一律存绝对路径。
-    pub(crate) target_path: PathBuf,
+    pub target_path: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct QueuedTransfer {
-    pub(crate) source: PathBuf,
-    pub(crate) target: PathBuf,
-    pub(crate) conflict_strategy: TransferConflictStrategy,
+pub struct QueuedTransfer {
+    pub source: PathBuf,
+    pub target: PathBuf,
+    pub conflict_strategy: TransferConflictStrategy,
 }
 
 impl QueuedTransfer {
-    pub(crate) fn new(source: PathBuf, target: PathBuf) -> Self {
+    pub fn new(source: PathBuf, target: PathBuf) -> Self {
         Self {
             source,
             target,
@@ -171,7 +169,7 @@ impl QueuedTransfer {
 impl QueuedFileOperation {
     /// 会改动回收站内容的批量操作。运行期间 UI 挂起 watcher 触发的回收站
     /// 重扫,任务终结后统一补刷一次。
-    pub(crate) fn changes_trash(&self) -> bool {
+    pub fn changes_trash(&self) -> bool {
         matches!(
             self,
             Self::Trash { .. }
@@ -181,11 +179,11 @@ impl QueuedFileOperation {
         )
     }
 
-    pub(crate) fn title(&self) -> String {
+    pub fn title(&self) -> String {
         self.title_in(bennu_localization::current_language())
     }
 
-    pub(crate) fn title_in(&self, language: crate::config::UiLanguage) -> String {
+    pub fn title_in(&self, language: bennu_localization::UiLanguage) -> String {
         match self {
             Self::Rename { .. } => tr_in!(language, "Rename"),
             Self::BatchRename { .. } => tr_in!(language, "Batch Rename"),
@@ -212,7 +210,7 @@ impl QueuedFileOperation {
         }
     }
 
-    pub(crate) fn created_path(&self) -> Option<PathBuf> {
+    pub fn created_path(&self) -> Option<PathBuf> {
         match self {
             Self::CreateDirectory { parent } => Some(parent.join(new_directory_name())),
             // 预览里第一个目录就是后续移入/重命名态的落点。
@@ -228,11 +226,11 @@ impl QueuedFileOperation {
 
     /// 「复制副本」完成后整批选中新副本;其余操作无此语义。副本名可能被复制
     /// 引擎续编号,选中按完成结果里的实际目标,不按这里的首选目标。
-    pub(crate) fn selects_completed_copies(&self) -> bool {
+    pub fn selects_completed_copies(&self) -> bool {
         matches!(self, Self::Duplicate { .. })
     }
 
-    pub(crate) fn supports_pause(&self) -> bool {
+    pub fn supports_pause(&self) -> bool {
         !matches!(
             self,
             Self::CreateArchive { .. } | Self::ExtractArchive { .. } | Self::Convert { .. }
@@ -256,7 +254,7 @@ impl QueuedFileOperation {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FileOperationStatus {
+pub enum FileOperationStatus {
     Pending,
     Running,
     Paused,
@@ -267,7 +265,7 @@ pub(crate) enum FileOperationStatus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FileOperationExecutionPhase {
+pub enum FileOperationExecutionPhase {
     Preparing,
     Executing,
 }
@@ -280,14 +278,14 @@ enum PostInsertDisposition {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FileOperationTerminalStatus {
+pub enum FileOperationTerminalStatus {
     Completed,
     Failed,
     Canceled,
 }
 
 impl FileOperationStatus {
-    pub(crate) fn label(self) -> String {
+    pub fn label(self) -> String {
         match self {
             Self::Pending => tr!("Pending"),
             Self::Running => tr!("Running"),
@@ -299,7 +297,7 @@ impl FileOperationStatus {
         }
     }
 
-    pub(crate) fn is_terminal(self) -> bool {
+    pub fn is_terminal(self) -> bool {
         matches!(self, Self::Failed | Self::Completed | Self::Canceled)
     }
 
@@ -316,7 +314,7 @@ impl FileOperationStatus {
     }
 }
 
-pub(crate) enum FileOperationFinish {
+pub enum FileOperationFinish {
     Succeeded,
     SucceededWithWarning(String),
     Canceled,
@@ -326,44 +324,44 @@ pub(crate) enum FileOperationFinish {
 }
 
 /// 入队只决定任务能否开始;写库结果经 `accept_persistence_outcome` 的回执返回。
-pub(crate) enum FileOperationEnqueueOutcome {
+pub enum FileOperationEnqueueOutcome {
     Queued { task_id: u64 },
     Rejected { error: String },
 }
 
-pub(crate) struct FileOperationTask {
-    pub(crate) id: u64,
-    pub(crate) operation: QueuedFileOperation,
-    pub(crate) status: FileOperationStatus,
-    pub(crate) progress: FileOperationProgress,
+pub struct FileOperationTask {
+    pub id: u64,
+    pub operation: QueuedFileOperation,
+    pub status: FileOperationStatus,
+    pub progress: FileOperationProgress,
     /// 传入条目的逐条目快照(占位行单一事实源)。入队即初始化:
     /// Copy/Duplicate 全量 Queued(占位立即出现),Move 置空——同盘移动
     /// 走瞬时 rename 全程无字节进度,跨盘 move 从首条复制进度起出现。
-    pub(crate) transfer_progress: Vec<TransferEntrySnapshot>,
+    pub transfer_progress: Vec<TransferEntrySnapshot>,
     /// 任务入队时刻;占位行在 Modified 排序下的缺省键(≈最新)。
-    pub(crate) enqueued_at: std::time::SystemTime,
-    pub(crate) completion_warning: Option<String>,
-    pub(crate) error: Option<String>,
+    pub enqueued_at: std::time::SystemTime,
+    pub completion_warning: Option<String>,
+    pub error: Option<String>,
     is_read: bool,
     cancel: CancellationToken,
     _runner_lease: Option<Arc<RecoverableTaskRunnerLease>>,
     run_state_sender: watch::Sender<FileOperationRunState>,
     run_state_receiver: watch::Receiver<FileOperationRunState>,
-    pub(crate) stored_id: Option<u64>,
+    pub stored_id: Option<u64>,
     execution_phase: Option<FileOperationExecutionPhase>,
     post_insert_disposition: PostInsertDisposition,
     terminal_persistence_pending: bool,
     accepted_direct_move_revisions: HashMap<file_core::TransferWorkKey, u64>,
     /// 当前驱动者代数;监督换代时递增,旧代驱动者的迟到终态凭此被拒。
-    pub(crate) driver_generation: u64,
+    pub driver_generation: u64,
     /// 是否已签发驱动者(Task::stream)。监督换代时清零等待重新签发。
-    pub(crate) driver_running: bool,
+    pub driver_running: bool,
     /// 最近一次该任务驱动者的生命信号(任意进度/终态消息)。
-    pub(crate) last_driver_signal: Option<std::time::Instant>,
+    pub last_driver_signal: Option<std::time::Instant>,
 }
 
 impl FileOperationTask {
-    pub(crate) fn status_label(&self) -> String {
+    pub fn status_label(&self) -> String {
         if self.status == FileOperationStatus::Running
             && self.execution_phase == Some(FileOperationExecutionPhase::Preparing)
         {
@@ -384,24 +382,24 @@ impl FileOperationTask {
     }
 }
 
-pub(crate) struct RunningFileOperation {
-    pub(crate) id: u64,
-    pub(crate) stored_id: Option<u64>,
-    pub(crate) operation: QueuedFileOperation,
-    pub(crate) controls: FileOperationControls,
-    pub(crate) store: Option<TaskQueueStore>,
-    pub(crate) generation: u64,
+pub struct RunningFileOperation {
+    pub id: u64,
+    pub stored_id: Option<u64>,
+    pub operation: QueuedFileOperation,
+    pub controls: FileOperationControls,
+    pub store: Option<TaskQueueStore>,
+    pub generation: u64,
 }
 
-pub(crate) struct FileOperationShutdownDisposition {
-    pub(crate) waiting_for_operation_ids: BTreeSet<u64>,
-    pub(crate) interrupted_recoverable_tasks: Vec<StoredInterruptedRecoverableTask>,
-    pub(crate) transient_task_ids: Vec<u64>,
-    pub(crate) stopping_signal_count: usize,
-    pub(crate) journal_read_count: usize,
+pub struct FileOperationShutdownDisposition {
+    pub waiting_for_operation_ids: BTreeSet<u64>,
+    pub interrupted_recoverable_tasks: Vec<StoredInterruptedRecoverableTask>,
+    pub transient_task_ids: Vec<u64>,
+    pub stopping_signal_count: usize,
+    pub journal_read_count: usize,
 }
 
-pub(crate) struct FileOperationQueue {
+pub struct FileOperationQueue {
     tasks: Vec<FileOperationTask>,
     next_local_id: u64,
     next_persistence_request_id: u64,
@@ -414,8 +412,14 @@ pub(crate) struct FileOperationQueue {
     next_store_scan: Option<std::time::Instant>,
 }
 
+impl Default for FileOperationQueue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FileOperationQueue {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             tasks: Vec::new(),
             next_local_id: LOCAL_TASK_ID_START,
@@ -429,7 +433,7 @@ impl FileOperationQueue {
         }
     }
 
-    pub(crate) fn set_store_and_restore(&mut self, store: TaskQueueStore) -> Option<String> {
+    pub fn set_store_and_restore(&mut self, store: TaskQueueStore) -> Option<String> {
         let restore_coordinator = match store.try_acquire_recoverable_restore_coordinator() {
             Ok(Some(restore_coordinator)) => restore_coordinator,
             Ok(None) => {
@@ -462,54 +466,51 @@ impl FileOperationQueue {
     }
 
     /// 进程的状态库句柄：设置、浏览会话与关机提交各自从它派生存储，不再各开一份连接。
-    pub(crate) fn state_database(&self) -> Option<StateDatabase> {
+    pub fn state_database(&self) -> Option<StateDatabase> {
         self.store.as_ref().map(|store| store.database().clone())
     }
 
-    pub(crate) fn tasks(&self) -> &[FileOperationTask] {
+    pub fn tasks(&self) -> &[FileOperationTask] {
         &self.tasks
     }
 
     /// 是否存在仍在运行(未到终态)的回收站变更类批量任务。
-    pub(crate) fn has_running_trash_change_operation(&self) -> bool {
+    pub fn has_running_trash_change_operation(&self) -> bool {
         self.tasks
             .iter()
             .any(|task| task.is_running() && task.operation.changes_trash())
     }
 
-    pub(crate) fn is_panel_open(&self) -> bool {
+    pub fn is_panel_open(&self) -> bool {
         self.is_panel_open
     }
 
-    pub(crate) fn open_panel(&mut self) {
+    pub fn open_panel(&mut self) {
         self.is_panel_open = true;
         self.mark_all_read();
     }
 
-    pub(crate) fn close_panel(&mut self) {
+    pub fn close_panel(&mut self) {
         self.is_panel_open = false;
     }
 
-    pub(crate) fn unread_count(&self) -> usize {
+    pub fn unread_count(&self) -> usize {
         self.tasks.iter().filter(|task| !task.is_read).count()
     }
 
-    pub(crate) fn has_unread_warning_task(&self) -> bool {
+    pub fn has_unread_warning_task(&self) -> bool {
         self.tasks
             .iter()
             .any(|task| !task.is_read && task.completion_warning.is_some())
     }
 
-    pub(crate) fn has_unread_failed_task(&self) -> bool {
+    pub fn has_unread_failed_task(&self) -> bool {
         self.tasks
             .iter()
             .any(|task| !task.is_read && task.status == FileOperationStatus::Failed)
     }
 
-    pub(crate) fn enqueue(
-        &mut self,
-        operation: QueuedFileOperation,
-    ) -> FileOperationEnqueueOutcome {
+    pub fn enqueue(&mut self, operation: QueuedFileOperation) -> FileOperationEnqueueOutcome {
         let requires_recovery_journal = operation.uses_recovery_journal();
         if self.store.is_none() && requires_recovery_journal {
             return FileOperationEnqueueOutcome::Rejected {
@@ -560,7 +561,7 @@ impl FileOperationQueue {
         FileOperationEnqueueOutcome::Queued { task_id: id }
     }
 
-    pub(crate) fn active_subscription(&self) -> Option<RunningFileOperation> {
+    pub fn active_subscription(&self) -> Option<RunningFileOperation> {
         self.tasks
             .iter()
             .find(|task| {
@@ -584,7 +585,7 @@ impl FileOperationQueue {
             })
     }
 
-    pub(crate) fn accept_durable_direct_move_commit(
+    pub fn accept_durable_direct_move_commit(
         &mut self,
         id: u64,
         work_key: &file_core::TransferWorkKey,
@@ -628,18 +629,18 @@ impl FileOperationQueue {
         true
     }
 
-    pub(crate) fn operation(&self, id: u64) -> Option<&QueuedFileOperation> {
+    pub fn operation(&self, id: u64) -> Option<&QueuedFileOperation> {
         self.tasks
             .iter()
             .find(|task| task.id == id)
             .map(|task| &task.operation)
     }
 
-    pub(crate) fn has_terminal_tasks(&self) -> bool {
+    pub fn has_terminal_tasks(&self) -> bool {
         self.tasks.iter().any(|task| task.status.is_terminal())
     }
 
-    pub(crate) fn clear_terminal_task(&mut self, id: u64) {
+    pub fn clear_terminal_task(&mut self, id: u64) {
         let task_ids = self
             .tasks
             .iter()
@@ -654,7 +655,7 @@ impl FileOperationQueue {
         self.clear_terminal_task_ids(&task_ids)
     }
 
-    pub(crate) fn clear_terminal_tasks(&mut self) {
+    pub fn clear_terminal_tasks(&mut self) {
         let task_ids = self
             .tasks
             .iter()
@@ -723,7 +724,7 @@ impl FileOperationQueue {
         });
     }
 
-    pub(crate) fn update_progress(
+    pub fn update_progress(
         &mut self,
         id: u64,
         update: FileOperationProgressUpdate,
@@ -746,7 +747,7 @@ impl FileOperationQueue {
         None
     }
 
-    pub(crate) fn finish(
+    pub fn finish(
         &mut self,
         id: u64,
         outcome: FileOperationFinish,
@@ -758,11 +759,7 @@ impl FileOperationQueue {
 
     /// 关机期间不再启动下一个任务;终态写库完成后由回执的
     /// `persisted_recoverable_terminal_stored_id` 推进关机流程。
-    pub(crate) fn finish_for_application_shutdown(
-        &mut self,
-        id: u64,
-        outcome: FileOperationFinish,
-    ) {
+    pub fn finish_for_application_shutdown(&mut self, id: u64, outcome: FileOperationFinish) {
         self.finish_without_advancing_queue(id, outcome);
     }
 
@@ -892,7 +889,7 @@ impl FileOperationQueue {
         Some(terminal_status)
     }
 
-    pub(crate) fn toggle_pause(&mut self, id: u64) {
+    pub fn toggle_pause(&mut self, id: u64) {
         let Some(position) = self.tasks.iter().position(|task| task.id == id) else {
             return;
         };
@@ -915,7 +912,7 @@ impl FileOperationQueue {
         }
     }
 
-    pub(crate) fn cancel(&mut self, id: u64) {
+    pub fn cancel(&mut self, id: u64) {
         let Some(position) = self.tasks.iter().position(|task| task.id == id) else {
             return;
         };
@@ -960,7 +957,7 @@ impl FileOperationQueue {
         self.start_next();
     }
 
-    pub(crate) fn begin_application_shutdown(&mut self) -> FileOperationShutdownDisposition {
+    pub fn begin_application_shutdown(&mut self) -> FileOperationShutdownDisposition {
         let mut waiting_for_operation_ids = BTreeSet::new();
         let mut interrupted_recoverable_tasks = Vec::new();
         let mut transient_task_ids = Vec::new();
@@ -1042,29 +1039,29 @@ impl FileOperationQueue {
         }
     }
 
-    pub(crate) fn release_application_shutdown_ownership(&mut self) {
+    pub fn release_application_shutdown_ownership(&mut self) {
         self.tasks.clear();
         self.is_panel_open = false;
     }
 
-    pub(crate) fn operation_uses_recovery_journal(&self, id: u64) -> bool {
+    pub fn operation_uses_recovery_journal(&self, id: u64) -> bool {
         self.tasks
             .iter()
             .find(|task| task.id == id)
             .is_some_and(|task| task.operation.uses_recovery_journal())
     }
 
-    pub(crate) fn task_count(&self) -> usize {
+    pub fn task_count(&self) -> usize {
         self.tasks.len()
     }
 
-    pub(crate) fn is_active_paused(&self) -> bool {
+    pub fn is_active_paused(&self) -> bool {
         self.tasks
             .iter()
             .any(|task| task.status == FileOperationStatus::Paused)
     }
 
-    pub(crate) fn has_active_task(&self) -> bool {
+    pub fn has_active_task(&self) -> bool {
         self.tasks.iter().any(|task| {
             matches!(
                 task.status,
@@ -1075,7 +1072,7 @@ impl FileOperationQueue {
         })
     }
 
-    pub(crate) fn has_active_indeterminate_progress(&self) -> bool {
+    pub fn has_active_indeterminate_progress(&self) -> bool {
         self.tasks.iter().any(|task| {
             matches!(
                 task.status,
@@ -1084,7 +1081,7 @@ impl FileOperationQueue {
         })
     }
 
-    pub(crate) fn indicator_progress(&self) -> Option<f32> {
+    pub fn indicator_progress(&self) -> Option<f32> {
         self.tasks
             .iter()
             .find(|task| {
@@ -1100,9 +1097,9 @@ impl FileOperationQueue {
 }
 
 mod runtime;
-pub(crate) use runtime::PersistedShutdownFileOperation;
+pub use runtime::PersistedShutdownFileOperation;
 mod supervision;
-pub(crate) use supervision::SUPERVISION_INTERVAL;
+pub use supervision::SUPERVISION_INTERVAL;
 
 fn storage_error(error: impl std::fmt::Display) -> String {
     format!("File operation queue storage failed: {error}")
@@ -1157,7 +1154,8 @@ fn stored_status_is_terminal(status: StoredTaskStatus) -> bool {
 
 #[cfg(test)]
 mod progress_tests;
-#[cfg(test)]
-pub(crate) mod test_persistence;
+/// 按正式版顺序驱动持久化的测试辅助；app-ui 的测试经 `test-support` feature 使用。
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_persistence;
 #[cfg(test)]
 mod tests;

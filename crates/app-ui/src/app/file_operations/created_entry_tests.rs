@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use super::*;
 use crate::config;
-use crate::operation_queue::test_persistence::queued_task_id;
+use file_operations::test_persistence::queued_task_id;
 
 #[test]
 fn advanced_new_folder_renames_the_leaf_it_actually_created() {

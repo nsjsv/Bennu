@@ -7,8 +7,8 @@ use crate::model::{
     same_parent, BatchRenameMessage, BatchRenameSource, BatchRenameSourceNameError,
     BatchRenameState, Message,
 };
-use crate::operation_queue::QueuedFileOperation;
 use crate::view::batch_rename_preview_name_input_id;
+use file_operations::QueuedFileOperation;
 
 impl FileBrowser {
     pub(super) fn handle_batch_rename_message(

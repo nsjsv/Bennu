@@ -15,7 +15,7 @@ use crate::model::{
     FileDropPrompt, FileDropSessionIdentity, TabDropDestination, TabFileDropTarget,
     TabFileDropTargetBounds,
 };
-use crate::operation_queue::QueuedFileOperation;
+use file_operations::QueuedFileOperation;
 
 #[test]
 fn x11_multi_file_directory_drop_opens_one_existing_prompt() {

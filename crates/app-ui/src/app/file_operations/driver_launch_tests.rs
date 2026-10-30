@@ -6,9 +6,9 @@ use iced::futures::StreamExt;
 
 use super::*;
 use crate::config;
-use crate::operation_queue::test_persistence::attach_store;
-use crate::operation_queue::FileOperationStatus;
+use file_operations::test_persistence::attach_store;
 use file_operations::FileOperationOutcome;
+use file_operations::FileOperationStatus;
 
 fn create_directory() -> QueuedFileOperation {
     QueuedFileOperation::CreateDirectory {
@@ -76,7 +76,7 @@ async fn persistence_receipt_launches_the_recoverable_task_it_unblocks() {
     );
 
     let enqueue = browser.enqueue_file_operation(QueuedFileOperation::Copy {
-        transfers: vec![crate::operation_queue::QueuedTransfer::new(
+        transfers: vec![file_operations::QueuedTransfer::new(
             PathBuf::from("/workspace/source"),
             PathBuf::from("/workspace/target"),
         )],

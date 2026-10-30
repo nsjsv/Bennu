@@ -24,13 +24,13 @@ use crate::model::{
     AddressSuggestionRequest, LoadedOperationStore, Message, PendingOperation, SidebarLocation,
     StartupEnvironment, StartupSessionPlanRequest, TransferConflictMode,
 };
-use crate::operation_queue::QueuedTransfer;
 use crate::startup_rendering::{StartupRenderingEnvironment, StartupRenderingEnvironmentStatus};
 use crate::startup_trace;
 use crate::thumbnail_cache::{
     ThumbnailLoadOutcome, ThumbnailLoadPolicy, ThumbnailLoadResult, ThumbnailWork,
 };
 use bennu_sidebar::{home_sidebar_location, sidebar_locations};
+use file_operations::QueuedTransfer;
 
 mod archive_creation;
 pub(crate) use archive_creation::check_archive_target_command;
@@ -54,6 +54,8 @@ mod directory_loading;
 pub(crate) use directory_loading::{load_directory_command, load_expanded_directory_command};
 mod directory_metadata;
 pub(crate) use directory_metadata::load_directory_metadata_command;
+mod file_operation_persistence;
+pub(crate) use file_operation_persistence::file_operation_persistence_command;
 mod desktop_notifications;
 pub(crate) use desktop_notifications::publish_desktop_notification_command;
 mod list_directory_summary;

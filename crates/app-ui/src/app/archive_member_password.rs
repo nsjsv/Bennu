@@ -13,7 +13,7 @@ use super::archive_password::ArchivePasswordDraft;
 use super::global_error::GlobalErrorSource;
 use super::FileBrowser;
 use crate::model::Message;
-use crate::operation_queue::QueuedFileOperation;
+use file_operations::QueuedFileOperation;
 
 /// 弹窗绑定的重试动作:提交后带密码重走对应管线。提取动作重新入队,
 /// 打开动作带密码重新物化并打开——两种动作共用一套弹窗,不复制两套。

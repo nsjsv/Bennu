@@ -8,9 +8,9 @@ use super::FileBrowser;
 use crate::commands::commit_application_shutdown_command;
 use crate::config;
 use crate::model::{snapshot_to_stored, Message};
-use crate::operation_queue::PersistedShutdownFileOperation;
 use crate::startup_trace;
 use file_operations::FileOperationCompletion;
+use file_operations::PersistedShutdownFileOperation;
 
 enum ShutdownWindowFact {
     CloseRequired,

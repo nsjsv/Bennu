@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use file_core::TrashRestoreEntry;
 
 use crate::formatting::format_file_size;
-use crate::operation_queue::{
+use file_operations::{
     new_directory_name, new_file_name, FileOperationStatus, FileOperationTask, QueuedFileOperation,
     QueuedTransfer,
 };
@@ -16,8 +16,13 @@ pub(crate) struct FileOperationPathLines {
     pub(crate) total_items: usize,
 }
 
-impl QueuedFileOperation {
-    pub(crate) fn path_lines(&self) -> FileOperationPathLines {
+/// 队列操作类型属于 file-operations，展示用的路径摘要是界面的事，所以以扩展 trait 提供。
+pub(crate) trait OperationPathLines {
+    fn path_lines(&self) -> FileOperationPathLines;
+}
+
+impl OperationPathLines for QueuedFileOperation {
+    fn path_lines(&self) -> FileOperationPathLines {
         match self {
             Self::Rename { path, new_name } => FileOperationPathLines {
                 file_name: new_name.to_string_lossy().into_owned(),
@@ -276,8 +281,8 @@ fn path_parent_text(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::operation_queue::test_persistence::queued_task_id;
     use file_core::FileOperationVerification;
+    use file_operations::test_persistence::queued_task_id;
 
     #[test]
     fn transfer_path_lines_expose_name_original_and_directory() {
@@ -302,7 +307,7 @@ mod tests {
         let long_parent = PathBuf::from(
             "/workspace/destination/another-very-long-directory-name-that-must-remain-complete",
         );
-        let mut queue = crate::operation_queue::FileOperationQueue::new();
+        let mut queue = file_operations::FileOperationQueue::new();
         let task_id = queued_task_id(queue.enqueue(QueuedFileOperation::CreateDirectory {
             parent: long_parent.clone(),
         }));
@@ -312,9 +317,9 @@ mod tests {
         assert_eq!(
             queue.finish(
                 task_id,
-                crate::operation_queue::FileOperationFinish::Failed(full_error.clone()),
+                file_operations::FileOperationFinish::Failed(full_error.clone()),
             ),
-            Some(crate::operation_queue::FileOperationTerminalStatus::Failed)
+            Some(file_operations::FileOperationTerminalStatus::Failed)
         );
 
         let copied = file_operation_copy_text(&queue.tasks()[0]);

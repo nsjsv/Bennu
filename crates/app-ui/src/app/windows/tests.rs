@@ -14,14 +14,14 @@ use crate::model::{
     PreviewState, PreviewWindowProfile, SettingsCategory, SettingsSubpage, WindowChromeLayout,
     WindowFrameState, WINDOW_TOP_BAR_HEIGHT,
 };
-use crate::operation_queue::test_persistence::enqueue_persisted;
-use crate::operation_queue::{QueuedFileOperation, QueuedTransfer};
 use bennu_preview::animated_image_preview::{
     AnimatedImageFrame, AnimatedImagePlayback, AnimatedImagePreview,
 };
 use bennu_preview::engine::preview_window_settings;
 use bennu_preview::preview::PreviewWindowChromeState;
+use file_operations::test_persistence::enqueue_persisted;
 use file_operations::FileOperationCompletion;
+use file_operations::{QueuedFileOperation, QueuedTransfer};
 
 const FLOAT_TOLERANCE: f32 = 0.01;
 

@@ -53,7 +53,6 @@ mod model;
 mod network_connections;
 mod open_with;
 mod operation_history;
-mod operation_queue;
 mod operation_queue_display;
 mod operation_queue_view;
 mod runtime_logging;

@@ -11,7 +11,7 @@ use crate::model::{
     FileDragState, FileDragStationaryAction, FileDropTarget, Message, SelectionMarqueeSource,
     TabDropDestination, TransferConflictMode,
 };
-use crate::operation_queue::{QueuedFileOperation, QueuedTransfer};
+use file_operations::{QueuedFileOperation, QueuedTransfer};
 
 impl FileBrowser {
     pub(crate) fn update_file_drag(&mut self, position: iced::Point) -> Task<Message> {

@@ -11,9 +11,9 @@ use crate::model::{
     FileDragDropIntent, FileDragNativeDndState, FileDragStationaryAction, FileDropTarget,
     SidebarBookmarkDropSlot,
 };
-use crate::operation_queue::QueuedFileOperation;
 use crate::sidebar_devices::SidebarDeviceEntry;
 use desktop_linux::{StorageDeviceAccess, StorageDeviceId};
+use file_operations::QueuedFileOperation;
 
 /// 文件夹名只是填进句式的参数：叫 "Trash"、"Copy to x" 也不会被当成文案翻译。
 #[test]

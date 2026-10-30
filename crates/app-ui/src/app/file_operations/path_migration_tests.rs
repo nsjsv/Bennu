@@ -9,7 +9,7 @@ use crate::model::{
     BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, ExpandedDirectory,
     ExpandedDirectoryStatus, SplitAxis,
 };
-use crate::operation_queue::test_persistence::{attach_store, enqueue_persisted};
+use file_operations::test_persistence::{attach_store, enqueue_persisted};
 use file_operations::FileOperationOutcome;
 
 fn directory_entry(path: &str) -> DirectoryEntry {
@@ -91,7 +91,7 @@ fn cross_directory_move_invalidates_source_and_preserves_target_tab_tree() {
     let task_id = enqueue_persisted(
         &mut browser.operation_queue,
         QueuedFileOperation::Move {
-            transfers: vec![crate::operation_queue::QueuedTransfer::new(
+            transfers: vec![file_operations::QueuedTransfer::new(
                 source_path.clone(),
                 target_path.clone(),
             )],

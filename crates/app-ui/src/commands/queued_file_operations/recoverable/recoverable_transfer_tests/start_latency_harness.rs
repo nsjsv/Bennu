@@ -1,11 +1,11 @@
 use super::*;
 
 use crate::model::Message;
-use crate::operation_queue::{
+use bennu_state::TaskQueueStore;
+use file_operations::{
     execute_file_operation_persistence, FileOperationEnqueueOutcome, FileOperationQueue,
     QueuedFileOperation, QueuedTransfer,
 };
-use bennu_state::TaskQueueStore;
 use iced::futures::channel::mpsc;
 use iced::futures::StreamExt;
 use rusqlite::Connection;

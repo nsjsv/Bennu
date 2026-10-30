@@ -7,7 +7,7 @@ use super::archive_password::ArchivePasswordDraft;
 use super::FileBrowser;
 use crate::commands::inspect_archive_extraction_command;
 use crate::model::Message;
-use crate::operation_queue::QueuedFileOperation;
+use file_operations::QueuedFileOperation;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ArchiveExtractionInspection {

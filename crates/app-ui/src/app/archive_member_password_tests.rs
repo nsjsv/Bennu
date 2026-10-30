@@ -11,7 +11,7 @@ use super::archive_member_password::{
 use super::archive_password::ArchivePasswordDraft;
 use super::FileBrowser;
 use crate::model::Message;
-use crate::operation_queue::QueuedFileOperation;
+use file_operations::QueuedFileOperation;
 
 fn extract_action() -> ArchiveMemberPasswordAction {
     ArchiveMemberPasswordAction::Extract {

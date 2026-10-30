@@ -9,8 +9,8 @@ use crate::model::{
     ExpandedDirectoryLoadRequest, ExpandedDirectoryStatus, IconGridExpansionAnchor,
     IconGridExpansionContext, IconGridExpansionSessionId, IconGridExpansionState,
 };
-use crate::operation_queue::test_persistence::queued_task_id;
-use crate::operation_queue::QueuedFileOperation;
+use file_operations::test_persistence::queued_task_id;
+use file_operations::QueuedFileOperation;
 use file_operations::{FileOperationCompletion, FileOperationOutcome};
 
 fn loaded_directory() -> ExpandedDirectory {

@@ -160,7 +160,6 @@ use crate::model::{
 use crate::network_connections::{NetworkConnectionEditorState, NetworkConnectionState};
 use crate::open_with::OpenWithState;
 use crate::operation_history::FileOperationHistory;
-use crate::operation_queue::FileOperationQueue;
 use crate::shortcuts::ShortcutCaptureState;
 use crate::sidebar_devices::SidebarDeviceState;
 use crate::startup_rendering::StartupRenderingEnvironment;
@@ -170,6 +169,7 @@ use crate::view::{
     auxiliary_window_content, floating_preview_window_content, view_browser,
     view_properties_window, view_settings_window, window_resize_frame,
 };
+use ::file_operations::FileOperationQueue;
 const DOUBLE_CLICK_THRESHOLD: Duration = Duration::from_millis(500);
 const POINTER_DRAG_ACTIVATION_DISTANCE: f32 = 3.0;
 const PREVIEW_TREE_ANIMATION_INTERVAL: Duration = bennu_theme::animation::FRAME_INTERVAL_60HZ;
@@ -863,7 +863,7 @@ impl FileBrowser {
         // 驱动者监督 tick:检测信号超时的驱动者并换代重启,顺带认领其他
         // 实例遗留的非终态任务(见 operation_queue::supervision)。
         subscriptions.push(
-            time::every(crate::operation_queue::SUPERVISION_INTERVAL)
+            time::every(::file_operations::SUPERVISION_INTERVAL)
                 .map(|_| Message::OperationSupervisionTick),
         );
 

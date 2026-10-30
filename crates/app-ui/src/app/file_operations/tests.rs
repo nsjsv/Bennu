@@ -9,9 +9,9 @@ use crate::model::{
     BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, ExpandedDirectory,
     ExpandedDirectoryStatus, ListDirectorySummary, SplitAxis,
 };
-use crate::operation_queue::test_persistence::{attach_store, enqueue_persisted, queued_task_id};
 use crate::shortcuts::FileSelectionDirection;
 use crate::thumbnail_cache::ColumnViewport;
+use file_operations::test_persistence::{attach_store, enqueue_persisted, queued_task_id};
 use file_operations::FileOperationOutcome;
 use iced::futures::StreamExt;
 
@@ -150,7 +150,7 @@ fn file_operation_events_preserve_queue_panel_visibility() {
     );
 
     drop(browser.enqueue_file_operation(QueuedFileOperation::Copy {
-        transfers: vec![crate::operation_queue::QueuedTransfer::new(
+        transfers: vec![file_operations::QueuedTransfer::new(
             PathBuf::from("/workspace/copy-source"),
             PathBuf::from("/workspace/copy-target"),
         )],
@@ -164,7 +164,7 @@ fn file_operation_events_preserve_queue_panel_visibility() {
     assert_eq!(browser.operation_queue.unread_count(), 0);
 
     drop(browser.enqueue_file_operation(QueuedFileOperation::Move {
-        transfers: vec![crate::operation_queue::QueuedTransfer::new(
+        transfers: vec![file_operations::QueuedTransfer::new(
             PathBuf::from("/workspace/move-source"),
             PathBuf::from("/workspace/move-target"),
         )],
@@ -329,7 +329,7 @@ async fn moved_renames_migrate_paths_before_terminal_completion() {
     enqueue_file_operation_persisted(
         &mut browser,
         QueuedFileOperation::Move {
-            transfers: vec![crate::operation_queue::QueuedTransfer::new(
+            transfers: vec![file_operations::QueuedTransfer::new(
                 source.clone(),
                 destination.clone(),
             )],
@@ -386,14 +386,8 @@ async fn moved_renames_batch_migrates_all_paths_with_one_pane_and_search_refresh
         &mut browser,
         QueuedFileOperation::Move {
             transfers: vec![
-                crate::operation_queue::QueuedTransfer::new(
-                    first_source.clone(),
-                    first_target.clone(),
-                ),
-                crate::operation_queue::QueuedTransfer::new(
-                    second_source.clone(),
-                    second_target.clone(),
-                ),
+                file_operations::QueuedTransfer::new(first_source.clone(), first_target.clone()),
+                file_operations::QueuedTransfer::new(second_source.clone(), second_target.clone()),
             ],
             verification: file_core::FileOperationVerification::BasicMetadata,
         },
@@ -737,7 +731,7 @@ fn failed_move_migrates_paths_for_completed_transfers_only() {
     let task_id = enqueue_persisted(
         &mut browser.operation_queue,
         QueuedFileOperation::Move {
-            transfers: vec![crate::operation_queue::QueuedTransfer::new(
+            transfers: vec![file_operations::QueuedTransfer::new(
                 source.clone(),
                 destination.clone(),
             )],

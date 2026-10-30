@@ -32,7 +32,6 @@ use crate::config::{RenderingGpuPreference, UiLanguage, UiLanguageSetting, UserC
 use crate::network_connections::{
     NetworkConnectionMessage, SidebarNetworkConnectionContextMenuState,
 };
-use crate::operation_queue::QueuedTransfer;
 use crate::shortcuts::{ShortcutAction, ShortcutBindingId};
 use crate::sidebar_devices::{
     SidebarDeviceAction, SidebarDeviceActionRequest, SidebarDeviceContextMenuState,
@@ -40,6 +39,7 @@ use crate::sidebar_devices::{
 use crate::startup_rendering::StartupRenderingEnvironmentStatus;
 use crate::thumbnail_cache::ThumbnailLoadOutcome;
 use file_operations::FileOperationCompletion;
+use file_operations::QueuedTransfer;
 
 pub(crate) use crate::text_preview::{MarkdownPreviewMode, TextPreviewDocument};
 pub(crate) use file_core::{TransferConflictItem, TransferConflictMetadata};
@@ -386,7 +386,7 @@ pub(crate) enum Message {
     /// 第二个参数是驱动者 generation:换代重启后,被取消的旧驱动者
     /// 迟到的终态消息凭它被拒,不会把已重启的任务提前终结。
     FileOperationFinished(u64, u64, FileOperationCompletion),
-    FileOperationPersistenceFinished(crate::operation_queue::FileOperationPersistenceOutcome),
+    FileOperationPersistenceFinished(file_operations::FileOperationPersistenceOutcome),
     OperationProgressAnimationTick,
     OperationSupervisionTick,
     FileDragSpringOpenTick,

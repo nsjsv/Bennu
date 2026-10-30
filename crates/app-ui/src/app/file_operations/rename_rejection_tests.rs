@@ -4,7 +4,7 @@ use file_core::{DirectoryEntry, EntryMetadata, FileKind, InvalidEntryName};
 
 use super::*;
 use crate::config;
-use crate::operation_queue::test_persistence::queued_task_id;
+use file_operations::test_persistence::queued_task_id;
 
 fn file_entry(path: &PathBuf) -> DirectoryEntry {
     DirectoryEntry::new(

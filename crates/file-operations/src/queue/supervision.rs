@@ -11,9 +11,9 @@ use super::*;
 /// Running 任务的驱动者超过该时长没有任何生命信号即判定死亡。
 /// 取值须宽容于最长静默阶段(目录指纹校验等纯元数据工作),
 /// 误判的代价只是重复一次幂等的断点校验,漏判的代价是任务永久挂起。
-pub(crate) const DRIVER_SIGNAL_TIMEOUT: Duration = Duration::from_secs(60);
+pub const DRIVER_SIGNAL_TIMEOUT: Duration = Duration::from_secs(60);
 /// 监督 tick 周期(app.rs 订阅按此频发 `OperationSupervisionTick`)。
-pub(crate) const SUPERVISION_INTERVAL: Duration = Duration::from_secs(5);
+pub const SUPERVISION_INTERVAL: Duration = Duration::from_secs(5);
 /// 外来任务认领的 store 扫描周期(本地 sqlite 全表读,不必每 tick 都扫)。
 const STORE_SCAN_INTERVAL: Duration = Duration::from_secs(30);
 
@@ -22,7 +22,7 @@ impl FileOperationQueue {
     /// 恢复路径重建的 Canceling 任务没有驱动者,取消协议只能靠驱动者收敛到终态,
     /// 不签发就会永远停在取消中并经 active_subscription 堵死整个队列。
     /// 序列性由 start_next 保证(同一时刻至多一个任务处于非终态推进中)。
-    pub(crate) fn poll_driver_launch(&mut self) -> Option<RunningFileOperation> {
+    pub fn poll_driver_launch(&mut self) -> Option<RunningFileOperation> {
         let position = self.tasks.iter().position(|task| {
             !task.driver_running
                 && matches!(
@@ -48,14 +48,14 @@ impl FileOperationQueue {
     }
 
     /// 驱动者生命信号:驱动者发出的任何任务级消息都刷新计时。
-    pub(crate) fn note_driver_signal(&mut self, task_id: u64) {
+    pub fn note_driver_signal(&mut self, task_id: u64) {
         if let Some(task) = self.tasks.iter_mut().find(|task| task.id == task_id) {
             task.last_driver_signal = Some(Instant::now());
         }
     }
 
     /// 过期驱动者的终态消息必须被拒,否则会终结已被换代重启的任务。
-    pub(crate) fn driver_generation_is_current(&self, task_id: u64, generation: u64) -> bool {
+    pub fn driver_generation_is_current(&self, task_id: u64, generation: u64) -> bool {
         self.tasks
             .iter()
             .find(|task| task.id == task_id)
@@ -63,7 +63,7 @@ impl FileOperationQueue {
     }
 
     /// 监督一个 tick:先做进程内静默重启,再做跨实例认领。
-    pub(crate) fn supervise(&mut self, now: Instant) -> Option<String> {
+    pub fn supervise(&mut self, now: Instant) -> Option<String> {
         self.resume_silent_driver(now);
         self.adopt_abandoned_tasks(now)
     }

@@ -1132,7 +1132,7 @@ fn finished_tasks_stay_until_queue_is_cleared() {
         .database()
         .commit_application_shutdown(bennu_state::StoredApplicationShutdown {
             browser_session: bennu_state::StoredBrowserSessionShutdown::Skip,
-            user_preferences: None::<crate::config::StoredUserPreferences>,
+            user_preferences: None::<serde_json::Value>,
             interrupted_recoverable_tasks: disposition.interrupted_recoverable_tasks,
             transient_task_ids: disposition.transient_task_ids,
         })
@@ -1206,12 +1206,21 @@ fn late_cancel_request_keeps_successful_completion_semantics() {
     assert_eq!(queue.tasks()[0].status, FileOperationStatus::Completed);
 }
 
-/// 统计 `action` 期间正式代码发出的 `file_operation_failed` 日志事件:临时安装
-/// 一个只计数的订阅器,不需要在正式代码里放测试计数器。
+/// 统计 `action` 期间本线程里正式代码发出的 `file_operation_failed` 日志事件,
+/// 不需要在正式代码里放测试计数器。
+///
+/// 订阅器必须进程级安装一次:日志调用点的 interest 是全局缓存的,并行的其它测试先
+/// 命中同一调用点时,线程级的 `with_default` 会拿到被缓存为「无人订阅」的结果而收不到
+/// 事件。计数放在线程局部,并行测试互不串数。
 fn count_file_operation_failure_logs(action: impl FnOnce()) -> usize {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Arc;
+    use std::cell::Cell;
+    use std::sync::Once;
     use tracing_subscriber::layer::{Context, SubscriberExt};
+
+    thread_local! {
+        static FAILURE_LOGS: Cell<usize> = const { Cell::new(0) };
+    }
+    static INSTALL_COUNTER: Once = Once::new();
 
     struct EventName(Option<String>);
     impl tracing::field::Visit for EventName {
@@ -1223,7 +1232,7 @@ fn count_file_operation_failure_logs(action: impl FnOnce()) -> usize {
         fn record_debug(&mut self, _: &tracing::field::Field, _: &dyn std::fmt::Debug) {}
     }
 
-    struct FailureLogCounter(Arc<AtomicUsize>);
+    struct FailureLogCounter;
     impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for FailureLogCounter {
         fn on_event(&self, event: &tracing::Event<'_>, _: Context<'_, S>) {
             if event.metadata().target() != "app_ui::file_operations" {
@@ -1232,15 +1241,20 @@ fn count_file_operation_failure_logs(action: impl FnOnce()) -> usize {
             let mut name = EventName(None);
             event.record(&mut name);
             if name.0.as_deref() == Some("file_operation_failed") {
-                self.0.fetch_add(1, Ordering::SeqCst);
+                FAILURE_LOGS.with(|count| count.set(count.get() + 1));
             }
         }
     }
 
-    let count = Arc::new(AtomicUsize::new(0));
-    let subscriber = tracing_subscriber::registry().with(FailureLogCounter(Arc::clone(&count)));
-    tracing::subscriber::with_default(subscriber, action);
-    count.load(Ordering::SeqCst)
+    INSTALL_COUNTER.call_once(|| {
+        tracing::subscriber::set_global_default(
+            tracing_subscriber::registry().with(FailureLogCounter),
+        )
+        .expect("no other test installs a global tracing subscriber");
+    });
+    FAILURE_LOGS.with(|count| count.set(0));
+    action();
+    FAILURE_LOGS.with(Cell::get)
 }
 
 #[test]

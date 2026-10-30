@@ -13,7 +13,7 @@ use std::time::SystemTime;
 use file_core::byte_progress::active_byte_fraction;
 use file_core::{DirectoryEntry, SortDirection, SortField};
 
-use crate::operation_queue::FileOperationQueue;
+use file_operations::FileOperationQueue;
 use file_operations::TransferEntrySnapshotState;
 
 /// 目标目录正在传入的顶层条目占位。
@@ -241,7 +241,7 @@ mod tests {
     use file_core::{DirectoryEntry, EntryMetadata, FileKind, SortDirection, SortField};
 
     use super::*;
-    use crate::operation_queue::test_persistence::{attach_store, enqueue_persisted};
+    use file_operations::test_persistence::{attach_store, enqueue_persisted};
 
     fn entry(path: &str, kind: FileKind, len: u64, modified: Option<SystemTime>) -> DirectoryEntry {
         DirectoryEntry::new(
@@ -283,13 +283,10 @@ mod tests {
         let running_id = enqueue_transfer(&mut queue, vec![transfer("/target/incoming.txt")]);
         let canceled_id = enqueue_transfer(&mut queue, vec![transfer("/target/canceled.txt")]);
         queue.cancel(canceled_id);
-        queue.finish(
-            canceled_id,
-            crate::operation_queue::FileOperationFinish::Canceled,
-        );
+        queue.finish(canceled_id, file_operations::FileOperationFinish::Canceled);
         queue.finish(
             running_id,
-            crate::operation_queue::FileOperationFinish::Failed("disk full".to_owned()),
+            file_operations::FileOperationFinish::Failed("disk full".to_owned()),
         );
 
         assert!(transfer_placeholders_for_directory(&queue, directory).is_empty());
@@ -627,8 +624,8 @@ mod tests {
         ));
     }
 
-    fn transfer(target: &str) -> crate::operation_queue::QueuedTransfer {
-        crate::operation_queue::QueuedTransfer::new(PathBuf::from("/source"), PathBuf::from(target))
+    fn transfer(target: &str) -> file_operations::QueuedTransfer {
+        file_operations::QueuedTransfer::new(PathBuf::from("/source"), PathBuf::from(target))
     }
 
     /// 恢复式传输入队需要任务存储;TempDir 由测试绑定到用例结束。
@@ -643,14 +640,14 @@ mod tests {
 
     fn enqueue_transfer(
         queue: &mut FileOperationQueue,
-        mut transfers: Vec<crate::operation_queue::QueuedTransfer>,
+        mut transfers: Vec<file_operations::QueuedTransfer>,
     ) -> u64 {
         for transfer in &mut transfers {
             transfer.conflict_strategy = file_core::TransferConflictStrategy::Fail;
         }
         enqueue_persisted(
             queue,
-            crate::operation_queue::QueuedFileOperation::Copy {
+            file_operations::QueuedFileOperation::Copy {
                 transfers,
                 verification: file_core::FileOperationVerification::BasicMetadata,
             },
@@ -659,11 +656,11 @@ mod tests {
 
     fn enqueue_move(
         queue: &mut FileOperationQueue,
-        transfers: Vec<crate::operation_queue::QueuedTransfer>,
+        transfers: Vec<file_operations::QueuedTransfer>,
     ) -> u64 {
         enqueue_persisted(
             queue,
-            crate::operation_queue::QueuedFileOperation::Move {
+            file_operations::QueuedFileOperation::Move {
                 transfers,
                 verification: file_core::FileOperationVerification::BasicMetadata,
             },

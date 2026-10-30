@@ -90,7 +90,7 @@ async fn sqlite_cross_filesystem_move_resumes_from_identified_retirement_artifac
             task_id,
             FileOperationFinish::RecoveryInterrupted(error.to_string()),
         ),
-        Some(crate::operation_queue::FileOperationTerminalStatus::Failed)
+        Some(file_operations::FileOperationTerminalStatus::Failed)
     );
     assert_persisted(&mut original_queue);
     let persisted = load_recoverable_transfer_records(store.clone(), stored_task_id)
@@ -126,7 +126,7 @@ async fn sqlite_cross_filesystem_move_resumes_from_identified_retirement_artifac
     assert_eq!(tokio::fs::read(&target).await.unwrap(), b"cross-device");
     assert_eq!(
         restored_queue.finish(stored_task_id, FileOperationFinish::Succeeded),
-        Some(crate::operation_queue::FileOperationTerminalStatus::Completed)
+        Some(file_operations::FileOperationTerminalStatus::Completed)
     );
     assert_persisted(&mut restored_queue);
     assert!(store

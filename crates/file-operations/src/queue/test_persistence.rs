@@ -13,12 +13,12 @@ use super::{
 };
 
 /// 给队列装上存储:与启动时同一入口。新建的库没有可恢复任务,恢复不应报错。
-pub(crate) fn attach_store(queue: &mut FileOperationQueue, store: TaskQueueStore) {
+pub fn attach_store(queue: &mut FileOperationQueue, store: TaskQueueStore) {
     assert_eq!(queue.set_store_and_restore(store), None);
 }
 
 /// 入队必须被接受,返回本地任务 id。
-pub(crate) fn queued_task_id(outcome: FileOperationEnqueueOutcome) -> u64 {
+pub fn queued_task_id(outcome: FileOperationEnqueueOutcome) -> u64 {
     match outcome {
         FileOperationEnqueueOutcome::Queued { task_id } => task_id,
         FileOperationEnqueueOutcome::Rejected { error } => panic!("enqueue rejected: {error}"),
@@ -26,7 +26,7 @@ pub(crate) fn queued_task_id(outcome: FileOperationEnqueueOutcome) -> u64 {
 }
 
 /// 驱动到队列里没有待执行的持久化请求为止,返回回执里的存储错误(按出现顺序)。
-pub(crate) fn drain_persistence_errors(queue: &mut FileOperationQueue) -> Vec<String> {
+pub fn drain_persistence_errors(queue: &mut FileOperationQueue) -> Vec<String> {
     let mut errors = Vec::new();
     while let Some(request) = queue.take_next_persistence_request() {
         let outcome = execute_file_operation_persistence(request);
@@ -36,16 +36,13 @@ pub(crate) fn drain_persistence_errors(queue: &mut FileOperationQueue) -> Vec<St
 }
 
 /// 驱动全部持久化并断言回执里没有存储错误。
-pub(crate) fn assert_persisted(queue: &mut FileOperationQueue) {
+pub fn assert_persisted(queue: &mut FileOperationQueue) {
     let errors = drain_persistence_errors(queue);
     assert!(errors.is_empty(), "unexpected storage errors: {errors:?}");
 }
 
 /// 入队并按正式版步骤完成写库,返回本地任务 id。
-pub(crate) fn enqueue_persisted(
-    queue: &mut FileOperationQueue,
-    operation: QueuedFileOperation,
-) -> u64 {
+pub fn enqueue_persisted(queue: &mut FileOperationQueue, operation: QueuedFileOperation) -> u64 {
     let task_id = queued_task_id(queue.enqueue(operation));
     assert_persisted(queue);
     task_id

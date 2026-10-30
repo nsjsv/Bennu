@@ -8,7 +8,7 @@ use iced::Task;
 
 use super::super::FileBrowser;
 use crate::model::Message;
-use crate::operation_queue::{QueuedFileOperation, SymbolicLinkCreation};
+use file_operations::{QueuedFileOperation, SymbolicLinkCreation};
 
 impl FileBrowser {
     /// 「复制路径」:把选中路径按可见顺序拼成多行纯文本写入桌面剪贴板,

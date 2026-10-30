@@ -10,12 +10,14 @@ use crate::appearance::{
 };
 use crate::formatting::format_middle_ellipsized_text;
 use crate::model::{Message, ScrollbarRegion, ScrollbarVisibility};
-use crate::operation_queue::{FileOperationQueue, FileOperationStatus, FileOperationTask};
-use crate::operation_queue_display::{file_operation_progress_text, FileOperationPathLines};
+use crate::operation_queue_display::{
+    file_operation_progress_text, FileOperationPathLines, OperationPathLines,
+};
 use bennu_preview::operation_progress::{
     active_indeterminate_track_handle, static_indeterminate_track_handle,
 };
 use bennu_preview::panel_text::readable_text;
+use file_operations::{FileOperationQueue, FileOperationStatus, FileOperationTask};
 
 pub(crate) const OPERATION_QUEUE_PANEL_WIDTH: f32 = 360.0;
 pub(crate) const OPERATION_QUEUE_PANEL_BOTTOM: f32 = 18.0;
@@ -385,7 +387,7 @@ fn indicator_svg(ring: QueueIndicatorRing, badge: QueueIndicatorBadge) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::operation_queue::test_persistence::queued_task_id;
+    use file_operations::test_persistence::queued_task_id;
 
     #[test]
     fn indicator_hides_progress_ring_for_completed_only_tasks() {
@@ -417,12 +419,12 @@ mod tests {
     fn task_panel_displays_newest_first_without_changing_fifo_runner() {
         let mut queue = FileOperationQueue::new();
         let first_id = queued_task_id(queue.enqueue(
-            crate::operation_queue::QueuedFileOperation::CreateDirectory {
+            file_operations::QueuedFileOperation::CreateDirectory {
                 parent: std::path::PathBuf::from("/first"),
             },
         ));
         let second_id = queued_task_id(queue.enqueue(
-            crate::operation_queue::QueuedFileOperation::CreateDirectory {
+            file_operations::QueuedFileOperation::CreateDirectory {
                 parent: std::path::PathBuf::from("/second"),
             },
         ));

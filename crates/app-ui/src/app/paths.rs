@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use file_core::TransferConflictStrategy;
 
-use crate::operation_queue::QueuedTransfer;
+use file_operations::QueuedTransfer;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum PasteTargetMode {

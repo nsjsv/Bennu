@@ -11,17 +11,17 @@ use file_operations::{
 
 use super::global_error::GlobalErrorSource;
 use super::FileBrowser;
-use crate::commands::file_operation_driver_task;
+use crate::commands::{file_operation_driver_task, file_operation_persistence_command};
 use crate::model::{
     AdvancedNewFolderAfter, BrowserViewMode, DestructiveActionConfirmation,
     IconGridExpansionMigration, Message, NavigationMode,
 };
 use crate::operation_history::PendingHistoryOperation;
-use crate::operation_queue::{
-    file_operation_persistence_command, FileOperationEnqueueOutcome, FileOperationFinish,
-    FileOperationPersistenceOutcome, QueuedFileOperation,
-};
 use crate::view::rename_input_id;
+use file_operations::{
+    FileOperationEnqueueOutcome, FileOperationFinish, FileOperationPersistenceOutcome,
+    QueuedFileOperation,
+};
 
 /// 完成后自动进入重命名的入口跟随执行结果的真实路径:执行器按唯一名
 /// 规则落地时(重名换「新建文件夹 2」、收纳竞争重选),入队侧的预测

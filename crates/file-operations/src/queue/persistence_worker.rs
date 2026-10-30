@@ -3,26 +3,23 @@ use std::sync::Arc;
 use bennu_state::{
     RecoverableTaskRunnerLease, StoredOperation, StoredProgress, StoredTaskStatus, TaskQueueStore,
 };
-use iced::Task;
-
-use crate::model::Message;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TaskStatePersistence {
+pub enum TaskStatePersistence {
     Update,
     FinalizeRecovery,
     PreserveRecovery,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum PersistenceEffect {
+pub enum PersistenceEffect {
     None,
     DeleteUiTasks(Vec<u64>),
     PersistRecoverableTerminalState { stored_task_id: u64 },
     ReleaseRecoverableRunnerLease { stored_task_id: u64 },
 }
 
-pub(crate) enum FileOperationPersistenceAction {
+pub enum FileOperationPersistenceAction {
     Insert {
         ui_task_id: u64,
         store: TaskQueueStore,
@@ -78,20 +75,20 @@ impl PersistenceWorkerFailureTarget {
     }
 }
 
-pub(crate) struct FileOperationPersistenceRequest {
-    pub(crate) request_id: u64,
-    pub(crate) action: FileOperationPersistenceAction,
+pub struct FileOperationPersistenceRequest {
+    pub request_id: u64,
+    pub action: FileOperationPersistenceAction,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct PersistedFileOperation {
-    pub(crate) ui_task_id: u64,
-    pub(crate) stored_task_id: u64,
-    pub(crate) runner_lease: Option<Arc<RecoverableTaskRunnerLease>>,
+pub struct PersistedFileOperation {
+    pub ui_task_id: u64,
+    pub stored_task_id: u64,
+    pub runner_lease: Option<Arc<RecoverableTaskRunnerLease>>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum FileOperationPersistenceCompletion {
+pub enum FileOperationPersistenceCompletion {
     Insert {
         ui_task_id: u64,
         requires_recovery_journal: bool,
@@ -104,32 +101,26 @@ pub(crate) enum FileOperationPersistenceCompletion {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct FileOperationPersistenceOutcome {
-    pub(crate) request_id: u64,
-    pub(crate) completion: FileOperationPersistenceCompletion,
+pub struct FileOperationPersistenceOutcome {
+    pub request_id: u64,
+    pub completion: FileOperationPersistenceCompletion,
 }
 
-pub(crate) fn file_operation_persistence_command(
+/// 在阻塞线程上执行一条持久化请求；线程本身崩溃时也回一份失败回执，队列据此收尾。
+pub async fn run_file_operation_persistence(
     request: FileOperationPersistenceRequest,
-) -> Task<Message> {
+) -> FileOperationPersistenceOutcome {
     let request_id = request.request_id;
     let worker_failure_target = persistence_worker_failure_target(&request.action);
-    Task::perform(
-        async move {
-            let outcome =
-                tokio::task::spawn_blocking(move || execute_file_operation_persistence(request))
-                    .await
-                    .unwrap_or_else(|error| FileOperationPersistenceOutcome {
-                        request_id,
-                        completion: worker_failure_target.completion(error),
-                    });
-            outcome
-        },
-        Message::FileOperationPersistenceFinished,
-    )
+    tokio::task::spawn_blocking(move || execute_file_operation_persistence(request))
+        .await
+        .unwrap_or_else(|error| FileOperationPersistenceOutcome {
+            request_id,
+            completion: worker_failure_target.completion(error),
+        })
 }
 
-pub(crate) fn execute_file_operation_persistence(
+pub fn execute_file_operation_persistence(
     request: FileOperationPersistenceRequest,
 ) -> FileOperationPersistenceOutcome {
     let request_id = request.request_id;

@@ -9,7 +9,7 @@ use crate::model::{
     Message, TransferConflictChoice, TransferConflictItem, TransferConflictMode,
     TransferConflictState,
 };
-use crate::operation_queue::{QueuedFileOperation, QueuedTransfer};
+use file_operations::{QueuedFileOperation, QueuedTransfer};
 
 impl FileBrowser {
     pub(in crate::app) fn enqueue_or_confirm_transfers(
@@ -264,7 +264,7 @@ mod tests {
     fn browser_resolving(state: TransferConflictState) -> (FileBrowser, tempfile::TempDir) {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
         let state_directory = tempfile::tempdir().unwrap();
-        crate::operation_queue::test_persistence::attach_store(
+        file_operations::test_persistence::attach_store(
             &mut browser.operation_queue,
             bennu_state::TaskQueueStore::new(state_directory.path().join("state.sqlite")).unwrap(),
         );
@@ -274,9 +274,7 @@ mod tests {
 
     fn queued_copy_transfers(browser: &FileBrowser) -> Vec<QueuedTransfer> {
         match &browser.operation_queue.tasks()[0].operation {
-            crate::operation_queue::QueuedFileOperation::Copy { transfers, .. } => {
-                transfers.clone()
-            }
+            file_operations::QueuedFileOperation::Copy { transfers, .. } => transfers.clone(),
             other => panic!("expected a copy, got {other:?}"),
         }
     }

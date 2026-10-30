@@ -1876,6 +1876,13 @@ dependencies = [
  "bennu-localization",
  "bennu-state",
  "file-core",
+ "rusqlite",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

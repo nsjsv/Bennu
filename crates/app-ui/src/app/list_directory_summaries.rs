@@ -17,8 +17,8 @@ use crate::model::{
     ExpandedDirectoryStatus, ListDirectorySizeDisplayMode, ListDirectorySummaryCache,
     ListDirectorySummaryLoadRequest, Message, RecursiveTotalSize,
 };
-use crate::operation_queue::QueuedFileOperation;
 use crate::thumbnail_cache::ColumnViewport;
+use file_operations::QueuedFileOperation;
 
 #[derive(Debug, Clone)]
 struct RenderedListDirectory {
@@ -678,7 +678,7 @@ mod tests {
     use super::*;
     use crate::config;
     use crate::model::ListDirectorySummary;
-    use crate::operation_queue::{QueuedFileOperation, QueuedTransfer};
+    use file_operations::{QueuedFileOperation, QueuedTransfer};
 
     fn test_entry(path: PathBuf, kind: FileKind, len: u64) -> DirectoryEntry {
         DirectoryEntry::new(

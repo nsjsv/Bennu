@@ -10,4 +10,9 @@ license.workspace = true
 bennu-theme = { path = "../bennu-theme" }
 desktop-linux = { path = "../desktop-linux" }
 dirs.workspace = true
+# 收藏与网络连接存在主程序的设置行里（state.sqlite）。
+file-operation-store = { path = "../file-operation-store" }
 toml = "1.1.2"
+
+[dev-dependencies]
+tempfile.workspace = true

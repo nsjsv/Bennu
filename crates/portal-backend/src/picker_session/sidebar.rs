@@ -10,8 +10,8 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use bennu_sidebar::{
-    normalize_sidebar_width, read_sidebar_config, sidebar_locations, SidebarDeviceEntry,
-    SidebarLocation, SidebarNetworkConnectionEntry, DEFAULT_SIDEBAR_WIDTH,
+    normalize_sidebar_width, read_sidebar_config, sidebar_locations, SidebarConfig,
+    SidebarDeviceEntry, SidebarLocation, SidebarNetworkConnectionEntry, DEFAULT_SIDEBAR_WIDTH,
 };
 use desktop_linux::{
     load_network_mount_states, load_storage_devices, NetworkConnection, NetworkConnectionId,
@@ -71,13 +71,18 @@ pub(crate) struct PickerSidebarData {
     pub(crate) provider_failures: Vec<StorageDeviceProviderFailure>,
 }
 
-/// 异步读取侧边栏数据：config.toml（收藏 + 保存的网络连接）→ 位置/收藏
-/// 计算 → 设备快照 + 网络挂载状态批量查询。任何一步失败都降级为空集
-/// （portal 常驻进程不能因配置/系统异常 panic），与主程序启动读一次的
-/// 容忍语义一致。
+/// 异步读取侧边栏数据：主程序设置行（收藏 + 保存的网络连接，与主程序侧边栏同一份）
+/// → 位置/收藏计算 → 设备快照 + 网络挂载状态批量查询。任何一步失败都降级为空集
+/// （portal 常驻进程不能因配置/系统异常 panic），设置读不了时记日志。
 pub(crate) async fn load_sidebar_data() -> PickerSidebarData {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
-    let config = read_sidebar_config();
+    let config = match read_sidebar_config(&crate::theme::state_database_path()) {
+        Ok(config) => config,
+        Err(error) => {
+            tracing::warn!(%error, "Bennu settings could not be read; showing default places");
+            SidebarConfig::default()
+        }
+    };
     let locations = sidebar_locations(&home, config.favorites.as_deref());
 
     let mut connections: Vec<SidebarNetworkConnectionEntry> = config

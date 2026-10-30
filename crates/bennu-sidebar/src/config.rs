@@ -1,6 +1,6 @@
-//! config.toml 中侧边栏两个字段（sidebar_favorites / network_connections）
-//! 的解析与读取。只解析侧边栏需要的两个字段，不搬 app-ui 全量 UserConfig；
-//! app-ui 的全量解析也调用这里的两段共享实现，避免双份 schema 漂移。
+//! 侧边栏数据模型，以及旧版 config.toml 里侧边栏两个字段（sidebar_favorites /
+//! network_connections）的解析——只有主程序把旧配置迁到设置行时用；现在的收藏与
+//! 网络连接由 `stored` 从设置行读。
 
 use std::path::PathBuf;
 
@@ -9,8 +9,6 @@ use desktop_linux::{NetworkConnection, NetworkConnectionId, NetworkProtocol};
 use crate::locations::sidebar_favorite_label_from_path;
 use crate::saved_connections::SavedNetworkConnection;
 
-const APP_DIR_NAME: &str = "bennu";
-const CONFIG_FILE_NAME: &str = "config.toml";
 const SIDEBAR_FAVORITES_KEY: &str = "sidebar_favorites";
 const SIDEBAR_FAVORITE_LABEL_KEY: &str = "label";
 const SIDEBAR_FAVORITE_PATH_KEY: &str = "path";
@@ -27,38 +25,12 @@ pub struct SidebarFavoriteConfig {
     pub path: PathBuf,
 }
 
-/// 侧边栏视角的 config.toml 载荷。favorites 为 None 表示未配置
+/// 侧边栏视角的收藏与网络连接。favorites 为 None 表示未配置
 /// （消费方回落默认用户目录 + GTK 书签）。
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SidebarConfig {
     pub favorites: Option<Vec<SidebarFavoriteConfig>>,
     pub network_connections: Vec<SavedNetworkConnection>,
-}
-
-pub fn sidebar_config_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|path| path.join(APP_DIR_NAME).join(CONFIG_FILE_NAME))
-}
-
-/// 读取主程序 config.toml 的侧边栏字段。读文件/解析失败一律返回默认值
-/// （portal 常驻进程不能因配置损坏 panic）；语义与主程序启动读一次一致。
-pub fn read_sidebar_config() -> SidebarConfig {
-    sidebar_config_from_path(sidebar_config_path().as_deref())
-}
-
-fn sidebar_config_from_path(path: Option<&std::path::Path>) -> SidebarConfig {
-    let Some(path) = path else {
-        return SidebarConfig::default();
-    };
-    let Ok(content) = std::fs::read_to_string(path) else {
-        return SidebarConfig::default();
-    };
-    let Ok(document) = content.parse::<toml::Table>() else {
-        return SidebarConfig::default();
-    };
-    SidebarConfig {
-        favorites: parse_toml_sidebar_favorites(&document),
-        network_connections: parse_toml_network_connections(&document),
-    }
 }
 
 pub fn parse_toml_sidebar_favorites(document: &toml::Table) -> Option<Vec<SidebarFavoriteConfig>> {
@@ -181,15 +153,5 @@ network_connections = [
         assert!(connections[0].auto_connect);
         assert!(!connections[1].auto_connect);
         assert_eq!(connections[1].connection.id.as_str(), "dav");
-    }
-
-    #[test]
-    fn read_sidebar_config_from_missing_or_broken_file_returns_defaults() {
-        let missing = std::path::Path::new("/nonexistent-bennu-sidebar-test/config.toml");
-        let config = sidebar_config_from_path(Some(missing));
-        assert_eq!(config.favorites, None);
-        assert!(config.network_connections.is_empty());
-
-        assert_eq!(sidebar_config_from_path(None), SidebarConfig::default());
     }
 }

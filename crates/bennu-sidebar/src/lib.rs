@@ -1,5 +1,5 @@
 //! 侧边栏数据单源：主程序 app-ui 与 FileChooser portal（portal-backend）
-//! 共用同一份位置/收藏/GTK 书签计算、config.toml 侧边栏字段读取、设备与
+//! 共用同一份位置/收藏/GTK 书签计算、设置行里收藏与网络连接的解释、设备与
 //! 网络连接条目视图模型。本 crate 只承载纯数据与解析（spec 代码组织规则：
 //! 不 import iced 运行时类型）；图标符号借用 bennu-theme::icons，视觉词汇
 //! 单源不破。
@@ -8,10 +8,11 @@ pub mod config;
 pub mod entries;
 pub mod locations;
 pub mod saved_connections;
+pub mod stored;
 
 pub use config::{
-    parse_toml_network_connections, parse_toml_sidebar_favorites, read_sidebar_config,
-    sidebar_config_path, SidebarConfig, SidebarFavoriteConfig,
+    parse_toml_network_connections, parse_toml_sidebar_favorites, SidebarConfig,
+    SidebarFavoriteConfig,
 };
 pub use entries::{
     selected_sidebar_device, SidebarDeviceAction, SidebarDeviceEntry,
@@ -23,6 +24,9 @@ pub use locations::{
     SidebarLocation, SidebarLocationKind,
 };
 pub use saved_connections::SavedNetworkConnection;
+pub use stored::{
+    network_connections_from_stored, read_sidebar_config, sidebar_favorites_from_stored,
+};
 
 /// 侧边栏宽度契约：主程序持久化宽度与 portal 每窗独立宽度共用同一组
 /// 默认值与夹取范围，两进程拖宽手感一致。

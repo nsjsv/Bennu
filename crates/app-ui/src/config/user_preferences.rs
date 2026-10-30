@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use desktop_linux::{NetworkConnection, NetworkConnectionId, NetworkProtocol, TerminalEmulator};
+use desktop_linux::TerminalEmulator;
 use file_core::FileOperationVerification;
 use file_operation_store::{
     StoreResult, StoredContextMenuItemEntry, StoredContextMenuLayout, StoredContextMenuLayouts,
@@ -382,7 +382,7 @@ impl UserPreferences {
                 .unwrap_or(default_preferences.right_preview_preview_ratio),
             sidebar_favorites: stored
                 .sidebar_favorites
-                .map(|favorites| sidebar_favorites_from_stored(&favorites)),
+                .map(|favorites| bennu_sidebar::sidebar_favorites_from_stored(&favorites)),
             network_connections: network_connections_from_stored(
                 &stored.network_connections,
                 &mut unrecognized,
@@ -545,18 +545,6 @@ fn trusted_transfer_devices_from_stored(
     devices
 }
 
-fn sidebar_favorites_from_stored(
-    favorites: &[StoredSidebarFavorite],
-) -> Vec<SidebarFavoriteConfig> {
-    favorites
-        .iter()
-        .map(|favorite| SidebarFavoriteConfig {
-            label: favorite.label.clone(),
-            path: favorite.path.to_path_buf(),
-        })
-        .collect()
-}
-
 fn stored_network_connections(
     connections: &[SavedNetworkConnection],
 ) -> Vec<StoredNetworkConnection> {
@@ -572,24 +560,12 @@ fn stored_network_connections(
         .collect()
 }
 
+/// 解释与文件选择器共用（`bennu_sidebar`）；这里另记被丢弃的条目，供设置损坏提示。
 fn network_connections_from_stored(
     connections: &[StoredNetworkConnection],
     unrecognized: &mut UnrecognizedSettings,
 ) -> Vec<SavedNetworkConnection> {
-    let mut restored = Vec::new();
-    for stored in connections {
-        let Some(protocol) = NetworkProtocol::from_config_value(&stored.protocol) else {
-            continue;
-        };
-        if let Ok(connection) = NetworkConnection::new(
-            NetworkConnectionId::new(stored.id.trim()),
-            stored.label.trim().to_owned(),
-            protocol,
-            &stored.uri,
-        ) {
-            restored.push(SavedNetworkConnection::new(connection, stored.auto_connect));
-        }
-    }
+    let restored = bennu_sidebar::network_connections_from_stored(connections);
     unrecognized.note_dropped("network_connections", connections.len(), restored.len());
     restored
 }

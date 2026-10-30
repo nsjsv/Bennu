@@ -643,6 +643,8 @@ dependencies = [
  "bennu-theme",
  "desktop-linux",
  "dirs",
+ "file-operation-store",
+ "tempfile",
  "toml",
 ]
 

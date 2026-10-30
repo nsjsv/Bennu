@@ -21,9 +21,9 @@ pub(crate) struct FileOperationPersistenceAcceptance {
 }
 
 impl FileOperationQueue {
-    pub(super) fn start_next(&mut self) -> Option<String> {
+    pub(super) fn start_next(&mut self) {
         if self.active_subscription().is_some() {
-            return None;
+            return;
         }
         if let Some(position) = self
             .tasks
@@ -51,7 +51,6 @@ impl FileOperationQueue {
                 TaskStatePersistence::Update,
             );
         }
-        None
     }
 
     pub(super) fn restore_stored_task(&mut self, stored_task: StoredTask) -> Option<String> {
@@ -249,7 +248,7 @@ impl FileOperationQueue {
                         } else if self.tasks[position].status == FileOperationStatus::Canceled {
                             acceptance.canceled_before_start_task_id = Some(ui_task_id);
                         }
-                        let _ = self.start_next();
+                        self.start_next();
                     }
                 }
             },
@@ -343,7 +342,7 @@ impl FileOperationQueue {
 
         match self.tasks[position].status {
             FileOperationStatus::Pending => {
-                let _ = self.start_next();
+                self.start_next();
             }
             FileOperationStatus::Running => {
                 self.queue_task_state(
@@ -360,7 +359,7 @@ impl FileOperationQueue {
                     StoredTaskStatus::Canceled,
                     TaskStatePersistence::Update,
                 );
-                let _ = self.start_next();
+                self.start_next();
             }
             FileOperationStatus::Failed | FileOperationStatus::Completed => {
                 let status = self.tasks[position].status;

@@ -64,13 +64,13 @@ impl FileOperationQueue {
 
     /// 监督一个 tick:先做进程内静默重启,再做跨实例认领。
     pub(crate) fn supervise(&mut self, now: Instant) -> Option<String> {
-        let storage_error = self.resume_silent_driver(now);
-        combine_storage_errors(storage_error, self.adopt_abandoned_tasks(now))
+        self.resume_silent_driver(now);
+        self.adopt_abandoned_tasks(now)
     }
 
     /// Running/Canceling 任务信号超时 → 判定驱动者死亡,换代重启。仅恢复式(journal)
     /// 任务可安全重放;瞬时任务(重命名/回收站等)不可重放,不重启。
-    fn resume_silent_driver(&mut self, now: Instant) -> Option<String> {
+    fn resume_silent_driver(&mut self, now: Instant) {
         let stale = self.tasks.iter().position(|task| {
             matches!(
                 task.status,
@@ -82,7 +82,7 @@ impl FileOperationQueue {
                     .is_some_and(|signal| now.duration_since(signal) >= DRIVER_SIGNAL_TIMEOUT)
         });
         let Some(position) = stale else {
-            return None;
+            return;
         };
         let task = &mut self.tasks[position];
         task.driver_generation += 1;
@@ -106,7 +106,6 @@ impl FileOperationQueue {
             operation = task.operation.title(),
             "driver showed no signal; restarting from recovery journal"
         );
-        None
     }
 
     /// 认领其他实例遗留的非终态任务:不在内存、租约空闲者,走启动恢复同一条
@@ -142,7 +141,7 @@ impl FileOperationQueue {
         }
         // 认领的任务推入为 Pending,无活动任务时推进到 Running,
         // 驱动者在本次 update 出口由 poll_driver_launch 统一签发。
-        storage_error = combine_storage_errors(storage_error, self.start_next());
+        self.start_next();
         storage_error
     }
 }

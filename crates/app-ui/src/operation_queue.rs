@@ -445,7 +445,8 @@ impl FileOperationQueue {
         }
         drop(restore_coordinator);
 
-        combine_storage_errors(storage_error, self.start_next())
+        self.start_next();
+        storage_error
     }
 
     pub(crate) fn task_queue_store(&self) -> Option<&TaskQueueStore> {
@@ -539,7 +540,7 @@ impl FileOperationQueue {
                 requires_recovery_journal,
             });
         }
-        let _ = self.start_next();
+        self.start_next();
 
         // 写库结果经 accept_persistence_outcome 的回执返回:初始写库失败时
         // 可恢复任务在那里被移除并报告 rejected_task_id。
@@ -738,7 +739,7 @@ impl FileOperationQueue {
         outcome: FileOperationFinish,
     ) -> Option<FileOperationTerminalStatus> {
         let terminal_status = self.finish_without_advancing_queue(id, outcome);
-        let _ = self.start_next();
+        self.start_next();
         terminal_status
     }
 
@@ -943,7 +944,7 @@ impl FileOperationQueue {
             | FileOperationStatus::Canceled => return,
         }
 
-        let _ = self.start_next();
+        self.start_next();
     }
 
     pub(crate) fn begin_application_shutdown(&mut self) -> FileOperationShutdownDisposition {

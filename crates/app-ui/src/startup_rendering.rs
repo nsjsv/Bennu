@@ -18,7 +18,6 @@ pub(crate) const VK_LOADER_DRIVERS_SELECT_ENV: &str = "VK_LOADER_DRIVERS_SELECT"
 const VULKAN_BACKEND_VALUE: &str = "vulkan";
 const GL_BACKEND_VALUE: &str = "gl";
 const RENDERER_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
-const RENDERER_PROBE_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StartupRenderingBackend {
@@ -409,33 +408,40 @@ fn read_renderer_probe_selection(child: &mut Child) -> Option<RendererProbeGpuSe
     RendererProbeGpuSelection::decode(&output)
 }
 
+/// 等探针退出：子进程的 pidfd 在它退出时变为可读，poll 带超时等这一次，
+/// 不反复查状态。
 fn wait_for_renderer_probe(child: &mut Child, timeout: Duration) -> RendererProbeOutcome {
-    let started = Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                return if status.success() {
-                    RendererProbeOutcome::Succeeded
-                } else {
-                    RendererProbeOutcome::Failed
-                };
-            }
-            Ok(None) => {}
-            Err(_) => {
-                terminate_and_reap(child);
-                return RendererProbeOutcome::Failed;
-            }
-        }
-
-        let elapsed = started.elapsed();
-        if elapsed >= timeout {
+    match child_exits_within(child, timeout) {
+        Ok(true) => match child.wait() {
+            Ok(status) if status.success() => RendererProbeOutcome::Succeeded,
+            Ok(_) | Err(_) => RendererProbeOutcome::Failed,
+        },
+        Ok(false) => {
             terminate_and_reap(child);
-            return RendererProbeOutcome::TimedOut;
+            RendererProbeOutcome::TimedOut
         }
-        std::thread::sleep(std::cmp::min(
-            RENDERER_PROBE_POLL_INTERVAL,
-            timeout.saturating_sub(elapsed),
-        ));
+        Err(_) => {
+            terminate_and_reap(child);
+            RendererProbeOutcome::Failed
+        }
+    }
+}
+
+fn child_exits_within(child: &Child, timeout: Duration) -> rustix::io::Result<bool> {
+    use rustix::event::{poll, PollFd, PollFlags, Timespec};
+    use rustix::process::{pidfd_open, Pid, PidfdFlags};
+
+    let pidfd = pidfd_open(Pid::from_child(child), PidfdFlags::empty())?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        let remaining = Timespec::try_from(deadline.saturating_duration_since(Instant::now()))
+            .map_err(|_| rustix::io::Errno::INVAL)?;
+        match poll(&mut [PollFd::new(&pidfd, PollFlags::IN)], Some(&remaining)) {
+            Ok(ready) => return Ok(ready > 0),
+            // 被信号打断不算结果，按剩余时间接着等。
+            Err(rustix::io::Errno::INTR) => {}
+            Err(error) => return Err(error),
+        }
     }
 }
 

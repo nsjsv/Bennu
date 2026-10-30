@@ -66,10 +66,9 @@ fn wholly_unreadable_settings_are_backed_up_and_reset() {
     let (reset, backup) = restored(loaded.recovery);
     assert_eq!(reset, ResetSettings::All);
     assert_eq!(fs::read_to_string(backup).unwrap(), "{ not json");
-    // 比存储形态：配色存成不带透明度的 #RRGGBB，内存里的默认配色存不回原样。
     assert_eq!(
-        loaded.config.user_preferences().to_stored(),
-        default_user_config().user_preferences().to_stored()
+        loaded.config.user_preferences(),
+        default_user_config().user_preferences()
     );
     assert!(stored_row_is_readable(&database));
 }

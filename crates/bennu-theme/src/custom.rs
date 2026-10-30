@@ -120,17 +120,15 @@ impl CustomColorScheme {
             return fallback.clone();
         };
         Self {
-            light: stored
-                .light
-                .as_ref()
-                .and_then(|set| CustomColorAnchors::from_stored(set).ok())
-                .unwrap_or(fallback.light),
-            dark: stored
-                .dark
-                .as_ref()
-                .and_then(|set| CustomColorAnchors::from_stored(set).ok())
-                .unwrap_or(fallback.dark),
+            light: CustomColorAnchors::from_stored_or(stored.light.as_ref(), fallback.light),
+            dark: CustomColorAnchors::from_stored_or(stored.dark.as_ref(), fallback.dark),
         }
+    }
+
+    /// 同 KDE KConfig：等于默认就不写，读到空时用当前算出的默认色。默认色带透明度与
+    /// 计算出的分量，存成 `#RRGGBB` 会走样，不写才能每次都是原样。
+    pub fn to_stored_unless_default(&self, default: &Self) -> Option<StoredCustomColorScheme> {
+        (self != default).then(|| self.to_stored())
     }
 
     /// 存储的配色里是否有一套颜色读不懂（`from_stored` 会让它单独回落）。
@@ -141,7 +139,7 @@ impl CustomColorScheme {
             .any(|set| CustomColorAnchors::from_stored(set).is_err())
     }
 
-    pub fn to_stored(&self) -> StoredCustomColorScheme {
+    fn to_stored(&self) -> StoredCustomColorScheme {
         StoredCustomColorScheme {
             light: Some(self.light.to_stored()),
             dark: Some(self.dark.to_stored()),
@@ -185,6 +183,16 @@ impl CustomColorSetDocument {
 }
 
 impl CustomColorAnchors {
+    /// 存储里的一套颜色；读不懂时用 `fallback`。与 `fallback` 存盘后的样子完全相同时就是
+    /// `fallback` 本身：旧版本每次保存都会写下一份走样的默认色。
+    fn from_stored_or(stored: Option<&StoredCustomColorSet>, fallback: Self) -> Self {
+        match stored {
+            Some(set) if *set == fallback.to_stored() => fallback,
+            Some(set) => Self::from_stored(set).unwrap_or(fallback),
+            None => fallback,
+        }
+    }
+
     fn from_stored(stored: &StoredCustomColorSet) -> Result<Self, String> {
         let color = |name: &'static str, value: &str| {
             super::parse_hex_color(value, &format!("custom.{name}"))
@@ -336,6 +344,51 @@ mod tests {
                 .background,
             matugen_background
         );
+    }
+
+    #[test]
+    fn the_default_scheme_is_not_stored_and_comes_back_exactly() {
+        let default = default_custom_color_scheme();
+
+        assert_eq!(default.to_stored_unless_default(&default), None);
+        assert_eq!(CustomColorScheme::from_stored(None, &default), default);
+    }
+
+    #[test]
+    fn a_previously_saved_default_is_read_as_the_exact_default() {
+        let default = default_custom_color_scheme();
+        // 旧版本存下的默认色：透明度与计算出的分量都已走样。
+        let saved = default.to_stored();
+        assert_ne!(
+            CustomColorAnchors::from_stored(saved.light.as_ref().unwrap()).unwrap(),
+            default.light
+        );
+
+        assert_eq!(
+            CustomColorScheme::from_stored(Some(&saved), &default),
+            default
+        );
+    }
+
+    #[test]
+    fn an_imported_scheme_is_stored_and_read_back_unchanged() {
+        let default = default_custom_color_scheme();
+        let imported = CustomColorScheme::from_json(VALID).unwrap();
+
+        let stored = imported.to_stored_unless_default(&default).unwrap();
+
+        assert_eq!(
+            CustomColorScheme::from_stored(Some(&stored), &default),
+            imported
+        );
+        // 只有一套是默认色存盘后的样子：那一套用默认色，另一套照旧。
+        let mixed = StoredCustomColorScheme {
+            light: default.to_stored().light,
+            dark: stored.dark,
+        };
+        let restored = CustomColorScheme::from_stored(Some(&mixed), &default);
+        assert_eq!(restored.light, default.light);
+        assert_eq!(restored.dark, imported.dark);
     }
 
     #[test]

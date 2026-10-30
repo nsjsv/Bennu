@@ -24,7 +24,9 @@ use super::{
     PreviewFileSizeLimits, SidebarFavoriteConfig, TrustedTransferDevice, UiLanguageSetting,
     UserConfig, ViewDensityLevel,
 };
-use crate::matugen_theme::{ColorSchemePreset, CustomColorScheme, ThemeMode};
+use crate::matugen_theme::{
+    default_custom_color_scheme, ColorSchemePreset, CustomColorScheme, ThemeMode,
+};
 use crate::model::{
     list_column_kind_config_value, list_column_kind_from_config_value, BrowserViewMode,
     ContextMenuLayoutConfigValues, ContextMenuPreferences, FileGroupingMode, LastSearchScope,
@@ -270,7 +272,9 @@ impl UserPreferences {
         });
         stored.theme_mode = self.theme_mode.config_value().to_owned();
         stored.color_scheme = self.color_scheme.config_value().to_owned();
-        stored.custom_color_scheme = Some(self.custom_color_scheme.to_stored());
+        stored.custom_color_scheme = self
+            .custom_color_scheme
+            .to_stored_unless_default(&default_custom_color_scheme());
         stored.context_menu_layouts = Some(stored_context_menu_layouts(&self.context_menus));
         stored.transfer_download_dir = self
             .transfer_download_dir

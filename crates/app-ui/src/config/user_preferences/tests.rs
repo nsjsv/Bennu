@@ -52,6 +52,21 @@ fn custom_color_scheme_roundtrips_and_invalid_modes_fall_back_independently() {
 }
 
 #[test]
+fn the_built_in_custom_colors_survive_saving_unchanged() {
+    let default = default_user_config();
+    let mut config = default.clone();
+    config.color_scheme = ColorSchemePreset::Custom;
+
+    let stored = config.user_preferences().to_stored();
+    assert_eq!(stored.custom_color_scheme, None);
+    let restored = UserPreferences::from_stored(stored, &default).preferences;
+
+    // 默认配色里弱化文字带透明度，存成 #RRGGBB 会丢掉；不写才能原样回来。
+    assert_eq!(restored.custom_color_scheme, default.custom_color_scheme);
+    assert!(restored.custom_color_scheme.light.muted_text.a < 1.0);
+}
+
+#[test]
 fn missing_custom_snapshot_uses_default_without_affecting_old_selection() {
     let mut stored = StoredUserPreferences::default();
     stored.color_scheme = "custom".to_owned();

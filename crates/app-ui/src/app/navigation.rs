@@ -8,9 +8,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::global_error::GlobalErrorSource;
 use super::FileBrowser;
-use crate::commands::{
-    delayed_thumbnail_refresh_command, load_directory_command, load_expanded_directory_command,
-};
+use crate::commands::{load_directory_command, load_expanded_directory_command};
 use crate::model::{
     empty_directory_entry_snapshot, trash_location_path, BrowserPaneId, BrowserViewMode,
     DirectoryCollectionPhase, DirectoryEntrySnapshot, DirectoryExpansionLoadContext,
@@ -196,7 +194,7 @@ impl FileBrowser {
     ) -> Task<Message> {
         let order_phase = directory_order_phase_after_collection(&self.options, &entries);
         if request.pane_id != self.active_pane_id() {
-            let current_dir = {
+            {
                 let Some(pane) = self.pane_by_id_mut(request.pane_id) else {
                     return Task::none();
                 };
@@ -223,11 +221,10 @@ impl FileBrowser {
                 pane.directory_collection_phase = DirectoryCollectionPhase::Ready;
                 pane.directory_order_phase = order_phase;
                 pane.sync_active_tab_state();
-                pane.current_dir.clone()
-            };
+            }
             self.resort_size_sorted_list_panes();
             return Task::batch([
-                delayed_thumbnail_refresh_command(request.pane_id, current_dir),
+                self.schedule_thumbnail_refresh_for_pane(request.pane_id),
                 self.schedule_visible_list_directory_summaries_for_pane(request.pane_id),
                 self.schedule_visible_directory_metadata(request.pane_id, None),
                 self.reveal_address_bar_current_segment(request.pane_id),
@@ -262,7 +259,7 @@ impl FileBrowser {
         self.resort_size_sorted_list_panes();
         Task::batch([
             command,
-            delayed_thumbnail_refresh_command(request.pane_id, self.current_dir.clone()),
+            self.schedule_thumbnail_refresh_for_pane(request.pane_id),
             self.schedule_visible_list_directory_summaries_for_pane(request.pane_id),
             self.schedule_visible_directory_metadata(request.pane_id, None),
             self.request_browser_session_save(),

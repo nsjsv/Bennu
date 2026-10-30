@@ -265,6 +265,11 @@ impl ThumbnailCache {
         self.inflight.remove(key);
     }
 
+    #[cfg(test)]
+    pub(crate) fn is_in_flight(&self, key: &ThumbnailKey) -> bool {
+        self.inflight.contains_key(key)
+    }
+
     pub(crate) fn insert_ready(
         &mut self,
         thumbnail: CachedThumbnail,

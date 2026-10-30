@@ -2,7 +2,6 @@ use std::collections::HashMap;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use desktop_linux::{
     open_path_with_application, open_path_with_terminal_emulator, open_terminal_at_directory,
@@ -22,8 +21,8 @@ use tokio_util::sync::CancellationToken;
 use crate::app::archive_member_password::ArchiveMemberPasswordAction;
 use crate::config;
 use crate::model::{
-    AddressSuggestionRequest, BrowserPaneId, LoadedOperationStore, Message, PendingOperation,
-    SidebarLocation, StartupEnvironment, StartupSessionPlanRequest, TransferConflictMode,
+    AddressSuggestionRequest, LoadedOperationStore, Message, PendingOperation, SidebarLocation,
+    StartupEnvironment, StartupSessionPlanRequest, TransferConflictMode,
 };
 use crate::operation_queue::QueuedTransfer;
 use crate::sidebar::{home_sidebar_location, sidebar_locations};
@@ -107,7 +106,6 @@ mod x11_dnd;
 pub(crate) use x11_dnd::x11_dnd_window_handle_command;
 
 const PATH_SUGGESTION_LIMIT: usize = 6;
-const THUMBNAIL_REFRESH_DELAY: Duration = Duration::from_millis(400);
 
 pub(crate) fn startup_environment_command(
     startup_rendering_environment: StartupRenderingEnvironment,
@@ -136,15 +134,6 @@ pub(crate) fn operation_store_command(
         load_operation_store(path, startup_session_request),
         Message::OperationStoreLoaded,
     )
-}
-
-pub(crate) fn delayed_thumbnail_refresh_command(
-    pane_id: BrowserPaneId,
-    directory: PathBuf,
-) -> Task<Message> {
-    Task::perform(delayed_thumbnail_refresh(directory), move |directory| {
-        Message::ThumbnailRefreshRequested(pane_id, directory)
-    })
 }
 
 pub(crate) fn save_column_width_overrides_command(
@@ -535,11 +524,6 @@ fn settings_after_load_crash(error: &str) -> LoadedStartupSettings {
         })
         .collect(),
     }
-}
-
-async fn delayed_thumbnail_refresh(directory: PathBuf) -> PathBuf {
-    tokio::time::sleep(THUMBNAIL_REFRESH_DELAY).await;
-    directory
 }
 
 async fn load_operation_store(

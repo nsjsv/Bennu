@@ -344,9 +344,6 @@ impl FileBrowser {
                 self.toggle_preview_tree_directory(entry_id)
             }
             Message::PreviewTreeAnimationTick => self.advance_preview_tree_animation(),
-            Message::ThumbnailRefreshRequested(pane_id, directory) => {
-                self.accept_thumbnail_refresh_request(pane_id, directory)
-            }
             Message::ThumbnailBatchLoaded(outcomes) => self.accept_thumbnail_batch(outcomes),
             Message::BrowserViewModeSelected(pane_id, view_mode) => {
                 self.select_browser_view_mode(pane_id, view_mode)

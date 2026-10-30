@@ -1,5 +1,3 @@
-use std::path::{Path, PathBuf};
-
 use iced::Task;
 
 use super::FileBrowser;
@@ -9,8 +7,7 @@ use crate::commands::{
 };
 use crate::config::UserConfig;
 use crate::model::{
-    BrowserPaneId, LoadedOperationStore, Message, SidebarLocation, StartupEnvironment,
-    StartupSessionPlan,
+    LoadedOperationStore, Message, SidebarLocation, StartupEnvironment, StartupSessionPlan,
 };
 use crate::sidebar::{home_sidebar_location, sidebar_favorite_configs};
 use crate::startup_trace;
@@ -135,29 +132,6 @@ impl FileBrowser {
             }
         }
         Task::none()
-    }
-
-    pub(super) fn accept_thumbnail_refresh_request(
-        &mut self,
-        pane_id: BrowserPaneId,
-        directory: PathBuf,
-    ) -> Task<Message> {
-        if !self.thumbnail_refresh_matches_pane(pane_id, &directory) {
-            return Task::none();
-        }
-        self.schedule_thumbnail_refresh_for_pane(pane_id)
-    }
-
-    fn thumbnail_refresh_matches_pane(&self, pane_id: BrowserPaneId, directory: &Path) -> bool {
-        if pane_id == self.active_pane_id() {
-            return !self.directory_collection_phase.is_discovering()
-                && self.current_dir.as_path() == directory;
-        }
-
-        self.pane_by_id(pane_id).is_some_and(|pane| {
-            !pane.directory_collection_phase.is_discovering()
-                && pane.current_dir.as_path() == directory
-        })
     }
 
     fn apply_loaded_user_config(&mut self, mut user_config: UserConfig) {

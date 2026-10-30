@@ -2,7 +2,7 @@ use file_core::{TrashEntry, TrashScan};
 use iced::Task;
 
 use super::FileBrowser;
-use crate::commands::{delayed_thumbnail_refresh_command, load_trash_command};
+use crate::commands::load_trash_command;
 use crate::model::{
     trash_location_path, BrowserPane, BrowserTab, DirectoryCollectionPhase, Message,
     TrashRefreshCompletionDecision,
@@ -38,7 +38,7 @@ impl FileBrowser {
         self.trash_refresh.clear_error();
         self.apply_trash_snapshot_to_all_views(&entries);
 
-        let thumbnail_commands = self
+        let trash_pane_ids = self
             .pane_layout
             .visible_pane_ids()
             .into_iter()
@@ -46,7 +46,10 @@ impl FileBrowser {
                 self.pane_by_id(*pane_id)
                     .is_some_and(|pane| pane.is_trash_view)
             })
-            .map(|pane_id| delayed_thumbnail_refresh_command(pane_id, trash_location_path()))
+            .collect::<Vec<_>>();
+        let thumbnail_commands = trash_pane_ids
+            .into_iter()
+            .map(|pane_id| self.schedule_thumbnail_refresh_for_pane(pane_id))
             .collect::<Vec<_>>();
         let remeasure_drop_layout = if self.is_trash_view {
             self.remeasure_active_file_drop_layout()

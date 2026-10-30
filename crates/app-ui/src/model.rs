@@ -462,7 +462,6 @@ pub(crate) enum Message {
     FileOperationClearFinishedRequested,
     PreviewTreeDirectoryToggled(usize),
     PreviewTreeAnimationTick,
-    ThumbnailRefreshRequested(BrowserPaneId, PathBuf),
     ThumbnailBatchLoaded(Vec<ThumbnailLoadOutcome>),
     BrowserViewModeSelected(BrowserPaneId, BrowserViewMode),
     IconGridDirectoryToggled(BrowserPaneId, IconGridExpansionAnchor),

@@ -64,6 +64,32 @@ fn missing_viewport_schedules_column_thumbnails_for_full_window_height() {
     assert_eq!(requests.len(), initial_rows.min(120));
 }
 
+#[test]
+fn finished_directory_load_starts_visible_thumbnails_at_once() {
+    // 目录读完当场就把可见项缩略图送出去，不等固定延时（Nautilus 同）。
+    let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
+    browser.view_mode = BrowserViewMode::List;
+    browser.current_dir = PathBuf::from("/workspace");
+    let image = image_entry("/workspace/a.png");
+    let generation = browser.directory_load_generation;
+
+    drop(browser.accept_complete_directory_fixture(
+        crate::model::DirectoryLoadRequest {
+            pane_id: BrowserPaneId::PRIMARY,
+            path: PathBuf::from("/workspace"),
+            generation,
+        },
+        file_core::DirectoryScan {
+            path: PathBuf::from("/workspace"),
+            entries: vec![image.clone()],
+            skipped: Vec::new(),
+        },
+    ));
+
+    let request = request_for_entry(&image, LIST_THUMBNAIL_EDGE).unwrap();
+    assert!(browser.thumbnail_cache.is_in_flight(&request.key()));
+}
+
 fn drain_scheduled_requests(browser: &mut FileBrowser) -> Vec<PathBuf> {
     let mut sources = Vec::new();
     loop {

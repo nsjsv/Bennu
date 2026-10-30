@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use file_core::FileKind;
 use iced::Task;
 
+use crate::app::global_error::GlobalErrorSource;
 use crate::app::FileBrowser;
 use crate::model::{Message, RemotePreviewCacheMessage};
 use bennu_preview::engine::RemotePreviewCacheCompletion;
@@ -22,7 +23,7 @@ impl FileBrowser {
         let command = self
             .preview_engine
             .start_remote_preview_download(source_path, max_file_bytes);
-        self.clear_global_error();
+        self.retract_global_error(GlobalErrorSource::Preview);
         self.sync_preview_window_focus();
         command.map(Message::Preview)
     }

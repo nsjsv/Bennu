@@ -6,6 +6,7 @@ use desktop_linux::{
 use file_core::{entry_name_with_suffix, TransferConflictStrategy};
 use iced::Task;
 
+use crate::app::global_error::GlobalErrorSource;
 use crate::app::paths::{self, PasteTargetMode};
 use crate::app::FileBrowser;
 use crate::commands::{
@@ -292,8 +293,8 @@ impl FileBrowser {
         result: Result<(), String>,
     ) -> Task<Message> {
         match result {
-            Ok(()) => self.clear_global_error(),
-            Err(error) => self.show_global_error(error),
+            Ok(()) => self.retract_global_error(GlobalErrorSource::ClipboardWrite),
+            Err(error) => self.show_global_error_from(GlobalErrorSource::ClipboardWrite, error),
         }
         Task::none()
     }

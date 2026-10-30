@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use iced::Task;
 
+use super::global_error::GlobalErrorSource;
 use super::FileBrowser;
 use crate::commands::{open_with_application_command, open_with_applications_command};
 use crate::model::Message;
@@ -41,16 +42,16 @@ impl FileBrowser {
         match applications {
             Ok(applications) => {
                 if open_with.accept_application_list(applications) {
-                    self.clear_global_error();
+                    self.retract_global_error(GlobalErrorSource::Launch);
                 }
             }
             Err(error) => {
                 let fallback_error = open_with.fallback_error().map(str::to_owned);
                 self.open_with = None;
-                self.show_global_error(open_with_error_with_fallback(
-                    fallback_error.as_deref(),
-                    &error,
-                ));
+                self.show_global_error_from(
+                    GlobalErrorSource::Launch,
+                    open_with_error_with_fallback(fallback_error.as_deref(), &error),
+                );
             }
         }
         Task::none()
@@ -70,7 +71,7 @@ impl FileBrowser {
         let path = open_with.path().clone();
         let launch_mode = open_with.launch_mode();
         self.open_with = None;
-        self.clear_global_error();
+        self.retract_global_error(GlobalErrorSource::Launch);
         open_with_application_command(path, desktop_id, launch_mode)
     }
 
@@ -79,8 +80,8 @@ impl FileBrowser {
         result: Result<(), String>,
     ) -> Task<Message> {
         match result {
-            Ok(()) => self.clear_global_error(),
-            Err(error) => self.show_global_error(error),
+            Ok(()) => self.retract_global_error(GlobalErrorSource::Launch),
+            Err(error) => self.show_global_error_from(GlobalErrorSource::Launch, error),
         }
         Task::none()
     }

@@ -1,3 +1,4 @@
+use super::global_error::GlobalErrorSource;
 use super::FileBrowser;
 use crate::model::{Message, NavigationMode, ScrollbarRegion as Region};
 use iced::Task;
@@ -121,7 +122,7 @@ impl FileBrowser {
                 Task::none()
             }
             Message::OpenFileFinished(_, Ok(())) => {
-                self.clear_global_error();
+                self.retract_global_error(GlobalErrorSource::Launch);
                 Task::none()
             }
             Message::OpenFileFinished(path, Err(error)) => {
@@ -141,11 +142,11 @@ impl FileBrowser {
                 self.accept_open_with_application_finished(result)
             }
             Message::OpenTerminalFinished(Ok(())) => {
-                self.clear_global_error();
+                self.retract_global_error(GlobalErrorSource::Launch);
                 Task::none()
             }
             Message::OpenTerminalFinished(Err(error)) => {
-                self.show_global_error(error);
+                self.show_global_error_from(GlobalErrorSource::Launch, error);
                 Task::none()
             }
             Message::PreviewLoaded(path, outcome) => self.accept_preview(path, outcome),
@@ -929,11 +930,11 @@ impl FileBrowser {
                 crate::commands::open_about_repository_link_command()
             }
             Message::AboutRepositoryLinkOpened(Ok(())) => {
-                self.clear_global_error();
+                self.retract_global_error(GlobalErrorSource::Launch);
                 Task::none()
             }
             Message::AboutRepositoryLinkOpened(Err(error)) => {
-                self.show_global_error(error);
+                self.show_global_error_from(GlobalErrorSource::Launch, error);
                 Task::none()
             }
             Message::ContextMenuSettingsPageShifted(step) => {
@@ -1259,8 +1260,10 @@ impl FileBrowser {
             Message::CreateSymlinkSelected => self.create_symlinks_for_selection(),
             Message::PathTextCopied(result) => {
                 match result {
-                    Ok(()) => self.clear_global_error(),
-                    Err(error) => self.show_global_error(error),
+                    Ok(()) => self.retract_global_error(GlobalErrorSource::ClipboardWrite),
+                    Err(error) => {
+                        self.show_global_error_from(GlobalErrorSource::ClipboardWrite, error)
+                    }
                 };
                 Task::none()
             }

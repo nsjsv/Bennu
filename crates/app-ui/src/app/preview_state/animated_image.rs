@@ -10,6 +10,7 @@ use iced::Task;
 
 use super::FileBrowser;
 use crate::animated_image_preview::AnimatedImagePreview;
+use crate::app::global_error::GlobalErrorSource;
 use crate::model::Message;
 
 impl FileBrowser {
@@ -28,7 +29,7 @@ impl FileBrowser {
             acceptance,
             bennu_preview::engine::PreviewAcceptance::ContentReady
         ) {
-            self.clear_global_error();
+            self.retract_global_error(GlobalErrorSource::Preview);
         }
         self.sync_preview_window_focus();
         command.map(Message::Preview)

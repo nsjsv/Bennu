@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use file_core::{SortDirection, SortField};
 use iced::Task;
 
+use super::global_error::GlobalErrorSource;
 use super::FileBrowser;
 use crate::commands::load_directory_command;
 use crate::model::{
@@ -113,7 +114,11 @@ impl FileBrowser {
         self.back_stack.clear();
         self.forward_stack.clear();
         self.directory_collection_phase = DirectoryCollectionPhase::Discovering;
-        self.replace_global_error(error);
+        // 换到启动目录：上一处目录的加载错误过时了；启动目录本身的问题是一条不归来源的提示。
+        self.retract_global_error(GlobalErrorSource::DirectoryLoad);
+        if let Some(error) = error {
+            self.show_global_error(error);
+        }
         self.tabs = vec![{
             let mut tab = crate::model::BrowserTab::directory(0, directory.clone());
             tab.view_mode = self.view_mode;
@@ -163,7 +168,7 @@ impl FileBrowser {
         self.pane_layout = self.pane_layout.with_active(active_pane.id);
         self.restore_pane_snapshot(active_pane);
         self.directory_collection_phase = DirectoryCollectionPhase::Discovering;
-        self.clear_global_error();
+        self.retract_global_error(GlobalErrorSource::DirectoryLoad);
         self.sync_active_pane_state();
 
         Task::batch([

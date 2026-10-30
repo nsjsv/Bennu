@@ -516,7 +516,7 @@ impl FileBrowser {
             return Task::none();
         }
         if button == mouse::Button::Left {
-            self.clear_global_error();
+            self.dismiss_global_error();
         }
 
         if self.preview_window == Some(self.focused_window) {

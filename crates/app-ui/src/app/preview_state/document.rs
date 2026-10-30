@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 use iced::Task;
 
+use crate::app::global_error::GlobalErrorSource;
 use crate::app::smooth_scroll::smooth_scroll_id;
 use crate::app::FileBrowser;
 use crate::document_preview::{DocumentPageRenderOutcome, DocumentPreviewMessage};
@@ -44,7 +45,7 @@ impl FileBrowser {
         let command = self
             .preview_engine
             .start_document_preview(path, max_file_bytes);
-        self.clear_global_error();
+        self.retract_global_error(GlobalErrorSource::Preview);
         self.sync_preview_window_focus();
         let session_save = self.request_browser_session_save();
         Task::batch([command.map(Message::Preview), session_save])

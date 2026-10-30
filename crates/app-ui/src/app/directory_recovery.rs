@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use iced::Task;
 
+use super::global_error::GlobalErrorSource;
 use super::FileBrowser;
 use crate::commands::load_directory_command;
 use crate::model::{
@@ -39,7 +40,7 @@ impl FileBrowser {
             }
             DirectoryLoadFailure::ReadFailed { message } => {
                 self.finish_active_failed_directory_load();
-                self.show_global_error(message);
+                self.show_global_error_from(GlobalErrorSource::DirectoryLoad, message);
                 Task::none()
             }
         }
@@ -65,7 +66,7 @@ impl FileBrowser {
                 if let Some(pane) = self.pane_by_id_mut(request.pane_id) {
                     finish_failed_directory_load_for_pane(pane);
                 }
-                self.show_global_error(message);
+                self.show_global_error_from(GlobalErrorSource::DirectoryLoad, message);
                 Task::none()
             }
         }
@@ -78,7 +79,7 @@ impl FileBrowser {
     ) -> Task<Message> {
         let Some(parent_directory) = unavailable_directory.parent().map(ToOwned::to_owned) else {
             self.finish_active_failed_directory_load();
-            self.show_global_error(unavailable_message);
+            self.show_global_error_from(GlobalErrorSource::DirectoryLoad, unavailable_message);
             return Task::none();
         };
 
@@ -105,7 +106,7 @@ impl FileBrowser {
             if let Some(pane) = self.pane_by_id_mut(request.pane_id) {
                 finish_failed_directory_load_for_pane(pane);
             }
-            self.show_global_error(unavailable_message);
+            self.show_global_error_from(GlobalErrorSource::DirectoryLoad, unavailable_message);
             return Task::none();
         };
 
@@ -140,7 +141,9 @@ impl FileBrowser {
             DirectoryLoadFailure::DirectoryUnavailable { .. } => {
                 self.discard_unavailable_expanded_directory(pane_id, unavailable_directory);
             }
-            DirectoryLoadFailure::ReadFailed { message } => self.show_global_error(message),
+            DirectoryLoadFailure::ReadFailed { message } => {
+                self.show_global_error_from(GlobalErrorSource::DirectoryLoad, message)
+            }
         }
     }
 

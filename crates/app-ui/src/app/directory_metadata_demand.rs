@@ -8,6 +8,7 @@ use file_core::{
 };
 use iced::Task;
 
+use super::global_error::GlobalErrorSource;
 use super::{DirectoryMetadataDemandKey, FileBrowser};
 use crate::commands::load_directory_metadata_command;
 use crate::model::{
@@ -519,7 +520,7 @@ impl FileBrowser {
             Ok(_) => return Task::none(),
             Err(DirectoryMetadataLoadFailure::Cancelled) => return Task::none(),
             Err(DirectoryMetadataLoadFailure::ReadFailed(message)) => {
-                self.show_global_error(message);
+                self.show_global_error_from(GlobalErrorSource::DirectoryLoad, message);
                 return Task::none();
             }
         };
@@ -530,7 +531,7 @@ impl FileBrowser {
             resolution.warnings.len(),
         );
         if let Some(warning) = resolution.warnings.first() {
-            self.show_global_error(warning.message.clone());
+            self.show_global_error_from(GlobalErrorSource::DirectoryLoad, warning.message.clone());
         }
         self.commit_requested_metadata_sort_if_ready(&request.context, request.request_generation)
     }

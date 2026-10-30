@@ -10,6 +10,7 @@ use file_core::ArchivePassword;
 use iced::Task;
 
 use super::archive_password::ArchivePasswordDraft;
+use super::global_error::GlobalErrorSource;
 use super::FileBrowser;
 use crate::model::Message;
 use crate::operation_queue::QueuedFileOperation;
@@ -216,7 +217,7 @@ impl FileBrowser {
         match outcome {
             ArchiveMemberOpenOutcome::Opened => {
                 self.archive_member_password = None;
-                self.clear_global_error();
+                self.retract_global_error(GlobalErrorSource::ArchiveMemberOpen);
                 Task::none()
             }
             ArchiveMemberOpenOutcome::InvalidPassword => {
@@ -225,7 +226,7 @@ impl FileBrowser {
             }
             ArchiveMemberOpenOutcome::Failed(error) => {
                 self.archive_member_password = None;
-                self.show_global_error(error);
+                self.show_global_error_from(GlobalErrorSource::ArchiveMemberOpen, error);
                 Task::none()
             }
         }

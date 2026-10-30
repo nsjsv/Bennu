@@ -4,7 +4,8 @@ use file_core::{is_supported_archive_path, FileKind};
 use iced::Task;
 
 use super::super::{
-    right_preview_panel::PreviewLoadSurface, FileBrowser, PendingKeyboardColumnFocus,
+    global_error::GlobalErrorSource, right_preview_panel::PreviewLoadSurface, FileBrowser,
+    PendingKeyboardColumnFocus,
 };
 use crate::commands::{
     animated_image_preview_command, image_preview_dimensions_command,
@@ -529,7 +530,7 @@ impl FileBrowser {
             self.preview_window_presentation_command(PreviewWindowProfile::Regular);
         self.clear_preview();
         self.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
-        self.clear_global_error();
+        self.retract_global_error(GlobalErrorSource::Preview);
         let max_file_bytes = self.preview_file_size_limit_for(&path);
         Task::batch([
             window_command,
@@ -553,7 +554,7 @@ impl FileBrowser {
             crate::preview::PreviewPathKind::Document => self.start_document_preview(path),
             crate::preview::PreviewPathKind::AnimatedImage => {
                 self.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
-                self.clear_global_error();
+                self.retract_global_error(GlobalErrorSource::Preview);
                 let max_file_bytes = self.preview_file_size_limit_for(&path);
                 let generation = self.next_animated_image_preview_generation();
                 Task::batch([
@@ -563,7 +564,7 @@ impl FileBrowser {
             }
             crate::preview::PreviewPathKind::Image => {
                 self.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
-                self.clear_global_error();
+                self.retract_global_error(GlobalErrorSource::Preview);
                 let generation = self.next_original_image_preview_generation();
                 Task::batch([
                     image_preview_dimensions_command(path, generation),
@@ -572,7 +573,7 @@ impl FileBrowser {
             }
             crate::preview::PreviewPathKind::Video => {
                 self.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
-                self.clear_global_error();
+                self.retract_global_error(GlobalErrorSource::Preview);
                 let max_file_bytes = self.preview_file_size_limit_for(&path);
                 preview_command(
                     path,
@@ -587,7 +588,7 @@ impl FileBrowser {
                     self.preview_window_presentation_command(PreviewWindowProfile::Audio);
                 self.clear_preview();
                 self.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
-                self.clear_global_error();
+                self.retract_global_error(GlobalErrorSource::Preview);
                 self.preview_engine.audio_preview =
                     Some(AudioPreviewPlayback::loading(path.clone()));
                 let max_file_bytes = self.preview_file_size_limit_for(&path);
@@ -611,7 +612,7 @@ impl FileBrowser {
                     self.preview_window_presentation_command(PreviewWindowProfile::Regular);
                 self.clear_preview();
                 self.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
-                self.clear_global_error();
+                self.retract_global_error(GlobalErrorSource::Preview);
                 let max_file_bytes = self.preview_file_size_limit_for(&path);
                 Task::batch([
                     window_command,

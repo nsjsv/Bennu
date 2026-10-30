@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
+use super::global_error::GlobalErrorSource;
 use super::FileBrowser;
 use crate::commands::{
     delayed_thumbnail_refresh_command, load_directory_command, load_expanded_directory_command,
@@ -251,7 +252,7 @@ impl FileBrowser {
         self.directory_loading_placeholder = None;
         self.directory_collection_phase = DirectoryCollectionPhase::Ready;
         self.directory_order_phase = order_phase;
-        self.clear_global_error();
+        self.retract_global_error(GlobalErrorSource::DirectoryLoad);
         startup_trace::record_directory_collection_ready(self.entries.len());
         if self.directory_order_phase.is_ready() {
             startup_trace::mark_once("initial_directory_ready");
@@ -297,7 +298,7 @@ impl FileBrowser {
         self.column_viewports.clear();
         self.clear_selection_context();
         self.directory_collection_phase = DirectoryCollectionPhase::Discovering;
-        self.clear_global_error();
+        self.retract_global_error(GlobalErrorSource::DirectoryLoad);
         self.sync_active_tab_state();
         let request = self.next_directory_load_request(path);
         let cancellation = self.directory_load_cancellation(&request);
@@ -353,7 +354,7 @@ impl FileBrowser {
         } else {
             DirectoryCollectionPhase::Discovering
         };
-        self.clear_global_error();
+        self.retract_global_error(GlobalErrorSource::DirectoryLoad);
         self.cancel_active_directory_load();
         self.sync_active_tab_state();
         Task::batch([
@@ -396,7 +397,7 @@ impl FileBrowser {
             } else {
                 DirectoryCollectionPhase::Discovering
             };
-            self.clear_global_error();
+            self.retract_global_error(GlobalErrorSource::DirectoryLoad);
             self.cancel_active_directory_load();
             self.deepest_open_column_directory = None;
             self.cancel_active_expanded_directory_loads();
@@ -407,7 +408,7 @@ impl FileBrowser {
 
         self.directory_loading_placeholder = None;
         self.directory_collection_phase = DirectoryCollectionPhase::Discovering;
-        self.clear_global_error();
+        self.retract_global_error(GlobalErrorSource::DirectoryLoad);
 
         let mut commands = self.refresh_expanded_directory_commands();
         commands.extend(self.refresh_icon_grid_expansion_commands());

@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use file_core::{validate_entry_name, ResolvedEntryChange};
 
+use super::global_error::GlobalErrorSource;
 use super::FileBrowser;
 use crate::commands::file_operation_driver_task;
 use crate::model::{
@@ -671,7 +672,7 @@ impl FileBrowser {
         operation: QueuedFileOperation,
         pending_history: Option<PendingHistoryOperation>,
     ) -> Task<Message> {
-        self.clear_global_error();
+        self.retract_global_error(GlobalErrorSource::FileOperationEnqueue);
         match self.operation_queue.enqueue(operation) {
             FileOperationEnqueueOutcome::Queued { task_id } => {
                 if let Some(pending_history) = pending_history {
@@ -680,7 +681,7 @@ impl FileBrowser {
                 }
             }
             FileOperationEnqueueOutcome::Rejected { error } => {
-                self.show_global_error(error);
+                self.show_global_error_from(GlobalErrorSource::FileOperationEnqueue, error);
                 if let Some(pending_history) = pending_history {
                     self.operation_history.reject_pending(pending_history);
                 }

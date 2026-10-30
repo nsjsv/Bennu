@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use iced::Task;
 
+use super::global_error::GlobalErrorSource;
 use super::FileBrowser;
 use crate::model::{Message, PreviewContent};
 
@@ -42,7 +43,7 @@ impl FileBrowser {
             acceptance,
             bennu_preview::engine::PreviewAcceptance::ContentReady
         ) {
-            self.clear_global_error();
+            self.retract_global_error(GlobalErrorSource::Preview);
         }
         command.map(Message::Preview)
     }
@@ -68,7 +69,7 @@ impl FileBrowser {
             .preview_engine
             .seek_audio_preview_playback(position_seconds)
         {
-            self.show_global_error(error);
+            self.show_global_error_from(GlobalErrorSource::Preview, error);
         }
         Task::none()
     }

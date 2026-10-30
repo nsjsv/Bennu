@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use file_core::{DirectoryDiscoveryBatch, DirectoryEntry};
 use iced::Task;
 
+use super::global_error::GlobalErrorSource;
 use super::panes::BrowserPaneView;
 use super::FileBrowser;
 use crate::commands::load_expanded_directory_command;
@@ -526,7 +527,7 @@ impl FileBrowser {
                 if let Some(state) = self.icon_grid_expansion.as_mut() {
                     state.cancel_follow_plan();
                 }
-                self.show_global_error(message);
+                self.show_global_error_from(GlobalErrorSource::DirectoryLoad, message);
             }
         }
 

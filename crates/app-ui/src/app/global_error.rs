@@ -5,26 +5,45 @@ use crate::model::sanitized_application_log_detail;
 
 const ERROR_NOTIFICATION_DISPLAY_DURATION: Duration = Duration::from_secs(5);
 
+/// 能收回自己报的错的来源：同一件事后来成功了（或重新开始），它的旧错误就过时了。
+/// 别的来源、别的事件都动不了这条错误（同 libadwaita：toast 只由创建它的代码撤回）。
+/// 不归任何来源的错误只会到期、被用户关闭或被新错误替换。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum GlobalErrorSource {
+    /// 目录、展开目录与目录元数据的加载。
+    DirectoryLoad,
+    /// 打开文件、打开方式、打开终端。
+    Launch,
+    Preview,
+    ArchiveMemberOpen,
+    /// 复制路径文本、写文件剪贴板。
+    ClipboardWrite,
+    FileOperationEnqueue,
+}
+
 pub(super) struct GlobalErrorNotification {
     message: String,
+    source: Option<GlobalErrorSource>,
     generation: u64,
     remaining: Duration,
     countdown_started_at: Option<Instant>,
 }
 
 impl GlobalErrorNotification {
-    fn new(message: String, generation: u64) -> Self {
+    fn new(message: String, source: Option<GlobalErrorSource>, generation: u64) -> Self {
         Self {
             message,
+            source,
             generation,
             remaining: ERROR_NOTIFICATION_DISPLAY_DURATION,
             countdown_started_at: Some(Instant::now()),
         }
     }
 
-    fn new_paused(message: String, generation: u64) -> Self {
+    fn new_paused(message: String, source: Option<GlobalErrorSource>, generation: u64) -> Self {
         Self {
             message,
+            source,
             generation,
             remaining: ERROR_NOTIFICATION_DISPLAY_DURATION,
             countdown_started_at: None,
@@ -97,8 +116,37 @@ impl FileBrowser {
             })
     }
 
+    /// 不归任何来源的错误：只会到期、被用户关闭或被新错误替换。
     pub(super) fn show_global_error(&mut self, error: impl Into<String>) {
-        let error = error.into();
+        self.show_global_error_notification(error.into(), None);
+    }
+
+    /// 归 `source` 所有的错误：该来源后来成功或重新开始时由 `retract_global_error` 收回。
+    pub(super) fn show_global_error_from(
+        &mut self,
+        source: GlobalErrorSource,
+        error: impl Into<String>,
+    ) {
+        self.show_global_error_notification(error.into(), Some(source));
+    }
+
+    /// 只收回 `source` 自己报的、仍在显示的错误。
+    pub(super) fn retract_global_error(&mut self, source: GlobalErrorSource) {
+        if self
+            .global_error_notification
+            .as_ref()
+            .is_some_and(|notification| notification.source == Some(source))
+        {
+            self.clear_global_error();
+        }
+    }
+
+    /// 用户动作接管了界面（打开模态框）时关掉任何错误。
+    pub(super) fn dismiss_global_error(&mut self) {
+        self.clear_global_error();
+    }
+
+    fn show_global_error_notification(&mut self, error: String, source: Option<GlobalErrorSource>) {
         let log_error = sanitized_application_log_detail(&error);
         record_global_error(&log_error);
         let notification_was_paused = self
@@ -107,21 +155,14 @@ impl FileBrowser {
             .is_some_and(|notification| notification.countdown_started_at.is_none());
         let generation = self.next_global_error_notification_generation();
         self.global_error_notification = Some(if notification_was_paused {
-            GlobalErrorNotification::new_paused(error, generation)
+            GlobalErrorNotification::new_paused(error, source, generation)
         } else {
-            GlobalErrorNotification::new(error, generation)
+            GlobalErrorNotification::new(error, source, generation)
         });
     }
 
-    pub(super) fn clear_global_error(&mut self) {
+    fn clear_global_error(&mut self) {
         self.global_error_notification = None;
-    }
-
-    pub(super) fn replace_global_error(&mut self, error: Option<String>) {
-        self.clear_global_error();
-        if let Some(error) = error {
-            self.show_global_error(error);
-        }
     }
 
     pub(super) fn pause_global_error_notification(&mut self, generation: u64) {
@@ -222,16 +263,67 @@ mod tests {
         );
         assert_eq!(recorded_global_error_count(), 1);
 
-        browser.clear_global_error();
+        browser.dismiss_global_error();
         assert_eq!(browser.current_error(), None);
-        browser.replace_global_error(Some("replacement failure".to_owned()));
+        browser.show_global_error("replacement failure");
         assert_eq!(browser.current_error(), Some("replacement failure"));
+    }
+
+    #[test]
+    fn a_source_retracts_only_its_own_error() {
+        let (mut browser, _) = FileBrowser::new(config::default_user_config());
+        browser.show_global_error_from(GlobalErrorSource::Launch, "could not open");
+
+        browser.retract_global_error(GlobalErrorSource::DirectoryLoad);
+        assert_eq!(browser.current_error(), Some("could not open"));
+
+        browser.retract_global_error(GlobalErrorSource::Launch);
+        assert_eq!(browser.current_error(), None);
+    }
+
+    #[test]
+    fn no_source_retracts_an_error_that_belongs_to_none() {
+        let (mut browser, _) = FileBrowser::new(config::default_user_config());
+        browser.show_global_error("settings were reset");
+
+        for source in [
+            GlobalErrorSource::DirectoryLoad,
+            GlobalErrorSource::Launch,
+            GlobalErrorSource::Preview,
+            GlobalErrorSource::ArchiveMemberOpen,
+            GlobalErrorSource::ClipboardWrite,
+            GlobalErrorSource::FileOperationEnqueue,
+        ] {
+            browser.retract_global_error(source);
+        }
+
+        assert_eq!(browser.current_error(), Some("settings were reset"));
+    }
+
+    #[test]
+    fn reloading_the_directory_keeps_an_error_reported_elsewhere() {
+        let (mut browser, _) = FileBrowser::new(config::default_user_config());
+        browser.show_global_error("settings were reset");
+
+        drop(browser.reload_visible_panes());
+
+        assert_eq!(browser.current_error(), Some("settings were reset"));
+    }
+
+    #[test]
+    fn reloading_the_directory_retracts_its_own_earlier_load_error() {
+        let (mut browser, _) = FileBrowser::new(config::default_user_config());
+        browser.show_global_error_from(GlobalErrorSource::DirectoryLoad, "permission denied");
+
+        drop(browser.reload_visible_panes());
+
+        assert_eq!(browser.current_error(), None);
     }
 
     #[test]
     fn error_notification_pause_preserves_remaining_duration() {
         let started_at = Instant::now();
-        let mut notification = GlobalErrorNotification::new("failure".to_owned(), 1);
+        let mut notification = GlobalErrorNotification::new("failure".to_owned(), None, 1);
         notification.countdown_started_at = Some(started_at);
 
         notification.pause(started_at + Duration::from_secs(2));

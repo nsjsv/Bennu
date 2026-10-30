@@ -33,9 +33,9 @@ optdepends=(
 )
 provides=('file-manager')
 conflicts=('file-manager')
-source_x86_64=("https://github.com/nsjsv/Bennu/releases/download/v${pkgver}/bennu-v${pkgver}-x86_64.tar.xz")
+source_x86_64=("https://github.com/nsjsv/Bennu/releases/download/v${pkgver}/bennu-${pkgver}-x86_64.tar.xz")
 sha256sums_x86_64=('@SHA256_X86_64@')
 
 package() {
-    cp -a "${srcdir}/bennu-v${pkgver}-x86_64/usr" "${pkgdir}/"
+    cp -a "${srcdir}/bennu-${pkgver}-x86_64/usr" "${pkgdir}/"
 }

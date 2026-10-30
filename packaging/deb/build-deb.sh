@@ -135,9 +135,4 @@ mkdir -p "${dist_dir}"
 dpkg-deb --build --root-owner-group "${deb_dir}" \
     "${dist_dir}/${APP_NAME}_${SEMVER}-${DEB_REVISION}_${DEB_ARCH}.deb"
 
-(
-    cd "${dist_dir}"
-    sha256sum "${APP_NAME}_${SEMVER}-${DEB_REVISION}_${DEB_ARCH}.deb" > SHA256SUMS.deb
-)
-
 echo "built: ${dist_dir}/${APP_NAME}_${SEMVER}-${DEB_REVISION}_${DEB_ARCH}.deb"

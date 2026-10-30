@@ -29,8 +29,8 @@ env:
   ARCH: x86_64
 
 jobs:
-  linux-release:
-    name: Build Linux release
+  tarball-release:
+    name: Build tarball
     outputs:
       semver: ${{ steps.metadata.outputs.semver }}
       sha256_x86_64: ${{ steps.package.outputs.sha256_x86_64 }}
@@ -69,7 +69,8 @@ jobs:
           fi
 
           semver="${version#v}"
-          package_dir="${APP_NAME}-${version}-${ARCH}"
+          # 与 deb/rpm 一致只写版本号，不带 tag 的 v 前缀。
+          package_dir="${APP_NAME}-${semver}-${ARCH}"
           asset_name="${package_dir}.tar.xz"
 
           {
@@ -112,25 +113,24 @@ jobs:
           # xz -T0 多线程压缩：压缩率优于 gzip（76MB 二进制 20MB 级），
           # 耗时由并行度抵消；makepkg 与 GNU tar 原生识别 .tar.xz。
           XZ_OPT="-9 -T0" tar -C dist -cJf "${asset_name}" "${package_dir}"
-          sha256sum "${asset_name}" > SHA256SUMS
-          read -r tarball_sha256 _ < SHA256SUMS
+          read -r tarball_sha256 _ < <(sha256sum "${asset_name}")
           echo "sha256_x86_64=${tarball_sha256}" >> "${GITHUB_OUTPUT}"
 
-      - name: Stage Linux release assets
+      - name: Stage tarball release assets
         run: |
           mkdir -p release-assets
-          cp "${{ steps.metadata.outputs.asset_name }}" SHA256SUMS release-assets/
+          cp "${{ steps.metadata.outputs.asset_name }}" release-assets/
 
-      - name: Upload Linux release assets
+      - name: Upload tarball release assets
         uses: actions/upload-artifact@v7
         with:
-          name: linux-release-assets
+          name: tarball-release-assets
           path: release-assets
           if-no-files-found: error
 
   aur-release:
-    name: Publish AUR package
-    needs: linux-release
+    name: Publish to AUR
+    needs: tarball-release
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     container:
@@ -148,8 +148,8 @@ jobs:
           AUR_KNOWN_HOSTS: ${{ secrets.AUR_KNOWN_HOSTS }}
           AUR_COMMIT_NAME: ${{ secrets.AUR_COMMIT_NAME }}
           AUR_COMMIT_EMAIL: ${{ secrets.AUR_COMMIT_EMAIL }}
-          PKGVER: ${{ needs.linux-release.outputs.semver }}
-          SHA256_X86_64: ${{ needs.linux-release.outputs.sha256_x86_64 }}
+          PKGVER: ${{ needs.tarball-release.outputs.semver }}
+          SHA256_X86_64: ${{ needs.tarball-release.outputs.sha256_x86_64 }}
         run: |
           if [[ -z "${AUR_SSH_PRIVATE_KEY}" ]]; then
             echo "::error::AUR_SSH_PRIVATE_KEY secret is required to publish bennu-bin"
@@ -210,7 +210,7 @@ jobs:
           fi
 
   deb-release:
-    name: Build Debian package
+    name: Build .deb package
     runs-on: ubuntu-latest
     container:
       image: ubuntu:24.04
@@ -218,15 +218,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Build Debian package
+      - name: Build .deb package
         run: packaging/deb/build-deb.sh "${GITHUB_REF_NAME#v}"
 
-      - name: Stage Debian release assets
+      - name: Stage .deb release assets
         run: |
           mkdir -p release-assets
-          cp dist/*.deb dist/SHA256SUMS.deb release-assets/
+          cp dist/*.deb release-assets/
 
-      - name: Upload Debian release assets
+      - name: Upload .deb release assets
         uses: actions/upload-artifact@v7
         with:
           name: deb-release-assets
@@ -234,7 +234,7 @@ jobs:
           if-no-files-found: error
 
   rpm-release:
-    name: Build RPM package
+    name: Build .rpm package
     runs-on: ubuntu-latest
     container:
       image: fedora:latest
@@ -242,15 +242,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Build RPM package
+      - name: Build .rpm package
         run: packaging/rpm/build-rpm.sh "${GITHUB_REF_NAME#v}"
 
-      - name: Stage RPM release assets
+      - name: Stage .rpm release assets
         run: |
           mkdir -p release-assets
-          cp dist/x86_64/*.rpm dist/SHA256SUMS.rpm release-assets/
+          cp dist/x86_64/*.rpm release-assets/
 
-      - name: Upload RPM release assets
+      - name: Upload .rpm release assets
         uses: actions/upload-artifact@v7
         with:
           name: rpm-release-assets
@@ -260,7 +260,7 @@ jobs:
   publish-release:
     name: Publish GitHub release
     needs:
-      - linux-release
+      - tarball-release
       - deb-release
       - rpm-release
     runs-on: ubuntu-latest
@@ -278,20 +278,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           shopt -s nullglob
-          assets=(
-            dist/bennu-v*.tar.xz
-            dist/SHA256SUMS
-            dist/bennu_*.deb
-            dist/SHA256SUMS.deb
-            dist/bennu-*.rpm
-            dist/SHA256SUMS.rpm
+          cd dist
+          packages=(
+            bennu-*.tar.xz
+            bennu_*.deb
+            bennu-*.rpm
           )
 
-          if ((${#assets[@]} != 6)); then
-            echo "::error::Expected six release assets, found ${#assets[@]}"
-            printf '%s\n' "${assets[@]}"
+          if ((${#packages[@]} != 3)); then
+            echo "::error::Expected three packages, found ${#packages[@]}"
+            printf '%s\n' "${packages[@]}"
             exit 1
           fi
+
+          # 校验文件在合并后的资产目录里统一生成：只列裸文件名，用户把
+          # 包和 SHA256SUMS 下载到同一目录即可 sha256sum -c。
+          sha256sum "${packages[@]}" > SHA256SUMS
+          assets=("${packages[@]}" SHA256SUMS)
 
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
             gh release upload "${GITHUB_REF_NAME}" "${assets[@]}" --clobber

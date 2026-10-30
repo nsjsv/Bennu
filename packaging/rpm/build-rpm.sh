@@ -88,9 +88,4 @@ rm -rf "${dist_dir}/rpm-buildroot"
 rpm_path="${dist_dir}/x86_64/${APP_NAME}-${SEMVER}-1.*.rpm"
 test -n "$(compgen -G "${rpm_path}")"
 
-(
-    cd "${dist_dir}"
-    sha256sum x86_64/*.rpm > SHA256SUMS.rpm
-)
-
 echo "built: ${dist_dir}/x86_64/"

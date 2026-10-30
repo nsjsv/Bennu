@@ -25,7 +25,7 @@ use crate::localization::translate_current;
 use crate::model::Message;
 use crate::operation_history::{
     CompletedTransfer, FileOperationCompletion, FileOperationHistoryEligibility,
-    FileOperationOutcome,
+    FileOperationOutcome, RenameRejection,
 };
 use crate::operation_progress::FileOperationProgressUpdate;
 use crate::operation_queue::{
@@ -33,7 +33,7 @@ use crate::operation_queue::{
 };
 
 use self::extract_members::run_queued_extract_archive_members;
-use super::batch_rename_operation::run_queued_batch_rename;
+use super::batch_rename_operation::{rename_failure_text, run_queued_batch_rename};
 use super::convert_operation::run_queued_convert;
 
 const FILE_OPERATION_CHANNEL_SIZE: usize = 32;
@@ -112,7 +112,7 @@ async fn run_queued_file_operation(
 ) -> FileOperationCompletion {
     let result = match operation {
         QueuedFileOperation::Rename { path, new_name } => {
-            run_queued_rename(path, new_name, controls, task_id, output).await
+            return run_queued_rename(path, new_name, controls, task_id, output).await;
         }
         QueuedFileOperation::BatchRename { items } => {
             send_file_operation_progress(
@@ -392,21 +392,35 @@ async fn run_queued_create_archive(
     }
 }
 
+/// 名字被占用、不合法或文件系统不能安全改名时结果是"被拒"而不是失败：
+/// 界面据此让用户换个名字。
 async fn run_queued_rename(
     path: PathBuf,
     new_name: OsString,
     mut controls: FileOperationControls,
     task_id: u64,
     output: &mut IcedSender<Message>,
-) -> Result<FileOperationOutcome, String> {
+) -> FileOperationCompletion {
     send_file_operation_progress(output, task_id, FileOperationProgressUpdate::Indeterminate).await;
-    controls
-        .wait_until_running()
-        .await
-        .map_err(|error| error.to_string())?;
-    let target = rename_entry(path.clone(), new_name)
-        .await
-        .map_err(|error| error.to_string())?;
+    if let Err(error) = controls.wait_until_running().await {
+        return FileOperationCompletion::from_result(Err(error.to_string()));
+    }
+    let target = match rename_entry(path.clone(), new_name.clone()).await {
+        Ok(target) => target,
+        Err(error) => {
+            return match RenameRejection::from_error(&error) {
+                Some(reason) => FileOperationCompletion::RenameRejected {
+                    path,
+                    attempted_name: new_name,
+                    reason,
+                },
+                None => FileOperationCompletion::from_result(Err(rename_failure_text(
+                    &error,
+                    crate::localization::current_language(),
+                ))),
+            };
+        }
+    };
     send_file_operation_progress(
         output,
         task_id,
@@ -416,7 +430,7 @@ async fn run_queued_rename(
         },
     )
     .await;
-    Ok(FileOperationOutcome::Rename {
+    FileOperationCompletion::Succeeded(FileOperationOutcome::Rename {
         from: path,
         to: target,
     })

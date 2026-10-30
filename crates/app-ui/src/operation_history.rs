@@ -1,10 +1,11 @@
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use bennu_localization::{LostAttributeKind, LostAttributesText, UiLanguage};
 use file_core::{
-    BatchRenameItem, CompletedBatchRename, FileOperationVerification, MetadataKind,
-    MetadataLossSummary, TransferConflictStrategy, TrashRestoreEntry,
+    BatchRenameItem, CompletedBatchRename, FileError, FileOperationVerification, InvalidEntryName,
+    MetadataKind, MetadataLossSummary, TransferConflictStrategy, TrashRestoreEntry,
 };
 
 use crate::operation_queue::{QueuedFileOperation, QueuedTransfer};
@@ -105,6 +106,50 @@ pub(crate) enum FileOperationCompletion {
         error: String,
         completed_move_transfers: Vec<CompletedTransfer>,
     },
+    /// 重命名在改动任何东西之前被拒。与 `Failed` 分开：用户发起的重命名据此
+    /// 重新打开输入框让用户换名字，而不只是弹一条错误。
+    RenameRejected {
+        path: PathBuf,
+        attempted_name: OsString,
+        reason: RenameRejection,
+    },
+}
+
+/// 重命名被拒的原因。输入时按已加载条目的预检与执行端的原子判定给出同一种原因。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RenameRejection {
+    NameTaken,
+    InvalidName(InvalidEntryName),
+    SafeRenameUnsupported,
+}
+
+impl RenameRejection {
+    pub(crate) fn from_error(error: &FileError) -> Option<Self> {
+        match error {
+            FileError::EntryNameTaken { .. } => Some(Self::NameTaken),
+            FileError::InvalidEntryName { reason, .. } => Some(Self::InvalidName(*reason)),
+            FileError::SafeRenameUnsupported { .. } => Some(Self::SafeRenameUnsupported),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn message(self, language: UiLanguage) -> String {
+        let text = match self {
+            Self::NameTaken => "A file or folder with this name already exists.",
+            Self::InvalidName(InvalidEntryName::Empty) => "Enter a name.",
+            Self::InvalidName(
+                InvalidEntryName::CurrentDirectory | InvalidEntryName::ParentDirectory,
+            ) => "\".\" and \"..\" cannot be used as names.",
+            Self::InvalidName(InvalidEntryName::ContainsSlash) => "Names cannot contain \"/\".",
+            Self::InvalidName(InvalidEntryName::ContainsNul) => {
+                "Names cannot contain NUL characters."
+            }
+            Self::SafeRenameUnsupported => {
+                "This file system cannot rename without risking an overwrite, so nothing was changed."
+            }
+        };
+        bennu_localization::translate(language, text).into_owned()
+    }
 }
 
 impl FileOperationCompletion {
@@ -146,6 +191,7 @@ impl FileOperationCompletion {
                     CompletedPathMigration::new(transfer.source.clone(), transfer.target.clone())
                 })
                 .collect(),
+            Self::RenameRejected { .. } => Vec::new(),
         }
     }
 }

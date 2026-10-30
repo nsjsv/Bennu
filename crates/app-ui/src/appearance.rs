@@ -45,6 +45,21 @@ pub(crate) use bennu_theme::styles::{
 use crate::file_entry_presentation::SelectionRunPosition;
 use crate::matugen_theme::ui_colors;
 
+/// 重命名输入框下方的原因提示：错误配色，与 tooltip 同款小圆角。
+pub(crate) fn rename_hint_style(theme: &Theme) -> container::Appearance {
+    let colors = ui_colors(theme);
+    container::Appearance {
+        background: Some(Background::Color(colors.error_container)),
+        text_color: Some(colors.on_error_container),
+        border: Border {
+            color: colors.error,
+            width: 1.0,
+            radius: 6.0.into(),
+        },
+        ..container::Appearance::default()
+    }
+}
+
 pub(crate) fn selected_row_style(theme: &Theme) -> container::Appearance {
     selected_row_style_for_run(SelectionRunPosition::Single)(theme)
 }

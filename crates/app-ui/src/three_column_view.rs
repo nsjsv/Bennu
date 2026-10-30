@@ -29,7 +29,9 @@ use crate::model::{
     BrowserPaneId, BrowserPaneLayout, ExpandedDirectoryStatus, Message, ScrollbarRegion, SplitAxis,
 };
 use crate::typography::readable_text;
-use crate::view::{column_browser_scroll_id, rename_input_id, translated_with_width_overflow};
+use crate::view::{
+    column_browser_scroll_id, rename_field, rename_input_id, translated_with_width_overflow,
+};
 use crate::virtual_range::{initial_virtual_range, virtual_range_for_viewport, VirtualRange};
 
 pub(crate) const COLUMN_RESIZE_DIVIDER_WIDTH: f32 = 5.0;
@@ -511,18 +513,21 @@ fn column_entry_row<'a>(
     let name: Element<'a, Message> = if pane.renaming == Some(&entry.path) {
         // 行槽高固定 24px（基准档），不显式压缩输入框时 iced 默认字号 16
         // 加默认 padding 5 会撑到 ~31px 溢出行槽，边框盖住文字。
-        text_input(
-            &crate::localization::translate_current("File name"),
-            pane.rename_input,
+        rename_field(
+            text_input(
+                &crate::localization::translate_current("File name"),
+                pane.rename_input,
+            )
+            .id(rename_input_id())
+            .on_input(Message::RenameInputChanged)
+            .on_submit(Message::RenameSelected)
+            .style(entry_text_input_style(modifier))
+            .padding([2, 4])
+            .size(geometry.text_size as u32)
+            .width(Length::Fill),
+            pane.rename_hint,
+            browser.active_language(),
         )
-        .id(rename_input_id())
-        .on_input(Message::RenameInputChanged)
-        .on_submit(Message::RenameSelected)
-        .style(entry_text_input_style(modifier))
-        .padding([2, 4])
-        .size(geometry.text_size as u32)
-        .width(Length::Fill)
-        .into()
     } else {
         container(measured_middle_ellipsized_text(
             entry.name().to_string_lossy().into_owned(),
@@ -801,6 +806,7 @@ mod tests {
             directory_collection_phase: crate::model::DirectoryCollectionPhase::Ready,
             renaming: None,
             rename_input: "",
+            rename_hint: None,
             file_drag: None,
             tab_bar_reveal_fraction: 0.0,
         }

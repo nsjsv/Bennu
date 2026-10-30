@@ -101,24 +101,43 @@ pub(super) fn incomplete_message(
     cause: &str,
     unrestored: &[UnrestoredRenameText],
 ) -> String {
+    let items = unrestored_items(language, unrestored);
     match language {
-        UiLanguage::English => {
-            let items = unrestored
-                .iter()
-                .map(|item| format!("{} → {} ({})", item.original, item.current, item.reason))
-                .collect::<Vec<_>>()
-                .join("; ");
-            format!(
-                "Batch rename failed and some items could not get their original names back: {items}. Original error: {cause}"
-            )
-        }
+        UiLanguage::English => format!(
+            "Batch rename failed and some items could not get their original names back: {items}. Original error: {cause}"
+        ),
         UiLanguage::Chinese => {
-            let items = unrestored
-                .iter()
-                .map(|item| format!("{} → {}（{}）", item.original, item.current, item.reason))
-                .collect::<Vec<_>>()
-                .join("；");
             format!("批量重命名失败，部分项目未能恢复原名：{items}。原始错误：{cause}")
         }
+    }
+}
+
+/// 单个重命名经临时名两步改名、又没能放回原名时的提示，条目清单格式与批量重命名一致。
+pub(super) fn single_incomplete_message(
+    language: UiLanguage,
+    cause: &str,
+    unrestored: &[UnrestoredRenameText],
+) -> String {
+    let items = unrestored_items(language, unrestored);
+    match language {
+        UiLanguage::English => format!(
+            "Rename failed and the item could not get its original name back: {items}. Original error: {cause}"
+        ),
+        UiLanguage::Chinese => format!("重命名失败，项目未能恢复原名：{items}。原始错误：{cause}"),
+    }
+}
+
+fn unrestored_items(language: UiLanguage, unrestored: &[UnrestoredRenameText]) -> String {
+    match language {
+        UiLanguage::English => unrestored
+            .iter()
+            .map(|item| format!("{} → {} ({})", item.original, item.current, item.reason))
+            .collect::<Vec<_>>()
+            .join("; "),
+        UiLanguage::Chinese => unrestored
+            .iter()
+            .map(|item| format!("{} → {}（{}）", item.original, item.current, item.reason))
+            .collect::<Vec<_>>()
+            .join("；"),
     }
 }

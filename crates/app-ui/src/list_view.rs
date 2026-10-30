@@ -27,7 +27,7 @@ use crate::model::{
     ListColumnKind, Message, ScrollbarRegion,
 };
 use crate::typography::readable_text;
-use crate::view::rename_input_id;
+use crate::view::{rename_field, rename_input_id};
 
 const LIST_ROW_TEXT_SIZE: u32 = 15;
 const LIST_HEADER_TEXT_SIZE: u32 = 12;
@@ -813,16 +813,19 @@ fn list_name_cell<'a>(
     let indent = Space::new().width(Length::Fixed(depth as f32 * geometry.indent_width));
     let toggle = list_directory_toggle(pane, geometry, entry);
     let name: Element<'a, Message> = if pane.renaming == Some(&entry.path) {
-        text_input(
-            &crate::localization::translate_current("File name"),
-            pane.rename_input,
+        rename_field(
+            text_input(
+                &crate::localization::translate_current("File name"),
+                pane.rename_input,
+            )
+            .id(rename_input_id())
+            .on_input(Message::RenameInputChanged)
+            .on_submit(Message::RenameSelected)
+            .style(entry_text_input_style(modifier))
+            .width(Length::Fill),
+            pane.rename_hint,
+            browser.active_language(),
         )
-        .id(rename_input_id())
-        .on_input(Message::RenameInputChanged)
-        .on_submit(Message::RenameSelected)
-        .style(entry_text_input_style(modifier))
-        .width(Length::Fill)
-        .into()
     } else {
         measured_middle_ellipsized_text(
             entry.name().to_string_lossy().into_owned(),

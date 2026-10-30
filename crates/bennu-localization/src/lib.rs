@@ -173,6 +173,15 @@ pub fn batch_rename_incomplete(
     batch_rename::incomplete_message(language, cause, unrestored)
 }
 
+/// 单个重命名失败且条目未能恢复原名时的任务错误文案，构造时按给定语言产出成品。
+pub fn rename_incomplete(
+    language: UiLanguage,
+    cause: &str,
+    unrestored: &[UnrestoredRenameText],
+) -> String {
+    batch_rename::single_incomplete_message(language, cause, unrestored)
+}
+
 /// 复制/移动内容已成功、但部分元数据没能保留时的完成提示，构造时按给定语言产出成品。
 pub fn metadata_loss_warning(
     language: UiLanguage,

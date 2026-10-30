@@ -38,7 +38,7 @@ use crate::input_blocking_space::input_blocking_space;
 use crate::measured_middle_ellipsized_text::measured_middle_ellipsized_wrapped_text_with_tooltip;
 use crate::model::{IconGridExpansionAnchor, IconGridViewport, Message, ScrollbarRegion};
 use crate::typography::readable_text;
-use crate::view::rename_input_id;
+use crate::view::{rename_field, rename_input_id};
 
 const GRID_PADDING: f32 = ICON_GRID_CONTENT_PADDING;
 const DISCLOSURE_BUTTON_SIZE: f32 = 24.0;
@@ -469,22 +469,25 @@ fn icon_grid_entry<'a>(
     };
 
     let label: Element<'a, Message> = if pane.renaming == Some(&entry.path) {
-        container(
-            text_input(
-                &crate::localization::translate_current("File name"),
-                pane.rename_input,
+        rename_field(
+            container(
+                text_input(
+                    &crate::localization::translate_current("File name"),
+                    pane.rename_input,
+                )
+                .id(rename_input_id())
+                .on_input(Message::RenameInputChanged)
+                .on_submit(Message::RenameSelected)
+                .style(entry_text_input_style(content_modifier))
+                .padding(4)
+                .size(label_size(icon_edge))
+                .width(Length::Fill),
             )
-            .id(rename_input_id())
-            .on_input(Message::RenameInputChanged)
-            .on_submit(Message::RenameSelected)
-            .style(entry_text_input_style(content_modifier))
-            .padding(4)
-            .size(label_size(icon_edge))
-            .width(Length::Fill),
+            .height(Length::Fixed(label_height(icon_edge)))
+            .clip(true),
+            pane.rename_hint,
+            browser.active_language(),
         )
-        .height(Length::Fixed(label_height(icon_edge)))
-        .clip(true)
-        .into()
     } else {
         let full_name = entry.name().to_string_lossy().into_owned();
         let full_name_tooltip = container(

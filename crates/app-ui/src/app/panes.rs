@@ -12,6 +12,7 @@ use crate::model::{
     DirectoryLoadingPlaceholder, ExpandedDirectory, FileDragState, IconGridViewport, SplitAxis,
     SplitRegion,
 };
+use crate::operation_history::RenameRejection;
 use crate::thumbnail_cache::ColumnViewport;
 
 const SPLIT_TARGET_MIN_CONTENT_WIDTH: f32 = 1.0;
@@ -47,6 +48,7 @@ pub(crate) struct BrowserPaneView<'a> {
     pub(crate) directory_collection_phase: DirectoryCollectionPhase,
     pub(crate) renaming: Option<&'a PathBuf>,
     pub(crate) rename_input: &'a str,
+    pub(crate) rename_hint: Option<RenameRejection>,
     pub(crate) file_drag: Option<&'a FileDragState>,
     pub(crate) tab_bar_reveal_fraction: f32,
 }
@@ -200,6 +202,7 @@ impl FileBrowser {
                 directory_collection_phase: self.directory_collection_phase,
                 renaming: self.renaming.as_ref(),
                 rename_input: &self.rename_input,
+                rename_hint: self.rename_hint(),
                 file_drag: self.file_drag.as_ref(),
                 tab_bar_reveal_fraction: self.tab_bar_reveal_fraction(),
             });
@@ -230,6 +233,7 @@ impl FileBrowser {
             directory_collection_phase: pane.directory_collection_phase,
             renaming: None,
             rename_input: "",
+            rename_hint: None,
             file_drag: None,
             tab_bar_reveal_fraction: if pane.tabs.len() > 1 { 1.0 } else { 0.0 },
         })

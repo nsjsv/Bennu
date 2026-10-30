@@ -160,6 +160,22 @@ pub(crate) fn rename_input_id() -> iced::widget::Id {
     iced::widget::Id::new("rename-input")
 }
 
+/// 行内重命名输入框：重名或非法名的原因浮在输入框下方，不挤占行高。
+/// 三种视图的输入框尺寸各不相同，由调用方构造后交进来。
+pub(crate) fn rename_field<'a>(
+    input: impl Into<Element<'a, Message>>,
+    hint: Option<crate::operation_history::RenameRejection>,
+    language: crate::config::UiLanguage,
+) -> Element<'a, Message> {
+    let popup = hint.map(|reason| {
+        container(iced::widget::text(reason.message(language)).size(12))
+            .padding([5, 8])
+            .style(crate::appearance::rename_hint_style)
+            .into()
+    });
+    crate::anchored_popup::anchored_popup(input, popup)
+}
+
 pub(crate) fn batch_rename_preview_name_input_id(path: &Path) -> iced::widget::Id {
     iced::widget::Id::from(format!("batch-rename-preview-name-{}", path.display()))
 }

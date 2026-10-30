@@ -1,8 +1,9 @@
 use iced::Task;
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-use file_core::ResolvedEntryChange;
+use file_core::{validate_entry_name, ResolvedEntryChange};
 
 use super::FileBrowser;
 use crate::commands::file_operation_driver_task;
@@ -11,7 +12,7 @@ use crate::model::{
 };
 use crate::operation_history::{
     path_after_completed_migrations, CompletedPathMigration, FileOperationCompletion,
-    FileOperationOutcome, PendingHistoryOperation,
+    FileOperationOutcome, PendingHistoryOperation, RenameRejection,
 };
 use crate::operation_queue::{
     file_operation_persistence_command, FileOperationEnqueueOutcome, FileOperationFinish,
@@ -99,6 +100,9 @@ pub(super) fn queue_finish_from_completion(
         }
         FileOperationCompletion::RecoveryBlocked { error, .. } => {
             FileOperationFinish::RecoveryBlocked(error.clone())
+        }
+        FileOperationCompletion::RenameRejected { reason, .. } => {
+            FileOperationFinish::Failed(reason.message(crate::localization::current_language()))
         }
     }
 }
@@ -350,6 +354,18 @@ impl FileBrowser {
             } => self
                 .operation_history
                 .accept_failed(task_id, completed_move_transfers),
+            FileOperationCompletion::RenameRejected {
+                path,
+                attempted_name,
+                reason,
+            } => {
+                self.operation_history.accept_failed(task_id, &[]);
+                // 原因已由 queue_finish_from_completion 写进任务行，这是文件操作错误的
+                // 归属位置。撤销/重做的新名字来自历史而不是输入框，没有可以接着改的输入。
+                if !is_history_replay {
+                    tasks.push(self.reopen_rejected_rename(path, attempted_name, *reason));
+                }
+            }
         }
 
         let pane_reload_task = if let Some(operation) = completed_operation.as_ref() {
@@ -506,6 +522,10 @@ impl FileBrowser {
             self.renaming = None;
             return Task::none();
         }
+        if self.rename_input_rejection(&path, name).is_some() {
+            // 原因已经浮在输入框旁：保持编辑让用户改名，不入队。
+            return focus_rename_input_command();
+        }
 
         self.renaming = None;
         self.context_menu = None;
@@ -513,6 +533,47 @@ impl FileBrowser {
             path,
             new_name: name.into(),
         })
+    }
+
+    /// 重命名输入框旁要显示的原因：执行端的拒绝优先，其次是当前输入的预检。
+    pub(crate) fn rename_hint(&self) -> Option<RenameRejection> {
+        let path = self.renaming.as_ref()?;
+        self.rename_rejection
+            .or_else(|| self.rename_input_rejection(path, self.rename_input.trim()))
+    }
+
+    /// 按已加载的同目录条目预检新名字。没显示的隐藏文件查不到，最终以执行端
+    /// 的原子判定为准。空名回车等于取消重命名，不算被拒。
+    fn rename_input_rejection(&self, path: &Path, name: &str) -> Option<RenameRejection> {
+        if name.is_empty() {
+            return None;
+        }
+        if let Err(reason) = validate_entry_name(OsStr::new(name)) {
+            return Some(RenameRejection::InvalidName(reason));
+        }
+        let target = path.parent()?.join(name);
+        (target.as_path() != path && self.entry_for_path(&target).is_some())
+            .then_some(RenameRejection::NameTaken)
+    }
+
+    /// 用户发起的重命名被拒：在原条目上重新打开输入框，填回尝试的名字并提示原因。
+    /// 条目已不在显示里，或用户已经在改别的名字时，没有地方重开，原因只留在任务行上。
+    fn reopen_rejected_rename(
+        &mut self,
+        path: &Path,
+        attempted_name: &OsStr,
+        reason: RenameRejection,
+    ) -> Task<Message> {
+        if self.renaming.is_some() || self.entry_for_path(path).is_none() {
+            return Task::none();
+        }
+        self.context_menu = None;
+        self.select_path(path.to_path_buf());
+        self.rename_input = attempted_name.to_string_lossy().into_owned();
+        self.rename_input_history.reset();
+        self.renaming = Some(path.to_path_buf());
+        self.rename_rejection = Some(reason);
+        focus_rename_input_command()
     }
 
     pub(super) fn commit_rename_if_active(&mut self) -> Task<Message> {
@@ -531,6 +592,7 @@ impl FileBrowser {
         self.context_menu = None;
         self.select_path(path.clone());
         self.rename_input_history.reset();
+        self.rename_rejection = None;
         self.renaming = Some(path);
         focus_rename_input_command()
     }
@@ -560,16 +622,19 @@ impl FileBrowser {
     pub(super) fn apply_rename_input_change(&mut self, value: String) -> Task<Message> {
         self.rename_input_history
             .apply_input_change(&mut self.rename_input, value);
+        self.rename_rejection = None;
         Task::none()
     }
 
     pub(super) fn undo_rename_input_change(&mut self) -> Task<Message> {
         self.rename_input_history.undo(&mut self.rename_input);
+        self.rename_rejection = None;
         Task::none()
     }
 
     pub(super) fn redo_rename_input_change(&mut self) -> Task<Message> {
         self.rename_input_history.redo(&mut self.rename_input);
+        self.rename_rejection = None;
         Task::none()
     }
 
@@ -658,5 +723,7 @@ fn focus_rename_input_command() -> Task<Message> {
 
 #[cfg(test)]
 mod path_migration_tests;
+#[cfg(test)]
+mod rename_rejection_tests;
 #[cfg(test)]
 mod tests;

@@ -132,6 +132,14 @@ pub(crate) fn translate(text: &str) -> Option<&'static str> {
         "That archive already exists. Choose another name." => {
             Some("该归档已存在，请使用其他名称。")
         }
+        "A file or folder with this name already exists." => Some("已存在同名的文件或文件夹。"),
+        "Enter a name." => Some("请输入名称。"),
+        "\".\" and \"..\" cannot be used as names." => Some("“.”和“..”不能用作名称。"),
+        "Names cannot contain \"/\"." => Some("名称不能包含“/”。"),
+        "Names cannot contain NUL characters." => Some("名称不能包含空字符。"),
+        "This file system cannot rename without risking an overwrite, so nothing was changed." => {
+            Some("该文件系统无法在不覆盖的前提下重命名，未做任何修改。")
+        }
         "Enter the archive password." => Some("请输入归档密码。"),
         "Incorrect password. Try again." => Some("密码不正确，请重试。"),
         "Saving" => Some("正在持久化"),

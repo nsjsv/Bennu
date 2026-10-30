@@ -346,6 +346,10 @@ pub(crate) struct FileBrowser {
     pub(crate) view_mode: BrowserViewMode,
     pub(crate) rename_input: String,
     rename_input_history: file_operations::RenameInputHistory,
+    /// 执行端拒绝本次重命名的原因。只在 `begin_rename` 开始会话、输入变化、
+    /// 被拒重开这三处改写，读取经 `rename_hint` 且要求会话仍在进行，
+    /// 所以不会把上一次会话的原因带到新会话。
+    rename_rejection: Option<crate::operation_history::RenameRejection>,
     pub(crate) directory_collection_phase: DirectoryCollectionPhase,
     pub(crate) directory_order_phase: DirectoryOrderPhase,
     global_error_notification: Option<global_error::GlobalErrorNotification>,
@@ -766,6 +770,7 @@ impl FileBrowser {
             view_mode: initial_view_mode,
             rename_input: String::new(),
             rename_input_history: file_operations::RenameInputHistory::default(),
+            rename_rejection: None,
             directory_collection_phase: DirectoryCollectionPhase::Discovering,
             directory_order_phase: DirectoryOrderPhase::Ready {
                 field: options.sort_field,

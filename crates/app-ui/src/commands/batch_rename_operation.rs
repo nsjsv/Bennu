@@ -20,8 +20,27 @@ pub(super) async fn run_queued_batch_rename(
 /// 回滚没能恢复原名的条目必须逐个告诉用户它们现在在哪里,否则停在隐藏
 /// 临时名上的文件在默认视图里等于"消失";其余失败沿用错误原文。
 fn batch_rename_failure_text(error: &FileError, language: UiLanguage) -> String {
+    match incomplete_rename_texts(error) {
+        Some((cause, unrestored)) => {
+            bennu_localization::batch_rename_incomplete(language, &cause, &unrestored)
+        }
+        None => error.to_string(),
+    }
+}
+
+/// 单个重命名两步改名后没能放回原名时同理，必须说出条目此刻在哪里。
+pub(super) fn rename_failure_text(error: &FileError, language: UiLanguage) -> String {
+    match incomplete_rename_texts(error) {
+        Some((cause, unrestored)) => {
+            bennu_localization::rename_incomplete(language, &cause, &unrestored)
+        }
+        None => error.to_string(),
+    }
+}
+
+fn incomplete_rename_texts(error: &FileError) -> Option<(String, Vec<UnrestoredRenameText>)> {
     let FileError::EntryMovesIncomplete { cause, unrestored } = error else {
-        return error.to_string();
+        return None;
     };
     let unrestored = unrestored
         .iter()
@@ -30,8 +49,8 @@ fn batch_rename_failure_text(error: &FileError, language: UiLanguage) -> String 
             current: item.current.display().to_string(),
             reason: item.error.to_string(),
         })
-        .collect::<Vec<_>>();
-    bennu_localization::batch_rename_incomplete(language, &cause.to_string(), &unrestored)
+        .collect();
+    Some((cause.to_string(), unrestored))
 }
 
 #[cfg(test)]

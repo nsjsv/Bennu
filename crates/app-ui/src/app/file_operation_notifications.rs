@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use iced::Task;
 
 use super::FileBrowser;
@@ -20,7 +22,7 @@ struct DesktopNotificationText {
 enum FileOperationNotificationCompletion<'a> {
     Completed,
     CompletedWithWarning(String),
-    Failed(&'a str),
+    Failed(Cow<'a, str>),
 }
 
 impl FileBrowser {
@@ -53,7 +55,12 @@ impl FileBrowser {
                 let error = match completion {
                     FileOperationCompletion::Failed { error, .. }
                     | FileOperationCompletion::RecoveryInterrupted(error, _)
-                    | FileOperationCompletion::RecoveryBlocked { error, .. } => error,
+                    | FileOperationCompletion::RecoveryBlocked { error, .. } => {
+                        Cow::Borrowed(error.as_str())
+                    }
+                    FileOperationCompletion::RenameRejected { reason, .. } => {
+                        Cow::Owned(reason.message(self.active_language()))
+                    }
                     FileOperationCompletion::Succeeded(_)
                     | FileOperationCompletion::Canceled(_) => {
                         unreachable!("failed queue status requires a failed operation completion")
@@ -130,7 +137,7 @@ fn file_operation_notification_text(
         }
         FileOperationNotificationCompletion::Failed(error) => format!(
             "{item_summary}\n{}",
-            notification_failure_reason(error, language)
+            notification_failure_reason(&error, language)
         ),
     };
 
@@ -370,7 +377,7 @@ mod tests {
         let notification = file_operation_notification_text(
             &operation,
             FileOperationNotificationCompletion::Failed(
-                "could not copy \"/home/user/report.txt\" to \"/tmp/report.txt\": Permission denied (os error 13)",
+                "could not copy \"/home/user/report.txt\" to \"/tmp/report.txt\": Permission denied (os error 13)".into(),
             ),
             UiLanguage::English,
         )
@@ -390,7 +397,9 @@ mod tests {
         let operation = copy_operation(&[("/tmp/report.txt", "/var/tmp/report.txt")]);
         let notification = file_operation_notification_text(
             &operation,
-            FileOperationNotificationCompletion::Failed("backend: inspect /run/user/1000/bus"),
+            FileOperationNotificationCompletion::Failed(
+                "backend: inspect /run/user/1000/bus".into(),
+            ),
             UiLanguage::Chinese,
         )
         .expect("failed notification");

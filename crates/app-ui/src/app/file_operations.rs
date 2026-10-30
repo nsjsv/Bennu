@@ -367,24 +367,25 @@ impl FileBrowser {
             FileOperationCompletion::Succeeded(outcome) => {
                 self.operation_history.accept_completed(task_id, outcome);
             }
-            FileOperationCompletion::Canceled(completed_move_transfers)
+            FileOperationCompletion::Canceled(partial_outcome)
             | FileOperationCompletion::Failed {
-                completed_move_transfers,
-                ..
-            }
-            | FileOperationCompletion::RecoveryInterrupted(_, completed_move_transfers)
-            | FileOperationCompletion::RecoveryBlocked {
-                completed_move_transfers,
-                ..
+                partial_outcome, ..
             } => self
                 .operation_history
-                .accept_failed(task_id, completed_move_transfers),
+                .accept_failed(task_id, partial_outcome),
+            FileOperationCompletion::RecoveryInterrupted(_, partial_outcome)
+            | FileOperationCompletion::RecoveryBlocked {
+                partial_outcome, ..
+            } => self
+                .operation_history
+                .accept_interrupted(task_id, partial_outcome),
             FileOperationCompletion::RenameRejected {
                 path,
                 attempted_name,
                 reason,
             } => {
-                self.operation_history.accept_failed(task_id, &[]);
+                self.operation_history
+                    .accept_failed(task_id, &FileOperationOutcome::NoHistory);
                 // 原因已由 queue_finish_from_completion 写进任务行，这是文件操作错误的
                 // 归属位置。撤销/重做的新名字来自历史而不是输入框，没有可以接着改的输入。
                 if !is_history_replay {
@@ -443,10 +444,12 @@ impl FileBrowser {
             self.show_global_error(error);
         }
         if let Some(task_id) = acceptance.rejected_task_id {
-            self.operation_history.accept_failed(task_id, &[]);
+            self.operation_history
+                .accept_failed(task_id, &FileOperationOutcome::NoHistory);
         }
         if let Some(task_id) = acceptance.canceled_before_start_task_id {
-            self.operation_history.accept_failed(task_id, &[]);
+            self.operation_history
+                .accept_failed(task_id, &FileOperationOutcome::NoHistory);
         }
         let next_persistence = self.continue_file_operation_persistence();
         let shutdown_progress = self.accept_file_operation_persistence_progress(

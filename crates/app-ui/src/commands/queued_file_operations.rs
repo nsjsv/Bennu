@@ -158,7 +158,7 @@ async fn run_queued_file_operation(
             run_queued_create_empty_file(parent, controls, task_id, output).await
         }
         QueuedFileOperation::Trash { paths } => {
-            run_queued_trash(paths, controls, task_id, output).await
+            return run_queued_trash(paths, controls, task_id, output).await;
         }
         QueuedFileOperation::Restore { entries } => {
             run_queued_restore(entries, controls, task_id, output).await
@@ -528,16 +528,16 @@ async fn run_queued_trash(
     mut controls: FileOperationControls,
     task_id: u64,
     output: &mut IcedSender<Message>,
-) -> Result<FileOperationOutcome, String> {
+) -> FileOperationCompletion {
     let total = paths.len();
     let mut entries = Vec::new();
     let mut untrashable = Vec::new();
     for (index, path) in paths.into_iter().enumerate() {
-        controls
-            .wait_until_running()
-            .await
-            .map_err(|error| error.to_string())?;
-        match file_core::trash_path(&path, controls.cancellation_token()).await {
+        let trashed = match controls.wait_until_running().await {
+            Ok(()) => file_core::trash_path(&path, controls.cancellation_token()).await,
+            Err(error) => Err(error),
+        };
+        match trashed {
             Ok(entry) => entries.push(entry),
             Err(FileError::TrashUnavailable { reason, .. }) => {
                 tracing::warn!(
@@ -549,7 +549,16 @@ async fn run_queued_trash(
                 );
                 untrashable.push(path);
             }
-            Err(error) => return Err(error.to_string()),
+            // 取消也走这里：队列按"正在取消"把它记成已取消。已放入的照样能撤销。
+            Err(error) => {
+                return FileOperationCompletion::Failed {
+                    error: error.to_string(),
+                    partial_outcome: FileOperationOutcome::Trash {
+                        entries,
+                        untrashable,
+                    },
+                }
+            }
         }
         send_file_operation_progress(
             output,
@@ -562,7 +571,7 @@ async fn run_queued_trash(
         .await;
     }
 
-    Ok(FileOperationOutcome::Trash {
+    FileOperationCompletion::Succeeded(FileOperationOutcome::Trash {
         entries,
         untrashable,
     })

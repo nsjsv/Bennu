@@ -75,7 +75,12 @@ async fn cancellation_before_manifest_preparation_terminalizes_every_record() {
     )
     .await;
 
-    assert!(matches!(&completion, FileOperationCompletion::Canceled(moved) if moved.is_empty()));
+    assert!(matches!(
+        &completion,
+        FileOperationCompletion::Canceled(
+            FileOperationOutcome::Copy { transfers, .. } | FileOperationOutcome::Move { transfers, .. }
+        ) if transfers.is_empty()
+    ));
     assert_all_records_canceled(&store, stored_task_id, transfers.len()).await;
     for transfer in &transfers {
         assert!(tokio::fs::symlink_metadata(&transfer.source).await.is_ok());
@@ -153,7 +158,12 @@ async fn cancellation_after_direct_move_intents_terminalizes_every_record() {
     )
     .await;
 
-    assert!(matches!(&completion, FileOperationCompletion::Canceled(moved) if moved.is_empty()));
+    assert!(matches!(
+        &completion,
+        FileOperationCompletion::Canceled(
+            FileOperationOutcome::Copy { transfers, .. } | FileOperationOutcome::Move { transfers, .. }
+        ) if transfers.is_empty()
+    ));
     assert_all_records_canceled(&store, stored_task_id, transfers.len()).await;
     for transfer in &transfers {
         assert!(tokio::fs::symlink_metadata(&transfer.source).await.is_ok());

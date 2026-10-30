@@ -53,7 +53,7 @@ async fn prepare_failure_settles_journal_and_finalizes_failed_task() {
 
     let FileOperationCompletion::Failed {
         error,
-        completed_move_transfers,
+        partial_outcome,
     } = &completion
     else {
         panic!("expected plain failure completion");
@@ -62,7 +62,7 @@ async fn prepare_failure_settles_journal_and_finalizes_failed_task() {
         error.contains("could not read directory"),
         "unexpected diagnostic: {error}"
     );
-    assert!(completed_move_transfers.is_empty());
+    assert!(partial_outcome.completed_path_migrations().is_empty());
 
     let records = load_recoverable_transfer_records(store.clone(), stored_task_id)
         .await

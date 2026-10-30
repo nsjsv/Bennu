@@ -155,6 +155,63 @@ fn pending_history_task_id_remaps_after_durable_insert() {
     assert!(history.is_replaying(42));
 }
 
+fn moved(transfers: Vec<CompletedTransfer>) -> FileOperationOutcome {
+    FileOperationOutcome::Move {
+        transfers,
+        history_eligibility: FileOperationHistoryEligibility::Replayable,
+        metadata_loss: MetadataLossSummary::default(),
+    }
+}
+
+#[test]
+fn stopped_task_keeps_undo_for_the_part_that_finished() {
+    let mut history = FileOperationHistory::new();
+    history
+        .redo_stack
+        .push(FileOperationHistoryItem::CreateEmptyFile {
+            path: PathBuf::from("/tmp/New File"),
+        });
+
+    history.accept_failed(1, &FileOperationOutcome::NoHistory);
+    assert_eq!(history.redo_stack.len(), 1);
+
+    history.accept_interrupted(2, &moved(vec![transfer("/a/one", "/b/one")]));
+    assert!(history.undo_stack.is_empty());
+
+    history.accept_failed(3, &moved(vec![transfer("/a/one", "/b/one")]));
+    assert!(history.redo_stack.is_empty());
+    let (undo, _) = history
+        .take_undo_operation()
+        .expect("undo the finished move");
+    let QueuedFileOperation::Move { transfers, .. } = undo else {
+        panic!("expected undo move");
+    };
+    assert_eq!(transfers[0].source, PathBuf::from("/b/one"));
+}
+
+#[test]
+fn stopped_trash_keeps_undo_for_items_already_in_trash() {
+    let mut history = FileOperationHistory::new();
+    let entry = TrashRestoreEntry::from_historical_paths(
+        PathBuf::from("/trash/files/a"),
+        PathBuf::from("/trash/info/a.trashinfo"),
+        PathBuf::from("/workspace/a"),
+    );
+
+    history.accept_failed(
+        1,
+        &FileOperationOutcome::Trash {
+            entries: vec![entry.clone()],
+            untrashable: Vec::new(),
+        },
+    );
+
+    let (undo, _) = history
+        .take_undo_operation()
+        .expect("undo the trashed item");
+    assert!(matches!(undo, QueuedFileOperation::Restore { entries } if entries == vec![entry]));
+}
+
 #[test]
 fn failed_undo_move_splits_completed_and_remaining_transfers() {
     let mut history = FileOperationHistory::new();
@@ -164,7 +221,7 @@ fn failed_undo_move_splits_completed_and_remaining_transfers() {
     let (_operation, pending) = history.take_undo_operation().expect("undo move");
     history.track_pending(1, pending);
 
-    history.accept_failed(1, &[transfer("/b/two", "/a/two")]);
+    history.accept_failed(1, &moved(vec![transfer("/b/two", "/a/two")]));
 
     let (remaining_undo, _) = history
         .take_undo_operation()
@@ -204,7 +261,7 @@ fn failed_redo_move_splits_completed_and_remaining_transfers() {
     let (_operation, pending) = history.take_redo_operation().expect("redo move");
     history.track_pending(1, pending);
 
-    history.accept_failed(1, &[transfer("/a/one", "/b/one")]);
+    history.accept_failed(1, &moved(vec![transfer("/a/one", "/b/one")]));
 
     let (remaining_redo, _) = history
         .take_redo_operation()

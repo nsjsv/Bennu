@@ -106,18 +106,20 @@ pub(crate) enum FileOperationOutcome {
     },
 }
 
+/// 停下的任务带着 `partial_outcome`：停下前已经生效的那部分（什么都没做时为
+/// `NoHistory`），浏览路径按它迁移，普通任务按它记撤销历史（同 Nautilus）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum FileOperationCompletion {
     Succeeded(FileOperationOutcome),
     Failed {
         error: String,
-        completed_move_transfers: Vec<CompletedTransfer>,
+        partial_outcome: FileOperationOutcome,
     },
-    Canceled(Vec<CompletedTransfer>),
-    RecoveryInterrupted(String, Vec<CompletedTransfer>),
+    Canceled(FileOperationOutcome),
+    RecoveryInterrupted(String, FileOperationOutcome),
     RecoveryBlocked {
         error: String,
-        completed_move_transfers: Vec<CompletedTransfer>,
+        partial_outcome: FileOperationOutcome,
     },
     /// 重命名在改动任何东西之前被拒。与 `Failed` 分开：用户发起的重命名据此
     /// 重新打开输入框让用户换名字，而不只是弹一条错误。
@@ -171,39 +173,24 @@ impl FileOperationCompletion {
             Ok(outcome) => Self::Succeeded(outcome),
             Err(error) => Self::Failed {
                 error,
-                completed_move_transfers: Vec::new(),
+                partial_outcome: FileOperationOutcome::NoHistory,
             },
-        }
-    }
-
-    pub(crate) fn failed_after_completed_moves(
-        error: String,
-        completed_move_transfers: Vec<CompletedTransfer>,
-    ) -> Self {
-        Self::Failed {
-            error,
-            completed_move_transfers,
         }
     }
 
     pub(crate) fn completed_path_migrations(&self) -> Vec<CompletedPathMigration> {
         match self {
-            Self::Succeeded(outcome) => outcome.completed_path_migrations(),
-            Self::Failed {
-                completed_move_transfers,
+            Self::Succeeded(outcome)
+            | Self::Failed {
+                partial_outcome: outcome,
                 ..
             }
-            | Self::Canceled(completed_move_transfers)
-            | Self::RecoveryInterrupted(_, completed_move_transfers)
+            | Self::Canceled(outcome)
+            | Self::RecoveryInterrupted(_, outcome)
             | Self::RecoveryBlocked {
-                completed_move_transfers,
+                partial_outcome: outcome,
                 ..
-            } => completed_move_transfers
-                .iter()
-                .map(|transfer| {
-                    CompletedPathMigration::new(transfer.source.clone(), transfer.target.clone())
-                })
-                .collect(),
+            } => outcome.completed_path_migrations(),
             Self::RenameRejected { .. } => Vec::new(),
         }
     }
@@ -501,13 +488,28 @@ impl FileOperationHistory {
         self.redo_stack.clear();
     }
 
-    pub(crate) fn accept_failed(
+    /// 失败或取消：停下前已生效的部分和成功一样进撤销历史。
+    pub(crate) fn accept_failed(&mut self, task_id: u64, partial_outcome: &FileOperationOutcome) {
+        if self.pending_tasks.contains_key(&task_id) {
+            self.accept_interrupted(task_id, partial_outcome);
+        } else if let Some(item) = FileOperationHistoryItem::from_outcome(partial_outcome) {
+            self.undo_stack.push(item);
+            self.redo_stack.clear();
+        }
+    }
+
+    /// 恢复中断的任务之后还会接着跑完，这时只处理撤销/重做重放，不记新历史。
+    pub(crate) fn accept_interrupted(
         &mut self,
         task_id: u64,
-        completed_move_transfers: &[CompletedTransfer],
+        partial_outcome: &FileOperationOutcome,
     ) {
         let Some(pending) = self.pending_tasks.remove(&task_id) else {
             return;
+        };
+        let completed_move_transfers = match partial_outcome {
+            FileOperationOutcome::Move { transfers, .. } => transfers.as_slice(),
+            _ => &[],
         };
 
         let PendingHistoryOperation { direction, item } = pending;

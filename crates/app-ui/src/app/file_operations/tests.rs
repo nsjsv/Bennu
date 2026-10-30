@@ -760,13 +760,18 @@ fn failed_move_migrates_paths_for_completed_transfers_only() {
 
     drop(browser.accept_file_operation_finished(
         task_id,
-        FileOperationCompletion::failed_after_completed_moves(
-            "second transfer failed".to_owned(),
-            vec![crate::operation_history::CompletedTransfer {
-                source,
-                target: destination.clone(),
-            }],
-        ),
+        FileOperationCompletion::Failed {
+            error: "second transfer failed".to_owned(),
+            partial_outcome: FileOperationOutcome::Move {
+                transfers: vec![crate::operation_history::CompletedTransfer {
+                    source,
+                    target: destination.clone(),
+                }],
+                history_eligibility:
+                    crate::operation_history::FileOperationHistoryEligibility::Replayable,
+                metadata_loss: Default::default(),
+            },
+        },
     ));
 
     assert_eq!(browser.current_dir, destination.join("nested"));

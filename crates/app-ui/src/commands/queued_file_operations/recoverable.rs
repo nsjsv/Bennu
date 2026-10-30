@@ -282,12 +282,15 @@ pub(super) async fn run_queued_transfers(
     let records = match load_recoverable_transfer_records(store.clone(), stored_task_id).await {
         Ok(records) => records,
         Err(RecoverableRecordLoadError::Interrupted(error)) => {
-            return FileOperationCompletion::RecoveryInterrupted(error, Vec::new());
+            return FileOperationCompletion::RecoveryInterrupted(
+                error,
+                FileOperationOutcome::NoHistory,
+            );
         }
         Err(RecoverableRecordLoadError::Invalid(error)) => {
             return FileOperationCompletion::RecoveryBlocked {
                 error,
-                completed_move_transfers: Vec::new(),
+                partial_outcome: FileOperationOutcome::NoHistory,
             };
         }
     };
@@ -307,7 +310,7 @@ pub(super) async fn run_queued_transfers(
     {
         return FileOperationCompletion::RecoveryBlocked {
             error: "Stored transfer journal does not match the queued operation".to_owned(),
-            completed_move_transfers: Vec::new(),
+            partial_outcome: FileOperationOutcome::NoHistory,
         };
     }
 
@@ -330,8 +333,9 @@ pub(super) async fn run_queued_transfers(
                     Err(error) => {
                         return settle_recoverable_transfer_failure(
                             mode,
+                            history_eligibility,
                             error,
-                            Vec::new(),
+                            SettledTransfers::default(),
                             stored_task_id,
                             task_id,
                             output,
@@ -374,8 +378,9 @@ pub(super) async fn run_queued_transfers(
                 {
                     return settle_recoverable_transfer_failure(
                         mode,
+                        history_eligibility,
                         error,
-                        completed.transfers,
+                        completed,
                         stored_task_id,
                         task_id,
                         output,
@@ -399,8 +404,9 @@ pub(super) async fn run_queued_transfers(
                 {
                     return settle_recoverable_transfer_failure(
                         mode,
+                        history_eligibility,
                         error,
-                        completed.transfers,
+                        completed,
                         stored_task_id,
                         task_id,
                         output,
@@ -426,8 +432,9 @@ pub(super) async fn run_queued_transfers(
     {
         return settle_recoverable_transfer_failure(
             mode,
+            history_eligibility,
             error,
-            completed.transfers,
+            completed,
             stored_task_id,
             task_id,
             output,
@@ -437,11 +444,24 @@ pub(super) async fn run_queued_transfers(
         .await;
     }
 
+    FileOperationCompletion::Succeeded(settled_transfer_outcome(
+        mode,
+        history_eligibility,
+        completed,
+    ))
+}
+
+/// 成功和中途停下用同一种结果：停下时它就是已完成的那部分。
+fn settled_transfer_outcome(
+    mode: QueuedTransferMode,
+    history_eligibility: FileOperationHistoryEligibility,
+    completed: SettledTransfers,
+) -> FileOperationOutcome {
     let SettledTransfers {
         transfers,
         metadata_loss,
     } = completed;
-    let outcome = match mode {
+    match mode {
         QueuedTransferMode::Copy => FileOperationOutcome::Copy {
             transfers,
             history_eligibility,
@@ -452,8 +472,7 @@ pub(super) async fn run_queued_transfers(
             history_eligibility,
             metadata_loss,
         },
-    };
-    FileOperationCompletion::Succeeded(outcome)
+    }
 }
 
 async fn prepare_queued_transfer_records(
@@ -707,8 +726,9 @@ fn failure_preserves_recovery_details(error: &RecoverableTransferError) -> bool 
 
 async fn settle_recoverable_transfer_failure(
     mode: QueuedTransferMode,
+    history_eligibility: FileOperationHistoryEligibility,
     error: RecoverableTransferError,
-    completed_move_transfers: Vec<CompletedTransfer>,
+    completed: SettledTransfers,
     stored_task_id: u64,
     task_id: u64,
     output: &mut IcedSender<Message>,
@@ -719,30 +739,35 @@ async fn settle_recoverable_transfer_failure(
         &error,
         RecoverableTransferError::FileOperation(FileError::Cancelled)
     ) || matches!(controls.checkpoint_now(), Err(FileError::Cancelled));
+    let partial_outcome = settled_transfer_outcome(mode, history_eligibility, completed);
     if !cancellation_demanded && failure_preserves_recovery_details(&error) {
-        return recoverable_transfer_failure(mode, error, completed_move_transfers);
+        return recoverable_transfer_failure(error, partial_outcome);
     }
 
     let records =
         match load_recoverable_transfer_records(journal.store.clone(), stored_task_id).await {
             Ok(records) => records,
             Err(RecoverableRecordLoadError::Interrupted(load_error)) => {
-                return FileOperationCompletion::RecoveryInterrupted(
-                    load_error,
-                    completed_move_transfers,
-                );
+                return FileOperationCompletion::RecoveryInterrupted(load_error, partial_outcome);
             }
             Err(RecoverableRecordLoadError::Invalid(load_error)) => {
                 return FileOperationCompletion::RecoveryBlocked {
                     error: load_error,
-                    completed_move_transfers,
+                    partial_outcome,
                 };
             }
         };
 
     if cancellation_demanded {
         return settle_cancellation_records(
-            records, mode, error, task_id, output, journal, controls,
+            records,
+            mode,
+            history_eligibility,
+            error,
+            task_id,
+            output,
+            journal,
+            controls,
         )
         .await;
     }
@@ -763,15 +788,16 @@ async fn settle_recoverable_transfer_failure(
     if let Some(settlement_error) = settlement_error {
         return FileOperationCompletion::RecoveryInterrupted(
             settlement_error.to_string(),
-            completed_move_transfers,
+            partial_outcome,
         );
     }
-    recoverable_transfer_failure(mode, error, completed_move_transfers)
+    recoverable_transfer_failure(error, partial_outcome)
 }
 
 async fn settle_cancellation_records(
     records: Vec<TransferJournalRecord>,
     mode: QueuedTransferMode,
+    history_eligibility: FileOperationHistoryEligibility,
     error: RecoverableTransferError,
     task_id: u64,
     output: &mut IcedSender<Message>,
@@ -830,43 +856,37 @@ async fn settle_cancellation_records(
         }
         _ => error,
     };
-    // 取消/失败的任务以错误收尾,完成提示只属于成功的任务;这里只需要已提交
-    // 的路径做迁移,元数据摘要不再展示。
-    recoverable_transfer_failure(mode, error, settled_completed.transfers)
+    // 取消/失败的任务以错误收尾,完成提示只属于成功的任务;已提交的部分
+    // 照样迁移路径、进撤销历史。
+    recoverable_transfer_failure(
+        error,
+        settled_transfer_outcome(mode, history_eligibility, settled_completed),
+    )
 }
 
 fn recoverable_transfer_failure(
-    mode: QueuedTransferMode,
     error: RecoverableTransferError,
-    completed_move_transfers: Vec<CompletedTransfer>,
+    partial_outcome: FileOperationOutcome,
 ) -> FileOperationCompletion {
     let diagnostic = error.to_string();
     match error {
-        RecoverableTransferError::FileOperation(file_core::FileError::ApplicationStopping) => {
-            FileOperationCompletion::RecoveryInterrupted(diagnostic, completed_move_transfers)
+        RecoverableTransferError::FileOperation(file_core::FileError::ApplicationStopping)
+        | RecoverableTransferError::Journal { .. }
+        | RecoverableTransferError::RecoveryRequired { .. } => {
+            FileOperationCompletion::RecoveryInterrupted(diagnostic, partial_outcome)
         }
         RecoverableTransferError::FileOperation(file_core::FileError::Cancelled) => {
-            FileOperationCompletion::Canceled(match mode {
-                QueuedTransferMode::Copy => Vec::new(),
-                QueuedTransferMode::Move => completed_move_transfers,
-            })
-        }
-        RecoverableTransferError::Journal { .. }
-        | RecoverableTransferError::RecoveryRequired { .. } => {
-            FileOperationCompletion::RecoveryInterrupted(diagnostic, completed_move_transfers)
+            FileOperationCompletion::Canceled(partial_outcome)
         }
         RecoverableTransferError::RecoveryBlocked { .. } => {
             FileOperationCompletion::RecoveryBlocked {
                 error: diagnostic,
-                completed_move_transfers,
+                partial_outcome,
             }
         }
-        _ => match mode {
-            QueuedTransferMode::Copy => FileOperationCompletion::from_result(Err(diagnostic)),
-            QueuedTransferMode::Move => FileOperationCompletion::failed_after_completed_moves(
-                diagnostic,
-                completed_move_transfers,
-            ),
+        _ => FileOperationCompletion::Failed {
+            error: diagnostic,
+            partial_outcome,
         },
     }
 }
@@ -1186,30 +1206,33 @@ mod recoverable_transfer_tests {
     fn application_stopping_has_recoverable_interruption_completion() {
         assert!(matches!(
             recoverable_transfer_failure(
-                QueuedTransferMode::Copy,
-                RecoverableTransferError::FileOperation(
-                    file_core::FileError::ApplicationStopping,
-                ),
-                Vec::new(),
+                RecoverableTransferError::FileOperation(file_core::FileError::ApplicationStopping),
+                FileOperationOutcome::NoHistory,
             ),
-            FileOperationCompletion::RecoveryInterrupted(_, completed)
-                if completed.is_empty()
+            FileOperationCompletion::RecoveryInterrupted(_, FileOperationOutcome::NoHistory)
         ));
     }
 
     #[test]
-    fn recoverable_cancellation_has_typed_completion() {
+    fn recoverable_cancellation_keeps_the_completed_part() {
+        let completed = SettledTransfers {
+            transfers: vec![CompletedTransfer {
+                source: PathBuf::from("source"),
+                target: PathBuf::from("target"),
+            }],
+            ..SettledTransfers::default()
+        };
         assert!(matches!(
             recoverable_transfer_failure(
-                QueuedTransferMode::Move,
                 RecoverableTransferError::FileOperation(file_core::FileError::Cancelled),
-                vec![CompletedTransfer {
-                    source: PathBuf::from("source"),
-                    target: PathBuf::from("target"),
-                }],
+                settled_transfer_outcome(
+                    QueuedTransferMode::Copy,
+                    FileOperationHistoryEligibility::Replayable,
+                    completed,
+                ),
             ),
-            FileOperationCompletion::Canceled(completed_move_transfers)
-                if completed_move_transfers.len() == 1
+            FileOperationCompletion::Canceled(FileOperationOutcome::Copy { transfers, .. })
+                if transfers.len() == 1
         ));
     }
 
@@ -1638,14 +1661,14 @@ mod recoverable_transfer_tests {
         .await;
 
         let FileOperationCompletion::Failed {
-            completed_move_transfers,
+            partial_outcome: FileOperationOutcome::Move { transfers, .. },
             ..
         } = completion
         else {
             panic!("later target conflict should fail the batch");
         };
         assert_eq!(
-            completed_move_transfers,
+            transfers,
             vec![CompletedTransfer {
                 source: first_source.clone(),
                 target: first_target.clone(),

@@ -14,6 +14,8 @@ async fn only_transfers_without_a_decided_strategy_are_checked_for_conflicts() {
         ..QueuedTransfer::new(source, taken)
     };
 
-    assert_eq!(check_transfer_conflicts(&[keep_both]).await.len(), 0);
-    assert_eq!(check_transfer_conflicts(&[undecided]).await.len(), 1);
+    let decided = check_transfer_conflicts(&[keep_both]).await.unwrap();
+    let asked = check_transfer_conflicts(&[undecided]).await.unwrap();
+    assert_eq!(decided.len(), 0);
+    assert_eq!(asked.len(), 1);
 }

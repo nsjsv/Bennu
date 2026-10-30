@@ -875,10 +875,11 @@ pub(crate) enum Message {
     },
     FileDropOperationSelected(FileClipboardOperation),
     FileDropCancelled,
+    /// 冲突检查读不到某项源或目标的信息时 `conflicts` 是错误：无从判断就不能放行入队。
     TransferConflictsChecked {
         mode: TransferConflictMode,
         transfers: Vec<QueuedTransfer>,
-        conflicts: Vec<TransferConflictItem>,
+        conflicts: Result<Vec<TransferConflictItem>, String>,
     },
     /// 「合并」把冲突目录展开成子项传输后的回执;随后走统一的冲突复查。
     TransferConflictMergesExpanded {

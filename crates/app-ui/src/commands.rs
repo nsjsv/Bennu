@@ -430,7 +430,7 @@ async fn expand_transfer_conflict_merges(
         }
     }
 
-    let new_conflicts = check_transfer_conflicts(&child_transfers).await;
+    let new_conflicts = check_transfer_conflicts(&child_transfers).await?;
     transfers.extend(child_transfers);
     conflicts.extend(new_conflicts);
     Ok((transfers, conflicts))
@@ -438,7 +438,9 @@ async fn expand_transfer_conflict_merges(
 
 /// 只有还没定策略（`Fail`）的传输需要问用户；带着 `KeepBoth` 等策略入场的
 /// （如原位副本）冲突时怎么办已经定了。
-async fn check_transfer_conflicts(transfers: &[QueuedTransfer]) -> Vec<TransferConflictItem> {
+async fn check_transfer_conflicts(
+    transfers: &[QueuedTransfer],
+) -> Result<Vec<TransferConflictItem>, String> {
     let conflict_checks = transfers
         .iter()
         .filter(|transfer| transfer.conflict_strategy == TransferConflictStrategy::Fail)
@@ -446,7 +448,9 @@ async fn check_transfer_conflicts(transfers: &[QueuedTransfer]) -> Vec<TransferC
             TransferConflictCheck::new(transfer.source.clone(), transfer.target.clone())
         })
         .collect();
-    check_core_transfer_conflicts(conflict_checks).await
+    check_core_transfer_conflicts(conflict_checks)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 async fn load_trash(

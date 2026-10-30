@@ -447,7 +447,9 @@ mod unix {
         symlink(&source_directory, &source_link).unwrap();
 
         let conflicts =
-            check_transfer_conflicts(vec![TransferConflictCheck::new(source_link, target)]).await;
+            check_transfer_conflicts(vec![TransferConflictCheck::new(source_link, target)])
+                .await
+                .unwrap();
 
         assert_eq!(conflicts.len(), 1);
         assert!(!conflicts[0].source_metadata.is_directory);

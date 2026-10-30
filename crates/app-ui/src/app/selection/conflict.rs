@@ -20,7 +20,24 @@ impl FileBrowser {
         check_transfer_conflicts_command(mode, transfers)
     }
 
-    pub(in crate::app) fn accept_transfer_conflicts_checked(
+    /// 首次冲突检查与「合并」展开后的复查共用：检查失败（读不到某项的信息）时报错，整批不入队。
+    pub(in crate::app) fn accept_transfer_conflict_review(
+        &mut self,
+        mode: TransferConflictMode,
+        review: Result<(Vec<QueuedTransfer>, Vec<TransferConflictItem>), String>,
+    ) -> Task<Message> {
+        match review {
+            Ok((transfers, conflicts)) => {
+                self.review_transfer_conflicts(mode, transfers, conflicts)
+            }
+            Err(error) => {
+                self.show_global_error(error);
+                Task::none()
+            }
+        }
+    }
+
+    fn review_transfer_conflicts(
         &mut self,
         mode: TransferConflictMode,
         transfers: Vec<QueuedTransfer>,
@@ -124,22 +141,6 @@ impl FileBrowser {
             remaining_transfers,
             remaining_conflicts,
         )
-    }
-
-    pub(in crate::app) fn accept_expanded_transfer_conflict_merges(
-        &mut self,
-        mode: TransferConflictMode,
-        expansion: Result<(Vec<QueuedTransfer>, Vec<TransferConflictItem>), String>,
-    ) -> Task<Message> {
-        match expansion {
-            Ok((transfers, conflicts)) => {
-                self.accept_transfer_conflicts_checked(mode, transfers, conflicts)
-            }
-            Err(error) => {
-                self.show_global_error(error);
-                Task::none()
-            }
-        }
     }
 
     pub(in crate::app) fn apply_transfer_conflict_message(
@@ -279,6 +280,21 @@ mod tests {
             }
             other => panic!("expected a copy, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_failed_conflict_check_shows_the_error_and_queues_nothing() {
+        let (mut browser, _state) = browser_resolving(test_conflict_state());
+        browser.transfer_conflict = None;
+
+        drop(browser.accept_transfer_conflict_review(
+            TransferConflictMode::Copy,
+            Err("could not read /target/report.txt: permission denied".to_owned()),
+        ));
+
+        assert!(browser.operation_queue.tasks().is_empty());
+        assert!(browser.transfer_conflict.is_none());
+        assert!(browser.global_error_notification.is_some());
     }
 
     #[test]

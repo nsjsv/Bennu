@@ -1302,9 +1302,12 @@ impl FileBrowser {
                 mode,
                 transfers,
                 conflicts,
-            } => self.accept_transfer_conflicts_checked(mode, transfers, conflicts),
+            } => self.accept_transfer_conflict_review(
+                mode,
+                conflicts.map(|conflicts| (transfers, conflicts)),
+            ),
             Message::TransferConflictMergesExpanded { mode, expansion } => {
-                self.accept_expanded_transfer_conflict_merges(mode, expansion)
+                self.accept_transfer_conflict_review(mode, expansion)
             }
             Message::TransferConflictChoiceSelected(_)
             | Message::TransferConflictApplyToAllToggled

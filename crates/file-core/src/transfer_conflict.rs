@@ -43,39 +43,43 @@ impl TransferConflictItem {
     }
 }
 
+/// 读不到某一项源或目标的信息时返回错误：那一项是否冲突无从判断，不能当作没有冲突放行。
+/// 多项失败时按输入顺序返回第一个。
 pub async fn check_transfer_conflicts(
     transfers: Vec<TransferConflictCheck>,
-) -> Vec<TransferConflictItem> {
-    let mut indexed_transfers = transfers.into_iter().enumerate();
-    let mut indexed_conflicts = Vec::new();
+) -> Result<Vec<TransferConflictItem>, FileError> {
+    let mut transfers = transfers.into_iter();
+    let mut conflicts = Vec::new();
 
     loop {
-        let mut handles = Vec::new();
-        for _ in 0..TRANSFER_CONFLICT_METADATA_CONCURRENCY {
-            let Some((position, transfer)) = indexed_transfers.next() else {
-                break;
-            };
-            handles.push(tokio::spawn(async move {
-                (position, transfer_conflict(transfer).await)
-            }));
-        }
+        let handles: Vec<_> = transfers
+            .by_ref()
+            .take(TRANSFER_CONFLICT_METADATA_CONCURRENCY)
+            .map(|transfer| {
+                (
+                    transfer.source.clone(),
+                    tokio::spawn(transfer_conflict(transfer)),
+                )
+            })
+            .collect();
 
         if handles.is_empty() {
             break;
         }
 
-        for handle in handles {
-            if let Ok((position, Some(conflict))) = handle.await {
-                indexed_conflicts.push((position, conflict));
+        // 同一批按 spawn 顺序等待，结果自然保持输入顺序。
+        for (source, handle) in handles {
+            let conflict = handle.await.map_err(|join_error| FileError::Metadata {
+                path: source,
+                source: io::Error::other(join_error),
+            })??;
+            if let Some(conflict) = conflict {
+                conflicts.push(conflict);
             }
         }
     }
 
-    indexed_conflicts.sort_by_key(|(position, _)| *position);
-    indexed_conflicts
-        .into_iter()
-        .map(|(_, conflict)| conflict)
-        .collect()
+    Ok(conflicts)
 }
 
 pub async fn is_transfer_target_available(path: impl AsRef<Path>) -> Result<bool, FileError> {
@@ -118,22 +122,28 @@ pub(crate) async fn first_available_entry_path(
     })
 }
 
-async fn transfer_conflict(transfer: TransferConflictCheck) -> Option<TransferConflictItem> {
-    let source_metadata = transfer_target_metadata_if_exists(&transfer.source)
-        .await
-        .ok()
-        .flatten()?;
-    let target_metadata = transfer_target_metadata_if_exists(&transfer.target)
-        .await
-        .ok()
-        .flatten()?;
+/// 目标不存在就没有冲突。源不存在也没有冲突要问：传输执行时会报源不存在。
+async fn transfer_conflict(
+    transfer: TransferConflictCheck,
+) -> Result<Option<TransferConflictItem>, FileError> {
+    let metadata_if_exists = |path: PathBuf| async move {
+        transfer_target_metadata_if_exists(&path)
+            .await
+            .map_err(|source| FileError::Metadata { path, source })
+    };
+    let Some(source_metadata) = metadata_if_exists(transfer.source.clone()).await? else {
+        return Ok(None);
+    };
+    let Some(target_metadata) = metadata_if_exists(transfer.target.clone()).await? else {
+        return Ok(None);
+    };
 
-    Some(TransferConflictItem {
+    Ok(Some(TransferConflictItem {
         source: transfer.source,
         target: transfer.target,
         source_metadata: transfer_conflict_metadata(source_metadata),
         target_metadata: transfer_conflict_metadata(target_metadata),
-    })
+    }))
 }
 
 fn transfer_conflict_metadata(metadata: std::fs::Metadata) -> TransferConflictMetadata {

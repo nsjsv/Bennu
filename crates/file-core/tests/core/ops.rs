@@ -394,10 +394,39 @@ async fn transfer_conflict_check_ignores_missing_target() {
     let target = dir.path().join("target.txt");
     fs::write(&source, b"source").unwrap();
 
-    let conflicts =
-        check_transfer_conflicts(vec![TransferConflictCheck::new(source, target)]).await;
+    let conflicts = check_transfer_conflicts(vec![TransferConflictCheck::new(source, target)])
+        .await
+        .unwrap();
 
     assert!(conflicts.is_empty());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn transfer_conflict_check_reports_an_unreadable_target_instead_of_no_conflict() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("source.txt");
+    let locked = dir.path().join("locked");
+    let target = locked.join("target.txt");
+    fs::write(&source, b"source").unwrap();
+    fs::create_dir(&locked).unwrap();
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+    // root 不受目录权限限制，读得到就测不出这条路径。
+    let unreadable = fs::symlink_metadata(&target)
+        .is_err_and(|error| error.kind() == std::io::ErrorKind::PermissionDenied);
+
+    let outcome =
+        check_transfer_conflicts(vec![TransferConflictCheck::new(source, target.clone())]).await;
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o700)).unwrap();
+
+    if unreadable {
+        assert!(matches!(
+            outcome,
+            Err(file_core::FileError::Metadata { path, .. }) if path == target
+        ));
+    }
 }
 
 #[tokio::test]
@@ -412,7 +441,8 @@ async fn transfer_conflict_check_detects_file_conflict() {
         source.clone(),
         target.clone(),
     )])
-    .await;
+    .await
+    .unwrap();
 
     assert_eq!(conflicts.len(), 1);
     let conflict = &conflicts[0];
@@ -433,8 +463,9 @@ async fn transfer_conflict_check_marks_directories_mergeable() {
     fs::create_dir(&source).unwrap();
     fs::create_dir(&target).unwrap();
 
-    let conflicts =
-        check_transfer_conflicts(vec![TransferConflictCheck::new(source, target)]).await;
+    let conflicts = check_transfer_conflicts(vec![TransferConflictCheck::new(source, target)])
+        .await
+        .unwrap();
 
     assert_eq!(conflicts.len(), 1);
     assert!(conflicts[0].can_merge());

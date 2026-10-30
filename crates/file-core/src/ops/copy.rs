@@ -465,8 +465,10 @@ async fn hash_source_content(
     }
 }
 
+/// 符号链接复制的唯一规则：建链接、校验链接目标、尽力恢复元数据，返回没能保留的种类。
+/// 串行复制和可恢复传输的并行暂存都走这里，保真结果不因路径不同而不同。
 #[cfg(unix)]
-async fn copy_symbolic_link_to_target(
+pub(crate) async fn copy_symbolic_link_to_target(
     from: &Path,
     to: &Path,
     source_object: &TransferSourceObject,
@@ -502,7 +504,7 @@ async fn copy_symbolic_link_to_target(
 }
 
 #[cfg(not(unix))]
-async fn copy_symbolic_link_to_target(
+pub(crate) async fn copy_symbolic_link_to_target(
     from: &Path,
     _to: &Path,
     _source_object: &TransferSourceObject,

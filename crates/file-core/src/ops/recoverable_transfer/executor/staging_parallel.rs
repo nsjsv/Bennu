@@ -1,7 +1,8 @@
 //! 目录 payload 的并行 staging:两阶段(保序准备 + 并行文件搬运)。
 //!
 //! 协议不变量保持方式:
-//! - 目录创建串行保序;符号链接串行创建,绝不跟随。
+//! - 目录创建串行保序;符号链接串行创建,绝不跟随,按串行复制同一个
+//!   `copy_symbolic_link_to_target` 校验并恢复元数据,恢复不了的计入丢失报告。
 //! - 文件搬运是唯一并行点:payload 是全新空树,名称天然无冲突;每个文件
 //!   独立走策略阶梯 + 类型/长度校验 + 元数据尽力恢复。
 //! - 目录元数据在全部文件完成后按后序恢复(后代先于祖先,与旧 LIFO 等价)。
@@ -14,6 +15,7 @@ use std::sync::Arc;
 
 use tokio::sync::mpsc;
 
+use crate::ops::copy::copy_symbolic_link_to_target;
 use crate::ops::metadata_loss::{MetadataKind, MetadataLossSummary};
 use crate::ops::transfer_metadata::apply_transfer_metadata;
 use crate::ops::transfer_object::{inspect_transfer_source, TransferSourceKind};
@@ -88,11 +90,13 @@ pub(super) async fn copy_tree_to_payload_parallel(
     });
 
     // 阶段一:保序准备。目录 mkdir + 符号链接串行,文件仅登记。
+    let mut link_metadata_loss = MetadataLossSummary::default();
     prepare_tree(
         source_root,
         payload_root,
         &mut directories,
         &mut files,
+        &mut link_metadata_loss,
         controls,
     )
     .await?;
@@ -174,6 +178,7 @@ pub(super) async fn copy_tree_to_payload_parallel(
         }
         std::mem::take(&mut state.metadata_loss)
     };
+    metadata_loss.absorb(link_metadata_loss);
 
     // 阶段三:目录元数据后序恢复。
     let mut controls = controls.clone();
@@ -199,6 +204,7 @@ async fn prepare_tree(
     payload_root: &Path,
     directories: &mut Vec<StagedDirectoryEntry>,
     files: &mut Vec<StagedFileEntry>,
+    metadata_loss: &mut MetadataLossSummary,
     controls: &FileOperationControls,
 ) -> Result<(), RecoverableTransferError> {
     let mut controls = controls.clone();
@@ -258,22 +264,16 @@ async fn prepare_tree(
                         length: source_object.metadata.len(),
                     });
                 }
-                TransferSourceKind::SymbolicLink { target } => {
-                    #[cfg(unix)]
-                    tokio::fs::symlink(target, &child_payload)
-                        .await
-                        .map_err(|source| {
-                            RecoverableTransferError::file_system(
-                                "create staging payload symbolic link",
-                                &child_payload,
-                                source,
-                            )
-                        })?;
-                    #[cfg(not(unix))]
-                    {
-                        let _ = target;
-                        let _ = child_payload;
-                    }
+                TransferSourceKind::SymbolicLink { .. } => {
+                    let lost = copy_symbolic_link_to_target(
+                        &child_source,
+                        &child_payload,
+                        &source_object,
+                        &mut controls,
+                    )
+                    .await
+                    .map_err(RecoverableTransferError::FileOperation)?;
+                    metadata_loss.record(&child_payload, lost);
                 }
             }
         }
@@ -317,4 +317,63 @@ async fn copy_staged_file(
         });
     }
     Ok(apply_transfer_metadata(&entry.source, &entry.payload, &source_object).await?)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::os::unix::fs::{symlink, MetadataExt};
+
+    use filetime::FileTime;
+    use tokio_util::sync::CancellationToken;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn parallel_staging_keeps_symbolic_link_times_like_the_serial_copy() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source");
+        let nested = source.join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(source.join("note.txt"), b"note").unwrap();
+        let link = nested.join("note-link");
+        symlink("../note.txt", &link).unwrap();
+        let link_modified = FileTime::from_unix_time(1_600_000_002, 0);
+        filetime::set_symlink_file_times(
+            &link,
+            FileTime::from_unix_time(1_600_000_001, 0),
+            link_modified,
+        )
+        .unwrap();
+        let payload = directory.path().join("payload");
+        let device = std::fs::metadata(directory.path()).unwrap().dev();
+        let engine = Arc::new(TransferStrategyEngine::probe(
+            device,
+            device,
+            directory.path(),
+        ));
+
+        let metadata_loss = copy_tree_to_payload_parallel(
+            &source,
+            &payload,
+            &engine,
+            &FileOperationControls::running(CancellationToken::new()),
+            None,
+        )
+        .await
+        .unwrap();
+
+        let staged_link = payload.join("nested").join("note-link");
+        let staged_metadata = std::fs::symlink_metadata(&staged_link).unwrap();
+        assert!(staged_metadata.file_type().is_symlink());
+        assert_eq!(
+            std::fs::read_link(&staged_link).unwrap(),
+            PathBuf::from("../note.txt")
+        );
+        assert_eq!(
+            FileTime::from_last_modification_time(&staged_metadata),
+            link_modified
+        );
+        // 链接的时间恢复了；恢复不了的种类才会出现在报告里。
+        assert!(metadata_loss.is_empty(), "{metadata_loss:?}");
+    }
 }

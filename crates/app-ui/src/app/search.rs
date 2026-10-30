@@ -11,7 +11,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::{FileBrowser, DOUBLE_CLICK_THRESHOLD};
 use crate::commands::{
-    directory_fallback_search_command, open_file_command, read_search_path_configuration,
+    directory_fallback_search_command, open_file_command, read_directory_fallback_preferences,
     search_command, search_service_recovery_command, search_service_status_command,
     search_with_scope_root_check_command,
 };
@@ -881,50 +881,43 @@ impl FileBrowser {
         }
 
         let generation = workspace.run.generation;
-        Task::perform(read_search_path_configuration(), move |outcome| {
-            Message::SearchDirectoryFallbackConfigurationLoaded(
-                generation,
-                unavailable_message,
-                outcome,
-            )
-        })
+        Task::perform(
+            read_directory_fallback_preferences(dirs::config_dir()),
+            move |outcome| {
+                Message::SearchDirectoryFallbackConfigurationLoaded(
+                    generation,
+                    unavailable_message,
+                    outcome,
+                )
+            },
+        )
     }
 
     pub(super) fn start_verified_directory_fallback(
         &mut self,
         generation: u64,
         unavailable_message: String,
-        outcome: Result<
-            (
-                file_search::VersionedSearchPathPreferences,
-                file_search::SearchPathConfigurationStatus,
-            ),
-            SearchServiceDiagnostic,
-        >,
+        outcome: Result<file_search::SearchPathPreferences, String>,
     ) -> Task<Message> {
-        let (_, status) = match outcome {
-            Ok(snapshot) => snapshot,
-            Err(diagnostic) => {
+        let preferences = match outcome {
+            Ok(preferences) => preferences,
+            Err(error) => {
                 self.fail_search_workspace(format!(
-                    "{unavailable_message}; could not verify search exclusions: {}",
-                    diagnostic.technical_detail
+                    "{unavailable_message}; could not read search exclusions: {error}"
                 ));
                 return Task::none();
             }
         };
-        let rules = match SearchExcludeRules::for_directory_fallback(
-            self.home_dir.clone(),
-            status.effective_preferences.clone(),
-        ) {
-            Ok(rules) => rules,
-            Err(message) => {
-                self.fail_search_workspace(format!(
-                    "{unavailable_message}; effective search path rules are invalid: {message}"
-                ));
-                return Task::none();
-            }
-        };
-        self.update_search_path_configuration_status(status);
+        let rules =
+            match SearchExcludeRules::for_directory_fallback(self.home_dir.clone(), preferences) {
+                Ok(rules) => rules,
+                Err(message) => {
+                    self.fail_search_workspace(format!(
+                        "{unavailable_message}; search path rules are invalid: {message}"
+                    ));
+                    return Task::none();
+                }
+            };
 
         let Some(workspace) = self.search_workspace.as_ref() else {
             return Task::none();

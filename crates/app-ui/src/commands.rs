@@ -88,9 +88,9 @@ mod search_service_endpoint;
 mod search_service_recovery;
 mod search_service_systemd;
 pub(crate) use search_service::{
-    configure_search_paths_command, ensure_search_service_command, read_search_path_configuration,
-    search_path_configuration_command, search_path_directory_chooser_command,
-    search_service_status_command,
+    configure_search_paths_command, ensure_search_service_command,
+    read_directory_fallback_preferences, search_path_configuration_command,
+    search_path_directory_chooser_command, search_service_status_command,
 };
 pub(crate) use search_service_recovery::search_service_recovery_command;
 mod sidebar_devices;

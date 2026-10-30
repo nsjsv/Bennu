@@ -49,7 +49,23 @@ pub(crate) fn search_path_directory_chooser_command(kind: SearchPathEntryKind) -
     })
 }
 
-pub(crate) async fn read_search_path_configuration() -> Result<
+/// 目录回退的跳过规则：直接读服务同一份路径偏好文件，不经服务进程——服务没运行时
+/// 回退照样可用（PRD：发行包默认不启用服务）。`config_directory` 为 None 时没有配置目录，
+/// 按读不了处理，回退拒绝搜索。
+pub(crate) async fn read_directory_fallback_preferences(
+    config_directory: Option<PathBuf>,
+) -> Result<SearchPathPreferences, String> {
+    tokio::task::spawn_blocking(move || {
+        let config_directory = config_directory
+            .ok_or_else(|| "the user configuration directory is unavailable".to_owned())?;
+        file_search::load_search_path_preferences(&config_directory)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+async fn read_search_path_configuration() -> Result<
     (
         file_search::VersionedSearchPathPreferences,
         file_search::SearchPathConfigurationStatus,

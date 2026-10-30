@@ -56,6 +56,6 @@ pub use protocol::{
     BoundSearchSocket, SearchSocketService,
 };
 pub use runtime_identity::{SearchRuntimeIdentity, SEARCH_RUNTIME_IDENTITY_ENV};
-pub use search_path_store::search_path_file_in;
+pub use search_path_store::{load_search_path_preferences, search_path_file_in};
 pub use service_runtime::SearchServiceRuntime;
 pub use writer::IndexWriter;

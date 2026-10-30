@@ -15,8 +15,8 @@ use file_core::{
 };
 use file_operation_store::TaskQueueStore;
 use file_search::{
-    SearchHit, SearchPathConfigurationStatus, SearchServiceStatus, SearchTextScope,
-    VersionedSearchPathPreferences,
+    SearchHit, SearchPathConfigurationStatus, SearchPathPreferences, SearchServiceStatus,
+    SearchTextScope, VersionedSearchPathPreferences,
 };
 use iced::keyboard;
 use iced::{event, mouse, window, Point, Theme};
@@ -669,17 +669,7 @@ pub(crate) enum Message {
             SearchServiceDiagnostic,
         >,
     ),
-    SearchDirectoryFallbackConfigurationLoaded(
-        u64,
-        String,
-        Result<
-            (
-                VersionedSearchPathPreferences,
-                SearchPathConfigurationStatus,
-            ),
-            SearchServiceDiagnostic,
-        >,
-    ),
+    SearchDirectoryFallbackConfigurationLoaded(u64, String, Result<SearchPathPreferences, String>),
     SearchPathInputChanged(SearchPathEntryKind, String),
     SearchPathInputCommitted(SearchPathEntryKind),
     SearchPathDirectoryChooserPressed(SearchPathEntryKind),

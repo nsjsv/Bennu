@@ -100,13 +100,7 @@ fn start_default_directory_fallback(
     drop(browser.start_verified_directory_fallback(
         generation,
         unavailable_message.to_owned(),
-        Ok((
-            file_search::VersionedSearchPathPreferences {
-                revision: 0,
-                preferences: file_search::SearchPathPreferences::default(),
-            },
-            file_search::SearchPathConfigurationStatus::default(),
-        )),
+        Ok(file_search::SearchPathPreferences::default()),
     ));
 }
 
@@ -508,6 +502,69 @@ fn unavailable_before_first_batch_switches_to_directory_fallback() {
     );
     assert!(workspace.window.is_loading);
     assert!(workspace.window.failure.is_none());
+}
+
+/// 没有搜索服务也没有 socket：回退经正式读取函数直接读配置目录里服务同一份文件。
+#[tokio::test]
+async fn directory_fallback_starts_without_the_search_service() {
+    let config_directory = tempdir().unwrap();
+    let preferences = crate::commands::read_directory_fallback_preferences(Some(
+        config_directory.path().to_path_buf(),
+    ))
+    .await;
+    let mut browser = browser_for_search_tests(PathBuf::from("/workspace"));
+    stabilize_search_input(&mut browser, "report");
+    let request = pending_indexed_request(&browser);
+    drop(browser.accept_search_results(
+        request,
+        IndexedSearchOutcome::TransportUnavailable("search service is not running".to_owned()),
+    ));
+
+    drop(browser.start_verified_directory_fallback(
+        request.generation,
+        "search service is not running".to_owned(),
+        preferences,
+    ));
+
+    let workspace = browser.search_workspace.as_ref().unwrap();
+    assert_eq!(
+        workspace.run.provider,
+        Some(SearchProvider::DirectoryFallback)
+    );
+    assert!(workspace.window.failure.is_none());
+}
+
+/// 跳过规则读不懂时不回退：不能扫进用户排除的目录。
+#[tokio::test]
+async fn unreadable_search_exclusions_stop_the_directory_fallback() {
+    let config_directory = tempdir().unwrap();
+    let sidecar = file_search::search_path_file_in(config_directory.path());
+    std::fs::create_dir_all(sidecar.parent().unwrap()).unwrap();
+    std::fs::write(&sidecar, b"{").unwrap();
+    let preferences = crate::commands::read_directory_fallback_preferences(Some(
+        config_directory.path().to_path_buf(),
+    ))
+    .await;
+    let mut browser = browser_for_search_tests(PathBuf::from("/workspace"));
+    stabilize_search_input(&mut browser, "report");
+    let request = pending_indexed_request(&browser);
+    drop(browser.accept_search_results(
+        request,
+        IndexedSearchOutcome::TransportUnavailable("search service is not running".to_owned()),
+    ));
+
+    drop(browser.start_verified_directory_fallback(
+        request.generation,
+        "search service is not running".to_owned(),
+        preferences,
+    ));
+
+    let workspace = browser.search_workspace.as_ref().unwrap();
+    assert!(workspace
+        .window
+        .failure
+        .as_deref()
+        .is_some_and(|failure| failure.contains("could not read search exclusions")));
 }
 
 #[test]

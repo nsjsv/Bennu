@@ -22,6 +22,17 @@ pub fn search_path_file_in(config_directory: &Path) -> PathBuf {
         .join(SEARCH_PATH_CONFIG_FILE)
 }
 
+/// 本地目录回退用：直接读服务同一份路径偏好文件，服务没运行也能读。文件不存在 = 默认
+/// 偏好；读不了或读不懂时返回错误，调用方据此拒绝回退，免得扫进用户排除的目录。
+pub fn load_search_path_preferences(
+    config_directory: &Path,
+) -> SearchResult<crate::SearchPathPreferences> {
+    Ok(SearchPathStore::at(search_path_file_in(config_directory))
+        .load()?
+        .map(|versioned| versioned.preferences)
+        .unwrap_or_default())
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct StoredSearchPathPreferences {
     format_version: u32,
@@ -224,6 +235,33 @@ mod tests {
             search_path_file_in(Path::new("/home/user/.config")),
             PathBuf::from("/home/user/.config/bennu/search-paths.json")
         );
+    }
+
+    #[test]
+    fn fallback_reads_the_same_preferences_the_service_stores() {
+        let config_directory = tempdir().unwrap();
+        assert_eq!(
+            load_search_path_preferences(config_directory.path()).unwrap(),
+            SearchPathPreferences::default()
+        );
+
+        let preferences = SearchPathPreferences {
+            custom_roots: Vec::new(),
+            exclusions: vec![PathBuf::from("/home/user/private")],
+        };
+        SearchPathStore::at(search_path_file_in(config_directory.path()))
+            .replace(&VersionedSearchPathPreferences {
+                revision: 3,
+                preferences: preferences.clone(),
+            })
+            .unwrap();
+        assert_eq!(
+            load_search_path_preferences(config_directory.path()).unwrap(),
+            preferences
+        );
+
+        fs::write(search_path_file_in(config_directory.path()), b"{").unwrap();
+        assert!(load_search_path_preferences(config_directory.path()).is_err());
     }
 
     #[test]

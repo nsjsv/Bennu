@@ -6,7 +6,7 @@ ConditionControlGroupController=memory
 ConditionControlGroupController=cpu
 
 [Service]
-Type=exec
+Type=notify
 SyslogIdentifier=bennu-search
 ExecStartPre=/usr/lib/bennu/bennu-searchd --shutdown-existing
 ExecStart=/usr/lib/bennu/bennu-searchd

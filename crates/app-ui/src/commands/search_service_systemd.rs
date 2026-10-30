@@ -11,6 +11,9 @@ use tokio::process::Command;
 use super::bounded_child_output::read_bounded_child_output;
 
 const SEARCH_CONTROL_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(1);
+/// 比 unit 的 TimeoutStopSec + TimeoutStartSec（30 + 30 秒）多留一点：超时由
+/// systemd 判定并报失败，这里只防 systemctl 本身卡住。
+const SEARCH_UNIT_JOB_TIMEOUT: Duration = Duration::from_secs(65);
 const MAXIMUM_SYSTEMCTL_STDOUT_BYTES: usize = 64 * 1024;
 const MAXIMUM_SYSTEMCTL_STDERR_BYTES: usize = 16 * 1024;
 const MAXIMUM_SYSTEMD_SOURCE_FIELD_CHARS: usize = 4096;
@@ -57,8 +60,10 @@ impl SearchUnitAction {
                 "show",
             ],
             Self::DaemonReload => vec!["--user", "--no-pager", "daemon-reload"],
-            Self::Start => vec!["--user", "--no-pager", "--no-block", "start"],
-            Self::Restart => vec!["--user", "--no-pager", "--no-block", "restart"],
+            // 不加 --no-block：unit 是 Type=notify，systemctl 等服务报就绪
+            // （或启动失败、超时）才返回，返回即可直接确认端点。
+            Self::Start => vec!["--user", "--no-pager", "start"],
+            Self::Restart => vec!["--user", "--no-pager", "restart"],
             Self::KillControlGroup => vec![
                 "--user",
                 "--no-pager",
@@ -76,6 +81,17 @@ impl SearchUnitAction {
             arguments.push(OsString::from(runtime_identity.systemd_unit()));
         }
         arguments
+    }
+
+    /// start/restart 要等 systemd 走完停止和启动（unit 里各最多 30 秒），
+    /// 其余操作是即时的。
+    fn attempt_timeout(self) -> Duration {
+        match self {
+            Self::Start | Self::Restart => SEARCH_UNIT_JOB_TIMEOUT,
+            Self::Show | Self::DaemonReload | Self::KillControlGroup | Self::ResetFailed => {
+                SEARCH_CONTROL_ATTEMPT_TIMEOUT
+            }
+        }
     }
 
     fn name(self) -> &'static str {
@@ -128,7 +144,7 @@ impl SearchUnitController {
             .stderr
             .take()
             .ok_or_else(|| "systemctl stderr pipe was unavailable".to_owned())?;
-        let command_result = tokio::time::timeout(SEARCH_CONTROL_ATTEMPT_TIMEOUT, async move {
+        let command_result = tokio::time::timeout(action.attempt_timeout(), async move {
             let (status_result, stdout_result, stderr_result) = tokio::join!(
                 child.wait(),
                 read_bounded_child_output(stdout, MAXIMUM_SYSTEMCTL_STDOUT_BYTES),

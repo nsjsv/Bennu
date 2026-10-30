@@ -1,6 +1,5 @@
 use std::num::NonZeroU32;
 use std::path::Path;
-use std::time::{Duration, Instant};
 
 use file_search::{SearchRuntimeIdentity, SearchServiceStatus};
 use iced::Task;
@@ -13,9 +12,6 @@ use super::search_service_endpoint::SearchEndpointProbeFailure;
 use crate::model::{
     Message, SearchServiceDiagnostic, SearchServiceDiagnosticKind, SearchServiceRecoveryAction,
 };
-
-const SEARCH_SERVICE_RECOVERY_TIMEOUT: Duration = Duration::from_secs(60);
-const SEARCH_SERVICE_RECOVERY_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 pub(crate) fn search_service_recovery_command(
     action: SearchServiceRecoveryAction,
@@ -59,48 +55,34 @@ pub(super) async fn recover_search_service_with(
             )
         })?;
 
-    let readiness_deadline = Instant::now() + SEARCH_SERVICE_RECOVERY_TIMEOUT;
-    loop {
-        let last_observation = match read_validated_search_service_with(
-            unit_controller,
-            socket_path,
-        )
-        .await
-        {
-            Ok(service) if owner_was_replaced(previous_main_pid, service.main_pid) => {
-                return Ok(service.status);
-            }
-            Ok(service) => format!(
-                "search service still uses previous MainPID={}",
-                service.main_pid
-            ),
-            Err(ValidatedSearchServiceFailure::StableOwnerEndpoint {
-                main_pid,
-                endpoint_failure: incompatibility @ SearchEndpointProbeFailure::Incompatible { .. },
-                unit_description,
-            }) if owner_was_replaced(previous_main_pid, main_pid) => {
-                return Err(SearchServiceDiagnostic::new(
-                    SearchServiceDiagnosticKind::ComponentIncompatible,
-                    format!(
-                        "{}; {unit_description}; reinstall the search service components from the current Bennu bundle, then try again",
-                        incompatibility.into_message()
-                    ),
-                ));
-            }
-            Err(failure) => failure.into_message(),
-        };
-
-        if Instant::now() >= readiness_deadline {
+    // restart 在 Type=notify 下等新进程报就绪才返回：此刻确认一次换了新进程即可。
+    let failure = match read_validated_search_service_with(unit_controller, socket_path).await {
+        Ok(service) if owner_was_replaced(previous_main_pid, service.main_pid) => {
+            return Ok(service.status);
+        }
+        Ok(service) => format!(
+            "search service still uses previous MainPID={}",
+            service.main_pid
+        ),
+        Err(ValidatedSearchServiceFailure::StableOwnerEndpoint {
+            main_pid,
+            endpoint_failure: incompatibility @ SearchEndpointProbeFailure::Incompatible { .. },
+            unit_description,
+        }) if owner_was_replaced(previous_main_pid, main_pid) => {
             return Err(SearchServiceDiagnostic::new(
-                SearchServiceDiagnosticKind::RecoveryFailed,
+                SearchServiceDiagnosticKind::ComponentIncompatible,
                 format!(
-                    "search service recovery did not produce a verified replacement owner within {} seconds; last observation: {last_observation}",
-                    SEARCH_SERVICE_RECOVERY_TIMEOUT.as_secs()
+                    "{}; {unit_description}; reinstall the search service components from the current Bennu bundle, then try again",
+                    incompatibility.into_message()
                 ),
             ));
         }
-        tokio::time::sleep(SEARCH_SERVICE_RECOVERY_POLL_INTERVAL).await;
-    }
+        Err(failure) => failure.into_message(),
+    };
+    Err(SearchServiceDiagnostic::new(
+        SearchServiceDiagnosticKind::RecoveryFailed,
+        format!("search service recovery did not produce a verified replacement owner: {failure}"),
+    ))
 }
 
 async fn issue_recovery_actions(

@@ -403,23 +403,11 @@ fn unit_actions_use_user_systemd_without_a_shell() {
     );
     assert_eq!(
         SearchUnitAction::Start.arguments(development_identity),
-        [
-            "--user",
-            "--no-pager",
-            "--no-block",
-            "start",
-            "bennu-search-dev.service"
-        ]
+        ["--user", "--no-pager", "start", "bennu-search-dev.service"]
     );
     assert_eq!(
         SearchUnitAction::Restart.arguments(release_identity),
-        [
-            "--user",
-            "--no-pager",
-            "--no-block",
-            "restart",
-            "bennu-search.service"
-        ]
+        ["--user", "--no-pager", "restart", "bennu-search.service"]
     );
     assert_eq!(
         SearchUnitAction::KillControlGroup.arguments(release_identity),
@@ -642,14 +630,15 @@ async fn incompatible_endpoint_is_restarted_only_once_before_compatibility() {
         index_status: None,
     };
     let served_status = expected_status.clone();
+    // restart 等新进程报就绪才返回：重启前旧版本答一次，重启后一次就是新版本。
     let endpoint_server = tokio::spawn(async move {
-        for connection_index in 0..3 {
+        for connection_index in 0..2 {
             let (mut stream, _) = listener.accept().await.unwrap();
             assert_eq!(
                 read_service_request(&mut stream).await.unwrap(),
                 SearchServiceRequest::Version
             );
-            let compatible = connection_index == 2;
+            let compatible = connection_index == 1;
             write_service_event(
                 &mut stream,
                 &SearchServiceEvent::Version {
@@ -704,7 +693,7 @@ async fn incompatible_endpoint_is_restarted_only_once_before_compatibility() {
 }
 
 #[tokio::test]
-async fn graceful_recovery_retries_a_transient_disconnect_without_sending_sigkill() {
+async fn graceful_recovery_restarts_once_without_sending_sigkill() {
     let temporary_directory = tempdir().unwrap();
     let cgroup_root = temporary_directory.path().join("cgroup");
     create_valid_search_cgroup(&cgroup_root).await;
@@ -726,14 +715,7 @@ async fn graceful_recovery_retries_a_transient_disconnect_without_sending_sigkil
         query_availability: IndexedQueryAvailability::Available,
         index_status: None,
     };
-    let served_status = expected_status.clone();
-    let endpoint_server = tokio::spawn(async move {
-        let (first_stream, _) = listener.accept().await.unwrap();
-        drop(first_stream);
-        spawn_compatible_endpoint(listener, served_status)
-            .await
-            .unwrap();
-    });
+    let endpoint_server = spawn_compatible_endpoint(listener, expected_status.clone());
     let unit_controller = SearchUnitController {
         runtime_identity: SearchRuntimeIdentity::Release,
         systemctl_executable,
@@ -759,7 +741,7 @@ async fn graceful_recovery_retries_a_transient_disconnect_without_sending_sigkil
         mutation_actions,
         [
             "--user --no-pager daemon-reload",
-            "--user --no-pager --no-block restart bennu-search.service",
+            "--user --no-pager restart bennu-search.service",
         ]
     );
 }
@@ -815,7 +797,7 @@ async fn force_recovery_kills_the_whole_control_group_before_restart() {
             "--user --no-pager --signal=SIGKILL --kill-whom=all kill bennu-search.service",
             "--user --no-pager reset-failed bennu-search.service",
             "--user --no-pager daemon-reload",
-            "--user --no-pager --no-block restart bennu-search.service",
+            "--user --no-pager restart bennu-search.service",
         ]
     );
 }

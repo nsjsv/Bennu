@@ -19,7 +19,6 @@ mod file_searchd_runtime_logging;
 use file_searchd_runtime_logging::{bounded_daemon_log_detail, init_runtime_logging};
 
 const EXISTING_ENDPOINT_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
-const EXISTING_ENDPOINT_CONNECT_INTERVAL: Duration = Duration::from_millis(50);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DaemonInvocation {
@@ -114,7 +113,8 @@ async fn check_existing(
     socket_path: &Path,
     expected_main_pid: NonZeroU32,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut peer_stream = connect_existing_endpoint(socket_path).await?;
+    // 只在 systemd 报了就绪之后调用（Type=notify），socket 必然已建好，不重试。
+    let mut peer_stream = UnixStream::connect(socket_path).await?;
     let peer_process_id = connected_peer_process_id(&peer_stream)?;
     if peer_process_id != expected_main_pid {
         return Err(io::Error::new(
@@ -139,24 +139,6 @@ async fn check_existing(
             format!("search service returned an unexpected status response: {event:?}"),
         )
         .into()),
-    }
-}
-
-async fn connect_existing_endpoint(socket_path: &Path) -> io::Result<UnixStream> {
-    loop {
-        match UnixStream::connect(socket_path).await {
-            Ok(peer_stream) => return Ok(peer_stream),
-            Err(source)
-                if matches!(
-                    source.kind(),
-                    io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
-                ) =>
-            {
-                // Type=exec 会先进入 active，再由 daemon 完成 socket bind；只重试这个启动窗口。
-                tokio::time::sleep(EXISTING_ENDPOINT_CONNECT_INTERVAL).await;
-            }
-            Err(source) => return Err(source),
-        }
     }
 }
 
@@ -242,6 +224,25 @@ fn is_file_searchd_executable_path(executable_path: &Path) -> bool {
     )
 }
 
+/// unit 是 Type=notify：socket 建好后发 `READY=1`，systemd 才把服务记成已启动，
+/// `systemctl start/restart` 也到这时才返回（sd_notify(3) 协议）。不在 systemd
+/// 下运行时没有 `NOTIFY_SOCKET`，什么都不做。
+fn notify_systemd_ready() -> io::Result<()> {
+    use std::os::linux::net::SocketAddrExt;
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::net::{SocketAddr, UnixDatagram};
+
+    let Some(notify_socket) = std::env::var_os("NOTIFY_SOCKET") else {
+        return Ok(());
+    };
+    let address = match notify_socket.as_bytes().strip_prefix(b"@") {
+        Some(abstract_name) => SocketAddr::from_abstract_name(abstract_name)?,
+        None => SocketAddr::from_pathname(&notify_socket)?,
+    };
+    UnixDatagram::unbound()?.send_to_addr(b"READY=1", &address)?;
+    Ok(())
+}
+
 async fn serve(socket_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     let mut terminate_signal = signal(SignalKind::terminate())?;
     let database_path = database_path();
@@ -255,6 +256,7 @@ async fn serve(socket_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
         SearchIndexConfig::default(),
     );
 
+    notify_systemd_ready()?;
     tracing::info!(
         target: "file_search::daemon",
         event = "daemon_endpoint_ready",
@@ -447,21 +449,20 @@ mod tests {
         endpoint_server.await.unwrap();
     }
 
-    #[tokio::test]
-    async fn check_existing_waits_for_endpoint_bind() {
+    #[test]
+    fn ready_notification_reaches_the_systemd_notify_socket() {
         let temporary_directory = tempfile::tempdir().unwrap();
-        let socket_path = temporary_directory.path().join("search.sock");
-        let server_socket_path = socket_path.clone();
-        let endpoint_server = tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            let listener = tokio::net::UnixListener::bind(server_socket_path).unwrap();
-            serve_compatible_probe(listener).await;
-        });
+        let notify_path = temporary_directory.path().join("notify.sock");
+        let systemd = std::os::unix::net::UnixDatagram::bind(&notify_path).unwrap();
 
-        check_existing_with_timeout(&socket_path, NonZeroU32::new(std::process::id()).unwrap())
-            .await
-            .unwrap();
-        endpoint_server.await.unwrap();
+        std::env::set_var("NOTIFY_SOCKET", &notify_path);
+        let sent = notify_systemd_ready();
+        std::env::remove_var("NOTIFY_SOCKET");
+        sent.unwrap();
+
+        let mut message = [0u8; 32];
+        let length = systemd.recv(&mut message).unwrap();
+        assert_eq!(&message[..length], b"READY=1");
     }
 
     #[tokio::test]

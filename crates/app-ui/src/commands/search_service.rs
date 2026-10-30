@@ -1,6 +1,5 @@
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
 
 use file_search::{SearchPathPreferences, SearchRuntimeIdentity, SearchServiceStatus};
 use iced::Task;
@@ -13,9 +12,6 @@ use crate::model::{
     Message, SearchPathConfigureRequest, SearchPathEntryKind, SearchServiceDiagnostic,
     SearchServiceDiagnosticKind, SearchServiceStatusRequest,
 };
-
-const SEARCH_SERVICE_READY_TIMEOUT: Duration = Duration::from_secs(30);
-const SEARCH_SERVICE_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 pub(crate) fn ensure_search_service_command(request: SearchServiceStatusRequest) -> Task<Message> {
     Task::perform(ensure_search_service(), move |outcome| {
@@ -291,116 +287,54 @@ async fn ensure_search_service_with(
     unit_controller: &SearchUnitController,
     socket_path: &Path,
 ) -> Result<SearchServiceStatus, String> {
+    // unit 是 Type=notify：start/restart 等到服务建好 socket 报就绪（或启动失败、
+    // 超过 TimeoutStartSec）才返回，之后确认一次端点即可，不用轮询。
     let initial_snapshot = unit_controller.show().await?;
-    let mut restart_issued = false;
-    match (&initial_snapshot.active_state, initial_snapshot.main_pid) {
-        (UnitActiveState::Active, Some(_)) | (UnitActiveState::Activating, _) => {}
-        (UnitActiveState::Active, None) => {
-            unit_controller
-                .reload_then_execute(SearchUnitAction::Restart)
-                .await
-                .map_err(|error| format!("{error}; {}", initial_snapshot.description()))?;
-            restart_issued = true;
-        }
+    let action = match (&initial_snapshot.active_state, initial_snapshot.main_pid) {
+        (UnitActiveState::Active, Some(_)) => None,
+        (UnitActiveState::Active, None) => Some(SearchUnitAction::Restart),
+        // 启动中的 unit 再 start 会并入同一个启动任务，一起等它就绪。
         (
-            UnitActiveState::Inactive | UnitActiveState::Failed | UnitActiveState::Deactivating,
+            UnitActiveState::Activating
+            | UnitActiveState::Inactive
+            | UnitActiveState::Failed
+            | UnitActiveState::Deactivating,
             _,
-        ) => {
-            unit_controller
-                .reload_then_execute(SearchUnitAction::Start)
-                .await
-                .map_err(|error| format!("{error}; {}", initial_snapshot.description()))?;
-        }
+        ) => Some(SearchUnitAction::Start),
         (UnitActiveState::Other(active_state), _) => {
             return Err(format!(
                 "search service unit has unsupported ActiveState={active_state}: {}",
                 initial_snapshot.description()
             ));
         }
+    };
+    if let Some(action) = action {
+        unit_controller
+            .reload_then_execute(action)
+            .await
+            .map_err(|error| format!("{error}; {}", initial_snapshot.description()))?;
     }
 
-    let readiness_deadline = Instant::now() + SEARCH_SERVICE_READY_TIMEOUT;
-    loop {
-        let current_snapshot = unit_controller.show().await?;
-        let last_observation = match (&current_snapshot.active_state, current_snapshot.main_pid) {
-            (UnitActiveState::Active, Some(expected_main_pid)) => {
-                let validated_main_pid = unit_controller
-                    .validated_main_pid(&current_snapshot)
-                    .await?;
-                debug_assert_eq!(validated_main_pid, expected_main_pid);
-                match inspect_search_endpoint(socket_path, expected_main_pid).await {
-                    Ok(service_status) => {
-                        let confirmed_snapshot = unit_controller.show().await?;
-                        if unit_controller
-                            .validated_main_pid(&confirmed_snapshot)
-                            .await
-                            .is_ok_and(|confirmed_main_pid| confirmed_main_pid == expected_main_pid)
-                        {
-                            return Ok(service_status);
-                        }
-                        format!(
-                            "service owner changed during endpoint inspection: {}",
-                            confirmed_snapshot.description()
-                        )
-                    }
-                    Err(
-                        probe_failure @ (SearchEndpointProbeFailure::RestartRequired(_)
-                        | SearchEndpointProbeFailure::Incompatible { .. }),
-                    ) if !restart_issued => {
-                        let message = probe_failure.into_message();
-                        let confirmed_snapshot = unit_controller.show().await?;
-                        if unit_controller
-                            .validated_main_pid(&confirmed_snapshot)
-                            .await
-                            .is_ok_and(|confirmed_main_pid| confirmed_main_pid == expected_main_pid)
-                        {
-                            unit_controller
-                                .reload_then_execute(SearchUnitAction::Restart)
-                                .await
-                                .map_err(|error| {
-                                    format!("{error}; {}", confirmed_snapshot.description())
-                                })?;
-                            restart_issued = true;
-                            format!("{message}; {}", confirmed_snapshot.description())
-                        } else {
-                            format!(
-                                "service owner changed before restart: {}",
-                                confirmed_snapshot.description()
-                            )
-                        }
-                    }
-                    Err(probe_failure) => format!(
-                        "{}; {}",
-                        probe_failure.into_message(),
-                        current_snapshot.description()
-                    ),
-                }
-            }
-            (UnitActiveState::Active, None) => current_snapshot.description(),
-            (UnitActiveState::Activating | UnitActiveState::Deactivating, _) => {
-                current_snapshot.description()
-            }
-            (UnitActiveState::Inactive | UnitActiveState::Failed, _) => {
-                return Err(format!(
-                    "search service stopped before endpoint readiness: {}",
-                    current_snapshot.description()
-                ));
-            }
-            (UnitActiveState::Other(active_state), _) => {
-                return Err(format!(
-                    "search service unit has unsupported ActiveState={active_state}: {}",
-                    current_snapshot.description()
-                ));
-            }
-        };
-
-        if Instant::now() >= readiness_deadline {
-            return Err(format!(
-                "search service did not become ready within {} seconds; last observation: {last_observation}",
-                SEARCH_SERVICE_READY_TIMEOUT.as_secs()
-            ));
+    match read_validated_search_service_with(unit_controller, socket_path).await {
+        Ok(service) => Ok(service.status),
+        // 在跑的是旧版本或要求重启：重启一次换成当前安装的服务，再确认一次。
+        Err(ValidatedSearchServiceFailure::StableOwnerEndpoint {
+            endpoint_failure:
+                SearchEndpointProbeFailure::RestartRequired(_)
+                | SearchEndpointProbeFailure::Incompatible { .. },
+            unit_description,
+            ..
+        }) if action != Some(SearchUnitAction::Restart) => {
+            unit_controller
+                .reload_then_execute(SearchUnitAction::Restart)
+                .await
+                .map_err(|error| format!("{error}; {unit_description}"))?;
+            read_validated_search_service_with(unit_controller, socket_path)
+                .await
+                .map(|service| service.status)
+                .map_err(ValidatedSearchServiceFailure::into_message)
         }
-        tokio::time::sleep(SEARCH_SERVICE_POLL_INTERVAL).await;
+        Err(failure) => Err(failure.into_message()),
     }
 }
 

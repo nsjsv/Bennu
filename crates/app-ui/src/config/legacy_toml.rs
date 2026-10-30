@@ -48,15 +48,17 @@ const LIST_VIEW_DENSITY_KEY: &str = "list_view_density";
 const ICONS_VIEW_DENSITY_KEY: &str = "icons_view_density";
 const SHORTCUTS_KEY: &str = "shortcuts";
 
+/// 读出错时返回 Err：迁移不能把"没读到"当成"没有旧设置"，否则旧设置再也迁不过来。
+/// 语法坏的文件已由启动加载 config.toml 时备份并提示，这里按没有旧设置处理。
 pub(super) fn load_legacy_user_config_from_dir(
     config_dir: &Path,
     default: UserConfig,
-) -> UserConfig {
+) -> io::Result<UserConfig> {
     let config_file = config_dir.join(CONFIG_FILE_NAME);
     match fs::read_to_string(&config_file) {
-        Ok(content) => parse_toml_user_config(&content, default),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => default,
-        Err(_) => default,
+        Ok(content) => Ok(parse_toml_user_config(&content, default)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(default),
+        Err(error) => Err(error),
     }
 }
 

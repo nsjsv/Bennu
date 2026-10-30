@@ -1,30 +1,21 @@
+//! config.toml 里归用户设置的四个键。文件的读写规则见 `config_file`，探针缓存段见
+//! `renderer_probe_cache`。
+
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use super::{
-    app_config_dir_path, default_user_config, toml_string, RenderingGpuPreference, UserConfig,
-    CONFIG_FILE_NAME,
+use super::config_file::{
+    back_up_config_file, config_file_path, read_config_file, required_config_file_path,
+    write_config_file, ConfigFileContent,
 };
+use super::settings_recovery::{ResetSettings, SettingsRecovery, SettingsSource};
+use super::{default_user_config, RenderingGpuPreference, UserConfig};
 
 const THUMBNAIL_CACHE_DIR_KEY: &str = "thumbnail_cache_dir";
 const RENDERING_BACKEND_KEY: &str = "rendering_backend";
 const SEARCH_CONTENT_INDEXING_ENABLED_KEY: &str = "search_content_indexing_enabled";
 const SEARCH_MAX_EXTRACT_BYTES_KEY: &str = "search_max_extract_bytes";
-const RENDERER_PROBE_CACHE_KEY: &str = "renderer_probe_cache";
-
-/// 渲染探针结果的落盘记录。字段保持原始字符串,语义校验由 startup_probe_cache
-/// 完成;解析时任何字段类型不对就整段丢弃,由下次启动重新探针写回。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct RendererProbeCacheRecord {
-    pub(crate) version: i64,
-    pub(crate) backend: String,
-    pub(crate) rendering_gpu_preference: String,
-    pub(crate) wgpu_power_preference: Option<String>,
-    pub(crate) mesa_vulkan_device_select: Option<String>,
-    pub(crate) vulkan_loader_driver_select: Option<String>,
-    pub(crate) display_gpu_device_select: Option<String>,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AppConfig {
@@ -32,7 +23,6 @@ pub(crate) struct AppConfig {
     pub(crate) rendering_gpu_preference: RenderingGpuPreference,
     pub(crate) search_content_indexing_enabled: bool,
     pub(crate) search_max_extract_bytes: u64,
-    pub(crate) renderer_probe_cache: Option<RendererProbeCacheRecord>,
 }
 
 impl AppConfig {
@@ -42,9 +32,6 @@ impl AppConfig {
             rendering_gpu_preference: config.rendering_gpu_preference,
             search_content_indexing_enabled: config.search_content_indexing_enabled,
             search_max_extract_bytes: config.search_max_extract_bytes,
-            // 探针缓存归启动探针路径所有;用户偏好持久化不携带它,
-            // 保存时由 save_app_config_preserving_probe_cache 保留磁盘上的现有段。
-            renderer_probe_cache: None,
         }
     }
 
@@ -60,124 +47,205 @@ pub(crate) fn default_app_config() -> AppConfig {
     AppConfig::from_user_config(&default_user_config())
 }
 
+/// 界面起来之前的读取方（渲染探针、GL 兜底重启）用：只读，读不了、读不懂的项用
+/// 默认值。备份与提示归启动加载（`load_and_repair_app_config`）。
 pub(crate) fn load_app_config() -> AppConfig {
-    let default = default_app_config();
-    let Some(config_dir) = app_config_dir_path() else {
-        return default;
-    };
-
-    load_app_config_from_dir(&config_dir, default)
-}
-
-pub(crate) fn save_app_config(config: &AppConfig) -> io::Result<()> {
-    let config_file = config_file_path().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::NotFound,
-            "application configuration directory is unavailable",
-        )
-    })?;
-    write_app_config(&config_file, config)
-}
-
-/// 用户偏好持久化专用:调用方构造的 AppConfig 不携带探针缓存
-/// (from_user_config 置 None),保存时保留磁盘上已有的缓存段。
-/// 探针路径写回新结果必须走 save_app_config,不能走这里。
-pub(crate) fn save_app_config_preserving_probe_cache(config: &AppConfig) -> io::Result<()> {
-    let config_file = config_file_path().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::NotFound,
-            "application configuration directory is unavailable",
-        )
-    })?;
-    save_app_config_preserving_probe_cache_at(&config_file, config)
-}
-
-pub(super) fn save_app_config_preserving_probe_cache_at(
-    config_file: &Path,
-    config: &AppConfig,
-) -> io::Result<()> {
-    let mut config = config.clone();
-    if config.renderer_probe_cache.is_none() {
-        config.renderer_probe_cache = fs::read_to_string(config_file)
-            .ok()
-            .and_then(|content| content.parse::<toml::Table>().ok())
-            .and_then(|document| parse_renderer_probe_cache(&document));
-    }
-    write_app_config(config_file, &config)
-}
-
-pub(super) fn load_app_config_from_dir(config_dir: &Path, default: AppConfig) -> AppConfig {
-    let config_file = config_dir.join(CONFIG_FILE_NAME);
-    match fs::read_to_string(&config_file) {
-        Ok(content) => parse_toml_app_config(&content, default),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => default,
-        Err(_) => default,
+    match config_file_path() {
+        Some(path) => load_app_config_at(&path),
+        None => default_app_config(),
     }
 }
 
-pub(super) fn parse_toml_app_config(content: &str, default: AppConfig) -> AppConfig {
-    let Ok(document) = content.parse::<toml::Table>() else {
-        return default;
-    };
-
-    let mut config = default;
-    if let Some(value) = toml_string(&document, THUMBNAIL_CACHE_DIR_KEY) {
-        config.thumbnail_cache_dir = PathBuf::from(value);
-    }
-    if let Some(value) = toml_string(&document, RENDERING_BACKEND_KEY) {
-        if let Some(preference) = RenderingGpuPreference::from_config_value(value) {
-            config.rendering_gpu_preference = preference;
+pub(super) fn load_app_config_at(path: &Path) -> AppConfig {
+    match read_config_file(path) {
+        Ok(ConfigFileContent::Parsed { document, .. }) => {
+            app_config_from_document(&document).config
+        }
+        Ok(ConfigFileContent::Missing | ConfigFileContent::Unparseable { .. }) | Err(_) => {
+            default_app_config()
         }
     }
-    if let Some(value) = document
-        .get(SEARCH_CONTENT_INDEXING_ENABLED_KEY)
-        .and_then(toml::Value::as_bool)
-    {
-        config.search_content_indexing_enabled = value;
-    }
-    if let Some(value) = document
-        .get(SEARCH_MAX_EXTRACT_BYTES_KEY)
-        .and_then(toml::Value::as_integer)
-        .and_then(|value| u64::try_from(value).ok())
-    {
-        config.search_max_extract_bytes = value.max(1);
-    }
-    config.renderer_probe_cache = parse_renderer_probe_cache(&document);
-    config
 }
 
-fn parse_renderer_probe_cache(document: &toml::Table) -> Option<RendererProbeCacheRecord> {
-    let section = document.get(RENDERER_PROBE_CACHE_KEY)?.as_table()?;
-    let table_string = |key: &str| -> Option<String> {
-        section
-            .get(key)
-            .and_then(toml::Value::as_str)
-            .map(str::to_owned)
+/// 启动时读到的应用配置，以及读的过程中要告诉用户的事。
+#[derive(Debug)]
+pub(crate) struct LoadedAppConfig {
+    pub(crate) config: AppConfig,
+    pub(crate) recovery: Option<SettingsRecovery>,
+}
+
+/// 启动加载，规则与设置相同：读不懂的项恢复默认，原文件先备份再写回修复后的键；
+/// 读不了时用默认值、本次不写回。
+pub(crate) fn load_and_repair_app_config() -> LoadedAppConfig {
+    match config_file_path() {
+        Some(path) => load_and_repair_app_config_at(&path),
+        None => LoadedAppConfig {
+            config: default_app_config(),
+            recovery: None,
+        },
+    }
+}
+
+pub(super) fn load_and_repair_app_config_at(path: &Path) -> LoadedAppConfig {
+    match read_config_file(path) {
+        Err(error) => LoadedAppConfig {
+            config: default_app_config(),
+            recovery: Some(SettingsRecovery::Unavailable {
+                source: SettingsSource::AppConfig,
+                error: error.to_string(),
+            }),
+        },
+        Ok(ConfigFileContent::Missing) => LoadedAppConfig {
+            config: default_app_config(),
+            recovery: None,
+        },
+        Ok(ConfigFileContent::Unparseable { text }) => repair_app_config(
+            path,
+            &text,
+            toml::Table::new(),
+            default_app_config(),
+            ResetSettings::All,
+        ),
+        Ok(ConfigFileContent::Parsed { text, document }) => {
+            let interpreted = app_config_from_document(&document);
+            if interpreted.unreadable.is_empty() {
+                return LoadedAppConfig {
+                    config: interpreted.config,
+                    recovery: None,
+                };
+            }
+            let reset = ResetSettings::Keys(
+                interpreted
+                    .unreadable
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect(),
+            );
+            repair_app_config(path, &text, document, interpreted.config, reset)
+        }
+    }
+}
+
+/// 备份失败时原文件不动，本次也不再写回配置。备份成功而写回失败只记日志：原文件
+/// 已有备份，之后照常保存会再写。
+fn repair_app_config(
+    path: &Path,
+    original_text: &str,
+    mut document: toml::Table,
+    config: AppConfig,
+    reset: ResetSettings,
+) -> LoadedAppConfig {
+    let recovery = match back_up_config_file(path, original_text) {
+        Ok(backup) => {
+            insert_app_config_keys(&mut document, &config);
+            if let Err(error) = write_config_file(path, &document) {
+                tracing::warn!(%error, backup = %backup.display(), "repaired config.toml was not written back");
+            }
+            SettingsRecovery::Restored {
+                source: SettingsSource::AppConfig,
+                reset,
+                backup,
+            }
+        }
+        Err(error) => SettingsRecovery::NotBackedUp {
+            source: SettingsSource::AppConfig,
+            error: error.to_string(),
+        },
     };
-    Some(RendererProbeCacheRecord {
-        version: section.get("version")?.as_integer()?,
-        backend: table_string("backend")?,
-        rendering_gpu_preference: table_string("rendering_gpu_preference")?,
-        wgpu_power_preference: table_string("wgpu_power_preference"),
-        mesa_vulkan_device_select: table_string("mesa_vulkan_device_select"),
-        vulkan_loader_driver_select: table_string("vulkan_loader_driver_select"),
-        display_gpu_device_select: table_string("display_gpu_device_select"),
-    })
+    LoadedAppConfig {
+        config,
+        recovery: Some(recovery),
+    }
 }
 
-pub(super) fn write_app_config(path: &Path, config: &AppConfig) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
+/// 只写这四个键，文件里其余的键（探针缓存段、本版本不认识的键）原样保留；现有
+/// 文件读不懂时先备份再写。
+pub(crate) fn save_app_config(config: &AppConfig) -> io::Result<()> {
+    save_app_config_at(&required_config_file_path()?, config)
+}
+
+pub(super) fn save_app_config_at(path: &Path, config: &AppConfig) -> io::Result<()> {
+    let mut document = match read_config_file(path)? {
+        ConfigFileContent::Missing => toml::Table::new(),
+        ConfigFileContent::Parsed { document, .. } => document,
+        ConfigFileContent::Unparseable { text } => {
+            back_up_config_file(path, &text)?;
+            toml::Table::new()
+        }
+    };
+    insert_app_config_keys(&mut document, config);
     if let Some(parent) = config.thumbnail_cache_dir.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    let content = toml_app_config_content(config).map_err(io::Error::other)?;
-    fs::write(path, content)
+    write_config_file(path, &document)
 }
 
-pub(super) fn toml_app_config_content(config: &AppConfig) -> Result<String, toml::ser::Error> {
-    let mut document = toml::Table::new();
+/// `app_config_from_document` 的结果：配置，以及存在但读不懂、已用默认值的键。
+struct InterpretedAppConfig {
+    config: AppConfig,
+    unreadable: Vec<&'static str>,
+}
+
+fn app_config_from_document(document: &toml::Table) -> InterpretedAppConfig {
+    let mut config = default_app_config();
+    let mut unreadable = Vec::new();
+    if let Some(path) = read_key(
+        document,
+        THUMBNAIL_CACHE_DIR_KEY,
+        &mut unreadable,
+        toml::Value::as_str,
+    ) {
+        // 空路径当作没设置（与旧版读取一致）。
+        if !path.is_empty() {
+            config.thumbnail_cache_dir = PathBuf::from(path);
+        }
+    }
+    if let Some(preference) = read_key(document, RENDERING_BACKEND_KEY, &mut unreadable, |value| {
+        value
+            .as_str()
+            .and_then(RenderingGpuPreference::from_config_value)
+    }) {
+        config.rendering_gpu_preference = preference;
+    }
+    if let Some(enabled) = read_key(
+        document,
+        SEARCH_CONTENT_INDEXING_ENABLED_KEY,
+        &mut unreadable,
+        toml::Value::as_bool,
+    ) {
+        config.search_content_indexing_enabled = enabled;
+    }
+    if let Some(bytes) = read_key(
+        document,
+        SEARCH_MAX_EXTRACT_BYTES_KEY,
+        &mut unreadable,
+        |value| {
+            value
+                .as_integer()
+                .and_then(|bytes| u64::try_from(bytes).ok())
+        },
+    ) {
+        config.search_max_extract_bytes = bytes.max(1);
+    }
+    InterpretedAppConfig { config, unreadable }
+}
+
+/// 键不存在为 None（用默认值，旧版本没有这一项不算读不懂）；存在但 `read` 解释不了
+/// 时记入 `unreadable`。
+fn read_key<'a, T>(
+    document: &'a toml::Table,
+    key: &'static str,
+    unreadable: &mut Vec<&'static str>,
+    read: impl FnOnce(&'a toml::Value) -> Option<T>,
+) -> Option<T> {
+    let value = read(document.get(key)?);
+    if value.is_none() {
+        unreadable.push(key);
+    }
+    value
+}
+
+fn insert_app_config_keys(document: &mut toml::Table, config: &AppConfig) {
     document.insert(
         THUMBNAIL_CACHE_DIR_KEY.to_owned(),
         toml::Value::String(config.thumbnail_cache_dir.to_string_lossy().into_owned()),
@@ -194,57 +262,4 @@ pub(super) fn toml_app_config_content(config: &AppConfig) -> Result<String, toml
         SEARCH_MAX_EXTRACT_BYTES_KEY.to_owned(),
         toml::Value::Integer(config.search_max_extract_bytes as i64),
     );
-    if let Some(record) = &config.renderer_probe_cache {
-        document.insert(
-            RENDERER_PROBE_CACHE_KEY.to_owned(),
-            toml::Value::Table(renderer_probe_cache_table(record)),
-        );
-    }
-
-    let content = toml::to_string_pretty(&document)?;
-    Ok(format!("# Bennu application configuration\n{content}"))
-}
-
-fn renderer_probe_cache_table(record: &RendererProbeCacheRecord) -> toml::Table {
-    let mut section = toml::Table::new();
-    section.insert("version".to_owned(), toml::Value::Integer(record.version));
-    section.insert(
-        "backend".to_owned(),
-        toml::Value::String(record.backend.clone()),
-    );
-    section.insert(
-        "rendering_gpu_preference".to_owned(),
-        toml::Value::String(record.rendering_gpu_preference.clone()),
-    );
-    // 可选字段直接省略键;写成空串会被解析回 Some("") 破坏 round-trip。
-    let optional_string = |section: &mut toml::Table, key: &str, value: &Option<String>| {
-        if let Some(value) = value {
-            section.insert(key.to_owned(), toml::Value::String(value.clone()));
-        }
-    };
-    optional_string(
-        &mut section,
-        "wgpu_power_preference",
-        &record.wgpu_power_preference,
-    );
-    optional_string(
-        &mut section,
-        "mesa_vulkan_device_select",
-        &record.mesa_vulkan_device_select,
-    );
-    optional_string(
-        &mut section,
-        "vulkan_loader_driver_select",
-        &record.vulkan_loader_driver_select,
-    );
-    optional_string(
-        &mut section,
-        "display_gpu_device_select",
-        &record.display_gpu_device_select,
-    );
-    section
-}
-
-fn config_file_path() -> Option<PathBuf> {
-    app_config_dir_path().map(|path| path.join(CONFIG_FILE_NAME))
 }

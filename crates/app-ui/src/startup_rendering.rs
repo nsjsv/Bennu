@@ -508,14 +508,18 @@ fn renderer_probe_view(_state: &(), _window: window::Id) -> Element<'_, ()> {
 }
 
 pub(crate) fn apply_fast_startup_environment() -> StartupRenderingEnvironment {
-    let mut app_config = config::load_app_config();
-    let preference = app_config.rendering_gpu_preference;
+    let preference = config::load_app_config().rendering_gpu_preference;
     // DisplayGpu 偏好需要显示 GPU 身份参与缓存判定与写回;sysfs 枚举毫秒级。
     let display_gpu = (preference == RenderingGpuPreference::DisplayGpu)
         .then(desktop_linux::detect_display_renderer_gpu);
     let display_gpu = display_gpu.flatten();
-    let cached_environment =
-        crate::startup_probe_cache::cached_probe_environment(&app_config, display_gpu.as_ref());
+    let cached_environment = config::load_renderer_probe_cache().and_then(|record| {
+        crate::startup_probe_cache::cached_probe_environment(
+            preference,
+            &record,
+            display_gpu.as_ref(),
+        )
+    });
     let environment = match cached_environment {
         Some(environment) => {
             startup_trace::mark("startup_probe_cache_hit");
@@ -526,13 +530,13 @@ pub(crate) fn apply_fast_startup_environment() -> StartupRenderingEnvironment {
             let probe_completion = renderer_probe_command(preference)
                 .map(|command| run_renderer_probe(command, RENDERER_PROBE_TIMEOUT))
                 .unwrap_or_else(|_| RendererProbeCompletion::gl_fallback());
-            crate::startup_probe_cache::store_probe_completion(
-                &mut app_config,
+            let record = crate::startup_probe_cache::probe_completion_record(
+                preference,
                 probe_completion.gpu_selection.as_ref(),
                 probe_completion.backend,
                 display_gpu.as_ref(),
             );
-            if let Err(error) = config::save_app_config(&app_config) {
+            if let Err(error) = config::save_renderer_probe_cache(&record) {
                 tracing::warn!(
                     target: "app_ui::startup",
                     event = "probe_cache_write_failed",

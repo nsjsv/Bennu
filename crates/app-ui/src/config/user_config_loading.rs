@@ -52,12 +52,17 @@ pub(super) fn load_user_config_from_sources(
             LoadedUserConfig { config, recovery }
         }
         Ok(None) => {
-            let migrated = config_dir.map_or_else(
-                || default.clone(),
+            let legacy = config_dir.map_or_else(
+                || Ok(default.clone()),
                 |config_dir| {
                     legacy_toml::load_legacy_user_config_from_dir(config_dir, default.clone())
                 },
             );
+            let migrated = match legacy {
+                Ok(migrated) => migrated,
+                // 旧配置读不了：不写设置，下次启动再迁移。
+                Err(error) => return unavailable(default, error.to_string()),
+            };
             let recovery = store
                 .replace_user_preferences(&migrated.user_preferences().to_stored())
                 .err()

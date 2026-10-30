@@ -14,10 +14,13 @@ use crate::network_connections::SavedNetworkConnection;
 use crate::shortcuts::ShortcutConfig;
 
 mod app_config;
-#[cfg(test)]
-pub(crate) use app_config::default_app_config;
 pub(crate) use app_config::{
-    load_app_config, save_app_config, save_app_config_preserving_probe_cache, AppConfig,
+    load_and_repair_app_config, load_app_config, save_app_config, AppConfig,
+};
+mod config_file;
+mod renderer_probe_cache;
+pub(crate) use renderer_probe_cache::{
+    clear_renderer_probe_cache, load_renderer_probe_cache, save_renderer_probe_cache,
     RendererProbeCacheRecord,
 };
 pub(crate) mod column_width_adjust_mode;

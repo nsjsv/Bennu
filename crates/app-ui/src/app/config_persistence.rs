@@ -142,6 +142,8 @@ impl FileBrowser {
             &recoveries,
             config::SettingsSource::Preferences,
         );
+        self.app_config_persistence =
+            config::SettingsPersistence::for_source(&recoveries, config::SettingsSource::AppConfig);
         if recoveries.is_empty() {
             return;
         }
@@ -154,7 +156,13 @@ impl FileBrowser {
         self.show_global_error(message);
     }
 
-    pub(super) fn persist_app_config_command(&self) -> Task<Message> {
+    pub(super) fn persist_app_config_command(&mut self) -> Task<Message> {
+        if let config::SettingsPersistence::Blocked(recovery) = &self.app_config_persistence {
+            // 原配置文件读不了或没能备份：写回会覆盖它，修改本次只在界面上生效。
+            let message = recovery.message(self.active_language());
+            self.show_global_error(message);
+            return Task::none();
+        }
         save_app_config_command(config::AppConfig::from_user_config(&self.user_config))
     }
 }
@@ -341,5 +349,47 @@ mod tests {
         assert!(browser
             .current_error()
             .is_some_and(|notice| notice.contains("permission denied")));
+    }
+
+    #[test]
+    fn a_config_file_that_could_not_be_backed_up_is_never_written_back() {
+        let (mut browser, _) = FileBrowser::new(config::default_user_config());
+        browser.accept_settings_recoveries(vec![config::SettingsRecovery::NotBackedUp {
+            source: config::SettingsSource::AppConfig,
+            error: "read-only file system".to_owned(),
+        }]);
+        browser.dismiss_global_error();
+
+        drop(browser.persist_app_config_command());
+
+        assert!(browser
+            .current_error()
+            .is_some_and(|notice| notice.contains("read-only file system")));
+        assert_eq!(
+            browser.user_preferences_persistence,
+            config::SettingsPersistence::Writable
+        );
+    }
+
+    #[test]
+    fn both_restored_sources_are_announced_in_one_notice() {
+        let (mut browser, _) = FileBrowser::new(config::default_user_config());
+
+        browser.accept_settings_recoveries(vec![
+            config::SettingsRecovery::Restored {
+                source: config::SettingsSource::AppConfig,
+                reset: config::ResetSettings::All,
+                backup: std::path::PathBuf::from("/config/bennu/config.toml.1.bak"),
+            },
+            config::SettingsRecovery::Restored {
+                source: config::SettingsSource::Preferences,
+                reset: config::ResetSettings::All,
+                backup: std::path::PathBuf::from("/data/bennu/user-preferences-1.json"),
+            },
+        ]);
+
+        let notice = browser.current_error().expect("notice");
+        assert!(notice.contains("/config/bennu/config.toml.1.bak"));
+        assert!(notice.contains("/data/bennu/user-preferences-1.json"));
     }
 }

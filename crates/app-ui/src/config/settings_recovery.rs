@@ -11,6 +11,8 @@ use bennu_localization::{ResetSettingsText, SettingsSourceText, UiLanguage};
 pub(crate) enum SettingsSource {
     /// 设置（数据库里的一行）。
     Preferences,
+    /// 配置文件 config.toml。
+    AppConfig,
 }
 
 /// 被恢复成默认的部分。
@@ -86,6 +88,7 @@ impl SettingsSource {
     fn text(self) -> SettingsSourceText {
         match self {
             Self::Preferences => SettingsSourceText::Preferences,
+            Self::AppConfig => SettingsSourceText::AppConfig,
         }
     }
 }

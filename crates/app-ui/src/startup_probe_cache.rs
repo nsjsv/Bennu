@@ -3,7 +3,6 @@
 //! GL 兜底重启。缓存命中的不变量:版本、渲染偏好、显示 GPU 身份全部一致,
 //! 且记录能还原出与探针等价的启动环境;任何一项不符都按无缓存处理。
 
-use std::io;
 use std::process::Command;
 
 #[cfg(unix)]
@@ -11,7 +10,7 @@ use std::os::unix::process::CommandExt;
 
 use desktop_linux::DisplayRendererGpu;
 
-use crate::config::{self, AppConfig, RendererProbeCacheRecord, RenderingGpuPreference};
+use crate::config::{self, RendererProbeCacheRecord, RenderingGpuPreference};
 use crate::startup_rendering::{
     parse_vulkan_loader_driver_select_value, parse_wgpu_power_preference_value,
     valid_mesa_vulkan_device_select, RendererProbeGpuSelection, StartupRenderingBackend,
@@ -24,14 +23,12 @@ pub(crate) const RENDERER_FALLBACK_GUARD_ENV: &str = "FILE_MANAGER_RENDERER_FALL
 /// 缓存命中的完整判定。`display_gpu` 由调用方在 DisplayGpu 偏好下预先检测;
 /// HighPerformanceGpu 偏好不涉及显示 GPU,传 None 即跳过身份对比。
 pub(crate) fn cached_probe_environment(
-    app_config: &AppConfig,
+    rendering_gpu_preference: RenderingGpuPreference,
+    record: &RendererProbeCacheRecord,
     display_gpu: Option<&DisplayRendererGpu>,
 ) -> Option<StartupRenderingEnvironment> {
-    let record = app_config.renderer_probe_cache.as_ref()?;
     let preference = RenderingGpuPreference::from_config_value(&record.rendering_gpu_preference)?;
-    if record.version != RENDERER_PROBE_CACHE_VERSION
-        || preference != app_config.rendering_gpu_preference
-    {
+    if record.version != RENDERER_PROBE_CACHE_VERSION || preference != rendering_gpu_preference {
         return None;
     }
     if preference == RenderingGpuPreference::DisplayGpu
@@ -51,29 +48,26 @@ pub(crate) fn cached_probe_environment(
     ))
 }
 
-/// 探针完成后把结果写进 AppConfig;保存由调用方执行(save_app_config)。
-pub(crate) fn store_probe_completion(
-    app_config: &mut AppConfig,
+/// 探针完成后要落盘的缓存记录;保存由调用方执行(config::save_renderer_probe_cache)。
+pub(crate) fn probe_completion_record(
+    rendering_gpu_preference: RenderingGpuPreference,
     probe_gpu_selection: Option<&RendererProbeGpuSelection>,
     backend: StartupRenderingBackend,
     display_gpu: Option<&DisplayRendererGpu>,
-) {
+) -> RendererProbeCacheRecord {
     // power 偏好镜像 from_probe_selection 的取值规则;等价性由
     // cached_environment_matches_probe_environment 系列测试钉住。
     let wgpu_power_preference = match probe_gpu_selection {
         Some(selection) => Some(selection.wgpu_power_preference),
-        None => match app_config.rendering_gpu_preference {
+        None => match rendering_gpu_preference {
             RenderingGpuPreference::DisplayGpu => Some("none"),
             RenderingGpuPreference::HighPerformanceGpu => Some("high"),
         },
     };
-    app_config.renderer_probe_cache = Some(RendererProbeCacheRecord {
+    RendererProbeCacheRecord {
         version: RENDERER_PROBE_CACHE_VERSION,
         backend: backend.environment_value().to_owned(),
-        rendering_gpu_preference: app_config
-            .rendering_gpu_preference
-            .config_value()
-            .to_owned(),
+        rendering_gpu_preference: rendering_gpu_preference.config_value().to_owned(),
         wgpu_power_preference: wgpu_power_preference.map(str::to_owned),
         mesa_vulkan_device_select: probe_gpu_selection
             .map(|selection| selection.mesa_vulkan_device_select.clone()),
@@ -83,16 +77,10 @@ pub(crate) fn store_probe_completion(
         display_gpu_device_select: display_gpu
             .filter(|_| {
                 probe_gpu_selection.is_some()
-                    || app_config.rendering_gpu_preference == RenderingGpuPreference::DisplayGpu
+                    || rendering_gpu_preference == RenderingGpuPreference::DisplayGpu
             })
             .map(DisplayRendererGpu::mesa_vulkan_device_select),
-    });
-}
-
-pub(crate) fn clear_stored_probe_cache() -> io::Result<()> {
-    let mut app_config = config::load_app_config();
-    app_config.renderer_probe_cache = None;
-    config::save_app_config(&app_config)
+    }
 }
 
 /// `app::run` 失败后的兜底:删缓存段并 exec 换 GL 环境重启一次。重启后的
@@ -105,7 +93,7 @@ pub(crate) fn gl_fallback_restart_after_renderer_failure() -> Result<(), String>
         return Err("renderer GL fallback has already been attempted".to_owned());
     }
     let preference = config::load_app_config().rendering_gpu_preference;
-    let _ = clear_stored_probe_cache();
+    let _ = config::clear_renderer_probe_cache();
     let environment =
         StartupRenderingEnvironment::without_display_probe(preference, StartupRenderingBackend::Gl);
     let Ok(current_exe) = std::env::current_exe() else {
@@ -194,12 +182,6 @@ mod tests {
         }
     }
 
-    fn app_config(preference: RenderingGpuPreference) -> AppConfig {
-        let mut app_config = config::default_app_config();
-        app_config.rendering_gpu_preference = preference;
-        app_config
-    }
-
     fn expected_environment_map(
         backend: StartupRenderingBackend,
         power: &str,
@@ -217,16 +199,16 @@ mod tests {
     fn cached_environment_matches_probe_environment_for_display_gpu_vulkan() {
         let gpu = amd_gpu();
         let selection = amd_selection();
-        let mut app_config = app_config(RenderingGpuPreference::DisplayGpu);
-        store_probe_completion(
-            &mut app_config,
+        let record = probe_completion_record(
+            RenderingGpuPreference::DisplayGpu,
             Some(&selection),
             StartupRenderingBackend::Vulkan,
             Some(&gpu),
         );
 
         let cached =
-            cached_probe_environment(&app_config, Some(&gpu)).expect("cache hit for matching gpu");
+            cached_probe_environment(RenderingGpuPreference::DisplayGpu, &record, Some(&gpu))
+                .expect("cache hit for matching gpu");
 
         assert!(environment_matches(
             &cached,
@@ -244,17 +226,13 @@ mod tests {
 
     #[test]
     fn cached_gl_environment_without_gpu_detection_round_trips() {
-        let mut app_config = app_config(RenderingGpuPreference::HighPerformanceGpu);
-        store_probe_completion(&mut app_config, None, StartupRenderingBackend::Gl, None);
-        let record = app_config
-            .renderer_probe_cache
-            .clone()
-            .expect("stored record");
+        let preference = RenderingGpuPreference::HighPerformanceGpu;
+        let record = probe_completion_record(preference, None, StartupRenderingBackend::Gl, None);
         assert_eq!(record.backend, "gl");
         assert_eq!(record.wgpu_power_preference.as_deref(), Some("high"));
         assert_eq!(record.mesa_vulkan_device_select, None);
 
-        let cached = cached_probe_environment(&app_config, None).expect("cache hit");
+        let cached = cached_probe_environment(preference, &record, None).expect("cache hit");
 
         assert_eq!(cached.backend(), StartupRenderingBackend::Gl);
         assert_eq!(
@@ -268,10 +246,11 @@ mod tests {
 
     #[test]
     fn cached_display_gpu_vulkan_without_detection_uses_unpinned_power() {
-        let mut app_config = app_config(RenderingGpuPreference::DisplayGpu);
-        store_probe_completion(&mut app_config, None, StartupRenderingBackend::Vulkan, None);
+        let preference = RenderingGpuPreference::DisplayGpu;
+        let record =
+            probe_completion_record(preference, None, StartupRenderingBackend::Vulkan, None);
 
-        let cached = cached_probe_environment(&app_config, None).expect("cache hit");
+        let cached = cached_probe_environment(preference, &record, None).expect("cache hit");
 
         assert!(environment_matches(
             &cached,
@@ -290,42 +269,45 @@ mod tests {
         let gpu = amd_gpu();
         let other_gpu = display_gpu("0x8086", "0x1234");
         let selection = amd_selection();
-        let mut display_config = app_config(RenderingGpuPreference::DisplayGpu);
-        store_probe_completion(
-            &mut display_config,
+        let display = RenderingGpuPreference::DisplayGpu;
+        let record = probe_completion_record(
+            display,
             Some(&selection),
             StartupRenderingBackend::Vulkan,
             Some(&gpu),
         );
 
-        let mut stale_version = display_config.clone();
-        stale_version.renderer_probe_cache.as_mut().unwrap().version += 1;
-        assert!(cached_probe_environment(&stale_version, Some(&gpu)).is_none());
+        let mut stale_version = record.clone();
+        stale_version.version += 1;
+        assert!(cached_probe_environment(display, &stale_version, Some(&gpu)).is_none());
 
-        let mut other_preference = display_config.clone();
-        other_preference.rendering_gpu_preference = RenderingGpuPreference::HighPerformanceGpu;
-        assert!(cached_probe_environment(&other_preference, None).is_none());
+        assert!(cached_probe_environment(
+            RenderingGpuPreference::HighPerformanceGpu,
+            &record,
+            None
+        )
+        .is_none());
 
-        assert!(cached_probe_environment(&display_config, Some(&other_gpu)).is_none());
-        assert!(cached_probe_environment(&display_config, None).is_none());
+        assert!(cached_probe_environment(display, &record, Some(&other_gpu)).is_none());
+        assert!(cached_probe_environment(display, &record, None).is_none());
     }
 
     #[test]
     fn cache_is_rejected_for_damaged_fields() {
         let gpu = amd_gpu();
         let selection = amd_selection();
-        let mut app_config = app_config(RenderingGpuPreference::DisplayGpu);
-        store_probe_completion(
-            &mut app_config,
+        let display = RenderingGpuPreference::DisplayGpu;
+        let record = probe_completion_record(
+            display,
             Some(&selection),
             StartupRenderingBackend::Vulkan,
             Some(&gpu),
         );
 
         let damage = |mutate: &dyn Fn(&mut RendererProbeCacheRecord)| {
-            let mut damaged = app_config.clone();
-            mutate(damaged.renderer_probe_cache.as_mut().unwrap());
-            assert!(cached_probe_environment(&damaged, Some(&gpu)).is_none());
+            let mut damaged = record.clone();
+            mutate(&mut damaged);
+            assert!(cached_probe_environment(display, &damaged, Some(&gpu)).is_none());
         };
         damage(&|record| record.backend = "dx12".to_owned());
         damage(&|record| record.mesa_vulkan_device_select = Some("$LD_PRELOAD!".to_owned()));

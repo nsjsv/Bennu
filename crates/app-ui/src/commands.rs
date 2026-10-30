@@ -464,10 +464,15 @@ async fn load_startup_environment(
     startup_trace::mark_once("startup_environment_started");
     let fallback_rendering_environment = startup_rendering_environment.clone();
     tokio::task::spawn_blocking(move || {
-        let app_config = config::load_app_config();
+        let loaded_app_config = config::load_and_repair_app_config();
         startup_trace::mark_once("startup_app_config_loaded");
-        let loaded_user_config = config::load_user_config_for_app_config(app_config);
+        let loaded_user_config = config::load_user_config_for_app_config(loaded_app_config.config);
         startup_trace::mark_once("startup_user_config_loaded");
+        let settings_recoveries = loaded_app_config
+            .recovery
+            .into_iter()
+            .chain(loaded_user_config.recovery)
+            .collect();
         let user_config = loaded_user_config.config;
         let rendering_environment_status =
             StartupRenderingEnvironmentStatus::for_loaded_config_with_runtime(
@@ -478,7 +483,7 @@ async fn load_startup_environment(
             home: dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")),
             system_language: crate::localization::detect_system_language(),
             user_config,
-            settings_recoveries: loaded_user_config.recovery.into_iter().collect(),
+            settings_recoveries,
             state_database_path: config::default_state_database_path(),
             rendering_environment_status,
         }

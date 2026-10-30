@@ -284,7 +284,7 @@ mod tests {
         for operation in [
             QueuedFileOperation::Rename {
                 path: PathBuf::from("/tmp/old.txt"),
-                new_name: "new.txt".to_owned(),
+                new_name: "new.txt".into(),
             },
             QueuedFileOperation::CreateDirectory {
                 parent: PathBuf::from("/tmp"),

@@ -3,7 +3,7 @@ use file_core::{
     TransferConflictStrategy, TrashRestoreEntry,
 };
 use file_operation_store::{
-    StoredArchiveCompressionLevel, StoredArchiveFormat, StoredBatchRenameItem,
+    StoredArchiveCompressionLevel, StoredArchiveFormat, StoredBatchRenameItem, StoredFileName,
     StoredFileOperationVerification, StoredOperation, StoredPath, StoredSymbolicLinkCreation,
     StoredTransfer, StoredTransferConflictStrategy, StoredTrashEntry, TRANSFER_JOURNAL_VERSION,
 };
@@ -14,7 +14,7 @@ pub(super) fn queued_operation_to_stored(operation: &QueuedFileOperation) -> Sto
     match operation {
         QueuedFileOperation::Rename { path, new_name } => StoredOperation::Rename {
             path: StoredPath::from_path(path),
-            new_name: new_name.clone(),
+            new_name: StoredFileName::from_os_str(new_name),
         },
         QueuedFileOperation::BatchRename { items } => StoredOperation::BatchRename {
             items: stored_batch_rename_items(items),

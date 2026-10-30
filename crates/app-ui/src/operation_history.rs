@@ -756,7 +756,7 @@ impl FileOperationHistoryItem {
 fn rename_operation(path: PathBuf, target: &Path) -> Option<QueuedFileOperation> {
     target.file_name().map(|name| QueuedFileOperation::Rename {
         path,
-        new_name: name.to_string_lossy().into_owned(),
+        new_name: name.to_os_string(),
     })
 }
 

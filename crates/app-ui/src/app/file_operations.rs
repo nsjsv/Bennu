@@ -511,7 +511,7 @@ impl FileBrowser {
         self.context_menu = None;
         self.enqueue_file_operation(QueuedFileOperation::Rename {
             path,
-            new_name: name.to_owned(),
+            new_name: name.into(),
         })
     }
 

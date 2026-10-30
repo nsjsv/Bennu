@@ -62,11 +62,7 @@ fn remember_summary(browser: &mut FileBrowser, path: &std::path::Path, count: us
 fn finish_queued_rename(browser: &mut FileBrowser, from: PathBuf, to: PathBuf) {
     let rename = QueuedFileOperation::Rename {
         path: from.clone(),
-        new_name: to
-            .file_name()
-            .expect("rename target name")
-            .to_string_lossy()
-            .into_owned(),
+        new_name: to.file_name().expect("rename target name").to_os_string(),
     };
     let task_id = queued_task_id(browser.operation_queue.enqueue(rename));
     drop(browser.accept_file_operation_finished(
@@ -301,7 +297,7 @@ fn duplicate_completion_is_rejected_before_history_side_effects() {
     let destination = PathBuf::from("/workspace/new.txt");
     let rename = QueuedFileOperation::Rename {
         path: source.clone(),
-        new_name: "new.txt".to_owned(),
+        new_name: "new.txt".into(),
     };
     let task_id = queued_task_id(browser.operation_queue.enqueue(rename));
     let completion = FileOperationCompletion::Succeeded(FileOperationOutcome::Rename {

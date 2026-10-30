@@ -394,7 +394,7 @@ async fn run_queued_create_archive(
 
 async fn run_queued_rename(
     path: PathBuf,
-    new_name: String,
+    new_name: OsString,
     mut controls: FileOperationControls,
     task_id: u64,
     output: &mut IcedSender<Message>,
@@ -404,7 +404,7 @@ async fn run_queued_rename(
         .wait_until_running()
         .await
         .map_err(|error| error.to_string())?;
-    let target = rename_entry(path.clone(), OsString::from(new_name))
+    let target = rename_entry(path.clone(), new_name)
         .await
         .map_err(|error| error.to_string())?;
     send_file_operation_progress(

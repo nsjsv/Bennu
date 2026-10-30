@@ -180,6 +180,57 @@ fn delete_permanently_operation_roundtrips_through_json_and_database() {
     let _ = fs::remove_dir_all(root);
 }
 
+#[cfg(unix)]
+#[test]
+fn rename_operation_keeps_non_utf8_new_name_bytes() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let (store, root) = test_store();
+    let new_name = OsString::from_vec(b"caf\xe9.txt".to_vec());
+    let operation = StoredOperation::Rename {
+        path: StoredPath::from_path(Path::new("/docs/old.txt")),
+        new_name: StoredFileName::from_os_str(&new_name),
+    };
+
+    let id = store.insert_task(&operation).unwrap();
+    let task = store.read_task(id).unwrap().unwrap();
+
+    let StoredOperation::Rename {
+        new_name: stored, ..
+    } = task.operation
+    else {
+        panic!("expected a rename operation");
+    };
+    assert_eq!(stored.to_os_string(), new_name);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn rename_rows_written_with_text_new_names_still_decode() {
+    let (store, root) = test_store();
+    let legacy_payload = r#"{"kind":"rename","path":{"encoding":"utf8","value":"/docs/old.txt"},"new_name":"new.txt"}"#;
+    store
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO task_queue (
+                operation_kind, payload_json, status, progress_fraction, error,
+                created_at_ms, updated_at_ms
+            ) VALUES ('rename', ?1, 'failed', NULL, NULL, 0, 0)",
+            params![legacy_payload],
+        )
+        .unwrap();
+
+    let tasks = store.read_tasks().unwrap();
+
+    assert_eq!(tasks.len(), 1);
+    let StoredOperation::Rename { new_name, .. } = &tasks[0].operation else {
+        panic!("expected a rename operation");
+    };
+    assert_eq!(new_name.to_os_string(), OsString::from("new.txt"));
+    let _ = fs::remove_dir_all(root);
+}
+
 #[test]
 fn column_widths_roundtrip_replace_and_clear() {
     let (store, root) = test_store();

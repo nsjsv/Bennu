@@ -21,7 +21,7 @@ impl QueuedFileOperation {
     pub(crate) fn path_lines(&self) -> FileOperationPathLines {
         match self {
             Self::Rename { path, new_name } => FileOperationPathLines {
-                file_name: new_name.clone(),
+                file_name: new_name.to_string_lossy().into_owned(),
                 original_path: path_full_text(path),
                 directory_path: path_parent_text(path),
                 total_items: 1,

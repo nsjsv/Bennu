@@ -115,6 +115,31 @@ fn undo_move_reverses_completed_transfers() {
     assert_eq!(transfers[1].target, PathBuf::from("/a/one"));
 }
 
+#[cfg(unix)]
+#[test]
+fn undo_and_redo_rename_keep_non_utf8_name_bytes() {
+    use std::os::unix::ffi::OsStrExt;
+
+    let original = PathBuf::from(std::ffi::OsStr::from_bytes(b"/docs/caf\xe9.txt"));
+    let renamed = PathBuf::from(std::ffi::OsStr::from_bytes(b"/docs/na\xefve.txt"));
+    let item = FileOperationHistoryItem::Rename {
+        from: original.clone(),
+        to: renamed.clone(),
+    };
+
+    let Some(QueuedFileOperation::Rename { path, new_name }) = item.undo_operation() else {
+        panic!("expected an undo rename");
+    };
+    assert_eq!(path, renamed);
+    assert_eq!(new_name.as_bytes(), b"caf\xe9.txt");
+
+    let Some(QueuedFileOperation::Rename { path, new_name }) = item.redo_operation() else {
+        panic!("expected a redo rename");
+    };
+    assert_eq!(path, original);
+    assert_eq!(new_name.as_bytes(), b"na\xefve.txt");
+}
+
 #[test]
 fn pending_history_task_id_remaps_after_durable_insert() {
     let mut history = FileOperationHistory::new();

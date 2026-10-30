@@ -1,4 +1,5 @@
 use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -52,7 +53,7 @@ fn record_file_operation_failure(task_id: u64, operation: &str, log_error: &str)
 pub(crate) enum QueuedFileOperation {
     Rename {
         path: PathBuf,
-        new_name: String,
+        new_name: OsString,
     },
     BatchRename {
         items: Vec<BatchRenameItem>,

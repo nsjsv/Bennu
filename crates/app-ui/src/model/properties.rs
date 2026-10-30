@@ -403,4 +403,6 @@ pub(crate) struct FilePropertiesDirectoryContents {
     pub(crate) directory_count: usize,
     pub(crate) total_size_bytes: u64,
     pub(crate) total_disk_size_bytes: u64,
+    /// 读不了、没算进来的子目录或条目数；非零时界面标注"部分内容无法读取"。
+    pub(crate) unreadable_entries: u64,
 }

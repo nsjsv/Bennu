@@ -26,7 +26,7 @@ async fn load_list_directory_summary(
         let cancellation = CancellationToken::new();
         let contents = read_directory_contents_summary(&path, cancellation.clone(), |_| {})
             .map_err(directory_summary_error_message)?;
-        let recursive_total_size_bytes = if include_recursive_total_size {
+        let recursive_total_size = if include_recursive_total_size {
             Some(
                 read_directory_recursive_total_size(&path, cancellation)
                     .map_err(directory_summary_error_message)?,
@@ -36,7 +36,7 @@ async fn load_list_directory_summary(
         };
         Ok(ListDirectorySummary {
             direct_child_count: contents.total_item_count(),
-            recursive_total_size_bytes,
+            recursive_total_size,
             files_total_size_bytes: Some(contents.files_total_size_bytes),
             hidden_files_total_size_bytes: Some(contents.hidden_files_total_size_bytes),
             hidden_entry_count: Some(contents.hidden_entry_count),

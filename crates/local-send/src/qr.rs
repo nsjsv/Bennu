@@ -49,8 +49,15 @@ pub struct QrItem {
 struct ItemMeta {
     display_name: String,
     source: QrSource,
-    size: u64,
+    size: ItemSize,
     zip_name: String,
+}
+
+/// 目录里有读不了的子目录或条目时 `complete == false`，页面显示"≥ 大小"。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ItemSize {
+    bytes: u64,
+    complete: bool,
 }
 
 struct QrShared {
@@ -277,7 +284,7 @@ fn stop_server(
     server_abort.abort();
 }
 
-async fn source_size(source: &QrSource) -> Result<u64, LocalSendError> {
+async fn source_size(source: &QrSource) -> Result<ItemSize, LocalSendError> {
     match source {
         QrSource::File(path) => {
             let meta = tokio::fs::metadata(path)
@@ -289,7 +296,10 @@ async fn source_size(source: &QrSource) -> Result<u64, LocalSendError> {
             if !meta.is_file() {
                 return Err(LocalSendError::InvalidPath { path: path.clone() });
             }
-            Ok(meta.len())
+            Ok(ItemSize {
+                bytes: meta.len(),
+                complete: true,
+            })
         }
         QrSource::Dir(path) => {
             let meta = tokio::fs::metadata(path)
@@ -301,30 +311,54 @@ async fn source_size(source: &QrSource) -> Result<u64, LocalSendError> {
             if !meta.is_dir() {
                 return Err(LocalSendError::InvalidPath { path: path.clone() });
             }
-            Ok(dir_size(path).await)
+            dir_size(path).await
         }
     }
 }
 
-async fn dir_size(dir: &Path) -> u64 {
-    let mut total = 0;
+/// 与主程序文件夹大小同一规则（同 Nautilus 属性）：目录本身读不了就报错；
+/// 更深处读不了的跳过，并标明大小不完整。
+async fn dir_size(dir: &Path) -> Result<ItemSize, LocalSendError> {
+    let mut size = ItemSize {
+        bytes: 0,
+        complete: true,
+    };
     let mut stack = vec![dir.to_path_buf()];
     while let Some(current) = stack.pop() {
-        let Ok(mut entries) = tokio::fs::read_dir(&current).await else {
-            continue;
+        let mut entries = match tokio::fs::read_dir(&current).await {
+            Ok(entries) => entries,
+            Err(source) if current.as_path() == dir => {
+                return Err(LocalSendError::Io {
+                    path: Some(current),
+                    source,
+                });
+            }
+            Err(_) => {
+                size.complete = false;
+                continue;
+            }
         };
-        while let Ok(Some(entry)) = entries.next_entry().await {
+        loop {
+            let entry = match entries.next_entry().await {
+                Ok(Some(entry)) => entry,
+                Ok(None) => break,
+                Err(_) => {
+                    size.complete = false;
+                    break;
+                }
+            };
             let Ok(meta) = entry.metadata().await else {
+                size.complete = false;
                 continue;
             };
             if meta.is_dir() {
                 stack.push(entry.path());
             } else {
-                total += meta.len();
+                size.bytes += meta.len();
             }
         }
     }
-    total
+    Ok(size)
 }
 
 fn router(shared: Arc<QrShared>) -> Router {
@@ -351,7 +385,11 @@ async fn index_page(
     shared.notify_connected();
     let mut rows = String::new();
     for (index, item) in shared.items.iter().enumerate() {
-        let size_text = format_size(item.size);
+        let size_text = if item.size.complete {
+            format_size(item.size.bytes)
+        } else {
+            format!("≥ {}", format_size(item.size.bytes))
+        };
         // 目录条目没有单文件链接，指向整包 zip。
         let href = match item.source {
             QrSource::File(_) => format!("/file/{index}"),
@@ -632,6 +670,42 @@ impl AsyncRead for CountingReader {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_shared_folder_with_unreadable_contents_reports_an_incomplete_size() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let blocked = directory.path().join("blocked");
+        std::fs::write(directory.path().join("top.txt"), b"top").unwrap();
+        std::fs::create_dir(&blocked).unwrap();
+        std::fs::write(blocked.join("secret.txt"), b"secret").unwrap();
+        std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        // root 不受目录权限限制，读得到就测不出这条路径。
+        if std::fs::read_dir(&blocked).is_ok() {
+            std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o755)).unwrap();
+            return;
+        }
+
+        let size = dir_size(directory.path()).await;
+        std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert_eq!(
+            size.unwrap(),
+            ItemSize {
+                bytes: 3,
+                complete: false,
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn a_shared_folder_that_cannot_be_read_at_all_is_an_error() {
+        let directory = tempfile::tempdir().unwrap();
+
+        assert!(dir_size(&directory.path().join("missing")).await.is_err());
+    }
 
     #[test]
     fn html_escape_and_size_format() {

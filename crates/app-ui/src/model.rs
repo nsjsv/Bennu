@@ -99,7 +99,7 @@ pub(crate) use file_grouping::{
 mod list_directory_summary;
 pub(crate) use list_directory_summary::{
     ListDirectorySizeDisplayMode, ListDirectorySummary, ListDirectorySummaryCache,
-    ListDirectorySummaryLoadRequest,
+    ListDirectorySummaryLoadRequest, RecursiveTotalSize,
 };
 mod file_entry_content_modifier;
 pub(crate) use file_entry_content_modifier::FileEntryContentModifier;

@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+pub(crate) use crate::directory_summary::RecursiveTotalSize;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ListDirectorySizeDisplayMode {
     ItemCount,
@@ -44,7 +46,7 @@ impl ListDirectorySizeDisplayMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ListDirectorySummary {
     pub(crate) direct_child_count: usize,
-    pub(crate) recursive_total_size_bytes: Option<u64>,
+    pub(crate) recursive_total_size: Option<RecursiveTotalSize>,
     // 直属文件大小事实（含隐藏与隐藏子集），由 direct 扫描顺带产出；
     // 可见口径由 UI 按 show_hidden_files 推导，缓存不掺配置。
     pub(crate) files_total_size_bytes: Option<u64>,
@@ -70,7 +72,7 @@ pub(crate) struct ListDirectorySummaryCache {
 struct ListDirectorySummaryCacheEntry {
     generation: u64,
     direct_child_count: Option<usize>,
-    recursive_total_size_bytes: Option<u64>,
+    recursive_total_size: Option<RecursiveTotalSize>,
     files_total_size_bytes: Option<u64>,
     hidden_files_total_size_bytes: Option<u64>,
     hidden_entry_count: Option<usize>,
@@ -87,7 +89,7 @@ impl ListDirectorySummaryCache {
         let entry = self.entries.get(path)?;
         Some(ListDirectorySummary {
             direct_child_count: entry.direct_child_count?,
-            recursive_total_size_bytes: entry.recursive_total_size_bytes,
+            recursive_total_size: entry.recursive_total_size,
             files_total_size_bytes: entry.files_total_size_bytes,
             hidden_files_total_size_bytes: entry.hidden_files_total_size_bytes,
             hidden_entry_count: entry.hidden_entry_count,
@@ -114,7 +116,7 @@ impl ListDirectorySummaryCache {
         let files_total_size_missing =
             entry.files_total_size_bytes.is_none() && !entry.files_total_size_failed;
         let recursive_total_size_missing = include_recursive_total_size
-            && entry.recursive_total_size_bytes.is_none()
+            && entry.recursive_total_size.is_none()
             && !entry.recursive_total_size_failed;
         let should_start_direct_request = (direct_child_count_missing
             && !entry.direct_child_count_loading)
@@ -166,7 +168,7 @@ impl ListDirectorySummaryCache {
         entry.files_total_size_loading = false;
         entry.files_total_size_failed = false;
         if request.include_recursive_total_size {
-            entry.recursive_total_size_bytes = summary.recursive_total_size_bytes;
+            entry.recursive_total_size = summary.recursive_total_size;
             entry.recursive_total_size_loading = false;
             entry.recursive_total_size_failed = false;
         }
@@ -202,7 +204,7 @@ impl ListDirectorySummaryCache {
         };
         entry.generation = entry.generation.wrapping_add(1);
         entry.direct_child_count = None;
-        entry.recursive_total_size_bytes = None;
+        entry.recursive_total_size = None;
         entry.files_total_size_bytes = None;
         entry.hidden_files_total_size_bytes = None;
         entry.hidden_entry_count = None;
@@ -269,7 +271,7 @@ mod tests {
             &first,
             ListDirectorySummary {
                 direct_child_count: 4,
-                recursive_total_size_bytes: None,
+                recursive_total_size: None,
                 files_total_size_bytes: Some(256),
                 hidden_files_total_size_bytes: Some(16),
                 hidden_entry_count: Some(2),
@@ -324,7 +326,10 @@ mod tests {
             &request,
             ListDirectorySummary {
                 direct_child_count: 9,
-                recursive_total_size_bytes: Some(4096),
+                recursive_total_size: Some(RecursiveTotalSize {
+                    bytes: 4096,
+                    complete: true,
+                }),
                 files_total_size_bytes: Some(1024),
                 hidden_files_total_size_bytes: Some(32),
                 hidden_entry_count: Some(3),
@@ -371,7 +376,10 @@ mod tests {
                 &request,
                 ListDirectorySummary {
                     direct_child_count: 1,
-                    recursive_total_size_bytes: Some(128),
+                    recursive_total_size: Some(RecursiveTotalSize {
+                        bytes: 128,
+                        complete: true,
+                    }),
                     files_total_size_bytes: Some(64),
                     hidden_files_total_size_bytes: Some(8),
                     hidden_entry_count: Some(1),
@@ -402,7 +410,7 @@ mod tests {
             .summary_for_path(&path)
             .expect("summary after failure");
         assert_eq!(summary.direct_child_count, 4);
-        assert_eq!(summary.recursive_total_size_bytes, None);
+        assert_eq!(summary.recursive_total_size, None);
         assert!(cache.start_request(path, true).is_none());
     }
 
@@ -423,7 +431,7 @@ mod tests {
             &request,
             ListDirectorySummary {
                 direct_child_count: 4,
-                recursive_total_size_bytes: None,
+                recursive_total_size: None,
                 files_total_size_bytes: Some(512),
                 hidden_files_total_size_bytes: Some(64),
                 hidden_entry_count: Some(5),

@@ -15,7 +15,7 @@ use crate::formatting::format_file_size;
 use crate::model::{
     displayed_address_directory, BrowserPaneId, BrowserViewMode, ExpandedDirectory,
     ExpandedDirectoryStatus, ListDirectorySizeDisplayMode, ListDirectorySummaryCache,
-    ListDirectorySummaryLoadRequest, Message,
+    ListDirectorySummaryLoadRequest, Message, RecursiveTotalSize,
 };
 use crate::operation_queue::QueuedFileOperation;
 use crate::thumbnail_cache::ColumnViewport;
@@ -404,8 +404,8 @@ impl FileBrowser {
                 list_item_count_text(summary.direct_child_count)
             }
             ListDirectorySizeDisplayMode::RecursiveTotalSize => summary
-                .recursive_total_size_bytes
-                .map(format_file_size)
+                .recursive_total_size
+                .map(RecursiveTotalSize::display_text)
                 .unwrap_or_else(|| "-".to_owned()),
         }
     }
@@ -655,8 +655,8 @@ fn directory_displayed_size_value(
             .map(DirectoryDisplayedSizeValue::Known)
             .unwrap_or(DirectoryDisplayedSizeValue::Unknown),
         ListDirectorySizeDisplayMode::RecursiveTotalSize => summary
-            .and_then(|summary| summary.recursive_total_size_bytes)
-            .map(DirectoryDisplayedSizeValue::Known)
+            .and_then(|summary| summary.recursive_total_size)
+            .map(|size| DirectoryDisplayedSizeValue::Known(size.bytes))
             .unwrap_or(DirectoryDisplayedSizeValue::Unknown),
     }
 }
@@ -751,7 +751,10 @@ mod tests {
             &request,
             ListDirectorySummary {
                 direct_child_count: count,
-                recursive_total_size_bytes: Some(size),
+                recursive_total_size: Some(crate::model::RecursiveTotalSize {
+                    bytes: size,
+                    complete: true,
+                }),
                 files_total_size_bytes: Some(size),
                 hidden_files_total_size_bytes: Some(0),
                 hidden_entry_count: Some(0),

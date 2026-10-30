@@ -319,7 +319,7 @@ fn aggregate_target_counts(snapshot: &FilePropertiesAggregateSnapshot) -> String
 }
 
 fn aggregate_contents_counts(snapshot: &FilePropertiesAggregateSnapshot) -> String {
-    if crate::localization::current_language_is_chinese() {
+    let counts = if crate::localization::current_language_is_chinese() {
         format!(
             "{} 个文件，{} 个文件夹",
             snapshot.recursive_contents.file_count, snapshot.recursive_contents.directory_count
@@ -329,7 +329,8 @@ fn aggregate_contents_counts(snapshot: &FilePropertiesAggregateSnapshot) -> Stri
             "{} files, {} folders",
             snapshot.recursive_contents.file_count, snapshot.recursive_contents.directory_count
         )
-    }
+    };
+    with_unreadable_contents_note(counts, snapshot.recursive_contents.unreadable_entries)
 }
 
 fn aggregate_type_label(snapshot: &FilePropertiesAggregateSnapshot) -> &'static str {
@@ -727,7 +728,7 @@ fn display_size(bytes: u64) -> String {
 }
 
 fn display_contents(contents: &FilePropertiesDirectoryContents) -> String {
-    if crate::localization::current_language_is_chinese() {
+    let counts = if crate::localization::current_language_is_chinese() {
         format!(
             "{} 个文件，{} 个文件夹，总计 {}",
             contents.file_count,
@@ -741,6 +742,18 @@ fn display_contents(contents: &FilePropertiesDirectoryContents) -> String {
             contents.directory_count,
             format_file_size(contents.total_size_bytes)
         )
+    };
+    with_unreadable_contents_note(counts, contents.unreadable_entries)
+}
+
+/// 同 Nautilus 属性的"(some contents unreadable)"：数字只算了读得到的部分。
+fn with_unreadable_contents_note(counts: String, unreadable_entries: u64) -> String {
+    if unreadable_entries == 0 {
+        counts
+    } else if crate::localization::current_language_is_chinese() {
+        format!("{counts}（部分内容无法读取）")
+    } else {
+        format!("{counts} (some contents unreadable)")
     }
 }
 
@@ -750,4 +763,29 @@ fn display_permissions(permissions: FilePropertiesPermissions) -> String {
         permissions.symbolic_string(),
         permissions.octal_string()
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn contents(unreadable_entries: u64) -> FilePropertiesDirectoryContents {
+        FilePropertiesDirectoryContents {
+            file_count: 3,
+            directory_count: 1,
+            total_size_bytes: 2048,
+            total_disk_size_bytes: 4096,
+            unreadable_entries,
+        }
+    }
+
+    #[test]
+    fn contents_say_when_part_of_the_folder_could_not_be_read() {
+        let complete = display_contents(&contents(0));
+        let incomplete = display_contents(&contents(2));
+
+        assert!(!complete.contains("unreadable") && !complete.contains("无法读取"));
+        assert!(incomplete.starts_with(&complete));
+        assert!(incomplete.contains("unreadable") || incomplete.contains("无法读取"));
+    }
 }

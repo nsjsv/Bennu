@@ -365,7 +365,10 @@ mod tests {
             &request,
             ListDirectorySummary {
                 direct_child_count: count,
-                recursive_total_size_bytes: Some(size),
+                recursive_total_size: Some(crate::model::RecursiveTotalSize {
+                    bytes: size,
+                    complete: true,
+                }),
                 files_total_size_bytes: Some(size),
                 hidden_files_total_size_bytes: Some(0),
                 hidden_entry_count: Some(0),

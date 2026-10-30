@@ -283,6 +283,9 @@ fn read_aggregate_file_properties(
                     total_disk_size_bytes: completed_contents
                         .total_disk_size_bytes
                         .saturating_add(directory_summary.total_disk_size_bytes),
+                    unreadable_entries: completed_contents
+                        .unreadable_entries
+                        .saturating_add(directory_summary.unreadable_entries),
                 };
                 progress(current);
             })
@@ -403,6 +406,7 @@ fn aggregate_snapshot_for_targets(
             directory_count: 0,
             total_size_bytes: 0,
             total_disk_size_bytes: 0,
+            unreadable_entries: 0,
         },
         common_parent,
         common_kind,
@@ -458,6 +462,10 @@ fn add_directory_summary(
         .total_disk_size_bytes
         .checked_add(summary.total_disk_size_bytes)
         .ok_or_else(|| "aggregate disk size overflowed u64".to_owned())?;
+    snapshot.recursive_contents.unreadable_entries = snapshot
+        .recursive_contents
+        .unreadable_entries
+        .saturating_add(summary.unreadable_entries);
     Ok(())
 }
 
@@ -737,6 +745,7 @@ fn file_properties_directory_contents(
         directory_count: summary.directory_count,
         total_size_bytes: summary.total_size_bytes,
         total_disk_size_bytes: summary.total_disk_size_bytes,
+        unreadable_entries: summary.unreadable_entries,
     }
 }
 

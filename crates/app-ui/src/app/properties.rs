@@ -758,6 +758,7 @@ mod tests {
             directory_count,
             total_size_bytes,
             total_disk_size_bytes: total_size_bytes,
+            unreadable_entries: 0,
         }
     }
 }

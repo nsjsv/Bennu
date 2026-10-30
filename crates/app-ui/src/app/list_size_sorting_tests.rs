@@ -133,7 +133,10 @@ fn recursive_size_sort_reorders_expanded_entries_and_inactive_pane() {
             request,
             Ok(ListDirectorySummary {
                 direct_child_count: 0,
-                recursive_total_size_bytes: Some(size),
+                recursive_total_size: Some(crate::model::RecursiveTotalSize {
+                    bytes: size,
+                    complete: true,
+                }),
                 files_total_size_bytes: Some(size),
                 hidden_files_total_size_bytes: Some(0),
                 hidden_entry_count: Some(0),

@@ -21,11 +21,31 @@ pub(crate) struct DirectoryContentsSummary {
     // 隐藏条目数事实（隐藏文件 + 隐藏文件夹），与隐藏大小同源产出，
     // 供底栏幽灵开关显示；缓存同样不掺配置。
     pub(crate) hidden_entry_count: usize,
+    /// 读不了、因而没算进来的子目录或条目数；非零时上面的数字偏小。
+    pub(crate) unreadable_entries: u64,
 }
 
 impl DirectoryContentsSummary {
     pub(crate) fn total_item_count(&self) -> usize {
         self.file_count.saturating_add(self.directory_count)
+    }
+}
+
+/// 文件夹递归总大小。读不了的子目录跳过不算时 `complete == false`，显示为"≥ 大小"。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RecursiveTotalSize {
+    pub(crate) bytes: u64,
+    pub(crate) complete: bool,
+}
+
+impl RecursiveTotalSize {
+    pub(crate) fn display_text(self) -> String {
+        let size = crate::formatting::format_file_size(self.bytes);
+        if self.complete {
+            size
+        } else {
+            format!("≥ {size}")
+        }
     }
 }
 
@@ -75,6 +95,8 @@ fn read_directory_summary(
     mut progress: impl FnMut(DirectoryContentsSummary),
 ) -> Result<DirectoryContentsSummary, DirectorySummaryError> {
     let mut summary = DirectoryContentsSummary::default();
+    // 根目录本身读不了才算失败；更深处读不了的跳过并记数，同 Nautilus 属性的
+    // "(some contents unreadable)"：给出能算出的部分，并标明不完整。
     let mut pending = vec![PathBuf::from(path)];
     let mut processed_entries = 0usize;
 
@@ -83,14 +105,29 @@ fn read_directory_summary(
             return Err(DirectorySummaryError::Cancelled);
         }
 
-        for entry in std::fs::read_dir(directory).map_err(DirectorySummaryError::Io)? {
+        let entries = match std::fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if directory.as_path() == path => {
+                return Err(DirectorySummaryError::Io(error));
+            }
+            Err(_) => {
+                summary.unreadable_entries = summary.unreadable_entries.saturating_add(1);
+                continue;
+            }
+        };
+        for entry in entries {
             if cancellation.is_cancelled() {
                 return Err(DirectorySummaryError::Cancelled);
             }
 
-            let entry = entry.map_err(DirectorySummaryError::Io)?;
-            let file_type = entry.file_type().map_err(DirectorySummaryError::Io)?;
-            let metadata = entry.metadata().map_err(DirectorySummaryError::Io)?;
+            let Ok((entry, file_type, metadata)) = entry.and_then(|entry| {
+                let file_type = entry.file_type()?;
+                let metadata = entry.metadata()?;
+                Ok((entry, file_type, metadata))
+            }) else {
+                summary.unreadable_entries = summary.unreadable_entries.saturating_add(1);
+                continue;
+            };
             if file_type.is_dir() {
                 summary.directory_count = summary
                     .directory_count
@@ -143,48 +180,16 @@ fn read_directory_summary(
     Ok(summary)
 }
 
+/// 列表大小列用的递归总大小，与属性窗口走同一次遍历、同一套"读不了就跳过并标注"规则。
 pub(crate) fn read_directory_recursive_total_size(
     path: &Path,
     cancellation: CancellationToken,
-) -> Result<u64, DirectorySummaryError> {
-    let mut pending = vec![PathBuf::from(path)];
-    let mut total_size_bytes = 0u64;
-
-    while let Some(directory) = pending.pop() {
-        if cancellation.is_cancelled() {
-            return Err(DirectorySummaryError::Cancelled);
-        }
-
-        let entries = match std::fs::read_dir(&directory) {
-            Ok(entries) => entries,
-            Err(error) if directory.as_path() == path => {
-                return Err(DirectorySummaryError::Io(error));
-            }
-            Err(_) => continue,
-        };
-
-        for entry in entries {
-            if cancellation.is_cancelled() {
-                return Err(DirectorySummaryError::Cancelled);
-            }
-
-            let Ok(entry) = entry else {
-                continue;
-            };
-            let Ok(file_type) = entry.file_type() else {
-                continue;
-            };
-            let Ok(metadata) = entry.metadata() else {
-                continue;
-            };
-            total_size_bytes = total_size_bytes.saturating_add(metadata.len());
-            if file_type.is_dir() {
-                pending.push(entry.path());
-            }
-        }
-    }
-
-    Ok(total_size_bytes)
+) -> Result<RecursiveTotalSize, DirectorySummaryError> {
+    let summary = read_directory_tree_summary(path, cancellation, |_| {})?;
+    Ok(RecursiveTotalSize {
+        bytes: summary.total_size_bytes,
+        complete: summary.unreadable_entries == 0,
+    })
 }
 
 #[cfg(unix)]
@@ -271,7 +276,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn recursive_total_size_skips_unreadable_descendants() {
+    fn recursive_total_size_counts_what_it_can_and_marks_itself_incomplete() {
         let temp_dir = tempfile::tempdir().expect("create temp dir");
         let root = temp_dir.path();
         let readable_dir = root.join("readable");
@@ -313,10 +318,34 @@ mod tests {
 
         let total = read_directory_recursive_total_size(root, CancellationToken::new())
             .expect("recursive total size");
+        let tree = read_directory_tree_summary(root, CancellationToken::new(), |_| {})
+            .expect("tree summary");
 
         std::fs::set_permissions(&blocked_dir, original_permissions).expect("unlock blocked dir");
 
-        assert_eq!(total, expected);
+        assert_eq!(
+            total,
+            RecursiveTotalSize {
+                bytes: expected,
+                complete: false,
+            }
+        );
+        assert!(total.display_text().starts_with("≥ "));
+        // 属性窗口用同一次遍历：同样的数字、同样标明有读不了的部分。
+        assert_eq!(tree.total_size_bytes, expected);
+        assert_eq!(tree.unreadable_entries, 1);
+    }
+
+    #[test]
+    fn a_fully_readable_folder_reports_a_complete_size() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        std::fs::write(temp_dir.path().join("top.txt"), b"top").expect("write top file");
+
+        let total = read_directory_recursive_total_size(temp_dir.path(), CancellationToken::new())
+            .expect("recursive total size");
+
+        assert!(total.complete);
+        assert!(!total.display_text().starts_with('≥'));
     }
 
     #[cfg(unix)]

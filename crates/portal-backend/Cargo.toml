@@ -53,4 +53,5 @@ url.workspace = true
 zbus.workspace = true
 
 [dev-dependencies]
+rusqlite = { version = "0.32.1", features = ["bundled"] }
 tempfile.workspace = true

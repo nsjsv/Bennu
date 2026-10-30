@@ -1,5 +1,5 @@
 use file_operation_store::{
-    TaskQueueStore, LAUNCH_WINDOW_POLICY_MERGE_INTO_EXISTING, LAUNCH_WINDOW_POLICY_OPEN_NEW_WINDOW,
+    LAUNCH_WINDOW_POLICY_MERGE_INTO_EXISTING, LAUNCH_WINDOW_POLICY_OPEN_NEW_WINDOW,
 };
 
 /// 二次启动进程的行为：把打开请求转发给主实例合并，或自己独立运行成新窗口。
@@ -30,20 +30,18 @@ impl LaunchWindowPolicy {
 }
 
 /// 在 claim 主实例 D-Bus 名之前读取存储的策略。这是新进程决定"转发还是独立运行"的唯一时机，
-/// 因此独立于完整的用户配置加载路径，任何读取失败都回退到默认策略。
+/// 因此独立于完整的用户配置加载路径，读取失败回退到默认策略。此时日志还没初始化，
+/// 错误写到 stderr（与 main 里激活失败同一做法）。
 pub(crate) fn stored_launch_window_policy() -> LaunchWindowPolicy {
-    let state_database_path = super::default_state_database_path();
-    let Ok(store) = TaskQueueStore::new(&state_database_path) else {
-        return DEFAULT_LAUNCH_WINDOW_POLICY;
-    };
-    store
-        .read_user_preferences(&file_operation_store::StoredUserPreferences::default())
-        .ok()
-        .flatten()
-        .and_then(|read| {
-            LaunchWindowPolicy::from_config_value(&read.preferences.launch_window_policy)
-        })
-        .unwrap_or(DEFAULT_LAUNCH_WINDOW_POLICY)
+    match super::read_user_preferences_without_repair(&super::default_state_database_path()) {
+        Ok(preferences) => preferences.launch_window_policy,
+        Err(error) => {
+            eprintln!(
+                "bennu: settings could not be read; using the default launch policy: {error}"
+            );
+            DEFAULT_LAUNCH_WINDOW_POLICY
+        }
+    }
 }
 
 #[cfg(test)]

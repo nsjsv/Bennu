@@ -220,8 +220,9 @@ mod tests {
     use crate::model::{
         BrowserPaneId, BrowserPaneLayout, BrowserPaneSession, BrowserSessionSnapshot,
         BrowserTabSession, BrowserViewMode, ClassifiedStartupSession, ColumnBrowserViewport,
-        ExpandedDirectoryStatus, LoadedOperationStore, SidebarLocation, SidebarLocationKind,
-        SplitAxis, StartupEnvironment, StartupSessionPlanRequest, StartupSessionSource,
+        ExpandedDirectoryStatus, LoadedOperationStore, SavedBrowserSession, SidebarLocation,
+        SidebarLocationKind, SplitAxis, StartupEnvironment, StartupSessionPlanRequest,
+        StartupSessionSource,
     };
     use crate::network_connections::SavedNetworkConnection;
     use crate::startup_rendering::{
@@ -304,7 +305,7 @@ mod tests {
 
     fn classify_previous_session(
         home: PathBuf,
-        session: Option<BrowserSessionSnapshot>,
+        session: SavedBrowserSession,
     ) -> ClassifiedStartupSession {
         classify_startup_session(
             StartupSessionPlanRequest {
@@ -430,8 +431,10 @@ mod tests {
             temp_dir.path().join("state.sqlite"),
         )));
         assert_ne!(browser.current_dir, workspace);
-        let classified =
-            classify_startup_session(browser.startup_session_plan_request(&home), None);
+        let classified = classify_startup_session(
+            browser.startup_session_plan_request(&home),
+            SavedBrowserSession::Missing,
+        );
         drop(browser.accept_startup_plan(classified));
 
         assert_eq!(browser.current_dir, workspace);
@@ -455,8 +458,10 @@ mod tests {
             temp_dir.path().join("state.sqlite"),
         )));
         assert_eq!(browser.current_error(), None);
-        let classified =
-            classify_startup_session(browser.startup_session_plan_request(&home), None);
+        let classified = classify_startup_session(
+            browser.startup_session_plan_request(&home),
+            SavedBrowserSession::Missing,
+        );
         drop(browser.accept_startup_plan(classified));
 
         assert_eq!(browser.current_dir, home);
@@ -494,7 +499,10 @@ mod tests {
         )));
         drop(browser.accept_operation_store(Ok(loaded_store(
             &temp_dir,
-            Some(classify_previous_session(home, Some(snapshot))),
+            Some(classify_previous_session(
+                home,
+                SavedBrowserSession::Restorable(snapshot),
+            )),
         ))));
 
         assert_eq!(browser.current_dir, previous);
@@ -584,7 +592,10 @@ mod tests {
         )));
         drop(browser.accept_operation_store(Ok(loaded_store(
             &temp_dir,
-            Some(classify_previous_session(home.clone(), Some(snapshot))),
+            Some(classify_previous_session(
+                home.clone(),
+                SavedBrowserSession::Restorable(snapshot),
+            )),
         ))));
 
         assert_eq!(browser.current_dir, right);
@@ -663,7 +674,10 @@ mod tests {
         )));
         drop(browser.accept_operation_store(Ok(loaded_store(
             &temp_dir,
-            Some(classify_previous_session(home.clone(), Some(snapshot))),
+            Some(classify_previous_session(
+                home.clone(),
+                SavedBrowserSession::Restorable(snapshot),
+            )),
         ))));
 
         assert_eq!(browser.current_dir, home.clone());
@@ -701,7 +715,10 @@ mod tests {
         )));
         drop(browser.accept_operation_store(Ok(loaded_store(
             &temp_dir,
-            Some(classify_previous_session(home.clone(), None)),
+            Some(classify_previous_session(
+                home.clone(),
+                SavedBrowserSession::Missing,
+            )),
         ))));
 
         assert!(browser
@@ -738,7 +755,10 @@ mod tests {
         )));
         drop(browser.accept_operation_store(Ok(loaded_store(
             &temp_dir,
-            Some(classify_previous_session(home.clone(), Some(snapshot))),
+            Some(classify_previous_session(
+                home.clone(),
+                SavedBrowserSession::Restorable(snapshot),
+            )),
         ))));
 
         assert!(browser

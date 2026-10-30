@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use file_operation_store::{TaskQueueStore, UnreadablePreferences};
+use file_operation_store::{StoreResult, TaskQueueStore, UnreadablePreferences};
 
 use super::app_config::AppConfig;
 use super::legacy_toml;
@@ -76,6 +76,21 @@ pub(super) fn load_user_config_from_sources(
         }
         Err(error) => unavailable(default, error.to_string()),
     }
+}
+
+/// 完整加载之前的只读读取方用（二次启动决定转发还是独立运行、窗口图标）：与启动
+/// 加载同一套解释规则，库里还没有设置时为默认值。不备份、不写、不提示——那些归
+/// 启动加载。读出错交给调用方记录：二次启动读策略时日志还没初始化。
+pub(crate) fn read_user_preferences_without_repair(
+    state_database_path: &Path,
+) -> StoreResult<UserPreferences> {
+    let default = default_user_config();
+    let read = TaskQueueStore::new(state_database_path)?
+        .read_user_preferences(&default.user_preferences().to_stored())?;
+    Ok(match read {
+        Some(read) => UserPreferences::from_stored(read.preferences, &default).preferences,
+        None => default.user_preferences(),
+    })
 }
 
 /// 存储层读不懂的键与界面层不认识的值合成一份"已恢复默认"的清单。

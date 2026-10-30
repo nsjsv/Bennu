@@ -78,7 +78,7 @@ fn classify_previous_session(
             home,
             source: StartupSessionSource::PreviousSession,
         },
-        Some(session),
+        crate::model::SavedBrowserSession::Restorable(session),
     )
 }
 

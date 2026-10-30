@@ -42,7 +42,9 @@ pub(crate) use settings_recovery::{SettingsPersistence, SettingsRecovery, Settin
 mod settings_recovery_tests;
 mod unrecognized_settings;
 mod user_config_loading;
-pub(crate) use user_config_loading::load_user_config_for_app_config;
+pub(crate) use user_config_loading::{
+    load_user_config_for_app_config, read_user_preferences_without_repair,
+};
 mod user_preferences;
 pub(crate) use user_preferences::{save_user_preferences, UserPreferences};
 

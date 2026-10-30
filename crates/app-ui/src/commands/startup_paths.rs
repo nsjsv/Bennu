@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 use iced::Task;
 
 use crate::model::{
-    BrowserSessionSnapshot, ClassifiedStartupSession, Message, StartupDirectoryAvailability,
-    StartupDirectoryValidationRequest, StartupSessionPlan, StartupSessionPlanRequest,
-    StartupSessionSource,
+    BrowserSessionSnapshot, ClassifiedStartupSession, Message, SavedBrowserSession,
+    StartupDirectoryAvailability, StartupDirectoryValidationRequest, StartupSessionPlan,
+    StartupSessionPlanRequest, StartupSessionSource,
 };
 
 pub(crate) fn startup_directory_validation_command(
@@ -24,18 +24,20 @@ pub(crate) fn startup_session_plan_command(request: StartupSessionPlanRequest) -
     let fallback_request = request.clone();
     Task::perform(
         async move {
-            tokio::task::spawn_blocking(move || classify_startup_session(request, None))
-                .await
-                .unwrap_or_else(|_| ClassifiedStartupSession {
-                    plan: StartupSessionPlan::Directory {
-                        directory: fallback_request.home.clone(),
-                        error: Some(
-                            "Failed to validate startup paths; opening the home directory."
-                                .to_owned(),
-                        ),
-                    },
-                    request: fallback_request,
-                })
+            // 只用于自定义启动目录，用不到上次会话。
+            tokio::task::spawn_blocking(move || {
+                classify_startup_session(request, SavedBrowserSession::Missing)
+            })
+            .await
+            .unwrap_or_else(|_| ClassifiedStartupSession {
+                plan: StartupSessionPlan::Directory {
+                    directory: fallback_request.home.clone(),
+                    error: Some(
+                        "Failed to validate startup paths; opening the home directory.".to_owned(),
+                    ),
+                },
+                request: fallback_request,
+            })
         },
         Message::StartupSessionClassified,
     )
@@ -43,7 +45,7 @@ pub(crate) fn startup_session_plan_command(request: StartupSessionPlanRequest) -
 
 pub(crate) fn classify_startup_session(
     request: StartupSessionPlanRequest,
-    browser_session: Option<BrowserSessionSnapshot>,
+    saved_session: SavedBrowserSession,
 ) -> ClassifiedStartupSession {
     let plan = match &request.source {
         StartupSessionSource::Home => StartupSessionPlan::Directory {
@@ -66,13 +68,19 @@ pub(crate) fn classify_startup_session(
                 }
             }
         }
-        StartupSessionSource::PreviousSession => match browser_session {
-            Some(session) => StartupSessionPlan::Session(validated_browser_session(session)),
-            None => StartupSessionPlan::Directory {
+        StartupSessionSource::PreviousSession => match saved_session {
+            SavedBrowserSession::Restorable(session) => {
+                StartupSessionPlan::Session(validated_browser_session(session))
+            }
+            SavedBrowserSession::Missing => StartupSessionPlan::Directory {
                 directory: request.home.clone(),
                 error: Some(
                     "No saved view state was found; opening the home directory.".to_owned(),
                 ),
+            },
+            SavedBrowserSession::Unreadable => StartupSessionPlan::Directory {
+                directory: request.home.clone(),
+                error: None,
             },
         },
     };
@@ -149,7 +157,7 @@ mod tests {
                 home.clone(),
                 StartupSessionSource::CustomDirectory(custom_directory.clone()),
             ),
-            None,
+            SavedBrowserSession::Missing,
         );
         let StartupSessionPlan::Directory { directory, error } = classified.plan else {
             panic!("custom startup should resolve to a directory plan");
@@ -162,7 +170,7 @@ mod tests {
                 home.clone(),
                 StartupSessionSource::CustomDirectory(custom_file),
             ),
-            None,
+            SavedBrowserSession::Missing,
         );
         let StartupSessionPlan::Directory { directory, error } = classified.plan else {
             panic!("invalid custom startup should resolve to a directory plan");
@@ -213,7 +221,7 @@ mod tests {
 
         let classified = classify_startup_session(
             startup_request(home, StartupSessionSource::PreviousSession),
-            Some(snapshot),
+            SavedBrowserSession::Restorable(snapshot),
         );
         let StartupSessionPlan::Session(session) = classified.plan else {
             panic!("previous session should resolve to a session plan");
@@ -223,5 +231,32 @@ mod tests {
         assert_eq!(session.panes[0].tabs.len(), 1);
         assert_eq!(session.panes[0].tabs[0].directory, valid_directory);
         assert!(session.panes[1].tabs[0].is_trash_view);
+    }
+
+    #[test]
+    fn an_unreadable_previous_session_opens_home_without_a_notice() {
+        let home = PathBuf::from("/home/user");
+        let plan = |saved_session| {
+            classify_startup_session(
+                startup_request(home.clone(), StartupSessionSource::PreviousSession),
+                saved_session,
+            )
+            .plan
+        };
+
+        let StartupSessionPlan::Directory { directory, error } =
+            plan(SavedBrowserSession::Unreadable)
+        else {
+            panic!("an unreadable session should open a directory");
+        };
+        assert_eq!(directory, home);
+        assert_eq!(error, None);
+
+        let StartupSessionPlan::Directory { directory, error } = plan(SavedBrowserSession::Missing)
+        else {
+            panic!("a missing session should open a directory");
+        };
+        assert_eq!(directory, home);
+        assert!(error.is_some());
     }
 }

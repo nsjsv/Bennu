@@ -4615,6 +4615,7 @@ dependencies = [
  "file-operation-store",
  "gio",
  "iced",
+ "rusqlite",
  "serde",
  "tempfile",
  "thiserror 1.0.69",

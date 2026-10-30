@@ -19,6 +19,15 @@ pub(crate) struct BrowserSessionSnapshot {
     pub(crate) layout: BrowserPaneLayout,
 }
 
+/// 启动时读到的上次会话。没存过与存了读不懂要分开：前者提示一句，后者照
+/// GNOME 的做法只记日志、安静地打开主目录，下次保存会话时覆盖。
+#[derive(Debug, Clone)]
+pub(crate) enum SavedBrowserSession {
+    Missing,
+    Unreadable,
+    Restorable(BrowserSessionSnapshot),
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct BrowserPaneSession {
     pub(crate) id: BrowserPaneId,

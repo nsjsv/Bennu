@@ -61,12 +61,19 @@ pub(crate) fn state_database_path() -> std::path::PathBuf {
         .join("state.sqlite")
 }
 
+/// 只读：读不懂的项已由存储层换成默认值；读出错时记日志、按未设置处理，不备份、不写
+/// （主程序启动时会备份并提示）。
 fn read_stored_appearance(db_path: &Path) -> Option<StoredAppearance> {
-    let store = TaskQueueStore::new(db_path).ok()?;
-    let stored = store
-        .read_user_preferences(&file_operation_store::StoredUserPreferences::default())
-        .ok()??
-        .preferences;
+    let read = TaskQueueStore::new(db_path).and_then(|store| {
+        store.read_user_preferences(&file_operation_store::StoredUserPreferences::default())
+    });
+    let stored = match read {
+        Ok(read) => read?.preferences,
+        Err(error) => {
+            tracing::warn!(%error, "Bennu settings could not be read; following the system theme");
+            return None;
+        }
+    };
     let theme_mode = ThemeMode::from_config_value(&stored.theme_mode)?;
     let color_scheme = ColorSchemePreset::from_config_value(&stored.color_scheme)?;
     let custom_color_scheme = CustomColorScheme::from_stored(
@@ -171,5 +178,49 @@ mod tests {
         let directory = tempfile::tempdir().expect("temporary directory");
         let missing = directory.path().join("nested/absent.sqlite");
         assert!(read_stored_appearance(&missing).is_none());
+    }
+
+    #[test]
+    fn a_damaged_setting_keeps_the_stored_theme_and_leaves_the_database_alone() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let database = directory.path().join("state.sqlite");
+        TaskQueueStore::new(&database).expect("create store");
+        let payload = r#"{"theme_mode":"dark","color_scheme":"nord","show_hidden_files":"yes"}"#;
+        let stored_payload = || -> String {
+            rusqlite::Connection::open(&database)
+                .unwrap()
+                .query_row(
+                    "SELECT payload_json FROM user_preferences WHERE preference_key = ?1",
+                    [file_operation_store::USER_PREFERENCES_KEY],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        rusqlite::Connection::open(&database)
+            .unwrap()
+            .execute(
+                "INSERT INTO user_preferences (preference_key, payload_json, updated_at_ms)
+                 VALUES (?1, ?2, 1)",
+                [file_operation_store::USER_PREFERENCES_KEY, payload],
+            )
+            .unwrap();
+
+        let appearance = read_stored_appearance(&database).expect("stored appearance");
+
+        assert_eq!(appearance.theme_mode, ThemeMode::Dark);
+        assert_eq!(appearance.color_scheme, ColorSchemePreset::Nord);
+        assert_eq!(stored_payload(), payload);
+        let backups = std::fs::read_dir(directory.path())
+            .unwrap()
+            .filter(|entry| {
+                entry
+                    .as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("user-preferences-")
+            })
+            .count();
+        assert_eq!(backups, 0);
     }
 }

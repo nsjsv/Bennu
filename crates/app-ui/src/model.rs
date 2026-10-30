@@ -189,7 +189,7 @@ pub(crate) use search_service::{
 mod session;
 pub(crate) use session::{
     pane_session_from_live, snapshot_from_stored, snapshot_to_stored, BrowserPaneSession,
-    BrowserSessionSnapshot, BrowserTabSession,
+    BrowserSessionSnapshot, BrowserTabSession, SavedBrowserSession,
 };
 mod file_drop;
 pub(crate) use file_drop::{

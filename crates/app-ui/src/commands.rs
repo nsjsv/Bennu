@@ -14,7 +14,7 @@ use file_core::{
     create_file_with_contents_at_available_name, scan_trash_with_cancellation, ScanOptions,
     TransferConflictCheck, TransferConflictItem, TransferConflictStrategy, TrashScan,
 };
-use file_operation_store::{StoreError, TaskQueueStore};
+use file_operation_store::TaskQueueStore;
 use iced::Task;
 
 use tokio_util::sync::CancellationToken;
@@ -516,11 +516,7 @@ async fn load_operation_store(
 
     let store_outcome = tokio::task::spawn_blocking(move || {
         let store = TaskQueueStore::new(path)?;
-        let browser_session = match store.read_browser_session() {
-            Ok(session) => session.and_then(crate::model::snapshot_from_stored),
-            Err(StoreError::Json(_)) => None,
-            Err(error) => return Err(error),
-        };
+        let saved_session = browser_session::read_saved_browser_session(&store)?;
         let column_width_overrides = store
             .read_column_widths()?
             .into_iter()
@@ -532,7 +528,7 @@ async fn load_operation_store(
             .read_column_width_reference_content_width()?
             .map(|width| width as f32);
         let classified_startup_session = startup_session_request
-            .map(|request| startup_paths::classify_startup_session(request, browser_session));
+            .map(|request| startup_paths::classify_startup_session(request, saved_session));
         Ok::<LoadedOperationStore, file_operation_store::StoreError>(LoadedOperationStore {
             task_queue_store: store,
             column_width_overrides,

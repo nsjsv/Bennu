@@ -244,6 +244,41 @@ fn a_restored_recovery_does_not_block_saving() {
 }
 
 #[test]
+fn early_readers_use_readable_settings_and_leave_damage_for_startup() {
+    let directory = tempfile::tempdir().unwrap();
+    let payload = default_payload_with(json!({
+        "theme_mode": "dark",
+        "launch_window_policy": file_operation_store::LAUNCH_WINDOW_POLICY_MERGE_INTO_EXISTING,
+        "show_hidden_files": "yes",
+    }));
+    let database = database_with_preferences(directory.path(), &payload);
+
+    let preferences = read_user_preferences_without_repair(&database).unwrap();
+
+    assert_eq!(
+        preferences.theme_mode,
+        crate::matugen_theme::ThemeMode::Dark
+    );
+    assert_eq!(
+        preferences.launch_window_policy,
+        LaunchWindowPolicy::MergeIntoExisting
+    );
+    assert_eq!(stored_raw_payload(&database), payload);
+    let backups = fs::read_dir(directory.path())
+        .unwrap()
+        .filter(|entry| {
+            entry
+                .as_ref()
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with("user-preferences-")
+        })
+        .count();
+    assert_eq!(backups, 0);
+}
+
+#[test]
 fn an_unreadable_legacy_config_is_not_migrated_and_blocks_saving() {
     let directory = tempfile::tempdir().unwrap();
     let config_dir = directory.path().join("config");

@@ -19,7 +19,7 @@ fn assert_canceled_task_finalizes(
 ) {
     assert_eq!(
         queue.finish(task_id, FileOperationFinish::Canceled),
-        Some(file_operations::FileOperationTerminalStatus::Canceled)
+        Some(crate::FileOperationTerminalStatus::Canceled)
     );
     assert_persisted(queue);
     assert_eq!(

@@ -1876,6 +1876,7 @@ dependencies = [
  "bennu-localization",
  "bennu-state",
  "file-core",
+ "libc",
  "rusqlite",
  "serde_json",
  "tempfile",

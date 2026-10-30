@@ -1,9 +1,10 @@
 use iced::futures::SinkExt;
 
-use super::queued_file_operations::run_file_operation;
 use crate::app::archive_member_password::ArchiveMemberPasswordAction;
 use crate::model::Message;
-use file_operations::{FileOperationEvent, RunningFileOperation, FILE_OPERATION_EVENT_CAPACITY};
+use file_operations::{
+    run_file_operation, FileOperationEvent, RunningFileOperation, FILE_OPERATION_EVENT_CAPACITY,
+};
 
 /// 驱动者是 `Task::stream`:一次性托付给执行器跑到流结束,不进订阅 hash 名册,
 /// 不会被 subscription() 重评估静默回收。驱动者死亡由队列监督检测并换代重启,

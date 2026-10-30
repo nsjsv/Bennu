@@ -2,7 +2,7 @@ use std::path::Path;
 
 use file_core::{convert_file_with_controls, ConversionRequest, FileError, FileOperationControls};
 
-use file_operations::{
+use crate::{
     FileOperationEvent, FileOperationEventSender, FileOperationOutcome, FileOperationProgressUpdate,
 };
 

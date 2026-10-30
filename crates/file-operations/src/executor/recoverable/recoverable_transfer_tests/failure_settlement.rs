@@ -74,7 +74,7 @@ async fn prepare_failure_settles_journal_and_finalizes_failed_task() {
     )));
     assert_eq!(
         queue.finish(task_id, FileOperationFinish::Failed(error.clone())),
-        Some(file_operations::FileOperationTerminalStatus::Failed)
+        Some(crate::FileOperationTerminalStatus::Failed)
     );
     assert_persisted(&mut queue);
     assert_eq!(

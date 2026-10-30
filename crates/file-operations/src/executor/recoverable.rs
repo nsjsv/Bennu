@@ -574,7 +574,8 @@ async fn persist_manifest_for_progress(
         Err(error) => {
             // 这份清单只为提前算出进度总量。建不出来时这一项的进度显示为未知；
             // 推进到它时会重新建清单，真正的错误在那里报给用户。
-            let log_error = crate::model::sanitized_application_log_detail(&error.to_string());
+            let log_error =
+                file_core::log_detail::sanitized_application_log_detail(&error.to_string());
             tracing::warn!(
                 target: "app_ui::file_operations",
                 event = "progress_manifest_unavailable",
@@ -1095,8 +1096,8 @@ mod recoverable_transfer_tests {
     use std::sync::Arc;
 
     use super::*;
-    use file_operations::test_persistence::{assert_persisted, attach_store};
-    use file_operations::{FileOperationEnqueueOutcome, FileOperationFinish, FileOperationQueue};
+    use crate::test_persistence::{assert_persisted, attach_store};
+    use crate::{FileOperationEnqueueOutcome, FileOperationFinish, FileOperationQueue};
 
     use file_core::{
         persist_recoverable_source_manifest_with_controls,
@@ -1361,7 +1362,7 @@ mod recoverable_transfer_tests {
 
         assert_eq!(
             queue.finish(task_id, FileOperationFinish::RecoveryBlocked(error)),
-            Some(file_operations::FileOperationTerminalStatus::Failed)
+            Some(crate::FileOperationTerminalStatus::Failed)
         );
         assert_persisted(&mut queue);
         assert_eq!(
@@ -2079,7 +2080,7 @@ mod recoverable_transfer_tests {
 
         assert_eq!(
             queue.finish(task_id, FileOperationFinish::Succeeded),
-            Some(file_operations::FileOperationTerminalStatus::Completed)
+            Some(crate::FileOperationTerminalStatus::Completed)
         );
         assert_persisted(&mut queue);
         assert!(store
@@ -2179,7 +2180,7 @@ mod recoverable_transfer_tests {
         assert!(tokio::fs::symlink_metadata(&second_source).await.is_err());
         assert_eq!(
             restored_queue.finish(stored_task_id, FileOperationFinish::Succeeded),
-            Some(file_operations::FileOperationTerminalStatus::Completed)
+            Some(crate::FileOperationTerminalStatus::Completed)
         );
         assert_persisted(&mut restored_queue);
         assert!(store
@@ -2281,7 +2282,7 @@ mod recoverable_transfer_tests {
         );
         assert_eq!(
             restored_queue.finish(stored_task_id, FileOperationFinish::Succeeded),
-            Some(file_operations::FileOperationTerminalStatus::Completed)
+            Some(crate::FileOperationTerminalStatus::Completed)
         );
         assert_persisted(&mut restored_queue);
         assert_eq!(

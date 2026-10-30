@@ -7,7 +7,7 @@ use file_core::{
     ArchivePassword, FileError, FileOperationControls,
 };
 
-use file_operations::{
+use crate::{
     FileOperationEvent, FileOperationEventSender, FileOperationOutcome, FileOperationProgressUpdate,
 };
 

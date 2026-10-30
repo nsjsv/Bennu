@@ -19,24 +19,24 @@ use file_core::{
     TrashVerificationBatch,
 };
 
-use file_operations::FileOperationProgressUpdate;
-use file_operations::{
+use crate::FileOperationProgressUpdate;
+use crate::{
     new_directory_name, new_file_name, DurableDirectMoveCommit, FileOperationEvent,
     FileOperationEventSender, QueuedFileOperation, QueuedTransfer, RunningFileOperation,
 };
-use file_operations::{
+use crate::{
     CompletedTransfer, FileOperationCompletion, FileOperationHistoryEligibility,
     FileOperationOutcome, RenameRejection,
 };
 
+use self::batch_rename::{rename_failure_text, run_queued_batch_rename};
+use self::convert::run_queued_convert;
 use self::entry_gathering::{
     run_queued_create_directories, run_queued_gather_selection_into_new_folder,
     run_queued_ungather_new_folder,
 };
 use self::extract_members::run_queued_extract_archive_members;
 use self::step_pacer::QueuedStepPacer;
-use super::batch_rename_operation::{rename_failure_text, run_queued_batch_rename};
-use super::convert_operation::run_queued_convert;
 
 const BYTE_PROGRESS_UI_INTERVAL: Duration = file_core::PROGRESS_REPORT_INTERVAL;
 
@@ -49,7 +49,7 @@ fn should_send_byte_progress(last_sent_at: Option<Instant>, now: Instant) -> boo
 
 /// 跑完一个任务,进度类事件经 `events` 汇报,终态作为返回值交回。
 /// `events` 在返回时随之关闭,接收方据此知道事件已发完。
-pub(crate) async fn run_file_operation(
+pub async fn run_file_operation(
     task: RunningFileOperation,
     events: FileOperationEventSender,
 ) -> FileOperationCompletion {
@@ -448,7 +448,7 @@ async fn run_queued_create_empty_file(
 }
 
 async fn run_queued_create_symbolic_links(
-    links: Vec<file_operations::SymbolicLinkCreation>,
+    links: Vec<crate::SymbolicLinkCreation>,
     mut controls: FileOperationControls,
     task_id: u64,
     output: &FileOperationEventSender,
@@ -647,6 +647,8 @@ impl QueuedTransferMode {
     }
 }
 
+mod batch_rename;
+mod convert;
 mod entry_gathering;
 mod extract_members;
 mod recoverable;

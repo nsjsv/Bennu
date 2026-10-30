@@ -1,10 +1,10 @@
 use super::*;
 
-use bennu_state::TaskQueueStore;
-use file_operations::{
+use crate::{
     execute_file_operation_persistence, FileOperationEnqueueOutcome, FileOperationQueue,
     QueuedFileOperation, QueuedTransfer,
 };
+use bennu_state::TaskQueueStore;
 use rusqlite::Connection;
 use std::fs::{self, File};
 use std::io::Write;

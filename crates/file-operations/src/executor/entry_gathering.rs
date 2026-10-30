@@ -9,9 +9,7 @@ use file_core::{
 };
 
 use super::step_pacer::QueuedStepPacer;
-use file_operations::{
-    CompletedTransfer, FileOperationEventSender, FileOperationOutcome, KeptNewFolder,
-};
+use crate::{CompletedTransfer, FileOperationEventSender, FileOperationOutcome, KeptNewFolder};
 
 pub(super) async fn run_queued_create_directories(
     parent: PathBuf,

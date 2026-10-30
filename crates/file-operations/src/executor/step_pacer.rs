@@ -3,7 +3,7 @@ use std::future::Future;
 use file_core::{EntryStepPacer, FileError, FileOperationControls};
 
 use super::send_file_operation_progress;
-use file_operations::{FileOperationEventSender, FileOperationProgressUpdate};
+use crate::{FileOperationEventSender, FileOperationProgressUpdate};
 
 /// file-core 多条目操作的每一步前等任务暂停结束、遇取消报错；每一步后把条目进度发给任务行。
 pub(super) struct QueuedStepPacer<'a> {

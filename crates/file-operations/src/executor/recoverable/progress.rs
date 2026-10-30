@@ -6,7 +6,7 @@ use file_core::{
     SourceManifest, TransferJournalRecord,
 };
 
-use file_operations::{
+use crate::{
     FileOperationEvent, FileOperationEventSender, FileOperationProgressUpdate,
     TransferEntrySnapshot, TransferEntrySnapshotState,
 };

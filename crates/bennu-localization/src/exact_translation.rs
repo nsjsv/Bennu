@@ -204,6 +204,7 @@ pub(crate) fn translate(text: &str) -> Option<&'static str> {
         "Keep Both" => Some("保留两者"),
         "Merge" => Some("合并"),
         "Delete Permanently?" => Some("要永久删除吗？"),
+        "Can't Move to Trash" => Some("无法放入回收站"),
         "Empty Trash?" => Some("要清空回收站吗？"),
         "Drop Files" => Some("拖放文件"),
         "Move files into the current folder." => Some("将文件移动到当前文件夹。"),

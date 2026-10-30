@@ -9,7 +9,8 @@ use super::global_error::GlobalErrorSource;
 use super::FileBrowser;
 use crate::commands::file_operation_driver_task;
 use crate::model::{
-    AdvancedNewFolderAfter, BrowserViewMode, IconGridExpansionMigration, Message, NavigationMode,
+    AdvancedNewFolderAfter, BrowserViewMode, DestructiveActionConfirmation,
+    IconGridExpansionMigration, Message, NavigationMode,
 };
 use crate::operation_history::{
     path_after_completed_migrations, CompletedPathMigration, FileOperationCompletion,
@@ -320,27 +321,47 @@ impl FileBrowser {
             }
             None => Task::none(),
         };
+        // 删掉后从目录里消失的路径。放不进回收站的还在原地，同 Nautilus 问要不要永久删除。
+        let removed_file_paths = match (completed_operation.as_ref(), &completion) {
+            (
+                Some(QueuedFileOperation::Trash { paths }),
+                FileOperationCompletion::Succeeded(FileOperationOutcome::Trash {
+                    untrashable, ..
+                }),
+            ) => {
+                if !untrashable.is_empty() {
+                    self.request_destructive_action_confirmation(
+                        DestructiveActionConfirmation::DeleteUntrashable {
+                            paths: untrashable.clone(),
+                        },
+                    );
+                }
+                Some(
+                    paths
+                        .iter()
+                        .filter(|path| !untrashable.contains(path))
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                )
+            }
+            (
+                Some(QueuedFileOperation::DeletePermanently { paths }),
+                FileOperationCompletion::Succeeded(_),
+            ) => Some(paths.clone()),
+            _ => None,
+        };
         let deletion_focus_task = if completed_successfully {
-            self.focus_after_file_operation_removal(completed_operation.as_ref())
+            self.focus_after_file_operation_removal(
+                completed_operation.as_ref(),
+                removed_file_paths.as_deref(),
+            )
         } else {
             Task::none()
         };
 
         let path_migration_task = self.migrate_paths_after_file_operation(&completion);
-        if completed_successfully {
-            if let Some(removed_paths) =
-                completed_operation
-                    .as_ref()
-                    .and_then(|operation| match operation {
-                        QueuedFileOperation::Trash { paths }
-                        | QueuedFileOperation::DeletePermanently { paths } => {
-                            Some(paths.as_slice())
-                        }
-                        _ => None,
-                    })
-            {
-                self.reconcile_icon_grid_removed_paths(removed_paths);
-            }
+        if let Some(removed_paths) = &removed_file_paths {
+            self.reconcile_icon_grid_removed_paths(removed_paths);
         }
         match &completion {
             FileOperationCompletion::Succeeded(outcome) => {
@@ -692,18 +713,18 @@ impl FileBrowser {
     fn focus_after_file_operation_removal(
         &mut self,
         operation: Option<&QueuedFileOperation>,
+        removed_file_paths: Option<&[PathBuf]>,
     ) -> Task<Message> {
         if self.search_workspace.is_some() {
             return Task::none();
+        }
+        if let Some(paths) = removed_file_paths {
+            return self.focus_after_removed_file_operation_paths(paths);
         }
         let Some(operation) = operation else {
             return Task::none();
         };
         match operation {
-            QueuedFileOperation::Trash { paths }
-            | QueuedFileOperation::DeletePermanently { paths } => {
-                self.focus_after_removed_file_operation_paths(paths)
-            }
             QueuedFileOperation::DeleteTrashEntries { entries }
             | QueuedFileOperation::Restore { entries } => {
                 let removed_paths = entries

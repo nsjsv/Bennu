@@ -342,6 +342,14 @@ fn dynamic_translation(text: &str) -> Option<String> {
     {
         return Some(format!("要永久删除 {item_count} 吗？此操作无法撤销。"));
     }
+    if let Some(item_count) = text
+        .strip_suffix(" can't be moved to Trash here. Delete permanently? This cannot be undone.")
+        .and_then(translated_item_count)
+    {
+        return Some(format!(
+            "{item_count}无法放入这里的回收站。要永久删除吗？此操作无法撤销。"
+        ));
+    }
     if let Some(size) = text.strip_prefix("Maximum content extraction: ") {
         return Some(format!("最大内容提取大小：{size}"));
     }

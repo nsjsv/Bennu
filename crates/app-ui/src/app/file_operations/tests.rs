@@ -828,13 +828,57 @@ fn successful_trash_focuses_next_entry_after_keyboard_selection() {
     drop(browser.accept_file_operation_finished(
         task_id,
         FileOperationCompletion::Succeeded(FileOperationOutcome::Trash {
-            paths: vec![deleted],
             entries: Vec::new(),
+            untrashable: Vec::new(),
         }),
     ));
 
     assert_eq!(browser.selected, Some(next.clone()));
     assert_eq!(browser.selected_paths, HashSet::from([next]));
+}
+
+#[test]
+fn untrashable_items_stay_selected_and_ask_to_delete_permanently() {
+    let (mut browser, _) = FileBrowser::new(config::default_user_config());
+    let trashed = PathBuf::from("/workspace/trashed.txt");
+    let kept = PathBuf::from("/workspace/kept.txt");
+    browser.entries = [&trashed, &kept]
+        .into_iter()
+        .map(|path| {
+            file_core::DirectoryEntry::new(
+                path.clone(),
+                file_core::FileKind::File,
+                file_core::EntryMetadata::default(),
+                false,
+                false,
+                false,
+            )
+        })
+        .collect::<Vec<_>>()
+        .into();
+    browser.select_path(kept.clone());
+    let task_id = queued_task_id(browser.operation_queue.enqueue(QueuedFileOperation::Trash {
+        paths: vec![trashed, kept.clone()],
+    }));
+
+    drop(browser.accept_file_operation_finished(
+        task_id,
+        FileOperationCompletion::Succeeded(FileOperationOutcome::Trash {
+            entries: Vec::new(),
+            untrashable: vec![kept.clone()],
+        }),
+    ));
+
+    assert_eq!(browser.selected, Some(kept.clone()));
+    assert!(matches!(
+        &browser.destructive_action_confirmation,
+        Some(DestructiveActionConfirmation::DeleteUntrashable { paths }) if paths == &vec![kept.clone()]
+    ));
+    drop(browser.confirm_destructive_action());
+    assert!(browser.operation_queue.tasks().iter().any(|task| matches!(
+        &task.operation,
+        QueuedFileOperation::DeletePermanently { paths } if paths == &vec![kept.clone()]
+    )));
 }
 
 #[test]

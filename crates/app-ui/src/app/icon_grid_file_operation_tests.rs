@@ -211,8 +211,8 @@ fn successful_trash_prunes_deleted_icon_grid_branch_before_reload() {
     drop(browser.accept_file_operation_finished(
         task_id,
         FileOperationCompletion::Succeeded(FileOperationOutcome::Trash {
-            paths: vec![branch.clone()],
             entries: Vec::new(),
+            untrashable: Vec::new(),
         }),
     ));
 

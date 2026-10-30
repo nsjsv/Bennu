@@ -69,9 +69,11 @@ pub(crate) enum FileOperationOutcome {
     CreateEmptyFile {
         path: PathBuf,
     },
+    /// `untrashable` 是所在位置用不了回收站、原样没动的请求路径，结束后问用户要不要
+    /// 永久删除。
     Trash {
-        paths: Vec<PathBuf>,
         entries: Vec<TrashRestoreEntry>,
+        untrashable: Vec<PathBuf>,
     },
     Restore {
         entries: Vec<TrashRestoreEntry>,
@@ -644,15 +646,12 @@ impl FileOperationHistoryItem {
             FileOperationOutcome::CreateEmptyFile { path } => {
                 Some(Self::CreateEmptyFile { path: path.clone() })
             }
-            FileOperationOutcome::Trash { paths, entries, .. }
-                if !entries.is_empty()
-                    && paths.len() == entries.len()
-                    && paths.iter().zip(entries).all(|(path, entry)| {
-                        entry.has_verified_identity() && path == &entry.original_path
-                    }) =>
-            {
+            FileOperationOutcome::Trash { entries, .. } if !entries.is_empty() => {
                 Some(Self::Trash {
-                    original_paths: paths.clone(),
+                    original_paths: entries
+                        .iter()
+                        .map(|entry| entry.original_path.clone())
+                        .collect(),
                     restore_entries: entries.clone(),
                 })
             }

@@ -182,6 +182,11 @@ fn translates_known_dynamic_text() {
         ("Copy to 备份", "复制到备份"),
         ("Create link to /mnt/data", "创建链接到/mnt/data"),
         ("Move to Trash", "移到回收站"),
+        ("Can't Move to Trash", "无法放入回收站"),
+        (
+            "2 items can't be moved to Trash here. Delete permanently? This cannot be undone.",
+            "2 个项目无法放入这里的回收站。要永久删除吗？此操作无法撤销。",
+        ),
     ] {
         assert_eq!(translate(UiLanguage::Chinese, text), expected);
     }

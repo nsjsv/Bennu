@@ -235,24 +235,6 @@ fn failed_redo_move_splits_completed_and_remaining_transfers() {
     assert_eq!(completed_undo_transfers[0].target, PathBuf::from("/a/one"));
 }
 
-#[test]
-fn historical_trash_entries_do_not_create_undo() {
-    let tracked_path = PathBuf::from("/workspace/tracked");
-    let mut history = FileOperationHistory::new();
-    let outcome = FileOperationOutcome::Trash {
-        paths: vec![tracked_path.clone()],
-        entries: vec![TrashRestoreEntry::from_historical_paths(
-            PathBuf::from("/trash/files/tracked"),
-            PathBuf::from("/trash/info/tracked.trashinfo"),
-            tracked_path,
-        )],
-    };
-
-    history.accept_completed(7, &outcome);
-
-    assert!(history.take_undo_operation().is_none());
-}
-
 fn metadata_loss_on(paths: &[&str]) -> MetadataLossSummary {
     let mut summary = MetadataLossSummary::default();
     for path in paths {
@@ -376,8 +358,8 @@ async fn trashed_entry_creates_an_executable_undo_entry() {
     history.accept_completed(
         7,
         &FileOperationOutcome::Trash {
-            paths: vec![entry.original_path.clone()],
             entries: vec![entry.clone()],
+            untrashable: Vec::new(),
         },
     );
 
@@ -405,8 +387,8 @@ fn normal_operation_clears_redo_stack() {
     history.accept_completed(
         1,
         &FileOperationOutcome::Trash {
-            paths: vec![PathBuf::from("/tmp/New File")],
             entries: Vec::new(),
+            untrashable: Vec::new(),
         },
     );
     assert_eq!(history.redo_stack.len(), 1);

@@ -226,7 +226,8 @@ impl FileBrowser {
                     self.enqueue_file_operation(QueuedFileOperation::DeleteTrashEntries { entries })
                 }
             }
-            DestructiveActionConfirmation::DeletePermanently { paths } => {
+            DestructiveActionConfirmation::DeletePermanently { paths }
+            | DestructiveActionConfirmation::DeleteUntrashable { paths } => {
                 if paths.is_empty() {
                     Task::none()
                 } else {

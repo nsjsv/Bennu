@@ -1108,6 +1108,7 @@ pub(crate) struct FileDropPrompt {
 pub(crate) enum DestructiveActionConfirmation {
     DeleteTrashEntries { entries: Vec<TrashRestoreEntry> },
     DeletePermanently { paths: Vec<PathBuf> },
+    DeleteUntrashable { paths: Vec<PathBuf> },
     EmptyTrash,
 }
 

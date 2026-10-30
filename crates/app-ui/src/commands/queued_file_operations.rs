@@ -531,17 +531,26 @@ async fn run_queued_trash(
 ) -> Result<FileOperationOutcome, String> {
     let total = paths.len();
     let mut entries = Vec::new();
-    let mut tracked_paths = Vec::new();
-    for (index, path) in paths.iter().enumerate() {
+    let mut untrashable = Vec::new();
+    for (index, path) in paths.into_iter().enumerate() {
         controls
             .wait_until_running()
             .await
             .map_err(|error| error.to_string())?;
-        let entry = file_core::trash_path(path, controls.cancellation_token())
-            .await
-            .map_err(|error| error.to_string())?;
-        tracked_paths.push(entry.original_path.clone());
-        entries.push(entry);
+        match file_core::trash_path(&path, controls.cancellation_token()).await {
+            Ok(entry) => entries.push(entry),
+            Err(FileError::TrashUnavailable { reason, .. }) => {
+                tracing::warn!(
+                    target: "app_ui::file_operations",
+                    event = "trash_unavailable",
+                    path = %path.display(),
+                    %reason,
+                    "item cannot be moved to Trash; asking to delete it permanently"
+                );
+                untrashable.push(path);
+            }
+            Err(error) => return Err(error.to_string()),
+        }
         send_file_operation_progress(
             output,
             task_id,
@@ -554,8 +563,8 @@ async fn run_queued_trash(
     }
 
     Ok(FileOperationOutcome::Trash {
-        paths: tracked_paths,
         entries,
+        untrashable,
     })
 }
 

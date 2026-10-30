@@ -79,33 +79,38 @@ pub(super) fn error_notification_panel(error: &str, generation: u64) -> Element<
 pub(super) fn destructive_action_confirmation_panel(
     confirmation: &DestructiveActionConfirmation,
 ) -> Element<'_, Message> {
+    let item_label = |item_count: usize| {
+        if item_count == 1 {
+            "1 item".to_owned()
+        } else {
+            format!("{item_count} items")
+        }
+    };
     let (title, body, confirm_label) = match confirmation {
-        DestructiveActionConfirmation::DeleteTrashEntries { entries } => {
-            let item_count = entries.len();
-            let item_label = if item_count == 1 {
-                "1 item".to_owned()
-            } else {
-                format!("{item_count} items")
-            };
-            (
-                "Delete Permanently?",
-                format!("Delete {item_label} from Trash permanently? This cannot be undone."),
-                "Delete Permanently",
-            )
-        }
-        DestructiveActionConfirmation::DeletePermanently { paths } => {
-            let item_count = paths.len();
-            let item_label = if item_count == 1 {
-                "1 item".to_owned()
-            } else {
-                format!("{item_count} items")
-            };
-            (
-                "Delete Permanently?",
-                format!("Delete {item_label} permanently? This cannot be undone."),
-                "Delete Permanently",
-            )
-        }
+        DestructiveActionConfirmation::DeleteTrashEntries { entries } => (
+            "Delete Permanently?",
+            format!(
+                "Delete {} from Trash permanently? This cannot be undone.",
+                item_label(entries.len())
+            ),
+            "Delete Permanently",
+        ),
+        DestructiveActionConfirmation::DeletePermanently { paths } => (
+            "Delete Permanently?",
+            format!(
+                "Delete {} permanently? This cannot be undone.",
+                item_label(paths.len())
+            ),
+            "Delete Permanently",
+        ),
+        DestructiveActionConfirmation::DeleteUntrashable { paths } => (
+            "Can't Move to Trash",
+            format!(
+                "{} can't be moved to Trash here. Delete permanently? This cannot be undone.",
+                item_label(paths.len())
+            ),
+            "Delete Permanently",
+        ),
         DestructiveActionConfirmation::EmptyTrash => (
             "Empty Trash?",
             "Delete all items in Trash permanently? This cannot be undone.".to_owned(),

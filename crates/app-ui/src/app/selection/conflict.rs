@@ -1,6 +1,4 @@
-use std::collections::HashSet;
-use std::ffi::OsStr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use file_core::TransferConflictStrategy;
 use iced::Task;
@@ -8,8 +6,8 @@ use iced::Task;
 use crate::app::FileBrowser;
 use crate::commands::{check_transfer_conflicts_command, expand_transfer_conflict_merges_command};
 use crate::model::{
-    entry_exists, unique_duplicated_directory_name, unique_duplicated_file_name, Message,
-    TransferConflictChoice, TransferConflictItem, TransferConflictMode, TransferConflictState,
+    Message, TransferConflictChoice, TransferConflictItem, TransferConflictMode,
+    TransferConflictState,
 };
 use crate::operation_queue::{QueuedFileOperation, QueuedTransfer};
 
@@ -70,27 +68,21 @@ impl FileBrowser {
             return Task::none();
         };
 
-        match choice {
-            // 「合并」改写传输集本身,交给展开命令复查;「保留两者」改写冲突
-            // 传输的目标名。两者都不走按策略标记的旧路径。
+        let strategy = match choice {
+            // 「合并」改写传输集本身,交给展开命令复查,不按策略标记。
             TransferConflictChoice::Merge => {
                 return self.expand_transfer_conflict_merges(state);
             }
-            TransferConflictChoice::KeepBoth => apply_keep_both_choice(&mut state),
-            TransferConflictChoice::Replace
-            | TransferConflictChoice::Skip
-            | TransferConflictChoice::Rename => {
-                let apply_to_all = state.apply_to_all;
-                loop {
-                    if state.current_conflict().is_none() {
-                        break;
-                    };
-                    apply_conflict_choice(&mut state, choice);
-                    state.current_index += 1;
-                    if !apply_to_all {
-                        break;
-                    }
-                }
+            TransferConflictChoice::Replace => TransferConflictStrategy::Replace,
+            TransferConflictChoice::Skip => TransferConflictStrategy::Skip,
+            TransferConflictChoice::KeepBoth => TransferConflictStrategy::KeepBoth,
+        };
+        let apply_to_all = state.apply_to_all;
+        while let Some(conflict) = state.current_conflict().cloned() {
+            mark_conflict_strategy(&mut state, &conflict, strategy);
+            state.current_index += 1;
+            if !apply_to_all {
+                break;
             }
         }
 
@@ -208,72 +200,16 @@ fn mergeable_conflict_pairs(state: &TransferConflictState) -> Vec<(PathBuf, Path
         .collect()
 }
 
-fn apply_conflict_choice(state: &mut TransferConflictState, choice: TransferConflictChoice) {
-    let Some(conflict) = state.current_conflict().cloned() else {
-        return;
-    };
-    let Some(position) = conflict_transfer_position(state, &conflict) else {
-        return;
-    };
-
-    let strategy = match choice {
-        TransferConflictChoice::Replace => TransferConflictStrategy::Replace,
-        TransferConflictChoice::Skip => TransferConflictStrategy::Skip,
-        TransferConflictChoice::Rename => TransferConflictStrategy::KeepBoth,
-        // 这两个选择有专用解析路径,不会走到按策略标记的旧路径。
-        TransferConflictChoice::KeepBoth | TransferConflictChoice::Merge => return,
-    };
-    state.transfers[position].conflict_strategy = strategy;
-}
-
-/// 「保留两者」:不改策略,直接把冲突传输的目标改成共享命名规则起出的新名;
-/// 批内其余传输目标与磁盘占用都算占用,保证一次应用全部时互不撞名。
-fn apply_keep_both_choice(state: &mut TransferConflictState) {
-    let apply_to_all = state.apply_to_all;
-    let mut reserved: HashSet<PathBuf> = state
-        .transfers
-        .iter()
-        .map(|transfer| transfer.target.clone())
-        .collect();
-    loop {
-        let Some(conflict) = state.current_conflict().cloned() else {
-            break;
-        };
-        let Some(position) = conflict_transfer_position(state, &conflict) else {
-            break;
-        };
-        let parent = conflict
-            .target
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_default();
-        let target = keep_both_transfer_target(&conflict, |candidate| {
-            entry_exists(&parent.join(candidate)) || reserved.contains(&parent.join(candidate))
-        });
-        reserved.insert(target.clone());
-        state.transfers[position].target = target;
-        state.current_index += 1;
-        if !apply_to_all {
-            break;
-        }
-    }
-}
-
-/// 「保留两者」的命名:源是目录就整体追加「副本」,否则插在扩展名前;
-/// 占用判定由调用方注入(磁盘 + 批内保留),纯函数便于锁定命名规则。
-fn keep_both_transfer_target(
+/// 冲突的处理方式记在对应传输上,由引擎提交时执行(保留两者在提交时原子续编号,
+/// 批内同名、磁盘新出现的同名都由那一次 no-replace 判定兜住)。
+fn mark_conflict_strategy(
+    state: &mut TransferConflictState,
     conflict: &TransferConflictItem,
-    is_taken: impl FnMut(&OsStr) -> bool,
-) -> PathBuf {
-    let target = &conflict.target;
-    let parent = target.parent().map(Path::to_path_buf).unwrap_or_default();
-    let name = target.file_name().unwrap_or_else(|| OsStr::new("item"));
-    let unique = if conflict.source_metadata.is_directory {
-        unique_duplicated_directory_name(name, is_taken)
-    } else {
-        unique_duplicated_file_name(name, is_taken)
-    };
-    parent.join(unique)
+    strategy: TransferConflictStrategy,
+) {
+    if let Some(position) = conflict_transfer_position(state, conflict) {
+        state.transfers[position].conflict_strategy = strategy;
+    }
 }
 
 fn conflict_transfer_position(
@@ -323,68 +259,73 @@ mod tests {
         }
     }
 
+    /// 带任务存储的浏览器（复制走可恢复管线），冲突对话框停在 `state` 上。
+    fn browser_resolving(state: TransferConflictState) -> (FileBrowser, tempfile::TempDir) {
+        let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+        let state_directory = tempfile::tempdir().unwrap();
+        crate::operation_queue::test_persistence::attach_store(
+            &mut browser.operation_queue,
+            file_operation_store::TaskQueueStore::new(state_directory.path().join("state.sqlite"))
+                .unwrap(),
+        );
+        browser.transfer_conflict = Some(state);
+        (browser, state_directory)
+    }
+
+    fn queued_copy_transfers(browser: &FileBrowser) -> Vec<QueuedTransfer> {
+        match &browser.operation_queue.tasks()[0].operation {
+            crate::operation_queue::QueuedFileOperation::Copy { transfers, .. } => {
+                transfers.clone()
+            }
+            other => panic!("expected a copy, got {other:?}"),
+        }
+    }
+
     #[test]
-    fn transfer_conflict_rename_uses_keep_both_strategy() {
-        let mut state = test_conflict_state();
+    fn keep_both_leaves_the_target_for_the_engine_to_number() {
+        let (mut browser, _state) = browser_resolving(test_conflict_state());
 
-        apply_conflict_choice(&mut state, TransferConflictChoice::Rename);
+        drop(browser.resolve_transfer_conflict_choice(TransferConflictChoice::KeepBoth));
 
+        assert!(browser.transfer_conflict.is_none());
+        let transfers = queued_copy_transfers(&browser);
+        assert_eq!(transfers[0].target, PathBuf::from("/target/report.txt"));
         assert_eq!(
-            state.transfers[0].conflict_strategy,
+            transfers[0].conflict_strategy,
             TransferConflictStrategy::KeepBoth
         );
     }
 
     #[test]
-    fn keep_both_renames_file_target_with_duplicate_suffix() {
-        let conflict = file_conflict("/source/report.txt", "/target/report.txt");
-        let taken = |candidate: &OsStr| candidate == OsStr::new("report副本.txt");
-
-        let target = keep_both_transfer_target(&conflict, taken);
-
-        assert_eq!(target, PathBuf::from("/target/report副本 2.txt"));
-    }
-
-    #[test]
-    fn keep_both_renames_directory_target_by_tail_suffix() {
-        let conflict = TransferConflictItem {
-            source: PathBuf::from("/source/photos"),
-            target: PathBuf::from("/target/photos"),
-            source_metadata: TransferConflictMetadata {
-                is_directory: true,
-                len: 3,
-                modified: None,
-            },
-            target_metadata: TransferConflictMetadata {
-                is_directory: true,
-                len: 3,
-                modified: None,
-            },
-        };
-
-        let target = keep_both_transfer_target(&conflict, |_| false);
-
-        assert_eq!(target, PathBuf::from("/target/photos副本"));
-    }
-
-    #[test]
-    fn keep_both_choice_rewrites_conflicting_transfer_target_only() {
+    fn keep_both_for_all_marks_every_conflict_and_nothing_else() {
         let mut state = test_conflict_state();
-        let untouched = QueuedTransfer::new(
+        state.transfers.push(QueuedTransfer::new(
+            PathBuf::from("/source/notes.txt"),
+            PathBuf::from("/target/notes.txt"),
+        ));
+        state
+            .conflicts
+            .push(file_conflict("/source/notes.txt", "/target/notes.txt"));
+        state.transfers.push(QueuedTransfer::new(
             PathBuf::from("/source/other.txt"),
             PathBuf::from("/target/other.txt"),
-        );
-        state.transfers.push(untouched);
+        ));
+        state.apply_to_all = true;
+        let (mut browser, _state) = browser_resolving(state);
 
-        apply_keep_both_choice(&mut state);
+        drop(browser.resolve_transfer_conflict_choice(TransferConflictChoice::KeepBoth));
 
+        let strategies = queued_copy_transfers(&browser)
+            .iter()
+            .map(|transfer| transfer.conflict_strategy)
+            .collect::<Vec<_>>();
         assert_eq!(
-            state.transfers[0].target,
-            PathBuf::from("/target/report副本.txt")
-        );
-        assert_eq!(
-            state.transfers[1].target,
-            PathBuf::from("/target/other.txt")
+            strategies,
+            [
+                TransferConflictStrategy::KeepBoth,
+                TransferConflictStrategy::KeepBoth,
+                TransferConflictStrategy::Fail
+            ]
         );
     }
 

@@ -55,10 +55,7 @@ pub(crate) use address_bar::{
     PaneAddressBarTransition, PaneAddressEditingSession,
 };
 mod entry_naming;
-pub(crate) use entry_naming::{
-    entry_exists, unique_duplicated_directory_name, unique_duplicated_file_name,
-    GATHERED_FOLDER_BASE_NAME,
-};
+pub(crate) use entry_naming::GATHERED_FOLDER_BASE_NAME;
 mod browser_panes;
 pub(crate) use browser_panes::{
     empty_directory_entry_snapshot, retain_direct_entry_selection, BrowserPane, BrowserPaneId,
@@ -1132,8 +1129,7 @@ pub(crate) enum TransferConflictMode {
 pub(crate) enum TransferConflictChoice {
     Replace,
     Skip,
-    Rename,
-    /// 保留两者:按共享命名规则给冲突目标起新名后原样传输。
+    /// 保留两者:目标不变,策略设为 KeepBoth,由复制/移动引擎在提交时续编号为「名字 2」。
     KeepBoth,
     /// 合并:仅源与目标都是目录时提供,展开成子项传输后再逐项走冲突流程。
     Merge,

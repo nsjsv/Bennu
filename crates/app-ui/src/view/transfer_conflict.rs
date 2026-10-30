@@ -81,11 +81,6 @@ pub(super) fn transfer_conflict_panel<'a>(
         ),
         Space::new().width(Length::Fill),
         conflict_action_button(
-            "Rename",
-            Message::TransferConflictChoiceSelected(TransferConflictChoice::Rename),
-        ),
-        Space::new().width(Length::Fill),
-        conflict_action_button(
             "Keep Both",
             Message::TransferConflictChoiceSelected(TransferConflictChoice::KeepBoth),
         ),

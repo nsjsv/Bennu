@@ -9,9 +9,11 @@ use notify::{Event, EventKind};
 use rusqlite::Connection;
 use tempfile::tempdir;
 
+use crate::crawler::IndexMaintenanceProgress;
 use crate::model::{IndexHealth, IndexPhase, IndexStatus, SearchQuery};
 use crate::SearchIndexConfig;
 
+use super::watch_coverage::WatchCoverageHealth;
 use super::*;
 
 /// 测试把搜索路径偏好文件放在数据库旁边,不碰真实的用户配置目录。
@@ -19,15 +21,13 @@ fn search_path_file_beside(database_path: &Path) -> PathBuf {
     database_path.with_file_name("search-paths.json")
 }
 
-fn snapshot_for(phase: DaemonLifecyclePhase) -> DaemonLifecycleSnapshot {
-    DaemonLifecycleSnapshot {
-        phase,
-        maintenance_backend_failure: None,
-        recovery_rebuild_message: None,
-        watch_coverage_health: WatchCoverageHealth::Healthy,
-        visible_indexed_files: 41,
-        capabilities: Vec::new(),
-        path_configuration: Default::default(),
+fn idle_snapshot() -> DaemonLifecycleSnapshot {
+    DaemonLifecycleSnapshot::starting(41, None, SearchPathConfigurationPhase::Ready)
+}
+
+fn incomplete(message: &str) -> IndexCompleteness {
+    IndexCompleteness::Incomplete {
+        message: message.to_owned(),
     }
 }
 
@@ -60,16 +60,13 @@ fn semantic_sidecar_failure_keeps_the_last_effective_configuration() {
         ..SearchIndexConfig::default()
     };
 
-    let runtime =
+    let (runtime, phase) =
         initialize_path_configuration(&database, &base_config, Some(&home), Some(&path_store))
             .unwrap();
 
     assert_eq!(runtime.desired.revision, 4);
     assert_eq!(runtime.effective, effective);
-    assert!(matches!(
-        runtime.phase,
-        SearchPathConfigurationPhase::Failed { .. }
-    ));
+    assert!(matches!(phase, SearchPathConfigurationPhase::Failed { .. }));
     assert_eq!(
         runtime.policy.unwrap().preferences(),
         &effective.preferences
@@ -101,7 +98,7 @@ fn startup_repairs_an_older_sidecar_from_the_newer_effective_snapshot() {
         })
         .unwrap();
 
-    let runtime = initialize_path_configuration(
+    let (runtime, _) = initialize_path_configuration(
         &database,
         &SearchIndexConfig::default(),
         Some(&home),
@@ -570,57 +567,122 @@ fn wait_for_global_hit_count(database_path: &Path, terms: &str, expected: usize)
 
 #[test]
 fn public_status_keeps_visible_count_independent_of_phase() {
-    let cases = [
-        (DaemonLifecyclePhase::Starting, IndexPhase::Starting),
-        (
-            DaemonLifecyclePhase::Checking {
-                checked_entries: 128,
-                changed_entries: 3,
-            },
+    let mut snapshot = idle_snapshot();
+    let mut observed = vec![snapshot.to_index_status()];
+    snapshot.begin_work();
+    for progress in [
+        IndexMaintenanceProgress::Checking {
+            checked_entries: 128,
+            changed_entries: 3,
+        },
+        IndexMaintenanceProgress::Crawling {
+            scanned_entries: 9,
+            current_scope: PathBuf::from("/tmp/root"),
+        },
+        IndexMaintenanceProgress::Applying {
+            pending_mutations: 4,
+        },
+    ] {
+        snapshot.apply_progress(progress);
+        observed.push(snapshot.to_index_status());
+    }
+    snapshot.finish_work(IndexCompleteness::Complete);
+    observed.push(snapshot.to_index_status());
+    snapshot.finish_work(incomplete("database unavailable"));
+    observed.push(snapshot.to_index_status());
+
+    assert_eq!(
+        observed
+            .iter()
+            .map(|status| status.phase.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            IndexPhase::Starting,
             IndexPhase::Checking {
                 checked_entries: 128,
                 changed_entries: 3,
-            },
-        ),
-        (
-            DaemonLifecyclePhase::Crawling {
-                scanned_entries: 9,
-                current_scope: PathBuf::from("/tmp/root"),
             },
             IndexPhase::Crawling {
                 scanned_entries: 9,
                 current_scope: PathBuf::from("/tmp/root"),
             },
-        ),
-        (
-            DaemonLifecyclePhase::Applying {
-                pending_mutations: 4,
-            },
             IndexPhase::Applying {
                 pending_mutations: 4,
             },
-        ),
-        (DaemonLifecyclePhase::Complete, IndexPhase::Complete),
-        (
-            DaemonLifecyclePhase::Failed {
-                message: "database unavailable".to_owned(),
-            },
+            IndexPhase::Complete,
             IndexPhase::Failed {
                 message: "database unavailable".to_owned(),
             },
-        ),
-    ];
+        ]
+    );
+    assert!(observed
+        .iter()
+        .all(|status| status.visible_indexed_files == 41));
+}
 
-    for (phase, expected) in cases {
-        let status = snapshot_for(phase).to_index_status();
-        assert_eq!(status.phase, expected);
-        assert_eq!(status.visible_indexed_files, 41);
-    }
+#[test]
+fn an_incomplete_index_stays_failed_through_later_successful_work() {
+    let mut snapshot = idle_snapshot();
+    snapshot.publish_path_configuration(
+        1,
+        &VersionedSearchPathPreferences {
+            revision: 1,
+            preferences: SearchPathPreferences::default(),
+        },
+    );
+    snapshot.begin_applying_path_configuration();
+
+    snapshot.begin_work();
+    snapshot.finish_work(incomplete("disk unavailable"));
+    let failed = IndexPhase::Failed {
+        message: "disk unavailable".to_owned(),
+    };
+    assert_eq!(snapshot.to_index_status().phase, failed);
+    // 全量检查失败不是搜索位置应用失败：保持"正在应用"，等重查。
+    assert_eq!(
+        snapshot.path_configuration_phase(),
+        &SearchPathConfigurationPhase::Applying
+    );
+
+    // 队列推导出的完整度仍是不完整时，一次成功的小更新改不了它。
+    snapshot.begin_work();
+    snapshot.record_visible_count(42);
+    snapshot.finish_work(incomplete("disk unavailable"));
+    assert_eq!(snapshot.to_index_status().phase, failed);
+    assert_eq!(
+        snapshot.path_configuration_phase(),
+        &SearchPathConfigurationPhase::Applying
+    );
+
+    snapshot.begin_work();
+    snapshot.finish_work(IndexCompleteness::Complete);
+    assert_eq!(snapshot.to_index_status().phase, IndexPhase::Complete);
+    assert_eq!(
+        snapshot.path_configuration_phase(),
+        &SearchPathConfigurationPhase::Ready
+    );
+}
+
+#[test]
+fn cancelled_work_leaves_the_last_known_completeness() {
+    let mut snapshot = idle_snapshot();
+    snapshot.finish_work(incomplete("disk unavailable"));
+    snapshot.begin_work();
+    snapshot.end_cancelled_work();
+
+    assert_eq!(
+        snapshot.to_index_status().phase,
+        IndexPhase::Failed {
+            message: "disk unavailable".to_owned(),
+        }
+    );
 }
 
 #[test]
 fn watch_degradation_does_not_replace_active_phase() {
-    let mut snapshot = snapshot_for(DaemonLifecyclePhase::Checking {
+    let mut snapshot = idle_snapshot();
+    snapshot.begin_work();
+    snapshot.apply_progress(IndexMaintenanceProgress::Checking {
         checked_entries: 7,
         changed_entries: 1,
     });
@@ -648,7 +710,8 @@ fn watch_degradation_does_not_replace_active_phase() {
 
 #[test]
 fn hybrid_watch_budget_patrol_is_a_healthy_maintenance_mode() {
-    let mut snapshot = snapshot_for(DaemonLifecyclePhase::Complete);
+    let mut snapshot = idle_snapshot();
+    snapshot.finish_work(IndexCompleteness::Complete);
     snapshot.update_watch_coverage(WatchCoverageHealth::HybridPatrol { root_count: 1 });
 
     assert_eq!(snapshot.to_index_status().health, IndexHealth::Healthy);
@@ -736,7 +799,11 @@ fn repeated_overflow_while_recovering_keeps_one_follow_up() {
 
     pending.request_dirty_roots(vec![root.clone()], now + DIRTY_ROOT_QUIET_WINDOW);
     let first_finished_at = now + DIRTY_ROOT_QUIET_WINDOW;
-    pending.finish_dirty_root_recovery(std::slice::from_ref(&root), true, first_finished_at);
+    pending.finish_dirty_root_recovery(
+        std::slice::from_ref(&root),
+        &WorkOutcome::Succeeded,
+        first_finished_at,
+    );
 
     assert!(pending
         .take_next_work(first_finished_at + DIRTY_ROOT_RETRY_BASE - Duration::from_millis(1))
@@ -759,7 +826,11 @@ fn new_overflow_does_not_shorten_an_existing_recovery_backoff() {
         Some(DaemonWorkRequest::DirtyRootRecovery { .. })
     ));
     pending.request_dirty_roots(vec![root.clone()], first_started_at);
-    pending.finish_dirty_root_recovery(std::slice::from_ref(&root), true, first_started_at);
+    pending.finish_dirty_root_recovery(
+        std::slice::from_ref(&root),
+        &WorkOutcome::Succeeded,
+        first_started_at,
+    );
 
     pending.request_dirty_roots(
         vec![root.clone()],
@@ -779,7 +850,10 @@ fn new_overflow_does_not_shorten_an_existing_recovery_backoff() {
 fn failed_dirty_recovery_uses_capped_backoff() {
     assert_eq!(dirty_root_retry_delay(1), Duration::from_secs(30));
     assert_eq!(dirty_root_retry_delay(2), Duration::from_secs(60));
+    assert_eq!(dirty_root_retry_delay(6), Duration::from_secs(16 * 60));
+    assert_eq!(dirty_root_retry_delay(7), Duration::from_secs(30 * 60));
     assert_eq!(dirty_root_retry_delay(100), DIRTY_ROOT_RETRY_MAX);
+    assert_eq!(DIRTY_ROOT_RETRY_MAX, Duration::from_secs(30 * 60));
 }
 
 #[test]
@@ -816,7 +890,7 @@ fn watch_budget_patrol_queue_allows_only_one_pending_or_running_batch() {
         .try_enqueue_watch_budget_patrol(std::slice::from_ref(&second))
         .unwrap());
 
-    queue.finish_watch_budget_patrol();
+    queue.finish_work(&WorkOutcome::Succeeded);
 
     assert!(!queue
         .try_enqueue_watch_budget_patrol(std::slice::from_ref(&second))
@@ -890,10 +964,19 @@ fn corruption_recovery_stays_degraded_until_the_rebuild_cycle_finishes() {
         IndexHealth::Degraded { ref message }
             if message.contains("SQLITE_NOTADB") && message.contains("quarantine")
     ));
+    // 重建没完成（还有位置失败待重查）时，损坏提示不能消失。
     core.lifecycle_snapshot
         .lock()
         .unwrap()
-        .finish_watch_cycle(0);
+        .finish_work(incomplete("rebuild failed"));
+    assert!(matches!(
+        core.current_status().health,
+        IndexHealth::Degraded { .. }
+    ));
+    core.lifecycle_snapshot
+        .lock()
+        .unwrap()
+        .finish_work(IndexCompleteness::Complete);
     assert_eq!(core.current_status().health, IndexHealth::Healthy);
     core.shutdown().unwrap();
 }

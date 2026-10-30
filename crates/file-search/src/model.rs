@@ -369,13 +369,15 @@ pub enum IndexPhase {
     Applying {
         pending_mutations: u64,
     },
+    /// 空闲，且没有检查失败、等着重查的搜索位置。
     Complete,
+    /// 空闲，但有搜索位置检查失败、正在退避重查，索引对它不完整；之后别的工作成功也不会变回 `Complete`。
     Failed {
         message: String,
     },
 }
 
-/// 持续监听与维护链路的健康度；索引任务自身失败由 `IndexPhase::Failed` 承载。
+/// 持续监听与维护链路的健康度；检查失败导致的索引不完整由 `IndexPhase::Failed` 承载。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IndexHealth {
     Healthy,

@@ -2,14 +2,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 
-use crate::crawler::IndexMaintenanceProgress;
 use crate::database::{SearchDatabase, SearchRootMount};
 use crate::error::{SearchError, SearchResult};
 use crate::logging::bounded_search_log_detail;
 use crate::managed_search_index::ManagedSearchIndex;
 use crate::model::{
-    ExtractorCapability, IndexHealth, IndexPhase, IndexStatus, SearchPathConfigurationPhase,
-    SearchPathConfigurationStatus, SearchRootAvailability, SearchRootStatus,
+    IndexStatus, SearchPathConfigurationPhase, SearchRootAvailability, SearchRootStatus,
 };
 use crate::search_path_store::SearchPathStore;
 use crate::writer::IndexWriter;
@@ -18,6 +16,7 @@ use crate::{
 };
 
 mod bounded_paths;
+mod lifecycle;
 mod maintenance;
 mod memory;
 mod root_mount;
@@ -28,195 +27,19 @@ mod work_queue;
 
 #[cfg(test)]
 use self::bounded_paths::BoundedPathSet;
+use self::lifecycle::DaemonLifecycleSnapshot;
+#[cfg(test)]
+use self::lifecycle::IndexCompleteness;
 use self::maintenance::{spawn_active_maintenance, stop_active_maintenance, ActiveMaintenance};
 use self::root_mount::observe_root_mounts;
-use self::watch_coverage::WatchCoverageHealth;
 #[cfg(test)]
 use self::watch_ingress::changed_paths_from_watch_event;
 #[cfg(test)]
 use self::work_queue::{
-    dirty_root_retry_delay, PendingDaemonWork, DIRTY_ROOT_QUIET_WINDOW, DIRTY_ROOT_RETRY_BASE,
-    DIRTY_ROOT_RETRY_MAX,
+    dirty_root_retry_delay, PendingDaemonWork, WorkOutcome, DIRTY_ROOT_QUIET_WINDOW,
+    DIRTY_ROOT_RETRY_BASE, DIRTY_ROOT_RETRY_MAX,
 };
 use self::work_queue::{DaemonWorkQueue, DaemonWorkRequest};
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum DaemonLifecyclePhase {
-    Starting,
-    Checking {
-        checked_entries: u64,
-        changed_entries: u64,
-    },
-    Crawling {
-        scanned_entries: u64,
-        current_scope: PathBuf,
-    },
-    Applying {
-        pending_mutations: u64,
-    },
-    Complete,
-    Failed {
-        message: String,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct DaemonLifecycleSnapshot {
-    phase: DaemonLifecyclePhase,
-    maintenance_backend_failure: Option<String>,
-    recovery_rebuild_message: Option<String>,
-    watch_coverage_health: WatchCoverageHealth,
-    visible_indexed_files: u64,
-    capabilities: Vec<ExtractorCapability>,
-    path_configuration: SearchPathConfigurationStatus,
-}
-
-impl DaemonLifecycleSnapshot {
-    fn starting(
-        visible_indexed_files: u64,
-        recovery_rebuild_message: Option<String>,
-        path_configuration: SearchPathConfigurationStatus,
-    ) -> Self {
-        Self {
-            phase: DaemonLifecyclePhase::Starting,
-            maintenance_backend_failure: None,
-            recovery_rebuild_message,
-            watch_coverage_health: WatchCoverageHealth::Healthy,
-            visible_indexed_files,
-            capabilities: Vec::new(),
-            path_configuration,
-        }
-    }
-
-    fn begin_checking(&mut self) {
-        self.phase = DaemonLifecyclePhase::Checking {
-            checked_entries: 0,
-            changed_entries: 0,
-        };
-    }
-
-    fn apply_progress(&mut self, progress: IndexMaintenanceProgress) {
-        self.phase = match progress {
-            IndexMaintenanceProgress::Checking {
-                checked_entries,
-                changed_entries,
-            } => DaemonLifecyclePhase::Checking {
-                checked_entries,
-                changed_entries,
-            },
-            IndexMaintenanceProgress::Crawling {
-                scanned_entries,
-                current_scope,
-            } => DaemonLifecyclePhase::Crawling {
-                scanned_entries,
-                current_scope,
-            },
-            IndexMaintenanceProgress::Applying { pending_mutations } => {
-                DaemonLifecyclePhase::Applying { pending_mutations }
-            }
-        };
-    }
-
-    fn finish_watch_cycle(&mut self, visible_indexed_files: u64) {
-        self.phase = DaemonLifecyclePhase::Complete;
-        self.visible_indexed_files = visible_indexed_files;
-        self.recovery_rebuild_message = None;
-        if matches!(
-            self.path_configuration.phase,
-            SearchPathConfigurationPhase::Applying
-        ) && self.path_configuration.desired_revision
-            == self.path_configuration.effective_revision
-        {
-            self.path_configuration.phase = SearchPathConfigurationPhase::Ready;
-        }
-    }
-
-    fn record_error(&mut self, message: String) {
-        self.phase = DaemonLifecyclePhase::Failed {
-            message: message.clone(),
-        };
-        if matches!(
-            self.path_configuration.phase,
-            SearchPathConfigurationPhase::Applying
-        ) {
-            self.path_configuration.phase = SearchPathConfigurationPhase::Failed { message };
-        }
-    }
-
-    fn record_maintenance_failure(&mut self, message: String) {
-        self.maintenance_backend_failure = Some(message);
-    }
-
-    fn clear_maintenance_failure(&mut self) {
-        self.maintenance_backend_failure = None;
-    }
-
-    fn update_watch_coverage(&mut self, health: WatchCoverageHealth) {
-        self.watch_coverage_health = health;
-    }
-
-    fn update_path_configuration(&mut self, status: SearchPathConfigurationStatus) {
-        self.path_configuration = status;
-    }
-
-    fn to_index_status(&self) -> IndexStatus {
-        let phase = match &self.phase {
-            DaemonLifecyclePhase::Starting => IndexPhase::Starting,
-            DaemonLifecyclePhase::Checking {
-                checked_entries,
-                changed_entries,
-            } => IndexPhase::Checking {
-                checked_entries: *checked_entries,
-                changed_entries: *changed_entries,
-            },
-            DaemonLifecyclePhase::Crawling {
-                scanned_entries,
-                current_scope,
-            } => IndexPhase::Crawling {
-                scanned_entries: *scanned_entries,
-                current_scope: current_scope.clone(),
-            },
-            DaemonLifecyclePhase::Applying { pending_mutations } => IndexPhase::Applying {
-                pending_mutations: *pending_mutations,
-            },
-            DaemonLifecyclePhase::Complete => IndexPhase::Complete,
-            DaemonLifecyclePhase::Failed { message } => IndexPhase::Failed {
-                message: message.clone(),
-            },
-        };
-        IndexStatus {
-            phase,
-            visible_indexed_files: self.visible_indexed_files,
-            health: self.index_health(),
-            capabilities: self.capabilities.clone(),
-            path_configuration: self.path_configuration.clone(),
-        }
-    }
-
-    fn index_health(&self) -> IndexHealth {
-        if let Some(message) = self.maintenance_backend_failure.as_ref() {
-            return IndexHealth::Error {
-                message: message.clone(),
-            };
-        }
-        match &self.watch_coverage_health {
-            WatchCoverageHealth::Healthy | WatchCoverageHealth::HybridPatrol { .. } => {
-                match self.recovery_rebuild_message.as_ref() {
-                    Some(message) => IndexHealth::Degraded {
-                        message: message.clone(),
-                    },
-                    None => IndexHealth::Healthy,
-                }
-            }
-            WatchCoverageHealth::Incomplete { message, .. } => IndexHealth::Degraded {
-                message: message.clone(),
-            },
-            WatchCoverageHealth::BackendUnavailable { message } => IndexHealth::Error {
-                message: message.clone(),
-            },
-        }
-    }
-}
 
 #[derive(Debug, Default, PartialEq, Eq)]
 enum DaemonRuntimePhase {
@@ -241,7 +64,6 @@ struct PathConfigurationRuntime {
     mounts: Vec<SearchRootMount>,
     unavailable_roots: Vec<PathBuf>,
     pending_frontiers: Vec<PathBuf>,
-    phase: SearchPathConfigurationPhase,
 }
 
 pub struct SearchDaemonCore {
@@ -291,20 +113,25 @@ impl SearchDaemonCore {
             );
             message
         });
-        let path_configuration = initialize_path_configuration(
+        let (path_configuration, path_configuration_phase) = initialize_path_configuration(
             &managed_index_open.database,
             &config,
             home_directory.as_deref(),
             path_store.as_ref(),
         )?;
-        let path_status = path_configuration_status(&path_configuration);
         let writer = Arc::new(IndexWriter::spawn(managed_index_open.database));
         let known_count = writer.count()?;
-        let lifecycle_snapshot = Arc::new(Mutex::new(DaemonLifecycleSnapshot::starting(
+        let mut lifecycle = DaemonLifecycleSnapshot::starting(
             known_count,
             recovery_rebuild_message,
-            path_status,
-        )));
+            path_configuration_phase,
+        );
+        lifecycle.publish_path_configuration(
+            path_configuration.desired.revision,
+            &path_configuration.effective,
+        );
+        lifecycle.publish_root_statuses(configured_root_statuses(&path_configuration));
+        let lifecycle_snapshot = Arc::new(Mutex::new(lifecycle));
 
         Ok(Self {
             database_path,
@@ -341,27 +168,17 @@ impl SearchDaemonCore {
 
     pub fn current_status(&self) -> IndexStatus {
         let _ = self.reconcile_root_mounts();
-        let roots = {
-            let path_configuration = self
+        let roots = configured_root_statuses(
+            &self
                 .path_configuration
                 .lock()
-                .expect("search path configuration mutex poisoned");
-            path_configuration
-                .policy
-                .as_ref()
-                .map(|policy| {
-                    root_statuses(
-                        &policy.preferences().custom_roots,
-                        &path_configuration.mounts,
-                    )
-                })
-                .unwrap_or_default()
-        };
+                .expect("search path configuration mutex poisoned"),
+        );
         let mut lifecycle = self
             .lifecycle_snapshot
             .lock()
             .expect("search daemon lifecycle mutex poisoned");
-        lifecycle.path_configuration.roots = roots;
+        lifecycle.publish_root_statuses(roots);
         lifecycle.to_index_status()
     }
 
@@ -411,7 +228,10 @@ impl SearchDaemonCore {
                 )));
             }
             let retrying_failed_desired = matches!(
-                path_configuration.phase,
+                self.lifecycle_snapshot
+                    .lock()
+                    .expect("search daemon lifecycle mutex poisoned")
+                    .path_configuration_phase(),
                 SearchPathConfigurationPhase::Failed { .. }
             ) && path_configuration.desired.preferences
                 == normalized_preferences;
@@ -444,8 +264,11 @@ impl SearchDaemonCore {
                 .lock()
                 .expect("search path configuration mutex poisoned");
             path_configuration.desired = next.clone();
-            path_configuration.phase = SearchPathConfigurationPhase::Applying;
-            self.update_path_configuration_status(path_configuration_status(&path_configuration));
+            self.publish_path_configuration(&path_configuration);
+            self.lifecycle_snapshot
+                .lock()
+                .expect("search daemon lifecycle mutex poisoned")
+                .begin_applying_path_configuration();
         }
 
         let policy_change = previous_policy
@@ -479,8 +302,7 @@ impl SearchDaemonCore {
             path_configuration.mounts = mounts;
             path_configuration.unavailable_roots = unavailable_roots;
             path_configuration.pending_frontiers = policy_change.newly_included_frontiers.clone();
-            path_configuration.phase = SearchPathConfigurationPhase::Applying;
-            self.update_path_configuration_status(path_configuration_status(&path_configuration));
+            self.publish_path_configuration(&path_configuration);
             Ok(())
         })?;
         Ok(next)
@@ -544,8 +366,8 @@ impl SearchDaemonCore {
             path_configuration.mounts = mounts;
             path_configuration.unavailable_roots = current_unavailable;
             path_configuration.effective_config = next_effective_config;
-            path_configuration.phase = SearchPathConfigurationPhase::Applying;
-            self.update_path_configuration_status(path_configuration_status(&path_configuration));
+            // 挂载变化不是应用搜索位置：只刷新各位置的状态，"正在应用/失败/就绪"不动。
+            self.publish_path_configuration(&path_configuration);
             Ok(())
         })
     }
@@ -555,6 +377,8 @@ impl SearchDaemonCore {
         SearchDatabase::open_read_only(&self.database_path)
     }
 
+    /// 给服务运行时的测试模拟维护后端坏掉。
+    #[cfg(test)]
     pub(crate) fn record_maintenance_failure(&self, message: String) {
         self.lifecycle_snapshot
             .lock()
@@ -581,23 +405,24 @@ impl SearchDaemonCore {
         maintenance_outcome.and(writer_outcome)
     }
 
-    fn update_path_configuration_status(&self, status: SearchPathConfigurationStatus) {
-        self.lifecycle_snapshot
+    fn publish_path_configuration(&self, path_configuration: &PathConfigurationRuntime) {
+        let roots = configured_root_statuses(path_configuration);
+        let mut lifecycle = self
+            .lifecycle_snapshot
             .lock()
-            .expect("search daemon lifecycle mutex poisoned")
-            .update_path_configuration(status);
+            .expect("search daemon lifecycle mutex poisoned");
+        lifecycle.publish_path_configuration(
+            path_configuration.desired.revision,
+            &path_configuration.effective,
+        );
+        lifecycle.publish_root_statuses(roots);
     }
 
     fn fail_path_configuration(&self, message: String) {
-        let status = {
-            let mut path_configuration = self
-                .path_configuration
-                .lock()
-                .expect("search path configuration mutex poisoned");
-            path_configuration.phase = SearchPathConfigurationPhase::Failed { message };
-            path_configuration_status(&path_configuration)
-        };
-        self.update_path_configuration_status(status);
+        self.lifecycle_snapshot
+            .lock()
+            .expect("search daemon lifecycle mutex poisoned")
+            .fail_path_configuration(message);
     }
 
     /// 唯一启动维护的地方。配置和新纳入的前沿目录都从路径配置里取，调用方没有参数可传错；
@@ -650,18 +475,16 @@ impl SearchDaemonCore {
                     .lock()
                     .expect("search daemon runtime mutex poisoned")
                     .phase = DaemonRuntimePhase::Created;
-                self.record_maintenance_failure(error.to_string());
+                let mut lifecycle = self
+                    .lifecycle_snapshot
+                    .lock()
+                    .expect("search daemon lifecycle mutex poisoned");
+                lifecycle.record_maintenance_failure(error.to_string());
                 // 新的搜索位置要靠维护才能生效，维护起不来就是这次应用失败了。
-                let applying = matches!(
-                    self.path_configuration
-                        .lock()
-                        .expect("search path configuration mutex poisoned")
-                        .phase,
-                    SearchPathConfigurationPhase::Applying
-                );
-                if applying {
-                    self.fail_path_configuration(error.to_string());
+                if lifecycle.path_configuration_phase() == &SearchPathConfigurationPhase::Applying {
+                    lifecycle.fail_path_configuration(error.to_string());
                 }
+                drop(lifecycle);
                 Err(error)
             }
         }
@@ -712,23 +535,25 @@ fn initialize_path_configuration(
     base_config: &SearchIndexConfig,
     home_directory: Option<&Path>,
     path_store: Option<&SearchPathStore>,
-) -> SearchResult<PathConfigurationRuntime> {
+) -> SearchResult<(PathConfigurationRuntime, SearchPathConfigurationPhase)> {
     let Some(home_directory) = home_directory else {
         let initial = VersionedSearchPathPreferences {
             revision: 0,
             preferences: SearchPathPreferences::default(),
         };
         let effective = database.initialize_search_path_configuration(&initial)?;
-        return Ok(PathConfigurationRuntime {
-            desired: effective.clone(),
-            effective,
-            policy: None,
-            effective_config: base_config.clone(),
-            mounts: Vec::new(),
-            unavailable_roots: Vec::new(),
-            pending_frontiers: Vec::new(),
-            phase: SearchPathConfigurationPhase::Ready,
-        });
+        return Ok((
+            PathConfigurationRuntime {
+                desired: effective.clone(),
+                effective,
+                policy: None,
+                effective_config: base_config.clone(),
+                mounts: Vec::new(),
+                unavailable_roots: Vec::new(),
+                pending_frontiers: Vec::new(),
+            },
+            SearchPathConfigurationPhase::Ready,
+        ));
     };
     let existing = database.read_search_path_configuration()?;
     let previous_mounts = database.read_search_root_mounts()?;
@@ -803,16 +628,18 @@ fn initialize_path_configuration(
         )?;
     }
     let unavailable = unavailable_roots_for_mounts(policy.roots(), &mounts, &observed_mounts);
-    Ok(PathConfigurationRuntime {
-        desired: desired.clone(),
-        effective: desired,
-        effective_config: index_config_for_policy(base_config, &policy, unavailable.clone()),
-        policy: Some(policy),
-        mounts,
-        unavailable_roots: unavailable,
-        pending_frontiers: policy_change.newly_included_frontiers,
-        phase: SearchPathConfigurationPhase::Ready,
-    })
+    Ok((
+        PathConfigurationRuntime {
+            desired: desired.clone(),
+            effective: desired,
+            effective_config: index_config_for_policy(base_config, &policy, unavailable.clone()),
+            policy: Some(policy),
+            mounts,
+            unavailable_roots: unavailable,
+            pending_frontiers: policy_change.newly_included_frontiers,
+        },
+        SearchPathConfigurationPhase::Ready,
+    ))
 }
 
 fn failed_path_configuration_runtime(
@@ -822,7 +649,7 @@ fn failed_path_configuration_runtime(
     effective: Option<VersionedSearchPathPreferences>,
     previous_mounts: Vec<SearchRootMount>,
     message: String,
-) -> SearchResult<PathConfigurationRuntime> {
+) -> SearchResult<(PathConfigurationRuntime, SearchPathConfigurationPhase)> {
     let Some(effective) = effective else {
         return Err(SearchError::InvalidConfiguration(message));
     };
@@ -835,16 +662,18 @@ fn failed_path_configuration_runtime(
         retained_root_mounts(policy.roots(), &previous_mounts, &observed_mounts)
     };
     let unavailable = unavailable_roots_for_mounts(policy.roots(), &mounts, &observed_mounts);
-    Ok(PathConfigurationRuntime {
-        desired: desired.unwrap_or_else(|| effective.clone()),
-        effective,
-        effective_config: index_config_for_policy(base_config, &policy, unavailable.clone()),
-        policy: Some(policy),
-        mounts,
-        unavailable_roots: unavailable,
-        pending_frontiers: Vec::new(),
-        phase: SearchPathConfigurationPhase::Failed { message },
-    })
+    Ok((
+        PathConfigurationRuntime {
+            desired: desired.unwrap_or_else(|| effective.clone()),
+            effective,
+            effective_config: index_config_for_policy(base_config, &policy, unavailable.clone()),
+            policy: Some(policy),
+            mounts,
+            unavailable_roots: unavailable,
+            pending_frontiers: Vec::new(),
+        },
+        SearchPathConfigurationPhase::Failed { message },
+    ))
 }
 
 fn index_config_for_policy(
@@ -955,10 +784,10 @@ fn invalidated_roots(
     invalidated
 }
 
-fn path_configuration_status(
+fn configured_root_statuses(
     path_configuration: &PathConfigurationRuntime,
-) -> SearchPathConfigurationStatus {
-    let roots = path_configuration
+) -> Vec<SearchRootStatus> {
+    path_configuration
         .policy
         .as_ref()
         .map(|policy| {
@@ -967,14 +796,7 @@ fn path_configuration_status(
                 &path_configuration.mounts,
             )
         })
-        .unwrap_or_default();
-    SearchPathConfigurationStatus {
-        desired_revision: path_configuration.desired.revision,
-        effective_revision: path_configuration.effective.revision,
-        effective_preferences: path_configuration.effective.preferences.clone(),
-        phase: path_configuration.phase.clone(),
-        roots,
-    }
+        .unwrap_or_default()
 }
 
 fn root_statuses(roots: &[PathBuf], expected_mounts: &[SearchRootMount]) -> Vec<SearchRootStatus> {

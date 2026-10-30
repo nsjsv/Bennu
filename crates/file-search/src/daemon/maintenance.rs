@@ -10,10 +10,10 @@ use crate::logging::bounded_search_log_detail;
 use crate::writer::IndexWriter;
 use crate::{SearchIndexConfig, SearchIndexer};
 
+use super::lifecycle::DaemonLifecycleSnapshot;
 use super::memory::release_allocator_idle_pages;
 use super::watch_ingress::{DaemonWatchIngress, DaemonWatchIngressBootstrap};
-use super::work_queue::{DaemonWorkQueue, DaemonWorkRequest};
-use super::DaemonLifecycleSnapshot;
+use super::work_queue::{DaemonWorkQueue, DaemonWorkRequest, WorkOutcome};
 
 pub(super) struct ActiveMaintenance {
     work_queue: Arc<DaemonWorkQueue>,
@@ -103,13 +103,7 @@ fn spawn_daemon_worker(
                 if matches!(work_request, DaemonWorkRequest::Shutdown) {
                     break;
                 }
-                let dirty_roots = match &work_request {
-                    DaemonWorkRequest::DirtyRootRecovery { roots } => Some(roots.clone()),
-                    _ => None,
-                };
-                let watch_budget_patrol =
-                    matches!(&work_request, DaemonWorkRequest::WatchBudgetPatrol { .. });
-                let succeeded = run_index_maintenance(
+                let outcome = run_index_maintenance(
                     &runtime,
                     Arc::clone(&writer),
                     &config,
@@ -118,11 +112,15 @@ fn spawn_daemon_worker(
                     work_request,
                     &crawl_cancellation,
                 );
-                if watch_budget_patrol {
-                    work_queue.finish_watch_budget_patrol();
-                }
-                if let Some(roots) = dirty_roots {
-                    work_queue.finish_dirty_root_recovery(&roots, succeeded);
+                let completeness = work_queue.finish_work(&outcome);
+                let mut snapshot = lifecycle_snapshot
+                    .lock()
+                    .expect("search daemon lifecycle mutex poisoned");
+                match outcome {
+                    WorkOutcome::Cancelled => snapshot.end_cancelled_work(),
+                    WorkOutcome::Succeeded | WorkOutcome::Failed { .. } => {
+                        snapshot.finish_work(completeness)
+                    }
                 }
             }
             Ok(())
@@ -140,7 +138,7 @@ fn run_index_maintenance(
     directory_snapshot_epoch: &AtomicU64,
     work_request: DaemonWorkRequest,
     crawl_cancellation: &CancellationToken,
-) -> bool {
+) -> WorkOutcome {
     let work_label = work_request_label(&work_request);
     let high_frequency_maintenance = matches!(
         &work_request,
@@ -149,7 +147,7 @@ fn run_index_maintenance(
     lifecycle_snapshot
         .lock()
         .expect("search daemon lifecycle mutex poisoned")
-        .begin_checking();
+        .begin_work();
 
     let maintenance_outcome = runtime.block_on(async {
         let indexer = SearchIndexer::new(Arc::clone(&writer), config.clone());
@@ -205,9 +203,6 @@ fn run_index_maintenance(
         Ok::<_, SearchError>((stats, total))
     });
     release_allocator_idle_pages();
-    let mut snapshot = lifecycle_snapshot
-        .lock()
-        .expect("search daemon lifecycle mutex poisoned");
     match maintenance_outcome {
         Ok((stats, total)) => {
             if stats.directory_snapshots_changed > 0 {
@@ -242,14 +237,17 @@ fn run_index_maintenance(
                     "index maintenance completed"
                 );
             }
-            snapshot.finish_watch_cycle(total);
-            true
+            lifecycle_snapshot
+                .lock()
+                .expect("search daemon lifecycle mutex poisoned")
+                .record_visible_count(total);
+            WorkOutcome::Succeeded
         }
-        Err(_) if crawl_cancellation.is_cancelled() => false,
-        Err(SearchError::Cancelled) => false,
+        Err(_) if crawl_cancellation.is_cancelled() => WorkOutcome::Cancelled,
+        Err(SearchError::Cancelled) => WorkOutcome::Cancelled,
         Err(error) => {
-            let error = error.to_string();
-            let log_error = bounded_search_log_detail(&error);
+            let message = error.to_string();
+            let log_error = bounded_search_log_detail(&message);
             tracing::error!(
                 target: "file_search::daemon",
                 event = "index_maintenance_failed",
@@ -257,8 +255,7 @@ fn run_index_maintenance(
                 error = %log_error,
                 "index maintenance failed"
             );
-            snapshot.record_error(error);
-            false
+            WorkOutcome::Failed { message }
         }
     }
 }

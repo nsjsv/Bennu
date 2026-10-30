@@ -7,10 +7,11 @@ use crate::error::SearchResult;
 
 use super::bounded_paths::BoundedPathSet;
 use super::daemon_core_stopped;
+use super::lifecycle::IndexCompleteness;
 
 pub(super) const DIRTY_ROOT_QUIET_WINDOW: Duration = Duration::from_secs(2);
 pub(super) const DIRTY_ROOT_RETRY_BASE: Duration = Duration::from_secs(30);
-pub(super) const DIRTY_ROOT_RETRY_MAX: Duration = Duration::from_secs(15 * 60);
+pub(super) const DIRTY_ROOT_RETRY_MAX: Duration = Duration::from_secs(30 * 60);
 pub(super) const WATCH_BUDGET_PATROL_INTERVAL: Duration = Duration::from_secs(5);
 const MAX_PENDING_LOCAL_PATHS: usize = 2_048;
 const MAX_PENDING_LOCAL_PATH_BYTES: usize = 1_048_576;
@@ -27,12 +28,25 @@ pub(super) enum DaemonWorkRequest {
     Shutdown,
 }
 
+/// 一件维护工作的结论。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum WorkOutcome {
+    Succeeded,
+    Failed {
+        message: String,
+    },
+    /// 被重启或关机打断，没有结论。
+    Cancelled,
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct DirtyRootRecoveryState {
     ready_at: Instant,
     retry_attempts: u32,
     running: bool,
     dirtied_while_running: bool,
+    /// 这个位置最近一次检查失败的原因；有它就说明索引对这个位置不完整，直到重查成功。
+    failure: Option<String>,
 }
 
 #[derive(Debug)]
@@ -128,6 +142,7 @@ impl PendingDaemonWork {
                         retry_attempts: 0,
                         running: false,
                         dirtied_while_running: false,
+                        failure: None,
                     },
                 );
                 continue;
@@ -183,21 +198,70 @@ impl PendingDaemonWork {
     pub(super) fn finish_dirty_root_recovery(
         &mut self,
         roots: &[PathBuf],
-        succeeded: bool,
+        outcome: &WorkOutcome,
         now: Instant,
     ) {
         for root in roots {
             let Some(state) = self.dirty_roots.get_mut(root) else {
                 continue;
             };
-            if succeeded && !state.dirtied_while_running {
-                self.dirty_roots.remove(root);
-                continue;
-            }
             state.running = false;
+            match outcome {
+                WorkOutcome::Succeeded if !state.dirtied_while_running => {
+                    self.dirty_roots.remove(root);
+                    continue;
+                }
+                WorkOutcome::Succeeded => state.failure = None,
+                WorkOutcome::Failed { message } => state.failure = Some(message.clone()),
+                WorkOutcome::Cancelled => continue,
+            }
             state.retry_attempts = state.retry_attempts.saturating_add(1);
             state.ready_at = now + dirty_root_retry_delay(state.retry_attempts);
         }
+    }
+
+    /// 一件非重查的工作失败：它涉及的位置排进退避重查，并记下原因。
+    pub(super) fn record_failed_roots(&mut self, roots: Vec<PathBuf>, message: &str, now: Instant) {
+        for root in roots {
+            let state = self
+                .dirty_roots
+                .entry(root)
+                .or_insert(DirtyRootRecoveryState {
+                    ready_at: now,
+                    retry_attempts: 0,
+                    running: false,
+                    dirtied_while_running: false,
+                    failure: None,
+                });
+            state.retry_attempts = state.retry_attempts.saturating_add(1);
+            state.ready_at = now + dirty_root_retry_delay(state.retry_attempts);
+            state.failure = Some(message.to_owned());
+        }
+    }
+
+    pub(super) fn index_completeness(&self) -> IndexCompleteness {
+        match self
+            .dirty_roots
+            .values()
+            .find_map(|state| state.failure.as_ref())
+        {
+            Some(message) => IndexCompleteness::Incomplete {
+                message: message.clone(),
+            },
+            None => IndexCompleteness::Complete,
+        }
+    }
+
+    fn roots_containing(&self, paths: &[PathBuf]) -> Vec<PathBuf> {
+        let mut roots = Vec::new();
+        for path in paths {
+            for root in self.containing_roots(path) {
+                if !roots.contains(&root) {
+                    roots.push(root);
+                }
+            }
+        }
+        roots
     }
 
     pub(super) fn next_deadline(&self) -> Option<Instant> {
@@ -229,20 +293,48 @@ enum PendingPathClass {
     CoverageRepair,
 }
 
+/// 30 秒起，每次翻倍，封顶 30 分钟（30 秒 × 2⁶ 已超过上限）。
 pub(super) fn dirty_root_retry_delay(retry_attempts: u32) -> Duration {
-    let multiplier = 1_u32
-        .checked_shl(retry_attempts.saturating_sub(1).min(5))
-        .unwrap_or(32);
+    let multiplier = 1_u32 << retry_attempts.saturating_sub(1).min(6);
     DIRTY_ROOT_RETRY_BASE
-        .checked_mul(multiplier)
-        .unwrap_or(DIRTY_ROOT_RETRY_MAX)
+        .saturating_mul(multiplier)
         .min(DIRTY_ROOT_RETRY_MAX)
+}
+
+/// worker 正在做的那件工作，结束时由 `finish_work` 交回，决定失败要记到哪些位置上。
+#[derive(Debug)]
+enum InFlightWork {
+    FullCheck,
+    Local { roots: Vec<PathBuf> },
+    WatchBudgetPatrol { roots: Vec<PathBuf> },
+    DirtyRootRecovery { roots: Vec<PathBuf> },
+}
+
+impl InFlightWork {
+    fn of(work_request: &DaemonWorkRequest, pending_work: &PendingDaemonWork) -> Option<Self> {
+        Some(match work_request {
+            DaemonWorkRequest::StartupCheck => Self::FullCheck,
+            DaemonWorkRequest::ChangedPaths {
+                changed_paths: paths,
+            }
+            | DaemonWorkRequest::CoverageRepair { scopes: paths } => Self::Local {
+                roots: pending_work.roots_containing(paths),
+            },
+            DaemonWorkRequest::WatchBudgetPatrol { directories } => Self::WatchBudgetPatrol {
+                roots: pending_work.roots_containing(directories),
+            },
+            DaemonWorkRequest::DirtyRootRecovery { roots } => Self::DirtyRootRecovery {
+                roots: roots.clone(),
+            },
+            DaemonWorkRequest::Shutdown => return None,
+        })
+    }
 }
 
 #[derive(Debug)]
 struct DaemonWorkQueueState {
     accepting_new_work: bool,
-    watch_budget_patrol_running: bool,
+    in_flight: Option<InFlightWork>,
     watch_budget_patrol_not_before: Option<Instant>,
     pending_work: PendingDaemonWork,
 }
@@ -258,7 +350,7 @@ impl DaemonWorkQueue {
         Self {
             state: Mutex::new(DaemonWorkQueueState {
                 accepting_new_work: true,
-                watch_budget_patrol_running: false,
+                in_flight: None,
                 watch_budget_patrol_not_before: None,
                 pending_work: PendingDaemonWork::new(roots),
             }),
@@ -324,7 +416,11 @@ impl DaemonWorkQueue {
         if !state.accepting_new_work {
             return Err(daemon_core_stopped());
         }
-        if state.watch_budget_patrol_running
+        let patrol_running = matches!(
+            state.in_flight,
+            Some(InFlightWork::WatchBudgetPatrol { .. })
+        );
+        if patrol_running
             || state.pending_work.watch_budget_patrol_directories.is_some()
             || state
                 .watch_budget_patrol_not_before
@@ -352,29 +448,50 @@ impl DaemonWorkQueue {
         self.ready_signal.notify_one();
     }
 
-    pub(super) fn finish_watch_budget_patrol(&self) {
-        self.finish_watch_budget_patrol_at(Instant::now());
+    /// 交回 `wait_for_next_work` 取走的那件工作的结论，返回此后索引的完整度。
+    pub(super) fn finish_work(&self, outcome: &WorkOutcome) -> IndexCompleteness {
+        self.finish_work_at(outcome, Instant::now())
     }
 
-    fn finish_watch_budget_patrol_at(&self, now: Instant) {
-        let mut state = self
+    fn finish_work_at(&self, outcome: &WorkOutcome, now: Instant) -> IndexCompleteness {
+        let mut guard = self
             .state
             .lock()
             .expect("search daemon work queue mutex poisoned");
-        state.watch_budget_patrol_running = false;
-        state.watch_budget_patrol_not_before = Some(now + WATCH_BUDGET_PATROL_INTERVAL);
+        let state = &mut *guard;
+        let in_flight = state
+            .in_flight
+            .take()
+            .expect("finished search daemon work was never taken");
+        let failure = match outcome {
+            WorkOutcome::Failed { message } => Some(message.as_str()),
+            WorkOutcome::Succeeded | WorkOutcome::Cancelled => None,
+        };
+        let pending_work = &mut state.pending_work;
+        match in_flight {
+            InFlightWork::FullCheck => {
+                if let Some(message) = failure {
+                    let roots = pending_work.roots.clone();
+                    pending_work.record_failed_roots(roots, message, now);
+                }
+            }
+            InFlightWork::Local { roots } => {
+                if let Some(message) = failure {
+                    pending_work.record_failed_roots(roots, message, now);
+                }
+            }
+            InFlightWork::WatchBudgetPatrol { roots } => {
+                if let Some(message) = failure {
+                    pending_work.record_failed_roots(roots, message, now);
+                }
+                state.watch_budget_patrol_not_before = Some(now + WATCH_BUDGET_PATROL_INTERVAL);
+            }
+            InFlightWork::DirtyRootRecovery { roots } => {
+                pending_work.finish_dirty_root_recovery(&roots, outcome, now);
+            }
+        }
         self.ready_signal.notify_one();
-    }
-
-    pub(super) fn finish_dirty_root_recovery(&self, roots: &[PathBuf], succeeded: bool) {
-        let mut state = self
-            .state
-            .lock()
-            .expect("search daemon work queue mutex poisoned");
-        state
-            .pending_work
-            .finish_dirty_root_recovery(roots, succeeded, Instant::now());
-        self.ready_signal.notify_one();
+        state.pending_work.index_completeness()
     }
 
     pub(super) fn wait_for_next_work(&self) -> DaemonWorkRequest {
@@ -384,9 +501,7 @@ impl DaemonWorkQueue {
             .expect("search daemon work queue mutex poisoned");
         loop {
             if let Some(work_request) = state.pending_work.take_next_work(Instant::now()) {
-                if matches!(work_request, DaemonWorkRequest::WatchBudgetPatrol { .. }) {
-                    state.watch_budget_patrol_running = true;
-                }
+                state.in_flight = InFlightWork::of(&work_request, &state.pending_work);
                 return work_request;
             }
             match state.pending_work.next_deadline() {
@@ -449,7 +564,7 @@ mod tests {
             queue.wait_for_next_work(),
             DaemonWorkRequest::WatchBudgetPatrol { .. }
         ));
-        queue.finish_watch_budget_patrol_at(started_at);
+        queue.finish_work_at(&WorkOutcome::Succeeded, started_at);
 
         assert!(!queue
             .try_enqueue_watch_budget_patrol_at(
@@ -463,5 +578,138 @@ mod tests {
                 started_at + WATCH_BUDGET_PATROL_INTERVAL,
             )
             .unwrap());
+    }
+
+    fn failed(message: &str) -> WorkOutcome {
+        WorkOutcome::Failed {
+            message: message.to_owned(),
+        }
+    }
+
+    fn incomplete(message: &str) -> IndexCompleteness {
+        IndexCompleteness::Incomplete {
+            message: message.to_owned(),
+        }
+    }
+
+    /// 不等真实时间：直接在内部队列上按给定时刻取工作，并像 `wait_for_next_work` 一样记下在做什么。
+    fn take_work_at(queue: &DaemonWorkQueue, now: Instant) -> Option<DaemonWorkRequest> {
+        let mut guard = queue.state.lock().unwrap();
+        let state = &mut *guard;
+        let work_request = state.pending_work.take_next_work(now)?;
+        state.in_flight = InFlightWork::of(&work_request, &state.pending_work);
+        Some(work_request)
+    }
+
+    #[test]
+    fn a_failed_full_check_stays_incomplete_until_its_retry_succeeds() {
+        let root = PathBuf::from("/root");
+        let queue = DaemonWorkQueue::starting_with_full_check(vec![root.clone()], Vec::new());
+        let failed_at = Instant::now();
+        assert_eq!(
+            take_work_at(&queue, failed_at),
+            Some(DaemonWorkRequest::StartupCheck)
+        );
+        assert_eq!(
+            queue.finish_work_at(&failed("disk unavailable"), failed_at),
+            incomplete("disk unavailable")
+        );
+
+        queue
+            .enqueue(DaemonWorkRequest::ChangedPaths {
+                changed_paths: vec![root.join("note.txt")],
+            })
+            .unwrap();
+        assert!(matches!(
+            take_work_at(&queue, failed_at),
+            Some(DaemonWorkRequest::ChangedPaths { .. })
+        ));
+        // 一次小更新成功，盖不掉全量检查的失败。
+        assert_eq!(
+            queue.finish_work_at(&WorkOutcome::Succeeded, failed_at),
+            incomplete("disk unavailable")
+        );
+
+        let retry_at = failed_at + DIRTY_ROOT_RETRY_BASE;
+        assert_eq!(
+            take_work_at(&queue, retry_at - Duration::from_millis(1)),
+            None
+        );
+        assert_eq!(
+            take_work_at(&queue, retry_at),
+            Some(DaemonWorkRequest::DirtyRootRecovery {
+                roots: vec![root.clone()]
+            })
+        );
+        assert_eq!(
+            queue.finish_work_at(&failed("still unavailable"), retry_at),
+            incomplete("still unavailable")
+        );
+
+        let second_retry_at = retry_at + dirty_root_retry_delay(2);
+        assert_eq!(
+            take_work_at(&queue, second_retry_at),
+            Some(DaemonWorkRequest::DirtyRootRecovery { roots: vec![root] })
+        );
+        assert_eq!(
+            queue.finish_work_at(&WorkOutcome::Succeeded, second_retry_at),
+            IndexCompleteness::Complete
+        );
+    }
+
+    #[test]
+    fn a_failed_local_update_rechecks_only_the_root_it_touched() {
+        let first = PathBuf::from("/first");
+        let second = PathBuf::from("/second");
+        let queue =
+            DaemonWorkQueue::starting_with_full_check(vec![first.clone(), second], Vec::new());
+        let now = Instant::now();
+        assert_eq!(
+            take_work_at(&queue, now),
+            Some(DaemonWorkRequest::StartupCheck)
+        );
+        assert_eq!(
+            queue.finish_work_at(&WorkOutcome::Succeeded, now),
+            IndexCompleteness::Complete
+        );
+
+        for work_request in [
+            DaemonWorkRequest::ChangedPaths {
+                changed_paths: vec![first.join("note.txt")],
+            },
+            DaemonWorkRequest::CoverageRepair {
+                scopes: vec![first.join("folder")],
+            },
+            DaemonWorkRequest::WatchBudgetPatrol {
+                directories: vec![first.join("unwatched")],
+            },
+        ] {
+            queue.enqueue(work_request).unwrap();
+            assert!(take_work_at(&queue, now).is_some());
+            assert_eq!(
+                queue.finish_work_at(&failed("write failed"), now),
+                incomplete("write failed")
+            );
+            let state = queue.state.lock().unwrap();
+            assert_eq!(
+                state.pending_work.dirty_roots.keys().collect::<Vec<_>>(),
+                vec![&first]
+            );
+        }
+    }
+
+    #[test]
+    fn cancelled_work_records_no_failure() {
+        let root = PathBuf::from("/root");
+        let queue = DaemonWorkQueue::starting_with_full_check(vec![root], Vec::new());
+        let now = Instant::now();
+        assert!(take_work_at(&queue, now).is_some());
+
+        assert_eq!(
+            queue.finish_work_at(&WorkOutcome::Cancelled, now),
+            IndexCompleteness::Complete
+        );
+        let state = queue.state.lock().unwrap();
+        assert!(state.pending_work.dirty_roots.is_empty());
     }
 }

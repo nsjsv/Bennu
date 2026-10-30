@@ -10,9 +10,9 @@ use iced::widget::{image, svg};
 use crate::animated_image_preview::AnimatedImagePreview;
 use crate::audio_preview::AudioPreviewRuntime;
 use crate::document_preview::PagedDocumentPreview;
-use crate::operation_progress::active_byte_fraction;
 use crate::sqlite_preview::SqliteDatabasePreview;
 use crate::text_preview::{TextPreviewFormat, TextPreviewLineLimitNotice};
+use file_core::byte_progress::active_byte_fraction;
 
 #[derive(Debug, Clone)]
 pub enum PreviewState {

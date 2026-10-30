@@ -10,9 +10,10 @@ use std::ffi::OsStr;
 use std::path::Path;
 use std::time::SystemTime;
 
+use file_core::byte_progress::active_byte_fraction;
 use file_core::{DirectoryEntry, SortDirection, SortField};
 
-use crate::operation_progress::{active_byte_fraction, TransferEntrySnapshotState};
+use crate::operation_progress::TransferEntrySnapshotState;
 use crate::operation_queue::FileOperationQueue;
 
 /// 目标目录正在传入的顶层条目占位。

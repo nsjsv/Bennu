@@ -7,6 +7,7 @@ pub mod archive;
 pub mod archive_extraction;
 pub mod archive_listing;
 pub mod archive_vfs;
+pub mod byte_progress;
 pub mod checksum;
 pub mod data_dir_migration;
 pub mod directory_metadata;

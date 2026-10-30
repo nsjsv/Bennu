@@ -1,6 +1,5 @@
-// WHY：RemotePreviewDownload::fraction 的字节进度数学随预览模型下沉到
-// 本 crate；app-ui 的文件操作进度条（operation_progress.rs）与传输占位
-// 经 re-export 继续单源消费此实现，不在两侧各留一份。
+// 远程预览下载的进度面板与不定进度轨道。字节进度分数在
+// file_core::byte_progress，文件操作进度条与传输占位共用同一份。
 
 use iced::widget::{column, container, progress_bar, svg, Column, Svg};
 use iced::{Element, Length};
@@ -11,20 +10,8 @@ use crate::formatting::format_file_size;
 use crate::panel_text::readable_text;
 use crate::preview::RemotePreviewDownload;
 
-pub const ACTIVE_PROGRESS_LIMIT: f32 = 0.999;
-
 const INDETERMINATE_DASH_PERIOD: u8 = 16;
 const PREVIEW_ENTRY_NAME_MAX_CHARS: usize = 48;
-
-pub fn active_byte_fraction(completed_bytes: u64, total_bytes: u64) -> Option<f32> {
-    if total_bytes == 0 {
-        return None;
-    }
-    Some(
-        ((completed_bytes.min(total_bytes) as f64 / total_bytes as f64) as f32)
-            .min(ACTIVE_PROGRESS_LIMIT),
-    )
-}
 
 /// 活动中的不定进度轨道（负 dash 偏移动画）。app-ui 的任务队列视图
 /// 经 re-export 消费同一实现。
@@ -96,16 +83,6 @@ pub fn remote_preview_download_panel<Message: 'static>(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn active_byte_fraction_is_unknown_without_a_denominator_and_never_reaches_terminal() {
-        assert_eq!(active_byte_fraction(0, 0), None);
-        assert_eq!(active_byte_fraction(250, 1_000), Some(0.25));
-        assert_eq!(
-            active_byte_fraction(1_000, 1_000),
-            Some(ACTIVE_PROGRESS_LIMIT)
-        );
-    }
 
     #[test]
     fn indeterminate_animation_changes_phase_without_changing_dash_density() {

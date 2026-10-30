@@ -2,11 +2,7 @@ use std::path::PathBuf;
 
 use bennu_state::StoredProgress;
 
-// 纯搬移：字节进度分数与远程下载面板随预览模型下沉 bennu-preview，
-// 此处 re-export 维持 crate::operation_progress::* 调用路径单源
-// （本文件与传输占位行消费分数函数；轨道 SVG 句柄由任务队列视图
-// 经 bennu-preview 路径直接消费）。
-pub(crate) use bennu_preview::operation_progress::active_byte_fraction;
+use file_core::byte_progress::active_byte_fraction;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FileOperationWorkProgress {

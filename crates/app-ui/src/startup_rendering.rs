@@ -207,6 +207,8 @@ impl StartupRenderingEnvironment {
 }
 
 impl StartupRenderingEnvironmentStatus {
+    /// 测试构造启动环境用；正式启动总是按读到的设置推导状态。
+    #[cfg(test)]
     pub(crate) fn ready(environment: StartupRenderingEnvironment) -> Self {
         Self {
             environment,

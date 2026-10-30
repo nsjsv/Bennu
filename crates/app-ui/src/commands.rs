@@ -465,43 +465,87 @@ async fn load_trash(
 async fn load_startup_environment(
     startup_rendering_environment: StartupRenderingEnvironment,
 ) -> StartupEnvironment {
-    startup_trace::mark_once("startup_environment_started");
-    let fallback_rendering_environment = startup_rendering_environment.clone();
-    tokio::task::spawn_blocking(move || {
-        let loaded_app_config = config::load_and_repair_app_config();
-        startup_trace::mark_once("startup_app_config_loaded");
-        let loaded_user_config = config::load_user_config_for_app_config(loaded_app_config.config);
-        startup_trace::mark_once("startup_user_config_loaded");
-        let settings_recoveries = loaded_app_config
+    startup_environment_with(startup_rendering_environment, load_startup_settings).await
+}
+
+/// 启动时只有这一步依赖读设置；它出问题不牵连主目录、数据库位置等真值。
+struct LoadedStartupSettings {
+    user_config: config::UserConfig,
+    settings_recoveries: Vec<config::SettingsRecovery>,
+}
+
+fn load_startup_settings() -> LoadedStartupSettings {
+    let loaded_app_config = config::load_and_repair_app_config();
+    startup_trace::mark_once("startup_app_config_loaded");
+    let loaded_user_config = config::load_user_config_for_app_config(loaded_app_config.config);
+    startup_trace::mark_once("startup_user_config_loaded");
+    LoadedStartupSettings {
+        user_config: loaded_user_config.config,
+        settings_recoveries: loaded_app_config
             .recovery
             .into_iter()
             .chain(loaded_user_config.recovery)
-            .collect();
-        let user_config = loaded_user_config.config;
-        let rendering_environment_status =
-            StartupRenderingEnvironmentStatus::for_loaded_config_with_runtime(
-                user_config.rendering_gpu_preference,
-                &startup_rendering_environment,
-            );
-        StartupEnvironment {
-            home: dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")),
-            system_language: crate::localization::detect_system_language(),
-            user_config,
-            settings_recoveries,
-            state_database_path: config::default_state_database_path(),
-            rendering_environment_status,
-        }
-    })
-    .await
-    .unwrap_or_else(|_| StartupEnvironment {
-        home: PathBuf::from("/"),
-        system_language: config::UiLanguage::English,
-        user_config: config::ui_thread_startup_config(),
-        settings_recoveries: Vec::new(),
-        state_database_path: PathBuf::new(),
-        rendering_environment_status: StartupRenderingEnvironmentStatus::ready(
-            fallback_rendering_environment,
-        ),
+            .collect(),
+    }
+}
+
+async fn startup_environment_with(
+    startup_rendering_environment: StartupRenderingEnvironment,
+    load_settings: impl FnOnce() -> LoadedStartupSettings + Send + 'static,
+) -> StartupEnvironment {
+    startup_trace::mark_once("startup_environment_started");
+    let settings = tokio::task::spawn_blocking(load_settings)
+        .await
+        .unwrap_or_else(|error| settings_after_load_crash(&error.to_string()));
+    let rendering_environment_status =
+        StartupRenderingEnvironmentStatus::for_loaded_config_with_runtime(
+            settings.user_config.rendering_gpu_preference,
+            &startup_rendering_environment,
+        );
+    StartupEnvironment {
+        home: home_directory(),
+        system_language: crate::localization::detect_system_language(),
+        user_config: settings.user_config,
+        settings_recoveries: settings.settings_recoveries,
+        state_database_path: config::default_state_database_path(),
+        rendering_environment_status,
+    }
+}
+
+/// 读设置的任务崩了（程序自身的错误）：设置用默认值，两份设置都按"读不了"处理——
+/// 提示一次、本次不写回，免得默认值覆盖用户原来的设置。
+fn settings_after_load_crash(error: &str) -> LoadedStartupSettings {
+    let log_error = crate::model::sanitized_application_log_detail(error);
+    tracing::error!(
+        target: "app_ui::startup",
+        event = "startup_settings_load_crashed",
+        error = %log_error,
+        "startup settings could not be loaded; using defaults without saving"
+    );
+    LoadedStartupSettings {
+        user_config: config::default_user_config(),
+        settings_recoveries: [
+            config::SettingsSource::Preferences,
+            config::SettingsSource::AppConfig,
+        ]
+        .into_iter()
+        .map(|source| config::SettingsRecovery::Unavailable {
+            source,
+            error: error.to_owned(),
+        })
+        .collect(),
+    }
+}
+
+/// 同 GLib `g_get_home_dir`：$HOME 与用户数据库都取不到时用 "/"，并留一条警告。
+fn home_directory() -> PathBuf {
+    dirs::home_dir().unwrap_or_else(|| {
+        tracing::warn!(
+            target: "app_ui::startup",
+            event = "home_directory_unavailable",
+            "home directory could not be determined; using /"
+        );
+        PathBuf::from("/")
     })
 }
 
@@ -514,10 +558,6 @@ async fn load_operation_store(
     path: PathBuf,
     startup_session_request: Option<StartupSessionPlanRequest>,
 ) -> Result<LoadedOperationStore, String> {
-    if path.as_os_str().is_empty() {
-        return Err("state database path is unavailable".to_owned());
-    }
-
     let store_outcome = tokio::task::spawn_blocking(move || {
         let store = TaskQueueStore::new(path)?;
         let saved_session = browser_session::read_saved_browser_session(&store)?;
@@ -704,6 +744,48 @@ fn suggestion_directory_and_prefix(input: &str, current_dir: &Path) -> Option<(P
 
 #[cfg(test)]
 mod transfer_conflict_check_tests;
+
+#[cfg(test)]
+mod startup_environment_tests {
+    use super::*;
+    use crate::startup_rendering::StartupRenderingBackend;
+
+    #[tokio::test]
+    async fn a_crashed_settings_load_keeps_real_paths_and_blocks_saving() {
+        let environment = startup_environment_with(
+            StartupRenderingEnvironment::fast_default(StartupRenderingBackend::Vulkan),
+            || panic!("settings loader bug"),
+        )
+        .await;
+
+        assert_eq!(environment.home, home_directory());
+        assert_eq!(
+            environment.state_database_path,
+            config::default_state_database_path()
+        );
+        assert!(!environment.state_database_path.as_os_str().is_empty());
+        let sources: Vec<_> = environment
+            .settings_recoveries
+            .iter()
+            .filter_map(config::SettingsRecovery::blocked_source)
+            .collect();
+        assert_eq!(
+            sources,
+            vec![
+                config::SettingsSource::Preferences,
+                config::SettingsSource::AppConfig
+            ]
+        );
+        assert!(environment.settings_recoveries.iter().all(|recovery| matches!(
+            recovery,
+            config::SettingsRecovery::Unavailable { error, .. } if error.contains("settings loader bug")
+        )));
+        assert_eq!(
+            environment.user_config.thumbnail_cache_dir,
+            config::default_user_config().thumbnail_cache_dir
+        );
+    }
+}
 
 #[cfg(test)]
 mod merge_expansion_tests {

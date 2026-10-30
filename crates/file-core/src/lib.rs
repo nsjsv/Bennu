@@ -63,7 +63,7 @@ pub use ops::{
     copy_path_with_options, create_directory, create_empty_file, create_file_with_contents,
     delete_path_permanently, is_direct_move_segment_candidate, locate_media_tool, media_duration,
     persist_recoverable_source_manifest, persist_recoverable_source_manifest_with_controls,
-    prepare_direct_move_intent_segment, rename_path, run_direct_move_batch_to_durable_renamed,
+    prepare_direct_move_intent_segment, rename_entry, run_direct_move_batch_to_durable_renamed,
     run_recoverable_transfer, run_recoverable_transfer_to_direct_move_intent,
     settle_failed_recoverable_transfer, ArtifactOwner, ArtifactToken, AudioChannelSpec,
     AudioTargetFormat, BackupCreationTransfer, BatchRenameItem, CommitPayload, CommitTransfer,

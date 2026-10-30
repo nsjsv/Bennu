@@ -1,4 +1,3 @@
-use std::ffi::OsStr;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -48,7 +47,7 @@ pub use copy::{
     FileOperationRunState, FileOperationVerification, FileTransferOptions, ProgressSender,
     TransferConflictStrategy,
 };
-pub use entry_moves::UnrestoredEntry;
+pub use entry_moves::{rename_entry, UnrestoredEntry};
 pub use metadata_loss::{
     MetadataKind, MetadataLossSample, MetadataLossSummary, METADATA_LOSS_SAMPLE_LIMIT,
 };
@@ -57,31 +56,6 @@ pub use transfer_strategy::{
     copy_regular_file_payload, ficlone_supported, PayloadCopyOutcome, PayloadCopyStrategy,
     RegularFilePayloadCopy, TransferStrategyEngine,
 };
-
-pub async fn rename_path(
-    path: impl AsRef<Path>,
-    new_name: impl AsRef<OsStr>,
-) -> Result<PathBuf, FileError> {
-    let path = path.as_ref().to_path_buf();
-    let parent = path
-        .parent()
-        .ok_or_else(|| FileError::InvalidInput {
-            path: path.clone(),
-            message: "path has no parent".to_owned(),
-        })?
-        .to_path_buf();
-    let target = parent.join(new_name.as_ref());
-
-    fs::rename(&path, &target)
-        .await
-        .map_err(|source| FileError::Rename {
-            from: path.clone(),
-            to: target.clone(),
-            source,
-        })?;
-
-    Ok(target)
-}
 
 pub async fn create_directory(path: impl AsRef<Path>) -> Result<PathBuf, FileError> {
     let path = path.as_ref().to_path_buf();

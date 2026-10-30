@@ -1,14 +1,16 @@
 use super::*;
 
 #[tokio::test]
-async fn create_directory_and_rename_path_update_filesystem() {
+async fn create_directory_and_rename_entry_update_filesystem() {
     let dir = tempdir().unwrap();
     let folder = dir.path().join("folder");
 
     let created = create_directory(&folder).await.unwrap();
     assert!(created.is_dir());
 
-    let renamed = rename_path(&folder, "renamed").await.unwrap();
+    let renamed = rename_entry(folder.clone(), OsString::from("renamed"))
+        .await
+        .unwrap();
     assert_eq!(renamed, dir.path().join("renamed"));
     assert!(renamed.is_dir());
     assert!(!folder.exists());

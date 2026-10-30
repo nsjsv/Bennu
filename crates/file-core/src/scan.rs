@@ -496,6 +496,17 @@ pub enum FileError {
     InvalidInput { path: PathBuf, message: String },
     #[error("no available name based on {base:?} in {directory:?}")]
     EntryNameCandidatesExhausted { directory: PathBuf, base: OsString },
+    #[error("invalid name {name:?}: {reason}")]
+    InvalidEntryName {
+        name: OsString,
+        reason: crate::entry_naming::InvalidEntryName,
+    },
+    #[error("{path:?} already exists")]
+    EntryNameTaken { path: PathBuf },
+    /// 文件系统不支持 `RENAME_NOREPLACE`。不退回普通改名：那样会在检查与改名之间
+    /// 覆盖别人刚放下的同名条目。
+    #[error("the filesystem cannot rename {from:?} to {to:?} without risking an overwrite")]
+    SafeRenameUnsupported { from: PathBuf, to: PathBuf },
     #[error("operation cancelled")]
     Cancelled,
     #[error("application is stopping")]

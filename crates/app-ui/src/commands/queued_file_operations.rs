@@ -9,7 +9,7 @@ use file_core::{
     delete_path_permanently, extract_archive_with_controls_and_progress,
     is_direct_move_segment_candidate, is_transfer_target_available,
     persist_recoverable_source_manifest_with_controls, prepare_direct_move_intent_segment,
-    rename_path, run_direct_move_batch_to_durable_renamed, run_recoverable_transfer,
+    rename_entry, run_direct_move_batch_to_durable_renamed, run_recoverable_transfer,
     ArchiveCreationRequest, ArchiveExtractionRequest, CopyProgress, DirectMoveBatchRecord,
     DirectMoveIntentBatchRecord, FileError, FileOperationControls, FileOperationVerification,
     FileTransferOptions, RecoverableTransferError, RecoverableTransferOperation,
@@ -404,7 +404,7 @@ async fn run_queued_rename(
         .wait_until_running()
         .await
         .map_err(|error| error.to_string())?;
-    let target = rename_path(path.clone(), OsString::from(new_name))
+    let target = rename_entry(path.clone(), OsString::from(new_name))
         .await
         .map_err(|error| error.to_string())?;
     send_file_operation_progress(

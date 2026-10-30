@@ -847,16 +847,6 @@ const DRAG_PREVIEW_SUMMARY_TEXT_SIZE: f32 = 12.0;
 /// 偏移(按住条目右下时)也能完整显示;聚合行右下角钉在指针尖上,
 /// 往指针左上展开,不挡指针也不被指针挡。
 fn drag_preview_panel(browser: &FileBrowser) -> Option<(Element<'_, Message>, FloatingPlacement)> {
-    // 临时调试:环境变量触发,绕过拖拽状态直接渲染聚合行,验证浮层渲染链。
-    if std::env::var_os("FM_DEBUG_DRAG_SUMMARY").is_some() {
-        let summary = crate::wayland_drag_icon::file_drag_group_summary_text(37, 12);
-        return Some((
-            drag_preview_summary_row(&summary),
-            FloatingPlacement::AnchorBottomRight {
-                anchor: browser.cursor_position,
-            },
-        ));
-    }
     let drag = browser.file_drag.as_ref()?;
     if !drag.displays_iced_drag_preview() || drag.preview_entries.is_empty() {
         return None;

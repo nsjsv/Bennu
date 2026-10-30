@@ -1,8 +1,13 @@
 use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use super::entry_moves::UnrestoredEntry;
+use super::entry_moves::{
+    move_without_replacing, park_at_temporary_name, EntryFilesystem, SystemEntryFilesystem,
+    UnrestoredEntry,
+};
+use crate::entry_naming::validate_entry_name;
 use crate::FileError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,14 +32,11 @@ struct BatchRenameStep {
 pub async fn batch_rename_paths(
     items: Vec<BatchRenameItem>,
 ) -> Result<Vec<CompletedBatchRename>, FileError> {
-    // 校验、预留临时名、两阶段改名与回滚都是同步文件系统调用,整批放进一个
-    // 阻塞任务;逐个 tokio::fs 调用只会多出线程切换。
-    let execution = tokio::task::spawn_blocking(move || {
-        run_batch_rename(items, &mut |from: &Path, to: &Path| {
-            std::fs::rename(from, to)
-        })
-    })
-    .await;
+    // 校验、两阶段改名与回滚都是同步文件系统调用,整批放进一个阻塞任务;
+    // 逐个 tokio::fs 调用只会多出线程切换。
+    let execution =
+        tokio::task::spawn_blocking(move || run_batch_rename(&mut SystemEntryFilesystem, items))
+            .await;
     match execution {
         Ok(result) => result,
         Err(join_error) if join_error.is_panic() => {
@@ -45,20 +47,22 @@ pub async fn batch_rename_paths(
     }
 }
 
-/// `rename` 由调用方注入:正式路径传 `std::fs::rename`。回滚失败只会在
-/// "第 k 次改名失败"时出现,真实文件系统无法在两次改名之间确定性地制造,
-/// 测试经同一入口注入失败,正式与测试共用全部执行和回滚逻辑。
+/// 文件系统操作经 `EntryFilesystem` 注入:回滚失败只会在"第 k 次改名失败"时出现,
+/// 真实文件系统无法在两次改名之间确定性地制造,测试经同一接口注入,正式与测试
+/// 共用全部执行和回滚逻辑。
 fn run_batch_rename(
+    filesystem: &mut impl EntryFilesystem,
     items: Vec<BatchRenameItem>,
-    rename: &mut impl FnMut(&Path, &Path) -> io::Result<()>,
 ) -> Result<Vec<CompletedBatchRename>, FileError> {
-    let items = validated_batch_rename_items(items)?;
-    let steps = prepare_batch_rename_steps(&items)?;
-    execute_batch_rename_steps(&steps, rename)?;
-
-    Ok(items
+    validate_batch_rename_items(filesystem, &items)?;
+    let moving = items
         .into_iter()
         .filter(|item| item.from != item.to)
+        .collect::<Vec<_>>();
+    execute_batch_rename(filesystem, &moving)?;
+
+    Ok(moving
+        .into_iter()
         .map(|item| CompletedBatchRename {
             from: item.from,
             to: item.to,
@@ -66,27 +70,36 @@ fn run_batch_rename(
         .collect())
 }
 
-fn execute_batch_rename_steps(
-    steps: &[BatchRenameStep],
-    rename: &mut impl FnMut(&Path, &Path) -> io::Result<()>,
+/// 先把所有源挪到临时名,再从临时名落到目标名:互换、环形改名的目标在第二阶段
+/// 都已空出。两个阶段都只用 no-replace 改名,执行期间别处新建的同名条目不会被覆盖。
+fn execute_batch_rename(
+    filesystem: &mut impl EntryFilesystem,
+    items: &[BatchRenameItem],
 ) -> Result<(), FileError> {
-    let mut renamed_to_temporary = Vec::new();
-    for step in steps {
-        if let Err(error) = rename_for_batch(rename, &step.source, &step.temporary) {
-            let unrestored = rollback_temporary_batch_renames(&renamed_to_temporary, rename);
-            return Err(batch_rename_failure(error, unrestored));
+    let mut steps = Vec::with_capacity(items.len());
+    for item in items {
+        match park_source(filesystem, &item.from) {
+            Ok(temporary) => steps.push(BatchRenameStep {
+                source: item.from.clone(),
+                temporary,
+                target: item.to.clone(),
+            }),
+            Err(cause) => {
+                let parked = steps
+                    .iter()
+                    .rev()
+                    .map(|step| (step.temporary.clone(), step.source.clone()));
+                let unrestored = restore_parked(filesystem, parked);
+                return Err(batch_rename_failure(cause, unrestored));
+            }
         }
-        renamed_to_temporary.push((step.temporary.clone(), step.source.clone()));
     }
 
-    let mut completed_steps = Vec::new();
-    for step in steps {
-        if let Err(error) = rename_for_batch(rename, &step.temporary, &step.target) {
-            let unrestored =
-                rollback_final_batch_renames(&completed_steps, &renamed_to_temporary, rename);
-            return Err(batch_rename_failure(error, unrestored));
+    for (landed, step) in steps.iter().enumerate() {
+        if let Err(cause) = move_without_replacing(filesystem, &step.temporary, &step.target) {
+            let unrestored = roll_back_landed(filesystem, &steps[..landed], &steps[landed..]);
+            return Err(batch_rename_failure(cause, unrestored));
         }
-        completed_steps.push((step.target.clone(), step.source.clone()));
     }
 
     Ok(())
@@ -104,17 +117,15 @@ fn batch_rename_failure(cause: FileError, unrestored: Vec<UnrestoredEntry>) -> F
     }
 }
 
-fn validated_batch_rename_items(
-    items: Vec<BatchRenameItem>,
-) -> Result<Vec<BatchRenameItem>, FileError> {
+/// 输入在边界上校验一次。目标是否被占用以第二阶段的 no-replace 改名为准;这里先按
+/// 对象身份挡掉已经看得见的冲突,免得整批挪到临时名再回滚。
+fn validate_batch_rename_items(
+    filesystem: &mut impl EntryFilesystem,
+    items: &[BatchRenameItem],
+) -> Result<(), FileError> {
     let mut sources = HashSet::new();
     let mut targets = HashSet::new();
-    let source_set = items
-        .iter()
-        .map(|item| item.from.clone())
-        .collect::<HashSet<_>>();
-
-    for item in &items {
+    for item in items {
         let Some(parent) = item.from.parent() else {
             return Err(invalid_batch_rename_input(
                 &item.from,
@@ -127,193 +138,119 @@ fn validated_batch_rename_items(
                 "target must stay in the source directory",
             ));
         }
-        if item.to.file_name().is_none_or(|name| name.is_empty()) {
-            return Err(invalid_batch_rename_input(
-                &item.to,
-                "target name cannot be empty",
-            ));
-        }
-        if !sources.insert(item.from.clone()) {
+        // 取最后一个路径成分而不是 file_name():后者遇到 ".." 返回 None,会被报成空名。
+        let target_name = item
+            .to
+            .components()
+            .next_back()
+            .map_or(OsStr::new(""), |component| component.as_os_str());
+        validate_entry_name(target_name).map_err(|reason| FileError::InvalidEntryName {
+            name: target_name.to_os_string(),
+            reason,
+        })?;
+        if !sources.insert(&item.from) {
             return Err(invalid_batch_rename_input(
                 &item.from,
                 "source appears more than once",
             ));
         }
-        if !targets.insert(item.to.clone()) {
+        if !targets.insert(&item.to) {
             return Err(invalid_batch_rename_input(
                 &item.to,
                 "target appears more than once",
             ));
         }
-        if item.from != item.to && !path_exists(&item.from)? {
-            return Err(FileError::Metadata {
-                path: item.from.clone(),
-                source: io::Error::new(io::ErrorKind::NotFound, "source does not exist"),
-            });
-        }
-        if item.from != item.to && !source_set.contains(&item.to) && path_exists(&item.to)? {
-            return Err(FileError::Rename {
-                from: item.from.clone(),
-                to: item.to.clone(),
-                source: io::Error::new(io::ErrorKind::AlreadyExists, "target already exists"),
-            });
-        }
     }
 
-    Ok(items)
-}
-
-fn prepare_batch_rename_steps(
-    items: &[BatchRenameItem],
-) -> Result<Vec<BatchRenameStep>, FileError> {
-    let mut reserved = items
+    let moving = items
         .iter()
-        .flat_map(|item| [item.from.clone(), item.to.clone()])
-        .collect::<HashSet<_>>();
-    let mut steps = Vec::new();
-
-    for item in items.iter().filter(|item| item.from != item.to) {
-        let temporary = available_batch_rename_temporary_path(&item.from, &mut reserved)?;
-        steps.push(BatchRenameStep {
-            source: item.from.clone(),
-            temporary,
-            target: item.to.clone(),
-        });
-    }
-
-    Ok(steps)
-}
-
-fn available_batch_rename_temporary_path(
-    source: &Path,
-    reserved: &mut HashSet<PathBuf>,
-) -> Result<PathBuf, FileError> {
-    let parent = source
-        .parent()
-        .ok_or_else(|| invalid_batch_rename_input(source, "source path has no parent"))?;
-    source
-        .file_name()
-        .ok_or_else(|| invalid_batch_rename_input(source, "source name cannot be empty"))?;
-
-    for index in 0..1000 {
-        let candidate = parent.join(format!(".bennu-batch-rename-{index}.tmp"));
-        if reserved.contains(&candidate) {
-            continue;
-        }
-        if path_exists(&candidate)? {
-            continue;
-        }
-        reserved.insert(candidate.clone());
-        return Ok(candidate);
-    }
-
-    Err(invalid_batch_rename_input(
-        source,
-        "could not reserve a temporary rename path",
-    ))
-}
-
-fn rename_for_batch(
-    rename: &mut impl FnMut(&Path, &Path) -> io::Result<()>,
-    from: &Path,
-    to: &Path,
-) -> Result<(), FileError> {
-    rename(from, to).map_err(|source| FileError::Rename {
-        from: from.to_path_buf(),
-        to: to.to_path_buf(),
-        source,
-    })
-}
-
-fn path_exists(path: &Path) -> Result<bool, FileError> {
-    match std::fs::symlink_metadata(path) {
-        Ok(_) => Ok(true),
-        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(source) => Err(FileError::Metadata {
-            path: path.to_path_buf(),
-            source,
-        }),
-    }
-}
-
-fn rollback_temporary_batch_renames(
-    renames: &[(PathBuf, PathBuf)],
-    rename: &mut impl FnMut(&Path, &Path) -> io::Result<()>,
-) -> Vec<UnrestoredEntry> {
-    let mut unrestored = Vec::new();
-    for (temporary_path, original_path) in renames.iter().rev() {
-        if let Err(error) = rename_for_batch(rename, temporary_path, original_path) {
-            unrestored.push(UnrestoredEntry {
-                original: original_path.clone(),
-                current: temporary_path.clone(),
-                error,
-            });
-        }
-    }
-    unrestored
-}
-
-fn rollback_final_batch_renames(
-    completed_steps: &[(PathBuf, PathBuf)],
-    temporary_steps: &[(PathBuf, PathBuf)],
-    rename: &mut impl FnMut(&Path, &Path) -> io::Result<()>,
-) -> Vec<UnrestoredEntry> {
-    let mut reserved = temporary_steps
-        .iter()
-        .flat_map(|(temporary_path, original_path)| [temporary_path.clone(), original_path.clone()])
-        .chain(
-            completed_steps
-                .iter()
-                .flat_map(|(final_path, original_path)| {
-                    [final_path.clone(), original_path.clone()]
-                }),
-        )
-        .collect::<HashSet<_>>();
-    let mut unrestored = Vec::new();
-    let mut completed_rollback_steps = Vec::new();
-
-    // 已改成目标名的条目先挪到新的临时名,腾出目标名,避免互换/环形改名
-    // 在恢复原名时互相覆盖。
-    for (final_path, original_path) in completed_steps.iter().rev() {
-        let parked = available_batch_rename_temporary_path(final_path, &mut reserved).and_then(
-            |rollback_temporary| {
-                rename_for_batch(rename, final_path, &rollback_temporary)?;
-                Ok(rollback_temporary)
-            },
-        );
-        match parked {
-            Ok(rollback_temporary) => {
-                completed_rollback_steps.push((rollback_temporary, original_path.clone()))
+        .filter(|item| item.from != item.to)
+        .collect::<Vec<_>>();
+    // 目标名被本批要挪走的对象占着不算冲突:互换、环形改名,或大小写不敏感的文件
+    // 系统上只改大小写(新旧名字指向同一个对象)。同一对象的另一个硬链接名在这里
+    // 放行,第二阶段 no-replace 撞上后回滚并按已占用报告。
+    let mut moving_objects = HashSet::new();
+    for item in &moving {
+        match filesystem.object_identity(&item.from) {
+            Ok(identity) => moving_objects.insert(identity),
+            Err(source) => {
+                return Err(FileError::Metadata {
+                    path: item.from.clone(),
+                    source,
+                })
             }
+        };
+    }
+    for item in &moving {
+        match filesystem.object_identity(&item.to) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Ok(occupant) if moving_objects.contains(&occupant) => {}
+            Ok(_) => {
+                return Err(FileError::EntryNameTaken {
+                    path: item.to.clone(),
+                })
+            }
+            Err(source) => {
+                return Err(FileError::Metadata {
+                    path: item.to.clone(),
+                    source,
+                })
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn park_source(filesystem: &mut impl EntryFilesystem, source: &Path) -> Result<PathBuf, FileError> {
+    let directory = source
+        .parent()
+        .expect("validated batch rename paths have a parent directory");
+    park_at_temporary_name(filesystem, source, directory)
+}
+
+/// 第二阶段失败:已落到目标名的先挪到新的临时名,腾出目标名(互换、环形改名里它
+/// 可能正是别的条目的原名),再把所有临时名放回原名。
+fn roll_back_landed(
+    filesystem: &mut impl EntryFilesystem,
+    landed: &[BatchRenameStep],
+    pending: &[BatchRenameStep],
+) -> Vec<UnrestoredEntry> {
+    let mut unrestored = Vec::new();
+    let mut parked = pending
+        .iter()
+        .map(|step| (step.temporary.clone(), step.source.clone()))
+        .collect::<Vec<_>>();
+    for step in landed.iter().rev() {
+        match park_source(filesystem, &step.target) {
+            Ok(temporary) => parked.push((temporary, step.source.clone())),
             Err(error) => unrestored.push(UnrestoredEntry {
-                original: original_path.clone(),
-                current: final_path.clone(),
+                original: step.source.clone(),
+                current: step.target.clone(),
                 error,
             }),
         }
     }
-
-    // 已完成的条目由上一步与下面的 completed_rollback_steps 负责,这里只恢复
-    // 仍停在第一阶段临时名上的条目。
-    let completed_originals = completed_steps
-        .iter()
-        .map(|(_, original_path)| original_path.clone())
-        .collect::<HashSet<_>>();
-    let still_temporary = temporary_steps
-        .iter()
-        .filter(|(_, original_path)| !completed_originals.contains(original_path))
-        .cloned();
-    for (temporary_path, original_path) in still_temporary.chain(completed_rollback_steps) {
-        if let Err(error) = rename_for_batch(rename, &temporary_path, &original_path) {
-            unrestored.push(UnrestoredEntry {
-                original: original_path,
-                current: temporary_path,
-                error,
-            });
-        }
-    }
-
+    unrestored.extend(restore_parked(filesystem, parked));
     unrestored
+}
+
+/// 放回原名同样不覆盖:原名在此期间被别处占用时,条目留在临时名上并报告。
+fn restore_parked(
+    filesystem: &mut impl EntryFilesystem,
+    parked: impl IntoIterator<Item = (PathBuf, PathBuf)>,
+) -> Vec<UnrestoredEntry> {
+    parked
+        .into_iter()
+        .filter_map(|(temporary, original)| {
+            let error = move_without_replacing(filesystem, &temporary, &original).err()?;
+            Some(UnrestoredEntry {
+                original,
+                current: temporary,
+                error,
+            })
+        })
+        .collect()
 }
 
 fn invalid_batch_rename_input(path: &Path, message: &'static str) -> FileError {

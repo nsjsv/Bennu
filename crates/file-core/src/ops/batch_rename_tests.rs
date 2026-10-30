@@ -2,25 +2,10 @@ use super::*;
 use std::fs;
 use tempfile::tempdir;
 
-fn real_rename(from: &Path, to: &Path) -> io::Result<()> {
-    std::fs::rename(from, to)
-}
-
-/// 真实改名,只有 `fails` 命中的那几步返回注入的失败。
-fn rename_failing_when(
-    fails: impl Fn(&Path, &Path) -> bool,
-) -> impl FnMut(&Path, &Path) -> io::Result<()> {
-    move |from: &Path, to: &Path| {
-        if fails(from, to) {
-            Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "injected rename failure",
-            ))
-        } else {
-            std::fs::rename(from, to)
-        }
-    }
-}
+use super::super::entry_moves::ObjectIdentity;
+use super::super::recoverable_transfer::NoReplaceRenameError;
+use crate::entry_naming::InvalidEntryName;
+use crate::ops::fake_entry_filesystem::{fake_path, is_temporary_name, FakeDirectory};
 
 fn item(from: &Path, to: &Path) -> BatchRenameItem {
     BatchRenameItem {
@@ -29,198 +14,280 @@ fn item(from: &Path, to: &Path) -> BatchRenameItem {
     }
 }
 
-/// 两个条目 a→x、b→y;空目录里预留的临时名依次为 tmp0(a)、tmp1(b),
-/// 第二阶段回滚为已完成条目预留的下一个临时名是 tmp2。
-struct TwoItemBatch {
-    _dir: tempfile::TempDir,
-    a: PathBuf,
-    b: PathBuf,
-    x: PathBuf,
-    y: PathBuf,
-    tmp0: PathBuf,
-    tmp1: PathBuf,
+fn fake_item(from: &str, to: &str) -> BatchRenameItem {
+    item(&fake_path(from), &fake_path(to))
 }
 
-impl TwoItemBatch {
-    fn new() -> Self {
-        let dir = tempdir().unwrap();
-        let path = |name: &str| dir.path().join(name);
-        let batch = Self {
-            a: path("a.txt"),
-            b: path("b.txt"),
-            x: path("x.txt"),
-            y: path("y.txt"),
-            tmp0: path(".bennu-batch-rename-0.tmp"),
-            tmp1: path(".bennu-batch-rename-1.tmp"),
-            _dir: dir,
-        };
-        fs::write(&batch.a, b"A").unwrap();
-        fs::write(&batch.b, b"B").unwrap();
-        batch
-    }
-
-    fn items(&self) -> Vec<BatchRenameItem> {
-        vec![item(&self.a, &self.x), item(&self.b, &self.y)]
-    }
+/// a(对象 1) → x、b(对象 2) → y。
+fn two_item_directory() -> (FakeDirectory, Vec<BatchRenameItem>) {
+    let directory = FakeDirectory::new(&[("a", 1), ("b", 2)]);
+    (directory, vec![fake_item("a", "x"), fake_item("b", "y")])
 }
 
-fn assert_rename_cause(cause: &FileError, from: &Path, to: &Path) {
+fn assert_failed_rename(
+    cause: &FileError,
+    from: impl Fn(&Path) -> bool,
+    to: impl Fn(&Path) -> bool,
+) {
     match cause {
         FileError::Rename {
             from: cause_from,
             to: cause_to,
             ..
         } => {
-            assert_eq!(cause_from, from);
-            assert_eq!(cause_to, to);
+            assert!(from(cause_from), "unexpected source {cause_from:?}");
+            assert!(to(cause_to), "unexpected target {cause_to:?}");
         }
         other => panic!("unexpected cause: {other:?}"),
     }
 }
 
-fn unrestored_locations(unrestored: &[UnrestoredEntry]) -> Vec<(PathBuf, PathBuf)> {
-    unrestored
-        .iter()
-        .map(|item| (item.original.clone(), item.current.clone()))
-        .collect()
+fn is_y(path: &Path) -> bool {
+    path == fake_path("y")
+}
+
+fn incomplete(error: &FileError) -> (&FileError, &[UnrestoredEntry]) {
+    match error {
+        FileError::EntryMovesIncomplete { cause, unrestored } => (cause, unrestored),
+        other => panic!("expected an incomplete rollback, got {other:?}"),
+    }
 }
 
 #[test]
-fn rollback_final_batch_renames_restores_completed_and_temporary_paths() {
-    let dir = tempdir().unwrap();
-    let first = dir.path().join("first.txt");
-    let second = dir.path().join("second.txt");
-    let final_first = dir.path().join("alpha.txt");
-    let temp_second = dir.path().join(".bennu-batch-rename-1.tmp");
-    fs::write(&final_first, b"one").unwrap();
-    fs::write(&temp_second, b"two").unwrap();
+fn swapped_names_go_through_temporary_names() {
+    let mut directory = FakeDirectory::new(&[("a", 1), ("b", 2)]);
 
-    let unrestored = rollback_final_batch_renames(
-        &[(final_first.clone(), first.clone())],
-        &[
-            (dir.path().join(".bennu-batch-rename-0.tmp"), first.clone()),
-            (temp_second.clone(), second.clone()),
-        ],
-        &mut real_rename,
-    );
+    let completed = run_batch_rename(
+        &mut directory,
+        vec![fake_item("a", "b"), fake_item("b", "a")],
+    )
+    .unwrap();
 
-    assert!(unrestored.is_empty());
-    assert_eq!(fs::read(&first).unwrap(), b"one");
-    assert_eq!(fs::read(&second).unwrap(), b"two");
-    assert!(!final_first.exists());
-    assert!(!temp_second.exists());
+    assert_eq!(completed.len(), 2);
+    assert_eq!(directory.names(), ["a", "b"]);
+    assert_eq!(directory.object_at("a"), Some(2));
+    assert_eq!(directory.object_at("b"), Some(1));
 }
 
 #[test]
-fn rollback_final_batch_renames_restores_cycles_without_overwriting() {
-    let dir = tempdir().unwrap();
-    let first = dir.path().join("first.txt");
-    let second = dir.path().join("second.txt");
-    let third = dir.path().join("third.txt");
-    let temp_first = dir.path().join(".bennu-batch-rename-0.tmp");
-    let temp_second = dir.path().join(".bennu-batch-rename-1.tmp");
-    let temp_third = dir.path().join(".bennu-batch-rename-2.tmp");
-    fs::write(&second, b"one").unwrap();
-    fs::write(&third, b"two").unwrap();
-    fs::write(&temp_third, b"three").unwrap();
+fn case_only_rename_works_on_a_case_insensitive_filesystem() {
+    let mut directory = FakeDirectory::new(&[("a.txt", 1), ("b.txt", 2)]).case_insensitive();
 
-    let unrestored = rollback_final_batch_renames(
-        &[
-            (second.clone(), first.clone()),
-            (third.clone(), second.clone()),
-        ],
-        &[
-            (temp_first.clone(), first.clone()),
-            (temp_second.clone(), second.clone()),
-            (temp_third.clone(), third.clone()),
-        ],
-        &mut real_rename,
-    );
+    run_batch_rename(
+        &mut directory,
+        vec![fake_item("a.txt", "A.txt"), fake_item("b.txt", "B.txt")],
+    )
+    .unwrap();
 
-    assert!(unrestored.is_empty());
-    assert_eq!(fs::read(&first).unwrap(), b"one");
-    assert_eq!(fs::read(&second).unwrap(), b"two");
-    assert_eq!(fs::read(&third).unwrap(), b"three");
-    assert!(!temp_third.exists());
+    assert_eq!(directory.names(), ["A.txt", "B.txt"]);
+}
+
+#[test]
+fn target_held_by_an_entry_outside_the_batch_is_rejected_before_any_rename() {
+    let mut directory = FakeDirectory::new(&[("a", 1), ("b", 2), ("y", 9)]);
+    let (_, items) = two_item_directory();
+
+    let error = run_batch_rename(&mut directory, items).unwrap_err();
+
+    assert!(matches!(error, FileError::EntryNameTaken { path } if path == fake_path("y")));
+    assert_eq!(directory.names(), ["a", "b", "y"]);
+}
+
+#[test]
+fn another_hard_link_name_is_reported_as_taken_and_rolled_back() {
+    let mut directory = FakeDirectory::new(&[("a", 1), ("b", 1)]);
+
+    let error = run_batch_rename(&mut directory, vec![fake_item("a", "b")]).unwrap_err();
+
+    assert!(matches!(error, FileError::EntryNameTaken { path } if path == fake_path("b")));
+    assert_eq!(directory.names(), ["a", "b"]);
+}
+
+#[test]
+fn illegal_target_names_are_rejected_before_any_rename() {
+    for (target, expected) in [
+        ("..", InvalidEntryName::ParentDirectory),
+        ("nul\0", InvalidEntryName::ContainsNul),
+    ] {
+        let (mut directory, _) = two_item_directory();
+
+        let error = run_batch_rename(&mut directory, vec![fake_item("a", target)]).unwrap_err();
+
+        assert!(
+            matches!(error, FileError::InvalidEntryName { reason, .. } if reason == expected),
+            "{target:?}: {error:?}"
+        );
+        assert_eq!(directory.names(), ["a", "b"]);
+    }
+}
+
+#[test]
+fn unsupported_no_replace_fails_without_renaming_anything() {
+    let (mut directory, items) = two_item_directory();
+    directory.unsupported = true;
+
+    let error = run_batch_rename(&mut directory, items).unwrap_err();
+
+    assert!(matches!(error, FileError::SafeRenameUnsupported { .. }));
+    assert_eq!(directory.names(), ["a", "b"]);
 }
 
 #[test]
 fn fully_rolled_back_failure_reports_only_the_original_cause() {
-    let batch = TwoItemBatch::new();
-    let y = batch.y.clone();
-    let mut rename = rename_failing_when(move |_, to| to == y);
+    let (mut directory, items) = two_item_directory();
+    directory.fail_when = Box::new(|_, to| to == fake_path("y"));
 
-    let error = run_batch_rename(batch.items(), &mut rename).unwrap_err();
+    let error = run_batch_rename(&mut directory, items).unwrap_err();
 
-    assert_rename_cause(&error, &batch.tmp1, &batch.y);
-    assert_eq!(fs::read(&batch.a).unwrap(), b"A");
-    assert_eq!(fs::read(&batch.b).unwrap(), b"B");
-    assert!(!batch.x.exists());
-    assert!(!batch.tmp0.exists());
-    assert!(!batch.tmp1.exists());
+    assert_failed_rename(&error, is_temporary_name, is_y);
+    assert_eq!(directory.names(), ["a", "b"]);
+    assert_eq!(directory.object_at("a"), Some(1));
+    assert_eq!(directory.object_at("b"), Some(2));
 }
 
 #[test]
 fn first_phase_rollback_failure_reports_item_left_at_temporary_name() {
-    let batch = TwoItemBatch::new();
-    let (b, a) = (batch.b.clone(), batch.a.clone());
-    let mut rename = rename_failing_when(move |from, to| from == b || to == a);
+    let (mut directory, items) = two_item_directory();
+    directory.fail_when = Box::new(|from, to| from == fake_path("b") || to == fake_path("a"));
 
-    let error = run_batch_rename(batch.items(), &mut rename).unwrap_err();
+    let error = run_batch_rename(&mut directory, items).unwrap_err();
 
-    let FileError::EntryMovesIncomplete { cause, unrestored } = &error else {
-        panic!("unexpected error: {error:?}");
-    };
-    assert_rename_cause(cause, &batch.b, &batch.tmp1);
-    assert_eq!(
-        unrestored_locations(unrestored),
-        vec![(batch.a.clone(), batch.tmp0.clone())]
-    );
-    assert_rename_cause(&unrestored[0].error, &batch.tmp0, &batch.a);
-    assert_eq!(fs::read(&batch.tmp0).unwrap(), b"A");
-    assert_eq!(fs::read(&batch.b).unwrap(), b"B");
+    let (cause, unrestored) = incomplete(&error);
+    assert_failed_rename(cause, |from| from == fake_path("b"), is_temporary_name);
+    assert_eq!(unrestored.len(), 1);
+    assert_eq!(unrestored[0].original, fake_path("a"));
+    assert!(is_temporary_name(&unrestored[0].current));
+    let left_at = unrestored[0].current.file_name().unwrap().to_str().unwrap();
+    assert_eq!(directory.object_at(left_at), Some(1));
+    assert_eq!(directory.object_at("b"), Some(2));
 }
 
 #[test]
 fn second_phase_park_failure_reports_item_left_at_target_name() {
-    let batch = TwoItemBatch::new();
-    let (y, x) = (batch.y.clone(), batch.x.clone());
-    let mut rename = rename_failing_when(move |from, to| to == y || from == x);
+    let (mut directory, items) = two_item_directory();
+    directory.fail_when = Box::new(|from, to| to == fake_path("y") || from == fake_path("x"));
 
-    let error = run_batch_rename(batch.items(), &mut rename).unwrap_err();
+    let error = run_batch_rename(&mut directory, items).unwrap_err();
 
-    let FileError::EntryMovesIncomplete { cause, unrestored } = &error else {
-        panic!("unexpected error: {error:?}");
-    };
-    assert_rename_cause(cause, &batch.tmp1, &batch.y);
-    assert_eq!(
-        unrestored_locations(unrestored),
-        vec![(batch.a.clone(), batch.x.clone())]
-    );
-    assert_eq!(fs::read(&batch.x).unwrap(), b"A");
-    assert_eq!(fs::read(&batch.b).unwrap(), b"B");
+    let (cause, unrestored) = incomplete(&error);
+    assert_failed_rename(cause, is_temporary_name, is_y);
+    assert_eq!(unrestored.len(), 1);
+    assert_eq!(unrestored[0].original, fake_path("a"));
+    assert_eq!(unrestored[0].current, fake_path("x"));
+    assert_eq!(directory.object_at("x"), Some(1));
+    assert_eq!(directory.object_at("b"), Some(2));
 }
 
 #[test]
 fn second_phase_restore_failure_reports_item_left_at_hidden_temporary_name() {
-    let batch = TwoItemBatch::new();
-    let (y, b) = (batch.y.clone(), batch.b.clone());
-    let mut rename = rename_failing_when(move |_, to| to == y || to == b);
+    let (mut directory, items) = two_item_directory();
+    directory.fail_when = Box::new(|_, to| to == fake_path("y") || to == fake_path("b"));
 
-    let error = run_batch_rename(batch.items(), &mut rename).unwrap_err();
+    let error = run_batch_rename(&mut directory, items).unwrap_err();
 
-    let FileError::EntryMovesIncomplete { cause, unrestored } = &error else {
-        panic!("unexpected error: {error:?}");
-    };
-    assert_rename_cause(cause, &batch.tmp1, &batch.y);
-    assert_eq!(
-        unrestored_locations(unrestored),
-        vec![(batch.b.clone(), batch.tmp1.clone())]
-    );
-    assert_eq!(fs::read(&batch.a).unwrap(), b"A");
-    assert_eq!(fs::read(&batch.tmp1).unwrap(), b"B");
+    let (cause, unrestored) = incomplete(&error);
+    assert_failed_rename(cause, is_temporary_name, is_y);
+    assert_eq!(unrestored.len(), 1);
+    assert_eq!(unrestored[0].original, fake_path("b"));
+    assert!(is_temporary_name(&unrestored[0].current));
+    let left_at = unrestored[0].current.file_name().unwrap().to_str().unwrap();
+    assert_eq!(directory.object_at(left_at), Some(2));
+    assert_eq!(directory.object_at("a"), Some(1));
 
     let message = error.to_string();
     assert!(message.starts_with(&cause.to_string()));
-    assert!(message.contains(&format!("{:?} -> {:?}", batch.b, batch.tmp1)));
+    assert!(message.contains(&format!(
+        "{:?} -> {:?}",
+        unrestored[0].original, unrestored[0].current
+    )));
+}
+
+/// 真实文件系统,在第一次改名成功后于 `intruder` 处放一个文件,模拟执行期间
+/// 别的程序新建了同名条目。
+struct IntruderAfterFirstRename {
+    intruder: PathBuf,
+    placed: bool,
+}
+
+impl EntryFilesystem for IntruderAfterFirstRename {
+    fn rename_noreplace(&mut self, from: &Path, to: &Path) -> Result<(), NoReplaceRenameError> {
+        SystemEntryFilesystem.rename_noreplace(from, to)?;
+        if !self.placed {
+            fs::write(&self.intruder, b"intruder").unwrap();
+            self.placed = true;
+        }
+        Ok(())
+    }
+
+    fn object_identity(&mut self, path: &Path) -> io::Result<ObjectIdentity> {
+        SystemEntryFilesystem.object_identity(path)
+    }
+}
+
+fn directory_names(directory: &Path) -> Vec<String> {
+    let mut names = fs::read_dir(directory)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    names.sort();
+    names
+}
+
+#[test]
+fn target_created_during_the_rename_is_not_replaced() {
+    let directory = tempdir().unwrap();
+    let source = directory.path().join("a.txt");
+    let target = directory.path().join("x.txt");
+    fs::write(&source, b"source").unwrap();
+    let mut filesystem = IntruderAfterFirstRename {
+        intruder: target.clone(),
+        placed: false,
+    };
+
+    let error = run_batch_rename(&mut filesystem, vec![item(&source, &target)]).unwrap_err();
+
+    assert!(matches!(error, FileError::EntryNameTaken { path } if path == target));
+    assert_eq!(fs::read(&source).unwrap(), b"source");
+    assert_eq!(fs::read(&target).unwrap(), b"intruder");
+    assert_eq!(directory_names(directory.path()), ["a.txt", "x.txt"]);
+}
+
+#[test]
+fn rotating_names_keeps_every_file() {
+    let directory = tempdir().unwrap();
+    let path = |name: &str| directory.path().join(name);
+    for name in ["a", "b", "c"] {
+        fs::write(path(name), name).unwrap();
+    }
+
+    run_batch_rename(
+        &mut SystemEntryFilesystem,
+        vec![
+            item(&path("a"), &path("b")),
+            item(&path("b"), &path("c")),
+            item(&path("c"), &path("a")),
+        ],
+    )
+    .unwrap();
+
+    assert_eq!(fs::read(path("b")).unwrap(), b"a");
+    assert_eq!(fs::read(path("c")).unwrap(), b"b");
+    assert_eq!(fs::read(path("a")).unwrap(), b"c");
+    assert_eq!(directory_names(directory.path()), ["a", "b", "c"]);
+}
+
+#[test]
+fn renaming_onto_an_existing_file_outside_the_batch_changes_nothing() {
+    let directory = tempdir().unwrap();
+    let source = directory.path().join("a.txt");
+    let target = directory.path().join("b.txt");
+    fs::write(&source, b"source").unwrap();
+    fs::write(&target, b"target").unwrap();
+
+    let error =
+        run_batch_rename(&mut SystemEntryFilesystem, vec![item(&source, &target)]).unwrap_err();
+
+    assert!(matches!(error, FileError::EntryNameTaken { .. }));
+    assert_eq!(fs::read(&source).unwrap(), b"source");
+    assert_eq!(fs::read(&target).unwrap(), b"target");
 }

@@ -30,7 +30,7 @@ pub(crate) trait EntryFilesystem {
     fn object_identity(&mut self, path: &Path) -> io::Result<ObjectIdentity>;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct ObjectIdentity {
     pub(crate) device: u64,
     pub(crate) inode: u64,
@@ -151,7 +151,9 @@ fn rename_onto_same_object(
     }
 }
 
-fn park_at_temporary_name(
+/// 把条目挪到同目录下一个随机的隐藏临时名上。临时名由 no-replace 改名本身占位，
+/// 撞名就换一个，不先查再改。
+pub(super) fn park_at_temporary_name(
     filesystem: &mut impl EntryFilesystem,
     path: &Path,
     parent: &Path,
@@ -170,7 +172,17 @@ fn park_at_temporary_name(
     })
 }
 
-const TEMPORARY_NAME_PREFIX: &str = ".bennu-rename-";
+pub(super) const TEMPORARY_NAME_PREFIX: &str = ".bennu-rename-";
+
+pub(super) fn move_without_replacing(
+    filesystem: &mut impl EntryFilesystem,
+    from: &Path,
+    to: &Path,
+) -> Result<(), FileError> {
+    filesystem
+        .rename_noreplace(from, to)
+        .map_err(|error| no_replace_rename_error(error, from, to))
+}
 
 fn temporary_entry_name(path: &Path, parent: &Path) -> Result<OsString, FileError> {
     let mut bytes = [0_u8; 8];

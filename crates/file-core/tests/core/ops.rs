@@ -95,13 +95,11 @@ async fn batch_rename_paths_rejects_existing_unrelated_target() {
     .unwrap_err();
 
     match error {
-        FileError::Rename { from, to, source } => {
-            assert_eq!(from, source_path);
-            assert_eq!(to, target);
-            assert_eq!(source.kind(), io::ErrorKind::AlreadyExists);
-        }
+        FileError::EntryNameTaken { path } => assert_eq!(path, target),
         other => panic!("unexpected error: {other:?}"),
     }
+    assert_eq!(fs::read(&source_path).unwrap(), b"source");
+    assert_eq!(fs::read(&target).unwrap(), b"target");
 }
 
 #[tokio::test]

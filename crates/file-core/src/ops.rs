@@ -11,6 +11,8 @@ mod convert;
 mod copy;
 mod copy_verification;
 mod entry_moves;
+#[cfg(test)]
+mod fake_entry_filesystem;
 mod metadata_loss;
 mod recoverable_transfer;
 pub use convert::{

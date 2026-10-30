@@ -1,5 +1,5 @@
 //! 驱动者监督:不变量是"非终态 journal 记录在租约存活期内必须有且仅有一个
-//! 活驱动者"。驱动者现在是 `Task::stream`(见 queued_file_operations),它的
+//! 活驱动者"。驱动者现在是界面侧的 `Task::stream`(app-ui 的 `file_operation_driver_task`),它的
 //! 死亡不再被框架记账,只能由本模块的信号超时发现;发现后换代重启,新驱动者
 //! 从 journal 断点续跑。跨实例的同类问题(其他进程退出后遗留的非终态任务)
 //! 由同一 tick 按 runner 租约认领,复用启动恢复路径。

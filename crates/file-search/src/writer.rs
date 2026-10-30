@@ -18,15 +18,26 @@ pub(crate) const MAX_WRITER_FILE_PAYLOAD_BYTES: usize = 2_500_000;
 const MAX_WRITER_SCOPE_PATH_BYTES: usize = 8_192;
 const INDEXED_FILE_FIXED_BYTES: usize = 1_024;
 
-/// A single write operation for the dedicated writer thread to apply.
+/// A single operation for the dedicated writer thread to apply. Every command
+/// replies with its own outcome, so a failed write is reported to the work
+/// that issued it and never to whichever request happens to come next.
 enum WriteCommand {
-    UpsertObservable(Box<IndexedFile>),
+    UpsertObservable {
+        file: Box<IndexedFile>,
+        reply: Sender<SearchResult<()>>,
+    },
     ClassifyObserved {
         files: Vec<ObservedFile>,
         reply: Sender<SearchResult<Vec<FileClassification>>>,
     },
-    ApplyFileBatch(Vec<ScanFileMutation>),
-    UpsertDirectorySnapshot(Box<DirectorySnapshot>),
+    ApplyFileBatch {
+        mutations: Vec<ScanFileMutation>,
+        reply: Sender<SearchResult<()>>,
+    },
+    UpsertDirectorySnapshot {
+        snapshot: Box<DirectorySnapshot>,
+        reply: Sender<SearchResult<()>>,
+    },
     DirectorySnapshot {
         path: PathBuf,
         reply: Sender<SearchResult<Option<DirectorySnapshot>>>,
@@ -53,7 +64,10 @@ enum WriteCommand {
         scope: PathBuf,
         reply: Sender<SearchResult<bool>>,
     },
-    DeleteScope(PathBuf),
+    DeleteScope {
+        scope: PathBuf,
+        reply: Sender<SearchResult<()>>,
+    },
     ApplyPathConfigurationTransition {
         effective: VersionedSearchPathPreferences,
         policy: SearchPathPolicy,
@@ -64,13 +78,10 @@ enum WriteCommand {
     },
     /// 统计当前可查询条目，并继续复用 writer 持有的数据库连接。
     Count(Sender<SearchResult<u64>>),
-    /// Drain everything queued before this point, then report the first error
-    /// seen since the previous flush.
-    Flush(Sender<SearchResult<()>>),
     /// Stop the writer after every previously queued command has been applied.
     /// Used when a stale daemon is retiring itself during a version handoff so
     /// the next daemon never races it for the writable SQLite connection.
-    Shutdown(Option<Sender<SearchResult<()>>>),
+    Shutdown(Option<Sender<()>>),
 }
 
 /// Serializes every write to the search database through one owned connection
@@ -106,12 +117,17 @@ impl IndexWriter {
         }
     }
 
-    /// Blocks until the dedicated writer accepts the file, preventing payload backlog.
+    /// Blocks until the dedicated writer has applied the file and returns that write's outcome.
     pub fn upsert(&self, file: IndexedFile) -> SearchResult<()> {
         validate_indexed_file_payload(&file)?;
+        let (reply, outcome) = mpsc::channel();
         self.sender
-            .send(WriteCommand::UpsertObservable(Box::new(file)))
-            .map_err(|_| writer_gone())
+            .send(WriteCommand::UpsertObservable {
+                file: Box::new(file),
+                reply,
+            })
+            .map_err(|_| writer_gone())?;
+        outcome.recv().map_err(|_| writer_gone())?
     }
 
     pub(crate) fn classify_observed(
@@ -128,9 +144,11 @@ impl IndexWriter {
 
     pub(crate) fn apply_file_batch(&self, mutations: Vec<ScanFileMutation>) -> SearchResult<()> {
         validate_scan_file_batch(&mutations)?;
+        let (reply, outcome) = mpsc::channel();
         self.sender
-            .send(WriteCommand::ApplyFileBatch(mutations))
-            .map_err(|_| writer_gone())
+            .send(WriteCommand::ApplyFileBatch { mutations, reply })
+            .map_err(|_| writer_gone())?;
+        outcome.recv().map_err(|_| writer_gone())?
     }
 
     pub(crate) fn upsert_directory_snapshot(
@@ -145,9 +163,14 @@ impl IndexWriter {
                 max_bytes: MAX_WRITER_SCOPE_PATH_BYTES,
             });
         }
+        let (reply, outcome) = mpsc::channel();
         self.sender
-            .send(WriteCommand::UpsertDirectorySnapshot(Box::new(snapshot)))
-            .map_err(|_| writer_gone())
+            .send(WriteCommand::UpsertDirectorySnapshot {
+                snapshot: Box::new(snapshot),
+                reply,
+            })
+            .map_err(|_| writer_gone())?;
+        outcome.recv().map_err(|_| writer_gone())?
     }
 
     pub(crate) fn directory_snapshot(
@@ -224,9 +247,11 @@ impl IndexWriter {
     }
 
     pub(crate) fn delete_scope(&self, scope: PathBuf) -> SearchResult<()> {
+        let (reply, outcome) = mpsc::channel();
         self.sender
-            .send(WriteCommand::DeleteScope(scope))
-            .map_err(|_| writer_gone())
+            .send(WriteCommand::DeleteScope { scope, reply })
+            .map_err(|_| writer_gone())?;
+        outcome.recv().map_err(|_| writer_gone())?
     }
 
     pub(crate) fn apply_path_configuration_transition(
@@ -265,16 +290,6 @@ impl IndexWriter {
         rx.recv().map_err(|_| writer_gone())?
     }
 
-    /// Blocks until every previously queued write has been applied, then returns
-    /// the first error the writer hit since the last flush (clearing it).
-    pub fn flush(&self) -> SearchResult<()> {
-        let (tx, rx) = mpsc::channel();
-        self.sender
-            .send(WriteCommand::Flush(tx))
-            .map_err(|_| writer_gone())?;
-        rx.recv().map_err(|_| writer_gone())?
-    }
-
     /// 排空此前接收的写入、停止并等待 writer 线程。首次调用持有完整关闭所有权，
     /// 并发或后续调用会等待首次调用结束后直接成功。
     pub fn shutdown(&self) -> SearchResult<()> {
@@ -291,8 +306,7 @@ impl IndexWriter {
             .sender
             .send(WriteCommand::Shutdown(Some(tx)))
             .map_err(|_| writer_gone())
-            .and_then(|()| rx.recv().map_err(|_| writer_gone()))
-            .and_then(|outcome| outcome);
+            .and_then(|()| rx.recv().map_err(|_| writer_gone()));
         let join_outcome = writer_thread.join().map_err(|_| {
             SearchError::WorkerFailed("search index writer thread panicked".to_owned())
         });
@@ -319,45 +333,31 @@ fn writer_loop(
     receiver: Receiver<WriteCommand>,
     maintenance_cancelled: Arc<AtomicBool>,
 ) {
-    // The first write error since the last flush. Individual writes don't have a
-    // caller waiting on them, so we stash the error and surface it at flush time.
-    let mut pending_error: Option<SearchError> = None;
     while let Ok(command) = receiver.recv() {
         match command {
-            WriteCommand::UpsertObservable(file) => {
-                record_first_write_error(
-                    &mut pending_error,
-                    database.upsert_file(&file),
-                    &maintenance_cancelled,
-                );
-            }
-            WriteCommand::ClassifyObserved { files, reply } => {
-                let outcome = match pending_error.take() {
-                    Some(error) => Err(error),
-                    None => database.classify_observed_files(&files),
-                };
+            WriteCommand::UpsertObservable { file, reply } => {
+                let outcome = logged_write(database.upsert_file(&file), &maintenance_cancelled);
                 let _ = reply.send(outcome);
             }
-            WriteCommand::ApplyFileBatch(mutations) => {
-                record_first_write_error(
-                    &mut pending_error,
+            WriteCommand::ClassifyObserved { files, reply } => {
+                let _ = reply.send(database.classify_observed_files(&files));
+            }
+            WriteCommand::ApplyFileBatch { mutations, reply } => {
+                let outcome = logged_write(
                     database.apply_file_batch(&mutations),
                     &maintenance_cancelled,
                 );
+                let _ = reply.send(outcome);
             }
-            WriteCommand::UpsertDirectorySnapshot(snapshot) => {
-                record_first_write_error(
-                    &mut pending_error,
+            WriteCommand::UpsertDirectorySnapshot { snapshot, reply } => {
+                let outcome = logged_write(
                     database.upsert_directory_snapshot(&snapshot),
                     &maintenance_cancelled,
                 );
+                let _ = reply.send(outcome);
             }
             WriteCommand::DirectorySnapshot { path, reply } => {
-                let outcome = match pending_error.take() {
-                    Some(error) => Err(error),
-                    None => database.directory_snapshot(&path),
-                };
-                let _ = reply.send(outcome);
+                let _ = reply.send(database.directory_snapshot(&path));
             }
             WriteCommand::KnownFilesPage {
                 scope,
@@ -365,11 +365,7 @@ fn writer_loop(
                 limit,
                 reply,
             } => {
-                let outcome = match pending_error.take() {
-                    Some(error) => Err(error),
-                    None => database.known_files_page(&scope, after_path.as_deref(), limit),
-                };
-                let _ = reply.send(outcome);
+                let _ = reply.send(database.known_files_page(&scope, after_path.as_deref(), limit));
             }
             WriteCommand::DirectorySnapshotsPage {
                 scope,
@@ -377,11 +373,11 @@ fn writer_loop(
                 limit,
                 reply,
             } => {
-                let outcome = match pending_error.take() {
-                    Some(error) => Err(error),
-                    None => database.directory_snapshots_page(&scope, after_path.as_deref(), limit),
-                };
-                let _ = reply.send(outcome);
+                let _ = reply.send(database.directory_snapshots_page(
+                    &scope,
+                    after_path.as_deref(),
+                    limit,
+                ));
             }
             WriteCommand::DirectChildrenPage {
                 parent,
@@ -389,25 +385,22 @@ fn writer_loop(
                 limit,
                 reply,
             } => {
-                let outcome = match pending_error.take() {
-                    Some(error) => Err(error),
-                    None => database.direct_children_page(&parent, after_path.as_deref(), limit),
-                };
-                let _ = reply.send(outcome);
+                let _ = reply.send(database.direct_children_page(
+                    &parent,
+                    after_path.as_deref(),
+                    limit,
+                ));
             }
             WriteCommand::MarkScopeInaccessible { scope, reply } => {
-                let outcome = match pending_error.take() {
-                    Some(error) => Err(error),
-                    None => database.mark_scope_inaccessible(&scope),
-                };
-                let _ = reply.send(outcome);
-            }
-            WriteCommand::DeleteScope(scope) => {
-                record_first_write_error(
-                    &mut pending_error,
-                    database.delete_scope(&scope),
+                let outcome = logged_write(
+                    database.mark_scope_inaccessible(&scope),
                     &maintenance_cancelled,
                 );
+                let _ = reply.send(outcome);
+            }
+            WriteCommand::DeleteScope { scope, reply } => {
+                let outcome = logged_write(database.delete_scope(&scope), &maintenance_cancelled);
+                let _ = reply.send(outcome);
             }
             WriteCommand::ApplyPathConfigurationTransition {
                 effective,
@@ -417,39 +410,24 @@ fn writer_loop(
                 affected_scopes,
                 reply,
             } => {
-                let outcome = match pending_error.take() {
-                    Some(error) => Err(error),
-                    None => database.apply_search_path_transition(
+                let outcome = logged_write(
+                    database.apply_search_path_transition(
                         &effective,
                         &policy,
                         &mounts,
                         &invalidated_roots,
                         &affected_scopes,
                     ),
-                };
+                    &maintenance_cancelled,
+                );
                 let _ = reply.send(outcome);
             }
             WriteCommand::Count(reply) => {
                 let _ = reply.send(database.indexed_file_count());
             }
-            WriteCommand::Flush(reply) => {
-                let _ = reply.send(match pending_error.take() {
-                    Some(error) => Err(error),
-                    None => Ok(()),
-                });
-            }
             WriteCommand::Shutdown(reply) => {
                 if let Some(reply) = reply {
-                    let shutdown_outcome = if maintenance_cancelled.load(Ordering::Acquire) {
-                        pending_error.take();
-                        Ok(())
-                    } else {
-                        match pending_error.take() {
-                            Some(error) => Err(error),
-                            None => Ok(()),
-                        }
-                    };
-                    let _ = reply.send(shutdown_outcome);
+                    let _ = reply.send(());
                 }
                 break;
             }
@@ -457,27 +435,25 @@ fn writer_loop(
     }
 }
 
-fn record_first_write_error(
-    slot: &mut Option<SearchError>,
-    write_outcome: SearchResult<()>,
+/// Logs every failed write once, at the writer. Failures after maintenance was
+/// cancelled come from the SQLite interrupt that cancellation itself issued, so
+/// they still reach the cancelled caller but are not reported as faults.
+fn logged_write<T>(
+    write_outcome: SearchResult<T>,
     maintenance_cancelled: &AtomicBool,
-) {
-    if maintenance_cancelled.load(Ordering::Acquire) {
-        return;
+) -> SearchResult<T> {
+    if let Err(error) = &write_outcome {
+        if !maintenance_cancelled.load(Ordering::Acquire) {
+            let log_error = bounded_search_log_detail(&error.to_string());
+            tracing::error!(
+                target: "file_search::writer",
+                event = "index_write_failed",
+                error = %log_error,
+                "search index write failed"
+            );
+        }
     }
-    if slot.is_none() {
-        let Err(error) = write_outcome else {
-            return;
-        };
-        let log_error = bounded_search_log_detail(&error.to_string());
-        tracing::error!(
-            target: "file_search::writer",
-            event = "index_write_failed",
-            error = %log_error,
-            "search index write failed"
-        );
-        *slot = Some(error);
-    }
+    write_outcome
 }
 
 fn writer_gone() -> SearchError {

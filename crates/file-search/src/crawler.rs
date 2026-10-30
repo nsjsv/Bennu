@@ -166,7 +166,6 @@ impl SearchIndexer {
         let mut stats = RebuildStats::default();
         self.reconcile_changed_paths(changed_paths, &mut stats, cancellation, &mut on_progress)
             .await?;
-        self.writer.flush()?;
         Ok(stats)
     }
 
@@ -180,7 +179,6 @@ impl SearchIndexer {
         let mut stats = RebuildStats::default();
         self.reconcile_changed_paths(scopes, &mut stats, cancellation, &mut on_progress)
             .await?;
-        self.writer.flush()?;
         Ok(stats)
     }
 
@@ -201,7 +199,6 @@ impl SearchIndexer {
             )
             .await?;
         }
-        self.writer.flush()?;
         Ok(stats)
     }
 
@@ -215,7 +212,6 @@ impl SearchIndexer {
         let mut stats = RebuildStats::default();
         self.startup_check_scopes(scopes, &mut stats, cancellation, &mut on_progress)
             .await?;
-        self.writer.flush()?;
         Ok(stats)
     }
 

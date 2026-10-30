@@ -30,30 +30,59 @@ where
 }
 
 #[test]
-fn repeated_write_failures_record_only_the_owned_first_error() {
+fn every_failed_write_is_logged_unless_maintenance_was_cancelled() {
     let error_events = ErrorEventCounter::default();
     let subscriber = tracing_subscriber::registry().with(error_events.clone());
-    let mut pending_error = None;
-
     let maintenance_cancelled = AtomicBool::new(false);
+
     tracing::subscriber::with_default(subscriber, || {
-        record_first_write_error(
-            &mut pending_error,
-            Err(SearchError::WorkerFailed("first".to_owned())),
+        for message in ["first", "second"] {
+            assert!(logged_write::<()>(
+                Err(SearchError::WorkerFailed(message.to_owned())),
+                &maintenance_cancelled,
+            )
+            .is_err());
+        }
+        maintenance_cancelled.store(true, Ordering::Release);
+        assert!(logged_write::<()>(
+            Err(SearchError::WorkerFailed("interrupted".to_owned())),
             &maintenance_cancelled,
-        );
-        record_first_write_error(
-            &mut pending_error,
-            Err(SearchError::WorkerFailed("second".to_owned())),
-            &maintenance_cancelled,
-        );
+        )
+        .is_err());
     });
 
-    assert_eq!(error_events.0.load(Ordering::Relaxed), 1);
-    assert_eq!(
-        pending_error.unwrap().to_string(),
-        "search worker failed: first"
-    );
+    assert_eq!(error_events.0.load(Ordering::Relaxed), 2);
+}
+
+#[test]
+fn every_failed_write_reaches_its_own_caller() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("search.sqlite");
+    let writer = IndexWriter::spawn(SearchDatabase::open(&db_path).unwrap());
+    let schema_connection = rusqlite::Connection::open(&db_path).unwrap();
+    schema_connection
+        .execute_batch("ALTER TABLE files RENAME TO files_unavailable")
+        .unwrap();
+
+    assert!(writer
+        .upsert(sample_file(&dir.path().join("first.txt"), 1, 1))
+        .is_err());
+    assert!(writer.delete_scope(dir.path().join("second.txt")).is_err());
+
+    schema_connection
+        .execute_batch("ALTER TABLE files_unavailable RENAME TO files")
+        .unwrap();
+    // 之前的写入失败已经交给了各自的调用方，后面的读写只拿自己的结果。
+    assert_eq!(writer.count().unwrap(), 0);
+    assert!(writer
+        .directory_snapshot(dir.path().to_path_buf())
+        .unwrap()
+        .is_none());
+    writer
+        .upsert(sample_file(&dir.path().join("third.txt"), 3, 3))
+        .unwrap();
+    assert_eq!(writer.count().unwrap(), 1);
+    writer.shutdown().unwrap();
 }
 
 fn sample_file(path: &Path, inode: u64, mtime_ns: i64) -> IndexedFile {
@@ -90,7 +119,6 @@ fn writes_are_visible_to_a_concurrent_reader_without_locking() {
     let reader = SearchDatabase::open_read_only(&db_path).unwrap();
 
     writer.upsert(sample_file(&file_path, 10, 20)).unwrap();
-    writer.flush().unwrap();
 
     // The read-only connection sees the committed write while the writer
     // thread is still alive and holding the write connection.
@@ -107,7 +135,6 @@ fn signatures_round_trip_through_the_writer() {
 
     let writer = IndexWriter::spawn(SearchDatabase::open(&db_path).unwrap());
     writer.upsert(sample_file(&file_path, 42, 99)).unwrap();
-    writer.flush().unwrap();
 
     let stored = writer
         .classify_observed(vec![ObservedFile {
@@ -154,7 +181,6 @@ fn skipped_stage_state_round_trips_through_the_writer() {
         content: EntryStageProgress::Skipped,
     };
     writer.upsert(file).unwrap();
-    writer.flush().unwrap();
 
     let stored = writer
         .classify_observed(vec![ObservedFile {
@@ -191,10 +217,8 @@ fn local_delete_only_removes_its_target() {
     let writer = IndexWriter::spawn(SearchDatabase::open(&db_path).unwrap());
     writer.upsert(sample_file(&kept, 1, 1)).unwrap();
     writer.upsert(sample_file(&gone, 2, 2)).unwrap();
-    writer.flush().unwrap();
 
     writer.delete_scope(gone).unwrap();
-    writer.flush().unwrap();
 
     assert_eq!(writer.count().unwrap(), 1);
     let reader = SearchDatabase::open_read_only(&db_path).unwrap();
@@ -220,7 +244,7 @@ fn shutdown_drains_queued_writes_before_stopping_writer() {
 }
 
 #[test]
-fn cancelled_index_maintenance_discards_write_failure_during_shutdown() {
+fn write_failure_after_cancellation_goes_to_its_caller_and_not_to_shutdown() {
     let dir = tempdir().unwrap();
     let db_path = dir.path().join("search.sqlite");
     let database = SearchDatabase::open(&db_path).unwrap();
@@ -231,9 +255,9 @@ fn cancelled_index_maintenance_discards_write_failure_during_shutdown() {
     let writer = IndexWriter::spawn(database);
 
     writer.cancel_index_maintenance();
-    writer
+    assert!(writer
         .upsert(sample_file(&dir.path().join("note.txt"), 1, 1))
-        .unwrap();
+        .is_err());
 
     writer.shutdown().unwrap();
 }
@@ -303,7 +327,6 @@ fn file_batch_commits_many_metadata_rows_with_one_handoff() {
         .collect();
 
     writer.apply_file_batch(mutations).unwrap();
-    writer.flush().unwrap();
 
     assert_eq!(writer.count().unwrap(), 128);
 }

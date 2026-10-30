@@ -14,8 +14,9 @@ use crate::model::{
 use crate::thumbnail_cache::{
     request_for_transfer_conflict_path, ThumbnailCache, TRANSFER_CONFLICT_THUMBNAIL_EDGE,
 };
+use bennu_preview::entry_icons::file_entry_icon_symbol;
 use bennu_preview::panel_text::readable_text;
-use bennu_theme::icons::{file_entry_icon_symbol, IconSymbol};
+use bennu_theme::icons::IconSymbol;
 
 use super::option_controls::secondary_action_button_style;
 use super::{themed_icon, IconTone};

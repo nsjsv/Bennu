@@ -6,7 +6,6 @@ license.workspace = true
 
 [dependencies]
 bennu-localization = { path = "../bennu-localization" }
-file-core = { path = "../file-core" }
 # 这里只声明主题/部件编译所需的 iced core、widget 和平台 feature；renderer
 # 由宿主选择。继承 workspace 的 wgpu 会让 tiny-skia portal 变成 WGPU fallback。
 iced = { version = "0.14", default-features = false, features = [

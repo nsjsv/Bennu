@@ -641,11 +641,9 @@ version = "0.3.6"
 dependencies = [
  "bennu-localization",
  "bennu-state",
- "bennu-theme",
  "desktop-linux",
  "dirs",
  "serde",
- "tempfile",
  "toml",
 ]
 
@@ -672,7 +670,6 @@ name = "bennu-theme"
 version = "0.3.6"
 dependencies = [
  "bennu-localization",
- "file-core",
  "iced",
  "serde",
  "serde_json",

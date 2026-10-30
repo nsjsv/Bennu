@@ -3,11 +3,11 @@
 //! （EntryClicked/EntryDoubleClicked/EntryHovered），索引即根行索引；
 //! 视觉词汇（样式、图标）全部来自 bennu-theme 共享层。
 
+use bennu_preview::entry_icons::file_entry_icon_symbol;
 use bennu_theme::icon_grid_geometry::{
     grid_gap, icon_label_spacing, label_height, label_size, tile_padding_horizontal,
     tile_padding_vertical, tile_visual_height, tile_width, ICON_GRID_CONTENT_PADDING,
 };
-use bennu_theme::icons::file_entry_icon_symbol;
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use bennu_theme::styles::{
     enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction, hovered_row_style,

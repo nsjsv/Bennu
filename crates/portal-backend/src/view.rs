@@ -5,8 +5,9 @@
 //! crate `bennu-theme`，与主程序消费同一份活动主题，保证两个进程的
 //! FileChooser 窗口看起来是同一个应用。
 
+use bennu_preview::entry_icons::file_entry_icon_symbol;
 use bennu_preview::formatting::format_file_size;
-use bennu_theme::icons::{file_entry_icon_symbol, rotated_chevron_right_view};
+use bennu_theme::icons::rotated_chevron_right_view;
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use bennu_theme::smooth_scroll::SmoothScrollArea;
 use bennu_theme::styles::{

@@ -1,7 +1,3 @@
-use std::ffi::OsStr;
-use std::path::Path;
-
-use file_core::FileKind;
 use iced::widget::{svg, Svg};
 use iced::{Length, Theme};
 
@@ -63,14 +59,6 @@ pub enum IconSymbol {
     Volume2,
 }
 
-pub fn file_entry_icon_symbol(kind: FileKind, name: &OsStr) -> IconSymbol {
-    file_kind_icon_symbol(kind, Path::new(name).extension().and_then(OsStr::to_str))
-}
-
-pub fn preview_entry_icon_symbol(kind: FileKind, name: &str) -> IconSymbol {
-    file_kind_icon_symbol(kind, Path::new(name).extension().and_then(OsStr::to_str))
-}
-
 pub fn rotated_chevron_right_view(rotation_degrees: f32, size: f32) -> Svg<'static, Theme> {
     Svg::new(svg::Handle::from_memory(rotated_chevron_right_bytes(
         rotation_degrees,
@@ -97,25 +85,9 @@ fn rotated_chevron_right_bytes(rotation_degrees: f32) -> Vec<u8> {
     .into_bytes()
 }
 
-/// 拖拽堆叠用实心图标:中空线条图标叠放会互相穿透,实心形状靠
-/// 遮挡产生层次。
-pub fn file_kind_solid_symbol(kind: FileKind) -> IconSymbol {
-    match kind {
-        FileKind::Directory => IconSymbol::FolderSolid,
-        FileKind::Symlink | FileKind::Other | FileKind::File => IconSymbol::FileSolid,
-    }
-}
-
-fn file_kind_icon_symbol(kind: FileKind, extension: Option<&str>) -> IconSymbol {
-    match kind {
-        FileKind::Directory => IconSymbol::Folder,
-        FileKind::Symlink => IconSymbol::Link,
-        FileKind::Other => IconSymbol::File,
-        FileKind::File => file_extension_icon_symbol(extension),
-    }
-}
-
-fn file_extension_icon_symbol(extension: Option<&str>) -> IconSymbol {
+/// 普通文件按扩展名选图标；目录、链接等按条目种类选图标的映射在 bennu-preview，
+/// 因为种类类型 `FileKind` 属于 file-core，而本 crate 不依赖它。
+pub fn file_extension_icon_symbol(extension: Option<&str>) -> IconSymbol {
     let Some(extension) = extension else {
         return IconSymbol::File;
     };

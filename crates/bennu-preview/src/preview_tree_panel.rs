@@ -5,9 +5,8 @@
 use iced::widget::{column, container, mouse_area, row, scrollable, Column, Space};
 use iced::{Alignment, Element, Length};
 
-use bennu_theme::icons::{
-    icon_tone_style, preview_entry_icon_symbol, rotated_chevron_right_view, themed_icon, IconTone,
-};
+use crate::entry_icons::preview_entry_icon_symbol;
+use bennu_theme::icons::{icon_tone_style, rotated_chevron_right_view, themed_icon, IconTone};
 use bennu_theme::measured_text::format_middle_ellipsized_text;
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis, ScrollbarViewport};
 use bennu_theme::styles::{

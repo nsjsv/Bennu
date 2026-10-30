@@ -7,8 +7,9 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
+use bennu_preview::entry_icons::file_entry_icon_symbol;
 use bennu_preview::panel_text::readable_text;
-use bennu_theme::icons::{file_entry_icon_symbol, IconSymbol};
+use bennu_theme::icons::IconSymbol;
 use bennu_theme::measured_text::{
     measured_middle_ellipsized_centered_text, measured_middle_ellipsized_text,
 };

@@ -19,8 +19,9 @@ use crate::model::{
     FilePropertiesPermissions, FilePropertiesPresentation, FilePropertiesSnapshot,
     FilePropertiesState, Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility,
 };
+use bennu_preview::entry_icons::file_entry_icon_symbol;
 use bennu_preview::panel_text::readable_text;
-use bennu_theme::icons::{file_entry_icon_symbol, IconSymbol};
+use bennu_theme::icons::IconSymbol;
 
 use super::auxiliary_window_layout::{
     auxiliary_detail_scroller, auxiliary_sidebar, auxiliary_sidebar_button, auxiliary_split_window,

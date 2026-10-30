@@ -4,8 +4,9 @@
 //! ColumnEntryDoubleClicked / ColumnEntryHovered）；视觉词汇（样式、
 //! 图标、滚动条）全部来自 bennu-theme 共享层。
 
+use bennu_preview::entry_icons::file_entry_icon_symbol;
 use bennu_theme::column_geometry::{ColumnEntryGeometry, COLUMN_ENTRY_TEXT_SIZE, COLUMN_PADDING};
-use bennu_theme::icons::{file_entry_icon_symbol, IconSymbol};
+use bennu_theme::icons::IconSymbol;
 use bennu_theme::measured_text::measured_middle_ellipsized_text;
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use bennu_theme::styles::{

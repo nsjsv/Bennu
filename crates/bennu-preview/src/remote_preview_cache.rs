@@ -66,13 +66,21 @@ pub async fn cache_remote_preview_file(
         })?;
 
     let now = SystemTime::now();
-    let _ = remove_expired_remote_preview_files(&request.cache_dir, now).await;
-    // 每次缓存流程先做容量预算清理，覆盖会话首次预览与长期未预览后的再次进入。
-    let _ = enforce_remote_preview_cache_budget_with_limit(
+    log_cache_cleanup_failure(
         &request.cache_dir,
-        NETWORK_PREVIEW_CACHE_MAX_BYTES,
-    )
-    .await;
+        "remove expired files",
+        remove_expired_remote_preview_files(&request.cache_dir, now).await,
+    );
+    // 每次缓存流程先做容量预算清理，覆盖会话首次预览与长期未预览后的再次进入。
+    log_cache_cleanup_failure(
+        &request.cache_dir,
+        "enforce size budget",
+        enforce_remote_preview_cache_budget_with_limit(
+            &request.cache_dir,
+            NETWORK_PREVIEW_CACHE_MAX_BYTES,
+        )
+        .await,
+    );
 
     let source_metadata = fs::metadata(&request.source_path).await.map_err(|error| {
         format!(
@@ -113,12 +121,29 @@ pub async fn cache_remote_preview_file(
         .await
         .map_err(|error| format!("could not download remote preview file: {error}"))?;
     // 下载新增文件后再次清理，保证总量始终在预算内。
-    let _ = enforce_remote_preview_cache_budget_with_limit(
+    log_cache_cleanup_failure(
         &request.cache_dir,
-        NETWORK_PREVIEW_CACHE_MAX_BYTES,
-    )
-    .await;
+        "enforce size budget",
+        enforce_remote_preview_cache_budget_with_limit(
+            &request.cache_dir,
+            NETWORK_PREVIEW_CACHE_MAX_BYTES,
+        )
+        .await,
+    );
     Ok(cache_path)
+}
+
+/// 清理只为控制缓存占用，失败不影响这次预览；但要留下记录，否则缓存会悄悄越积越多。
+fn log_cache_cleanup_failure(cache_dir: &Path, step: &'static str, outcome: io::Result<()>) {
+    if let Err(error) = outcome {
+        tracing::warn!(
+            event = "remote_preview_cache_cleanup_failed",
+            step,
+            cache_dir = %cache_dir.display(),
+            %error,
+            "remote preview cache cleanup failed"
+        );
+    }
 }
 
 fn remote_preview_cache_path(
@@ -191,7 +216,7 @@ async fn remove_expired_remote_preview_files(cache_dir: &Path, now: SystemTime) 
 
     while let Some(entry) = entries.next_entry().await? {
         let path = entry.path();
-        let Ok(metadata) = entry.metadata().await else {
+        let Some(metadata) = entry_metadata_unless_gone(&entry).await? else {
             continue;
         };
         let expired = metadata
@@ -234,7 +259,7 @@ async fn enforce_remote_preview_cache_budget_with_limit(
     };
     let mut files: Vec<(PathBuf, u64, SystemTime)> = Vec::new();
     while let Some(entry) = entries.next_entry().await? {
-        let Ok(metadata) = entry.metadata().await else {
+        let Some(metadata) = entry_metadata_unless_gone(&entry).await? else {
             continue;
         };
         if !metadata.is_file() {
@@ -252,16 +277,33 @@ async fn enforce_remote_preview_cache_budget_with_limit(
         return Ok(());
     }
     // 超预算按 modified 最旧优先删除，等价 LRU：刚下载的文件 modified 最新，必被保留。
+    // 某个删不掉就接着删下一个，尽量回到预算内，最后报第一个失败。
     files.sort_by_key(|(_, _, modified)| *modified);
+    let mut first_failure = None;
     for (path, size, _) in files {
         if total_bytes <= max_total_bytes {
             break;
         }
-        if fs::remove_file(&path).await.is_ok() {
-            total_bytes = total_bytes.saturating_sub(size);
+        match fs::remove_file(&path).await {
+            Ok(()) => total_bytes = total_bytes.saturating_sub(size),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                total_bytes = total_bytes.saturating_sub(size);
+            }
+            Err(error) => {
+                first_failure.get_or_insert(error);
+            }
         }
     }
-    Ok(())
+    first_failure.map_or(Ok(()), Err)
+}
+
+/// 条目在列目录和取元数据之间被别处删掉不算失败；其余读不到的情况如实返回。
+async fn entry_metadata_unless_gone(entry: &fs::DirEntry) -> io::Result<Option<std::fs::Metadata>> {
+    match entry.metadata().await {
+        Ok(metadata) => Ok(Some(metadata)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 #[cfg(test)]
@@ -376,6 +418,71 @@ mod tests {
             CancellationToken::new(),
         );
         cache_remote_preview_file(request, progress).await
+    }
+
+    /// 清理失败不拦预览，但要留下日志事件。
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_cache_entry_that_cannot_be_removed_is_logged_and_the_preview_still_works() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use tracing_subscriber::layer::{Context, SubscriberExt};
+
+        struct CleanupFailureCounter(Arc<AtomicUsize>);
+        impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for CleanupFailureCounter {
+            fn on_event(&self, event: &tracing::Event<'_>, _: Context<'_, S>) {
+                struct EventName(bool);
+                impl tracing::field::Visit for EventName {
+                    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+                        if field.name() == "event" && value == "remote_preview_cache_cleanup_failed"
+                        {
+                            self.0 = true;
+                        }
+                    }
+                    fn record_debug(&mut self, _: &tracing::field::Field, _: &dyn std::fmt::Debug) {
+                    }
+                }
+                let mut name = EventName(false);
+                event.record(&mut name);
+                if name.0 {
+                    self.0.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+        }
+
+        let temp_dir = tempdir().expect("temp dir");
+        let source = temp_dir.path().join("remote.txt");
+        let cache_dir = temp_dir.path().join("cache");
+        let stale = cache_dir.join("network-preview-stale");
+        tokio::fs::write(&source, b"remote")
+            .await
+            .expect("write source");
+        std::fs::create_dir_all(&stale).expect("create stale entry");
+        std::fs::write(stale.join("inner"), b"stale").expect("write stale content");
+        std::fs::File::open(&stale)
+            .and_then(|directory| directory.set_modified(UNIX_EPOCH + Duration::from_secs(1)))
+            .expect("age stale entry");
+        std::fs::set_permissions(&stale, std::fs::Permissions::from_mode(0o555))
+            .expect("lock stale entry");
+        // root 不受目录权限限制，删得掉就测不出这条路径。
+        if std::fs::write(stale.join("probe"), b"").is_ok() {
+            std::fs::set_permissions(&stale, std::fs::Permissions::from_mode(0o755)).unwrap();
+            return;
+        }
+
+        let failures = Arc::new(AtomicUsize::new(0));
+        let subscriber =
+            tracing_subscriber::registry().with(CleanupFailureCounter(Arc::clone(&failures)));
+        let cached = {
+            // 当前线程运行时：清理与日志都在这个线程上，线程内订阅器看得到。
+            let _subscriber = tracing::subscriber::set_default(subscriber);
+            cache_once(&source, &cache_dir).await
+        };
+        std::fs::set_permissions(&stale, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert_eq!(tokio::fs::read(&cached).await.unwrap(), b"remote");
+        assert!(failures.load(Ordering::SeqCst) >= 1);
     }
 
     #[tokio::test]

@@ -78,3 +78,5 @@ tracing.workspace = true
 # 仅测试用：把 Task 还原成动作流断言窗口/输出动作（自 app-ui 迁入的
 # 初始 chrome 计时命令测试依赖）。
 iced_runtime = "0.14"
+# 仅测试用：捕获日志事件，断言清理失败被记录。
+tracing-subscriber.workspace = true

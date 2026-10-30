@@ -210,17 +210,12 @@ impl RenderingGpuPreference {
         }
     }
 
-    pub(crate) fn wgpu_power_preference(
-        self,
-        display_renderer_gpu: Option<&DisplayRendererGpu>,
-    ) -> Option<&'static str> {
+    /// 不经探针时的电源偏好。显示 GPU 的集显/独显只有探针问 Vulkan 才知道，
+    /// 这里给 `none`：钉住了卡时 wgpu 取第一块就是它。
+    pub(crate) fn wgpu_power_preference(self) -> &'static str {
         match self {
-            Self::DisplayGpu => Some(
-                display_renderer_gpu
-                    .map(|gpu| gpu.class().wgpu_power_preference())
-                    .unwrap_or("none"),
-            ),
-            Self::HighPerformanceGpu => Some("high"),
+            Self::DisplayGpu => "none",
+            Self::HighPerformanceGpu => "high",
         }
     }
 

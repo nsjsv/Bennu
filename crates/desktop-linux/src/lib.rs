@@ -17,8 +17,7 @@ pub mod x11_dnd;
 
 pub use desktop_notifications::{publish_desktop_notification, DesktopNotificationError};
 pub use display_renderer::{
-    detect_display_renderer_gpu, detect_display_renderer_gpu_class, DisplayRendererGpu,
-    DisplayRendererGpuClass,
+    detect_display_renderer_gpu, DisplayRendererGpu, DisplayRendererGpuClass,
 };
 pub use file_clipboard::{
     parse_file_uri_list, parse_gnome_copied_files, read_desktop_clipboard, read_file_clipboard,

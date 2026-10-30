@@ -17,7 +17,8 @@ use crate::startup_rendering::{
     StartupRenderingEnvironment,
 };
 
-const RENDERER_PROBE_CACHE_VERSION: i64 = 1;
+// 2:电源偏好改由 Vulkan 报告的类型决定;旧缓存按设备号表猜的,一律重探。
+const RENDERER_PROBE_CACHE_VERSION: i64 = 2;
 pub(crate) const RENDERER_FALLBACK_GUARD_ENV: &str = "FILE_MANAGER_RENDERER_FALLBACK";
 
 /// 缓存命中的完整判定。`display_gpu` 由调用方在 DisplayGpu 偏好下预先检测;
@@ -118,8 +119,8 @@ pub(crate) fn gl_fallback_restart_after_renderer_failure() -> Result<(), String>
 }
 
 /// 记录还原为探针 GPU 选择。mesa 字段存在即视为检测成功过的 Vulkan 选择,
-/// power 必须是 low/high;mesa 缺失时只接受 power none/high(检测失败或
-/// 高性能偏好),low 无来源,视为损坏。
+/// power 可以是 low/high/none(none = 钉住了卡但 Vulkan 没报类型);mesa 缺失
+/// 时只接受 power none/high(检测失败或高性能偏好),low 无来源,视为损坏。
 fn gpu_selection_from_record(
     record: &RendererProbeCacheRecord,
 ) -> Option<Option<RendererProbeGpuSelection>> {
@@ -136,7 +137,7 @@ fn gpu_selection_from_record(
             _ => None,
         };
     };
-    if !matches!(power, "low" | "high") || !valid_mesa_vulkan_device_select(mesa) {
+    if !valid_mesa_vulkan_device_select(mesa) {
         return None;
     }
     let vulkan_loader_driver_select = match record.vulkan_loader_driver_select.as_deref() {
@@ -154,8 +155,6 @@ fn gpu_selection_from_record(
 mod tests {
     use std::collections::HashMap;
 
-    use desktop_linux::DisplayRendererGpuClass;
-
     use super::*;
     use crate::startup_rendering::{
         environment_matches, ICED_BACKEND_ENV, MESA_VK_DEVICE_SELECT_ENV,
@@ -163,11 +162,7 @@ mod tests {
     };
 
     fn display_gpu(vendor: &str, device: &str) -> desktop_linux::DisplayRendererGpu {
-        desktop_linux::DisplayRendererGpu::from_drm_ids(
-            DisplayRendererGpuClass::Integrated,
-            vendor,
-            device,
-        )
+        desktop_linux::DisplayRendererGpu::from_drm_ids(vendor, device)
     }
 
     fn amd_gpu() -> desktop_linux::DisplayRendererGpu {
@@ -222,6 +217,30 @@ mod tests {
                 StartupRenderingBackend::Vulkan,
             )
         );
+    }
+
+    #[test]
+    fn cached_pinned_gpu_without_a_vulkan_class_keeps_power_none() {
+        let gpu = amd_gpu();
+        let selection = RendererProbeGpuSelection {
+            wgpu_power_preference: "none",
+            ..amd_selection()
+        };
+        let record = probe_completion_record(
+            RenderingGpuPreference::DisplayGpu,
+            Some(&selection),
+            StartupRenderingBackend::Vulkan,
+            Some(&gpu),
+        );
+
+        let cached =
+            cached_probe_environment(RenderingGpuPreference::DisplayGpu, &record, Some(&gpu))
+                .expect("pinned gpu with power none is a valid cache entry");
+
+        assert!(environment_matches(
+            &cached,
+            &expected_environment_map(StartupRenderingBackend::Vulkan, "none")
+        ));
     }
 
     #[test]

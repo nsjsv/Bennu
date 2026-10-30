@@ -2,7 +2,7 @@ use std::io::{Read, Write};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use desktop_linux::DisplayRendererGpu;
+use desktop_linux::{DisplayRendererGpu, DisplayRendererGpuClass};
 use iced::{window, Element, Size, Task};
 
 #[cfg(test)]
@@ -105,9 +105,7 @@ impl StartupRenderingEnvironment {
                 },
                 StartupRenderingVariable {
                     key: WGPU_POWER_PREF_ENV,
-                    value: preference
-                        .wgpu_power_preference(display_renderer_gpu)
-                        .map(str::to_owned),
+                    value: Some(preference.wgpu_power_preference().to_owned()),
                 },
                 StartupRenderingVariable {
                     key: VK_LOADER_DRIVERS_SELECT_ENV,
@@ -251,9 +249,15 @@ impl StartupRenderingEnvironmentStatus {
 const RENDERER_PROBE_SELECTION_PREFIX: &str = "bennu-renderer-gpu-v1";
 
 impl RendererProbeGpuSelection {
-    fn from_display_gpu(display_renderer_gpu: &DisplayRendererGpu) -> Self {
+    /// `class` 是 Vulkan 驱动报告的类型；问不到时偏好 `none`：设备已钉住，
+    /// wgpu 取第一块就是它。
+    fn from_display_gpu(
+        display_renderer_gpu: &DisplayRendererGpu,
+        class: Option<DisplayRendererGpuClass>,
+    ) -> Self {
         Self {
-            wgpu_power_preference: display_renderer_gpu.class().wgpu_power_preference(),
+            wgpu_power_preference: class
+                .map_or("none", DisplayRendererGpuClass::wgpu_power_preference),
             mesa_vulkan_device_select: display_renderer_gpu.mesa_vulkan_device_select(),
             vulkan_loader_driver_select: display_renderer_gpu.vulkan_loader_driver_select(),
         }
@@ -278,11 +282,7 @@ impl RendererProbeGpuSelection {
         if fields.next()? != RENDERER_PROBE_SELECTION_PREFIX {
             return None;
         }
-        let wgpu_power_preference = match fields.next()? {
-            "low" => "low",
-            "high" => "high",
-            _ => return None,
-        };
+        let wgpu_power_preference = parse_wgpu_power_preference_value(fields.next()?)?;
         let mesa_vulkan_device_select = fields.next()?.to_owned();
         let vulkan_loader_driver_select = match fields.next()? {
             "none" => None,
@@ -312,8 +312,8 @@ pub(crate) fn valid_mesa_vulkan_device_select(value: &str) -> bool {
         && device_id.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-/// wgpu 电源偏好字面量域。缓存里会出现 "none"(探针未能识别显示 GPU 或 GL 回退),
-/// 探针 stdout 只产 "low"/"high"。
+/// wgpu 电源偏好字面量域。"none":没找到显示 GPU、GL 回退,或钉住了卡但
+/// Vulkan 没报出集显/独显。
 pub(crate) fn parse_wgpu_power_preference_value(value: &str) -> Option<&'static str> {
     match value {
         "low" => Some("low"),
@@ -448,18 +448,26 @@ pub(crate) fn run_vulkan_renderer_probe() -> iced::Result {
     std::env::set_var(ICED_BACKEND_ENV, "wgpu");
     std::env::set_var(WGPU_BACKEND_ENV, VULKAN_BACKEND_VALUE);
 
-    if let Some(gpu_selection) = renderer_probe_gpu_selection() {
+    let display_gpu = (std::env::var(WGPU_POWER_PREF_ENV).ok().as_deref() == Some("none"))
+        .then(desktop_linux::detect_display_renderer_gpu)
+        .flatten();
+    if let Some(display_gpu) = display_gpu {
         std::env::set_var(
             MESA_VK_DEVICE_SELECT_ENV,
-            &gpu_selection.mesa_vulkan_device_select,
+            display_gpu.mesa_vulkan_device_select(),
         );
-        match gpu_selection.vulkan_loader_driver_select {
+        match display_gpu.vulkan_loader_driver_select() {
             Some(driver_select) => {
                 std::env::set_var(VK_LOADER_DRIVERS_SELECT_ENV, driver_select);
             }
             None => std::env::remove_var(VK_LOADER_DRIVERS_SELECT_ENV),
         }
-        emit_renderer_probe_selection(&gpu_selection);
+        // 设好设备选择和驱动过滤之后再问类型：Vulkan 只加载这块卡的驱动。
+        let class = display_gpu.vulkan_class();
+        emit_renderer_probe_selection(&RendererProbeGpuSelection::from_display_gpu(
+            &display_gpu,
+            class,
+        ));
     }
 
     iced::daemon(
@@ -468,15 +476,6 @@ pub(crate) fn run_vulkan_renderer_probe() -> iced::Result {
         renderer_probe_view,
     )
     .run()
-}
-
-fn renderer_probe_gpu_selection() -> Option<RendererProbeGpuSelection> {
-    (std::env::var(WGPU_POWER_PREF_ENV).ok().as_deref() == Some("none"))
-        .then(desktop_linux::detect_display_renderer_gpu)
-        .flatten()
-        .map(|display_renderer_gpu| {
-            RendererProbeGpuSelection::from_display_gpu(&display_renderer_gpu)
-        })
 }
 
 fn emit_renderer_probe_selection(gpu_selection: &RendererProbeGpuSelection) {
@@ -608,7 +607,6 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use desktop_linux::DisplayRendererGpuClass;
 
     const PROBE_TEST_MODE_ENV: &str = "FILE_MANAGER_RENDERER_PROBE_TEST_MODE";
 
@@ -703,11 +701,7 @@ mod tests {
 
     #[test]
     fn display_gpu_environment_uses_detected_gpu_when_available() {
-        let gpu = DisplayRendererGpu::from_drm_ids(
-            DisplayRendererGpuClass::Integrated,
-            "0x1002",
-            "0x15bf",
-        );
+        let gpu = DisplayRendererGpu::from_drm_ids("0x1002", "0x15bf");
 
         let environment = StartupRenderingEnvironment::from_preference(
             RenderingGpuPreference::DisplayGpu,
@@ -720,7 +714,11 @@ mod tests {
             Some("wgpu,tiny-skia")
         );
         assert_eq!(environment.variable_value(WGPU_BACKEND_ENV), Some("vulkan"));
-        assert_eq!(environment.variable_value(WGPU_POWER_PREF_ENV), Some("low"));
+        // 没经探针问 Vulkan 就不猜集显/独显：卡已钉住，偏好 none。
+        assert_eq!(
+            environment.variable_value(WGPU_POWER_PREF_ENV),
+            Some("none")
+        );
         assert_eq!(
             environment.variable_value(MESA_VK_DEVICE_SELECT_ENV),
             Some("1002:15bf!")
@@ -747,6 +745,24 @@ mod tests {
             b"bennu-renderer-gpu-v1\tlow\t$LD_PRELOAD!\t*nvidia*"
         )
         .is_none());
+    }
+
+    #[test]
+    fn probe_selection_takes_power_from_the_vulkan_class() {
+        let gpu = DisplayRendererGpu::from_drm_ids("0x8086", "0x56a0");
+        let discrete = RendererProbeGpuSelection::from_display_gpu(
+            &gpu,
+            Some(DisplayRendererGpuClass::Discrete),
+        );
+        let unknown = RendererProbeGpuSelection::from_display_gpu(&gpu, None);
+
+        // Intel Arc 独显:以前按厂商一律当集显。
+        assert_eq!(discrete.wgpu_power_preference, "high");
+        assert_eq!(unknown.wgpu_power_preference, "none");
+        assert_eq!(
+            RendererProbeGpuSelection::decode(unknown.encode().as_bytes()),
+            Some(unknown)
+        );
     }
 
     #[test]
@@ -794,11 +810,7 @@ mod tests {
     }
     #[test]
     fn high_performance_environment_avoids_display_gpu_selection() {
-        let gpu = DisplayRendererGpu::from_drm_ids(
-            DisplayRendererGpuClass::Integrated,
-            "0x1002",
-            "0x15bf",
-        );
+        let gpu = DisplayRendererGpu::from_drm_ids("0x1002", "0x15bf");
 
         let environment = StartupRenderingEnvironment::from_preference(
             RenderingGpuPreference::HighPerformanceGpu,

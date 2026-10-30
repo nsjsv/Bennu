@@ -19,14 +19,6 @@ const COMPOSITOR_COMM_PRIORITY: &[&str] = &[
     "xorg",
     "x",
 ];
-const INTEL_VENDOR_ID: &str = "0x8086";
-const NVIDIA_VENDOR_ID: &str = "0x10de";
-const AMD_VENDOR_ID: &str = "0x1002";
-const AMD_APU_VENDOR_ID: &str = "0x1022";
-const AMD_INTEGRATED_DEVICE_IDS: &[&str] = &[
-    "0x15bf", "0x15d8", "0x15dd", "0x15e7", "0x1636", "0x1638", "0x164c", "0x164d", "0x1681",
-    "0x1688",
-];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DisplayRendererGpuClass {
@@ -43,28 +35,60 @@ impl DisplayRendererGpuClass {
     }
 }
 
+/// 合成器正在用的那块卡（DRM 报告的 PCI vendor/device）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DisplayRendererGpu {
-    class: DisplayRendererGpuClass,
     vendor_id: String,
     device_id: String,
 }
 
 impl DisplayRendererGpu {
-    pub fn from_drm_ids(
-        class: DisplayRendererGpuClass,
-        vendor_id: impl Into<String>,
-        device_id: impl Into<String>,
-    ) -> Self {
+    pub fn from_drm_ids(vendor_id: impl Into<String>, device_id: impl Into<String>) -> Self {
         Self {
-            class,
             vendor_id: vendor_id.into().to_ascii_lowercase(),
             device_id: device_id.into().to_ascii_lowercase(),
         }
     }
 
-    pub fn class(&self) -> DisplayRendererGpuClass {
-        self.class
+    /// 这块卡是集显还是独显，以 Vulkan 驱动报告的设备类型为准：驱动用的是
+    /// 和 switcheroo-control 一样的内核事实（APU 标志、有没有独立显存），
+    /// 不靠设备号表。调用前先把本卡的 `mesa_vulkan_device_select` 与
+    /// `vulkan_loader_driver_select` 写进环境，Vulkan 只加载这块卡的驱动，
+    /// 不会唤醒其它卡。拿不到（找不到这块卡、CPU/虚拟卡）时返回 `None`。
+    pub fn vulkan_class(&self) -> Option<DisplayRendererGpuClass> {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::VULKAN,
+            ..Default::default()
+        });
+        self.class_among(
+            instance
+                .enumerate_adapters(wgpu::Backends::VULKAN)
+                .iter()
+                .map(|adapter| {
+                    let info = adapter.get_info();
+                    (info.vendor, info.device, info.device_type)
+                }),
+        )
+    }
+
+    fn class_among(
+        &self,
+        adapters: impl IntoIterator<Item = (u32, u32, wgpu::DeviceType)>,
+    ) -> Option<DisplayRendererGpuClass> {
+        let vendor = u32::from_str_radix(hex_id_without_prefix(&self.vendor_id), 16).ok()?;
+        let device = u32::from_str_radix(hex_id_without_prefix(&self.device_id), 16).ok()?;
+        adapters
+            .into_iter()
+            .find(|(adapter_vendor, adapter_device, _)| {
+                (*adapter_vendor, *adapter_device) == (vendor, device)
+            })
+            .and_then(|(_, _, device_type)| match device_type {
+                wgpu::DeviceType::IntegratedGpu => Some(DisplayRendererGpuClass::Integrated),
+                wgpu::DeviceType::DiscreteGpu => Some(DisplayRendererGpuClass::Discrete),
+                wgpu::DeviceType::Other | wgpu::DeviceType::VirtualGpu | wgpu::DeviceType::Cpu => {
+                    None
+                }
+            })
     }
 
     pub fn mesa_vulkan_device_select(&self) -> String {
@@ -92,20 +116,8 @@ struct CompositorCandidate {
     same_user: bool,
 }
 
-pub fn detect_display_renderer_gpu_class() -> Option<DisplayRendererGpuClass> {
-    detect_display_renderer_gpu().map(|gpu| gpu.class())
-}
-
 pub fn detect_display_renderer_gpu() -> Option<DisplayRendererGpu> {
     detect_display_renderer_gpu_at(Path::new("/proc"), Path::new("/sys/class/drm"))
-}
-
-#[cfg(test)]
-fn detect_display_renderer_gpu_class_at(
-    proc_root: &Path,
-    drm_class_root: &Path,
-) -> Option<DisplayRendererGpuClass> {
-    detect_display_renderer_gpu_at(proc_root, drm_class_root).map(|gpu| gpu.class())
 }
 
 fn detect_display_renderer_gpu_at(
@@ -255,38 +267,9 @@ fn drm_node_rank(node: &str, drm_class_root: &Path) -> u8 {
 
 fn gpu_from_drm_node(node: &str, drm_class_root: &Path) -> Option<DisplayRendererGpu> {
     let device_dir = drm_class_root.join(node).join("device");
-    let vendor = read_trimmed(device_dir.join("vendor"))?.to_ascii_lowercase();
-    let device = read_trimmed(device_dir.join("device"))?.to_ascii_lowercase();
-    let card_node = card_node_for_drm_node(node, drm_class_root);
-    let class = gpu_class_from_drm_ids(&vendor, &device, card_node.as_deref(), drm_class_root)?;
-
-    Some(DisplayRendererGpu::from_drm_ids(class, vendor, device))
-}
-
-fn gpu_class_from_drm_ids(
-    vendor: &str,
-    device_id: &str,
-    card_node: Option<&str>,
-    drm_class_root: &Path,
-) -> Option<DisplayRendererGpuClass> {
-    if card_node.is_some_and(|card| has_integrated_panel_connector(card, drm_class_root)) {
-        return Some(DisplayRendererGpuClass::Integrated);
-    }
-
-    match vendor {
-        INTEL_VENDOR_ID => Some(DisplayRendererGpuClass::Integrated),
-        NVIDIA_VENDOR_ID => Some(DisplayRendererGpuClass::Discrete),
-        AMD_VENDOR_ID | AMD_APU_VENDOR_ID => amd_gpu_class(device_id),
-        _ => None,
-    }
-}
-
-fn amd_gpu_class(device_id: &str) -> Option<DisplayRendererGpuClass> {
-    if AMD_INTEGRATED_DEVICE_IDS.contains(&device_id) {
-        Some(DisplayRendererGpuClass::Integrated)
-    } else {
-        Some(DisplayRendererGpuClass::Discrete)
-    }
+    let vendor = read_trimmed(device_dir.join("vendor"))?;
+    let device = read_trimmed(device_dir.join("device"))?;
+    Some(DisplayRendererGpu::from_drm_ids(vendor, device))
 }
 
 fn card_node_for_drm_node(node: &str, drm_class_root: &Path) -> Option<String> {
@@ -362,46 +345,22 @@ mod tests {
     use super::*;
     use std::os::unix::fs::symlink;
 
-    #[test]
-    fn maps_intel_compositor_to_integrated_gpu() {
-        let temp_dir = tempfile::tempdir().expect("create temp dir");
-        let proc_root = temp_dir.path().join("proc");
-        let drm_root = temp_dir.path().join("drm");
-        create_compositor_fd(&proc_root, 100, "gnome-shell", "renderD128");
-        create_drm_device(&drm_root, "renderD128", "card0", INTEL_VENDOR_ID, "0x9a49");
-
-        assert_eq!(
-            detect_display_renderer_gpu_class_at(&proc_root, &drm_root),
-            Some(DisplayRendererGpuClass::Integrated)
-        );
+    fn detected_device(proc_root: &Path, drm_root: &Path) -> Option<String> {
+        detect_display_renderer_gpu_at(proc_root, drm_root)
+            .map(|gpu| gpu.mesa_vulkan_device_select())
     }
 
     #[test]
-    fn maps_nvidia_compositor_to_discrete_gpu() {
+    fn picks_the_card_behind_the_compositor_render_node() {
         let temp_dir = tempfile::tempdir().expect("create temp dir");
         let proc_root = temp_dir.path().join("proc");
         let drm_root = temp_dir.path().join("drm");
         create_compositor_fd(&proc_root, 100, "kwin_wayland", "renderD129");
-        create_drm_device(&drm_root, "renderD129", "card1", NVIDIA_VENDOR_ID, "0x2484");
+        create_drm_device(&drm_root, "renderD129", "card1", "0x10de", "0x2484");
 
         assert_eq!(
-            detect_display_renderer_gpu_class_at(&proc_root, &drm_root),
-            Some(DisplayRendererGpuClass::Discrete)
-        );
-    }
-
-    #[test]
-    fn uses_panel_connector_before_vendor_fallback() {
-        let temp_dir = tempfile::tempdir().expect("create temp dir");
-        let proc_root = temp_dir.path().join("proc");
-        let drm_root = temp_dir.path().join("drm");
-        create_compositor_fd(&proc_root, 100, "gnome-shell", "renderD128");
-        create_drm_device(&drm_root, "renderD128", "card0", AMD_VENDOR_ID, "0xffff");
-        create_connected_connector(&drm_root, "card0-eDP-1");
-
-        assert_eq!(
-            detect_display_renderer_gpu_class_at(&proc_root, &drm_root),
-            Some(DisplayRendererGpuClass::Integrated)
+            detected_device(&proc_root, &drm_root).as_deref(),
+            Some("10de:2484!")
         );
     }
 
@@ -412,12 +371,12 @@ mod tests {
         let drm_root = temp_dir.path().join("drm");
         create_compositor_fd(&proc_root, 10, "Xorg", "renderD129");
         create_compositor_fd(&proc_root, 20, "gnome-shell", "renderD128");
-        create_drm_device(&drm_root, "renderD128", "card0", INTEL_VENDOR_ID, "0x9a49");
-        create_drm_device(&drm_root, "renderD129", "card1", NVIDIA_VENDOR_ID, "0x2484");
+        create_drm_device(&drm_root, "renderD128", "card0", "0x8086", "0x9a49");
+        create_drm_device(&drm_root, "renderD129", "card1", "0x10de", "0x2484");
 
         assert_eq!(
-            detect_display_renderer_gpu_class_at(&proc_root, &drm_root),
-            Some(DisplayRendererGpuClass::Integrated)
+            detected_device(&proc_root, &drm_root).as_deref(),
+            Some("8086:9a49!")
         );
     }
 
@@ -427,12 +386,41 @@ mod tests {
         let proc_root = temp_dir.path().join("proc");
         let drm_root = temp_dir.path().join("drm");
         create_compositor_fd(&proc_root, 100, "niri", "renderD128");
-        create_drm_device(&drm_root, "renderD128", "card0", AMD_VENDOR_ID, "0x15bf");
+        create_drm_device(&drm_root, "renderD128", "card0", "0x1002", "0x15bf");
 
         assert_eq!(
-            detect_display_renderer_gpu_class_at(&proc_root, &drm_root),
-            Some(DisplayRendererGpuClass::Integrated)
+            detected_device(&proc_root, &drm_root).as_deref(),
+            Some("1002:15bf!")
         );
+    }
+
+    #[test]
+    fn takes_the_class_the_vulkan_driver_reports_for_this_card() {
+        use wgpu::DeviceType::{Cpu, DiscreteGpu, IntegratedGpu};
+        // 同一台机器上 Vulkan 看到的卡：合成器那块按 vendor/device 找出来，
+        // 类型照驱动说的，不看厂商。
+        let adapters = [
+            (0x8086, 0x9a49, IntegratedGpu), // Intel 核显
+            (0x8086, 0x56a0, DiscreteGpu),   // Intel Arc A770
+            (0x1002, 0x15bf, IntegratedGpu), // AMD APU（780M）
+            (0x1002, 0x744c, DiscreteGpu),   // AMD RX 7900
+            (0x10de, 0x2484, DiscreteGpu),   // NVIDIA RTX 3070
+            (0x10005, 0x0000, Cpu),          // llvmpipe
+        ];
+        use DisplayRendererGpuClass::{Discrete, Integrated};
+
+        for (vendor, device, expected) in [
+            ("0x8086", "0x9a49", Some(Integrated)),
+            ("0x8086", "0x56a0", Some(Discrete)),
+            ("0x1002", "0x15bf", Some(Integrated)),
+            ("0x1002", "0x744c", Some(Discrete)),
+            ("0x10de", "0x2484", Some(Discrete)),
+            ("0x10005", "0x0000", None),
+            ("0x1234", "0x5678", None),
+        ] {
+            let gpu = DisplayRendererGpu::from_drm_ids(vendor, device);
+            assert_eq!(gpu.class_among(adapters), expected, "{vendor}:{device}");
+        }
     }
 
     #[test]
@@ -441,16 +429,15 @@ mod tests {
         let proc_root = temp_dir.path().join("proc");
         let drm_root = temp_dir.path().join("drm");
         create_compositor_fds(&proc_root, 100, "niri", &["card0", "card1"]);
-        create_drm_device(&drm_root, "card0", "card0", NVIDIA_VENDOR_ID, "0x28e0");
-        create_drm_device(&drm_root, "card1", "card1", AMD_VENDOR_ID, "0x15bf");
+        create_drm_device(&drm_root, "card0", "card0", "0x10de", "0x28e0");
+        create_drm_device(&drm_root, "card1", "card1", "0x1002", "0x15bf");
         create_connected_connector(&drm_root, "card0-HDMI-A-1");
         create_connected_connector(&drm_root, "card1-eDP-1");
 
-        let gpu = detect_display_renderer_gpu_at(&proc_root, &drm_root)
-            .expect("detect display renderer gpu");
-
-        assert_eq!(gpu.vendor_id, AMD_VENDOR_ID);
-        assert_eq!(gpu.device_id, "0x15bf");
+        assert_eq!(
+            detected_device(&proc_root, &drm_root).as_deref(),
+            Some("1002:15bf!")
+        );
     }
 
     #[test]
@@ -459,44 +446,30 @@ mod tests {
         let proc_root = temp_dir.path().join("proc");
         let drm_root = temp_dir.path().join("drm");
         create_compositor_fds(&proc_root, 100, "niri", &["renderD129", "card0", "card1"]);
-        create_drm_device(&drm_root, "renderD129", "card0", NVIDIA_VENDOR_ID, "0x28e0");
-        create_drm_device(&drm_root, "card0", "card0", NVIDIA_VENDOR_ID, "0x28e0");
-        create_drm_device(&drm_root, "card1", "card1", AMD_VENDOR_ID, "0x15bf");
+        create_drm_device(&drm_root, "renderD129", "card0", "0x10de", "0x28e0");
+        create_drm_device(&drm_root, "card0", "card0", "0x10de", "0x28e0");
+        create_drm_device(&drm_root, "card1", "card1", "0x1002", "0x15bf");
         create_boot_vga(&drm_root, "card0", "0");
         create_boot_vga(&drm_root, "card1", "1");
 
-        let gpu = detect_display_renderer_gpu_at(&proc_root, &drm_root)
-            .expect("detect display renderer gpu");
-
-        assert_eq!(gpu.class(), DisplayRendererGpuClass::Integrated);
-        assert_eq!(gpu.mesa_vulkan_device_select(), "1002:15bf!");
+        assert_eq!(
+            detected_device(&proc_root, &drm_root).as_deref(),
+            Some("1002:15bf!")
+        );
     }
 
     #[test]
     fn formats_mesa_vulkan_device_selection() {
-        let gpu = DisplayRendererGpu::from_drm_ids(
-            DisplayRendererGpuClass::Discrete,
-            NVIDIA_VENDOR_ID,
-            "0x28e0",
-        );
+        let gpu = DisplayRendererGpu::from_drm_ids("0x10DE", "0x28e0");
 
         assert_eq!(gpu.mesa_vulkan_device_select(), "10de:28e0!");
     }
 
     #[test]
     fn maps_gpu_vendor_to_loader_driver_filter() {
-        let nvidia =
-            DisplayRendererGpu::from_drm_ids(DisplayRendererGpuClass::Discrete, "0x10de", "0x28e0");
-        let amd = DisplayRendererGpu::from_drm_ids(
-            DisplayRendererGpuClass::Integrated,
-            "0x1002",
-            "0x15bf",
-        );
-        let unknown = DisplayRendererGpu::from_drm_ids(
-            DisplayRendererGpuClass::Integrated,
-            "0x1234",
-            "0x5678",
-        );
+        let nvidia = DisplayRendererGpu::from_drm_ids("0x10de", "0x28e0");
+        let amd = DisplayRendererGpu::from_drm_ids("0x1002", "0x15bf");
+        let unknown = DisplayRendererGpu::from_drm_ids("0x1234", "0x5678");
 
         assert_eq!(nvidia.vulkan_loader_driver_select(), Some("*nvidia*"));
         assert_eq!(amd.vulkan_loader_driver_select(), Some("*amd*,*radeon*"));

@@ -2,8 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use desktop_linux::{
-    DisplayRendererGpu, DisplayRendererGpuClass, NetworkConnection, NetworkConnectionId,
-    NetworkProtocol, TerminalEmulator,
+    DisplayRendererGpu, NetworkConnection, NetworkConnectionId, NetworkProtocol, TerminalEmulator,
 };
 use file_core::{FileOperationVerification, SortDirection, SortField};
 use file_operation_store::{
@@ -748,34 +747,20 @@ fn maps_rendering_gpu_preferences_to_iced_backend() {
 }
 
 #[test]
-fn maps_display_gpu_preference_to_display_matched_wgpu_power() {
-    let integrated_gpu =
-        DisplayRendererGpu::from_drm_ids(DisplayRendererGpuClass::Integrated, "0x1002", "0x15bf");
-    let discrete_gpu =
-        DisplayRendererGpu::from_drm_ids(DisplayRendererGpuClass::Discrete, "0x10de", "0x28e0");
-
+fn display_gpu_preference_leaves_power_to_the_probe() {
     assert_eq!(
-        RenderingGpuPreference::DisplayGpu.wgpu_power_preference(Some(&integrated_gpu)),
-        Some("low")
+        RenderingGpuPreference::DisplayGpu.wgpu_power_preference(),
+        "none"
     );
     assert_eq!(
-        RenderingGpuPreference::DisplayGpu.wgpu_power_preference(Some(&discrete_gpu)),
-        Some("high")
-    );
-    assert_eq!(
-        RenderingGpuPreference::DisplayGpu.wgpu_power_preference(None),
-        Some("none")
-    );
-    assert_eq!(
-        RenderingGpuPreference::HighPerformanceGpu.wgpu_power_preference(Some(&integrated_gpu)),
-        Some("high")
+        RenderingGpuPreference::HighPerformanceGpu.wgpu_power_preference(),
+        "high"
     );
 }
 
 #[test]
 fn maps_display_gpu_preference_to_forced_vulkan_device_selection() {
-    let integrated_gpu =
-        DisplayRendererGpu::from_drm_ids(DisplayRendererGpuClass::Integrated, "0x1002", "0x15bf");
+    let integrated_gpu = DisplayRendererGpu::from_drm_ids("0x1002", "0x15bf");
 
     assert_eq!(
         RenderingGpuPreference::DisplayGpu.mesa_vulkan_device_select(Some(&integrated_gpu)),

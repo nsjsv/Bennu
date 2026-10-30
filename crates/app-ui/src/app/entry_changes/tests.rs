@@ -346,13 +346,12 @@ async fn cross_pane_move_updates_active_source_and_inactive_target() {
     let target = target_dir.join("moved.txt");
     std::fs::rename(&source, &target).unwrap();
 
-    drop(browser.accept_file_operation_moves_renamed(
-        1,
-        vec![CompletedTransfer {
+    drop(
+        browser.accept_file_operation_moves_renamed(vec![CompletedTransfer {
             source: source.clone(),
             target: target.clone(),
-        }],
-    ));
+        }]),
+    );
 
     // 源面板（活动镜像）移除源条目：这是修复前唯一生效的一侧。
     assert_eq!(entry_paths(&browser), Vec::<String>::new());
@@ -390,13 +389,12 @@ async fn cross_pane_move_updates_inactive_source_and_active_target() {
     }
 
     std::fs::rename(&source, &target).unwrap();
-    drop(browser.accept_file_operation_moves_renamed(
-        1,
-        vec![CompletedTransfer {
+    drop(
+        browser.accept_file_operation_moves_renamed(vec![CompletedTransfer {
             source: source.clone(),
             target: target.clone(),
-        }],
-    ));
+        }]),
+    );
 
     // 目标面板（活动镜像）插入目标条目。
     assert_eq!(entry_paths(&browser), vec!["moved.txt"]);

@@ -556,7 +556,7 @@ fn enter_key_activates_directory_cursor_and_otherwise_confirms() {
 #[test]
 fn type_ahead_matches_within_focused_lane() {
     let (mut session, _rx) = open_file_session(false);
-    let (adir, _deep) = open_adir_lane(&mut session);
+    open_adir_lane(&mut session);
     // 焦点在第 1 栏：type-ahead 匹配本栏的 note（不匹配第 0 栏）。
     session.update(SessionMessage::TypeAheadChar { ch: 'n' });
     assert_eq!(session.columns_focused(), 1);
@@ -566,7 +566,6 @@ fn type_ahead_matches_within_focused_lane() {
     session.update(SessionMessage::TypeAheadChar { ch: 'a' });
     assert_eq!(session.columns_focused(), 0);
     assert_eq!(session.columns_cursor(0), Some(0));
-    let _ = adir;
 }
 
 #[test]
@@ -657,7 +656,7 @@ fn emphasis_only_lives_in_focused_lane() {
 fn lane_click_clears_other_lanes_selection() {
     // 跨栏点击重置：选中集只允许存在于一栏（design 决策）。
     let (mut session, _rx) = open_file_session(true);
-    let (adir, _bdir, deep) = seeded_root(&mut session);
+    let (adir, _bdir, _deep) = seeded_root(&mut session);
 
     // lane0 点 adir 开子栏；回填后 lane1 选中 note.txt。
     session.update(SessionMessage::ColumnEntryClicked {
@@ -697,5 +696,4 @@ fn lane_click_clears_other_lanes_selection() {
         shift: false,
     });
     assert!(session.columns_rightmost_selection_paths().is_empty());
-    let _ = deep;
 }

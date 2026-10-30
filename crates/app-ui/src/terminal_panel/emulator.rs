@@ -221,7 +221,7 @@ impl TerminalEmulator {
                 fg: cell.fg,
                 bg: cell.bg,
                 flags: cell.flags,
-                selected: self.cell_is_selected(cell, indexed.point, selection_range),
+                selected: selection_range.is_some_and(|range| range.contains(indexed.point)),
             });
         }
 
@@ -242,34 +242,6 @@ impl TerminalEmulator {
             cursor,
             cursor_shape: content.cursor.shape,
         }
-    }
-
-    fn cell_is_selected(
-        &self,
-        cell: &alacritty_terminal::term::cell::Cell,
-        point: Point<Line, Column>,
-        selection_range: Option<alacritty_terminal::selection::SelectionRange>,
-    ) -> bool {
-        let _ = cell;
-        let Some(range) = selection_range else {
-            return false;
-        };
-        if range.is_block {
-            return point.line >= range.start.line
-                && point.line <= range.end.line
-                && point.column >= range.start.column
-                && point.column <= range.end.column;
-        }
-        if point.line < range.start.line || point.line > range.end.line {
-            return false;
-        }
-        if point.line == range.start.line && point.column < range.start.column {
-            return false;
-        }
-        if point.line == range.end.line && point.column > range.end.column {
-            return false;
-        }
-        true
     }
 }
 

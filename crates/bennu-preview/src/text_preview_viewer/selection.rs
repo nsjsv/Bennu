@@ -225,7 +225,7 @@ pub(crate) fn move_position(
             column: 0,
         },
         text_editor::Motion::End => clamp_to(from.line, usize::MAX),
-        text_editor::Motion::WordLeft => word_left(document, from, last),
+        text_editor::Motion::WordLeft => word_left(document, from),
         text_editor::Motion::WordRight => word_right(document, from, last),
         text_editor::Motion::PageUp => {
             let line = from
@@ -269,7 +269,7 @@ fn is_word_char(text: &str, index: usize) -> bool {
         .is_some_and(|c| c.is_alphanumeric() || c == '_')
 }
 
-fn word_left(document: &TextPreviewDocument, from: TextPos, last: usize) -> TextPos {
+fn word_left(document: &TextPreviewDocument, from: TextPos) -> TextPos {
     let text = document.line(from.line).unwrap_or_default();
     let mut column = from.column.min(text.len());
     while column > 0 && !is_word_char(text, prev_boundary(text, column)) {
@@ -284,7 +284,6 @@ fn word_left(document: &TextPreviewDocument, from: TextPos, last: usize) -> Text
             column: line_len(document, from.line - 1),
         };
     }
-    let _ = last;
     TextPos {
         line: from.line,
         column,

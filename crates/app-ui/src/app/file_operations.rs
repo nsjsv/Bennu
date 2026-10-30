@@ -177,10 +177,8 @@ impl FileBrowser {
     // 源条目不可见（目录未显示）时跳过立即应用，交给 watcher 与对账兜底。
     pub(super) fn accept_file_operation_moves_renamed(
         &mut self,
-        task_id: u64,
         moves: Vec<crate::operation_history::CompletedTransfer>,
     ) -> Task<Message> {
-        let _ = task_id;
         if moves.is_empty() {
             return Task::none();
         }

@@ -151,7 +151,7 @@ where
     fn layout(
         &mut self,
         tree: &mut widget::Tree,
-        renderer: &Renderer,
+        _renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
         let size = limits
@@ -169,7 +169,6 @@ where
             content_width,
             self.scroll_height,
         );
-        let _ = renderer;
         layout::Node::new(size)
     }
 

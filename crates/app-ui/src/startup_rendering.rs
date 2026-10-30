@@ -559,28 +559,27 @@ pub(crate) fn apply_fast_startup_environment() -> StartupRenderingEnvironment {
     environment
 }
 
+#[cfg(unix)]
 pub(crate) fn restart_current_process(
     environment: &StartupRenderingEnvironment,
 ) -> Result<(), String> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
+    use std::os::unix::process::CommandExt;
 
-        let current_exe = std::env::current_exe()
-            .map_err(|error| format!("failed to locate current executable: {error}"))?;
-        let mut command = Command::new(current_exe);
-        command.args(std::env::args_os().skip(1));
-        environment.apply_to_command(&mut command);
+    let current_exe = std::env::current_exe()
+        .map_err(|error| format!("failed to locate current executable: {error}"))?;
+    let mut command = Command::new(current_exe);
+    command.args(std::env::args_os().skip(1));
+    environment.apply_to_command(&mut command);
 
-        let error = command.exec();
-        Err(format!("failed to restart Bennu: {error}"))
-    }
+    let error = command.exec();
+    Err(format!("failed to restart Bennu: {error}"))
+}
 
-    #[cfg(not(unix))]
-    {
-        let _ = environment;
-        Err("restart is not supported on this platform".to_owned())
-    }
+#[cfg(not(unix))]
+pub(crate) fn restart_current_process(
+    _environment: &StartupRenderingEnvironment,
+) -> Result<(), String> {
+    Err("restart is not supported on this platform".to_owned())
 }
 
 #[cfg(test)]

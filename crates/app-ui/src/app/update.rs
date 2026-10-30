@@ -269,7 +269,7 @@ impl FileBrowser {
             }
             Message::FileOperationMovesRenamed { task_id, moves } => {
                 self.operation_queue.note_driver_signal(task_id);
-                self.accept_file_operation_moves_renamed(task_id, moves)
+                self.accept_file_operation_moves_renamed(moves)
             }
             Message::FileOperationFinished(task_id, generation, completion) => {
                 self.operation_queue.note_driver_signal(task_id);

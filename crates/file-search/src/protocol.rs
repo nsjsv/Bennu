@@ -564,7 +564,23 @@ where
                 ));
             }
             joined = client_tasks.join_next(), if !client_tasks.is_empty() => {
-                let _ = joined;
+                // 单个客户端出错只结束它自己的会话，服务继续。客户端中途断开
+                // 也会走到会话错误，所以只记 debug；任务 panic 是本服务的缺陷。
+                match joined {
+                    Some(Ok(Err(error))) => tracing::debug!(
+                        target: "file_search::protocol",
+                        event = "client_session_failed",
+                        error = %crate::logging::bounded_search_log_detail(&error.to_string()),
+                        "search client session ended with an error"
+                    ),
+                    Some(Err(error)) => tracing::error!(
+                        target: "file_search::protocol",
+                        event = "client_task_panicked",
+                        error = %error,
+                        "search client task panicked"
+                    ),
+                    Some(Ok(Ok(()))) | None => {}
+                }
                 let _ = client_ready_receiver.recv().await;
             }
         };

@@ -125,12 +125,8 @@ async fn run_recoverable_transfer_to_boundary<J: TransferJournal>(
         transfer_options.proof_memo = Some(crate::ops::recoverable_transfer::ProofMemo::shared());
     }
     if transfer_options.strategy_engine.is_none() {
-        // 引擎探测需要源与目标父目录的设备号;任一侧拿不到就保持 None,
+        // 引擎探测需要目标父目录的设备号;拿不到就保持 None,
         // 搬运退回历史路径,不阻塞传输。
-        let source_device = tokio::fs::symlink_metadata(&record.request.source)
-            .await
-            .ok()
-            .map(|metadata| std::os::unix::fs::MetadataExt::dev(&metadata));
         let target_parent = record
             .request
             .requested_target
@@ -138,11 +134,10 @@ async fn run_recoverable_transfer_to_boundary<J: TransferJournal>(
             .map(Path::to_path_buf)
             .unwrap_or_else(|| record.request.requested_target.clone());
         let parent_probe = tokio::fs::symlink_metadata(&target_parent).await.ok();
-        if let (Some(source_device), Some(parent_metadata)) = (source_device, parent_probe) {
+        if let Some(parent_metadata) = parent_probe {
             let target_device = std::os::unix::fs::MetadataExt::dev(&parent_metadata);
             transfer_options.strategy_engine = Some(std::sync::Arc::new(
                 crate::ops::transfer_strategy::TransferStrategyEngine::probe(
-                    source_device,
                     target_device,
                     &target_parent,
                 ),

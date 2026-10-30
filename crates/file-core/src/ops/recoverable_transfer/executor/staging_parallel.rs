@@ -346,11 +346,7 @@ mod tests {
         .unwrap();
         let payload = directory.path().join("payload");
         let device = std::fs::metadata(directory.path()).unwrap().dev();
-        let engine = Arc::new(TransferStrategyEngine::probe(
-            device,
-            device,
-            directory.path(),
-        ));
+        let engine = Arc::new(TransferStrategyEngine::probe(device, directory.path()));
 
         let metadata_loss = copy_tree_to_payload_parallel(
             &source,

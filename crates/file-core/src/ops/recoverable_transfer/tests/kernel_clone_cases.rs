@@ -21,9 +21,8 @@ fn basic_copy_options(strategy: Option<PayloadCopyStrategy>) -> FileTransferOpti
         let directory = std::env::temp_dir();
         let metadata = std::fs::symlink_metadata(&directory).unwrap();
         let device = std::os::unix::fs::MetadataExt::dev(&metadata);
-        let engine = crate::ops::transfer_strategy::TransferStrategyEngine::probe(
-            device, device, &directory,
-        );
+        let engine =
+            crate::ops::transfer_strategy::TransferStrategyEngine::probe(device, &directory);
         engine.force_strategy(device, device, strategy);
         options = options.with_strategy_engine(std::sync::Arc::new(engine));
     }

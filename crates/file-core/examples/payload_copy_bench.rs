@@ -45,7 +45,7 @@ async fn main() {
             .expect("读源设备号")
             .dev()
     };
-    let engine = TransferStrategyEngine::probe(source_device, source_device, &target);
+    let engine = TransferStrategyEngine::probe(source_device, &target);
     if let Some(forced) = forced {
         engine.force_strategy(source_device, source_device, forced);
     }

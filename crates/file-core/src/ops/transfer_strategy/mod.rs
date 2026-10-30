@@ -55,11 +55,10 @@ pub struct TransferStrategyEngine {
 }
 
 impl TransferStrategyEngine {
-    /// `source_device`/`target_device` 为两侧 `st_dev`；`target_probe_path`
+    /// `target_device` 为目标侧 `st_dev`；`target_probe_path`
     /// 用于识别 FUSE 挂载（网盘、rclone 等），其并行度受单次往返延迟支配
     /// 而非带宽，需要单独压制。
-    pub fn probe(source_device: u64, target_device: u64, target_probe_path: &Path) -> Self {
-        let _ = source_device;
+    pub fn probe(target_device: u64, target_probe_path: &Path) -> Self {
         Self {
             strategies: Mutex::new(HashMap::new()),
             parallelism: target_parallelism(target_device, target_probe_path),

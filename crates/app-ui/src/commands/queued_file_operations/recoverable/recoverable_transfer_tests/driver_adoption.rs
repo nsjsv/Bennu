@@ -18,12 +18,11 @@ async fn supervision_adopts_a_foreign_nonterminal_task_with_a_free_lease() {
     let mut survivor = FileOperationQueue::new();
     attach_store(&mut survivor, store.clone());
     let transfers = vec![QueuedTransfer::new(source.clone(), target.clone())];
-    let FileOperationEnqueueOutcome::Queued { task_id } =
-        owner.enqueue(QueuedFileOperation::Move {
-            transfers: transfers.clone(),
-            verification: FileOperationVerification::BasicMetadata,
-        })
-    else {
+    // 认领的任务以存储 id 作为内存 id;所有者的本地 task_id 与幸存者无关。
+    let FileOperationEnqueueOutcome::Queued { .. } = owner.enqueue(QueuedFileOperation::Move {
+        transfers: transfers.clone(),
+        verification: FileOperationVerification::BasicMetadata,
+    }) else {
         panic!("recoverable move should enqueue");
     };
     assert_persisted(&mut owner);
@@ -99,6 +98,4 @@ async fn supervision_adopts_a_foreign_nonterminal_task_with_a_free_lease() {
         .unwrap()
         .journal_entries
         .is_empty());
-    // 认领的任务以存储 id 作为内存 id;所有者的本地 task_id 与幸存者无关。
-    let _ = task_id;
 }

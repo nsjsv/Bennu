@@ -358,52 +358,65 @@ pub(super) fn inspect_directory(
         ));
     }
 
-    #[cfg(unix)]
-    {
-        let mode = metadata.mode();
-        match expectation {
-            DirectoryExpectation::MountTop => {}
-            DirectoryExpectation::SharedRoot { device } => {
-                if metadata.dev() != device {
-                    return Err(validation_warning(path, "directory is on another device"));
-                }
-                if mode & libc::S_ISVTX == 0 {
-                    return Err(validation_warning(
-                        path,
-                        "shared Trash directory has no sticky bit",
-                    ));
-                }
-            }
-            DirectoryExpectation::OwnedTrash { uid, device } => {
-                if metadata.uid() != uid {
-                    return Err(validation_warning(
-                        path,
-                        "Trash directory has another owner",
-                    ));
-                }
-                if mode & 0o022 != 0 {
-                    return Err(validation_warning(
-                        path,
-                        "Trash directory is writable by group or other users",
-                    ));
-                }
-                if device.is_some_and(|device| metadata.dev() != device) {
-                    return Err(validation_warning(
-                        path,
-                        "Trash directory is on another device",
-                    ));
-                }
-            }
-        }
-    }
-
-    #[cfg(not(unix))]
-    let _ = expectation;
-
+    check_directory_expectation(path, &metadata, expectation)?;
     Ok(VerifiedTrashDirectory {
         path: path.to_path_buf(),
         identity: trash_object_identity(&metadata),
     })
+}
+
+#[cfg(unix)]
+fn check_directory_expectation(
+    path: &Path,
+    metadata: &fs::Metadata,
+    expectation: DirectoryExpectation,
+) -> Result<(), ScanWarning> {
+    let mode = metadata.mode();
+    match expectation {
+        DirectoryExpectation::MountTop => {}
+        DirectoryExpectation::SharedRoot { device } => {
+            if metadata.dev() != device {
+                return Err(validation_warning(path, "directory is on another device"));
+            }
+            if mode & libc::S_ISVTX == 0 {
+                return Err(validation_warning(
+                    path,
+                    "shared Trash directory has no sticky bit",
+                ));
+            }
+        }
+        DirectoryExpectation::OwnedTrash { uid, device } => {
+            if metadata.uid() != uid {
+                return Err(validation_warning(
+                    path,
+                    "Trash directory has another owner",
+                ));
+            }
+            if mode & 0o022 != 0 {
+                return Err(validation_warning(
+                    path,
+                    "Trash directory is writable by group or other users",
+                ));
+            }
+            if device.is_some_and(|device| metadata.dev() != device) {
+                return Err(validation_warning(
+                    path,
+                    "Trash directory is on another device",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 所有权、粘滞位与设备号只有 unix 才有，其它平台不做这几项检查。
+#[cfg(not(unix))]
+fn check_directory_expectation(
+    _path: &Path,
+    _metadata: &fs::Metadata,
+    _expectation: DirectoryExpectation,
+) -> Result<(), ScanWarning> {
+    Ok(())
 }
 
 pub(super) fn revalidate_trash_location(location: &TrashLocationGuard) -> Result<(), FileError> {

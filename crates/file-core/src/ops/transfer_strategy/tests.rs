@@ -16,7 +16,7 @@ fn running_controls() -> FileOperationControls {
 #[test]
 fn initial_strategy_follows_device_pair() {
     let directory = tempfile::tempdir().unwrap();
-    let engine = TransferStrategyEngine::probe(7, 7, directory.path());
+    let engine = TransferStrategyEngine::probe(7, directory.path());
     assert_eq!(
         engine.strategy(7, 7),
         PayloadCopyStrategy::KernelClone,
@@ -32,7 +32,7 @@ fn initial_strategy_follows_device_pair() {
 #[test]
 fn ladder_downgrades_monotonically_and_never_upgrades() {
     let directory = tempfile::tempdir().unwrap();
-    let engine = TransferStrategyEngine::probe(7, 7, directory.path());
+    let engine = TransferStrategyEngine::probe(7, directory.path());
 
     engine.record_kernel_clone_unsupported(7, 7);
     assert_eq!(engine.strategy(7, 7), PayloadCopyStrategy::KernelRange);
@@ -83,7 +83,7 @@ async fn payload_copy_preserves_content_on_default_ladder() {
     let target_path = directory.path().join("target.bin");
     let content = write_random_file(&source_path, 3 * 1024 * 1024).await;
     let source_device = std::fs::symlink_metadata(&source_path).unwrap().dev();
-    let engine = TransferStrategyEngine::probe(source_device, source_device, directory.path());
+    let engine = TransferStrategyEngine::probe(source_device, directory.path());
     let mut controls = running_controls();
 
     let outcome = copy_regular_file_payload(RegularFilePayloadCopy {
@@ -110,7 +110,6 @@ async fn forced_user_loop_copies_and_second_file_hits_cached_strategy() {
     let content = write_random_file(&source_path, 1024 * 1024).await;
     let source_device = std::fs::symlink_metadata(&source_path).unwrap().dev();
     let engine = Arc::new(TransferStrategyEngine::probe(
-        source_device,
         source_device,
         directory.path(),
     ));
@@ -142,7 +141,7 @@ async fn unsupported_ladder_falls_back_to_user_loop_and_still_copies() {
     let source_path = directory.path().join("source.bin");
     let content = write_random_file(&source_path, 2 * 1024 * 1024).await;
     let source_device = std::fs::symlink_metadata(&source_path).unwrap().dev();
-    let engine = TransferStrategyEngine::probe(source_device, source_device, directory.path());
+    let engine = TransferStrategyEngine::probe(source_device, directory.path());
     // 同时钉死克隆与快拷都"不支持",模拟老文件系统:阶梯必须一路降级到
     // 用户态循环并完成搬运,而不是报错。
     engine.record_kernel_clone_unsupported(source_device, source_device);
@@ -173,7 +172,7 @@ async fn progress_events_are_monotonic_and_end_at_total() {
     let source_path = directory.path().join("source.bin");
     let content = write_random_file(&source_path, 9 * 1024 * 1024).await;
     let source_device = std::fs::symlink_metadata(&source_path).unwrap().dev();
-    let engine = TransferStrategyEngine::probe(source_device, source_device, directory.path());
+    let engine = TransferStrategyEngine::probe(source_device, directory.path());
     // 9 MiB 源 + 4 MiB 缓冲固定产生 3 个进度事件,断言与宿主文件系统无关。
     engine.force_strategy(source_device, source_device, PayloadCopyStrategy::UserLoop);
     let (sender, receiver) = mpsc::unbounded_channel::<CopyProgress>();
@@ -220,7 +219,6 @@ async fn cancel_while_paused_in_user_loop_returns_cancelled() {
     let content = write_random_file(&source_path, 1024 * 1024).await;
     let source_device = std::fs::symlink_metadata(&source_path).unwrap().dev();
     let engine = Arc::new(TransferStrategyEngine::probe(
-        source_device,
         source_device,
         directory.path(),
     ));

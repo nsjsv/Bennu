@@ -333,11 +333,8 @@ async fn copy_file_to_target(
     let engine = match strategy_engine {
         Some(engine) => engine,
         None => {
-            local_engine = crate::ops::transfer_strategy::TransferStrategyEngine::probe(
-                metadata.dev(),
-                metadata.dev(),
-                to,
-            );
+            local_engine =
+                crate::ops::transfer_strategy::TransferStrategyEngine::probe(metadata.dev(), to);
             &local_engine
         }
     };

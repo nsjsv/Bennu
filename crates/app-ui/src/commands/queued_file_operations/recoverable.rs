@@ -688,9 +688,8 @@ async fn run_not_applicable_record(
     batch_progress: &mut TransferBatchProgress,
     completed: &mut SettledTransfers,
 ) -> Result<(), RecoverableTransferError> {
-    if let Some(commit) = durable_direct_move_commit(&record, None) {
+    if durable_direct_move_commit(&record, None).is_some() {
         send_durable_direct_move_commits(output, task_id, &[(index, record.clone())]).await;
-        let _ = commit;
     }
     let outcome = run_recoverable_record_with_progress(
         record,

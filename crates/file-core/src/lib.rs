@@ -79,7 +79,7 @@ pub use ops::{
     SourceManifestEntry, SourceRetirementPlan, StagedSourceLocation, StagingTransfer,
     TransferCheckpoint, TransferCheckpointSwap, TransferConflictStrategy, TransferExecutionKind,
     TransferFailureIntent, TransferJournal, TransferJournalError, TransferJournalFuture,
-    TransferJournalMutation, TransferJournalRecord, TransferWorkKey, UnrestoredBatchRename,
+    TransferJournalMutation, TransferJournalRecord, TransferWorkKey, UnrestoredEntry,
     VideoTargetFormat,
 };
 pub use ops::{

@@ -20,7 +20,7 @@ pub(super) async fn run_queued_batch_rename(
 /// 回滚没能恢复原名的条目必须逐个告诉用户它们现在在哪里,否则停在隐藏
 /// 临时名上的文件在默认视图里等于"消失";其余失败沿用错误原文。
 fn batch_rename_failure_text(error: &FileError, language: UiLanguage) -> String {
-    let FileError::BatchRenameIncomplete { cause, unrestored } = error else {
+    let FileError::EntryMovesIncomplete { cause, unrestored } = error else {
         return error.to_string();
     };
     let unrestored = unrestored
@@ -39,14 +39,14 @@ mod tests {
     use std::io;
     use std::path::PathBuf;
 
-    use file_core::UnrestoredBatchRename;
+    use file_core::UnrestoredEntry;
 
     use super::*;
 
     fn incomplete_error() -> FileError {
-        FileError::BatchRenameIncomplete {
+        FileError::EntryMovesIncomplete {
             cause: Box::new(FileError::Cancelled),
-            unrestored: vec![UnrestoredBatchRename {
+            unrestored: vec![UnrestoredEntry {
                 original: PathBuf::from("/docs/a.txt"),
                 current: PathBuf::from("/docs/.bennu-batch-rename-0.tmp"),
                 error: FileError::Rename {

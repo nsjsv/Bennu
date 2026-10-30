@@ -78,7 +78,7 @@ fn assert_rename_cause(cause: &FileError, from: &Path, to: &Path) {
     }
 }
 
-fn unrestored_locations(unrestored: &[UnrestoredBatchRename]) -> Vec<(PathBuf, PathBuf)> {
+fn unrestored_locations(unrestored: &[UnrestoredEntry]) -> Vec<(PathBuf, PathBuf)> {
     unrestored
         .iter()
         .map(|item| (item.original.clone(), item.current.clone()))
@@ -168,7 +168,7 @@ fn first_phase_rollback_failure_reports_item_left_at_temporary_name() {
 
     let error = run_batch_rename(batch.items(), &mut rename).unwrap_err();
 
-    let FileError::BatchRenameIncomplete { cause, unrestored } = &error else {
+    let FileError::EntryMovesIncomplete { cause, unrestored } = &error else {
         panic!("unexpected error: {error:?}");
     };
     assert_rename_cause(cause, &batch.b, &batch.tmp1);
@@ -189,7 +189,7 @@ fn second_phase_park_failure_reports_item_left_at_target_name() {
 
     let error = run_batch_rename(batch.items(), &mut rename).unwrap_err();
 
-    let FileError::BatchRenameIncomplete { cause, unrestored } = &error else {
+    let FileError::EntryMovesIncomplete { cause, unrestored } = &error else {
         panic!("unexpected error: {error:?}");
     };
     assert_rename_cause(cause, &batch.tmp1, &batch.y);
@@ -209,7 +209,7 @@ fn second_phase_restore_failure_reports_item_left_at_hidden_temporary_name() {
 
     let error = run_batch_rename(batch.items(), &mut rename).unwrap_err();
 
-    let FileError::BatchRenameIncomplete { cause, unrestored } = &error else {
+    let FileError::EntryMovesIncomplete { cause, unrestored } = &error else {
         panic!("unexpected error: {error:?}");
     };
     assert_rename_cause(cause, &batch.tmp1, &batch.y);

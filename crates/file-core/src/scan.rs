@@ -15,7 +15,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     resolve_directory_metadata, sort_discovered_entry_indices, sort_entries, DirectoryEntry,
     DirectoryMetadataRequest, DirectoryMetadataRequirement, DirectoryMetadataResolver,
-    DiscoveredDirectoryEntry, FileKind, SortDirection, SortField, UnrestoredBatchRename,
+    DiscoveredDirectoryEntry, FileKind, SortDirection, SortField, UnrestoredEntry,
 };
 
 const DIRECTORY_SCAN_BATCH_SIZE: usize = 128;
@@ -438,15 +438,15 @@ pub enum FileError {
         #[source]
         source: std::io::Error,
     },
-    /// 批量重命名失败后回滚没能让所有条目恢复原名。`cause` 是最初的失败,
+    /// 改名或移动失败后回滚没能让所有条目回到原处。`cause` 是最初的失败,
     /// `unrestored` 逐条记录没恢复的条目此刻在哪里。
     #[error(
         "{cause}; could not restore original names: {}",
-        unrestored_batch_rename_details(.unrestored)
+        unrestored_entry_details(.unrestored)
     )]
-    BatchRenameIncomplete {
+    EntryMovesIncomplete {
         cause: Box<FileError>,
-        unrestored: Vec<UnrestoredBatchRename>,
+        unrestored: Vec<UnrestoredEntry>,
     },
     #[error("could not copy {from:?} to {to:?}: {source}")]
     Copy {
@@ -504,7 +504,7 @@ pub enum FileError {
     Unsupported(&'static str),
 }
 
-fn unrestored_batch_rename_details(unrestored: &[UnrestoredBatchRename]) -> String {
+fn unrestored_entry_details(unrestored: &[UnrestoredEntry]) -> String {
     unrestored
         .iter()
         .map(|item| format!("{:?} -> {:?} ({})", item.original, item.current, item.error))

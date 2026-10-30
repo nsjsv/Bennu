@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use super::entry_moves::UnrestoredEntry;
 use crate::FileError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,15 +15,6 @@ pub struct BatchRenameItem {
 pub struct CompletedBatchRename {
     pub from: PathBuf,
     pub to: PathBuf,
-}
-
-/// 回滚没能把条目改回原名:用户的原名、条目此刻实际所在位置、恢复失败的原因。
-/// 用户要靠这三项自己找回文件,所以回滚的每一步失败都必须落到这里。
-#[derive(Debug)]
-pub struct UnrestoredBatchRename {
-    pub original: PathBuf,
-    pub current: PathBuf,
-    pub error: FileError,
 }
 
 #[derive(Debug, Clone)]
@@ -101,11 +93,11 @@ fn execute_batch_rename_steps(
 }
 
 /// 回滚全部成功时用户的文件都已回到原名,只需报告最初的失败。
-fn batch_rename_failure(cause: FileError, unrestored: Vec<UnrestoredBatchRename>) -> FileError {
+fn batch_rename_failure(cause: FileError, unrestored: Vec<UnrestoredEntry>) -> FileError {
     if unrestored.is_empty() {
         cause
     } else {
-        FileError::BatchRenameIncomplete {
+        FileError::EntryMovesIncomplete {
             cause: Box::new(cause),
             unrestored,
         }
@@ -247,11 +239,11 @@ fn path_exists(path: &Path) -> Result<bool, FileError> {
 fn rollback_temporary_batch_renames(
     renames: &[(PathBuf, PathBuf)],
     rename: &mut impl FnMut(&Path, &Path) -> io::Result<()>,
-) -> Vec<UnrestoredBatchRename> {
+) -> Vec<UnrestoredEntry> {
     let mut unrestored = Vec::new();
     for (temporary_path, original_path) in renames.iter().rev() {
         if let Err(error) = rename_for_batch(rename, temporary_path, original_path) {
-            unrestored.push(UnrestoredBatchRename {
+            unrestored.push(UnrestoredEntry {
                 original: original_path.clone(),
                 current: temporary_path.clone(),
                 error,
@@ -265,7 +257,7 @@ fn rollback_final_batch_renames(
     completed_steps: &[(PathBuf, PathBuf)],
     temporary_steps: &[(PathBuf, PathBuf)],
     rename: &mut impl FnMut(&Path, &Path) -> io::Result<()>,
-) -> Vec<UnrestoredBatchRename> {
+) -> Vec<UnrestoredEntry> {
     let mut reserved = temporary_steps
         .iter()
         .flat_map(|(temporary_path, original_path)| [temporary_path.clone(), original_path.clone()])
@@ -293,7 +285,7 @@ fn rollback_final_batch_renames(
             Ok(rollback_temporary) => {
                 completed_rollback_steps.push((rollback_temporary, original_path.clone()))
             }
-            Err(error) => unrestored.push(UnrestoredBatchRename {
+            Err(error) => unrestored.push(UnrestoredEntry {
                 original: original_path.clone(),
                 current: final_path.clone(),
                 error,
@@ -313,7 +305,7 @@ fn rollback_final_batch_renames(
         .cloned();
     for (temporary_path, original_path) in still_temporary.chain(completed_rollback_steps) {
         if let Err(error) = rename_for_batch(rename, &temporary_path, &original_path) {
-            unrestored.push(UnrestoredBatchRename {
+            unrestored.push(UnrestoredEntry {
                 original: original_path,
                 current: temporary_path,
                 error,

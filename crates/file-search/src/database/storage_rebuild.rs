@@ -14,9 +14,11 @@ use crate::error::{SearchError, SearchResult};
 
 #[cfg(unix)]
 use super::schema::{
-    verify_search_storage_schema, BASE_SCHEMA, CONTENTLESS_SEARCH_SCHEMA,
-    PATH_CONFIGURATION_SCHEMA, QUERY_INDEXES,
+    verify_search_storage_schema, BASE_SCHEMA, FULLTEXT_INDEX_SCHEMA, PATH_CONFIGURATION_SCHEMA,
+    QUERY_INDEXES, SNIPPET_SCHEMA,
 };
+#[cfg(unix)]
+use super::search::full_text_match_expression;
 #[cfg(unix)]
 use super::storage_workspace::{
     atomically_replace_database, remove_checkpointed_sidecars, storage_migration_error,
@@ -28,6 +30,12 @@ use super::storage_workspace::{workspace_path, WORKSPACE_PENDING_MARKER_NAME};
 use super::{
     bounded_search_content_preview, SearchDatabase, SCHEMA_VERSION,
     SEARCH_CONTENT_PREVIEW_CHARACTER_LIMIT,
+};
+#[cfg(unix)]
+use crate::model::SearchTextScope;
+#[cfg(unix)]
+use crate::text_matching::{
+    content_index_text, fts_phrase, name_index_text, normalize_search_text,
 };
 
 #[cfg(not(unix))]
@@ -172,7 +180,8 @@ fn build_replacement_database(
     let target_transaction = target.unchecked_transaction()?;
     target_transaction.execute_batch(BASE_SCHEMA)?;
     target_transaction.execute_batch(PATH_CONFIGURATION_SCHEMA)?;
-    target_transaction.execute_batch(CONTENTLESS_SEARCH_SCHEMA)?;
+    target_transaction.execute_batch(FULLTEXT_INDEX_SCHEMA)?;
+    target_transaction.execute_batch(SNIPPET_SCHEMA)?;
 
     copy_files(source, &target_transaction)?;
     copy_stage_state(source, &target_transaction)?;
@@ -245,18 +254,20 @@ fn copy_files(source: &Connection, target: &Connection) -> SearchResult<()> {
             rowid, path, parent_path, display_name, kind, size,
             modified_ms, accessed_ms, created_ms, mime_type, content_status,
             tombstoned, device, inode, mtime_ns, ctime_ns, observation_state,
-            scan_generation
+            scan_generation, search_name
          ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
-            ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18
+            ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19
          )",
     )?;
     while let Some(row) = rows.next()? {
+        let display_name = row.get::<_, String>(3)?;
+        let search_name = normalize_search_text(&display_name);
         insert_statement.execute(params![
             row.get::<_, i64>(0)?,
             row.get::<_, Vec<u8>>(1)?,
             row.get::<_, Vec<u8>>(2)?,
-            row.get::<_, String>(3)?,
+            display_name,
             row.get::<_, String>(4)?,
             row.get::<_, i64>(5)?,
             row.get::<_, Option<i64>>(6)?,
@@ -271,6 +282,7 @@ fn copy_files(source: &Connection, target: &Connection) -> SearchResult<()> {
             row.get::<_, Option<i64>>(15)?,
             row.get::<_, String>(16)?,
             row.get::<_, i64>(17)?,
+            search_name,
         ])?;
     }
     Ok(())
@@ -365,9 +377,12 @@ fn copy_fulltext_storage(
         });
     }
 
+    // schema 8 的 FTS 还存着原文：名称与内容直接按当前文本规则写成新格式，不必重新提取。
     let mut source_statement =
         source.prepare("SELECT rowid, name, content FROM file_search_fts ORDER BY rowid")?;
     let mut rows = source_statement.query([])?;
+    let mut search_name_statement =
+        target.prepare_cached("SELECT search_name FROM files WHERE rowid = ?1")?;
     let mut fts_insert = target
         .prepare_cached("INSERT INTO file_search_fts(rowid, name, content) VALUES (?1, ?2, ?3)")?;
     let mut preview_insert = target
@@ -378,7 +393,13 @@ fn copy_fulltext_storage(
         let rowid = row.get::<_, i64>(0)?;
         let name = row.get::<_, Option<String>>(1)?;
         let content = row.get::<_, Option<String>>(2)?;
-        fts_insert.execute(params![rowid, name, content])?;
+        let search_name =
+            search_name_statement.query_row([rowid], |row| row.get::<_, String>(0))?;
+        fts_insert.execute(params![
+            rowid,
+            name_index_text(&search_name),
+            content_index_text(content.as_deref().unwrap_or(""))
+        ])?;
         if let Some(preview) = content.as_deref().and_then(bounded_search_content_preview) {
             preview_insert.execute(params![rowid, preview])?;
         }
@@ -475,6 +496,8 @@ fn validate_copied_storage(
     Ok(())
 }
 
+/// 新规则（名称子串、规范化切词）对 ASCII 字母数字词只会多命中、不会少命中：旧库里按词
+/// 命中的每一行，在新库里按同一个词仍须命中。排序随规则改变，不再逐位比较。
 #[cfg(unix)]
 fn validate_probe_queries(
     database_path: &Path,
@@ -483,13 +506,15 @@ fn validate_probe_queries(
     probe_terms: &[String],
 ) -> SearchResult<()> {
     for term in probe_terms {
-        let expression = format!("\"{}\"", term.replace('"', "\"\""));
-        let source_rows = fulltext_rank_rows(source, &expression)?;
-        let target_rows = fulltext_rank_rows(target, &expression)?;
-        if source_rows != target_rows {
+        let source_rows = fulltext_rows(source, &fts_phrase(term))?;
+        let target_rows = match full_text_match_expression(term, SearchTextScope::NameAndContent) {
+            Some(expression) => fulltext_rows(target, &expression)?,
+            None => BTreeSet::new(),
+        };
+        if !source_rows.is_subset(&target_rows) {
             return Err(storage_migration_error(
                 database_path,
-                format!("FTS hit/rank probe changed for token {term:?}"),
+                format!("FTS probe lost hits for token {term:?}"),
             ));
         }
     }
@@ -497,19 +522,12 @@ fn validate_probe_queries(
 }
 
 #[cfg(unix)]
-fn fulltext_rank_rows(connection: &Connection, expression: &str) -> SearchResult<Vec<(i64, u64)>> {
-    let mut statement = connection.prepare(
-        "SELECT rowid, rank
-         FROM file_search_fts
-         WHERE file_search_fts MATCH ?1
-         ORDER BY rank, rowid
-         LIMIT 201",
-    )?;
+fn fulltext_rows(connection: &Connection, expression: &str) -> SearchResult<BTreeSet<i64>> {
+    let mut statement =
+        connection.prepare("SELECT rowid FROM file_search_fts WHERE file_search_fts MATCH ?1")?;
     let rows = statement
-        .query_map([expression], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?.to_bits()))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
+        .query_map([expression], |row| row.get::<_, i64>(0))?
+        .collect::<Result<BTreeSet<_>, _>>()?;
     Ok(rows)
 }
 

@@ -1,9 +1,8 @@
 use crate::error::{SearchError, SearchResult};
 use crate::extractor::ExtractionStatus;
+use crate::text_matching::{name_index_text, normalize_search_text};
 
-use super::{
-    IndexedEntryStageState, SearchDatabase, SCHEMA_VERSION, SEARCH_CONTENT_PREVIEW_CHARACTER_LIMIT,
-};
+use super::{IndexedEntryStageState, SearchDatabase, SEARCH_CONTENT_PREVIEW_CHARACTER_LIMIT};
 
 const LEGACY_TOMBSTONE_RECOVERY_MIGRATION: &str = "legacy_tombstone_recovery_v1";
 
@@ -100,6 +99,64 @@ impl SearchDatabase {
         if current < 11 {
             self.reset_skipped_office_content_stage()?;
         }
+        if current < 12 {
+            self.migrate_search_text_rules()?;
+        }
+        Ok(())
+    }
+
+    /// schema 12：名称改按规范化子串、内容改按规范化切词（`text_matching`）。回填规范化
+    /// 名称，按新分词器重建 FTS；名称文本立即写入（升级后马上能按名称搜），已提取内容的
+    /// 文件把内容阶段重置为 pending，由服务在后台重新提取——contentless FTS 不存原文，
+    /// 旧内容无法就地改写。
+    fn migrate_search_text_rules(&self) -> SearchResult<()> {
+        let transaction = self.connection.unchecked_transaction()?;
+        if !self.column_exists("files", "search_name")? {
+            transaction.execute_batch(
+                "ALTER TABLE files ADD COLUMN search_name TEXT NOT NULL DEFAULT '';",
+            )?;
+        }
+        {
+            let mut names = transaction.prepare("SELECT rowid, display_name FROM files")?;
+            let mut update =
+                transaction.prepare("UPDATE files SET search_name = ?2 WHERE rowid = ?1")?;
+            let mut rows = names.query([])?;
+            while let Some(row) = rows.next()? {
+                let display_name: String = row.get(1)?;
+                update.execute(rusqlite::params![
+                    row.get::<_, i64>(0)?,
+                    normalize_search_text(&display_name)
+                ])?;
+            }
+        }
+        let indexed_names = transaction
+            .prepare(
+                "SELECT fts.rowid, f.search_name
+                 FROM file_search_fts AS fts
+                 JOIN files AS f ON f.rowid = fts.rowid",
+            )?
+            .query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        transaction.execute_batch("DROP TABLE file_search_fts;")?;
+        transaction.execute_batch(super::schema::FULLTEXT_INDEX_SCHEMA)?;
+        {
+            let mut insert = transaction
+                .prepare("INSERT INTO file_search_fts(rowid, name, content) VALUES (?1, ?2, '')")?;
+            for (rowid, search_name) in &indexed_names {
+                insert.execute(rusqlite::params![rowid, name_index_text(search_name)])?;
+            }
+        }
+        transaction.execute(
+            "UPDATE file_stage_state
+             SET content_stage_state = 'pending'
+             WHERE content_stage_state = 'complete'
+               AND path IN (SELECT path FROM files WHERE content_status = ?1)",
+            [serde_json::to_string(&ExtractionStatus::Indexed)?],
+        )?;
+        transaction.pragma_update(None, "user_version", 12)?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -129,7 +186,8 @@ impl SearchDatabase {
                 OFFICE_MIME_TYPES[3]
             ],
         )?;
-        transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        // 每一步只记自己到达的版本：写成最新版本的话，这一步之后中断会跳过后面的迁移。
+        transaction.pragma_update(None, "user_version", 11)?;
         transaction.commit()?;
         Ok(())
     }
@@ -137,7 +195,7 @@ impl SearchDatabase {
     fn migrate_path_configuration(&self) -> SearchResult<()> {
         let transaction = self.connection.unchecked_transaction()?;
         transaction.execute_batch(super::schema::PATH_CONFIGURATION_SCHEMA)?;
-        transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        transaction.pragma_update(None, "user_version", 10)?;
         transaction.commit()?;
         Ok(())
     }

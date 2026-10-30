@@ -89,6 +89,9 @@ fn native_rank_matches_bm25_across_pages_without_temporary_sorting() {
     }
 
     fn explicit_bm25_hits(database: &SearchDatabase) -> Vec<(PathBuf, u64)> {
+        let expression =
+            super::search::full_text_match_expression("needle", SearchTextScope::NameAndContent)
+                .unwrap();
         let mut statement = database
             .connection
             .prepare(
@@ -102,7 +105,7 @@ fn native_rank_matches_bm25_across_pages_without_temporary_sorting() {
             )
             .unwrap();
         statement
-            .query_map(["\"needle\""], |row| {
+            .query_map([expression], |row| {
                 let path: Vec<u8> = row.get(0)?;
                 let score: f64 = row.get(1)?;
                 Ok((path_from_storage_bytes(path), (-score).to_bits()))
@@ -449,57 +452,140 @@ fn fulltext_replacement_and_scope_delete_keep_snippets_aligned() {
 }
 
 #[test]
-fn sql_snippet_gating_matches_public_match_sources() {
+fn snippets_follow_the_same_name_rule_as_match_sources() {
     let database = SearchDatabase::in_memory().unwrap();
     for (path, name, content) in [
         ("/tmp/name.txt", "ALPHA-beta-name.txt", "unrelated content"),
         ("/tmp/content.txt", "content.txt", "alpha BETA body"),
         ("/tmp/mixed.txt", "alpha-mixed.txt", "BETA body"),
+        ("/tmp/umlaut.txt", "Ärger.md", "unrelated"),
     ] {
         database
             .upsert_file(&indexed_file(path, name, content))
             .unwrap();
     }
 
-    let query = SearchQuery::global(1, "alpha beta");
-    let projected_snippets = database.projected_content_snippets(&query).unwrap();
-    let batch = database.search(&query).unwrap();
+    let batch = database
+        .search(&SearchQuery::global(1, "alpha beta"))
+        .unwrap();
     for (path, expected_source) in [
         (Path::new("/tmp/name.txt"), MatchSource::Name),
         (Path::new("/tmp/content.txt"), MatchSource::Content),
         (Path::new("/tmp/mixed.txt"), MatchSource::Content),
     ] {
-        let raw_snippet = projected_snippets
-            .iter()
-            .find(|(candidate, _)| candidate == path)
-            .unwrap()
-            .1
-            .as_ref();
         let hit = batch.hits.iter().find(|hit| hit.path == path).unwrap();
         assert_eq!(hit.match_source, expected_source);
-        assert_eq!(
-            raw_snippet.is_some(),
-            expected_source == MatchSource::Content
-        );
         assert_eq!(
             hit.snippet.is_some(),
             expected_source == MatchSource::Content
         );
     }
 
-    let mut name_only_query = SearchQuery::global(2, "alpha BETA");
+    // 旧实现用 SQLite lower()（只折叠 ASCII）判名称，"Ärger" 会被误标成内容命中。
+    let umlaut = database.search(&SearchQuery::global(2, "ärger")).unwrap();
+    assert_eq!(umlaut.hits.len(), 1);
+    assert_eq!(umlaut.hits[0].match_source, MatchSource::Name);
+    assert!(umlaut.hits[0].snippet.is_none());
+
+    let mut name_only_query = SearchQuery::global(3, "alpha BETA");
     name_only_query.text_scope = SearchTextScope::NameOnly;
-    let projected_snippets = database
-        .projected_content_snippets(&name_only_query)
-        .unwrap();
     let batch = database.search(&name_only_query).unwrap();
     assert_eq!(batch.hits.len(), 1);
+    assert_eq!(batch.hits[0].path, Path::new("/tmp/name.txt"));
     assert_eq!(batch.hits[0].match_source, MatchSource::Name);
     assert!(batch.hits[0].snippet.is_none());
+}
+
+#[test]
+fn names_match_by_any_part_and_short_queries_scan_names() {
+    let database = SearchDatabase::in_memory().unwrap();
+    for (path, name, content) in [
+        ("/tmp/annual.pdf", "年度报告.pdf", ""),
+        ("/tmp/report.pdf", "report_2024.pdf", ""),
+        ("/tmp/my.docx", "MyReport.docx", ""),
+        ("/tmp/notes.txt", "notes.txt", "季度报告摘要"),
+    ] {
+        database
+            .upsert_file(&indexed_file(path, name, content))
+            .unwrap();
+    }
+    let paths = |terms: &str| {
+        let mut paths = database
+            .search(&SearchQuery::global(1, terms))
+            .unwrap()
+            .hits
+            .into_iter()
+            .map(|hit| (hit.path, hit.match_source))
+            .collect::<Vec<_>>();
+        paths.sort_by(|left, right| left.0.cmp(&right.0));
+        paths
+    };
+
     assert_eq!(
-        projected_snippets,
-        vec![(Path::new("/tmp/name.txt").to_path_buf(), None)]
+        paths("报告"),
+        [
+            (PathBuf::from("/tmp/annual.pdf"), MatchSource::Name),
+            (PathBuf::from("/tmp/notes.txt"), MatchSource::Content),
+        ]
     );
+    assert_eq!(
+        paths("repo"),
+        [
+            (PathBuf::from("/tmp/my.docx"), MatchSource::Name),
+            (PathBuf::from("/tmp/report.pdf"), MatchSource::Name),
+        ]
+    );
+    assert_eq!(
+        paths("report"),
+        [
+            (PathBuf::from("/tmp/my.docx"), MatchSource::Name),
+            (PathBuf::from("/tmp/report.pdf"), MatchSource::Name),
+        ]
+    );
+    // 1 个字：名称按子串扫，内容按逐字。
+    assert_eq!(
+        paths("报"),
+        [
+            (PathBuf::from("/tmp/annual.pdf"), MatchSource::Name),
+            (PathBuf::from("/tmp/notes.txt"), MatchSource::Content),
+        ]
+    );
+    // 长词走 FTS、短词作附加条件。
+    assert_eq!(
+        paths("report 24"),
+        [(PathBuf::from("/tmp/report.pdf"), MatchSource::Name)]
+    );
+}
+
+#[test]
+fn content_matches_whole_words_and_each_unsegmented_character() {
+    let database = SearchDatabase::in_memory().unwrap();
+    database
+        .upsert_file(&indexed_file(
+            "/tmp/plan.txt",
+            "plan.txt",
+            "Quarterly REPORT: 年度报告摘要",
+        ))
+        .unwrap();
+    let hit_count = |terms: &str| {
+        database
+            .search(&SearchQuery::global(1, terms))
+            .unwrap()
+            .hits
+            .len()
+    };
+
+    assert_eq!(hit_count("report"), 1);
+    assert_eq!(hit_count("度报"), 1);
+    // 内容按词：词的一部分不算（名称才按子串）。
+    assert_eq!(hit_count("quarter"), 0);
+    let hit = database
+        .search(&SearchQuery::global(2, "报告"))
+        .unwrap()
+        .hits
+        .remove(0);
+    assert_eq!(hit.match_source, MatchSource::Content);
+    assert!(hit.snippet.is_some_and(|snippet| snippet.contains("报告")));
 }
 
 #[test]
@@ -1371,7 +1457,7 @@ fn migration_backfills_stage_state_for_legacy_rows() {
 }
 
 #[test]
-fn fts_rowid_migration_preserves_content_and_uses_files_row_identity() {
+fn fts_rowid_migration_keeps_fts_rows_on_the_files_row_identity() {
     let directory = tempdir().unwrap();
     let database_path = directory.path().join("search.sqlite");
     let database = SearchDatabase::open(&database_path).unwrap();
@@ -1420,9 +1506,10 @@ fn fts_rowid_migration_preserves_content_and_uses_files_row_identity() {
         )
         .unwrap();
     assert_eq!(file_rowid, fts_rowid);
+    // 途经 schema 12：名称立即可搜，内容等服务后台重新提取。
     assert_eq!(
         database
-            .search(&SearchQuery::global(1, "needle"))
+            .search(&SearchQuery::global(1, "rowid"))
             .unwrap()
             .hits
             .len(),

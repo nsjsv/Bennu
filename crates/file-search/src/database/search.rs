@@ -3,8 +3,11 @@ use rusqlite::types::Value;
 
 use crate::error::SearchResult;
 use crate::model::{
-    MatchSource, SearchCursor, SearchEntryTypeRule, SearchFileKind, SearchHit, SearchMatchMode,
-    SearchQuery, SearchResultBatch, SearchScope, SearchTextScope, SizeRange,
+    MatchSource, SearchCursor, SearchFileKind, SearchHit, SearchMatchMode, SearchQuery,
+    SearchResultBatch, SearchScope, SearchTextScope,
+};
+use crate::text_matching::{
+    content_term_tokens, fts_phrase, locate_content_term, name_term_tokens, SearchTerms,
 };
 
 use super::{
@@ -21,6 +24,72 @@ enum FullTextQueryPlan {
     UnfilteredRank,
 }
 
+/// 查询词按 `text_matching` 的规则落到 SQL：够 3 个字的词进 FTS 表达式（名称 trigram
+/// 短语，`NameAndContent` 时或上内容短语）；不满 3 个字的词作为附加条件，名称直接在
+/// 规范化名称上找子串。
+struct TextPredicates {
+    match_expression: Option<String>,
+    short_terms: Vec<ShortTerm>,
+}
+
+struct ShortTerm {
+    term: String,
+    content_expression: Option<String>,
+}
+
+impl TextPredicates {
+    fn new(terms: &SearchTerms, text_scope: SearchTextScope) -> Self {
+        let mut phrases = Vec::new();
+        let mut short_terms = Vec::new();
+        for term in terms.iter() {
+            let content_expression = match text_scope {
+                SearchTextScope::NameAndContent => content_term_tokens(term)
+                    .map(|tokens| format!("content : {}", fts_phrase(&tokens))),
+                SearchTextScope::NameOnly => None,
+            };
+            match name_term_tokens(term) {
+                Some(tokens) => {
+                    let name_expression = format!("name : {}", fts_phrase(&tokens));
+                    phrases.push(match content_expression {
+                        Some(content_expression) => {
+                            format!("({name_expression} OR {content_expression})")
+                        }
+                        None => name_expression,
+                    });
+                }
+                None => short_terms.push(ShortTerm {
+                    term: term.to_owned(),
+                    content_expression,
+                }),
+            }
+        }
+        Self {
+            match_expression: (!phrases.is_empty()).then(|| phrases.join(" AND ")),
+            short_terms,
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.match_expression.is_none() && self.short_terms.is_empty()
+    }
+
+    fn append_short_term_sql(&self, sql: &mut String, values: &mut Vec<Value>) {
+        for short_term in &self.short_terms {
+            sql.push_str(" AND (instr(f.search_name, ?) > 0");
+            values.push(Value::Text(short_term.term.clone()));
+            if let Some(content_expression) = &short_term.content_expression {
+                sql.push_str(
+                    " OR f.rowid IN (
+                        SELECT rowid FROM file_search_fts WHERE file_search_fts MATCH ?
+                     )",
+                );
+                values.push(Value::Text(content_expression.clone()));
+            }
+            sql.push(')');
+        }
+    }
+}
+
 impl SearchDatabase {
     pub fn search(&self, query: &SearchQuery) -> SearchResult<SearchResultBatch> {
         if query.match_mode == SearchMatchMode::Regex {
@@ -29,10 +98,11 @@ impl SearchDatabase {
         let limit = query.limit.clamp(1, 200);
         let fetch_limit = limit.saturating_add(1);
         let offset = query.cursor.map_or(0, |cursor| cursor.offset);
-        let tokens = search_tokens(&query.terms);
+        let terms = SearchTerms::parse(&query.terms);
+        let text = TextPredicates::new(&terms, query.text_scope);
         let transaction = self.connection.unchecked_transaction()?;
-        let full_text_plan = full_text_query_plan(&transaction, query)?;
-        let (sql, values) = search_sql(query, &tokens, fetch_limit, offset, full_text_plan);
+        let full_text_plan = full_text_query_plan(&transaction, query, &text)?;
+        let (sql, values) = search_sql(query, &text, fetch_limit, offset, full_text_plan);
 
         let mut hits = {
             let mut statement = transaction.prepare(&sql)?;
@@ -42,15 +112,14 @@ impl SearchDatabase {
                     let display_name: String = row.get(1)?;
                     let kind = SearchFileKind::from_storage_value(row.get_ref(2)?.as_str()?);
                     let score: f64 = row.get(7)?;
-                    let content_preview: Option<String> = row.get(8)?;
-                    let match_source =
-                        match_source_for_hit(query.text_scope, &tokens, &display_name);
-                    let snippet = if match_source == MatchSource::Content {
-                        content_preview.as_deref().and_then(|preview| {
-                            content_snippet_from_preview(&display_name, preview, &tokens)
-                        })
-                    } else {
-                        None
+                    let search_name: String = row.get(8)?;
+                    let preview: Option<String> = row.get(9)?;
+                    let match_source = match_source_for_hit(query.text_scope, &terms, &search_name);
+                    let snippet = match (match_source, preview) {
+                        (MatchSource::Content, Some(preview)) => {
+                            content_snippet_from_preview(&search_name, &preview, &terms)
+                        }
+                        _ => None,
                     };
                     Ok(SearchHit {
                         path: path_from_storage_bytes(path_bytes),
@@ -149,9 +218,9 @@ impl SearchDatabase {
     pub(super) fn search_plan(&self, query: &SearchQuery) -> SearchResult<Vec<String>> {
         let limit = query.limit.clamp(1, 200).saturating_add(1);
         let offset = query.cursor.map_or(0, |cursor| cursor.offset);
-        let tokens = search_tokens(&query.terms);
-        let full_text_plan = full_text_query_plan(&self.connection, query)?;
-        let (sql, values) = search_sql(query, &tokens, limit, offset, full_text_plan);
+        let text = TextPredicates::new(&SearchTerms::parse(&query.terms), query.text_scope);
+        let full_text_plan = full_text_query_plan(&self.connection, query, &text)?;
+        let (sql, values) = search_sql(query, &text, limit, offset, full_text_plan);
         let mut statement = self
             .connection
             .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
@@ -162,31 +231,20 @@ impl SearchDatabase {
         plan
     }
 
-    #[cfg(test)]
-    pub(super) fn projected_content_snippets(
-        &self,
-        query: &SearchQuery,
-    ) -> SearchResult<Vec<(std::path::PathBuf, Option<String>)>> {
-        let limit = query.limit.clamp(1, 200).saturating_add(1);
-        let offset = query.cursor.map_or(0, |cursor| cursor.offset);
-        let tokens = search_tokens(&query.terms);
-        let full_text_plan = full_text_query_plan(&self.connection, query)?;
-        let (sql, values) = search_sql(query, &tokens, limit, offset, full_text_plan);
-        let mut statement = self.connection.prepare(&sql)?;
-        let rows = statement
-            .query_map(params_from_iter(values), |row| {
-                let path: Vec<u8> = row.get(0)?;
-                Ok((path_from_storage_bytes(path), row.get(8)?))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(rows)
-    }
-
     pub fn indexed_file_count(&self) -> SearchResult<u64> {
         let sql = format!("SELECT COUNT(*) FROM files f WHERE {QUERY_VISIBLE_PREDICATE}");
         let count: i64 = self.connection.query_row(&sql, [], |row| row.get(0))?;
         Ok(count.max(0) as u64)
     }
+}
+
+/// 查询词实际使用的 FTS 表达式（只含够 3 个字的词）。整库重建拿它核对旧命中，测试拿它
+/// 对照显式 `bm25()`。
+pub(super) fn full_text_match_expression(
+    terms: &str,
+    text_scope: SearchTextScope,
+) -> Option<String> {
+    TextPredicates::new(&SearchTerms::parse(terms), text_scope).match_expression
 }
 
 fn regex_scan_sql(query: &SearchQuery) -> (String, Vec<Value>) {
@@ -198,15 +256,17 @@ fn regex_scan_sql(query: &SearchQuery) -> (String, Vec<Value>) {
         .to_owned()
         + QUERY_VISIBLE_PREDICATE;
     append_scope_filter(&mut sql, &mut values, query);
-    append_filters(&mut sql, &mut values, query);
+    query.filters.append_sql(&mut sql, &mut values);
     (sql, values)
 }
 
 fn full_text_query_plan(
     connection: &rusqlite::Connection,
     query: &SearchQuery,
+    text: &TextPredicates,
 ) -> SearchResult<FullTextQueryPlan> {
-    let unrestricted_full_text_query = query.terms.split_whitespace().next().is_some()
+    let unrestricted_full_text_query = text.match_expression.is_some()
+        && text.short_terms.is_empty()
         && matches!(query.scope, SearchScope::Global)
         && query.filters.entry_type_rules.is_empty()
         && query.filters.modified.is_none()
@@ -232,62 +292,67 @@ fn full_text_query_plan(
     })
 }
 
+/// 列顺序固定：path, display_name, kind, size, modified, accessed, created, score,
+/// search_name, preview。有 FTS 表达式时由 FTS5 原生 rank 顺序驱动并提前满足 LIMIT；
+/// 只有短词或没有词时按元数据顺序扫描，凑满一页即停。
 fn search_sql(
     query: &SearchQuery,
-    tokens: &[&str],
+    text: &TextPredicates,
     limit: usize,
     offset: usize,
     full_text_plan: FullTextQueryPlan,
 ) -> (String, Vec<Value>) {
-    let match_expression = search_match_expression(tokens, query.text_scope);
     let recursive_range = recursive_path_range(query);
-    let range_drives_query = match_expression.is_none() && recursive_range.is_some();
-    let mut values = Vec::new();
-    let mut sql = if let Some(match_expression) = match_expression.as_ref() {
-        let snippet_projection = content_preview_projection(tokens, query.text_scope, &mut values);
-        let preview_join = if query.text_scope == SearchTextScope::NameAndContent {
-            "LEFT JOIN file_search_snippets ON file_search_snippets.file_rowid = f.rowid"
+    let range_drives_query = text.match_expression.is_none() && recursive_range.is_some();
+    let (preview_projection, preview_join) =
+        if query.text_scope == SearchTextScope::NameAndContent && !text.is_empty() {
+            (
+                "file_search_snippets.preview",
+                " LEFT JOIN file_search_snippets ON file_search_snippets.file_rowid = f.rowid",
+            )
         } else {
-            ""
+            ("NULL", "")
         };
-        values.push(Value::Text(match_expression.clone()));
-        let mut full_text_sql = format!(
-            "SELECT f.path, f.display_name, f.kind, f.size, f.modified_ms, f.accessed_ms,
-                f.created_ms, file_search_fts.rank AS score,
-                {snippet_projection}
-         FROM file_search_fts
-         JOIN files f ON f.rowid = file_search_fts.rowid
-         {preview_join}
-         WHERE file_search_fts MATCH ?"
-        );
-        if full_text_plan == FullTextQueryPlan::FilterWithMetadata {
-            full_text_sql.push_str(" AND ");
-            full_text_sql.push_str(QUERY_VISIBLE_PREDICATE);
-        }
-        full_text_sql
-    } else if let Some(range) = recursive_range.as_ref() {
-        let mut scoped_sql = "SELECT f.path, f.display_name, f.kind, f.size, f.modified_ms,
-                    f.accessed_ms, f.created_ms, 0.0 AS score, NULL AS content_snippet
-             FROM files f
-             WHERE f.rowid IN (SELECT rowid FROM files WHERE "
-            .to_owned();
-        append_recursive_path_range(&mut scoped_sql, &mut values, "path", range);
-        scoped_sql.push_str(") AND ");
-        scoped_sql + QUERY_VISIBLE_PREDICATE
+    let score_projection = if text.match_expression.is_some() {
+        "file_search_fts.rank"
     } else {
-        "SELECT f.path, f.display_name, f.kind, f.size, f.modified_ms, f.accessed_ms,
-                f.created_ms, 0.0 AS score, NULL AS content_snippet
-         FROM files f
-         WHERE "
-            .to_owned()
-            + QUERY_VISIBLE_PREDICATE
+        "0.0"
     };
+    let mut values = Vec::new();
+    let mut sql = format!(
+        "SELECT f.path, f.display_name, f.kind, f.size, f.modified_ms, f.accessed_ms,
+                f.created_ms, {score_projection} AS score, f.search_name,
+                {preview_projection} AS preview"
+    );
+    if let Some(match_expression) = text.match_expression.as_ref() {
+        sql.push_str(" FROM file_search_fts JOIN files f ON f.rowid = file_search_fts.rowid");
+        sql.push_str(preview_join);
+        sql.push_str(" WHERE file_search_fts MATCH ?");
+        values.push(Value::Text(match_expression.clone()));
+        if full_text_plan == FullTextQueryPlan::FilterWithMetadata {
+            sql.push_str(" AND ");
+            sql.push_str(QUERY_VISIBLE_PREDICATE);
+        }
+    } else if let Some(range) = recursive_range.as_ref() {
+        sql.push_str(" FROM files f");
+        sql.push_str(preview_join);
+        sql.push_str(" WHERE f.rowid IN (SELECT rowid FROM files WHERE ");
+        append_recursive_path_range(&mut sql, &mut values, "path", range);
+        sql.push_str(") AND ");
+        sql.push_str(QUERY_VISIBLE_PREDICATE);
+    } else {
+        sql.push_str(" FROM files f");
+        sql.push_str(preview_join);
+        sql.push_str(" WHERE ");
+        sql.push_str(QUERY_VISIBLE_PREDICATE);
+    }
 
     if !range_drives_query {
         append_scope_filter(&mut sql, &mut values, query);
     }
-    append_filters(&mut sql, &mut values, query);
-    if match_expression.is_some() {
+    text.append_short_term_sql(&mut sql, &mut values);
+    query.filters.append_sql(&mut sql, &mut values);
+    if text.match_expression.is_some() {
         // FTS5 可在原生 rank 顺序下提前满足 LIMIT，避免评分并排序全部命中。
         sql.push_str(" ORDER BY file_search_fts.rank LIMIT ? OFFSET ?");
     } else {
@@ -340,239 +405,37 @@ fn append_recursive_path_range(
     values.push(Value::Blob(range.descendant_upper.clone()));
 }
 
-fn append_filters(sql: &mut String, values: &mut Vec<Value>, query: &SearchQuery) {
-    append_entry_type_rules(sql, values, &query.filters.entry_type_rules);
-    append_time_filter(sql, values, "f.modified_ms", query.filters.modified);
-    append_time_filter(sql, values, "f.accessed_ms", query.filters.accessed);
-    append_time_filter(sql, values, "f.created_ms", query.filters.created);
-    append_extension_filter(sql, values, &query.filters.extensions);
-    append_size_filter(sql, values, query.filters.size);
-}
-
-fn append_entry_type_rules(
-    sql: &mut String,
-    values: &mut Vec<Value>,
-    rules: &[SearchEntryTypeRule],
-) {
-    if rules.is_empty() {
-        return;
-    }
-    sql.push_str(" AND (");
-    for (index, rule) in rules.iter().enumerate() {
-        if index > 0 {
-            sql.push_str(" OR ");
-        }
-        match rule {
-            SearchEntryTypeRule::Kind(kind) => {
-                sql.push_str("f.kind = ?");
-                values.push(Value::Text(kind.as_storage_value().to_owned()));
-            }
-            SearchEntryTypeRule::Mime(crate::model::MimePattern::Exact(mime_type)) => {
-                sql.push_str("f.mime_type = ?");
-                values.push(Value::Text(mime_type.clone()));
-            }
-            SearchEntryTypeRule::Mime(crate::model::MimePattern::Prefix(prefix)) => {
-                sql.push_str("f.mime_type LIKE ? ESCAPE '\\'");
-                values.push(Value::Text(escaped_like_prefix(prefix)));
-            }
-        }
-    }
-    sql.push(')');
-}
-
-fn escaped_like_prefix(prefix: &str) -> String {
-    let mut pattern = String::with_capacity(prefix.len() + 1);
-    for character in prefix.chars() {
-        if matches!(character, '\\' | '%' | '_') {
-            pattern.push('\\');
-        }
-        pattern.push(character);
-    }
-    pattern.push('%');
-    pattern
-}
-
-fn append_extension_filter(sql: &mut String, values: &mut Vec<Value>, extensions: &[String]) {
-    if extensions.is_empty() {
-        return;
-    }
-    // 后缀语义只作用于文件类条目：目录即使名称以点后缀结尾也不匹配。
-    sql.push_str(" AND (f.kind <> ?");
-    values.push(Value::Text(
-        SearchFileKind::Directory.as_storage_value().to_owned(),
-    ));
-    sql.push_str(" AND (");
-    for (index, extension) in extensions.iter().enumerate() {
-        if index > 0 {
-            sql.push_str(" OR ");
-        }
-        // LIKE 默认对 ASCII 大小写不敏感；token 已规范化小写且不含通配符，无需转义。
-        sql.push_str("f.display_name LIKE '%.' || ?");
-        values.push(Value::Text(extension.clone()));
-    }
-    sql.push_str("))");
-}
-
-fn append_size_filter(sql: &mut String, values: &mut Vec<Value>, size: Option<SizeRange>) {
-    let Some(size) = size else {
-        return;
-    };
-    // 大小语义只作用于文件类条目：目录直接放行（PRD：文件夹永不被大小排除，
-    // 区别于后缀过滤的"目录不匹配"语义），文件按 [min, max) 判定。
-    sql.push_str(" AND (f.kind = ? OR (f.size >= ?");
-    values.push(Value::Text(
-        SearchFileKind::Directory.as_storage_value().to_owned(),
-    ));
-    values.push(Value::Integer(storage_size_bound(size.min_bytes)));
-    // 上界排他：[min, max)。
-    if let Some(max_bytes) = size.max_bytes {
-        sql.push_str(" AND f.size < ?");
-        values.push(Value::Integer(storage_size_bound(max_bytes)));
-    }
-    sql.push_str("))");
-}
-
-/// size 列是 SQLite 整数：超过 i64 的自定义边界饱和为 i64::MAX，
-/// 该边界在真实文件尺寸之外，不改变过滤语义。
-fn storage_size_bound(bytes: u64) -> i64 {
-    i64::try_from(bytes).unwrap_or(i64::MAX)
-}
-
-fn append_time_filter(
-    sql: &mut String,
-    values: &mut Vec<Value>,
-    column: &str,
-    range: Option<crate::model::TimeRange>,
-) {
-    if let Some(range) = range {
-        sql.push_str(" AND ");
-        sql.push_str(column);
-        sql.push_str(" >= ? AND ");
-        sql.push_str(column);
-        sql.push_str(" <= ?");
-        values.push(Value::Integer(range.start_ms));
-        values.push(Value::Integer(range.end_ms));
-    }
-}
-
-fn search_tokens(terms: &str) -> Vec<&str> {
-    terms.split_whitespace().collect()
-}
-
-fn search_match_expression(tokens: &[&str], text_scope: SearchTextScope) -> Option<String> {
-    let tokens = tokens
-        .iter()
-        .map(|token| format!("\"{}\"", token.replace('"', "\"\"")))
-        .collect::<Vec<_>>();
-    if tokens.is_empty() {
-        return None;
-    }
-    let expression = tokens.join(" AND ");
-    Some(match text_scope {
-        SearchTextScope::NameAndContent => expression,
-        SearchTextScope::NameOnly => format!("name : ({expression})"),
-    })
-}
-
-fn content_preview_projection(
-    tokens: &[&str],
-    text_scope: SearchTextScope,
-    values: &mut Vec<Value>,
-) -> String {
-    if text_scope == SearchTextScope::NameOnly {
-        return "NULL AS content_snippet".to_owned();
-    }
-    debug_assert!(!tokens.is_empty());
-    let mut projection = "CASE WHEN ".to_owned();
-    for (index, token) in tokens.iter().enumerate() {
-        if index > 0 {
-            projection.push_str(" AND ");
-        }
-        projection.push_str("instr(lower(f.display_name), lower(?)) > 0");
-        values.push(Value::Text((*token).to_owned()));
-    }
-    projection.push_str(" THEN NULL ELSE file_search_snippets.preview END AS content_snippet");
-    projection
-}
-
+/// 所有词都是规范化名称的子串 → 名称命中；否则至少有一个词只在内容里。
 fn match_source_for_hit(
     text_scope: SearchTextScope,
-    terms: &[&str],
-    display_name: &str,
+    terms: &SearchTerms,
+    search_name: &str,
 ) -> MatchSource {
     if terms.is_empty() {
         return MatchSource::Metadata;
     }
-    if text_scope == SearchTextScope::NameOnly {
-        return MatchSource::Name;
-    }
-    if terms
-        .iter()
-        .all(|term| display_name_contains_search_token(display_name, term))
-    {
+    if text_scope == SearchTextScope::NameOnly || terms.all_in_name(search_name) {
         MatchSource::Name
     } else {
         MatchSource::Content
     }
 }
 
-fn display_name_contains_search_token(display_name: &str, term: &str) -> bool {
-    let display_name = display_name.as_bytes();
-    let term = term.as_bytes();
-    display_name
-        .windows(term.len())
-        .any(|candidate| candidate.eq_ignore_ascii_case(term))
-}
-
+/// 只为不在名称里的词在预览里按内容规则定位；命中位置在预览之外时没有摘要。
 fn content_snippet_from_preview(
-    display_name: &str,
+    search_name: &str,
     preview: &str,
-    terms: &[&str],
+    terms: &SearchTerms,
 ) -> Option<String> {
-    let normalized = normalize_content_preview(preview)?;
+    let normalized = collapse_preview_whitespace(preview)?;
     let match_character_index = terms
         .iter()
-        .filter(|term| !display_name_contains_search_token(display_name, term))
-        .find_map(|term| preview_token_start(&normalized, term))?;
+        .filter(|term| !search_name.contains(term))
+        .find_map(|term| locate_content_term(&normalized, term))?;
     Some(snippet_around_character(&normalized, match_character_index))
 }
 
-fn preview_token_start(preview: &str, term: &str) -> Option<usize> {
-    if term.is_empty() {
-        return None;
-    }
-    let term_character_count = term.chars().count();
-    let folded_term = term.to_lowercase();
-    for (start_byte, _) in preview.char_indices() {
-        if preview[..start_byte]
-            .chars()
-            .next_back()
-            .is_some_and(char::is_alphanumeric)
-        {
-            continue;
-        }
-        let mut candidate_characters = preview[start_byte..].chars();
-        let candidate = candidate_characters
-            .by_ref()
-            .take(term_character_count)
-            .collect::<String>();
-        if candidate.chars().count() != term_character_count
-            || candidate.to_lowercase() != folded_term
-        {
-            continue;
-        }
-        if candidate_characters
-            .next()
-            .is_some_and(char::is_alphanumeric)
-        {
-            continue;
-        }
-        return Some(preview[..start_byte].chars().count());
-    }
-    None
-}
-
-fn normalize_content_preview(preview: &str) -> Option<String> {
+fn collapse_preview_whitespace(preview: &str) -> Option<String> {
     let mut normalized = String::with_capacity(preview.len());
     let mut pending_space = false;
     for character in preview.chars() {

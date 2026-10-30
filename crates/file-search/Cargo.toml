@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 dirs.workspace = true
 file-core = { path = "../file-core" }
+icu_normalizer = { version = "2.2.0", default-features = false, features = ["compiled_data"] }
 libc = "0.2"
 notify.workspace = true
 quick-xml = "0.39.4"
@@ -22,6 +23,8 @@ tokio-util.workspace = true
 tracing.workspace = true
 tracing-journald.workspace = true
 tracing-subscriber.workspace = true
+unicase = "2.9.0"
+unicode-segmentation = "1.13.2"
 zip = "8.6.0"
 
 [dev-dependencies]

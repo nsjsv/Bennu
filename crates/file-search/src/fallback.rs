@@ -6,10 +6,11 @@ use crate::filesystem::{
     display_name, ensure_not_cancelled, file_time_ms, mime_type_for_path, FilesystemObservation,
     LocalFilesystemBoundary, TraversalDepth, TraversalEvent,
 };
+use crate::filter_semantics::EntryFacts;
 use crate::model::{
-    MatchSource, SearchFileKind, SearchHit, SearchMatchMode, SearchQuery, SearchScope, SizeRange,
-    TimeRange,
+    MatchSource, SearchFileKind, SearchHit, SearchMatchMode, SearchQuery, SearchScope,
 };
+use crate::text_matching::{normalize_search_text, SearchTerms};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DirectoryFallbackLimits {
@@ -96,11 +97,7 @@ pub fn search_directory_fallback(
             })
         }
     };
-    let terms = query
-        .terms
-        .split_whitespace()
-        .map(str::to_ascii_lowercase)
-        .collect::<Vec<_>>();
+    let terms = SearchTerms::parse(&query.terms);
     let name_regex = (query.match_mode == SearchMatchMode::Regex)
         .then(|| query.match_mode.name_regex(&query.terms))
         .transpose()?;
@@ -125,11 +122,11 @@ pub fn search_directory_fallback(
         };
         inspected_entries += 1;
         let name = display_name(entry.path());
-        let folded_name = name.to_ascii_lowercase();
+        let search_name = normalize_search_text(&name);
         let name_matches = match &name_regex {
-            // 正则自行处理大小写折叠，不依赖 ASCII lowercase 视图。
+            // 正则自行处理大小写折叠，匹配原名。
             Some(name_regex) => name_regex.is_match(&name),
-            None => terms.iter().all(|term| folded_name.contains(term)),
+            None => terms.all_in_name(&search_name),
         };
         if !name_matches {
             continue;
@@ -144,16 +141,16 @@ pub fn search_directory_fallback(
         } else {
             None
         };
-        if !matches_filters(
-            query,
-            entry.path(),
-            entry.kind(),
-            mime_type.as_deref(),
+        let facts = EntryFacts {
+            search_name: &search_name,
+            kind: entry.kind(),
+            mime_type: mime_type.as_deref(),
+            size: metadata.len(),
             modified_ms,
             accessed_ms,
             created_ms,
-            metadata.len(),
-        ) {
+        };
+        if !query.filters.matches(&facts) {
             continue;
         }
 
@@ -190,92 +187,6 @@ pub fn search_directory_fallback(
         ensure_not_cancelled(cancellation)?;
     }
     Ok(DirectoryFallbackCompletion::TraversalComplete { inspected_entries })
-}
-
-/// 八个事实全部来自同一次遍历条目的 metadata 快照，参数扁平但概念单一；
-/// 收敛成结构体反而多一层只构造一次的中转。
-#[allow(clippy::too_many_arguments)]
-fn matches_filters(
-    query: &SearchQuery,
-    path: &std::path::Path,
-    kind: SearchFileKind,
-    mime_type: Option<&str>,
-    modified_ms: Option<i64>,
-    accessed_ms: Option<i64>,
-    created_ms: Option<i64>,
-    size: u64,
-) -> bool {
-    (query.filters.entry_type_rules.is_empty()
-        || query
-            .filters
-            .entry_type_rules
-            .iter()
-            .any(|rule| entry_type_rule_matches(rule, kind, mime_type)))
-        && extension_filter_matches(query, path, kind)
-        && size_filter_matches(kind, size, query.filters.size)
-        && time_matches(modified_ms, query.filters.modified)
-        && time_matches(accessed_ms, query.filters.accessed)
-        && time_matches(created_ms, query.filters.created)
-}
-
-/// 大小语义只作用于文件类条目：目录永不因大小被排除（与索引路径一致）。
-fn size_filter_matches(kind: SearchFileKind, size: u64, range: Option<SizeRange>) -> bool {
-    match range {
-        Some(range) => {
-            kind == SearchFileKind::Directory
-                || (size >= range.min_bytes && range.max_bytes.is_none_or(|max| size < max))
-        }
-        None => true,
-    }
-}
-
-/// 后缀语义只作用于文件类条目：目录即使名称以点后缀结尾也不匹配（与索引路径一致）。
-fn extension_filter_matches(
-    query: &SearchQuery,
-    path: &std::path::Path,
-    kind: SearchFileKind,
-) -> bool {
-    let extensions = &query.filters.extensions;
-    extensions.is_empty()
-        || (kind != SearchFileKind::Directory
-            && path
-                .extension()
-                .and_then(|extension| extension.to_str())
-                .is_some_and(|extension| {
-                    extensions
-                        .iter()
-                        .any(|token| extension.eq_ignore_ascii_case(token))
-                }))
-}
-
-fn entry_type_rule_matches(
-    rule: &crate::model::SearchEntryTypeRule,
-    kind: SearchFileKind,
-    mime_type: Option<&str>,
-) -> bool {
-    match rule {
-        crate::model::SearchEntryTypeRule::Kind(expected) => *expected == kind,
-        crate::model::SearchEntryTypeRule::Mime(pattern) => {
-            mime_pattern_matches(pattern, mime_type)
-        }
-    }
-}
-
-fn mime_pattern_matches(pattern: &crate::model::MimePattern, mime_type: Option<&str>) -> bool {
-    let Some(mime_type) = mime_type else {
-        return false;
-    };
-    match pattern {
-        crate::model::MimePattern::Exact(expected) => mime_type == expected,
-        crate::model::MimePattern::Prefix(prefix) => mime_type.starts_with(prefix),
-    }
-}
-
-fn time_matches(value: Option<i64>, range: Option<TimeRange>) -> bool {
-    match range {
-        Some(range) => value.is_some_and(|value| value >= range.start_ms && value <= range.end_ms),
-        None => true,
-    }
 }
 
 #[cfg(test)]
@@ -629,15 +540,57 @@ mod tests {
         assert!(!hits.contains("two.bin"));
     }
 
+    fn fallback_names(query: &SearchQuery) -> Vec<String> {
+        let mut names = Vec::new();
+        search_directory_fallback(
+            query,
+            &SearchExcludeRules::new(Vec::new()),
+            complete_traversal_limits(),
+            &CancellationToken::new(),
+            |batch| names.extend(batch.into_iter().map(|hit| hit.display_name)),
+        )
+        .unwrap();
+        names.sort();
+        names
+    }
+
     #[test]
-    fn missing_time_value_does_not_match_a_selected_range() {
-        assert!(!super::time_matches(
-            None,
-            Some(TimeRange {
-                start_ms: 10,
-                end_ms: 20,
-            })
-        ));
+    fn names_match_by_any_part_ignoring_case_and_diacritics() {
+        let content = tempdir().unwrap();
+        for name in [
+            "年度报告.pdf",
+            "report_2024.pdf",
+            "MyReport.docx",
+            "Ärger.md",
+        ] {
+            fs::write(content.path().join(name), "x").unwrap();
+        }
+        let root = content.path().to_path_buf();
+
+        assert_eq!(
+            fallback_names(&directory_query(root.clone(), "报告")),
+            ["年度报告.pdf"]
+        );
+        assert_eq!(
+            fallback_names(&directory_query(root.clone(), "repo")),
+            ["MyReport.docx", "report_2024.pdf"]
+        );
+        assert_eq!(
+            fallback_names(&directory_query(root, "ARGER")),
+            ["Ärger.md"]
+        );
+    }
+
+    #[test]
+    fn multi_part_suffix_filters_match_the_whole_suffix() {
+        let content = tempdir().unwrap();
+        for name in ["backup.tar.gz", "notes.gz", "archive.tar"] {
+            fs::write(content.path().join(name), "x").unwrap();
+        }
+        let mut query = directory_query(content.path().to_path_buf(), "");
+        query.filters.extensions = vec!["tar.gz".to_owned()];
+
+        assert_eq!(fallback_names(&query), ["backup.tar.gz"]);
     }
 
     #[test]

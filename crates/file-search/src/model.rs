@@ -196,11 +196,13 @@ pub(crate) fn extension_token_is_valid(token: &str) -> bool {
 }
 
 /// 自定义后缀的唯一解析入口：UI 预检与两条执行路径共用同一语义。
-/// 容错规则：逗号/空白分隔、前后点号可省略、大小写不敏感、按序去重。
+/// 容错规则：逗号/空白分隔、前后点号可省略、按搜索文本规则规范化（大小写、变音不敏感）、
+/// 按序去重。
 pub fn normalize_extension_tokens(input: &str) -> Result<Vec<String>, String> {
     let mut tokens = Vec::new();
     for raw in input.split(|c: char| c == ',' || c.is_whitespace()) {
-        let token = raw.trim_matches('.').to_lowercase();
+        let normalized = crate::text_matching::normalize_search_text(raw);
+        let token = normalized.trim_matches('.').to_owned();
         if token.is_empty() {
             continue;
         }

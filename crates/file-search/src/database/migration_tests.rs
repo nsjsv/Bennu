@@ -294,16 +294,149 @@ fn schema_ten_migration_adds_path_configuration_without_losing_search_rows() {
             .unwrap(),
         SCHEMA_VERSION
     );
+    // 途经 schema 12：名称立即可搜，内容等服务后台重新提取。
     assert_eq!(
         database
-            .search(&SearchQuery::global(1, "needle"))
+            .search(&SearchQuery::global(1, "preserved"))
             .unwrap()
             .hits
             .len(),
         1
     );
+    assert_eq!(
+        database
+            .entry_stage_state(Path::new("/tmp/preserved.txt"))
+            .unwrap()
+            .unwrap()
+            .content,
+        EntryStageProgress::Pending
+    );
     assert!(database.read_search_path_configuration().unwrap().is_none());
     assert!(database.read_search_root_mounts().unwrap().is_empty());
+}
+
+#[test]
+fn schema_twelve_migration_indexes_names_by_any_part_and_queues_content_again() {
+    let directory = tempdir().unwrap();
+    let database_path = directory.path().join("search.sqlite");
+    let database = SearchDatabase::open(&database_path).unwrap();
+    for (path, name, status) in [
+        (
+            "/tmp/年度报告.pdf",
+            "年度报告.pdf",
+            ExtractionStatus::Indexed,
+        ),
+        ("/tmp/Ärger.md", "Ärger.md", ExtractionStatus::Unsupported),
+    ] {
+        database
+            .upsert_file(&IndexedFile {
+                path: Path::new(path).to_path_buf(),
+                parent_path: Path::new("/tmp").to_path_buf(),
+                display_name: name.to_owned(),
+                kind: SearchFileKind::File,
+                size: 9,
+                modified_ms: None,
+                accessed_ms: None,
+                created_ms: None,
+                mime_type: None,
+                stage_state: IndexedEntryStageState {
+                    metadata: EntryStageProgress::Complete,
+                    content: EntryStageProgress::Complete,
+                },
+                content: Some("body".to_owned()),
+                extraction_status: status,
+                device: Some(1),
+                inode: Some(2),
+                mtime_ns: Some(3),
+                ctime_ns: Some(4),
+            })
+            .unwrap();
+    }
+    // 退回 schema 11 的样子：没有规范化名称列，FTS 是默认分词、原样写名称。
+    database
+        .connection
+        .execute_batch(
+            "DROP TABLE file_search_fts;
+             CREATE VIRTUAL TABLE file_search_fts USING fts5(
+                name, content, content = '', contentless_delete = 1, detail = full
+             );
+             INSERT INTO file_search_fts(rowid, name, content)
+                SELECT rowid, display_name, 'body' FROM files;
+             ALTER TABLE files DROP COLUMN search_name;
+             PRAGMA user_version = 11;",
+        )
+        .unwrap();
+    drop(database);
+
+    let database = SearchDatabase::open(&database_path).unwrap();
+
+    let names = |terms: &str| {
+        database
+            .search(&SearchQuery::global(1, terms))
+            .unwrap()
+            .hits
+            .into_iter()
+            .map(|hit| hit.display_name)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(names("报告"), ["年度报告.pdf"]);
+    assert_eq!(names("arger"), ["Ärger.md"]);
+    // 已提取内容的文件重新排队；没有内容的不动。
+    assert_eq!(
+        database
+            .entry_stage_state(Path::new("/tmp/年度报告.pdf"))
+            .unwrap()
+            .unwrap()
+            .content,
+        EntryStageProgress::Pending
+    );
+    assert_eq!(
+        database
+            .entry_stage_state(Path::new("/tmp/Ärger.md"))
+            .unwrap()
+            .unwrap()
+            .content,
+        EntryStageProgress::Complete
+    );
+}
+
+/// 每一步只记自己到达的版本：后面一步失败时，重来会从失败的那一步继续，而不是被跳过。
+#[test]
+fn an_interrupted_migration_resumes_at_the_failed_step() {
+    let directory = tempdir().unwrap();
+    let database_path = directory.path().join("search.sqlite");
+    let database = SearchDatabase::open(&database_path).unwrap();
+    let user_version = |database: &SearchDatabase| {
+        database
+            .connection
+            .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+            .unwrap()
+    };
+    // 回到 schema 9，并让 schema 12 那一步读不到 FTS 表而失败。
+    database
+        .connection
+        .execute_batch(
+            "DROP TABLE search_root_mounts;
+             DROP TABLE search_path_configuration;
+             DROP TABLE file_search_fts;
+             ALTER TABLE files DROP COLUMN search_name;
+             PRAGMA user_version = 9;",
+        )
+        .unwrap();
+
+    assert!(database.migrate().is_err());
+    assert_eq!(user_version(&database), 11);
+
+    database
+        .connection
+        .execute_batch(
+            "CREATE VIRTUAL TABLE file_search_fts USING fts5(
+                name, content, content = '', contentless_delete = 1, detail = full
+             );",
+        )
+        .unwrap();
+    database.migrate().unwrap();
+    assert_eq!(user_version(&database), SCHEMA_VERSION);
 }
 
 #[test]

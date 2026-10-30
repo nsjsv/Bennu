@@ -1870,6 +1870,7 @@ version = "0.3.6"
 dependencies = [
  "dirs",
  "file-core",
+ "icu_normalizer",
  "libc",
  "notify",
  "quick-xml",
@@ -1884,6 +1885,8 @@ dependencies = [
  "tracing",
  "tracing-journald",
  "tracing-subscriber",
+ "unicase",
+ "unicode-segmentation",
  "zip",
 ]
 

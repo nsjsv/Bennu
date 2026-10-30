@@ -1,11 +1,14 @@
+use std::collections::BTreeSet;
 use std::fs;
 use std::os::unix::fs::{symlink, PermissionsExt};
 
 use rusqlite::{params, Connection, ErrorCode, OptionalExtension};
 use tempfile::tempdir;
 
+use crate::database::search::full_text_match_expression;
 use crate::error::SearchError;
 use crate::extractor::ExtractionStatus;
+use crate::model::SearchTextScope;
 
 use super::{
     atomically_replace_database, create_replacement_database, open_committed_database,
@@ -15,61 +18,64 @@ use super::{
 use crate::database::{schema::BASE_SCHEMA, SearchDatabase, SCHEMA_VERSION};
 
 #[derive(Clone)]
-struct RankedQueryCase {
-    match_expression: String,
+struct QueryCase {
+    terms: String,
+    text_scope: SearchTextScope,
     parent_path: Option<Vec<u8>>,
     mime_type: Option<String>,
     modified_at_least: Option<i64>,
 }
 
-fn ranked_query_pages(
-    connection: &Connection,
-    query: &RankedQueryCase,
-) -> Vec<Vec<(Vec<u8>, u64)>> {
-    let mut pages = Vec::new();
-    let mut offset = 0_i64;
-    loop {
-        let mut statement = connection
-            .prepare(
-                "SELECT files.path, file_search_fts.rank
-                 FROM file_search_fts
-                 JOIN files ON files.rowid = file_search_fts.rowid
-                 WHERE file_search_fts MATCH ?1
-                   AND (?2 IS NULL OR files.parent_path = ?2)
-                   AND (?3 IS NULL OR files.mime_type = ?3)
-                   AND (?4 IS NULL OR files.modified_ms >= ?4)
-                 ORDER BY file_search_fts.rank, files.rowid
-                 LIMIT 7 OFFSET ?5",
-            )
-            .unwrap();
-        let page = statement
-            .query_map(
-                params![
-                    query.match_expression,
-                    query.parent_path,
-                    query.mime_type,
-                    query.modified_at_least,
-                    offset,
-                ],
-                |row| {
-                    let rank: f64 = row.get(1)?;
-                    Ok((row.get(0)?, rank.to_bits()))
-                },
-            )
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        if page.is_empty() {
-            break;
+impl QueryCase {
+    /// schema 8 的旧表达式：每个词整词匹配，`NameOnly` 限定在名称列。
+    fn legacy_match_expression(&self) -> String {
+        let expression = self
+            .terms
+            .split_whitespace()
+            .map(|term| format!("\"{term}\""))
+            .collect::<Vec<_>>()
+            .join(" AND ");
+        match self.text_scope {
+            SearchTextScope::NameAndContent => expression,
+            SearchTextScope::NameOnly => format!("name : ({expression})"),
         }
-        offset += i64::try_from(page.len()).unwrap();
-        pages.push(page);
     }
-    pages
 }
 
+fn matched_paths(
+    connection: &Connection,
+    query: &QueryCase,
+    match_expression: &str,
+) -> BTreeSet<Vec<u8>> {
+    let mut statement = connection
+        .prepare(
+            "SELECT files.path
+             FROM file_search_fts
+             JOIN files ON files.rowid = file_search_fts.rowid
+             WHERE file_search_fts MATCH ?1
+               AND (?2 IS NULL OR files.parent_path = ?2)
+               AND (?3 IS NULL OR files.mime_type = ?3)
+               AND (?4 IS NULL OR files.modified_ms >= ?4)",
+        )
+        .unwrap();
+    statement
+        .query_map(
+            params![
+                match_expression,
+                query.parent_path,
+                query.mime_type,
+                query.modified_at_least,
+            ],
+            |row| row.get(0),
+        )
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
+}
+
+/// 当前规则（名称子串、规范化切词）只会多命中：旧库按词命中的每一行重建后仍须命中。
 #[test]
-fn schema_eight_rebuild_preserves_the_fixed_ranked_query_corpus() {
+fn schema_eight_rebuild_keeps_every_legacy_hit_of_the_fixed_query_corpus() {
     let directory = tempdir().unwrap();
     let database_path = directory.path().join("search.sqlite");
     let connection = create_schema_eight_database(&database_path);
@@ -133,28 +139,30 @@ fn schema_eight_rebuild_preserves_the_fixed_ranked_query_corpus() {
         )
         .unwrap();
 
+    let plain = |terms: String, text_scope| QueryCase {
+        terms,
+        text_scope,
+        parent_path: None,
+        mime_type: None,
+        modified_at_least: None,
+    };
     let mut queries = Vec::with_capacity(80);
     for group in 0..20 {
-        queries.push(RankedQueryCase {
-            match_expression: format!("name : (\"namegroup{group}\")"),
-            parent_path: None,
-            mime_type: None,
-            modified_at_least: None,
-        });
-        queries.push(RankedQueryCase {
-            match_expression: format!("\"contentgroup{group}\""),
-            parent_path: None,
-            mime_type: None,
-            modified_at_least: None,
-        });
-        queries.push(RankedQueryCase {
-            match_expression: format!("\"shared\" AND \"multi{group}\""),
-            parent_path: None,
-            mime_type: None,
-            modified_at_least: None,
-        });
-        queries.push(RankedQueryCase {
-            match_expression: "\"shared\"".to_owned(),
+        queries.push(plain(
+            format!("namegroup{group}"),
+            SearchTextScope::NameOnly,
+        ));
+        queries.push(plain(
+            format!("contentgroup{group}"),
+            SearchTextScope::NameAndContent,
+        ));
+        queries.push(plain(
+            format!("shared multi{group}"),
+            SearchTextScope::NameAndContent,
+        ));
+        queries.push(QueryCase {
+            terms: "shared".to_owned(),
+            text_scope: SearchTextScope::NameAndContent,
             parent_path: Some(format!("/root/scope-{}", group % 4).into_bytes()),
             mime_type: Some(if group % 2 == 0 {
                 "text/plain".to_owned()
@@ -164,20 +172,23 @@ fn schema_eight_rebuild_preserves_the_fixed_ranked_query_corpus() {
             modified_at_least: Some(i64::from(group * 3)),
         });
     }
-    let legacy_pages = queries
+    let legacy_hits = queries
         .iter()
-        .map(|query| ranked_query_pages(&connection, query))
+        .map(|query| matched_paths(&connection, query, &query.legacy_match_expression()))
         .collect::<Vec<_>>();
     drop(connection);
 
     let migrated = SearchDatabase::open(&database_path).unwrap();
-    for (query_index, (query, expected_pages)) in
-        queries.iter().zip(legacy_pages.iter()).enumerate()
-    {
-        assert_eq!(
-            ranked_query_pages(&migrated.connection, query),
-            *expected_pages,
-            "ranked query corpus changed at index {query_index}"
+    for (query_index, (query, legacy_hits)) in queries.iter().zip(&legacy_hits).enumerate() {
+        assert!(
+            !legacy_hits.is_empty(),
+            "query {query_index} has no legacy hits"
+        );
+        let expression = full_text_match_expression(&query.terms, query.text_scope).unwrap();
+        let rebuilt_hits = matched_paths(&migrated.connection, query, &expression);
+        assert!(
+            legacy_hits.is_subset(&rebuilt_hits),
+            "query {query_index} lost legacy hits after the rebuild"
         );
     }
 }

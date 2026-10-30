@@ -6,6 +6,7 @@ use crate::error::{SearchError, SearchResult};
 use crate::extractor::{DurableContentStageState, ExtractionStatus};
 use crate::model::SearchFileKind;
 use crate::path_encoding::{path_from_storage, storage_bytes};
+use crate::text_matching::{content_index_text, name_index_text, normalize_search_text};
 
 #[path = "database/known_entry.rs"]
 mod known_entry;
@@ -36,7 +37,7 @@ pub(crate) use scan::{
 };
 
 /// Bumped whenever the on-disk schema changes in a way that requires a migration.
-pub(crate) const SCHEMA_VERSION: i64 = 11;
+pub(crate) const SCHEMA_VERSION: i64 = 12;
 pub(super) const SEARCH_CONTENT_PREVIEW_CHARACTER_LIMIT: usize = 1_024;
 
 const WRITER_PAGE_CACHE_KIB: i64 = 2_048;
@@ -387,13 +388,14 @@ fn upsert_query_visible_metadata(
         .prepare_cached(
             "INSERT INTO files (
             path, parent_path, display_name, kind, size, modified_ms, accessed_ms,
-            created_ms, mime_type, content_status, device, inode, mtime_ns, ctime_ns, tombstoned,
-            observation_state
+            created_ms, mime_type, content_status, device, inode, mtime_ns, ctime_ns, search_name,
+            tombstoned, observation_state
          )
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 0, 'observable')
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, 0, 'observable')
          ON CONFLICT(path) DO UPDATE SET
             parent_path = excluded.parent_path,
             display_name = excluded.display_name,
+            search_name = excluded.search_name,
             kind = excluded.kind,
             size = excluded.size,
             modified_ms = excluded.modified_ms,
@@ -423,6 +425,7 @@ fn upsert_query_visible_metadata(
             metadata_row.signature.inode.map(|inode| inode as i64),
             metadata_row.signature.mtime_ns,
             metadata_row.signature.ctime_ns,
+            normalize_search_text(metadata_row.display_name),
         ])?;
     Ok(())
 }
@@ -438,13 +441,14 @@ fn upsert_inaccessible_metadata(
         .prepare_cached(
             "INSERT INTO files (
             path, parent_path, display_name, kind, size, modified_ms, accessed_ms,
-            created_ms, mime_type, content_status, device, inode, mtime_ns, ctime_ns, tombstoned,
-            observation_state
+            created_ms, mime_type, content_status, device, inode, mtime_ns, ctime_ns, search_name,
+            tombstoned, observation_state
          )
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 0, 'inaccessible')
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, 0, 'inaccessible')
          ON CONFLICT(path) DO UPDATE SET
             parent_path = excluded.parent_path,
             display_name = excluded.display_name,
+            search_name = excluded.search_name,
             kind = excluded.kind,
             size = excluded.size,
             modified_ms = excluded.modified_ms,
@@ -473,6 +477,7 @@ fn upsert_inaccessible_metadata(
             metadata_row.signature.inode.map(|inode| inode as i64),
             metadata_row.signature.mtime_ns,
             metadata_row.signature.ctime_ns,
+            normalize_search_text(metadata_row.display_name),
         ])?;
     Ok(())
 }
@@ -516,8 +521,8 @@ fn replace_fulltext_content(
         .prepare_cached("INSERT INTO file_search_fts (rowid, name, content) VALUES (?1, ?2, ?3)")?
         .execute(params![
             file_rowid,
-            fulltext_row.display_name,
-            fulltext_row.content.unwrap_or("")
+            name_index_text(&normalize_search_text(fulltext_row.display_name)),
+            content_index_text(fulltext_row.content.unwrap_or(""))
         ])?;
     if let Some(preview) = fulltext_row
         .content

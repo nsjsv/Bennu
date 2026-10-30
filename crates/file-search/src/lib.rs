@@ -6,14 +6,18 @@ mod error;
 mod extractor;
 mod fallback;
 mod filesystem;
+mod filter_semantics;
 mod logging;
 mod managed_search_index;
 mod model;
 mod path_encoding;
 mod protocol;
 mod runtime_identity;
+#[cfg(test)]
+mod search_parity_tests;
 mod search_path_store;
 mod service_runtime;
+mod text_matching;
 mod writer;
 
 pub use config::{

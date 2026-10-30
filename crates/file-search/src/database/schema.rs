@@ -22,7 +22,8 @@ pub(super) const BASE_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS files (
         ctime_ns INTEGER,
         observation_state TEXT NOT NULL DEFAULT 'observable'
             CHECK (observation_state IN ('observable', 'inaccessible')),
-        scan_generation INTEGER NOT NULL DEFAULT 0
+        scan_generation INTEGER NOT NULL DEFAULT 0,
+        search_name TEXT NOT NULL DEFAULT ''
     );
     CREATE TABLE IF NOT EXISTS file_stage_state (
         path BLOB PRIMARY KEY,
@@ -56,15 +57,19 @@ pub(super) const PATH_CONFIGURATION_SCHEMA: &str =
         device INTEGER NOT NULL CHECK(device >= 0)
     ) WITHOUT ROWID;";
 
-pub(super) const CONTENTLESS_SEARCH_SCHEMA: &str = "CREATE VIRTUAL TABLE file_search_fts
+/// 名称与内容都由 `text_matching` 规范化、切好词、以空格连接后写入；分词器配置成只在
+/// 空格处切（不去变音、各类字母数字与组合符号都算词内字符），看到的词与 Rust 切的一致。
+pub(super) const FULLTEXT_INDEX_SCHEMA: &str = "CREATE VIRTUAL TABLE file_search_fts
         USING fts5(
             name,
             content,
             content = '',
             contentless_delete = 1,
-            detail = full
-        );
-     CREATE TABLE file_search_snippets (
+            detail = full,
+            tokenize = 'unicode61 remove_diacritics 0 categories ''L* M* N* Co'''
+        );";
+
+pub(super) const SNIPPET_SCHEMA: &str = "CREATE TABLE file_search_snippets (
         file_rowid INTEGER PRIMARY KEY,
         preview TEXT NOT NULL CHECK (length(preview) <= 1024)
      );";
@@ -100,7 +105,8 @@ impl SearchDatabase {
             let transaction = self.connection.unchecked_transaction()?;
             transaction.execute_batch(BASE_SCHEMA)?;
             transaction.execute_batch(PATH_CONFIGURATION_SCHEMA)?;
-            transaction.execute_batch(CONTENTLESS_SEARCH_SCHEMA)?;
+            transaction.execute_batch(FULLTEXT_INDEX_SCHEMA)?;
+            transaction.execute_batch(SNIPPET_SCHEMA)?;
             transaction.execute_batch(QUERY_INDEXES)?;
             transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             transaction.commit()?;
@@ -211,9 +217,16 @@ pub(super) fn verify_search_storage_schema(connection: &Connection) -> SearchRes
         [],
         |row| row.get::<_, bool>(0),
     )?;
+    let search_name_column_exists = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('files') WHERE name = 'search_name')",
+        [],
+        |row| row.get::<_, bool>(0),
+    )?;
     if !normalized_fts_schema.contains("content=''")
         || !normalized_fts_schema.contains("contentless_delete=1")
         || !normalized_fts_schema.contains("detail=full")
+        || !normalized_fts_schema.contains("remove_diacritics0categories''l*m*n*co''")
+        || !search_name_column_exists
         || fts_columns != "name,content"
         || snippet_columns != "file_rowid,preview"
         || !normalized_snippet_schema.contains("check(length(preview)<=1024)")
@@ -224,8 +237,9 @@ pub(super) fn verify_search_storage_schema(connection: &Connection) -> SearchRes
         || raw_fts_content_table_exists
     {
         return Err(SearchError::InvalidDatabaseSchema {
-            message: "schema 10 requires an exact durable path snapshot, root mount identities, contentless full-detail FTS, and bounded snippets"
-                .to_owned(),
+            message: format!(
+                "schema {SCHEMA_VERSION} requires an exact durable path snapshot, root mount identities, normalized search names, a space-tokenized contentless full-detail FTS, and bounded snippets"
+            ),
         });
     }
     Ok(())

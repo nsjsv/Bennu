@@ -62,14 +62,14 @@ fn read_right_preview_panel_info(
 ) -> Result<crate::preview::RightPreviewPanelInfoSnapshot, String> {
     let metadata = std::fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
     let file_type = metadata.file_type();
-    let (kind, type_label) = if file_type.is_symlink() {
-        (file_core::FileKind::Symlink, "Symbolic Link".to_owned())
+    let kind = if file_type.is_symlink() {
+        file_core::FileKind::Symlink
     } else if file_type.is_dir() {
-        (file_core::FileKind::Directory, "Folder".to_owned())
+        file_core::FileKind::Directory
     } else if file_type.is_file() {
-        (file_core::FileKind::File, "File".to_owned())
+        file_core::FileKind::File
     } else {
-        (file_core::FileKind::Other, "Other".to_owned())
+        file_core::FileKind::Other
     };
     Ok(crate::preview::RightPreviewPanelInfoSnapshot {
         name: path
@@ -86,7 +86,6 @@ fn read_right_preview_panel_info(
         accessed: metadata.accessed().ok(),
         path,
         kind,
-        type_label,
     })
 }
 

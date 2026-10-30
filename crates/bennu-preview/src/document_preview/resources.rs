@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+use bennu_localization::tr;
 use iced::widget::image;
 
 use super::model::{DocumentPageRenderPlan, DocumentPageSize, DocumentScaleAxis};
@@ -164,7 +165,7 @@ pub(super) fn page_render_plan(
     {
         (
             target_width,
-            u32::try_from(target_height).map_err(|_| "PDF page is too tall".to_owned())?,
+            u32::try_from(target_height).map_err(|_| tr!("PDF page is too tall"))?,
             if page.quarter_turn {
                 DocumentScaleAxis::Height(target_width)
             } else {
@@ -193,14 +194,14 @@ pub(super) fn page_render_plan(
         || height > MAX_DOCUMENT_PAGE_EDGE
         || u64::from(width).saturating_mul(u64::from(height)) > MAX_DOCUMENT_PAGE_PIXELS
     {
-        return Err("PDF page exceeds the rendering pixel budget".to_owned());
+        return Err(tr!("PDF page exceeds the rendering pixel budget"));
     }
     let estimated_rgba_bytes = u64::from(width)
         .checked_mul(u64::from(height))
         .and_then(|pixels| pixels.checked_mul(4))
-        .ok_or_else(|| "PDF page rendering size overflowed".to_owned())?;
+        .ok_or_else(|| tr!("PDF page rendering size overflowed"))?;
     if estimated_rgba_bytes > MAX_READY_DOCUMENT_RGBA_BYTES {
-        return Err("PDF page exceeds the preview memory budget".to_owned());
+        return Err(tr!("PDF page exceeds the preview memory budget"));
     }
     Ok(DocumentPageRenderPlan {
         width,

@@ -14,10 +14,11 @@ use bennu_theme::styles::{
     enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction, ScrollbarVisibility,
 };
 
-use crate::panel_text::{localized_text, readable_text};
+use crate::panel_text::readable_text;
 use crate::preview::{PreviewTreeDirectoryChildren, PreviewTreeEntry};
 use crate::preview_message::PreviewMessage;
 use crate::scroll_wiring::ScrollRegionWiring;
+use bennu_localization::tr;
 
 const PREVIEW_ICON_SIZE: f32 = 16.0;
 const PREVIEW_ENTRY_NAME_MAX_CHARS: usize = 48;
@@ -36,7 +37,7 @@ pub(crate) fn directory_preview_panel<Message>(
 where
     Message: 'static + Clone + From<PreviewMessage>,
 {
-    let listing = preview_tree_listing(entries, "Empty directory");
+    let listing = preview_tree_listing(entries, tr!("Empty directory"));
     tree_scroller(
         listing,
         scroll_height,
@@ -56,7 +57,7 @@ pub(crate) fn archive_preview_panel<Message>(
 where
     Message: 'static + Clone + From<PreviewMessage>,
 {
-    let listing = preview_tree_listing(entries, "Empty archive");
+    let listing = preview_tree_listing(entries, tr!("Empty archive"));
     tree_scroller(
         listing,
         scroll_height,
@@ -104,7 +105,7 @@ where
 
 fn preview_tree_listing<Message>(
     entries: &[PreviewTreeEntry],
-    empty_message: &'static str,
+    empty_message: String,
 ) -> Column<'static, Message>
 where
     Message: 'static + Clone + From<PreviewMessage>,
@@ -130,7 +131,7 @@ fn preview_tree_directory_status_message(entry: &PreviewTreeEntry) -> Option<Str
     }
 
     match entry.directory_children.as_ref()? {
-        PreviewTreeDirectoryChildren::Error(error) => Some(format!("Could not load: {error}")),
+        PreviewTreeDirectoryChildren::Error(error) => Some(tr!("Could not load: %1", error)),
         PreviewTreeDirectoryChildren::Loading
         | PreviewTreeDirectoryChildren::Pending
         | PreviewTreeDirectoryChildren::Loaded => None,
@@ -226,7 +227,7 @@ where
         indent,
         Space::new().width(Length::Fixed(PREVIEW_TREE_TOGGLE_WIDTH)),
         Space::new().width(Length::Fixed(PREVIEW_ICON_SIZE)),
-        localized_text(message).size(13).width(Length::Fill),
+        readable_text(message).size(13).width(Length::Fill),
     ]
     .spacing(6)
     .align_y(Alignment::Center);

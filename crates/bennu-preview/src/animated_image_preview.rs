@@ -3,6 +3,7 @@ use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use bennu_localization::tr;
 use iced::futures::channel::mpsc::Sender as IcedSender;
 use iced::futures::{SinkExt, Stream};
 use iced::widget::image as iced_image;
@@ -61,7 +62,7 @@ impl AnimatedImagePreview {
         playback: AnimatedImagePlayback,
     ) -> Result<Self, String> {
         if first_frame.width == 0 || first_frame.height == 0 {
-            return Err("Animated image preview has invalid dimensions".to_owned());
+            return Err(tr!("Animated image preview has invalid dimensions"));
         }
 
         Ok(Self {
@@ -162,8 +163,6 @@ pub fn is_animated_image_preview_path(path: &Path) -> bool {
         .is_some_and(|extension| extension.eq_ignore_ascii_case("gif"))
 }
 
-// 首帧加载自 app-ui 命令层随迁：超限文案依赖的 format_file_size 已下沉，
-// 阻塞解除（订阅流仍留宿主）。
 pub async fn load_animated_image_preview(
     path: PathBuf,
     generation: u64,
@@ -186,10 +185,9 @@ fn decode_animated_image_first_frame(
             .map_err(|error| format!("could not inspect animated image {path:?}: {error}"))?
             .len();
         if byte_len > max_file_bytes {
-            return Err(format!(
-                "File is too large to preview ({}). Maximum preview size is {}.",
-                crate::formatting::format_file_size(byte_len),
-                crate::formatting::format_file_size(max_file_bytes)
+            return Err(crate::preview_loading::file_too_large_to_preview(
+                byte_len,
+                max_file_bytes,
             ));
         }
     }
@@ -260,7 +258,7 @@ fn decode_first_animated_image_frame_at(
         return decode_first_animated_image_frame_at(path, generation, Duration::ZERO);
     }
 
-    first_frame.ok_or_else(|| "Animated image preview has no frames".to_owned())
+    first_frame.ok_or_else(|| tr!("Animated image preview has no frames"))
 }
 
 pub fn decode_animated_image_frames_into_channel(
@@ -339,7 +337,7 @@ pub fn inspect_animated_image_metadata(path: &Path) -> Result<AnimatedImageMetad
     {
         frame_count = frame_count
             .checked_add(1)
-            .ok_or_else(|| "This GIF has too many frames to inspect safely".to_owned())?;
+            .ok_or_else(|| tr!("This GIF has too many frames to inspect safely"))?;
         if frame_count > ANIMATED_IMAGE_PREVIEW_DURATION_FRAME_LIMIT {
             return Ok(AnimatedImageMetadata {
                 duration: None,
@@ -350,7 +348,7 @@ pub fn inspect_animated_image_metadata(path: &Path) -> Result<AnimatedImageMetad
     }
 
     if frame_count == 0 {
-        return Err("Animated image preview has no frames".to_owned());
+        return Err(tr!("Animated image preview has no frames"));
     }
 
     Ok(AnimatedImageMetadata {
@@ -403,7 +401,7 @@ fn animated_image_frame_rgba_byte_len(width: u32, height: u32) -> Result<usize, 
 
 fn validate_animated_image_frame_decode_budget(width: u32, height: u32) -> Result<(), String> {
     if width == 0 || height == 0 {
-        return Err("Animated image preview has invalid dimensions".to_owned());
+        return Err(tr!("Animated image preview has invalid dimensions"));
     }
 
     let frame_bytes = animated_image_frame_rgba_byte_len(width, height)?;

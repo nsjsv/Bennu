@@ -153,7 +153,6 @@ impl FilePropertiesPresentation {
 pub(crate) struct FilePropertiesSnapshot {
     pub(crate) name: OsString,
     pub(crate) kind: FileKind,
-    pub(crate) type_label: String,
     pub(crate) location: PathBuf,
     pub(crate) created: Option<SystemTime>,
     pub(crate) modified: Option<SystemTime>,

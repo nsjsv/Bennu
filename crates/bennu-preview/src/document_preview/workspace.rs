@@ -3,6 +3,7 @@ use std::io;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
+use bennu_localization::tr;
 use tempfile::TempDir;
 use url::Url;
 
@@ -159,12 +160,12 @@ impl OfficeDocumentPreviewWorkspace {
         if !self
             .output_directory_identity_is_current()
             .await
-            .map_err(|error| format!("Could not inspect LibreOffice output directory: {error}"))?
+            .map_err(|error| tr!("Could not inspect LibreOffice output directory: %1", error))?
         {
-            return Err("LibreOffice output directory identity changed".to_owned());
+            return Err(tr!("LibreOffice output directory identity changed"));
         }
         if pdf_path.parent() != Some(self.output.as_path()) {
-            return Err("LibreOffice output escaped the preview workspace".to_owned());
+            return Err(tr!("LibreOffice output escaped the preview workspace"));
         }
         Ok(DocumentPreviewWorkspace {
             root: self.root,

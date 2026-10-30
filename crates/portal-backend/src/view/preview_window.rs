@@ -11,11 +11,12 @@
 use iced::widget::{button, container, mouse_area, row, Space, Stack};
 use iced::{mouse, window, Element, Length, Theme};
 
+use bennu_localization::tr;
 use bennu_preview::document_preview::{
     DocumentPreviewMessage, DocumentPreviewRequestKey, DocumentRenderKey, DocumentViewportKey,
 };
 use bennu_preview::engine::SqlitePreviewState;
-use bennu_preview::panel_text::localized_text;
+use bennu_preview::panel_text::readable_text;
 use bennu_preview::preview::{PreviewContent, PreviewState};
 use bennu_preview::preview_message::PreviewMessage;
 use bennu_preview::preview_panel;
@@ -329,7 +330,7 @@ fn sqlite_data_scroll_wiring<'a>() -> ScrollRegionWiring<'a, Message> {
 // ---------------------------------------------------------------------------
 
 struct SegmentedChoice {
-    label: &'static str,
+    label: String,
     selected: bool,
     message: Message,
 }
@@ -349,7 +350,7 @@ fn segmented_choice_row(choices: Vec<SegmentedChoice>) -> Element<'static, Messa
 const SEGMENTED_CHOICE_HEIGHT: f32 = 30.0;
 
 fn segmented_choice_button(choice: SegmentedChoice) -> Element<'static, Message> {
-    let label = container(localized_text(choice.label).size(12))
+    let label = container(readable_text(choice.label).size(12))
         .width(Length::Fill)
         .height(Length::Fill)
         .center_x(Length::Fill)
@@ -420,14 +421,14 @@ fn subtle_border(theme: &Theme) -> iced::Border {
 fn markdown_mode_switch_row(mode: MarkdownPreviewMode) -> Element<'static, Message> {
     segmented_choice_row(vec![
         SegmentedChoice {
-            label: "Rendered",
+            label: tr!("Rendered"),
             selected: mode == MarkdownPreviewMode::Rendered,
             message: Message::from(PreviewMessage::MarkdownPreviewModeSelected(
                 MarkdownPreviewMode::Rendered,
             )),
         },
         SegmentedChoice {
-            label: "Raw",
+            label: tr!("Raw"),
             selected: mode == MarkdownPreviewMode::Raw,
             message: Message::from(PreviewMessage::MarkdownPreviewModeSelected(
                 MarkdownPreviewMode::Raw,
@@ -443,14 +444,14 @@ fn sqlite_tabs_row(state: Option<&SqlitePreviewState>) -> Element<'static, Messa
         .unwrap_or(SqlitePreviewTab::Tables);
     segmented_choice_row(vec![
         SegmentedChoice {
-            label: "Table Data",
+            label: tr!("Table Data"),
             selected: active_tab == SqlitePreviewTab::Tables,
             message: Message::from(PreviewMessage::SqlitePreview(
                 SqlitePreviewMessage::TabSelected(SqlitePreviewTab::Tables),
             )),
         },
         SegmentedChoice {
-            label: "SQL Query",
+            label: tr!("SQL Query"),
             selected: active_tab == SqlitePreviewTab::Sql,
             message: Message::from(PreviewMessage::SqlitePreview(
                 SqlitePreviewMessage::TabSelected(SqlitePreviewTab::Sql),
@@ -500,7 +501,7 @@ fn preview_window_top_bar<'a>(
             &window_control_message,
         ))
         .push(preview_pin_button(pinned))
-        .push(localized_text("预览").size(16))
+        .push(readable_text("预览".to_owned()).size(16))
         .push(Space::new().width(Length::Fill))
         .push(window_control_group(
             config,

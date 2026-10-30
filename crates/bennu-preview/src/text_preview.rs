@@ -39,8 +39,8 @@ impl TextPreviewLineLimitNotice {
     }
 
     pub fn label(self) -> String {
-        format!(
-            "Only showing {} lines. Full line count: {}.",
+        bennu_localization::tr!(
+            "Only showing %1 lines. Full line count: %2.",
             self.preview_line_limit(),
             self.total_line_count()
         )

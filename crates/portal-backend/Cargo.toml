@@ -21,6 +21,7 @@ file-operation-store = { path = "../file-operation-store" }
 # 预览的守卫/窗口/回流全走本 crate；其 iced 声明不带渲染器 feature，
 # 与本 crate 自行声明的 wgpu+tiny-skia 并集不改变渲染链。
 bennu-preview = { path = "../bennu-preview" }
+bennu-localization = { path = "../bennu-localization" }
 # 渲染链：核显 → 独显 → 软件渲染（iced fallback 按 ICED_BACKEND 候选依次
 # 尝试）。wgpu 首选钉住驱动显示器的 GPU（通常为核显且必然已上电；纯 GPU
 # 初始化冷首窗实测 ~130ms，独显 NVIDIA 则 ~2.2s，必须避免），GPU 整体不可

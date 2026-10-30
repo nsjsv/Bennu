@@ -64,11 +64,7 @@ pub fn remote_preview_download_panel<Message: 'static>(
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| download.source_path.to_string_lossy().into_owned());
     let name = format_middle_ellipsized_text(&name, PREVIEW_ENTRY_NAME_MAX_CHARS);
-    let title = if bennu_localization::current_language_is_chinese() {
-        format!("正在下载 {name}")
-    } else {
-        format!("Downloading {name}")
-    };
+    let title = bennu_localization::tr!("Downloading %1", name);
     let progress: Element<'static, Message> = match download.fraction() {
         Some(fraction) => container(progress_bar(0.0..=1.0, fraction))
             .width(Length::Fill)
@@ -87,7 +83,7 @@ pub fn remote_preview_download_panel<Message: 'static>(
                 format_file_size(bytes_total)
             )
         })
-        .unwrap_or_else(|| bennu_localization::translate_current("Preparing download..."));
+        .unwrap_or_else(|| bennu_localization::tr!("Preparing download..."));
 
     column![
         readable_text(title).size(14),

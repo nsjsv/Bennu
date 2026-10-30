@@ -716,7 +716,6 @@ mod tests {
         FilePropertiesSnapshot {
             name: OsString::from("project"),
             kind: FileKind::Directory,
-            type_label: "Folder".to_owned(),
             location: path.parent().unwrap().to_path_buf(),
             created: None,
             modified: None,

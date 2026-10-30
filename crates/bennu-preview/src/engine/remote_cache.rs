@@ -87,8 +87,9 @@ impl super::PreviewEngine {
             Ok(cache_path) => Some(RemotePreviewCacheCompletion::OpenLocalCache(cache_path)),
             Err(error) => {
                 self.text_preview_document = None;
-                self.preview = Some(PreviewState::Error(format!(
-                    "Could not download remote preview: {error}"
+                self.preview = Some(PreviewState::Error(bennu_localization::tr!(
+                    "Could not download remote preview: %1",
+                    error
                 )));
                 // 面板会话不弹独立窗口;错误态直接呈现在面板里。
                 Some(RemotePreviewCacheCompletion::Failed(

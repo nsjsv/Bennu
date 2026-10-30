@@ -96,25 +96,22 @@ async fn missing_and_nonzero_poppler_are_bounded_preview_failures() {
 }
 
 #[test]
-fn pdfinfo_process_failures_share_one_inspection_error_boundary() {
+fn pdf_inspection_errors_follow_the_tool_error_kind() {
+    assert_eq!(
+        pdf_inspection_error(DocumentToolError::NotFound),
+        "PDF preview requires Poppler. Install the poppler package."
+    );
+    // 原话（包括密码错）只作详情原样显示。
     for detail in [
         "pdfinfo timed out",
         "pdfinfo failed: fixture failure",
-        "pdfinfo stdout exceeded the safety limit",
+        "pdfinfo failed: Command Line Error: Incorrect password",
     ] {
         assert_eq!(
-            pdf_inspection_error(detail.to_owned()),
+            pdf_inspection_error(DocumentToolError::Failed(detail.to_owned())),
             format!("Could not inspect PDF: {detail}")
         );
     }
-    assert_eq!(
-        pdf_inspection_error(POPPLER_INSTALL_ERROR.to_owned()),
-        POPPLER_INSTALL_ERROR
-    );
-    assert_eq!(
-        pdf_inspection_error("pdfinfo failed: Incorrect password".to_owned()),
-        ENCRYPTED_PDF_ERROR
-    );
 }
 
 #[tokio::test]
@@ -136,7 +133,7 @@ async fn child_runner_times_out_cancels_and_rejects_excess_output() {
     )
     .await
     .expect_err("timeout");
-    assert!(timeout.contains("timed out"));
+    assert!(timeout.into_message().contains("timed out"));
 
     let cancel_source = directory.path().join("timeout.pdf");
     let cancel = CancellationToken::new();
@@ -173,7 +170,7 @@ async fn child_runner_times_out_cancels_and_rejects_excess_output() {
     )
     .await
     .expect_err("excess output");
-    assert!(output_error.contains("stdout exceeded"));
+    assert!(output_error.into_message().contains("stdout exceeded"));
 }
 
 #[tokio::test]
@@ -298,7 +295,7 @@ async fn real_poppler_parses_rotated_crop_boxes_and_renders_only_requested_pages
 }
 
 #[tokio::test]
-async fn encrypted_real_pdf_returns_explicit_local_failure() {
+async fn password_protected_pdf_shows_what_poppler_said() {
     let outcome = prepare_document_with_programs(
         request(fixture("encrypted.pdf"), 1024 * 1024),
         DocumentPrograms::default(),
@@ -308,7 +305,8 @@ async fn encrypted_real_pdf_returns_explicit_local_failure() {
         panic!("expected encrypted PDF failure");
     };
 
-    assert!(error.contains("Encrypted PDF preview is not supported"));
+    assert!(error.starts_with("Could not inspect PDF: "));
+    assert!(error.contains("Incorrect password"));
 }
 
 #[tokio::test]
@@ -345,6 +343,6 @@ async fn fake_page_failure_removes_partial_output_and_stays_page_local() {
     let error = render_document_page_inner(&render_request, &fake_programs())
         .await
         .expect_err("page failure");
-    assert!(error.contains("page fixture failure"));
+    assert!(error.into_message().contains("page fixture failure"));
     assert!(!output.exists());
 }

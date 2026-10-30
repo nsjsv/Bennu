@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use bennu_localization::tr;
 use iced::widget::image;
 use tokio_util::sync::CancellationToken;
 
@@ -63,19 +64,19 @@ pub struct DocumentPageSize {
 impl DocumentPageSize {
     pub fn from_crop_box(mut width: f64, mut height: f64, rotation: i32) -> Result<Self, String> {
         if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
-            return Err("PDF page has invalid dimensions".to_owned());
+            return Err(tr!("PDF page has invalid dimensions"));
         }
         let quarter_turn = match rotation {
             0 | 180 => false,
             90 | 270 => true,
-            _ => return Err("PDF page has invalid rotation".to_owned()),
+            _ => return Err(tr!("PDF page has invalid rotation")),
         };
         if quarter_turn {
             std::mem::swap(&mut width, &mut height);
         }
         let aspect_ratio = height / width;
         if !aspect_ratio.is_finite() || aspect_ratio <= 0.0 {
-            return Err("PDF page has invalid dimensions".to_owned());
+            return Err(tr!("PDF page has invalid dimensions"));
         }
         Ok(Self {
             width,
@@ -215,7 +216,7 @@ impl PagedDocumentPreview {
         preview_height: f32,
     ) -> Result<Self, String> {
         if prepared.pages.is_empty() || prepared.pages.len() > MAX_DOCUMENT_PAGES {
-            return Err("PDF preview has an invalid page count".to_owned());
+            return Err(tr!("PDF preview has an invalid page count"));
         }
         let page_width = document_page_width(preview_width);
         let viewport_height = document_viewport_height(preview_height);
@@ -384,10 +385,8 @@ impl PagedDocumentPreview {
             }
             let Ok(plan) = page_render_plan(self.pages[page_index], self.width_bucket) else {
                 self.in_flight.remove(&page_index);
-                self.failures.insert(
-                    page_index,
-                    "PDF page exceeds the rendering budget".to_owned(),
-                );
+                self.failures
+                    .insert(page_index, tr!("PDF page exceeds the rendering budget"));
                 continue;
             };
             requests.push(DocumentPageRenderRequest {
@@ -442,21 +441,18 @@ impl PagedDocumentPreview {
         for (index, page) in self.pages.iter().enumerate() {
             let height = (self.page_width as f64 * page.height / page.width) as f32;
             if !height.is_finite() || height <= 0.0 {
-                return Err(format!(
-                    "PDF page {} has invalid layout dimensions",
-                    index + 1
-                ));
+                return Err(tr!("PDF page %1 has invalid layout dimensions", index + 1));
             }
             self.page_tops.push(top);
             self.display_heights.push(height);
             top += height;
             if !top.is_finite() {
-                return Err("PDF document layout height overflowed".to_owned());
+                return Err(tr!("PDF document layout height overflowed"));
             }
             if index + 1 < self.pages.len() {
                 top += DOCUMENT_PAGE_GAP;
                 if !top.is_finite() {
-                    return Err("PDF document layout height overflowed".to_owned());
+                    return Err(tr!("PDF document layout height overflowed"));
                 }
             }
         }

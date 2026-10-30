@@ -198,15 +198,6 @@ fn read_file_properties(path: PathBuf) -> Result<FilePropertiesSnapshot, String>
     } else {
         FileKind::Other
     };
-    let type_label = if file_type.is_symlink() {
-        "Symbolic Link".to_owned()
-    } else if file_type.is_dir() {
-        "Folder".to_owned()
-    } else if file_type.is_file() {
-        "File".to_owned()
-    } else {
-        "Other".to_owned()
-    };
     let name = path
         .file_name()
         .map(|name| name.to_os_string())
@@ -227,7 +218,6 @@ fn read_file_properties(path: PathBuf) -> Result<FilePropertiesSnapshot, String>
     Ok(FilePropertiesSnapshot {
         name,
         kind,
-        type_label,
         location,
         created: metadata.created().ok(),
         modified: metadata.modified().ok(),

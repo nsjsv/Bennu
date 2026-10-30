@@ -17,12 +17,13 @@ use bennu_theme::styles::{
 use bennu_theme::ui_colors;
 
 use crate::engine::{SqlitePreviewState, SQLITE_DEFAULT_TABLES_WIDTH};
-use crate::panel_text::{localized_text, readable_text};
+use crate::panel_text::readable_text;
 use crate::preview_message::PreviewMessage;
 use crate::scroll_wiring::ScrollRegionWiring;
 use crate::sqlite_preview::{
     SqlQueryOutcome, SqliteCellValue, SqliteDatabasePreview, SqlitePreviewMessage, SqlitePreviewTab,
 };
+use bennu_localization::tr;
 
 const SQLITE_TABLE_NAME_MAX_CHARS: usize = 40;
 const SQLITE_COLUMN_WIDTH: f32 = 170.0;
@@ -92,7 +93,7 @@ where
     Message: 'static + Clone + From<PreviewMessage>,
 {
     if preview.tables.is_empty() {
-        return localized_text("This database has no tables")
+        return readable_text(tr!("This database has no tables"))
             .size(14)
             .into();
     }
@@ -165,7 +166,7 @@ where
     let filter_value = state.map(|state| state.table_filter.as_str()).unwrap_or("");
     let filter = filter_value.to_lowercase();
     let filter_input = container(
-        text_input("Filter tables", filter_value)
+        text_input(&tr!("Filter tables"), filter_value)
             .on_input(|value| {
                 Message::from(PreviewMessage::SqlitePreview(
                     SqlitePreviewMessage::TableFilterChanged(value),
@@ -210,7 +211,7 @@ where
     }
     if matching_count == 0 {
         list = list.push(
-            localized_text("No tables match")
+            readable_text(tr!("No tables match"))
                 .size(12)
                 .width(Length::Fill),
         );
@@ -263,7 +264,7 @@ where
 
     // 单行 SQL 输入：回车直接执行，与搜索框一致的交互。
     let editor_area = container(
-        text_input("SQL query (Enter to run)", &state.sql_text)
+        text_input(&tr!("SQL query (Enter to run)"), &state.sql_text)
             .on_input(|value| {
                 Message::from(PreviewMessage::SqlitePreview(
                     SqlitePreviewMessage::SqlTextChanged(value),
@@ -303,7 +304,7 @@ where
     Message: 'static + Clone + From<PreviewMessage>,
 {
     if outcome.columns.is_empty() {
-        return localized_text("Statement executed. No result rows.")
+        return readable_text(tr!("Statement executed. No result rows."))
             .size(13)
             .into();
     }
@@ -353,7 +354,7 @@ where
     if truncated {
         column![
             scroller,
-            localized_text("Only the first 200 rows are shown.").size(11)
+            readable_text(tr!("Only the first 200 rows are shown.")).size(11)
         ]
         .spacing(4)
         .height(Length::Fill)

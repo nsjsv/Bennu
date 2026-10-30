@@ -11,9 +11,10 @@ use bennu_theme::styles::{
 };
 
 use crate::document_preview::{document_viewport_height, DocumentPageView, PagedDocumentPreview};
-use crate::panel_text::localized_text;
+use crate::panel_text::readable_text;
 use crate::preview::PreviewSize;
 use crate::scroll_wiring::ScrollRegionWiring;
+use bennu_localization::tr;
 
 const DOCUMENT_SCROLLBAR_WIDTH: f32 = 6.0;
 const DOCUMENT_PAGE_GAP: f32 = 12.0;
@@ -46,17 +47,19 @@ where
                 .height(Length::Fill)
                 .content_fit(ContentFit::Contain)
                 .into(),
-            DocumentPageView::Error(error) => localized_text(error.to_owned())
+            DocumentPageView::Error(error) => readable_text(error.to_owned())
                 .size(DOCUMENT_STATUS_TEXT_SIZE)
                 .width(Length::Fill)
                 .align_x(Alignment::Center)
                 .into(),
-            DocumentPageView::Loading => localized_text("Rendering page...")
+            DocumentPageView::Loading => readable_text(tr!("Rendering page..."))
                 .size(DOCUMENT_STATUS_TEXT_SIZE)
                 .into(),
-            DocumentPageView::Deferred => localized_text("Page deferred by preview memory limit")
-                .size(DOCUMENT_STATUS_TEXT_SIZE)
-                .into(),
+            DocumentPageView::Deferred => {
+                readable_text(tr!("Page deferred by preview memory limit"))
+                    .size(DOCUMENT_STATUS_TEXT_SIZE)
+                    .into()
+            }
         };
         let page = container(page)
             .width(Length::Fixed(document.page_width()))

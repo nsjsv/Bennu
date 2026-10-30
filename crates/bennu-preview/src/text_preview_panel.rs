@@ -10,12 +10,13 @@ use bennu_theme::styles::{
 };
 
 use crate::markdown_preview::markdown_preview_body;
-use crate::panel_text::{localized_text, readable_text};
+use crate::panel_text::readable_text;
 use crate::preview_message::PreviewMessage;
 use crate::scroll_wiring::ScrollRegionWiring;
 use crate::text_preview::{
     MarkdownPreviewMode, TextPreviewDocument, TextPreviewFormat, TextPreviewLineLimitNotice,
 };
+use bennu_localization::tr;
 use iced::widget::{column, row, scrollable, Column, Space};
 use iced::{Element, Length};
 
@@ -108,7 +109,9 @@ where
     Message: 'static + From<PreviewMessage>,
 {
     let Some(document) = document else {
-        return readable_text("Text preview is not ready").size(14).into();
+        return readable_text(tr!("Text preview is not ready"))
+            .size(14)
+            .into();
     };
     let viewer = plain_viewer(document, scroll_height);
     let ScrollRegionWiring {
@@ -146,11 +149,11 @@ where
 fn text_preview_line_limit_notice<Message: 'static>(
     notice: TextPreviewLineLimitNotice,
 ) -> Element<'static, Message> {
-    localized_text(notice.label()).size(12).into()
+    readable_text(notice.label()).size(12).into()
 }
 
 fn text_preview_chunk_error<Message: 'static>(error: &str) -> Element<'static, Message> {
-    localized_text(format!("Could not load more text preview: {error}"))
+    readable_text(tr!("Could not load more text preview: %1", error))
         .size(12)
         .into()
 }
@@ -191,7 +194,9 @@ where
     Message: 'static + From<PreviewMessage>,
 {
     let Some(document) = document else {
-        return readable_text("Text preview is not ready").size(14).into();
+        return readable_text(tr!("Text preview is not ready"))
+            .size(14)
+            .into();
     };
     let mode = document.markdown_preview_mode();
     let body_height =

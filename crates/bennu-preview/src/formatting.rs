@@ -3,6 +3,19 @@
 
 pub use bennu_localization::{format_file_size, format_file_size_compact};
 
+use bennu_localization::tr;
+use file_core::FileKind;
+
+/// 属性窗口与右侧信息区的"类型"一栏，绘制时按当前语言取。
+pub fn file_kind_label(kind: FileKind) -> String {
+    match kind {
+        FileKind::Directory => tr!("Folder"),
+        FileKind::File => tr!("File"),
+        FileKind::Symlink => tr!("Symbolic Link"),
+        FileKind::Other => tr!("Other"),
+    }
+}
+
 /// 音视频/动图预览的播放时长文案（H:MM:SS / M:SS）。自 app-ui
 /// formatting.rs 下沉（音频/视频/动图面板消费；app-ui re-export）。
 pub fn format_duration(duration: std::time::Duration) -> String {

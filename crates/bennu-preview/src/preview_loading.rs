@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use bennu_localization::tr;
 use file_core::{
     list_archive_members_with_format, scan_directory, sniff_archive_extraction_format,
     ArchiveListingEntry, DirectoryEntry, FileKind, ScanOptions,
@@ -16,8 +17,14 @@ use crate::text_preview_loading::load_initial_text_preview;
 
 pub const PREVIEW_ARCHIVE_ENTRY_LIMIT: usize = 500;
 
-const SUPPORTED_ARCHIVE_FORMAT_MESSAGE: &str =
-    "Archive preview supports .zip, .tar, .tar.gz, .tgz, .7z, and .rar files";
+/// 所有预览入口（本地、远程缓存、动图、文档、文件选择器）共用的超限提示。
+pub fn file_too_large_to_preview(size: u64, maximum: u64) -> String {
+    tr!(
+        "File is too large to preview (%1). Maximum preview size is %2.",
+        format_file_size(size),
+        format_file_size(maximum)
+    )
+}
 
 pub async fn load_preview(
     path: PathBuf,
@@ -33,9 +40,7 @@ pub async fn load_preview(
             if rules.matches(PreviewFileSizeKind::Archive, &path) {
                 load_archive_preview(path).await
             } else if is_recognized_unsupported_archive_path(&path) {
-                Err(format!(
-                    "This archive format is not supported yet. {SUPPORTED_ARCHIVE_FORMAT_MESSAGE}"
-                ))
+                Err(tr!("This archive format is not supported yet. Archive preview supports .zip, .tar, .tar.gz, .tgz, .7z, and .rar files"))
             } else if rules.matches(PreviewFileSizeKind::Audio, &path) {
                 load_audio_preview(path).await
             } else if rules.matches(PreviewFileSizeKind::Video, &path) {
@@ -46,9 +51,9 @@ pub async fn load_preview(
                 load_text_preview(path).await
             }
         }
-        FileKind::Symlink | FileKind::Other => {
-            Err("Preview is only available for directories, archives, audio files, images, and UTF-8 text files".to_owned())
-        }
+        FileKind::Symlink | FileKind::Other => Err(tr!(
+            "Preview is only available for directories, archives, audio files, images, and UTF-8 text files"
+        )),
     }
 }
 
@@ -60,11 +65,7 @@ async fn reject_file_over_preview_limit(path: &Path, max_file_bytes: u64) -> Res
         return Ok(());
     }
 
-    Err(format!(
-        "File is too large to preview ({}). Maximum preview size is {}.",
-        format_file_size(metadata.len()),
-        format_file_size(max_file_bytes)
-    ))
+    Err(file_too_large_to_preview(metadata.len(), max_file_bytes))
 }
 
 /// 预览路径的单一事实源分类：分支顺序必须镜像

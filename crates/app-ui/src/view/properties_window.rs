@@ -2,6 +2,7 @@ use std::ffi::OsStr;
 use std::path::Path;
 use std::time::SystemTime;
 
+use bennu_preview::formatting::file_kind_label;
 use file_core::FileKind;
 use iced::widget::{button, column, container, row, Button, Column, Space};
 use iced::{Alignment, Element, Length};
@@ -185,7 +186,7 @@ fn properties_information_detail(
         themed_icon(icon, IconTone::Normal, PROPERTIES_ICON_SIZE),
         column![
             readable_text(display_name(&snapshot.name)).size(18),
-            localized_text(snapshot.type_label.clone()).size(13)
+            readable_text(file_kind_label(snapshot.kind)).size(13)
         ]
         .spacing(4)
         .width(Length::Fill)
@@ -196,10 +197,7 @@ fn properties_information_detail(
     let mut details = Column::new()
         .spacing(10)
         .push(property_row("Name", display_name(&snapshot.name)))
-        .push(property_row(
-            "Type",
-            crate::localization::translate_current(&snapshot.type_label),
-        ))
+        .push(property_row("Type", file_kind_label(snapshot.kind)))
         .push(property_row("Location", display_path(&snapshot.location)))
         .push(property_row(
             "Created",

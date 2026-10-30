@@ -253,14 +253,15 @@ impl FileBrowser {
         let (width, height) = match dimensions {
             Ok((width, height)) if width > 0 && height > 0 => (width, height),
             Ok(_) => {
-                let error = "Image preview has invalid dimensions".to_owned();
                 tracing::warn!(
                     target: "app_ui::preview",
                     path = ?path,
-                    error = %error,
-                    "image preview dimensions failed"
+                    "image preview has zero dimensions"
                 );
-                return self.fail_image_preview_dimensions(path, error);
+                return self.fail_image_preview_dimensions(
+                    path,
+                    bennu_localization::tr!("Image preview has invalid dimensions"),
+                );
             }
             Err(error) => {
                 tracing::warn!(

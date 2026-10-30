@@ -11,9 +11,10 @@ use bennu_theme::styles::{
     enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction, ScrollbarVisibility,
 };
 
-use crate::panel_text::{localized_text, readable_text};
+use crate::panel_text::readable_text;
 use crate::scroll_wiring::ScrollRegionWiring;
 use crate::text_preview::TextPreviewLineLimitNotice;
+use bennu_localization::tr;
 
 const MARKDOWN_BODY_TEXT_SIZE: u32 = 14;
 const MARKDOWN_CODE_TEXT_SIZE: u32 = 13;
@@ -39,14 +40,14 @@ where
         .width(Length::Fill);
 
     if blocks.is_empty() {
-        content = content.push(readable_text("(empty file)").size(MARKDOWN_BODY_TEXT_SIZE));
+        content = content.push(readable_text(tr!("(empty file)")).size(MARKDOWN_BODY_TEXT_SIZE));
     } else {
         for block in blocks {
             content = content.push(markdown_block_view(block));
         }
     }
     if let Some(notice) = line_limit_notice {
-        content = content.push(localized_text(notice.label()).size(12));
+        content = content.push(readable_text(notice.label()).size(12));
     }
 
     let ScrollRegionWiring {

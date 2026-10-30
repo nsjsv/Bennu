@@ -3,6 +3,7 @@
 //! 切换行、SQLite 标签行、拖选结束事件）与七个滚动区域的接线经参数注入；
 //! 事件统一以 `PreviewMessage` 表达（宿主 Message 需 `From<PreviewMessage>`）。
 
+use bennu_localization::tr;
 use iced::widget::{button, column};
 use iced::{Alignment, Element};
 
@@ -15,7 +16,7 @@ use crate::image_preview_panel::{
 };
 use crate::image_preview_viewport::ImagePreviewViewport;
 use crate::operation_progress::remote_preview_download_panel;
-use crate::panel_text::{localized_text, readable_text};
+use crate::panel_text::readable_text;
 use crate::preview::PreviewSize;
 use crate::preview::VideoPreviewPlayback;
 use crate::preview::{AudioPreviewPlayback, ImagePreviewContent};
@@ -83,7 +84,7 @@ where
             on_sqlite_resize_drag_finished,
         ),
         None => preview_surface(
-            localized_text("Select a file and press Space to load preview")
+            readable_text(tr!("Select a file and press Space to load preview"))
                 .size(14)
                 .into(),
         ),
@@ -119,7 +120,9 @@ where
 {
     let scroll_height = preview_scroll_height(size);
     let panel: Element<'a, Message> = match preview {
-        PreviewState::Loading(_) => column![readable_text("Loading preview...").size(14)].into(),
+        PreviewState::Loading(_) => {
+            column![readable_text(tr!("Loading preview...")).size(14)].into()
+        }
         PreviewState::DownloadingRemoteFile(download) => {
             remote_preview_download_panel(download, operation_progress_animation_frame).into()
         }
@@ -234,10 +237,10 @@ where
             size,
             preview_bottom_controls_opacity,
         ),
-        PreviewState::Error(error) => column![localized_text(error).size(14)].into(),
+        PreviewState::Error(error) => column![readable_text(error.clone()).size(14)].into(),
         PreviewState::ImageError { path, error } => column![
-            localized_text(error).size(14),
-            button(localized_text("Retry")).on_press(Message::from(
+            readable_text(error.clone()).size(14),
+            button(readable_text(tr!("Retry"))).on_press(Message::from(
                 PreviewMessage::RetryImagePreview(path.clone(),)
             )),
         ]

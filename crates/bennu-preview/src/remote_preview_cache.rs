@@ -12,7 +12,7 @@ use file_core::{
 use tokio::fs;
 use tokio_util::sync::CancellationToken;
 
-use crate::formatting::format_file_size;
+use crate::preview_loading::file_too_large_to_preview;
 
 const NETWORK_PREVIEW_CACHE_TTL: Duration = Duration::from_secs(30 * 60);
 /// 磁盘侧容量预算：缓存总量不允许越过该值，防止长期使用无限膨胀。
@@ -89,10 +89,9 @@ pub async fn cache_remote_preview_file(
         ));
     }
     if request.max_file_bytes != 0 && source_metadata.len() > request.max_file_bytes {
-        return Err(format!(
-            "File is too large to preview ({}). Maximum preview size is {}.",
-            format_file_size(source_metadata.len()),
-            format_file_size(request.max_file_bytes)
+        return Err(file_too_large_to_preview(
+            source_metadata.len(),
+            request.max_file_bytes,
         ));
     }
 

@@ -278,7 +278,6 @@ pub struct PreviewSize {
 pub struct RightPreviewPanelInfoSnapshot {
     pub path: std::path::PathBuf,
     pub kind: file_core::FileKind,
-    pub type_label: String,
     pub name: std::ffi::OsString,
     pub location: std::path::PathBuf,
     pub size_bytes: u64,

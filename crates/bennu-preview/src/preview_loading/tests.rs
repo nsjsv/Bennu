@@ -61,7 +61,7 @@ async fn load_preview_reports_recognized_unsupported_archive_format() {
     .expect_err("unsupported archive should be identified");
 
     assert!(error.contains("This archive format is not supported yet"));
-    assert!(error.contains(SUPPORTED_ARCHIVE_FORMAT_MESSAGE));
+    assert!(error.contains(".tar.gz, .tgz, .7z, and .rar"));
 }
 
 #[test]

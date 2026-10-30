@@ -101,7 +101,7 @@ fn right_preview_info_content(browser: &FileBrowser) -> Element<'_, Message> {
             .unwrap_or_else(|| "—".to_owned()),
     };
     let type_label = snapshot
-        .map(|snapshot| crate::localization::translate_current(&snapshot.type_label))
+        .map(|snapshot| bennu_preview::formatting::file_kind_label(snapshot.kind))
         .unwrap_or_else(|| "—".to_owned());
     let size_label = match snapshot {
         Some(snapshot) if snapshot.kind != FileKind::Directory => display_size(snapshot.size_bytes),

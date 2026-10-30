@@ -7,11 +7,13 @@ use std::borrow::Cow;
 use std::sync::atomic::{AtomicU8, Ordering};
 
 mod batch_rename;
+mod catalog;
 mod convert;
 mod document_preview;
 mod exact_translation;
 mod file_operation_notifications;
 mod index_status;
+mod message;
 mod metadata_loss;
 mod new_folders;
 mod properties;
@@ -24,6 +26,7 @@ mod transfer;
 mod trash;
 
 pub use batch_rename::UnrestoredRenameText;
+pub use message::MessageId;
 pub use metadata_loss::{LostAttributeKind, LostAttributesText};
 pub use new_folders::KeptFolderText;
 pub use settings_recovery::{ResetSettingsText, SettingsSourceText};

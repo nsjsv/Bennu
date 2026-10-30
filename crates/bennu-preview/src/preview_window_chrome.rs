@@ -5,6 +5,7 @@
 //! 窗口控制按钮机件（window_control_group 等）与宿主辅助窗口 chrome
 //! 共用，此处是唯一实现，宿主经包装函数映射自己的窗口消息。
 
+use bennu_localization::tr;
 use iced::widget::{button, container, tooltip, Row, Space, Stack};
 use iced::window;
 use iced::{Background, Element, Length};
@@ -128,12 +129,12 @@ where
     Message: 'static + Clone,
 {
     let (icon, label) = match kind {
-        WindowControlKind::Minimize => (IconSymbol::Minus, "Minimize"),
+        WindowControlKind::Minimize => (IconSymbol::Minus, tr!("Minimize")),
         WindowControlKind::MaximizeRestore => match frame_state {
-            WindowFrameState::Restored => (IconSymbol::Square, "Maximize"),
-            WindowFrameState::Maximized => (IconSymbol::RestoreWindow, "Restore"),
+            WindowFrameState::Restored => (IconSymbol::Square, tr!("Maximize")),
+            WindowFrameState::Maximized => (IconSymbol::RestoreWindow, tr!("Restore")),
         },
-        WindowControlKind::Close => (IconSymbol::Close, "Close"),
+        WindowControlKind::Close => (IconSymbol::Close, tr!("Close")),
     };
     let message = on_control(kind, window);
     let (style, opacity): (fn(&Theme, button::Status) -> button::Style, f32) =
@@ -239,7 +240,7 @@ where
 
     tooltip(
         control,
-        container(readable_text(if pinned { "Unpin" } else { "Pin" }).size(11))
+        container(readable_text(if pinned { tr!("Unpin") } else { tr!("Pin") }).size(11))
             .padding([5, 7])
             .style(context_menu_style),
         tooltip::Position::Bottom,

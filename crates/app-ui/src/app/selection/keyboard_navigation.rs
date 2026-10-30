@@ -12,7 +12,6 @@ use crate::commands::{
     load_expanded_directory_command, open_file_command, open_terminal_command, preview_command,
     start_audio_preview_command,
 };
-use crate::formatting::format_file_size;
 use crate::list_view::LIST_HEADER_HEIGHT;
 use crate::model::{
     AudioPreviewPlayback, BrowserViewMode, DirectoryExpansionLoadContext, ExpandedDirectory,
@@ -497,9 +496,9 @@ impl FileBrowser {
         let window_command =
             self.preview_window_presentation_command(PreviewWindowProfile::Regular);
         self.clear_preview();
-        self.preview_engine.preview = Some(PreviewState::Error(
-            "No preview available for this file type.".to_owned(),
-        ));
+        self.preview_engine.preview = Some(PreviewState::Error(bennu_localization::tr!(
+            "No preview available for this file type."
+        )));
         window_command
     }
 
@@ -640,11 +639,9 @@ impl FileBrowser {
         let window_command =
             self.preview_window_presentation_command(PreviewWindowProfile::Regular);
         self.clear_preview();
-        self.preview_engine.preview = Some(PreviewState::Error(format!(
-            "File is too large to preview ({}). Maximum preview size is {}.",
-            format_file_size(file_bytes),
-            format_file_size(max_bytes)
-        )));
+        self.preview_engine.preview = Some(PreviewState::Error(
+            bennu_preview::preview_loading::file_too_large_to_preview(file_bytes, max_bytes),
+        ));
         Some(window_command)
     }
 }

@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
+use bennu_localization::tr;
 use iced::Task;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_util::sync::CancellationToken;
@@ -17,7 +18,7 @@ use crate::document_preview::{
     DocumentPrepareOutcome, DocumentPrepareRequest, DocumentPreviewFormat, DocumentPreviewMessage,
     DocumentPreviewWorkspace, DocumentScaleAxis, OfficeDocumentFormat, PreparedDocumentPreview,
 };
-use crate::formatting::format_file_size;
+use crate::preview_loading::file_too_large_to_preview;
 use crate::preview_message::PreviewMessage;
 
 const PDFINFO_TIMEOUT: Duration = Duration::from_secs(5);
@@ -28,8 +29,6 @@ const PDFTOPPM_STDOUT_LIMIT: usize = 16 * 1024;
 const PDFTOPPM_STDERR_LIMIT: usize = 16 * 1024;
 const PAGE_PNG_FILE_LIMIT: u64 = 64 * 1024 * 1024;
 const PAGE_RENDER_CONCURRENCY: usize = 2;
-const POPPLER_INSTALL_ERROR: &str = "PDF preview requires Poppler. Install the poppler package.";
-const ENCRYPTED_PDF_ERROR: &str = "Encrypted PDF preview is not supported";
 
 static PAGE_RENDER_SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();
 
@@ -119,24 +118,19 @@ pub(super) async fn validate_document_source(
         metadata = tokio::fs::metadata(&request.key.source_path) => metadata,
     }
     .map_err(|error| match format {
-        DocumentPreviewFormat::Pdf => format!("Could not inspect PDF: {error}"),
-        DocumentPreviewFormat::Office(_) => {
-            format!("Could not inspect Office document: {error}")
-        }
+        DocumentPreviewFormat::Pdf => tr!("Could not inspect PDF: %1", error),
+        DocumentPreviewFormat::Office(_) => tr!("Could not inspect Office document: %1", error),
     })?;
     if !metadata.is_file() {
         return Err(match format {
-            DocumentPreviewFormat::Pdf => "PDF preview source is not a regular file".to_owned(),
-            DocumentPreviewFormat::Office(_) => {
-                "Office preview source is not a regular file".to_owned()
-            }
+            DocumentPreviewFormat::Pdf => tr!("PDF preview source is not a regular file"),
+            DocumentPreviewFormat::Office(_) => tr!("Office preview source is not a regular file"),
         });
     }
     if request.max_file_bytes != 0 && metadata.len() > request.max_file_bytes {
-        return Err(format!(
-            "File is too large to preview ({}). Maximum preview size is {}.",
-            format_file_size(metadata.len()),
-            format_file_size(request.max_file_bytes)
+        return Err(file_too_large_to_preview(
+            metadata.len(),
+            request.max_file_bytes,
         ));
     }
     Ok(Some(metadata))
@@ -158,8 +152,8 @@ async fn prepare_document_inner(
                 _ = request.cancellation.cancelled() => return Ok(None),
                 workspace = tokio::task::spawn_blocking(move || DocumentPreviewWorkspace::create_for_pdf(pdf_path)) => {
                     workspace
-                        .map_err(|error| format!("Could not create PDF preview workspace: {error}"))?
-                        .map_err(|error| format!("Could not create PDF preview workspace: {error}"))?
+                        .map_err(|error| tr!("Could not create PDF preview workspace: %1", error))?
+                        .map_err(|error| tr!("Could not create PDF preview workspace: %1", error))?
                 },
             };
             workspace
@@ -197,7 +191,7 @@ async fn prepare_document_inner(
     };
     let summary = parse_pdfinfo_summary(&summary_output.stdout.bytes)?;
     if summary.encrypted {
-        return Err(ENCRYPTED_PDF_ERROR.to_owned());
+        return Err(tr!("Encrypted PDF preview is not supported"));
     }
 
     let page_arguments = vec![
@@ -237,20 +231,24 @@ async fn render_document_page(request: DocumentPageRenderRequest) -> DocumentPag
     match render_document_page_inner(&request, &PopplerPrograms::default()).await {
         Ok(Some(result)) => DocumentPageRenderOutcome::Ready(result),
         Ok(None) => DocumentPageRenderOutcome::Cancelled(key),
-        Err(error) if error == POPPLER_INSTALL_ERROR => {
-            DocumentPageRenderOutcome::Failed(key, error)
+        Err(DocumentToolError::NotFound) => {
+            DocumentPageRenderOutcome::Failed(key, poppler_missing())
         }
-        Err(error) => {
-            DocumentPageRenderOutcome::Failed(key, format!("Could not render PDF page: {error}"))
+        Err(DocumentToolError::Failed(detail)) => {
+            DocumentPageRenderOutcome::Failed(key, tr!("Could not render PDF page: %1", detail))
         }
     }
 }
 
+/// 出错时 `Failed` 带的是给用户看的详情（Poppler 原话或本函数自己的检查）。
 async fn render_document_page_inner(
     request: &DocumentPageRenderRequest,
     programs: &PopplerPrograms,
-) -> Result<Option<DocumentPageRenderResult>, String> {
-    let Some(_permit) = acquire_page_render_permit(request).await? else {
+) -> Result<Option<DocumentPageRenderResult>, DocumentToolError> {
+    let Some(_permit) = acquire_page_render_permit(request)
+        .await
+        .map_err(DocumentToolError::Failed)?
+    else {
         return Ok(None);
     };
     let output_prefix = request.workspace.page_output_prefix(&request.key);
@@ -299,7 +297,10 @@ async fn render_document_page_inner(
     )
     .await;
     let result = match command_outcome {
-        Ok(Some(_)) => read_rendered_page(request, &output_file).await.map(Some),
+        Ok(Some(_)) => read_rendered_page(request, &output_file)
+            .await
+            .map(Some)
+            .map_err(DocumentToolError::Failed),
         Ok(None) => Ok(None),
         Err(error) => Err(error),
     };
@@ -318,7 +319,7 @@ async fn acquire_page_render_permit(
         _ = request.render_cancellation.cancelled() => Ok(None),
         permit = semaphore.acquire_owned() => permit
             .map(Some)
-            .map_err(|_| "PDF page renderer is unavailable".to_owned()),
+            .map_err(|_| tr!("PDF page renderer is unavailable")),
     }
 }
 
@@ -328,26 +329,26 @@ async fn read_rendered_page(
 ) -> Result<DocumentPageRenderResult, String> {
     let metadata = tokio::fs::metadata(output_file)
         .await
-        .map_err(|error| format!("Could not read rendered PDF page: {error}"))?;
+        .map_err(|error| tr!("Could not read rendered PDF page: %1", error))?;
     if !metadata.is_file() || metadata.len() == 0 {
-        return Err("Poppler produced an empty PDF page image".to_owned());
+        return Err(tr!("Poppler produced an empty PDF page image"));
     }
     if metadata.len() > PAGE_PNG_FILE_LIMIT {
-        return Err("Rendered PDF page image exceeds the file budget".to_owned());
+        return Err(tr!("Rendered PDF page image exceeds the file budget"));
     }
 
     let dimensions_path = output_file.to_path_buf();
     let (width, height) =
         tokio::task::spawn_blocking(move || image::image_dimensions(dimensions_path))
             .await
-            .map_err(|error| format!("Could not inspect rendered PDF page: {error}"))?
-            .map_err(|error| format!("Could not inspect rendered PDF page: {error}"))?;
+            .map_err(|error| tr!("Could not inspect rendered PDF page: %1", error))?
+            .map_err(|error| tr!("Could not inspect rendered PDF page: %1", error))?;
     let pixels = u64::from(width)
         .checked_mul(u64::from(height))
-        .ok_or_else(|| "Rendered PDF page dimensions overflowed".to_owned())?;
+        .ok_or_else(|| tr!("Rendered PDF page dimensions overflowed"))?;
     let rgba_bytes = pixels
         .checked_mul(4)
-        .ok_or_else(|| "Rendered PDF page memory size overflowed".to_owned())?;
+        .ok_or_else(|| tr!("Rendered PDF page memory size overflowed"))?;
     if width == 0
         || height == 0
         || width > crate::document_preview::MAX_DOCUMENT_PAGE_EDGE
@@ -357,11 +358,13 @@ async fn read_rendered_page(
         || height > request.plan.height
         || rgba_bytes > request.plan.estimated_rgba_bytes
     {
-        return Err("Rendered PDF page exceeds the planned rendering budget".to_owned());
+        return Err(tr!(
+            "Rendered PDF page exceeds the planned rendering budget"
+        ));
     }
     let bytes = tokio::fs::read(output_file)
         .await
-        .map_err(|error| format!("Could not read rendered PDF page: {error}"))?;
+        .map_err(|error| tr!("Could not read rendered PDF page: %1", error))?;
 
     Ok(DocumentPageRenderResult {
         key: request.key.clone(),
@@ -383,7 +386,7 @@ async fn run_poppler_command(
     stderr_limit: usize,
     document_cancellation: &CancellationToken,
     render_cancellation: Option<&CancellationToken>,
-) -> Result<Option<DocumentToolOutput>, String> {
+) -> Result<Option<DocumentToolOutput>, DocumentToolError> {
     let environment = [
         (OsString::from("LC_ALL"), OsString::from("C")),
         (OsString::from("LANG"), OsString::from("C")),
@@ -400,19 +403,18 @@ async fn run_poppler_command(
         render_cancellation,
     })
     .await
-    .map_err(|error| match error {
-        DocumentToolError::NotFound => POPPLER_INSTALL_ERROR.to_owned(),
-        DocumentToolError::Failed(message) => message,
-    })
 }
 
-fn pdf_inspection_error(error: String) -> String {
-    if error == POPPLER_INSTALL_ERROR {
-        error
-    } else if error.to_ascii_lowercase().contains("incorrect password") {
-        ENCRYPTED_PDF_ERROR.to_owned()
-    } else {
-        format!("Could not inspect PDF: {error}")
+fn poppler_missing() -> String {
+    tr!("PDF preview requires Poppler. Install the poppler package.")
+}
+
+/// Poppler 原话只作详情：有用户密码的 PDF pdfinfo 打不开，也没有单独的退出码，
+/// 用户从原话（"Incorrect password"）里就能看出来，不拿它来判断。
+fn pdf_inspection_error(error: DocumentToolError) -> String {
+    match error {
+        DocumentToolError::NotFound => poppler_missing(),
+        DocumentToolError::Failed(detail) => tr!("Could not inspect PDF: %1", detail),
     }
 }
 

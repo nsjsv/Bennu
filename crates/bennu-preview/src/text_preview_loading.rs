@@ -142,8 +142,7 @@ async fn read_text_preview_chunk(
         reached_eof && next_offset.is_none() && start_offset + buffer.len() as u64 >= file_len;
     let valid_len = valid_utf8_prefix_len(&buffer, reached_preview_end)?;
     buffer.truncate(valid_len);
-    let content = String::from_utf8(buffer)
-        .map_err(|_| "Preview is only available for UTF-8 text files".to_owned())?;
+    let content = String::from_utf8(buffer).map_err(|_| not_utf8_text())?;
     let line_count = text_preview_loaded_line_count(&content);
     let line_limit_notice = if scan_after_line_limit && next_offset.is_some() {
         TextPreviewLineLimitNotice::for_total_line_count(
@@ -217,8 +216,12 @@ fn valid_utf8_prefix_len(buffer: &[u8], reached_eof: bool) -> Result<usize, Stri
         Err(error) if error.error_len().is_none() && !reached_eof && error.valid_up_to() > 0 => {
             Ok(error.valid_up_to())
         }
-        Err(_) => Err("Preview is only available for UTF-8 text files".to_owned()),
+        Err(_) => Err(not_utf8_text()),
     }
+}
+
+fn not_utf8_text() -> String {
+    bennu_localization::tr!("Preview is only available for UTF-8 text files")
 }
 
 #[cfg(test)]

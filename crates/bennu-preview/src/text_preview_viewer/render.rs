@@ -78,7 +78,7 @@ pub(super) fn draw_empty_placeholder(
 ) {
     renderer.fill_text(
         text::Text {
-            content: "(empty file)".into(),
+            content: bennu_localization::tr!("(empty file)"),
             bounds: text_bounds.size(),
             size: Pixels(TEXT_PREVIEW_TEXT_SIZE),
             line_height: text::LineHeight::Relative(TEXT_PREVIEW_LINE_HEIGHT),

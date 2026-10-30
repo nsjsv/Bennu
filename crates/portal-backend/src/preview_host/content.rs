@@ -174,7 +174,7 @@ impl PreviewHost {
                 return host
                     .fail_image_preview_dimensions(
                         path,
-                        "Image preview has invalid dimensions".to_owned(),
+                        bennu_localization::tr!("Image preview has invalid dimensions"),
                     )
                     .map(Message::Preview)
             }

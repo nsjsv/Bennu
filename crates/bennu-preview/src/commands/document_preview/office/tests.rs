@@ -211,7 +211,7 @@ async fn missing_libreoffice_falls_back_only_to_soffice() {
     )
     .await
     .expect_err("missing LibreOffice");
-    assert_eq!(error, LIBREOFFICE_INSTALL_ERROR);
+    assert_eq!(error, libreoffice_missing());
 }
 
 #[tokio::test]
@@ -607,7 +607,7 @@ async fn missing_libreoffice_is_reported_before_poppler_is_considered() {
     let DocumentPrepareOutcome::Failed(_, error) = outcome else {
         panic!("expected missing LibreOffice failure");
     };
-    assert_eq!(error, LIBREOFFICE_INSTALL_ERROR);
+    assert_eq!(error, libreoffice_missing());
     assert!(!error.contains("Poppler"));
 }
 

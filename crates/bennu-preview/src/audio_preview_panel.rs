@@ -4,6 +4,7 @@
 use std::path::Path;
 use std::time::Duration;
 
+use bennu_localization::tr;
 use iced::widget::{button, column, container, row, slider, Button, Column, Space};
 use iced::{Alignment, Element, Length};
 
@@ -15,7 +16,7 @@ use crate::media_controls::{
     media_position_text, AUDIO_CONTROL_BUTTON_SIZE, AUDIO_CONTROL_ICON_SIZE,
     AUDIO_PROGRESS_SLIDER_STEP_SECONDS, AUDIO_TIMELINE_CONTROL_GAP, AUDIO_VOLUME_SLIDER_STEP,
 };
-use crate::panel_text::{localized_text, readable_text};
+use crate::panel_text::readable_text;
 use crate::preview::{AudioPreviewPlayback, AudioPreviewPlaybackStatus};
 use crate::preview_message::PreviewMessage;
 
@@ -34,9 +35,9 @@ where
 {
     let playback = playback.filter(|playback| playback.path.as_path() == path);
     let title = column![
-        readable_text("Audio preview").size(17),
-        localized_text(audio_preview_summary(duration, len)).size(12),
-        localized_text(audio_preview_status(playback, duration)).size(12),
+        readable_text(tr!("Audio preview")).size(17),
+        readable_text(audio_preview_summary(duration, len)).size(12),
+        readable_text(audio_preview_status(playback, duration)).size(12),
     ]
     .spacing(4)
     .width(Length::Fixed(150.0));
@@ -128,7 +129,7 @@ where
 {
     let volume = playback.map(|playback| playback.volume).unwrap_or(1.0);
     column![
-        localized_text(format!("Volume {:.0}%", volume * 100.0)).size(12),
+        readable_text(tr!("Volume %1%", format!("{:.0}", volume * 100.0))).size(12),
         slider(0.0..=1.0, volume, |value: f32| Message::from(
             PreviewMessage::AudioPreviewVolumeChanged(value)
         ),)
@@ -143,7 +144,7 @@ where
 fn audio_preview_summary(duration: Option<Duration>, len: u64) -> String {
     match duration {
         Some(duration) => format!("{} · {}", format_duration(duration), format_file_size(len)),
-        None => format!("Duration unknown · {}", format_file_size(len)),
+        None => tr!("Duration unknown · %1", format_file_size(len)),
     }
 }
 
@@ -153,25 +154,25 @@ fn audio_preview_status(
 ) -> String {
     use AudioPreviewPlaybackStatus as Status;
     let Some(playback) = playback else {
-        return "Ready to play".to_owned();
+        return tr!("Ready to play");
     };
 
     match playback.status {
-        Status::Loading => "Opening audio output...".to_owned(),
-        Status::Playing => format!(
-            "Playing · {}",
+        Status::Loading => tr!("Opening audio output..."),
+        Status::Playing => tr!(
+            "Playing · %1",
             media_position_text(playback.position, duration)
         ),
-        Status::Paused => format!(
-            "Paused · {}",
+        Status::Paused => tr!(
+            "Paused · %1",
             media_position_text(playback.position, duration)
         ),
-        Status::Stopped => "Stopped".to_owned(),
-        Status::Finished => "Finished".to_owned(),
+        Status::Stopped => tr!("Stopped"),
+        Status::Finished => tr!("Finished"),
         Status::Error => playback
             .error
             .as_ref()
-            .map(|error| format!("Audio unavailable: {error}"))
-            .unwrap_or_else(|| "Could not start audio preview".to_owned()),
+            .map(|error| tr!("Audio unavailable: %1", error))
+            .unwrap_or_else(|| tr!("Could not start audio preview")),
     }
 }

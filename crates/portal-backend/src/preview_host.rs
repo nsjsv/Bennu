@@ -24,13 +24,14 @@ use bennu_preview::engine::{
     preview_window_size_for_content, PreviewEngine, PreviewEngineConfig, PreviewLoadSurface,
     PreviewWindowIdentity,
 };
-use bennu_preview::formatting::format_file_size;
 use bennu_preview::image_preview_viewport::ImagePreviewViewport;
 use bennu_preview::preview::{AudioPreviewPlayback, PreviewState, PreviewWindowProfile};
 use bennu_preview::preview_config::{
     load_preview_preferences_from_state_database, PreviewFileSizeKind, PreviewPreferences,
 };
-use bennu_preview::preview_loading::{classify_preview_path, PreviewPathKind};
+use bennu_preview::preview_loading::{
+    classify_preview_path, file_too_large_to_preview, PreviewPathKind,
+};
 use bennu_preview::preview_message::PreviewMessage;
 use bennu_theme::window_controls::WindowControlKind;
 
@@ -234,9 +235,9 @@ impl PreviewHost {
             .engine
             .preview_window_presentation_command(PreviewWindowProfile::Regular);
         self.engine.clear_preview();
-        self.engine.preview = Some(PreviewState::Error(
-            "No preview available for this file type.".to_owned(),
-        ));
+        self.engine.preview = Some(PreviewState::Error(bennu_localization::tr!(
+            "No preview available for this file type."
+        )));
         window_command
     }
 
@@ -253,10 +254,9 @@ impl PreviewHost {
             .engine
             .preview_window_presentation_command(PreviewWindowProfile::Regular);
         self.engine.clear_preview();
-        self.engine.preview = Some(PreviewState::Error(format!(
-            "File is too large to preview ({}). Maximum preview size is {}.",
-            format_file_size(selection.file_bytes),
-            format_file_size(max_bytes),
+        self.engine.preview = Some(PreviewState::Error(file_too_large_to_preview(
+            selection.file_bytes,
+            max_bytes,
         )));
         Some(window_command)
     }

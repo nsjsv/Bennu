@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
+use bennu_localization::tr;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use super::process::{
@@ -15,8 +16,6 @@ use crate::document_preview::{
 };
 use crate::formatting::format_file_size;
 
-pub(super) const LIBREOFFICE_INSTALL_ERROR: &str =
-    "Office preview requires LibreOffice. Install the libreoffice package.";
 const OFFICE_CONVERSION_CONCURRENCY: usize = 1;
 const OFFICE_CONVERSION_TIMEOUT: Duration = Duration::from_secs(30);
 const OFFICE_CONVERSION_OUTPUT_LIMIT: usize = 64 * 1024;
@@ -64,8 +63,8 @@ pub(super) async fn prepare_office_document_workspace(
         _ = request.cancellation.cancelled() => return Ok(None),
         workspace = tokio::task::spawn_blocking(OfficeDocumentPreviewWorkspace::create) => {
             workspace
-                .map_err(|error| format!("Could not create Office preview workspace: {error}"))?
-                .map_err(|error| format!("Could not create Office preview workspace: {error}"))?
+                .map_err(|error| tr!("Could not create Office preview workspace: %1", error))?
+                .map_err(|error| tr!("Could not create Office preview workspace: %1", error))?
         },
     };
     let Some(pdf_path) = convert_office_document_in_workspace(
@@ -83,7 +82,7 @@ pub(super) async fn prepare_office_document_workspace(
         .into_document_workspace(pdf_path)
         .await
         .map(Some)
-        .map_err(|error| format!("Could not convert Office document: {error}"))
+        .map_err(|error| tr!("Could not convert Office document: %1", error))
 }
 
 async fn convert_office_document_in_workspace(
@@ -124,17 +123,15 @@ async fn convert_office_document_in_workspace(
             )
             .await
             {
-                Err(DocumentToolError::NotFound) => {
-                    return Err(LIBREOFFICE_INSTALL_ERROR.to_owned())
-                }
+                Err(DocumentToolError::NotFound) => return Err(libreoffice_missing()),
                 outcome => outcome,
             }
         }
         outcome => outcome,
     };
     let Some(_output) = output.map_err(|error| {
-        format!(
-            "Could not convert Office document: {}",
+        tr!(
+            "Could not convert Office document: %1",
             error.into_message()
         )
     })?
@@ -148,7 +145,11 @@ async fn convert_office_document_in_workspace(
     validate_office_conversion_output(workspace, request.max_file_bytes)
         .await
         .map(Some)
-        .map_err(|error| format!("Could not convert Office document: {error}"))
+        .map_err(|error| tr!("Could not convert Office document: %1", error))
+}
+
+pub(super) fn libreoffice_missing() -> String {
+    tr!("Office preview requires LibreOffice. Install the libreoffice package.")
 }
 
 async fn acquire_office_conversion_permit(
@@ -161,7 +162,7 @@ async fn acquire_office_conversion_permit(
         _ = request.cancellation.cancelled() => Ok(None),
         permit = semaphore.acquire_owned() => permit
             .map(Some)
-            .map_err(|_| "Office document converter is unavailable".to_owned()),
+            .map_err(|_| tr!("Office document converter is unavailable")),
     }
 }
 
@@ -238,15 +239,15 @@ async fn validate_office_conversion_output(
     // 子进程拥有目录内容写权限，只有枚举和 metadata 完成后的同一 inode 才能证明结果未逃逸。
     verify_office_output_directory_identity(workspace).await?;
     let (entry, has_extra_entry) = scan_outcome?;
-    let entry = entry.ok_or_else(|| "LibreOffice did not produce a PDF".to_owned())?;
+    let entry = entry.ok_or_else(|| tr!("LibreOffice did not produce a PDF"))?;
     if has_extra_entry {
-        return Err("LibreOffice produced more than one output".to_owned());
+        return Err(tr!("LibreOffice produced more than one output"));
     }
     if entry.file_type.is_symlink() || !entry.file_type.is_file() {
-        return Err("LibreOffice output is not a regular PDF file".to_owned());
+        return Err(tr!("LibreOffice output is not a regular PDF file"));
     }
     if entry.path.parent() != Some(workspace.output_dir()) {
-        return Err("LibreOffice output escaped the preview workspace".to_owned());
+        return Err(tr!("LibreOffice output escaped the preview workspace"));
     }
     let is_pdf = entry
         .path
@@ -254,14 +255,14 @@ async fn validate_office_conversion_output(
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"));
     if !is_pdf {
-        return Err("LibreOffice output is not a PDF file".to_owned());
+        return Err(tr!("LibreOffice output is not a PDF file"));
     }
     if !entry.metadata.file_type().is_file() || entry.metadata.len() == 0 {
-        return Err("LibreOffice produced an empty PDF".to_owned());
+        return Err(tr!("LibreOffice produced an empty PDF"));
     }
     if max_file_bytes != 0 && entry.metadata.len() > max_file_bytes {
-        return Err(format!(
-            "Converted Office PDF is too large to preview ({}). Maximum preview size is {}.",
+        return Err(tr!(
+            "Converted Office PDF is too large to preview (%1). Maximum preview size is %2.",
             format_file_size(entry.metadata.len()),
             format_file_size(max_file_bytes)
         ));
@@ -274,25 +275,25 @@ async fn scan_office_output_directory(
 ) -> Result<(Option<OfficeOutputEntry>, bool), String> {
     let mut entries = tokio::fs::read_dir(output_dir)
         .await
-        .map_err(|error| format!("Could not inspect LibreOffice output: {error}"))?;
+        .map_err(|error| tr!("Could not inspect LibreOffice output: %1", error))?;
     let entry = entries
         .next_entry()
         .await
-        .map_err(|error| format!("Could not inspect LibreOffice output: {error}"))?;
+        .map_err(|error| tr!("Could not inspect LibreOffice output: %1", error))?;
     let has_extra_entry = entries
         .next_entry()
         .await
-        .map_err(|error| format!("Could not inspect LibreOffice output: {error}"))?
+        .map_err(|error| tr!("Could not inspect LibreOffice output: %1", error))?
         .is_some();
     let entry = if let Some(entry) = entry {
         let path = entry.path();
         let file_type = entry
             .file_type()
             .await
-            .map_err(|error| format!("Could not inspect LibreOffice output: {error}"))?;
+            .map_err(|error| tr!("Could not inspect LibreOffice output: %1", error))?;
         let metadata = tokio::fs::symlink_metadata(&path)
             .await
-            .map_err(|error| format!("Could not inspect LibreOffice output: {error}"))?;
+            .map_err(|error| tr!("Could not inspect LibreOffice output: %1", error))?;
         Some(OfficeOutputEntry {
             path,
             file_type,
@@ -309,9 +310,10 @@ async fn verify_office_output_directory_identity(
 ) -> Result<(), String> {
     match workspace.output_directory_identity_is_current().await {
         Ok(true) => Ok(()),
-        Ok(false) => Err("LibreOffice output directory identity changed".to_owned()),
-        Err(error) => Err(format!(
-            "Could not inspect LibreOffice output directory: {error}"
+        Ok(false) => Err(tr!("LibreOffice output directory identity changed")),
+        Err(error) => Err(tr!(
+            "Could not inspect LibreOffice output directory: %1",
+            error
         )),
     }
 }

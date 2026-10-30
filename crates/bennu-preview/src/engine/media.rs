@@ -7,6 +7,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use bennu_localization::tr;
 use iced::widget::image;
 use iced::{Subscription, Task};
 
@@ -353,7 +354,7 @@ impl super::PreviewEngine {
             }
             Err(error) => {
                 playback.audio_runtime = None;
-                playback.error = Some(format!("Audio unavailable: {error}"));
+                playback.error = Some(tr!("Audio unavailable: %1", error));
             }
         }
         Task::none()

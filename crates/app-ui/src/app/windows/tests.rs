@@ -847,6 +847,7 @@ async fn shutdown_waits_for_old_preferences_save_then_commits_latest_search_hist
             .read_user_preferences()
             .unwrap()
             .unwrap()
+            .preferences
             .search_history,
         ["latest"]
     );

@@ -1,8 +1,7 @@
-use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use crate::{StoreError, StoreResult, StoredPath, TaskQueueStore};
+use crate::StoredPath;
 
 pub const USER_PREFERENCES_KEY: &str = "main";
 const DEFAULT_VIEW_DENSITY_INDEX: u8 = 2;
@@ -386,46 +385,6 @@ fn default_stored_window_controls() -> Vec<StoredWindowControlPlacement> {
             visible: true,
         })
         .collect()
-}
-
-impl TaskQueueStore {
-    pub fn read_user_preferences(&self) -> StoreResult<Option<StoredUserPreferences>> {
-        let connection = self.connection()?;
-        let payload_json = connection
-            .query_row(
-                "SELECT payload_json FROM user_preferences WHERE preference_key = ?1",
-                rusqlite::params![USER_PREFERENCES_KEY],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
-        match payload_json {
-            Some(payload_json) => match serde_json::from_str(&payload_json) {
-                Ok(preferences) => Ok(Some(preferences)),
-                Err(error) => {
-                    connection.execute(
-                        "DELETE FROM user_preferences WHERE preference_key = ?1",
-                        rusqlite::params![USER_PREFERENCES_KEY],
-                    )?;
-                    Err(StoreError::Json(error))
-                }
-            },
-            None => Ok(None),
-        }
-    }
-
-    pub fn replace_user_preferences(&self, preferences: &StoredUserPreferences) -> StoreResult<()> {
-        let connection = self.connection()?;
-        let payload_json = serde_json::to_string(preferences)?;
-        connection.execute(
-            "INSERT INTO user_preferences (preference_key, payload_json, updated_at_ms)
-             VALUES (?1, ?2, ?3)
-             ON CONFLICT(preference_key) DO UPDATE SET
-                 payload_json = excluded.payload_json,
-                 updated_at_ms = excluded.updated_at_ms",
-            rusqlite::params![USER_PREFERENCES_KEY, payload_json, crate::current_time_ms()],
-        )?;
-        Ok(())
-    }
 }
 
 #[cfg(test)]

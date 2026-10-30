@@ -29,6 +29,8 @@ pub use recoverable_transfer::{
     StoredTransferRecoverySnapshot, StoredTransferWorkKey, TransferManifestCheckpointUpdate,
     TRANSFER_JOURNAL_VERSION,
 };
+mod preferences_payload;
+pub use preferences_payload::{UnreadablePreferences, UserPreferencesRead};
 mod user_preferences;
 pub use user_preferences::{
     StoredContextMenuItemEntry, StoredContextMenuLayout, StoredContextMenuLayouts,
@@ -781,10 +783,6 @@ impl TaskQueueStore {
             StoredBrowserSessionShutdown::Skip => None,
             StoredBrowserSessionShutdown::Persist(session) => Some(serde_json::to_string(session)?),
         };
-        let user_preferences_json = user_preferences
-            .as_ref()
-            .map(serde_json::to_string)
-            .transpose()?;
         let mut connection = self.connection()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
 
@@ -826,19 +824,8 @@ impl TaskQueueStore {
             transaction.execute("DELETE FROM task_queue WHERE id = ?1", params![task_id])?;
         }
 
-        if let Some(payload_json) = user_preferences_json {
-            transaction.execute(
-                "INSERT INTO user_preferences (preference_key, payload_json, updated_at_ms)
-                 VALUES (?1, ?2, ?3)
-                 ON CONFLICT(preference_key) DO UPDATE SET
-                     payload_json = excluded.payload_json,
-                     updated_at_ms = excluded.updated_at_ms",
-                params![
-                    user_preferences::USER_PREFERENCES_KEY,
-                    payload_json,
-                    current_time_ms()
-                ],
-            )?;
+        if let Some(preferences) = &user_preferences {
+            preferences_payload::write_user_preferences(&transaction, self.db_path(), preferences)?;
         }
         if let Some(payload_json) = browser_session_json {
             transaction.execute(
@@ -863,19 +850,11 @@ impl TaskQueueStore {
                 |row| row.get::<_, String>(0),
             )
             .optional()?;
-        match payload_json {
-            Some(payload_json) => match serde_json::from_str(&payload_json) {
-                Ok(session) => Ok(Some(session)),
-                Err(error) => {
-                    connection.execute(
-                        "DELETE FROM browser_session WHERE session_key = ?1",
-                        params![BROWSER_SESSION_KEY],
-                    )?;
-                    Err(StoreError::Json(error))
-                }
-            },
-            None => Ok(None),
-        }
+        // 读不懂时原样留着：读取没有副作用，下次保存会话时自然覆盖。
+        payload_json
+            .map(|payload_json| serde_json::from_str(&payload_json))
+            .transpose()
+            .map_err(StoreError::Json)
     }
 
     pub fn replace_browser_session(&self, session: &StoredBrowserSession) -> StoreResult<()> {

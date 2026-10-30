@@ -40,7 +40,9 @@ pub(crate) fn stored_launch_window_policy() -> LaunchWindowPolicy {
         .read_user_preferences()
         .ok()
         .flatten()
-        .and_then(|stored| LaunchWindowPolicy::from_config_value(&stored.launch_window_policy))
+        .and_then(|read| {
+            LaunchWindowPolicy::from_config_value(&read.preferences.launch_window_policy)
+        })
         .unwrap_or(DEFAULT_LAUNCH_WINDOW_POLICY)
 }
 

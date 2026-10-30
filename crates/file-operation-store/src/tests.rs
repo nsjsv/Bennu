@@ -421,11 +421,7 @@ fn application_shutdown_commits_session_recovery_and_transient_cleanup_atomicall
 
     assert_eq!(store.read_browser_session().unwrap(), Some(session));
     assert_eq!(
-        store
-            .read_user_preferences()
-            .unwrap()
-            .unwrap()
-            .search_history,
+        stored_preferences(&store).unwrap().search_history,
         ["report"]
     );
     assert_eq!(
@@ -535,7 +531,7 @@ fn application_shutdown_rolls_back_prior_task_writes_when_session_write_fails() 
     );
     assert!(store.read_task(transient_task_id).unwrap().is_some());
     assert!(store.read_browser_session().unwrap().is_none());
-    assert!(store.read_user_preferences().unwrap().is_none());
+    assert!(stored_preferences(&store).is_none());
     assert!(!store
         .read_transfer_recovery(recoverable_task_id)
         .unwrap()
@@ -608,7 +604,7 @@ fn icon_browser_view_mode_uses_stable_json_value() {
 #[test]
 fn user_preferences_roundtrip_replace() {
     let (store, root) = test_store();
-    assert_eq!(store.read_user_preferences().unwrap(), None);
+    assert_eq!(stored_preferences(&store), None);
     let defaults = StoredUserPreferences::default();
     assert_eq!(defaults.preview.preview_text_size_bytes, None);
     assert_eq!(
@@ -716,7 +712,7 @@ fn user_preferences_roundtrip_replace() {
     };
 
     store.replace_user_preferences(&first).unwrap();
-    assert_eq!(store.read_user_preferences().unwrap(), Some(first.clone()));
+    assert_eq!(stored_preferences(&store), Some(first.clone()));
 
     let second = StoredUserPreferences {
         show_hidden_files: false,
@@ -727,32 +723,15 @@ fn user_preferences_roundtrip_replace() {
     };
     store.replace_user_preferences(&second).unwrap();
 
-    assert_eq!(store.read_user_preferences().unwrap(), Some(second));
+    assert_eq!(stored_preferences(&store), Some(second));
     let _ = fs::remove_dir_all(root);
 }
 
-#[test]
-fn unreadable_user_preferences_payload_is_deleted_on_read() {
-    let (store, root) = test_store();
-    let connection = Connection::open(store.db_path()).unwrap();
-    connection
-        .execute(
-            "INSERT INTO user_preferences (preference_key, payload_json, updated_at_ms)
-             VALUES (?1, ?2, ?3)",
-            params![user_preferences::USER_PREFERENCES_KEY, "{", 1_i64],
-        )
-        .unwrap();
-    drop(connection);
-
-    assert!(store.read_user_preferences().is_err());
-    let connection = Connection::open(store.db_path()).unwrap();
-    let preference_count: i64 = connection
-        .query_row("SELECT COUNT(*) FROM user_preferences", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    assert_eq!(preference_count, 0);
-    let _ = fs::remove_dir_all(root);
+fn stored_preferences(store: &TaskQueueStore) -> Option<StoredUserPreferences> {
+    store
+        .read_user_preferences()
+        .unwrap()
+        .map(|read| read.preferences)
 }
 
 #[test]
@@ -785,10 +764,7 @@ fn legacy_user_preferences_without_optional_fields_get_defaults() {
         .unwrap();
     drop(connection);
 
-    let preferences = store
-        .read_user_preferences()
-        .unwrap()
-        .expect("preferences load");
+    let preferences = stored_preferences(&store).expect("preferences load");
 
     assert_eq!(preferences.list_view_columns.len(), 9);
     assert_eq!(preferences.list_view_columns[0].kind, "name");
@@ -855,10 +831,7 @@ fn legacy_user_preferences_ignore_removed_search_fields() {
         .unwrap();
     drop(connection);
 
-    let preferences = store
-        .read_user_preferences()
-        .unwrap()
-        .expect("preferences load");
+    let preferences = stored_preferences(&store).expect("preferences load");
 
     assert!(preferences.network_list_thumbnail_downloads_enabled);
     assert_eq!(preferences.language_setting, "chinese");

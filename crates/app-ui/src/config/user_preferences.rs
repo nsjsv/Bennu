@@ -456,8 +456,8 @@ pub(super) fn load_user_config_from_sources(
     };
 
     match store.read_user_preferences() {
-        Ok(Some(stored)) => {
-            let preferences = UserPreferences::from_stored(stored, &default);
+        Ok(Some(read)) => {
+            let preferences = UserPreferences::from_stored(read.preferences, &default);
             UserConfig::from_parts(app_config, preferences)
         }
         Ok(None) => {

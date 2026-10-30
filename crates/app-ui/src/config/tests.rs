@@ -638,7 +638,8 @@ network_connections = [
     let stored = store
         .read_user_preferences()
         .expect("read migrated preferences")
-        .expect("migrated preferences");
+        .expect("migrated preferences")
+        .preferences;
     assert_eq!(stored.network_connections.len(), 1);
     assert_eq!(stored.network_connections[0].id, "good");
     assert!(!stored.network_connections[0].uri.contains("secret"));

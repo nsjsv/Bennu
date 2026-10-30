@@ -63,7 +63,7 @@ pub(crate) fn state_database_path() -> std::path::PathBuf {
 
 fn read_stored_appearance(db_path: &Path) -> Option<StoredAppearance> {
     let store = TaskQueueStore::new(db_path).ok()?;
-    let stored = store.read_user_preferences().ok()??;
+    let stored = store.read_user_preferences().ok()??.preferences;
     let theme_mode = ThemeMode::from_config_value(&stored.theme_mode)?;
     let color_scheme = ColorSchemePreset::from_config_value(&stored.color_scheme)?;
     let custom_color_scheme = CustomColorScheme::from_stored(

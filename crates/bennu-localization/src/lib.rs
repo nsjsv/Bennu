@@ -160,14 +160,6 @@ pub fn trash_warning_summary(count: usize) -> String {
     trash::warning_summary(current_language(), count)
 }
 
-pub fn trash_tracking_warning(language: UiLanguage, warning: &str) -> String {
-    trash::tracking_warning(language, warning)
-}
-
-pub fn current_trash_tracking_warning(warning: &str) -> String {
-    trash::tracking_warning(current_language(), warning)
-}
-
 /// 批量重命名失败且有条目未恢复原名时的任务错误文案，构造时按给定语言产出成品。
 pub fn batch_rename_incomplete(
     language: UiLanguage,

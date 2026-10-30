@@ -170,7 +170,7 @@ fn operation_task_row(task: &FileOperationTask, animation_frame: u8) -> Element<
 
     if let Some(warning) = task.completion_warning.as_deref() {
         body = body.push(
-            readable_text(crate::localization::current_trash_tracking_warning(warning))
+            readable_text(crate::localization::translate_current(warning))
                 .size(11)
                 .width(Length::Fill),
         );

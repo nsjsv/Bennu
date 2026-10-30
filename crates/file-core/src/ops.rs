@@ -26,7 +26,6 @@ pub use convert::{
     ConversionRequest, ConversionTarget, ConvertedFile, ImageTargetFormat, QualitySpec, ResizeSpec,
     VideoTargetFormat,
 };
-pub(crate) use recoverable_transfer::rename_noreplace;
 pub use recoverable_transfer::{
     advance_recoverable_transfer, is_direct_move_segment_candidate,
     persist_recoverable_source_manifest, persist_recoverable_source_manifest_with_controls,
@@ -45,6 +44,7 @@ pub use recoverable_transfer::{
     TransferJournalError, TransferJournalFuture, TransferJournalMutation, TransferJournalRecord,
     TransferWorkKey,
 };
+pub(crate) use recoverable_transfer::{rename_noreplace, NoReplaceRenameError};
 mod transfer_metadata;
 mod transfer_object;
 mod transfer_strategy;

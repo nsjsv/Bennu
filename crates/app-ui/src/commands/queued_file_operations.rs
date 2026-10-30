@@ -15,7 +15,7 @@ use file_core::{
     FileTransferOptions, RecoverableTransferError, RecoverableTransferOperation,
     RecoverableTransferOutcome, SymbolicLinkRequest, TransferConflictStrategy, TransferJournal,
     TransferJournalError, TransferJournalMutation, TransferJournalRecord, TransferWorkKey,
-    TrashCommitBatch, TrashRestoreEntry, TrashVerificationBatch,
+    TrashRestoreEntry, TrashVerificationBatch,
 };
 use file_operation_store::TaskQueueStore;
 use iced::futures::channel::mpsc::Sender as IcedSender;
@@ -532,26 +532,16 @@ async fn run_queued_trash(
     let total = paths.len();
     let mut entries = Vec::new();
     let mut tracked_paths = Vec::new();
-    let mut tracking_warnings = Vec::new();
-    let mut commit_batch = TrashCommitBatch::new();
-    for (index, path) in paths.iter().cloned().enumerate() {
+    for (index, path) in paths.iter().enumerate() {
         controls
             .wait_until_running()
             .await
             .map_err(|error| error.to_string())?;
-        match commit_batch
-            .commit(&path, controls.cancellation_token())
+        let entry = file_core::trash_path(path, controls.cancellation_token())
             .await
-            .map_err(|error| error.to_string())?
-        {
-            file_core::TrashCommitOutcome::Tracked(entry) => {
-                tracked_paths.push(entry.original_path.clone());
-                entries.push(*entry);
-            }
-            file_core::TrashCommitOutcome::CommittedWithoutRestoreEntry(warning) => {
-                tracking_warnings.push(warning);
-            }
-        }
+            .map_err(|error| error.to_string())?;
+        tracked_paths.push(entry.original_path.clone());
+        entries.push(entry);
         send_file_operation_progress(
             output,
             task_id,
@@ -566,7 +556,6 @@ async fn run_queued_trash(
     Ok(FileOperationOutcome::Trash {
         paths: tracked_paths,
         entries,
-        tracking_warnings,
     })
 }
 

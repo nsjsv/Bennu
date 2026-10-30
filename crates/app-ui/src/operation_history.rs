@@ -72,7 +72,6 @@ pub(crate) enum FileOperationOutcome {
     Trash {
         paths: Vec<PathBuf>,
         entries: Vec<TrashRestoreEntry>,
-        tracking_warnings: Vec<file_core::TrashTrackingWarning>,
     },
     Restore {
         entries: Vec<TrashRestoreEntry>,
@@ -210,7 +209,7 @@ impl FileOperationCompletion {
 
 impl FileOperationOutcome {
     pub(crate) fn completion_warning(&self, language: UiLanguage) -> Option<String> {
-        const MAX_TRACKING_WARNING_DETAILS: usize = 5;
+        const MAX_CONVERT_FAILURE_DETAILS: usize = 5;
 
         if let Self::Copy { metadata_loss, .. } | Self::Move { metadata_loss, .. } = self {
             return metadata_loss_warning(metadata_loss, language);
@@ -232,47 +231,23 @@ impl FileOperationOutcome {
             ));
         }
 
-        if let Self::Convert { failures } = self {
-            if failures.is_empty() {
-                return None;
-            }
-            let mut details = failures
-                .iter()
-                .take(MAX_TRACKING_WARNING_DETAILS)
-                .cloned()
-                .collect::<Vec<_>>();
-            let remaining = failures.len().saturating_sub(MAX_TRACKING_WARNING_DETAILS);
-            if remaining > 0 {
-                details.push(format!("... (+{remaining})"));
-            }
-            return Some(format!(
-                "Some files could not be converted: {}",
-                details.join("; ")
-            ));
-        }
-
-        let Self::Trash {
-            tracking_warnings, ..
-        } = self
-        else {
+        let Self::Convert { failures } = self else {
             return None;
         };
-        if tracking_warnings.is_empty() {
+        if failures.is_empty() {
             return None;
         }
-        let mut details = tracking_warnings
+        let mut details = failures
             .iter()
-            .take(MAX_TRACKING_WARNING_DETAILS)
-            .map(|warning| format!("{}: {}", warning.path.display(), warning.message))
+            .take(MAX_CONVERT_FAILURE_DETAILS)
+            .cloned()
             .collect::<Vec<_>>();
-        let remaining = tracking_warnings
-            .len()
-            .saturating_sub(MAX_TRACKING_WARNING_DETAILS);
+        let remaining = failures.len().saturating_sub(MAX_CONVERT_FAILURE_DETAILS);
         if remaining > 0 {
             details.push(format!("... (+{remaining})"));
         }
         Some(format!(
-            "Moved to Trash, but undo information could not be recorded. {}",
+            "Some files could not be converted: {}",
             details.join("; ")
         ))
     }

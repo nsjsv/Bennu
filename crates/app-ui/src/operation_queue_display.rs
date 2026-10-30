@@ -200,7 +200,7 @@ pub(crate) fn file_operation_copy_text(task: &FileOperationTask, language: UiLan
         lines.push(format!(
             "{}: {}",
             translate("Warning"),
-            crate::localization::trash_tracking_warning(language, warning)
+            crate::localization::translate(language, warning)
         ));
     }
     if let Some(error) = task.error.as_deref() {

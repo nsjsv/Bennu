@@ -482,6 +482,10 @@ pub enum FileError {
     },
     #[error("could not move {path:?} to trash: {message}")]
     Trash { path: PathBuf, message: String },
+    /// 这个位置用不了回收站（建不起合规的回收站、系统内部挂载等），什么都没动。
+    /// 调用方据此问用户要不要直接永久删除，同 Nautilus。
+    #[error("{path:?} cannot be moved to Trash: {reason}")]
+    TrashUnavailable { path: PathBuf, reason: String },
     #[error("could not watch {path:?}: {message}")]
     Watch { path: PathBuf, message: String },
     #[error("could not create archive {path:?}: {message}")]

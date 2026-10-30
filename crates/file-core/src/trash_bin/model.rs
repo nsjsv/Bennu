@@ -74,18 +74,6 @@ impl TrashRestoreEntry {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TrashTrackingWarning {
-    pub path: PathBuf,
-    pub message: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TrashCommitOutcome {
-    Tracked(Box<TrashRestoreEntry>),
-    CommittedWithoutRestoreEntry(TrashTrackingWarning),
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum TrashLocationKind {
     Home,

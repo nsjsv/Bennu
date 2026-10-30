@@ -193,9 +193,6 @@ pub(crate) fn translate(text: &str) -> Option<&'static str> {
         "Restore" => Some("恢复"),
         "Delete Permanently" => Some("永久删除"),
         "Empty Trash" => Some("清空回收站"),
-        "Moved to Trash, but undo information could not be recorded." => {
-            Some("项目已移到回收站，但无法记录精确的撤销信息。")
-        }
         "Copy" => Some("复制"),
         "Move" => Some("移动"),
         "Create Archive" => Some("创建归档"),

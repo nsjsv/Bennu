@@ -21,11 +21,3 @@ pub(super) fn warning_summary(language: UiLanguage, count: usize) -> String {
         UiLanguage::Chinese => format!("回收站已加载，但有 {count} 条警告"),
     }
 }
-
-pub(super) fn tracking_warning(language: UiLanguage, warning: &str) -> String {
-    const PREFIX: &str = "Moved to Trash, but undo information could not be recorded.";
-    let Some(detail) = warning.strip_prefix(PREFIX) else {
-        return crate::translate(language, warning).into_owned();
-    };
-    format!("{}{}", crate::translate(language, PREFIX), detail)
-}

@@ -1,8 +1,9 @@
 use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 
 use tempfile::tempdir;
 
-use super::super::catalog::discover_trash_locations_from_mountinfo;
+use super::super::catalog::{discover_trash_locations_from_mountinfo, effective_user_id};
 use super::super::scan::scan_trash_with_catalog;
 use super::*;
 
@@ -39,57 +40,6 @@ fn scan_single_entry(fixture: &Path) -> TrashRestoreEntry {
     let original = fixture.join("original.txt");
     write_entry(&root, "item", &original.display().to_string(), b"payload");
     scan_home_entries(fixture).remove(0).restore_entry()
-}
-
-#[cfg(unix)]
-#[test]
-fn trash_source_canonicalizes_the_parent_without_following_the_leaf() {
-    use std::os::unix::fs::symlink;
-
-    let fixture = tempdir().unwrap();
-    let actual_parent = fixture.path().join("actual");
-    fs::create_dir(&actual_parent).unwrap();
-    let parent_link = fixture.path().join("parent-link");
-    symlink(&actual_parent, &parent_link).unwrap();
-    let external_target = fixture.path().join("external-target");
-    fs::write(&external_target, b"target").unwrap();
-    let leaf = actual_parent.join("leaf-link");
-    symlink(&external_target, &leaf).unwrap();
-
-    assert_eq!(
-        canonical_trash_source_path(&parent_link.join("leaf-link")).unwrap(),
-        leaf
-    );
-}
-
-#[test]
-fn home_trash_mount_classification_resolves_symlinked_existing_parent() {
-    use std::os::unix::fs::symlink;
-
-    let fixture = tempdir().unwrap();
-    let physical = fixture.path().join("physical");
-    fs::create_dir(&physical).unwrap();
-    let linked = fixture.path().join("linked");
-    symlink(&physical, &linked).unwrap();
-
-    assert_eq!(
-        canonicalize_path_or_existing_parent(&linked.join("data/Trash")).unwrap(),
-        physical.join("data/Trash")
-    );
-}
-
-#[test]
-fn deepest_mount_point_distinguishes_a_same_device_bind_from_home() {
-    let mount_points = vec![PathBuf::from("/"), PathBuf::from("/srv/home-bind")];
-
-    assert_eq!(
-        deepest_mount_point(&mount_points, Path::new("/srv/home-bind/user/item")),
-        Some(PathBuf::from("/srv/home-bind"))
-    );
-    assert_eq!(
-        deepest_mount_point(&mount_points, Path::new("/home/user/.local/share")),
-        Some(PathBuf::from("/"))
-    );
 }
 
 #[tokio::test]
@@ -356,60 +306,4 @@ async fn batch_restore_restores_every_entry_of_the_batch() {
     assert!(!root.join("files/second").exists());
     assert!(!root.join("info/first.trashinfo").exists());
     assert!(!root.join("info/second.trashinfo").exists());
-}
-
-#[test]
-fn tracking_requires_an_absolute_source_before_any_trash_side_effect() {
-    let error = canonical_trash_source_path(Path::new("relative")).unwrap_err();
-    assert!(error.to_string().contains("absolute source path"));
-}
-
-#[test]
-fn tracking_ignores_preexisting_matching_entry_after_directory_metadata_changes() {
-    let fixture = tempdir().unwrap();
-    let data_home = fixture.path().join("data");
-    let root = data_home.join("Trash");
-    create_location(&root);
-    let original = fixture.path().join("original.txt");
-    let original_text = original.display().to_string();
-    write_entry(&root, "original.txt", &original_text, b"existing");
-    let existing = scan_home_entries(fixture.path()).remove(0);
-    let existing_identity = existing.identity.clone().unwrap();
-    let plan = TrashTrackingPlan {
-        original_path: original,
-        scope: TrashTrackingScope::Home,
-        data_home,
-        uid: effective_user_id(),
-        mountinfo: Vec::new(),
-        before_info_objects: vec![existing_identity.info.clone()],
-    };
-    write_entry(&root, "original.txt.2", &original_text, b"new");
-
-    let tracked = plan.find_committed_entry().unwrap();
-
-    assert_eq!(tracked.trash_path, root.join("files/original.txt.2"));
-}
-
-#[test]
-fn post_commit_tracking_rejects_ambiguous_new_entries() {
-    let fixture = tempdir().unwrap();
-    let data_home = fixture.path().join("data");
-    let root = data_home.join("Trash");
-    create_location(&root);
-    let original = fixture.path().join("original.txt");
-    let plan = TrashTrackingPlan {
-        original_path: original.clone(),
-        scope: TrashTrackingScope::Home,
-        data_home: data_home.clone(),
-        uid: effective_user_id(),
-        mountinfo: Vec::new(),
-        before_info_objects: Vec::new(),
-    };
-    let original_text = original.display().to_string();
-    write_entry(&root, "original.txt", &original_text, b"first");
-    write_entry(&root, "original.txt.2", &original_text, b"second");
-
-    let error = plan.find_committed_entry().unwrap_err();
-
-    assert!(error.contains("2 matching entries"));
 }

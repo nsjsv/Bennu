@@ -24,7 +24,7 @@ pub(super) struct TrashLocationCatalog {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum DirectoryExpectation {
+pub(super) enum DirectoryExpectation {
     MountTop,
     SharedRoot { device: u64 },
     OwnedTrash { uid: u32, device: Option<u64> },
@@ -75,6 +75,7 @@ fn discover_trash_locations_from_mountinfo_read(
     }
 }
 
+#[cfg(test)]
 pub(super) fn discover_trash_locations_from_mountinfo(
     data_home: &Path,
     uid: u32,
@@ -220,7 +221,7 @@ fn trash_candidate_exists(path: &Path, warnings: &mut Vec<ScanWarning>) -> bool 
     }
 }
 
-fn probe_home_location(
+pub(super) fn probe_home_location(
     data_home: &Path,
     root_path: &Path,
     uid: u32,
@@ -272,7 +273,7 @@ fn probe_home_location(
     })
 }
 
-fn probe_volume_location(
+pub(super) fn probe_volume_location(
     kind: TrashLocationKind,
     top_directory: &Path,
     top: &VerifiedTrashDirectory,
@@ -346,7 +347,7 @@ fn probe_owned_root(
     }
 }
 
-fn inspect_directory(
+pub(super) fn inspect_directory(
     path: &Path,
     expectation: DirectoryExpectation,
 ) -> Result<VerifiedTrashDirectory, ScanWarning> {

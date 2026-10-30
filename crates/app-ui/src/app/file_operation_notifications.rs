@@ -129,7 +129,7 @@ fn file_operation_notification_text(
     let body = match completion {
         FileOperationNotificationCompletion::Completed => item_summary,
         FileOperationNotificationCompletion::CompletedWithWarning(warning) => {
-            let warning = localization::trash_tracking_warning(language, &warning);
+            let warning = localization::translate(language, &warning);
             format!(
                 "{item_summary}\n{}",
                 format_middle_ellipsized_text(&warning, NOTIFICATION_FAILURE_REASON_MAX_CHARS,)
@@ -341,34 +341,6 @@ mod tests {
         )
         .expect("empty trash notification");
         assert_eq!(empty_trash.body, "回收站");
-    }
-
-    #[test]
-    fn completed_tracking_warning_is_localized_without_changing_the_success_summary() {
-        let operation = QueuedFileOperation::Trash {
-            paths: vec![PathBuf::from("/tmp/report.txt")],
-        };
-        let warning = "Moved to Trash, but undo information could not be recorded. 1 item";
-
-        let english = file_operation_notification_text(
-            &operation,
-            FileOperationNotificationCompletion::CompletedWithWarning(warning.to_owned()),
-            UiLanguage::English,
-        )
-        .expect("English warning notification");
-        let chinese = file_operation_notification_text(
-            &operation,
-            FileOperationNotificationCompletion::CompletedWithWarning(warning.to_owned()),
-            UiLanguage::Chinese,
-        )
-        .expect("Chinese warning notification");
-
-        assert_eq!(english.summary, "Move to Trash completed");
-        assert!(english
-            .body
-            .contains("undo information could not be recorded"));
-        assert_eq!(chinese.summary, "移到回收站已完成");
-        assert!(chinese.body.contains("无法记录精确的撤销信息"));
     }
 
     #[test]

@@ -1,8 +1,6 @@
 use std::ffi::OsString;
-#[cfg(test)]
-use std::fs;
-use std::fs::{File, OpenOptions};
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 
 #[cfg(unix)]
@@ -25,102 +23,52 @@ pub(super) struct ParsedTrashInfo {
     pub warnings: Vec<ScanWarning>,
 }
 
-pub(super) fn normalize_new_volume_trash_info(
+/// 新建并写好 `.trashinfo`，返回它的身份。`create_new` 独占名字（同 GLib 的
+/// `O_EXCL`），已被占用时返回 `AlreadyExists`；写完先 sync 再移动文件，别的程序
+/// 不会读到半个文件。`path_value` 是 home 的绝对路径或卷顶层下的相对路径。
+pub(super) fn create_trash_info(
     info_path: &Path,
-    expected_info_identity: &TrashObjectIdentity,
-    top_directory: &Path,
-    expected_original_path: &Path,
-) -> Result<bool, ScanWarning> {
-    let mut file = open_trash_info_for_update_no_follow(info_path).map_err(|error| {
-        warning(
-            info_path,
-            format!("cannot open new volume .trashinfo safely: {error}"),
+    path_value: &Path,
+) -> io::Result<TrashObjectIdentity> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(info_path)?;
+    let mut content = b"[Trash Info]\nPath=".to_vec();
+    content.extend_from_slice(&percent_encode_path(path_value));
+    content.extend_from_slice(
+        format!(
+            "\nDeletionDate={}\n",
+            chrono::Local::now().format("%Y-%m-%dT%H:%M:%S")
         )
-    })?;
-    let before = file
-        .metadata()
-        .map_err(|error| warning(info_path, format!("cannot inspect .trashinfo: {error}")))?;
-    if !before.file_type().is_file() {
-        return Err(warning(info_path, ".trashinfo is not a regular file"));
+        .as_bytes(),
+    );
+    let written = file
+        .write_all(&content)
+        .and_then(|()| file.sync_all())
+        .and_then(|()| file.metadata());
+    match written {
+        Ok(metadata) => Ok(trash_object_identity(&metadata)),
+        Err(error) => {
+            remove_unused_trash_info(info_path);
+            Err(error)
+        }
     }
-    let before_identity = trash_object_identity(&before);
-    if !before_identity.same_object(expected_info_identity) {
-        return Err(warning(
-            info_path,
-            ".trashinfo identity changed before it could be normalized",
-        ));
-    }
-    let mut bytes = Vec::new();
-    Read::by_ref(&mut file)
-        .take(MAX_TRASH_INFO_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|error| warning(info_path, format!("cannot read .trashinfo: {error}")))?;
-    if bytes.len() as u64 > MAX_TRASH_INFO_BYTES {
-        return Err(warning(
-            info_path,
-            format!(".trashinfo exceeds {MAX_TRASH_INFO_BYTES} bytes"),
-        ));
-    }
-    let fields = parse_trash_info_fields(info_path, &bytes)?;
-    let decoded = percent_decode(&fields.path)
-        .map_err(|message| warning(info_path, format!("invalid Path value: {message}")))?;
-    let absolute_path = path_from_bytes(decoded);
-    if !absolute_path.is_absolute() || absolute_path != expected_original_path {
-        return Ok(false);
-    }
-    let relative = expected_original_path
-        .strip_prefix(top_directory)
-        .map_err(|_| {
-            warning(
-                info_path,
-                "volume Path is outside the mounted top directory",
-            )
-        })?;
-    let relative = validate_path_components(relative, PathForm::Relative)
-        .map_err(|message| warning(info_path, format!("invalid Path value: {message}")))?;
-    let encoded_relative = percent_encode_path(&relative);
-    let mut normalized = Vec::new();
-    normalized.extend_from_slice(b"[Trash Info]\nPath=");
-    normalized.extend_from_slice(&encoded_relative);
-    normalized.push(b'\n');
-    if let Some(deletion_date) = fields.deletion_date {
-        normalized.extend_from_slice(b"DeletionDate=");
-        normalized.extend_from_slice(&deletion_date);
-        normalized.push(b'\n');
-    }
+}
 
-    file.seek(SeekFrom::Start(0))
-        .and_then(|_| file.write_all(&normalized))
-        .and_then(|_| file.set_len(normalized.len() as u64))
-        .and_then(|_| file.sync_all())
-        .map_err(|error| warning(info_path, format!("cannot normalize .trashinfo: {error}")))?;
-    let after = file.metadata().map_err(|error| {
-        warning(
-            info_path,
-            format!("cannot re-inspect normalized .trashinfo: {error}"),
-        )
-    })?;
-    if !trash_object_identity(&after).same_object(&before_identity) {
-        return Err(warning(
-            info_path,
-            ".trashinfo identity changed while it was normalized",
-        ));
+/// 放入没成功时删掉占名字的 `.trashinfo`。删不掉只记日志：调用方要报的是放入失败
+/// 的原因，留下的 info 没有对应文件，扫描会把它当坏条目提示。
+pub(super) fn remove_unused_trash_info(info_path: &Path) {
+    if let Err(error) = fs::remove_file(info_path) {
+        tracing::warn!(
+            target: "file_core::trash",
+            event = "trash_info_not_removed",
+            path = %info_path.display(),
+            %error,
+            "reserved .trashinfo could not be removed after the item was not moved to Trash"
+        );
     }
-    let path_identity = std::fs::symlink_metadata(info_path)
-        .map(|metadata| trash_object_identity(&metadata))
-        .map_err(|error| {
-            warning(
-                info_path,
-                format!("cannot re-open normalized .trashinfo path: {error}"),
-            )
-        })?;
-    if !path_identity.same_object(&before_identity) {
-        return Err(warning(
-            info_path,
-            ".trashinfo path was replaced while it was normalized",
-        ));
-    }
-    Ok(true)
 }
 
 fn percent_encode_path(path: &Path) -> Vec<u8> {
@@ -364,20 +312,6 @@ fn trim_carriage_return(line: &[u8]) -> &[u8] {
 }
 
 #[cfg(unix)]
-fn open_trash_info_for_update_no_follow(path: &Path) -> io::Result<File> {
-    OpenOptions::new()
-        .read(true)
-        .write(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(path)
-}
-
-#[cfg(not(unix))]
-fn open_trash_info_for_update_no_follow(path: &Path) -> io::Result<File> {
-    OpenOptions::new().read(true).write(true).open(path)
-}
-
-#[cfg(unix)]
 fn path_bytes(path: &Path) -> Vec<u8> {
     use std::os::unix::ffi::OsStrExt;
     path.as_os_str().as_bytes().to_vec()
@@ -526,59 +460,6 @@ mod tests {
         let error = read_trash_info(&link, OriginalPathBase::Absolute, fixture.path()).unwrap_err();
 
         assert!(error.message.contains("safely"));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn newly_created_absolute_volume_info_is_normalized_to_relative_bytes() {
-        use std::os::unix::ffi::OsStringExt;
-
-        let fixture = tempdir().unwrap();
-        let top = fixture.path().join("volume");
-        fs::create_dir(&top).unwrap();
-        let original = top.join(OsString::from_vec(b"folder/nonutf8-\xff.txt".to_vec()));
-        let info = fixture.path().join("entry.trashinfo");
-        let mut content = b"[Trash Info]\nPath=".to_vec();
-        content.extend_from_slice(&percent_encode_path(&original));
-        content.extend_from_slice(b"\nDeletionDate=2026-08-02T12:34:56\n");
-        write_info(&info, &content);
-        let expected_identity = trash_object_identity(&fs::symlink_metadata(&info).unwrap());
-
-        assert!(
-            normalize_new_volume_trash_info(&info, &expected_identity, &top, &original).unwrap()
-        );
-        let parsed =
-            read_trash_info(&info, OriginalPathBase::RelativeToTopDirectory, &top).unwrap();
-
-        assert_eq!(parsed.original_path, original);
-        assert_eq!(parsed.deletion_date.as_deref(), Some("2026-08-02T12:34:56"));
-        assert!(!fs::read(&info)
-            .unwrap()
-            .starts_with(b"[Trash Info]\nPath=/"));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn normalization_rejects_an_info_path_replaced_after_discovery() {
-        let fixture = tempdir().unwrap();
-        let top = fixture.path().join("volume");
-        fs::create_dir(&top).unwrap();
-        let original = top.join("item.txt");
-        let info = fixture.path().join("entry.trashinfo");
-        write_info(
-            &info,
-            format!("[Trash Info]\nPath={}\n", original.display()).as_bytes(),
-        );
-        let expected_identity = trash_object_identity(&fs::symlink_metadata(&info).unwrap());
-        fs::rename(&info, fixture.path().join("discovered.trashinfo")).unwrap();
-        let replacement = b"[Trash Info]\nPath=/replacement\n";
-        write_info(&info, replacement);
-
-        let error = normalize_new_volume_trash_info(&info, &expected_identity, &top, &original)
-            .unwrap_err();
-
-        assert!(error.message.contains("identity changed"));
-        assert_eq!(fs::read(info).unwrap(), replacement);
     }
 
     #[test]

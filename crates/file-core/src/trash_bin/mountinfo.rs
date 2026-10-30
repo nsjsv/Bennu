@@ -88,9 +88,8 @@ fn device_has_block_prefix(device: &OsStr) -> bool {
 /// FUSE bridges like rclone or gvfs, ZFS datasets) are skipped: probing them
 /// happens on this scan's synchronous critical path, and one network stat can
 /// block for seconds. This matches glib's
-/// `g_unix_mount_entry_is_system_internal` behavior. The file manager never
-/// trashes files on remote mounts anyway (they are deleted permanently), so
-/// this filter cannot hide recoverable data.
+/// `g_unix_mount_entry_is_system_internal` behavior. Moving to Trash refuses
+/// these mounts with the same filter, so nothing recoverable is ever hidden.
 pub(super) fn mounts_candidate_for_trash_probing(entry: &MountTableEntry) -> bool {
     !is_system_fs_type(entry.fs_type.as_os_str())
         && device_has_block_prefix(entry.device.as_os_str())

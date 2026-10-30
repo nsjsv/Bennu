@@ -236,9 +236,8 @@ fn failed_redo_move_splits_completed_and_remaining_transfers() {
 }
 
 #[test]
-fn trash_tracking_warning_does_not_create_undo_from_historical_paths() {
+fn historical_trash_entries_do_not_create_undo() {
     let tracked_path = PathBuf::from("/workspace/tracked");
-    let untracked_path = PathBuf::from("/workspace/untracked");
     let mut history = FileOperationHistory::new();
     let outcome = FileOperationOutcome::Trash {
         paths: vec![tracked_path.clone()],
@@ -247,39 +246,11 @@ fn trash_tracking_warning_does_not_create_undo_from_historical_paths() {
             PathBuf::from("/trash/info/tracked.trashinfo"),
             tracked_path,
         )],
-        tracking_warnings: vec![file_core::TrashTrackingWarning {
-            path: untracked_path,
-            message: "post-commit scan failed".to_owned(),
-        }],
     };
 
     history.accept_completed(7, &outcome);
 
     assert!(history.take_undo_operation().is_none());
-    assert!(outcome
-        .completion_warning(bennu_localization::UiLanguage::English)
-        .is_some());
-}
-
-#[test]
-fn trash_tracking_warning_bounds_rendered_details() {
-    let tracking_warnings = (0..8)
-        .map(|index| file_core::TrashTrackingWarning {
-            path: PathBuf::from(format!("/workspace/item-{index}")),
-            message: "post-commit scan failed".to_owned(),
-        })
-        .collect();
-    let warning = FileOperationOutcome::Trash {
-        paths: Vec::new(),
-        entries: Vec::new(),
-        tracking_warnings,
-    }
-    .completion_warning(bennu_localization::UiLanguage::English)
-    .expect("tracking warning");
-
-    assert!(warning.contains("/workspace/item-4"));
-    assert!(!warning.contains("/workspace/item-5"));
-    assert!(warning.ends_with("... (+3)"));
 }
 
 fn metadata_loss_on(paths: &[&str]) -> MetadataLossSummary {
@@ -388,7 +359,7 @@ fn metadata_loss_warning_is_built_in_chinese() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn verified_trash_outcome_with_untracked_peer_creates_only_the_executable_undo_entry() {
+async fn trashed_entry_creates_an_executable_undo_entry() {
     let _environment_guard = TRASH_ENVIRONMENT_LOCK
         .get_or_init(|| Mutex::new(()))
         .lock()
@@ -398,25 +369,15 @@ async fn verified_trash_outcome_with_untracked_peer_creates_only_the_executable_
         ScopedEnvironmentVariable::set("XDG_DATA_HOME", &fixture.path().join("data"));
     let source = fixture.path().join("tracked.txt");
     std::fs::write(&source, b"payload").unwrap();
-    let entry = match file_core::trash_path_with_restore_entry(&source)
+    let entry = file_core::trash_path(&source, tokio_util::sync::CancellationToken::new())
         .await
-        .unwrap()
-    {
-        file_core::TrashCommitOutcome::Tracked(entry) => *entry,
-        file_core::TrashCommitOutcome::CommittedWithoutRestoreEntry(warning) => {
-            panic!("Trash entry was not tracked: {}", warning.message)
-        }
-    };
+        .unwrap();
     let mut history = FileOperationHistory::new();
     history.accept_completed(
         7,
         &FileOperationOutcome::Trash {
             paths: vec![entry.original_path.clone()],
             entries: vec![entry.clone()],
-            tracking_warnings: vec![file_core::TrashTrackingWarning {
-                path: fixture.path().join("untracked.txt"),
-                message: "post-commit scan failed".to_owned(),
-            }],
         },
     );
 
@@ -446,7 +407,6 @@ fn normal_operation_clears_redo_stack() {
         &FileOperationOutcome::Trash {
             paths: vec![PathBuf::from("/tmp/New File")],
             entries: Vec::new(),
-            tracking_warnings: Vec::new(),
         },
     );
     assert_eq!(history.redo_stack.len(), 1);

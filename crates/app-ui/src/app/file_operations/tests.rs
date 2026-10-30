@@ -830,7 +830,6 @@ fn successful_trash_focuses_next_entry_after_keyboard_selection() {
         FileOperationCompletion::Succeeded(FileOperationOutcome::Trash {
             paths: vec![deleted],
             entries: Vec::new(),
-            tracking_warnings: Vec::new(),
         }),
     ));
 

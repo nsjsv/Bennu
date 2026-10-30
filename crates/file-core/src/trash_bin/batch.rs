@@ -1,18 +1,14 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-
-use tokio_util::sync::CancellationToken;
 
 use super::catalog::revalidate_trash_location;
 use super::model::{
-    TrashCommitOutcome, TrashEntryIdentity, TrashLocationGuard, TrashObjectIdentity,
-    TrashRestoreEntry,
+    TrashEntryIdentity, TrashLocationGuard, TrashObjectIdentity, TrashRestoreEntry,
 };
 use super::operations::{
-    commit_path_with_shared_tracking, prepare_restore_target, remove_trash_info,
-    remove_trash_payload, verify_entry_identity_with_locations, verify_trash_info_identity,
-    RestoreTarget, TrashTrackingShared,
+    prepare_restore_target, remove_trash_info, remove_trash_payload,
+    verify_entry_identity_with_locations, verify_trash_info_identity, RestoreTarget,
 };
 use crate::ops::rename_noreplace;
 use crate::{FileError, TransferConflictStrategy};
@@ -164,51 +160,4 @@ fn delete_entry_on_batch(
     remove_trash_payload(entry, identity.payload.kind)?;
     verify_trash_info_identity(entry, &identity)?;
     remove_trash_info(entry)
-}
-
-/// 批量「移入回收站」:mountinfo 快照与各卷移入前凭据快照整批共享一次,
-/// 逐条仍由 trash crate 落盘并精确找回撤销条目。调用侧同一循环复用同一实例。
-#[derive(Default)]
-pub struct TrashCommitBatch {
-    shared: Option<Arc<Mutex<TrashTrackingShared>>>,
-}
-
-impl TrashCommitBatch {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub async fn commit(
-        &mut self,
-        path: impl AsRef<Path>,
-        cancellation: CancellationToken,
-    ) -> Result<TrashCommitOutcome, FileError> {
-        let path = path.as_ref().to_path_buf();
-        let shared = match &self.shared {
-            Some(shared) => shared.clone(),
-            None => {
-                let shared = tokio::task::spawn_blocking({
-                    let cancellation = cancellation.clone();
-                    move || TrashTrackingShared::prepare(cancellation)
-                })
-                .await
-                .map_err(|join_error| FileError::Trash {
-                    path: PathBuf::from("/proc/self/mountinfo"),
-                    message: format!("Trash tracking worker failed: {join_error}"),
-                })??;
-                let shared = Arc::new(Mutex::new(shared));
-                self.shared = Some(shared.clone());
-                shared
-            }
-        };
-        tokio::task::spawn_blocking(move || {
-            let mut shared = shared.lock().expect("trash commit batch mutex");
-            commit_path_with_shared_tracking(path, cancellation, &mut shared)
-        })
-        .await
-        .map_err(|join_error| FileError::Trash {
-            path: PathBuf::from("/proc/self/mountinfo"),
-            message: format!("Trash operation worker failed: {join_error}"),
-        })?
-    }
 }

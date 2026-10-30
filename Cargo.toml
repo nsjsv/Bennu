@@ -53,7 +53,6 @@ thiserror = "1.0"
 time = { version = "0.3.47", features = ["formatting", "macros"] }
 tokio = { version = "1.37", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
 tokio-util = "0.7"
-trash = "5.2.6"
 tracing = "0.1"
 tracing-journald = "0.3"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["ansi", "env-filter", "fmt"] }

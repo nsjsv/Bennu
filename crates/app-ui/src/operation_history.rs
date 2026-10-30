@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use bennu_localization::{LostAttributeKind, LostAttributesText, UiLanguage};
+use bennu_localization::{KeptFolderText, LostAttributeKind, LostAttributesText, UiLanguage};
 use file_core::{
     BatchRenameItem, CompletedBatchRename, FileError, FileOperationVerification, InvalidEntryName,
     MetadataKind, MetadataLossSummary, TransferConflictStrategy, TrashRestoreEntry,
@@ -14,6 +14,13 @@ use crate::operation_queue::{QueuedFileOperation, QueuedTransfer};
 pub(crate) struct CompletedTransfer {
     pub(crate) source: PathBuf,
     pub(crate) target: PathBuf,
+}
+
+/// 撤销收纳后保留下来的新建目录与删不掉的原因。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct KeptNewFolder {
+    pub(crate) path: PathBuf,
+    pub(crate) reason: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,6 +93,10 @@ pub(crate) enum FileOperationOutcome {
     GatheredIntoNewFolder {
         directory: PathBuf,
         moved: Vec<CompletedTransfer>,
+    },
+    /// 撤销收纳：条目都已移回；新建目录里有了别的内容时保留并提示，不算失败。
+    NewFolderUngathered {
+        kept_directories: Vec<KeptNewFolder>,
     },
     Convert {
         /// 逐文件失败的「源名: 原因」清单;空表示全部成功。
@@ -204,6 +215,22 @@ impl FileOperationOutcome {
             return metadata_loss_warning(metadata_loss, language);
         }
 
+        if let Self::NewFolderUngathered { kept_directories } = self {
+            if kept_directories.is_empty() {
+                return None;
+            }
+            let kept = kept_directories
+                .iter()
+                .map(|folder| KeptFolderText {
+                    path: folder.path.display().to_string(),
+                    reason: folder.reason.clone(),
+                })
+                .collect::<Vec<_>>();
+            return Some(bennu_localization::kept_new_folders_warning(
+                language, &kept,
+            ));
+        }
+
         if let Self::Convert { failures } = self {
             if failures.is_empty() {
                 return None;
@@ -310,6 +337,7 @@ impl FileOperationOutcome {
             | Self::Restore { .. }
             | Self::Copy { .. }
             | Self::GatheredIntoNewFolder { .. }
+            | Self::NewFolderUngathered { .. }
             | Self::Convert { .. } => Vec::new(),
         }
     }
@@ -603,7 +631,10 @@ impl PendingHistoryOperation {
 impl FileOperationHistoryItem {
     fn from_outcome(outcome: &FileOperationOutcome) -> Option<Self> {
         match outcome {
-            FileOperationOutcome::NoHistory => None,
+            // 撤销收纳只在撤销时发生，它本身不再进历史。
+            FileOperationOutcome::NoHistory | FileOperationOutcome::NewFolderUngathered { .. } => {
+                None
+            }
             // 转换生成新文件,不可通过删除新文件安全撤销(可能有同名列/外部引用),不写历史。
             FileOperationOutcome::Convert { .. } => None,
             FileOperationOutcome::Rename { from, to } => Some(Self::Rename {

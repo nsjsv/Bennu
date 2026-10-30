@@ -1,21 +1,20 @@
 use std::ffi::OsString;
 use std::future::Future;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::time::{Duration, Instant};
 
 use file_core::{
     create_archive_with_controls_and_progress, create_directory, create_empty_file,
     delete_path_permanently, extract_archive_with_controls_and_progress,
-    is_direct_move_segment_candidate, is_transfer_target_available,
-    persist_recoverable_source_manifest_with_controls, prepare_direct_move_intent_segment,
-    rename_entry, run_direct_move_batch_to_durable_renamed, run_recoverable_transfer,
-    ArchiveCreationRequest, ArchiveExtractionRequest, CopyProgress, DirectMoveBatchRecord,
-    DirectMoveIntentBatchRecord, FileError, FileOperationControls, FileOperationVerification,
-    FileTransferOptions, RecoverableTransferError, RecoverableTransferOperation,
-    RecoverableTransferOutcome, TransferConflictStrategy, TransferJournal, TransferJournalError,
-    TransferJournalMutation, TransferJournalRecord, TransferWorkKey, TrashCommitBatch,
-    TrashRestoreEntry, TrashVerificationBatch,
+    is_direct_move_segment_candidate, persist_recoverable_source_manifest_with_controls,
+    prepare_direct_move_intent_segment, rename_entry, run_direct_move_batch_to_durable_renamed,
+    run_recoverable_transfer, ArchiveCreationRequest, ArchiveExtractionRequest, CopyProgress,
+    DirectMoveBatchRecord, DirectMoveIntentBatchRecord, FileError, FileOperationControls,
+    FileOperationVerification, FileTransferOptions, RecoverableTransferError,
+    RecoverableTransferOperation, RecoverableTransferOutcome, TransferConflictStrategy,
+    TransferJournal, TransferJournalError, TransferJournalMutation, TransferJournalRecord,
+    TransferWorkKey, TrashCommitBatch, TrashRestoreEntry, TrashVerificationBatch,
 };
 use file_operation_store::TaskQueueStore;
 use iced::futures::channel::mpsc::Sender as IcedSender;
@@ -32,6 +31,10 @@ use crate::operation_queue::{
     QueuedFileOperation, QueuedTransfer, RunningFileOperation, NEW_DIRECTORY_NAME, NEW_FILE_NAME,
 };
 
+use self::entry_gathering::{
+    run_queued_create_directories, run_queued_gather_selection_into_new_folder,
+    run_queued_ungather_new_folder,
+};
 use self::extract_members::run_queued_extract_archive_members;
 use super::batch_rename_operation::{rename_failure_text, run_queued_batch_rename};
 use super::convert_operation::run_queued_convert;
@@ -464,126 +467,6 @@ async fn run_queued_create_directory(
     Ok(FileOperationOutcome::CreateDirectory { path })
 }
 
-async fn run_queued_create_directories(
-    parent: PathBuf,
-    names: Vec<String>,
-    gather_sources: Vec<PathBuf>,
-    mut controls: FileOperationControls,
-    task_id: u64,
-    output: &mut IcedSender<Message>,
-) -> Result<FileOperationOutcome, String> {
-    controls
-        .wait_until_running()
-        .await
-        .map_err(|error| error.to_string())?;
-    let total = names.len() + gather_sources.len();
-    // names 是相对 parent 的叶子路径,段间 '/' 表达嵌套链;
-    // created 收集本次真正新建的目录(含中间段),撤销时只回收
-    // 互相不包含的顶层新目录,复用的已有目录和空壳不残留。
-    let mut created: Vec<PathBuf> = Vec::new();
-    for (index, name) in names.iter().enumerate() {
-        let segments: Vec<&str> = name
-            .split('/')
-            .map(str::trim)
-            .filter(|segment| !segment.is_empty())
-            .collect();
-        let mut current = parent.clone();
-        for (segment_index, segment) in segments.iter().enumerate() {
-            let is_leaf = segment_index + 1 == segments.len();
-            if is_leaf {
-                // 叶子段走单建同一套候选循环:预览已错开,这里由
-                // AlreadyExists 原子裁决兜底磁盘重名与极端竞争。
-                let directory =
-                    create_new_entry(current.clone(), segment, NewEntryKind::Directory).await?;
-                created.push(directory);
-            } else {
-                let next = current.join(segment);
-                match create_directory(&next).await {
-                    Ok(directory) => created.push(directory),
-                    // 中间段已存在:复用现有目录继续往里建。
-                    Err(error) if create_entry_name_taken(&error) => {}
-                    Err(error) => return Err(error.to_string()),
-                }
-                current = next;
-            }
-        }
-        send_file_operation_progress(
-            output,
-            task_id,
-            FileOperationProgressUpdate::IndeterminateItems {
-                completed: index + 1,
-                total,
-            },
-        )
-        .await;
-    }
-    let top_level = top_level_directories(&created);
-
-    let mut moved = Vec::with_capacity(gather_sources.len());
-    if let Some(directory) = leaves_directory(&parent, names.first()) {
-        for (index, source) in gather_sources.iter().enumerate() {
-            controls
-                .wait_until_running()
-                .await
-                .map_err(|error| error.to_string())?;
-            let name = source
-                .file_name()
-                .map(std::ffi::OsStr::to_os_string)
-                .ok_or_else(|| format!("missing file name for {}", source.display()))?;
-            let target = directory.join(name);
-            // 源与目标同在一个父目录树下,rename 原子完成且必同盘。
-            tokio::fs::rename(source, &target)
-                .await
-                .map_err(|error| error.to_string())?;
-            moved.push(CompletedTransfer {
-                source: source.clone(),
-                target,
-            });
-            send_file_operation_progress(
-                output,
-                task_id,
-                FileOperationProgressUpdate::IndeterminateItems {
-                    completed: names.len() + index + 1,
-                    total,
-                },
-            )
-            .await;
-        }
-    }
-    Ok(FileOperationOutcome::CreateDirectories {
-        parent,
-        leaves: names,
-        top_level,
-        moved,
-    })
-}
-
-/// 撤销回收集:新建目录里去掉是另一个新建目录后代的项,
-/// 让顶层目录整棵进回收站,不留下空壳中间层。
-fn top_level_directories(created: &[PathBuf]) -> Vec<PathBuf> {
-    created
-        .iter()
-        .filter(|path| {
-            !created
-                .iter()
-                .any(|other| *other != **path && path.strip_prefix(other).is_ok())
-        })
-        .cloned()
-        .collect()
-}
-
-/// 第一个叶子路径对应的绝对目录(移入落点/完成后重命名落点)。
-fn leaves_directory(parent: &Path, first_leaf: Option<&String>) -> Option<PathBuf> {
-    first_leaf.map(|leaf| {
-        leaf.split('/')
-            .map(str::trim)
-            .filter(|segment| !segment.is_empty())
-            .fold(parent.to_path_buf(), |current, segment| {
-                current.join(segment)
-            })
-    })
-}
-
 async fn run_queued_create_empty_file(
     parent: PathBuf,
     mut controls: FileOperationControls,
@@ -653,120 +536,6 @@ fn create_entry_name_taken(error: &FileError) -> bool {
 enum NewEntryKind {
     Directory,
     EmptyFile,
-}
-
-async fn run_queued_gather_selection_into_new_folder(
-    directory: PathBuf,
-    sources: Vec<PathBuf>,
-    mut controls: FileOperationControls,
-    task_id: u64,
-    output: &mut IcedSender<Message>,
-) -> Result<FileOperationOutcome, String> {
-    controls
-        .wait_until_running()
-        .await
-        .map_err(|error| error.to_string())?;
-    // 入队侧已起好名;极端竞争下名字被占时按同一命名规则就地重选,
-    // 让操作完成而不是带着误导性的失败退出。
-    let directory = available_gathered_folder_directory(directory).await?;
-    create_directory(&directory)
-        .await
-        .map_err(|error| error.to_string())?;
-
-    let mut moved = Vec::with_capacity(sources.len());
-    for (index, source) in sources.iter().enumerate() {
-        controls
-            .wait_until_running()
-            .await
-            .map_err(|error| error.to_string())?;
-        let name = source
-            .file_name()
-            .map(std::ffi::OsStr::to_os_string)
-            .ok_or_else(|| format!("missing file name for {}", source.display()))?;
-        let target = directory.join(name);
-        // 源与目标同在一个父目录树内,rename 原子完成且必同盘。
-        tokio::fs::rename(source, &target)
-            .await
-            .map_err(|error| error.to_string())?;
-        moved.push(CompletedTransfer {
-            source: source.clone(),
-            target,
-        });
-        send_file_operation_progress(
-            output,
-            task_id,
-            FileOperationProgressUpdate::IndeterminateItems {
-                completed: index + 1,
-                total: sources.len(),
-            },
-        )
-        .await;
-    }
-    Ok(FileOperationOutcome::GatheredIntoNewFolder { directory, moved })
-}
-
-async fn run_queued_ungather_new_folder(
-    directory: PathBuf,
-    restore_targets: Vec<PathBuf>,
-    mut controls: FileOperationControls,
-    task_id: u64,
-    output: &mut IcedSender<Message>,
-) -> Result<FileOperationOutcome, String> {
-    let total = restore_targets.len();
-    for (index, restore_target) in restore_targets.iter().enumerate() {
-        controls
-            .wait_until_running()
-            .await
-            .map_err(|error| error.to_string())?;
-        let name = restore_target
-            .file_name()
-            .map(std::ffi::OsStr::to_os_string)
-            .ok_or_else(|| format!("missing file name for {}", restore_target.display()))?;
-        tokio::fs::rename(directory.join(name), restore_target)
-            .await
-            .map_err(|error| error.to_string())?;
-        send_file_operation_progress(
-            output,
-            task_id,
-            FileOperationProgressUpdate::IndeterminateItems {
-                completed: index + 1,
-                total,
-            },
-        )
-        .await;
-    }
-    // 只接受空目录;若撤销前用户往里放了新内容,操作显式失败而不是吞掉它们。
-    tokio::fs::remove_dir(&directory)
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok(FileOperationOutcome::NoHistory)
-}
-
-async fn available_gathered_folder_directory(directory: PathBuf) -> Result<PathBuf, String> {
-    if is_transfer_target_available(&directory)
-        .await
-        .map_err(|error| error.to_string())?
-    {
-        return Ok(directory);
-    }
-    let parent = directory
-        .parent()
-        .map(Path::to_path_buf)
-        .ok_or_else(|| format!("missing parent for {}", directory.display()))?;
-    for name in crate::model::suffixed_name_candidates(
-        std::ffi::OsStr::new(crate::model::GATHERED_FOLDER_BASE_NAME),
-        "",
-        false,
-    ) {
-        let candidate = parent.join(name);
-        if is_transfer_target_available(&candidate)
-            .await
-            .map_err(|error| error.to_string())?
-        {
-            return Ok(candidate);
-        }
-    }
-    Ok(directory)
 }
 
 async fn run_queued_create_symbolic_links(
@@ -1006,6 +775,7 @@ mod create_new_entry_tests {
     }
 }
 
+mod entry_gathering;
 mod extract_members;
 mod recoverable;
 

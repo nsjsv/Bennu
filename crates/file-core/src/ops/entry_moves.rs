@@ -23,6 +23,13 @@ pub struct UnrestoredEntry {
     pub error: FileError,
 }
 
+/// 本次新建、回滚或撤销时却没能删掉的目录，多半是里面有了别的内容。
+#[derive(Debug)]
+pub struct LeftoverDirectory {
+    pub path: PathBuf,
+    pub error: io::Error,
+}
+
 /// 改名要用到的文件系统操作。正式路径走真实系统调用；测试注入大小写不敏感、
 /// 不支持 no-replace、某一步失败等真实环境难以制造的行为，判定与回退逻辑共用一份。
 pub(crate) trait EntryFilesystem {
@@ -34,6 +41,16 @@ pub(crate) trait EntryFilesystem {
 pub(crate) struct ObjectIdentity {
     pub(crate) device: u64,
     pub(crate) inode: u64,
+}
+
+/// 建目录、删空目录：收纳与高级新建在改名之外还要用到的操作，同样可注入。
+pub(crate) trait EntryTreeFilesystem: EntryFilesystem {
+    /// 已存在时返回 `AlreadyExists`，这就是"名字被占用"的判定。
+    fn create_dir(&mut self, path: &Path) -> io::Result<()>;
+    /// 只删空目录；目录里有内容时失败，不会连带删掉别人的东西。
+    fn remove_dir(&mut self, path: &Path) -> io::Result<()>;
+    /// 跟随符号链接，与 `mkdir -p` 复用已有中间目录的判定一致。
+    fn is_directory(&mut self, path: &Path) -> io::Result<bool>;
 }
 
 pub(crate) struct SystemEntryFilesystem;
@@ -49,6 +66,20 @@ impl EntryFilesystem for SystemEntryFilesystem {
             device: metadata.dev(),
             inode: metadata.ino(),
         })
+    }
+}
+
+impl EntryTreeFilesystem for SystemEntryFilesystem {
+    fn create_dir(&mut self, path: &Path) -> io::Result<()> {
+        std::fs::create_dir(path)
+    }
+
+    fn remove_dir(&mut self, path: &Path) -> io::Result<()> {
+        std::fs::remove_dir(path)
+    }
+
+    fn is_directory(&mut self, path: &Path) -> io::Result<bool> {
+        Ok(std::fs::metadata(path)?.is_dir())
     }
 }
 
@@ -147,6 +178,7 @@ fn rename_onto_same_object(
                 current: temporary.clone(),
                 error: no_replace_rename_error(restore_error, &temporary, path),
             }],
+            leftover_directories: Vec::new(),
         }),
     }
 }

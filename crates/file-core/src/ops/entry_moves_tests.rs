@@ -60,7 +60,9 @@ fn a_failed_restore_reports_where_the_entry_was_left() {
     let renamed = rename_entry_with(&mut directory, &fake_path("a.txt"), OsStr::new("b.txt"));
 
     let (cause, unrestored) = match renamed {
-        Err(FileError::EntryMovesIncomplete { cause, unrestored }) => (cause, unrestored),
+        Err(FileError::EntryMovesIncomplete {
+            cause, unrestored, ..
+        }) => (cause, unrestored),
         other => panic!("expected an incomplete restore, got {other:?}"),
     };
     assert!(matches!(*cause, FileError::EntryNameTaken { .. }));

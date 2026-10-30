@@ -15,7 +15,8 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     resolve_directory_metadata, sort_discovered_entry_indices, sort_entries, DirectoryEntry,
     DirectoryMetadataRequest, DirectoryMetadataRequirement, DirectoryMetadataResolver,
-    DiscoveredDirectoryEntry, FileKind, SortDirection, SortField, UnrestoredEntry,
+    DiscoveredDirectoryEntry, FileKind, LeftoverDirectory, SortDirection, SortField,
+    UnrestoredEntry,
 };
 
 const DIRECTORY_SCAN_BATCH_SIZE: usize = 128;
@@ -438,15 +439,14 @@ pub enum FileError {
         #[source]
         source: std::io::Error,
     },
-    /// 改名或移动失败后回滚没能让所有条目回到原处。`cause` 是最初的失败,
-    /// `unrestored` 逐条记录没恢复的条目此刻在哪里。
-    #[error(
-        "{cause}; could not restore original names: {}",
-        unrestored_entry_details(.unrestored)
-    )]
+    /// 改名或移动失败后回滚没能回到操作前。`cause` 是最初的失败,
+    /// `unrestored` 逐条记录没恢复的条目此刻在哪里,`leftover_directories`
+    /// 是本次新建、回滚时却没能删掉的目录。
+    #[error("{cause}; {}", rollback_details(.unrestored, .leftover_directories))]
     EntryMovesIncomplete {
         cause: Box<FileError>,
         unrestored: Vec<UnrestoredEntry>,
+        leftover_directories: Vec<LeftoverDirectory>,
     },
     #[error("could not copy {from:?} to {to:?}: {source}")]
     Copy {
@@ -515,10 +515,26 @@ pub enum FileError {
     Unsupported(&'static str),
 }
 
-fn unrestored_entry_details(unrestored: &[UnrestoredEntry]) -> String {
-    unrestored
-        .iter()
-        .map(|item| format!("{:?} -> {:?} ({})", item.original, item.current, item.error))
-        .collect::<Vec<_>>()
-        .join("; ")
+fn rollback_details(
+    unrestored: &[UnrestoredEntry],
+    leftover_directories: &[LeftoverDirectory],
+) -> String {
+    let mut parts = Vec::new();
+    if !unrestored.is_empty() {
+        let items = unrestored
+            .iter()
+            .map(|item| format!("{:?} -> {:?} ({})", item.original, item.current, item.error))
+            .collect::<Vec<_>>()
+            .join("; ");
+        parts.push(format!("could not restore original names: {items}"));
+    }
+    if !leftover_directories.is_empty() {
+        let directories = leftover_directories
+            .iter()
+            .map(|directory| format!("{:?} ({})", directory.path, directory.error))
+            .collect::<Vec<_>>()
+            .join("; ");
+        parts.push(format!("could not remove new folders: {directories}"));
+    }
+    parts.join("; ")
 }

@@ -113,6 +113,7 @@ fn batch_rename_failure(cause: FileError, unrestored: Vec<UnrestoredEntry>) -> F
         FileError::EntryMovesIncomplete {
             cause: Box::new(cause),
             unrestored,
+            leftover_directories: Vec::new(),
         }
     }
 }

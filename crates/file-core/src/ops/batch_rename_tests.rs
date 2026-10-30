@@ -48,7 +48,9 @@ fn is_y(path: &Path) -> bool {
 
 fn incomplete(error: &FileError) -> (&FileError, &[UnrestoredEntry]) {
     match error {
-        FileError::EntryMovesIncomplete { cause, unrestored } => (cause, unrestored),
+        FileError::EntryMovesIncomplete {
+            cause, unrestored, ..
+        } => (cause, unrestored),
         other => panic!("expected an incomplete rollback, got {other:?}"),
     }
 }

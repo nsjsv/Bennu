@@ -39,7 +39,11 @@ pub(super) fn rename_failure_text(error: &FileError, language: UiLanguage) -> St
 }
 
 fn incomplete_rename_texts(error: &FileError) -> Option<(String, Vec<UnrestoredRenameText>)> {
-    let FileError::EntryMovesIncomplete { cause, unrestored } = error else {
+    // 改名不新建目录，回滚报告里不会有残留目录。
+    let FileError::EntryMovesIncomplete {
+        cause, unrestored, ..
+    } = error
+    else {
         return None;
     };
     let unrestored = unrestored
@@ -74,6 +78,7 @@ mod tests {
                     source: io::Error::new(io::ErrorKind::PermissionDenied, "denied"),
                 },
             }],
+            leftover_directories: Vec::new(),
         }
     }
 

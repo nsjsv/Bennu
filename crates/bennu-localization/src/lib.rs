@@ -13,6 +13,7 @@ mod exact_translation;
 mod file_operation_notifications;
 mod index_status;
 mod metadata_loss;
+mod new_folders;
 mod properties;
 mod search_paths;
 mod search_service_recovery;
@@ -23,6 +24,7 @@ mod trash;
 
 pub use batch_rename::UnrestoredRenameText;
 pub use metadata_loss::{LostAttributeKind, LostAttributesText};
+pub use new_folders::KeptFolderText;
 
 /// 界面语言。自 app-ui config.rs 下沉：翻译表按它分派，语言设置
 /// （UiLanguageSetting 与 TOML 存取）仍属 app-ui 存储域，经 re-export
@@ -180,6 +182,11 @@ pub fn rename_incomplete(
     unrestored: &[UnrestoredRenameText],
 ) -> String {
     batch_rename::single_incomplete_message(language, cause, unrestored)
+}
+
+/// 撤销收纳把条目都移回后、新建目录没能删掉时的完成提示，构造时按给定语言产出成品。
+pub fn kept_new_folders_warning(language: UiLanguage, kept: &[KeptFolderText]) -> String {
+    new_folders::kept_folders_warning(language, kept)
 }
 
 /// 复制/移动内容已成功、但部分元数据没能保留时的完成提示，构造时按给定语言产出成品。

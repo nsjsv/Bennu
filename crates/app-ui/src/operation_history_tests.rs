@@ -461,3 +461,43 @@ fn normal_operation_clears_redo_stack() {
     assert!(history.redo_stack.is_empty());
     assert_eq!(history.undo_stack.len(), 1);
 }
+
+#[test]
+fn ungathering_that_keeps_a_new_folder_warns_with_its_path_and_reason() {
+    let outcome = FileOperationOutcome::NewFolderUngathered {
+        kept_directories: vec![KeptNewFolder {
+            path: PathBuf::from("/docs/新建文件夹"),
+            reason: "Directory not empty (os error 39)".to_owned(),
+        }],
+    };
+
+    assert_eq!(
+        outcome
+            .completion_warning(bennu_localization::UiLanguage::English)
+            .as_deref(),
+        Some(
+            "Items were moved back, but these new folders could not be removed: \
+             /docs/新建文件夹 (Directory not empty (os error 39))"
+        )
+    );
+    assert_eq!(
+        outcome
+            .completion_warning(bennu_localization::UiLanguage::Chinese)
+            .as_deref(),
+        Some(
+            "条目已移回原处，但以下新建文件夹没能删除：\
+             /docs/新建文件夹（Directory not empty (os error 39)）"
+        )
+    );
+}
+
+#[test]
+fn ungathering_that_removes_the_new_folder_has_no_warning() {
+    let outcome = FileOperationOutcome::NewFolderUngathered {
+        kept_directories: Vec::new(),
+    };
+
+    assert!(outcome
+        .completion_warning(bennu_localization::UiLanguage::English)
+        .is_none());
+}

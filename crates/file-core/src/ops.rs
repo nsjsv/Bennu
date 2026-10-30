@@ -10,6 +10,7 @@ mod batch_rename;
 mod convert;
 mod copy;
 mod copy_verification;
+mod entry_gathering;
 mod entry_moves;
 #[cfg(test)]
 mod fake_entry_filesystem;
@@ -49,7 +50,11 @@ pub use copy::{
     FileOperationRunState, FileOperationVerification, FileTransferOptions, ProgressSender,
     TransferConflictStrategy,
 };
-pub use entry_moves::{rename_entry, UnrestoredEntry};
+pub use entry_gathering::{
+    create_directory_tree, gather_entries_into_new_directory, restore_gathered_entries,
+    CreatedDirectoryTree, EntryMove, EntryStepPacer, GatheredEntries, RestoredGatheredEntries,
+};
+pub use entry_moves::{rename_entry, LeftoverDirectory, UnrestoredEntry};
 pub use metadata_loss::{
     MetadataKind, MetadataLossSample, MetadataLossSummary, METADATA_LOSS_SAMPLE_LIMIT,
 };

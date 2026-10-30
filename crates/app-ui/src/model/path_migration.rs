@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use file_core::{DirectoryDiscovery, DirectoryEntry};
 
 use super::{DirectoryOrderPhase, ExpandedDirectory, ExpandedDirectoryStatus};
-use crate::operation_history::{path_after_completed_migrations, CompletedPathMigration};
+use file_operations::{path_after_completed_migrations, CompletedPathMigration};
 
 pub(super) fn migrate_directory_entries(
     entries: &mut [DirectoryEntry],

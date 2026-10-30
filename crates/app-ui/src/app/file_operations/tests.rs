@@ -9,10 +9,10 @@ use crate::model::{
     BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, ExpandedDirectory,
     ExpandedDirectoryStatus, ListDirectorySummary, SplitAxis,
 };
-use crate::operation_history::FileOperationOutcome;
 use crate::operation_queue::test_persistence::{attach_store, enqueue_persisted, queued_task_id};
 use crate::shortcuts::FileSelectionDirection;
 use crate::thumbnail_cache::ColumnViewport;
+use file_operations::FileOperationOutcome;
 use iced::futures::StreamExt;
 
 /// 按正式版跑完界面入队产生的写库:Task 在后台执行,回执交给 update 处理
@@ -116,7 +116,7 @@ fn direct_move_renamed_batch_message(moves: Vec<(PathBuf, PathBuf)>) -> Message 
         task_id: 0,
         moves: moves
             .into_iter()
-            .map(|(source, target)| crate::operation_history::CompletedTransfer { source, target })
+            .map(|(source, target)| file_operations::CompletedTransfer { source, target })
             .collect(),
     }
 }
@@ -204,7 +204,7 @@ fn progress_and_completion_keep_queue_panel_closed() {
 
     drop(browser.update(Message::FileOperationProgressed(
         task_id,
-        crate::operation_progress::FileOperationProgressUpdate::IndeterminateItems {
+        file_operations::FileOperationProgressUpdate::IndeterminateItems {
             completed: 1,
             total: 2,
         },
@@ -348,12 +348,11 @@ async fn moved_renames_migrate_paths_before_terminal_completion() {
     drop(browser.accept_file_operation_finished(
         task_id,
         FileOperationCompletion::Succeeded(FileOperationOutcome::Move {
-            transfers: vec![crate::operation_history::CompletedTransfer {
+            transfers: vec![file_operations::CompletedTransfer {
                 source: source.clone(),
                 target: destination.clone(),
             }],
-            history_eligibility:
-                crate::operation_history::FileOperationHistoryEligibility::Replayable,
+            history_eligibility: file_operations::FileOperationHistoryEligibility::Replayable,
             metadata_loss: Default::default(),
         }),
     ));
@@ -687,12 +686,11 @@ fn rejected_recoverable_history_replay_returns_item_to_original_stack() {
     browser.operation_history.accept_completed(
         1,
         &FileOperationOutcome::Move {
-            transfers: vec![crate::operation_history::CompletedTransfer {
+            transfers: vec![file_operations::CompletedTransfer {
                 source: source.clone(),
                 target: target.clone(),
             }],
-            history_eligibility:
-                crate::operation_history::FileOperationHistoryEligibility::Replayable,
+            history_eligibility: file_operations::FileOperationHistoryEligibility::Replayable,
             metadata_loss: Default::default(),
         },
     );
@@ -752,12 +750,11 @@ fn failed_move_migrates_paths_for_completed_transfers_only() {
         FileOperationCompletion::Failed {
             error: "second transfer failed".to_owned(),
             partial_outcome: FileOperationOutcome::Move {
-                transfers: vec![crate::operation_history::CompletedTransfer {
+                transfers: vec![file_operations::CompletedTransfer {
                     source,
                     target: destination.clone(),
                 }],
-                history_eligibility:
-                    crate::operation_history::FileOperationHistoryEligibility::Replayable,
+                history_eligibility: file_operations::FileOperationHistoryEligibility::Replayable,
                 metadata_loss: Default::default(),
             },
         },
@@ -971,8 +968,7 @@ fn copy_with_metadata_loss_finishes_as_success_with_warning() {
     );
     let completion = FileOperationCompletion::Succeeded(FileOperationOutcome::Copy {
         transfers: Vec::new(),
-        history_eligibility:
-            crate::operation_history::FileOperationHistoryEligibility::NotReplayable,
+        history_eligibility: file_operations::FileOperationHistoryEligibility::NotReplayable,
         metadata_loss,
     });
 

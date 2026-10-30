@@ -4,6 +4,10 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use file_core::{validate_entry_name, ResolvedEntryChange};
+use file_operations::{
+    path_after_completed_migrations, CompletedPathMigration, FileOperationCompletion,
+    FileOperationOutcome, RenameRejection,
+};
 
 use super::global_error::GlobalErrorSource;
 use super::FileBrowser;
@@ -12,10 +16,7 @@ use crate::model::{
     AdvancedNewFolderAfter, BrowserViewMode, DestructiveActionConfirmation,
     IconGridExpansionMigration, Message, NavigationMode,
 };
-use crate::operation_history::{
-    path_after_completed_migrations, CompletedPathMigration, FileOperationCompletion,
-    FileOperationOutcome, PendingHistoryOperation, RenameRejection,
-};
+use crate::operation_history::PendingHistoryOperation;
 use crate::operation_queue::{
     file_operation_persistence_command, FileOperationEnqueueOutcome, FileOperationFinish,
     FileOperationPersistenceOutcome, QueuedFileOperation,
@@ -177,7 +178,7 @@ impl FileBrowser {
     // 源条目不可见（目录未显示）时跳过立即应用，交给 watcher 与对账兜底。
     pub(super) fn accept_file_operation_moves_renamed(
         &mut self,
-        moves: Vec<crate::operation_history::CompletedTransfer>,
+        moves: Vec<file_operations::CompletedTransfer>,
     ) -> Task<Message> {
         if moves.is_empty() {
             return Task::none();

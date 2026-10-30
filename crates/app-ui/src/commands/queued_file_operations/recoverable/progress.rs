@@ -9,7 +9,7 @@ use iced::futures::channel::mpsc::Sender as IcedSender;
 use iced::futures::SinkExt;
 
 use crate::model::Message;
-use crate::operation_progress::{
+use file_operations::{
     FileOperationProgressUpdate, TransferEntrySnapshot, TransferEntrySnapshotState,
 };
 

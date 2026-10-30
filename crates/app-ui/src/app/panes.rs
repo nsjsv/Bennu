@@ -12,8 +12,8 @@ use crate::model::{
     DirectoryLoadingPlaceholder, ExpandedDirectory, FileDragState, IconGridViewport, SplitAxis,
     SplitRegion,
 };
-use crate::operation_history::RenameRejection;
 use crate::thumbnail_cache::ColumnViewport;
+use file_operations::RenameRejection;
 
 const SPLIT_TARGET_MIN_CONTENT_WIDTH: f32 = 1.0;
 

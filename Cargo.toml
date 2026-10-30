@@ -9,6 +9,7 @@ members = [
     "crates/desktop-linux",
     "crates/display-renderer",
     "crates/file-core",
+    "crates/file-operations",
     "crates/file-search",
     "crates/file-search-daemon",
     "crates/bennu-state",

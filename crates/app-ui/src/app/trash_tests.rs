@@ -265,8 +265,8 @@ fn trash_watch_event_during_batch_operation_defers_rescan_until_it_finishes() {
     drop(browser.update(crate::model::Message::FileOperationFinished(
         task_id,
         0,
-        crate::operation_history::FileOperationCompletion::Succeeded(
-            crate::operation_history::FileOperationOutcome::NoHistory,
+        file_operations::FileOperationCompletion::Succeeded(
+            file_operations::FileOperationOutcome::NoHistory,
         ),
     )));
     assert!(browser.trash_refresh.begin_if_idle().is_none());

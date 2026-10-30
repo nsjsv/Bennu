@@ -337,7 +337,7 @@ pub(crate) struct FileBrowser {
     /// 执行端拒绝本次重命名的原因。只在 `begin_rename` 开始会话、输入变化、
     /// 被拒重开这三处改写，读取经 `rename_hint` 且要求会话仍在进行，
     /// 所以不会把上一次会话的原因带到新会话。
-    rename_rejection: Option<crate::operation_history::RenameRejection>,
+    rename_rejection: Option<::file_operations::RenameRejection>,
     global_error_notification: Option<global_error::GlobalErrorNotification>,
     next_global_error_notification_generation: u64,
     pub(crate) application_logs: ApplicationLogViewState,

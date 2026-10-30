@@ -8,12 +8,12 @@ use file_core::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::operation_history::{
+use crate::thumbnail_cache::ColumnViewport;
+use file_operations::{
     completed_migrations_have_source_in_directory_tree, completed_migrations_leave_directory_tree,
     completed_migrations_touch_directory_tree, path_after_completed_migrations,
     CompletedPathMigration,
 };
-use crate::thumbnail_cache::ColumnViewport;
 
 use super::path_migration::{
     cancel_and_clear_expanded_directories, detach_directory_discovery, migrate_directory_entries,

@@ -1,5 +1,5 @@
 use super::*;
-use crate::operation_progress::{FileOperationProgress, FileOperationProgressUpdate};
+use file_operations::{FileOperationProgress, FileOperationProgressUpdate};
 
 fn queued_directory_creation() -> QueuedFileOperation {
     QueuedFileOperation::CreateDirectory {

@@ -1,0 +1,13 @@
+[package]
+name = "file-operations"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# 文件操作编排：任务队列、可恢复传输驱动、日志接入、结算与执行。
+# 只依赖文件系统层与状态存储，不依赖任何界面包；界面经 `FileOperationEvent` 与队列的
+# 同步接口发起操作、展示进度与结果。
+[dependencies]
+bennu-localization = { path = "../bennu-localization" }
+bennu-state = { path = "../bennu-state" }
+file-core = { path = "../file-core" }

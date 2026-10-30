@@ -162,6 +162,7 @@ dependencies = [
  "dark-light",
  "desktop-linux",
  "file-core",
+ "file-operations",
  "file-search",
  "iced",
  "iced_runtime",
@@ -1866,6 +1867,15 @@ dependencies = [
  "tracing-subscriber",
  "xattr",
  "zip",
+]
+
+[[package]]
+name = "file-operations"
+version = "0.3.6"
+dependencies = [
+ "bennu-localization",
+ "bennu-state",
+ "file-core",
 ]
 
 [[package]]

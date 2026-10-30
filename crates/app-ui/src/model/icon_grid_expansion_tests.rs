@@ -4,7 +4,7 @@ use file_core::{DirectoryEntry, EntryMetadata, FileKind};
 use tokio_util::sync::CancellationToken;
 
 use super::*;
-use crate::operation_history::CompletedPathMigration;
+use file_operations::CompletedPathMigration;
 
 fn entry(path: &str, kind: FileKind) -> DirectoryEntry {
     DirectoryEntry::new(

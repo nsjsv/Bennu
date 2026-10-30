@@ -14,7 +14,6 @@ use crate::model::{
     PreviewState, PreviewWindowProfile, SettingsCategory, SettingsSubpage, WindowChromeLayout,
     WindowFrameState, WINDOW_TOP_BAR_HEIGHT,
 };
-use crate::operation_history::FileOperationCompletion;
 use crate::operation_queue::test_persistence::enqueue_persisted;
 use crate::operation_queue::{QueuedFileOperation, QueuedTransfer};
 use bennu_preview::animated_image_preview::{
@@ -22,6 +21,7 @@ use bennu_preview::animated_image_preview::{
 };
 use bennu_preview::engine::preview_window_settings;
 use bennu_preview::preview::PreviewWindowChromeState;
+use file_operations::FileOperationCompletion;
 
 const FLOAT_TOLERANCE: f32 = 0.01;
 
@@ -1149,7 +1149,7 @@ async fn recoverable_runner_ack_precedes_one_shutdown_transaction_and_exit() {
             0,
             FileOperationCompletion::RecoveryInterrupted(
                 "application stopping".to_owned(),
-                crate::operation_history::FileOperationOutcome::NoHistory,
+                file_operations::FileOperationOutcome::NoHistory,
             ),
         ))
     })
@@ -1212,7 +1212,7 @@ async fn terminal_recoverable_completion_is_not_rewritten_as_recovery_pending() 
             0,
             FileOperationCompletion::RecoveryBlocked {
                 error: "manual recovery required".to_owned(),
-                partial_outcome: crate::operation_history::FileOperationOutcome::NoHistory,
+                partial_outcome: file_operations::FileOperationOutcome::NoHistory,
             },
         ))
     })

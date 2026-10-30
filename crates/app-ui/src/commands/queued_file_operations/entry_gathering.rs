@@ -11,7 +11,7 @@ use iced::futures::channel::mpsc::Sender as IcedSender;
 
 use super::step_pacer::QueuedStepPacer;
 use crate::model::Message;
-use crate::operation_history::{CompletedTransfer, FileOperationOutcome, KeptNewFolder};
+use file_operations::{CompletedTransfer, FileOperationOutcome, KeptNewFolder};
 
 pub(super) async fn run_queued_create_directories(
     parent: PathBuf,

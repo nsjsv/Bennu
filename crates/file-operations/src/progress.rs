@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
 use bennu_state::StoredProgress;
-
 use file_core::byte_progress::active_byte_fraction;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,14 +16,14 @@ enum FileOperationWorkProgress {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct FileOperationProgress {
+pub struct FileOperationProgress {
     work: FileOperationWorkProgress,
     completed_items: usize,
     total_items: Option<usize>,
 }
 
 impl FileOperationProgress {
-    pub(crate) fn pending() -> Self {
+    pub fn pending() -> Self {
         Self {
             work: FileOperationWorkProgress::Indeterminate,
             completed_items: 0,
@@ -32,7 +31,7 @@ impl FileOperationProgress {
         }
     }
 
-    pub(crate) fn fraction(self) -> Option<f32> {
+    pub fn fraction(self) -> Option<f32> {
         match self.work {
             FileOperationWorkProgress::Indeterminate => None,
             FileOperationWorkProgress::Bytes {
@@ -43,7 +42,7 @@ impl FileOperationProgress {
         }
     }
 
-    pub(crate) fn bytes(self) -> Option<(u64, u64)> {
+    pub fn bytes(self) -> Option<(u64, u64)> {
         match self.work {
             FileOperationWorkProgress::Bytes {
                 completed_bytes,
@@ -54,12 +53,12 @@ impl FileOperationProgress {
         }
     }
 
-    pub(crate) fn items(self) -> Option<(usize, usize)> {
+    pub fn items(self) -> Option<(usize, usize)> {
         self.total_items
             .map(|total_items| (self.completed_items, total_items))
     }
 
-    pub(crate) fn mark_complete(&mut self) {
+    pub fn mark_complete(&mut self) {
         let bytes = match self.work {
             FileOperationWorkProgress::Bytes { total_bytes, .. } => {
                 Some((total_bytes, total_bytes))
@@ -73,14 +72,14 @@ impl FileOperationProgress {
         }
     }
 
-    pub(crate) fn to_stored(self) -> StoredProgress {
+    pub fn to_stored(self) -> StoredProgress {
         match self.fraction() {
             Some(fraction) => StoredProgress::with_fraction(fraction as f64),
             None => StoredProgress::pending(),
         }
     }
 
-    pub(crate) fn update(&mut self, update: FileOperationProgressUpdate) {
+    pub fn update(&mut self, update: FileOperationProgressUpdate) {
         match update {
             FileOperationProgressUpdate::Bytes {
                 completed_bytes,
@@ -134,7 +133,7 @@ impl FileOperationProgress {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum FileOperationProgressUpdate {
+pub enum FileOperationProgressUpdate {
     Bytes {
         completed_bytes: u64,
         total_bytes: u64,
@@ -151,18 +150,18 @@ pub(crate) enum FileOperationProgressUpdate {
 /// 单个传入条目的传输快照:占位行的单一事实源,由任务 `transfer_progress`
 /// 全量替换持有,视图渲染时从队列派生,不另建占位状态。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct TransferEntrySnapshot {
+pub struct TransferEntrySnapshot {
     /// 最终落地路径(含重名序号,入队后不变),`parent()` 用于匹配目标目录。
-    pub(crate) target: PathBuf,
-    pub(crate) is_directory: bool,
+    pub target: PathBuf,
+    pub is_directory: bool,
     /// `None` 表示未开始或字节数未知(排队中/清单缺失),占位画空环。
-    pub(crate) completed_bytes: Option<u64>,
-    pub(crate) total_bytes: Option<u64>,
-    pub(crate) state: TransferEntrySnapshotState,
+    pub completed_bytes: Option<u64>,
+    pub total_bytes: Option<u64>,
+    pub state: TransferEntrySnapshotState,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TransferEntrySnapshotState {
+pub enum TransferEntrySnapshotState {
     Queued,
     Active,
     Completed,

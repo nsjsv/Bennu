@@ -22,13 +22,13 @@ use iced::futures::channel::mpsc::Sender as IcedSender;
 use iced::futures::SinkExt;
 
 use crate::model::Message;
-use crate::operation_history::{
-    CompletedTransfer, FileOperationCompletion, FileOperationHistoryEligibility,
-    FileOperationOutcome, RenameRejection,
-};
-use crate::operation_progress::FileOperationProgressUpdate;
 use crate::operation_queue::{
     new_directory_name, new_file_name, QueuedFileOperation, QueuedTransfer, RunningFileOperation,
+};
+use file_operations::FileOperationProgressUpdate;
+use file_operations::{
+    CompletedTransfer, FileOperationCompletion, FileOperationHistoryEligibility,
+    FileOperationOutcome, RenameRejection,
 };
 
 use self::entry_gathering::{

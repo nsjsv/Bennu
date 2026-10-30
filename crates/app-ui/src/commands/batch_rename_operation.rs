@@ -1,7 +1,7 @@
 use bennu_localization::UiLanguage;
 use file_core::{batch_rename_paths, BatchRenameItem, FileError, FileOperationControls};
 
-use crate::operation_history::FileOperationOutcome;
+use file_operations::FileOperationOutcome;
 
 pub(super) async fn run_queued_batch_rename(
     items: Vec<BatchRenameItem>,

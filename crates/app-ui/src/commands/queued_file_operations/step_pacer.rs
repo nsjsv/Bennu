@@ -5,7 +5,7 @@ use iced::futures::channel::mpsc::Sender as IcedSender;
 
 use super::send_file_operation_progress;
 use crate::model::Message;
-use crate::operation_progress::FileOperationProgressUpdate;
+use file_operations::FileOperationProgressUpdate;
 
 /// file-core 多条目操作的每一步前等任务暂停结束、遇取消报错；每一步后把条目进度发给任务行。
 pub(super) struct QueuedStepPacer<'a> {

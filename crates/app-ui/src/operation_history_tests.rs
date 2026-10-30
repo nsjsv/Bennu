@@ -1,6 +1,8 @@
 use std::ffi::OsString;
 use std::sync::OnceLock;
 
+use file_core::{MetadataKind, MetadataLossSummary};
+use file_operations::{path_after_completed_migrations, KeptNewFolder};
 use tokio::sync::Mutex;
 
 use super::*;

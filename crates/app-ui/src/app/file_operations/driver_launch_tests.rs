@@ -6,9 +6,9 @@ use iced::futures::StreamExt;
 
 use super::*;
 use crate::config;
-use crate::operation_history::FileOperationOutcome;
 use crate::operation_queue::test_persistence::attach_store;
 use crate::operation_queue::FileOperationStatus;
+use file_operations::FileOperationOutcome;
 
 fn create_directory() -> QueuedFileOperation {
     QueuedFileOperation::CreateDirectory {

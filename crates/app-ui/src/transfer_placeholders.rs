@@ -13,8 +13,8 @@ use std::time::SystemTime;
 use file_core::byte_progress::active_byte_fraction;
 use file_core::{DirectoryEntry, SortDirection, SortField};
 
-use crate::operation_progress::TransferEntrySnapshotState;
 use crate::operation_queue::FileOperationQueue;
+use file_operations::TransferEntrySnapshotState;
 
 /// 目标目录正在传入的顶层条目占位。
 #[derive(Debug, Clone, PartialEq)]
@@ -324,14 +324,14 @@ mod tests {
 
     #[test]
     fn running_snapshot_progress_maps_to_ring_fraction_and_completion() {
-        use crate::operation_progress::{TransferEntrySnapshot, TransferEntrySnapshotState};
+        use file_operations::{TransferEntrySnapshot, TransferEntrySnapshotState};
 
         let directory = Path::new("/target");
         let (mut queue, _storage) = placeholder_test_queue();
         let task_id = enqueue_transfer(&mut queue, vec![transfer("/target/incoming.txt")]);
         queue.update_progress(
             task_id,
-            crate::operation_progress::FileOperationProgressUpdate::Bytes {
+            file_operations::FileOperationProgressUpdate::Bytes {
                 completed_bytes: 0,
                 total_bytes: 0,
                 completed_items: 0,
@@ -356,7 +356,7 @@ mod tests {
         // 完成态精确 1.0;排队态保持 None(空环)。
         queue.update_progress(
             task_id,
-            crate::operation_progress::FileOperationProgressUpdate::Bytes {
+            file_operations::FileOperationProgressUpdate::Bytes {
                 completed_bytes: 1_000,
                 total_bytes: 1_000,
                 completed_items: 1,

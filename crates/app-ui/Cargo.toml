@@ -16,6 +16,7 @@ chrono.workspace = true
 dark-light = "2.0.0"
 desktop-linux = { path = "../desktop-linux" }
 file-core = { path = "../file-core" }
+file-operations = { path = "../file-operations" }
 file-search = { path = "../file-search" }
 bennu-state = { path = "../bennu-state" }
 iced.workspace = true

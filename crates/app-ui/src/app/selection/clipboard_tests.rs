@@ -12,14 +12,14 @@ use crate::model::{
     BrowserViewMode, DestructiveActionConfirmation, FileDragStationaryAction, FileDropTarget,
     FileEntryContentModifier, PendingOperation,
 };
-use crate::operation_history::{
-    CompletedTransfer, FileOperationCompletion, FileOperationHistoryEligibility,
-    FileOperationOutcome,
-};
 use crate::operation_queue::test_persistence::{attach_store, enqueue_persisted};
 use crate::operation_queue::{QueuedFileOperation, QueuedTransfer};
 use desktop_linux::{NetworkConnection, NetworkConnectionId, NetworkMountState, NetworkProtocol};
 use file_core::{DirectoryEntry, EntryMetadata, FileKind};
+use file_operations::{
+    CompletedTransfer, FileOperationCompletion, FileOperationHistoryEligibility,
+    FileOperationOutcome,
+};
 
 fn test_entry(path: &Path) -> DirectoryEntry {
     test_entry_with_kind(path, FileKind::File)

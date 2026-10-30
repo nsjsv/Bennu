@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use file_core::{DirectoryEntry, FileKind};
 
-use crate::operation_history::{
+use file_operations::{
     completed_migrations_cross_directory_tree_boundary, path_after_completed_migrations,
     CompletedPathMigration,
 };

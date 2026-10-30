@@ -16,7 +16,7 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use crate::model::sanitized_application_log_detail;
-use crate::operation_progress::{
+use file_operations::{
     FileOperationProgress, FileOperationProgressUpdate, TransferEntrySnapshot,
     TransferEntrySnapshotState,
 };

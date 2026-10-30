@@ -5,8 +5,8 @@ use iced::futures::channel::mpsc::Sender as IcedSender;
 use iced::futures::SinkExt;
 
 use crate::model::Message;
-use crate::operation_history::FileOperationOutcome;
-use crate::operation_progress::FileOperationProgressUpdate;
+use file_operations::FileOperationOutcome;
+use file_operations::FileOperationProgressUpdate;
 
 pub(super) async fn run_queued_convert(
     requests: Vec<ConversionRequest>,

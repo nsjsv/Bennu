@@ -9,8 +9,8 @@ use crate::model::{
     BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, ExpandedDirectory,
     ExpandedDirectoryStatus, SplitAxis,
 };
-use crate::operation_history::FileOperationOutcome;
 use crate::operation_queue::test_persistence::{attach_store, enqueue_persisted};
+use file_operations::FileOperationOutcome;
 
 fn directory_entry(path: &str) -> DirectoryEntry {
     DirectoryEntry::new(
@@ -102,12 +102,11 @@ fn cross_directory_move_invalidates_source_and_preserves_target_tab_tree() {
     drop(browser.accept_file_operation_finished(
         task_id,
         FileOperationCompletion::Succeeded(FileOperationOutcome::Move {
-            transfers: vec![crate::operation_history::CompletedTransfer {
+            transfers: vec![file_operations::CompletedTransfer {
                 source: source_path,
                 target: target_path,
             }],
-            history_eligibility:
-                crate::operation_history::FileOperationHistoryEligibility::Replayable,
+            history_eligibility: file_operations::FileOperationHistoryEligibility::Replayable,
             metadata_loss: Default::default(),
         }),
     ));

@@ -7,8 +7,8 @@ use crate::commands::publish_desktop_notification_command;
 use crate::config::UiLanguage;
 use crate::formatting::format_middle_ellipsized_text;
 use crate::model::{sanitized_application_log_detail, Message};
-use crate::operation_history::FileOperationCompletion;
 use crate::operation_queue::{FileOperationTerminalStatus, QueuedFileOperation};
+use file_operations::FileOperationCompletion;
 
 const NOTIFICATION_FILE_NAME_MAX_CHARS: usize = 96;
 const NOTIFICATION_FAILURE_REASON_MAX_CHARS: usize = 160;
@@ -191,8 +191,8 @@ mod tests {
 
     use super::*;
     use crate::config;
-    use crate::operation_history::FileOperationOutcome;
     use crate::operation_queue::QueuedTransfer;
+    use file_operations::FileOperationOutcome;
 
     fn copy_operation(paths: &[(&str, &str)]) -> QueuedFileOperation {
         QueuedFileOperation::Copy {

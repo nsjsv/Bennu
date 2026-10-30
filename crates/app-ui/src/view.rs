@@ -164,7 +164,7 @@ pub(crate) fn rename_input_id() -> iced::widget::Id {
 /// 三种视图的输入框尺寸各不相同，由调用方构造后交进来。
 pub(crate) fn rename_field<'a>(
     input: impl Into<Element<'a, Message>>,
-    hint: Option<crate::operation_history::RenameRejection>,
+    hint: Option<file_operations::RenameRejection>,
     language: crate::config::UiLanguage,
 ) -> Element<'a, Message> {
     let popup = hint.map(|reason| {

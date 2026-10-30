@@ -14,8 +14,8 @@ use crate::model::{
     DirectoryCollectionPhase, DirectoryExpansionLoadContext, DirectoryLoadRequest,
     ExpandedDirectoryStatus, PrebuiltDirectoryDiscovery, SplitAxis,
 };
-use crate::operation_history::CompletedTransfer;
 use crate::thumbnail_cache::ColumnViewport;
+use file_operations::CompletedTransfer;
 
 async fn discovery_for(path: &std::path::Path) -> DirectoryDiscovery {
     discover_directory_with_progress(

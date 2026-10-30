@@ -6,7 +6,7 @@ use crate::model::{
     BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, BrowserViewMode, NavigationMode,
     SplitAxis,
 };
-use crate::operation_history::CompletedTransfer;
+use file_operations::CompletedTransfer;
 
 // 终端面板展开时，它的 shell 跟随文件区的目标目录。目标由「活动窗格的活动
 // 标签」和多栏下悬停的栏决定，这些用例逐个断言引起目标变化的转换都已经

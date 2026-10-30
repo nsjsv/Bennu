@@ -10,8 +10,8 @@ use iced::futures::SinkExt;
 
 use crate::app::archive_member_password::ArchiveMemberPasswordAction;
 use crate::model::Message;
-use crate::operation_history::FileOperationOutcome;
-use crate::operation_progress::FileOperationProgressUpdate;
+use file_operations::FileOperationOutcome;
+use file_operations::FileOperationProgressUpdate;
 
 type IcedSender = iced::futures::channel::mpsc::Sender<Message>;
 

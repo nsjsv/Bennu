@@ -32,7 +32,6 @@ use crate::config::{RenderingGpuPreference, UiLanguage, UiLanguageSetting, UserC
 use crate::network_connections::{
     NetworkConnectionMessage, SidebarNetworkConnectionContextMenuState,
 };
-use crate::operation_history::FileOperationCompletion;
 use crate::operation_queue::QueuedTransfer;
 use crate::shortcuts::{ShortcutAction, ShortcutBindingId};
 use crate::sidebar_devices::{
@@ -40,6 +39,7 @@ use crate::sidebar_devices::{
 };
 use crate::startup_rendering::StartupRenderingEnvironmentStatus;
 use crate::thumbnail_cache::ThumbnailLoadOutcome;
+use file_operations::FileOperationCompletion;
 
 pub(crate) use crate::text_preview::{MarkdownPreviewMode, TextPreviewDocument};
 pub(crate) use file_core::{TransferConflictItem, TransferConflictMetadata};
@@ -372,8 +372,8 @@ pub(crate) enum Message {
     FileProperties(FilePropertiesMessage),
     FileOperationProgressed(
         u64,
-        crate::operation_progress::FileOperationProgressUpdate,
-        Vec<crate::operation_progress::TransferEntrySnapshot>,
+        file_operations::FileOperationProgressUpdate,
+        Vec<file_operations::TransferEntrySnapshot>,
     ),
     FileOperationDirectMovesCommitted {
         task_id: u64,
@@ -381,7 +381,7 @@ pub(crate) enum Message {
     },
     FileOperationMovesRenamed {
         task_id: u64,
-        moves: Vec<crate::operation_history::CompletedTransfer>,
+        moves: Vec<file_operations::CompletedTransfer>,
     },
     /// 第二个参数是驱动者 generation:换代重启后,被取消的旧驱动者
     /// 迟到的终态消息凭它被拒,不会把已重启的任务提前终结。

@@ -1,7 +1,11 @@
+use std::ffi::OsStr;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use file_core::{ArchiveCompressionLevel, ArchiveFormat, ArchivePassword, FileKind};
+use file_core::{
+    validate_entry_name, ArchiveCompressionLevel, ArchiveFormat, ArchivePassword, FileKind,
+    InvalidEntryName,
+};
 use iced::Task;
 
 use super::archive_password::ArchivePasswordDraft;
@@ -97,12 +101,8 @@ impl ArchiveCreationState {
 
     pub(crate) fn target_path(&self) -> Result<PathBuf, String> {
         let name = self.file_name.trim();
-        if name.is_empty() {
-            return Err("Enter an archive name.".to_owned());
-        }
-        if name == "." || name == ".." || name.contains('/') || name.contains('\\') {
-            return Err("Archive name cannot contain path separators.".to_owned());
-        }
+        validate_entry_name(OsStr::new(name))
+            .map_err(|reason| archive_name_error(reason).to_owned())?;
 
         Ok(self
             .target_directory
@@ -374,9 +374,52 @@ fn default_archive_name(sources: &[PathBuf], single_source_kind: Option<FileKind
     }
 }
 
+/// 名字规则与重命名、新建一致（`validate_entry_name`）：Linux 上 `\` 是普通字符，
+/// 不当作路径分隔符拒绝。校验的是用户输入的基名，所以 `.`、`..` 仍然被拒。
+fn archive_name_error(reason: InvalidEntryName) -> &'static str {
+    match reason {
+        InvalidEntryName::Empty => "Enter an archive name.",
+        InvalidEntryName::CurrentDirectory | InvalidEntryName::ParentDirectory => {
+            "\".\" and \"..\" cannot be used as names."
+        }
+        InvalidEntryName::ContainsSlash => "Archive name cannot contain path separators.",
+        InvalidEntryName::ContainsNul => "Names cannot contain NUL characters.",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn state_named(name: &str) -> ArchiveCreationState {
+        let mut state = ArchiveCreationState::new(
+            vec![PathBuf::from("/docs/report.pdf")],
+            PathBuf::from("/docs"),
+            Some(FileKind::File),
+        );
+        state.update_name(name.to_owned());
+        state
+    }
+
+    #[test]
+    fn archive_names_follow_the_shared_entry_name_rules() {
+        assert_eq!(
+            state_named(r"Q1\Q2").target_path(),
+            Ok(PathBuf::from(r"/docs/Q1\Q2.zip"))
+        );
+        for (name, error) in [
+            ("  ", "Enter an archive name."),
+            ("..", "\".\" and \"..\" cannot be used as names."),
+            ("a/b", "Archive name cannot contain path separators."),
+            ("a\0b", "Names cannot contain NUL characters."),
+        ] {
+            assert_eq!(
+                state_named(name).target_path(),
+                Err(error.to_owned()),
+                "{name:?}"
+            );
+        }
+    }
 
     #[test]
     fn single_file_default_archive_name_uses_file_stem() {

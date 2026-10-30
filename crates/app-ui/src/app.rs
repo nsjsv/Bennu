@@ -385,6 +385,8 @@ pub(crate) struct FileBrowser {
     list_directory_summary_cache: crate::model::ListDirectorySummaryCache,
     user_preferences_save_in_flight: bool,
     pending_user_preferences_save: Option<config::UserPreferences>,
+    /// 启动时设置读不了或原数据没能备份时为 Blocked：写回会覆盖用户原来的设置。
+    user_preferences_persistence: config::SettingsPersistence,
     pending_browser_session_save: bool,
     browser_session_saves_in_flight: usize,
     last_browser_session_save: Option<std::time::Instant>,
@@ -806,6 +808,7 @@ impl FileBrowser {
             list_directory_summary_cache: crate::model::ListDirectorySummaryCache::default(),
             user_preferences_save_in_flight: false,
             pending_user_preferences_save: None,
+            user_preferences_persistence: config::SettingsPersistence::Writable,
             pending_browser_session_save: false,
             browser_session_saves_in_flight: 0,
             last_browser_session_save: None,

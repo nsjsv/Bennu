@@ -133,6 +133,14 @@ impl CustomColorScheme {
         }
     }
 
+    /// 存储的配色里是否有一套颜色读不懂（`from_stored` 会让它单独回落）。
+    pub fn stored_has_unreadable_set(stored: &StoredCustomColorScheme) -> bool {
+        [&stored.light, &stored.dark]
+            .into_iter()
+            .flatten()
+            .any(|set| CustomColorAnchors::from_stored(set).is_err())
+    }
+
     pub fn to_stored(&self) -> StoredCustomColorScheme {
         StoredCustomColorScheme {
             light: Some(self.light.to_stored()),

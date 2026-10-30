@@ -26,6 +26,7 @@ fn startup_environment(
         home,
         system_language: config::UiLanguage::English,
         user_config,
+        settings_recoveries: Vec::new(),
         state_database_path,
         rendering_environment_status: StartupRenderingEnvironmentStatus::ready(
             StartupRenderingEnvironment::fast_default(

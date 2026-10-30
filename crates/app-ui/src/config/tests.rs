@@ -259,11 +259,13 @@ fn user_preferences_round_trip_through_sqlite() {
 
     save_user_preferences(&store, &config.user_preferences()).expect("save preferences");
 
-    let loaded = user_preferences::load_user_config_from_sources(
+    let loaded = user_config_loading::load_user_config_from_sources(
         app_config.clone(),
         &state_database_path,
         None,
     );
+    assert_eq!(loaded.recovery, None);
+    let loaded = loaded.config;
 
     assert_eq!(loaded.thumbnail_cache_dir, app_config.thumbnail_cache_dir);
     assert_eq!(
@@ -360,7 +362,7 @@ fn stored_window_controls_are_normalized_at_config_boundary() {
         },
     ];
 
-    let preferences = UserPreferences::from_stored(stored, &default);
+    let preferences = UserPreferences::from_stored(stored, &default).preferences;
 
     assert_eq!(
         preferences.window_controls.layout(),
@@ -408,7 +410,7 @@ fn stored_preferences_drop_removed_list_columns_and_restore_supported_defaults()
         },
     ];
 
-    let preferences = UserPreferences::from_stored(stored, &default);
+    let preferences = UserPreferences::from_stored(stored, &default).preferences;
 
     assert_eq!(
         preferences
@@ -458,7 +460,7 @@ fn stored_preferences_skip_password_bearing_network_connections() {
         },
     ];
 
-    let preferences = UserPreferences::from_stored(stored, &default);
+    let preferences = UserPreferences::from_stored(stored, &default).preferences;
 
     assert_eq!(preferences.network_connections.len(), 1);
     assert_eq!(
@@ -474,7 +476,7 @@ fn stored_preferences_derive_view_state_saving_from_startup_location() {
     stored.startup_location = "custom".to_owned();
     stored.save_view_state = true;
 
-    let preferences = UserPreferences::from_stored(stored, &default);
+    let preferences = UserPreferences::from_stored(stored, &default).preferences;
 
     assert_eq!(
         preferences.startup_location_policy,
@@ -489,7 +491,7 @@ fn stored_preferences_invalid_language_setting_falls_back_to_system() {
     let mut stored = default.user_preferences().to_stored();
     stored.language_setting = "unsupported".to_owned();
 
-    let preferences = UserPreferences::from_stored(stored, &default);
+    let preferences = UserPreferences::from_stored(stored, &default).preferences;
 
     assert_eq!(preferences.language_setting, UiLanguageSetting::System);
 }
@@ -500,7 +502,7 @@ fn stored_preferences_default_list_directory_size_mode_is_item_count() {
     let mut stored = default.user_preferences().to_stored();
     stored.list_directory_size_display_mode = "unknown".to_owned();
 
-    let preferences = UserPreferences::from_stored(stored, &default);
+    let preferences = UserPreferences::from_stored(stored, &default).preferences;
 
     assert_eq!(
         preferences.list_directory_size_display_mode,
@@ -527,13 +529,17 @@ fn stored_icon_grid_size_is_normalized_at_config_boundary() {
     stored.icons_view_density = None;
     stored.icon_grid_size = 1;
     assert_eq!(
-        UserPreferences::from_stored(stored.clone(), &default).icon_grid_size,
+        UserPreferences::from_stored(stored.clone(), &default)
+            .preferences
+            .icon_grid_size,
         MIN_ICON_GRID_SIZE
     );
 
     stored.icon_grid_size = u32::MAX;
     assert_eq!(
-        UserPreferences::from_stored(stored, &default).icon_grid_size,
+        UserPreferences::from_stored(stored, &default)
+            .preferences
+            .icon_grid_size,
         MAX_ICON_GRID_SIZE
     );
 }
@@ -544,13 +550,17 @@ fn stored_visible_column_count_is_normalized_at_config_boundary() {
     let mut stored = default.user_preferences().to_stored();
     stored.visible_column_count = 0;
     assert_eq!(
-        UserPreferences::from_stored(stored.clone(), &default).visible_column_count,
+        UserPreferences::from_stored(stored.clone(), &default)
+            .preferences
+            .visible_column_count,
         MIN_VISIBLE_COLUMN_COUNT
     );
 
     stored.visible_column_count = u32::MAX;
     assert_eq!(
-        UserPreferences::from_stored(stored, &default).visible_column_count,
+        UserPreferences::from_stored(stored, &default)
+            .preferences
+            .visible_column_count,
         MAX_VISIBLE_COLUMN_COUNT
     );
 }
@@ -609,11 +619,13 @@ network_connections = [
         app_config::load_app_config_from_dir(&config_dir, app_config::default_app_config());
     let state_database_path = temp_dir.path().join("state.sqlite");
 
-    let loaded = user_preferences::load_user_config_from_sources(
+    let loaded = user_config_loading::load_user_config_from_sources(
         app_config,
         &state_database_path,
         Some(&config_dir),
     );
+    assert_eq!(loaded.recovery, None);
+    let loaded = loaded.config;
 
     assert!(loaded.show_hidden_files);
     assert_eq!(loaded.sidebar_width, 250.0);
@@ -636,7 +648,7 @@ network_connections = [
 
     let store = TaskQueueStore::new(&state_database_path).expect("open migrated store");
     let stored = store
-        .read_user_preferences()
+        .read_user_preferences(&file_operation_store::StoredUserPreferences::default())
         .expect("read migrated preferences")
         .expect("migrated preferences")
         .preferences;
@@ -878,7 +890,7 @@ fn preview_extension_rules_roundtrip_through_stored_preferences() {
     config.preview_extension_rules.image = Vec::new();
 
     let stored = config.user_preferences().to_stored();
-    let restored = UserPreferences::from_stored(stored, &default);
+    let restored = UserPreferences::from_stored(stored, &default).preferences;
     assert_eq!(restored.preview_extension_rules.text, vec!["nfo", "cfg"]);
     // 用户显式清空是合法选择，不能回退默认列表。
     assert!(restored.preview_extension_rules.image.is_empty());
@@ -890,7 +902,7 @@ fn preview_extension_rules_roundtrip_through_stored_preferences() {
 
     // 旧版本存储缺该字段时整体回退默认。
     let stored = StoredUserPreferences::default();
-    let restored = UserPreferences::from_stored(stored, &default);
+    let restored = UserPreferences::from_stored(stored, &default).preferences;
     assert_eq!(
         restored.preview_extension_rules,
         default.preview_extension_rules
@@ -905,7 +917,7 @@ fn preview_extension_rules_roundtrip_through_stored_preferences() {
         .expect("stored rules");
     rules.text = None;
     stored.preview.preview_extension_rules = Some(rules);
-    let restored = UserPreferences::from_stored(stored, &default);
+    let restored = UserPreferences::from_stored(stored, &default).preferences;
     assert_eq!(
         restored.preview_extension_rules.text,
         default.preview_extension_rules.text

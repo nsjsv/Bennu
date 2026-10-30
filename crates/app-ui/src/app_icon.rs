@@ -62,7 +62,7 @@ fn stored_theme_mode() -> ThemeMode {
         return ThemeMode::Automatic;
     };
     store
-        .read_user_preferences()
+        .read_user_preferences(&file_operation_store::StoredUserPreferences::default())
         .ok()
         .flatten()
         .and_then(|read| ThemeMode::from_config_value(&read.preferences.theme_mode))

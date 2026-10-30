@@ -1,3 +1,5 @@
+use std::os::unix::fs::PermissionsExt;
+
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -25,8 +27,15 @@ fn stored_payload(store: &TaskQueueStore) -> String {
         .expect("preferences row")
 }
 
+fn read_back(store: &TaskQueueStore) -> UserPreferencesRead {
+    store
+        .read_user_preferences(&StoredUserPreferences::default())
+        .unwrap()
+        .expect("preferences row")
+}
+
 fn default_payload_with(changes: Value) -> String {
-    let mut payload = default_payload_object();
+    let mut payload = payload_object(&StoredUserPreferences::default()).unwrap();
     for (key, value) in changes.as_object().expect("changes object") {
         payload.insert(key.clone(), value.clone());
     }
@@ -50,12 +59,31 @@ fn backups(directory: &TempDir) -> Vec<PathBuf> {
 fn an_unreadable_payload_stays_in_place_after_reading() {
     let (store, _directory) = store_with_payload("{");
 
-    let read = store.read_user_preferences().unwrap().expect("row exists");
+    let read = read_back(&store);
 
     assert_eq!(read.unreadable, Some(UnreadablePreferences::Whole));
     assert_eq!(read.preferences, StoredUserPreferences::default());
     assert_eq!(read.raw_payload, "{");
     assert_eq!(stored_payload(&store), "{");
+}
+
+#[test]
+fn unreadable_settings_fall_back_to_the_callers_defaults() {
+    let defaults = StoredUserPreferences {
+        terminal_emulator: "foot".to_owned(),
+        ..StoredUserPreferences::default()
+    };
+    let (whole, _whole_directory) = store_with_payload("{");
+    let (one_key, _one_key_directory) =
+        store_with_payload(&default_payload_with(json!({"terminal_emulator": 5})));
+
+    for store in [whole, one_key] {
+        let read = store
+            .read_user_preferences(&defaults)
+            .unwrap()
+            .expect("preferences row");
+        assert_eq!(read.preferences.terminal_emulator, "foot");
+    }
 }
 
 #[test]
@@ -66,7 +94,7 @@ fn a_key_of_the_wrong_type_falls_back_alone() {
     }));
     let (store, _directory) = store_with_payload(&payload);
 
-    let read = store.read_user_preferences().unwrap().expect("row exists");
+    let read = read_back(&store);
 
     assert_eq!(
         read.unreadable,
@@ -91,7 +119,7 @@ fn one_unreadable_list_item_does_not_drop_the_others() {
     }));
     let (store, _directory) = store_with_payload(&payload);
 
-    let read = store.read_user_preferences().unwrap().expect("row exists");
+    let read = read_back(&store);
 
     assert_eq!(
         read.unreadable,
@@ -113,12 +141,12 @@ fn one_unreadable_list_item_does_not_drop_the_others() {
 
 #[test]
 fn a_key_written_before_it_existed_is_not_reported_as_unreadable() {
-    let mut payload = default_payload_object();
+    let mut payload = payload_object(&StoredUserPreferences::default()).unwrap();
     payload.remove("show_hidden_files");
     payload.insert("sidebar_width".to_owned(), json!(300.0));
     let (store, _directory) = store_with_payload(&Value::Object(payload).to_string());
 
-    let read = store.read_user_preferences().unwrap().expect("row exists");
+    let read = read_back(&store);
 
     assert_eq!(read.unreadable, None);
     assert_eq!(read.preferences.sidebar_width, 300.0);
@@ -166,20 +194,75 @@ fn an_unreadable_payload_is_backed_up_before_it_is_overwritten() {
     let backups = backups(&directory);
     assert_eq!(backups.len(), 1);
     assert_eq!(fs::read_to_string(&backups[0]).unwrap(), "{ not json");
-    assert_eq!(
-        store.read_user_preferences().unwrap().unwrap().unreadable,
-        None
-    );
+    assert_eq!(read_back(&store).unreadable, None);
 }
 
 #[test]
-fn a_backup_is_a_new_file_next_to_the_database() {
-    let (store, directory) = store_with_payload("{}");
+fn repairing_backs_up_the_original_then_writes_the_repaired_settings() {
+    let original = default_payload_with(json!({
+        "show_hidden_files": "yes",
+        "setting_from_a_newer_version": 7,
+    }));
+    let (store, directory) = store_with_payload(&original);
+    let repaired = StoredUserPreferences {
+        sidebar_width: 280.0,
+        ..StoredUserPreferences::default()
+    };
 
-    let backup = store.back_up_user_preferences("original").unwrap();
+    let backup = store
+        .replace_unreadable_user_preferences(&original, &repaired)
+        .unwrap();
 
-    assert_eq!(backup.parent(), Some(directory.path()));
-    assert_eq!(fs::read_to_string(&backup).unwrap(), "original");
+    assert!(backup.write_back.is_ok());
+    assert_eq!(backup.path.parent(), Some(directory.path()));
+    assert_eq!(fs::read_to_string(&backup.path).unwrap(), original);
+    let read = read_back(&store);
+    assert_eq!(read.unreadable, None);
+    assert_eq!(read.preferences, repaired);
+    let saved: Value = serde_json::from_str(&read.raw_payload).unwrap();
+    assert_eq!(saved["setting_from_a_newer_version"], json!(7));
+}
+
+#[test]
+fn repairing_writes_nothing_when_the_backup_cannot_be_written() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("state.sqlite");
+    let store = TaskQueueStore::new(&database).unwrap();
+    store
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO user_preferences (preference_key, payload_json, updated_at_ms)
+             VALUES (?1, '{', 1)",
+            rusqlite::params![USER_PREFERENCES_KEY],
+        )
+        .unwrap();
+    // 备份和数据库在同一目录：目录只读时备份写不进去。
+    fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o555)).unwrap();
+
+    let result = store.replace_unreadable_user_preferences("{", &StoredUserPreferences::default());
+
+    fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(result.is_err());
+    assert_eq!(stored_payload(&store), "{");
+}
+
+#[test]
+fn a_failed_write_back_still_reports_the_backup() {
+    let (store, directory) = store_with_payload("{");
+    // 数据库文件只读：备份写得进目录，写回写不进库。
+    fs::set_permissions(store.db_path(), fs::Permissions::from_mode(0o444)).unwrap();
+
+    let backup = store
+        .replace_unreadable_user_preferences("{", &StoredUserPreferences::default())
+        .unwrap();
+
+    assert!(backup.write_back.is_err());
+    let backups = backups(&directory);
+    assert_eq!(backups.len(), 1);
+    assert_eq!(backups[0], backup.path);
+    assert_eq!(fs::read_to_string(&backup.path).unwrap(), "{");
+    assert_eq!(stored_payload(&store), "{");
 }
 
 #[test]

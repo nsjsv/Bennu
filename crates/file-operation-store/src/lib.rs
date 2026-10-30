@@ -30,7 +30,9 @@ pub use recoverable_transfer::{
     TRANSFER_JOURNAL_VERSION,
 };
 mod preferences_payload;
-pub use preferences_payload::{UnreadablePreferences, UserPreferencesRead};
+pub use preferences_payload::{
+    UnreadablePreferences, UnreadablePreferencesBackup, UserPreferencesRead,
+};
 mod user_preferences;
 pub use user_preferences::{
     StoredContextMenuItemEntry, StoredContextMenuLayout, StoredContextMenuLayouts,

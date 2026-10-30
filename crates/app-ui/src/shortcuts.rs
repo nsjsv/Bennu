@@ -336,18 +336,22 @@ impl ShortcutConfig {
             .map(|binding| binding.id)
     }
 
-    pub(crate) fn apply_toml_table(&mut self, table: &toml::Table) {
+    /// 返回读不懂、被跳过的条目数（不认识的动作或按键写法）。
+    pub(crate) fn apply_toml_table(&mut self, table: &toml::Table) -> usize {
+        let mut skipped = 0;
         for (key, value) in table {
-            let (Some(id), Some(value)) = (
-                ShortcutBindingId::from_config_key(key),
-                value.as_str().filter(|value| !value.is_empty()),
-            ) else {
-                continue;
-            };
-            if let Some(binding) = KeyBinding::from_config_value(value) {
-                self.set_binding(id, binding);
+            let binding = ShortcutBindingId::from_config_key(key).zip(
+                value
+                    .as_str()
+                    .filter(|value| !value.is_empty())
+                    .and_then(KeyBinding::from_config_value),
+            );
+            match binding {
+                Some((id, binding)) => self.set_binding(id, binding),
+                None => skipped += 1,
             }
         }
+        skipped
     }
 
     pub(crate) fn toml_table(&self) -> toml::Table {

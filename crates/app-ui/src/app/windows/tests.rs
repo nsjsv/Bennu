@@ -844,7 +844,7 @@ async fn shutdown_waits_for_old_preferences_save_then_commits_latest_search_hist
     );
     assert_eq!(
         store
-            .read_user_preferences()
+            .read_user_preferences(&file_operation_store::StoredUserPreferences::default())
             .unwrap()
             .unwrap()
             .preferences

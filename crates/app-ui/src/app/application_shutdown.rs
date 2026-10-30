@@ -8,6 +8,7 @@ use iced::{window, Task};
 use super::file_operations::queue_finish_from_completion;
 use super::FileBrowser;
 use crate::commands::commit_application_shutdown_command;
+use crate::config;
 use crate::model::{snapshot_to_stored, Message};
 use crate::operation_history::FileOperationCompletion;
 use crate::operation_queue::PersistedShutdownFileOperation;
@@ -66,7 +67,10 @@ impl FileBrowser {
         let user_preferences_need_final_commit = store.is_some()
             || self.user_preferences_save_in_flight
             || self.pending_user_preferences_save.is_some();
-        let user_preferences = user_preferences_need_final_commit
+        // 启动时原设置读不了或没能备份：退出时也不能写回覆盖它。
+        let user_preferences_writable =
+            self.user_preferences_persistence == config::SettingsPersistence::Writable;
+        let user_preferences = (user_preferences_need_final_commit && user_preferences_writable)
             .then(|| self.user_config.user_preferences().to_stored());
         let disposition = self.operation_queue.begin_application_shutdown();
         startup_trace::record_application_shutdown_plan(

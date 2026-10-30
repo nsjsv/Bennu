@@ -1156,6 +1156,8 @@ pub(crate) struct StartupEnvironment {
     pub(crate) home: PathBuf,
     pub(crate) system_language: UiLanguage,
     pub(crate) user_config: UserConfig,
+    /// 读设置、配置时要告诉用户的事；界面接收后提示一次并据此决定能否写回。
+    pub(crate) settings_recoveries: Vec<crate::config::SettingsRecovery>,
     pub(crate) state_database_path: PathBuf,
     pub(crate) rendering_environment_status: StartupRenderingEnvironmentStatus,
 }

@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use desktop_linux::{NetworkConnection, NetworkConnectionId, NetworkProtocol, TerminalEmulator};
 use file_core::FileOperationVerification;
@@ -11,12 +11,12 @@ use file_operation_store::{
 };
 
 use super::app_config::AppConfig;
-use super::legacy_toml;
 use super::startup::StartupLocationPolicy;
+use super::unrecognized_settings::UnrecognizedSettings;
 use super::{
-    app_config_dir_path, browser_view_mode_config_value, browser_view_mode_from_config_value,
-    default_state_database_path, default_user_config, file_operation_verification_config_value,
-    file_operation_verification_from_config_value, list_directory_size_display_mode_config_value,
+    browser_view_mode_config_value, browser_view_mode_from_config_value, default_user_config,
+    file_operation_verification_config_value, file_operation_verification_from_config_value,
+    list_directory_size_display_mode_config_value,
     list_directory_size_display_mode_from_config_value, normalize_right_preview_panel_width,
     normalize_right_preview_preview_ratio, normalize_sidebar_width, normalize_visible_column_count,
     sort_direction_config_value, sort_direction_from_config_value, sort_field_config_value,
@@ -282,29 +282,51 @@ impl UserPreferences {
         stored
     }
 
-    pub(crate) fn from_stored(stored: StoredUserPreferences, default: &UserConfig) -> Self {
+    /// 把存储值转成界面设置；值不认识的项换成默认值，并在结果里列出这些项。
+    pub(crate) fn from_stored(
+        stored: StoredUserPreferences,
+        default: &UserConfig,
+    ) -> InterpretedPreferences {
         let default_preferences = Self::from_user_config(default);
-        let (theme_mode, color_scheme) = match (
-            ThemeMode::from_config_value(&stored.theme_mode),
-            ColorSchemePreset::from_config_value(&stored.color_scheme),
-        ) {
+        let mut unrecognized = UnrecognizedSettings::default();
+        let stored_theme_mode = ThemeMode::from_config_value(&stored.theme_mode);
+        let stored_color_scheme = ColorSchemePreset::from_config_value(&stored.color_scheme);
+        // 主题模式与配色要么一起用、要么一起回落：只认一半会拼出用户没选过的组合。
+        if stored_theme_mode.is_none() {
+            unrecognized.note("theme_mode");
+        }
+        if stored_color_scheme.is_none() {
+            unrecognized.note("color_scheme");
+        }
+        let (theme_mode, color_scheme) = match (stored_theme_mode, stored_color_scheme) {
             (Some(theme_mode), Some(color_scheme)) => (theme_mode, color_scheme),
             _ => (
                 default_preferences.theme_mode,
                 default_preferences.color_scheme,
             ),
         };
-        let startup_location_policy =
-            StartupLocationPolicy::from_config_value(&stored.startup_location)
-                .unwrap_or(default_preferences.startup_location_policy);
+        let startup_location_policy = unrecognized.value_or_default(
+            "startup_location",
+            StartupLocationPolicy::from_config_value(&stored.startup_location),
+            default_preferences.startup_location_policy,
+        );
         let list_view_preferences =
-            list_view_preferences_from_stored(&stored, &default_preferences);
+            list_view_preferences_from_stored(&stored, &default_preferences, &mut unrecognized);
+        if stored
+            .custom_color_scheme
+            .as_ref()
+            .is_some_and(CustomColorScheme::stored_has_unreadable_set)
+        {
+            unrecognized.note("custom_color_scheme");
+        }
         let custom_color_scheme = CustomColorScheme::from_stored(
             stored.custom_color_scheme.as_ref(),
             &default_preferences.custom_color_scheme,
         );
-        let window_controls = window_controls_from_stored(&stored, &default_preferences);
-        let context_menus = context_menu_preferences_from_stored(&stored, &default_preferences);
+        let window_controls =
+            window_controls_from_stored(&stored, &default_preferences, &mut unrecognized);
+        let context_menus =
+            context_menu_preferences_from_stored(&stored, &default_preferences, &mut unrecognized);
         let columns_view_density = stored
             .columns_view_density
             .map(ViewDensityLevel::from_index)
@@ -317,7 +339,16 @@ impl UserPreferences {
             .icons_view_density
             .map(ViewDensityLevel::from_index)
             .unwrap_or_else(|| ViewDensityLevel::from_icon_grid_size(stored.icon_grid_size));
-        Self {
+        // None = 旧版本数据未持久化过分组设置，不算读不懂；有值但不认识才算。
+        let file_grouping = match stored.file_grouping.as_deref() {
+            Some(value) => unrecognized.value_or_default(
+                "file_grouping",
+                FileGroupingMode::from_config_value(value),
+                default_preferences.file_grouping,
+            ),
+            None => default_preferences.file_grouping,
+        };
+        let preferences = Self {
             network_list_thumbnail_downloads_enabled: stored
                 .network_list_thumbnail_downloads_enabled,
             preview_size_limits: preview_size_limits_from_stored(
@@ -333,8 +364,11 @@ impl UserPreferences {
                 &default_preferences.preview_extension_rules,
             ),
             show_hidden_files: stored.show_hidden_files,
-            language_setting: UiLanguageSetting::from_config_value(&stored.language_setting)
-                .unwrap_or(default_preferences.language_setting),
+            language_setting: unrecognized.value_or_default(
+                "language_setting",
+                UiLanguageSetting::from_config_value(&stored.language_setting),
+                default_preferences.language_setting,
+            ),
             sidebar_width: normalize_sidebar_width(stored.sidebar_width as f32),
             right_preview_panel_open: stored.right_preview_panel_open,
             // 宽度缺省/非法值都回退默认;非法存储值按“从未设置过”处理。
@@ -349,19 +383,29 @@ impl UserPreferences {
             sidebar_favorites: stored
                 .sidebar_favorites
                 .map(|favorites| sidebar_favorites_from_stored(&favorites)),
-            network_connections: network_connections_from_stored(&stored.network_connections),
-            terminal_emulator: TerminalEmulator::from_config_value(&stored.terminal_emulator)
-                .unwrap_or(default_preferences.terminal_emulator),
+            network_connections: network_connections_from_stored(
+                &stored.network_connections,
+                &mut unrecognized,
+            ),
+            terminal_emulator: unrecognized.value_or_default(
+                "terminal_emulator",
+                TerminalEmulator::from_config_value(&stored.terminal_emulator),
+                default_preferences.terminal_emulator,
+            ),
             terminal_shell: stored
                 .terminal_shell
                 .clone()
                 .unwrap_or(default_preferences.terminal_shell.clone()),
-            file_operation_verification: file_operation_verification_from_config_value(
-                &stored.file_operation_verification,
-            )
-            .unwrap_or(default_preferences.file_operation_verification),
-            browser_view_mode: browser_view_mode_from_config_value(&stored.browser_view_mode)
-                .unwrap_or(default_preferences.browser_view_mode),
+            file_operation_verification: unrecognized.value_or_default(
+                "file_operation_verification",
+                file_operation_verification_from_config_value(&stored.file_operation_verification),
+                default_preferences.file_operation_verification,
+            ),
+            browser_view_mode: unrecognized.value_or_default(
+                "browser_view_mode",
+                browser_view_mode_from_config_value(&stored.browser_view_mode),
+                default_preferences.browser_view_mode,
+            ),
             visible_column_count: normalize_visible_column_count(
                 stored.visible_column_count as usize,
             ),
@@ -371,28 +415,28 @@ impl UserPreferences {
             list_view_density,
             icons_view_density,
             list_view_preferences,
-            list_directory_size_display_mode: list_directory_size_display_mode_from_config_value(
-                &stored.list_directory_size_display_mode,
-            )
-            .unwrap_or(default_preferences.list_directory_size_display_mode),
-            // None = 旧版本数据未持久化过分组设置；非法值同样回退默认。
-            file_grouping: stored
-                .file_grouping
-                .as_deref()
-                .and_then(FileGroupingMode::from_config_value)
-                .unwrap_or(default_preferences.file_grouping),
+            list_directory_size_display_mode: unrecognized.value_or_default(
+                "list_directory_size_display_mode",
+                list_directory_size_display_mode_from_config_value(
+                    &stored.list_directory_size_display_mode,
+                ),
+                default_preferences.list_directory_size_display_mode,
+            ),
+            file_grouping,
             startup_location_policy,
-            launch_window_policy: LaunchWindowPolicy::from_config_value(
-                &stored.launch_window_policy,
-            )
-            .unwrap_or(default_preferences.launch_window_policy),
-            column_width_adjust_mode: ColumnWidthAdjustMode::from_config_value(
-                &stored.column_width_adjust_mode,
-            )
-            .unwrap_or(default_preferences.column_width_adjust_mode),
+            launch_window_policy: unrecognized.value_or_default(
+                "launch_window_policy",
+                LaunchWindowPolicy::from_config_value(&stored.launch_window_policy),
+                default_preferences.launch_window_policy,
+            ),
+            column_width_adjust_mode: unrecognized.value_or_default(
+                "column_width_adjust_mode",
+                ColumnWidthAdjustMode::from_config_value(&stored.column_width_adjust_mode),
+                default_preferences.column_width_adjust_mode,
+            ),
             startup_custom_directory: stored.startup_custom_directory.to_path_buf(),
             save_view_state: startup_location_policy.saves_view_state(),
-            shortcuts: shortcut_config_from_stored(&stored.shortcuts),
+            shortcuts: shortcut_config_from_stored(&stored.shortcuts, &mut unrecognized),
             search_history: crate::model::SearchHistory::from_persisted(
                 stored.search_history.clone(),
             ),
@@ -413,9 +457,21 @@ impl UserPreferences {
             transfer_device_alias: stored.transfer_device_alias.clone(),
             transfer_trusted_devices: trusted_transfer_devices_from_stored(
                 &stored.transfer_trusted_devices,
+                &mut unrecognized,
             ),
+        };
+        InterpretedPreferences {
+            preferences,
+            unrecognized,
         }
     }
+}
+
+/// `from_stored` 的结果：界面设置，以及值不认识、已换成默认值的项。
+#[derive(Debug)]
+pub(crate) struct InterpretedPreferences {
+    pub(crate) preferences: UserPreferences,
+    pub(crate) unrecognized: UnrecognizedSettings,
 }
 
 impl Default for UserPreferences {
@@ -434,43 +490,6 @@ impl UserConfig {
 
     pub(crate) fn user_preferences(&self) -> UserPreferences {
         UserPreferences::from_user_config(self)
-    }
-}
-
-pub(crate) fn load_user_config_for_app_config(app_config: AppConfig) -> UserConfig {
-    let state_database_path = default_state_database_path();
-    let config_dir = app_config_dir_path();
-    load_user_config_from_sources(app_config, &state_database_path, config_dir.as_deref())
-}
-
-pub(super) fn load_user_config_from_sources(
-    app_config: AppConfig,
-    state_database_path: &Path,
-    config_dir: Option<&Path>,
-) -> UserConfig {
-    let mut default = default_user_config();
-    app_config.apply_to_user_config(&mut default);
-
-    let Ok(store) = TaskQueueStore::new(state_database_path) else {
-        return default;
-    };
-
-    match store.read_user_preferences() {
-        Ok(Some(read)) => {
-            let preferences = UserPreferences::from_stored(read.preferences, &default);
-            UserConfig::from_parts(app_config, preferences)
-        }
-        Ok(None) => {
-            let migrated = config_dir.map_or_else(
-                || default.clone(),
-                |config_dir| {
-                    legacy_toml::load_legacy_user_config_from_dir(config_dir, default.clone())
-                },
-            );
-            let _ = store.replace_user_preferences(&migrated.user_preferences().to_stored());
-            migrated
-        }
-        Err(_) => default,
     }
 }
 
@@ -506,8 +525,9 @@ fn stored_trusted_transfer_devices(
 
 fn trusted_transfer_devices_from_stored(
     stored: &[StoredTrustedTransferDevice],
+    unrecognized: &mut UnrecognizedSettings,
 ) -> Vec<TrustedTransferDevice> {
-    stored
+    let devices = stored
         .iter()
         // 空 fingerprint 无法作为信任身份,丢弃防止全设备误信任。
         .filter(|device| !device.fingerprint.is_empty())
@@ -520,7 +540,9 @@ fn trusted_transfer_devices_from_stored(
             },
             added_at: device.added_at.clone(),
         })
-        .collect()
+        .collect::<Vec<_>>();
+    unrecognized.note_dropped("transfer_trusted_devices", stored.len(), devices.len());
+    devices
 }
 
 fn sidebar_favorites_from_stored(
@@ -552,6 +574,7 @@ fn stored_network_connections(
 
 fn network_connections_from_stored(
     connections: &[StoredNetworkConnection],
+    unrecognized: &mut UnrecognizedSettings,
 ) -> Vec<SavedNetworkConnection> {
     let mut restored = Vec::new();
     for stored in connections {
@@ -567,6 +590,7 @@ fn network_connections_from_stored(
             restored.push(SavedNetworkConnection::new(connection, stored.auto_connect));
         }
     }
+    unrecognized.note_dropped("network_connections", connections.len(), restored.len());
     restored
 }
 
@@ -597,6 +621,7 @@ fn stored_context_menu_layouts(preferences: &ContextMenuPreferences) -> StoredCo
 fn context_menu_preferences_from_stored(
     stored: &StoredUserPreferences,
     default: &UserPreferences,
+    unrecognized: &mut UnrecognizedSettings,
 ) -> ContextMenuPreferences {
     let Some(layouts) = &stored.context_menu_layouts else {
         return default.context_menus.clone();
@@ -608,7 +633,7 @@ fn context_menu_preferences_from_stored(
             .map(|entry| (entry.id.clone(), entry.visible))
             .collect::<Vec<(String, bool)>>()
     };
-    ContextMenuPreferences::from_config_values(&ContextMenuLayoutConfigValues {
+    let stored_values = ContextMenuLayoutConfigValues {
         file_entry: config_values(&layouts.file_entry),
         file_blank: config_values(&layouts.file_blank),
         trash: config_values(&layouts.trash),
@@ -618,7 +643,38 @@ fn context_menu_preferences_from_stored(
         sidebar_bookmark: config_values(&layouts.sidebar_bookmark),
         sidebar_device: config_values(&layouts.sidebar_device),
         network_connection: config_values(&layouts.network_connection),
-    })
+    };
+    let preferences = ContextMenuPreferences::from_config_values(&stored_values);
+    // 解码会丢掉不认识的菜单项；转回配置值后，原来有、现在没有的 id 就是被丢掉的。
+    let decoded_values = preferences.to_config_values();
+    let dropped_unknown_item = context_menu_layout_lists(&stored_values)
+        .into_iter()
+        .zip(context_menu_layout_lists(&decoded_values))
+        .any(|(stored_items, decoded_items)| {
+            stored_items.iter().any(|(stored_id, _)| {
+                !decoded_items
+                    .iter()
+                    .any(|(decoded_id, _)| decoded_id == stored_id)
+            })
+        });
+    if dropped_unknown_item {
+        unrecognized.note("context_menu_layouts");
+    }
+    preferences
+}
+
+fn context_menu_layout_lists(values: &ContextMenuLayoutConfigValues) -> [&Vec<(String, bool)>; 9] {
+    [
+        &values.file_entry,
+        &values.file_blank,
+        &values.trash,
+        &values.search,
+        &values.search_entry_types,
+        &values.list_columns,
+        &values.sidebar_bookmark,
+        &values.sidebar_device,
+        &values.network_connection,
+    ]
 }
 
 fn stored_list_view_columns(preferences: &ListViewPreferences) -> Vec<StoredListViewColumn> {
@@ -636,6 +692,7 @@ fn stored_list_view_columns(preferences: &ListViewPreferences) -> Vec<StoredList
 fn list_view_preferences_from_stored(
     stored: &StoredUserPreferences,
     default: &UserPreferences,
+    unrecognized: &mut UnrecognizedSettings,
 ) -> ListViewPreferences {
     let columns = stored
         .list_view_columns
@@ -648,12 +705,23 @@ fn list_view_preferences_from_stored(
                 column.visible,
             ))
         })
-        .collect();
+        .collect::<Vec<_>>();
+    unrecognized.note_dropped(
+        "list_view_columns",
+        stored.list_view_columns.len(),
+        columns.len(),
+    );
     let sort = ListSortPreference {
-        field: sort_field_from_config_value(&stored.list_sort_field)
-            .unwrap_or(default.list_view_preferences.sort().field),
-        direction: sort_direction_from_config_value(&stored.list_sort_direction)
-            .unwrap_or(default.list_view_preferences.sort().direction),
+        field: unrecognized.value_or_default(
+            "list_sort_field",
+            sort_field_from_config_value(&stored.list_sort_field),
+            default.list_view_preferences.sort().field,
+        ),
+        direction: unrecognized.value_or_default(
+            "list_sort_direction",
+            sort_direction_from_config_value(&stored.list_sort_direction),
+            default.list_view_preferences.sort().direction,
+        ),
     };
     ListViewPreferences::new(columns, sort)
 }
@@ -661,23 +729,35 @@ fn list_view_preferences_from_stored(
 fn window_controls_from_stored(
     stored: &StoredUserPreferences,
     default: &UserPreferences,
+    unrecognized: &mut UnrecognizedSettings,
 ) -> WindowControlsConfig {
-    let layout = WindowChromeLayout::from_config_value(&stored.window_chrome_layout)
-        .unwrap_or(default.window_controls.layout());
+    let layout = unrecognized.value_or_default(
+        "window_chrome_layout",
+        WindowChromeLayout::from_config_value(&stored.window_chrome_layout),
+        default.window_controls.layout(),
+    );
     let placements = stored
         .window_controls
         .iter()
         .filter_map(|placement| {
             let kind = WindowControlKind::from_config_value(&placement.kind)?;
-            let side = WindowControlSide::from_config_value(&placement.side)
-                .unwrap_or_else(|| default.window_controls.placement(kind).side());
+            let side = unrecognized.value_or_default(
+                "window_controls",
+                WindowControlSide::from_config_value(&placement.side),
+                default.window_controls.placement(kind).side(),
+            );
             Some(WindowControlPlacement::new(
                 kind,
                 side,
                 WindowControlVisibility::from(placement.visible),
             ))
         })
-        .collect();
+        .collect::<Vec<_>>();
+    unrecognized.note_dropped(
+        "window_controls",
+        stored.window_controls.len(),
+        placements.len(),
+    );
     WindowControlsConfig::from_partial_placements(layout, placements)
 }
 
@@ -709,7 +789,10 @@ fn stored_shortcuts(shortcuts: &ShortcutConfig) -> Vec<StoredShortcutBinding> {
         .collect()
 }
 
-fn shortcut_config_from_stored(shortcuts: &[StoredShortcutBinding]) -> ShortcutConfig {
+fn shortcut_config_from_stored(
+    shortcuts: &[StoredShortcutBinding],
+    unrecognized: &mut UnrecognizedSettings,
+) -> ShortcutConfig {
     let mut config = ShortcutConfig::defaults();
     let table = shortcuts
         .iter()
@@ -720,228 +803,11 @@ fn shortcut_config_from_stored(shortcuts: &[StoredShortcutBinding]) -> ShortcutC
             )
         })
         .collect();
-    config.apply_toml_table(&table);
+    if config.apply_toml_table(&table) > 0 {
+        unrecognized.note("shortcuts");
+    }
     config
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    const CUSTOM_JSON: &str = r##"{
-        "version": 1,
-        "light": {
-            "background": "#ffffff",
-            "surface": "#f6f8fa",
-            "text": "#1f2328",
-            "muted_text": "#59636e",
-            "primary": "#0969da",
-            "success": "#1a7f37",
-            "warning": "#9a6700",
-            "danger": "#d1242f"
-        },
-        "dark": {
-            "background": "#0d1117",
-            "surface": "#151b23",
-            "text": "#f0f6fc",
-            "muted_text": "#9198a1",
-            "primary": "#4493f8",
-            "success": "#3fb950",
-            "warning": "#d29922",
-            "danger": "#f85149"
-        }
-    }"##;
-
-    #[test]
-    fn custom_color_scheme_roundtrips_and_invalid_modes_fall_back_independently() {
-        let default = default_user_config();
-        let imported = CustomColorScheme::from_json(CUSTOM_JSON).expect("valid custom scheme");
-        let mut config = default.clone();
-        config.custom_color_scheme = imported.clone();
-        config.color_scheme = ColorSchemePreset::Custom;
-
-        let stored = config.user_preferences().to_stored();
-        let restored = UserPreferences::from_stored(stored, &default);
-        assert_eq!(restored.custom_color_scheme, imported);
-        assert_eq!(restored.color_scheme, ColorSchemePreset::Custom);
-
-        let mut partially_invalid = config.user_preferences().to_stored();
-        let custom = partially_invalid
-            .custom_color_scheme
-            .as_mut()
-            .expect("stored custom scheme");
-        custom.dark.as_mut().expect("stored dark set").text = "bad".to_owned();
-        let restored = UserPreferences::from_stored(partially_invalid, &default);
-        assert_eq!(restored.custom_color_scheme.light, imported.light);
-        assert_eq!(
-            restored.custom_color_scheme.dark,
-            default.custom_color_scheme.dark
-        );
-    }
-
-    #[test]
-    fn missing_custom_snapshot_uses_default_without_affecting_old_selection() {
-        let mut stored = StoredUserPreferences::default();
-        stored.color_scheme = "custom".to_owned();
-        let restored = UserPreferences::from_stored(stored, &default_user_config());
-        assert_eq!(restored.color_scheme, ColorSchemePreset::Custom);
-        assert_eq!(
-            restored.custom_color_scheme,
-            default_user_config().custom_color_scheme
-        );
-    }
-
-    #[test]
-    fn file_grouping_roundtrips_and_legacy_missing_field_falls_back_to_none() {
-        let default = default_user_config();
-        let mut config = default.clone();
-        config.file_grouping = FileGroupingMode::Kind;
-
-        let stored = config.user_preferences().to_stored();
-        assert_eq!(stored.file_grouping.as_deref(), Some("kind"));
-        let restored = UserPreferences::from_stored(stored, &default);
-        assert_eq!(restored.file_grouping, FileGroupingMode::Kind);
-
-        // 旧版本记录没有该字段：回退默认（无分组），而不是误开启分组。
-        let legacy = StoredUserPreferences::default();
-        assert_eq!(legacy.file_grouping, None);
-        let restored = UserPreferences::from_stored(legacy, &default);
-        assert_eq!(restored.file_grouping, FileGroupingMode::None);
-
-        // 落盘值为 "none"（用户显式关闭）与缺字段回退结果一致。
-        let mut explicit_none = default_user_config().user_preferences().to_stored();
-        explicit_none.file_grouping = Some("none".to_owned());
-        let restored = UserPreferences::from_stored(explicit_none, &default);
-        assert_eq!(restored.file_grouping, FileGroupingMode::None);
-    }
-
-    #[test]
-    fn theme_selection_roundtrips_through_stored_preferences() {
-        for color_scheme in ColorSchemePreset::ALL {
-            let mut config = default_user_config();
-            config.theme_mode = ThemeMode::Dark;
-            config.color_scheme = color_scheme;
-
-            let stored = config.user_preferences().to_stored();
-            let restored = UserPreferences::from_stored(stored, &default_user_config());
-
-            assert_eq!(restored.theme_mode, ThemeMode::Dark);
-            assert_eq!(restored.color_scheme, color_scheme);
-        }
-    }
-
-    #[test]
-    fn right_preview_panel_roundtrips_and_missing_width_falls_back() {
-        let default = default_user_config();
-        let mut config = default.clone();
-        config.right_preview_panel_open = true;
-        config.right_preview_panel_width = 480.0;
-        config.right_preview_preview_ratio = 0.8;
-
-        let stored = config.user_preferences().to_stored();
-        assert_eq!(stored.right_preview_panel_open, true);
-        assert_eq!(stored.right_preview_panel_width, Some(480.0));
-        // f32 比例升 f64 存储,只保留精度容差内相等。
-        assert!((stored.right_preview_preview_ratio.unwrap() - 0.8).abs() < 1e-6);
-        let restored = UserPreferences::from_stored(stored, &default);
-        assert!(restored.right_preview_panel_open);
-        assert_eq!(restored.right_preview_panel_width, 480.0);
-        assert_eq!(restored.right_preview_preview_ratio, 0.8);
-
-        // 旧版本数据缺宽度字段:回退默认宽度,开关回退关闭。
-        let mut legacy = StoredUserPreferences::default();
-        legacy.right_preview_panel_width = None;
-        legacy.right_preview_preview_ratio = None;
-        let restored = UserPreferences::from_stored(legacy, &default);
-        assert!(!restored.right_preview_panel_open);
-        assert_eq!(
-            restored.right_preview_panel_width,
-            default.right_preview_panel_width
-        );
-        assert_eq!(
-            restored.right_preview_preview_ratio,
-            default.right_preview_preview_ratio
-        );
-    }
-
-    #[test]
-    fn invalid_theme_selection_falls_back_to_current_defaults() {
-        for (theme_mode, color_scheme) in [("sepia", "claude"), ("dark", "unknown")] {
-            let mut stored = StoredUserPreferences::default();
-            stored.theme_mode = theme_mode.to_owned();
-            stored.color_scheme = color_scheme.to_owned();
-
-            let restored = UserPreferences::from_stored(stored, &default_user_config());
-
-            assert_eq!(restored.theme_mode, ThemeMode::Automatic);
-            assert_eq!(restored.color_scheme, ColorSchemePreset::Default);
-        }
-    }
-
-    #[test]
-    fn density_levels_roundtrip_independently_with_icon_mirror() {
-        let default = default_user_config();
-        let mut config = default.clone();
-        config.columns_view_density = ViewDensityLevel::from_index(1);
-        config.list_view_density = ViewDensityLevel::from_index(4);
-        config.icons_view_density = ViewDensityLevel::from_index(6);
-        config.icon_grid_size = config.icons_view_density.icon_grid_size();
-
-        let stored = config.user_preferences().to_stored();
-        assert_eq!(
-            (
-                stored.columns_view_density,
-                stored.list_view_density,
-                stored.icons_view_density,
-                stored.icon_grid_size,
-            ),
-            (Some(1), Some(4), Some(6), 160)
-        );
-
-        let restored = UserPreferences::from_stored(stored, &default);
-        assert_eq!(restored.columns_view_density.index(), 1);
-        assert_eq!(restored.list_view_density.index(), 4);
-        assert_eq!(restored.icons_view_density.index(), 6);
-        assert_eq!(restored.icon_grid_size, 160);
-    }
-
-    #[test]
-    fn density_boundary_migrates_legacy_values_and_clamps_new_indexes() {
-        let default = default_user_config();
-        let mut legacy_config = default.clone();
-        legacy_config.icon_grid_size = 160;
-        assert_eq!(
-            legacy_config.user_preferences().icons_view_density.index(),
-            6
-        );
-
-        let mut stored = default.user_preferences().to_stored();
-        stored.columns_view_density = None;
-        stored.list_view_density = None;
-        stored.icons_view_density = None;
-        stored.icon_grid_size = 120;
-        let migrated = UserPreferences::from_stored(stored, &default);
-        assert_eq!(migrated.columns_view_density, ViewDensityLevel::DEFAULT);
-        assert_eq!(migrated.list_view_density, ViewDensityLevel::DEFAULT);
-        assert_eq!(migrated.icons_view_density.index(), 4);
-        assert_eq!(migrated.icon_grid_size, 128);
-
-        let mut stored = migrated.to_stored();
-        stored.columns_view_density = Some(u8::MAX);
-        stored.list_view_density = Some(0);
-        stored.icons_view_density = Some(u8::MAX);
-        stored.icon_grid_size = 64;
-        let normalized = UserPreferences::from_stored(stored, &default);
-        assert_eq!(normalized.columns_view_density.index(), 8);
-        assert_eq!(normalized.list_view_density.index(), 0);
-        assert_eq!(normalized.icons_view_density.index(), 8);
-        assert_eq!(normalized.to_stored().icon_grid_size, 192);
-
-        let mut stored = normalized.to_stored();
-        stored.icons_view_density = Some(1);
-        stored.icon_grid_size = 192;
-        let preferred = UserPreferences::from_stored(stored, &default);
-        assert_eq!(preferred.icons_view_density.index(), 1);
-        assert_eq!(preferred.icon_grid_size, 80);
-    }
-}
+mod tests;

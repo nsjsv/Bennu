@@ -25,6 +25,7 @@ impl FileBrowser {
         self.system_language = startup_environment.system_language;
         let state_database_path = startup_environment.state_database_path;
         let rendering_environment_status = startup_environment.rendering_environment_status;
+        let settings_recoveries = startup_environment.settings_recoveries;
 
         self.apply_loaded_user_config(startup_environment.user_config);
         self.home_dir = home.clone();
@@ -59,6 +60,8 @@ impl FileBrowser {
             }
         };
         let operation_store_startup_request = self.previous_session_plan_request(&home);
+        // 放在启动目录处理之后：那里同步弹出的提示不会顶掉设置提示。
+        self.accept_settings_recoveries(settings_recoveries);
 
         Task::batch([
             startup_command,
@@ -242,6 +245,7 @@ mod tests {
             home,
             system_language: config::UiLanguage::English,
             user_config,
+            settings_recoveries: Vec::new(),
             state_database_path,
             rendering_environment_status: StartupRenderingEnvironmentStatus::ready(
                 StartupRenderingEnvironment::fast_default(

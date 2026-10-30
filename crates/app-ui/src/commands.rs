@@ -466,8 +466,9 @@ async fn load_startup_environment(
     tokio::task::spawn_blocking(move || {
         let app_config = config::load_app_config();
         startup_trace::mark_once("startup_app_config_loaded");
-        let user_config = config::load_user_config_for_app_config(app_config);
+        let loaded_user_config = config::load_user_config_for_app_config(app_config);
         startup_trace::mark_once("startup_user_config_loaded");
+        let user_config = loaded_user_config.config;
         let rendering_environment_status =
             StartupRenderingEnvironmentStatus::for_loaded_config_with_runtime(
                 user_config.rendering_gpu_preference,
@@ -477,6 +478,7 @@ async fn load_startup_environment(
             home: dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")),
             system_language: crate::localization::detect_system_language(),
             user_config,
+            settings_recoveries: loaded_user_config.recovery.into_iter().collect(),
             state_database_path: config::default_state_database_path(),
             rendering_environment_status,
         }
@@ -486,6 +488,7 @@ async fn load_startup_environment(
         home: PathBuf::from("/"),
         system_language: config::UiLanguage::English,
         user_config: config::ui_thread_startup_config(),
+        settings_recoveries: Vec::new(),
         state_database_path: PathBuf::new(),
         rendering_environment_status: StartupRenderingEnvironmentStatus::ready(
             fallback_rendering_environment,

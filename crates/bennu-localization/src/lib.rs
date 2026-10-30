@@ -19,12 +19,14 @@ mod search_paths;
 mod search_service_recovery;
 mod search_service_status;
 mod search_workspace;
+mod settings_recovery;
 mod transfer;
 mod trash;
 
 pub use batch_rename::UnrestoredRenameText;
 pub use metadata_loss::{LostAttributeKind, LostAttributesText};
 pub use new_folders::KeptFolderText;
+pub use settings_recovery::{ResetSettingsText, SettingsSourceText};
 
 /// 界面语言。自 app-ui config.rs 下沉：翻译表按它分派，语言设置
 /// （UiLanguageSetting 与 TOML 存取）仍属 app-ui 存储域，经 re-export
@@ -182,6 +184,39 @@ pub fn rename_incomplete(
     unrestored: &[UnrestoredRenameText],
 ) -> String {
     batch_rename::single_incomplete_message(language, cause, unrestored)
+}
+
+/// 设置或配置文件读不懂的部分已恢复默认、原数据已备份时的启动提示。
+pub fn settings_restored(
+    language: UiLanguage,
+    source: SettingsSourceText,
+    reset: ResetSettingsText<'_>,
+    backup: &str,
+) -> String {
+    settings_recovery::restored(language, source, reset, backup)
+}
+
+/// 设置或配置文件读不懂、原数据也没能备份时的启动提示（本次不保存）。
+pub fn settings_not_backed_up(
+    language: UiLanguage,
+    source: SettingsSourceText,
+    error: &str,
+) -> String {
+    settings_recovery::not_backed_up(language, source, error)
+}
+
+/// 设置或配置文件读不了（打不开、读出错）时的启动提示（本次用默认值、不保存）。
+pub fn settings_unavailable(
+    language: UiLanguage,
+    source: SettingsSourceText,
+    error: &str,
+) -> String {
+    settings_recovery::unavailable(language, source, error)
+}
+
+/// 首次从旧配置文件迁移的设置没能写入时的启动提示。
+pub fn settings_migration_not_saved(language: UiLanguage, error: &str) -> String {
+    settings_recovery::migration_not_saved(language, error)
 }
 
 /// 撤销收纳把条目都移回后、新建目录没能删掉时的完成提示，构造时按给定语言产出成品。

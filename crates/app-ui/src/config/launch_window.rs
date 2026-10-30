@@ -37,7 +37,7 @@ pub(crate) fn stored_launch_window_policy() -> LaunchWindowPolicy {
         return DEFAULT_LAUNCH_WINDOW_POLICY;
     };
     store
-        .read_user_preferences()
+        .read_user_preferences(&file_operation_store::StoredUserPreferences::default())
         .ok()
         .flatten()
         .and_then(|read| {

@@ -30,9 +30,15 @@ pub enum UnreadablePreferences {
 }
 
 impl TaskQueueStore {
-    pub fn read_user_preferences(&self) -> StoreResult<Option<UserPreferencesRead>> {
+    /// `defaults` 是调用方自己的默认设置：读不懂的项、旧版本没有的项用它补。存储层
+    /// 不知道程序的默认值（比如启动目录取主目录），所以由调用方给。
+    pub fn read_user_preferences(
+        &self,
+        defaults: &StoredUserPreferences,
+    ) -> StoreResult<Option<UserPreferencesRead>> {
         let connection = self.connection()?;
-        Ok(read_payload(&connection)?.map(decode_user_preferences))
+        Ok(read_payload(&connection)?
+            .map(|raw_payload| decode_user_preferences(raw_payload, defaults)))
     }
 
     pub fn replace_user_preferences(&self, preferences: &StoredUserPreferences) -> StoreResult<()> {
@@ -40,10 +46,40 @@ impl TaskQueueStore {
         write_user_preferences(&connection, self.db_path(), preferences)
     }
 
-    /// 把读不懂的原始设置另存成数据库所在目录下的文件，返回文件路径。
-    pub fn back_up_user_preferences(&self, raw_payload: &str) -> StoreResult<PathBuf> {
-        back_up_payload(self.db_path(), raw_payload)
+    /// 主程序启动修复：先把读不懂的原始载荷另存成数据库所在目录下的文件，再写入
+    /// 修复后的设置（原始载荷是 JSON 对象时，其中本版本不认识的键照样保留）。备份
+    /// 失败返回 Err，什么都不写；备份成功后写回的结果单独交给调用方。
+    pub fn replace_unreadable_user_preferences(
+        &self,
+        raw_payload: &str,
+        repaired: &StoredUserPreferences,
+    ) -> StoreResult<UnreadablePreferencesBackup> {
+        let path = back_up_payload(self.db_path(), raw_payload)?;
+        Ok(UnreadablePreferencesBackup {
+            path,
+            write_back: write_repaired_payload(self, raw_payload, repaired),
+        })
     }
+}
+
+/// 读不懂的设置已备份。写回失败时库里仍是原数据，但它已有备份，之后照常保存
+/// 覆盖它不会丢东西，所以写回失败不像备份失败那样要拦住保存。
+#[derive(Debug)]
+pub struct UnreadablePreferencesBackup {
+    pub path: PathBuf,
+    pub write_back: StoreResult<()>,
+}
+
+fn write_repaired_payload(
+    store: &TaskQueueStore,
+    raw_payload: &str,
+    repaired: &StoredUserPreferences,
+) -> StoreResult<()> {
+    let mut payload = payload_object(repaired)?;
+    if let Ok(Value::Object(original)) = serde_json::from_str::<Value>(raw_payload) {
+        keep_unknown_keys(&mut payload, original);
+    }
+    upsert_payload(&store.connection()?, payload)
 }
 
 fn read_payload(connection: &Connection) -> StoreResult<Option<String>> {
@@ -56,10 +92,13 @@ fn read_payload(connection: &Connection) -> StoreResult<Option<String>> {
         .optional()?)
 }
 
-fn decode_user_preferences(raw_payload: String) -> UserPreferencesRead {
+fn decode_user_preferences(
+    raw_payload: String,
+    defaults: &StoredUserPreferences,
+) -> UserPreferencesRead {
     let (preferences, unreadable) = match serde_json::from_str(&raw_payload) {
         Ok(preferences) => (preferences, None),
-        Err(_) => salvage(&raw_payload),
+        Err(_) => salvage(&raw_payload, defaults),
     };
     UserPreferencesRead {
         preferences,
@@ -68,18 +107,18 @@ fn decode_user_preferences(raw_payload: String) -> UserPreferencesRead {
     }
 }
 
-/// 整体解析失败时逐项挽救：以默认值序列化出的对象为底，每个已知键单独代入
-/// 试解析，能解析的保留；数组键整体不行时逐个元素试（一条坏掉的网络连接不连累
+/// 整体解析失败时逐项挽救：以调用方的默认设置序列化出的对象为底，每个已知键单独
+/// 代入试解析，能解析的保留；数组键整体不行时逐个元素试（一条坏掉的网络连接不连累
 /// 其余）。缺失的键用默认值、不算读不懂（旧版本没有这一项）；不认识的键在这里
 /// 忽略，写时原样保留。
-fn salvage(raw_payload: &str) -> (StoredUserPreferences, Option<UnreadablePreferences>) {
+fn salvage(
+    raw_payload: &str,
+    defaults: &StoredUserPreferences,
+) -> (StoredUserPreferences, Option<UnreadablePreferences>) {
     let Ok(Value::Object(stored)) = serde_json::from_str::<Value>(raw_payload) else {
-        return (
-            StoredUserPreferences::default(),
-            Some(UnreadablePreferences::Whole),
-        );
+        return (defaults.clone(), Some(UnreadablePreferences::Whole));
     };
-    let mut merged = default_payload_object();
+    let mut merged = payload_object(defaults).expect("preferences serialize to JSON");
     let mut unreadable = Vec::new();
     for (key, value) in stored {
         if !merged.contains_key(&key) {
@@ -107,13 +146,6 @@ fn salvage(raw_payload: &str) -> (StoredUserPreferences, Option<UnreadablePrefer
     )
 }
 
-fn default_payload_object() -> Map<String, Value> {
-    match serde_json::to_value(StoredUserPreferences::default()) {
-        Ok(Value::Object(object)) => object,
-        _ => unreachable!("StoredUserPreferences serializes to a JSON object"),
-    }
-}
-
 fn accepts(base: &Map<String, Value>, key: &str, value: &Value) -> bool {
     let mut candidate = base.clone();
     candidate.insert(key.to_owned(), value.clone());
@@ -128,22 +160,33 @@ pub(crate) fn write_user_preferences(
     db_path: &Path,
     preferences: &StoredUserPreferences,
 ) -> StoreResult<()> {
-    let mut payload = match serde_json::to_value(preferences)? {
-        Value::Object(object) => object,
-        _ => unreachable!("StoredUserPreferences serializes to a JSON object"),
-    };
+    let mut payload = payload_object(preferences)?;
     if let Some(existing) = read_payload(connection)? {
         match serde_json::from_str::<Value>(&existing) {
-            Ok(Value::Object(existing)) => {
-                for (key, value) in existing {
-                    payload.entry(key).or_insert(value);
-                }
-            }
+            Ok(Value::Object(existing)) => keep_unknown_keys(&mut payload, existing),
             _ => {
                 back_up_payload(db_path, &existing)?;
             }
         }
     }
+    upsert_payload(connection, payload)
+}
+
+fn payload_object(preferences: &StoredUserPreferences) -> StoreResult<Map<String, Value>> {
+    match serde_json::to_value(preferences)? {
+        Value::Object(object) => Ok(object),
+        _ => unreachable!("StoredUserPreferences serializes to a JSON object"),
+    }
+}
+
+/// 本版本序列化出的载荷包含全部已知键，原载荷里多出来的就是不认识的键。
+fn keep_unknown_keys(payload: &mut Map<String, Value>, original: Map<String, Value>) {
+    for (key, value) in original {
+        payload.entry(key).or_insert(value);
+    }
+}
+
+fn upsert_payload(connection: &Connection, payload: Map<String, Value>) -> StoreResult<()> {
     connection.execute(
         "INSERT INTO user_preferences (preference_key, payload_json, updated_at_ms)
          VALUES (?1, ?2, ?3)

@@ -729,7 +729,7 @@ fn user_preferences_roundtrip_replace() {
 
 fn stored_preferences(store: &TaskQueueStore) -> Option<StoredUserPreferences> {
     store
-        .read_user_preferences()
+        .read_user_preferences(&StoredUserPreferences::default())
         .unwrap()
         .map(|read| read.preferences)
 }

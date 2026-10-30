@@ -31,10 +31,17 @@ pub(crate) use launch_window::{
 };
 pub(crate) mod startup;
 pub(crate) use startup::StartupLocationPolicy;
+mod settings_recovery;
+#[cfg(test)]
+pub(crate) use settings_recovery::ResetSettings;
+pub(crate) use settings_recovery::{SettingsPersistence, SettingsRecovery, SettingsSource};
+#[cfg(test)]
+mod settings_recovery_tests;
+mod unrecognized_settings;
+mod user_config_loading;
+pub(crate) use user_config_loading::load_user_config_for_app_config;
 mod user_preferences;
-pub(crate) use user_preferences::{
-    load_user_config_for_app_config, save_user_preferences, UserPreferences,
-};
+pub(crate) use user_preferences::{save_user_preferences, UserPreferences};
 
 const APP_DIR_NAME: &str = "bennu";
 pub(super) const CONFIG_FILE_NAME: &str = "config.toml";

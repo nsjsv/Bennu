@@ -1,4 +1,4 @@
-use file_core::{BatchRenameItem, DirectoryEntry};
+use file_core::{BatchRenameItem, DirectoryEntry, InvalidEntryName};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -9,6 +9,8 @@ mod rule_options;
 mod transforms;
 use preview::build_batch_rename_preview;
 
+#[cfg(test)]
+mod name_validation_tests;
 #[cfg(test)]
 mod tests;
 
@@ -453,7 +455,8 @@ pub(crate) enum BatchRenamePreviewStatus {
     Unchanged,
     DuplicateTarget,
     ExistingTarget,
-    EmptyName,
+    /// 名字本身不能用（空、`.`/`..`、含 `/` 或 NUL），与执行端 `validate_entry_name` 同一判定。
+    InvalidName(InvalidEntryName),
     RuleError,
 }
 
@@ -793,7 +796,7 @@ impl BatchRenameState {
         let has_problem = self.preview.rows.iter().any(|row| {
             matches!(
                 row.status,
-                BatchRenamePreviewStatus::EmptyName
+                BatchRenamePreviewStatus::InvalidName(_)
                     | BatchRenamePreviewStatus::DuplicateTarget
                     | BatchRenamePreviewStatus::ExistingTarget
                     | BatchRenamePreviewStatus::RuleError
@@ -928,7 +931,12 @@ impl BatchRenamePreviewStatus {
         match self {
             Self::Ready => "Ready",
             Self::Unchanged => "Unchanged",
-            Self::EmptyName => "Empty name",
+            Self::InvalidName(InvalidEntryName::Empty) => "Empty name",
+            Self::InvalidName(
+                InvalidEntryName::CurrentDirectory | InvalidEntryName::ParentDirectory,
+            ) => "Reserved name",
+            Self::InvalidName(InvalidEntryName::ContainsSlash) => "Contains \"/\"",
+            Self::InvalidName(InvalidEntryName::ContainsNul) => "Contains NUL",
             Self::DuplicateTarget => "Duplicate target",
             Self::ExistingTarget => "Already exists",
             Self::RuleError => "Rule error",

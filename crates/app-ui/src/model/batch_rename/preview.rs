@@ -1,6 +1,9 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+
+use file_core::validate_entry_name;
 
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
@@ -62,10 +65,13 @@ fn mark_batch_rename_preview_statuses(
     }
 
     for row in rows {
+        // 名字非法时 `target` 是拼出来的无意义路径（含 `/` 时甚至在别的目录），
+        // 必须先于重名与已存在判定。
+        let name_validity = validate_entry_name(OsStr::new(&row.target_name));
         row.status = if row.status == BatchRenamePreviewStatus::RuleError {
             BatchRenamePreviewStatus::RuleError
-        } else if row.target_name.is_empty() {
-            BatchRenamePreviewStatus::EmptyName
+        } else if let Err(reason) = name_validity {
+            BatchRenamePreviewStatus::InvalidName(reason)
         } else if target_counts.get(&row.target).copied().unwrap_or(0) > 1 {
             BatchRenamePreviewStatus::DuplicateTarget
         } else if existing_paths.contains(&row.target) && !source_paths.contains(&row.target) {

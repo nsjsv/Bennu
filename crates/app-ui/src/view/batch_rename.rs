@@ -1012,7 +1012,7 @@ fn status_color(theme: &Theme, status: crate::model::BatchRenamePreviewStatus) -
     match status {
         Ready => base_text_color(theme),
         Unchanged => muted_text_color(theme),
-        DuplicateTarget | ExistingTarget | EmptyName | RuleError => colors.error,
+        DuplicateTarget | ExistingTarget | InvalidName(_) | RuleError => colors.error,
     }
 }
 

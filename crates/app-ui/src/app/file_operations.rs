@@ -27,15 +27,8 @@ fn outcome_created_path(outcome: &FileOperationOutcome) -> Option<PathBuf> {
     match outcome {
         FileOperationOutcome::CreateDirectory { path }
         | FileOperationOutcome::CreateEmptyFile { path } => Some(path.clone()),
-        // 完成后重命名落点 = 第一个叶子链的绝对路径(嵌套链含中间段)。
-        FileOperationOutcome::CreateDirectories { parent, leaves, .. } => {
-            leaves.first().map(|leaf| {
-                leaf.split('/')
-                    .map(str::trim)
-                    .filter(|segment| !segment.is_empty())
-                    .fold(parent.clone(), |current, segment| current.join(segment))
-            })
-        }
+        // 完成后重命名落点 = 第一个叶子实际建成的目录(重名时已续编号)。
+        FileOperationOutcome::CreateDirectories { leaf_paths, .. } => leaf_paths.first().cloned(),
         FileOperationOutcome::GatheredIntoNewFolder { directory, .. } => Some(directory.clone()),
         _ => None,
     }
@@ -721,6 +714,8 @@ fn focus_rename_input_command() -> Task<Message> {
     ])
 }
 
+#[cfg(test)]
+mod created_entry_tests;
 #[cfg(test)]
 mod path_migration_tests;
 #[cfg(test)]

@@ -462,6 +462,95 @@ fn normal_operation_clears_redo_stack() {
     assert_eq!(history.undo_stack.len(), 1);
 }
 
+fn advanced_new_folder_outcome(moved: Vec<CompletedTransfer>) -> FileOperationOutcome {
+    FileOperationOutcome::CreateDirectories {
+        parent: PathBuf::from("/docs"),
+        leaves: vec!["p/q".to_owned(), "r".to_owned()],
+        leaf_paths: vec![PathBuf::from("/docs/p/q"), PathBuf::from("/docs/r 2")],
+        created: vec![
+            PathBuf::from("/docs/p"),
+            PathBuf::from("/docs/p/q"),
+            PathBuf::from("/docs/r 2"),
+        ],
+        moved,
+    }
+}
+
+#[test]
+fn undoing_an_advanced_new_folder_with_moved_items_moves_them_back() {
+    let mut history = FileOperationHistory::new();
+    history.accept_completed(
+        1,
+        &advanced_new_folder_outcome(vec![CompletedTransfer {
+            source: PathBuf::from("/docs/a.txt"),
+            target: PathBuf::from("/docs/p/q/a.txt"),
+        }]),
+    );
+
+    let (operation, _) = history.take_undo_operation().expect("undo operation");
+
+    let QueuedFileOperation::UngatherNewFolder {
+        directory,
+        restore_targets,
+        created_directories,
+    } = operation
+    else {
+        panic!("expected ungather, got {operation:?}");
+    };
+    assert_eq!(directory, PathBuf::from("/docs/p/q"));
+    assert_eq!(restore_targets, [PathBuf::from("/docs/a.txt")]);
+    assert_eq!(
+        created_directories,
+        [
+            PathBuf::from("/docs/p"),
+            PathBuf::from("/docs/p/q"),
+            PathBuf::from("/docs/r 2")
+        ]
+    );
+}
+
+#[test]
+fn undoing_an_advanced_new_folder_without_moved_items_trashes_its_top_level_folders() {
+    let mut history = FileOperationHistory::new();
+    history.accept_completed(1, &advanced_new_folder_outcome(Vec::new()));
+
+    let (operation, _) = history.take_undo_operation().expect("undo operation");
+
+    let QueuedFileOperation::Trash { paths } = operation else {
+        panic!("expected trash, got {operation:?}");
+    };
+    assert_eq!(
+        paths,
+        [PathBuf::from("/docs/p"), PathBuf::from("/docs/r 2")]
+    );
+}
+
+#[test]
+fn undoing_a_gather_removes_only_the_gathered_folder() {
+    let mut history = FileOperationHistory::new();
+    history.accept_completed(
+        1,
+        &FileOperationOutcome::GatheredIntoNewFolder {
+            directory: PathBuf::from("/docs/新建文件夹"),
+            moved: vec![CompletedTransfer {
+                source: PathBuf::from("/docs/a.txt"),
+                target: PathBuf::from("/docs/新建文件夹/a.txt"),
+            }],
+        },
+    );
+
+    let (operation, _) = history.take_undo_operation().expect("undo operation");
+
+    let QueuedFileOperation::UngatherNewFolder {
+        created_directories,
+        ..
+    } = operation
+    else {
+        panic!("expected ungather, got {operation:?}");
+    };
+    assert_eq!(created_directories, [PathBuf::from("/docs/新建文件夹")]);
+}
+
 #[test]
 fn ungathering_that_keeps_a_new_folder_warns_with_its_path_and_reason() {
     let outcome = FileOperationOutcome::NewFolderUngathered {

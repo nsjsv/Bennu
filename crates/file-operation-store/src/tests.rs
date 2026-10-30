@@ -232,6 +232,44 @@ fn rename_rows_written_with_text_new_names_still_decode() {
 }
 
 #[test]
+fn ungather_rows_written_before_created_directories_still_decode() {
+    let legacy_payload = r#"{"kind":"ungather_new_folder","directory":{"encoding":"utf8","value":"/docs/folder"},"restore_targets":[{"encoding":"utf8","value":"/docs/a.txt"}]}"#;
+
+    let decoded: StoredOperation = serde_json::from_str(legacy_payload).unwrap();
+
+    let StoredOperation::UngatherNewFolder {
+        directory,
+        restore_targets,
+        created_directories,
+    } = decoded
+    else {
+        panic!("expected an ungather operation, got {decoded:?}");
+    };
+    assert_eq!(directory.to_path_buf(), PathBuf::from("/docs/folder"));
+    assert_eq!(restore_targets.len(), 1);
+    assert!(created_directories.is_empty());
+}
+
+#[test]
+fn ungather_operation_roundtrips_created_directories() {
+    let (store, root) = test_store();
+    let operation = StoredOperation::UngatherNewFolder {
+        directory: StoredPath::from_path(Path::new("/docs/p/q")),
+        restore_targets: vec![StoredPath::from_path(Path::new("/docs/a.txt"))],
+        created_directories: vec![
+            StoredPath::from_path(Path::new("/docs/p")),
+            StoredPath::from_path(Path::new("/docs/p/q")),
+        ],
+    };
+
+    let id = store.insert_task(&operation).unwrap();
+    let task = store.read_task(id).unwrap().unwrap();
+
+    assert_eq!(task.operation, operation);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn column_widths_roundtrip_replace_and_clear() {
     let (store, root) = test_store();
     store

@@ -86,9 +86,14 @@ pub(super) fn queued_operation_to_stored(operation: &QueuedFileOperation) -> Sto
         QueuedFileOperation::UngatherNewFolder {
             directory,
             restore_targets,
+            created_directories,
         } => StoredOperation::UngatherNewFolder {
             directory: StoredPath::from_path(directory),
             restore_targets: restore_targets
+                .iter()
+                .map(|path| StoredPath::from_path(path))
+                .collect(),
+            created_directories: created_directories
                 .iter()
                 .map(|path| StoredPath::from_path(path))
                 .collect(),

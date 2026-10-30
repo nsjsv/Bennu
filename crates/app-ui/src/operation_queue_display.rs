@@ -73,6 +73,7 @@ impl QueuedFileOperation {
             Self::UngatherNewFolder {
                 directory,
                 restore_targets,
+                ..
             } => path_lines_from_gather(directory, restore_targets),
             Self::CreateSymbolicLinks { links } => {
                 let link_paths = links

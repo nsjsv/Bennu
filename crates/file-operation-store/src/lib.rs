@@ -358,6 +358,9 @@ pub enum StoredOperation {
     UngatherNewFolder {
         directory: StoredPath,
         restore_targets: Vec<StoredPath>,
+        /// 加入前写下的行没有这个字段，解码为空。
+        #[serde(default)]
+        created_directories: Vec<StoredPath>,
     },
     CreateSymbolicLinks {
         links: Vec<StoredSymbolicLinkCreation>,

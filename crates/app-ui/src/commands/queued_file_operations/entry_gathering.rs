@@ -55,7 +55,8 @@ pub(super) async fn run_queued_create_directories(
     Ok(FileOperationOutcome::CreateDirectories {
         parent,
         leaves: names,
-        top_level: top_level_directories(&tree.created),
+        leaf_paths: tree.leaves,
+        created: tree.created,
         moved: completed_transfers(tree.moved),
     })
 }
@@ -84,6 +85,7 @@ pub(super) async fn run_queued_gather_selection_into_new_folder(
 pub(super) async fn run_queued_ungather_new_folder(
     directory: PathBuf,
     restore_targets: Vec<PathBuf>,
+    created_directories: Vec<PathBuf>,
     mut controls: FileOperationControls,
     task_id: u64,
     output: &mut IcedSender<Message>,
@@ -93,8 +95,6 @@ pub(super) async fn run_queued_ungather_new_folder(
         output,
         task_id,
     };
-    // 收纳只新建了这一个目录。
-    let created_directories = vec![directory.clone()];
     let restored =
         restore_gathered_entries(directory, restore_targets, created_directories, &mut pacer)
             .await
@@ -109,20 +109,6 @@ pub(super) async fn run_queued_ungather_new_folder(
             })
             .collect(),
     })
-}
-
-/// 撤销回收集:新建目录里去掉是另一个新建目录后代的项,
-/// 让顶层目录整棵进回收站,不留下空壳中间层。
-fn top_level_directories(created: &[PathBuf]) -> Vec<PathBuf> {
-    created
-        .iter()
-        .filter(|path| {
-            !created
-                .iter()
-                .any(|other| *other != **path && path.strip_prefix(other).is_ok())
-        })
-        .cloned()
-        .collect()
 }
 
 fn completed_transfers(moves: Vec<EntryMove>) -> Vec<CompletedTransfer> {

@@ -214,9 +214,17 @@ async fn run_queued_file_operation(
         QueuedFileOperation::UngatherNewFolder {
             directory,
             restore_targets,
+            created_directories,
         } => {
-            run_queued_ungather_new_folder(directory, restore_targets, controls, task_id, output)
-                .await
+            run_queued_ungather_new_folder(
+                directory,
+                restore_targets,
+                created_directories,
+                controls,
+                task_id,
+                output,
+            )
+            .await
         }
         QueuedFileOperation::CreateSymbolicLinks { links } => {
             run_queued_create_symbolic_links(links, controls, task_id, output).await

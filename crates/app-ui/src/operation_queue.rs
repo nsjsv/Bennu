@@ -104,10 +104,12 @@ pub(crate) enum QueuedFileOperation {
         directory: PathBuf,
         sources: Vec<PathBuf>,
     },
-    /// GatherSelectionIntoNewFolder 的撤销:移回条目后删除空目录。
+    /// 收纳与"高级新建并移入"的撤销:条目从 `directory` 移回原位,再逆序删除
+    /// `created_directories`(按创建顺序)中已空的目录。
     UngatherNewFolder {
         directory: PathBuf,
         restore_targets: Vec<PathBuf>,
+        created_directories: Vec<PathBuf>,
     },
     CreateSymbolicLinks {
         links: Vec<SymbolicLinkCreation>,

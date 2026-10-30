@@ -356,8 +356,13 @@ impl FileBrowser {
             QueuedFileOperation::UngatherNewFolder {
                 directory,
                 restore_targets,
+                created_directories,
             } => {
                 self.invalidate_list_directory_summary_subtree_and_ancestor_chain(directory);
+                // 其余新建目录（另几个叶子、中间段）撤销时一并删除。
+                for created in created_directories {
+                    self.invalidate_list_directory_summary_subtree_and_ancestor_chain(created);
+                }
                 for restore_target in restore_targets {
                     self.invalidate_list_directory_summary_subtree_and_ancestor_chain(
                         restore_target,

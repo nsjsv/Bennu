@@ -57,12 +57,13 @@ pub(crate) enum FileOperationOutcome {
     CreateDirectory {
         path: PathBuf,
     },
-    /// 高级新建文件夹成果：叶子路径（含嵌套段）+ 撤销回收的顶层新目录
-    /// 集合 + 整批移入第一个目录的条目。
+    /// 高级新建文件夹成果：请求的叶子路径（重做按它重建）、各叶子实际建成的目录
+    /// （重名时续编号）、本次新建的全部目录（按创建顺序）、整批移入第一个叶子的条目。
     CreateDirectories {
         parent: PathBuf,
         leaves: Vec<String>,
-        top_level: Vec<PathBuf>,
+        leaf_paths: Vec<PathBuf>,
+        created: Vec<PathBuf>,
         moved: Vec<CompletedTransfer>,
     },
     CreateEmptyFile {
@@ -426,13 +427,14 @@ pub(crate) enum FileOperationHistoryItem {
     CreateDirectory {
         path: PathBuf,
     },
-    /// 高级新建文件夹成果。撤销 = 整批进回收站（与单建 CreateDirectory
-    /// 同语义，一条 undo 完事且数据无损）；移入过条目后源路径已变，
-    /// 重做不再可用。
+    /// 高级新建文件夹成果。没移入条目时撤销 = 顶层新目录整批进回收站（与单建
+    /// CreateDirectory 同语义）；移入过条目时撤销 = 条目挪回原位、删掉新建的空目录
+    /// （与撤销收纳一致），重做不再可用（源路径已变）。
     CreateDirectories {
         parent: PathBuf,
         leaves: Vec<String>,
-        top_level: Vec<PathBuf>,
+        leaf_paths: Vec<PathBuf>,
+        created: Vec<PathBuf>,
         moved: Vec<CompletedTransfer>,
     },
     CreateEmptyFile {
@@ -653,12 +655,14 @@ impl FileOperationHistoryItem {
             FileOperationOutcome::CreateDirectories {
                 parent,
                 leaves,
-                top_level,
+                leaf_paths,
+                created,
                 moved,
-            } if !top_level.is_empty() => Some(Self::CreateDirectories {
+            } if !created.is_empty() => Some(Self::CreateDirectories {
                 parent: parent.clone(),
                 leaves: leaves.clone(),
-                top_level: top_level.clone(),
+                leaf_paths: leaf_paths.clone(),
+                created: created.clone(),
                 moved: moved.clone(),
             }),
             FileOperationOutcome::CreateDirectories { .. } => None,
@@ -725,14 +729,26 @@ impl FileOperationHistoryItem {
                     paths: vec![path.clone()],
                 })
             }
-            // 批量新建与单建同语义：本次新建的顶层目录整批进回收站
-            //（嵌套链只回收顶层，复用的已有目录与空壳不残留）。
-            Self::CreateDirectories { top_level, .. } if !top_level.is_empty() => {
-                Some(QueuedFileOperation::Trash {
-                    paths: top_level.clone(),
-                })
+            // 移入过条目：与撤销收纳一致，条目挪回原位、新建的空目录逆序删除。
+            Self::CreateDirectories {
+                leaf_paths,
+                created,
+                moved,
+                ..
+            } if !moved.is_empty() => {
+                leaf_paths
+                    .first()
+                    .map(|directory| QueuedFileOperation::UngatherNewFolder {
+                        directory: directory.clone(),
+                        restore_targets: transfer_sources(moved),
+                        created_directories: created.clone(),
+                    })
             }
-            Self::CreateDirectories { .. } => None,
+            // 没移入条目：与单建同语义，本次新建的顶层目录整批进回收站
+            //（嵌套链只回收顶层，复用的已有目录不受影响）。
+            Self::CreateDirectories { created, .. } => Some(QueuedFileOperation::Trash {
+                paths: top_level_directories(created),
+            }),
             Self::Trash {
                 restore_entries, ..
             } if !restore_entries.is_empty() => Some(QueuedFileOperation::Restore {
@@ -752,10 +768,8 @@ impl FileOperationHistoryItem {
             Self::GatheredIntoNewFolder { directory, moved } => {
                 Some(QueuedFileOperation::UngatherNewFolder {
                     directory: directory.clone(),
-                    restore_targets: moved
-                        .iter()
-                        .map(|transfer| transfer.source.clone())
-                        .collect(),
+                    restore_targets: transfer_sources(moved),
+                    created_directories: vec![directory.clone()],
                 })
             }
         }
@@ -802,10 +816,7 @@ impl FileOperationHistoryItem {
             Self::GatheredIntoNewFolder { directory, moved } => {
                 Some(QueuedFileOperation::GatherSelectionIntoNewFolder {
                     directory: directory.clone(),
-                    sources: moved
-                        .iter()
-                        .map(|transfer| transfer.source.clone())
-                        .collect(),
+                    sources: transfer_sources(moved),
                 })
             }
         }
@@ -902,6 +913,26 @@ fn transfer_targets(transfers: &[CompletedTransfer]) -> Vec<PathBuf> {
         .iter()
         .rev()
         .map(|transfer| transfer.target.clone())
+        .collect()
+}
+
+fn transfer_sources(transfers: &[CompletedTransfer]) -> Vec<PathBuf> {
+    transfers
+        .iter()
+        .map(|transfer| transfer.source.clone())
+        .collect()
+}
+
+/// 新建目录里去掉是另一个新建目录后代的项：顶层目录整棵进回收站，不留下空壳中间层。
+fn top_level_directories(created: &[PathBuf]) -> Vec<PathBuf> {
+    created
+        .iter()
+        .filter(|path| {
+            !created
+                .iter()
+                .any(|other| *other != **path && path.strip_prefix(other).is_ok())
+        })
+        .cloned()
         .collect()
 }
 

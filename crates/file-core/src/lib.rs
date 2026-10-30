@@ -12,6 +12,7 @@ pub mod data_dir_migration;
 pub mod directory_metadata;
 pub mod entry;
 pub mod entry_naming;
+pub mod log_detail;
 pub mod media;
 pub mod mount_table;
 pub mod ops;

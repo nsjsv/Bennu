@@ -162,9 +162,13 @@ pub(crate) use context_menu_layout::{
 };
 mod application_logs;
 pub(crate) use application_logs::{
-    bounded_application_log_message, sanitized_application_log_detail, ApplicationLogEntry,
-    ApplicationLogLevel, ApplicationLogRequest, ApplicationLogSource, ApplicationLogViewState,
-    APPLICATION_LOG_ENTRY_LIMIT, APP_JOURNAL_IDENTIFIER, SEARCH_JOURNAL_IDENTIFIER,
+    ApplicationLogEntry, ApplicationLogLevel, ApplicationLogRequest, ApplicationLogSource,
+    ApplicationLogViewState, APPLICATION_LOG_ENTRY_LIMIT, APP_JOURNAL_IDENTIFIER,
+    SEARCH_JOURNAL_IDENTIFIER,
+};
+// 日志细节的脱敏与限长由 file-core 提供（文件操作队列也要用），主程序各处沿用此路径。
+pub(crate) use file_core::log_detail::{
+    bounded_application_log_message, sanitized_application_log_detail,
 };
 pub(crate) mod search;
 pub(crate) use search::{

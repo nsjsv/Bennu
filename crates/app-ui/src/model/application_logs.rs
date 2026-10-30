@@ -1,10 +1,6 @@
-use std::sync::OnceLock;
 use std::time::SystemTime;
 
-use regex::Regex;
-
 pub(crate) const APPLICATION_LOG_ENTRY_LIMIT: usize = 200;
-pub(crate) const APPLICATION_LOG_MESSAGE_CHAR_LIMIT: usize = 1_000;
 pub(crate) const APP_JOURNAL_IDENTIFIER: &str = "bennu-ui";
 pub(crate) const SEARCH_JOURNAL_IDENTIFIER: &str = "bennu-search";
 
@@ -165,43 +161,6 @@ impl ApplicationLogViewState {
     }
 }
 
-pub(crate) fn bounded_application_log_message(message: &str) -> String {
-    let mut characters = message.chars();
-    let prefix = characters
-        .by_ref()
-        .take(APPLICATION_LOG_MESSAGE_CHAR_LIMIT)
-        .collect::<String>();
-    if characters.next().is_none() {
-        return prefix;
-    }
-
-    let mut truncated = prefix
-        .chars()
-        .take(APPLICATION_LOG_MESSAGE_CHAR_LIMIT - 1)
-        .collect::<String>();
-    truncated.push('…');
-    truncated
-}
-
-pub(crate) fn sanitized_application_log_detail(detail: &str) -> String {
-    static URI_USERINFO: OnceLock<Regex> = OnceLock::new();
-    static SENSITIVE_ASSIGNMENT: OnceLock<Regex> = OnceLock::new();
-
-    let uri_userinfo = URI_USERINFO.get_or_init(|| {
-        Regex::new(r"(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)[^/\s?#@]*@")
-            .expect("credential URI regex must compile")
-    });
-    let sensitive_assignment = SENSITIVE_ASSIGNMENT.get_or_init(|| {
-        Regex::new(
-            r#"(?i)\b(password|passwd|token|secret|authorization|cookie)\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)"#,
-        )
-        .expect("sensitive assignment regex must compile")
-    });
-    let redacted = uri_userinfo.replace_all(detail, "${scheme}[redacted]@");
-    let redacted = sensitive_assignment.replace_all(&redacted, "$1=[redacted]");
-    bounded_application_log_message(&redacted)
-}
-
 #[cfg(test)]
 mod tests {
     use std::time::UNIX_EPOCH;
@@ -319,24 +278,7 @@ mod tests {
                 .map(|position| entry(ApplicationLogLevel::Info, position.to_string()))
                 .collect()),
         );
-        let long_message = "界".repeat(APPLICATION_LOG_MESSAGE_CHAR_LIMIT + 1);
-        let bounded = bounded_application_log_message(&long_message);
 
         assert_eq!(state.entries.len(), APPLICATION_LOG_ENTRY_LIMIT);
-        assert_eq!(bounded.chars().count(), APPLICATION_LOG_MESSAGE_CHAR_LIMIT);
-        assert!(bounded.ends_with('…'));
-    }
-
-    #[test]
-    fn persisted_log_detail_redacts_uri_and_assignment_credentials() {
-        let detail = "mount smb://alice:secret@example.test/share failed; token=abc123";
-        let sanitized = sanitized_application_log_detail(detail);
-
-        assert_eq!(
-            sanitized,
-            "mount smb://[redacted]@example.test/share failed; token=[redacted]"
-        );
-        assert!(!sanitized.contains("secret"));
-        assert!(!sanitized.contains("abc123"));
     }
 }

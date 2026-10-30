@@ -36,10 +36,9 @@ pub use file_manager_activation::{
 };
 pub use network_mounts::{
     load_network_mount_states, mount_network_connection, mount_network_connection_with_credentials,
-    parse_gio_mount_uris, resolve_gvfs_mount_path_from_root, unmount_network_connection,
-    validate_network_connection_uri, MountedNetworkConnection, NetworkConnection,
-    NetworkConnectionId, NetworkMountCredentials, NetworkMountError, NetworkMountState,
-    NetworkProtocol,
+    unmount_network_connection, validate_network_connection_uri, MountedNetworkConnection,
+    NetworkConnection, NetworkConnectionId, NetworkMountCredentials, NetworkMountError,
+    NetworkMountState, NetworkProtocol,
 };
 pub use network_secrets::{
     clear_network_connection_credentials, lookup_network_connection_credentials,

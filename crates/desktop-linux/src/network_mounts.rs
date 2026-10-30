@@ -1,20 +1,16 @@
+use std::cell::{Cell, RefCell};
 use std::fmt;
-use std::io;
-use std::path::{Path, PathBuf};
-use std::process::{ExitStatus, Output, Stdio};
-use std::time::Duration;
+use std::path::PathBuf;
+use std::rc::Rc;
 
+use gio::glib;
+use gio::prelude::{FileExt, MountExt, MountOperationExt, ObjectExt, VolumeMonitorExt};
 use thiserror::Error;
-use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
-use tokio::time::sleep;
+
+use crate::gio_runtime::{run_on_gio_thread, GioRuntimeError};
 
 mod uri;
-use uri::{parse_network_uri, percent_encode_gvfs_prefix};
-
-const GIO: &str = "gio";
-const GVFS_MOUNT_PATH_RETRIES: usize = 10;
-const GVFS_MOUNT_PATH_RETRY_DELAY: Duration = Duration::from_millis(100);
+use uri::parse_network_uri;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NetworkConnectionId(String);
@@ -202,80 +198,74 @@ impl fmt::Debug for NetworkMountCredentials {
     }
 }
 
+/// 挂载失败按 GIO 错误码分类，与系统界面语言无关；`source` 的消息由 GVfs 按系统语言给出，
+/// 原样留给用户看。
 #[derive(Debug, Error)]
 pub enum NetworkMountError {
     #[error("invalid network URI {uri:?}: {message}")]
     InvalidUri { uri: String, message: String },
-    #[error("could not run gio to list network mounts: {source}")]
-    ListSpawn {
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("gio failed to list network mounts with status {status}: {stderr}")]
-    ListFailed { status: ExitStatus, stderr: String },
-    #[error("could not run gio to mount {uri:?}: {source}")]
-    MountSpawn {
-        uri: String,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("could not send credentials to gio while mounting {uri:?}: {source}")]
-    MountCredentialWrite {
-        uri: String,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("gio failed to mount {uri:?} with status {status}: {stderr}")]
-    MountFailed {
-        uri: String,
-        status: ExitStatus,
-        stderr: String,
-    },
-    #[error("{backend} backend is unavailable for {uri:?}: {reason}")]
+    #[error(transparent)]
+    Runtime(#[from] GioRuntimeError),
+    #[error("{backend} backend is unavailable for {uri:?}: {source}")]
     BackendUnavailable {
         uri: String,
         backend: &'static str,
-        reason: String,
+        #[source]
+        source: glib::Error,
     },
-    #[error("could not run gio to unmount {uri:?}: {source}")]
-    UnmountSpawn {
+    #[error("could not sign in to {uri:?}: {source}")]
+    AuthenticationFailed {
         uri: String,
         #[source]
-        source: std::io::Error,
+        source: glib::Error,
     },
-    #[error("gio failed to unmount {uri:?} with status {status}: {stderr}")]
+    #[error("mounting {uri:?} needs an answer to {question:?}")]
+    QuestionDeclined {
+        uri: String,
+        question: String,
+        #[source]
+        source: glib::Error,
+    },
+    #[error("could not mount {uri:?}: {source}")]
+    MountFailed {
+        uri: String,
+        #[source]
+        source: glib::Error,
+    },
+    #[error("{uri:?} is not mounted")]
+    NotMounted { uri: String },
+    #[error("could not unmount {uri:?}: {source}")]
     UnmountFailed {
         uri: String,
-        status: ExitStatus,
-        stderr: String,
+        #[source]
+        source: glib::Error,
     },
-    #[error("GVfs FUSE root is unavailable for {uri:?}: {root:?}")]
-    FuseUnavailable { uri: String, root: PathBuf },
-    #[error("mounted GVfs path was not found for {uri:?} under {root:?}")]
-    MountPathUnavailable { uri: String, root: PathBuf },
+    #[error("{uri:?} is mounted but has no local path; GVfs FUSE may not be running")]
+    MountPathUnavailable { uri: String },
 }
 
 pub async fn load_network_mount_states(
     connections: Vec<NetworkConnection>,
 ) -> Result<Vec<(NetworkConnectionId, NetworkMountState)>, NetworkMountError> {
-    let listing = load_gio_mount_listing().await?;
-    let mount_uris = parse_gio_mount_uris(&listing);
-    let fuse_root = default_gvfs_fuse_root();
-    let mut states = Vec::with_capacity(connections.len());
-
-    for connection in connections {
-        let state = if mount_uris
-            .iter()
-            .any(|mount_uri| network_connection_matches_mounted_uri(&connection, mount_uri))
-        {
-            NetworkMountState::Mounted(resolve_gvfs_mount_path_from_root(&connection, &fuse_root)?)
-        } else {
-            NetworkMountState::Disconnected
-        };
-        states.push((connection.id, state));
-    }
-
-    Ok(states)
+    run_on_gio_thread(move |monitor| async move {
+        let mounted_uris = mounted_network_uris(&monitor);
+        connections
+            .into_iter()
+            .map(|connection| {
+                let state = if mounted_uris
+                    .iter()
+                    .any(|uri| network_connection_matches_mounted_uri(&connection, uri))
+                {
+                    let location = gio::File::for_uri(&connection.uri);
+                    NetworkMountState::Mounted(local_path_of_location(&connection, &location)?)
+                } else {
+                    NetworkMountState::Disconnected
+                };
+                Ok((connection.id, state))
+            })
+            .collect()
+    })
+    .await?
 }
 
 pub async fn mount_network_connection(
@@ -290,74 +280,244 @@ pub async fn mount_network_connection_with_credentials(
 ) -> Result<MountedNetworkConnection, NetworkMountError> {
     validate_network_connection_uri(connection.protocol, &connection.uri)?;
     let mount_uri = mount_uri_for_credentials(&connection, credentials.as_ref())?;
-    let output = run_gio_mount_command(&connection, &mount_uri, credentials.as_ref()).await?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-        if !mount_already_present_message(&stderr) {
-            return Err(mount_command_error(&connection, output.status, stderr));
-        }
-    }
-
-    let mount_path = wait_for_gvfs_mount_path(&connection).await?;
+    let mounting = connection.clone();
+    let mount_path = run_on_gio_thread(move |_| async move {
+        mount_on_gio_thread(&mounting, &mount_uri, credentials).await
+    })
+    .await??;
     Ok(MountedNetworkConnection {
         connection,
         mount_path,
     })
 }
 
-async fn run_gio_mount_command(
+/// 挂载并直接从挂载结果取本地路径：GVfs 位置的 `File::path()` 就是它在 FUSE 下的路径
+/// （含 SMB 子目录、SFTP 远端路径），不扫 FUSE 目录、不轮询。
+async fn mount_on_gio_thread(
     connection: &NetworkConnection,
     mount_uri: &str,
+    credentials: Option<NetworkMountCredentials>,
+) -> Result<PathBuf, NetworkMountError> {
+    let location = gio::File::for_uri(mount_uri);
+    let declined = Rc::new(RefCell::new(None));
+    let operation = mount_operation(credentials, declined.clone());
+    location
+        .mount_enclosing_volume_future(gio::MountMountFlags::NONE, Some(&operation))
+        .await
+        .or_else(already_mounted_is_success)
+        .map_err(|error| classify_mount_error(connection, error, declined.take()))?;
+    local_path_of_location(connection, &location)
+}
+
+/// 位置已经挂载是幂等成功，直接取它的本地路径。
+fn already_mounted_is_success(error: glib::Error) -> Result<(), glib::Error> {
+    if error.matches(gio::IOErrorEnum::AlreadyMounted) {
+        Ok(())
+    } else {
+        Err(error)
+    }
+}
+
+fn local_path_of_location(
+    connection: &NetworkConnection,
+    location: &gio::File,
+) -> Result<PathBuf, NetworkMountError> {
+    location
+        .path()
+        .ok_or_else(|| NetworkMountError::MountPathUnavailable {
+            uri: connection.uri.clone(),
+        })
+}
+
+/// 挂载过程中替用户放弃回答的提问；挂载以 `FailedHandled` 结束时据此区分原因。
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DeclinedPrompt {
+    Password,
+    Question(String),
+}
+
+/// 回答挂载时的提问。密码只回答一次：密码错时 GVfs 会再问，第二次放弃，挂载以认证失败
+/// 结束（原先往 gio 标准输入写一次密码也是这样结束）。没有凭据、以及其它提问（如 SFTP
+/// 主机指纹）一律放弃，不替用户做决定。
+fn mount_operation(
+    credentials: Option<NetworkMountCredentials>,
+    declined: Rc<RefCell<Option<DeclinedPrompt>>>,
+) -> gio::MountOperation {
+    let operation = gio::MountOperation::new();
+    let answered = Cell::new(false);
+    let password_declined = declined.clone();
+    operation.connect_ask_password(move |operation, _message, user, domain, flags| {
+        let answer = password_answer(
+            credentials.as_ref(),
+            answered.replace(true),
+            user,
+            domain,
+            flags,
+        );
+        reply_to_password_request(operation, answer, &password_declined);
+    });
+    operation.connect_local("ask-question", false, move |values| {
+        let question = values
+            .get(1)
+            .and_then(|value| value.get::<String>().ok())
+            .unwrap_or_default();
+        declined.replace(Some(DeclinedPrompt::Question(question)));
+        if let Some(operation) = values
+            .first()
+            .and_then(|value| value.get::<gio::MountOperation>().ok())
+        {
+            operation.reply(gio::MountOperationResult::Aborted);
+        }
+        None
+    });
+    operation
+}
+
+fn reply_to_password_request(
+    operation: &gio::MountOperation,
+    answer: PasswordAnswer,
+    declined: &RefCell<Option<DeclinedPrompt>>,
+) {
+    match answer {
+        PasswordAnswer::Provide {
+            username,
+            domain,
+            password,
+        } => {
+            operation.set_username(username.as_deref());
+            operation.set_domain(domain.as_deref());
+            operation.set_password(password.as_deref());
+            operation.set_password_save(gio::PasswordSave::Never);
+            operation.reply(gio::MountOperationResult::Handled);
+        }
+        PasswordAnswer::Decline => {
+            declined.replace(Some(DeclinedPrompt::Password));
+            operation.reply(gio::MountOperationResult::Aborted);
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum PasswordAnswer {
+    Provide {
+        username: Option<String>,
+        domain: Option<String>,
+        password: Option<String>,
+    },
+    Decline,
+}
+
+/// 只填 GVfs 要的项：需要域时用服务端给的默认域（SMB 的 WORKGROUP 等）。
+fn password_answer(
     credentials: Option<&NetworkMountCredentials>,
-) -> Result<Output, NetworkMountError> {
+    already_answered: bool,
+    default_user: &str,
+    default_domain: &str,
+    flags: gio::AskPasswordFlags,
+) -> PasswordAnswer {
     let Some(credentials) = credentials.filter(|credentials| !credentials.is_empty()) else {
-        return Command::new(GIO)
-            .arg("mount")
-            .arg(mount_uri)
-            .output()
+        return PasswordAnswer::Decline;
+    };
+    if already_answered {
+        return PasswordAnswer::Decline;
+    }
+    PasswordAnswer::Provide {
+        username: flags
+            .contains(gio::AskPasswordFlags::NEED_USERNAME)
+            .then(|| {
+                credentials
+                    .username
+                    .clone()
+                    .unwrap_or_else(|| default_user.to_owned())
+            }),
+        domain: flags
+            .contains(gio::AskPasswordFlags::NEED_DOMAIN)
+            .then(|| default_domain.to_owned()),
+        password: flags
+            .contains(gio::AskPasswordFlags::NEED_PASSWORD)
+            .then(|| credentials.password.clone()),
+    }
+}
+
+/// GVfs 后端没装或没运行时，GIO 对网络 URI 报 `NotSupported` / `NotMountableFile`；
+/// `FailedHandled` 表示提问被放弃，原因由 `declined` 给出。
+fn classify_mount_error(
+    connection: &NetworkConnection,
+    source: glib::Error,
+    declined: Option<DeclinedPrompt>,
+) -> NetworkMountError {
+    let uri = connection.uri.clone();
+    match source.kind::<gio::IOErrorEnum>() {
+        Some(gio::IOErrorEnum::NotSupported | gio::IOErrorEnum::NotMountableFile) => {
+            NetworkMountError::BackendUnavailable {
+                uri,
+                backend: connection.protocol.backend_name(),
+                source,
+            }
+        }
+        Some(gio::IOErrorEnum::PermissionDenied) => {
+            NetworkMountError::AuthenticationFailed { uri, source }
+        }
+        Some(gio::IOErrorEnum::FailedHandled) => match declined {
+            Some(DeclinedPrompt::Password) => {
+                NetworkMountError::AuthenticationFailed { uri, source }
+            }
+            Some(DeclinedPrompt::Question(question)) => NetworkMountError::QuestionDeclined {
+                uri,
+                question,
+                source,
+            },
+            None => NetworkMountError::MountFailed { uri, source },
+        },
+        _ => NetworkMountError::MountFailed { uri, source },
+    }
+}
+
+pub async fn unmount_network_connection(
+    connection: NetworkConnection,
+) -> Result<(), NetworkMountError> {
+    validate_network_connection_uri(connection.protocol, &connection.uri)?;
+    run_on_gio_thread(move |monitor| async move {
+        let mount = monitor
+            .mounts()
+            .into_iter()
+            .find(|mount| {
+                mount_uris(mount)
+                    .iter()
+                    .any(|uri| network_connection_matches_mounted_uri(&connection, uri))
+            })
+            .ok_or_else(|| NetworkMountError::NotMounted {
+                uri: connection.uri.clone(),
+            })?;
+        mount
+            .unmount_with_operation_future(
+                gio::MountUnmountFlags::NONE,
+                None::<&gio::MountOperation>,
+            )
             .await
-            .map_err(|source| NetworkMountError::MountSpawn {
+            .map_err(|source| NetworkMountError::UnmountFailed {
                 uri: connection.uri.clone(),
                 source,
-            });
-    };
+            })
+    })
+    .await?
+}
 
-    let mut child = Command::new(GIO)
-        .arg("mount")
-        .arg(mount_uri)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|source| NetworkMountError::MountSpawn {
-            uri: connection.uri.clone(),
-            source,
-        })?;
-    let Some(mut stdin) = child.stdin.take() else {
-        return Err(NetworkMountError::MountCredentialWrite {
-            uri: connection.uri.clone(),
-            source: io::Error::new(io::ErrorKind::BrokenPipe, "gio stdin was unavailable"),
-        });
-    };
-    stdin
-        .write_all(&gio_mount_credential_stdin(
-            connection.protocol,
-            credentials,
-        ))
-        .await
-        .map_err(|source| NetworkMountError::MountCredentialWrite {
-            uri: connection.uri.clone(),
-            source,
-        })?;
-    drop(stdin);
+fn mounted_network_uris(monitor: &gio::VolumeMonitor) -> Vec<String> {
+    let mut uris = Vec::new();
+    for uri in monitor.mounts().iter().flat_map(mount_uris) {
+        if is_supported_network_uri(&uri) && !uris.contains(&uri) {
+            uris.push(uri);
+        }
+    }
+    uris
+}
 
-    child
-        .wait_with_output()
-        .await
-        .map_err(|source| NetworkMountError::MountSpawn {
-            uri: connection.uri.clone(),
-            source,
-        })
+fn mount_uris(mount: &gio::Mount) -> [String; 2] {
+    [
+        mount.root().uri().to_string(),
+        mount.default_location().uri().to_string(),
+    ]
 }
 
 fn mount_uri_for_credentials(
@@ -377,45 +537,6 @@ fn mount_uri_for_credentials(
         });
     }
     Ok(parts.to_uri_with_username(parts.canonical_scheme(), username.as_deref()))
-}
-
-fn gio_mount_credential_stdin(
-    protocol: NetworkProtocol,
-    credentials: &NetworkMountCredentials,
-) -> Vec<u8> {
-    let mut input = Vec::with_capacity(credentials.password.len() + 2);
-    if protocol == NetworkProtocol::Smb {
-        // gvfsd-smb 会先询问 Domain [WORKGROUP]，空行表示接受默认域。
-        input.push(b'\n');
-    }
-    input.extend_from_slice(credentials.password.as_bytes());
-    input.push(b'\n');
-    input
-}
-
-pub async fn unmount_network_connection(
-    connection: NetworkConnection,
-) -> Result<(), NetworkMountError> {
-    validate_network_connection_uri(connection.protocol, &connection.uri)?;
-    let output = Command::new(GIO)
-        .arg("mount")
-        .arg("-u")
-        .arg(&connection.uri)
-        .output()
-        .await
-        .map_err(|source| NetworkMountError::UnmountSpawn {
-            uri: connection.uri.clone(),
-            source,
-        })?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(NetworkMountError::UnmountFailed {
-            uri: connection.uri,
-            status: output.status,
-            stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-        })
-    }
 }
 
 pub fn validate_network_connection_uri(
@@ -455,236 +576,6 @@ pub fn normalize_network_connection_uri(
         });
     }
     Ok(parts.to_uri(mount_scheme))
-}
-
-pub fn parse_gio_mount_uris(output: &str) -> Vec<String> {
-    let mut uris = Vec::new();
-    for line in output.lines().map(str::trim) {
-        if let Some(uri) = line
-            .strip_prefix("default_location=")
-            .or_else(|| line.rsplit_once("->").map(|(_, uri)| uri.trim()))
-        {
-            if is_supported_network_uri(uri) && !uris.iter().any(|existing| existing == uri) {
-                uris.push(uri.to_owned());
-            }
-        }
-    }
-    uris
-}
-
-pub fn resolve_gvfs_mount_path_from_root(
-    connection: &NetworkConnection,
-    root: &Path,
-) -> Result<PathBuf, NetworkMountError> {
-    if !root.is_dir() {
-        return Err(NetworkMountError::FuseUnavailable {
-            uri: connection.uri.clone(),
-            root: root.to_path_buf(),
-        });
-    }
-    let mut entries = std::fs::read_dir(root).map_err(|_| NetworkMountError::FuseUnavailable {
-        uri: connection.uri.clone(),
-        root: root.to_path_buf(),
-    })?;
-
-    while let Some(entry) =
-        entries
-            .next()
-            .transpose()
-            .map_err(|_| NetworkMountError::MountPathUnavailable {
-                uri: connection.uri.clone(),
-                root: root.to_path_buf(),
-            })?
-    {
-        if gvfs_mount_directory_matches(&entry.file_name().to_string_lossy(), connection)? {
-            return gvfs_mount_path_for_connection(entry.path(), connection);
-        }
-    }
-
-    Err(NetworkMountError::MountPathUnavailable {
-        uri: connection.uri.clone(),
-        root: root.to_path_buf(),
-    })
-}
-
-fn mount_command_error(
-    connection: &NetworkConnection,
-    status: ExitStatus,
-    stderr: String,
-) -> NetworkMountError {
-    if backend_error_message(&stderr).is_some() {
-        NetworkMountError::BackendUnavailable {
-            uri: connection.uri.clone(),
-            backend: connection.protocol.backend_name(),
-            reason: stderr,
-        }
-    } else {
-        NetworkMountError::MountFailed {
-            uri: connection.uri.clone(),
-            status,
-            stderr,
-        }
-    }
-}
-
-fn gio_unavailable_message(stderr: &str) -> Option<&str> {
-    let lower = stderr.to_lowercase();
-    if lower.contains("error creating proxy")
-        || lower.contains("no backend")
-        || lower.contains("no such interface")
-        || lower.contains("not mountable")
-    {
-        return Some("gvfs proxy/backend unavailable");
-    }
-    ["not supported", "unsupported", "volume doesn"]
-        .into_iter()
-        .find(|marker| lower.contains(marker))
-}
-
-fn backend_error_message(stderr: &str) -> Option<&str> {
-    gio_unavailable_message(stderr)
-}
-
-fn mount_already_present_message(stderr: &str) -> bool {
-    stderr.to_lowercase().contains("already mounted")
-}
-
-async fn load_gio_mount_listing() -> Result<String, NetworkMountError> {
-    let output = Command::new(GIO)
-        .arg("mount")
-        .arg("-l")
-        .output()
-        .await
-        .map_err(|source| NetworkMountError::ListSpawn { source })?;
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-    if gio_unavailable_message(&stderr).is_some() {
-        return Err(NetworkMountError::BackendUnavailable {
-            uri: "gio mount -l".to_owned(),
-            backend: "GVfs/GIO",
-            reason: stderr,
-        });
-    }
-    if !output.status.success() {
-        return Err(NetworkMountError::ListFailed {
-            status: output.status,
-            stderr,
-        });
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
-async fn wait_for_gvfs_mount_path(
-    connection: &NetworkConnection,
-) -> Result<PathBuf, NetworkMountError> {
-    let fuse_root = default_gvfs_fuse_root();
-    let mut last_error = None;
-    for _ in 0..GVFS_MOUNT_PATH_RETRIES {
-        match resolve_gvfs_mount_path_from_root(connection, &fuse_root) {
-            Ok(path) => return Ok(path),
-            Err(NetworkMountError::MountPathUnavailable { .. }) => {
-                last_error = Some(NetworkMountError::MountPathUnavailable {
-                    uri: connection.uri.clone(),
-                    root: fuse_root.clone(),
-                });
-                sleep(GVFS_MOUNT_PATH_RETRY_DELAY).await;
-            }
-            Err(error) => return Err(error),
-        }
-    }
-    Err(
-        last_error.unwrap_or_else(|| NetworkMountError::MountPathUnavailable {
-            uri: connection.uri.clone(),
-            root: fuse_root,
-        }),
-    )
-}
-
-fn default_gvfs_fuse_root() -> PathBuf {
-    crate::gvfs_paths::default_gvfs_fuse_root()
-}
-
-fn gvfs_mount_directory_matches(
-    directory_name: &str,
-    connection: &NetworkConnection,
-) -> Result<bool, NetworkMountError> {
-    let parts = parse_network_uri(&connection.uri)?;
-    match connection.protocol {
-        NetworkProtocol::Smb => {
-            let Some(values) = directory_name
-                .strip_prefix("smb-share:")
-                .map(parse_gvfs_mount_values)
-            else {
-                return Ok(false);
-            };
-            Ok(values
-                .get("server")
-                .is_some_and(|server| server == &parts.host)
-                && values
-                    .get("share")
-                    .is_some_and(|share| Some(share) == parts.path_segments.first()))
-        }
-        NetworkProtocol::WebDav => {
-            let Some(values) = directory_name
-                .strip_prefix("dav:")
-                .map(parse_gvfs_mount_values)
-            else {
-                return Ok(false);
-            };
-            let ssl = if parts.canonical_scheme() == "davs" {
-                "true"
-            } else {
-                "false"
-            };
-            Ok(values.get("host").is_some_and(|host| host == &parts.host)
-                && values.get("ssl").is_some_and(|value| value == ssl)
-                && values
-                    .get("prefix")
-                    .is_some_and(|prefix| prefix == &percent_encode_gvfs_prefix(&parts.path)))
-        }
-        NetworkProtocol::Sftp => {
-            let Some(values) = directory_name
-                .strip_prefix("sftp:")
-                .map(parse_gvfs_mount_values)
-            else {
-                return Ok(false);
-            };
-            Ok(values.get("host").is_some_and(|host| host == &parts.host)
-                && sftp_gvfs_user_matches(parts.username().as_deref(), values.get("user")))
-        }
-    }
-}
-
-fn gvfs_mount_path_for_connection(
-    mount_root: PathBuf,
-    connection: &NetworkConnection,
-) -> Result<PathBuf, NetworkMountError> {
-    if connection.protocol != NetworkProtocol::Sftp {
-        return Ok(mount_root);
-    }
-    let parts = parse_network_uri(&connection.uri)?;
-    Ok(parts
-        .path_segments
-        .iter()
-        .fold(mount_root, |path, segment| path.join(segment)))
-}
-
-fn sftp_gvfs_user_matches(connection_user: Option<&str>, mount_user: Option<&String>) -> bool {
-    match (connection_user, mount_user) {
-        (Some(connection_user), Some(mount_user)) => {
-            mount_user == connection_user
-                || mount_user == &percent_encode_gvfs_prefix(connection_user)
-        }
-        (None, None) => true,
-        _ => false,
-    }
-}
-
-fn parse_gvfs_mount_values(value: &str) -> std::collections::HashMap<String, String> {
-    value
-        .split(',')
-        .filter_map(|item| item.split_once('='))
-        .map(|(key, value)| (key.to_owned(), value.to_owned()))
-        .collect()
 }
 
 fn network_connection_label_from_uri(uri: &str) -> String {

@@ -105,20 +105,6 @@ pub(super) fn parse_network_uri(uri: &str) -> Result<NetworkUriParts, NetworkMou
     })
 }
 
-pub(super) fn percent_encode_gvfs_prefix(path: &str) -> String {
-    let path = if path.is_empty() { "/" } else { path };
-    let mut output = String::with_capacity(path.len());
-    for byte in path.as_bytes() {
-        match *byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                output.push(*byte as char)
-            }
-            _ => output.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    output
-}
-
 fn percent_encode_userinfo(value: &str) -> String {
     let mut output = String::with_capacity(value.len());
     for byte in value.as_bytes() {

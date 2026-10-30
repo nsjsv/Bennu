@@ -15,8 +15,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     resolve_directory_metadata, sort_discovered_entry_indices, sort_entries, DirectoryEntry,
     DirectoryMetadataRequest, DirectoryMetadataRequirement, DirectoryMetadataResolver,
-    DiscoveredDirectoryEntry, FileKind, LeftoverDirectory, SortDirection, SortField,
-    UnrestoredEntry,
+    DiscoveredDirectoryEntry, FileKind, LeftoverEntry, SortDirection, SortField, UnrestoredEntry,
 };
 
 const DIRECTORY_SCAN_BATCH_SIZE: usize = 128;
@@ -432,6 +431,13 @@ pub enum FileError {
         #[source]
         source: std::io::Error,
     },
+    #[error("could not create link {link:?} to {target:?}: {source}")]
+    CreateSymbolicLink {
+        link: PathBuf,
+        target: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("could not rename {from:?} to {to:?}: {source}")]
     Rename {
         from: PathBuf,
@@ -440,13 +446,13 @@ pub enum FileError {
         source: std::io::Error,
     },
     /// 改名或移动失败后回滚没能回到操作前。`cause` 是最初的失败,
-    /// `unrestored` 逐条记录没恢复的条目此刻在哪里,`leftover_directories`
-    /// 是本次新建、回滚时却没能删掉的目录。
-    #[error("{cause}; {}", rollback_details(.unrestored, .leftover_directories))]
+    /// `unrestored` 逐条记录没恢复的条目此刻在哪里,`leftover_entries`
+    /// 是本次新建、回滚时却没能删掉的目录或链接。
+    #[error("{cause}; {}", rollback_details(.unrestored, .leftover_entries))]
     EntryMovesIncomplete {
         cause: Box<FileError>,
         unrestored: Vec<UnrestoredEntry>,
-        leftover_directories: Vec<LeftoverDirectory>,
+        leftover_entries: Vec<LeftoverEntry>,
     },
     #[error("could not copy {from:?} to {to:?}: {source}")]
     Copy {
@@ -515,10 +521,7 @@ pub enum FileError {
     Unsupported(&'static str),
 }
 
-fn rollback_details(
-    unrestored: &[UnrestoredEntry],
-    leftover_directories: &[LeftoverDirectory],
-) -> String {
+fn rollback_details(unrestored: &[UnrestoredEntry], leftover_entries: &[LeftoverEntry]) -> String {
     let mut parts = Vec::new();
     if !unrestored.is_empty() {
         let items = unrestored
@@ -528,13 +531,13 @@ fn rollback_details(
             .join("; ");
         parts.push(format!("could not restore original names: {items}"));
     }
-    if !leftover_directories.is_empty() {
-        let directories = leftover_directories
+    if !leftover_entries.is_empty() {
+        let entries = leftover_entries
             .iter()
-            .map(|directory| format!("{:?} ({})", directory.path, directory.error))
+            .map(|entry| format!("{:?} ({})", entry.path, entry.error))
             .collect::<Vec<_>>()
             .join("; ");
-        parts.push(format!("could not remove new folders: {directories}"));
+        parts.push(format!("could not remove created entries: {entries}"));
     }
     parts.join("; ")
 }

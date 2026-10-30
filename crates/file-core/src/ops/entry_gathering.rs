@@ -8,7 +8,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use super::entry_moves::{
-    move_without_replacing, EntryTreeFilesystem, LeftoverDirectory, SystemEntryFilesystem,
+    move_without_replacing, EntryTreeFilesystem, LeftoverEntry, SystemEntryFilesystem,
     UnrestoredEntry,
 };
 use crate::entry_naming::{
@@ -47,7 +47,7 @@ pub struct CreatedDirectoryTree {
 #[derive(Debug)]
 pub struct RestoredGatheredEntries {
     /// 条目都已挪回、但没能删掉的新建目录（多半是用户往里放了别的内容）。
-    pub kept_directories: Vec<LeftoverDirectory>,
+    pub kept_directories: Vec<LeftoverEntry>,
 }
 
 /// 在 `preferred` 处（被占用则按"名字 2"续编号）新建目录，把 `sources` 逐个挪进去。
@@ -197,7 +197,7 @@ pub(crate) async fn restore_gathered_entries_with(
         .rev()
         .filter_map(|created| {
             let error = filesystem.remove_dir(created).err()?;
-            Some(LeftoverDirectory {
+            Some(LeftoverEntry {
                 path: created.clone(),
                 error,
             })
@@ -226,7 +226,7 @@ impl AppliedChanges {
                 });
             }
         }
-        let mut leftover_directories = Vec::new();
+        let mut leftover_entries = Vec::new();
         for created in self.created.iter().rev() {
             // 里面还留着没挪回去的条目：目录只能留下，条目的位置已经在 unrestored 里。
             if unrestored
@@ -236,19 +236,19 @@ impl AppliedChanges {
                 continue;
             }
             if let Err(error) = filesystem.remove_dir(created) {
-                leftover_directories.push(LeftoverDirectory {
+                leftover_entries.push(LeftoverEntry {
                     path: created.clone(),
                     error,
                 });
             }
         }
-        if unrestored.is_empty() && leftover_directories.is_empty() {
+        if unrestored.is_empty() && leftover_entries.is_empty() {
             cause
         } else {
             FileError::EntryMovesIncomplete {
                 cause: Box::new(cause),
                 unrestored,
-                leftover_directories,
+                leftover_entries,
             }
         }
     }

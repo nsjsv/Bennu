@@ -83,9 +83,9 @@ pub use ops::{
     VideoTargetFormat,
 };
 pub use ops::{
-    create_directory_tree, gather_entries_into_new_directory, restore_gathered_entries,
-    CreatedDirectoryTree, EntryMove, EntryStepPacer, GatheredEntries, LeftoverDirectory,
-    RestoredGatheredEntries,
+    create_directory_tree, create_symbolic_links, gather_entries_into_new_directory,
+    restore_gathered_entries, CreatedDirectoryTree, EntryMove, EntryStepPacer, GatheredEntries,
+    LeftoverEntry, RestoredGatheredEntries, SymbolicLinkRequest,
 };
 pub use ops::{
     CopiedTarget, MetadataKind, MetadataLossSample, MetadataLossSummary, METADATA_LOSS_SAMPLE_LIMIT,

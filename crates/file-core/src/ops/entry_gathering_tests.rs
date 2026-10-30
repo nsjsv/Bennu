@@ -5,6 +5,7 @@ use tempfile::tempdir;
 use super::*;
 use crate::ops::entry_moves::{EntryFilesystem, ObjectIdentity};
 use crate::ops::recoverable_transfer::NoReplaceRenameError;
+use crate::ops::scripted_pacer::ScriptedPacer;
 
 type RenameFailure = Box<dyn Fn(&Path, &Path) -> bool + Send>;
 type RemoveDirFailure = Box<dyn Fn(&Path) -> bool + Send>;
@@ -65,42 +66,6 @@ impl EntryTreeFilesystem for InjectedFailures {
     }
 }
 
-/// 第 `cancel_before` 步（从 0 数）开始前返回取消；记录每次上报的进度。
-#[derive(Default)]
-struct ScriptedPacer {
-    steps_started: usize,
-    cancel_before: Option<usize>,
-    progress: Vec<(usize, usize)>,
-}
-
-impl ScriptedPacer {
-    fn cancelling_before(step: usize) -> Self {
-        Self {
-            cancel_before: Some(step),
-            ..Self::default()
-        }
-    }
-}
-
-impl EntryStepPacer for ScriptedPacer {
-    fn before_step(&mut self) -> impl Future<Output = Result<(), FileError>> + Send {
-        let cancel = self.cancel_before == Some(self.steps_started);
-        self.steps_started += 1;
-        async move {
-            if cancel {
-                Err(FileError::Cancelled)
-            } else {
-                Ok(())
-            }
-        }
-    }
-
-    fn step_finished(&mut self, completed: usize, total: usize) -> impl Future<Output = ()> + Send {
-        self.progress.push((completed, total));
-        async {}
-    }
-}
-
 /// 目录下的全部相对路径（含子目录内容），排序后比较整棵树。
 fn tree(root: &Path) -> Vec<String> {
     let mut paths = Vec::new();
@@ -131,13 +96,13 @@ fn two_sources(root: &Path) -> Vec<PathBuf> {
     vec![root.join("a.txt"), root.join("b")]
 }
 
-fn incomplete(error: &FileError) -> (&FileError, &[UnrestoredEntry], &[LeftoverDirectory]) {
+fn incomplete(error: &FileError) -> (&FileError, &[UnrestoredEntry], &[LeftoverEntry]) {
     match error {
         FileError::EntryMovesIncomplete {
             cause,
             unrestored,
-            leftover_directories,
-        } => (cause, unrestored, leftover_directories),
+            leftover_entries,
+        } => (cause, unrestored, leftover_entries),
         other => panic!("expected an incomplete rollback, got {other:?}"),
     }
 }
@@ -249,13 +214,13 @@ async fn gather_reports_an_item_it_could_not_move_back() {
     .await
     .unwrap_err();
 
-    let (cause, unrestored, leftover_directories) = incomplete(&error);
+    let (cause, unrestored, leftover_entries) = incomplete(&error);
     assert!(matches!(cause, FileError::Rename { .. }));
     assert_eq!(unrestored.len(), 1);
     assert_eq!(unrestored[0].original, root.path().join("a.txt"));
     assert_eq!(unrestored[0].current, root.path().join("folder/a.txt"));
     // 目录里还有没挪回的条目，只能留下；它的位置已经由 unrestored 说明。
-    assert!(leftover_directories.is_empty());
+    assert!(leftover_entries.is_empty());
     assert_eq!(
         tree(root.path()),
         ["b", "b/child.txt", "folder", "folder/a.txt"]
@@ -281,11 +246,13 @@ async fn gather_reports_a_new_folder_it_could_not_remove() {
     .await
     .unwrap_err();
 
-    let (_, unrestored, leftover_directories) = incomplete(&error);
+    let (_, unrestored, leftover_entries) = incomplete(&error);
     assert!(unrestored.is_empty());
-    assert_eq!(leftover_directories.len(), 1);
-    assert_eq!(leftover_directories[0].path, root.path().join("folder"));
-    assert!(error.to_string().contains("could not remove new folders"));
+    assert_eq!(leftover_entries.len(), 1);
+    assert_eq!(leftover_entries[0].path, root.path().join("folder"));
+    assert!(error
+        .to_string()
+        .contains("could not remove created entries"));
 }
 
 #[tokio::test]

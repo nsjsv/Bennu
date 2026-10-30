@@ -16,6 +16,9 @@ mod entry_moves;
 mod fake_entry_filesystem;
 mod metadata_loss;
 mod recoverable_transfer;
+#[cfg(test)]
+mod scripted_pacer;
+mod symbolic_links;
 pub use convert::{
     available_conversion_encoders, convert_file_with_controls, locate_media_tool, media_duration,
     AudioChannelSpec, AudioTargetFormat, ConversionEncoderAvailability, ConversionQualityPreset,
@@ -54,10 +57,11 @@ pub use entry_gathering::{
     create_directory_tree, gather_entries_into_new_directory, restore_gathered_entries,
     CreatedDirectoryTree, EntryMove, EntryStepPacer, GatheredEntries, RestoredGatheredEntries,
 };
-pub use entry_moves::{rename_entry, LeftoverDirectory, UnrestoredEntry};
+pub use entry_moves::{rename_entry, LeftoverEntry, UnrestoredEntry};
 pub use metadata_loss::{
     MetadataKind, MetadataLossSample, MetadataLossSummary, METADATA_LOSS_SAMPLE_LIMIT,
 };
+pub use symbolic_links::{create_symbolic_links, SymbolicLinkRequest};
 use transfer_object::{TransferSourceKind, TransferSourceObject};
 pub use transfer_strategy::{
     copy_regular_file_payload, ficlone_supported, PayloadCopyOutcome, PayloadCopyStrategy,

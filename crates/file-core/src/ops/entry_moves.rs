@@ -23,9 +23,10 @@ pub struct UnrestoredEntry {
     pub error: FileError,
 }
 
-/// 本次新建、回滚或撤销时却没能删掉的目录，多半是里面有了别的内容。
+/// 本次新建、回滚或撤销时却没能删掉的目录或链接：目录多半是里面有了别的内容，
+/// 链接多半是已被换成了别的东西。
 #[derive(Debug)]
-pub struct LeftoverDirectory {
+pub struct LeftoverEntry {
     pub path: PathBuf,
     pub error: io::Error,
 }
@@ -178,7 +179,7 @@ fn rename_onto_same_object(
                 current: temporary.clone(),
                 error: no_replace_rename_error(restore_error, &temporary, path),
             }],
-            leftover_directories: Vec::new(),
+            leftover_entries: Vec::new(),
         }),
     }
 }

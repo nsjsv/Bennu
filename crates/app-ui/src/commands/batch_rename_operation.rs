@@ -78,7 +78,7 @@ mod tests {
                     source: io::Error::new(io::ErrorKind::PermissionDenied, "denied"),
                 },
             }],
-            leftover_directories: Vec::new(),
+            leftover_entries: Vec::new(),
         }
     }
 

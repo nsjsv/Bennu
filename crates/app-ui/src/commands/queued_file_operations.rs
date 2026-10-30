@@ -6,15 +6,16 @@ use std::time::{Duration, Instant};
 
 use file_core::{
     create_archive_with_controls_and_progress, create_directory, create_empty_file,
-    delete_path_permanently, extract_archive_with_controls_and_progress,
+    create_symbolic_links, delete_path_permanently, extract_archive_with_controls_and_progress,
     is_direct_move_segment_candidate, persist_recoverable_source_manifest_with_controls,
     prepare_direct_move_intent_segment, rename_entry, run_direct_move_batch_to_durable_renamed,
     run_recoverable_transfer, ArchiveCreationRequest, ArchiveExtractionRequest, CopyProgress,
     DirectMoveBatchRecord, DirectMoveIntentBatchRecord, FileError, FileOperationControls,
     FileOperationVerification, FileTransferOptions, RecoverableTransferError,
-    RecoverableTransferOperation, RecoverableTransferOutcome, TransferConflictStrategy,
-    TransferJournal, TransferJournalError, TransferJournalMutation, TransferJournalRecord,
-    TransferWorkKey, TrashCommitBatch, TrashRestoreEntry, TrashVerificationBatch,
+    RecoverableTransferOperation, RecoverableTransferOutcome, SymbolicLinkRequest,
+    TransferConflictStrategy, TransferJournal, TransferJournalError, TransferJournalMutation,
+    TransferJournalRecord, TransferWorkKey, TrashCommitBatch, TrashRestoreEntry,
+    TrashVerificationBatch,
 };
 use file_operation_store::TaskQueueStore;
 use iced::futures::channel::mpsc::Sender as IcedSender;
@@ -36,6 +37,7 @@ use self::entry_gathering::{
     run_queued_ungather_new_folder,
 };
 use self::extract_members::run_queued_extract_archive_members;
+use self::step_pacer::QueuedStepPacer;
 use super::batch_rename_operation::{rename_failure_text, run_queued_batch_rename};
 use super::convert_operation::run_queued_convert;
 
@@ -552,25 +554,17 @@ async fn run_queued_create_symbolic_links(
     task_id: u64,
     output: &mut IcedSender<Message>,
 ) -> Result<FileOperationOutcome, String> {
-    let total = links.len();
-    for (index, link) in links.iter().enumerate() {
-        controls
-            .wait_until_running()
-            .await
-            .map_err(|error| error.to_string())?;
-        tokio::fs::symlink(&link.target_path, &link.link_path)
-            .await
-            .map_err(|error| error.to_string())?;
-        send_file_operation_progress(
-            output,
-            task_id,
-            FileOperationProgressUpdate::IndeterminateItems {
-                completed: index + 1,
-                total,
-            },
-        )
-        .await;
-    }
+    let requests = links
+        .into_iter()
+        .map(|link| SymbolicLinkRequest {
+            link: link.link_path,
+            target: link.target_path,
+        })
+        .collect();
+    let mut pacer = QueuedStepPacer::new(&mut controls, output, task_id);
+    create_symbolic_links(requests, &mut pacer)
+        .await
+        .map_err(|error| error.to_string())?;
     Ok(FileOperationOutcome::NoHistory)
 }
 
@@ -786,6 +780,7 @@ mod create_new_entry_tests {
 mod entry_gathering;
 mod extract_members;
 mod recoverable;
+mod step_pacer;
 
 #[cfg(test)]
 mod archive_progress_tests;

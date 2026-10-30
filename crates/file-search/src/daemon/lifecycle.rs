@@ -39,13 +39,14 @@ pub(super) enum IndexCompleteness {
 }
 
 /// 对外状态的唯一存储。每个字段只有一个写入方：活动、完整度、可见条目数由 worker 写；
-/// 维护后端失败由启动维护处写；监听健康度由监听线程写；搜索位置由所有者写，
-/// 只有"正在应用 → 就绪"由 worker 在完整度变成 `Complete` 时写。
+/// 维护后端失败由启动维护处写；监视线程失败由它的所有者写；监听健康度由监听线程写；
+/// 搜索位置由所有者写，只有"正在应用 → 就绪"由 worker 在完整度变成 `Complete` 时写。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct DaemonLifecycleSnapshot {
     activity: MaintenanceActivity,
     completeness: IndexCompleteness,
     maintenance_backend_failure: Option<String>,
+    root_monitor_failure: Option<String>,
     recovery_rebuild_message: Option<String>,
     watch_coverage_health: WatchCoverageHealth,
     visible_indexed_files: u64,
@@ -63,6 +64,7 @@ impl DaemonLifecycleSnapshot {
             activity: MaintenanceActivity::Idle,
             completeness: IndexCompleteness::Unverified,
             maintenance_backend_failure: None,
+            root_monitor_failure: None,
             recovery_rebuild_message,
             watch_coverage_health: WatchCoverageHealth::Healthy,
             visible_indexed_files,
@@ -133,6 +135,11 @@ impl DaemonLifecycleSnapshot {
 
     pub(super) fn clear_maintenance_failure(&mut self) {
         self.maintenance_backend_failure = None;
+    }
+
+    /// 监视线程没了：索引照常可用，但挂载和搜索位置的变化跟不上了。
+    pub(super) fn record_root_monitor_failure(&mut self, message: String) {
+        self.root_monitor_failure = Some(message);
     }
 
     pub(super) fn update_watch_coverage(&mut self, health: WatchCoverageHealth) {
@@ -209,7 +216,11 @@ impl DaemonLifecycleSnapshot {
         }
         match &self.watch_coverage_health {
             WatchCoverageHealth::Healthy | WatchCoverageHealth::HybridPatrol { .. } => {
-                match self.recovery_rebuild_message.as_ref() {
+                match self
+                    .root_monitor_failure
+                    .as_ref()
+                    .or(self.recovery_rebuild_message.as_ref())
+                {
                     Some(message) => IndexHealth::Degraded {
                         message: message.clone(),
                     },

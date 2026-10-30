@@ -239,6 +239,15 @@ impl PendingDaemonWork {
         }
     }
 
+    /// 外部情况变了（挂载表变化）：失败待重查、又没在跑的位置不再等退避，立刻重查。
+    pub(super) fn retry_failed_roots_now(&mut self, now: Instant) {
+        for state in self.dirty_roots.values_mut() {
+            if state.failure.is_some() && !state.running {
+                state.ready_at = state.ready_at.min(now);
+            }
+        }
+    }
+
     pub(super) fn index_completeness(&self) -> IndexCompleteness {
         match self
             .dirty_roots
@@ -445,6 +454,15 @@ impl DaemonWorkQueue {
             .expect("search daemon work queue mutex poisoned");
         state.accepting_new_work = false;
         state.pending_work.shutdown_requested = true;
+        self.ready_signal.notify_one();
+    }
+
+    pub(super) fn retry_failed_roots_now(&self) {
+        let mut state = self
+            .state
+            .lock()
+            .expect("search daemon work queue mutex poisoned");
+        state.pending_work.retry_failed_roots_now(Instant::now());
         self.ready_signal.notify_one();
     }
 
@@ -696,6 +714,39 @@ mod tests {
                 vec![&first]
             );
         }
+    }
+
+    #[test]
+    fn retrying_now_only_moves_failed_roots_that_are_not_running() {
+        let failed_root = PathBuf::from("/failed");
+        let running_root = PathBuf::from("/running");
+        let overflowed_root = PathBuf::from("/overflowed");
+        let now = Instant::now();
+        let mut pending = PendingDaemonWork::new(vec![
+            failed_root.clone(),
+            running_root.clone(),
+            overflowed_root.clone(),
+        ]);
+        pending.record_failed_roots(vec![running_root.clone()], "failed", now);
+        let running_at = now + DIRTY_ROOT_RETRY_BASE;
+        assert_eq!(
+            pending.take_next_work(running_at),
+            Some(DaemonWorkRequest::DirtyRootRecovery {
+                roots: vec![running_root]
+            })
+        );
+        pending.record_failed_roots(vec![failed_root.clone()], "failed", running_at);
+        pending.request_dirty_roots(vec![overflowed_root], running_at);
+
+        pending.retry_failed_roots_now(running_at);
+
+        assert_eq!(
+            pending.take_next_work(running_at),
+            Some(DaemonWorkRequest::DirtyRootRecovery {
+                roots: vec![failed_root]
+            })
+        );
+        assert_eq!(pending.take_next_work(running_at), None);
     }
 
     #[test]

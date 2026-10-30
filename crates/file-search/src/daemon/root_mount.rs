@@ -7,7 +7,15 @@ use file_core::mount_table::{parse_mount_table, PROC_SELF_MOUNTINFO};
 use crate::database::SearchRootMount;
 use crate::error::{SearchError, SearchResult};
 
+#[cfg(test)]
+thread_local! {
+    /// 本线程观测挂载的次数：测试用它证明查状态、开查询连接不观测挂载。
+    pub(super) static MOUNT_OBSERVATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub(super) fn observe_root_mounts(roots: &[PathBuf]) -> SearchResult<Vec<SearchRootMount>> {
+    #[cfg(test)]
+    MOUNT_OBSERVATIONS.with(|observations| observations.set(observations.get() + 1));
     let mount_points = read_mount_points()?;
     roots
         .iter()

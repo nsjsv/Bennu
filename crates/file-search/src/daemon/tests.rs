@@ -10,9 +10,13 @@ use rusqlite::Connection;
 use tempfile::tempdir;
 
 use crate::crawler::IndexMaintenanceProgress;
-use crate::model::{IndexHealth, IndexPhase, IndexStatus, SearchQuery};
+use crate::model::{
+    IndexHealth, IndexPhase, IndexStatus, SearchQuery, SearchRootAvailability, SearchRootStatus,
+};
 use crate::SearchIndexConfig;
 
+use super::path_configuration::root_statuses_from_mount_observation;
+use super::root_mount::MOUNT_OBSERVATIONS;
 use super::watch_coverage::WatchCoverageHealth;
 use super::*;
 
@@ -271,29 +275,96 @@ fn restarting_maintenance_clears_a_previous_watch_failure() {
     )
     .unwrap();
     core.start_index_maintenance().unwrap();
-    core.lifecycle_snapshot
+    core.state
+        .lifecycle_snapshot
         .lock()
         .unwrap()
         .record_maintenance_failure("watch backend unavailable".to_owned());
 
     fs::create_dir(&later).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        let status = core.current_status();
-        if matches!(
+    let recovered = |status: &IndexStatus| {
+        matches!(
             status.path_configuration.roots[0].availability,
             SearchRootAvailability::Available
         ) && status.health == IndexHealth::Healthy
-        {
-            break;
+    };
+    wait_for_status(&core, "the root is back without the old failure", recovered);
+    core.shutdown().unwrap();
+}
+
+/// 查状态是纯读，测试反复读不会推动任何事；变化只能由监视线程带来。
+fn wait_for_status(
+    core: &SearchDaemonCore,
+    expectation: &str,
+    matches_expectation: impl Fn(&IndexStatus) -> bool,
+) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let status = core.current_status();
+        if matches_expectation(&status) {
+            return;
         }
         assert!(
             Instant::now() < deadline,
-            "restart after the root appeared kept the old watch failure: {:?}",
-            status.health
+            "status never showed that {expectation}: {status:?}"
         );
         thread::sleep(Duration::from_millis(20));
     }
+}
+
+#[test]
+fn status_queries_and_path_reads_are_pure_reads() {
+    let directory = tempdir().unwrap();
+    let home = directory.path().join("home");
+    let archive = directory.path().join("archive");
+    fs::create_dir(&home).unwrap();
+    fs::create_dir(&archive).unwrap();
+    let database_path = directory.path().join("search.sqlite");
+    let core = SearchDaemonCore::new(
+        database_path.clone(),
+        search_path_file_beside(&database_path),
+        SearchIndexConfig {
+            roots: vec![home],
+            ..SearchIndexConfig::default()
+        },
+    )
+    .unwrap();
+    core.configure_search_paths(
+        0,
+        SearchPathPreferences {
+            custom_roots: vec![archive],
+            exclusions: Vec::new(),
+        },
+    )
+    .unwrap();
+    core.start_index_maintenance().unwrap();
+
+    let observations_before = MOUNT_OBSERVATIONS.with(std::cell::Cell::get);
+    for _ in 0..3 {
+        core.current_status();
+        core.open_query_reader().unwrap();
+        core.current_path_preferences();
+    }
+    assert_eq!(
+        MOUNT_OBSERVATIONS.with(std::cell::Cell::get),
+        observations_before
+    );
+
+    // 改状态的操作正占着操作锁时，读不用等它。
+    let core = &core;
+    thread::scope(|scope| {
+        let operation = core.state.operation_serialization.lock().unwrap();
+        let (finished, reads_finished) = std::sync::mpsc::channel();
+        scope.spawn(move || {
+            core.current_status();
+            core.open_query_reader().unwrap();
+            core.current_path_preferences();
+            finished.send(()).unwrap();
+        });
+        let reads = reads_finished.recv_timeout(Duration::from_secs(5));
+        drop(operation);
+        assert!(reads.is_ok(), "reads waited for the operation lock");
+    });
     core.shutdown().unwrap();
 }
 
@@ -308,7 +379,8 @@ fn symlink_root_is_reported_unavailable_at_the_status_boundary() {
     fs::create_dir(&target).unwrap();
     symlink(&target, &root).unwrap();
 
-    let statuses = root_statuses(std::slice::from_ref(&root), &[]);
+    let statuses =
+        root_statuses_from_mount_observation(std::slice::from_ref(&root), &[], &Ok(Vec::new()));
 
     assert!(matches!(
         statuses.as_slice(),
@@ -320,10 +392,10 @@ fn symlink_root_is_reported_unavailable_at_the_status_boundary() {
 }
 
 #[test]
-fn missing_root_is_saved_and_a_status_poll_activates_it_after_creation() {
+fn a_missing_root_is_indexed_once_created_without_anyone_polling_status() {
     let directory = tempdir().unwrap();
     let home = directory.path().join("home");
-    let missing = directory.path().join("later");
+    let missing = directory.path().join("later").join("deeper");
     fs::create_dir(&home).unwrap();
     let database_path = directory.path().join("search.sqlite");
     let core = SearchDaemonCore::new(
@@ -350,14 +422,67 @@ fn missing_root_is_saved_and_a_status_poll_activates_it_after_creation() {
         SearchRootAvailability::Unavailable { .. }
     ));
 
+    // 先建中间一层再建位置本身：监视要从最近的上级一路跟下来。
+    fs::create_dir(missing.parent().unwrap()).unwrap();
+    thread::sleep(Duration::from_millis(100));
     fs::create_dir(&missing).unwrap();
     fs::write(missing.join("later-root-note.txt"), "later").unwrap();
+    wait_for_global_hit_count(&database_path, "later-root-note", 1);
     assert!(matches!(
         core.current_status().path_configuration.roots[0].availability,
         SearchRootAvailability::Available
     ));
-    wait_for_global_hit_count(&database_path, "later-root-note", 1);
 
+    core.shutdown().unwrap();
+}
+
+#[test]
+fn a_deleted_root_turns_unavailable_and_comes_back_when_recreated() {
+    let directory = tempdir().unwrap();
+    let home = directory.path().join("home");
+    let archive = directory.path().join("archive");
+    fs::create_dir(&home).unwrap();
+    fs::create_dir(&archive).unwrap();
+    fs::write(archive.join("first-archive-note.txt"), "first").unwrap();
+    let database_path = directory.path().join("search.sqlite");
+    let core = SearchDaemonCore::new(
+        database_path.clone(),
+        search_path_file_beside(&database_path),
+        SearchIndexConfig {
+            roots: vec![home],
+            ..SearchIndexConfig::default()
+        },
+    )
+    .unwrap();
+    core.configure_search_paths(
+        0,
+        SearchPathPreferences {
+            custom_roots: vec![archive.clone()],
+            exclusions: Vec::new(),
+        },
+    )
+    .unwrap();
+    core.start_index_maintenance().unwrap();
+    wait_for_global_hit_count(&database_path, "first-archive-note", 1);
+
+    fs::remove_dir_all(&archive).unwrap();
+    wait_for_status(&core, "the deleted root is unavailable", |status| {
+        matches!(
+            status.path_configuration.roots[0].availability,
+            SearchRootAvailability::Unavailable { .. }
+        )
+    });
+    wait_for_global_hit_count(&database_path, "first-archive-note", 0);
+
+    fs::create_dir(&archive).unwrap();
+    fs::write(archive.join("second-archive-note.txt"), "second").unwrap();
+    wait_for_global_hit_count(&database_path, "second-archive-note", 1);
+    wait_for_status(&core, "the recreated root is available", |status| {
+        matches!(
+            status.path_configuration.roots[0].availability,
+            SearchRootAvailability::Available
+        )
+    });
     core.shutdown().unwrap();
 }
 
@@ -370,7 +495,7 @@ fn mount_observation_failure_reports_all_roots_unavailable() {
     let statuses = root_statuses_from_mount_observation(
         std::slice::from_ref(&root),
         &[],
-        Err(SearchError::InvalidConfiguration(
+        &Err(SearchError::InvalidConfiguration(
             "mountinfo unreadable".to_owned(),
         )),
     );
@@ -434,17 +559,18 @@ fn mount_replacement_hides_retains_recrawls_and_explicit_removal_purges() {
         "must stay outside index",
     )
     .unwrap();
-    core.reconcile_root_mounts().unwrap();
+    wait_for_status(&core, "the unmounted root changed filesystem", |status| {
+        matches!(
+            status.path_configuration.roots[0].availability,
+            SearchRootAvailability::MountChanged { .. }
+        )
+    });
     wait_for_global_hit_count(&database_path, "first-volume-note", 0);
     wait_for_global_hit_count(&database_path, "underlying-decoy", 0);
     assert_eq!(
         stored_path_count(&database_path, &mount_root.join("first-volume-note.txt")),
         1
     );
-    assert!(matches!(
-        core.current_status().path_configuration.roots[0].availability,
-        SearchRootAvailability::MountChanged { .. }
-    ));
 
     run_mount_command(&[
         "-t",
@@ -459,7 +585,6 @@ fn mount_replacement_hides_retains_recrawls_and_explicit_removal_purges() {
         "replacement",
     )
     .unwrap();
-    core.reconcile_root_mounts().unwrap();
     wait_for_global_hit_count(&database_path, "replacement-volume-note", 1);
     wait_for_global_hit_count(&database_path, "first-volume-note", 0);
     assert_eq!(
@@ -965,7 +1090,8 @@ fn corruption_recovery_stays_degraded_until_the_rebuild_cycle_finishes() {
             if message.contains("SQLITE_NOTADB") && message.contains("quarantine")
     ));
     // 重建没完成（还有位置失败待重查）时，损坏提示不能消失。
-    core.lifecycle_snapshot
+    core.state
+        .lifecycle_snapshot
         .lock()
         .unwrap()
         .finish_work(incomplete("rebuild failed"));
@@ -973,7 +1099,8 @@ fn corruption_recovery_stays_degraded_until_the_rebuild_cycle_finishes() {
         core.current_status().health,
         IndexHealth::Degraded { .. }
     ));
-    core.lifecycle_snapshot
+    core.state
+        .lifecycle_snapshot
         .lock()
         .unwrap()
         .finish_work(IndexCompleteness::Complete);

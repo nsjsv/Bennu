@@ -22,7 +22,13 @@ pub(super) struct ActiveMaintenance {
     watch_ingress: Option<DaemonWatchIngress>,
 }
 
-/// 只由 `SearchDaemonCore::start_maintenance` 调用。返回的错误表示 worker 没起来；
+impl ActiveMaintenance {
+    pub(super) fn retry_failed_roots_now(&self) {
+        self.work_queue.retry_failed_roots_now();
+    }
+}
+
+/// 只由 `DaemonState::start_maintenance` 调用。返回的错误表示 worker 没起来；
 /// 第二项是监听没建起来，维护照常进行，只是健康度要报告它。
 pub(super) fn spawn_active_maintenance(
     writer: Arc<IndexWriter>,

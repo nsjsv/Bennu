@@ -30,7 +30,6 @@ resvg.workspace = true
 rustix = { workspace = true, features = ["event", "process"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json.workspace = true
-rusqlite = { version = "0.32.1", features = ["bundled"] }
 thumbnails = { path = "../thumbnails" }
 time.workspace = true
 tempfile.workspace = true
@@ -48,3 +47,4 @@ portable-pty = "0.9.0"
 chrono-tz = "0.10.4"
 file-operations = { path = "../file-operations", features = ["test-support"] }
 iced_runtime = "0.14"
+rusqlite = { version = "0.32.1", features = ["bundled"] }

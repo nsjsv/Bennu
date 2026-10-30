@@ -92,6 +92,8 @@ pub(super) fn recorded_global_error_count() -> usize {
 }
 
 impl FileBrowser {
+    /// 测试断言用；界面要连同代际号一起取（`current_error_notification`）。
+    #[cfg(test)]
     pub(crate) fn current_error(&self) -> Option<&str> {
         self.global_error_notification
             .as_ref()

@@ -129,7 +129,7 @@ pub(super) const MENU_ICON_SIZE: f32 = 16.0;
 const TAB_LABEL_MAX_CHARS: usize = 24;
 const ERROR_NOTIFICATION_CONTENT_OFFSET_X: f32 = 18.0;
 const ERROR_NOTIFICATION_FLOAT_Y: f32 = 18.0;
-const RENDERER_RESTART_NOTICE_ERROR_OFFSET_Y: f32 = 58.0;
+const NOTIFICATION_STACK_SPACING: f32 = 10.0;
 const DRAG_PREVIEW_OFFSET_X: f32 = 14.0;
 const DRAG_PREVIEW_OFFSET_Y: f32 = 14.0;
 
@@ -458,28 +458,26 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
         });
     }
 
-    if let Some((error, generation)) = browser.current_error_notification() {
+    // 报错条与重启提示同一列堆叠：按各自实际高度排，报错换行也不会叠住下一条。
+    let notices: Vec<Element<'_, Message>> = [
+        browser
+            .current_error_notification()
+            .map(|(error, generation)| error_notification_panel(error, generation)),
+        browser
+            .renderer_restart_notice_visible
+            .then(renderer_restart_notice_panel),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if !notices.is_empty() {
         floating.push(FloatingContent {
-            element: error_notification_panel(error, generation),
+            element: Column::with_children(notices)
+                .spacing(NOTIFICATION_STACK_SPACING)
+                .into(),
             placement: FloatingPlacement::At(iced::Point::new(
                 browser.sidebar_width + ERROR_NOTIFICATION_CONTENT_OFFSET_X,
                 ERROR_NOTIFICATION_FLOAT_Y,
-            )),
-            captures_pointer: true,
-        });
-    }
-
-    if browser.renderer_restart_notice_visible {
-        let notice_y = if browser.current_error().is_some() {
-            ERROR_NOTIFICATION_FLOAT_Y + RENDERER_RESTART_NOTICE_ERROR_OFFSET_Y
-        } else {
-            ERROR_NOTIFICATION_FLOAT_Y
-        };
-        floating.push(FloatingContent {
-            element: renderer_restart_notice_panel(),
-            placement: FloatingPlacement::At(iced::Point::new(
-                browser.sidebar_width + ERROR_NOTIFICATION_CONTENT_OFFSET_X,
-                notice_y,
             )),
             captures_pointer: true,
         });

@@ -51,7 +51,7 @@ fn names(directory: &Path) -> Vec<String> {
     names
 }
 
-/// links 目录里给 a.txt、b.txt 各建一个链接。
+/// links 目录里给 a.txt、b.txt 各建一个同名链接。
 fn two_link_requests(root: &Path) -> Vec<SymbolicLinkRequest> {
     fs::create_dir(root.join("links")).unwrap();
     ["a.txt", "b.txt"]
@@ -59,8 +59,9 @@ fn two_link_requests(root: &Path) -> Vec<SymbolicLinkRequest> {
         .map(|name| {
             fs::write(root.join(name), name).unwrap();
             SymbolicLinkRequest {
-                link: root.join("links").join(name),
+                preferred_link: root.join("links").join(name),
                 target: root.join(name),
+                name_kind: EntryNameKind::File,
             }
         })
         .collect()
@@ -72,30 +73,112 @@ async fn creates_every_requested_link() {
     let requests = two_link_requests(root.path());
     let mut pacer = ScriptedPacer::default();
 
-    create_symbolic_links_with(&mut SystemEntryFilesystem, &requests, &mut pacer)
+    let created = create_symbolic_links_with(&mut SystemEntryFilesystem, &requests, &mut pacer)
         .await
         .unwrap();
 
+    assert_eq!(
+        created,
+        requests
+            .iter()
+            .map(|request| request.preferred_link.clone())
+            .collect::<Vec<_>>()
+    );
     for request in &requests {
-        assert_eq!(fs::read_link(&request.link).unwrap(), request.target);
+        assert_eq!(
+            fs::read_link(&request.preferred_link).unwrap(),
+            request.target
+        );
     }
     assert_eq!(pacer.progress, [(1, 2), (2, 2)]);
+}
+
+#[tokio::test]
+async fn a_taken_link_name_is_numbered_without_touching_the_existing_entry() {
+    let root = tempdir().unwrap();
+    let requests = two_link_requests(root.path());
+    fs::write(&requests[1].preferred_link, b"existing").unwrap();
+
+    let created = create_symbolic_links_with(
+        &mut SystemEntryFilesystem,
+        &requests,
+        &mut ScriptedPacer::default(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(created[1], root.path().join("links/b 2.txt"));
+    assert_eq!(fs::read(&requests[1].preferred_link).unwrap(), b"existing");
+    assert_eq!(fs::read_link(&created[1]).unwrap(), requests[1].target);
+}
+
+#[tokio::test]
+async fn links_to_directories_are_numbered_without_splitting_a_dotted_name() {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("data.v2")).unwrap();
+    fs::create_dir(root.path().join("links")).unwrap();
+    fs::write(root.path().join("links/data.v2链接"), b"taken").unwrap();
+    let request = SymbolicLinkRequest {
+        preferred_link: root.path().join("links/data.v2链接"),
+        target: root.path().join("data.v2"),
+        name_kind: EntryNameKind::Directory,
+    };
+
+    let created = create_symbolic_links_with(
+        &mut SystemEntryFilesystem,
+        &[request],
+        &mut ScriptedPacer::default(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(created, [root.path().join("links/data.v2链接 2")]);
+}
+
+#[tokio::test]
+async fn links_to_the_same_name_in_one_batch_are_numbered_in_turn() {
+    let root = tempdir().unwrap();
+    let requests = two_link_requests(root.path());
+    let same_name = requests
+        .iter()
+        .map(|request| SymbolicLinkRequest {
+            preferred_link: root.path().join("links/link.txt"),
+            ..request.clone()
+        })
+        .collect::<Vec<_>>();
+
+    let created = create_symbolic_links_with(
+        &mut SystemEntryFilesystem,
+        &same_name,
+        &mut ScriptedPacer::default(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        created,
+        [
+            root.path().join("links/link.txt"),
+            root.path().join("links/link 2.txt")
+        ]
+    );
 }
 
 #[tokio::test]
 async fn a_failure_removes_the_links_already_created() {
     let root = tempdir().unwrap();
     let requests = two_link_requests(root.path());
-    let mut filesystem = failing_at(requests[1].link.clone());
+    let mut filesystem = failing_at(requests[1].preferred_link.clone());
 
     let error =
         create_symbolic_links_with(&mut filesystem, &requests, &mut ScriptedPacer::default())
             .await
             .unwrap_err();
 
-    assert!(
-        matches!(&error, FileError::CreateSymbolicLink { link, .. } if *link == requests[1].link)
-    );
+    assert!(matches!(
+        &error,
+        FileError::CreateSymbolicLink { link, .. } if *link == requests[1].preferred_link
+    ));
     assert!(names(&root.path().join("links")).is_empty());
 }
 
@@ -117,29 +200,11 @@ async fn cancelling_midway_removes_the_links_already_created() {
 }
 
 #[tokio::test]
-async fn an_existing_entry_at_the_link_path_is_not_replaced() {
-    let root = tempdir().unwrap();
-    let requests = two_link_requests(root.path());
-    fs::write(&requests[1].link, b"existing").unwrap();
-
-    let error = create_symbolic_links_with(
-        &mut SystemEntryFilesystem,
-        &requests,
-        &mut ScriptedPacer::default(),
-    )
-    .await
-    .unwrap_err();
-
-    assert!(matches!(error, FileError::CreateSymbolicLink { .. }));
-    assert_eq!(fs::read(&requests[1].link).unwrap(), b"existing");
-    assert_eq!(names(&root.path().join("links")), ["b.txt"]);
-}
-
-#[tokio::test]
 async fn a_link_replaced_during_the_operation_is_kept_and_reported() {
     let root = tempdir().unwrap();
     let requests = two_link_requests(root.path());
-    let (replaced_link, failing_link) = (requests[0].link.clone(), requests[1].link.clone());
+    let replaced_link = requests[0].preferred_link.clone();
+    let failing_link = requests[1].preferred_link.clone();
     let elsewhere = root.path().join("elsewhere");
     let mut filesystem = HookedLinks {
         // 建第二个链接之前，第一个链接被别人换成了指向别处的链接，然后这一步失败。
@@ -168,9 +233,9 @@ async fn a_link_replaced_during_the_operation_is_kept_and_reported() {
         panic!("expected an incomplete rollback, got {error:?}");
     };
     assert_eq!(leftover_entries.len(), 1);
-    assert_eq!(leftover_entries[0].path, requests[0].link);
+    assert_eq!(leftover_entries[0].path, requests[0].preferred_link);
     assert_eq!(
-        fs::read_link(&requests[0].link).unwrap(),
+        fs::read_link(&requests[0].preferred_link).unwrap(),
         root.path().join("elsewhere")
     );
 }

@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use desktop_linux::{
     ClipboardImage, DesktopClipboardContent, FileClipboardOperation, FileClipboardSelection,
 };
+use file_core::{entry_name_with_suffix, TransferConflictStrategy};
 use iced::Task;
 
 use crate::app::paths::{self, PasteTargetMode};
@@ -11,9 +12,8 @@ use crate::commands::{
     create_clipboard_file_command, read_desktop_clipboard_command, write_file_clipboard_command,
 };
 use crate::model::{
-    entry_exists, unique_duplicated_directory_name, unique_duplicated_file_name,
-    unique_gathered_folder_directory, BrowserViewMode, ContextMenuState,
-    DestructiveActionConfirmation, FileDropPrompt, Message, PendingOperation, TransferConflictMode,
+    BrowserViewMode, ContextMenuState, DestructiveActionConfirmation, FileDropPrompt, Message,
+    PendingOperation, TransferConflictMode, GATHERED_FOLDER_BASE_NAME,
 };
 use crate::operation_queue::{QueuedFileOperation, QueuedTransfer};
 
@@ -65,20 +65,7 @@ impl FileBrowser {
             .iter()
             .map(|source| {
                 let parent = self.entry_parent_directory(source);
-                let name = source
-                    .file_name()
-                    .unwrap_or_else(|| std::ffi::OsStr::new("item"));
-                let unique_name = if self.entry_kind(source) == Some(file_core::FileKind::Directory)
-                {
-                    unique_duplicated_directory_name(name, |candidate| {
-                        entry_exists(&parent.join(candidate))
-                    })
-                } else {
-                    unique_duplicated_file_name(name, |candidate| {
-                        entry_exists(&parent.join(candidate))
-                    })
-                };
-                QueuedTransfer::new(source.clone(), parent.join(unique_name))
+                self.duplicate_transfer(source, &parent)
             })
             .collect::<Vec<_>>();
         self.enqueue_file_operation(QueuedFileOperation::Duplicate {
@@ -103,10 +90,28 @@ impl FileBrowser {
         self.renaming = None;
         self.drag_selection_anchor = None;
         self.cancel_file_drag_interaction();
+        // 首选名被占用时执行端原子创建并续编号（新建文件夹 2、3…），这里不查磁盘。
         self.enqueue_file_operation(QueuedFileOperation::GatherSelectionIntoNewFolder {
-            directory: unique_gathered_folder_directory(&directory),
+            directory: directory.join(GATHERED_FOLDER_BASE_NAME),
             sources,
         })
+    }
+
+    /// 副本传输：首选名 `名字副本(.扩展名)`，策略 `KeepBoth`——首选名被占用时
+    /// 由复制引擎续编号（`名字副本 2`），界面不查磁盘。复制副本与同目录拖放副本共用。
+    pub(in crate::app) fn duplicate_transfer(
+        &self,
+        source: &Path,
+        parent: &Path,
+    ) -> QueuedTransfer {
+        let name = source
+            .file_name()
+            .unwrap_or_else(|| std::ffi::OsStr::new("item"));
+        let preferred = entry_name_with_suffix(name, self.entry_name_kind(source), "副本");
+        QueuedTransfer {
+            conflict_strategy: TransferConflictStrategy::KeepBoth,
+            ..QueuedTransfer::new(source.to_path_buf(), parent.join(preferred))
+        }
     }
 
     /// 与 keyboard_paste_directory 同源的「活动栏」语义:多栏取聚焦已渲染栏,

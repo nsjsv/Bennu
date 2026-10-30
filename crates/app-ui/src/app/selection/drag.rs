@@ -7,10 +7,9 @@ use super::super::wayland_dnd::WaylandFileDragRequest;
 use super::super::{FileBrowser, POINTER_DRAG_ACTIVATION_DISTANCE};
 use super::clipboard::split_archive_member_sources;
 use crate::model::{
-    entry_exists, unique_duplicated_directory_name, unique_duplicated_file_name, BrowserPaneId,
-    FileDragDropIntent, FileDragGestureId, FileDragNativeDndState, FileDragPhase, FileDragState,
-    FileDragStationaryAction, FileDropTarget, Message, SelectionMarqueeSource, TabDropDestination,
-    TransferConflictMode,
+    BrowserPaneId, FileDragDropIntent, FileDragGestureId, FileDragNativeDndState, FileDragPhase,
+    FileDragState, FileDragStationaryAction, FileDropTarget, Message, SelectionMarqueeSource,
+    TabDropDestination, TransferConflictMode,
 };
 use crate::operation_queue::{QueuedFileOperation, QueuedTransfer};
 
@@ -481,8 +480,8 @@ impl FileBrowser {
         }
     }
 
-    /// Ctrl 拖拽的复制分支:同目录拖放视为原位副本(共享命名规则起名),
-    /// 其余目标沿用源名;把条目拖进自身子树仍然拒绝。
+    /// Ctrl 拖拽的复制分支:同目录拖放视为原位副本(与「复制副本」同一套首选名
+    /// 与 KeepBoth),其余目标沿用源名;把条目拖进自身子树仍然拒绝。
     fn copy_dragged_files(
         &mut self,
         transfer_targets: Vec<(PathBuf, PathBuf)>,
@@ -500,11 +499,10 @@ impl FileBrowser {
                 if source != target {
                     return QueuedTransfer::new(source, target);
                 }
-                let is_directory = self.entry_kind(&source) == Some(file_core::FileKind::Directory);
-                QueuedTransfer::new(
-                    source.clone(),
-                    in_place_duplicate_target(&source, &target_directory, is_directory),
-                )
+                let parent = source
+                    .parent()
+                    .map_or_else(|| target_directory.clone(), Path::to_path_buf);
+                self.duplicate_transfer(&source, &parent)
             })
             .collect::<Vec<_>>();
         self.enqueue_or_confirm_transfers(TransferConflictMode::Copy, transfers)
@@ -608,27 +606,6 @@ fn display_directory_name(directory: &Path) -> String {
         .and_then(|name| name.to_str())
         .map(str::to_owned)
         .unwrap_or_else(|| directory.to_string_lossy().into_owned())
-}
-
-/// 同目录复制拖放的原位副本目标:按共享命名规则在源父目录里起唯一名。
-pub(super) fn in_place_duplicate_target(
-    source: &Path,
-    fallback_directory: &Path,
-    source_is_directory: bool,
-) -> PathBuf {
-    let parent = source
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| fallback_directory.to_path_buf());
-    let name = source
-        .file_name()
-        .unwrap_or_else(|| std::ffi::OsStr::new("item"));
-    let unique_name = if source_is_directory {
-        unique_duplicated_directory_name(name, |candidate| entry_exists(&parent.join(candidate)))
-    } else {
-        unique_duplicated_file_name(name, |candidate| entry_exists(&parent.join(candidate)))
-    };
-    parent.join(unique_name)
 }
 
 pub(super) fn resolve_file_drag_target(

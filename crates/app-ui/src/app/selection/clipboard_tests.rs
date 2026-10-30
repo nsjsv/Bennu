@@ -12,7 +12,11 @@ use crate::model::{
     BrowserViewMode, DestructiveActionConfirmation, FileDragStationaryAction, FileDropTarget,
     FileEntryContentModifier, PendingOperation,
 };
-use crate::operation_queue::test_persistence::attach_store;
+use crate::operation_history::{
+    CompletedTransfer, FileOperationCompletion, FileOperationHistoryEligibility,
+    FileOperationOutcome,
+};
+use crate::operation_queue::test_persistence::{attach_store, enqueue_persisted};
 use crate::operation_queue::{QueuedFileOperation, QueuedTransfer};
 use desktop_linux::{NetworkConnection, NetworkConnectionId, NetworkMountState, NetworkProtocol};
 use file_core::{DirectoryEntry, EntryMetadata, FileKind};
@@ -314,35 +318,67 @@ fn duplicate_selected_enqueues_in_place_copies_for_whole_selection() {
 
     drop(browser.duplicate_selected());
 
+    // 首选副本名 + KeepBoth：重名由复制引擎续编号，界面不查磁盘。
+    let keep_both = |source: &PathBuf, target: &str| QueuedTransfer {
+        conflict_strategy: file_core::TransferConflictStrategy::KeepBoth,
+        ..QueuedTransfer::new(source.clone(), PathBuf::from(target))
+    };
     assert_eq!(browser.operation_queue.tasks().len(), 1);
     assert!(matches!(
         &browser.operation_queue.tasks()[0].operation,
         QueuedFileOperation::Duplicate { transfers, .. }
             if transfers == &vec![
-                QueuedTransfer::new(report.clone(), PathBuf::from("/workspace/report副本.pdf")),
-                QueuedTransfer::new(notes.clone(), PathBuf::from("/workspace/notes副本")),
+                keep_both(&report, "/workspace/report副本.pdf"),
+                keep_both(&notes, "/workspace/notes副本"),
             ]
     ));
 }
 
 #[test]
-fn duplicate_completion_selects_the_new_copies() {
-    let first_copy = PathBuf::from("/workspace/report副本.pdf");
-    let second_copy = PathBuf::from("/workspace/notes副本");
-    let mut browser = browser_with_entries(&[PathBuf::from("/workspace/report.pdf")]);
-    let operation = QueuedFileOperation::Duplicate {
+fn duplicate_completion_selects_the_copies_actually_created() {
+    let report = PathBuf::from("/workspace/report.pdf");
+    let notes = PathBuf::from("/workspace/notes");
+    let mut browser = browser_with_entries(&[report.clone(), notes.clone()]);
+    let state_directory = tempfile::tempdir().unwrap();
+    attach_store(
+        &mut browser.operation_queue,
+        file_operation_store::TaskQueueStore::new(state_directory.path().join("state.sqlite"))
+            .unwrap(),
+    );
+    let duplicate = QueuedFileOperation::Duplicate {
         transfers: vec![
-            QueuedTransfer::new(PathBuf::from("/workspace/report.pdf"), first_copy.clone()),
-            QueuedTransfer::new(PathBuf::from("/workspace/notes"), second_copy.clone()),
+            QueuedTransfer::new(report.clone(), PathBuf::from("/workspace/report副本.pdf")),
+            QueuedTransfer::new(notes.clone(), PathBuf::from("/workspace/notes副本")),
         ],
         verification: browser.file_operation_verification(),
     };
+    let task_id = enqueue_persisted(&mut browser.operation_queue, duplicate);
+    // 首选名已被占用，引擎续编号后的实际副本。
+    let first_copy = PathBuf::from("/workspace/report副本 2.pdf");
+    let second_copy = PathBuf::from("/workspace/notes副本 2");
 
-    let targets = operation.duplicate_selection_targets().unwrap();
-    browser.select_operation_result_paths(targets);
+    drop(browser.accept_file_operation_finished(
+        task_id,
+        FileOperationCompletion::Succeeded(FileOperationOutcome::Copy {
+            transfers: vec![
+                CompletedTransfer {
+                    source: report,
+                    target: first_copy.clone(),
+                },
+                CompletedTransfer {
+                    source: notes,
+                    target: second_copy.clone(),
+                },
+            ],
+            history_eligibility: FileOperationHistoryEligibility::Replayable,
+            metadata_loss: Default::default(),
+        }),
+    ));
 
-    assert!(browser.selected_paths.contains(&first_copy));
-    assert!(browser.selected_paths.contains(&second_copy));
+    assert_eq!(
+        browser.selected_paths,
+        HashSet::from([first_copy, second_copy.clone()])
+    );
     assert_eq!(browser.selected, Some(second_copy));
 }
 

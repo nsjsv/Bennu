@@ -294,12 +294,22 @@ impl FileBrowser {
         }
 
         // 复制副本对齐 Finder:成功后整批选中新副本(撤销重放不抢焦点)。
-        if completed_successfully && !is_history_replay {
-            if let Some(targets) = completed_operation
+        if !is_history_replay
+            && completed_operation
                 .as_ref()
-                .and_then(QueuedFileOperation::duplicate_selection_targets)
+                .is_some_and(QueuedFileOperation::selects_completed_copies)
+        {
+            if let FileOperationCompletion::Succeeded(FileOperationOutcome::Copy {
+                transfers,
+                ..
+            }) = &completion
             {
-                self.select_operation_result_paths(targets);
+                self.select_operation_result_paths(
+                    transfers
+                        .iter()
+                        .map(|transfer| transfer.target.clone())
+                        .collect(),
+                );
             }
         }
 

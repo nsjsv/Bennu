@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use iced::keyboard;
 
-use super::drag::{in_place_duplicate_target, safe_file_drop_target};
+use super::drag::safe_file_drop_target;
 use crate::model::{
     FileDragDropIntent, FileDragNativeDndState, FileDragStationaryAction, FileDropTarget,
     SidebarBookmarkDropSlot,
@@ -249,7 +249,7 @@ fn alt_drag_release_queues_symlinks_into_target_directory() {
         QueuedFileOperation::CreateSymbolicLinks { links } => {
             assert_eq!(links.len(), 1);
             assert_eq!(links[0].target_path, source);
-            assert_eq!(links[0].link_path.parent(), Some(target.as_path()));
+            assert_eq!(links[0].link_path, target.join("report链接.pdf"));
         }
         other => panic!("expected symlink creation, got {other:?}"),
     }
@@ -257,15 +257,20 @@ fn alt_drag_release_queues_symlinks_into_target_directory() {
 
 #[test]
 fn ctrl_drag_inside_same_directory_plans_in_place_duplicate() {
+    let (browser, _) = crate::app::FileBrowser::new(crate::config::default_user_config());
     let directory = tempfile::tempdir().unwrap();
     let source = directory.path().join("report.pdf");
     std::fs::write(&source, b"data").unwrap();
-    let directory_path = directory.path().to_path_buf();
+    // 首选副本名已被占用：界面不查磁盘，照样给首选名，由复制引擎按 KeepBoth 续编号。
+    std::fs::write(directory.path().join("report副本.pdf"), b"older copy").unwrap();
 
-    let target = in_place_duplicate_target(&source, &directory_path, false);
+    let transfer = browser.duplicate_transfer(&source, directory.path());
 
-    assert_eq!(target, directory.path().join("report副本.pdf"));
-    assert!(!target.exists());
+    assert_eq!(transfer.target, directory.path().join("report副本.pdf"));
+    assert_eq!(
+        transfer.conflict_strategy,
+        file_core::TransferConflictStrategy::KeepBoth
+    );
 }
 
 #[test]

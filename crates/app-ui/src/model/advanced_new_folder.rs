@@ -1,11 +1,12 @@
 //! 高级新建文件夹弹窗的模型:两种批量命名模式与最终名字计划。
-//! 名字错开复用共享命名规则(`suffixed_name_candidates`),与执行侧
+//! 名字错开用 file-core 的候选序列(`entry_name_candidates`),与执行侧
 //! AlreadyExists 原子裁决同一套语义。
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::path::PathBuf;
 
+use file_core::{entry_name_candidates, EntryNameKind};
 use iced::widget::text_editor;
 
 /// 编号模式的数量上限:批量建目录是显式动作,500 足够覆盖
@@ -147,8 +148,7 @@ impl AdvancedNewFolderState {
                 [] => continue,
                 [single] => {
                     let name = if taken.contains(*single) {
-                        crate::model::suffixed_name_candidates(OsStr::new(single), "", false)
-                            .into_iter()
+                        entry_name_candidates(OsStr::new(single), EntryNameKind::Directory)
                             .map(|candidate| candidate.to_string_lossy().into_owned())
                             .find(|candidate| !taken.contains(candidate))
                             .unwrap_or_else(|| (*single).to_owned())
@@ -178,8 +178,7 @@ impl AdvancedNewFolderState {
                         }
                     }
                     let leaf = if occupied.contains(leaf_last) {
-                        crate::model::suffixed_name_candidates(OsStr::new(leaf_last), "", false)
-                            .into_iter()
+                        entry_name_candidates(OsStr::new(leaf_last), EntryNameKind::Directory)
                             .map(|candidate| candidate.to_string_lossy().into_owned())
                             .find(|candidate| !occupied.contains(candidate))
                             .map(|candidate| {

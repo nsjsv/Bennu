@@ -10,6 +10,7 @@ mod batch_rename;
 mod convert;
 mod copy;
 mod copy_verification;
+mod entry_creation;
 mod entry_gathering;
 mod entry_moves;
 #[cfg(test)]
@@ -52,6 +53,10 @@ pub use copy::{
     copy_path, copy_path_with_options, CopiedTarget, CopyProgress, FileOperationControls,
     FileOperationRunState, FileOperationVerification, FileTransferOptions, ProgressSender,
     TransferConflictStrategy,
+};
+pub use entry_creation::{
+    create_directory_at_available_name, create_empty_file_at_available_name,
+    create_file_with_contents_at_available_name,
 };
 pub use entry_gathering::{
     create_directory_tree, gather_entries_into_new_directory, restore_gathered_entries,

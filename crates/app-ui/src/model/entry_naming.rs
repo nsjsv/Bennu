@@ -5,7 +5,7 @@
 //! 整体视作主名(`.bashrc` → `.bashrc副本`)。
 
 use std::ffi::{OsStr, OsString};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// 与 `operation_queue::NEW_DIRECTORY_NAME`(「New...」菜单的英文目录)区分:
 /// 收纳选中项的新文件夹按工单固定使用中文名。
@@ -35,33 +35,8 @@ pub(crate) fn unique_duplicated_directory_name(
     unique_suffixed_name(name, "副本", false, is_taken)
 }
 
-/// 符号链接用的文件名;`stem + "链接"` 插在扩展名之前。
-pub(crate) fn unique_symlink_file_name(
-    file_name: &OsStr,
-    is_taken: impl FnMut(&OsStr) -> bool,
-) -> OsString {
-    unique_suffixed_name(file_name, "链接", true, is_taken)
-}
-
-/// 符号链接用的目录名;目录名尾部直接追加「链接」。
-pub(crate) fn unique_symlink_directory_name(
-    name: &OsStr,
-    is_taken: impl FnMut(&OsStr) -> bool,
-) -> OsString {
-    unique_suffixed_name(name, "链接", false, is_taken)
-}
-
-/// `parent` 下第一个可用的「新建文件夹( 2/3…)」目录完整路径。
-pub(crate) fn unique_gathered_folder_directory(parent: &Path) -> PathBuf {
-    let name = unique_suffixed_name(OsStr::new(GATHERED_FOLDER_BASE_NAME), "", false, |name| {
-        entry_exists(&parent.join(name))
-    });
-    parent.join(name)
-}
-
 /// 列出按占用顺序尝试的全部候选名;首个未被占用的即结果。
-/// 供异步侧逐个探测使用(执行器里没有同步 FS 可用的闭包)。
-pub(crate) fn suffixed_name_candidates(
+fn suffixed_name_candidates(
     original: &OsStr,
     suffix: &str,
     split_extension: bool,
@@ -188,37 +163,6 @@ mod tests {
         assert_eq!(
             unique_duplicated_file_name(OsStr::new(".bashrc"), is_taken),
             OsString::from(".bashrc副本 2")
-        );
-    }
-
-    #[test]
-    fn symlink_suffix_follows_the_same_rules() {
-        assert_eq!(
-            unique_symlink_file_name(OsStr::new("report.pdf"), taken_set(&[])),
-            OsString::from("report链接.pdf")
-        );
-        assert_eq!(
-            unique_symlink_directory_name(OsStr::new("data"), taken_set(&[])),
-            OsString::from("data链接")
-        );
-        let is_taken = taken_set(&["report链接.pdf"]);
-        assert_eq!(
-            unique_symlink_file_name(OsStr::new("report.pdf"), is_taken),
-            OsString::from("report链接 2.pdf")
-        );
-    }
-
-    #[test]
-    fn gathered_folder_base_name_increments_like_other_suffixes() {
-        let parent = Path::new("/workspace");
-        assert_eq!(
-            unique_gathered_folder_directory(parent),
-            PathBuf::from("/workspace/新建文件夹")
-        );
-        let is_taken = taken_set(&["新建文件夹"]);
-        assert_eq!(
-            unique_suffixed_name(OsStr::new(GATHERED_FOLDER_BASE_NAME), "", false, is_taken),
-            OsString::from("新建文件夹 2")
         );
     }
 

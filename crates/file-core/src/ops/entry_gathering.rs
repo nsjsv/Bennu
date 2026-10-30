@@ -7,13 +7,12 @@ use std::future::Future;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use super::entry_creation::{create_at_first_available_name, preferred_directory_and_name};
 use super::entry_moves::{
     move_without_replacing, EntryTreeFilesystem, LeftoverEntry, SystemEntryFilesystem,
     UnrestoredEntry,
 };
-use crate::entry_naming::{
-    entry_name_candidates, validate_entry_name, EntryNameKind, InvalidEntryName,
-};
+use crate::entry_naming::{validate_entry_name, EntryNameKind, InvalidEntryName};
 use crate::FileError;
 
 /// 多条目操作每一步前后与调用方的协作。`before_step` 等暂停结束，遇取消返回错误；
@@ -101,10 +100,7 @@ pub(crate) async fn gather_entries_with(
     sources: &[PathBuf],
     pacer: &mut impl EntryStepPacer,
 ) -> Result<GatheredEntries, FileError> {
-    let (Some(parent), Some(name)) = (preferred.parent(), preferred.file_name()) else {
-        return Err(invalid_input(preferred, "new folder path has no parent"));
-    };
-    validate_name(name)?;
+    let (parent, name) = preferred_directory_and_name(preferred)?;
     let names = entry_file_names(sources)?;
 
     pacer.before_step().await?;
@@ -284,24 +280,19 @@ fn moves_into(directory: &Path, sources: &[PathBuf], names: &[&OsStr]) -> Vec<En
         .collect()
 }
 
-/// 名字已经校验过。候选上逐个原子创建，`AlreadyExists` 就换下一个，不先查再建。
+/// 名字已经校验过。
 fn create_directory_at_available_name(
     filesystem: &mut impl EntryTreeFilesystem,
     parent: &Path,
     name: &OsStr,
 ) -> Result<PathBuf, FileError> {
-    for candidate in entry_name_candidates(name, EntryNameKind::Directory) {
-        let path = parent.join(candidate);
-        match filesystem.create_dir(&path) {
-            Ok(()) => return Ok(path),
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(source) => return Err(FileError::CreateDirectory { path, source }),
-        }
-    }
-    Err(FileError::EntryNameCandidatesExhausted {
-        directory: parent.to_path_buf(),
-        base: name.to_os_string(),
-    })
+    create_at_first_available_name(
+        parent,
+        name,
+        EntryNameKind::Directory,
+        |path| filesystem.create_dir(path),
+        |path, source| FileError::CreateDirectory { path, source },
+    )
 }
 
 /// 建一条嵌套链，新建的目录记进 `created`，返回叶子实际建成的路径。

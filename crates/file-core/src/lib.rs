@@ -83,6 +83,10 @@ pub use ops::{
     VideoTargetFormat,
 };
 pub use ops::{
+    create_directory_at_available_name, create_empty_file_at_available_name,
+    create_file_with_contents_at_available_name,
+};
+pub use ops::{
     create_directory_tree, create_symbolic_links, gather_entries_into_new_directory,
     restore_gathered_entries, CreatedDirectoryTree, EntryMove, EntryStepPacer, GatheredEntries,
     LeftoverEntry, RestoredGatheredEntries, SymbolicLinkRequest,

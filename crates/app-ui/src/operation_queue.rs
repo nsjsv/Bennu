@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use file_core::{
     ArchiveCompressionLevel, ArchiveExtractionRequest, ArchiveFormat, ArchivePassword,
-    BatchRenameItem, ConversionRequest, FileOperationControls, FileOperationRunState,
-    FileOperationVerification, TransferConflictStrategy, TrashRestoreEntry,
+    BatchRenameItem, ConversionRequest, EntryNameKind, FileOperationControls,
+    FileOperationRunState, FileOperationVerification, TransferConflictStrategy, TrashRestoreEntry,
 };
 use file_operation_store::{
     RecoverableTaskRunnerLease, StoredInterruptedRecoverableTask, StoredOperation, StoredTask,
@@ -89,7 +89,7 @@ pub(crate) enum QueuedFileOperation {
         verification: FileOperationVerification,
     },
     /// 右键「复制副本」:与 Copy 同一条恢复管线,仅多一个
-    /// 「完成后选中新副本」的收尾语义(见 duplicate_selection_targets)。
+    /// 「完成后选中新副本」的收尾语义(见 selects_completed_copies)。
     Duplicate {
         transfers: Vec<QueuedTransfer>,
         verification: FileOperationVerification,
@@ -138,7 +138,9 @@ pub(crate) enum QueuedFileOperation {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SymbolicLinkCreation {
+    /// 首选链接路径；被占用时执行端按"名字 2"续编号，按 `name_kind` 决定是否拆扩展名。
     pub(crate) link_path: PathBuf,
+    pub(crate) name_kind: EntryNameKind,
     /// 符号链接目标一律存绝对路径。
     pub(crate) target_path: PathBuf,
 }
@@ -212,17 +214,10 @@ impl QueuedFileOperation {
         }
     }
 
-    /// 「复制副本」完成后应整批选中的新副本路径;其余操作无此语义。
-    pub(crate) fn duplicate_selection_targets(&self) -> Option<Vec<PathBuf>> {
-        match self {
-            Self::Duplicate { transfers, .. } => Some(
-                transfers
-                    .iter()
-                    .map(|transfer| transfer.target.clone())
-                    .collect(),
-            ),
-            _ => None,
-        }
+    /// 「复制副本」完成后整批选中新副本;其余操作无此语义。副本名可能被复制
+    /// 引擎续编号,选中按完成结果里的实际目标,不按这里的首选目标。
+    pub(crate) fn selects_completed_copies(&self) -> bool {
+        matches!(self, Self::Duplicate { .. })
     }
 
     pub(crate) fn supports_pause(&self) -> bool {

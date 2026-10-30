@@ -5,17 +5,17 @@ use std::pin::Pin;
 use std::time::{Duration, Instant};
 
 use file_core::{
-    create_archive_with_controls_and_progress, create_directory, create_empty_file,
-    create_symbolic_links, delete_path_permanently, extract_archive_with_controls_and_progress,
-    is_direct_move_segment_candidate, persist_recoverable_source_manifest_with_controls,
-    prepare_direct_move_intent_segment, rename_entry, run_direct_move_batch_to_durable_renamed,
-    run_recoverable_transfer, ArchiveCreationRequest, ArchiveExtractionRequest, CopyProgress,
-    DirectMoveBatchRecord, DirectMoveIntentBatchRecord, FileError, FileOperationControls,
-    FileOperationVerification, FileTransferOptions, RecoverableTransferError,
-    RecoverableTransferOperation, RecoverableTransferOutcome, SymbolicLinkRequest,
-    TransferConflictStrategy, TransferJournal, TransferJournalError, TransferJournalMutation,
-    TransferJournalRecord, TransferWorkKey, TrashCommitBatch, TrashRestoreEntry,
-    TrashVerificationBatch,
+    create_archive_with_controls_and_progress, create_directory_at_available_name,
+    create_empty_file_at_available_name, create_symbolic_links, delete_path_permanently,
+    extract_archive_with_controls_and_progress, is_direct_move_segment_candidate,
+    persist_recoverable_source_manifest_with_controls, prepare_direct_move_intent_segment,
+    rename_entry, run_direct_move_batch_to_durable_renamed, run_recoverable_transfer,
+    ArchiveCreationRequest, ArchiveExtractionRequest, CopyProgress, DirectMoveBatchRecord,
+    DirectMoveIntentBatchRecord, FileError, FileOperationControls, FileOperationVerification,
+    FileTransferOptions, RecoverableTransferError, RecoverableTransferOperation,
+    RecoverableTransferOutcome, SymbolicLinkRequest, TransferConflictStrategy, TransferJournal,
+    TransferJournalError, TransferJournalMutation, TransferJournalRecord, TransferWorkKey,
+    TrashCommitBatch, TrashRestoreEntry, TrashVerificationBatch,
 };
 use file_operation_store::TaskQueueStore;
 use iced::futures::channel::mpsc::Sender as IcedSender;
@@ -459,12 +459,11 @@ async fn run_queued_create_directory(
         .wait_until_running()
         .await
         .map_err(|error| error.to_string())?;
-    let path = create_new_entry(
-        parent,
-        &translate_current(NEW_DIRECTORY_NAME),
-        NewEntryKind::Directory,
-    )
-    .await?;
+    // 基名跟随界面语言；被占用时 file-core 原子创建并续编号（基名 2、基名 3…）。
+    let path =
+        create_directory_at_available_name(parent.join(translate_current(NEW_DIRECTORY_NAME)))
+            .await
+            .map_err(|error| error.to_string())?;
     send_file_operation_progress(
         output,
         task_id,
@@ -487,12 +486,9 @@ async fn run_queued_create_empty_file(
         .wait_until_running()
         .await
         .map_err(|error| error.to_string())?;
-    let path = create_new_entry(
-        parent,
-        &translate_current(NEW_FILE_NAME),
-        NewEntryKind::EmptyFile,
-    )
-    .await?;
+    let path = create_empty_file_at_available_name(parent.join(translate_current(NEW_FILE_NAME)))
+        .await
+        .map_err(|error| error.to_string())?;
     send_file_operation_progress(
         output,
         task_id,
@@ -505,49 +501,6 @@ async fn run_queued_create_empty_file(
     Ok(FileOperationOutcome::CreateEmptyFile { path })
 }
 
-/// 「New...」菜单新建条目的唯一名落地:基名跟随界面语言,候选名按共享
-/// 命名规则生成(基名、基名 2、基名 3…),由创建操作的 AlreadyExists
-/// 原子裁决逐个后移——与「收纳新文件夹」执行侧的就地重选同一套命名规则。
-async fn create_new_entry(
-    parent: PathBuf,
-    base_name: &str,
-    kind: NewEntryKind,
-) -> Result<PathBuf, String> {
-    let mut name_taken_error = None;
-    for name in crate::model::suffixed_name_candidates(std::ffi::OsStr::new(base_name), "", false) {
-        let path = parent.join(name);
-        let result = match kind {
-            NewEntryKind::Directory => create_directory(&path).await,
-            NewEntryKind::EmptyFile => create_empty_file(&path).await,
-        };
-        match result {
-            Ok(path) => return Ok(path),
-            Err(error) if create_entry_name_taken(&error) => {
-                name_taken_error = Some(error.to_string());
-            }
-            Err(error) => return Err(error.to_string()),
-        }
-    }
-    Err(name_taken_error
-        .unwrap_or_else(|| format!("no available name for new entry in {}", parent.display())))
-}
-
-/// 候选名被占用的错误形态:create_dir / create_new 的 AlreadyExists 就是
-/// 占用判定本身,先探测再创建反而引入 TOCTOU。
-fn create_entry_name_taken(error: &FileError) -> bool {
-    match error {
-        FileError::CreateDirectory { source, .. } | FileError::CreateFile { source, .. } => {
-            source.kind() == std::io::ErrorKind::AlreadyExists
-        }
-        _ => false,
-    }
-}
-
-enum NewEntryKind {
-    Directory,
-    EmptyFile,
-}
-
 async fn run_queued_create_symbolic_links(
     links: Vec<crate::operation_queue::SymbolicLinkCreation>,
     mut controls: FileOperationControls,
@@ -557,11 +510,13 @@ async fn run_queued_create_symbolic_links(
     let requests = links
         .into_iter()
         .map(|link| SymbolicLinkRequest {
-            link: link.link_path,
+            preferred_link: link.link_path,
             target: link.target_path,
+            name_kind: link.name_kind,
         })
         .collect();
     let mut pacer = QueuedStepPacer::new(&mut controls, output, task_id);
+    // 建成的链接不进撤销历史、也不选中，实际路径（可能已续编号）由目录刷新呈现。
     create_symbolic_links(requests, &mut pacer)
         .await
         .map_err(|error| error.to_string())?;
@@ -736,44 +691,6 @@ impl QueuedTransferMode {
             Self::Copy => RecoverableTransferOperation::Copy,
             Self::Move => RecoverableTransferOperation::Move,
         }
-    }
-}
-
-#[cfg(test)]
-mod create_new_entry_tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn create_new_entry_skips_taken_candidates() {
-        let directory = tempfile::tempdir().unwrap();
-        std::fs::create_dir(directory.path().join("新建文件夹")).unwrap();
-
-        let created = create_new_entry(
-            directory.path().to_path_buf(),
-            "新建文件夹",
-            NewEntryKind::Directory,
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(created, directory.path().join("新建文件夹 2"));
-        assert!(created.is_dir());
-    }
-
-    #[tokio::test]
-    async fn create_new_entry_creates_base_name_when_free() {
-        let directory = tempfile::tempdir().unwrap();
-
-        let created = create_new_entry(
-            directory.path().to_path_buf(),
-            "新建文件",
-            NewEntryKind::EmptyFile,
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(created, directory.path().join("新建文件"));
-        assert!(created.is_file());
     }
 }
 

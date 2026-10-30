@@ -1,16 +1,22 @@
 //! 批量创建符号链接：要么全部建好，要么删掉本次已建的链接回到操作前。
 
+use std::ffi::OsStr;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use super::entry_creation::{create_at_first_available_name, preferred_directory_and_name};
 use super::entry_gathering::EntryStepPacer;
 use super::entry_moves::{LeftoverEntry, SystemEntryFilesystem};
+use crate::entry_naming::EntryNameKind;
 use crate::FileError;
 
+/// `preferred_link` 被占用时按"名字 2"续编号；`name_kind` 决定续编号是否拆扩展名，
+/// 取链接指向的对象的类型（指向目录的链接按目录名编号）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SymbolicLinkRequest {
-    pub link: PathBuf,
+    pub preferred_link: PathBuf,
     pub target: PathBuf,
+    pub name_kind: EntryNameKind,
 }
 
 /// 建、读、删符号链接，可注入。
@@ -35,10 +41,11 @@ impl LinkFilesystem for SystemEntryFilesystem {
     }
 }
 
+/// 返回实际建成的链接路径，与请求同序。
 pub async fn create_symbolic_links(
     requests: Vec<SymbolicLinkRequest>,
     pacer: &mut impl EntryStepPacer,
-) -> Result<(), FileError> {
+) -> Result<Vec<PathBuf>, FileError> {
     create_symbolic_links_with(&mut SystemEntryFilesystem, &requests, pacer).await
 }
 
@@ -46,43 +53,63 @@ pub(crate) async fn create_symbolic_links_with(
     filesystem: &mut impl LinkFilesystem,
     requests: &[SymbolicLinkRequest],
     pacer: &mut impl EntryStepPacer,
-) -> Result<(), FileError> {
-    for (index, request) in requests.iter().enumerate() {
-        if let Err(cause) = create_link(filesystem, request, pacer).await {
-            return Err(remove_created_links(filesystem, &requests[..index], cause));
+) -> Result<Vec<PathBuf>, FileError> {
+    let preferred_names = requests
+        .iter()
+        .map(|request| preferred_directory_and_name(&request.preferred_link))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut created = Vec::with_capacity(requests.len());
+    for (index, (request, (directory, name))) in requests.iter().zip(preferred_names).enumerate() {
+        match create_link(filesystem, request, directory, name, pacer).await {
+            Ok(link) => created.push(CreatedLink {
+                link,
+                target: &request.target,
+            }),
+            Err(cause) => return Err(remove_created_links(filesystem, &created, cause)),
         }
         pacer.step_finished(index + 1, requests.len()).await;
     }
-    Ok(())
+    Ok(created.into_iter().map(|created| created.link).collect())
+}
+
+struct CreatedLink<'a> {
+    link: PathBuf,
+    target: &'a Path,
 }
 
 async fn create_link(
     filesystem: &mut impl LinkFilesystem,
     request: &SymbolicLinkRequest,
+    directory: &Path,
+    name: &OsStr,
     pacer: &mut impl EntryStepPacer,
-) -> Result<(), FileError> {
+) -> Result<PathBuf, FileError> {
     pacer.before_step().await?;
-    filesystem
-        .symlink(&request.target, &request.link)
-        .map_err(|source| FileError::CreateSymbolicLink {
-            link: request.link.clone(),
+    create_at_first_available_name(
+        directory,
+        name,
+        request.name_kind,
+        |link| filesystem.symlink(&request.target, link),
+        |link, source| FileError::CreateSymbolicLink {
+            link,
             target: request.target.clone(),
             source,
-        })
+        },
+    )
 }
 
 fn remove_created_links(
     filesystem: &mut impl LinkFilesystem,
-    created: &[SymbolicLinkRequest],
+    created: &[CreatedLink<'_>],
     cause: FileError,
 ) -> FileError {
     let leftover_entries = created
         .iter()
         .rev()
-        .filter_map(|request| {
-            let error = remove_own_link(filesystem, request).err()?;
+        .filter_map(|created| {
+            let error = remove_own_link(filesystem, created).err()?;
             Some(LeftoverEntry {
-                path: request.link.clone(),
+                path: created.link.clone(),
                 error,
             })
         })
@@ -101,15 +128,15 @@ fn remove_created_links(
 /// 只删仍指向本次目标的链接：这期间它若被换成了别的东西，删掉就是删别人的。
 fn remove_own_link(
     filesystem: &mut impl LinkFilesystem,
-    request: &SymbolicLinkRequest,
+    created: &CreatedLink<'_>,
 ) -> io::Result<()> {
-    let current_target = filesystem.read_link(&request.link)?;
-    if current_target != request.target {
+    let current_target = filesystem.read_link(&created.link)?;
+    if current_target != created.target {
         return Err(io::Error::other(format!(
             "the link now points to {current_target:?}"
         )));
     }
-    filesystem.remove_link(&request.link)
+    filesystem.remove_link(&created.link)
 }
 
 #[cfg(test)]

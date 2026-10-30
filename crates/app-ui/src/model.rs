@@ -56,9 +56,8 @@ pub(crate) use address_bar::{
 };
 mod entry_naming;
 pub(crate) use entry_naming::{
-    entry_exists, suffixed_name_candidates, unique_duplicated_directory_name,
-    unique_duplicated_file_name, unique_gathered_folder_directory, unique_symlink_directory_name,
-    unique_symlink_file_name,
+    entry_exists, unique_duplicated_directory_name, unique_duplicated_file_name,
+    GATHERED_FOLDER_BASE_NAME,
 };
 mod browser_panes;
 pub(crate) use browser_panes::{

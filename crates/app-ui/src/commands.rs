@@ -10,9 +10,10 @@ use desktop_linux::{
     FileClipboardSelection, OpenWithLaunchMode, TerminalEmulator,
 };
 use file_core::{
-    available_transfer_target_path, check_transfer_conflicts as check_core_transfer_conflicts,
-    create_file_with_contents, numbered_duplicate_name, scan_trash_with_cancellation, ScanOptions,
-    TransferConflictCheck, TransferConflictItem, TrashScan,
+    check_transfer_conflicts as check_core_transfer_conflicts,
+    create_file_with_contents_at_available_name, numbered_duplicate_name,
+    scan_trash_with_cancellation, ScanOptions, TransferConflictCheck, TransferConflictItem,
+    TransferConflictStrategy, TrashScan,
 };
 use file_operation_store::{StoreError, TaskQueueStore};
 use iced::Task;
@@ -352,9 +353,14 @@ pub(crate) fn read_desktop_clipboard_command(
     )
 }
 
+/// `path` 是首选路径；被占用时 file-core 原子创建并续编号。
 pub(crate) fn create_clipboard_file_command(path: PathBuf, contents: Vec<u8>) -> Task<Message> {
     Task::perform(
-        create_clipboard_file_at_available_path(path, contents),
+        async move {
+            create_file_with_contents_at_available_name(path, contents)
+                .await
+                .map_err(|error| error.to_string())
+        },
         Message::ClipboardFileCreated,
     )
 }
@@ -444,21 +450,12 @@ fn unique_reserved_target(target: &Path, reserved: &std::collections::HashSet<Pa
     target.to_path_buf()
 }
 
-async fn create_clipboard_file_at_available_path(
-    path: PathBuf,
-    contents: Vec<u8>,
-) -> Result<PathBuf, String> {
-    let target = available_transfer_target_path(path)
-        .await
-        .map_err(|error| error.to_string())?;
-    create_file_with_contents(target, contents)
-        .await
-        .map_err(|error| error.to_string())
-}
-
+/// 只有还没定策略（`Fail`）的传输需要问用户；带着 `KeepBoth` 等策略入场的
+/// （如原位副本）冲突时怎么办已经定了。
 async fn check_transfer_conflicts(transfers: &[QueuedTransfer]) -> Vec<TransferConflictItem> {
     let conflict_checks = transfers
         .iter()
+        .filter(|transfer| transfer.conflict_strategy == TransferConflictStrategy::Fail)
         .map(|transfer| {
             TransferConflictCheck::new(transfer.source.clone(), transfer.target.clone())
         })
@@ -710,6 +707,9 @@ fn suggestion_directory_and_prefix(input: &str, current_dir: &Path) -> Option<(P
 
     Some((directory, prefix))
 }
+
+#[cfg(test)]
+mod transfer_conflict_check_tests;
 
 #[cfg(test)]
 mod merge_expansion_tests {

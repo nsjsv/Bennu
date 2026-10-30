@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use file_core::{is_supported_archive_path, FileKind};
+use file_core::{is_supported_archive_path, EntryNameKind, FileKind};
 use iced::Task;
 
 use super::panes::BrowserPaneView;
@@ -664,6 +664,12 @@ impl FileBrowser {
 
     pub(super) fn entry_kind(&self, path: &Path) -> Option<FileKind> {
         self.entry_kind_recursive(path)
+    }
+
+    /// 给副本、链接起首选名时的类型：目录不拆扩展名。没加载到的条目按文件处理。
+    pub(super) fn entry_name_kind(&self, path: &Path) -> EntryNameKind {
+        self.entry_kind(path)
+            .map_or(EntryNameKind::File, EntryNameKind::from)
     }
 
     /// 条目是否按目录对待：真实目录，或压缩包（视作目录，多栏单击、

@@ -3,12 +3,11 @@
 use std::path::{Path, PathBuf};
 
 use desktop_linux::write_desktop_clipboard_text;
+use file_core::entry_name_with_suffix;
 use iced::Task;
 
 use super::super::FileBrowser;
-use crate::model::{
-    entry_exists, unique_symlink_directory_name, unique_symlink_file_name, Message,
-};
+use crate::model::Message;
 use crate::operation_queue::{QueuedFileOperation, SymbolicLinkCreation};
 
 impl FileBrowser {
@@ -47,9 +46,9 @@ impl FileBrowser {
         self.enqueue_file_operation(QueuedFileOperation::CreateSymbolicLinks { links })
     }
 
-    /// 单个源的符号链接构造:名字按共享唯一命名规则在 directory 里起名,
+    /// 单个源的符号链接构造:首选名 `名字链接(.扩展名)` 建在 directory 里,
     /// 目标一律绝对路径。右键菜单(建在源父目录)与 Alt 拖放(建在落点)
-    /// 共用此不变量,重名自动递增。
+    /// 共用此不变量;重名由执行端原子创建时续编号,这里不查磁盘。
     pub(in crate::app) fn symbolic_link_creation_for(
         &self,
         source: &Path,
@@ -58,15 +57,10 @@ impl FileBrowser {
         let name = source
             .file_name()
             .unwrap_or_else(|| std::ffi::OsStr::new("item"));
-        let link_name = if self.entry_kind(source) == Some(file_core::FileKind::Directory) {
-            unique_symlink_directory_name(name, |candidate| {
-                entry_exists(&directory.join(candidate))
-            })
-        } else {
-            unique_symlink_file_name(name, |candidate| entry_exists(&directory.join(candidate)))
-        };
+        let name_kind = self.entry_name_kind(source);
         SymbolicLinkCreation {
-            link_path: directory.join(link_name),
+            link_path: directory.join(entry_name_with_suffix(name, name_kind, "链接")),
+            name_kind,
             target_path: source.to_path_buf(),
         }
     }

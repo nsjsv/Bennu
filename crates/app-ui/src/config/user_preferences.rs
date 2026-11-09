@@ -79,6 +79,8 @@ pub(crate) struct UserPreferences {
     pub(crate) transfer_download_dir: Option<PathBuf>,
     pub(crate) transfer_device_alias: Option<String>,
     pub(crate) transfer_trusted_devices: Vec<TrustedTransferDevice>,
+    pub(crate) transfer_enabled: bool,
+    pub(crate) transfer_port: u16,
 }
 
 impl UserPreferences {
@@ -128,6 +130,8 @@ impl UserPreferences {
             transfer_download_dir: config.transfer_download_dir.clone(),
             transfer_device_alias: config.transfer_device_alias.clone(),
             transfer_trusted_devices: config.transfer_trusted_devices.clone(),
+            transfer_enabled: config.transfer_enabled,
+            transfer_port: config.transfer_port,
         }
     }
 
@@ -172,6 +176,8 @@ impl UserPreferences {
         config.transfer_download_dir = self.transfer_download_dir.clone();
         config.transfer_device_alias = self.transfer_device_alias.clone();
         config.transfer_trusted_devices = self.transfer_trusted_devices.clone();
+        config.transfer_enabled = self.transfer_enabled;
+        config.transfer_port = self.transfer_port;
     }
 
     pub(crate) fn to_stored(&self) -> StoredUserPreferences {
@@ -263,6 +269,8 @@ impl UserPreferences {
         stored.transfer_device_alias = self.transfer_device_alias.clone();
         stored.transfer_trusted_devices =
             stored_trusted_transfer_devices(&self.transfer_trusted_devices);
+        stored.transfer_enabled = Some(self.transfer_enabled);
+        stored.transfer_port = Some(self.transfer_port);
         stored
     }
 
@@ -447,6 +455,8 @@ impl UserPreferences {
                 &stored.transfer_trusted_devices,
                 &mut unrecognized,
             ),
+            transfer_enabled: stored.transfer_enabled.unwrap_or(false),
+            transfer_port: stored.transfer_port.unwrap_or(53317).clamp(1024, 65535),
         };
         InterpretedPreferences {
             preferences,

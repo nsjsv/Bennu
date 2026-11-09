@@ -70,6 +70,9 @@ pub(crate) enum TransferMessage {
     DownloadDirChooserPressed,
     DownloadDirChosen(Result<Option<PathBuf>, String>),
     DeviceAliasInputChanged(String),
+    TransferEnabledToggled,
+    TransferPortInputChanged(String),
+    TransferPortCommitted,
     DeviceAliasCommitted,
     TrustedDeviceRemoved(String),
 }
@@ -155,6 +158,9 @@ impl FileBrowser {
         }
         // 旧服务的挂起确认随重启作废：Modal 不能指向死会话。
         self.incoming_transfer = None;
+        if !self.user_config.transfer_enabled {
+            return;
+        }
         let trusted = Arc::new(parking_lot::RwLock::new(trusted_fingerprint_set(
             &self.user_config.transfer_trusted_devices,
         )));
@@ -298,6 +304,16 @@ impl FileBrowser {
                 self.transfer_device_alias_input = value;
                 iced::Task::none()
             }
+            TransferMessage::TransferEnabledToggled => {
+                let new_state = !self.user_config.transfer_enabled;
+                self.set_transfer_enabled(new_state)
+            }
+            TransferMessage::TransferPortInputChanged(port) => {
+                // 暂存用户输入
+                self.transfer_port_input = port;
+                iced::Task::none()
+            }
+            TransferMessage::TransferPortCommitted => self.commit_transfer_port(),
             TransferMessage::DeviceAliasCommitted => self.commit_transfer_device_alias(),
             TransferMessage::TrustedDeviceRemoved(fingerprint) => {
                 self.remove_trusted_transfer_device(fingerprint)
@@ -601,6 +617,38 @@ impl FileBrowser {
         }
         // 移除信任后再次接收需要重新确认（PRD A5）。
         self.persist_user_preferences_command()
+    }
+    fn set_transfer_enabled(&mut self, enabled: bool) -> iced::Task<Message> {
+        // 如果状态没变，直接返回，省得频繁重启服务
+        if self.user_config.transfer_enabled == enabled {
+            return iced::Task::none();
+        }
+        self.user_config.transfer_enabled = enabled;
+        // 重启服务（如果关了，内部会直接 return 不启动）
+        self.start_or_restart_local_send_service();
+        // 写入数据库
+        self.persist_user_preferences_command()
+    }
+
+    fn commit_transfer_port(&mut self) -> iced::Task<Message> {
+        if let Ok(port) = self.transfer_port_input.parse::<u16>() {
+            // 合法范围
+            let clamped_port = port.clamp(1024, 65535);
+            if self.user_config.transfer_port == clamped_port {
+                // 如果没变，也不用重启
+                self.transfer_port_input = clamped_port.to_string();
+                return iced::Task::none();
+            }
+            self.user_config.transfer_port = clamped_port;
+            self.transfer_port_input = clamped_port.to_string();
+            // 端口改变，必须重启服务
+            self.start_or_restart_local_send_service();
+            self.persist_user_preferences_command()
+        } else {
+            // 输入非法：恢复原本的端口字符串，不保存
+            self.transfer_port_input = self.user_config.transfer_port.to_string();
+            iced::Task::none()
+        }
     }
 }
 

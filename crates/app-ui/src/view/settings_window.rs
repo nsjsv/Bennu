@@ -391,7 +391,19 @@ fn transfer_settings_detail(
             chrome_top_spacer(browser),
             settings_group(
                 tr!("Receive"),
-                vec![receive_directory_row(browser), device_alias_row(browser),],
+                vec![
+                    toggle_setting_row(
+                        "Enable LocalSend".to_string(),
+                        Some("Allow receiving files from other devices".to_string()),
+                        browser.user_config().transfer_enabled,
+                        Message::Transfer(
+                            crate::app::transfer::TransferMessage::TransferEnabledToggled,
+                        ),
+                    ),
+                    transfer_port_row(browser),
+                    receive_directory_row(browser),
+                    device_alias_row(browser),
+                ],
             ),
             settings_group(
                 tr!("Trusted devices"),
@@ -403,6 +415,39 @@ fn transfer_settings_detail(
         scrollbar_visibility,
         scrollbar_viewport,
     )
+}
+fn transfer_port_row(browser: &FileBrowser) -> Element<'_, Message> {
+    let port_str = &browser.transfer_port_input;
+
+    let input = text_input("53317", port_str)
+        .on_input(|value| {
+            Message::Transfer(
+                crate::app::transfer::TransferMessage::TransferPortInputChanged(value),
+            )
+        })
+        .on_submit(Message::Transfer(
+            crate::app::transfer::TransferMessage::TransferPortCommitted,
+        ))
+        .padding([6, 8])
+        .size(12)
+        .width(Length::Fill);
+
+    let save = button(container(readable_text(tr!("Save")).size(12)).padding([6, 10]))
+        .on_press(Message::Transfer(
+            crate::app::transfer::TransferMessage::TransferPortCommitted,
+        ))
+        .style(context_menu_button_style());
+
+    row![
+        readable_text("Port".to_string())
+            .size(12)
+            .width(Length::Fill),
+        input,
+        save,
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center)
+    .into()
 }
 
 /// 接收目录行：当前生效目录 + 选择按钮；缺省显示 ~/Downloads。

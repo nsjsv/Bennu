@@ -101,6 +101,12 @@ pub(crate) struct StoredUserPreferences {
     /// 各右键菜单的项顺序与可见性;None = 旧版本数据,读取端回退内置默认。
     #[serde(default)]
     pub context_menu_layouts: Option<StoredContextMenuLayouts>,
+    /// LocalSend 常驻服务开关；None = 旧数据，默认为关闭（false），避免和官方冲突
+    #[serde(default)]
+    pub transfer_enabled: Option<bool>,
+    /// LocalSend 端口；None = 旧数据，回退 53317
+    #[serde(default)]
+    pub transfer_port: Option<u16>,
     /// 传输接收保存目录;None = 未设置,读取端回退 ~/Downloads。
     #[serde(default)]
     pub transfer_download_dir: Option<StoredPath>,
@@ -201,6 +207,8 @@ impl Default for StoredUserPreferences {
             transfer_download_dir: None,
             transfer_device_alias: None,
             transfer_trusted_devices: Vec::new(),
+            transfer_enabled: None,
+            transfer_port: None,
         }
     }
 }

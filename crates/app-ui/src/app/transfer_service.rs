@@ -16,7 +16,8 @@ use crate::config::default_transfer_device_alias;
 use crate::model::Message;
 
 /// LocalSend 协议固定端口（PRD R6）。
-pub(crate) const LOCAL_SEND_PORT: u16 = 53317;
+#[allow(dead_code)]
+pub(crate) const DEFAULT_LOCAL_SEND_PORT: u16 = 53317;
 /// 设备身份文件（证书 + 私钥，权限 600），放在应用数据目录下。
 const LOCAL_SEND_IDENTITY_FILE_NAME: &str = "localsend-identity.pem";
 
@@ -101,7 +102,7 @@ pub(crate) fn service_config(
             .unwrap_or_else(default_transfer_device_alias),
         // LocalSend 官方设备类型词表中的桌面端取值。
         device_type: Some("computer".to_owned()),
-        listen_port: LOCAL_SEND_PORT,
+        listen_port: user_config.transfer_port,
         download_dir: transfer_download_dir(user_config),
         identity_path: file_core::app_dirs::app_data_dir().join(LOCAL_SEND_IDENTITY_FILE_NAME),
         is_trusted,

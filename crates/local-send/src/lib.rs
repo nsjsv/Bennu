@@ -204,6 +204,7 @@ impl LocalSendService {
             client.clone(),
             Arc::clone(&sweeper_notify),
             shutdown_rx.clone(),
+            config.listen_port,
         );
 
         // 接收端 HTTP：绑定失败同样走 ServiceError 事件而非 Err。

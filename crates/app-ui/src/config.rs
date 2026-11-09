@@ -376,6 +376,8 @@ pub(crate) struct UserConfig {
     pub(crate) transfer_device_alias: Option<String>,
     /// 信任的 LocalSend 设备;这些设备的发送请求自动接收。
     pub(crate) transfer_trusted_devices: Vec<TrustedTransferDevice>,
+    pub(crate) transfer_enabled: bool,
+    pub(crate) transfer_port: u16,
 }
 
 /// 信任设备列表条目:fingerprint 是 LocalSend 协议设备身份,alias/added_at
@@ -452,6 +454,8 @@ pub(crate) fn default_user_config() -> UserConfig {
         transfer_download_dir: None,
         transfer_device_alias: None,
         transfer_trusted_devices: Vec::new(),
+        transfer_enabled: false,
+        transfer_port: 53317,
     }
 }
 
@@ -499,6 +503,8 @@ pub(crate) fn ui_thread_startup_config() -> UserConfig {
         transfer_download_dir: None,
         transfer_device_alias: None,
         transfer_trusted_devices: Vec::new(),
+        transfer_enabled: false,
+        transfer_port: 53317,
     }
 }
 

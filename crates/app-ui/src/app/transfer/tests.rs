@@ -10,7 +10,7 @@ use super::{
     qr_items_from_paths, trusted_fingerprint_set, DirectSendState, FileBrowser, TransferMessage,
     TransferSessionPhase, TransferSessionState,
 };
-use crate::app::transfer_service::{service_config, LOCAL_SEND_PORT};
+use crate::app::transfer_service::{service_config, DEFAULT_LOCAL_SEND_PORT};
 use crate::config::TrustedTransferDevice;
 use crate::model::sanitized_application_log_detail;
 use crate::view::transfer_qr::qr_image_handle;
@@ -23,7 +23,7 @@ fn sample_device(fingerprint: &str) -> DeviceInfo {
         device_model: None,
         device_type: Some("phone".to_owned()),
         download: None,
-        port: LOCAL_SEND_PORT,
+        port: DEFAULT_LOCAL_SEND_PORT,
         protocol: "http".to_owned(),
         address: None,
     }

@@ -17,7 +17,8 @@ use crate::ServiceEvent;
 
 /// LocalSend v2 固定组播地址与端口（UDP，与 HTTP 的 TCP 53317 互不冲突）。
 pub(crate) const MULTICAST_GROUP: Ipv4Addr = Ipv4Addr::new(224, 0, 0, 167);
-pub(crate) const MULTICAST_PORT: u16 = 53317;
+#[allow(dead_code)]
+pub(crate) const DEFAULT_MULTICAST_PORT: u16 = 53317;
 
 /// 设备表老化阈值（N5：~30s 未刷新剔除）。
 pub(crate) const DEVICE_LIFETIME: Duration = Duration::from_secs(30);
@@ -181,13 +182,17 @@ pub(crate) fn spawn(
     client: reqwest::Client,
     sweeper_notify: Arc<tokio::sync::Notify>,
     shutdown: watch::Receiver<bool>,
+    listen_port: u16,
 ) {
     // announce：启动立即一次 + 周期重发；逐非环回 IPv4 接口各发一份。
     let announce_device = device.clone();
     let mut announce_shutdown = shutdown.clone();
     tokio::spawn(async move {
         loop {
-            if announce_to_all(&announce_device).await.is_err() {
+            if announce_to_all(&announce_device, listen_port)
+                .await
+                .is_err()
+            {
                 // 单次发送失败（如临时的接口变化）只影响本轮，等待下一轮即可。
                 tracing::debug!(event = "localsend_announce_failed", "announce round failed");
             }
@@ -227,6 +232,7 @@ pub(crate) fn spawn(
         client.clone(),
         sweeper_notify,
         sweeper_shutdown,
+        listen_port,
     ));
 
     // 组播监听：处理对端 announce 并回应 register。
@@ -236,6 +242,7 @@ pub(crate) fn spawn(
         events,
         client,
         shutdown.clone(),
+        listen_port,
     ));
     let mut listener_shutdown = shutdown;
     tokio::spawn(async move {
@@ -250,14 +257,17 @@ async fn run_listener(
     events: broadcast::Sender<ServiceEvent>,
     client: reqwest::Client,
     shutdown: watch::Receiver<bool>,
+    listen_port: u16,
 ) {
-    let socket = match UdpSocket::bind(("0.0.0.0", MULTICAST_PORT)).await {
+    // 替换这里绑定的端口
+    let socket = match UdpSocket::bind(("0.0.0.0", listen_port)).await {
         Ok(socket) => socket,
         Err(error) => {
-            // N2：UDP 53317 被占（如另一 LocalSend 实例）只报一次错误，不重试。
-            tracing::warn!(event = "localsend_udp_bind_failed", %error, "udp 53317 bind failed");
+            // 把日志里的 53317 也换成动态参数
+            tracing::warn!(event = "localsend_udp_bind_failed", %error, "udp {} bind failed", listen_port);
             let _ = events.send(ServiceEvent::ServiceError(format!(
-                "UDP 端口 {MULTICAST_PORT} 被占用（可能有另一个 LocalSend 应用正在运行）: {error}"
+                "UDP 端口 {} 被占用（可能有另一个 LocalSend 应用正在运行）: {error}",
+                listen_port
             )));
             return;
         }
@@ -364,9 +374,9 @@ pub(crate) async fn post_register(
 }
 
 /// 对每个局域网候选 IPv4 各发一份组播 announce：不同接口可达不同网段。
-async fn announce_to_all(device: &DeviceInfo) -> Result<(), LocalSendError> {
+async fn announce_to_all(device: &DeviceInfo, listen_port: u16) -> Result<(), LocalSendError> {
     let payload = encode_announce(device, true)?;
-    let target = SocketAddrV4::new(MULTICAST_GROUP, MULTICAST_PORT);
+    let target = SocketAddrV4::new(MULTICAST_GROUP, listen_port);
     for interface in local_ipv4s()? {
         // 组播出口接口由 IP_MULTICAST_IF 决定，须用 socket2 在创建阶段配置；
         // std/tokio 未暴露该设置。
@@ -441,6 +451,7 @@ async fn run_http_sweeper(
     client: reqwest::Client,
     refresh: Arc<tokio::sync::Notify>,
     mut shutdown: watch::Receiver<bool>,
+    _listen_port: u16,
 ) {
     let own_ips: std::collections::HashSet<Ipv4Addr> = lan_candidates()
         .unwrap_or_default()

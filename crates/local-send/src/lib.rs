@@ -67,10 +67,22 @@ pub struct ServiceConfig {
     pub favorites: Vec<Favorite>,
 }
 
-/// 接收端配置：只有接收会用到的字段。
+/// 接收端配置：只有接收会用到的字段。改任何一项都经 `restart` 生效（同官方改 PIN
+/// 重启服务）：PIN 错误计数随旧接收端一起清零，正是"改了 PIN 就放开"。
 pub struct ReceiverConfig {
     /// 接收文件保存目录。
     pub download_dir: PathBuf,
+    pub accept: AcceptPolicy,
+    /// 发文件进来要带的 PIN（`?pin=`），收藏设备也要；None = 不要 PIN。
+    pub pin: Option<String>,
+}
+
+/// 谁发来的文件不用确认就收（官方 Quick Save / Quick Save for Favorites）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AcceptPolicy {
+    AskEveryone,
+    AcceptFavorites,
+    AcceptEveryone,
 }
 
 /// 收藏设备：按证书指纹认人；`address` 是最后一次见到它的地址（IP + 它的端口），
@@ -170,7 +182,8 @@ enum ServiceCommand {
 }
 
 impl ServiceHandle {
-    /// 直推文件清单到目标设备，出示本机设备身份。
+    /// 直推文件清单到目标设备，出示本机设备身份。`pin` 是对方要的 PIN：先不带，
+    /// 对方回 `PinRequired` 再让用户输了带上重发（同官方）。
     ///
     /// 返回的 future 自带客户端与本机设备信息的克隆，不借用句柄，可直接
     /// `tokio::spawn`；进度通道满时丢弃进度，不反压传输。
@@ -178,11 +191,12 @@ impl ServiceHandle {
         &self,
         target: &DeviceInfo,
         items: Vec<PathBuf>,
+        pin: Option<String>,
         progress: mpsc::Sender<SendProgress>,
     ) -> impl Future<Output = Result<(), LocalSendError>> + Send + 'static {
         let sender = self.sender.clone();
         let target = target.clone();
-        async move { sender.send(&target, items, progress).await }
+        async move { sender.send(&target, items, pin.as_deref(), progress).await }
     }
 
     /// 确认 Modal 回写：接受不是收藏的设备的请求。要"加入收藏"时先 `set_favorites`。
@@ -275,7 +289,7 @@ impl LocalSendService {
                 let tls = receive::server_config(&identity).map_err(invalid_identity)?;
                 let state = Arc::new(receive::ReceiveState::new(
                     own_device.clone(),
-                    receiver.download_dir,
+                    receiver,
                     favorites_rx.clone(),
                     Arc::clone(&devices),
                     events.clone(),
@@ -443,6 +457,8 @@ mod tests {
             identity_path: identity_path.clone(),
             receiver: Some(ReceiverConfig {
                 download_dir: dir.path().to_path_buf(),
+                accept: AcceptPolicy::AcceptFavorites,
+                pin: None,
             }),
             favorites: Vec::new(),
         };

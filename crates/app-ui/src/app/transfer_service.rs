@@ -4,12 +4,12 @@
 //! 不直接接触协议装配细节。
 
 use iced::futures::SinkExt;
-use local_send::{ReceiverConfig, ServiceConfig, ServiceEvent};
+use local_send::{AcceptPolicy, ReceiverConfig, ServiceConfig, ServiceEvent};
 use tokio::sync::broadcast;
 use tracing::warn;
 
 use super::transfer::{service_favorites, TransferMessage};
-use crate::config::default_transfer_device_alias;
+use crate::config::{default_transfer_device_alias, TransferAcceptMode};
 use crate::model::Message;
 
 /// 设备身份文件（证书 + 私钥，权限 600），放在应用数据目录下。
@@ -79,12 +79,18 @@ pub(crate) fn transfer_download_dir(user_config: &crate::config::UserConfig) -> 
     dir
 }
 
-/// 组装常驻服务配置：本机设备信息、收藏设备；接收开着时再带上接收目录。
+/// 组装常驻服务配置：本机设备信息、收藏设备；接收开着时再带上接收目录、确认档位与 PIN。
 pub(crate) fn service_config(user_config: &crate::config::UserConfig) -> ServiceConfig {
     let receiver = user_config
         .transfer_receive_enabled
         .then(|| ReceiverConfig {
             download_dir: transfer_download_dir(user_config),
+            accept: match user_config.transfer_accept_mode {
+                TransferAcceptMode::AskEveryone => AcceptPolicy::AskEveryone,
+                TransferAcceptMode::AcceptFavorites => AcceptPolicy::AcceptFavorites,
+                TransferAcceptMode::AcceptEveryone => AcceptPolicy::AcceptEveryone,
+            },
+            pin: user_config.transfer_receive_pin.clone(),
         });
     ServiceConfig {
         alias: user_config

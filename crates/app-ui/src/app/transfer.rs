@@ -21,6 +21,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::transfer_service::service_config;
 use super::FileBrowser;
+use crate::config::TransferAcceptMode;
 use crate::model::Message;
 use crate::view::transfer_qr::qr_image_handle;
 
@@ -49,8 +50,15 @@ pub(crate) enum TransferMessage {
     DirectSendFinished {
         fingerprint: String,
         alias: String,
-        outcome: Result<(), String>,
+        outcome: DirectSendOutcome,
     },
+    /// 设备行里的 PIN 输入（按证书指纹找这台设备的这次直推）。
+    DirectSendPinChanged {
+        fingerprint: String,
+        value: String,
+    },
+    DirectSendPinSubmitted(String),
+    DirectSendPinCanceled(String),
     // ---- 接收确认（R7） ----
     IncomingAddToFavoritesToggled(bool),
     IncomingConfirmed {
@@ -68,6 +76,10 @@ pub(crate) enum TransferMessage {
     DeviceAliasInputChanged(String),
     DeviceAliasCommitted,
     ReceiveEnabledToggled,
+    AcceptModeSelected(TransferAcceptMode),
+    ReceivePinToggled,
+    ReceivePinInputChanged(String),
+    ReceivePinCommitted,
     PortInputChanged(String),
     PortCommitted,
     // ---- LocalSend 窗口 ----
@@ -282,6 +294,17 @@ impl FileBrowser {
                 self.accept_direct_send_finished(&fingerprint, &alias, outcome);
                 iced::Task::none()
             }
+            TransferMessage::DirectSendPinChanged { fingerprint, value } => {
+                self.edit_direct_send_pin(&fingerprint, value);
+                iced::Task::none()
+            }
+            TransferMessage::DirectSendPinSubmitted(fingerprint) => {
+                self.submit_direct_send_pin(&fingerprint)
+            }
+            TransferMessage::DirectSendPinCanceled(fingerprint) => {
+                self.cancel_direct_send_pin(&fingerprint);
+                iced::Task::none()
+            }
             TransferMessage::IncomingAddToFavoritesToggled(add) => {
                 if let Some(incoming) = &mut self.incoming_transfer {
                     incoming.add_to_favorites = add;
@@ -318,6 +341,13 @@ impl FileBrowser {
                 iced::Task::none()
             }
             TransferMessage::PortCommitted => self.commit_transfer_port(),
+            TransferMessage::AcceptModeSelected(mode) => self.select_transfer_accept_mode(mode),
+            TransferMessage::ReceivePinToggled => self.toggle_receive_pin(),
+            TransferMessage::ReceivePinInputChanged(value) => {
+                self.edit_receive_pin(value);
+                iced::Task::none()
+            }
+            TransferMessage::ReceivePinCommitted => self.commit_receive_pin(),
             TransferMessage::LocalSendWindowRequested => self.open_local_send_window(),
             TransferMessage::ChooserPressed(target) => local_send_window::chooser_command(target),
             TransferMessage::LocalSendPathsChosen(Ok(paths)) => self.stage_local_send_paths(paths),
@@ -599,7 +629,9 @@ mod favorites;
 mod local_send_window;
 mod settings;
 
-pub(crate) use direct_send::DirectSendState;
+pub(crate) use direct_send::{
+    DirectSendFailure, DirectSendOutcome, DirectSendPhase, DirectSendState,
+};
 pub(crate) use favorites::{
     service_favorites, AddressFormMessage, FavoriteAddressForm, FavoriteRow,
 };
@@ -608,4 +640,4 @@ pub(crate) use local_send_window::{ChooserTarget, StagedItem, StagedSize};
 pub(crate) use settings::receiver_failure_message;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

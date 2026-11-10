@@ -35,6 +35,22 @@ pub enum LocalSendError {
         endpoint: &'static str,
     },
 
+    /// 对方要 PIN，这次没带。
+    #[error("the device requires a PIN")]
+    PinRequired,
+
+    /// 带的 PIN 不对。
+    #[error("the PIN is not correct")]
+    WrongPin,
+
+    /// PIN 错的次数太多，对方拦住了这台电脑（直到它重启或改 PIN）。
+    #[error("too many wrong PINs; the device no longer accepts files from this computer")]
+    TooManyPinAttempts,
+
+    /// 对方拒绝了（或没人确认、超时）。
+    #[error("the device declined the files")]
+    Declined,
+
     /// 对端响应不符合协议（缺字段、错结构等）。
     #[error("peer response does not match LocalSend protocol for {endpoint}: {reason}")]
     PeerProtocol {

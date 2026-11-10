@@ -87,13 +87,18 @@ fn removing_clearing_and_closing_stop_the_size_measurements() {
 fn closing_the_window_keeps_sends_that_are_still_running() {
     let mut browser = browser();
     drop(browser.stage_local_send_paths(vec![PathBuf::from("/a")]));
-    browser
-        .direct_sends
-        .insert("phone-fp".to_owned(), DirectSendState::started());
+    let phone = crate::app::transfer::tests::sample_device("phone-fp");
+    browser.direct_sends.insert(
+        "phone-fp".to_owned(),
+        DirectSendState::sending_to(phone, vec![PathBuf::from("/a")]),
+    );
 
     drop(browser.close_local_send_window());
 
-    assert!(browser.direct_sends["phone-fp"].is_running());
+    assert_eq!(
+        browser.direct_sends["phone-fp"].phase,
+        crate::app::transfer::DirectSendPhase::Sending
+    );
 }
 
 #[test]

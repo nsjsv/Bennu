@@ -117,6 +117,12 @@ pub(crate) struct StoredUserPreferences {
     /// LocalSend 端口;缺省 = 协议默认端口。范围由读取端校验。
     #[serde(default = "default_transfer_port")]
     pub transfer_port: u16,
+    /// 接收确认档位;缺省 = 收藏自动收,旧数据升级后行为不变。
+    #[serde(default = "default_transfer_accept_mode")]
+    pub transfer_accept_mode: String,
+    /// 接收 PIN;缺省 = 不要 PIN。
+    #[serde(default)]
+    pub transfer_receive_pin: Option<String>,
 }
 
 /// 收藏设备条目:fingerprint 是 LocalSend 设备身份(证书指纹)。
@@ -215,6 +221,8 @@ impl Default for StoredUserPreferences {
             transfer_trusted_devices: Vec::new(),
             transfer_receive_enabled: default_transfer_receive_enabled(),
             transfer_port: default_transfer_port(),
+            transfer_accept_mode: default_transfer_accept_mode(),
+            transfer_receive_pin: None,
         }
     }
 }
@@ -226,6 +234,12 @@ fn default_transfer_receive_enabled() -> bool {
 
 fn default_transfer_port() -> u16 {
     local_send::DEFAULT_PORT
+}
+
+fn default_transfer_accept_mode() -> String {
+    super::TransferAcceptMode::AcceptFavorites
+        .config_value()
+        .to_owned()
 }
 
 fn default_launch_window_policy() -> String {

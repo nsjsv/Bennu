@@ -106,4 +106,13 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ),
     ("Could not connect: %1", "连不上：%1"),
     ("This is this computer.", "这是本机。"),
+    // PIN 与接收确认
+    ("This device requires a PIN", "对方需要 PIN"),
+    ("Wrong PIN. Try again.", "PIN 不对，再输一次。"),
+    ("The device declined.", "对方拒绝了。"),
+    (
+        "Too many wrong PINs. The device no longer accepts files from this computer for now.",
+        "PIN 错的次数太多，对方暂时不收这台电脑的文件了。",
+    ),
+    ("PIN", "PIN"),
 ];

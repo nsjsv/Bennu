@@ -3,10 +3,12 @@
 //! 两块：收藏（全部收藏设备，不在线的灰着）与附近（没被收藏认领的设备）。每行：
 //! 类型图标 + 名字 + 小字 + 这台设备最近一次直推的状态 + ☆/★ + 发送。
 
-use iced::widget::{button, column, container, row, tooltip, Column};
+use iced::widget::{button, column, container, row, text_input, tooltip, Column};
 use iced::{Alignment, Element, Length, Theme};
 
-use crate::app::transfer::{DirectSendState, FavoriteRow, TransferMessage};
+use crate::app::transfer::{
+    DirectSendFailure, DirectSendPhase, DirectSendState, FavoriteRow, TransferMessage,
+};
 use crate::app::FileBrowser;
 use crate::appearance::{context_menu_button_style, muted_text_color};
 use crate::formatting::format_middle_ellipsized_text;
@@ -146,6 +148,9 @@ fn online_row<'a>(
     }
     if let Some(state) = browser.direct_send_to(device) {
         details = details.push(direct_send_status(state));
+        if let DirectSendPhase::NeedsPin { input, .. } = &state.phase {
+            details = details.push(pin_prompt(&device.fingerprint, input));
+        }
     }
     let message = send(device).filter(|_| browser.can_send_to(device));
     device_row(device_icon(device), details, star, message)
@@ -200,19 +205,8 @@ fn device_icon(device: &DeviceInfo) -> IconSymbol {
 }
 
 fn direct_send_status(state: &DirectSendState) -> Element<'static, Message> {
-    match &state.outcome {
-        Some(Ok(())) => muted_setting_text(tr!("Sent"), 11),
-        Some(Err(error)) => {
-            let label =
-                format_middle_ellipsized_text(&tr!("Send failed: %1", error), STATUS_MAX_CHARS);
-            readable_text(label)
-                .size(11)
-                .style(|theme: &Theme| iced::widget::text::Style {
-                    color: Some(ui_colors(theme).error),
-                })
-                .into()
-        }
-        None if state.total_files > 0 => muted_setting_text(
+    match &state.phase {
+        DirectSendPhase::Sending if state.total_files > 0 => muted_setting_text(
             tr!(
                 "Sending %1/%2 · %3%",
                 // 协议层的序号从 0 开始。
@@ -222,8 +216,72 @@ fn direct_send_status(state: &DirectSendState) -> Element<'static, Message> {
             ),
             11,
         ),
-        None => muted_setting_text(tr!("Sending..."), 11),
+        DirectSendPhase::Sending => muted_setting_text(tr!("Sending..."), 11),
+        DirectSendPhase::NeedsPin { wrong: false, .. } => {
+            readable_text(tr!("This device requires a PIN"))
+                .size(11)
+                .into()
+        }
+        DirectSendPhase::NeedsPin { wrong: true, .. } => error_text(tr!("Wrong PIN. Try again.")),
+        DirectSendPhase::Sent => muted_setting_text(tr!("Sent"), 11),
+        DirectSendPhase::Canceled => muted_setting_text(tr!("Canceled"), 11),
+        DirectSendPhase::Failed(DirectSendFailure::Declined) => {
+            error_text(tr!("The device declined."))
+        }
+        DirectSendPhase::Failed(DirectSendFailure::TooManyPinAttempts) => error_text(tr!(
+            "Too many wrong PINs. The device no longer accepts files from this computer for now."
+        )),
+        DirectSendPhase::Failed(DirectSendFailure::Other(error)) => error_text(
+            format_middle_ellipsized_text(&tr!("Send failed: %1", error), STATUS_MAX_CHARS),
+        ),
     }
+}
+
+fn error_text(label: String) -> Element<'static, Message> {
+    readable_text(label)
+        .size(11)
+        .style(|theme: &Theme| iced::widget::text::Style {
+            color: Some(ui_colors(theme).error),
+        })
+        .into()
+}
+
+/// 对方要 PIN：圆点遮住的输入框（回车即发）+ 取消/发送；用同一批文件重发。
+fn pin_prompt<'a>(fingerprint: &str, input: &'a str) -> Element<'a, Message> {
+    let changed = fingerprint.to_owned();
+    let submit = Message::Transfer(TransferMessage::DirectSendPinSubmitted(
+        fingerprint.to_owned(),
+    ));
+    let action = |label: String, message: Option<Message>| {
+        button(readable_text(label).size(12))
+            .on_press_maybe(message)
+            .padding([4, 10])
+            .style(context_menu_button_style())
+    };
+    row![
+        text_input(&tr!("PIN"), input)
+            .secure(true)
+            .on_input(move |value| {
+                Message::Transfer(TransferMessage::DirectSendPinChanged {
+                    fingerprint: changed.clone(),
+                    value,
+                })
+            })
+            .on_submit_maybe((!input.is_empty()).then(|| submit.clone()))
+            .padding([4, 8])
+            .size(12)
+            .width(Length::Fill),
+        action(
+            tr!("Cancel"),
+            Some(Message::Transfer(TransferMessage::DirectSendPinCanceled(
+                fingerprint.to_owned(),
+            ))),
+        ),
+        action(tr!("Send"), (!input.is_empty()).then_some(submit)),
+    ]
+    .spacing(6)
+    .align_y(Alignment::Center)
+    .into()
 }
 
 /// 当前文件的进度百分比；大小为 0 的文件直接算完成。

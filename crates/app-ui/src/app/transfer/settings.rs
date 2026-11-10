@@ -1,6 +1,8 @@
-//! 设置页的传输项：接收开关、端口、接收目录、设备名（收藏设备在 `favorites.rs`）。
+//! 设置页的传输项：接收开关、接收确认档位、PIN、端口、接收目录、设备名（收藏设备在
+//! `favorites.rs`）。
 //!
-//! 改动服务启动时就确定的配置（开关、端口、目录、设备名）都重启常驻服务并持久化。
+//! 改动服务启动时就确定的配置（开关、档位、PIN、端口、目录、设备名）都重启常驻服务并
+//! 持久化。
 
 use std::path::PathBuf;
 
@@ -8,7 +10,10 @@ use local_send::ReceiverFailure;
 
 use super::super::FileBrowser;
 use super::TransferMessage;
-use crate::config::{default_transfer_device_alias, transfer_port_from};
+use crate::config::{
+    default_transfer_device_alias, transfer_port_from, transfer_receive_pin_from,
+    TransferAcceptMode,
+};
 use crate::model::Message;
 
 impl FileBrowser {
@@ -58,6 +63,58 @@ impl FileBrowser {
             return iced::Task::none();
         }
         self.user_config.transfer_port = port;
+        self.start_or_restart_local_send_service();
+        self.persist_user_preferences_command()
+    }
+
+    /// 档位由接收端执行，改了要重启接收（同 PIN）。
+    pub(super) fn select_transfer_accept_mode(
+        &mut self,
+        mode: TransferAcceptMode,
+    ) -> iced::Task<Message> {
+        if mode == self.user_config.transfer_accept_mode {
+            return iced::Task::none();
+        }
+        self.user_config.transfer_accept_mode = mode;
+        self.start_or_restart_local_send_service();
+        self.persist_user_preferences_command()
+    }
+
+    /// 打开只是露出输入框，保存了 PIN 才生效；关掉 = 不要 PIN，并忘掉它（同官方）。
+    pub(super) fn toggle_receive_pin(&mut self) -> iced::Task<Message> {
+        self.transfer_pin_invalid = false;
+        if self.transfer_pin_input.take().is_none() {
+            self.transfer_pin_input = Some(String::new());
+            return iced::Task::none();
+        }
+        if self.user_config.transfer_receive_pin.take().is_none() {
+            return iced::Task::none();
+        }
+        self.start_or_restart_local_send_service();
+        self.persist_user_preferences_command()
+    }
+
+    pub(super) fn edit_receive_pin(&mut self, value: String) {
+        if let Some(input) = &mut self.transfer_pin_input {
+            *input = value;
+            self.transfer_pin_invalid = false;
+        }
+    }
+
+    /// 空的只提示、不生效；改了 PIN 重启接收（同官方），输错被拦的 IP 随之放开。
+    pub(super) fn commit_receive_pin(&mut self) -> iced::Task<Message> {
+        let Some(input) = &mut self.transfer_pin_input else {
+            return iced::Task::none();
+        };
+        let Some(pin) = transfer_receive_pin_from(input) else {
+            self.transfer_pin_invalid = true;
+            return iced::Task::none();
+        };
+        *input = pin.clone();
+        if self.user_config.transfer_receive_pin.as_ref() == Some(&pin) {
+            return iced::Task::none();
+        }
+        self.user_config.transfer_receive_pin = Some(pin);
         self.start_or_restart_local_send_service();
         self.persist_user_preferences_command()
     }

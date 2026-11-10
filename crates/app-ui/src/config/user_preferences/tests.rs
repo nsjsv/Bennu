@@ -365,3 +365,53 @@ fn an_unreadable_favorite_address_is_dropped_but_the_favorite_stays() {
         vec!["transfer_trusted_devices"]
     );
 }
+
+#[test]
+fn preferences_saved_before_pins_keep_accepting_favorites_without_a_pin() {
+    let current = UserPreferences::from_user_config(&default_user_config()).to_stored();
+    let mut payload = serde_json::to_value(current).unwrap();
+    let object = payload.as_object_mut().expect("preferences payload object");
+    object.remove("transfer_accept_mode");
+    object.remove("transfer_receive_pin");
+    let legacy: StoredUserPreferences = serde_json::from_value(payload).unwrap();
+
+    let interpreted = UserPreferences::from_stored(legacy, &default_user_config());
+
+    assert_eq!(
+        interpreted.preferences.transfer_accept_mode,
+        TransferAcceptMode::AcceptFavorites
+    );
+    assert_eq!(interpreted.preferences.transfer_receive_pin, None);
+    assert!(interpreted.unrecognized.into_keys().is_empty());
+}
+
+#[test]
+fn accept_mode_and_pin_round_trip_and_unreadable_values_are_reported() {
+    let mut config = default_user_config();
+    config.transfer_accept_mode = TransferAcceptMode::AcceptEveryone;
+    config.transfer_receive_pin = Some("a&b 中".to_owned());
+    let stored = UserPreferences::from_user_config(&config).to_stored();
+    let interpreted = UserPreferences::from_stored(stored.clone(), &default_user_config());
+    assert_eq!(
+        interpreted.preferences.transfer_accept_mode,
+        TransferAcceptMode::AcceptEveryone
+    );
+    assert_eq!(
+        interpreted.preferences.transfer_receive_pin.as_deref(),
+        Some("a&b 中")
+    );
+
+    let mut broken = stored;
+    broken.transfer_accept_mode = "trust_nobody".to_owned();
+    broken.transfer_receive_pin = Some("   ".to_owned());
+    let interpreted = UserPreferences::from_stored(broken, &default_user_config());
+    assert_eq!(
+        interpreted.preferences.transfer_accept_mode,
+        TransferAcceptMode::AcceptFavorites
+    );
+    assert_eq!(interpreted.preferences.transfer_receive_pin, None);
+    assert_eq!(
+        interpreted.unrecognized.into_keys(),
+        vec!["transfer_accept_mode", "transfer_receive_pin"]
+    );
+}

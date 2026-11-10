@@ -1,4 +1,4 @@
-//! 设置 → 传输：接收开关与原因、端口、接收目录、设备名、收藏设备。
+//! 设置 → 传输：接收开关与原因、接收确认、PIN、端口、接收目录、设备名、收藏设备。
 
 use iced::widget::{button, column, container, row, text_input};
 use iced::{Alignment, Element, Length, Theme};
@@ -6,16 +6,18 @@ use iced::{Alignment, Element, Length, Theme};
 use crate::app::transfer::{receiver_failure_message, TransferMessage};
 use crate::app::FileBrowser;
 use crate::appearance::context_menu_button_style;
-use crate::config::TRANSFER_PORT_RANGE;
+use crate::config::{TransferAcceptMode, TRANSFER_PORT_RANGE};
 use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::icons::IconSymbol;
 use bennu_theme::ui_colors;
 
+use super::option_controls::{segmented_choice_row, SegmentedChoice};
 use super::settings_group::toggle_setting_row;
 use super::{themed_icon, IconTone};
 
-/// "接收"组的行：开关 → 没开起来的原因（有才显示）→ 端口 → 接收目录 → 设备名。
+/// "接收"组的行：开关 → 没开起来的原因（有才显示）→ 接收确认 → PIN → 端口 → 接收目录
+/// → 设备名。
 pub(super) fn transfer_receive_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
     let mut rows = vec![toggle_setting_row(
         tr!("Receive files"),
@@ -27,6 +29,16 @@ pub(super) fn transfer_receive_rows(browser: &FileBrowser) -> Vec<Element<'_, Me
     )];
     if let Some(failure) = browser.transfer_receiver_failure() {
         rows.push(error_line(receiver_failure_message(failure)));
+    }
+    rows.push(accept_mode_row(browser));
+    rows.push(toggle_setting_row(
+        tr!("Require PIN to receive"),
+        None,
+        browser.transfer_pin_input.is_some(),
+        Message::Transfer(TransferMessage::ReceivePinToggled),
+    ));
+    if let Some(input) = &browser.transfer_pin_input {
+        rows.push(pin_row(browser, input));
     }
     rows.push(port_row(browser));
     rows.push(receive_directory_row(browser));
@@ -43,6 +55,64 @@ fn error_line(label: String) -> Element<'static, Message> {
             color: Some(ui_colors(theme).error),
         })
         .into()
+}
+
+/// 接收确认三档；"所有人自动收"时一直红字提醒（同官方 Quick Save 的提示）。
+fn accept_mode_row(browser: &FileBrowser) -> Element<'_, Message> {
+    let current = browser.user_config().transfer_accept_mode;
+    let choices = TransferAcceptMode::ALL
+        .into_iter()
+        .map(|mode| SegmentedChoice {
+            label: match mode {
+                TransferAcceptMode::AskEveryone => tr!("Always ask"),
+                TransferAcceptMode::AcceptFavorites => tr!("Accept from favorites"),
+                TransferAcceptMode::AcceptEveryone => tr!("Accept from everyone"),
+            },
+            selected: mode == current,
+            message: Message::Transfer(TransferMessage::AcceptModeSelected(mode)),
+            tooltip: None,
+        })
+        .collect();
+    let mut content = column![
+        readable_text(tr!("Confirm incoming files")).size(12),
+        segmented_choice_row(choices),
+    ]
+    .spacing(6);
+    if current == TransferAcceptMode::AcceptEveryone {
+        content = content.push(error_line(tr!(
+            "Anyone on your local network can send you files without asking."
+        )));
+    }
+    content.into()
+}
+
+/// PIN 行：明文输入（要念给别人听，同官方）+ 保存；保存了非空的才生效。
+fn pin_row<'a>(browser: &'a FileBrowser, input: &'a str) -> Element<'a, Message> {
+    let field = text_input(&tr!("PIN"), input)
+        .on_input(|value| Message::Transfer(TransferMessage::ReceivePinInputChanged(value)))
+        .on_submit(Message::Transfer(TransferMessage::ReceivePinCommitted))
+        .padding([6, 8])
+        .size(12)
+        .width(Length::Fill);
+    let save = button(container(readable_text(tr!("Save")).size(12)).padding([6, 10]))
+        .on_press(Message::Transfer(TransferMessage::ReceivePinCommitted))
+        .style(context_menu_button_style());
+    let mut content = column![
+        row![readable_text(tr!("PIN")).size(12), field, save]
+            .spacing(8)
+            .align_y(Alignment::Center),
+        readable_text(tr!(
+            "Other devices must enter this PIN to send files to this computer, favorites included."
+        ))
+        .size(11),
+    ]
+    .spacing(3);
+    if browser.transfer_pin_invalid {
+        content = content.push(error_line(tr!("The PIN cannot be empty.")));
+    } else if browser.user_config().transfer_receive_pin.as_deref() != Some(input) {
+        content = content.push(readable_text(tr!("Takes effect after you save.")).size(11));
+    }
+    content.into()
 }
 
 /// 端口行：输入 + Save；下方常驻"两端端口要一致"的提示，上次提交不合法时再加红字。

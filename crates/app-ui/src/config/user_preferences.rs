@@ -16,12 +16,12 @@ use super::{
     list_directory_size_display_mode_from_config_value, normalize_right_preview_panel_width,
     normalize_right_preview_preview_ratio, normalize_sidebar_width, normalize_visible_column_count,
     sort_direction_config_value, sort_direction_from_config_value, sort_field_config_value,
-    sort_field_from_config_value, transfer_port_from, ColumnWidthAdjustMode,
-    FavoriteTransferDevice, LaunchWindowPolicy, PreviewExtensionRules, PreviewFileSizeLimits,
-    SidebarFavoriteConfig, StoredContextMenuItemEntry, StoredContextMenuLayout,
-    StoredContextMenuLayouts, StoredLastSearchScope, StoredListViewColumn, StoredShortcutBinding,
-    StoredUserPreferences, StoredWindowControlPlacement, UiLanguageSetting, UserConfig,
-    ViewDensityLevel,
+    sort_field_from_config_value, transfer_port_from, transfer_receive_pin_from,
+    ColumnWidthAdjustMode, FavoriteTransferDevice, LaunchWindowPolicy, PreviewExtensionRules,
+    PreviewFileSizeLimits, SidebarFavoriteConfig, StoredContextMenuItemEntry,
+    StoredContextMenuLayout, StoredContextMenuLayouts, StoredLastSearchScope, StoredListViewColumn,
+    StoredShortcutBinding, StoredUserPreferences, StoredWindowControlPlacement, TransferAcceptMode,
+    UiLanguageSetting, UserConfig, ViewDensityLevel,
 };
 use crate::model::{
     list_column_kind_config_value, list_column_kind_from_config_value, BrowserViewMode,
@@ -81,6 +81,8 @@ pub(crate) struct UserPreferences {
     pub(crate) transfer_favorite_devices: Vec<FavoriteTransferDevice>,
     pub(crate) transfer_receive_enabled: bool,
     pub(crate) transfer_port: u16,
+    pub(crate) transfer_accept_mode: TransferAcceptMode,
+    pub(crate) transfer_receive_pin: Option<String>,
 }
 
 impl UserPreferences {
@@ -132,6 +134,8 @@ impl UserPreferences {
             transfer_favorite_devices: config.transfer_favorite_devices.clone(),
             transfer_receive_enabled: config.transfer_receive_enabled,
             transfer_port: config.transfer_port,
+            transfer_accept_mode: config.transfer_accept_mode,
+            transfer_receive_pin: config.transfer_receive_pin.clone(),
         }
     }
 
@@ -178,6 +182,8 @@ impl UserPreferences {
         config.transfer_favorite_devices = self.transfer_favorite_devices.clone();
         config.transfer_receive_enabled = self.transfer_receive_enabled;
         config.transfer_port = self.transfer_port;
+        config.transfer_accept_mode = self.transfer_accept_mode;
+        config.transfer_receive_pin = self.transfer_receive_pin.clone();
     }
 
     pub(crate) fn to_stored(&self) -> StoredUserPreferences {
@@ -271,6 +277,8 @@ impl UserPreferences {
             stored_favorite_transfer_devices(&self.transfer_favorite_devices);
         stored.transfer_receive_enabled = self.transfer_receive_enabled;
         stored.transfer_port = self.transfer_port;
+        stored.transfer_accept_mode = self.transfer_accept_mode.config_value().to_owned();
+        stored.transfer_receive_pin = self.transfer_receive_pin.clone();
         stored
     }
 
@@ -461,6 +469,18 @@ impl UserPreferences {
                 transfer_port_from(stored.transfer_port),
                 default_preferences.transfer_port,
             ),
+            transfer_accept_mode: unrecognized.value_or_default(
+                "transfer_accept_mode",
+                TransferAcceptMode::from_config_value(&stored.transfer_accept_mode),
+                default_preferences.transfer_accept_mode,
+            ),
+            transfer_receive_pin: stored.transfer_receive_pin.as_deref().and_then(|pin| {
+                let recognized = transfer_receive_pin_from(pin);
+                if recognized.is_none() {
+                    unrecognized.note("transfer_receive_pin");
+                }
+                recognized
+            }),
         };
         InterpretedPreferences {
             preferences,

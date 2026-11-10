@@ -6,15 +6,15 @@ use local_send::{DeviceInfo, QrSource};
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    qr_items_from_paths, DirectSendState, FileBrowser, TransferMessage, TransferSessionPhase,
-    TransferSessionState,
+    qr_items_from_paths, DirectSendFailure, DirectSendOutcome, DirectSendPhase, DirectSendState,
+    FileBrowser, TransferMessage, TransferSessionPhase, TransferSessionState,
 };
 use crate::app::transfer_service::service_config;
-use crate::config::FavoriteTransferDevice;
+use crate::config::{FavoriteTransferDevice, TransferAcceptMode};
 use crate::model::sanitized_application_log_detail;
 use crate::view::transfer_qr::qr_image_handle;
 
-fn sample_device(fingerprint: &str) -> DeviceInfo {
+pub(crate) fn sample_device(fingerprint: &str) -> DeviceInfo {
     DeviceInfo {
         alias: "Phone".to_owned(),
         version: "2.0".to_owned(),
@@ -227,16 +227,30 @@ fn qr_session() -> TransferSessionState {
     }
 }
 
-fn finish_direct_send(browser: &mut FileBrowser, fingerprint: &str, outcome: Result<(), &str>) {
+fn finish_direct_send(browser: &mut FileBrowser, fingerprint: &str, outcome: DirectSendOutcome) {
     let _ = browser.handle_transfer_message(TransferMessage::DirectSendFinished {
         fingerprint: fingerprint.to_owned(),
         alias: "Phone".to_owned(),
-        outcome: outcome.map_err(str::to_owned),
+        outcome,
     });
 }
 
-fn outcome_of(browser: &FileBrowser, fingerprint: &str) -> Option<Result<(), String>> {
-    browser.direct_sends[fingerprint].outcome.clone()
+fn phase_of(browser: &FileBrowser, fingerprint: &str) -> DirectSendPhase {
+    browser.direct_sends[fingerprint].phase.clone()
+}
+
+fn start_sending(browser: &mut FileBrowser, fingerprint: &str) {
+    browser.direct_sends.insert(
+        fingerprint.to_owned(),
+        DirectSendState::sending_to(
+            sample_device(fingerprint),
+            vec![std::path::PathBuf::from("/tmp/one.txt")],
+        ),
+    );
+}
+
+fn failed(reason: &str) -> DirectSendOutcome {
+    DirectSendOutcome::Failed(DirectSendFailure::Other(reason.to_owned()))
 }
 
 #[test]
@@ -250,9 +264,7 @@ fn direct_send_results_land_on_their_device_and_failures_are_logged_once() {
     );
     let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
     for fingerprint in ["phone-fp", "tablet-fp"] {
-        browser
-            .direct_sends
-            .insert(fingerprint.to_owned(), DirectSendState::started());
+        start_sending(&mut browser, fingerprint);
     }
 
     let logs = capture_direct_send_failure_logs(|| {
@@ -266,19 +278,19 @@ fn direct_send_results_land_on_their_device_and_failures_are_logged_once() {
                 file_size: 10,
             },
         });
-        finish_direct_send(&mut browser, "phone-fp", Err(failure));
-        finish_direct_send(&mut browser, "tablet-fp", Ok(()));
+        finish_direct_send(&mut browser, "phone-fp", failed(failure));
+        finish_direct_send(&mut browser, "tablet-fp", DirectSendOutcome::Sent);
         // 设备状态已不在（不该发生）时失败照样进日志：日志是长期记录。
-        finish_direct_send(&mut browser, "gone-fp", Err(failure));
+        finish_direct_send(&mut browser, "gone-fp", failed(failure));
     });
 
     assert_eq!(browser.direct_sends["phone-fp"].file_index, 1);
     assert_eq!(
-        outcome_of(&browser, "phone-fp"),
-        Some(Err(failure.to_owned()))
+        phase_of(&browser, "phone-fp"),
+        DirectSendPhase::Failed(DirectSendFailure::Other(failure.to_owned()))
     );
     assert_eq!(browser.direct_sends["tablet-fp"].file_index, 0);
-    assert_eq!(outcome_of(&browser, "tablet-fp"), Some(Ok(())));
+    assert_eq!(phase_of(&browser, "tablet-fp"), DirectSendPhase::Sent);
     assert!(!browser.direct_sends.contains_key("gone-fp"));
     // 成功不记日志。
     assert_eq!(logs, vec![logged_failure; 2]);
@@ -292,14 +304,101 @@ fn a_device_that_is_sending_cannot_start_another_send() {
     let phone = sample_device("phone-fp");
     assert!(browser.can_send_to(&phone));
 
-    browser
-        .direct_sends
-        .insert("phone-fp".to_owned(), DirectSendState::started());
+    start_sending(&mut browser, "phone-fp");
     assert!(!browser.can_send_to(&phone));
     assert!(browser.can_send_to(&sample_device("tablet-fp")));
 
-    finish_direct_send(&mut browser, "phone-fp", Ok(()));
+    finish_direct_send(&mut browser, "phone-fp", DirectSendOutcome::Sent);
     assert!(browser.can_send_to(&phone));
+}
+
+#[test]
+fn a_pin_request_opens_the_prompt_until_it_is_canceled() {
+    let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+    let phone = sample_device("phone-fp");
+    start_sending(&mut browser, "phone-fp");
+
+    let logs = capture_direct_send_failure_logs(|| {
+        finish_direct_send(&mut browser, "phone-fp", DirectSendOutcome::PinRequired);
+        assert_eq!(
+            phase_of(&browser, "phone-fp"),
+            DirectSendPhase::NeedsPin {
+                input: String::new(),
+                wrong: false
+            }
+        );
+        // 等 PIN 时主"发送"不可点：输完用同一批文件重发。
+        assert!(!browser.can_send_to(&phone));
+        let _ = browser.handle_transfer_message(TransferMessage::DirectSendPinChanged {
+            fingerprint: "phone-fp".to_owned(),
+            value: "4821".to_owned(),
+        });
+        assert_eq!(
+            phase_of(&browser, "phone-fp"),
+            DirectSendPhase::NeedsPin {
+                input: "4821".to_owned(),
+                wrong: false
+            }
+        );
+
+        // 重发后对方说 PIN 不对：清空输入、提示再输。
+        finish_direct_send(&mut browser, "phone-fp", DirectSendOutcome::WrongPin);
+        assert_eq!(
+            phase_of(&browser, "phone-fp"),
+            DirectSendPhase::NeedsPin {
+                input: String::new(),
+                wrong: true
+            }
+        );
+        // 空的不发。
+        let _ = browser.handle_transfer_message(TransferMessage::DirectSendPinSubmitted(
+            "phone-fp".to_owned(),
+        ));
+        assert!(matches!(
+            phase_of(&browser, "phone-fp"),
+            DirectSendPhase::NeedsPin { .. }
+        ));
+
+        let _ = browser.handle_transfer_message(TransferMessage::DirectSendPinCanceled(
+            "phone-fp".to_owned(),
+        ));
+    });
+
+    assert_eq!(phase_of(&browser, "phone-fp"), DirectSendPhase::Canceled);
+    assert!(browser.can_send_to(&phone));
+    // 要 PIN、PIN 不对、取消都不是失败，不进日志。
+    assert!(logs.is_empty());
+}
+
+#[test]
+fn being_declined_or_blocked_ends_the_send_and_is_logged() {
+    let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+    start_sending(&mut browser, "phone-fp");
+    start_sending(&mut browser, "tablet-fp");
+
+    let logs = capture_direct_send_failure_logs(|| {
+        finish_direct_send(
+            &mut browser,
+            "phone-fp",
+            DirectSendOutcome::Failed(DirectSendFailure::Declined),
+        );
+        finish_direct_send(
+            &mut browser,
+            "tablet-fp",
+            DirectSendOutcome::Failed(DirectSendFailure::TooManyPinAttempts),
+        );
+    });
+
+    assert_eq!(
+        phase_of(&browser, "phone-fp"),
+        DirectSendPhase::Failed(DirectSendFailure::Declined)
+    );
+    assert!(browser.can_send_to(&sample_device("tablet-fp")));
+    let reasons: Vec<_> = logs.into_iter().map(|(_, reason)| reason).collect();
+    assert_eq!(
+        reasons,
+        ["the device declined the files", "too many wrong PINs"]
+    );
 }
 
 #[test]
@@ -318,4 +417,62 @@ fn shutdown_closes_the_transfer_window_and_cancels_its_qr_session() {
         cancel.is_cancelled(),
         "the QR download service must be shut down"
     );
+}
+
+fn send_settings(browser: &mut FileBrowser, message: TransferMessage) {
+    drop(browser.handle_transfer_message(message));
+}
+
+#[test]
+fn a_receive_pin_takes_effect_only_once_a_non_empty_one_is_saved() {
+    let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+
+    // 打开只露出输入框。
+    send_settings(&mut browser, TransferMessage::ReceivePinToggled);
+    assert_eq!(browser.transfer_pin_input.as_deref(), Some(""));
+    assert_eq!(browser.user_config.transfer_receive_pin, None);
+
+    send_settings(&mut browser, TransferMessage::ReceivePinCommitted);
+    assert!(browser.transfer_pin_invalid);
+    assert_eq!(browser.user_config.transfer_receive_pin, None);
+
+    send_settings(
+        &mut browser,
+        TransferMessage::ReceivePinInputChanged(" 4821 ".to_owned()),
+    );
+    assert!(!browser.transfer_pin_invalid);
+    send_settings(&mut browser, TransferMessage::ReceivePinCommitted);
+    assert_eq!(
+        browser.user_config.transfer_receive_pin.as_deref(),
+        Some("4821")
+    );
+    assert_eq!(browser.transfer_pin_input.as_deref(), Some("4821"));
+
+    // 关掉 = 不要 PIN，并忘掉它。
+    send_settings(&mut browser, TransferMessage::ReceivePinToggled);
+    assert_eq!(browser.user_config.transfer_receive_pin, None);
+    assert_eq!(browser.transfer_pin_input, None);
+    send_settings(&mut browser, TransferMessage::ReceivePinToggled);
+    assert_eq!(browser.transfer_pin_input.as_deref(), Some(""));
+}
+
+#[test]
+fn choosing_an_accept_mode_changes_what_the_receiver_is_given() {
+    let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+    assert_eq!(
+        browser.user_config.transfer_accept_mode,
+        TransferAcceptMode::AcceptFavorites
+    );
+
+    send_settings(
+        &mut browser,
+        TransferMessage::AcceptModeSelected(TransferAcceptMode::AskEveryone),
+    );
+    browser.user_config.transfer_receive_pin = Some("4821".to_owned());
+
+    let receiver = service_config(&browser.user_config)
+        .receiver
+        .expect("receiving is on by default");
+    assert_eq!(receiver.accept, local_send::AcceptPolicy::AskEveryone);
+    assert_eq!(receiver.pin.as_deref(), Some("4821"));
 }

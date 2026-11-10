@@ -9,6 +9,7 @@
 //! 与 LocalSend 官方 App 行为一致。
 
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,7 +25,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::{broadcast, oneshot, watch, Mutex};
 
 use crate::device::{DeviceInfo, FileMetadata, PrepareUploadRequest, PrepareUploadResponse};
-use crate::{Favorite, ServiceEvent};
+use crate::{AcceptPolicy, Favorite, ReceiverConfig, ServiceEvent};
 
 mod listener;
 mod tls;
@@ -68,6 +69,10 @@ struct Session {
 pub(crate) struct ReceiveState {
     own_device: DeviceInfo,
     download_dir: PathBuf,
+    accept: AcceptPolicy,
+    pin: Option<String>,
+    /// 每个 IP 连续输错 PIN 的次数；接收端换代（重启、改 PIN）即清零。
+    pin_failures: Mutex<HashMap<IpAddr, u32>>,
     /// 收藏设备算信任；app-ui 改收藏时立刻换掉快照。
     favorites: watch::Receiver<Vec<Favorite>>,
     /// 不是收藏的设备的挂起确认：session_id → 决策回写端。
@@ -81,7 +86,7 @@ pub(crate) struct ReceiveState {
 impl ReceiveState {
     pub(crate) fn new(
         own_device: DeviceInfo,
-        download_dir: PathBuf,
+        receiver: ReceiverConfig,
         favorites: watch::Receiver<Vec<Favorite>>,
         devices: Arc<Mutex<crate::discovery::DeviceTable>>,
         events: broadcast::Sender<ServiceEvent>,
@@ -89,7 +94,10 @@ impl ReceiveState {
     ) -> Self {
         ReceiveState {
             own_device,
-            download_dir,
+            download_dir: receiver.download_dir,
+            accept: receiver.accept,
+            pin: receiver.pin,
+            pin_failures: Mutex::new(HashMap::new()),
             favorites,
             pending: Mutex::new(HashMap::new()),
             sessions: Mutex::new(HashMap::new()),
@@ -109,13 +117,52 @@ impl ReceiveState {
         sender.send(accept).is_ok()
     }
 
-    /// 收藏的设备自动收：按握手时的证书指纹比。
-    fn is_favorite(&self, fingerprint: &str) -> bool {
-        self.favorites
-            .borrow()
-            .iter()
-            .any(|favorite| favorite.fingerprint == fingerprint)
+    /// 不用确认就收：按接收确认档位；收藏按握手时的证书指纹比。
+    fn accepts_without_asking(&self, fingerprint: &str) -> bool {
+        match self.accept {
+            AcceptPolicy::AskEveryone => false,
+            AcceptPolicy::AcceptFavorites => self
+                .favorites
+                .borrow()
+                .iter()
+                .any(|favorite| favorite.fingerprint == fingerprint),
+            AcceptPolicy::AcceptEveryone => true,
+        }
     }
+
+    /// 照官方 `pin.rs`：要 PIN 时每个 prepare-upload 都查（收藏也一样）。没带或不对
+    /// 回 401；同一 IP 错满 3 次后一律 429（填对也不行），直到接收端换代；填对一次
+    /// 清零；没带不算错。
+    async fn check_pin(&self, ip: IpAddr, given: Option<&str>) -> Result<(), StatusCode> {
+        let Some(required) = &self.pin else {
+            return Ok(());
+        };
+        let mut failures = self.pin_failures.lock().await;
+        let count = failures.get(&ip).copied().unwrap_or(0);
+        if count >= MAX_PIN_FAILURES {
+            return Err(StatusCode::TOO_MANY_REQUESTS);
+        }
+        match given {
+            Some(pin) if pin == required => {
+                failures.remove(&ip);
+                Ok(())
+            }
+            Some(_) => {
+                failures.insert(ip, count + 1);
+                Err(StatusCode::UNAUTHORIZED)
+            }
+            None => Err(StatusCode::UNAUTHORIZED),
+        }
+    }
+}
+
+/// 同一 IP 连续输错几次 PIN 后拦住（同官方）。
+const MAX_PIN_FAILURES: u32 = 3;
+
+/// prepare-upload 的查询参数：发送方带的 PIN。
+#[derive(serde::Deserialize)]
+struct PinQuery {
+    pin: Option<String>,
 }
 
 pub(crate) fn router(state: Arc<ReceiveState>) -> Router {
@@ -176,8 +223,15 @@ fn random_id() -> String {
 async fn prepare_upload(
     State(state): State<Arc<ReceiveState>>,
     ConnectInfo(peer): ConnectInfo<Peer>,
+    Query(query): Query<PinQuery>,
     Json(mut request): Json<PrepareUploadRequest>,
 ) -> impl IntoResponse {
+    if let Err(status) = state
+        .check_pin(peer.address.ip(), query.pin.as_deref())
+        .await
+    {
+        return (status, Json(Option::<PrepareUploadResponse>::None));
+    }
     // 发送方是证书证明的那台设备（同官方 `certFingerprint ?? info.fingerprint`）；
     // 地址是连接来源，"加入收藏"要记住它。
     request.info.fingerprint = peer.fingerprint;
@@ -190,7 +244,7 @@ async fn prepare_upload(
     }
 
     let session_id = random_id();
-    if state.is_favorite(&request.info.fingerprint) {
+    if state.accepts_without_asking(&request.info.fingerprint) {
         let response = accept_session(&state, &session_id, &request.info, &request.files).await;
         let _ = state.events.send(ServiceEvent::RequestAccepted {
             session_id: session_id.clone(),
@@ -198,7 +252,7 @@ async fn prepare_upload(
         return (StatusCode::CREATED, Json(Some(response)));
     }
 
-    // 不是收藏：挂起等 UI 确认，超时回 403（协议语义：403 = 拒绝）。
+    // 要确认：挂起等 UI 确认，超时回 403（协议语义：403 = 拒绝）。
     let (tx, rx) = oneshot::channel();
     state.pending.lock().await.insert(session_id.clone(), tx);
     let _ = state.events.send(ServiceEvent::IncomingRequest {

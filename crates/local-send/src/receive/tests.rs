@@ -27,7 +27,7 @@ fn receive_state(
             protocol: "http".into(),
             address: None,
         },
-        download_dir,
+        crate::integration::receiver_config(&download_dir, AcceptPolicy::AcceptFavorites, None),
         watch::channel(Vec::new()).1,
         Arc::new(Mutex::new(crate::discovery::DeviceTable::new(
             "own-fp".into(),

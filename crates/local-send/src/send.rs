@@ -83,6 +83,7 @@ impl DirectSender {
         &self,
         target: &DeviceInfo,
         items: Vec<PathBuf>,
+        pin: Option<&str>,
         progress: mpsc::Sender<SendProgress>,
     ) -> Result<(), LocalSendError> {
         let base = target
@@ -123,17 +124,16 @@ impl DirectSender {
 
         let endpoint = "prepare-upload";
         let url = format!("{base}/api/localsend/v2/{endpoint}");
-        let response = client
-            .post(&url)
-            .json(&request)
+        let mut prepare = client.post(&url).json(&request);
+        if let Some(pin) = pin {
+            prepare = prepare.query(&[("pin", pin)]);
+        }
+        let response = prepare
             .send()
             .await
             .map_err(|source| LocalSendError::Request { endpoint, source })?;
         if !response.status().is_success() {
-            return Err(LocalSendError::PeerRejected {
-                status: response.status(),
-                endpoint,
-            });
+            return Err(prepare_upload_refusal(response.status(), pin.is_some()));
         }
         let prepared_response: PrepareUploadResponse = response
             .json()
@@ -171,6 +171,21 @@ impl DirectSender {
             }
         }
         Ok(())
+    }
+}
+
+/// prepare-upload 被拒的原因：PIN、拒绝、拦截各有各的意思（同官方发送端的分支），
+/// 界面据此决定是让用户输 PIN 还是报错。
+fn prepare_upload_refusal(status: reqwest::StatusCode, pin_given: bool) -> LocalSendError {
+    match status {
+        reqwest::StatusCode::UNAUTHORIZED if pin_given => LocalSendError::WrongPin,
+        reqwest::StatusCode::UNAUTHORIZED => LocalSendError::PinRequired,
+        reqwest::StatusCode::FORBIDDEN => LocalSendError::Declined,
+        reqwest::StatusCode::TOO_MANY_REQUESTS => LocalSendError::TooManyPinAttempts,
+        status => LocalSendError::PeerRejected {
+            status,
+            endpoint: "prepare-upload",
+        },
     }
 }
 
@@ -539,7 +554,7 @@ mod tests {
         let (progress, _) = mpsc::channel(1);
 
         let error = sender
-            .send(&target_at(address), one_file(&dir), progress)
+            .send(&target_at(address), one_file(&dir), None, progress)
             .await
             .unwrap_err();
 
@@ -588,7 +603,7 @@ mod tests {
         let (progress, _) = mpsc::channel(1);
 
         let error = sender
-            .send(&target_at(address), one_file(&dir), progress)
+            .send(&target_at(address), one_file(&dir), None, progress)
             .await
             .unwrap_err();
         responder.await.unwrap();

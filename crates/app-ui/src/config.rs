@@ -380,6 +380,46 @@ pub(crate) struct UserConfig {
     pub(crate) transfer_receive_enabled: bool,
     /// 发现与接收共用的 LocalSend 端口;只存 `transfer_port_from` 认可的值。
     pub(crate) transfer_port: u16,
+    pub(crate) transfer_accept_mode: TransferAcceptMode,
+    /// 别人发文件进来要输的 PIN;None = 不要。只存 `transfer_receive_pin_from` 认可的值。
+    pub(crate) transfer_receive_pin: Option<String>,
+}
+
+/// 谁发来的文件不用确认就收;默认收藏自动收(合并收藏前"信任设备自动收"的行为)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TransferAcceptMode {
+    AskEveryone,
+    AcceptFavorites,
+    AcceptEveryone,
+}
+
+impl TransferAcceptMode {
+    pub(crate) const ALL: [Self; 3] = [
+        Self::AskEveryone,
+        Self::AcceptFavorites,
+        Self::AcceptEveryone,
+    ];
+
+    pub(crate) fn config_value(self) -> &'static str {
+        match self {
+            Self::AskEveryone => "ask_everyone",
+            Self::AcceptFavorites => "accept_favorites",
+            Self::AcceptEveryone => "accept_everyone",
+        }
+    }
+
+    pub(crate) fn from_config_value(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|mode| mode.config_value() == value)
+    }
+}
+
+/// PIN 能否保存:去掉前后空格后非空。读配置与设置页保存共用这一条规则(多敲的空格
+/// 别人念不出来,对不上)。
+pub(crate) fn transfer_receive_pin_from(input: &str) -> Option<String> {
+    let pin = input.trim();
+    (!pin.is_empty()).then(|| pin.to_owned())
 }
 
 /// 用户可选的 LocalSend 端口:1024 以下在 Linux 上要特权才能绑定。
@@ -469,6 +509,8 @@ pub(crate) fn default_user_config() -> UserConfig {
         transfer_favorite_devices: Vec::new(),
         transfer_receive_enabled: true,
         transfer_port: local_send::DEFAULT_PORT,
+        transfer_accept_mode: TransferAcceptMode::AcceptFavorites,
+        transfer_receive_pin: None,
     }
 }
 
@@ -518,6 +560,8 @@ pub(crate) fn ui_thread_startup_config() -> UserConfig {
         transfer_favorite_devices: Vec::new(),
         transfer_receive_enabled: true,
         transfer_port: local_send::DEFAULT_PORT,
+        transfer_accept_mode: TransferAcceptMode::AcceptFavorites,
+        transfer_receive_pin: None,
     }
 }
 

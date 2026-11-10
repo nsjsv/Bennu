@@ -277,6 +277,10 @@ pub(crate) struct FileBrowser {
     pub(crate) transfer_port_input: String,
     /// 上一次提交的端口不合法（配置未改）。
     pub(crate) transfer_port_invalid: bool,
+    /// 设置页 PIN 输入；None = "接收需要 PIN"关着（此时配置里也没有 PIN），启动时与已存 PIN 同步。
+    pub(crate) transfer_pin_input: Option<String>,
+    /// 上一次保存的 PIN 是空的（配置未改）。
+    pub(crate) transfer_pin_invalid: bool,
     tab_bar_reveal: TabBarReveal,
     pub(crate) tab_animations: HashMap<usize, TabAnimationState>,
     /// 全部窗格；浏览状态只存在这里（窗格→标签），活动窗格由 `pane_layout`
@@ -655,6 +659,8 @@ impl FileBrowser {
             incoming_transfer: None,
             transfer_device_alias_input: String::new(),
             transfer_port_input: String::new(),
+            transfer_pin_input: None,
+            transfer_pin_invalid: false,
             transfer_port_invalid: false,
             tab_bar_reveal: TabBarReveal::default(),
             tab_animations: HashMap::new(),

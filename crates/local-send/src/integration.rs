@@ -13,10 +13,11 @@ use crate::device::{DeviceInfo, FileMetadata, PrepareUploadRequest, PrepareUploa
 use crate::discovery::DeviceTable;
 use crate::identity::DeviceIdentity;
 use crate::receive::{port_already_released, spawn_server, PortReleased, ReceiveState};
-use crate::{Favorite, ServiceEvent};
+use crate::{AcceptPolicy, Favorite, ReceiverConfig, ServiceEvent};
 
 mod find_device;
 mod mtls;
+mod pin;
 mod qr;
 
 pub(crate) const TEST_TIMEOUT: Duration = Duration::from_secs(15);
@@ -112,12 +113,42 @@ pub(crate) fn favorite(fingerprint: &str) -> Favorite {
     }
 }
 
-/// 启动接收端但不等它就绪（端口可能被占）；没有收藏设备。
+pub(crate) fn receiver_config(
+    download_dir: &std::path::Path,
+    accept: AcceptPolicy,
+    pin: Option<&str>,
+) -> ReceiverConfig {
+    ReceiverConfig {
+        download_dir: download_dir.to_path_buf(),
+        accept,
+        pin: pin.map(str::to_owned),
+    }
+}
+
+/// 启动接收端但不等它就绪（端口可能被占）；没有收藏设备、收藏自动收、不要 PIN。
 pub(crate) fn start_receiver(
     alias: &str,
     port: u16,
     previous_released: PortReleased,
     confirm_timeout: Duration,
+) -> ReceiveServer {
+    start_receiver_with(
+        alias,
+        port,
+        previous_released,
+        confirm_timeout,
+        AcceptPolicy::AcceptFavorites,
+        None,
+    )
+}
+
+pub(crate) fn start_receiver_with(
+    alias: &str,
+    port: u16,
+    previous_released: PortReleased,
+    confirm_timeout: Duration,
+    accept: AcceptPolicy,
+    pin: Option<&str>,
 ) -> ReceiveServer {
     let dir = tempfile::tempdir().unwrap();
     let identity_dir = tempfile::tempdir().unwrap();
@@ -127,7 +158,7 @@ pub(crate) fn start_receiver(
     let (favorites, favorites_rx) = watch::channel(Vec::new());
     let state = Arc::new(ReceiveState::new(
         crate::own_device_info(alias.to_owned(), None, port, &identity),
-        dir.path().to_path_buf(),
+        receiver_config(dir.path(), accept, pin),
         favorites_rx,
         Arc::new(Mutex::new(DeviceTable::new(
             identity.fingerprint().to_owned(),
@@ -637,7 +668,10 @@ async fn send_to_device_transfers_files_and_directory_zip() {
     let identity_dir = tempfile::tempdir().unwrap();
     let (sender, fingerprint) = crate::send::sender_with_new_identity(identity_dir.path());
     server.favor(&fingerprint);
-    sender.send(&target, items, progress_tx).await.unwrap();
+    sender
+        .send(&target, items, None, progress_tx)
+        .await
+        .unwrap();
 
     // 接收端：一个普通文件 + 一个目录 zip。
     let event = wait_for(&mut server.events, |e| {
@@ -688,6 +722,6 @@ async fn send_to_device_requires_discovered_address() {
     std::fs::write(&file, b"x").unwrap();
     let (sender, _) = crate::send::sender_with_new_identity(source.path());
     let (progress, _) = tokio::sync::mpsc::channel(1);
-    let result = sender.send(&target, vec![file], progress).await;
+    let result = sender.send(&target, vec![file], None, progress).await;
     assert!(matches!(result, Err(crate::LocalSendError::AddressUnknown)));
 }

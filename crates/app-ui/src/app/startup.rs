@@ -173,6 +173,7 @@ impl FileBrowser {
         self.refresh_current_language();
         // 设置页设备名输入框显示生效别名（配置值优先，缺省 hostname）。
         self.transfer_device_alias_input = self.effective_transfer_device_alias();
+        self.transfer_port_input = self.user_config.transfer_port.to_string();
         // 常驻 LocalSend 服务随启动环境就绪后启动（此处用户配置已加载）。
         self.start_or_restart_local_send_service();
     }
@@ -317,6 +318,21 @@ mod tests {
 
         assert!(!browser.renderer_restart_notice_visible);
         assert!(browser.pending_renderer_restart_environment.is_none());
+    }
+
+    #[test]
+    fn loaded_transfer_port_fills_the_settings_input() {
+        let mut user_config = config::default_user_config();
+        user_config.transfer_port = 50000;
+        let (mut browser, _) = FileBrowser::new(config::ui_thread_startup_config());
+
+        drop(browser.accept_startup_environment(startup_environment(
+            PathBuf::from("/home/user"),
+            user_config,
+            PathBuf::from("/tmp/state.sqlite"),
+        )));
+
+        assert_eq!(browser.transfer_port_input, "50000");
     }
 
     #[test]

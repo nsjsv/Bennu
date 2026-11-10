@@ -212,9 +212,10 @@ async fn spawn_mutual_tls_receive() -> MutualTlsReceiver {
         client_fingerprints: Arc::clone(&client_fingerprints),
         handshake_rejections: rejections_tx,
     };
-    // axum 只为 TcpListener 实现了 SocketAddr 的 ConnectInfo；对端地址在这里不重要。
-    let router =
-        receive_router(state).layer(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 0))));
+    // 测试用的 TLS listener 不提供对端地址；对端地址在这里不重要。
+    let router = receive_router(state).layer(MockConnectInfo(crate::receive::PeerAddr(
+        SocketAddr::from(([127, 0, 0, 1], 0)),
+    )));
     tokio::spawn(async move {
         let _ = axum::serve(listener, router.into_make_service()).await;
     });

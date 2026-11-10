@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use iced::futures::SinkExt;
-use local_send::{DeviceInfo, ServiceConfig, ServiceEvent, TrustPredicate};
+use local_send::{DeviceInfo, ReceiverConfig, ServiceConfig, ServiceEvent, TrustPredicate};
 use tokio::sync::broadcast;
 use tracing::warn;
 
@@ -15,8 +15,6 @@ use super::transfer::TransferMessage;
 use crate::config::default_transfer_device_alias;
 use crate::model::Message;
 
-/// LocalSend 协议固定端口（PRD R6）。
-pub(crate) const LOCAL_SEND_PORT: u16 = 53317;
 /// 设备身份文件（证书 + 私钥，权限 600），放在应用数据目录下。
 const LOCAL_SEND_IDENTITY_FILE_NAME: &str = "localsend-identity.pem";
 
@@ -84,14 +82,20 @@ pub(crate) fn transfer_download_dir(user_config: &crate::config::UserConfig) -> 
     dir
 }
 
-/// 组装常驻服务配置：本机设备信息 + 信任查询回调。
+/// 组装常驻服务配置：本机设备信息；接收开着时再带上接收目录与信任查询回调。
 pub(crate) fn service_config(
     user_config: &crate::config::UserConfig,
     trusted: Arc<parking_lot::RwLock<HashSet<String>>>,
 ) -> ServiceConfig {
-    let is_trusted: TrustPredicate = Arc::new(move |device: &DeviceInfo| {
-        // 空 fingerprint 不能作为信任身份；锁中毒按未信任处理（fail closed）。
-        !device.fingerprint.is_empty() && trusted.read().contains(&device.fingerprint)
+    let receiver = user_config.transfer_receive_enabled.then(|| {
+        let is_trusted: TrustPredicate = Arc::new(move |device: &DeviceInfo| {
+            // 空 fingerprint 不能作为信任身份；锁中毒按未信任处理（fail closed）。
+            !device.fingerprint.is_empty() && trusted.read().contains(&device.fingerprint)
+        });
+        ReceiverConfig {
+            download_dir: transfer_download_dir(user_config),
+            is_trusted,
+        }
     });
     ServiceConfig {
         alias: user_config
@@ -101,9 +105,8 @@ pub(crate) fn service_config(
             .unwrap_or_else(default_transfer_device_alias),
         // LocalSend 官方设备类型词表中的桌面端取值。
         device_type: Some("computer".to_owned()),
-        listen_port: LOCAL_SEND_PORT,
-        download_dir: transfer_download_dir(user_config),
+        port: user_config.transfer_port,
         identity_path: file_core::app_dirs::app_data_dir().join(LOCAL_SEND_IDENTITY_FILE_NAME),
-        is_trusted,
+        receiver,
     }
 }

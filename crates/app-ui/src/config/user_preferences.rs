@@ -16,12 +16,12 @@ use super::{
     list_directory_size_display_mode_from_config_value, normalize_right_preview_panel_width,
     normalize_right_preview_preview_ratio, normalize_sidebar_width, normalize_visible_column_count,
     sort_direction_config_value, sort_direction_from_config_value, sort_field_config_value,
-    sort_field_from_config_value, ColumnWidthAdjustMode, LaunchWindowPolicy, PreviewExtensionRules,
-    PreviewFileSizeLimits, SidebarFavoriteConfig, StoredContextMenuItemEntry,
-    StoredContextMenuLayout, StoredContextMenuLayouts, StoredLastSearchScope, StoredListViewColumn,
-    StoredShortcutBinding, StoredTrustedTransferDevice, StoredUserPreferences,
-    StoredWindowControlPlacement, TrustedTransferDevice, UiLanguageSetting, UserConfig,
-    ViewDensityLevel,
+    sort_field_from_config_value, transfer_port_from, ColumnWidthAdjustMode, LaunchWindowPolicy,
+    PreviewExtensionRules, PreviewFileSizeLimits, SidebarFavoriteConfig,
+    StoredContextMenuItemEntry, StoredContextMenuLayout, StoredContextMenuLayouts,
+    StoredLastSearchScope, StoredListViewColumn, StoredShortcutBinding,
+    StoredTrustedTransferDevice, StoredUserPreferences, StoredWindowControlPlacement,
+    TrustedTransferDevice, UiLanguageSetting, UserConfig, ViewDensityLevel,
 };
 use crate::model::{
     list_column_kind_config_value, list_column_kind_from_config_value, BrowserViewMode,
@@ -79,6 +79,8 @@ pub(crate) struct UserPreferences {
     pub(crate) transfer_download_dir: Option<PathBuf>,
     pub(crate) transfer_device_alias: Option<String>,
     pub(crate) transfer_trusted_devices: Vec<TrustedTransferDevice>,
+    pub(crate) transfer_receive_enabled: bool,
+    pub(crate) transfer_port: u16,
 }
 
 impl UserPreferences {
@@ -128,6 +130,8 @@ impl UserPreferences {
             transfer_download_dir: config.transfer_download_dir.clone(),
             transfer_device_alias: config.transfer_device_alias.clone(),
             transfer_trusted_devices: config.transfer_trusted_devices.clone(),
+            transfer_receive_enabled: config.transfer_receive_enabled,
+            transfer_port: config.transfer_port,
         }
     }
 
@@ -172,6 +176,8 @@ impl UserPreferences {
         config.transfer_download_dir = self.transfer_download_dir.clone();
         config.transfer_device_alias = self.transfer_device_alias.clone();
         config.transfer_trusted_devices = self.transfer_trusted_devices.clone();
+        config.transfer_receive_enabled = self.transfer_receive_enabled;
+        config.transfer_port = self.transfer_port;
     }
 
     pub(crate) fn to_stored(&self) -> StoredUserPreferences {
@@ -263,6 +269,8 @@ impl UserPreferences {
         stored.transfer_device_alias = self.transfer_device_alias.clone();
         stored.transfer_trusted_devices =
             stored_trusted_transfer_devices(&self.transfer_trusted_devices);
+        stored.transfer_receive_enabled = self.transfer_receive_enabled;
+        stored.transfer_port = self.transfer_port;
         stored
     }
 
@@ -446,6 +454,12 @@ impl UserPreferences {
             transfer_trusted_devices: trusted_transfer_devices_from_stored(
                 &stored.transfer_trusted_devices,
                 &mut unrecognized,
+            ),
+            transfer_receive_enabled: stored.transfer_receive_enabled,
+            transfer_port: unrecognized.value_or_default(
+                "transfer_port",
+                transfer_port_from(stored.transfer_port),
+                default_preferences.transfer_port,
             ),
         };
         InterpretedPreferences {

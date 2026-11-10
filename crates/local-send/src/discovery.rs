@@ -1,7 +1,9 @@
-//! UDP 组播发现：announce 周期广播、register 回应与设备表老化。
+//! 发现：UDP 组播 announce 与回应、legacy HTTP 扫描、设备表老化。
 //!
-//! 组播组 `224.0.0.167:53317`（UDP）；对端收到 `announce:true` 后优先用 HTTP
-//! `POST /api/localsend/v2/register` 回应，失败退化为 UDP 回 `announce:false`。
+//! 组播组 `224.0.0.167`，端口与接收端口相同（默认 53317）；对端收到
+//! `announce:true` 后优先用 HTTP `POST /api/localsend/v2/register` 回应，失败退化为
+//! UDP 回 `announce:false`。本机是否露面（announce、回应、扫描时登记自己）由
+//! [`Presence`] 决定：接收关着时只看不露面。
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
@@ -15,9 +17,10 @@ use crate::device::{Announce, DeviceInfo};
 use crate::error::LocalSendError;
 use crate::ServiceEvent;
 
-/// LocalSend v2 固定组播地址与端口（UDP，与 HTTP 的 TCP 53317 互不冲突）。
+mod sweep;
+
+/// LocalSend v2 固定组播地址。
 pub(crate) const MULTICAST_GROUP: Ipv4Addr = Ipv4Addr::new(224, 0, 0, 167);
-pub(crate) const MULTICAST_PORT: u16 = 53317;
 
 /// 设备表老化阈值（N5：~30s 未刷新剔除）。
 pub(crate) const DEVICE_LIFETIME: Duration = Duration::from_secs(30);
@@ -25,13 +28,12 @@ pub(crate) const DEVICE_LIFETIME: Duration = Duration::from_secs(30);
 pub(crate) const ANNOUNCE_INTERVAL: Duration = Duration::from_secs(5);
 /// register 回应的 HTTP 超时：局域网单跳请求，超过即退化 UDP。
 const REGISTER_TIMEOUT: Duration = Duration::from_secs(2);
-/// legacy 发现（规范 §3.2）扫描周期：组播常被 AP 隔离、IGMP snooping 或
-/// TUN 防火墙吞掉，退化为对候选子网逐 IP 发送 register。
-const HTTP_SWEEP_INTERVAL: Duration = Duration::from_secs(10);
 /// 单个扫描请求超时：局域网单跳，超时即视为不存在。
 const SWEEP_TIMEOUT: Duration = Duration::from_millis(500);
 /// register 路由路径（listener 回应与主动扫描共用）。
 const REGISTER_PATH: &str = "/api/localsend/v2/register";
+/// info 路由路径：不露面时扫描只查询、不登记。
+const INFO_PATH: &str = "/api/localsend/v2/info";
 
 /// 设备表条目：设备信息 + 来源地址（直推目标）+ 最近活跃时刻。
 #[derive(Debug, Clone)]
@@ -173,34 +175,100 @@ pub(crate) fn local_ipv4s() -> Result<Vec<Ipv4Addr>, LocalSendError> {
     Ok(lan_candidates()?.into_iter().map(|(_, ip)| ip).collect())
 }
 
-/// 驱动全部发现任务：announce 循环、组播监听与设备老化；收到 shutdown 后全部退出。
+/// 本机在网络上的露面方式。接收开着才宣告自己、回应 announce、扫描时登记自己；
+/// 关着只看不露面：别人发现不了本机，本机照样能发现别人并直推。依赖露面方式的
+/// 三处行为都在这里决定，发现任务里不各自判断。
+pub(crate) enum Presence {
+    Visible(DeviceInfo),
+    Hidden,
+}
+
+impl Presence {
+    /// announce 循环：只在露面时运行。
+    fn spawn_announcer(&self, port: u16, mut shutdown: watch::Receiver<bool>) {
+        let Presence::Visible(own_device) = self else {
+            return;
+        };
+        let own_device = own_device.clone();
+        tokio::spawn(async move {
+            loop {
+                if announce_to_all(&own_device, port).await.is_err() {
+                    // 单次发送失败（如临时的接口变化）只影响本轮，等待下一轮即可。
+                    tracing::debug!(event = "localsend_announce_failed", "announce round failed");
+                }
+                tokio::select! {
+                    _ = tokio::time::sleep(ANNOUNCE_INTERVAL) => {}
+                    _ = shutdown.changed() => return,
+                }
+            }
+        });
+    }
+
+    /// 回应对端的 `announce:true`：露面时登记自己，不露面时不回应。
+    async fn answer(
+        &self,
+        remote: &DeviceInfo,
+        source: std::net::SocketAddr,
+        client: &reqwest::Client,
+        socket: &UdpSocket,
+    ) {
+        if let Presence::Visible(own_device) = self {
+            reply_register(own_device, remote, source, client, socket).await;
+        }
+    }
+
+    /// 扫描探测：露面时 POST register（顺带让对方认识本机），不露面时只 GET info。
+    async fn probe(
+        &self,
+        client: &reqwest::Client,
+        base: &str,
+    ) -> reqwest::Result<reqwest::Response> {
+        match self {
+            Presence::Visible(own_device) => {
+                post_register(
+                    client,
+                    &format!("{base}{REGISTER_PATH}"),
+                    own_device,
+                    SWEEP_TIMEOUT,
+                )
+                .await
+            }
+            Presence::Hidden => {
+                client
+                    .get(format!("{base}{INFO_PATH}"))
+                    .timeout(SWEEP_TIMEOUT)
+                    .send()
+                    .await
+            }
+        }
+    }
+}
+
+/// 发现任务共用的上下文。
+pub(crate) struct Discovery {
+    /// 本机身份指纹：过滤听到、扫到的自己。
+    pub(crate) own_fingerprint: String,
+    /// 组播端口，也是扫描探测对端的端口（同官方：端口一致才互相发现）。
+    pub(crate) port: u16,
+    pub(crate) presence: Presence,
+    pub(crate) devices: Arc<Mutex<DeviceTable>>,
+    pub(crate) events: broadcast::Sender<ServiceEvent>,
+    pub(crate) client: reqwest::Client,
+}
+
+/// 驱动全部发现任务：announce 循环（露面时）、组播监听、扫描与设备老化；收到
+/// shutdown 后全部退出。
 pub(crate) fn spawn(
-    device: DeviceInfo,
-    devices: Arc<Mutex<DeviceTable>>,
-    events: broadcast::Sender<ServiceEvent>,
-    client: reqwest::Client,
+    discovery: Arc<Discovery>,
     sweeper_notify: Arc<tokio::sync::Notify>,
     shutdown: watch::Receiver<bool>,
 ) {
-    // announce：启动立即一次 + 周期重发；逐非环回 IPv4 接口各发一份。
-    let announce_device = device.clone();
-    let mut announce_shutdown = shutdown.clone();
-    tokio::spawn(async move {
-        loop {
-            if announce_to_all(&announce_device).await.is_err() {
-                // 单次发送失败（如临时的接口变化）只影响本轮，等待下一轮即可。
-                tracing::debug!(event = "localsend_announce_failed", "announce round failed");
-            }
-            tokio::select! {
-                _ = tokio::time::sleep(ANNOUNCE_INTERVAL) => {}
-                _ = announce_shutdown.changed() => return,
-            }
-        }
-    });
+    discovery
+        .presence
+        .spawn_announcer(discovery.port, shutdown.clone());
 
     // 老化：周期剔除 30s 未刷新的设备并广播 DeviceLost。
-    let aging_devices = Arc::clone(&devices);
-    let aging_events = events.clone();
+    let aging = Arc::clone(&discovery);
     let mut aging_shutdown = shutdown.clone();
     tokio::spawn(async move {
         loop {
@@ -208,35 +276,26 @@ pub(crate) fn spawn(
                 _ = tokio::time::sleep(ANNOUNCE_INTERVAL) => {}
                 _ = aging_shutdown.changed() => return,
             }
-            let removed = aging_devices
+            let removed = aging
+                .devices
                 .lock()
                 .await
                 .prune(Instant::now(), DEVICE_LIFETIME);
             for device in removed {
-                let _ = aging_events.send(ServiceEvent::DeviceLost(device));
+                let _ = aging.events.send(ServiceEvent::DeviceLost(device));
             }
         }
     });
 
     // legacy HTTP 扫描兜底：组播被网络吞掉时仍能发现常驻 LocalSend 设备。
-    let sweeper_shutdown = shutdown.clone();
-    tokio::spawn(run_http_sweeper(
-        device.clone(),
-        Arc::clone(&devices),
-        events.clone(),
-        client.clone(),
+    tokio::spawn(sweep::run_http_sweeper(
+        Arc::clone(&discovery),
         sweeper_notify,
-        sweeper_shutdown,
-    ));
-
-    // 组播监听：处理对端 announce 并回应 register。
-    let listener = tokio::spawn(run_listener(
-        device,
-        devices,
-        events,
-        client,
         shutdown.clone(),
     ));
+
+    // 组播监听：登记对端 announce，按露面方式决定是否回应。
+    let listener = tokio::spawn(run_listener(discovery, shutdown.clone()));
     let mut listener_shutdown = shutdown;
     tokio::spawn(async move {
         let _ = listener_shutdown.changed().await;
@@ -244,21 +303,28 @@ pub(crate) fn spawn(
     });
 }
 
-async fn run_listener(
-    own_device: DeviceInfo,
-    devices: Arc<Mutex<DeviceTable>>,
-    events: broadcast::Sender<ServiceEvent>,
-    client: reqwest::Client,
-    shutdown: watch::Receiver<bool>,
-) {
-    let socket = match UdpSocket::bind(("0.0.0.0", MULTICAST_PORT)).await {
+/// 组播监听套接字。同机的官方 LocalSend（1.18 起同样设置复用）也监听这个端口：
+/// 双方都开复用才能共存，组播报文两边都收得到。
+fn bind_multicast_listener(port: u16) -> std::io::Result<UdpSocket> {
+    let socket = socket2::Socket::new(
+        socket2::Domain::IPV4,
+        socket2::Type::DGRAM,
+        Some(socket2::Protocol::UDP),
+    )?;
+    socket.set_reuse_address(true)?;
+    socket.set_reuse_port(true)?;
+    socket.bind(&std::net::SocketAddr::from((Ipv4Addr::UNSPECIFIED, port)).into())?;
+    socket.set_nonblocking(true)?;
+    UdpSocket::from_std(socket.into())
+}
+
+/// 听不到组播只影响"发现别人"：本机 announce 走每个接口单独的发送套接字，不受影响；
+/// 扫描每轮兜底，用户也无可操作的事，所以只记警告日志、不上报界面。
+async fn run_listener(discovery: Arc<Discovery>, shutdown: watch::Receiver<bool>) {
+    let socket = match bind_multicast_listener(discovery.port) {
         Ok(socket) => socket,
         Err(error) => {
-            // N2：UDP 53317 被占（如另一 LocalSend 实例）只报一次错误，不重试。
-            tracing::warn!(event = "localsend_udp_bind_failed", %error, "udp 53317 bind failed");
-            let _ = events.send(ServiceEvent::ServiceError(format!(
-                "UDP 端口 {MULTICAST_PORT} 被占用（可能有另一个 LocalSend 应用正在运行）: {error}"
-            )));
+            tracing::warn!(event = "localsend_udp_bind_failed", %error, port = discovery.port, "udp bind failed, relying on http sweep");
             return;
         }
     };
@@ -276,9 +342,8 @@ async fn run_listener(
     if !joined {
         tracing::warn!(
             event = "localsend_multicast_join_failed",
-            "join multicast failed"
+            "join multicast failed, relying on http sweep"
         );
-        let _ = events.send(ServiceEvent::ServiceError("加入组播组失败".to_string()));
         return;
     }
 
@@ -295,13 +360,22 @@ async fn run_listener(
             },
             _ = shutdown.changed() => return,
         };
-        let Some(announce) = parse_announce(&buffer[..size], &own_device.fingerprint) else {
+        let Some(announce) = parse_announce(&buffer[..size], &discovery.own_fingerprint) else {
             continue;
         };
-        record_device(&devices, &events, announce.device.clone(), source.ip()).await;
-        // 对端请求被发现（announce:true）→ HTTP register 回应；失败退化 UDP announce:false。
+        record_device(
+            &discovery.devices,
+            &discovery.events,
+            announce.device.clone(),
+            source.ip(),
+        )
+        .await;
+        // 对端请求被发现（announce:true）→ 按露面方式回应。
         if announce.announce == Some(true) {
-            reply_register(&own_device, &announce.device, source, &client, &socket).await;
+            discovery
+                .presence
+                .answer(&announce.device, source, &discovery.client, &socket)
+                .await;
         }
     }
 }
@@ -364,9 +438,9 @@ pub(crate) async fn post_register(
 }
 
 /// 对每个局域网候选 IPv4 各发一份组播 announce：不同接口可达不同网段。
-async fn announce_to_all(device: &DeviceInfo) -> Result<(), LocalSendError> {
+async fn announce_to_all(device: &DeviceInfo, port: u16) -> Result<(), LocalSendError> {
     let payload = encode_announce(device, true)?;
-    let target = SocketAddrV4::new(MULTICAST_GROUP, MULTICAST_PORT);
+    let target = SocketAddrV4::new(MULTICAST_GROUP, port);
     for interface in local_ipv4s()? {
         // 组播出口接口由 IP_MULTICAST_IF 决定，须用 socket2 在创建阶段配置；
         // std/tokio 未暴露该设置。
@@ -386,109 +460,98 @@ async fn announce_to_all(device: &DeviceInfo) -> Result<(), LocalSendError> {
     Ok(())
 }
 
-/// 展开一个候选接口所在子网的主机地址：只处理 /24..=/30 常规网段（更大
-/// 的前缀会地址爆炸，跳过并留给组播），排除网络/广播地址与自身地址。
-fn expand_subnet(
-    interface_ip: Ipv4Addr,
-    netmask: Ipv4Addr,
-    own_ips: &std::collections::HashSet<Ipv4Addr>,
-) -> Vec<Ipv4Addr> {
-    let prefix = u32::from(netmask).leading_ones();
-    if !(24..=30).contains(&prefix) {
-        return Vec::new();
-    }
-    let network = u32::from(interface_ip) & u32::from(netmask);
-    let size = 1u32 << (32 - prefix);
-    (1..size - 1)
-        .map(|host| Ipv4Addr::from(network + host))
-        .filter(|candidate| !own_ips.contains(candidate))
-        .collect()
-}
-
-/// legacy 发现（规范 §3.2）：枚举候选接口子网，展开全部主机地址。
-pub(crate) fn sweep_targets(own_ips: &std::collections::HashSet<Ipv4Addr>) -> Vec<Ipv4Addr> {
-    let Ok(interfaces) = getifaddrs::getifaddrs() else {
-        return Vec::new();
-    };
-    let mut targets: Vec<Ipv4Addr> = Vec::new();
-    for interface in interfaces {
-        let Some(IpAddr::V4(v4)) = interface.address.ip_addr() else {
-            continue;
-        };
-        if !is_lan_candidate(&interface.name, v4) {
-            continue;
-        }
-        let Some(netmask) = interface.address.netmask().and_then(|mask| match mask {
-            IpAddr::V4(mask) => Some(mask),
-            _ => None,
-        }) else {
-            continue;
-        };
-        targets.extend(expand_subnet(v4, netmask, own_ips));
-    }
-    targets.sort_unstable();
-    targets.dedup();
-    targets
-}
-
-/// legacy HTTP 扫描兜底：周期对候选子网逐 IP 发送 register；对方 200 响应
-/// 即完成发现（手机端打开 LocalSend 或常驻 HTTP 服务时均可响应）。
-/// `refresh` 被通知（手动刷新）时立即再扫一轮。
-async fn run_http_sweeper(
-    own_device: DeviceInfo,
-    devices: Arc<Mutex<DeviceTable>>,
-    events: broadcast::Sender<ServiceEvent>,
-    client: reqwest::Client,
-    refresh: Arc<tokio::sync::Notify>,
-    mut shutdown: watch::Receiver<bool>,
-) {
-    let own_ips: std::collections::HashSet<Ipv4Addr> = lan_candidates()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|(_, ip)| ip)
-        .collect();
-    loop {
-        let targets = sweep_targets(&own_ips);
-        if !targets.is_empty() {
-            // 官方 App 默认 HTTPS（自签名），部分设备显式用 HTTP；扫描时
-            // 无先验协议，双协议并发探测（幂等登记，重复响应无害）。
-            let (client, own_device) = (&client, &own_device);
-            let responses = targets.iter().flat_map(|target| {
-                ["https", "http"].map(|scheme| {
-                    let url = format!("{scheme}://{target}:{}{REGISTER_PATH}", own_device.port);
-                    async move {
-                        let response = post_register(client, &url, own_device, SWEEP_TIMEOUT).await;
-                        (*target, scheme, response)
-                    }
-                })
-            });
-            let results = futures_util::future::join_all(responses).await;
-            for (ip, scheme, response) in results {
-                let Ok(response) = response else { continue };
-                if !response.status().is_success() {
-                    continue;
-                }
-                // 200 响应体 = 对端 DeviceInfo；忽略自身 fingerprint（扫到自己的另一接口）。
-                if let Ok(mut device) = response.json::<DeviceInfo>().await {
-                    if device.fingerprint != own_device.fingerprint {
-                        // 对端响应可能省略 protocol：以实际探测成功的 scheme 为准。
-                        device.protocol = scheme.to_owned();
-                        record_device(&devices, &events, device, IpAddr::from(ip)).await;
-                    }
-                }
-            }
-        }
-        tokio::select! {
-            _ = tokio::time::sleep(HTTP_SWEEP_INTERVAL) => {}
-            _ = refresh.notified() => {}
-            _ = shutdown.changed() => return,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 假对端：记录被打到的路由；响应体照官方 App 省略 port/protocol。
+    pub(super) struct FakePeer {
+        pub(super) port: u16,
+        pub(super) hits: Arc<parking_lot::Mutex<Vec<&'static str>>>,
+    }
+
+    pub(super) async fn fake_peer() -> FakePeer {
+        let hits = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let body = serde_json::json!({
+            "alias": "Phone",
+            "version": "2.1",
+            "fingerprint": "PEER",
+            "deviceType": "mobile",
+        });
+        let (register_hits, register_body) = (Arc::clone(&hits), body.clone());
+        let (info_hits, info_body) = (Arc::clone(&hits), body);
+        let router = axum::Router::new()
+            .route(
+                REGISTER_PATH,
+                axum::routing::post(move |_: axum::Json<DeviceInfo>| async move {
+                    register_hits.lock().push("register");
+                    axum::Json(register_body)
+                }),
+            )
+            .route(
+                INFO_PATH,
+                axum::routing::get(move || async move {
+                    info_hits.lock().push("info");
+                    axum::Json(info_body)
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, router).await;
+        });
+        FakePeer { port, hits }
+    }
+
+    pub(super) fn discovery(port: u16, presence: Presence) -> Discovery {
+        Discovery {
+            own_fingerprint: "OWN".into(),
+            port,
+            presence,
+            devices: Arc::new(Mutex::new(DeviceTable::default())),
+            events: broadcast::channel(16).0,
+            // 测试只连回环；环境里的代理变量不能把请求带走。
+            client: reqwest::Client::builder().no_proxy().build().unwrap(),
+        }
+    }
+
+    #[tokio::test]
+    async fn only_a_visible_presence_answers_announces() {
+        let peer = fake_peer().await;
+        let mut remote = device("PEER");
+        remote.address = Some(IpAddr::V4(Ipv4Addr::LOCALHOST));
+        remote.port = peer.port;
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let source = socket.local_addr().unwrap();
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+
+        Presence::Hidden
+            .answer(&remote, source, &client, &socket)
+            .await;
+        assert!(
+            peer.hits.lock().is_empty(),
+            "hidden must not register itself"
+        );
+
+        Presence::Visible(device("OWN"))
+            .answer(&remote, source, &client, &socket)
+            .await;
+        assert_eq!(*peer.hits.lock(), vec!["register"]);
+    }
+
+    #[tokio::test]
+    async fn multicast_listener_shares_its_port_with_another_reusing_socket() {
+        let port = std::net::UdpSocket::bind("0.0.0.0:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let first = bind_multicast_listener(port).expect("first bind");
+        // 同机的官方 LocalSend 1.18 同样开着复用：第二个监听必须绑得上。
+        let second = bind_multicast_listener(port).expect("second bind on the same port");
+        assert_eq!(first.local_addr().unwrap().port(), port);
+        assert_eq!(second.local_addr().unwrap().port(), port);
+    }
 
     fn device(fingerprint: &str) -> DeviceInfo {
         DeviceInfo {
@@ -498,7 +561,7 @@ mod tests {
             device_model: None,
             device_type: None,
             download: None,
-            port: 53317,
+            port: crate::DEFAULT_PORT,
             protocol: "http".into(),
             address: None,
         }
@@ -558,42 +621,6 @@ mod tests {
         sort_lan_candidates(&mut candidates);
         // 私网候选排前：QR URL 必须取到手机可达的地址。
         assert_eq!(candidates[0].1, "192.168.1.5".parse::<Ipv4Addr>().unwrap());
-    }
-
-    #[test]
-    fn sweep_expands_regular_subnet_excluding_self_and_edges() {
-        let own: std::collections::HashSet<Ipv4Addr> = ["192.168.10.11".parse().unwrap()].into();
-        let targets = expand_subnet(
-            "192.168.10.11".parse().unwrap(),
-            "255.255.255.0".parse().unwrap(),
-            &own,
-        );
-        assert!(targets.contains(&"192.168.10.1".parse().unwrap()));
-        assert!(targets.contains(&"192.168.10.254".parse().unwrap()));
-        // 网络/广播地址与自身必须排除。
-        assert!(!targets.contains(&"192.168.10.0".parse().unwrap()));
-        assert!(!targets.contains(&"192.168.10.255".parse().unwrap()));
-        assert!(!targets.contains(&"192.168.10.11".parse().unwrap()));
-        assert_eq!(targets.len(), 253);
-    }
-
-    #[test]
-    fn sweep_skips_non_regular_prefixes() {
-        let own: std::collections::HashSet<Ipv4Addr> = ["10.1.0.1".parse().unwrap()].into();
-        // /16 子网展开会地址爆炸（6.5 万目标），扫描范围明确跳过。
-        assert!(expand_subnet(
-            "10.1.0.1".parse().unwrap(),
-            "255.255.0.0".parse().unwrap(),
-            &own,
-        )
-        .is_empty());
-        // /32 无子网可扫。
-        assert!(expand_subnet(
-            "100.127.113.87".parse().unwrap(),
-            "255.255.255.255".parse().unwrap(),
-            &own,
-        )
-        .is_empty());
     }
 
     // 自发自收必须丢弃，否则设备表会被自己污染。

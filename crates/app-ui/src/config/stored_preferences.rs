@@ -110,6 +110,12 @@ pub(crate) struct StoredUserPreferences {
     /// 信任的 LocalSend 设备(按 fingerprint);空 = 无信任设备。
     #[serde(default)]
     pub transfer_trusted_devices: Vec<StoredTrustedTransferDevice>,
+    /// 接收文件开关;缺省 = 开,旧数据升级后行为不变。
+    #[serde(default = "default_transfer_receive_enabled")]
+    pub transfer_receive_enabled: bool,
+    /// LocalSend 端口;缺省 = 协议默认端口。范围由读取端校验。
+    #[serde(default = "default_transfer_port")]
+    pub transfer_port: u16,
 }
 
 /// 信任设备列表条目:fingerprint 是 LocalSend 协议设备身份,alias/added_at
@@ -201,11 +207,21 @@ impl Default for StoredUserPreferences {
             transfer_download_dir: None,
             transfer_device_alias: None,
             transfer_trusted_devices: Vec::new(),
+            transfer_receive_enabled: default_transfer_receive_enabled(),
+            transfer_port: default_transfer_port(),
         }
     }
 }
 
 /// 新装/旧数据缺字段的默认策略：每次触发启动都打开新窗口。
+fn default_transfer_receive_enabled() -> bool {
+    true
+}
+
+fn default_transfer_port() -> u16 {
+    local_send::DEFAULT_PORT
+}
+
 fn default_launch_window_policy() -> String {
     LAUNCH_WINDOW_POLICY_OPEN_NEW_WINDOW.to_owned()
 }

@@ -9,7 +9,7 @@ use tokio::sync::{broadcast, Mutex};
 
 use crate::device::{DeviceInfo, FileMetadata, PrepareUploadRequest, PrepareUploadResponse};
 use crate::discovery::DeviceTable;
-use crate::receive::{router as receive_router, ReceiveState};
+use crate::receive::{router as receive_router, PeerAddr, ReceiveState};
 use crate::{QrDownloadServer, QrEvent, QrItem, QrSource, ServiceEvent};
 
 mod mtls;
@@ -82,13 +82,15 @@ async fn spawn_receive(trusted: bool, confirm_timeout: Duration) -> ReceiveServe
     ));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
-    let router = receive_router(std::sync::Arc::clone(&state));
+    // 测试全在本机回环上：对端地址固定 127.0.0.1（真实服务的对端地址由 receive::listener 提供）。
+    let router = receive_router(std::sync::Arc::clone(&state)).layer(
+        axum::extract::connect_info::MockConnectInfo(PeerAddr(SocketAddr::from((
+            [127, 0, 0, 1],
+            0,
+        )))),
+    );
     tokio::spawn(async move {
-        let _ = axum::serve(
-            listener,
-            router.into_make_service_with_connect_info::<SocketAddr>(),
-        )
-        .await;
+        let _ = axum::serve(listener, router.into_make_service()).await;
     });
     ReceiveServer {
         base: format!("http://127.0.0.1:{port}"),

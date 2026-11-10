@@ -112,6 +112,11 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Trusted devices", "信任设备"),
     ("No trusted devices", "暂无信任设备"),
     ("Files received from trusted devices are accepted automatically", "信任设备发来的文件会自动接收"),
+    ("Receive files", "接收文件"),
+    ("When off, other devices cannot find this computer. You can still send files.", "关掉后其他设备搜不到这台电脑，仍然可以发送文件。"),
+    ("Port", "端口"),
+    ("If you change the port, other devices must use the same port to find each other.", "改了端口，对方也要改成一样的才能互相发现。"),
+    ("Port must be between %1 and %2.", "端口要在 %1–%2 之间。"),
     // 快捷键
     ("Click a shortcut, then press the replacement keys.", "点击一个快捷键项，然后按下新的按键组合。"),
     ("Press keys...", "请按键..."),

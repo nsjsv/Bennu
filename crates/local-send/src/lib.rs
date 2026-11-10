@@ -4,6 +4,9 @@
 //! 窄接口消费。公共 API 原则上只增不改形；例外是设备身份（2026-10）：本机
 //! fingerprint 必须等于出示的客户端证书哈希，旧接口让调用方自填 fingerprint、
 //! 直推每次另造身份，表达不了这条约束，所以 `ServiceConfig` 与直推入口改了形。
+//! 第二次例外是接收开关（2026-11）：接收与发现原是一个整体，关接收只能连发现
+//! 一起关；`ServiceConfig` 拆出可缺省的 `ReceiverConfig`，重启改由
+//! `ServiceHandle::restart` 等旧服务放掉接收端口后再绑定。
 //!
 //! 全部服务任务要求在 tokio 运行时上下文中使用（app-ui 的 iced tokio executor
 //! 已在 update/命令上下文进入 tokio runtime，见 design.md 阶段 A 结论）。
@@ -40,6 +43,9 @@ const EVENT_CAPACITY: usize = 128;
 /// 信任判定回调：UI 注入（UserPreferences 的信任设备表），服务只查询不存储。
 pub type TrustPredicate = Arc<dyn Fn(&DeviceInfo) -> bool + Send + Sync>;
 
+/// LocalSend 协议默认端口：发现（UDP 组播）与接收（TCP）共用。
+pub const DEFAULT_PORT: u16 = 53317;
+
 /// 常驻服务配置：只含调用方真正拥有的字段；协议字段（version、fingerprint、
 /// port、protocol）由服务按设备身份组装，调用方无从传入与身份不符的 fingerprint。
 pub struct ServiceConfig {
@@ -47,14 +53,33 @@ pub struct ServiceConfig {
     pub alias: String,
     /// LocalSend 官方设备类型词表中的取值（桌面端为 `computer`）。
     pub device_type: Option<String>,
-    /// 接收端 HTTP 监听端口（53317）。
-    pub listen_port: u16,
-    /// 接收文件保存目录。
-    pub download_dir: PathBuf,
+    /// 发现与接收共用的端口：官方把组播端口与 HTTP 端口当同一个设置，改了端口
+    /// 只能和同端口的设备互相发现，这里保持一致。
+    pub port: u16,
     /// 设备身份文件（证书 + 私钥 PEM）：不存在时生成；内容不合法或读写失败时服务不启动。
     pub identity_path: PathBuf,
+    /// 接收端；None = 不接收：不监听 TCP，也不在网络上露面（不 announce、不回应、
+    /// 扫描只查询不登记），发现与直推照常。
+    pub receiver: Option<ReceiverConfig>,
+}
+
+/// 接收端配置：只有接收会用到的字段。
+pub struct ReceiverConfig {
+    /// 接收文件保存目录。
+    pub download_dir: PathBuf,
     /// 信任设备查询回调。
     pub is_trusted: TrustPredicate,
+}
+
+/// 接收端没开起来或运行中停止的原因；文案归 UI。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReceiverFailure {
+    /// 端口已被占用，常见于同机运行着另一个 LocalSend。
+    PortInUse { port: u16 },
+    /// 其他绑定失败（如权限不足）。
+    BindFailed { port: u16, reason: String },
+    /// 运行中监听出错，接收已停止。
+    Stopped { port: u16, reason: String },
 }
 
 /// 二维码下载会话事件（design.md 契约）。
@@ -100,15 +125,16 @@ pub enum ServiceEvent {
         saved_paths: Vec<PathBuf>,
         failed: Vec<(String, String)>,
     },
-    /// 服务级错误（端口占用等）：只报一次，UI 展示后不再重试。
-    ServiceError(String),
+    /// 接收端没开起来或已停止：每个服务只报一次，不重试；发现与直推不受影响。
+    ReceiverFailed(ReceiverFailure),
 }
 
-/// 常驻服务句柄：直推、确认回写、手动刷新与关停；drop 不会停服务（常驻语义，随应用退出）。
+/// 常驻服务句柄：直推、确认回写、手动刷新与重启；drop 不会停服务（常驻语义，随应用退出）。
 pub struct ServiceHandle {
     commands: mpsc::UnboundedSender<ServiceCommand>,
     shutdown_tx: watch::Sender<bool>,
     sender: DirectSender,
+    receiver_released: receive::PortReleased,
 }
 
 /// UI → 常驻服务的命令（经无界通道路由到各服务任务）。
@@ -163,9 +189,14 @@ impl ServiceHandle {
         let _ = self.commands.send(ServiceCommand::RefreshDevices);
     }
 
-    /// 关停常驻服务：停 UDP 发现与 HTTP 接收，释放端口。
-    pub fn shutdown(&self) {
+    /// 按新配置重启：关停本服务，新服务的接收端等本服务放掉接收端口后再绑定。
+    /// 进行中的接收照常传完；不等端口放掉就绑定，同端口必然冲突。
+    pub fn restart(
+        self,
+        config: ServiceConfig,
+    ) -> Result<(ServiceHandle, broadcast::Receiver<ServiceEvent>), LocalSendError> {
         let _ = self.shutdown_tx.send(true);
+        LocalSendService::start_after(config, self.receiver_released)
     }
 }
 
@@ -173,92 +204,89 @@ impl ServiceHandle {
 pub struct LocalSendService;
 
 impl LocalSendService {
-    /// 启动常驻服务：UDP 组播发现 + 接收端 HTTP。
+    /// 启动常驻服务：发现与直推，配置了接收端时再加 TCP 接收并在网络上露面。
     ///
     /// 设备身份不可用（文件内容不合法或读写失败）时返回 Err，此时还没有绑定
-    /// 任何端口、没有启动任何任务。端口绑定失败不返回 Err：按 N2 发一次
-    /// `ServiceError` 事件后保持惰性，UI 只需展示错误，服务不重试（避免与已运行的
-    /// LocalSend 实例冲突风暴）。必须在 tokio 运行时上下文中调用。
+    /// 任何端口、没有启动任何任务。接收端口绑定失败不返回 Err：发一次
+    /// `ReceiverFailed` 事件后不重试（避免与已运行的 LocalSend 实例冲突风暴），
+    /// 发现与直推照常。必须在 tokio 运行时上下文中调用。
     pub fn start(
         config: ServiceConfig,
     ) -> Result<(ServiceHandle, broadcast::Receiver<ServiceEvent>), LocalSendError> {
+        Self::start_after(config, receive::port_already_released())
+    }
+
+    fn start_after(
+        config: ServiceConfig,
+        previous_released: receive::PortReleased,
+    ) -> Result<(ServiceHandle, broadcast::Receiver<ServiceEvent>), LocalSendError> {
         let identity = DeviceIdentity::load_or_create(&config.identity_path)?;
-        let own_device = own_device_info(
-            config.alias,
-            config.device_type,
-            config.listen_port,
-            &identity,
-        );
+        let own_device = own_device_info(config.alias, config.device_type, config.port, &identity);
         let client = peer_client(&identity)?;
 
         let (events, events_rx) = broadcast::channel(EVENT_CAPACITY);
         let devices = Arc::new(Mutex::new(discovery::DeviceTable::default()));
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
+        let (presence, receive_state, receiver_released) = match config.receiver {
+            Some(receiver) => {
+                let state = Arc::new(receive::ReceiveState::new(
+                    own_device.clone(),
+                    receiver.download_dir,
+                    receiver.is_trusted,
+                    Arc::clone(&devices),
+                    events.clone(),
+                    receive::CONFIRM_TIMEOUT,
+                ));
+                let released = receive::spawn_server(
+                    Arc::clone(&state),
+                    config.port,
+                    previous_released,
+                    shutdown_rx.clone(),
+                );
+                (
+                    discovery::Presence::Visible(own_device.clone()),
+                    Some(state),
+                    released,
+                )
+            }
+            None => (
+                discovery::Presence::Hidden,
+                None,
+                receive::port_already_released(),
+            ),
+        };
+
         // sweeper 的手动刷新通知：命令路由收到 RefreshDevices 时 notify 一次。
         let sweeper_notify = Arc::new(tokio::sync::Notify::new());
         discovery::spawn(
-            own_device.clone(),
-            Arc::clone(&devices),
-            events.clone(),
-            client.clone(),
+            Arc::new(discovery::Discovery {
+                own_fingerprint: own_device.fingerprint.clone(),
+                port: config.port,
+                presence,
+                devices: Arc::clone(&devices),
+                events: events.clone(),
+                client: client.clone(),
+            }),
             Arc::clone(&sweeper_notify),
             shutdown_rx.clone(),
         );
 
-        // 接收端 HTTP：绑定失败同样走 ServiceError 事件而非 Err。
-        let receive_state = Arc::new(receive::ReceiveState::new(
-            own_device.clone(),
-            config.download_dir,
-            config.is_trusted,
-            Arc::clone(&devices),
-            events.clone(),
-            receive::CONFIRM_TIMEOUT,
-        ));
-        let router = receive::router(Arc::clone(&receive_state));
-        let port = config.listen_port;
-        let service_events = events.clone();
-        tokio::spawn(async move {
-            match tokio::net::TcpListener::bind(("0.0.0.0", port)).await {
-                Ok(listener) => {
-                    // serve 只在监听套接字出错时返回；之后再也收不到文件，必须让界面知道。
-                    if let Err(error) = axum::serve(
-                        listener,
-                        router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
-                    )
-                    .await
-                    {
-                        tracing::error!(event = "localsend_tcp_serve_failed", %error, port, "tcp receive service stopped");
-                        let _ = service_events.send(ServiceEvent::ServiceError(format!(
-                            "接收服务已停止（TCP 端口 {port}）: {error}"
-                        )));
-                    }
-                }
-                Err(error) => {
-                    // N2：端口被占（如另一 LocalSend 实例）只报一次，不重试。
-                    tracing::warn!(event = "localsend_tcp_bind_failed", %error, port, "tcp bind failed");
-                    let _ = service_events.send(ServiceEvent::ServiceError(format!(
-                        "TCP 端口 {port} 被占用（可能有另一个 LocalSend 应用正在运行）: {error}"
-                    )));
-                }
-            }
-        });
-
         // 命令路由：handle（UI 线程）→ 服务任务（resolve 挂起的 oneshot / 手动刷新）。
         let (command_tx, mut command_rx) = mpsc::unbounded_channel::<ServiceCommand>();
-        let receive_for_commands = Arc::clone(&receive_state);
         let devices_for_refresh = Arc::clone(&devices);
         let events_for_refresh = events.clone();
         let sweeper_notify_for_refresh = Arc::clone(&sweeper_notify);
-        let mut command_shutdown = shutdown_rx.clone();
+        let mut command_shutdown = shutdown_rx;
         tokio::spawn(async move {
             loop {
                 tokio::select! {
                     command = command_rx.recv() => match command {
                         Some(ServiceCommand::ResolveSession { session_id, accept, remember }) => {
-                            receive_for_commands
-                                .resolve_pending(&session_id, accept, remember)
-                                .await;
+                            // 没有接收端就没有挂起的会话，确认回写无处可去。
+                            if let Some(state) = &receive_state {
+                                state.resolve_pending(&session_id, accept, remember).await;
+                            }
                         }
                         Some(ServiceCommand::RefreshDevices) => {
                             // 清空设备表并逐个广播 DeviceLost，再立即触发一轮扫描。
@@ -280,6 +308,7 @@ impl LocalSendService {
                 commands: command_tx,
                 shutdown_tx,
                 sender: DirectSender::new(client, own_device),
+                receiver_released,
             },
             events_rx,
         ))
@@ -291,7 +320,7 @@ impl LocalSendService {
 pub(crate) fn own_device_info(
     alias: String,
     device_type: Option<String>,
-    listen_port: u16,
+    port: u16,
     identity: &DeviceIdentity,
 ) -> DeviceInfo {
     DeviceInfo {
@@ -301,7 +330,7 @@ pub(crate) fn own_device_info(
         device_model: None,
         device_type,
         download: None,
-        port: listen_port,
+        port,
         protocol: "http".to_owned(),
         address: None,
     }
@@ -378,10 +407,12 @@ mod tests {
         let config = ServiceConfig {
             alias: "TestPC".to_owned(),
             device_type: None,
-            listen_port: 0,
-            download_dir: dir.path().to_path_buf(),
+            port: 0,
             identity_path: identity_path.clone(),
-            is_trusted: Arc::new(|_| false),
+            receiver: Some(ReceiverConfig {
+                download_dir: dir.path().to_path_buf(),
+                is_trusted: Arc::new(|_| false),
+            }),
         };
 
         let error = LocalSendService::start(config).err().unwrap();

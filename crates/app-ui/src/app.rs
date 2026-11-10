@@ -263,6 +263,10 @@ pub(crate) struct FileBrowser {
     pub(crate) incoming_transfer: Option<transfer::IncomingTransferConfirmation>,
     /// 设置页设备名输入缓冲。
     pub(crate) transfer_device_alias_input: String,
+    /// 设置页端口输入缓冲；启动时与已保存端口同步。
+    pub(crate) transfer_port_input: String,
+    /// 上一次提交的端口不合法（配置未改）。
+    pub(crate) transfer_port_invalid: bool,
     tab_bar_reveal: TabBarReveal,
     pub(crate) tab_animations: HashMap<usize, TabAnimationState>,
     /// 全部窗格；浏览状态只存在这里（窗格→标签），活动窗格由 `pane_layout`
@@ -635,6 +639,8 @@ impl FileBrowser {
             transfer_session: None,
             incoming_transfer: None,
             transfer_device_alias_input: String::new(),
+            transfer_port_input: String::new(),
+            transfer_port_invalid: false,
             tab_bar_reveal: TabBarReveal::default(),
             tab_animations: HashMap::new(),
             panes: vec![initial_pane],

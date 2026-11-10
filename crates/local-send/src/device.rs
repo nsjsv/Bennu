@@ -42,7 +42,7 @@ pub struct DeviceInfo {
 
 /// 官方 App 省略 port 时假定协议默认端口。
 fn default_port() -> u16 {
-    53317
+    crate::DEFAULT_PORT
 }
 
 /// 官方 App 省略 protocol 时按官方默认 HTTPS 假定。

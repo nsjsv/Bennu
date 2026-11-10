@@ -14,6 +14,15 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ),
     ("Choose receive directory", "选择接收目录"),
     (
+        "Could not start receiving: port %1 is already in use. Turn off receiving or choose another port.",
+        "接收没开起来：端口 %1 被占用。关掉接收，或换一个端口。",
+    ),
+    (
+        "Could not start receiving on port %1: %2",
+        "接收没开起来（端口 %1）：%2",
+    ),
+    ("Receiving stopped (port %1): %2", "接收已停止（端口 %1）：%2"),
+    (
         "the selected location is not a local directory",
         "所选位置不是本地目录",
     ),

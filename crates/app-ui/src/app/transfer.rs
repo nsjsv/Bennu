@@ -17,14 +17,14 @@ use std::time::Instant;
 use iced::futures::{SinkExt, StreamExt};
 use local_send::{
     DeviceInfo, FileMetadata, LocalSendError, LocalSendService, QrDownloadServer, QrEvent, QrItem,
-    QrSource, SendProgress, ServiceEvent,
+    QrSource, ReceiverFailure, SendProgress, ServiceEvent,
 };
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
 use super::transfer_service::service_config;
 use super::FileBrowser;
-use crate::config::{default_transfer_device_alias, TrustedTransferDevice};
+use crate::config::TrustedTransferDevice;
 use crate::model::{sanitized_application_log_detail, Message};
 use crate::view::transfer_qr::qr_image_handle;
 
@@ -72,6 +72,9 @@ pub(crate) enum TransferMessage {
     DeviceAliasInputChanged(String),
     DeviceAliasCommitted,
     TrustedDeviceRemoved(String),
+    ReceiveEnabledToggled,
+    PortInputChanged(String),
+    PortCommitted,
 }
 
 /// 常驻 LocalSend 服务运行时状态。
@@ -85,6 +88,8 @@ pub(crate) struct LocalSendRuntime {
     pub(crate) trusted: Arc<parking_lot::RwLock<HashSet<String>>>,
     /// 发现的设备快照（fingerprint 去重，UI 列表直接渲染）。
     pub(crate) devices: Vec<DeviceInfo>,
+    /// 本服务的接收端没开起来或已停止的原因：随服务换代重置。
+    pub(crate) receiver_failure: Option<ReceiverFailure>,
 }
 
 /// 二维码下载会话状态（与传输窗口同生命周期）。
@@ -146,19 +151,22 @@ impl FileBrowser {
         if tokio::runtime::Handle::try_current().is_err() {
             return;
         }
-        let generation = self
-            .transfer_runtime
+        let previous = self.transfer_runtime.take();
+        let generation = previous
             .as_ref()
             .map_or(0, |runtime| runtime.generation + 1);
-        if let Some(previous) = self.transfer_runtime.take() {
-            previous.handle.shutdown();
-        }
         // 旧服务的挂起确认随重启作废：Modal 不能指向死会话。
         self.incoming_transfer = None;
         let trusted = Arc::new(parking_lot::RwLock::new(trusted_fingerprint_set(
             &self.user_config.transfer_trusted_devices,
         )));
-        match LocalSendService::start(service_config(&self.user_config, Arc::clone(&trusted))) {
+        let config = service_config(&self.user_config, Arc::clone(&trusted));
+        // 重启交给服务：旧接收端放掉端口后新接收端才绑定。
+        let started = match previous {
+            Some(previous) => previous.handle.restart(config),
+            None => LocalSendService::start(config),
+        };
+        match started {
             Ok((handle, events)) => {
                 self.transfer_runtime = Some(LocalSendRuntime {
                     handle,
@@ -166,6 +174,7 @@ impl FileBrowser {
                     generation,
                     trusted,
                     devices: Vec::new(),
+                    receiver_failure: None,
                 });
             }
             Err(error) => {
@@ -290,7 +299,7 @@ impl FileBrowser {
                 }
                 iced::Task::none()
             }
-            TransferMessage::DownloadDirChooserPressed => download_dir_chooser_command(),
+            TransferMessage::DownloadDirChooserPressed => settings::download_dir_chooser_command(),
             TransferMessage::DownloadDirChosen(outcome) => {
                 self.accept_transfer_download_dir(outcome)
             }
@@ -302,6 +311,12 @@ impl FileBrowser {
             TransferMessage::TrustedDeviceRemoved(fingerprint) => {
                 self.remove_trusted_transfer_device(fingerprint)
             }
+            TransferMessage::ReceiveEnabledToggled => self.toggle_transfer_receive(),
+            TransferMessage::PortInputChanged(value) => {
+                self.edit_transfer_port(value);
+                iced::Task::none()
+            }
+            TransferMessage::PortCommitted => self.commit_transfer_port(),
         }
     }
 
@@ -493,9 +508,12 @@ impl FileBrowser {
             } => {
                 return self.notify_transfer_receive_finished(saved_paths, failed);
             }
-            ServiceEvent::ServiceError(message) => {
-                // 服务级错误（端口占用等）只报一次：全局 Toast（N2/design）。
-                self.show_global_error(message);
+            ServiceEvent::ReceiverFailed(failure) => {
+                // 弹一次；设置页从运行时读原因常驻显示。
+                self.show_global_error(settings::receiver_failure_message(&failure));
+                if let Some(runtime) = self.transfer_runtime.as_mut() {
+                    runtime.receiver_failure = Some(failure);
+                }
             }
         }
         iced::Task::none()
@@ -547,60 +565,6 @@ impl FileBrowser {
             )
         };
         crate::commands::publish_desktop_notification_command(summary, body)
-    }
-
-    /// 设置页生效别名（配置值优先，缺省 hostname）。
-    pub(crate) fn effective_transfer_device_alias(&self) -> String {
-        self.user_config
-            .transfer_device_alias
-            .clone()
-            .filter(|alias| !alias.trim().is_empty())
-            .unwrap_or_else(default_transfer_device_alias)
-    }
-
-    fn accept_transfer_download_dir(
-        &mut self,
-        outcome: Result<Option<PathBuf>, String>,
-    ) -> iced::Task<Message> {
-        match outcome {
-            Ok(Some(dir)) => {
-                self.user_config.transfer_download_dir = Some(dir);
-                // 接收目录在服务启动时确定：改目录必须重启常驻服务。
-                self.start_or_restart_local_send_service();
-                self.persist_user_preferences_command()
-            }
-            Ok(None) => iced::Task::none(),
-            Err(error) => {
-                self.show_global_error(error);
-                iced::Task::none()
-            }
-        }
-    }
-
-    fn commit_transfer_device_alias(&mut self) -> iced::Task<Message> {
-        let trimmed = self.transfer_device_alias_input.trim().to_owned();
-        let configured = if trimmed.is_empty() {
-            // 清空输入 = 回退 hostname 默认。
-            None
-        } else if Some(&trimmed) == self.user_config.transfer_device_alias.as_ref() {
-            return iced::Task::none();
-        } else {
-            Some(trimmed)
-        };
-        self.user_config.transfer_device_alias = configured;
-        self.start_or_restart_local_send_service();
-        self.persist_user_preferences_command()
-    }
-
-    fn remove_trusted_transfer_device(&mut self, fingerprint: String) -> iced::Task<Message> {
-        self.user_config
-            .transfer_trusted_devices
-            .retain(|device| device.fingerprint != fingerprint);
-        if let Some(runtime) = self.transfer_runtime.as_ref() {
-            runtime.trusted.write().remove(&fingerprint);
-        }
-        // 移除信任后再次接收需要重新确认（PRD A5）。
-        self.persist_user_preferences_command()
     }
 }
 
@@ -755,44 +719,14 @@ fn record_direct_send_failure(alias: &str, error: &str) {
     );
 }
 
-/// 设置页接收目录选择（ashpd 目录选择器，复用搜索路径选择先例）。
-fn download_dir_chooser_command() -> iced::Task<Message> {
-    iced::Task::perform(choose_download_directory(), |outcome| {
-        Message::Transfer(TransferMessage::DownloadDirChosen(outcome))
-    })
-}
-
-async fn choose_download_directory() -> Result<Option<PathBuf>, String> {
-    let title = tr!("Choose receive directory");
-    let accept_label = tr!("Select");
-    let request = ashpd::desktop::file_chooser::SelectedFiles::open_file()
-        .title(title.as_str())
-        .accept_label(accept_label.as_str())
-        .modal(true)
-        .directory(true)
-        .multiple(false)
-        .send()
-        .await
-        .map_err(|error| error.to_string())?;
-    let selected = match request.response() {
-        Ok(selected) => selected,
-        Err(ashpd::Error::Response(ashpd::desktop::ResponseError::Cancelled)) => return Ok(None),
-        Err(error) => return Err(error.to_string()),
-    };
-    selected
-        .uris()
-        .first()
-        .map(|uri| {
-            uri.to_file_path()
-                .map_err(|_| tr!("the selected location is not a local directory"))
-        })
-        .transpose()
-}
-
 /// 服务启动失败的用户可见文案（保留底层错误）。
 fn transfer_service_start_failed(error: &LocalSendError) -> String {
     tr!("Could not start transfer service: %1", error)
 }
+
+mod settings;
+
+pub(crate) use settings::receiver_failure_message;
 
 #[cfg(test)]
 mod tests;

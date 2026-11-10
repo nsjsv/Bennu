@@ -376,6 +376,18 @@ pub(crate) struct UserConfig {
     pub(crate) transfer_device_alias: Option<String>,
     /// 信任的 LocalSend 设备;这些设备的发送请求自动接收。
     pub(crate) transfer_trusted_devices: Vec<TrustedTransferDevice>,
+    /// 接收文件开关;关掉后不监听接收端口、不在网络上露面,发现与直推照常。
+    pub(crate) transfer_receive_enabled: bool,
+    /// 发现与接收共用的 LocalSend 端口;只存 `transfer_port_from` 认可的值。
+    pub(crate) transfer_port: u16,
+}
+
+/// 用户可选的 LocalSend 端口:1024 以下在 Linux 上要特权才能绑定。
+pub(crate) const TRANSFER_PORT_RANGE: std::ops::RangeInclusive<u16> = 1024..=u16::MAX;
+
+/// 端口能否用作 LocalSend 端口;读配置与设置页提交共用这一条规则。
+pub(crate) fn transfer_port_from(port: u16) -> Option<u16> {
+    TRANSFER_PORT_RANGE.contains(&port).then_some(port)
 }
 
 /// 信任设备列表条目:fingerprint 是 LocalSend 协议设备身份,alias/added_at
@@ -452,6 +464,8 @@ pub(crate) fn default_user_config() -> UserConfig {
         transfer_download_dir: None,
         transfer_device_alias: None,
         transfer_trusted_devices: Vec::new(),
+        transfer_receive_enabled: true,
+        transfer_port: local_send::DEFAULT_PORT,
     }
 }
 
@@ -499,6 +513,8 @@ pub(crate) fn ui_thread_startup_config() -> UserConfig {
         transfer_download_dir: None,
         transfer_device_alias: None,
         transfer_trusted_devices: Vec::new(),
+        transfer_receive_enabled: true,
+        transfer_port: local_send::DEFAULT_PORT,
     }
 }
 

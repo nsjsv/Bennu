@@ -1,12 +1,12 @@
-//! LocalSend 接收端常驻 HTTP 服务（TCP 53317）。
+//! LocalSend 接收端常驻 HTTP 服务（TCP，端口可配，默认 53317）。
 //!
-//! 端点（前缀 /api/localsend/v2）：`register`、`prepare-upload`、`upload`、`cancel`。
+//! 端点（前缀 /api/localsend/v2）：`info`、`register`、`prepare-upload`、`upload`、`cancel`；
+//! 另回应 v1 的 `info`（同官方：老版官方 App 扫描时探测 v1 路由）。
 //! 未信任设备的 prepare-upload 挂起等待 UI 确认（oneshot 回写），超时 30s 回 403，
 //! 与 LocalSend 官方 App 行为一致。
 
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,7 +15,7 @@ use axum::body::Body;
 use axum::extract::{ConnectInfo, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
@@ -23,6 +23,10 @@ use tokio::sync::{broadcast, oneshot, Mutex};
 
 use crate::device::{DeviceInfo, FileMetadata, PrepareUploadRequest, PrepareUploadResponse};
 use crate::ServiceEvent;
+
+mod listener;
+
+pub(crate) use listener::{port_already_released, spawn_server, PeerAddr, PortReleased};
 
 /// 未信任设备 prepare-upload 挂起等待用户确认的超时（design：30s 后 403）。
 pub(crate) const CONFIRM_TIMEOUT: Duration = Duration::from_secs(30);
@@ -113,6 +117,8 @@ impl ReceiveState {
 
 pub(crate) fn router(state: Arc<ReceiveState>) -> Router {
     Router::new()
+        .route("/api/localsend/v1/info", get(info))
+        .route("/api/localsend/v2/info", get(info))
         .route("/api/localsend/v2/register", post(register))
         .route("/api/localsend/v2/prepare-upload", post(prepare_upload))
         .route("/api/localsend/v2/upload", post(upload))
@@ -120,9 +126,14 @@ pub(crate) fn router(state: Arc<ReceiveState>) -> Router {
         .with_state(state)
 }
 
+/// 只查询、不登记：不露面的扫描方（关了接收的 Bennu）与老版官方 App 靠它发现本机。
+async fn info(State(state): State<Arc<ReceiveState>>) -> Json<DeviceInfo> {
+    Json(state.own_device.clone())
+}
+
 async fn register(
     State(state): State<Arc<ReceiveState>>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    ConnectInfo(PeerAddr(peer)): ConnectInfo<PeerAddr>,
     Json(device): Json<DeviceInfo>,
 ) -> impl IntoResponse {
     // 对端回应我们的 announce：登记进设备表并广播 DeviceSeen（双向发现的另一半）。

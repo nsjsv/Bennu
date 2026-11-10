@@ -33,6 +33,7 @@ mod toggle_switch;
 mod toolbar_controls;
 mod transfer_conflict;
 pub(crate) mod transfer_qr;
+mod transfer_settings;
 pub(crate) mod transfer_window;
 mod trash_warning;
 mod window_chrome;

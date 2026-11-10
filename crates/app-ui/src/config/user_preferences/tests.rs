@@ -237,3 +237,51 @@ fn legacy_icon_grid_size_is_read_but_never_written_back() {
     assert!(rewritten.get("icon_grid_size").is_none());
     assert_eq!(rewritten["icons_view_density"], 6);
 }
+
+#[test]
+fn transfer_receive_switch_and_port_roundtrip() {
+    let mut config = default_user_config();
+    config.transfer_receive_enabled = false;
+    config.transfer_port = 50000;
+
+    let stored = UserPreferences::from_user_config(&config).to_stored();
+    let interpreted = UserPreferences::from_stored(stored, &default_user_config());
+
+    assert!(!interpreted.preferences.transfer_receive_enabled);
+    assert_eq!(interpreted.preferences.transfer_port, 50000);
+    assert!(interpreted.unrecognized.into_keys().is_empty());
+}
+
+#[test]
+fn legacy_preferences_keep_receiving_on_the_default_port() {
+    // 用真实配置写出的文档：`StoredUserPreferences::default()` 的占位值本身就有读不懂的键。
+    let current = UserPreferences::from_user_config(&default_user_config()).to_stored();
+    let mut payload = serde_json::to_value(current).unwrap();
+    let object = payload.as_object_mut().expect("preferences payload object");
+    object.remove("transfer_receive_enabled");
+    object.remove("transfer_port");
+    let legacy: StoredUserPreferences = serde_json::from_value(payload).unwrap();
+
+    let interpreted = UserPreferences::from_stored(legacy, &default_user_config());
+
+    assert!(interpreted.preferences.transfer_receive_enabled);
+    assert_eq!(
+        interpreted.preferences.transfer_port,
+        local_send::DEFAULT_PORT
+    );
+    assert!(interpreted.unrecognized.into_keys().is_empty());
+}
+
+#[test]
+fn stored_privileged_port_falls_back_to_the_default_and_is_reported() {
+    let mut stored = UserPreferences::from_user_config(&default_user_config()).to_stored();
+    stored.transfer_port = 80;
+
+    let interpreted = UserPreferences::from_stored(stored, &default_user_config());
+
+    assert_eq!(
+        interpreted.preferences.transfer_port,
+        local_send::DEFAULT_PORT
+    );
+    assert_eq!(interpreted.unrecognized.into_keys(), vec!["transfer_port"]);
+}

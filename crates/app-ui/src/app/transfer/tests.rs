@@ -10,7 +10,7 @@ use super::{
     qr_items_from_paths, trusted_fingerprint_set, DirectSendState, FileBrowser, TransferMessage,
     TransferSessionPhase, TransferSessionState,
 };
-use crate::app::transfer_service::{service_config, LOCAL_SEND_PORT};
+use crate::app::transfer_service::service_config;
 use crate::config::TrustedTransferDevice;
 use crate::model::sanitized_application_log_detail;
 use crate::view::transfer_qr::qr_image_handle;
@@ -23,7 +23,7 @@ fn sample_device(fingerprint: &str) -> DeviceInfo {
         device_model: None,
         device_type: Some("phone".to_owned()),
         download: None,
-        port: LOCAL_SEND_PORT,
+        port: local_send::DEFAULT_PORT,
         protocol: "http".to_owned(),
         address: None,
     }
@@ -33,13 +33,101 @@ fn sample_device(fingerprint: &str) -> DeviceInfo {
 fn trust_predicate_reads_shared_snapshot_and_fails_closed() {
     let trusted = Arc::new(parking_lot::RwLock::new(HashSet::from(["fp-1".to_owned()])));
     let config = service_config(&crate::config::default_user_config(), Arc::clone(&trusted));
-    let is_trusted = config.is_trusted;
+    let is_trusted = config
+        .receiver
+        .expect("receiving is on by default")
+        .is_trusted;
     assert!(is_trusted(&sample_device("fp-1")));
     assert!(!is_trusted(&sample_device("fp-2")));
     // 空 fingerprint 永不信任（fail closed）。
     assert!(!is_trusted(&sample_device("")));
     trusted.write().insert("fp-2".to_owned());
     assert!(is_trusted(&sample_device("fp-2")));
+}
+
+#[test]
+fn service_config_follows_the_receive_switch_and_port() {
+    let trusted = Arc::new(parking_lot::RwLock::new(HashSet::new()));
+    let mut user_config = crate::config::default_user_config();
+    user_config.transfer_port = 50000;
+
+    let receiving = service_config(&user_config, Arc::clone(&trusted));
+    assert_eq!(receiving.port, 50000);
+    assert!(receiving.receiver.is_some());
+
+    // 关掉接收：没有接收端，端口仍用于发现。
+    user_config.transfer_receive_enabled = false;
+    let hidden = service_config(&user_config, trusted);
+    assert_eq!(hidden.port, 50000);
+    assert!(hidden.receiver.is_none());
+}
+
+fn browser_with_port_input(input: &str) -> FileBrowser {
+    let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+    browser.transfer_port_input = local_send::DEFAULT_PORT.to_string();
+    drop(browser.handle_transfer_message(TransferMessage::PortInputChanged(input.to_owned())));
+    browser
+}
+
+#[test]
+fn invalid_port_input_is_flagged_and_changes_nothing() {
+    for input in ["80", "1023", "abc", "70000", ""] {
+        let mut browser = browser_with_port_input(input);
+
+        drop(browser.handle_transfer_message(TransferMessage::PortCommitted));
+
+        assert!(browser.transfer_port_invalid, "{input:?} must be rejected");
+        assert_eq!(browser.user_config.transfer_port, local_send::DEFAULT_PORT);
+        // 输入保留，便于用户改正；再编辑即清掉提示。
+        assert_eq!(browser.transfer_port_input, input);
+        drop(browser.handle_transfer_message(TransferMessage::PortInputChanged("5".to_owned())));
+        assert!(!browser.transfer_port_invalid);
+    }
+}
+
+#[test]
+fn valid_port_input_is_saved_normalized() {
+    let mut browser = browser_with_port_input(" 50000 ");
+
+    drop(browser.handle_transfer_message(TransferMessage::PortCommitted));
+
+    assert!(!browser.transfer_port_invalid);
+    assert_eq!(browser.user_config.transfer_port, 50000);
+    assert_eq!(browser.transfer_port_input, "50000");
+    assert_eq!(browser.user_config.user_preferences().transfer_port, 50000);
+}
+
+#[test]
+fn receive_switch_toggles_the_saved_preference() {
+    let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+    assert!(browser.user_config.transfer_receive_enabled);
+
+    drop(browser.handle_transfer_message(TransferMessage::ReceiveEnabledToggled));
+    assert!(!browser.user_config.transfer_receive_enabled);
+    assert!(
+        !browser
+            .user_config
+            .user_preferences()
+            .transfer_receive_enabled
+    );
+
+    drop(browser.handle_transfer_message(TransferMessage::ReceiveEnabledToggled));
+    assert!(browser.user_config.transfer_receive_enabled);
+}
+
+#[test]
+fn receiver_failure_text_names_the_port_in_both_languages() {
+    let failure = local_send::ReceiverFailure::PortInUse { port: 53317 };
+    assert!(super::receiver_failure_message(&failure).contains("53317"));
+    let chinese = tr_in!(
+        crate::config::UiLanguage::Chinese,
+        "Could not start receiving: port %1 is already in use. Turn off receiving or choose another port.",
+        53317
+    );
+    assert_eq!(
+        chinese,
+        "接收没开起来：端口 53317 被占用。关掉接收，或换一个端口。"
+    );
 }
 
 #[test]

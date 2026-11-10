@@ -475,14 +475,10 @@ async fn upload_writes_files_and_emits_finished() {
         matches!(e, ServiceEvent::ReceiveFinished { .. })
     })
     .await;
-    let ServiceEvent::ReceiveFinished {
-        session_id,
-        saved_paths,
-        failed,
-    } = event
-    else {
+    let ServiceEvent::ReceiveFinished { session_id, report } = event else {
         unreachable!()
     };
+    let (saved_paths, failed) = (report.saved_paths(), report.failures());
     assert_eq!(session_id, session.session_id);
     assert_eq!(saved_paths.len(), 2);
     assert!(failed.is_empty());
@@ -537,14 +533,10 @@ async fn a_checksum_mismatch_may_be_resent_until_the_third_attempt() {
         matches!(e, ServiceEvent::ReceiveFinished { .. })
     })
     .await;
-    let ServiceEvent::ReceiveFinished {
-        saved_paths,
-        failed,
-        ..
-    } = event
-    else {
+    let ServiceEvent::ReceiveFinished { report, .. } = event else {
         unreachable!()
     };
+    let (saved_paths, failed) = (report.saved_paths(), report.failures());
     assert!(saved_paths.is_empty());
     assert_eq!(
         failed,
@@ -701,18 +693,16 @@ async fn cancel_deletes_partials_and_keeps_done_files() {
         matches!(e, ServiceEvent::ReceiveFinished { .. })
     })
     .await;
-    let ServiceEvent::ReceiveFinished {
-        saved_paths,
-        failed,
-        ..
-    } = event
-    else {
+    let ServiceEvent::ReceiveFinished { report, .. } = event else {
         unreachable!()
     };
-    assert_eq!(saved_paths.len(), 1);
-    assert!(failed
+    assert_eq!(report.saved_paths().len(), 1);
+    assert!(report.failures().is_empty());
+    assert!(report
+        .files
         .iter()
-        .any(|(name, reason)| name == "partial.bin" && reason == "canceled by sender"));
+        .any(|file| file.file_name == "partial.bin"
+            && file.outcome == crate::ReceivedOutcome::Canceled));
     // cancel 清理语义：半成品删除，已完成文件保留。
     assert!(!partial.exists());
     assert_eq!(

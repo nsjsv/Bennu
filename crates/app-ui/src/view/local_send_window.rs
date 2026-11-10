@@ -1,11 +1,12 @@
-//! LocalSend 窗口：本机与接收状态、待发（文件或文字）、收藏设备、附近设备。
+//! LocalSend 窗口：本机与接收状态；"设备"页是待发（文件或文字）、收藏设备、附近设备，
+//! "记录"页是传输记录。
 
 use iced::widget::{button, column, container, row, scrollable, text_editor, Column, Space};
 use iced::{Alignment, Element, Length, Theme};
 
 use crate::app::transfer::{
-    receiver_failure_message, AddressFormMessage, ChooserTarget, DeviceListOwner, StagedItem,
-    StagedSize, StagedTab, TransferMessage,
+    receiver_failure_message, AddressFormMessage, ChooserTarget, DeviceListOwner, LocalSendPage,
+    StagedItem, StagedSize, StagedTab, TransferMessage,
 };
 use crate::app::FileBrowser;
 use crate::appearance::{context_menu_button_style, context_menu_style, muted_text_color};
@@ -19,7 +20,7 @@ use local_send::DeviceInfo;
 
 use super::option_controls::{segmented_choice_row, SegmentedChoice};
 use super::settings_group::{muted_setting_text, toggle_setting_row};
-use super::{local_send_address_form, local_send_devices};
+use super::{local_send_address_form, local_send_devices, transfer_history};
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};
 
 const WINDOW_PADDING: f32 = 16.0;
@@ -29,15 +30,32 @@ const STAGED_ROW_HEIGHT: f32 = 26.0;
 const STAGED_NAME_MAX_CHARS: usize = 48;
 const STAGED_TEXT_HEIGHT: f32 = 120.0;
 
+/// 本机卡片（两页都看得到）+ "设备 | 记录"标签 + 当前那页。
 pub(crate) fn view_local_send_window(browser: &FileBrowser) -> Element<'_, Message> {
-    let content = column![this_computer_card(browser), staged_card(browser)]
-        .push(local_send_devices::checked_bar(
-            browser,
-            DeviceListOwner::LocalSendWindow,
-            browser.local_send_has_outgoing(),
-        ))
-        .push(favorites_card(browser))
-        .push(nearby_card(browser))
+    let page = |label: String, target: LocalSendPage| SegmentedChoice {
+        label,
+        selected: browser.local_send_page == target,
+        message: Message::Transfer(TransferMessage::LocalSendPageSelected(target)),
+        tooltip: None,
+    };
+    let pages = segmented_choice_row(vec![
+        page(tr!("Devices"), LocalSendPage::Devices),
+        page(tr!("History"), LocalSendPage::History),
+    ]);
+    let content = column![this_computer_card(browser), pages];
+    let content = match browser.local_send_page {
+        LocalSendPage::Devices => content
+            .push(staged_card(browser))
+            .push(local_send_devices::checked_bar(
+                browser,
+                DeviceListOwner::LocalSendWindow,
+                browser.local_send_has_outgoing(),
+            ))
+            .push(favorites_card(browser))
+            .push(nearby_card(browser)),
+        LocalSendPage::History => content.push(card(transfer_history::history_list(browser))),
+    };
+    let content = content
         .spacing(CARD_SPACING)
         .padding(WINDOW_PADDING)
         .width(Length::Fill);

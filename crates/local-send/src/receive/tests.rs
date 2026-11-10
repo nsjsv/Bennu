@@ -108,14 +108,10 @@ async fn a_file_that_cannot_reach_the_disk_fails_instead_of_reporting_success() 
         upload_status(&state, Body::from("hello")).await,
         StatusCode::INTERNAL_SERVER_ERROR
     );
-    let ServiceEvent::ReceiveFinished {
-        saved_paths,
-        failed,
-        ..
-    } = events.recv().await.unwrap()
-    else {
+    let ServiceEvent::ReceiveFinished { report, .. } = events.recv().await.unwrap() else {
         panic!("the session should finish with the failed file");
     };
+    let (saved_paths, failed) = (report.saved_paths(), report.failures());
     assert!(saved_paths.is_empty());
     let expected = vec![("note.txt".to_owned(), "write failed".to_owned())];
     assert_eq!(failed, expected);

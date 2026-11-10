@@ -3,10 +3,11 @@
 //! 文件先由 `prepare` 展开、算好校验（几台设备共用一份）；这里只管发。一个文件失败不
 //! 影响别的（同官方）：对方校验不符回 422 时整个文件重传，同一文件最多共传 3 次。
 //!
-//! 可以中途取消：还在等对方接受时取消就是撤回请求（丢掉连接）；传输中取消就断掉当前
-//! 上传，并 `cancel` 对方的会话，对方删掉收了一半的、留下收完的。
+//! 可以中途取消：还在等对方接受时取消就是撤回请求（丢掉连接），返回 `Canceled`；传输中
+//! 取消就断掉当前上传，并 `cancel` 对方的会话（对方删掉收了一半的、留下收完的），返回
+//! 标了 `canceled` 的报告。
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -40,11 +41,64 @@ pub struct SendProgress {
     pub bytes_total: u64,
 }
 
-/// 一次直推的结果：发成了几个，哪些没发成（含准备时就读不了的）。
+/// 一次直推的结果：对方接受之后每个文件怎样了（含准备时就读不了的）。传输中取消的
+/// 也是一份报告（`canceled`）：已传的照样算传了，传输记录要逐个文件记。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SendReport {
-    pub sent: usize,
-    pub failed: Vec<FileFailure>,
+    pub files: Vec<FileReport>,
+    pub canceled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileReport {
+    /// 发给对方的名字（文件夹里的是 `文件夹名/相对路径`）。
+    pub file_name: String,
+    /// 本机的源文件；准备时就读不了的没有。
+    pub path: Option<PathBuf>,
+    pub size: u64,
+    pub outcome: FileOutcome,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FileOutcome {
+    Sent,
+    /// 英文原因（日志与界面详情都显示它）。
+    Failed(String),
+    Canceled,
+}
+
+impl SendReport {
+    pub fn sent(&self) -> usize {
+        self.files
+            .iter()
+            .filter(|file| file.outcome == FileOutcome::Sent)
+            .count()
+    }
+
+    /// 没发成的（取消的不算）。
+    pub fn failures(&self) -> Vec<FileFailure> {
+        self.files
+            .iter()
+            .filter_map(|file| match &file.outcome {
+                FileOutcome::Failed(reason) => Some(FileFailure {
+                    file_name: file.file_name.clone(),
+                    reason: reason.clone(),
+                }),
+                _ => None,
+            })
+            .collect()
+    }
+}
+
+impl FileReport {
+    fn of(file: &PreparedFile, outcome: FileOutcome) -> Self {
+        Self {
+            file_name: file.file_name.clone(),
+            path: Some(file.path.clone()),
+            size: file.size,
+            outcome,
+        }
+    }
 }
 
 /// 直推客户端：出站 TLS 配置（出示设备身份）+ 本机设备信息。
@@ -79,13 +133,23 @@ impl DirectSender {
         progress: mpsc::Sender<SendProgress>,
         cancel: &CancellationToken,
     ) -> Result<SendReport, LocalSendError> {
+        let mut reports: Vec<FileReport> = files
+            .unreadable
+            .iter()
+            .map(|failure| FileReport {
+                file_name: failure.file_name.clone(),
+                path: None,
+                size: 0,
+                outcome: FileOutcome::Failed(failure.reason.clone()),
+            })
+            .collect();
         if files.files.is_empty() {
             // 全都读不了：不必打扰对方。
-            return match files.unreadable.is_empty() {
+            return match reports.is_empty() {
                 true => Err(LocalSendError::NothingToSend),
                 false => Ok(SendReport {
-                    sent: 0,
-                    failed: files.unreadable.clone(),
+                    files: reports,
+                    canceled: false,
                 }),
             };
         }
@@ -110,16 +174,17 @@ impl DirectSender {
                 (id, metadata)
             })
             .collect();
-        let mut failed = files.unreadable.clone();
         // 协议：204 = 对方一个也不需要。
         let prepare = self.prepare_upload(client, &base, announced, pin);
         let Some(prepared_response) = unless_canceled(cancel, prepare).await? else {
-            failed.extend(files.files.iter().map(not_taken));
-            return Ok(SendReport { sent: 0, failed });
+            reports.extend(files.files.iter().map(not_taken));
+            return Ok(SendReport {
+                files: reports,
+                canceled: false,
+            });
         };
         let session_id = prepared_response.session_id;
 
-        let mut sent = 0;
         let mut announced_file_failed = false;
         let total = files.files.len();
         let bytes_total = files.files.iter().map(|file| file.size).sum();
@@ -137,7 +202,7 @@ impl DirectSender {
             bytes_before += file.size;
             // 对方可以只要其中一部分（官方接收端能挑文件）。
             let Some(token) = prepared_response.files.get(&index.to_string()) else {
-                failed.push(not_taken(file));
+                reports.push(not_taken(file));
                 continue;
             };
             reporter.report(0);
@@ -153,18 +218,24 @@ impl DirectSender {
             let outcome = tokio::select! {
                 outcome = upload.with_retries() => outcome,
                 () = cancel.cancelled() => {
+                    // 正在传的与后面的都算取消；已传的照样算传了。
                     cancel_session(client, &base, &session_id).await;
-                    return Err(LocalSendError::Canceled);
+                    reports.extend(
+                        files.files[index..]
+                            .iter()
+                            .map(|file| FileReport::of(file, FileOutcome::Canceled)),
+                    );
+                    return Ok(SendReport {
+                        files: reports,
+                        canceled: true,
+                    });
                 }
             };
             match outcome {
-                Ok(()) => sent += 1,
+                Ok(()) => reports.push(FileReport::of(file, FileOutcome::Sent)),
                 Err(reason) => {
                     announced_file_failed = true;
-                    failed.push(FileFailure {
-                        file_name: file.file_name.clone(),
-                        reason,
-                    });
+                    reports.push(FileReport::of(file, FileOutcome::Failed(reason)));
                 }
             }
         }
@@ -172,7 +243,10 @@ impl DirectSender {
         if announced_file_failed {
             cancel_session(client, &base, &session_id).await;
         }
-        Ok(SendReport { sent, failed })
+        Ok(SendReport {
+            files: reports,
+            canceled: false,
+        })
     }
 
     /// 发一段文字（同官方）：一个 `text/plain` 文件，内容放在 preview 里；对方读完回
@@ -295,11 +369,11 @@ async fn unless_canceled<T>(
     }
 }
 
-fn not_taken(file: &PreparedFile) -> FileFailure {
-    FileFailure {
-        file_name: file.file_name.clone(),
-        reason: "the device did not take this file".to_owned(),
-    }
+fn not_taken(file: &PreparedFile) -> FileReport {
+    FileReport::of(
+        file,
+        FileOutcome::Failed("the device did not take this file".to_owned()),
+    )
 }
 
 /// prepare-upload 被拒的原因：PIN、拒绝、拦截各有各的意思（同官方发送端的分支），
@@ -603,8 +677,9 @@ mod tests {
             .unwrap();
         responder.await.unwrap();
 
-        assert_eq!(report.sent, 0);
-        let [FileFailure { file_name, reason }] = report.failed.as_slice() else {
+        assert_eq!(report.sent(), 0);
+        let failures = report.failures();
+        let [FileFailure { file_name, reason }] = failures.as_slice() else {
             panic!("expected one failed file, got {report:?}");
         };
         assert_eq!(file_name, "one.txt");

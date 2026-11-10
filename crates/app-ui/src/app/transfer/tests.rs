@@ -261,11 +261,31 @@ pub(crate) fn start_sending(browser: &mut FileBrowser, fingerprint: &str) -> u64
     )
 }
 
-fn all_sent() -> local_send::SendReport {
+/// 一份发送报告：`sent` 个传成的文件 + 给的失败。
+pub(crate) fn report(
+    sent: usize,
+    failures: Vec<local_send::FileFailure>,
+) -> local_send::SendReport {
+    let sent_files = (0..sent).map(|index| local_send::FileReport {
+        file_name: format!("sent-{index}.txt"),
+        path: Some(std::path::PathBuf::from(format!("/tmp/sent-{index}.txt"))),
+        size: 10,
+        outcome: local_send::FileOutcome::Sent,
+    });
+    let failed_files = failures.into_iter().map(|failure| local_send::FileReport {
+        file_name: failure.file_name,
+        path: None,
+        size: 0,
+        outcome: local_send::FileOutcome::Failed(failure.reason),
+    });
     local_send::SendReport {
-        sent: 1,
-        failed: Vec::new(),
+        files: sent_files.chain(failed_files).collect(),
+        canceled: false,
     }
+}
+
+fn all_sent() -> local_send::SendReport {
+    report(1, Vec::new())
 }
 
 fn finished(sent: usize, failed: Vec<local_send::FileFailure>) -> DirectSendPhase {
@@ -528,10 +548,7 @@ fn a_send_with_failed_files_shows_them_on_demand_and_logs_them_once() {
         finish_direct_send(
             &mut browser,
             "phone-fp",
-            DirectSendOutcome::Sent(local_send::SendReport {
-                sent: 2,
-                failed: vec![failure.clone()],
-            }),
+            DirectSendOutcome::Sent(report(2, vec![failure.clone()])),
         );
     });
 

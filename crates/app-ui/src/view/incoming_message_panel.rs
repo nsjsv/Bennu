@@ -3,7 +3,7 @@
 use iced::widget::{column, container, row, scrollable, Space};
 use iced::{Alignment, Element, Length};
 
-use crate::app::transfer::{message_link, IncomingMessage, TransferMessage};
+use crate::app::transfer::{message_link, IncomingMessage, MessageTitle, TransferMessage};
 use crate::appearance::context_menu_style;
 use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
@@ -53,9 +53,12 @@ pub(super) fn incoming_message_panel(
     let mut content = column![
         row![
             themed_icon(IconSymbol::Send, IconTone::Normal, MENU_ICON_SIZE),
-            readable_text(tr!("%1 sent a message", message.alias))
-                .size(16)
-                .width(Length::Fill),
+            readable_text(match &message.title {
+                MessageTitle::Received(alias) => tr!("%1 sent a message", alias),
+                MessageTitle::Sent(alias) => tr!("Message to %1", alias),
+            })
+            .size(16)
+            .width(Length::Fill),
         ]
         .spacing(8)
         .align_y(Alignment::Center),

@@ -78,12 +78,12 @@ fn canceling_one_device_stops_the_preparation_only_when_nobody_waits_for_it() {
     let tablet = checking(&mut browser, 7, "tablet");
     let preparation = add_batch(&mut browser, 7);
 
-    browser.cancel_transfer_task(phone);
+    drop(browser.cancel_transfer_task(phone));
     assert_eq!(send(&browser, "phone").phase, DirectSendPhase::Canceled);
     assert!(!preparation.is_cancelled(), "the tablet still waits");
     assert!(browser.can_send_to(&sample_device("phone")));
 
-    browser.cancel_transfer_task(tablet);
+    drop(browser.cancel_transfer_task(tablet));
     assert!(preparation.is_cancelled());
 
     // 准备被取消：结果是 None，没人再开始发。
@@ -97,12 +97,12 @@ fn canceling_a_running_send_waits_for_it_to_stop() {
     let id = crate::app::transfer::tests::start_sending(&mut browser, "phone");
     let token = browser.transfer_tasks.send_mut(id).unwrap().cancel.clone();
 
-    browser.cancel_transfer_task(id);
+    drop(browser.cancel_transfer_task(id));
 
     assert!(token.is_cancelled());
     assert_eq!(send(&browser, "phone").phase, DirectSendPhase::Canceling);
     assert!(!browser.can_send_to(&sample_device("phone")));
-    browser.accept_direct_send_finished(id, "Phone", DirectSendOutcome::Canceled);
+    drop(browser.accept_direct_send_finished(id, "Phone", DirectSendOutcome::Canceled));
     assert_eq!(send(&browser, "phone").phase, DirectSendPhase::Canceled);
 }
 

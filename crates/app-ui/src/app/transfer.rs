@@ -82,6 +82,13 @@ pub(crate) enum TransferMessage {
     /// 任务面板里 LocalSend 行的"取消"、"清除"（任务 id）。
     TaskCancelRequested(u64),
     TaskClearRequested(u64),
+    // ---- LocalSend 窗口"设备 | 记录"与传输记录 ----
+    LocalSendPageSelected(LocalSendPage),
+    HistoryLoaded(Result<Vec<HistoryRecord>, String>),
+    /// 写库没成的原因（只记日志：内存里的记录照样在）；None = 写成了。
+    HistorySaved(Option<String>),
+    HistoryClearPressed,
+    HistoryRecordOpened(String),
     // ---- 接收确认（R7） ----
     IncomingAddToFavoritesToggled(bool),
     IncomingConfirmed {
@@ -319,10 +326,7 @@ impl FileBrowser {
                 task,
                 alias,
                 outcome,
-            } => {
-                self.accept_direct_send_finished(task, &alias, outcome);
-                iced::Task::none()
-            }
+            } => self.accept_direct_send_finished(task, &alias, outcome),
             TransferMessage::BatchProgress { batch, progress } => {
                 self.accept_batch_progress(batch, progress);
                 iced::Task::none()
@@ -355,13 +359,30 @@ impl FileBrowser {
                 self.submit_direct_send_pin(&fingerprint)
             }
             TransferMessage::DirectSendCancelPressed(fingerprint) => {
-                self.cancel_latest_send(&fingerprint);
+                self.cancel_latest_send(&fingerprint)
+            }
+            TransferMessage::TaskCancelRequested(task) => self.cancel_transfer_task(task),
+            TransferMessage::LocalSendPageSelected(page) => {
+                self.local_send_page = page;
                 iced::Task::none()
             }
-            TransferMessage::TaskCancelRequested(task) => {
-                self.cancel_transfer_task(task);
+            TransferMessage::HistoryLoaded(outcome) => {
+                self.accept_history_loaded(outcome);
                 iced::Task::none()
             }
+            TransferMessage::HistorySaved(error) => {
+                if let Some(error) = error {
+                    tracing::warn!(
+                        target: "app_ui::transfer",
+                        event = "localsend_history_save_failed",
+                        %error,
+                        "could not save the LocalSend transfer history"
+                    );
+                }
+                iced::Task::none()
+            }
+            TransferMessage::HistoryClearPressed => self.clear_transfer_history(),
+            TransferMessage::HistoryRecordOpened(id) => self.open_history_record(&id),
             TransferMessage::TaskClearRequested(task) => {
                 self.transfer_tasks.clear(task);
                 iced::Task::none()
@@ -571,13 +592,11 @@ impl FileBrowser {
                 file_id,
                 received,
             } => self.accept_receive_progress(&session_id, file_id, received),
-            ServiceEvent::ReceiveFinished {
-                session_id,
-                saved_paths,
-                failed,
-            } => {
-                self.accept_receive_finished(&session_id, saved_paths.len(), failed.clone());
-                return self.notify_transfer_receive_finished(saved_paths, failed);
+            ServiceEvent::ReceiveFinished { session_id, report } => {
+                let history = self.accept_receive_finished(&session_id, &report);
+                let notification =
+                    self.notify_transfer_receive_finished(report.saved_paths(), report.failures());
+                return iced::Task::batch([history, notification]);
             }
             ServiceEvent::MessageReceived { device, text } => {
                 return self.accept_incoming_message(device, text);
@@ -729,6 +748,7 @@ fn transfer_service_start_failed(error: &LocalSendError) -> String {
 mod device_checks;
 mod direct_send;
 mod favorites;
+mod history;
 mod incoming;
 mod local_send_window;
 mod messages;
@@ -743,9 +763,11 @@ pub(crate) use direct_send::{
 pub(crate) use favorites::{
     service_favorites, AddressFormMessage, FavoriteAddressForm, FavoriteRow,
 };
+pub(crate) use history::{Direction, HistoryItem, HistoryRecord, HistoryResult, TransferHistory};
 pub(crate) use incoming::{incoming_entries, IncomingEntry};
+pub(crate) use local_send_window::LocalSendPage;
 pub(crate) use local_send_window::{ChooserTarget, StagedItem, StagedSize, StagedTab};
-pub(crate) use messages::{message_link, IncomingMessage};
+pub(crate) use messages::{message_link, IncomingMessage, MessageTitle};
 pub(crate) use tasks::{ReceivePhase, ReceiveTask, TransferKind, TransferTask, TransferTasks};
 
 pub(crate) use settings::receiver_failure_message;

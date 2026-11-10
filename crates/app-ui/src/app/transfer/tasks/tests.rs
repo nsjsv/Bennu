@@ -26,6 +26,24 @@ fn file(id: &str, size: u64) -> FileMetadata {
     }
 }
 
+/// a.jpg 收下了，b.jpg 是 `second`。
+fn received(second: local_send::ReceivedOutcome) -> local_send::ReceiveReport {
+    local_send::ReceiveReport {
+        files: vec![
+            local_send::ReceivedFile {
+                file_name: "a.jpg".to_owned(),
+                size: 100,
+                outcome: local_send::ReceivedOutcome::Saved("/tmp/a.jpg".into()),
+            },
+            local_send::ReceivedFile {
+                file_name: "b.jpg".to_owned(),
+                size: 300,
+                outcome: second,
+            },
+        ],
+    }
+}
+
 fn start_receiving(browser: &mut FileBrowser, session: &str) {
     event(
         browser,
@@ -77,8 +95,9 @@ fn a_receive_shows_progress_per_file_and_its_result() {
         &mut browser,
         ServiceEvent::ReceiveFinished {
             session_id: "s".to_owned(),
-            saved_paths: vec!["/tmp/a.jpg".into()],
-            failed: vec![("b.jpg".to_owned(), "write failed".to_owned())],
+            report: received(local_send::ReceivedOutcome::Failed(
+                "write failed".to_owned(),
+            )),
         },
     );
     assert_eq!(
@@ -104,8 +123,7 @@ fn canceling_a_receive_shows_it_as_canceled_once_the_session_ends() {
         &mut browser,
         ServiceEvent::ReceiveFinished {
             session_id: "s".to_owned(),
-            saved_paths: vec!["/tmp/a.jpg".into()],
-            failed: vec![("b.jpg".to_owned(), "canceled on this computer".to_owned())],
+            report: received(local_send::ReceivedOutcome::Canceled),
         },
     );
     assert_eq!(
@@ -119,14 +137,11 @@ fn canceling_a_receive_shows_it_as_canceled_once_the_session_ends() {
 fn a_new_send_keeps_the_earlier_one_in_the_panel_but_replaces_an_old_text_send() {
     let mut browser = browser();
     let first = start_sending(&mut browser, "phone");
-    browser.accept_direct_send_finished(
+    drop(browser.accept_direct_send_finished(
         first,
         "Phone",
-        DirectSendOutcome::Sent(local_send::SendReport {
-            sent: 1,
-            failed: Vec::new(),
-        }),
-    );
+        DirectSendOutcome::Sent(crate::app::transfer::tests::report(1, Vec::new())),
+    ));
     let second = start_sending(&mut browser, "phone");
     assert_eq!(panel_ids(&browser), [first, second]);
     // 设备行显示最新的那次。
@@ -139,10 +154,10 @@ fn a_new_send_keeps_the_earlier_one_in_the_panel_but_replaces_an_old_text_send()
     );
 
     // 文字发送不进面板，被下一次发送取代。
-    browser.accept_direct_send_finished(second, "Phone", DirectSendOutcome::Canceled);
+    drop(browser.accept_direct_send_finished(second, "Phone", DirectSendOutcome::Canceled));
     let text = browser.begin_text_for_test("phone");
     assert_eq!(panel_ids(&browser), [first, second]);
-    browser.accept_direct_send_finished(text, "Phone", DirectSendOutcome::Canceled);
+    drop(browser.accept_direct_send_finished(text, "Phone", DirectSendOutcome::Canceled));
     let third = start_sending(&mut browser, "phone");
     assert!(browser
         .transfer_tasks
@@ -168,14 +183,11 @@ fn unread_clear_and_the_indicator_cover_localsend_rows() {
             bytes_total: 100,
         },
     );
-    browser.accept_direct_send_finished(
+    drop(browser.accept_direct_send_finished(
         done,
         "Phone",
-        DirectSendOutcome::Sent(local_send::SendReport {
-            sent: 1,
-            failed: Vec::new(),
-        }),
-    );
+        DirectSendOutcome::Sent(crate::app::transfer::tests::report(1, Vec::new())),
+    ));
     assert_eq!(browser.transfer_tasks.unread_count(), 2);
     assert_eq!(browser.transfer_tasks.active_fraction(), Some(0.25));
     assert!(!browser.transfer_tasks.has_indeterminate());

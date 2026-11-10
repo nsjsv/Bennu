@@ -244,6 +244,13 @@ impl TransferTasks {
         self.tasks.iter_mut().find(|task| task.id == id)
     }
 
+    pub(super) fn send(&self, id: u64) -> Option<&DirectSendState> {
+        self.tasks.iter().find_map(|task| match &task.kind {
+            TransferKind::Send(send) if task.id == id => Some(send),
+            _ => None,
+        })
+    }
+
     pub(super) fn send_mut(&mut self, id: u64) -> Option<&mut DirectSendState> {
         self.get_mut(id).and_then(TransferTask::send_mut)
     }

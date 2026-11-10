@@ -1,4 +1,5 @@
-//! 收到的文字消息：排队，主窗口一次弹一条（官方的接收页也是一次一条）。
+//! 文字弹窗：收到的文字，以及从传输记录里再打开的（收到的或发出的）。排队，主窗口
+//! 一次弹一条（官方的接收页也是一次一条）。
 //!
 //! 服务收到就回了 204，这里只管显示：复制、链接用浏览器打开、关掉看下一条。
 
@@ -6,6 +7,7 @@ use iced::Task;
 use local_send::DeviceInfo;
 
 use super::super::FileBrowser;
+use super::history::{Direction, HistoryItem, HistoryResult, NewRecord};
 use super::TransferMessage;
 use crate::model::Message;
 
@@ -14,26 +16,43 @@ const NOTIFICATION_PREVIEW_CHARS: usize = 100;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct IncomingMessage {
-    /// 发送方的名字：收藏里起过名的用收藏名。
-    pub(crate) alias: String,
+    pub(crate) title: MessageTitle,
     pub(crate) text: String,
     /// 复制过：按钮变"已复制"。
     pub(crate) copied: bool,
 }
 
+/// 弹窗标题：对方的名字（收藏里起过名的用收藏名）与收发方向。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum MessageTitle {
+    Received(String),
+    Sent(String),
+}
+
 impl FileBrowser {
+    /// 文字弹窗的唯一入口：排进队列；队列原来是空的就先清掉主窗口同层的输入状态。
+    pub(super) fn show_message(&mut self, message: IncomingMessage) -> Task<Message> {
+        let modal = if self.incoming_messages.is_empty() {
+            self.prepare_transfer_modal()
+        } else {
+            Task::none()
+        };
+        self.incoming_messages.push_back(message);
+        modal
+    }
+
     pub(super) fn accept_incoming_message(
         &mut self,
         device: DeviceInfo,
         text: String,
     ) -> Task<Message> {
         let alias = self.transfer_device_name(&device);
-        // 已经在显示别的消息：排在后面，主窗口状态已经清过了。
-        let modal = if self.incoming_messages.is_empty() {
-            self.prepare_transfer_modal()
-        } else {
-            Task::none()
-        };
+        let history = self.record_history(vec![NewRecord {
+            direction: Direction::Received,
+            device: alias.clone(),
+            item: HistoryItem::Text(text.clone()),
+            result: HistoryResult::Done,
+        }]);
         // 前台不通知（与接收完成通知同一门控）：弹窗本身就看得到。
         let notification = if self.system_focused_window.is_none() {
             let preview: String = text.chars().take(NOTIFICATION_PREVIEW_CHARS).collect();
@@ -44,12 +63,12 @@ impl FileBrowser {
         } else {
             Task::none()
         };
-        self.incoming_messages.push_back(IncomingMessage {
-            alias,
+        let modal = self.show_message(IncomingMessage {
+            title: MessageTitle::Received(alias),
             text,
             copied: false,
         });
-        Task::batch([modal, notification])
+        Task::batch([modal, notification, history])
     }
 
     pub(super) fn copy_incoming_message(&mut self) -> Task<Message> {

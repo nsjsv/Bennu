@@ -2,9 +2,10 @@
 //! 还有面板与设备行共用的取消、清除入口。
 
 use iced::Task;
-use local_send::{DeviceInfo, FileMetadata};
+use local_send::{DeviceInfo, FileMetadata, ReceiveReport};
 
 use super::super::FileBrowser;
+use super::history::NewRecord;
 use super::tasks::{ReceivePhase, ReceiveTask, TransferKind};
 use crate::model::Message;
 
@@ -39,43 +40,55 @@ impl FileBrowser {
         }
     }
 
-    /// 会话结束（收完、对方取消、本机取消）：本机取消的显示"已取消"，其余显示结果。
+    /// 会话结束（收完、对方取消、本机取消）：取消了的显示"已取消"，其余显示结果；每个
+    /// 文件记一条传输记录。
     pub(super) fn accept_receive_finished(
         &mut self,
         session_id: &str,
-        saved: usize,
-        failed: Vec<(String, String)>,
-    ) {
+        report: &ReceiveReport,
+    ) -> Task<Message> {
         let panel_open = self.operation_queue.is_panel_open();
         let Some(task) = self.transfer_tasks.receive_mut(session_id) else {
-            return;
+            return Task::none();
         };
         let id = task.id;
-        if let TransferKind::Receive(receive) = &mut task.kind {
-            receive.phase = match receive.phase {
-                ReceivePhase::Canceling => ReceivePhase::Canceled { saved },
-                _ => ReceivePhase::Finished { saved, failed },
-            };
-        }
+        let TransferKind::Receive(receive) = &mut task.kind else {
+            return Task::none();
+        };
+        let saved = report.saved_paths().len();
+        receive.phase = if report.canceled() || receive.phase == ReceivePhase::Canceling {
+            ReceivePhase::Canceled { saved }
+        } else {
+            ReceivePhase::Finished {
+                saved,
+                failed: report.failures(),
+            }
+        };
+        let records = NewRecord::per_received_file(&receive.sender, report);
         self.transfer_tasks.mark_changed(id, panel_open);
+        self.record_history(records)
     }
 
     /// 面板"取消"、设备行"取消"的唯一入口。
-    pub(super) fn cancel_transfer_task(&mut self, id: u64) {
+    pub(super) fn cancel_transfer_task(&mut self, id: u64) -> Task<Message> {
         let panel_open = self.operation_queue.is_panel_open();
-        let ended_now = match self.transfer_tasks.get_mut(id).map(|task| &mut task.kind) {
-            Some(TransferKind::Send(_)) => self.cancel_send(id),
+        match self.transfer_tasks.get_mut(id).map(|task| &mut task.kind) {
+            Some(TransferKind::Send(_)) => {
+                let Some(history) = self.cancel_send(id) else {
+                    return Task::none();
+                };
+                self.transfer_tasks.mark_changed(id, panel_open);
+                history
+            }
             Some(TransferKind::Receive(receive)) if receive.phase == ReceivePhase::Receiving => {
+                // 结果（含记录）等服务结束会话、发 `ReceiveFinished` 再说。
                 receive.phase = ReceivePhase::Canceling;
                 if let Some(runtime) = &self.transfer_runtime {
                     runtime.handle.cancel_receive(&receive.session_id);
                 }
-                false
+                Task::none()
             }
-            _ => false,
-        };
-        if ended_now {
-            self.transfer_tasks.mark_changed(id, panel_open);
+            _ => Task::none(),
         }
     }
 

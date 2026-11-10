@@ -30,9 +30,11 @@ use crate::{AcceptPolicy, Favorite, ReceiverConfig, ServiceEvent};
 
 mod destination;
 mod listener;
+mod report;
 mod tls;
 
 pub(crate) use listener::{port_already_released, spawn_server, Peer, PortReleased};
+pub use report::{ReceiveReport, ReceivedFile, ReceivedOutcome};
 pub(crate) use tls::server_config;
 
 /// 未信任设备 prepare-upload 挂起等待用户确认的超时（design：30s 后 403）。
@@ -679,7 +681,7 @@ async fn mark_slot_failed(
 
 /// 会话所有文件槽到达终态后：发 `ReceiveFinished` 并移除会话（只发一次）。
 async fn finish_if_complete(state: &Arc<ReceiveState>, session_id: &str) {
-    let snapshot = {
+    let report = {
         let mut sessions = state.sessions.lock().await;
         let Some(session) = sessions.get_mut(session_id) else {
             return;
@@ -693,32 +695,18 @@ async fn finish_if_complete(state: &Arc<ReceiveState>, session_id: &str) {
             return;
         }
         session.finished_emitted = true;
-        session
-            .files
-            .values()
-            .map(|slot| {
-                (
-                    slot.dest.clone(),
-                    slot.meta.file_name.clone(),
-                    slot.outcome.clone(),
-                )
-            })
-            .collect::<Vec<_>>()
-    };
-    let mut saved_paths = Vec::new();
-    let mut failed = Vec::new();
-    for (dest, file_name, outcome) in snapshot {
-        match (outcome, dest) {
-            (SlotOutcome::Done, Some(dest)) => saved_paths.push(dest),
-            (SlotOutcome::Failed(reason), _) => failed.push((file_name, reason.to_string())),
-            _ => failed.push((file_name, "incomplete".to_string())),
+        ReceiveReport {
+            files: session
+                .files
+                .values()
+                .map(ReceivedFile::from_slot)
+                .collect(),
         }
-    }
+    };
     state.sessions.lock().await.remove(session_id);
     let _ = state.events.send(ServiceEvent::ReceiveFinished {
         session_id: session_id.to_string(),
-        saved_paths,
-        failed,
+        report,
     });
 }
 
@@ -737,16 +725,14 @@ async fn cancel(
     if !owned {
         return StatusCode::FORBIDDEN;
     }
-    state
-        .end_session(&query.session_id, "canceled by sender")
-        .await;
+    state.end_session(&query.session_id).await;
     StatusCode::OK
 }
 
 impl ReceiveState {
-    /// 结束一次会话（对方取消、本机取消共用）：正在写的上传停下，没收完的标失败并删掉
+    /// 结束一次会话（对方取消、本机取消共用）：正在写的上传停下，没收完的算取消、删掉
     /// 半成品，收完的留着；发 `ReceiveFinished`。会话不在了返回 false。
-    pub(crate) async fn end_session(&self, session_id: &str, reason: &'static str) -> bool {
+    pub(crate) async fn end_session(&self, session_id: &str) -> bool {
         let Some(session) = self.sessions.lock().await.remove(session_id) else {
             return false;
         };
@@ -755,27 +741,19 @@ impl ReceiveState {
         if session.finished_emitted {
             return true;
         }
-        let mut saved_paths = Vec::new();
-        let mut failed = Vec::new();
-        for slot in session.files.into_values() {
-            match (slot.outcome, slot.dest) {
-                (SlotOutcome::Done, Some(dest)) => saved_paths.push(dest),
-                (outcome, dest) => {
-                    if let Some(dest) = dest {
-                        let _ = tokio::fs::remove_file(&dest).await;
-                    }
-                    let reason = match outcome {
-                        SlotOutcome::Failed(earlier) => earlier,
-                        _ => reason,
-                    };
-                    failed.push((slot.meta.file_name, reason.to_string()));
+        let mut files = Vec::with_capacity(session.files.len());
+        for slot in session.files.values() {
+            let file = ReceivedFile::from_slot(slot);
+            if !matches!(file.outcome, ReceivedOutcome::Saved(_)) {
+                if let Some(dest) = &slot.dest {
+                    let _ = tokio::fs::remove_file(dest).await;
                 }
             }
+            files.push(file);
         }
         let _ = self.events.send(ServiceEvent::ReceiveFinished {
             session_id: session_id.to_string(),
-            saved_paths,
-            failed,
+            report: ReceiveReport { files },
         });
         true
     }

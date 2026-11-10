@@ -22,6 +22,7 @@ use local_send::{
 };
 
 use super::super::FileBrowser;
+use super::history::{Direction, HistoryItem, HistoryResult, NewRecord};
 use super::tasks::{Batch, SpeedMeter, TransferKind};
 use super::TransferMessage;
 use crate::model::{sanitized_application_log_detail, Message};
@@ -320,10 +321,11 @@ impl FileBrowser {
                         .send_text(&state.target, text.clone(), pin, cancel);
                     // 文字没有进度：通道随 `progress_tx` 一起关掉，命令只等结果。
                     drop(progress_tx);
+                    // 文字没有逐个文件的结果：送达就是一份空报告。
                     Box::pin(async move {
                         send.await.map(|()| SendReport {
-                            sent: 1,
-                            failed: Vec::new(),
+                            files: Vec::new(),
+                            canceled: false,
                         })
                     })
                 }
@@ -391,43 +393,87 @@ impl FileBrowser {
     }
 
     /// 设备行的"取消"与 PIN 输入框的"取消"：与面板同一个入口。
-    pub(super) fn cancel_latest_send(&mut self, fingerprint: &str) {
-        if let Some(id) = self.latest_send_id(fingerprint) {
-            self.cancel_transfer_task(id);
+    pub(super) fn cancel_latest_send(&mut self, fingerprint: &str) -> iced::Task<Message> {
+        match self.latest_send_id(fingerprint) {
+            Some(id) => self.cancel_transfer_task(id),
+            None => iced::Task::none(),
         }
     }
 
-    /// 取消一次发送；返回是否已经结束（不用等发送停下）。
-    pub(super) fn cancel_send(&mut self, id: u64) -> bool {
-        let Some(state) = self.transfer_tasks.send_mut(id) else {
-            return false;
+    /// 整次没传成（对方接受之前就结束了）的一条记录。
+    fn whole_send_record(&self, state: &DirectSendState, result: HistoryResult) -> NewRecord {
+        let item = match &state.payload {
+            Payload::Text(text) => HistoryItem::Text(text.clone()),
+            _ => HistoryItem::File {
+                name: state.first_item.clone(),
+                path: None,
+                size: None,
+                more: state.item_count.saturating_sub(1) as u64,
+            },
         };
+        NewRecord {
+            direction: Direction::Sent,
+            device: self.transfer_device_name(&state.target),
+            item,
+            result,
+        }
+    }
+
+    /// 结束了的一次发送记哪些：对方接受之后按文件，之前就结束的整次一条，文字一条。
+    fn send_records(&self, state: &DirectSendState, outcome: &DirectSendOutcome) -> Vec<NewRecord> {
+        let result = match outcome {
+            DirectSendOutcome::PinRequired | DirectSendOutcome::WrongPin => return Vec::new(),
+            DirectSendOutcome::Sent(report) if !state.is_text() => {
+                let device = self.transfer_device_name(&state.target);
+                return NewRecord::per_sent_file(&device, report);
+            }
+            DirectSendOutcome::Sent(_) => HistoryResult::Done,
+            DirectSendOutcome::Canceled => HistoryResult::Canceled,
+            DirectSendOutcome::Failed(DirectSendFailure::Declined) => HistoryResult::Declined,
+            DirectSendOutcome::Failed(DirectSendFailure::TooManyPinAttempts) => {
+                HistoryResult::TooManyPinAttempts
+            }
+            DirectSendOutcome::Failed(DirectSendFailure::NothingToSend) => {
+                HistoryResult::Failed("nothing to send".to_owned())
+            }
+            DirectSendOutcome::Failed(DirectSendFailure::Other(reason)) => {
+                HistoryResult::Failed(reason.clone())
+            }
+        };
+        vec![self.whole_send_record(state, result)]
+    }
+
+    /// 取消一次发送。校验中、等 PIN 的在这里就结束：记一条"已取消"，返回 Some（记录的
+    /// 写库命令）。发送中的要等它停下，结果回来时再记，返回 None。
+    pub(super) fn cancel_send(&mut self, id: u64) -> Option<iced::Task<Message>> {
+        let state = self.transfer_tasks.send(id)?;
         match state.phase {
-            // 还在校验：这台不发了；等这批的都不发了才停下准备。
-            DirectSendPhase::Checking => {
-                state.phase = DirectSendPhase::Canceled;
+            DirectSendPhase::Checking | DirectSendPhase::NeedsPin { .. } => {
+                let record = self.whole_send_record(state, HistoryResult::Canceled);
                 let batch = state.batch();
+                if let Some(state) = self.transfer_tasks.send_mut(id) {
+                    state.phase = DirectSendPhase::Canceled;
+                }
+                // 校验中：这台不发了；等这批的都不发了才停下准备。
                 let still_waiting = self
                     .transfer_tasks
                     .sends_mut()
-                    .any(|(_, send)| send.batch() == batch && send.is_busy());
+                    .any(|(_, send)| batch.is_some() && send.batch() == batch && send.is_busy());
                 if let (Some(batch), false) = (batch, still_waiting) {
                     if let Some(batch) = self.transfer_tasks.batches.get(&batch) {
                         batch.cancel.cancel();
                     }
                 }
-                true
-            }
-            DirectSendPhase::NeedsPin { .. } => {
-                state.phase = DirectSendPhase::Canceled;
-                true
+                Some(self.record_history(vec![record]))
             }
             DirectSendPhase::Sending => {
-                state.phase = DirectSendPhase::Canceling;
-                state.cancel.cancel();
-                false
+                if let Some(state) = self.transfer_tasks.send_mut(id) {
+                    state.phase = DirectSendPhase::Canceling;
+                    state.cancel.cancel();
+                }
+                None
             }
-            _ => false,
+            _ => None,
         }
     }
 
@@ -449,19 +495,25 @@ impl FileBrowser {
         id: u64,
         alias: &str,
         outcome: DirectSendOutcome,
-    ) {
+    ) -> iced::Task<Message> {
         // 失败进日志：设备行只显示到下一次发送，日志是长期记录。要 PIN、取消不是失败。
         if let Some(reason) = logged_failure(&outcome) {
             record_direct_send_failure(alias, &reason);
         }
         let panel_open = self.operation_queue.is_panel_open();
+        let records = self
+            .transfer_tasks
+            .send(id)
+            .map(|state| self.send_records(state, &outcome))
+            .unwrap_or_default();
         let Some(state) = self.transfer_tasks.send_mut(id) else {
-            return;
+            return iced::Task::none();
         };
         state.phase = match outcome {
+            DirectSendOutcome::Sent(report) if report.canceled => DirectSendPhase::Canceled,
             DirectSendOutcome::Sent(report) => DirectSendPhase::Finished {
-                sent: report.sent,
-                failed: report.failed,
+                sent: report.sent(),
+                failed: report.failures(),
                 details_open: false,
             },
             DirectSendOutcome::PinRequired => DirectSendPhase::NeedsPin {
@@ -476,6 +528,7 @@ impl FileBrowser {
             DirectSendOutcome::Failed(failure) => DirectSendPhase::Failed(failure),
         };
         self.transfer_tasks.mark_changed(id, panel_open);
+        self.record_history(records)
     }
 }
 
@@ -580,10 +633,10 @@ fn send_outcome(
 /// 要进日志的原因（英文，Logs 页不走翻译）；没失败返回 None。
 fn logged_failure(outcome: &DirectSendOutcome) -> Option<String> {
     match outcome {
-        DirectSendOutcome::Sent(report) if report.failed.is_empty() => None,
+        DirectSendOutcome::Sent(report) if report.failures().is_empty() => None,
         DirectSendOutcome::Sent(report) => Some(
             report
-                .failed
+                .failures()
                 .iter()
                 .map(|failure| format!("{}: {}", failure.file_name, failure.reason))
                 .collect::<Vec<_>>()

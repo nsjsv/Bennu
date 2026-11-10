@@ -37,8 +37,9 @@ pub use tokio_util::sync::CancellationToken;
 pub use device::{Announce, DeviceInfo, FileMetadata, PrepareUploadRequest, PrepareUploadResponse};
 pub use error::LocalSendError;
 pub use qr::{QrDownloadHandle, QrItem, QrSource};
+pub use receive::{ReceiveReport, ReceivedFile, ReceivedOutcome};
 pub use send::prepare::{prepare_files, FileFailure, PrepareProgress, PreparedFiles};
-pub use send::{SendProgress, SendReport};
+pub use send::{FileOutcome, FileReport, SendProgress, SendReport};
 
 use identity::DeviceIdentity;
 use send::DirectSender;
@@ -158,11 +159,10 @@ pub enum ServiceEvent {
         file_id: String,
         received: u64,
     },
-    /// 会话结束：saved_paths 为成功落盘文件，failed 为 (文件名, 原因)。
+    /// 会话结束（收完、对方取消、本机取消）：每个文件怎样了。
     ReceiveFinished {
         session_id: String,
-        saved_paths: Vec<PathBuf>,
-        failed: Vec<(String, String)>,
+        report: ReceiveReport,
     },
     /// 收到一段文字消息（已回 204，不建会话、不走接收确认）；发送方按证书认。
     MessageReceived { device: DeviceInfo, text: String },
@@ -393,7 +393,7 @@ impl LocalSendService {
                         }
                         Some(ServiceCommand::CancelReceive { session_id }) => {
                             if let Some(state) = &receive_state {
-                                state.end_session(&session_id, "canceled on this computer").await;
+                                state.end_session(&session_id).await;
                             }
                         }
                         Some(ServiceCommand::RefreshDevices) => {

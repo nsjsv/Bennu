@@ -173,13 +173,25 @@ async fn canceling_mid_transfer_stops_and_tells_the_device() {
 
     cancel.cancel();
 
-    assert!(matches!(
-        tokio::time::timeout(TEST_TIMEOUT, sending)
-            .await
-            .unwrap()
-            .unwrap(),
-        Err(LocalSendError::Canceled)
-    ));
+    // 传输中取消：照样给报告（传输记录要逐个文件记），正在传的与后面的都算取消。
+    let report = tokio::time::timeout(TEST_TIMEOUT, sending)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(report.canceled);
+    let outcomes: Vec<_> = report
+        .files
+        .iter()
+        .map(|file| (file.file_name.as_str(), file.outcome.clone()))
+        .collect();
+    assert_eq!(
+        outcomes,
+        [
+            ("a.txt", crate::FileOutcome::Canceled),
+            ("b.txt", crate::FileOutcome::Canceled)
+        ]
+    );
     assert_eq!(cancels.load(Ordering::SeqCst), 1);
 }
 
@@ -222,12 +234,7 @@ async fn canceling_a_receive_keeps_finished_files_and_stops_the_one_being_writte
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 
-    assert!(
-        server
-            .state
-            .end_session(&session.session_id, "canceled on this computer")
-            .await
-    );
+    assert!(server.state.end_session(&session.session_id).await);
 
     // 正在写的那个上传马上停下（回给对方的是错误，不是成功）。
     let response = tokio::time::timeout(TEST_TIMEOUT, stalled)
@@ -236,25 +243,20 @@ async fn canceling_a_receive_keeps_finished_files_and_stops_the_one_being_writte
         .unwrap()
         .unwrap();
     assert_eq!(response.status(), 409);
-    let ServiceEvent::ReceiveFinished {
-        saved_paths,
-        failed,
-        ..
-    } = wait_for(&mut server.events, |event| {
+    let ServiceEvent::ReceiveFinished { report, .. } = wait_for(&mut server.events, |event| {
         matches!(event, ServiceEvent::ReceiveFinished { .. })
     })
     .await
     else {
         unreachable!()
     };
-    assert_eq!(saved_paths, [server._dir.path().join("done.txt")]);
-    assert_eq!(
-        failed,
-        [(
-            "partial.bin".to_owned(),
-            "canceled on this computer".to_owned()
-        )]
-    );
+    assert_eq!(report.saved_paths(), [server._dir.path().join("done.txt")]);
+    assert!(report.failures().is_empty());
+    assert!(report.files.contains(&crate::ReceivedFile {
+        file_name: "partial.bin".to_owned(),
+        size: 100,
+        outcome: crate::ReceivedOutcome::Canceled,
+    }));
     assert!(!partial.exists());
     // 对方后面的文件发不进来了。
     assert_eq!(

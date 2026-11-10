@@ -1,7 +1,7 @@
 //! Bennu 的应用状态存储：一个进程、一个 `state.sqlite`。
 //!
-//! 数据库句柄 `StateDatabase` 每进程只开一次、只建一次表；任务队列、用户设置、浏览会话
-//! 各有一个存储类型，从同一个句柄派生，互不知道对方的表。
+//! 数据库句柄 `StateDatabase` 每进程只开一次、只建一次表；任务队列、用户设置、浏览会话、
+//! 传输记录各有一个存储类型，从同一个句柄派生，互不知道对方的表。
 
 mod browser_session;
 mod database;
@@ -11,6 +11,7 @@ mod recoverable_transfer;
 mod shutdown;
 mod stored_path;
 mod task_queue;
+mod transfer_history;
 mod user_settings;
 
 pub use browser_session::{
@@ -38,6 +39,10 @@ pub use task_queue::{
     StoredArchiveCompressionLevel, StoredArchiveFormat, StoredBatchRenameItem,
     StoredInterruptedRecoverableTask, StoredOperation, StoredProgress, StoredSymbolicLinkCreation,
     StoredTask, StoredTaskStatus, StoredTransfer, StoredTrashEntry, TaskQueueStore,
+};
+pub use transfer_history::{
+    StoredTransferDirection, StoredTransferItem, StoredTransferRecord, StoredTransferResult,
+    TransferHistoryRead, TransferHistoryStore,
 };
 pub use user_settings::UserSettingsStore;
 

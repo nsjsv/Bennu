@@ -265,6 +265,10 @@ pub(crate) struct FileBrowser {
     pub(crate) local_send_window: Option<window::Id>,
     pub(crate) local_send_staged: Vec<transfer::StagedItem>,
     pub(crate) favorite_address_form: Option<transfer::FavoriteAddressForm>,
+    /// LocalSend 窗口停在"设备"还是"记录"标签（关窗不重置：下次打开还在原来那页）。
+    pub(crate) local_send_page: transfer::LocalSendPage,
+    /// LocalSend 传输记录（新的在前，启动时从状态库读入）。
+    pub(crate) transfer_history: transfer::TransferHistory,
     /// 待发卡片停在"文件"还是"文字"标签，与要发的文字。
     pub(crate) local_send_tab: transfer::StagedTab,
     pub(crate) local_send_text: iced::widget::text_editor::Content,
@@ -661,6 +665,8 @@ impl FileBrowser {
             local_send_window: None,
             local_send_staged: Vec::new(),
             favorite_address_form: None,
+            local_send_page: transfer::LocalSendPage::Devices,
+            transfer_history: transfer::TransferHistory::default(),
             local_send_tab: transfer::StagedTab::Files,
             local_send_text: iced::widget::text_editor::Content::new(),
             favorite_alias_inputs: HashMap::new(),

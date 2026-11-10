@@ -118,6 +118,7 @@ impl FileBrowser {
                     self.maybe_flush_pending_browser_session_save(),
                     self.continue_file_operation_persistence(),
                     self.launch_ready_driver(),
+                    self.load_transfer_history(),
                 ]);
             }
             Err(error) => {

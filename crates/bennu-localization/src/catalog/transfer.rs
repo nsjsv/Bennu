@@ -156,4 +156,15 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("%1 received, %2 failed", "已接收 %1 个，%2 个失败"),
     ("%1 file(s) kept", "留下了 %1 个收完的文件"),
     ("and %1 more", "还有 %1 个"),
+    // 传输记录
+    ("History", "记录"),
+    ("Transfer history", "传输记录"),
+    ("Clear history", "清空"),
+    ("Nothing sent or received yet.", "还没有收发过东西。"),
+    ("%1 and %2 more", "%1 等 %2 个"),
+    ("Too many wrong PINs", "PIN 错的次数太多"),
+    ("Failed: %1", "失败：%1"),
+    ("Yesterday %1", "昨天 %1"),
+    ("Message to %1", "发给 %1 的文字"),
+    ("The file is no longer there: %1", "文件已经不在了：%1"),
 ];

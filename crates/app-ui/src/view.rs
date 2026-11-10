@@ -38,6 +38,7 @@ pub(crate) mod tab_motion;
 mod toggle_switch;
 mod toolbar_controls;
 mod transfer_conflict;
+mod transfer_history;
 pub(crate) mod transfer_qr;
 mod transfer_settings;
 pub(crate) mod transfer_task_row;

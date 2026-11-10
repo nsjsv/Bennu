@@ -69,9 +69,15 @@ fn a_favorite_is_named_by_its_favorite_name_but_a_plain_device_never_is() {
     let names: Vec<_> = browser
         .incoming_messages
         .iter()
-        .map(|message| message.alias.as_str())
+        .map(|message| message.title.clone())
         .collect();
-    assert_eq!(names, ["Living room", "Phone"]);
+    assert_eq!(
+        names,
+        [
+            MessageTitle::Received("Living room".to_owned()),
+            MessageTitle::Received("Phone".to_owned())
+        ]
+    );
 }
 
 #[test]

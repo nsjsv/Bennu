@@ -39,6 +39,14 @@ pub(crate) enum StagedSize {
     Unreadable(String),
 }
 
+/// LocalSend 窗口本机卡片下面的两个标签：设备（待发 + 收藏 + 附近）与传输记录。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum LocalSendPage {
+    #[default]
+    Devices,
+    History,
+}
+
 /// 待发卡片的两个标签：发文件还是发文字。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum StagedTab {

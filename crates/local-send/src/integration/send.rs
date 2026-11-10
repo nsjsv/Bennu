@@ -99,13 +99,8 @@ async fn a_checksum_mismatch_resends_the_whole_file() {
 
     let (report, _source) = send_to(&receiver, &["a.txt"]).await;
 
-    assert_eq!(
-        report.unwrap(),
-        SendReport {
-            sent: 1,
-            failed: Vec::new()
-        }
-    );
+    let report = report.unwrap();
+    assert_eq!((report.sent(), report.failures()), (1, Vec::new()));
     assert_eq!(receiver.uploads.load(Ordering::SeqCst), 3);
     assert_eq!(receiver.cancels.load(Ordering::SeqCst), 0);
 }
@@ -117,9 +112,9 @@ async fn a_file_is_given_up_after_three_mismatches_and_the_session_is_canceled()
     let (report, _source) = send_to(&receiver, &["a.txt"]).await;
 
     let report = report.unwrap();
-    assert_eq!(report.sent, 0);
+    assert_eq!(report.sent(), 0);
     assert_eq!(
-        report.failed[0].reason,
+        report.failures()[0].reason,
         "the received file did not match its checksum 3 times"
     );
     assert_eq!(receiver.uploads.load(Ordering::SeqCst), 3);
@@ -133,9 +128,9 @@ async fn files_the_device_did_not_take_are_reported_and_the_rest_are_sent() {
     let (report, _source) = send_to(&receiver, &["a.txt", "b.txt"]).await;
 
     let report = report.unwrap();
-    assert_eq!(report.sent, 1);
-    assert_eq!(report.failed.len(), 1);
-    assert_eq!(report.failed[0].file_name, "a.txt");
+    assert_eq!(report.sent(), 1);
+    assert_eq!(report.failures().len(), 1);
+    assert_eq!(report.failures()[0].file_name, "a.txt");
     // 没宣告失败的文件：对方的会话本来就不等它，不用取消。
     assert_eq!(receiver.cancels.load(Ordering::SeqCst), 0);
 }
@@ -164,25 +159,21 @@ async fn one_file_failing_mid_send_does_not_stop_the_others() {
         .await
         .unwrap();
 
-    assert_eq!(report.sent, 1);
-    assert_eq!(report.failed[0].file_name, "a.txt");
+    assert_eq!(report.sent(), 1);
+    assert_eq!(report.failures()[0].file_name, "a.txt");
     // 有宣告过的文件没传：取消让对方收尾，收到的那个留着。
-    let ServiceEvent::ReceiveFinished {
-        saved_paths,
-        failed,
-        ..
-    } = wait_for(&mut server.events, |event| {
+    let ServiceEvent::ReceiveFinished { report, .. } = wait_for(&mut server.events, |event| {
         matches!(event, ServiceEvent::ReceiveFinished { .. })
     })
     .await
     else {
         unreachable!()
     };
-    assert_eq!(saved_paths, [server._dir.path().join("b.txt")]);
-    assert_eq!(
-        failed,
-        [("a.txt".to_owned(), "canceled by sender".to_owned())]
-    );
+    assert_eq!(report.saved_paths(), [server._dir.path().join("b.txt")]);
+    assert!(report
+        .files
+        .iter()
+        .any(|file| file.file_name == "a.txt" && file.outcome == crate::ReceivedOutcome::Canceled));
 }
 
 // —— 端到端：真实接收端 ——
@@ -213,20 +204,16 @@ async fn a_folder_is_sent_file_by_file_and_arrives_with_its_structure() {
         .await
         .unwrap();
 
-    assert_eq!(
-        report,
-        SendReport {
-            sent: 3,
-            failed: Vec::new()
-        }
-    );
-    let ServiceEvent::ReceiveFinished { failed, .. } = wait_for(&mut server.events, |e| {
+    assert_eq!((report.sent(), report.failures()), (3, Vec::new()));
+    assert!(!report.canceled);
+    let ServiceEvent::ReceiveFinished { report, .. } = wait_for(&mut server.events, |e| {
         matches!(e, ServiceEvent::ReceiveFinished { .. })
     })
     .await
     else {
         unreachable!()
     };
+    let failed = report.failures();
     assert!(failed.is_empty(), "failed: {failed:?}");
     let received = server._dir.path();
     assert_eq!(std::fs::read(received.join("one.txt")).unwrap(), b"first");
@@ -276,8 +263,8 @@ async fn only_empty_folders_are_nothing_to_send_and_unreadable_files_never_reach
         )
         .await
         .unwrap();
-    assert_eq!(report.sent, 0);
-    assert_eq!(report.failed[0].file_name, "missing.txt");
+    assert_eq!(report.sent(), 0);
+    assert_eq!(report.failures()[0].file_name, "missing.txt");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

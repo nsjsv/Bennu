@@ -3,6 +3,7 @@ use iced::advanced::widget::operation::{Focusable, Operation, Outcome};
 use iced::widget::scrollable;
 use iced::{event, mouse, window, Rectangle, Size, Task};
 
+use super::auxiliary_window::AuxiliaryWindow;
 use super::FileBrowser;
 use crate::app::smooth_scroll::smooth_scroll_id;
 use crate::model::{
@@ -211,18 +212,13 @@ impl FileBrowser {
     }
 
     pub(crate) fn window_title(&self, window: window::Id) -> String {
-        if self.settings_window == Some(window) {
-            tr!("Settings - Bennu")
-        } else if self.properties_window == Some(window) {
-            tr!("Properties - Bennu")
-        } else if self.preview_engine.preview_window == Some(window) {
-            tr!("Preview - Bennu")
-        } else if self.transfer_window == Some(window) {
-            tr!("Send to Phone - Bennu")
-        } else if self.search_workspace.is_some() {
-            tr!("Search - Bennu")
-        } else {
-            "Bennu".to_owned()
+        match self.auxiliary_window(window) {
+            Some(AuxiliaryWindow::Settings) => tr!("Settings - Bennu"),
+            Some(AuxiliaryWindow::Properties) => tr!("Properties - Bennu"),
+            Some(AuxiliaryWindow::Preview) => tr!("Preview - Bennu"),
+            Some(AuxiliaryWindow::Transfer) => tr!("Send to Phone - Bennu"),
+            None if self.search_workspace.is_some() => tr!("Search - Bennu"),
+            None => "Bennu".to_owned(),
         }
     }
 
@@ -449,23 +445,22 @@ impl FileBrowser {
     }
 
     pub(super) fn handle_focused_window_escape_pressed(&mut self) -> Task<Message> {
-        if self.settings_window == Some(self.focused_window) {
-            if self.search_service.cancel_force_restart_confirmation() {
-                return Task::none();
+        match self.auxiliary_window(self.focused_window) {
+            Some(AuxiliaryWindow::Settings) => {
+                if self.search_service.cancel_force_restart_confirmation() {
+                    return Task::none();
+                }
+                if self.settings_subpage.is_some() {
+                    return self.close_settings_subpage();
+                }
+                return self.close_settings_window();
             }
-            if self.settings_subpage.is_some() {
-                return self.close_settings_subpage();
-            }
-            return self.close_settings_window();
-        }
-        if self.properties_window == Some(self.focused_window) {
-            return self.close_properties_window();
-        }
-        if self.transfer_window == Some(self.focused_window) {
-            return self.close_transfer_window();
-        }
-        if self.preview_engine.preview_window == Some(self.focused_window) {
-            return self.close_preview_window();
+            Some(
+                kind @ (AuxiliaryWindow::Properties
+                | AuxiliaryWindow::Preview
+                | AuxiliaryWindow::Transfer),
+            ) => return self.close_auxiliary_window_of(kind),
+            None => {}
         }
         if self.address_editing.is_some() {
             return self.cancel_address_editing();
@@ -662,16 +657,9 @@ impl FileBrowser {
             return self.begin_application_shutdown();
         }
 
-        if self.settings_window == Some(window_id) {
-            self.close_settings_window()
-        } else if self.properties_window == Some(window_id) {
-            self.close_properties_window()
-        } else if self.preview_engine.preview_window == Some(window_id) {
-            self.close_preview_window()
-        } else if self.transfer_window == Some(window_id) {
-            self.close_transfer_window()
-        } else {
-            Task::none()
+        match self.auxiliary_window(window_id) {
+            Some(kind) => self.close_auxiliary_window_of(kind),
+            None => Task::none(),
         }
     }
 

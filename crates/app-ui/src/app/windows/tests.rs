@@ -918,9 +918,11 @@ async fn idle_shutdown_closes_every_window_and_exits_after_one_outcome() {
     let settings_window = window::Id::unique();
     let properties_window = window::Id::unique();
     let preview_window = window::Id::unique();
+    let transfer_window = window::Id::unique();
     browser.settings_window = Some(settings_window);
     browser.properties_window = Some(properties_window);
     browser.preview_engine.preview_window = Some(preview_window);
+    browser.transfer_window = Some(transfer_window);
 
     let shutdown = shutdown_actions(&mut browser, |browser| {
         browser.close_auxiliary_window(browser.main_window)
@@ -940,11 +942,17 @@ async fn idle_shutdown_closes_every_window_and_exits_after_one_outcome() {
             settings_window,
             properties_window,
             preview_window,
+            transfer_window,
         ])
     );
     assert!(!shutdown.contains(&ShutdownAction::PersistenceFinished));
     assert!(!shutdown.contains(&ShutdownAction::Exit));
-    for window in [settings_window, properties_window, preview_window] {
+    for window in [
+        settings_window,
+        properties_window,
+        preview_window,
+        transfer_window,
+    ] {
         assert!(shutdown_actions(&mut browser, |browser| browser
             .update(Message::ApplicationWindowClosed(window)))
         .await

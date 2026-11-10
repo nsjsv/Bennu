@@ -18,10 +18,7 @@ impl FileBrowser {
 
     fn application_window_is_open(&self, window: window::Id) -> bool {
         self.application_shutdown_phase.is_running()
-            && (window == self.main_window
-                || self.settings_window == Some(window)
-                || self.properties_window == Some(window)
-                || self.preview_engine.preview_window == Some(window))
+            && (window == self.main_window || self.auxiliary_window(window).is_some())
     }
 
     pub(super) fn minimize_window(&self, window: window::Id) -> Task<Message> {

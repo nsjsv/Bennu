@@ -297,3 +297,21 @@ fn direct_send_failure_is_logged_once_whatever_the_display_slot_shows() {
     // 上传 URL 里的会话令牌必须先脱敏再进日志。
     assert!(!logs[0].1.contains("abc123"));
 }
+
+#[test]
+fn shutdown_closes_the_transfer_window_and_cancels_its_qr_session() {
+    let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+    let session = session_showing("phone-fp");
+    let cancel = session.cancel.clone();
+    browser.transfer_session = Some(session);
+    browser.transfer_window = Some(iced::window::Id::unique());
+
+    drop(browser.close_auxiliary_window(browser.main_window));
+
+    assert_eq!(browser.transfer_window, None);
+    assert!(browser.transfer_session.is_none());
+    assert!(
+        cancel.is_cancelled(),
+        "the QR download service must be shut down"
+    );
+}

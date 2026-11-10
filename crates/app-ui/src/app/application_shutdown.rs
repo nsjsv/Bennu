@@ -83,19 +83,12 @@ impl FileBrowser {
         self.cancel_work_for_application_shutdown();
         self.pending_user_preferences_save = None;
         self.pending_browser_session_save = false;
-        let mut close_commands = Vec::with_capacity(4);
-        let mut pending_window_ids = HashSet::with_capacity(4);
-        if let Some(settings_window) = self.settings_window.take() {
-            pending_window_ids.insert(settings_window);
-            close_commands.push(window::close(settings_window));
-        }
-        if let Some(properties_window) = self.properties_window.take() {
-            pending_window_ids.insert(properties_window);
-            close_commands.push(window::close(properties_window));
-        }
-        if let Some(preview_window) = self.preview_engine.preview_window.take() {
-            pending_window_ids.insert(preview_window);
-            close_commands.push(window::close(preview_window));
+        let mut close_commands = Vec::new();
+        let mut pending_window_ids = HashSet::new();
+        // 每种辅助窗口都走自己的关闭收尾（如传输窗口取消二维码会话），不只丢掉 id。
+        for (kind, window) in self.open_auxiliary_windows() {
+            pending_window_ids.insert(window);
+            close_commands.push(self.close_auxiliary_window_of(kind));
         }
         if !matches!(window_fact, ShutdownWindowFact::AlreadyClosed(window) if window == self.main_window)
         {

@@ -7,6 +7,7 @@ pub(crate) mod archive_member_password;
 #[cfg(test)]
 mod archive_member_password_tests;
 pub(crate) mod archive_password;
+mod auxiliary_window;
 mod batch_rename;
 pub(crate) mod checksum;
 mod column_resize;
@@ -88,6 +89,7 @@ mod window_control_settings;
 mod windows;
 mod x11_dnd;
 
+use auxiliary_window::AuxiliaryWindow;
 pub(crate) use runtime::run;
 
 use std::collections::{HashMap, HashSet};
@@ -980,56 +982,64 @@ impl FileBrowser {
     }
 
     fn view(&self, window: window::Id) -> Element<'_, Message> {
-        if self.settings_window == Some(window) {
-            view_settings_window(self, window)
-        } else if self.properties_window == Some(window) {
-            let content = view_properties_window(
-                self.properties.as_ref(),
-                self.scrollbar_visibility_for(&ScrollbarRegion::Properties),
-                self.scrollbar_viewport_for(&ScrollbarRegion::Properties),
-            );
-            self.view_with_window_chrome(window, tr!("Properties"), content, None)
-        } else if self.transfer_window == Some(window) {
-            let content = crate::view::view_transfer_window(self);
-            self.view_with_window_chrome(window, tr!("Transfer"), content, None)
-        } else if self.preview_engine.preview_window == Some(window) {
-            let content = self.preview_window_content(
-                self.preview_engine.preview_window_bottom_controls.opacity(),
-            );
-            if self.preview_engine.preview_window_uses_window_chrome() {
-                self.view_with_window_chrome(
-                    window,
-                    tr!("Preview"),
-                    content,
-                    Some(self.preview_engine.preview_window_pinned),
-                )
-            } else {
-                let frame_state = self.window_frame_state(window);
-                let content = floating_preview_window_content(
-                    content,
-                    &self.user_config.window_controls,
-                    window,
-                    frame_state,
-                    self.preview_engine.preview_window_chrome.opacity(),
-                    self.preview_engine.preview_window_pinned,
+        match self.auxiliary_window(window) {
+            Some(AuxiliaryWindow::Settings) => view_settings_window(self, window),
+            Some(AuxiliaryWindow::Properties) => {
+                let content = view_properties_window(
+                    self.properties.as_ref(),
+                    self.scrollbar_visibility_for(&ScrollbarRegion::Properties),
+                    self.scrollbar_viewport_for(&ScrollbarRegion::Properties),
                 );
-                window_resize_frame(content, window, frame_state)
+                self.view_with_window_chrome(window, tr!("Properties"), content, None)
             }
-        } else if window == self.main_window {
-            startup_trace::mark_once("first_main_window_view");
-            if !self.tab().directory_collection_phase.is_discovering()
-                && self.tab().directory_order_phase.is_ready()
-            {
-                startup_trace::mark_once("first_browser_view_after_initial_load");
+            Some(AuxiliaryWindow::Transfer) => {
+                let content = crate::view::view_transfer_window(self);
+                self.view_with_window_chrome(window, tr!("Transfer"), content, None)
             }
-            view_browser(self)
-        } else {
-            iced::widget::container(bennu_preview::panel_text::readable_text(tr!(
+            Some(AuxiliaryWindow::Preview) => self.view_preview_window(window),
+            None => self.view_main_or_closing_window(window),
+        }
+    }
+
+    fn view_preview_window(&self, window: window::Id) -> Element<'_, Message> {
+        let content = self
+            .preview_window_content(self.preview_engine.preview_window_bottom_controls.opacity());
+        if self.preview_engine.preview_window_uses_window_chrome() {
+            return self.view_with_window_chrome(
+                window,
+                tr!("Preview"),
+                content,
+                Some(self.preview_engine.preview_window_pinned),
+            );
+        }
+        let frame_state = self.window_frame_state(window);
+        let content = floating_preview_window_content(
+            content,
+            &self.user_config.window_controls,
+            window,
+            frame_state,
+            self.preview_engine.preview_window_chrome.opacity(),
+            self.preview_engine.preview_window_pinned,
+        );
+        window_resize_frame(content, window, frame_state)
+    }
+
+    fn view_main_or_closing_window(&self, window: window::Id) -> Element<'_, Message> {
+        if window != self.main_window {
+            // 已登记关闭、但合成器还没销毁的窗口：渲染占位避免空白。
+            return iced::widget::container(bennu_preview::panel_text::readable_text(tr!(
                 "Closing window..."
             )))
             .width(iced::Length::Fill)
             .height(iced::Length::Fill)
-            .into()
+            .into();
         }
+        startup_trace::mark_once("first_main_window_view");
+        if !self.tab().directory_collection_phase.is_discovering()
+            && self.tab().directory_order_phase.is_ready()
+        {
+            startup_trace::mark_once("first_browser_view_after_initial_load");
+        }
+        view_browser(self)
     }
 }

@@ -52,21 +52,32 @@ fn status_line(
     state: &DirectSendState,
 ) -> Element<'static, Message> {
     match &state.phase {
-        DirectSendPhase::Checking => muted_setting_text(
-            tr!("Checking files %1%", browser.checking_percent(state)),
-            11,
-        ),
-        DirectSendPhase::Sending if state.total_files > 0 => muted_setting_text(
-            tr!(
-                "Sending %1/%2 · %3%",
-                // 协议层的序号从 0 开始。
-                state.file_index + 1,
-                state.total_files,
-                file_percent(state)
+        DirectSendPhase::Checking => with_cancel_button(
+            muted_setting_text(
+                tr!("Checking files %1%", browser.checking_percent(state)),
+                11,
             ),
-            11,
+            fingerprint,
         ),
-        DirectSendPhase::Sending => muted_setting_text(tr!("Sending..."), 11),
+        DirectSendPhase::Sending if state.total_files > 0 => with_cancel_button(
+            muted_setting_text(
+                tr!(
+                    "Sending %1/%2 · %3%",
+                    // 协议层的序号从 0 开始。
+                    state.file_index + 1,
+                    state.total_files,
+                    file_percent(state)
+                ),
+                11,
+            ),
+            fingerprint,
+        ),
+        // 还没报过进度：对方在决定要不要收。
+        DirectSendPhase::Sending => with_cancel_button(
+            muted_setting_text(tr!("Waiting for the device to accept..."), 11),
+            fingerprint,
+        ),
+        DirectSendPhase::Canceling => muted_setting_text(tr!("Canceling..."), 11),
         DirectSendPhase::NeedsPin { wrong: false, .. } => {
             readable_text(tr!("This device requires a PIN"))
                 .size(11)
@@ -104,6 +115,25 @@ fn status_line(
             format_middle_ellipsized_text(&tr!("Send failed: %1", error), STATUS_MAX_CHARS),
         ),
     }
+}
+
+/// 进行中的发送旁边的"取消"：与任务面板同一个动作。
+fn with_cancel_button(
+    status: Element<'static, Message>,
+    fingerprint: &str,
+) -> Element<'static, Message> {
+    row![
+        status,
+        button(readable_text(tr!("Cancel")).size(11))
+            .on_press(Message::Transfer(TransferMessage::DirectSendCancelPressed(
+                fingerprint.to_owned(),
+            )))
+            .padding([2, 8])
+            .style(context_menu_button_style()),
+    ]
+    .spacing(6)
+    .align_y(Alignment::Center)
+    .into()
 }
 
 fn with_details_button(
@@ -166,7 +196,7 @@ fn pin_prompt<'a>(fingerprint: &str, input: &'a str) -> Element<'a, Message> {
             .width(Length::Fill),
         action(
             tr!("Cancel"),
-            Some(Message::Transfer(TransferMessage::DirectSendPinCanceled(
+            Some(Message::Transfer(TransferMessage::DirectSendCancelPressed(
                 fingerprint.to_owned(),
             ))),
         ),

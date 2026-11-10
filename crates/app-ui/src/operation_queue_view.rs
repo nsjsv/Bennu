@@ -3,6 +3,7 @@ use iced::{Alignment, Element, Length};
 
 use crate::app::scrollbar::{enhanced_scrollbar, scrollbar_on_scroll, ScrollbarAxis};
 use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
+use crate::app::transfer::{TransferTask, TransferTasks};
 use crate::appearance::{
     context_menu_button_style, context_menu_style, enhanced_scrollbar_style,
     enhanced_vertical_scrollbar_direction, error_notification_style,
@@ -13,6 +14,7 @@ use crate::model::{Message, ScrollbarRegion, ScrollbarVisibility};
 use crate::operation_queue_display::{
     file_operation_progress_text, FileOperationPathLines, OperationPathLines,
 };
+use crate::view::transfer_task_row::transfer_task_row;
 use bennu_preview::operation_progress::{
     active_indeterminate_track_handle, static_indeterminate_track_handle,
 };
@@ -30,14 +32,15 @@ const TASK_PATH_MAX_CHARS: usize = 46;
 const TASK_ERROR_MAX_CHARS: usize = 120;
 const TASK_LIST_MAX_HEIGHT: f32 = 320.0;
 
-pub(crate) fn operation_queue_indicator(
-    queue: &FileOperationQueue,
+pub(crate) fn operation_queue_indicator<'a>(
+    queue: &'a FileOperationQueue,
+    transfers: &TransferTasks,
     animation_frame: u8,
-) -> Option<Element<'_, Message>> {
+) -> Option<Element<'a, Message>> {
     let svg = Svg::new(svg::Handle::from_memory(
         indicator_svg(
-            queue_indicator_ring(queue, animation_frame),
-            queue_indicator_badge(queue),
+            queue_indicator_ring(queue, transfers, animation_frame),
+            queue_indicator_badge(queue, transfers),
         )
         .into_bytes(),
     ))
@@ -53,29 +56,49 @@ pub(crate) fn operation_queue_indicator(
     )
 }
 
-pub(crate) fn operation_queue_panel(
-    queue: &FileOperationQueue,
+/// 面板里的一行：文件任务，或 LocalSend 收发（两边各记各的，按开始时间混排）。
+enum PanelRow<'a> {
+    File(&'a FileOperationTask),
+    Transfer(&'a TransferTask),
+}
+
+impl PanelRow<'_> {
+    fn started_at(&self) -> std::time::SystemTime {
+        match self {
+            Self::File(task) => task.enqueued_at,
+            Self::Transfer(task) => task.started_at,
+        }
+    }
+}
+
+pub(crate) fn operation_queue_panel<'a>(
+    queue: &'a FileOperationQueue,
+    transfers: &'a TransferTasks,
     scrollbar_visibility: ScrollbarVisibility,
     scrollbar_viewport: Option<crate::model::ScrollbarViewport>,
     animation_frame: u8,
-) -> Element<'_, Message> {
+) -> Element<'a, Message> {
     let mut header = row![readable_text(tr!("Tasks")).size(16).width(Length::Fill)]
         .spacing(8)
         .align_y(Alignment::Center);
-    if queue.has_terminal_tasks() {
+    if queue.has_terminal_tasks() || transfers.has_terminal() {
         header = header.push(task_control_button(
             tr!("Clear Finished"),
             Message::FileOperationClearFinishedRequested,
         ));
     }
-    let header = header.push(readable_text(tr!("%1 tasks", queue.task_count())).size(12));
+    let rows = panel_rows(queue, transfers);
+    let header = header.push(readable_text(tr!("%1 tasks", rows.len())).size(12));
 
     let mut tasks = column![].spacing(6);
-    if queue.tasks().is_empty() {
+    if rows.is_empty() {
         tasks = tasks.push(empty_queue_row());
     } else {
-        for task in operation_queue_display_tasks(queue) {
-            tasks = tasks.push(operation_task_row(task, animation_frame));
+        for row in rows {
+            tasks = tasks.push(match row {
+                PanelRow::File(task) => operation_task_row(task, animation_frame),
+                PanelRow::Transfer(task) => transfer_task_row(transfers, task, animation_frame),
+            });
         }
     }
 
@@ -113,6 +136,19 @@ fn operation_queue_display_tasks(
     queue: &FileOperationQueue,
 ) -> impl Iterator<Item = &FileOperationTask> {
     queue.tasks().iter().rev()
+}
+
+/// 最新的在上面；同一时刻开始的保持各自原来的先后。
+fn panel_rows<'a>(
+    queue: &'a FileOperationQueue,
+    transfers: &'a TransferTasks,
+) -> Vec<PanelRow<'a>> {
+    let mut rows: Vec<PanelRow<'a>> = operation_queue_display_tasks(queue)
+        .map(PanelRow::File)
+        .chain(transfers.panel_tasks().rev().map(PanelRow::Transfer))
+        .collect();
+    rows.sort_by_key(|row| std::cmp::Reverse(row.started_at()));
+    rows
 }
 
 fn operation_task_row(task: &FileOperationTask, animation_frame: u8) -> Element<'_, Message> {
@@ -294,7 +330,11 @@ enum QueueIndicatorBadge {
     Paused,
 }
 
-fn queue_indicator_ring(queue: &FileOperationQueue, animation_frame: u8) -> QueueIndicatorRing {
+fn queue_indicator_ring(
+    queue: &FileOperationQueue,
+    transfers: &TransferTasks,
+    animation_frame: u8,
+) -> QueueIndicatorRing {
     if let Some(fraction) = queue.indicator_progress() {
         return QueueIndicatorRing::Determinate {
             fraction,
@@ -306,18 +346,32 @@ fn queue_indicator_ring(queue: &FileOperationQueue, animation_frame: u8) -> Queu
         };
     }
     if queue.is_active_paused() {
-        QueueIndicatorRing::PausedIndeterminate
-    } else if queue.has_active_task() {
+        return QueueIndicatorRing::PausedIndeterminate;
+    }
+    // 文件任务没有确定进度时，进度环跟着 LocalSend 收发走。
+    if !queue.has_active_task() {
+        if let Some(fraction) = transfers.active_fraction() {
+            return QueueIndicatorRing::Determinate {
+                fraction,
+                tone: QueueIndicatorTone::Active,
+            };
+        }
+    }
+    if queue.has_active_task() || transfers.has_active() {
         QueueIndicatorRing::ActiveIndeterminate { animation_frame }
     } else {
         QueueIndicatorRing::Hidden
     }
 }
 
-fn queue_indicator_badge(queue: &FileOperationQueue) -> QueueIndicatorBadge {
-    if queue.unread_count() > 1 {
-        QueueIndicatorBadge::Count(queue.unread_count().min(99))
-    } else if queue.has_unread_failed_task() {
+fn queue_indicator_badge(
+    queue: &FileOperationQueue,
+    transfers: &TransferTasks,
+) -> QueueIndicatorBadge {
+    let unread = queue.unread_count() + transfers.unread_count();
+    if unread > 1 {
+        QueueIndicatorBadge::Count(unread.min(99))
+    } else if queue.has_unread_failed_task() || transfers.has_unread_failed() {
         QueueIndicatorBadge::Error
     } else if queue.has_unread_warning_task() {
         QueueIndicatorBadge::Warning
@@ -435,6 +489,42 @@ mod tests {
 
         assert_eq!(displayed_ids, vec![second_id, first_id]);
         assert_eq!(queue.active_subscription().unwrap().id, first_id);
+    }
+
+    #[test]
+    fn localsend_rows_mix_with_file_tasks_newest_first() {
+        let (mut browser, _) = crate::app::FileBrowser::new(crate::config::default_user_config());
+        let older = crate::app::transfer::tests::start_sending(&mut browser, "phone");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let file = queued_task_id(browser.operation_queue.enqueue(
+            file_operations::QueuedFileOperation::CreateDirectory {
+                parent: std::path::PathBuf::from("/first"),
+            },
+        ));
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let newer = crate::app::transfer::tests::start_sending(&mut browser, "tablet");
+
+        let order: Vec<String> = panel_rows(&browser.operation_queue, &browser.transfer_tasks)
+            .into_iter()
+            .map(|row| match row {
+                PanelRow::File(task) => format!("file {}", task.id),
+                PanelRow::Transfer(task) => format!("transfer {}", task.id),
+            })
+            .collect();
+
+        assert_eq!(
+            order,
+            [
+                format!("transfer {newer}"),
+                format!("file {file}"),
+                format!("transfer {older}")
+            ]
+        );
+        // 未读角标把两边加起来。
+        assert_eq!(
+            queue_indicator_badge(&browser.operation_queue, &browser.transfer_tasks),
+            QueueIndicatorBadge::Count(3)
+        );
     }
 
     #[test]

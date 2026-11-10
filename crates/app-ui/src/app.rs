@@ -257,8 +257,8 @@ pub(crate) struct FileBrowser {
     properties_load_generation: u64,
     /// 发送到手机辅助窗口（bennu-transfer）。
     pub(crate) transfer_window: Option<window::Id>,
-    /// 每台设备（证书指纹）最近一次 LocalSend 直推；两个传输窗口的设备行共用。
-    pub(crate) direct_sends: transfer::DirectSends,
+    /// LocalSend 收发任务（进任务面板）；设备行显示每台设备最新的那次发送。
+    pub(crate) transfer_tasks: transfer::TransferTasks,
     /// 两个传输窗口各自勾选的设备；关哪个窗口清哪份。
     pub(crate) checked_devices: transfer::CheckedDevices,
     /// LocalSend 窗口（bennu-localsend）与它的待发列表、"按 IP 添加"表单；关窗即清空。
@@ -656,7 +656,7 @@ impl FileBrowser {
             properties: None,
             properties_load_generation: 0,
             transfer_window: None,
-            direct_sends: transfer::DirectSends::default(),
+            transfer_tasks: transfer::TransferTasks::default(),
             checked_devices: transfer::CheckedDevices::default(),
             local_send_window: None,
             local_send_staged: Vec::new(),
@@ -912,6 +912,7 @@ impl FileBrowser {
             Some(PreviewState::DownloadingRemoteFile(download)) if download.fraction().is_none()
         );
         if self.operation_queue.has_active_indeterminate_progress()
+            || self.transfer_tasks.has_indeterminate()
             || remote_preview_progress_is_indeterminate
         {
             subscriptions.push(

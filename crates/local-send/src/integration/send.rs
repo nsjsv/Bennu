@@ -82,7 +82,13 @@ async fn send_to(
         ..remote_device("FAKE", "Fake")
     };
     let report = sender
-        .send(&target, &files, None, tokio::sync::mpsc::channel(4).0)
+        .send(
+            &target,
+            &files,
+            None,
+            tokio::sync::mpsc::channel(4).0,
+            &crate::CancellationToken::new(),
+        )
         .await;
     (report, source)
 }
@@ -153,6 +159,7 @@ async fn one_file_failing_mid_send_does_not_stop_the_others() {
             &files,
             None,
             tokio::sync::mpsc::channel(4).0,
+            &crate::CancellationToken::new(),
         )
         .await
         .unwrap();
@@ -196,7 +203,13 @@ async fn a_folder_is_sent_file_by_file_and_arrives_with_its_structure() {
     let files = prepared(vec![source.path().join("one.txt"), dir]).await;
 
     let report = sender
-        .send(&server.target(), &files, None, progress_tx)
+        .send(
+            &server.target(),
+            &files,
+            None,
+            progress_tx,
+            &crate::CancellationToken::new(),
+        )
         .await
         .unwrap();
 
@@ -239,14 +252,28 @@ async fn only_empty_folders_are_nothing_to_send_and_unreadable_files_never_reach
 
     let empty = prepared(vec![source.path().join("empty")]).await;
     assert!(matches!(
-        sender.send(&target, &empty, None, progress.clone()).await,
+        sender
+            .send(
+                &target,
+                &empty,
+                None,
+                progress.clone(),
+                &crate::CancellationToken::new()
+            )
+            .await,
         Err(LocalSendError::NothingToSend)
     ));
 
     // 都读不了：不连对方（这台设备连地址都没有），直接报告全失败。
     let missing = prepared(vec![source.path().join("missing.txt")]).await;
     let report = sender
-        .send(&target, &missing, None, progress)
+        .send(
+            &target,
+            &missing,
+            None,
+            progress,
+            &crate::CancellationToken::new(),
+        )
         .await
         .unwrap();
     assert_eq!(report.sent, 0);
@@ -262,7 +289,13 @@ async fn send_to_device_requires_discovered_address() {
     let (sender, _) = crate::send::sender_with_new_identity(source.path());
     let (progress, _) = tokio::sync::mpsc::channel(1);
     let result = sender
-        .send(&target, &prepared(vec![file]).await, None, progress)
+        .send(
+            &target,
+            &prepared(vec![file]).await,
+            None,
+            progress,
+            &crate::CancellationToken::new(),
+        )
         .await;
     assert!(matches!(result, Err(LocalSendError::AddressUnknown)));
 }

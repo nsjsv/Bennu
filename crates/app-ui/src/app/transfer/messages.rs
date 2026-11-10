@@ -27,12 +27,7 @@ impl FileBrowser {
         device: DeviceInfo,
         text: String,
     ) -> Task<Message> {
-        let alias = self
-            .user_config
-            .transfer_favorite_devices
-            .iter()
-            .find(|favorite| device.is_certified() && favorite.fingerprint == device.fingerprint)
-            .map_or(device.alias, |favorite| favorite.alias.clone());
+        let alias = self.transfer_device_name(&device);
         // 已经在显示别的消息：排在后面，主窗口状态已经清过了。
         let modal = if self.incoming_messages.is_empty() {
             self.prepare_transfer_modal()

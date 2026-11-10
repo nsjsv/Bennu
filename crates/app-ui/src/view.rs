@@ -40,6 +40,7 @@ mod toolbar_controls;
 mod transfer_conflict;
 pub(crate) mod transfer_qr;
 mod transfer_settings;
+pub(crate) mod transfer_task_row;
 pub(crate) mod transfer_window;
 mod trash_warning;
 mod window_chrome;
@@ -507,6 +508,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
         floating.push(FloatingContent {
             element: operation_queue_panel(
                 &browser.operation_queue,
+                &browser.transfer_tasks,
                 browser.scrollbar_visibility_for(&ScrollbarRegion::OperationQueue),
                 browser.scrollbar_viewport_for(&ScrollbarRegion::OperationQueue),
                 browser.operation_progress_animation_frame,
@@ -521,6 +523,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
 
     if let Some(indicator) = operation_queue_indicator(
         &browser.operation_queue,
+        &browser.transfer_tasks,
         browser.operation_progress_animation_frame,
     ) {
         floating.push(FloatingContent {

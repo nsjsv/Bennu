@@ -23,6 +23,7 @@ use axum::{Json, Router};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{broadcast, oneshot, watch, Mutex};
+use tokio_util::sync::CancellationToken;
 
 use crate::device::{DeviceInfo, FileMetadata, PrepareUploadRequest, PrepareUploadResponse};
 use crate::{AcceptPolicy, Favorite, ReceiverConfig, ServiceEvent};
@@ -71,6 +72,8 @@ struct Session {
     files: HashMap<String, FileSlot>,
     /// 这次发送里每个顶层文件夹实际落到的目录（同名的已改名）。
     folders: HashMap<String, PathBuf>,
+    /// 会话被结束（对方取消或本机取消）时触发：正在写的上传立刻停下。
+    ended: CancellationToken,
     finished_emitted: bool,
 }
 
@@ -265,27 +268,27 @@ async fn prepare_upload(
     let session_id = random_id();
     if state.accepts_without_asking(&request.info.fingerprint) {
         let response = accept_session(&state, &session_id, &request.info, &request.files).await;
-        let _ = state.events.send(ServiceEvent::RequestAccepted {
-            session_id: session_id.clone(),
-        });
         return (StatusCode::CREATED, Json(Some(response)));
     }
 
     // 要确认：挂起等 UI 确认，超时回 403（协议语义：403 = 拒绝）。
     let (tx, rx) = oneshot::channel();
     state.pending.lock().await.insert(session_id.clone(), tx);
+    // 对方在等确认时撤回（断开连接）：这个处理函数会被直接丢掉，靠守卫收起确认。
+    let withdrawn = WithdrawnGuard {
+        state: Arc::clone(&state),
+        session_id: Some(session_id.clone()),
+    };
     let _ = state.events.send(ServiceEvent::IncomingRequest {
         device: request.info.clone(),
         session_id: session_id.clone(),
         files: request.files.values().cloned().collect(),
     });
     let accepted = tokio::time::timeout(state.confirm_timeout, rx).await;
+    withdrawn.disarm();
     match accepted {
         Ok(Ok(true)) => {
             let response = accept_session(&state, &session_id, &request.info, &request.files).await;
-            let _ = state
-                .events
-                .send(ServiceEvent::RequestAccepted { session_id });
             (StatusCode::CREATED, Json(Some(response)))
         }
         Ok(Ok(false)) | Ok(Err(_)) => {
@@ -311,7 +314,38 @@ async fn prepare_upload(
     }
 }
 
-/// 创建会话并为每个 fileId 生成上传令牌（信任放行的唯一路径）。
+/// 等确认时对方撤回请求（连接断开，处理函数被丢掉）：去掉挂起的确认、发
+/// `RequestRejected`，界面据此收起确认弹窗，不用等 30 秒超时。
+struct WithdrawnGuard {
+    state: Arc<ReceiveState>,
+    /// None = 已经等到了结果，没撤回。
+    session_id: Option<String>,
+}
+
+impl WithdrawnGuard {
+    fn disarm(mut self) {
+        self.session_id = None;
+    }
+}
+
+impl Drop for WithdrawnGuard {
+    fn drop(&mut self) {
+        let Some(session_id) = self.session_id.take() else {
+            return;
+        };
+        let state = Arc::clone(&self.state);
+        tokio::spawn(async move {
+            if state.pending.lock().await.remove(&session_id).is_some() {
+                let _ = state
+                    .events
+                    .send(ServiceEvent::RequestRejected { session_id });
+            }
+        });
+    }
+}
+
+/// 创建会话并为每个 fileId 生成上传令牌（放行的唯一路径），告诉界面谁发来了什么：
+/// 自动收下的会话界面没见过确认弹窗，也要能显示进度。
 async fn accept_session(
     state: &Arc<ReceiveState>,
     session_id: &str,
@@ -341,9 +375,15 @@ async fn accept_session(
             sender: sender.fingerprint.clone(),
             files: slots,
             folders: HashMap::new(),
+            ended: CancellationToken::new(),
             finished_emitted: false,
         },
     );
+    let _ = state.events.send(ServiceEvent::RequestAccepted {
+        session_id: session_id.to_owned(),
+        device: sender.clone(),
+        files: files.values().cloned().collect(),
+    });
     PrepareUploadResponse {
         session_id: session_id.to_string(),
         files: tokens,
@@ -365,7 +405,7 @@ async fn upload(
     Query(query): Query<UploadQuery>,
     body: Body,
 ) -> impl IntoResponse {
-    let (meta, attempts) = {
+    let (meta, attempts, ended) = {
         let mut sessions = state.sessions.lock().await;
         // 别的证书拿着令牌也不行；与未知会话同一回应，不告诉探测者会话存在。
         let Some(session) = sessions
@@ -383,7 +423,7 @@ async fn upload(
         match slot.outcome {
             SlotOutcome::Pending => {
                 slot.attempts = slot.attempts.saturating_add(1);
-                (slot.meta.clone(), slot.attempts)
+                (slot.meta.clone(), slot.attempts, session.ended.clone())
             }
             // 重复上传同一 fileId：令牌有效但槽位已终态，拒绝重放。
             _ => return (StatusCode::CONFLICT, "file already finalized".to_string()),
@@ -450,7 +490,7 @@ async fn upload(
         }
     };
 
-    match stream_to_file(&state, &query, body, &dest, &meta, attempts).await {
+    match stream_to_file(&state, &query, body, &dest, &meta, attempts, &ended).await {
         Ok(()) => (StatusCode::OK, "ok".to_string()),
         Err(error) => (error.0, error.1),
     }
@@ -466,6 +506,7 @@ async fn stream_to_file(
     dest: &PathBuf,
     meta: &FileMetadata,
     attempts: u8,
+    ended: &CancellationToken,
 ) -> Result<(), UploadFailure> {
     // truncate：dest 由 unique_destination 占位/上次中断重传时，从头重写。
     let mut file = tokio::fs::OpenOptions::new()
@@ -485,7 +526,15 @@ async fn stream_to_file(
     // futures-util StreamExt：axum 的 BodyDataStream 走 futures Stream 接口。
     use futures_util::StreamExt;
     let mut body = body.into_data_stream();
-    while let Some(chunk) = body.next().await {
+    loop {
+        // 会话被结束：半成品由 `end_session` 删掉，这里只停下。
+        let chunk = tokio::select! {
+            chunk = body.next() => chunk,
+            () = ended.cancelled() => return Err(session_ended()),
+        };
+        let Some(chunk) = chunk else {
+            break;
+        };
         let chunk = chunk.map_err(|error| {
             (
                 StatusCode::BAD_REQUEST,
@@ -509,7 +558,7 @@ async fn stream_to_file(
         received += chunk.len() as u64;
         if received - last_emitted >= PROGRESS_STEP {
             last_emitted = received;
-            emit_progress(state, query, &meta.file_name, received, meta.size);
+            emit_progress(state, query, received);
         }
     }
     // 写入经 tokio 的后台缓冲，磁盘错误可能到这里才冒出来；没落盘就不能报接收成功。
@@ -561,32 +610,31 @@ async fn stream_to_file(
     }
 
     {
+        // 收完之前会话被结束了：文件已被当成半成品删掉，不能报成功。
         let mut sessions = state.sessions.lock().await;
-        if let Some(slot) = sessions
+        let Some(slot) = sessions
             .get_mut(&query.session_id)
             .and_then(|s| s.files.get_mut(&query.file_id))
-        {
-            slot.outcome = SlotOutcome::Done;
-            slot.received = received;
-        }
+        else {
+            return Err(session_ended());
+        };
+        slot.outcome = SlotOutcome::Done;
+        slot.received = received;
     }
-    emit_progress(state, query, &meta.file_name, received, meta.size);
+    emit_progress(state, query, received);
     finish_if_complete(state, &query.session_id).await;
     Ok(())
 }
 
-fn emit_progress(
-    state: &Arc<ReceiveState>,
-    query: &UploadQuery,
-    file_name: &str,
-    received: u64,
-    total: u64,
-) {
+fn session_ended() -> UploadFailure {
+    (StatusCode::CONFLICT, "the session has ended".to_string())
+}
+
+fn emit_progress(state: &Arc<ReceiveState>, query: &UploadQuery, received: u64) {
     let _ = state.events.send(ServiceEvent::ReceiveProgress {
         session_id: query.session_id.clone(),
-        file_name: file_name.to_string(),
+        file_id: query.file_id.clone(),
         received,
-        total,
     });
 }
 
@@ -674,59 +722,63 @@ async fn finish_if_complete(state: &Arc<ReceiveState>, session_id: &str) {
     });
 }
 
+/// 对方取消：只有发起这次会话的那张证书能取消。
 async fn cancel(
     State(state): State<Arc<ReceiveState>>,
     ConnectInfo(peer): ConnectInfo<Peer>,
     Query(query): Query<CancelQuery>,
 ) -> impl IntoResponse {
-    let mut snapshot: Vec<(String, Option<PathBuf>, SlotOutcome)> = Vec::new();
-    {
-        let mut sessions = state.sessions.lock().await;
-        let Some(session) = sessions
-            .get_mut(&query.session_id)
-            .filter(|session| session.sender == peer.fingerprint)
-        else {
-            return StatusCode::FORBIDDEN;
-        };
-        for slot in session.files.values_mut() {
-            if slot.outcome == SlotOutcome::Pending {
-                // 发送方取消：未完成槽位标记失败并删除半成品。
-                slot.outcome = SlotOutcome::Failed("canceled by sender");
-            }
-            snapshot.push((
-                slot.meta.file_name.clone(),
-                slot.dest.clone(),
-                slot.outcome.clone(),
-            ));
-        }
-        session.finished_emitted = true;
+    let owned = state
+        .sessions
+        .lock()
+        .await
+        .get(&query.session_id)
+        .is_some_and(|session| session.sender == peer.fingerprint);
+    if !owned {
+        return StatusCode::FORBIDDEN;
     }
-    let mut saved_paths = Vec::new();
-    let mut failed = Vec::new();
-    for (file_name, dest, outcome) in snapshot {
-        match outcome {
-            SlotOutcome::Done => {
-                if let Some(dest) = dest {
-                    saved_paths.push(dest);
-                }
-            }
-            SlotOutcome::Failed(reason) => {
-                // cancel 的清理语义：未完成的落盘文件是半成品，必须删除。
-                if let Some(dest) = dest {
-                    let _ = tokio::fs::remove_file(&dest).await;
-                }
-                failed.push((file_name, reason.to_string()));
-            }
-            SlotOutcome::Pending => unreachable!("上面已全部置为终态"),
-        }
-    }
-    state.sessions.lock().await.remove(&query.session_id);
-    let _ = state.events.send(ServiceEvent::ReceiveFinished {
-        session_id: query.session_id.clone(),
-        saved_paths,
-        failed,
-    });
+    state
+        .end_session(&query.session_id, "canceled by sender")
+        .await;
     StatusCode::OK
+}
+
+impl ReceiveState {
+    /// 结束一次会话（对方取消、本机取消共用）：正在写的上传停下，没收完的标失败并删掉
+    /// 半成品，收完的留着；发 `ReceiveFinished`。会话不在了返回 false。
+    pub(crate) async fn end_session(&self, session_id: &str, reason: &'static str) -> bool {
+        let Some(session) = self.sessions.lock().await.remove(session_id) else {
+            return false;
+        };
+        session.ended.cancel();
+        // 已经在收尾（`finish_if_complete` 正在报结果）：不重复报。
+        if session.finished_emitted {
+            return true;
+        }
+        let mut saved_paths = Vec::new();
+        let mut failed = Vec::new();
+        for slot in session.files.into_values() {
+            match (slot.outcome, slot.dest) {
+                (SlotOutcome::Done, Some(dest)) => saved_paths.push(dest),
+                (outcome, dest) => {
+                    if let Some(dest) = dest {
+                        let _ = tokio::fs::remove_file(&dest).await;
+                    }
+                    let reason = match outcome {
+                        SlotOutcome::Failed(earlier) => earlier,
+                        _ => reason,
+                    };
+                    failed.push((slot.meta.file_name, reason.to_string()));
+                }
+            }
+        }
+        let _ = self.events.send(ServiceEvent::ReceiveFinished {
+            session_id: session_id.to_string(),
+            saved_paths,
+            failed,
+        });
+        true
+    }
 }
 
 #[derive(serde::Deserialize)]

@@ -120,11 +120,23 @@ async fn the_sender_delivers_a_message_and_handles_pins_like_files() {
     let (sender, fingerprint) = crate::send::sender_with_new_identity(identity.path());
 
     assert!(matches!(
-        sender.send_text(&server.target(), "hi", None).await,
+        sender
+            .send_text(
+                &server.target(),
+                "hi",
+                None,
+                &crate::CancellationToken::new()
+            )
+            .await,
         Err(LocalSendError::PinRequired)
     ));
     sender
-        .send_text(&server.target(), "第一行\n第二行", Some("4821"))
+        .send_text(
+            &server.target(),
+            "第一行\n第二行",
+            Some("4821"),
+            &crate::CancellationToken::new(),
+        )
         .await
         .unwrap();
 
@@ -171,7 +183,10 @@ async fn a_receiver_that_wants_the_message_as_a_file_gets_its_content() {
         ..remote_device("FAKE", "Fake")
     };
 
-    sender.send_text(&target, "hello", None).await.unwrap();
+    sender
+        .send_text(&target, "hello", None, &crate::CancellationToken::new())
+        .await
+        .unwrap();
 
     assert_eq!(*received.lock(), [b"hello".to_vec()]);
 }

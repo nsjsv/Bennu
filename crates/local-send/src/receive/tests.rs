@@ -56,6 +56,7 @@ fn receive_state(
             sender: SENDER.into(),
             files: HashMap::from([(FILE.to_owned(), slot)]),
             folders: HashMap::new(),
+            ended: CancellationToken::new(),
             finished_emitted: false,
         },
     );

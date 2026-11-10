@@ -43,12 +43,13 @@ pub(crate) enum TransferMessage {
     QrEvent(QrEvent),
     // ---- 发送：LocalSend 直推（R5） ----
     SendToDevicePressed(DeviceInfo),
+    /// 某次发送（任务 id）的进度与结果。
     DirectSendProgress {
-        fingerprint: String,
+        task: u64,
         progress: SendProgress,
     },
     DirectSendFinished {
-        fingerprint: String,
+        task: u64,
         alias: String,
         outcome: DirectSendOutcome,
     },
@@ -57,9 +58,10 @@ pub(crate) enum TransferMessage {
         batch: u64,
         progress: local_send::PrepareProgress,
     },
+    /// None = 准备被取消了。
     BatchPrepared {
         batch: u64,
-        files: std::sync::Arc<local_send::PreparedFiles>,
+        files: Option<std::sync::Arc<local_send::PreparedFiles>>,
     },
     DirectSendDetailsToggled(String),
     DeviceChecked {
@@ -75,7 +77,11 @@ pub(crate) enum TransferMessage {
         value: String,
     },
     DirectSendPinSubmitted(String),
-    DirectSendPinCanceled(String),
+    /// 设备行的"取消"（含 PIN 输入框旁的）：取消这台设备最新的那次发送。
+    DirectSendCancelPressed(String),
+    /// 任务面板里 LocalSend 行的"取消"、"清除"（任务 id）。
+    TaskCancelRequested(u64),
+    TaskClearRequested(u64),
     // ---- 接收确认（R7） ----
     IncomingAddToFavoritesToggled(bool),
     IncomingConfirmed {
@@ -305,19 +311,16 @@ impl FileBrowser {
                 let paths = session.paths.clone();
                 self.begin_direct_sends(vec![device], Outgoing::Files(paths))
             }
-            TransferMessage::DirectSendProgress {
-                fingerprint,
-                progress,
-            } => {
-                self.accept_direct_send_progress(&fingerprint, progress);
+            TransferMessage::DirectSendProgress { task, progress } => {
+                self.accept_direct_send_progress(task, progress);
                 iced::Task::none()
             }
             TransferMessage::DirectSendFinished {
-                fingerprint,
+                task,
                 alias,
                 outcome,
             } => {
-                self.accept_direct_send_finished(&fingerprint, &alias, outcome);
+                self.accept_direct_send_finished(task, &alias, outcome);
                 iced::Task::none()
             }
             TransferMessage::BatchProgress { batch, progress } => {
@@ -351,8 +354,16 @@ impl FileBrowser {
             TransferMessage::DirectSendPinSubmitted(fingerprint) => {
                 self.submit_direct_send_pin(&fingerprint)
             }
-            TransferMessage::DirectSendPinCanceled(fingerprint) => {
-                self.cancel_direct_send_pin(&fingerprint);
+            TransferMessage::DirectSendCancelPressed(fingerprint) => {
+                self.cancel_latest_send(&fingerprint);
+                iced::Task::none()
+            }
+            TransferMessage::TaskCancelRequested(task) => {
+                self.cancel_transfer_task(task);
+                iced::Task::none()
+            }
+            TransferMessage::TaskClearRequested(task) => {
+                self.transfer_tasks.clear(task);
                 iced::Task::none()
             }
             TransferMessage::IncomingAddToFavoritesToggled(add) => {
@@ -547,17 +558,25 @@ impl FileBrowser {
                 session_id,
                 files,
             } => return self.begin_incoming_transfer_confirmation(device, session_id, files),
-            ServiceEvent::RequestAccepted { .. } | ServiceEvent::RequestRejected { .. } => {
-                // 确认动作由本 UI 发起，回执无需呈现。
+            ServiceEvent::RequestAccepted {
+                session_id,
+                device,
+                files,
+            } => self.accept_receive_started(session_id, &device, files),
+            ServiceEvent::RequestRejected { session_id } => {
+                return self.accept_request_withdrawn(&session_id);
             }
-            ServiceEvent::ReceiveProgress { .. } => {
-                // 第一期接收进度不进 UI（R8 以完成通知为准）。
-            }
+            ServiceEvent::ReceiveProgress {
+                session_id,
+                file_id,
+                received,
+            } => self.accept_receive_progress(&session_id, file_id, received),
             ServiceEvent::ReceiveFinished {
+                session_id,
                 saved_paths,
                 failed,
-                ..
             } => {
+                self.accept_receive_finished(&session_id, saved_paths.len(), failed.clone());
                 return self.notify_transfer_receive_finished(saved_paths, failed);
             }
             ServiceEvent::MessageReceived { device, text } => {
@@ -713,11 +732,13 @@ mod favorites;
 mod incoming;
 mod local_send_window;
 mod messages;
+mod receive_tasks;
 mod settings;
+mod tasks;
 
 pub(crate) use device_checks::{CheckedDevices, DeviceListOwner};
 pub(crate) use direct_send::{
-    DirectSendFailure, DirectSendOutcome, DirectSendPhase, DirectSendState, DirectSends, Outgoing,
+    DirectSendFailure, DirectSendOutcome, DirectSendPhase, DirectSendState, Outgoing,
 };
 pub(crate) use favorites::{
     service_favorites, AddressFormMessage, FavoriteAddressForm, FavoriteRow,
@@ -725,6 +746,7 @@ pub(crate) use favorites::{
 pub(crate) use incoming::{incoming_entries, IncomingEntry};
 pub(crate) use local_send_window::{ChooserTarget, StagedItem, StagedSize, StagedTab};
 pub(crate) use messages::{message_link, IncomingMessage};
+pub(crate) use tasks::{ReceivePhase, ReceiveTask, TransferKind, TransferTask, TransferTasks};
 
 pub(crate) use settings::receiver_failure_message;
 

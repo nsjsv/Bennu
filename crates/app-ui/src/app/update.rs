@@ -181,7 +181,9 @@ impl FileBrowser {
                 if self.operation_queue.is_panel_open() {
                     self.operation_queue.close_panel();
                 } else {
+                    // 打开面板 = 都看过了，LocalSend 收发也一样。
                     self.operation_queue.open_panel();
+                    self.transfer_tasks.mark_all_read();
                 }
                 Task::none()
             }
@@ -210,6 +212,7 @@ impl FileBrowser {
             }
             Message::FileOperationClearFinishedRequested => {
                 self.operation_queue.clear_terminal_tasks();
+                self.transfer_tasks.clear_finished();
                 self.continue_file_operation_persistence()
             }
             Message::ThumbnailBatchLoaded(outcomes) => self.accept_thumbnail_batch(outcomes),

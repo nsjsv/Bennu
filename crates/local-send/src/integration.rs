@@ -15,6 +15,7 @@ use crate::identity::DeviceIdentity;
 use crate::receive::{port_already_released, spawn_server, PortReleased, ReceiveState};
 use crate::{AcceptPolicy, Favorite, ReceiverConfig, ServiceEvent};
 
+mod cancel;
 mod find_device;
 mod mtls;
 mod pin;
@@ -728,5 +729,11 @@ fn sha256_hex(data: &[u8]) -> String {
 // —— A4：send 端到端 ——
 
 pub(crate) async fn prepared(items: Vec<std::path::PathBuf>) -> crate::PreparedFiles {
-    crate::prepare_files(items, tokio::sync::mpsc::channel(1).0).await
+    crate::prepare_files(
+        items,
+        tokio::sync::mpsc::channel(1).0,
+        crate::CancellationToken::new(),
+    )
+    .await
+    .unwrap()
 }

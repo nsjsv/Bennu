@@ -159,6 +159,7 @@ async fn send_one_file(
             &super::prepared(vec![file]).await,
             pin,
             progress,
+            &crate::CancellationToken::new(),
         )
         .await;
     (result, source)

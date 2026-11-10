@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 /// 准备好的一批文件。读不了的不会让整批失败，记在 `unreadable` 里随结果报给用户。
 #[derive(Debug)]
@@ -56,14 +57,18 @@ pub struct PrepareProgress {
 const HASH_BUFFER: usize = 1024 * 1024;
 
 /// 展开并算校验；进度通道满时丢进度，不拖慢计算。
+/// 取消了（每个条目、每读 1 MiB 查一次）返回 None。
 pub async fn prepare_files(
     items: Vec<PathBuf>,
     progress: mpsc::Sender<PrepareProgress>,
-) -> PreparedFiles {
-    tokio::task::spawn_blocking(move || prepare_blocking(items, &progress))
+    cancel: CancellationToken,
+) -> Option<PreparedFiles> {
+    tokio::task::spawn_blocking(move || prepare_blocking(items, &progress, &cancel))
         .await
         .unwrap_or_else(|error| {
-            PreparedFiles::unreadable(format!("preparing the files failed: {error}"))
+            Some(PreparedFiles::unreadable(format!(
+                "preparing the files failed: {error}"
+            )))
         })
 }
 
@@ -77,10 +82,14 @@ struct FoundFile {
 fn prepare_blocking(
     items: Vec<PathBuf>,
     progress: &mpsc::Sender<PrepareProgress>,
-) -> PreparedFiles {
+    cancel: &CancellationToken,
+) -> Option<PreparedFiles> {
     let mut found = Vec::new();
     let mut unreadable = Vec::new();
     for item in items {
+        if cancel.is_cancelled() {
+            return None;
+        }
         let Some(name) = item
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
@@ -123,7 +132,11 @@ fn prepare_blocking(
                 bytes_done: bytes_done.min(bytes_total),
                 bytes_total,
             });
+            !cancel.is_cancelled()
         });
+        if cancel.is_cancelled() {
+            return None;
+        }
         // 文件在枚举后变了大小：进度按枚举时的大小走完，不倒退也不超出。
         bytes_done = before + file.size;
         match hashed {
@@ -143,7 +156,7 @@ fn prepare_blocking(
         bytes_done: bytes_total,
         bytes_total,
     });
-    PreparedFiles { files, unreadable }
+    Some(PreparedFiles { files, unreadable })
 }
 
 /// 文件夹里按名字顺序深度优先。指向文件的链接发内容；指向文件夹的链接不进（免得
@@ -197,7 +210,8 @@ fn collect_directory(
 }
 
 /// 流式算 sha256（小写 hex，同官方），返回 (校验和, 读到的字节数)。
-fn hash_file(path: &Path, mut on_read: impl FnMut(u64)) -> std::io::Result<(String, u64)> {
+/// `on_read` 返回 false = 不算了（取消），返回 Interrupted。
+fn hash_file(path: &Path, mut on_read: impl FnMut(u64) -> bool) -> std::io::Result<(String, u64)> {
     let mut file = std::fs::File::open(path)?;
     let mut hasher = Sha256::new();
     let mut buffer = vec![0u8; HASH_BUFFER];
@@ -209,7 +223,9 @@ fn hash_file(path: &Path, mut on_read: impl FnMut(u64)) -> std::io::Result<(Stri
         }
         hasher.update(&buffer[..read]);
         size += read as u64;
-        on_read(read as u64);
+        if !on_read(read as u64) {
+            return Err(std::io::ErrorKind::Interrupted.into());
+        }
     }
     Ok((format!("{:x}", hasher.finalize()), size))
 }
@@ -222,7 +238,22 @@ mod tests {
 
     async fn prepare(items: Vec<PathBuf>) -> PreparedFiles {
         let (progress, _) = mpsc::channel(64);
-        prepare_files(items, progress).await
+        prepare_files(items, progress, CancellationToken::new())
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_canceled_preparation_gives_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("a.txt");
+        std::fs::write(&file, b"a").unwrap();
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+
+        let prepared = prepare_files(vec![file], mpsc::channel(4).0, cancel).await;
+
+        assert!(prepared.is_none());
     }
 
     fn names(prepared: &PreparedFiles) -> Vec<&str> {

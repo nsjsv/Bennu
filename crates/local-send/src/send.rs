@@ -2,6 +2,9 @@
 //!
 //! 文件先由 `prepare` 展开、算好校验（几台设备共用一份）；这里只管发。一个文件失败不
 //! 影响别的（同官方）：对方校验不符回 422 时整个文件重传，同一文件最多共传 3 次。
+//!
+//! 可以中途取消：还在等对方接受时取消就是撤回请求（丢掉连接）；传输中取消就断掉当前
+//! 上传，并 `cancel` 对方的会话，对方删掉收了一半的、留下收完的。
 
 use std::path::Path;
 use std::pin::Pin;
@@ -9,6 +12,7 @@ use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, ReadBuf};
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 use crate::device::{DeviceInfo, FileMetadata, PrepareUploadRequest, PrepareUploadResponse};
 use crate::error::{error_chain_text, LocalSendError};
@@ -23,7 +27,8 @@ const PROGRESS_STEP: u64 = 1024 * 1024;
 /// 同一文件最多传几次（同官方接收端的 `MAX_UPLOAD_ATTEMPTS`，发送方不能比它多）。
 const MAX_UPLOAD_ATTEMPTS: u8 = 3;
 
-/// 直推进度快照（阶段 B 的窗口进度显示直接消费）。
+/// 直推进度快照：当前文件的，与整批的（之前文件的大小之和 + 当前文件已读）。每个文件
+/// 开始上传时报一次（0 字节），之后按节流步长报。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SendProgress {
     pub file_name: String,
@@ -31,6 +36,8 @@ pub struct SendProgress {
     pub total_files: usize,
     pub bytes_sent: u64,
     pub file_size: u64,
+    pub bytes_done: u64,
+    pub bytes_total: u64,
 }
 
 /// 一次直推的结果：发成了几个，哪些没发成（含准备时就读不了的）。
@@ -70,6 +77,7 @@ impl DirectSender {
         files: &PreparedFiles,
         pin: Option<&str>,
         progress: mpsc::Sender<SendProgress>,
+        cancel: &CancellationToken,
     ) -> Result<SendReport, LocalSendError> {
         if files.files.is_empty() {
             // 全都读不了：不必打扰对方。
@@ -104,8 +112,8 @@ impl DirectSender {
             .collect();
         let mut failed = files.unreadable.clone();
         // 协议：204 = 对方一个也不需要。
-        let Some(prepared_response) = self.prepare_upload(client, &base, announced, pin).await?
-        else {
+        let prepare = self.prepare_upload(client, &base, announced, pin);
+        let Some(prepared_response) = unless_canceled(cancel, prepare).await? else {
             failed.extend(files.files.iter().map(not_taken));
             return Ok(SendReport { sent: 0, failed });
         };
@@ -114,12 +122,25 @@ impl DirectSender {
         let mut sent = 0;
         let mut announced_file_failed = false;
         let total = files.files.len();
+        let bytes_total = files.files.iter().map(|file| file.size).sum();
+        let mut bytes_before = 0;
         for (index, file) in files.files.iter().enumerate() {
+            let reporter = ProgressReporter {
+                channel: progress.clone(),
+                file_name: file.file_name.clone(),
+                file_index: index,
+                total_files: total,
+                file_size: file.size,
+                bytes_before,
+                bytes_total,
+            };
+            bytes_before += file.size;
             // 对方可以只要其中一部分（官方接收端能挑文件）。
             let Some(token) = prepared_response.files.get(&index.to_string()) else {
                 failed.push(not_taken(file));
                 continue;
             };
+            reporter.report(0);
             let upload = Upload {
                 client,
                 base: &base,
@@ -127,11 +148,16 @@ impl DirectSender {
                 file_id: index.to_string(),
                 token,
                 file,
-                progress: &progress,
-                index,
-                total,
+                reporter,
             };
-            match upload.with_retries().await {
+            let outcome = tokio::select! {
+                outcome = upload.with_retries() => outcome,
+                () = cancel.cancelled() => {
+                    cancel_session(client, &base, &session_id).await;
+                    return Err(LocalSendError::Canceled);
+                }
+            };
+            match outcome {
                 Ok(()) => sent += 1,
                 Err(reason) => {
                     announced_file_failed = true;
@@ -156,6 +182,7 @@ impl DirectSender {
         target: &DeviceInfo,
         text: &str,
         pin: Option<&str>,
+        cancel: &CancellationToken,
     ) -> Result<(), LocalSendError> {
         let base = target
             .http_base_url()
@@ -171,7 +198,9 @@ impl DirectSender {
             preview: Some(text.to_owned()),
         };
         let announced = [(file_id.clone(), message)].into_iter().collect();
-        let Some(prepared) = self.prepare_upload(client, &base, announced, pin).await? else {
+        // 官方接收端要等对方看完文字才回：这段时间里取消就是撤回。
+        let prepare = self.prepare_upload(client, &base, announced, pin);
+        let Some(prepared) = unless_canceled(cancel, prepare).await? else {
             return Ok(());
         };
         let Some(token) = prepared.files.get(&file_id) else {
@@ -182,12 +211,21 @@ impl DirectSender {
             "{base}/api/localsend/v2/{endpoint}?sessionId={}&fileId={file_id}&token={token}",
             prepared.session_id
         );
-        let response = client
-            .post(&url)
-            .body(text.to_owned())
-            .send()
-            .await
-            .map_err(|source| LocalSendError::Request { endpoint, source })?;
+        let upload = async {
+            client
+                .post(&url)
+                .body(text.to_owned())
+                .send()
+                .await
+                .map_err(|source| LocalSendError::Request { endpoint, source })
+        };
+        let response = match unless_canceled(cancel, upload).await {
+            Err(LocalSendError::Canceled) => {
+                cancel_session(client, &base, &prepared.session_id).await;
+                return Err(LocalSendError::Canceled);
+            }
+            response => response?,
+        };
         if !response.status().is_success() {
             return Err(LocalSendError::PeerRejected {
                 status: response.status(),
@@ -246,6 +284,17 @@ impl DirectSender {
     }
 }
 
+/// 取消先到就返回 `Canceled`（丢掉还没完成的请求，连接随之关闭）。
+async fn unless_canceled<T>(
+    cancel: &CancellationToken,
+    work: impl std::future::Future<Output = Result<T, LocalSendError>>,
+) -> Result<T, LocalSendError> {
+    tokio::select! {
+        outcome = work => outcome,
+        () = cancel.cancelled() => Err(LocalSendError::Canceled),
+    }
+}
+
 fn not_taken(file: &PreparedFile) -> FileFailure {
     FileFailure {
         file_name: file.file_name.clone(),
@@ -276,9 +325,7 @@ struct Upload<'a> {
     file_id: String,
     token: &'a str,
     file: &'a PreparedFile,
-    progress: &'a mpsc::Sender<SendProgress>,
-    index: usize,
-    total: usize,
+    reporter: ProgressReporter,
 }
 
 enum UploadError {
@@ -315,11 +362,7 @@ impl Upload<'_> {
             inner: source,
             count: 0,
             last_emitted: 0,
-            file_name: self.file.file_name.clone(),
-            file_size: self.file.size,
-            file_index: self.index,
-            total_files: self.total,
-            progress: self.progress.clone(),
+            reporter: self.reporter.clone(),
         };
         let response = self
             .client
@@ -336,14 +379,7 @@ impl Upload<'_> {
             status => return Err(UploadError::Other(format!("HTTP {status}"))),
         }
         // 发送端进度只反映本机读取量；HTTP 200 即对端确认接收完成。
-        emit_progress(
-            self.progress,
-            &self.file.file_name,
-            self.index,
-            self.total,
-            self.file.size,
-            self.file.size,
-        );
+        self.reporter.report(self.file.size);
         Ok(())
     }
 }
@@ -361,22 +397,32 @@ fn mime_of(file_name: &str) -> &'static str {
         .unwrap_or("application/octet-stream")
 }
 
-fn emit_progress(
-    progress: &mpsc::Sender<SendProgress>,
-    file_name: &str,
+/// 一个文件的进度怎么报：它在整批里的位置与大小。
+#[derive(Clone)]
+struct ProgressReporter {
+    channel: mpsc::Sender<SendProgress>,
+    file_name: String,
     file_index: usize,
     total_files: usize,
-    bytes_sent: u64,
     file_size: u64,
-) {
-    // try_send：通道满即丢弃进度（UI 只需要最新值，不允许反压传输）。
-    let _ = progress.try_send(SendProgress {
-        file_name: file_name.to_string(),
-        file_index,
-        total_files,
-        bytes_sent,
-        file_size,
-    });
+    /// 这个文件之前的文件大小之和。
+    bytes_before: u64,
+    bytes_total: u64,
+}
+
+impl ProgressReporter {
+    fn report(&self, bytes_sent: u64) {
+        // try_send：通道满即丢弃进度（UI 只需要最新值，不允许反压传输）。
+        let _ = self.channel.try_send(SendProgress {
+            file_name: self.file_name.clone(),
+            file_index: self.file_index,
+            total_files: self.total_files,
+            bytes_sent,
+            file_size: self.file_size,
+            bytes_done: self.bytes_before + bytes_sent.min(self.file_size),
+            bytes_total: self.bytes_total,
+        });
+    }
 }
 
 /// 计数 AsyncRead：透传读取并在节流步长处投递进度。
@@ -384,11 +430,7 @@ struct CountingReader {
     inner: tokio::fs::File,
     count: u64,
     last_emitted: u64,
-    file_name: String,
-    file_size: u64,
-    file_index: usize,
-    total_files: usize,
-    progress: mpsc::Sender<SendProgress>,
+    reporter: ProgressReporter,
 }
 
 impl AsyncRead for CountingReader {
@@ -405,14 +447,7 @@ impl AsyncRead for CountingReader {
                 self.count += read;
                 if self.count - self.last_emitted >= PROGRESS_STEP {
                     self.last_emitted = self.count;
-                    emit_progress(
-                        &self.progress,
-                        &self.file_name,
-                        self.file_index,
-                        self.total_files,
-                        self.count,
-                        self.file_size,
-                    );
+                    self.reporter.report(self.count);
                 }
             }
         }
@@ -461,7 +496,9 @@ mod tests {
     async fn one_file(dir: &tempfile::TempDir) -> PreparedFiles {
         let file = dir.path().join("one.txt");
         std::fs::write(&file, b"x").unwrap();
-        prepare::prepare_files(vec![file], mpsc::channel(1).0).await
+        prepare::prepare_files(vec![file], mpsc::channel(1).0, CancellationToken::new())
+            .await
+            .unwrap()
     }
 
     /// 读完一个带 content-length 的请求再回响应：未读数据留在内核缓冲时
@@ -500,7 +537,13 @@ mod tests {
         let (progress, _) = mpsc::channel(1);
 
         let error = sender
-            .send(&target_at(address), &one_file(&dir).await, None, progress)
+            .send(
+                &target_at(address),
+                &one_file(&dir).await,
+                None,
+                progress,
+                &crate::CancellationToken::new(),
+            )
             .await
             .unwrap_err();
 
@@ -549,7 +592,13 @@ mod tests {
         let (progress, _) = mpsc::channel(1);
 
         let report = sender
-            .send(&target_at(address), &one_file(&dir).await, None, progress)
+            .send(
+                &target_at(address),
+                &one_file(&dir).await,
+                None,
+                progress,
+                &crate::CancellationToken::new(),
+            )
             .await
             .unwrap();
         responder.await.unwrap();

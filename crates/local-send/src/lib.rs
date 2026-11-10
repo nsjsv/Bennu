@@ -32,6 +32,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::{broadcast, mpsc, watch, Mutex};
+pub use tokio_util::sync::CancellationToken;
 
 pub use device::{Announce, DeviceInfo, FileMetadata, PrepareUploadRequest, PrepareUploadResponse};
 pub use error::LocalSendError;
@@ -142,16 +143,20 @@ pub enum ServiceEvent {
         session_id: String,
         files: Vec<FileMetadata>,
     },
-    /// 会话被接受（信任设备自动放行或用户确认）。
-    RequestAccepted { session_id: String },
+    /// 会话被接受（收藏/档位自动收下，或用户确认）：谁发来了哪些文件。
+    RequestAccepted {
+        session_id: String,
+        device: DeviceInfo,
+        files: Vec<FileMetadata>,
+    },
     /// 会话被拒绝（用户拒绝或 30s 确认超时）。
     RequestRejected { session_id: String },
     /// 接收进度（按 ≥1MiB 增量节流）。
+    /// 某个文件已收到的字节（按 ≥1MiB 增量节流，收完再报一次）；重传时从头算。
     ReceiveProgress {
         session_id: String,
-        file_name: String,
+        file_id: String,
         received: u64,
-        total: u64,
     },
     /// 会话结束：saved_paths 为成功落盘文件，failed 为 (文件名, 原因)。
     ReceiveFinished {
@@ -182,6 +187,8 @@ enum ServiceCommand {
     ResolveSession { session_id: String, accept: bool },
     /// 手动刷新：清空设备表（逐个广播 DeviceLost）并立即触发一轮扫描。
     RefreshDevices,
+    /// 本机取消一次接收。
+    CancelReceive { session_id: String },
 }
 
 impl ServiceHandle {
@@ -191,28 +198,40 @@ impl ServiceHandle {
     ///
     /// 返回的 future 自带客户端与本机设备信息的克隆，不借用句柄，可直接
     /// `tokio::spawn`；进度通道满时丢弃进度，不反压传输。
+    /// `cancel`：还在等对方接受时取消 = 撤回；传输中取消 = 断掉并通知对方（对方删掉
+    /// 收了一半的）；都返回 `Canceled`。
     pub fn send_to_device(
         &self,
         target: &DeviceInfo,
         files: Arc<PreparedFiles>,
         pin: Option<String>,
         progress: mpsc::Sender<SendProgress>,
+        cancel: CancellationToken,
     ) -> impl Future<Output = Result<SendReport, LocalSendError>> + Send + 'static {
         let sender = self.sender.clone();
         let target = target.clone();
-        async move { sender.send(&target, &files, pin.as_deref(), progress).await }
+        async move {
+            sender
+                .send(&target, &files, pin.as_deref(), progress, &cancel)
+                .await
+        }
     }
 
-    /// 发一段文字给目标设备（同官方的文字消息）；`pin` 同 `send_to_device`。
+    /// 发一段文字给目标设备（同官方的文字消息）；`pin`、`cancel` 同 `send_to_device`。
     pub fn send_text(
         &self,
         target: &DeviceInfo,
         text: String,
         pin: Option<String>,
+        cancel: CancellationToken,
     ) -> impl Future<Output = Result<(), LocalSendError>> + Send + 'static {
         let sender = self.sender.clone();
         let target = target.clone();
-        async move { sender.send_text(&target, &text, pin.as_deref()).await }
+        async move {
+            sender
+                .send_text(&target, &text, pin.as_deref(), &cancel)
+                .await
+        }
     }
 
     /// 确认 Modal 回写：接受不是收藏的设备的请求。要"加入收藏"时先 `set_favorites`。
@@ -244,6 +263,14 @@ impl ServiceHandle {
     ) -> impl Future<Output = Result<DeviceInfo, FindDeviceError>> + Send + 'static {
         let discovery = Arc::clone(&self.discovery);
         async move { discovery::find_device(&discovery, address).await }
+    }
+
+    /// 取消一次接收：收完的留着，收了一半的删掉，对方后面的文件发不进来；随后照常发
+    /// `ReceiveFinished`。
+    pub fn cancel_receive(&self, session_id: &str) {
+        let _ = self.commands.send(ServiceCommand::CancelReceive {
+            session_id: session_id.to_string(),
+        });
     }
 
     /// 手动刷新设备列表：清空现有条目并立即触发一轮子网扫描。
@@ -362,6 +389,11 @@ impl LocalSendService {
                             // 没有接收端就没有挂起的会话，确认回写无处可去。
                             if let Some(state) = &receive_state {
                                 state.resolve_pending(&session_id, accept).await;
+                            }
+                        }
+                        Some(ServiceCommand::CancelReceive { session_id }) => {
+                            if let Some(state) = &receive_state {
+                                state.end_session(&session_id, "canceled on this computer").await;
                             }
                         }
                         Some(ServiceCommand::RefreshDevices) => {

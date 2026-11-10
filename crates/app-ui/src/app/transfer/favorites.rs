@@ -59,6 +59,15 @@ impl FileBrowser {
         online_among(self.nearby_devices(), fingerprint)
     }
 
+    /// 给人看的设备名：证书认过的收藏用收藏里的名字（可能是用户起的），否则用它自报的。
+    pub(super) fn transfer_device_name(&self, device: &DeviceInfo) -> String {
+        self.user_config
+            .transfer_favorite_devices
+            .iter()
+            .find(|favorite| device.is_certified() && favorite.fingerprint == device.fingerprint)
+            .map_or_else(|| device.alias.clone(), |favorite| favorite.alias.clone())
+    }
+
     pub(crate) fn favorite_rows(&self) -> Vec<FavoriteRow<'_>> {
         favorite_rows_among(
             &self.user_config.transfer_favorite_devices,

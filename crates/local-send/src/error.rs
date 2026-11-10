@@ -51,6 +51,10 @@ pub enum LocalSendError {
     #[error("the device declined the files")]
     Declined,
 
+    /// 用户取消了。
+    #[error("canceled")]
+    Canceled,
+
     /// 没有可发的文件（只有空文件夹）。
     #[error("there is nothing to send; empty folders cannot be sent")]
     NothingToSend,

@@ -7,7 +7,8 @@ use tokio_util::sync::CancellationToken;
 
 use super::{
     qr_items_from_paths, DeviceListOwner, DirectSendFailure, DirectSendOutcome, DirectSendPhase,
-    DirectSendState, FileBrowser, TransferMessage, TransferSessionPhase, TransferSessionState,
+    DirectSendState, FileBrowser, TransferKind, TransferMessage, TransferSessionPhase,
+    TransferSessionState,
 };
 use crate::app::transfer_service::service_config;
 use crate::config::{FavoriteTransferDevice, TransferAcceptMode};
@@ -227,23 +228,37 @@ fn qr_session() -> TransferSessionState {
     }
 }
 
+/// 这台设备最新那次发送的任务 id；没有（任务已不在）时给一个不存在的 id。
+fn task_of(browser: &FileBrowser, fingerprint: &str) -> u64 {
+    browser
+        .transfer_tasks
+        .latest_send_to(fingerprint)
+        .map_or(u64::MAX, |(id, _)| id)
+}
+
 fn finish_direct_send(browser: &mut FileBrowser, fingerprint: &str, outcome: DirectSendOutcome) {
+    let task = task_of(browser, fingerprint);
     let _ = browser.handle_transfer_message(TransferMessage::DirectSendFinished {
-        fingerprint: fingerprint.to_owned(),
+        task,
         alias: "Phone".to_owned(),
         outcome,
     });
 }
 
-fn phase_of(browser: &FileBrowser, fingerprint: &str) -> DirectSendPhase {
-    browser.direct_sends.states[fingerprint].phase.clone()
+fn send_of<'a>(browser: &'a FileBrowser, fingerprint: &str) -> &'a DirectSendState {
+    browser.direct_send_to(&sample_device(fingerprint)).unwrap()
 }
 
-fn start_sending(browser: &mut FileBrowser, fingerprint: &str) {
-    browser.direct_sends.states.insert(
-        fingerprint.to_owned(),
-        DirectSendState::sending_to(sample_device(fingerprint)),
-    );
+fn phase_of(browser: &FileBrowser, fingerprint: &str) -> DirectSendPhase {
+    send_of(browser, fingerprint).phase.clone()
+}
+
+pub(crate) fn start_sending(browser: &mut FileBrowser, fingerprint: &str) -> u64 {
+    let panel_open = browser.operation_queue.is_panel_open();
+    browser.transfer_tasks.push(
+        TransferKind::Send(DirectSendState::sending_to(sample_device(fingerprint))),
+        panel_open,
+    )
 }
 
 fn all_sent() -> local_send::SendReport {
@@ -279,15 +294,18 @@ fn direct_send_results_land_on_their_device_and_failures_are_logged_once() {
         start_sending(&mut browser, fingerprint);
     }
 
+    let phone = task_of(&browser, "phone-fp");
     let logs = capture_direct_send_failure_logs(|| {
         let _ = browser.handle_transfer_message(TransferMessage::DirectSendProgress {
-            fingerprint: "phone-fp".to_owned(),
+            task: phone,
             progress: local_send::SendProgress {
                 file_name: "one.txt".to_owned(),
                 file_index: 1,
                 total_files: 3,
                 bytes_sent: 5,
                 file_size: 10,
+                bytes_done: 15,
+                bytes_total: 30,
             },
         });
         finish_direct_send(&mut browser, "phone-fp", failed(failure));
@@ -300,14 +318,14 @@ fn direct_send_results_land_on_their_device_and_failures_are_logged_once() {
         finish_direct_send(&mut browser, "gone-fp", failed(failure));
     });
 
-    assert_eq!(browser.direct_sends.states["phone-fp"].file_index, 1);
+    assert_eq!(send_of(&browser, "phone-fp").file_index, 1);
     assert_eq!(
         phase_of(&browser, "phone-fp"),
         DirectSendPhase::Failed(DirectSendFailure::Other(failure.to_owned()))
     );
-    assert_eq!(browser.direct_sends.states["tablet-fp"].file_index, 0);
+    assert_eq!(send_of(&browser, "tablet-fp").file_index, 0);
     assert_eq!(phase_of(&browser, "tablet-fp"), finished(1, Vec::new()));
-    assert!(!browser.direct_sends.states.contains_key("gone-fp"));
+    assert!(browser.direct_send_to(&sample_device("gone-fp")).is_none());
     // 成功不记日志。
     assert_eq!(logs, vec![logged_failure; 2]);
     // 上传 URL 里的会话令牌必须先脱敏再进日志。
@@ -379,7 +397,7 @@ fn a_pin_request_opens_the_prompt_until_it_is_canceled() {
             DirectSendPhase::NeedsPin { .. }
         ));
 
-        let _ = browser.handle_transfer_message(TransferMessage::DirectSendPinCanceled(
+        let _ = browser.handle_transfer_message(TransferMessage::DirectSendCancelPressed(
             "phone-fp".to_owned(),
         ));
     });

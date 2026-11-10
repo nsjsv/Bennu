@@ -227,7 +227,7 @@ fn capture_direct_send_failure_logs(action: impl FnOnce()) -> Vec<(String, Strin
     collected
 }
 
-fn session_showing(fingerprint: &str) -> TransferSessionState {
+fn qr_session() -> TransferSessionState {
     TransferSessionState {
         phase: TransferSessionPhase::Preparing,
         connected: false,
@@ -236,16 +236,7 @@ fn session_showing(fingerprint: &str) -> TransferSessionState {
         finished: None,
         last_progress: None,
         cancel: CancellationToken::new(),
-        direct_send: Some(DirectSendState {
-            fingerprint: fingerprint.to_owned(),
-            alias: String::new(),
-            file_name: String::new(),
-            file_index: 0,
-            total_files: 0,
-            bytes_sent: 0,
-            file_size: 0,
-            outcome: None,
-        }),
+        paths: vec![std::path::PathBuf::from("/tmp/one.txt")],
     }
 }
 
@@ -257,16 +248,12 @@ fn finish_direct_send(browser: &mut FileBrowser, fingerprint: &str, outcome: Res
     });
 }
 
-fn displayed_outcome(browser: &FileBrowser) -> Option<Result<(), String>> {
-    browser
-        .transfer_session
-        .as_ref()
-        .and_then(|session| session.direct_send.as_ref())
-        .and_then(|state| state.outcome.clone())
+fn outcome_of(browser: &FileBrowser, fingerprint: &str) -> Option<Result<(), String>> {
+    browser.direct_sends[fingerprint].outcome.clone()
 }
 
 #[test]
-fn direct_send_failure_is_logged_once_whatever_the_display_slot_shows() {
+fn direct_send_results_land_on_their_device_and_failures_are_logged_once() {
     let failure = "failed to transfer one.txt: error sending request for url \
         (http://192.168.1.9:53317/api/localsend/v2/upload?sessionId=s&fileId=0&token=abc123): \
         client error (Connect): tcp connect error: Connection refused (os error 111)";
@@ -275,33 +262,63 @@ fn direct_send_failure_is_logged_once_whatever_the_display_slot_shows() {
         sanitized_application_log_detail(failure),
     );
     let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+    for fingerprint in ["phone-fp", "tablet-fp"] {
+        browser
+            .direct_sends
+            .insert(fingerprint.to_owned(), DirectSendState::started());
+    }
 
     let logs = capture_direct_send_failure_logs(|| {
-        // 窗口已关：没有传输会话可写。
+        let _ = browser.handle_transfer_message(TransferMessage::DirectSendProgress {
+            fingerprint: "phone-fp".to_owned(),
+            progress: local_send::SendProgress {
+                file_name: "one.txt".to_owned(),
+                file_index: 1,
+                total_files: 3,
+                bytes_sent: 5,
+                file_size: 10,
+            },
+        });
         finish_direct_send(&mut browser, "phone-fp", Err(failure));
-        // 显示槽已被另一台设备的直推顶替。
-        browser.transfer_session = Some(session_showing("tablet-fp"));
-        finish_direct_send(&mut browser, "phone-fp", Err(failure));
-        assert_eq!(displayed_outcome(&browser), None);
-        // 显示槽正是这次直推：失败照常写进窗口状态。
-        browser.transfer_session = Some(session_showing("phone-fp"));
-        finish_direct_send(&mut browser, "phone-fp", Err(failure));
-        assert_eq!(displayed_outcome(&browser), Some(Err(failure.to_owned())));
-        // 成功不记日志。
-        browser.transfer_session = Some(session_showing("phone-fp"));
-        finish_direct_send(&mut browser, "phone-fp", Ok(()));
-        assert_eq!(displayed_outcome(&browser), Some(Ok(())));
+        finish_direct_send(&mut browser, "tablet-fp", Ok(()));
+        // 设备状态已不在（不该发生）时失败照样进日志：日志是长期记录。
+        finish_direct_send(&mut browser, "gone-fp", Err(failure));
     });
 
-    assert_eq!(logs, vec![logged_failure; 3]);
+    assert_eq!(browser.direct_sends["phone-fp"].file_index, 1);
+    assert_eq!(
+        outcome_of(&browser, "phone-fp"),
+        Some(Err(failure.to_owned()))
+    );
+    assert_eq!(browser.direct_sends["tablet-fp"].file_index, 0);
+    assert_eq!(outcome_of(&browser, "tablet-fp"), Some(Ok(())));
+    assert!(!browser.direct_sends.contains_key("gone-fp"));
+    // 成功不记日志。
+    assert_eq!(logs, vec![logged_failure; 2]);
     // 上传 URL 里的会话令牌必须先脱敏再进日志。
     assert!(!logs[0].1.contains("abc123"));
 }
 
 #[test]
+fn a_device_that_is_sending_cannot_start_another_send() {
+    let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+    let phone = sample_device("phone-fp");
+    assert!(browser.can_send_to(&phone));
+
+    browser
+        .direct_sends
+        .insert("phone-fp".to_owned(), DirectSendState::started());
+    assert!(!browser.can_send_to(&phone));
+    assert!(browser.can_send_to(&sample_device("tablet-fp")));
+
+    finish_direct_send(&mut browser, "phone-fp", Ok(()));
+    assert!(browser.can_send_to(&phone));
+}
+
+#[test]
 fn shutdown_closes_the_transfer_window_and_cancels_its_qr_session() {
     let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-    let session = session_showing("phone-fp");
+    let session = qr_session();
     let cancel = session.cancel.clone();
     browser.transfer_session = Some(session);
     browser.transfer_window = Some(iced::window::Id::unique());

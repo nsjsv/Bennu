@@ -217,6 +217,7 @@ impl FileBrowser {
             Some(AuxiliaryWindow::Properties) => tr!("Properties - Bennu"),
             Some(AuxiliaryWindow::Preview) => tr!("Preview - Bennu"),
             Some(AuxiliaryWindow::Transfer) => tr!("Send to Phone - Bennu"),
+            Some(AuxiliaryWindow::LocalSend) => tr!("LocalSend - Bennu"),
             None if self.search_workspace.is_some() => tr!("Search - Bennu"),
             None => "Bennu".to_owned(),
         }
@@ -346,8 +347,8 @@ impl FileBrowser {
         window::close(window)
     }
 
-    /// 打开传输窗口前清理主窗口同层输入状态（与 Properties 打开先例一致）。
-    pub(super) fn prepare_transfer_window_open(&mut self) -> Task<Message> {
+    /// 打开传输、LocalSend 窗口前清理主窗口同层输入状态（与 Properties 打开先例一致）。
+    pub(super) fn prepare_auxiliary_window_open(&mut self) -> Task<Message> {
         self.context_menu = None;
         self.open_with = None;
         self.archive_creation = None;
@@ -408,7 +409,7 @@ impl FileBrowser {
         command.map(Message::Preview)
     }
 
-    fn clear_closed_window_focus(&mut self, window: window::Id) {
+    pub(super) fn clear_closed_window_focus(&mut self, window: window::Id) {
         self.maximized_windows.remove(&window);
         if self.focused_window == window {
             self.focused_window = self.main_window;
@@ -458,7 +459,8 @@ impl FileBrowser {
             Some(
                 kind @ (AuxiliaryWindow::Properties
                 | AuxiliaryWindow::Preview
-                | AuxiliaryWindow::Transfer),
+                | AuxiliaryWindow::Transfer
+                | AuxiliaryWindow::LocalSend),
             ) => return self.close_auxiliary_window_of(kind),
             None => {}
         }

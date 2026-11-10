@@ -15,15 +15,17 @@ pub(crate) enum AuxiliaryWindow {
     Properties,
     Preview,
     Transfer,
+    LocalSend,
 }
 
 impl AuxiliaryWindow {
     /// 按 id 反查与退出时逐个关闭都靠它；新增种类必须加进来。
-    pub(crate) const ALL: [Self; 4] = [
+    pub(crate) const ALL: [Self; 5] = [
         Self::Settings,
         Self::Properties,
         Self::Preview,
         Self::Transfer,
+        Self::LocalSend,
     ];
 }
 
@@ -35,6 +37,7 @@ impl FileBrowser {
             AuxiliaryWindow::Properties => self.properties_window,
             AuxiliaryWindow::Preview => self.preview_engine.preview_window,
             AuxiliaryWindow::Transfer => self.transfer_window,
+            AuxiliaryWindow::LocalSend => self.local_send_window,
         }
     }
 
@@ -59,6 +62,7 @@ impl FileBrowser {
             AuxiliaryWindow::Properties => self.close_properties_window(),
             AuxiliaryWindow::Preview => self.close_preview_window(),
             AuxiliaryWindow::Transfer => self.close_transfer_window(),
+            AuxiliaryWindow::LocalSend => self.close_local_send_window(),
         }
     }
 }
@@ -80,6 +84,7 @@ mod tests {
                 AuxiliaryWindow::Properties => &mut browser.properties_window,
                 AuxiliaryWindow::Preview => &mut browser.preview_engine.preview_window,
                 AuxiliaryWindow::Transfer => &mut browser.transfer_window,
+                AuxiliaryWindow::LocalSend => &mut browser.local_send_window,
             };
             *slot = Some(*id);
         }

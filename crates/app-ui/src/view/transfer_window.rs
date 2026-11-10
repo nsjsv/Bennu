@@ -1,26 +1,23 @@
 //! 发送到手机窗口：二维码、下载状态/进度、LocalSend 设备直推列表。
 
 use iced::widget::{button, column, container, image, row, scrollable, Space};
-use iced::{Alignment, Element, Length};
+use iced::{Element, Length};
 
-use crate::app::transfer::{
-    DirectSendState, TransferMessage, TransferSessionPhase, TransferSessionState,
-};
+use crate::app::transfer::{TransferMessage, TransferSessionPhase, TransferSessionState};
 use crate::app::FileBrowser;
 use crate::appearance::{context_menu_button_style, context_menu_style};
-use crate::formatting::{format_file_size, format_middle_ellipsized_text};
+use crate::formatting::format_file_size;
 use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
-use bennu_theme::icons::IconSymbol;
-use local_send::DeviceInfo;
 
-use super::{themed_icon, IconTone, MENU_ICON_SIZE};
+use super::local_send_devices;
 
 const QR_DISPLAY_SIZE: f32 = 220.0;
 const TRANSFER_CARD_SPACING: f32 = 12.0;
 const TRANSFER_WINDOW_PADDING: f32 = 16.0;
-const DIRECT_SEND_STATUS_MAX_CHARS: usize = 72;
-const DEVICE_LIST_MAX_HEIGHT: f32 = 180.0;
+const DEVICE_LIST_MAX_HEIGHT: f32 = 220.0;
+/// 设备行含名字、型号 · IP、状态三行文字。
+const DEVICE_ROW_HEIGHT: f32 = 56.0;
 
 /// 从下载链接提取显示用地址段（host:port），列表项不展示完整 token 链接。
 fn display_address(url: &str) -> &str {
@@ -38,9 +35,6 @@ pub(crate) fn view_transfer_window(browser: &FileBrowser) -> Element<'_, Message
         Some(session) => {
             content = content.push(session_card(session));
             content = content.push(device_list_card(browser));
-            if let Some(direct_send) = &session.direct_send {
-                content = content.push(direct_send_card(direct_send));
-            }
         }
         // 窗口 id 存在但会话已清空：渲染占位避免空白（窗口规范要求）。
         None => {
@@ -143,111 +137,26 @@ fn qr_progress_line(session: &TransferSessionState) -> String {
     }
 }
 
-/// LocalSend 设备直推列表卡片。
+/// LocalSend 设备直推列表卡片：发的是打开窗口时那批文件（会话非空才会打开窗口）。
 fn device_list_card(browser: &FileBrowser) -> Element<'_, Message> {
-    let mut list = column![].spacing(4).width(Length::Fill);
-    let devices = browser
-        .transfer_runtime
-        .as_ref()
-        .map(|runtime| runtime.devices.as_slice())
-        .unwrap_or(&[]);
-    if devices.is_empty() {
-        list = list.push(status_line(tr!("No nearby devices found")));
-    } else {
-        for device in devices {
-            list = list.push(device_row(device));
-        }
-    }
-    // 标题 + 手动刷新：立即清空快照并触发一轮子网扫描（不等 10s 周期）。
-    let header = row![
-        readable_text(tr!("Nearby LocalSend devices"))
-            .size(13)
-            .width(Length::Fill),
-        button(themed_icon(
-            IconSymbol::Refresh,
-            IconTone::Normal,
-            MENU_ICON_SIZE
-        ))
-        .on_press(Message::Transfer(TransferMessage::RefreshDevicesRequested,))
-        .padding([4, 8])
-        .style(context_menu_button_style()),
-    ]
-    .spacing(8)
-    .align_y(Alignment::Center);
+    let rows = local_send_devices::device_rows(browser, |device| {
+        Some(Message::Transfer(TransferMessage::SendToDevicePressed(
+            device.clone(),
+        )))
+    });
+    let device_count = local_send_devices::nearby_devices(browser).len();
     let content = column![
-        header,
-        container(scrollable(list))
+        local_send_devices::nearby_devices_header(),
+        container(scrollable(rows))
             .height(Length::Fixed(DEVICE_LIST_MAX_HEIGHT.min(
                 // 设备少时不占满固定高度，避免滚动区空白。
-                (devices.len() as f32 + 1.0) * 32.0
+                (device_count as f32 + 1.0) * DEVICE_ROW_HEIGHT
             )))
             .width(Length::Fill),
     ]
     .spacing(8)
     .width(Length::Fill);
     card_container(content)
-}
-
-fn device_row(device: &DeviceInfo) -> Element<'_, Message> {
-    let mut subtitle = String::new();
-    if let Some(model) = &device.device_model {
-        subtitle.push_str(model);
-    }
-    if let Some(kind) = &device.device_type {
-        if !subtitle.is_empty() {
-            subtitle.push_str(" · ");
-        }
-        subtitle.push_str(kind);
-    }
-    // 设备名是用户内容，不做本地化；副行仅展示协议自报型号/类型。
-    let label = if subtitle.is_empty() {
-        device.alias.clone()
-    } else {
-        format!("{alias} ({subtitle})", alias = device.alias)
-    };
-    let send_button = button(readable_text(tr!("Send")).size(12))
-        .on_press(Message::Transfer(TransferMessage::SendToDevicePressed(
-            device.clone(),
-        )))
-        .padding([5, 12])
-        .style(context_menu_button_style());
-    row![
-        readable_text(label).size(12).width(Length::Fill),
-        send_button,
-    ]
-    .spacing(8)
-    .align_y(Alignment::Center)
-    .into()
-}
-
-fn direct_send_card(state: &DirectSendState) -> Element<'_, Message> {
-    let detail: String = match &state.outcome {
-        Some(Ok(())) => tr!("Sent to %1", state.alias),
-        Some(Err(error)) => tr!("Send to %1 failed: %2", state.alias, error),
-        None if state.total_files > 0 => tr!(
-            "Sending to %1: %2 (%3/%4, %5 of %6)",
-            state.alias,
-            state.file_name,
-            state.file_index,
-            state.total_files,
-            format_file_size(state.bytes_sent),
-            format_file_size(state.file_size)
-        ),
-        None => tr!("Sending to %1...", state.alias),
-    };
-    card_container(
-        row![
-            themed_icon(IconSymbol::Download, IconTone::Normal, MENU_ICON_SIZE),
-            readable_text(format_middle_ellipsized_text(
-                &detail,
-                DIRECT_SEND_STATUS_MAX_CHARS
-            ))
-            .size(12)
-            .width(Length::Fill),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center),
-    )
 }
 
 fn status_line(label: String) -> Element<'static, Message> {

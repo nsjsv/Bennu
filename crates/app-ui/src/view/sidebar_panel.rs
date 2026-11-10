@@ -5,6 +5,7 @@ use iced::{Alignment, Element, Length, Padding};
 
 use crate::app::scrollbar::{enhanced_scrollbar, scrollbar_on_scroll, ScrollbarAxis};
 use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
+use crate::app::transfer::TransferMessage;
 use crate::app::FileBrowser;
 use crate::appearance::{
     enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction, hovered_sidebar_item_style,
@@ -15,7 +16,8 @@ use crate::file_drag_hit_test_bounds::FileDragHitTestMarker;
 use crate::file_drag_hit_test_marker::track_file_drag_hit_test_marker;
 use crate::formatting::format_file_size;
 use crate::model::{
-    trash_location_path, Message, ScrollbarRegion, SidebarBookmarkDropSlot, SidebarLocation,
+    trash_location_path, FileDropTarget, Message, ScrollbarRegion, SidebarBookmarkDropSlot,
+    SidebarLocation,
 };
 use crate::network_connections::{NetworkConnectionMessage, SidebarNetworkConnectionEntry};
 use crate::sidebar_devices::SidebarDeviceEntry;
@@ -74,6 +76,7 @@ pub(crate) fn sidebar_view(browser: &FileBrowser) -> Element<'_, Message> {
         sidebar = sidebar.push(sidebar_location_item(browser, location));
     }
     sidebar = sidebar.push(sidebar_trash_item(browser));
+    sidebar = sidebar.push(sidebar_local_send_item(browser));
 
     let favorite_locations = browser
         .sidebar_locations
@@ -491,6 +494,47 @@ fn sidebar_trash_item(browser: &FileBrowser) -> Element<'_, Message> {
         .on_release(Message::DragSelectionFinished)
         .interaction(iced::mouse::Interaction::Pointer)
         .into()
+}
+
+/// LocalSend 入口：点开窗口；拖上来的文件进待发列表。它不是路径，悬停用按钮自身
+/// 的状态出样式，不往按路径记的 `hovered_sidebar` 里塞假路径。
+fn sidebar_local_send_item(browser: &FileBrowser) -> Element<'_, Message> {
+    let drop_hovered = browser
+        .file_drop_session
+        .as_ref()
+        .is_some_and(|session| session.hovered_target == Some(FileDropTarget::LocalSend));
+    let item = button(sidebar_label(
+        IconSymbol::Send,
+        &tr!("LocalSend"),
+        IconTone::Normal,
+    ))
+    .on_press(Message::Transfer(TransferMessage::LocalSendWindowRequested))
+    .padding([6, 8])
+    .width(Length::Fill)
+    .style(move |theme, status| {
+        let highlighted =
+            drop_hovered || matches!(status, button::Status::Hovered | button::Status::Pressed);
+        let surface = if highlighted {
+            hovered_sidebar_item_style(theme)
+        } else {
+            container::Style::default()
+        };
+        button::Style {
+            background: surface.background,
+            text_color: surface
+                .text_color
+                .unwrap_or_else(|| theme.extended_palette().background.base.text),
+            border: surface.border,
+            shadow: surface.shadow,
+            snap: surface.snap,
+        }
+    });
+    // 应用内拖拽在这里松手时要结束拖拽（同其他侧栏行）；按钮只在自己被按下时
+    // 才吃掉松开事件，拖拽经过时不会。
+    track_file_drag_hit_test_marker(
+        mouse_area(item).on_release(Message::DragSelectionFinished),
+        FileDragHitTestMarker::SidebarLocalSend,
+    )
 }
 
 fn sidebar_section_label(label: String) -> Element<'static, Message> {

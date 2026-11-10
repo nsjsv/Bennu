@@ -49,6 +49,8 @@ pub(crate) struct TabFileDropTarget {
 pub(crate) enum FileDropTarget {
     Directory(PathBuf),
     Trash,
+    /// 侧栏 LocalSend 入口：放进 LocalSend 待发列表。
+    LocalSend,
     SidebarBookmarkSlot(SidebarBookmarkDropSlot),
     Tab(TabFileDropTarget),
 }

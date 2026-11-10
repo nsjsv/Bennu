@@ -546,6 +546,7 @@ impl FileBrowser {
                 self.file_drag_directory_capsule(&drag.sources, directory)
             }
             FileDropTarget::Trash => Some(tr!("Move to Trash")),
+            FileDropTarget::LocalSend => Some(tr!("Send with LocalSend")),
             FileDropTarget::Tab(tab) => match &tab.destination {
                 TabDropDestination::Trash => Some(tr!("Move to Trash")),
                 TabDropDestination::Directory(directory) => {
@@ -632,7 +633,10 @@ pub(super) fn resolve_file_drag_target(
             }
         }
         target @ Some(
-            FileDropTarget::Trash | FileDropTarget::SidebarBookmarkSlot(_) | FileDropTarget::Tab(_),
+            FileDropTarget::Trash
+            | FileDropTarget::LocalSend
+            | FileDropTarget::SidebarBookmarkSlot(_)
+            | FileDropTarget::Tab(_),
         ) => target,
         None => fallback_directory.map(FileDropTarget::Directory),
     }

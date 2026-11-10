@@ -13,6 +13,8 @@ mod context_menu_submenu;
 mod convert;
 mod file_operation_verification_settings;
 mod floating_panels;
+mod local_send_devices;
+mod local_send_window;
 mod network_connections;
 mod network_settings;
 mod option_controls;
@@ -46,6 +48,7 @@ pub(crate) use window_chrome::{
 };
 
 pub(crate) use address_bar::address_input_id;
+pub(crate) use local_send_window::view_local_send_window;
 pub(crate) use preview_panel::view_preview_window;
 pub(crate) use properties_window::view_properties_window;
 pub(crate) use search_panel::{search_input_id, SEARCH_RESULT_ROW_HEIGHT};

@@ -52,6 +52,7 @@ pub(super) fn freeze_file_drop_hit_test_bounds(
             .collect(),
         sidebar_directories: measured.sidebar_directories,
         empty_sidebar_bookmarks: measured.empty_sidebar_bookmarks,
+        local_send: measured.local_send,
     }
 }
 
@@ -67,6 +68,12 @@ pub(super) fn resolve_file_drop_target(
         .find(|tab| tab.bounds.contains(position))
     {
         return Some(FileDropTarget::Tab(tab.target.clone()));
+    }
+    if bounds
+        .local_send
+        .is_some_and(|area| area.contains(position))
+    {
+        return Some(FileDropTarget::LocalSend);
     }
 
     if let Some(bookmark_source) = bookmark_source {
@@ -190,6 +197,31 @@ mod tests {
         assert_eq!(
             resolve_file_drop_target(&bounds, Point::new(20.0, 20.0), None),
             Some(FileDropTarget::Tab(tab_target))
+        );
+    }
+
+    #[test]
+    fn sidebar_local_send_entry_resolves_to_local_send() {
+        let bounds = FileDropHitTestBounds {
+            local_send: Some(Rectangle::new(
+                Point::new(0.0, 40.0),
+                Size::new(180.0, 36.0),
+            )),
+            directory_targets: vec![crate::model::DirectoryFileDragTargetBounds {
+                pane_id: crate::model::BrowserPaneId(0),
+                directory: PathBuf::from("/content"),
+                bounds: Rectangle::new(Point::new(0.0, 0.0), Size::new(400.0, 400.0)),
+            }],
+            ..FileDropHitTestBounds::default()
+        };
+
+        assert_eq!(
+            resolve_file_drop_target(&bounds, Point::new(20.0, 50.0), None),
+            Some(FileDropTarget::LocalSend)
+        );
+        assert_eq!(
+            resolve_file_drop_target(&bounds, Point::new(20.0, 100.0), None),
+            Some(FileDropTarget::Directory(PathBuf::from("/content")))
         );
     }
 

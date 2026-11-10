@@ -9,7 +9,6 @@
 //! - 信任判定回调读共享指纹快照；持久化仍归 UserPreferences。
 
 use std::collections::HashSet;
-use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -25,7 +24,7 @@ use tokio_util::sync::CancellationToken;
 use super::transfer_service::service_config;
 use super::FileBrowser;
 use crate::config::TrustedTransferDevice;
-use crate::model::{sanitized_application_log_detail, Message};
+use crate::model::Message;
 use crate::view::transfer_qr::qr_image_handle;
 
 /// 传输子消息：`Message::Transfer` 的载荷。
@@ -75,6 +74,18 @@ pub(crate) enum TransferMessage {
     ReceiveEnabledToggled,
     PortInputChanged(String),
     PortCommitted,
+    // ---- LocalSend 窗口 ----
+    /// 侧栏入口：打开或聚焦窗口。
+    LocalSendWindowRequested,
+    ChooserPressed(ChooserTarget),
+    LocalSendPathsChosen(Result<Vec<PathBuf>, String>),
+    StagedSizeMeasured {
+        path: PathBuf,
+        size: StagedSize,
+    },
+    StagedItemRemoved(PathBuf),
+    StagedItemsCleared,
+    SendStagedToDevicePressed(DeviceInfo),
 }
 
 /// 常驻 LocalSend 服务运行时状态。
@@ -103,8 +114,8 @@ pub(crate) struct TransferSessionState {
     last_progress: Option<(u64, Instant)>,
     /// 窗口关闭→流收尾的取消令牌。
     pub(crate) cancel: CancellationToken,
-    /// 当前直推显示槽（单槽：新直推顶替旧显示，后台任务继续跑完）。
-    pub(crate) direct_send: Option<DirectSendState>,
+    /// 打开窗口时那批文件：二维码分享它们，点设备"发送"也发它们。
+    pub(crate) paths: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -117,20 +128,6 @@ pub(crate) enum TransferSessionPhase {
         qr: Option<iced::widget::image::Handle>,
     },
     Failed(String),
-}
-
-/// LocalSend 直推进度快照（R5：设备列表点选直推）。
-#[derive(Debug, Clone)]
-pub(crate) struct DirectSendState {
-    pub(crate) fingerprint: String,
-    pub(crate) alias: String,
-    pub(crate) file_name: String,
-    pub(crate) file_index: usize,
-    pub(crate) total_files: usize,
-    pub(crate) bytes_sent: u64,
-    pub(crate) file_size: u64,
-    /// 终态：Ok 为全部完成，Err 为失败原因（保留最后一次进度展示）。
-    pub(crate) outcome: Option<Result<(), String>>,
 }
 
 /// 接收确认 Modal 状态（R7：未信任设备首次发送）。
@@ -204,11 +201,11 @@ impl FileBrowser {
             finished: None,
             last_progress: None,
             cancel: cancel.clone(),
-            direct_send: None,
+            paths: paths.clone(),
         });
         let items = qr_items_from_paths(paths);
         iced::Task::batch([
-            self.prepare_transfer_window_open(),
+            self.prepare_auxiliary_window_open(),
             self.ensure_transfer_window(),
             qr_transfer_session_command(items, cancel),
         ])
@@ -262,12 +259,18 @@ impl FileBrowser {
                 self.accept_qr_event(event);
                 iced::Task::none()
             }
-            TransferMessage::SendToDevicePressed(device) => self.begin_direct_send(device),
+            TransferMessage::SendToDevicePressed(device) => {
+                let Some(session) = &self.transfer_session else {
+                    return iced::Task::none();
+                };
+                let paths = session.paths.clone();
+                self.begin_direct_send(device, paths)
+            }
             TransferMessage::DirectSendProgress {
                 fingerprint,
                 progress,
             } => {
-                self.accept_direct_send_progress(fingerprint, progress);
+                self.accept_direct_send_progress(&fingerprint, progress);
                 iced::Task::none()
             }
             TransferMessage::DirectSendFinished {
@@ -275,7 +278,7 @@ impl FileBrowser {
                 alias,
                 outcome,
             } => {
-                self.accept_direct_send_finished(fingerprint, &alias, outcome);
+                self.accept_direct_send_finished(&fingerprint, &alias, outcome);
                 iced::Task::none()
             }
             TransferMessage::IncomingRememberToggled(remember) => {
@@ -317,6 +320,28 @@ impl FileBrowser {
                 iced::Task::none()
             }
             TransferMessage::PortCommitted => self.commit_transfer_port(),
+            TransferMessage::LocalSendWindowRequested => self.open_local_send_window(),
+            TransferMessage::ChooserPressed(target) => local_send_window::chooser_command(target),
+            TransferMessage::LocalSendPathsChosen(Ok(paths)) => self.stage_local_send_paths(paths),
+            TransferMessage::LocalSendPathsChosen(Err(error)) => {
+                self.show_global_error(error);
+                iced::Task::none()
+            }
+            TransferMessage::StagedSizeMeasured { path, size } => {
+                self.accept_staged_size(&path, size);
+                iced::Task::none()
+            }
+            TransferMessage::StagedItemRemoved(path) => {
+                self.remove_staged_item(&path);
+                iced::Task::none()
+            }
+            TransferMessage::StagedItemsCleared => {
+                self.clear_staged_items();
+                iced::Task::none()
+            }
+            TransferMessage::SendStagedToDevicePressed(device) => {
+                self.send_staged_to_device(device)
+            }
         }
     }
 
@@ -350,74 +375,6 @@ impl FileBrowser {
     }
 
     /// 设备列表点选直推（R5）。
-    fn begin_direct_send(&mut self, device: DeviceInfo) -> iced::Task<Message> {
-        let paths = self.selected_paths_for_operation();
-        if paths.is_empty() {
-            return iced::Task::none();
-        }
-        // 直推要出示的设备身份归常驻服务；设备列表本身也只在服务运行时存在。
-        let Some(runtime) = self.transfer_runtime.as_ref() else {
-            return iced::Task::none();
-        };
-        let Some(session) = self.transfer_session.as_mut() else {
-            return iced::Task::none();
-        };
-        session.direct_send = Some(DirectSendState {
-            fingerprint: device.fingerprint.clone(),
-            alias: device.alias.clone(),
-            file_name: String::new(),
-            file_index: 0,
-            total_files: 0,
-            bytes_sent: 0,
-            file_size: 0,
-            outcome: None,
-        });
-        let (progress_tx, progress_rx) = tokio::sync::mpsc::channel::<SendProgress>(16);
-        let send = runtime.handle.send_to_device(&device, paths, progress_tx);
-        direct_send_command(device.fingerprint, device.alias, send, progress_rx)
-    }
-
-    fn accept_direct_send_progress(&mut self, fingerprint: String, progress: SendProgress) {
-        let Some(session) = self.transfer_session.as_mut() else {
-            return;
-        };
-        let Some(state) = session.direct_send.as_mut() else {
-            return;
-        };
-        // 迟到的旧直推进度（已被更新的直推顶替）直接丢弃。
-        if state.fingerprint != fingerprint || state.outcome.is_some() {
-            return;
-        }
-        state.file_name = progress.file_name;
-        state.file_index = progress.file_index;
-        state.total_files = progress.total_files;
-        state.bytes_sent = progress.bytes_sent;
-        state.file_size = progress.file_size;
-    }
-
-    fn accept_direct_send_finished(
-        &mut self,
-        fingerprint: String,
-        alias: &str,
-        outcome: Result<(), String>,
-    ) {
-        // 先记日志再找显示槽：窗口已关或显示槽已被新直推顶替时，
-        // 这次失败不会再出现在界面上，日志是它唯一的记录。
-        if let Err(error) = &outcome {
-            record_direct_send_failure(alias, error);
-        }
-        let Some(session) = self.transfer_session.as_mut() else {
-            return;
-        };
-        let Some(state) = session.direct_send.as_mut() else {
-            return;
-        };
-        if state.fingerprint != fingerprint {
-            return;
-        }
-        state.outcome = Some(outcome);
-    }
-
     /// 接收确认回写：accept 走服务确认 + 记住设备持久化；reject 释放会话。
     fn confirm_incoming_transfer(&mut self, accept: bool) -> iced::Task<Message> {
         let Some(incoming) = self.incoming_transfer.take() else {
@@ -649,82 +606,17 @@ fn qr_transfer_session_command(
     )
 }
 
-/// LocalSend 直推：进度经 mpsc 进入同一事件流，终态单独回执。
-fn direct_send_command(
-    fingerprint: String,
-    alias: String,
-    send: impl Future<Output = Result<(), LocalSendError>> + Send + 'static,
-    mut progress_rx: tokio::sync::mpsc::Receiver<SendProgress>,
-) -> iced::Task<Message> {
-    iced::Task::stream(
-        iced::stream::channel(16, async move |mut output| {
-            // 进度通道满时服务内部丢进度，不会阻塞传输本身。
-            let mut send_task = tokio::spawn(send);
-            loop {
-                tokio::select! {
-                    biased;
-                    progress = progress_rx.recv() => match progress {
-                        Some(progress) => {
-                            let _ = output
-                                .send(TransferMessage::DirectSendProgress {
-                                    fingerprint: fingerprint.clone(),
-                                    progress,
-                                })
-                                .await;
-                        }
-                        // 发送任务结束关闭进度通道：收最终回执。
-                        None => break,
-                    },
-                    result = &mut send_task => {
-                        let outcome = match result {
-                            Ok(Ok(())) => Ok(()),
-                            Ok(Err(error)) => Err(error.to_string()),
-                            Err(error) => Err(error.to_string()),
-                        };
-                        let _ = output
-                            .send(TransferMessage::DirectSendFinished {
-                                fingerprint,
-                                alias,
-                                outcome,
-                            })
-                            .await;
-                        return;
-                    }
-                }
-            }
-            let outcome = match send_task.await {
-                Ok(Ok(())) => Ok(()),
-                Ok(Err(error)) => Err(error.to_string()),
-                Err(error) => Err(error.to_string()),
-            };
-            let _ = output
-                .send(TransferMessage::DirectSendFinished {
-                    fingerprint,
-                    alias,
-                    outcome,
-                })
-                .await;
-        })
-        .map(Message::Transfer),
-    )
-}
-
-fn record_direct_send_failure(alias: &str, error: &str) {
-    tracing::error!(
-        target: "app_ui::transfer",
-        event = "localsend_direct_send_failed",
-        error = %sanitized_application_log_detail(error),
-        "LocalSend direct send to {} failed",
-        sanitized_application_log_detail(alias)
-    );
-}
-
 /// 服务启动失败的用户可见文案（保留底层错误）。
 fn transfer_service_start_failed(error: &LocalSendError) -> String {
     tr!("Could not start transfer service: %1", error)
 }
 
+mod direct_send;
+mod local_send_window;
 mod settings;
+
+pub(crate) use direct_send::DirectSendState;
+pub(crate) use local_send_window::{ChooserTarget, StagedItem, StagedSize};
 
 pub(crate) use settings::receiver_failure_message;
 

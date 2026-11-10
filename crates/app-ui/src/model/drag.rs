@@ -149,6 +149,7 @@ pub(crate) struct FileDragHitTestBounds {
     pub(crate) blocked_directories: Vec<FileDragBlockedDirectoryBounds>,
     pub(crate) sidebar_directories: Vec<SidebarFileDragTargetBounds>,
     pub(crate) empty_sidebar_bookmarks: Option<Rectangle>,
+    pub(crate) local_send: Option<Rectangle>,
 }
 
 #[derive(Debug, Clone)]
@@ -208,6 +209,7 @@ pub(crate) struct FileDropHitTestBounds {
     pub(crate) blocked_directories: Vec<FileDragBlockedDirectoryBounds>,
     pub(crate) sidebar_directories: Vec<SidebarFileDragTargetBounds>,
     pub(crate) empty_sidebar_bookmarks: Option<Rectangle>,
+    pub(crate) local_send: Option<Rectangle>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

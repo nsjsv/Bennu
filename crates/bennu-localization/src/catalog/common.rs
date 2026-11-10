@@ -17,6 +17,8 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Properties - Bennu", "属性 - Bennu"),
     ("Preview - Bennu", "预览 - Bennu"),
     ("Send to Phone - Bennu", "发送到手机 - Bennu"),
+    ("LocalSend - Bennu", "LocalSend - Bennu"),
+    ("LocalSend", "LocalSend"),
     ("Search - Bennu", "搜索 - Bennu"),
     ("Closing window...", "正在关闭窗口..."),
     ("Open", "打开"),

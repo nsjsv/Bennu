@@ -103,8 +103,8 @@ pub(crate) fn service_config(
             .clone()
             .filter(|alias| !alias.trim().is_empty())
             .unwrap_or_else(default_transfer_device_alias),
-        // LocalSend 官方设备类型词表中的桌面端取值。
-        device_type: Some("computer".to_owned()),
+        // LocalSend 官方设备类型词表（mobile/desktop/web/headless/server）的桌面端取值。
+        device_type: Some("desktop".to_owned()),
         port: user_config.transfer_port,
         identity_path: file_core::app_dirs::app_data_dir().join(LOCAL_SEND_IDENTITY_FILE_NAME),
         receiver,

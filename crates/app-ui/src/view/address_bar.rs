@@ -127,6 +127,7 @@ fn breadcrumb_layer<'a>(
             Some(FileDropTarget::Directory(directory)) => Some(directory.clone()),
             Some(
                 FileDropTarget::Trash
+                | FileDropTarget::LocalSend
                 | FileDropTarget::SidebarBookmarkSlot(_)
                 | FileDropTarget::Tab(_),
             )

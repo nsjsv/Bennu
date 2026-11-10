@@ -3,6 +3,8 @@ mod x11;
 
 #[cfg(test)]
 mod column_tab_tests;
+#[cfg(test)]
+mod local_send_tests;
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -709,6 +711,13 @@ impl FileBrowser {
             }
             (FileDropOrigin::Internal(snapshot), FileDropTarget::Trash) => {
                 self.trash_explicit_paths(snapshot.sources)
+            }
+            // LocalSend 不区分移动或复制：按住修饰键拖过来同样只是放进待发列表。
+            (FileDropOrigin::Internal(snapshot), FileDropTarget::LocalSend) => {
+                self.stage_local_send_paths(snapshot.sources)
+            }
+            (FileDropOrigin::External, FileDropTarget::LocalSend) => {
+                self.stage_local_send_paths(paths)
             }
             (FileDropOrigin::Internal(snapshot), FileDropTarget::SidebarBookmarkSlot(slot)) => {
                 snapshot.bookmark_source.map_or_else(Task::none, |source| {

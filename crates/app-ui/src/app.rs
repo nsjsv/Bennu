@@ -257,6 +257,11 @@ pub(crate) struct FileBrowser {
     properties_load_generation: u64,
     /// 发送到手机辅助窗口（bennu-transfer）。
     pub(crate) transfer_window: Option<window::Id>,
+    /// 每台设备（证书指纹）最近一次 LocalSend 直推；两个传输窗口的设备行共用。
+    pub(crate) direct_sends: HashMap<String, transfer::DirectSendState>,
+    /// LocalSend 窗口（bennu-localsend）与它的待发列表；关窗即清空。
+    pub(crate) local_send_window: Option<window::Id>,
+    pub(crate) local_send_staged: Vec<transfer::StagedItem>,
     /// 常驻 LocalSend 服务运行时；None = 未启动或启动失败。
     pub(crate) transfer_runtime: Option<transfer::LocalSendRuntime>,
     /// 二维码下载会话；与 transfer_window 同生命周期。
@@ -637,6 +642,9 @@ impl FileBrowser {
             properties: None,
             properties_load_generation: 0,
             transfer_window: None,
+            direct_sends: HashMap::new(),
+            local_send_window: None,
+            local_send_staged: Vec::new(),
             transfer_runtime: None,
             transfer_session: None,
             incoming_transfer: None,
@@ -995,6 +1003,10 @@ impl FileBrowser {
             Some(AuxiliaryWindow::Transfer) => {
                 let content = crate::view::view_transfer_window(self);
                 self.view_with_window_chrome(window, tr!("Transfer"), content, None)
+            }
+            Some(AuxiliaryWindow::LocalSend) => {
+                let content = crate::view::view_local_send_window(self);
+                self.view_with_window_chrome(window, tr!("LocalSend"), content, None)
             }
             Some(AuxiliaryWindow::Preview) => self.view_preview_window(window),
             None => self.view_main_or_closing_window(window),

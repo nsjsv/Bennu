@@ -36,7 +36,8 @@ use tokio::sync::{broadcast, mpsc, watch, Mutex};
 pub use device::{Announce, DeviceInfo, FileMetadata, PrepareUploadRequest, PrepareUploadResponse};
 pub use error::LocalSendError;
 pub use qr::{QrDownloadHandle, QrItem, QrSource};
-pub use send::SendProgress;
+pub use send::prepare::{prepare_files, FileFailure, PrepareProgress, PreparedFiles};
+pub use send::{SendProgress, SendReport};
 
 use identity::DeviceIdentity;
 use send::DirectSender;
@@ -182,21 +183,22 @@ enum ServiceCommand {
 }
 
 impl ServiceHandle {
-    /// 直推文件清单到目标设备，出示本机设备身份。`pin` 是对方要的 PIN：先不带，
-    /// 对方回 `PinRequired` 再让用户输了带上重发（同官方）。
+    /// 直推准备好的文件（`prepare_files`，几台设备共用一份）到目标设备，出示本机设备
+    /// 身份。`pin` 是对方要的 PIN：先不带，对方回 `PinRequired` 再让用户输了带上重发
+    /// （同官方），重发不用重新准备。
     ///
     /// 返回的 future 自带客户端与本机设备信息的克隆，不借用句柄，可直接
     /// `tokio::spawn`；进度通道满时丢弃进度，不反压传输。
     pub fn send_to_device(
         &self,
         target: &DeviceInfo,
-        items: Vec<PathBuf>,
+        files: Arc<PreparedFiles>,
         pin: Option<String>,
         progress: mpsc::Sender<SendProgress>,
-    ) -> impl Future<Output = Result<(), LocalSendError>> + Send + 'static {
+    ) -> impl Future<Output = Result<SendReport, LocalSendError>> + Send + 'static {
         let sender = self.sender.clone();
         let target = target.clone();
-        async move { sender.send(&target, items, pin.as_deref(), progress).await }
+        async move { sender.send(&target, &files, pin.as_deref(), progress).await }
     }
 
     /// 确认 Modal 回写：接受不是收藏的设备的请求。要"加入收藏"时先 `set_favorites`。

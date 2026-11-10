@@ -6,8 +6,8 @@ use local_send::{DeviceInfo, QrSource};
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    qr_items_from_paths, DirectSendFailure, DirectSendOutcome, DirectSendPhase, DirectSendState,
-    FileBrowser, TransferMessage, TransferSessionPhase, TransferSessionState,
+    qr_items_from_paths, DeviceListOwner, DirectSendFailure, DirectSendOutcome, DirectSendPhase,
+    DirectSendState, FileBrowser, TransferMessage, TransferSessionPhase, TransferSessionState,
 };
 use crate::app::transfer_service::service_config;
 use crate::config::{FavoriteTransferDevice, TransferAcceptMode};
@@ -236,17 +236,29 @@ fn finish_direct_send(browser: &mut FileBrowser, fingerprint: &str, outcome: Dir
 }
 
 fn phase_of(browser: &FileBrowser, fingerprint: &str) -> DirectSendPhase {
-    browser.direct_sends[fingerprint].phase.clone()
+    browser.direct_sends.states[fingerprint].phase.clone()
 }
 
 fn start_sending(browser: &mut FileBrowser, fingerprint: &str) {
-    browser.direct_sends.insert(
+    browser.direct_sends.states.insert(
         fingerprint.to_owned(),
-        DirectSendState::sending_to(
-            sample_device(fingerprint),
-            vec![std::path::PathBuf::from("/tmp/one.txt")],
-        ),
+        DirectSendState::sending_to(sample_device(fingerprint)),
     );
+}
+
+fn all_sent() -> local_send::SendReport {
+    local_send::SendReport {
+        sent: 1,
+        failed: Vec::new(),
+    }
+}
+
+fn finished(sent: usize, failed: Vec<local_send::FileFailure>) -> DirectSendPhase {
+    DirectSendPhase::Finished {
+        sent,
+        failed,
+        details_open: false,
+    }
 }
 
 fn failed(reason: &str) -> DirectSendOutcome {
@@ -279,19 +291,23 @@ fn direct_send_results_land_on_their_device_and_failures_are_logged_once() {
             },
         });
         finish_direct_send(&mut browser, "phone-fp", failed(failure));
-        finish_direct_send(&mut browser, "tablet-fp", DirectSendOutcome::Sent);
+        finish_direct_send(
+            &mut browser,
+            "tablet-fp",
+            DirectSendOutcome::Sent(all_sent()),
+        );
         // 设备状态已不在（不该发生）时失败照样进日志：日志是长期记录。
         finish_direct_send(&mut browser, "gone-fp", failed(failure));
     });
 
-    assert_eq!(browser.direct_sends["phone-fp"].file_index, 1);
+    assert_eq!(browser.direct_sends.states["phone-fp"].file_index, 1);
     assert_eq!(
         phase_of(&browser, "phone-fp"),
         DirectSendPhase::Failed(DirectSendFailure::Other(failure.to_owned()))
     );
-    assert_eq!(browser.direct_sends["tablet-fp"].file_index, 0);
-    assert_eq!(phase_of(&browser, "tablet-fp"), DirectSendPhase::Sent);
-    assert!(!browser.direct_sends.contains_key("gone-fp"));
+    assert_eq!(browser.direct_sends.states["tablet-fp"].file_index, 0);
+    assert_eq!(phase_of(&browser, "tablet-fp"), finished(1, Vec::new()));
+    assert!(!browser.direct_sends.states.contains_key("gone-fp"));
     // 成功不记日志。
     assert_eq!(logs, vec![logged_failure; 2]);
     // 上传 URL 里的会话令牌必须先脱敏再进日志。
@@ -308,7 +324,11 @@ fn a_device_that_is_sending_cannot_start_another_send() {
     assert!(!browser.can_send_to(&phone));
     assert!(browser.can_send_to(&sample_device("tablet-fp")));
 
-    finish_direct_send(&mut browser, "phone-fp", DirectSendOutcome::Sent);
+    finish_direct_send(
+        &mut browser,
+        "phone-fp",
+        DirectSendOutcome::Sent(all_sent()),
+    );
     assert!(browser.can_send_to(&phone));
 }
 
@@ -475,4 +495,109 @@ fn choosing_an_accept_mode_changes_what_the_receiver_is_given() {
         .expect("receiving is on by default");
     assert_eq!(receiver.accept, local_send::AcceptPolicy::AskEveryone);
     assert_eq!(receiver.pin.as_deref(), Some("4821"));
+}
+
+#[test]
+fn a_send_with_failed_files_shows_them_on_demand_and_logs_them_once() {
+    let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+    start_sending(&mut browser, "phone-fp");
+    let failure = local_send::FileFailure {
+        file_name: "照片/a.jpg".to_owned(),
+        reason: "Permission denied (os error 13)".to_owned(),
+    };
+
+    let logs = capture_direct_send_failure_logs(|| {
+        finish_direct_send(
+            &mut browser,
+            "phone-fp",
+            DirectSendOutcome::Sent(local_send::SendReport {
+                sent: 2,
+                failed: vec![failure.clone()],
+            }),
+        );
+    });
+
+    assert_eq!(
+        phase_of(&browser, "phone-fp"),
+        finished(2, vec![failure.clone()])
+    );
+    let reasons: Vec<_> = logs.into_iter().map(|(_, reason)| reason).collect();
+    assert_eq!(reasons, ["照片/a.jpg: Permission denied (os error 13)"]);
+    let toggle = TransferMessage::DirectSendDetailsToggled("phone-fp".to_owned());
+    send_settings(&mut browser, toggle.clone());
+    assert!(matches!(
+        phase_of(&browser, "phone-fp"),
+        DirectSendPhase::Finished {
+            details_open: true,
+            ..
+        }
+    ));
+    send_settings(&mut browser, toggle);
+    assert_eq!(phase_of(&browser, "phone-fp"), finished(2, vec![failure]));
+
+    // 只有空文件夹：报"没有可发的"。
+    start_sending(&mut browser, "tablet-fp");
+    finish_direct_send(
+        &mut browser,
+        "tablet-fp",
+        DirectSendOutcome::Failed(DirectSendFailure::NothingToSend),
+    );
+    assert_eq!(
+        phase_of(&browser, "tablet-fp"),
+        DirectSendPhase::Failed(DirectSendFailure::NothingToSend)
+    );
+}
+
+#[test]
+fn each_window_keeps_its_own_checked_devices_until_it_closes() {
+    let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+    let check = |owner, fingerprint: &str, checked| TransferMessage::DeviceChecked {
+        owner,
+        fingerprint: fingerprint.to_owned(),
+        checked,
+    };
+    send_settings(
+        &mut browser,
+        check(DeviceListOwner::LocalSendWindow, "phone", true),
+    );
+    send_settings(
+        &mut browser,
+        check(DeviceListOwner::LocalSendWindow, "tablet", true),
+    );
+    send_settings(
+        &mut browser,
+        check(DeviceListOwner::LocalSendWindow, "tablet", false),
+    );
+    send_settings(
+        &mut browser,
+        check(DeviceListOwner::TransferWindow, "laptop", true),
+    );
+
+    let checked = |browser: &FileBrowser, owner| {
+        let mut checked: Vec<_> = browser.checked_devices.of(owner).iter().cloned().collect();
+        checked.sort();
+        checked
+    };
+    assert_eq!(
+        checked(&browser, DeviceListOwner::LocalSendWindow),
+        ["phone"]
+    );
+    assert_eq!(
+        checked(&browser, DeviceListOwner::TransferWindow),
+        ["laptop"]
+    );
+
+    browser.local_send_window = Some(iced::window::Id::unique());
+    drop(browser.close_local_send_window());
+    assert!(checked(&browser, DeviceListOwner::LocalSendWindow).is_empty());
+    assert_eq!(
+        checked(&browser, DeviceListOwner::TransferWindow),
+        ["laptop"]
+    );
+
+    send_settings(
+        &mut browser,
+        TransferMessage::CheckedCleared(DeviceListOwner::TransferWindow),
+    );
+    assert!(checked(&browser, DeviceListOwner::TransferWindow).is_empty());
 }

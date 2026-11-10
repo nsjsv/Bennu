@@ -258,7 +258,9 @@ pub(crate) struct FileBrowser {
     /// 发送到手机辅助窗口（bennu-transfer）。
     pub(crate) transfer_window: Option<window::Id>,
     /// 每台设备（证书指纹）最近一次 LocalSend 直推；两个传输窗口的设备行共用。
-    pub(crate) direct_sends: HashMap<String, transfer::DirectSendState>,
+    pub(crate) direct_sends: transfer::DirectSends,
+    /// 两个传输窗口各自勾选的设备；关哪个窗口清哪份。
+    pub(crate) checked_devices: transfer::CheckedDevices,
     /// LocalSend 窗口（bennu-localsend）与它的待发列表、"按 IP 添加"表单；关窗即清空。
     pub(crate) local_send_window: Option<window::Id>,
     pub(crate) local_send_staged: Vec<transfer::StagedItem>,
@@ -649,7 +651,8 @@ impl FileBrowser {
             properties: None,
             properties_load_generation: 0,
             transfer_window: None,
-            direct_sends: HashMap::new(),
+            direct_sends: transfer::DirectSends::default(),
+            checked_devices: transfer::CheckedDevices::default(),
             local_send_window: None,
             local_send_staged: Vec::new(),
             favorite_address_form: None,

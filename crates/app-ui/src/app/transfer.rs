@@ -52,6 +52,23 @@ pub(crate) enum TransferMessage {
         alias: String,
         outcome: DirectSendOutcome,
     },
+    /// 一批要发的文件准备中（展开文件夹、算校验）。
+    BatchProgress {
+        batch: u64,
+        progress: local_send::PrepareProgress,
+    },
+    BatchPrepared {
+        batch: u64,
+        files: std::sync::Arc<local_send::PreparedFiles>,
+    },
+    DirectSendDetailsToggled(String),
+    DeviceChecked {
+        owner: DeviceListOwner,
+        fingerprint: String,
+        checked: bool,
+    },
+    SendToCheckedPressed(DeviceListOwner),
+    CheckedCleared(DeviceListOwner),
     /// 设备行里的 PIN 输入（按证书指纹找这台设备的这次直推）。
     DirectSendPinChanged {
         fingerprint: String,
@@ -277,7 +294,7 @@ impl FileBrowser {
                     return iced::Task::none();
                 };
                 let paths = session.paths.clone();
-                self.begin_direct_send(device, paths)
+                self.begin_direct_sends(vec![device], paths)
             }
             TransferMessage::DirectSendProgress {
                 fingerprint,
@@ -292,6 +309,30 @@ impl FileBrowser {
                 outcome,
             } => {
                 self.accept_direct_send_finished(&fingerprint, &alias, outcome);
+                iced::Task::none()
+            }
+            TransferMessage::BatchProgress { batch, progress } => {
+                self.accept_batch_progress(batch, progress);
+                iced::Task::none()
+            }
+            TransferMessage::BatchPrepared { batch, files } => {
+                self.accept_batch_prepared(batch, files)
+            }
+            TransferMessage::DirectSendDetailsToggled(fingerprint) => {
+                self.toggle_direct_send_details(&fingerprint);
+                iced::Task::none()
+            }
+            TransferMessage::DeviceChecked {
+                owner,
+                fingerprint,
+                checked,
+            } => {
+                self.check_device(owner, fingerprint, checked);
+                iced::Task::none()
+            }
+            TransferMessage::SendToCheckedPressed(owner) => self.send_to_checked_devices(owner),
+            TransferMessage::CheckedCleared(owner) => {
+                self.checked_devices.clear(owner);
                 iced::Task::none()
             }
             TransferMessage::DirectSendPinChanged { fingerprint, value } => {
@@ -624,17 +665,21 @@ fn transfer_service_start_failed(error: &LocalSendError) -> String {
     tr!("Could not start transfer service: %1", error)
 }
 
+mod device_checks;
 mod direct_send;
 mod favorites;
+mod incoming;
 mod local_send_window;
 mod settings;
 
+pub(crate) use device_checks::{CheckedDevices, DeviceListOwner};
 pub(crate) use direct_send::{
-    DirectSendFailure, DirectSendOutcome, DirectSendPhase, DirectSendState,
+    DirectSendFailure, DirectSendOutcome, DirectSendPhase, DirectSendState, DirectSends,
 };
 pub(crate) use favorites::{
     service_favorites, AddressFormMessage, FavoriteAddressForm, FavoriteRow,
 };
+pub(crate) use incoming::{incoming_entries, IncomingEntry};
 pub(crate) use local_send_window::{ChooserTarget, StagedItem, StagedSize};
 
 pub(crate) use settings::receiver_failure_message;

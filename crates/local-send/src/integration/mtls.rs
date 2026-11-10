@@ -126,7 +126,12 @@ async fn direct_send_presents_the_identity_its_fingerprint_claims() {
     let (progress, _) = mpsc::channel(1);
 
     sender
-        .send(&server.target(), vec![file], None, progress)
+        .send(
+            &server.target(),
+            &super::prepared(vec![file]).await,
+            None,
+            progress,
+        )
         .await
         .unwrap();
 
@@ -193,7 +198,7 @@ async fn direct_send_refuses_a_device_whose_certificate_is_not_the_chosen_one() 
     };
 
     let error = sender
-        .send(&chosen, vec![file], None, progress)
+        .send(&chosen, &super::prepared(vec![file]).await, None, progress)
         .await
         .unwrap_err();
 

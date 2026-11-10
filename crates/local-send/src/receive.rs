@@ -27,6 +27,7 @@ use tokio::sync::{broadcast, oneshot, watch, Mutex};
 use crate::device::{DeviceInfo, FileMetadata, PrepareUploadRequest, PrepareUploadResponse};
 use crate::{AcceptPolicy, Favorite, ReceiverConfig, ServiceEvent};
 
+mod destination;
 mod listener;
 mod tls;
 
@@ -46,8 +47,14 @@ struct FileSlot {
     /// 实际落盘路径（首块写入前确定，重名规则在此时应用）。
     dest: Option<PathBuf>,
     received: u64,
+    /// 已经开始过几次上传：校验不符时据此决定还让不让重传。
+    attempts: u8,
     outcome: SlotOutcome,
 }
+
+/// 同一文件最多收几次（同官方 `MAX_UPLOAD_ATTEMPTS`）：校验不符的前几次回 422 让对方
+/// 重发，到次数判失败。
+const MAX_UPLOAD_ATTEMPTS: u8 = 3;
 
 /// 文件槽终态：成功、失败（原因随 `ReceiveFinished` 上报）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,6 +69,8 @@ struct Session {
     /// 发起 prepare-upload 的证书指纹：upload、cancel 必须来自同一张证书。
     sender: String,
     files: HashMap<String, FileSlot>,
+    /// 这次发送里每个顶层文件夹实际落到的目录（同名的已改名）。
+    folders: HashMap<String, PathBuf>,
     finished_emitted: bool,
 }
 
@@ -203,18 +212,6 @@ async fn register(
     (StatusCode::OK, Json(state.own_device.clone()))
 }
 
-/// 清洗网络传来的文件名：只保留末段路径组件，拒绝空名与目录穿越。
-/// 这是信任边界：fileName 来自任意同网设备，直接拼接会写出下载目录之外。
-fn sanitize_file_name(raw: &str) -> Option<String> {
-    let name = raw.replace('\\', "/");
-    let name = name.rsplit('/').next().unwrap_or("");
-    let name = name.trim();
-    if name.is_empty() || name == "." || name == ".." {
-        return None;
-    }
-    Some(name.to_string())
-}
-
 /// 生成接收端会话 id / 上传令牌（随机 16 字节 hex，见 lib::random_id）。
 fn random_id() -> String {
     crate::random_id()
@@ -311,6 +308,7 @@ async fn accept_session(
                 token,
                 dest: None,
                 received: 0,
+                attempts: 0,
                 outcome: SlotOutcome::Pending,
             },
         );
@@ -320,6 +318,7 @@ async fn accept_session(
         Session {
             sender: sender.fingerprint.clone(),
             files: slots,
+            folders: HashMap::new(),
             finished_emitted: false,
         },
     );
@@ -344,29 +343,32 @@ async fn upload(
     Query(query): Query<UploadQuery>,
     body: Body,
 ) -> impl IntoResponse {
-    let (meta, _) = {
-        let sessions = state.sessions.lock().await;
+    let (meta, attempts) = {
+        let mut sessions = state.sessions.lock().await;
         // 别的证书拿着令牌也不行；与未知会话同一回应，不告诉探测者会话存在。
         let Some(session) = sessions
-            .get(&query.session_id)
+            .get_mut(&query.session_id)
             .filter(|session| session.sender == peer.fingerprint)
         else {
             return (StatusCode::FORBIDDEN, "unknown session".to_string());
         };
-        let Some(slot) = session.files.get(&query.file_id) else {
+        let Some(slot) = session.files.get_mut(&query.file_id) else {
             return (StatusCode::FORBIDDEN, "unknown fileId".to_string());
         };
         if slot.token != query.token {
             return (StatusCode::FORBIDDEN, "invalid token".to_string());
         }
         match slot.outcome {
-            SlotOutcome::Pending => (slot.meta.clone(), slot.token.clone()),
+            SlotOutcome::Pending => {
+                slot.attempts = slot.attempts.saturating_add(1);
+                (slot.meta.clone(), slot.attempts)
+            }
             // 重复上传同一 fileId：令牌有效但槽位已终态，拒绝重放。
             _ => return (StatusCode::CONFLICT, "file already finalized".to_string()),
         }
     };
 
-    let Some(file_name) = sanitize_file_name(&meta.file_name) else {
+    let Some(segments) = destination::file_name_segments(&meta.file_name) else {
         mark_slot_failed(
             &state,
             &query.session_id,
@@ -378,82 +380,58 @@ async fn upload(
         return (StatusCode::BAD_REQUEST, "invalid file name".to_string());
     };
 
-    // 首块写入前才确定落盘路径：create_new 保证重名探测与占位原子完成。
-    let dest = {
-        let sessions = state.sessions.lock().await;
-        sessions
-            .get(&query.session_id)
-            .and_then(|s| s.files.get(&query.file_id))
-            .and_then(|slot| slot.dest.clone())
-    };
-    let dest = match dest {
-        Some(dest) => dest,
-        None => match unique_destination(&state.download_dir, &file_name).await {
-            Ok(dest) => {
-                // 必须登记成功：发送方重传时要写回同一个文件，否则会另起一个名字、留下半成品。
-                let mut sessions = state.sessions.lock().await;
-                if let Some(slot) = sessions
-                    .get_mut(&query.session_id)
-                    .and_then(|s| s.files.get_mut(&query.file_id))
-                {
-                    slot.dest = Some(dest.clone());
+    // 首块写入前才确定落盘路径：create_new 保证重名探测与占位原子完成。在会话锁内定，
+    // 同一次发送的同一个文件夹只改一次名。必须登记：重传要写回同一个文件，否则会另起
+    // 一个名字、留下半成品。
+    let resolved = {
+        let mut sessions = state.sessions.lock().await;
+        match sessions.get_mut(&query.session_id) {
+            None => return (StatusCode::FORBIDDEN, "unknown session".to_string()),
+            Some(session) => match session
+                .files
+                .get(&query.file_id)
+                .and_then(|slot| slot.dest.clone())
+            {
+                Some(dest) => Ok(dest),
+                None => {
+                    let resolved = destination::resolve_destination(
+                        &state.download_dir,
+                        &mut session.folders,
+                        &segments,
+                    )
+                    .await;
+                    if let (Ok(dest), Some(slot)) =
+                        (&resolved, session.files.get_mut(&query.file_id))
+                    {
+                        slot.dest = Some(dest.clone());
+                    }
+                    resolved
                 }
-                dest
-            }
-            Err(error) => {
-                mark_slot_failed(
-                    &state,
-                    &query.session_id,
-                    &query.file_id,
-                    "cannot create file",
-                )
-                .await;
-                finish_if_complete(&state, &query.session_id).await;
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("cannot create file: {error}"),
-                );
-            }
-        },
+            },
+        }
+    };
+    let dest = match resolved {
+        Ok(dest) => dest,
+        Err(error) => {
+            mark_slot_failed(
+                &state,
+                &query.session_id,
+                &query.file_id,
+                "cannot create file",
+            )
+            .await;
+            finish_if_complete(&state, &query.session_id).await;
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("cannot create file: {error}"),
+            );
+        }
     };
 
-    match stream_to_file(&state, &query, body, &dest, &meta).await {
+    match stream_to_file(&state, &query, body, &dest, &meta, attempts).await {
         Ok(()) => (StatusCode::OK, "ok".to_string()),
         Err(error) => (error.0, error.1),
     }
-}
-
-/// 重名规则：`name.ext` 已存在则 `name (1).ext`、`name (2).ext` 依次探测（R8）。
-/// create_new 保证并发会话写入同名文件时不会互相覆盖。
-async fn unique_destination(dir: &PathBuf, file_name: &str) -> std::io::Result<PathBuf> {
-    tokio::fs::create_dir_all(dir).await?;
-    let path = std::path::Path::new(file_name);
-    let stem = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or(file_name);
-    let extension = path.extension().and_then(|s| s.to_str());
-    for index in 0..10_000u32 {
-        let candidate = match (index, extension) {
-            (0, _) => dir.join(file_name),
-            (n, Some(ext)) => dir.join(format!("{stem} ({n}).{ext}")),
-            (n, None) => dir.join(format!("{stem} ({n})")),
-        };
-        match tokio::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&candidate)
-            .await
-        {
-            Ok(_) => return Ok(candidate),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(error),
-        }
-    }
-    Err(std::io::Error::new(
-        std::io::ErrorKind::AlreadyExists,
-        "too many name collisions",
-    ))
 }
 
 type UploadFailure = (StatusCode, String);
@@ -465,6 +443,7 @@ async fn stream_to_file(
     body: Body,
     dest: &PathBuf,
     meta: &FileMetadata,
+    attempts: u8,
 ) -> Result<(), UploadFailure> {
     // truncate：dest 由 unique_destination 占位/上次中断重传时，从头重写。
     let mut file = tokio::fs::OpenOptions::new()
@@ -524,10 +503,17 @@ async fn stream_to_file(
         .await);
     }
 
-    // 协议 v2.2：声明了 sha256 但不匹配 → 422，删除半成品。
+    // 协议 v2.2：声明了 sha256 但不匹配 → 422。还没到次数：槽退回待收、留着占位文件
+    // （下次 truncate 重写，名字不被别人占走），让对方重发；到次数删半成品、判失败。
     if let (Some(expected), Some(hasher)) = (&meta.sha256, hasher) {
         let actual = format!("{:x}", hasher.finalize());
         if !actual.eq_ignore_ascii_case(expected) {
+            if attempts < MAX_UPLOAD_ATTEMPTS {
+                return Err((
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "checksum mismatch".to_string(),
+                ));
+            }
             return Err(fail_upload(
                 state,
                 query,

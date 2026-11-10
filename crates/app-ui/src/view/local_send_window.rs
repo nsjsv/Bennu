@@ -4,8 +4,8 @@ use iced::widget::{button, column, container, row, scrollable, Column};
 use iced::{Alignment, Element, Length, Theme};
 
 use crate::app::transfer::{
-    receiver_failure_message, AddressFormMessage, ChooserTarget, StagedItem, StagedSize,
-    TransferMessage,
+    receiver_failure_message, AddressFormMessage, ChooserTarget, DeviceListOwner, StagedItem,
+    StagedSize, TransferMessage,
 };
 use crate::app::FileBrowser;
 use crate::appearance::{context_menu_button_style, context_menu_style, muted_text_color};
@@ -28,15 +28,18 @@ const STAGED_ROW_HEIGHT: f32 = 26.0;
 const STAGED_NAME_MAX_CHARS: usize = 48;
 
 pub(crate) fn view_local_send_window(browser: &FileBrowser) -> Element<'_, Message> {
-    let content = column![
-        this_computer_card(browser),
-        staged_card(browser),
-        favorites_card(browser),
-        nearby_card(browser),
-    ]
-    .spacing(CARD_SPACING)
-    .padding(WINDOW_PADDING)
-    .width(Length::Fill);
+    let has_files = !browser.local_send_staged.is_empty();
+    let content = column![this_computer_card(browser), staged_card(browser)]
+        .push(local_send_devices::checked_bar(
+            browser,
+            DeviceListOwner::LocalSendWindow,
+            has_files,
+        ))
+        .push(favorites_card(browser))
+        .push(nearby_card(browser))
+        .spacing(CARD_SPACING)
+        .padding(WINDOW_PADDING)
+        .width(Length::Fill);
     scrollable(content).height(Length::Fill).into()
 }
 
@@ -192,12 +195,20 @@ fn staged_total_text(staged: &[StagedItem]) -> String {
     total.display_text()
 }
 
-/// 有待发文件时点设备就发这批；没有时发送不可点。
-fn send_staged(browser: &FileBrowser) -> impl Fn(&DeviceInfo) -> Option<Message> {
+/// 这个窗口的设备行：勾选记在 LocalSend 窗口名下；有待发文件时点设备就发这批，没有
+/// 时发送不可点。
+fn device_rows(
+    browser: &FileBrowser,
+) -> local_send_devices::DeviceRows<'_, impl Fn(&DeviceInfo) -> Option<Message>> {
     let has_files = !browser.local_send_staged.is_empty();
-    move |device| {
-        has_files
-            .then(|| Message::Transfer(TransferMessage::SendStagedToDevicePressed(device.clone())))
+    local_send_devices::DeviceRows {
+        browser,
+        owner: DeviceListOwner::LocalSendWindow,
+        send: move |device: &DeviceInfo| {
+            has_files.then(|| {
+                Message::Transfer(TransferMessage::SendStagedToDevicePressed(device.clone()))
+            })
+        },
     }
 }
 
@@ -233,10 +244,7 @@ fn favorites_card(browser: &FileBrowser) -> Element<'_, Message> {
                 11,
             ))
     } else {
-        content.push(local_send_devices::favorite_rows(
-            browser,
-            send_staged(browser),
-        ))
+        content.push(local_send_devices::favorite_rows(&device_rows(browser)))
     };
     card(content)
 }
@@ -245,7 +253,7 @@ fn nearby_card(browser: &FileBrowser) -> Element<'_, Message> {
     card(
         column![
             local_send_devices::nearby_devices_header(),
-            local_send_devices::nearby_rows(browser, send_staged(browser)),
+            local_send_devices::nearby_rows(&device_rows(browser)),
         ]
         .spacing(8),
     )

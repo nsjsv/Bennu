@@ -13,8 +13,10 @@ mod context_menu_submenu;
 mod convert;
 mod file_operation_verification_settings;
 mod floating_panels;
+mod incoming_transfer_panel;
 mod local_send_address_form;
 mod local_send_devices;
+mod local_send_send_status;
 mod local_send_window;
 mod network_connections;
 mod network_settings;
@@ -108,8 +110,9 @@ use checksum::checksum_panel;
 use convert::convert_panel;
 use floating_panels::{
     context_menu_panel, destructive_action_confirmation_panel, error_notification_panel,
-    file_drop_operation_panel, incoming_transfer_confirmation_panel, open_with_panel,
+    file_drop_operation_panel, open_with_panel,
 };
+use incoming_transfer_panel::incoming_transfer_confirmation_panel;
 use rendering_settings::renderer_restart_notice_panel;
 use right_preview_panel::right_preview_panel;
 use search_panel::{search_input_panel, search_results_view};

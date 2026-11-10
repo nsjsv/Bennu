@@ -383,6 +383,8 @@ impl FileBrowser {
         if let Some(session) = self.transfer_session.take() {
             session.cancel.cancel();
         }
+        self.checked_devices
+            .clear(super::transfer::DeviceListOwner::TransferWindow);
         let Some(window) = self.transfer_window.take() else {
             return Task::none();
         };

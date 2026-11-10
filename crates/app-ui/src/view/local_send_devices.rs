@@ -1,29 +1,66 @@
 //! LocalSend 设备行："发送到手机"窗口与 LocalSend 窗口共用。
 //!
 //! 两块：收藏（全部收藏设备，不在线的灰着）与附近（没被收藏认领的设备）。每行：
-//! 类型图标 + 名字 + 小字 + 这台设备最近一次直推的状态 + ☆/★ + 发送。
+//! 勾选框 + 类型图标 + 名字 + 小字 + 这台设备最近一次直推的状态 + ☆/★ + 发送。
+//! 勾选按窗口各记一份（`DeviceListOwner`）。
 
-use iced::widget::{button, column, container, row, text_input, tooltip, Column};
+use iced::widget::{button, checkbox, column, container, row, tooltip, Column};
 use iced::{Alignment, Element, Length, Theme};
 
-use crate::app::transfer::{
-    DirectSendFailure, DirectSendPhase, DirectSendState, FavoriteRow, TransferMessage,
-};
+use crate::app::transfer::{DeviceListOwner, FavoriteRow, TransferMessage};
 use crate::app::FileBrowser;
 use crate::appearance::{context_menu_button_style, muted_text_color};
-use crate::formatting::format_middle_ellipsized_text;
 use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::icons::IconSymbol;
-use bennu_theme::ui_colors;
 use local_send::DeviceInfo;
 
+use super::local_send_send_status::direct_send_lines;
 use super::option_controls::tooltip_panel_style;
 use super::settings_group::muted_setting_text;
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};
 
 const DEVICE_ICON_SIZE: f32 = 20.0;
-const STATUS_MAX_CHARS: usize = 72;
+
+/// 设备行共用的上下文：哪个窗口的勾选、点"发送"发什么。
+pub(super) struct DeviceRows<'a, F: Fn(&DeviceInfo) -> Option<Message>> {
+    pub(super) browser: &'a FileBrowser,
+    pub(super) owner: DeviceListOwner,
+    /// 这台设备的发送消息；没有可发的文件时返回 None。
+    pub(super) send: F,
+}
+
+/// 勾了设备就出：给勾着的在线设备发送（`can_send` = 有文件可发）+ 取消勾选。
+pub(super) fn checked_bar(
+    browser: &FileBrowser,
+    owner: DeviceListOwner,
+    can_send: bool,
+) -> Option<Element<'static, Message>> {
+    if browser.checked_devices.of(owner).is_empty() {
+        return None;
+    }
+    let count = browser.checked_online_devices(owner).len();
+    let action = |label: String, message: Option<TransferMessage>| {
+        button(readable_text(label).size(12))
+            .on_press_maybe(message.map(Message::Transfer))
+            .padding([5, 12])
+            .style(context_menu_button_style())
+    };
+    Some(
+        row![
+            action(
+                tr!("Send to %1 selected", count),
+                (can_send && count > 0).then_some(TransferMessage::SendToCheckedPressed(owner)),
+            ),
+            action(
+                tr!("Clear selection"),
+                Some(TransferMessage::CheckedCleared(owner)),
+            ),
+        ]
+        .spacing(8)
+        .into(),
+    )
+}
 
 /// 标题 + 手动刷新：立即清空快照并触发一轮扫描（不等 10s 周期）。
 pub(super) fn nearby_devices_header() -> Element<'static, Message> {
@@ -52,9 +89,9 @@ pub(super) fn favorites_title<'a>() -> iced::widget::Text<'a, Theme> {
 /// 收藏行。`send` 给出这台设备的发送消息；没有可发的文件时返回 None。不在线的
 /// 收藏发不了：后台按记住的地址一直在找，找到了就变成在线。
 pub(super) fn favorite_rows<'a>(
-    browser: &'a FileBrowser,
-    send: impl Fn(&DeviceInfo) -> Option<Message>,
+    rows_of: &DeviceRows<'a, impl Fn(&DeviceInfo) -> Option<Message>>,
 ) -> Column<'a, Message> {
+    let browser = rows_of.browser;
     let mut rows = column![].spacing(8).width(Length::Fill);
     for FavoriteRow { favorite, online } in browser.favorite_rows() {
         let unfavor = star_button(
@@ -66,7 +103,7 @@ pub(super) fn favorite_rows<'a>(
         // 名字是对方自报或用户起的，不做本地化。
         let name = readable_text(favorite.alias.clone()).size(12);
         rows = rows.push(match online {
-            Some(device) => online_row(browser, device, name.into(), unfavor, &send),
+            Some(device) => online_row(rows_of, device, name.into(), unfavor),
             None => {
                 let last_seen = match favorite.address {
                     Some(address) => tr!("Offline · last seen at %1", address.ip()),
@@ -79,7 +116,14 @@ pub(super) fn favorite_rows<'a>(
                     muted_setting_text(last_seen, 11),
                 ]
                 .spacing(2);
-                device_row(IconSymbol::Monitor, details, unfavor, None)
+                // 不在线的勾不了：发不出去。
+                device_row(
+                    checkbox(false).into(),
+                    IconSymbol::Monitor,
+                    details,
+                    unfavor,
+                    None,
+                )
             }
         });
     }
@@ -88,9 +132,9 @@ pub(super) fn favorite_rows<'a>(
 
 /// 附近行：没被收藏认领的设备。明文设备收藏不了，☆ 灰着并说明原因。
 pub(super) fn nearby_rows<'a>(
-    browser: &'a FileBrowser,
-    send: impl Fn(&DeviceInfo) -> Option<Message>,
+    rows_of: &DeviceRows<'a, impl Fn(&DeviceInfo) -> Option<Message>>,
 ) -> Column<'a, Message> {
+    let browser = rows_of.browser;
     let devices = browser.unclaimed_nearby_devices();
     if devices.is_empty() {
         let any_favorite_online = browser
@@ -127,7 +171,7 @@ pub(super) fn nearby_rows<'a>(
             .into()
         };
         let name = readable_text(device.alias.clone()).size(12).into();
-        rows = rows.push(online_row(browser, device, name, star, &send));
+        rows = rows.push(online_row(rows_of, device, name, star));
     }
     rows
 }
@@ -135,28 +179,41 @@ pub(super) fn nearby_rows<'a>(
 /// 在线设备的一行：小字"型号 · IP"、直推状态、发送（正在发给这台时不可点：同一台
 /// 设备同时只有一次直推）。
 fn online_row<'a>(
-    browser: &'a FileBrowser,
+    rows_of: &DeviceRows<'a, impl Fn(&DeviceInfo) -> Option<Message>>,
     device: &'a DeviceInfo,
     name: Element<'a, Message>,
     star: Element<'a, Message>,
-    send: &impl Fn(&DeviceInfo) -> Option<Message>,
 ) -> Element<'a, Message> {
+    let browser = rows_of.browser;
     let mut details = column![name].spacing(2);
     let subtitle = device_subtitle(device);
     if !subtitle.is_empty() {
         details = details.push(muted_setting_text(subtitle, 11));
     }
     if let Some(state) = browser.direct_send_to(device) {
-        details = details.push(direct_send_status(state));
-        if let DirectSendPhase::NeedsPin { input, .. } = &state.phase {
-            details = details.push(pin_prompt(&device.fingerprint, input));
-        }
+        details = details.push(direct_send_lines(browser, &device.fingerprint, state));
     }
-    let message = send(device).filter(|_| browser.can_send_to(device));
-    device_row(device_icon(device), details, star, message)
+    let owner = rows_of.owner;
+    let fingerprint = device.fingerprint.clone();
+    let check = checkbox(
+        browser
+            .checked_devices
+            .of(owner)
+            .contains(&device.fingerprint),
+    )
+    .on_toggle(move |checked| {
+        Message::Transfer(TransferMessage::DeviceChecked {
+            owner,
+            fingerprint: fingerprint.clone(),
+            checked,
+        })
+    });
+    let message = (rows_of.send)(device).filter(|_| browser.can_send_to(device));
+    device_row(check.into(), device_icon(device), details, star, message)
 }
 
 fn device_row<'a>(
+    check: Element<'a, Message>,
     icon: IconSymbol,
     details: Column<'a, Message>,
     star: Element<'a, Message>,
@@ -167,6 +224,7 @@ fn device_row<'a>(
         .padding([5, 12])
         .style(context_menu_button_style());
     row![
+        check,
         themed_icon(icon, IconTone::Normal, DEVICE_ICON_SIZE),
         details.width(Length::Fill),
         star,
@@ -202,92 +260,4 @@ fn device_icon(device: &DeviceInfo) -> IconSymbol {
         Some("headless" | "server") => IconSymbol::HardDrive,
         _ => IconSymbol::Monitor,
     }
-}
-
-fn direct_send_status(state: &DirectSendState) -> Element<'static, Message> {
-    match &state.phase {
-        DirectSendPhase::Sending if state.total_files > 0 => muted_setting_text(
-            tr!(
-                "Sending %1/%2 · %3%",
-                // 协议层的序号从 0 开始。
-                state.file_index + 1,
-                state.total_files,
-                file_percent(state)
-            ),
-            11,
-        ),
-        DirectSendPhase::Sending => muted_setting_text(tr!("Sending..."), 11),
-        DirectSendPhase::NeedsPin { wrong: false, .. } => {
-            readable_text(tr!("This device requires a PIN"))
-                .size(11)
-                .into()
-        }
-        DirectSendPhase::NeedsPin { wrong: true, .. } => error_text(tr!("Wrong PIN. Try again.")),
-        DirectSendPhase::Sent => muted_setting_text(tr!("Sent"), 11),
-        DirectSendPhase::Canceled => muted_setting_text(tr!("Canceled"), 11),
-        DirectSendPhase::Failed(DirectSendFailure::Declined) => {
-            error_text(tr!("The device declined."))
-        }
-        DirectSendPhase::Failed(DirectSendFailure::TooManyPinAttempts) => error_text(tr!(
-            "Too many wrong PINs. The device no longer accepts files from this computer for now."
-        )),
-        DirectSendPhase::Failed(DirectSendFailure::Other(error)) => error_text(
-            format_middle_ellipsized_text(&tr!("Send failed: %1", error), STATUS_MAX_CHARS),
-        ),
-    }
-}
-
-fn error_text(label: String) -> Element<'static, Message> {
-    readable_text(label)
-        .size(11)
-        .style(|theme: &Theme| iced::widget::text::Style {
-            color: Some(ui_colors(theme).error),
-        })
-        .into()
-}
-
-/// 对方要 PIN：圆点遮住的输入框（回车即发）+ 取消/发送；用同一批文件重发。
-fn pin_prompt<'a>(fingerprint: &str, input: &'a str) -> Element<'a, Message> {
-    let changed = fingerprint.to_owned();
-    let submit = Message::Transfer(TransferMessage::DirectSendPinSubmitted(
-        fingerprint.to_owned(),
-    ));
-    let action = |label: String, message: Option<Message>| {
-        button(readable_text(label).size(12))
-            .on_press_maybe(message)
-            .padding([4, 10])
-            .style(context_menu_button_style())
-    };
-    row![
-        text_input(&tr!("PIN"), input)
-            .secure(true)
-            .on_input(move |value| {
-                Message::Transfer(TransferMessage::DirectSendPinChanged {
-                    fingerprint: changed.clone(),
-                    value,
-                })
-            })
-            .on_submit_maybe((!input.is_empty()).then(|| submit.clone()))
-            .padding([4, 8])
-            .size(12)
-            .width(Length::Fill),
-        action(
-            tr!("Cancel"),
-            Some(Message::Transfer(TransferMessage::DirectSendPinCanceled(
-                fingerprint.to_owned(),
-            ))),
-        ),
-        action(tr!("Send"), (!input.is_empty()).then_some(submit)),
-    ]
-    .spacing(6)
-    .align_y(Alignment::Center)
-    .into()
-}
-
-/// 当前文件的进度百分比；大小为 0 的文件直接算完成。
-fn file_percent(state: &DirectSendState) -> u64 {
-    if state.file_size == 0 {
-        return 100;
-    }
-    (state.bytes_sent.min(state.file_size) * 100) / state.file_size
 }

@@ -1,8 +1,8 @@
 //! LocalSend 窗口：待发列表与窗口生命周期。
 //!
 //! Bennu 的拖放只在主窗口上收（Wayland、X11 两套底层都是单窗口），所以文件经
-//! 侧栏"LocalSend"落点或窗口里的选择器进待发列表，再点设备发送。待发列表与
-//! "按 IP 添加"表单随窗口：关窗即清空，进行中的直推不受影响。
+//! 侧栏"LocalSend"落点或窗口里的选择器进待发列表，再点设备发送。待发列表、
+//! "按 IP 添加"表单与设备勾选随窗口：关窗即清空，进行中的直推不受影响。
 
 use std::path::{Path, PathBuf};
 
@@ -70,6 +70,8 @@ impl FileBrowser {
         }
         // 还在连的结果回来时对不上表单，会被丢掉。
         self.favorite_address_form = None;
+        self.checked_devices
+            .clear(super::DeviceListOwner::LocalSendWindow);
         let Some(window) = self.local_send_window.take() else {
             return Task::none();
         };
@@ -133,14 +135,17 @@ impl FileBrowser {
         }
     }
 
-    pub(super) fn send_staged_to_device(&mut self, device: DeviceInfo) -> Task<Message> {
-        // 发完列表保留：可以接着发给别的设备。
-        let paths = self
-            .local_send_staged
+    /// 待发列表里的路径；发完列表保留，可以接着发给别的设备。
+    pub(super) fn staged_paths(&self) -> Vec<PathBuf> {
+        self.local_send_staged
             .iter()
             .map(|item| item.path.clone())
-            .collect();
-        self.begin_direct_send(device, paths)
+            .collect()
+    }
+
+    pub(super) fn send_staged_to_device(&mut self, device: DeviceInfo) -> Task<Message> {
+        let paths = self.staged_paths();
+        self.begin_direct_sends(vec![device], paths)
     }
 }
 

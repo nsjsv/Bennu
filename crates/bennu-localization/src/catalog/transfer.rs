@@ -115,4 +115,17 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
         "PIN 错的次数太多，对方暂时不收这台电脑的文件了。",
     ),
     ("PIN", "PIN"),
+    // 发送改造：校验、部分失败、勾选多台
+    ("Checking files %1%", "正在校验 %1%"),
+    ("Sent, %1 failed", "已发送，%1 个失败"),
+    ("Send failed", "发送失败"),
+    ("Details", "详情"),
+    ("Hide details", "收起"),
+    (
+        "Nothing to send. Empty folders cannot be sent.",
+        "没有可发的文件（空文件夹发不过去）。",
+    ),
+    ("Send to %1 selected", "给选中的 %1 台发送"),
+    ("Clear selection", "取消勾选"),
+    ("%1 file(s) · %2", "%1 个文件 · %2"),
 ];

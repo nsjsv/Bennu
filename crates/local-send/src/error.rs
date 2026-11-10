@@ -51,16 +51,16 @@ pub enum LocalSendError {
     #[error("the device declined the files")]
     Declined,
 
+    /// 没有可发的文件（只有空文件夹）。
+    #[error("there is nothing to send; empty folders cannot be sent")]
+    NothingToSend,
+
     /// 对端响应不符合协议（缺字段、错结构等）。
     #[error("peer response does not match LocalSend protocol for {endpoint}: {reason}")]
     PeerProtocol {
         endpoint: &'static str,
         reason: String,
     },
-
-    /// 传输过程中某个文件失败（发送端汇总）。
-    #[error("failed to transfer {file_name}: {reason}")]
-    TransferFile { file_name: String, reason: String },
 
     /// 网络请求失败。
     #[error("network request to {endpoint} failed: {}", error_chain_text(.source))]

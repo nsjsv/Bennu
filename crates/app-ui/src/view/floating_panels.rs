@@ -7,7 +7,7 @@ use desktop_linux::FileClipboardOperation;
 
 use crate::app::scrollbar::{enhanced_scrollbar, scrollbar_on_scroll, ScrollbarAxis};
 use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
-use crate::app::transfer::{IncomingTransferConfirmation, TransferMessage};
+use crate::app::transfer::TransferMessage;
 use crate::appearance::{
     context_menu_item_button_style, context_menu_style, enhanced_scrollbar_style,
     enhanced_vertical_scrollbar_direction, error_notification_style, navigation_icon_button_style,
@@ -37,7 +37,7 @@ use super::{themed_icon, IconTone, MENU_ICON_SIZE};
 
 const ERROR_NOTIFICATION_FLOAT_WIDTH: f32 = 560.0;
 const ERROR_NOTIFICATION_MAX_CHARS: usize = 96;
-const DESTRUCTIVE_CONFIRMATION_PANEL_WIDTH: f32 = 460.0;
+pub(super) const DESTRUCTIVE_CONFIRMATION_PANEL_WIDTH: f32 = 460.0;
 const FILE_DROP_OPERATION_PANEL_WIDTH: f32 = 460.0;
 const FILE_DROP_PATH_MAX_CHARS: usize = 62;
 const OPEN_WITH_PANEL_WIDTH: f32 = 420.0;
@@ -129,74 +129,6 @@ pub(super) fn destructive_action_confirmation_panel(
     let content = column![title_row, readable_text(body).size(13), actions]
         .spacing(12)
         .width(Length::Fill);
-
-    container(content)
-        .padding(14)
-        .width(Length::Fixed(DESTRUCTIVE_CONFIRMATION_PANEL_WIDTH))
-        .style(context_menu_style)
-        .into()
-}
-
-/// 接收确认 Modal：设备名 + 文件清单 + 加入收藏 + 接受/拒绝（R7）。
-pub(super) fn incoming_transfer_confirmation_panel(
-    incoming: &IncomingTransferConfirmation,
-) -> Element<'_, Message> {
-    let summary = tr!(
-        "%1 wants to send %2 item(s)",
-        incoming.device.alias,
-        incoming.files.len()
-    );
-    let mut file_list = column![].spacing(4).width(Length::Fill);
-    for file in &incoming.files {
-        file_list = file_list.push(
-            row![
-                readable_text(file.file_name.clone())
-                    .size(12)
-                    .width(Length::Fill),
-                readable_text(bennu_localization::format_file_size(file.size)).size(11),
-            ]
-            .spacing(8)
-            .align_y(Alignment::Center),
-        );
-    }
-    // 明文设备的身份是自报的，收藏不了。
-    let add_to_favorites = incoming.device.is_certified().then(|| {
-        checkbox(incoming.add_to_favorites)
-            .label(tr!("Add to favorites"))
-            .on_toggle(|add| Message::Transfer(TransferMessage::IncomingAddToFavoritesToggled(add)))
-    });
-    let actions = row![
-        Space::new().width(Length::Fill),
-        secondary_action_button(
-            tr!("Decline"),
-            Message::Transfer(TransferMessage::IncomingConfirmed { accept: false }),
-        ),
-        primary_action_button(
-            tr!("Accept"),
-            Message::Transfer(TransferMessage::IncomingConfirmed { accept: true }),
-        ),
-    ]
-    .spacing(6)
-    .align_y(Alignment::Center);
-
-    let content = column![
-        row![
-            themed_icon(IconSymbol::Download, IconTone::Normal, MENU_ICON_SIZE),
-            readable_text(tr!("Incoming files"))
-                .size(16)
-                .width(Length::Fill),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center),
-        readable_text(summary).size(13),
-        container(scrollable(file_list))
-            .height(Length::Fixed(132.0))
-            .width(Length::Fill),
-    ]
-    .push(add_to_favorites)
-    .push(actions)
-    .spacing(12)
-    .width(Length::Fill);
 
     container(content)
         .padding(14)

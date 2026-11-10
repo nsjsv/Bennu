@@ -46,6 +46,7 @@ fn receive_state(
         token: TOKEN.into(),
         dest: None,
         received: 0,
+        attempts: 0,
         outcome: SlotOutcome::Pending,
     };
     state.sessions.try_lock().unwrap().insert(
@@ -53,6 +54,7 @@ fn receive_state(
         Session {
             sender: SENDER.into(),
             files: HashMap::from([(FILE.to_owned(), slot)]),
+            folders: HashMap::new(),
             finished_emitted: false,
         },
     );

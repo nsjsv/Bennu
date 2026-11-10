@@ -19,6 +19,7 @@ mod find_device;
 mod mtls;
 mod pin;
 mod qr;
+mod send;
 
 pub(crate) const TEST_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -512,10 +513,21 @@ async fn upload_dedups_existing_names_with_suffix() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn upload_sha256_mismatch_returns_422_and_cleans_up() {
+async fn a_checksum_mismatch_may_be_resent_until_the_third_attempt() {
     let mut checksum_meta = meta("0", "sum.txt", 5);
     checksum_meta.sha256 = Some(sha256_hex(b"hello"));
     let (mut server, session) = run_trusted_session(vec![("0", checksum_meta)]).await;
+
+    // 前两次不对：422，文件退回待收，会话没结束。
+    for _ in 0..2 {
+        let response = upload_text(&server, &session, "0", "hellx").await;
+        assert_eq!(response.status(), 422);
+    }
+    assert!(!matches!(
+        server.events.try_recv(),
+        Ok(ServiceEvent::ReceiveFinished { .. })
+    ));
+    // 第三次还不对：判失败、删半成品。
     let response = upload_text(&server, &session, "0", "hellx").await;
     assert_eq!(response.status(), 422);
     let event = wait_for(&mut server.events, |e| {
@@ -531,10 +543,72 @@ async fn upload_sha256_mismatch_returns_422_and_cleans_up() {
         unreachable!()
     };
     assert!(saved_paths.is_empty());
-    assert_eq!(failed[0].0, "sum.txt");
-    assert_eq!(failed[0].1, "checksum mismatch");
-    // 校验失败的半成品必须删除。
+    assert_eq!(
+        failed,
+        [("sum.txt".to_owned(), "checksum mismatch".to_owned())]
+    );
     assert!(!server._dir.path().join("sum.txt").exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_resent_file_lands_in_the_same_place_after_a_mismatch() {
+    let mut checksum_meta = meta("0", "sum.txt", 5);
+    checksum_meta.sha256 = Some(sha256_hex(b"hello"));
+    let (server, session) = run_trusted_session(vec![("0", checksum_meta)]).await;
+
+    assert_eq!(
+        upload_text(&server, &session, "0", "hellx").await.status(),
+        422
+    );
+    assert_eq!(
+        upload_text(&server, &session, "0", "hello").await.status(),
+        200
+    );
+
+    assert_eq!(
+        std::fs::read(server._dir.path().join("sum.txt")).unwrap(),
+        b"hello"
+    );
+    assert_eq!(std::fs::read_dir(server._dir.path()).unwrap().count(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_folder_arrives_with_its_structure_beside_an_existing_one() {
+    let (mut server, session) = run_trusted_session(vec![
+        ("0", meta("0", "照片/a.txt", 1)),
+        ("1", meta("1", "照片/2024/b.txt", 1)),
+    ])
+    .await;
+    std::fs::create_dir(server._dir.path().join("照片")).unwrap();
+
+    assert_eq!(upload_text(&server, &session, "0", "a").await.status(), 200);
+    assert_eq!(upload_text(&server, &session, "1", "b").await.status(), 200);
+
+    let renamed = server._dir.path().join("照片 (1)");
+    assert_eq!(std::fs::read(renamed.join("a.txt")).unwrap(), b"a");
+    assert_eq!(
+        std::fs::read(renamed.join("2024").join("b.txt")).unwrap(),
+        b"b"
+    );
+    wait_for(&mut server.events, |e| {
+        matches!(e, ServiceEvent::ReceiveFinished { .. })
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_file_name_climbing_out_of_the_receive_directory_is_refused() {
+    let (server, session) = run_trusted_session(vec![("0", meta("0", "../evil.txt", 1))]).await;
+
+    assert_eq!(upload_text(&server, &session, "0", "x").await.status(), 400);
+
+    assert!(!server
+        ._dir
+        .path()
+        .parent()
+        .unwrap()
+        .join("evil.txt")
+        .exists());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -651,77 +725,6 @@ fn sha256_hex(data: &[u8]) -> String {
 
 // —— A4：send 端到端 ——
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn send_to_device_transfers_files_and_directory_zip() {
-    let mut server = spawn_receive(false, Duration::from_secs(10)).await;
-
-    let source = tempfile::tempdir().unwrap();
-    std::fs::write(source.path().join("one.txt"), b"first").unwrap();
-    let dir = source.path().join("bundle");
-    std::fs::create_dir_all(dir.join("inner")).unwrap();
-    std::fs::write(dir.join("inner").join("deep.txt"), b"deep").unwrap();
-    std::fs::write(dir.join("top.txt"), b"top").unwrap();
-
-    let target = server.target();
-    let (progress_tx, mut progress_rx) = tokio::sync::mpsc::channel(64);
-    let items = vec![source.path().join("one.txt"), dir.clone()];
-    let identity_dir = tempfile::tempdir().unwrap();
-    let (sender, fingerprint) = crate::send::sender_with_new_identity(identity_dir.path());
-    server.favor(&fingerprint);
-    sender
-        .send(&target, items, None, progress_tx)
-        .await
-        .unwrap();
-
-    // 接收端：一个普通文件 + 一个目录 zip。
-    let event = wait_for(&mut server.events, |e| {
-        matches!(e, ServiceEvent::ReceiveFinished { .. })
-    })
-    .await;
-    let ServiceEvent::ReceiveFinished {
-        saved_paths,
-        failed,
-        ..
-    } = event
-    else {
-        unreachable!()
-    };
-    assert!(failed.is_empty(), "failed: {failed:?}");
-    assert_eq!(saved_paths.len(), 2);
-    assert_eq!(
-        std::fs::read(server._dir.path().join("one.txt")).unwrap(),
-        b"first"
-    );
-    let zip_bytes = std::fs::read(server._dir.path().join("bundle.zip")).unwrap();
-    let reader =
-        async_zip::tokio::read::seek::ZipFileReader::with_tokio(std::io::Cursor::new(zip_bytes))
-            .await
-            .unwrap();
-    let mut names = Vec::new();
-    for index in 0..reader.file().entries().len() {
-        names.push(
-            reader.file().entries()[index]
-                .filename()
-                .clone()
-                .into_string()
-                .unwrap(),
-        );
-    }
-    assert!(names.contains(&"bundle/top.txt".to_string()));
-    assert!(names.contains(&"bundle/inner/deep.txt".to_string()));
-
-    // 进度通道收到过事件（通道容量有限，只验证存在性）。
-    assert!(progress_rx.recv().await.is_some());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn send_to_device_requires_discovered_address() {
-    let target = remote_device("phone-fp", "Phone");
-    let source = tempfile::tempdir().unwrap();
-    let file = source.path().join("one.txt");
-    std::fs::write(&file, b"x").unwrap();
-    let (sender, _) = crate::send::sender_with_new_identity(source.path());
-    let (progress, _) = tokio::sync::mpsc::channel(1);
-    let result = sender.send(&target, vec![file], None, progress).await;
-    assert!(matches!(result, Err(crate::LocalSendError::AddressUnknown)));
+pub(crate) async fn prepared(items: Vec<std::path::PathBuf>) -> crate::PreparedFiles {
+    crate::prepare_files(items, tokio::sync::mpsc::channel(1).0).await
 }

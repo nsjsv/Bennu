@@ -1,21 +1,27 @@
-//! LocalSend 直推客户端：prepare-upload → upload×N → cancel（失败时）。
+//! LocalSend 直推客户端：prepare-upload → upload×N → cancel（有文件没传成时）。
 //!
-//! 目录条目内存打包为单个 `<名称>.zip`（与 QR 路径的 zip 策略一致）；
-//! `ponytail:` 内存缓冲整个目录，超大目录若成问题再改临时文件/分块。
+//! 文件先由 `prepare` 展开、算好校验（几台设备共用一份）；这里只管发。一个文件失败不
+//! 影响别的（同官方）：对方校验不符回 422 时整个文件重传，同一文件最多共传 3 次。
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use tokio::io::{AsyncRead, AsyncReadExt, ReadBuf};
+use tokio::io::{AsyncRead, ReadBuf};
 use tokio::sync::mpsc;
 
 use crate::device::{DeviceInfo, FileMetadata, PrepareUploadRequest, PrepareUploadResponse};
 use crate::error::{error_chain_text, LocalSendError};
 use crate::outbound_tls::OutboundTls;
 
+pub(crate) mod prepare;
+
+use prepare::{FileFailure, PreparedFile, PreparedFiles};
+
 /// 直推进度事件的节流步长。
 const PROGRESS_STEP: u64 = 1024 * 1024;
+/// 同一文件最多传几次（同官方接收端的 `MAX_UPLOAD_ATTEMPTS`，发送方不能比它多）。
+const MAX_UPLOAD_ATTEMPTS: u8 = 3;
 
 /// 直推进度快照（阶段 B 的窗口进度显示直接消费）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,33 +33,11 @@ pub struct SendProgress {
     pub file_size: u64,
 }
 
-/// 发送前的文件准备结果：目录已打包成 zip 缓冲。
-enum PreparedFile {
-    Path {
-        file_name: String,
-        size: u64,
-        path: PathBuf,
-    },
-    Memory {
-        file_name: String,
-        bytes: axum::body::Bytes,
-    },
-}
-
-impl PreparedFile {
-    fn file_name(&self) -> &str {
-        match self {
-            PreparedFile::Path { file_name, .. } => file_name,
-            PreparedFile::Memory { file_name, .. } => file_name,
-        }
-    }
-
-    fn size(&self) -> u64 {
-        match self {
-            PreparedFile::Path { size, .. } => *size,
-            PreparedFile::Memory { bytes, .. } => bytes.len() as u64,
-        }
-    }
+/// 一次直推的结果：发成了几个，哪些没发成（含准备时就读不了的）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SendReport {
+    pub sent: usize,
+    pub failed: Vec<FileFailure>,
 }
 
 /// 直推客户端：出站 TLS 配置（出示设备身份）+ 本机设备信息。
@@ -78,21 +62,28 @@ impl DirectSender {
         }
     }
 
-    /// 直推文件清单到目标设备；进度通道满时丢弃进度（UI 只需要最新值）。
+    /// 直推准备好的文件；进度通道满时丢弃进度（UI 只需要最新值）。整次被拒（PIN、
+    /// 拒绝、连不上）返回 Err；单个文件没发成记进 `SendReport.failed`。
     pub(crate) async fn send(
         &self,
         target: &DeviceInfo,
-        items: Vec<PathBuf>,
+        files: &PreparedFiles,
         pin: Option<&str>,
         progress: mpsc::Sender<SendProgress>,
-    ) -> Result<(), LocalSendError> {
+    ) -> Result<SendReport, LocalSendError> {
+        if files.files.is_empty() {
+            // 全都读不了：不必打扰对方。
+            return match files.unreadable.is_empty() {
+                true => Err(LocalSendError::NothingToSend),
+                false => Ok(SendReport {
+                    sent: 0,
+                    failed: files.unreadable.clone(),
+                }),
+            };
+        }
         let base = target
             .http_base_url()
             .ok_or(LocalSendError::AddressUnknown)?;
-        let prepared = prepare_items(items).await?;
-        if prepared.is_empty() {
-            return Ok(());
-        }
         // 开了加密的设备：握手钉住设备表里的指纹（发现时取自它的证书），换了设备的
         // 地址在发出文件清单之前就断开。
         let pinned;
@@ -103,25 +94,26 @@ impl DirectSender {
             &self.client
         };
 
-        let mut files = std::collections::HashMap::new();
-        for (index, item) in prepared.iter().enumerate() {
-            files.insert(
-                index.to_string(),
-                FileMetadata {
-                    id: index.to_string(),
-                    file_name: item.file_name().to_string(),
-                    size: item.size(),
-                    file_type: Some(mime_of(item.file_name()).to_string()),
-                    sha256: None,
-                },
-            );
-        }
         let request = PrepareUploadRequest {
             // 官方接收端以客户端证书哈希识别发送方，自报的身份必须是同一个设备身份。
             info: self.own_device.clone(),
-            files,
+            files: files
+                .files
+                .iter()
+                .enumerate()
+                .map(|(index, file)| {
+                    let id = index.to_string();
+                    let metadata = FileMetadata {
+                        id: id.clone(),
+                        file_name: file.file_name.clone(),
+                        size: file.size,
+                        file_type: Some(mime_of(&file.file_name).to_string()),
+                        sha256: Some(file.sha256.clone()),
+                    };
+                    (id, metadata)
+                })
+                .collect(),
         };
-
         let endpoint = "prepare-upload";
         let url = format!("{base}/api/localsend/v2/{endpoint}");
         let mut prepare = client.post(&url).json(&request);
@@ -132,6 +124,12 @@ impl DirectSender {
             .send()
             .await
             .map_err(|source| LocalSendError::Request { endpoint, source })?;
+        let mut failed = files.unreadable.clone();
+        // 协议：204 = 对方一个也不需要。
+        if response.status() == reqwest::StatusCode::NO_CONTENT {
+            failed.extend(files.files.iter().map(not_taken));
+            return Ok(SendReport { sent: 0, failed });
+        }
         if !response.status().is_success() {
             return Err(prepare_upload_refusal(response.status(), pin.is_some()));
         }
@@ -141,36 +139,49 @@ impl DirectSender {
             .map_err(|source| LocalSendError::Request { endpoint, source })?;
         let session_id = prepared_response.session_id;
 
-        // 逐文件上传；任一失败 → cancel 会话并返回失败汇总。
-        for (index, item) in prepared.iter().enumerate() {
+        let mut sent = 0;
+        let mut announced_file_failed = false;
+        let total = files.files.len();
+        for (index, file) in files.files.iter().enumerate() {
+            // 对方可以只要其中一部分（官方接收端能挑文件）。
             let Some(token) = prepared_response.files.get(&index.to_string()) else {
-                cancel_session(client, &base, &session_id).await;
-                return Err(LocalSendError::PeerProtocol {
-                    endpoint: "prepare-upload",
-                    reason: format!("missing token for fileId {index}"),
-                });
+                failed.push(not_taken(file));
+                continue;
             };
-            let result = upload_one(
+            let upload = Upload {
                 client,
-                &base,
-                &session_id,
-                &index.to_string(),
+                base: &base,
+                session_id: &session_id,
+                file_id: index.to_string(),
                 token,
-                item,
-                &progress,
+                file,
+                progress: &progress,
                 index,
-                prepared.len(),
-            )
-            .await;
-            if let Err(reason) = result {
-                cancel_session(client, &base, &session_id).await;
-                return Err(LocalSendError::TransferFile {
-                    file_name: item.file_name().to_string(),
-                    reason,
-                });
+                total,
+            };
+            match upload.with_retries().await {
+                Ok(()) => sent += 1,
+                Err(reason) => {
+                    announced_file_failed = true;
+                    failed.push(FileFailure {
+                        file_name: file.file_name.clone(),
+                        reason,
+                    });
+                }
             }
         }
-        Ok(())
+        // 宣告过的文件没传完：对方的会话等不到它，取消让对方收尾（删半成品、报结果）。
+        if announced_file_failed {
+            cancel_session(client, &base, &session_id).await;
+        }
+        Ok(SendReport { sent, failed })
+    }
+}
+
+fn not_taken(file: &PreparedFile) -> FileFailure {
+    FileFailure {
+        file_name: file.file_name.clone(),
+        reason: "the device did not take this file".to_owned(),
     }
 }
 
@@ -189,199 +200,90 @@ fn prepare_upload_refusal(status: reqwest::StatusCode, pin_given: bool) -> Local
     }
 }
 
-/// 枚举并准备全部条目；目录 → 内存 zip（顶层保留目录名）。
-async fn prepare_items(items: Vec<PathBuf>) -> Result<Vec<PreparedFile>, LocalSendError> {
-    let mut prepared = Vec::new();
-    for item in items {
-        let metadata = tokio::fs::metadata(&item)
-            .await
-            .map_err(|source| LocalSendError::Io {
-                path: Some(item.clone()),
-                source,
-            })?;
-        if metadata.is_dir() {
-            let dir_name = item
-                .file_name()
-                .and_then(|name| name.to_str())
-                .ok_or_else(|| LocalSendError::InvalidPath { path: item.clone() })?
-                .to_string();
-            let bytes = zip_directory_to_memory(&item, &dir_name).await?;
-            prepared.push(PreparedFile::Memory {
-                file_name: format!("{dir_name}.zip"),
-                // Bytes::from(Vec) 零拷贝接管缓冲。
-                bytes: axum::body::Bytes::from(bytes),
-            });
-        } else {
-            let file_name = item
-                .file_name()
-                .and_then(|name| name.to_str())
-                .ok_or_else(|| LocalSendError::InvalidPath { path: item.clone() })?
-                .to_string();
-            prepared.push(PreparedFile::Path {
-                file_name,
-                size: metadata.len(),
-                path: item.clone(),
-            });
-        }
-    }
-    Ok(prepared)
-}
-
-// 九个参数各自来自会话状态、单文件 prepare 结果与进度通道的不同来源，
-// 且调用点只有一个；为迎合 lint 聚合成参数结构只会多一层无意义的中转映射。
-#[allow(clippy::too_many_arguments)]
-async fn upload_one(
-    client: &reqwest::Client,
-    base: &str,
-    session_id: &str,
-    file_id: &str,
-    token: &str,
-    item: &PreparedFile,
-    progress: &mpsc::Sender<SendProgress>,
+/// 一个文件的上传：地址、令牌与进度归属都来自会话与这批文件。
+struct Upload<'a> {
+    client: &'a reqwest::Client,
+    base: &'a str,
+    session_id: &'a str,
+    file_id: String,
+    token: &'a str,
+    file: &'a PreparedFile,
+    progress: &'a mpsc::Sender<SendProgress>,
     index: usize,
     total: usize,
-) -> Result<(), String> {
-    let endpoint = "upload";
-    let url = format!(
-        "{base}/api/localsend/v2/{endpoint}?sessionId={session_id}&fileId={file_id}&token={token}"
-    );
-    let body = match item {
-        PreparedFile::Path { path, size, .. } => {
-            let file = tokio::fs::File::open(path)
-                .await
-                .map_err(|error| error.to_string())?;
-            // 计数 AsyncRead 包装：ReaderStream 从中切分出 chunk，进度按节流步长投递。
-            let reader = CountingReader {
-                inner: file,
-                count: 0,
-                last_emitted: 0,
-                file_name: item.file_name().to_string(),
-                file_size: *size,
-                file_index: index,
-                total_files: total,
-                progress: progress.clone(),
-            };
-            reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(reader))
+}
+
+enum UploadError {
+    ChecksumMismatch,
+    Other(String),
+}
+
+impl Upload<'_> {
+    /// 对方说校验不符（422）就整个文件重传，同一文件最多共传 3 次。
+    async fn with_retries(&self) -> Result<(), String> {
+        for attempt in 1..=MAX_UPLOAD_ATTEMPTS {
+            match self.once().await {
+                Ok(()) => return Ok(()),
+                Err(UploadError::ChecksumMismatch) if attempt < MAX_UPLOAD_ATTEMPTS => continue,
+                Err(UploadError::ChecksumMismatch) => break,
+                Err(UploadError::Other(reason)) => return Err(reason),
+            }
         }
-        PreparedFile::Memory { bytes, .. } => {
-            emit_progress(
-                progress,
-                item.file_name(),
-                index,
-                total,
-                bytes.len() as u64,
-                bytes.len() as u64,
-            );
-            reqwest::Body::from(bytes.clone())
-        }
-    };
-    let response = client
-        .post(&url)
-        .body(body)
-        .send()
-        .await
-        .map_err(|error| error_chain_text(&error))?;
-    if !response.status().is_success() {
-        return Err(format!("HTTP {}", response.status()));
+        Err(format!(
+            "the received file did not match its checksum {MAX_UPLOAD_ATTEMPTS} times"
+        ))
     }
-    // 发送端进度只反映本机读取量；HTTP 200 即对端确认接收完成。
-    emit_progress(
-        progress,
-        item.file_name(),
-        index,
-        total,
-        item.size(),
-        item.size(),
-    );
-    Ok(())
+
+    async fn once(&self) -> Result<(), UploadError> {
+        let url = format!(
+            "{}/api/localsend/v2/upload?sessionId={}&fileId={}&token={}",
+            self.base, self.session_id, self.file_id, self.token
+        );
+        let source = tokio::fs::File::open(&self.file.path)
+            .await
+            .map_err(|error| UploadError::Other(error.to_string()))?;
+        // 计数 AsyncRead 包装：ReaderStream 从中切分出 chunk，进度按节流步长投递。
+        let reader = CountingReader {
+            inner: source,
+            count: 0,
+            last_emitted: 0,
+            file_name: self.file.file_name.clone(),
+            file_size: self.file.size,
+            file_index: self.index,
+            total_files: self.total,
+            progress: self.progress.clone(),
+        };
+        let response = self
+            .client
+            .post(&url)
+            .body(reqwest::Body::wrap_stream(
+                tokio_util::io::ReaderStream::new(reader),
+            ))
+            .send()
+            .await
+            .map_err(|error| UploadError::Other(error_chain_text(&error)))?;
+        match response.status() {
+            status if status.is_success() => {}
+            reqwest::StatusCode::UNPROCESSABLE_ENTITY => return Err(UploadError::ChecksumMismatch),
+            status => return Err(UploadError::Other(format!("HTTP {status}"))),
+        }
+        // 发送端进度只反映本机读取量；HTTP 200 即对端确认接收完成。
+        emit_progress(
+            self.progress,
+            &self.file.file_name,
+            self.index,
+            self.total,
+            self.file.size,
+            self.file.size,
+        );
+        Ok(())
+    }
 }
 
 async fn cancel_session(client: &reqwest::Client, base: &str, session_id: &str) {
     let url = format!("{base}/api/localsend/v2/cancel?sessionId={session_id}");
     // cancel 是尽力而为的清理，失败只记日志不改变错误传播。
     let _ = client.post(&url).send().await;
-}
-
-/// 目录 → 内存 zip；async_zip 逐文件写缓冲，保持流式压缩避免一次性读入。
-async fn zip_directory_to_memory(dir: &Path, top_level: &str) -> Result<Vec<u8>, LocalSendError> {
-    fn zip_error(path: PathBuf, error: async_zip::error::ZipError) -> LocalSendError {
-        LocalSendError::Io {
-            path: Some(path),
-            source: std::io::Error::other(error),
-        }
-    }
-    let mut buffer = Vec::new();
-    let mut writer = async_zip::tokio::write::ZipFileWriter::with_tokio(&mut buffer);
-    let mut stack = vec![(dir.to_path_buf(), String::new())];
-    while let Some((current, relative)) = stack.pop() {
-        let mut entries =
-            tokio::fs::read_dir(&current)
-                .await
-                .map_err(|source| LocalSendError::Io {
-                    path: Some(current.clone()),
-                    source,
-                })?;
-        while let Some(entry) = entries
-            .next_entry()
-            .await
-            .map_err(|source| LocalSendError::Io {
-                path: Some(current.clone()),
-                source,
-            })?
-        {
-            let name_in_zip = if relative.is_empty() {
-                format!("{top_level}/{}", entry.file_name().to_string_lossy())
-            } else {
-                format!(
-                    "{top_level}/{relative}/{}",
-                    entry.file_name().to_string_lossy()
-                )
-            };
-            if entry
-                .metadata()
-                .await
-                .map_err(|source| LocalSendError::Io {
-                    path: Some(entry.path()),
-                    source,
-                })?
-                .is_dir()
-            {
-                let child_relative = if relative.is_empty() {
-                    entry.file_name().to_string_lossy().to_string()
-                } else {
-                    format!("{relative}/{}", entry.file_name().to_string_lossy())
-                };
-                stack.push((entry.path(), child_relative));
-                continue;
-            }
-            let mut bytes = Vec::new();
-            tokio::fs::File::open(entry.path())
-                .await
-                .map_err(|source| LocalSendError::Io {
-                    path: Some(entry.path()),
-                    source,
-                })?
-                .read_to_end(&mut bytes)
-                .await
-                .map_err(|source| LocalSendError::Io {
-                    path: Some(entry.path()),
-                    source,
-                })?;
-            let entry_builder = async_zip::ZipEntryBuilder::new(
-                name_in_zip.into(),
-                async_zip::Compression::Deflate,
-            );
-            writer
-                .write_entry_whole(entry_builder, &bytes)
-                .await
-                .map_err(|error| zip_error(entry.path(), error))?;
-        }
-    }
-    writer
-        .close()
-        .await
-        .map_err(|error| zip_error(dir.to_path_buf(), error))?;
-    Ok(buffer)
 }
 
 /// 扩展名 → MIME；未知类型统一 octet-stream（浏览器/对端都按下载处理）。
@@ -465,7 +367,7 @@ pub(crate) fn sender_with_new_identity(dir: &Path) -> (DirectSender, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
+    use tokio::io::AsyncReadExt;
 
     #[test]
     fn mime_guess_covers_common_types() {
@@ -474,30 +376,6 @@ mod tests {
     }
 
     // 端到端成功路径见 integration 与 receive 联动（A4）；这里覆盖纯函数与失败文本。
-    #[tokio::test]
-    async fn zip_directory_produces_valid_archive() {
-        let dir = tempfile::tempdir().unwrap();
-        tokio::fs::write(dir.path().join("a.txt"), b"hello")
-            .await
-            .unwrap();
-        tokio::fs::create_dir(dir.path().join("sub")).await.unwrap();
-        tokio::fs::write(dir.path().join("sub").join("b.bin"), [7u8; 64])
-            .await
-            .unwrap();
-
-        let zip = zip_directory_to_memory(dir.path(), "folder").await.unwrap();
-        let reader = async_zip::tokio::read::seek::ZipFileReader::with_tokio(Cursor::new(zip))
-            .await
-            .unwrap();
-        let mut names = Vec::new();
-        for index in 0..reader.file().entries().len() {
-            let entry = reader.file().entries()[index].filename().clone();
-            names.push(entry.into_string().unwrap());
-        }
-        assert!(names.contains(&"folder/a.txt".to_string()));
-        assert!(names.contains(&"folder/sub/b.bin".to_string()));
-    }
-
     fn target_at(address: std::net::SocketAddr) -> DeviceInfo {
         DeviceInfo {
             alias: "Phone".into(),
@@ -512,10 +390,10 @@ mod tests {
         }
     }
 
-    fn one_file(dir: &tempfile::TempDir) -> Vec<PathBuf> {
+    async fn one_file(dir: &tempfile::TempDir) -> PreparedFiles {
         let file = dir.path().join("one.txt");
         std::fs::write(&file, b"x").unwrap();
-        vec![file]
+        prepare::prepare_files(vec![file], mpsc::channel(1).0).await
     }
 
     /// 读完一个带 content-length 的请求再回响应：未读数据留在内核缓冲时
@@ -554,7 +432,7 @@ mod tests {
         let (progress, _) = mpsc::channel(1);
 
         let error = sender
-            .send(&target_at(address), one_file(&dir), None, progress)
+            .send(&target_at(address), &one_file(&dir).await, None, progress)
             .await
             .unwrap_err();
 
@@ -602,15 +480,17 @@ mod tests {
         let (sender, _) = sender_with_new_identity(dir.path());
         let (progress, _) = mpsc::channel(1);
 
-        let error = sender
-            .send(&target_at(address), one_file(&dir), None, progress)
+        let report = sender
+            .send(&target_at(address), &one_file(&dir).await, None, progress)
             .await
-            .unwrap_err();
+            .unwrap();
         responder.await.unwrap();
 
-        let LocalSendError::TransferFile { reason, .. } = &error else {
-            panic!("expected an upload failure, got {error:?}");
+        assert_eq!(report.sent, 0);
+        let [FileFailure { file_name, reason }] = report.failed.as_slice() else {
+            panic!("expected one failed file, got {report:?}");
         };
+        assert_eq!(file_name, "one.txt");
         let refused = std::net::TcpStream::connect(address)
             .unwrap_err()
             .to_string();

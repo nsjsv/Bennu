@@ -146,7 +146,7 @@ async fn accepting_everyone_takes_files_from_strangers() {
 async fn send_one_file(
     server: &ReceiveServer,
     pin: Option<&str>,
-) -> (Result<(), LocalSendError>, tempfile::TempDir) {
+) -> (Result<crate::SendReport, LocalSendError>, tempfile::TempDir) {
     let source = tempfile::tempdir().unwrap();
     let file = source.path().join("one.txt");
     std::fs::write(&file, b"first").unwrap();
@@ -154,7 +154,12 @@ async fn send_one_file(
     server.favor(&fingerprint);
     let (progress, _) = mpsc::channel(4);
     let result = sender
-        .send(&server.target(), vec![file], pin, progress)
+        .send(
+            &server.target(),
+            &super::prepared(vec![file]).await,
+            pin,
+            progress,
+        )
         .await;
     (result, source)
 }

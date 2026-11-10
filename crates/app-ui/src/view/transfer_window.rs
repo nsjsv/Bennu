@@ -3,7 +3,9 @@
 use iced::widget::{button, column, container, image, row, scrollable, Space};
 use iced::{Element, Length};
 
-use crate::app::transfer::{TransferMessage, TransferSessionPhase, TransferSessionState};
+use crate::app::transfer::{
+    DeviceListOwner, TransferMessage, TransferSessionPhase, TransferSessionState,
+};
 use crate::app::FileBrowser;
 use crate::appearance::{context_menu_button_style, context_menu_style};
 use crate::formatting::format_file_size;
@@ -141,10 +143,14 @@ fn qr_progress_line(session: &TransferSessionState) -> String {
 /// LocalSend 设备直推列表卡片：发的是打开窗口时那批文件（会话非空才会打开窗口）。
 /// 有收藏时先列收藏；"按 IP 添加"只在 LocalSend 窗口里。
 fn device_list_card(browser: &FileBrowser) -> Element<'_, Message> {
-    let send = |device: &DeviceInfo| {
-        Some(Message::Transfer(TransferMessage::SendToDevicePressed(
-            device.clone(),
-        )))
+    let rows = local_send_devices::DeviceRows {
+        browser,
+        owner: DeviceListOwner::TransferWindow,
+        send: |device: &DeviceInfo| {
+            Some(Message::Transfer(TransferMessage::SendToDevicePressed(
+                device.clone(),
+            )))
+        },
     };
     let favorite_count = browser.user_config().transfer_favorite_devices.len();
     let mut sections = column![].spacing(8).width(Length::Fill);
@@ -152,19 +158,22 @@ fn device_list_card(browser: &FileBrowser) -> Element<'_, Message> {
     if favorite_count > 0 {
         sections = sections
             .push(local_send_devices::favorites_title())
-            .push(local_send_devices::favorite_rows(browser, send));
+            .push(local_send_devices::favorite_rows(&rows));
         row_count += favorite_count + 1;
     }
     let sections = sections
         .push(local_send_devices::nearby_devices_header())
-        .push(local_send_devices::nearby_rows(browser, send));
+        .push(local_send_devices::nearby_rows(&rows));
     // 设备少时不占满固定高度，避免滚动区空白。
     let content = container(scrollable(sections))
         .height(Length::Fixed(
             DEVICE_LIST_MAX_HEIGHT.min(row_count as f32 * DEVICE_ROW_HEIGHT),
         ))
         .width(Length::Fill);
-    card_container(content)
+    // 会话非空才会打开窗口：总有文件可发。
+    let checked_bar =
+        local_send_devices::checked_bar(browser, DeviceListOwner::TransferWindow, true);
+    card_container(column![].push(checked_bar).push(content).spacing(8))
 }
 
 fn status_line(label: String) -> Element<'static, Message> {

@@ -13,8 +13,9 @@ use crate::device::{DeviceInfo, FileMetadata, PrepareUploadRequest, PrepareUploa
 use crate::discovery::DeviceTable;
 use crate::identity::DeviceIdentity;
 use crate::receive::{port_already_released, spawn_server, PortReleased, ReceiveState};
-use crate::{ServiceEvent, TrustPredicate};
+use crate::{Favorite, ServiceEvent};
 
+mod find_device;
 mod mtls;
 mod qr;
 
@@ -80,12 +81,19 @@ pub(crate) struct ReceiveServer {
     pub(crate) released: PortReleased,
     /// 接收端自己的证书指纹（直推时对端声明的 fingerprint）。
     pub(crate) fingerprint: String,
+    /// 收藏快照：app-ui 改收藏时做的就是换掉它。
+    pub(crate) favorites: watch::Sender<Vec<Favorite>>,
     pub(crate) sender: TestPeer,
     /// 下载目录，随句柄一起释放：服务任务持有的 download_dir 在测试期间始终有效。
     pub(crate) _dir: tempfile::TempDir,
 }
 
 impl ReceiveServer {
+    /// 让这台设备成为收藏（自动收）。
+    pub(crate) fn favor(&self, fingerprint: &str) {
+        self.favorites.send_replace(vec![favorite(fingerprint)]);
+    }
+
     /// 直推目标：本接收端。
     fn target(&self) -> DeviceInfo {
         DeviceInfo {
@@ -97,12 +105,18 @@ impl ReceiveServer {
     }
 }
 
-/// 启动接收端但不等它就绪（端口可能被占）。
+pub(crate) fn favorite(fingerprint: &str) -> Favorite {
+    Favorite {
+        fingerprint: fingerprint.to_owned(),
+        address: None,
+    }
+}
+
+/// 启动接收端但不等它就绪（端口可能被占）；没有收藏设备。
 pub(crate) fn start_receiver(
     alias: &str,
     port: u16,
     previous_released: PortReleased,
-    is_trusted: TrustPredicate,
     confirm_timeout: Duration,
 ) -> ReceiveServer {
     let dir = tempfile::tempdir().unwrap();
@@ -110,10 +124,11 @@ pub(crate) fn start_receiver(
     let identity =
         DeviceIdentity::load_or_create(&identity_dir.path().join("identity.pem")).unwrap();
     let (events_tx, events) = broadcast::channel(128);
+    let (favorites, favorites_rx) = watch::channel(Vec::new());
     let state = Arc::new(ReceiveState::new(
         crate::own_device_info(alias.to_owned(), None, port, &identity),
         dir.path().to_path_buf(),
-        is_trusted,
+        favorites_rx,
         Arc::new(Mutex::new(DeviceTable::default())),
         events_tx,
         confirm_timeout,
@@ -134,6 +149,7 @@ pub(crate) fn start_receiver(
         shutdown,
         released,
         fingerprint: identity.fingerprint().to_owned(),
+        favorites,
         sender: test_peer(),
         _dir: dir,
     }
@@ -163,23 +179,19 @@ pub(crate) async fn wait_until_serving(client: &reqwest::Client, port: u16, alia
     .expect("receiver never started serving");
 }
 
-async fn spawn_receive_with(
-    is_trusted: TrustPredicate,
-    confirm_timeout: Duration,
-) -> ReceiveServer {
+/// `sender_is_favorite`：测试自带的发送方（`server.sender`）是不是收藏设备。
+async fn spawn_receive(sender_is_favorite: bool, confirm_timeout: Duration) -> ReceiveServer {
     let server = start_receiver(
         "TestPC",
         free_port().await,
         port_already_released(),
-        is_trusted,
         confirm_timeout,
     );
+    if sender_is_favorite {
+        server.favor(&server.sender.fingerprint.clone());
+    }
     wait_until_serving(&server.sender.client, server.port, "TestPC").await;
     server
-}
-
-async fn spawn_receive(trusted: bool, confirm_timeout: Duration) -> ReceiveServer {
-    spawn_receive_with(Arc::new(move |_| trusted), confirm_timeout).await
 }
 
 /// 二维码下载服务是明文 HTTP，用普通客户端。
@@ -283,7 +295,7 @@ async fn trusted_prepare_upload_returns_session_and_tokens() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn untrusted_prepare_upload_pends_then_accepts_and_remembers() {
+async fn a_request_from_a_non_favorite_waits_for_confirmation() {
     let mut server = spawn_receive(false, Duration::from_secs(10)).await;
     let task = tokio::spawn(prepare_with(
         server.sender.client.clone(),
@@ -303,17 +315,33 @@ async fn untrusted_prepare_upload_pends_then_accepts_and_remembers() {
     else {
         unreachable!()
     };
-    // 自报的 "sender-fp" 不作数：确认框里的设备、记住的身份都是证书指纹。
+    // 自报的 "sender-fp" 不作数：确认框里的设备（以及加进收藏的身份）是证书指纹；
+    // 地址是连接来源，加进收藏时要记住。
     assert_eq!(device.fingerprint, server.sender.fingerprint);
+    assert_eq!(device.address, Some("127.0.0.1".parse().unwrap()));
     assert_eq!(files.len(), 1);
 
-    // remember=true：本次放行，且后续同设备请求不再挂起。
-    assert!(server.state.resolve_pending(&session_id, true, true).await);
+    assert!(server.state.resolve_pending(&session_id, true).await);
     let response = task.await.unwrap();
     assert_eq!(response.status(), 201);
+}
 
-    let second = prepare(&server, files_map(vec![("0", meta("0", "again.txt", 2))])).await;
-    assert_eq!(second.status(), 201);
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn changing_favorites_takes_effect_on_the_next_request() {
+    let mut server = spawn_receive(false, Duration::from_millis(300)).await;
+    let single = || files_map(vec![("0", meta("0", "a.txt", 5))]);
+
+    // 加进收藏（接收确认里勾"加入收藏"、点 ☆）：下一个请求直接收，不用重启。
+    server.favor(&server.sender.fingerprint.clone());
+    assert_eq!(prepare(&server, single()).await.status(), 201);
+
+    // 取消收藏：又要确认（这里没人确认，超时 403）。
+    server.favorites.send_replace(Vec::new());
+    assert_eq!(prepare(&server, single()).await.status(), 403);
+    wait_for(&mut server.events, |event| {
+        matches!(event, ServiceEvent::IncomingRequest { .. })
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -331,12 +359,7 @@ async fn untrusted_prepare_upload_rejects_and_stale_resolve_fails() {
     let ServiceEvent::IncomingRequest { session_id, .. } = event else {
         unreachable!()
     };
-    assert!(
-        server
-            .state
-            .resolve_pending(&session_id, false, false)
-            .await
-    );
+    assert!(server.state.resolve_pending(&session_id, false).await);
     assert_eq!(task.await.unwrap().status(), 403);
     let event = wait_for(&mut server.events, |e| {
         matches!(e, ServiceEvent::RequestRejected { .. })
@@ -350,7 +373,7 @@ async fn untrusted_prepare_upload_rejects_and_stale_resolve_fails() {
     };
     assert_eq!(rejected, session_id);
     // 决策已消费：重复回写必须返回 false，UI 据此感知决策落空。
-    assert!(!server.state.resolve_pending(&session_id, true, false).await);
+    assert!(!server.state.resolve_pending(&session_id, true).await);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -597,7 +620,7 @@ fn sha256_hex(data: &[u8]) -> String {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn send_to_device_transfers_files_and_directory_zip() {
-    let mut server = spawn_receive(true, Duration::from_secs(10)).await;
+    let mut server = spawn_receive(false, Duration::from_secs(10)).await;
 
     let source = tempfile::tempdir().unwrap();
     std::fs::write(source.path().join("one.txt"), b"first").unwrap();
@@ -610,7 +633,8 @@ async fn send_to_device_transfers_files_and_directory_zip() {
     let (progress_tx, mut progress_rx) = tokio::sync::mpsc::channel(64);
     let items = vec![source.path().join("one.txt"), dir.clone()];
     let identity_dir = tempfile::tempdir().unwrap();
-    let (sender, _) = crate::send::sender_with_new_identity(identity_dir.path());
+    let (sender, fingerprint) = crate::send::sender_with_new_identity(identity_dir.path());
+    server.favor(&fingerprint);
     sender.send(&target, items, progress_tx).await.unwrap();
 
     // 接收端：一个普通文件 + 一个目录 zip。

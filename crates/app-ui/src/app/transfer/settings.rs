@@ -1,7 +1,6 @@
-//! 设置页的传输项：接收开关、端口、接收目录、设备名与信任设备。
+//! 设置页的传输项：接收开关、端口、接收目录、设备名（收藏设备在 `favorites.rs`）。
 //!
-//! 改动服务启动时就确定的配置（开关、端口、目录、设备名）都重启常驻服务并持久化；
-//! 信任设备改的是共享快照，不用重启。
+//! 改动服务启动时就确定的配置（开关、端口、目录、设备名）都重启常驻服务并持久化。
 
 use std::path::PathBuf;
 
@@ -94,20 +93,6 @@ impl FileBrowser {
         };
         self.user_config.transfer_device_alias = configured;
         self.start_or_restart_local_send_service();
-        self.persist_user_preferences_command()
-    }
-
-    pub(super) fn remove_trusted_transfer_device(
-        &mut self,
-        fingerprint: String,
-    ) -> iced::Task<Message> {
-        self.user_config
-            .transfer_trusted_devices
-            .retain(|device| device.fingerprint != fingerprint);
-        if let Some(runtime) = self.transfer_runtime.as_ref() {
-            runtime.trusted.write().remove(&fingerprint);
-        }
-        // 移除信任后再次接收需要重新确认（PRD A5）。
         self.persist_user_preferences_command()
     }
 }

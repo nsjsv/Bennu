@@ -1,10 +1,11 @@
-//! LocalSend 窗口：本机与接收状态、待发列表、附近设备。
+//! LocalSend 窗口：本机与接收状态、待发列表、收藏设备、附近设备。
 
 use iced::widget::{button, column, container, row, scrollable, Column};
 use iced::{Alignment, Element, Length, Theme};
 
 use crate::app::transfer::{
-    receiver_failure_message, ChooserTarget, StagedItem, StagedSize, TransferMessage,
+    receiver_failure_message, AddressFormMessage, ChooserTarget, StagedItem, StagedSize,
+    TransferMessage,
 };
 use crate::app::FileBrowser;
 use crate::appearance::{context_menu_button_style, context_menu_style, muted_text_color};
@@ -14,9 +15,10 @@ use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::icons::IconSymbol;
 use bennu_theme::ui_colors;
+use local_send::DeviceInfo;
 
-use super::local_send_devices;
 use super::settings_group::{muted_setting_text, toggle_setting_row};
+use super::{local_send_address_form, local_send_devices};
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};
 
 const WINDOW_PADDING: f32 = 16.0;
@@ -29,7 +31,8 @@ pub(crate) fn view_local_send_window(browser: &FileBrowser) -> Element<'_, Messa
     let content = column![
         this_computer_card(browser),
         staged_card(browser),
-        devices_card(browser),
+        favorites_card(browser),
+        nearby_card(browser),
     ]
     .spacing(CARD_SPACING)
     .padding(WINDOW_PADDING)
@@ -189,13 +192,63 @@ fn staged_total_text(staged: &[StagedItem]) -> String {
     total.display_text()
 }
 
-fn devices_card(browser: &FileBrowser) -> Element<'_, Message> {
+/// 有待发文件时点设备就发这批；没有时发送不可点。
+fn send_staged(browser: &FileBrowser) -> impl Fn(&DeviceInfo) -> Option<Message> {
     let has_files = !browser.local_send_staged.is_empty();
-    let rows = local_send_devices::device_rows(browser, |device| {
+    move |device| {
         has_files
             .then(|| Message::Transfer(TransferMessage::SendStagedToDevicePressed(device.clone())))
-    });
-    card(column![local_send_devices::nearby_devices_header(), rows].spacing(8))
+    }
+}
+
+/// 收藏：标题 + "按 IP 添加"（展开的表单在标题下面）+ 全部收藏设备。
+fn favorites_card(browser: &FileBrowser) -> Element<'_, Message> {
+    let add = button(
+        row![
+            themed_icon(IconSymbol::Plus, IconTone::Normal, MENU_ICON_SIZE),
+            readable_text(tr!("Add by IP")).size(12),
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center),
+    )
+    .on_press(Message::Transfer(TransferMessage::AddressForm(
+        AddressFormMessage::Opened,
+    )))
+    .padding([4, 10])
+    .style(context_menu_button_style());
+    let mut content = column![row![
+        local_send_devices::favorites_title().width(Length::Fill),
+        add
+    ]
+    .align_y(Alignment::Center)]
+    .spacing(8);
+    if let Some(form) = &browser.favorite_address_form {
+        content = content.push(local_send_address_form::address_form(form));
+    }
+    content = if browser.user_config().transfer_favorite_devices.is_empty() {
+        content
+            .push(readable_text(tr!("No favorite devices yet")).size(12))
+            .push(muted_setting_text(
+                tr!("Click the star next to a device to add it here."),
+                11,
+            ))
+    } else {
+        content.push(local_send_devices::favorite_rows(
+            browser,
+            send_staged(browser),
+        ))
+    };
+    card(content)
+}
+
+fn nearby_card(browser: &FileBrowser) -> Element<'_, Message> {
+    card(
+        column![
+            local_send_devices::nearby_devices_header(),
+            local_send_devices::nearby_rows(browser, send_staged(browser)),
+        ]
+        .spacing(8),
+    )
 }
 
 fn error_text(label: String) -> Element<'static, Message> {

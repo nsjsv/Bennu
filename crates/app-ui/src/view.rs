@@ -13,6 +13,7 @@ mod context_menu_submenu;
 mod convert;
 mod file_operation_verification_settings;
 mod floating_panels;
+mod local_send_address_form;
 mod local_send_devices;
 mod local_send_window;
 mod network_connections;

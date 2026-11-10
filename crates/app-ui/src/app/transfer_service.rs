@@ -3,15 +3,12 @@
 //! 从 transfer.rs 拆出的服务接线职责：状态机只消费这里的产物，
 //! 不直接接触协议装配细节。
 
-use std::collections::HashSet;
-use std::sync::Arc;
-
 use iced::futures::SinkExt;
-use local_send::{DeviceInfo, ReceiverConfig, ServiceConfig, ServiceEvent, TrustPredicate};
+use local_send::{ReceiverConfig, ServiceConfig, ServiceEvent};
 use tokio::sync::broadcast;
 use tracing::warn;
 
-use super::transfer::TransferMessage;
+use super::transfer::{service_favorites, TransferMessage};
 use crate::config::default_transfer_device_alias;
 use crate::model::Message;
 
@@ -82,21 +79,13 @@ pub(crate) fn transfer_download_dir(user_config: &crate::config::UserConfig) -> 
     dir
 }
 
-/// 组装常驻服务配置：本机设备信息；接收开着时再带上接收目录与信任查询回调。
-pub(crate) fn service_config(
-    user_config: &crate::config::UserConfig,
-    trusted: Arc<parking_lot::RwLock<HashSet<String>>>,
-) -> ServiceConfig {
-    let receiver = user_config.transfer_receive_enabled.then(|| {
-        let is_trusted: TrustPredicate = Arc::new(move |device: &DeviceInfo| {
-            // 空 fingerprint 不能作为信任身份；锁中毒按未信任处理（fail closed）。
-            !device.fingerprint.is_empty() && trusted.read().contains(&device.fingerprint)
-        });
-        ReceiverConfig {
+/// 组装常驻服务配置：本机设备信息、收藏设备；接收开着时再带上接收目录。
+pub(crate) fn service_config(user_config: &crate::config::UserConfig) -> ServiceConfig {
+    let receiver = user_config
+        .transfer_receive_enabled
+        .then(|| ReceiverConfig {
             download_dir: transfer_download_dir(user_config),
-            is_trusted,
-        }
-    });
+        });
     ServiceConfig {
         alias: user_config
             .transfer_device_alias
@@ -108,5 +97,6 @@ pub(crate) fn service_config(
         port: user_config.transfer_port,
         identity_path: file_core::app_dirs::app_data_dir().join(LOCAL_SEND_IDENTITY_FILE_NAME),
         receiver,
+        favorites: service_favorites(&user_config.transfer_favorite_devices),
     }
 }

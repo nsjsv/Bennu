@@ -119,7 +119,7 @@ fn segmented_choice_button(choice: SegmentedChoice) -> Element<'static, Message>
             button,
             container(readable_text(text).size(11))
                 .padding([5, 7])
-                .style(segmented_choice_tooltip_style),
+                .style(tooltip_panel_style),
             tooltip::Position::Bottom,
         )
         .into(),
@@ -127,7 +127,7 @@ fn segmented_choice_button(choice: SegmentedChoice) -> Element<'static, Message>
     }
 }
 
-fn segmented_choice_tooltip_style(theme: &Theme) -> container::Style {
+pub(super) fn tooltip_panel_style(theme: &Theme) -> container::Style {
     let colors = ui_colors(theme);
     container::Style {
         background: Some(Background::Color(colors.surface_container_high)),

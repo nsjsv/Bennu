@@ -1,17 +1,16 @@
 //! transfer.rs 状态机的单元测试（保持宿主文件 ≤800 行）。
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use local_send::{DeviceInfo, QrSource};
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    qr_items_from_paths, trusted_fingerprint_set, DirectSendState, FileBrowser, TransferMessage,
-    TransferSessionPhase, TransferSessionState,
+    qr_items_from_paths, DirectSendState, FileBrowser, TransferMessage, TransferSessionPhase,
+    TransferSessionState,
 };
 use crate::app::transfer_service::service_config;
-use crate::config::TrustedTransferDevice;
+use crate::config::FavoriteTransferDevice;
 use crate::model::sanitized_application_log_detail;
 use crate::view::transfer_qr::qr_image_handle;
 
@@ -30,34 +29,39 @@ fn sample_device(fingerprint: &str) -> DeviceInfo {
 }
 
 #[test]
-fn trust_predicate_reads_shared_snapshot_and_fails_closed() {
-    let trusted = Arc::new(parking_lot::RwLock::new(HashSet::from(["fp-1".to_owned()])));
-    let config = service_config(&crate::config::default_user_config(), Arc::clone(&trusted));
-    let is_trusted = config
-        .receiver
-        .expect("receiving is on by default")
-        .is_trusted;
-    assert!(is_trusted(&sample_device("fp-1")));
-    assert!(!is_trusted(&sample_device("fp-2")));
-    // 空 fingerprint 永不信任（fail closed）。
-    assert!(!is_trusted(&sample_device("")));
-    trusted.write().insert("fp-2".to_owned());
-    assert!(is_trusted(&sample_device("fp-2")));
+fn service_config_carries_favorites_with_their_last_address() {
+    let mut user_config = crate::config::default_user_config();
+    user_config.transfer_favorite_devices = vec![FavoriteTransferDevice {
+        fingerprint: "FP-1".to_owned(),
+        alias: "Phone".to_owned(),
+        custom_alias: false,
+        address: Some("192.168.1.9:53317".parse().unwrap()),
+        added_at: String::new(),
+    }];
+
+    let config = service_config(&user_config);
+
+    assert_eq!(
+        config.favorites,
+        vec![local_send::Favorite {
+            fingerprint: "FP-1".to_owned(),
+            address: Some("192.168.1.9:53317".parse().unwrap()),
+        }]
+    );
 }
 
 #[test]
 fn service_config_follows_the_receive_switch_and_port() {
-    let trusted = Arc::new(parking_lot::RwLock::new(HashSet::new()));
     let mut user_config = crate::config::default_user_config();
     user_config.transfer_port = 50000;
 
-    let receiving = service_config(&user_config, Arc::clone(&trusted));
+    let receiving = service_config(&user_config);
     assert_eq!(receiving.port, 50000);
     assert!(receiving.receiver.is_some());
 
     // 关掉接收：没有接收端，端口仍用于发现。
     user_config.transfer_receive_enabled = false;
-    let hidden = service_config(&user_config, trusted);
+    let hidden = service_config(&user_config);
     assert_eq!(hidden.port, 50000);
     assert!(hidden.receiver.is_none());
 }
@@ -160,23 +164,6 @@ fn qr_items_classify_directories_and_files() {
     assert!(matches!(items[1].source, QrSource::File(_)));
     assert_eq!(items[1].display_name, "note.txt");
     std::fs::remove_dir_all(&dir).ok();
-}
-
-#[test]
-fn trusted_fingerprint_set_skips_empty_identities() {
-    let set = trusted_fingerprint_set(&[
-        TrustedTransferDevice {
-            fingerprint: String::new(),
-            alias: "broken".to_owned(),
-            added_at: String::new(),
-        },
-        TrustedTransferDevice {
-            fingerprint: "fp-9".to_owned(),
-            alias: "Phone".to_owned(),
-            added_at: String::new(),
-        },
-    ]);
-    assert_eq!(set, HashSet::from(["fp-9".to_owned()]));
 }
 
 /// 收集 `action` 期间正式代码发出的直推失败日志（消息正文, error 字段）：

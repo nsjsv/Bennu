@@ -3,12 +3,12 @@
 use super::*;
 
 /// 假对端：记录被打到的路由；响应体照官方 App 省略 port/protocol。
-pub(super) struct FakePeer {
-    pub(super) port: u16,
-    pub(super) hits: Arc<parking_lot::Mutex<Vec<&'static str>>>,
+pub(crate) struct FakePeer {
+    pub(crate) port: u16,
+    pub(crate) hits: Arc<parking_lot::Mutex<Vec<&'static str>>>,
 }
 
-pub(super) async fn fake_peer() -> FakePeer {
+pub(crate) async fn fake_peer() -> FakePeer {
     let hits = Arc::new(parking_lot::Mutex::new(Vec::new()));
     let body = serde_json::json!({
         "alias": "Phone",
@@ -56,6 +56,7 @@ pub(crate) fn discovery(port: u16, presence: Presence) -> Discovery {
             .unwrap()
             .client(None)
             .unwrap(),
+        favorites: watch::channel(Vec::new()).1,
     }
 }
 

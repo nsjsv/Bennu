@@ -1,4 +1,5 @@
 use super::*;
+use crate::config::StoredFavoriteTransferDevice;
 
 const CUSTOM_JSON: &str = r##"{
     "version": 1,
@@ -284,4 +285,83 @@ fn stored_privileged_port_falls_back_to_the_default_and_is_reported() {
         local_send::DEFAULT_PORT
     );
     assert_eq!(interpreted.unrecognized.into_keys(), vec!["transfer_port"]);
+}
+
+/// 合并前存下的信任设备：没有地址、没有自定义名标记，fingerprint 是对方自报的（大小写不定）。
+#[test]
+fn trusted_devices_saved_before_favorites_existed_become_favorites() {
+    let current = UserPreferences::from_user_config(&default_user_config()).to_stored();
+    let mut payload = serde_json::to_value(current).unwrap();
+    payload["transfer_trusted_devices"] = serde_json::json!([
+        {"fingerprint": "ab12cd", "alias": "Phone", "added_at": "2026-10-01T00:00:00Z"},
+    ]);
+    let legacy: StoredUserPreferences = serde_json::from_value(payload).unwrap();
+
+    let interpreted = UserPreferences::from_stored(legacy, &default_user_config());
+
+    assert_eq!(
+        interpreted.preferences.transfer_favorite_devices,
+        vec![FavoriteTransferDevice {
+            fingerprint: "AB12CD".to_owned(),
+            alias: "Phone".to_owned(),
+            custom_alias: false,
+            address: None,
+            added_at: "2026-10-01T00:00:00Z".to_owned(),
+        }]
+    );
+    assert!(interpreted.unrecognized.into_keys().is_empty());
+}
+
+#[test]
+fn favorites_keep_their_address_and_custom_name_across_saves() {
+    let mut config = default_user_config();
+    config.transfer_favorite_devices = vec![FavoriteTransferDevice {
+        fingerprint: "AB12CD".to_owned(),
+        alias: "Living room".to_owned(),
+        custom_alias: true,
+        address: Some("192.168.1.9:53318".parse().unwrap()),
+        added_at: String::new(),
+    }];
+
+    let stored = UserPreferences::from_user_config(&config).to_stored();
+    let interpreted = UserPreferences::from_stored(stored, &default_user_config());
+
+    assert_eq!(
+        interpreted.preferences.transfer_favorite_devices,
+        config.transfer_favorite_devices
+    );
+    assert!(interpreted.unrecognized.into_keys().is_empty());
+}
+
+#[test]
+fn an_unreadable_favorite_address_is_dropped_but_the_favorite_stays() {
+    let mut stored = UserPreferences::from_user_config(&default_user_config()).to_stored();
+    stored.transfer_trusted_devices = vec![
+        StoredFavoriteTransferDevice {
+            fingerprint: "AB12CD".to_owned(),
+            alias: "Phone".to_owned(),
+            custom_alias: false,
+            address: Some("not an address".to_owned()),
+            added_at: String::new(),
+        },
+        // 空 fingerprint 不能匹配上任何设备：丢掉。
+        StoredFavoriteTransferDevice {
+            fingerprint: String::new(),
+            alias: "broken".to_owned(),
+            custom_alias: false,
+            address: None,
+            added_at: String::new(),
+        },
+    ];
+
+    let interpreted = UserPreferences::from_stored(stored, &default_user_config());
+
+    let favorites = &interpreted.preferences.transfer_favorite_devices;
+    assert_eq!(favorites.len(), 1);
+    assert_eq!(favorites[0].fingerprint, "AB12CD");
+    assert_eq!(favorites[0].address, None);
+    assert_eq!(
+        interpreted.unrecognized.into_keys(),
+        vec!["transfer_trusted_devices"]
+    );
 }

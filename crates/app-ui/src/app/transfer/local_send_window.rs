@@ -1,8 +1,8 @@
 //! LocalSend 窗口：待发列表与窗口生命周期。
 //!
 //! Bennu 的拖放只在主窗口上收（Wayland、X11 两套底层都是单窗口），所以文件经
-//! 侧栏"LocalSend"落点或窗口里的选择器进待发列表，再点设备发送。待发列表随
-//! 窗口：关窗即清空，进行中的直推不受影响。
+//! 侧栏"LocalSend"落点或窗口里的选择器进待发列表，再点设备发送。待发列表与
+//! "按 IP 添加"表单随窗口：关窗即清空，进行中的直推不受影响。
 
 use std::path::{Path, PathBuf};
 
@@ -68,6 +68,8 @@ impl FileBrowser {
         for item in self.local_send_staged.drain(..) {
             item.measuring.cancel();
         }
+        // 还在连的结果回来时对不上表单，会被丢掉。
+        self.favorite_address_form = None;
         let Some(window) = self.local_send_window.take() else {
             return Task::none();
         };

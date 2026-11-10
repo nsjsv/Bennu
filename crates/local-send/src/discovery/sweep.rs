@@ -8,6 +8,7 @@ use std::time::Duration;
 use tokio::sync::watch;
 
 use super::{is_lan_candidate, lan_candidates, probe_target, record_device, Discovery};
+use crate::Favorite;
 
 /// 扫描周期。
 const HTTP_SWEEP_INTERVAL: Duration = Duration::from_secs(10);
@@ -59,9 +60,31 @@ pub(crate) fn sweep_targets(own_ips: &std::collections::HashSet<Ipv4Addr>) -> Ve
     targets
 }
 
-/// legacy HTTP 扫描兜底：周期对候选子网逐 IP 探测；对方 200 响应即完成发现
-/// （手机端打开 LocalSend 或常驻 HTTP 服务时均可响应）。`refresh` 被通知
-/// （手动刷新）时立即再扫一轮。
+/// 一轮要连的（地址, 协议）：子网里每个地址两种协议都试（扫描时不知道对方开没开
+/// 加密）；收藏只会是开了加密的设备，按记住的地址只试 HTTPS（同官方每轮先探收藏）。
+fn round_probes(
+    subnet: &[Ipv4Addr],
+    port: u16,
+    favorites: &[Favorite],
+) -> Vec<(SocketAddr, &'static str)> {
+    let mut probes: Vec<(SocketAddr, &'static str)> = subnet
+        .iter()
+        .flat_map(|ip| {
+            let address = SocketAddr::new(IpAddr::V4(*ip), port);
+            [(address, "https"), (address, "http")]
+        })
+        .collect();
+    for address in favorites.iter().filter_map(|favorite| favorite.address) {
+        if !probes.contains(&(address, "https")) {
+            probes.push((address, "https"));
+        }
+    }
+    probes
+}
+
+/// legacy HTTP 扫描兜底：周期对候选子网逐 IP 探测，外加收藏记住的地址；对方 200
+/// 响应即完成发现（手机端打开 LocalSend 或常驻 HTTP 服务时均可响应）。`refresh`
+/// 被通知（手动刷新）时立即再扫一轮。
 pub(super) async fn run_http_sweeper(
     discovery: Arc<Discovery>,
     refresh: Arc<tokio::sync::Notify>,
@@ -73,25 +96,22 @@ pub(super) async fn run_http_sweeper(
         .map(|(_, ip)| ip)
         .collect();
     loop {
-        let targets = sweep_targets(&own_ips);
-        if !targets.is_empty() {
-            // 官方 App 默认 HTTPS（自签名），部分设备显式用 HTTP；扫描时
-            // 无先验协议，双协议并发探测（幂等登记，重复响应无害）。
-            let discovery = &discovery;
-            let probes = targets.iter().flat_map(|target| {
-                let address = SocketAddr::new(IpAddr::V4(*target), discovery.port);
-                ["https", "http"].map(|scheme| async move {
-                    (
-                        address,
-                        probe_target(discovery, address, scheme, SWEEP_TIMEOUT).await,
-                    )
-                })
-            });
-            for (address, probed) in futures_util::future::join_all(probes).await {
-                if let Ok(device) = probed {
-                    record_device(&discovery.devices, &discovery.events, device, address.ip())
-                        .await;
-                }
+        let probes = round_probes(
+            &sweep_targets(&own_ips),
+            discovery.port,
+            &discovery.favorites.borrow(),
+        );
+        // 并发探测；同一地址两种协议都通时重复登记无害（幂等）。
+        let discovery = &discovery;
+        let probed = probes.into_iter().map(|(address, scheme)| async move {
+            (
+                address,
+                probe_target(discovery, address, scheme, SWEEP_TIMEOUT).await,
+            )
+        });
+        for (address, probed) in futures_util::future::join_all(probed).await {
+            if let Ok(device) = probed {
+                record_device(&discovery.devices, &discovery.events, device, address.ip()).await;
             }
         }
         tokio::select! {
@@ -105,6 +125,40 @@ pub(super) async fn run_http_sweeper(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_round_also_reaches_favorites_at_their_last_address_over_https_only() {
+        let subnet: Vec<Ipv4Addr> = vec!["192.168.1.5".parse().unwrap()];
+        let favorite = |address: &str| Favorite {
+            fingerprint: "F".into(),
+            address: Some(address.parse().unwrap()),
+        };
+        let favorites = [
+            // 别的网段（如 Tailscale）：子网扫描够不着。
+            favorite("100.64.0.7:53317"),
+            // 子网里已经会试 HTTPS 的地址不重复。
+            favorite("192.168.1.5:53317"),
+            // 同一 IP 换了端口仍要单独连。
+            favorite("192.168.1.5:53318"),
+            Favorite {
+                fingerprint: "NO-ADDRESS".into(),
+                address: None,
+            },
+        ];
+
+        let probes = round_probes(&subnet, 53317, &favorites);
+
+        let address = |text: &str| text.parse::<SocketAddr>().unwrap();
+        assert_eq!(
+            probes,
+            [
+                (address("192.168.1.5:53317"), "https"),
+                (address("192.168.1.5:53317"), "http"),
+                (address("100.64.0.7:53317"), "https"),
+                (address("192.168.1.5:53318"), "https"),
+            ]
+        );
+    }
 
     #[test]
     fn sweep_expands_regular_subnet_excluding_self_and_edges() {

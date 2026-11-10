@@ -6,7 +6,9 @@
 //! 直推每次另造身份，表达不了这条约束，所以 `ServiceConfig` 与直推入口改了形。
 //! 第二次例外是接收开关（2026-11）：接收与发现原是一个整体，关接收只能连发现
 //! 一起关；`ServiceConfig` 拆出可缺省的 `ReceiverConfig`，重启改由
-//! `ServiceHandle::restart` 等旧服务放掉接收端口后再绑定。
+//! `ServiceHandle::restart` 等旧服务放掉接收端口后再绑定。第三次例外是收藏设备
+//! （2026-11）：信任回调只能回答"信不信"，扫描还要知道收藏设备记住的地址，所以
+//! 换成服务持有的收藏快照（`ServiceConfig.favorites` + `ServiceHandle::set_favorites`）。
 //!
 //! 全部服务任务要求在 tokio 运行时上下文中使用（app-ui 的 iced tokio executor
 //! 已在 update/命令上下文进入 tokio runtime，见 design.md 阶段 A 结论）。
@@ -24,6 +26,7 @@ mod send;
 mod integration;
 
 use std::future::Future;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -40,9 +43,6 @@ use send::DirectSender;
 
 /// 常驻服务事件流（broadcast 容量有界；积压时 UI 收到 `Lagged` 应整体刷新）。
 const EVENT_CAPACITY: usize = 128;
-
-/// 信任判定回调：UI 注入（UserPreferences 的信任设备表），服务只查询不存储。
-pub type TrustPredicate = Arc<dyn Fn(&DeviceInfo) -> bool + Send + Sync>;
 
 /// LocalSend 协议默认端口：发现（UDP 组播）与接收（TCP）共用。
 pub const DEFAULT_PORT: u16 = 53317;
@@ -62,14 +62,34 @@ pub struct ServiceConfig {
     /// 接收端；None = 不接收：不监听 TCP，也不在网络上露面（不 announce、不回应、
     /// 扫描只查询不登记），发现与直推照常。
     pub receiver: Option<ReceiverConfig>,
+    /// 收藏设备：接收时算信任，扫描时按记住的地址直接连。之后经
+    /// `ServiceHandle::set_favorites` 更新，不用重启。
+    pub favorites: Vec<Favorite>,
 }
 
 /// 接收端配置：只有接收会用到的字段。
 pub struct ReceiverConfig {
     /// 接收文件保存目录。
     pub download_dir: PathBuf,
-    /// 信任设备查询回调。
-    pub is_trusted: TrustPredicate,
+}
+
+/// 收藏设备：按证书指纹认人；`address` 是最后一次见到它的地址（IP + 它的端口），
+/// 广播被吞、对方在别的网段时扫描靠它找到这台设备。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Favorite {
+    pub fingerprint: String,
+    pub address: Option<SocketAddr>,
+}
+
+/// 按地址找设备（"按 IP 添加"）没找到的原因；文案归 UI。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FindDeviceError {
+    /// 连不上；附 HTTPS 那一次的失败原因。
+    Unreachable(String),
+    /// 只有明文 HTTP：认不了身份，不能收藏。
+    NotEncrypted,
+    /// 这个地址是本机。
+    ThisDevice,
 }
 
 /// 接收端没开起来或运行中停止的原因；文案归 UI。
@@ -137,16 +157,14 @@ pub struct ServiceHandle {
     shutdown_tx: watch::Sender<bool>,
     sender: DirectSender,
     receiver_released: receive::PortReleased,
+    favorites: watch::Sender<Vec<Favorite>>,
+    discovery: Arc<discovery::Discovery>,
 }
 
 /// UI → 常驻服务的命令（经无界通道路由到各服务任务）。
 enum ServiceCommand {
     /// 接收确认 Modal 的回写。
-    ResolveSession {
-        session_id: String,
-        accept: bool,
-        remember: bool,
-    },
+    ResolveSession { session_id: String, accept: bool },
     /// 手动刷新：清空设备表（逐个广播 DeviceLost）并立即触发一轮扫描。
     RefreshDevices,
 }
@@ -167,13 +185,11 @@ impl ServiceHandle {
         async move { sender.send(&target, items, progress).await }
     }
 
-    /// 确认 Modal 回写：接受未信任设备的请求；remember=true 同时补入内存信任集。
-    /// 持久化信任设备归 app-ui。
-    pub fn accept_session(&self, session_id: &str, remember: bool) {
+    /// 确认 Modal 回写：接受不是收藏的设备的请求。要"加入收藏"时先 `set_favorites`。
+    pub fn accept_session(&self, session_id: &str) {
         let _ = self.commands.send(ServiceCommand::ResolveSession {
             session_id: session_id.to_string(),
             accept: true,
-            remember,
         });
     }
 
@@ -182,8 +198,22 @@ impl ServiceHandle {
         let _ = self.commands.send(ServiceCommand::ResolveSession {
             session_id: session_id.to_string(),
             accept: false,
-            remember: false,
         });
+    }
+
+    /// 换收藏快照：立刻生效，下一个接收请求、下一轮扫描就按它来。持久化归 app-ui。
+    pub fn set_favorites(&self, favorites: Vec<Favorite>) {
+        self.favorites.send_replace(favorites);
+    }
+
+    /// 按地址找设备（"按 IP 添加"）：只认开了加密的设备，身份取自握手证书；找到的
+    /// 设备同时登记进设备表，马上出现在列表里。
+    pub fn find_device(
+        &self,
+        address: SocketAddr,
+    ) -> impl Future<Output = Result<DeviceInfo, FindDeviceError>> + Send + 'static {
+        let discovery = Arc::clone(&self.discovery);
+        async move { discovery::find_device(&discovery, address).await }
     }
 
     /// 手动刷新设备列表：清空现有条目并立即触发一轮子网扫描。
@@ -236,6 +266,7 @@ impl LocalSendService {
         let (events, events_rx) = broadcast::channel(EVENT_CAPACITY);
         let devices = Arc::new(Mutex::new(discovery::DeviceTable::default()));
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let (favorites, favorites_rx) = watch::channel(config.favorites);
 
         let (presence, receive_state, receiver_released) = match config.receiver {
             Some(receiver) => {
@@ -243,7 +274,7 @@ impl LocalSendService {
                 let state = Arc::new(receive::ReceiveState::new(
                     own_device.clone(),
                     receiver.download_dir,
-                    receiver.is_trusted,
+                    favorites_rx.clone(),
                     Arc::clone(&devices),
                     events.clone(),
                     receive::CONFIRM_TIMEOUT,
@@ -270,15 +301,17 @@ impl LocalSendService {
 
         // sweeper 的手动刷新通知：命令路由收到 RefreshDevices 时 notify 一次。
         let sweeper_notify = Arc::new(tokio::sync::Notify::new());
+        let discovery = Arc::new(discovery::Discovery {
+            own_fingerprint: own_device.fingerprint.clone(),
+            port: config.port,
+            presence,
+            devices: Arc::clone(&devices),
+            events: events.clone(),
+            client: client.clone(),
+            favorites: favorites_rx,
+        });
         discovery::spawn(
-            Arc::new(discovery::Discovery {
-                own_fingerprint: own_device.fingerprint.clone(),
-                port: config.port,
-                presence,
-                devices: Arc::clone(&devices),
-                events: events.clone(),
-                client: client.clone(),
-            }),
+            Arc::clone(&discovery),
             Arc::clone(&sweeper_notify),
             shutdown_rx.clone(),
         );
@@ -293,10 +326,10 @@ impl LocalSendService {
             loop {
                 tokio::select! {
                     command = command_rx.recv() => match command {
-                        Some(ServiceCommand::ResolveSession { session_id, accept, remember }) => {
+                        Some(ServiceCommand::ResolveSession { session_id, accept }) => {
                             // 没有接收端就没有挂起的会话，确认回写无处可去。
                             if let Some(state) = &receive_state {
-                                state.resolve_pending(&session_id, accept, remember).await;
+                                state.resolve_pending(&session_id, accept).await;
                             }
                         }
                         Some(ServiceCommand::RefreshDevices) => {
@@ -320,6 +353,8 @@ impl LocalSendService {
                 shutdown_tx,
                 sender: DirectSender::new(client, outbound, own_device),
                 receiver_released,
+                favorites,
+                discovery,
             },
             events_rx,
         ))
@@ -406,8 +441,8 @@ mod tests {
             identity_path: identity_path.clone(),
             receiver: Some(ReceiverConfig {
                 download_dir: dir.path().to_path_buf(),
-                is_trusted: Arc::new(|_| false),
             }),
+            favorites: Vec::new(),
         };
 
         let error = LocalSendService::start(config).err().unwrap();

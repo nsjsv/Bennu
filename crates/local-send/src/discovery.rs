@@ -18,7 +18,7 @@ use tokio::sync::{broadcast, watch, Mutex};
 
 use crate::device::{Announce, DeviceInfo};
 use crate::error::LocalSendError;
-use crate::ServiceEvent;
+use crate::{Favorite, FindDeviceError, ServiceEvent};
 
 mod sweep;
 
@@ -31,6 +31,8 @@ pub(crate) const DEVICE_LIFETIME: Duration = Duration::from_secs(30);
 pub(crate) const ANNOUNCE_INTERVAL: Duration = Duration::from_secs(5);
 /// 听到广播后连对方的超时：局域网单跳请求，超过即退化 UDP。
 const ANNOUNCE_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+/// 用户按地址找设备时的超时：人在等，但对方可能在别的网段或隧道另一头。
+const FIND_TIMEOUT: Duration = Duration::from_secs(5);
 /// register 路由路径（listener 回应与主动扫描共用）。
 const REGISTER_PATH: &str = "/api/localsend/v2/register";
 /// info 路由路径：不露面时扫描只查询、不登记。
@@ -257,6 +259,8 @@ pub(crate) struct Discovery {
     pub(crate) devices: Arc<Mutex<DeviceTable>>,
     pub(crate) events: broadcast::Sender<ServiceEvent>,
     pub(crate) client: reqwest::Client,
+    /// 收藏快照：扫描按记住的地址直接连。
+    pub(crate) favorites: watch::Receiver<Vec<Favorite>>,
 }
 
 /// 驱动全部发现任务：announce 循环（露面时）、组播监听、扫描与设备老化；收到
@@ -447,6 +451,34 @@ pub(crate) async fn probe_target(
     device.protocol = scheme.to_owned();
     device.port = address.port();
     Ok(device)
+}
+
+/// 按地址找设备：先按 HTTPS 认证书；不通再试明文，只为告诉用户"对方没开加密"。
+/// 找到就登记，和扫描到的一样马上出现在列表里。
+pub(crate) async fn find_device(
+    discovery: &Discovery,
+    address: SocketAddr,
+) -> Result<DeviceInfo, FindDeviceError> {
+    match probe_target(discovery, address, "https", FIND_TIMEOUT).await {
+        Ok(mut device) => {
+            record_device(
+                &discovery.devices,
+                &discovery.events,
+                device.clone(),
+                address.ip(),
+            )
+            .await;
+            device.address = Some(address.ip());
+            Ok(device)
+        }
+        Err(ProbeError::ThisDevice) => Err(FindDeviceError::ThisDevice),
+        Err(ProbeError::Unreachable(reason)) => {
+            match probe_target(discovery, address, "http", FIND_TIMEOUT).await {
+                Ok(_) => Err(FindDeviceError::NotEncrypted),
+                Err(_) => Err(FindDeviceError::Unreachable(reason)),
+            }
+        }
+    }
 }
 
 /// 登记设备并在信息变化时广播 `DeviceSeen`；listener、sweeper 共用。

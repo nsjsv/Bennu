@@ -3,7 +3,7 @@
 pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("%1 wants to send %2 item(s)", "%1 想要发送 %2 个文件"),
     ("Incoming files", "收到文件"),
-    ("Remember this device", "记住此设备"),
+    ("Add to favorites", "加入收藏"),
     ("Accept", "接受"),
     ("Decline", "拒绝"),
     ("Files received", "文件接收完成"),
@@ -81,4 +81,29 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Send failed: %1", "发送失败：%1"),
     ("Sending %1/%2 · %3%", "正在发送 %1/%2 · %3%"),
     ("Sending...", "正在发送…"),
+    // 收藏设备
+    ("Offline · last seen at %1", "不在线 · 上次 %1"),
+    ("Offline · not found yet", "不在线 · 还没找到过地址"),
+    ("No other devices found", "没有发现别的设备"),
+    (
+        "This device has encryption turned off, so it cannot be a favorite.",
+        "对方没开加密，不能收藏。",
+    ),
+    ("Add by IP", "按 IP 添加"),
+    ("No favorite devices yet", "还没有收藏的设备"),
+    (
+        "Click the star next to a device to add it here.",
+        "点设备右边的 ☆，它就会收藏到这里。",
+    ),
+    ("IP", "IP"),
+    (
+        "Optional. Uses the device's own name.",
+        "可不填，用对方设备的名字",
+    ),
+    (
+        "Enter an IPv4 address, like 192.168.1.20.",
+        "请填 IPv4 地址，比如 192.168.1.20。",
+    ),
+    ("Could not connect: %1", "连不上：%1"),
+    ("This is this computer.", "这是本机。"),
 ];

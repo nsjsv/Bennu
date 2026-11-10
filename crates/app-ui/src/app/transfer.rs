@@ -6,11 +6,9 @@
 //!   见 design.md A0 结论）；`ServiceHandle` 常驻不主动关停，设置变更时重启。
 //! - 二维码下载服务是一次性会话：服务句柄随事件转发流存活，窗口关闭通过
 //!   `CancellationToken` 收尾；完成/超时由服务自停。
-//! - 信任判定回调读共享指纹快照；持久化仍归 UserPreferences。
+//! - 收藏设备（接收时算信任）只存在 UserConfig 里，改动经 `favorites.rs` 推给服务。
 
-use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Instant;
 
 use iced::futures::{SinkExt, StreamExt};
@@ -23,7 +21,6 @@ use tokio_util::sync::CancellationToken;
 
 use super::transfer_service::service_config;
 use super::FileBrowser;
-use crate::config::TrustedTransferDevice;
 use crate::model::Message;
 use crate::view::transfer_qr::qr_image_handle;
 
@@ -55,7 +52,7 @@ pub(crate) enum TransferMessage {
         outcome: Result<(), String>,
     },
     // ---- 接收确认（R7） ----
-    IncomingRememberToggled(bool),
+    IncomingAddToFavoritesToggled(bool),
     IncomingConfirmed {
         accept: bool,
     },
@@ -70,7 +67,6 @@ pub(crate) enum TransferMessage {
     DownloadDirChosen(Result<Option<PathBuf>, String>),
     DeviceAliasInputChanged(String),
     DeviceAliasCommitted,
-    TrustedDeviceRemoved(String),
     ReceiveEnabledToggled,
     PortInputChanged(String),
     PortCommitted,
@@ -86,6 +82,17 @@ pub(crate) enum TransferMessage {
     StagedItemRemoved(PathBuf),
     StagedItemsCleared,
     SendStagedToDevicePressed(DeviceInfo),
+    // ---- 收藏设备 ----
+    /// 附近设备行的 ☆。
+    FavoritePressed(DeviceInfo),
+    /// 收藏行的 ★、设置页"删除"。
+    UnfavoritePressed(String),
+    FavoriteAliasInputChanged {
+        fingerprint: String,
+        value: String,
+    },
+    FavoriteAliasCommitted(String),
+    AddressForm(AddressFormMessage),
 }
 
 /// 常驻 LocalSend 服务运行时状态。
@@ -95,8 +102,6 @@ pub(crate) struct LocalSendRuntime {
     pub(crate) events: broadcast::Receiver<ServiceEvent>,
     /// 订阅身份代：服务重启后强制重挂事件流，旧流随旧服务关闭而终结。
     pub(crate) generation: u64,
-    /// 共享信任指纹快照：`is_trusted` 回调读这里，设置页/确认勾选写这里。
-    pub(crate) trusted: Arc<parking_lot::RwLock<HashSet<String>>>,
     /// 发现的设备快照（fingerprint 去重，UI 列表直接渲染）。
     pub(crate) devices: Vec<DeviceInfo>,
     /// 本服务的接收端没开起来或已停止的原因：随服务换代重置。
@@ -130,13 +135,13 @@ pub(crate) enum TransferSessionPhase {
     Failed(String),
 }
 
-/// 接收确认 Modal 状态（R7：未信任设备首次发送）。
+/// 接收确认 Modal 状态：不是收藏的设备发来文件。
 #[derive(Debug, Clone)]
 pub(crate) struct IncomingTransferConfirmation {
     pub(crate) device: DeviceInfo,
     pub(crate) session_id: String,
     pub(crate) files: Vec<FileMetadata>,
-    pub(crate) remember_device: bool,
+    pub(crate) add_to_favorites: bool,
 }
 
 impl FileBrowser {
@@ -154,10 +159,7 @@ impl FileBrowser {
             .map_or(0, |runtime| runtime.generation + 1);
         // 旧服务的挂起确认随重启作废：Modal 不能指向死会话。
         self.incoming_transfer = None;
-        let trusted = Arc::new(parking_lot::RwLock::new(trusted_fingerprint_set(
-            &self.user_config.transfer_trusted_devices,
-        )));
-        let config = service_config(&self.user_config, Arc::clone(&trusted));
+        let config = service_config(&self.user_config);
         // 重启交给服务：旧接收端放掉端口后新接收端才绑定。
         let started = match previous {
             Some(previous) => previous.handle.restart(config),
@@ -169,7 +171,6 @@ impl FileBrowser {
                     handle,
                     events,
                     generation,
-                    trusted,
                     devices: Vec::new(),
                     receiver_failure: None,
                 });
@@ -281,9 +282,9 @@ impl FileBrowser {
                 self.accept_direct_send_finished(&fingerprint, &alias, outcome);
                 iced::Task::none()
             }
-            TransferMessage::IncomingRememberToggled(remember) => {
+            TransferMessage::IncomingAddToFavoritesToggled(add) => {
                 if let Some(incoming) = &mut self.incoming_transfer {
-                    incoming.remember_device = remember;
+                    incoming.add_to_favorites = add;
                 }
                 iced::Task::none()
             }
@@ -311,9 +312,6 @@ impl FileBrowser {
                 iced::Task::none()
             }
             TransferMessage::DeviceAliasCommitted => self.commit_transfer_device_alias(),
-            TransferMessage::TrustedDeviceRemoved(fingerprint) => {
-                self.remove_trusted_transfer_device(fingerprint)
-            }
             TransferMessage::ReceiveEnabledToggled => self.toggle_transfer_receive(),
             TransferMessage::PortInputChanged(value) => {
                 self.edit_transfer_port(value);
@@ -342,6 +340,16 @@ impl FileBrowser {
             TransferMessage::SendStagedToDevicePressed(device) => {
                 self.send_staged_to_device(device)
             }
+            TransferMessage::FavoritePressed(device) => self.favor_device(&device, None),
+            TransferMessage::UnfavoritePressed(fingerprint) => self.unfavor_device(&fingerprint),
+            TransferMessage::FavoriteAliasInputChanged { fingerprint, value } => {
+                self.edit_favorite_alias(fingerprint, value);
+                iced::Task::none()
+            }
+            TransferMessage::FavoriteAliasCommitted(fingerprint) => {
+                self.commit_favorite_alias(&fingerprint)
+            }
+            TransferMessage::AddressForm(message) => self.handle_address_form(message),
         }
     }
 
@@ -374,44 +382,25 @@ impl FileBrowser {
         }
     }
 
-    /// 设备列表点选直推（R5）。
-    /// 接收确认回写：accept 走服务确认 + 记住设备持久化；reject 释放会话。
+    /// 接收确认回写：要加入收藏时先换掉服务的收藏快照，再放行这次请求。
     fn confirm_incoming_transfer(&mut self, accept: bool) -> iced::Task<Message> {
         let Some(incoming) = self.incoming_transfer.take() else {
             return iced::Task::none();
         };
+        let persist = if accept && incoming.add_to_favorites {
+            self.favor_device(&incoming.device, None)
+        } else {
+            iced::Task::none()
+        };
         let Some(runtime) = self.transfer_runtime.as_ref() else {
-            return iced::Task::none();
+            return persist;
         };
         if accept {
-            // remember=true 时服务把设备补进内存信任集（覆盖持久化落盘前的窗口期）。
-            runtime
-                .handle
-                .accept_session(&incoming.session_id, incoming.remember_device);
-            if incoming.remember_device
-                && !self
-                    .user_config
-                    .transfer_trusted_devices
-                    .iter()
-                    .any(|device| device.fingerprint == incoming.device.fingerprint)
-            {
-                self.user_config
-                    .transfer_trusted_devices
-                    .push(TrustedTransferDevice {
-                        fingerprint: incoming.device.fingerprint.clone(),
-                        alias: incoming.device.alias.clone(),
-                        added_at: chrono::Utc::now().to_rfc3339(),
-                    });
-                runtime
-                    .trusted
-                    .write()
-                    .insert(incoming.device.fingerprint.clone());
-                return self.persist_user_preferences_command();
-            }
-            return iced::Task::none();
+            runtime.handle.accept_session(&incoming.session_id);
+        } else {
+            runtime.handle.reject_session(&incoming.session_id);
         }
-        runtime.handle.reject_session(&incoming.session_id);
-        iced::Task::none()
+        persist
     }
 
     /// Escape/外部点击对 Modal 的清理语义：按拒绝收敛（dismiss_floating 调用）。
@@ -428,6 +417,7 @@ impl FileBrowser {
     fn accept_local_send_service_event(&mut self, event: ServiceEvent) -> iced::Task<Message> {
         match event {
             ServiceEvent::DeviceSeen(device) => {
+                let favorite_refresh = self.refresh_favorite_from(&device);
                 if let Some(runtime) = self.transfer_runtime.as_mut() {
                     if let Some(existing) = runtime
                         .devices
@@ -439,6 +429,7 @@ impl FileBrowser {
                         runtime.devices.push(device);
                     }
                 }
+                return favorite_refresh;
             }
             ServiceEvent::DeviceLost(device) => {
                 if let Some(runtime) = self.transfer_runtime.as_mut() {
@@ -476,7 +467,7 @@ impl FileBrowser {
         iced::Task::none()
     }
 
-    /// 未信任设备的接收请求：清理主窗口同层输入状态后弹出确认 Modal。
+    /// 不是收藏的设备发来文件：清理主窗口同层输入状态后弹出确认 Modal。
     fn begin_incoming_transfer_confirmation(
         &mut self,
         device: DeviceInfo,
@@ -496,7 +487,7 @@ impl FileBrowser {
             device,
             session_id,
             files,
-            remember_device: false,
+            add_to_favorites: false,
         });
         rename_command
     }
@@ -523,14 +514,6 @@ impl FileBrowser {
         };
         crate::commands::publish_desktop_notification_command(summary, body)
     }
-}
-
-fn trusted_fingerprint_set(devices: &[TrustedTransferDevice]) -> HashSet<String> {
-    devices
-        .iter()
-        .filter(|device| !device.fingerprint.is_empty())
-        .map(|device| device.fingerprint.clone())
-        .collect()
 }
 
 /// 选中集合 → 下载会话条目：目录走 zip 流式，文件直接流式。
@@ -612,10 +595,14 @@ fn transfer_service_start_failed(error: &LocalSendError) -> String {
 }
 
 mod direct_send;
+mod favorites;
 mod local_send_window;
 mod settings;
 
 pub(crate) use direct_send::DirectSendState;
+pub(crate) use favorites::{
+    service_favorites, AddressFormMessage, FavoriteAddressForm, FavoriteRow,
+};
 pub(crate) use local_send_window::{ChooserTarget, StagedItem, StagedSize};
 
 pub(crate) use settings::receiver_failure_message;

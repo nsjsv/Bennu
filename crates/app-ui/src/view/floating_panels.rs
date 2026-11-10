@@ -137,7 +137,7 @@ pub(super) fn destructive_action_confirmation_panel(
         .into()
 }
 
-/// 接收确认 Modal：设备名 + 文件清单 + 记住设备 + 接受/拒绝（R7）。
+/// 接收确认 Modal：设备名 + 文件清单 + 加入收藏 + 接受/拒绝（R7）。
 pub(super) fn incoming_transfer_confirmation_panel(
     incoming: &IncomingTransferConfirmation,
 ) -> Element<'_, Message> {
@@ -159,11 +159,12 @@ pub(super) fn incoming_transfer_confirmation_panel(
             .align_y(Alignment::Center),
         );
     }
-    let remember_checkbox = checkbox(incoming.remember_device)
-        .label(tr!("Remember this device"))
-        .on_toggle(|remember| {
-            Message::Transfer(TransferMessage::IncomingRememberToggled(remember))
-        });
+    // 明文设备的身份是自报的，收藏不了。
+    let add_to_favorites = incoming.device.is_certified().then(|| {
+        checkbox(incoming.add_to_favorites)
+            .label(tr!("Add to favorites"))
+            .on_toggle(|add| Message::Transfer(TransferMessage::IncomingAddToFavoritesToggled(add)))
+    });
     let actions = row![
         Space::new().width(Length::Fill),
         secondary_action_button(
@@ -191,9 +192,9 @@ pub(super) fn incoming_transfer_confirmation_panel(
         container(scrollable(file_list))
             .height(Length::Fixed(132.0))
             .width(Length::Fill),
-        remember_checkbox,
-        actions,
     ]
+    .push(add_to_favorites)
+    .push(actions)
     .spacing(12)
     .width(Length::Fill);
 

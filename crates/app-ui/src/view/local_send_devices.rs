@@ -1,13 +1,14 @@
 //! LocalSend 设备行："发送到手机"窗口与 LocalSend 窗口共用。
 //!
-//! 每行：类型图标 + 名字 + 小字"型号 · IP" + 这台设备最近一次直推的状态 + 发送。
+//! 两块：收藏（全部收藏设备，不在线的灰着）与附近（没被收藏认领的设备）。每行：
+//! 类型图标 + 名字 + 小字 + 这台设备最近一次直推的状态 + ☆/★ + 发送。
 
-use iced::widget::{button, column, row, Column};
+use iced::widget::{button, column, container, row, tooltip, Column};
 use iced::{Alignment, Element, Length, Theme};
 
-use crate::app::transfer::{DirectSendState, TransferMessage};
+use crate::app::transfer::{DirectSendState, FavoriteRow, TransferMessage};
 use crate::app::FileBrowser;
-use crate::appearance::context_menu_button_style;
+use crate::appearance::{context_menu_button_style, muted_text_color};
 use crate::formatting::format_middle_ellipsized_text;
 use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
@@ -15,13 +16,14 @@ use bennu_theme::icons::IconSymbol;
 use bennu_theme::ui_colors;
 use local_send::DeviceInfo;
 
+use super::option_controls::tooltip_panel_style;
 use super::settings_group::muted_setting_text;
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};
 
 const DEVICE_ICON_SIZE: f32 = 20.0;
 const STATUS_MAX_CHARS: usize = 72;
 
-/// 标题 + 手动刷新：立即清空快照并触发一轮子网扫描（不等 10s 周期）。
+/// 标题 + 手动刷新：立即清空快照并触发一轮扫描（不等 10s 周期）。
 pub(super) fn nearby_devices_header() -> Element<'static, Message> {
     row![
         readable_text(tr!("Nearby LocalSend devices"))
@@ -41,58 +43,141 @@ pub(super) fn nearby_devices_header() -> Element<'static, Message> {
     .into()
 }
 
-pub(super) fn nearby_devices(browser: &FileBrowser) -> &[DeviceInfo] {
-    browser
-        .transfer_runtime
-        .as_ref()
-        .map(|runtime| runtime.devices.as_slice())
-        .unwrap_or(&[])
+pub(super) fn favorites_title<'a>() -> iced::widget::Text<'a, Theme> {
+    readable_text(tr!("Favorite devices")).size(13)
 }
 
-/// 设备行列表。`send` 给出这台设备的发送消息；没有可发的文件时返回 None。
-/// 正在发给这台设备时按钮一律不可点：同一台设备同时只有一次直推。
-pub(super) fn device_rows<'a>(
+/// 收藏行。`send` 给出这台设备的发送消息；没有可发的文件时返回 None。不在线的
+/// 收藏发不了：后台按记住的地址一直在找，找到了就变成在线。
+pub(super) fn favorite_rows<'a>(
     browser: &'a FileBrowser,
     send: impl Fn(&DeviceInfo) -> Option<Message>,
 ) -> Column<'a, Message> {
-    let devices = nearby_devices(browser);
-    if devices.is_empty() {
-        return column![readable_text(tr!("No nearby devices found")).size(12)];
-    }
     let mut rows = column![].spacing(8).width(Length::Fill);
-    for device in devices {
-        let message = send(device).filter(|_| browser.can_send_to(device));
-        rows = rows.push(device_row(device, browser.direct_send_to(device), message));
+    for FavoriteRow { favorite, online } in browser.favorite_rows() {
+        let unfavor = star_button(
+            IconSymbol::StarSolid,
+            Some(TransferMessage::UnfavoritePressed(
+                favorite.fingerprint.clone(),
+            )),
+        );
+        // 名字是对方自报或用户起的，不做本地化。
+        let name = readable_text(favorite.alias.clone()).size(12);
+        rows = rows.push(match online {
+            Some(device) => online_row(browser, device, name.into(), unfavor, &send),
+            None => {
+                let last_seen = match favorite.address {
+                    Some(address) => tr!("Offline · last seen at %1", address.ip()),
+                    None => tr!("Offline · not found yet"),
+                };
+                let details = column![
+                    name.style(|theme: &Theme| iced::widget::text::Style {
+                        color: Some(muted_text_color(theme)),
+                    }),
+                    muted_setting_text(last_seen, 11),
+                ]
+                .spacing(2);
+                device_row(IconSymbol::Monitor, details, unfavor, None)
+            }
+        });
     }
     rows
 }
 
-fn device_row<'a>(
+/// 附近行：没被收藏认领的设备。明文设备收藏不了，☆ 灰着并说明原因。
+pub(super) fn nearby_rows<'a>(
+    browser: &'a FileBrowser,
+    send: impl Fn(&DeviceInfo) -> Option<Message>,
+) -> Column<'a, Message> {
+    let devices = browser.unclaimed_nearby_devices();
+    if devices.is_empty() {
+        let any_favorite_online = browser
+            .favorite_rows()
+            .iter()
+            .any(|row| row.online.is_some());
+        let empty = if any_favorite_online {
+            tr!("No other devices found")
+        } else {
+            tr!("No nearby devices found")
+        };
+        return column![readable_text(empty).size(12)];
+    }
+    let mut rows = column![].spacing(8).width(Length::Fill);
+    for device in devices {
+        let star = if device.is_certified() {
+            star_button(
+                IconSymbol::Star,
+                Some(TransferMessage::FavoritePressed(device.clone())),
+            )
+        } else {
+            tooltip(
+                star_button(IconSymbol::Star, None),
+                container(
+                    readable_text(tr!(
+                        "This device has encryption turned off, so it cannot be a favorite."
+                    ))
+                    .size(11),
+                )
+                .padding([5, 7])
+                .style(tooltip_panel_style),
+                tooltip::Position::Left,
+            )
+            .into()
+        };
+        let name = readable_text(device.alias.clone()).size(12).into();
+        rows = rows.push(online_row(browser, device, name, star, &send));
+    }
+    rows
+}
+
+/// 在线设备的一行：小字"型号 · IP"、直推状态、发送（正在发给这台时不可点：同一台
+/// 设备同时只有一次直推）。
+fn online_row<'a>(
+    browser: &'a FileBrowser,
     device: &'a DeviceInfo,
-    state: Option<&'a DirectSendState>,
-    send: Option<Message>,
+    name: Element<'a, Message>,
+    star: Element<'a, Message>,
+    send: &impl Fn(&DeviceInfo) -> Option<Message>,
 ) -> Element<'a, Message> {
-    // 设备名、型号是对端自报的用户内容，不做本地化。
-    let mut details = column![readable_text(device.alias.clone()).size(12)].spacing(2);
+    let mut details = column![name].spacing(2);
     let subtitle = device_subtitle(device);
     if !subtitle.is_empty() {
         details = details.push(muted_setting_text(subtitle, 11));
     }
-    if let Some(state) = state {
+    if let Some(state) = browser.direct_send_to(device) {
         details = details.push(direct_send_status(state));
     }
+    let message = send(device).filter(|_| browser.can_send_to(device));
+    device_row(device_icon(device), details, star, message)
+}
+
+fn device_row<'a>(
+    icon: IconSymbol,
+    details: Column<'a, Message>,
+    star: Element<'a, Message>,
+    send: Option<Message>,
+) -> Element<'a, Message> {
     let send_button = button(readable_text(tr!("Send")).size(12))
         .on_press_maybe(send)
         .padding([5, 12])
         .style(context_menu_button_style());
     row![
-        themed_icon(device_icon(device), IconTone::Normal, DEVICE_ICON_SIZE),
+        themed_icon(icon, IconTone::Normal, DEVICE_ICON_SIZE),
         details.width(Length::Fill),
+        star,
         send_button,
     ]
     .spacing(10)
     .align_y(Alignment::Center)
     .into()
+}
+
+fn star_button(symbol: IconSymbol, message: Option<TransferMessage>) -> Element<'static, Message> {
+    button(themed_icon(symbol, IconTone::Normal, MENU_ICON_SIZE))
+        .on_press_maybe(message.map(Message::Transfer))
+        .padding([4, 6])
+        .style(context_menu_button_style())
+        .into()
 }
 
 /// "型号 · IP"：同名设备靠它分辨。

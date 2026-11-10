@@ -9,6 +9,7 @@ use crate::appearance::{context_menu_button_style, context_menu_style};
 use crate::formatting::format_file_size;
 use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
+use local_send::DeviceInfo;
 
 use super::local_send_devices;
 
@@ -138,24 +139,31 @@ fn qr_progress_line(session: &TransferSessionState) -> String {
 }
 
 /// LocalSend 设备直推列表卡片：发的是打开窗口时那批文件（会话非空才会打开窗口）。
+/// 有收藏时先列收藏；"按 IP 添加"只在 LocalSend 窗口里。
 fn device_list_card(browser: &FileBrowser) -> Element<'_, Message> {
-    let rows = local_send_devices::device_rows(browser, |device| {
+    let send = |device: &DeviceInfo| {
         Some(Message::Transfer(TransferMessage::SendToDevicePressed(
             device.clone(),
         )))
-    });
-    let device_count = local_send_devices::nearby_devices(browser).len();
-    let content = column![
-        local_send_devices::nearby_devices_header(),
-        container(scrollable(rows))
-            .height(Length::Fixed(DEVICE_LIST_MAX_HEIGHT.min(
-                // 设备少时不占满固定高度，避免滚动区空白。
-                (device_count as f32 + 1.0) * DEVICE_ROW_HEIGHT
-            )))
-            .width(Length::Fill),
-    ]
-    .spacing(8)
-    .width(Length::Fill);
+    };
+    let favorite_count = browser.user_config().transfer_favorite_devices.len();
+    let mut sections = column![].spacing(8).width(Length::Fill);
+    let mut row_count = browser.unclaimed_nearby_devices().len().max(1) + 1;
+    if favorite_count > 0 {
+        sections = sections
+            .push(local_send_devices::favorites_title())
+            .push(local_send_devices::favorite_rows(browser, send));
+        row_count += favorite_count + 1;
+    }
+    let sections = sections
+        .push(local_send_devices::nearby_devices_header())
+        .push(local_send_devices::nearby_rows(browser, send));
+    // 设备少时不占满固定高度，避免滚动区空白。
+    let content = container(scrollable(sections))
+        .height(Length::Fixed(
+            DEVICE_LIST_MAX_HEIGHT.min(row_count as f32 * DEVICE_ROW_HEIGHT),
+        ))
+        .width(Length::Fill);
     card_container(content)
 }
 

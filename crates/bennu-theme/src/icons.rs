@@ -54,6 +54,9 @@ pub enum IconSymbol {
     Settings,
     Smartphone,
     Square,
+    Star,
+    /// 实心星：收藏了的设备。
+    StarSolid,
     Terminal,
     Trash,
     TriangleAlert,
@@ -198,6 +201,8 @@ impl IconSymbol {
             Self::Settings => SETTINGS_ICON,
             Self::Smartphone => include_bytes!("../assets/icons/lucide/smartphone.svg"),
             Self::Square => SQUARE_ICON,
+            Self::Star => include_bytes!("../assets/icons/lucide/star.svg"),
+            Self::StarSolid => include_bytes!("../assets/icons/solid/star.svg"),
             Self::Terminal => TERMINAL_ICON,
             Self::Trash => include_bytes!("../assets/icons/lucide/trash-2.svg"),
             Self::TriangleAlert => include_bytes!("../assets/icons/lucide/triangle-alert.svg"),

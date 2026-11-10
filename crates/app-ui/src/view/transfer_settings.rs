@@ -1,4 +1,4 @@
-//! 设置 → 传输：接收开关与原因、端口、接收目录、设备名、信任设备。
+//! 设置 → 传输：接收开关与原因、端口、接收目录、设备名、收藏设备。
 
 use iced::widget::{button, column, container, row, text_input};
 use iced::{Alignment, Element, Length, Theme};
@@ -146,40 +146,67 @@ fn device_alias_row(browser: &FileBrowser) -> Element<'_, Message> {
     .into()
 }
 
-/// 信任设备组：逐行展示别名 + 移除按钮；空表给说明文案。
-pub(super) fn trusted_devices_section(browser: &FileBrowser) -> Element<'_, Message> {
-    let trusted = &browser.user_config().transfer_trusted_devices;
-    if trusted.is_empty() {
+/// 收藏设备组：每行 名字输入框（回车保存，清空回车 = 恢复对方的名字）+ 地址 + 删除。
+pub(super) fn favorite_devices_section(browser: &FileBrowser) -> Element<'_, Message> {
+    let favorites = &browser.user_config().transfer_favorite_devices;
+    if favorites.is_empty() {
         return column![
-            readable_text(tr!("No trusted devices")).size(12),
+            readable_text(tr!("No favorite devices yet")).size(12),
             readable_text(tr!(
-                "Files received from trusted devices are accepted automatically"
+                "In the LocalSend window, click the star next to a device to add it. Files from favorite devices are accepted automatically."
             ))
             .size(11),
         ]
         .spacing(3)
         .into();
     }
-    let mut rows = Vec::with_capacity(trusted.len());
-    for device in trusted {
+    let mut rows = Vec::with_capacity(favorites.len() + 1);
+    for device in favorites {
         let fingerprint = device.fingerprint.clone();
-        let remove = button(readable_text(tr!("Remove")).size(11))
-            .on_press(Message::Transfer(TransferMessage::TrustedDeviceRemoved(
+        // 名字是对方自报或用户起的，不做本地化。
+        let value = browser
+            .favorite_alias_inputs
+            .get(&device.fingerprint)
+            .unwrap_or(&device.alias);
+        let name = text_input(&tr!("Device name"), value)
+            .on_input({
+                let fingerprint = fingerprint.clone();
+                move |value| {
+                    Message::Transfer(TransferMessage::FavoriteAliasInputChanged {
+                        fingerprint: fingerprint.clone(),
+                        value,
+                    })
+                }
+            })
+            .on_submit(Message::Transfer(TransferMessage::FavoriteAliasCommitted(
+                fingerprint.clone(),
+            )))
+            .padding([6, 8])
+            .size(12)
+            .width(Length::Fill);
+        let address = match device.address {
+            Some(address) => address.ip().to_string(),
+            None => tr!("Not found yet"),
+        };
+        let remove = button(readable_text(tr!("Delete")).size(11))
+            .on_press(Message::Transfer(TransferMessage::UnfavoritePressed(
                 fingerprint,
             )))
             .padding([4, 8])
             .style(context_menu_button_style());
         rows.push(
-            row![
-                readable_text(device.alias.clone())
-                    .size(12)
-                    .width(Length::Fill),
-                remove,
-            ]
-            .spacing(8)
-            .align_y(Alignment::Center)
-            .into(),
+            row![name, readable_text(address).size(12), remove]
+                .spacing(8)
+                .align_y(Alignment::Center)
+                .into(),
         );
     }
+    rows.push(
+        readable_text(tr!(
+            "Press Enter to save a name. Clear it and press Enter to use the device's own name again. Files from favorite devices are accepted automatically."
+        ))
+        .size(11)
+        .into(),
+    );
     column(rows).spacing(6).width(Length::Fill).into()
 }

@@ -9,7 +9,6 @@
 //! 与 LocalSend 官方 App 行为一致。
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,10 +21,10 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
-use tokio::sync::{broadcast, oneshot, Mutex};
+use tokio::sync::{broadcast, oneshot, watch, Mutex};
 
 use crate::device::{DeviceInfo, FileMetadata, PrepareUploadRequest, PrepareUploadResponse};
-use crate::ServiceEvent;
+use crate::{Favorite, ServiceEvent};
 
 mod listener;
 mod tls;
@@ -69,11 +68,10 @@ struct Session {
 pub(crate) struct ReceiveState {
     own_device: DeviceInfo,
     download_dir: PathBuf,
-    is_trusted: Arc<dyn Fn(&DeviceInfo) -> bool + Send + Sync>,
-    /// `accept_session(id, true)` 写入的内存补充信任集（覆盖 UI 持久化完成前的窗口期）。
-    supplemental_trusted: Mutex<HashSet<String>>,
-    /// 未信任设备的挂起确认：session_id → 决策回写端 + 设备指纹（remember 时补信任）。
-    pending: Mutex<HashMap<String, (oneshot::Sender<bool>, String)>>,
+    /// 收藏设备算信任；app-ui 改收藏时立刻换掉快照。
+    favorites: watch::Receiver<Vec<Favorite>>,
+    /// 不是收藏的设备的挂起确认：session_id → 决策回写端。
+    pending: Mutex<HashMap<String, oneshot::Sender<bool>>>,
     sessions: Mutex<HashMap<String, Session>>,
     devices: Arc<Mutex<crate::discovery::DeviceTable>>,
     events: broadcast::Sender<ServiceEvent>,
@@ -84,7 +82,7 @@ impl ReceiveState {
     pub(crate) fn new(
         own_device: DeviceInfo,
         download_dir: PathBuf,
-        is_trusted: Arc<dyn Fn(&DeviceInfo) -> bool + Send + Sync>,
+        favorites: watch::Receiver<Vec<Favorite>>,
         devices: Arc<Mutex<crate::discovery::DeviceTable>>,
         events: broadcast::Sender<ServiceEvent>,
         confirm_timeout: Duration,
@@ -92,8 +90,7 @@ impl ReceiveState {
         ReceiveState {
             own_device,
             download_dir,
-            is_trusted,
-            supplemental_trusted: Mutex::new(HashSet::new()),
+            favorites,
             pending: Mutex::new(HashMap::new()),
             sessions: Mutex::new(HashMap::new()),
             devices,
@@ -103,22 +100,21 @@ impl ReceiveState {
     }
 
     /// UI 确认回写：accept=true 放行挂起的 prepare-upload；返回 false 表示会话已不存在。
-    pub(crate) async fn resolve_pending(
-        &self,
-        session_id: &str,
-        accept: bool,
-        remember: bool,
-    ) -> bool {
+    pub(crate) async fn resolve_pending(&self, session_id: &str, accept: bool) -> bool {
         let sender = self.pending.lock().await.remove(session_id);
-        let Some((sender, fingerprint)) = sender else {
+        let Some(sender) = sender else {
             // 会话不存在（已超时/已完成），让 UI 感知决策落空。
             return false;
         };
-        if accept && remember {
-            // remember 的持久化归 app-ui；这里只做内存补充信任，覆盖持久化完成前的窗口期。
-            self.supplemental_trusted.lock().await.insert(fingerprint);
-        }
         sender.send(accept).is_ok()
+    }
+
+    /// 收藏的设备自动收：按握手时的证书指纹比。
+    fn is_favorite(&self, fingerprint: &str) -> bool {
+        self.favorites
+            .borrow()
+            .iter()
+            .any(|favorite| favorite.fingerprint == fingerprint)
     }
 }
 
@@ -177,25 +173,15 @@ fn random_id() -> String {
     crate::random_id()
 }
 
-/// 判断设备是否放行：UI 注入的信任回调 || accept_session(remember=true) 的补充信任。
-async fn device_is_trusted(state: &Arc<ReceiveState>, device: &DeviceInfo) -> bool {
-    if (state.is_trusted)(device) {
-        return true;
-    }
-    state
-        .supplemental_trusted
-        .lock()
-        .await
-        .contains(&device.fingerprint)
-}
-
 async fn prepare_upload(
     State(state): State<Arc<ReceiveState>>,
     ConnectInfo(peer): ConnectInfo<Peer>,
     Json(mut request): Json<PrepareUploadRequest>,
 ) -> impl IntoResponse {
-    // 发送方是证书证明的那台设备（同官方 `certFingerprint ?? info.fingerprint`）。
+    // 发送方是证书证明的那台设备（同官方 `certFingerprint ?? info.fingerprint`）；
+    // 地址是连接来源，"加入收藏"要记住它。
     request.info.fingerprint = peer.fingerprint;
+    request.info.address = Some(peer.address.ip());
     if request.files.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -204,7 +190,7 @@ async fn prepare_upload(
     }
 
     let session_id = random_id();
-    if device_is_trusted(&state, &request.info).await {
+    if state.is_favorite(&request.info.fingerprint) {
         let response = accept_session(&state, &session_id, &request.info, &request.files).await;
         let _ = state.events.send(ServiceEvent::RequestAccepted {
             session_id: session_id.clone(),
@@ -212,13 +198,9 @@ async fn prepare_upload(
         return (StatusCode::CREATED, Json(Some(response)));
     }
 
-    // 未信任：挂起等 UI 确认，超时回 403（协议语义：403 = 拒绝）。
+    // 不是收藏：挂起等 UI 确认，超时回 403（协议语义：403 = 拒绝）。
     let (tx, rx) = oneshot::channel();
-    state
-        .pending
-        .lock()
-        .await
-        .insert(session_id.clone(), (tx, request.info.fingerprint.clone()));
+    state.pending.lock().await.insert(session_id.clone(), tx);
     let _ = state.events.send(ServiceEvent::IncomingRequest {
         device: request.info.clone(),
         session_id: session_id.clone(),

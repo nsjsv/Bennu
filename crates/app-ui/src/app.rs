@@ -259,14 +259,17 @@ pub(crate) struct FileBrowser {
     pub(crate) transfer_window: Option<window::Id>,
     /// 每台设备（证书指纹）最近一次 LocalSend 直推；两个传输窗口的设备行共用。
     pub(crate) direct_sends: HashMap<String, transfer::DirectSendState>,
-    /// LocalSend 窗口（bennu-localsend）与它的待发列表；关窗即清空。
+    /// LocalSend 窗口（bennu-localsend）与它的待发列表、"按 IP 添加"表单；关窗即清空。
     pub(crate) local_send_window: Option<window::Id>,
     pub(crate) local_send_staged: Vec<transfer::StagedItem>,
+    pub(crate) favorite_address_form: Option<transfer::FavoriteAddressForm>,
+    /// 设置页收藏设备改名的输入（证书指纹 → 正在输入的名字），回车提交后清掉。
+    pub(crate) favorite_alias_inputs: HashMap<String, String>,
     /// 常驻 LocalSend 服务运行时；None = 未启动或启动失败。
     pub(crate) transfer_runtime: Option<transfer::LocalSendRuntime>,
     /// 二维码下载会话；与 transfer_window 同生命周期。
     pub(crate) transfer_session: Option<transfer::TransferSessionState>,
-    /// 接收确认 Modal 状态（未信任设备请求）。
+    /// 接收确认 Modal 状态（不是收藏的设备发来文件）。
     pub(crate) incoming_transfer: Option<transfer::IncomingTransferConfirmation>,
     /// 设置页设备名输入缓冲。
     pub(crate) transfer_device_alias_input: String,
@@ -645,6 +648,8 @@ impl FileBrowser {
             direct_sends: HashMap::new(),
             local_send_window: None,
             local_send_staged: Vec::new(),
+            favorite_address_form: None,
+            favorite_alias_inputs: HashMap::new(),
             transfer_runtime: None,
             transfer_session: None,
             incoming_transfer: None,

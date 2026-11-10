@@ -28,7 +28,7 @@ fn receive_state(
             address: None,
         },
         download_dir,
-        Arc::new(|_| true),
+        watch::channel(Vec::new()).1,
         Arc::new(Mutex::new(crate::discovery::DeviceTable::default())),
         events,
         CONFIRM_TIMEOUT,

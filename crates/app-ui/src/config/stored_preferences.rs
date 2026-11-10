@@ -107,9 +107,10 @@ pub(crate) struct StoredUserPreferences {
     /// 本机对外设备显示名;None = 未设置,读取端回退 hostname。
     #[serde(default)]
     pub transfer_device_alias: Option<String>,
-    /// 信任的 LocalSend 设备(按 fingerprint);空 = 无信任设备。
+    /// 收藏的 LocalSend 设备(按 fingerprint)。键名沿用合并前的"信任设备":表还是
+    /// 那张表,旧版本 Bennu 读回来照样是信任设备(新增字段它会忽略)。
     #[serde(default)]
-    pub transfer_trusted_devices: Vec<StoredTrustedTransferDevice>,
+    pub transfer_trusted_devices: Vec<StoredFavoriteTransferDevice>,
     /// 接收文件开关;缺省 = 开,旧数据升级后行为不变。
     #[serde(default = "default_transfer_receive_enabled")]
     pub transfer_receive_enabled: bool,
@@ -118,12 +119,17 @@ pub(crate) struct StoredUserPreferences {
     pub transfer_port: u16,
 }
 
-/// 信任设备列表条目:fingerprint 是 LocalSend 协议设备身份,alias/added_at
-/// 仅用于设置页展示。
+/// 收藏设备条目:fingerprint 是 LocalSend 设备身份(证书指纹)。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct StoredTrustedTransferDevice {
+pub(crate) struct StoredFavoriteTransferDevice {
     pub fingerprint: String,
     pub alias: String,
+    /// 名字是用户改的;缺省(旧数据)= 跟着对方设备名变。
+    #[serde(default)]
+    pub custom_alias: bool,
+    /// 最后一次见到的 "IP:端口";缺省(旧数据)= 还没找到过。
+    #[serde(default)]
+    pub address: Option<String>,
     /// ISO 8601 字符串;仅展示用途,解析失败不参与逻辑。
     #[serde(default)]
     pub added_at: String,

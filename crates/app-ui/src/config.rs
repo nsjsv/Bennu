@@ -42,8 +42,8 @@ mod stored_preferences;
 mod unrecognized_settings;
 pub(crate) use stored_preferences::{
     StoredContextMenuItemEntry, StoredContextMenuLayout, StoredContextMenuLayouts,
-    StoredLastSearchScope, StoredListViewColumn, StoredShortcutBinding,
-    StoredTrustedTransferDevice, StoredUserPreferences, StoredWindowControlPlacement,
+    StoredFavoriteTransferDevice, StoredLastSearchScope, StoredListViewColumn,
+    StoredShortcutBinding, StoredUserPreferences, StoredWindowControlPlacement,
     COLUMN_WIDTH_ADJUST_MODE_PER_COLUMN, COLUMN_WIDTH_ADJUST_MODE_UNIFORM,
     LAUNCH_WINDOW_POLICY_MERGE_INTO_EXISTING, LAUNCH_WINDOW_POLICY_OPEN_NEW_WINDOW,
 };
@@ -374,8 +374,8 @@ pub(crate) struct UserConfig {
     pub(crate) transfer_download_dir: Option<PathBuf>,
     /// 本机对外设备显示名;None = 使用 hostname。
     pub(crate) transfer_device_alias: Option<String>,
-    /// 信任的 LocalSend 设备;这些设备的发送请求自动接收。
-    pub(crate) transfer_trusted_devices: Vec<TrustedTransferDevice>,
+    /// 收藏的 LocalSend 设备:发来的文件自动接收,发送时一直在列表里。
+    pub(crate) transfer_favorite_devices: Vec<FavoriteTransferDevice>,
     /// 接收文件开关;关掉后不监听接收端口、不在网络上露面,发现与直推照常。
     pub(crate) transfer_receive_enabled: bool,
     /// 发现与接收共用的 LocalSend 端口;只存 `transfer_port_from` 认可的值。
@@ -390,12 +390,15 @@ pub(crate) fn transfer_port_from(port: u16) -> Option<u16> {
     TRANSFER_PORT_RANGE.contains(&port).then_some(port)
 }
 
-/// 信任设备列表条目:fingerprint 是 LocalSend 协议设备身份,alias/added_at
-/// 仅用于设置页展示。
+/// 收藏的 LocalSend 设备:按证书指纹认人(大写 hex,读配置时已规范)。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct TrustedTransferDevice {
+pub(crate) struct FavoriteTransferDevice {
     pub(crate) fingerprint: String,
+    /// 显示名;`custom_alias` 为 false 时跟着对方设备名变(同官方 `customAlias`)。
     pub(crate) alias: String,
+    pub(crate) custom_alias: bool,
+    /// 最后一次见到它的地址(IP + 它的端口);升级来的旧信任设备还没有。
+    pub(crate) address: Option<std::net::SocketAddr>,
     pub(crate) added_at: String,
 }
 
@@ -463,7 +466,7 @@ pub(crate) fn default_user_config() -> UserConfig {
         context_menus: crate::model::ContextMenuPreferences::defaults(),
         transfer_download_dir: None,
         transfer_device_alias: None,
-        transfer_trusted_devices: Vec::new(),
+        transfer_favorite_devices: Vec::new(),
         transfer_receive_enabled: true,
         transfer_port: local_send::DEFAULT_PORT,
     }
@@ -512,7 +515,7 @@ pub(crate) fn ui_thread_startup_config() -> UserConfig {
         column_width_adjust_mode: DEFAULT_COLUMN_WIDTH_ADJUST_MODE,
         transfer_download_dir: None,
         transfer_device_alias: None,
-        transfer_trusted_devices: Vec::new(),
+        transfer_favorite_devices: Vec::new(),
         transfer_receive_enabled: true,
         transfer_port: local_send::DEFAULT_PORT,
     }

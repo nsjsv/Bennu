@@ -8,8 +8,7 @@ use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
 
 use super::{
-    files_map, free_port, meta, post, prepare, spawn_receive, spawn_receive_with, test_peer,
-    wait_for, TEST_TIMEOUT,
+    files_map, free_port, meta, post, prepare, spawn_receive, test_peer, wait_for, TEST_TIMEOUT,
 };
 use crate::device::{DeviceInfo, PrepareUploadResponse};
 use crate::identity::DeviceIdentity;
@@ -117,20 +116,13 @@ async fn another_certificate_cannot_use_a_session_token() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn direct_send_presents_the_identity_its_fingerprint_claims() {
-    let seen_by_trust = Arc::new(parking_lot::Mutex::new(Vec::new()));
-    let recorder = Arc::clone(&seen_by_trust);
-    let mut server = spawn_receive_with(
-        Arc::new(move |device: &DeviceInfo| {
-            recorder.lock().push(device.fingerprint.clone());
-            true
-        }),
-        Duration::from_secs(10),
-    )
-    .await;
+    let mut server = spawn_receive(false, Duration::from_secs(10)).await;
     let source = tempfile::tempdir().unwrap();
     let file = source.path().join("one.txt");
     std::fs::write(&file, b"first").unwrap();
     let (sender, fingerprint) = crate::send::sender_with_new_identity(source.path());
+    // 只收藏发送方的身份：自动收下说明接收端按握手时的证书认出了它。
+    server.favor(&fingerprint);
     let (progress, _) = mpsc::channel(1);
 
     sender
@@ -138,16 +130,21 @@ async fn direct_send_presents_the_identity_its_fingerprint_claims() {
         .await
         .unwrap();
 
-    wait_for(&mut server.events, |event| {
-        matches!(event, ServiceEvent::ReceiveFinished { .. })
+    let event = wait_for(&mut server.events, |event| {
+        matches!(
+            event,
+            ServiceEvent::IncomingRequest { .. } | ServiceEvent::ReceiveFinished { .. }
+        )
     })
     .await;
+    assert!(
+        matches!(event, ServiceEvent::ReceiveFinished { .. }),
+        "{event:?}"
+    );
     assert_eq!(
         std::fs::read(server._dir.path().join("one.txt")).unwrap(),
         b"first"
     );
-    // 接收端按握手时的证书认人：信任判定看到的就是发送方身份的指纹。
-    assert_eq!(*seen_by_trust.lock(), vec![fingerprint]);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -227,7 +224,7 @@ async fn probing_an_encrypted_device_trusts_its_certificate_not_its_claim() {
     let state = Arc::new(crate::receive::ReceiveState::new(
         liar,
         download.path().to_path_buf(),
-        Arc::new(|_| false),
+        tokio::sync::watch::channel(Vec::new()).1,
         Arc::new(tokio::sync::Mutex::new(
             crate::discovery::DeviceTable::default(),
         )),

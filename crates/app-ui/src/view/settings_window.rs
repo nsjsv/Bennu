@@ -41,7 +41,7 @@ use super::settings_group::{
     SETTINGS_GROUP_SPACING,
 };
 use super::shortcut_settings::shortcut_settings_section;
-use super::transfer_settings::{transfer_receive_rows, trusted_devices_section};
+use super::transfer_settings::{favorite_devices_section, transfer_receive_rows};
 use super::window_chrome::{floating_window_control_group, separate_window_content};
 use super::window_control_settings::window_control_settings_row;
 use super::window_drag_region::window_drag_region;
@@ -392,8 +392,8 @@ fn transfer_settings_detail(
             chrome_top_spacer(browser),
             settings_group(tr!("Receive"), transfer_receive_rows(browser)),
             settings_group(
-                tr!("Trusted devices"),
-                vec![trusted_devices_section(browser)]
+                tr!("Favorite devices"),
+                vec![favorite_devices_section(browser)]
             ),
         ]
         .spacing(SETTINGS_GROUP_SPACING)

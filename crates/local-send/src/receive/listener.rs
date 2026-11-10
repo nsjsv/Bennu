@@ -188,8 +188,6 @@ async fn bind(port: u16) -> Result<TcpListener, ReceiverFailure> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use tokio::sync::broadcast;
 
     use super::*;
@@ -204,7 +202,6 @@ mod tests {
             alias,
             port,
             previous_released,
-            Arc::new(|_| false),
             super::super::CONFIRM_TIMEOUT,
         )
     }

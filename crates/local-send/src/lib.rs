@@ -17,6 +17,7 @@ mod device;
 mod discovery;
 mod error;
 mod identity;
+mod link;
 mod outbound_tls;
 mod qr;
 mod receive;
@@ -36,6 +37,7 @@ pub use tokio_util::sync::CancellationToken;
 
 pub use device::{Announce, DeviceInfo, FileMetadata, PrepareUploadRequest, PrepareUploadResponse};
 pub use error::LocalSendError;
+pub use link::{LinkControl, LinkEvent, LinkReceiveConfig, LinkReceiveHandle, LinkReceiveServer};
 pub use qr::{QrDownloadHandle, QrItem, QrSource};
 pub use receive::{ReceiveReport, ReceivedFile, ReceivedOutcome};
 pub use send::prepare::{prepare_files, FileFailure, PrepareProgress, PreparedFiles};
@@ -393,7 +395,7 @@ impl LocalSendService {
                         }
                         Some(ServiceCommand::CancelReceive { session_id }) => {
                             if let Some(state) = &receive_state {
-                                state.end_session(&session_id).await;
+                                state.sessions.end_session(&session_id).await;
                             }
                         }
                         Some(ServiceCommand::RefreshDevices) => {

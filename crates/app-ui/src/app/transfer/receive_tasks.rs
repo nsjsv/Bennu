@@ -2,25 +2,25 @@
 //! 还有面板与设备行共用的取消、清除入口。
 
 use iced::Task;
-use local_send::{DeviceInfo, FileMetadata, ReceiveReport};
+use local_send::{FileMetadata, ReceiveReport};
 
 use super::super::FileBrowser;
 use super::history::NewRecord;
-use super::tasks::{ReceivePhase, ReceiveTask, TransferKind};
+use super::tasks::{ReceivePhase, ReceiveSource, ReceiveTask, TransferKind};
 use crate::model::Message;
 
 impl FileBrowser {
-    /// 服务收下了一次接收（自动收下或用户确认）：进面板。
+    /// 收下了一次接收（LocalSend 设备被自动收下或用户确认、手机网页开始发）：进面板。
     pub(super) fn accept_receive_started(
         &mut self,
         session_id: String,
-        device: &DeviceInfo,
+        sender: String,
+        source: ReceiveSource,
         files: Vec<FileMetadata>,
     ) {
-        let sender = self.transfer_device_name(device);
         let panel_open = self.operation_queue.is_panel_open();
         self.transfer_tasks.push(
-            TransferKind::Receive(ReceiveTask::new(session_id, sender, files)),
+            TransferKind::Receive(ReceiveTask::new(session_id, sender, source, files)),
             panel_open,
         );
     }
@@ -40,8 +40,19 @@ impl FileBrowser {
         }
     }
 
-    /// 会话结束（收完、对方取消、本机取消）：取消了的显示"已取消"，其余显示结果；每个
-    /// 文件记一条传输记录。
+    /// 会话结束（收完、对方取消、本机取消）：任务面板、传输记录、后台时的桌面通知。
+    pub(super) fn finish_receive(
+        &mut self,
+        session_id: &str,
+        report: &ReceiveReport,
+    ) -> Task<Message> {
+        let history = self.accept_receive_finished(session_id, report);
+        let notification =
+            self.notify_transfer_receive_finished(report.saved_paths(), report.failures());
+        Task::batch([history, notification])
+    }
+
+    /// 取消了的显示"已取消"，其余显示结果；每个文件记一条传输记录。
     pub(super) fn accept_receive_finished(
         &mut self,
         session_id: &str,
@@ -83,8 +94,13 @@ impl FileBrowser {
             Some(TransferKind::Receive(receive)) if receive.phase == ReceivePhase::Receiving => {
                 // 结果（含记录）等服务结束会话、发 `ReceiveFinished` 再说。
                 receive.phase = ReceivePhase::Canceling;
-                if let Some(runtime) = &self.transfer_runtime {
-                    runtime.handle.cancel_receive(&receive.session_id);
+                match &receive.source {
+                    ReceiveSource::LocalSend => {
+                        if let Some(runtime) = &self.transfer_runtime {
+                            runtime.handle.cancel_receive(&receive.session_id);
+                        }
+                    }
+                    ReceiveSource::Link(control) => control.cancel_session(&receive.session_id),
                 }
                 Task::none()
             }

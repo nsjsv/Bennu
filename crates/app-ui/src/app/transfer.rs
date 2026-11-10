@@ -23,7 +23,6 @@ use super::transfer_service::service_config;
 use super::FileBrowser;
 use crate::config::TransferAcceptMode;
 use crate::model::Message;
-use crate::view::transfer_qr::qr_image_handle;
 
 /// 传输子消息：`Message::Transfer` 的载荷。
 #[derive(Debug, Clone)]
@@ -144,6 +143,7 @@ pub(crate) enum TransferMessage {
     },
     FavoriteAliasCommitted(String),
     AddressForm(AddressFormMessage),
+    LinkReceive(LinkReceiveMessage),
 }
 
 /// 常驻 LocalSend 服务运行时状态。
@@ -177,12 +177,7 @@ pub(crate) struct TransferSessionState {
 #[derive(Debug, Clone)]
 pub(crate) enum TransferSessionPhase {
     Preparing,
-    /// `selected`/`qr` 为 `None` 时显示本机地址列表；点选地址后生成对应二维码。
-    Ready {
-        urls: Vec<String>,
-        selected: Option<usize>,
-        qr: Option<iced::widget::image::Handle>,
-    },
+    Ready(QrLinks),
     Failed(String),
 }
 
@@ -271,33 +266,27 @@ impl FileBrowser {
             TransferMessage::SendToPhoneRequested => self.begin_qr_transfer_session(),
             TransferMessage::QrSessionStarted { urls } => {
                 if let Some(session) = &mut self.transfer_session {
-                    // 默认展示地址列表，二维码等用户点选地址后再生成。
-                    session.phase = TransferSessionPhase::Ready {
-                        urls,
-                        selected: None,
-                        qr: None,
-                    };
+                    session.phase = TransferSessionPhase::Ready(QrLinks::new(urls));
                 }
                 iced::Task::none()
             }
             TransferMessage::QrAddressSelected(index) => {
-                if let Some(session) = &mut self.transfer_session {
-                    if let TransferSessionPhase::Ready { urls, selected, qr } = &mut session.phase {
-                        // 点选即生成：fast_qr 矩阵计算在微秒级，无需异步。
-                        if let Some(url) = urls.get(index) {
-                            *selected = Some(index);
-                            *qr = Some(qr_image_handle(url));
-                        }
-                    }
+                if let Some(TransferSessionPhase::Ready(links)) = self
+                    .transfer_session
+                    .as_mut()
+                    .map(|session| &mut session.phase)
+                {
+                    links.choose(index);
                 }
                 iced::Task::none()
             }
             TransferMessage::QrAddressListRequested => {
-                if let Some(session) = &mut self.transfer_session {
-                    if let TransferSessionPhase::Ready { selected, qr, .. } = &mut session.phase {
-                        *selected = None;
-                        *qr = None;
-                    }
+                if let Some(TransferSessionPhase::Ready(links)) = self
+                    .transfer_session
+                    .as_mut()
+                    .map(|session| &mut session.phase)
+                {
+                    links.show_addresses();
                 }
                 iced::Task::none()
             }
@@ -486,6 +475,7 @@ impl FileBrowser {
                 self.commit_favorite_alias(&fingerprint)
             }
             TransferMessage::AddressForm(message) => self.handle_address_form(message),
+            TransferMessage::LinkReceive(message) => self.handle_link_receive(message),
         }
     }
 
@@ -583,7 +573,10 @@ impl FileBrowser {
                 session_id,
                 device,
                 files,
-            } => self.accept_receive_started(session_id, &device, files),
+            } => {
+                let sender = self.transfer_device_name(&device);
+                self.accept_receive_started(session_id, sender, ReceiveSource::LocalSend, files);
+            }
             ServiceEvent::RequestRejected { session_id } => {
                 return self.accept_request_withdrawn(&session_id);
             }
@@ -593,10 +586,7 @@ impl FileBrowser {
                 received,
             } => self.accept_receive_progress(&session_id, file_id, received),
             ServiceEvent::ReceiveFinished { session_id, report } => {
-                let history = self.accept_receive_finished(&session_id, &report);
-                let notification =
-                    self.notify_transfer_receive_finished(report.saved_paths(), report.failures());
-                return iced::Task::batch([history, notification]);
+                return self.finish_receive(&session_id, &report);
             }
             ServiceEvent::MessageReceived { device, text } => {
                 return self.accept_incoming_message(device, text);
@@ -750,8 +740,10 @@ mod direct_send;
 mod favorites;
 mod history;
 mod incoming;
+mod link_receive;
 mod local_send_window;
 mod messages;
+mod qr_links;
 mod receive_tasks;
 mod settings;
 mod tasks;
@@ -765,10 +757,14 @@ pub(crate) use favorites::{
 };
 pub(crate) use history::{Direction, HistoryItem, HistoryRecord, HistoryResult, TransferHistory};
 pub(crate) use incoming::{incoming_entries, IncomingEntry};
+pub(crate) use link_receive::{LinkReceiveMessage, LinkReceivePhase, LinkReceiving};
 pub(crate) use local_send_window::LocalSendPage;
 pub(crate) use local_send_window::{ChooserTarget, StagedItem, StagedSize, StagedTab};
 pub(crate) use messages::{message_link, IncomingMessage, MessageTitle};
-pub(crate) use tasks::{ReceivePhase, ReceiveTask, TransferKind, TransferTask, TransferTasks};
+pub(crate) use qr_links::QrLinks;
+pub(crate) use tasks::{
+    ReceivePhase, ReceiveSource, ReceiveTask, TransferKind, TransferTask, TransferTasks,
+};
 
 pub(crate) use settings::receiver_failure_message;
 

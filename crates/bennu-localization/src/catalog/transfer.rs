@@ -167,4 +167,31 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Yesterday %1", "昨天 %1"),
     ("Message to %1", "发给 %1 的文字"),
     ("The file is no longer there: %1", "文件已经不在了：%1"),
+    // 通过链接接收：LocalSend 窗口
+    ("Receive from phone", "从手机接收"),
+    ("Stop receiving", "停止接收"),
+    ("Preparing the link...", "正在准备链接..."),
+    (
+        "Scan the code or open the link on your phone to send files here: %1",
+        "在手机上扫码或打开链接，把文件发到这台电脑：%1",
+    ),
+    (
+        "No one used the link for 10 minutes, so receiving stopped.",
+        "10 分钟没人用，已停止接收。",
+    ),
+    ("Could not start receiving from a phone: %1", "没能开始从手机接收：%1"),
+    ("Browser %1", "网页 %1"),
+    // 通过链接接收：手机上的网页
+    ("Send files to %1", "发送文件到 %1"),
+    ("Or drop files here.", "或者把文件拖到这里"),
+    ("This page needs JavaScript.", "这个网页需要打开 JavaScript。"),
+    (
+        "Sent %1 file(s). You can send more.",
+        "已发送 %1 个文件，可以接着发。",
+    ),
+    ("The computer canceled this transfer.", "电脑取消了这次发送。"),
+    ("The computer has stopped receiving.", "电脑已停止接收。"),
+    ("Cannot reach the computer.", "连不上电脑。"),
+    ("Could not send %1: %2", "%1 没发成：%2"),
+    ("Could not start sending: %1", "没能开始发送：%1"),
 ];

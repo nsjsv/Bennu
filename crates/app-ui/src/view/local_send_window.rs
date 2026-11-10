@@ -1,4 +1,4 @@
-//! LocalSend 窗口：本机与接收状态；"设备"页是待发（文件或文字）、收藏设备、附近设备，
+//! LocalSend 窗口：本机与接收状态、从手机接收；"设备"页是待发（文件或文字）、收藏设备、附近设备，
 //! "记录"页是传输记录。
 
 use iced::widget::{button, column, container, row, scrollable, text_editor, Column, Space};
@@ -20,7 +20,7 @@ use local_send::DeviceInfo;
 
 use super::option_controls::{segmented_choice_row, SegmentedChoice};
 use super::settings_group::{muted_setting_text, toggle_setting_row};
-use super::{local_send_address_form, local_send_devices, transfer_history};
+use super::{link_receive, local_send_address_form, local_send_devices, transfer_history};
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};
 
 const WINDOW_PADDING: f32 = 16.0;
@@ -62,7 +62,7 @@ pub(crate) fn view_local_send_window(browser: &FileBrowser) -> Element<'_, Messa
     scrollable(content).height(Length::Fill).into()
 }
 
-/// 本机名、接收开关（与设置页同一个状态）与接收状态。
+/// 本机名、接收开关（与设置页同一个状态）、接收状态与"从手机接收"。
 fn this_computer_card(browser: &FileBrowser) -> Element<'_, Message> {
     let receiving = browser.user_config().transfer_receive_enabled;
     let status: Element<'_, Message> = if let Some(failure) = browser.transfer_receiver_failure() {
@@ -91,6 +91,7 @@ fn this_computer_card(browser: &FileBrowser) -> Element<'_, Message> {
                 Message::Transfer(TransferMessage::ReceiveEnabledToggled),
             ),
             status,
+            link_receive::link_receive_section(browser),
         ]
         .spacing(8),
     )
@@ -320,7 +321,7 @@ fn nearby_card(browser: &FileBrowser) -> Element<'_, Message> {
     )
 }
 
-fn error_text(label: String) -> Element<'static, Message> {
+pub(super) fn error_text(label: String) -> Element<'static, Message> {
     readable_text(label)
         .size(11)
         .width(Length::Fill)

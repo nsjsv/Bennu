@@ -15,6 +15,7 @@ mod file_operation_verification_settings;
 mod floating_panels;
 mod incoming_message_panel;
 mod incoming_transfer_panel;
+mod link_receive;
 mod local_send_address_form;
 mod local_send_devices;
 mod local_send_send_status;

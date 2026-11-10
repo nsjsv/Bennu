@@ -1,36 +1,26 @@
 //! 发送到手机窗口：二维码、下载状态/进度、LocalSend 设备直推列表。
 
-use iced::widget::{button, column, container, image, row, scrollable, Space};
+use iced::widget::{column, container, row, scrollable, Space};
 use iced::{Element, Length};
 
 use crate::app::transfer::{
     DeviceListOwner, TransferMessage, TransferSessionPhase, TransferSessionState,
 };
 use crate::app::FileBrowser;
-use crate::appearance::{context_menu_button_style, context_menu_style};
+use crate::appearance::context_menu_style;
 use crate::formatting::format_file_size;
 use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
 use local_send::DeviceInfo;
 
 use super::local_send_devices;
+use super::transfer_qr::qr_links_view;
 
-const QR_DISPLAY_SIZE: f32 = 220.0;
 const TRANSFER_CARD_SPACING: f32 = 12.0;
 const TRANSFER_WINDOW_PADDING: f32 = 16.0;
 const DEVICE_LIST_MAX_HEIGHT: f32 = 220.0;
 /// 设备行含名字、型号 · IP、状态三行文字。
 const DEVICE_ROW_HEIGHT: f32 = 56.0;
-
-/// 从下载链接提取显示用地址段（host:port），列表项不展示完整 token 链接。
-fn display_address(url: &str) -> &str {
-    url.strip_prefix("http://")
-        .or_else(|| url.strip_prefix("https://"))
-        .unwrap_or(url)
-        .split('/')
-        .next()
-        .unwrap_or(url)
-}
 
 pub(crate) fn view_transfer_window(browser: &FileBrowser) -> Element<'_, Message> {
     let mut content = column![].spacing(TRANSFER_CARD_SPACING).width(Length::Fill);
@@ -63,54 +53,15 @@ fn session_card(session: &TransferSessionState) -> Element<'_, Message> {
                 .push(status_line(tr!("Could not start download service")))
                 .push(readable_text(error.clone()).size(12));
         }
-        TransferSessionPhase::Ready { urls, selected, qr } => {
-            match (selected.as_ref(), qr.as_ref()) {
-                (Some(index), Some(qr)) => {
-                    // 已选地址：显示对应二维码；finished 后二维码无意义。
-                    if session.finished.is_none() {
-                        card = card.push(
-                            container(
-                                image(qr.clone())
-                                    .filter_method(image::FilterMethod::Nearest)
-                                    .width(Length::Fixed(QR_DISPLAY_SIZE))
-                                    .height(Length::Fixed(QR_DISPLAY_SIZE)),
-                            )
-                            .width(Length::Fill)
-                            .center_x(Length::Fill),
-                        );
-                    }
-                    if let Some(url) = urls.get(*index) {
-                        card = card.push(
-                            readable_text(tr!(
-                                "Scan the code or open the link on your phone: %1",
-                                url
-                            ))
-                            .size(11),
-                        );
-                    }
-                    card = card.push(
-                        button(readable_text(tr!("Choose another address")).size(12))
-                            .on_press(Message::Transfer(TransferMessage::QrAddressListRequested))
-                            .padding([5, 12])
-                            .style(context_menu_button_style()),
-                    );
-                }
-                _ => {
-                    // 未选地址：展示本机全部候选地址，点击后才生成二维码。
-                    card = card.push(status_line(tr!("Choose an address your phone can reach")));
-                    for (index, url) in urls.iter().enumerate() {
-                        let address = display_address(url).to_owned();
-                        card = card.push(
-                            button(readable_text(address.clone()).size(12).width(Length::Fill))
-                                .on_press(Message::Transfer(TransferMessage::QrAddressSelected(
-                                    index,
-                                )))
-                                .padding([6, 10])
-                                .width(Length::Fill)
-                                .style(context_menu_button_style()),
-                        );
-                    }
-                }
+        TransferSessionPhase::Ready(links) => {
+            // 传完或超时后服务已停，链接没用了。
+            if session.finished.is_none() {
+                card = card.push(qr_links_view(
+                    links,
+                    |url| tr!("Scan the code or open the link on your phone: %1", url),
+                    TransferMessage::QrAddressSelected,
+                    TransferMessage::QrAddressListRequested,
+                ));
             }
             card = card.push(match session.finished {
                 // finished 只会记录终态事件；Connected/Progress 不会进入该槽。

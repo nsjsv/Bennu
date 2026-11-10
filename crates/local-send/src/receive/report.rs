@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use super::{FileSlot, SlotOutcome};
+use super::sessions::{FileSlot, SlotOutcome};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReceiveReport {

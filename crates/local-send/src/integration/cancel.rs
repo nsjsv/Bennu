@@ -234,7 +234,7 @@ async fn canceling_a_receive_keeps_finished_files_and_stops_the_one_being_writte
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 
-    assert!(server.state.end_session(&session.session_id).await);
+    assert!(server.state.sessions.end_session(&session.session_id).await);
 
     // 正在写的那个上传马上停下（回给对方的是错误，不是成功）。
     let response = tokio::time::timeout(TEST_TIMEOUT, stalled)

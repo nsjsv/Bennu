@@ -17,6 +17,7 @@ use crate::{AcceptPolicy, Favorite, ReceiverConfig, ServiceEvent};
 
 mod cancel;
 mod find_device;
+mod link;
 mod mtls;
 mod pin;
 mod qr;

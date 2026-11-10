@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="{{LANG}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{TITLE}}</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; line-height: 1.5; text-align: center; color: #202124; }
+  h1 { font-size: 1.3em; margin: 0; padding: 1em 1em 0; word-break: break-word; }
+  #content { box-sizing: border-box; max-width: 400px; margin: 10vh auto 0; padding: 1em; border: 2px dashed transparent; border-radius: 0.5em; }
+  #content.drag-over { border-color: #1a73e8; background: #e8f0fe; }
+  #choose { width: 100%; padding: 0.9em; font: inherit; font-size: 1.3em; color: #fff; background: #1a73e8; border: none; border-radius: 0.5em; cursor: pointer; }
+  #hint { color: #5f6368; }
+  /* 手机上没有拖放。 */
+  @media (pointer: coarse) { #hint { display: none; } }
+  #bar { width: 100%; height: 0.6em; margin-top: 1em; }
+  #status { font-size: 1.2em; word-break: break-word; }
+  #status.error { color: #c5221f; }
+</style>
+</head>
+<body>
+<noscript>{{NOSCRIPT}}</noscript>
+<h1>{{TITLE}}</h1>
+<div id="content">
+  <button id="choose" type="button">{{CHOOSE}}</button>
+  <p id="hint">{{DROP_HINT}}</p>
+  <input id="files" type="file" multiple style="display: none">
+  <progress id="bar" max="100" value="0" style="display: none"></progress>
+  <p id="status"></p>
+</div>
+<script>
+  var T = {{STRINGS}};
+  var uploading = false;
+  var sessionId = null;
+  // dragenter/dragleave 每个子元素都会触发：回到 0 才算离开。
+  var dragDepth = 0;
+
+  function byId(id) { return document.getElementById(id); }
+
+  function fill(template, values) {
+    return template.replace(/%(\d)/g, function (match, n) { return String(values[n - 1]); });
+  }
+
+  function showStatus(text, isError) {
+    var status = byId('status');
+    status.textContent = text;
+    status.className = isError ? 'error' : '';
+  }
+
+  function setIdle(idle) {
+    byId('choose').style.display = idle ? '' : 'none';
+    byId('hint').style.display = idle ? '' : 'none';
+    if (idle) {
+      byId('bar').style.display = 'none';
+    }
+  }
+
+  function request(method, url, body, done, onProgress) {
+    var xhr = new XMLHttpRequest();
+    xhr.open(method, url, true);
+    // 只有 prepare-upload 发字符串（JSON）；不声明类型服务端会回 415。
+    if (typeof body === 'string') {
+      xhr.setRequestHeader('Content-Type', 'application/json');
+    }
+    if (onProgress && xhr.upload) {
+      xhr.upload.onprogress = function (e) { onProgress(e.loaded); };
+    }
+    xhr.onreadystatechange = function () {
+      if (xhr.readyState === 4) {
+        done(xhr);
+      }
+    };
+    xhr.send(body);
+  }
+
+  // 电脑那边的原因；别的错误返回 null，由调用方写具体是哪个文件。
+  function knownFailure(xhr) {
+    if (xhr.status === 0) return T.unreachable;
+    if (xhr.status === 410) return T.stopped;
+    // 电脑取消了：正在传的回 409，下一个文件回 403（会话已经没了）。
+    if (xhr.status === 409 || xhr.status === 403) return T.canceled;
+    return null;
+  }
+
+  function cancelSession() {
+    if (sessionId) {
+      request('POST', T.base + '/cancel?sessionId=' + encodeURIComponent(sessionId), null, function () {});
+    }
+  }
+
+  function finish(text, isError) {
+    uploading = false;
+    sessionId = null;
+    setIdle(true);
+    showStatus(text, isError);
+  }
+
+  function start(list) {
+    var files = [];
+    for (var i = 0; i < list.length; i++) {
+      files.push(list[i]);
+    }
+    if (uploading || files.length === 0) {
+      return;
+    }
+    uploading = true;
+    setIdle(false);
+    showStatus(T.connecting, false);
+    var dto = {};
+    var total = 0;
+    for (var j = 0; j < files.length; j++) {
+      dto[String(j)] = {
+        id: String(j),
+        fileName: files[j].name,
+        size: files[j].size,
+        fileType: files[j].type || 'application/octet-stream'
+      };
+      total += files[j].size;
+    }
+    request('POST', T.base + '/prepare-upload', JSON.stringify({ files: dto }), function (xhr) {
+      if (xhr.status !== 200) {
+        finish(knownFailure(xhr) || fill(T.notStarted, [xhr.responseText || xhr.status]), true);
+        return;
+      }
+      var answer = JSON.parse(xhr.responseText);
+      sessionId = answer.sessionId;
+      sendFrom(files, answer.files, 0, 0, total);
+    });
+  }
+
+  function sendFrom(files, tokens, index, doneBytes, total) {
+    if (index >= files.length) {
+      finish(fill(T.sent, [files.length]), false);
+      return;
+    }
+    var file = files[index];
+    var fileId = String(index);
+    function showProgress(loaded) {
+      var percent = total > 0 ? Math.min(100, Math.floor((doneBytes + loaded) * 100 / total)) : 100;
+      byId('bar').style.display = '';
+      byId('bar').value = percent;
+      showStatus(percent + '% · ' + fill(T.fileOf, [index + 1, files.length]), false);
+    }
+    showProgress(0);
+    var url = T.base + '/upload?sessionId=' + encodeURIComponent(sessionId) +
+      '&fileId=' + encodeURIComponent(fileId) + '&token=' + encodeURIComponent(tokens[fileId]);
+    request('POST', url, file, function (xhr) {
+      if (xhr.status === 200) {
+        sendFrom(files, tokens, index + 1, doneBytes + file.size, total);
+        return;
+      }
+      // 没发成就结束整次，电脑上不会一直挂着"接收中"。
+      cancelSession();
+      finish(knownFailure(xhr) || fill(T.failed, [file.name, xhr.responseText || xhr.status]), true);
+    }, showProgress);
+  }
+
+  // 文件夹读不成文件，传到一半会失败：跳过（同官方）。
+  function droppedFiles(dataTransfer) {
+    var files = [];
+    var items = dataTransfer.items;
+    if (items && items.length > 0 && items[0].webkitGetAsEntry) {
+      for (var i = 0; i < items.length; i++) {
+        var entry = items[i].webkitGetAsEntry();
+        if (entry && entry.isDirectory) {
+          continue;
+        }
+        var file = items[i].getAsFile();
+        if (file) {
+          files.push(file);
+        }
+      }
+      return files;
+    }
+    for (var j = 0; j < dataTransfer.files.length; j++) {
+      files.push(dataTransfer.files[j]);
+    }
+    return files;
+  }
+
+  function isFileDrag(e) {
+    var types = e.dataTransfer && e.dataTransfer.types;
+    if (!types) return false;
+    for (var i = 0; i < types.length; i++) {
+      if (types[i] === 'Files') return true;
+    }
+    return false;
+  }
+
+  byId('choose').onclick = function () { byId('files').click(); };
+  byId('files').onchange = function () {
+    start(this.files);
+    // 同样的文件能再选一次。
+    this.value = '';
+  };
+  document.addEventListener('dragenter', function (e) {
+    if (!isFileDrag(e) || uploading) return;
+    e.preventDefault();
+    dragDepth++;
+    byId('content').className = 'drag-over';
+  });
+  document.addEventListener('dragleave', function (e) {
+    if (!isFileDrag(e)) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) byId('content').className = '';
+  });
+  document.addEventListener('dragover', function (e) {
+    if (!isFileDrag(e)) return;
+    // 不拦的话浏览器会直接打开文件。
+    e.preventDefault();
+    e.dataTransfer.dropEffect = uploading ? 'none' : 'copy';
+  });
+  document.addEventListener('drop', function (e) {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    dragDepth = 0;
+    byId('content').className = '';
+    if (!uploading) start(droppedFiles(e.dataTransfer));
+  });
+  // 发到一半离开页面：告诉电脑这次不发了。
+  window.addEventListener('pagehide', function () {
+    if (uploading && sessionId && navigator.sendBeacon) {
+      navigator.sendBeacon(T.base + '/cancel?sessionId=' + encodeURIComponent(sessionId));
+    }
+  });
+</script>
+</body>
+</html>

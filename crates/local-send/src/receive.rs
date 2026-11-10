@@ -10,7 +10,6 @@
 
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -20,10 +19,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use sha2::{Digest, Sha256};
-use tokio::io::AsyncWriteExt;
 use tokio::sync::{broadcast, oneshot, watch, Mutex};
-use tokio_util::sync::CancellationToken;
 
 use crate::device::{DeviceInfo, FileMetadata, PrepareUploadRequest, PrepareUploadResponse};
 use crate::{AcceptPolicy, Favorite, ReceiverConfig, ServiceEvent};
@@ -31,58 +27,19 @@ use crate::{AcceptPolicy, Favorite, ReceiverConfig, ServiceEvent};
 mod destination;
 mod listener;
 mod report;
+mod sessions;
 mod tls;
 
 pub(crate) use listener::{port_already_released, spawn_server, Peer, PortReleased};
 pub use report::{ReceiveReport, ReceivedFile, ReceivedOutcome};
+pub(crate) use sessions::{CancelQuery, ReceiveSessions, SessionEvents, UploadQuery};
 pub(crate) use tls::server_config;
 
 /// 未信任设备 prepare-upload 挂起等待用户确认的超时（design：30s 后 403）。
 pub(crate) const CONFIRM_TIMEOUT: Duration = Duration::from_secs(30);
-/// 进度事件的节流步长：避免逐 chunk 事件淹没 broadcast 通道。
-const PROGRESS_STEP: u64 = 1024 * 1024;
-
-/// 单个接收文件的会话内状态。
-#[derive(Debug)]
-struct FileSlot {
-    meta: FileMetadata,
-    token: String,
-    /// 实际落盘路径（首块写入前确定，重名规则在此时应用）。
-    dest: Option<PathBuf>,
-    received: u64,
-    /// 已经开始过几次上传：校验不符时据此决定还让不让重传。
-    attempts: u8,
-    outcome: SlotOutcome,
-}
-
-/// 同一文件最多收几次（同官方 `MAX_UPLOAD_ATTEMPTS`）：校验不符的前几次回 422 让对方
-/// 重发，到次数判失败。
-const MAX_UPLOAD_ATTEMPTS: u8 = 3;
-
-/// 文件槽终态：成功、失败（原因随 `ReceiveFinished` 上报）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum SlotOutcome {
-    Pending,
-    Done,
-    Failed(&'static str),
-}
-
-#[derive(Debug)]
-struct Session {
-    /// 发起 prepare-upload 的证书指纹：upload、cancel 必须来自同一张证书。
-    sender: String,
-    files: HashMap<String, FileSlot>,
-    /// 这次发送里每个顶层文件夹实际落到的目录（同名的已改名）。
-    folders: HashMap<String, PathBuf>,
-    /// 会话被结束（对方取消或本机取消）时触发：正在写的上传立刻停下。
-    ended: CancellationToken,
-    finished_emitted: bool,
-}
-
 /// receive 服务共享状态。
 pub(crate) struct ReceiveState {
     own_device: DeviceInfo,
-    download_dir: PathBuf,
     accept: AcceptPolicy,
     pin: Option<String>,
     /// 每个 IP 连续输错 PIN 的次数；接收端换代（重启、改 PIN）即清零。
@@ -91,7 +48,8 @@ pub(crate) struct ReceiveState {
     favorites: watch::Receiver<Vec<Favorite>>,
     /// 不是收藏的设备的挂起确认：session_id → 决策回写端。
     pending: Mutex<HashMap<String, oneshot::Sender<bool>>>,
-    sessions: Mutex<HashMap<String, Session>>,
+    /// 放行之后的会话：发送方按握手证书指纹认。
+    pub(crate) sessions: ReceiveSessions,
     devices: Arc<Mutex<crate::discovery::DeviceTable>>,
     events: broadcast::Sender<ServiceEvent>,
     confirm_timeout: Duration,
@@ -108,13 +66,15 @@ impl ReceiveState {
     ) -> Self {
         ReceiveState {
             own_device,
-            download_dir: receiver.download_dir,
             accept: receiver.accept,
             pin: receiver.pin,
             pin_failures: Mutex::new(HashMap::new()),
             favorites,
             pending: Mutex::new(HashMap::new()),
-            sessions: Mutex::new(HashMap::new()),
+            sessions: ReceiveSessions::new(
+                receiver.download_dir,
+                SessionEvents::Service(events.clone()),
+            ),
             devices,
             events,
             confirm_timeout,
@@ -346,59 +306,23 @@ impl Drop for WithdrawnGuard {
     }
 }
 
-/// 创建会话并为每个 fileId 生成上传令牌（放行的唯一路径），告诉界面谁发来了什么：
-/// 自动收下的会话界面没见过确认弹窗，也要能显示进度。
+/// 开会话并告诉界面谁发来了什么：自动收下的会话界面没见过确认弹窗，也要能显示进度。
 async fn accept_session(
     state: &Arc<ReceiveState>,
     session_id: &str,
     sender: &DeviceInfo,
     files: &HashMap<String, FileMetadata>,
 ) -> PrepareUploadResponse {
-    let mut tokens = HashMap::new();
-    let mut slots = HashMap::new();
-    for (file_id, meta) in files {
-        let token = random_id();
-        tokens.insert(file_id.clone(), token.clone());
-        slots.insert(
-            file_id.clone(),
-            FileSlot {
-                meta: meta.clone(),
-                token,
-                dest: None,
-                received: 0,
-                attempts: 0,
-                outcome: SlotOutcome::Pending,
-            },
-        );
-    }
-    state.sessions.lock().await.insert(
-        session_id.to_string(),
-        Session {
-            sender: sender.fingerprint.clone(),
-            files: slots,
-            folders: HashMap::new(),
-            ended: CancellationToken::new(),
-            finished_emitted: false,
-        },
-    );
+    let response = state
+        .sessions
+        .open(session_id, &sender.fingerprint, files)
+        .await;
     let _ = state.events.send(ServiceEvent::RequestAccepted {
         session_id: session_id.to_owned(),
         device: sender.clone(),
         files: files.values().cloned().collect(),
     });
-    PrepareUploadResponse {
-        session_id: session_id.to_string(),
-        files: tokens,
-    }
-}
-
-#[derive(serde::Deserialize)]
-struct UploadQuery {
-    #[serde(rename = "sessionId")]
-    session_id: String,
-    #[serde(rename = "fileId")]
-    file_id: String,
-    token: String,
+    response
 }
 
 async fn upload(
@@ -407,307 +331,7 @@ async fn upload(
     Query(query): Query<UploadQuery>,
     body: Body,
 ) -> impl IntoResponse {
-    let (meta, attempts, ended) = {
-        let mut sessions = state.sessions.lock().await;
-        // 别的证书拿着令牌也不行；与未知会话同一回应，不告诉探测者会话存在。
-        let Some(session) = sessions
-            .get_mut(&query.session_id)
-            .filter(|session| session.sender == peer.fingerprint)
-        else {
-            return (StatusCode::FORBIDDEN, "unknown session".to_string());
-        };
-        let Some(slot) = session.files.get_mut(&query.file_id) else {
-            return (StatusCode::FORBIDDEN, "unknown fileId".to_string());
-        };
-        if slot.token != query.token {
-            return (StatusCode::FORBIDDEN, "invalid token".to_string());
-        }
-        match slot.outcome {
-            SlotOutcome::Pending => {
-                slot.attempts = slot.attempts.saturating_add(1);
-                (slot.meta.clone(), slot.attempts, session.ended.clone())
-            }
-            // 重复上传同一 fileId：令牌有效但槽位已终态，拒绝重放。
-            _ => return (StatusCode::CONFLICT, "file already finalized".to_string()),
-        }
-    };
-
-    let Some(segments) = destination::file_name_segments(&meta.file_name) else {
-        mark_slot_failed(
-            &state,
-            &query.session_id,
-            &query.file_id,
-            "invalid file name",
-        )
-        .await;
-        finish_if_complete(&state, &query.session_id).await;
-        return (StatusCode::BAD_REQUEST, "invalid file name".to_string());
-    };
-
-    // 首块写入前才确定落盘路径：create_new 保证重名探测与占位原子完成。在会话锁内定，
-    // 同一次发送的同一个文件夹只改一次名。必须登记：重传要写回同一个文件，否则会另起
-    // 一个名字、留下半成品。
-    let resolved = {
-        let mut sessions = state.sessions.lock().await;
-        match sessions.get_mut(&query.session_id) {
-            None => return (StatusCode::FORBIDDEN, "unknown session".to_string()),
-            Some(session) => match session
-                .files
-                .get(&query.file_id)
-                .and_then(|slot| slot.dest.clone())
-            {
-                Some(dest) => Ok(dest),
-                None => {
-                    let resolved = destination::resolve_destination(
-                        &state.download_dir,
-                        &mut session.folders,
-                        &segments,
-                    )
-                    .await;
-                    if let (Ok(dest), Some(slot)) =
-                        (&resolved, session.files.get_mut(&query.file_id))
-                    {
-                        slot.dest = Some(dest.clone());
-                    }
-                    resolved
-                }
-            },
-        }
-    };
-    let dest = match resolved {
-        Ok(dest) => dest,
-        Err(error) => {
-            mark_slot_failed(
-                &state,
-                &query.session_id,
-                &query.file_id,
-                "cannot create file",
-            )
-            .await;
-            finish_if_complete(&state, &query.session_id).await;
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("cannot create file: {error}"),
-            );
-        }
-    };
-
-    match stream_to_file(&state, &query, body, &dest, &meta, attempts, &ended).await {
-        Ok(()) => (StatusCode::OK, "ok".to_string()),
-        Err(error) => (error.0, error.1),
-    }
-}
-
-type UploadFailure = (StatusCode, String);
-
-/// 流式写盘 + 可选 sha256 校验 + 节流进度事件。
-async fn stream_to_file(
-    state: &Arc<ReceiveState>,
-    query: &UploadQuery,
-    body: Body,
-    dest: &PathBuf,
-    meta: &FileMetadata,
-    attempts: u8,
-    ended: &CancellationToken,
-) -> Result<(), UploadFailure> {
-    // truncate：dest 由 unique_destination 占位/上次中断重传时，从头重写。
-    let mut file = tokio::fs::OpenOptions::new()
-        .write(true)
-        .truncate(true)
-        .open(dest)
-        .await
-        .map_err(|error| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("open dest failed: {error}"),
-            )
-        })?;
-    let mut hasher = meta.sha256.as_ref().map(|_| Sha256::new());
-    let mut received = 0u64;
-    let mut last_emitted = received;
-    // futures-util StreamExt：axum 的 BodyDataStream 走 futures Stream 接口。
-    use futures_util::StreamExt;
-    let mut body = body.into_data_stream();
-    loop {
-        // 会话被结束：半成品由 `end_session` 删掉，这里只停下。
-        let chunk = tokio::select! {
-            chunk = body.next() => chunk,
-            () = ended.cancelled() => return Err(session_ended()),
-        };
-        let Some(chunk) = chunk else {
-            break;
-        };
-        let chunk = chunk.map_err(|error| {
-            (
-                StatusCode::BAD_REQUEST,
-                format!("read body failed: {error}"),
-            )
-        })?;
-        if let Err(error) = file.write_all(&chunk).await {
-            return Err(fail_upload(
-                state,
-                query,
-                dest,
-                "write failed",
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("write failed: {error}"),
-            )
-            .await);
-        }
-        if let Some(hasher) = hasher.as_mut() {
-            hasher.update(&chunk);
-        }
-        received += chunk.len() as u64;
-        if received - last_emitted >= PROGRESS_STEP {
-            last_emitted = received;
-            emit_progress(state, query, received);
-        }
-    }
-    // 写入经 tokio 的后台缓冲，磁盘错误可能到这里才冒出来；没落盘就不能报接收成功。
-    if let Err(error) = file.sync_data().await {
-        return Err(fail_upload(
-            state,
-            query,
-            dest,
-            "write failed",
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("write failed: {error}"),
-        )
-        .await);
-    }
-
-    // 协议 v2.2：声明了 sha256 但不匹配 → 422。还没到次数：槽退回待收、留着占位文件
-    // （下次 truncate 重写，名字不被别人占走），让对方重发；到次数删半成品、判失败。
-    if let (Some(expected), Some(hasher)) = (&meta.sha256, hasher) {
-        let actual = format!("{:x}", hasher.finalize());
-        if !actual.eq_ignore_ascii_case(expected) {
-            if attempts < MAX_UPLOAD_ATTEMPTS {
-                return Err((
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "checksum mismatch".to_string(),
-                ));
-            }
-            return Err(fail_upload(
-                state,
-                query,
-                dest,
-                "checksum mismatch",
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "checksum mismatch".to_string(),
-            )
-            .await);
-        }
-    }
-
-    if meta.size != received {
-        return Err(fail_upload(
-            state,
-            query,
-            dest,
-            "size mismatch",
-            StatusCode::BAD_REQUEST,
-            format!("size mismatch: expected {} bytes", meta.size),
-        )
-        .await);
-    }
-
-    {
-        // 收完之前会话被结束了：文件已被当成半成品删掉，不能报成功。
-        let mut sessions = state.sessions.lock().await;
-        let Some(slot) = sessions
-            .get_mut(&query.session_id)
-            .and_then(|s| s.files.get_mut(&query.file_id))
-        else {
-            return Err(session_ended());
-        };
-        slot.outcome = SlotOutcome::Done;
-        slot.received = received;
-    }
-    emit_progress(state, query, received);
-    finish_if_complete(state, &query.session_id).await;
-    Ok(())
-}
-
-fn session_ended() -> UploadFailure {
-    (StatusCode::CONFLICT, "the session has ended".to_string())
-}
-
-fn emit_progress(state: &Arc<ReceiveState>, query: &UploadQuery, received: u64) {
-    let _ = state.events.send(ServiceEvent::ReceiveProgress {
-        session_id: query.session_id.clone(),
-        file_id: query.file_id.clone(),
-        received,
-    });
-}
-
-/// 这个文件收不成了：删掉半成品、把文件槽标成失败、会话到终态就收尾，返回给发送方的错误。
-async fn fail_upload(
-    state: &Arc<ReceiveState>,
-    query: &UploadQuery,
-    dest: &Path,
-    reason: &'static str,
-    status: StatusCode,
-    message: String,
-) -> UploadFailure {
-    if let Err(error) = tokio::fs::remove_file(dest).await {
-        if error.kind() != std::io::ErrorKind::NotFound {
-            tracing::warn!(
-                event = "localsend_partial_file_not_removed",
-                path = %dest.display(),
-                %error,
-                "could not remove a partially received file"
-            );
-        }
-    }
-    mark_slot_failed(state, &query.session_id, &query.file_id, reason).await;
-    finish_if_complete(state, &query.session_id).await;
-    (status, message)
-}
-
-async fn mark_slot_failed(
-    state: &Arc<ReceiveState>,
-    session_id: &str,
-    file_id: &str,
-    reason: &'static str,
-) {
-    let mut sessions = state.sessions.lock().await;
-    if let Some(slot) = sessions
-        .get_mut(session_id)
-        .and_then(|s| s.files.get_mut(file_id))
-    {
-        slot.outcome = SlotOutcome::Failed(reason);
-    }
-}
-
-/// 会话所有文件槽到达终态后：发 `ReceiveFinished` 并移除会话（只发一次）。
-async fn finish_if_complete(state: &Arc<ReceiveState>, session_id: &str) {
-    let report = {
-        let mut sessions = state.sessions.lock().await;
-        let Some(session) = sessions.get_mut(session_id) else {
-            return;
-        };
-        if session.finished_emitted
-            || !session
-                .files
-                .values()
-                .all(|slot| slot.outcome != SlotOutcome::Pending)
-        {
-            return;
-        }
-        session.finished_emitted = true;
-        ReceiveReport {
-            files: session
-                .files
-                .values()
-                .map(ReceivedFile::from_slot)
-                .collect(),
-        }
-    };
-    state.sessions.lock().await.remove(session_id);
-    let _ = state.events.send(ServiceEvent::ReceiveFinished {
-        session_id: session_id.to_string(),
-        report,
-    });
+    state.sessions.upload(&peer.fingerprint, &query, body).await
 }
 
 /// 对方取消：只有发起这次会话的那张证书能取消。
@@ -715,55 +339,9 @@ async fn cancel(
     State(state): State<Arc<ReceiveState>>,
     ConnectInfo(peer): ConnectInfo<Peer>,
     Query(query): Query<CancelQuery>,
-) -> impl IntoResponse {
-    let owned = state
+) -> StatusCode {
+    state
         .sessions
-        .lock()
+        .cancel_from(&peer.fingerprint, &query.session_id)
         .await
-        .get(&query.session_id)
-        .is_some_and(|session| session.sender == peer.fingerprint);
-    if !owned {
-        return StatusCode::FORBIDDEN;
-    }
-    state.end_session(&query.session_id).await;
-    StatusCode::OK
 }
-
-impl ReceiveState {
-    /// 结束一次会话（对方取消、本机取消共用）：正在写的上传停下，没收完的算取消、删掉
-    /// 半成品，收完的留着；发 `ReceiveFinished`。会话不在了返回 false。
-    pub(crate) async fn end_session(&self, session_id: &str) -> bool {
-        let Some(session) = self.sessions.lock().await.remove(session_id) else {
-            return false;
-        };
-        session.ended.cancel();
-        // 已经在收尾（`finish_if_complete` 正在报结果）：不重复报。
-        if session.finished_emitted {
-            return true;
-        }
-        let mut files = Vec::with_capacity(session.files.len());
-        for slot in session.files.values() {
-            let file = ReceivedFile::from_slot(slot);
-            if !matches!(file.outcome, ReceivedOutcome::Saved(_)) {
-                if let Some(dest) = &slot.dest {
-                    let _ = tokio::fs::remove_file(dest).await;
-                }
-            }
-            files.push(file);
-        }
-        let _ = self.events.send(ServiceEvent::ReceiveFinished {
-            session_id: session_id.to_string(),
-            report: ReceiveReport { files },
-        });
-        true
-    }
-}
-
-#[derive(serde::Deserialize)]
-struct CancelQuery {
-    #[serde(rename = "sessionId")]
-    session_id: String,
-}
-
-#[cfg(test)]
-mod tests;

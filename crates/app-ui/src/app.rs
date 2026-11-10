@@ -269,6 +269,8 @@ pub(crate) struct FileBrowser {
     pub(crate) local_send_page: transfer::LocalSendPage,
     /// LocalSend 传输记录（新的在前，启动时从状态库读入）。
     pub(crate) transfer_history: transfer::TransferHistory,
+    /// 通过链接接收（本机卡片里的二维码）。
+    pub(crate) link_receiving: transfer::LinkReceiving,
     /// 待发卡片停在"文件"还是"文字"标签，与要发的文字。
     pub(crate) local_send_tab: transfer::StagedTab,
     pub(crate) local_send_text: iced::widget::text_editor::Content,
@@ -667,6 +669,7 @@ impl FileBrowser {
             favorite_address_form: None,
             local_send_page: transfer::LocalSendPage::Devices,
             transfer_history: transfer::TransferHistory::default(),
+            link_receiving: transfer::LinkReceiving::default(),
             local_send_tab: transfer::StagedTab::Files,
             local_send_text: iced::widget::text_editor::Content::new(),
             favorite_alias_inputs: HashMap::new(),

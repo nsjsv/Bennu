@@ -83,6 +83,7 @@ impl FileBrowser {
     }
 
     pub(in crate::app) fn close_local_send_window(&mut self) -> Task<Message> {
+        self.stop_link_receive();
         for item in self.local_send_staged.drain(..) {
             item.measuring.cancel();
         }

@@ -640,7 +640,7 @@ fn content_disposition(name: &str) -> header::HeaderValue {
 }
 
 /// HTML 文本转义：文件名来自用户选择，防止注入列表页。
-fn html_escape(text: &str) -> String {
+pub(crate) fn html_escape(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")

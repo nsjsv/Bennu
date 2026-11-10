@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant, SystemTime};
 
-use local_send::{CancellationToken, FileMetadata, PrepareProgress};
+use local_send::{CancellationToken, FileMetadata, LinkControl, PrepareProgress};
 
 use super::direct_send::{DirectSendPhase, DirectSendState};
 
@@ -52,13 +52,23 @@ pub(crate) enum TransferKind {
 #[derive(Debug)]
 pub(crate) struct ReceiveTask {
     pub(crate) session_id: String,
-    /// 发送方的名字：收藏里起过名的用收藏名。
+    /// 发送方的名字：收藏里起过名的用收藏名；手机网页是"网页 IP"。
     pub(crate) sender: String,
+    pub(crate) source: ReceiveSource,
     pub(crate) files: Vec<FileMetadata>,
     /// fileId → 已收字节（重传时从头算）。
     received: HashMap<String, u64>,
     pub(crate) speed: SpeedMeter,
     pub(crate) phase: ReceivePhase,
+}
+
+/// 这次接收从哪来：取消要发回给它。
+#[derive(Debug)]
+pub(crate) enum ReceiveSource {
+    /// 常驻 LocalSend 服务（装了 LocalSend 的设备发来）。
+    LocalSend,
+    /// 手机网页，经那次链接的临时服务。
+    Link(LinkControl),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,10 +111,16 @@ impl SpeedMeter {
 }
 
 impl ReceiveTask {
-    pub(super) fn new(session_id: String, sender: String, files: Vec<FileMetadata>) -> Self {
+    pub(super) fn new(
+        session_id: String,
+        sender: String,
+        source: ReceiveSource,
+        files: Vec<FileMetadata>,
+    ) -> Self {
         Self {
             session_id,
             sender,
+            source,
             files,
             received: HashMap::new(),
             speed: SpeedMeter::default(),

@@ -1,4 +1,7 @@
-//! LocalSend 接收端常驻 HTTP 服务（TCP，端口可配，默认 53317）。
+//! LocalSend 接收端常驻 HTTPS 服务（TCP，端口可配，默认 53317）。
+//!
+//! 对端身份只在 TLS 握手处确定（强制客户端证书，见 `listener` 与 `tls`）：信任判定、
+//! 挂起确认、会话归属都按证书指纹，请求体里自报的 fingerprint 不作数。
 //!
 //! 端点（前缀 /api/localsend/v2）：`info`、`register`、`prepare-upload`、`upload`、`cancel`；
 //! 另回应 v1 的 `info`（同官方：老版官方 App 扫描时探测 v1 路由）。
@@ -25,8 +28,10 @@ use crate::device::{DeviceInfo, FileMetadata, PrepareUploadRequest, PrepareUploa
 use crate::ServiceEvent;
 
 mod listener;
+mod tls;
 
-pub(crate) use listener::{port_already_released, spawn_server, PeerAddr, PortReleased};
+pub(crate) use listener::{port_already_released, spawn_server, Peer, PortReleased};
+pub(crate) use tls::server_config;
 
 /// 未信任设备 prepare-upload 挂起等待用户确认的超时（design：30s 后 403）。
 pub(crate) const CONFIRM_TIMEOUT: Duration = Duration::from_secs(30);
@@ -54,6 +59,8 @@ enum SlotOutcome {
 
 #[derive(Debug)]
 struct Session {
+    /// 发起 prepare-upload 的证书指纹：upload、cancel 必须来自同一张证书。
+    sender: String,
     files: HashMap<String, FileSlot>,
     finished_emitted: bool,
 }
@@ -131,19 +138,24 @@ async fn info(State(state): State<Arc<ReceiveState>>) -> Json<DeviceInfo> {
     Json(state.own_device.clone())
 }
 
+/// 对端回应我们的 announce 或扫描到本机：登记进设备表并广播 DeviceSeen（双向发现
+/// 的另一半）。自报 fingerprint 与证书对不上的不登记，但照常回 200（同官方）。
 async fn register(
     State(state): State<Arc<ReceiveState>>,
-    ConnectInfo(PeerAddr(peer)): ConnectInfo<PeerAddr>,
-    Json(device): Json<DeviceInfo>,
+    ConnectInfo(peer): ConnectInfo<Peer>,
+    Json(mut device): Json<DeviceInfo>,
 ) -> impl IntoResponse {
-    // 对端回应我们的 announce：登记进设备表并广播 DeviceSeen（双向发现的另一半）。
-    let changed = state
-        .devices
-        .lock()
-        .await
-        .upsert(device, peer.ip(), std::time::Instant::now());
-    if let Some(device) = changed {
-        let _ = state.events.send(ServiceEvent::DeviceSeen(device));
+    if device.fingerprint.to_ascii_uppercase() == peer.fingerprint {
+        device.fingerprint = peer.fingerprint;
+        let changed =
+            state
+                .devices
+                .lock()
+                .await
+                .upsert(device, peer.address.ip(), std::time::Instant::now());
+        if let Some(device) = changed {
+            let _ = state.events.send(ServiceEvent::DeviceSeen(device));
+        }
     }
     (StatusCode::OK, Json(state.own_device.clone()))
 }
@@ -179,8 +191,11 @@ async fn device_is_trusted(state: &Arc<ReceiveState>, device: &DeviceInfo) -> bo
 
 async fn prepare_upload(
     State(state): State<Arc<ReceiveState>>,
-    Json(request): Json<PrepareUploadRequest>,
+    ConnectInfo(peer): ConnectInfo<Peer>,
+    Json(mut request): Json<PrepareUploadRequest>,
 ) -> impl IntoResponse {
+    // 发送方是证书证明的那台设备（同官方 `certFingerprint ?? info.fingerprint`）。
+    request.info.fingerprint = peer.fingerprint;
     if request.files.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -190,7 +205,7 @@ async fn prepare_upload(
 
     let session_id = random_id();
     if device_is_trusted(&state, &request.info).await {
-        let response = accept_session(&state, &session_id, &request.files).await;
+        let response = accept_session(&state, &session_id, &request.info, &request.files).await;
         let _ = state.events.send(ServiceEvent::RequestAccepted {
             session_id: session_id.clone(),
         });
@@ -212,7 +227,7 @@ async fn prepare_upload(
     let accepted = tokio::time::timeout(state.confirm_timeout, rx).await;
     match accepted {
         Ok(Ok(true)) => {
-            let response = accept_session(&state, &session_id, &request.files).await;
+            let response = accept_session(&state, &session_id, &request.info, &request.files).await;
             let _ = state
                 .events
                 .send(ServiceEvent::RequestAccepted { session_id });
@@ -245,6 +260,7 @@ async fn prepare_upload(
 async fn accept_session(
     state: &Arc<ReceiveState>,
     session_id: &str,
+    sender: &DeviceInfo,
     files: &HashMap<String, FileMetadata>,
 ) -> PrepareUploadResponse {
     let mut tokens = HashMap::new();
@@ -266,6 +282,7 @@ async fn accept_session(
     state.sessions.lock().await.insert(
         session_id.to_string(),
         Session {
+            sender: sender.fingerprint.clone(),
             files: slots,
             finished_emitted: false,
         },
@@ -287,12 +304,17 @@ struct UploadQuery {
 
 async fn upload(
     State(state): State<Arc<ReceiveState>>,
+    ConnectInfo(peer): ConnectInfo<Peer>,
     Query(query): Query<UploadQuery>,
     body: Body,
 ) -> impl IntoResponse {
     let (meta, _) = {
         let sessions = state.sessions.lock().await;
-        let Some(session) = sessions.get(&query.session_id) else {
+        // 别的证书拿着令牌也不行；与未知会话同一回应，不告诉探测者会话存在。
+        let Some(session) = sessions
+            .get(&query.session_id)
+            .filter(|session| session.sender == peer.fingerprint)
+        else {
             return (StatusCode::FORBIDDEN, "unknown session".to_string());
         };
         let Some(slot) = session.files.get(&query.file_id) else {
@@ -610,12 +632,16 @@ async fn finish_if_complete(state: &Arc<ReceiveState>, session_id: &str) {
 
 async fn cancel(
     State(state): State<Arc<ReceiveState>>,
+    ConnectInfo(peer): ConnectInfo<Peer>,
     Query(query): Query<CancelQuery>,
 ) -> impl IntoResponse {
     let mut snapshot: Vec<(String, Option<PathBuf>, SlotOutcome)> = Vec::new();
     {
         let mut sessions = state.sessions.lock().await;
-        let Some(session) = sessions.get_mut(&query.session_id) else {
+        let Some(session) = sessions
+            .get_mut(&query.session_id)
+            .filter(|session| session.sender == peer.fingerprint)
+        else {
             return StatusCode::FORBIDDEN;
         };
         for slot in session.files.values_mut() {
@@ -666,133 +692,4 @@ struct CancelQuery {
 }
 
 #[cfg(test)]
-mod tests {
-    use axum::response::IntoResponse;
-
-    use super::*;
-
-    const SESSION: &str = "session";
-    const FILE: &str = "file";
-    const TOKEN: &str = "token";
-
-    fn receive_state(
-        download_dir: PathBuf,
-        file_name: &str,
-        size: u64,
-    ) -> (Arc<ReceiveState>, broadcast::Receiver<ServiceEvent>) {
-        let (events, events_rx) = broadcast::channel(16);
-        let state = Arc::new(ReceiveState::new(
-            DeviceInfo {
-                alias: "TestPC".into(),
-                version: "2.0".into(),
-                fingerprint: "own-fp".into(),
-                device_model: None,
-                device_type: None,
-                download: None,
-                port: 53317,
-                protocol: "http".into(),
-                address: None,
-            },
-            download_dir,
-            Arc::new(|_| true),
-            Arc::new(Mutex::new(crate::discovery::DeviceTable::default())),
-            events,
-            CONFIRM_TIMEOUT,
-        ));
-        let slot = FileSlot {
-            meta: FileMetadata {
-                id: FILE.into(),
-                file_name: file_name.into(),
-                size,
-                file_type: None,
-                sha256: None,
-            },
-            token: TOKEN.into(),
-            dest: None,
-            received: 0,
-            outcome: SlotOutcome::Pending,
-        };
-        state.sessions.try_lock().unwrap().insert(
-            SESSION.into(),
-            Session {
-                files: HashMap::from([(FILE.to_owned(), slot)]),
-                finished_emitted: false,
-            },
-        );
-        (state, events_rx)
-    }
-
-    async fn upload_status(state: &Arc<ReceiveState>, body: Body) -> StatusCode {
-        let query = UploadQuery {
-            session_id: SESSION.into(),
-            file_id: FILE.into(),
-            token: TOKEN.into(),
-        };
-        upload(State(Arc::clone(state)), Query(query), body)
-            .await
-            .into_response()
-            .status()
-    }
-
-    /// /dev/full 能打开，写入时报 ENOSPC：等同于写到一半磁盘满了。
-    #[tokio::test]
-    async fn a_file_that_cannot_reach_the_disk_fails_instead_of_reporting_success() {
-        let full = PathBuf::from("/dev/full");
-        if !full.exists() {
-            return;
-        }
-        let directory = tempfile::tempdir().unwrap();
-        let (state, mut events) = receive_state(directory.path().to_path_buf(), "note.txt", 5);
-        state
-            .sessions
-            .lock()
-            .await
-            .get_mut(SESSION)
-            .unwrap()
-            .files
-            .get_mut(FILE)
-            .unwrap()
-            .dest = Some(full);
-
-        assert_eq!(
-            upload_status(&state, Body::from("hello")).await,
-            StatusCode::INTERNAL_SERVER_ERROR
-        );
-        let ServiceEvent::ReceiveFinished {
-            saved_paths,
-            failed,
-            ..
-        } = events.recv().await.unwrap()
-        else {
-            panic!("the session should finish with the failed file");
-        };
-        assert!(saved_paths.is_empty());
-        let expected = vec![("note.txt".to_owned(), "write failed".to_owned())];
-        assert_eq!(failed, expected);
-    }
-
-    /// 第一次上传中途断了：落盘路径已经登记，重传写回同一个文件，不会另起名字留下半成品。
-    #[tokio::test]
-    async fn an_interrupted_upload_is_retried_into_the_same_file() {
-        let directory = tempfile::tempdir().unwrap();
-        let (state, _events) = receive_state(directory.path().to_path_buf(), "note.txt", 5);
-        let broken_body = Body::from_stream(futures_util::stream::iter(vec![
-            Ok(axum::body::Bytes::from_static(b"he")),
-            Err(std::io::Error::other("connection dropped")),
-        ]));
-
-        assert_eq!(
-            upload_status(&state, broken_body).await,
-            StatusCode::BAD_REQUEST
-        );
-        assert_eq!(
-            upload_status(&state, Body::from("hello")).await,
-            StatusCode::OK
-        );
-        assert_eq!(
-            std::fs::read(directory.path().join("note.txt")).unwrap(),
-            b"hello"
-        );
-        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
-    }
-}
+mod tests;

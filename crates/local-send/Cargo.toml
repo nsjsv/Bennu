@@ -27,10 +27,10 @@ sha2.workspace = true
 socket2 = { version = "0.6", features = ["all"] }
 thiserror.workspace = true
 tokio.workspace = true
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 tokio-util = { workspace = true, features = ["compat", "io"] }
 tracing.workspace = true
+x509-parser = { version = "0.18", features = ["verify"] }
 
 [dev-dependencies]
 tempfile.workspace = true
-tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
-x509-parser = { version = "0.18", features = ["verify"] }

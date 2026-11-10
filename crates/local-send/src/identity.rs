@@ -17,11 +17,15 @@ use crate::error::LocalSendError;
 /// 证书主题与官方 App 一致：对端只按指纹识别设备，名称不携带信息。
 const CERTIFICATE_COMMON_NAME: &str = "LocalSend User";
 
-/// 设备身份：PEM（证书 + PKCS#8 私钥）与证书指纹。
+/// 设备身份：PEM（证书 + PKCS#8 私钥）、解析好的证书与私钥、证书指纹。
 ///
-/// 不实现 `Debug`：PEM 里有私钥，不能被日志或错误文本带出去。
+/// 不实现 `Debug`：里面有私钥，不能被日志或错误文本带出去。
 pub(crate) struct DeviceIdentity {
+    /// 给 reqwest 客户端身份用（它只收 PEM）。
     pem: Vec<u8>,
+    /// 给 TLS 服务端用。
+    certificate: CertificateDer<'static>,
+    private_key: PrivateKeyDer<'static>,
     fingerprint: String,
 }
 
@@ -54,6 +58,14 @@ impl DeviceIdentity {
         &self.fingerprint
     }
 
+    pub(crate) fn certificate(&self) -> &CertificateDer<'static> {
+        &self.certificate
+    }
+
+    pub(crate) fn private_key(&self) -> PrivateKeyDer<'static> {
+        self.private_key.clone_key()
+    }
+
     pub(crate) fn reqwest_identity(&self) -> Result<reqwest::Identity, LocalSendError> {
         reqwest::Identity::from_pem(&self.pem).map_err(|source| LocalSendError::Request {
             endpoint: "client",
@@ -73,6 +85,8 @@ impl DeviceIdentity {
         Ok(Self {
             fingerprint: fingerprint_of(certificate.der()),
             pem: format!("{}{}", certificate.pem(), key_pair.serialize_pem()).into_bytes(),
+            certificate: certificate.der().clone(),
+            private_key: PrivateKeyDer::Pkcs8(key_pair.serialize_der().into()),
         })
     }
 
@@ -100,14 +114,17 @@ impl DeviceIdentity {
             .map_err(|error| format!("private key does not match the certificate: {error}"))?;
         Ok(Self {
             fingerprint: fingerprint_of(certificate),
+            certificate: certificate.clone().into_owned(),
+            private_key: key.clone_key(),
             pem,
         })
     }
 }
 
 /// 证书 DER 的 SHA-256 大写 hex：与官方 `fingerprint_from_cert_der` 同格式，
-/// 官方 register 校验时把对端声明的 fingerprint 转大写后逐字比较。
-fn fingerprint_of(certificate_der: &[u8]) -> String {
+/// 官方 register 校验时把对端声明的 fingerprint 转大写后逐字比较。本机与对端
+/// 证书都用它算，格式天然一致。
+pub(crate) fn fingerprint_of(certificate_der: &[u8]) -> String {
     Sha256::digest(certificate_der)
         .iter()
         .map(|byte| format!("{byte:02X}"))

@@ -129,7 +129,8 @@ pub enum ServiceEvent {
     ReceiverFailed(ReceiverFailure),
 }
 
-/// 常驻服务句柄：直推、确认回写、手动刷新与重启；drop 不会停服务（常驻语义，随应用退出）。
+/// 常驻服务句柄：直推、确认回写、手动刷新与重启。drop 即关停（关停通道随之关闭，
+/// 发现与接收任务都会退出），常驻靠调用方一直持有它。
 pub struct ServiceHandle {
     commands: mpsc::UnboundedSender<ServiceCommand>,
     shutdown_tx: watch::Sender<bool>,
@@ -230,6 +231,13 @@ impl LocalSendService {
 
         let (presence, receive_state, receiver_released) = match config.receiver {
             Some(receiver) => {
+                // 先于任何任务：身份证书当不了 TLS 证书时不碰网络就失败。
+                let tls = receive::server_config(&identity).map_err(|error| {
+                    LocalSendError::InvalidIdentity {
+                        path: config.identity_path.clone(),
+                        reason: error.to_string(),
+                    }
+                })?;
                 let state = Arc::new(receive::ReceiveState::new(
                     own_device.clone(),
                     receiver.download_dir,
@@ -241,6 +249,7 @@ impl LocalSendService {
                 let released = receive::spawn_server(
                     Arc::clone(&state),
                     config.port,
+                    tls,
                     previous_released,
                     shutdown_rx.clone(),
                 );
@@ -331,7 +340,8 @@ pub(crate) fn own_device_info(
         device_type,
         download: None,
         port,
-        protocol: "http".to_owned(),
+        // 接收端只提供 HTTPS（服务端证书即设备身份证书，官方客户端按 fingerprint 钉扎）。
+        protocol: "https".to_owned(),
         address: None,
     }
 }
@@ -346,6 +356,10 @@ pub(crate) fn peer_client(identity: &DeviceIdentity) -> Result<reqwest::Client, 
         .danger_accept_invalid_certs(true)
         // 新版官方 App 对 HTTPS 强制客户端证书，并以证书哈希识别发送方。
         .identity(identity.reqwest_identity()?)
+        // 对端都在局域网：系统代理会把 TLS 握手带到代理上（官方 1.18.2 同样不走代理）。
+        .no_proxy()
+        // 对端回的跳转不跟：只和发现的那台设备说话（官方 1.18.2 安全修复）。
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|source| LocalSendError::Request {
             endpoint: "client",
@@ -396,6 +410,40 @@ mod tests {
     fn qr_matrix_encodes_url() {
         let code = qr_matrix("http://192.168.1.5:49152/abcdef");
         assert!(code.size >= 21);
+    }
+
+    #[tokio::test]
+    async fn peer_client_does_not_follow_redirects_sent_by_peers() {
+        let followed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let hit = Arc::clone(&followed);
+        let router = axum::Router::new()
+            .route(
+                "/start",
+                axum::routing::get(|| async { axum::response::Redirect::temporary("/elsewhere") }),
+            )
+            .route(
+                "/elsewhere",
+                axum::routing::get(move || async move {
+                    hit.store(true, std::sync::atomic::Ordering::SeqCst);
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, router).await;
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let identity = DeviceIdentity::load_or_create(&dir.path().join("identity.pem")).unwrap();
+
+        let response = peer_client(&identity)
+            .unwrap()
+            .get(format!("http://127.0.0.1:{port}/start"))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), 307);
+        assert!(!followed.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     // 普通 #[test] 没有 tokio 运行时：若身份检查晚于 spawn 任务，这里会直接 panic。

@@ -1,15 +1,24 @@
-//! 接收端 TCP 监听：绑定、对端地址、端口何时放掉与优雅关停。
+//! 接收端监听：TCP 绑定、TLS 握手、对端身份、端口何时放掉与优雅关停。
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::extract::connect_info::Connected;
 use axum::serve::{IncomingStream, Listener};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{oneshot, watch};
+use tokio::sync::{mpsc, oneshot, watch};
+use tokio_rustls::server::TlsStream;
+use tokio_rustls::TlsAcceptor;
 
 use super::{router, ReceiveState};
+use crate::identity::fingerprint_of;
 use crate::{ReceiverFailure, ServiceEvent};
+
+/// 一次 TLS 握手最多等多久：连上 TCP 却不握手的连接到点丢弃。
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+/// 握手完成、等 axum 取走的连接数上限。
+const HANDSHAKEN_CAPACITY: usize = 32;
 
 /// 接收端何时放掉端口：完成（Ok，或发送端已 drop）即端口已关闭。
 pub(crate) type PortReleased = oneshot::Receiver<()>;
@@ -19,36 +28,94 @@ pub(crate) fn port_already_released() -> PortReleased {
     oneshot::channel().1
 }
 
-/// 对端地址。axum 只为 `TcpListener` 实现了 `SocketAddr` 的 `Connected`，孤儿规则
-/// 不允许为本 crate 的 listener 补那个实现，所以用本 crate 的类型承载。
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct PeerAddr(pub(crate) SocketAddr);
+/// 连接的一端：地址 + 握手时验证过的证书指纹。接收端强制客户端证书，每个请求的
+/// 对端都有指纹；处理函数只认它，不看请求体里自报的 fingerprint。
+#[derive(Debug, Clone)]
+pub(crate) struct Peer {
+    pub(crate) address: SocketAddr,
+    pub(crate) fingerprint: String,
+}
 
-impl Connected<IncomingStream<'_, ReceiverListener>> for PeerAddr {
+impl Connected<IncomingStream<'_, ReceiverListener>> for Peer {
     fn connect_info(stream: IncomingStream<'_, ReceiverListener>) -> Self {
-        PeerAddr(*stream.remote_addr())
+        stream.remote_addr().clone()
     }
 }
 
-/// 接收端监听套接字。axum 优雅关停时先 drop listener 再等进行中的连接，所以
-/// 端口立刻放掉、进行中的传输照样传完；等端口的人只需要知道 listener 何时 drop。
+type Handshaken = (TlsStream<TcpStream>, Peer);
+
+/// 交给 axum 的监听：只交出握手成功的连接。握手在各自的任务里做，不握手的连接
+/// 挡不住别人。axum 优雅关停时先 drop listener 再等进行中的连接，所以端口立刻
+/// 放掉、进行中的传输照样传完；等端口的人只需要知道 listener 何时 drop。
 pub(crate) struct ReceiverListener {
-    socket: TcpListener,
     // 字段按声明顺序 drop：先关套接字，再 drop 发送端唤醒等端口的新接收端。
+    socket: TcpListener,
     _released: oneshot::Sender<()>,
+    acceptor: TlsAcceptor,
+    own_fingerprint: String,
+    handshaken_tx: mpsc::Sender<Handshaken>,
+    handshaken: mpsc::Receiver<Handshaken>,
 }
 
 impl Listener for ReceiverListener {
-    type Io = TcpStream;
-    type Addr = SocketAddr;
+    type Io = TlsStream<TcpStream>;
+    type Addr = Peer;
 
     async fn accept(&mut self) -> (Self::Io, Self::Addr) {
-        Listener::accept(&mut self.socket).await
+        loop {
+            tokio::select! {
+                // 自己持有一个发送端，通道不会关。
+                Some(handshaken) = self.handshaken.recv() => return handshaken,
+                (stream, address) = Listener::accept(&mut self.socket) => {
+                    tokio::spawn(handshake(
+                        self.acceptor.clone(),
+                        stream,
+                        address,
+                        self.handshaken_tx.clone(),
+                    ));
+                }
+            }
+        }
     }
 
+    /// 本端：监听地址 + 本机证书指纹。
     fn local_addr(&self) -> std::io::Result<Self::Addr> {
-        self.socket.local_addr()
+        Ok(Peer {
+            address: self.socket.local_addr()?,
+            fingerprint: self.own_fingerprint.clone(),
+        })
     }
+}
+
+/// 握手失败（没带证书、证书无效、不是 TLS、超时）只记调试日志：局域网里扫端口的
+/// 程序很多，提示用户只会烦人（同官方）。
+async fn handshake(
+    acceptor: TlsAcceptor,
+    stream: TcpStream,
+    address: SocketAddr,
+    handshaken: mpsc::Sender<Handshaken>,
+) {
+    let tls = match tokio::time::timeout(HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await {
+        Ok(Ok(tls)) => tls,
+        Ok(Err(error)) => {
+            tracing::debug!(event = "localsend_tls_handshake_rejected", %address, %error, "tls handshake rejected");
+            return;
+        }
+        Err(_) => {
+            tracing::debug!(event = "localsend_tls_handshake_rejected", %address, "tls handshake timed out");
+            return;
+        }
+    };
+    // 客户端证书是强制的：握手成功就一定有。
+    let Some(certificate) = tls.get_ref().1.peer_certificates().and_then(<[_]>::first) else {
+        return;
+    };
+    let peer = Peer {
+        address,
+        fingerprint: fingerprint_of(certificate),
+    };
+    // listener 已 drop（关停中）时发送失败，连接随之丢弃。
+    let _ = handshaken.send((tls, peer)).await;
 }
 
 /// 启动接收端：先等旧接收端放掉端口（同端口重启不等必然冲突），绑定失败发一次
@@ -56,11 +123,13 @@ impl Listener for ReceiverListener {
 pub(crate) fn spawn_server(
     state: Arc<ReceiveState>,
     port: u16,
+    tls: Arc<rustls::ServerConfig>,
     previous_released: PortReleased,
     mut shutdown: watch::Receiver<bool>,
 ) -> PortReleased {
     let (released_tx, released_rx) = oneshot::channel();
     let events = state.events.clone();
+    let own_fingerprint = state.own_device.fingerprint.clone();
     let router = router(state);
     tokio::spawn(async move {
         let _ = previous_released.await;
@@ -76,13 +145,18 @@ pub(crate) fn spawn_server(
                 return;
             }
         };
+        let (handshaken_tx, handshaken) = mpsc::channel(HANDSHAKEN_CAPACITY);
         let listener = ReceiverListener {
             socket,
             _released: released_tx,
+            acceptor: TlsAcceptor::from(tls),
+            own_fingerprint,
+            handshaken_tx,
+            handshaken,
         };
         let serve = axum::serve(
             listener,
-            router.into_make_service_with_connect_info::<PeerAddr>(),
+            router.into_make_service_with_connect_info::<Peer>(),
         )
         .with_graceful_shutdown(async move {
             // wait_for 而非 changed：关停信号可能在绑定完成前就已发出。
@@ -114,80 +188,25 @@ async fn bind(port: u16) -> Result<TcpListener, ReceiverFailure> {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::sync::Arc;
 
-    use tokio::sync::{broadcast, Mutex};
+    use tokio::sync::broadcast;
 
     use super::*;
-    use crate::device::DeviceInfo;
-    use crate::discovery::DeviceTable;
+    use crate::integration::{free_port, start_receiver, wait_until_serving, TEST_TIMEOUT};
 
-    const TEST_TIMEOUT: Duration = Duration::from_secs(10);
-
-    struct Receiver {
-        events: broadcast::Receiver<ServiceEvent>,
-        shutdown: watch::Sender<bool>,
-        released: PortReleased,
-        _dir: tempfile::TempDir,
-    }
-
-    fn own_device(alias: &str) -> DeviceInfo {
-        DeviceInfo {
-            alias: alias.into(),
-            version: "2.0".into(),
-            fingerprint: "OWN".into(),
-            device_model: None,
-            device_type: Some("computer".into()),
-            download: None,
-            port: crate::DEFAULT_PORT,
-            protocol: "http".into(),
-            address: None,
-        }
-    }
-
-    fn spawn_receiver(alias: &str, port: u16, previous_released: PortReleased) -> Receiver {
-        let dir = tempfile::tempdir().unwrap();
-        let (events_tx, events) = broadcast::channel(16);
-        let state = Arc::new(ReceiveState::new(
-            own_device(alias),
-            dir.path().to_path_buf(),
+    fn receiver(
+        alias: &str,
+        port: u16,
+        previous_released: PortReleased,
+    ) -> crate::integration::ReceiveServer {
+        start_receiver(
+            alias,
+            port,
+            previous_released,
             Arc::new(|_| false),
-            Arc::new(Mutex::new(DeviceTable::default())),
-            events_tx,
             super::super::CONFIRM_TIMEOUT,
-        ));
-        let (shutdown, shutdown_rx) = watch::channel(false);
-        let released = spawn_server(state, port, previous_released, shutdown_rx);
-        Receiver {
-            events,
-            shutdown,
-            released,
-            _dir: dir,
-        }
-    }
-
-    async fn free_port() -> u16 {
-        let probe = TcpListener::bind("0.0.0.0:0").await.unwrap();
-        probe.local_addr().unwrap().port()
-    }
-
-    /// 端口上回应 info 的是名为 `alias` 的接收端，才算它在服务。
-    async fn wait_until_serving(port: u16, alias: &str) {
-        let url = format!("http://127.0.0.1:{port}/api/localsend/v2/info");
-        tokio::time::timeout(TEST_TIMEOUT, async {
-            loop {
-                if let Ok(response) = reqwest::get(&url).await {
-                    if let Ok(device) = response.json::<DeviceInfo>().await {
-                        if device.alias == alias {
-                            return;
-                        }
-                    }
-                }
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-        })
-        .await
-        .expect("receiver never started serving");
+        )
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -195,9 +214,9 @@ mod tests {
         let occupant = TcpListener::bind("0.0.0.0:0").await.unwrap();
         let port = occupant.local_addr().unwrap().port();
 
-        let mut receiver = spawn_receiver("Blocked", port, port_already_released());
+        let mut blocked = receiver("Blocked", port, port_already_released());
 
-        let event = tokio::time::timeout(TEST_TIMEOUT, receiver.events.recv())
+        let event = tokio::time::timeout(TEST_TIMEOUT, blocked.events.recv())
             .await
             .unwrap()
             .unwrap();
@@ -210,7 +229,7 @@ mod tests {
             "{event:?}"
         );
         // 发送端 drop（Err）同样表示端口已放掉，只断言没有超时。
-        let _ = tokio::time::timeout(TEST_TIMEOUT, receiver.released)
+        let _ = tokio::time::timeout(TEST_TIMEOUT, blocked.released)
             .await
             .expect("a receiver that never bound must not block the next one");
     }
@@ -218,12 +237,12 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn shutdown_releases_the_port_for_a_restart_on_the_same_port() {
         let port = free_port().await;
-        let first = spawn_receiver("First", port, port_already_released());
-        wait_until_serving(port, "First").await;
+        let first = receiver("First", port, port_already_released());
+        wait_until_serving(&first.sender.client, port, "First").await;
 
         first.shutdown.send(true).unwrap();
-        let mut second = spawn_receiver("Second", port, first.released);
-        wait_until_serving(port, "Second").await;
+        let mut second = receiver("Second", port, first.released);
+        wait_until_serving(&second.sender.client, port, "Second").await;
 
         assert!(
             matches!(

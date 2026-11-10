@@ -47,12 +47,23 @@ pub(crate) struct DeviceEntry {
 }
 
 /// 共享设备表：discovery 监听、receive 的 register 端点与老化任务共同持有。
-#[derive(Default)]
+///
+/// 本机永远不进表，在这里统一拦：本机的出站请求连到本机接收端时（"按 IP 添加"填了
+/// 本机 IP、扫描经别的地址绕回本机），register 的证书与自报都对得上，入口处看不出
+/// 这是自己。
 pub(crate) struct DeviceTable {
+    own_fingerprint: String,
     entries: HashMap<String, DeviceEntry>,
 }
 
 impl DeviceTable {
+    pub(crate) fn new(own_fingerprint: String) -> Self {
+        Self {
+            own_fingerprint,
+            entries: HashMap::new(),
+        }
+    }
+
     /// 按 fingerprint 插入或刷新；返回 `Some(device)` 表示首次发现或信息变化（需发 `DeviceSeen`）。
     pub(crate) fn upsert(
         &mut self,
@@ -60,6 +71,9 @@ impl DeviceTable {
         address: IpAddr,
         now: Instant,
     ) -> Option<DeviceInfo> {
+        if device.fingerprint == self.own_fingerprint {
+            return None;
+        }
         let changed = match self.entries.get_mut(&device.fingerprint) {
             Some(entry) => {
                 let changed = entry.device != device || entry.address != address;

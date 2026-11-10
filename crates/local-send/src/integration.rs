@@ -129,7 +129,9 @@ pub(crate) fn start_receiver(
         crate::own_device_info(alias.to_owned(), None, port, &identity),
         dir.path().to_path_buf(),
         favorites_rx,
-        Arc::new(Mutex::new(DeviceTable::default())),
+        Arc::new(Mutex::new(DeviceTable::new(
+            identity.fingerprint().to_owned(),
+        ))),
         events_tx,
         confirm_timeout,
     ));

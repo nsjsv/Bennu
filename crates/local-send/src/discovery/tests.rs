@@ -50,7 +50,7 @@ pub(crate) fn discovery(port: u16, presence: Presence) -> Discovery {
         own_fingerprint: "OWN".into(),
         port,
         presence,
-        devices: Arc::new(Mutex::new(DeviceTable::default())),
+        devices: Arc::new(Mutex::new(DeviceTable::new("OWN".into()))),
         events: broadcast::channel(16).0,
         client: crate::outbound_tls::OutboundTls::new(&identity)
             .unwrap()
@@ -306,7 +306,7 @@ fn invalid_payload_is_dropped() {
 
 #[test]
 fn device_table_dedups_and_reports_changes() {
-    let mut table = DeviceTable::default();
+    let mut table = DeviceTable::new("OWN".into());
     let now = Instant::now();
     let first = device("fp");
     let seen = table.upsert(first.clone(), "10.0.0.2".parse().unwrap(), now);
@@ -314,6 +314,10 @@ fn device_table_dedups_and_reports_changes() {
     // 相同信息重复上报不再触发 DeviceSeen。
     assert!(table
         .upsert(first.clone(), "10.0.0.2".parse().unwrap(), now)
+        .is_none());
+    // 本机不进表，哪个入口来的都一样。
+    assert!(table
+        .upsert(device("OWN"), "10.0.0.9".parse().unwrap(), now)
         .is_none());
     // 别名变化视为信息变化。
     let mut renamed = first.clone();
@@ -325,7 +329,7 @@ fn device_table_dedups_and_reports_changes() {
 
 #[test]
 fn device_table_prunes_only_expired_entries() {
-    let mut table = DeviceTable::default();
+    let mut table = DeviceTable::new("OWN".into());
     let now = Instant::now();
     table.upsert(device("old"), "10.0.0.2".parse().unwrap(), now);
     table.upsert(

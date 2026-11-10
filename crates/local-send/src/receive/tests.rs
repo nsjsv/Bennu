@@ -29,7 +29,9 @@ fn receive_state(
         },
         download_dir,
         watch::channel(Vec::new()).1,
-        Arc::new(Mutex::new(crate::discovery::DeviceTable::default())),
+        Arc::new(Mutex::new(crate::discovery::DeviceTable::new(
+            "own-fp".into(),
+        ))),
         events,
         CONFIRM_TIMEOUT,
     ));

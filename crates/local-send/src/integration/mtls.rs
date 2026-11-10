@@ -225,9 +225,9 @@ async fn probing_an_encrypted_device_trusts_its_certificate_not_its_claim() {
         liar,
         download.path().to_path_buf(),
         tokio::sync::watch::channel(Vec::new()).1,
-        Arc::new(tokio::sync::Mutex::new(
-            crate::discovery::DeviceTable::default(),
-        )),
+        Arc::new(tokio::sync::Mutex::new(crate::discovery::DeviceTable::new(
+            identity.fingerprint().to_owned(),
+        ))),
         broadcast::channel(16).0,
         Duration::from_secs(10),
     ));
@@ -253,4 +253,55 @@ async fn probing_an_encrypted_device_trusts_its_certificate_not_its_claim() {
 
     assert_eq!(device.fingerprint, identity.fingerprint());
     assert!(device.is_certified());
+}
+
+/// 本机自己的客户端连到本机接收端（比如"按 IP 添加"填了本机 IP）：register 证书与
+/// 自报都对得上，但这是本机，设备表里不能有它。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn this_computer_registering_with_itself_is_not_listed() {
+    let identity_dir = tempfile::tempdir().unwrap();
+    let identity =
+        DeviceIdentity::load_or_create(&identity_dir.path().join("identity.pem")).unwrap();
+    let port = free_port().await;
+    let own = crate::own_device_info("Self".to_owned(), None, port, &identity);
+    let download = tempfile::tempdir().unwrap();
+    let (events, mut events_rx) = broadcast::channel(16);
+    let state = Arc::new(crate::receive::ReceiveState::new(
+        own.clone(),
+        download.path().to_path_buf(),
+        tokio::sync::watch::channel(Vec::new()).1,
+        Arc::new(tokio::sync::Mutex::new(crate::discovery::DeviceTable::new(
+            identity.fingerprint().to_owned(),
+        ))),
+        events,
+        Duration::from_secs(10),
+    ));
+    let (_shutdown, shutdown_rx) = tokio::sync::watch::channel(false);
+    let _released = crate::receive::spawn_server(
+        Arc::clone(&state),
+        port,
+        crate::receive::server_config(&identity).unwrap(),
+        crate::receive::port_already_released(),
+        shutdown_rx,
+    );
+    let own_client = crate::outbound_tls::OutboundTls::new(&identity)
+        .unwrap()
+        .client(None)
+        .unwrap();
+    super::wait_until_serving(&own_client, port, "Self").await;
+
+    let response = crate::discovery::post_register(
+        &own_client,
+        &format!("https://127.0.0.1:{port}/api/localsend/v2/register"),
+        &own,
+        TEST_TIMEOUT,
+    )
+    .await
+    .unwrap();
+
+    assert!(response.status().is_success());
+    assert!(matches!(
+        events_rx.try_recv(),
+        Err(broadcast::error::TryRecvError::Empty)
+    ));
 }

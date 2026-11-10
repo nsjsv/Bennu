@@ -264,7 +264,9 @@ impl LocalSendService {
         let client = outbound.client(None)?;
 
         let (events, events_rx) = broadcast::channel(EVENT_CAPACITY);
-        let devices = Arc::new(Mutex::new(discovery::DeviceTable::default()));
+        let devices = Arc::new(Mutex::new(discovery::DeviceTable::new(
+            own_device.fingerprint.clone(),
+        )));
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let (favorites, favorites_rx) = watch::channel(config.favorites);
 

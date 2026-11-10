@@ -208,7 +208,7 @@ pub(crate) fn open_file_command(
 ) -> Task<Message> {
     // 包内成员：先物化为临时文件再交给系统打开；虚拟路径本身
     // 对外部程序无意义。
-    if file_core::archive_path_identity(&path) != file_core::ArchivePathIdentity::RealFile {
+    if file_core::archive_path_identity(&path) == file_core::ArchivePathIdentity::InsideArchive {
         let opened_path = path.clone();
         return Task::perform(
             async move {

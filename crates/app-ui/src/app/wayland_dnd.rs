@@ -145,7 +145,7 @@ impl FileBrowser {
         // 文件名,拖出去必然失败。不把虚拟路径交给外部:返回
         // Unavailable 让调用方回退应用内拖拽,窗口内松手仍走提取管线。
         if paths.iter().any(|path| {
-            file_core::archive_path_identity(path) != file_core::ArchivePathIdentity::RealFile
+            file_core::archive_path_identity(path) == file_core::ArchivePathIdentity::InsideArchive
         }) {
             tracing::debug!(
                 path_count = paths.len(),
@@ -324,6 +324,12 @@ mod tests {
         assert!(matches!(
             browser.request_wayland_file_drag(vec![member]),
             WaylandFileDragRequest::Unavailable
+        ));
+
+        // 归档文件本身是磁盘上的真实文件,可以拖给外部应用。
+        assert!(matches!(
+            browser.request_wayland_file_drag(vec![archive]),
+            WaylandFileDragRequest::Requested(_)
         ));
 
         // 真实路径不受影响,照常请求原生会话。

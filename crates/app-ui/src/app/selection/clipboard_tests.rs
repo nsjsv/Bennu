@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use super::clipboard::move_paste_transfers;
+use super::clipboard::{move_paste_transfers, split_archive_member_sources};
 use super::gather_sources_in_directory;
 use crate::app::FileBrowser;
 use crate::config;
@@ -409,4 +409,22 @@ fn new_folder_from_selection_enqueues_one_undoable_move_batch() {
             if directory == &workspace.path().join("New Folder")
                 && sources == &vec![report.clone()]
     ));
+}
+
+#[test]
+fn archive_file_itself_is_a_real_source_not_an_archive_member() {
+    let directory = tempfile::tempdir().unwrap();
+    // 归档边界只需真实存在的归档文件,成员按路径形态判定,无需真实解包。
+    let archive = directory.path().join("docs.zip");
+    std::fs::write(&archive, b"payload").unwrap();
+    let member = archive.join("photos/1.txt");
+    let plain = directory.path().join("notes.txt");
+    std::fs::write(&plain, b"data").unwrap();
+
+    // 粘贴与拖放共用这一拆分:zip 本体搬的是包本身,只有包内成员走提取。
+    let (members, real) =
+        split_archive_member_sources(vec![archive.clone(), member.clone(), plain.clone()]);
+
+    assert_eq!(members, vec![member]);
+    assert_eq!(real, vec![archive, plain]);
 }

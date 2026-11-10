@@ -229,20 +229,22 @@ fn restored_pane_from_session(pane: BrowserPaneSession) -> Option<BrowserPane> {
 
 /// 会话恢复不入包内：包内/包根目录归一到归档所在真实目录；包内选中与
 /// 多栏展开链丢弃（真实目录中这些条目并不存在）。真实路径的选中照常
-/// 恢复（CLI 显式工作区同样途经此处）。
+/// 恢复（CLI 显式工作区同样途经此处）。归档文件本身作为选中项是真实文件，
+/// 照常恢复；作为展开目录就是进包浏览，与包内展开一起丢弃。
 fn restored_tab(session: &BrowserTabSession) -> BrowserTab {
-    let is_real_file = |path: &Path| {
-        file_core::archive_path_identity(path) == file_core::ArchivePathIdentity::RealFile
+    let is_archive_member = |path: &Path| {
+        file_core::archive_path_identity(path) == file_core::ArchivePathIdentity::InsideArchive
     };
     let mut tab = session.to_browser_tab();
     if let Some(real_directory) = file_core::real_directory_outside_archive(&tab.current_dir) {
         tab.current_dir = real_directory;
     }
-    tab.selected = tab.selected.take().filter(|path| is_real_file(path));
-    tab.selected_paths.retain(|path| is_real_file(path));
+    tab.selected = tab.selected.take().filter(|path| !is_archive_member(path));
+    tab.selected_paths.retain(|path| !is_archive_member(path));
     tab.selection_anchor = None;
-    tab.expanded_directories
-        .retain(|directory, _| is_real_file(directory));
+    tab.expanded_directories.retain(|directory, _| {
+        file_core::archive_path_identity(directory) == file_core::ArchivePathIdentity::RealFile
+    });
     tab
 }
 

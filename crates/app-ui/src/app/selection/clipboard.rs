@@ -542,18 +542,12 @@ pub(in crate::app) fn gather_sources_in_directory(
 }
 
 /// 把粘贴源拆成「包内成员」与「真实路径」两组；包内成员走提取管线。
-/// 拖拽落地(drag.rs)复用同一拆分，不在拖拽侧复刻判定。
+/// 归档文件本身(BrowsingRoot)作为源就是磁盘上的文件，复制/移动的是包本体，
+/// 不是包里的内容。拖拽落地(drag.rs)复用同一拆分，不在拖拽侧复刻判定。
 pub(super) fn split_archive_member_sources(sources: Vec<PathBuf>) -> (Vec<PathBuf>, Vec<PathBuf>) {
-    let mut archive_sources = Vec::new();
-    let mut real_sources = Vec::new();
-    for source in sources {
-        if file_core::archive_path_identity(&source) == file_core::ArchivePathIdentity::RealFile {
-            real_sources.push(source);
-        } else {
-            archive_sources.push(source);
-        }
-    }
-    (archive_sources, real_sources)
+    sources.into_iter().partition(|source| {
+        file_core::archive_path_identity(source) == file_core::ArchivePathIdentity::InsideArchive
+    })
 }
 
 /// 粘贴移动的目标计算:与拖拽落地共用同一空操作不变量(源等于落点、

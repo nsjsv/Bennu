@@ -1,17 +1,19 @@
 //! LocalSend 窗口：待发列表与窗口生命周期。
 //!
 //! Bennu 的拖放只在主窗口上收（Wayland、X11 两套底层都是单窗口），所以文件经
-//! 侧栏"LocalSend"落点或窗口里的选择器进待发列表，再点设备发送。待发列表、
-//! "按 IP 添加"表单与设备勾选随窗口：关窗即清空，进行中的直推不受影响。
+//! 侧栏"LocalSend"落点或窗口里的选择器进待发列表，再点设备发送；也可以切到"文字"
+//! 标签发一段文字。待发列表、文字、"按 IP 添加"表单与设备勾选随窗口：关窗即清空，
+//! 进行中的直推不受影响。
 
 use std::path::{Path, PathBuf};
 
+use iced::widget::text_editor;
 use iced::{window, Size, Task};
 use local_send::DeviceInfo;
 use tokio_util::sync::CancellationToken;
 
 use super::super::FileBrowser;
-use super::TransferMessage;
+use super::{Outgoing, TransferMessage};
 use crate::directory_summary::{
     read_directory_recursive_total_size, DirectorySummaryError, RecursiveTotalSize,
 };
@@ -35,6 +37,14 @@ pub(crate) enum StagedSize {
     Measuring,
     Measured(RecursiveTotalSize),
     Unreadable(String),
+}
+
+/// 待发卡片的两个标签：发文件还是发文字。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum StagedTab {
+    #[default]
+    Files,
+    Text,
 }
 
 /// 门户选择器选什么：文件与文件夹是两种选择对话框，不能混选。
@@ -68,6 +78,8 @@ impl FileBrowser {
         for item in self.local_send_staged.drain(..) {
             item.measuring.cancel();
         }
+        self.local_send_tab = StagedTab::Files;
+        self.local_send_text = text_editor::Content::new();
         // 还在连的结果回来时对不上表单，会被丢掉。
         self.favorite_address_form = None;
         self.checked_devices
@@ -135,17 +147,35 @@ impl FileBrowser {
         }
     }
 
-    /// 待发列表里的路径；发完列表保留，可以接着发给别的设备。
-    pub(super) fn staged_paths(&self) -> Vec<PathBuf> {
-        self.local_send_staged
-            .iter()
-            .map(|item| item.path.clone())
-            .collect()
+    /// 这个窗口发什么只在这里定：看待发卡片停在哪个标签。发完待发列表与文字都保留，
+    /// 可以接着发给别的设备。
+    pub(super) fn local_send_outgoing(&self) -> Outgoing {
+        match self.local_send_tab {
+            StagedTab::Files => Outgoing::Files(
+                self.local_send_staged
+                    .iter()
+                    .map(|item| item.path.clone())
+                    .collect(),
+            ),
+            StagedTab::Text => Outgoing::Text(self.local_send_text.text()),
+        }
+    }
+
+    /// 有没有东西可发：设备行的"发送"与勾选顶栏据此可不可点。
+    pub(crate) fn local_send_has_outgoing(&self) -> bool {
+        match self.local_send_tab {
+            StagedTab::Files => !self.local_send_staged.is_empty(),
+            StagedTab::Text => !self.local_send_text.text().trim().is_empty(),
+        }
     }
 
     pub(super) fn send_staged_to_device(&mut self, device: DeviceInfo) -> Task<Message> {
-        let paths = self.staged_paths();
-        self.begin_direct_sends(vec![device], paths)
+        let outgoing = self.local_send_outgoing();
+        self.begin_direct_sends(vec![device], outgoing)
+    }
+
+    pub(super) fn edit_staged_text(&mut self, action: text_editor::Action) {
+        self.local_send_text.perform(action);
     }
 }
 

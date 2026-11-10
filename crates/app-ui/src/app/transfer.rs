@@ -81,6 +81,12 @@ pub(crate) enum TransferMessage {
     IncomingConfirmed {
         accept: bool,
     },
+    // ---- 收到的文字（主窗口弹窗，当前显示的是队首那条） ----
+    IncomingMessageCopied,
+    IncomingMessageLinkOpened,
+    /// 浏览器没打开链接的原因；None = 打开了。
+    IncomingMessageLinkFailed(Option<String>),
+    IncomingMessageClosed,
     // ---- 常驻服务事件流（R6） ----
     ServiceEvent(ServiceEvent),
     /// 事件流积压丢弃（broadcast Lagged）：整体刷新设备表。
@@ -110,6 +116,9 @@ pub(crate) enum TransferMessage {
     },
     StagedItemRemoved(PathBuf),
     StagedItemsCleared,
+    StagedTabSelected(StagedTab),
+    StagedTextEdited(iced::widget::text_editor::Action),
+    StagedTextCleared,
     SendStagedToDevicePressed(DeviceInfo),
     // ---- 收藏设备 ----
     /// 附近设备行的 ☆。
@@ -294,7 +303,7 @@ impl FileBrowser {
                     return iced::Task::none();
                 };
                 let paths = session.paths.clone();
-                self.begin_direct_sends(vec![device], paths)
+                self.begin_direct_sends(vec![device], Outgoing::Files(paths))
             }
             TransferMessage::DirectSendProgress {
                 fingerprint,
@@ -353,6 +362,18 @@ impl FileBrowser {
                 iced::Task::none()
             }
             TransferMessage::IncomingConfirmed { accept } => self.confirm_incoming_transfer(accept),
+            TransferMessage::IncomingMessageCopied => self.copy_incoming_message(),
+            TransferMessage::IncomingMessageLinkOpened => self.open_incoming_message_link(),
+            TransferMessage::IncomingMessageLinkFailed(error) => {
+                if let Some(error) = error {
+                    self.show_global_error(error);
+                }
+                iced::Task::none()
+            }
+            TransferMessage::IncomingMessageClosed => {
+                self.close_incoming_message();
+                iced::Task::none()
+            }
             TransferMessage::ServiceEvent(event) => self.accept_local_send_service_event(event),
             TransferMessage::DevicesRefreshRequested => {
                 if let Some(runtime) = self.transfer_runtime.as_mut() {
@@ -406,6 +427,18 @@ impl FileBrowser {
             }
             TransferMessage::StagedItemsCleared => {
                 self.clear_staged_items();
+                iced::Task::none()
+            }
+            TransferMessage::StagedTabSelected(tab) => {
+                self.local_send_tab = tab;
+                iced::Task::none()
+            }
+            TransferMessage::StagedTextEdited(action) => {
+                self.edit_staged_text(action);
+                iced::Task::none()
+            }
+            TransferMessage::StagedTextCleared => {
+                self.local_send_text = iced::widget::text_editor::Content::new();
                 iced::Task::none()
             }
             TransferMessage::SendStagedToDevicePressed(device) => {
@@ -527,6 +560,9 @@ impl FileBrowser {
             } => {
                 return self.notify_transfer_receive_finished(saved_paths, failed);
             }
+            ServiceEvent::MessageReceived { device, text } => {
+                return self.accept_incoming_message(device, text);
+            }
             ServiceEvent::ReceiverFailed(failure) => {
                 // 弹一次；设置页从运行时读原因常驻显示。
                 self.show_global_error(settings::receiver_failure_message(&failure));
@@ -538,13 +574,9 @@ impl FileBrowser {
         iced::Task::none()
     }
 
-    /// 不是收藏的设备发来文件：清理主窗口同层输入状态后弹出确认 Modal。
-    fn begin_incoming_transfer_confirmation(
-        &mut self,
-        device: DeviceInfo,
-        session_id: String,
-        files: Vec<FileMetadata>,
-    ) -> iced::Task<Message> {
+    /// 传输弹窗（接收确认、收到的文字）要盖在主窗口上：先清掉主窗口同层的输入状态
+    /// （菜单、拖拽、框选、地址栏编辑），进行中的重命名照常提交。
+    fn prepare_transfer_modal(&mut self) -> iced::Task<Message> {
         self.context_menu = None;
         self.open_with = None;
         self.operation_queue.close_panel();
@@ -553,7 +585,17 @@ impl FileBrowser {
         self.sidebar_bookmark_drop_slot = None;
         self.selection_marquee = None;
         let _ = self.cancel_address_editing();
-        let rename_command = self.commit_rename_if_active();
+        self.commit_rename_if_active()
+    }
+
+    /// 不是收藏的设备发来文件：清理主窗口同层输入状态后弹出确认 Modal。
+    fn begin_incoming_transfer_confirmation(
+        &mut self,
+        device: DeviceInfo,
+        session_id: String,
+        files: Vec<FileMetadata>,
+    ) -> iced::Task<Message> {
+        let rename_command = self.prepare_transfer_modal();
         self.incoming_transfer = Some(IncomingTransferConfirmation {
             device,
             session_id,
@@ -670,17 +712,19 @@ mod direct_send;
 mod favorites;
 mod incoming;
 mod local_send_window;
+mod messages;
 mod settings;
 
 pub(crate) use device_checks::{CheckedDevices, DeviceListOwner};
 pub(crate) use direct_send::{
-    DirectSendFailure, DirectSendOutcome, DirectSendPhase, DirectSendState, DirectSends,
+    DirectSendFailure, DirectSendOutcome, DirectSendPhase, DirectSendState, DirectSends, Outgoing,
 };
 pub(crate) use favorites::{
     service_favorites, AddressFormMessage, FavoriteAddressForm, FavoriteRow,
 };
 pub(crate) use incoming::{incoming_entries, IncomingEntry};
-pub(crate) use local_send_window::{ChooserTarget, StagedItem, StagedSize};
+pub(crate) use local_send_window::{ChooserTarget, StagedItem, StagedSize, StagedTab};
+pub(crate) use messages::{message_link, IncomingMessage};
 
 pub(crate) use settings::receiver_failure_message;
 

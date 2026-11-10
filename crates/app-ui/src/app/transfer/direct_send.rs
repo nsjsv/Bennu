@@ -5,12 +5,13 @@
 //! 按指纹找到的就是这一次，不需要会话号。
 //!
 //! 一次发给几台时文件只准备一遍（展开文件夹、算 sha256）：准备中的一批记在
-//! `batches`，好了再分给等它的每台设备。对方要 PIN 时停在 `NeedsPin`，输完用
-//! 同一份准备结果重发（同官方：先不带 PIN，401 才问）。
+//! `batches`，好了再分给等它的每台设备。文字不用准备。对方要 PIN 时停在
+//! `NeedsPin`，输完用同一份东西重发（同官方：先不带 PIN，401 才问）。
 
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use iced::futures::{SinkExt, StreamExt};
@@ -41,14 +42,22 @@ pub(crate) struct DirectSendState {
     pub(crate) file_size: u64,
     pub(crate) phase: DirectSendPhase,
     target: DeviceInfo,
-    files: SendFiles,
+    payload: Payload,
 }
 
-/// 这台设备要发的文件：还在准备（哪一批），或已准备好（几台共用）。
+/// 这台设备要发的东西：文件还在准备（哪一批）或已准备好（几台共用），或一段文字。
 #[derive(Debug, Clone)]
-enum SendFiles {
+enum Payload {
     Preparing(u64),
-    Ready(Arc<PreparedFiles>),
+    Files(Arc<PreparedFiles>),
+    Text(String),
+}
+
+/// 用户要发出去的：一批文件（路径），或一段文字。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Outgoing {
+    Files(Vec<PathBuf>),
+    Text(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,7 +108,7 @@ impl DirectSendState {
             file_size: 0,
             phase: DirectSendPhase::Sending,
             target,
-            files: SendFiles::Ready(Arc::new(PreparedFiles::unreadable(String::new()))),
+            payload: Payload::Files(Arc::new(PreparedFiles::unreadable(String::new()))),
         }
     }
 
@@ -126,7 +135,7 @@ impl FileBrowser {
 
     /// 准备进度（0–100）：这台设备在等的那一批。
     pub(crate) fn checking_percent(&self, state: &DirectSendState) -> u64 {
-        let SendFiles::Preparing(batch) = state.files else {
+        let Payload::Preparing(batch) = state.payload else {
             return 100;
         };
         self.direct_sends
@@ -138,29 +147,42 @@ impl FileBrowser {
             })
     }
 
-    /// 所有"发送"都走这里：跳过正忙的设备；几台一起发时文件只准备一遍。
+    /// 所有"发送"都走这里：跳过正忙的设备；几台一起发时文件只准备一遍。没东西可发
+    /// （没有文件、文字是空白）时不做。
     pub(super) fn begin_direct_sends(
         &mut self,
         devices: Vec<DeviceInfo>,
-        paths: Vec<PathBuf>,
+        outgoing: Outgoing,
     ) -> iced::Task<Message> {
         let devices: Vec<_> = devices
             .into_iter()
             .filter(|device| self.can_send_to(device))
             .collect();
         // 直推要出示的设备身份归常驻服务；设备列表本身也只在服务运行时存在。
-        if paths.is_empty() || devices.is_empty() || self.transfer_runtime.is_none() {
+        if devices.is_empty() || self.transfer_runtime.is_none() {
             return iced::Task::none();
         }
-        let batch = self.direct_sends.next_batch;
-        self.direct_sends.next_batch += 1;
-        self.direct_sends.batches.insert(
-            batch,
-            PrepareProgress {
-                bytes_done: 0,
-                bytes_total: 0,
-            },
-        );
+        let (payload, command) = match outgoing {
+            Outgoing::Files(paths) if paths.is_empty() => return iced::Task::none(),
+            Outgoing::Text(text) if text.trim().is_empty() => return iced::Task::none(),
+            Outgoing::Files(paths) => {
+                let batch = self.direct_sends.next_batch;
+                self.direct_sends.next_batch += 1;
+                self.direct_sends.batches.insert(
+                    batch,
+                    PrepareProgress {
+                        bytes_done: 0,
+                        bytes_total: 0,
+                    },
+                );
+                (Payload::Preparing(batch), prepare_command(batch, paths))
+            }
+            Outgoing::Text(text) => (Payload::Text(text), iced::Task::none()),
+        };
+        let fingerprints: Vec<String> = devices
+            .iter()
+            .map(|device| device.fingerprint.clone())
+            .collect();
         for target in devices {
             self.direct_sends.states.insert(
                 target.fingerprint.clone(),
@@ -171,11 +193,16 @@ impl FileBrowser {
                     file_size: 0,
                     phase: DirectSendPhase::Checking,
                     target,
-                    files: SendFiles::Preparing(batch),
+                    payload: payload.clone(),
                 },
             );
         }
-        prepare_command(batch, paths)
+        // 文字不用准备，直接发；文件等这一批准备好（`accept_batch_prepared`）再发。
+        let launches: Vec<_> = fingerprints
+            .iter()
+            .map(|fingerprint| self.launch_direct_send(fingerprint, None))
+            .collect();
+        iced::Task::batch(launches.into_iter().chain([command]))
     }
 
     pub(super) fn accept_batch_progress(&mut self, batch: u64, progress: PrepareProgress) {
@@ -195,9 +222,9 @@ impl FileBrowser {
             .direct_sends
             .states
             .iter_mut()
-            .filter(|(_, state)| matches!(state.files, SendFiles::Preparing(id) if id == batch))
+            .filter(|(_, state)| matches!(state.payload, Payload::Preparing(id) if id == batch))
             .map(|(fingerprint, state)| {
-                state.files = SendFiles::Ready(Arc::clone(&files));
+                state.payload = Payload::Files(Arc::clone(&files));
                 fingerprint.clone()
             })
             .collect();
@@ -208,7 +235,7 @@ impl FileBrowser {
         iced::Task::batch(launches)
     }
 
-    /// 用这台设备已准备好的文件发一次；要 PIN 时带上。
+    /// 把这台设备的东西发一次（文件还在准备时不发）；要 PIN 时带上。
     fn launch_direct_send(
         &mut self,
         fingerprint: &str,
@@ -220,14 +247,28 @@ impl FileBrowser {
         let Some(state) = self.direct_sends.states.get_mut(fingerprint) else {
             return iced::Task::none();
         };
-        let SendFiles::Ready(files) = &state.files else {
-            return iced::Task::none();
-        };
         let (progress_tx, progress_rx) = tokio::sync::mpsc::channel::<SendProgress>(16);
-        let send =
-            runtime
-                .handle
-                .send_to_device(&state.target, Arc::clone(files), pin, progress_tx);
+        let send: Pin<Box<dyn Future<Output = Result<SendReport, LocalSendError>> + Send>> =
+            match &state.payload {
+                Payload::Preparing(_) => return iced::Task::none(),
+                Payload::Files(files) => Box::pin(runtime.handle.send_to_device(
+                    &state.target,
+                    Arc::clone(files),
+                    pin,
+                    progress_tx,
+                )),
+                Payload::Text(text) => {
+                    let send = runtime.handle.send_text(&state.target, text.clone(), pin);
+                    // 文字没有进度：通道随 `progress_tx` 一起关掉，命令只等结果。
+                    drop(progress_tx);
+                    Box::pin(async move {
+                        send.await.map(|()| SendReport {
+                            sent: 1,
+                            failed: Vec::new(),
+                        })
+                    })
+                }
+            };
         state.phase = DirectSendPhase::Sending;
         state.file_index = 0;
         state.total_files = 0;

@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use super::*;
 use crate::app::transfer::DirectSendState;
+use crate::app::transfer::StagedTab;
 
 fn browser() -> FileBrowser {
     FileBrowser::new(crate::config::default_user_config()).0
@@ -131,4 +132,43 @@ fn staged_size_reads_files_and_sums_folders() {
         measure(&directory.path().join("missing")),
         StagedSize::Unreadable(_)
     ));
+}
+
+#[test]
+fn the_tab_decides_what_the_window_sends() {
+    let mut browser = browser();
+    drop(browser.stage_local_send_paths(vec![PathBuf::from("/a")]));
+    assert_eq!(
+        browser.local_send_outgoing(),
+        Outgoing::Files(vec![PathBuf::from("/a")])
+    );
+
+    drop(browser.handle_transfer_message(TransferMessage::StagedTabSelected(StagedTab::Text)));
+    // 文字标签：只有空白时不能发，待发文件不算数。
+    browser.local_send_text = text_editor::Content::with_text("  \n ");
+    assert!(!browser.local_send_has_outgoing());
+    browser.local_send_text = text_editor::Content::with_text("今晚 8 点\nhttps://x.y");
+    assert!(browser.local_send_has_outgoing());
+    assert_eq!(
+        browser.local_send_outgoing(),
+        Outgoing::Text("今晚 8 点\nhttps://x.y".to_owned())
+    );
+
+    drop(browser.handle_transfer_message(TransferMessage::StagedTextCleared));
+    assert!(browser.local_send_text.text().trim().is_empty());
+    drop(browser.handle_transfer_message(TransferMessage::StagedTabSelected(StagedTab::Files)));
+    assert!(browser.local_send_has_outgoing());
+}
+
+#[test]
+fn closing_the_window_forgets_the_text_and_returns_to_files() {
+    let mut browser = browser();
+    browser.local_send_window = Some(iced::window::Id::unique());
+    browser.local_send_tab = StagedTab::Text;
+    browser.local_send_text = text_editor::Content::with_text("hi");
+
+    drop(browser.close_local_send_window());
+
+    assert_eq!(browser.local_send_tab, StagedTab::Files);
+    assert!(browser.local_send_text.text().trim().is_empty());
 }

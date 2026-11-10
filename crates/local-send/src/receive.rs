@@ -212,6 +212,18 @@ async fn register(
     (StatusCode::OK, Json(state.own_device.clone()))
 }
 
+/// 这个请求是不是一段文字消息（官方 `ReceiveSessionState.message` 的规则）：只有一个
+/// 文件、类型是 `text/*`（旧版直接写 `text`）、带 preview。
+fn text_message(files: &HashMap<String, FileMetadata>) -> Option<String> {
+    let mut files = files.values();
+    let (Some(file), None) = (files.next(), files.next()) else {
+        return None;
+    };
+    let file_type = file.file_type.as_deref()?;
+    let is_text = file_type == "text" || file_type.starts_with("text/");
+    is_text.then(|| file.preview.clone()).flatten()
+}
+
 /// 生成接收端会话 id / 上传令牌（随机 16 字节 hex，见 lib::random_id）。
 fn random_id() -> String {
     crate::random_id()
@@ -238,6 +250,16 @@ async fn prepare_upload(
             StatusCode::BAD_REQUEST,
             Json(Option::<PrepareUploadResponse>::None),
         );
+    }
+
+    // 文字消息：内容就在请求里，回 204（不要文件内容）。不走接收确认：弹出来的就是
+    // 内容本身，没什么要先决定的（同官方，Quick Save 也不管文字）。
+    if let Some(text) = text_message(&request.files) {
+        let _ = state.events.send(ServiceEvent::MessageReceived {
+            device: request.info,
+            text,
+        });
+        return (StatusCode::NO_CONTENT, Json(None));
     }
 
     let session_id = random_id();

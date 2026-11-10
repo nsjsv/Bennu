@@ -9,6 +9,7 @@ use std::collections::HashSet;
 use local_send::DeviceInfo;
 
 use super::super::FileBrowser;
+use super::Outgoing;
 use crate::model::Message;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,14 +78,15 @@ impl FileBrowser {
             .into_iter()
             .cloned()
             .collect();
-        let paths = match owner {
-            DeviceListOwner::LocalSendWindow => self.staged_paths(),
-            DeviceListOwner::TransferWindow => self
-                .transfer_session
-                .as_ref()
-                .map(|session| session.paths.clone())
-                .unwrap_or_default(),
+        let outgoing = match owner {
+            DeviceListOwner::LocalSendWindow => self.local_send_outgoing(),
+            DeviceListOwner::TransferWindow => Outgoing::Files(
+                self.transfer_session
+                    .as_ref()
+                    .map(|session| session.paths.clone())
+                    .unwrap_or_default(),
+            ),
         };
-        self.begin_direct_sends(devices, paths)
+        self.begin_direct_sends(devices, outgoing)
     }
 }

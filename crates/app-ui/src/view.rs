@@ -13,6 +13,7 @@ mod context_menu_submenu;
 mod convert;
 mod file_operation_verification_settings;
 mod floating_panels;
+mod incoming_message_panel;
 mod incoming_transfer_panel;
 mod local_send_address_form;
 mod local_send_devices;
@@ -112,6 +113,7 @@ use floating_panels::{
     context_menu_panel, destructive_action_confirmation_panel, error_notification_panel,
     file_drop_operation_panel, open_with_panel,
 };
+use incoming_message_panel::incoming_message_panel;
 use incoming_transfer_panel::incoming_transfer_confirmation_panel;
 use rendering_settings::renderer_restart_notice_panel;
 use right_preview_panel::right_preview_panel;
@@ -270,6 +272,14 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
         floating_input = BrowserFloatingInput::Modal;
         floating.push(FloatingContent {
             element: incoming_transfer_confirmation_panel(incoming),
+            placement: FloatingPlacement::Center,
+            captures_pointer: true,
+        });
+    } else if let Some(message) = browser.incoming_messages.front() {
+        // 收到的文字排在接收确认之后：确认有 30 秒时限，先处理。
+        floating_input = BrowserFloatingInput::Modal;
+        floating.push(FloatingContent {
+            element: incoming_message_panel(message, browser.incoming_messages.len() - 1),
             placement: FloatingPlacement::Center,
             captures_pointer: true,
         });

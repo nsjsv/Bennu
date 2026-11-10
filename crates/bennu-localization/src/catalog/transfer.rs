@@ -128,4 +128,11 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Send to %1 selected", "给选中的 %1 台发送"),
     ("Clear selection", "取消勾选"),
     ("%1 file(s) · %2", "%1 个文件 · %2"),
+    // 文字消息
+    ("Text message", "文字"),
+    ("Type the text to send", "输入要发送的文字"),
+    ("%1 sent a message", "%1 发来一段文字"),
+    ("Open link", "打开链接"),
+    ("Copied", "已复制"),
+    ("%1 more", "还有 %1 条"),
 ];

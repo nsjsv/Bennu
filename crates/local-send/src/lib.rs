@@ -159,6 +159,8 @@ pub enum ServiceEvent {
         saved_paths: Vec<PathBuf>,
         failed: Vec<(String, String)>,
     },
+    /// 收到一段文字消息（已回 204，不建会话、不走接收确认）；发送方按证书认。
+    MessageReceived { device: DeviceInfo, text: String },
     /// 接收端没开起来或已停止：每个服务只报一次，不重试；发现与直推不受影响。
     ReceiverFailed(ReceiverFailure),
 }
@@ -199,6 +201,18 @@ impl ServiceHandle {
         let sender = self.sender.clone();
         let target = target.clone();
         async move { sender.send(&target, &files, pin.as_deref(), progress).await }
+    }
+
+    /// 发一段文字给目标设备（同官方的文字消息）；`pin` 同 `send_to_device`。
+    pub fn send_text(
+        &self,
+        target: &DeviceInfo,
+        text: String,
+        pin: Option<String>,
+    ) -> impl Future<Output = Result<(), LocalSendError>> + Send + 'static {
+        let sender = self.sender.clone();
+        let target = target.clone();
+        async move { sender.send_text(&target, &text, pin.as_deref()).await }
     }
 
     /// 确认 Modal 回写：接受不是收藏的设备的请求。要"加入收藏"时先 `set_favorites`。

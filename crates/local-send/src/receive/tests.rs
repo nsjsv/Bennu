@@ -42,6 +42,7 @@ fn receive_state(
             size,
             file_type: None,
             sha256: None,
+            preview: None,
         },
         token: TOKEN.into(),
         dest: None,

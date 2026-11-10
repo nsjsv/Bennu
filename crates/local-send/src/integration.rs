@@ -20,6 +20,7 @@ mod mtls;
 mod pin;
 mod qr;
 mod send;
+mod text;
 
 pub(crate) const TEST_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -44,6 +45,7 @@ fn meta(id: &str, name: &str, size: u64) -> FileMetadata {
         size,
         file_type: Some("text/plain".into()),
         sha256: None,
+        preview: None,
     }
 }
 

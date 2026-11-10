@@ -1,11 +1,11 @@
-//! LocalSend 窗口：本机与接收状态、待发列表、收藏设备、附近设备。
+//! LocalSend 窗口：本机与接收状态、待发（文件或文字）、收藏设备、附近设备。
 
-use iced::widget::{button, column, container, row, scrollable, Column};
+use iced::widget::{button, column, container, row, scrollable, text_editor, Column, Space};
 use iced::{Alignment, Element, Length, Theme};
 
 use crate::app::transfer::{
     receiver_failure_message, AddressFormMessage, ChooserTarget, DeviceListOwner, StagedItem,
-    StagedSize, TransferMessage,
+    StagedSize, StagedTab, TransferMessage,
 };
 use crate::app::FileBrowser;
 use crate::appearance::{context_menu_button_style, context_menu_style, muted_text_color};
@@ -17,6 +17,7 @@ use bennu_theme::icons::IconSymbol;
 use bennu_theme::ui_colors;
 use local_send::DeviceInfo;
 
+use super::option_controls::{segmented_choice_row, SegmentedChoice};
 use super::settings_group::{muted_setting_text, toggle_setting_row};
 use super::{local_send_address_form, local_send_devices};
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};
@@ -26,14 +27,14 @@ const CARD_SPACING: f32 = 12.0;
 const STAGED_LIST_MAX_HEIGHT: f32 = 160.0;
 const STAGED_ROW_HEIGHT: f32 = 26.0;
 const STAGED_NAME_MAX_CHARS: usize = 48;
+const STAGED_TEXT_HEIGHT: f32 = 120.0;
 
 pub(crate) fn view_local_send_window(browser: &FileBrowser) -> Element<'_, Message> {
-    let has_files = !browser.local_send_staged.is_empty();
     let content = column![this_computer_card(browser), staged_card(browser)]
         .push(local_send_devices::checked_bar(
             browser,
             DeviceListOwner::LocalSendWindow,
-            has_files,
+            browser.local_send_has_outgoing(),
         ))
         .push(favorites_card(browser))
         .push(nearby_card(browser))
@@ -77,7 +78,48 @@ fn this_computer_card(browser: &FileBrowser) -> Element<'_, Message> {
     )
 }
 
+/// 待发卡片："文件 | 文字"两个标签，设备行发的是当前标签里的东西。
 fn staged_card(browser: &FileBrowser) -> Element<'_, Message> {
+    let tab = |label: String, target: StagedTab| SegmentedChoice {
+        label,
+        selected: browser.local_send_tab == target,
+        message: Message::Transfer(TransferMessage::StagedTabSelected(target)),
+        tooltip: None,
+    };
+    let tabs = segmented_choice_row(vec![
+        tab(tr!("Files"), StagedTab::Files),
+        tab(tr!("Text message"), StagedTab::Text),
+    ]);
+    let content = match browser.local_send_tab {
+        StagedTab::Files => staged_files(browser),
+        StagedTab::Text => staged_text(browser),
+    };
+    card(column![tabs, content].spacing(10))
+}
+
+/// 要发的文字：多行，发完还在，可以接着发给别人。
+fn staged_text(browser: &FileBrowser) -> Element<'_, Message> {
+    let editor = text_editor(&browser.local_send_text)
+        .placeholder(tr!("Type the text to send"))
+        .on_action(|action| Message::Transfer(TransferMessage::StagedTextEdited(action)))
+        .height(Length::Fixed(STAGED_TEXT_HEIGHT))
+        .padding(6);
+    let clear = button(readable_text(tr!("Clear")).size(12))
+        .on_press_maybe(
+            (!browser.local_send_text.text().is_empty())
+                .then_some(Message::Transfer(TransferMessage::StagedTextCleared)),
+        )
+        .padding([4, 10])
+        .style(context_menu_button_style());
+    column![
+        editor,
+        row![Space::new().width(Length::Fill), clear].align_y(Alignment::Center),
+    ]
+    .spacing(6)
+    .into()
+}
+
+fn staged_files(browser: &FileBrowser) -> Element<'_, Message> {
     let staged = &browser.local_send_staged;
     let mut content = column![].spacing(8).width(Length::Fill);
     if staged.is_empty() {
@@ -120,14 +162,15 @@ fn staged_card(browser: &FileBrowser) -> Element<'_, Message> {
             .padding([5, 12])
             .style(context_menu_button_style())
     };
-    content = content.push(
-        row![
-            choose(tr!("Choose files..."), ChooserTarget::Files),
-            choose(tr!("Choose folders..."), ChooserTarget::Folders),
-        ]
-        .spacing(8),
-    );
-    card(content)
+    content
+        .push(
+            row![
+                choose(tr!("Choose files..."), ChooserTarget::Files),
+                choose(tr!("Choose folders..."), ChooserTarget::Folders),
+            ]
+            .spacing(8),
+        )
+        .into()
 }
 
 fn staged_rows(staged: &[StagedItem]) -> Column<'_, Message> {
@@ -195,17 +238,17 @@ fn staged_total_text(staged: &[StagedItem]) -> String {
     total.display_text()
 }
 
-/// 这个窗口的设备行：勾选记在 LocalSend 窗口名下；有待发文件时点设备就发这批，没有
-/// 时发送不可点。
+/// 这个窗口的设备行：勾选记在 LocalSend 窗口名下；点设备发当前标签里的东西（文件或
+/// 文字），没东西可发时发送不可点。
 fn device_rows(
     browser: &FileBrowser,
 ) -> local_send_devices::DeviceRows<'_, impl Fn(&DeviceInfo) -> Option<Message>> {
-    let has_files = !browser.local_send_staged.is_empty();
+    let has_outgoing = browser.local_send_has_outgoing();
     local_send_devices::DeviceRows {
         browser,
         owner: DeviceListOwner::LocalSendWindow,
         send: move |device: &DeviceInfo| {
-            has_files.then(|| {
+            has_outgoing.then(|| {
                 Message::Transfer(TransferMessage::SendStagedToDevicePressed(device.clone()))
             })
         },

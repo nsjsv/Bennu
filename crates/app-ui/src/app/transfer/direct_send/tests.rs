@@ -11,7 +11,7 @@ fn waiting_for(batch: u64, fingerprint: &str) -> DirectSendState {
         file_size: 0,
         phase: DirectSendPhase::Checking,
         target: sample_device(fingerprint),
-        files: SendFiles::Preparing(batch),
+        payload: Payload::Preparing(batch),
     }
 }
 
@@ -53,14 +53,14 @@ fn one_batch_is_prepared_once_for_every_device_waiting_for_it() {
 
     assert!(!browser.direct_sends.batches.contains_key(&7));
     for fingerprint in ["phone", "tablet"] {
-        let SendFiles::Ready(ready) = &browser.direct_sends.states[fingerprint].files else {
+        let Payload::Files(ready) = &browser.direct_sends.states[fingerprint].payload else {
             panic!("{fingerprint} should have the prepared files");
         };
         // 同一份：不是每台各算一遍。
         assert!(Arc::ptr_eq(ready, &files));
     }
     assert!(matches!(
-        browser.direct_sends.states["laptop"].files,
-        SendFiles::Preparing(8)
+        browser.direct_sends.states["laptop"].payload,
+        Payload::Preparing(8)
     ));
 }

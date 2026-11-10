@@ -121,6 +121,9 @@ pub struct FileMetadata {
     pub file_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sha256: Option<String>,
+    /// 文字消息的内容（同官方：只有一个 text 文件且带 preview 的请求就是一段文字）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
 }
 
 #[cfg(test)]
@@ -214,6 +217,7 @@ mod tests {
                 size: 3,
                 file_type: Some("text/plain".into()),
                 sha256: None,
+                preview: None,
             },
         );
         let request = PrepareUploadRequest {

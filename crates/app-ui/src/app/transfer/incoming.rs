@@ -65,6 +65,7 @@ mod tests {
             size,
             file_type: None,
             sha256: None,
+            preview: None,
         }
     }
 

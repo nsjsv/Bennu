@@ -84,59 +84,31 @@ impl DirectSender {
         let base = target
             .http_base_url()
             .ok_or(LocalSendError::AddressUnknown)?;
-        // 开了加密的设备：握手钉住设备表里的指纹（发现时取自它的证书），换了设备的
-        // 地址在发出文件清单之前就断开。
-        let pinned;
-        let client = if target.is_certified() {
-            pinned = self.outbound.client(Some(&target.fingerprint))?;
-            &pinned
-        } else {
-            &self.client
-        };
-
-        let request = PrepareUploadRequest {
-            // 官方接收端以客户端证书哈希识别发送方，自报的身份必须是同一个设备身份。
-            info: self.own_device.clone(),
-            files: files
-                .files
-                .iter()
-                .enumerate()
-                .map(|(index, file)| {
-                    let id = index.to_string();
-                    let metadata = FileMetadata {
-                        id: id.clone(),
-                        file_name: file.file_name.clone(),
-                        size: file.size,
-                        file_type: Some(mime_of(&file.file_name).to_string()),
-                        sha256: Some(file.sha256.clone()),
-                    };
-                    (id, metadata)
-                })
-                .collect(),
-        };
-        let endpoint = "prepare-upload";
-        let url = format!("{base}/api/localsend/v2/{endpoint}");
-        let mut prepare = client.post(&url).json(&request);
-        if let Some(pin) = pin {
-            prepare = prepare.query(&[("pin", pin)]);
-        }
-        let response = prepare
-            .send()
-            .await
-            .map_err(|source| LocalSendError::Request { endpoint, source })?;
+        let client = &self.client_for(target)?;
+        let announced = files
+            .files
+            .iter()
+            .enumerate()
+            .map(|(index, file)| {
+                let id = index.to_string();
+                let metadata = FileMetadata {
+                    id: id.clone(),
+                    file_name: file.file_name.clone(),
+                    size: file.size,
+                    file_type: Some(mime_of(&file.file_name).to_string()),
+                    sha256: Some(file.sha256.clone()),
+                    preview: None,
+                };
+                (id, metadata)
+            })
+            .collect();
         let mut failed = files.unreadable.clone();
         // 协议：204 = 对方一个也不需要。
-        if response.status() == reqwest::StatusCode::NO_CONTENT {
+        let Some(prepared_response) = self.prepare_upload(client, &base, announced, pin).await?
+        else {
             failed.extend(files.files.iter().map(not_taken));
             return Ok(SendReport { sent: 0, failed });
-        }
-        if !response.status().is_success() {
-            return Err(prepare_upload_refusal(response.status(), pin.is_some()));
-        }
-        let prepared_response: PrepareUploadResponse = response
-            .json()
-            .await
-            .map_err(|source| LocalSendError::Request { endpoint, source })?;
+        };
         let session_id = prepared_response.session_id;
 
         let mut sent = 0;
@@ -175,6 +147,102 @@ impl DirectSender {
             cancel_session(client, &base, &session_id).await;
         }
         Ok(SendReport { sent, failed })
+    }
+
+    /// 发一段文字（同官方）：一个 `text/plain` 文件，内容放在 preview 里；对方读完回
+    /// 204。有的接收端把文字当文件收、给了令牌，就把文字当那个文件的内容传过去。
+    pub(crate) async fn send_text(
+        &self,
+        target: &DeviceInfo,
+        text: &str,
+        pin: Option<&str>,
+    ) -> Result<(), LocalSendError> {
+        let base = target
+            .http_base_url()
+            .ok_or(LocalSendError::AddressUnknown)?;
+        let client = &self.client_for(target)?;
+        let file_id = "0".to_owned();
+        let message = FileMetadata {
+            id: file_id.clone(),
+            file_name: format!("{}.txt", crate::random_id()),
+            size: text.len() as u64,
+            file_type: Some("text/plain".to_owned()),
+            sha256: None,
+            preview: Some(text.to_owned()),
+        };
+        let announced = [(file_id.clone(), message)].into_iter().collect();
+        let Some(prepared) = self.prepare_upload(client, &base, announced, pin).await? else {
+            return Ok(());
+        };
+        let Some(token) = prepared.files.get(&file_id) else {
+            return Ok(());
+        };
+        let endpoint = "upload";
+        let url = format!(
+            "{base}/api/localsend/v2/{endpoint}?sessionId={}&fileId={file_id}&token={token}",
+            prepared.session_id
+        );
+        let response = client
+            .post(&url)
+            .body(text.to_owned())
+            .send()
+            .await
+            .map_err(|source| LocalSendError::Request { endpoint, source })?;
+        if !response.status().is_success() {
+            return Err(LocalSendError::PeerRejected {
+                status: response.status(),
+                endpoint,
+            });
+        }
+        Ok(())
+    }
+
+    /// 开了加密的设备：握手钉住设备表里的指纹（发现时取自它的证书），换了设备的地址在
+    /// 发出任何请求字节之前就断开。明文设备用不钉的共享客户端。
+    fn client_for(&self, target: &DeviceInfo) -> Result<reqwest::Client, LocalSendError> {
+        if target.is_certified() {
+            self.outbound.client(Some(&target.fingerprint))
+        } else {
+            Ok(self.client.clone())
+        }
+    }
+
+    /// prepare-upload：对方要哪些文件（返回会话与令牌）；204 = 一个也不要（None）。
+    /// 被拒的原因按 `prepare_upload_refusal` 分清楚。
+    async fn prepare_upload(
+        &self,
+        client: &reqwest::Client,
+        base: &str,
+        files: std::collections::HashMap<String, FileMetadata>,
+        pin: Option<&str>,
+    ) -> Result<Option<PrepareUploadResponse>, LocalSendError> {
+        let request = PrepareUploadRequest {
+            // 官方接收端以客户端证书哈希识别发送方，自报的身份必须是同一个设备身份。
+            info: self.own_device.clone(),
+            files,
+        };
+        let endpoint = "prepare-upload";
+        let mut prepare = client
+            .post(format!("{base}/api/localsend/v2/{endpoint}"))
+            .json(&request);
+        if let Some(pin) = pin {
+            prepare = prepare.query(&[("pin", pin)]);
+        }
+        let response = prepare
+            .send()
+            .await
+            .map_err(|source| LocalSendError::Request { endpoint, source })?;
+        if response.status() == reqwest::StatusCode::NO_CONTENT {
+            return Ok(None);
+        }
+        if !response.status().is_success() {
+            return Err(prepare_upload_refusal(response.status(), pin.is_some()));
+        }
+        response
+            .json()
+            .await
+            .map(Some)
+            .map_err(|source| LocalSendError::Request { endpoint, source })
     }
 }
 

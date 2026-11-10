@@ -265,12 +265,17 @@ pub(crate) struct FileBrowser {
     pub(crate) local_send_window: Option<window::Id>,
     pub(crate) local_send_staged: Vec<transfer::StagedItem>,
     pub(crate) favorite_address_form: Option<transfer::FavoriteAddressForm>,
+    /// 待发卡片停在"文件"还是"文字"标签，与要发的文字。
+    pub(crate) local_send_tab: transfer::StagedTab,
+    pub(crate) local_send_text: iced::widget::text_editor::Content,
     /// 设置页收藏设备改名的输入（证书指纹 → 正在输入的名字），回车提交后清掉。
     pub(crate) favorite_alias_inputs: HashMap<String, String>,
     /// 常驻 LocalSend 服务运行时；None = 未启动或启动失败。
     pub(crate) transfer_runtime: Option<transfer::LocalSendRuntime>,
     /// 二维码下载会话；与 transfer_window 同生命周期。
     pub(crate) transfer_session: Option<transfer::TransferSessionState>,
+    /// 收到的文字，排队一次弹一条（队首在显示）。
+    pub(crate) incoming_messages: std::collections::VecDeque<transfer::IncomingMessage>,
     /// 接收确认 Modal 状态（不是收藏的设备发来文件）。
     pub(crate) incoming_transfer: Option<transfer::IncomingTransferConfirmation>,
     /// 设置页设备名输入缓冲。
@@ -656,10 +661,13 @@ impl FileBrowser {
             local_send_window: None,
             local_send_staged: Vec::new(),
             favorite_address_form: None,
+            local_send_tab: transfer::StagedTab::Files,
+            local_send_text: iced::widget::text_editor::Content::new(),
             favorite_alias_inputs: HashMap::new(),
             transfer_runtime: None,
             transfer_session: None,
             incoming_transfer: None,
+            incoming_messages: std::collections::VecDeque::new(),
             transfer_device_alias_input: String::new(),
             transfer_port_input: String::new(),
             transfer_pin_input: None,

@@ -555,6 +555,12 @@ impl FileBrowser {
             return self.reject_pending_incoming_transfer();
         }
 
+        // 收到的文字：Esc/外部点击关掉当前这条，下一条接着显示。
+        if !self.incoming_messages.is_empty() {
+            self.close_incoming_message();
+            return Task::none();
+        }
+
         if self.file_drop_prompt.is_some() {
             self.file_drop_prompt = None;
             return Task::none();

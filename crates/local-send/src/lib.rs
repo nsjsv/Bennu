@@ -15,6 +15,7 @@ mod device;
 mod discovery;
 mod error;
 mod identity;
+mod outbound_tls;
 mod qr;
 mod receive;
 mod send;
@@ -51,7 +52,7 @@ pub const DEFAULT_PORT: u16 = 53317;
 pub struct ServiceConfig {
     /// 本机对外别名（announce、register、prepare-upload 共用）。
     pub alias: String,
-    /// LocalSend 官方设备类型词表中的取值（桌面端为 `computer`）。
+    /// LocalSend 官方设备类型词表中的取值（桌面端为 `desktop`）。
     pub device_type: Option<String>,
     /// 发现与接收共用的端口：官方把组播端口与 HTTP 端口当同一个设置，改了端口
     /// 只能和同端口的设备互相发现，这里保持一致。
@@ -223,7 +224,14 @@ impl LocalSendService {
     ) -> Result<(ServiceHandle, broadcast::Receiver<ServiceEvent>), LocalSendError> {
         let identity = DeviceIdentity::load_or_create(&config.identity_path)?;
         let own_device = own_device_info(config.alias, config.device_type, config.port, &identity);
-        let client = peer_client(&identity)?;
+        // 先于任何任务：身份证书当不了 TLS 证书时不碰网络就失败。
+        let invalid_identity = |error: rustls::Error| LocalSendError::InvalidIdentity {
+            path: config.identity_path.clone(),
+            reason: error.to_string(),
+        };
+        let outbound = outbound_tls::OutboundTls::new(&identity).map_err(invalid_identity)?;
+        // 发现用的客户端不钉指纹：还不知道对方是谁，身份从回应的握手证书读。
+        let client = outbound.client(None)?;
 
         let (events, events_rx) = broadcast::channel(EVENT_CAPACITY);
         let devices = Arc::new(Mutex::new(discovery::DeviceTable::default()));
@@ -231,13 +239,7 @@ impl LocalSendService {
 
         let (presence, receive_state, receiver_released) = match config.receiver {
             Some(receiver) => {
-                // 先于任何任务：身份证书当不了 TLS 证书时不碰网络就失败。
-                let tls = receive::server_config(&identity).map_err(|error| {
-                    LocalSendError::InvalidIdentity {
-                        path: config.identity_path.clone(),
-                        reason: error.to_string(),
-                    }
-                })?;
+                let tls = receive::server_config(&identity).map_err(invalid_identity)?;
                 let state = Arc::new(receive::ReceiveState::new(
                     own_device.clone(),
                     receiver.download_dir,
@@ -316,7 +318,7 @@ impl LocalSendService {
             ServiceHandle {
                 commands: command_tx,
                 shutdown_tx,
-                sender: DirectSender::new(client, own_device),
+                sender: DirectSender::new(client, outbound, own_device),
                 receiver_released,
             },
             events_rx,
@@ -344,27 +346,6 @@ pub(crate) fn own_device_info(
         protocol: "https".to_owned(),
         address: None,
     }
-}
-
-/// 唯一的出站客户端：直推、legacy 扫描、register 回应共用，全部出示设备身份。
-pub(crate) fn peer_client(identity: &DeviceIdentity) -> Result<reqwest::Client, LocalSendError> {
-    reqwest::Client::builder()
-        // 局域网内握手超过 5s 视为对端不可达；总时长不设限（大文件直推）。
-        .connect_timeout(Duration::from_secs(5))
-        // LocalSend 证书是自签名且无 CA 校验（规范 §2，安全性靠 fingerprint
-        // 记忆）；官方客户端同样接受自签名证书，否则 HTTPS 设备全部握手失败。
-        .danger_accept_invalid_certs(true)
-        // 新版官方 App 对 HTTPS 强制客户端证书，并以证书哈希识别发送方。
-        .identity(identity.reqwest_identity()?)
-        // 对端都在局域网：系统代理会把 TLS 握手带到代理上（官方 1.18.2 同样不走代理）。
-        .no_proxy()
-        // 对端回的跳转不跟：只和发现的那台设备说话（官方 1.18.2 安全修复）。
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|source| LocalSendError::Request {
-            endpoint: "client",
-            source,
-        })
 }
 
 /// 二维码下载服务门面。
@@ -410,40 +391,6 @@ mod tests {
     fn qr_matrix_encodes_url() {
         let code = qr_matrix("http://192.168.1.5:49152/abcdef");
         assert!(code.size >= 21);
-    }
-
-    #[tokio::test]
-    async fn peer_client_does_not_follow_redirects_sent_by_peers() {
-        let followed = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let hit = Arc::clone(&followed);
-        let router = axum::Router::new()
-            .route(
-                "/start",
-                axum::routing::get(|| async { axum::response::Redirect::temporary("/elsewhere") }),
-            )
-            .route(
-                "/elsewhere",
-                axum::routing::get(move || async move {
-                    hit.store(true, std::sync::atomic::Ordering::SeqCst);
-                }),
-            );
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        tokio::spawn(async move {
-            let _ = axum::serve(listener, router).await;
-        });
-        let dir = tempfile::tempdir().unwrap();
-        let identity = DeviceIdentity::load_or_create(&dir.path().join("identity.pem")).unwrap();
-
-        let response = peer_client(&identity)
-            .unwrap()
-            .get(format!("http://127.0.0.1:{port}/start"))
-            .send()
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), 307);
-        assert!(!followed.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     // 普通 #[test] 没有 tokio 运行时：若身份检查晚于 spawn 任务，这里会直接 panic。

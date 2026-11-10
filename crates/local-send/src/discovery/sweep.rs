@@ -1,17 +1,18 @@
 //! legacy HTTP 扫描（规范 §3.2）：组播常被 AP 隔离、IGMP snooping 或 TUN 防火墙
 //! 吞掉，退化为周期对候选子网逐 IP 探测。
 
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::watch;
 
-use super::{is_lan_candidate, lan_candidates, record_device, Discovery};
-use crate::device::DeviceInfo;
+use super::{is_lan_candidate, lan_candidates, probe_target, record_device, Discovery};
 
 /// 扫描周期。
 const HTTP_SWEEP_INTERVAL: Duration = Duration::from_secs(10);
+/// 单个扫描请求超时：局域网单跳，超时即视为不存在。
+const SWEEP_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// 展开一个候选接口所在子网的主机地址：只处理 /24..=/30 常规网段（更大
 /// 的前缀会地址爆炸，跳过并留给组播），排除网络/广播地址与自身地址。
@@ -78,22 +79,18 @@ pub(super) async fn run_http_sweeper(
             // 无先验协议，双协议并发探测（幂等登记，重复响应无害）。
             let discovery = &discovery;
             let probes = targets.iter().flat_map(|target| {
+                let address = SocketAddr::new(IpAddr::V4(*target), discovery.port);
                 ["https", "http"].map(|scheme| async move {
                     (
-                        *target,
-                        probe_target(discovery, IpAddr::V4(*target), scheme).await,
+                        address,
+                        probe_target(discovery, address, scheme, SWEEP_TIMEOUT).await,
                     )
                 })
             });
-            for (ip, device) in futures_util::future::join_all(probes).await {
-                if let Some(device) = device {
-                    record_device(
-                        &discovery.devices,
-                        &discovery.events,
-                        device,
-                        IpAddr::V4(ip),
-                    )
-                    .await;
+            for (address, probed) in futures_util::future::join_all(probes).await {
+                if let Ok(device) = probed {
+                    record_device(&discovery.devices, &discovery.events, device, address.ip())
+                        .await;
                 }
             }
         }
@@ -105,87 +102,9 @@ pub(super) async fn run_http_sweeper(
     }
 }
 
-/// 探测一个地址：200 响应体 = 对端 DeviceInfo。忽略自身（扫到自己的另一接口）。
-/// 对端响应可能省略 port/protocol，反序列化会填默认值：以实际探测成功的端口与
-/// scheme 为准。
-async fn probe_target(discovery: &Discovery, ip: IpAddr, scheme: &str) -> Option<DeviceInfo> {
-    let base = format!("{scheme}://{ip}:{}", discovery.port);
-    let response = discovery
-        .presence
-        .probe(&discovery.client, &base)
-        .await
-        .ok()?;
-    if !response.status().is_success() {
-        return None;
-    }
-    let mut device = response.json::<DeviceInfo>().await.ok()?;
-    if device.fingerprint == discovery.own_fingerprint {
-        return None;
-    }
-    device.protocol = scheme.to_owned();
-    device.port = discovery.port;
-    Some(device)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::super::tests::{discovery, fake_peer};
-    use super::super::Presence;
     use super::*;
-
-    fn localhost() -> IpAddr {
-        IpAddr::V4(Ipv4Addr::LOCALHOST)
-    }
-
-    #[tokio::test]
-    async fn hidden_probe_only_queries_info() {
-        let peer = fake_peer().await;
-        let discovery = discovery(peer.port, Presence::Hidden);
-
-        let device = probe_target(&discovery, localhost(), "http").await.unwrap();
-
-        assert_eq!(
-            *peer.hits.lock(),
-            vec!["info"],
-            "hidden must not register itself"
-        );
-        assert_eq!(device.fingerprint, "PEER");
-    }
-
-    #[tokio::test]
-    async fn visible_probe_registers_and_records_the_probed_port_and_scheme() {
-        let peer = fake_peer().await;
-        let own = DeviceInfo {
-            alias: "TestPC".into(),
-            version: "2.0".into(),
-            fingerprint: "OWN".into(),
-            device_model: None,
-            device_type: None,
-            download: None,
-            port: peer.port,
-            protocol: "http".into(),
-            address: None,
-        };
-        let discovery = discovery(peer.port, Presence::Visible(own));
-
-        let device = probe_target(&discovery, localhost(), "http").await.unwrap();
-
-        assert_eq!(*peer.hits.lock(), vec!["register"]);
-        // 对端响应省略 port/protocol：反序列化默认值（53317/https）不能当真。
-        assert_eq!(device.port, peer.port);
-        assert_eq!(device.protocol, "http");
-    }
-
-    #[tokio::test]
-    async fn probe_ignores_its_own_device() {
-        let peer = fake_peer().await;
-        let mut discovery = discovery(peer.port, Presence::Hidden);
-        discovery.own_fingerprint = "PEER".into();
-
-        assert!(probe_target(&discovery, localhost(), "http")
-            .await
-            .is_none());
-    }
 
     #[test]
     fn sweep_expands_regular_subnet_excluding_self_and_edges() {

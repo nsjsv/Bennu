@@ -64,6 +64,13 @@ where
 }
 
 impl DeviceInfo {
+    /// 开了加密（HTTPS）的设备：服务发出的设备信息（`DeviceSeen`、`IncomingRequest`）
+    /// 里它的 fingerprint 一定是证书证明过的——发现时取对方服务端证书，接收时取客户端
+    /// 证书——发送时还会钉在握手上。明文 HTTP 设备的 fingerprint 只是自报，能被冒充。
+    pub fn is_certified(&self) -> bool {
+        self.protocol == "https"
+    }
+
     /// 供直推/回应使用的 base URL；scheme 按对端 announce 声明的 protocol：
     /// 官方 App 默认 HTTPS（自签名），明文 HTTP 需对端显式声明。
     pub fn http_base_url(&self) -> Option<String> {

@@ -17,13 +17,10 @@ use crate::error::LocalSendError;
 /// 证书主题与官方 App 一致：对端只按指纹识别设备，名称不携带信息。
 const CERTIFICATE_COMMON_NAME: &str = "LocalSend User";
 
-/// 设备身份：PEM（证书 + PKCS#8 私钥）、解析好的证书与私钥、证书指纹。
+/// 设备身份：解析好的证书与私钥（接收端与出站请求的 TLS 都用它）、证书指纹。
 ///
 /// 不实现 `Debug`：里面有私钥，不能被日志或错误文本带出去。
 pub(crate) struct DeviceIdentity {
-    /// 给 reqwest 客户端身份用（它只收 PEM）。
-    pem: Vec<u8>,
-    /// 给 TLS 服务端用。
     certificate: CertificateDer<'static>,
     private_key: PrivateKeyDer<'static>,
     fingerprint: String,
@@ -40,14 +37,14 @@ impl DeviceIdentity {
             source,
         };
         match std::fs::read(path) {
-            Ok(pem) => Self::from_pem(pem).map_err(|reason| LocalSendError::InvalidIdentity {
+            Ok(pem) => Self::from_pem(&pem).map_err(|reason| LocalSendError::InvalidIdentity {
                 path: path.to_path_buf(),
                 reason,
             }),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                let identity =
+                let (identity, pem) =
                     Self::generate().map_err(|error| io_error(std::io::Error::other(error)))?;
-                publish(path, &identity.pem).map_err(io_error)?;
+                publish(path, &pem).map_err(io_error)?;
                 Ok(identity)
             }
             Err(error) => Err(io_error(error)),
@@ -66,14 +63,8 @@ impl DeviceIdentity {
         self.private_key.clone_key()
     }
 
-    pub(crate) fn reqwest_identity(&self) -> Result<reqwest::Identity, LocalSendError> {
-        reqwest::Identity::from_pem(&self.pem).map_err(|source| LocalSendError::Request {
-            endpoint: "client",
-            source,
-        })
-    }
-
-    fn generate() -> Result<Self, rcgen::Error> {
+    /// 新身份与要写进身份文件的 PEM（证书 + PKCS#8 私钥）。
+    fn generate() -> Result<(Self, Vec<u8>), rcgen::Error> {
         // rcgen 默认 ECDSA P-256 SHA-256；默认有效期 1975–4096，与官方一致，免轮换。
         let key_pair = rcgen::KeyPair::generate()?;
         let mut params = rcgen::CertificateParams::default();
@@ -82,20 +73,21 @@ impl DeviceIdentity {
             .distinguished_name
             .push(rcgen::DnType::CommonName, CERTIFICATE_COMMON_NAME);
         let certificate = params.self_signed(&key_pair)?;
-        Ok(Self {
+        let identity = Self {
             fingerprint: fingerprint_of(certificate.der()),
-            pem: format!("{}{}", certificate.pem(), key_pair.serialize_pem()).into_bytes(),
             certificate: certificate.der().clone(),
             private_key: PrivateKeyDer::Pkcs8(key_pair.serialize_der().into()),
-        })
+        };
+        let pem = format!("{}{}", certificate.pem(), key_pair.serialize_pem()).into_bytes();
+        Ok((identity, pem))
     }
 
     /// 身份文件是外部输入，只在这里校验一次：恰好一张证书、一把私钥，且两者配对。
-    fn from_pem(pem: Vec<u8>) -> Result<Self, String> {
-        let certificates = CertificateDer::pem_slice_iter(&pem)
+    fn from_pem(pem: &[u8]) -> Result<Self, String> {
+        let certificates = CertificateDer::pem_slice_iter(pem)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| format!("unreadable certificate: {error}"))?;
-        let keys = PrivateKeyDer::pem_slice_iter(&pem)
+        let keys = PrivateKeyDer::pem_slice_iter(pem)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| format!("unreadable private key: {error}"))?;
         let ([certificate], [key]) = (certificates.as_slice(), keys.as_slice()) else {
@@ -116,7 +108,6 @@ impl DeviceIdentity {
             fingerprint: fingerprint_of(certificate),
             certificate: certificate.clone().into_owned(),
             private_key: key.clone_key(),
-            pem,
         })
     }
 }
@@ -129,6 +120,21 @@ pub(crate) fn fingerprint_of(certificate_der: &[u8]) -> String {
         .iter()
         .map(|byte| format!("{byte:02X}"))
         .collect()
+}
+
+/// 对端证书（接收时的客户端证书、发送时的服务端证书）的唯一检查，照官方
+/// `client_cert_verifier.rs`：LocalSend 设备之间没有共同的 CA，证书在有效期内、
+/// 自签名验证通过就接受；对端是谁由证书指纹决定。
+pub(crate) fn check_peer_certificate(certificate_der: &[u8]) -> Result<(), rustls::Error> {
+    use x509_parser::prelude::{FromDer, X509Certificate};
+    let rejected = || {
+        rustls::Error::InvalidCertificate(rustls::CertificateError::ApplicationVerificationFailure)
+    };
+    let (_, certificate) = X509Certificate::from_der(certificate_der).map_err(|_| rejected())?;
+    if !certificate.validity().is_valid() {
+        return Err(rejected());
+    }
+    certificate.verify_signature(None).map_err(|_| rejected())
 }
 
 /// 先写同目录临时文件（600）再 rename：写到一半失败不会留下半个身份文件。

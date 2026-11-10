@@ -4,9 +4,12 @@
 //! `announce:true` 后优先用 HTTP `POST /api/localsend/v2/register` 回应，失败退化为
 //! UDP 回 `announce:false`。本机是否露面（announce、回应、扫描时登记自己）由
 //! [`Presence`] 决定：接收关着时只看不露面。
+//!
+//! 设备表只收连上过的设备，开了加密的按握手证书认人（同官方最新版）：组播报文是
+//! 谁都能发的明文，只当线索，按它报的地址去连一下才登记。
 
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -26,10 +29,8 @@ pub(crate) const MULTICAST_GROUP: Ipv4Addr = Ipv4Addr::new(224, 0, 0, 167);
 pub(crate) const DEVICE_LIFETIME: Duration = Duration::from_secs(30);
 /// announce 周期（N5：~5s）。
 pub(crate) const ANNOUNCE_INTERVAL: Duration = Duration::from_secs(5);
-/// register 回应的 HTTP 超时：局域网单跳请求，超过即退化 UDP。
-const REGISTER_TIMEOUT: Duration = Duration::from_secs(2);
-/// 单个扫描请求超时：局域网单跳，超时即视为不存在。
-const SWEEP_TIMEOUT: Duration = Duration::from_millis(500);
+/// 听到广播后连对方的超时：局域网单跳请求，超过即退化 UDP。
+const ANNOUNCE_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 /// register 路由路径（listener 回应与主动扫描共用）。
 const REGISTER_PATH: &str = "/api/localsend/v2/register";
 /// info 路由路径：不露面时扫描只查询、不登记。
@@ -204,24 +205,26 @@ impl Presence {
         });
     }
 
-    /// 回应对端的 `announce:true`：露面时登记自己，不露面时不回应。
-    async fn answer(
-        &self,
-        remote: &DeviceInfo,
-        source: std::net::SocketAddr,
-        client: &reqwest::Client,
-        socket: &UdpSocket,
-    ) {
-        if let Presence::Visible(own_device) = self {
-            reply_register(own_device, remote, source, client, socket).await;
+    /// 连不上 `announce:true` 的来源时改用 UDP 回 `announce:false`（协议允许）；
+    /// 不露面时不回应。
+    async fn reply_by_udp(&self, socket: &UdpSocket, source: SocketAddr) {
+        let Presence::Visible(own_device) = self else {
+            return;
+        };
+        if let Ok(payload) = encode_announce(own_device, false) {
+            if let Err(error) = socket.send_to(&payload, source).await {
+                tracing::debug!(event = "localsend_udp_reply_failed", %source, %error, "udp announce reply failed");
+            }
         }
     }
 
-    /// 扫描探测：露面时 POST register（顺带让对方认识本机），不露面时只 GET info。
+    /// 连一台设备：露面时 POST register（顺带让对方认识本机，也是对 announce 的
+    /// 回应），不露面时只 GET info。
     async fn probe(
         &self,
         client: &reqwest::Client,
         base: &str,
+        timeout: Duration,
     ) -> reqwest::Result<reqwest::Response> {
         match self {
             Presence::Visible(own_device) => {
@@ -229,14 +232,14 @@ impl Presence {
                     client,
                     &format!("{base}{REGISTER_PATH}"),
                     own_device,
-                    SWEEP_TIMEOUT,
+                    timeout,
                 )
                 .await
             }
             Presence::Hidden => {
                 client
                     .get(format!("{base}{INFO_PATH}"))
-                    .timeout(SWEEP_TIMEOUT)
+                    .timeout(timeout)
                     .send()
                     .await
             }
@@ -347,6 +350,7 @@ async fn run_listener(discovery: Arc<Discovery>, shutdown: watch::Receiver<bool>
         return;
     }
 
+    let socket = Arc::new(socket);
     let mut buffer = [0u8; 4096];
     let mut shutdown = shutdown;
     loop {
@@ -363,21 +367,86 @@ async fn run_listener(discovery: Arc<Discovery>, shutdown: watch::Receiver<bool>
         let Some(announce) = parse_announce(&buffer[..size], &discovery.own_fingerprint) else {
             continue;
         };
-        record_device(
-            &discovery.devices,
-            &discovery.events,
-            announce.device.clone(),
-            source.ip(),
-        )
-        .await;
-        // 对端请求被发现（announce:true）→ 按露面方式回应。
-        if announce.announce == Some(true) {
-            discovery
-                .presence
-                .answer(&announce.device, source, &discovery.client, &socket)
-                .await;
-        }
+        // 各连各的：一台连不上的设备不能拖住后面的报文。
+        tokio::spawn(accept_announce(
+            Arc::clone(&discovery),
+            announce,
+            source,
+            Arc::clone(&socket),
+        ));
     }
+}
+
+/// 按报文里的端口和协议连一下来源 IP，连上才登记。露面时这一连就是 register，也就是
+/// 对 `announce:true` 的回应；连不上时协议允许改用 UDP 回 `announce:false`。
+async fn accept_announce(
+    discovery: Arc<Discovery>,
+    announce: Announce,
+    source: SocketAddr,
+    socket: Arc<UdpSocket>,
+) {
+    let address = SocketAddr::new(source.ip(), announce.device.port);
+    let scheme = if announce.device.protocol == "https" {
+        "https"
+    } else {
+        "http"
+    };
+    match probe_target(&discovery, address, scheme, ANNOUNCE_PROBE_TIMEOUT).await {
+        Ok(device) => {
+            record_device(&discovery.devices, &discovery.events, device, source.ip()).await;
+        }
+        Err(ProbeError::Unreachable(reason)) if announce.announce == Some(true) => {
+            tracing::debug!(event = "localsend_register_http_failed", %address, %reason, "register via http failed, falling back to udp");
+            discovery.presence.reply_by_udp(&socket, source).await;
+        }
+        Err(_) => {}
+    }
+}
+
+/// 探测失败的原因：按 IP 添加要把它告诉用户，扫描直接丢弃。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ProbeError {
+    Unreachable(String),
+    /// 连上的是本机（扫到自己的另一个接口，或用户填了本机地址）。
+    ThisDevice,
+}
+
+/// 探测一个地址：200 响应体 = 对端 DeviceInfo。对方是谁：开了加密看握手证书（响应体里
+/// 自报的不作数），明文 HTTP 只能信自报的。对端响应可能省略 port/protocol，反序列化会
+/// 填默认值：以实际连上的端口与 scheme 为准。
+pub(crate) async fn probe_target(
+    discovery: &Discovery,
+    address: SocketAddr,
+    scheme: &'static str,
+    timeout: Duration,
+) -> Result<DeviceInfo, ProbeError> {
+    let unreachable =
+        |error: reqwest::Error| ProbeError::Unreachable(crate::error::error_chain_text(&error));
+    let base = format!("{scheme}://{address}");
+    let response = discovery
+        .presence
+        .probe(&discovery.client, &base, timeout)
+        .await
+        .map_err(unreachable)?;
+    if !response.status().is_success() {
+        return Err(ProbeError::Unreachable(format!(
+            "HTTP {}",
+            response.status()
+        )));
+    }
+    let certified = crate::outbound_tls::certified_fingerprint(&response);
+    let mut device = response.json::<DeviceInfo>().await.map_err(unreachable)?;
+    if scheme == "https" {
+        device.fingerprint = certified.ok_or_else(|| {
+            ProbeError::Unreachable("the device did not present a certificate".to_owned())
+        })?;
+    }
+    if device.fingerprint == discovery.own_fingerprint {
+        return Err(ProbeError::ThisDevice);
+    }
+    device.protocol = scheme.to_owned();
+    device.port = address.port();
+    Ok(device)
 }
 
 /// 登记设备并在信息变化时广播 `DeviceSeen`；listener、sweeper 共用。
@@ -393,34 +462,7 @@ async fn record_device(
     }
 }
 
-/// 向 announce 来源回应自身设备信息；端口取对端 announce 里声明的 HTTP 端口。
-async fn reply_register(
-    own_device: &DeviceInfo,
-    remote: &DeviceInfo,
-    source: std::net::SocketAddr,
-    client: &reqwest::Client,
-    socket: &UdpSocket,
-) {
-    let Some(url) = remote
-        .http_base_url()
-        .map(|base| format!("{base}{REGISTER_PATH}"))
-    else {
-        return;
-    };
-    let result = post_register(client, &url, own_device, REGISTER_TIMEOUT).await;
-    if result.is_ok() {
-        return;
-    }
-    // HTTP 不可达（对端未开 HTTP 或防火墙）：协议允许退化 UDP 回 announce:false。
-    tracing::debug!(event = "localsend_register_http_failed", %url, "register via http failed, falling back to udp");
-    if let Ok(payload) = encode_announce(own_device, false) {
-        if let Err(error) = socket.send_to(&payload, source).await {
-            tracing::debug!(event = "localsend_udp_reply_failed", %source, %error, "udp announce reply failed");
-        }
-    }
-}
-
-/// register 出站请求：announce 回应与 legacy 扫描共用，请求体就是本机设备信息。
+/// register 出站请求：回应 announce 与扫描共用，请求体就是本机设备信息。
 /// 官方接收端在 TLS 下只接受 fingerprint 与客户端证书哈希一致的登记，所以必须经
 /// 服务唯一的出站客户端（出示设备身份）发出。
 pub(crate) async fn post_register(
@@ -461,223 +503,4 @@ async fn announce_to_all(device: &DeviceInfo, port: u16) -> Result<(), LocalSend
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// 假对端：记录被打到的路由；响应体照官方 App 省略 port/protocol。
-    pub(super) struct FakePeer {
-        pub(super) port: u16,
-        pub(super) hits: Arc<parking_lot::Mutex<Vec<&'static str>>>,
-    }
-
-    pub(super) async fn fake_peer() -> FakePeer {
-        let hits = Arc::new(parking_lot::Mutex::new(Vec::new()));
-        let body = serde_json::json!({
-            "alias": "Phone",
-            "version": "2.1",
-            "fingerprint": "PEER",
-            "deviceType": "mobile",
-        });
-        let (register_hits, register_body) = (Arc::clone(&hits), body.clone());
-        let (info_hits, info_body) = (Arc::clone(&hits), body);
-        let router = axum::Router::new()
-            .route(
-                REGISTER_PATH,
-                axum::routing::post(move |_: axum::Json<DeviceInfo>| async move {
-                    register_hits.lock().push("register");
-                    axum::Json(register_body)
-                }),
-            )
-            .route(
-                INFO_PATH,
-                axum::routing::get(move || async move {
-                    info_hits.lock().push("info");
-                    axum::Json(info_body)
-                }),
-            );
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        tokio::spawn(async move {
-            let _ = axum::serve(listener, router).await;
-        });
-        FakePeer { port, hits }
-    }
-
-    pub(super) fn discovery(port: u16, presence: Presence) -> Discovery {
-        Discovery {
-            own_fingerprint: "OWN".into(),
-            port,
-            presence,
-            devices: Arc::new(Mutex::new(DeviceTable::default())),
-            events: broadcast::channel(16).0,
-            // 测试只连回环；环境里的代理变量不能把请求带走。
-            client: reqwest::Client::builder().no_proxy().build().unwrap(),
-        }
-    }
-
-    #[tokio::test]
-    async fn only_a_visible_presence_answers_announces() {
-        let peer = fake_peer().await;
-        let mut remote = device("PEER");
-        remote.address = Some(IpAddr::V4(Ipv4Addr::LOCALHOST));
-        remote.port = peer.port;
-        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        let source = socket.local_addr().unwrap();
-        let client = reqwest::Client::builder().no_proxy().build().unwrap();
-
-        Presence::Hidden
-            .answer(&remote, source, &client, &socket)
-            .await;
-        assert!(
-            peer.hits.lock().is_empty(),
-            "hidden must not register itself"
-        );
-
-        Presence::Visible(device("OWN"))
-            .answer(&remote, source, &client, &socket)
-            .await;
-        assert_eq!(*peer.hits.lock(), vec!["register"]);
-    }
-
-    #[tokio::test]
-    async fn multicast_listener_shares_its_port_with_another_reusing_socket() {
-        let port = std::net::UdpSocket::bind("0.0.0.0:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
-        let first = bind_multicast_listener(port).expect("first bind");
-        // 同机的官方 LocalSend 1.18 同样开着复用：第二个监听必须绑得上。
-        let second = bind_multicast_listener(port).expect("second bind on the same port");
-        assert_eq!(first.local_addr().unwrap().port(), port);
-        assert_eq!(second.local_addr().unwrap().port(), port);
-    }
-
-    fn device(fingerprint: &str) -> DeviceInfo {
-        DeviceInfo {
-            alias: "A".into(),
-            version: "2.0".into(),
-            fingerprint: fingerprint.into(),
-            device_model: None,
-            device_type: None,
-            download: None,
-            port: crate::DEFAULT_PORT,
-            protocol: "http".into(),
-            address: None,
-        }
-    }
-
-    #[test]
-    fn announce_json_roundtrip() {
-        let payload = encode_announce(&device("fp"), true).unwrap();
-        let parsed = parse_announce(&payload, "other").unwrap();
-        assert_eq!(parsed.device.fingerprint, "fp");
-        assert_eq!(parsed.announce, Some(true));
-    }
-
-    #[test]
-    fn lan_candidates_exclude_virtual_interfaces_and_reserved_ranges() {
-        // 真实网卡私网地址是候选。
-        assert!(is_lan_candidate("wlan0", "192.168.1.5".parse().unwrap()));
-        assert!(is_lan_candidate("enp3s0", "10.0.0.2".parse().unwrap()));
-        assert!(is_lan_candidate("eth0", "172.16.0.1".parse().unwrap()));
-        // Clash/mihomo fake-ip TUN（benchmark 段 198.18/15）必须排除。
-        assert!(!is_lan_candidate("utun5", "198.18.0.1".parse().unwrap()));
-        assert!(!is_lan_candidate("wlan0", "198.18.0.1".parse().unwrap()));
-        // CGNAT（100.64/10，Tailscale 等）放开：对端接入同一隧道时真实可达，
-        // 由用户在地址列表自行取舍；链路本地仍排除。
-        assert!(is_lan_candidate(
-            "tailscale0",
-            "100.64.1.1".parse().unwrap()
-        ));
-        assert!(!is_lan_candidate("wlan0", "169.254.3.4".parse().unwrap()));
-        // 虚拟接口名排除（docker/网桥/veth/隧道）。
-        assert!(!is_lan_candidate("docker0", "172.17.0.1".parse().unwrap()));
-        assert!(!is_lan_candidate(
-            "virbr0",
-            "192.168.122.1".parse().unwrap()
-        ));
-        assert!(!is_lan_candidate(
-            "br-600092",
-            "172.19.0.1".parse().unwrap()
-        ));
-        assert!(!is_lan_candidate(
-            "veth9c3e8fa",
-            "172.17.0.2".parse().unwrap()
-        ));
-        assert!(!is_lan_candidate("wg0", "10.99.0.1".parse().unwrap()));
-        // 环回/多播/未指定排除。
-        assert!(!is_lan_candidate("lo", "127.0.0.1".parse().unwrap()));
-        assert!(!is_lan_candidate("wlan0", "239.1.1.1".parse().unwrap()));
-        assert!(!is_lan_candidate("wlan0", "0.0.0.0".parse().unwrap()));
-    }
-
-    #[test]
-    fn lan_candidates_sort_private_first() {
-        let mut candidates = vec![
-            ("eth0".to_owned(), "8.8.8.8".parse().unwrap()),
-            ("wlan0".to_owned(), "192.168.1.5".parse().unwrap()),
-        ];
-        sort_lan_candidates(&mut candidates);
-        // 私网候选排前：QR URL 必须取到手机可达的地址。
-        assert_eq!(candidates[0].1, "192.168.1.5".parse::<Ipv4Addr>().unwrap());
-    }
-
-    // 自发自收必须丢弃，否则设备表会被自己污染。
-    #[test]
-    fn own_announce_is_ignored() {
-        let payload = encode_announce(&device("fp"), true).unwrap();
-        assert!(parse_announce(&payload, "fp").is_none());
-    }
-
-    #[test]
-    fn invalid_payload_is_dropped() {
-        assert!(parse_announce(b"not json", "fp").is_none());
-    }
-
-    #[test]
-    fn device_table_dedups_and_reports_changes() {
-        let mut table = DeviceTable::default();
-        let now = Instant::now();
-        let first = device("fp");
-        let seen = table.upsert(first.clone(), "10.0.0.2".parse().unwrap(), now);
-        assert_eq!(seen.unwrap().address, Some("10.0.0.2".parse().unwrap()));
-        // 相同信息重复上报不再触发 DeviceSeen。
-        assert!(table
-            .upsert(first.clone(), "10.0.0.2".parse().unwrap(), now)
-            .is_none());
-        // 别名变化视为信息变化。
-        let mut renamed = first.clone();
-        renamed.alias = "B".into();
-        assert!(table
-            .upsert(renamed, "10.0.0.2".parse().unwrap(), now)
-            .is_some());
-    }
-
-    #[test]
-    fn device_table_prunes_only_expired_entries() {
-        let mut table = DeviceTable::default();
-        let now = Instant::now();
-        table.upsert(device("old"), "10.0.0.2".parse().unwrap(), now);
-        table.upsert(
-            device("new"),
-            "10.0.0.3".parse().unwrap(),
-            now + Duration::from_secs(20),
-        );
-        let removed = table.prune(
-            now + DEVICE_LIFETIME + Duration::from_secs(1),
-            DEVICE_LIFETIME,
-        );
-        // new 在 now+20s 刷新，寿命到 now+50s；old 在 now，寿命到 now+30s。
-        assert_eq!(
-            removed
-                .iter()
-                .map(|d| d.fingerprint.as_str())
-                .collect::<Vec<_>>(),
-            ["old"]
-        );
-        assert!(table
-            .upsert(device("x"), "10.0.0.4".parse().unwrap(), now)
-            .is_some());
-    }
-}
+pub(crate) mod tests;

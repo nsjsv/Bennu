@@ -1,5 +1,6 @@
 //! 双向 TLS：真实接收端照新版官方 App（Rust 核心）强制客户端证书、按证书指纹认人；
-//! 本机出站请求（直推、register）出示的证书就是自报 fingerprint 对应的那张。
+//! 本机出站请求（直推、register）出示的证书就是自报 fingerprint 对应的那张；本机
+//! 认对方也只看它的服务端证书。
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -157,7 +158,10 @@ async fn register_presents_the_identity_its_fingerprint_claims() {
     let own = crate::own_device_info("Peer".to_owned(), None, free_port().await, &identity);
 
     let response = crate::discovery::post_register(
-        &crate::peer_client(&identity).unwrap(),
+        &crate::outbound_tls::OutboundTls::new(&identity)
+            .unwrap()
+            .client(None)
+            .unwrap(),
         &format!("{}/api/localsend/v2/register", server.base),
         &own,
         TEST_TIMEOUT,
@@ -175,4 +179,81 @@ async fn register_presents_the_identity_its_fingerprint_claims() {
         unreachable!()
     };
     assert_eq!(device.fingerprint, identity.fingerprint());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn direct_send_refuses_a_device_whose_certificate_is_not_the_chosen_one() {
+    let mut server = spawn_receive(true, Duration::from_secs(10)).await;
+    let source = tempfile::tempdir().unwrap();
+    let file = source.path().join("secret-name.txt");
+    std::fs::write(&file, b"secret").unwrap();
+    let (sender, _) = crate::send::sender_with_new_identity(source.path());
+    let (progress, _) = mpsc::channel(1);
+    // 选的是另一台设备，这个地址上却是 server：比如对方换了 IP，地址被别的设备占了。
+    let chosen = DeviceInfo {
+        fingerprint: test_peer().fingerprint,
+        ..server.target()
+    };
+
+    let error = sender
+        .send(&chosen, vec![file], progress)
+        .await
+        .unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("does not belong to the device you chose"),
+        "{error}"
+    );
+    // 握手就断了：连文件清单都没到接收端。
+    assert!(matches!(
+        server.events.try_recv(),
+        Err(broadcast::error::TryRecvError::Empty)
+    ));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn probing_an_encrypted_device_trusts_its_certificate_not_its_claim() {
+    let identity_dir = tempfile::tempdir().unwrap();
+    let identity =
+        DeviceIdentity::load_or_create(&identity_dir.path().join("identity.pem")).unwrap();
+    let port = free_port().await;
+    let liar = DeviceInfo {
+        fingerprint: "SOMEONE-ELSE".into(),
+        ..crate::own_device_info("Liar".to_owned(), None, port, &identity)
+    };
+    let download = tempfile::tempdir().unwrap();
+    let state = Arc::new(crate::receive::ReceiveState::new(
+        liar,
+        download.path().to_path_buf(),
+        Arc::new(|_| false),
+        Arc::new(tokio::sync::Mutex::new(
+            crate::discovery::DeviceTable::default(),
+        )),
+        broadcast::channel(16).0,
+        Duration::from_secs(10),
+    ));
+    let (_shutdown, shutdown_rx) = tokio::sync::watch::channel(false);
+    let _released = crate::receive::spawn_server(
+        state,
+        port,
+        crate::receive::server_config(&identity).unwrap(),
+        crate::receive::port_already_released(),
+        shutdown_rx,
+    );
+    let discovery = crate::discovery::tests::discovery(port, crate::discovery::Presence::Hidden);
+    super::wait_until_serving(&discovery.client, port, "Liar").await;
+
+    let device = crate::discovery::probe_target(
+        &discovery,
+        std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+        "https",
+        TEST_TIMEOUT,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(device.fingerprint, identity.fingerprint());
+    assert!(device.is_certified());
 }

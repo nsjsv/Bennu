@@ -61,7 +61,10 @@ pub(crate) fn test_peer() -> TestPeer {
     let dir = tempfile::tempdir().unwrap();
     let identity = DeviceIdentity::load_or_create(&dir.path().join("identity.pem")).unwrap();
     TestPeer {
-        client: crate::peer_client(&identity).unwrap(),
+        client: crate::outbound_tls::OutboundTls::new(&identity)
+            .unwrap()
+            .client(None)
+            .unwrap(),
         fingerprint: identity.fingerprint().to_owned(),
     }
 }

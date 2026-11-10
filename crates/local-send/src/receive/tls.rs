@@ -1,8 +1,5 @@
-//! 接收端 TLS：服务端证书是本机设备身份证书，客户端证书强制出示。
-//!
-//! 校验规则照新版官方 App（Rust 核心）`packages/core/src/http/server/common/
-//! client_cert_verifier.rs`：LocalSend 设备之间没有共同的 CA，只要证书在有效期内、
-//! 自签名验证通过就接受；对端是谁由证书指纹决定。
+//! 接收端 TLS：服务端证书是本机设备身份证书，客户端证书强制出示；证书检查与出站
+//! 请求共用 `identity::check_peer_certificate`。
 
 use std::sync::Arc;
 
@@ -12,7 +9,7 @@ use rustls::pki_types::{CertificateDer, UnixTime};
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
 use rustls::{DigitallySignedStruct, DistinguishedName, SignatureScheme};
 
-use crate::identity::DeviceIdentity;
+use crate::identity::{check_peer_certificate, DeviceIdentity};
 
 /// 接收端 TLS 配置；身份证书不能当服务端证书用时返回 rustls 的原因。
 pub(crate) fn server_config(
@@ -51,17 +48,7 @@ impl ClientCertVerifier for ClientCertificateVerifier {
         _intermediates: &[CertificateDer<'_>],
         _now: UnixTime,
     ) -> Result<ClientCertVerified, rustls::Error> {
-        use x509_parser::prelude::{FromDer, X509Certificate};
-        let rejected = || {
-            rustls::Error::InvalidCertificate(
-                rustls::CertificateError::ApplicationVerificationFailure,
-            )
-        };
-        let (_, certificate) = X509Certificate::from_der(end_entity).map_err(|_| rejected())?;
-        if !certificate.validity().is_valid() {
-            return Err(rejected());
-        }
-        certificate.verify_signature(None).map_err(|_| rejected())?;
+        check_peer_certificate(end_entity)?;
         Ok(ClientCertVerified::assertion())
     }
 

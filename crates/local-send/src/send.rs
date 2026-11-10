@@ -12,6 +12,7 @@ use tokio::sync::mpsc;
 
 use crate::device::{DeviceInfo, FileMetadata, PrepareUploadRequest, PrepareUploadResponse};
 use crate::error::{error_chain_text, LocalSendError};
+use crate::outbound_tls::OutboundTls;
 
 /// 直推进度事件的节流步长。
 const PROGRESS_STEP: u64 = 1024 * 1024;
@@ -55,16 +56,26 @@ impl PreparedFile {
     }
 }
 
-/// 直推客户端：服务唯一的出站客户端（出示设备身份）+ 本机设备信息。
+/// 直推客户端：出站 TLS 配置（出示设备身份）+ 本机设备信息。
 #[derive(Clone)]
 pub(crate) struct DirectSender {
+    /// 发给明文 HTTP 设备用：没有证书可钉。
     client: reqwest::Client,
+    outbound: OutboundTls,
     own_device: DeviceInfo,
 }
 
 impl DirectSender {
-    pub(crate) fn new(client: reqwest::Client, own_device: DeviceInfo) -> Self {
-        Self { client, own_device }
+    pub(crate) fn new(
+        client: reqwest::Client,
+        outbound: OutboundTls,
+        own_device: DeviceInfo,
+    ) -> Self {
+        Self {
+            client,
+            outbound,
+            own_device,
+        }
     }
 
     /// 直推文件清单到目标设备；进度通道满时丢弃进度（UI 只需要最新值）。
@@ -81,7 +92,15 @@ impl DirectSender {
         if prepared.is_empty() {
             return Ok(());
         }
-        let client = &self.client;
+        // 开了加密的设备：握手钉住设备表里的指纹（发现时取自它的证书），换了设备的
+        // 地址在发出文件清单之前就断开。
+        let pinned;
+        let client = if target.is_certified() {
+            pinned = self.outbound.client(Some(&target.fingerprint))?;
+            &pinned
+        } else {
+            &self.client
+        };
 
         let mut files = std::collections::HashMap::new();
         for (index, item) in prepared.iter().enumerate() {
@@ -423,7 +442,8 @@ pub(crate) fn sender_with_new_identity(dir: &Path) -> (DirectSender, String) {
     let identity =
         crate::identity::DeviceIdentity::load_or_create(&dir.join("identity.pem")).unwrap();
     let own_device = crate::own_device_info("TestPC".to_owned(), None, 53317, &identity);
-    let sender = DirectSender::new(crate::peer_client(&identity).unwrap(), own_device);
+    let outbound = OutboundTls::new(&identity).unwrap();
+    let sender = DirectSender::new(outbound.client(None).unwrap(), outbound, own_device);
     (sender, identity.fingerprint().to_owned())
 }
 

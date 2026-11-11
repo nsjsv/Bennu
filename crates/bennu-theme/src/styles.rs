@@ -3,7 +3,7 @@
 //! 这里只允许通过 `crate::ui_colors` 读取语义角色，禁止固定 RGB 分支。
 
 use iced::widget::{button, container, scrollable, svg, text_input};
-use iced::{Background, Border, Color, Theme};
+use iced::{Background, Border, Color, Shadow, Theme, Vector};
 
 use crate::controls::text_field_style;
 use crate::{ui_colors, AppearanceMode};
@@ -214,8 +214,9 @@ pub fn app_content_style(theme: &Theme) -> container::Style {
     }
 }
 
-/// 右键菜单/工具提示底：surface container + 细边 + 圆角 8。自 app-ui
-/// appearance.rs 下沉（窗口控制按钮工具提示消费）；app-ui re-export。
+/// 右键菜单、下拉、工具提示这类浮在内容上的小层：浅浅一层的底、细边、圆角，再加一层
+/// 淡阴影，压在什么背景上都看得出边。底色不用更亮的浮起层：深色下那层和悬停一样亮，
+/// 菜单行悬停会看不出来。
 pub fn context_menu_style(theme: &Theme) -> container::Style {
     let colors = ui_colors(theme);
     container::Style {
@@ -224,7 +225,12 @@ pub fn context_menu_style(theme: &Theme) -> container::Style {
         border: Border {
             color: subtle_border_color(theme),
             width: 1.0,
-            radius: 8.0.into(),
+            radius: 10.0.into(),
+        },
+        shadow: Shadow {
+            color: elevation_shadow_color(theme, 0.12),
+            offset: Vector::new(0.0, 4.0),
+            blur_radius: 16.0,
         },
         ..container::Style::default()
     }
@@ -262,6 +268,10 @@ fn context_menu_item_button_style_for_status(
             muted_text_color(theme)
         } else {
             base_text_color(theme)
+        },
+        border: Border {
+            radius: 6.0.into(),
+            ..Border::default()
         },
         ..button::Style::default()
     }

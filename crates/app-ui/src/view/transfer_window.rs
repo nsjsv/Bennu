@@ -7,13 +7,13 @@ use crate::app::transfer::{
     DeviceListOwner, TransferMessage, TransferSessionPhase, TransferSessionState,
 };
 use crate::app::FileBrowser;
-use crate::appearance::context_menu_style;
 use crate::formatting::format_file_size;
 use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
 use local_send::DeviceInfo;
 
 use super::local_send_devices;
+use super::settings_group::settings_card_style;
 use super::transfer_qr::qr_links_view;
 
 const TRANSFER_CARD_SPACING: f32 = 12.0;
@@ -137,11 +137,11 @@ fn status_line(label: String) -> Element<'static, Message> {
     .into()
 }
 
-/// 卡片外壳：面板样式与右键菜单一致（surface 背景 + 边框）。
+/// 卡片外壳：和设置页的卡片同一个样子。
 fn card_container<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     container(content.into())
         .padding(12)
         .width(Length::Fill)
-        .style(context_menu_style)
+        .style(settings_card_style)
         .into()
 }

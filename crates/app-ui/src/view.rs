@@ -13,6 +13,7 @@ mod context_menu_settings;
 mod context_menu_submenu;
 mod convert;
 mod dialog;
+mod file_context_menu;
 mod file_operation_verification_settings;
 mod floating_panels;
 mod incoming_message_panel;
@@ -387,7 +388,6 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
         let panels = context_menu_panel(
             context_menu,
             browser.tab().is_trash_view,
-            browser.active_pane_id(),
             browser.keyboard_modifiers,
             &browser.user_config().context_menus,
             &browser.user_config().list_view_preferences,

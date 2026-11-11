@@ -116,7 +116,8 @@ fn row_separator() -> Element<'static, Message> {
     .into()
 }
 
-fn settings_card_style(theme: &Theme) -> container::Style {
+/// 窗口里的内容卡片：比底色深一档，没有边框也没有阴影。
+pub(super) fn settings_card_style(theme: &Theme) -> container::Style {
     container::Style {
         background: Some(Background::Color(ui_colors(theme).surface_container)),
         text_color: Some(base_text_color(theme)),

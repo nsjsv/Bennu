@@ -20,33 +20,27 @@ use super::{themed_icon, IconTone, MENU_ICON_SIZE};
 pub(super) const CONTEXT_MENU_PADDING: f32 = 8.0;
 pub(super) const CONTEXT_MENU_ITEM_SPACING: f32 = 4.0;
 pub(super) const CONTEXT_MENU_ITEM_HEIGHT: f32 = 28.0;
-pub(super) const CONTEXT_SUBMENU_WIDTH: f32 = 170.0;
+/// 主菜单和子菜单同宽：最长的一项（英文“New Folder with Selection”）不折行。
+pub(super) const CONTEXT_MENU_WIDTH: f32 = 230.0;
 
-/// 子菜单相对父浮层顶沿的纵向偏移:对齐触发行顶(行号来自结构列表,
-/// 无硬编码行数);横向与安全区钳制由 floating_surface::BesideParent 负责。
-pub(super) fn submenu_top(row_index: usize) -> f32 {
-    CONTEXT_MENU_PADDING + row_index as f32 * (CONTEXT_MENU_ITEM_HEIGHT + CONTEXT_MENU_ITEM_SPACING)
-}
-
-/// 组触发行:动作锚点(on_press 有值)单点执行动作,纯触发器单点仅展开;悬停一律展开。
+/// 组触发行:悬停一律展开;单点执行锚点自己的动作,没有动作的锚点单点也是展开。
 pub(super) fn group_trigger_row(
     anchor: FileAreaMenuItem,
     icon: IconSymbol,
     label: String,
-    on_press: Option<Message>,
+    on_press: Message,
 ) -> Element<'static, Message> {
-    let mut button = button(menu_label_with_chevron(icon, label))
-        .width(Length::Fill)
-        .height(Length::Fixed(CONTEXT_MENU_ITEM_HEIGHT))
-        .style(context_menu_item_button_style());
-    if let Some(message) = on_press {
-        button = button.on_press(message);
-    }
-    mouse_area(button)
-        .on_enter(Message::FileContextMenuExpansionChanged(
-            FileContextMenuExpansion::Group(anchor),
-        ))
-        .into()
+    mouse_area(
+        button(menu_label_with_chevron(icon, label))
+            .on_press(on_press)
+            .width(Length::Fill)
+            .height(Length::Fixed(CONTEXT_MENU_ITEM_HEIGHT))
+            .style(context_menu_item_button_style()),
+    )
+    .on_enter(Message::FileContextMenuExpansionChanged(
+        FileContextMenuExpansion::Group(anchor),
+    ))
+    .into()
 }
 
 /// 组的子菜单面板:「新建...」的硬编码行在最前,其余组只渲染成员行。
@@ -81,7 +75,7 @@ pub(super) fn group_submenu_panel(
 
     mouse_area(
         container(content)
-            .width(Length::Fixed(CONTEXT_SUBMENU_WIDTH))
+            .width(Length::Fixed(CONTEXT_MENU_WIDTH))
             .style(context_menu_style),
     )
     .on_enter(Message::FileContextMenuExpansionChanged(
@@ -90,11 +84,14 @@ pub(super) fn group_submenu_panel(
     .into()
 }
 
-/// 空白菜单固定的「分组方式」触发行:纯触发器,悬停展开子菜单,
-/// 单击无动作,与组锚点行同一交互。
+/// 空白菜单固定的「分组方式」触发行:纯触发器,悬停或单击都是展开子菜单,
+/// 与组锚点行同一交互。
 pub(super) fn file_grouping_trigger_row() -> Element<'static, Message> {
     mouse_area(
         button(menu_label_with_chevron(IconSymbol::List, tr!("Group By")))
+            .on_press(Message::FileContextMenuExpansionChanged(
+                FileContextMenuExpansion::FileGrouping,
+            ))
             .width(Length::Fill)
             .height(Length::Fixed(CONTEXT_MENU_ITEM_HEIGHT))
             .style(context_menu_item_button_style()),
@@ -126,7 +123,7 @@ pub(super) fn file_grouping_submenu_panel(current: FileGroupingMode) -> Element<
 
     mouse_area(
         container(content)
-            .width(Length::Fixed(CONTEXT_SUBMENU_WIDTH))
+            .width(Length::Fixed(CONTEXT_MENU_WIDTH))
             .style(context_menu_style),
     )
     .on_enter(Message::FileContextMenuExpansionChanged(
@@ -221,7 +218,7 @@ fn submenu_item(
     .into()
 }
 
-fn menu_label(icon: IconSymbol, label: String) -> Row<'static, Message> {
+pub(super) fn menu_label(icon: IconSymbol, label: String) -> Row<'static, Message> {
     row![
         themed_icon(icon, IconTone::Normal, MENU_ICON_SIZE),
         readable_text(label),

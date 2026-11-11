@@ -5,7 +5,6 @@ use desktop_linux::FileClipboardOperation;
 
 use crate::app::scrollbar::{enhanced_scrollbar, scrollbar_on_scroll, ScrollbarAxis};
 use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
-use crate::app::transfer::TransferMessage;
 use crate::appearance::{
     context_menu_item_button_style, context_menu_style, enhanced_scrollbar_style,
     enhanced_vertical_scrollbar_direction, error_notification_style,
@@ -13,11 +12,10 @@ use crate::appearance::{
 use crate::formatting::format_middle_ellipsized_text;
 use crate::formatting::item_count_label;
 use crate::model::{
-    BrowserPaneId, ContextMenuPreferences, ContextMenuState, DestructiveActionConfirmation,
-    FileAreaMenuItem, FileContextMenuExpansion, FileContextMenuState, FileDeleteAction,
-    FileDropPrompt, FileEntryMenuEntry, FileGroupingMode, FilePropertiesMessage, ListColumnConfig,
-    ListColumnKind, ListViewPreferences, Message, ScrollbarRegion, ScrollbarViewport,
-    ScrollbarVisibility, SearchContextMenuState, SearchEntryTypePreset, SearchResultMenuItem,
+    ContextMenuPreferences, ContextMenuState, DestructiveActionConfirmation, FileContextMenuState,
+    FileDropPrompt, FileGroupingMode, FilePropertiesMessage, ListColumnConfig, ListColumnKind,
+    ListViewPreferences, Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility,
+    SearchContextMenuState, SearchEntryTypePreset, SearchResultMenuItem,
     SidebarBookmarkContextMenuState, TrashMenuItem,
 };
 use crate::open_with::OpenWithState;
@@ -26,10 +24,10 @@ use bennu_preview::panel_text::readable_text;
 use bennu_theme::icons::IconSymbol;
 
 use super::context_menu_submenu::{
-    file_grouping_submenu_panel, file_grouping_trigger_row, group_submenu_panel, group_trigger_row,
-    submenu_top, CONTEXT_MENU_ITEM_HEIGHT, CONTEXT_MENU_ITEM_SPACING, CONTEXT_MENU_PADDING,
+    CONTEXT_MENU_ITEM_HEIGHT, CONTEXT_MENU_ITEM_SPACING, CONTEXT_MENU_PADDING, CONTEXT_MENU_WIDTH,
 };
 use super::dialog::{self, Dialog};
+use super::file_context_menu::file_context_menu_panel;
 use super::network_connections::network_connection_context_menu_panel;
 use super::option_controls::action_choice_row;
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};
@@ -44,7 +42,6 @@ const OPEN_WITH_PANEL_WIDTH: f32 = 420.0;
 const OPEN_WITH_APPLICATION_LIST_HEIGHT: f32 = 240.0;
 const OPEN_WITH_PATH_MAX_CHARS: usize = 62;
 const OPEN_WITH_ERROR_MAX_CHARS: usize = 96;
-const CONTEXT_MENU_WIDTH: f32 = 190.0;
 const LIST_COLUMN_MENU_WIDTH: f32 = 230.0;
 const LIST_COLUMN_VISIBILITY_BUTTON_HEIGHT: f32 = 28.0;
 pub(super) fn error_notification_panel(error: &str, generation: u64) -> Element<'_, Message> {
@@ -271,7 +268,6 @@ pub(super) struct ContextMenuPanels<'a> {
 pub(super) fn context_menu_panel<'a>(
     menu: &'a ContextMenuState,
     is_trash_view: bool,
-    active_pane_id: BrowserPaneId,
     keyboard_modifiers: iced::keyboard::Modifiers,
     context_menus: &'a ContextMenuPreferences,
     list_view_preferences: &'a ListViewPreferences,
@@ -279,15 +275,13 @@ pub(super) fn context_menu_panel<'a>(
     file_grouping: FileGroupingMode,
 ) -> ContextMenuPanels<'a> {
     match menu {
+        ContextMenuState::FileArea(menu) if is_trash_view => ContextMenuPanels {
+            root: trash_context_menu_panel(menu, context_menus),
+            submenu: None,
+        },
         ContextMenuState::FileArea(menu) => {
-            let (root, submenu) = file_context_menu_panel(
-                menu,
-                is_trash_view,
-                active_pane_id,
-                context_menus,
-                keyboard_modifiers,
-                file_grouping,
-            );
+            let (root, submenu) =
+                file_context_menu_panel(menu, context_menus, keyboard_modifiers, file_grouping);
             ContextMenuPanels { root, submenu }
         }
         ContextMenuState::Search(menu) => ContextMenuPanels {
@@ -365,7 +359,7 @@ fn search_context_menu_panel<'a>(
                 Message::SearchDeletePermanentlySelected,
             ),
         };
-        content = content.push(menu_item(icon, label, message));
+        content = content.push(menu_button(icon, label, message));
     }
 
     container(content)
@@ -431,297 +425,6 @@ fn list_column_visibility_button(column: &ListColumnConfig) -> Button<'static, M
     } else {
         button.on_press(Message::ListColumnVisibilityToggled(column.kind))
     }
-}
-
-fn file_context_menu_panel<'a>(
-    menu: &'a FileContextMenuState,
-    is_trash_view: bool,
-    _active_pane_id: BrowserPaneId,
-    context_menus: &'a ContextMenuPreferences,
-    keyboard_modifiers: iced::keyboard::Modifiers,
-    file_grouping: FileGroupingMode,
-) -> (Element<'a, Message>, Option<(Element<'a, Message>, f32)>) {
-    if is_trash_view {
-        return (trash_context_menu_panel(menu, context_menus), None);
-    }
-
-    let terminal_directory = if menu.target_is_directory {
-        menu.target
-            .clone()
-            .unwrap_or_else(|| menu.paste_directory.clone())
-    } else {
-        menu.paste_directory.clone()
-    };
-
-    let alt_held = keyboard_modifiers.alt();
-    let shift_held = keyboard_modifiers.shift();
-
-    // 行渲染与子菜单展开共用同一份配置后的结构列表;空白菜单没有组成员,
-    // 只有「New...」组行。
-    let entries: Vec<FileEntryMenuEntry> = match &menu.target {
-        Some(_) => {
-            let mut entries = context_menus.file_entry_menu_entries(
-                menu.target_is_directory,
-                menu.can_batch_rename,
-                menu.can_create_symlink,
-            );
-            if menu.inside_archive {
-                // 包内只读：条目菜单切换为固定的只读子集，写操作与
-                // 解压入口整体不渲染（门控是防御，菜单是交互层真相）。
-                entries = [
-                    FileAreaMenuItem::Open,
-                    FileAreaMenuItem::Copy,
-                    FileAreaMenuItem::CopyPath,
-                    FileAreaMenuItem::Properties,
-                ]
-                .into_iter()
-                .map(FileEntryMenuEntry::Item)
-                .collect();
-            } else if menu.selection_archives.is_empty() {
-                // 解压两项只属于压缩包条目；其余归档无关选中不含它们。
-                entries.retain(|entry| match entry {
-                    FileEntryMenuEntry::Item(item) => !matches!(
-                        item,
-                        FileAreaMenuItem::SmartExtractHere
-                            | FileAreaMenuItem::ExtractToArchiveFolder
-                    ),
-                    FileEntryMenuEntry::Group { members, .. } => !members.iter().any(|item| {
-                        matches!(
-                            item,
-                            FileAreaMenuItem::SmartExtractHere
-                                | FileAreaMenuItem::ExtractToArchiveFolder
-                        )
-                    }),
-                });
-            }
-            entries
-        }
-        None => context_menus
-            .file_blank_items()
-            .into_iter()
-            .map(|item| {
-                if item == FileAreaMenuItem::NewEntry {
-                    FileEntryMenuEntry::Group {
-                        anchor: item,
-                        members: Vec::new(),
-                    }
-                } else {
-                    FileEntryMenuEntry::Item(item)
-                }
-            })
-            .collect(),
-    };
-
-    /// 当前展开的悬停子菜单:配置化组锚点的成员子菜单,或空白菜单
-    /// 末尾固定的「分组方式」子菜单。
-    enum ExpandedSubmenu {
-        Group(usize, FileAreaMenuItem, Vec<FileAreaMenuItem>),
-        FileGrouping(usize),
-    }
-
-    let mut menu_content = Column::new()
-        .spacing(CONTEXT_MENU_ITEM_SPACING)
-        .padding(CONTEXT_MENU_PADDING);
-    let mut expanded = None;
-    // 子菜单槽位按真实渲染行号钉位;被配置隐藏/不适用的行不占位。
-    let mut rendered_row_count = 0usize;
-    for (row_index, entry) in entries.iter().enumerate() {
-        match entry {
-            FileEntryMenuEntry::Item(item) => {
-                if let Some(row) =
-                    file_menu_action_row(*item, menu, &terminal_directory, alt_held, shift_held)
-                {
-                    menu_content = menu_content.push(row);
-                    rendered_row_count += 1;
-                }
-            }
-            FileEntryMenuEntry::Group { anchor, members } => {
-                if menu.expansion == FileContextMenuExpansion::Group(*anchor) {
-                    expanded = Some(ExpandedSubmenu::Group(row_index, *anchor, members.clone()));
-                }
-                let (icon, label, on_press) = match *anchor {
-                    FileAreaMenuItem::Copy => {
-                        let (icon, label, message) = copy_menu_action(alt_held);
-                        (icon, label, Some(message))
-                    }
-                    FileAreaMenuItem::Rename => {
-                        let (icon, label, message) = rename_menu_action(menu);
-                        (icon, label, Some(message))
-                    }
-                    other => (other.icon(), other.label(), None),
-                };
-                menu_content = menu_content.push(group_trigger_row(*anchor, icon, label, on_press));
-                rendered_row_count += 1;
-            }
-        }
-    }
-
-    // 空白菜单末尾的固定「分组方式」触发行:构造时已按视图模式门控,
-    // 条目菜单一律不带该入口。
-    if menu.grouping_entry_visible {
-        if menu.expansion == FileContextMenuExpansion::FileGrouping {
-            expanded = Some(ExpandedSubmenu::FileGrouping(rendered_row_count));
-        }
-        menu_content = menu_content.push(file_grouping_trigger_row());
-    }
-
-    let root_menu = container(menu_content)
-        .width(Length::Fixed(CONTEXT_MENU_WIDTH))
-        .style(context_menu_style)
-        .into();
-
-    let submenu = match expanded {
-        // 子菜单纵向钉在触发行顶(行号来自结构列表,无硬编码行数),
-        // 横向与钳制由 floating_surface::BesideParent 接管。
-        Some(ExpandedSubmenu::Group(row_index, anchor, members)) => Some((
-            group_submenu_panel(menu, anchor, &members),
-            submenu_top(row_index),
-        )),
-        Some(ExpandedSubmenu::FileGrouping(row_index)) => Some((
-            file_grouping_submenu_panel(file_grouping),
-            submenu_top(row_index),
-        )),
-        None => None,
-    };
-
-    (root_menu, submenu)
-}
-
-/// 复制的动作与文案:按住 Alt 时实时切换为复制路径。
-fn copy_menu_action(alt_held: bool) -> (IconSymbol, String, Message) {
-    if alt_held {
-        (
-            IconSymbol::List,
-            FileAreaMenuItem::CopyPath.label(),
-            Message::CopyPathSelected,
-        )
-    } else {
-        (
-            IconSymbol::Copy,
-            FileAreaMenuItem::Copy.label(),
-            Message::CopySelected,
-        )
-    }
-}
-
-/// 重命名的动作与文案;条目菜单必有 target。
-fn rename_menu_action(menu: &FileContextMenuState) -> (IconSymbol, String, Message) {
-    let path = menu
-        .target
-        .clone()
-        .unwrap_or_else(|| menu.paste_directory.clone());
-    (
-        IconSymbol::Pencil,
-        FileAreaMenuItem::Rename.label(),
-        Message::BeginRename(path),
-    )
-}
-
-/// 删除的动作与文案:纯本地选中且按住 Shift 时实时切换为永久删除(仍走确认框);
-/// 远程选中本就永久删除、混合选中本就分流,Shift 无额外效果。
-fn delete_menu_action(
-    menu: &FileContextMenuState,
-    shift_held: bool,
-) -> (IconSymbol, String, Message) {
-    if shift_held && menu.delete_action == FileDeleteAction::MoveToTrash {
-        (
-            IconSymbol::Trash,
-            FileDeleteAction::DeletePermanently.label(),
-            Message::DeleteSelectedPermanently,
-        )
-    } else {
-        (
-            IconSymbol::Trash,
-            menu.delete_action.label(),
-            Message::TrashSelected,
-        )
-    }
-}
-
-/// 一级普通行的动作渲染。组成员只会出现在子菜单里,组锚点走组行;
-/// 返回 None 的变体是布局子集保证不会出现的防御分支。
-fn file_menu_action_row(
-    item: FileAreaMenuItem,
-    menu: &FileContextMenuState,
-    terminal_directory: &std::path::Path,
-    alt_held: bool,
-    shift_held: bool,
-) -> Option<Element<'static, Message>> {
-    let row = match (item, &menu.target) {
-        (FileAreaMenuItem::Open, Some(path)) => menu_item(
-            IconSymbol::Folder,
-            item.label(),
-            Message::OpenPath(path.clone()),
-        ),
-        (FileAreaMenuItem::SmartExtractHere, _) => {
-            menu_item(item.icon(), item.label(), Message::SmartExtractSelected)
-        }
-        (FileAreaMenuItem::ExtractToArchiveFolder, _) => menu_item(
-            item.icon(),
-            item.label(),
-            Message::ExtractSelectedToArchiveFolder,
-        ),
-        (FileAreaMenuItem::OpenWith, Some(path)) => menu_item(
-            IconSymbol::Monitor,
-            item.label(),
-            Message::OpenWithRequested(path.clone()),
-        ),
-        (FileAreaMenuItem::Copy, _) => {
-            let (icon, label, message) = copy_menu_action(alt_held);
-            menu_item(icon, label, message)
-        }
-        (FileAreaMenuItem::Move, _) => {
-            menu_item(IconSymbol::ArrowRight, item.label(), Message::MoveSelected)
-        }
-        (FileAreaMenuItem::Paste, _) => {
-            menu_item(IconSymbol::Copy, item.label(), Message::PastePending)
-        }
-        (FileAreaMenuItem::Rename, Some(path)) => menu_item(
-            IconSymbol::Pencil,
-            item.label(),
-            Message::BeginRename(path.clone()),
-        ),
-        (FileAreaMenuItem::OpenTerminalHere, _) => menu_item(
-            IconSymbol::Terminal,
-            item.label(),
-            Message::OpenTerminalHere(terminal_directory.to_path_buf()),
-        ),
-        (FileAreaMenuItem::Delete, _) => {
-            let (icon, label, message) = delete_menu_action(menu, shift_held);
-            menu_item(icon, label, message)
-        }
-        (FileAreaMenuItem::Properties, Some(path)) => menu_item(
-            IconSymbol::FileText,
-            item.label(),
-            Message::FileProperties(FilePropertiesMessage::Requested(path.clone())),
-        ),
-        (FileAreaMenuItem::SendToPhone, _) => menu_item(
-            item.icon(),
-            item.label(),
-            Message::Transfer(TransferMessage::SendToPhoneRequested),
-        ),
-        // 组锚点不经普通行渲染;条目专属项不进空白菜单。
-        (
-            FileAreaMenuItem::NewEntry
-            | FileAreaMenuItem::Tools
-            | FileAreaMenuItem::Open
-            | FileAreaMenuItem::OpenWith
-            | FileAreaMenuItem::Rename
-            | FileAreaMenuItem::Properties,
-            _,
-        ) => return None,
-        // 组成员只渲染在子菜单里。
-        _ => return None,
-    };
-    Some(row)
-}
-
-fn menu_item(icon: IconSymbol, label: String, message: Message) -> Element<'static, Message> {
-    mouse_area(menu_button(icon, label, message))
-        .on_enter(Message::FileContextMenuExpansionChanged(
-            FileContextMenuExpansion::None,
-        ))
-        .into()
 }
 
 fn sidebar_bookmark_context_menu_panel<'a>(

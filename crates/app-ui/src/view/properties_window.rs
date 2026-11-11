@@ -7,9 +7,7 @@ use file_core::FileKind;
 use iced::widget::{button, column, container, row, Button, Column};
 use iced::{Alignment, Element, Length};
 
-use crate::appearance::{
-    app_content_style, context_menu_style, preview_panel_style, selected_sidebar_item_style,
-};
+use crate::appearance::{app_content_style, preview_panel_style, selected_sidebar_item_style};
 use crate::formatting::{format_file_size, format_system_time, item_count_label};
 use crate::model::{
     FilePropertiesAggregateSnapshot, FilePropertiesCategory, FilePropertiesDirectoryContents,
@@ -26,6 +24,7 @@ use super::auxiliary_window_layout::{
     auxiliary_detail_scroller, auxiliary_sidebar_button, auxiliary_sidebar_list,
     AUXILIARY_SIDEBAR_WIDTH,
 };
+use super::settings_group::settings_card_style;
 use super::{auxiliary_window_message, themed_icon, IconTone};
 use bennu_preview::window_shell::{single_window, split_window, HeaderBar, SplitPane, WindowShell};
 use bennu_theme::controls::switch;
@@ -510,7 +509,7 @@ fn permission_privilege_badge(
     )
     .padding([6, 10])
     .width(Length::Fixed(PERMISSION_PRIVILEGE_WIDTH))
-    .style(context_menu_style)
+    .style(settings_card_style)
     .into()
 }
 

@@ -13,12 +13,11 @@ use crate::formatting::{format_file_size, format_middle_ellipsized_text};
 use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::icons::IconSymbol;
-use bennu_theme::metrics::CARD_RADIUS;
 use bennu_theme::typography::{BOLD, CAPTION_SIZE};
 use bennu_theme::ui_colors;
 
 use super::local_send_tiles::centered_muted_text;
-use super::settings_group::{card_row_button_style, muted_setting_text};
+use super::settings_group::{card_row_button_style, muted_setting_text, settings_card_style};
 use super::{themed_icon, IconTone};
 
 const NAME_MAX_CHARS: usize = 34;
@@ -83,7 +82,7 @@ fn day_group<'a>(
         container(rows)
             .padding(4)
             .width(Length::Fill)
-            .style(day_card_style),
+            .style(settings_card_style),
     ]
     .spacing(6)
     .into()
@@ -204,17 +203,6 @@ fn day_label(day: NaiveDate, today: NaiveDate) -> String {
         day.format("%m-%d").to_string()
     } else {
         day.format("%Y-%m-%d").to_string()
-    }
-}
-
-fn day_card_style(theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(ui_colors(theme).surface_container)),
-        border: Border {
-            radius: CARD_RADIUS.into(),
-            ..Border::default()
-        },
-        ..container::Style::default()
     }
 }
 

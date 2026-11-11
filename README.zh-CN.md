@@ -124,7 +124,6 @@ bennu --version
 
 - [Matugen 配色](docs/matugen.md)：从壁纸生成配色，所有窗口热更新
 - [Niri 悬浮窗口](docs/niri.md)：让设置、属性、预览窗口悬浮打开
-- [自定义配色](docs/custom-color-scheme.md)：用 JSON 定义浅色与深色配色
 
 ## 从源码构建
 

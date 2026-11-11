@@ -1,6 +1,6 @@
 # Niri 悬浮窗口配置
 
-Bennu 的设置、属性和预览都是独立窗口。在 [Niri](https://github.com/YaLTeu/niri) 下，这些窗口默认可能被平铺进当前列；加一条 `window-rule` 可以让它们像对话框一样悬浮打开。
+Bennu 的设置、属性、预览、LocalSend 和发送到手机都是独立窗口。在 [Niri](https://github.com/YaLTeu/niri) 下，这些窗口默认可能被平铺进当前列；加一条 `window-rule` 可以让它们像对话框一样悬浮打开。
 
 ## 窗口 app-id
 
@@ -10,7 +10,8 @@ Bennu 的设置、属性和预览都是独立窗口。在 [Niri](https://github.
 | 设置 | `bennu-settings` |
 | 属性 | `bennu-properties` |
 | 预览 | `bennu-preview` |
-| 传输 | `bennu-transfer` |
+| 发送到手机 | `bennu-transfer` |
+| LocalSend | `bennu-localsend` |
 | 文件选择器（portal 进程） | `bennu-filechooser` |
 
 ## 添加 window-rule
@@ -23,6 +24,7 @@ window-rule {
     match app-id="bennu-properties"
     match app-id="bennu-preview"
     match app-id="bennu-transfer"
+    match app-id="bennu-localsend"
     match app-id="bennu-filechooser"
     open-floating true
 }

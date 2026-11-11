@@ -124,7 +124,6 @@ More tutorials live in `docs/`:
 
 - [Matugen color scheme](docs/matugen.md): generate a palette from your wallpaper, hot-reloaded across all windows
 - [Niri floating windows](docs/niri.md): open settings, properties, and preview windows as floating windows
-- [Custom color schemes](docs/custom-color-scheme.md): define light and dark palettes in JSON
 
 ## Building from source
 

@@ -641,26 +641,27 @@ fn a_send_with_failed_files_shows_them_on_demand_and_logs_them_once() {
 #[test]
 fn each_window_keeps_its_own_checked_devices_until_it_closes() {
     let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-    let check = |owner, fingerprint: &str, checked| TransferMessage::DeviceChecked {
+    // 按住 Ctrl 点设备是勾上 / 取消，只记在点的那个窗口里。
+    browser.keyboard_modifiers = iced::keyboard::Modifiers::CTRL;
+    let ctrl_click = |owner, fingerprint: &str| TransferMessage::DevicePressed {
         owner,
-        fingerprint: fingerprint.to_owned(),
-        checked,
+        device: sample_device(fingerprint),
     };
     send_settings(
         &mut browser,
-        check(DeviceListOwner::LocalSendWindow, "phone", true),
+        ctrl_click(DeviceListOwner::LocalSendWindow, "phone"),
     );
     send_settings(
         &mut browser,
-        check(DeviceListOwner::LocalSendWindow, "tablet", true),
+        ctrl_click(DeviceListOwner::LocalSendWindow, "tablet"),
     );
     send_settings(
         &mut browser,
-        check(DeviceListOwner::LocalSendWindow, "tablet", false),
+        ctrl_click(DeviceListOwner::LocalSendWindow, "tablet"),
     );
     send_settings(
         &mut browser,
-        check(DeviceListOwner::TransferWindow, "laptop", true),
+        ctrl_click(DeviceListOwner::TransferWindow, "laptop"),
     );
 
     let checked = |browser: &FileBrowser, owner| {
@@ -690,4 +691,23 @@ fn each_window_keeps_its_own_checked_devices_until_it_closes() {
         TransferMessage::CheckedCleared(DeviceListOwner::TransferWindow),
     );
     assert!(checked(&browser, DeviceListOwner::TransferWindow).is_empty());
+}
+
+#[test]
+fn each_window_sends_its_own_things() {
+    let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+    // 发送到手机：打开窗口时那批文件；没有会话就没东西可发。
+    assert!(!browser.has_outgoing(DeviceListOwner::TransferWindow));
+    browser.transfer_session = Some(qr_session());
+    assert!(browser.has_outgoing(DeviceListOwner::TransferWindow));
+    assert_eq!(
+        browser.outgoing_of(DeviceListOwner::TransferWindow),
+        super::Outgoing::Files(vec![std::path::PathBuf::from("/tmp/one.txt")])
+    );
+    // LocalSend 窗口看自己的待发卡片，和发送到手机那批无关。
+    assert!(!browser.has_outgoing(DeviceListOwner::LocalSendWindow));
+    assert_eq!(
+        browser.outgoing_of(DeviceListOwner::LocalSendWindow),
+        super::Outgoing::Files(Vec::new())
+    );
 }

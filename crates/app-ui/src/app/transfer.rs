@@ -41,7 +41,12 @@ pub(crate) enum TransferMessage {
     QrSessionFailed(String),
     QrEvent(QrEvent),
     // ---- 发送：LocalSend 直推（R5） ----
-    SendToDevicePressed(DeviceInfo),
+    /// 某个窗口里点了一台设备：按住 Ctrl 是在这个窗口里勾上 / 取消，否则把这个窗口要发的
+    /// 东西直接发给它。
+    DevicePressed {
+        owner: DeviceListOwner,
+        device: DeviceInfo,
+    },
     /// 某次发送（任务 id）的进度与结果。
     DirectSendProgress {
         task: u64,
@@ -63,11 +68,6 @@ pub(crate) enum TransferMessage {
         files: Option<std::sync::Arc<local_send::PreparedFiles>>,
     },
     DirectSendDetailsToggled(String),
-    DeviceChecked {
-        owner: DeviceListOwner,
-        fingerprint: String,
-        checked: bool,
-    },
     SendToCheckedPressed(DeviceListOwner),
     CheckedCleared(DeviceListOwner),
     /// 设备行里的 PIN 输入（按证书指纹找这台设备的这次直推）。
@@ -133,8 +133,6 @@ pub(crate) enum TransferMessage {
     StagedTabSelected(StagedTab),
     StagedTextEdited(iced::widget::text_editor::Action),
     StagedTextCleared,
-    /// LocalSend 窗口点了一台设备：按住 Ctrl 是多选，否则把要发的东西直接发给它。
-    LocalSendDevicePressed(DeviceInfo),
     // ---- 收藏设备 ----
     /// 附近设备行的 ☆。
     FavoritePressed(DeviceInfo),
@@ -303,13 +301,7 @@ impl FileBrowser {
                 self.accept_qr_event(event);
                 iced::Task::none()
             }
-            TransferMessage::SendToDevicePressed(device) => {
-                let Some(session) = &self.transfer_session else {
-                    return iced::Task::none();
-                };
-                let paths = session.paths.clone();
-                self.begin_direct_sends(vec![device], Outgoing::Files(paths))
-            }
+            TransferMessage::DevicePressed { owner, device } => self.press_device(owner, device),
             TransferMessage::DirectSendProgress { task, progress } => {
                 self.accept_direct_send_progress(task, progress);
                 iced::Task::none()
@@ -328,14 +320,6 @@ impl FileBrowser {
             }
             TransferMessage::DirectSendDetailsToggled(fingerprint) => {
                 self.toggle_direct_send_details(&fingerprint);
-                iced::Task::none()
-            }
-            TransferMessage::DeviceChecked {
-                owner,
-                fingerprint,
-                checked,
-            } => {
-                self.check_device(owner, fingerprint, checked);
                 iced::Task::none()
             }
             TransferMessage::SendToCheckedPressed(owner) => self.send_to_checked_devices(owner),
@@ -470,7 +454,6 @@ impl FileBrowser {
                 self.local_send_text = iced::widget::text_editor::Content::new();
                 iced::Task::none()
             }
-            TransferMessage::LocalSendDevicePressed(device) => self.press_local_send_device(device),
             TransferMessage::FavoritePressed(device) => self.favor_device(&device, None),
             TransferMessage::UnfavoritePressed(fingerprint) => self.unfavor_device(&fingerprint),
             TransferMessage::FavoriteAliasInputChanged { fingerprint, value } => {

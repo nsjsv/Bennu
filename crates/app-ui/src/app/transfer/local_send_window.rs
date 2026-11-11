@@ -9,11 +9,10 @@ use std::path::{Path, PathBuf};
 
 use iced::widget::text_editor;
 use iced::{window, Size, Task};
-use local_send::DeviceInfo;
 use tokio_util::sync::CancellationToken;
 
 use super::super::FileBrowser;
-use super::{DeviceListOwner, Outgoing, TransferMessage};
+use super::{Outgoing, TransferMessage};
 use crate::directory_summary::{
     read_directory_recursive_total_size, DirectorySummaryError, RecursiveTotalSize,
 };
@@ -171,25 +170,11 @@ impl FileBrowser {
         }
     }
 
-    /// 有没有东西可发：设备行的"发送"与勾选顶栏据此可不可点。
-    pub(crate) fn local_send_has_outgoing(&self) -> bool {
+    pub(super) fn local_send_has_outgoing(&self) -> bool {
         match self.local_send_tab {
             StagedTab::Files => !self.local_send_staged.is_empty(),
             StagedTab::Text => !self.local_send_text.text().trim().is_empty(),
         }
-    }
-
-    /// 点设备就发（没东西可发、正在发给它时什么都不做）；按住 Ctrl 点是勾上 / 取消，
-    /// 勾好几台再一起发。
-    pub(super) fn press_local_send_device(&mut self, device: DeviceInfo) -> Task<Message> {
-        if self.keyboard_modifiers.control() {
-            let owner = DeviceListOwner::LocalSendWindow;
-            let checked = !self.checked_devices.of(owner).contains(&device.fingerprint);
-            self.check_device(owner, device.fingerprint, checked);
-            return Task::none();
-        }
-        let outgoing = self.local_send_outgoing();
-        self.begin_direct_sends(vec![device], outgoing)
     }
 
     pub(super) fn edit_staged_text(&mut self, action: text_editor::Action) {

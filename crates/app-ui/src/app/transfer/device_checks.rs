@@ -1,8 +1,9 @@
-//! 设备行前的勾选框：勾了就能"给选中的 N 台发送"。
+//! 两个窗口（LocalSend、发送到手机）的设备格子：点一下发这个窗口要发的东西，按住 Ctrl
+//! 点是勾上，勾了就能"给选中的 N 台发送"。
 //!
-//! 两个窗口（LocalSend、发送到手机）各勾各的，关哪个窗口清哪份：两边发的不是同一批
-//! 文件（待发列表 / 打开窗口时那批）。按证书指纹记，设备暂时不在线也留着勾，回来
-//! 照样算；N 只算此刻在线的。
+//! 两个窗口各发各的、各勾各的，关哪个窗口清哪份：两边发的不是同一批（待发列表或文字 /
+//! 打开窗口时那批文件）。勾选按证书指纹记，设备暂时不在线也留着勾，回来照样算；N 只算
+//! 此刻在线的。
 
 use std::collections::HashSet;
 
@@ -45,17 +46,45 @@ impl CheckedDevices {
 }
 
 impl FileBrowser {
-    pub(super) fn check_device(
+    /// 点设备就发（没东西可发、正在发给它时什么都不做）；按住 Ctrl 点是勾上 / 取消，
+    /// 勾好几台再一起发。
+    pub(super) fn press_device(
         &mut self,
         owner: DeviceListOwner,
-        fingerprint: String,
-        checked: bool,
-    ) {
-        let set = self.checked_devices.of_mut(owner);
-        if checked {
-            set.insert(fingerprint);
-        } else {
-            set.remove(&fingerprint);
+        device: DeviceInfo,
+    ) -> iced::Task<Message> {
+        if self.keyboard_modifiers.control() {
+            let set = self.checked_devices.of_mut(owner);
+            if !set.remove(&device.fingerprint) {
+                set.insert(device.fingerprint);
+            }
+            return iced::Task::none();
+        }
+        let outgoing = self.outgoing_of(owner);
+        self.begin_direct_sends(vec![device], outgoing)
+    }
+
+    /// 每个窗口发什么只在这里分：LocalSend 看待发卡片，发送到手机是打开窗口时那批文件。
+    pub(super) fn outgoing_of(&self, owner: DeviceListOwner) -> Outgoing {
+        match owner {
+            DeviceListOwner::LocalSendWindow => self.local_send_outgoing(),
+            DeviceListOwner::TransferWindow => Outgoing::Files(
+                self.transfer_session
+                    .as_ref()
+                    .map(|session| session.paths.clone())
+                    .unwrap_or_default(),
+            ),
+        }
+    }
+
+    /// 有没有东西可发：设备区的提示和勾选顶栏的“发送”据此变。
+    pub(crate) fn has_outgoing(&self, owner: DeviceListOwner) -> bool {
+        match owner {
+            DeviceListOwner::LocalSendWindow => self.local_send_has_outgoing(),
+            DeviceListOwner::TransferWindow => self
+                .transfer_session
+                .as_ref()
+                .is_some_and(|session| !session.paths.is_empty()),
         }
     }
 
@@ -78,15 +107,7 @@ impl FileBrowser {
             .into_iter()
             .cloned()
             .collect();
-        let outgoing = match owner {
-            DeviceListOwner::LocalSendWindow => self.local_send_outgoing(),
-            DeviceListOwner::TransferWindow => Outgoing::Files(
-                self.transfer_session
-                    .as_ref()
-                    .map(|session| session.paths.clone())
-                    .unwrap_or_default(),
-            ),
-        };
+        let outgoing = self.outgoing_of(owner);
         self.begin_direct_sends(devices, outgoing)
     }
 }

@@ -2,7 +2,7 @@
 //! 底下是本机能不能被找到。传输记录、从手机接收在顶栏两边。
 
 use iced::widget::{button, column, container, row, scrollable, tooltip, Column, Space};
-use iced::{Alignment, Background, Border, Element, Length, Theme};
+use iced::{Alignment, Background, Element, Length, Theme};
 
 use crate::app::transfer::{
     receiver_failure_message, ChooserTarget, DeviceListOwner, LinkReceiveMessage, LocalSendPage,
@@ -20,11 +20,10 @@ use bennu_theme::controls::{
     tooltip_bubble_style,
 };
 use bennu_theme::icons::IconSymbol;
-use bennu_theme::metrics::CARD_RADIUS;
 use bennu_theme::typography::{BOLD, CAPTION_SIZE};
 use bennu_theme::ui_colors;
 
-use super::settings_group::muted_setting_text;
+use super::settings_group::{muted_setting_text, settings_card_style};
 use super::{
     link_receive, local_send_address_form, local_send_devices, local_send_tiles, transfer_history,
 };
@@ -320,39 +319,13 @@ fn staged_total_text(staged: &[StagedItem]) -> String {
     total.display_text()
 }
 
-/// 设备：标题 + 刷新，勾了几台时的“一起发”，设备格子，按 IP 添加的表单，正在发的那几台。
+/// 设备：标题、提示、勾选条，设备格子（最后一格按 IP 添加），表单，正在发的那几台。
 fn devices_section(browser: &FileBrowser) -> Element<'_, Message> {
-    let refresh = icon_button(themed_icon(
-        IconSymbol::Refresh,
-        IconTone::Normal,
-        MENU_ICON_SIZE,
-    ))
-    .on_press(Message::Transfer(TransferMessage::RefreshDevicesRequested));
-    let mut section = column![row![
-        readable_text(tr!("Devices")).font(BOLD).width(Length::Fill),
-        refresh,
-    ]
-    .align_y(Alignment::Center)]
-    .spacing(10)
-    .width(Length::Fill);
-
-    let any_device =
-        !browser.favorite_rows().is_empty() || !browser.unclaimed_nearby_devices().is_empty();
-    section = section.push(muted_setting_text(if !any_device {
-        tr!("Looking for nearby devices. The other device needs LocalSend open on the same network.")
-    } else if browser.local_send_has_outgoing() {
-        tr!("Click a device to send. Hold Ctrl to pick several.")
-    } else {
-        tr!("Choose files or type some text, then click a device.")
-    }));
-    if let Some(bar) = local_send_devices::checked_bar(
-        browser,
-        DeviceListOwner::LocalSendWindow,
-        browser.local_send_has_outgoing(),
-    ) {
-        section = section.push(bar);
-    }
-    section = section.push(local_send_tiles::device_grid(browser));
+    let owner = DeviceListOwner::LocalSendWindow;
+    let mut tiles = local_send_tiles::device_tiles(browser, owner);
+    tiles.push(local_send_tiles::add_by_ip_tile());
+    let mut section = local_send_devices::devices_section_head(browser, owner)
+        .push(local_send_tiles::tile_grid(tiles));
     if let Some(form) = &browser.favorite_address_form {
         section = section.push(panel(local_send_address_form::address_form(form)));
     }
@@ -413,24 +386,13 @@ pub(super) fn error_text(label: String) -> Element<'static, Message> {
         .into()
 }
 
-/// 一块内容：卡片底色，没有边框。
-fn panel<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+/// 一块内容：卡片底色，没有边框。“发送到手机”窗口也用它。
+pub(super) fn panel<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     container(content.into())
         .padding(PANEL_PADDING)
         .width(Length::Fill)
-        .style(panel_style)
+        .style(settings_card_style)
         .into()
-}
-
-fn panel_style(theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(ui_colors(theme).surface_container)),
-        border: Border {
-            radius: CARD_RADIUS.into(),
-            ..Border::default()
-        },
-        ..container::Style::default()
-    }
 }
 
 /// 底栏比内容暗一层（和侧栏同一层），不用分隔线也和上面分得开。

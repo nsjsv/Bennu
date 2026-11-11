@@ -1,6 +1,7 @@
-//! LocalSend 窗口的设备格子：大圆头像（设备类型图标）+ 名字 + 一行状态，点一下就把要发的
-//! 东西发过去。发送中头像外面一圈进度；收藏的排前面，右上角是实心星；按住 Ctrl 点是多选，
-//! 勾上的头像带强调色描边。要输 PIN、能取消、失败要看详情的，在格子下面的“进行中”里处理。
+//! 设备格子（LocalSend、发送到手机两个窗口共用）：大圆头像（设备类型图标）+ 名字 + 一行
+//! 状态，点一下就把这个窗口要发的东西发过去。发送中头像外面一圈进度；收藏的排前面，右上角
+//! 是实心星；按住 Ctrl 点是多选，勾上的头像带强调色描边。要输 PIN、能取消、失败要看详情的，
+//! 在格子下面的“进行中”里处理。
 
 use iced::widget::{button, column, container, tooltip, Row, Stack};
 use iced::{alignment, Alignment, Background, Border, Color, Element, Length, Theme};
@@ -35,9 +36,11 @@ const STAR_SIZE: f32 = 14.0;
 const NAME_MAX_CHARS: usize = 14;
 const STATUS_MAX_CHARS: usize = 18;
 
-/// 收藏（在线的、不在线的）在前，其它附近设备在后，最后一格“按 IP 添加”。窗口多宽就
-/// 一行排几个。
-pub(super) fn device_grid(browser: &FileBrowser) -> Element<'_, Message> {
+/// 收藏（在线的、不在线的）在前，其它附近设备在后。
+pub(super) fn device_tiles(
+    browser: &FileBrowser,
+    owner: DeviceListOwner,
+) -> Vec<Element<'_, Message>> {
     let mut tiles: Vec<Element<'_, Message>> = Vec::new();
     for FavoriteRow { favorite, online } in browser.favorite_rows() {
         let unfavor = star_button(
@@ -48,19 +51,24 @@ pub(super) fn device_grid(browser: &FileBrowser) -> Element<'_, Message> {
         );
         tiles.push(match online {
             // 名字用收藏时起的（或对方自报的）别名。
-            Some(device) => online_tile(browser, device, favorite.alias.clone(), unfavor),
+            Some(device) => online_tile(browser, owner, device, favorite.alias.clone(), unfavor),
             None => offline_tile(favorite.alias.clone(), unfavor),
         });
     }
     for device in browser.unclaimed_nearby_devices() {
         tiles.push(online_tile(
             browser,
+            owner,
             device,
             device.alias.clone(),
             favor_star(device),
         ));
     }
-    tiles.push(add_by_ip_tile());
+    tiles
+}
+
+/// 窗口多宽就一行排几个。
+pub(super) fn tile_grid(tiles: Vec<Element<'_, Message>>) -> Element<'_, Message> {
     Row::with_children(tiles)
         .spacing(TILE_SPACING)
         .wrap()
@@ -120,6 +128,7 @@ fn needs_attention(phase: &DirectSendPhase) -> bool {
 
 fn online_tile<'a>(
     browser: &'a FileBrowser,
+    owner: DeviceListOwner,
     device: &'a DeviceInfo,
     name: String,
     star: Element<'a, Message>,
@@ -127,7 +136,7 @@ fn online_tile<'a>(
     let state = browser.direct_send_to(device);
     let checked = browser
         .checked_devices
-        .of(DeviceListOwner::LocalSendWindow)
+        .of(owner)
         .contains(&device.fingerprint);
     let avatar = avatar(
         device_icon(device),
@@ -142,9 +151,10 @@ fn online_tile<'a>(
         avatar,
         name,
         status,
-        Some(Message::Transfer(TransferMessage::LocalSendDevicePressed(
-            device.clone(),
-        ))),
+        Some(Message::Transfer(TransferMessage::DevicePressed {
+            owner,
+            device: device.clone(),
+        })),
         Some(star),
     )
 }
@@ -160,7 +170,8 @@ fn offline_tile(name: String, star: Element<'static, Message>) -> Element<'stati
     )
 }
 
-fn add_by_ip_tile() -> Element<'static, Message> {
+/// 按 IP 添加只在 LocalSend 窗口里：表单跟着那个窗口开关。
+pub(super) fn add_by_ip_tile() -> Element<'static, Message> {
     tile(
         avatar(IconSymbol::Plus, AvatarLook::Offline, None),
         tr!("Add by IP"),

@@ -49,8 +49,6 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Sent %1", "已发送 %1"),
     ("Sent %1 (%2/s)", "已发送 %1（%2/秒）"),
     // 直接发送到附近设备
-    ("No nearby devices found", "未发现附近设备"),
-    ("Nearby LocalSend devices", "附近的 LocalSend 设备"),
     ("Send", "发送"),
     (
         "Files inside an archive cannot be sent directly. Extract them first.",
@@ -81,9 +79,6 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Sending %1/%2 · %3%", "正在发送 %1/%2 · %3%"),
     ("Sending...", "正在发送…"),
     // 收藏设备
-    ("Offline · last seen at %1", "不在线 · 上次 %1"),
-    ("Offline · not found yet", "不在线 · 还没找到过地址"),
-    ("No other devices found", "没有发现别的设备"),
     (
         "This device has encryption turned off, so it cannot be a favorite.",
         "对方没开加密，不能收藏。",

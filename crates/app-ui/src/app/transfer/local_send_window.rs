@@ -17,7 +17,8 @@ use super::{Outgoing, TransferMessage};
 use crate::directory_summary::{
     read_directory_recursive_total_size, DirectorySummaryError, RecursiveTotalSize,
 };
-use crate::model::{Message, WINDOW_TOP_BAR_HEIGHT};
+use crate::model::Message;
+use bennu_preview::window_shell::HEADER_BAR_HEIGHT;
 
 const LOCAL_SEND_WINDOW_APP_ID: &str = "bennu-localsend";
 const DEFAULT_WIDTH: f32 = 440.0;
@@ -190,8 +191,8 @@ impl FileBrowser {
 
 fn local_send_window_settings() -> window::Settings {
     let mut settings = window::Settings {
-        size: Size::new(DEFAULT_WIDTH, DEFAULT_HEIGHT + WINDOW_TOP_BAR_HEIGHT),
-        min_size: Some(Size::new(MIN_WIDTH, MIN_HEIGHT + WINDOW_TOP_BAR_HEIGHT)),
+        size: Size::new(DEFAULT_WIDTH, DEFAULT_HEIGHT + HEADER_BAR_HEIGHT),
+        min_size: Some(Size::new(MIN_WIDTH, MIN_HEIGHT + HEADER_BAR_HEIGHT)),
         decorations: false,
         // 关闭请求交给状态机：关窗要清待发列表、停掉还在测的大小。
         exit_on_close_request: false,

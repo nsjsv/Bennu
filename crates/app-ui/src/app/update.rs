@@ -432,17 +432,12 @@ impl FileBrowser {
             Message::CursorLeft { window } => {
                 if self.preview_engine.preview_window == Some(window) {
                     let preview_engine = &mut self.preview_engine;
-                    preview_engine.cancel_preview_window_initial_chrome_hide();
+                    preview_engine.cancel_preview_window_initial_controls_hide();
                     preview_engine.preview_window_pointer_y = None;
                     // 指针带着按下的左键离开预览窗口时，窗口外收不到
                     // release，就地结束平移，避免回进窗口后误跳偏移。
                     preview_engine.preview_image_viewport.panning = false;
                     preview_engine.preview_window_bottom_controls.start_hide();
-                    if !preview_engine.preview_window_drag_active
-                        && !preview_engine.preview_window_uses_window_chrome()
-                    {
-                        preview_engine.preview_window_chrome.start_hide();
-                    }
                     return Task::none();
                 }
                 if window == self.main_window {
@@ -525,13 +520,11 @@ impl FileBrowser {
             Message::ShortcutCaptureStarted(binding_id) => self.start_shortcut_capture(binding_id),
             Message::ShortcutCaptureCanceled => self.cancel_shortcut_capture(),
             Message::ShortcutBindingReset(binding_id) => self.reset_shortcut_binding(binding_id),
-            Message::WindowPointerReleased { window, status } => match status {
-                iced::event::Status::Captured => self.finish_tab_drag_from_captured_release(window),
-                iced::event::Status::Ignored => self.finish_pointer_drag_interactions(window),
+            Message::WindowPointerReleased(status) => match status {
+                iced::event::Status::Captured => self.finish_tab_drag_from_captured_release(),
+                iced::event::Status::Ignored => self.finish_pointer_drag_interactions(),
             },
-            Message::DragSelectionFinished => {
-                self.finish_pointer_drag_interactions(self.main_window)
-            }
+            Message::DragSelectionFinished => self.finish_pointer_drag_interactions(),
             Message::GlobalErrorNotificationElapsed(generation) => {
                 self.expire_global_error_notification(generation);
                 Task::none()
@@ -812,7 +805,6 @@ impl FileBrowser {
             Message::ContextMenuSettingsResetConfirmed(page) => {
                 self.confirm_context_menu_settings_reset(page)
             }
-            Message::WindowChromeLayoutSelected(layout) => self.select_window_chrome_layout(layout),
             Message::WindowControlVisibilityToggled(kind) => {
                 self.toggle_window_control_visibility(kind)
             }
@@ -1031,9 +1023,7 @@ impl FileBrowser {
                 self.close_tab(tab_id)
             }
             Message::TabDragEntered(pane_id, tab_id) => self.reorder_dragged_tab(pane_id, tab_id),
-            Message::TabDragFinished => {
-                self.finish_tab_drag_from_captured_release(self.main_window)
-            }
+            Message::TabDragFinished => self.finish_tab_drag_from_captured_release(),
             Message::TabFileDropEntered(id, tab) => self.accept_tab_file_drop_entered(id, tab),
             Message::TabFileDropExited(id, tab) => self.accept_tab_file_drop_exited(id, tab),
             Message::TabFileDropReleased(id, tab) => self.accept_tab_file_drop_released(id, tab),

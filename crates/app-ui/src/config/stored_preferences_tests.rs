@@ -98,7 +98,6 @@ fn user_preferences_roundtrip_replace() {
         list_sort_field: "size".to_owned(),
         list_sort_direction: "descending".to_owned(),
         list_directory_size_display_mode: "recursive_total_size".to_owned(),
-        window_chrome_layout: "separate_title_bar".to_owned(),
         window_controls: vec![
             StoredWindowControlPlacement {
                 kind: "close".to_owned(),
@@ -159,6 +158,24 @@ fn user_preferences_roundtrip_replace() {
     assert_eq!(stored_preferences(&store), Some(second));
 }
 
+/// 「融合导航栏 / 独立标题栏」设置已删除（所有窗口都用嵌入式顶栏）：旧库里的键
+/// 照常能读、不报错，下次保存时消失。
+#[test]
+fn retired_window_chrome_layout_key_is_ignored_and_dropped_on_save() {
+    let mut payload = serde_json::to_value(StoredUserPreferences::default()).unwrap();
+    payload.as_object_mut().unwrap().insert(
+        "window_chrome_layout".to_owned(),
+        serde_json::Value::from("separate_title_bar"),
+    );
+
+    let parsed: StoredUserPreferences =
+        serde_json::from_value(payload).expect("old document with the retired key parses");
+
+    assert_eq!(parsed, StoredUserPreferences::default());
+    let saved = serde_json::to_string(&parsed).unwrap();
+    assert!(!saved.contains("window_chrome_layout"));
+}
+
 #[test]
 fn legacy_user_preferences_without_optional_fields_get_defaults() {
     let (store, _directory) = test_store();
@@ -171,7 +188,6 @@ fn legacy_user_preferences_without_optional_fields_get_defaults() {
     object.remove("columns_view_density");
     object.remove("list_view_density");
     object.remove("icons_view_density");
-    object.remove("window_chrome_layout");
     object.remove("window_controls");
     object.remove("search_history");
     object.remove("theme_mode");
@@ -193,7 +209,6 @@ fn legacy_user_preferences_without_optional_fields_get_defaults() {
     assert_eq!(preferences.columns_view_density, None);
     assert_eq!(preferences.list_view_density, None);
     assert_eq!(preferences.icons_view_density, None);
-    assert_eq!(preferences.window_chrome_layout, "integrated_navigation");
     assert_eq!(preferences.visible_column_count, 3);
     assert_eq!(preferences.window_controls.len(), 3);
     assert_eq!(preferences.window_controls[0].kind, "minimize");
@@ -286,7 +301,7 @@ const LEGACY_DOCUMENT: &str = r#"{
 /// 出现语义外的裁剪差异。布局变更必须经迁移评审，不许静默改。
 #[test]
 fn stored_user_preferences_default_json_layout_is_frozen() {
-    const FROZEN_DEFAULT_JSON: &str = "{\"network_list_thumbnail_downloads_enabled\":false,\"max_preview_file_bytes\":null,\"preview_text_size_bytes\":null,\"preview_image_size_bytes\":null,\"preview_video_size_bytes\":null,\"preview_audio_size_bytes\":null,\"preview_archive_size_bytes\":null,\"preview_document_size_bytes\":null,\"preview_sqlite_size_bytes\":null,\"preview_extension_rules\":null,\"preview_directory_expand_levels\":null,\"show_hidden_files\":false,\"language_setting\":\"system\",\"sidebar_width\":180.0,\"right_preview_panel_open\":false,\"right_preview_panel_width\":null,\"right_preview_preview_ratio\":null,\"sidebar_favorites\":null,\"network_connections\":[],\"terminal_emulator\":\"automatic\",\"terminal_shell\":null,\"file_operation_verification\":\"basic_metadata\",\"browser_view_mode\":\"columns\",\"columns_view_density\":2,\"list_view_density\":2,\"icons_view_density\":2,\"visible_column_count\":3,\"startup_location\":\"home\",\"startup_custom_directory\":{\"encoding\":\"unix_bytes\",\"bytes\":[]},\"save_view_state\":false,\"shortcuts\":[],\"list_view_columns\":[{\"kind\":\"name\",\"width\":320.0,\"visible\":true},{\"kind\":\"modified\",\"width\":168.0,\"visible\":true},{\"kind\":\"size\",\"width\":96.0,\"visible\":true},{\"kind\":\"kind\",\"width\":96.0,\"visible\":true},{\"kind\":\"owner\",\"width\":120.0,\"visible\":false},{\"kind\":\"group\",\"width\":120.0,\"visible\":false},{\"kind\":\"permissions\",\"width\":128.0,\"visible\":false},{\"kind\":\"accessed\",\"width\":168.0,\"visible\":false},{\"kind\":\"created\",\"width\":168.0,\"visible\":false}],\"list_sort_field\":\"name\",\"list_sort_direction\":\"ascending\",\"list_directory_size_display_mode\":\"item_count\",\"file_grouping\":null,\"window_chrome_layout\":\"integrated_navigation\",\"window_controls\":[{\"kind\":\"minimize\",\"side\":\"right\",\"visible\":true},{\"kind\":\"maximize_restore\",\"side\":\"right\",\"visible\":true},{\"kind\":\"close\",\"side\":\"right\",\"visible\":true}],\"search_history\":[],\"last_search_scope\":null,\"theme_mode\":\"automatic\",\"color_scheme\":\"default\",\"custom_color_scheme\":null,\"launch_window_policy\":\"open_new_window\",\"column_width_adjust_mode\":\"per_column\",\"context_menu_layouts\":null,\"transfer_download_dir\":null,\"transfer_device_alias\":null,\"transfer_trusted_devices\":[],\"transfer_receive_enabled\":true,\"transfer_port\":53317,\"transfer_accept_mode\":\"accept_favorites\",\"transfer_receive_pin\":null}";
+    const FROZEN_DEFAULT_JSON: &str = "{\"network_list_thumbnail_downloads_enabled\":false,\"max_preview_file_bytes\":null,\"preview_text_size_bytes\":null,\"preview_image_size_bytes\":null,\"preview_video_size_bytes\":null,\"preview_audio_size_bytes\":null,\"preview_archive_size_bytes\":null,\"preview_document_size_bytes\":null,\"preview_sqlite_size_bytes\":null,\"preview_extension_rules\":null,\"preview_directory_expand_levels\":null,\"show_hidden_files\":false,\"language_setting\":\"system\",\"sidebar_width\":180.0,\"right_preview_panel_open\":false,\"right_preview_panel_width\":null,\"right_preview_preview_ratio\":null,\"sidebar_favorites\":null,\"network_connections\":[],\"terminal_emulator\":\"automatic\",\"terminal_shell\":null,\"file_operation_verification\":\"basic_metadata\",\"browser_view_mode\":\"columns\",\"columns_view_density\":2,\"list_view_density\":2,\"icons_view_density\":2,\"visible_column_count\":3,\"startup_location\":\"home\",\"startup_custom_directory\":{\"encoding\":\"unix_bytes\",\"bytes\":[]},\"save_view_state\":false,\"shortcuts\":[],\"list_view_columns\":[{\"kind\":\"name\",\"width\":320.0,\"visible\":true},{\"kind\":\"modified\",\"width\":168.0,\"visible\":true},{\"kind\":\"size\",\"width\":96.0,\"visible\":true},{\"kind\":\"kind\",\"width\":96.0,\"visible\":true},{\"kind\":\"owner\",\"width\":120.0,\"visible\":false},{\"kind\":\"group\",\"width\":120.0,\"visible\":false},{\"kind\":\"permissions\",\"width\":128.0,\"visible\":false},{\"kind\":\"accessed\",\"width\":168.0,\"visible\":false},{\"kind\":\"created\",\"width\":168.0,\"visible\":false}],\"list_sort_field\":\"name\",\"list_sort_direction\":\"ascending\",\"list_directory_size_display_mode\":\"item_count\",\"file_grouping\":null,\"window_controls\":[{\"kind\":\"minimize\",\"side\":\"right\",\"visible\":true},{\"kind\":\"maximize_restore\",\"side\":\"right\",\"visible\":true},{\"kind\":\"close\",\"side\":\"right\",\"visible\":true}],\"search_history\":[],\"last_search_scope\":null,\"theme_mode\":\"automatic\",\"color_scheme\":\"default\",\"custom_color_scheme\":null,\"launch_window_policy\":\"open_new_window\",\"column_width_adjust_mode\":\"per_column\",\"context_menu_layouts\":null,\"transfer_download_dir\":null,\"transfer_device_alias\":null,\"transfer_trusted_devices\":[],\"transfer_receive_enabled\":true,\"transfer_port\":53317,\"transfer_accept_mode\":\"accept_favorites\",\"transfer_receive_pin\":null}";
     let serialized = serde_json::to_string(&StoredUserPreferences::default())
         .expect("serialize stored preferences");
     assert_eq!(serialized, FROZEN_DEFAULT_JSON);

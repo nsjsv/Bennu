@@ -588,19 +588,7 @@ mod tests {
     }
 
     fn daemon_with_open_file_session() -> (PickerDaemon, window::Id) {
-        // 直接构造结构体：PickerDaemon::new() 的主题解析链含 dark-light
-        // 检测（zbus 需要 reactor），测试线程里不可用；路由裁决只读
-        // windows/preview 字段，主题无关。
-        let mut daemon = PickerDaemon {
-            windows: std::collections::HashMap::new(),
-            theme: bennu_theme::fallback_theme(bennu_theme::AppearanceMode::Light),
-            keyboard_modifiers: keyboard::Modifiers::default(),
-            cursor_position: None,
-            sidebar_resize: std::collections::HashMap::new(),
-            preview: crate::preview_host::PreviewHost::new(
-                tempfile::tempdir().unwrap().keep().join("state.sqlite"),
-            ),
-        };
+        let mut daemon = crate::test_daemon();
         let (reply, _receiver) = tokio::sync::oneshot::channel();
         let base = tempfile::tempdir().unwrap();
         let session = PickerSession::new(

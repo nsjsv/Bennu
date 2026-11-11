@@ -18,7 +18,6 @@ use bennu_preview::preview_loading::classify_preview_path;
 use bennu_preview::preview_message::PreviewMessage;
 use bennu_preview::sqlite_preview::{SqliteDatabasePreview, SqlitePreviewTab};
 use bennu_theme::scrollbar::ScrollbarViewport;
-use bennu_theme::window_controls::WindowControlKind;
 use thumbnails::{CachedThumbnail, ThumbnailRequest, ThumbnailSourceMetadata};
 
 use crate::dbus_file_chooser::PickerResolution;
@@ -26,7 +25,7 @@ use crate::picker_request::{PickerKind, PickerRequestSpec};
 use crate::picker_session::scan::{DirectoryScanOutcome, DirectoryScanResult};
 use crate::picker_session::{PickerSession, SessionMessage, SessionScrollRegion};
 use crate::preview_scroll::PreviewScrollRegion;
-use crate::{PickerDaemon, Theme};
+use crate::PickerDaemon;
 
 use super::content::preview_thumbnail_edge_for_size;
 use super::{PreviewHost, PreviewSelection};
@@ -300,21 +299,6 @@ fn unfocused_close_honors_pinned_exception() {
 }
 
 #[test]
-fn window_control_close_only_acts_on_preview_window() {
-    // chrome 关闭按钮：预览窗收尾会话；选择窗 id 一律 no-op。
-    let mut host = host();
-    let _ = host.request_preview(None, Some(&file_selection(Path::new("/tmp/a.txt"), 16)));
-    let preview_window = host.engine.preview_window.unwrap();
-
-    let _ = host.handle_window_control(window::Id::unique(), WindowControlKind::Close);
-    assert_eq!(host.engine.preview_window, Some(preview_window));
-
-    let _ = host.handle_window_control(preview_window, WindowControlKind::Close);
-    assert!(host.engine.preview_window.is_none());
-    assert!(host.engine.preview.is_none());
-}
-
-#[test]
 fn resize_follows_pending_target_before_accepting_user_size() {
     // pending resize 匹配语义：未到目标尺寸时重发 resize 且不采纳
     // 当帧尺寸；匹配后清 pending 并采纳。
@@ -332,7 +316,9 @@ fn resize_follows_pending_target_before_accepting_user_size() {
     ));
 
     // 目标尺寸到达：采纳并清 pending（None = 走文档重排/档位刷新路径）。
-    let _ = host.handle_window_resized_engine(preview_window, pending.width, pending.height);
+    // resize 事件报的是整窗尺寸（内容 + 顶栏），pending 只指内容区。
+    let target = bennu_preview::engine::preview_window_size_for_content(pending);
+    let _ = host.handle_window_resized_engine(preview_window, target.width, target.height);
     assert!(host.engine.pending_preview_resize.is_none());
     assert!(bennu_preview::engine::preview_size_matches(
         host.engine.preview_size,
@@ -345,24 +331,7 @@ fn resize_follows_pending_target_before_accepting_user_size() {
 }
 
 #[test]
-fn title_bar_press_starts_drag_reveal_and_double_click_toggles_maximize() {
-    // 标题栏按下：单击进拖动态并取消初始 chrome 计时；双击切换最大化。
-    let mut host = host();
-    let _ = host.request_preview(None, Some(&file_selection(Path::new("/tmp/a.txt"), 16)));
-    let preview_window = host.engine.preview_window.unwrap();
-    host.engine.preview_window_chrome.reset_hidden();
-
-    let _ = host.handle_title_bar_pressed(preview_window, false);
-    assert!(host.engine.preview_window_drag_active);
-    assert!(host.engine.preview_window_chrome.target_is_visible());
-
-    host.engine.preview_window_drag_active = false;
-    let _ = host.handle_title_bar_pressed(preview_window, true);
-    assert!(!host.engine.preview_window_drag_active);
-}
-
-#[test]
-fn pointer_motion_drives_chrome_and_window_chrome_tracks_sqlite_drag() {
+fn pointer_tracking_is_scoped_to_the_preview_window() {
     let mut host = host();
     let _ = host.request_preview(None, Some(&file_selection(Path::new("/tmp/a.txt"), 16)));
     let preview_window = host.engine.preview_window.unwrap();
@@ -372,28 +341,19 @@ fn pointer_motion_drives_chrome_and_window_chrome_tracks_sqlite_drag() {
     let _ = host.handle_pointer_moved(picker_window, iced::Point::new(10.0, 10.0));
     assert_eq!(host.engine.preview_window_pointer_y, None);
 
-    // 媒体类预览：指针位置驱动 chrome/底部控件。
     let _ = host.handle_pointer_moved(preview_window, iced::Point::new(10.0, 8.0));
     assert_eq!(host.engine.preview_window_pointer_y, Some(8.0));
-    assert!(host.engine.preview_window_chrome.target_is_visible());
+    // 文本预览没有底部播放控制条：指针移动不会让它出现。
+    assert!(!host
+        .engine
+        .preview_window_bottom_controls
+        .target_is_visible());
 
-    // 指针离开：隐藏 chrome、结束平移。
+    // 指针离开：清指针位置、结束平移。
+    host.engine.preview_image_viewport.panning = true;
     let _ = host.handle_pointer_left(preview_window);
     assert_eq!(host.engine.preview_window_pointer_y, None);
-    assert!(!host.engine.preview_window_chrome.target_is_visible());
-}
-
-#[test]
-fn maximize_observation_updates_chrome_frame_state() {
-    let mut host = host();
-    let _ = host.request_preview(None, Some(&file_selection(Path::new("/tmp/a.txt"), 16)));
-    let preview_window = host.engine.preview_window.unwrap();
-    assert!(!host.preview_window_maximized);
-    host.accept_maximize_observed(preview_window, true);
-    assert!(host.preview_window_maximized);
-    // 非预览窗的观测不落簿记。
-    host.accept_maximize_observed(window::Id::unique(), false);
-    assert!(host.preview_window_maximized);
+    assert!(!host.engine.preview_image_viewport.panning);
 }
 
 // ---------------------------------------------------------------------------
@@ -438,14 +398,7 @@ fn daemon_with_image_row(file_name: &str) -> (PickerDaemon, window::Id, PathBuf)
             )],
         }),
     });
-    let mut daemon = PickerDaemon {
-        windows: std::collections::HashMap::new(),
-        theme: Theme::Light,
-        keyboard_modifiers: iced::keyboard::Modifiers::default(),
-        cursor_position: None,
-        sidebar_resize: std::collections::HashMap::new(),
-        preview: PreviewHost::new(PathBuf::new()),
-    };
+    let mut daemon = crate::test_daemon();
     let window = window::Id::unique();
     daemon.windows.insert(window, session);
     (daemon, window, path)

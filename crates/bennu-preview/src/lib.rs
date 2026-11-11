@@ -85,6 +85,7 @@ pub mod preview_tree_panel;
 pub mod preview_panel;
 // 预览浮动窗口 chrome（悬浮控制层/固定按钮/窗口控制组机件）。
 pub mod preview_window_chrome;
+pub mod window_shell;
 // 宿主滚动管线接线参数（smooth-scroll 包装/id/视口回传闭包），
 // 视图面板经它消费宿主滚动几何，见 scrollbar-guidelines 分工。
 pub mod scroll_wiring;

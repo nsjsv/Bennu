@@ -7,9 +7,10 @@ use crate::app::scrollbar::{enhanced_scrollbar, scrollbar_on_scroll, ScrollbarAx
 use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
 use crate::app::transfer::TransferMessage;
 use crate::app::FileBrowser;
+use crate::app::SidebarFixedEntry;
 use crate::appearance::{
     enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction, hovered_sidebar_item_style,
-    selected_sidebar_item_style, sidebar_bookmark_drop_slot_style, sidebar_style,
+    selected_sidebar_item_style, sidebar_bookmark_drop_slot_style,
 };
 use crate::file_drag_hit_test_bounds::FileDragHitTestMarker;
 use crate::file_drag_hit_test_marker::track_file_drag_hit_test_marker;
@@ -24,10 +25,11 @@ use bennu_preview::panel_text::readable_text;
 use bennu_sidebar::SidebarLocationKind;
 use bennu_theme::icons::IconSymbol;
 use bennu_theme::measured_text::measured_middle_ellipsized_text;
+use iced::alignment::Vertical;
 
 use super::{tab_motion, themed_icon, IconTone, MENU_ICON_SIZE};
-use bennu_theme::controls::icon_button_style;
-use bennu_theme::typography::{BODY_SIZE, BOLD, CAPTION_SIZE, TITLE_SIZE};
+use bennu_theme::controls::{icon_button, icon_button_style};
+use bennu_theme::typography::{BODY_SIZE, BOLD, CAPTION_SIZE};
 
 /// 位置行图标。侧边栏数据 crate 不依赖图标词汇，映射由两个宿主的视图各持一份
 /// （portal 侧栏同一张表）：没有同时能看到两种类型的共享 crate，为一张 8 行的表不值得再建一个。
@@ -45,42 +47,44 @@ fn location_icon_symbol(location: &SidebarLocation) -> IconSymbol {
 }
 
 const SIDEBAR_RESIZE_HANDLE_WIDTH: f32 = 6.0;
-// 卡片悬浮感靠留白 + 圆角 + 投影:窗口侧三边(上/左/下)等宽 7
-// (离窗沿近,与 portal 选择窗口一致),右侧 4 是与内容区的间隙。卡片
-// 仍盖在终端抽屉左段上,分隔线从卡片后穿过。
-const SIDEBAR_FLOATING_MARGIN_LEFT: f32 = 7.0;
-const SIDEBAR_FLOATING_MARGIN_RIGHT: f32 = 4.0;
-const SIDEBAR_FLOATING_MARGIN_VERTICAL: f32 = 7.0;
 const SIDEBAR_BOOKMARK_DROP_SLOT_HEIGHT: f32 = 3.0;
+const SIDEBAR_ROW_PADDING_X: f32 = 8.0;
 
-pub(crate) fn sidebar_view(browser: &FileBrowser) -> Element<'_, Message> {
-    let sidebar_header = row![
-        readable_text(tr!("Places"))
-            .size(TITLE_SIZE)
-            .font(BOLD)
-            .width(Length::Fill),
-        button(themed_icon(
-            IconSymbol::Settings,
-            IconTone::Normal,
-            MENU_ICON_SIZE
-        ))
-        .on_press(Message::SettingsOpened)
-        .padding([4, 6])
-        .style(icon_button_style),
-    ]
-    .spacing(8)
-    .align_y(Alignment::Center);
+// 侧栏列表的几何：界面按这些常量排，收藏夹拖放落点（app/sidebar_bookmarks）按同样的
+// 常量算。行高必须固定——跟着字号变的行高曾让落点整体偏移（2026-11-10）。
+pub(crate) const SIDEBAR_ROW_HEIGHT: f32 = 32.0;
+pub(crate) const SIDEBAR_ROW_SPACING: f32 = 2.0;
+pub(crate) const SIDEBAR_SECTION_LABEL_HEIGHT: f32 = 30.0;
+pub(crate) const SIDEBAR_LIST_PADDING_TOP: f32 = 4.0;
+const SIDEBAR_LIST_PADDING_X: f32 = 8.0;
+const SIDEBAR_LIST_PADDING_BOTTOM: f32 = 12.0;
 
-    let mut sidebar = column![sidebar_header].spacing(6).padding(12);
-    for location in browser
-        .sidebar_locations
-        .iter()
-        .filter(|location| !location.kind.is_user_favorite())
-    {
-        sidebar = sidebar.push(sidebar_location_item(browser, location));
+/// 侧栏顶栏右边：设置按钮（不写标题，同 Nautilus）。
+pub(crate) fn sidebar_settings_button() -> Element<'static, Message> {
+    icon_button(themed_icon(
+        IconSymbol::Settings,
+        IconTone::Normal,
+        MENU_ICON_SIZE,
+    ))
+    .on_press(Message::SettingsOpened)
+    .into()
+}
+
+/// 侧栏顶栏下面的部分：可滚动的位置列表，右边缘是拖宽手柄。
+pub(crate) fn sidebar_body(browser: &FileBrowser) -> Element<'_, Message> {
+    let mut sidebar = Column::new().spacing(SIDEBAR_ROW_SPACING).padding(Padding {
+        top: SIDEBAR_LIST_PADDING_TOP,
+        right: SIDEBAR_LIST_PADDING_X,
+        bottom: SIDEBAR_LIST_PADDING_BOTTOM,
+        left: SIDEBAR_LIST_PADDING_X,
+    });
+    for entry in browser.sidebar_fixed_entries() {
+        sidebar = sidebar.push(match entry {
+            SidebarFixedEntry::Location(location) => sidebar_location_item(browser, location),
+            SidebarFixedEntry::Trash => sidebar_trash_item(browser),
+            SidebarFixedEntry::LocalSend => sidebar_local_send_item(browser),
+        });
     }
-    sidebar = sidebar.push(sidebar_trash_item(browser));
-    sidebar = sidebar.push(sidebar_local_send_item(browser));
 
     let favorite_locations = browser
         .sidebar_locations
@@ -140,33 +144,10 @@ pub(crate) fn sidebar_view(browser: &FileBrowser) -> Element<'_, Message> {
         sidebar_content_panel.into()
     };
 
-    let sidebar_panel = container(sidebar_content)
+    row![sidebar_content, sidebar_resize_handle()]
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(sidebar_style);
-
-    let sidebar_panel = container(sidebar_panel)
-        .padding(sidebar_floating_panel_margin())
-        .width(Length::Fill)
-        .height(Length::Fill);
-
-    container(
-        row![sidebar_panel, sidebar_resize_handle()]
-            .width(Length::Fill)
-            .height(Length::Fill),
-    )
-    .width(Length::Fixed(browser.sidebar_width))
-    .height(Length::Fill)
-    .into()
-}
-
-pub(super) fn sidebar_floating_panel_margin() -> Padding {
-    Padding {
-        top: SIDEBAR_FLOATING_MARGIN_VERTICAL,
-        right: SIDEBAR_FLOATING_MARGIN_RIGHT,
-        bottom: SIDEBAR_FLOATING_MARGIN_VERTICAL,
-        left: SIDEBAR_FLOATING_MARGIN_LEFT,
-    }
+        .into()
 }
 
 fn append_sidebar_devices<'a>(
@@ -216,8 +197,8 @@ fn append_sidebar_network_connections<'a>(
 
 fn sidebar_network_section_header() -> Element<'static, Message> {
     row![
-        container(readable_text(tr!("Network")))
-            .padding([4, 8])
+        container(section_label_text(tr!("Network")))
+            .padding([0.0, SIDEBAR_ROW_PADDING_X])
             .width(Length::Fill),
         button(themed_icon(
             IconSymbol::Plus,
@@ -230,7 +211,8 @@ fn sidebar_network_section_header() -> Element<'static, Message> {
         .padding([2, 5])
         .style(icon_button_style),
     ]
-    .align_y(Alignment::Center)
+    .height(Length::Fixed(SIDEBAR_SECTION_LABEL_HEIGHT))
+    .align_y(Alignment::End)
     .into()
 }
 
@@ -276,7 +258,9 @@ fn sidebar_location_item_content<'a>(
     let label = location.display_label();
 
     let item_container = container(sidebar_label(location_icon_symbol(location), &label, tone))
-        .padding([6, 8])
+        .padding([0.0, SIDEBAR_ROW_PADDING_X])
+        .height(Length::Fixed(SIDEBAR_ROW_HEIGHT))
+        .align_y(Vertical::Center)
         .width(Length::Fill);
     let item_container = match presentation {
         SidebarPresentation::Selected => item_container.style(selected_sidebar_item_style),
@@ -399,7 +383,9 @@ fn sidebar_device_item<'a>(
     let pending = browser.sidebar_devices.is_action_pending(&device.id);
 
     let item_container = container(sidebar_device_label(device, pending, tone))
-        .padding([6, 8])
+        .padding([0.0, SIDEBAR_ROW_PADDING_X])
+        .height(Length::Fixed(SIDEBAR_ROW_HEIGHT))
+        .align_y(Vertical::Center)
         .width(Length::Fill);
     let item_container = match presentation {
         SidebarPresentation::Selected => item_container.style(selected_sidebar_item_style),
@@ -434,7 +420,9 @@ fn sidebar_network_connection_item<'a>(
     let pending = browser.network_connections.is_pending(connection.id());
 
     let item_container = container(sidebar_network_connection_label(connection, pending, tone))
-        .padding([6, 8])
+        .padding([0.0, SIDEBAR_ROW_PADDING_X])
+        .height(Length::Fixed(SIDEBAR_ROW_HEIGHT))
+        .align_y(Vertical::Center)
         .width(Length::Fill);
     let item_container = match presentation {
         SidebarPresentation::Selected => item_container.style(selected_sidebar_item_style),
@@ -482,7 +470,9 @@ fn sidebar_trash_item(browser: &FileBrowser) -> Element<'_, Message> {
     };
     let trash_label = tr!("Trash");
     let trash_container = container(sidebar_label(IconSymbol::Trash, &trash_label, trash_tone))
-        .padding([6, 8])
+        .padding([0.0, SIDEBAR_ROW_PADDING_X])
+        .height(Length::Fixed(SIDEBAR_ROW_HEIGHT))
+        .align_y(Vertical::Center)
         .width(Length::Fill);
     let trash_container = match trash_presentation {
         SidebarPresentation::Selected => trash_container.style(selected_sidebar_item_style),
@@ -507,13 +497,18 @@ fn sidebar_local_send_item(browser: &FileBrowser) -> Element<'_, Message> {
         .file_drop_session
         .as_ref()
         .is_some_and(|session| session.hovered_target == Some(FileDropTarget::LocalSend));
-    let item = button(sidebar_label(
-        IconSymbol::Send,
-        &tr!("LocalSend"),
-        IconTone::Normal,
-    ))
+    let item = button(
+        container(sidebar_label(
+            IconSymbol::Send,
+            &tr!("LocalSend"),
+            IconTone::Normal,
+        ))
+        .height(Length::Fill)
+        .align_y(Vertical::Center),
+    )
     .on_press(Message::Transfer(TransferMessage::LocalSendWindowRequested))
-    .padding([6, 8])
+    .padding([0.0, SIDEBAR_ROW_PADDING_X])
+    .height(Length::Fixed(SIDEBAR_ROW_HEIGHT))
     .width(Length::Fill)
     .style(move |theme, status| {
         let highlighted =
@@ -541,10 +536,23 @@ fn sidebar_local_send_item(browser: &FileBrowser) -> Element<'_, Message> {
     )
 }
 
+/// 分组标题（收藏夹、网络、设备）：小号粗体灰字，固定高度——收藏夹拖放落点按它算。
 fn sidebar_section_label(label: String) -> Element<'static, Message> {
-    container(readable_text(label))
-        .padding([4, 8])
+    container(section_label_text(label))
+        .padding([0.0, SIDEBAR_ROW_PADDING_X])
+        .height(Length::Fixed(SIDEBAR_SECTION_LABEL_HEIGHT))
+        .align_y(Vertical::Bottom)
         .width(Length::Fill)
+        .into()
+}
+
+fn section_label_text(label: String) -> Element<'static, Message> {
+    readable_text(label)
+        .size(CAPTION_SIZE)
+        .font(BOLD)
+        .style(|theme: &iced::Theme| iced::widget::text::Style {
+            color: Some(crate::appearance::muted_text_color(theme)),
+        })
         .into()
 }
 

@@ -1,69 +1,24 @@
-use iced::widget::{button, container, row, scrollable, Button, Column, Space};
+use iced::widget::{button, container, scrollable, Button, Column};
 use iced::{Element, Length};
 
 use crate::app::scrollbar::{enhanced_scrollbar, scrollbar_on_scroll, ScrollbarAxis};
 use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
 use crate::appearance::{
-    app_content_style, enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction,
-    selected_sidebar_item_style, sidebar_style, transparent_button_style,
+    enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction, selected_sidebar_item_style,
+    transparent_button_style,
 };
 use crate::model::{Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility};
 use bennu_preview::panel_text::readable_text;
 
-use super::sidebar_panel::sidebar_floating_panel_margin;
+/// 设置、属性窗口的侧栏宽度（主窗口侧栏可拖宽，另算）。
+pub(super) const AUXILIARY_SIDEBAR_WIDTH: f32 = 196.0;
 
-const AUXILIARY_SIDEBAR_WIDTH: f32 = 196.0;
-
-pub(super) fn auxiliary_split_window<'a>(
-    sidebar: Element<'a, Message>,
-    detail: Element<'a, Message>,
-) -> Element<'a, Message> {
-    container(row![sidebar, detail].height(Length::Fill))
+/// 侧栏顶栏下面的分类列表。
+pub(super) fn auxiliary_sidebar_list<'a>(items: Vec<Element<'a, Message>>) -> Element<'a, Message> {
+    Column::with_children(items)
+        .spacing(2)
+        .padding([4, 8])
         .width(Length::Fill)
-        .height(Length::Fill)
-        .style(app_content_style)
-        .into()
-}
-pub(super) fn auxiliary_detail_surface_with_sidebar_space<'a>(
-    detail: Element<'a, Message>,
-) -> Element<'a, Message> {
-    container(
-        row![
-            Space::new().width(Length::Fixed(AUXILIARY_SIDEBAR_WIDTH)),
-            detail,
-        ]
-        .height(Length::Fill),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .style(app_content_style)
-    .into()
-}
-
-pub(super) fn auxiliary_sidebar<'a>(content: Column<'a, Message>) -> Element<'a, Message> {
-    let sidebar = container(content.padding(14))
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .style(sidebar_style);
-
-    container(sidebar)
-        .padding(sidebar_floating_panel_margin())
-        .width(Length::Fixed(AUXILIARY_SIDEBAR_WIDTH))
-        .height(Length::Fill)
-        .into()
-}
-
-pub(super) fn auxiliary_full_height_sidebar<'a>(
-    content: Column<'a, Message>,
-) -> Element<'a, Message> {
-    let sidebar = container(content.padding(14))
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .style(sidebar_style);
-    container(sidebar)
-        .padding(sidebar_floating_panel_margin())
-        .width(Length::Fixed(AUXILIARY_SIDEBAR_WIDTH))
-        .height(Length::Fill)
         .into()
 }
 

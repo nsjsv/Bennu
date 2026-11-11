@@ -155,9 +155,14 @@ impl FileBrowser {
         self.pane_mut().tab_mut()
     }
 
-    /// 窗格区的窗口 y 起点:全窗工具栏顶栏横贯后,窗格从它下方开始。
+    /// 窗格区的窗口 y 起点：内容顶栏（工具栏）下方。
     pub(super) fn main_panes_area_top(&self) -> f32 {
-        crate::model::MAIN_TOOLBAR_ROW_HEIGHT
+        crate::view::main_toolbar_height(self.main_content_width())
+    }
+
+    /// 内容栏宽度：侧栏右边整段（工具栏、窗格、预览面板、终端抽屉都在这一栏里）。
+    pub(crate) fn main_content_width(&self) -> f32 {
+        self.main_window_width - self.sidebar_width
     }
 
     pub(super) fn pane_id_at_position(&self, position: Point) -> Option<BrowserPaneId> {
@@ -430,7 +435,7 @@ impl FileBrowser {
         } else {
             0.0
         };
-        (self.main_window_width - self.sidebar_width - preview_panel_width).max(1.0)
+        (self.main_content_width() - preview_panel_width).max(1.0)
     }
 }
 

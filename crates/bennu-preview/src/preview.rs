@@ -304,14 +304,6 @@ enum PreviewWindowChromeTarget {
 }
 
 impl PreviewWindowChromeTarget {
-    fn from_cursor_y(cursor_y: f32) -> Self {
-        if cursor_y <= PreviewWindowChromeState::REVEAL_HEIGHT {
-            Self::Visible
-        } else {
-            Self::Hidden
-        }
-    }
-
     fn opacity(self) -> f32 {
         match self {
             Self::Hidden => 0.0,
@@ -334,13 +326,14 @@ struct PreviewWindowChromeAnimation {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct PreviewWindowChromeState {
+/// 视频 / 动图底部播放控制条的淡入淡出：指针移到底部一带才出现，离开后淡出。
+pub struct PreviewBottomControlsState {
     target: PreviewWindowChromeTarget,
     opacity: f32,
     animation: Option<PreviewWindowChromeAnimation>,
 }
 
-impl Default for PreviewWindowChromeState {
+impl Default for PreviewBottomControlsState {
     fn default() -> Self {
         Self {
             target: PreviewWindowChromeTarget::Hidden,
@@ -350,7 +343,7 @@ impl Default for PreviewWindowChromeState {
     }
 }
 
-impl PreviewWindowChromeState {
+impl PreviewBottomControlsState {
     pub const REVEAL_HEIGHT: f32 = 64.0;
 
     pub fn start_reveal(&mut self) {
@@ -361,12 +354,6 @@ impl PreviewWindowChromeState {
         self.retarget_at(PreviewWindowChromeTarget::Hidden, Instant::now());
     }
 
-    pub fn update_for_cursor_y(&mut self, cursor_y: f32) {
-        self.retarget_at(
-            PreviewWindowChromeTarget::from_cursor_y(cursor_y),
-            Instant::now(),
-        );
-    }
     pub fn update_for_bottom_cursor_y(&mut self, cursor_y: f32, window_height: f32) {
         let reveal_start = (window_height - Self::REVEAL_HEIGHT).max(0.0);
         let target = if cursor_y >= reveal_start && cursor_y <= window_height {
@@ -454,23 +441,8 @@ mod preview_window_chrome_tests {
     use super::*;
 
     #[test]
-    fn cursor_y_targets_only_the_top_reveal_region() {
-        assert_eq!(
-            PreviewWindowChromeTarget::from_cursor_y(0.0),
-            PreviewWindowChromeTarget::Visible
-        );
-        assert_eq!(
-            PreviewWindowChromeTarget::from_cursor_y(64.0),
-            PreviewWindowChromeTarget::Visible
-        );
-        assert_eq!(
-            PreviewWindowChromeTarget::from_cursor_y(64.1),
-            PreviewWindowChromeTarget::Hidden
-        );
-    }
-    #[test]
     fn bottom_cursor_y_targets_only_the_bottom_reveal_region() {
-        let mut chrome = PreviewWindowChromeState::default();
+        let mut chrome = PreviewBottomControlsState::default();
 
         chrome.update_for_bottom_cursor_y(636.0, 700.0);
         assert!(chrome.target_is_visible());
@@ -484,7 +456,7 @@ mod preview_window_chrome_tests {
 
     #[test]
     fn bottom_cursor_y_reveals_the_entire_small_window() {
-        let mut chrome = PreviewWindowChromeState::default();
+        let mut chrome = PreviewBottomControlsState::default();
 
         chrome.update_for_bottom_cursor_y(0.0, 40.0);
 
@@ -494,7 +466,7 @@ mod preview_window_chrome_tests {
     #[test]
     fn chrome_fades_in_and_out_over_the_configured_durations() {
         let started_at = Instant::now();
-        let mut chrome = PreviewWindowChromeState::default();
+        let mut chrome = PreviewBottomControlsState::default();
 
         chrome.retarget_at(PreviewWindowChromeTarget::Visible, started_at);
         chrome.advance_at(started_at + Duration::from_millis(80));
@@ -515,7 +487,7 @@ mod preview_window_chrome_tests {
     #[test]
     fn reversing_a_fade_keeps_the_current_opacity() {
         let started_at = Instant::now();
-        let mut chrome = PreviewWindowChromeState::default();
+        let mut chrome = PreviewBottomControlsState::default();
         chrome.retarget_at(PreviewWindowChromeTarget::Visible, started_at);
 
         let reversed_at = started_at + Duration::from_millis(80);

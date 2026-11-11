@@ -63,7 +63,7 @@ pub(super) fn global_event_message(
         &event,
         Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
     ) {
-        return Some(Message::WindowPointerReleased { window, status });
+        return Some(Message::WindowPointerReleased(status));
     }
 
     if matches!(status, event::Status::Captured) {
@@ -177,18 +177,14 @@ mod tests {
     }
 
     #[test]
-    fn captured_left_release_reports_source_window_and_status() {
-        let window = window::Id::unique();
+    fn captured_left_release_reports_its_status() {
         let event = Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left));
 
-        let message = route_event_with_window(event, event::Status::Captured, window);
+        let message = route_event(event, event::Status::Captured);
 
         assert!(matches!(
             message,
-            Some(Message::WindowPointerReleased {
-                window: received_window,
-                status: event::Status::Captured,
-            }) if received_window == window
+            Some(Message::WindowPointerReleased(event::Status::Captured))
         ));
     }
 

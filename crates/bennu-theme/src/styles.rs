@@ -3,7 +3,7 @@
 //! 这里只允许通过 `crate::ui_colors` 读取语义角色，禁止固定 RGB 分支。
 
 use iced::widget::{button, container, scrollable, svg, text_input};
-use iced::{Background, Border, Color, Shadow, Theme, Vector};
+use iced::{Background, Border, Color, Theme};
 
 use crate::controls::text_field_style;
 use crate::{ui_colors, AppearanceMode};
@@ -170,33 +170,6 @@ pub fn hovered_sidebar_item_style(theme: &Theme) -> container::Style {
         border: Border {
             radius: 8.0.into(),
             ..Border::default()
-        },
-        ..container::Style::default()
-    }
-}
-
-/// 侧边栏浮动卡片面板：0.92 半透明 surface 底 + 18 圆角 + 投影，
-/// 自 app-ui appearance.rs 原样下沉（一个数值都不许漂移）。
-pub fn sidebar_style(theme: &Theme) -> container::Style {
-    let colors = ui_colors(theme);
-    container::Style {
-        background: Some(Background::Color(Color {
-            a: 0.92,
-            ..colors.surface
-        })),
-        text_color: Some(colors.on_surface),
-        border: Border {
-            color: Color {
-                a: 0.55,
-                ..colors.outline_variant
-            },
-            width: 1.0,
-            radius: 18.0.into(),
-        },
-        shadow: Shadow {
-            color: elevation_shadow_color(theme, 0.22),
-            offset: Vector::new(0.0, 10.0),
-            blur_radius: 22.0,
         },
         ..container::Style::default()
     }

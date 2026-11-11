@@ -31,7 +31,6 @@ use bennu_preview::preview_loading::{
     classify_preview_path, file_too_large_to_preview, PreviewPathKind,
 };
 use bennu_preview::preview_message::PreviewMessage;
-use bennu_theme::window_controls::WindowControlKind;
 
 use crate::picker_session::PickerSession;
 use crate::preview_scroll::PreviewScrollPipeline;
@@ -69,9 +68,6 @@ pub(crate) struct PreviewHost {
     preferences_database: PathBuf,
     /// 预览窗滚动管线（七区域：显隐状态机 + 滚轮惯性）。
     pub(crate) scroll: PreviewScrollPipeline,
-    /// 预览窗最大化簿记（chrome 的最大化/还原按钮形态；仅观测自家
-    /// toggle 后的回信，主软件同款边界）。
-    pub(crate) preview_window_maximized: bool,
     /// 预览窗指针位置宿主簿记：SQLite 列宽拖拽起点读横坐标（主软件
     /// cursor_position.x 的预览对应物；纵坐标的引擎消费走
     /// engine.preview_window_pointer_y）。
@@ -97,7 +93,6 @@ impl PreviewHost {
             preferences,
             preferences_database,
             scroll: PreviewScrollPipeline::default(),
-            preview_window_maximized: false,
             preview_window_pointer: None,
         }
     }
@@ -207,7 +202,6 @@ impl PreviewHost {
         let Some(closed) = closed_window else {
             return command;
         };
-        self.preview_window_maximized = false;
         if self.focused_window == Some(closed) {
             self.focused_window = None;
         }
@@ -436,66 +430,6 @@ impl PreviewHost {
     }
 
     /// chrome 控制按钮：最小化 / 最大化切换（带最大化观测）/ 关闭。
-    pub(crate) fn handle_window_control(
-        &mut self,
-        window: window::Id,
-        kind: WindowControlKind,
-    ) -> Task<Message> {
-        if !self.is_preview_window(window) {
-            return Task::none();
-        }
-        match kind {
-            WindowControlKind::Minimize => window::minimize(window, true),
-            WindowControlKind::MaximizeRestore => self.toggle_window_maximized(window),
-            WindowControlKind::Close => self.close_focused_preview(),
-        }
-    }
-
-    /// 标题栏按下：单击拖动（取消初始 chrome 淡出计时），双击最大化。
-    pub(crate) fn handle_title_bar_pressed(
-        &mut self,
-        window: window::Id,
-        double_click: bool,
-    ) -> Task<Message> {
-        if !self.is_preview_window(window) {
-            return Task::none();
-        }
-        if double_click {
-            return self.toggle_window_maximized(window);
-        }
-        self.engine.cancel_preview_window_initial_chrome_hide();
-        self.engine.preview_window_drag_active = true;
-        self.engine.preview_window_chrome.start_reveal();
-        window::drag(window)
-    }
-
-    /// resize 边缘按下 → 原生 drag_resize（边缘仅在非最大化时存在）。
-    pub(crate) fn handle_resize_edge_pressed(
-        &mut self,
-        window: window::Id,
-        direction: window::Direction,
-    ) -> Task<Message> {
-        if !self.is_preview_window(window) {
-            return Task::none();
-        }
-        window::drag_resize(window, direction)
-    }
-
-    fn toggle_window_maximized(&mut self, window: window::Id) -> Task<Message> {
-        window::toggle_maximize(window).chain(
-            window::is_maximized(window)
-                .map(move |maximized| Message::PreviewWindowMaximizeObserved { window, maximized }),
-        )
-    }
-
-    /// 最大化观测回信（主软件 accept_window_maximized_observation 的
-    /// 预览分支：只登记 chrome 按钮形态，无其它窗口簿记）。
-    pub(crate) fn accept_maximize_observed(&mut self, window: window::Id, maximized: bool) {
-        if self.is_preview_window(window) {
-            self.preview_window_maximized = maximized;
-        }
-    }
-
     /// 预览窗失焦自动关闭的门禁（引擎判定：预览窗且未钉住）。
     pub(crate) fn handle_window_unfocused(&mut self, window: window::Id) -> Task<Message> {
         if self.engine.should_close_unfocused_window(window) {
@@ -545,9 +479,7 @@ impl PreviewHost {
         None
     }
 
-    /// 预览窗指针移动：媒体类驱动 chrome/底部控件淡入淡出；标准窗口
-    /// chrome（文本/SQLite）只推进表格列宽拖拽（主软件 update_pointer_
-    /// motion 的预览分支）。
+    /// 预览窗指针移动：推进 SQLite 列宽拖拽，驱动底部播放控制条的淡入淡出。
     pub(crate) fn handle_pointer_moved(
         &mut self,
         window: window::Id,
@@ -556,57 +488,30 @@ impl PreviewHost {
         if !self.is_preview_window(window) {
             return Task::none();
         }
-        if self.engine.preview_window_uses_window_chrome() {
-            self.engine.update_sqlite_tables_resize_drag(position);
-            self.preview_window_pointer = Some(position);
-            return Task::none();
-        }
-        self.engine.cancel_preview_window_initial_chrome_hide();
+        self.engine.update_sqlite_tables_resize_drag(position);
+        self.engine.cancel_preview_window_initial_controls_hide();
         self.engine.preview_window_pointer_y = Some(position.y);
         self.preview_window_pointer = Some(position);
         self.engine.refresh_preview_window_bottom_controls();
-        if !self.engine.preview_window_drag_active {
-            self.engine
-                .preview_window_chrome
-                .update_for_cursor_y(position.y);
-        }
         Task::none()
     }
 
-    /// 指针离开预览窗：隐藏 chrome/底部控件；按着左键离开时就地结束
-    /// 图片平移（窗口外收不到 release，主软件 CursorLeft 同款）。
+    /// 指针离开预览窗：隐藏底部控制条；按着左键离开时就地结束图片平移
+    /// （窗口外收不到 release，主软件 CursorLeft 同款）。
     pub(crate) fn handle_pointer_left(&mut self, window: window::Id) -> Task<Message> {
         if !self.is_preview_window(window) {
             return Task::none();
         }
-        self.engine.cancel_preview_window_initial_chrome_hide();
+        self.engine.cancel_preview_window_initial_controls_hide();
         self.engine.preview_window_pointer_y = None;
         self.preview_window_pointer = None;
         self.engine.preview_image_viewport.panning = false;
         self.engine.preview_window_bottom_controls.start_hide();
-        if !self.engine.preview_window_drag_active
-            && !self.engine.preview_window_uses_window_chrome()
-        {
-            self.engine.preview_window_chrome.start_hide();
-        }
         Task::none()
     }
 
-    /// 预览窗内左键释放 / SQLite 列宽拖拽收尾（面板闭包与全局释放共用，
-    /// 主软件 finish_pointer_drag_interactions 的预览子集）。
+    /// 预览窗内左键释放 / SQLite 列宽拖拽收尾。
     pub(crate) fn finish_window_drags(&mut self) -> Task<Message> {
-        if self.engine.preview_window_drag_active {
-            self.engine.preview_window_drag_active = false;
-            if let Some(pointer_y) = self.engine.preview_window_pointer_y {
-                self.engine
-                    .preview_window_chrome
-                    .update_for_cursor_y(pointer_y);
-                self.engine.refresh_preview_window_bottom_controls();
-            } else {
-                self.engine.preview_window_chrome.start_hide();
-                self.engine.preview_window_bottom_controls.start_hide();
-            }
-        }
         self.engine.preview_image_viewport.panning = false;
         self.engine
             .finish_sqlite_tables_resize_drag()
@@ -616,8 +521,7 @@ impl PreviewHost {
     /// 帧时钟是否需要挂载（chrome 淡入淡出 ∪ 底部控件 ∪ 预览树动画 ∪
     /// 滚动管线；与选择窗 is_animating 联合后驱动 AnimationTick）。
     pub(crate) fn is_animating(&self) -> bool {
-        self.engine.preview_window_chrome.is_animating()
-            || self.engine.preview_window_bottom_controls.is_animating()
+        self.engine.preview_window_bottom_controls.is_animating()
             || self.engine.preview_tree_animation_is_active()
             || self.scroll.is_animating()
     }
@@ -626,7 +530,6 @@ impl PreviewHost {
     /// 透明度（app-ui advance_window_animation_frame + WindowChrome-
     /// AnimationTick/PreviewTreeAnimationTick 两条订阅的合并驱动）。
     pub(crate) fn advance_frame(&mut self) -> Task<Message> {
-        self.engine.preview_window_chrome.advance();
         self.engine.preview_window_bottom_controls.advance();
         let tree_task = self.engine.advance_preview_tree_animation();
         let scroll_task = self.scroll.advance_frame();

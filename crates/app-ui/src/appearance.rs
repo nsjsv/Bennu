@@ -8,7 +8,6 @@ mod container {
 }
 mod icon_grid;
 mod list_header;
-mod window_chrome;
 
 pub(crate) use icon_grid::icon_grid_expansion_panel_style;
 pub(crate) use navigation_input::address_bar_style;
@@ -16,7 +15,6 @@ pub(crate) use navigation_input::address_bar_style;
 // 窗口控制按钮样式（标准/浮动）已下沉 bennu-theme::window_chrome_styles
 // （预览浮动 chrome 迁移需要，随 bennu-preview 的 chrome 机件消费），
 // app-ui 侧不再有直接调用点。
-pub(crate) use window_chrome::{window_title_bar_style, window_top_bar_style};
 
 // 导航按钮样式已下沉 bennu-theme（与导航输入框同组词汇）；预览/文档
 // 视觉词汇在 bennu-theme::preview_styles（面板本体已随 bennu-preview
@@ -37,7 +35,7 @@ pub(crate) use bennu_theme::styles::{
     list_row_style, muted_icon_svg_style, muted_text_color, open_child_row_style,
     path_suggestion_item_style, path_suggestions_style, scale_color_alpha, selected_icon_svg_style,
     selected_path_suggestion_item_style, selected_sidebar_item_style,
-    sidebar_bookmark_drop_slot_style, sidebar_style, subtle_border_color, transparent_button_style,
+    sidebar_bookmark_drop_slot_style, subtle_border_color, transparent_button_style,
     transparent_icon_button_style, warning_icon_svg_style,
 };
 
@@ -349,13 +347,6 @@ mod tests {
             );
             assert_eq!(error.text_color, Some(colors.on_error_container));
             assert_eq!(error.border.color, colors.error);
-
-            let close = bennu_theme::window_chrome_styles::window_close_button_style(
-                &theme,
-                button::Status::Hovered,
-            );
-            assert_eq!(close.background, Some(Background::Color(colors.error)));
-            assert_eq!(close.text_color, colors.on_error);
         }
     }
 }

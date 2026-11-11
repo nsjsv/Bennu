@@ -64,6 +64,7 @@ mod session_persistence;
 mod session_restore;
 mod shortcuts;
 mod sidebar_bookmarks;
+pub(crate) use sidebar_bookmarks::SidebarFixedEntry;
 mod sidebar_devices;
 mod sidebar_resize;
 mod smart_extract;
@@ -167,11 +168,10 @@ use crate::sidebar_devices::SidebarDeviceState;
 use crate::startup_rendering::StartupRenderingEnvironment;
 use crate::startup_trace;
 use crate::thumbnail_cache::ThumbnailCache;
-use crate::view::{
-    auxiliary_window_content, floating_preview_window_content, view_browser,
-    view_properties_window, view_settings_window, window_resize_frame,
-};
+use crate::view::{view_browser, view_properties_window, view_settings_window, window_shell};
 use ::file_operations::FileOperationQueue;
+use bennu_preview::preview_window_chrome::preview_pin_button;
+use bennu_preview::window_shell::{single_window, HeaderBar, WindowShell};
 const DOUBLE_CLICK_THRESHOLD: Duration = Duration::from_millis(500);
 const POINTER_DRAG_ACTIVATION_DISTANCE: f32 = 3.0;
 const PREVIEW_TREE_ANIMATION_INTERVAL: Duration = bennu_theme::animation::FRAME_INTERVAL_60HZ;
@@ -471,7 +471,6 @@ impl FileBrowser {
     }
 
     pub(crate) fn advance_window_animation_frame(&mut self) -> Task<Message> {
-        self.preview_engine.preview_window_chrome.advance();
         self.preview_engine.preview_window_bottom_controls.advance();
         self.advance_terminal_panel_height_animation();
         self.advance_terminal_tab_shift_animations();
@@ -953,11 +952,10 @@ impl FileBrowser {
             );
         }
 
-        if self.preview_engine.preview_window_chrome.is_animating()
-            || self
-                .preview_engine
-                .preview_window_bottom_controls
-                .is_animating()
+        if self
+            .preview_engine
+            .preview_window_bottom_controls
+            .is_animating()
             || self.scrollbar_animation_is_active()
             || self.smooth_scroll_animation_is_active()
             || self.file_drag_edge_scroll_is_active()
@@ -1007,71 +1005,68 @@ impl FileBrowser {
             .active(self.user_config.theme_mode, self.user_config.color_scheme)
     }
 
-    fn view_with_window_chrome<'a>(
+    fn window_frame<'a>(
         &'a self,
         window: window::Id,
-        integrated_title: String,
-        content: Element<'a, Message>,
-        preview_pin: Option<bool>,
+        build: impl FnOnce(WindowShell<'a, Message>) -> Element<'a, Message>,
     ) -> Element<'a, Message> {
         let frame_state = self.window_frame_state(window);
-        let content = auxiliary_window_content(
-            integrated_title,
-            self.window_title(window),
-            content,
+        build(window_shell(
             &self.user_config.window_controls,
             window,
             frame_state,
-            preview_pin,
-        );
-        window_resize_frame(content, window, frame_state)
+        ))
+    }
+
+    fn single_window_view<'a>(
+        &'a self,
+        window: window::Id,
+        header: HeaderBar<'a, Message>,
+        content: Element<'a, Message>,
+    ) -> Element<'a, Message> {
+        self.window_frame(window, |shell| single_window(header, content, &shell))
     }
 
     fn view(&self, window: window::Id) -> Element<'_, Message> {
         match self.auxiliary_window(window) {
             Some(AuxiliaryWindow::Settings) => view_settings_window(self, window),
-            Some(AuxiliaryWindow::Properties) => {
-                let content = view_properties_window(
+            Some(AuxiliaryWindow::Properties) => self.window_frame(window, |shell| {
+                view_properties_window(
                     self.properties.as_ref(),
                     self.scrollbar_visibility_for(&ScrollbarRegion::Properties),
                     self.scrollbar_viewport_for(&ScrollbarRegion::Properties),
-                );
-                self.view_with_window_chrome(window, tr!("Properties"), content, None)
-            }
-            Some(AuxiliaryWindow::Transfer) => {
-                let content = crate::view::view_transfer_window(self);
-                self.view_with_window_chrome(window, tr!("Transfer"), content, None)
-            }
-            Some(AuxiliaryWindow::LocalSend) => {
-                let content = crate::view::view_local_send_window(self);
-                self.view_with_window_chrome(window, tr!("LocalSend"), content, None)
-            }
+                    shell,
+                )
+            }),
+            Some(AuxiliaryWindow::Transfer) => self.single_window_view(
+                window,
+                HeaderBar::new().title(tr!("Send to Phone")),
+                crate::view::view_transfer_window(self),
+            ),
+            Some(AuxiliaryWindow::LocalSend) => self.single_window_view(
+                window,
+                HeaderBar::new().title(tr!("LocalSend")),
+                crate::view::view_local_send_window(self),
+            ),
             Some(AuxiliaryWindow::Preview) => self.view_preview_window(window),
             None => self.view_main_or_closing_window(window),
         }
     }
 
+    /// 预览窗口：顶栏常驻（标题是文件名，左边“固定”）；视频/音频底部控制条仍自动淡出。
     fn view_preview_window(&self, window: window::Id) -> Element<'_, Message> {
-        let content = self
-            .preview_window_content(self.preview_engine.preview_window_bottom_controls.opacity());
-        if self.preview_engine.preview_window_uses_window_chrome() {
-            return self.view_with_window_chrome(
-                window,
-                tr!("Preview"),
-                content,
-                Some(self.preview_engine.preview_window_pinned),
-            );
-        }
-        let frame_state = self.window_frame_state(window);
-        let content = floating_preview_window_content(
-            content,
-            &self.user_config.window_controls,
-            window,
-            frame_state,
-            self.preview_engine.preview_window_chrome.opacity(),
-            self.preview_engine.preview_window_pinned,
-        );
-        window_resize_frame(content, window, frame_state)
+        let engine = &self.preview_engine;
+        let title = engine
+            .preview_shown_path
+            .as_deref()
+            .and_then(|path| path.file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| tr!("Preview"));
+        let header = HeaderBar::new()
+            .title(title)
+            .start(preview_pin_button(engine.preview_window_pinned));
+        let content = self.preview_window_content(engine.preview_window_bottom_controls.opacity());
+        self.single_window_view(window, header, content)
     }
 
     fn view_main_or_closing_window(&self, window: window::Id) -> Element<'_, Message> {

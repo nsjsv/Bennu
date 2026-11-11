@@ -91,7 +91,7 @@ pub enum PreviewMessage {
     /// 引擎呈现（开启或复用）预览窗口时随任务发出：宿主的焦点簿记
     /// （focused_window）不归引擎所有，由宿主认领。
     PreviewWindowPresented(window::Id),
-    PreviewWindowInitialChromeElapsed(u64),
+    PreviewWindowInitialControlsElapsed(u64),
     SqlitePreviewTablesScrolled,
     SqlitePreviewDataScrolled,
     PreviewDirectoryScrolled,

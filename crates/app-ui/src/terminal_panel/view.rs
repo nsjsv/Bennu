@@ -23,8 +23,6 @@ pub(crate) const CELL_HEIGHT: f32 = FONT_SIZE * 1.4;
 /// 底部窄条高度(收起时)。
 pub(crate) const BOTTOM_BAR_HEIGHT: f32 = 28.0;
 const BOTTOM_BAR_ICON_SIZE: f32 = 15.0;
-/// 左端选中统计相对内容区起点的缩进(侧边栏让位宽度之外的间距)。
-const SUMMARY_SIDEBAR_GAP: f32 = 10.0;
 /// 展开面板顶部的分隔线 + 拖拽热区总高度。
 const DRAG_HANDLE_HEIGHT: f32 = 6.0;
 /// 分隔线可见宽度。
@@ -142,12 +140,7 @@ pub(crate) fn terminal_panel_area(browser: &FileBrowser) -> Element<'_, Message>
                         browser.terminal_panel.height(),
                         tab_strip_visible,
                     )))
-                    // 左侧让位给边栏列,文字从内容区起点开始。
-                    .padding(iced::Padding {
-                        left: browser.sidebar_width,
-                        right: PANEL_HORIZONTAL_PADDING,
-                        ..iced::Padding::default()
-                    })
+                    .padding([0.0, PANEL_HORIZONTAL_PADDING])
                     .style(content_background_style),
             );
             return panel.into();
@@ -173,12 +166,7 @@ fn terminal_tab_strip(browser: &FileBrowser) -> Element<'_, Message> {
     container(strip)
         .width(Length::Fill)
         .height(Length::Fixed(TAB_STRIP_HEIGHT))
-        .padding(iced::Padding {
-            left: browser.sidebar_width,
-            right: PANEL_HORIZONTAL_PADDING,
-            top: TAB_STRIP_VERTICAL_PADDING,
-            bottom: TAB_STRIP_VERTICAL_PADDING,
-        })
+        .padding([TAB_STRIP_VERTICAL_PADDING, PANEL_HORIZONTAL_PADDING])
         .style(content_background_style)
         .into()
 }
@@ -356,9 +344,9 @@ fn collapsed_strip(browser: &FileBrowser) -> Element<'_, Message> {
         container(content)
             .width(Length::Fill)
             .height(Length::Fixed(BOTTOM_BAR_HEIGHT - DIVIDER_LINE_HEIGHT))
-            // 左端统计与终端标签条同源让位侧边栏浮层,随 sidebar_width 变化收放。
+            // 左端统计与终端标签条、终端文字左对齐。
             .padding(iced::Padding {
-                left: browser.sidebar_width + SUMMARY_SIDEBAR_GAP,
+                left: PANEL_HORIZONTAL_PADDING,
                 right: 6.0,
                 ..iced::Padding::default()
             })

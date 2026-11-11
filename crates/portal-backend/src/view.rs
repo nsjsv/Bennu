@@ -11,9 +11,9 @@ use bennu_theme::icons::rotated_chevron_right_view;
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use bennu_theme::smooth_scroll::SmoothScrollArea;
 use bennu_theme::styles::{
-    base_text_color, enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction,
-    hovered_row_style, list_row_style, muted_icon_svg_style, muted_text_color,
-    selected_icon_svg_style, selected_row_style, transparent_icon_button_style,
+    enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction, hovered_row_style,
+    list_row_style, muted_icon_svg_style, muted_text_color, selected_icon_svg_style,
+    selected_row_style, transparent_icon_button_style,
 };
 use bennu_theme::ui_colors;
 use file_core::entry::FileKind;
@@ -28,18 +28,21 @@ use crate::picker_session::{
     DirectoryListing, PickerRow, PickerSession, PickerViewMode, SessionMessage,
     SessionScrollRegion, LIST_ROW_HEIGHT, LIST_ROW_SPACING,
 };
+use crate::{Message, PickerDaemon};
+use bennu_preview::window_shell::{split_window, HeaderBar, SplitPane};
 use bennu_theme::controls::check_box;
 use bennu_theme::controls::dropdown;
 use bennu_theme::controls::text_field;
 use bennu_theme::controls::{normal_button, suggested_button};
 use bennu_theme::typography::{BODY_SIZE, BOLD, HEADING_SIZE};
+use iced::window;
 
 mod address_bar;
 mod columns;
 mod icon_grid;
 mod preview_window;
 mod sidebar;
-mod window_drag_region;
+mod window_frame;
 
 pub(crate) use address_bar::address_input_id;
 pub(crate) use preview_window::preview_window_view;
@@ -74,34 +77,48 @@ fn smooth_scroll_region(
     ))
 }
 
-/// 窗口内容。`emit` 由上层提供，负责把会话消息与窗口关联。
-/// 顶层为「侧边栏 + 拖宽手柄 + 主内容」三段 row（design.md 第 3 节）。
-pub(crate) fn picker_window_view(
+/// 选择窗：侧栏（顶栏写对话框标题）+ 内容（顶栏是导航与地址栏，下面是列表和
+/// 确认栏），与主程序同一套嵌入式外壳。
+pub(crate) fn picker_window_view<'a>(
+    daemon: &'a PickerDaemon,
     session: &PickerSession,
-    theme: &Theme,
-    emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'static,
-) -> Element<'static, SessionMessage> {
-    let mut layout = column![].spacing(10);
-    layout = layout.push(address_bar::navigation_bar(session, emit.clone()));
-    layout = layout.push(listing_body(session, theme, emit.clone()));
-    layout = layout.push(confirm_footer(session, emit));
-
-    container(
-        row![
-            sidebar::sidebar_panel(session),
-            container(layout).width(Length::Fill).height(Length::Fill),
-        ]
-        .height(Length::Fill),
+    window: window::Id,
+) -> Element<'a, Message> {
+    let to_window = move |message| Message::Session(window, message);
+    let emit = |message| message;
+    let body = column![
+        listing_body(session, &daemon.theme, emit),
+        confirm_footer(session, emit),
+    ]
+    .spacing(10)
+    .padding(Padding {
+        top: 0.0,
+        right: 10.0,
+        bottom: 10.0,
+        left: 10.0,
+    });
+    split_window(
+        SplitPane {
+            header: HeaderBar::new().title(session_window_title(session)),
+            body: sidebar::sidebar_panel(session).map(to_window),
+        },
+        SplitPane {
+            header: HeaderBar::new()
+                .center(address_bar::navigation_bar(session, emit).map(to_window)),
+            body: Element::from(body).map(to_window),
+        },
+        session.sidebar_width(),
+        &window_frame::window_shell(daemon, window),
     )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .padding(7)
-    .style(|theme: &Theme| container::Style {
-        background: Some(bennu_theme::ui_colors(theme).background.into()),
-        text_color: Some(base_text_color(theme)),
-        ..container::Style::default()
-    })
-    .into()
+}
+
+/// 窗口标题：调用方显式传入 title 则跟随，空缺时回落模式默认标题。
+/// 协议规定 title 仅作显示，不参与任何选择语义。
+pub(crate) fn session_window_title(session: &PickerSession) -> String {
+    session
+        .title()
+        .map(str::to_string)
+        .unwrap_or_else(|| session.kind().default_title().to_string())
 }
 
 /// 中文等非 ASCII 文案需要 Advanced shaping（与主程序 typography 同规则）。

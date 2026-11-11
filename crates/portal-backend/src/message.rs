@@ -44,23 +44,22 @@ pub(crate) enum Message {
     /// 预览子系统包裹变体：引擎直连变体在 PreviewEngine 内处理，
     /// 回退变体由 preview_host 路由（对齐 app-ui update 入口模式）。
     Preview(PreviewMessage),
-    /// 预览窗 chrome 控制按钮（最小化/最大化切换/关闭）。
-    PreviewWindowControl {
+    /// 窗口按钮（最小化/最大化切换/关闭），选择窗与预览窗共用。
+    WindowControl {
         window: window::Id,
         kind: WindowControlKind,
     },
-    /// 预览窗标题栏按下：单击拖动，双击最大化（拖动面 widget 发布）。
-    PreviewWindowTitlePressed {
+    /// 按下顶栏空白处 → 原生拖动。
+    WindowDragRequested {
         window: window::Id,
-        double_click: bool,
     },
-    /// 预览窗 resize 边缘按下 → 原生 drag_resize。
-    PreviewWindowResizeEdgePressed {
+    /// 窗口边缘按下 → 原生 drag_resize。
+    WindowResizeEdgePressed {
         window: window::Id,
         direction: window::Direction,
     },
     /// 最大化观测回信（toggle 后 is_maximized 查询）。
-    PreviewWindowMaximizeObserved {
+    WindowMaximizeObserved {
         window: window::Id,
         maximized: bool,
     },

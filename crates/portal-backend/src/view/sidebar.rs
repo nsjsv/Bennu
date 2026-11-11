@@ -13,7 +13,7 @@ use bennu_theme::measured_text::measured_middle_ellipsized_text;
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use bennu_theme::styles::{
     enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction, error_notification_style,
-    hovered_sidebar_item_style, selected_sidebar_item_style, sidebar_style,
+    hovered_sidebar_item_style, selected_sidebar_item_style,
 };
 use desktop_linux::NetworkMountState;
 use iced::widget::{column, container, mouse_area, row, scrollable, Space};
@@ -272,7 +272,7 @@ fn connection_item(
 /// 侧边栏主体（含滚动接线与拖宽手柄），由 picker_window_view 组进
 /// 顶层 row 的左段。宽度当次窗口有效，不持久化。
 pub(super) fn sidebar_panel(session: &PickerSession) -> Element<'static, SessionMessage> {
-    let mut content = column![].spacing(6).padding(12);
+    let mut content = column![].spacing(2).padding([4, 8]);
 
     // 位置：Home + 垃圾桶（与主程序 Places 块同序）。
     for location in session
@@ -360,17 +360,13 @@ pub(super) fn sidebar_panel(session: &PickerSession) -> Element<'static, Session
         SIDEBAR_SCROLLBAR_WIDTH,
     ))
     .width(Length::Fill)
-    .height(Length::Fill)
-    .style(sidebar_style);
+    .height(Length::Fill);
 
-    container(
-        row![panel, resize_handle()]
-            .width(Length::Fill)
-            .height(Length::Fill),
-    )
-    .width(Length::Fixed(session.sidebar_width()))
-    .height(Length::Fill)
-    .into()
+    // 宽度由窗口外壳按 sidebar_width 给；右边缘是拖宽手柄。
+    row![panel, resize_handle()]
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
 }
 
 /// 拖宽手柄：6px 窄条，左右光标语义；按下发 `SidebarResizeStarted`，

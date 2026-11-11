@@ -12,7 +12,7 @@ use tokio_util::sync::CancellationToken;
 use crate::document_preview::PendingDocumentPreview;
 use crate::image_preview_viewport::ImagePreviewViewport;
 use crate::preview::{
-    AudioPreviewPlayback, PreviewSize, PreviewState, PreviewWindowChromeState,
+    AudioPreviewPlayback, PreviewBottomControlsState, PreviewSize, PreviewState,
     PreviewWindowProfile, VideoPreviewPlayback,
 };
 use crate::preview_config::{PreviewExtensionRules, PreviewFileSizeLimits};
@@ -61,12 +61,10 @@ pub struct PreviewEngine {
     pub preview_window_profile: PreviewWindowProfile,
     pub preview_window_pinned: bool,
     pub preview_shown_path: Option<std::path::PathBuf>,
-    pub preview_window_chrome: PreviewWindowChromeState,
-    pub preview_window_bottom_controls: PreviewWindowChromeState,
-    pub preview_window_drag_active: bool,
+    pub preview_window_bottom_controls: PreviewBottomControlsState,
     pub preview_window_pointer_y: Option<f32>,
     pub preview_image_viewport: ImagePreviewViewport,
-    pub preview_window_initial_chrome_generation: u64,
+    pub preview_window_initial_controls_generation: u64,
     pub preview_window: Option<Id>,
     /// 预览档位缩略图的展示占位标记（原图已并行加载，标记只决定磁盘
     /// 缓存探测回流是否替换 Loading 展示）；入队/回流入口在宿主缩略图
@@ -131,12 +129,10 @@ impl PreviewEngine {
             preview_window_profile: PreviewWindowProfile::Regular,
             preview_window_pinned: false,
             preview_shown_path: None,
-            preview_window_chrome: PreviewWindowChromeState::default(),
-            preview_window_bottom_controls: PreviewWindowChromeState::default(),
-            preview_window_drag_active: false,
+            preview_window_bottom_controls: PreviewBottomControlsState::default(),
             preview_window_pointer_y: None,
             preview_image_viewport: ImagePreviewViewport::default(),
-            preview_window_initial_chrome_generation: 0,
+            preview_window_initial_controls_generation: 0,
             preview_window: None,
             pending_preview_thumbnail_display: None,
             preview_load_surface: PreviewLoadSurface::StandaloneWindow,
@@ -166,8 +162,8 @@ impl PreviewEngine {
             } => self.accept_text_preview_chunk(path, generation, start_offset, outcome),
             PreviewMessage::PreviewTreeAnimationTick => self.advance_preview_tree_animation(),
             PreviewMessage::PreviewWindowPinToggled => self.toggle_preview_window_pin(),
-            PreviewMessage::PreviewWindowInitialChromeElapsed(generation) => {
-                self.hide_preview_window_initial_chrome(generation);
+            PreviewMessage::PreviewWindowInitialControlsElapsed(generation) => {
+                self.hide_preview_window_initial_controls(generation);
                 Task::none()
             }
             PreviewMessage::AnimatedImageFrameLoaded(frame) => {

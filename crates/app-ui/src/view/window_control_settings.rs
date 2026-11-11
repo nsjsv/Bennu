@@ -4,8 +4,8 @@ use iced::{Alignment, Border, Element, Length, Theme};
 use crate::app::FileBrowser;
 use crate::appearance::subtle_border_color;
 use crate::model::{
-    Message, WindowChromeLayout, WindowControlKind, WindowControlMoveDirection,
-    WindowControlPlacement, WindowControlSide,
+    Message, WindowControlKind, WindowControlMoveDirection, WindowControlPlacement,
+    WindowControlSide,
 };
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::icons::IconSymbol;
@@ -33,11 +33,7 @@ enum WindowControlVisibilityControl {
 }
 
 pub(super) fn window_control_settings_row(browser: &FileBrowser) -> Element<'_, Message> {
-    let mut content = Column::new()
-        .spacing(8)
-        .width(Length::Fill)
-        .push(muted_setting_text(tr!("Window layout")))
-        .push(window_layout_selector(browser));
+    let mut content = Column::new().spacing(8).width(Length::Fill);
     for side in WindowControlSide::ALL {
         if let Some(group) = side_control_group(browser, side) {
             content = content.push(group);
@@ -49,21 +45,6 @@ pub(super) fn window_control_settings_row(browser: &FileBrowser) -> Element<'_, 
                 .on_press(Message::WindowControlsReset),
         )
         .into()
-}
-
-fn window_layout_selector(browser: &FileBrowser) -> Element<'static, Message> {
-    let selected = browser.user_config().window_controls.layout();
-    segmented_choice_row(
-        WindowChromeLayout::ALL
-            .into_iter()
-            .map(|layout| SegmentedChoice {
-                label: layout.label(),
-                selected: layout == selected,
-                message: Some(Message::WindowChromeLayoutSelected(layout)),
-                tooltip: None,
-            })
-            .collect(),
-    )
 }
 
 // A side with no placements renders nothing at all — not even its header.

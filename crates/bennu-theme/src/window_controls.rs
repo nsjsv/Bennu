@@ -1,6 +1,5 @@
-//! 窗口 chrome 域模型：标题栏布局、窗口控件摆放/可见性/侧别偏好与
-//! 窗框状态。自主程序 app-ui 原样搬移（预览浮动窗与设置窗口共用），
-//! 供主程序与后续下沉的预览视图层同源消费。
+//! 窗口 chrome 域模型：窗口控件摆放/可见性/侧别偏好与窗框状态。主程序与
+//! portal 的所有窗口经 `window_shell` 同源消费。
 
 use std::collections::HashSet;
 
@@ -117,44 +116,6 @@ pub enum WindowFrameState {
     Maximized,
 }
 
-pub const WINDOW_TITLE_BAR_HEIGHT: f32 = 40.0;
-pub const WINDOW_TOP_BAR_HEIGHT: f32 = 48.0;
-/// 全窗工具栏顶栏高度(上下 padding 18 + 控制行)。顶栏自身用此值
-/// 定高,侧栏/窗格/面板的 y 向几何偏移才能与渲染严格一致。
-pub const MAIN_TOOLBAR_ROW_HEIGHT: f32 = 72.0;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WindowChromeLayout {
-    IntegratedNavigation,
-    SeparateTitleBar,
-}
-
-impl WindowChromeLayout {
-    pub const ALL: [Self; 2] = [Self::IntegratedNavigation, Self::SeparateTitleBar];
-
-    pub fn label(self) -> String {
-        match self {
-            Self::IntegratedNavigation => tr!("Integrated navigation"),
-            Self::SeparateTitleBar => tr!("Separate title bar"),
-        }
-    }
-
-    pub fn config_value(self) -> &'static str {
-        match self {
-            Self::IntegratedNavigation => "integrated_navigation",
-            Self::SeparateTitleBar => "separate_title_bar",
-        }
-    }
-
-    pub fn from_config_value(value: &str) -> Option<Self> {
-        match value {
-            "integrated_navigation" => Some(Self::IntegratedNavigation),
-            "separate_title_bar" => Some(Self::SeparateTitleBar),
-            _ => None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WindowControlPlacement {
     kind: WindowControlKind,
@@ -190,15 +151,11 @@ impl WindowControlPlacement {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowControlsConfig {
-    layout: WindowChromeLayout,
     placements: Vec<WindowControlPlacement>,
 }
 
 impl WindowControlsConfig {
-    pub fn from_partial_placements(
-        layout: WindowChromeLayout,
-        placements: Vec<WindowControlPlacement>,
-    ) -> Self {
+    pub fn from_partial_placements(placements: Vec<WindowControlPlacement>) -> Self {
         let mut seen = HashSet::with_capacity(WindowControlKind::ALL.len());
         let mut normalized = Vec::with_capacity(WindowControlKind::ALL.len());
         for placement in placements {
@@ -216,13 +173,8 @@ impl WindowControlsConfig {
             }
         }
         Self {
-            layout,
             placements: normalized,
         }
-    }
-
-    pub fn layout(&self) -> WindowChromeLayout {
-        self.layout
     }
 
     pub fn placements(&self) -> &[WindowControlPlacement] {
@@ -245,14 +197,6 @@ impl WindowControlsConfig {
             .copied()
             .find(|placement| placement.kind == kind)
             .expect("normalized window controls contain every kind")
-    }
-
-    pub fn select_layout(&mut self, layout: WindowChromeLayout) -> bool {
-        if self.layout == layout {
-            return false;
-        }
-        self.layout = layout;
-        true
     }
 
     pub fn set_visibility(
@@ -331,7 +275,6 @@ impl WindowControlsConfig {
 impl Default for WindowControlsConfig {
     fn default() -> Self {
         Self {
-            layout: WindowChromeLayout::IntegratedNavigation,
             placements: WindowControlKind::ALL
                 .into_iter()
                 .map(default_placement)
@@ -371,10 +314,9 @@ mod tests {
     }
 
     #[test]
-    fn default_uses_integrated_right_standard_order() {
+    fn default_puts_every_control_on_the_right_in_standard_order() {
         let config = WindowControlsConfig::default();
 
-        assert_eq!(config.layout(), WindowChromeLayout::IntegratedNavigation);
         assert!(kinds_on(&config, WindowControlSide::Left).is_empty());
         assert_eq!(
             kinds_on(&config, WindowControlSide::Right),
@@ -388,26 +330,23 @@ mod tests {
 
     #[test]
     fn partial_placements_drop_duplicates_fill_missing_and_keep_close_visible() {
-        let config = WindowControlsConfig::from_partial_placements(
-            WindowChromeLayout::SeparateTitleBar,
-            vec![
-                WindowControlPlacement::new(
-                    WindowControlKind::Close,
-                    WindowControlSide::Left,
-                    WindowControlVisibility::Hidden,
-                ),
-                WindowControlPlacement::new(
-                    WindowControlKind::Close,
-                    WindowControlSide::Right,
-                    WindowControlVisibility::Visible,
-                ),
-                WindowControlPlacement::new(
-                    WindowControlKind::Minimize,
-                    WindowControlSide::Left,
-                    WindowControlVisibility::Hidden,
-                ),
-            ],
-        );
+        let config = WindowControlsConfig::from_partial_placements(vec![
+            WindowControlPlacement::new(
+                WindowControlKind::Close,
+                WindowControlSide::Left,
+                WindowControlVisibility::Hidden,
+            ),
+            WindowControlPlacement::new(
+                WindowControlKind::Close,
+                WindowControlSide::Right,
+                WindowControlVisibility::Visible,
+            ),
+            WindowControlPlacement::new(
+                WindowControlKind::Minimize,
+                WindowControlSide::Left,
+                WindowControlVisibility::Hidden,
+            ),
+        ]);
 
         assert_eq!(config.placements().len(), 3);
         assert_eq!(
@@ -502,26 +441,23 @@ mod tests {
     fn move_within_side_skips_foreign_side_entries() {
         // Pin the exact interleaved Vec [Close(L), Min(R), Max(R)]; plain
         // move_to_side appends to the Vec tail and cannot reach this order.
-        let mut config = WindowControlsConfig::from_partial_placements(
-            WindowChromeLayout::IntegratedNavigation,
-            vec![
-                WindowControlPlacement::new(
-                    WindowControlKind::Close,
-                    WindowControlSide::Left,
-                    WindowControlVisibility::Visible,
-                ),
-                WindowControlPlacement::new(
-                    WindowControlKind::Minimize,
-                    WindowControlSide::Right,
-                    WindowControlVisibility::Visible,
-                ),
-                WindowControlPlacement::new(
-                    WindowControlKind::MaximizeRestore,
-                    WindowControlSide::Right,
-                    WindowControlVisibility::Visible,
-                ),
-            ],
-        );
+        let mut config = WindowControlsConfig::from_partial_placements(vec![
+            WindowControlPlacement::new(
+                WindowControlKind::Close,
+                WindowControlSide::Left,
+                WindowControlVisibility::Visible,
+            ),
+            WindowControlPlacement::new(
+                WindowControlKind::Minimize,
+                WindowControlSide::Right,
+                WindowControlVisibility::Visible,
+            ),
+            WindowControlPlacement::new(
+                WindowControlKind::MaximizeRestore,
+                WindowControlSide::Right,
+                WindowControlVisibility::Visible,
+            ),
+        ]);
 
         // Ahead of Minimize the Vec holds only the foreign-side Close: the
         // nearest same-side scan must skip it and refuse, never swap across

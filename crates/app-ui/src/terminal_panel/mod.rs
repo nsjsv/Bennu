@@ -292,11 +292,13 @@ impl FileBrowser {
         self.tab().current_dir.clone()
     }
 
-    /// 内容区宽度能容纳的终端列数(抽屉在侧边栏占位右侧)。
+    /// 抽屉在内容栏里、左右各留 `PANEL_HORIZONTAL_PADDING`：标签条和终端画布都排在这个宽度里。
+    pub(crate) fn terminal_panel_inner_width(&self) -> f32 {
+        (self.main_content_width() - PANEL_HORIZONTAL_PADDING * 2.0).max(1.0)
+    }
+
     pub(crate) fn terminal_panel_grid_columns(&self) -> usize {
-        let width =
-            (self.main_window_width - self.sidebar_width - PANEL_HORIZONTAL_PADDING * 2.0).max(1.0);
-        ((width / view::CELL_WIDTH).floor() as usize).max(2)
+        ((self.terminal_panel_inner_width() / view::CELL_WIDTH).floor() as usize).max(2)
     }
 
     /// 面板高度稳定后把新尺寸同步给所有 PTY;动画期间跳过,结束时再收敛。
@@ -625,6 +627,20 @@ mod tests {
         assert!(!view::tab_strip_visible_for_tab_count(0));
         assert!(!view::tab_strip_visible_for_tab_count(1));
         assert!(view::tab_strip_visible_for_tab_count(2));
+    }
+
+    #[test]
+    fn terminal_grid_fits_the_content_column_inside_its_padding() {
+        // 抽屉在侧栏右边的内容栏里：只减左右留白，不再另减一次侧栏（2026-11-10 多减过）。
+        let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+        browser.main_window_width = 1_000.0;
+        browser.sidebar_width = 200.0;
+        let inner_width = 800.0 - PANEL_HORIZONTAL_PADDING * 2.0;
+        assert_eq!(browser.terminal_panel_inner_width(), inner_width);
+        assert_eq!(
+            browser.terminal_panel_grid_columns(),
+            (inner_width / view::CELL_WIDTH).floor() as usize
+        );
     }
 
     #[test]

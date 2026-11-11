@@ -27,8 +27,8 @@ use crate::model::{
     list_column_kind_config_value, list_column_kind_from_config_value, BrowserViewMode,
     ContextMenuLayoutConfigValues, ContextMenuPreferences, FileGroupingMode, LastSearchScope,
     ListColumnConfig, ListDirectorySizeDisplayMode, ListSortPreference, ListViewPreferences,
-    WindowChromeLayout, WindowControlKind, WindowControlPlacement, WindowControlSide,
-    WindowControlVisibility, WindowControlsConfig,
+    WindowControlKind, WindowControlPlacement, WindowControlSide, WindowControlVisibility,
+    WindowControlsConfig,
 };
 use crate::network_connections::SavedNetworkConnection;
 use crate::shortcuts::ShortcutConfig;
@@ -235,7 +235,6 @@ impl UserPreferences {
             browser_view_mode_config_value(self.browser_view_mode).to_owned();
         stored.visible_column_count =
             normalize_visible_column_count(self.visible_column_count) as u32;
-        stored.window_chrome_layout = self.window_controls.layout().config_value().to_owned();
         stored.window_controls = stored_window_controls(&self.window_controls);
         stored.columns_view_density = Some(self.columns_view_density.index());
         stored.list_view_density = Some(self.list_view_density.index());
@@ -694,11 +693,6 @@ fn window_controls_from_stored(
     default: &UserPreferences,
     unrecognized: &mut UnrecognizedSettings,
 ) -> WindowControlsConfig {
-    let layout = unrecognized.value_or_default(
-        "window_chrome_layout",
-        WindowChromeLayout::from_config_value(&stored.window_chrome_layout),
-        default.window_controls.layout(),
-    );
     let placements = stored
         .window_controls
         .iter()
@@ -721,7 +715,7 @@ fn window_controls_from_stored(
         stored.window_controls.len(),
         placements.len(),
     );
-    WindowControlsConfig::from_partial_placements(layout, placements)
+    WindowControlsConfig::from_partial_placements(placements)
 }
 
 fn stored_window_controls(

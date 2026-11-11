@@ -9,9 +9,7 @@ use std::time::{Duration, Instant};
 use iced::{Point, Task};
 
 use super::session::{SessionId, TerminalSession};
-use super::{
-    FileBrowser, MIN_PANEL_HEIGHT, PANEL_HORIZONTAL_PADDING, TERMINAL_TAB_DRAG_ACTIVATION_DISTANCE,
-};
+use super::{FileBrowser, MIN_PANEL_HEIGHT, TERMINAL_TAB_DRAG_ACTIVATION_DISTANCE};
 use crate::animation::elapsed_fraction;
 use crate::model::Message;
 use bennu_theme::animation::ease_out_cubic;
@@ -372,8 +370,7 @@ impl FileBrowser {
     /// N 个标签和最右 1 个加号排成 N+1 项、N 个间距,标签均分剩余宽度。
     fn terminal_tab_slot_width(&self) -> f32 {
         let count = self.terminal_panel.tabs.len().max(1) as f32;
-        let strip_width =
-            (self.main_window_width - self.sidebar_width - PANEL_HORIZONTAL_PADDING).max(1.0);
+        let strip_width = self.terminal_panel_inner_width();
         let shareable_width =
             strip_width - super::view::TAB_ADD_BUTTON_SIZE - super::view::TAB_STRIP_SPACING * count;
         (shareable_width / count).max(MIN_TAB_SLOT_WIDTH)

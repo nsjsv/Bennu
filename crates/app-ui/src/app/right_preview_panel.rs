@@ -173,8 +173,7 @@ impl FileBrowser {
     }
 
     fn right_preview_panel_width_for_window(&self, width: f32) -> f32 {
-        let max_width =
-            (self.main_window_width - self.sidebar_width - MIN_BROWSER_AREA_WIDTH).max(1.0);
+        let max_width = (self.main_content_width() - MIN_BROWSER_AREA_WIDTH).max(1.0);
         config::normalize_right_preview_panel_width(width).min(max_width)
     }
 
@@ -230,15 +229,8 @@ impl FileBrowser {
     }
 
     /// 面板内容总高(信息区 + 分隔条 + 预览区),不含内容留白。
-    /// 全窗工具栏顶栏横贯后,面板从顶栏下方开始,两种 chrome 布局
-    /// 都要让位顶栏;独立标题栏布局再额外让位应用内标题条。
+    /// 面板和窗格一样从内容顶栏下方开始。
     pub(crate) fn right_preview_panel_content_height(&self) -> f32 {
-        let title_bar_height = match self.user_config.window_controls.layout() {
-            crate::model::WindowChromeLayout::SeparateTitleBar => {
-                crate::model::WINDOW_TOP_BAR_HEIGHT
-            }
-            crate::model::WindowChromeLayout::IntegratedNavigation => 0.0,
-        };
         // 终端面板展开时占据 height();收起时横贯底部的窄条同样让位。
         let terminal_height =
             if self.terminal_panel.height() >= crate::terminal_panel::view::CELL_HEIGHT {
@@ -247,8 +239,7 @@ impl FileBrowser {
                 crate::terminal_panel::view::BOTTOM_BAR_HEIGHT
             };
         (self.main_window_height
-            - title_bar_height
-            - crate::model::MAIN_TOOLBAR_ROW_HEIGHT
+            - self.main_panes_area_top()
             - terminal_height
             - PANEL_CONTENT_PADDING * 2.0)
             .max(MIN_PANEL_CONTENT_HEIGHT)

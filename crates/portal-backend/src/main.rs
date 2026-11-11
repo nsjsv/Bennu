@@ -22,6 +22,7 @@ mod tasks;
 mod theme;
 mod thumbnail_dispatch;
 mod view;
+mod window_frames;
 
 pub(crate) use message::Message;
 
@@ -56,6 +57,8 @@ struct PickerDaemon {
     cursor_position: Option<iced::Point>,
     /// 进行中的侧栏拖宽：窗口 → 起点（指针 X + 起始宽度）。
     sidebar_resize: HashMap<window::Id, sidebar_bridge::SidebarResizeDrag>,
+    /// 各窗口的最大化状态（顶栏窗口按钮与缩放边用）。
+    frames: window_frames::WindowFrames,
     /// 全进程唯一的预览会话（多选择窗并发时新请求顶掉旧会话，
     /// design 决策 #3）；含预览窗焦点/请求窗簿记。
     preview: preview_host::PreviewHost,
@@ -72,6 +75,7 @@ impl PickerDaemon {
             keyboard_modifiers: keyboard::Modifiers::default(),
             cursor_position: None,
             sidebar_resize: HashMap::new(),
+            frames: window_frames::WindowFrames::default(),
             preview: preview_host::PreviewHost::new(theme::state_database_path()),
         }
     }
@@ -99,6 +103,7 @@ fn update(daemon: &mut PickerDaemon, message: Message) -> Task<Message> {
             apply_session_message(daemon, window_id, session_message)
         }
         Message::WindowClosed(window_id) => {
+            daemon.frames.forget(window_id);
             close_picker_window(daemon, window_id);
             // 预览窗被外部关闭或请求窗先亡：预览会话一并收尾。
             daemon.preview.handle_window_closed(window_id)
@@ -128,20 +133,15 @@ fn update(daemon: &mut PickerDaemon, message: Message) -> Task<Message> {
         Message::Preview(preview_message) => {
             preview_host::handle_preview_message(daemon, preview_message)
         }
-        Message::PreviewWindowControl { window, kind } => {
-            daemon.preview.handle_window_control(window, kind)
+        Message::WindowControl { window, kind } => {
+            window_frames::handle_window_control(daemon, window, kind)
         }
-        Message::PreviewWindowTitlePressed {
-            window,
-            double_click,
-        } => daemon
-            .preview
-            .handle_title_bar_pressed(window, double_click),
-        Message::PreviewWindowResizeEdgePressed { window, direction } => {
-            daemon.preview.handle_resize_edge_pressed(window, direction)
+        Message::WindowDragRequested { window } => window::drag(window),
+        Message::WindowResizeEdgePressed { window, direction } => {
+            window_frames::handle_resize_edge_pressed(daemon, window, direction)
         }
-        Message::PreviewWindowMaximizeObserved { window, maximized } => {
-            daemon.preview.accept_maximize_observed(window, maximized);
+        Message::WindowMaximizeObserved { window, maximized } => {
+            window_frames::accept_maximize_observed(daemon, window, maximized);
             Task::none()
         }
         Message::PreviewPointerMoved { window, position } => {
@@ -248,7 +248,8 @@ fn open_picker_window(daemon: &mut PickerDaemon, invocation: PickerInvocation) -
         size: view::window_size(),
         min_size: Some(view::window_min_size()),
         resizable: true,
-        decorations: true,
+        // 选择窗自己画顶栏（与主程序同一套嵌入式外壳）。
+        decorations: false,
         ..window::Settings::default()
     };
     // 独立 app-id 供 niri window-rule 悬浮匹配（docs/niri.md），与 app-ui
@@ -556,8 +557,7 @@ fn view_picker(daemon: &PickerDaemon, window_id: window::Id) -> Element<'_, Mess
         // 拾取窗之外的未知窗口安全空白。
         return iced::widget::text("").into();
     };
-    view::picker_window_view(session, &daemon.theme, |message| message)
-        .map(move |message| Message::Session(window_id, message))
+    view::picker_window_view(daemon, session, window_id)
 }
 
 fn daemon_title(daemon: &PickerDaemon, window_id: window::Id) -> String {
@@ -567,17 +567,8 @@ fn daemon_title(daemon: &PickerDaemon, window_id: window::Id) -> String {
     daemon
         .windows
         .get(&window_id)
-        .map(session_window_title)
+        .map(view::session_window_title)
         .unwrap_or_else(|| "Bennu 文件选择".to_string())
-}
-
-/// 窗口标题：调用方显式传入 title 则跟随，空缺时回落模式默认标题。
-/// 协议规定 title 仅作显示，不参与任何选择语义。
-fn session_window_title(session: &PickerSession) -> String {
-    session
-        .title()
-        .map(str::to_string)
-        .unwrap_or_else(|| session.kind().default_title().to_string())
 }
 
 async fn build_portal_connection(
@@ -651,11 +642,27 @@ fn main() {
     }
 }
 
+/// 测试专用 daemon：绕过 new() 的主题解析（需 tokio reactor），
+/// 预览库路径指向空（配置回落默认，隔离测试机配置）。
+#[cfg(test)]
+pub(crate) fn test_daemon() -> PickerDaemon {
+    PickerDaemon {
+        windows: HashMap::new(),
+        theme: Theme::Light,
+        keyboard_modifiers: keyboard::Modifiers::default(),
+        cursor_position: None,
+        sidebar_resize: HashMap::new(),
+        frames: window_frames::WindowFrames::default(),
+        preview: preview_host::PreviewHost::new(std::path::PathBuf::new()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::picker_request::{PickerKind, PickerRequestSpec};
     use crate::subscriptions::active_media_streams;
+    use crate::view::session_window_title;
 
     fn session_with_title(title: Option<&str>) -> PickerSession {
         let (reply, _receiver) = tokio::sync::oneshot::channel();
@@ -726,18 +733,5 @@ mod tests {
             .video
             .is_some_and(|(stream_path, _, _)| stream_path == path));
         assert!(media.animated_image.is_none());
-    }
-
-    /// 测试专用 daemon：绕过 new() 的主题解析（需 tokio reactor），
-    /// 预览库路径指向空（配置回落默认，隔离测试机配置）。
-    fn test_daemon() -> PickerDaemon {
-        PickerDaemon {
-            windows: HashMap::new(),
-            theme: Theme::Light,
-            keyboard_modifiers: keyboard::Modifiers::default(),
-            cursor_position: None,
-            sidebar_resize: HashMap::new(),
-            preview: preview_host::PreviewHost::new(std::path::PathBuf::new()),
-        }
     }
 }

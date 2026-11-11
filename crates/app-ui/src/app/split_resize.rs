@@ -80,7 +80,7 @@ impl FileBrowser {
 
     pub(crate) fn split_axis_extent(&self, axis: SplitAxis) -> f32 {
         match axis {
-            SplitAxis::Horizontal => (self.main_window_width - self.sidebar_width).max(0.0),
+            SplitAxis::Horizontal => self.main_content_width().max(0.0),
             SplitAxis::Vertical => self.main_window_height.max(0.0),
         }
     }

@@ -17,11 +17,31 @@ use bennu_theme::animation::ease_out_cubic as sidebar_bookmark_ease_out_cubic;
 #[cfg(test)]
 mod tests;
 
-const SIDEBAR_HEADER_HEIGHT: f32 = 24.0;
-const SIDEBAR_LOCATION_ROW_HEIGHT: f32 = 32.8;
-const SIDEBAR_ROW_SPACING: f32 = 6.0;
-const SIDEBAR_SECTION_LABEL_HEIGHT: f32 = 20.0;
-const SIDEBAR_VERTICAL_PADDING: f32 = 24.0;
+use crate::view::{
+    SIDEBAR_LIST_PADDING_TOP, SIDEBAR_ROW_HEIGHT as SIDEBAR_LOCATION_ROW_HEIGHT,
+    SIDEBAR_ROW_SPACING, SIDEBAR_SECTION_LABEL_HEIGHT,
+};
+
+/// 侧栏收藏夹上面那几行固定条目，按显示顺序。界面按它画，收藏夹拖放落点按它的
+/// 行数算——两处共用这一份，加一个固定入口不会再让落点错位（LocalSend 入口曾被漏算）。
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum SidebarFixedEntry<'a> {
+    Location(&'a SidebarLocation),
+    Trash,
+    LocalSend,
+}
+
+impl FileBrowser {
+    pub(crate) fn sidebar_fixed_entries(&self) -> Vec<SidebarFixedEntry<'_>> {
+        self.sidebar_locations
+            .iter()
+            .filter(|location| !location.kind.is_user_favorite())
+            .map(SidebarFixedEntry::Location)
+            .chain([SidebarFixedEntry::Trash, SidebarFixedEntry::LocalSend])
+            .collect()
+    }
+}
+
 const SIDEBAR_BOOKMARK_INSERT_EDGE_HEIGHT: f32 = 8.0;
 const SIDEBAR_BOOKMARK_MOTION_DURATION: Duration = Duration::from_millis(150);
 
@@ -435,17 +455,10 @@ impl FileBrowser {
         sidebar_bookmark_pointer_target(position_y, first_row_top, &favorites)
     }
 
+    /// 列表从侧栏顶栏下沿开始：固定条目 → “收藏夹”标题 → 第一个收藏。
     fn sidebar_favorite_first_row_top(&self) -> f32 {
-        let fixed_location_count = self
-            .sidebar_locations
-            .iter()
-            .filter(|location| !location.kind.is_user_favorite())
-            .count()
-            + 1;
-        SIDEBAR_VERTICAL_PADDING / 2.0
-            + SIDEBAR_HEADER_HEIGHT
-            + SIDEBAR_ROW_SPACING
-            + fixed_location_count as f32 * sidebar_bookmark_motion_stride()
+        SIDEBAR_LIST_PADDING_TOP
+            + self.sidebar_fixed_entries().len() as f32 * sidebar_bookmark_motion_stride()
             + SIDEBAR_SECTION_LABEL_HEIGHT
             + SIDEBAR_ROW_SPACING
     }

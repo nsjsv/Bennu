@@ -12,7 +12,6 @@ use bennu_theme::ui_colors;
 
 use super::network_settings::preview_size_limit_rows;
 use super::settings_group::{expander_row, navigation_row, settings_card, SettingsRow};
-use super::{themed_icon, IconSymbol, IconTone};
 
 /// 每行标签数量：标签按内容收缩，设置面板宽度下 8 个一行不溢出。
 const CHIPS_PER_ROW: usize = 8;
@@ -29,19 +28,10 @@ pub(super) fn preview_settings_entry_card() -> Element<'static, Message> {
     )])
 }
 
-/// 预览设置二级页面：返回按钮 + 各类型扩展名 + 最大预览大小。
+/// 预览设置二级页面：各类型扩展名 + 最大预览大小（后退在顶栏）。
 pub(super) fn preview_settings_subpage_sections(
     browser: &FileBrowser,
 ) -> Vec<Element<'_, Message>> {
-    let back = normal_button(
-        row![
-            themed_icon(IconSymbol::ArrowLeft, IconTone::Normal, 13.0),
-            readable_text(tr!("Back")),
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center),
-    )
-    .on_press(Message::SettingsSubpageClosed);
     let extension_rows = config::PreviewFileSizeKind::ALL
         .iter()
         .enumerate()
@@ -49,7 +39,6 @@ pub(super) fn preview_settings_subpage_sections(
         .collect();
 
     vec![
-        back.into(),
         settings_card(extension_rows),
         settings_card(preview_size_limit_rows(browser)),
     ]

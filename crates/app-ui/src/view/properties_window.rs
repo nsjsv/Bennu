@@ -4,7 +4,7 @@ use std::time::SystemTime;
 
 use bennu_preview::formatting::file_kind_label;
 use file_core::FileKind;
-use iced::widget::{button, column, container, row, Button, Column, Space};
+use iced::widget::{button, column, container, row, Button, Column};
 use iced::{Alignment, Element, Length};
 
 use crate::appearance::{
@@ -23,9 +23,11 @@ use bennu_preview::panel_text::readable_text;
 use bennu_theme::icons::IconSymbol;
 
 use super::auxiliary_window_layout::{
-    auxiliary_detail_scroller, auxiliary_sidebar, auxiliary_sidebar_button, auxiliary_split_window,
+    auxiliary_detail_scroller, auxiliary_sidebar_button, auxiliary_sidebar_list,
+    AUXILIARY_SIDEBAR_WIDTH,
 };
 use super::{auxiliary_window_message, themed_icon, IconTone};
+use bennu_preview::window_shell::{single_window, split_window, HeaderBar, SplitPane, WindowShell};
 use bennu_theme::controls::switch;
 use bennu_theme::controls::{normal_button, normal_button_style};
 use bennu_theme::typography::{BOLD, CAPTION_SIZE, TITLE_SIZE};
@@ -34,28 +36,37 @@ const PROPERTIES_ICON_SIZE: f32 = 44.0;
 const PROPERTIES_LABEL_WIDTH: f32 = 128.0;
 const PERMISSION_PRIVILEGE_WIDTH: f32 = 184.0;
 
-pub(crate) fn view_properties_window(
-    properties: Option<&FilePropertiesState>,
+pub(crate) fn view_properties_window<'a>(
+    properties: Option<&'a FilePropertiesState>,
     scrollbar_visibility: ScrollbarVisibility,
     scrollbar_viewport: Option<ScrollbarViewport>,
-) -> Element<'_, Message> {
+    shell: WindowShell<'a, Message>,
+) -> Element<'a, Message> {
+    let single = |body: Element<'a, Message>| {
+        single_window(HeaderBar::new().title(tr!("Properties")), body, &shell)
+    };
     let Some(properties) = properties else {
-        return auxiliary_window_message(tr!("No properties are available."));
+        return single(auxiliary_window_message(tr!(
+            "No properties are available."
+        )));
     };
 
     let target_label = properties_target_label(properties);
     match &properties.load_state {
-        FilePropertiesLoadState::Loading => properties_loading_view(target_label),
-        FilePropertiesLoadState::LoadingAggregate(snapshot) => {
-            aggregate_properties_loading_view(snapshot, scrollbar_visibility, scrollbar_viewport)
-        }
+        FilePropertiesLoadState::Loading => single(properties_loading_view(target_label)),
+        FilePropertiesLoadState::LoadingAggregate(snapshot) => single(
+            aggregate_properties_loading_view(snapshot, scrollbar_visibility, scrollbar_viewport),
+        ),
         FilePropertiesLoadState::Loaded(presentation) => properties_split_view(
             properties,
             presentation,
             scrollbar_visibility,
             scrollbar_viewport,
+            &shell,
         ),
-        FilePropertiesLoadState::Failed(error) => properties_error_view(target_label, error),
+        FilePropertiesLoadState::Failed(error) => {
+            single(properties_error_view(target_label, error))
+        }
     }
 }
 
@@ -125,9 +136,10 @@ fn properties_split_view<'a>(
     presentation: &'a FilePropertiesPresentation,
     scrollbar_visibility: ScrollbarVisibility,
     scrollbar_viewport: Option<ScrollbarViewport>,
+    shell: &WindowShell<'a, Message>,
 ) -> Element<'a, Message> {
-    let sidebar = properties_category_sidebar(properties.selected_category);
-    let detail = match properties.selected_category {
+    let selected = properties.selected_category;
+    let detail = match selected {
         FilePropertiesCategory::Information => match presentation {
             FilePropertiesPresentation::Single(snapshot) => {
                 properties_information_detail(snapshot, scrollbar_visibility, scrollbar_viewport)
@@ -147,21 +159,20 @@ fn properties_split_view<'a>(
             scrollbar_viewport,
         ),
     };
-
-    auxiliary_split_window(sidebar, detail)
-}
-
-fn properties_category_sidebar(selected: FilePropertiesCategory) -> Element<'static, Message> {
-    let mut categories = Column::new()
-        .spacing(6)
-        .push(readable_text(tr!("Properties")).size(TITLE_SIZE).font(BOLD))
-        .push(Space::new().height(Length::Fixed(6.0)));
-
-    for category in FilePropertiesCategory::ALL {
-        categories = categories.push(properties_category_button(category, selected));
-    }
-
-    auxiliary_sidebar(categories)
+    let sidebar = SplitPane {
+        header: HeaderBar::new().title(tr!("Properties")),
+        body: auxiliary_sidebar_list(
+            FilePropertiesCategory::ALL
+                .into_iter()
+                .map(|category| properties_category_button(category, selected).into())
+                .collect(),
+        ),
+    };
+    let content = SplitPane {
+        header: HeaderBar::new().title(selected.label()),
+        body: detail,
+    };
+    split_window(sidebar, content, AUXILIARY_SIDEBAR_WIDTH, shell)
 }
 
 fn properties_category_button(

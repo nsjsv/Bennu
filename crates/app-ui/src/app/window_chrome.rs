@@ -59,13 +59,7 @@ impl FileBrowser {
         Task::none()
     }
 
-    pub(super) fn start_window_drag(&mut self, window: window::Id) -> Task<Message> {
-        if self.preview_engine.preview_window == Some(window) {
-            let preview_engine = &mut self.preview_engine;
-            preview_engine.cancel_preview_window_initial_chrome_hide();
-            preview_engine.preview_window_drag_active = true;
-            preview_engine.preview_window_chrome.start_reveal();
-        }
+    pub(super) fn start_window_drag(&self, window: window::Id) -> Task<Message> {
         window::drag(window)
     }
 

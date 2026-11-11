@@ -34,7 +34,7 @@ use iced::{Color, Theme};
 use crate::{ui_colors, AppearanceMode};
 
 /// 前景色按透明度叠在任何底色上：按钮、输入框底色不依赖它所在的卡片或窗口底色。
-fn foreground_tint(theme: &Theme, alpha: f32) -> Color {
+pub(crate) fn foreground_tint(theme: &Theme, alpha: f32) -> Color {
     Color {
         a: alpha,
         ..ui_colors(theme).on_surface

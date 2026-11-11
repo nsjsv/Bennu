@@ -150,9 +150,8 @@ mod context_menu_layout;
 #[cfg(test)]
 mod context_menu_layout_tests;
 pub(crate) use bennu_theme::window_controls::{
-    WindowChromeLayout, WindowControlKind, WindowControlMoveDirection, WindowControlPlacement,
-    WindowControlSide, WindowControlVisibility, WindowControlsConfig, WindowFrameState,
-    MAIN_TOOLBAR_ROW_HEIGHT, WINDOW_TITLE_BAR_HEIGHT, WINDOW_TOP_BAR_HEIGHT,
+    WindowControlKind, WindowControlMoveDirection, WindowControlPlacement, WindowControlSide,
+    WindowControlVisibility, WindowControlsConfig, WindowFrameState,
 };
 pub(crate) use context_menu_items::{FileAreaMenuItem, SearchResultMenuItem, TrashMenuItem};
 pub(crate) use context_menu_layout::{
@@ -519,10 +518,8 @@ pub(crate) enum Message {
         button: mouse::Button,
         status: event::Status,
     },
-    WindowPointerReleased {
-        window: window::Id,
-        status: event::Status,
-    },
+    /// 任一窗口里松开左键：结束进行中的拖拽（被控件捕获时只结束标签拖拽）。
+    WindowPointerReleased(event::Status),
     AddressEditingRequested(BrowserPaneId),
     BreadcrumbSegmentPressed(BrowserPaneId, PathBuf),
     AddressDraftChanged(BrowserPaneId, String),
@@ -647,7 +644,6 @@ pub(crate) enum Message {
     ColorSchemePresetSelected(ColorSchemePreset),
     CustomColorSchemeImportPressed,
     CustomColorSchemeImportCompleted(Result<Option<String>, String>),
-    WindowChromeLayoutSelected(WindowChromeLayout),
     WindowControlVisibilityToggled(WindowControlKind),
     WindowControlSideSelected(WindowControlKind, WindowControlSide),
     WindowControlMoveRequested(WindowControlKind, WindowControlMoveDirection),

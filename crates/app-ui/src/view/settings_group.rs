@@ -24,7 +24,6 @@ use bennu_theme::ui_colors;
 
 use super::auxiliary_window_layout::auxiliary_detail_scroller;
 use super::option_controls::hover_background_color;
-use super::settings_window::chrome_top_spacer;
 
 /// 组与组之间的距离（紧凑密度定稿值，见 ui-style-preferences）。
 pub(super) const SETTINGS_GROUP_SPACING: f32 = 16.0;
@@ -39,7 +38,7 @@ pub(super) enum RowNote {
     Error(String),
 }
 
-/// 一个设置分类页：顶部给窗口按钮让位，内容最宽 [`PAGE_MAX_WIDTH`] 并居中，可滚动。
+/// 一个设置分类页：内容最宽 [`PAGE_MAX_WIDTH`] 并居中，可滚动。
 pub(super) fn settings_page<'a>(
     browser: &FileBrowser,
     sections: Vec<Element<'a, Message>>,
@@ -50,11 +49,7 @@ pub(super) fn settings_page<'a>(
         .width(Length::Fill)
         .max_width(PAGE_MAX_WIDTH);
     auxiliary_detail_scroller(
-        column![
-            chrome_top_spacer(browser),
-            container(sections).center_x(Length::Fill),
-        ]
-        .spacing(SETTINGS_GROUP_SPACING),
+        column![container(sections).center_x(Length::Fill)],
         region.clone(),
         browser.scrollbar_visibility_for(&region),
         browser.scrollbar_viewport_for(&region),

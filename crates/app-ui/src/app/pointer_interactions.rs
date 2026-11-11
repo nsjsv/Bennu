@@ -23,29 +23,14 @@ impl FileBrowser {
         self.hovered_list_header_column = None;
     }
 
-    pub(super) fn finish_pointer_drag_interactions(&mut self, window: window::Id) -> Task<Message> {
+    pub(super) fn finish_pointer_drag_interactions(&mut self) -> Task<Message> {
         let tab_drag_finished = self.finish_tab_drag();
         let pane_drag_finished = self.finish_pane_drag();
         self.finish_batch_rename_preview_drag();
         self.finish_terminal_panel_pointer_interaction();
         // 任何窗口里的左键释放都结束图片平移；面板内释放由
         // mouse_area 的 PanEnded 先行处理，这里只是兜底。
-        let preview_engine = &mut self.preview_engine;
-        preview_engine.preview_image_viewport.panning = false;
-        if preview_engine.preview_window == Some(window)
-            && preview_engine.preview_window_drag_active
-        {
-            preview_engine.preview_window_drag_active = false;
-            if let Some(pointer_y) = preview_engine.preview_window_pointer_y {
-                preview_engine
-                    .preview_window_chrome
-                    .update_for_cursor_y(pointer_y);
-                preview_engine.refresh_preview_window_bottom_controls();
-            } else {
-                preview_engine.preview_window_chrome.start_hide();
-                preview_engine.preview_window_bottom_controls.start_hide();
-            }
-        }
+        self.preview_engine.preview_image_viewport.panning = false;
         Task::batch([
             tab_drag_finished,
             pane_drag_finished,
@@ -70,21 +55,12 @@ impl FileBrowser {
         position: Point,
     ) -> Task<Message> {
         if self.preview_engine.preview_window == Some(window) {
-            if self.preview_engine.preview_window_uses_window_chrome() {
-                self.cursor_position = Some(position);
-                self.preview_engine
-                    .update_sqlite_tables_resize_drag(position);
-                return Task::none();
-            }
+            self.cursor_position = Some(position);
             let preview_engine = &mut self.preview_engine;
-            preview_engine.cancel_preview_window_initial_chrome_hide();
+            preview_engine.update_sqlite_tables_resize_drag(position);
+            preview_engine.cancel_preview_window_initial_controls_hide();
             preview_engine.preview_window_pointer_y = Some(position.y);
             preview_engine.refresh_preview_window_bottom_controls();
-            if !preview_engine.preview_window_drag_active {
-                preview_engine
-                    .preview_window_chrome
-                    .update_for_cursor_y(position.y);
-            }
             return Task::none();
         }
         if self.settings_window == Some(window) {

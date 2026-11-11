@@ -1,17 +1,14 @@
 use std::fmt;
 
 use desktop_linux::{TerminalEmulator, TERMINAL_EMULATOR_OPTIONS};
-use iced::widget::{button, column, row, stack, svg, Button, Column, Space, Svg};
+use iced::widget::{button, column, row, svg, Button, Column, Space, Svg};
 use iced::{window, Alignment, Element, Length, Theme};
 
 use crate::app::FileBrowser;
 use crate::config::{
     ColumnWidthAdjustMode, LaunchWindowPolicy, StartupLocationPolicy, UiLanguageSetting,
 };
-use crate::model::{
-    Message, SettingsCategory, SettingsSubpage, WindowChromeLayout, WindowControlSide,
-    WindowFrameState, WINDOW_TITLE_BAR_HEIGHT, WINDOW_TOP_BAR_HEIGHT,
-};
+use crate::model::{Message, SettingsCategory, SettingsSubpage};
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::icons::{rotated_chevron_right_view, IconSymbol};
 use bennu_theme::{ColorSchemeFamily, ColorSchemePreset, ContrastWarnings, ThemeMode};
@@ -19,8 +16,7 @@ use bennu_theme::{ColorSchemeFamily, ColorSchemePreset, ContrastWarnings, ThemeM
 use super::about_settings::about_settings_sections;
 use super::application_logs::application_logs_sections;
 use super::auxiliary_window_layout::{
-    auxiliary_detail_surface_with_sidebar_space, auxiliary_full_height_sidebar,
-    auxiliary_sidebar_button,
+    auxiliary_sidebar_button, auxiliary_sidebar_list, AUXILIARY_SIDEBAR_WIDTH,
 };
 use super::context_menu_settings::context_menu_settings_section;
 use super::file_operation_verification_settings::file_operation_verification_options;
@@ -30,35 +26,23 @@ use super::rendering_settings::rendering_gpu_preference_row;
 use super::search_settings::search_settings_sections;
 use super::settings_group::{
     choice_row, control_row, custom_row, entry_row, settings_card, settings_group, settings_page,
-    switch_row, EntryRow, RowNote, SettingsRow, SETTINGS_GROUP_SPACING,
+    switch_row, EntryRow, RowNote, SettingsRow,
 };
 use super::shortcut_settings::shortcut_settings_section;
 use super::transfer_settings::{favorite_devices_group, transfer_receive_rows};
-use super::window_chrome::{floating_window_control_group, separate_window_content};
+use super::window_chrome::window_shell;
 use super::window_control_settings::window_control_settings_row;
-use super::window_drag_region::window_drag_region;
 use super::IconTone;
+use bennu_preview::window_shell::{split_window, HeaderBar, SplitPane};
 use bennu_theme::controls::dropdown;
-use bennu_theme::controls::normal_button;
+use bennu_theme::controls::{icon_button, normal_button};
 use bennu_theme::controls::{toggle_button_style, SegmentedChoice};
-use bennu_theme::typography::{BOLD, CAPTION_SIZE, SMALL_SIZE, TITLE_SIZE};
+use bennu_theme::typography::{CAPTION_SIZE, SMALL_SIZE};
 
 const SETTINGS_DROPDOWN_WIDTH: f32 = 220.0;
 
-/// Settings Integrated chrome 悬浮层高度；滚动内容以同高空白开头，悬浮按钮不遮挡初始内容。
-const SETTINGS_CHROME_HEIGHT: f32 = WINDOW_TOP_BAR_HEIGHT + 12.0;
-
-/// Settings 滚动内容顶部的空白填充：Integrated 布局下悬浮控制键落在空白上，不遮挡内容。
-pub(super) fn chrome_top_spacer(browser: &FileBrowser) -> Element<'static, Message> {
-    let height = match browser.user_config().window_controls.layout() {
-        // 内容起点与 SeparateTitleBar 模式对齐（标题栏 40px，减去列间距 16px）。
-        WindowChromeLayout::IntegratedNavigation => {
-            WINDOW_TITLE_BAR_HEIGHT - SETTINGS_GROUP_SPACING
-        }
-        WindowChromeLayout::SeparateTitleBar => 0.0,
-    };
-    Space::new().height(Length::Fixed(height)).into()
-}
+/// 顶栏里图标按钮的图标尺寸。
+const HEADER_ICON_SIZE: f32 = 14.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct TerminalEmulatorPickOption(TerminalEmulator);
@@ -140,69 +124,38 @@ pub(crate) fn view_settings_window(
     browser: &FileBrowser,
     window: window::Id,
 ) -> Element<'_, Message> {
-    let sidebar = settings_category_sidebar(browser.selected_settings_category);
     let frame_state = browser.window_frame_state(window);
-    let layout = browser.user_config().window_controls.layout();
-    let detail = auxiliary_detail_surface_with_sidebar_space(match layout {
-        WindowChromeLayout::IntegratedNavigation => stack![
-            settings_category_detail(browser),
-            settings_window_controls_chrome(browser, window, frame_state),
-        ]
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into(),
-        WindowChromeLayout::SeparateTitleBar => settings_category_detail(browser),
-    });
-    let content: Element<'_, Message> = stack![detail, sidebar]
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into();
-    let window_content = match layout {
-        WindowChromeLayout::IntegratedNavigation => content,
-        WindowChromeLayout::SeparateTitleBar => separate_window_content(
-            browser.window_title(window),
-            content,
-            &browser.user_config().window_controls,
-            window,
-            frame_state,
+    let shell = window_shell(&browser.user_config().window_controls, window, frame_state);
+    let selected = browser.selected_settings_category;
+    let sidebar = SplitPane {
+        header: HeaderBar::new().title(tr!("Settings")),
+        body: auxiliary_sidebar_list(
+            SettingsCategory::ALL
+                .into_iter()
+                .map(|category| settings_category_button(category, selected).into())
+                .collect(),
         ),
     };
-    super::window_resize_frame(window_content, window, frame_state)
+    let content = SplitPane {
+        header: settings_content_header(browser),
+        body: settings_category_detail(browser),
+    };
+    split_window(sidebar, content, AUXILIARY_SIDEBAR_WIDTH, &shell)
 }
 
-fn settings_window_controls_chrome(
-    browser: &FileBrowser,
-    window: window::Id,
-    frame_state: WindowFrameState,
-) -> Element<'static, Message> {
-    let config = &browser.user_config().window_controls;
-    let chrome: Element<'static, Message> = row![
-        floating_window_control_group(config, WindowControlSide::Left, window, frame_state, 1.0),
-        Space::new().width(Length::Fill),
-        floating_window_control_group(config, WindowControlSide::Right, window, frame_state, 1.0),
-    ]
-    .spacing(10)
-    .padding(iced::Padding {
-        top: 14.0,
-        right: 8.0,
-        bottom: 10.0,
-        left: 8.0,
-    })
-    .align_y(Alignment::Center)
-    .width(Length::Fill)
-    .height(Length::Fixed(SETTINGS_CHROME_HEIGHT))
-    .into();
-    window_drag_region(chrome, window)
-}
-
-fn settings_category_sidebar(selected: SettingsCategory) -> Element<'static, Message> {
-    let mut categories = Column::new()
-        .push(readable_text(tr!("Settings")).size(TITLE_SIZE).font(BOLD))
-        .spacing(4);
-    for category in SettingsCategory::ALL {
-        categories = categories.push(settings_category_button(category, selected));
+/// 内容顶栏：标题是当前分类；二级页左边放后退（GNOME 设置的做法）。
+fn settings_content_header(browser: &FileBrowser) -> HeaderBar<'static, Message> {
+    match browser.settings_subpage {
+        Some(SettingsSubpage::Preview) => HeaderBar::new().title(tr!("Preview settings")).start(
+            icon_button(super::themed_icon(
+                IconSymbol::ArrowLeft,
+                IconTone::Normal,
+                HEADER_ICON_SIZE,
+            ))
+            .on_press(Message::SettingsSubpageClosed),
+        ),
+        None => HeaderBar::new().title(browser.selected_settings_category.label()),
     }
-    auxiliary_full_height_sidebar(categories)
 }
 
 fn settings_category_button(

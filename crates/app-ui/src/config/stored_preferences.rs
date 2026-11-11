@@ -77,8 +77,6 @@ pub(crate) struct StoredUserPreferences {
     /// 数据，读取端回退无分组。独立字段是全局单值，无需嵌套结构。
     #[serde(default)]
     pub file_grouping: Option<String>,
-    #[serde(default = "default_window_chrome_layout")]
-    pub window_chrome_layout: String,
     #[serde(default = "default_stored_window_controls")]
     pub window_controls: Vec<StoredWindowControlPlacement>,
     #[serde(default)]
@@ -206,7 +204,6 @@ impl Default for StoredUserPreferences {
             list_sort_direction: default_list_sort_direction(),
             list_directory_size_display_mode: default_list_directory_size_display_mode(),
             file_grouping: None,
-            window_chrome_layout: default_window_chrome_layout(),
             window_controls: default_stored_window_controls(),
             search_history: Vec::new(),
             last_search_scope: None,
@@ -318,10 +315,6 @@ fn default_language_setting() -> String {
 
 fn default_visible_column_count() -> u32 {
     3
-}
-
-fn default_window_chrome_layout() -> String {
-    "integrated_navigation".to_owned()
 }
 
 fn default_stored_window_controls() -> Vec<StoredWindowControlPlacement> {

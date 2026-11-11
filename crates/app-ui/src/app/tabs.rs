@@ -122,14 +122,11 @@ impl FileBrowser {
         cancel_address_editing
     }
 
-    pub(in crate::app) fn finish_tab_drag_from_captured_release(
-        &mut self,
-        window: iced::window::Id,
-    ) -> Task<Message> {
+    pub(in crate::app) fn finish_tab_drag_from_captured_release(&mut self) -> Task<Message> {
         if self.file_drop_session.is_some() {
             Task::none()
         } else {
-            self.finish_pointer_drag_interactions(window)
+            self.finish_pointer_drag_interactions()
         }
     }
 

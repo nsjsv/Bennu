@@ -10,7 +10,7 @@ use file_core::{FileOperationVerification, SortDirection, SortField};
 
 use crate::model::{
     BrowserViewMode, LastSearchScope, ListColumnKind, ListDirectorySizeDisplayMode,
-    WindowChromeLayout, WindowControlKind, WindowControlSide, WindowControlVisibility,
+    WindowControlKind, WindowControlSide, WindowControlVisibility,
 };
 use crate::network_connections::SavedNetworkConnection;
 use crate::shortcuts::ShortcutBindingId;
@@ -200,9 +200,6 @@ fn user_preferences_round_trip_through_sqlite() {
     config.browser_view_mode = BrowserViewMode::List;
     config
         .window_controls
-        .select_layout(WindowChromeLayout::SeparateTitleBar);
-    config
-        .window_controls
         .set_visibility(WindowControlKind::Minimize, WindowControlVisibility::Hidden);
     config
         .window_controls
@@ -326,7 +323,6 @@ fn user_preferences_round_trip_through_sqlite() {
 fn stored_window_controls_are_normalized_at_config_boundary() {
     let default = default_user_config();
     let mut stored = default.user_preferences().to_stored();
-    stored.window_chrome_layout = "future-layout".to_owned();
     stored.window_controls = vec![
         StoredWindowControlPlacement {
             kind: "close".to_owned(),
@@ -352,10 +348,6 @@ fn stored_window_controls_are_normalized_at_config_boundary() {
 
     let preferences = UserPreferences::from_stored(stored, &default).preferences;
 
-    assert_eq!(
-        preferences.window_controls.layout(),
-        WindowChromeLayout::IntegratedNavigation
-    );
     assert_eq!(preferences.window_controls.placements().len(), 3);
     let close = preferences
         .window_controls

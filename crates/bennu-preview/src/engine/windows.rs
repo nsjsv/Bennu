@@ -3,6 +3,7 @@
 //! design.md「窗口命令由引擎直接产出」）。宿主侧窗口管理（焦点簿记、
 //! 最大化观测、滚动条视口回收、Escape 路由）留在宿主转发层。
 
+use crate::window_shell::HEADER_BAR_HEIGHT;
 use iced::window::{self, Id};
 use iced::{Size, Task};
 
@@ -65,8 +66,10 @@ pub fn preview_window_settings(
     settings
 }
 
+/// 预览窗口 = 常驻顶栏 + 下面的内容区；`PreviewSize` 只指内容区，按图片 / 视频比例
+/// 算出的尺寸因此不会被顶栏挤歪。
 pub fn preview_window_size_for_content(content_size: PreviewSize) -> Size {
-    Size::new(content_size.width, content_size.height)
+    Size::new(content_size.width, content_size.height + HEADER_BAR_HEIGHT)
 }
 
 pub fn preview_content_size_from_window(
@@ -74,7 +77,13 @@ pub fn preview_content_size_from_window(
     width: f32,
     height: f32,
 ) -> PreviewSize {
-    clamp_preview_size_to_minimum(profile, PreviewSize { width, height })
+    clamp_preview_size_to_minimum(
+        profile,
+        PreviewSize {
+            width,
+            height: height - HEADER_BAR_HEIGHT,
+        },
+    )
 }
 
 pub fn default_preview_size(profile: PreviewWindowProfile) -> PreviewSize {
@@ -186,13 +195,13 @@ pub fn preview_size_matches(actual: PreviewSize, expected: PreviewSize) -> bool 
         && (actual.height - expected.height).abs() <= PREVIEW_RESIZE_MATCH_TOLERANCE
 }
 
-fn preview_window_initial_chrome_command(generation: u64) -> Task<PreviewMessage> {
+fn preview_window_initial_controls_command(generation: u64) -> Task<PreviewMessage> {
     Task::perform(
         async move {
             tokio::time::sleep(PREVIEW_WINDOW_INITIAL_CONTROLS_DURATION).await;
             generation
         },
-        PreviewMessage::PreviewWindowInitialChromeElapsed,
+        PreviewMessage::PreviewWindowInitialControlsElapsed,
     )
 }
 
@@ -210,7 +219,7 @@ impl PreviewEngine {
 
         if let Some(window) = self.preview_window {
             self.reset_preview_window_bottom_controls();
-            let initial_chrome = self.start_preview_window_initial_chrome();
+            let initial_controls = self.start_preview_window_initial_controls();
             let min_size = preview_min_size(profile);
             let resize = window::set_min_size(
                 window,
@@ -228,16 +237,15 @@ impl PreviewEngine {
                 Task::batch([
                     resize,
                     window::gain_focus(window),
-                    initial_chrome,
+                    initial_controls,
                     Task::done(PreviewMessage::PreviewWindowPresented(window)),
                 ]),
             );
         }
 
-        self.preview_window_drag_active = false;
         self.preview_window_pointer_y = None;
         self.reset_preview_window_bottom_controls();
-        let initial_chrome = self.start_preview_window_initial_chrome();
+        let initial_controls = self.start_preview_window_initial_controls();
         let (window, command) = window::open(preview_window_settings(
             profile,
             size,
@@ -248,7 +256,7 @@ impl PreviewEngine {
             window,
             Task::batch([
                 command.discard(),
-                initial_chrome,
+                initial_controls,
                 Task::done(PreviewMessage::PreviewWindowPresented(window)),
             ]),
         )
@@ -310,7 +318,7 @@ impl PreviewEngine {
         if let Some(window) = self.preview_window {
             self.reset_preview_window_bottom_controls();
             let min_size = preview_min_size(profile);
-            let initial_chrome = self.start_preview_window_initial_chrome();
+            let initial_controls = self.start_preview_window_initial_controls();
             let resize = window::set_min_size(
                 window,
                 Some(preview_window_size_for_content(PreviewSize {
@@ -327,16 +335,15 @@ impl PreviewEngine {
                 Task::batch([
                     resize,
                     window::gain_focus(window),
-                    initial_chrome,
+                    initial_controls,
                     Task::done(PreviewMessage::PreviewWindowPresented(window)),
                 ]),
             );
         }
 
-        self.preview_window_drag_active = false;
         self.preview_window_pointer_y = None;
         self.reset_preview_window_bottom_controls();
-        let initial_chrome = self.start_preview_window_initial_chrome();
+        let initial_controls = self.start_preview_window_initial_controls();
         let (window, command) = window::open(preview_window_settings(
             profile,
             self.preview_size,
@@ -347,7 +354,7 @@ impl PreviewEngine {
             window,
             Task::batch([
                 command.discard(),
-                initial_chrome,
+                initial_controls,
                 Task::done(PreviewMessage::PreviewWindowPresented(window)),
             ]),
         )
@@ -374,10 +381,11 @@ impl PreviewEngine {
             return;
         }
 
+        // 指针 y 是窗口坐标；底部控制条贴着内容区底边，换算到内容区坐标。
         if let Some(pointer_y) = self.preview_window_pointer_y {
             let panel_height = self.preview_size.height;
             self.preview_window_bottom_controls
-                .update_for_bottom_cursor_y(pointer_y, panel_height);
+                .update_for_bottom_cursor_y(pointer_y - HEADER_BAR_HEIGHT, panel_height);
         }
     }
 
@@ -397,44 +405,27 @@ impl PreviewEngine {
         .1
     }
 
-    // 文本与 SQLite 预览使用标准窗口壳（标题栏 + 控制按钮）；媒体类内容保持悬浮 chrome。
-    pub fn preview_window_uses_window_chrome(&self) -> bool {
-        matches!(
-            self.preview,
-            Some(PreviewState::Ready(PreviewContent::Text { .. }))
-                | Some(PreviewState::Ready(PreviewContent::Sqlite(_)))
-        )
-    }
-
-    pub fn start_preview_window_initial_chrome(&mut self) -> Task<PreviewMessage> {
-        if self.preview_window_uses_window_chrome() {
+    /// 刚打开时把视频底部控制条亮一会儿，再自动淡出。
+    pub fn start_preview_window_initial_controls(&mut self) -> Task<PreviewMessage> {
+        self.cancel_preview_window_initial_controls_hide();
+        if !self.preview_window_has_bottom_media_controls() {
+            self.preview_window_bottom_controls.reset_hidden();
             return Task::none();
         }
-
-        self.cancel_preview_window_initial_chrome_hide();
-        self.preview_window_chrome.start_reveal();
-        if self.preview_window_has_bottom_media_controls() {
-            self.preview_window_bottom_controls.start_reveal();
-        } else {
-            self.preview_window_bottom_controls.reset_hidden();
-        }
-        preview_window_initial_chrome_command(self.preview_window_initial_chrome_generation)
+        self.preview_window_bottom_controls.start_reveal();
+        preview_window_initial_controls_command(self.preview_window_initial_controls_generation)
     }
 
-    pub fn cancel_preview_window_initial_chrome_hide(&mut self) {
-        self.preview_window_initial_chrome_generation = self
-            .preview_window_initial_chrome_generation
+    pub fn cancel_preview_window_initial_controls_hide(&mut self) {
+        self.preview_window_initial_controls_generation = self
+            .preview_window_initial_controls_generation
             .wrapping_add(1);
     }
 
-    pub fn hide_preview_window_initial_chrome(&mut self, generation: u64) {
-        if generation != self.preview_window_initial_chrome_generation {
+    pub fn hide_preview_window_initial_controls(&mut self, generation: u64) {
+        if generation != self.preview_window_initial_controls_generation {
             return;
         }
-        if self.preview_window_uses_window_chrome() {
-            return;
-        }
-        self.preview_window_chrome.start_hide();
         if !self.preview_window_has_bottom_media_controls() {
             self.preview_window_bottom_controls.reset_hidden();
         } else if self.preview_window_pointer_y.is_some() {
@@ -453,10 +444,8 @@ impl PreviewEngine {
         self.preview_shown_path = None;
         self.clear_preview();
         self.pending_preview_resize = None;
-        self.preview_window_drag_active = false;
         self.preview_window_pointer_y = None;
-        self.cancel_preview_window_initial_chrome_hide();
-        self.preview_window_chrome.reset_hidden();
+        self.cancel_preview_window_initial_controls_hide();
         self.preview_window_bottom_controls.reset_hidden();
         let Some(window) = self.preview_window.take() else {
             return (None, Task::none());
@@ -504,7 +493,7 @@ mod tests {
 
     #[tokio::test]
     async fn preview_window_initial_controls_command_waits_for_configured_duration() {
-        let mut task = iced_runtime::task::into_stream(preview_window_initial_chrome_command(7))
+        let mut task = iced_runtime::task::into_stream(preview_window_initial_controls_command(7))
             .expect("initial controls task stream");
         assert!(
             tokio::time::timeout(PREVIEW_WINDOW_INITIAL_CONTROLS_DURATION / 2, task.next())
@@ -520,7 +509,7 @@ mod tests {
         .expect("initial controls task ended");
         assert!(matches!(
             message,
-            iced_runtime::Action::Output(PreviewMessage::PreviewWindowInitialChromeElapsed(7))
+            iced_runtime::Action::Output(PreviewMessage::PreviewWindowInitialControlsElapsed(7))
         ));
     }
 }

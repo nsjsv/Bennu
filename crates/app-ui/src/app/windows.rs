@@ -6,10 +6,9 @@ use iced::{event, mouse, window, Rectangle, Size, Task};
 use super::auxiliary_window::AuxiliaryWindow;
 use super::FileBrowser;
 use crate::app::smooth_scroll::smooth_scroll_id;
-use crate::model::{
-    Message, ScrollbarRegion, SettingsCategory, SettingsSubpage, WINDOW_TOP_BAR_HEIGHT,
-};
+use crate::model::{Message, ScrollbarRegion, SettingsCategory, SettingsSubpage};
 use crate::view::{address_input_id, rename_input_id};
+use bennu_preview::window_shell::HEADER_BAR_HEIGHT;
 
 // 预览窗口机械（设置/尺寸档位常量/开关适配状态机/初始 chrome 计时）
 // 已迁 bennu-preview 的 PreviewEngine（engine/windows.rs）；此处
@@ -71,11 +70,11 @@ fn settings_window_settings() -> window::Settings {
     let mut settings = window::Settings {
         size: Size::new(
             DEFAULT_SETTINGS_WIDTH,
-            DEFAULT_SETTINGS_HEIGHT + WINDOW_TOP_BAR_HEIGHT,
+            DEFAULT_SETTINGS_HEIGHT + HEADER_BAR_HEIGHT,
         ),
         min_size: Some(Size::new(
             MIN_SETTINGS_WIDTH,
-            MIN_SETTINGS_HEIGHT + WINDOW_TOP_BAR_HEIGHT,
+            MIN_SETTINGS_HEIGHT + HEADER_BAR_HEIGHT,
         )),
         decorations: false,
         exit_on_close_request: true,
@@ -90,11 +89,11 @@ fn properties_window_settings() -> window::Settings {
     let mut settings = window::Settings {
         size: Size::new(
             DEFAULT_PROPERTIES_WIDTH,
-            DEFAULT_PROPERTIES_HEIGHT + WINDOW_TOP_BAR_HEIGHT,
+            DEFAULT_PROPERTIES_HEIGHT + HEADER_BAR_HEIGHT,
         ),
         min_size: Some(Size::new(
             MIN_PROPERTIES_WIDTH,
-            MIN_PROPERTIES_HEIGHT + WINDOW_TOP_BAR_HEIGHT,
+            MIN_PROPERTIES_HEIGHT + HEADER_BAR_HEIGHT,
         )),
         decorations: false,
         exit_on_close_request: true,
@@ -109,11 +108,11 @@ fn transfer_window_settings() -> window::Settings {
     let mut settings = window::Settings {
         size: Size::new(
             DEFAULT_TRANSFER_WIDTH,
-            DEFAULT_TRANSFER_HEIGHT + WINDOW_TOP_BAR_HEIGHT,
+            DEFAULT_TRANSFER_HEIGHT + HEADER_BAR_HEIGHT,
         ),
         min_size: Some(Size::new(
             MIN_TRANSFER_WIDTH,
-            MIN_TRANSFER_HEIGHT + WINDOW_TOP_BAR_HEIGHT,
+            MIN_TRANSFER_HEIGHT + HEADER_BAR_HEIGHT,
         )),
         decorations: false,
         // 关闭请求交给状态机：关窗同时要收尾二维码服务，不能让 winit 直接关。

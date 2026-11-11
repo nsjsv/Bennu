@@ -103,7 +103,7 @@ fn toolbar_segment_button(
     icon_size: f32,
 ) -> Button<'static, Message> {
     let interaction = match tone {
-        IconTone::Selected => SegmentedButtonTone::Selected,
+        IconTone::Selected | IconTone::OnAccent => SegmentedButtonTone::Selected,
         IconTone::Normal | IconTone::Warning => SegmentedButtonTone::Normal,
     };
     segmented_button(themed_icon(icon, tone, icon_size), interaction, message)

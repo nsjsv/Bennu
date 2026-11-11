@@ -449,7 +449,7 @@ fn search_entry_type_button(
     search_filter_button(
         search_entry_type_icon(entry_type),
         if selected {
-            IconTone::Selected
+            IconTone::OnAccent
         } else {
             IconTone::Normal
         },
@@ -466,7 +466,7 @@ fn custom_extension_button(filters: &SearchFilterPresetState) -> Element<'static
     search_filter_button(
         IconSymbol::Plus,
         if selected {
-            IconTone::Selected
+            IconTone::OnAccent
         } else {
             IconTone::Normal
         },
@@ -709,7 +709,7 @@ fn search_filter_commands(filters: &SearchFilterPresetState) -> Element<'static,
         search_filter_button(
             IconSymbol::Regex,
             if regex_mode {
-                IconTone::Selected
+                IconTone::OnAccent
             } else {
                 IconTone::Normal
             },
@@ -722,7 +722,7 @@ fn search_filter_commands(filters: &SearchFilterPresetState) -> Element<'static,
             if selected_more_type_count == 0 {
                 IconTone::Normal
             } else {
-                IconTone::Selected
+                IconTone::OnAccent
             },
             more_label,
             Message::SearchEntryTypesMenuOpened,

@@ -174,19 +174,6 @@ pub(crate) fn grouping_rail_button_style(
     }
 }
 
-pub(crate) fn preview_panel_style(theme: &Theme) -> container::Appearance {
-    let colors = ui_colors(theme);
-    container::Appearance {
-        background: Some(Background::Color(colors.surface_container_low)),
-        text_color: Some(colors.on_surface),
-        border: Border {
-            color: subtle_border_color(theme),
-            width: 1.0,
-            radius: 14.0.into(),
-        },
-        ..container::Appearance::default()
-    }
-}
 pub(crate) fn column_browser_style(theme: &Theme) -> container::Appearance {
     container::Appearance {
         text_color: Some(base_text_color(theme)),

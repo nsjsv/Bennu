@@ -293,6 +293,10 @@ pub fn warning_icon_svg_style() -> fn(&Theme, svg::Status) -> svg::Style {
     warning_icon_svg_style_for_status
 }
 
+pub fn on_accent_icon_svg_style() -> fn(&Theme, svg::Status) -> svg::Style {
+    on_accent_icon_svg_style_for_status
+}
+
 fn icon_svg_style_for_status(theme: &Theme, _status: svg::Status) -> svg::Style {
     svg::Style {
         color: Some(ui_colors(theme).on_surface),
@@ -314,6 +318,12 @@ fn muted_icon_svg_style_for_status(theme: &Theme, _status: svg::Status) -> svg::
 fn warning_icon_svg_style_for_status(theme: &Theme, _status: svg::Status) -> svg::Style {
     svg::Style {
         color: Some(ui_colors(theme).tertiary),
+    }
+}
+
+fn on_accent_icon_svg_style_for_status(theme: &Theme, _status: svg::Status) -> svg::Style {
+    svg::Style {
+        color: Some(ui_colors(theme).on_primary),
     }
 }
 

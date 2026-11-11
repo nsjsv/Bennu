@@ -1,7 +1,9 @@
 use iced::widget::{svg, Svg};
 use iced::{Length, Theme};
 
-use crate::styles::{icon_svg_style, selected_icon_svg_style, warning_icon_svg_style};
+use crate::styles::{
+    icon_svg_style, on_accent_icon_svg_style, selected_icon_svg_style, warning_icon_svg_style,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IconSymbol {
@@ -221,12 +223,15 @@ impl IconSymbol {
     }
 }
 
-/// 图标语义色调：常规/选中/警示三档，主程序视图与 portal 同源消费。
+/// 图标语义色调，主程序视图与 portal 同源消费。
 #[derive(Debug, Clone, Copy)]
 pub enum IconTone {
     Normal,
+    /// 选中的文件行这类强调色淡底上。
     Selected,
     Warning,
+    /// 强调色实底上：开着的开关按钮。
+    OnAccent,
 }
 
 /// 色调 → svg 着色样式函数（自主程序 app-ui view.rs 原样搬移）。
@@ -235,6 +240,7 @@ pub fn icon_tone_style(tone: IconTone) -> fn(&Theme, svg::Status) -> svg::Style 
         IconTone::Normal => icon_svg_style(),
         IconTone::Selected => selected_icon_svg_style(),
         IconTone::Warning => warning_icon_svg_style(),
+        IconTone::OnAccent => on_accent_icon_svg_style(),
     }
 }
 

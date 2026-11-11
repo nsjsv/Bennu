@@ -1,7 +1,8 @@
 //! 卡片行的骨架：每种行一个函数，统一内边距、最矮高度、标题与附注的排法。
 //! 行的种类是不同概念（开关、输入、跳转……），所以拆成不同函数，不用种类参数。
 
-use iced::alignment::Vertical;
+use iced::alignment::{Horizontal, Vertical};
+use iced::widget::text::Wrapping;
 use iced::widget::{button, column, container, row, Column, Row, Space};
 use iced::{Alignment, Element, Length, Padding, Theme};
 
@@ -163,12 +164,20 @@ pub(in crate::view) fn label_row(title: String, note: Option<RowNote>) -> Settin
     framed(labels(title, note))
 }
 
-/// 左边标题，右边灰色的值。
+/// 左边标题，右边灰色的值。值长（属性窗口里的路径）时在右边那块里折行、需要时从字中间断，
+/// 标题不让位也不被挤成一列。
 pub(in crate::view) fn value_row(title: String, value: String) -> SettingsRow<'static> {
     framed(
         row![
-            readable_text(title).width(Length::Fill),
-            caption(value, muted_text_color),
+            readable_text(title).wrapping(Wrapping::None),
+            readable_text(value)
+                .size(CAPTION_SIZE)
+                .width(Length::Fill)
+                .align_x(Horizontal::Right)
+                .wrapping(Wrapping::WordOrGlyph)
+                .style(|theme: &Theme| iced::widget::text::Style {
+                    color: Some(muted_text_color(theme)),
+                }),
         ]
         .spacing(ROW_CONTENT_SPACING)
         .align_y(Alignment::Center),

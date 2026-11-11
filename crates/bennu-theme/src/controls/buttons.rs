@@ -74,22 +74,18 @@ pub fn destructive_button_style(theme: &Theme, status: button::Status) -> button
     accent_button(theme, status, colors.error, colors.on_error)
 }
 
-/// 带开/关状态的按钮（筛选开关、配色卡片）：关时同普通按钮，开时用强调色容器底，
-/// 里面的 `IconTone::Selected` 图标与它同一对颜色。
+/// 带开/关状态的按钮（筛选开关、权限的读 / 写 / 执行）：关时同普通按钮，开时是强调色
+/// 实底（和主按钮、开关的开同一种），里面的图标用 `IconTone::OnAccent`。不用强调色容器底：
+/// 默认配色的强调色就是文字色，容器底只是深一点的灰，开和关几乎分不出来。
 pub fn toggle_button_style(
     selected: bool,
 ) -> impl Fn(&Theme, button::Status) -> button::Style + Clone {
     move |theme, status| {
-        if !selected {
-            return normal_button_style(theme, status);
+        if selected {
+            suggested_button_style(theme, status)
+        } else {
+            normal_button_style(theme, status)
         }
-        let colors = ui_colors(theme);
-        accent_button(
-            theme,
-            status,
-            colors.primary_container,
-            colors.on_primary_container,
-        )
     }
 }
 

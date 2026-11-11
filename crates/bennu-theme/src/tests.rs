@@ -212,3 +212,40 @@ fn theme_modes_keep_their_stable_config_values() {
         ["light", "dark", "automatic"]
     );
 }
+
+#[test]
+fn a_toggle_that_is_on_stands_apart_from_one_that_is_off_in_every_scheme() {
+    use iced::widget::button::Status;
+    let mut theme = ApplicationTheme::new(AppearanceMode::Light);
+    theme.replace_matugen(Some(matugen()));
+    let fill = |style: iced::widget::button::Style| match style.background {
+        Some(iced::Background::Color(color)) => color,
+        other => panic!("toggle without a flat fill: {other:?}"),
+    };
+    // 关着的是半透明前景色，叠在卡片上看。
+    let over = |top: Color, bottom: Color| Color {
+        r: top.r * top.a + bottom.r * (1.0 - top.a),
+        g: top.g * top.a + bottom.g * (1.0 - top.a),
+        b: top.b * top.a + bottom.b * (1.0 - top.a),
+        a: 1.0,
+    };
+    for (preset, mode, roles) in every_scheme() {
+        let iced_theme = theme.active(mode, preset);
+        let on = fill(controls::toggle_button_style(true)(
+            &iced_theme,
+            Status::Active,
+        ));
+        let off = over(
+            fill(controls::toggle_button_style(false)(
+                &iced_theme,
+                Status::Active,
+            )),
+            roles.surface_container,
+        );
+        // 开时用强调色容器底那会儿，各配色都只有 1.0–1.2：只差一点点灰或一点色相。
+        assert!(
+            contrast_ratio(on, off) >= 2.5,
+            "{preset:?} {mode:?}: on {on:?} vs off {off:?}"
+        );
+    }
+}

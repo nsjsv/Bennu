@@ -7,7 +7,6 @@ use file_core::FileKind;
 use iced::widget::{button, column, container, row, Button, Column};
 use iced::{Alignment, Element, Length};
 
-use crate::appearance::{app_content_style, preview_panel_style, selected_sidebar_item_style};
 use crate::formatting::{format_file_size, format_system_time, item_count_label};
 use crate::model::{
     FilePropertiesAggregateSnapshot, FilePropertiesCategory, FilePropertiesDirectoryContents,
@@ -24,16 +23,16 @@ use super::auxiliary_window_layout::{
     auxiliary_detail_scroller, auxiliary_sidebar_button, auxiliary_sidebar_list,
     AUXILIARY_SIDEBAR_WIDTH,
 };
-use super::settings_group::settings_card_style;
+use super::settings_group::{
+    action_row, control_row, label_row, muted_setting_text, notice_row, settings_card, value_row,
+    RowNote, SETTINGS_GROUP_SPACING,
+};
 use super::{auxiliary_window_message, themed_icon, IconTone};
 use bennu_preview::window_shell::{single_window, split_window, HeaderBar, SplitPane, WindowShell};
-use bennu_theme::controls::switch;
-use bennu_theme::controls::{normal_button, normal_button_style};
-use bennu_theme::typography::{BOLD, CAPTION_SIZE, TITLE_SIZE};
+use bennu_theme::controls::toggle_button_style;
+use bennu_theme::typography::{BOLD, TITLE_SIZE};
 
 const PROPERTIES_ICON_SIZE: f32 = 44.0;
-const PROPERTIES_LABEL_WIDTH: f32 = 128.0;
-const PERMISSION_PRIVILEGE_WIDTH: f32 = 184.0;
 
 pub(crate) fn view_properties_window<'a>(
     properties: Option<&'a FilePropertiesState>,
@@ -76,20 +75,12 @@ fn properties_target_label(properties: &FilePropertiesState) -> String {
     }
 }
 
+/// 还没读完、读不了：和读完后同一个页边距，一张卡片里一行说明。
 fn properties_loading_view(target_label: String) -> Element<'static, Message> {
-    let content = column![
-        readable_text(tr!("Loading properties...")),
-        readable_text(target_label)
-    ]
-    .spacing(8)
-    .padding(24)
-    .width(Length::Fill);
-
-    container(content)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .style(app_content_style)
-        .into()
+    properties_notice(settings_card(vec![label_row(
+        tr!("Loading properties..."),
+        Some(RowNote::Hint(target_label)),
+    )]))
 }
 
 fn aggregate_properties_loading_view(
@@ -97,37 +88,27 @@ fn aggregate_properties_loading_view(
     scrollbar_visibility: ScrollbarVisibility,
     scrollbar_viewport: Option<ScrollbarViewport>,
 ) -> Element<'_, Message> {
-    let content = column![
-        readable_text(tr!("Calculating...")),
-        aggregate_properties_information_detail(snapshot, scrollbar_visibility, scrollbar_viewport),
-    ]
-    .spacing(8)
-    .padding(16)
-    .width(Length::Fill)
-    .height(Length::Fill);
-
-    container(content)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .style(app_content_style)
-        .into()
+    properties_detail_scroller(
+        aggregate_information(snapshot).push(settings_card(vec![notice_row(RowNote::Hint(tr!(
+            "Calculating..."
+        )))])),
+        scrollbar_visibility,
+        scrollbar_viewport,
+    )
 }
 
 fn properties_error_view<'a>(target_label: String, error: &'a str) -> Element<'a, Message> {
-    let content = column![
-        readable_text(tr!("Could not load properties")),
-        readable_text(target_label),
-        readable_text(error.to_owned())
-    ]
-    .spacing(8)
-    .padding(24)
-    .width(Length::Fill);
+    properties_notice(settings_card(vec![
+        label_row(
+            tr!("Could not load properties"),
+            Some(RowNote::Hint(target_label)),
+        ),
+        notice_row(RowNote::Error(error.to_owned())),
+    ]))
+}
 
-    container(content)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .style(app_content_style)
-        .into()
+fn properties_notice(card: Element<'_, Message>) -> Element<'_, Message> {
+    container(card).padding(18).width(Length::Fill).into()
 }
 
 fn properties_split_view<'a>(
@@ -185,74 +166,65 @@ fn properties_category_button(
     )
 }
 
-fn properties_information_detail(
-    snapshot: &FilePropertiesSnapshot,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
-) -> Element<'_, Message> {
-    let icon = file_entry_icon_symbol(snapshot.kind, snapshot.name.as_os_str());
-    let header = row![
+/// 大图标 + 名字 + 一行灰字（类型）；下面的卡片不再重复名字和类型。
+fn properties_heading(
+    icon: IconSymbol,
+    title: String,
+    subtitle: String,
+) -> Element<'static, Message> {
+    row![
         themed_icon(icon, IconTone::Normal, PROPERTIES_ICON_SIZE),
         column![
-            readable_text(display_name(&snapshot.name))
-                .size(TITLE_SIZE)
-                .font(BOLD),
-            readable_text(file_kind_label(snapshot.kind))
+            readable_text(title).size(TITLE_SIZE).font(BOLD),
+            muted_setting_text(subtitle),
         ]
         .spacing(4)
         .width(Length::Fill)
     ]
     .spacing(14)
-    .align_y(Alignment::Center);
+    .align_y(Alignment::Center)
+    .into()
+}
 
-    let mut details = Column::new()
-        .spacing(10)
-        .push(property_row(tr!("Name"), display_name(&snapshot.name)))
-        .push(property_row(tr!("Type"), file_kind_label(snapshot.kind)))
-        .push(property_row(
-            tr!("Location"),
-            display_path(&snapshot.location),
-        ))
-        .push(property_row(
-            tr!("Created"),
-            display_optional_time(snapshot.created),
-        ))
-        .push(property_row(
-            tr!("Modified"),
-            display_optional_time(snapshot.modified),
-        ))
-        .push(property_row(
-            tr!("Accessed"),
-            display_optional_time(snapshot.accessed),
-        ))
-        .push(property_row(tr!("Size"), display_size(snapshot.size_bytes)))
-        .push(property_row(
-            tr!("Size on disk"),
-            display_size(snapshot.disk_size_bytes),
-        ));
-
-    match &snapshot.directory_contents {
-        FilePropertiesDirectoryContentsState::NotDirectory => {}
-        FilePropertiesDirectoryContentsState::Loading(contents) => {
-            let label = contents
+fn properties_information_detail(
+    snapshot: &FilePropertiesSnapshot,
+    scrollbar_visibility: ScrollbarVisibility,
+    scrollbar_viewport: Option<ScrollbarViewport>,
+) -> Element<'_, Message> {
+    let mut place = vec![
+        value_row(tr!("Location"), display_path(&snapshot.location)),
+        value_row(tr!("Size"), display_size(snapshot.size_bytes)),
+        value_row(tr!("Size on disk"), display_size(snapshot.disk_size_bytes)),
+    ];
+    let contents = match &snapshot.directory_contents {
+        FilePropertiesDirectoryContentsState::NotDirectory => None,
+        FilePropertiesDirectoryContentsState::Loading(contents) => Some(
+            contents
                 .as_ref()
                 .map(display_contents)
-                .unwrap_or_else(|| tr!("Calculating..."));
-            details = details.push(property_row(tr!("Contents"), label));
-        }
-        FilePropertiesDirectoryContentsState::Loaded(contents) => {
-            details = details.push(property_row(tr!("Contents"), display_contents(contents)));
-        }
-        FilePropertiesDirectoryContentsState::Failed(error) => {
-            details = details.push(property_row(
-                tr!("Contents"),
-                tr!("Unavailable (%1)", error),
-            ));
-        }
+                .unwrap_or_else(|| tr!("Calculating...")),
+        ),
+        FilePropertiesDirectoryContentsState::Loaded(contents) => Some(display_contents(contents)),
+        FilePropertiesDirectoryContentsState::Failed(error) => Some(tr!("Unavailable (%1)", error)),
+    };
+    if let Some(contents) = contents {
+        place.push(value_row(tr!("Contents"), contents));
     }
 
     properties_detail_scroller(
-        column![header, details].spacing(22).width(Length::Fill),
+        column![
+            properties_heading(
+                file_entry_icon_symbol(snapshot.kind, snapshot.name.as_os_str()),
+                display_name(&snapshot.name),
+                file_kind_label(snapshot.kind),
+            ),
+            settings_card(place),
+            settings_card(vec![
+                value_row(tr!("Created"), display_optional_time(snapshot.created)),
+                value_row(tr!("Modified"), display_optional_time(snapshot.modified)),
+                value_row(tr!("Accessed"), display_optional_time(snapshot.accessed)),
+            ]),
+        ],
         scrollbar_visibility,
         scrollbar_viewport,
     )
@@ -263,19 +235,15 @@ fn aggregate_properties_information_detail(
     scrollbar_visibility: ScrollbarVisibility,
     scrollbar_viewport: Option<ScrollbarViewport>,
 ) -> Element<'_, Message> {
-    let header = row![
-        themed_icon(IconSymbol::File, IconTone::Normal, PROPERTIES_ICON_SIZE),
-        column![
-            readable_text(item_count_label(snapshot.target_count))
-                .size(TITLE_SIZE)
-                .font(BOLD),
-            readable_text(aggregate_type_label(snapshot))
-        ]
-        .spacing(4)
-        .width(Length::Fill)
-    ]
-    .spacing(14)
-    .align_y(Alignment::Center);
+    properties_detail_scroller(
+        aggregate_information(snapshot),
+        scrollbar_visibility,
+        scrollbar_viewport,
+    )
+}
+
+/// 多选：标题是“N 项”，卡片里是各类各几个、在哪、总大小，时间只在大家都一样时有。
+fn aggregate_information(snapshot: &FilePropertiesAggregateSnapshot) -> Column<'_, Message> {
     let location = snapshot
         .common_parent
         .as_deref()
@@ -296,36 +264,37 @@ fn aggregate_properties_information_detail(
         ),
         snapshot.recursive_contents.unreadable_entries,
     );
-    let details = column![
-        property_row(tr!("Selected"), snapshot.target_count.to_string()),
-        property_row(tr!("Types"), counts),
-        property_row(tr!("Location"), location),
-        property_row(
-            tr!("Created"),
-            aggregate_optional_time(snapshot.common_created)
+    column![
+        properties_heading(
+            IconSymbol::File,
+            item_count_label(snapshot.target_count),
+            aggregate_type_label(snapshot),
         ),
-        property_row(
-            tr!("Modified"),
-            aggregate_optional_time(snapshot.common_modified)
-        ),
-        property_row(
-            tr!("Accessed"),
-            aggregate_optional_time(snapshot.common_accessed)
-        ),
-        property_row(tr!("Size"), display_size(snapshot.total_size_bytes)),
-        property_row(
-            tr!("Size on disk"),
-            display_size(snapshot.total_disk_size_bytes)
-        ),
-        property_row(tr!("Contents"), contents),
+        settings_card(vec![
+            value_row(tr!("Types"), counts),
+            value_row(tr!("Location"), location),
+            value_row(tr!("Size"), display_size(snapshot.total_size_bytes)),
+            value_row(
+                tr!("Size on disk"),
+                display_size(snapshot.total_disk_size_bytes)
+            ),
+            value_row(tr!("Contents"), contents),
+        ]),
+        settings_card(vec![
+            value_row(
+                tr!("Created"),
+                aggregate_optional_time(snapshot.common_created)
+            ),
+            value_row(
+                tr!("Modified"),
+                aggregate_optional_time(snapshot.common_modified)
+            ),
+            value_row(
+                tr!("Accessed"),
+                aggregate_optional_time(snapshot.common_accessed)
+            ),
+        ]),
     ]
-    .spacing(10);
-
-    properties_detail_scroller(
-        column![header, details].spacing(22).width(Length::Fill),
-        scrollbar_visibility,
-        scrollbar_viewport,
-    )
 }
 
 fn aggregate_type_label(snapshot: &FilePropertiesAggregateSnapshot) -> String {
@@ -343,68 +312,65 @@ fn aggregate_optional_time(time: Option<SystemTime>) -> String {
         .unwrap_or_else(|| tr!("Mixed or unavailable"))
 }
 
+/// 权限：一张卡片三行（所有者、组、其他人），每行右边“读 / 写 / 执行”三个开关按钮，点一下
+/// 立即保存；最后一行是现在的模式。文件夹多一行“应用到里面的所有项目”。
 fn properties_permissions_detail<'a>(
     properties: &'a FilePropertiesState,
     presentation: &'a FilePropertiesPresentation,
     scrollbar_visibility: ScrollbarVisibility,
     scrollbar_viewport: Option<ScrollbarViewport>,
 ) -> Element<'a, Message> {
-    let displayed_permissions =
-        displayed_permissions(presentation.permissions(), &properties.permission_update);
-    let mut content = Column::new()
-        .spacing(18)
-        .push(permissions_header(displayed_permissions));
+    let update = &properties.permission_update;
+    let mut content = column![muted_setting_text(tr!(
+        "Choose who can read, write, or execute this item. Changes save immediately."
+    ))];
 
-    if let Some(current_permissions) = displayed_permissions {
-        content = content.push(permissions_people_panel(
-            current_permissions,
-            &properties.permission_update,
-        ));
-        if matches!(
-            presentation,
-            FilePropertiesPresentation::Single(snapshot)
-                if snapshot.kind == FileKind::Directory
-        ) {
-            content = content.push(apply_permissions_to_enclosed_items_button(
-                &properties.permission_update,
+    match displayed_permissions(presentation.permissions(), update) {
+        Some(permissions) => {
+            let mut rows: Vec<_> = FilePropertiesPermissionClass::ALL
+                .into_iter()
+                .map(|class| {
+                    control_row(
+                        permission_subject_label(class),
+                        Some(RowNote::Hint(permission_subject_description(class))),
+                        permission_access_buttons(class, permissions, update),
+                    )
+                })
+                .collect();
+            rows.push(value_row(
+                tr!("Current mode"),
+                display_permissions(permissions),
             ));
+            content = content.push(settings_card(rows));
+            if matches!(
+                presentation,
+                FilePropertiesPresentation::Single(snapshot)
+                    if snapshot.kind == FileKind::Directory
+            ) {
+                content = content.push(settings_card(vec![action_row(
+                    tr!("Apply to Enclosed Items"),
+                    None,
+                    (!update.is_in_progress()).then_some(Message::FileProperties(
+                        FilePropertiesMessage::ApplyPermissionsToEnclosedItems,
+                    )),
+                )]));
+            }
         }
-    } else {
-        content = content.push(permissions_unavailable_panel());
+        None => {
+            content = content.push(settings_card(vec![label_row(
+                tr!("Permissions are read-only"),
+                Some(RowNote::Hint(tr!(
+                    "Permission editing is unavailable for this item."
+                ))),
+            )]));
+        }
     }
 
-    if let Some(status) = permissions_status_panel(&properties.permission_update) {
-        content = content.push(status);
+    if let Some(status) = permissions_status(update) {
+        content = content.push(settings_card(vec![notice_row(status)]));
     }
 
-    properties_detail_scroller(
-        content.width(Length::Fill),
-        scrollbar_visibility,
-        scrollbar_viewport,
-    )
-}
-
-fn permissions_header(permissions: Option<FilePropertiesPermissions>) -> Element<'static, Message> {
-    let title = column![
-        readable_text(tr!("Sharing & Permissions"))
-            .size(TITLE_SIZE)
-            .font(BOLD),
-        readable_text(tr!(
-            "Choose who can read, write, or execute this item. Changes save immediately."
-        ))
-    ]
-    .spacing(4)
-    .width(Length::Fill);
-
-    let mut header = row![title]
-        .spacing(16)
-        .align_y(Alignment::Center)
-        .width(Length::Fill);
-    if let Some(current_permissions) = permissions {
-        header = header.push(permissions_mode_badge(current_permissions));
-    }
-
-    header.into()
+    properties_detail_scroller(content, scrollbar_visibility, scrollbar_viewport)
 }
 
 fn properties_detail_scroller<'a>(
@@ -413,7 +379,7 @@ fn properties_detail_scroller<'a>(
     scrollbar_viewport: Option<ScrollbarViewport>,
 ) -> Element<'a, Message> {
     auxiliary_detail_scroller(
-        content,
+        content.spacing(SETTINGS_GROUP_SPACING).width(Length::Fill),
         ScrollbarRegion::Properties,
         scrollbar_visibility,
         scrollbar_viewport,
@@ -428,103 +394,17 @@ fn displayed_permissions(
     update.pending_permissions().or(permissions)
 }
 
-fn permissions_mode_badge(permissions: FilePropertiesPermissions) -> Element<'static, Message> {
-    column![
-        readable_text(tr!("Current mode")).size(CAPTION_SIZE),
-        readable_text(display_permissions(permissions))
-    ]
-    .spacing(2)
-    .align_x(Alignment::End)
-    .width(Length::Fixed(PERMISSION_PRIVILEGE_WIDTH))
-    .into()
-}
-
-fn permissions_people_panel(
-    permissions: FilePropertiesPermissions,
-    update: &FilePropertiesPermissionUpdate,
-) -> Element<'static, Message> {
-    let mut rows = Column::new().spacing(12).push(permissions_table_header());
-
-    for class in FilePropertiesPermissionClass::ALL {
-        rows = rows.push(permission_person_row(class, permissions, update));
-    }
-
-    container(rows)
-        .padding([12, 14])
-        .width(Length::Fill)
-        .style(preview_panel_style)
-        .into()
-}
-
-fn permissions_table_header() -> Element<'static, Message> {
-    row![
-        readable_text(tr!("Name"))
-            .size(CAPTION_SIZE)
-            .width(Length::Fill),
-        readable_text(tr!("Privilege"))
-            .size(CAPTION_SIZE)
-            .width(Length::Fixed(PERMISSION_PRIVILEGE_WIDTH))
-    ]
-    .spacing(12)
-    .padding([0, 2])
-    .into()
-}
-
-fn permission_person_row(
+/// 读 / 写 / 执行：开着的是选中样式；正在保存时都点不了，免得两次 chmod 交错。
+fn permission_access_buttons(
     class: FilePropertiesPermissionClass,
     permissions: FilePropertiesPermissions,
     update: &FilePropertiesPermissionUpdate,
 ) -> Element<'static, Message> {
-    let subject = column![
-        readable_text(permission_subject_label(class)),
-        readable_text(permission_subject_description(class)).size(CAPTION_SIZE)
-    ]
-    .spacing(2)
-    .width(Length::Fill);
-
-    let content = column![
-        row![subject, permission_privilege_badge(class, permissions),]
-            .spacing(12)
-            .align_y(Alignment::Center),
-        permission_access_controls(class, permissions, update)
-    ]
-    .spacing(8);
-
-    container(content)
-        .padding([2, 0])
-        .width(Length::Fill)
-        .into()
-}
-
-fn permission_privilege_badge(
-    class: FilePropertiesPermissionClass,
-    permissions: FilePropertiesPermissions,
-) -> Element<'static, Message> {
-    container(
-        column![
-            readable_text(permission_privilege_label(class, permissions)),
-            readable_text(permission_symbolic_segment(class, permissions)).size(CAPTION_SIZE)
-        ]
-        .spacing(2),
-    )
-    .padding([6, 10])
-    .width(Length::Fixed(PERMISSION_PRIVILEGE_WIDTH))
-    .style(settings_card_style)
-    .into()
-}
-
-fn permission_access_controls(
-    class: FilePropertiesPermissionClass,
-    permissions: FilePropertiesPermissions,
-    update: &FilePropertiesPermissionUpdate,
-) -> Element<'static, Message> {
-    let mut controls = row![].spacing(6).align_y(Alignment::Center);
-
+    let mut buttons = row![].spacing(4).align_y(Alignment::Center);
     for access in FilePropertiesPermissionAccess::ALL {
-        controls = controls.push(permission_access_button(class, access, permissions, update));
+        buttons = buttons.push(permission_access_button(class, access, permissions, update));
     }
-
-    controls.width(Length::Fill).into()
+    buttons.into()
 }
 
 fn permission_access_button(
@@ -533,84 +413,36 @@ fn permission_access_button(
     permissions: FilePropertiesPermissions,
     update: &FilePropertiesPermissionUpdate,
 ) -> Button<'static, Message> {
-    let is_enabled = permissions.contains(class, access);
-    let label = row![
-        readable_text(access.label()).width(Length::Fill),
-        switch(is_enabled),
-    ]
-    .spacing(8)
-    .align_y(Alignment::Center);
-    let label = container(label).padding([6, 8]).width(Length::Fill);
-    let label = if is_enabled {
-        label.style(selected_sidebar_item_style)
-    } else {
-        label
-    };
-
-    let button = button(label)
-        .padding(0)
-        .width(Length::FillPortion(1))
-        .style(normal_button_style);
-
-    if update.is_in_progress() {
-        button
-    } else {
-        button.on_press(Message::FileProperties(
-            FilePropertiesMessage::PermissionToggled(class, access),
-        ))
-    }
+    button(readable_text(access.label()))
+        .style(toggle_button_style(permissions.contains(class, access)))
+        .on_press_maybe(
+            (!update.is_in_progress()).then_some(Message::FileProperties(
+                FilePropertiesMessage::PermissionToggled(class, access),
+            )),
+        )
 }
 
-fn apply_permissions_to_enclosed_items_button(
-    update: &FilePropertiesPermissionUpdate,
-) -> Element<'static, Message> {
-    let button = normal_button(readable_text(tr!("Apply to Enclosed Items"))).width(Length::Fill);
-
-    if update.is_in_progress() {
-        button.into()
-    } else {
-        button
-            .on_press(Message::FileProperties(
-                FilePropertiesMessage::ApplyPermissionsToEnclosedItems,
-            ))
-            .into()
-    }
-}
-
-fn permissions_unavailable_panel() -> Element<'static, Message> {
-    container(
-        column![
-            readable_text(tr!("Permissions are read-only")),
-            readable_text(tr!("Permission editing is unavailable for this item."))
-        ]
-        .spacing(4),
-    )
-    .padding([10, 12])
-    .width(Length::Fill)
-    .style(preview_panel_style)
-    .into()
-}
-
-fn permissions_status_panel(
-    update: &FilePropertiesPermissionUpdate,
-) -> Option<Element<'static, Message>> {
-    let message = match update {
+/// 保存中是灰字；失败（含部分失败）是红字。
+fn permissions_status(update: &FilePropertiesPermissionUpdate) -> Option<RowNote> {
+    let note = match update {
         FilePropertiesPermissionUpdate::Idle => return None,
-        FilePropertiesPermissionUpdate::SavingCurrentItem { .. } => tr!("Saving permissions..."),
+        FilePropertiesPermissionUpdate::SavingCurrentItem { .. } => {
+            RowNote::Hint(tr!("Saving permissions..."))
+        }
         FilePropertiesPermissionUpdate::SavingTargetSet { .. } => {
-            tr!("Saving permissions for selected items...")
+            RowNote::Hint(tr!("Saving permissions for selected items..."))
         }
         FilePropertiesPermissionUpdate::ApplyingToEnclosedItems { .. } => {
-            tr!("Applying permissions to enclosed items...")
+            RowNote::Hint(tr!("Applying permissions to enclosed items..."))
         }
         FilePropertiesPermissionUpdate::TargetSetCompleted {
             succeeded_count,
             failures,
         } => {
             if failures.is_empty() {
-                tr!("Updated permissions for %1 items.", succeeded_count)
+                RowNote::Hint(tr!("Updated permissions for %1 items.", succeeded_count))
             } else {
-                tr!(
+                RowNote::Error(tr!(
                     "Updated %1 items; %2 items failed. %3",
                     succeeded_count,
                     failures.len(),
@@ -619,21 +451,14 @@ fn permissions_status_panel(
                         .map(|failure| format!("{:?}: {}", failure.path, failure.error))
                         .collect::<Vec<_>>()
                         .join("; ")
-                )
+                ))
             }
         }
         FilePropertiesPermissionUpdate::Failed(error) => {
-            tr!("Could not update permissions: %1", error)
+            RowNote::Error(tr!("Could not update permissions: %1", error))
         }
     };
-
-    Some(
-        container(readable_text(message))
-            .padding([8, 12])
-            .width(Length::Fill)
-            .style(preview_panel_style)
-            .into(),
-    )
+    Some(note)
 }
 
 fn permission_subject_label(class: FilePropertiesPermissionClass) -> String {
@@ -650,53 +475,6 @@ fn permission_subject_description(class: FilePropertiesPermissionClass) -> Strin
         FilePropertiesPermissionClass::Group => tr!("Assigned group"),
         FilePropertiesPermissionClass::Others => tr!("Other users"),
     }
-}
-
-fn permission_privilege_label(
-    class: FilePropertiesPermissionClass,
-    permissions: FilePropertiesPermissions,
-) -> String {
-    match (
-        permissions.contains(class, FilePropertiesPermissionAccess::Read),
-        permissions.contains(class, FilePropertiesPermissionAccess::Write),
-        permissions.contains(class, FilePropertiesPermissionAccess::Execute),
-    ) {
-        (true, true, true) => tr!("Read, Write & Execute"),
-        (true, true, false) => tr!("Read & Write"),
-        (true, false, true) => tr!("Read & Execute"),
-        (true, false, false) => tr!("Read only"),
-        (false, true, true) => tr!("Write & Execute"),
-        (false, true, false) => tr!("Write only"),
-        (false, false, true) => tr!("Execute only"),
-        (false, false, false) => tr!("No access"),
-    }
-}
-
-fn permission_symbolic_segment(
-    class: FilePropertiesPermissionClass,
-    permissions: FilePropertiesPermissions,
-) -> String {
-    FilePropertiesPermissionAccess::ALL
-        .into_iter()
-        .zip(['r', 'w', 'x'])
-        .map(|(access, enabled_char)| {
-            if permissions.contains(class, access) {
-                enabled_char
-            } else {
-                '-'
-            }
-        })
-        .collect()
-}
-
-fn property_row(label: String, value: String) -> Element<'static, Message> {
-    row![
-        readable_text(label).width(Length::Fixed(PROPERTIES_LABEL_WIDTH)),
-        readable_text(value).width(Length::Fill)
-    ]
-    .spacing(12)
-    .align_y(Alignment::Start)
-    .into()
 }
 
 fn display_name(name: &OsStr) -> String {
@@ -726,7 +504,7 @@ fn display_contents(contents: &FilePropertiesDirectoryContents) -> String {
     with_unreadable_contents_note(counts, contents.unreadable_entries)
 }
 
-/// 同 Nautilus 属性的"(some contents unreadable)"：数字只算了读得到的部分。
+/// 有读不了的子项时注明：数字只算了读得到的部分。
 fn with_unreadable_contents_note(counts: String, unreadable_entries: u64) -> String {
     if unreadable_entries == 0 {
         counts
@@ -755,6 +533,38 @@ mod tests {
             total_disk_size_bytes: 4096,
             unreadable_entries,
         }
+    }
+
+    #[test]
+    fn saving_permissions_is_gray_and_anything_that_failed_is_red() {
+        let permissions = FilePropertiesPermissions::from_mode(0o644);
+        assert!(permissions_status(&FilePropertiesPermissionUpdate::Idle).is_none());
+        assert!(matches!(
+            permissions_status(&FilePropertiesPermissionUpdate::SavingCurrentItem { permissions }),
+            Some(RowNote::Hint(_))
+        ));
+        assert!(matches!(
+            permissions_status(&FilePropertiesPermissionUpdate::TargetSetCompleted {
+                succeeded_count: 2,
+                failures: Vec::new(),
+            }),
+            Some(RowNote::Hint(_))
+        ));
+        // 部分失败也是失败。
+        assert!(matches!(
+            permissions_status(&FilePropertiesPermissionUpdate::TargetSetCompleted {
+                succeeded_count: 1,
+                failures: vec![crate::model::PermissionBatchPathFailure {
+                    path: "/tmp/a".into(),
+                    error: "denied".to_owned(),
+                }],
+            }),
+            Some(RowNote::Error(_))
+        ));
+        assert!(matches!(
+            permissions_status(&FilePropertiesPermissionUpdate::Failed("denied".to_owned())),
+            Some(RowNote::Error(_))
+        ));
     }
 
     #[test]

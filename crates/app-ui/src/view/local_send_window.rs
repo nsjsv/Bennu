@@ -92,7 +92,7 @@ fn header_button(
     active: bool,
 ) -> Element<'static, Message> {
     let tone = if active {
-        IconTone::Selected
+        IconTone::OnAccent
     } else {
         IconTone::Normal
     };

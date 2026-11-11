@@ -4,12 +4,12 @@
 use std::time::SystemTime;
 
 use chrono::{DateTime, Datelike, Local};
-use iced::widget::{button, column, row, Column, Space};
+use iced::widget::{column, row, Column, Space};
 use iced::{Alignment, Element, Length, Theme};
 
 use crate::app::transfer::{Direction, HistoryItem, HistoryRecord, HistoryResult, TransferMessage};
 use crate::app::FileBrowser;
-use crate::appearance::{context_menu_button_style, muted_text_color};
+use crate::appearance::muted_text_color;
 use crate::formatting::{format_file_size, format_middle_ellipsized_text};
 use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
@@ -18,6 +18,8 @@ use bennu_theme::ui_colors;
 
 use super::settings_group::muted_setting_text;
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};
+use bennu_theme::controls::normal_button;
+use bennu_theme::typography::CAPTION_SIZE;
 
 const NAME_MAX_CHARS: usize = 40;
 const TEXT_PREVIEW_CHARS: usize = 40;
@@ -25,17 +27,11 @@ const RESULT_MAX_CHARS: usize = 60;
 
 pub(super) fn history_list(browser: &FileBrowser) -> Element<'_, Message> {
     let records = &browser.transfer_history.records;
-    let clear = button(readable_text(tr!("Clear history")).size(12))
-        .on_press_maybe(
-            (!records.is_empty())
-                .then_some(Message::Transfer(TransferMessage::HistoryClearPressed)),
-        )
-        .padding([4, 10])
-        .style(context_menu_button_style());
+    let clear = normal_button(readable_text(tr!("Clear history"))).on_press_maybe(
+        (!records.is_empty()).then_some(Message::Transfer(TransferMessage::HistoryClearPressed)),
+    );
     let header = row![
-        readable_text(tr!("Transfer history"))
-            .size(13)
-            .width(Length::Fill),
+        readable_text(tr!("Transfer history")).width(Length::Fill),
         clear
     ]
     .align_y(Alignment::Center);
@@ -88,7 +84,7 @@ fn history_row(record: &HistoryRecord, now: SystemTime) -> Element<'_, Message> 
     };
     summary.push(record_time(record.at, now));
     let details = column![
-        readable_text(name).size(12),
+        readable_text(name),
         muted_setting_text(summary.join(" · "), 11),
     ]
     .spacing(2)
@@ -101,15 +97,13 @@ fn history_row(record: &HistoryRecord, now: SystemTime) -> Element<'_, Message> 
     ]
     .spacing(8)
     .align_y(Alignment::Center);
-    button(content)
+    normal_button(content)
         .on_press_maybe(
             openable.then(|| {
                 Message::Transfer(TransferMessage::HistoryRecordOpened(record.id.clone()))
             }),
         )
-        .padding([4, 6])
         .width(Length::Fill)
-        .style(context_menu_button_style())
         .into()
 }
 
@@ -125,7 +119,7 @@ fn result_text(result: &HistoryResult) -> Element<'static, Message> {
         ),
     };
     readable_text(label)
-        .size(11)
+        .size(CAPTION_SIZE)
         .style(move |theme: &Theme| iced::widget::text::Style {
             color: Some(if failed {
                 ui_colors(theme).error

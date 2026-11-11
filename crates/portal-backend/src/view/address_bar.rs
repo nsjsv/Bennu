@@ -32,6 +32,8 @@ use crate::picker_session::scrollbar::{scroll_id, scrollbar_on_scroll, Scrollbar
 use crate::picker_session::{PickerSession, PickerViewMode, SessionMessage, SessionScrollRegion};
 
 use super::readable_label;
+use bennu_theme::controls::text_field;
+use bennu_theme::metrics::{CONTROL_PADDING_Y, FIELD_PADDING_X};
 
 /// 面包屑横向滚动条静态宽度：与主软件地址栏一致。
 const BREADCRUMB_SCROLLBAR_WIDTH: f32 = 8.0;
@@ -157,15 +159,13 @@ fn address_bar(
 
     let anchor: Element<'static, SessionMessage> = if let Some(editing) = session.address_editing()
     {
-        let input = text_input("输入路径，回车跳转", &editing.draft)
+        let input = text_field("输入路径，回车跳转", &editing.draft)
             .id(address_input_id(session.request_path()))
             .on_input({
                 let emit = emit.clone();
                 move |value| emit(SessionMessage::AddressEditChanged(value))
             })
             .on_submit(emit(SessionMessage::AddressEditingSubmitted))
-            .padding([7, 10])
-            .size(16)
             .style(move |theme, status| faded_text_input_style(theme, status, editing_fraction))
             .width(Length::Fill);
 
@@ -217,7 +217,7 @@ fn breadcrumb_layer(
     if session.is_trash_view() {
         return container(
             readable_label("回收站".to_string())
-                .size(ADDRESS_TEXT_SIZE as f32)
+                .size(ADDRESS_TEXT_SIZE)
                 .width(Length::Fill),
         )
         .padding([7, BREADCRUMB_HORIZONTAL_PADDING as u16])
@@ -372,7 +372,7 @@ fn path_suggestion_row(
 ) -> Element<'static, SessionMessage> {
     let label = path.to_string_lossy();
     let label = format_middle_ellipsized_text(label.as_ref(), PATH_SUGGESTION_MAX_CHARS);
-    let item = container(readable_label(label).size(13).width(Length::Fill))
+    let item = container(readable_label(label).width(Length::Fill))
         .padding([5, 8])
         .width(Length::Fill);
     let item = if is_selected {
@@ -392,20 +392,23 @@ fn path_suggestion_row(
 /// 退出过渡期间的草稿快照层：复用输入框样式保证渐出时边框/底色与
 /// 编辑态完全连续（主软件 address_exit_snapshot 同构）。
 fn address_exit_snapshot(snapshot: &str, opacity: f32) -> Element<'static, SessionMessage> {
-    container(measured_middle_ellipsized_text(snapshot.to_owned(), 16))
-        .padding([7, 10])
-        .width(Length::Fill)
-        .height(Length::Fixed(ADDRESS_BAR_HEIGHT))
-        .style(move |theme| {
-            let input_style = faded_text_input_style(theme, text_input::Status::Active, opacity);
-            container::Style {
-                background: Some(input_style.background),
-                text_color: Some(input_style.value),
-                border: input_style.border,
-                ..container::Style::default()
-            }
-        })
-        .into()
+    container(measured_middle_ellipsized_text(
+        snapshot.to_owned(),
+        ADDRESS_TEXT_SIZE,
+    ))
+    .padding([CONTROL_PADDING_Y, FIELD_PADDING_X])
+    .width(Length::Fill)
+    .height(Length::Fixed(ADDRESS_BAR_HEIGHT))
+    .style(move |theme| {
+        let input_style = faded_text_input_style(theme, text_input::Status::Active, opacity);
+        container::Style {
+            background: Some(input_style.background),
+            text_color: Some(input_style.value),
+            border: input_style.border,
+            ..container::Style::default()
+        }
+    })
+    .into()
 }
 
 /// 随过渡分数淡出的图标（面包屑分隔符与 Home 图标）。

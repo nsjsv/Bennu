@@ -8,8 +8,7 @@ use iced::widget::{button, column, container, row, Button, Column, Space};
 use iced::{Alignment, Element, Length};
 
 use crate::appearance::{
-    app_content_style, context_menu_button_style, context_menu_style, preview_panel_style,
-    selected_sidebar_item_style,
+    app_content_style, context_menu_style, preview_panel_style, selected_sidebar_item_style,
 };
 use crate::formatting::{format_file_size, format_system_time, item_count_label};
 use crate::model::{
@@ -26,8 +25,10 @@ use bennu_theme::icons::IconSymbol;
 use super::auxiliary_window_layout::{
     auxiliary_detail_scroller, auxiliary_sidebar, auxiliary_sidebar_button, auxiliary_split_window,
 };
-use super::toggle_switch::switch_control;
 use super::{auxiliary_window_message, themed_icon, IconTone};
+use bennu_theme::controls::switch;
+use bennu_theme::controls::{normal_button, normal_button_style};
+use bennu_theme::typography::{BOLD, CAPTION_SIZE, TITLE_SIZE};
 
 const PROPERTIES_ICON_SIZE: f32 = 44.0;
 const PROPERTIES_LABEL_WIDTH: f32 = 128.0;
@@ -67,8 +68,8 @@ fn properties_target_label(properties: &FilePropertiesState) -> String {
 
 fn properties_loading_view(target_label: String) -> Element<'static, Message> {
     let content = column![
-        readable_text(tr!("Loading properties...")).size(16),
-        readable_text(target_label).size(13)
+        readable_text(tr!("Loading properties...")),
+        readable_text(target_label)
     ]
     .spacing(8)
     .padding(24)
@@ -87,7 +88,7 @@ fn aggregate_properties_loading_view(
     scrollbar_viewport: Option<ScrollbarViewport>,
 ) -> Element<'_, Message> {
     let content = column![
-        readable_text(tr!("Calculating...")).size(13),
+        readable_text(tr!("Calculating...")),
         aggregate_properties_information_detail(snapshot, scrollbar_visibility, scrollbar_viewport),
     ]
     .spacing(8)
@@ -104,9 +105,9 @@ fn aggregate_properties_loading_view(
 
 fn properties_error_view<'a>(target_label: String, error: &'a str) -> Element<'a, Message> {
     let content = column![
-        readable_text(tr!("Could not load properties")).size(16),
-        readable_text(target_label).size(13),
-        readable_text(error.to_owned()).size(13)
+        readable_text(tr!("Could not load properties")),
+        readable_text(target_label),
+        readable_text(error.to_owned())
     ]
     .spacing(8)
     .padding(24)
@@ -153,7 +154,7 @@ fn properties_split_view<'a>(
 fn properties_category_sidebar(selected: FilePropertiesCategory) -> Element<'static, Message> {
     let mut categories = Column::new()
         .spacing(6)
-        .push(readable_text(tr!("Properties")).size(18))
+        .push(readable_text(tr!("Properties")).size(TITLE_SIZE).font(BOLD))
         .push(Space::new().height(Length::Fixed(6.0)));
 
     for category in FilePropertiesCategory::ALL {
@@ -183,8 +184,10 @@ fn properties_information_detail(
     let header = row![
         themed_icon(icon, IconTone::Normal, PROPERTIES_ICON_SIZE),
         column![
-            readable_text(display_name(&snapshot.name)).size(18),
-            readable_text(file_kind_label(snapshot.kind)).size(13)
+            readable_text(display_name(&snapshot.name))
+                .size(TITLE_SIZE)
+                .font(BOLD),
+            readable_text(file_kind_label(snapshot.kind))
         ]
         .spacing(4)
         .width(Length::Fill)
@@ -253,8 +256,10 @@ fn aggregate_properties_information_detail(
     let header = row![
         themed_icon(IconSymbol::File, IconTone::Normal, PROPERTIES_ICON_SIZE),
         column![
-            readable_text(item_count_label(snapshot.target_count)).size(18),
-            readable_text(aggregate_type_label(snapshot)).size(13)
+            readable_text(item_count_label(snapshot.target_count))
+                .size(TITLE_SIZE)
+                .font(BOLD),
+            readable_text(aggregate_type_label(snapshot))
         ]
         .spacing(4)
         .width(Length::Fill)
@@ -371,11 +376,12 @@ fn properties_permissions_detail<'a>(
 
 fn permissions_header(permissions: Option<FilePropertiesPermissions>) -> Element<'static, Message> {
     let title = column![
-        readable_text(tr!("Sharing & Permissions")).size(20),
+        readable_text(tr!("Sharing & Permissions"))
+            .size(TITLE_SIZE)
+            .font(BOLD),
         readable_text(tr!(
             "Choose who can read, write, or execute this item. Changes save immediately."
         ))
-        .size(12)
     ]
     .spacing(4)
     .width(Length::Fill);
@@ -414,8 +420,8 @@ fn displayed_permissions(
 
 fn permissions_mode_badge(permissions: FilePropertiesPermissions) -> Element<'static, Message> {
     column![
-        readable_text(tr!("Current mode")).size(11),
-        readable_text(display_permissions(permissions)).size(12)
+        readable_text(tr!("Current mode")).size(CAPTION_SIZE),
+        readable_text(display_permissions(permissions))
     ]
     .spacing(2)
     .align_x(Alignment::End)
@@ -442,9 +448,11 @@ fn permissions_people_panel(
 
 fn permissions_table_header() -> Element<'static, Message> {
     row![
-        readable_text(tr!("Name")).size(11).width(Length::Fill),
+        readable_text(tr!("Name"))
+            .size(CAPTION_SIZE)
+            .width(Length::Fill),
         readable_text(tr!("Privilege"))
-            .size(11)
+            .size(CAPTION_SIZE)
             .width(Length::Fixed(PERMISSION_PRIVILEGE_WIDTH))
     ]
     .spacing(12)
@@ -458,8 +466,8 @@ fn permission_person_row(
     update: &FilePropertiesPermissionUpdate,
 ) -> Element<'static, Message> {
     let subject = column![
-        readable_text(permission_subject_label(class)).size(13),
-        readable_text(permission_subject_description(class)).size(11)
+        readable_text(permission_subject_label(class)),
+        readable_text(permission_subject_description(class)).size(CAPTION_SIZE)
     ]
     .spacing(2)
     .width(Length::Fill);
@@ -484,8 +492,8 @@ fn permission_privilege_badge(
 ) -> Element<'static, Message> {
     container(
         column![
-            readable_text(permission_privilege_label(class, permissions)).size(12),
-            readable_text(permission_symbolic_segment(class, permissions)).size(11)
+            readable_text(permission_privilege_label(class, permissions)),
+            readable_text(permission_symbolic_segment(class, permissions)).size(CAPTION_SIZE)
         ]
         .spacing(2),
     )
@@ -517,8 +525,8 @@ fn permission_access_button(
 ) -> Button<'static, Message> {
     let is_enabled = permissions.contains(class, access);
     let label = row![
-        readable_text(access.label()).size(12).width(Length::Fill),
-        switch_control(is_enabled),
+        readable_text(access.label()).width(Length::Fill),
+        switch(is_enabled),
     ]
     .spacing(8)
     .align_y(Alignment::Center);
@@ -530,8 +538,9 @@ fn permission_access_button(
     };
 
     let button = button(label)
+        .padding(0)
         .width(Length::FillPortion(1))
-        .style(context_menu_button_style());
+        .style(normal_button_style);
 
     if update.is_in_progress() {
         button
@@ -545,12 +554,7 @@ fn permission_access_button(
 fn apply_permissions_to_enclosed_items_button(
     update: &FilePropertiesPermissionUpdate,
 ) -> Element<'static, Message> {
-    let label = container(readable_text(tr!("Apply to Enclosed Items")).size(13))
-        .padding([8, 12])
-        .width(Length::Fill);
-    let button = button(label)
-        .width(Length::Fill)
-        .style(context_menu_button_style());
+    let button = normal_button(readable_text(tr!("Apply to Enclosed Items"))).width(Length::Fill);
 
     if update.is_in_progress() {
         button.into()
@@ -566,8 +570,8 @@ fn apply_permissions_to_enclosed_items_button(
 fn permissions_unavailable_panel() -> Element<'static, Message> {
     container(
         column![
-            readable_text(tr!("Permissions are read-only")).size(14),
-            readable_text(tr!("Permission editing is unavailable for this item.")).size(12)
+            readable_text(tr!("Permissions are read-only")),
+            readable_text(tr!("Permission editing is unavailable for this item."))
         ]
         .spacing(4),
     )
@@ -614,7 +618,7 @@ fn permissions_status_panel(
     };
 
     Some(
-        container(readable_text(message).size(12))
+        container(readable_text(message))
             .padding([8, 12])
             .width(Length::Fill)
             .style(preview_panel_style)

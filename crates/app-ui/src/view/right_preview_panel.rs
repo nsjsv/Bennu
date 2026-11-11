@@ -162,12 +162,10 @@ fn display_size(bytes: u64) -> String {
 
 fn info_row(label: String, value: String) -> Element<'static, Message> {
     row![
-        bennu_preview::panel_text::readable_text(label)
-            .size(13)
-            .style(|theme| iced::widget::text::Style {
-                color: Some(muted_text_color(theme)),
-            }),
-        iced::widget::text(value).size(13),
+        bennu_preview::panel_text::readable_text(label).style(|theme| iced::widget::text::Style {
+            color: Some(muted_text_color(theme)),
+        }),
+        iced::widget::text(value),
     ]
     .spacing(10)
     .width(Length::Fill)

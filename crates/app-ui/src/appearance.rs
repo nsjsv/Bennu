@@ -11,7 +11,7 @@ mod list_header;
 mod window_chrome;
 
 pub(crate) use icon_grid::icon_grid_expansion_panel_style;
-pub(crate) use navigation_input::{address_bar_style, navigation_text_input_style};
+pub(crate) use navigation_input::address_bar_style;
 // 顶栏/标题栏容器样式只被宿主辅助窗口 chrome 消费，留在这里；四枚
 // 窗口控制按钮样式（标准/浮动）已下沉 bennu-theme::window_chrome_styles
 // （预览浮动 chrome 迁移需要，随 bennu-preview 的 chrome 机件消费），
@@ -21,7 +21,6 @@ pub(crate) use window_chrome::{window_title_bar_style, window_top_bar_style};
 // 导航按钮样式已下沉 bennu-theme（与导航输入框同组词汇）；预览/文档
 // 视觉词汇在 bennu-theme::preview_styles（面板本体已随 bennu-preview
 // 迁移，经 bennu-theme 路径直接消费，app-ui 侧无剩余调用点）。
-pub(crate) use bennu_theme::styles::navigation_icon_button_style;
 
 pub(crate) use list_header::{
     group_header_style, list_header_cell_style, list_header_reorder_indicator_style,
@@ -38,8 +37,8 @@ pub(crate) use bennu_theme::styles::{
     list_row_style, muted_icon_svg_style, muted_text_color, open_child_row_style,
     path_suggestion_item_style, path_suggestions_style, scale_color_alpha, selected_icon_svg_style,
     selected_path_suggestion_item_style, selected_sidebar_item_style,
-    sidebar_bookmark_drop_slot_style, sidebar_style, subtle_border_color, surface_button_style,
-    transparent_button_style, transparent_icon_button_style, warning_icon_svg_style,
+    sidebar_bookmark_drop_slot_style, sidebar_style, subtle_border_color, transparent_button_style,
+    transparent_icon_button_style, warning_icon_svg_style,
 };
 
 use crate::file_entry_presentation::SelectionRunPosition;
@@ -176,10 +175,6 @@ pub(crate) fn grouping_rail_button_style(
     }
 }
 
-pub(crate) fn context_menu_button_style() -> fn(&Theme, button::Status) -> button::Style {
-    surface_button_style
-}
-
 pub(crate) fn preview_panel_style(theme: &Theme) -> container::Appearance {
     let colors = ui_colors(theme);
     container::Appearance {
@@ -304,50 +299,6 @@ pub(crate) fn faded_drag_preview_pill_style(theme: &Theme, fade: f32) -> contain
     }
 }
 
-pub(crate) fn switch_track_on_style(theme: &Theme) -> container::Appearance {
-    container::Appearance {
-        background: Some(Background::Color(ui_colors(theme).primary)),
-        border: Border {
-            radius: 11.0.into(),
-            ..Border::default()
-        },
-        ..container::Appearance::default()
-    }
-}
-
-pub(crate) fn switch_track_off_style(theme: &Theme) -> container::Appearance {
-    container::Appearance {
-        background: Some(Background::Color(ui_colors(theme).outline_variant)),
-        border: Border {
-            radius: 11.0.into(),
-            ..Border::default()
-        },
-        ..container::Appearance::default()
-    }
-}
-
-pub(crate) fn switch_thumb_on_style(theme: &Theme) -> container::Appearance {
-    container::Appearance {
-        background: Some(Background::Color(ui_colors(theme).on_primary)),
-        border: Border {
-            radius: 7.0.into(),
-            ..Border::default()
-        },
-        ..container::Appearance::default()
-    }
-}
-
-pub(crate) fn switch_thumb_off_style(theme: &Theme) -> container::Appearance {
-    container::Appearance {
-        background: Some(Background::Color(ui_colors(theme).on_surface)),
-        border: Border {
-            radius: 7.0.into(),
-            ..Border::default()
-        },
-        ..container::Appearance::default()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -405,17 +356,6 @@ mod tests {
             );
             assert_eq!(close.background, Some(Background::Color(colors.error)));
             assert_eq!(close.text_color, colors.on_error);
-
-            let switch_on = switch_thumb_on_style(&theme);
-            assert_eq!(
-                switch_on.background,
-                Some(Background::Color(colors.on_primary))
-            );
-            let switch_off = switch_thumb_off_style(&theme);
-            assert_eq!(
-                switch_off.background,
-                Some(Background::Color(colors.on_surface))
-            );
         }
     }
 }

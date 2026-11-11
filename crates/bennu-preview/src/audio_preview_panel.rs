@@ -5,11 +5,11 @@ use std::path::Path;
 use std::time::Duration;
 
 use bennu_localization::tr;
-use iced::widget::{button, column, container, row, slider, Button, Column, Space};
+use iced::widget::{button, column, container, row, Button, Column, Space};
 use iced::{Alignment, Element, Length};
 
+use bennu_theme::controls::icon_button_style;
 use bennu_theme::icons::{themed_icon, IconSymbol, IconTone};
-use bennu_theme::styles::navigation_icon_button_style;
 
 use crate::formatting::{format_duration, format_file_size};
 use crate::media_controls::{
@@ -19,6 +19,8 @@ use crate::media_controls::{
 use crate::panel_text::readable_text;
 use crate::preview::{AudioPreviewPlayback, AudioPreviewPlaybackStatus};
 use crate::preview_message::PreviewMessage;
+use bennu_theme::controls::slider;
+use bennu_theme::typography::{BOLD, TITLE_SIZE};
 
 const AUDIO_PREVIEW_CONTROL_HEIGHT: f32 = 92.0;
 const AUDIO_PROGRESS_SLIDER_WIDTH: f32 = 280.0;
@@ -35,9 +37,11 @@ where
 {
     let playback = playback.filter(|playback| playback.path.as_path() == path);
     let title = column![
-        readable_text(tr!("Audio preview")).size(17),
-        readable_text(audio_preview_summary(duration, len)).size(12),
-        readable_text(audio_preview_status(playback, duration)).size(12),
+        readable_text(tr!("Audio preview"))
+            .size(TITLE_SIZE)
+            .font(BOLD),
+        readable_text(audio_preview_summary(duration, len)),
+        readable_text(audio_preview_status(playback, duration)),
     ]
     .spacing(4)
     .width(Length::Fixed(150.0));
@@ -70,7 +74,7 @@ where
         .padding(8)
         .width(Length::Fixed(AUDIO_CONTROL_BUTTON_SIZE))
         .height(Length::Fixed(AUDIO_CONTROL_BUTTON_SIZE))
-        .style(navigation_icon_button_style());
+        .style(icon_button_style);
     if matches!(
         playback.map(|playback| playback.status),
         Some(AudioPreviewPlaybackStatus::Loading)
@@ -113,7 +117,7 @@ where
         slider_row,
         row![
             Space::new().width(Length::Fixed(label_offset)),
-            readable_text(media_position_text(position, duration)).size(12),
+            readable_text(media_position_text(position, duration)),
         ],
     ]
     .spacing(4)
@@ -129,7 +133,7 @@ where
 {
     let volume = playback.map(|playback| playback.volume).unwrap_or(1.0);
     column![
-        readable_text(tr!("Volume %1%", format!("{:.0}", volume * 100.0))).size(12),
+        readable_text(tr!("Volume %1%", format!("{:.0}", volume * 100.0))),
         slider(0.0..=1.0, volume, |value: f32| Message::from(
             PreviewMessage::AudioPreviewVolumeChanged(value)
         ),)

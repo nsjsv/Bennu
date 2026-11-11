@@ -10,9 +10,10 @@ use bennu_preview::panel_text::readable_text;
 use bennu_theme::icons::IconSymbol;
 
 use super::floating_panels::DESTRUCTIVE_CONFIRMATION_PANEL_WIDTH;
-use super::option_controls::{primary_action_button, secondary_action_button};
 use super::settings_group::muted_setting_text;
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};
+use bennu_theme::controls::{normal_button, suggested_button};
+use bennu_theme::typography::{BOLD, TITLE_SIZE};
 
 const MESSAGE_MAX_HEIGHT: f32 = 240.0;
 
@@ -28,28 +29,25 @@ pub(super) fn incoming_message_panel(
     };
     let mut actions = row![
         Space::new().width(Length::Fill),
-        secondary_action_button(copy_label, action(TransferMessage::IncomingMessageCopied)),
+        normal_button(readable_text(copy_label))
+            .on_press(action(TransferMessage::IncomingMessageCopied)),
     ]
     .spacing(6)
     .align_y(Alignment::Center);
     if message_link(&message.text).is_some() {
-        actions = actions.push(secondary_action_button(
-            tr!("Open link"),
-            action(TransferMessage::IncomingMessageLinkOpened),
-        ));
+        actions = actions.push(
+            normal_button(readable_text(tr!("Open link")))
+                .on_press(action(TransferMessage::IncomingMessageLinkOpened)),
+        );
     }
-    actions = actions.push(primary_action_button(
-        tr!("Close"),
-        action(TransferMessage::IncomingMessageClosed),
-    ));
+    actions = actions.push(
+        suggested_button(readable_text(tr!("Close")))
+            .on_press(action(TransferMessage::IncomingMessageClosed)),
+    );
 
     // 文字是对方发来的用户内容，不做本地化；放进可滚动的区域，长文不撑破弹窗。
-    let body = scrollable(
-        readable_text(message.text.clone())
-            .size(13)
-            .width(Length::Fill),
-    )
-    .height(Length::Shrink);
+    let body =
+        scrollable(readable_text(message.text.clone()).width(Length::Fill)).height(Length::Shrink);
     let mut content = column![
         row![
             themed_icon(IconSymbol::Send, IconTone::Normal, MENU_ICON_SIZE),
@@ -57,7 +55,8 @@ pub(super) fn incoming_message_panel(
                 MessageTitle::Received(alias) => tr!("%1 sent a message", alias),
                 MessageTitle::Sent(alias) => tr!("Message to %1", alias),
             })
-            .size(16)
+            .size(TITLE_SIZE)
+            .font(BOLD)
             .width(Length::Fill),
         ]
         .spacing(8)

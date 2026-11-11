@@ -1,7 +1,7 @@
 //! LocalSend 窗口：本机与接收状态、从手机接收；"设备"页是待发（文件或文字）、收藏设备、附近设备，
 //! "记录"页是传输记录。
 
-use iced::widget::{button, column, container, row, scrollable, text_editor, Column, Space};
+use iced::widget::{column, container, row, scrollable, Column, Space};
 use iced::{Alignment, Element, Length, Theme};
 
 use crate::app::transfer::{
@@ -9,7 +9,7 @@ use crate::app::transfer::{
     StagedItem, StagedSize, StagedTab, TransferMessage,
 };
 use crate::app::FileBrowser;
-use crate::appearance::{context_menu_button_style, context_menu_style, muted_text_color};
+use crate::appearance::{context_menu_style, muted_text_color};
 use crate::directory_summary::RecursiveTotalSize;
 use crate::formatting::format_middle_ellipsized_text;
 use crate::model::Message;
@@ -18,10 +18,13 @@ use bennu_theme::icons::IconSymbol;
 use bennu_theme::ui_colors;
 use local_send::DeviceInfo;
 
-use super::option_controls::{segmented_choice_row, SegmentedChoice};
 use super::settings_group::{muted_setting_text, toggle_setting_row};
 use super::{link_receive, local_send_address_form, local_send_devices, transfer_history};
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};
+use bennu_theme::controls::text_area;
+use bennu_theme::controls::{icon_button, normal_button};
+use bennu_theme::controls::{segmented_choice_row, SegmentedChoice};
+use bennu_theme::typography::CAPTION_SIZE;
 
 const WINDOW_PADDING: f32 = 16.0;
 const CARD_SPACING: f32 = 12.0;
@@ -35,7 +38,9 @@ pub(crate) fn view_local_send_window(browser: &FileBrowser) -> Element<'_, Messa
     let page = |label: String, target: LocalSendPage| SegmentedChoice {
         label,
         selected: browser.local_send_page == target,
-        message: Message::Transfer(TransferMessage::LocalSendPageSelected(target)),
+        message: Some(Message::Transfer(TransferMessage::LocalSendPageSelected(
+            target,
+        ))),
         tooltip: None,
     };
     let pages = segmented_choice_row(vec![
@@ -82,8 +87,7 @@ fn this_computer_card(browser: &FileBrowser) -> Element<'_, Message> {
             readable_text(tr!(
                 "This computer: %1",
                 browser.effective_transfer_device_alias()
-            ))
-            .size(13),
+            )),
             toggle_setting_row(
                 tr!("Receive files"),
                 None,
@@ -102,7 +106,9 @@ fn staged_card(browser: &FileBrowser) -> Element<'_, Message> {
     let tab = |label: String, target: StagedTab| SegmentedChoice {
         label,
         selected: browser.local_send_tab == target,
-        message: Message::Transfer(TransferMessage::StagedTabSelected(target)),
+        message: Some(Message::Transfer(TransferMessage::StagedTabSelected(
+            target,
+        ))),
         tooltip: None,
     };
     let tabs = segmented_choice_row(vec![
@@ -118,18 +124,14 @@ fn staged_card(browser: &FileBrowser) -> Element<'_, Message> {
 
 /// 要发的文字：多行，发完还在，可以接着发给别人。
 fn staged_text(browser: &FileBrowser) -> Element<'_, Message> {
-    let editor = text_editor(&browser.local_send_text)
+    let editor = text_area(&browser.local_send_text)
         .placeholder(tr!("Type the text to send"))
         .on_action(|action| Message::Transfer(TransferMessage::StagedTextEdited(action)))
-        .height(Length::Fixed(STAGED_TEXT_HEIGHT))
-        .padding(6);
-    let clear = button(readable_text(tr!("Clear")).size(12))
-        .on_press_maybe(
-            (!browser.local_send_text.text().is_empty())
-                .then_some(Message::Transfer(TransferMessage::StagedTextCleared)),
-        )
-        .padding([4, 10])
-        .style(context_menu_button_style());
+        .height(Length::Fixed(STAGED_TEXT_HEIGHT));
+    let clear = normal_button(readable_text(tr!("Clear"))).on_press_maybe(
+        (!browser.local_send_text.text().is_empty())
+            .then_some(Message::Transfer(TransferMessage::StagedTextCleared)),
+    );
     column![
         editor,
         row![Space::new().width(Length::Fill), clear].align_y(Alignment::Center),
@@ -143,16 +145,14 @@ fn staged_files(browser: &FileBrowser) -> Element<'_, Message> {
     let mut content = column![].spacing(8).width(Length::Fill);
     if staged.is_empty() {
         content = content
-            .push(readable_text(tr!("No files to send")).size(13))
+            .push(readable_text(tr!("No files to send")))
             .push(muted_setting_text(
                 tr!("Drag files onto LocalSend in the sidebar, or choose them here."),
                 11,
             ));
     } else {
-        let clear = button(readable_text(tr!("Clear list")).size(12))
-            .on_press(Message::Transfer(TransferMessage::StagedItemsCleared))
-            .padding([4, 10])
-            .style(context_menu_button_style());
+        let clear = normal_button(readable_text(tr!("Clear list")))
+            .on_press(Message::Transfer(TransferMessage::StagedItemsCleared));
         content = content
             .push(
                 row![
@@ -161,7 +161,6 @@ fn staged_files(browser: &FileBrowser) -> Element<'_, Message> {
                         staged.len(),
                         staged_total_text(staged)
                     ))
-                    .size(13)
                     .width(Length::Fill),
                     clear,
                 ]
@@ -176,10 +175,8 @@ fn staged_files(browser: &FileBrowser) -> Element<'_, Message> {
             );
     }
     let choose = |label: String, target: ChooserTarget| {
-        button(readable_text(label).size(12))
+        normal_button(readable_text(label))
             .on_press(Message::Transfer(TransferMessage::ChooserPressed(target)))
-            .padding([5, 12])
-            .style(context_menu_button_style())
     };
     content
         .push(
@@ -201,23 +198,20 @@ fn staged_rows(staged: &[StagedItem]) -> Column<'_, Message> {
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| item.path.to_string_lossy().into_owned());
-        let remove = button(themed_icon(
+        let remove = icon_button(themed_icon(
             IconSymbol::Close,
             IconTone::Normal,
             MENU_ICON_SIZE,
         ))
         .on_press(Message::Transfer(TransferMessage::StagedItemRemoved(
             item.path.clone(),
-        )))
-        .padding([2, 6])
-        .style(context_menu_button_style());
+        )));
         rows = rows.push(
             row![
                 readable_text(format_middle_ellipsized_text(&name, STAGED_NAME_MAX_CHARS))
-                    .size(12)
                     .width(Length::Fill),
                 readable_text(staged_size_text(&item.size))
-                    .size(11)
+                    .size(CAPTION_SIZE)
                     .style(|theme: &Theme| iced::widget::text::Style {
                         color: Some(muted_text_color(theme)),
                     }),
@@ -276,19 +270,17 @@ fn device_rows(
 
 /// 收藏：标题 + "按 IP 添加"（展开的表单在标题下面）+ 全部收藏设备。
 fn favorites_card(browser: &FileBrowser) -> Element<'_, Message> {
-    let add = button(
+    let add = normal_button(
         row![
             themed_icon(IconSymbol::Plus, IconTone::Normal, MENU_ICON_SIZE),
-            readable_text(tr!("Add by IP")).size(12),
+            readable_text(tr!("Add by IP")),
         ]
         .spacing(4)
         .align_y(Alignment::Center),
     )
     .on_press(Message::Transfer(TransferMessage::AddressForm(
         AddressFormMessage::Opened,
-    )))
-    .padding([4, 10])
-    .style(context_menu_button_style());
+    )));
     let mut content = column![row![
         local_send_devices::favorites_title().width(Length::Fill),
         add
@@ -300,7 +292,7 @@ fn favorites_card(browser: &FileBrowser) -> Element<'_, Message> {
     }
     content = if browser.user_config().transfer_favorite_devices.is_empty() {
         content
-            .push(readable_text(tr!("No favorite devices yet")).size(12))
+            .push(readable_text(tr!("No favorite devices yet")))
             .push(muted_setting_text(
                 tr!("Click the star next to a device to add it here."),
                 11,
@@ -323,7 +315,7 @@ fn nearby_card(browser: &FileBrowser) -> Element<'_, Message> {
 
 pub(super) fn error_text(label: String) -> Element<'static, Message> {
     readable_text(label)
-        .size(11)
+        .size(CAPTION_SIZE)
         .width(Length::Fill)
         .style(|theme: &Theme| iced::widget::text::Style {
             color: Some(ui_colors(theme).error),

@@ -13,7 +13,7 @@ const TEXT_MEASUREMENT_HEIGHT: f32 = 10_000.0;
 // 多栏列表等按最终像素宽度截断；这里必须等布局拿到 renderer 后再决定是否省略。
 pub fn measured_middle_ellipsized_text<'a, Message>(
     content: impl Into<String>,
-    size: u32,
+    size: f32,
 ) -> Element<'a, Message>
 where
     Message: 'a,
@@ -484,13 +484,13 @@ where
     paragraph.min_width()
 }
 
-pub fn measured_text_natural_width<Renderer>(renderer: &Renderer, content: &str, size: u32) -> f32
+pub fn measured_text_natural_width<Renderer>(renderer: &Renderer, content: &str, size: f32) -> f32
 where
     Renderer: text::Renderer,
 {
     measured_text_width::<Renderer>(
         content,
-        Pixels(size as f32),
+        Pixels(size),
         text::LineHeight::default(),
         renderer.default_font(),
         shaping_for_content(content),

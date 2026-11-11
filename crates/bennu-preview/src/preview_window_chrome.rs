@@ -24,6 +24,7 @@ use crate::panel_text::readable_text;
 use crate::preview::PreviewWindowChromeState;
 use crate::preview_message::PreviewMessage;
 
+use bennu_theme::typography::CAPTION_SIZE;
 use iced::Theme;
 
 const WINDOW_CONTROL_WIDTH: f32 = 36.0;
@@ -170,7 +171,7 @@ where
 
     tooltip(
         control,
-        container(readable_text(label).size(11))
+        container(readable_text(label).size(CAPTION_SIZE))
             .padding([5, 7])
             .style(context_menu_style),
         tooltip::Position::Bottom,
@@ -240,7 +241,7 @@ where
 
     tooltip(
         control,
-        container(readable_text(if pinned { tr!("Unpin") } else { tr!("Pin") }).size(11))
+        container(readable_text(if pinned { tr!("Unpin") } else { tr!("Pin") }).size(CAPTION_SIZE))
             .padding([5, 7])
             .style(context_menu_style),
         tooltip::Position::Bottom,

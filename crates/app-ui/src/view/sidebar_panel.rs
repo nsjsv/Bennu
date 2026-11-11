@@ -9,8 +9,7 @@ use crate::app::transfer::TransferMessage;
 use crate::app::FileBrowser;
 use crate::appearance::{
     enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction, hovered_sidebar_item_style,
-    navigation_icon_button_style, selected_sidebar_item_style, sidebar_bookmark_drop_slot_style,
-    sidebar_style,
+    selected_sidebar_item_style, sidebar_bookmark_drop_slot_style, sidebar_style,
 };
 use crate::file_drag_hit_test_bounds::FileDragHitTestMarker;
 use crate::file_drag_hit_test_marker::track_file_drag_hit_test_marker;
@@ -27,6 +26,8 @@ use bennu_theme::icons::IconSymbol;
 use bennu_theme::measured_text::measured_middle_ellipsized_text;
 
 use super::{tab_motion, themed_icon, IconTone, MENU_ICON_SIZE};
+use bennu_theme::controls::icon_button_style;
+use bennu_theme::typography::{BODY_SIZE, BOLD, CAPTION_SIZE, TITLE_SIZE};
 
 /// 位置行图标。侧边栏数据 crate 不依赖图标词汇，映射由两个宿主的视图各持一份
 /// （portal 侧栏同一张表）：没有同时能看到两种类型的共享 crate，为一张 8 行的表不值得再建一个。
@@ -54,7 +55,10 @@ const SIDEBAR_BOOKMARK_DROP_SLOT_HEIGHT: f32 = 3.0;
 
 pub(crate) fn sidebar_view(browser: &FileBrowser) -> Element<'_, Message> {
     let sidebar_header = row![
-        readable_text(tr!("Places")).size(16).width(Length::Fill),
+        readable_text(tr!("Places"))
+            .size(TITLE_SIZE)
+            .font(BOLD)
+            .width(Length::Fill),
         button(themed_icon(
             IconSymbol::Settings,
             IconTone::Normal,
@@ -62,7 +66,7 @@ pub(crate) fn sidebar_view(browser: &FileBrowser) -> Element<'_, Message> {
         ))
         .on_press(Message::SettingsOpened)
         .padding([4, 6])
-        .style(navigation_icon_button_style()),
+        .style(icon_button_style),
     ]
     .spacing(8)
     .align_y(Alignment::Center);
@@ -212,7 +216,7 @@ fn append_sidebar_network_connections<'a>(
 
 fn sidebar_network_section_header() -> Element<'static, Message> {
     row![
-        container(readable_text(tr!("Network")).size(12))
+        container(readable_text(tr!("Network")))
             .padding([4, 8])
             .width(Length::Fill),
         button(themed_icon(
@@ -224,7 +228,7 @@ fn sidebar_network_section_header() -> Element<'static, Message> {
             NetworkConnectionMessage::AddRequested
         ))
         .padding([2, 5])
-        .style(navigation_icon_button_style()),
+        .style(icon_button_style),
     ]
     .align_y(Alignment::Center)
     .into()
@@ -538,14 +542,14 @@ fn sidebar_local_send_item(browser: &FileBrowser) -> Element<'_, Message> {
 }
 
 fn sidebar_section_label(label: String) -> Element<'static, Message> {
-    container(readable_text(label).size(12))
+    container(readable_text(label))
         .padding([4, 8])
         .width(Length::Fill)
         .into()
 }
 
 fn sidebar_message_row(message: String) -> Element<'static, Message> {
-    container(readable_text(message).size(12))
+    container(readable_text(message))
         .padding([4, 8])
         .width(Length::Fill)
         .into()
@@ -603,7 +607,7 @@ impl SidebarPresentation {
 fn sidebar_label(icon: IconSymbol, label: &str, tone: IconTone) -> Row<'static, Message> {
     row![
         themed_icon(icon, tone, MENU_ICON_SIZE),
-        measured_middle_ellipsized_text(label.to_owned(), 16)
+        measured_middle_ellipsized_text(label.to_owned(), BODY_SIZE)
     ]
     .spacing(8)
     .align_y(Alignment::Center)
@@ -618,8 +622,8 @@ fn sidebar_device_label(
     row![
         themed_icon(IconSymbol::HardDrive, tone, MENU_ICON_SIZE),
         column![
-            measured_middle_ellipsized_text(device.label.clone(), 13),
-            measured_middle_ellipsized_text(detail, 11)
+            measured_middle_ellipsized_text(device.label.clone(), BODY_SIZE),
+            measured_middle_ellipsized_text(detail, CAPTION_SIZE)
         ]
         .spacing(1)
         .width(Length::Fill)
@@ -637,8 +641,8 @@ fn sidebar_network_connection_label(
     row![
         themed_icon(IconSymbol::Link, tone, MENU_ICON_SIZE),
         column![
-            measured_middle_ellipsized_text(connection.label(), 13),
-            measured_middle_ellipsized_text(detail, 11)
+            measured_middle_ellipsized_text(connection.label(), BODY_SIZE),
+            measured_middle_ellipsized_text(detail, CAPTION_SIZE)
         ]
         .spacing(1)
         .width(Length::Fill)

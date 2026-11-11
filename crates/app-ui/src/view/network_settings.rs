@@ -1,13 +1,15 @@
-use iced::widget::{button, column, container, row, text_input};
+use iced::widget::{column, row};
 use iced::{Alignment, Element, Length};
 
 use crate::app::FileBrowser;
-use crate::appearance::context_menu_button_style;
 use crate::config;
 use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
 
 use super::settings_group::{info_setting_row, toggle_setting_row};
+use bennu_theme::controls::normal_button;
+use bennu_theme::controls::text_field;
+use bennu_theme::typography::CAPTION_SIZE;
 
 pub(super) fn network_thumbnails_row(browser: &FileBrowser) -> Element<'static, Message> {
     toggle_setting_row(
@@ -43,20 +45,17 @@ fn preview_size_limit_row(
         config::PreviewFileSizeKind::Document => tr!("Max Document Preview"),
         config::PreviewFileSizeKind::Sqlite => tr!("Max SQLite Preview"),
     };
-    let input = text_input("0", &browser.preview_size_limit_mib_inputs[kind_index])
+    let input = text_field("0", &browser.preview_size_limit_mib_inputs[kind_index])
         .on_input(move |value| Message::PreviewSizeLimitInputChanged(kind_index, value))
         .on_submit(Message::PreviewSizeLimitInputCommitted(kind_index))
-        .padding([6, 8])
-        .size(12)
         .width(Length::Fixed(120.0));
-    let save = button(container(readable_text(tr!("Save")).size(12)).padding([6, 10]))
-        .on_press(Message::PreviewSizeLimitInputCommitted(kind_index))
-        .style(context_menu_button_style());
+    let save = normal_button(readable_text(tr!("Save")))
+        .on_press(Message::PreviewSizeLimitInputCommitted(kind_index));
 
     let mut content = column![row![
-        readable_text(label).size(12).width(Length::Fill),
+        readable_text(label).width(Length::Fill),
         input,
-        readable_text("MiB".to_owned()).size(12),
+        readable_text("MiB".to_owned()),
         save,
     ]
     .spacing(8)
@@ -68,34 +67,33 @@ fn preview_size_limit_row(
             readable_text(tr!(
                 "Size is unlimited: previewing very large files may use a lot of memory."
             ))
-            .size(11)
+            .size(CAPTION_SIZE)
             .width(Length::Fill),
         );
     }
     if let Some(error) = &browser.preview_size_limit_mib_errors[kind_index] {
-        content = content.push(readable_text(error.clone()).size(11).width(Length::Fill));
+        content = content.push(
+            readable_text(error.clone())
+                .size(CAPTION_SIZE)
+                .width(Length::Fill),
+        );
     }
 
     info_setting_row(content.into())
 }
 
 fn preview_directory_expand_levels_row(browser: &FileBrowser) -> Element<'_, Message> {
-    let input = text_input("1", &browser.preview_directory_expand_levels_input)
+    let input = text_field("1", &browser.preview_directory_expand_levels_input)
         .on_input(Message::PreviewDirectoryExpandLevelsInputChanged)
         .on_submit(Message::PreviewDirectoryExpandLevelsInputCommitted)
-        .padding([6, 8])
-        .size(12)
         .width(Length::Fixed(120.0));
-    let save = button(container(readable_text(tr!("Save")).size(12)).padding([6, 10]))
-        .on_press(Message::PreviewDirectoryExpandLevelsInputCommitted)
-        .style(context_menu_button_style());
+    let save = normal_button(readable_text(tr!("Save")))
+        .on_press(Message::PreviewDirectoryExpandLevelsInputCommitted);
 
     let mut content = column![row![
-        readable_text(tr!("Preview Expand Levels"))
-            .size(12)
-            .width(Length::Fill),
+        readable_text(tr!("Preview Expand Levels")).width(Length::Fill),
         input,
-        readable_text(tr!("levels")).size(12),
+        readable_text(tr!("levels")),
         save,
     ]
     .spacing(8)
@@ -103,7 +101,11 @@ fn preview_directory_expand_levels_row(browser: &FileBrowser) -> Element<'_, Mes
     .spacing(3);
 
     if let Some(error) = &browser.preview_directory_expand_levels_error {
-        content = content.push(readable_text(error.clone()).size(11).width(Length::Fill));
+        content = content.push(
+            readable_text(error.clone())
+                .size(CAPTION_SIZE)
+                .width(Length::Fill),
+        );
     }
 
     info_setting_row(content.into())

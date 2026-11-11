@@ -1,8 +1,8 @@
-use iced::widget::{button, column, container, row, text, text_input};
+use iced::widget::{button, column, container, row, text};
 use iced::{Alignment, Background, Border, Color, Element, Length, Theme};
 
 use crate::app::FileBrowser;
-use crate::appearance::{context_menu_button_style, muted_text_color, subtle_border_color};
+use crate::appearance::{muted_text_color, subtle_border_color};
 use crate::config;
 use crate::model::{
     Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility, SettingsSubpage,
@@ -13,13 +13,16 @@ use bennu_theme::ui_colors;
 
 use super::auxiliary_window_layout::auxiliary_detail_scroller;
 use super::network_settings::preview_size_limit_rows;
-use super::option_controls::destructive_confirmation_button_style;
 use super::settings_group::{
     card_row_button_style, info_setting_row, navigation_setting_row, settings_card,
     SETTINGS_GROUP_SPACING,
 };
 use super::settings_window::chrome_top_spacer;
 use super::{icon_tone_style, themed_icon, IconSymbol, IconTone};
+use bennu_theme::controls::destructive_button;
+use bennu_theme::controls::normal_button;
+use bennu_theme::controls::text_field;
+use bennu_theme::typography::CAPTION_SIZE;
 
 /// 每行标签数量：标签按内容收缩，设置面板宽度下 8 个一行不溢出。
 const CHIPS_PER_ROW: usize = 8;
@@ -49,17 +52,15 @@ pub(super) fn preview_settings_subpage_detail(
     scrollbar_visibility: ScrollbarVisibility,
     scrollbar_viewport: Option<ScrollbarViewport>,
 ) -> Element<'_, Message> {
-    let back = button(
+    let back = normal_button(
         row![
             themed_icon(IconSymbol::ArrowLeft, IconTone::Normal, 13.0),
-            readable_text(tr!("Back")).size(12),
+            readable_text(tr!("Back")),
         ]
         .spacing(6)
         .align_y(Alignment::Center),
     )
-    .on_press(Message::SettingsSubpageClosed)
-    .padding([6, 10])
-    .style(context_menu_button_style());
+    .on_press(Message::SettingsSubpageClosed);
 
     let content = column![
         chrome_top_spacer(browser),
@@ -104,7 +105,7 @@ fn preview_extension_row(
         let toggle = button(
             row![
                 rotated_chevron_right_view(90.0, 13.0).style(icon_tone_style(IconTone::Normal)),
-                readable_text(label.clone()).size(12),
+                readable_text(label.clone()),
             ]
             .spacing(6)
             .align_y(Alignment::Center),
@@ -116,24 +117,19 @@ fn preview_extension_row(
         // 重置原地二次确认：第一次进入待确认态，第二次真正恢复默认；
         // 折叠该行或改点其他类型即撤销。
         let reset = if browser.preview_extension_reset_confirmation == Some(kind_index) {
-            button(container(readable_text(tr!("Click Again to Reset")).size(12)).padding([6, 10]))
+            destructive_button(readable_text(tr!("Click Again to Reset")))
                 .on_press(Message::PreviewExtensionResetConfirmed(kind_index))
-                .style(destructive_confirmation_button_style())
         } else {
-            button(container(readable_text(tr!("Reset")).size(12)).padding([6, 10]))
+            normal_button(readable_text(tr!("Reset")))
                 .on_press(Message::PreviewExtensionResetRequested(kind_index))
-                .style(context_menu_button_style())
         };
         header = header.push(reset);
-        let input = text_input("txt", &browser.preview_extension_inputs[kind_index])
+        let input = text_field("txt", &browser.preview_extension_inputs[kind_index])
             .on_input(move |value| Message::PreviewExtensionInputChanged(kind_index, value))
             .on_submit(Message::PreviewExtensionInputCommitted(kind_index))
-            .padding([6, 8])
-            .size(12)
             .width(Length::Fixed(110.0));
-        let add = button(container(readable_text(tr!("Add")).size(12)).padding([6, 10]))
-            .on_press(Message::PreviewExtensionInputCommitted(kind_index))
-            .style(context_menu_button_style());
+        let add = normal_button(readable_text(tr!("Add")))
+            .on_press(Message::PreviewExtensionInputCommitted(kind_index));
         header = header.push(input).push(add);
         content = content.push(header);
 
@@ -144,7 +140,7 @@ fn preview_extension_row(
         let visible_count = extensions.len().min(COLLAPSED_CHIPS_PER_KIND);
         let mut collapsed = row![
             rotated_chevron_right_view(0.0, 13.0).style(icon_tone_style(IconTone::Normal)),
-            readable_text(label).size(12).width(Length::Fill),
+            readable_text(label).width(Length::Fill),
         ]
         .spacing(6)
         .align_y(Alignment::Center);
@@ -165,7 +161,11 @@ fn preview_extension_row(
         );
     }
     if let Some(error) = &browser.preview_extension_input_errors[kind_index] {
-        content = content.push(readable_text(error.clone()).size(11).width(Length::Fill));
+        content = content.push(
+            readable_text(error.clone())
+                .size(CAPTION_SIZE)
+                .width(Length::Fill),
+        );
     }
 
     info_setting_row(content.into())
@@ -209,7 +209,7 @@ fn chip_remove_button_style() -> impl Fn(&Theme, button::Status) -> button::Styl
 
 /// 折叠行的只读标签：仅预览，不带删除。
 fn extension_chip(extension: &str) -> Element<'static, Message> {
-    container(readable_text(extension.to_owned()).size(11))
+    container(readable_text(extension.to_owned()).size(CAPTION_SIZE))
         .padding([2, 6])
         .style(chip_container_style)
         .into()
@@ -217,7 +217,7 @@ fn extension_chip(extension: &str) -> Element<'static, Message> {
 
 /// 展开区的标签：带删除按钮，可单个移除。
 fn removable_extension_chip(kind_index: usize, extension: &str) -> Element<'_, Message> {
-    let remove = button(readable_text("×".to_owned()).size(11))
+    let remove = button(readable_text("×".to_owned()).size(CAPTION_SIZE))
         .padding([2, 6])
         .style(chip_remove_button_style())
         .on_press(Message::PreviewExtensionRemoved(
@@ -225,9 +225,12 @@ fn removable_extension_chip(kind_index: usize, extension: &str) -> Element<'_, M
             extension.to_owned(),
         ));
     container(
-        row![readable_text(extension.to_owned()).size(11), remove]
-            .spacing(2)
-            .align_y(Alignment::Center),
+        row![
+            readable_text(extension.to_owned()).size(CAPTION_SIZE),
+            remove
+        ]
+        .spacing(2)
+        .align_y(Alignment::Center),
     )
     .padding([2, 4])
     .style(chip_container_style)
@@ -237,7 +240,7 @@ fn removable_extension_chip(kind_index: usize, extension: &str) -> Element<'_, M
 /// 折叠行的余量提示，纯展示不可点。
 fn muted_count_label(hidden_count: usize) -> Element<'static, Message> {
     text(format!("+{hidden_count}"))
-        .size(11)
+        .size(CAPTION_SIZE)
         .style(|theme: &Theme| iced::widget::text::Style {
             color: Some(muted_text_color(theme)),
         })

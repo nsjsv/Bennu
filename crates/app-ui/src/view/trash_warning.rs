@@ -10,6 +10,7 @@ use bennu_theme::icons::IconSymbol;
 use bennu_theme::ui_colors;
 
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};
+use bennu_theme::typography::CAPTION_SIZE;
 
 const MAX_VISIBLE_WARNING_DETAILS: usize = 50;
 const WARNING_DETAIL_MAX_CHARS: usize = 140;
@@ -46,7 +47,7 @@ pub(super) fn trash_warning_panel(browser: &FileBrowser) -> Option<Element<'_, M
     );
     let mut summary = row![
         themed_icon(IconSymbol::TriangleAlert, IconTone::Warning, MENU_ICON_SIZE),
-        readable_text(summary_text).size(12).width(Length::Fill),
+        readable_text(summary_text).width(Length::Fill),
     ]
     .spacing(8)
     .align_y(Alignment::Center)
@@ -58,7 +59,7 @@ pub(super) fn trash_warning_panel(browser: &FileBrowser) -> Option<Element<'_, M
             tr!("Show warning details")
         };
         summary = summary.push(
-            button(readable_text(action_label).size(11))
+            button(readable_text(action_label).size(CAPTION_SIZE))
                 .padding([4, 6])
                 .style(transparent_button_style())
                 .on_press(Message::TrashWarningsToggled),
@@ -74,7 +75,7 @@ pub(super) fn trash_warning_panel(browser: &FileBrowser) -> Option<Element<'_, M
                     &detail,
                     WARNING_DETAIL_MAX_CHARS,
                 ))
-                .size(11)
+                .size(CAPTION_SIZE)
                 .width(Length::Fill),
             );
         }
@@ -84,7 +85,7 @@ pub(super) fn trash_warning_panel(browser: &FileBrowser) -> Option<Element<'_, M
                     "%1 more warning(s)",
                     warnings.len() - MAX_VISIBLE_WARNING_DETAILS
                 ))
-                .size(11),
+                .size(CAPTION_SIZE),
             );
         }
     }

@@ -4,7 +4,7 @@ use std::time::Duration;
 use file_core::DirectoryEntry;
 use iced::alignment::{Horizontal, Vertical};
 use iced::widget::{
-    button, container, mouse_area, scrollable, text, text_input, tooltip, Column, Row, Space, Stack,
+    button, container, mouse_area, scrollable, text, tooltip, Column, Row, Space, Stack,
 };
 use iced::{Alignment, Element, Length};
 
@@ -15,7 +15,6 @@ use crate::app::FileBrowser;
 use crate::appearance::{
     context_menu_style, enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction,
     group_header_style, icon_grid_expansion_panel_style, icon_svg_style, list_panel_style,
-    navigation_icon_button_style,
 };
 use crate::column_entry_bounds::track_column_entry_bounds;
 use crate::file_drag_hit_test_bounds::FileDragHitTestMarker;
@@ -38,8 +37,11 @@ use crate::input_blocking_space::input_blocking_space;
 use crate::model::{IconGridExpansionAnchor, IconGridViewport, Message, ScrollbarRegion};
 use crate::view::{rename_field, rename_input_id};
 use bennu_preview::panel_text::readable_text;
+use bennu_theme::controls::icon_button_style;
+use bennu_theme::controls::inline_text_field;
 use bennu_theme::icons::rotated_chevron_right_view;
 use bennu_theme::measured_text::measured_middle_ellipsized_wrapped_text_with_tooltip;
+use bennu_theme::typography::{BOLD, CAPTION_SIZE, HEADING_SIZE};
 
 const GRID_PADDING: f32 = ICON_GRID_CONTENT_PADDING;
 const DISCLOSURE_BUTTON_SIZE: f32 = 24.0;
@@ -48,7 +50,6 @@ const PANEL_INDICATOR_SIZE: f32 = 14.0;
 const ICON_GRID_NAME_TOOLTIP_WIDTH: f32 = 320.0;
 const ICON_GRID_NAME_TOOLTIP_DELAY: Duration = Duration::from_millis(500);
 /// 分组标题条字号:与列表组头同族的 12px 面板 chrome 文字。
-const GRID_GROUP_HEADER_TEXT_SIZE: u32 = 12;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum IconGridPanelInput {
@@ -297,8 +298,12 @@ fn render_rows<'a>(
 fn render_group_header<'a>(header: &IconGridGroupHeaderLayout) -> Element<'a, Message> {
     container(
         Row::new()
-            .push(readable_text(header.title.clone()).size(GRID_GROUP_HEADER_TEXT_SIZE))
-            .push(readable_text(format!("({})", header.count)).size(GRID_GROUP_HEADER_TEXT_SIZE))
+            .push(
+                readable_text(header.title.clone())
+                    .size(HEADING_SIZE)
+                    .font(BOLD),
+            )
+            .push(readable_text(format!("({})", header.count)).size(CAPTION_SIZE))
             .spacing(4)
             .align_y(Alignment::Center),
     )
@@ -439,7 +444,7 @@ fn icon_grid_entry<'a>(
         .padding(0)
         .width(Length::Fixed(DISCLOSURE_BUTTON_SIZE))
         .height(Length::Fixed(DISCLOSURE_BUTTON_SIZE))
-        .style(navigation_icon_button_style());
+        .style(icon_button_style);
         let label = if is_open {
             tr!("Collapse folder")
         } else {
@@ -447,7 +452,7 @@ fn icon_grid_entry<'a>(
         };
         let disclosure_button = tooltip(
             disclosure_button,
-            container(readable_text(label).size(11))
+            container(readable_text(label).size(CAPTION_SIZE))
                 .padding([5, 7])
                 .style(context_menu_style),
             tooltip::Position::Bottom,
@@ -468,7 +473,7 @@ fn icon_grid_entry<'a>(
     let label: Element<'a, Message> = if pane.renaming == Some(&entry.path) {
         rename_field(
             container(
-                text_input(&tr!("File name"), pane.rename_input)
+                inline_text_field(&tr!("File name"), pane.rename_input)
                     .id(rename_input_id())
                     .on_input(Message::RenameInputChanged)
                     .on_submit(Message::RenameSelected)
@@ -486,7 +491,6 @@ fn icon_grid_entry<'a>(
         let full_name = entry.name().to_string_lossy().into_owned();
         let full_name_tooltip = container(
             readable_text(full_name.clone())
-                .size(12)
                 .wrapping(text::Wrapping::WordOrGlyph)
                 .width(Length::Fill),
         )

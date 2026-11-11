@@ -9,9 +9,10 @@ use crate::model::{
 use bennu_preview::panel_text::readable_text;
 
 use super::auxiliary_window_layout::auxiliary_detail_scroller;
-use super::option_controls::{segmented_choice_row, SegmentedChoice};
 use super::settings_group::{info_setting_row, settings_group, SETTINGS_GROUP_SPACING};
 use super::settings_window::chrome_top_spacer;
+use bennu_theme::controls::{segmented_choice_row, SegmentedChoice};
+use bennu_theme::typography::CAPTION_SIZE;
 
 pub(super) fn application_logs_settings_detail(
     browser: &FileBrowser,
@@ -32,13 +33,13 @@ pub(super) fn application_logs_settings_detail(
 
     let mut entries = Column::new().spacing(4).width(Length::Fill);
     if let Some(warning) = browser.application_logs.journald_warning.as_ref() {
-        entries = entries.push(readable_text(warning.clone()).size(12).width(Length::Fill));
+        entries = entries.push(readable_text(warning.clone()).width(Length::Fill));
     }
     if let Some(error) = browser.application_logs.load_error.as_ref() {
-        entries = entries.push(readable_text(error.clone()).size(12).width(Length::Fill));
+        entries = entries.push(readable_text(error.clone()).width(Length::Fill));
     }
     if browser.application_logs.is_loading() {
-        entries = entries.push(readable_text(tr!("Loading logs...")).size(12));
+        entries = entries.push(readable_text(tr!("Loading logs...")));
     }
 
     let mut visible_count = 0;
@@ -51,10 +52,8 @@ pub(super) fn application_logs_settings_detail(
             entry.source.label()
         );
         let log_entry = column![
-            readable_text(metadata).size(11),
-            readable_text(entry.message.clone())
-                .size(12)
-                .width(Length::Fill),
+            readable_text(metadata).size(CAPTION_SIZE),
+            readable_text(entry.message.clone()).width(Length::Fill),
         ]
         .spacing(2)
         .width(Length::Fill);
@@ -64,7 +63,7 @@ pub(super) fn application_logs_settings_detail(
         && !browser.application_logs.is_loading()
         && browser.application_logs.load_error.is_none()
     {
-        entries = entries.push(readable_text(tr!("No logs for this level.")).size(13));
+        entries = entries.push(readable_text(tr!("No logs for this level.")));
     }
     content = content.push(entries);
 
@@ -84,7 +83,7 @@ fn log_threshold_choices(selected: ApplicationLogLevel) -> Element<'static, Mess
             .map(|level| SegmentedChoice {
                 label: level.label(),
                 selected: level == selected,
-                message: Message::ApplicationLogThresholdSelected(level),
+                message: Some(Message::ApplicationLogThresholdSelected(level)),
                 tooltip: None,
             })
             .collect(),

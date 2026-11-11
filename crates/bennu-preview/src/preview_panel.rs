@@ -84,9 +84,7 @@ where
             on_sqlite_resize_drag_finished,
         ),
         None => preview_surface(
-            readable_text(tr!("Select a file and press Space to load preview"))
-                .size(14)
-                .into(),
+            readable_text(tr!("Select a file and press Space to load preview")).into(),
         ),
     }
 }
@@ -120,9 +118,7 @@ where
 {
     let scroll_height = preview_scroll_height(size);
     let panel: Element<'a, Message> = match preview {
-        PreviewState::Loading(_) => {
-            column![readable_text(tr!("Loading preview...")).size(14)].into()
-        }
+        PreviewState::Loading(_) => column![readable_text(tr!("Loading preview..."))].into(),
         PreviewState::DownloadingRemoteFile(download) => {
             remote_preview_download_panel(download, operation_progress_animation_frame).into()
         }
@@ -237,9 +233,9 @@ where
             size,
             preview_bottom_controls_opacity,
         ),
-        PreviewState::Error(error) => column![readable_text(error.clone()).size(14)].into(),
+        PreviewState::Error(error) => column![readable_text(error.clone())].into(),
         PreviewState::ImageError { path, error } => column![
-            readable_text(error.clone()).size(14),
+            readable_text(error.clone()),
             button(readable_text(tr!("Retry"))).on_press(Message::from(
                 PreviewMessage::RetryImagePreview(path.clone(),)
             )),

@@ -12,6 +12,7 @@ use crate::model::Message;
 use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::vte::ansi::{Color as TermColor, CursorShape, NamedColor};
 use bennu_theme::icons::IconSymbol;
+use bennu_theme::typography::CAPTION_SIZE;
 
 /// 终端字号;等宽字体在 cosmic-text 下的 advance 约 0.6em。
 pub(crate) const FONT_SIZE: f32 = 14.0;
@@ -196,8 +197,10 @@ fn terminal_tab_button<'a>(
         .unwrap_or_else(|| directory.to_string_lossy().into_owned());
     let label = row![
         space::Space::new().width(Length::Fixed(TAB_CLOSE_SLOT_WIDTH)),
-        container(text(format_middle_ellipsized_text(&title, TAB_LABEL_MAX_CHARS)).size(11))
-            .center_x(Length::Fill),
+        container(
+            text(format_middle_ellipsized_text(&title, TAB_LABEL_MAX_CHARS)).size(CAPTION_SIZE)
+        )
+        .center_x(Length::Fill),
         unread_dot_slot(has_unread_output),
         button(
             IconSymbol::Close
@@ -211,7 +214,7 @@ fn terminal_tab_button<'a>(
         ))
         .padding(2.0)
         .width(Length::Fixed(TAB_CLOSE_SLOT_WIDTH))
-        .style(crate::appearance::navigation_icon_button_style()),
+        .style(bennu_theme::controls::icon_button_style),
     ]
     .spacing(4.0)
     .align_y(Vertical::Center)
@@ -370,7 +373,7 @@ fn collapsed_strip(browser: &FileBrowser) -> Element<'_, Message> {
 /// 组尾为幽灵开关:当前目录隐藏条目数,点击切换"显示隐藏文件"。
 /// 多窗格并排,竖线分隔。
 const SUMMARY_ICON_SIZE: f32 = 13.0;
-const SUMMARY_TEXT_SIZE: f32 = 12.0;
+const SUMMARY_TEXT_SIZE: f32 = CAPTION_SIZE;
 const GROUP_SPACING: f32 = 6.0;
 fn pane_status_summary_strip(
     entries: Vec<crate::selection_summary::PaneStatusStripEntry>,
@@ -474,7 +477,7 @@ fn disconnected_notice_text(reason: &str) -> String {
 }
 
 fn disconnected_notice(reason: &str) -> Element<'static, Message> {
-    container(text(disconnected_notice_text(reason)).size(12))
+    container(text(disconnected_notice_text(reason)))
         .width(Length::Fill)
         .padding([4, 10])
         .style(disconnected_notice_style)

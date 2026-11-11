@@ -39,6 +39,7 @@ use crate::preview_host::PreviewHost;
 use crate::preview_scroll::{preview_scroll_id, scrollbar_viewport_from, PreviewScrollRegion};
 use crate::view::window_drag_region::window_drag_region;
 use crate::{Message, PickerDaemon};
+use bennu_theme::typography::{BOLD, TITLE_SIZE};
 
 /// 无装饰窗口手动 resize 的边缘/拐角命中宽度（主软件同值）。
 const WINDOW_RESIZE_EDGE_WIDTH: f32 = 5.0;
@@ -350,7 +351,7 @@ fn segmented_choice_row(choices: Vec<SegmentedChoice>) -> Element<'static, Messa
 const SEGMENTED_CHOICE_HEIGHT: f32 = 30.0;
 
 fn segmented_choice_button(choice: SegmentedChoice) -> Element<'static, Message> {
-    let label = container(readable_text(choice.label).size(12))
+    let label = container(readable_text(choice.label))
         .width(Length::Fill)
         .height(Length::Fill)
         .center_x(Length::Fill)
@@ -501,7 +502,7 @@ fn preview_window_top_bar<'a>(
             &window_control_message,
         ))
         .push(preview_pin_button(pinned))
-        .push(readable_text("预览".to_owned()).size(16))
+        .push(readable_text("预览".to_owned()).size(TITLE_SIZE).font(BOLD))
         .push(Space::new().width(Length::Fill))
         .push(window_control_group(
             config,

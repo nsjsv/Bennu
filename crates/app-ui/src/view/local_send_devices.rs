@@ -4,21 +4,24 @@
 //! 勾选框 + 类型图标 + 名字 + 小字 + 这台设备最近一次直推的状态 + ☆/★ + 发送。
 //! 勾选按窗口各记一份（`DeviceListOwner`）。
 
-use iced::widget::{button, checkbox, column, container, row, tooltip, Column};
+use iced::widget::{column, container, row, tooltip, Column};
 use iced::{Alignment, Element, Length, Theme};
 
 use crate::app::transfer::{DeviceListOwner, FavoriteRow, TransferMessage};
 use crate::app::FileBrowser;
-use crate::appearance::{context_menu_button_style, muted_text_color};
+use crate::appearance::muted_text_color;
 use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::icons::IconSymbol;
 use local_send::DeviceInfo;
 
 use super::local_send_send_status::direct_send_lines;
-use super::option_controls::tooltip_panel_style;
 use super::settings_group::muted_setting_text;
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};
+use bennu_theme::controls::check_box;
+use bennu_theme::controls::tooltip_bubble_style;
+use bennu_theme::controls::{icon_button, normal_button};
+use bennu_theme::typography::CAPTION_SIZE;
 
 const DEVICE_ICON_SIZE: f32 = 20.0;
 
@@ -41,10 +44,7 @@ pub(super) fn checked_bar(
     }
     let count = browser.checked_online_devices(owner).len();
     let action = |label: String, message: Option<TransferMessage>| {
-        button(readable_text(label).size(12))
-            .on_press_maybe(message.map(Message::Transfer))
-            .padding([5, 12])
-            .style(context_menu_button_style())
+        normal_button(readable_text(label)).on_press_maybe(message.map(Message::Transfer))
     };
     Some(
         row![
@@ -65,17 +65,13 @@ pub(super) fn checked_bar(
 /// 标题 + 手动刷新：立即清空快照并触发一轮扫描（不等 10s 周期）。
 pub(super) fn nearby_devices_header() -> Element<'static, Message> {
     row![
-        readable_text(tr!("Nearby LocalSend devices"))
-            .size(13)
-            .width(Length::Fill),
-        button(themed_icon(
+        readable_text(tr!("Nearby LocalSend devices")).width(Length::Fill),
+        icon_button(themed_icon(
             IconSymbol::Refresh,
             IconTone::Normal,
             MENU_ICON_SIZE
         ))
-        .on_press(Message::Transfer(TransferMessage::RefreshDevicesRequested))
-        .padding([4, 8])
-        .style(context_menu_button_style()),
+        .on_press(Message::Transfer(TransferMessage::RefreshDevicesRequested)),
     ]
     .spacing(8)
     .align_y(Alignment::Center)
@@ -83,7 +79,7 @@ pub(super) fn nearby_devices_header() -> Element<'static, Message> {
 }
 
 pub(super) fn favorites_title<'a>() -> iced::widget::Text<'a, Theme> {
-    readable_text(tr!("Favorite devices")).size(13)
+    readable_text(tr!("Favorite devices"))
 }
 
 /// 收藏行。`send` 给出这台设备的发送消息；没有可发的文件时返回 None。不在线的
@@ -101,7 +97,7 @@ pub(super) fn favorite_rows<'a>(
             )),
         );
         // 名字是对方自报或用户起的，不做本地化。
-        let name = readable_text(favorite.alias.clone()).size(12);
+        let name = readable_text(favorite.alias.clone());
         rows = rows.push(match online {
             Some(device) => online_row(rows_of, device, name.into(), unfavor),
             None => {
@@ -118,7 +114,7 @@ pub(super) fn favorite_rows<'a>(
                 .spacing(2);
                 // 不在线的勾不了：发不出去。
                 device_row(
-                    checkbox(false).into(),
+                    check_box(false).into(),
                     IconSymbol::Monitor,
                     details,
                     unfavor,
@@ -146,7 +142,7 @@ pub(super) fn nearby_rows<'a>(
         } else {
             tr!("No nearby devices found")
         };
-        return column![readable_text(empty).size(12)];
+        return column![readable_text(empty)];
     }
     let mut rows = column![].spacing(8).width(Length::Fill);
     for device in devices {
@@ -162,15 +158,15 @@ pub(super) fn nearby_rows<'a>(
                     readable_text(tr!(
                         "This device has encryption turned off, so it cannot be a favorite."
                     ))
-                    .size(11),
+                    .size(CAPTION_SIZE),
                 )
                 .padding([5, 7])
-                .style(tooltip_panel_style),
+                .style(tooltip_bubble_style),
                 tooltip::Position::Left,
             )
             .into()
         };
-        let name = readable_text(device.alias.clone()).size(12).into();
+        let name = readable_text(device.alias.clone()).into();
         rows = rows.push(online_row(rows_of, device, name, star));
     }
     rows
@@ -195,7 +191,7 @@ fn online_row<'a>(
     }
     let owner = rows_of.owner;
     let fingerprint = device.fingerprint.clone();
-    let check = checkbox(
+    let check = check_box(
         browser
             .checked_devices
             .of(owner)
@@ -219,10 +215,7 @@ fn device_row<'a>(
     star: Element<'a, Message>,
     send: Option<Message>,
 ) -> Element<'a, Message> {
-    let send_button = button(readable_text(tr!("Send")).size(12))
-        .on_press_maybe(send)
-        .padding([5, 12])
-        .style(context_menu_button_style());
+    let send_button = normal_button(readable_text(tr!("Send"))).on_press_maybe(send);
     row![
         check,
         themed_icon(icon, IconTone::Normal, DEVICE_ICON_SIZE),
@@ -236,10 +229,8 @@ fn device_row<'a>(
 }
 
 fn star_button(symbol: IconSymbol, message: Option<TransferMessage>) -> Element<'static, Message> {
-    button(themed_icon(symbol, IconTone::Normal, MENU_ICON_SIZE))
+    icon_button(themed_icon(symbol, IconTone::Normal, MENU_ICON_SIZE))
         .on_press_maybe(message.map(Message::Transfer))
-        .padding([4, 6])
-        .style(context_menu_button_style())
         .into()
 }
 

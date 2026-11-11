@@ -1,18 +1,17 @@
-use iced::widget::{column, container, row, text_input, Column, Space};
+use iced::widget::{column, container, row, Column, Space};
 use iced::{Alignment, Element, Length};
 
+use super::{themed_icon, IconTone, MENU_ICON_SIZE};
 use crate::app::archive_extraction::{ArchiveExtractionMessage, ArchiveExtractionState};
 use crate::app::archive_password::ArchivePasswordDraft;
 use crate::appearance::context_menu_style;
 use crate::formatting::format_middle_ellipsized_text;
 use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
+use bennu_theme::controls::text_field;
+use bennu_theme::controls::{normal_button, suggested_button};
 use bennu_theme::icons::IconSymbol;
-
-use super::option_controls::{
-    inactive_primary_action_button, primary_action_button, secondary_action_button,
-};
-use super::{themed_icon, IconTone, MENU_ICON_SIZE};
+use bennu_theme::typography::{BOLD, TITLE_SIZE};
 
 const ARCHIVE_EXTRACTION_PANEL_WIDTH: f32 = 500.0;
 const ARCHIVE_PATH_MAX_CHARS: usize = 72;
@@ -21,7 +20,8 @@ pub(super) fn archive_extraction_panel(state: &ArchiveExtractionState) -> Elemen
     let title = row![
         themed_icon(IconSymbol::FileArchive, IconTone::Normal, MENU_ICON_SIZE),
         readable_text(tr!("Extract Archive"))
-            .size(16)
+            .size(TITLE_SIZE)
+            .font(BOLD)
             .width(Length::Fill),
     ]
     .spacing(8)
@@ -35,20 +35,20 @@ pub(super) fn archive_extraction_panel(state: &ArchiveExtractionState) -> Elemen
     let content = if state.is_waiting_for_password() || state.is_checking_password() {
         column![
             title,
-            readable_text(archive_summary(state)).size(12),
-            readable_text(destination_summary(state)).size(12),
-            readable_text(status_text(state)).size(13),
+            readable_text(archive_summary(state)),
+            readable_text(destination_summary(state)),
+            readable_text(status_text(state)),
             archive_password_input(state),
-            readable_text(validation_error).size(12),
+            readable_text(validation_error),
             archive_extraction_actions(state),
         ]
     } else {
         column![
             title,
-            readable_text(archive_summary(state)).size(12),
-            readable_text(destination_summary(state)).size(12),
-            readable_text(status_text(state)).size(13),
-            readable_text(validation_error).size(12),
+            readable_text(archive_summary(state)),
+            readable_text(destination_summary(state)),
+            readable_text(status_text(state)),
+            readable_text(validation_error),
             archive_extraction_actions(state),
         ]
     }
@@ -79,10 +79,8 @@ pub(super) fn archive_password_input_field(
     on_changed: impl Fn(ArchivePasswordDraft) -> Message + 'static,
     on_submitted: Message,
 ) -> Element<'_, Message> {
-    let mut password_input = text_input(&tr!("Password"), draft.as_str())
+    let mut password_input = text_field(&tr!("Password"), draft.as_str())
         .secure(true)
-        .padding([6, 8])
-        .size(14)
         .width(Length::Fill);
     if editable {
         password_input = password_input
@@ -92,7 +90,7 @@ pub(super) fn archive_password_input_field(
 
     Column::new()
         .spacing(4)
-        .push(readable_text(tr!("Password")).size(12))
+        .push(readable_text(tr!("Password")))
         .push(password_input)
         .into()
 }
@@ -106,17 +104,16 @@ fn archive_extraction_actions(state: &ArchiveExtractionState) -> Element<'_, Mes
         tr!("Extract")
     };
     let extract_button = if state.is_waiting_for_password() && state.can_submit_password() {
-        primary_action_button(
-            extract_label,
-            Message::ArchiveExtraction(ArchiveExtractionMessage::Submitted),
-        )
+        suggested_button(readable_text(extract_label)).on_press(Message::ArchiveExtraction(
+            ArchiveExtractionMessage::Submitted,
+        ))
     } else {
-        inactive_primary_action_button(extract_label)
+        suggested_button(readable_text(extract_label))
     };
 
     row![
         Space::new().width(Length::Fill),
-        secondary_action_button(tr!("Cancel"), Message::DismissFloating),
+        normal_button(readable_text(tr!("Cancel"))).on_press(Message::DismissFloating),
         extract_button,
     ]
     .spacing(6)

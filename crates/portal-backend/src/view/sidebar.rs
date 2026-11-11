@@ -23,6 +23,7 @@ use crate::picker_session::scrollbar::{scroll_id, scrollbar_on_scroll};
 use crate::picker_session::{PickerSession, SessionMessage, SessionScrollRegion, SidebarEntryId};
 
 use super::readable_label;
+use bennu_theme::typography::{BODY_SIZE, CAPTION_SIZE};
 
 /// 侧栏滚动条静态宽度（与主软件侧栏一致）。
 const SIDEBAR_SCROLLBAR_WIDTH: f32 = 6.0;
@@ -77,7 +78,7 @@ fn sidebar_label(
     symbol: IconSymbol,
     label: String,
     tone: IconTone,
-    label_size: u32,
+    label_size: f32,
 ) -> Element<'static, SessionMessage> {
     row![
         symbol.view(SIDEBAR_ICON_SIZE).style(icon_tone_style(tone)),
@@ -98,8 +99,8 @@ fn sidebar_detailed_label(
     row![
         symbol.view(SIDEBAR_ICON_SIZE).style(icon_tone_style(tone)),
         column![
-            measured_middle_ellipsized_text(label, 13),
-            measured_middle_ellipsized_text(detail, 11)
+            measured_middle_ellipsized_text(label, BODY_SIZE),
+            measured_middle_ellipsized_text(detail, CAPTION_SIZE)
         ]
         .spacing(1)
         .width(Length::Fill)
@@ -132,7 +133,7 @@ fn sidebar_item(
 }
 
 fn section_label(label: &str) -> Element<'static, SessionMessage> {
-    container(readable_label(label.to_string()).size(12))
+    container(readable_label(label.to_string()))
         .padding([4, 8])
         .width(Length::Fill)
         .into()
@@ -158,7 +159,7 @@ fn location_item(
         location_label(location)
     };
     sidebar_item(
-        sidebar_label(location_icon_symbol(location), label, tone, 16),
+        sidebar_label(location_icon_symbol(location), label, tone, BODY_SIZE),
         selected,
         hovered,
         SessionMessage::SidebarLocationPressed {
@@ -176,7 +177,7 @@ fn trash_item(session: &PickerSession) -> Element<'static, SessionMessage> {
         IconTone::Normal
     };
     sidebar_item(
-        sidebar_label(IconSymbol::Trash, "回收站".to_string(), tone, 16),
+        sidebar_label(IconSymbol::Trash, "回收站".to_string(), tone, BODY_SIZE),
         selected,
         session.sidebar().hovered.as_ref() == Some(&SidebarEntryId::Trash),
         SessionMessage::SidebarTrashPressed,
@@ -318,7 +319,7 @@ pub(super) fn sidebar_panel(session: &PickerSession) -> Element<'static, Session
     // 覆盖提示同源（bennu-theme error_notification_style）。
     if let Some(notice) = session.sidebar().notice.clone() {
         content = content.push(
-            container(readable_label(notice).size(12))
+            container(readable_label(notice))
                 .padding([4, 8])
                 .width(Length::Fill)
                 .style(error_notification_style),

@@ -1,14 +1,11 @@
 //! 高级新建文件夹弹窗视图：两种批量命名模式 + 移入勾选 + 最终名字预览。
 
-use iced::widget::{
-    button, checkbox, column, container, mouse_area, row, scrollable, space::Space, text_editor,
-    text_input, Column,
-};
+use iced::widget::{button, column, container, mouse_area, row, scrollable, space::Space, Column};
 use iced::{Alignment, Background, Border, Color, Element, Length};
 
 use crate::appearance::{
     context_menu_item_button_style, context_menu_style, enhanced_scrollbar_style,
-    enhanced_vertical_scrollbar_direction, muted_text_color, subtle_border_color,
+    enhanced_vertical_scrollbar_direction, muted_text_color,
 };
 use crate::model::{
     invalid_entry_name_label, AdvancedNewFolderAfter, AdvancedNewFolderMessage,
@@ -20,7 +17,12 @@ use bennu_theme::anchored_popup::{anchored_popup_expanding, dismiss_on_outside_p
 use bennu_theme::icons::IconSymbol;
 use bennu_theme::ui_colors;
 
-use super::option_controls::{secondary_action_button, segmented_choice_row, SegmentedChoice};
+use bennu_theme::controls::check_box;
+use bennu_theme::controls::normal_button;
+use bennu_theme::controls::text_area;
+use bennu_theme::controls::text_field;
+use bennu_theme::controls::{segmented_choice_row, SegmentedChoice};
+use bennu_theme::typography::{BOLD, CAPTION_SIZE, TITLE_SIZE};
 
 const PANEL_WIDTH: f32 = 480.0;
 const PANEL_MAX_HEIGHT: f32 = 560.0;
@@ -34,33 +36,28 @@ pub(super) fn advanced_new_folder_panel(state: &AdvancedNewFolderState) -> Eleme
         SegmentedChoice {
             label: tr!("Name list"),
             selected: state.mode == AdvancedNewFolderMode::NameList,
-            message: Message::AdvancedNewFolder(AdvancedNewFolderMessage::ModeSelected(
-                AdvancedNewFolderMode::NameList,
+            message: Some(Message::AdvancedNewFolder(
+                AdvancedNewFolderMessage::ModeSelected(AdvancedNewFolderMode::NameList),
             )),
             tooltip: None,
         },
         SegmentedChoice {
             label: tr!("Numbered"),
             selected: state.mode == AdvancedNewFolderMode::Numbered,
-            message: Message::AdvancedNewFolder(AdvancedNewFolderMessage::ModeSelected(
-                AdvancedNewFolderMode::Numbered,
+            message: Some(Message::AdvancedNewFolder(
+                AdvancedNewFolderMessage::ModeSelected(AdvancedNewFolderMode::Numbered),
             )),
             tooltip: None,
         },
     ]);
 
     let editor: Element<'_, Message> = match state.mode {
-        AdvancedNewFolderMode::NameList => container(
-            text_editor(&state.editor_content)
-                .on_action(|action| {
-                    Message::AdvancedNewFolder(AdvancedNewFolderMessage::DraftEdited(action))
-                })
-                .height(Length::Fixed(NAME_EDITOR_HEIGHT))
-                .padding(6),
-        )
-        .width(Length::Fill)
-        .style(name_editor_frame_style)
-        .into(),
+        AdvancedNewFolderMode::NameList => text_area(&state.editor_content)
+            .on_action(|action| {
+                Message::AdvancedNewFolder(AdvancedNewFolderMessage::DraftEdited(action))
+            })
+            .height(Length::Fixed(NAME_EDITOR_HEIGHT))
+            .into(),
         AdvancedNewFolderMode::Numbered => row![
             number_input_column(tr!("Prefix"), &state.prefix, |prefix| {
                 Message::AdvancedNewFolder(AdvancedNewFolderMessage::PrefixChanged(prefix))
@@ -81,10 +78,10 @@ pub(super) fn advanced_new_folder_panel(state: &AdvancedNewFolderState) -> Eleme
     } else {
         Some(
             row![
-                checkbox(state.gather).on_toggle(|gather| {
+                check_box(state.gather).on_toggle(|gather| {
                     Message::AdvancedNewFolder(AdvancedNewFolderMessage::GatherToggled(gather))
                 }),
-                readable_text(tr!("Move selected items into the first folder")).size(12),
+                readable_text(tr!("Move selected items into the first folder")),
             ]
             .spacing(8)
             .align_y(Alignment::Center)
@@ -93,7 +90,7 @@ pub(super) fn advanced_new_folder_panel(state: &AdvancedNewFolderState) -> Eleme
     };
 
     let preview_rows: Element<'_, Message> = if planned.is_empty() {
-        readable_text(tr!("No folders to create")).size(12).into()
+        readable_text(tr!("No folders to create")).into()
     } else {
         let mut rows = Column::new().spacing(2);
         for folder in &planned {
@@ -117,21 +114,21 @@ pub(super) fn advanced_new_folder_panel(state: &AdvancedNewFolderState) -> Eleme
     );
 
     let mut content_column = column![
-        readable_text(tr!("Advanced New Folder")).size(16),
+        readable_text(tr!("Advanced New Folder"))
+            .size(TITLE_SIZE)
+            .font(BOLD),
         mode_row,
         editor,
     ];
     if let Some(gather_row) = gather_row {
         content_column = content_column.push(gather_row);
     }
-    content_column = content_column.push(readable_text(tr!("Folders")).size(12));
+    content_column = content_column.push(readable_text(tr!("Folders")));
     content_column = content_column.push(preview_rows);
     let action_row = row![
         Space::new().width(Length::Fill),
-        secondary_action_button(
-            tr!("Cancel"),
-            Message::AdvancedNewFolder(AdvancedNewFolderMessage::Cancel),
-        ),
+        normal_button(readable_text(tr!("Cancel")))
+            .on_press(Message::AdvancedNewFolder(AdvancedNewFolderMessage::Cancel)),
         apply,
     ]
     .spacing(8)
@@ -159,11 +156,9 @@ fn number_input_column<'a>(
     on_input: impl Fn(String) -> Message + 'a,
 ) -> Element<'a, Message> {
     column![
-        readable_text(label.clone()).size(11),
-        text_input(&label, value)
+        readable_text(label.clone()).size(CAPTION_SIZE),
+        text_field(&label, value)
             .on_input(on_input)
-            .padding([6, 8])
-            .size(13)
             .width(Length::Fill),
     ]
     .spacing(3)
@@ -192,7 +187,7 @@ fn create_split_button(
                 }
             })
     };
-    let primary_section = button(readable_text(tr!("Create")).size(12))
+    let primary_section = button(readable_text(tr!("Create")))
         .padding(iced::Padding {
             top: 6.0,
             right: 4.0,
@@ -347,7 +342,7 @@ fn after_create_menu(disabled: bool) -> Element<'static, Message> {
     if !disabled {
         for (label, after) in choices {
             items = items.push(
-                button(readable_text(label).size(12))
+                button(readable_text(label))
                     .padding([5, 10])
                     .width(Length::Fixed(width))
                     .style(context_menu_item_button_style())
@@ -365,7 +360,7 @@ fn after_create_menu(disabled: bool) -> Element<'static, Message> {
 
 /// 预览一行：被自动错开的整行淡化、不能创建的整行标错，尾部小字说明原因。
 fn planned_folder_row<'a>(folder: &PlannedFolder) -> Element<'a, Message> {
-    let mut name_row = row![readable_text(folder.path.clone()).size(13)].spacing(8);
+    let mut name_row = row![readable_text(folder.path.clone())].spacing(8);
     if let Some(reason) = planned_folder_reason(&folder.status) {
         name_row = name_row.push(reason);
     }
@@ -383,17 +378,17 @@ fn planned_folder_reason<'a>(status: &PlannedFolderStatus) -> Option<Element<'a,
     match status {
         PlannedFolderStatus::AsRequested => None,
         PlannedFolderStatus::AutoRenamed => {
-            Some(readable_text(tr!("Auto-renamed")).size(11).into())
+            Some(readable_text(tr!("Auto-renamed")).size(CAPTION_SIZE).into())
         }
         PlannedFolderStatus::InvalidName(reason) => Some(
             readable_text(invalid_entry_name_label(*reason))
-                .size(11)
+                .size(CAPTION_SIZE)
                 .into(),
         ),
         PlannedFolderStatus::UnreadableParent(error) => Some(
             row![
-                readable_text(tr!("Cannot read the parent folder")).size(11),
-                readable_text(error.clone()).size(11),
+                readable_text(tr!("Cannot read the parent folder")).size(CAPTION_SIZE),
+                readable_text(error.clone()).size(CAPTION_SIZE),
             ]
             .spacing(6)
             .into(),
@@ -413,19 +408,6 @@ fn problem_row_style(theme: &iced::Theme) -> iced::widget::container::Style {
 fn auto_renamed_style(theme: &iced::Theme) -> iced::widget::container::Style {
     iced::widget::container::Style {
         text_color: Some(muted_text_color(theme)),
-        ..Default::default()
-    }
-}
-
-/// 编辑器外框：内容透明，只画 1px 边框提示可输入区域。
-fn name_editor_frame_style(theme: &iced::Theme) -> iced::widget::container::Style {
-    iced::widget::container::Style {
-        background: None,
-        border: iced::Border {
-            color: subtle_border_color(theme),
-            width: 1.0,
-            radius: 4.0.into(),
-        },
         ..Default::default()
     }
 }

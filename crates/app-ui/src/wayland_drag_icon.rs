@@ -6,6 +6,7 @@ use resvg::tiny_skia::Pixmap;
 use resvg::usvg::{fontdb, Options, Tree};
 
 use bennu_theme::icons::IconSymbol;
+use bennu_theme::typography::CAPTION_SIZE;
 
 // Wayland 协议把拖拽图标位图的左上角钉在光标上;画布因此以光标为
 // 原点向右下展开。协议对 icon surface 没有硬性尺寸限制,512 是为
@@ -23,12 +24,12 @@ const TILE_SIZE: f32 = 24.0;
 const TILE_ICON_LEFT: f32 = 0.0;
 const TILE_ICON_TOP: f32 = 0.0;
 const PILL_LABEL_LEFT: f32 = TILE_ICON_LEFT + TILE_SIZE + 6.0;
-const PILL_LABEL_SIZE: f32 = 12.0;
+const PILL_LABEL_SIZE: f32 = CAPTION_SIZE;
 const PILL_LABEL_BASELINE: f32 = 16.0;
 const PILL_LABEL_MAX_WIDTH: f32 = 150.0;
 const PILL_PADDING_RIGHT: f32 = 4.0;
 // 聚合行:一行总数文字 + 胶囊底板。
-const SUMMARY_TEXT_SIZE: f32 = 12.0;
+const SUMMARY_TEXT_SIZE: f32 = CAPTION_SIZE;
 const SUMMARY_TEXT_BASELINE: f32 = 16.0;
 const SUMMARY_TEXT_HEIGHT: f32 = 20.0;
 const SUMMARY_PAD_X: f32 = 6.0;

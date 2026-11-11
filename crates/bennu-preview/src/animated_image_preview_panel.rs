@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use iced::alignment::{Horizontal, Vertical};
-use iced::widget::{column, container, slider, Space, Stack};
+use iced::widget::{column, container, Space, Stack};
 use iced::{Alignment, Element, Length};
 
 use bennu_theme::preview_styles::{preview_media_style, preview_window_bottom_gradient_style};
@@ -21,6 +21,7 @@ use crate::panel_text::readable_text;
 use crate::preview::image_preview_size;
 use crate::preview::PreviewSize;
 use crate::preview_message::PreviewMessage;
+use bennu_theme::controls::slider;
 
 const ANIMATED_IMAGE_CONTROL_SIDE_PADDING: f32 = 28.0;
 const ANIMATED_IMAGE_MIN_CONTROL_WIDTH: f32 = 220.0;
@@ -125,7 +126,6 @@ where
     .width(Length::Fixed(width))
     .style(move |theme, status| faded_media_slider_style(theme, status, opacity));
     let position_text = readable_text(animated_image_position_text(position, duration))
-        .size(12)
         .style(move |theme| faded_media_text_style(theme, opacity));
     let controls = column![position_text, progress_slider]
         .spacing(4)

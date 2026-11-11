@@ -1,7 +1,7 @@
 // 远程预览下载的进度面板与不定进度轨道。字节进度分数在
 // file_core::byte_progress，文件操作进度条与传输占位共用同一份。
 
-use iced::widget::{column, container, progress_bar, svg, Column, Svg};
+use iced::widget::{column, container, svg, Column, Svg};
 use iced::{Element, Length};
 
 use bennu_theme::measured_text::format_middle_ellipsized_text;
@@ -9,6 +9,7 @@ use bennu_theme::measured_text::format_middle_ellipsized_text;
 use crate::formatting::format_file_size;
 use crate::panel_text::readable_text;
 use crate::preview::RemotePreviewDownload;
+use bennu_theme::controls::progress_bar;
 
 const INDETERMINATE_DASH_PERIOD: u8 = 16;
 const PREVIEW_ENTRY_NAME_MAX_CHARS: usize = 48;
@@ -72,12 +73,7 @@ pub fn remote_preview_download_panel<Message: 'static>(
         })
         .unwrap_or_else(|| bennu_localization::tr!("Preparing download..."));
 
-    column![
-        readable_text(title).size(14),
-        progress,
-        readable_text(detail).size(12),
-    ]
-    .spacing(8)
+    column![readable_text(title), progress, readable_text(detail),].spacing(8)
 }
 
 #[cfg(test)]

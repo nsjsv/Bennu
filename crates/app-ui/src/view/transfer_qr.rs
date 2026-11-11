@@ -1,13 +1,14 @@
 //! 二维码：矩阵 → iced RGBA 图像句柄（用 image widget，规避 canvas 全局光标陷阱，
 //! 见 iced-014-pitfalls），以及扫码下载与链接接收共用的"选地址 / 出码"视图。
 
-use iced::widget::{button, column, container, image};
+use iced::widget::{column, container, image};
 use iced::{Element, Length};
 
 use crate::app::transfer::{QrLinks, TransferMessage};
-use crate::appearance::context_menu_button_style;
 use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
+use bennu_theme::controls::normal_button;
+use bennu_theme::typography::CAPTION_SIZE;
 
 /// 矩阵 → RGBA 像素：白底黑模块 + 4 模块静区，4x 放大配合 nearest
 /// 过滤保证缩放后模块边缘锐利。
@@ -72,31 +73,25 @@ pub(crate) fn qr_links_view(
                 .center_x(Length::Fill),
             );
             if let Some(url) = links.urls.get(*index) {
-                content = content.push(readable_text(caption(url)).size(11));
+                content = content.push(readable_text(caption(url)).size(CAPTION_SIZE));
             }
             content.push(
-                button(readable_text(tr!("Choose another address")).size(12))
-                    .on_press(Message::Transfer(show_addresses))
-                    .padding([5, 12])
-                    .style(context_menu_button_style()),
+                normal_button(readable_text(tr!("Choose another address")))
+                    .on_press(Message::Transfer(show_addresses)),
             )
         }
         None => {
             content = content.push(
-                container(readable_text(tr!("Choose an address your phone can reach")).size(13))
+                container(readable_text(tr!("Choose an address your phone can reach")))
                     .center_x(Length::Fill),
             );
             for (index, url) in links.urls.iter().enumerate() {
                 content = content.push(
-                    button(
-                        readable_text(display_address(url).to_owned())
-                            .size(12)
-                            .width(Length::Fill),
+                    normal_button(
+                        readable_text(display_address(url).to_owned()).width(Length::Fill),
                     )
                     .on_press(Message::Transfer(choose(index)))
-                    .padding([6, 10])
-                    .width(Length::Fill)
-                    .style(context_menu_button_style()),
+                    .width(Length::Fill),
                 );
             }
             content

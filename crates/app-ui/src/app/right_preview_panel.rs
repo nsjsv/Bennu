@@ -278,9 +278,9 @@ impl FileBrowser {
     pub(crate) fn right_preview_panel_content(&self) -> Element<'_, Message> {
         let preview_engine = &self.preview_engine;
         if preview_engine.preview.is_none() {
-            return container_centered(
-                bennu_preview::panel_text::readable_text(tr!("Select an item to preview")).size(14),
-            );
+            return container_centered(bennu_preview::panel_text::readable_text(tr!(
+                "Select an item to preview"
+            )));
         }
         crate::view::view_preview_window(
             preview_engine.preview.as_ref(),

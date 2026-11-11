@@ -1,6 +1,4 @@
-use iced::widget::{
-    button, checkbox, column, container, mouse_area, rich_text, row, space::Space, Button,
-};
+use iced::widget::{button, column, container, mouse_area, rich_text, row, space::Space, Button};
 use iced::{Alignment, Background, Color, Element, Length};
 
 use crate::app::FileBrowser;
@@ -14,9 +12,9 @@ use crate::model::{
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::icons::IconSymbol;
 
-use super::option_controls::{destructive_confirmation_button_style, secondary_action_button};
 use super::tab_motion::translated;
 use super::{themed_icon, IconTone};
+use bennu_theme::controls::{check_box, destructive_button, normal_button};
 
 const CONTEXT_MENU_ITEM_HEIGHT: f32 = 24.0;
 const CONTEXT_MENU_PADDING: f32 = 8.0;
@@ -25,7 +23,6 @@ const CONTEXT_MENU_WIDTH: f32 = 240.0;
 const CONTEXT_MENU_ICON_SIZE: f32 = 14.0;
 const CONTEXT_MENU_GRIP_ICON_SIZE: f32 = 14.0;
 const CONTEXT_MENU_EYE_ICON_SIZE: f32 = 14.0;
-const CONTEXT_MENU_LABEL_SIZE: f32 = 13.0;
 
 /// 「右键菜单」配置区块:直接以右键菜单的样子预览当前菜单,
 /// 行内拖拽排序、眼睛开关可见性;下方翻页器与恢复默认。
@@ -66,8 +63,7 @@ pub(super) fn context_menu_settings_section(browser: &FileBrowser) -> Element<'_
                 "{}/{}",
                 position + 1,
                 CONTEXT_MENU_SETTINGS_PAGES.len()
-            ))
-            .size(14),
+            )),
             pager_button(
                 IconSymbol::ArrowRight,
                 Message::ContextMenuSettingsPageShifted(ContextMenuSettingsPageStep::Next),
@@ -80,14 +76,11 @@ pub(super) fn context_menu_settings_section(browser: &FileBrowser) -> Element<'_
     .center_x(Length::Fill);
 
     // 菜单名在预览面板正上方居中。
-    let page_label: Element<'static, Message> = container(
-        readable_text(page.label())
-            .size(13)
-            .width(Length::Fixed(CONTEXT_MENU_WIDTH)),
-    )
-    .width(Length::Fixed(CONTEXT_MENU_WIDTH))
-    .center_x(Length::Fixed(CONTEXT_MENU_WIDTH))
-    .into();
+    let page_label: Element<'static, Message> =
+        container(readable_text(page.label()).width(Length::Fixed(CONTEXT_MENU_WIDTH)))
+            .width(Length::Fixed(CONTEXT_MENU_WIDTH))
+            .center_x(Length::Fixed(CONTEXT_MENU_WIDTH))
+            .into();
 
     // 文件条目页悬停组行时,成员子面板在预览面板旁边展开,与真实菜单同构。
     let preview: Element<'static, Message> = match (page, browser.context_menu_preview_expansion) {
@@ -264,7 +257,7 @@ fn context_menu_item_row(
     };
 
     let item_content: Element<'static, Message> = if let Some(checked) = entry_type_checked {
-        row![checkbox(checked).size(14).spacing(8), item_label(entry)]
+        row![check_box(checked), item_label(entry)]
             .spacing(6)
             .align_y(Alignment::Center)
             .width(Length::Fill)
@@ -354,13 +347,9 @@ fn eye_toggle_button(
 /// 菜单项名:与真实菜单同一份文案;隐藏时删除线并沿用容器淡化色。
 fn item_label(entry: &ContextMenuSettingsRow) -> Element<'static, Message> {
     if entry.visible {
-        readable_text(entry.label.clone())
-            .size(CONTEXT_MENU_LABEL_SIZE)
-            .into()
+        readable_text(entry.label.clone()).into()
     } else {
-        rich_text![settings_span(entry.label.clone()).strikethrough(true)]
-            .size(CONTEXT_MENU_LABEL_SIZE)
-            .into()
+        rich_text![settings_span(entry.label.clone()).strikethrough(true)].into()
     }
 }
 
@@ -378,16 +367,13 @@ fn pager_button(icon: IconSymbol, message: Message) -> Button<'static, Message> 
 fn reset_row(browser: &FileBrowser, page: ContextMenuSettingsPage) -> Element<'_, Message> {
     let reset: Element<'static, Message> = if browser.context_menu_reset_confirmation == Some(page)
     {
-        button(container(readable_text(tr!("Click Again to Reset")).size(12)).padding([6, 10]))
+        destructive_button(readable_text(tr!("Click Again to Reset")))
             .on_press(Message::ContextMenuSettingsResetConfirmed(page))
-            .style(destructive_confirmation_button_style())
             .into()
     } else {
-        secondary_action_button(
-            tr!("Restore defaults"),
-            Message::ContextMenuSettingsResetRequested(page),
-        )
-        .into()
+        normal_button(readable_text(tr!("Restore defaults")))
+            .on_press(Message::ContextMenuSettingsResetRequested(page))
+            .into()
     };
     center_horizontally(reset)
 }

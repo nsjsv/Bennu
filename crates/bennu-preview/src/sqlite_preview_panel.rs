@@ -3,7 +3,7 @@
 //! 窗口共用词汇）与滚动接线、拖拽结束事件经参数由宿主注入，其余逐字节
 //! 保真。
 
-use iced::widget::{button, column, container, mouse_area, row, scrollable, text_input, Space};
+use iced::widget::{button, column, container, mouse_area, row, scrollable, Space};
 use iced::{Background, Border, Element, Length};
 
 use bennu_theme::measured_text::format_middle_ellipsized_text;
@@ -12,7 +12,7 @@ use bennu_theme::scrollbar::{
 };
 use bennu_theme::styles::{
     base_text_color, enhanced_both_scrollbar_direction, enhanced_scrollbar_style,
-    enhanced_vertical_scrollbar_direction, navigation_text_input_style, ScrollbarVisibility,
+    enhanced_vertical_scrollbar_direction, ScrollbarVisibility,
 };
 use bennu_theme::ui_colors;
 
@@ -24,6 +24,8 @@ use crate::sqlite_preview::{
     SqlQueryOutcome, SqliteCellValue, SqliteDatabasePreview, SqlitePreviewMessage, SqlitePreviewTab,
 };
 use bennu_localization::tr;
+use bennu_theme::controls::text_field;
+use bennu_theme::typography::CAPTION_SIZE;
 
 const SQLITE_TABLE_NAME_MAX_CHARS: usize = 40;
 const SQLITE_COLUMN_WIDTH: f32 = 170.0;
@@ -93,9 +95,7 @@ where
     Message: 'static + Clone + From<PreviewMessage>,
 {
     if preview.tables.is_empty() {
-        return readable_text(tr!("This database has no tables"))
-            .size(14)
-            .into();
+        return readable_text(tr!("This database has no tables")).into();
     }
 
     // 直接切换：数据到达前保持空白，不显示加载占位。
@@ -166,16 +166,13 @@ where
     let filter_value = state.map(|state| state.table_filter.as_str()).unwrap_or("");
     let filter = filter_value.to_lowercase();
     let filter_input = container(
-        text_input(&tr!("Filter tables"), filter_value)
+        text_field(&tr!("Filter tables"), filter_value)
             .on_input(|value| {
                 Message::from(PreviewMessage::SqlitePreview(
                     SqlitePreviewMessage::TableFilterChanged(value),
                 ))
             })
-            .padding([5, 8])
-            .size(12)
-            .width(Length::Fill)
-            .style(navigation_text_input_style),
+            .width(Length::Fill),
     )
     .padding([0, 6])
     .width(Length::Fill);
@@ -192,8 +189,8 @@ where
         let label = format_middle_ellipsized_text(&table.name, SQLITE_TABLE_NAME_MAX_CHARS);
         let content = container(
             column![
-                readable_text(label).size(13),
-                readable_text(table.row_count.to_string()).size(11),
+                readable_text(label),
+                readable_text(table.row_count.to_string()).size(CAPTION_SIZE),
             ]
             .spacing(1),
         )
@@ -210,11 +207,7 @@ where
         list = list.push(entry);
     }
     if matching_count == 0 {
-        list = list.push(
-            readable_text(tr!("No tables match"))
-                .size(12)
-                .width(Length::Fill),
-        );
+        list = list.push(readable_text(tr!("No tables match")).width(Length::Fill));
     }
 
     let ScrollRegionWiring {
@@ -264,7 +257,7 @@ where
 
     // 单行 SQL 输入：回车直接执行，与搜索框一致的交互。
     let editor_area = container(
-        text_input(&tr!("SQL query (Enter to run)"), &state.sql_text)
+        text_field(&tr!("SQL query (Enter to run)"), &state.sql_text)
             .on_input(|value| {
                 Message::from(PreviewMessage::SqlitePreview(
                     SqlitePreviewMessage::SqlTextChanged(value),
@@ -273,17 +266,14 @@ where
             .on_submit(Message::from(PreviewMessage::SqlitePreview(
                 SqlitePreviewMessage::SqlSubmitted,
             )))
-            .padding([5, 8])
-            .size(13)
-            .width(Length::Fill)
-            .style(navigation_text_input_style),
+            .width(Length::Fill),
     )
     .width(Length::Fill);
 
     // 查询期间保留旧结果，新结果到达后直接替换。
     let result: Element<'a, Message> = match &state.sql_result {
         Some(Ok(outcome)) => sql_result_area(outcome, data_visibility, data_viewport, data_scroll),
-        Some(Err(error)) => readable_text(error.clone()).size(13).into(),
+        Some(Err(error)) => readable_text(error.clone()).into(),
         None => column![].into(),
     };
 
@@ -304,9 +294,7 @@ where
     Message: 'static + Clone + From<PreviewMessage>,
 {
     if outcome.columns.is_empty() {
-        return readable_text(tr!("Statement executed. No result rows."))
-            .size(13)
-            .into();
+        return readable_text(tr!("Statement executed. No result rows.")).into();
     }
     sqlite_grid(
         &outcome.columns,
@@ -354,7 +342,7 @@ where
     if truncated {
         column![
             scroller,
-            readable_text(tr!("Only the first 200 rows are shown.")).size(11)
+            readable_text(tr!("Only the first 200 rows are shown.")).size(CAPTION_SIZE)
         ]
         .spacing(4)
         .height(Length::Fill)
@@ -368,7 +356,7 @@ fn grid_header_row<Message: 'static>(columns: &[String]) -> Element<'static, Mes
     let mut header = row![].spacing(1);
     for column_name in columns {
         header = header.push(
-            container(readable_text(column_name.clone()).size(12))
+            container(readable_text(column_name.clone()))
                 .width(Length::Fixed(SQLITE_COLUMN_WIDTH))
                 .padding([5, 8])
                 .style(grid_header_cell_style),
@@ -381,7 +369,7 @@ fn grid_data_row<Message: 'static>(values: &[SqliteCellValue]) -> Element<'stati
     let mut data_row = row![].spacing(1);
     for value in values {
         data_row = data_row.push(
-            container(readable_text(cell_text(value)).size(13))
+            container(readable_text(cell_text(value)))
                 .width(Length::Fixed(SQLITE_COLUMN_WIDTH))
                 .padding([4, 8]),
         );

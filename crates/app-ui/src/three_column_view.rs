@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use file_core::DirectoryEntry;
-use iced::widget::{container, mouse_area, row, scrollable, text_input, Column, Row, Space};
+use iced::widget::{container, mouse_area, row, scrollable, Column, Row, Space};
 use iced::{Alignment, Element, Length};
 
 use crate::app::panes::{BrowserPaneView, DirectoryContentAvailability};
@@ -32,6 +32,7 @@ use crate::view::{
 };
 use crate::virtual_range::{initial_virtual_range, virtual_range_for_viewport, VirtualRange};
 use bennu_preview::panel_text::readable_text;
+use bennu_theme::controls::inline_text_field;
 use bennu_theme::icons::IconSymbol;
 use bennu_theme::measured_text::measured_middle_ellipsized_text;
 
@@ -510,7 +511,7 @@ fn column_entry_row<'a>(
         // 行槽高固定 24px（基准档），不显式压缩输入框时 iced 默认字号 16
         // 加默认 padding 5 会撑到 ~31px 溢出行槽，边框盖住文字。
         rename_field(
-            text_input(&tr!("File name"), pane.rename_input)
+            inline_text_field(&tr!("File name"), pane.rename_input)
                 .id(rename_input_id())
                 .on_input(Message::RenameInputChanged)
                 .on_submit(Message::RenameSelected)
@@ -524,7 +525,7 @@ fn column_entry_row<'a>(
     } else {
         container(measured_middle_ellipsized_text(
             entry.name().to_string_lossy().into_owned(),
-            geometry.text_size as u32,
+            geometry.text_size,
         ))
         .style(visual_state.content_style(modifier))
         .into()
@@ -864,7 +865,7 @@ mod tests {
             default_geometry.content_spacing,
             COLUMN_CONTENT_SPACING as f32
         );
-        assert_eq!(default_geometry.text_size, COLUMN_ENTRY_TEXT_SIZE as f32);
+        assert_eq!(default_geometry.text_size, COLUMN_ENTRY_TEXT_SIZE);
         assert_eq!(
             default_geometry.chevron_icon_size,
             bennu_theme::column_geometry::COLUMN_CHEVRON_ICON_SIZE
@@ -885,10 +886,7 @@ mod tests {
             geometry.entries_top_padding,
             COLUMN_PADDING[0] as f32 + (COLUMN_CONTENT_SPACING as f32 * scale).round()
         );
-        assert_eq!(
-            geometry.text_size,
-            (COLUMN_ENTRY_TEXT_SIZE as f32 * scale).round()
-        );
+        assert_eq!(geometry.text_size, (COLUMN_ENTRY_TEXT_SIZE * scale).round());
         assert_eq!(
             geometry.entry_padding.right,
             (COLUMN_ENTRY_PADDING[1] as f32 * scale).round()

@@ -1,10 +1,11 @@
 // 地址栏外框与导航输入框样式已下沉 bennu-theme 共享（portal FileChooser
 // 地址栏复用同一份视觉）；这里仅 re-export 保持 crate 内引用路径不变。
-pub(crate) use bennu_theme::styles::{address_bar_style, navigation_text_input_style};
+pub(crate) use bennu_theme::styles::address_bar_style;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bennu_theme::controls::text_field_style;
     use iced::widget::text_input;
     use iced::Theme;
 
@@ -20,13 +21,13 @@ mod tests {
 
         for theme in [Theme::Light, Theme::Dark] {
             for status in statuses {
-                let input_style = navigation_text_input_style(&theme, status);
+                let input_style = text_field_style(&theme, status);
                 assert_eq!(input_style.border.radius, 8.0.into());
             }
 
-            let input_style = navigation_text_input_style(&theme, text_input::Status::Active);
+            let input_style = text_field_style(&theme, text_input::Status::Active);
             let frame_style = address_bar_style(&theme);
-            assert_eq!(frame_style.background, Some(input_style.background));
+            // 底色一致性（不透明换算）由 address_bar 的叠层测试负责。
             assert_eq!(frame_style.border, input_style.border);
         }
     }

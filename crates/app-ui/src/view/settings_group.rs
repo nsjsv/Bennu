@@ -7,8 +7,9 @@ use bennu_preview::panel_text::readable_text;
 use bennu_theme::ui_colors;
 
 use super::option_controls::hover_background_color;
-use super::toggle_switch::switch_control;
 use super::{themed_icon, IconSymbol, IconTone};
+use bennu_theme::controls::switch;
+use bennu_theme::typography::CAPTION_SIZE;
 
 pub(super) const SETTINGS_GROUP_SPACING: f32 = 16.0;
 
@@ -55,12 +56,12 @@ pub(super) fn toggle_setting_row(
     let mut labels = Column::new()
         .spacing(2)
         .width(Length::Fill)
-        .push(readable_text(title).size(12).width(Length::Fill));
+        .push(readable_text(title).width(Length::Fill));
     if let Some(description) = description {
         labels = labels.push(muted_setting_text(description, 11));
     }
 
-    let content = row![labels, switch_control(is_on)]
+    let content = row![labels, switch(is_on)]
         .spacing(8)
         .align_y(Alignment::Center);
 
@@ -77,7 +78,7 @@ pub(super) fn labeled_setting_row<'a>(
     control: Element<'a, Message>,
 ) -> Element<'a, Message> {
     container(
-        row![readable_text(label).size(12).width(Length::Fill), control]
+        row![readable_text(label).width(Length::Fill), control]
             .spacing(8)
             .align_y(Alignment::Center),
     )
@@ -90,8 +91,12 @@ pub(super) fn action_setting_row(title: String, description: String) -> Button<'
     let labels = Column::new()
         .spacing(2)
         .width(Length::Fill)
-        .push(readable_text(title).size(12).width(Length::Fill))
-        .push(readable_text(description).size(11).width(Length::Fill));
+        .push(readable_text(title).width(Length::Fill))
+        .push(
+            readable_text(description)
+                .size(CAPTION_SIZE)
+                .width(Length::Fill),
+        );
 
     button(labels)
         .padding(ROW_PADDING)
@@ -102,7 +107,7 @@ pub(super) fn action_setting_row(title: String, description: String) -> Button<'
 /// 进入二级页面的导航行：左标题右箭头，整行可点。
 pub(super) fn navigation_setting_row(title: String) -> Button<'static, Message> {
     let content = row![
-        readable_text(title).size(12).width(Length::Fill),
+        readable_text(title).width(Length::Fill),
         themed_icon(IconSymbol::ChevronRight, IconTone::Normal, 13.0),
     ]
     .spacing(8)
@@ -129,7 +134,7 @@ pub(super) fn muted_setting_text(label: String, size: u32) -> Element<'static, M
 }
 
 fn settings_group_header(header: String) -> Element<'static, Message> {
-    container(readable_text(header).size(12).width(Length::Fill))
+    container(readable_text(header).width(Length::Fill))
         .padding([0, ROW_CONTENT_INSET])
         .width(Length::Fill)
         .style(muted_text_style)

@@ -2,7 +2,7 @@ use iced::widget::{button, container, row, Column};
 use iced::{Alignment, Border, Element, Length, Theme};
 
 use crate::app::FileBrowser;
-use crate::appearance::{context_menu_button_style, subtle_border_color};
+use crate::appearance::subtle_border_color;
 use crate::model::{
     Message, WindowChromeLayout, WindowControlKind, WindowControlMoveDirection,
     WindowControlPlacement, WindowControlSide,
@@ -10,10 +10,14 @@ use crate::model::{
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::icons::IconSymbol;
 
-use super::option_controls::{secondary_action_button, segmented_choice_row, SegmentedChoice};
+use super::settings_group::card_row_button_style;
 use super::settings_group::{info_setting_row, muted_setting_text};
-use super::toggle_switch::switch_control;
 use super::{themed_icon, IconTone};
+use bennu_theme::controls::icon_button_style;
+use bennu_theme::controls::normal_button;
+use bennu_theme::controls::switch;
+use bennu_theme::controls::{segmented_choice_row, SegmentedChoice};
+use bennu_theme::typography::CAPTION_SIZE;
 
 const WINDOW_CONTROL_ROW_HEIGHT: f32 = 46.0;
 const WINDOW_CONTROL_SIDE_WIDTH: f32 = 150.0;
@@ -41,10 +45,10 @@ pub(super) fn window_control_settings_row(browser: &FileBrowser) -> Element<'_, 
     }
     info_setting_row(
         content
-            .push(secondary_action_button(
-                tr!("Restore defaults"),
-                Message::WindowControlsReset,
-            ))
+            .push(
+                normal_button(readable_text(tr!("Restore defaults")))
+                    .on_press(Message::WindowControlsReset),
+            )
             .into(),
     )
 }
@@ -57,7 +61,7 @@ fn window_layout_selector(browser: &FileBrowser) -> Element<'static, Message> {
             .map(|layout| SegmentedChoice {
                 label: layout.label(),
                 selected: layout == selected,
-                message: Message::WindowChromeLayoutSelected(layout),
+                message: Some(Message::WindowChromeLayoutSelected(layout)),
                 tooltip: None,
             })
             .collect(),
@@ -111,7 +115,7 @@ fn window_control_row(
     let kind = placement.kind();
     let content = row![
         reorder_arrows(kind, can_move_up, can_move_down),
-        readable_text(kind.label()).size(12).width(Length::Fill),
+        readable_text(kind.label()).width(Length::Fill),
         visibility_control(placement),
         side_selector(placement),
     ]
@@ -163,34 +167,36 @@ fn reorder_arrow_button(
         .center_x(Length::Shrink)
         .center_y(Length::Shrink),
     )
-    // Both arrows must fit the 34px content box of a 46px row: with the
-    // 1px button border the pair is 2 * (12 + 2 + 2) + 1 spacing = 33px,
-    // so the button's own 5px default padding has to go.
+    // Both arrows must fit the 34px content box of a 46px row: the pair is
+    // 2 * (12 + 2) + 1 spacing = 29px only once the button's own 5px default
+    // padding is gone.
     .padding(0)
     .on_press(Message::WindowControlMoveRequested(kind, direction))
-    .style(context_menu_button_style())
+    .style(icon_button_style)
     .into()
 }
 
 fn visibility_control(placement: WindowControlPlacement) -> Element<'static, Message> {
     match window_control_visibility_control(placement) {
         WindowControlVisibilityControl::AlwaysVisible => {
-            container(readable_text(tr!("Always visible")).size(11))
+            container(readable_text(tr!("Always visible")).size(CAPTION_SIZE))
                 .width(Length::Fixed(WINDOW_CONTROL_VISIBILITY_WIDTH))
                 .center_x(Length::Fill)
                 .into()
         }
         WindowControlVisibilityControl::Toggle { visible } => {
             let content = row![
-                readable_text(tr!("Show")).size(11).width(Length::Fill),
-                switch_control(visible),
+                readable_text(tr!("Show"))
+                    .size(CAPTION_SIZE)
+                    .width(Length::Fill),
+                switch(visible),
             ]
             .spacing(6)
             .align_y(Alignment::Center);
             button(container(content).padding([3, 6]).width(Length::Fill))
                 .on_press(Message::WindowControlVisibilityToggled(placement.kind()))
                 .width(Length::Fixed(WINDOW_CONTROL_VISIBILITY_WIDTH))
-                .style(context_menu_button_style())
+                .style(card_row_button_style())
                 .into()
         }
     }
@@ -215,7 +221,7 @@ fn side_selector(placement: WindowControlPlacement) -> Element<'static, Message>
             .map(|side| SegmentedChoice {
                 label: side.label(),
                 selected: side == placement.side(),
-                message: Message::WindowControlSideSelected(placement.kind(), side),
+                message: Some(Message::WindowControlSideSelected(placement.kind(), side)),
                 tooltip: None,
             })
             .collect(),

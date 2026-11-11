@@ -1,9 +1,7 @@
-use iced::widget::{button, column, container, row, text_input, Button, Space};
+use iced::widget::{button, column, container, row, Button, Space};
 use iced::{Alignment, Element, Length};
 
-use crate::appearance::{
-    context_menu_button_style, context_menu_item_button_style, context_menu_style,
-};
+use crate::appearance::{context_menu_item_button_style, context_menu_style};
 use crate::formatting::format_middle_ellipsized_text;
 use crate::model::{ContextMenuPreferences, Message};
 use crate::network_connections::{
@@ -13,11 +11,13 @@ use crate::network_connections::{
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::icons::IconSymbol;
 
-use super::option_controls::{
-    primary_action_button, secondary_action_button, segmented_choice_row, SegmentedChoice,
-};
-use super::toggle_switch::switch_control;
+use super::settings_group::card_row_button_style;
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};
+use bennu_theme::controls::switch;
+use bennu_theme::controls::text_field;
+use bennu_theme::controls::{normal_button, suggested_button};
+use bennu_theme::controls::{segmented_choice_row, SegmentedChoice};
+use bennu_theme::typography::{BOLD, TITLE_SIZE};
 
 const NETWORK_EDITOR_PANEL_WIDTH: f32 = 460.0;
 const NETWORK_EDITOR_ERROR_MAX_CHARS: usize = 96;
@@ -32,19 +32,17 @@ pub(super) fn network_connection_editor_panel(
     let title = editor_title(editor.mode);
     let title_row = row![
         themed_icon(IconSymbol::Link, IconTone::Normal, MENU_ICON_SIZE),
-        readable_text(title).size(16).width(Length::Fill),
+        readable_text(title)
+            .size(TITLE_SIZE)
+            .font(BOLD)
+            .width(Length::Fill),
     ]
     .spacing(8)
     .align_y(Alignment::Center);
-    let mut label_input = text_input(&tr!("Name"), &editor.label)
-        .padding([6, 8])
-        .size(14);
-    let mut uri_input = text_input("URI", &editor.uri)
-        .on_submit(Message::NetworkConnection(
-            NetworkConnectionMessage::EditorSaved,
-        ))
-        .padding([6, 8])
-        .size(14);
+    let mut label_input = text_field(&tr!("Name"), &editor.label);
+    let mut uri_input = text_field("URI", &editor.uri).on_submit(Message::NetworkConnection(
+        NetworkConnectionMessage::EditorSaved,
+    ));
     if editor.mode != NetworkConnectionEditorMode::Connect {
         label_input = label_input.on_input(|value| {
             Message::NetworkConnection(NetworkConnectionMessage::EditorLabelChanged(value))
@@ -61,7 +59,7 @@ pub(super) fn network_connection_editor_panel(
         .push(label_input)
         .push(uri_input)
         .push(
-            text_input(&tr!("Username"), &editor.username)
+            text_field(&tr!("Username"), &editor.username)
                 .on_input(|value| {
                     Message::NetworkConnection(NetworkConnectionMessage::EditorUsernameChanged(
                         value,
@@ -69,12 +67,10 @@ pub(super) fn network_connection_editor_panel(
                 })
                 .on_submit(Message::NetworkConnection(
                     NetworkConnectionMessage::EditorSaved,
-                ))
-                .padding([6, 8])
-                .size(14),
+                )),
         )
         .push(
-            text_input(&tr!("Password"), &editor.password)
+            text_field(&tr!("Password"), &editor.password)
                 .secure(true)
                 .on_input(|value| {
                     Message::NetworkConnection(NetworkConnectionMessage::EditorPasswordChanged(
@@ -83,9 +79,7 @@ pub(super) fn network_connection_editor_panel(
                 })
                 .on_submit(Message::NetworkConnection(
                     NetworkConnectionMessage::EditorSaved,
-                ))
-                .padding([6, 8])
-                .size(14),
+                )),
         );
 
     if editor.mode != NetworkConnectionEditorMode::Connect {
@@ -93,25 +87,20 @@ pub(super) fn network_connection_editor_panel(
     }
 
     if let Some(error) = &editor.error {
-        content = content.push(
-            readable_text(format_middle_ellipsized_text(
-                error,
-                NETWORK_EDITOR_ERROR_MAX_CHARS,
-            ))
-            .size(12),
-        );
+        content = content.push(readable_text(format_middle_ellipsized_text(
+            error,
+            NETWORK_EDITOR_ERROR_MAX_CHARS,
+        )));
     }
 
     content = content.push(
         row![
             Space::new().width(Length::Fill),
-            secondary_action_button(
-                tr!("Cancel"),
-                Message::NetworkConnection(NetworkConnectionMessage::EditorCanceled),
-            ),
-            primary_action_button(
-                editor_primary_action_label(editor),
-                Message::NetworkConnection(NetworkConnectionMessage::EditorSaved),
+            normal_button(readable_text(tr!("Cancel"))).on_press(Message::NetworkConnection(
+                NetworkConnectionMessage::EditorCanceled
+            )),
+            suggested_button(readable_text(editor_primary_action_label(editor))).on_press(
+                Message::NetworkConnection(NetworkConnectionMessage::EditorSaved)
             ),
         ]
         .spacing(6)
@@ -127,10 +116,8 @@ pub(super) fn network_connection_editor_panel(
 
 fn editor_auto_connect_button(is_on: bool) -> Button<'static, Message> {
     let content = row![
-        readable_text(tr!("Connect on startup"))
-            .size(12)
-            .width(Length::Fill),
-        switch_control(is_on),
+        readable_text(tr!("Connect on startup")).width(Length::Fill),
+        switch(is_on),
     ]
     .spacing(8)
     .align_y(Alignment::Center);
@@ -140,7 +127,7 @@ fn editor_auto_connect_button(is_on: bool) -> Button<'static, Message> {
             NetworkConnectionMessage::EditorAutoConnectToggled(!is_on),
         ))
         .width(Length::Fill)
-        .style(context_menu_button_style())
+        .style(card_row_button_style())
 }
 
 fn editor_title(mode: NetworkConnectionEditorMode) -> String {
@@ -169,24 +156,30 @@ fn protocol_selector(selected: desktop_linux::NetworkProtocol) -> Element<'stati
         SegmentedChoice {
             label: "SMB".to_owned(),
             selected: selected == desktop_linux::NetworkProtocol::Smb,
-            message: Message::NetworkConnection(NetworkConnectionMessage::EditorProtocolSelected(
-                desktop_linux::NetworkProtocol::Smb,
+            message: Some(Message::NetworkConnection(
+                NetworkConnectionMessage::EditorProtocolSelected(
+                    desktop_linux::NetworkProtocol::Smb,
+                ),
             )),
             tooltip: None,
         },
         SegmentedChoice {
             label: "WebDAV".to_owned(),
             selected: selected == desktop_linux::NetworkProtocol::WebDav,
-            message: Message::NetworkConnection(NetworkConnectionMessage::EditorProtocolSelected(
-                desktop_linux::NetworkProtocol::WebDav,
+            message: Some(Message::NetworkConnection(
+                NetworkConnectionMessage::EditorProtocolSelected(
+                    desktop_linux::NetworkProtocol::WebDav,
+                ),
             )),
             tooltip: None,
         },
         SegmentedChoice {
             label: "SFTP".to_owned(),
             selected: selected == desktop_linux::NetworkProtocol::Sftp,
-            message: Message::NetworkConnection(NetworkConnectionMessage::EditorProtocolSelected(
-                desktop_linux::NetworkProtocol::Sftp,
+            message: Some(Message::NetworkConnection(
+                NetworkConnectionMessage::EditorProtocolSelected(
+                    desktop_linux::NetworkProtocol::Sftp,
+                ),
             )),
             tooltip: None,
         },

@@ -111,7 +111,7 @@ where
 {
     let mut listing = Column::new().spacing(3);
     if entries.is_empty() {
-        return listing.push(readable_text(empty_message).size(14));
+        return listing.push(readable_text(empty_message));
     }
 
     for entry in visible_preview_tree_entries(entries) {
@@ -193,7 +193,7 @@ where
             IconTone::Normal,
             PREVIEW_ICON_SIZE,
         ),
-        readable_text(name).size(14).width(Length::Fill),
+        readable_text(name).width(Length::Fill),
     ]
     .spacing(6)
     .align_y(Alignment::Center);
@@ -226,7 +226,7 @@ where
         indent,
         Space::new().width(Length::Fixed(PREVIEW_TREE_TOGGLE_WIDTH)),
         Space::new().width(Length::Fixed(PREVIEW_ICON_SIZE)),
-        readable_text(message).size(13).width(Length::Fill),
+        readable_text(message).width(Length::Fill),
     ]
     .spacing(6)
     .align_y(Alignment::Center);

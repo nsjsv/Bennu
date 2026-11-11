@@ -1,8 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use iced::widget::{
-    button, container, mouse_area, opaque, responsive, scrollable, stack, text_input, Column,
-};
+use iced::widget::{button, container, mouse_area, opaque, responsive, scrollable, stack, Column};
 use iced::{mouse, Element, Length};
 
 use bennu_theme::address_bar::{
@@ -30,8 +28,10 @@ use crate::model::{
 use crate::view::{icon_tone_style, themed_icon, IconTone};
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::anchored_popup::anchored_popup;
+use bennu_theme::controls::text_field;
 use bennu_theme::icons::IconSymbol;
 use bennu_theme::measured_text::measured_middle_ellipsized_text;
+use bennu_theme::metrics::{CONTROL_PADDING_Y, FIELD_PADDING_X};
 
 const PATH_SUGGESTION_MAX_CHARS: usize = 72;
 
@@ -47,7 +47,7 @@ pub(crate) fn address_bar<'a>(
         let content = container(
             iced::widget::row![
                 themed_icon(IconSymbol::Trash, IconTone::Normal, BREADCRUMB_ICON_SIZE),
-                readable_text(tr!("Trash")).size(16),
+                readable_text(tr!("Trash")),
             ]
             .spacing(8)
             .align_y(iced::Alignment::Center),
@@ -69,12 +69,10 @@ pub(crate) fn address_bar<'a>(
     );
 
     let anchor: Element<'a, Message> = if let Some(session) = pane.address_editing {
-        let input = text_input(&tr!("Path"), &session.draft)
+        let input = text_field(&tr!("Path"), &session.draft)
             .id(address_input_id(pane.id))
             .on_input(move |value| Message::AddressDraftChanged(pane.id, value))
             .on_submit(Message::AddressEditingSubmitted(pane.id))
-            .padding([7, 10])
-            .size(16)
             .style(move |theme, status| faded_text_input_style(theme, status, editing_fraction))
             .width(Length::Fill);
 
@@ -295,7 +293,7 @@ fn path_suggestion_row(
 ) -> Element<'_, Message> {
     let label = path.to_string_lossy();
     let label = format_middle_ellipsized_text(label.as_ref(), PATH_SUGGESTION_MAX_CHARS);
-    let item = container(readable_text(label).size(13).width(Length::Fill))
+    let item = container(readable_text(label).width(Length::Fill))
         .padding([5, 8])
         .width(Length::Fill);
     let item = if is_selected {
@@ -314,8 +312,8 @@ fn path_suggestion_row(
 }
 
 fn address_exit_snapshot(snapshot: &str, opacity: f32) -> Element<'_, Message> {
-    container(measured_middle_ellipsized_text(snapshot, 16))
-        .padding([7, 10])
+    container(measured_middle_ellipsized_text(snapshot, ADDRESS_TEXT_SIZE))
+        .padding([CONTROL_PADDING_Y, FIELD_PADDING_X])
         .width(Length::Fill)
         .height(Length::Fixed(ADDRESS_BAR_HEIGHT))
         .style(move |theme| {
@@ -355,6 +353,13 @@ mod tests {
                 faded_text_input_style(&theme, iced::widget::text_input::Status::Active, 1.0);
 
             assert_eq!(Some(input_style.background), frame_style.background);
+            let iced::Background::Color(mask) = input_style.background else {
+                panic!("address input overlay must be a solid color");
+            };
+            assert_eq!(
+                mask.a, 1.0,
+                "a translucent overlay shows the breadcrumbs through it"
+            );
             assert_eq!(input_style.border.radius, frame_style.border.radius);
             assert_eq!(input_style.border.width, 0.0);
             assert_eq!(input_style.border.color, Color::TRANSPARENT);

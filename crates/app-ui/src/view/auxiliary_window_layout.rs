@@ -72,7 +72,7 @@ pub(super) fn auxiliary_sidebar_button(
     selected: bool,
     message: Message,
 ) -> Button<'static, Message> {
-    let label = container(readable_text(label).size(13))
+    let label = container(readable_text(label))
         .padding([7, 10])
         .width(Length::Fill);
     let label = if selected {

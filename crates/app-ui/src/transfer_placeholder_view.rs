@@ -98,7 +98,7 @@ pub(crate) fn transfer_placeholder_icon(
 
 fn transfer_placeholder_name_text(
     placeholder: &TransferPlaceholder,
-    text_size: u32,
+    text_size: f32,
 ) -> Element<'static, Message> {
     measured_middle_ellipsized_text(placeholder.name.clone(), text_size)
 }
@@ -124,7 +124,7 @@ pub(crate) fn transfer_placeholder_list_row(
             ListColumnKind::Name => row![
                 Space::new().width(Length::Fixed(geometry.toggle_width)),
                 transfer_placeholder_icon(placeholder, geometry.icon_density),
-                transfer_placeholder_name_text(placeholder, geometry.text_size as u32),
+                transfer_placeholder_name_text(placeholder, geometry.text_size),
             ]
             .spacing(geometry.row_spacing)
             .align_y(Alignment::Center)
@@ -167,7 +167,7 @@ pub(crate) fn transfer_placeholder_column_row(
         transfer_placeholder_icon(placeholder, geometry.icon_density),
         container(transfer_placeholder_name_text(
             placeholder,
-            geometry.text_size as u32
+            geometry.text_size
         )),
         Space::new().width(Length::Fixed(geometry.chevron_icon_size)),
     ]

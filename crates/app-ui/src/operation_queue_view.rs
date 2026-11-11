@@ -1,13 +1,12 @@
-use iced::widget::{button, column, container, progress_bar, row, scrollable, svg, Svg};
+use iced::widget::{button, column, container, row, scrollable, svg, Svg};
 use iced::{Alignment, Element, Length};
 
 use crate::app::scrollbar::{enhanced_scrollbar, scrollbar_on_scroll, ScrollbarAxis};
 use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
 use crate::app::transfer::{TransferTask, TransferTasks};
 use crate::appearance::{
-    context_menu_button_style, context_menu_style, enhanced_scrollbar_style,
-    enhanced_vertical_scrollbar_direction, error_notification_style,
-    operation_queue_indicator_button_style, path_suggestion_item_style,
+    context_menu_style, enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction,
+    error_notification_style, operation_queue_indicator_button_style, path_suggestion_item_style,
 };
 use crate::formatting::format_middle_ellipsized_text;
 use crate::model::{Message, ScrollbarRegion, ScrollbarVisibility};
@@ -19,6 +18,9 @@ use bennu_preview::operation_progress::{
     active_indeterminate_track_handle, static_indeterminate_track_handle,
 };
 use bennu_preview::panel_text::readable_text;
+use bennu_theme::controls::normal_button;
+use bennu_theme::controls::progress_bar;
+use bennu_theme::typography::{BOLD, CAPTION_SIZE, TITLE_SIZE};
 use file_operations::{FileOperationQueue, FileOperationStatus, FileOperationTask};
 
 pub(crate) const OPERATION_QUEUE_PANEL_WIDTH: f32 = 360.0;
@@ -78,9 +80,12 @@ pub(crate) fn operation_queue_panel<'a>(
     scrollbar_viewport: Option<crate::model::ScrollbarViewport>,
     animation_frame: u8,
 ) -> Element<'a, Message> {
-    let mut header = row![readable_text(tr!("Tasks")).size(16).width(Length::Fill)]
-        .spacing(8)
-        .align_y(Alignment::Center);
+    let mut header = row![readable_text(tr!("Tasks"))
+        .size(TITLE_SIZE)
+        .font(BOLD)
+        .width(Length::Fill)]
+    .spacing(8)
+    .align_y(Alignment::Center);
     if queue.has_terminal_tasks() || transfers.has_terminal() {
         header = header.push(task_control_button(
             tr!("Clear Finished"),
@@ -88,7 +93,7 @@ pub(crate) fn operation_queue_panel<'a>(
         ));
     }
     let rows = panel_rows(queue, transfers);
-    let header = header.push(readable_text(tr!("%1 tasks", rows.len())).size(12));
+    let header = header.push(readable_text(tr!("%1 tasks", rows.len())));
 
     let mut tasks = column![].spacing(6);
     if rows.is_empty() {
@@ -155,9 +160,8 @@ fn operation_task_row(task: &FileOperationTask, animation_frame: u8) -> Element<
     let path_lines = task.operation.path_lines();
     let title = row![
         readable_text(operation_title_text(task.operation.title(), &path_lines))
-            .size(13)
             .width(Length::Fill),
-        readable_text(task.status_label()).size(11),
+        readable_text(task.status_label()).size(CAPTION_SIZE),
     ]
     .spacing(6)
     .align_y(Alignment::Center);
@@ -167,12 +171,12 @@ fn operation_task_row(task: &FileOperationTask, animation_frame: u8) -> Element<
             "Original: %1",
             format_middle_ellipsized_text(&path_lines.original_path, TASK_PATH_MAX_CHARS)
         ))
-        .size(11),
+        .size(CAPTION_SIZE),
         readable_text(tr!(
             "Directory: %1",
             format_middle_ellipsized_text(&path_lines.directory_path, TASK_PATH_MAX_CHARS)
         ))
-        .size(11),
+        .size(CAPTION_SIZE),
     ]
     .spacing(2)
     .width(Length::Fill);
@@ -202,13 +206,13 @@ fn operation_task_row(task: &FileOperationTask, animation_frame: u8) -> Element<
         .width(Length::Fill);
 
     if let Some(detail) = file_operation_progress_text(task) {
-        body = body.push(readable_text(detail).size(11).width(Length::Fill));
+        body = body.push(readable_text(detail).size(CAPTION_SIZE).width(Length::Fill));
     }
 
     if let Some(warning) = task.completion_warning.as_deref() {
         body = body.push(
             readable_text(warning.to_owned())
-                .size(11)
+                .size(CAPTION_SIZE)
                 .width(Length::Fill),
         );
     }
@@ -216,7 +220,7 @@ fn operation_task_row(task: &FileOperationTask, animation_frame: u8) -> Element<
     if let Some(error) = task.error.as_deref() {
         body = body.push(
             readable_text(format_middle_ellipsized_text(error, TASK_ERROR_MAX_CHARS))
-                .size(11)
+                .size(CAPTION_SIZE)
                 .width(Length::Fill),
         );
     }
@@ -245,7 +249,7 @@ fn operation_title_text(title: String, path_lines: &FileOperationPathLines) -> S
 }
 
 fn empty_queue_row() -> Element<'static, Message> {
-    container(readable_text(tr!("No tasks")).size(13).width(Length::Fill))
+    container(readable_text(tr!("No tasks")).width(Length::Fill))
         .padding(10)
         .width(Length::Fill)
         .style(path_suggestion_item_style)
@@ -295,11 +299,7 @@ fn operation_task_controls(task: &FileOperationTask) -> Element<'static, Message
 }
 
 fn task_control_button(label: String, message: Message) -> Element<'static, Message> {
-    button(readable_text(label).size(12))
-        .on_press(message)
-        .padding([4, 8])
-        .style(context_menu_button_style())
-        .into()
+    normal_button(readable_text(label)).on_press(message).into()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

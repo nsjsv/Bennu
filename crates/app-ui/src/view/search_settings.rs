@@ -2,13 +2,10 @@ use file_search::{
     IndexHealth, IndexPhase, IndexedQueryAvailability, SearchPathConfigurationPhase,
     SearchRootAvailability, SearchServicePhase, SearchServiceStatus,
 };
-use iced::widget::{button, column, container, row, text_input, tooltip, Column};
+use iced::widget::{button, column, container, row, tooltip, Column};
 use iced::{Alignment, Element, Length};
 
 use crate::app::FileBrowser;
-use crate::appearance::{
-    context_menu_button_style, navigation_icon_button_style, navigation_text_input_style,
-};
 use crate::formatting::{format_file_size, format_middle_ellipsized_text, format_system_time};
 use crate::model::{
     Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility, SearchEndpointState,
@@ -19,13 +16,17 @@ use bennu_preview::panel_text::readable_text;
 use bennu_theme::icons::IconSymbol;
 
 use super::auxiliary_window_layout::auxiliary_detail_scroller;
-use super::option_controls::destructive_confirmation_button_style;
 use super::settings_group::{
     action_setting_row, info_setting_row, labeled_setting_row, settings_group, toggle_setting_row,
     SETTINGS_GROUP_SPACING,
 };
 use super::settings_window::chrome_top_spacer;
 use super::{themed_icon, IconTone};
+use bennu_theme::controls::destructive_button_style;
+use bennu_theme::controls::icon_button_style;
+use bennu_theme::controls::normal_button;
+use bennu_theme::controls::text_field;
+use bennu_theme::typography::{CAPTION_SIZE, SMALL_SIZE};
 
 pub(super) fn search_settings_detail(
     browser: &FileBrowser,
@@ -160,12 +161,10 @@ fn path_configuration_failure_row(detail: &str) -> Element<'_, Message> {
     info_setting_row(
         row![
             readable_text(tr!("Could not apply search locations: %1", detail))
-                .size(11)
+                .size(CAPTION_SIZE)
                 .width(Length::Fill),
-            button(readable_text(tr!("Retry")).size(11))
-                .on_press(Message::SearchPathConfigurationRetryPressed)
-                .padding([5, 9])
-                .style(context_menu_button_style()),
+            normal_button(readable_text(tr!("Retry")).size(CAPTION_SIZE))
+                .on_press(Message::SearchPathConfigurationRetryPressed),
         ]
         .spacing(8)
         .align_y(Alignment::Center)
@@ -207,9 +206,8 @@ fn search_path_row<'a>(
         row![
             column![
                 readable_text(format_middle_ellipsized_text(&path.to_string_lossy(), 72,))
-                    .size(12)
                     .width(Length::Fill),
-                readable_text(status).size(10).width(Length::Fill),
+                readable_text(status).size(SMALL_SIZE).width(Length::Fill),
             ]
             .spacing(2)
             .width(Length::Fill),
@@ -217,7 +215,7 @@ fn search_path_row<'a>(
                 button(themed_icon(IconSymbol::Trash, IconTone::Normal, 12.0))
                     .on_press(Message::SearchPathEntryRemoved(kind, remove_path))
                     .padding([7, 8])
-                    .style(navigation_icon_button_style()),
+                    .style(icon_button_style),
                 path_tooltip(tr!("Remove location")),
                 tooltip::Position::Left,
             ),
@@ -234,16 +232,13 @@ fn search_path_input_row(
     value: &str,
     picker_in_flight: bool,
 ) -> Element<'_, Message> {
-    let input = text_input(&tr!("Absolute path"), value)
+    let input = text_field(&tr!("Absolute path"), value)
         .on_input(move |value| Message::SearchPathInputChanged(kind, value))
         .on_submit(Message::SearchPathInputCommitted(kind))
-        .padding([7, 9])
-        .size(12)
-        .style(navigation_text_input_style)
         .width(Length::Fill);
     let chooser = button(themed_icon(IconSymbol::FolderOpen, IconTone::Normal, 13.0))
         .padding([8, 9])
-        .style(navigation_icon_button_style());
+        .style(icon_button_style);
     let chooser = if picker_in_flight {
         chooser
     } else {
@@ -266,7 +261,7 @@ fn search_path_input_row(
 }
 
 fn path_tooltip(label: String) -> Element<'static, Message> {
-    container(readable_text(label).size(11))
+    container(readable_text(label).size(CAPTION_SIZE))
         .padding([4, 6])
         .into()
 }
@@ -284,7 +279,6 @@ fn content_indexing_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
                 "Maximum content extraction: %1",
                 format_file_size(browser.user_config().search_max_extract_bytes)
             ))
-            .size(12)
             .into(),
         ),
     ]
@@ -316,7 +310,7 @@ fn status_overview_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
         if let Some(confirmed_at) = service.last_confirmed_at {
             rows.push(info_setting_row(
                 readable_text(tr!("Last confirmed: %1", format_system_time(confirmed_at)))
-                    .size(11)
+                    .size(CAPTION_SIZE)
                     .into(),
             ));
         }
@@ -385,9 +379,9 @@ fn endpoint_without_snapshot_label(endpoint: &SearchEndpointState) -> String {
 fn diagnostic_notice(kind: SearchServiceDiagnosticKind) -> Element<'static, Message> {
     info_setting_row(
         column![
-            readable_text(diagnostic_title(kind)).size(13),
+            readable_text(diagnostic_title(kind)),
             readable_text(diagnostic_recommendation(kind))
-                .size(11)
+                .size(CAPTION_SIZE)
                 .width(Length::Fill),
         ]
         .spacing(3)
@@ -397,14 +391,16 @@ fn diagnostic_notice(kind: SearchServiceDiagnosticKind) -> Element<'static, Mess
 }
 
 fn status_notice(message: String) -> Element<'static, Message> {
-    info_setting_row(readable_text(message).size(11).width(Length::Fill).into())
+    info_setting_row(
+        readable_text(message)
+            .size(CAPTION_SIZE)
+            .width(Length::Fill)
+            .into(),
+    )
 }
 
 fn summary_value_row(label: String, value: String) -> Element<'static, Message> {
-    labeled_setting_row(
-        label,
-        readable_text(value).size(12).width(Length::Shrink).into(),
-    )
+    labeled_setting_row(label, readable_text(value).width(Length::Shrink).into())
 }
 
 fn index_progress_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
@@ -510,31 +506,25 @@ fn issue_row(incident: &SearchServiceIncident) -> Element<'_, Message> {
     } else {
         tr!("Show technical details")
     };
-    let detail_button =
-        button(container(readable_text(detail_button_label).size(11)).padding([4, 8]))
-            .on_press(Message::SearchServiceIncidentDetailsToggled(incident.kind))
-            .style(context_menu_button_style());
+    let detail_button = normal_button(readable_text(detail_button_label))
+        .on_press(Message::SearchServiceIncidentDetailsToggled(incident.kind));
 
     let mut content = Column::new()
         .spacing(4)
         .width(Length::Fill)
-        .push(readable_text(diagnostic_title(incident.kind)).size(13))
-        .push(readable_text(diagnostic_recommendation(incident.kind)).size(11))
-        .push(readable_text(metadata).size(10))
+        .push(readable_text(diagnostic_title(incident.kind)))
+        .push(readable_text(diagnostic_recommendation(incident.kind)).size(CAPTION_SIZE))
+        .push(readable_text(metadata).size(SMALL_SIZE))
         .push(detail_button);
 
     if incident.technical_detail_expanded {
-        let copy_button = button(
-            container(readable_text(tr!("Copy technical details")).size(11)).padding([4, 8]),
-        )
-        .on_press(Message::SearchServiceIncidentDetailsCopyRequested(
-            incident.kind,
-        ))
-        .style(context_menu_button_style());
+        let copy_button = normal_button(readable_text(tr!("Copy technical details"))).on_press(
+            Message::SearchServiceIncidentDetailsCopyRequested(incident.kind),
+        );
         content = content
             .push(
                 readable_text(incident.technical_detail.clone())
-                    .size(10)
+                    .size(SMALL_SIZE)
                     .width(Length::Fill),
             )
             .push(copy_button);
@@ -561,7 +551,7 @@ fn service_recovery_rows(browser: &FileBrowser) -> Vec<Element<'static, Message>
             tr!("Click Again to Force Restart"),
             tr!("Current indexing work will stop. Index data and settings will be kept."),
         )
-        .style(destructive_confirmation_button_style())
+        .style(destructive_button_style)
     } else {
         action_setting_row(
             tr!("Force Restart"),

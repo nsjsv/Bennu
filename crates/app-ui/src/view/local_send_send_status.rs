@@ -1,17 +1,19 @@
 //! 设备行里这台设备最近一次直推的状态：校验/发送进度、要 PIN 的输入、结果与失败详情。
 
-use iced::widget::{button, column, row, text_input, Column};
+use iced::widget::{column, row, Column};
 use iced::{Alignment, Element, Length, Theme};
 
 use crate::app::transfer::{DirectSendFailure, DirectSendPhase, DirectSendState, TransferMessage};
 use crate::app::FileBrowser;
-use crate::appearance::context_menu_button_style;
 use crate::formatting::format_middle_ellipsized_text;
 use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::ui_colors;
 
 use super::settings_group::muted_setting_text;
+use bennu_theme::controls::normal_button;
+use bennu_theme::controls::text_field;
+use bennu_theme::typography::CAPTION_SIZE;
 
 const STATUS_MAX_CHARS: usize = 72;
 const DETAIL_MAX_CHARS: usize = 64;
@@ -80,7 +82,7 @@ fn status_line(
         DirectSendPhase::Canceling => muted_setting_text(tr!("Canceling..."), 11),
         DirectSendPhase::NeedsPin { wrong: false, .. } => {
             readable_text(tr!("This device requires a PIN"))
-                .size(11)
+                .size(CAPTION_SIZE)
                 .into()
         }
         DirectSendPhase::NeedsPin { wrong: true, .. } => error_text(tr!("Wrong PIN. Try again.")),
@@ -124,12 +126,9 @@ fn with_cancel_button(
 ) -> Element<'static, Message> {
     row![
         status,
-        button(readable_text(tr!("Cancel")).size(11))
-            .on_press(Message::Transfer(TransferMessage::DirectSendCancelPressed(
-                fingerprint.to_owned(),
-            )))
-            .padding([2, 8])
-            .style(context_menu_button_style()),
+        normal_button(readable_text(tr!("Cancel")).size(CAPTION_SIZE)).on_press(Message::Transfer(
+            TransferMessage::DirectSendCancelPressed(fingerprint.to_owned(),)
+        )),
     ]
     .spacing(6)
     .align_y(Alignment::Center)
@@ -148,12 +147,9 @@ fn with_details_button(
     };
     row![
         status,
-        button(readable_text(label).size(11))
-            .on_press(Message::Transfer(
-                TransferMessage::DirectSendDetailsToggled(fingerprint.to_owned(),)
-            ))
-            .padding([2, 8])
-            .style(context_menu_button_style()),
+        normal_button(readable_text(label).size(CAPTION_SIZE)).on_press(Message::Transfer(
+            TransferMessage::DirectSendDetailsToggled(fingerprint.to_owned(),)
+        )),
     ]
     .spacing(6)
     .align_y(Alignment::Center)
@@ -162,7 +158,7 @@ fn with_details_button(
 
 fn error_text(label: String) -> Element<'static, Message> {
     readable_text(label)
-        .size(11)
+        .size(CAPTION_SIZE)
         .style(|theme: &Theme| iced::widget::text::Style {
             color: Some(ui_colors(theme).error),
         })
@@ -176,13 +172,10 @@ fn pin_prompt<'a>(fingerprint: &str, input: &'a str) -> Element<'a, Message> {
         fingerprint.to_owned(),
     ));
     let action = |label: String, message: Option<Message>| {
-        button(readable_text(label).size(12))
-            .on_press_maybe(message)
-            .padding([4, 10])
-            .style(context_menu_button_style())
+        normal_button(readable_text(label)).on_press_maybe(message)
     };
     row![
-        text_input(&tr!("PIN"), input)
+        text_field(&tr!("PIN"), input)
             .secure(true)
             .on_input(move |value| {
                 Message::Transfer(TransferMessage::DirectSendPinChanged {
@@ -191,8 +184,6 @@ fn pin_prompt<'a>(fingerprint: &str, input: &'a str) -> Element<'a, Message> {
                 })
             })
             .on_submit_maybe((!input.is_empty()).then(|| submit.clone()))
-            .padding([4, 8])
-            .size(12)
             .width(Length::Fill),
         action(
             tr!("Cancel"),

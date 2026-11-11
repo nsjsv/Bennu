@@ -14,6 +14,7 @@ use super::settings_group::{
 };
 use super::settings_window::chrome_top_spacer;
 use super::{themed_icon, IconSymbol, IconTone};
+use bennu_theme::typography::{BOLD, CAPTION_SIZE, TITLE_SIZE};
 
 /// 图标固定尺寸。早期按视口宽度比例缩放的方案被放弃：滚动条隐藏/可见
 /// 会改变滚动区实测宽度，图标跟着抖。品牌展示图用固定像素最稳。
@@ -74,9 +75,11 @@ fn app_identity_row() -> Element<'static, Message> {
             },
             ..iced::widget::container::Style::default()
         }),
-        readable_text(APP_DISPLAY_NAME.to_owned()).size(15),
+        readable_text(APP_DISPLAY_NAME.to_owned())
+            .size(TITLE_SIZE)
+            .font(BOLD),
         text(version)
-            .size(11)
+            .size(CAPTION_SIZE)
             .style(|theme: &Theme| iced::widget::text::Style {
                 color: Some(muted_text_color(theme)),
             }),
@@ -89,9 +92,7 @@ fn app_identity_row() -> Element<'static, Message> {
 
 fn repository_link_row() -> Element<'static, Message> {
     let labels = column![
-        readable_text(tr!("GitHub repository"))
-            .size(12)
-            .width(Length::Fill),
+        readable_text(tr!("GitHub repository")).width(Length::Fill),
         muted_setting_text(
             tr!("Report issues or browse the source code in your browser."),
             11

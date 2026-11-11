@@ -635,8 +635,13 @@ fn main() {
         })
         .expect("D-Bus 线程创建失败");
 
+    bennu_theme::typography::adopt_system_font_families();
     let result = iced::daemon(boot, update, view_picker)
         .title(daemon_title)
+        .settings(iced::Settings {
+            default_text_size: bennu_theme::typography::BODY_SIZE.into(),
+            ..iced::Settings::default()
+        })
         .subscription(subscriptions::subscription)
         .theme(|daemon: &PickerDaemon, _| daemon.theme.clone())
         .run();

@@ -23,6 +23,7 @@ iced = { version = "0.14", default-features = false, features = [
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json.workspace = true
 tokio.workspace = true
+tracing.workspace = true
 toml = "1.1.2"
 
 [dev-dependencies]

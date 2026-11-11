@@ -6,7 +6,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use iced::alignment::{Horizontal, Vertical};
-use iced::widget::{button, column, container, image, row, slider, Space, Stack};
+use iced::widget::{button, column, container, image, row, Space, Stack};
 use iced::{Alignment, Element, Length};
 
 use bennu_theme::icons::IconSymbol;
@@ -24,6 +24,7 @@ use crate::preview::VideoPreviewPlayback;
 use crate::preview::VideoPreviewPlaybackStatus;
 use crate::preview::{scaled_media_size, PreviewSize};
 use crate::preview_message::PreviewMessage;
+use bennu_theme::controls::slider;
 
 const VIDEO_PROGRESS_SLIDER_PORTION: u16 = 4;
 const VIDEO_VOLUME_SLIDER_PORTION: u16 = 1;
@@ -209,7 +210,6 @@ where
             row![
                 video_primary_button(playback, opacity),
                 readable_text(media_position_text(position, duration))
-                    .size(12)
                     .style(move |theme| faded_media_text_style(theme, opacity)),
             ]
             .spacing(AUDIO_TIMELINE_CONTROL_GAP)

@@ -1,17 +1,17 @@
 //! 本机卡片里的"从手机接收"：按钮、准备中、二维码与"停止接收"、失败与超时的说明。
 
-use iced::widget::{button, column};
+use iced::widget::column;
 use iced::Element;
 
 use crate::app::transfer::{LinkReceiveMessage, LinkReceivePhase, TransferMessage};
 use crate::app::FileBrowser;
-use crate::appearance::context_menu_button_style;
 use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
 
 use super::local_send_window::error_text;
 use super::settings_group::muted_setting_text;
 use super::transfer_qr::qr_links_view;
+use bennu_theme::controls::normal_button;
 
 pub(super) fn link_receive_section(browser: &FileBrowser) -> Element<'_, Message> {
     let Some(current) = &browser.link_receiving.current else {
@@ -52,9 +52,7 @@ pub(super) fn link_receive_section(browser: &FileBrowser) -> Element<'_, Message
 }
 
 fn action_button(label: String, message: LinkReceiveMessage) -> Element<'static, Message> {
-    button(readable_text(label).size(12))
+    normal_button(readable_text(label))
         .on_press(Message::Transfer(TransferMessage::LinkReceive(message)))
-        .padding([5, 12])
-        .style(context_menu_button_style())
         .into()
 }

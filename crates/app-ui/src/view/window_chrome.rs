@@ -9,6 +9,7 @@ use crate::model::{
 
 use super::window_drag_region::window_drag_region;
 use bennu_preview::panel_text::readable_text;
+use bennu_theme::typography::{BOLD, TITLE_SIZE};
 
 const WINDOW_TITLE_SIDE_RESERVE: u16 = 116;
 const WINDOW_RESIZE_EDGE_WIDTH: f32 = 5.0;
@@ -198,7 +199,7 @@ fn window_top_bar(
         ));
     }
     let content = content
-        .push(readable_text(title).size(16))
+        .push(readable_text(title).size(TITLE_SIZE).font(BOLD))
         .push(Space::new().width(Length::Fill))
         .push(window_control_group(
             config,
@@ -271,7 +272,7 @@ fn separate_window_title_bar(
         .height(Length::Fixed(height))
         .style(window_title_bar_style);
     let drag_surface = window_drag_region(drag_surface.into(), window);
-    let title = container(readable_text(title).size(13))
+    let title = container(readable_text(title))
         .padding([0, WINDOW_TITLE_SIDE_RESERVE])
         .center_x(Length::Fill)
         .center_y(Length::Fixed(height))

@@ -1,8 +1,10 @@
-use iced::widget::{button, column, container, row, scrollable, text_input, Column, Space};
+use iced::widget::{button, column, container, row, scrollable, Column, Space};
 use iced::{Alignment, Element, Length};
 
 use file_core::{ChecksumAlgorithm, ALL_CHECKSUM_ALGORITHMS};
 
+use super::settings_group::settings_card;
+use super::{themed_icon, IconTone, MENU_ICON_SIZE};
 use crate::app::checksum::{
     ChecksumComputation, ChecksumExpectedVerdict, ChecksumFileVerdict, ChecksumMessage,
     ChecksumState,
@@ -11,11 +13,10 @@ use crate::appearance::{context_menu_style, muted_text_color};
 use crate::formatting::format_middle_ellipsized_text;
 use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
+use bennu_theme::controls::normal_button;
+use bennu_theme::controls::text_field;
 use bennu_theme::icons::IconSymbol;
-
-use super::option_controls::secondary_action_button;
-use super::settings_group::settings_card;
-use super::{themed_icon, IconTone, MENU_ICON_SIZE};
+use bennu_theme::typography::{BOLD, CAPTION_SIZE, TITLE_SIZE};
 
 const CHECKSUM_PANEL_WIDTH: f32 = 560.0;
 const SECTION_SPACING: f32 = 12.0;
@@ -33,7 +34,8 @@ pub(super) fn checksum_panel(state: &ChecksumState) -> Element<'_, Message> {
     let title = row![
         themed_icon(IconSymbol::Hash, IconTone::Normal, MENU_ICON_SIZE),
         readable_text(tr!("File Checksum"))
-            .size(16)
+            .size(TITLE_SIZE)
+            .font(BOLD)
             .width(Length::Fill),
     ]
     .spacing(8)
@@ -57,12 +59,12 @@ pub(super) fn checksum_panel(state: &ChecksumState) -> Element<'_, Message> {
             &state.active_file().to_string_lossy(),
             ACTIVE_PATH_MAX_CHARS,
         ))
-        .size(11)
+        .size(CAPTION_SIZE)
         .width(Length::Fill),
         scrollable(body).width(Length::Fill).height(Length::Shrink),
         row![
             Space::new().width(Length::Fill),
-            secondary_action_button(tr!("Close"), Message::DismissFloating),
+            normal_button(readable_text(tr!("Close"))).on_press(Message::DismissFloating),
         ]
         .align_y(Alignment::Center),
     ]
@@ -93,7 +95,6 @@ fn file_chip_list(state: &ChecksumState) -> Element<'static, Message> {
                 row![
                     themed_icon(chip_icon, IconTone::Normal, 12.0),
                     readable_text(format_middle_ellipsized_text(&label, FILE_CHIP_MAX_CHARS,))
-                        .size(12)
                         .width(Length::Fill),
                 ]
                 .spacing(6)
@@ -167,17 +168,15 @@ fn digest_row(
         .padding(4)
         .width(Length::Fixed(28.0))
         .height(Length::Fixed(28.0))
-        .style(crate::appearance::navigation_icon_button_style());
+        .style(bennu_theme::controls::icon_button_style);
     if digest.is_some() {
         copy_button = copy_button.on_press(Message::Checksum(ChecksumMessage::HashCopyRequested(
             algorithm,
         )));
     }
     row![
-        readable_text(algorithm.label().to_owned())
-            .size(12)
-            .width(Length::Fixed(64.0)),
-        readable_text(value_text).size(12).width(Length::Fill),
+        readable_text(algorithm.label().to_owned()).width(Length::Fixed(64.0)),
+        readable_text(value_text).width(Length::Fill),
         copy_button,
     ]
     .spacing(8)
@@ -188,10 +187,8 @@ fn digest_row(
 
 fn verify_section(state: &ChecksumState) -> Element<'static, Message> {
     let mut rows = vec![
-        text_input(&tr!("Paste expected checksum"), state.expected_text())
+        text_field(&tr!("Paste expected checksum"), state.expected_text())
             .on_input(|text| Message::Checksum(ChecksumMessage::ExpectedValueChanged(text)))
-            .padding([6, 8])
-            .size(13)
             .width(Length::Fill)
             .into(),
     ];
@@ -200,10 +197,8 @@ fn verify_section(state: &ChecksumState) -> Element<'static, Message> {
         rows.push(verdict);
     }
 
-    let mut load_row = row![secondary_action_button(
-        tr!("Load checksum file..."),
-        Message::Checksum(ChecksumMessage::ChecksumFileLoadPressed)
-    )]
+    let mut load_row = row![normal_button(readable_text(tr!("Load checksum file...")))
+        .on_press(Message::Checksum(ChecksumMessage::ChecksumFileLoadPressed))]
     .spacing(8)
     .align_y(Alignment::Center);
     if let Some(verification) = state.checksum_file() {
@@ -212,7 +207,7 @@ fn verify_section(state: &ChecksumState) -> Element<'static, Message> {
                 &verification.path().to_string_lossy(),
                 CHECKSUM_FILE_PATH_MAX_CHARS,
             ))
-            .size(11),
+            .size(CAPTION_SIZE),
         );
     }
     rows.push(load_row.width(Length::Fill).into());
@@ -324,11 +319,9 @@ fn retry_notice(message: String) -> iced::widget::Row<'static, Message> {
             IconTone::Warning,
             NOTICE_ICON_SIZE
         ),
-        readable_text(message).size(12).width(Length::Fill),
-        secondary_action_button(
-            tr!("Retry"),
-            Message::Checksum(ChecksumMessage::RetryPressed)
-        ),
+        readable_text(message).width(Length::Fill),
+        normal_button(readable_text(tr!("Retry")))
+            .on_press(Message::Checksum(ChecksumMessage::RetryPressed)),
     ]
     .spacing(6)
     .align_y(Alignment::Center)
@@ -342,14 +335,14 @@ fn verdict_line(
 ) -> iced::widget::Row<'static, Message> {
     row![
         themed_icon(icon, tone, NOTICE_ICON_SIZE),
-        readable_text(message).size(12).width(Length::Fill),
+        readable_text(message).width(Length::Fill),
     ]
     .spacing(6)
     .align_y(Alignment::Center)
 }
 
 fn muted_info_line(message: String) -> iced::widget::Text<'static> {
-    readable_text(message).size(12)
+    readable_text(message)
 }
 
 fn muted_container_style(theme: &iced::Theme) -> container::Style {

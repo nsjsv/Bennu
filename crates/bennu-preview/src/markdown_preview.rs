@@ -47,7 +47,7 @@ where
         }
     }
     if let Some(notice) = line_limit_notice {
-        content = content.push(readable_text(notice.label()).size(12));
+        content = content.push(readable_text(notice.label()));
     }
 
     let ScrollRegionWiring {

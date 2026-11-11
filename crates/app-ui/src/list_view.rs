@@ -1,7 +1,7 @@
 use file_core::{
     DirectoryEntry, DirectoryMetadataAvailability, EntryMetadata, FileKind, SortDirection,
 };
-use iced::widget::{container, mouse_area, row, scrollable, text_input, Column, Row, Space, Stack};
+use iced::widget::{container, mouse_area, row, scrollable, Column, Row, Space, Stack};
 use iced::{Alignment, Element, Length};
 
 use crate::app::panes::{BrowserPaneView, DirectoryContentAvailability};
@@ -26,11 +26,13 @@ use crate::model::{
 };
 use crate::view::{rename_field, rename_input_id};
 use bennu_preview::panel_text::readable_text;
+use bennu_theme::controls::inline_text_field;
 use bennu_theme::icons::rotated_chevron_right_view;
 use bennu_theme::measured_text::measured_middle_ellipsized_text;
+use bennu_theme::typography::{BODY_SIZE, CAPTION_SIZE};
 
-const LIST_ROW_TEXT_SIZE: u32 = 15;
-const LIST_HEADER_TEXT_SIZE: u32 = 12;
+const LIST_ROW_TEXT_SIZE: f32 = BODY_SIZE;
+const LIST_HEADER_TEXT_SIZE: f32 = CAPTION_SIZE;
 const LIST_HEADER_SORT_ICON_SIZE: f32 = 12.0;
 const LIST_CONTENT_PADDING: iced::Padding = iced::Padding {
     top: 0.0,
@@ -69,7 +71,7 @@ impl ListGeometry {
         Self {
             scale,
             row_height: scaled(LIST_ROW_HEIGHT),
-            text_size: scaled(LIST_ROW_TEXT_SIZE as f32),
+            text_size: scaled(LIST_ROW_TEXT_SIZE),
             row_padding: iced::Padding {
                 top: 0.0,
                 right: row_padding_horizontal,
@@ -794,7 +796,7 @@ fn list_placeholder_name_cell<'a>(
         ),
         measured_middle_ellipsized_text(
             entry.name().to_string_lossy().into_owned(),
-            geometry.text_size as u32,
+            geometry.text_size,
         )
     ]
     .spacing(geometry.row_spacing)
@@ -818,7 +820,7 @@ fn list_name_cell<'a>(
     let toggle = list_directory_toggle(pane, geometry, entry);
     let name: Element<'a, Message> = if pane.renaming == Some(&entry.path) {
         rename_field(
-            text_input(&tr!("File name"), pane.rename_input)
+            inline_text_field(&tr!("File name"), pane.rename_input)
                 .id(rename_input_id())
                 .on_input(Message::RenameInputChanged)
                 .on_submit(Message::RenameSelected)
@@ -830,7 +832,7 @@ fn list_name_cell<'a>(
     } else {
         measured_middle_ellipsized_text(
             entry.name().to_string_lossy().into_owned(),
-            geometry.text_size as u32,
+            geometry.text_size,
         )
     };
 
@@ -1050,7 +1052,7 @@ mod tests {
     fn list_geometry_scales_entry_dimensions_and_keeps_header_fixed() {
         let default_geometry = ListGeometry::for_level(crate::config::ViewDensityLevel::DEFAULT);
         assert_eq!(default_geometry.row_height, LIST_ROW_HEIGHT);
-        assert_eq!(default_geometry.text_size, LIST_ROW_TEXT_SIZE as f32);
+        assert_eq!(default_geometry.text_size, LIST_ROW_TEXT_SIZE);
         assert_eq!(default_geometry.row_spacing, LIST_ROW_SPACING as f32);
         assert_eq!(default_geometry.indent_width, LIST_INDENT_WIDTH);
         assert_eq!(default_geometry.toggle_width, LIST_TOGGLE_WIDTH);
@@ -1070,10 +1072,7 @@ mod tests {
         let geometry = ListGeometry::for_level(level);
         // 缩放尺寸按设计四舍五入到整数像素。
         assert_eq!(geometry.row_height, (LIST_ROW_HEIGHT * scale).round());
-        assert_eq!(
-            geometry.text_size,
-            (LIST_ROW_TEXT_SIZE as f32 * scale).round()
-        );
+        assert_eq!(geometry.text_size, (LIST_ROW_TEXT_SIZE * scale).round());
         assert_eq!(
             geometry.row_spacing,
             (LIST_ROW_SPACING as f32 * scale).round()

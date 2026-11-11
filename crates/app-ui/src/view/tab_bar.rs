@@ -7,14 +7,13 @@ use super::{
     tab_motion, tab_title_content, themed_icon, BrowserPaneView, FileBrowser, IconSymbol, IconTone,
     Message, TAB_BAR_EXPANDED_HEIGHT, TAB_CLOSE_ICON_SIZE, TAB_CLOSE_SLOT_WIDTH, TAB_FILL_PORTION,
 };
-use crate::appearance::{
-    navigation_icon_button_style, selected_tab_item_style, tab_item_style, tab_strip_style,
-};
+use crate::appearance::{selected_tab_item_style, tab_item_style, tab_strip_style};
 use crate::file_drag_hit_test_bounds::FileDragHitTestMarker;
 use crate::file_drag_hit_test_marker::track_file_drag_hit_test_marker;
 use crate::model::{
     BrowserPaneId, FileDropSessionIdentity, FileDropTarget, TabDropDestination, TabFileDropTarget,
 };
+use bennu_theme::controls::icon_button_style;
 
 pub(super) fn tab_bar<'a>(
     browser: &'a FileBrowser,
@@ -82,7 +81,7 @@ fn tab_button<'a>(
             .on_press(Message::TabCloseRequested(pane_id, tab_id))
             .padding([2, 2])
             .width(Length::Fixed(TAB_CLOSE_SLOT_WIDTH))
-            .style(navigation_icon_button_style()),
+            .style(icon_button_style),
     ]
     .spacing(6)
     .align_y(Alignment::Center)

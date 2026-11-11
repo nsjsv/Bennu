@@ -109,9 +109,7 @@ where
     Message: 'static + From<PreviewMessage>,
 {
     let Some(document) = document else {
-        return readable_text(tr!("Text preview is not ready"))
-            .size(14)
-            .into();
+        return readable_text(tr!("Text preview is not ready")).into();
     };
     let viewer = plain_viewer(document, scroll_height);
     let ScrollRegionWiring {
@@ -149,13 +147,11 @@ where
 fn text_preview_line_limit_notice<Message: 'static>(
     notice: TextPreviewLineLimitNotice,
 ) -> Element<'static, Message> {
-    readable_text(notice.label()).size(12).into()
+    readable_text(notice.label()).into()
 }
 
 fn text_preview_chunk_error<Message: 'static>(error: &str) -> Element<'static, Message> {
-    readable_text(tr!("Could not load more text preview: %1", error))
-        .size(12)
-        .into()
+    readable_text(tr!("Could not load more text preview: %1", error)).into()
 }
 
 fn text_preview_external_notice_is_visible(
@@ -194,9 +190,7 @@ where
     Message: 'static + From<PreviewMessage>,
 {
     let Some(document) = document else {
-        return readable_text(tr!("Text preview is not ready"))
-            .size(14)
-            .into();
+        return readable_text(tr!("Text preview is not ready")).into();
     };
     let mode = document.markdown_preview_mode();
     let body_height =

@@ -1,4 +1,4 @@
-use iced::widget::{column, container, pick_list, row, slider, text_input, Column, Space};
+use iced::widget::{column, container, row, Column, Space};
 use iced::{Alignment, Element, Length};
 
 use file_core::{AudioTargetFormat, ConversionQualityPreset, ImageTargetFormat, VideoTargetFormat};
@@ -13,12 +13,14 @@ use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::icons::IconSymbol;
 
-use super::option_controls::{
-    inactive_primary_action_button, primary_action_button, secondary_action_button,
-    segmented_choice_row, SegmentedChoice,
-};
 use super::settings_group::{info_setting_row, labeled_setting_row, settings_card};
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};
+use bennu_theme::controls::dropdown;
+use bennu_theme::controls::slider;
+use bennu_theme::controls::text_field;
+use bennu_theme::controls::{normal_button, suggested_button};
+use bennu_theme::controls::{segmented_choice_row, SegmentedChoice};
+use bennu_theme::typography::{BOLD, CAPTION_SIZE, TITLE_SIZE};
 
 const CONVERT_PANEL_WIDTH: f32 = 640.0;
 const SECTION_SPACING: f32 = 14.0;
@@ -31,7 +33,8 @@ pub(super) fn convert_panel(state: &ConvertState) -> Element<'_, Message> {
     let title = row![
         themed_icon(IconSymbol::FileImage, IconTone::Normal, MENU_ICON_SIZE),
         readable_text(tr!("Convert Format"))
-            .size(16)
+            .size(TITLE_SIZE)
+            .font(BOLD)
             .width(Length::Fill),
     ]
     .spacing(8)
@@ -55,7 +58,7 @@ pub(super) fn convert_panel(state: &ConvertState) -> Element<'_, Message> {
         content = content.push(notice);
     }
     if let Some(error) = state.validation_error() {
-        content = content.push(container(readable_text(error.to_owned()).size(12)));
+        content = content.push(container(readable_text(error.to_owned())));
     }
     content = content.push(actions(state));
 
@@ -205,17 +208,17 @@ fn audio_section<'a>(
             SegmentedChoice {
                 label: tr!("Keep"),
                 selected: options.channels() == file_core::AudioChannelSpec::Keep,
-                message: Message::Convert(ConvertMessage::AudioChannelsSelected(
+                message: Some(Message::Convert(ConvertMessage::AudioChannelsSelected(
                     file_core::AudioChannelSpec::Keep,
-                )),
+                ))),
                 tooltip: None,
             },
             SegmentedChoice {
                 label: tr!("Mono"),
                 selected: options.channels() == file_core::AudioChannelSpec::Mono,
-                message: Message::Convert(ConvertMessage::AudioChannelsSelected(
+                message: Some(Message::Convert(ConvertMessage::AudioChannelsSelected(
                     file_core::AudioChannelSpec::Mono,
-                )),
+                ))),
                 tooltip: None,
             },
         ]),
@@ -240,7 +243,7 @@ fn section<'a>(
         container(
             row![
                 themed_icon(icon, IconTone::Normal, NOTICE_ICON_SIZE),
-                readable_text(format!("{title} · {count}")).size(12),
+                readable_text(format!("{title} · {count}")),
             ]
             .spacing(6)
             .align_y(Alignment::Center),
@@ -265,10 +268,8 @@ where
 {
     labeled_setting_row(
         tr!("Format"),
-        pick_list(formats.to_vec(), Some(selected), message)
+        dropdown(formats.to_vec(), Some(selected), message)
             .width(Length::Fixed(FORMAT_PICK_WIDTH))
-            .text_size(12)
-            .padding([5, 8])
             .into(),
     )
 }
@@ -297,13 +298,13 @@ fn mode_row(
             SegmentedChoice {
                 label: tr!("Quality"),
                 selected: mode == ConvertMode::Quality,
-                message: message(ConvertMode::Quality),
+                message: Some(message(ConvertMode::Quality)),
                 tooltip: None,
             },
             SegmentedChoice {
                 label: tr!("Target size"),
                 selected: mode == ConvertMode::TargetSize,
-                message: message(ConvertMode::TargetSize),
+                message: Some(message(ConvertMode::TargetSize)),
                 tooltip: None,
             },
         ]),
@@ -320,7 +321,6 @@ fn image_quality_row(options: &ImageConvertOptions) -> Element<'static, Message>
                 ),)
                 .width(Length::Fill),
                 readable_text(format!("{}", options.quality()))
-                    .size(12)
                     .width(Length::Fixed(QUALITY_VALUE_WIDTH)),
             ]
             .spacing(10)
@@ -346,7 +346,7 @@ fn quality_preset_row(
                 .map(|candidate| SegmentedChoice {
                     label: preset_label(candidate),
                     selected: candidate == preset,
-                    message: preset_message(candidate),
+                    message: Some(preset_message(candidate)),
                     tooltip: None,
                 })
                 .collect(),
@@ -381,10 +381,8 @@ fn target_size_row(
 ) -> Element<'static, Message> {
     labeled_setting_row(
         tr!("Target size per file"),
-        text_input("500KB / 2MB", target_size_text)
+        text_field("500KB / 2MB", target_size_text)
             .on_input(size_message)
-            .padding([6, 8])
-            .size(14)
             .width(Length::Fixed(ROW_CONTROL_WIDTH))
             .into(),
     )
@@ -397,20 +395,20 @@ fn resize_row(
     custom_changed: impl Fn(String) -> Message + 'static,
     custom_toggle: Message,
 ) -> Element<'static, Message> {
-    let mut choices: Vec<SegmentedChoice> = RESIZE_PERCENT_CHOICES
+    let mut choices: Vec<SegmentedChoice<Message>> = RESIZE_PERCENT_CHOICES
         .iter()
         .copied()
         .map(|percent| SegmentedChoice {
             label: format!("{percent}%"),
             selected: !selection.uses_custom_width() && selection.percent() == percent,
-            message: percent_message(percent),
+            message: Some(percent_message(percent)),
             tooltip: None,
         })
         .collect();
     choices.push(SegmentedChoice {
         label: tr!("Custom"),
         selected: selection.uses_custom_width(),
-        message: custom_toggle,
+        message: Some(custom_toggle),
         tooltip: None,
     });
 
@@ -421,10 +419,8 @@ fn resize_row(
     if selection.uses_custom_width() {
         rows.push(labeled_setting_row(
             tr!("Width"),
-            text_input("1920", selection.custom_width_text())
+            text_field("1920", selection.custom_width_text())
                 .on_input(custom_changed)
-                .padding([6, 8])
-                .size(14)
                 .width(Length::Fixed(ROW_CONTROL_WIDTH))
                 .into(),
         ));
@@ -436,17 +432,19 @@ fn resize_row(
     }
 }
 
-fn fps_choices(selected: Option<u32>) -> Vec<SegmentedChoice> {
+fn fps_choices(selected: Option<u32>) -> Vec<SegmentedChoice<Message>> {
     let mut choices = vec![SegmentedChoice {
         label: tr!("Keep"),
         selected: selected.is_none(),
-        message: Message::Convert(ConvertMessage::VideoFpsSelected(None)),
+        message: Some(Message::Convert(ConvertMessage::VideoFpsSelected(None))),
         tooltip: None,
     }];
     choices.extend(FPS_CHOICES.iter().copied().map(|fps| SegmentedChoice {
         label: format!("{fps}fps"),
         selected: selected == Some(fps),
-        message: Message::Convert(ConvertMessage::VideoFpsSelected(Some(fps))),
+        message: Some(Message::Convert(ConvertMessage::VideoFpsSelected(Some(
+            fps,
+        )))),
         tooltip: None,
     }));
     choices
@@ -467,7 +465,7 @@ fn ffmpeg_notice(state: &ConvertState) -> Option<Element<'static, Message>> {
                 IconTone::Normal,
                 NOTICE_ICON_SIZE
             ),
-            readable_text(message).size(12).width(Length::Fill),
+            readable_text(message).width(Length::Fill),
         ]
         .spacing(6)
         .align_y(Alignment::Center)
@@ -476,19 +474,20 @@ fn ffmpeg_notice(state: &ConvertState) -> Option<Element<'static, Message>> {
 }
 
 fn note_text(message: String) -> Element<'static, Message> {
-    readable_text(message).size(12).into()
+    readable_text(message).into()
 }
 
 fn actions(state: &ConvertState) -> Element<'static, Message> {
     let convert_button = if state.can_submit() {
-        primary_action_button(tr!("Convert"), Message::Convert(ConvertMessage::Submitted))
+        suggested_button(readable_text(tr!("Convert")))
+            .on_press(Message::Convert(ConvertMessage::Submitted))
     } else {
-        inactive_primary_action_button(tr!("Convert"))
+        suggested_button(readable_text(tr!("Convert")))
     };
 
     row![
         Space::new().width(Length::Fill),
-        secondary_action_button(tr!("Cancel"), Message::DismissFloating),
+        normal_button(readable_text(tr!("Cancel"))).on_press(Message::DismissFloating),
         convert_button,
     ]
     .spacing(6)
@@ -501,10 +500,14 @@ fn source_summary(state: &ConvertState) -> Element<'static, Message> {
         "%1 items · Converted files are written next to the originals; existing files are never replaced.",
         state.source_count()
     );
-    container(readable_text(summary).size(11).width(Length::Fill))
-        .width(Length::Fill)
-        .style(muted_container_style)
-        .into()
+    container(
+        readable_text(summary)
+            .size(CAPTION_SIZE)
+            .width(Length::Fill),
+    )
+    .width(Length::Fill)
+    .style(muted_container_style)
+    .into()
 }
 
 fn muted_container_style(theme: &iced::Theme) -> container::Style {

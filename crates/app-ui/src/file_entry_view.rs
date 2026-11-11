@@ -207,7 +207,7 @@ pub(crate) fn entry_text_input_style(
     modifier: FileEntryContentModifier,
 ) -> impl Fn(&Theme, iced::widget::text_input::Status) -> iced::widget::text_input::Style + Clone {
     move |theme, status| {
-        let mut style = iced::widget::text_input::default(theme, status);
+        let mut style = bennu_theme::controls::text_field_style(theme, status);
         style.value = style.value.scale_alpha(modifier.opacity());
         style.placeholder = style.placeholder.scale_alpha(modifier.opacity());
         style

@@ -1,13 +1,13 @@
-use iced::widget::{button, column, container, row, Space};
+use iced::widget::{column, container, row, Space};
 use iced::{Alignment, Element, Length};
 
 use crate::app::FileBrowser;
-use crate::appearance::context_menu_button_style;
 use crate::model::Message;
 use crate::shortcuts::{ShortcutBinding, ShortcutCaptureState};
 use bennu_preview::panel_text::readable_text;
 
 use super::settings_group::{muted_setting_text, settings_card};
+use bennu_theme::controls::normal_button;
 
 const SHORTCUT_BINDING_BUTTON_WIDTH: f32 = 142.0;
 
@@ -47,20 +47,12 @@ fn shortcut_binding_row(
 
     container(
         row![
-            readable_text(binding.id.label())
-                .size(12)
-                .width(Length::Fill),
-            button(
-                container(readable_text(binding_label).size(12))
-                    .padding([5, 8])
-                    .width(Length::Fixed(SHORTCUT_BINDING_BUTTON_WIDTH)),
-            )
-            .on_press(Message::ShortcutCaptureStarted(binding.id))
-            .style(context_menu_button_style()),
-            button(readable_text(tr!("Reset")).size(12))
-                .on_press(Message::ShortcutBindingReset(binding.id))
-                .padding([6, 10])
-                .style(context_menu_button_style()),
+            readable_text(binding.id.label()).width(Length::Fill),
+            normal_button(readable_text(binding_label))
+                .width(Length::Fixed(SHORTCUT_BINDING_BUTTON_WIDTH))
+                .on_press(Message::ShortcutCaptureStarted(binding.id)),
+            normal_button(readable_text(tr!("Reset")))
+                .on_press(Message::ShortcutBindingReset(binding.id)),
         ]
         .spacing(6)
         .align_y(Alignment::Center)
@@ -86,11 +78,8 @@ fn shortcut_capture_feedback(capture: &ShortcutCaptureState) -> Element<'static,
     };
 
     row![
-        readable_text(message).size(12).width(Length::Fill),
-        button(readable_text(tr!("Cancel")).size(12))
-            .on_press(Message::ShortcutCaptureCanceled)
-            .padding([6, 10])
-            .style(context_menu_button_style()),
+        readable_text(message).width(Length::Fill),
+        normal_button(readable_text(tr!("Cancel"))).on_press(Message::ShortcutCaptureCanceled),
         Space::new().width(Length::Shrink),
     ]
     .spacing(6)

@@ -5,20 +5,18 @@
 use iced::widget::{column, container, row, Space};
 use iced::{Alignment, Element, Length};
 
+use super::{
+    archive_extraction::archive_password_input_field, themed_icon, IconTone, MENU_ICON_SIZE,
+};
 use crate::app::archive_member_password::{
     ArchiveMemberPasswordAction, ArchiveMemberPasswordMessage, ArchiveMemberPasswordState,
 };
 use crate::appearance::context_menu_style;
 use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
+use bennu_theme::controls::{normal_button, suggested_button};
 use bennu_theme::icons::IconSymbol;
-
-use super::option_controls::{
-    inactive_primary_action_button, primary_action_button, secondary_action_button,
-};
-use super::{
-    archive_extraction::archive_password_input_field, themed_icon, IconTone, MENU_ICON_SIZE,
-};
+use bennu_theme::typography::{BOLD, TITLE_SIZE};
 
 const ARCHIVE_MEMBER_PASSWORD_PANEL_WIDTH: f32 = 500.0;
 
@@ -28,7 +26,8 @@ pub(super) fn archive_member_password_panel(
     let title = row![
         themed_icon(IconSymbol::FileArchive, IconTone::Normal, MENU_ICON_SIZE),
         readable_text(summary_title(state))
-            .size(16)
+            .size(TITLE_SIZE)
+            .font(BOLD)
             .width(Length::Fill),
     ]
     .spacing(8)
@@ -41,7 +40,7 @@ pub(super) fn archive_member_password_panel(
 
     let content = column![
         title,
-        readable_text(tr!("Enter the archive password to continue.")).size(13),
+        readable_text(tr!("Enter the archive password to continue.")),
         archive_password_input_field(
             state.password(),
             state.can_submit_password(),
@@ -50,7 +49,7 @@ pub(super) fn archive_member_password_panel(
             ),
             Message::ArchiveMemberPassword(ArchiveMemberPasswordMessage::Submitted),
         ),
-        readable_text(validation_error).size(12),
+        readable_text(validation_error),
         archive_member_password_actions(state),
     ]
     .spacing(10)
@@ -78,17 +77,16 @@ fn archive_member_password_actions(state: &ArchiveMemberPasswordState) -> Elemen
         ArchiveMemberPasswordAction::Open { .. } => (tr!("Open"), tr!("Opening...")),
     };
     let submit_button = if state.can_submit_password() {
-        primary_action_button(
-            submit_label,
-            Message::ArchiveMemberPassword(ArchiveMemberPasswordMessage::Submitted),
-        )
+        suggested_button(readable_text(submit_label)).on_press(Message::ArchiveMemberPassword(
+            ArchiveMemberPasswordMessage::Submitted,
+        ))
     } else {
-        inactive_primary_action_button(submitting_label)
+        suggested_button(readable_text(submitting_label))
     };
 
     row![
         Space::new().width(Length::Fill),
-        secondary_action_button(tr!("Cancel"), Message::DismissFloating),
+        normal_button(readable_text(tr!("Cancel"))).on_press(Message::DismissFloating),
         submit_button,
     ]
     .spacing(6)

@@ -1,20 +1,21 @@
 //! 任务面板里 LocalSend 收发的一行：与文件任务同一种卡片，标题、状态、进度条、
 //! "已传 / 总量 · 速度 · 第几个"，结束后列出没成的文件；取消、清除。
 
-use iced::widget::{button, column, container, progress_bar, row, Svg};
+use iced::widget::{column, container, row, Svg};
 use iced::{Alignment, Element, Length};
 
 use crate::app::transfer::{
     DirectSendFailure, DirectSendPhase, DirectSendState, ReceivePhase, ReceiveTask, TransferKind,
     TransferMessage, TransferTask, TransferTasks,
 };
-use crate::appearance::{
-    context_menu_button_style, error_notification_style, path_suggestion_item_style,
-};
+use crate::appearance::{error_notification_style, path_suggestion_item_style};
 use crate::formatting::{format_file_size, format_middle_ellipsized_text};
 use crate::model::Message;
 use bennu_preview::operation_progress::active_indeterminate_track_handle;
 use bennu_preview::panel_text::readable_text;
+use bennu_theme::controls::normal_button;
+use bennu_theme::controls::progress_bar;
+use bennu_theme::typography::CAPTION_SIZE;
 
 const TITLE_ITEM_MAX_CHARS: usize = 24;
 const FAILURE_MAX_CHARS: usize = 80;
@@ -32,8 +33,8 @@ pub(crate) fn transfer_task_row<'a>(
         TransferKind::Receive(receive) => receive_lines(receive),
     };
     let header = row![
-        readable_text(title).size(13).width(Length::Fill),
-        readable_text(status).size(11),
+        readable_text(title).width(Length::Fill),
+        readable_text(status).size(CAPTION_SIZE),
     ]
     .spacing(6)
     .align_y(Alignment::Center);
@@ -51,10 +52,14 @@ pub(crate) fn transfer_task_row<'a>(
         body = body.push(progress);
     }
     if let Some(detail) = detail {
-        body = body.push(readable_text(detail).size(11).width(Length::Fill));
+        body = body.push(readable_text(detail).size(CAPTION_SIZE).width(Length::Fill));
     }
     for failure in failures {
-        body = body.push(readable_text(failure).size(11).width(Length::Fill));
+        body = body.push(
+            readable_text(failure)
+                .size(CAPTION_SIZE)
+                .width(Length::Fill),
+        );
     }
     let content = column![body, controls(task)].spacing(6).width(Length::Fill);
     let item = container(content).padding(8).width(Length::Fill);
@@ -250,9 +255,7 @@ fn controls(task: &TransferTask) -> Element<'static, Message> {
 }
 
 fn control_button(label: String, message: TransferMessage) -> Element<'static, Message> {
-    button(readable_text(label).size(12))
+    normal_button(readable_text(label))
         .on_press(Message::Transfer(message))
-        .padding([4, 8])
-        .style(context_menu_button_style())
         .into()
 }

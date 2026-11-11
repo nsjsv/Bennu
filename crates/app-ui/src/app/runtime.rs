@@ -31,6 +31,8 @@ pub(crate) fn run(
     startup_rendering_environment: StartupRenderingEnvironment,
 ) -> iced::Result {
     startup_trace::mark("iced_run_entered");
+    bennu_theme::typography::adopt_system_font_families();
+    startup_trace::mark("system_fonts_adopted");
     iced::daemon(
         move || {
             FileBrowser::boot(
@@ -46,6 +48,10 @@ pub(crate) fn run(
     .subscription(FileBrowser::subscription)
     .theme(FileBrowser::theme)
     .title(FileBrowser::title)
+    .settings(iced::Settings {
+        default_text_size: bennu_theme::typography::BODY_SIZE.into(),
+        ..iced::Settings::default()
+    })
     .run()
 }
 

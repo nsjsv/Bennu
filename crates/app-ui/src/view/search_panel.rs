@@ -2,19 +2,18 @@ use std::fmt;
 
 use file_search::{SearchFileKind, SearchMatchMode, SearchTextScope};
 use iced::widget::{
-    button, container, mouse_area, pick_list, responsive, row, scrollable, tooltip, Button, Column,
-    Row, Space,
+    button, container, mouse_area, responsive, row, scrollable, tooltip, Button, Column, Row, Space,
 };
 use iced::{Alignment, Element, Length};
 
+use super::{themed_icon, IconTone};
 use crate::app::scrollbar::{enhanced_scrollbar, scrollbar_on_scroll, ScrollbarAxis};
 use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
 use crate::app::FileBrowser;
 use crate::appearance::{
     context_menu_style, enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction,
-    list_panel_style, list_row_style, navigation_icon_button_style, navigation_text_input_style,
-    path_suggestion_item_style, path_suggestions_style, selected_row_style,
-    transparent_button_style,
+    list_panel_style, list_row_style, path_suggestion_item_style, path_suggestions_style,
+    selected_row_style, transparent_button_style,
 };
 use crate::file_entry_view::{file_entry_symbol_icon, FileEntryIconTone, FileEntryVisualState};
 use crate::formatting::{format_file_size, format_middle_ellipsized_text};
@@ -26,13 +25,12 @@ use crate::model::{
 use crate::virtual_range::{initial_virtual_range, virtual_range_for_viewport};
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::anchored_popup::anchored_popup;
+use bennu_theme::controls::dropdown;
+use bennu_theme::controls::icon_button_style;
+use bennu_theme::controls::text_field;
+use bennu_theme::controls::{segmented_choice_row, toggle_button_style, SegmentedChoice};
 use bennu_theme::icons::IconSymbol;
-
-use super::option_controls::{
-    inactive_segmented_choice_row, segmented_choice_button_style, segmented_choice_row,
-    SegmentedChoice,
-};
-use super::{themed_icon, IconTone};
+use bennu_theme::typography::CAPTION_SIZE;
 
 const SEARCH_INPUT_WIDTH: f32 = 140.0;
 const WIDE_SEARCH_TOOLBAR_WIDTH: f32 = 1_000.0;
@@ -116,13 +114,10 @@ pub(super) fn search_input_panel(browser: &FileBrowser) -> Element<'_, Message> 
         .as_ref()
         .map(|workspace| workspace.input.as_str())
         .unwrap_or_default();
-    let input = iced::widget::text_input(&tr!("Search"), input_value)
+    let input = text_field(&tr!("Search"), input_value)
         .id(search_input_id())
         .on_input(Message::SearchInputChanged)
         .on_submit(Message::SearchSubmitted)
-        .padding([8, 10])
-        .size(15)
-        .style(navigation_text_input_style)
         .width(Length::Fill);
     let content = if input_value.is_empty() {
         row![input].spacing(4).align_y(Alignment::Center)
@@ -133,7 +128,7 @@ pub(super) fn search_input_panel(browser: &FileBrowser) -> Element<'_, Message> 
                 button(themed_icon(IconSymbol::Close, IconTone::Normal, 12.0))
                     .on_press(Message::SearchKeywordCleared)
                     .padding([8, 8])
-                    .style(navigation_icon_button_style()),
+                    .style(icon_button_style),
                 tooltip_label(tr!("Clear search text")),
                 tooltip::Position::Bottom,
             )
@@ -152,7 +147,7 @@ pub(super) fn search_input_panel(browser: &FileBrowser) -> Element<'_, Message> 
 fn search_history_panel(browser: &FileBrowser) -> Element<'_, Message> {
     let mut history = Column::new()
         .push(
-            container(readable_text(tr!("Recent searches")).size(12))
+            container(readable_text(tr!("Recent searches")))
                 .padding([6, 8])
                 .width(Length::Fill),
         )
@@ -163,7 +158,7 @@ fn search_history_panel(browser: &FileBrowser) -> Element<'_, Message> {
         history = history.push(search_history_row(keyword));
     }
     history = history.push(
-        button(readable_text(tr!("Clear search history")).size(12))
+        button(readable_text(tr!("Clear search history")))
             .on_press(Message::SearchHistoryCleared)
             .padding([6, 8])
             .width(Length::Fill)
@@ -202,20 +197,16 @@ fn search_history_panel(browser: &FileBrowser) -> Element<'_, Message> {
 fn search_history_row(keyword: &str) -> Element<'static, Message> {
     let displayed_keyword =
         format_middle_ellipsized_text(keyword, SEARCH_HISTORY_KEYWORD_MAX_CHARS);
-    let select_keyword = button(
-        readable_text(displayed_keyword)
-            .size(13)
-            .width(Length::Fill),
-    )
-    .on_press(Message::SearchHistoryKeywordSelected(keyword.to_owned()))
-    .padding([6, 8])
-    .width(Length::Fill)
-    .style(transparent_button_style());
+    let select_keyword = button(readable_text(displayed_keyword).width(Length::Fill))
+        .on_press(Message::SearchHistoryKeywordSelected(keyword.to_owned()))
+        .padding([6, 8])
+        .width(Length::Fill)
+        .style(transparent_button_style());
     let remove_keyword = tooltip(
         button(themed_icon(IconSymbol::Close, IconTone::Normal, 11.0))
             .on_press(Message::SearchHistoryKeywordRemoved(keyword.to_owned()))
             .padding([6, 7])
-            .style(navigation_icon_button_style()),
+            .style(icon_button_style),
         tooltip_label(tr!("Remove from search history")),
         tooltip::Position::Bottom,
     );
@@ -382,12 +373,12 @@ fn search_workspace_toolbar_layout(
 ) -> Element<'static, Message> {
     let header = row![
         themed_icon(IconSymbol::Search, IconTone::Normal, 15.0),
-        readable_text(root_label).size(13).width(Length::Fill),
+        readable_text(root_label).width(Length::Fill),
         tooltip(
             button(themed_icon(IconSymbol::Close, IconTone::Normal, 13.0))
                 .on_press(Message::SearchWorkspaceClosed)
                 .padding([6, 8])
-                .style(navigation_icon_button_style()),
+                .style(icon_button_style),
             tooltip_label(tr!("Close search")),
             tooltip::Position::Bottom,
         )
@@ -466,7 +457,7 @@ fn search_entry_type_button(
         Message::SearchEntryTypeToggled(entry_type),
     )
     .width(Length::FillPortion(1))
-    .style(segmented_choice_button_style(selected))
+    .style(toggle_button_style(selected))
     .into()
 }
 
@@ -483,17 +474,14 @@ fn custom_extension_button(filters: &SearchFilterPresetState) -> Element<'static
         Message::SearchCustomExtensionsToggled,
     )
     .width(Length::FillPortion(1))
-    .style(segmented_choice_button_style(selected))
+    .style(toggle_button_style(selected))
     .into()
 }
 
 fn custom_extension_input_row(filters: &SearchFilterPresetState) -> Element<'static, Message> {
     container(
-        iced::widget::text_input(&tr!("e.g. pdf, docx"), &filters.custom_extensions)
+        text_field(&tr!("e.g. pdf, docx"), &filters.custom_extensions)
             .on_input(Message::SearchCustomExtensionsChanged)
-            .padding([5, 8])
-            .size(12)
-            .style(navigation_text_input_style)
             .width(Length::Fill),
     )
     .width(Length::Fill)
@@ -601,14 +589,14 @@ fn search_directory_scope_choices(
     available_scopes: &[SearchDirectoryScope],
     selected: SearchDirectoryScope,
     last_location_path: Option<std::path::PathBuf>,
-) -> Vec<SegmentedChoice> {
+) -> Vec<SegmentedChoice<Message>> {
     available_scopes
         .iter()
         .copied()
         .map(|scope| SegmentedChoice {
             label: scope.label(),
             selected: scope == selected,
-            message: Message::SearchDirectoryScopeSelected(scope),
+            message: Some(Message::SearchDirectoryScopeSelected(scope)),
             // "上次位置"档只给目录名，悬停补完整路径消歧。
             tooltip: if scope == SearchDirectoryScope::LastLocation {
                 last_location_path
@@ -631,32 +619,29 @@ fn search_text_scope_filter(filters: &SearchFilterPresetState) -> Element<'stati
         SegmentedChoice {
             label: tr!("Name & content"),
             selected: name_content_selected,
-            message: Message::SearchTextScopeSelected(SearchTextScope::NameAndContent),
+            message: (!regex_mode).then_some(Message::SearchTextScopeSelected(
+                SearchTextScope::NameAndContent,
+            )),
             tooltip: None,
         },
         SegmentedChoice {
             label: tr!("Name only"),
             selected: name_only_selected,
-            message: Message::SearchTextScopeSelected(SearchTextScope::NameOnly),
+            message: (!regex_mode)
+                .then_some(Message::SearchTextScopeSelected(SearchTextScope::NameOnly)),
             tooltip: None,
         },
     ];
-    if regex_mode {
-        inactive_segmented_choice_row(choices)
-    } else {
-        segmented_choice_row(choices)
-    }
+    segmented_choice_row(choices)
 }
 
 fn search_date_field_filter(selected: SearchDateField, width: Length) -> Element<'static, Message> {
-    pick_list(
+    dropdown(
         SearchDateField::ALL.map(SearchDateFieldOption),
         Some(SearchDateFieldOption(selected)),
         |selected| Message::SearchDateFieldSelected(selected.0),
     )
     .width(width)
-    .text_size(12)
-    .padding([5, 6])
     .into()
 }
 
@@ -664,14 +649,12 @@ fn search_date_preset_filter(
     selected: SearchDatePreset,
     width: Length,
 ) -> Element<'static, Message> {
-    pick_list(
+    dropdown(
         SearchDatePreset::ALL.map(SearchDatePresetOption),
         Some(SearchDatePresetOption(selected)),
         |selected| Message::SearchDatePresetSelected(selected.0),
     )
     .width(width)
-    .text_size(12)
-    .padding([5, 6])
     .into()
 }
 
@@ -679,14 +662,12 @@ fn search_size_preset_filter(
     selected: SearchSizePreset,
     width: Length,
 ) -> Element<'static, Message> {
-    pick_list(
+    dropdown(
         SearchSizePreset::ALL.map(SearchSizePresetOption),
         Some(SearchSizePresetOption(selected)),
         |selected| Message::SearchSizePresetSelected(selected.0),
     )
     .width(width)
-    .text_size(12)
-    .padding([5, 6])
     .into()
 }
 
@@ -700,19 +681,13 @@ fn custom_size_input_is_expanded(filters: &SearchFilterPresetState) -> bool {
 fn custom_size_input_row(filters: &SearchFilterPresetState) -> Element<'static, Message> {
     container(
         row![
-            readable_text(tr!("Min size")).size(12),
-            iced::widget::text_input(&tr!("e.g. 10MB"), &filters.custom_size_min)
+            readable_text(tr!("Min size")),
+            text_field(&tr!("e.g. 10MB"), &filters.custom_size_min)
                 .on_input(Message::SearchCustomSizeMinChanged)
-                .padding([5, 8])
-                .size(12)
-                .style(navigation_text_input_style)
                 .width(Length::Fill),
-            readable_text(tr!("Max size")).size(12),
-            iced::widget::text_input(&tr!("e.g. 2 GB"), &filters.custom_size_max)
+            readable_text(tr!("Max size")),
+            text_field(&tr!("e.g. 2 GB"), &filters.custom_size_max)
                 .on_input(Message::SearchCustomSizeMaxChanged)
-                .padding([5, 8])
-                .size(12)
-                .style(navigation_text_input_style)
                 .width(Length::Fill),
         ]
         .spacing(6)
@@ -741,7 +716,7 @@ fn search_filter_commands(filters: &SearchFilterPresetState) -> Element<'static,
             tr!("Regex"),
             Message::SearchRegexToggled,
         )
-        .style(segmented_choice_button_style(regex_mode)),
+        .style(toggle_button_style(regex_mode)),
         search_filter_button(
             IconSymbol::Plus,
             if selected_more_type_count == 0 {
@@ -752,7 +727,7 @@ fn search_filter_commands(filters: &SearchFilterPresetState) -> Element<'static,
             more_label,
             Message::SearchEntryTypesMenuOpened,
         )
-        .style(segmented_choice_button_style(selected_more_type_count > 0)),
+        .style(toggle_button_style(selected_more_type_count > 0)),
     ]
     .spacing(6)
     .align_y(Alignment::Center);
@@ -764,7 +739,7 @@ fn search_filter_commands(filters: &SearchFilterPresetState) -> Element<'static,
                 tr!("Reset filters"),
                 Message::SearchFiltersReset,
             )
-            .style(segmented_choice_button_style(false)),
+            .style(toggle_button_style(false)),
         );
     }
     commands.into()
@@ -823,7 +798,7 @@ fn search_action_button(
             .width(Length::Fixed(30.0))
             .height(Length::Fixed(28.0))
             .padding([5, 7])
-            .style(navigation_icon_button_style()),
+            .style(icon_button_style),
         tooltip_label(label),
         tooltip::Position::Bottom,
     )
@@ -837,7 +812,6 @@ fn search_content_degraded_notice() -> Element<'static, Message> {
             readable_text(tr!(
                 "Content indexing is unavailable; matching file names only."
             ))
-            .size(12)
             .width(Length::Fill),
         ]
         .spacing(8)
@@ -849,15 +823,11 @@ fn search_content_degraded_notice() -> Element<'static, Message> {
     .into()
 }
 fn search_regex_notice() -> Element<'static, Message> {
-    container(
-        readable_text(tr!("Regex mode matches file names only."))
-            .size(12)
-            .width(Length::Fill),
-    )
-    .padding([7, 10])
-    .width(Length::Fill)
-    .style(list_panel_style)
-    .into()
+    container(readable_text(tr!("Regex mode matches file names only.")).width(Length::Fill))
+        .padding([7, 10])
+        .width(Length::Fill)
+        .style(list_panel_style)
+        .into()
 }
 
 fn search_completion_message(completion: SearchResultCompletion) -> Element<'static, Message> {
@@ -872,7 +842,7 @@ fn search_completion_message(completion: SearchResultCompletion) -> Element<'sta
 }
 
 fn search_message(message: String) -> Element<'static, Message> {
-    container(readable_text(message).size(14))
+    container(readable_text(message))
         .padding([14, 12])
         .width(Length::Fill)
         .style(list_row_style(0, 0))
@@ -901,10 +871,10 @@ fn search_result_row(
     };
     let mut content = Column::new()
         .spacing(3)
-        .push(readable_text(hit.display_name.clone()).size(15))
-        .push(readable_text(metadata).size(12));
+        .push(readable_text(hit.display_name.clone()))
+        .push(readable_text(metadata));
     if let Some(snippet) = hit.snippet.clone().filter(|snippet| !snippet.is_empty()) {
-        content = content.push(readable_text(snippet).size(12));
+        content = content.push(readable_text(snippet));
     }
     let content = container(content).style(visual_state.content_style(modifier));
     let result_icon = match hit.kind {
@@ -937,7 +907,7 @@ fn search_result_row(
 }
 
 fn tooltip_label(label: String) -> Element<'static, Message> {
-    container(readable_text(label).size(11))
+    container(readable_text(label).size(CAPTION_SIZE))
         .padding([5, 7])
         .style(context_menu_style)
         .into()

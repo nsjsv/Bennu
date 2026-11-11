@@ -2,13 +2,15 @@
 //!
 //! 连接中输入框不可改、"添加"变"正在连接…"：结果要对上用户看到的那个地址。
 
-use iced::widget::{button, column, container, row, text_input, Space, TextInput};
+use iced::widget::{column, container, row, Space, TextInput};
 use iced::{Alignment, Element, Length, Theme};
 
 use crate::app::transfer::{AddressFormMessage, FavoriteAddressForm, TransferMessage};
-use crate::appearance::context_menu_button_style;
 use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
+use bennu_theme::controls::normal_button;
+use bennu_theme::controls::text_field;
+use bennu_theme::typography::CAPTION_SIZE;
 use bennu_theme::ui_colors;
 
 const LABEL_WIDTH: f32 = 40.0;
@@ -25,20 +27,14 @@ fn form_input<'a>(
     editable: bool,
     on_input: fn(String) -> AddressFormMessage,
 ) -> TextInput<'a, Message> {
-    text_input(placeholder, value)
+    text_field(placeholder, value)
         .on_input_maybe(editable.then_some(move |value| form_message(on_input(value))))
         .on_submit_maybe(editable.then(|| form_message(AddressFormMessage::Submitted)))
-        .padding([5, 8])
-        .size(12)
 }
 
 pub(super) fn address_form(form: &FavoriteAddressForm) -> Element<'_, Message> {
     let editable = form.connecting.is_none();
-    let label = |text: String| {
-        readable_text(text)
-            .size(12)
-            .width(Length::Fixed(LABEL_WIDTH))
-    };
+    let label = |text: String| readable_text(text).width(Length::Fixed(LABEL_WIDTH));
     let mut content = column![
         row![
             label(tr!("Name")),
@@ -61,7 +57,7 @@ pub(super) fn address_form(form: &FavoriteAddressForm) -> Element<'_, Message> {
                 AddressFormMessage::IpChanged
             )
             .width(Length::Fill),
-            readable_text(tr!("Port")).size(12),
+            readable_text(tr!("Port")),
             form_input(
                 &local_send::DEFAULT_PORT.to_string(),
                 &form.port,
@@ -77,7 +73,7 @@ pub(super) fn address_form(form: &FavoriteAddressForm) -> Element<'_, Message> {
     if let Some(error) = &form.error {
         content = content.push(
             readable_text(error.clone())
-                .size(11)
+                .size(CAPTION_SIZE)
                 .width(Length::Fill)
                 .style(|theme: &Theme| iced::widget::text::Style {
                     color: Some(ui_colors(theme).error),
@@ -85,10 +81,7 @@ pub(super) fn address_form(form: &FavoriteAddressForm) -> Element<'_, Message> {
         );
     }
     let action = |label: String, message: Option<AddressFormMessage>| {
-        button(readable_text(label).size(12))
-            .on_press_maybe(message.map(form_message))
-            .padding([5, 12])
-            .style(context_menu_button_style())
+        normal_button(readable_text(label)).on_press_maybe(message.map(form_message))
     };
     let add = if editable {
         action(tr!("Add"), Some(AddressFormMessage::Submitted))

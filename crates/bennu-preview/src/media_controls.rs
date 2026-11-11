@@ -4,14 +4,15 @@
 
 use std::time::Duration;
 
-use iced::widget::{container, progress_bar};
+use iced::widget::container;
 use iced::{alignment::Vertical, Background, Border, Element, Length, Theme};
 
 use bennu_theme::icons::{themed_icon, IconSymbol, IconTone};
-use bennu_theme::styles::{base_text_color, navigation_icon_button_style};
+use bennu_theme::styles::base_text_color;
 use bennu_theme::ui_colors;
 
 use crate::formatting::format_duration;
+use bennu_theme::controls::progress_bar;
 
 pub(crate) const AUDIO_CONTROL_BUTTON_SIZE: f32 = 30.0;
 pub(crate) const AUDIO_CONTROL_ICON_SIZE: f32 = 14.0;
@@ -43,10 +44,10 @@ pub(crate) fn mini_progress_bar_layer<Message: 'static>(
     .into()
 }
 
-fn mini_progress_bar_style(theme: &Theme, opacity: f32) -> progress_bar::Style {
+fn mini_progress_bar_style(theme: &Theme, opacity: f32) -> iced::widget::progress_bar::Style {
     let opacity = opacity.clamp(0.0, 1.0);
     let colors = ui_colors(theme);
-    progress_bar::Style {
+    iced::widget::progress_bar::Style {
         background: Background::Color(colors.outline_variant.scale_alpha(opacity)),
         bar: Background::Color(colors.primary.scale_alpha(opacity)),
         border: Border::default(),
@@ -83,7 +84,7 @@ pub(crate) fn faded_media_button_style(
     opacity: f32,
 ) -> iced::widget::button::Style {
     let opacity = opacity.clamp(0.0, 1.0);
-    let mut style = navigation_icon_button_style()(theme, status);
+    let mut style = bennu_theme::controls::icon_button_style(theme, status);
     style.background = style
         .background
         .map(|background| background.scale_alpha(opacity));

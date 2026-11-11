@@ -14,11 +14,11 @@ use crate::model::{
     PreviewSize, PreviewState, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility,
     SqlitePreviewMessage, SqlitePreviewTab, TextPreviewDocument, VideoPreviewPlayback,
 };
-use crate::view::option_controls::{segmented_choice_row, SegmentedChoice};
 use bennu_preview::document_preview::{
     DocumentPreviewMessage, DocumentPreviewRequestKey, DocumentRenderKey, DocumentViewportKey,
 };
 use bennu_preview::engine::SqlitePreviewState;
+use bennu_theme::controls::{segmented_choice_row, SegmentedChoice};
 
 use bennu_preview::preview_message::PreviewMessage;
 use bennu_preview::scroll_wiring::{ScrollRegionState, ScrollRegionWiring};
@@ -132,16 +132,16 @@ pub(crate) fn view_preview_window<'a>(
                 SegmentedChoice {
                     label: tr!("Rendered"),
                     selected: mode == MarkdownPreviewMode::Rendered,
-                    message: Message::Preview(PreviewMessage::MarkdownPreviewModeSelected(
-                        MarkdownPreviewMode::Rendered,
+                    message: Some(Message::Preview(
+                        PreviewMessage::MarkdownPreviewModeSelected(MarkdownPreviewMode::Rendered),
                     )),
                     tooltip: None,
                 },
                 SegmentedChoice {
                     label: tr!("Raw"),
                     selected: mode == MarkdownPreviewMode::Raw,
-                    message: Message::Preview(PreviewMessage::MarkdownPreviewModeSelected(
-                        MarkdownPreviewMode::Raw,
+                    message: Some(Message::Preview(
+                        PreviewMessage::MarkdownPreviewModeSelected(MarkdownPreviewMode::Raw),
                     )),
                     tooltip: None,
                 },
@@ -162,17 +162,17 @@ fn sqlite_tabs_row(state: Option<&SqlitePreviewState>) -> Element<'static, Messa
         SegmentedChoice {
             label: tr!("Table Data"),
             selected: active_tab == SqlitePreviewTab::Tables,
-            message: Message::Preview(PreviewMessage::SqlitePreview(
+            message: Some(Message::Preview(PreviewMessage::SqlitePreview(
                 SqlitePreviewMessage::TabSelected(SqlitePreviewTab::Tables),
-            )),
+            ))),
             tooltip: None,
         },
         SegmentedChoice {
             label: tr!("SQL Query"),
             selected: active_tab == SqlitePreviewTab::Sql,
-            message: Message::Preview(PreviewMessage::SqlitePreview(
+            message: Some(Message::Preview(PreviewMessage::SqlitePreview(
                 SqlitePreviewMessage::TabSelected(SqlitePreviewTab::Sql),
-            )),
+            ))),
             tooltip: None,
         },
     ])

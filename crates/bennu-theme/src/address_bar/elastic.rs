@@ -7,8 +7,8 @@ use crate::measured_text::measured_text_natural_width;
 
 use super::model::allocate_breadcrumb_widths;
 
-pub const ADDRESS_BAR_HEIGHT: f32 = 34.0;
-pub const ADDRESS_TEXT_SIZE: u32 = 14;
+pub const ADDRESS_BAR_HEIGHT: f32 = crate::metrics::CONTROL_HEIGHT;
+pub const ADDRESS_TEXT_SIZE: f32 = crate::typography::BODY_SIZE;
 pub const BREADCRUMB_ICON_SIZE: f32 = 16.0;
 pub const BREADCRUMB_SEPARATOR_SIZE: f32 = 13.0;
 pub const BREADCRUMB_SEPARATOR_WIDTH: f32 = 17.0;

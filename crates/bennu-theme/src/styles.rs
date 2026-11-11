@@ -5,6 +5,7 @@
 use iced::widget::{button, container, scrollable, svg, text_input};
 use iced::{Background, Border, Color, Shadow, Theme, Vector};
 
+use crate::controls::text_field_style;
 use crate::{ui_colors, AppearanceMode};
 
 /// 滚动条悬停展开后的宽度；正常宽度由调用方传入。
@@ -268,31 +269,6 @@ pub fn transparent_icon_button_style(theme: &Theme, status: button::Status) -> b
     }
 }
 
-/// surface 按钮：surface_container 底、outline_variant 细边、圆角 7，
-/// hover/pressed 各加深一档。
-pub fn surface_button_style(theme: &Theme, status: button::Status) -> button::Style {
-    let background = match status {
-        button::Status::Hovered => button_hover_surface_color(theme),
-        button::Status::Pressed => button_pressed_surface_color(theme),
-        button::Status::Active | button::Status::Disabled => button_surface_color(theme),
-    };
-
-    button::Style {
-        background: Some(Background::Color(background)),
-        text_color: if matches!(status, button::Status::Disabled) {
-            muted_text_color(theme)
-        } else {
-            base_text_color(theme)
-        },
-        border: Border {
-            color: subtle_border_color(theme),
-            width: 1.0,
-            radius: 7.0.into(),
-        },
-        ..button::Style::default()
-    }
-}
-
 pub fn context_menu_item_button_style() -> fn(&Theme, button::Status) -> button::Style {
     context_menu_item_button_style_for_status
 }
@@ -315,96 +291,6 @@ fn context_menu_item_button_style_for_status(
             base_text_color(theme)
         },
         ..button::Style::default()
-    }
-}
-
-/// 主操作按钮：primary 底、on_primary 文字、圆角 7、hover/pressed 透明度档、
-/// 带轻微投影；禁用时退为 surface_container_highest。
-pub fn primary_action_button_style() -> fn(&Theme, button::Status) -> button::Style {
-    primary_action_button_appearance
-}
-
-fn primary_action_button_appearance(theme: &Theme, status: button::Status) -> button::Style {
-    let colors = ui_colors(theme);
-    let background = match status {
-        button::Status::Hovered => Color {
-            a: 0.9,
-            ..colors.primary
-        },
-        button::Status::Pressed => Color {
-            a: 0.8,
-            ..colors.primary
-        },
-        button::Status::Disabled => colors.surface_container_highest,
-        button::Status::Active => colors.primary,
-    };
-
-    button::Style {
-        background: Some(Background::Color(background)),
-        text_color: if matches!(status, button::Status::Disabled) {
-            colors.on_surface_variant
-        } else {
-            colors.on_primary
-        },
-        border: Border {
-            color: Color::TRANSPARENT,
-            width: 0.0,
-            radius: 7.0.into(),
-        },
-        shadow: action_button_shadow(theme, status),
-        ..button::Style::default()
-    }
-}
-
-/// 破坏性确认按钮：error 底的 primary 动作按钮变体。
-pub fn destructive_confirmation_button_style() -> fn(&Theme, button::Status) -> button::Style {
-    destructive_confirmation_button_appearance
-}
-
-fn destructive_confirmation_button_appearance(
-    theme: &Theme,
-    status: button::Status,
-) -> button::Style {
-    let colors = ui_colors(theme);
-    let background = match status {
-        button::Status::Hovered => Color {
-            a: 0.9,
-            ..colors.error
-        },
-        button::Status::Pressed => Color {
-            a: 0.8,
-            ..colors.error
-        },
-        button::Status::Disabled => colors.error_container,
-        button::Status::Active => colors.error,
-    };
-
-    button::Style {
-        background: Some(Background::Color(background)),
-        text_color: if matches!(status, button::Status::Disabled) {
-            colors.on_error_container
-        } else {
-            colors.on_error
-        },
-        border: Border {
-            color: Color::TRANSPARENT,
-            width: 0.0,
-            radius: 8.0.into(),
-        },
-        shadow: action_button_shadow(theme, status),
-        ..button::Style::default()
-    }
-}
-
-fn action_button_shadow(theme: &Theme, status: button::Status) -> Shadow {
-    if matches!(status, button::Status::Disabled) {
-        Shadow::default()
-    } else {
-        Shadow {
-            color: elevation_shadow_color(theme, 0.14),
-            offset: Vector::new(0.0, 1.0),
-            blur_radius: 3.0,
-        }
     }
 }
 
@@ -448,19 +334,6 @@ fn warning_icon_svg_style_for_status(theme: &Theme, _status: svg::Status) -> svg
     }
 }
 
-/// 导航输入框（地址栏/文件名）样式：默认 text_input + 圆角 8。
-pub fn navigation_text_input_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
-    let mut style = text_input::default(theme, status);
-    style.border.radius = 8.0.into();
-    style
-}
-
-/// 导航栏图标按钮样式入口：与 surface 按钮同一视觉（自主程序
-/// app-ui 原样搬移，保持主程序与 portal 图标按钮同源）。
-pub fn navigation_icon_button_style() -> fn(&Theme, button::Status) -> button::Style {
-    surface_button_style
-}
-
 // ---------------------------------------------------------------------------
 // 地址栏样式组：主程序地址栏与 portal FileChooser 地址栏共用同一份视觉。
 // 值自主程序 app-ui 原样搬移，一个数值都不许漂移。
@@ -469,17 +342,36 @@ pub fn navigation_icon_button_style() -> fn(&Theme, button::Status) -> button::S
 /// 地址栏外框：与导航输入框共用同一圆角框面，让编辑态输入框恰好覆盖
 /// 面包屑层而不露出第二层边框。
 pub fn address_bar_style(theme: &Theme) -> container::Style {
-    let input_style = navigation_text_input_style(theme, text_input::Status::Active);
+    let input_style = text_field_style(theme, text_input::Status::Active);
     container::Style {
-        background: Some(input_style.background),
+        background: Some(opaque_over_window(theme, input_style.background)),
         border: input_style.border,
         ..container::Style::default()
+    }
+}
+
+/// 地址栏外框、编辑层、退出快照三层叠放：都换算成叠在窗口底色上的实色，
+/// 编辑层才能盖住面包屑，且三层颜色完全相同。
+fn opaque_over_window(theme: &Theme, background: Background) -> Background {
+    match background {
+        Background::Color(tint) => Background::Color(over(tint, ui_colors(theme).background)),
+        gradient @ Background::Gradient(_) => gradient,
     }
 }
 
 /// 透明无框按钮样式入口（地址栏面包屑段等使用）。
 pub fn transparent_button_style() -> fn(&Theme, button::Status) -> button::Style {
     transparent_icon_button_style
+}
+
+/// 半透明色叠在不透明底色上的结果。
+fn over(top: Color, bottom: Color) -> Color {
+    Color {
+        r: top.r * top.a + bottom.r * (1.0 - top.a),
+        g: top.g * top.a + bottom.g * (1.0 - top.a),
+        b: top.b * top.a + bottom.b * (1.0 - top.a),
+        a: 1.0,
+    }
 }
 
 pub fn scale_color_alpha(color: Color, opacity: f32) -> Color {
@@ -571,7 +463,8 @@ pub fn faded_text_input_style(
     status: text_input::Status,
     opacity: f32,
 ) -> text_input::Style {
-    let mut style = navigation_text_input_style(theme, status);
+    let mut style = text_field_style(theme, status);
+    style.background = opaque_over_window(theme, style.background);
     style.border.width = 0.0;
     style.border.color = Color::TRANSPARENT;
     style.icon = scale_color_alpha(style.icon, opacity);
@@ -755,11 +648,7 @@ mod tests {
                 Some(Background::Color(colors.error_container))
             );
 
-            let primary = primary_action_button_style()(&theme, button::Status::Active);
-            assert_eq!(primary.background, Some(Background::Color(colors.primary)));
-            assert_eq!(primary.text_color, colors.on_primary);
-
-            let input = navigation_text_input_style(&theme, text_input::Status::Active);
+            let input = text_field_style(&theme, text_input::Status::Active);
             assert_eq!(input.border.radius, 8.0.into());
         }
     }

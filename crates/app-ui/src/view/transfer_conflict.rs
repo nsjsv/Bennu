@@ -2,9 +2,10 @@ use std::ffi::OsStr;
 use std::path::Path;
 use std::time::SystemTime;
 
-use iced::widget::{button, checkbox, column, container, image, row, Button, Space, Svg};
+use iced::widget::{button, column, container, image, row, Button, Space, Svg};
 use iced::{Alignment, Element, Length, Theme};
 
+use super::{themed_icon, IconTone};
 use crate::appearance::context_menu_style;
 use crate::formatting::{format_file_size, format_middle_ellipsized_text, format_system_time};
 use crate::model::{
@@ -16,10 +17,10 @@ use crate::thumbnail_cache::{
 };
 use bennu_preview::entry_icons::file_entry_icon_symbol;
 use bennu_preview::panel_text::readable_text;
+use bennu_theme::controls::check_box;
+use bennu_theme::controls::normal_button_style;
 use bennu_theme::icons::IconSymbol;
-
-use super::option_controls::secondary_action_button_style;
-use super::{themed_icon, IconTone};
+use bennu_theme::typography::{BOLD, HEADING_SIZE, TITLE_SIZE};
 
 const TRANSFER_CONFLICT_PANEL_WIDTH: f32 = 560.0;
 const TRANSFER_CONFLICT_PANEL_WIDTH_WITH_MERGE: f32 = 700.0;
@@ -32,7 +33,7 @@ pub(super) fn transfer_conflict_panel<'a>(
     thumbnail_cache: &'a ThumbnailCache,
 ) -> Element<'a, Message> {
     let Some(conflict) = state.current_conflict() else {
-        return container(readable_text(tr!("No pending conflicts")).size(14))
+        return container(readable_text(tr!("No pending conflicts")))
             .padding(14)
             .width(Length::Fixed(TRANSFER_CONFLICT_PANEL_WIDTH))
             .style(context_menu_style)
@@ -42,7 +43,8 @@ pub(super) fn transfer_conflict_panel<'a>(
     let title = row![
         conflict_icon(conflict),
         readable_text(conflict_title(conflict))
-            .size(18)
+            .size(TITLE_SIZE)
+            .font(BOLD)
             .width(Length::Fill),
         conflict_count_label(state),
     ]
@@ -62,12 +64,9 @@ pub(super) fn transfer_conflict_panel<'a>(
         thumbnail_cache,
     );
 
-    let apply_to_all = checkbox(state.apply_to_all)
+    let apply_to_all = check_box(state.apply_to_all)
         .label(tr!("Apply this action to all files and folders"))
-        .on_toggle(|_| Message::TransferConflictApplyToAllToggled)
-        .size(18)
-        .text_size(14)
-        .spacing(8);
+        .on_toggle(|_| Message::TransferConflictApplyToAllToggled);
 
     // 「合并」只在源与目标都是目录时提供(与冲突项 can_merge 同源)。
     let merge_offered = conflict.can_merge();
@@ -145,7 +144,6 @@ fn conflict_count_label(state: &TransferConflictState) -> Element<'_, Message> {
         state.current_index + 1,
         state.conflicts.len()
     ))
-    .size(12)
     .into()
 }
 
@@ -162,12 +160,14 @@ fn conflict_file_section<'a>(
     thumbnail_cache: &'a ThumbnailCache,
 ) -> Element<'a, Message> {
     column![
-        readable_text(conflict_section_title(section_kind, path)).size(15),
+        readable_text(conflict_section_title(section_kind, path))
+            .size(HEADING_SIZE)
+            .font(BOLD),
         row![
             conflict_thumbnail(metadata, path, thumbnail_cache),
             column![
-                readable_text(conflict_size_label(metadata)).size(14),
-                readable_text(conflict_modified_label(metadata.modified)).size(14),
+                readable_text(conflict_size_label(metadata)),
+                readable_text(conflict_modified_label(metadata.modified)),
             ]
             .spacing(3)
             .width(Length::Fill),
@@ -266,7 +266,7 @@ fn conflict_icon_symbol(metadata: &TransferConflictMetadata, path: &Path) -> Ico
 
 fn conflict_action_button(label: String, message: Message) -> Button<'static, Message> {
     button(
-        container(readable_text(label).size(14))
+        container(readable_text(label))
             .width(Length::Fill)
             .height(Length::Fill)
             .center_x(Length::Fill)
@@ -276,5 +276,5 @@ fn conflict_action_button(label: String, message: Message) -> Button<'static, Me
     .padding(0)
     .width(Length::Fixed(98.0))
     .height(Length::Fixed(32.0))
-    .style(secondary_action_button_style())
+    .style(normal_button_style)
 }

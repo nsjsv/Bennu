@@ -51,7 +51,7 @@ fn session_card(session: &TransferSessionState) -> Element<'_, Message> {
         TransferSessionPhase::Failed(error) => {
             card = card
                 .push(status_line(tr!("Could not start download service")))
-                .push(readable_text(error.clone()).size(12));
+                .push(readable_text(error.clone()));
         }
         TransferSessionPhase::Ready(links) => {
             // 传完或超时后服务已停，链接没用了。
@@ -71,7 +71,7 @@ fn session_card(session: &TransferSessionState) -> Element<'_, Message> {
                 None => status_line(tr!("Waiting for a phone to scan...")),
             });
             if session.bytes_sent > 0 {
-                card = card.push(readable_text(qr_progress_line(session)).size(12));
+                card = card.push(readable_text(qr_progress_line(session)));
             }
         }
     }
@@ -130,7 +130,7 @@ fn device_list_card(browser: &FileBrowser) -> Element<'_, Message> {
 fn status_line(label: String) -> Element<'static, Message> {
     row![
         Space::new().width(Length::Fill),
-        readable_text(label).size(13),
+        readable_text(label),
         Space::new().width(Length::Fill),
     ]
     .width(Length::Fill)

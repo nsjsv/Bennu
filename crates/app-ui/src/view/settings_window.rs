@@ -1,13 +1,10 @@
 use std::fmt;
 
 use desktop_linux::{TerminalEmulator, TERMINAL_EMULATOR_OPTIONS};
-use iced::widget::{
-    button, column, container, pick_list, row, stack, svg, text_input, Button, Column, Space, Svg,
-};
+use iced::widget::{button, column, container, row, stack, svg, Button, Column, Space, Svg};
 use iced::{window, Alignment, Element, Length, Theme};
 
 use crate::app::FileBrowser;
-use crate::appearance::context_menu_button_style;
 use crate::config::{
     ColumnWidthAdjustMode, LaunchWindowPolicy, StartupLocationPolicy, UiLanguageSetting,
 };
@@ -29,10 +26,6 @@ use super::auxiliary_window_layout::{
 use super::context_menu_settings::context_menu_settings_section;
 use super::file_operation_verification_settings::file_operation_verification_options;
 use super::network_settings::network_thumbnails_row;
-use super::option_controls::{
-    inactive_segmented_choice_row, segmented_choice_button_style, segmented_choice_row,
-    SegmentedChoice,
-};
 use super::preview_settings::{preview_settings_entry_card, preview_settings_subpage_detail};
 use super::rendering_settings::rendering_gpu_preference_row;
 use super::search_settings::search_settings_detail;
@@ -46,6 +39,11 @@ use super::window_chrome::{floating_window_control_group, separate_window_conten
 use super::window_control_settings::window_control_settings_row;
 use super::window_drag_region::window_drag_region;
 use super::IconTone;
+use bennu_theme::controls::dropdown;
+use bennu_theme::controls::normal_button;
+use bennu_theme::controls::text_field;
+use bennu_theme::controls::{segmented_choice_row, toggle_button_style, SegmentedChoice};
+use bennu_theme::typography::{BOLD, CAPTION_SIZE, SMALL_SIZE, TITLE_SIZE};
 
 const SETTINGS_DROPDOWN_WIDTH: f32 = 220.0;
 
@@ -201,7 +199,7 @@ fn settings_window_controls_chrome(
 
 fn settings_category_sidebar(selected: SettingsCategory) -> Element<'static, Message> {
     let mut categories = Column::new()
-        .push(readable_text(tr!("Settings")).size(16))
+        .push(readable_text(tr!("Settings")).size(TITLE_SIZE).font(BOLD))
         .spacing(4);
     for category in SettingsCategory::ALL {
         categories = categories.push(settings_category_button(category, selected));
@@ -435,27 +433,24 @@ fn settings_detail_scroller<'a>(
 
 fn theme_mode_selector(browser: &FileBrowser) -> Element<'static, Message> {
     let selected = browser.user_config().theme_mode;
+    // Matugen 自带深浅，模式选择只显示不可点。
+    let selectable = browser.user_config().color_scheme != ColorSchemePreset::Matugen;
     let choices = ThemeMode::ALL
         .into_iter()
         .map(|mode| SegmentedChoice {
             label: mode.label(),
             selected: mode == selected,
-            message: Message::ThemeModeSelected(mode),
+            message: selectable.then_some(Message::ThemeModeSelected(mode)),
             tooltip: None,
         })
         .collect();
-
-    if browser.user_config().color_scheme == ColorSchemePreset::Matugen {
-        inactive_segmented_choice_row(choices)
-    } else {
-        segmented_choice_row(choices)
-    }
+    segmented_choice_row(choices)
 }
 
 fn color_scheme_setting_row(browser: &FileBrowser) -> Element<'_, Message> {
     container(
         column![
-            readable_text(tr!("Color scheme")).size(12),
+            readable_text(tr!("Color scheme")),
             color_scheme_grid(browser),
         ]
         .spacing(8),
@@ -466,21 +461,17 @@ fn color_scheme_setting_row(browser: &FileBrowser) -> Element<'_, Message> {
 }
 
 fn custom_color_scheme_import_row(browser: &FileBrowser) -> Element<'_, Message> {
-    let import = button(
+    let import = normal_button(
         row![
             super::themed_icon(IconSymbol::Download, IconTone::Normal, 14.0),
-            readable_text(tr!("Import JSON")).size(12),
+            readable_text(tr!("Import JSON")),
         ]
         .spacing(6)
         .align_y(Alignment::Center),
     )
-    .on_press(Message::CustomColorSchemeImportPressed)
-    .padding([6, 10])
-    .style(context_menu_button_style());
+    .on_press(Message::CustomColorSchemeImportPressed);
     let mut content = column![row![
-        readable_text(tr!("Custom color scheme"))
-            .size(12)
-            .width(Length::Fill),
+        readable_text(tr!("Custom color scheme")).width(Length::Fill),
         import,
     ]
     .spacing(8)
@@ -500,7 +491,7 @@ fn custom_color_scheme_import_row(browser: &FileBrowser) -> Element<'_, Message>
         content = content.push(
             row![
                 super::themed_icon(IconSymbol::TriangleAlert, IconTone::Warning, 13.0),
-                readable_text(tr!("Import failed: %1", error)).size(11),
+                readable_text(tr!("Import failed: %1", error)).size(CAPTION_SIZE),
             ]
             .spacing(5)
             .align_y(Alignment::Center),
@@ -519,7 +510,7 @@ fn custom_color_scheme_contrast_warning(warnings: ContrastWarnings) -> Element<'
     };
     row![
         super::themed_icon(IconSymbol::TriangleAlert, IconTone::Warning, 13.0),
-        readable_text(label).size(11),
+        readable_text(label).size(CAPTION_SIZE),
     ]
     .spacing(5)
     .align_y(Alignment::Center)
@@ -568,7 +559,7 @@ fn color_scheme_family_card(
     };
     let is_selected = selected.family() == family;
     // 展开箭头放在标题右侧，整组居中；单样式家族不渲染箭头。
-    let mut title = row![readable_text(family.display_label()).size(11)]
+    let mut title = row![readable_text(family.display_label()).size(CAPTION_SIZE)]
         .spacing(4)
         .align_y(Alignment::Center);
     if family.styles(mode).len() > 1 {
@@ -599,7 +590,7 @@ fn color_scheme_family_card(
         .width(Length::FillPortion(1))
         .height(Length::Fixed(112.0))
         .padding(8)
-        .style(segmented_choice_button_style(is_selected))
+        .style(toggle_button_style(is_selected))
         .into()
 }
 
@@ -613,7 +604,7 @@ fn color_scheme_style_row(
     for preset in family.styles(mode) {
         let is_selected = selected == *preset;
         // 勾放在标题右侧，整组居中；未选中不渲染勾。
-        let mut label = row![readable_text(preset.style_label(mode)).size(10)]
+        let mut label = row![readable_text(preset.style_label(mode)).size(SMALL_SIZE)]
             .spacing(4)
             .align_y(Alignment::Center);
         if is_selected {
@@ -637,7 +628,7 @@ fn color_scheme_style_row(
             .width(Length::FillPortion(1))
             .height(Length::Fixed(62.0))
             .padding(5)
-            .style(segmented_choice_button_style(is_selected)),
+            .style(toggle_button_style(is_selected)),
         );
     }
 
@@ -698,7 +689,7 @@ fn language_setting_dropdown(browser: &FileBrowser) -> Element<'static, Message>
     .map(LanguageSettingPickOption)
     .collect::<Vec<_>>();
 
-    pick_list(
+    dropdown(
         options,
         Some(LanguageSettingPickOption(
             browser.user_config().language_setting,
@@ -706,8 +697,6 @@ fn language_setting_dropdown(browser: &FileBrowser) -> Element<'static, Message>
         |selected| Message::LanguageSettingSelected(selected.0),
     )
     .width(Length::Fixed(SETTINGS_DROPDOWN_WIDTH))
-    .text_size(12)
-    .padding([5, 8])
     .into()
 }
 
@@ -721,7 +710,7 @@ fn startup_location_dropdown(browser: &FileBrowser) -> Element<'static, Message>
     .map(StartupLocationPickOption)
     .collect::<Vec<_>>();
 
-    pick_list(
+    dropdown(
         options,
         Some(StartupLocationPickOption(
             browser.user_config().startup_location_policy,
@@ -729,8 +718,6 @@ fn startup_location_dropdown(browser: &FileBrowser) -> Element<'static, Message>
         |selected| Message::StartupLocationPolicySelected(selected.0),
     )
     .width(Length::Fixed(SETTINGS_DROPDOWN_WIDTH))
-    .text_size(12)
-    .padding([5, 8])
     .into()
 }
 
@@ -761,7 +748,7 @@ fn column_width_adjust_mode_dropdown(browser: &FileBrowser) -> Element<'static, 
     .map(ColumnWidthAdjustModePickOption)
     .collect::<Vec<_>>();
 
-    pick_list(
+    dropdown(
         options,
         Some(ColumnWidthAdjustModePickOption(
             browser.user_config().column_width_adjust_mode,
@@ -769,8 +756,6 @@ fn column_width_adjust_mode_dropdown(browser: &FileBrowser) -> Element<'static, 
         |selected| Message::ColumnWidthAdjustModeSelected(selected.0),
     )
     .width(Length::Fixed(SETTINGS_DROPDOWN_WIDTH))
-    .text_size(12)
-    .padding([5, 8])
     .into()
 }
 
@@ -783,7 +768,7 @@ fn launch_window_dropdown(browser: &FileBrowser) -> Element<'static, Message> {
     .map(LaunchWindowPickOption)
     .collect::<Vec<_>>();
 
-    pick_list(
+    dropdown(
         options,
         Some(LaunchWindowPickOption(
             browser.user_config().launch_window_policy,
@@ -791,8 +776,6 @@ fn launch_window_dropdown(browser: &FileBrowser) -> Element<'static, Message> {
         |selected| Message::LaunchWindowPolicySelected(selected.0),
     )
     .width(Length::Fixed(SETTINGS_DROPDOWN_WIDTH))
-    .text_size(12)
-    .padding([5, 8])
     .into()
 }
 
@@ -802,7 +785,7 @@ fn visible_column_count_dropdown(browser: &FileBrowser) -> Element<'static, Mess
         .map(VisibleColumnCountPickOption)
         .collect::<Vec<_>>();
 
-    pick_list(
+    dropdown(
         options,
         Some(VisibleColumnCountPickOption(
             browser.user_config().visible_column_count,
@@ -810,8 +793,6 @@ fn visible_column_count_dropdown(browser: &FileBrowser) -> Element<'static, Mess
         |selected| Message::VisibleColumnCountSelected(selected.0),
     )
     .width(Length::Fixed(SETTINGS_DROPDOWN_WIDTH))
-    .text_size(12)
-    .padding([5, 8])
     .into()
 }
 
@@ -822,14 +803,12 @@ fn terminal_emulator_dropdown(selected: TerminalEmulator) -> Element<'static, Me
         .map(TerminalEmulatorPickOption)
         .collect::<Vec<_>>();
 
-    pick_list(
+    dropdown(
         options,
         Some(TerminalEmulatorPickOption(selected)),
         |selected| Message::TerminalEmulatorSelected(selected.0),
     )
     .width(Length::Fixed(SETTINGS_DROPDOWN_WIDTH))
-    .text_size(12)
-    .padding([5, 8])
     .into()
 }
 
@@ -847,31 +826,24 @@ fn terminal_shell_dropdown(selected: String) -> Element<'static, Message> {
     let options: Vec<TerminalShellPickOption> =
         shells.into_iter().map(TerminalShellPickOption).collect();
 
-    pick_list(
+    dropdown(
         options,
         Some(TerminalShellPickOption(selected)),
         |selected| Message::TerminalShellSelected(selected.0),
     )
     .width(Length::Fixed(SETTINGS_DROPDOWN_WIDTH))
-    .text_size(12)
-    .padding([5, 8])
     .into()
 }
 
 fn startup_custom_directory_row(browser: &FileBrowser) -> Element<'_, Message> {
-    let input = text_input(&tr!("Directory"), &browser.startup_custom_directory_input)
+    let input = text_field(&tr!("Directory"), &browser.startup_custom_directory_input)
         .on_input(Message::StartupCustomDirectoryInputChanged)
         .on_submit(Message::StartupCustomDirectoryCommitted)
-        .padding([6, 8])
-        .size(12)
         .width(Length::Fill);
-    let save = button(container(readable_text(tr!("Save")).size(12)).padding([6, 10]))
-        .on_press(Message::StartupCustomDirectoryCommitted)
-        .style(context_menu_button_style());
+    let save = normal_button(readable_text(tr!("Save")))
+        .on_press(Message::StartupCustomDirectoryCommitted);
     let mut content = column![row![
-        readable_text(tr!("Custom Startup Directory"))
-            .size(12)
-            .width(Length::FillPortion(2)),
+        readable_text(tr!("Custom Startup Directory")).width(Length::FillPortion(2)),
         input,
         save,
     ]
@@ -879,7 +851,11 @@ fn startup_custom_directory_row(browser: &FileBrowser) -> Element<'_, Message> {
     .align_y(Alignment::Center)]
     .spacing(3);
     if let Some(error) = &browser.startup_custom_directory_error {
-        content = content.push(readable_text(error.clone()).size(11).width(Length::Fill));
+        content = content.push(
+            readable_text(error.clone())
+                .size(CAPTION_SIZE)
+                .width(Length::Fill),
+        );
     }
     info_setting_row(content.into())
 }

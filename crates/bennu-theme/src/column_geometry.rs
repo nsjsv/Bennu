@@ -12,7 +12,7 @@ pub const COLUMN_CONTENT_SPACING: u32 = 2;
 /// 栏内容外层 padding [纵向, 横向]。
 pub const COLUMN_PADDING: [u16; 2] = [5, 5];
 /// 条目文字字号（基准档）。
-pub const COLUMN_ENTRY_TEXT_SIZE: u32 = 13;
+pub const COLUMN_ENTRY_TEXT_SIZE: f32 = crate::typography::BODY_SIZE;
 /// 条目行高（基准档）。
 pub const COLUMN_ENTRY_HEIGHT: f32 = 24.0;
 /// 条目内部图标与文字的 spacing（基准档）。
@@ -50,7 +50,7 @@ impl ColumnEntryGeometry {
             entry_scroll_height: entry_height + content_spacing,
             entries_top_padding: COLUMN_PADDING[0] as f32 + content_spacing,
             content_spacing,
-            text_size: scaled(COLUMN_ENTRY_TEXT_SIZE as f32),
+            text_size: scaled(COLUMN_ENTRY_TEXT_SIZE),
             chevron_icon_size: scaled(COLUMN_CHEVRON_ICON_SIZE),
             entry_spacing: scaled(COLUMN_ENTRY_SPACING as f32),
             entry_padding: Padding {
@@ -80,7 +80,7 @@ mod tests {
             COLUMN_PADDING[0] as f32 + COLUMN_CONTENT_SPACING as f32
         );
         assert_eq!(geometry.content_spacing, COLUMN_CONTENT_SPACING as f32);
-        assert_eq!(geometry.text_size, COLUMN_ENTRY_TEXT_SIZE as f32);
+        assert_eq!(geometry.text_size, COLUMN_ENTRY_TEXT_SIZE);
         assert_eq!(geometry.chevron_icon_size, COLUMN_CHEVRON_ICON_SIZE);
         assert_eq!(geometry.entry_spacing, COLUMN_ENTRY_SPACING as f32);
         assert_eq!(
@@ -104,10 +104,7 @@ mod tests {
             geometry.entries_top_padding,
             COLUMN_PADDING[0] as f32 + (COLUMN_CONTENT_SPACING as f32 * scale).round()
         );
-        assert_eq!(
-            geometry.text_size,
-            (COLUMN_ENTRY_TEXT_SIZE as f32 * scale).round()
-        );
+        assert_eq!(geometry.text_size, (COLUMN_ENTRY_TEXT_SIZE * scale).round());
         assert_eq!(
             geometry.chevron_icon_size,
             (COLUMN_CHEVRON_ICON_SIZE * scale).round()

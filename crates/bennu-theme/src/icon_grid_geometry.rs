@@ -14,8 +14,10 @@ pub const ICON_GRID_TILE_VERTICAL_PADDING: u16 = 4;
 pub const ICON_GRID_TILE_HORIZONTAL_PADDING: u16 = 8;
 pub const ICON_GRID_ICON_LABEL_SPACING: u32 = 8;
 pub const ICON_GRID_LABEL_LINES: usize = 3;
-pub const ICON_GRID_LABEL_SIZE: f32 = 14.0;
-pub const ICON_GRID_LABEL_LINE_HEIGHT_PX: f32 = 17.0;
+pub const ICON_GRID_LABEL_SIZE: f32 = crate::typography::BODY_SIZE;
+/// 标签换行按整数像素行高排版，由字号推出，不单独写死。
+pub const ICON_GRID_LABEL_LINE_HEIGHT_PX: f32 =
+    (ICON_GRID_LABEL_SIZE * crate::typography::LINE_HEIGHT + 0.5) as u32 as f32;
 pub const ICON_GRID_LABEL_HEIGHT: f32 =
     ICON_GRID_LABEL_LINE_HEIGHT_PX * ICON_GRID_LABEL_LINES as f32;
 const ICON_GRID_TILE_EXTRA_WIDTH: f32 = 32.0;

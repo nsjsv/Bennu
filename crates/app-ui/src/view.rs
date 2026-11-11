@@ -36,7 +36,6 @@ mod shortcut_settings;
 mod sidebar_panel;
 mod tab_bar;
 pub(crate) mod tab_motion;
-mod toggle_switch;
 mod toolbar_controls;
 mod transfer_conflict;
 mod transfer_history;
@@ -110,6 +109,7 @@ use archive_extraction::archive_extraction_panel;
 use archive_member_password::archive_member_password_panel;
 use batch_rename::batch_rename_panel;
 pub(super) use bennu_theme::icons::{icon_tone_style, themed_icon, IconTone};
+use bennu_theme::typography::CAPTION_SIZE;
 use checksum::checksum_panel;
 use convert::convert_panel;
 use floating_panels::{
@@ -181,7 +181,7 @@ pub(crate) fn rename_field<'a>(
     language: crate::config::UiLanguage,
 ) -> Element<'a, Message> {
     let popup = hint.map(|reason| {
-        container(iced::widget::text(reason.message(language)).size(12))
+        container(iced::widget::text(reason.message(language)))
             .padding([5, 8])
             .style(crate::appearance::rename_hint_style)
             .into()
@@ -198,7 +198,7 @@ pub(crate) fn column_browser_scroll_id(pane_id: BrowserPaneId) -> iced::widget::
 }
 
 pub(super) fn auxiliary_window_message(message: String) -> Element<'static, Message> {
-    container(readable_text(message).size(14))
+    container(readable_text(message))
         .padding(18)
         .width(Length::Fill)
         .height(Length::Fill)
@@ -856,13 +856,13 @@ const DRAG_PREVIEW_FADE_RADIUS: f32 = 256.0;
 const DRAG_PREVIEW_FADE_SOLID_DISTANCE: f32 = 96.0;
 const DRAG_PREVIEW_MAX_TILES: usize = 128;
 const DRAG_PREVIEW_TILE_SIZE: f32 = 24.0;
-const DRAG_PREVIEW_LABEL_SIZE: f32 = 12.0;
+const DRAG_PREVIEW_LABEL_SIZE: f32 = CAPTION_SIZE;
 const DRAG_PREVIEW_LABEL_WIDTH: f32 = 132.0;
 const DRAG_PREVIEW_LABEL_MAX_CHARS: usize = 20;
 // 条目行:24 图标 + 6 间距 + 132 文件名,全部裸露无背景。
 const DRAG_PREVIEW_PILL_WIDTH: f32 = 162.0;
 const DRAG_PREVIEW_PILL_HEIGHT: f32 = 24.0;
-const DRAG_PREVIEW_SUMMARY_TEXT_SIZE: f32 = 12.0;
+const DRAG_PREVIEW_SUMMARY_TEXT_SIZE: f32 = CAPTION_SIZE;
 
 /// 返回预览浮层与其定位:提起条目组左上角对准最早出现的条目,使负
 /// 偏移(按住条目右下时)也能完整显示;聚合行右下角钉在指针尖上,
@@ -1083,7 +1083,7 @@ fn tab_title_content<'a>(
     };
     row![
         themed_icon(symbol, tone, TAB_ICON_SIZE),
-        readable_text(tab_title_text(directory, is_trash_view)).size(13),
+        readable_text(tab_title_text(directory, is_trash_view)),
     ]
     .spacing(6)
     .align_y(Alignment::Center)

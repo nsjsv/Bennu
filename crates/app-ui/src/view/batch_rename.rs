@@ -1,8 +1,7 @@
 use crate::app::scrollbar::{enhanced_scrollbar, scrollbar_on_scroll, ScrollbarAxis};
 use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
 use iced::widget::{
-    button, checkbox, column, container, mouse_area, pick_list, row, scrollable, text, text_input,
-    Column, Row, Space,
+    button, column, container, mouse_area, row, scrollable, text, Column, Row, Space,
 };
 use iced::{Alignment, Background, Border, Color, Element, Length, Theme};
 
@@ -24,9 +23,11 @@ use bennu_theme::anchored_popup::anchored_popup;
 use bennu_theme::ui_colors;
 
 use super::batch_rename_preview_name_input_id;
-use super::option_controls::{
-    inactive_primary_action_button, primary_action_button, secondary_action_button,
-};
+use bennu_theme::controls::check_box;
+use bennu_theme::controls::dropdown;
+use bennu_theme::controls::text_field;
+use bennu_theme::controls::{normal_button, suggested_button};
+use bennu_theme::typography::{BOLD, CAPTION_SIZE, TITLE_SIZE};
 
 const BATCH_RENAME_PANEL_WIDTH: f32 = 720.0;
 // 面板自然高度上限(规则区+预览区满配)。浮层把窗口高-2×边距作为 max 传入,
@@ -47,26 +48,23 @@ pub(super) fn batch_rename_panel(
 ) -> Element<'_, Message> {
     let header = row![
         readable_text(tr!("Batch Rename"))
-            .size(16)
+            .size(TITLE_SIZE)
+            .font(BOLD)
             .width(Length::Fill),
-        readable_text(tr!("Items")).size(12),
-        readable_text(state.items.len().to_string()).size(12),
+        readable_text(tr!("Items")),
+        readable_text(state.items.len().to_string()),
     ]
     .spacing(8)
     .align_y(Alignment::Center);
 
     let sort_row = row![
-        readable_text(tr!("Sort order"))
-            .size(12)
-            .width(Length::Fixed(84.0)),
-        pick_list(
+        readable_text(tr!("Sort order")).width(Length::Fixed(84.0)),
+        dropdown(
             BatchRenameSortMode::options(),
             Some(state.sort.mode),
             |mode| { Message::BatchRename(BatchRenameMessage::SortModeSelected(mode)) }
         )
-        .width(Length::Fill)
-        .text_size(12)
-        .padding([5, 8]),
+        .width(Length::Fill),
     ]
     .spacing(8)
     .align_y(Alignment::Center);
@@ -120,9 +118,7 @@ fn rules_section(state: &BatchRenameState) -> Element<'_, Message> {
     }
 
     let chips_area: Element<'_, Message> = if state.rules.is_empty() {
-        readable_text(tr!("No rules yet. Add a rule to rename files."))
-            .size(12)
-            .into()
+        readable_text(tr!("No rules yet. Add a rule to rename files.")).into()
     } else {
         scrollable(chips)
             .height(Length::Fixed(BATCH_RENAME_RULES_AREA_HEIGHT))
@@ -136,8 +132,8 @@ fn rules_section(state: &BatchRenameState) -> Element<'_, Message> {
 
     let add_button = button(
         row![
-            readable_text("+".to_owned()).size(13),
-            readable_text(tr!("Add rule")).size(12),
+            readable_text("+".to_owned()),
+            readable_text(tr!("Add rule")),
         ]
         .spacing(4)
         .align_y(Alignment::Center),
@@ -165,7 +161,7 @@ fn add_rule_menu() -> Element<'static, Message> {
     let mut items = Column::new().spacing(2);
     for kind in BatchRenameRuleKind::ALL {
         items = items.push(
-            button(readable_text(kind.label()).size(12))
+            button(readable_text(kind.label()))
                 .padding([5, 10])
                 .width(Length::Fill)
                 .style(context_menu_item_button_style())
@@ -189,16 +185,16 @@ fn rule_chip_row(
     is_last: bool,
 ) -> Element<'static, Message> {
     let id = rule.id;
-    let enabled_toggle = checkbox(rule.enabled)
+    let enabled_toggle = check_box(rule.enabled)
         .on_toggle(move |_| Message::BatchRename(BatchRenameMessage::RuleEnabledToggled(id)));
 
-    let summary = button(readable_text(rule_summary(rule)).size(12))
+    let summary = button(readable_text(rule_summary(rule)))
         .padding([4, 8])
         .width(Length::Fill)
         .style(rule_chip_style(is_selected))
         .on_press(Message::BatchRename(BatchRenameMessage::RuleSelected(id)));
 
-    let move_up = button(readable_text("↑".to_owned()).size(12))
+    let move_up = button(readable_text("↑".to_owned()))
         .padding([4, 7])
         .style(chip_action_button_style());
     let move_up = if is_first {
@@ -207,7 +203,7 @@ fn rule_chip_row(
         move_up.on_press(Message::BatchRename(BatchRenameMessage::RuleMoved(id, -1)))
     };
 
-    let move_down = button(readable_text("↓".to_owned()).size(12))
+    let move_down = button(readable_text("↓".to_owned()))
         .padding([4, 7])
         .style(chip_action_button_style());
     let move_down = if is_last {
@@ -216,7 +212,7 @@ fn rule_chip_row(
         move_down.on_press(Message::BatchRename(BatchRenameMessage::RuleMoved(id, 1)))
     };
 
-    let remove = button(readable_text("×".to_owned()).size(12))
+    let remove = button(readable_text("×".to_owned()))
         .padding([4, 7])
         .style(chip_action_button_style())
         .on_press(Message::BatchRename(BatchRenameMessage::RuleRemoved(id)));
@@ -279,14 +275,12 @@ fn selected_rule_editor(state: &BatchRenameState) -> Element<'_, Message> {
         BatchRenameRuleParams::Remove(params) => remove_editor(rule.id, params),
         BatchRenameRuleParams::Case(params) => column![
             section_title(tr!("Letter case")),
-            pick_list(
+            dropdown(
                 crate::model::BatchRenameCaseRule::options(),
                 Some(*params),
                 move |value| Message::BatchRename(BatchRenameMessage::CaseSelected(rule.id, value)),
             )
-            .width(Length::Fill)
-            .text_size(12)
-            .padding([5, 8]),
+            .width(Length::Fill),
         ]
         .spacing(6)
         .into(),
@@ -294,16 +288,14 @@ fn selected_rule_editor(state: &BatchRenameState) -> Element<'_, Message> {
         BatchRenameRuleParams::Random(params) => column![
             section_title(tr!("Random")),
             row![
-                pick_list(
+                dropdown(
                     crate::model::BatchRenameRandomMode::options(),
                     Some(params.mode),
                     move |value| Message::BatchRename(BatchRenameMessage::RandomModeSelected(
                         rule.id, value
                     )),
                 )
-                .width(Length::Fill)
-                .text_size(12)
-                .padding([5, 8]),
+                .width(Length::Fill),
                 input_column(tr!("Length"), &params.length_input, move |value| {
                     Message::BatchRename(BatchRenameMessage::RandomLengthChanged(rule.id, value))
                 }),
@@ -317,16 +309,14 @@ fn selected_rule_editor(state: &BatchRenameState) -> Element<'_, Message> {
         .spacing(6)
         .into(),
         BatchRenameRuleParams::Extension(params) => {
-            let mode = pick_list(
+            let mode = dropdown(
                 crate::model::BatchRenameExtensionMode::options(),
                 Some(params.mode),
                 move |value| {
                     Message::BatchRename(BatchRenameMessage::ExtensionModeSelected(rule.id, value))
                 },
             )
-            .width(Length::Fill)
-            .text_size(12)
-            .padding([5, 8]);
+            .width(Length::Fill);
             let controls = column![section_title(tr!("Extension"))];
             if params.mode == BatchRenameExtensionMode::Replace {
                 controls
@@ -386,7 +376,7 @@ fn template_editor<'a>(
     id: u64,
     params: &'a crate::model::BatchRenameTemplateRule,
 ) -> Element<'a, Message> {
-    let token_button = button(readable_text(tr!("Tokens")).size(12))
+    let token_button = button(readable_text(tr!("Tokens")))
         .padding([6, 10])
         .style(add_rule_button_style())
         .on_press(Message::BatchRename(
@@ -396,7 +386,7 @@ fn template_editor<'a>(
         let mut items = Column::new().spacing(2);
         for token in BatchRenameTemplateToken::ALL {
             items = items.push(
-                button(readable_text(token.label()).size(12))
+                button(readable_text(token.label()))
                     .padding([5, 10])
                     .width(Length::Fill)
                     .style(context_menu_item_button_style())
@@ -434,14 +424,12 @@ fn template_editor<'a>(
 fn replace_editor<'a>(id: u64, params: &'a BatchRenameReplaceRule) -> Element<'a, Message> {
     let mut controls = column![
         section_title(tr!("Replace")),
-        pick_list(
+        dropdown(
             crate::model::BatchRenameReplaceScope::options(),
             Some(params.scope),
             move |value| Message::BatchRename(BatchRenameMessage::ReplaceScopeSelected(id, value)),
         )
-        .width(Length::Fill)
-        .text_size(12)
-        .padding([5, 8]),
+        .width(Length::Fill),
         row![
             input_column(tr!("Find"), &params.find, move |value| {
                 Message::BatchRename(BatchRenameMessage::ReplaceFindChanged(id, value))
@@ -482,7 +470,7 @@ fn replace_editor<'a>(id: u64, params: &'a BatchRenameReplaceRule) -> Element<'a
 
     controls
         .push(
-            checkbox(params.ignore_case)
+            check_box(params.ignore_case)
                 .label(tr!("Ignore case"))
                 .on_toggle(move |value| {
                     Message::BatchRename(BatchRenameMessage::ReplaceIgnoreCaseToggled(id, value))
@@ -525,19 +513,17 @@ fn insert_editor<'a>(
 
     let mut controls = column![
         section_title(tr!("Insert")),
-        pick_list(
+        dropdown(
             crate::model::BatchRenameInsertMode::options(),
             Some(params.mode),
             move |value| Message::BatchRename(BatchRenameMessage::InsertModeSelected(id, value)),
         )
-        .width(Length::Fill)
-        .text_size(12)
-        .padding([5, 8]),
+        .width(Length::Fill),
         fields,
     ];
     if params.mode != BatchRenameInsertMode::Before {
         controls = controls.push(
-            checkbox(params.ignore_extension)
+            check_box(params.ignore_extension)
                 .label(tr!("Ignore extension"))
                 .on_toggle(move |value| {
                     Message::BatchRename(BatchRenameMessage::InsertIgnoreExtensionToggled(
@@ -569,14 +555,12 @@ fn slice_editor<'a>(
 
     column![
         section_title(tr!("Slice")),
-        pick_list(
+        dropdown(
             crate::model::BatchRenameSliceMode::options(),
             Some(params.mode),
             move |value| Message::BatchRename(BatchRenameMessage::SliceModeSelected(id, value)),
         )
-        .width(Length::Fill)
-        .text_size(12)
-        .padding([5, 8]),
+        .width(Length::Fill),
         row![
             location,
             input_column(tr!("Length"), &params.length_input, move |value| {
@@ -635,14 +619,12 @@ fn remove_editor<'a>(
 
     column![
         section_title(tr!("Remove characters")),
-        pick_list(
+        dropdown(
             crate::model::BatchRenameRemoveMode::options(),
             Some(params.mode),
             move |value| Message::BatchRename(BatchRenameMessage::RemoveModeSelected(id, value)),
         )
-        .width(Length::Fill)
-        .text_size(12)
-        .padding([5, 8]),
+        .width(Length::Fill),
         mode_controls,
     ]
     .spacing(6)
@@ -654,7 +636,7 @@ fn remove_class_toggle<'a>(
     params: &'a crate::model::BatchRenameRemoveRule,
     class: BatchRenameRemoveClass,
 ) -> Element<'a, Message> {
-    checkbox(params.classes.contains(&class))
+    check_box(params.classes.contains(&class))
         .label(class.to_string())
         .on_toggle(move |value| {
             Message::BatchRename(BatchRenameMessage::RemoveClassToggled(id, class, value))
@@ -685,14 +667,14 @@ fn sequence_editor<'a>(
         .spacing(8)
         .align_y(Alignment::Center),
         row![
-            checkbox(params.include_original_stem)
+            check_box(params.include_original_stem)
                 .label(tr!("Original stem"))
                 .on_toggle(move |value| {
                     Message::BatchRename(BatchRenameMessage::SequenceIncludeOriginalToggled(
                         id, value,
                     ))
                 }),
-            checkbox(params.preserve_extension)
+            check_box(params.preserve_extension)
                 .label(tr!("Extension"))
                 .on_toggle(move |value| {
                     Message::BatchRename(BatchRenameMessage::SequencePreserveExtensionToggled(
@@ -754,25 +736,25 @@ fn preview_rows(
     // 探针实测 400px 窗口约 43px vs 单行 28px),clip 只裁绘制不救换行。
     let header = row![
         readable_text("#".to_owned())
-            .size(11)
+            .size(CAPTION_SIZE)
             .width(Length::Fixed(24.0)),
         container(
             readable_text(tr!("Original name"))
-                .size(11)
+                .size(CAPTION_SIZE)
                 .wrapping(text::Wrapping::None)
         )
         .width(Length::FillPortion(3))
         .clip(true),
         container(
             readable_text(tr!("New name"))
-                .size(11)
+                .size(CAPTION_SIZE)
                 .wrapping(text::Wrapping::None)
         )
         .width(Length::FillPortion(3))
         .clip(true),
         container(
             readable_text(tr!("Status"))
-                .size(11)
+                .size(CAPTION_SIZE)
                 .wrapping(text::Wrapping::None)
         )
         .width(Length::FillPortion(1))
@@ -797,18 +779,14 @@ fn preview_row<'a>(
         format_middle_ellipsized_text(&row_state.original_name, BATCH_RENAME_PATH_MAX_CHARS);
     let status = row_state.status.label();
     let index_cell: Element<'a, Message> = readable_text(index.to_string())
-        .size(11)
+        .size(CAPTION_SIZE)
         .width(Length::Fixed(24.0))
         .into();
     let source_cell: Element<'a, Message> = mouse_area(
-        container(
-            readable_text(source)
-                .size(12)
-                .wrapping(text::Wrapping::None),
-        )
-        .width(Length::FillPortion(3))
-        .padding([1, 0])
-        .clip(true),
+        container(readable_text(source).wrapping(text::Wrapping::None))
+            .width(Length::FillPortion(3))
+            .padding([1, 0])
+            .clip(true),
     )
     .on_press(Message::BatchRename(
         BatchRenameMessage::PreviewDragStarted(row_state.source.clone()),
@@ -816,14 +794,12 @@ fn preview_row<'a>(
     .interaction(iced::mouse::Interaction::Grab)
     .into();
     let target_cell: Element<'a, Message> = if is_editing {
-        text_input(&tr!("New name"), editing_input)
+        text_field(&tr!("New name"), editing_input)
             .id(batch_rename_preview_name_input_id(&row_state.source))
             .on_input(|value| Message::BatchRename(BatchRenameMessage::PreviewNameChanged(value)))
             .on_submit(Message::BatchRename(
                 BatchRenameMessage::PreviewNameEditCommitted,
             ))
-            .padding([5, 6])
-            .size(12)
             .width(Length::FillPortion(3))
             .into()
     } else {
@@ -846,7 +822,7 @@ fn preview_row<'a>(
             // 状态列与新名列一致:单行测量 + clip 裁剪,窄列不撑高行。
             container(
                 readable_text(status)
-                    .size(11)
+                    .size(CAPTION_SIZE)
                     .wrapping(text::Wrapping::None)
                     .style(move |theme: &Theme| {
                         iced::widget::text::Style {
@@ -895,18 +871,15 @@ fn diff_highlighted_target(row_state: &BatchRenamePreviewRow) -> Element<'_, Mes
     let mut cells = Row::new().spacing(0);
     for (segment, changed) in segments {
         // 变更段同样单行测量,窄面板下交给外层 container.clip 裁剪。
-        cells = cells.push(
-            readable_text(segment)
-                .size(12)
-                .wrapping(text::Wrapping::None)
-                .style(move |theme: &Theme| iced::widget::text::Style {
-                    color: Some(if changed {
-                        changed_segment_color(theme)
-                    } else {
-                        base_text_color(theme)
-                    }),
+        cells = cells.push(readable_text(segment).wrapping(text::Wrapping::None).style(
+            move |theme: &Theme| iced::widget::text::Style {
+                color: Some(if changed {
+                    changed_segment_color(theme)
+                } else {
+                    base_text_color(theme)
                 }),
-        );
+            },
+        ));
     }
 
     container(cells).clip(true).width(Length::Fill).into()
@@ -1008,20 +981,16 @@ fn status_color(theme: &Theme, status: crate::model::BatchRenamePreviewStatus) -
 
 fn action_row(state: &BatchRenameState) -> Element<'static, Message> {
     let apply = if state.can_apply() {
-        primary_action_button(
-            tr!("Apply"),
-            Message::BatchRename(BatchRenameMessage::Apply),
-        )
+        suggested_button(readable_text(tr!("Apply")))
+            .on_press(Message::BatchRename(BatchRenameMessage::Apply))
     } else {
-        inactive_primary_action_button(tr!("Apply"))
+        suggested_button(readable_text(tr!("Apply")))
     };
 
     row![
         Space::new().width(Length::Fill),
-        secondary_action_button(
-            tr!("Cancel"),
-            Message::BatchRename(BatchRenameMessage::Cancel)
-        ),
+        normal_button(readable_text(tr!("Cancel")))
+            .on_press(Message::BatchRename(BatchRenameMessage::Cancel)),
         apply,
     ]
     .spacing(8)
@@ -1035,11 +1004,9 @@ fn input_column<'a>(
     on_input: impl Fn(String) -> Message + 'a,
 ) -> Element<'a, Message> {
     column![
-        readable_text(label.clone()).size(11),
-        text_input(&label, value)
+        readable_text(label.clone()).size(CAPTION_SIZE),
+        text_field(&label, value)
             .on_input(on_input)
-            .padding([6, 8])
-            .size(13)
             .width(Length::Fill),
     ]
     .spacing(3)
@@ -1048,7 +1015,7 @@ fn input_column<'a>(
 }
 
 fn section_title(label: String) -> Element<'static, Message> {
-    readable_text(label).size(12).into()
+    readable_text(label).into()
 }
 
 fn rule_chip_style(selected: bool) -> impl Fn(&Theme, button::Status) -> button::Style + Clone {

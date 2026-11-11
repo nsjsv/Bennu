@@ -18,7 +18,6 @@ use bennu_localization::tr;
 
 const DOCUMENT_SCROLLBAR_WIDTH: f32 = 6.0;
 const DOCUMENT_PAGE_GAP: f32 = 12.0;
-const DOCUMENT_STATUS_TEXT_SIZE: u32 = 13;
 
 pub fn document_preview_panel<Message>(
     document: &PagedDocumentPreview,
@@ -48,17 +47,12 @@ where
                 .content_fit(ContentFit::Contain)
                 .into(),
             DocumentPageView::Error(error) => readable_text(error.to_owned())
-                .size(DOCUMENT_STATUS_TEXT_SIZE)
                 .width(Length::Fill)
                 .align_x(Alignment::Center)
                 .into(),
-            DocumentPageView::Loading => readable_text(tr!("Rendering page..."))
-                .size(DOCUMENT_STATUS_TEXT_SIZE)
-                .into(),
+            DocumentPageView::Loading => readable_text(tr!("Rendering page...")).into(),
             DocumentPageView::Deferred => {
-                readable_text(tr!("Page deferred by preview memory limit"))
-                    .size(DOCUMENT_STATUS_TEXT_SIZE)
-                    .into()
+                readable_text(tr!("Page deferred by preview memory limit")).into()
             }
         };
         let page = container(page)

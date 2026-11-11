@@ -1,5 +1,5 @@
 use iced::widget::{
-    button, checkbox, column, container, mouse_area, row, scrollable, Button, Column, Row, Space,
+    button, column, container, mouse_area, row, scrollable, Button, Column, Row, Space,
 };
 use iced::{Alignment, Element, Length};
 
@@ -10,7 +10,7 @@ use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
 use crate::app::transfer::TransferMessage;
 use crate::appearance::{
     context_menu_item_button_style, context_menu_style, enhanced_scrollbar_style,
-    enhanced_vertical_scrollbar_direction, error_notification_style, navigation_icon_button_style,
+    enhanced_vertical_scrollbar_direction, error_notification_style,
 };
 use crate::formatting::format_middle_ellipsized_text;
 use crate::formatting::item_count_label;
@@ -32,8 +32,12 @@ use super::context_menu_submenu::{
     submenu_top, CONTEXT_MENU_ITEM_HEIGHT, CONTEXT_MENU_ITEM_SPACING, CONTEXT_MENU_PADDING,
 };
 use super::network_connections::network_connection_context_menu_panel;
-use super::option_controls::{action_choice_row, primary_action_button, secondary_action_button};
+use super::option_controls::action_choice_row;
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};
+use bennu_theme::controls::check_box;
+use bennu_theme::controls::icon_button_style;
+use bennu_theme::controls::{normal_button, suggested_button};
+use bennu_theme::typography::{BOLD, CAPTION_SIZE, TITLE_SIZE};
 
 const ERROR_NOTIFICATION_FLOAT_WIDTH: f32 = 560.0;
 const ERROR_NOTIFICATION_MAX_CHARS: usize = 96;
@@ -54,10 +58,10 @@ pub(super) fn error_notification_panel(error: &str, generation: u64) -> Element<
         .padding(4)
         .width(Length::Fixed(28.0))
         .height(Length::Fixed(28.0))
-        .style(navigation_icon_button_style());
+        .style(icon_button_style);
     let content = row![
         themed_icon(IconSymbol::TriangleAlert, IconTone::Warning, MENU_ICON_SIZE),
-        readable_text(message).size(13).width(Length::Fill),
+        readable_text(message).width(Length::Fill),
         close_button,
     ]
     .spacing(8)
@@ -113,20 +117,24 @@ pub(super) fn destructive_action_confirmation_panel(
 
     let title_row = row![
         themed_icon(IconSymbol::TriangleAlert, IconTone::Warning, MENU_ICON_SIZE),
-        readable_text(title).size(16).width(Length::Fill),
+        readable_text(title)
+            .size(TITLE_SIZE)
+            .font(BOLD)
+            .width(Length::Fill),
     ]
     .spacing(8)
     .align_y(Alignment::Center);
 
     let actions = row![
         Space::new().width(Length::Fill),
-        secondary_action_button(tr!("Cancel"), Message::DestructiveActionCanceled),
-        primary_action_button(confirm_label, Message::DestructiveActionConfirmed),
+        normal_button(readable_text(tr!("Cancel"))).on_press(Message::DestructiveActionCanceled),
+        suggested_button(readable_text(confirm_label))
+            .on_press(Message::DestructiveActionConfirmed),
     ]
     .spacing(6)
     .align_y(Alignment::Center);
 
-    let content = column![title_row, readable_text(body).size(13), actions]
+    let content = column![title_row, readable_text(body), actions]
         .spacing(12)
         .width(Length::Fill);
 
@@ -146,7 +154,8 @@ pub(super) fn file_drop_operation_panel(prompt: &FileDropPrompt) -> Element<'_, 
     let title = row![
         themed_icon(IconSymbol::ArrowRight, IconTone::Normal, MENU_ICON_SIZE),
         readable_text(tr!("Drop Files"))
-            .size(16)
+            .size(TITLE_SIZE)
+            .font(BOLD)
             .width(Length::Fill),
     ]
     .spacing(8)
@@ -168,7 +177,7 @@ pub(super) fn file_drop_operation_panel(prompt: &FileDropPrompt) -> Element<'_, 
 
     let actions = row![
         Space::new().width(Length::Fill),
-        secondary_action_button(tr!("Cancel"), Message::FileDropCancelled),
+        normal_button(readable_text(tr!("Cancel"))).on_press(Message::FileDropCancelled),
     ]
     .align_y(Alignment::Center);
 
@@ -177,9 +186,8 @@ pub(super) fn file_drop_operation_panel(prompt: &FileDropPrompt) -> Element<'_, 
         readable_text(tr!(
             "%1 will be added to:",
             item_count_label(prompt.paths.len())
-        ))
-        .size(13),
-        readable_text(destination).size(12).width(Length::Fill),
+        )),
+        readable_text(destination).width(Length::Fill),
         operation_choices,
         actions,
     ]
@@ -204,32 +212,32 @@ pub(super) fn open_with_panel(
     );
     let title = row![
         themed_icon(IconSymbol::Monitor, IconTone::Normal, MENU_ICON_SIZE),
-        readable_text(tr!("Open With")).size(16).width(Length::Fill),
+        readable_text(tr!("Open With"))
+            .size(TITLE_SIZE)
+            .font(BOLD)
+            .width(Length::Fill),
     ]
     .spacing(8)
     .align_y(Alignment::Center);
 
-    let mut content = column![title, readable_text(path_label).size(12)]
+    let mut content = column![title, readable_text(path_label)]
         .spacing(10)
         .width(Length::Fill);
 
     if let Some(fallback_error) = state.fallback_error() {
-        content = content.push(
-            readable_text(tr!(
-                "Default open failed: %1",
-                format_middle_ellipsized_text(fallback_error, OPEN_WITH_ERROR_MAX_CHARS)
-            ))
-            .size(12),
-        );
+        content = content.push(readable_text(tr!(
+            "Default open failed: %1",
+            format_middle_ellipsized_text(fallback_error, OPEN_WITH_ERROR_MAX_CHARS)
+        )));
     }
 
     if let Some(mime_type) = state.mime_type() {
-        content = content.push(readable_text(mime_type.to_owned()).size(12));
+        content = content.push(readable_text(mime_type.to_owned()));
     }
 
     match state {
         OpenWithState::Loading { .. } => {
-            content = content.push(readable_text(tr!("Loading applications...")).size(13));
+            content = content.push(readable_text(tr!("Loading applications...")));
         }
         OpenWithState::Ready { .. } => {
             content = content
@@ -239,7 +247,7 @@ pub(super) fn open_with_panel(
                     scrollbar_viewport,
                 ))
                 .push(
-                    checkbox(state.set_default_selected())
+                    check_box(state.set_default_selected())
                         .label(tr!("Set as default application"))
                         .on_toggle(Message::OpenWithDefaultApplicationToggled),
                 );
@@ -249,7 +257,7 @@ pub(super) fn open_with_panel(
     content = content.push(
         row![
             Space::new().width(Length::Fill),
-            secondary_action_button(tr!("Cancel"), Message::DismissFloating),
+            normal_button(readable_text(tr!("Cancel"))).on_press(Message::DismissFloating),
         ]
         .align_y(Alignment::Center),
     );
@@ -278,8 +286,8 @@ fn open_with_application_list(
                 row![
                     themed_icon(IconSymbol::Monitor, IconTone::Normal, MENU_ICON_SIZE),
                     column![
-                        readable_text(label).size(13).width(Length::Fill),
-                        readable_text(application.desktop_id.clone()).size(11),
+                        readable_text(label).width(Length::Fill),
+                        readable_text(application.desktop_id.clone()).size(CAPTION_SIZE),
                     ]
                     .spacing(2)
                     .width(Length::Fill),
@@ -394,12 +402,9 @@ fn search_entry_types_menu_panel<'a>(
         .padding(CONTEXT_MENU_PADDING + 2.0);
     for entry_type in context_menus.search_entry_type_items() {
         content = content.push(
-            checkbox(selected_entry_types.contains(&entry_type))
+            check_box(selected_entry_types.contains(&entry_type))
                 .label(entry_type.label())
-                .on_toggle(move |_| Message::SearchEntryTypeToggled(entry_type))
-                .size(16)
-                .text_size(13)
-                .spacing(8),
+                .on_toggle(move |_| Message::SearchEntryTypeToggled(entry_type)),
         );
     }
 
@@ -471,9 +476,7 @@ fn list_column_context_menu_panel<'a>(
 fn list_column_menu_row(column: &ListColumnConfig) -> Element<'static, Message> {
     row![
         themed_icon(IconSymbol::List, IconTone::Normal, MENU_ICON_SIZE),
-        readable_text(column.kind.label())
-            .size(13)
-            .width(Length::Fill),
+        readable_text(column.kind.label()).width(Length::Fill),
         list_column_visibility_button(column),
     ]
     .spacing(6)
@@ -491,7 +494,7 @@ fn list_column_visibility_button(column: &ListColumnConfig) -> Button<'static, M
         tr!("Show")
     };
     let button = button(
-        container(readable_text(label).size(12))
+        container(readable_text(label))
             .center_x(Length::Fixed(62.0))
             .center_y(Length::Fixed(LIST_COLUMN_VISIBILITY_BUTTON_HEIGHT)),
     )
@@ -823,8 +826,7 @@ fn sidebar_device_context_menu_panel<'a>(
     let mut menu_content = iced::widget::Column::new().spacing(4).padding(8);
     let actions = menu.device.available_actions();
     if actions.is_empty() {
-        menu_content =
-            menu_content.push(readable_text(tr!("No device actions available")).size(12));
+        menu_content = menu_content.push(readable_text(tr!("No device actions available")));
     } else {
         for action in context_menus.sidebar_device_items(actions) {
             menu_content = menu_content.push(menu_button(

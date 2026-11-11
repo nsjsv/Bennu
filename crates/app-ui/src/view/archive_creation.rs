@@ -1,4 +1,4 @@
-use iced::widget::{column, container, row, text_input, Column, Space};
+use iced::widget::{column, container, row, Column, Space};
 use iced::{Alignment, Element, Length};
 
 use crate::app::archive_creation::{
@@ -12,11 +12,11 @@ use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::icons::IconSymbol;
 
-use super::option_controls::{
-    inactive_primary_action_button, primary_action_button, secondary_action_button,
-    segmented_choice_row, SegmentedChoice,
-};
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};
+use bennu_theme::controls::text_field;
+use bennu_theme::controls::{normal_button, suggested_button};
+use bennu_theme::controls::{segmented_choice_row, SegmentedChoice};
+use bennu_theme::typography::{BOLD, TITLE_SIZE};
 
 const ARCHIVE_CREATION_PANEL_WIDTH: f32 = 500.0;
 const ARCHIVE_PATH_MAX_CHARS: usize = 72;
@@ -25,17 +25,16 @@ pub(super) fn archive_creation_panel(state: &ArchiveCreationState) -> Element<'_
     let title = row![
         themed_icon(IconSymbol::FileArchive, IconTone::Normal, MENU_ICON_SIZE),
         readable_text(tr!("Create Archive"))
-            .size(16)
+            .size(TITLE_SIZE)
+            .font(BOLD)
             .width(Length::Fill),
     ]
     .spacing(8)
     .align_y(Alignment::Center);
 
-    let name_input = text_input(&tr!("Archive name"), state.file_name())
+    let name_input = text_field(&tr!("Archive name"), state.file_name())
         .on_input(|name| Message::ArchiveCreation(ArchiveCreationMessage::NameChanged(name)))
         .on_submit(Message::ArchiveCreation(ArchiveCreationMessage::Submitted))
-        .padding([6, 8])
-        .size(14)
         .width(Length::Fill);
     let validation_error = state
         .validation_error()
@@ -44,22 +43,18 @@ pub(super) fn archive_creation_panel(state: &ArchiveCreationState) -> Element<'_
 
     let content = column![
         title,
-        readable_text(source_summary(state)).size(12),
-        readable_text(target_directory_summary(state)).size(12),
-        column![readable_text(tr!("Name")).size(12), name_input].spacing(4),
+        readable_text(source_summary(state)),
+        readable_text(target_directory_summary(state)),
+        column![readable_text(tr!("Name")), name_input].spacing(4),
+        column![readable_text(tr!("Format")), archive_format_buttons(state)].spacing(4),
         column![
-            readable_text(tr!("Format")).size(12),
-            archive_format_buttons(state)
-        ]
-        .spacing(4),
-        column![
-            readable_text(tr!("Compression")).size(12),
+            readable_text(tr!("Compression")),
             archive_compression_buttons(state)
         ]
         .spacing(4),
         archive_password_input(state),
-        readable_text(target_summary(state)).size(12),
-        readable_text(validation_error).size(12),
+        readable_text(target_summary(state)),
+        readable_text(validation_error),
         archive_creation_actions(state),
     ]
     .spacing(10)
@@ -80,7 +75,9 @@ fn archive_format_buttons(state: &ArchiveCreationState) -> Element<'_, Message> 
             .map(|format| SegmentedChoice {
                 label: archive_format_label(format),
                 selected: format == state.format(),
-                message: Message::ArchiveCreation(ArchiveCreationMessage::FormatSelected(format)),
+                message: Some(Message::ArchiveCreation(
+                    ArchiveCreationMessage::FormatSelected(format),
+                )),
                 tooltip: None,
             })
             .collect(),
@@ -95,9 +92,9 @@ fn archive_compression_buttons(state: &ArchiveCreationState) -> Element<'_, Mess
             .map(|level| SegmentedChoice {
                 label: archive_compression_level_label(level),
                 selected: level == state.compression_level(),
-                message: Message::ArchiveCreation(
+                message: Some(Message::ArchiveCreation(
                     ArchiveCreationMessage::CompressionLevelSelected(level),
-                ),
+                )),
                 tooltip: None,
             })
             .collect(),
@@ -105,10 +102,8 @@ fn archive_compression_buttons(state: &ArchiveCreationState) -> Element<'_, Mess
 }
 
 fn archive_password_input(state: &ArchiveCreationState) -> Element<'_, Message> {
-    let mut password_input = text_input(&tr!("Optional password"), state.password().as_str())
+    let mut password_input = text_field(&tr!("Optional password"), state.password().as_str())
         .secure(true)
-        .padding([6, 8])
-        .size(14)
         .width(Length::Fill);
     if state.password_supported() {
         password_input = password_input
@@ -122,11 +117,12 @@ fn archive_password_input(state: &ArchiveCreationState) -> Element<'_, Message> 
 
     let mut field = Column::new()
         .spacing(4)
-        .push(readable_text(tr!("Password")).size(12))
+        .push(readable_text(tr!("Password")))
         .push(password_input);
     if !state.password_supported() {
-        field =
-            field.push(readable_text(tr!("tar.gz archives do not support passwords.")).size(12));
+        field = field.push(readable_text(tr!(
+            "tar.gz archives do not support passwords."
+        )));
     }
     field.into()
 }
@@ -138,17 +134,15 @@ fn archive_creation_actions(state: &ArchiveCreationState) -> Element<'_, Message
         tr!("Create")
     };
     let create_button = if state.can_submit() {
-        primary_action_button(
-            create_label,
-            Message::ArchiveCreation(ArchiveCreationMessage::Submitted),
-        )
+        suggested_button(readable_text(create_label))
+            .on_press(Message::ArchiveCreation(ArchiveCreationMessage::Submitted))
     } else {
-        inactive_primary_action_button(create_label)
+        suggested_button(readable_text(create_label))
     };
 
     row![
         Space::new().width(Length::Fill),
-        secondary_action_button(tr!("Cancel"), Message::DismissFloating),
+        normal_button(readable_text(tr!("Cancel"))).on_press(Message::DismissFloating),
         create_button,
     ]
     .spacing(6)

@@ -11,20 +11,16 @@ use bennu_theme::icons::rotated_chevron_right_view;
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use bennu_theme::smooth_scroll::SmoothScrollArea;
 use bennu_theme::styles::{
-    base_text_color, button_hover_surface_color, button_pressed_surface_color,
-    button_surface_color, enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction,
+    base_text_color, enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction,
     hovered_row_style, list_row_style, muted_icon_svg_style, muted_text_color,
-    navigation_text_input_style, primary_action_button_style, selected_icon_svg_style,
-    selected_row_style, subtle_border_color, surface_button_style, transparent_icon_button_style,
+    selected_icon_svg_style, selected_row_style, transparent_icon_button_style,
 };
 use bennu_theme::ui_colors;
 use file_core::entry::FileKind;
 use file_core::is_supported_image_path;
-use iced::widget::{
-    button, checkbox, column, container, mouse_area, pick_list, row, scrollable, text, text_input,
-};
+use iced::widget::{button, column, container, mouse_area, row, scrollable, text};
 use iced::widget::{image, Space};
-use iced::{alignment, Background, Border, Color, Element, Length, Padding, Shadow, Size, Theme};
+use iced::{alignment, Color, Element, Length, Padding, Size, Theme};
 
 use crate::picker_request::PickerKind;
 use crate::picker_session::scrollbar::{scroll_axis, scroll_id, scrollbar_on_scroll};
@@ -32,6 +28,11 @@ use crate::picker_session::{
     DirectoryListing, PickerRow, PickerSession, PickerViewMode, SessionMessage,
     SessionScrollRegion, LIST_ROW_HEIGHT, LIST_ROW_SPACING,
 };
+use bennu_theme::controls::check_box;
+use bennu_theme::controls::dropdown;
+use bennu_theme::controls::text_field;
+use bennu_theme::controls::{normal_button, suggested_button};
+use bennu_theme::typography::{BODY_SIZE, BOLD, HEADING_SIZE};
 
 mod address_bar;
 mod columns;
@@ -120,15 +121,16 @@ fn listing_body(
     emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'static,
 ) -> Element<'static, SessionMessage> {
     let body: Element<'static, SessionMessage> = match session.listing() {
-        DirectoryListing::Pending => centered_hint("正在读取目录…", 14.0, muted_text_color(theme)),
+        DirectoryListing::Pending => {
+            centered_hint("正在读取目录…", BODY_SIZE, muted_text_color(theme))
+        }
         DirectoryListing::Failed(details) => container(
             column![
                 readable_label("目录读取失败".to_string())
-                    .size(15)
+                    .size(HEADING_SIZE)
+                    .font(BOLD)
                     .color(ui_colors(theme).error),
-                readable_label(details.clone())
-                    .size(13)
-                    .color(muted_text_color(theme)),
+                readable_label(details.clone()).color(muted_text_color(theme)),
             ]
             .spacing(6),
         )
@@ -139,7 +141,7 @@ fn listing_body(
         .into(),
         DirectoryListing::Ready(_) => {
             if session.rows().is_empty() {
-                centered_hint("空目录", 14.0, muted_text_color(theme))
+                centered_hint("空目录", BODY_SIZE, muted_text_color(theme))
             } else {
                 // 视图分派：列表/网格/多栏滚动接线同一套（区域、惯性、
                 // 滚动条），仅行几何不同。
@@ -288,9 +290,9 @@ fn entry_row(
     let mut content = row![].spacing(10).align_y(alignment::Vertical::Center);
     content = content.push(disclosure);
     content = content.push(icon);
-    content = content.push(readable_label(entry.name.to_string_lossy().into_owned()).size(14));
+    content = content.push(readable_label(entry.name.to_string_lossy().into_owned()));
     content = content.push(Space::new().width(Length::Fill));
-    content = content.push(readable_label(meta).size(12).color(muted_text_color(theme)));
+    content = content.push(readable_label(meta).color(muted_text_color(theme)));
 
     // 条纹是常态底色（与主应用同一份实现），选中/悬停态在其上覆盖。
     let stripe_style = list_row_style(row.depth, index);
@@ -345,29 +347,20 @@ fn save_name_input(
 ) -> Option<iced::widget::TextInput<'static, SessionMessage>> {
     match session.kind() {
         PickerKind::SaveFile { .. } => Some(
-            text_input("文件名", session.name_input())
+            text_field("文件名", session.name_input())
                 .on_input({
                     let emit = emit.clone();
                     move |value| emit(SessionMessage::NameInputChanged(value))
                 })
                 .on_submit(emit(SessionMessage::ConfirmPressed))
-                .size(14)
-                .width(Length::Fill)
-                .padding(Padding::new(6.0).top(7.0).bottom(7.0))
-                .style(navigation_text_input_style),
+                .width(Length::Fill),
         ),
         PickerKind::SaveFiles { default_names } => {
             // 只读展示调用方文件名列表：无 on_input 即无回写路径（iced
             // 无 handler 即只读）；名字列表是调用方资产，用户不可改。
             // 宽 Fill 水平滚动应对长列表。
             let names = default_names.join(", ");
-            Some(
-                text_input("", &names)
-                    .size(14)
-                    .width(Length::Fill)
-                    .padding(Padding::new(6.0).top(7.0).bottom(7.0))
-                    .style(navigation_text_input_style),
-            )
+            Some(text_field("", &names).width(Length::Fill))
         }
         PickerKind::OpenFile { .. } => None,
     }
@@ -405,9 +398,9 @@ fn choice_rows(
     }
     let mut layout = column![].spacing(6);
     for choice in choices {
-        let label = readable_label(choice.label.clone()).size(13);
+        let label = readable_label(choice.label.clone());
         let control: Element<'static, SessionMessage> = if choice.options.is_empty() {
-            checkbox(choice.selected == "true")
+            check_box(choice.selected == "true")
                 .on_toggle({
                     let emit = emit.clone();
                     let id = choice.id.clone();
@@ -418,7 +411,6 @@ fn choice_rows(
                         })
                     }
                 })
-                .size(18)
                 .into()
         } else {
             let options: Vec<ChoiceOption> = choice
@@ -436,14 +428,12 @@ fn choice_rows(
             let id = choice.id.clone();
             let pick_emit = emit.clone();
             // 与地址栏过滤器下拉同一套默认样式与 13px 字号。
-            pick_list(options, selected, move |picked: ChoiceOption| {
+            dropdown(options, selected, move |picked: ChoiceOption| {
                 pick_emit(SessionMessage::ChoiceSelected {
                     id: id.clone(),
                     value: picked.value,
                 })
             })
-            .text_size(13.0)
-            .padding(Padding::new(6.0))
             .into()
         };
         layout = layout.push(
@@ -478,12 +468,9 @@ fn confirm_footer(
                             .file_name()
                             .map(|name| name.to_string_lossy().into_owned())
                             .unwrap_or_default()
-                    ))
-                    .size(13),
+                    )),
                     Space::new().width(Length::Fill),
-                    button(readable_label("换个名字".to_string()).size(13))
-                        .padding([5, 10])
-                        .style(surface_button_style)
+                    normal_button(readable_label("换个名字".to_string()))
                         .on_press(emit(SessionMessage::OverwriteDeclined)),
                 ]
                 .spacing(10)
@@ -502,12 +489,9 @@ fn confirm_footer(
                     readable_label(format!(
                         "{} 个文件已存在，确认覆盖？",
                         overwrite_targets.len()
-                    ))
-                    .size(13),
+                    )),
                     Space::new().width(Length::Fill),
-                    button(readable_label("取消".to_string()).size(13))
-                        .padding([5, 10])
-                        .style(surface_button_style)
+                    normal_button(readable_label("取消".to_string()))
                         .on_press(emit(SessionMessage::OverwriteDeclined)),
                 ]
                 .spacing(10)
@@ -538,28 +522,20 @@ fn confirm_footer(
         let known_labels = labels.clone();
         let current = Some(session.active_filter_label());
         let pick_emit = emit.clone();
-        footer = footer.push(
-            pick_list(labels, current, move |picked: String| {
-                match known_labels.iter().position(|label| *label == picked) {
-                    Some(rule) => pick_emit(SessionMessage::FilterSelected { rule }),
-                    None => pick_emit(SessionMessage::FilterSelectionIgnored),
-                }
-            })
-            .text_size(13.0)
-            .padding(Padding::new(6.0))
-            .style(filter_pick_list_style)
-            .menu_style(filter_pick_list_menu_style),
-        );
+        footer = footer.push(dropdown(
+            labels,
+            current,
+            move |picked: String| match known_labels.iter().position(|label| *label == picked) {
+                Some(rule) => pick_emit(SessionMessage::FilterSelected { rule }),
+                None => pick_emit(SessionMessage::FilterSelectionIgnored),
+            },
+        ));
     }
 
-    let cancel = button(readable_label("取消".to_string()).size(13))
-        .padding([6, 14])
-        .style(surface_button_style)
+    let cancel = normal_button(readable_label("取消".to_string()))
         .on_press(emit(SessionMessage::DismissPressed));
 
-    let mut confirm = button(readable_label(session.accept_button_label()).size(13))
-        .padding([6, 14])
-        .style(primary_action_button_style());
+    let mut confirm = suggested_button(readable_label(session.accept_button_label()));
     if session.can_confirm() {
         confirm = confirm.on_press(emit(SessionMessage::ConfirmPressed));
     }
@@ -568,41 +544,4 @@ fn confirm_footer(
     layout = layout.push(footer);
 
     container(layout).width(Length::Fill).into()
-}
-
-/// 过滤器下拉样式：surface 底色 + subtle 边框 + 圆角 7，与确认栏按钮
-/// （surface_button_style）同一视觉词汇，hover/pressed 各加深一档。
-fn filter_pick_list_style(theme: &Theme, status: pick_list::Status) -> pick_list::Style {
-    let background = match status {
-        pick_list::Status::Hovered => button_hover_surface_color(theme),
-        pick_list::Status::Opened { .. } => button_pressed_surface_color(theme),
-        pick_list::Status::Active => button_surface_color(theme),
-    };
-    pick_list::Style {
-        text_color: base_text_color(theme),
-        placeholder_color: muted_text_color(theme),
-        handle_color: base_text_color(theme),
-        background: Background::Color(background),
-        border: Border {
-            color: subtle_border_color(theme),
-            width: 1.0,
-            radius: 7.0.into(),
-        },
-    }
-}
-
-/// 下拉菜单弹出层：同 surface 底色与圆角，选中项用 hover 底色标记。
-fn filter_pick_list_menu_style(theme: &Theme) -> iced::overlay::menu::Style {
-    iced::overlay::menu::Style {
-        background: Background::Color(button_surface_color(theme)),
-        border: Border {
-            color: subtle_border_color(theme),
-            width: 1.0,
-            radius: 7.0.into(),
-        },
-        text_color: base_text_color(theme),
-        selected_text_color: base_text_color(theme),
-        selected_background: Background::Color(button_hover_surface_color(theme)),
-        shadow: Shadow::default(),
-    }
 }

@@ -1006,12 +1006,7 @@ impl FileBrowser {
         window: window::Id,
         build: impl FnOnce(WindowShell<'a, Message>) -> Element<'a, Message>,
     ) -> Element<'a, Message> {
-        let frame_state = self.window_frame_state(window);
-        build(window_shell(
-            &self.user_config.window_controls,
-            window,
-            frame_state,
-        ))
+        build(window_shell(self, window))
     }
 
     fn single_window_view<'a>(

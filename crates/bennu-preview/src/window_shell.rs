@@ -9,10 +9,11 @@
 mod title_drag;
 
 use iced::widget::{column, container, mouse_area, row, Row, Space, Stack};
-use iced::{window, Background, Element, Length, Theme};
+use iced::{window, Background, Border, Element, Length, Padding, Theme};
 
+use bennu_theme::metrics::CARD_RADIUS;
 use bennu_theme::window_controls::{
-    WindowControlKind, WindowControlSide, WindowControlsConfig, WindowFrameState,
+    SidebarStyle, WindowControlKind, WindowControlSide, WindowControlsConfig, WindowFrameState,
 };
 use bennu_theme::{typography::BOLD, ui_colors};
 
@@ -27,12 +28,15 @@ const HEADER_ITEM_SPACING: f32 = 6.0;
 /// 左右区里一个普通项（图标按钮）按这个宽度给标题让位。
 const HEADER_ITEM_WIDTH: f32 = 32.0;
 const DIVIDER_WIDTH: f32 = 1.0;
+/// 悬浮侧栏和窗口边缘之间的空；和内容区之间只留一半，卡片离内容更近。
+const FLOATING_SIDEBAR_GAP: f32 = 8.0;
 const RESIZE_EDGE_WIDTH: f32 = 5.0;
 const RESIZE_CORNER_WIDTH: f32 = 11.0;
 
 /// 宿主注入的窗口管理：按钮配置与最大化状态，以及按钮、顶栏、边缘发出的消息。
 pub struct WindowShell<'a, Message> {
     pub config: &'a WindowControlsConfig,
+    pub sidebar_style: SidebarStyle,
     pub window: window::Id,
     pub frame_state: WindowFrameState,
     pub on_control: Box<dyn Fn(WindowControlKind, window::Id) -> Message + 'a>,
@@ -153,19 +157,43 @@ pub fn split_window<'a, Message>(
 where
     Message: Clone + 'static,
 {
-    // 分隔线算在侧栏宽度里：内容区从 sidebar_width 开始，宿主按这个宽度算的命中区域不偏。
-    let sidebar = container(column![
-        header_bar(sidebar.header, HeaderEdges::Leading, shell),
-        sidebar.body,
-    ])
-    .width(Length::Fixed((sidebar_width - DIVIDER_WIDTH).max(0.0)))
-    .height(Length::Fill)
-    .clip(true)
-    .style(sidebar_surface_style);
-    let divider = container(Space::new())
-        .width(Length::Fixed(DIVIDER_WIDTH))
+    // 两种样式都让内容区从 sidebar_width 开始（分隔线、卡片四周的空都算在侧栏宽度里），
+    // 宿主按这个宽度算的命中区域不偏。
+    let sidebar_column = |header: HeaderBar<'a, Message>| {
+        container(column![
+            header_bar(header, HeaderEdges::Leading, shell),
+            sidebar.body,
+        ])
+        .width(Length::Fill)
         .height(Length::Fill)
-        .style(divider_style);
+        .clip(true)
+    };
+    let sidebar: Element<'a, Message> = match shell.sidebar_style {
+        SidebarStyle::Embedded => row![
+            sidebar_column(sidebar.header).style(sidebar_surface_style),
+            container(Space::new())
+                .width(Length::Fixed(DIVIDER_WIDTH))
+                .height(Length::Fill)
+                .style(divider_style),
+        ]
+        .width(Length::Fixed(sidebar_width))
+        .into(),
+        SidebarStyle::Floating => {
+            // 卡片的顶栏少一段上边的空，和内容顶栏下沿对齐。
+            let mut header = sidebar.header;
+            header.height = (header.height - FLOATING_SIDEBAR_GAP).max(0.0);
+            container(sidebar_column(header).style(floating_sidebar_style))
+                .padding(Padding {
+                    top: FLOATING_SIDEBAR_GAP,
+                    right: FLOATING_SIDEBAR_GAP / 2.0,
+                    bottom: FLOATING_SIDEBAR_GAP,
+                    left: FLOATING_SIDEBAR_GAP,
+                })
+                .width(Length::Fixed(sidebar_width))
+                .height(Length::Fill)
+                .into()
+        }
+    };
     // 两栏各自裁到自己的范围：内容区横向滚出去的东西（多栏视图左边的栏）不会画到侧栏上。
     let content = container(column![
         header_bar(content.header, HeaderEdges::Trailing, shell),
@@ -177,9 +205,11 @@ where
     .style(content_surface_style);
 
     resize_frame(
-        row![sidebar, divider, content]
+        // 底色垫满整窗：悬浮侧栏四周的空露出的是内容区的底色。
+        container(row![sidebar, content])
             .width(Length::Fill)
             .height(Length::Fill)
+            .style(content_surface_style)
             .into(),
         shell,
     )
@@ -311,6 +341,7 @@ where
         height,
     } = header;
     let (leading_controls, trailing_controls) = edges.controls_sides();
+    let band = HEADER_BAR_HEIGHT.min(height);
     // 标题绝对居中，两边按较宽的一侧让位，左右区的按钮不会压到标题上。
     let side_width = |item_count: usize, controls: Option<WindowControlSide>| {
         let control_count = controls.map_or(0, |side| visible_control_count(shell, side));
@@ -333,10 +364,10 @@ where
         .spacing(HEADER_ITEM_SPACING)
         .padding([0.0, HEADER_PADDING_X]);
     if leading_controls {
-        items = items.push(top_band(controls(shell, WindowControlSide::Left)));
+        items = items.push(top_band(controls(shell, WindowControlSide::Left), band));
     }
     for item in start {
-        items = items.push(top_band(item));
+        items = items.push(top_band(item, band));
     }
     let title = match center {
         Some(center) => {
@@ -349,10 +380,10 @@ where
         }
     };
     for item in end {
-        items = items.push(top_band(item));
+        items = items.push(top_band(item, band));
     }
     if trailing_controls {
-        items = items.push(top_band(controls(shell, WindowControlSide::Right)));
+        items = items.push(top_band(controls(shell, WindowControlSide::Right), band));
     }
     let items = items.width(Length::Fill).height(Length::Fixed(height));
 
@@ -372,7 +403,7 @@ where
             )
             .padding([0.0, title_reserve])
             .center_x(Length::Fill)
-            .center_y(Length::Fixed(HEADER_BAR_HEIGHT))
+            .center_y(Length::Fixed(band))
             .clip(true)
             .into(),
         );
@@ -384,10 +415,9 @@ where
         .into()
 }
 
-fn top_band<'a, Message: 'a>(item: Element<'a, Message>) -> Element<'a, Message> {
-    container(item)
-        .center_y(Length::Fixed(HEADER_BAR_HEIGHT))
-        .into()
+/// 两边的按钮和标题所在的那一条：标准顶栏高；顶栏比它矮（悬浮侧栏的顶栏）时就是整条。
+fn top_band<'a, Message: 'a>(item: Element<'a, Message>, band: f32) -> Element<'a, Message> {
+    container(item).center_y(Length::Fixed(band)).into()
 }
 
 fn visible_control_count<Message>(
@@ -437,6 +467,17 @@ fn sidebar_surface_style(theme: &Theme) -> container::Style {
     }
 }
 
+/// 悬浮侧栏：同一层底色，圆角卡片，没有描边。
+fn floating_sidebar_style(theme: &Theme) -> container::Style {
+    container::Style {
+        border: Border {
+            radius: CARD_RADIUS.into(),
+            ..Border::default()
+        },
+        ..sidebar_surface_style(theme)
+    }
+}
+
 fn divider_style(theme: &Theme) -> container::Style {
     container::Style {
         background: Some(Background::Color(ui_colors(theme).outline_variant)),
@@ -459,9 +500,11 @@ mod tests {
     fn shell(
         config: &WindowControlsConfig,
         frame_state: WindowFrameState,
+        sidebar_style: SidebarStyle,
     ) -> WindowShell<'_, ShellMessage> {
         WindowShell {
             config,
+            sidebar_style,
             window: window::Id::unique(),
             frame_state,
             on_control: Box::new(|_, _| ShellMessage::Control),
@@ -487,8 +530,13 @@ mod tests {
             header: HeaderBar::new(),
             body: body(),
         };
-        for frame_state in [WindowFrameState::Restored, WindowFrameState::Maximized] {
-            let shell = shell(&config, frame_state);
+        for (frame_state, sidebar_style) in [
+            (WindowFrameState::Restored, SidebarStyle::Embedded),
+            (WindowFrameState::Restored, SidebarStyle::Floating),
+            (WindowFrameState::Maximized, SidebarStyle::Embedded),
+            (WindowFrameState::Maximized, SidebarStyle::Floating),
+        ] {
+            let shell = shell(&config, frame_state, sidebar_style);
             let expected = frame_state == WindowFrameState::Restored;
             assert_eq!(
                 has_resize_zones(&single_window(HeaderBar::new(), body(), &shell)),
@@ -498,7 +546,7 @@ mod tests {
             assert_eq!(
                 has_resize_zones(&split_window(pane(), pane(), 200.0, &shell)),
                 expected,
-                "split_window {frame_state:?}"
+                "split_window {frame_state:?} {sidebar_style:?}"
             );
         }
     }

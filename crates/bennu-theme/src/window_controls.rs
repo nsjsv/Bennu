@@ -1,4 +1,4 @@
-//! 窗口 chrome 域模型：窗口控件摆放/可见性/侧别偏好与窗框状态。主程序与
+//! 窗口 chrome 域模型：窗口控件摆放/可见性/侧别偏好、侧栏样式与窗框状态。主程序与
 //! portal 的所有窗口经 `window_shell` 同源消费。
 
 use std::collections::HashSet;
@@ -38,6 +38,40 @@ impl WindowControlKind {
             "close" => Some(Self::Close),
             _ => None,
         }
+    }
+}
+
+/// 带侧栏的窗口（主窗口、设置、属性、文件选择对话框）里侧栏的样子。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SidebarStyle {
+    /// 贴着窗口左边从顶到底平铺，和内容区之间一条细线。
+    #[default]
+    Embedded,
+    /// 四周和窗口边缘留空的圆角卡片。
+    Floating,
+}
+
+impl SidebarStyle {
+    pub const ALL: [Self; 2] = [Self::Embedded, Self::Floating];
+
+    pub fn label(self) -> String {
+        match self {
+            Self::Embedded => tr!("Embedded"),
+            Self::Floating => tr!("Floating"),
+        }
+    }
+
+    pub const fn config_value(self) -> &'static str {
+        match self {
+            Self::Embedded => "embedded",
+            Self::Floating => "floating",
+        }
+    }
+
+    pub fn from_config_value(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|style| style.config_value() == value)
     }
 }
 

@@ -29,7 +29,7 @@ pub(crate) use message::Message;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use iced::{keyboard, window, Element, Task, Theme};
+use iced::{keyboard, window, Element, Task};
 
 use dbus_file_chooser::{BridgeEvent, FileChooserInterface, PickerInvocation};
 use picker_session::SessionScrollRegion;
@@ -50,8 +50,8 @@ static BRIDGE_SLOT: OnceLock<Mutex<Option<mpsc::Receiver<BridgeEvent>>>> = OnceL
 
 struct PickerDaemon {
     windows: HashMap<window::Id, PickerSession>,
-    theme: Theme,
-    /// 最近一次收到的系统深浅色；开窗、系统设置变化时据此重算 `theme`。
+    look: theme::PickerLook,
+    /// 最近一次收到的系统深浅色；开窗、系统设置变化时据此重算 `look`。
     system_mode: bennu_theme::AppearanceMode,
     keyboard_modifiers: keyboard::Modifiers,
     /// 最新指针位置（拖宽增量基准；与主程序 FileBrowser.cursor_position
@@ -72,7 +72,7 @@ impl PickerDaemon {
         let system_mode = bennu_theme::AppearanceMode::Light;
         PickerDaemon {
             windows: HashMap::new(),
-            theme: theme::resolve_theme(system_mode),
+            look: theme::resolve_look(system_mode),
             system_mode,
             keyboard_modifiers: keyboard::Modifiers::default(),
             cursor_position: None,
@@ -91,7 +91,7 @@ fn update(daemon: &mut PickerDaemon, message: Message) -> Task<Message> {
     match message {
         Message::SystemModeChanged(system_mode) => {
             daemon.system_mode = system_mode;
-            daemon.theme = theme::resolve_theme(system_mode);
+            daemon.look = theme::resolve_look(system_mode);
             Task::none()
         }
         Message::Bridge(bridge_event) => {
@@ -233,7 +233,7 @@ fn update(daemon: &mut PickerDaemon, message: Message) -> Task<Message> {
 fn open_picker_window(daemon: &mut PickerDaemon, invocation: PickerInvocation) -> Task<Message> {
     // WHY：进程常驻后主题不能锁死在登录时刻——用户在主程序换配色后，
     // 旧主题会跟随整个会话。每次开窗重读存储偏好（本地毫秒级 IO）。
-    daemon.theme = theme::resolve_theme(daemon.system_mode);
+    daemon.look = theme::resolve_look(daemon.system_mode);
     let PickerInvocation {
         request_path,
         spec,
@@ -640,7 +640,7 @@ fn main() {
             ..iced::Settings::default()
         })
         .subscription(subscriptions::subscription)
-        .theme(|daemon: &PickerDaemon, _| daemon.theme.clone())
+        .theme(|daemon: &PickerDaemon, _| daemon.look.theme.clone())
         .run();
     if let Err(error) = result {
         tracing::error!("选择窗口运行失败: {error}");
@@ -654,7 +654,10 @@ fn main() {
 pub(crate) fn test_daemon() -> PickerDaemon {
     PickerDaemon {
         windows: HashMap::new(),
-        theme: Theme::Light,
+        look: theme::PickerLook {
+            theme: iced::Theme::Light,
+            sidebar_style: bennu_theme::window_controls::SidebarStyle::Embedded,
+        },
         system_mode: bennu_theme::AppearanceMode::Light,
         keyboard_modifiers: keyboard::Modifiers::default(),
         cursor_position: None,

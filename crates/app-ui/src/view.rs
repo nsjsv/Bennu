@@ -231,13 +231,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
     .width(Length::Fill)
     .height(Length::Fill);
 
-    let main_window = browser.main_window_id();
-    let frame_state = browser.window_frame_state(main_window);
-    let shell = window_shell(
-        &browser.user_config().window_controls,
-        main_window,
-        frame_state,
-    );
+    let shell = window_shell(browser, browser.main_window_id());
     let toolbar_height = main_toolbar_height(browser.main_content_width());
     let content = split_window(
         SplitPane {

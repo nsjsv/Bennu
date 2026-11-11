@@ -1,6 +1,7 @@
 use iced::window;
 
-use crate::model::{Message, WindowControlKind, WindowControlsConfig, WindowFrameState};
+use crate::app::FileBrowser;
+use crate::model::{Message, WindowControlKind};
 
 use bennu_preview::window_shell::{WindowShell, HEADER_BAR_HEIGHT};
 use bennu_theme::metrics::CONTROL_HEIGHT;
@@ -39,16 +40,15 @@ pub(crate) fn main_toolbar_height(toolbar_width: f32) -> f32 {
     }
 }
 
-/// 本进程窗口的外壳注入：窗口按钮发本进程的窗口管理消息，顶栏空白处可拖动、双击最大化。
-pub(crate) fn window_shell<'a>(
-    config: &'a WindowControlsConfig,
-    window: window::Id,
-    frame_state: WindowFrameState,
-) -> WindowShell<'a, Message> {
+/// 本进程窗口的外壳注入：窗口按钮与侧栏样式按用户设置，按钮发本进程的窗口管理消息，
+/// 顶栏空白处可拖动、双击最大化。
+pub(crate) fn window_shell(browser: &FileBrowser, window: window::Id) -> WindowShell<'_, Message> {
+    let config = browser.user_config();
     WindowShell {
-        config,
+        config: &config.window_controls,
+        sidebar_style: config.sidebar_style,
         window,
-        frame_state,
+        frame_state: browser.window_frame_state(window),
         on_control: Box::new(host_window_control_message),
         title_drag: Message::WindowDragRequested(window),
         title_double_click: Message::WindowMaximizeToggled(window),

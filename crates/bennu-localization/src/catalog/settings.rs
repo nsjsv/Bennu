@@ -42,6 +42,10 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Right side", "右侧"),
     ("Left", "左侧"),
     ("Right", "右侧"),
+    // 外观 → 窗口控制：侧栏样式。
+    ("Sidebar", "侧栏"),
+    ("Embedded", "嵌入"),
+    ("Floating", "悬浮"),
     ("Maximize / Restore", "最大化 / 还原"),
     ("Always visible", "始终显示"),
     ("Columns view", "多栏视图"),

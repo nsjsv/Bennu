@@ -62,6 +62,36 @@ impl FileBrowser {
             Task::none()
         }
     }
+
+    /// 所有带侧栏的窗口下一帧就换样子（外壳每帧按设置画）；文件选择对话框下次打开时读。
+    pub(super) fn select_sidebar_style(
+        &mut self,
+        style: bennu_theme::window_controls::SidebarStyle,
+    ) -> Task<Message> {
+        if self.user_config.sidebar_style == style {
+            return Task::none();
+        }
+        self.user_config.sidebar_style = style;
+        self.persist_user_preferences_command()
+    }
+}
+
+#[cfg(test)]
+mod sidebar_style_tests {
+    use super::*;
+    use bennu_theme::window_controls::SidebarStyle;
+
+    #[test]
+    fn choosing_a_sidebar_style_saves_only_a_real_change() {
+        let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+
+        drop(browser.select_sidebar_style(SidebarStyle::Embedded));
+        assert!(!browser.user_preferences_save_in_flight);
+
+        drop(browser.select_sidebar_style(SidebarStyle::Floating));
+        assert_eq!(browser.user_config.sidebar_style, SidebarStyle::Floating);
+        assert!(browser.user_preferences_save_in_flight);
+    }
 }
 
 #[cfg(test)]

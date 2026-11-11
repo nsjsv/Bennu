@@ -87,7 +87,7 @@ pub(crate) fn picker_window_view<'a>(
     let to_window = move |message| Message::Session(window, message);
     let emit = |message| message;
     let body = column![
-        listing_body(session, &daemon.theme, emit),
+        listing_body(session, &daemon.look.theme, emit),
         confirm_footer(session, emit),
     ]
     .spacing(10)

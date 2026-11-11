@@ -645,6 +645,7 @@ pub(crate) enum Message {
     WindowControlSideSelected(WindowControlKind, WindowControlSide),
     WindowControlMoveRequested(WindowControlKind, WindowControlMoveDirection),
     WindowControlsReset,
+    SidebarStyleSelected(bennu_theme::window_controls::SidebarStyle),
     ApplicationLogsRefreshRequested,
     ApplicationLogsLoaded(
         ApplicationLogRequest,

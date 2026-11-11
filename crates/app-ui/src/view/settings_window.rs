@@ -10,6 +10,7 @@ use crate::config::{
 };
 use crate::model::{Message, SettingsCategory, SettingsSubpage};
 use bennu_theme::icons::IconSymbol;
+use bennu_theme::window_controls::SidebarStyle;
 use bennu_theme::ThemeMode;
 
 use super::about_settings::about_settings_sections;
@@ -123,8 +124,7 @@ pub(crate) fn view_settings_window(
     browser: &FileBrowser,
     window: window::Id,
 ) -> Element<'_, Message> {
-    let frame_state = browser.window_frame_state(window);
-    let shell = window_shell(&browser.user_config().window_controls, window, frame_state);
+    let shell = window_shell(browser, window);
     let selected = browser.selected_settings_category;
     let sidebar = SplitPane {
         header: HeaderBar::new().title(tr!("Settings")),
@@ -228,7 +228,10 @@ fn appearance_settings_sections(browser: &FileBrowser) -> Vec<Element<'_, Messag
         settings_group(
             tr!("Window controls"),
             None,
-            vec![custom_row(window_control_settings_row(browser))],
+            vec![
+                custom_row(window_control_settings_row(browser)),
+                sidebar_style_row(browser),
+            ],
         ),
         settings_group(
             tr!("Columns view"),
@@ -302,6 +305,20 @@ fn transfer_settings_sections(browser: &FileBrowser) -> Vec<Element<'_, Message>
         settings_group(tr!("Receive"), None, transfer_receive_rows(browser)),
         favorite_devices_group(browser),
     ]
+}
+
+fn sidebar_style_row(browser: &FileBrowser) -> SettingsRow<'static> {
+    let selected = browser.user_config().sidebar_style;
+    let choices = SidebarStyle::ALL
+        .into_iter()
+        .map(|style| SegmentedChoice {
+            label: style.label(),
+            selected: style == selected,
+            message: Some(Message::SidebarStyleSelected(style)),
+            tooltip: None,
+        })
+        .collect();
+    choice_row(tr!("Sidebar"), None, choices)
 }
 
 fn theme_mode_row(browser: &FileBrowser) -> SettingsRow<'static> {

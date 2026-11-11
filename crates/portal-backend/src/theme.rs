@@ -1,12 +1,13 @@
-//! FileChooser 窗口的主题解析。与主程序走同一条构造链路
+//! FileChooser 窗口的外观解析：配色和侧栏样式。与主程序走同一条构造链路
 //! （`bennu_theme::ApplicationTheme::active`），保证两种进程呈现同一套配色：
-//! 配色偏好从主程序的状态库读，Matugen 仅在选中时读，系统深浅色由
+//! 外观偏好从主程序的状态库读，Matugen 仅在选中时读，系统深浅色由
 //! daemon 订阅系统设置后传进来。portal 进程常驻，每次开窗和系统设置变化时都重新
 //! 解析，否则会锁死在登录时刻。
 
 use std::path::Path;
 
 use bennu_state::UserSettingsStore;
+use bennu_theme::window_controls::SidebarStyle;
 use bennu_theme::{
     parse_matugen_colors, AppearanceMode, ApplicationTheme, ColorSchemePreset, MatugenColors,
     ThemeMode,
@@ -18,16 +19,30 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct StoredAppearance {
     pub(crate) theme_mode: ThemeMode,
     pub(crate) color_scheme: ColorSchemePreset,
+    pub(crate) sidebar_style: SidebarStyle,
 }
 
-pub(crate) fn resolve_theme(system_mode: AppearanceMode) -> Theme {
+/// 选择窗、预览窗画出来的样子：一次读设置得到的配色和侧栏样式。
+pub(crate) struct PickerLook {
+    pub(crate) theme: Theme,
+    pub(crate) sidebar_style: SidebarStyle,
+}
+
+pub(crate) fn resolve_look(system_mode: AppearanceMode) -> PickerLook {
     let appearance = read_stored_appearance(&state_database_path());
     // Matugen 文件只在显式选中时读；默认和出名配色绝不会被生成文件换色。
     let matugen = appearance
         .as_ref()
         .filter(|appearance| appearance.color_scheme == ColorSchemePreset::Matugen)
         .and_then(|_| load_matugen_colors());
-    compose(system_mode, appearance.as_ref(), matugen)
+    PickerLook {
+        theme: compose(system_mode, appearance.as_ref(), matugen),
+        sidebar_style: appearance
+            .as_ref()
+            .map_or(SidebarStyle::default(), |appearance| {
+                appearance.sidebar_style
+            }),
+    }
 }
 
 /// 状态库缺失/损坏 = 未设置：跟随系统深浅 + 默认配色。
@@ -49,13 +64,15 @@ pub(crate) fn state_database_path() -> std::path::PathBuf {
     file_core::app_dirs::app_data_dir().join("state.sqlite")
 }
 
-/// 设置文档里外观用到的两个键，缺省值与主程序的设置文档一致（旧数据没有这些键）。
+/// 设置文档里外观用到的键，缺省值与主程序的设置文档一致（旧数据没有这些键）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AppearanceSettings {
     #[serde(default = "default_theme_mode")]
     theme_mode: String,
     #[serde(default = "default_color_scheme")]
     color_scheme: String,
+    #[serde(default = "default_sidebar_style")]
+    sidebar_style: String,
 }
 
 impl Default for AppearanceSettings {
@@ -63,8 +80,13 @@ impl Default for AppearanceSettings {
         Self {
             theme_mode: default_theme_mode(),
             color_scheme: default_color_scheme(),
+            sidebar_style: default_sidebar_style(),
         }
     }
+}
+
+fn default_sidebar_style() -> String {
+    SidebarStyle::default().config_value().to_owned()
 }
 
 fn default_theme_mode() -> String {
@@ -93,6 +115,8 @@ fn read_stored_appearance(db_path: &Path) -> Option<StoredAppearance> {
     Some(StoredAppearance {
         theme_mode,
         color_scheme,
+        // 侧栏样式读不懂不连累配色：主程序那边会提示并改回默认。
+        sidebar_style: SidebarStyle::from_config_value(&stored.sidebar_style).unwrap_or_default(),
     })
 }
 
@@ -113,6 +137,7 @@ mod tests {
         StoredAppearance {
             theme_mode,
             color_scheme,
+            sidebar_style: SidebarStyle::Embedded,
         }
     }
 
@@ -174,6 +199,32 @@ mod tests {
 
         assert_eq!(appearance.theme_mode, ThemeMode::Dark);
         assert_eq!(appearance.color_scheme, ColorSchemePreset::Catppuccin);
+    }
+
+    #[test]
+    fn the_chooser_reads_the_sidebar_style_and_ignores_an_unknown_one() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let database = directory.path().join("state.sqlite");
+        UserSettingsStore::new(&database).expect("create store");
+        let write = |payload: &str| {
+            rusqlite::Connection::open(&database)
+                .unwrap()
+                .execute(
+                    "INSERT OR REPLACE INTO user_preferences (preference_key, payload_json, updated_at_ms)
+                     VALUES (?1, ?2, 1)",
+                    [bennu_state::USER_PREFERENCES_KEY, payload],
+                )
+                .unwrap();
+        };
+
+        write(r#"{"theme_mode":"dark","color_scheme":"nord","sidebar_style":"floating"}"#);
+        let appearance = read_stored_appearance(&database).expect("stored appearance");
+        assert_eq!(appearance.sidebar_style, SidebarStyle::Floating);
+
+        write(r#"{"theme_mode":"dark","color_scheme":"nord","sidebar_style":"glass"}"#);
+        let appearance = read_stored_appearance(&database).expect("stored appearance");
+        assert_eq!(appearance.sidebar_style, SidebarStyle::Embedded);
+        assert_eq!(appearance.color_scheme, ColorSchemePreset::Nord);
     }
 
     #[test]

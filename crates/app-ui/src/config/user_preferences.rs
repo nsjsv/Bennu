@@ -36,6 +36,7 @@ use bennu_preview::preview_config::{
     preview_directory_expand_levels_from_stored, preview_extension_rules_from_stored,
     preview_size_limits_from_stored,
 };
+use bennu_theme::window_controls::SidebarStyle;
 use bennu_theme::{ColorSchemePreset, ThemeMode};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -58,6 +59,7 @@ pub(crate) struct UserPreferences {
     pub(crate) browser_view_mode: BrowserViewMode,
     pub(crate) visible_column_count: usize,
     pub(crate) window_controls: WindowControlsConfig,
+    pub(crate) sidebar_style: SidebarStyle,
     pub(crate) columns_view_density: ViewDensityLevel,
     pub(crate) list_view_density: ViewDensityLevel,
     pub(crate) icons_view_density: ViewDensityLevel,
@@ -110,6 +112,7 @@ impl UserPreferences {
             browser_view_mode: config.browser_view_mode,
             visible_column_count: normalize_visible_column_count(config.visible_column_count),
             window_controls: config.window_controls.clone(),
+            sidebar_style: config.sidebar_style,
             columns_view_density: config.columns_view_density,
             list_view_density: config.list_view_density,
             icons_view_density: config.icons_view_density,
@@ -157,6 +160,7 @@ impl UserPreferences {
         config.browser_view_mode = self.browser_view_mode;
         config.visible_column_count = normalize_visible_column_count(self.visible_column_count);
         config.window_controls = self.window_controls.clone();
+        config.sidebar_style = self.sidebar_style;
         config.columns_view_density = self.columns_view_density;
         config.list_view_density = self.list_view_density;
         config.icons_view_density = self.icons_view_density;
@@ -233,6 +237,7 @@ impl UserPreferences {
         stored.visible_column_count =
             normalize_visible_column_count(self.visible_column_count) as u32;
         stored.window_controls = stored_window_controls(&self.window_controls);
+        stored.sidebar_style = self.sidebar_style.config_value().to_owned();
         stored.columns_view_density = Some(self.columns_view_density.index());
         stored.list_view_density = Some(self.list_view_density.index());
         stored.icons_view_density = Some(self.icons_view_density.index());
@@ -307,6 +312,11 @@ impl UserPreferences {
             list_view_preferences_from_stored(&stored, &default_preferences, &mut unrecognized);
         let window_controls =
             window_controls_from_stored(&stored, &default_preferences, &mut unrecognized);
+        let sidebar_style = unrecognized.value_or_default(
+            "sidebar_style",
+            SidebarStyle::from_config_value(&stored.sidebar_style),
+            default_preferences.sidebar_style,
+        );
         let context_menus =
             context_menu_preferences_from_stored(&stored, &default_preferences, &mut unrecognized);
         let columns_view_density = stored
@@ -397,6 +407,7 @@ impl UserPreferences {
                 stored.visible_column_count as usize,
             ),
             window_controls,
+            sidebar_style,
             columns_view_density,
             list_view_density,
             icons_view_density,

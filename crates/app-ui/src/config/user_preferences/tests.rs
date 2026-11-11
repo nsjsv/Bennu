@@ -28,6 +28,29 @@ fn retired_color_schemes_are_read_as_their_successor_without_a_warning() {
 }
 
 #[test]
+fn sidebar_style_round_trips_and_an_unknown_value_falls_back_to_embedded() {
+    let mut config = default_user_config();
+    config.sidebar_style = SidebarStyle::Floating;
+    let stored = UserPreferences::from_user_config(&config).to_stored();
+    assert_eq!(stored.sidebar_style, "floating");
+    let interpreted = UserPreferences::from_stored(stored, &default_user_config());
+    assert_eq!(
+        interpreted.preferences.sidebar_style,
+        SidebarStyle::Floating
+    );
+    assert!(interpreted.unrecognized.into_keys().is_empty());
+
+    let mut stored = UserPreferences::from_user_config(&default_user_config()).to_stored();
+    stored.sidebar_style = "glass".to_owned();
+    let interpreted = UserPreferences::from_stored(stored, &default_user_config());
+    assert_eq!(
+        interpreted.preferences.sidebar_style,
+        SidebarStyle::Embedded
+    );
+    assert_eq!(interpreted.unrecognized.into_keys(), vec!["sidebar_style"]);
+}
+
+#[test]
 fn an_unknown_color_scheme_still_counts_as_unreadable() {
     let mut stored = UserPreferences::from_user_config(&default_user_config()).to_stored();
     stored.color_scheme = "sepia".to_owned();

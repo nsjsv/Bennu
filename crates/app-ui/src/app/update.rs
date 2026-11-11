@@ -811,6 +811,7 @@ impl FileBrowser {
                 self.move_window_control_within_side(kind, direction)
             }
             Message::WindowControlsReset => self.reset_window_controls(),
+            Message::SidebarStyleSelected(style) => self.select_sidebar_style(style),
             Message::ApplicationLogsRefreshRequested => self.refresh_application_logs(),
             Message::ApplicationLogsLoaded(request, outcome) => {
                 self.accept_application_logs(request, outcome)

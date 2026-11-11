@@ -16,6 +16,7 @@ static WINDOW_CONTROLS: std::sync::LazyLock<WindowControlsConfig> =
 pub(crate) fn window_shell(daemon: &PickerDaemon, window: window::Id) -> WindowShell<'_, Message> {
     WindowShell {
         config: &WINDOW_CONTROLS,
+        sidebar_style: daemon.look.sidebar_style,
         window,
         frame_state: daemon.frames.frame_state(window),
         on_control: Box::new(window_control_message),

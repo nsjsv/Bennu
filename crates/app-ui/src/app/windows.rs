@@ -317,7 +317,6 @@ impl FileBrowser {
         self.shortcut_capture = None;
         self.search_service.cancel_force_restart_confirmation();
         self.invalidate_startup_directory_validation();
-        self.expanded_color_scheme_family = None;
         let Some(window) = self.settings_window.take() else {
             return Task::none();
         };

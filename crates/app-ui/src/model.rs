@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use bennu_state::TaskQueueStore;
-use bennu_theme::{ColorSchemeFamily, ColorSchemePreset, ThemeMode};
+use bennu_theme::{AppearanceMode, ColorSchemePreset, MatugenColors, ThemeMode};
 use desktop_linux::{
     DesktopActivationEvent, DesktopClipboardContent, FileClipboardOperation,
     OpenWithApplicationList, StorageDeviceId, StorageDeviceSnapshot, TerminalEmulator,
@@ -19,7 +19,7 @@ use file_search::{
     SearchTextScope, VersionedSearchPathPreferences,
 };
 use iced::keyboard;
-use iced::{event, mouse, window, Point, Theme};
+use iced::{event, mouse, window, Point};
 
 use crate::app::archive_creation::ArchiveCreationMessage;
 use crate::app::archive_extraction::ArchiveExtractionMessage;
@@ -611,8 +611,8 @@ pub(crate) enum Message {
     ),
     SearchServiceIncidentDetailsToggled(SearchServiceDiagnosticKind),
     SearchServiceIncidentDetailsCopyRequested(SearchServiceDiagnosticKind),
-    SystemThemeDetected(Theme),
-    MatugenThemeUpdated(Result<Option<Theme>, String>),
+    SystemModeChanged(AppearanceMode),
+    MatugenColorsUpdated(Result<Option<MatugenColors>, String>),
     UserPreferencesSaved(Result<(), String>),
     AppConfigSaved(Result<(), String>),
     ColumnWidthOverrideSaved(Result<(), String>),
@@ -640,10 +640,7 @@ pub(crate) enum Message {
     ContextMenuSettingsResetRequested(ContextMenuSettingsPage),
     ContextMenuSettingsResetConfirmed(ContextMenuSettingsPage),
     ThemeModeSelected(ThemeMode),
-    ColorSchemeFamilySelected(ColorSchemeFamily),
     ColorSchemePresetSelected(ColorSchemePreset),
-    CustomColorSchemeImportPressed,
-    CustomColorSchemeImportCompleted(Result<Option<String>, String>),
     WindowControlVisibilityToggled(WindowControlKind),
     WindowControlSideSelected(WindowControlKind, WindowControlSide),
     WindowControlMoveRequested(WindowControlKind, WindowControlMoveDirection),

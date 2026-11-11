@@ -1,6 +1,8 @@
 # Matugen 配色
 
-Bennu 会读取 `$XDG_CONFIG_HOME/bennu/matugen.toml`（默认 `~/.config/bennu/matugen.toml`），并在文件变化时热更新所有已打开窗口。Matugen 是可选依赖；没有生成文件时，应用继续使用系统深浅色主题。
+Bennu 会读取 `$XDG_CONFIG_HOME/bennu/matugen.toml`（默认 `~/.config/bennu/matugen.toml`），并在文件变化时热更新所有已打开窗口。在设置 → 外观 → 配色里选“Matugen”才会使用它。一次生成会同时写入浅色和深色两套，Bennu 按设置里的深浅模式选用。Matugen 是可选依赖；没有生成文件时，Matugen 配色和默认配色一样。
+
+> 旧版本模板生成的文件（`version = 1`）不再支持，请用新模板重新生成一次。
 
 发行包中的模板位于：
 
@@ -39,12 +41,11 @@ output_path = "~/.config/bennu/matugen.toml"
 
 ## 直接使用 Matugen
 
-创建输出目录后，按桌面模式生成配色：
+创建输出目录后生成一次配色（浅色、深色两套一起写入，`-m` 选哪个都行）：
 
 ```bash
 mkdir -p ~/.config/bennu
-matugen image ~/Pictures/wallpaper.jpg -m dark
-matugen image ~/Pictures/wallpaper.jpg -m light
+matugen image ~/Pictures/wallpaper.jpg
 ```
 
-不需要配置 `post_hook`。有效输出会直接替换当前配色；删除输出文件会恢复系统主题；短暂或畸形写入会被忽略并保留上一套有效配色。
+不需要配置 `post_hook`。有效输出会直接替换当前配色；删除输出文件后 Matugen 配色回到和默认配色一样；短暂或畸形写入会被忽略并保留上一套有效配色。

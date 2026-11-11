@@ -40,56 +40,39 @@ fn desktop_and_brand_activation_files_expose_local_file_manager_contract() {
 }
 
 #[test]
-fn packaged_matugen_template_exports_every_runtime_color_role() {
+fn packaged_matugen_template_renders_to_a_file_the_app_reads() {
     let root = repository_root();
     let template = fs::read_to_string(root.join("packaging/matugen/bennu-colors.toml"))
         .expect("read Matugen template");
-    assert!(template.contains("mode = \"{{ mode }}\""));
-
-    for role in [
-        "background",
-        "on_background",
-        "surface",
-        "surface_dim",
-        "surface_bright",
-        "surface_container_lowest",
-        "surface_container_low",
-        "surface_container",
-        "surface_container_high",
-        "surface_container_highest",
-        "on_surface",
-        "on_surface_variant",
-        "outline",
-        "outline_variant",
-        "primary",
-        "on_primary",
-        "primary_container",
-        "on_primary_container",
-        "secondary",
-        "on_secondary",
-        "secondary_container",
-        "on_secondary_container",
-        "tertiary",
-        "on_tertiary",
-        "tertiary_container",
-        "on_tertiary_container",
-        "error",
-        "on_error",
-        "error_container",
-        "on_error_container",
-    ] {
-        assert!(
-            template.contains(&format!("{role} = \"{{{{ colors.{role}.default.hex }}}}\"")),
-            "missing Matugen role {role}"
-        );
+    // Matugen 把每个 {{ colors.<role>.<light|dark>.hex }} 换成 #RRGGBB；这里换成同一个色，
+    // 只验证模板和读取端对得上（版本、两套深浅、三种颜色的键名）。
+    let mut rendered = String::new();
+    let mut rest = template.as_str();
+    while let Some(start) = rest.find("{{") {
+        let end = rest[start..]
+            .find("}}")
+            .expect("closed template expression")
+            + start
+            + 2;
+        rendered.push_str(&rest[..start]);
+        rendered.push_str("#123456");
+        rest = &rest[end..];
     }
+    rendered.push_str(rest);
 
-    let instructions = fs::read_to_string(root.join("packaging/matugen/README.md"))
-        .expect("read Matugen instructions");
-    assert!(instructions.contains("/usr/share/bennu/matugen/bennu-colors.toml"));
-    assert!(instructions.contains("~/.config/bennu/matugen.toml"));
-    assert!(instructions.contains("-m dark"));
-    assert!(instructions.contains("-m light"));
+    bennu_theme::parse_matugen_colors(&rendered).expect("rendered template must be readable");
+    for mode in ["light", "dark"] {
+        for (key, role) in [
+            ("background", "surface"),
+            ("text", "on_surface"),
+            ("accent", "primary"),
+        ] {
+            assert!(
+                template.contains(&format!("{key} = \"{{{{ colors.{role}.{mode}.hex }}}}\"")),
+                "{mode}.{key}"
+            );
+        }
+    }
 }
 
 #[test]

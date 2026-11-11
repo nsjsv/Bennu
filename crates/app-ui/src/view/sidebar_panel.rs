@@ -59,7 +59,7 @@ pub(crate) const SIDEBAR_LIST_PADDING_TOP: f32 = 4.0;
 const SIDEBAR_LIST_PADDING_X: f32 = 8.0;
 const SIDEBAR_LIST_PADDING_BOTTOM: f32 = 12.0;
 
-/// 侧栏顶栏右边：设置按钮（不写标题，同 Nautilus）。
+/// 侧栏顶栏右边：设置按钮。不写标题：窗口内容就是当前目录，标题没有新信息。
 pub(crate) fn sidebar_settings_button() -> Element<'static, Message> {
     icon_button(themed_icon(
         IconSymbol::Settings,

@@ -146,13 +146,13 @@ pub fn list_row_style(
     }
 }
 
-/// 侧边栏行选中态：自 app-ui appearance.rs 下沉（portal FileChooser 侧栏
-/// 与主程序共用同一视觉）。primary container 底 + 圆角 8。
+/// 侧边栏行选中态（主程序、设置分类、portal FileChooser 共用）：中性灰底 + 圆角 8，
+/// 比悬停深一档。侧栏是导航，用中性灰；强调色留给选中的文件，两种“选中”不会混。
 pub fn selected_sidebar_item_style(theme: &Theme) -> container::Style {
     let colors = ui_colors(theme);
     container::Style {
-        background: Some(Background::Color(colors.primary_container)),
-        text_color: Some(colors.on_primary_container),
+        background: Some(Background::Color(colors.surface_container_highest)),
+        text_color: Some(colors.on_surface),
         border: Border {
             radius: 8.0.into(),
             ..Border::default()
@@ -588,12 +588,10 @@ mod tests {
     }
 
     #[test]
-    fn matugen_roles_flow_into_representative_shared_styles() {
-        for document in [
-            include_str!("../test-data/matugen-dark.toml"),
-            include_str!("../test-data/matugen-light.toml"),
-        ] {
-            let theme = crate::parse_matugen_theme(document).expect("fixture must be valid");
+    fn scheme_roles_flow_into_representative_shared_styles() {
+        let schemes = crate::ApplicationTheme::new(crate::AppearanceMode::Light);
+        for theme_mode in [crate::ThemeMode::Light, crate::ThemeMode::Dark] {
+            let theme = schemes.active(theme_mode, crate::ColorSchemePreset::Catppuccin);
             let colors = crate::ui_colors(&theme);
 
             let selected = selected_row_style(&theme);

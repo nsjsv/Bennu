@@ -5,7 +5,6 @@ use std::path::Path;
 use bennu_preview::preview_config::StoredPreviewPreferences;
 use bennu_sidebar::{StoredNetworkConnection, StoredSidebarFavorite};
 use bennu_state::{UserSettingsStore, USER_PREFERENCES_KEY};
-use bennu_theme::{StoredCustomColorScheme, StoredCustomColorSet};
 use rusqlite::{params, Connection};
 
 use super::*;
@@ -117,29 +116,7 @@ fn user_preferences_roundtrip_replace() {
         ],
         search_history: vec!["report".to_owned(), "images".to_owned()],
         theme_mode: "dark".to_owned(),
-        color_scheme: "custom".to_owned(),
-        custom_color_scheme: Some(StoredCustomColorScheme {
-            light: Some(StoredCustomColorSet {
-                background: "#ffffff".to_owned(),
-                surface: "#f6f8fa".to_owned(),
-                text: "#1f2328".to_owned(),
-                muted_text: "#59636e".to_owned(),
-                primary: "#0969da".to_owned(),
-                success: "#1a7f37".to_owned(),
-                warning: "#9a6700".to_owned(),
-                danger: "#d1242f".to_owned(),
-            }),
-            dark: Some(StoredCustomColorSet {
-                background: "#0d1117".to_owned(),
-                surface: "#151b23".to_owned(),
-                text: "#f0f6fc".to_owned(),
-                muted_text: "#9198a1".to_owned(),
-                primary: "#4493f8".to_owned(),
-                success: "#3fb950".to_owned(),
-                warning: "#d29922".to_owned(),
-                danger: "#f85149".to_owned(),
-            }),
-        }),
+        color_scheme: "nord".to_owned(),
         ..defaults
     };
 
@@ -161,19 +138,30 @@ fn user_preferences_roundtrip_replace() {
 /// 「融合导航栏 / 独立标题栏」设置已删除（所有窗口都用嵌入式顶栏）：旧库里的键
 /// 照常能读、不报错，下次保存时消失。
 #[test]
-fn retired_window_chrome_layout_key_is_ignored_and_dropped_on_save() {
-    let mut payload = serde_json::to_value(StoredUserPreferences::default()).unwrap();
-    payload.as_object_mut().unwrap().insert(
-        "window_chrome_layout".to_owned(),
-        serde_json::Value::from("separate_title_bar"),
-    );
+fn retired_keys_are_ignored_and_dropped_on_save() {
+    for (key, value) in [
+        (
+            "window_chrome_layout",
+            serde_json::json!("separate_title_bar"),
+        ),
+        (
+            "custom_color_scheme",
+            serde_json::json!({"light": {"background": "#ffffff"}, "dark": null}),
+        ),
+    ] {
+        let mut payload = serde_json::to_value(StoredUserPreferences::default()).unwrap();
+        payload
+            .as_object_mut()
+            .unwrap()
+            .insert(key.to_owned(), value);
 
-    let parsed: StoredUserPreferences =
-        serde_json::from_value(payload).expect("old document with the retired key parses");
+        let parsed: StoredUserPreferences =
+            serde_json::from_value(payload).expect("old document with a retired key parses");
 
-    assert_eq!(parsed, StoredUserPreferences::default());
-    let saved = serde_json::to_string(&parsed).unwrap();
-    assert!(!saved.contains("window_chrome_layout"));
+        assert_eq!(parsed, StoredUserPreferences::default(), "{key}");
+        let saved = serde_json::to_string(&parsed).unwrap();
+        assert!(!saved.contains(key), "{key}");
+    }
 }
 
 #[test]
@@ -301,7 +289,7 @@ const LEGACY_DOCUMENT: &str = r#"{
 /// 出现语义外的裁剪差异。布局变更必须经迁移评审，不许静默改。
 #[test]
 fn stored_user_preferences_default_json_layout_is_frozen() {
-    const FROZEN_DEFAULT_JSON: &str = "{\"network_list_thumbnail_downloads_enabled\":false,\"max_preview_file_bytes\":null,\"preview_text_size_bytes\":null,\"preview_image_size_bytes\":null,\"preview_video_size_bytes\":null,\"preview_audio_size_bytes\":null,\"preview_archive_size_bytes\":null,\"preview_document_size_bytes\":null,\"preview_sqlite_size_bytes\":null,\"preview_extension_rules\":null,\"preview_directory_expand_levels\":null,\"show_hidden_files\":false,\"language_setting\":\"system\",\"sidebar_width\":180.0,\"right_preview_panel_open\":false,\"right_preview_panel_width\":null,\"right_preview_preview_ratio\":null,\"sidebar_favorites\":null,\"network_connections\":[],\"terminal_emulator\":\"automatic\",\"terminal_shell\":null,\"file_operation_verification\":\"basic_metadata\",\"browser_view_mode\":\"columns\",\"columns_view_density\":2,\"list_view_density\":2,\"icons_view_density\":2,\"visible_column_count\":3,\"startup_location\":\"home\",\"startup_custom_directory\":{\"encoding\":\"unix_bytes\",\"bytes\":[]},\"save_view_state\":false,\"shortcuts\":[],\"list_view_columns\":[{\"kind\":\"name\",\"width\":320.0,\"visible\":true},{\"kind\":\"modified\",\"width\":168.0,\"visible\":true},{\"kind\":\"size\",\"width\":96.0,\"visible\":true},{\"kind\":\"kind\",\"width\":96.0,\"visible\":true},{\"kind\":\"owner\",\"width\":120.0,\"visible\":false},{\"kind\":\"group\",\"width\":120.0,\"visible\":false},{\"kind\":\"permissions\",\"width\":128.0,\"visible\":false},{\"kind\":\"accessed\",\"width\":168.0,\"visible\":false},{\"kind\":\"created\",\"width\":168.0,\"visible\":false}],\"list_sort_field\":\"name\",\"list_sort_direction\":\"ascending\",\"list_directory_size_display_mode\":\"item_count\",\"file_grouping\":null,\"window_controls\":[{\"kind\":\"minimize\",\"side\":\"right\",\"visible\":true},{\"kind\":\"maximize_restore\",\"side\":\"right\",\"visible\":true},{\"kind\":\"close\",\"side\":\"right\",\"visible\":true}],\"search_history\":[],\"last_search_scope\":null,\"theme_mode\":\"automatic\",\"color_scheme\":\"default\",\"custom_color_scheme\":null,\"launch_window_policy\":\"open_new_window\",\"column_width_adjust_mode\":\"per_column\",\"context_menu_layouts\":null,\"transfer_download_dir\":null,\"transfer_device_alias\":null,\"transfer_trusted_devices\":[],\"transfer_receive_enabled\":true,\"transfer_port\":53317,\"transfer_accept_mode\":\"accept_favorites\",\"transfer_receive_pin\":null}";
+    const FROZEN_DEFAULT_JSON: &str = "{\"network_list_thumbnail_downloads_enabled\":false,\"max_preview_file_bytes\":null,\"preview_text_size_bytes\":null,\"preview_image_size_bytes\":null,\"preview_video_size_bytes\":null,\"preview_audio_size_bytes\":null,\"preview_archive_size_bytes\":null,\"preview_document_size_bytes\":null,\"preview_sqlite_size_bytes\":null,\"preview_extension_rules\":null,\"preview_directory_expand_levels\":null,\"show_hidden_files\":false,\"language_setting\":\"system\",\"sidebar_width\":180.0,\"right_preview_panel_open\":false,\"right_preview_panel_width\":null,\"right_preview_preview_ratio\":null,\"sidebar_favorites\":null,\"network_connections\":[],\"terminal_emulator\":\"automatic\",\"terminal_shell\":null,\"file_operation_verification\":\"basic_metadata\",\"browser_view_mode\":\"columns\",\"columns_view_density\":2,\"list_view_density\":2,\"icons_view_density\":2,\"visible_column_count\":3,\"startup_location\":\"home\",\"startup_custom_directory\":{\"encoding\":\"unix_bytes\",\"bytes\":[]},\"save_view_state\":false,\"shortcuts\":[],\"list_view_columns\":[{\"kind\":\"name\",\"width\":320.0,\"visible\":true},{\"kind\":\"modified\",\"width\":168.0,\"visible\":true},{\"kind\":\"size\",\"width\":96.0,\"visible\":true},{\"kind\":\"kind\",\"width\":96.0,\"visible\":true},{\"kind\":\"owner\",\"width\":120.0,\"visible\":false},{\"kind\":\"group\",\"width\":120.0,\"visible\":false},{\"kind\":\"permissions\",\"width\":128.0,\"visible\":false},{\"kind\":\"accessed\",\"width\":168.0,\"visible\":false},{\"kind\":\"created\",\"width\":168.0,\"visible\":false}],\"list_sort_field\":\"name\",\"list_sort_direction\":\"ascending\",\"list_directory_size_display_mode\":\"item_count\",\"file_grouping\":null,\"window_controls\":[{\"kind\":\"minimize\",\"side\":\"right\",\"visible\":true},{\"kind\":\"maximize_restore\",\"side\":\"right\",\"visible\":true},{\"kind\":\"close\",\"side\":\"right\",\"visible\":true}],\"search_history\":[],\"last_search_scope\":null,\"theme_mode\":\"automatic\",\"color_scheme\":\"default\",\"launch_window_policy\":\"open_new_window\",\"column_width_adjust_mode\":\"per_column\",\"context_menu_layouts\":null,\"transfer_download_dir\":null,\"transfer_device_alias\":null,\"transfer_trusted_devices\":[],\"transfer_receive_enabled\":true,\"transfer_port\":53317,\"transfer_accept_mode\":\"accept_favorites\",\"transfer_receive_pin\":null}";
     let serialized = serde_json::to_string(&StoredUserPreferences::default())
         .expect("serialize stored preferences");
     assert_eq!(serialized, FROZEN_DEFAULT_JSON);

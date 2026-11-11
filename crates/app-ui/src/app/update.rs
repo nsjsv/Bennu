@@ -731,30 +731,26 @@ impl FileBrowser {
             Message::SearchServiceIncidentDetailsCopyRequested(kind) => {
                 self.copy_search_service_incident_details(kind)
             }
-            Message::SystemThemeDetected(theme) => {
-                self.application_theme.replace_system_fallback(theme);
+            Message::SystemModeChanged(system_mode) => {
+                crate::startup_trace::mark_once("system_mode_received");
+                self.application_theme.replace_system_mode(system_mode);
                 Task::none()
             }
-            Message::MatugenThemeUpdated(Ok(theme)) => {
-                self.application_theme.replace_matugen_override(theme);
+            Message::MatugenColorsUpdated(Ok(colors)) => {
+                self.application_theme.replace_matugen(colors);
                 Task::none()
             }
-            Message::MatugenThemeUpdated(Err(error)) => {
+            Message::MatugenColorsUpdated(Err(error)) => {
                 tracing::warn!(
                     target: "app_ui::matugen_theme",
                     error = %error,
-                    "matugen theme update was ignored"
+                    "matugen colors update was ignored"
                 );
                 Task::none()
             }
             Message::ThemeModeSelected(theme_mode) => self.select_theme_mode(theme_mode),
-            Message::ColorSchemeFamilySelected(family) => self.select_color_scheme_family(family),
             Message::ColorSchemePresetSelected(color_scheme) => {
                 self.select_color_scheme_preset(color_scheme)
-            }
-            Message::CustomColorSchemeImportPressed => self.import_custom_color_scheme(),
-            Message::CustomColorSchemeImportCompleted(outcome) => {
-                self.accept_custom_color_scheme_import(outcome)
             }
             Message::UserPreferencesSaved(result) => self.accept_user_preferences_saved(result),
             Message::AppConfigSaved(result) => self.accept_app_config_saved(result),
@@ -1191,7 +1187,7 @@ mod theme_selection_tests {
     }
 
     #[test]
-    fn matugen_selection_preserves_the_previous_mode() {
+    fn matugen_follows_the_selected_mode_like_every_other_scheme() {
         let mut user_config = config::default_user_config();
         user_config.theme_mode = ThemeMode::Light;
         user_config.color_scheme = ColorSchemePreset::Matugen;
@@ -1199,6 +1195,34 @@ mod theme_selection_tests {
 
         drop(browser.update(Message::ThemeModeSelected(ThemeMode::Dark)));
 
-        assert_eq!(browser.user_config.theme_mode, ThemeMode::Light);
+        assert_eq!(browser.user_config.theme_mode, ThemeMode::Dark);
+        assert!(
+            browser
+                .theme(browser.main_window)
+                .extended_palette()
+                .is_dark
+        );
+    }
+
+    #[test]
+    fn a_system_mode_change_restyles_the_windows_right_away() {
+        let (mut browser, _) = FileBrowser::new(config::default_user_config());
+        assert!(
+            !browser
+                .theme(browser.main_window)
+                .extended_palette()
+                .is_dark
+        );
+
+        drop(browser.update(Message::SystemModeChanged(
+            bennu_theme::AppearanceMode::Dark,
+        )));
+
+        assert!(
+            browser
+                .theme(browser.main_window)
+                .extended_palette()
+                .is_dark
+        );
     }
 }

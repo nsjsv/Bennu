@@ -1,23 +1,23 @@
 use std::fmt;
 
 use desktop_linux::{TerminalEmulator, TERMINAL_EMULATOR_OPTIONS};
-use iced::widget::{button, column, row, svg, Button, Column, Space, Svg};
-use iced::{window, Alignment, Element, Length, Theme};
+use iced::widget::Button;
+use iced::{window, Element, Length};
 
 use crate::app::FileBrowser;
 use crate::config::{
     ColumnWidthAdjustMode, LaunchWindowPolicy, StartupLocationPolicy, UiLanguageSetting,
 };
 use crate::model::{Message, SettingsCategory, SettingsSubpage};
-use bennu_preview::panel_text::readable_text;
-use bennu_theme::icons::{rotated_chevron_right_view, IconSymbol};
-use bennu_theme::{ColorSchemeFamily, ColorSchemePreset, ContrastWarnings, ThemeMode};
+use bennu_theme::icons::IconSymbol;
+use bennu_theme::ThemeMode;
 
 use super::about_settings::about_settings_sections;
 use super::application_logs::application_logs_sections;
 use super::auxiliary_window_layout::{
     auxiliary_sidebar_button, auxiliary_sidebar_list, AUXILIARY_SIDEBAR_WIDTH,
 };
+use super::color_scheme_picker::color_scheme_row;
 use super::context_menu_settings::context_menu_settings_section;
 use super::file_operation_verification_settings::file_operation_verification_options;
 use super::network_settings::network_thumbnails_row;
@@ -35,9 +35,8 @@ use super::window_control_settings::window_control_settings_row;
 use super::IconTone;
 use bennu_preview::window_shell::{split_window, HeaderBar, SplitPane};
 use bennu_theme::controls::dropdown;
-use bennu_theme::controls::{icon_button, normal_button};
-use bennu_theme::controls::{toggle_button_style, SegmentedChoice};
-use bennu_theme::typography::{CAPTION_SIZE, SMALL_SIZE};
+use bennu_theme::controls::icon_button;
+use bennu_theme::controls::SegmentedChoice;
 
 const SETTINGS_DROPDOWN_WIDTH: f32 = 220.0;
 
@@ -143,7 +142,7 @@ pub(crate) fn view_settings_window(
     split_window(sidebar, content, AUXILIARY_SIDEBAR_WIDTH, &shell)
 }
 
-/// 内容顶栏：标题是当前分类；二级页左边放后退（GNOME 设置的做法）。
+/// 内容顶栏：标题是当前分类；二级页左边放后退，回上一级的入口和标题在同一条上。
 fn settings_content_header(browser: &FileBrowser) -> HeaderBar<'static, Message> {
     match browser.settings_subpage {
         Some(SettingsSubpage::Preview) => HeaderBar::new().title(tr!("Preview settings")).start(
@@ -224,11 +223,7 @@ fn appearance_settings_sections(browser: &FileBrowser) -> Vec<Element<'_, Messag
         settings_group(
             tr!("Theme"),
             None,
-            vec![
-                theme_mode_row(browser),
-                color_scheme_setting_row(browser),
-                custom_color_scheme_import_row(browser),
-            ],
+            vec![theme_mode_row(browser), color_scheme_row(browser)],
         ),
         settings_group(
             tr!("Window controls"),
@@ -311,230 +306,16 @@ fn transfer_settings_sections(browser: &FileBrowser) -> Vec<Element<'_, Message>
 
 fn theme_mode_row(browser: &FileBrowser) -> SettingsRow<'static> {
     let selected = browser.user_config().theme_mode;
-    // Matugen 自带深浅，模式选择只显示不可点。
-    let selectable = browser.user_config().color_scheme != ColorSchemePreset::Matugen;
     let choices = ThemeMode::ALL
         .into_iter()
         .map(|mode| SegmentedChoice {
             label: mode.label(),
             selected: mode == selected,
-            message: selectable.then_some(Message::ThemeModeSelected(mode)),
+            message: Some(Message::ThemeModeSelected(mode)),
             tooltip: None,
         })
         .collect();
     choice_row(tr!("Mode"), None, choices)
-}
-
-fn color_scheme_setting_row(browser: &FileBrowser) -> SettingsRow<'_> {
-    custom_row(
-        column![
-            readable_text(tr!("Color scheme")),
-            color_scheme_grid(browser),
-        ]
-        .spacing(8),
-    )
-}
-
-fn custom_color_scheme_import_row(browser: &FileBrowser) -> SettingsRow<'_> {
-    let import = normal_button(
-        row![
-            super::themed_icon(IconSymbol::Download, IconTone::Normal, 14.0),
-            readable_text(tr!("Import JSON")),
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center),
-    )
-    .on_press(Message::CustomColorSchemeImportPressed);
-    let mut content = column![row![
-        readable_text(tr!("Custom color scheme")).width(Length::Fill),
-        import,
-    ]
-    .spacing(8)
-    .align_y(Alignment::Center)]
-    .spacing(5);
-
-    if browser.user_config().color_scheme == ColorSchemePreset::Custom {
-        let warnings = browser
-            .user_config()
-            .custom_color_scheme
-            .contrast_warnings(browser.active_appearance_mode());
-        if !warnings.is_empty() {
-            content = content.push(custom_color_scheme_contrast_warning(warnings));
-        }
-    }
-    if let Some(error) = &browser.custom_color_scheme_import_error {
-        content = content.push(
-            row![
-                super::themed_icon(IconSymbol::TriangleAlert, IconTone::Warning, 13.0),
-                readable_text(tr!("Import failed: %1", error)).size(CAPTION_SIZE),
-            ]
-            .spacing(5)
-            .align_y(Alignment::Center),
-        );
-    }
-
-    custom_row(content)
-}
-
-fn custom_color_scheme_contrast_warning(warnings: ContrastWarnings) -> Element<'static, Message> {
-    let label = match (warnings.background_text, warnings.surface_muted_text) {
-        (true, true) => tr!("Custom colors have low text contrast"),
-        (true, false) => tr!("Background and text contrast is below 2.4:1"),
-        (false, true) => tr!("Surface and muted text contrast is below 2.4:1"),
-        (false, false) => return Space::new().into(),
-    };
-    row![
-        super::themed_icon(IconSymbol::TriangleAlert, IconTone::Warning, 13.0),
-        readable_text(label).size(CAPTION_SIZE),
-    ]
-    .spacing(5)
-    .align_y(Alignment::Center)
-    .into()
-}
-
-fn color_scheme_grid(browser: &FileBrowser) -> Element<'_, Message> {
-    let mode = browser.active_appearance_mode();
-    let selected = browser.user_config().color_scheme.effective_for_mode(mode);
-    let expanded = browser.expanded_color_scheme_family;
-    let mut grid = Column::new().spacing(8).width(Length::Fill);
-
-    for families in ColorSchemeFamily::ALL.chunks(3) {
-        let mut family_row = row![].spacing(8).width(Length::Fill);
-        for family in families {
-            family_row =
-                family_row.push(color_scheme_family_card(browser, *family, mode, selected));
-        }
-        for _ in families.len()..3 {
-            family_row = family_row.push(
-                Space::new()
-                    .width(Length::FillPortion(1))
-                    .height(Length::Fixed(112.0)),
-            );
-        }
-        grid = grid.push(family_row);
-
-        if let Some(family) = expanded.filter(|family| families.contains(family)) {
-            grid = grid.push(color_scheme_style_row(browser, family, mode, selected));
-        }
-    }
-
-    grid.into()
-}
-
-fn color_scheme_family_card(
-    browser: &FileBrowser,
-    family: ColorSchemeFamily,
-    mode: bennu_theme::AppearanceMode,
-    selected: ColorSchemePreset,
-) -> Element<'static, Message> {
-    let preview_preset = if selected.family() == family {
-        browser.user_config().color_scheme
-    } else {
-        family.default_preset()
-    };
-    let is_selected = selected.family() == family;
-    // 展开箭头放在标题右侧，整组居中；单样式家族不渲染箭头。
-    let mut title = row![readable_text(family.display_label()).size(CAPTION_SIZE)]
-        .spacing(4)
-        .align_y(Alignment::Center);
-    if family.styles(mode).len() > 1 {
-        let expanded = browser.expanded_color_scheme_family == Some(family);
-        title = title.push(
-            rotated_chevron_right_view(if expanded { 90.0 } else { 0.0 }, 13.0)
-                .style(super::icon_tone_style(IconTone::Normal)),
-        );
-    }
-    // 列必须占满按钮宽度，align_x 居中才以卡片中线为基准。
-    let mut content = column![
-        theme_preview(browser.theme_preview_colors(preview_preset), 48.0),
-        title,
-    ]
-    .spacing(6)
-    .align_x(Alignment::Center)
-    .width(Length::Fill);
-    // 勾居中放在卡片正下方；未选中不渲染勾，标题保持居中。
-    if is_selected {
-        content = content.push(super::themed_icon(
-            IconSymbol::Check,
-            IconTone::Selected,
-            13.0,
-        ));
-    }
-    button(content)
-        .on_press(Message::ColorSchemeFamilySelected(family))
-        .width(Length::FillPortion(1))
-        .height(Length::Fixed(112.0))
-        .padding(8)
-        .style(toggle_button_style(is_selected))
-        .into()
-}
-
-fn color_scheme_style_row(
-    browser: &FileBrowser,
-    family: ColorSchemeFamily,
-    mode: bennu_theme::AppearanceMode,
-    selected: ColorSchemePreset,
-) -> Element<'static, Message> {
-    let mut styles = row![].spacing(6).width(Length::Fill);
-    for preset in family.styles(mode) {
-        let is_selected = selected == *preset;
-        // 勾放在标题右侧，整组居中；未选中不渲染勾。
-        let mut label = row![readable_text(preset.style_label(mode)).size(SMALL_SIZE)]
-            .spacing(4)
-            .align_y(Alignment::Center);
-        if is_selected {
-            label = label.push(super::themed_icon(
-                IconSymbol::Check,
-                IconTone::Selected,
-                12.0,
-            ));
-        }
-        styles = styles.push(
-            button(
-                column![
-                    theme_preview(browser.theme_preview_colors(*preset), 28.0),
-                    label,
-                ]
-                .spacing(4)
-                .align_x(Alignment::Center)
-                .width(Length::Fill),
-            )
-            .on_press(Message::ColorSchemePresetSelected(*preset))
-            .width(Length::FillPortion(1))
-            .height(Length::Fixed(62.0))
-            .padding(5)
-            .style(toggle_button_style(is_selected)),
-        );
-    }
-
-    styles.into()
-}
-
-fn theme_preview(colors: [iced::Color; 3], size: f32) -> Svg<'static, Theme> {
-    Svg::new(svg::Handle::from_memory(theme_preview_svg(colors)))
-        .width(Length::Fixed(size))
-        .height(Length::Fixed(size))
-}
-
-fn theme_preview_svg(colors: [iced::Color; 3]) -> Vec<u8> {
-    let [background, primary, text] = colors;
-    let background = color_hex(background);
-    let primary = color_hex(primary);
-    let text = color_hex(text);
-    format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 48 48\"><defs><clipPath id=\"circle\"><circle cx=\"24\" cy=\"24\" r=\"22\"/></clipPath></defs><g clip-path=\"url(#circle)\"><path fill=\"{background}\" d=\"M0 0h48L0 48z\"/><path fill=\"{primary}\" d=\"M48 0v48H0z\"/><path d=\"M0 48 48 0\" fill=\"none\" stroke=\"{text}\" stroke-width=\"3\"/></g><circle cx=\"24\" cy=\"24\" r=\"22\" fill=\"none\" stroke=\"{text}\" stroke-width=\"3\"/></svg>"
-    )
-    .into_bytes()
-}
-
-fn color_hex(color: iced::Color) -> String {
-    let channel = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
-    format!(
-        "#{:02x}{:02x}{:02x}",
-        channel(color.r),
-        channel(color.g),
-        channel(color.b)
-    )
 }
 
 /// 语言名用它自己的写法（同 GNOME、KDE），不随界面语言翻译。
@@ -729,26 +510,4 @@ fn startup_custom_directory_row(browser: &FileBrowser) -> SettingsRow<'_> {
         unit: None,
         trailing: Vec::new(),
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn theme_preview_clips_both_fills_and_divider_to_the_circle() {
-        let svg = String::from_utf8(theme_preview_svg([
-            iced::Color::from_rgb8(1, 2, 3),
-            iced::Color::from_rgb8(4, 5, 6),
-            iced::Color::from_rgb8(7, 8, 9),
-        ]))
-        .expect("preview SVG is UTF-8");
-
-        assert!(svg.contains("fill=\"#010203\""));
-        assert!(svg.contains("fill=\"#040506\""));
-        assert!(svg.contains("stroke=\"#070809\""));
-        let divider = svg.find("M0 48 48 0").expect("diagonal divider");
-        let clipped_group_end = svg.find("</g>").expect("clipped preview group");
-        assert!(divider < clipped_group_end);
-    }
 }

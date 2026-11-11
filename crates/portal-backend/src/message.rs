@@ -25,6 +25,8 @@ impl From<PreviewMessage> for Message {
 #[derive(Clone)]
 pub(crate) enum Message {
     Bridge(Arc<BridgeEvent>),
+    /// 系统深浅色变了（启动时也来一次）：所有打开的选择窗立刻换色。
+    SystemModeChanged(bennu_theme::AppearanceMode),
     Session(window::Id, SessionMessage),
     WindowClosed(window::Id),
     KeyPressed {

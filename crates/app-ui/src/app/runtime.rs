@@ -11,13 +11,12 @@ use file_core::watch_directory;
 use iced::futures::SinkExt;
 use iced::{Subscription, Task};
 
-use super::events::system_theme;
 use super::FileBrowser;
 use crate::command_line::ApplicationLaunchRequest;
 use crate::model::{Message, X11DndMessage};
 use crate::startup_rendering::StartupRenderingEnvironment;
 use crate::startup_trace;
-use bennu_theme::{fallback_theme, read_matugen_theme_file, AppearanceMode};
+use bennu_theme::{read_matugen_colors_file, AppearanceMode};
 
 const DIRECTORY_WATCH_DEBOUNCE: Duration = Duration::from_millis(250);
 const DIRECTORY_WATCH_CHANNEL_SIZE: usize = 8;
@@ -117,8 +116,29 @@ pub(super) fn directory_watch_subscription(path: PathBuf) -> Subscription<Messag
     Subscription::run_with(path, directory_watch_stream)
 }
 
-pub(super) fn matugen_theme_subscription(path: PathBuf) -> Subscription<Message> {
-    Subscription::run_with(path, matugen_theme_stream)
+pub(super) fn matugen_colors_subscription(path: PathBuf) -> Subscription<Message> {
+    Subscription::run_with(path, matugen_colors_stream)
+}
+
+/// 系统深浅色：启动时报一次，之后系统每切换一次报一次（“自动”模式跟着变）。
+pub(super) fn system_mode_subscription() -> Subscription<Message> {
+    Subscription::run(system_mode_stream)
+}
+
+fn system_mode_stream() -> impl iced::futures::Stream<Item = Message> {
+    use iced::futures::StreamExt;
+    desktop_linux::portal_prefers_dark_changes()
+        .map(|prefers_dark| Message::SystemModeChanged(system_mode(prefers_dark)))
+        // 连不上 portal 时上面只出一项就结束；流结束会被 iced 重新拉起，反复连 portal。
+        .chain(iced::futures::stream::pending())
+}
+
+fn system_mode(prefers_dark: bool) -> AppearanceMode {
+    if prefers_dark {
+        AppearanceMode::Dark
+    } else {
+        AppearanceMode::Light
+    }
 }
 
 pub(super) fn sidebar_device_refresh_subscription() -> Subscription<Message> {
@@ -181,7 +201,7 @@ fn directory_watch_stream(path: &PathBuf) -> impl iced::futures::Stream<Item = M
     })
 }
 
-fn matugen_theme_stream(path: &PathBuf) -> impl iced::futures::Stream<Item = Message> + 'static {
+fn matugen_colors_stream(path: &PathBuf) -> impl iced::futures::Stream<Item = Message> + 'static {
     let path = path.clone();
     let directory = path
         .parent()
@@ -190,7 +210,7 @@ fn matugen_theme_stream(path: &PathBuf) -> impl iced::futures::Stream<Item = Mes
     iced::stream::channel(DIRECTORY_WATCH_CHANNEL_SIZE, async move |mut output| {
         if let Err(error) = tokio::fs::create_dir_all(&directory).await {
             let _ = output
-                .send(Message::MatugenThemeUpdated(Err(format!(
+                .send(Message::MatugenColorsUpdated(Err(format!(
                     "could not create matugen theme directory {}: {error}",
                     directory.display()
                 ))))
@@ -201,8 +221,8 @@ fn matugen_theme_stream(path: &PathBuf) -> impl iced::futures::Stream<Item = Mes
         let watcher = watch_directory(directory, DIRECTORY_WATCH_DEBOUNCE);
 
         if output
-            .send(Message::MatugenThemeUpdated(
-                read_matugen_theme_file(&path).await,
+            .send(Message::MatugenColorsUpdated(
+                read_matugen_colors_file(&path).await,
             ))
             .await
             .is_err()
@@ -214,7 +234,7 @@ fn matugen_theme_stream(path: &PathBuf) -> impl iced::futures::Stream<Item = Mes
             Ok(watcher) => watcher,
             Err(error) => {
                 let _ = output
-                    .send(Message::MatugenThemeUpdated(Err(format!(
+                    .send(Message::MatugenColorsUpdated(Err(format!(
                         "could not watch matugen theme directory: {error}"
                     ))))
                     .await;
@@ -224,8 +244,8 @@ fn matugen_theme_stream(path: &PathBuf) -> impl iced::futures::Stream<Item = Mes
 
         while watcher.recv().await.is_some() {
             if output
-                .send(Message::MatugenThemeUpdated(
-                    read_matugen_theme_file(&path).await,
+                .send(Message::MatugenColorsUpdated(
+                    read_matugen_colors_file(&path).await,
                 ))
                 .await
                 .is_err()
@@ -383,19 +403,6 @@ impl Drop for FileDndShutdown {
     }
 }
 
-pub(super) fn system_theme_command() -> Task<Message> {
-    Task::perform(
-        async {
-            let theme = tokio::task::spawn_blocking(system_theme)
-                .await
-                .unwrap_or_else(|_| fallback_theme(AppearanceMode::Light));
-            startup_trace::mark_once("system_theme_detected");
-            theme
-        },
-        Message::SystemThemeDetected,
-    )
-}
-
 pub(super) fn scrollbar_auto_hide_command(generation: u64) -> Task<Message> {
     Task::perform(
         async move {
@@ -409,21 +416,22 @@ pub(super) fn scrollbar_auto_hide_command(generation: u64) -> Task<Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bennu_theme::{ui_colors, AppearanceMode};
+    use bennu_theme::MatugenColors;
     use iced::futures::StreamExt;
-    use iced::Theme;
     use std::fs;
     use tokio::time::timeout;
 
+    const GENERATED: &str = include_str!("../../../bennu-theme/test-data/matugen.toml");
+
     async fn next_matugen_update(
         stream: &mut std::pin::Pin<Box<impl iced::futures::Stream<Item = Message>>>,
-    ) -> Result<Option<Theme>, String> {
+    ) -> Result<Option<MatugenColors>, String> {
         match timeout(Duration::from_secs(3), stream.next())
             .await
             .expect("Matugen watcher timed out")
             .expect("Matugen watcher ended")
         {
-            Message::MatugenThemeUpdated(update) => update,
+            Message::MatugenColorsUpdated(update) => update,
             message => panic!("unexpected watcher message: {message:?}"),
         }
     }
@@ -432,39 +440,31 @@ mod tests {
     async fn matugen_stream_reads_initial_atomic_updates_and_deletion() {
         let directory = tempfile::tempdir().expect("create temporary config directory");
         let path = directory.path().join("matugen.toml");
-        fs::write(
-            &path,
-            include_str!("../../../bennu-theme/test-data/matugen-dark.toml"),
-        )
-        .expect("write initial Matugen theme");
+        fs::write(&path, GENERATED).expect("write initial Matugen colors");
 
-        let mut stream = Box::pin(matugen_theme_stream(&path));
+        let mut stream = Box::pin(matugen_colors_stream(&path));
         let initial = next_matugen_update(&mut stream)
             .await
-            .expect("initial Matugen theme must parse")
-            .expect("initial Matugen theme must exist");
-        assert_eq!(ui_colors(&initial).mode, AppearanceMode::Dark);
+            .expect("initial Matugen colors must parse")
+            .expect("initial Matugen colors must exist");
 
         let replacement = directory.path().join("matugen.toml.next");
-        fs::write(
-            &replacement,
-            include_str!("../../../bennu-theme/test-data/matugen-light.toml"),
-        )
-        .expect("write replacement Matugen theme");
-        fs::rename(&replacement, &path).expect("atomically replace Matugen theme");
+        let regenerated = GENERATED.replace("#65558f", "#8f5565");
+        fs::write(&replacement, &regenerated).expect("write replacement Matugen colors");
+        fs::rename(&replacement, &path).expect("atomically replace Matugen colors");
 
         let updated = next_matugen_update(&mut stream)
             .await
-            .expect("replacement Matugen theme must parse")
-            .expect("replacement Matugen theme must exist");
-        assert_eq!(ui_colors(&updated).mode, AppearanceMode::Light);
+            .expect("replacement Matugen colors must parse")
+            .expect("replacement Matugen colors must exist");
+        assert_ne!(updated, initial);
 
         fs::write(&replacement, "version = 1\nmode = \"dark\"\n")
-            .expect("write malformed Matugen theme");
-        fs::rename(&replacement, &path).expect("atomically replace with malformed theme");
+            .expect("write an old-format Matugen file");
+        fs::rename(&replacement, &path).expect("atomically replace with the old format");
         assert!(next_matugen_update(&mut stream).await.is_err());
 
-        fs::remove_file(&path).expect("remove Matugen theme");
+        fs::remove_file(&path).expect("remove Matugen colors");
         assert!(next_matugen_update(&mut stream)
             .await
             .expect("deletion must be accepted")

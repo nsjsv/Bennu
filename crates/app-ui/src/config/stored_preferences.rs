@@ -7,7 +7,6 @@ use std::path::Path;
 use bennu_preview::preview_config::StoredPreviewPreferences;
 use bennu_sidebar::{StoredNetworkConnection, StoredSidebarFavorite};
 use bennu_state::StoredPath;
-use bennu_theme::StoredCustomColorScheme;
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_VIEW_DENSITY_INDEX: u8 = 2;
@@ -89,8 +88,6 @@ pub(crate) struct StoredUserPreferences {
     pub theme_mode: String,
     #[serde(default = "default_color_scheme")]
     pub color_scheme: String,
-    #[serde(default)]
-    pub custom_color_scheme: Option<StoredCustomColorScheme>,
     #[serde(default = "default_launch_window_policy")]
     pub launch_window_policy: String,
     /// 多栏视图栏宽的调整方式;缺省 = 每栏独立(旧数据行为)。
@@ -209,7 +206,6 @@ impl Default for StoredUserPreferences {
             last_search_scope: None,
             theme_mode: default_theme_mode(),
             color_scheme: default_color_scheme(),
-            custom_color_scheme: None,
             launch_window_policy: default_launch_window_policy(),
             column_width_adjust_mode: default_column_width_adjust_mode(),
             context_menu_layouts: None,

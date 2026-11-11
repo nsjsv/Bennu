@@ -11,7 +11,6 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Maximize", "最大化"),
     ("Restore", "恢复"),
     ("Select", "选择"),
-    ("Import", "导入"),
     // 窗口标题
     ("Settings - Bennu", "设置 - Bennu"),
     ("Properties - Bennu", "属性 - Bennu"),

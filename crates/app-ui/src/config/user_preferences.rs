@@ -36,7 +36,7 @@ use bennu_preview::preview_config::{
     preview_directory_expand_levels_from_stored, preview_extension_rules_from_stored,
     preview_size_limits_from_stored,
 };
-use bennu_theme::{default_custom_color_scheme, ColorSchemePreset, CustomColorScheme, ThemeMode};
+use bennu_theme::{ColorSchemePreset, ThemeMode};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct UserPreferences {
@@ -74,7 +74,6 @@ pub(crate) struct UserPreferences {
     pub(crate) last_search_scope: Option<LastSearchScope>,
     pub(crate) theme_mode: ThemeMode,
     pub(crate) color_scheme: ColorSchemePreset,
-    pub(crate) custom_color_scheme: CustomColorScheme,
     pub(crate) context_menus: ContextMenuPreferences,
     pub(crate) transfer_download_dir: Option<PathBuf>,
     pub(crate) transfer_device_alias: Option<String>,
@@ -127,7 +126,6 @@ impl UserPreferences {
             last_search_scope: config.last_search_scope.clone(),
             theme_mode: config.theme_mode,
             color_scheme: config.color_scheme,
-            custom_color_scheme: config.custom_color_scheme.clone(),
             context_menus: config.context_menus.clone(),
             transfer_download_dir: config.transfer_download_dir.clone(),
             transfer_device_alias: config.transfer_device_alias.clone(),
@@ -175,7 +173,6 @@ impl UserPreferences {
         config.last_search_scope = self.last_search_scope.clone();
         config.theme_mode = self.theme_mode;
         config.color_scheme = self.color_scheme;
-        config.custom_color_scheme = self.custom_color_scheme.clone();
         config.context_menus = self.context_menus.clone();
         config.transfer_download_dir = self.transfer_download_dir.clone();
         config.transfer_device_alias = self.transfer_device_alias.clone();
@@ -263,9 +260,6 @@ impl UserPreferences {
         });
         stored.theme_mode = self.theme_mode.config_value().to_owned();
         stored.color_scheme = self.color_scheme.config_value().to_owned();
-        stored.custom_color_scheme = self
-            .custom_color_scheme
-            .to_stored_unless_default(&default_custom_color_scheme());
         stored.context_menu_layouts = Some(stored_context_menu_layouts(&self.context_menus));
         stored.transfer_download_dir = self
             .transfer_download_dir
@@ -289,7 +283,7 @@ impl UserPreferences {
         let default_preferences = Self::from_user_config(default);
         let mut unrecognized = UnrecognizedSettings::default();
         let stored_theme_mode = ThemeMode::from_config_value(&stored.theme_mode);
-        let stored_color_scheme = ColorSchemePreset::from_config_value(&stored.color_scheme);
+        let stored_color_scheme = ColorSchemePreset::from_stored_value(&stored.color_scheme);
         // 主题模式与配色要么一起用、要么一起回落：只认一半会拼出用户没选过的组合。
         if stored_theme_mode.is_none() {
             unrecognized.note("theme_mode");
@@ -311,17 +305,6 @@ impl UserPreferences {
         );
         let list_view_preferences =
             list_view_preferences_from_stored(&stored, &default_preferences, &mut unrecognized);
-        if stored
-            .custom_color_scheme
-            .as_ref()
-            .is_some_and(CustomColorScheme::stored_has_unreadable_set)
-        {
-            unrecognized.note("custom_color_scheme");
-        }
-        let custom_color_scheme = CustomColorScheme::from_stored(
-            stored.custom_color_scheme.as_ref(),
-            &default_preferences.custom_color_scheme,
-        );
         let window_controls =
             window_controls_from_stored(&stored, &default_preferences, &mut unrecognized);
         let context_menus =
@@ -451,7 +434,6 @@ impl UserPreferences {
             }),
             theme_mode,
             color_scheme,
-            custom_color_scheme,
             context_menus,
             transfer_download_dir: stored
                 .transfer_download_dir

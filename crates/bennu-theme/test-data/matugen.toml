@@ -1,0 +1,12 @@
+# 用 packaging/matugen/bennu-colors.toml 生成的样例（同一张壁纸的浅色、深色）。
+version = 2
+
+[light]
+background = "#fdf7ff"
+text = "#1d1b20"
+accent = "#65558f"
+
+[dark]
+background = "#141218"
+text = "#e6e0e9"
+accent = "#cfbdfe"

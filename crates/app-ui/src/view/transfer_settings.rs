@@ -50,7 +50,7 @@ pub(super) fn transfer_receive_rows(browser: &FileBrowser) -> Vec<SettingsRow<'_
     rows
 }
 
-/// 接收确认三档；"所有人自动收"时附注一直是红字提醒（同官方 Quick Save 的提示）。
+/// 接收确认三档；"所有人自动收"时附注一直是红字提醒：同一网络里谁都能直接往这台电脑塞文件。
 fn accept_mode_row(browser: &FileBrowser) -> SettingsRow<'static> {
     let current = browser.user_config().transfer_accept_mode;
     let choices = TransferAcceptMode::ALL
@@ -74,7 +74,7 @@ fn accept_mode_row(browser: &FileBrowser) -> SettingsRow<'static> {
     choice_row(tr!("Confirm incoming files"), note, choices)
 }
 
-/// PIN 行：明文输入（要念给别人听，同官方）；保存了非空的才生效。
+/// PIN 行：明文输入（要念给发送方听）；保存了非空的才生效。
 fn pin_row<'a>(browser: &'a FileBrowser, input: &'a str) -> SettingsRow<'a> {
     let note = if browser.transfer_pin_invalid {
         RowNote::Error(tr!("The PIN cannot be empty."))

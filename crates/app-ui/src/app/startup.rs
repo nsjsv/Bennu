@@ -168,8 +168,6 @@ impl FileBrowser {
             crate::network_connections::NetworkConnectionState::from_saved_connections(
                 user_config.network_connections.clone(),
             );
-        self.application_theme
-            .replace_custom_color_scheme(user_config.custom_color_scheme.clone());
         self.user_config = user_config;
         self.refresh_current_language();
         // 设置页设备名输入框显示生效别名（配置值优先，缺省 hostname）。
@@ -336,26 +334,6 @@ mod tests {
         )));
 
         assert_eq!(browser.transfer_port_input, "50000");
-    }
-
-    #[test]
-    fn loaded_custom_color_scheme_replaces_the_runtime_theme_snapshot() {
-        let mut user_config = config::default_user_config();
-        user_config.theme_mode = ThemeMode::Light;
-        user_config.color_scheme = ColorSchemePreset::Custom;
-        user_config.custom_color_scheme.light.background = iced::Color::from_rgb8(1, 2, 3);
-        let (mut browser, _) = FileBrowser::new(config::ui_thread_startup_config());
-
-        drop(browser.accept_startup_environment(startup_environment(
-            PathBuf::from("/home/user"),
-            user_config,
-            PathBuf::from("/tmp/state.sqlite"),
-        )));
-
-        assert_eq!(
-            browser.theme_preview_colors(ColorSchemePreset::Custom)[0],
-            iced::Color::from_rgb8(1, 2, 3)
-        );
     }
 
     #[test]

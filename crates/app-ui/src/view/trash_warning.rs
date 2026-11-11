@@ -101,15 +101,13 @@ pub(super) fn trash_warning_panel(browser: &FileBrowser) -> Option<Element<'_, M
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bennu_theme::{parse_matugen_theme, ui_colors};
+    use bennu_theme::{ui_colors, AppearanceMode, ApplicationTheme, ColorSchemePreset, ThemeMode};
 
     #[test]
     fn trash_warning_uses_tertiary_roles_in_both_modes() {
-        for document in [
-            include_str!("../../../bennu-theme/test-data/matugen-dark.toml"),
-            include_str!("../../../bennu-theme/test-data/matugen-light.toml"),
-        ] {
-            let theme = parse_matugen_theme(document).expect("fixture must be valid");
+        let schemes = ApplicationTheme::new(AppearanceMode::Light);
+        for theme_mode in [ThemeMode::Light, ThemeMode::Dark] {
+            let theme = schemes.active(theme_mode, ColorSchemePreset::Default);
             let colors = ui_colors(&theme);
             let style = trash_warning_style(&theme);
 

@@ -1,16 +1,15 @@
-//! FileChooser 窗口的启动主题解析。与主程序走同一条构造链路
-//! （`bennu_theme::ApplicationTheme::active`），保证两种进程呈现同一套
-//! 配色：显式预设/Custom 按存储值解析，matugen 仅在选中时生效，其余
-//! 情况回退系统深浅检测。portal 进程常驻，主题在每次开窗时重新调用
-//! 本解析（见 main.rs 的 open_picker_window），否则会锁死在登录时刻；
-//! 窗口存续期间不做热跟随。
+//! FileChooser 窗口的主题解析。与主程序走同一条构造链路
+//! （`bennu_theme::ApplicationTheme::active`），保证两种进程呈现同一套配色：
+//! 配色偏好从主程序的状态库读，Matugen 仅在选中时读，系统深浅色由
+//! daemon 订阅系统设置后传进来。portal 进程常驻，每次开窗和系统设置变化时都重新
+//! 解析，否则会锁死在登录时刻。
 
 use std::path::Path;
 
 use bennu_state::UserSettingsStore;
 use bennu_theme::{
-    default_custom_color_scheme, fallback_theme, parse_matugen_theme, ApplicationTheme,
-    ColorSchemePreset, CustomColorScheme, StoredCustomColorScheme, ThemeMode,
+    parse_matugen_colors, AppearanceMode, ApplicationTheme, ColorSchemePreset, MatugenColors,
+    ThemeMode,
 };
 use iced::Theme;
 use serde::{Deserialize, Serialize};
@@ -19,34 +18,29 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct StoredAppearance {
     pub(crate) theme_mode: ThemeMode,
     pub(crate) color_scheme: ColorSchemePreset,
-    pub(crate) custom_color_scheme: CustomColorScheme,
 }
 
-pub(crate) fn resolve_startup_theme() -> Theme {
-    let detected = detected_mode();
-    let mut theme_state = ApplicationTheme::new(fallback_theme(detected));
-    match read_stored_appearance(&state_database_path()) {
-        Some(appearance) => {
-            theme_state.replace_custom_color_scheme(appearance.custom_color_scheme.clone());
-            // matugen 覆盖只在显式选中时加载；Default/预设绝不能被生成文件换色。
-            if appearance.color_scheme == ColorSchemePreset::Matugen {
-                theme_state.replace_matugen_override(load_matugen_override());
-            }
-            theme_state.active(appearance.theme_mode, appearance.color_scheme)
-        }
-        // 状态库缺失/损坏 = 未设置：跟随系统深浅 + 默认配色。
-        None => theme_state.active(ThemeMode::Automatic, ColorSchemePreset::Default),
-    }
+pub(crate) fn resolve_theme(system_mode: AppearanceMode) -> Theme {
+    let appearance = read_stored_appearance(&state_database_path());
+    // Matugen 文件只在显式选中时读；默认和出名配色绝不会被生成文件换色。
+    let matugen = appearance
+        .as_ref()
+        .filter(|appearance| appearance.color_scheme == ColorSchemePreset::Matugen)
+        .and_then(|_| load_matugen_colors());
+    compose(system_mode, appearance.as_ref(), matugen)
 }
 
-fn detected_mode() -> bennu_theme::AppearanceMode {
-    // dark-light 在 Linux 走 async-std 的 block_on，主线程可同步调用；
-    // 检测失败（无 portal 会话等）回退浅色，与主程序启动检测同一兜底。
-    match dark_light::detect() {
-        Ok(dark_light::Mode::Dark) => bennu_theme::AppearanceMode::Dark,
-        Ok(dark_light::Mode::Light) | Ok(dark_light::Mode::Unspecified) | Err(_) => {
-            bennu_theme::AppearanceMode::Light
-        }
+/// 状态库缺失/损坏 = 未设置：跟随系统深浅 + 默认配色。
+fn compose(
+    system_mode: AppearanceMode,
+    appearance: Option<&StoredAppearance>,
+    matugen: Option<MatugenColors>,
+) -> Theme {
+    let mut theme = ApplicationTheme::new(system_mode);
+    theme.replace_matugen(matugen);
+    match appearance {
+        Some(appearance) => theme.active(appearance.theme_mode, appearance.color_scheme),
+        None => theme.active(ThemeMode::Automatic, ColorSchemePreset::Default),
     }
 }
 
@@ -55,15 +49,13 @@ pub(crate) fn state_database_path() -> std::path::PathBuf {
     file_core::app_dirs::app_data_dir().join("state.sqlite")
 }
 
-/// 设置文档里外观用到的三个键，缺省值与主程序的设置文档一致（旧数据没有这些键）。
+/// 设置文档里外观用到的两个键，缺省值与主程序的设置文档一致（旧数据没有这些键）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AppearanceSettings {
     #[serde(default = "default_theme_mode")]
     theme_mode: String,
     #[serde(default = "default_color_scheme")]
     color_scheme: String,
-    #[serde(default)]
-    custom_color_scheme: Option<StoredCustomColorScheme>,
 }
 
 impl Default for AppearanceSettings {
@@ -71,7 +63,6 @@ impl Default for AppearanceSettings {
         Self {
             theme_mode: default_theme_mode(),
             color_scheme: default_color_scheme(),
-            custom_color_scheme: None,
         }
     }
 }
@@ -97,102 +88,92 @@ fn read_stored_appearance(db_path: &Path) -> Option<StoredAppearance> {
         }
     };
     let theme_mode = ThemeMode::from_config_value(&stored.theme_mode)?;
-    let color_scheme = ColorSchemePreset::from_config_value(&stored.color_scheme)?;
-    let custom_color_scheme = CustomColorScheme::from_stored(
-        stored.custom_color_scheme.as_ref(),
-        &default_custom_color_scheme(),
-    );
+    // 退役的配色值按主程序同一规则读成后继配色。
+    let color_scheme = ColorSchemePreset::from_stored_value(&stored.color_scheme)?;
     Some(StoredAppearance {
         theme_mode,
         color_scheme,
-        custom_color_scheme,
     })
 }
 
-fn load_matugen_override() -> Option<Theme> {
+fn load_matugen_colors() -> Option<MatugenColors> {
     let path = file_core::app_dirs::app_config_dir().join("matugen.toml");
     let document = std::fs::read_to_string(path).ok()?;
-    parse_matugen_theme(&document).ok()
+    parse_matugen_colors(&document).ok()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bennu_theme::{ui_colors, AppearanceMode};
+    use bennu_theme::ui_colors;
 
-    /// 组合规则与主程序 ApplicationTheme::active 一致；这里用注入的
-    /// StoredAppearance 验证优先级，绕开 50 字段的存储结构构造。
-    fn compose(
-        fallback: Theme,
-        appearance: Option<&StoredAppearance>,
-        matugen: Option<Theme>,
-    ) -> Theme {
-        let mut theme_state = ApplicationTheme::new(fallback);
-        if let Some(appearance) = appearance {
-            theme_state.replace_custom_color_scheme(appearance.custom_color_scheme.clone());
-            if appearance.color_scheme == ColorSchemePreset::Matugen {
-                theme_state.replace_matugen_override(matugen);
-            }
-            return theme_state.active(appearance.theme_mode, appearance.color_scheme);
-        }
-        theme_state.active(ThemeMode::Automatic, ColorSchemePreset::Default)
-    }
+    const GENERATED: &str = include_str!("../../bennu-theme/test-data/matugen.toml");
 
     fn stored(theme_mode: ThemeMode, color_scheme: ColorSchemePreset) -> StoredAppearance {
         StoredAppearance {
             theme_mode,
             color_scheme,
-            custom_color_scheme: default_custom_color_scheme(),
         }
     }
 
     #[test]
-    fn missing_preferences_follow_the_detected_system_mode() {
-        let light = fallback_theme(AppearanceMode::Light);
-        let dark = fallback_theme(AppearanceMode::Dark);
+    fn missing_preferences_follow_the_system_mode() {
+        let dark = compose(AppearanceMode::Dark, None, None);
+        assert!(dark.extended_palette().is_dark);
+        assert!(
+            !compose(AppearanceMode::Light, None, None)
+                .extended_palette()
+                .is_dark
+        );
+    }
 
+    #[test]
+    fn the_same_preferences_give_the_main_window_and_the_chooser_the_same_colors() {
+        let preferences = stored(ThemeMode::Dark, ColorSchemePreset::Nord);
+        let chooser = compose(AppearanceMode::Light, Some(&preferences), None);
+        let main_window = ApplicationTheme::new(AppearanceMode::Light)
+            .active(ThemeMode::Dark, ColorSchemePreset::Nord);
+        assert_eq!(ui_colors(&chooser), ui_colors(&main_window));
+    }
+
+    #[test]
+    fn matugen_colors_apply_only_when_selected() {
+        let generated = parse_matugen_colors(GENERATED).expect("fixture must be valid");
+        let selected = stored(ThemeMode::Light, ColorSchemePreset::Matugen);
+        let with_file = compose(AppearanceMode::Light, Some(&selected), Some(generated));
         assert_eq!(
-            ui_colors(&compose(light.clone(), None, None)),
-            ui_colors(&light)
+            with_file.palette().background,
+            iced::Color::from_rgb8(0xfd, 0xf7, 0xff)
         );
-        // automatic + default = 系统回退原样，预设不会因 matugen 文件存在而换色。
-        let with_unused_override = compose(dark.clone(), None, Some(light));
-        assert_eq!(ui_colors(&with_unused_override), ui_colors(&dark));
+
+        let default = stored(ThemeMode::Light, ColorSchemePreset::Default);
+        assert_eq!(
+            ui_colors(&compose(AppearanceMode::Light, Some(&selected), None)),
+            ui_colors(&compose(AppearanceMode::Light, Some(&default), None))
+        );
     }
 
     #[test]
-    fn explicit_preset_ignores_a_valid_matugen_file() {
-        let fallback = fallback_theme(AppearanceMode::Dark);
-        let generated = parse_matugen_theme(include_str!(
-            "../../bennu-theme/test-data/matugen-light.toml"
-        ))
-        .expect("fixture must be valid");
+    fn a_retired_color_scheme_is_read_as_its_successor() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let database = directory.path().join("state.sqlite");
+        UserSettingsStore::new(&database).expect("create store");
+        rusqlite::Connection::open(&database)
+            .unwrap()
+            .execute(
+                "INSERT INTO user_preferences (preference_key, payload_json, updated_at_ms)
+                 VALUES (?1, ?2, 1)",
+                [
+                    bennu_state::USER_PREFERENCES_KEY,
+                    r#"{"theme_mode":"dark","color_scheme":"catppuccin-frappe"}"#,
+                ],
+            )
+            .unwrap();
 
-        let theme = compose(
-            fallback.clone(),
-            Some(&stored(ThemeMode::Dark, ColorSchemePreset::Nord)),
-            Some(generated),
-        );
-        assert!(theme.extended_palette().is_dark);
-        // Nord 深色 ≠ 系统回退背景，也 ≠ matugen 生成背景。
-        assert_ne!(ui_colors(&theme), ui_colors(&fallback));
-    }
+        let appearance = read_stored_appearance(&database).expect("stored appearance");
 
-    #[test]
-    fn selected_matugen_wins_and_missing_file_falls_back() {
-        let fallback = fallback_theme(AppearanceMode::Light);
-        let generated = parse_matugen_theme(include_str!(
-            "../../bennu-theme/test-data/matugen-light.toml"
-        ))
-        .expect("fixture must be valid");
-        let generated_background = generated.palette().background;
-
-        let selected = stored(ThemeMode::Automatic, ColorSchemePreset::Matugen);
-        let with_override = compose(fallback.clone(), Some(&selected), Some(generated));
-        assert_eq!(with_override.palette().background, generated_background);
-
-        let without_override = compose(fallback.clone(), Some(&selected), None);
-        assert_eq!(ui_colors(&without_override), ui_colors(&fallback));
+        assert_eq!(appearance.theme_mode, ThemeMode::Dark);
+        assert_eq!(appearance.color_scheme, ColorSchemePreset::Catppuccin);
     }
 
     #[test]

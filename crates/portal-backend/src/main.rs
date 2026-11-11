@@ -51,6 +51,8 @@ static BRIDGE_SLOT: OnceLock<Mutex<Option<mpsc::Receiver<BridgeEvent>>>> = OnceL
 struct PickerDaemon {
     windows: HashMap<window::Id, PickerSession>,
     theme: Theme,
+    /// 最近一次收到的系统深浅色；开窗、系统设置变化时据此重算 `theme`。
+    system_mode: bennu_theme::AppearanceMode,
     keyboard_modifiers: keyboard::Modifiers,
     /// 最新指针位置（拖宽增量基准；与主程序 FileBrowser.cursor_position
     /// 同一角色）。全部窗口的 CursorMoved 都更新，按下时读取。
@@ -66,12 +68,12 @@ struct PickerDaemon {
 
 impl PickerDaemon {
     fn new() -> Self {
-        // 初值只覆盖进程启动到首次开窗之间的空窗期；权威主题在每次
-        // 开窗时重解析（见 open_picker_window），构造链路与主程序一致。
-        let theme = theme::resolve_startup_theme();
+        // 系统设置订阅的第一项到达前按浅色；之后每次开窗和系统设置变化都重算。
+        let system_mode = bennu_theme::AppearanceMode::Light;
         PickerDaemon {
             windows: HashMap::new(),
-            theme,
+            theme: theme::resolve_theme(system_mode),
+            system_mode,
             keyboard_modifiers: keyboard::Modifiers::default(),
             cursor_position: None,
             sidebar_resize: HashMap::new(),
@@ -87,6 +89,11 @@ fn boot() -> (PickerDaemon, Task<Message>) {
 
 fn update(daemon: &mut PickerDaemon, message: Message) -> Task<Message> {
     match message {
+        Message::SystemModeChanged(system_mode) => {
+            daemon.system_mode = system_mode;
+            daemon.theme = theme::resolve_theme(system_mode);
+            Task::none()
+        }
         Message::Bridge(bridge_event) => {
             // 桥事件携带一次性 reply sender，本体不可 Clone；Message 的
             // Clone bound 是 iced 面板/控件的静态要求，桥事件从不进控件
@@ -224,10 +231,9 @@ fn update(daemon: &mut PickerDaemon, message: Message) -> Task<Message> {
 }
 
 fn open_picker_window(daemon: &mut PickerDaemon, invocation: PickerInvocation) -> Task<Message> {
-    // WHY：进程常驻后主题不能锁死在登录时刻——用户在主程序切换深浅
-    // 色后，旧主题会跟随整个会话。每次开窗重读存储偏好（本地毫秒级
-    // IO），等价于旧模型「每请求一进程、每次新鲜解析」的行为。
-    daemon.theme = theme::resolve_startup_theme();
+    // WHY：进程常驻后主题不能锁死在登录时刻——用户在主程序换配色后，
+    // 旧主题会跟随整个会话。每次开窗重读存储偏好（本地毫秒级 IO）。
+    daemon.theme = theme::resolve_theme(daemon.system_mode);
     let PickerInvocation {
         request_path,
         spec,
@@ -649,6 +655,7 @@ pub(crate) fn test_daemon() -> PickerDaemon {
     PickerDaemon {
         windows: HashMap::new(),
         theme: Theme::Light,
+        system_mode: bennu_theme::AppearanceMode::Light,
         keyboard_modifiers: keyboard::Modifiers::default(),
         cursor_position: None,
         sidebar_resize: HashMap::new(),

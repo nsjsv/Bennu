@@ -12,6 +12,7 @@ pub mod open;
 pub mod open_with;
 mod storage_device_visibility;
 pub mod storage_devices;
+mod system_appearance;
 pub mod wayland_dnd;
 pub mod x11_dnd;
 
@@ -57,6 +58,7 @@ pub use storage_devices::{
     StorageDeviceId, StorageDeviceMountState, StorageDeviceProvider, StorageDeviceProviderFailure,
     StorageDeviceRemoval, StorageDeviceSnapshot,
 };
+pub use system_appearance::portal_prefers_dark_changes;
 pub use wayland_dnd::{
     spawn_wayland_file_dnd, WaylandDndCommandError, WaylandDndController, WaylandDndDropOrigin,
     WaylandDndDropPosition, WaylandDndError, WaylandDndEvent, WaylandDndFileDrop,

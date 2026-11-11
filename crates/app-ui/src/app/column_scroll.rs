@@ -7,9 +7,7 @@ use iced::{Rectangle, Task, Vector};
 
 use super::FileBrowser;
 use crate::model::{BrowserPaneId, ColumnBrowserViewport, Message, ScrollbarRegion};
-use crate::three_column_view::{
-    column_directories, sidebar_underlay_width_for_pane, COLUMN_RESIZE_DIVIDER_WIDTH,
-};
+use crate::three_column_view::{column_directories, COLUMN_RESIZE_DIVIDER_WIDTH};
 use crate::view::column_browser_scroll_id;
 
 struct ColumnBrowserRevealColumn {
@@ -17,7 +15,6 @@ struct ColumnBrowserRevealColumn {
     column_left_x: f32,
     column_right_x: f32,
     real_content_width: f32,
-    viewport_underlay_width: f32,
 }
 
 impl ColumnBrowserRevealColumn {
@@ -26,14 +23,12 @@ impl ColumnBrowserRevealColumn {
         column_left_x: f32,
         column_right_x: f32,
         real_content_width: f32,
-        viewport_underlay_width: f32,
     ) -> Self {
         Self {
             target: target.into(),
             column_left_x,
             column_right_x,
             real_content_width,
-            viewport_underlay_width,
         }
     }
 }
@@ -52,8 +47,7 @@ impl Operation<Message> for ColumnBrowserRevealColumn {
         state: &mut dyn ScrollableOperation,
     ) {
         if id == Some(&self.target) {
-            let viewport_width =
-                programmatic_viewport_width(bounds.width, self.viewport_underlay_width);
+            let viewport_width = bounds.width;
             let max_offset_x = (content_bounds.width - bounds.width).max(0.0);
             let current_offset_x = translation.x.max(0.0);
             let target_offset_x = reveal_horizontal_range_scroll_offset(
@@ -167,7 +161,6 @@ impl FileBrowser {
             column_left_x,
             column_right_x,
             real_content_width,
-            sidebar_underlay_width_for_pane(self, pane_id),
         ))
     }
 }
@@ -223,10 +216,6 @@ fn real_column_content_width(
 
 fn programmatic_max_scroll_offset(real_content_width: f32, viewport_width: f32) -> f32 {
     (real_content_width - viewport_width).max(0.0)
-}
-
-fn programmatic_viewport_width(scrollable_bounds_width: f32, viewport_underlay_width: f32) -> f32 {
-    (scrollable_bounds_width - viewport_underlay_width).max(0.0)
 }
 
 fn column_browser_viewport_from_scroll(offset_x: f32, width: f32) -> Option<ColumnBrowserViewport> {
@@ -287,12 +276,6 @@ mod tests {
         );
         assert_eq!(programmatic_max_scroll_offset(five_columns, 500.0), 420.0);
         assert_eq!(programmatic_max_scroll_offset(five_columns, 1000.0), 0.0);
-    }
-
-    #[test]
-    fn programmatic_viewport_width_excludes_sidebar_underlay() {
-        assert_eq!(programmatic_viewport_width(1000.0, 200.0), 800.0);
-        assert_eq!(programmatic_viewport_width(100.0, 200.0), 0.0);
     }
 
     #[test]

@@ -21,6 +21,7 @@ use crate::{Message, PickerDaemon};
 pub(crate) fn subscription(daemon: &PickerDaemon) -> Subscription<Message> {
     let mut subscriptions = vec![
         Subscription::run(bridge_events),
+        Subscription::run(system_mode_changes),
         iced::window::close_events().map(Message::WindowClosed),
         iced::event::listen_with(|event, status, window_id| match event {
             // 键盘事件无差别转发（Captured 也收）：补全面板的 ↑/↓/Tab
@@ -114,6 +115,21 @@ pub(crate) fn subscription(daemon: &PickerDaemon) -> Subscription<Message> {
             .push(video_preview_subscription(path, generation, position).map(Message::Preview));
     }
     Subscription::batch(subscriptions)
+}
+
+/// 系统深浅色（主程序 runtime.rs 同一来源）：先报当前值，之后每切换一次报一次。
+fn system_mode_changes() -> impl Stream<Item = Message> {
+    use iced::futures::StreamExt;
+    desktop_linux::portal_prefers_dark_changes()
+        .map(|prefers_dark| {
+            Message::SystemModeChanged(if prefers_dark {
+                bennu_theme::AppearanceMode::Dark
+            } else {
+                bennu_theme::AppearanceMode::Light
+            })
+        })
+        // 连不上 portal 时上面只出一项就结束；流结束会被 iced 重新拉起，反复连 portal。
+        .chain(iced::futures::stream::pending())
 }
 
 /// 媒体订阅挂载判定（纯查询，单测锚点）：四路订阅的活跃快照，

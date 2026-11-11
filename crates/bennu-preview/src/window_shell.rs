@@ -1,6 +1,6 @@
 //! 窗口外壳：全部窗口（主窗口、设置、属性、传输、LocalSend、预览、portal 对话框）
 //! 只从这里的两种骨架里选一种——只有一块内容的 [`single_window`]，侧栏 + 内容的
-//! [`split_window`]。标题和窗口按钮都在窗口自己的顶栏里（嵌入式，GNOME 风格）。
+//! [`split_window`]。标题和窗口按钮都在窗口自己的顶栏里，不用系统标题栏。
 //!
 //! 窗口按钮的位置只在这里决定：靠左的按钮放在最左那条顶栏的最前面，靠右的放在
 //! 最右那条顶栏的最后面。调用方不自己拼按钮。窗口管理（按钮、拖动、缩放的消息）
@@ -160,17 +160,20 @@ where
     ])
     .width(Length::Fixed((sidebar_width - DIVIDER_WIDTH).max(0.0)))
     .height(Length::Fill)
+    .clip(true)
     .style(sidebar_surface_style);
     let divider = container(Space::new())
         .width(Length::Fixed(DIVIDER_WIDTH))
         .height(Length::Fill)
         .style(divider_style);
+    // 两栏各自裁到自己的范围：内容区横向滚出去的东西（多栏视图左边的栏）不会画到侧栏上。
     let content = container(column![
         header_bar(content.header, HeaderEdges::Trailing, shell),
         content.body,
     ])
     .width(Length::Fill)
     .height(Length::Fill)
+    .clip(true)
     .style(content_surface_style);
 
     resize_frame(
@@ -424,10 +427,11 @@ fn content_surface_style(theme: &Theme) -> container::Style {
 }
 
 /// 侧栏面：贴边平铺、没有圆角和描边，只靠底色和内容区区分（层次由配色决定）。
+/// 侧栏比内容区“陷下去”一层（深色下更暗），导航和内容一眼分得开。
 fn sidebar_surface_style(theme: &Theme) -> container::Style {
     let colors = ui_colors(theme);
     container::Style {
-        background: Some(Background::Color(colors.surface_container_low)),
+        background: Some(Background::Color(colors.surface_dim)),
         text_color: Some(colors.on_surface),
         ..container::Style::default()
     }

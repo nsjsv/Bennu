@@ -300,15 +300,13 @@ pub(crate) fn faded_drag_preview_pill_style(theme: &Theme, fade: f32) -> contain
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bennu_theme::{parse_matugen_theme, ui_colors};
+    use bennu_theme::{ui_colors, AppearanceMode, ApplicationTheme, ColorSchemePreset, ThemeMode};
 
     #[test]
-    fn generated_light_and_dark_roles_drive_representative_surfaces() {
-        for document in [
-            include_str!("../../bennu-theme/test-data/matugen-dark.toml"),
-            include_str!("../../bennu-theme/test-data/matugen-light.toml"),
-        ] {
-            let theme = parse_matugen_theme(document).expect("fixture must be valid");
+    fn scheme_roles_drive_representative_surfaces_in_both_modes() {
+        let schemes = ApplicationTheme::new(AppearanceMode::Light);
+        for theme_mode in [ThemeMode::Light, ThemeMode::Dark] {
+            let theme = schemes.active(theme_mode, ColorSchemePreset::Gruvbox);
             let colors = ui_colors(&theme);
 
             let app = app_content_style(&theme);

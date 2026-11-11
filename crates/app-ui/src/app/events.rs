@@ -1,8 +1,7 @@
 use iced::keyboard;
-use iced::{event, mouse, window, Event, Theme};
+use iced::{event, mouse, window, Event};
 
 use crate::model::{Message, X11DndMessage};
-use bennu_theme::{fallback_theme, AppearanceMode};
 
 pub(super) fn global_event_message(
     event: Event,
@@ -96,16 +95,6 @@ fn pointer_pressed_message(
         }
         _ => None,
     }
-}
-
-pub(super) fn system_theme() -> Theme {
-    let mode = match dark_light::detect() {
-        Ok(dark_light::Mode::Dark) => AppearanceMode::Dark,
-        Ok(dark_light::Mode::Light) | Ok(dark_light::Mode::Unspecified) | Err(_) => {
-            AppearanceMode::Light
-        }
-    };
-    fallback_theme(mode)
 }
 
 #[cfg(test)]

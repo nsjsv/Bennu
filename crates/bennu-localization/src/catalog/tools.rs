@@ -10,6 +10,7 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Target size per file", "每个文件的目标体积"),
     ("Level", "级别"),
     ("Low", "低"),
+    ("Medium", "中"),
     ("High", "高"),
     ("Resize", "尺寸"),
     ("Frame rate", "帧率"),

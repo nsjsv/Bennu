@@ -116,7 +116,7 @@ use bennu_preview::video_preview::video_preview_subscription;
 
 use bennu_preview::preview_loading::{classify_preview_path, PreviewPathKind};
 use bennu_preview::preview_message::PreviewMessage;
-use bennu_theme::{fallback_theme, AppearanceMode, ApplicationTheme};
+use bennu_theme::{AppearanceMode, ApplicationTheme};
 
 use crate::app::application_shutdown::ApplicationShutdownPhase;
 use crate::app::archive_creation::ArchiveCreationState;
@@ -126,8 +126,8 @@ use crate::app::column_resize::ColumnResizeDrag;
 use crate::app::convert::ConvertState;
 use crate::app::events::global_event_message;
 use crate::app::runtime::{
-    desktop_activation_subscription, directory_watch_subscription, matugen_theme_subscription,
-    sidebar_device_refresh_subscription, system_theme_command, wayland_file_dnd_subscription,
+    desktop_activation_subscription, directory_watch_subscription, matugen_colors_subscription,
+    sidebar_device_refresh_subscription, system_mode_subscription, wayland_file_dnd_subscription,
     x11_file_dnd_subscription,
 };
 use crate::app::scrollbar::{ScrollbarState, SCROLLBAR_ANIMATION_INTERVAL};
@@ -359,8 +359,6 @@ pub(crate) struct FileBrowser {
     /// 设置页文件条目预览中悬停展开的组锚点;None = 无展开。
     pub(crate) context_menu_preview_expansion: Option<FileAreaMenuItem>,
     pub(crate) settings_subpage: Option<SettingsSubpage>,
-    pub(crate) expanded_color_scheme_family: Option<bennu_theme::ColorSchemeFamily>,
-    pub(crate) custom_color_scheme_import_error: Option<String>,
     pub(crate) search_service: SearchServiceState,
     pub(crate) search_workspace: Option<SearchWorkspaceState>,
     pub(crate) search_history_interaction: crate::model::SearchHistoryInteraction,
@@ -457,17 +455,17 @@ impl FileBrowser {
             .resolve(self.system_language)
     }
 
-    pub(crate) fn active_appearance_mode(&self) -> bennu_theme::AppearanceMode {
-        self.application_theme
-            .effective_mode(self.user_config.theme_mode)
-    }
-
-    pub(crate) fn theme_preview_colors(
+    /// 设置页缩略图用的颜色：和换上这套配色后真正的颜色同源。
+    pub(crate) fn color_scheme_roles(
         &self,
         color_scheme: bennu_theme::ColorSchemePreset,
-    ) -> [iced::Color; 3] {
+    ) -> bennu_theme::UiColorRoles {
         self.application_theme
-            .preview_colors(self.user_config.theme_mode, color_scheme)
+            .scheme_roles(self.user_config.theme_mode, color_scheme)
+    }
+
+    pub(crate) fn matugen_colors_available(&self) -> bool {
+        self.application_theme.matugen_available()
     }
 
     pub(crate) fn advance_window_animation_frame(&mut self) -> Task<Message> {
@@ -747,8 +745,6 @@ impl FileBrowser {
             context_menu_settings_drag: None,
             context_menu_preview_expansion: None,
             settings_subpage: None,
-            expanded_color_scheme_family: None,
-            custom_color_scheme_import_error: None,
             search_service,
             search_workspace: None,
             search_history_interaction: crate::model::SearchHistoryInteraction::default(),
@@ -799,12 +795,10 @@ impl FileBrowser {
             next_pane_id: 1,
             next_icon_grid_expansion_session_id: 1,
             next_list_expansion_follow_session_id: 1,
-            application_theme: ApplicationTheme::new(fallback_theme(AppearanceMode::Light)),
+            // 读到系统设置之前按浅色。
+            application_theme: ApplicationTheme::new(AppearanceMode::Light),
             application_shutdown_phase: ApplicationShutdownPhase::Running,
         };
-        browser
-            .application_theme
-            .replace_custom_color_scheme(user_config.custom_color_scheme);
         browser.refresh_current_language();
         browser.refresh_column_width_reference_content_width();
         startup_trace::mark_once("file_browser_new_ready");
@@ -817,7 +811,6 @@ impl FileBrowser {
             browser,
             Task::batch([
                 startup_environment_command(startup_rendering_environment),
-                system_theme_command(),
                 ensure_search_service_command(initial_search_service_request),
                 thumbnail_cache_trimming,
             ]),
@@ -855,7 +848,10 @@ impl FileBrowser {
             );
         }
         subscriptions.push(sidebar_device_refresh_subscription());
-        subscriptions.push(matugen_theme_subscription(config::matugen_theme_file_path()));
+        subscriptions.push(matugen_colors_subscription(
+            config::matugen_theme_file_path(),
+        ));
+        subscriptions.push(system_mode_subscription());
         if let Some(runtime) = &self.file_manager_activation {
             subscriptions.push(desktop_activation_subscription(Arc::clone(runtime)));
         }

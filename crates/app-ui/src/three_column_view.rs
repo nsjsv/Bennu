@@ -24,12 +24,8 @@ use crate::file_entry_view::{
 };
 use crate::formatting::empty_directory_message;
 use crate::input_blocking_space::input_blocking_space;
-use crate::model::{
-    BrowserPaneId, BrowserPaneLayout, ExpandedDirectoryStatus, Message, ScrollbarRegion, SplitAxis,
-};
-use crate::view::{
-    column_browser_scroll_id, rename_field, rename_input_id, translated_with_width_overflow,
-};
+use crate::model::{BrowserPaneId, ExpandedDirectoryStatus, Message, ScrollbarRegion};
+use crate::view::{column_browser_scroll_id, rename_field, rename_input_id};
 use crate::virtual_range::{initial_virtual_range, virtual_range_for_viewport, VirtualRange};
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::controls::inline_text_field;
@@ -116,15 +112,7 @@ pub(crate) fn column_browser_view<'a>(
     let visible_column_count = rendered_directories
         .len()
         .max(browser.user_config().visible_column_count);
-    let sidebar_underlay_width = sidebar_underlay_width_for_pane(browser, pane.id);
     let mut columns = Row::new().spacing(0).height(Length::Fill);
-    if sidebar_underlay_width > f32::EPSILON {
-        columns = columns.push(
-            Space::new()
-                .width(Length::Fixed(sidebar_underlay_width))
-                .height(Length::Fill),
-        );
-    }
 
     for index in 0..visible_column_count {
         if let Some(directory) = rendered_directories.get(index) {
@@ -187,16 +175,6 @@ pub(crate) fn column_browser_view<'a>(
         ScrollbarAxis::Horizontal,
         8.0,
     );
-    let column_content = if sidebar_underlay_width > f32::EPSILON {
-        translated_with_width_overflow(
-            column_content,
-            -sidebar_underlay_width,
-            0.0,
-            sidebar_underlay_width,
-        )
-    } else {
-        column_content
-    };
 
     mouse_area(
         container(column_content)
@@ -216,34 +194,6 @@ pub(crate) fn column_browser_view<'a>(
     .on_enter(Message::ColumnBrowserCursorEntered(pane.id))
     .on_exit(Message::ColumnBrowserCursorExited(pane.id))
     .into()
-}
-
-pub(crate) fn sidebar_underlay_width_for_pane(
-    browser: &FileBrowser,
-    pane_id: BrowserPaneId,
-) -> f32 {
-    if pane_starts_at_sidebar_edge(browser.pane_layout, pane_id) {
-        browser.sidebar_width
-    } else {
-        0.0
-    }
-}
-
-fn pane_starts_at_sidebar_edge(layout: BrowserPaneLayout, pane_id: BrowserPaneId) -> bool {
-    match layout {
-        BrowserPaneLayout::Single { active } => active == pane_id,
-        BrowserPaneLayout::Split {
-            axis: SplitAxis::Horizontal,
-            first,
-            ..
-        } => first == pane_id,
-        BrowserPaneLayout::Split {
-            axis: SplitAxis::Vertical,
-            first,
-            second,
-            ..
-        } => first == pane_id || second == pane_id,
-    }
 }
 
 fn directory_column<'a>(
@@ -891,47 +841,6 @@ mod tests {
             geometry.entry_padding.right,
             (COLUMN_ENTRY_PADDING[1] as f32 * scale).round()
         );
-    }
-
-    #[test]
-    fn sidebar_underlay_only_applies_to_panes_touching_sidebar_edge() {
-        let first = BrowserPaneId(1);
-        let second = BrowserPaneId(2);
-
-        assert!(pane_starts_at_sidebar_edge(
-            BrowserPaneLayout::Single { active: first },
-            first,
-        ));
-        assert!(pane_starts_at_sidebar_edge(
-            BrowserPaneLayout::Split {
-                axis: SplitAxis::Horizontal,
-                first,
-                second,
-                active: first,
-                first_portion: 500,
-            },
-            first,
-        ));
-        assert!(!pane_starts_at_sidebar_edge(
-            BrowserPaneLayout::Split {
-                axis: SplitAxis::Horizontal,
-                first,
-                second,
-                active: second,
-                first_portion: 500,
-            },
-            second,
-        ));
-        assert!(pane_starts_at_sidebar_edge(
-            BrowserPaneLayout::Split {
-                axis: SplitAxis::Vertical,
-                first,
-                second,
-                active: second,
-                first_portion: 500,
-            },
-            second,
-        ));
     }
 
     #[test]

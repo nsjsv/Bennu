@@ -1533,6 +1533,7 @@ name = "desktop-linux"
 version = "0.3.7"
 dependencies = [
  "display-renderer",
+ "futures-util",
  "gio",
  "smithay-client-toolkit 0.19.2",
  "tempfile",
@@ -4652,7 +4653,6 @@ dependencies = [
  "bennu-sidebar",
  "bennu-state",
  "bennu-theme",
- "dark-light",
  "desktop-linux",
  "display-renderer",
  "file-core",

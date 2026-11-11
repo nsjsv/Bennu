@@ -1,82 +1,44 @@
 use super::*;
 use crate::config::StoredFavoriteTransferDevice;
 
-const CUSTOM_JSON: &str = r##"{
-    "version": 1,
-    "light": {
-        "background": "#ffffff",
-        "surface": "#f6f8fa",
-        "text": "#1f2328",
-        "muted_text": "#59636e",
-        "primary": "#0969da",
-        "success": "#1a7f37",
-        "warning": "#9a6700",
-        "danger": "#d1242f"
-    },
-    "dark": {
-        "background": "#0d1117",
-        "surface": "#151b23",
-        "text": "#f0f6fc",
-        "muted_text": "#9198a1",
-        "primary": "#4493f8",
-        "success": "#3fb950",
-        "warning": "#d29922",
-        "danger": "#f85149"
+#[test]
+fn retired_color_schemes_are_read_as_their_successor_without_a_warning() {
+    for (retired, successor) in [
+        ("catppuccin-frappe", ColorSchemePreset::Catppuccin),
+        ("gruvbox-hard", ColorSchemePreset::Gruvbox),
+        ("tokyo-night-storm", ColorSchemePreset::TokyoNight),
+        ("github-dimmed", ColorSchemePreset::Default),
+        ("custom", ColorSchemePreset::Default),
+    ] {
+        let mut stored = UserPreferences::from_user_config(&default_user_config()).to_stored();
+        stored.theme_mode = "dark".to_owned();
+        stored.color_scheme = retired.to_owned();
+
+        let interpreted = UserPreferences::from_stored(stored, &default_user_config());
+
+        assert_eq!(interpreted.preferences.color_scheme, successor, "{retired}");
+        // 用户选的深浅不会因为配色退役被一起重置。
+        assert_eq!(interpreted.preferences.theme_mode, ThemeMode::Dark);
+        assert!(interpreted.unrecognized.into_keys().is_empty(), "{retired}");
+        assert_eq!(
+            interpreted.preferences.to_stored().color_scheme,
+            successor.config_value()
+        );
     }
-}"##;
-
-#[test]
-fn custom_color_scheme_roundtrips_and_invalid_modes_fall_back_independently() {
-    let default = default_user_config();
-    let imported = CustomColorScheme::from_json(CUSTOM_JSON).expect("valid custom scheme");
-    let mut config = default.clone();
-    config.custom_color_scheme = imported.clone();
-    config.color_scheme = ColorSchemePreset::Custom;
-
-    let stored = config.user_preferences().to_stored();
-    let restored = UserPreferences::from_stored(stored, &default).preferences;
-    assert_eq!(restored.custom_color_scheme, imported);
-    assert_eq!(restored.color_scheme, ColorSchemePreset::Custom);
-
-    let mut partially_invalid = config.user_preferences().to_stored();
-    let custom = partially_invalid
-        .custom_color_scheme
-        .as_mut()
-        .expect("stored custom scheme");
-    custom.dark.as_mut().expect("stored dark set").text = "bad".to_owned();
-    let restored = UserPreferences::from_stored(partially_invalid, &default).preferences;
-    assert_eq!(restored.custom_color_scheme.light, imported.light);
-    assert_eq!(
-        restored.custom_color_scheme.dark,
-        default.custom_color_scheme.dark
-    );
 }
 
 #[test]
-fn the_built_in_custom_colors_survive_saving_unchanged() {
-    let default = default_user_config();
-    let mut config = default.clone();
-    config.color_scheme = ColorSchemePreset::Custom;
+fn an_unknown_color_scheme_still_counts_as_unreadable() {
+    let mut stored = UserPreferences::from_user_config(&default_user_config()).to_stored();
+    stored.color_scheme = "sepia".to_owned();
 
-    let stored = config.user_preferences().to_stored();
-    assert_eq!(stored.custom_color_scheme, None);
-    let restored = UserPreferences::from_stored(stored, &default).preferences;
+    let interpreted = UserPreferences::from_stored(stored, &default_user_config());
 
-    // 默认配色里弱化文字带透明度，存成 #RRGGBB 会丢掉；不写才能原样回来。
-    assert_eq!(restored.custom_color_scheme, default.custom_color_scheme);
-    assert!(restored.custom_color_scheme.light.muted_text.a < 1.0);
-}
-
-#[test]
-fn missing_custom_snapshot_uses_default_without_affecting_old_selection() {
-    let mut stored = StoredUserPreferences::default();
-    stored.color_scheme = "custom".to_owned();
-    let restored = UserPreferences::from_stored(stored, &default_user_config()).preferences;
-    assert_eq!(restored.color_scheme, ColorSchemePreset::Custom);
     assert_eq!(
-        restored.custom_color_scheme,
-        default_user_config().custom_color_scheme
+        interpreted.preferences.color_scheme,
+        ColorSchemePreset::Default
     );
+    assert_eq!(interpreted.unrecognized.into_keys(), vec!["color_scheme"]);
 }
 
 #[test]

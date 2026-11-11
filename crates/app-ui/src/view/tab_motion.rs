@@ -13,23 +13,6 @@ where
     Element::new(Translated {
         content: content.into(),
         offset: Vector::new(x, y),
-        extra_width: 0.0,
-    })
-}
-
-pub(crate) fn translated_with_width_overflow<'a, Message>(
-    content: impl Into<Element<'a, Message>>,
-    x: f32,
-    y: f32,
-    extra_width: f32,
-) -> Element<'a, Message>
-where
-    Message: 'a,
-{
-    Element::new(Translated {
-        content: content.into(),
-        offset: Vector::new(x, y),
-        extra_width,
     })
 }
 
@@ -39,7 +22,6 @@ where
 {
     content: Element<'a, Message, Theme, Renderer>,
     offset: Vector,
-    extra_width: f32,
 }
 
 impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
@@ -67,28 +49,13 @@ where
         renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
-        let content_size = self.content.as_widget().size();
-        let child_limits = if self.extra_width > f32::EPSILON {
-            layout::Limits::with_compression(
-                limits.min(),
-                Size::new(limits.max().width + self.extra_width, limits.max().height),
-                limits.compression(),
-            )
-        } else {
-            *limits
-        };
-        let node =
-            self.content
-                .as_widget_mut()
-                .layout(&mut tree.children[0], renderer, &child_limits);
-        let size = if self.extra_width > f32::EPSILON {
-            limits.resolve(content_size.width, content_size.height, node.size())
-        } else {
-            node.size()
-        };
+        let node = self
+            .content
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits);
 
         layout::Node::with_children(
-            size,
+            node.size(),
             vec![node.move_to(Point::new(self.offset.x, self.offset.y))],
         )
     }

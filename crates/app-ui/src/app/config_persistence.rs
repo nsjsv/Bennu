@@ -2,37 +2,12 @@ use bennu_state::UserSettingsStore;
 use iced::Task;
 
 use super::FileBrowser;
-use crate::commands::{
-    custom_color_scheme_import_command, save_app_config_command, save_user_preferences_command,
-};
+use crate::commands::{save_app_config_command, save_user_preferences_command};
 use crate::config;
 use crate::model::Message;
-use bennu_theme::{ColorSchemeFamily, ColorSchemePreset, CustomColorScheme};
+use bennu_theme::ColorSchemePreset;
 
 impl FileBrowser {
-    pub(super) fn select_color_scheme_family(
-        &mut self,
-        family: ColorSchemeFamily,
-    ) -> Task<Message> {
-        let mode = self
-            .application_theme
-            .effective_mode(self.user_config.theme_mode);
-        let has_styles = family.styles(mode).len() > 1;
-        if self.user_config.color_scheme.family() == family {
-            self.expanded_color_scheme_family =
-                if has_styles && self.expanded_color_scheme_family != Some(family) {
-                    Some(family)
-                } else {
-                    None
-                };
-            return Task::none();
-        }
-
-        self.expanded_color_scheme_family = has_styles.then_some(family);
-        self.user_config.color_scheme = family.default_preset();
-        self.persist_user_preferences_command()
-    }
-
     pub(super) fn select_color_scheme_preset(
         &mut self,
         preset: ColorSchemePreset,
@@ -41,11 +16,6 @@ impl FileBrowser {
             return Task::none();
         }
         self.user_config.color_scheme = preset;
-        let mode = self
-            .application_theme
-            .effective_mode(self.user_config.theme_mode);
-        self.expanded_color_scheme_family =
-            (preset.family().styles(mode).len() > 1).then_some(preset.family());
         self.persist_user_preferences_command()
     }
 
@@ -53,45 +23,10 @@ impl FileBrowser {
         &mut self,
         theme_mode: bennu_theme::ThemeMode,
     ) -> Task<Message> {
-        if self.user_config.color_scheme == ColorSchemePreset::Matugen
-            || self.user_config.theme_mode == theme_mode
-        {
+        if self.user_config.theme_mode == theme_mode {
             return Task::none();
         }
         self.user_config.theme_mode = theme_mode;
-        self.expanded_color_scheme_family = None;
-        self.persist_user_preferences_command()
-    }
-    pub(super) fn import_custom_color_scheme(&self) -> Task<Message> {
-        custom_color_scheme_import_command()
-    }
-
-    pub(super) fn accept_custom_color_scheme_import(
-        &mut self,
-        outcome: Result<Option<String>, String>,
-    ) -> Task<Message> {
-        let document = match outcome {
-            Ok(Some(document)) => document,
-            Ok(None) => return Task::none(),
-            Err(error) => {
-                self.custom_color_scheme_import_error = Some(error);
-                return Task::none();
-            }
-        };
-        let custom_color_scheme = match CustomColorScheme::from_json(&document) {
-            Ok(custom_color_scheme) => custom_color_scheme,
-            Err(error) => {
-                self.custom_color_scheme_import_error = Some(error);
-                return Task::none();
-            }
-        };
-
-        self.application_theme
-            .replace_custom_color_scheme(custom_color_scheme.clone());
-        self.user_config.custom_color_scheme = custom_color_scheme;
-        self.user_config.color_scheme = ColorSchemePreset::Custom;
-        self.expanded_color_scheme_family = None;
-        self.custom_color_scheme_import_error = None;
         self.persist_user_preferences_command()
     }
 
@@ -175,104 +110,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn custom_import_is_atomic_and_selects_custom_only_after_validation() {
+    fn scheme_and_mode_selection_persist_only_real_changes() {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
-        let previous = browser.user_config.custom_color_scheme.clone();
 
-        drop(browser.accept_custom_color_scheme_import(Err("read failed".to_owned())));
-        assert_eq!(browser.user_config.custom_color_scheme, previous);
-        assert_eq!(browser.user_config.color_scheme, ColorSchemePreset::Default);
+        drop(browser.select_color_scheme_preset(ColorSchemePreset::Default));
+        drop(browser.select_theme_mode(browser.user_config.theme_mode));
         assert!(!browser.user_preferences_save_in_flight);
 
-        let document = r##"{
-            "version": 1,
-            "light": {
-                "background": "#ffffff", "surface": "#f6f8fa", "text": "#1f2328",
-                "muted_text": "#59636e", "primary": "#0969da", "success": "#1a7f37",
-                "warning": "#9a6700", "danger": "#d1242f"
-            },
-            "dark": {
-                "background": "#0d1117", "surface": "#151b23", "text": "#f0f6fc",
-                "muted_text": "#9198a1", "primary": "#4493f8", "success": "#3fb950",
-                "warning": "#d29922", "danger": "#f85149"
-            }
-        }"##;
-        drop(browser.accept_custom_color_scheme_import(Ok(Some(document.to_owned()))));
-        assert_eq!(browser.user_config.color_scheme, ColorSchemePreset::Custom);
-        assert_eq!(
-            browser.user_config.custom_color_scheme.light.background,
-            iced::Color::from_rgb8(255, 255, 255)
-        );
-        assert!(browser.user_preferences_save_in_flight);
-    }
-
-    #[test]
-    fn canceled_custom_import_does_not_change_state() {
-        let (mut browser, _) = FileBrowser::new(config::default_user_config());
-        browser.custom_color_scheme_import_error = Some("old error".to_owned());
-        let before = browser.user_config.custom_color_scheme.clone();
-        drop(browser.accept_custom_color_scheme_import(Ok(None)));
-        assert_eq!(browser.user_config.custom_color_scheme, before);
-        assert_eq!(
-            browser.custom_color_scheme_import_error.as_deref(),
-            Some("old error")
-        );
-        assert!(!browser.user_preferences_save_in_flight);
-    }
-
-    #[test]
-    fn color_scheme_family_selection_uses_one_persisted_preset_and_toggles_styles() {
-        let (mut browser, _) = FileBrowser::new(config::default_user_config());
-        browser.user_config.theme_mode = bennu_theme::ThemeMode::Dark;
-
-        drop(browser.select_color_scheme_family(ColorSchemeFamily::Catppuccin));
+        drop(browser.select_color_scheme_preset(ColorSchemePreset::Catppuccin));
         assert_eq!(
             browser.user_config.color_scheme,
             ColorSchemePreset::Catppuccin
         );
-        assert_eq!(
-            browser.expanded_color_scheme_family,
-            Some(ColorSchemeFamily::Catppuccin)
-        );
-
-        drop(browser.select_color_scheme_preset(ColorSchemePreset::CatppuccinFrappe));
-        assert_eq!(
-            browser.user_config.color_scheme,
-            ColorSchemePreset::CatppuccinFrappe
-        );
-        assert_eq!(
-            browser.expanded_color_scheme_family,
-            Some(ColorSchemeFamily::Catppuccin)
-        );
-
-        drop(browser.select_color_scheme_family(ColorSchemeFamily::Catppuccin));
-        assert_eq!(browser.expanded_color_scheme_family, None);
-        drop(browser.select_color_scheme_family(ColorSchemeFamily::Catppuccin));
-        assert_eq!(
-            browser.expanded_color_scheme_family,
-            Some(ColorSchemeFamily::Catppuccin)
-        );
-    }
-
-    #[test]
-    fn theme_mode_selection_clears_styles_and_matugen_keeps_its_mode() {
-        let (mut browser, _) = FileBrowser::new(config::default_user_config());
-        browser.user_config.theme_mode = bennu_theme::ThemeMode::Dark;
-        browser.expanded_color_scheme_family = Some(ColorSchemeFamily::Everforest);
-
-        drop(browser.select_theme_mode(bennu_theme::ThemeMode::Light));
-        assert_eq!(
-            browser.user_config.theme_mode,
-            bennu_theme::ThemeMode::Light
-        );
-        assert_eq!(browser.expanded_color_scheme_family, None);
-
-        browser.user_config.color_scheme = ColorSchemePreset::Matugen;
-        drop(browser.select_theme_mode(bennu_theme::ThemeMode::Dark));
-        assert_eq!(
-            browser.user_config.theme_mode,
-            bennu_theme::ThemeMode::Light
-        );
+        assert!(browser.user_preferences_save_in_flight);
     }
 
     #[test]

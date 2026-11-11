@@ -9,7 +9,7 @@ use crate::model::{
 };
 use crate::network_connections::SavedNetworkConnection;
 use crate::shortcuts::ShortcutConfig;
-use bennu_theme::{default_custom_color_scheme, ColorSchemePreset, CustomColorScheme, ThemeMode};
+use bennu_theme::{ColorSchemePreset, ThemeMode};
 
 mod app_config;
 pub(crate) use app_config::{
@@ -351,7 +351,6 @@ pub(crate) struct UserConfig {
     pub(crate) last_search_scope: Option<LastSearchScope>,
     pub(crate) theme_mode: ThemeMode,
     pub(crate) color_scheme: ColorSchemePreset,
-    pub(crate) custom_color_scheme: CustomColorScheme,
     pub(crate) file_operation_verification: FileOperationVerification,
     pub(crate) browser_view_mode: BrowserViewMode,
     pub(crate) visible_column_count: usize,
@@ -486,7 +485,6 @@ pub(crate) fn default_user_config() -> UserConfig {
         last_search_scope: None,
         theme_mode: ThemeMode::Automatic,
         color_scheme: ColorSchemePreset::Default,
-        custom_color_scheme: default_custom_color_scheme(),
         file_operation_verification: DEFAULT_FILE_OPERATION_VERIFICATION,
         browser_view_mode: BrowserViewMode::Columns,
         visible_column_count: DEFAULT_VISIBLE_COLUMN_COUNT,
@@ -537,7 +535,6 @@ pub(crate) fn ui_thread_startup_config() -> UserConfig {
         last_search_scope: None,
         theme_mode: ThemeMode::Automatic,
         color_scheme: ColorSchemePreset::Default,
-        custom_color_scheme: default_custom_color_scheme(),
         file_operation_verification: DEFAULT_FILE_OPERATION_VERIFICATION,
         browser_view_mode: BrowserViewMode::Columns,
         visible_column_count: DEFAULT_VISIBLE_COLUMN_COUNT,

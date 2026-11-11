@@ -1,64 +1,28 @@
-use iced::widget::{column, container, row, Column, Space};
-use iced::{Alignment, Element, Length};
+use iced::{Element, Length};
 
-use super::{themed_icon, IconTone, MENU_ICON_SIZE};
+use super::dialog::{self, Dialog};
 use crate::app::archive_extraction::{ArchiveExtractionMessage, ArchiveExtractionState};
 use crate::app::archive_password::ArchivePasswordDraft;
-use crate::appearance::context_menu_style;
-use crate::formatting::format_middle_ellipsized_text;
 use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::controls::text_field;
 use bennu_theme::controls::{normal_button, suggested_button};
-use bennu_theme::icons::IconSymbol;
-use bennu_theme::typography::{BOLD, TITLE_SIZE};
-
-const ARCHIVE_EXTRACTION_PANEL_WIDTH: f32 = 500.0;
-const ARCHIVE_PATH_MAX_CHARS: usize = 72;
 
 pub(super) fn archive_extraction_panel(state: &ArchiveExtractionState) -> Element<'_, Message> {
-    let title = row![
-        themed_icon(IconSymbol::FileArchive, IconTone::Normal, MENU_ICON_SIZE),
-        readable_text(tr!("Extract Archive"))
-            .size(TITLE_SIZE)
-            .font(BOLD)
-            .width(Length::Fill),
-    ]
-    .spacing(8)
-    .align_y(Alignment::Center);
-
-    let validation_error = state
-        .validation_error()
-        .map(str::to_owned)
-        .unwrap_or_default();
-
-    let content = if state.is_waiting_for_password() || state.is_checking_password() {
-        column![
-            title,
-            readable_text(archive_summary(state)),
-            readable_text(destination_summary(state)),
-            readable_text(status_text(state)),
-            archive_password_input(state),
-            readable_text(validation_error),
-            archive_extraction_actions(state),
-        ]
-    } else {
-        column![
-            title,
-            readable_text(archive_summary(state)),
-            readable_text(destination_summary(state)),
-            readable_text(status_text(state)),
-            readable_text(validation_error),
-            archive_extraction_actions(state),
-        ]
+    let mut body = dialog::fields(vec![dialog::hint(status_text(state))]);
+    if state.is_waiting_for_password() || state.is_checking_password() {
+        body = body.push(archive_password_input(state));
     }
-    .spacing(10)
-    .width(Length::Fill);
-
-    container(content)
-        .padding(14)
-        .width(Length::Fixed(ARCHIVE_EXTRACTION_PANEL_WIDTH))
-        .style(context_menu_style)
+    if let Some(problem) = state.validation_error() {
+        body = body.push(dialog::error(problem.to_owned()));
+    }
+    let request = state.request();
+    Dialog::new(tr!("Extract Archive"), body)
+        .subtitle(dialog::into_subtitle(
+            &dialog::path_name(&request.archive),
+            &request.destination,
+        ))
+        .actions(archive_extraction_actions(state))
         .into()
 }
 
@@ -88,14 +52,10 @@ pub(super) fn archive_password_input_field(
             .on_submit(on_submitted);
     }
 
-    Column::new()
-        .spacing(4)
-        .push(readable_text(tr!("Password")))
-        .push(password_input)
-        .into()
+    dialog::field(tr!("Password"), password_input)
 }
 
-fn archive_extraction_actions(state: &ArchiveExtractionState) -> Element<'_, Message> {
+fn archive_extraction_actions(state: &ArchiveExtractionState) -> Vec<Element<'_, Message>> {
     let extract_label = if state.is_checking_password() {
         tr!("Checking...")
     } else if state.is_inspecting() {
@@ -103,42 +63,17 @@ fn archive_extraction_actions(state: &ArchiveExtractionState) -> Element<'_, Mes
     } else {
         tr!("Extract")
     };
-    let extract_button = if state.is_waiting_for_password() && state.can_submit_password() {
-        suggested_button(readable_text(extract_label)).on_press(Message::ArchiveExtraction(
-            ArchiveExtractionMessage::Submitted,
-        ))
-    } else {
+    let can_extract = state.is_waiting_for_password() && state.can_submit_password();
+    vec![
+        normal_button(readable_text(tr!("Cancel")))
+            .on_press(Message::DismissFloating)
+            .into(),
         suggested_button(readable_text(extract_label))
-    };
-
-    row![
-        Space::new().width(Length::Fill),
-        normal_button(readable_text(tr!("Cancel"))).on_press(Message::DismissFloating),
-        extract_button,
+            .on_press_maybe(can_extract.then_some(Message::ArchiveExtraction(
+                ArchiveExtractionMessage::Submitted,
+            )))
+            .into(),
     ]
-    .spacing(6)
-    .align_y(Alignment::Center)
-    .into()
-}
-
-fn archive_summary(state: &ArchiveExtractionState) -> String {
-    tr!(
-        "Archive: %1",
-        format_middle_ellipsized_text(
-            state.request().archive.to_string_lossy().as_ref(),
-            ARCHIVE_PATH_MAX_CHARS,
-        )
-    )
-}
-
-fn destination_summary(state: &ArchiveExtractionState) -> String {
-    tr!(
-        "Destination: %1",
-        format_middle_ellipsized_text(
-            state.request().destination.to_string_lossy().as_ref(),
-            ARCHIVE_PATH_MAX_CHARS,
-        )
-    )
 }
 
 fn status_text(state: &ArchiveExtractionState) -> String {

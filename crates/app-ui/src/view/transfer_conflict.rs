@@ -2,11 +2,11 @@ use std::ffi::OsStr;
 use std::path::Path;
 use std::time::SystemTime;
 
-use iced::widget::{button, column, container, image, row, Button, Space, Svg};
-use iced::{Alignment, Element, Length, Theme};
+use iced::widget::{column, container, image, row, Space};
+use iced::{Alignment, Element, Length};
 
+use super::dialog::{self, Dialog};
 use super::{themed_icon, IconTone};
-use crate::appearance::context_menu_style;
 use crate::formatting::{format_file_size, format_middle_ellipsized_text, format_system_time};
 use crate::model::{
     Message, TransferConflictChoice, TransferConflictItem, TransferConflictMetadata,
@@ -18,9 +18,9 @@ use crate::thumbnail_cache::{
 use bennu_preview::entry_icons::file_entry_icon_symbol;
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::controls::check_box;
-use bennu_theme::controls::normal_button_style;
+use bennu_theme::controls::normal_button;
 use bennu_theme::icons::IconSymbol;
-use bennu_theme::typography::{BOLD, HEADING_SIZE, TITLE_SIZE};
+use bennu_theme::typography::{BOLD, HEADING_SIZE};
 
 const TRANSFER_CONFLICT_PANEL_WIDTH: f32 = 560.0;
 const TRANSFER_CONFLICT_PANEL_WIDTH_WITH_MERGE: f32 = 700.0;
@@ -33,92 +33,67 @@ pub(super) fn transfer_conflict_panel<'a>(
     thumbnail_cache: &'a ThumbnailCache,
 ) -> Element<'a, Message> {
     let Some(conflict) = state.current_conflict() else {
-        return container(readable_text(tr!("No pending conflicts")))
-            .padding(14)
-            .width(Length::Fixed(TRANSFER_CONFLICT_PANEL_WIDTH))
-            .style(context_menu_style)
-            .into();
+        return Dialog::new(
+            tr!("No pending conflicts"),
+            Space::new().height(Length::Fixed(0.0)),
+        )
+        .into();
     };
 
-    let title = row![
-        conflict_icon(conflict),
-        readable_text(conflict_title(conflict))
-            .size(TITLE_SIZE)
-            .font(BOLD)
-            .width(Length::Fill),
-        conflict_count_label(state),
-    ]
-    .spacing(8)
-    .align_y(Alignment::Start);
-
-    let source_section = conflict_file_section(
-        ConflictFileSectionKind::Existing,
-        &conflict.target_metadata,
-        &conflict.target,
-        thumbnail_cache,
-    );
-    let incoming_section = conflict_file_section(
-        ConflictFileSectionKind::Incoming,
-        &conflict.source_metadata,
-        &conflict.source,
-        thumbnail_cache,
-    );
-
-    let apply_to_all = check_box(state.apply_to_all)
-        .label(tr!("Apply this action to all files and folders"))
-        .on_toggle(|_| Message::TransferConflictApplyToAllToggled);
+    let body = dialog::fields(vec![
+        conflict_file_section(
+            ConflictFileSectionKind::Existing,
+            &conflict.target_metadata,
+            &conflict.target,
+            thumbnail_cache,
+        ),
+        conflict_file_section(
+            ConflictFileSectionKind::Incoming,
+            &conflict.source_metadata,
+            &conflict.source,
+            thumbnail_cache,
+        ),
+        check_box(state.apply_to_all)
+            .label(tr!("Apply this action to all files and folders"))
+            .on_toggle(|_| Message::TransferConflictApplyToAllToggled)
+            .into(),
+    ]);
 
     // 「合并」只在源与目标都是目录时提供(与冲突项 can_merge 同源)。
     let merge_offered = conflict.can_merge();
-    let mut actions = row![
-        conflict_action_button(tr!("Cancel"), Message::TransferConflictCancelRequested),
-        Space::new().width(Length::Fill),
-        conflict_action_button(
-            tr!("Skip"),
-            Message::TransferConflictChoiceSelected(TransferConflictChoice::Skip),
-        ),
-        Space::new().width(Length::Fill),
-        conflict_action_button(
-            tr!("Keep Both"),
-            Message::TransferConflictChoiceSelected(TransferConflictChoice::KeepBoth),
-        ),
-        Space::new().width(Length::Fill),
-        conflict_action_button(
-            tr!("Replace"),
-            Message::TransferConflictChoiceSelected(TransferConflictChoice::Replace),
-        ),
-    ]
-    .spacing(12)
-    .align_y(Alignment::Center);
+    let choice = |label: String, choice: TransferConflictChoice| -> Element<'a, Message> {
+        normal_button(readable_text(label))
+            .on_press(Message::TransferConflictChoiceSelected(choice))
+            .into()
+    };
+    let mut actions = vec![
+        normal_button(readable_text(tr!("Cancel")))
+            .on_press(Message::TransferConflictCancelRequested)
+            .into(),
+        choice(tr!("Skip"), TransferConflictChoice::Skip),
+        choice(tr!("Keep Both"), TransferConflictChoice::KeepBoth),
+        choice(tr!("Replace"), TransferConflictChoice::Replace),
+    ];
     if merge_offered {
-        actions = actions
-            .push(Space::new().width(Length::Fill))
-            .push(conflict_action_button(
-                tr!("Merge"),
-                Message::TransferConflictChoiceSelected(TransferConflictChoice::Merge),
-            ));
+        actions.push(choice(tr!("Merge"), TransferConflictChoice::Merge));
     }
 
-    let content = column![
-        title,
-        source_section,
-        incoming_section,
-        apply_to_all,
-        actions,
-    ]
-    .spacing(13)
-    .width(Length::Fill);
-
-    let panel_width = if merge_offered {
-        TRANSFER_CONFLICT_PANEL_WIDTH_WITH_MERGE
-    } else {
-        TRANSFER_CONFLICT_PANEL_WIDTH
-    };
-    container(content)
-        .padding([14, 12])
-        .width(Length::Fixed(panel_width))
-        .style(context_menu_style)
-        .into()
+    let mut dialog = Dialog::new(conflict_title(conflict), body)
+        .actions(actions)
+        .width(if merge_offered {
+            TRANSFER_CONFLICT_PANEL_WIDTH_WITH_MERGE
+        } else {
+            TRANSFER_CONFLICT_PANEL_WIDTH
+        });
+    // 还有别的冲突时，标题下面写“第几个 / 一共几个”。
+    if state.conflicts.len() > 1 {
+        dialog = dialog.subtitle(format!(
+            "{} / {}",
+            state.current_index + 1,
+            state.conflicts.len()
+        ));
+    }
+    dialog.into()
 }
 
 fn conflict_title(conflict: &TransferConflictItem) -> String {
@@ -132,19 +107,6 @@ fn conflict_title(conflict: &TransferConflictItem) -> String {
         "This folder already contains a file named \"%1\".",
         format_middle_ellipsized_text(&file_name, TRANSFER_CONFLICT_NAME_MAX_CHARS)
     )
-}
-
-fn conflict_count_label(state: &TransferConflictState) -> Element<'_, Message> {
-    if state.conflicts.len() <= 1 {
-        return Space::new().into();
-    }
-
-    readable_text(format!(
-        "{} / {}",
-        state.current_index + 1,
-        state.conflicts.len()
-    ))
-    .into()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -214,14 +176,6 @@ fn conflict_modified_label(modified: Option<SystemTime>) -> String {
         .unwrap_or_else(|| tr!("Modified: unknown"))
 }
 
-fn conflict_icon(conflict: &TransferConflictItem) -> Svg<'static, Theme> {
-    themed_icon(
-        conflict_icon_symbol(&conflict.target_metadata, &conflict.target),
-        IconTone::Normal,
-        18.0,
-    )
-}
-
 fn conflict_thumbnail(
     metadata: &TransferConflictMetadata,
     path: &Path,
@@ -262,19 +216,4 @@ fn conflict_icon_symbol(metadata: &TransferConflictMetadata, path: &Path) -> Ico
             path.file_name().unwrap_or_else(|| OsStr::new("")),
         )
     }
-}
-
-fn conflict_action_button(label: String, message: Message) -> Button<'static, Message> {
-    button(
-        container(readable_text(label))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center_x(Length::Fill)
-            .center_y(Length::Fill),
-    )
-    .on_press(message)
-    .padding(0)
-    .width(Length::Fixed(98.0))
-    .height(Length::Fixed(32.0))
-    .style(normal_button_style)
 }

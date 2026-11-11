@@ -12,6 +12,7 @@ mod color_scheme_picker;
 mod context_menu_settings;
 mod context_menu_submenu;
 mod convert;
+mod dialog;
 mod file_operation_verification_settings;
 mod floating_panels;
 mod incoming_message_panel;

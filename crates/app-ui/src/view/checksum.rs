@@ -1,29 +1,28 @@
-use iced::widget::{button, column, container, row, scrollable, Column, Space};
+use iced::widget::{button, column, row, scrollable, Column};
 use iced::{Alignment, Element, Length};
 
 use file_core::{ChecksumAlgorithm, ALL_CHECKSUM_ALGORITHMS};
 
+use super::dialog::{self, Dialog};
 use super::settings_group::{custom_row, settings_card};
-use super::{themed_icon, IconTone, MENU_ICON_SIZE};
+use super::{themed_icon, IconTone};
 use crate::app::checksum::{
     ChecksumComputation, ChecksumExpectedVerdict, ChecksumFileVerdict, ChecksumMessage,
     ChecksumState,
 };
-use crate::appearance::{context_menu_style, muted_text_color};
 use crate::formatting::format_middle_ellipsized_text;
 use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::controls::normal_button;
 use bennu_theme::controls::text_field;
 use bennu_theme::icons::IconSymbol;
-use bennu_theme::typography::{BOLD, CAPTION_SIZE, TITLE_SIZE};
+use bennu_theme::typography::CAPTION_SIZE;
 
 const CHECKSUM_PANEL_WIDTH: f32 = 560.0;
-const SECTION_SPACING: f32 = 12.0;
 /// SHA-512 摘要 128 位太长,面板内显示中间省略,完整值走复制按钮。
 const DIGEST_MAX_CHARS: usize = 52;
 const FILE_CHIP_MAX_CHARS: usize = 26;
-const ACTIVE_PATH_MAX_CHARS: usize = 62;
+const ACTIVE_NAME_MAX_CHARS: usize = 48;
 const CHECKSUM_FILE_PATH_MAX_CHARS: usize = 44;
 const FILE_LIST_MAX_HEIGHT: f32 = 110.0;
 /// 单个文件 chip 的高度(文本 12 + 上下 padding 4×2 + 行距 2 + 边距)。
@@ -31,51 +30,29 @@ const FILE_CHIP_ROW_HEIGHT: f32 = 26.0;
 const NOTICE_ICON_SIZE: f32 = 14.0;
 
 pub(super) fn checksum_panel(state: &ChecksumState) -> Element<'_, Message> {
-    let title = row![
-        themed_icon(IconSymbol::Hash, IconTone::Normal, MENU_ICON_SIZE),
-        readable_text(tr!("File Checksum"))
-            .size(TITLE_SIZE)
-            .font(BOLD)
-            .width(Length::Fill),
-    ]
-    .spacing(8)
-    .align_y(Alignment::Center);
-
-    // 标题、路径与关闭按钮钉死在面板两端;中间内容用 Shrink 滚动区:
-    // 窗口够高时按内容自然伸缩,窗口太矮时中间出滚动条,关闭按钮
-    // 永远可见可达(iced flex 会把剩余高度传给 Shrink 子元素)。
-    let mut body = column![].spacing(SECTION_SPACING).width(Length::Fill);
-
+    // 中间内容用 Shrink 滚动区：窗口够高时按内容自然伸缩，窗口太矮时中间出滚动条，
+    // 关闭按钮永远可见可达（iced flex 会把剩余高度传给 Shrink 子元素）。
+    let mut body = dialog::fields(Vec::new());
     if state.files().len() > 1 {
         body = body.push(file_chip_list(state));
     }
+    body = body
+        .push(dialog::field(tr!("Checksums"), computation_section(state)))
+        .push(dialog::field(tr!("Verify"), verify_section(state)));
 
-    body = body.push(computation_section(state));
-    body = body.push(verify_section(state));
-
-    let content = column![
-        title,
-        readable_text(format_middle_ellipsized_text(
-            &state.active_file().to_string_lossy(),
-            ACTIVE_PATH_MAX_CHARS,
-        ))
-        .size(CAPTION_SIZE)
-        .width(Length::Fill),
+    Dialog::new(
+        tr!("File Checksum"),
         scrollable(body).width(Length::Fill).height(Length::Shrink),
-        row![
-            Space::new().width(Length::Fill),
-            normal_button(readable_text(tr!("Close"))).on_press(Message::DismissFloating),
-        ]
-        .align_y(Alignment::Center),
-    ]
-    .spacing(SECTION_SPACING)
-    .width(Length::Fill);
-
-    container(content)
-        .padding(16)
-        .width(Length::Fixed(CHECKSUM_PANEL_WIDTH))
-        .style(context_menu_style)
-        .into()
+    )
+    .subtitle(format_middle_ellipsized_text(
+        &dialog::path_name(state.active_file()),
+        ACTIVE_NAME_MAX_CHARS,
+    ))
+    .actions(vec![normal_button(readable_text(tr!("Close")))
+        .on_press(Message::DismissFloating)
+        .into()])
+    .width(CHECKSUM_PANEL_WIDTH)
+    .into()
 }
 
 /// 多选文件切换列表:当前文件带对勾标记,点击其它文件切换并重新计算。
@@ -133,7 +110,7 @@ fn computation_section(state: &ChecksumState) -> Element<'static, Message> {
         body = body.push(line);
     }
 
-    section(body.into())
+    body.into()
 }
 
 fn digest_card(state: &ChecksumState) -> Element<'static, Message> {
@@ -222,12 +199,10 @@ fn verify_section(state: &ChecksumState) -> Element<'static, Message> {
         rows.push(checksum_file_verdict_line(verdict));
     }
 
-    section(
-        Column::with_children(rows)
-            .spacing(6)
-            .width(Length::Fill)
-            .into(),
-    )
+    Column::with_children(rows)
+        .spacing(6)
+        .width(Length::Fill)
+        .into()
 }
 
 /// 期望值比对结论行;没有输入时不占位。
@@ -305,18 +280,6 @@ fn algorithm_labels(algorithms: &[ChecksumAlgorithm]) -> String {
 }
 
 /// 分区:muted 标题 + 卡片行组;与设置窗口的分组观感一致。
-fn section(body: Element<'static, Message>) -> Element<'static, Message> {
-    column![
-        container(readable_text(tr!("Verify")))
-            .width(Length::Fill)
-            .style(muted_container_style),
-        body,
-    ]
-    .spacing(6)
-    .width(Length::Fill)
-    .into()
-}
-
 /// 取消/失败后的提示行,附重新计算按钮。
 fn retry_notice(message: String) -> iced::widget::Row<'static, Message> {
     row![
@@ -349,11 +312,4 @@ fn verdict_line(
 
 fn muted_info_line(message: String) -> iced::widget::Text<'static> {
     readable_text(message)
-}
-
-fn muted_container_style(theme: &iced::Theme) -> container::Style {
-    container::Style {
-        text_color: Some(muted_text_color(theme)),
-        ..container::Style::default()
-    }
 }

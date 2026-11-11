@@ -23,11 +23,12 @@ use bennu_theme::anchored_popup::anchored_popup;
 use bennu_theme::ui_colors;
 
 use super::batch_rename_preview_name_input_id;
+use super::dialog::Dialog;
 use bennu_theme::controls::check_box;
 use bennu_theme::controls::dropdown;
 use bennu_theme::controls::text_field;
 use bennu_theme::controls::{normal_button, suggested_button};
-use bennu_theme::typography::{BOLD, CAPTION_SIZE, TITLE_SIZE};
+use bennu_theme::typography::CAPTION_SIZE;
 
 const BATCH_RENAME_PANEL_WIDTH: f32 = 720.0;
 // 面板自然高度上限(规则区+预览区满配)。浮层把窗口高-2×边距作为 max 传入,
@@ -46,17 +47,6 @@ pub(super) fn batch_rename_panel(
     scrollbar_visibility: ScrollbarVisibility,
     scrollbar_viewport: Option<ScrollbarViewport>,
 ) -> Element<'_, Message> {
-    let header = row![
-        readable_text(tr!("Batch Rename"))
-            .size(TITLE_SIZE)
-            .font(BOLD)
-            .width(Length::Fill),
-        readable_text(tr!("Items")),
-        readable_text(state.items.len().to_string()),
-    ]
-    .spacing(8)
-    .align_y(Alignment::Center);
-
     let sort_row = row![
         readable_text(tr!("Sort order")).width(Length::Fixed(84.0)),
         dropdown(
@@ -69,11 +59,9 @@ pub(super) fn batch_rename_panel(
     .spacing(8)
     .align_y(Alignment::Center);
 
-    // 按钮钉底:表单区(标题/排序/规则/编辑器/预览)整体滚动,取消/应用留在
-    // 滚动区外。窗口矮时滚动区收缩,按钮行永远贴底可见;大窗口下受
-    // BATCH_RENAME_PANEL_MAX_HEIGHT 兜底,外观与固定高度时代一致。
+    // 按钮钉底:表单区(排序/规则/编辑器/预览)整体滚动,取消/应用留在滚动区外。
+    // 窗口矮时滚动区收缩,按钮行永远贴底可见;大窗口下受 BATCH_RENAME_PANEL_MAX_HEIGHT 兜底。
     let form = column![
-        header,
         sort_row,
         rules_section(state),
         selected_rule_editor(state),
@@ -91,18 +79,11 @@ pub(super) fn batch_rename_panel(
         ))
         .style(enhanced_scrollbar_style(scrollbar_visibility_stub()));
 
-    let content = column![form_scroller, action_row(state)]
-        .spacing(12)
-        .width(Length::Fill)
-        .height(Length::Fill);
-
-    container(content)
-        .padding(14)
-        .width(Length::Fill)
-        .max_width(BATCH_RENAME_PANEL_WIDTH)
-        .height(Length::Fill)
-        .max_height(BATCH_RENAME_PANEL_MAX_HEIGHT)
-        .style(context_menu_style)
+    Dialog::new(tr!("Batch Rename"), form_scroller)
+        .subtitle(tr!("%1 items", state.items.len()))
+        .actions(actions(state))
+        .width(BATCH_RENAME_PANEL_WIDTH)
+        .fill_height(BATCH_RENAME_PANEL_MAX_HEIGHT)
         .into()
 }
 
@@ -979,23 +960,19 @@ fn status_color(theme: &Theme, status: crate::model::BatchRenamePreviewStatus) -
     }
 }
 
-fn action_row(state: &BatchRenameState) -> Element<'static, Message> {
-    let apply = if state.can_apply() {
-        suggested_button(readable_text(tr!("Apply")))
-            .on_press(Message::BatchRename(BatchRenameMessage::Apply))
-    } else {
-        suggested_button(readable_text(tr!("Apply")))
-    };
-
-    row![
-        Space::new().width(Length::Fill),
+fn actions(state: &BatchRenameState) -> Vec<Element<'static, Message>> {
+    vec![
         normal_button(readable_text(tr!("Cancel")))
-            .on_press(Message::BatchRename(BatchRenameMessage::Cancel)),
-        apply,
+            .on_press(Message::BatchRename(BatchRenameMessage::Cancel))
+            .into(),
+        suggested_button(readable_text(tr!("Apply")))
+            .on_press_maybe(
+                state
+                    .can_apply()
+                    .then_some(Message::BatchRename(BatchRenameMessage::Apply)),
+            )
+            .into(),
     ]
-    .spacing(8)
-    .align_y(Alignment::Center)
-    .into()
 }
 
 fn input_column<'a>(

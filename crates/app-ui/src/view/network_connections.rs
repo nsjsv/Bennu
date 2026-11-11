@@ -1,4 +1,4 @@
-use iced::widget::{button, column, container, row, Button, Space};
+use iced::widget::{button, container, row, Button};
 use iced::{Alignment, Element, Length};
 
 use crate::appearance::{context_menu_item_button_style, context_menu_style};
@@ -11,15 +11,14 @@ use crate::network_connections::{
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::icons::IconSymbol;
 
+use super::dialog::{self, Dialog};
 use super::settings_group::card_row_button_style;
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};
 use bennu_theme::controls::switch;
 use bennu_theme::controls::text_field;
 use bennu_theme::controls::{normal_button, suggested_button};
 use bennu_theme::controls::{segmented_choice_row, SegmentedChoice};
-use bennu_theme::typography::{BOLD, TITLE_SIZE};
 
-const NETWORK_EDITOR_PANEL_WIDTH: f32 = 460.0;
 const NETWORK_EDITOR_ERROR_MAX_CHARS: usize = 96;
 const NETWORK_CONTEXT_MENU_WIDTH: f32 = 190.0;
 const NETWORK_CONTEXT_MENU_PADDING: f32 = 8.0;
@@ -29,21 +28,11 @@ const NETWORK_CONTEXT_MENU_ITEM_HEIGHT: f32 = 28.0;
 pub(super) fn network_connection_editor_panel(
     editor: &NetworkConnectionEditorState,
 ) -> Element<'_, Message> {
-    let title = editor_title(editor.mode);
-    let title_row = row![
-        themed_icon(IconSymbol::Link, IconTone::Normal, MENU_ICON_SIZE),
-        readable_text(title)
-            .size(TITLE_SIZE)
-            .font(BOLD)
-            .width(Length::Fill),
-    ]
-    .spacing(8)
-    .align_y(Alignment::Center);
+    let editable = editor.mode != NetworkConnectionEditorMode::Connect;
+    let save = Message::NetworkConnection(NetworkConnectionMessage::EditorSaved);
     let mut label_input = text_field(&tr!("Name"), &editor.label);
-    let mut uri_input = text_field("URI", &editor.uri).on_submit(Message::NetworkConnection(
-        NetworkConnectionMessage::EditorSaved,
-    ));
-    if editor.mode != NetworkConnectionEditorMode::Connect {
+    let mut uri_input = text_field("smb://server/share", &editor.uri).on_submit(save.clone());
+    if editable {
         label_input = label_input.on_input(|value| {
             Message::NetworkConnection(NetworkConnectionMessage::EditorLabelChanged(value))
         });
@@ -51,25 +40,28 @@ pub(super) fn network_connection_editor_panel(
             Message::NetworkConnection(NetworkConnectionMessage::EditorUriChanged(value))
         });
     }
-    let mut content = column![title_row].spacing(10).width(Length::Fill);
-    if editor.mode != NetworkConnectionEditorMode::Connect {
-        content = content.push(protocol_selector(editor.protocol));
+    let mut body = dialog::fields(Vec::new());
+    if editable {
+        body = body.push(dialog::field(
+            tr!("Protocol"),
+            protocol_selector(editor.protocol),
+        ));
     }
-    content = content
-        .push(label_input)
-        .push(uri_input)
-        .push(
+    body = body
+        .push(dialog::field(tr!("Name"), label_input))
+        .push(dialog::field(tr!("Address"), uri_input))
+        .push(dialog::field(
+            tr!("Username"),
             text_field(&tr!("Username"), &editor.username)
                 .on_input(|value| {
                     Message::NetworkConnection(NetworkConnectionMessage::EditorUsernameChanged(
                         value,
                     ))
                 })
-                .on_submit(Message::NetworkConnection(
-                    NetworkConnectionMessage::EditorSaved,
-                )),
-        )
-        .push(
+                .on_submit(save.clone()),
+        ))
+        .push(dialog::field(
+            tr!("Password"),
             text_field(&tr!("Password"), &editor.password)
                 .secure(true)
                 .on_input(|value| {
@@ -77,40 +69,28 @@ pub(super) fn network_connection_editor_panel(
                         value,
                     ))
                 })
-                .on_submit(Message::NetworkConnection(
-                    NetworkConnectionMessage::EditorSaved,
-                )),
-        );
-
-    if editor.mode != NetworkConnectionEditorMode::Connect {
-        content = content.push(editor_auto_connect_button(editor.auto_connect));
+                .on_submit(save.clone()),
+        ));
+    if editable {
+        body = body.push(editor_auto_connect_button(editor.auto_connect));
     }
-
     if let Some(error) = &editor.error {
-        content = content.push(readable_text(format_middle_ellipsized_text(
+        body = body.push(dialog::error(format_middle_ellipsized_text(
             error,
             NETWORK_EDITOR_ERROR_MAX_CHARS,
         )));
     }
-
-    content = content.push(
-        row![
-            Space::new().width(Length::Fill),
-            normal_button(readable_text(tr!("Cancel"))).on_press(Message::NetworkConnection(
-                NetworkConnectionMessage::EditorCanceled
-            )),
-            suggested_button(readable_text(editor_primary_action_label(editor))).on_press(
-                Message::NetworkConnection(NetworkConnectionMessage::EditorSaved)
-            ),
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center),
-    );
-
-    container(content)
-        .padding(14)
-        .width(Length::Fixed(NETWORK_EDITOR_PANEL_WIDTH))
-        .style(context_menu_style)
+    Dialog::new(editor_title(editor.mode), body)
+        .actions(vec![
+            normal_button(readable_text(tr!("Cancel")))
+                .on_press(Message::NetworkConnection(
+                    NetworkConnectionMessage::EditorCanceled,
+                ))
+                .into(),
+            suggested_button(readable_text(editor_primary_action_label(editor)))
+                .on_press(save)
+                .into(),
+        ])
         .into()
 }
 

@@ -19,6 +19,9 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Edit Network Connection", "编辑网络连接"),
     ("Connect Network Location", "连接网络位置"),
     ("Username", "用户名"),
+    // 网络连接编辑框的字段名。
+    ("Protocol", "协议"),
+    ("Address", "地址"),
     ("Connect on startup", "启动时连接"),
     ("Save & Connect", "保存并连接"),
     (
@@ -159,7 +162,6 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
         "Copy files into the current folder.",
         "将文件复制到当前文件夹。",
     ),
-    ("%1 will be added to:", "将向以下位置添加 %1："),
     ("Copy to %1", "复制到%1"),
     ("Create link to %1", "创建链接到%1"),
     ("Move to %1", "移动到%1"),

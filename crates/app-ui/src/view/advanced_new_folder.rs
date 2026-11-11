@@ -22,10 +22,11 @@ use bennu_theme::controls::normal_button;
 use bennu_theme::controls::text_area;
 use bennu_theme::controls::text_field;
 use bennu_theme::controls::{segmented_choice_row, SegmentedChoice};
-use bennu_theme::typography::{BOLD, CAPTION_SIZE, TITLE_SIZE};
+use bennu_theme::typography::CAPTION_SIZE;
+
+use super::dialog::{self, Dialog};
 
 const PANEL_WIDTH: f32 = 480.0;
-const PANEL_MAX_HEIGHT: f32 = 560.0;
 const NAME_EDITOR_HEIGHT: f32 = 140.0;
 const PREVIEW_HEIGHT: f32 = 160.0;
 
@@ -113,40 +114,25 @@ pub(super) fn advanced_new_folder_panel(state: &AdvancedNewFolderState) -> Eleme
         state.split_button_hover,
     );
 
-    let mut content_column = column![
-        readable_text(tr!("Advanced New Folder"))
-            .size(TITLE_SIZE)
-            .font(BOLD),
-        mode_row,
-        editor,
-    ];
+    let mut body = dialog::fields(vec![mode_row.into(), editor]);
     if let Some(gather_row) = gather_row {
-        content_column = content_column.push(gather_row);
+        body = body.push(gather_row);
     }
-    content_column = content_column.push(readable_text(tr!("Folders")));
-    content_column = content_column.push(preview_rows);
+    body = body.push(dialog::field(tr!("Folders"), preview_rows));
+    // 菜单从按钮这一行往下展开，所以“取消 / 创建”整行作为一个锚点交给对话框。
+    let after_menu: Option<Element<'_, Message>> = state
+        .after_menu_open
+        .then(|| after_create_menu(cannot_create));
     let action_row = row![
-        Space::new().width(Length::Fill),
         normal_button(readable_text(tr!("Cancel")))
             .on_press(Message::AdvancedNewFolder(AdvancedNewFolderMessage::Cancel)),
         apply,
     ]
     .spacing(8)
     .align_y(Alignment::Center);
-    let after_menu: Option<Element<'_, Message>> = state
-        .after_menu_open
-        .then(|| after_create_menu(cannot_create));
-    let actions = anchored_popup_expanding(action_row, after_menu);
-    content_column = content_column.push(actions);
-    let content = content_column.spacing(12).width(Length::Fill);
-
-    container(content)
-        .padding(14)
-        .width(Length::Fill)
-        .max_width(PANEL_WIDTH)
-        .height(Length::Shrink)
-        .max_height(PANEL_MAX_HEIGHT)
-        .style(context_menu_style)
+    Dialog::new(tr!("Advanced New Folder"), body)
+        .actions(vec![anchored_popup_expanding(action_row, after_menu)])
+        .width(PANEL_WIDTH)
         .into()
 }
 

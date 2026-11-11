@@ -1,4 +1,4 @@
-use iced::widget::{column, container, row, Space};
+use iced::widget::row;
 use iced::{Alignment, Element, Length};
 
 use file_core::{AudioTargetFormat, ConversionQualityPreset, ImageTargetFormat, VideoTargetFormat};
@@ -8,64 +8,49 @@ use crate::app::convert::{
     VideoConvertOptions, AUDIO_TARGET_FORMATS, FPS_CHOICES, IMAGE_TARGET_FORMATS, QUALITY_PRESETS,
     RESIZE_PERCENT_CHOICES, VIDEO_TARGET_FORMATS,
 };
-use crate::appearance::{context_menu_style, muted_text_color};
 use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::icons::IconSymbol;
 
+use super::dialog::{self, Dialog};
 use super::settings_group::{control_row, custom_row, settings_card, SettingsRow};
-use super::{themed_icon, IconTone, MENU_ICON_SIZE};
+use super::{themed_icon, IconTone};
 use bennu_theme::controls::dropdown;
 use bennu_theme::controls::slider;
 use bennu_theme::controls::text_field;
 use bennu_theme::controls::{normal_button, suggested_button};
 use bennu_theme::controls::{segmented_choice_row, SegmentedChoice};
-use bennu_theme::typography::{BOLD, CAPTION_SIZE, TITLE_SIZE};
 
-const CONVERT_PANEL_WIDTH: f32 = 640.0;
-const SECTION_SPACING: f32 = 14.0;
+const CONVERT_PANEL_WIDTH: f32 = 600.0;
 const ROW_CONTROL_WIDTH: f32 = 170.0;
 const FORMAT_PICK_WIDTH: f32 = 240.0;
 const QUALITY_VALUE_WIDTH: f32 = 30.0;
 const NOTICE_ICON_SIZE: f32 = 14.0;
 
 pub(super) fn convert_panel(state: &ConvertState) -> Element<'_, Message> {
-    let title = row![
-        themed_icon(IconSymbol::FileImage, IconTone::Normal, MENU_ICON_SIZE),
-        readable_text(tr!("Convert Format"))
-            .size(TITLE_SIZE)
-            .font(BOLD)
-            .width(Length::Fill),
-    ]
-    .spacing(8)
-    .align_y(Alignment::Center);
-
-    let mut content = column![title, source_summary(state)]
-        .spacing(SECTION_SPACING)
-        .width(Length::Fill);
-
+    let mut body = dialog::fields(Vec::new());
     if let Some(options) = state.image() {
-        content = content.push(image_section(state, options));
+        body = body.push(image_section(state, options));
     }
     if let Some(options) = state.video() {
-        content = content.push(video_section(state, options));
+        body = body.push(video_section(state, options));
     }
     if let Some(options) = state.audio() {
-        content = content.push(audio_section(state, options));
+        body = body.push(audio_section(state, options));
     }
-
     if let Some(notice) = ffmpeg_notice(state) {
-        content = content.push(notice);
+        body = body.push(notice);
     }
     if let Some(error) = state.validation_error() {
-        content = content.push(container(readable_text(error.to_owned())));
+        body = body.push(dialog::error(error.to_owned()));
     }
-    content = content.push(actions(state));
-
-    container(content)
-        .padding(16)
-        .width(Length::Fixed(CONVERT_PANEL_WIDTH))
-        .style(context_menu_style)
+    Dialog::new(tr!("Convert Format"), body)
+        .subtitle(tr!(
+            "%1 items · Converted files are written next to the originals; existing files are never replaced.",
+            state.source_count()
+        ))
+        .actions(actions(state))
+        .width(CONVERT_PANEL_WIDTH)
         .into()
 }
 
@@ -108,12 +93,7 @@ fn image_section<'a>(
         Message::Convert(ConvertMessage::ImageCustomWidthToggled),
     ));
 
-    section(
-        tr!("Images"),
-        state.image_source_count(),
-        IconSymbol::FileImage,
-        rows,
-    )
+    section(tr!("Images"), state.image_source_count(), rows)
 }
 
 fn video_section<'a>(
@@ -162,12 +142,7 @@ fn video_section<'a>(
         ));
     }
 
-    section(
-        tr!("Videos"),
-        state.video_source_count(),
-        IconSymbol::Video,
-        rows,
-    )
+    section(tr!("Videos"), state.video_source_count(), rows)
 }
 
 fn audio_section<'a>(
@@ -226,37 +201,13 @@ fn audio_section<'a>(
         ]),
     ));
 
-    section(
-        tr!("Audio"),
-        state.audio_source_count(),
-        IconSymbol::Music,
-        rows,
-    )
+    section(tr!("Audio"), state.audio_source_count(), rows)
 }
 
 /// 分区:muted 标题 + 卡片行组;与设置窗口的分组观感一致。
-fn section<'a>(
-    title: String,
-    count: usize,
-    icon: IconSymbol,
-    rows: Vec<SettingsRow<'a>>,
-) -> Element<'a, Message> {
-    column![
-        container(
-            row![
-                themed_icon(icon, IconTone::Normal, NOTICE_ICON_SIZE),
-                readable_text(format!("{title} · {count}")),
-            ]
-            .spacing(6)
-            .align_y(Alignment::Center),
-        )
-        .width(Length::Fill)
-        .style(muted_container_style),
-        settings_card(rows),
-    ]
-    .spacing(6)
-    .width(Length::Fill)
-    .into()
+/// 一类媒体：小标题“图片 · 3”+ 设置卡片。
+fn section<'a>(title: String, count: usize, rows: Vec<SettingsRow<'a>>) -> Element<'a, Message> {
+    dialog::field(format!("{title} · {count}"), settings_card(rows))
 }
 
 /// 目标格式用下拉选择:格式多到分段按钮放不下,下拉能承载完整清单。
@@ -477,42 +428,17 @@ fn note_text(message: String) -> Element<'static, Message> {
     readable_text(message).into()
 }
 
-fn actions(state: &ConvertState) -> Element<'static, Message> {
-    let convert_button = if state.can_submit() {
+fn actions(state: &ConvertState) -> Vec<Element<'static, Message>> {
+    vec![
+        normal_button(readable_text(tr!("Cancel")))
+            .on_press(Message::DismissFloating)
+            .into(),
         suggested_button(readable_text(tr!("Convert")))
-            .on_press(Message::Convert(ConvertMessage::Submitted))
-    } else {
-        suggested_button(readable_text(tr!("Convert")))
-    };
-
-    row![
-        Space::new().width(Length::Fill),
-        normal_button(readable_text(tr!("Cancel"))).on_press(Message::DismissFloating),
-        convert_button,
+            .on_press_maybe(
+                state
+                    .can_submit()
+                    .then_some(Message::Convert(ConvertMessage::Submitted)),
+            )
+            .into(),
     ]
-    .spacing(6)
-    .align_y(Alignment::Center)
-    .into()
-}
-
-fn source_summary(state: &ConvertState) -> Element<'static, Message> {
-    let summary = tr!(
-        "%1 items · Converted files are written next to the originals; existing files are never replaced.",
-        state.source_count()
-    );
-    container(
-        readable_text(summary)
-            .size(CAPTION_SIZE)
-            .width(Length::Fill),
-    )
-    .width(Length::Fill)
-    .style(muted_container_style)
-    .into()
-}
-
-fn muted_container_style(theme: &iced::Theme) -> container::Style {
-    container::Style {
-        text_color: Some(muted_text_color(theme)),
-        ..container::Style::default()
-    }
 }

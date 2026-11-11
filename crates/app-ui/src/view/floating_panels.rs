@@ -1,6 +1,4 @@
-use iced::widget::{
-    button, column, container, mouse_area, row, scrollable, Button, Column, Row, Space,
-};
+use iced::widget::{button, column, container, mouse_area, row, scrollable, Button, Column, Row};
 use iced::{Alignment, Element, Length};
 
 use desktop_linux::FileClipboardOperation;
@@ -31,19 +29,17 @@ use super::context_menu_submenu::{
     file_grouping_submenu_panel, file_grouping_trigger_row, group_submenu_panel, group_trigger_row,
     submenu_top, CONTEXT_MENU_ITEM_HEIGHT, CONTEXT_MENU_ITEM_SPACING, CONTEXT_MENU_PADDING,
 };
+use super::dialog::{self, Dialog};
 use super::network_connections::network_connection_context_menu_panel;
 use super::option_controls::action_choice_row;
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};
 use bennu_theme::controls::check_box;
 use bennu_theme::controls::icon_button_style;
-use bennu_theme::controls::{normal_button, suggested_button};
-use bennu_theme::typography::{BOLD, CAPTION_SIZE, TITLE_SIZE};
+use bennu_theme::controls::{destructive_button, normal_button};
+use bennu_theme::typography::CAPTION_SIZE;
 
 const ERROR_NOTIFICATION_FLOAT_WIDTH: f32 = 560.0;
 const ERROR_NOTIFICATION_MAX_CHARS: usize = 96;
-pub(super) const DESTRUCTIVE_CONFIRMATION_PANEL_WIDTH: f32 = 460.0;
-const FILE_DROP_OPERATION_PANEL_WIDTH: f32 = 460.0;
-const FILE_DROP_PATH_MAX_CHARS: usize = 62;
 const OPEN_WITH_PANEL_WIDTH: f32 = 420.0;
 const OPEN_WITH_APPLICATION_LIST_HEIGHT: f32 = 240.0;
 const OPEN_WITH_PATH_MAX_CHARS: usize = 62;
@@ -115,52 +111,20 @@ pub(super) fn destructive_action_confirmation_panel(
         ),
     };
 
-    let title_row = row![
-        themed_icon(IconSymbol::TriangleAlert, IconTone::Warning, MENU_ICON_SIZE),
-        readable_text(title)
-            .size(TITLE_SIZE)
-            .font(BOLD)
-            .width(Length::Fill),
-    ]
-    .spacing(8)
-    .align_y(Alignment::Center);
-
-    let actions = row![
-        Space::new().width(Length::Fill),
-        normal_button(readable_text(tr!("Cancel"))).on_press(Message::DestructiveActionCanceled),
-        suggested_button(readable_text(confirm_label))
-            .on_press(Message::DestructiveActionConfirmed),
-    ]
-    .spacing(6)
-    .align_y(Alignment::Center);
-
-    let content = column![title_row, readable_text(body), actions]
-        .spacing(12)
-        .width(Length::Fill);
-
-    container(content)
-        .padding(14)
-        .width(Length::Fixed(DESTRUCTIVE_CONFIRMATION_PANEL_WIDTH))
-        .style(context_menu_style)
+    // 删了就回不来：确认按钮用红色，不用强调色。
+    Dialog::new(title, readable_text(body).width(Length::Fill))
+        .actions(vec![
+            normal_button(readable_text(tr!("Cancel")))
+                .on_press(Message::DestructiveActionCanceled)
+                .into(),
+            destructive_button(readable_text(confirm_label))
+                .on_press(Message::DestructiveActionConfirmed)
+                .into(),
+        ])
         .into()
 }
 
 pub(super) fn file_drop_operation_panel(prompt: &FileDropPrompt) -> Element<'_, Message> {
-    let destination = format_middle_ellipsized_text(
-        prompt.paste_directory.to_string_lossy().as_ref(),
-        FILE_DROP_PATH_MAX_CHARS,
-    );
-
-    let title = row![
-        themed_icon(IconSymbol::ArrowRight, IconTone::Normal, MENU_ICON_SIZE),
-        readable_text(tr!("Drop Files"))
-            .size(TITLE_SIZE)
-            .font(BOLD)
-            .width(Length::Fill),
-    ]
-    .spacing(8)
-    .align_y(Alignment::Center);
-
     let operation_choices = column![
         action_choice_row(
             tr!("Move"),
@@ -174,30 +138,14 @@ pub(super) fn file_drop_operation_panel(prompt: &FileDropPrompt) -> Element<'_, 
         ),
     ]
     .spacing(8);
-
-    let actions = row![
-        Space::new().width(Length::Fill),
-        normal_button(readable_text(tr!("Cancel"))).on_press(Message::FileDropCancelled),
-    ]
-    .align_y(Alignment::Center);
-
-    let content = column![
-        title,
-        readable_text(tr!(
-            "%1 will be added to:",
-            item_count_label(prompt.paths.len())
-        )),
-        readable_text(destination).width(Length::Fill),
-        operation_choices,
-        actions,
-    ]
-    .spacing(12)
-    .width(Length::Fill);
-
-    container(content)
-        .padding(14)
-        .width(Length::Fixed(FILE_DROP_OPERATION_PANEL_WIDTH))
-        .style(context_menu_style)
+    Dialog::new(tr!("Drop Files"), operation_choices)
+        .subtitle(dialog::into_subtitle(
+            &item_count_label(prompt.paths.len()),
+            &prompt.paste_directory,
+        ))
+        .actions(vec![normal_button(readable_text(tr!("Cancel")))
+            .on_press(Message::FileDropCancelled)
+            .into()])
         .into()
 }
 
@@ -206,41 +154,24 @@ pub(super) fn open_with_panel(
     scrollbar_visibility: ScrollbarVisibility,
     scrollbar_viewport: Option<ScrollbarViewport>,
 ) -> Element<'static, Message> {
-    let path_label = format_middle_ellipsized_text(
-        state.path().to_string_lossy().as_ref(),
-        OPEN_WITH_PATH_MAX_CHARS,
-    );
-    let title = row![
-        themed_icon(IconSymbol::Monitor, IconTone::Normal, MENU_ICON_SIZE),
-        readable_text(tr!("Open With"))
-            .size(TITLE_SIZE)
-            .font(BOLD)
-            .width(Length::Fill),
-    ]
-    .spacing(8)
-    .align_y(Alignment::Center);
-
-    let mut content = column![title, readable_text(path_label)]
-        .spacing(10)
-        .width(Length::Fill);
-
+    let mut subtitle =
+        format_middle_ellipsized_text(&dialog::path_name(state.path()), OPEN_WITH_PATH_MAX_CHARS);
+    if let Some(mime_type) = state.mime_type() {
+        subtitle = format!("{subtitle} · {mime_type}");
+    }
+    let mut body = dialog::fields(Vec::new());
     if let Some(fallback_error) = state.fallback_error() {
-        content = content.push(readable_text(tr!(
+        body = body.push(dialog::error(tr!(
             "Default open failed: %1",
             format_middle_ellipsized_text(fallback_error, OPEN_WITH_ERROR_MAX_CHARS)
         )));
     }
-
-    if let Some(mime_type) = state.mime_type() {
-        content = content.push(readable_text(mime_type.to_owned()));
-    }
-
     match state {
         OpenWithState::Loading { .. } => {
-            content = content.push(readable_text(tr!("Loading applications...")));
+            body = body.push(dialog::hint(tr!("Loading applications...")));
         }
         OpenWithState::Ready { .. } => {
-            content = content
+            body = body
                 .push(open_with_application_list(
                     state,
                     scrollbar_visibility,
@@ -253,19 +184,12 @@ pub(super) fn open_with_panel(
                 );
         }
     }
-
-    content = content.push(
-        row![
-            Space::new().width(Length::Fill),
-            normal_button(readable_text(tr!("Cancel"))).on_press(Message::DismissFloating),
-        ]
-        .align_y(Alignment::Center),
-    );
-
-    container(content)
-        .padding(14)
-        .width(Length::Fixed(OPEN_WITH_PANEL_WIDTH))
-        .style(context_menu_style)
+    Dialog::new(tr!("Open With"), body)
+        .subtitle(subtitle)
+        .actions(vec![normal_button(readable_text(tr!("Cancel")))
+            .on_press(Message::DismissFloating)
+            .into()])
+        .width(OPEN_WITH_PANEL_WIDTH)
         .into()
 }
 

@@ -42,11 +42,9 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Create", "创建"),
     ("Extract", "解压"),
     ("No selected items", "没有已选择的项目"),
-    ("Source: %1", "来源：%1"),
-    ("Sources: %1 items", "来源：%1 个项目"),
-    ("Destination: %1", "目标目录：%1"),
-    ("Target: %1", "目标文件：%1"),
-    ("Archive: %1", "归档：%1"),
+    // 对话框标题下的一行：操作对象、放到哪。
+    ("%1, into %2", "%1，放到 %2"),
+    ("Creates %1", "将创建 %1"),
     ("That archive already exists. Choose another name.", "该归档已存在，请使用其他名称。"),
     ("Could not check archive target: %1", "无法检查归档目标：%1"),
     ("Enter an archive name.", "请输入归档名称。"),
@@ -77,6 +75,7 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("File entry in the checksum file does not match.", "与校验文件条目不一致。"),
     ("The checksum file has no entry for this file.", "校验文件中没有该文件的条目。"),
     ("Verify", "校验比对"),
+    ("Checksums", "校验值"),
     // 高级新建
     ("Advanced New Folder", "高级新建文件夹"),
     ("Name list", "名字列表"),
@@ -91,7 +90,6 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Auto-renamed", "已自动改名"),
     ("Cannot read the parent folder", "无法读取上级文件夹"),
     // 批量重命名
-    ("Items", "项目数"),
     ("Sort order", "排序"),
     ("Rules", "规则"),
     ("Add rule", "添加规则"),

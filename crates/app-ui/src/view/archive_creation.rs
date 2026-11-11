@@ -1,70 +1,42 @@
-use iced::widget::{column, container, row, Column, Space};
-use iced::{Alignment, Element, Length};
+use iced::widget::column;
+use iced::{Element, Length};
 
 use crate::app::archive_creation::{
     archive_compression_level_label, archive_format_label, ArchiveCreationMessage,
     ArchiveCreationState, ARCHIVE_COMPRESSION_LEVELS, ARCHIVE_FORMATS,
 };
 use crate::app::archive_password::ArchivePasswordDraft;
-use crate::appearance::context_menu_style;
-use crate::formatting::format_middle_ellipsized_text;
 use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
-use bennu_theme::icons::IconSymbol;
 
-use super::{themed_icon, IconTone, MENU_ICON_SIZE};
+use super::dialog::{self, Dialog};
 use bennu_theme::controls::text_field;
 use bennu_theme::controls::{normal_button, suggested_button};
 use bennu_theme::controls::{segmented_choice_row, SegmentedChoice};
-use bennu_theme::typography::{BOLD, TITLE_SIZE};
-
-const ARCHIVE_CREATION_PANEL_WIDTH: f32 = 500.0;
-const ARCHIVE_PATH_MAX_CHARS: usize = 72;
 
 pub(super) fn archive_creation_panel(state: &ArchiveCreationState) -> Element<'_, Message> {
-    let title = row![
-        themed_icon(IconSymbol::FileArchive, IconTone::Normal, MENU_ICON_SIZE),
-        readable_text(tr!("Create Archive"))
-            .size(TITLE_SIZE)
-            .font(BOLD)
-            .width(Length::Fill),
-    ]
-    .spacing(8)
-    .align_y(Alignment::Center);
-
     let name_input = text_field(&tr!("Archive name"), state.file_name())
         .on_input(|name| Message::ArchiveCreation(ArchiveCreationMessage::NameChanged(name)))
         .on_submit(Message::ArchiveCreation(ArchiveCreationMessage::Submitted))
         .width(Length::Fill);
-    let validation_error = state
-        .validation_error()
-        .map(str::to_owned)
-        .unwrap_or_default();
-
-    let content = column![
-        title,
-        readable_text(source_summary(state)),
-        readable_text(target_directory_summary(state)),
-        column![readable_text(tr!("Name")), name_input].spacing(4),
-        column![readable_text(tr!("Format")), archive_format_buttons(state)].spacing(4),
-        column![
-            readable_text(tr!("Compression")),
-            archive_compression_buttons(state)
-        ]
-        .spacing(4),
-        archive_password_input(state),
-        readable_text(target_summary(state)),
-        readable_text(validation_error),
-        archive_creation_actions(state),
-    ]
-    .spacing(10)
-    .width(Length::Fill);
-
-    container(content)
-        .padding(14)
-        .width(Length::Fixed(ARCHIVE_CREATION_PANEL_WIDTH))
-        .style(context_menu_style)
-        .into()
+    // 名字下面：要建出来的文件名；名字不行时换成原因。
+    let name_note = match (state.validation_error(), state.target_path()) {
+        (Some(problem), _) => dialog::error(problem.to_owned()),
+        (None, Err(problem)) => dialog::error(problem),
+        (None, Ok(target)) => dialog::hint(tr!("Creates %1", dialog::path_name(&target))),
+    };
+    Dialog::new(
+        tr!("Create Archive"),
+        dialog::fields(vec![
+            dialog::field(tr!("Name"), column![name_input, name_note].spacing(6)),
+            dialog::field(tr!("Format"), archive_format_buttons(state)),
+            dialog::field(tr!("Compression"), archive_compression_buttons(state)),
+            archive_password_input(state),
+        ]),
+    )
+    .subtitle(sources_into_target(state))
+    .actions(archive_creation_actions(state))
+    .into()
 }
 
 fn archive_format_buttons(state: &ArchiveCreationState) -> Element<'_, Message> {
@@ -114,75 +86,40 @@ fn archive_password_input(state: &ArchiveCreationState) -> Element<'_, Message> 
             })
             .on_submit(Message::ArchiveCreation(ArchiveCreationMessage::Submitted));
     }
-
-    let mut field = Column::new()
-        .spacing(4)
-        .push(readable_text(tr!("Password")))
-        .push(password_input);
+    let mut control = column![password_input].spacing(6);
     if !state.password_supported() {
-        field = field.push(readable_text(tr!(
+        control = control.push(dialog::hint(tr!(
             "tar.gz archives do not support passwords."
         )));
     }
-    field.into()
+    dialog::field(tr!("Password"), control)
 }
 
-fn archive_creation_actions(state: &ArchiveCreationState) -> Element<'_, Message> {
+fn archive_creation_actions(state: &ArchiveCreationState) -> Vec<Element<'_, Message>> {
     let create_label = if state.is_checking_target() {
         tr!("Checking...")
     } else {
         tr!("Create")
     };
-    let create_button = if state.can_submit() {
+    vec![
+        normal_button(readable_text(tr!("Cancel")))
+            .on_press(Message::DismissFloating)
+            .into(),
         suggested_button(readable_text(create_label))
-            .on_press(Message::ArchiveCreation(ArchiveCreationMessage::Submitted))
-    } else {
-        suggested_button(readable_text(create_label))
-    };
-
-    row![
-        Space::new().width(Length::Fill),
-        normal_button(readable_text(tr!("Cancel"))).on_press(Message::DismissFloating),
-        create_button,
+            .on_press_maybe(
+                state
+                    .can_submit()
+                    .then_some(Message::ArchiveCreation(ArchiveCreationMessage::Submitted)),
+            )
+            .into(),
     ]
-    .spacing(6)
-    .align_y(Alignment::Center)
-    .into()
 }
 
-fn source_summary(state: &ArchiveCreationState) -> String {
-    match state.sources() {
+fn sources_into_target(state: &ArchiveCreationState) -> String {
+    let sources = match state.sources() {
         [] => tr!("No selected items"),
-        [source] => tr!(
-            "Source: %1",
-            format_middle_ellipsized_text(
-                source.to_string_lossy().as_ref(),
-                ARCHIVE_PATH_MAX_CHARS
-            )
-        ),
-        sources => tr!("Sources: %1 items", sources.len()),
-    }
-}
-
-fn target_directory_summary(state: &ArchiveCreationState) -> String {
-    tr!(
-        "Destination: %1",
-        format_middle_ellipsized_text(
-            state.target_directory().to_string_lossy().as_ref(),
-            ARCHIVE_PATH_MAX_CHARS,
-        )
-    )
-}
-
-fn target_summary(state: &ArchiveCreationState) -> String {
-    match state.target_path() {
-        Ok(target) => tr!(
-            "Target: %1",
-            format_middle_ellipsized_text(
-                target.to_string_lossy().as_ref(),
-                ARCHIVE_PATH_MAX_CHARS
-            )
-        ),
-        Err(error) => error,
-    }
+        [source] => dialog::path_name(source),
+        sources => tr!("%1 items", sources.len()),
+    };
+    dialog::into_subtitle(&sources, state.target_directory())
 }

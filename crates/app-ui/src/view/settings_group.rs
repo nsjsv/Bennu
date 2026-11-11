@@ -1,143 +1,112 @@
-use iced::widget::{button, column, container, row, Button, Column, Space};
-use iced::{Alignment, Background, Border, Color, Element, Length, Theme};
+//! 分组卡片：设置页和借用它的弹窗共用。
+//!
+//! 卡片统一负责行的内边距、分隔线和悬停底色；行只能由 [`rows`] 里的骨架做出来
+//! （[`SettingsRow`] 的字段是私有的）。以前卡片收任意 Element、各页自己加内边距，
+//! 漏加的行左边就对不齐、分隔线贴字——现在裸 row/column 放不进卡片。
 
+mod rows;
+
+pub(super) use rows::{
+    action_row, choice_row, control_row, custom_row, destructive_action_row, entry_row,
+    expander_row, label_row, link_row, navigation_row, notice_row, switch_row, value_row, EntryRow,
+};
+
+use iced::widget::{button, column, container, Column, Space};
+use iced::{Background, Border, Color, Element, Length, Theme};
+
+use crate::app::FileBrowser;
 use crate::appearance::{base_text_color, muted_text_color, subtle_border_color};
-use crate::model::Message;
+use crate::model::{Message, ScrollbarRegion};
 use bennu_preview::panel_text::readable_text;
+use bennu_theme::metrics::{CARD_INSET, CARD_RADIUS, PAGE_MAX_WIDTH, ROW_PADDING_X, ROW_RADIUS};
+use bennu_theme::typography::{BOLD, CAPTION_SIZE, HEADING_SIZE};
 use bennu_theme::ui_colors;
 
+use super::auxiliary_window_layout::auxiliary_detail_scroller;
 use super::option_controls::hover_background_color;
-use super::{themed_icon, IconSymbol, IconTone};
-use bennu_theme::controls::switch;
-use bennu_theme::typography::CAPTION_SIZE;
+use super::settings_window::chrome_top_spacer;
 
+/// 组与组之间的距离（紧凑密度定稿值，见 ui-style-preferences）。
 pub(super) const SETTINGS_GROUP_SPACING: f32 = 16.0;
-
 const GROUP_HEADER_SPACING: f32 = 6.0;
-const CARD_PADDING: u16 = 4;
-const CARD_BORDER_RADIUS: f32 = 10.0;
-const ROW_BORDER_RADIUS: f32 = 6.0;
-const ROW_PADDING: [u16; 2] = [8, 12];
-const ROW_CONTENT_INSET: u16 = CARD_PADDING + ROW_PADDING[1];
+
+/// 卡片里的一行。只能由骨架函数构造。
+pub(super) struct SettingsRow<'a>(Element<'a, Message>);
+
+/// 行的附注：标题下面一行小字。提示是灰字，错误是红字；同一时刻只显示一条。
+pub(super) enum RowNote {
+    Hint(String),
+    Error(String),
+}
+
+/// 一个设置分类页：顶部给窗口按钮让位，内容最宽 [`PAGE_MAX_WIDTH`] 并居中，可滚动。
+pub(super) fn settings_page<'a>(
+    browser: &FileBrowser,
+    sections: Vec<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    let region = ScrollbarRegion::Settings;
+    let sections = Column::with_children(sections)
+        .spacing(SETTINGS_GROUP_SPACING)
+        .width(Length::Fill)
+        .max_width(PAGE_MAX_WIDTH);
+    auxiliary_detail_scroller(
+        column![
+            chrome_top_spacer(browser),
+            container(sections).center_x(Length::Fill),
+        ]
+        .spacing(SETTINGS_GROUP_SPACING),
+        region.clone(),
+        browser.scrollbar_visibility_for(&region),
+        browser.scrollbar_viewport_for(&region),
+        Message::SettingsScrolled,
+    )
+}
 
 pub(super) fn settings_group<'a>(
     header: String,
-    rows: Vec<Element<'a, Message>>,
+    description: Option<String>,
+    rows: Vec<SettingsRow<'a>>,
 ) -> Element<'a, Message> {
-    column![settings_group_header(header), settings_card(rows)]
-        .spacing(GROUP_HEADER_SPACING)
-        .width(Length::Fill)
-        .into()
+    let mut heading = column![readable_text(header).size(HEADING_SIZE).font(BOLD)].spacing(2);
+    if let Some(description) = description {
+        heading = heading.push(muted_setting_text(description));
+    }
+    column![
+        container(heading)
+            .padding([0.0, CARD_INSET + ROW_PADDING_X])
+            .width(Length::Fill),
+        settings_card(rows),
+    ]
+    .spacing(GROUP_HEADER_SPACING)
+    .width(Length::Fill)
+    .into()
 }
 
-pub(super) fn settings_card<'a>(rows: Vec<Element<'a, Message>>) -> Element<'a, Message> {
+pub(super) fn settings_card<'a>(rows: Vec<SettingsRow<'a>>) -> Element<'a, Message> {
     let row_count = rows.len();
     let mut content = Column::new().width(Length::Fill);
-    for (index, card_row) in rows.into_iter().enumerate() {
-        content = content.push(card_row);
+    for (index, SettingsRow(row)) in rows.into_iter().enumerate() {
+        content = content.push(row);
         if index + 1 < row_count {
             content = content.push(row_separator());
         }
     }
 
     container(content)
-        .padding(CARD_PADDING)
+        .padding(CARD_INSET)
         .width(Length::Fill)
         .style(settings_card_style)
         .into()
 }
 
-pub(super) fn toggle_setting_row(
-    title: String,
-    description: Option<String>,
-    is_on: bool,
-    message: Message,
-) -> Element<'static, Message> {
-    let mut labels = Column::new()
-        .spacing(2)
+/// 灰色说明小字（组说明、弹窗里的状态提示）。
+pub(super) fn muted_setting_text(label: String) -> Element<'static, Message> {
+    readable_text(label)
+        .size(CAPTION_SIZE)
         .width(Length::Fill)
-        .push(readable_text(title).width(Length::Fill));
-    if let Some(description) = description {
-        labels = labels.push(muted_setting_text(description, 11));
-    }
-
-    let content = row![labels, switch(is_on)]
-        .spacing(8)
-        .align_y(Alignment::Center);
-
-    button(content)
-        .on_press(message)
-        .padding(ROW_PADDING)
-        .width(Length::Fill)
-        .style(card_row_button_style())
-        .into()
-}
-
-pub(super) fn labeled_setting_row<'a>(
-    label: String,
-    control: Element<'a, Message>,
-) -> Element<'a, Message> {
-    container(
-        row![readable_text(label).width(Length::Fill), control]
-            .spacing(8)
-            .align_y(Alignment::Center),
-    )
-    .padding(ROW_PADDING)
-    .width(Length::Fill)
-    .into()
-}
-
-pub(super) fn action_setting_row(title: String, description: String) -> Button<'static, Message> {
-    let labels = Column::new()
-        .spacing(2)
-        .width(Length::Fill)
-        .push(readable_text(title).width(Length::Fill))
-        .push(
-            readable_text(description)
-                .size(CAPTION_SIZE)
-                .width(Length::Fill),
-        );
-
-    button(labels)
-        .padding(ROW_PADDING)
-        .width(Length::Fill)
-        .style(card_row_button_style())
-}
-
-/// 进入二级页面的导航行：左标题右箭头，整行可点。
-pub(super) fn navigation_setting_row(title: String) -> Button<'static, Message> {
-    let content = row![
-        readable_text(title).width(Length::Fill),
-        themed_icon(IconSymbol::ChevronRight, IconTone::Normal, 13.0),
-    ]
-    .spacing(8)
-    .align_y(Alignment::Center);
-
-    button(content)
-        .padding(ROW_PADDING)
-        .width(Length::Fill)
-        .style(card_row_button_style())
-}
-
-pub(super) fn info_setting_row(content: Element<'_, Message>) -> Element<'_, Message> {
-    container(content)
-        .padding(ROW_PADDING)
-        .width(Length::Fill)
-        .into()
-}
-
-pub(super) fn muted_setting_text(label: String, size: u32) -> Element<'static, Message> {
-    container(readable_text(label).size(size).width(Length::Fill))
-        .width(Length::Fill)
-        .style(muted_text_style)
-        .into()
-}
-
-fn settings_group_header(header: String) -> Element<'static, Message> {
-    container(readable_text(header).width(Length::Fill))
-        .padding([0, ROW_CONTENT_INSET])
-        .width(Length::Fill)
-        .style(muted_text_style)
+        .style(|theme: &Theme| iced::widget::text::Style {
+            color: Some(muted_text_color(theme)),
+        })
         .into()
 }
 
@@ -147,31 +116,19 @@ fn row_separator() -> Element<'static, Message> {
             .width(Length::Fill)
             .style(separator_line_style),
     )
-    .padding([0, ROW_PADDING[1]])
+    .padding([0.0, ROW_PADDING_X])
     .width(Length::Fill)
     .into()
 }
 
 fn settings_card_style(theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(Background::Color(settings_card_background(theme))),
+        background: Some(Background::Color(ui_colors(theme).surface_container)),
         text_color: Some(base_text_color(theme)),
         border: Border {
-            color: Color::TRANSPARENT,
-            width: 0.0,
-            radius: CARD_BORDER_RADIUS.into(),
+            radius: CARD_RADIUS.into(),
+            ..Border::default()
         },
-        ..container::Style::default()
-    }
-}
-
-fn settings_card_background(theme: &Theme) -> Color {
-    ui_colors(theme).surface_container
-}
-
-fn muted_text_style(theme: &Theme) -> container::Style {
-    container::Style {
-        text_color: Some(muted_text_color(theme)),
         ..container::Style::default()
     }
 }
@@ -186,6 +143,7 @@ fn separator_line_style(theme: &Theme) -> container::Style {
     }
 }
 
+/// 整行可点的行：平时透明，悬停淡底，圆角与卡片同心。
 pub(super) fn card_row_button_style() -> fn(&Theme, button::Status) -> button::Style {
     card_row_button_appearance
 }
@@ -198,11 +156,13 @@ fn card_row_button_appearance(theme: &Theme, status: button::Status) -> button::
 
     button::Style {
         background: background.map(Background::Color),
-        text_color: base_text_color(theme),
+        text_color: match status {
+            button::Status::Disabled => muted_text_color(theme),
+            _ => base_text_color(theme),
+        },
         border: Border {
-            color: Color::TRANSPARENT,
-            width: 0.0,
-            radius: ROW_BORDER_RADIUS.into(),
+            radius: ROW_RADIUS.into(),
+            ..Border::default()
         },
         ..button::Style::default()
     }

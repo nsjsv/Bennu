@@ -2,60 +2,58 @@ use file_search::{
     IndexHealth, IndexPhase, IndexedQueryAvailability, SearchPathConfigurationPhase,
     SearchRootAvailability, SearchServicePhase, SearchServiceStatus,
 };
-use iced::widget::{button, column, container, row, tooltip, Column};
-use iced::{Alignment, Element, Length};
+use iced::widget::{tooltip, Column};
+use iced::{Element, Length};
 
 use crate::app::FileBrowser;
 use crate::formatting::{format_file_size, format_middle_ellipsized_text, format_system_time};
 use crate::model::{
-    Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility, SearchEndpointState,
-    SearchPathEntryKind, SearchServiceDiagnosticKind, SearchServiceIncident,
-    SearchServiceIncidentState, SearchServiceRecoveryAction, SearchServiceRecoveryState,
+    Message, SearchEndpointState, SearchPathEntryKind, SearchServiceDiagnosticKind,
+    SearchServiceIncident, SearchServiceIncidentState, SearchServiceRecoveryAction,
+    SearchServiceRecoveryState,
 };
 use bennu_preview::panel_text::readable_text;
+use bennu_theme::controls::{icon_button, normal_button, tooltip_bubble};
 use bennu_theme::icons::IconSymbol;
 
-use super::auxiliary_window_layout::auxiliary_detail_scroller;
 use super::settings_group::{
-    action_setting_row, info_setting_row, labeled_setting_row, settings_group, toggle_setting_row,
-    SETTINGS_GROUP_SPACING,
+    action_row, control_row, custom_row, destructive_action_row, entry_row, label_row, notice_row,
+    settings_group, switch_row, value_row, EntryRow, RowNote, SettingsRow,
 };
-use super::settings_window::chrome_top_spacer;
 use super::{themed_icon, IconTone};
-use bennu_theme::controls::destructive_button_style;
-use bennu_theme::controls::icon_button_style;
-use bennu_theme::controls::normal_button;
-use bennu_theme::controls::text_field;
 use bennu_theme::typography::{CAPTION_SIZE, SMALL_SIZE};
 
-pub(super) fn search_settings_detail(
-    browser: &FileBrowser,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
-) -> Element<'_, Message> {
-    let content = column![
-        chrome_top_spacer(browser),
-        settings_group(tr!("Indexed locations"), indexed_location_rows(browser)),
-        settings_group(tr!("Excluded locations"), excluded_location_rows(browser)),
-        settings_group(tr!("Content indexing"), content_indexing_rows(browser)),
-        settings_group(tr!("Status overview"), status_overview_rows(browser)),
-        settings_group(tr!("Index progress"), index_progress_rows(browser)),
-        settings_group(tr!("Recent issues"), recent_issue_rows(browser)),
-        settings_group(tr!("Service recovery"), service_recovery_rows(browser)),
-    ]
-    .spacing(SETTINGS_GROUP_SPACING)
-    .width(Length::Fill);
+const ROW_ICON_SIZE: f32 = 14.0;
 
-    auxiliary_detail_scroller(
-        content,
-        ScrollbarRegion::Settings,
-        scrollbar_visibility,
-        scrollbar_viewport,
-        Message::SettingsScrolled,
-    )
+pub(super) fn search_settings_sections(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
+    vec![
+        settings_group(
+            tr!("Indexed locations"),
+            None,
+            indexed_location_rows(browser),
+        ),
+        settings_group(
+            tr!("Excluded locations"),
+            None,
+            excluded_location_rows(browser),
+        ),
+        settings_group(
+            tr!("Content indexing"),
+            None,
+            content_indexing_rows(browser),
+        ),
+        settings_group(tr!("Status overview"), None, status_overview_rows(browser)),
+        settings_group(tr!("Index progress"), None, index_progress_rows(browser)),
+        settings_group(tr!("Recent issues"), None, recent_issue_rows(browser)),
+        settings_group(
+            tr!("Service recovery"),
+            None,
+            service_recovery_rows(browser),
+        ),
+    ]
 }
 
-fn indexed_location_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
+fn indexed_location_rows(browser: &FileBrowser) -> Vec<SettingsRow<'_>> {
     let settings = &browser.search_service.path_settings;
     if settings.confirmed.is_none() {
         return vec![status_notice(tr!("Loading indexed locations..."))];
@@ -86,7 +84,7 @@ fn indexed_location_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
     rows
 }
 
-fn excluded_location_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
+fn excluded_location_rows(browser: &FileBrowser) -> Vec<SettingsRow<'_>> {
     let settings = &browser.search_service.path_settings;
     if settings.confirmed.is_none() {
         return vec![status_notice(tr!("Loading excluded locations..."))];
@@ -118,17 +116,17 @@ fn excluded_location_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
 fn path_picker_failure_notice(
     browser: &FileBrowser,
     kind: SearchPathEntryKind,
-) -> Option<Element<'static, Message>> {
+) -> Option<SettingsRow<'static>> {
     browser
         .search_service
         .path_settings
         .picker_failure
         .as_ref()
         .filter(|(failed_kind, _)| *failed_kind == kind)
-        .map(|(_, message)| status_notice(message.clone()))
+        .map(|(_, message)| notice_row(RowNote::Error(message.clone())))
 }
 
-fn path_configuration_state_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
+fn path_configuration_state_rows(browser: &FileBrowser) -> Vec<SettingsRow<'_>> {
     let settings = &browser.search_service.path_settings;
     if settings.apply_in_flight {
         return vec![status_notice(tr!("Applying search location changes..."))];
@@ -157,19 +155,12 @@ fn path_configuration_state_rows(browser: &FileBrowser) -> Vec<Element<'_, Messa
 }
 
 /// 搜索服务给的原话只作详情，外层一句译文（不翻原话，也不拿它来判断）。
-fn path_configuration_failure_row(detail: &str) -> Element<'_, Message> {
-    info_setting_row(
-        row![
-            readable_text(tr!("Could not apply search locations: %1", detail))
-                .size(CAPTION_SIZE)
-                .width(Length::Fill),
-            normal_button(readable_text(tr!("Retry")).size(CAPTION_SIZE))
-                .on_press(Message::SearchPathConfigurationRetryPressed),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center)
-        .width(Length::Fill)
-        .into(),
+fn path_configuration_failure_row(detail: &str) -> SettingsRow<'static> {
+    control_row(
+        tr!("Could not apply search locations: %1", detail),
+        None,
+        normal_button(readable_text(tr!("Retry")))
+            .on_press(Message::SearchPathConfigurationRetryPressed),
     )
 }
 
@@ -200,91 +191,73 @@ fn search_path_row<'a>(
     path: &'a std::path::Path,
     kind: SearchPathEntryKind,
     status: String,
-) -> Element<'a, Message> {
-    let remove_path = path.to_path_buf();
-    info_setting_row(
-        row![
-            column![
-                readable_text(format_middle_ellipsized_text(&path.to_string_lossy(), 72,))
-                    .width(Length::Fill),
-                readable_text(status).size(SMALL_SIZE).width(Length::Fill),
-            ]
-            .spacing(2)
-            .width(Length::Fill),
-            tooltip(
-                button(themed_icon(IconSymbol::Trash, IconTone::Normal, 12.0))
-                    .on_press(Message::SearchPathEntryRemoved(kind, remove_path))
-                    .padding([7, 8])
-                    .style(icon_button_style),
-                path_tooltip(tr!("Remove location")),
-                tooltip::Position::Left,
-            ),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center)
-        .width(Length::Fill)
-        .into(),
+) -> SettingsRow<'a> {
+    let remove = tooltip(
+        icon_button(themed_icon(
+            IconSymbol::Trash,
+            IconTone::Normal,
+            ROW_ICON_SIZE,
+        ))
+        .on_press(Message::SearchPathEntryRemoved(kind, path.to_path_buf())),
+        tooltip_bubble(tr!("Remove location")),
+        tooltip::Position::Left,
+    );
+    control_row(
+        format_middle_ellipsized_text(&path.to_string_lossy(), 72),
+        Some(RowNote::Hint(status)),
+        remove,
     )
 }
 
+/// 添加位置：回车或 ✓ 加进列表；右边也能用目录选择器选。
 fn search_path_input_row(
     kind: SearchPathEntryKind,
     value: &str,
     picker_in_flight: bool,
-) -> Element<'_, Message> {
-    let input = text_field(&tr!("Absolute path"), value)
-        .on_input(move |value| Message::SearchPathInputChanged(kind, value))
-        .on_submit(Message::SearchPathInputCommitted(kind))
-        .width(Length::Fill);
-    let chooser = button(themed_icon(IconSymbol::FolderOpen, IconTone::Normal, 13.0))
-        .padding([8, 9])
-        .style(icon_button_style);
-    let chooser = if picker_in_flight {
-        chooser
-    } else {
-        chooser.on_press(Message::SearchPathDirectoryChooserPressed(kind))
-    };
-    info_setting_row(
-        row![
-            input,
-            tooltip(
-                chooser,
-                path_tooltip(tr!("Choose directory")),
-                tooltip::Position::Left,
-            ),
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center)
-        .width(Length::Fill)
-        .into(),
+) -> SettingsRow<'_> {
+    let chooser = icon_button(themed_icon(
+        IconSymbol::FolderOpen,
+        IconTone::Normal,
+        ROW_ICON_SIZE,
+    ))
+    .on_press_maybe(
+        (!picker_in_flight).then_some(Message::SearchPathDirectoryChooserPressed(kind)),
+    );
+    let chooser: Element<'_, Message> = tooltip(
+        chooser,
+        tooltip_bubble(tr!("Choose directory")),
+        tooltip::Position::Left,
     )
+    .into();
+    entry_row(EntryRow {
+        title: tr!("Add a location"),
+        saved: String::new(),
+        draft: value,
+        placeholder: tr!("Absolute path"),
+        on_input: Box::new(move |value| Message::SearchPathInputChanged(kind, value)),
+        submit: Message::SearchPathInputCommitted(kind),
+        note: None,
+        unit: None,
+        trailing: vec![chooser],
+    })
 }
 
-fn path_tooltip(label: String) -> Element<'static, Message> {
-    container(readable_text(label).size(CAPTION_SIZE))
-        .padding([4, 6])
-        .into()
-}
-
-fn content_indexing_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
+fn content_indexing_rows(browser: &FileBrowser) -> Vec<SettingsRow<'_>> {
     vec![
-        toggle_setting_row(
+        switch_row(
             tr!("Index File Contents"),
             None,
             browser.user_config().search_content_indexing_enabled,
             Message::SearchContentIndexingToggled,
         ),
-        info_setting_row(
-            readable_text(tr!(
-                "Maximum content extraction: %1",
-                format_file_size(browser.user_config().search_max_extract_bytes)
-            ))
-            .into(),
-        ),
+        notice_row(RowNote::Hint(tr!(
+            "Maximum content extraction: %1",
+            format_file_size(browser.user_config().search_max_extract_bytes)
+        ))),
     ]
 }
 
-fn status_overview_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
+fn status_overview_rows(browser: &FileBrowser) -> Vec<SettingsRow<'_>> {
     let service = &browser.search_service;
     let mut rows = Vec::new();
 
@@ -308,34 +281,33 @@ fn status_overview_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
     if let Some(status) = service.confirmed_status.as_ref() {
         rows.extend(confirmed_status_summary_rows(status));
         if let Some(confirmed_at) = service.last_confirmed_at {
-            rows.push(info_setting_row(
-                readable_text(tr!("Last confirmed: %1", format_system_time(confirmed_at)))
-                    .size(CAPTION_SIZE)
-                    .into(),
-            ));
+            rows.push(notice_row(RowNote::Hint(tr!(
+                "Last confirmed: %1",
+                format_system_time(confirmed_at)
+            ))));
         }
     } else {
         rows.extend([
-            summary_value_row(
+            value_row(
                 tr!("Service"),
                 endpoint_without_snapshot_label(&service.endpoint),
             ),
-            summary_value_row(tr!("Indexed search"), tr!("Waiting for service status")),
-            summary_value_row(tr!("Index maintenance"), tr!("Not initialized")),
+            value_row(tr!("Indexed search"), tr!("Waiting for service status")),
+            value_row(tr!("Index maintenance"), tr!("Not initialized")),
         ]);
     }
 
     rows
 }
 
-fn confirmed_status_summary_rows(status: &SearchServiceStatus) -> Vec<Element<'static, Message>> {
+fn confirmed_status_summary_rows(status: &SearchServiceStatus) -> Vec<SettingsRow<'static>> {
     vec![
-        summary_value_row(tr!("Service"), service_phase_label(&status.phase)),
-        summary_value_row(
+        value_row(tr!("Service"), service_phase_label(&status.phase)),
+        value_row(
             tr!("Indexed search"),
             query_availability_label(&status.query_availability),
         ),
-        summary_value_row(tr!("Index maintenance"), index_maintenance_label(status)),
+        value_row(tr!("Index maintenance"), index_maintenance_label(status)),
     ]
 }
 
@@ -376,34 +348,18 @@ fn endpoint_without_snapshot_label(endpoint: &SearchEndpointState) -> String {
     }
 }
 
-fn diagnostic_notice(kind: SearchServiceDiagnosticKind) -> Element<'static, Message> {
-    info_setting_row(
-        column![
-            readable_text(diagnostic_title(kind)),
-            readable_text(diagnostic_recommendation(kind))
-                .size(CAPTION_SIZE)
-                .width(Length::Fill),
-        ]
-        .spacing(3)
-        .width(Length::Fill)
-        .into(),
+fn diagnostic_notice(kind: SearchServiceDiagnosticKind) -> SettingsRow<'static> {
+    label_row(
+        diagnostic_title(kind),
+        Some(RowNote::Hint(diagnostic_recommendation(kind))),
     )
 }
 
-fn status_notice(message: String) -> Element<'static, Message> {
-    info_setting_row(
-        readable_text(message)
-            .size(CAPTION_SIZE)
-            .width(Length::Fill)
-            .into(),
-    )
+fn status_notice(message: String) -> SettingsRow<'static> {
+    notice_row(RowNote::Hint(message))
 }
 
-fn summary_value_row(label: String, value: String) -> Element<'static, Message> {
-    labeled_setting_row(label, readable_text(value).width(Length::Shrink).into())
-}
-
-fn index_progress_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
+fn index_progress_rows(browser: &FileBrowser) -> Vec<SettingsRow<'_>> {
     let Some(status) = browser.search_service.confirmed_status.as_ref() else {
         return vec![status_notice(tr!(
             "Index progress will appear after the service responds."
@@ -416,8 +372,8 @@ fn index_progress_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
     };
 
     let mut rows = vec![
-        summary_value_row(tr!("Index phase"), index_phase_label(&index_status.phase)),
-        summary_value_row(
+        value_row(tr!("Index phase"), index_phase_label(&index_status.phase)),
+        value_row(
             tr!("Indexed items"),
             format_count(index_status.visible_indexed_files),
         ),
@@ -427,11 +383,11 @@ fn index_progress_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
             checked_entries,
             changed_entries,
         } => {
-            rows.push(summary_value_row(
+            rows.push(value_row(
                 tr!("Checked items"),
                 format_count(*checked_entries),
             ));
-            rows.push(summary_value_row(
+            rows.push(value_row(
                 tr!("Changed items"),
                 format_count(*changed_entries),
             ));
@@ -440,16 +396,16 @@ fn index_progress_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
             scanned_entries,
             current_scope,
         } => {
-            rows.push(summary_value_row(
+            rows.push(value_row(
                 tr!("Scanned items"),
                 format_count(*scanned_entries),
             ));
-            rows.push(summary_value_row(
+            rows.push(value_row(
                 tr!("Current location"),
                 current_scope.to_string_lossy().into_owned(),
             ));
         }
-        IndexPhase::Applying { pending_mutations } => rows.push(summary_value_row(
+        IndexPhase::Applying { pending_mutations } => rows.push(value_row(
             tr!("Pending changes"),
             format_count(*pending_mutations),
         )),
@@ -469,7 +425,7 @@ fn index_phase_label(phase: &IndexPhase) -> String {
     }
 }
 
-fn recent_issue_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
+fn recent_issue_rows(browser: &FileBrowser) -> Vec<SettingsRow<'_>> {
     if browser.search_service.incidents.is_empty() {
         return vec![status_notice(tr!(
             "No search service issues detected during this app session."
@@ -484,7 +440,7 @@ fn recent_issue_rows(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
         .collect()
 }
 
-fn issue_row(incident: &SearchServiceIncident) -> Element<'_, Message> {
+fn issue_row(incident: &SearchServiceIncident) -> SettingsRow<'_> {
     let state_label = match incident.state {
         SearchServiceIncidentState::Current => tr!("Current issue"),
         SearchServiceIncidentState::Recovered => tr!("Recovered"),
@@ -530,42 +486,39 @@ fn issue_row(incident: &SearchServiceIncident) -> Element<'_, Message> {
             .push(copy_button);
     }
 
-    info_setting_row(content.into())
+    custom_row(content)
 }
 
-fn service_recovery_rows(browser: &FileBrowser) -> Vec<Element<'static, Message>> {
+fn service_recovery_rows(browser: &FileBrowser) -> Vec<SettingsRow<'static>> {
     let recovery = &browser.search_service.recovery;
-    let recovery_is_running = recovery.is_running();
-    let restart_row = action_setting_row(
+    // 恢复进行中两行都不可点。
+    let idle = |message: Message| (!recovery.is_running()).then_some(message);
+    let restart_row = action_row(
         tr!("Restart Index Service"),
-        tr!("Gracefully stop and restart the managed service."),
+        Some(RowNote::Hint(tr!(
+            "Gracefully stop and restart the managed service."
+        ))),
+        idle(Message::SearchServiceRestartRequested),
     );
-    let restart_row = if recovery_is_running {
-        restart_row
-    } else {
-        restart_row.on_press(Message::SearchServiceRestartRequested)
-    };
-
     let force_restart_row = if *recovery == SearchServiceRecoveryState::ConfirmingForceRestart {
-        action_setting_row(
+        destructive_action_row(
             tr!("Click Again to Force Restart"),
-            tr!("Current indexing work will stop. Index data and settings will be kept."),
+            Some(RowNote::Hint(tr!(
+                "Current indexing work will stop. Index data and settings will be kept."
+            ))),
+            idle(Message::SearchServiceForceRestartPressed),
         )
-        .style(destructive_button_style)
     } else {
-        action_setting_row(
+        action_row(
             tr!("Force Restart"),
-            tr!("Use only when the managed service is unresponsive."),
+            Some(RowNote::Hint(tr!(
+                "Use only when the managed service is unresponsive."
+            ))),
+            idle(Message::SearchServiceForceRestartPressed),
         )
-    };
-    let force_restart_row = if recovery_is_running {
-        force_restart_row
-    } else {
-        force_restart_row.on_press(Message::SearchServiceForceRestartPressed)
     };
 
-    let mut rows: Vec<Element<'static, Message>> =
-        vec![restart_row.into(), force_restart_row.into()];
+    let mut rows = vec![restart_row, force_restart_row];
     if let Some(status_text) = recovery_status_text(recovery) {
         rows.push(status_notice(status_text));
     }

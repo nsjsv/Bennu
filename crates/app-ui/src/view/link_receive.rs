@@ -18,7 +18,7 @@ pub(super) fn link_receive_section(browser: &FileBrowser) -> Element<'_, Message
         return action_button(tr!("Receive from phone"), LinkReceiveMessage::StartPressed);
     };
     match &current.phase {
-        LinkReceivePhase::Starting => muted_setting_text(tr!("Preparing the link..."), 11),
+        LinkReceivePhase::Starting => muted_setting_text(tr!("Preparing the link...")),
         LinkReceivePhase::Ready(links) => column![
             qr_links_view(
                 links,
@@ -40,10 +40,9 @@ pub(super) fn link_receive_section(browser: &FileBrowser) -> Element<'_, Message
         .spacing(8)
         .into(),
         LinkReceivePhase::TimedOut => column![
-            muted_setting_text(
-                tr!("No one used the link for 10 minutes, so receiving stopped."),
-                11
-            ),
+            muted_setting_text(tr!(
+                "No one used the link for 10 minutes, so receiving stopped."
+            )),
             action_button(tr!("Receive from phone"), LinkReceiveMessage::StartPressed),
         ]
         .spacing(8)

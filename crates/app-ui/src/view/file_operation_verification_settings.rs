@@ -1,13 +1,12 @@
 use file_core::FileOperationVerification;
-use iced::Element;
 
 use crate::model::Message;
 
-use super::settings_group::toggle_setting_row;
+use super::settings_group::{switch_row, RowNote, SettingsRow};
 
 pub(super) fn file_operation_verification_options(
     selected: FileOperationVerification,
-) -> Element<'static, Message> {
+) -> SettingsRow<'static> {
     let is_strong = selected == FileOperationVerification::Strong;
     let next_verification = if is_strong {
         FileOperationVerification::BasicMetadata
@@ -15,11 +14,11 @@ pub(super) fn file_operation_verification_options(
         FileOperationVerification::Strong
     };
 
-    toggle_setting_row(
+    switch_row(
         tr!("Strong Verification"),
-        Some(tr!(
+        Some(RowNote::Hint(tr!(
             "Compare copied file content hashes after standard metadata checks."
-        )),
+        ))),
         is_strong,
         Message::FileOperationVerificationSelected(next_verification),
     )

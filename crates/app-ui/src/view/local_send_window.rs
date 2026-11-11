@@ -18,7 +18,9 @@ use bennu_theme::icons::IconSymbol;
 use bennu_theme::ui_colors;
 use local_send::DeviceInfo;
 
-use super::settings_group::{muted_setting_text, toggle_setting_row};
+use super::settings_group::{
+    custom_row, label_row, muted_setting_text, settings_card, switch_row, RowNote,
+};
 use super::{link_receive, local_send_address_form, local_send_devices, transfer_history};
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};
 use bennu_theme::controls::text_area;
@@ -70,35 +72,33 @@ pub(crate) fn view_local_send_window(browser: &FileBrowser) -> Element<'_, Messa
 /// 本机名、接收开关（与设置页同一个状态）、接收状态与"从手机接收"。
 fn this_computer_card(browser: &FileBrowser) -> Element<'_, Message> {
     let receiving = browser.user_config().transfer_receive_enabled;
-    let status: Element<'_, Message> = if let Some(failure) = browser.transfer_receiver_failure() {
-        error_text(receiver_failure_message(failure))
+    let status = if let Some(failure) = browser.transfer_receiver_failure() {
+        RowNote::Error(receiver_failure_message(failure))
     } else if browser.transfer_runtime.is_none() {
-        error_text(tr!("LocalSend is not running."))
+        RowNote::Error(tr!("LocalSend is not running."))
     } else if receiving {
-        muted_setting_text(tr!("Other devices can find this computer."), 11)
+        RowNote::Hint(tr!("Other devices can find this computer."))
     } else {
-        muted_setting_text(
-            tr!("Receiving is off. Other devices cannot find this computer."),
-            11,
-        )
+        RowNote::Hint(tr!(
+            "Receiving is off. Other devices cannot find this computer."
+        ))
     };
-    card(
-        column![
-            readable_text(tr!(
+    settings_card(vec![
+        label_row(
+            tr!(
                 "This computer: %1",
                 browser.effective_transfer_device_alias()
-            )),
-            toggle_setting_row(
-                tr!("Receive files"),
-                None,
-                receiving,
-                Message::Transfer(TransferMessage::ReceiveEnabledToggled),
             ),
-            status,
-            link_receive::link_receive_section(browser),
-        ]
-        .spacing(8),
-    )
+            None,
+        ),
+        switch_row(
+            tr!("Receive files"),
+            Some(status),
+            receiving,
+            Message::Transfer(TransferMessage::ReceiveEnabledToggled),
+        ),
+        custom_row(link_receive::link_receive_section(browser)),
+    ])
 }
 
 /// 待发卡片："文件 | 文字"两个标签，设备行发的是当前标签里的东西。
@@ -146,10 +146,9 @@ fn staged_files(browser: &FileBrowser) -> Element<'_, Message> {
     if staged.is_empty() {
         content = content
             .push(readable_text(tr!("No files to send")))
-            .push(muted_setting_text(
-                tr!("Drag files onto LocalSend in the sidebar, or choose them here."),
-                11,
-            ));
+            .push(muted_setting_text(tr!(
+                "Drag files onto LocalSend in the sidebar, or choose them here."
+            )));
     } else {
         let clear = normal_button(readable_text(tr!("Clear list")))
             .on_press(Message::Transfer(TransferMessage::StagedItemsCleared));
@@ -293,10 +292,9 @@ fn favorites_card(browser: &FileBrowser) -> Element<'_, Message> {
     content = if browser.user_config().transfer_favorite_devices.is_empty() {
         content
             .push(readable_text(tr!("No favorite devices yet")))
-            .push(muted_setting_text(
-                tr!("Click the star next to a device to add it here."),
-                11,
-            ))
+            .push(muted_setting_text(tr!(
+                "Click the star next to a device to add it here."
+            )))
     } else {
         content.push(local_send_devices::favorite_rows(&device_rows(browser)))
     };

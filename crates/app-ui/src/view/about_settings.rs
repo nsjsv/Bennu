@@ -1,19 +1,12 @@
 //! 设置「关于」分类页：应用标识（图标 + 名称 + 版本）、许可证说明与开源仓库链接。
 
-use crate::app::FileBrowser;
 use crate::appearance::muted_text_color;
-use crate::model::{Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility};
+use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
-use iced::widget::{button, column, container, image, row, text};
+use iced::widget::{column, container, image, text};
 use iced::{Alignment, Background, Border, Color, Element, Length, Theme};
 
-use super::auxiliary_window_layout::auxiliary_detail_scroller;
-use super::settings_group::{
-    card_row_button_style, info_setting_row, muted_setting_text, settings_card, settings_group,
-    SETTINGS_GROUP_SPACING,
-};
-use super::settings_window::chrome_top_spacer;
-use super::{themed_icon, IconSymbol, IconTone};
+use super::settings_group::{link_row, notice_row, settings_card, settings_group, RowNote};
 use bennu_theme::typography::{BOLD, CAPTION_SIZE, TITLE_SIZE};
 
 /// 图标固定尺寸。早期按视口宽度比例缩放的方案被放弃：滚动条隐藏/可见
@@ -23,34 +16,25 @@ const ABOUT_ICON_SIZE: f32 = 140.0;
 /// 品牌展示名，不做翻译。
 const APP_DISPLAY_NAME: &str = "Bennu";
 
-/// 关于分类页详情：三张卡片从上到下，滚动行为与其他分类页一致。
-pub(super) fn about_settings_detail(
-    browser: &FileBrowser,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
-) -> Element<'_, Message> {
-    let content = column![
-        chrome_top_spacer(browser),
+/// 关于分类页：图标名称版本在卡片外，下面许可证与仓库链接。
+pub(super) fn about_settings_sections() -> Vec<Element<'static, Message>> {
+    vec![
         app_identity_row(),
         settings_group(
             tr!("License"),
-            vec![info_setting_row(muted_setting_text(
-                tr!("Bennu is free software released under the GNU General Public License, version 3 or later."),
-                11
-            ))],
+            None,
+            vec![notice_row(RowNote::Hint(tr!(
+                "Bennu is free software released under the GNU General Public License, version 3 or later."
+            )))],
         ),
-        settings_card(vec![repository_link_row()]),
+        settings_card(vec![link_row(
+            tr!("GitHub repository"),
+            Some(RowNote::Hint(tr!(
+                "Report issues or browse the source code in your browser."
+            ))),
+            Message::AboutRepositoryLinkPressed,
+        )]),
     ]
-    .spacing(SETTINGS_GROUP_SPACING)
-    .width(Length::Fill);
-
-    auxiliary_detail_scroller(
-        content,
-        ScrollbarRegion::Settings,
-        scrollbar_visibility,
-        scrollbar_viewport,
-        Message::SettingsScrolled,
-    )
 }
 
 fn app_identity_row() -> Element<'static, Message> {
@@ -88,29 +72,4 @@ fn app_identity_row() -> Element<'static, Message> {
     .align_x(Alignment::Center)
     .width(Length::Fill)
     .into()
-}
-
-fn repository_link_row() -> Element<'static, Message> {
-    let labels = column![
-        readable_text(tr!("GitHub repository")).width(Length::Fill),
-        muted_setting_text(
-            tr!("Report issues or browse the source code in your browser."),
-            11
-        ),
-    ]
-    .spacing(2)
-    .width(Length::Fill);
-    let content = row![
-        labels,
-        themed_icon(IconSymbol::Link, IconTone::Normal, 13.0)
-    ]
-    .spacing(8)
-    .align_y(Alignment::Center);
-
-    button(content)
-        .on_press(Message::AboutRepositoryLinkPressed)
-        .padding([8, 12])
-        .width(Length::Fill)
-        .style(card_row_button_style())
-        .into()
 }

@@ -344,34 +344,31 @@ fn warning_icon_svg_style_for_status(theme: &Theme, _status: svg::Status) -> svg
 pub fn address_bar_style(theme: &Theme) -> container::Style {
     let input_style = text_field_style(theme, text_input::Status::Active);
     container::Style {
-        background: Some(opaque_over_window(theme, input_style.background)),
+        background: Some(input_style.background),
         border: input_style.border,
         ..container::Style::default()
     }
 }
 
-/// 地址栏外框、编辑层、退出快照三层叠放：都换算成叠在窗口底色上的实色，
-/// 编辑层才能盖住面包屑，且三层颜色完全相同。
-fn opaque_over_window(theme: &Theme, background: Background) -> Background {
-    match background {
-        Background::Color(tint) => Background::Color(over(tint, ui_colors(theme).background)),
-        gradient @ Background::Gradient(_) => gradient,
+/// 地址栏编辑层、退出快照下面垫的一层不透明窗口底色：盖住下面的面包屑，再由上层的
+/// 半透明输入框底色叠出和外框、搜索框完全相同的颜色。
+///
+/// 不自己算“半透明叠到底色上”的结果：wgpu 在线性色彩空间混色，按 sRGB 算出来的
+/// 实色在深色主题下比渲染器叠出的明显偏暗（2026-11-10 用户发现地址栏比搜索框暗）。
+pub fn address_bar_mask_style(theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(ui_colors(theme).background)),
+        border: Border {
+            radius: crate::metrics::CONTROL_RADIUS.into(),
+            ..Border::default()
+        },
+        ..container::Style::default()
     }
 }
 
 /// 透明无框按钮样式入口（地址栏面包屑段等使用）。
 pub fn transparent_button_style() -> fn(&Theme, button::Status) -> button::Style {
     transparent_icon_button_style
-}
-
-/// 半透明色叠在不透明底色上的结果。
-fn over(top: Color, bottom: Color) -> Color {
-    Color {
-        r: top.r * top.a + bottom.r * (1.0 - top.a),
-        g: top.g * top.a + bottom.g * (1.0 - top.a),
-        b: top.b * top.a + bottom.b * (1.0 - top.a),
-        a: 1.0,
-    }
 }
 
 pub fn scale_color_alpha(color: Color, opacity: f32) -> Color {
@@ -456,17 +453,14 @@ pub fn faded_button_style(
     style
 }
 
-/// 编辑态地址输入框：去掉边框只留底色，随过渡 fraction 淡入淡出，
-/// 与面包屑层叠时不产生第二层边框。
+/// 编辑态地址输入框：外观同普通输入框（含聚焦边框），文字随过渡 fraction 淡入淡出。
+/// 它放在 `address_bar_overlay` 的不透明垫层上，盖住外框的边框，所以只看得到一层边框。
 pub fn faded_text_input_style(
     theme: &Theme,
     status: text_input::Status,
     opacity: f32,
 ) -> text_input::Style {
     let mut style = text_field_style(theme, status);
-    style.background = opaque_over_window(theme, style.background);
-    style.border.width = 0.0;
-    style.border.color = Color::TRANSPARENT;
     style.icon = scale_color_alpha(style.icon, opacity);
     style.placeholder = scale_color_alpha(style.placeholder, opacity);
     style.value = scale_color_alpha(style.value, opacity);

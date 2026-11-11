@@ -54,7 +54,6 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Size", "大小"),
     ("Kind", "类型"),
     ("Directory", "目录"),
-    ("Choose...", "选择..."),
     ("Today", "今天"),
     ("Yesterday", "昨天"),
     ("1 item", "1 个项目"),

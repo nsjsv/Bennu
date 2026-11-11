@@ -38,7 +38,7 @@ pub(super) fn history_list(browser: &FileBrowser) -> Element<'_, Message> {
     let mut list: Column<'_, Message> = column![header].spacing(6).width(Length::Fill);
     if records.is_empty() {
         return list
-            .push(muted_setting_text(tr!("Nothing sent or received yet."), 11))
+            .push(muted_setting_text(tr!("Nothing sent or received yet.")))
             .into();
     }
     let now = SystemTime::now();
@@ -83,12 +83,9 @@ fn history_row(record: &HistoryRecord, now: SystemTime) -> Element<'_, Message> 
         }
     };
     summary.push(record_time(record.at, now));
-    let details = column![
-        readable_text(name),
-        muted_setting_text(summary.join(" · "), 11),
-    ]
-    .spacing(2)
-    .width(Length::Fill);
+    let details = column![readable_text(name), muted_setting_text(summary.join(" · ")),]
+        .spacing(2)
+        .width(Length::Fill);
     let content = row![
         themed_icon(icon, IconTone::Normal, MENU_ICON_SIZE),
         details,

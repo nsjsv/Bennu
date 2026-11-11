@@ -1,4 +1,4 @@
-use iced::widget::{column, container, row, Column, Space};
+use iced::widget::{column, container, row, Space};
 use iced::{Alignment, Element, Length};
 
 use file_core::{AudioTargetFormat, ConversionQualityPreset, ImageTargetFormat, VideoTargetFormat};
@@ -13,7 +13,7 @@ use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::icons::IconSymbol;
 
-use super::settings_group::{info_setting_row, labeled_setting_row, settings_card};
+use super::settings_group::{control_row, custom_row, settings_card, SettingsRow};
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};
 use bennu_theme::controls::dropdown;
 use bennu_theme::controls::slider;
@@ -83,11 +83,11 @@ fn image_section<'a>(
     })];
 
     if formats.is_empty() {
-        rows.push(info_setting_row(note_text(tr!(
+        rows.push(custom_row(note_text(tr!(
             "ffmpeg is missing; WebP and AVIF are unavailable."
         ))));
     } else if image_format_is_lossless(options.target_format()) {
-        rows.push(info_setting_row(note_text(tr!(
+        rows.push(custom_row(note_text(tr!(
             "This format is lossless; quality and target size do not apply."
         ))));
     } else if options.target_format() == ImageTargetFormat::Gif {
@@ -101,7 +101,7 @@ fn image_section<'a>(
         }));
         rows.push(image_quality_row(options));
     }
-    rows.push(resize_row(
+    rows.extend(resize_row(
         options.resize(),
         |percent| Message::Convert(ConvertMessage::ImageResizePercentSelected(percent)),
         |text| Message::Convert(ConvertMessage::ImageCustomWidthChanged(text)),
@@ -130,7 +130,7 @@ fn video_section<'a>(
     })];
 
     if formats.is_empty() {
-        rows.push(info_setting_row(note_text(tr!(
+        rows.push(custom_row(note_text(tr!(
             "Install ffmpeg to convert videos."
         ))));
     } else if options.target_format() == VideoTargetFormat::Gif {
@@ -149,14 +149,15 @@ fn video_section<'a>(
             |preset| Message::Convert(ConvertMessage::VideoPresetSelected(preset)),
             |text| Message::Convert(ConvertMessage::VideoTargetSizeChanged(text)),
         ));
-        rows.push(resize_row(
+        rows.extend(resize_row(
             options.resize(),
             |percent| Message::Convert(ConvertMessage::VideoResizePercentSelected(percent)),
             |text| Message::Convert(ConvertMessage::VideoCustomWidthChanged(text)),
             Message::Convert(ConvertMessage::VideoCustomWidthToggled),
         ));
-        rows.push(labeled_setting_row(
+        rows.push(control_row(
             tr!("Frame rate"),
+            None,
             segmented_choice_row(fps_choices(options.fps_override())),
         ));
     }
@@ -183,11 +184,11 @@ fn audio_section<'a>(
     })];
 
     if formats.is_empty() {
-        rows.push(info_setting_row(note_text(tr!(
+        rows.push(custom_row(note_text(tr!(
             "Install ffmpeg to convert audio files."
         ))));
     } else if audio_format_is_lossless(options.target_format()) {
-        rows.push(info_setting_row(note_text(tr!(
+        rows.push(custom_row(note_text(tr!(
             "This format is lossless; quality and target size do not apply."
         ))));
     } else {
@@ -202,8 +203,9 @@ fn audio_section<'a>(
             |text| Message::Convert(ConvertMessage::AudioTargetSizeChanged(text)),
         ));
     }
-    rows.push(labeled_setting_row(
+    rows.push(control_row(
         tr!("Channels"),
+        None,
         segmented_choice_row(vec![
             SegmentedChoice {
                 label: tr!("Keep"),
@@ -237,7 +239,7 @@ fn section<'a>(
     title: String,
     count: usize,
     icon: IconSymbol,
-    rows: Vec<Element<'a, Message>>,
+    rows: Vec<SettingsRow<'a>>,
 ) -> Element<'a, Message> {
     column![
         container(
@@ -262,15 +264,14 @@ fn format_row<F>(
     formats: &[F],
     selected: F,
     message: impl Fn(F) -> Message + 'static,
-) -> Element<'static, Message>
+) -> SettingsRow<'static>
 where
     F: Copy + PartialEq + std::fmt::Display + 'static,
 {
-    labeled_setting_row(
+    control_row(
         tr!("Format"),
-        dropdown(formats.to_vec(), Some(selected), message)
-            .width(Length::Fixed(FORMAT_PICK_WIDTH))
-            .into(),
+        None,
+        dropdown(formats.to_vec(), Some(selected), message).width(Length::Fixed(FORMAT_PICK_WIDTH)),
     )
 }
 
@@ -291,9 +292,10 @@ fn audio_format_is_lossless(format: AudioTargetFormat) -> bool {
 fn mode_row(
     mode: ConvertMode,
     message: impl Fn(ConvertMode) -> Message + 'static,
-) -> Element<'static, Message> {
-    labeled_setting_row(
+) -> SettingsRow<'static> {
+    control_row(
         tr!("Mode"),
+        None,
         segmented_choice_row(vec![
             SegmentedChoice {
                 label: tr!("Quality"),
@@ -311,10 +313,11 @@ fn mode_row(
     )
 }
 
-fn image_quality_row(options: &ImageConvertOptions) -> Element<'static, Message> {
+fn image_quality_row(options: &ImageConvertOptions) -> SettingsRow<'static> {
     match options.mode() {
-        ConvertMode::Quality => labeled_setting_row(
+        ConvertMode::Quality => control_row(
             tr!("Level"),
+            None,
             row![
                 slider(1..=100, options.quality(), |value| Message::Convert(
                     ConvertMessage::ImageQualityChanged(value)
@@ -324,8 +327,7 @@ fn image_quality_row(options: &ImageConvertOptions) -> Element<'static, Message>
                     .width(Length::Fixed(QUALITY_VALUE_WIDTH)),
             ]
             .spacing(10)
-            .align_y(Alignment::Center)
-            .into(),
+            .align_y(Alignment::Center),
         ),
         ConvertMode::TargetSize => target_size_row(options.target_size_text(), |text| {
             Message::Convert(ConvertMessage::ImageTargetSizeChanged(text))
@@ -336,9 +338,10 @@ fn image_quality_row(options: &ImageConvertOptions) -> Element<'static, Message>
 fn quality_preset_row(
     preset: ConversionQualityPreset,
     preset_message: impl Fn(ConversionQualityPreset) -> Message + 'static,
-) -> Element<'static, Message> {
-    labeled_setting_row(
+) -> SettingsRow<'static> {
+    control_row(
         tr!("Quality"),
+        None,
         segmented_choice_row(
             QUALITY_PRESETS
                 .iter()
@@ -360,7 +363,7 @@ fn preset_or_size_row(
     target_size_text: &str,
     preset_message: impl Fn(ConversionQualityPreset) -> Message + 'static,
     size_message: impl Fn(String) -> Message + 'static,
-) -> Element<'static, Message> {
+) -> SettingsRow<'static> {
     match mode {
         ConvertMode::Quality => quality_preset_row(preset, preset_message),
         ConvertMode::TargetSize => target_size_row(target_size_text, size_message),
@@ -378,13 +381,13 @@ fn preset_label(preset: ConversionQualityPreset) -> String {
 fn target_size_row(
     target_size_text: &str,
     size_message: impl Fn(String) -> Message + 'static,
-) -> Element<'static, Message> {
-    labeled_setting_row(
+) -> SettingsRow<'static> {
+    control_row(
         tr!("Target size per file"),
+        None,
         text_field("500KB / 2MB", target_size_text)
             .on_input(size_message)
-            .width(Length::Fixed(ROW_CONTROL_WIDTH))
-            .into(),
+            .width(Length::Fixed(ROW_CONTROL_WIDTH)),
     )
 }
 
@@ -394,7 +397,7 @@ fn resize_row(
     percent_message: impl Fn(u8) -> Message + Copy + 'static,
     custom_changed: impl Fn(String) -> Message + 'static,
     custom_toggle: Message,
-) -> Element<'static, Message> {
+) -> Vec<SettingsRow<'static>> {
     let mut choices: Vec<SegmentedChoice<Message>> = RESIZE_PERCENT_CHOICES
         .iter()
         .copied()
@@ -412,24 +415,21 @@ fn resize_row(
         tooltip: None,
     });
 
-    let mut rows = vec![labeled_setting_row(
+    let mut rows = vec![control_row(
         tr!("Resize"),
+        None,
         segmented_choice_row(choices),
     )];
     if selection.uses_custom_width() {
-        rows.push(labeled_setting_row(
+        rows.push(control_row(
             tr!("Width"),
+            None,
             text_field("1920", selection.custom_width_text())
                 .on_input(custom_changed)
-                .width(Length::Fixed(ROW_CONTROL_WIDTH))
-                .into(),
+                .width(Length::Fixed(ROW_CONTROL_WIDTH)),
         ));
     }
-    if rows.len() == 1 {
-        rows.remove(0)
-    } else {
-        Column::with_children(rows).width(Length::Fill).into()
-    }
+    rows
 }
 
 fn fps_choices(selected: Option<u32>) -> Vec<SegmentedChoice<Message>> {

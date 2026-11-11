@@ -106,7 +106,7 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     // 传输
     ("Receive", "接收"),
     ("Receive directory", "接收目录"),
-    ("Default: ~/Downloads", "默认：~/Downloads"),
+    ("Enter an absolute path.", "请输入绝对路径。"),
     ("Files received from other devices are saved to this directory", "其他设备发来的文件保存在此目录"),
     ("Device name", "设备名称"),
     ("Favorite devices", "收藏设备"),
@@ -134,7 +134,6 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
         "别人给这台电脑发文件时要输入这个 PIN，收藏设备也要输。",
     ),
     ("The PIN cannot be empty.", "PIN 不能为空。"),
-    ("Takes effect after you save.", "保存后生效。"),
     ("When off, other devices cannot find this computer. You can still send files.", "关掉后其他设备搜不到这台电脑，仍然可以发送文件。"),
     ("Port", "端口"),
     ("If you change the port, other devices must use the same port to find each other.", "改了端口，对方也要改成一样的才能互相发现。"),

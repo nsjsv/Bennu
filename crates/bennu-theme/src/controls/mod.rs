@@ -7,6 +7,7 @@
 //! 颜色只从 `ui_colors` 角色派生，配色重算后控件自动跟随。
 
 mod buttons;
+mod escape;
 mod feedback;
 mod fields;
 mod toggles;
@@ -15,6 +16,7 @@ pub use buttons::{
     destructive_button, destructive_button_style, icon_button, icon_button_style, normal_button,
     normal_button_style, suggested_button, suggested_button_style, toggle_button_style,
 };
+pub use escape::on_escape;
 pub use feedback::{
     progress_bar, progress_bar_style, slider, slider_style, tooltip_bubble, tooltip_bubble_style,
 };

@@ -55,31 +55,25 @@ fn status_line(
 ) -> Element<'static, Message> {
     match &state.phase {
         DirectSendPhase::Checking => with_cancel_button(
-            muted_setting_text(
-                tr!("Checking files %1%", browser.checking_percent(state)),
-                11,
-            ),
+            muted_setting_text(tr!("Checking files %1%", browser.checking_percent(state))),
             fingerprint,
         ),
         DirectSendPhase::Sending if state.total_files > 0 => with_cancel_button(
-            muted_setting_text(
-                tr!(
-                    "Sending %1/%2 · %3%",
-                    // 协议层的序号从 0 开始。
-                    state.file_index + 1,
-                    state.total_files,
-                    file_percent(state)
-                ),
-                11,
-            ),
+            muted_setting_text(tr!(
+                "Sending %1/%2 · %3%",
+                // 协议层的序号从 0 开始。
+                state.file_index + 1,
+                state.total_files,
+                file_percent(state)
+            )),
             fingerprint,
         ),
         // 还没报过进度：对方在决定要不要收。
         DirectSendPhase::Sending => with_cancel_button(
-            muted_setting_text(tr!("Waiting for the device to accept..."), 11),
+            muted_setting_text(tr!("Waiting for the device to accept...")),
             fingerprint,
         ),
-        DirectSendPhase::Canceling => muted_setting_text(tr!("Canceling..."), 11),
+        DirectSendPhase::Canceling => muted_setting_text(tr!("Canceling...")),
         DirectSendPhase::NeedsPin { wrong: false, .. } => {
             readable_text(tr!("This device requires a PIN"))
                 .size(CAPTION_SIZE)
@@ -87,7 +81,7 @@ fn status_line(
         }
         DirectSendPhase::NeedsPin { wrong: true, .. } => error_text(tr!("Wrong PIN. Try again.")),
         DirectSendPhase::Finished { failed, .. } if failed.is_empty() => {
-            muted_setting_text(tr!("Sent"), 11)
+            muted_setting_text(tr!("Sent"))
         }
         DirectSendPhase::Finished {
             sent: 0,
@@ -99,11 +93,11 @@ fn status_line(
             details_open,
             ..
         } => with_details_button(
-            muted_setting_text(tr!("Sent, %1 failed", failed.len()), 11),
+            muted_setting_text(tr!("Sent, %1 failed", failed.len())),
             fingerprint,
             *details_open,
         ),
-        DirectSendPhase::Canceled => muted_setting_text(tr!("Canceled"), 11),
+        DirectSendPhase::Canceled => muted_setting_text(tr!("Canceled")),
         DirectSendPhase::Failed(DirectSendFailure::Declined) => {
             error_text(tr!("The device declined."))
         }

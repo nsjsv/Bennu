@@ -1,83 +1,62 @@
-use iced::widget::{column, container, Column};
+use iced::widget::column;
 use iced::{Element, Length};
 
 use crate::app::FileBrowser;
 use crate::formatting::format_system_time;
-use crate::model::{
-    ApplicationLogLevel, Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility,
-};
+use crate::model::{ApplicationLogLevel, Message};
 use bennu_preview::panel_text::readable_text;
-
-use super::auxiliary_window_layout::auxiliary_detail_scroller;
-use super::settings_group::{info_setting_row, settings_group, SETTINGS_GROUP_SPACING};
-use super::settings_window::chrome_top_spacer;
-use bennu_theme::controls::{segmented_choice_row, SegmentedChoice};
+use bennu_theme::controls::SegmentedChoice;
 use bennu_theme::typography::CAPTION_SIZE;
 
-pub(super) fn application_logs_settings_detail(
-    browser: &FileBrowser,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
-) -> Element<'_, Message> {
-    let mut content = column![
-        chrome_top_spacer(browser),
-        settings_group(
-            tr!("Display level"),
-            vec![info_setting_row(log_threshold_choices(
-                browser.application_logs.threshold,
-            ))],
-        )
-    ]
-    .spacing(SETTINGS_GROUP_SPACING)
-    .width(Length::Fill);
+use super::settings_group::{
+    choice_row, custom_row, notice_row, settings_card, RowNote, SettingsRow,
+};
 
-    let mut entries = Column::new().spacing(4).width(Length::Fill);
-    if let Some(warning) = browser.application_logs.journald_warning.as_ref() {
-        entries = entries.push(readable_text(warning.clone()).width(Length::Fill));
+/// 日志页：级别选择一张卡，日志条目一张卡（每条一行）。
+pub(super) fn application_logs_sections(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
+    let logs = &browser.application_logs;
+    let mut rows: Vec<SettingsRow<'_>> = Vec::new();
+    if let Some(warning) = logs.journald_warning.as_ref() {
+        rows.push(notice_row(RowNote::Hint(warning.clone())));
     }
-    if let Some(error) = browser.application_logs.load_error.as_ref() {
-        entries = entries.push(readable_text(error.clone()).width(Length::Fill));
+    if let Some(error) = logs.load_error.as_ref() {
+        rows.push(notice_row(RowNote::Error(error.clone())));
     }
-    if browser.application_logs.is_loading() {
-        entries = entries.push(readable_text(tr!("Loading logs...")));
+    if logs.is_loading() {
+        rows.push(notice_row(RowNote::Hint(tr!("Loading logs..."))));
     }
-
-    let mut visible_count = 0;
-    for entry in browser.application_logs.visible_entries() {
-        visible_count += 1;
+    let entry_count = rows.len();
+    rows.extend(logs.visible_entries().map(|entry| {
         let metadata = format!(
             "{}  ·  {}  ·  {}",
             format_system_time(entry.timestamp),
             entry.level.label(),
             entry.source.label()
         );
-        let log_entry = column![
-            readable_text(metadata).size(CAPTION_SIZE),
-            readable_text(entry.message.clone()).width(Length::Fill),
-        ]
-        .spacing(2)
-        .width(Length::Fill);
-        entries = entries.push(container(log_entry).padding([6, 0]).width(Length::Fill));
+        custom_row(
+            column![
+                readable_text(metadata).size(CAPTION_SIZE),
+                readable_text(entry.message.clone()).width(Length::Fill),
+            ]
+            .spacing(2)
+            .width(Length::Fill),
+        )
+    }));
+    let has_entries = rows.len() > entry_count;
+    if !has_entries && !logs.is_loading() && logs.load_error.is_none() {
+        rows.push(notice_row(RowNote::Hint(tr!("No logs for this level."))));
     }
-    if visible_count == 0
-        && !browser.application_logs.is_loading()
-        && browser.application_logs.load_error.is_none()
-    {
-        entries = entries.push(readable_text(tr!("No logs for this level.")));
-    }
-    content = content.push(entries);
 
-    auxiliary_detail_scroller(
-        content,
-        ScrollbarRegion::Settings,
-        scrollbar_visibility,
-        scrollbar_viewport,
-        Message::SettingsScrolled,
-    )
+    vec![
+        settings_card(vec![log_threshold_row(logs.threshold)]),
+        settings_card(rows),
+    ]
 }
 
-fn log_threshold_choices(selected: ApplicationLogLevel) -> Element<'static, Message> {
-    segmented_choice_row(
+fn log_threshold_row(selected: ApplicationLogLevel) -> SettingsRow<'static> {
+    choice_row(
+        tr!("Display level"),
+        None,
         ApplicationLogLevel::ALL
             .into_iter()
             .map(|level| SegmentedChoice {

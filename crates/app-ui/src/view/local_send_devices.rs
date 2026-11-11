@@ -109,7 +109,7 @@ pub(super) fn favorite_rows<'a>(
                     name.style(|theme: &Theme| iced::widget::text::Style {
                         color: Some(muted_text_color(theme)),
                     }),
-                    muted_setting_text(last_seen, 11),
+                    muted_setting_text(last_seen),
                 ]
                 .spacing(2);
                 // 不在线的勾不了：发不出去。
@@ -184,7 +184,7 @@ fn online_row<'a>(
     let mut details = column![name].spacing(2);
     let subtitle = device_subtitle(device);
     if !subtitle.is_empty() {
-        details = details.push(muted_setting_text(subtitle, 11));
+        details = details.push(muted_setting_text(subtitle));
     }
     if let Some(state) = browser.direct_send_to(device) {
         details = details.push(direct_send_lines(browser, &device.fingerprint, state));

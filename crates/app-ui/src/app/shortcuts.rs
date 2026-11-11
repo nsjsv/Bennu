@@ -48,6 +48,9 @@ impl FileBrowser {
         let Some(action) = self.user_config.shortcuts.matching_action(&key, modifiers) else {
             return Task::none();
         };
+        if self.escape_left_a_text_field(action, status) {
+            return Task::none();
+        }
         match keyboard_shortcut_route(action, &key, status) {
             KeyboardShortcutRoute::InvokeApplication => self.invoke_shortcut(action),
             KeyboardShortcutRoute::InvokeFileBrowserContent => {
@@ -59,6 +62,15 @@ impl FileBrowser {
             KeyboardShortcutRoute::CapturedPreview => self.handle_captured_preview_shortcut(),
             KeyboardShortcutRoute::Stop => Task::none(),
         }
+    }
+
+    /// 辅助窗口里被捕获的 Escape，是聚焦的输入框吃掉的（iced text_input 只在聚焦时
+    /// 捕获 Escape，并借此失焦）：这一下只离开输入框，第二下才关窗口。主窗口不算：
+    /// 地址栏编辑正是靠这次被捕获的 Escape 来取消编辑。
+    fn escape_left_a_text_field(&self, action: ShortcutAction, status: event::Status) -> bool {
+        action == ShortcutAction::Escape
+            && status == event::Status::Captured
+            && self.auxiliary_window(self.focused_window).is_some()
     }
 
     fn handle_path_suggestion_keyboard_key(
@@ -377,6 +389,38 @@ mod tests {
         ));
 
         assert!(captured_browser.operation_queue.tasks().is_empty());
+    }
+
+    fn escape(browser: &mut FileBrowser, status: event::Status) {
+        drop(browser.handle_keyboard_key_pressed(
+            keyboard::Key::Named(key::Named::Escape),
+            keyboard::Modifiers::default(),
+            status,
+        ));
+    }
+
+    #[test]
+    fn escape_taken_by_a_text_field_leaves_auxiliary_windows_open() {
+        let mut browser = FileBrowser::new(config::default_user_config()).0;
+        let settings_window = iced::window::Id::unique();
+        browser.settings_window = Some(settings_window);
+        browser.focused_window = settings_window;
+
+        escape(&mut browser, event::Status::Captured);
+        assert_eq!(browser.settings_window, Some(settings_window));
+
+        escape(&mut browser, event::Status::Ignored);
+        assert_eq!(browser.settings_window, None);
+    }
+
+    #[test]
+    fn captured_escape_still_cancels_main_window_address_editing() {
+        let mut browser = FileBrowser::new(config::default_user_config()).0;
+        drop(browser.begin_address_editing(browser.active_pane_id()));
+        assert!(browser.address_editing.is_some());
+
+        escape(&mut browser, event::Status::Captured);
+        assert!(browser.address_editing.is_none());
     }
 
     #[test]

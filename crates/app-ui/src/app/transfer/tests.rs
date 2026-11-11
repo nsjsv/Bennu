@@ -102,6 +102,61 @@ fn valid_port_input_is_saved_normalized() {
     assert_eq!(browser.user_config.user_preferences().transfer_port, 50000);
 }
 
+fn commit_download_dir(browser: &mut FileBrowser, input: &str) {
+    drop(
+        browser.handle_transfer_message(TransferMessage::DownloadDirInputChanged(input.to_owned())),
+    );
+    drop(browser.handle_transfer_message(TransferMessage::DownloadDirCommitted));
+}
+
+#[test]
+fn relative_download_dir_is_flagged_and_changes_nothing() {
+    let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+
+    commit_download_dir(&mut browser, "Downloads/phone");
+
+    assert!(browser.transfer_download_dir_invalid);
+    assert_eq!(browser.user_config.transfer_download_dir, None);
+    assert_eq!(browser.transfer_download_dir_input, "Downloads/phone");
+    drop(browser.handle_transfer_message(TransferMessage::DownloadDirInputChanged("/".to_owned())));
+    assert!(!browser.transfer_download_dir_invalid);
+}
+
+#[test]
+fn absolute_download_dir_is_saved_and_clearing_returns_to_default() {
+    let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+
+    commit_download_dir(&mut browser, " /data/phone ");
+    assert_eq!(
+        browser.user_config.transfer_download_dir,
+        Some(std::path::PathBuf::from("/data/phone"))
+    );
+    assert_eq!(browser.transfer_download_dir_input, "/data/phone");
+
+    commit_download_dir(&mut browser, "  ");
+    assert_eq!(browser.user_config.transfer_download_dir, None);
+    assert_eq!(browser.transfer_download_dir_input, "");
+}
+
+#[test]
+fn chosen_download_dir_replaces_the_draft() {
+    let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+    drop(
+        browser.handle_transfer_message(TransferMessage::DownloadDirInputChanged(
+            "half typed".to_owned(),
+        )),
+    );
+
+    drop(
+        browser.handle_transfer_message(TransferMessage::DownloadDirChosen(Ok(Some(
+            std::path::PathBuf::from("/data/chosen"),
+        )))),
+    );
+
+    assert_eq!(browser.transfer_download_dir_input, "/data/chosen");
+    assert!(!browser.transfer_download_dir_invalid);
+}
+
 #[test]
 fn receive_switch_toggles_the_saved_preference() {
     let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());

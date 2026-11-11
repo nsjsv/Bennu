@@ -4,8 +4,9 @@ use iced::widget::{button, container, mouse_area, opaque, responsive, scrollable
 use iced::{mouse, Element, Length};
 
 use bennu_theme::address_bar::{
-    BreadcrumbMeasurement, ElasticBreadcrumbs, ADDRESS_BAR_HEIGHT, ADDRESS_TEXT_SIZE,
-    BREADCRUMB_HORIZONTAL_PADDING, BREADCRUMB_ICON_SIZE, BREADCRUMB_SEPARATOR_SIZE,
+    address_bar_overlay, BreadcrumbMeasurement, ElasticBreadcrumbs, ADDRESS_BAR_HEIGHT,
+    ADDRESS_TEXT_SIZE, BREADCRUMB_HORIZONTAL_PADDING, BREADCRUMB_ICON_SIZE,
+    BREADCRUMB_SEPARATOR_SIZE,
 };
 
 use crate::app::panes::BrowserPaneView;
@@ -76,12 +77,12 @@ pub(crate) fn address_bar<'a>(
             .style(move |theme, status| faded_text_input_style(theme, status, editing_fraction))
             .width(Length::Fill);
 
-        stack([breadcrumbs, opaque(input)])
+        stack([breadcrumbs, opaque(address_bar_overlay(input))])
             .width(Length::Fill)
             .height(Length::Fixed(ADDRESS_BAR_HEIGHT))
             .into()
     } else if let Some(snapshot) = pane.address_exit_snapshot {
-        let snapshot = address_exit_snapshot(snapshot, editing_fraction);
+        let snapshot = address_bar_overlay(address_exit_snapshot(snapshot, editing_fraction));
         stack([breadcrumbs, snapshot])
             .width(Length::Fill)
             .height(Length::Fixed(ADDRESS_BAR_HEIGHT))
@@ -343,26 +344,28 @@ fn faded_icon<'a>(symbol: IconSymbol, size: f32, opacity: f32) -> Element<'a, Me
 #[cfg(test)]
 mod tests {
     use super::*;
-    use iced::{Color, Theme};
+    use bennu_theme::controls::text_field_style;
+    use bennu_theme::styles::address_bar_mask_style;
+    use iced::widget::text_input;
+    use iced::Theme;
 
+    /// 外框、编辑层、搜索框是同一个半透明底色，由渲染器叠出同一个颜色；
+    /// 编辑层下面垫的是不透明窗口底色，面包屑透不过来。
     #[test]
-    fn address_input_overlay_masks_breadcrumbs_without_drawing_a_second_border() {
+    fn address_layers_share_the_field_tint_over_an_opaque_mask() {
         for theme in [Theme::Light, Theme::Dark] {
-            let frame_style = address_bar_style(&theme);
-            let input_style =
-                faded_text_input_style(&theme, iced::widget::text_input::Status::Active, 1.0);
+            let search = text_field_style(&theme, text_input::Status::Active);
+            let frame = address_bar_style(&theme);
+            let editing = faded_text_input_style(&theme, text_input::Status::Active, 1.0);
 
-            assert_eq!(Some(input_style.background), frame_style.background);
-            let iced::Background::Color(mask) = input_style.background else {
-                panic!("address input overlay must be a solid color");
+            assert_eq!(frame.background, Some(search.background));
+            assert_eq!(editing.background, search.background);
+
+            let Some(iced::Background::Color(mask)) = address_bar_mask_style(&theme).background
+            else {
+                panic!("the mask under the editing layer must be a solid color");
             };
-            assert_eq!(
-                mask.a, 1.0,
-                "a translucent overlay shows the breadcrumbs through it"
-            );
-            assert_eq!(input_style.border.radius, frame_style.border.radius);
-            assert_eq!(input_style.border.width, 0.0);
-            assert_eq!(input_style.border.color, Color::TRANSPARENT);
+            assert_eq!(mask.a, 1.0, "a translucent mask shows the breadcrumbs");
         }
     }
 }

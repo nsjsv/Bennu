@@ -68,7 +68,7 @@ pub(super) fn incoming_message_panel(
     .spacing(12)
     .width(Length::Fill);
     if remaining > 0 {
-        content = content.push(muted_setting_text(tr!("%1 more", remaining), 11));
+        content = content.push(muted_setting_text(tr!("%1 more", remaining)));
     }
     container(content.push(actions))
         .padding(14)

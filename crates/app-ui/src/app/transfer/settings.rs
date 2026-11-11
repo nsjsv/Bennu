@@ -119,17 +119,42 @@ impl FileBrowser {
         self.persist_user_preferences_command()
     }
 
+    /// 已保存的接收目录（空串 = 用默认的 ~/Downloads）：输入框与“是否改过”都以它为准。
+    pub(crate) fn configured_transfer_download_dir(&self) -> String {
+        self.user_config
+            .transfer_download_dir
+            .as_ref()
+            .map(|dir| dir.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    }
+
+    pub(super) fn edit_transfer_download_dir(&mut self, value: String) {
+        self.transfer_download_dir_input = value;
+        self.transfer_download_dir_invalid = false;
+    }
+
+    /// 清空 = 回到默认目录；必须是绝对路径。目录不存在没关系：接收服务启动时会创建。
+    pub(super) fn commit_transfer_download_dir(&mut self) -> iced::Task<Message> {
+        let trimmed = self.transfer_download_dir_input.trim();
+        let configured = if trimmed.is_empty() {
+            None
+        } else {
+            let dir = PathBuf::from(trimmed);
+            if !dir.is_absolute() {
+                self.transfer_download_dir_invalid = true;
+                return iced::Task::none();
+            }
+            Some(dir)
+        };
+        self.set_transfer_download_dir(configured)
+    }
+
     pub(super) fn accept_transfer_download_dir(
         &mut self,
         outcome: Result<Option<PathBuf>, String>,
     ) -> iced::Task<Message> {
         match outcome {
-            Ok(Some(dir)) => {
-                self.user_config.transfer_download_dir = Some(dir);
-                // 接收目录在服务启动时确定：改目录必须重启常驻服务。
-                self.start_or_restart_local_send_service();
-                self.persist_user_preferences_command()
-            }
+            Ok(Some(dir)) => self.set_transfer_download_dir(Some(dir)),
             Ok(None) => iced::Task::none(),
             Err(error) => {
                 self.show_global_error(error);
@@ -140,15 +165,29 @@ impl FileBrowser {
 
     pub(super) fn commit_transfer_device_alias(&mut self) -> iced::Task<Message> {
         let trimmed = self.transfer_device_alias_input.trim().to_owned();
-        let configured = if trimmed.is_empty() {
-            // 清空输入 = 回退 hostname 默认。
-            None
-        } else if Some(&trimmed) == self.user_config.transfer_device_alias.as_ref() {
-            return iced::Task::none();
-        } else {
-            Some(trimmed)
-        };
+        // 清空输入 = 回退 hostname 默认。
+        let configured = (!trimmed.is_empty()).then_some(trimmed);
+        let changed = configured != self.user_config.transfer_device_alias;
         self.user_config.transfer_device_alias = configured;
+        // 输入框显示生效的名字：清空保存后显示回 hostname，输入行不再显示“没保存”。
+        self.transfer_device_alias_input = self.effective_transfer_device_alias();
+        if !changed {
+            return iced::Task::none();
+        }
+        self.start_or_restart_local_send_service();
+        self.persist_user_preferences_command()
+    }
+
+    /// 输入框和选择器共用的落地：输入框显示规范化后的值；目录没变不重启服务。
+    fn set_transfer_download_dir(&mut self, dir: Option<PathBuf>) -> iced::Task<Message> {
+        self.transfer_download_dir_invalid = false;
+        let changed = dir != self.user_config.transfer_download_dir;
+        self.user_config.transfer_download_dir = dir;
+        self.transfer_download_dir_input = self.configured_transfer_download_dir();
+        if !changed {
+            return iced::Task::none();
+        }
+        // 接收目录在服务启动时确定：改目录必须重启常驻服务。
         self.start_or_restart_local_send_service();
         self.persist_user_preferences_command()
     }

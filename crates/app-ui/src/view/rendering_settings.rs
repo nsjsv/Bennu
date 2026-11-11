@@ -1,7 +1,7 @@
 use iced::widget::{column, container, row, Space};
 use iced::{Alignment, Element, Length};
 
-use super::settings_group::toggle_setting_row;
+use super::settings_group::{switch_row, SettingsRow};
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};
 use crate::appearance::context_menu_style;
 use crate::config::RenderingGpuPreference;
@@ -15,8 +15,8 @@ const RENDERER_RESTART_NOTICE_WIDTH: f32 = 420.0;
 
 pub(super) fn rendering_gpu_preference_row(
     preference: RenderingGpuPreference,
-) -> Element<'static, Message> {
-    toggle_setting_row(
+) -> SettingsRow<'static> {
+    switch_row(
         tr!("Discrete GPU"),
         None,
         matches!(preference, RenderingGpuPreference::HighPerformanceGpu),

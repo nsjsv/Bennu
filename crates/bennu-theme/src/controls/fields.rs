@@ -17,6 +17,7 @@ use iced::{Background, Border, Color, Pixels, Shadow, Theme, Vector};
 
 use super::foreground_tint;
 use crate::metrics::{CONTROL_LINE_HEIGHT, CONTROL_PADDING_Y, CONTROL_RADIUS, FIELD_PADDING_X};
+
 use crate::styles::{elevation_shadow_color, muted_text_color, subtle_border_color};
 use crate::ui_colors;
 
@@ -62,17 +63,20 @@ where
         .menu_style(dropdown_menu_style)
 }
 
+/// 输入框和按钮必须一眼分得开：按钮是实心淡灰块，输入框是更淡的底 + 一圈细边框，
+/// 聚焦时边框换成强调色。只靠底色时，用户认不出放在卡片里的输入框
+/// （2026-11-10 用户验收反馈）。
 pub fn text_field_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
     let colors = ui_colors(theme);
-    let (background, focused) = match status {
-        text_input::Status::Active => (foreground_tint(theme, 0.07), false),
-        text_input::Status::Hovered => (foreground_tint(theme, 0.10), false),
-        text_input::Status::Focused { .. } => (foreground_tint(theme, 0.07), true),
-        text_input::Status::Disabled => (foreground_tint(theme, 0.04), false),
+    let (background, border) = match status {
+        text_input::Status::Active => (0.03, hairline_border(theme, 0.20)),
+        text_input::Status::Hovered => (0.05, hairline_border(theme, 0.32)),
+        text_input::Status::Focused { .. } => (0.03, focus_border(theme)),
+        text_input::Status::Disabled => (0.02, hairline_border(theme, 0.10)),
     };
     text_input::Style {
-        background: Background::Color(background),
-        border: field_border(theme, focused),
+        background: Background::Color(foreground_tint(theme, background)),
+        border,
         icon: colors.on_surface_variant,
         placeholder: colors.on_surface_variant,
         value: match status {
@@ -146,17 +150,21 @@ pub fn dropdown_menu_style(theme: &Theme) -> menu::Style {
     }
 }
 
-fn field_border(theme: &Theme, focused: bool) -> Border {
+fn hairline_border(theme: &Theme, alpha: f32) -> Border {
     Border {
-        color: if focused {
-            Color {
-                a: 0.7,
-                ..ui_colors(theme).primary
-            }
-        } else {
-            Color::TRANSPARENT
+        color: foreground_tint(theme, alpha),
+        width: 1.0,
+        radius: CONTROL_RADIUS.into(),
+    }
+}
+
+fn focus_border(theme: &Theme) -> Border {
+    Border {
+        color: Color {
+            a: 0.7,
+            ..ui_colors(theme).primary
         },
-        width: if focused { 2.0 } else { 0.0 },
+        width: 2.0,
         radius: CONTROL_RADIUS.into(),
     }
 }

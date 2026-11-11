@@ -11,7 +11,7 @@ use bennu_preview::panel_text::readable_text;
 use bennu_theme::icons::IconSymbol;
 
 use super::settings_group::card_row_button_style;
-use super::settings_group::{info_setting_row, muted_setting_text};
+use super::settings_group::muted_setting_text;
 use super::{themed_icon, IconTone};
 use bennu_theme::controls::icon_button_style;
 use bennu_theme::controls::normal_button;
@@ -36,21 +36,19 @@ pub(super) fn window_control_settings_row(browser: &FileBrowser) -> Element<'_, 
     let mut content = Column::new()
         .spacing(8)
         .width(Length::Fill)
-        .push(muted_setting_text(tr!("Window layout"), 12))
+        .push(muted_setting_text(tr!("Window layout")))
         .push(window_layout_selector(browser));
     for side in WindowControlSide::ALL {
         if let Some(group) = side_control_group(browser, side) {
             content = content.push(group);
         }
     }
-    info_setting_row(
-        content
-            .push(
-                normal_button(readable_text(tr!("Restore defaults")))
-                    .on_press(Message::WindowControlsReset),
-            )
-            .into(),
-    )
+    content
+        .push(
+            normal_button(readable_text(tr!("Restore defaults")))
+                .on_press(Message::WindowControlsReset),
+        )
+        .into()
 }
 
 fn window_layout_selector(browser: &FileBrowser) -> Element<'static, Message> {
@@ -88,13 +86,10 @@ fn side_control_group(
     let mut controls = Column::new()
         .spacing(5)
         .width(Length::Fill)
-        .push(muted_setting_text(
-            match side {
-                WindowControlSide::Left => tr!("Left side"),
-                WindowControlSide::Right => tr!("Right side"),
-            },
-            12,
-        ));
+        .push(muted_setting_text(match side {
+            WindowControlSide::Left => tr!("Left side"),
+            WindowControlSide::Right => tr!("Right side"),
+        }));
     for (index, placement) in placements.into_iter().enumerate() {
         controls = controls.push(window_control_row(
             placement,

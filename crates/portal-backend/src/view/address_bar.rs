@@ -6,9 +6,9 @@
 use std::path::Path;
 
 use bennu_theme::address_bar::{
-    breadcrumb_segments, BreadcrumbMeasurement, BreadcrumbSegmentKind, ElasticBreadcrumbs,
-    ADDRESS_BAR_HEIGHT, ADDRESS_TEXT_SIZE, BREADCRUMB_HORIZONTAL_PADDING, BREADCRUMB_ICON_SIZE,
-    BREADCRUMB_SEPARATOR_SIZE,
+    address_bar_overlay, breadcrumb_segments, BreadcrumbMeasurement, BreadcrumbSegmentKind,
+    ElasticBreadcrumbs, ADDRESS_BAR_HEIGHT, ADDRESS_TEXT_SIZE, BREADCRUMB_HORIZONTAL_PADDING,
+    BREADCRUMB_ICON_SIZE, BREADCRUMB_SEPARATOR_SIZE,
 };
 use bennu_theme::anchored_popup::anchored_popup;
 use bennu_theme::icons::IconSymbol;
@@ -169,12 +169,12 @@ fn address_bar(
             .style(move |theme, status| faded_text_input_style(theme, status, editing_fraction))
             .width(Length::Fill);
 
-        stack([breadcrumbs, opaque(input)])
+        stack([breadcrumbs, opaque(address_bar_overlay(input))])
             .width(Length::Fill)
             .height(Length::Fixed(ADDRESS_BAR_HEIGHT))
             .into()
     } else if let Some(snapshot) = session.address_exit_snapshot() {
-        let snapshot_layer = address_exit_snapshot(snapshot, editing_fraction);
+        let snapshot_layer = address_bar_overlay(address_exit_snapshot(snapshot, editing_fraction));
         stack([breadcrumbs, snapshot_layer])
             .width(Length::Fill)
             .height(Length::Fixed(ADDRESS_BAR_HEIGHT))

@@ -1,7 +1,7 @@
 use std::fmt;
 
 use desktop_linux::{TerminalEmulator, TERMINAL_EMULATOR_OPTIONS};
-use iced::widget::{button, column, container, row, stack, svg, Button, Column, Space, Svg};
+use iced::widget::{button, column, row, stack, svg, Button, Column, Space, Svg};
 use iced::{window, Alignment, Element, Length, Theme};
 
 use crate::app::FileBrowser;
@@ -9,40 +9,38 @@ use crate::config::{
     ColumnWidthAdjustMode, LaunchWindowPolicy, StartupLocationPolicy, UiLanguageSetting,
 };
 use crate::model::{
-    Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility, SettingsCategory,
-    SettingsSubpage, WindowChromeLayout, WindowControlSide, WindowFrameState,
-    WINDOW_TITLE_BAR_HEIGHT, WINDOW_TOP_BAR_HEIGHT,
+    Message, SettingsCategory, SettingsSubpage, WindowChromeLayout, WindowControlSide,
+    WindowFrameState, WINDOW_TITLE_BAR_HEIGHT, WINDOW_TOP_BAR_HEIGHT,
 };
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::icons::{rotated_chevron_right_view, IconSymbol};
 use bennu_theme::{ColorSchemeFamily, ColorSchemePreset, ContrastWarnings, ThemeMode};
 
-use super::about_settings::about_settings_detail;
-use super::application_logs::application_logs_settings_detail;
+use super::about_settings::about_settings_sections;
+use super::application_logs::application_logs_sections;
 use super::auxiliary_window_layout::{
-    auxiliary_detail_scroller, auxiliary_detail_surface_with_sidebar_space,
-    auxiliary_full_height_sidebar, auxiliary_sidebar_button,
+    auxiliary_detail_surface_with_sidebar_space, auxiliary_full_height_sidebar,
+    auxiliary_sidebar_button,
 };
 use super::context_menu_settings::context_menu_settings_section;
 use super::file_operation_verification_settings::file_operation_verification_options;
 use super::network_settings::network_thumbnails_row;
-use super::preview_settings::{preview_settings_entry_card, preview_settings_subpage_detail};
+use super::preview_settings::{preview_settings_entry_card, preview_settings_subpage_sections};
 use super::rendering_settings::rendering_gpu_preference_row;
-use super::search_settings::search_settings_detail;
+use super::search_settings::search_settings_sections;
 use super::settings_group::{
-    info_setting_row, labeled_setting_row, settings_card, settings_group, toggle_setting_row,
-    SETTINGS_GROUP_SPACING,
+    choice_row, control_row, custom_row, entry_row, settings_card, settings_group, settings_page,
+    switch_row, EntryRow, RowNote, SettingsRow, SETTINGS_GROUP_SPACING,
 };
 use super::shortcut_settings::shortcut_settings_section;
-use super::transfer_settings::{favorite_devices_section, transfer_receive_rows};
+use super::transfer_settings::{favorite_devices_group, transfer_receive_rows};
 use super::window_chrome::{floating_window_control_group, separate_window_content};
 use super::window_control_settings::window_control_settings_row;
 use super::window_drag_region::window_drag_region;
 use super::IconTone;
 use bennu_theme::controls::dropdown;
 use bennu_theme::controls::normal_button;
-use bennu_theme::controls::text_field;
-use bennu_theme::controls::{segmented_choice_row, toggle_button_style, SegmentedChoice};
+use bennu_theme::controls::{toggle_button_style, SegmentedChoice};
 use bennu_theme::typography::{BOLD, CAPTION_SIZE, SMALL_SIZE, TITLE_SIZE};
 
 const SETTINGS_DROPDOWN_WIDTH: f32 = 220.0;
@@ -219,219 +217,146 @@ fn settings_category_button(
 }
 
 fn settings_category_detail(browser: &FileBrowser) -> Element<'_, Message> {
-    let scrollbar_region = ScrollbarRegion::Settings;
-    let scrollbar_visibility = browser.scrollbar_visibility_for(&scrollbar_region);
-    let scrollbar_viewport = browser.scrollbar_viewport_for(&scrollbar_region);
     match browser.selected_settings_category {
-        SettingsCategory::General => {
-            general_settings_detail(browser, scrollbar_visibility, scrollbar_viewport)
-        }
+        SettingsCategory::General => settings_page(browser, general_settings_sections(browser)),
         SettingsCategory::Appearance => {
-            appearance_settings_detail(browser, scrollbar_visibility, scrollbar_viewport)
+            settings_page(browser, appearance_settings_sections(browser))
         }
         SettingsCategory::Files if browser.settings_subpage == Some(SettingsSubpage::Preview) => {
-            preview_settings_subpage_detail(browser, scrollbar_visibility, scrollbar_viewport)
+            settings_page(browser, preview_settings_subpage_sections(browser))
         }
-        SettingsCategory::Files => {
-            files_settings_detail(browser, scrollbar_visibility, scrollbar_viewport)
-        }
-        SettingsCategory::Transfer => {
-            transfer_settings_detail(browser, scrollbar_visibility, scrollbar_viewport)
-        }
-        SettingsCategory::Search => {
-            search_settings_detail(browser, scrollbar_visibility, scrollbar_viewport)
-        }
+        SettingsCategory::Files => settings_page(browser, files_settings_sections(browser)),
+        SettingsCategory::Transfer => settings_page(browser, transfer_settings_sections(browser)),
+        SettingsCategory::Search => settings_page(browser, search_settings_sections(browser)),
         SettingsCategory::Shortcuts => {
-            shortcut_settings_detail(browser, scrollbar_visibility, scrollbar_viewport)
+            settings_page(browser, vec![shortcut_settings_section(browser)])
         }
-        SettingsCategory::Logs => {
-            application_logs_settings_detail(browser, scrollbar_visibility, scrollbar_viewport)
-        }
-        SettingsCategory::About => {
-            about_settings_detail(browser, scrollbar_visibility, scrollbar_viewport)
-        }
+        SettingsCategory::Logs => settings_page(browser, application_logs_sections(browser)),
+        SettingsCategory::About => settings_page(browser, about_settings_sections()),
     }
 }
 
-fn general_settings_detail(
-    browser: &FileBrowser,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
-) -> Element<'_, Message> {
+fn general_settings_sections(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
     let mut rows = vec![
-        labeled_setting_row(tr!("Language"), language_setting_dropdown(browser)),
-        labeled_setting_row(tr!("Startup location"), startup_location_dropdown(browser)),
-        labeled_setting_row(tr!("Launch behavior"), launch_window_dropdown(browser)),
+        control_row(tr!("Language"), None, language_setting_dropdown(browser)),
+        control_row(
+            tr!("Startup location"),
+            None,
+            startup_location_dropdown(browser),
+        ),
+        control_row(
+            tr!("Launch behavior"),
+            None,
+            launch_window_dropdown(browser),
+        ),
     ];
     if browser.user_config().startup_location_policy == StartupLocationPolicy::CustomDirectory {
         rows.push(startup_custom_directory_row(browser));
     }
-    rows.push(labeled_setting_row(
+    rows.push(control_row(
         tr!("Terminal"),
+        None,
         terminal_emulator_dropdown(browser.terminal_emulator),
     ));
-    rows.push(labeled_setting_row(
+    rows.push(control_row(
         tr!("Shell"),
+        None,
         terminal_shell_dropdown(browser.user_config().terminal_shell.clone()),
     ));
-
-    settings_detail_scroller(
-        column![chrome_top_spacer(browser), settings_card(rows)]
-            .spacing(SETTINGS_GROUP_SPACING)
-            .width(Length::Fill),
-        scrollbar_visibility,
-        scrollbar_viewport,
-    )
+    vec![settings_card(rows)]
 }
 
-fn appearance_settings_detail(
-    browser: &FileBrowser,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
-) -> Element<'_, Message> {
-    settings_detail_scroller(
-        column![
-            chrome_top_spacer(browser),
-            settings_group(
-                tr!("Theme"),
-                vec![
-                    labeled_setting_row(tr!("Mode"), theme_mode_selector(browser)),
-                    color_scheme_setting_row(browser),
-                    custom_color_scheme_import_row(browser),
-                ],
-            ),
-            settings_group(
-                tr!("Window controls"),
-                vec![window_control_settings_row(browser)]
-            ),
-            settings_group(
-                tr!("Columns view"),
-                vec![
-                    labeled_setting_row(
-                        tr!("Column width"),
-                        column_width_adjust_mode_dropdown(browser),
-                    ),
-                    labeled_setting_row(
-                        tr!("Visible columns"),
-                        visible_column_count_dropdown(browser),
-                    ),
-                ],
-            ),
-            settings_group(
-                tr!("Rendering"),
-                vec![rendering_gpu_preference_row(
-                    browser.rendering_gpu_preference
-                )],
-            ),
-        ]
-        .spacing(SETTINGS_GROUP_SPACING)
-        .width(Length::Fill),
-        scrollbar_visibility,
-        scrollbar_viewport,
-    )
+fn appearance_settings_sections(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
+    vec![
+        settings_group(
+            tr!("Theme"),
+            None,
+            vec![
+                theme_mode_row(browser),
+                color_scheme_setting_row(browser),
+                custom_color_scheme_import_row(browser),
+            ],
+        ),
+        settings_group(
+            tr!("Window controls"),
+            None,
+            vec![custom_row(window_control_settings_row(browser))],
+        ),
+        settings_group(
+            tr!("Columns view"),
+            None,
+            vec![
+                control_row(
+                    tr!("Column width"),
+                    None,
+                    column_width_adjust_mode_dropdown(browser),
+                ),
+                control_row(
+                    tr!("Visible columns"),
+                    None,
+                    visible_column_count_dropdown(browser),
+                ),
+            ],
+        ),
+        settings_group(
+            tr!("Rendering"),
+            None,
+            vec![rendering_gpu_preference_row(
+                browser.rendering_gpu_preference,
+            )],
+        ),
+    ]
 }
 
-fn files_settings_detail(
-    browser: &FileBrowser,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
-) -> Element<'_, Message> {
-    settings_detail_scroller(
-        column![
-            chrome_top_spacer(browser),
-            settings_group(
-                tr!("File display"),
-                vec![
-                    toggle_setting_row(
-                        tr!("Show Hidden Files"),
-                        None,
-                        browser.options.include_hidden,
-                        Message::ShowHiddenFilesToggled,
-                    ),
-                    toggle_setting_row(
-                        tr!("Show Recursive Folder Size In List View"),
-                        None,
-                        browser
-                            .user_config()
-                            .list_directory_size_display_mode
-                            .uses_recursive_total_size(),
-                        Message::ListDirectorySizeDisplayModeToggled,
-                    ),
-                ],
-            ),
-            settings_group(
-                tr!("Context menus"),
-                vec![context_menu_settings_section(browser)],
-            ),
-            preview_settings_entry_card(),
-            settings_group(
-                tr!("Verification"),
-                vec![file_operation_verification_options(
-                    browser.file_operation_verification(),
-                )],
-            ),
-            settings_group(tr!("Network"), vec![network_thumbnails_row(browser)]),
-        ]
-        .spacing(SETTINGS_GROUP_SPACING)
-        .width(Length::Fill),
-        scrollbar_visibility,
-        scrollbar_viewport,
-    )
+fn files_settings_sections(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
+    vec![
+        settings_group(
+            tr!("File display"),
+            None,
+            vec![
+                switch_row(
+                    tr!("Show Hidden Files"),
+                    None,
+                    browser.options.include_hidden,
+                    Message::ShowHiddenFilesToggled,
+                ),
+                switch_row(
+                    tr!("Show Recursive Folder Size In List View"),
+                    None,
+                    browser
+                        .user_config()
+                        .list_directory_size_display_mode
+                        .uses_recursive_total_size(),
+                    Message::ListDirectorySizeDisplayModeToggled,
+                ),
+            ],
+        ),
+        settings_group(
+            tr!("Context menus"),
+            None,
+            vec![custom_row(context_menu_settings_section(browser))],
+        ),
+        preview_settings_entry_card(),
+        settings_group(
+            tr!("Verification"),
+            None,
+            vec![file_operation_verification_options(
+                browser.file_operation_verification(),
+            )],
+        ),
+        settings_group(tr!("Network"), None, vec![network_thumbnails_row(browser)]),
+    ]
 }
 
-/// 传输设置页：接收开关与端口、接收目录、设备名与信任设备管理（R9）。
-fn transfer_settings_detail(
-    browser: &FileBrowser,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
-) -> Element<'_, Message> {
-    settings_detail_scroller(
-        column![
-            chrome_top_spacer(browser),
-            settings_group(tr!("Receive"), transfer_receive_rows(browser)),
-            settings_group(
-                tr!("Favorite devices"),
-                vec![favorite_devices_section(browser)]
-            ),
-        ]
-        .spacing(SETTINGS_GROUP_SPACING)
-        .width(Length::Fill),
-        scrollbar_visibility,
-        scrollbar_viewport,
-    )
+/// 传输设置页：接收开关与端口、接收目录、设备名，收藏设备。
+fn transfer_settings_sections(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
+    vec![
+        settings_group(tr!("Receive"), None, transfer_receive_rows(browser)),
+        favorite_devices_group(browser),
+    ]
 }
 
-fn shortcut_settings_detail(
-    browser: &FileBrowser,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
-) -> Element<'_, Message> {
-    settings_detail_scroller(
-        column![
-            chrome_top_spacer(browser),
-            shortcut_settings_section(browser)
-        ]
-        .spacing(SETTINGS_GROUP_SPACING)
-        .width(Length::Fill),
-        scrollbar_visibility,
-        scrollbar_viewport,
-    )
-}
-fn settings_detail_scroller<'a>(
-    content: Column<'a, Message>,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
-) -> Element<'a, Message> {
-    auxiliary_detail_scroller(
-        content,
-        ScrollbarRegion::Settings,
-        scrollbar_visibility,
-        scrollbar_viewport,
-        Message::SettingsScrolled,
-    )
-}
-
-fn theme_mode_selector(browser: &FileBrowser) -> Element<'static, Message> {
+fn theme_mode_row(browser: &FileBrowser) -> SettingsRow<'static> {
     let selected = browser.user_config().theme_mode;
     // Matugen 自带深浅，模式选择只显示不可点。
     let selectable = browser.user_config().color_scheme != ColorSchemePreset::Matugen;
@@ -444,23 +369,20 @@ fn theme_mode_selector(browser: &FileBrowser) -> Element<'static, Message> {
             tooltip: None,
         })
         .collect();
-    segmented_choice_row(choices)
+    choice_row(tr!("Mode"), None, choices)
 }
 
-fn color_scheme_setting_row(browser: &FileBrowser) -> Element<'_, Message> {
-    container(
+fn color_scheme_setting_row(browser: &FileBrowser) -> SettingsRow<'_> {
+    custom_row(
         column![
             readable_text(tr!("Color scheme")),
             color_scheme_grid(browser),
         ]
         .spacing(8),
     )
-    .padding([8, 12])
-    .width(Length::Fill)
-    .into()
 }
 
-fn custom_color_scheme_import_row(browser: &FileBrowser) -> Element<'_, Message> {
+fn custom_color_scheme_import_row(browser: &FileBrowser) -> SettingsRow<'_> {
     let import = normal_button(
         row![
             super::themed_icon(IconSymbol::Download, IconTone::Normal, 14.0),
@@ -498,7 +420,7 @@ fn custom_color_scheme_import_row(browser: &FileBrowser) -> Element<'_, Message>
         );
     }
 
-    info_setting_row(content.into())
+    custom_row(content)
 }
 
 fn custom_color_scheme_contrast_warning(warnings: ContrastWarnings) -> Element<'static, Message> {
@@ -835,29 +757,25 @@ fn terminal_shell_dropdown(selected: String) -> Element<'static, Message> {
     .into()
 }
 
-fn startup_custom_directory_row(browser: &FileBrowser) -> Element<'_, Message> {
-    let input = text_field(&tr!("Directory"), &browser.startup_custom_directory_input)
-        .on_input(Message::StartupCustomDirectoryInputChanged)
-        .on_submit(Message::StartupCustomDirectoryCommitted)
-        .width(Length::Fill);
-    let save = normal_button(readable_text(tr!("Save")))
-        .on_press(Message::StartupCustomDirectoryCommitted);
-    let mut content = column![row![
-        readable_text(tr!("Custom Startup Directory")).width(Length::FillPortion(2)),
-        input,
-        save,
-    ]
-    .spacing(8)
-    .align_y(Alignment::Center)]
-    .spacing(3);
-    if let Some(error) = &browser.startup_custom_directory_error {
-        content = content.push(
-            readable_text(error.clone())
-                .size(CAPTION_SIZE)
-                .width(Length::Fill),
-        );
-    }
-    info_setting_row(content.into())
+fn startup_custom_directory_row(browser: &FileBrowser) -> SettingsRow<'_> {
+    entry_row(EntryRow {
+        title: tr!("Custom Startup Directory"),
+        saved: browser
+            .user_config()
+            .startup_custom_directory
+            .to_string_lossy()
+            .into_owned(),
+        draft: &browser.startup_custom_directory_input,
+        placeholder: tr!("Directory"),
+        on_input: Box::new(Message::StartupCustomDirectoryInputChanged),
+        submit: Message::StartupCustomDirectoryCommitted,
+        note: browser
+            .startup_custom_directory_error
+            .clone()
+            .map(RowNote::Error),
+        unit: None,
+        trailing: Vec::new(),
+    })
 }
 
 #[cfg(test)]

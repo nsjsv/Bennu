@@ -1,28 +1,18 @@
-use iced::widget::{button, column, container, row, text};
+use iced::widget::{button, column, container, row, text, Space};
 use iced::{Alignment, Background, Border, Color, Element, Length, Theme};
 
 use crate::app::FileBrowser;
 use crate::appearance::{muted_text_color, subtle_border_color};
 use crate::config;
-use crate::model::{
-    Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility, SettingsSubpage,
-};
+use crate::model::{Message, SettingsSubpage};
 use bennu_preview::panel_text::readable_text;
-use bennu_theme::icons::rotated_chevron_right_view;
+use bennu_theme::controls::{destructive_button, normal_button, text_field};
+use bennu_theme::typography::CAPTION_SIZE;
 use bennu_theme::ui_colors;
 
-use super::auxiliary_window_layout::auxiliary_detail_scroller;
 use super::network_settings::preview_size_limit_rows;
-use super::settings_group::{
-    card_row_button_style, info_setting_row, navigation_setting_row, settings_card,
-    SETTINGS_GROUP_SPACING,
-};
-use super::settings_window::chrome_top_spacer;
-use super::{icon_tone_style, themed_icon, IconSymbol, IconTone};
-use bennu_theme::controls::destructive_button;
-use bennu_theme::controls::normal_button;
-use bennu_theme::controls::text_field;
-use bennu_theme::typography::CAPTION_SIZE;
+use super::settings_group::{expander_row, navigation_row, settings_card, SettingsRow};
+use super::{themed_icon, IconSymbol, IconTone};
 
 /// 每行标签数量：标签按内容收缩，设置面板宽度下 8 个一行不溢出。
 const CHIPS_PER_ROW: usize = 8;
@@ -30,28 +20,19 @@ const CHIPS_PER_ROW: usize = 8;
 /// 折叠状态下每种类别默认展示的标签数量，余量靠切换标签展开。
 const COLLAPSED_CHIPS_PER_KIND: usize = 3;
 
-/// 空格预览分类型后缀规则编辑：每个预览类型一行，标签式增删 + 恢复默认。
-pub(super) fn preview_extension_rows(browser: &FileBrowser) -> Element<'_, Message> {
-    let mut rows = column![].spacing(3);
-    for (kind_index, kind) in config::PreviewFileSizeKind::ALL.iter().enumerate() {
-        rows = rows.push(preview_extension_row(browser, kind_index, *kind));
-    }
-    rows.into()
-}
-
 /// Files 分类里的预览设置入口：一行导航条，点击进入预览二级页面。
 pub(super) fn preview_settings_entry_card() -> Element<'static, Message> {
-    let open = navigation_setting_row(tr!("Preview settings"))
-        .on_press(Message::SettingsSubpageOpened(SettingsSubpage::Preview));
-    settings_card(vec![open.into()])
+    settings_card(vec![navigation_row(
+        tr!("Preview settings"),
+        None,
+        Message::SettingsSubpageOpened(SettingsSubpage::Preview),
+    )])
 }
 
-/// 预览设置二级页面：返回按钮 + 各类型扩展名与最大预览大小编辑。
-pub(super) fn preview_settings_subpage_detail(
+/// 预览设置二级页面：返回按钮 + 各类型扩展名 + 最大预览大小。
+pub(super) fn preview_settings_subpage_sections(
     browser: &FileBrowser,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
-) -> Element<'_, Message> {
+) -> Vec<Element<'_, Message>> {
     let back = normal_button(
         row![
             themed_icon(IconSymbol::ArrowLeft, IconTone::Normal, 13.0),
@@ -61,31 +42,27 @@ pub(super) fn preview_settings_subpage_detail(
         .align_y(Alignment::Center),
     )
     .on_press(Message::SettingsSubpageClosed);
+    let extension_rows = config::PreviewFileSizeKind::ALL
+        .iter()
+        .enumerate()
+        .map(|(kind_index, kind)| preview_extension_row(browser, kind_index, *kind))
+        .collect();
 
-    let content = column![
-        chrome_top_spacer(browser),
-        back,
-        settings_card(vec![preview_extension_rows(browser)]),
-        settings_card(vec![preview_size_limit_rows(browser)]),
+    vec![
+        back.into(),
+        settings_card(extension_rows),
+        settings_card(preview_size_limit_rows(browser)),
     ]
-    .spacing(SETTINGS_GROUP_SPACING)
-    .width(Length::Fill);
-
-    auxiliary_detail_scroller(
-        content,
-        ScrollbarRegion::Settings,
-        scrollbar_visibility,
-        scrollbar_viewport,
-        Message::SettingsScrolled,
-    )
 }
 
+/// 折叠态只露前 COLLAPSED_CHIPS_PER_KIND 个只读标签和灰色余量；展开态是添加输入、
+/// 标签流和重置（行内二次确认）。
 fn preview_extension_row(
     browser: &FileBrowser,
     kind_index: usize,
     kind: config::PreviewFileSizeKind,
-) -> Element<'_, Message> {
-    let label = match kind {
+) -> SettingsRow<'_> {
+    let title = match kind {
         config::PreviewFileSizeKind::Text => tr!("Text Preview Extensions"),
         config::PreviewFileSizeKind::Image => tr!("Image Preview Extensions"),
         config::PreviewFileSizeKind::Video => tr!("Video Preview Extensions"),
@@ -94,85 +71,68 @@ fn preview_extension_row(
         config::PreviewFileSizeKind::Document => tr!("Document Preview Extensions"),
         config::PreviewFileSizeKind::Sqlite => tr!("SQLite Preview Extensions"),
     };
-    let expanded = browser.preview_extension_expanded[kind_index];
     let extensions = browser.user_config().preview_extension_rules.list(kind);
+    let toggle = Message::PreviewExtensionExpandToggled(kind_index);
 
-    // 折叠态是一整行切换按钮：箭头朝右，只露出前 COLLAPSED_CHIPS_PER_KIND
-    // 个只读标签和余量提示；展开态恢复编辑行（输入框、添加、文字重置），
-    // 箭头朝下，重置走行内确认。
-    let mut content = column![].spacing(4);
-    if expanded {
-        let toggle = button(
-            row![
-                rotated_chevron_right_view(90.0, 13.0).style(icon_tone_style(IconTone::Normal)),
-                readable_text(label.clone()),
-            ]
-            .spacing(6)
-            .align_y(Alignment::Center),
-        )
-        .on_press(Message::PreviewExtensionExpandToggled(kind_index))
-        .width(Length::Fill)
-        .style(card_row_button_style());
-        let mut header = row![toggle].spacing(8).align_y(Alignment::Center);
-        // 重置原地二次确认：第一次进入待确认态，第二次真正恢复默认；
-        // 折叠该行或改点其他类型即撤销。
-        let reset = if browser.preview_extension_reset_confirmation == Some(kind_index) {
-            destructive_button(readable_text(tr!("Click Again to Reset")))
-                .on_press(Message::PreviewExtensionResetConfirmed(kind_index))
-        } else {
-            normal_button(readable_text(tr!("Reset")))
-                .on_press(Message::PreviewExtensionResetRequested(kind_index))
-        };
-        header = header.push(reset);
-        let input = text_field("txt", &browser.preview_extension_inputs[kind_index])
-            .on_input(move |value| Message::PreviewExtensionInputChanged(kind_index, value))
-            .on_submit(Message::PreviewExtensionInputCommitted(kind_index))
-            .width(Length::Fixed(110.0));
-        let add = normal_button(readable_text(tr!("Add")))
-            .on_press(Message::PreviewExtensionInputCommitted(kind_index));
-        header = header.push(input).push(add);
-        content = content.push(header);
+    let visible_count = extensions.len().min(COLLAPSED_CHIPS_PER_KIND);
+    let mut summary = row![].spacing(6).align_y(Alignment::Center);
+    for extension in &extensions[..visible_count] {
+        summary = summary.push(extension_chip(extension));
+    }
+    if extensions.len() > COLLAPSED_CHIPS_PER_KIND {
+        summary = summary.push(muted_count_label(
+            extensions.len() - COLLAPSED_CHIPS_PER_KIND,
+        ));
+    }
 
-        if !extensions.is_empty() {
-            content = content.push(chip_flow(kind_index, &extensions));
-        }
+    let body = browser.preview_extension_expanded[kind_index]
+        .then(|| preview_extension_editor(browser, kind_index, extensions));
+    expander_row(title, summary, toggle, body)
+}
+
+fn preview_extension_editor<'a>(
+    browser: &'a FileBrowser,
+    kind_index: usize,
+    extensions: &[String],
+) -> Element<'a, Message> {
+    let input = text_field("txt", &browser.preview_extension_inputs[kind_index])
+        .on_input(move |value| Message::PreviewExtensionInputChanged(kind_index, value))
+        .on_submit(Message::PreviewExtensionInputCommitted(kind_index))
+        .width(Length::Fixed(110.0));
+    let add = normal_button(readable_text(tr!("Add")))
+        .on_press(Message::PreviewExtensionInputCommitted(kind_index));
+    // 重置原地二次确认：第一次进入待确认态，第二次真正恢复默认；
+    // 折叠该行或改点其他类型即撤销。
+    let reset = if browser.preview_extension_reset_confirmation == Some(kind_index) {
+        destructive_button(readable_text(tr!("Click Again to Reset")))
+            .on_press(Message::PreviewExtensionResetConfirmed(kind_index))
     } else {
-        let visible_count = extensions.len().min(COLLAPSED_CHIPS_PER_KIND);
-        let mut collapsed = row![
-            rotated_chevron_right_view(0.0, 13.0).style(icon_tone_style(IconTone::Normal)),
-            readable_text(label).width(Length::Fill),
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center);
-        for extension in &extensions[..visible_count] {
-            collapsed = collapsed.push(extension_chip(extension));
-        }
-        // 折叠行只作预览，删除只出现在展开区。
-        if extensions.len() > COLLAPSED_CHIPS_PER_KIND {
-            collapsed = collapsed.push(muted_count_label(
-                extensions.len() - COLLAPSED_CHIPS_PER_KIND,
-            ));
-        }
-        content = content.push(
-            button(collapsed)
-                .on_press(Message::PreviewExtensionExpandToggled(kind_index))
-                .width(Length::Fill)
-                .style(card_row_button_style()),
-        );
+        normal_button(readable_text(tr!("Reset")))
+            .on_press(Message::PreviewExtensionResetRequested(kind_index))
+    };
+
+    let mut editor = column![row![input, add, Space::new().width(Length::Fill), reset]
+        .spacing(8)
+        .align_y(Alignment::Center)]
+    .spacing(8);
+    if !extensions.is_empty() {
+        editor = editor.push(chip_flow(kind_index, extensions));
     }
     if let Some(error) = &browser.preview_extension_input_errors[kind_index] {
-        content = content.push(
+        editor = editor.push(
             readable_text(error.clone())
                 .size(CAPTION_SIZE)
-                .width(Length::Fill),
+                .width(Length::Fill)
+                .style(|theme: &Theme| iced::widget::text::Style {
+                    color: Some(ui_colors(theme).error),
+                }),
         );
     }
-
-    info_setting_row(content.into())
+    editor.into()
 }
 
 /// 展开区的完整标签流：每行固定数量手动换行，标签可单个删除。
-fn chip_flow(kind_index: usize, extensions: &[String]) -> Element<'_, Message> {
+fn chip_flow(kind_index: usize, extensions: &[String]) -> Element<'static, Message> {
     // 标签按文字内容收缩，每行固定数量手动换行；Grid 会把单元
     // 拉伸成等宽大方格，不适合紧凑标签。
     extensions
@@ -216,7 +176,7 @@ fn extension_chip(extension: &str) -> Element<'static, Message> {
 }
 
 /// 展开区的标签：带删除按钮，可单个移除。
-fn removable_extension_chip(kind_index: usize, extension: &str) -> Element<'_, Message> {
+fn removable_extension_chip(kind_index: usize, extension: &str) -> Element<'static, Message> {
     let remove = button(readable_text("×".to_owned()).size(CAPTION_SIZE))
         .padding([2, 6])
         .style(chip_remove_button_style())

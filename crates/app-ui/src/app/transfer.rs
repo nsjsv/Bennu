@@ -106,6 +106,8 @@ pub(crate) enum TransferMessage {
     /// 设备列表手动刷新按钮：清空快照并立即触发一轮子网扫描。
     RefreshDevicesRequested,
     // ---- 设置（R9） ----
+    DownloadDirInputChanged(String),
+    DownloadDirCommitted,
     DownloadDirChooserPressed,
     DownloadDirChosen(Result<Option<PathBuf>, String>),
     DeviceAliasInputChanged(String),
@@ -409,6 +411,11 @@ impl FileBrowser {
                 }
                 iced::Task::none()
             }
+            TransferMessage::DownloadDirInputChanged(value) => {
+                self.edit_transfer_download_dir(value);
+                iced::Task::none()
+            }
+            TransferMessage::DownloadDirCommitted => self.commit_transfer_download_dir(),
             TransferMessage::DownloadDirChooserPressed => settings::download_dir_chooser_command(),
             TransferMessage::DownloadDirChosen(outcome) => {
                 self.accept_transfer_download_dir(outcome)

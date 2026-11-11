@@ -86,6 +86,7 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Storage changed: %1", "存储已变化：%1"),
     ("Remove location", "移除位置"),
     ("Absolute path", "绝对路径"),
+    ("Add a location", "添加位置"),
     ("Choose directory", "选择目录"),
     ("Select a search location", "选择搜索位置"),
     ("Search locations must be absolute paths", "搜索位置必须使用绝对路径"),

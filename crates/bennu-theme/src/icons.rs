@@ -48,6 +48,8 @@ pub enum IconSymbol {
     Refresh,
     Regex,
     RestoreWindow,
+    /// 恢复默认（逆时针箭头）。
+    RotateCcw,
     Search,
     Scissors,
     Send,
@@ -182,6 +184,7 @@ impl IconSymbol {
             Self::Hash => include_bytes!("../assets/icons/lucide/hash.svg"),
             Self::House => include_bytes!("../assets/icons/lucide/house.svg"),
             Self::Link => include_bytes!("../assets/icons/lucide/link.svg"),
+            Self::RotateCcw => include_bytes!("../assets/icons/lucide/rotate-ccw.svg"),
             Self::List => LIST_ICON,
             Self::Minus => MINUS_ICON,
             Self::Monitor => include_bytes!("../assets/icons/lucide/monitor.svg"),

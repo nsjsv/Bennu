@@ -290,6 +290,10 @@ pub(crate) struct FileBrowser {
     pub(crate) transfer_port_input: String,
     /// 上一次提交的端口不合法（配置未改）。
     pub(crate) transfer_port_invalid: bool,
+    /// 设置页接收目录输入缓冲；空 = 用默认的 ~/Downloads。
+    pub(crate) transfer_download_dir_input: String,
+    /// 上一次提交的接收目录不是绝对路径（配置未改）。
+    pub(crate) transfer_download_dir_invalid: bool,
     /// 设置页 PIN 输入；None = "接收需要 PIN"关着（此时配置里也没有 PIN），启动时与已存 PIN 同步。
     pub(crate) transfer_pin_input: Option<String>,
     /// 上一次保存的 PIN 是空的（配置未改）。
@@ -682,6 +686,8 @@ impl FileBrowser {
             transfer_pin_input: None,
             transfer_pin_invalid: false,
             transfer_port_invalid: false,
+            transfer_download_dir_input: String::new(),
+            transfer_download_dir_invalid: false,
             tab_bar_reveal: TabBarReveal::default(),
             tab_animations: HashMap::new(),
             panes: vec![initial_pane],

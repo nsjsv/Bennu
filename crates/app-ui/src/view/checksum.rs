@@ -3,7 +3,7 @@ use iced::{Alignment, Element, Length};
 
 use file_core::{ChecksumAlgorithm, ALL_CHECKSUM_ALGORITHMS};
 
-use super::settings_group::settings_card;
+use super::settings_group::{custom_row, settings_card};
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};
 use crate::app::checksum::{
     ChecksumComputation, ChecksumExpectedVerdict, ChecksumFileVerdict, ChecksumMessage,
@@ -143,7 +143,13 @@ fn digest_card(state: &ChecksumState) -> Element<'static, Message> {
     };
     let rows = ALL_CHECKSUM_ALGORITHMS
         .into_iter()
-        .map(|algorithm| digest_row(state, digests.map(|d| d.digest(algorithm)), algorithm))
+        .map(|algorithm| {
+            custom_row(digest_row(
+                state,
+                digests.map(|d| d.digest(algorithm)),
+                algorithm,
+            ))
+        })
         .collect();
     settings_card(rows)
 }

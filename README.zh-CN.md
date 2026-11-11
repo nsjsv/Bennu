@@ -30,8 +30,9 @@
 
 <p align="center">
   <img src="docs/images/appearance.png" alt="外观与配色" width="49%">
+  <img src="docs/images/localsend.png" alt="LocalSend 互传" width="49%">
 </p>
-<p align="center"><b>外观与配色</b></p>
+<p align="center"><b>外观与配色</b> · <b>LocalSend 互传</b></p>
 
 ## 功能亮点
 

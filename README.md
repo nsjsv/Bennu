@@ -30,8 +30,9 @@ Developed and tested mainly on Wayland.
 
 <p align="center">
   <img src="docs/images/appearance.png" alt="Themes & color schemes" width="49%">
+  <img src="docs/images/localsend.png" alt="LocalSend" width="49%">
 </p>
-<p align="center"><b>Themes &amp; color schemes</b></p>
+<p align="center"><b>Themes &amp; color schemes</b> · <b>LocalSend</b></p>
 
 ## Features
 

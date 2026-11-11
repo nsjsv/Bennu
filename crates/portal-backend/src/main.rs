@@ -657,6 +657,7 @@ pub(crate) fn test_daemon() -> PickerDaemon {
         look: theme::PickerLook {
             theme: iced::Theme::Light,
             sidebar_style: bennu_theme::window_controls::SidebarStyle::Embedded,
+            window_controls: bennu_theme::window_controls::WindowControlsConfig::default(),
         },
         system_mode: bennu_theme::AppearanceMode::Light,
         keyboard_modifiers: keyboard::Modifiers::default(),

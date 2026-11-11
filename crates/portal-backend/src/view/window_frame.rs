@@ -5,17 +5,14 @@
 use iced::window;
 
 use bennu_preview::window_shell::WindowShell;
-use bennu_theme::window_controls::{WindowControlKind, WindowControlsConfig};
+use bennu_theme::window_controls::WindowControlKind;
 
 use crate::{Message, PickerDaemon};
 
-/// portal 没有自己的窗口按钮设置，用默认布局（与主程序默认一致）。
-static WINDOW_CONTROLS: std::sync::LazyLock<WindowControlsConfig> =
-    std::sync::LazyLock::new(WindowControlsConfig::default);
-
+/// 窗口按钮和侧栏样式按主程序里用户的设置（开窗时读）。
 pub(crate) fn window_shell(daemon: &PickerDaemon, window: window::Id) -> WindowShell<'_, Message> {
     WindowShell {
-        config: &WINDOW_CONTROLS,
+        config: &daemon.look.window_controls,
         sidebar_style: daemon.look.sidebar_style,
         window,
         frame_state: daemon.frames.frame_state(window),

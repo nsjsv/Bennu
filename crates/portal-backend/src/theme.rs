@@ -1,4 +1,4 @@
-//! FileChooser 窗口的外观解析：配色和侧栏样式。与主程序走同一条构造链路
+//! FileChooser 窗口的外观解析：配色、侧栏样式、窗口按钮。与主程序走同一条构造链路
 //! （`bennu_theme::ApplicationTheme::active`），保证两种进程呈现同一套配色：
 //! 外观偏好从主程序的状态库读，Matugen 仅在选中时读，系统深浅色由
 //! daemon 订阅系统设置后传进来。portal 进程常驻，每次开窗和系统设置变化时都重新
@@ -7,7 +7,10 @@
 use std::path::Path;
 
 use bennu_state::UserSettingsStore;
-use bennu_theme::window_controls::SidebarStyle;
+use bennu_theme::window_controls::{
+    SidebarStyle, WindowControlKind, WindowControlPlacement, WindowControlSide,
+    WindowControlsConfig,
+};
 use bennu_theme::{
     parse_matugen_colors, AppearanceMode, ApplicationTheme, ColorSchemePreset, MatugenColors,
     ThemeMode,
@@ -20,12 +23,15 @@ pub(crate) struct StoredAppearance {
     pub(crate) theme_mode: ThemeMode,
     pub(crate) color_scheme: ColorSchemePreset,
     pub(crate) sidebar_style: SidebarStyle,
+    pub(crate) window_controls: WindowControlsConfig,
 }
 
-/// 选择窗、预览窗画出来的样子：一次读设置得到的配色和侧栏样式。
+/// 选择窗、预览窗画出来的样子：一次读设置得到的配色、侧栏样式和窗口按钮（放哪边、
+/// 藏哪个），和主程序的窗口一样。
 pub(crate) struct PickerLook {
     pub(crate) theme: Theme,
     pub(crate) sidebar_style: SidebarStyle,
+    pub(crate) window_controls: WindowControlsConfig,
 }
 
 pub(crate) fn resolve_look(system_mode: AppearanceMode) -> PickerLook {
@@ -35,13 +41,18 @@ pub(crate) fn resolve_look(system_mode: AppearanceMode) -> PickerLook {
         .as_ref()
         .filter(|appearance| appearance.color_scheme == ColorSchemePreset::Matugen)
         .and_then(|_| load_matugen_colors());
-    PickerLook {
-        theme: compose(system_mode, appearance.as_ref(), matugen),
-        sidebar_style: appearance
-            .as_ref()
-            .map_or(SidebarStyle::default(), |appearance| {
-                appearance.sidebar_style
-            }),
+    let theme = compose(system_mode, appearance.as_ref(), matugen);
+    match appearance {
+        Some(appearance) => PickerLook {
+            theme,
+            sidebar_style: appearance.sidebar_style,
+            window_controls: appearance.window_controls,
+        },
+        None => PickerLook {
+            theme,
+            sidebar_style: SidebarStyle::default(),
+            window_controls: WindowControlsConfig::default(),
+        },
     }
 }
 
@@ -73,6 +84,16 @@ struct AppearanceSettings {
     color_scheme: String,
     #[serde(default = "default_sidebar_style")]
     sidebar_style: String,
+    #[serde(default = "default_window_controls")]
+    window_controls: Vec<StoredWindowControl>,
+}
+
+/// 主程序设置文档里一个窗口按钮的写法。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredWindowControl {
+    kind: String,
+    side: String,
+    visible: bool,
 }
 
 impl Default for AppearanceSettings {
@@ -81,8 +102,42 @@ impl Default for AppearanceSettings {
             theme_mode: default_theme_mode(),
             color_scheme: default_color_scheme(),
             sidebar_style: default_sidebar_style(),
+            window_controls: default_window_controls(),
         }
     }
+}
+
+fn default_window_controls() -> Vec<StoredWindowControl> {
+    WindowControlsConfig::default()
+        .placements()
+        .iter()
+        .map(|placement| StoredWindowControl {
+            kind: placement.kind().config_value().to_owned(),
+            side: placement.side().config_value().to_owned(),
+            visible: placement.visibility().is_visible(),
+        })
+        .collect()
+}
+
+/// 认不出的按钮丢掉、认不出的边放回默认那边；缺的按钮由 `from_partial_placements` 补成默认。
+/// 规则和主程序读设置时一样，只是这里只读不提示（主程序启动时会提示并改回）。
+fn window_controls_from_stored(stored: &[StoredWindowControl]) -> WindowControlsConfig {
+    let defaults = WindowControlsConfig::default();
+    WindowControlsConfig::from_partial_placements(
+        stored
+            .iter()
+            .filter_map(|placement| {
+                let kind = WindowControlKind::from_config_value(&placement.kind)?;
+                let side = WindowControlSide::from_config_value(&placement.side)
+                    .unwrap_or_else(|| defaults.placement(kind).side());
+                Some(WindowControlPlacement::new(
+                    kind,
+                    side,
+                    placement.visible.into(),
+                ))
+            })
+            .collect(),
+    )
 }
 
 fn default_sidebar_style() -> String {
@@ -117,6 +172,7 @@ fn read_stored_appearance(db_path: &Path) -> Option<StoredAppearance> {
         color_scheme,
         // 侧栏样式读不懂不连累配色：主程序那边会提示并改回默认。
         sidebar_style: SidebarStyle::from_config_value(&stored.sidebar_style).unwrap_or_default(),
+        window_controls: window_controls_from_stored(&stored.window_controls),
     })
 }
 
@@ -138,6 +194,7 @@ mod tests {
             theme_mode,
             color_scheme,
             sidebar_style: SidebarStyle::Embedded,
+            window_controls: WindowControlsConfig::default(),
         }
     }
 
@@ -225,6 +282,54 @@ mod tests {
         let appearance = read_stored_appearance(&database).expect("stored appearance");
         assert_eq!(appearance.sidebar_style, SidebarStyle::Embedded);
         assert_eq!(appearance.color_scheme, ColorSchemePreset::Nord);
+    }
+
+    #[test]
+    fn the_chooser_puts_the_window_buttons_where_the_user_put_them() {
+        use bennu_theme::window_controls::WindowControlVisibility;
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let database = directory.path().join("state.sqlite");
+        UserSettingsStore::new(&database).expect("create store");
+        let write = |payload: &str| {
+            rusqlite::Connection::open(&database)
+                .unwrap()
+                .execute(
+                    "INSERT OR REPLACE INTO user_preferences (preference_key, payload_json, updated_at_ms)
+                     VALUES (?1, ?2, 1)",
+                    [bennu_state::USER_PREFERENCES_KEY, payload],
+                )
+                .unwrap();
+        };
+        let read = || read_stored_appearance(&database).expect("stored appearance");
+
+        // 主程序存的样子：关闭放左边、最小化藏起来；认不出的边回到默认那边，
+        // 认不出的按钮丢掉，没写的按钮补成默认。
+        write(
+            r#"{"theme_mode":"dark","color_scheme":"nord","window_controls":[
+                {"kind":"close","side":"left","visible":true},
+                {"kind":"minimize","side":"right","visible":false},
+                {"kind":"maximize_restore","side":"top","visible":true},
+                {"kind":"pin","side":"left","visible":true}]}"#,
+        );
+        let controls = read().window_controls;
+        let close = controls.placement(WindowControlKind::Close);
+        assert_eq!(close.side(), WindowControlSide::Left);
+        assert_eq!(
+            controls.placement(WindowControlKind::Minimize).visibility(),
+            WindowControlVisibility::Hidden
+        );
+        assert_eq!(
+            controls
+                .placement(WindowControlKind::MaximizeRestore)
+                .side(),
+            WindowControlsConfig::default()
+                .placement(WindowControlKind::MaximizeRestore)
+                .side()
+        );
+
+        // 旧设置没有这个键：和主程序默认一样。
+        write(r#"{"theme_mode":"dark","color_scheme":"nord"}"#);
+        assert_eq!(read().window_controls, WindowControlsConfig::default());
     }
 
     #[test]

@@ -74,8 +74,8 @@ use crate::app::panes::BrowserPaneView;
 use crate::app::smooth_scroll::smooth_scroll_id;
 use crate::app::FileBrowser;
 use crate::appearance::{
-    app_content_style, column_resize_divider_style, faded_drag_preview_label_style,
-    faded_drag_preview_pill_style, selected_tab_item_style, tab_split_overlay_style,
+    app_content_style, column_resize_divider_style, context_menu_style,
+    faded_drag_preview_label_style, faded_drag_preview_pill_style, tab_split_overlay_style,
 };
 use crate::file_drag_hit_test_bounds::FileDragHitTestMarker;
 use crate::file_drag_hit_test_marker::track_file_drag_hit_test_marker;
@@ -127,7 +127,7 @@ use toolbar_controls::{
     navigation_button_group, right_preview_panel_toggle_button, view_mode_button_group,
 };
 use transfer_conflict::transfer_conflict_panel;
-use window_chrome::{pane_navigation_layout, PaneNavigationLayout, PANE_NAVIGATION_ROW_SPACING};
+use window_chrome::{pane_navigation_layout, PaneNavigationLayout};
 
 const TOOLBAR_ICON_SIZE: f32 = 16.0;
 const VIEW_MODE_ICON_SIZE: f32 = 16.0;
@@ -243,9 +243,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
             body: sidebar_body(browser),
         },
         SplitPane {
-            header: HeaderBar::new()
-                .center(main_toolbar(browser))
-                .height(toolbar_height),
+            header: main_toolbar(browser).height(toolbar_height),
             body: content_body.into(),
         },
         browser.sidebar_width,
@@ -459,10 +457,10 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
 
     if let Some(directory) = browser.terminal_tab_drag_preview() {
         floating.push(FloatingContent {
-            element: container(tab_title_content(directory, false, IconTone::Selected))
+            element: container(tab_title_content(directory, false))
                 .padding([7, 10])
                 .width(Length::Fixed(TAB_DRAG_PREVIEW_WIDTH))
-                .style(selected_tab_item_style)
+                .style(context_menu_style)
                 .into(),
             placement: FloatingPlacement::Free(drag_preview_position(browser.cursor_or_origin())),
             captures_pointer: true,
@@ -637,11 +635,11 @@ fn split_resize_divider(axis: SplitAxis) -> Element<'static, Message> {
 /// 全窗工具栏顶栏:窗口控制居两端,导航/地址栏/搜索/视图切换/预览
 /// 开关取自活动窗格。集成导航布局时整条是窗口拖拽区;独立标题栏
 /// 布局时控制归标题栏,顶栏只承载工具栏本体。
-/// 内容顶栏里的工具栏：属于活动窗格。
-fn main_toolbar(browser: &FileBrowser) -> Element<'_, Message> {
+/// 内容顶栏就是工具栏：属于活动窗格。
+fn main_toolbar(browser: &FileBrowser) -> HeaderBar<'_, Message> {
     match browser.pane_view(browser.active_pane_id()) {
-        Some(pane) => pane_navigation_content(browser, pane),
-        None => Space::new().width(Length::Fill).into(),
+        Some(pane) => pane_navigation_header(browser, pane),
+        None => HeaderBar::new(),
     }
 }
 
@@ -676,48 +674,47 @@ fn pane_view(browser: &FileBrowser, pane_id: BrowserPaneId) -> Element<'_, Messa
         .into()
 }
 
-fn pane_navigation_content<'a>(
+fn pane_navigation_header<'a>(
     browser: &'a FileBrowser,
     pane: BrowserPaneView<'a>,
-) -> Element<'a, Message> {
+) -> HeaderBar<'a, Message> {
     match pane_navigation_layout(browser.main_content_width()) {
-        PaneNavigationLayout::SingleRow => Row::new()
-            .spacing(8)
-            .align_y(Alignment::Center)
-            .push(navigation_button_group(pane.id))
-            .push(address_bar(browser, pane))
-            .push(search_input_panel(browser))
-            .push(view_mode_button_group(pane))
-            .push(right_preview_panel_toggle_button(
-                browser.right_preview_panel_open,
-            ))
-            .width(Length::Fill)
-            .into(),
-        // 两行各放一半：按钮一行、输入框一行，窄内容栏里两行都还放得下。
-        PaneNavigationLayout::StackedRows => {
-            let control_row = Row::new()
+        PaneNavigationLayout::SingleRow => HeaderBar::new().center(
+            Row::new()
                 .spacing(8)
                 .align_y(Alignment::Center)
                 .push(navigation_button_group(pane.id))
-                .push(Space::new().width(Length::Fill))
+                .push(address_bar(browser, pane))
+                .push(search_input_panel(browser))
                 .push(view_mode_button_group(pane))
                 .push(right_preview_panel_toggle_button(
                     browser.right_preview_panel_open,
                 ))
-                .width(Length::Fill);
-            let location_row = Row::new()
-                .spacing(8)
-                .align_y(Alignment::Center)
-                .push(address_bar(browser, pane))
-                .push(search_input_panel(browser))
-                .width(Length::Fill);
-            Column::new()
-                .spacing(PANE_NAVIGATION_ROW_SPACING)
-                .push(control_row)
-                .push(location_row)
-                .width(Length::Fill)
-                .into()
-        }
+                .width(Length::Fill),
+        ),
+        // 两行各放一半：按钮和窗口按钮一行；地址栏和搜索框一行，从窗口按钮下面横穿过去，
+        // 窄内容栏里最需要宽度的就是它们。
+        PaneNavigationLayout::StackedRows => HeaderBar::new()
+            .center(
+                Row::new()
+                    .spacing(8)
+                    .align_y(Alignment::Center)
+                    .push(navigation_button_group(pane.id))
+                    .push(Space::new().width(Length::Fill))
+                    .push(view_mode_button_group(pane))
+                    .push(right_preview_panel_toggle_button(
+                        browser.right_preview_panel_open,
+                    ))
+                    .width(Length::Fill),
+            )
+            .below(
+                Row::new()
+                    .spacing(8)
+                    .align_y(Alignment::Center)
+                    .push(address_bar(browser, pane))
+                    .push(search_input_panel(browser))
+                    .width(Length::Fill),
+            ),
     }
 }
 
@@ -961,45 +958,34 @@ fn drag_preview_tile_layer(
 fn tab_drag_preview_panel(browser: &FileBrowser) -> Option<Element<'_, Message>> {
     let preview = browser.tab_drag_preview()?;
     Some(
-        container(tab_title_content(
-            preview.directory,
-            preview.is_trash_view,
-            IconTone::Selected,
-        ))
-        .padding([7, 10])
-        .width(Length::Fixed(TAB_DRAG_PREVIEW_WIDTH))
-        .style(selected_tab_item_style)
-        .into(),
+        container(tab_title_content(preview.directory, preview.is_trash_view))
+            .padding([7, 10])
+            .width(Length::Fixed(TAB_DRAG_PREVIEW_WIDTH))
+            .style(context_menu_style)
+            .into(),
     )
 }
 
 fn pane_drag_preview_panel(browser: &FileBrowser) -> Option<Element<'_, Message>> {
     let preview = browser.pane_drag_preview()?;
     Some(
-        container(tab_title_content(
-            preview.directory,
-            preview.is_trash_view,
-            IconTone::Selected,
-        ))
-        .padding([7, 10])
-        .width(Length::Fixed(TAB_DRAG_PREVIEW_WIDTH))
-        .style(selected_tab_item_style)
-        .into(),
+        container(tab_title_content(preview.directory, preview.is_trash_view))
+            .padding([7, 10])
+            .width(Length::Fixed(TAB_DRAG_PREVIEW_WIDTH))
+            .style(context_menu_style)
+            .into(),
     )
 }
 
-fn tab_title_content<'a>(
-    directory: &'a Path,
-    is_trash_view: bool,
-    tone: IconTone,
-) -> Row<'a, Message> {
+/// 标签标题。图标一律用正文色：标签条和拖动中的标签都不再垫强调色底。
+fn tab_title_content<'a>(directory: &'a Path, is_trash_view: bool) -> Row<'a, Message> {
     let symbol = if is_trash_view {
         IconSymbol::Trash
     } else {
         IconSymbol::Folder
     };
     row![
-        themed_icon(symbol, tone, TAB_ICON_SIZE),
+        themed_icon(symbol, IconTone::Normal, TAB_ICON_SIZE),
         readable_text(tab_title_text(directory, is_trash_view)),
     ]
     .spacing(6)

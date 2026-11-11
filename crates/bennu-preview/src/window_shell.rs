@@ -55,6 +55,8 @@ pub struct HeaderBar<'a, Message> {
     /// 占满左右区之间的整段（主窗口工具栏）；有它时不画标题。
     center: Option<Element<'a, Message>>,
     end: Vec<Element<'a, Message>>,
+    /// 折成两行时的第二行：在窗口按钮下面，横跨整条顶栏。
+    below: Option<Element<'a, Message>>,
     height: f32,
 }
 
@@ -65,6 +67,7 @@ impl<'a, Message> HeaderBar<'a, Message> {
             title: None,
             center: None,
             end: Vec::new(),
+            below: None,
             height: HEADER_BAR_HEIGHT,
         }
     }
@@ -86,6 +89,13 @@ impl<'a, Message> HeaderBar<'a, Message> {
 
     pub fn end(mut self, item: impl Into<Element<'a, Message>>) -> Self {
         self.end.push(item.into());
+        self
+    }
+
+    /// 第一行（按钮、`center`）留在最上面一条，窗口按钮也在那条里；第二行从它下面开始，
+    /// 不用给窗口按钮让位。顶栏总高仍由 `height` 定，第二行在剩下的高度里靠上。
+    pub fn below(mut self, row: impl Into<Element<'a, Message>>) -> Self {
+        self.below = Some(row.into());
         self
     }
 
@@ -338,6 +348,7 @@ where
         title,
         center,
         end,
+        below,
         height,
     } = header;
     let (leading_controls, trailing_controls) = edges.controls_sides();
@@ -359,7 +370,7 @@ where
         ));
 
     // 顶栏比标准高（主窗口工具栏折两行）时，两边的按钮和标题留在最上面一条，
-    // 跟第一行对齐；只有中间的内容占满整个高度。
+    // 跟第一行对齐；没有第二行时中间的内容占满整个高度。
     let mut items = Row::new()
         .spacing(HEADER_ITEM_SPACING)
         .padding([0.0, HEADER_PADDING_X]);
@@ -385,7 +396,21 @@ where
     if trailing_controls {
         items = items.push(top_band(controls(shell, WindowControlSide::Right), band));
     }
-    let items = items.width(Length::Fill).height(Length::Fixed(height));
+    let items: Element<'a, Message> = match below {
+        Some(below) => column![
+            items.width(Length::Fill).height(Length::Fixed(band)),
+            container(below)
+                .padding([0.0, HEADER_PADDING_X])
+                .width(Length::Fill)
+                .height(Length::Fill),
+        ]
+        .height(Length::Fixed(height))
+        .into(),
+        None => items
+            .width(Length::Fill)
+            .height(Length::Fixed(height))
+            .into(),
+    };
 
     // 拖动面垫在最底下：左右区和标题不捕获的空白处才会开始拖动窗口。
     let drag_surface = title_drag::title_drag_surface(
@@ -408,7 +433,7 @@ where
             .into(),
         );
     }
-    layers.push(items.into());
+    layers.push(items);
     Stack::with_children(layers)
         .width(Length::Fill)
         .height(Length::Fixed(height))
@@ -549,6 +574,25 @@ mod tests {
                 "split_window {frame_state:?} {sidebar_style:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_second_header_row_sits_under_the_window_controls_not_beside_them() {
+        let config = WindowControlsConfig::default();
+        let shell = shell(&config, WindowFrameState::Restored, SidebarStyle::Embedded);
+        let header = HeaderBar::new()
+            .center(body())
+            .below(row![body(), body()])
+            .height(HEADER_BAR_HEIGHT * 2.0);
+
+        let header = header_bar(header, HeaderEdges::Trailing, &shell);
+        // 叠层：拖动面在下，按钮在上。
+        let layers = header.as_widget().children();
+        let rows = &layers.last().unwrap().children;
+        // 第一行是工具栏第一行 + 右边的窗口按钮；第二行只有它自己的两项，旁边没有按钮。
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].children.len(), 2);
+        assert_eq!(rows[1].children.len(), 2);
     }
 
     #[test]

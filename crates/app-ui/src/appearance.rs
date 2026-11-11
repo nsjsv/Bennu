@@ -27,6 +27,7 @@ pub(crate) use list_header::{
 
 // 通用样式词汇已迁至共享 crate `bennu-theme::styles`（portal 复用同一份）；
 // 这里重导出保持 crate 内调用点不变。
+pub(crate) use bennu_theme::styles::selected_sidebar_item_style as selected_tab_item_style;
 pub(crate) use bennu_theme::styles::{
     app_content_style, base_text_color, button_hover_surface_color, context_menu_item_button_style,
     context_menu_style, enhanced_horizontal_scrollbar_direction, enhanced_scrollbar_style,
@@ -222,32 +223,14 @@ pub(crate) fn tab_strip_style(theme: &Theme) -> container::Appearance {
     }
 }
 
+/// 标签页和侧栏一样是导航：没选中的不画底也不画框，标签多了也不挤；选中的和侧栏
+/// 选中同一个中性灰底（`selected_tab_item_style`），强调色留给选中的文件。
 pub(crate) fn tab_item_style(theme: &Theme) -> container::Appearance {
-    let colors = ui_colors(theme);
     container::Appearance {
-        background: Some(Background::Color(Color {
-            a: 0.78,
-            ..colors.surface_container_high
-        })),
-        text_color: Some(colors.on_surface),
+        text_color: Some(ui_colors(theme).on_surface),
         border: Border {
-            color: subtle_border_color(theme),
-            width: 1.0,
-            radius: 12.0.into(),
-        },
-        ..container::Appearance::default()
-    }
-}
-
-pub(crate) fn selected_tab_item_style(theme: &Theme) -> container::Appearance {
-    let colors = ui_colors(theme);
-    container::Appearance {
-        background: Some(Background::Color(colors.primary_container)),
-        text_color: Some(colors.on_primary_container),
-        border: Border {
-            color: colors.primary,
-            width: 1.0,
-            radius: 12.0.into(),
+            radius: 8.0.into(),
+            ..Border::default()
         },
         ..container::Appearance::default()
     }

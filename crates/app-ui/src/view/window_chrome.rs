@@ -26,16 +26,16 @@ pub(crate) fn pane_navigation_layout(toolbar_width: f32) -> PaneNavigationLayout
     }
 }
 
-/// 窄窗口工具栏折成两行时两行之间的距离。
-pub(crate) const PANE_NAVIGATION_ROW_SPACING: f32 = 8.0;
+/// 折两行时第二行下面留的空：和第一行在标准顶栏里上下各留的一样，两行间距也就是它。
+const SECOND_ROW_BOTTOM_GAP: f32 = (HEADER_BAR_HEIGHT - CONTROL_HEIGHT) / 2.0;
 
-/// 主窗口内容顶栏（工具栏）的高度：单行是标准顶栏高；折两行时多一行控件高 + 行距。
+/// 主窗口内容顶栏（工具栏）的高度：单行是标准顶栏高；折两行时多一行控件高 + 下边的空。
 /// 窗格区起点、预览面板高度都按它算，和界面是同一个来源。
 pub(crate) fn main_toolbar_height(toolbar_width: f32) -> f32 {
     match pane_navigation_layout(toolbar_width) {
         PaneNavigationLayout::SingleRow => HEADER_BAR_HEIGHT,
         PaneNavigationLayout::StackedRows => {
-            HEADER_BAR_HEIGHT + CONTROL_HEIGHT + PANE_NAVIGATION_ROW_SPACING
+            HEADER_BAR_HEIGHT + CONTROL_HEIGHT + SECOND_ROW_BOTTOM_GAP
         }
     }
 }
@@ -80,7 +80,7 @@ mod tests {
         );
         assert_eq!(
             main_toolbar_height(SINGLE_ROW_TOOLBAR_MIN_WIDTH - 1.0),
-            HEADER_BAR_HEIGHT + CONTROL_HEIGHT + PANE_NAVIGATION_ROW_SPACING
+            HEADER_BAR_HEIGHT + CONTROL_HEIGHT + SECOND_ROW_BOTTOM_GAP
         );
     }
 }

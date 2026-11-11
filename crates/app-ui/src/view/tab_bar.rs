@@ -69,19 +69,18 @@ fn tab_button<'a>(
     let is_file_drop_target = browser.file_drop_session.as_ref().is_some_and(|session| {
         session.hovered_target.as_ref() == Some(&FileDropTarget::Tab(target.clone()))
     });
-    let tone = if is_active || is_file_drop_target {
-        IconTone::Selected
-    } else {
-        IconTone::Normal
-    };
     let label = row![
         Space::new().width(Length::Fixed(TAB_CLOSE_SLOT_WIDTH)),
-        container(tab_title_content(directory, is_trash_view, tone)).center_x(Length::Fill),
-        button(themed_icon(IconSymbol::Close, tone, TAB_CLOSE_ICON_SIZE))
-            .on_press(Message::TabCloseRequested(pane_id, tab_id))
-            .padding([2, 2])
-            .width(Length::Fixed(TAB_CLOSE_SLOT_WIDTH))
-            .style(icon_button_style),
+        container(tab_title_content(directory, is_trash_view)).center_x(Length::Fill),
+        button(themed_icon(
+            IconSymbol::Close,
+            IconTone::Normal,
+            TAB_CLOSE_ICON_SIZE
+        ))
+        .on_press(Message::TabCloseRequested(pane_id, tab_id))
+        .padding([2, 2])
+        .width(Length::Fixed(TAB_CLOSE_SLOT_WIDTH))
+        .style(icon_button_style),
     ]
     .spacing(6)
     .align_y(Alignment::Center)

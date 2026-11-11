@@ -1,11 +1,10 @@
-//! LocalSend 窗口"记录"页：传输记录列表（新的在前）+ 清空。每行：收/发、设备、文件名
-//! 或文字开头、大小、时间、结果；能打开的（有位置的文件、文字）整行可点。
+//! LocalSend 窗口"记录"页：传输记录按天分组（新的在前），每天一张卡片。每条：发出 / 收到
+//! 图标、文件名或文字开头、“发给 / 来自 设备 · 大小”、时间；没成的才在时间下面写结果。
+//! 能打开的（有位置的文件、文字）整行可点。标题和“清空”在窗口顶栏上。
 
-use std::time::SystemTime;
-
-use chrono::{DateTime, Datelike, Local};
-use iced::widget::{column, row, Column, Space};
-use iced::{Alignment, Element, Length, Theme};
+use chrono::{DateTime, Datelike, Local, NaiveDate};
+use iced::widget::{button, column, container, row, Column};
+use iced::{alignment, Alignment, Background, Border, Element, Length, Theme};
 
 use crate::app::transfer::{Direction, HistoryItem, HistoryRecord, HistoryResult, TransferMessage};
 use crate::app::FileBrowser;
@@ -14,47 +13,92 @@ use crate::formatting::{format_file_size, format_middle_ellipsized_text};
 use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::icons::IconSymbol;
+use bennu_theme::metrics::CARD_RADIUS;
+use bennu_theme::typography::{BOLD, CAPTION_SIZE};
 use bennu_theme::ui_colors;
 
-use super::settings_group::muted_setting_text;
-use super::{themed_icon, IconTone, MENU_ICON_SIZE};
-use bennu_theme::controls::normal_button;
-use bennu_theme::typography::CAPTION_SIZE;
+use super::local_send_tiles::centered_muted_text;
+use super::settings_group::{card_row_button_style, muted_setting_text};
+use super::{themed_icon, IconTone};
 
-const NAME_MAX_CHARS: usize = 40;
-const TEXT_PREVIEW_CHARS: usize = 40;
-const RESULT_MAX_CHARS: usize = 60;
+const NAME_MAX_CHARS: usize = 34;
+const TEXT_PREVIEW_CHARS: usize = 34;
+const RESULT_MAX_CHARS: usize = 24;
+const DAY_SPACING: f32 = 18.0;
+const ROW_ICON_CIRCLE: f32 = 36.0;
+const ROW_ICON_SIZE: f32 = 16.0;
+const EMPTY_ICON_SIZE: f32 = 28.0;
 
 pub(super) fn history_list(browser: &FileBrowser) -> Element<'_, Message> {
     let records = &browser.transfer_history.records;
-    let clear = normal_button(readable_text(tr!("Clear history"))).on_press_maybe(
-        (!records.is_empty()).then_some(Message::Transfer(TransferMessage::HistoryClearPressed)),
-    );
-    let header = row![
-        readable_text(tr!("Transfer history")).width(Length::Fill),
-        clear
-    ]
-    .align_y(Alignment::Center);
-    let mut list: Column<'_, Message> = column![header].spacing(6).width(Length::Fill);
     if records.is_empty() {
-        return list
-            .push(muted_setting_text(tr!("Nothing sent or received yet.")))
-            .into();
+        return column![
+            themed_icon(IconSymbol::History, IconTone::Normal, EMPTY_ICON_SIZE),
+            centered_muted_text(tr!("Nothing sent or received yet.")),
+        ]
+        .spacing(10)
+        .padding([48, 0])
+        .align_x(Alignment::Center)
+        .width(Length::Fill)
+        .into();
     }
-    let now = SystemTime::now();
+    let today = Local::now().date_naive();
+    let mut days: Column<'_, Message> = column![].spacing(DAY_SPACING).width(Length::Fill);
+    let mut current: Option<(NaiveDate, Column<'_, Message>)> = None;
     for record in records {
-        list = list.push(history_row(record, now));
+        let at: DateTime<Local> = record.at.into();
+        let day = at.date_naive();
+        if current.as_ref().map(|(current_day, _)| *current_day) != Some(day) {
+            if let Some((day, rows)) = current.take() {
+                days = days.push(day_group(day, today, rows));
+            }
+            current = Some((day, column![].spacing(2).width(Length::Fill)));
+        }
+        if let Some((_, rows)) = current.take() {
+            current = Some((day, rows.push(history_row(record, at))));
+        }
     }
-    list.into()
+    if let Some((day, rows)) = current {
+        days = days.push(day_group(day, today, rows));
+    }
+    days.into()
 }
 
-fn history_row(record: &HistoryRecord, now: SystemTime) -> Element<'_, Message> {
+/// 一天：小标题 + 一张卡片。
+fn day_group<'a>(
+    day: NaiveDate,
+    today: NaiveDate,
+    rows: Column<'a, Message>,
+) -> Element<'a, Message> {
+    column![
+        container(
+            readable_text(day_label(day, today))
+                .size(CAPTION_SIZE)
+                .font(BOLD)
+                .style(|theme: &Theme| iced::widget::text::Style {
+                    color: Some(muted_text_color(theme)),
+                }),
+        )
+        .padding([0, 4]),
+        container(rows)
+            .padding(4)
+            .width(Length::Fill)
+            .style(day_card_style),
+    ]
+    .spacing(6)
+    .into()
+}
+
+fn history_row(record: &HistoryRecord, at: DateTime<Local>) -> Element<'_, Message> {
     let icon = match record.direction {
         Direction::Sent => IconSymbol::ArrowUp,
         Direction::Received => IconSymbol::ArrowDown,
     };
     // 设备名、文件名、文字是用户内容，不做本地化。
-    let mut summary = vec![record.device.clone()];
+    let mut subtitle = vec![match record.direction {
+        Direction::Sent => tr!("To %1", record.device),
+        Direction::Received => tr!("From %1", record.device),
+    }];
     let (name, openable) = match &record.item {
         HistoryItem::File {
             name,
@@ -63,7 +107,7 @@ fn history_row(record: &HistoryRecord, now: SystemTime) -> Element<'_, Message> 
             more,
         } => {
             if let Some(size) = size {
-                summary.push(format_file_size(*size));
+                subtitle.push(format_file_size(*size));
             }
             let name = format_middle_ellipsized_text(name, NAME_MAX_CHARS);
             let name = match more {
@@ -82,90 +126,124 @@ fn history_row(record: &HistoryRecord, now: SystemTime) -> Element<'_, Message> 
             (format!("\u{201c}{preview}{ellipsis}\u{201d}"), true)
         }
     };
-    summary.push(record_time(record.at, now));
-    let details = column![readable_text(name), muted_setting_text(summary.join(" · ")),]
+    let circle = container(themed_icon(icon, IconTone::Normal, ROW_ICON_SIZE))
+        .center(Length::Fixed(ROW_ICON_CIRCLE))
+        .style(icon_circle_style);
+    let mut trailing = column![muted_caption(at.format("%H:%M").to_string())]
         .spacing(2)
-        .width(Length::Fill);
+        .align_x(alignment::Horizontal::Right);
+    if let Some(result) = result_text(&record.result) {
+        trailing = trailing.push(result);
+    }
     let content = row![
-        themed_icon(icon, IconTone::Normal, MENU_ICON_SIZE),
-        details,
-        Space::new().width(Length::Fixed(6.0)),
-        result_text(&record.result),
+        circle,
+        column![
+            readable_text(name),
+            muted_setting_text(subtitle.join(" · ")),
+        ]
+        .spacing(2)
+        .width(Length::Fill),
+        trailing,
     ]
-    .spacing(8)
+    .spacing(12)
     .align_y(Alignment::Center);
-    normal_button(content)
+    button(container(content).padding([8, 10]))
         .on_press_maybe(
             openable.then(|| {
                 Message::Transfer(TransferMessage::HistoryRecordOpened(record.id.clone()))
             }),
         )
+        .padding(0)
         .width(Length::Fill)
+        .style(card_row_button_style())
         .into()
 }
 
-fn result_text(result: &HistoryResult) -> Element<'static, Message> {
+/// 只有没成的写结果；正常完成是默认，不在每条上重复“已完成”。
+fn result_text(result: &HistoryResult) -> Option<Element<'static, Message>> {
     let (label, failed) = match result {
-        HistoryResult::Done => (tr!("Completed"), false),
+        HistoryResult::Done => return None,
         HistoryResult::Canceled => (tr!("Canceled"), false),
-        HistoryResult::Declined => (tr!("The device declined."), true),
+        HistoryResult::Declined => (tr!("Declined"), true),
         HistoryResult::TooManyPinAttempts => (tr!("Too many wrong PINs"), true),
         HistoryResult::Failed(reason) => (
             format_middle_ellipsized_text(&tr!("Failed: %1", reason), RESULT_MAX_CHARS),
             true,
         ),
     };
+    Some(
+        readable_text(label)
+            .size(CAPTION_SIZE)
+            .style(move |theme: &Theme| iced::widget::text::Style {
+                color: Some(if failed {
+                    ui_colors(theme).error
+                } else {
+                    muted_text_color(theme)
+                }),
+            })
+            .into(),
+    )
+}
+
+fn muted_caption(label: String) -> Element<'static, Message> {
     readable_text(label)
         .size(CAPTION_SIZE)
-        .style(move |theme: &Theme| iced::widget::text::Style {
-            color: Some(if failed {
-                ui_colors(theme).error
-            } else {
-                muted_text_color(theme)
-            }),
+        .style(|theme: &Theme| iced::widget::text::Style {
+            color: Some(muted_text_color(theme)),
         })
         .into()
 }
 
-/// 今天"14:05"、昨天"昨天 14:05"、今年"11-08 14:05"、更早"2025-11-08"（本地时间）。
-pub(crate) fn record_time(at: SystemTime, now: SystemTime) -> String {
-    let at: DateTime<Local> = at.into();
-    let now: DateTime<Local> = now.into();
-    let (day, today) = (at.date_naive(), now.date_naive());
+/// 今天、昨天；今年“11-08”；更早“2025-11-08”（本地时间）。
+fn day_label(day: NaiveDate, today: NaiveDate) -> String {
     if day == today {
-        at.format("%H:%M").to_string()
+        tr!("Today")
     } else if today.pred_opt() == Some(day) {
-        tr!("Yesterday %1", at.format("%H:%M"))
-    } else if at.year() == now.year() {
-        at.format("%m-%d %H:%M").to_string()
+        tr!("Yesterday")
+    } else if day.year() == today.year() {
+        day.format("%m-%d").to_string()
     } else {
-        at.format("%Y-%m-%d").to_string()
+        day.format("%Y-%m-%d").to_string()
+    }
+}
+
+fn day_card_style(theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(ui_colors(theme).surface_container)),
+        border: Border {
+            radius: CARD_RADIUS.into(),
+            ..Border::default()
+        },
+        ..container::Style::default()
+    }
+}
+
+fn icon_circle_style(theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(ui_colors(theme).surface_container_high)),
+        border: Border {
+            radius: (ROW_ICON_CIRCLE / 2.0).into(),
+            ..Border::default()
+        },
+        ..container::Style::default()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
 
-    fn local(y: i32, m: u32, d: u32, h: u32, min: u32) -> SystemTime {
-        Local
-            .with_ymd_and_hms(y, m, d, h, min, 0)
-            .single()
-            .unwrap()
-            .into()
+    fn date(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).unwrap()
     }
 
     #[test]
-    fn times_get_shorter_the_closer_they_are() {
-        let now = local(2026, 11, 10, 15, 0);
+    fn day_headers_get_shorter_the_closer_they_are() {
+        let today = date(2026, 11, 10);
 
-        assert_eq!(record_time(local(2026, 11, 10, 14, 5), now), "14:05");
-        assert_eq!(
-            record_time(local(2026, 11, 9, 9, 30), now),
-            tr!("Yesterday %1", "09:30")
-        );
-        assert_eq!(record_time(local(2026, 11, 8, 23, 1), now), "11-08 23:01");
-        assert_eq!(record_time(local(2025, 11, 8, 23, 1), now), "2025-11-08");
+        assert_eq!(day_label(date(2026, 11, 10), today), tr!("Today"));
+        assert_eq!(day_label(date(2026, 11, 9), today), tr!("Yesterday"));
+        assert_eq!(day_label(date(2026, 11, 8), today), "11-08");
+        assert_eq!(day_label(date(2025, 11, 8), today), "2025-11-08");
     }
 }

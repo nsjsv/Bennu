@@ -13,7 +13,7 @@ use local_send::DeviceInfo;
 use tokio_util::sync::CancellationToken;
 
 use super::super::FileBrowser;
-use super::{Outgoing, TransferMessage};
+use super::{DeviceListOwner, Outgoing, TransferMessage};
 use crate::directory_summary::{
     read_directory_recursive_total_size, DirectorySummaryError, RecursiveTotalSize,
 };
@@ -179,7 +179,15 @@ impl FileBrowser {
         }
     }
 
-    pub(super) fn send_staged_to_device(&mut self, device: DeviceInfo) -> Task<Message> {
+    /// 点设备就发（没东西可发、正在发给它时什么都不做）；按住 Ctrl 点是勾上 / 取消，
+    /// 勾好几台再一起发。
+    pub(super) fn press_local_send_device(&mut self, device: DeviceInfo) -> Task<Message> {
+        if self.keyboard_modifiers.control() {
+            let owner = DeviceListOwner::LocalSendWindow;
+            let checked = !self.checked_devices.of(owner).contains(&device.fingerprint);
+            self.check_device(owner, device.fingerprint, checked);
+            return Task::none();
+        }
         let outgoing = self.local_send_outgoing();
         self.begin_direct_sends(vec![device], outgoing)
     }

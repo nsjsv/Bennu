@@ -1041,7 +1041,7 @@ impl FileBrowser {
             ),
             Some(AuxiliaryWindow::LocalSend) => self.single_window_view(
                 window,
-                HeaderBar::new().title(tr!("LocalSend")),
+                crate::view::local_send_header(self),
                 crate::view::view_local_send_window(self),
             ),
             Some(AuxiliaryWindow::Preview) => self.view_preview_window(window),

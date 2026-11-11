@@ -1,8 +1,7 @@
-//! 拖拽悬停目录自动打开(spring-loaded)的进度环。
+//! 圆形进度环：拖拽悬停目录自动打开(spring-loaded)、传输占位、LocalSend 发送进度共用。
 //!
-//! 只做视觉:圆环围绕条目图标槽,进度弧从顶部顺时针生长,转满即到
-//! 打开阈值。计时与触发在 `app::selection::spring_open`,环本体不承担
-//! 状态,每次 view 重建按当前进度重画。
+//! 只做视觉:圆环占满父级,进度弧从顶部顺时针生长。计时与进度由各自的
+//! 状态拥有,环本体不承担状态,每次 view 重建按当前进度重画。
 
 use std::f32::consts::FRAC_PI_2;
 use std::f32::consts::TAU;
@@ -17,18 +16,18 @@ const RING_STROKE_WIDTH: f32 = 2.0;
 /// 进度弧用折线逼近:整圆 64 段,3 秒内视觉连续。
 const RING_ARC_SEGMENTS: usize = 64;
 
-pub(crate) fn file_drag_spring_ring(progress: f32) -> Element<'static, Message> {
-    canvas(FileDragSpringRingOverlay { progress })
+pub(crate) fn progress_ring(progress: f32) -> Element<'static, Message> {
+    canvas(ProgressRing { progress })
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
 }
 
-struct FileDragSpringRingOverlay {
+struct ProgressRing {
     progress: f32,
 }
 
-impl canvas::Program<Message> for FileDragSpringRingOverlay {
+impl canvas::Program<Message> for ProgressRing {
     type State = ();
 
     // 纯视觉叠层:不拦截事件,不改变指针交互,让下层条目照常响应。

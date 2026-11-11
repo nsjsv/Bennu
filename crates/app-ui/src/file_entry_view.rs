@@ -13,9 +13,9 @@ use crate::appearance::{
     warning_icon_svg_style,
 };
 use crate::config::ViewDensityLevel;
-use crate::file_drag_spring_ring::file_drag_spring_ring;
 use crate::file_entry_presentation::SelectionRunPosition;
 use crate::model::{FileEntryContentModifier, Message};
+use crate::progress_ring::progress_ring;
 use crate::thumbnail_cache::{
     COLUMN_THUMBNAIL_EDGE, COLUMN_THUMBNAIL_SIZE, LIST_THUMBNAIL_EDGE, LIST_THUMBNAIL_SIZE,
 };
@@ -261,7 +261,7 @@ pub(crate) fn entry_thumbnail_or_icon<'a>(
         )
     };
     match spring_progress {
-        Some(progress) => Stack::with_children([decorated, file_drag_spring_ring(progress)])
+        Some(progress) => Stack::with_children([decorated, progress_ring(progress)])
             .width(Length::Fixed(thumbnail_size))
             .height(Length::Fixed(thumbnail_size))
             .into(),

@@ -63,7 +63,6 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
         "接收已关闭，其他设备搜不到这台电脑。",
     ),
     ("This computer: %1", "本机：%1"),
-    ("No files to send", "还没有要发送的文件"),
     (
         "Drag files onto LocalSend in the sidebar, or choose them here.",
         "把文件拖到侧栏的 LocalSend 上，或在这里选择。",
@@ -91,10 +90,6 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ),
     ("Add by IP", "按 IP 添加"),
     ("No favorite devices yet", "还没有收藏的设备"),
-    (
-        "Click the star next to a device to add it here.",
-        "点设备右边的 ☆，它就会收藏到这里。",
-    ),
     ("IP", "IP"),
     (
         "Optional. Uses the device's own name.",
@@ -129,7 +124,6 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Clear selection", "取消勾选"),
     ("%1 file(s) · %2", "%1 个文件 · %2"),
     // 文字消息
-    ("Text message", "文字"),
     ("Type the text to send", "输入要发送的文字"),
     ("%1 sent a message", "%1 发来一段文字"),
     ("Open link", "打开链接"),
@@ -157,14 +151,15 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("%1 file(s) kept", "留下了 %1 个收完的文件"),
     ("and %1 more", "还有 %1 个"),
     // 传输记录
-    ("History", "记录"),
     ("Transfer history", "传输记录"),
     ("Clear history", "清空"),
     ("Nothing sent or received yet.", "还没有收发过东西。"),
     ("%1 and %2 more", "%1 等 %2 个"),
     ("Too many wrong PINs", "PIN 错的次数太多"),
     ("Failed: %1", "失败：%1"),
-    ("Yesterday %1", "昨天 %1"),
+    // 传输记录：每条下面的“发给 / 来自 设备”。
+    ("To %1", "发给 %1"),
+    ("From %1", "来自 %1"),
     ("Message to %1", "发给 %1 的文字"),
     ("The file is no longer there: %1", "文件已经不在了：%1"),
     // 通过链接接收：LocalSend 窗口
@@ -194,4 +189,26 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Cannot reach the computer.", "连不上电脑。"),
     ("Could not send %1: %2", "%1 没发成：%2"),
     ("Could not start sending: %1", "没能开始发送：%1"),
+    // LocalSend 窗口：设备格子与上方“要发什么”。格子很窄，状态要短。
+    ("Choose what to send", "选择要发送的内容"),
+    ("Send text instead", "改发文字"),
+    ("Send files instead", "改发文件"),
+    (
+        "Looking for nearby devices. The other device needs LocalSend open on the same network.",
+        "正在找附近的设备。对方也要打开 LocalSend，并连着同一个网络。",
+    ),
+    (
+        "Click a device to send. Hold Ctrl to pick several.",
+        "点一台设备就发过去。按住 Ctrl 点可以选几台一起发。",
+    ),
+    (
+        "Choose files or type some text, then click a device.",
+        "先选好文件或写好文字，再点设备。",
+    ),
+    ("Offline", "不在线"),
+    ("Sending %1%", "发送中 %1%"),
+    ("Waiting...", "等对方接受…"),
+    ("Needs a PIN", "需要 PIN"),
+    ("%1 file(s) failed", "%1 个失败"),
+    ("Declined", "对方拒绝了"),
 ];

@@ -1,125 +1,221 @@
-//! LocalSend 窗口：本机与接收状态、从手机接收；"设备"页是待发（文件或文字）、收藏设备、附近设备，
-//! "记录"页是传输记录。
+//! LocalSend 窗口：打开就能发。上面选要发的（文件或文字），中间点一台设备就发过去，
+//! 底下是本机能不能被找到。传输记录、从手机接收在顶栏两边。
 
-use iced::widget::{column, container, row, scrollable, Column, Space};
-use iced::{Alignment, Element, Length, Theme};
+use iced::widget::{button, column, container, row, scrollable, tooltip, Column, Space};
+use iced::{Alignment, Background, Border, Element, Length, Theme};
 
 use crate::app::transfer::{
-    receiver_failure_message, AddressFormMessage, ChooserTarget, DeviceListOwner, LocalSendPage,
+    receiver_failure_message, ChooserTarget, DeviceListOwner, LinkReceiveMessage, LocalSendPage,
     StagedItem, StagedSize, StagedTab, TransferMessage,
 };
 use crate::app::FileBrowser;
-use crate::appearance::{context_menu_style, muted_text_color};
+use crate::appearance::muted_text_color;
 use crate::directory_summary::RecursiveTotalSize;
 use crate::formatting::format_middle_ellipsized_text;
 use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
-use bennu_theme::icons::IconSymbol;
-use bennu_theme::ui_colors;
-use local_send::DeviceInfo;
-
-use super::settings_group::{
-    custom_row, label_row, muted_setting_text, settings_card, switch_row, RowNote,
+use bennu_preview::window_shell::HeaderBar;
+use bennu_theme::controls::{
+    icon_button, icon_button_style, normal_button, switch, text_area, toggle_button_style,
+    tooltip_bubble_style,
 };
-use super::{link_receive, local_send_address_form, local_send_devices, transfer_history};
+use bennu_theme::icons::IconSymbol;
+use bennu_theme::metrics::CARD_RADIUS;
+use bennu_theme::typography::{BOLD, CAPTION_SIZE};
+use bennu_theme::ui_colors;
+
+use super::settings_group::muted_setting_text;
+use super::{
+    link_receive, local_send_address_form, local_send_devices, local_send_tiles, transfer_history,
+};
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};
-use bennu_theme::controls::text_area;
-use bennu_theme::controls::{icon_button, normal_button};
-use bennu_theme::controls::{segmented_choice_row, SegmentedChoice};
-use bennu_theme::typography::CAPTION_SIZE;
 
 const WINDOW_PADDING: f32 = 16.0;
-const CARD_SPACING: f32 = 12.0;
-const STAGED_LIST_MAX_HEIGHT: f32 = 160.0;
+const SECTION_SPACING: f32 = 16.0;
+const PANEL_PADDING: f32 = 14.0;
+const HEADER_ICON_SIZE: f32 = 16.0;
+const EMPTY_ICON_SIZE: f32 = 28.0;
+const STAGED_LIST_MAX_HEIGHT: f32 = 132.0;
 const STAGED_ROW_HEIGHT: f32 = 26.0;
-const STAGED_NAME_MAX_CHARS: usize = 48;
-const STAGED_TEXT_HEIGHT: f32 = 120.0;
+const STAGED_NAME_MAX_CHARS: usize = 40;
+const STAGED_TEXT_HEIGHT: f32 = 96.0;
+const FOOTER_ICON_SIZE: f32 = 18.0;
 
-/// 本机卡片（两页都看得到）+ "设备 | 记录"标签 + 当前那页。
-pub(crate) fn view_local_send_window(browser: &FileBrowser) -> Element<'_, Message> {
-    let page = |label: String, target: LocalSendPage| SegmentedChoice {
-        label,
-        selected: browser.local_send_page == target,
-        message: Some(Message::Transfer(TransferMessage::LocalSendPageSelected(
-            target,
-        ))),
-        tooltip: None,
-    };
-    let pages = segmented_choice_row(vec![
-        page(tr!("Devices"), LocalSendPage::Devices),
-        page(tr!("History"), LocalSendPage::History),
-    ]);
-    let content = column![this_computer_card(browser), pages];
-    let content = match browser.local_send_page {
-        LocalSendPage::Devices => content
-            .push(staged_card(browser))
-            .push(local_send_devices::checked_bar(
-                browser,
-                DeviceListOwner::LocalSendWindow,
-                browser.local_send_has_outgoing(),
+/// 顶栏：设备页左边是“传输记录”，右边是“从手机接收”（开着时高亮，再点就停）；
+/// 记录页左边是后退。
+pub(crate) fn local_send_header(browser: &FileBrowser) -> HeaderBar<'static, Message> {
+    let page = |target| Message::Transfer(TransferMessage::LocalSendPageSelected(target));
+    match browser.local_send_page {
+        LocalSendPage::History => HeaderBar::new()
+            .title(tr!("Transfer history"))
+            .start(header_button(
+                IconSymbol::ArrowLeft,
+                tr!("Back"),
+                Some(page(LocalSendPage::Devices)),
+                false,
             ))
-            .push(favorites_card(browser))
-            .push(nearby_card(browser)),
-        LocalSendPage::History => content.push(card(transfer_history::history_list(browser))),
-    };
-    let content = content
-        .spacing(CARD_SPACING)
-        .padding(WINDOW_PADDING)
-        .width(Length::Fill);
-    scrollable(content).height(Length::Fill).into()
+            .end(header_button(
+                IconSymbol::Trash,
+                tr!("Clear history"),
+                (!browser.transfer_history.records.is_empty())
+                    .then_some(Message::Transfer(TransferMessage::HistoryClearPressed)),
+                false,
+            )),
+        LocalSendPage::Devices => {
+            let receiving_from_phone = browser.link_receiving.current.is_some();
+            let phone = if receiving_from_phone {
+                LinkReceiveMessage::StopPressed
+            } else {
+                LinkReceiveMessage::StartPressed
+            };
+            HeaderBar::new()
+                .title(tr!("LocalSend"))
+                .start(header_button(
+                    IconSymbol::History,
+                    tr!("Transfer history"),
+                    Some(page(LocalSendPage::History)),
+                    false,
+                ))
+                .end(header_button(
+                    IconSymbol::QrCode,
+                    tr!("Receive from phone"),
+                    Some(Message::Transfer(TransferMessage::LinkReceive(phone))),
+                    receiving_from_phone,
+                ))
+        }
+    }
 }
 
-/// 本机名、接收开关（与设置页同一个状态）、接收状态与"从手机接收"。
-fn this_computer_card(browser: &FileBrowser) -> Element<'_, Message> {
-    let receiving = browser.user_config().transfer_receive_enabled;
-    let status = if let Some(failure) = browser.transfer_receiver_failure() {
-        RowNote::Error(receiver_failure_message(failure))
-    } else if browser.transfer_runtime.is_none() {
-        RowNote::Error(tr!("LocalSend is not running."))
-    } else if receiving {
-        RowNote::Hint(tr!("Other devices can find this computer."))
+fn header_button(
+    symbol: IconSymbol,
+    label: String,
+    message: Option<Message>,
+    active: bool,
+) -> Element<'static, Message> {
+    let tone = if active {
+        IconTone::Selected
     } else {
-        RowNote::Hint(tr!(
-            "Receiving is off. Other devices cannot find this computer."
-        ))
+        IconTone::Normal
     };
-    settings_card(vec![
-        label_row(
-            tr!(
-                "This computer: %1",
-                browser.effective_transfer_device_alias()
-            ),
-            None,
-        ),
-        switch_row(
-            tr!("Receive files"),
-            Some(status),
-            receiving,
-            Message::Transfer(TransferMessage::ReceiveEnabledToggled),
-        ),
-        custom_row(link_receive::link_receive_section(browser)),
-    ])
+    let button = icon_button(themed_icon(symbol, tone, HEADER_ICON_SIZE)).on_press_maybe(message);
+    let button = if active {
+        button.style(toggle_button_style(true))
+    } else {
+        button
+    };
+    tooltip(
+        button,
+        container(readable_text(label).size(CAPTION_SIZE))
+            .padding([5, 7])
+            .style(tooltip_bubble_style),
+        tooltip::Position::Bottom,
+    )
+    .into()
 }
 
-/// 待发卡片："文件 | 文字"两个标签，设备行发的是当前标签里的东西。
-fn staged_card(browser: &FileBrowser) -> Element<'_, Message> {
-    let tab = |label: String, target: StagedTab| SegmentedChoice {
-        label,
-        selected: browser.local_send_tab == target,
-        message: Some(Message::Transfer(TransferMessage::StagedTabSelected(
-            target,
-        ))),
-        tooltip: None,
-    };
-    let tabs = segmented_choice_row(vec![
-        tab(tr!("Files"), StagedTab::Files),
-        tab(tr!("Text message"), StagedTab::Text),
-    ]);
+pub(crate) fn view_local_send_window(browser: &FileBrowser) -> Element<'_, Message> {
+    match browser.local_send_page {
+        LocalSendPage::History => scrollable(
+            container(transfer_history::history_list(browser))
+                .padding(WINDOW_PADDING)
+                .width(Length::Fill),
+        )
+        .height(Length::Fill)
+        .into(),
+        LocalSendPage::Devices => {
+            let mut body = column![]
+                .spacing(SECTION_SPACING)
+                .padding(WINDOW_PADDING)
+                .width(Length::Fill);
+            if browser.link_receiving.current.is_some() {
+                body = body.push(panel(
+                    column![
+                        readable_text(tr!("Receive from phone")).font(BOLD),
+                        link_receive::link_receive_section(browser),
+                    ]
+                    .spacing(10),
+                ));
+            }
+            body = body
+                .push(outgoing_panel(browser))
+                .push(devices_section(browser));
+            column![
+                scrollable(body).height(Length::Fill),
+                this_computer_footer(browser)
+            ]
+            .into()
+        }
+    }
+}
+
+/// 要发什么：文件（默认）或一段文字。没选文件时是一块大的“选择文件”。
+fn outgoing_panel(browser: &FileBrowser) -> Element<'_, Message> {
     let content = match browser.local_send_tab {
-        StagedTab::Files => staged_files(browser),
+        StagedTab::Files if browser.local_send_staged.is_empty() => empty_files(),
+        StagedTab::Files => staged_files(&browser.local_send_staged),
         StagedTab::Text => staged_text(browser),
     };
-    card(column![tabs, content].spacing(10))
+    panel(content)
+}
+
+fn empty_files() -> Element<'static, Message> {
+    column![
+        themed_icon(IconSymbol::Send, IconTone::Normal, EMPTY_ICON_SIZE),
+        readable_text(tr!("Choose what to send")).font(BOLD),
+        choose_buttons(),
+        local_send_tiles::centered_muted_text(tr!(
+            "Drag files onto LocalSend in the sidebar, or choose them here."
+        )),
+        switch_tab_link(tr!("Send text instead"), StagedTab::Text),
+    ]
+    .spacing(8)
+    .align_x(Alignment::Center)
+    .width(Length::Fill)
+    .into()
+}
+
+fn staged_files(staged: &[StagedItem]) -> Element<'_, Message> {
+    let clear = normal_button(readable_text(tr!("Clear list")))
+        .on_press(Message::Transfer(TransferMessage::StagedItemsCleared));
+    column![
+        row![
+            readable_text(tr!(
+                "%1 item(s) · %2",
+                staged.len(),
+                staged_total_text(staged)
+            ))
+            .font(BOLD)
+            .width(Length::Fill),
+            clear,
+        ]
+        .align_y(Alignment::Center),
+        container(scrollable(staged_rows(staged)))
+            .height(Length::Fixed(
+                STAGED_LIST_MAX_HEIGHT.min(staged.len() as f32 * STAGED_ROW_HEIGHT),
+            ))
+            .width(Length::Fill),
+        row![
+            choose_buttons(),
+            Space::new().width(Length::Fill),
+            switch_tab_link(tr!("Send text instead"), StagedTab::Text),
+        ]
+        .align_y(Alignment::Center),
+    ]
+    .spacing(8)
+    .into()
+}
+
+fn choose_buttons() -> Element<'static, Message> {
+    let choose = |label: String, target: ChooserTarget| {
+        normal_button(readable_text(label))
+            .on_press(Message::Transfer(TransferMessage::ChooserPressed(target)))
+    };
+    row![
+        choose(tr!("Choose files..."), ChooserTarget::Files),
+        choose(tr!("Choose folders..."), ChooserTarget::Folders),
+    ]
+    .spacing(8)
+    .into()
 }
 
 /// 要发的文字：多行，发完还在，可以接着发给别人。
@@ -134,58 +230,32 @@ fn staged_text(browser: &FileBrowser) -> Element<'_, Message> {
     );
     column![
         editor,
-        row![Space::new().width(Length::Fill), clear].align_y(Alignment::Center),
+        row![
+            switch_tab_link(tr!("Send files instead"), StagedTab::Files),
+            Space::new().width(Length::Fill),
+            clear,
+        ]
+        .align_y(Alignment::Center),
     ]
-    .spacing(6)
+    .spacing(8)
     .into()
 }
 
-fn staged_files(browser: &FileBrowser) -> Element<'_, Message> {
-    let staged = &browser.local_send_staged;
-    let mut content = column![].spacing(8).width(Length::Fill);
-    if staged.is_empty() {
-        content = content
-            .push(readable_text(tr!("No files to send")))
-            .push(muted_setting_text(tr!(
-                "Drag files onto LocalSend in the sidebar, or choose them here."
-            )));
-    } else {
-        let clear = normal_button(readable_text(tr!("Clear list")))
-            .on_press(Message::Transfer(TransferMessage::StagedItemsCleared));
-        content = content
-            .push(
-                row![
-                    readable_text(tr!(
-                        "%1 item(s) · %2",
-                        staged.len(),
-                        staged_total_text(staged)
-                    ))
-                    .width(Length::Fill),
-                    clear,
-                ]
-                .align_y(Alignment::Center),
-            )
-            .push(
-                container(scrollable(staged_rows(staged)))
-                    .height(Length::Fixed(
-                        STAGED_LIST_MAX_HEIGHT.min(staged.len() as f32 * STAGED_ROW_HEIGHT),
-                    ))
-                    .width(Length::Fill),
-            );
-    }
-    let choose = |label: String, target: ChooserTarget| {
-        normal_button(readable_text(label))
-            .on_press(Message::Transfer(TransferMessage::ChooserPressed(target)))
-    };
-    content
-        .push(
-            row![
-                choose(tr!("Choose files..."), ChooserTarget::Files),
-                choose(tr!("Choose folders..."), ChooserTarget::Folders),
-            ]
-            .spacing(8),
-        )
-        .into()
+/// 文件和文字之间切换：一个不起眼的文字按钮，不占一整行分段选择。
+fn switch_tab_link(label: String, target: StagedTab) -> Element<'static, Message> {
+    button(
+        readable_text(label)
+            .size(CAPTION_SIZE)
+            .style(|theme: &Theme| iced::widget::text::Style {
+                color: Some(ui_colors(theme).primary),
+            }),
+    )
+    .padding([4, 6])
+    .style(icon_button_style)
+    .on_press(Message::Transfer(TransferMessage::StagedTabSelected(
+        target,
+    )))
+    .into()
 }
 
 fn staged_rows(staged: &[StagedItem]) -> Column<'_, Message> {
@@ -250,65 +320,87 @@ fn staged_total_text(staged: &[StagedItem]) -> String {
     total.display_text()
 }
 
-/// 这个窗口的设备行：勾选记在 LocalSend 窗口名下；点设备发当前标签里的东西（文件或
-/// 文字），没东西可发时发送不可点。
-fn device_rows(
-    browser: &FileBrowser,
-) -> local_send_devices::DeviceRows<'_, impl Fn(&DeviceInfo) -> Option<Message>> {
-    let has_outgoing = browser.local_send_has_outgoing();
-    local_send_devices::DeviceRows {
-        browser,
-        owner: DeviceListOwner::LocalSendWindow,
-        send: move |device: &DeviceInfo| {
-            has_outgoing.then(|| {
-                Message::Transfer(TransferMessage::SendStagedToDevicePressed(device.clone()))
-            })
-        },
-    }
-}
-
-/// 收藏：标题 + "按 IP 添加"（展开的表单在标题下面）+ 全部收藏设备。
-fn favorites_card(browser: &FileBrowser) -> Element<'_, Message> {
-    let add = normal_button(
-        row![
-            themed_icon(IconSymbol::Plus, IconTone::Normal, MENU_ICON_SIZE),
-            readable_text(tr!("Add by IP")),
-        ]
-        .spacing(4)
-        .align_y(Alignment::Center),
-    )
-    .on_press(Message::Transfer(TransferMessage::AddressForm(
-        AddressFormMessage::Opened,
-    )));
-    let mut content = column![row![
-        local_send_devices::favorites_title().width(Length::Fill),
-        add
+/// 设备：标题 + 刷新，勾了几台时的“一起发”，设备格子，按 IP 添加的表单，正在发的那几台。
+fn devices_section(browser: &FileBrowser) -> Element<'_, Message> {
+    let refresh = icon_button(themed_icon(
+        IconSymbol::Refresh,
+        IconTone::Normal,
+        MENU_ICON_SIZE,
+    ))
+    .on_press(Message::Transfer(TransferMessage::RefreshDevicesRequested));
+    let mut section = column![row![
+        readable_text(tr!("Devices")).font(BOLD).width(Length::Fill),
+        refresh,
     ]
     .align_y(Alignment::Center)]
-    .spacing(8);
-    if let Some(form) = &browser.favorite_address_form {
-        content = content.push(local_send_address_form::address_form(form));
-    }
-    content = if browser.user_config().transfer_favorite_devices.is_empty() {
-        content
-            .push(readable_text(tr!("No favorite devices yet")))
-            .push(muted_setting_text(tr!(
-                "Click the star next to a device to add it here."
-            )))
+    .spacing(10)
+    .width(Length::Fill);
+
+    let any_device =
+        !browser.favorite_rows().is_empty() || !browser.unclaimed_nearby_devices().is_empty();
+    section = section.push(muted_setting_text(if !any_device {
+        tr!("Looking for nearby devices. The other device needs LocalSend open on the same network.")
+    } else if browser.local_send_has_outgoing() {
+        tr!("Click a device to send. Hold Ctrl to pick several.")
     } else {
-        content.push(local_send_devices::favorite_rows(&device_rows(browser)))
-    };
-    card(content)
+        tr!("Choose files or type some text, then click a device.")
+    }));
+    if let Some(bar) = local_send_devices::checked_bar(
+        browser,
+        DeviceListOwner::LocalSendWindow,
+        browser.local_send_has_outgoing(),
+    ) {
+        section = section.push(bar);
+    }
+    section = section.push(local_send_tiles::device_grid(browser));
+    if let Some(form) = &browser.favorite_address_form {
+        section = section.push(panel(local_send_address_form::address_form(form)));
+    }
+    if let Some(active) = local_send_tiles::active_sends(browser) {
+        section = section.push(panel(active));
+    }
+    section.into()
 }
 
-fn nearby_card(browser: &FileBrowser) -> Element<'_, Message> {
-    card(
+/// 底栏：本机名、能不能被找到（或接收服务为什么没起来），右边是接收开关（与设置页同一个
+/// 状态）。
+fn this_computer_footer(browser: &FileBrowser) -> Element<'_, Message> {
+    let receiving = browser.user_config().transfer_receive_enabled;
+    let status = if let Some(failure) = browser.transfer_receiver_failure() {
+        error_text(receiver_failure_message(failure))
+    } else if browser.transfer_runtime.is_none() {
+        error_text(tr!("LocalSend is not running."))
+    } else if receiving {
+        muted_setting_text(tr!("Other devices can find this computer."))
+    } else {
+        muted_setting_text(tr!(
+            "Receiving is off. Other devices cannot find this computer."
+        ))
+    };
+    let toggle = button(switch(receiving))
+        .padding(0)
+        .style(|_: &Theme, _| button::Style::default())
+        .on_press(Message::Transfer(TransferMessage::ReceiveEnabledToggled));
+    let content = row![
+        themed_icon(IconSymbol::Monitor, IconTone::Normal, FOOTER_ICON_SIZE),
         column![
-            local_send_devices::nearby_devices_header(),
-            local_send_devices::nearby_rows(&device_rows(browser)),
+            readable_text(tr!(
+                "This computer: %1",
+                browser.effective_transfer_device_alias()
+            )),
+            status,
         ]
-        .spacing(8),
-    )
+        .spacing(1)
+        .width(Length::Fill),
+        toggle,
+    ]
+    .spacing(10)
+    .align_y(Alignment::Center);
+    container(content)
+        .padding([10.0, WINDOW_PADDING])
+        .width(Length::Fill)
+        .style(footer_style)
+        .into()
 }
 
 pub(super) fn error_text(label: String) -> Element<'static, Message> {
@@ -321,11 +413,30 @@ pub(super) fn error_text(label: String) -> Element<'static, Message> {
         .into()
 }
 
-/// 卡片外壳：与"发送到手机"窗口同样式（surface 背景 + 边框）。
-fn card<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+/// 一块内容：卡片底色，没有边框。
+fn panel<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     container(content.into())
-        .padding(12)
+        .padding(PANEL_PADDING)
         .width(Length::Fill)
-        .style(context_menu_style)
+        .style(panel_style)
         .into()
+}
+
+fn panel_style(theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(ui_colors(theme).surface_container)),
+        border: Border {
+            radius: CARD_RADIUS.into(),
+            ..Border::default()
+        },
+        ..container::Style::default()
+    }
+}
+
+/// 底栏比内容暗一层（和侧栏同一层），不用分隔线也和上面分得开。
+fn footer_style(theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(ui_colors(theme).surface_dim)),
+        ..container::Style::default()
+    }
 }

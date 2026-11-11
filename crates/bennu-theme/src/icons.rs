@@ -33,6 +33,8 @@ pub enum IconSymbol {
     GripVertical,
     HardDrive,
     Hash,
+    /// 传输记录（带指针的逆时针箭头）。
+    History,
     House,
     Link,
     List,
@@ -45,6 +47,8 @@ pub enum IconSymbol {
     Pin,
     Play,
     Plus,
+    /// 二维码：让手机扫码传文件过来。
+    QrCode,
     Refresh,
     Regex,
     RestoreWindow,
@@ -182,6 +186,7 @@ impl IconSymbol {
             Self::GripVertical => include_bytes!("../assets/icons/lucide/grip-vertical.svg"),
             Self::HardDrive => HARD_DRIVE_ICON,
             Self::Hash => include_bytes!("../assets/icons/lucide/hash.svg"),
+            Self::History => include_bytes!("../assets/icons/lucide/history.svg"),
             Self::House => include_bytes!("../assets/icons/lucide/house.svg"),
             Self::Link => include_bytes!("../assets/icons/lucide/link.svg"),
             Self::RotateCcw => include_bytes!("../assets/icons/lucide/rotate-ccw.svg"),
@@ -195,6 +200,7 @@ impl IconSymbol {
             Self::Pin => include_bytes!("../assets/icons/lucide/pin.svg"),
             Self::Play => PLAY_ICON,
             Self::Plus => include_bytes!("../assets/icons/lucide/plus.svg"),
+            Self::QrCode => include_bytes!("../assets/icons/lucide/qr-code.svg"),
             Self::Refresh => REFRESH_ICON,
             Self::Regex => include_bytes!("../assets/icons/lucide/regex.svg"),
             Self::RestoreWindow => include_bytes!("../assets/icons/lucide/copy.svg"),

@@ -20,6 +20,7 @@ mod link_receive;
 mod local_send_address_form;
 mod local_send_devices;
 mod local_send_send_status;
+mod local_send_tiles;
 mod local_send_window;
 mod network_connections;
 mod network_settings;
@@ -54,7 +55,7 @@ pub(crate) use sidebar_panel::{
 pub(crate) use window_chrome::{main_toolbar_height, window_shell};
 
 pub(crate) use address_bar::address_input_id;
-pub(crate) use local_send_window::view_local_send_window;
+pub(crate) use local_send_window::{local_send_header, view_local_send_window};
 pub(crate) use preview_panel::view_preview_window;
 pub(crate) use properties_window::view_properties_window;
 pub(crate) use search_panel::{search_input_id, SEARCH_RESULT_ROW_HEIGHT};

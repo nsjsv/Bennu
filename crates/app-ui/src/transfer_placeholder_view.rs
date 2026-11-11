@@ -20,13 +20,13 @@ use iced::{Alignment, Element, Length, Point};
 use crate::app::panes::BrowserPaneView;
 use crate::app::FileBrowser;
 use crate::appearance::list_row_style;
-use crate::file_drag_spring_ring::file_drag_spring_ring;
 use crate::file_entry_view::{file_entry_symbol_icon, FileEntryIconDensity, FileEntryIconTone};
 use crate::list_view::{ListGeometry, LIST_GROUP_HEADER_HEIGHT};
 use crate::model::{
     DirectoryOrderPhase, ExpandedDirectory, ExpandedDirectoryStatus, FileEntryContentModifier,
     ListColumnConfig, ListColumnKind, Message,
 };
+use crate::progress_ring::progress_ring;
 use crate::transfer_placeholders::{
     merge_entries_with_placeholders, transfer_placeholders_for_directory, MergedTransferItem,
     TransferPlaceholder, TransferSortOptions,
@@ -58,7 +58,7 @@ pub(crate) fn entry_icon_with_transfer<'a>(
             .center_x(iced::Length::Fixed(slot_size))
             .center_y(iced::Length::Fixed(slot_size))
             .into(),
-        file_drag_spring_ring(transfer.progress.unwrap_or(0.0)),
+        progress_ring(transfer.progress.unwrap_or(0.0)),
     ])
     .width(iced::Length::Fixed(slot_size))
     .height(iced::Length::Fixed(slot_size))
@@ -89,7 +89,7 @@ pub(crate) fn transfer_placeholder_icon(
     .into();
     iced::widget::Stack::with_children([
         icon_slot,
-        file_drag_spring_ring(placeholder.progress.unwrap_or(0.0)),
+        progress_ring(placeholder.progress.unwrap_or(0.0)),
     ])
     .width(Length::Fixed(slot_size))
     .height(Length::Fixed(slot_size))

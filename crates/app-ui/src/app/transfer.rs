@@ -133,7 +133,8 @@ pub(crate) enum TransferMessage {
     StagedTabSelected(StagedTab),
     StagedTextEdited(iced::widget::text_editor::Action),
     StagedTextCleared,
-    SendStagedToDevicePressed(DeviceInfo),
+    /// LocalSend 窗口点了一台设备：按住 Ctrl 是多选，否则把要发的东西直接发给它。
+    LocalSendDevicePressed(DeviceInfo),
     // ---- 收藏设备 ----
     /// 附近设备行的 ☆。
     FavoritePressed(DeviceInfo),
@@ -469,9 +470,7 @@ impl FileBrowser {
                 self.local_send_text = iced::widget::text_editor::Content::new();
                 iced::Task::none()
             }
-            TransferMessage::SendStagedToDevicePressed(device) => {
-                self.send_staged_to_device(device)
-            }
+            TransferMessage::LocalSendDevicePressed(device) => self.press_local_send_device(device),
             TransferMessage::FavoritePressed(device) => self.favor_device(&device, None),
             TransferMessage::UnfavoritePressed(fingerprint) => self.unfavor_device(&fingerprint),
             TransferMessage::FavoriteAliasInputChanged { fingerprint, value } => {

@@ -1,8 +1,8 @@
-//! LocalSend 窗口收藏区里展开的"按 IP 添加"表单：名字（可不填）、IP、端口。
+//! LocalSend 窗口里点“按 IP 添加”后展开的表单：名字（可不填）、IP、端口。
 //!
 //! 连接中输入框不可改、"添加"变"正在连接…"：结果要对上用户看到的那个地址。
 
-use iced::widget::{column, container, row, Space, TextInput};
+use iced::widget::{column, row, Space, TextInput};
 use iced::{Alignment, Element, Length, Theme};
 
 use crate::app::transfer::{AddressFormMessage, FavoriteAddressForm, TransferMessage};
@@ -96,22 +96,5 @@ pub(super) fn address_form(form: &FavoriteAddressForm) -> Element<'_, Message> {
         ]
         .spacing(8),
     );
-    container(content)
-        .padding(10)
-        .width(Length::Fill)
-        .style(form_style)
-        .into()
-}
-
-fn form_style(theme: &Theme) -> container::Style {
-    let colors = ui_colors(theme);
-    container::Style {
-        background: Some(iced::Background::Color(colors.surface_container_low)),
-        border: iced::Border {
-            color: crate::appearance::subtle_border_color(theme),
-            width: 1.0,
-            radius: 6.0.into(),
-        },
-        ..container::Style::default()
-    }
+    content.width(Length::Fill).into()
 }

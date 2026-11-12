@@ -20,6 +20,7 @@ use crate::model::{
     IndexStatus, IndexedQueryAvailability, SearchPathConfigurationStatus, SearchProviderFailure,
     SearchQuery, SearchServicePhase, SearchServiceRequest, SearchServiceStatus,
 };
+use crate::ranked_snapshots::RankedSnapshots;
 use crate::{SearchPathPreferences, VersionedSearchPathPreferences};
 
 const MAX_ACTIVE_CLIENTS: usize = 8;
@@ -354,6 +355,9 @@ where
     ShutdownHandler: FnOnce() -> ShutdownFuture + Send,
 {
     let listener = bound_socket.take_tokio_listener()?;
+    let ranked_snapshots = Arc::new(RankedSnapshots::default());
+    let ranked_snapshot_release =
+        tokio::spawn(Arc::clone(&ranked_snapshots).release_idle_snapshots());
     let (shutdown_requested_sender, mut shutdown_requested_receiver) = watch::channel(false);
     let (shutdown_finished_sender, _) = watch::channel(false);
     let (client_ready_sender, mut client_ready_receiver) = mpsc::unbounded_channel();
@@ -380,6 +384,7 @@ where
                 client_tasks.spawn(handle_client(
                     stream,
                     backend.clone(),
+                    Arc::clone(&ranked_snapshots),
                     shutdown_requested_sender.clone(),
                     shutdown_requested_sender.subscribe(),
                     shutdown_finished_sender.subscribe(),
@@ -411,6 +416,7 @@ where
 
     shutdown_requested_sender.send_replace(true);
     drop(listener);
+    ranked_snapshot_release.abort();
     for _ in 0..client_tasks.len() {
         let _ = client_ready_receiver.recv().await;
     }
@@ -481,10 +487,11 @@ fn validate_wire_query(query: &SearchQuery) -> Result<(), String> {
     if !(1..=200).contains(&query.limit) {
         return Err("search result limit must be between 1 and 200".to_owned());
     }
-    if query
-        .cursor
-        .is_some_and(|cursor| cursor.offset > MAX_QUERY_OFFSET)
-    {
+    // 偏移翻页每页都要跳过前面的行，所以限住偏移；定格位置在查询时按定格长度检查。
+    if matches!(
+        query.cursor,
+        Some(crate::model::SearchCursor::Offset { offset }) if offset > MAX_QUERY_OFFSET
+    ) {
         return Err(format!(
             "search cursor exceeds the {MAX_QUERY_OFFSET} row offset limit"
         ));
@@ -574,6 +581,10 @@ async fn wait_for_signal(receiver: &mut watch::Receiver<bool>) {
 #[cfg(all(test, unix))]
 #[path = "protocol_path_tests.rs"]
 mod path_tests;
+
+#[cfg(all(test, unix))]
+#[path = "protocol_ranked_paging_tests.rs"]
+mod ranked_paging_tests;
 
 #[cfg(test)]
 #[path = "protocol_tests.rs"]

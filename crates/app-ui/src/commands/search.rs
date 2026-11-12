@@ -131,6 +131,9 @@ fn indexed_outcome_from_error(error: SearchError) -> IndexedSearchOutcome {
                 IndexedSearchOutcome::InvalidQuery(message)
             }
             SearchProviderFailure::Fatal { message } => IndexedSearchOutcome::Fatal(message),
+            SearchProviderFailure::RankedSnapshotExpired => {
+                IndexedSearchOutcome::RankedSnapshotExpired
+            }
         },
         SearchError::InvalidQuery(message) => IndexedSearchOutcome::InvalidQuery(message),
         error => IndexedSearchOutcome::Fatal(error.to_string()),

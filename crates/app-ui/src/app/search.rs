@@ -544,6 +544,8 @@ impl FileBrowser {
                     workspace.apply_indexed_failure(request, message);
                 }
             }
+            // 接着翻会重复或漏条目，所以不报错，直接从头重新搜，列表回到顶部。
+            IndexedSearchOutcome::RankedSnapshotExpired => return self.restart_search_workspace(),
         }
         Task::none()
     }

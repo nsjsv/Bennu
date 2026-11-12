@@ -374,6 +374,7 @@ mod tests {
         SearchServicePhase,
     };
     use crate::protocol::{serve_bound_search_socket, BoundSearchSocket, SearchSocketService};
+    use crate::ranked_snapshots::RankedSnapshots;
 
     use super::*;
 
@@ -473,7 +474,10 @@ mod tests {
             runtime
                 .open_query_reader()
                 .unwrap()
-                .search(&SearchQuery::global(6, "needle"))
+                .search(
+                    &SearchQuery::global(6, "needle"),
+                    &RankedSnapshots::default()
+                )
                 .unwrap()
                 .hits
                 .len(),
@@ -603,7 +607,10 @@ mod tests {
         let batch = runtime
             .open_query_reader()
             .unwrap()
-            .search(&SearchQuery::global(7, "needle"))
+            .search(
+                &SearchQuery::global(7, "needle"),
+                &RankedSnapshots::default(),
+            )
             .unwrap();
         assert_eq!(batch.hits.len(), 1);
         assert_eq!(batch.hits[0].display_name, "note.txt");
@@ -643,7 +650,7 @@ mod tests {
         assert!(runtime
             .open_query_reader()
             .unwrap()
-            .search(&SearchQuery::global(9, ""))
+            .search(&SearchQuery::global(9, ""), &RankedSnapshots::default())
             .is_ok());
 
         runtime.shutdown().unwrap();

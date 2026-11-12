@@ -162,11 +162,14 @@ impl SearchIndexer {
         cancellation: &CancellationToken,
         mut on_progress: impl FnMut(IndexMaintenanceProgress),
     ) -> SearchResult<RebuildStats> {
-        ensure_not_cancelled(cancellation)?;
-        let mut stats = RebuildStats::default();
-        self.reconcile_changed_paths(changed_paths, &mut stats, cancellation, &mut on_progress)
-            .await?;
-        Ok(stats)
+        self.committed(async {
+            ensure_not_cancelled(cancellation)?;
+            let mut stats = RebuildStats::default();
+            self.reconcile_changed_paths(changed_paths, &mut stats, cancellation, &mut on_progress)
+                .await?;
+            Ok(stats)
+        })
+        .await
     }
 
     pub(crate) async fn repair_scopes_with_progress_cancelled(
@@ -175,11 +178,14 @@ impl SearchIndexer {
         cancellation: &CancellationToken,
         mut on_progress: impl FnMut(IndexMaintenanceProgress),
     ) -> SearchResult<RebuildStats> {
-        ensure_not_cancelled(cancellation)?;
-        let mut stats = RebuildStats::default();
-        self.reconcile_changed_paths(scopes, &mut stats, cancellation, &mut on_progress)
-            .await?;
-        Ok(stats)
+        self.committed(async {
+            ensure_not_cancelled(cancellation)?;
+            let mut stats = RebuildStats::default();
+            self.reconcile_changed_paths(scopes, &mut stats, cancellation, &mut on_progress)
+                .await?;
+            Ok(stats)
+        })
+        .await
     }
 
     pub(crate) async fn patrol_unwatched_directories_with_progress_cancelled(
@@ -188,18 +194,21 @@ impl SearchIndexer {
         cancellation: &CancellationToken,
         mut on_progress: impl FnMut(IndexMaintenanceProgress),
     ) -> SearchResult<RebuildStats> {
-        ensure_not_cancelled(cancellation)?;
-        let mut stats = RebuildStats::default();
-        for directory in directories {
-            self.reconcile_changed_paths(
-                vec![directory],
-                &mut stats,
-                cancellation,
-                &mut on_progress,
-            )
-            .await?;
-        }
-        Ok(stats)
+        self.committed(async {
+            ensure_not_cancelled(cancellation)?;
+            let mut stats = RebuildStats::default();
+            for directory in directories {
+                self.reconcile_changed_paths(
+                    vec![directory],
+                    &mut stats,
+                    cancellation,
+                    &mut on_progress,
+                )
+                .await?;
+            }
+            Ok(stats)
+        })
+        .await
     }
 
     pub(crate) async fn recover_dirty_roots_with_progress_cancelled(
@@ -208,11 +217,25 @@ impl SearchIndexer {
         cancellation: &CancellationToken,
         mut on_progress: impl FnMut(IndexMaintenanceProgress),
     ) -> SearchResult<RebuildStats> {
-        ensure_not_cancelled(cancellation)?;
-        let mut stats = RebuildStats::default();
-        self.startup_check_scopes(scopes, &mut stats, cancellation, &mut on_progress)
-            .await?;
-        Ok(stats)
+        self.committed(async {
+            ensure_not_cancelled(cancellation)?;
+            let mut stats = RebuildStats::default();
+            self.startup_check_scopes(scopes, &mut stats, cancellation, &mut on_progress)
+                .await?;
+            Ok(stats)
+        })
+        .await
+    }
+
+    /// 一件索引工作返回时，它的写入一定已经提交。写库线程按批提交，批不能跨工作，
+    /// 否则这件工作的提交失败会算到下一件头上。所以成功、失败、取消都要提交。
+    async fn committed(
+        &self,
+        work: impl std::future::Future<Output = SearchResult<RebuildStats>>,
+    ) -> SearchResult<RebuildStats> {
+        let outcome = work.await;
+        let committed = self.writer.commit_pending();
+        outcome.and_then(|stats| committed.map(|()| stats))
     }
 
     fn collapse_paths_by_owning_root(&self, paths: Vec<PathBuf>) -> Vec<PathBuf> {

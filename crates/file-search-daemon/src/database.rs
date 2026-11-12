@@ -7,6 +7,7 @@ use crate::extractor::{DurableContentStageState, ExtractionStatus};
 use crate::model::SearchFileKind;
 use crate::path_encoding::{path_from_storage, storage_bytes};
 use crate::text_matching::{content_index_text, name_index_text, normalize_search_text};
+use write_batch::WriteSavepoint;
 
 #[path = "database/known_entry.rs"]
 mod known_entry;
@@ -25,6 +26,8 @@ mod storage_rebuild;
 #[cfg(unix)]
 #[path = "database/storage_workspace.rs"]
 mod storage_workspace;
+#[path = "database/write_batch.rs"]
+mod write_batch;
 
 pub(crate) use known_entry::{
     DirectorySignature, DirectorySnapshot, EntryObservationState, KnownDirectChild, KnownFileEntry,
@@ -229,13 +232,13 @@ impl SearchDatabase {
     }
 
     pub fn upsert_file(&self, file: &IndexedFile) -> SearchResult<()> {
-        let transaction = self.connection.unchecked_transaction()?;
+        let transaction = WriteSavepoint::begin(&self.connection)?;
         let metadata_row = file.query_visible_metadata_row();
         let fulltext_row = file.fulltext_content_row();
         upsert_query_visible_metadata(&transaction, &metadata_row)?;
         upsert_stage_state(&transaction, metadata_row.path, &file.stage_state)?;
         replace_fulltext_content(&transaction, &fulltext_row)?;
-        transaction.commit()?;
+        transaction.release()?;
         Ok(())
     }
 
@@ -260,16 +263,16 @@ impl SearchDatabase {
     }
 
     pub fn upsert_inaccessible_file(&self, file: &IndexedFile) -> SearchResult<()> {
-        let transaction = self.connection.unchecked_transaction()?;
+        let transaction = WriteSavepoint::begin(&self.connection)?;
         let metadata_row = file.query_visible_metadata_row();
         upsert_inaccessible_metadata(&transaction, &metadata_row)?;
         upsert_stage_state(&transaction, metadata_row.path, &file.stage_state)?;
-        transaction.commit()?;
+        transaction.release()?;
         Ok(())
     }
 
     pub(crate) fn apply_file_batch(&self, mutations: &[ScanFileMutation]) -> SearchResult<()> {
-        let transaction = self.connection.unchecked_transaction()?;
+        let transaction = WriteSavepoint::begin(&self.connection)?;
         for mutation in mutations {
             match mutation {
                 ScanFileMutation::Observable(file) => {
@@ -286,7 +289,7 @@ impl SearchDatabase {
                 }
             }
         }
-        transaction.commit()?;
+        transaction.release()?;
         Ok(())
     }
 
@@ -595,6 +598,10 @@ mod migration_tests;
 #[cfg(all(test, unix))]
 #[path = "database/path_identity_tests.rs"]
 mod path_identity_tests;
+
+#[cfg(test)]
+#[path = "database/ranked_paging_tests.rs"]
+mod ranked_paging_tests;
 
 #[cfg(test)]
 #[path = "database/schema_tests.rs"]

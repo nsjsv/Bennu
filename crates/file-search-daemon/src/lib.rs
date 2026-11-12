@@ -11,6 +11,7 @@ mod filter_semantics_tests;
 mod logging;
 mod managed_search_index;
 mod protocol;
+mod ranked_snapshots;
 #[cfg(test)]
 mod search_parity_tests;
 mod service_runtime;

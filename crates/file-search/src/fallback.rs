@@ -701,7 +701,7 @@ mod tests {
 
         let content = tempdir().unwrap();
         let mut query = directory_query(content.path().to_path_buf(), "name");
-        query.cursor = Some(SearchCursor { offset: 1 });
+        query.cursor = Some(SearchCursor::Offset { offset: 1 });
         assert!(matches!(
             search_directory_fallback(
                 &query,

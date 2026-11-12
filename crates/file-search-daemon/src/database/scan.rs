@@ -5,6 +5,7 @@ use rusqlite::{params, OptionalExtension};
 use crate::error::{SearchError, SearchResult};
 use crate::model::SearchFileKind;
 
+use super::write_batch::WriteSavepoint;
 use super::{
     path_from_storage_bytes, path_to_storage, recursive_storage_range, DirectorySignature,
     DirectorySnapshot, EntryObservationState, EntryStageProgress, FileSignature,
@@ -331,7 +332,7 @@ impl SearchDatabase {
     }
 
     pub(crate) fn mark_scope_inaccessible(&self, scope: &Path) -> SearchResult<bool> {
-        let transaction = self.connection.unchecked_transaction()?;
+        let transaction = WriteSavepoint::begin(&self.connection)?;
         let scope_range = recursive_storage_range(scope);
         let files_changed = transaction.execute(
             "UPDATE files
@@ -362,12 +363,12 @@ impl SearchDatabase {
                 &scope_range.descendant_upper,
             ],
         )?;
-        transaction.commit()?;
+        transaction.release()?;
         Ok(files_changed > 0 || directories_changed > 0)
     }
 
     pub(crate) fn delete_scope(&self, scope: &Path) -> SearchResult<()> {
-        let transaction = self.connection.unchecked_transaction()?;
+        let transaction = WriteSavepoint::begin(&self.connection)?;
         let scope_range = recursive_storage_range(scope);
         transaction.execute(
             "DELETE FROM file_search_snippets
@@ -423,7 +424,7 @@ impl SearchDatabase {
                 &scope_range.descendant_upper,
             ],
         )?;
-        transaction.commit()?;
+        transaction.release()?;
         Ok(())
     }
 

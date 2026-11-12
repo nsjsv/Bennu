@@ -1,4 +1,5 @@
 use std::io;
+use std::sync::Arc;
 
 use tokio::net::UnixStream;
 use tokio::sync::{mpsc, oneshot, watch};
@@ -10,6 +11,7 @@ use crate::model::{
     daemon_build_id, SearchPathConfigurationStatus, SearchProviderFailure, SearchQuery,
     SearchResultBatch, SearchServiceEvent, SearchServiceRequest, PROTOCOL_VERSION,
 };
+use crate::ranked_snapshots::RankedSnapshots;
 use crate::{SearchPathPreferences, VersionedSearchPathPreferences};
 
 use super::{
@@ -48,6 +50,7 @@ impl Drop for ClientShutdownReadiness {
 pub(super) async fn handle_client(
     mut stream: UnixStream,
     backend: SearchServiceBackend,
+    ranked_snapshots: Arc<RankedSnapshots>,
     shutdown_requested_sender: watch::Sender<bool>,
     mut shutdown_requested_receiver: watch::Receiver<bool>,
     mut shutdown_finished_receiver: watch::Receiver<bool>,
@@ -140,8 +143,12 @@ pub(super) async fn handle_client(
                     continue;
                 }
 
-                let mut active_query =
-                    spawn_client_query(backend.clone(), client_reader.take(), query);
+                let mut active_query = spawn_client_query(
+                    backend.clone(),
+                    Arc::clone(&ranked_snapshots),
+                    client_reader.take(),
+                    query,
+                );
                 loop {
                     tokio::select! {
                         biased;
@@ -346,6 +353,7 @@ fn open_query_reader(
 
 fn spawn_client_query(
     backend: SearchServiceBackend,
+    ranked_snapshots: Arc<RankedSnapshots>,
     reader: Option<SearchDatabase>,
     query: SearchQuery,
 ) -> ActiveClientQuery {
@@ -373,7 +381,7 @@ fn spawn_client_query(
             };
         }
         let outcome = reader
-            .search(&query)
+            .search(&query, &ranked_snapshots)
             .map_err(search_provider_failure_from_error);
         ClientQueryCompletion {
             reader: Some(reader),

@@ -153,6 +153,8 @@ pub(crate) enum IndexedSearchOutcome {
     ProviderUnavailable(String),
     InvalidQuery(String),
     Fatal(String),
+    /// 服务里定格的排序结果已释放或服务重启过，这次搜索只能从头再来。
+    RankedSnapshotExpired,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

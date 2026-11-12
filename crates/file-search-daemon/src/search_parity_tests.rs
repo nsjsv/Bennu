@@ -17,6 +17,7 @@ use crate::model::{
     SearchFileKind, SearchFilters, SearchMatchMode, SearchQuery, SearchScope, SearchTextScope,
     SizeRange, TimeRange,
 };
+use crate::ranked_snapshots::RankedSnapshots;
 
 const CORPUS: &[(&str, usize)] = &[
     ("年度报告.pdf", 10),
@@ -87,7 +88,7 @@ fn directory_query(root: &Path, terms: &str, filters: SearchFilters) -> SearchQu
 
 fn index_names(database: &SearchDatabase, query: &SearchQuery) -> BTreeSet<String> {
     database
-        .search(query)
+        .search(query, &RankedSnapshots::default())
         .unwrap()
         .hits
         .into_iter()

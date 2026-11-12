@@ -23,6 +23,8 @@ use crate::model::{
     SelectionMarqueePhase, SelectionMarqueeScrollAnchor, SelectionMarqueeSource,
 };
 
+#[path = "search_tests/ranked_snapshot_tests.rs"]
+mod ranked_snapshot_tests;
 #[path = "search_tests/search_scope_tests.rs"]
 mod search_scope_tests;
 
@@ -61,7 +63,7 @@ fn indexed_batch(query_id: u64, hits: Vec<SearchHit>, finished: bool) -> SearchR
     SearchResultBatch {
         query_id,
         hits,
-        next_cursor: (!finished).then_some(file_search::SearchCursor {
+        next_cursor: (!finished).then_some(file_search::SearchCursor::Offset {
             offset: SEARCH_RESULT_WINDOW,
         }),
         finished,
@@ -450,7 +452,7 @@ fn approaching_loaded_end_requests_and_appends_one_indexed_page() {
     let next_request = pending_indexed_request(&browser);
     assert_eq!(
         next_request.cursor,
-        Some(file_search::SearchCursor {
+        Some(file_search::SearchCursor::Offset {
             offset: SEARCH_RESULT_WINDOW,
         })
     );

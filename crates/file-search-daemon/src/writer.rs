@@ -1,8 +1,9 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
 use crate::database::{
     validate_classification_batch, DirectorySnapshot, FileClassification, IndexedFile,
@@ -17,6 +18,11 @@ use crate::{SearchPathPolicy, VersionedSearchPathPreferences};
 pub(crate) const MAX_WRITER_FILE_PAYLOAD_BYTES: usize = 2_500_000;
 const MAX_WRITER_SCOPE_PATH_BYTES: usize = 8_192;
 const INDEXED_FILE_FIXED_BYTES: usize = 1_024;
+/// 写入按批提交。每个目录各提交一次时，冷索引的写盘量是终库大小的约 70 倍：
+/// 每次提交都要写一遍改动过的 B 树页和一个新的全文索引段。
+/// 批龄上限决定建索引期间新文件最晚多久能被搜到。
+const WRITE_BATCH_MAX_AGE: Duration = Duration::from_secs(1);
+const WRITE_BATCH_MAX_CHANGES: u64 = 20_000;
 
 /// A single operation for the dedicated writer thread to apply. Every command
 /// replies with its own outcome, so a failed write is reported to the work
@@ -76,6 +82,8 @@ enum WriteCommand {
         affected_scopes: Vec<PathBuf>,
         reply: Sender<SearchResult<()>>,
     },
+    /// 提交当前批。一件维护工作返回前调用，让批不跨工作，提交失败也算在这件工作头上。
+    CommitPending(Sender<SearchResult<()>>),
     /// 统计当前可查询条目，并继续复用 writer 持有的数据库连接。
     Count(Sender<SearchResult<u64>>),
     /// Stop the writer after every previously queued command has been applied.
@@ -276,6 +284,14 @@ impl IndexWriter {
         outcome.recv().map_err(|_| writer_gone())?
     }
 
+    pub(crate) fn commit_pending(&self) -> SearchResult<()> {
+        let (reply, outcome) = mpsc::channel();
+        self.sender
+            .send(WriteCommand::CommitPending(reply))
+            .map_err(|_| writer_gone())?;
+        outcome.recv().map_err(|_| writer_gone())?
+    }
+
     pub(crate) fn cancel_index_maintenance(&self) {
         self.maintenance_cancelled.store(true, Ordering::Release);
         self.interrupt.interrupt();
@@ -333,27 +349,44 @@ fn writer_loop(
     receiver: Receiver<WriteCommand>,
     maintenance_cancelled: Arc<AtomicBool>,
 ) {
-    while let Ok(command) = receiver.recv() {
+    let mut batch = WriteBatch::default();
+    loop {
+        let command = match batch.deadline() {
+            None => match receiver.recv() {
+                Ok(command) => command,
+                Err(_) => break,
+            },
+            Some(deadline) => {
+                match receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                    Ok(command) => command,
+                    Err(RecvTimeoutError::Timeout) => {
+                        batch.commit_if_expired(&database);
+                        continue;
+                    }
+                    Err(RecvTimeoutError::Disconnected) => break,
+                }
+            }
+        };
+        let cancelled = maintenance_cancelled.as_ref();
         match command {
             WriteCommand::UpsertObservable { file, reply } => {
-                let outcome = logged_write(database.upsert_file(&file), &maintenance_cancelled);
+                let outcome =
+                    batch.write(&database, cancelled, |database| database.upsert_file(&file));
                 let _ = reply.send(outcome);
             }
             WriteCommand::ClassifyObserved { files, reply } => {
                 let _ = reply.send(database.classify_observed_files(&files));
             }
             WriteCommand::ApplyFileBatch { mutations, reply } => {
-                let outcome = logged_write(
-                    database.apply_file_batch(&mutations),
-                    &maintenance_cancelled,
-                );
+                let outcome = batch.write(&database, cancelled, |database| {
+                    database.apply_file_batch(&mutations)
+                });
                 let _ = reply.send(outcome);
             }
             WriteCommand::UpsertDirectorySnapshot { snapshot, reply } => {
-                let outcome = logged_write(
-                    database.upsert_directory_snapshot(&snapshot),
-                    &maintenance_cancelled,
-                );
+                let outcome = batch.write(&database, cancelled, |database| {
+                    database.upsert_directory_snapshot(&snapshot)
+                });
                 let _ = reply.send(outcome);
             }
             WriteCommand::DirectorySnapshot { path, reply } => {
@@ -392,14 +425,15 @@ fn writer_loop(
                 ));
             }
             WriteCommand::MarkScopeInaccessible { scope, reply } => {
-                let outcome = logged_write(
-                    database.mark_scope_inaccessible(&scope),
-                    &maintenance_cancelled,
-                );
+                let outcome = batch.write(&database, cancelled, |database| {
+                    database.mark_scope_inaccessible(&scope)
+                });
                 let _ = reply.send(outcome);
             }
             WriteCommand::DeleteScope { scope, reply } => {
-                let outcome = logged_write(database.delete_scope(&scope), &maintenance_cancelled);
+                let outcome = batch.write(&database, cancelled, |database| {
+                    database.delete_scope(&scope)
+                });
                 let _ = reply.send(outcome);
             }
             WriteCommand::ApplyPathConfigurationTransition {
@@ -410,27 +444,139 @@ fn writer_loop(
                 affected_scopes,
                 reply,
             } => {
+                // 配置迁移自带事务，不能嵌进批里，所以先把批提交掉。
                 let outcome = logged_write(
-                    database.apply_search_path_transition(
-                        &effective,
-                        &policy,
-                        &mounts,
-                        &invalidated_roots,
-                        &affected_scopes,
-                    ),
-                    &maintenance_cancelled,
+                    batch.commit(&database).and_then(|()| {
+                        database.apply_search_path_transition(
+                            &effective,
+                            &policy,
+                            &mounts,
+                            &invalidated_roots,
+                            &affected_scopes,
+                        )
+                    }),
+                    cancelled,
                 );
                 let _ = reply.send(outcome);
+            }
+            WriteCommand::CommitPending(reply) => {
+                let _ = reply.send(logged_write(batch.commit(&database), cancelled));
             }
             WriteCommand::Count(reply) => {
                 let _ = reply.send(database.indexed_file_count());
             }
             WriteCommand::Shutdown(reply) => {
+                let _ = logged_write(batch.commit(&database), cancelled);
                 if let Some(reply) = reply {
                     let _ = reply.send(());
                 }
-                break;
+                return;
             }
+        }
+        // 读命令接连不断时等不到超时，所以每条命令之后都看一次批龄。
+        batch.commit_if_expired(&database);
+    }
+    let _ = logged_write(batch.commit(&database), &maintenance_cancelled);
+}
+
+/// 写库连接上当前打开的一批写入。同一连接上的读命令能看到批内还没提交的写入，
+/// 维护工作依赖这一点（例如目录换成同名文件后按 path 重读快照）。
+#[derive(Default)]
+struct WriteBatch {
+    open: Option<OpenWriteBatch>,
+    /// 超时提交没有调用方可以回复，失败留到下一条写命令或 CommitPending 交付。
+    /// 批不跨维护工作，所以拿到它的一定是写入这批数据的那件工作。
+    undelivered_commit_failure: Option<SearchError>,
+}
+
+struct OpenWriteBatch {
+    started_at: Instant,
+    changes_at_start: u64,
+}
+
+impl WriteBatch {
+    fn deadline(&self) -> Option<Instant> {
+        self.open
+            .as_ref()
+            .map(|open| open.started_at + WRITE_BATCH_MAX_AGE)
+    }
+
+    fn write<T>(
+        &mut self,
+        database: &SearchDatabase,
+        maintenance_cancelled: &AtomicBool,
+        write: impl FnOnce(&SearchDatabase) -> SearchResult<T>,
+    ) -> SearchResult<T> {
+        let outcome = self.open_if_closed(database).and_then(|()| write(database));
+        let settled = self.settle_after_write(database);
+        logged_write(
+            outcome.and_then(|value| settled.map(|()| value)),
+            maintenance_cancelled,
+        )
+    }
+
+    fn open_if_closed(&mut self, database: &SearchDatabase) -> SearchResult<()> {
+        if self.open.is_none() {
+            database.begin_write_batch()?;
+            self.open = Some(OpenWriteBatch {
+                started_at: Instant::now(),
+                changes_at_start: database.total_changes(),
+            });
+        }
+        Ok(())
+    }
+
+    /// 批里什么都没改时立刻关掉：没有待提交数据时不占着写锁，
+    /// 重启核对无变化时也就不会产生任何提交。
+    fn settle_after_write(&mut self, database: &SearchDatabase) -> SearchResult<()> {
+        self.forget_if_rolled_back(database);
+        let commit_due = self.open.as_ref().is_some_and(|open| {
+            let changes = database.total_changes() - open.changes_at_start;
+            changes == 0
+                || changes >= WRITE_BATCH_MAX_CHANGES
+                || open.started_at.elapsed() >= WRITE_BATCH_MAX_AGE
+        });
+        if commit_due {
+            self.commit(database)
+        } else {
+            self.take_undelivered_failure()
+        }
+    }
+
+    fn commit_if_expired(&mut self, database: &SearchDatabase) {
+        self.forget_if_rolled_back(database);
+        let expired = self
+            .open
+            .as_ref()
+            .is_some_and(|open| open.started_at.elapsed() >= WRITE_BATCH_MAX_AGE);
+        if expired {
+            if let Err(failure) = self.commit(database) {
+                self.undelivered_commit_failure = Some(failure);
+            }
+        }
+    }
+
+    fn commit(&mut self, database: &SearchDatabase) -> SearchResult<()> {
+        self.forget_if_rolled_back(database);
+        let committed = match self.open.take() {
+            Some(_) => database.commit_write_batch(),
+            None => Ok(()),
+        };
+        self.take_undelivered_failure().and(committed)
+    }
+
+    fn take_undelivered_failure(&mut self) -> SearchResult<()> {
+        match self.undelivered_commit_failure.take() {
+            Some(failure) => Err(failure),
+            None => Ok(()),
+        }
+    }
+
+    /// 取消维护会中断正在执行的写语句，SQLite 随之回滚整个批。这批写入属于被取消的
+    /// 工作，不记失败；下次核对会把它们当作新变化重新写入。
+    fn forget_if_rolled_back(&mut self, database: &SearchDatabase) {
+        if !database.write_batch_is_open() {
+            self.open = None;
         }
     }
 }

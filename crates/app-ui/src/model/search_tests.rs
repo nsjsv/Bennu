@@ -287,7 +287,7 @@ fn clearing_indexed_query_cancels_pending_page_and_restores_idle_state() {
         SearchResultBatch {
             query_id: 1,
             hits: vec![hit(1)],
-            next_cursor: Some(SearchCursor { offset: 1 }),
+            next_cursor: Some(SearchCursor::Offset { offset: 1 }),
             finished: false,
         },
     );
@@ -496,7 +496,7 @@ fn indexed_completion_distinguishes_exact_window_from_real_overflow() {
         SearchResultBatch {
             query_id: 2,
             hits: (0..SEARCH_RESULT_WINDOW).map(hit).collect(),
-            next_cursor: Some(file_search::SearchCursor {
+            next_cursor: Some(file_search::SearchCursor::Offset {
                 offset: SEARCH_RESULT_WINDOW,
             }),
             finished: false,
@@ -517,7 +517,7 @@ fn indexed_pages_append_once_and_advance_the_cursor() {
         SearchResultBatch {
             query_id: 1,
             hits: (0..SEARCH_RESULT_WINDOW).map(hit).collect(),
-            next_cursor: Some(SearchCursor {
+            next_cursor: Some(SearchCursor::Offset {
                 offset: SEARCH_RESULT_WINDOW,
             }),
             finished: false,
@@ -656,7 +656,7 @@ fn indexed_pagination_stops_at_total_limit_and_first_page_resets_truncation() {
         SearchResultBatch {
             query_id: 1,
             hits: (0..SEARCH_RESULT_WINDOW).map(hit).collect(),
-            next_cursor: Some(file_search::SearchCursor {
+            next_cursor: Some(file_search::SearchCursor::Offset {
                 offset: SEARCH_RESULT_WINDOW,
             }),
             finished: false,
@@ -675,7 +675,7 @@ fn indexed_pagination_stops_at_total_limit_and_first_page_resets_truncation() {
             SearchResultBatch {
                 query_id: 1,
                 hits: (0..SEARCH_RESULT_WINDOW).map(hit).collect(),
-                next_cursor: Some(file_search::SearchCursor {
+                next_cursor: Some(file_search::SearchCursor::Offset {
                     offset: (page + 1) * SEARCH_RESULT_WINDOW,
                 }),
                 finished: false,

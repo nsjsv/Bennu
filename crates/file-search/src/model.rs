@@ -257,9 +257,13 @@ pub struct TimeRange {
     pub end_ms: i64,
 }
 
+/// 翻页游标由服务生成，客户端原样回传。两种翻页是不同的概念：
+/// 按相关度排序的查询在第一页把全部命中的顺序定格在服务里，后续页按位置取，
+/// 免得每页都给全部命中重新打分；其他查询每页现场查询、按偏移跳过前面的行。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SearchCursor {
-    pub offset: usize,
+pub enum SearchCursor {
+    Offset { offset: usize },
+    RankedSnapshot { snapshot_id: u64, position: usize },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -441,10 +445,13 @@ pub enum SearchProviderFailure {
     InvalidQuery { message: String },
     #[error("search provider failed: {message}")]
     Fatal { message: String },
+    /// 定格的排序结果已被释放（或服务重启过），这次搜索要从头重新查。
+    #[error("ranked search results expired")]
+    RankedSnapshotExpired,
 }
 
 /// 协议 payload 含义变化时提升版本，让新客户端能退休仍在运行的旧 daemon。
-pub const PROTOCOL_VERSION: u32 = 12;
+pub const PROTOCOL_VERSION: u32 = 13;
 
 /// app 更新后用构建标识识别遗留 daemon；本任务保留现有包版本策略。
 pub fn daemon_build_id() -> String {

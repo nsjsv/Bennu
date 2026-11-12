@@ -8,6 +8,7 @@ use tracing_subscriber::prelude::*;
 use crate::database::{EntryStageProgress, IndexedEntryStageState, SearchDatabase};
 use crate::extractor::ExtractionStatus;
 use crate::model::{SearchFileKind, SearchQuery};
+use crate::ranked_snapshots::RankedSnapshots;
 
 use super::*;
 
@@ -119,10 +120,15 @@ fn writes_are_visible_to_a_concurrent_reader_without_locking() {
     let reader = SearchDatabase::open_read_only(&db_path).unwrap();
 
     writer.upsert(sample_file(&file_path, 10, 20)).unwrap();
+    writer.commit_pending().unwrap();
 
-    // The read-only connection sees the committed write while the writer
-    // thread is still alive and holding the write connection.
-    let batch = reader.search(&SearchQuery::global(1, "needle")).unwrap();
+    // 写库线程还活着、仍持有写连接时，只读连接就能看到已提交的写入。
+    let batch = reader
+        .search(
+            &SearchQuery::global(1, "needle"),
+            &RankedSnapshots::default(),
+        )
+        .unwrap();
     assert_eq!(batch.hits.len(), 1);
     assert_eq!(batch.hits[0].display_name, "note.txt");
 }
@@ -219,10 +225,16 @@ fn local_delete_only_removes_its_target() {
     writer.upsert(sample_file(&gone, 2, 2)).unwrap();
 
     writer.delete_scope(gone).unwrap();
+    writer.commit_pending().unwrap();
 
     assert_eq!(writer.count().unwrap(), 1);
     let reader = SearchDatabase::open_read_only(&db_path).unwrap();
-    let batch = reader.search(&SearchQuery::global(1, "needle")).unwrap();
+    let batch = reader
+        .search(
+            &SearchQuery::global(1, "needle"),
+            &RankedSnapshots::default(),
+        )
+        .unwrap();
     assert_eq!(batch.hits.len(), 1);
     assert_eq!(batch.hits[0].path, kept);
 }
@@ -238,7 +250,12 @@ fn shutdown_drains_queued_writes_before_stopping_writer() {
     writer.shutdown().unwrap();
 
     let reader = SearchDatabase::open_read_only(&db_path).unwrap();
-    let batch = reader.search(&SearchQuery::global(1, "needle")).unwrap();
+    let batch = reader
+        .search(
+            &SearchQuery::global(1, "needle"),
+            &RankedSnapshots::default(),
+        )
+        .unwrap();
     assert_eq!(batch.hits.len(), 1);
     assert_eq!(batch.hits[0].display_name, "note.txt");
 }
@@ -353,4 +370,171 @@ fn file_batch_rejects_combined_payload_above_the_fixed_budget() {
         })
     ));
     assert_eq!(writer.count().unwrap(), 0);
+}
+
+fn committed_names(database_path: &Path) -> Vec<String> {
+    let reader = SearchDatabase::open_read_only(database_path).unwrap();
+    let mut names: Vec<String> = reader
+        .search(
+            &SearchQuery::global(1, "needle"),
+            &RankedSnapshots::default(),
+        )
+        .unwrap()
+        .hits
+        .into_iter()
+        .map(|hit| hit.display_name)
+        .collect();
+    names.sort();
+    names
+}
+
+fn add_files_trigger(database_path: &Path, display_name: &str, raise: &str) {
+    rusqlite::Connection::open(database_path)
+        .unwrap()
+        .execute_batch(&format!(
+            "CREATE TRIGGER reject_{raise} BEFORE INSERT ON files
+             WHEN NEW.display_name = '{display_name}'
+             BEGIN SELECT RAISE({raise}, 'rejected by test'); END;"
+        ))
+        .unwrap();
+}
+
+#[test]
+fn an_open_batch_is_read_by_the_writer_but_not_by_other_connections() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("search.sqlite");
+    let writer = IndexWriter::spawn(SearchDatabase::open(&db_path).unwrap());
+
+    writer
+        .upsert(sample_file(&dir.path().join("note.txt"), 1, 1))
+        .unwrap();
+
+    // 维护工作的读命令走写库连接，必须看到自己还没提交的写入。
+    assert_eq!(writer.count().unwrap(), 1);
+    assert!(committed_names(&db_path).is_empty());
+    writer.commit_pending().unwrap();
+    assert_eq!(committed_names(&db_path), ["note.txt"]);
+}
+
+#[test]
+fn a_failed_write_only_undoes_itself_within_its_batch() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("search.sqlite");
+    let database = SearchDatabase::open(&db_path).unwrap();
+    add_files_trigger(&db_path, "rejected.txt", "ABORT");
+    let writer = IndexWriter::spawn(database);
+
+    writer
+        .upsert(sample_file(&dir.path().join("before.txt"), 1, 1))
+        .unwrap();
+    assert!(writer
+        .upsert(sample_file(&dir.path().join("rejected.txt"), 2, 2))
+        .is_err());
+    writer
+        .upsert(sample_file(&dir.path().join("after.txt"), 3, 3))
+        .unwrap();
+    writer.commit_pending().unwrap();
+
+    assert_eq!(committed_names(&db_path), ["after.txt", "before.txt"]);
+}
+
+#[test]
+fn a_batch_rolled_back_by_sqlite_is_forgotten_by_the_writer() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("search.sqlite");
+    let database = SearchDatabase::open(&db_path).unwrap();
+    // 与取消维护时被中断的写语句相同：SQLite 自己回滚了整个批。
+    add_files_trigger(&db_path, "rolled-back.txt", "ROLLBACK");
+    let writer = IndexWriter::spawn(database);
+
+    writer
+        .upsert(sample_file(&dir.path().join("lost.txt"), 1, 1))
+        .unwrap();
+    assert!(writer
+        .upsert(sample_file(&dir.path().join("rolled-back.txt"), 2, 2))
+        .is_err());
+    writer
+        .upsert(sample_file(&dir.path().join("next.txt"), 3, 3))
+        .unwrap();
+    writer.commit_pending().unwrap();
+
+    assert_eq!(committed_names(&db_path), ["next.txt"]);
+}
+
+#[test]
+fn an_open_batch_commits_by_itself_once_it_is_old_enough() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("search.sqlite");
+    let writer = IndexWriter::spawn(SearchDatabase::open(&db_path).unwrap());
+
+    writer
+        .upsert(sample_file(&dir.path().join("note.txt"), 1, 1))
+        .unwrap();
+
+    let deadline = Instant::now() + WRITE_BATCH_MAX_AGE * 5;
+    while committed_names(&db_path).is_empty() {
+        assert!(
+            Instant::now() < deadline,
+            "the batch was never committed by age"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn a_batch_commits_as_soon_as_it_holds_enough_changes() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("search.sqlite");
+    let database = SearchDatabase::open(&db_path).unwrap();
+    let maintenance_cancelled = AtomicBool::new(false);
+    let mut batch = WriteBatch::default();
+    let file = |index: u64| {
+        sample_file(
+            &dir.path().join(format!("file-{index}.txt")),
+            index,
+            index as i64,
+        )
+    };
+
+    batch
+        .write(&database, &maintenance_cancelled, |database| {
+            database.upsert_file(&file(0))
+        })
+        .unwrap();
+    assert!(database.write_batch_is_open());
+
+    let mutations: Vec<_> = (1..=5_000)
+        .map(|index| ScanFileMutation::Observable(file(index)))
+        .collect();
+    let changes_before = database.total_changes();
+    batch
+        .write(&database, &maintenance_cancelled, |database| {
+            database.apply_file_batch(&mutations)
+        })
+        .unwrap();
+
+    assert!(database.total_changes() - changes_before >= WRITE_BATCH_MAX_CHANGES);
+    assert!(!database.write_batch_is_open());
+}
+
+#[test]
+fn a_timed_commit_failure_reaches_the_next_write_exactly_once() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("search.sqlite");
+    let database = SearchDatabase::open(&db_path).unwrap();
+    let maintenance_cancelled = AtomicBool::new(false);
+    let mut batch = WriteBatch {
+        open: None,
+        undelivered_commit_failure: Some(SearchError::WorkerFailed("timed commit".to_owned())),
+    };
+
+    let outcome = batch.write(&database, &maintenance_cancelled, |database| {
+        database.upsert_file(&sample_file(&dir.path().join("note.txt"), 1, 1))
+    });
+
+    assert!(
+        matches!(outcome, Err(SearchError::WorkerFailed(message)) if message == "timed commit")
+    );
+    batch.commit(&database).unwrap();
+    assert_eq!(committed_names(&db_path), ["note.txt"]);
 }

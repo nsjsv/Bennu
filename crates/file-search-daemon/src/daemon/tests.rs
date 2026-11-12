@@ -13,6 +13,7 @@ use crate::crawler::IndexMaintenanceProgress;
 use crate::model::{
     IndexHealth, IndexPhase, IndexStatus, SearchQuery, SearchRootAvailability, SearchRootStatus,
 };
+use crate::ranked_snapshots::RankedSnapshots;
 use crate::SearchIndexConfig;
 
 use super::path_configuration::root_statuses_from_mount_observation;
@@ -678,7 +679,11 @@ fn wait_for_global_hit_count(database_path: &Path, terms: &str, expected: usize)
         let database = SearchDatabase::open_read_only(database_path).unwrap();
         let mut query = SearchQuery::global(1, terms);
         query.limit = 10;
-        let actual = database.search(&query).unwrap().hits.len();
+        let actual = database
+            .search(&query, &RankedSnapshots::default())
+            .unwrap()
+            .hits
+            .len();
         if actual == expected {
             return;
         }

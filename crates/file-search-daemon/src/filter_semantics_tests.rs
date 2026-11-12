@@ -8,6 +8,7 @@ use crate::model::{
     MimePattern, SearchEntryTypeRule, SearchFileKind, SearchFilters, SearchQuery, SizeRange,
     TimeRange,
 };
+use crate::ranked_snapshots::RankedSnapshots;
 use crate::text_matching::normalize_search_text;
 use file_search::filter_semantics::EntryFacts;
 
@@ -204,7 +205,11 @@ fn index_sql_follows_the_same_filter_matrix() {
         let mut query = SearchQuery::global(1, "");
         query.filters = case.filters.clone();
 
-        let matched = !database.search(&query).unwrap().hits.is_empty();
+        let matched = !database
+            .search(&query, &RankedSnapshots::default())
+            .unwrap()
+            .hits
+            .is_empty();
 
         assert_eq!(matched, case.expected, "{}", case.label);
     }

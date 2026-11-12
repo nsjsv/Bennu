@@ -13,7 +13,7 @@ use iced::Task;
 
 use super::global_error::GlobalErrorSource;
 use super::FileBrowser;
-use crate::model::{Message, PreviewContent, PreviewMessage, ScrollbarRegion};
+use crate::model::{Message, PreviewContent, PreviewMessage};
 
 mod animated_image;
 mod document;
@@ -76,12 +76,10 @@ impl FileBrowser {
                 offset_y,
                 viewport_height,
                 content_height,
-            } => Task::batch([
-                self.show_scrollbars_temporarily(ScrollbarRegion::MarkdownPreview),
-                self.preview_engine
-                    .handle_markdown_preview_scrolled(offset_y, viewport_height, content_height)
-                    .map(Message::Preview),
-            ]),
+            } => self
+                .preview_engine
+                .handle_markdown_preview_scrolled(offset_y, viewport_height, content_height)
+                .map(Message::Preview),
             PreviewMessage::MarkdownPreviewModeSelected(mode) => {
                 if let Some(document) = self.preview_engine.text_preview_document.as_mut() {
                     document.select_markdown_preview_mode(mode);
@@ -100,18 +98,6 @@ impl FileBrowser {
             PreviewMessage::RightPreviewPanelInfoLoaded { path, snapshot } => {
                 self.accept_right_preview_panel_info(&path, snapshot);
                 Task::none()
-            }
-            PreviewMessage::SqlitePreviewTablesScrolled => {
-                self.show_scrollbars_temporarily(ScrollbarRegion::PreviewSqliteTables)
-            }
-            PreviewMessage::SqlitePreviewDataScrolled => {
-                self.show_scrollbars_temporarily(ScrollbarRegion::PreviewSqliteData)
-            }
-            PreviewMessage::PreviewDirectoryScrolled => {
-                self.show_scrollbars_temporarily(ScrollbarRegion::PreviewDirectory)
-            }
-            PreviewMessage::PreviewArchiveScrolled => {
-                self.show_scrollbars_temporarily(ScrollbarRegion::PreviewArchive)
             }
             // 焦点簿记归宿主；窗口在消息回到宿主前已被关掉时，不能让它
             // 指向已死窗口。

@@ -92,8 +92,4 @@ pub enum PreviewMessage {
     /// （focused_window）不归引擎所有，由宿主认领。
     PreviewWindowPresented(window::Id),
     PreviewWindowInitialControlsElapsed(u64),
-    SqlitePreviewTablesScrolled,
-    SqlitePreviewDataScrolled,
-    PreviewDirectoryScrolled,
-    PreviewArchiveScrolled,
 }

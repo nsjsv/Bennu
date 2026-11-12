@@ -56,9 +56,6 @@ pub(crate) fn window_min_size() -> Size {
     Size::new(640.0, 420.0)
 }
 
-/// 列表滚动条静态宽度：与主软件列表一致（mac 式细滚动条）。
-const LIST_SCROLLBAR_WIDTH: f32 = 8.0;
-
 /// 子级行相对父级的缩进。
 const EXPANSION_INDENT: f32 = 16.0;
 
@@ -194,7 +191,6 @@ fn list_body(
     emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'static,
 ) -> Element<'static, SessionMessage> {
     let region = SessionScrollRegion::List;
-    let scrollbar_visibility = session.scrollbar_visibility_for(&region);
     let mut list = column![].spacing(LIST_ROW_SPACING);
     for (index, row) in session.rows().iter().enumerate() {
         list = list.push(entry_row(
@@ -215,26 +211,10 @@ fn list_body(
     .id(scroll_id(session.request_path(), region))
     .width(Length::Fill)
     .height(Length::Fill)
-    .direction(enhanced_vertical_scrollbar_direction(
-        scrollbar_visibility,
-        LIST_SCROLLBAR_WIDTH,
-    ))
-    .style(enhanced_scrollbar_style(scrollbar_visibility))
-    .on_scroll(scrollbar_on_scroll(region, |_| {
-        SessionMessage::ScrollbarEngaged {
-            region: SessionScrollRegion::List,
-        }
-    }));
-    // mac 式滚动条：透明原生拇指 + canvas 浮层拇指（此前
-    // enhanced_scrollbar_style 把原生拇指透明化而浮层缺失，
-    // 滚动条整体隐形）。
-    enhanced_scrollbar(
-        list_scroller,
-        scrollbar_visibility,
-        session.scrollbar_viewport_for(&region),
-        ScrollbarAxis::Vertical,
-        LIST_SCROLLBAR_WIDTH,
-    )
+    .direction(enhanced_vertical_scrollbar_direction())
+    .style(enhanced_scrollbar_style)
+    .on_scroll(scrollbar_on_scroll(region));
+    enhanced_scrollbar(list_scroller, ScrollbarAxis::Vertical)
 }
 
 fn centered_hint(label: &str, size: f32, color: Color) -> Element<'static, SessionMessage> {

@@ -1,7 +1,6 @@
 use iced::widget::{button, column, container, row, scrollable, svg, Svg};
 use iced::{Alignment, Element, Length};
 
-use crate::app::scrollbar::{enhanced_scrollbar, scrollbar_on_scroll, ScrollbarAxis};
 use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
 use crate::app::transfer::{TransferTask, TransferTasks};
 use crate::appearance::{
@@ -9,7 +8,7 @@ use crate::appearance::{
     error_notification_style, operation_queue_indicator_button_style, path_suggestion_item_style,
 };
 use crate::formatting::format_middle_ellipsized_text;
-use crate::model::{Message, ScrollbarRegion, ScrollbarVisibility};
+use crate::model::{Message, ScrollbarRegion};
 use crate::operation_queue_display::{
     file_operation_progress_text, FileOperationPathLines, OperationPathLines,
 };
@@ -20,6 +19,7 @@ use bennu_preview::operation_progress::{
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::controls::normal_button;
 use bennu_theme::controls::progress_bar;
+use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use bennu_theme::typography::{BOLD, CAPTION_SIZE, TITLE_SIZE};
 use file_operations::{FileOperationQueue, FileOperationStatus, FileOperationTask};
 
@@ -76,8 +76,6 @@ impl PanelRow<'_> {
 pub(crate) fn operation_queue_panel<'a>(
     queue: &'a FileOperationQueue,
     transfers: &'a TransferTasks,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<crate::model::ScrollbarViewport>,
     animation_frame: u8,
 ) -> Element<'a, Message> {
     let mut header = row![readable_text(tr!("Tasks"))
@@ -110,24 +108,12 @@ pub(crate) fn operation_queue_panel<'a>(
     let scroll_region = ScrollbarRegion::OperationQueue;
     let scroller = scrollable(smooth_scroll_content(tasks, scroll_region.clone()))
         .id(smooth_scroll_id(&scroll_region))
-        .direction(enhanced_vertical_scrollbar_direction(
-            scrollbar_visibility,
-            6.0,
-        ))
-        .style(enhanced_scrollbar_style(scrollbar_visibility))
-        .on_scroll(scrollbar_on_scroll(scroll_region.clone(), |_| {
-            Message::OperationQueueScrolled
-        }));
+        .direction(enhanced_vertical_scrollbar_direction())
+        .style(enhanced_scrollbar_style);
     let scroller = container(scroller)
         .width(Length::Fill)
         .max_height(TASK_LIST_MAX_HEIGHT);
-    let scroller = enhanced_scrollbar(
-        scroller,
-        scrollbar_visibility,
-        scrollbar_viewport,
-        ScrollbarAxis::Vertical,
-        6.0,
-    );
+    let scroller = enhanced_scrollbar(scroller, ScrollbarAxis::Vertical);
     let content = column![header, scroller].spacing(10);
 
     container(content)

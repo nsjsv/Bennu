@@ -9,7 +9,6 @@ use iced::widget::{
 use iced::{Alignment, Element, Length};
 
 use crate::app::panes::{BrowserPaneView, DirectoryContentAvailability};
-use crate::app::scrollbar::{enhanced_scrollbar, scrollbar_on_scroll, ScrollbarAxis};
 use crate::app::smooth_scroll::{smooth_scroll_content_with_shift, smooth_scroll_id};
 use crate::app::FileBrowser;
 use crate::appearance::{
@@ -41,6 +40,7 @@ use bennu_theme::controls::icon_button_style;
 use bennu_theme::controls::inline_text_field;
 use bennu_theme::icons::rotated_chevron_right_view;
 use bennu_theme::measured_text::measured_middle_ellipsized_wrapped_text_with_tooltip;
+use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use bennu_theme::typography::{BOLD, CAPTION_SIZE, HEADING_SIZE};
 
 const GRID_PADDING: f32 = ICON_GRID_CONTENT_PADDING;
@@ -92,35 +92,22 @@ pub(crate) fn icon_grid_view<'a>(
         }
     };
     let scrollbar_region = ScrollbarRegion::PaneIcons(pane_id);
-    let scrollbar_visibility = browser.scrollbar_visibility_for(&scrollbar_region);
     let grid_scroll = scrollable(smooth_scroll_content_with_shift(
         content,
         scrollbar_region.clone(),
         browser.smooth_scroll_shift_pressed(),
     ))
     .id(smooth_scroll_id(&scrollbar_region))
-    .direction(enhanced_vertical_scrollbar_direction(
-        scrollbar_visibility,
-        8.0,
-    ))
+    .direction(enhanced_vertical_scrollbar_direction())
     .width(Length::Fill)
     .height(Length::Fill)
-    .style(enhanced_scrollbar_style(scrollbar_visibility))
-    .on_scroll(scrollbar_on_scroll(
-        scrollbar_region.clone(),
-        move |viewport: scrollable::Viewport| {
-            let offset = viewport.absolute_offset();
-            let bounds = viewport.bounds();
-            Message::IconGridScrolled(pane_id, offset.y, bounds)
-        },
-    ));
-    let grid_scroll = enhanced_scrollbar(
-        grid_scroll,
-        scrollbar_visibility,
-        browser.scrollbar_viewport_for(&scrollbar_region),
-        ScrollbarAxis::Vertical,
-        8.0,
-    );
+    .style(enhanced_scrollbar_style)
+    .on_scroll(move |viewport: scrollable::Viewport| {
+        let offset = viewport.absolute_offset();
+        let bounds = viewport.bounds();
+        Message::IconGridScrolled(pane_id, offset.y, bounds)
+    });
+    let grid_scroll = enhanced_scrollbar(grid_scroll, ScrollbarAxis::Vertical);
 
     let pane_surface: Element<'a, Message> = container(grid_scroll)
         .width(Length::Fill)

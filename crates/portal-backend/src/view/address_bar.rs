@@ -13,11 +13,9 @@ use bennu_theme::address_bar::{
 use bennu_theme::anchored_popup::anchored_popup;
 use bennu_theme::icons::IconSymbol;
 use bennu_theme::measured_text::{format_middle_ellipsized_text, measured_middle_ellipsized_text};
-use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use bennu_theme::segmented_buttons::{
     segmented_button, segmented_button_group, SegmentedButtonTone,
 };
-use bennu_theme::styles::ScrollbarVisibility;
 use bennu_theme::styles::{
     address_bar_style, faded_button_style, faded_text_input_style, icon_svg_style,
     muted_icon_svg_style, path_suggestion_item_style, path_suggestions_style, scale_color_alpha,
@@ -28,15 +26,12 @@ use iced::widget::{
 };
 use iced::{alignment, mouse, Alignment, Element, Length};
 
-use crate::picker_session::scrollbar::{scroll_id, scrollbar_on_scroll, ScrollbarViewport};
+use crate::picker_session::scrollbar::scroll_id;
 use crate::picker_session::{PickerSession, PickerViewMode, SessionMessage, SessionScrollRegion};
 
 use super::readable_label;
 use bennu_theme::controls::text_field;
 use bennu_theme::metrics::{CONTROL_PADDING_Y, FIELD_PADDING_X};
-
-/// 面包屑横向滚动条静态宽度：与主软件地址栏一致。
-const BREADCRUMB_SCROLLBAR_WIDTH: f32 = 8.0;
 
 /// 补全建议行的中间省略上限：与主软件同值。
 const PATH_SUGGESTION_MAX_CHARS: usize = 72;
@@ -226,9 +221,6 @@ fn breadcrumb_layer(
         .into();
     }
     let segments = breadcrumb_segments(session.target_directory(), session.home_dir());
-    let region = SessionScrollRegion::Breadcrumb;
-    let scrollbar_visibility = session.scrollbar_visibility_for(&region);
-    let scrollbar_viewport = session.scrollbar_viewport_for(&region);
     let request_path = session.request_path().to_string();
     let shift_pressed = session.scroll_shift_pressed();
 
@@ -239,8 +231,6 @@ fn breadcrumb_layer(
             viewport_size.width,
             request_path.clone(),
             shift_pressed,
-            scrollbar_visibility,
-            scrollbar_viewport,
             emit.clone(),
         )
     })
@@ -257,13 +247,12 @@ fn breadcrumb_scroller(
     viewport_width: f32,
     request_path: String,
     shift_pressed: bool,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
     emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'static,
 ) -> Element<'static, SessionMessage> {
     let region = SessionScrollRegion::Breadcrumb;
     let breadcrumbs = elastic_breadcrumbs(segments, opacity, viewport_width, emit);
-    let scroller = scrollable(super::smooth_scroll_region(
+    // 面包屑不画滚动条：路径下面多一根线只是噪音，滚轮照样横向滚动。
+    scrollable(super::smooth_scroll_region(
         breadcrumbs,
         region,
         shift_pressed,
@@ -271,26 +260,10 @@ fn breadcrumb_scroller(
     .id(scroll_id(&request_path, region))
     .width(Length::Fill)
     .height(Length::Fixed(ADDRESS_BAR_HEIGHT))
-    .direction(
-        bennu_theme::styles::enhanced_horizontal_scrollbar_direction(
-            scrollbar_visibility,
-            BREADCRUMB_SCROLLBAR_WIDTH,
-        ),
-    )
-    .style(bennu_theme::styles::enhanced_scrollbar_style(
-        scrollbar_visibility,
+    .direction(scrollable::Direction::Horizontal(
+        scrollable::Scrollbar::hidden(),
     ))
-    .on_scroll(scrollbar_on_scroll(region, move |_| {
-        SessionMessage::ScrollbarEngaged { region }
-    }));
-
-    enhanced_scrollbar(
-        scroller,
-        scrollbar_visibility,
-        scrollbar_viewport,
-        ScrollbarAxis::Horizontal,
-        BREADCRUMB_SCROLLBAR_WIDTH,
-    )
+    .into()
 }
 
 /// 弹性面包屑：段按钮与分隔符按「段/分隔符交错」交给共享 widget 布局；

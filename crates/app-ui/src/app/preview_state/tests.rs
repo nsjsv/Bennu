@@ -478,10 +478,6 @@ fn every_message_the_engine_returns_has_a_host_handler() {
 
     for message in [
         PreviewMessage::SqliteTablesResizeStarted,
-        PreviewMessage::SqlitePreviewTablesScrolled,
-        PreviewMessage::SqlitePreviewDataScrolled,
-        PreviewMessage::PreviewDirectoryScrolled,
-        PreviewMessage::PreviewArchiveScrolled,
         PreviewMessage::TextPreviewContentHeightChanged(12.0),
         PreviewMessage::TextPreviewViewportSynced {
             offset_y: 0.0,

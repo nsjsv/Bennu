@@ -2,14 +2,12 @@
 //! 事件滚动接线（smooth-scroll 包装/id/视口回传）经 ScrollRegionWiring
 //! 由宿主注入（宿主滚动管线分工见 scrollbar-guidelines），其余逐字节保真。
 
-use iced::widget::{container, row, scrollable, Column, Space};
+use iced::widget::{container, row, Column, Space};
 use iced::{Alignment, Element, Font, Length};
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
-use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis, ScrollbarViewport};
-use bennu_theme::styles::{
-    enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction, ScrollbarVisibility,
-};
+use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
+use bennu_theme::styles::{enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction};
 
 use crate::panel_text::readable_text;
 use crate::scroll_wiring::ScrollRegionWiring;
@@ -21,14 +19,11 @@ const MARKDOWN_CODE_TEXT_SIZE: u32 = 13;
 const MARKDOWN_BLOCK_SPACING: f32 = 10.0;
 const MARKDOWN_LIST_INDENT: f32 = 20.0;
 const MARKDOWN_MARKER_WIDTH: f32 = 22.0;
-const MARKDOWN_SCROLLBAR_WIDTH: f32 = 6.0;
 
 pub fn markdown_preview_body<Message>(
     markdown: &str,
     line_limit_notice: Option<TextPreviewLineLimitNotice>,
     scroll_height: f32,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
     scroll: ScrollRegionWiring<'static, Message>,
 ) -> Element<'static, Message>
 where
@@ -49,30 +44,14 @@ where
     if let Some(notice) = line_limit_notice {
         content = content.push(readable_text(notice.label()));
     }
-
-    let ScrollRegionWiring {
-        smooth_scroll_wrap,
-        scrollable_id,
-        on_scroll,
-    } = scroll;
-    let scroller = scrollable(smooth_scroll_wrap(content.into()))
-        .id(scrollable_id)
-        .direction(enhanced_vertical_scrollbar_direction(
-            scrollbar_visibility,
-            MARKDOWN_SCROLLBAR_WIDTH,
-        ))
-        .style(enhanced_scrollbar_style(scrollbar_visibility))
+    let scroller = scroll
+        .scrollable(content.into())
+        .direction(enhanced_vertical_scrollbar_direction())
+        .style(enhanced_scrollbar_style)
         .height(Length::Fixed(scroll_height))
-        .width(Length::Fill)
-        .on_scroll(on_scroll);
+        .width(Length::Fill);
 
-    enhanced_scrollbar(
-        scroller,
-        scrollbar_visibility,
-        scrollbar_viewport,
-        ScrollbarAxis::Vertical,
-        MARKDOWN_SCROLLBAR_WIDTH,
-    )
+    enhanced_scrollbar(scroller, ScrollbarAxis::Vertical)
 }
 
 fn markdown_block_view<Message: 'static>(block: MarkdownBlock) -> Element<'static, Message> {

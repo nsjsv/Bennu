@@ -344,9 +344,6 @@ impl FileBrowser {
                             y: Some(viewport.offset_y),
                         },
                     ));
-                    // 重钉让内容高度骤变,滚动条缓存的溢出数据随之过期;
-                    // 借布局探针把当帧布局写回,thumb 不再照旧数据显示。
-                    commands.push(self.verify_scrollbar_layout(region));
                 }
                 Reclamp::Icons {
                     pane_id,
@@ -367,8 +364,6 @@ impl FileBrowser {
                             y: Some(viewport.offset_y),
                         },
                     ));
-                    commands
-                        .push(self.verify_scrollbar_layout(ScrollbarRegion::PaneIcons(pane_id)));
                 }
             }
         }

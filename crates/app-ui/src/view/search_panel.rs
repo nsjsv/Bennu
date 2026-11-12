@@ -7,7 +7,6 @@ use iced::widget::{
 use iced::{Alignment, Element, Length};
 
 use super::{themed_icon, IconTone};
-use crate::app::scrollbar::{enhanced_scrollbar, scrollbar_on_scroll, ScrollbarAxis};
 use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
 use crate::app::FileBrowser;
 use crate::appearance::{
@@ -30,6 +29,7 @@ use bennu_theme::controls::icon_button_style;
 use bennu_theme::controls::text_field;
 use bennu_theme::controls::{segmented_choice_row, toggle_button_style, SegmentedChoice};
 use bennu_theme::icons::IconSymbol;
+use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use bennu_theme::typography::CAPTION_SIZE;
 
 const SEARCH_INPUT_WIDTH: f32 = 140.0;
@@ -166,22 +166,12 @@ fn search_history_panel(browser: &FileBrowser) -> Element<'_, Message> {
     );
 
     let region = ScrollbarRegion::SearchHistory;
-    let visibility = browser.scrollbar_visibility_for(&region);
     let history = scrollable(smooth_scroll_content(history, region.clone()))
         .id(smooth_scroll_id(&region))
-        .direction(enhanced_vertical_scrollbar_direction(visibility, 6.0))
-        .style(enhanced_scrollbar_style(visibility))
-        .on_scroll(scrollbar_on_scroll(region.clone(), |_| {
-            Message::SearchHistoryScrolled
-        }))
+        .direction(enhanced_vertical_scrollbar_direction())
+        .style(enhanced_scrollbar_style)
         .height(Length::Shrink);
-    let history = enhanced_scrollbar(
-        history,
-        visibility,
-        browser.scrollbar_viewport_for(&region),
-        ScrollbarAxis::Vertical,
-        6.0,
-    );
+    let history = enhanced_scrollbar(history, ScrollbarAxis::Vertical);
 
     mouse_area(
         container(history)
@@ -281,27 +271,20 @@ pub(super) fn search_results_view(browser: &FileBrowser) -> Element<'_, Message>
     }
 
     let region = ScrollbarRegion::SearchResults;
-    let visibility = browser.scrollbar_visibility_for(&region);
     let results = scrollable(smooth_scroll_content(rows, region.clone()))
         .id(smooth_scroll_id(&region))
-        .direction(enhanced_vertical_scrollbar_direction(visibility, 8.0))
-        .style(enhanced_scrollbar_style(visibility))
+        .direction(enhanced_vertical_scrollbar_direction())
+        .style(enhanced_scrollbar_style)
         .width(Length::Fill)
         .height(Length::Fill)
-        .on_scroll(scrollbar_on_scroll(region.clone(), |viewport| {
+        .on_scroll(|viewport| {
             let offset = viewport.absolute_offset();
             Message::SearchResultsScrolled {
                 offset_y: offset.y,
                 viewport_height: viewport.bounds().height,
             }
-        }));
-    let results = enhanced_scrollbar(
-        results,
-        visibility,
-        browser.scrollbar_viewport_for(&region),
-        ScrollbarAxis::Vertical,
-        8.0,
-    );
+        });
+    let results = enhanced_scrollbar(results, ScrollbarAxis::Vertical);
 
     let mut content = Column::new().push(search_workspace_toolbar(browser));
     if workspace.content_search_is_degraded() {

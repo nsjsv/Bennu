@@ -110,19 +110,10 @@ pub(crate) enum SessionMessage {
         region: SessionScrollRegion,
         viewport: ScrollbarViewport,
     },
-    /// 滚动条视口回传（on_scroll 持续刷缓存），内层事件继续按滚动消息路由。
+    /// 视口回传（on_scroll 持续刷业务视口缓存）。
     ScrollbarViewportChanged {
         region: SessionScrollRegion,
         viewport: ScrollbarViewport,
-        event: Box<SessionMessage>,
-    },
-    /// 滚动条被直接交互（拖动/轨道点击）触发的视口回传内层事件。
-    ScrollbarEngaged {
-        region: SessionScrollRegion,
-    },
-    /// 650ms 无输入的 auto-hide 回信；代数不匹配（期间又有滚动）则忽略。
-    ScrollbarAutoHideElapsed {
-        generation: u64,
     },
     /// 缩略图加载回信（main 层 drain 出队后 Task::perform 的结果）；
     /// key 已不在 in_flight 的迟到回信（换目录后）由会话直接丢弃。

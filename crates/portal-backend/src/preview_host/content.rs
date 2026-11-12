@@ -361,44 +361,17 @@ impl PreviewHost {
                 offset_y,
                 viewport_height,
                 content_height,
-            } => {
-                // 主软件：滚动条淡入与文档预取分块同批（update.rs 的
-                // MarkdownPreviewScrolled 分支）。
-                let reveal = self
-                    .scroll
-                    .layout_probe_task(PreviewScrollRegion::Markdown)
-                    .discard();
-                let engine_task = self.engine.handle_markdown_preview_scrolled(
-                    offset_y,
-                    viewport_height,
-                    content_height,
-                );
-                Task::batch([engine_task, reveal])
-            }
+            } => self.engine.handle_markdown_preview_scrolled(
+                offset_y,
+                viewport_height,
+                content_height,
+            ),
             PreviewMessage::MarkdownPreviewModeSelected(mode) => {
                 if let Some(document) = self.engine.text_preview_document.as_mut() {
                     document.select_markdown_preview_mode(mode);
                 }
                 Task::none()
             }
-            // 滚动条显隐的裸标记：显示入口唯一（先探布局再淡入，探针回信
-            // 走全局消息路由）。
-            PreviewMessage::PreviewDirectoryScrolled => self
-                .scroll
-                .layout_probe_task(PreviewScrollRegion::Directory)
-                .discard(),
-            PreviewMessage::PreviewArchiveScrolled => self
-                .scroll
-                .layout_probe_task(PreviewScrollRegion::Archive)
-                .discard(),
-            PreviewMessage::SqlitePreviewTablesScrolled => self
-                .scroll
-                .layout_probe_task(PreviewScrollRegion::SqliteTables)
-                .discard(),
-            PreviewMessage::SqlitePreviewDataScrolled => self
-                .scroll
-                .layout_probe_task(PreviewScrollRegion::SqliteData)
-                .discard(),
             // 窗口在消息回到宿主前已被关掉时，焦点簿记不能指向已死窗口。
             PreviewMessage::PreviewWindowPresented(window) => {
                 if self.engine.preview_window == Some(window) {
@@ -442,14 +415,7 @@ impl PreviewHost {
                 viewport_height,
                 content_height,
             ) {
-                // 引擎接受时同批淡入滚动条（主软件 handle_document_
-                // preview_scrolled 的 batch）。
-                Some(command) => Task::batch([
-                    self.scroll
-                        .layout_probe_task(PreviewScrollRegion::Document)
-                        .discard(),
-                    command,
-                ]),
+                Some(command) => command,
                 None => Task::none(),
             },
         }

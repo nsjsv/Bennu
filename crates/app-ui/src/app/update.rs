@@ -1,7 +1,7 @@
 use super::entry_hover_recalc::ScrolledView;
 use super::global_error::GlobalErrorSource;
 use super::FileBrowser;
-use crate::model::{Message, NavigationMode, ScrollbarRegion as Region};
+use crate::model::{Message, NavigationMode};
 use iced::Task;
 impl FileBrowser {
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
@@ -602,10 +602,7 @@ impl FileBrowser {
             Message::AddressSuggestionsLoaded(request, suggestions) => {
                 self.accept_address_suggestions(request, suggestions)
             }
-            Message::AddressBarScrolled(pane_id) => Task::batch([
-                self.show_scrollbars_temporarily(Region::AddressBar(pane_id)),
-                self.request_breadcrumb_drop_target_bounds_measurement(),
-            ]),
+            Message::AddressBarScrolled => self.request_breadcrumb_drop_target_bounds_measurement(),
             Message::SearchInputChanged(value) => self.update_search_input(value),
             Message::SearchInputStabilized(request) => {
                 self.accept_search_input_stabilization(request)
@@ -686,10 +683,7 @@ impl FileBrowser {
             Message::SearchResultsScrolled {
                 offset_y,
                 viewport_height,
-            } => Task::batch([
-                self.show_scrollbars_temporarily(Region::SearchResults),
-                self.update_search_results_viewport(offset_y, viewport_height),
-            ]),
+            } => self.update_search_results_viewport(offset_y, viewport_height),
             Message::SearchServiceEnsured(request, outcome) => {
                 self.accept_search_service_status(request, outcome)
             }
@@ -905,46 +899,11 @@ impl FileBrowser {
             Message::SmoothScrollWheel(region, delta) => {
                 self.handle_smooth_scroll_wheel(region, delta)
             }
-            Message::ScrollbarViewportChanged {
-                region,
-                viewport,
-                event,
-            } => {
-                self.remember_scrollbar_viewport(region, viewport);
-                self.update(*event)
-            }
-            Message::ScrollbarLayoutVerified { region, viewport } => {
-                self.handle_scrollbar_layout_verified(region, viewport)
-            }
-            Message::ScrollbarAutoHideElapsed(generation) => {
-                self.start_global_scrollbar_hide(generation);
-                Task::none()
-            }
             Message::WindowChromeAnimationTick => self.advance_window_animation_frame(),
-            Message::SidebarScrolled => self.show_scrollbars_temporarily(Region::Sidebar),
-            Message::SettingsScrolled => self.show_scrollbars_temporarily(Region::Settings),
-            Message::PropertiesScrolled => self.show_scrollbars_temporarily(Region::Properties),
-            Message::OpenWithApplicationsScrolled => {
-                self.show_scrollbars_temporarily(Region::OpenWithApplications)
+            Message::ColumnBrowserScrolled(pane_id, offset_x, width) => {
+                self.handle_column_browser_scrolled(pane_id, offset_x, width)
             }
-            Message::OperationQueueScrolled => {
-                self.show_scrollbars_temporarily(Region::OperationQueue)
-            }
-            Message::BatchRenamePreviewScrolled => {
-                self.show_scrollbars_temporarily(Region::BatchRenamePreview)
-            }
-            Message::SearchHistoryScrolled => {
-                self.show_scrollbars_temporarily(Region::SearchHistory)
-            }
-            Message::ColumnBrowserScrolled(pane_id, offset_x, width) => Task::batch([
-                self.show_scrollbars_temporarily(Region::ColumnBrowser(pane_id)),
-                self.handle_column_browser_scrolled(pane_id, offset_x, width),
-            ]),
             Message::ColumnScrolled(pane_id, directory, offset_y, height) => Task::batch([
-                self.show_scrollbars_temporarily(Region::Column {
-                    pane_id,
-                    directory: directory.clone(),
-                }),
                 self.handle_column_scrolled(pane_id, directory, offset_y, height),
                 self.request_browser_session_save(),
             ]),
@@ -958,7 +917,6 @@ impl FileBrowser {
                 );
                 Task::batch([
                     scrolled,
-                    self.show_scrollbars_temporarily(Region::PaneList(pane_id)),
                     self.schedule_visible_directory_metadata(
                         pane_id,
                         Some(crate::thumbnail_cache::ColumnViewport {
@@ -982,10 +940,7 @@ impl FileBrowser {
                     offset_y,
                     viewport,
                 );
-                Task::batch([
-                    scrolled,
-                    self.show_scrollbars_temporarily(Region::PaneIcons(pane_id)),
-                ])
+                scrolled
             }
             Message::ColumnResizeStarted(pane_id, column_index) => {
                 self.activate_pane(pane_id);

@@ -24,7 +24,7 @@ use crate::preview::{PreviewContent, PreviewState};
 use crate::preview_message::PreviewMessage;
 use crate::preview_surface::{preview_scroll_height, preview_surface};
 use crate::preview_tree_panel::{archive_preview_panel, directory_preview_panel};
-use crate::scroll_wiring::ScrollRegionState;
+use crate::scroll_wiring::ScrollRegionWiring;
 use crate::sqlite_preview_panel::sqlite_preview_panel;
 use crate::text_preview::{MarkdownPreviewMode, TextPreviewDocument};
 use crate::text_preview_panel::text_preview_panel;
@@ -44,13 +44,13 @@ pub fn view_preview_window<'a, Message>(
     preview_bottom_controls_opacity: f32,
     operation_progress_animation_frame: u8,
     text_preview_content_height: f32,
-    directory_scroll: ScrollRegionState<'static, Message>,
-    archive_scroll: ScrollRegionState<'static, Message>,
-    document_scroll: ScrollRegionState<'static, Message>,
-    text_scroll: ScrollRegionState<'a, Message>,
-    markdown_scroll: ScrollRegionState<'static, Message>,
-    sqlite_tables_scroll: ScrollRegionState<'a, Message>,
-    sqlite_data_scroll: ScrollRegionState<'a, Message>,
+    directory_scroll: ScrollRegionWiring<'static, Message>,
+    archive_scroll: ScrollRegionWiring<'static, Message>,
+    document_scroll: ScrollRegionWiring<'static, Message>,
+    text_scroll: ScrollRegionWiring<'a, Message>,
+    markdown_scroll: ScrollRegionWiring<'static, Message>,
+    sqlite_tables_scroll: ScrollRegionWiring<'a, Message>,
+    sqlite_data_scroll: ScrollRegionWiring<'a, Message>,
     plain_viewer: impl Fn(&'a TextPreviewDocument, f32) -> Element<'a, Message> + 'a,
     markdown_mode_switch: impl Fn(MarkdownPreviewMode) -> Element<'static, Message>,
     sqlite_tabs: Element<'static, Message>,
@@ -101,13 +101,13 @@ fn preview_panel<'a, Message>(
     preview_bottom_controls_opacity: f32,
     operation_progress_animation_frame: u8,
     text_preview_content_height: f32,
-    directory_scroll: ScrollRegionState<'static, Message>,
-    archive_scroll: ScrollRegionState<'static, Message>,
-    document_scroll: ScrollRegionState<'static, Message>,
-    text_scroll: ScrollRegionState<'a, Message>,
-    markdown_scroll: ScrollRegionState<'static, Message>,
-    sqlite_tables_scroll: ScrollRegionState<'a, Message>,
-    sqlite_data_scroll: ScrollRegionState<'a, Message>,
+    directory_scroll: ScrollRegionWiring<'static, Message>,
+    archive_scroll: ScrollRegionWiring<'static, Message>,
+    document_scroll: ScrollRegionWiring<'static, Message>,
+    text_scroll: ScrollRegionWiring<'a, Message>,
+    markdown_scroll: ScrollRegionWiring<'static, Message>,
+    sqlite_tables_scroll: ScrollRegionWiring<'a, Message>,
+    sqlite_data_scroll: ScrollRegionWiring<'a, Message>,
     plain_viewer: impl Fn(&'a TextPreviewDocument, f32) -> Element<'a, Message> + 'a,
     markdown_mode_switch: impl Fn(MarkdownPreviewMode) -> Element<'static, Message>,
     sqlite_tabs: Element<'static, Message>,
@@ -122,14 +122,9 @@ where
         PreviewState::DownloadingRemoteFile(download) => {
             remote_preview_download_panel(download, operation_progress_animation_frame).into()
         }
-        PreviewState::Ready(PreviewContent::Directory { entries, .. }) => directory_preview_panel(
-            entries,
-            scroll_height,
-            directory_scroll.visibility,
-            directory_scroll.viewport,
-            directory_scroll.wiring,
-        )
-        .into(),
+        PreviewState::Ready(PreviewContent::Directory { entries, .. }) => {
+            directory_preview_panel(entries, scroll_height, directory_scroll).into()
+        }
         PreviewState::Ready(PreviewContent::Text {
             path,
             rendered,
@@ -144,43 +139,26 @@ where
                 .filter(|document: &&TextPreviewDocument| document.path() == path.as_path()),
             scroll_height,
             text_preview_content_height,
-            text_scroll.visibility,
-            text_scroll.viewport,
-            markdown_scroll.visibility,
-            markdown_scroll.viewport,
             plain_viewer,
-            text_scroll.wiring,
-            markdown_scroll.wiring,
+            text_scroll,
+            markdown_scroll,
             markdown_mode_switch,
         )
         .into(),
-        PreviewState::Ready(PreviewContent::Archive { entries, .. }) => archive_preview_panel(
-            entries,
-            scroll_height,
-            archive_scroll.visibility,
-            archive_scroll.viewport,
-            archive_scroll.wiring,
-        )
-        .into(),
+        PreviewState::Ready(PreviewContent::Archive { entries, .. }) => {
+            archive_preview_panel(entries, scroll_height, archive_scroll).into()
+        }
         PreviewState::Ready(PreviewContent::Sqlite(database)) => sqlite_preview_panel(
             database,
             sqlite_preview_state,
-            sqlite_tables_scroll.visibility,
-            sqlite_tables_scroll.viewport,
-            sqlite_data_scroll.visibility,
-            sqlite_data_scroll.viewport,
             sqlite_tabs,
-            sqlite_tables_scroll.wiring,
-            sqlite_data_scroll.wiring,
+            sqlite_tables_scroll,
+            sqlite_data_scroll,
             on_sqlite_resize_drag_finished,
         ),
-        PreviewState::Ready(PreviewContent::PagedDocument(document)) => document_preview_panel(
-            document,
-            size,
-            document_scroll.visibility,
-            document_scroll.viewport,
-            document_scroll.wiring,
-        ),
+        PreviewState::Ready(PreviewContent::PagedDocument(document)) => {
+            document_preview_panel(document, size, document_scroll)
+        }
         PreviewState::Ready(PreviewContent::Image(content)) => match content {
             ImagePreviewContent::Thumbnail {
                 handle,

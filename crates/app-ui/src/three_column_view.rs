@@ -5,7 +5,6 @@ use iced::widget::{container, mouse_area, row, scrollable, Column, Row, Space};
 use iced::{Alignment, Element, Length};
 
 use crate::app::panes::{BrowserPaneView, DirectoryContentAvailability};
-use crate::app::scrollbar::{enhanced_scrollbar, scrollbar_on_scroll, ScrollbarAxis};
 use crate::app::smooth_scroll::{smooth_scroll_content_with_shift, smooth_scroll_id};
 use crate::app::FileBrowser;
 use crate::appearance::{
@@ -31,6 +30,7 @@ use bennu_preview::panel_text::readable_text;
 use bennu_theme::controls::inline_text_field;
 use bennu_theme::icons::IconSymbol;
 use bennu_theme::measured_text::measured_middle_ellipsized_text;
+use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 
 pub(crate) const COLUMN_RESIZE_DIVIDER_WIDTH: f32 = 5.0;
 const COLUMN_RESIZE_LINE_WIDTH: f32 = 1.0;
@@ -145,36 +145,23 @@ pub(crate) fn column_browser_view<'a>(
         columns = columns.push(end_scroll_spacer(scroll_spacer_width));
     }
     let scrollbar_region = ScrollbarRegion::ColumnBrowser(pane.id);
-    let scrollbar_visibility = browser.scrollbar_visibility_for(&scrollbar_region);
     let column_content: Element<'_, Message> = scrollable(smooth_scroll_content_with_shift(
         columns,
         scrollbar_region.clone(),
         browser.smooth_scroll_shift_pressed(),
     ))
     .id(column_browser_scroll_id(pane.id))
-    .direction(enhanced_horizontal_scrollbar_direction(
-        scrollbar_visibility,
-        8.0,
-    ))
-    .style(enhanced_scrollbar_style(scrollbar_visibility))
+    .direction(enhanced_horizontal_scrollbar_direction())
+    .style(enhanced_scrollbar_style)
     .width(Length::Fill)
     .height(Length::Fill)
-    .on_scroll(scrollbar_on_scroll(
-        scrollbar_region.clone(),
-        move |viewport: scrollable::Viewport| {
-            let offset = viewport.absolute_offset();
-            let bounds = viewport.bounds();
-            Message::ColumnBrowserScrolled(pane.id, offset.x, bounds.width)
-        },
-    ))
+    .on_scroll(move |viewport: scrollable::Viewport| {
+        let offset = viewport.absolute_offset();
+        let bounds = viewport.bounds();
+        Message::ColumnBrowserScrolled(pane.id, offset.x, bounds.width)
+    })
     .into();
-    let column_content = enhanced_scrollbar(
-        column_content,
-        scrollbar_visibility,
-        browser.scrollbar_viewport_for(&scrollbar_region),
-        ScrollbarAxis::Horizontal,
-        8.0,
-    );
+    let column_content = enhanced_scrollbar(column_content, ScrollbarAxis::Horizontal);
 
     mouse_area(
         container(column_content)
@@ -311,7 +298,6 @@ fn directory_column<'a>(
         pane_id: pane.id,
         directory: directory.to_path_buf(),
     };
-    let scrollbar_visibility = browser.scrollbar_visibility_for(&scrollbar_region);
     let scroll_directory = directory.to_path_buf();
     let column_scroll = scrollable(smooth_scroll_content_with_shift(
         content,
@@ -319,28 +305,16 @@ fn directory_column<'a>(
         browser.smooth_scroll_shift_pressed(),
     ))
     .id(smooth_scroll_id(&scrollbar_region))
-    .direction(enhanced_vertical_scrollbar_direction(
-        scrollbar_visibility,
-        8.0,
-    ))
+    .direction(enhanced_vertical_scrollbar_direction())
     .width(Length::Fill)
     .height(Length::Fill)
-    .style(enhanced_scrollbar_style(scrollbar_visibility))
-    .on_scroll(scrollbar_on_scroll(
-        scrollbar_region.clone(),
-        move |viewport: scrollable::Viewport| {
-            let offset = viewport.absolute_offset();
-            let bounds = viewport.bounds();
-            Message::ColumnScrolled(pane.id, scroll_directory.clone(), offset.y, bounds.height)
-        },
-    ));
-    let column_scroll = enhanced_scrollbar(
-        column_scroll,
-        scrollbar_visibility,
-        browser.scrollbar_viewport_for(&scrollbar_region),
-        ScrollbarAxis::Vertical,
-        8.0,
-    );
+    .style(enhanced_scrollbar_style)
+    .on_scroll(move |viewport: scrollable::Viewport| {
+        let offset = viewport.absolute_offset();
+        let bounds = viewport.bounds();
+        Message::ColumnScrolled(pane.id, scroll_directory.clone(), offset.y, bounds.height)
+    });
+    let column_scroll = enhanced_scrollbar(column_scroll, ScrollbarAxis::Vertical);
 
     let column = container(column_scroll)
         .width(Length::Fixed(browser.column_width(column_index)))

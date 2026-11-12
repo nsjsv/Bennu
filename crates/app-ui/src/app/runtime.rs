@@ -9,7 +9,7 @@ use desktop_linux::{
 };
 use file_core::watch_directory;
 use iced::futures::SinkExt;
-use iced::{Subscription, Task};
+use iced::Subscription;
 
 use super::FileBrowser;
 use crate::command_line::ApplicationLaunchRequest;
@@ -21,7 +21,6 @@ use bennu_theme::{read_matugen_colors_file, AppearanceMode};
 const DIRECTORY_WATCH_DEBOUNCE: Duration = Duration::from_millis(250);
 const DIRECTORY_WATCH_CHANNEL_SIZE: usize = 8;
 const SIDEBAR_DEVICE_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
-const SCROLLBAR_AUTO_HIDE_DURATION: Duration = Duration::from_millis(650);
 
 pub(crate) fn run(
     application_launch_request: ApplicationLaunchRequest,
@@ -401,16 +400,6 @@ impl Drop for FileDndShutdown {
             let _ = sender.send(());
         }
     }
-}
-
-pub(super) fn scrollbar_auto_hide_command(generation: u64) -> Task<Message> {
-    Task::perform(
-        async move {
-            tokio::time::sleep(SCROLLBAR_AUTO_HIDE_DURATION).await;
-            generation
-        },
-        Message::ScrollbarAutoHideElapsed,
-    )
 }
 
 #[cfg(test)]

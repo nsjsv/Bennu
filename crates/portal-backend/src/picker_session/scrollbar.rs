@@ -1,24 +1,20 @@
-//! 会话级滚动状态机：Mos 惯性（复用 `bennu_theme::smooth_scroll`）与
-//! mac 式滚动条显隐（主软件 `app/scrollbar.rs` 状态机的小型移植）。
-//! 显隐状态机本体在 crate 级 `scrollbar_state`（区域泛化，预览窗滚动
-//! 管线共用）；本模块保留会话侧差异——区域枚举、widget id 命名空间与
-//! 消息路由。
+//! 会话级滚动：Mos 惯性（复用 `bennu_theme::smooth_scroll`）与业务用的
+//! 视口缓存（键盘揭示、缩略图可见区间、多栏栏宽）。滚动条本身由
+//! `bennu_theme::scrollbar` 按当帧布局常驻绘制，会话不再持有任何显隐状态。
 //!
 //! 多窗口约束：iced 0.14 的 widget 操作（operate/scroll_by）作用于进程
 //! 内所有窗口的控件树，widget Id 必须带会话命名空间（请求路径），
 //! 才能保证只命中本窗口的滚动容器。
 
-use bennu_theme::scrollbar::{scrollbar_layout_probe, scrollbar_viewport_has_overflow};
+use bennu_theme::scrollbar::scrollbar_layout_probe;
 use bennu_theme::smooth_scroll::{
     wheel_delta_for_axis, MosScrollState, SmoothScrollAxis, WheelScrollMode,
 };
-use bennu_theme::styles::ScrollbarVisibility;
 use iced::advanced::widget as advanced_widget;
 use iced::widget::scrollable;
 use iced::{mouse, Task};
 
 use super::{PickerSession, PickerViewMode, SessionMessage};
-use crate::scrollbar_state::{scrollbar_auto_hide_task, ScrollbarStateMachine};
 
 /// portal 的滚动区域：文件列表（竖向）、地址栏面包屑（横向）、
 /// 侧边栏（竖向），以及多栏视图的横向栏容器与逐栏纵向滚动。
@@ -81,21 +77,14 @@ impl SessionMessage {
             SessionMessage::WheelScrolled { .. }
                 | SessionMessage::ScrollbarLayoutVerified { .. }
                 | SessionMessage::ScrollbarViewportChanged { .. }
-                | SessionMessage::ScrollbarEngaged { .. }
-                | SessionMessage::ScrollbarAutoHideElapsed { .. }
         )
     }
 }
 
-/// mac 式滚动条显隐状态（主软件 ScrollbarState 的两区域移植）：
-/// 状态机本体在 scrollbar_state，这里按会话区域实例化。
-pub(crate) type SessionScrollbarState = ScrollbarStateMachine<SessionScrollRegion>;
-
-/// `Scrollable::on_scroll` 回调包装：快照视口并发 `ScrollbarViewportChanged`，
-/// 内层事件继续按滚动消息路由（与主软件同名适配同构）。
+/// `Scrollable::on_scroll` 回调：快照视口并发 `ScrollbarViewportChanged`。
+/// 只接在业务要读视口的区域（列表、多栏栏容器与各栏）。
 pub(crate) fn scrollbar_on_scroll(
     region: SessionScrollRegion,
-    event: impl Fn(scrollable::Viewport) -> SessionMessage + 'static,
 ) -> impl Fn(scrollable::Viewport) -> SessionMessage {
     move |viewport| {
         let absolute_offset = viewport.absolute_offset();
@@ -111,7 +100,6 @@ pub(crate) fn scrollbar_on_scroll(
                 content_width: content_bounds.width,
                 content_height: content_bounds.height,
             },
-            event: Box::new(event(viewport)),
         }
     }
 }
@@ -126,18 +114,11 @@ impl PickerSession {
         self.shift_pressed = pressed;
     }
 
-    pub(crate) fn scrollbar_visibility_for(
-        &self,
-        region: &SessionScrollRegion,
-    ) -> ScrollbarVisibility {
-        self.scrollbar.visibility_for(region)
-    }
-
     pub(crate) fn scrollbar_viewport_for(
         &self,
         region: &SessionScrollRegion,
     ) -> Option<ScrollbarViewport> {
-        self.scrollbar.viewport_for(region)
+        self.scroll_viewports.get(region).copied()
     }
 
     /// 键盘导航滚动跟随的偏移写入收口：程序化 scroll_to 不回发
@@ -154,15 +135,14 @@ impl PickerSession {
     }
 
     fn record_keyboard_scroll(&mut self, region: SessionScrollRegion, offset_y: f32) {
-        if let Some(mut viewport) = self.scrollbar.viewport_for(&region) {
+        if let Some(viewport) = self.scroll_viewports.get_mut(&region) {
             viewport.offset_y = offset_y;
-            self.scrollbar.remember_viewport(region, viewport);
         }
         self.smooth_scroll.stop();
     }
 
     /// 滚动类消息入口（main 层以 `is_scroll_message` 把关后路由）：
-    /// 处理滚轮、探针回信、视口回传、auto-hide 与滚动条直接交互。
+    /// 处理滚轮、探针回信与视口回传。
     pub(crate) fn handle_scroll_message(
         &mut self,
         message: SessionMessage,
@@ -174,13 +154,8 @@ impl PickerSession {
             SessionMessage::ScrollbarLayoutVerified { region, viewport } => {
                 self.handle_scrollbar_layout_verified(region, viewport)
             }
-            // 视口快照先写缓存（thumb 位置跟随），内层事件继续按滚动消息处理。
-            SessionMessage::ScrollbarViewportChanged {
-                region,
-                viewport,
-                event,
-            } => {
-                self.scrollbar.remember_viewport(region, viewport);
+            SessionMessage::ScrollbarViewportChanged { region, viewport } => {
+                self.scroll_viewports.insert(region, viewport);
                 // 列表/多栏栏视口更新：可见区间变化，重算缩略图请求（main 层
                 // 在本入口返回后统一 drain 发起）。
                 if region == SessionScrollRegion::List
@@ -188,11 +163,6 @@ impl PickerSession {
                 {
                     self.schedule_visible_thumbnails();
                 }
-                self.handle_scroll_message(*event)
-            }
-            SessionMessage::ScrollbarEngaged { region } => self.show_scrollbars_temporarily(region),
-            SessionMessage::ScrollbarAutoHideElapsed { generation } => {
-                self.start_scrollbar_hide(generation);
                 Vec::new()
             }
             // 非滚动消息不会进入本入口（is_scroll_message 把关）；仅为穷尽。
@@ -200,7 +170,7 @@ impl PickerSession {
         }
     }
 
-    /// 滚轮输入：Lines 走 Mos 惯性累积并暂显滚动条；Pixels（触控板）
+    /// 滚轮输入：Lines 走 Mos 惯性累积；Pixels（触控板）
     /// 停止惯性直接位移。portal 无密度档位语义，Ctrl+滚轮按普通滚动处理。
     fn handle_wheel_scrolled(
         &mut self,
@@ -214,43 +184,26 @@ impl PickerSession {
         match wheel.mode {
             WheelScrollMode::MosAnimated => {
                 self.smooth_scroll.push_wheel_delta(region, wheel.delta);
-                self.show_scrollbars_temporarily(region)
+                Vec::new()
             }
             WheelScrollMode::Direct => {
                 self.smooth_scroll.stop();
-                let scroll_task = iced::widget::operation::scroll_by(
+                vec![iced::widget::operation::scroll_by(
                     scroll_id(&self.request_path, region),
                     scrollable::AbsoluteOffset {
                         x: wheel.delta.x,
                         y: wheel.delta.y,
                     },
-                );
-                let mut tasks = self.show_scrollbars_temporarily(region);
-                tasks.push(scroll_task);
-                tasks
+                )]
             }
         }
     }
 
-    /// 显示入口保持唯一：先探实时布局再决定是否淡入。iced 在内容塞得下
-    /// 时永不发布 on_scroll，缓存可能过期，“能不能滚”以探针读到的当帧
-    /// 布局为准；回信核实溢出后才淡入（`handle_scrollbar_layout_verified`）。
-    fn show_scrollbars_temporarily(
-        &mut self,
-        region: SessionScrollRegion,
-    ) -> Vec<Task<SessionMessage>> {
-        vec![self.scrollbar_layout_probe_task(region)]
-    }
-
-    /// 内容骤变后（导航/展开/扫描回填/过滤切换）核实滚动区域溢出：
-    /// 只探测不预设显示意图，无溢出仅自愈缓存。多栏视图下追加栏容
-    /// 器与各栏（逐栏视口缓存驱动键盘揭示与缩略图可见区间）。
+    /// 内容骤变后（导航/展开/扫描回填/过滤切换）把当帧布局写回视口缓存：
+    /// iced 在内容塞得下时不发 on_scroll，缓存只能靠探针自愈。多栏视图下
+    /// 追加栏容器与各栏（逐栏视口缓存驱动键盘揭示与缩略图可见区间）。
     pub(crate) fn scrollbar_layout_probe_tasks(&self) -> Vec<Task<SessionMessage>> {
-        let mut regions = vec![
-            SessionScrollRegion::List,
-            SessionScrollRegion::Breadcrumb,
-            SessionScrollRegion::Sidebar,
-        ];
+        let mut regions = vec![SessionScrollRegion::List];
         if self.view_mode() == PickerViewMode::Columns {
             regions.push(SessionScrollRegion::ColumnsRail);
             regions.extend((0..self.columns_chain().len()).map(SessionScrollRegion::ColumnsLane));
@@ -272,13 +225,13 @@ impl PickerSession {
         ))
     }
 
-    /// 探针回信：把当帧布局写回缓存（自愈过期数据），核实溢出后才淡入。
+    /// 探针回信：把当帧布局写回缓存（自愈过期数据）。
     fn handle_scrollbar_layout_verified(
         &mut self,
         region: SessionScrollRegion,
         viewport: ScrollbarViewport,
     ) -> Vec<Task<SessionMessage>> {
-        self.scrollbar.remember_viewport(region, viewport);
+        self.scroll_viewports.insert(region, viewport);
         let mut tasks = Vec::new();
         if region == SessionScrollRegion::List {
             self.schedule_visible_thumbnails();
@@ -296,21 +249,7 @@ impl PickerSession {
             // 栏视口缓存就位：各栏可见区间重算。
             self.schedule_visible_thumbnails();
         }
-        if scrollbar_viewport_has_overflow(viewport) {
-            tasks.extend(self.start_scrollbar_reveal(region));
-        }
         tasks
-    }
-
-    fn start_scrollbar_reveal(&mut self, region: SessionScrollRegion) -> Vec<Task<SessionMessage>> {
-        let generation = self.scrollbar.start_reveal(region);
-        vec![scrollbar_auto_hide_task(generation, |generation| {
-            SessionMessage::ScrollbarAutoHideElapsed { generation }
-        })]
-    }
-
-    fn start_scrollbar_hide(&mut self, generation: u64) {
-        self.scrollbar.start_hide(generation);
     }
 
     fn advance_smooth_scroll(&mut self) -> Task<SessionMessage> {
@@ -336,23 +275,14 @@ impl PickerSession {
         scroll_task.unwrap_or_else(Task::none)
     }
 
-    fn advance_scrollbar_animation(&mut self) -> Task<SessionMessage> {
-        self.scrollbar.advance_animation();
-        Task::none()
-    }
-
-    /// 帧时钟推进：展开动画 + 惯性滚动位移 + 滚动条透明度；产出的
-    /// Task 由 main 层按窗口路由后批量执行。
+    /// 帧时钟推进：展开动画 + 惯性滚动位移；产出的 Task 由 main 层
+    /// 按窗口路由后批量执行。
     pub(crate) fn advance_frame(&mut self) -> Vec<Task<SessionMessage>> {
         // 地址栏渐变过渡不产出 Task，只需在帧尾清理已播完的退出过渡。
         self.advance_address_bar_transition();
         let expansion_frame = self.advance_animations();
-        let mut tasks = vec![
-            self.advance_smooth_scroll(),
-            self.advance_scrollbar_animation(),
-        ];
-        // 收起播完触发结构性收缩后，行数/内容高度骤变：立刻核实两个
-        // 区域的溢出并自愈视口缓存。
+        let mut tasks = vec![self.advance_smooth_scroll()];
+        // 收起播完触发结构性收缩后，行数/内容高度骤变：立刻自愈视口缓存。
         if expansion_frame.collapse_finished {
             tasks.extend(self.scrollbar_layout_probe_tasks());
         }
@@ -408,30 +338,12 @@ mod tests {
     }
 
     #[test]
-    fn verified_viewport_with_overflow_reveals_scrollbar() {
-        let mut session = test_session();
-
-        session.handle_scroll_message(SessionMessage::ScrollbarLayoutVerified {
-            region: SessionScrollRegion::List,
-            viewport: overflowing_viewport(),
-        });
-
-        assert!(
-            session
-                .scrollbar_visibility_for(&SessionScrollRegion::List)
-                .opacity()
-                > 0.0
-        );
-        assert!(session.is_animating());
-    }
-
-    #[test]
-    fn verified_viewport_without_overflow_heals_cache_and_skips_reveal() {
+    fn verified_viewport_heals_stale_cache() {
         let mut session = test_session();
         // 预置过期缓存：旧布局曾溢出，真实布局已塞得下。
         session
-            .scrollbar
-            .remember_viewport(SessionScrollRegion::List, overflowing_viewport());
+            .scroll_viewports
+            .insert(SessionScrollRegion::List, overflowing_viewport());
 
         session.handle_scroll_message(SessionMessage::ScrollbarLayoutVerified {
             region: SessionScrollRegion::List,
@@ -439,79 +351,8 @@ mod tests {
         });
 
         assert_eq!(
-            session.scrollbar_visibility_for(&SessionScrollRegion::List),
-            ScrollbarVisibility::Hidden
-        );
-        assert_eq!(
             session.scrollbar_viewport_for(&SessionScrollRegion::List),
             Some(fitting_viewport())
-        );
-    }
-
-    #[test]
-    fn stale_auto_hide_generation_does_not_hide() {
-        let mut session = test_session();
-        drop(session.start_scrollbar_reveal(SessionScrollRegion::List));
-        drop(session.start_scrollbar_reveal(SessionScrollRegion::List));
-
-        // 第一次 reveal 的旧代数回信：必须被丢弃。
-        session.start_scrollbar_hide(1);
-
-        assert!(
-            session
-                .scrollbar_visibility_for(&SessionScrollRegion::List)
-                .opacity()
-                > 0.0
-        );
-    }
-
-    #[test]
-    fn hide_animation_runs_to_completion_and_clears_state() {
-        let mut session = test_session();
-        drop(session.start_scrollbar_reveal(SessionScrollRegion::List));
-        let generation = session.scrollbar.auto_hide_generation();
-
-        session.start_scrollbar_hide(generation);
-        assert!(session.is_animating());
-        // 淡出按真实时间推进：等过 300ms 后再推一帧，动画必须收尾。
-        std::thread::sleep(
-            crate::scrollbar_state::SCROLLBAR_HIDE_DURATION + std::time::Duration::from_millis(10),
-        );
-        drop(session.advance_frame());
-
-        assert_eq!(
-            session.scrollbar_visibility_for(&SessionScrollRegion::List),
-            ScrollbarVisibility::Hidden
-        );
-        assert!(!session.is_animating());
-    }
-
-    #[test]
-    fn visibility_moves_with_active_region_switch() {
-        let mut session = test_session();
-        drop(session.start_scrollbar_reveal(SessionScrollRegion::List));
-
-        assert!(
-            session
-                .scrollbar_visibility_for(&SessionScrollRegion::List)
-                .opacity()
-                > 0.0
-        );
-        assert_eq!(
-            session.scrollbar_visibility_for(&SessionScrollRegion::Breadcrumb),
-            ScrollbarVisibility::Hidden
-        );
-
-        drop(session.start_scrollbar_reveal(SessionScrollRegion::Breadcrumb));
-        assert_eq!(
-            session.scrollbar_visibility_for(&SessionScrollRegion::List),
-            ScrollbarVisibility::Hidden
-        );
-        assert!(
-            session
-                .scrollbar_visibility_for(&SessionScrollRegion::Breadcrumb)
-                .opacity()
-                > 0.0
         );
     }
 
@@ -552,36 +393,17 @@ mod tests {
     }
 
     #[test]
-    fn viewport_changed_updates_cache_and_routes_inner_event() {
+    fn viewport_changed_updates_cache() {
         let mut session = test_session();
 
         session.handle_scroll_message(SessionMessage::ScrollbarViewportChanged {
-            region: SessionScrollRegion::Breadcrumb,
+            region: SessionScrollRegion::List,
             viewport: overflowing_viewport(),
-            event: Box::new(SessionMessage::ScrollbarEngaged {
-                region: SessionScrollRegion::Breadcrumb,
-            }),
         });
 
         assert_eq!(
-            session.scrollbar_viewport_for(&SessionScrollRegion::Breadcrumb),
+            session.scrollbar_viewport_for(&SessionScrollRegion::List),
             Some(overflowing_viewport())
-        );
-        // 视口回传只刷缓存；淡入必须等探针回信核实溢出。
-        assert_eq!(
-            session.scrollbar_visibility_for(&SessionScrollRegion::Breadcrumb),
-            ScrollbarVisibility::Hidden
-        );
-
-        session.handle_scroll_message(SessionMessage::ScrollbarLayoutVerified {
-            region: SessionScrollRegion::Breadcrumb,
-            viewport: overflowing_viewport(),
-        });
-        assert!(
-            session
-                .scrollbar_visibility_for(&SessionScrollRegion::Breadcrumb)
-                .opacity()
-                > 0.0
         );
     }
 

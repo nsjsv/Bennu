@@ -92,7 +92,6 @@ impl FileBrowser {
                             y: Some(target),
                         },
                     ),
-                    self.show_scrollbars_temporarily(region),
                     self.handle_list_scrolled(pane_id, target, viewport_height),
                 ])
             }
@@ -125,7 +124,6 @@ impl FileBrowser {
                             y: Some(target),
                         },
                     ),
-                    self.show_scrollbars_temporarily(region),
                     self.handle_icon_grid_scrolled(
                         pane_id,
                         target,

@@ -39,7 +39,7 @@ pub(crate) use columns::{COLUMNS_SCALE, MIN_LANE_WIDTH};
 pub(crate) use expansion::{LIST_ROW_HEIGHT, LIST_ROW_SPACING};
 pub(crate) use scan::{scan_listing, scan_trash_listing, DirectoryListing, DirectoryScanResult};
 pub(crate) use scrollbar::SessionScrollRegion;
-use scrollbar::{SessionScrollbarState, SmoothScrollState};
+use scrollbar::{ScrollbarViewport, SmoothScrollState};
 pub(crate) use sidebar::{load_sidebar_data, PickerSidebarState, SidebarEntryId, TRASH_DIRECTORY};
 
 pub(crate) use address_editing::PathSuggestionDirection;
@@ -93,9 +93,9 @@ pub(crate) struct PickerSession {
     /// 目录访问历史；`history_position` 指向当前目录（侧键后退/前进）。
     history: Vec<PathBuf>,
     history_position: usize,
-    /// 滚轮 Mos 惯性状态机与滚动条显隐状态：逻辑见子模块 scrollbar。
+    /// 滚轮 Mos 惯性状态机与业务视口缓存：逻辑见子模块 scrollbar。
     smooth_scroll: SmoothScrollState,
-    scrollbar: SessionScrollbarState,
+    scroll_viewports: HashMap<SessionScrollRegion, ScrollbarViewport>,
     /// 侧边栏子状态（数据/宽度/拖宽/提示），见 sidebar 子模块。
     sidebar: PickerSidebarState,
     /// 滚动轴向换算用的 shift 修饰键（main 层同步；视图与处理端同源）。
@@ -168,7 +168,7 @@ impl PickerSession {
             history: vec![start_directory.clone()],
             history_position: 0,
             smooth_scroll: SmoothScrollState::default(),
-            scrollbar: SessionScrollbarState::default(),
+            scroll_viewports: HashMap::new(),
             sidebar: PickerSidebarState::default(),
             shift_pressed: false,
             thumbnails: thumbnails::SessionThumbnailState::new(::thumbnails::thumbnail_cache_dir()),
@@ -408,9 +408,7 @@ impl PickerSession {
             // update 前已拦截路由；此臂仅为匹配穷尽兜底。
             SessionMessage::WheelScrolled { .. }
             | SessionMessage::ScrollbarLayoutVerified { .. }
-            | SessionMessage::ScrollbarViewportChanged { .. }
-            | SessionMessage::ScrollbarEngaged { .. }
-            | SessionMessage::ScrollbarAutoHideElapsed { .. } => SessionEffect::None,
+            | SessionMessage::ScrollbarViewportChanged { .. } => SessionEffect::None,
         }
     }
 
@@ -553,8 +551,7 @@ impl PickerSession {
     }
 
     /// 是否存在进行中的展开/收起动画（含等待扫描的展开节点：其进度
-    /// 仍在推进，箭头需要帧时钟驱动）、地址栏渐变过渡、惯性滚动或
-    /// 滚动条淡入淡出。
+    /// 仍在推进，箭头需要帧时钟驱动）、地址栏渐变过渡或惯性滚动。
     pub(crate) fn is_animating(&self) -> bool {
         self.expansions
             .values()
@@ -564,7 +561,6 @@ impl PickerSession {
                 .as_ref()
                 .is_some_and(|transition| !transition.is_complete())
             || self.smooth_scroll.is_active()
-            || self.scrollbar.is_animating()
     }
 
     /// 进入目录：派生状态（选中、锚点、悬停、展开、地址编辑）的统一
@@ -577,8 +573,7 @@ impl PickerSession {
         // 列表内容整体更换：旧视口缓存对新目录是错误几何，不清会让
         // ScanReady 按旧 offset 对新目录错误区间入队；清掉等探针回信
         // （NavigateDirectory 附带布局探针）重填。
-        self.scrollbar
-            .invalidate_viewport(SessionScrollRegion::List);
+        self.scroll_viewports.remove(&SessionScrollRegion::List);
         self.selection.clear();
         self.selection_anchor = None;
         self.hovered_index = None;

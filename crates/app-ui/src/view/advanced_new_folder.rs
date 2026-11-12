@@ -10,7 +10,6 @@ use crate::appearance::{
 use crate::model::{
     invalid_entry_name_label, AdvancedNewFolderAfter, AdvancedNewFolderMessage,
     AdvancedNewFolderMode, AdvancedNewFolderState, Message, PlannedFolder, PlannedFolderStatus,
-    ScrollbarVisibility,
 };
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::anchored_popup::{anchored_popup_expanding, dismiss_on_outside_press};
@@ -99,11 +98,8 @@ pub(super) fn advanced_new_folder_panel(state: &AdvancedNewFolderState) -> Eleme
         }
         scrollable(rows)
             .height(Length::Fixed(PREVIEW_HEIGHT))
-            .direction(enhanced_vertical_scrollbar_direction(
-                ScrollbarVisibility::Visible,
-                6.0,
-            ))
-            .style(enhanced_scrollbar_style(ScrollbarVisibility::Visible))
+            .direction(enhanced_vertical_scrollbar_direction())
+            .style(enhanced_scrollbar_style)
             .into()
     };
 

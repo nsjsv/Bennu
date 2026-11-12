@@ -125,8 +125,7 @@ impl PickerSession {
                     .unwrap_or(DirectoryListing::Pending);
                 self.directory = focused;
                 // 列表视口缓存对新目录是新几何，失效等探针回信。
-                self.scrollbar
-                    .invalidate_viewport(SessionScrollRegion::List);
+                self.scroll_viewports.remove(&SessionScrollRegion::List);
             }
         }
         self.expansions.clear();

@@ -307,11 +307,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
     } else if let Some(batch_rename) = &browser.batch_rename {
         floating_input = BrowserFloatingInput::Modal;
         floating.push(FloatingContent {
-            element: batch_rename_panel(
-                batch_rename,
-                browser.scrollbar_visibility_for(&ScrollbarRegion::BatchRenamePreview),
-                browser.scrollbar_viewport_for(&ScrollbarRegion::BatchRenamePreview),
-            ),
+            element: batch_rename_panel(batch_rename),
             placement: FloatingPlacement::Center,
             captures_pointer: true,
         });
@@ -413,11 +409,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
     } else if let Some(open_with) = &browser.open_with {
         floating_input = BrowserFloatingInput::DismissibleBlocking;
         floating.push(FloatingContent {
-            element: open_with_panel(
-                open_with,
-                browser.scrollbar_visibility_for(&ScrollbarRegion::OpenWithApplications),
-                browser.scrollbar_viewport_for(&ScrollbarRegion::OpenWithApplications),
-            ),
+            element: open_with_panel(open_with),
             placement: FloatingPlacement::Center,
             captures_pointer: true,
         });
@@ -499,8 +491,6 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
             element: operation_queue_panel(
                 &browser.operation_queue,
                 &browser.transfer_tasks,
-                browser.scrollbar_visibility_for(&ScrollbarRegion::OperationQueue),
-                browser.scrollbar_viewport_for(&ScrollbarRegion::OperationQueue),
                 browser.operation_progress_animation_frame,
             ),
             placement: FloatingPlacement::BottomLeft {

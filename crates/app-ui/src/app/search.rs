@@ -710,18 +710,15 @@ impl FileBrowser {
         else {
             return Task::none();
         };
-        Task::batch([
-            iced::widget::operation::scroll_to(
-                crate::app::smooth_scroll::smooth_scroll_id(
-                    &crate::model::ScrollbarRegion::SearchResults,
-                ),
-                iced::widget::scrollable::AbsoluteOffset {
-                    x: 0.0,
-                    y: index as f32 * crate::view::SEARCH_RESULT_ROW_HEIGHT,
-                },
+        iced::widget::operation::scroll_to(
+            crate::app::smooth_scroll::smooth_scroll_id(
+                &crate::model::ScrollbarRegion::SearchResults,
             ),
-            self.show_scrollbars_temporarily(crate::model::ScrollbarRegion::SearchResults),
-        ])
+            iced::widget::scrollable::AbsoluteOffset {
+                x: 0.0,
+                y: index as f32 * crate::view::SEARCH_RESULT_ROW_HEIGHT,
+            },
+        )
     }
 
     pub(crate) fn select_all_search_results(&mut self) -> Task<Message> {

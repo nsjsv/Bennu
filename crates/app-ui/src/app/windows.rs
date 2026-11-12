@@ -290,11 +290,9 @@ impl FileBrowser {
     }
 
     /// 六个分类页与二级页面共用 ScrollbarRegion::Settings 的 scrollable 状态，
-    /// 任何切换都必须归零，否则上一页的滚动偏移、平滑滚动动画和 thumb 几何
-    /// 会泄漏到新页。
+    /// 任何切换都必须归零，否则上一页的滚动偏移和平滑滚动动画会泄漏到新页。
     fn reset_settings_detail_scroll(&mut self) -> Task<Message> {
         self.smooth_scroll.stop();
-        self.forget_scrollbar_viewport(&ScrollbarRegion::Settings);
         iced::widget::operation::scroll_to(
             smooth_scroll_id(&ScrollbarRegion::Settings),
             scrollable::AbsoluteOffset { x: 0.0, y: 0.0 },
@@ -398,11 +396,9 @@ impl FileBrowser {
         }
     }
 
-    /// 宿主在预览窗口关闭时补引擎不持有的簿记：焦点与滚动条视口收尾。
+    /// 宿主在预览窗口关闭时补引擎不持有的簿记：焦点收尾。
     pub(super) fn close_preview_window(&mut self) -> Task<Message> {
         let (closed_window, command) = self.preview_engine.close_preview_window();
-        self.forget_scrollbar_viewport(&ScrollbarRegion::PreviewSqliteTables);
-        self.forget_scrollbar_viewport(&ScrollbarRegion::PreviewSqliteData);
         if let Some(window) = closed_window {
             self.clear_closed_window_focus(window);
         }

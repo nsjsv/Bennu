@@ -17,7 +17,7 @@ use bennu_preview::preview::{PreviewContent, PreviewState};
 use bennu_preview::preview_message::PreviewMessage;
 use bennu_preview::preview_panel;
 use bennu_preview::preview_window_chrome::preview_pin_button;
-use bennu_preview::scroll_wiring::{ScrollRegionState, ScrollRegionWiring};
+use bennu_preview::scroll_wiring::ScrollRegionWiring;
 use bennu_preview::sqlite_preview::{SqlitePreviewMessage, SqlitePreviewTab};
 use bennu_preview::text_preview::{MarkdownPreviewMode, TextPreviewDocument};
 use bennu_preview::text_preview_viewer::text_preview_viewer;
@@ -26,8 +26,7 @@ use bennu_theme::controls::{segmented_choice_row, SegmentedChoice};
 use bennu_theme::smooth_scroll::{SmoothScrollArea, SmoothScrollAxis};
 
 use super::window_frame::window_shell;
-use crate::preview_host::PreviewHost;
-use crate::preview_scroll::{preview_scroll_id, scrollbar_viewport_from, PreviewScrollRegion};
+use crate::preview_scroll::{preview_scroll_id, PreviewScrollRegion};
 use crate::{Message, PickerDaemon};
 
 /// 预览窗视图入口：面板放进共享外壳。
@@ -49,33 +48,13 @@ pub(crate) fn preview_window_view(
         // 不定进度动画帧：portal 不移植远程下载管线，无生产者，恒 0。
         0,
         engine.text_preview_content_height,
-        scroll_region_state(
-            host,
-            PreviewScrollRegion::Directory,
-            directory_scroll_wiring(),
-        ),
-        scroll_region_state(host, PreviewScrollRegion::Archive, archive_scroll_wiring()),
-        scroll_region_state(
-            host,
-            PreviewScrollRegion::Document,
-            document_scroll_wiring(engine.preview.as_ref()),
-        ),
-        scroll_region_state(host, PreviewScrollRegion::Text, text_scroll_wiring()),
-        scroll_region_state(
-            host,
-            PreviewScrollRegion::Markdown,
-            markdown_scroll_wiring(),
-        ),
-        scroll_region_state(
-            host,
-            PreviewScrollRegion::SqliteTables,
-            sqlite_tables_scroll_wiring(),
-        ),
-        scroll_region_state(
-            host,
-            PreviewScrollRegion::SqliteData,
-            sqlite_data_scroll_wiring(),
-        ),
+        directory_scroll_wiring(),
+        archive_scroll_wiring(),
+        document_scroll_wiring(engine.preview.as_ref()),
+        text_scroll_wiring(),
+        markdown_scroll_wiring(),
+        sqlite_tables_scroll_wiring(),
+        sqlite_data_scroll_wiring(),
         // 查看器是渲染器敏感部件，宿主实例化注入；内容事件走
         // PreviewMessage，滚轮走宿主滚动管线（app-ui 适配层同构）。
         |document: &TextPreviewDocument, scroll_height| {
@@ -129,18 +108,6 @@ pub(crate) fn preview_window_view(
     )
 }
 
-fn scroll_region_state<'a>(
-    host: &PreviewHost,
-    region: PreviewScrollRegion,
-    wiring: ScrollRegionWiring<'a, Message>,
-) -> ScrollRegionState<'a, Message> {
-    ScrollRegionState {
-        visibility: host.scroll.visibility_for(region),
-        viewport: host.scroll.viewport_for(region),
-        wiring,
-    }
-}
-
 /// 预览七区全为竖向滚动；shift 换算与主软件 preview 区域同语义
 /// （app-ui 的 smooth_scroll_content 传 false，轴向换算在处理端）。
 type SmoothScrollWrapFn<'a> =
@@ -161,11 +128,7 @@ fn directory_scroll_wiring() -> ScrollRegionWiring<'static, Message> {
     ScrollRegionWiring {
         smooth_scroll_wrap: smooth_scroll_wrap(PreviewScrollRegion::Directory),
         scrollable_id: preview_scroll_id(PreviewScrollRegion::Directory),
-        on_scroll: Box::new(|viewport| Message::PreviewScrollbarViewportChanged {
-            region: PreviewScrollRegion::Directory,
-            viewport: scrollbar_viewport_from(&viewport),
-            event: Box::new(PreviewMessage::PreviewDirectoryScrolled),
-        }),
+        on_scroll: None,
     }
 }
 
@@ -173,11 +136,7 @@ fn archive_scroll_wiring() -> ScrollRegionWiring<'static, Message> {
     ScrollRegionWiring {
         smooth_scroll_wrap: smooth_scroll_wrap(PreviewScrollRegion::Archive),
         scrollable_id: preview_scroll_id(PreviewScrollRegion::Archive),
-        on_scroll: Box::new(|viewport| Message::PreviewScrollbarViewportChanged {
-            region: PreviewScrollRegion::Archive,
-            viewport: scrollbar_viewport_from(&viewport),
-            event: Box::new(PreviewMessage::PreviewArchiveScrolled),
-        }),
+        on_scroll: None,
     }
 }
 
@@ -204,18 +163,16 @@ fn document_scroll_wiring(preview: Option<&PreviewState>) -> ScrollRegionWiring<
     ScrollRegionWiring {
         smooth_scroll_wrap: smooth_scroll_wrap(PreviewScrollRegion::Document),
         scrollable_id: preview_scroll_id(PreviewScrollRegion::Document),
-        on_scroll: Box::new(move |viewport| Message::PreviewScrollbarViewportChanged {
-            region: PreviewScrollRegion::Document,
-            viewport: scrollbar_viewport_from(&viewport),
-            event: Box::new(PreviewMessage::DocumentPreview(
+        on_scroll: Some(Box::new(move |viewport| {
+            Message::from(PreviewMessage::DocumentPreview(
                 DocumentPreviewMessage::Scrolled {
                     key: key.clone(),
                     offset_y: viewport.absolute_offset().y,
                     viewport_height: viewport.bounds().height,
                     content_height: viewport.content_bounds().height,
                 },
-            )),
-        }),
+            ))
+        })),
     }
 }
 
@@ -225,14 +182,12 @@ fn text_scroll_wiring<'a>() -> ScrollRegionWiring<'a, Message> {
     ScrollRegionWiring {
         smooth_scroll_wrap: smooth_scroll_wrap(PreviewScrollRegion::Text),
         scrollable_id: preview_scroll_id(PreviewScrollRegion::Text),
-        on_scroll: Box::new(|viewport| Message::PreviewScrollbarViewportChanged {
-            region: PreviewScrollRegion::Text,
-            viewport: scrollbar_viewport_from(&viewport),
-            event: Box::new(PreviewMessage::TextPreviewViewportSynced {
+        on_scroll: Some(Box::new(|viewport| {
+            Message::from(PreviewMessage::TextPreviewViewportSynced {
                 offset_y: viewport.absolute_offset().y,
                 viewport_height: viewport.bounds().height,
-            }),
-        }),
+            })
+        })),
     }
 }
 
@@ -241,15 +196,13 @@ fn markdown_scroll_wiring() -> ScrollRegionWiring<'static, Message> {
     ScrollRegionWiring {
         smooth_scroll_wrap: smooth_scroll_wrap(PreviewScrollRegion::Markdown),
         scrollable_id: preview_scroll_id(PreviewScrollRegion::Markdown),
-        on_scroll: Box::new(|viewport| Message::PreviewScrollbarViewportChanged {
-            region: PreviewScrollRegion::Markdown,
-            viewport: scrollbar_viewport_from(&viewport),
-            event: Box::new(PreviewMessage::MarkdownPreviewScrolled {
+        on_scroll: Some(Box::new(|viewport| {
+            Message::from(PreviewMessage::MarkdownPreviewScrolled {
                 offset_y: viewport.absolute_offset().y,
                 viewport_height: viewport.bounds().height,
                 content_height: viewport.content_bounds().height,
-            }),
-        }),
+            })
+        })),
     }
 }
 
@@ -257,11 +210,7 @@ fn sqlite_tables_scroll_wiring<'a>() -> ScrollRegionWiring<'a, Message> {
     ScrollRegionWiring {
         smooth_scroll_wrap: smooth_scroll_wrap(PreviewScrollRegion::SqliteTables),
         scrollable_id: preview_scroll_id(PreviewScrollRegion::SqliteTables),
-        on_scroll: Box::new(|viewport| Message::PreviewScrollbarViewportChanged {
-            region: PreviewScrollRegion::SqliteTables,
-            viewport: scrollbar_viewport_from(&viewport),
-            event: Box::new(PreviewMessage::SqlitePreviewTablesScrolled),
-        }),
+        on_scroll: None,
     }
 }
 
@@ -269,11 +218,7 @@ fn sqlite_data_scroll_wiring<'a>() -> ScrollRegionWiring<'a, Message> {
     ScrollRegionWiring {
         smooth_scroll_wrap: smooth_scroll_wrap(PreviewScrollRegion::SqliteData),
         scrollable_id: preview_scroll_id(PreviewScrollRegion::SqliteData),
-        on_scroll: Box::new(|viewport| Message::PreviewScrollbarViewportChanged {
-            region: PreviewScrollRegion::SqliteData,
-            viewport: scrollbar_viewport_from(&viewport),
-            event: Box::new(PreviewMessage::SqlitePreviewDataScrolled),
-        }),
+        on_scroll: None,
     }
 }
 

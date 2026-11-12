@@ -19,14 +19,12 @@ use desktop_linux::NetworkMountState;
 use iced::widget::{column, container, mouse_area, row, scrollable, Space};
 use iced::{alignment, Element, Length, Theme};
 
-use crate::picker_session::scrollbar::{scroll_id, scrollbar_on_scroll};
+use crate::picker_session::scrollbar::scroll_id;
 use crate::picker_session::{PickerSession, SessionMessage, SessionScrollRegion, SidebarEntryId};
 
 use super::readable_label;
 use bennu_theme::typography::{BODY_SIZE, CAPTION_SIZE};
 
-/// 侧栏滚动条静态宽度（与主软件侧栏一致）。
-const SIDEBAR_SCROLLBAR_WIDTH: f32 = 6.0;
 /// 行图标尺寸（与主软件 MENU_ICON_SIZE 同值）。
 const SIDEBAR_ICON_SIZE: f32 = 16.0;
 /// 拖宽手柄宽度。
@@ -327,8 +325,6 @@ pub(super) fn sidebar_panel(session: &PickerSession) -> Element<'static, Session
     }
 
     let region = SessionScrollRegion::Sidebar;
-    let scrollbar_visibility = session.scrollbar_visibility_for(&region);
-    let scrollbar_viewport = session.scrollbar_viewport_for(&region);
     let request_path = session.request_path().to_string();
 
     // 滚轮走 SmoothScrollArea → WheelScrolled{region}（main 层拦截路由），
@@ -341,26 +337,12 @@ pub(super) fn sidebar_panel(session: &PickerSession) -> Element<'static, Session
     .id(scroll_id(&request_path, region))
     .width(Length::Fill)
     .height(Length::Fill)
-    .direction(enhanced_vertical_scrollbar_direction(
-        scrollbar_visibility,
-        SIDEBAR_SCROLLBAR_WIDTH,
-    ))
-    .style(enhanced_scrollbar_style(scrollbar_visibility))
-    .on_scroll(scrollbar_on_scroll(region, |_| {
-        SessionMessage::ScrollbarEngaged {
-            region: SessionScrollRegion::Sidebar,
-        }
-    }));
+    .direction(enhanced_vertical_scrollbar_direction())
+    .style(enhanced_scrollbar_style);
 
-    let panel = container(enhanced_scrollbar(
-        scroller,
-        scrollbar_visibility,
-        scrollbar_viewport,
-        ScrollbarAxis::Vertical,
-        SIDEBAR_SCROLLBAR_WIDTH,
-    ))
-    .width(Length::Fill)
-    .height(Length::Fill);
+    let panel = container(enhanced_scrollbar(scroller, ScrollbarAxis::Vertical))
+        .width(Length::Fill)
+        .height(Length::Fill);
 
     // 宽度由窗口外壳按 sidebar_width 给；右边缘是拖宽手柄。
     row![panel, resize_handle()]

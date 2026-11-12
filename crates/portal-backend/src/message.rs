@@ -9,7 +9,6 @@ use std::sync::Arc;
 use iced::{keyboard, mouse, window};
 
 use bennu_preview::preview_message::PreviewMessage;
-use bennu_theme::scrollbar::ScrollbarViewport;
 use bennu_theme::window_controls::WindowControlKind;
 
 use crate::dbus_file_chooser::BridgeEvent;
@@ -90,18 +89,6 @@ pub(crate) enum Message {
     PreviewWheelScrolled {
         region: PreviewScrollRegion,
         delta: mouse::ScrollDelta,
-    },
-    PreviewScrollbarLayoutVerified {
-        region: PreviewScrollRegion,
-        viewport: ScrollbarViewport,
-    },
-    PreviewScrollbarViewportChanged {
-        region: PreviewScrollRegion,
-        viewport: ScrollbarViewport,
-        event: Box<PreviewMessage>,
-    },
-    PreviewScrollbarAutoHideElapsed {
-        generation: u64,
     },
     /// SQLite 表格列宽拖拽结束（面板闭包注入）。
     PreviewSqliteDragFinished,

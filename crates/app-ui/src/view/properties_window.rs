@@ -13,7 +13,7 @@ use crate::model::{
     FilePropertiesDirectoryContentsState, FilePropertiesLoadState, FilePropertiesMessage,
     FilePropertiesPermissionAccess, FilePropertiesPermissionClass, FilePropertiesPermissionUpdate,
     FilePropertiesPermissions, FilePropertiesPresentation, FilePropertiesSnapshot,
-    FilePropertiesState, Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility,
+    FilePropertiesState, Message, ScrollbarRegion,
 };
 use bennu_preview::entry_icons::file_entry_icon_symbol;
 use bennu_preview::panel_text::readable_text;
@@ -36,8 +36,6 @@ const PROPERTIES_ICON_SIZE: f32 = 44.0;
 
 pub(crate) fn view_properties_window<'a>(
     properties: Option<&'a FilePropertiesState>,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
     shell: WindowShell<'a, Message>,
 ) -> Element<'a, Message> {
     let single = |body: Element<'a, Message>| {
@@ -52,16 +50,12 @@ pub(crate) fn view_properties_window<'a>(
     let target_label = properties_target_label(properties);
     match &properties.load_state {
         FilePropertiesLoadState::Loading => single(properties_loading_view(target_label)),
-        FilePropertiesLoadState::LoadingAggregate(snapshot) => single(
-            aggregate_properties_loading_view(snapshot, scrollbar_visibility, scrollbar_viewport),
-        ),
-        FilePropertiesLoadState::Loaded(presentation) => properties_split_view(
-            properties,
-            presentation,
-            scrollbar_visibility,
-            scrollbar_viewport,
-            &shell,
-        ),
+        FilePropertiesLoadState::LoadingAggregate(snapshot) => {
+            single(aggregate_properties_loading_view(snapshot))
+        }
+        FilePropertiesLoadState::Loaded(presentation) => {
+            properties_split_view(properties, presentation, &shell)
+        }
         FilePropertiesLoadState::Failed(error) => {
             single(properties_error_view(target_label, error))
         }
@@ -85,16 +79,10 @@ fn properties_loading_view(target_label: String) -> Element<'static, Message> {
 
 fn aggregate_properties_loading_view(
     snapshot: &FilePropertiesAggregateSnapshot,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
 ) -> Element<'_, Message> {
-    properties_detail_scroller(
-        aggregate_information(snapshot).push(settings_card(vec![notice_row(RowNote::Hint(tr!(
-            "Calculating..."
-        )))])),
-        scrollbar_visibility,
-        scrollbar_viewport,
-    )
+    properties_detail_scroller(aggregate_information(snapshot).push(settings_card(vec![
+        notice_row(RowNote::Hint(tr!("Calculating..."))),
+    ])))
 }
 
 fn properties_error_view<'a>(target_label: String, error: &'a str) -> Element<'a, Message> {
@@ -114,30 +102,19 @@ fn properties_notice(card: Element<'_, Message>) -> Element<'_, Message> {
 fn properties_split_view<'a>(
     properties: &'a FilePropertiesState,
     presentation: &'a FilePropertiesPresentation,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
     shell: &WindowShell<'a, Message>,
 ) -> Element<'a, Message> {
     let selected = properties.selected_category;
     let detail = match selected {
         FilePropertiesCategory::Information => match presentation {
-            FilePropertiesPresentation::Single(snapshot) => {
-                properties_information_detail(snapshot, scrollbar_visibility, scrollbar_viewport)
-            }
+            FilePropertiesPresentation::Single(snapshot) => properties_information_detail(snapshot),
             FilePropertiesPresentation::Aggregate(snapshot) => {
-                aggregate_properties_information_detail(
-                    snapshot,
-                    scrollbar_visibility,
-                    scrollbar_viewport,
-                )
+                aggregate_properties_information_detail(snapshot)
             }
         },
-        FilePropertiesCategory::Permissions => properties_permissions_detail(
-            properties,
-            presentation,
-            scrollbar_visibility,
-            scrollbar_viewport,
-        ),
+        FilePropertiesCategory::Permissions => {
+            properties_permissions_detail(properties, presentation)
+        }
     };
     let sidebar = SplitPane {
         header: HeaderBar::new().title(tr!("Properties")),
@@ -186,11 +163,7 @@ fn properties_heading(
     .into()
 }
 
-fn properties_information_detail(
-    snapshot: &FilePropertiesSnapshot,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
-) -> Element<'_, Message> {
+fn properties_information_detail(snapshot: &FilePropertiesSnapshot) -> Element<'_, Message> {
     let mut place = vec![
         value_row(tr!("Location"), display_path(&snapshot.location)),
         value_row(tr!("Size"), display_size(snapshot.size_bytes)),
@@ -211,35 +184,25 @@ fn properties_information_detail(
         place.push(value_row(tr!("Contents"), contents));
     }
 
-    properties_detail_scroller(
-        column![
-            properties_heading(
-                file_entry_icon_symbol(snapshot.kind, snapshot.name.as_os_str()),
-                display_name(&snapshot.name),
-                file_kind_label(snapshot.kind),
-            ),
-            settings_card(place),
-            settings_card(vec![
-                value_row(tr!("Created"), display_optional_time(snapshot.created)),
-                value_row(tr!("Modified"), display_optional_time(snapshot.modified)),
-                value_row(tr!("Accessed"), display_optional_time(snapshot.accessed)),
-            ]),
-        ],
-        scrollbar_visibility,
-        scrollbar_viewport,
-    )
+    properties_detail_scroller(column![
+        properties_heading(
+            file_entry_icon_symbol(snapshot.kind, snapshot.name.as_os_str()),
+            display_name(&snapshot.name),
+            file_kind_label(snapshot.kind),
+        ),
+        settings_card(place),
+        settings_card(vec![
+            value_row(tr!("Created"), display_optional_time(snapshot.created)),
+            value_row(tr!("Modified"), display_optional_time(snapshot.modified)),
+            value_row(tr!("Accessed"), display_optional_time(snapshot.accessed)),
+        ]),
+    ])
 }
 
 fn aggregate_properties_information_detail(
     snapshot: &FilePropertiesAggregateSnapshot,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
 ) -> Element<'_, Message> {
-    properties_detail_scroller(
-        aggregate_information(snapshot),
-        scrollbar_visibility,
-        scrollbar_viewport,
-    )
+    properties_detail_scroller(aggregate_information(snapshot))
 }
 
 /// 多选：标题是“N 项”，卡片里是各类各几个、在哪、总大小，时间只在大家都一样时有。
@@ -317,8 +280,6 @@ fn aggregate_optional_time(time: Option<SystemTime>) -> String {
 fn properties_permissions_detail<'a>(
     properties: &'a FilePropertiesState,
     presentation: &'a FilePropertiesPresentation,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
 ) -> Element<'a, Message> {
     let update = &properties.permission_update;
     let mut content = column![muted_setting_text(tr!(
@@ -370,20 +331,13 @@ fn properties_permissions_detail<'a>(
         content = content.push(settings_card(vec![notice_row(status)]));
     }
 
-    properties_detail_scroller(content, scrollbar_visibility, scrollbar_viewport)
+    properties_detail_scroller(content)
 }
 
-fn properties_detail_scroller<'a>(
-    content: Column<'a, Message>,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
-) -> Element<'a, Message> {
+fn properties_detail_scroller<'a>(content: Column<'a, Message>) -> Element<'a, Message> {
     auxiliary_detail_scroller(
         content.spacing(SETTINGS_GROUP_SPACING).width(Length::Fill),
         ScrollbarRegion::Properties,
-        scrollbar_visibility,
-        scrollbar_viewport,
-        Message::PropertiesScrolled,
     )
 }
 

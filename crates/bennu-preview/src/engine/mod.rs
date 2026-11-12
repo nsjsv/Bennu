@@ -283,8 +283,6 @@ mod tests {
 
         for message in [
             PreviewMessage::SqliteTablesResizeStarted,
-            PreviewMessage::SqlitePreviewTablesScrolled,
-            PreviewMessage::PreviewDirectoryScrolled,
             PreviewMessage::TextPreviewContentHeightChanged(12.0),
         ] {
             returned_to_host(&mut engine, message);

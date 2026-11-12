@@ -105,65 +105,6 @@ async fn prepared_document_resets_stable_scrollable_before_page_commands() {
 }
 
 #[test]
-fn stale_and_invalid_scrolls_do_not_change_scrollbar_state() {
-    let directory = tempdir().unwrap();
-    let source = directory.path().join("stale-scroll.pdf");
-    let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    prepare_current_document(&mut browser, source, 6);
-    drop(browser.start_scrollbar_reveal(ScrollbarRegion::Sidebar));
-
-    let mut stale_key = browser
-        .preview_engine
-        .active_document_preview_mut()
-        .unwrap()
-        .viewport_key();
-    stale_key.layout_generation = stale_key.layout_generation.wrapping_add(1);
-    let content_height = browser
-        .preview_engine
-        .active_document_preview_mut()
-        .unwrap()
-        .content_height();
-    drop(
-        browser.handle_document_preview_message(DocumentPreviewMessage::Scrolled {
-            key: stale_key,
-            offset_y: 100.0,
-            viewport_height: 400.0,
-            content_height,
-        }),
-    );
-    assert!(
-        browser
-            .scrollbar_visibility_for(&ScrollbarRegion::Sidebar)
-            .opacity()
-            > 0.0
-    );
-
-    let current_key = browser
-        .preview_engine
-        .active_document_preview_mut()
-        .unwrap()
-        .viewport_key();
-    drop(
-        browser.handle_document_preview_message(DocumentPreviewMessage::Scrolled {
-            key: current_key,
-            offset_y: f32::NAN,
-            viewport_height: 400.0,
-            content_height,
-        }),
-    );
-    assert!(
-        browser
-            .scrollbar_visibility_for(&ScrollbarRegion::Sidebar)
-            .opacity()
-            > 0.0
-    );
-    assert_eq!(
-        browser.scrollbar_visibility_for(&ScrollbarRegion::PreviewDocument),
-        crate::model::ScrollbarVisibility::Hidden
-    );
-}
-
-#[test]
 fn office_document_dispatch_enters_the_typed_document_pipeline() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let source = PathBuf::from("/tmp/report.DOCX");

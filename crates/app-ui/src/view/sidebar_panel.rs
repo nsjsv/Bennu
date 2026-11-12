@@ -3,7 +3,6 @@ use iced::widget::{
 };
 use iced::{Alignment, Element, Length, Padding};
 
-use crate::app::scrollbar::{enhanced_scrollbar, scrollbar_on_scroll, ScrollbarAxis};
 use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
 use crate::app::transfer::TransferMessage;
 use crate::app::FileBrowser;
@@ -25,6 +24,7 @@ use bennu_preview::panel_text::readable_text;
 use bennu_sidebar::SidebarLocationKind;
 use bennu_theme::icons::IconSymbol;
 use bennu_theme::measured_text::measured_middle_ellipsized_text;
+use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use iced::alignment::Vertical;
 
 use super::{tab_motion, themed_icon, IconTone, MENU_ICON_SIZE};
@@ -112,25 +112,12 @@ pub(crate) fn sidebar_body(browser: &FileBrowser) -> Element<'_, Message> {
     sidebar = append_sidebar_devices(sidebar, browser);
 
     let scrollbar_region = ScrollbarRegion::Sidebar;
-    let scrollbar_visibility = browser.scrollbar_visibility_for(&scrollbar_region);
     let sidebar_scroller = scrollable(smooth_scroll_content(sidebar, scrollbar_region.clone()))
         .id(smooth_scroll_id(&scrollbar_region))
-        .direction(enhanced_vertical_scrollbar_direction(
-            scrollbar_visibility,
-            6.0,
-        ))
-        .style(enhanced_scrollbar_style(scrollbar_visibility))
-        .height(Length::Fill)
-        .on_scroll(scrollbar_on_scroll(scrollbar_region.clone(), |_| {
-            Message::SidebarScrolled
-        }));
-    let sidebar_scroller = enhanced_scrollbar(
-        sidebar_scroller,
-        scrollbar_visibility,
-        browser.scrollbar_viewport_for(&scrollbar_region),
-        ScrollbarAxis::Vertical,
-        6.0,
-    );
+        .direction(enhanced_vertical_scrollbar_direction())
+        .style(enhanced_scrollbar_style)
+        .height(Length::Fill);
+    let sidebar_scroller = enhanced_scrollbar(sidebar_scroller, ScrollbarAxis::Vertical);
     let sidebar_content_panel = container(sidebar_scroller)
         .width(Length::Fill)
         .height(Length::Fill);

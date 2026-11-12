@@ -1,5 +1,5 @@
 //! 主程序与 portal 共享的样式词汇：文本/边框/阴影颜色助手、surface 与
-//! primary 动作按钮、行悬停/选中态、mac 式滚动条、图标着色、导航输入框。
+//! primary 动作按钮、行悬停/选中态、滚动条命中区样式、图标着色、导航输入框。
 //! 这里只允许通过 `crate::ui_colors` 读取语义角色，禁止固定 RGB 分支。
 
 use iced::widget::{button, container, scrollable, svg, text_input};
@@ -8,37 +8,9 @@ use iced::{Background, Border, Color, Shadow, Theme, Vector};
 use crate::controls::text_field_style;
 use crate::{ui_colors, AppearanceMode};
 
-/// 滚动条悬停展开后的宽度；正常宽度由调用方传入。
-pub const SCROLLBAR_HOVER_WIDTH: f32 = 14.0;
-
-/// 滚动条可见性（透明度档位），由滚动容器按悬停/拖动状态计算。
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ScrollbarVisibility {
-    Hidden,
-    VisibleWithOpacity(f32),
-    Visible,
-}
-
-impl ScrollbarVisibility {
-    pub fn with_opacity(opacity: f32) -> Self {
-        let opacity = opacity.clamp(0.0, 1.0);
-        if opacity <= f32::EPSILON {
-            Self::Hidden
-        } else if (1.0 - opacity) <= f32::EPSILON {
-            Self::Visible
-        } else {
-            Self::VisibleWithOpacity(opacity)
-        }
-    }
-
-    pub fn opacity(self) -> f32 {
-        match self {
-            Self::Hidden => 0.0,
-            Self::VisibleWithOpacity(opacity) => opacity,
-            Self::Visible => 1.0,
-        }
-    }
-}
+/// 滚动条命中区宽度：原生 Scrollable 的透明轨道，点击和拖动都落在这里；
+/// 常驻细线与展开后的滑块都画在这条区域内（见 `scrollbar` 模块）。
+pub const SCROLLBAR_HIT_WIDTH: f32 = 14.0;
 
 pub fn base_text_color(theme: &Theme) -> Color {
     ui_colors(theme).on_surface
@@ -461,151 +433,44 @@ pub fn faded_text_input_style(
     style
 }
 
-pub fn enhanced_scrollbar_style(
-    visibility: ScrollbarVisibility,
-) -> impl Fn(&Theme, scrollable::Status) -> scrollable::Style + Clone {
-    move |theme, status| {
-        let mut style = mac_scrollbar_style(theme, status, visibility);
-        // 保留 Iced 的命中区域和拖动状态机，避免与 Canvas 滑块绘制两套视觉反馈。
-        style.vertical_rail.scroller.background = Background::Color(Color::TRANSPARENT);
-        style.vertical_rail.scroller.border = Border::default();
-        style.horizontal_rail.scroller.background = Background::Color(Color::TRANSPARENT);
-        style.horizontal_rail.scroller.border = Border::default();
-        style
-    }
-}
-
-pub fn enhanced_vertical_scrollbar_direction(
-    visibility: ScrollbarVisibility,
-    width: f32,
-) -> scrollable::Direction {
-    scrollable::Direction::Vertical(auto_hide_scrollbar_properties(
-        visibility,
-        width.max(SCROLLBAR_HOVER_WIDTH),
-    ))
-}
-
-pub fn enhanced_horizontal_scrollbar_direction(
-    visibility: ScrollbarVisibility,
-    width: f32,
-) -> scrollable::Direction {
-    scrollable::Direction::Horizontal(auto_hide_scrollbar_properties(
-        visibility,
-        width.max(SCROLLBAR_HOVER_WIDTH),
-    ))
-}
-
-pub fn enhanced_both_scrollbar_direction(
-    visibility: ScrollbarVisibility,
-    width: f32,
-) -> scrollable::Direction {
-    let bar = auto_hide_scrollbar_properties(visibility, width.max(SCROLLBAR_HOVER_WIDTH));
-    scrollable::Direction::Both {
-        vertical: bar,
-        horizontal: bar,
-    }
-}
-
-fn auto_hide_scrollbar_properties(
-    visibility: ScrollbarVisibility,
-    width: f32,
-) -> scrollable::Scrollbar {
-    let width = if visibility.opacity() <= f32::EPSILON {
-        0.0
-    } else {
-        width
-    };
-
-    scrollable::Scrollbar::new()
-        .width(width)
-        .scroller_width(width)
-}
-
-/// mac 式滚动条：透明轨道、半透明圆角滑块，悬停/拖动加深。
-pub fn mac_scrollbar_style(
-    theme: &Theme,
-    status: scrollable::Status,
-    visibility: ScrollbarVisibility,
-) -> scrollable::Style {
-    let mut opacity = visibility.opacity();
-
-    match status {
-        scrollable::Status::Hovered {
-            is_horizontal_scrollbar_hovered,
-            is_vertical_scrollbar_hovered,
-            ..
-        } if opacity > 0.0
-            && (is_horizontal_scrollbar_hovered || is_vertical_scrollbar_hovered) =>
-        {
-            opacity = (opacity + 0.18).min(1.0);
-        }
-        scrollable::Status::Dragged {
-            is_horizontal_scrollbar_dragged,
-            is_vertical_scrollbar_dragged,
-            ..
-        } if opacity > 0.0
-            && (is_horizontal_scrollbar_dragged || is_vertical_scrollbar_dragged) =>
-        {
-            opacity = opacity.max(0.86);
-        }
-        _ => {}
-    }
-
+/// 原生 scroller 全透明：只保留 Iced 的命中区域和拖动状态机，可见滑块由
+/// `scrollbar::enhanced_scrollbar` 按当帧布局自绘，避免两套视觉反馈。
+pub fn enhanced_scrollbar_style(theme: &Theme, status: scrollable::Status) -> scrollable::Style {
     let mut style = scrollable::default(theme, status);
-    let scroller_background = mac_scrollbar_scroller_color(theme, opacity).into();
-    let rail_border = Border {
-        radius: 999.0.into(),
-        ..Border::default()
-    };
-    let scroller_border = Border {
-        radius: 999.0.into(),
-        ..Border::default()
-    };
-
-    style.vertical_rail.background = None;
-    style.vertical_rail.border = rail_border;
-    style.vertical_rail.scroller.background = scroller_background;
-    style.vertical_rail.scroller.border = scroller_border;
-    style.horizontal_rail.background = None;
-    style.horizontal_rail.border = rail_border;
-    style.horizontal_rail.scroller.background = scroller_background;
-    style.horizontal_rail.scroller.border = scroller_border;
+    for rail in [&mut style.vertical_rail, &mut style.horizontal_rail] {
+        rail.background = None;
+        rail.border = Border::default();
+        rail.scroller.background = Background::Color(Color::TRANSPARENT);
+        rail.scroller.border = Border::default();
+    }
     style.gap = None;
     style
 }
 
-fn mac_scrollbar_scroller_color(theme: &Theme, opacity: f32) -> Color {
-    Color {
-        a: 0.42 * opacity.clamp(0.0, 1.0),
-        ..ui_colors(theme).on_surface
+pub fn enhanced_vertical_scrollbar_direction() -> scrollable::Direction {
+    scrollable::Direction::Vertical(hit_area_scrollbar())
+}
+
+pub fn enhanced_horizontal_scrollbar_direction() -> scrollable::Direction {
+    scrollable::Direction::Horizontal(hit_area_scrollbar())
+}
+
+pub fn enhanced_both_scrollbar_direction() -> scrollable::Direction {
+    scrollable::Direction::Both {
+        vertical: hit_area_scrollbar(),
+        horizontal: hit_area_scrollbar(),
     }
+}
+
+fn hit_area_scrollbar() -> scrollable::Scrollbar {
+    scrollable::Scrollbar::new()
+        .width(SCROLLBAR_HIT_WIDTH)
+        .scroller_width(SCROLLBAR_HIT_WIDTH)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn scrollbar_visibility_opacity_ladder_round_trips() {
-        assert_eq!(
-            ScrollbarVisibility::with_opacity(0.0),
-            ScrollbarVisibility::Hidden
-        );
-        assert_eq!(
-            ScrollbarVisibility::with_opacity(-1.0),
-            ScrollbarVisibility::Hidden
-        );
-        assert_eq!(
-            ScrollbarVisibility::with_opacity(1.0),
-            ScrollbarVisibility::Visible
-        );
-        match ScrollbarVisibility::with_opacity(0.4) {
-            ScrollbarVisibility::VisibleWithOpacity(opacity) => {
-                assert!((opacity - 0.4).abs() < 1e-3)
-            }
-            other => panic!("expected explicit opacity, got {other:?}"),
-        }
-    }
 
     #[test]
     fn scheme_roles_flow_into_representative_shared_styles() {

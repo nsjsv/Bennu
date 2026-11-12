@@ -443,8 +443,8 @@ impl PickerSession {
 
     fn invalidate_lane_viewports(&mut self, from: usize, until: usize) {
         for lane in from..until {
-            self.scrollbar
-                .invalidate_viewport(SessionScrollRegion::ColumnsLane(lane));
+            self.scroll_viewports
+                .remove(&SessionScrollRegion::ColumnsLane(lane));
         }
     }
 

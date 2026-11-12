@@ -170,21 +170,17 @@ fn settings_category_button(
 
 fn settings_category_detail(browser: &FileBrowser) -> Element<'_, Message> {
     match browser.selected_settings_category {
-        SettingsCategory::General => settings_page(browser, general_settings_sections(browser)),
-        SettingsCategory::Appearance => {
-            settings_page(browser, appearance_settings_sections(browser))
-        }
+        SettingsCategory::General => settings_page(general_settings_sections(browser)),
+        SettingsCategory::Appearance => settings_page(appearance_settings_sections(browser)),
         SettingsCategory::Files if browser.settings_subpage == Some(SettingsSubpage::Preview) => {
-            settings_page(browser, preview_settings_subpage_sections(browser))
+            settings_page(preview_settings_subpage_sections(browser))
         }
-        SettingsCategory::Files => settings_page(browser, files_settings_sections(browser)),
-        SettingsCategory::Transfer => settings_page(browser, transfer_settings_sections(browser)),
-        SettingsCategory::Search => settings_page(browser, search_settings_sections(browser)),
-        SettingsCategory::Shortcuts => {
-            settings_page(browser, vec![shortcut_settings_section(browser)])
-        }
-        SettingsCategory::Logs => settings_page(browser, application_logs_sections(browser)),
-        SettingsCategory::About => settings_page(browser, about_settings_sections()),
+        SettingsCategory::Files => settings_page(files_settings_sections(browser)),
+        SettingsCategory::Transfer => settings_page(transfer_settings_sections(browser)),
+        SettingsCategory::Search => settings_page(search_settings_sections(browser)),
+        SettingsCategory::Shortcuts => settings_page(vec![shortcut_settings_section(browser)]),
+        SettingsCategory::Logs => settings_page(application_logs_sections(browser)),
+        SettingsCategory::About => settings_page(about_settings_sections()),
     }
 }
 

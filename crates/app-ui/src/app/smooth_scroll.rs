@@ -43,18 +43,15 @@ impl FileBrowser {
         match scroll_delta.mode {
             WheelScrollMode::MosAnimated => {
                 self.smooth_scroll
-                    .push_wheel_delta(region.clone(), scroll_delta.delta);
-
-                self.show_scrollbars_temporarily(region)
+                    .push_wheel_delta(region, scroll_delta.delta);
+                Task::none()
             }
             WheelScrollMode::Direct => {
                 self.smooth_scroll.stop();
-                let scroll_task = iced::widget::operation::scroll_by(
+                iced::widget::operation::scroll_by(
                     smooth_scroll_id(&region),
                     scroll_frame_offset(scroll_delta.delta),
-                );
-
-                Task::batch([self.show_scrollbars_temporarily(region), scroll_task])
+                )
             }
         }
     }

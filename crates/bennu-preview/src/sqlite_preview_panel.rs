@@ -3,16 +3,14 @@
 //! 窗口共用词汇）与滚动接线、拖拽结束事件经参数由宿主注入，其余逐字节
 //! 保真。
 
-use iced::widget::{button, column, container, mouse_area, row, scrollable, Space};
+use iced::widget::{button, column, container, mouse_area, row, Space};
 use iced::{Background, Border, Element, Length};
 
 use bennu_theme::measured_text::format_middle_ellipsized_text;
-use bennu_theme::scrollbar::{
-    enhanced_scrollbar, enhanced_scrollbar_both, ScrollbarAxis, ScrollbarViewport,
-};
+use bennu_theme::scrollbar::{enhanced_scrollbar, enhanced_scrollbar_both, ScrollbarAxis};
 use bennu_theme::styles::{
     base_text_color, enhanced_both_scrollbar_direction, enhanced_scrollbar_style,
-    enhanced_vertical_scrollbar_direction, ScrollbarVisibility,
+    enhanced_vertical_scrollbar_direction,
 };
 use bennu_theme::ui_colors;
 
@@ -30,7 +28,6 @@ use bennu_theme::typography::CAPTION_SIZE;
 const SQLITE_TABLE_NAME_MAX_CHARS: usize = 40;
 const SQLITE_COLUMN_WIDTH: f32 = 170.0;
 const SQLITE_CELL_MAX_CHARS: usize = 64;
-const SQLITE_SCROLLBAR_WIDTH: f32 = 6.0;
 const SQLITE_RESIZE_HANDLE_WIDTH: f32 = 6.0;
 
 // ponytail: 200 行 × 每列直接渲染 widget，表列数极大（数百列）时才需要虚拟化。
@@ -39,10 +36,6 @@ const SQLITE_RESIZE_HANDLE_WIDTH: f32 = 6.0;
 pub fn sqlite_preview_panel<'a, Message>(
     preview: &'a SqliteDatabasePreview,
     state: Option<&'a SqlitePreviewState>,
-    tables_visibility: ScrollbarVisibility,
-    tables_viewport: Option<ScrollbarViewport>,
-    data_visibility: ScrollbarVisibility,
-    data_viewport: Option<ScrollbarViewport>,
     tabs: Element<'a, Message>,
     tables_scroll: ScrollRegionWiring<'a, Message>,
     data_scroll: ScrollRegionWiring<'a, Message>,
@@ -60,15 +53,11 @@ where
         SqlitePreviewTab::Tables => tables_tab(
             preview,
             state,
-            tables_visibility,
-            tables_viewport,
-            data_visibility,
-            data_viewport,
             tables_scroll,
             data_scroll,
             on_resize_drag_finished,
         ),
-        SqlitePreviewTab::Sql => sql_tab(state, data_visibility, data_viewport, data_scroll),
+        SqlitePreviewTab::Sql => sql_tab(state, data_scroll),
     };
 
     column![tabs, body]
@@ -83,10 +72,6 @@ where
 fn tables_tab<'a, Message>(
     preview: &'a SqliteDatabasePreview,
     state: Option<&'a SqlitePreviewState>,
-    tables_visibility: ScrollbarVisibility,
-    tables_viewport: Option<ScrollbarViewport>,
-    data_visibility: ScrollbarVisibility,
-    data_viewport: Option<ScrollbarViewport>,
     tables_scroll: ScrollRegionWiring<'a, Message>,
     data_scroll: ScrollRegionWiring<'a, Message>,
     on_resize_drag_finished: impl Fn() -> Message + 'a,
@@ -100,14 +85,7 @@ where
 
     // 直接切换：数据到达前保持空白，不显示加载占位。
     let data_area: Element<'a, Message> = match state.and_then(|state| state.table_data.as_ref()) {
-        Some(data) => sqlite_grid(
-            &data.columns,
-            &data.rows,
-            data.truncated,
-            data_visibility,
-            data_viewport,
-            data_scroll,
-        ),
+        Some(data) => sqlite_grid(&data.columns, &data.rows, data.truncated, data_scroll),
         None => column![].width(Length::Fill).height(Length::Fill).into(),
     };
 
@@ -116,16 +94,11 @@ where
     let tables_width = state
         .map(|state| state.tables_width)
         .unwrap_or(SQLITE_DEFAULT_TABLES_WIDTH);
-    let tables_panel: Element<'a, Message> = container(sqlite_table_list(
-        preview,
-        state,
-        tables_visibility,
-        tables_viewport,
-        tables_scroll,
-    ))
-    .width(Length::Fixed(tables_width))
-    .height(Length::Fill)
-    .into();
+    let tables_panel: Element<'a, Message> =
+        container(sqlite_table_list(preview, state, tables_scroll))
+            .width(Length::Fixed(tables_width))
+            .height(Length::Fill)
+            .into();
 
     row![
         tables_panel,
@@ -156,8 +129,6 @@ where
 fn sqlite_table_list<'a, Message>(
     preview: &'a SqliteDatabasePreview,
     state: Option<&'a SqlitePreviewState>,
-    visibility: ScrollbarVisibility,
-    viewport: Option<ScrollbarViewport>,
     scroll: ScrollRegionWiring<'a, Message>,
 ) -> Element<'a, Message>
 where
@@ -209,32 +180,16 @@ where
     if matching_count == 0 {
         list = list.push(readable_text(tr!("No tables match")).width(Length::Fill));
     }
-
-    let ScrollRegionWiring {
-        smooth_scroll_wrap,
-        scrollable_id,
-        on_scroll,
-    } = scroll;
-    let scroller = scrollable(smooth_scroll_wrap(list.into()))
-        .id(scrollable_id)
+    let scroller = scroll
+        .scrollable(list.into())
         .width(Length::Fill)
         .height(Length::Fill)
-        .direction(enhanced_vertical_scrollbar_direction(
-            visibility,
-            SQLITE_SCROLLBAR_WIDTH,
-        ))
-        .style(enhanced_scrollbar_style(visibility))
-        .on_scroll(on_scroll);
+        .direction(enhanced_vertical_scrollbar_direction())
+        .style(enhanced_scrollbar_style);
 
     column![
         filter_input,
-        enhanced_scrollbar(
-            scroller,
-            visibility,
-            viewport,
-            ScrollbarAxis::Vertical,
-            SQLITE_SCROLLBAR_WIDTH,
-        )
+        enhanced_scrollbar(scroller, ScrollbarAxis::Vertical)
     ]
     .spacing(6)
     .width(Length::Fill)
@@ -244,8 +199,6 @@ where
 
 fn sql_tab<'a, Message>(
     state: Option<&'a SqlitePreviewState>,
-    data_visibility: ScrollbarVisibility,
-    data_viewport: Option<ScrollbarViewport>,
     data_scroll: ScrollRegionWiring<'a, Message>,
 ) -> Element<'a, Message>
 where
@@ -272,7 +225,7 @@ where
 
     // 查询期间保留旧结果，新结果到达后直接替换。
     let result: Element<'a, Message> = match &state.sql_result {
-        Some(Ok(outcome)) => sql_result_area(outcome, data_visibility, data_viewport, data_scroll),
+        Some(Ok(outcome)) => sql_result_area(outcome, data_scroll),
         Some(Err(error)) => readable_text(error.clone()).into(),
         None => column![].into(),
     };
@@ -286,8 +239,6 @@ where
 
 fn sql_result_area<'a, Message>(
     outcome: &SqlQueryOutcome,
-    visibility: ScrollbarVisibility,
-    viewport: Option<ScrollbarViewport>,
     scroll: ScrollRegionWiring<'a, Message>,
 ) -> Element<'a, Message>
 where
@@ -296,22 +247,13 @@ where
     if outcome.columns.is_empty() {
         return readable_text(tr!("Statement executed. No result rows.")).into();
     }
-    sqlite_grid(
-        &outcome.columns,
-        &outcome.rows,
-        outcome.truncated,
-        visibility,
-        viewport,
-        scroll,
-    )
+    sqlite_grid(&outcome.columns, &outcome.rows, outcome.truncated, scroll)
 }
 
 fn sqlite_grid<'a, Message>(
     columns: &[String],
     rows: &[Vec<SqliteCellValue>],
     truncated: bool,
-    visibility: ScrollbarVisibility,
-    viewport: Option<ScrollbarViewport>,
     scroll: ScrollRegionWiring<'a, Message>,
 ) -> Element<'a, Message>
 where
@@ -321,23 +263,13 @@ where
     for values in rows {
         grid = grid.push(grid_data_row(values));
     }
-
-    let ScrollRegionWiring {
-        smooth_scroll_wrap,
-        scrollable_id,
-        on_scroll,
-    } = scroll;
-    let scroller = scrollable(smooth_scroll_wrap(grid.into()))
-        .id(scrollable_id)
+    let scroller = scroll
+        .scrollable(grid.into())
         .width(Length::Fill)
         .height(Length::Fill)
-        .direction(enhanced_both_scrollbar_direction(
-            visibility,
-            SQLITE_SCROLLBAR_WIDTH,
-        ))
-        .style(enhanced_scrollbar_style(visibility))
-        .on_scroll(on_scroll);
-    let scroller = enhanced_scrollbar_both(scroller, visibility, viewport, SQLITE_SCROLLBAR_WIDTH);
+        .direction(enhanced_both_scrollbar_direction())
+        .style(enhanced_scrollbar_style);
+    let scroller = enhanced_scrollbar_both(scroller);
 
     if truncated {
         column![

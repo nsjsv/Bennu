@@ -24,10 +24,10 @@ use bennu_theme::typography::SMALL_SIZE;
 /// 标签在其中垂直居中,行高不随文字自适应。
 pub(crate) const RAIL_ITEM_HEIGHT: f32 = 20.0;
 const RAIL_LABEL_TEXT_SIZE: f32 = SMALL_SIZE;
-/// 栏右缘与滚动条 thumb 的间距:thumb 悬停加宽到 SCROLLBAR_HOVER_WIDTH,
-/// 列表内容流还有 6px 右内边距(即列表 thumb 外缘最多伸到 20px 处),
-/// 取 20px 让两个视图的索引栏都落在 thumb 区域内侧,永不遮挡滚动条。
-const RAIL_TRAILING_GAP: f32 = crate::model::SCROLLBAR_HOVER_WIDTH + 6.0;
+/// 栏右缘与滚动条命中区的间距:命中区宽 SCROLLBAR_HIT_WIDTH,列表内容流
+/// 还有 6px 右内边距(即列表命中区外缘最多伸到 20px 处),取 20px 让两个
+/// 视图的索引栏都落在命中区内侧,永不遮挡滚动条。
+const RAIL_TRAILING_GAP: f32 = bennu_theme::styles::SCROLLBAR_HIT_WIDTH + 6.0;
 
 /// 纵向位置 → 组序:索引项等高纵排,除以行高取整再夹进有效范围。
 /// 独立成纯函数供扫动换档的数学单测。

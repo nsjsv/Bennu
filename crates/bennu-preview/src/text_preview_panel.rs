@@ -3,10 +3,9 @@
 //! 部件，宿主实例化）、模式切换行（segmented_choice_row 是设置窗口
 //! 共用词汇，5a 结论留 app-ui）；滚动接线经 ScrollRegionWiring 注入。
 
-use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis, ScrollbarViewport};
+use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use bennu_theme::styles::{
-    enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction, ScrollbarVisibility,
-    SCROLLBAR_HOVER_WIDTH,
+    enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction, SCROLLBAR_HIT_WIDTH,
 };
 
 use crate::markdown_preview::markdown_preview_body;
@@ -17,14 +16,13 @@ use crate::text_preview::{
     MarkdownPreviewMode, TextPreviewDocument, TextPreviewFormat, TextPreviewLineLimitNotice,
 };
 use bennu_localization::tr;
-use iced::widget::{column, row, scrollable, Column, Space};
+use iced::widget::{column, row, Column, Space};
 use iced::{Element, Length};
 
 const MARKDOWN_MODE_SWITCH_RESERVED_HEIGHT: f32 = 40.0;
 const MARKDOWN_MIN_BODY_SCROLL_HEIGHT: f32 = 120.0;
 const TEXT_PREVIEW_LIMIT_NOTICE_RESERVED_HEIGHT: f32 = 30.0;
 const TEXT_PREVIEW_MIN_BODY_SCROLL_HEIGHT: f32 = 120.0;
-const TEXT_PREVIEW_SCROLLBAR_WIDTH: f32 = 6.0;
 // 参数即文本预览面板的完整输入（渲染产物 + 文档 + 接线），与调用点一一对应
 #[allow(clippy::too_many_arguments)]
 pub fn text_preview_panel<'a, Message>(
@@ -34,10 +32,6 @@ pub fn text_preview_panel<'a, Message>(
     document: Option<&'a TextPreviewDocument>,
     scroll_height: f32,
     text_preview_content_height: f32,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
-    markdown_scrollbar_visibility: ScrollbarVisibility,
-    markdown_scrollbar_viewport: Option<ScrollbarViewport>,
     plain_viewer: impl Fn(&'a TextPreviewDocument, f32) -> Element<'a, Message> + 'a,
     text_scroll: ScrollRegionWiring<'a, Message>,
     markdown_scroll: ScrollRegionWiring<'static, Message>,
@@ -61,8 +55,6 @@ where
             document,
             body_height,
             text_preview_content_height,
-            scrollbar_visibility,
-            scrollbar_viewport,
             plain_viewer,
             text_scroll,
         ),
@@ -72,10 +64,6 @@ where
             line_limit_notice,
             body_height,
             text_preview_content_height,
-            scrollbar_visibility,
-            scrollbar_viewport,
-            markdown_scrollbar_visibility,
-            markdown_scrollbar_viewport,
             plain_viewer,
             text_scroll,
             markdown_scroll,
@@ -100,8 +88,6 @@ fn plain_text_preview_body<'a, Message>(
     document: Option<&'a TextPreviewDocument>,
     scroll_height: f32,
     content_height: f32,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
     plain_viewer: impl Fn(&'a TextPreviewDocument, f32) -> Element<'a, Message> + 'a,
     scroll: ScrollRegionWiring<'a, Message>,
 ) -> Element<'a, Message>
@@ -112,36 +98,25 @@ where
         return readable_text(tr!("Text preview is not ready")).into();
     };
     let viewer = plain_viewer(document, scroll_height);
-    let ScrollRegionWiring {
-        smooth_scroll_wrap,
-        scrollable_id,
-        on_scroll,
-    } = scroll;
-    let geometry = scrollable(smooth_scroll_wrap(
-        Space::new()
-            .width(Length::Fill)
-            .height(Length::Fixed(content_height.max(0.0)))
-            .into(),
-    ))
-    .id(scrollable_id)
-    .direction(enhanced_vertical_scrollbar_direction(
-        scrollbar_visibility,
-        TEXT_PREVIEW_SCROLLBAR_WIDTH,
-    ))
-    .style(enhanced_scrollbar_style(scrollbar_visibility))
+    let geometry = scroll
+        .scrollable(
+            Space::new()
+                .width(Length::Fill)
+                .height(Length::Fixed(content_height.max(0.0)))
+                .into(),
+        )
+        .direction(enhanced_vertical_scrollbar_direction())
+        .style(enhanced_scrollbar_style)
+        .height(Length::Fixed(scroll_height))
+        .width(Length::Fixed(SCROLLBAR_HIT_WIDTH));
+    // 只包几何宿主：查看器自己也经 operate 报告 scrollable，包整行会让滑块读到它。
+    row![
+        viewer,
+        enhanced_scrollbar(geometry, ScrollbarAxis::Vertical)
+    ]
+    .width(Length::Fill)
     .height(Length::Fixed(scroll_height))
-    .width(Length::Fixed(SCROLLBAR_HOVER_WIDTH))
-    .on_scroll(on_scroll);
-    let base = row![viewer, geometry]
-        .width(Length::Fill)
-        .height(Length::Fixed(scroll_height));
-    enhanced_scrollbar(
-        base,
-        scrollbar_visibility,
-        scrollbar_viewport,
-        ScrollbarAxis::Vertical,
-        TEXT_PREVIEW_SCROLLBAR_WIDTH,
-    )
+    .into()
 }
 
 fn text_preview_line_limit_notice<Message: 'static>(
@@ -177,10 +152,6 @@ fn markdown_text_preview_body<'a, Message>(
     line_limit_notice: Option<TextPreviewLineLimitNotice>,
     scroll_height: f32,
     text_preview_content_height: f32,
-    text_scrollbar_visibility: ScrollbarVisibility,
-    text_scrollbar_viewport: Option<ScrollbarViewport>,
-    markdown_scrollbar_visibility: ScrollbarVisibility,
-    markdown_scrollbar_viewport: Option<ScrollbarViewport>,
     plain_viewer: impl Fn(&'a TextPreviewDocument, f32) -> Element<'a, Message> + 'a,
     text_scroll: ScrollRegionWiring<'a, Message>,
     markdown_scroll: ScrollRegionWiring<'static, Message>,
@@ -196,20 +167,13 @@ where
     let body_height =
         (scroll_height - MARKDOWN_MODE_SWITCH_RESERVED_HEIGHT).max(MARKDOWN_MIN_BODY_SCROLL_HEIGHT);
     let body = match mode {
-        MarkdownPreviewMode::Rendered => markdown_preview_body(
-            rendered,
-            line_limit_notice,
-            body_height,
-            markdown_scrollbar_visibility,
-            markdown_scrollbar_viewport,
-            markdown_scroll,
-        ),
+        MarkdownPreviewMode::Rendered => {
+            markdown_preview_body(rendered, line_limit_notice, body_height, markdown_scroll)
+        }
         MarkdownPreviewMode::Raw => plain_text_preview_body(
             Some(document),
             body_height,
             text_preview_content_height,
-            text_scrollbar_visibility,
-            text_scrollbar_viewport,
             plain_viewer,
             text_scroll,
         ),

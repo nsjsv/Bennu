@@ -14,7 +14,6 @@ pub(super) use rows::{
 use iced::widget::{button, column, container, Column, Space};
 use iced::{Background, Border, Color, Element, Length, Theme};
 
-use crate::app::FileBrowser;
 use crate::appearance::{base_text_color, muted_text_color, subtle_border_color};
 use crate::model::{Message, ScrollbarRegion};
 use bennu_preview::panel_text::readable_text;
@@ -39,21 +38,14 @@ pub(super) enum RowNote {
 }
 
 /// 一个设置分类页：内容最宽 [`PAGE_MAX_WIDTH`] 并居中，可滚动。
-pub(super) fn settings_page<'a>(
-    browser: &FileBrowser,
-    sections: Vec<Element<'a, Message>>,
-) -> Element<'a, Message> {
-    let region = ScrollbarRegion::Settings;
+pub(super) fn settings_page<'a>(sections: Vec<Element<'a, Message>>) -> Element<'a, Message> {
     let sections = Column::with_children(sections)
         .spacing(SETTINGS_GROUP_SPACING)
         .width(Length::Fill)
         .max_width(PAGE_MAX_WIDTH);
     auxiliary_detail_scroller(
         column![container(sections).center_x(Length::Fill)],
-        region.clone(),
-        browser.scrollbar_visibility_for(&region),
-        browser.scrollbar_viewport_for(&region),
-        Message::SettingsScrolled,
+        ScrollbarRegion::Settings,
     )
 }
 

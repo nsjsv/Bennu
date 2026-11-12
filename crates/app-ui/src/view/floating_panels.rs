@@ -3,7 +3,6 @@ use iced::{Alignment, Element, Length};
 
 use desktop_linux::FileClipboardOperation;
 
-use crate::app::scrollbar::{enhanced_scrollbar, scrollbar_on_scroll, ScrollbarAxis};
 use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
 use crate::appearance::{
     context_menu_item_button_style, context_menu_style, enhanced_scrollbar_style,
@@ -14,14 +13,14 @@ use crate::formatting::item_count_label;
 use crate::model::{
     ContextMenuPreferences, ContextMenuState, DestructiveActionConfirmation, FileContextMenuState,
     FileDropPrompt, FileGroupingMode, FilePropertiesMessage, ListColumnConfig, ListColumnKind,
-    ListViewPreferences, Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility,
-    SearchContextMenuState, SearchEntryTypePreset, SearchResultMenuItem,
-    SidebarBookmarkContextMenuState, TrashMenuItem,
+    ListViewPreferences, Message, ScrollbarRegion, SearchContextMenuState, SearchEntryTypePreset,
+    SearchResultMenuItem, SidebarBookmarkContextMenuState, TrashMenuItem,
 };
 use crate::open_with::OpenWithState;
 use crate::sidebar_devices::SidebarDeviceContextMenuState;
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::icons::IconSymbol;
+use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 
 use super::context_menu_submenu::{
     CONTEXT_MENU_ITEM_HEIGHT, CONTEXT_MENU_ITEM_SPACING, CONTEXT_MENU_PADDING, CONTEXT_MENU_WIDTH,
@@ -146,11 +145,7 @@ pub(super) fn file_drop_operation_panel(prompt: &FileDropPrompt) -> Element<'_, 
         .into()
 }
 
-pub(super) fn open_with_panel(
-    state: &OpenWithState,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
-) -> Element<'static, Message> {
+pub(super) fn open_with_panel(state: &OpenWithState) -> Element<'static, Message> {
     let mut subtitle =
         format_middle_ellipsized_text(&dialog::path_name(state.path()), OPEN_WITH_PATH_MAX_CHARS);
     if let Some(mime_type) = state.mime_type() {
@@ -168,17 +163,11 @@ pub(super) fn open_with_panel(
             body = body.push(dialog::hint(tr!("Loading applications...")));
         }
         OpenWithState::Ready { .. } => {
-            body = body
-                .push(open_with_application_list(
-                    state,
-                    scrollbar_visibility,
-                    scrollbar_viewport,
-                ))
-                .push(
-                    check_box(state.set_default_selected())
-                        .label(tr!("Set as default application"))
-                        .on_toggle(Message::OpenWithDefaultApplicationToggled),
-                );
+            body = body.push(open_with_application_list(state)).push(
+                check_box(state.set_default_selected())
+                    .label(tr!("Set as default application"))
+                    .on_toggle(Message::OpenWithDefaultApplicationToggled),
+            );
         }
     }
     Dialog::new(tr!("Open With"), body)
@@ -190,11 +179,7 @@ pub(super) fn open_with_panel(
         .into()
 }
 
-fn open_with_application_list(
-    state: &OpenWithState,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
-) -> Element<'static, Message> {
+fn open_with_application_list(state: &OpenWithState) -> Element<'static, Message> {
     let mut applications = Column::new().spacing(4);
     for application in state.applications() {
         let label = if application.is_default {
@@ -228,24 +213,12 @@ fn open_with_application_list(
     let scroll_region = ScrollbarRegion::OpenWithApplications;
     let scroller = scrollable(smooth_scroll_content(applications, scroll_region.clone()))
         .id(smooth_scroll_id(&scroll_region))
-        .direction(enhanced_vertical_scrollbar_direction(
-            scrollbar_visibility,
-            6.0,
-        ))
-        .style(enhanced_scrollbar_style(scrollbar_visibility))
+        .direction(enhanced_vertical_scrollbar_direction())
+        .style(enhanced_scrollbar_style)
         .height(Length::Fixed(OPEN_WITH_APPLICATION_LIST_HEIGHT))
-        .width(Length::Fill)
-        .on_scroll(scrollbar_on_scroll(scroll_region.clone(), |_| {
-            Message::OpenWithApplicationsScrolled
-        }));
+        .width(Length::Fill);
 
-    enhanced_scrollbar(
-        scroller,
-        scrollbar_visibility,
-        scrollbar_viewport,
-        ScrollbarAxis::Vertical,
-        6.0,
-    )
+    enhanced_scrollbar(scroller, ScrollbarAxis::Vertical)
 }
 
 fn action_label(icon: IconSymbol, label: String, size: f32) -> Row<'static, Message> {

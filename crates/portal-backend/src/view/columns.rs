@@ -26,8 +26,6 @@ use crate::picker_session::{
 
 use super::smooth_scroll_region;
 
-/// 多栏滚动条静态宽度：与列表同值（mac 式细滚动条）。
-const COLUMNS_SCROLLBAR_WIDTH: f32 = 8.0;
 /// 行内图标/缩略图边长：与列表行同尺寸（prd：行内小缩略图同列表）。
 const LANE_ICON_EDGE: f32 = 18.0;
 /// 空栏占位数：与主软件 DEFAULT_VISIBLE_COLUMN_COUNT 同值。
@@ -66,7 +64,6 @@ pub(super) fn columns_body(
     }
 
     let region = SessionScrollRegion::ColumnsRail;
-    let scrollbar_visibility = session.scrollbar_visibility_for(&region);
     let scroller = scrollable(smooth_scroll_region(
         rail,
         region,
@@ -75,23 +72,10 @@ pub(super) fn columns_body(
     .id(scroll_id(session.request_path(), region))
     .width(Length::Fill)
     .height(Length::Fill)
-    .direction(enhanced_horizontal_scrollbar_direction(
-        scrollbar_visibility,
-        COLUMNS_SCROLLBAR_WIDTH,
-    ))
-    .style(enhanced_scrollbar_style(scrollbar_visibility))
-    .on_scroll(scrollbar_on_scroll(region, |_| {
-        SessionMessage::ScrollbarEngaged {
-            region: SessionScrollRegion::ColumnsRail,
-        }
-    }));
-    enhanced_scrollbar(
-        scroller,
-        scrollbar_visibility,
-        session.scrollbar_viewport_for(&region),
-        ScrollbarAxis::Horizontal,
-        COLUMNS_SCROLLBAR_WIDTH,
-    )
+    .direction(enhanced_horizontal_scrollbar_direction())
+    .style(enhanced_scrollbar_style)
+    .on_scroll(scrollbar_on_scroll(region));
+    enhanced_scrollbar(scroller, ScrollbarAxis::Horizontal)
 }
 
 /// 空栏占位：无行、无交互，仅撑出等宽栏面（主软件 empty_column 同构）。
@@ -120,7 +104,6 @@ fn lane_view(
     }
 
     let region = SessionScrollRegion::ColumnsLane(lane);
-    let scrollbar_visibility = session.scrollbar_visibility_for(&region);
     let scroller = scrollable(smooth_scroll_region(
         content,
         region,
@@ -129,23 +112,10 @@ fn lane_view(
     .id(scroll_id(session.request_path(), region))
     .width(Length::Fill)
     .height(Length::Fill)
-    .direction(enhanced_vertical_scrollbar_direction(
-        scrollbar_visibility,
-        COLUMNS_SCROLLBAR_WIDTH,
-    ))
-    .style(enhanced_scrollbar_style(scrollbar_visibility))
-    .on_scroll(scrollbar_on_scroll(region, move |_| {
-        SessionMessage::ScrollbarEngaged {
-            region: SessionScrollRegion::ColumnsLane(lane),
-        }
-    }));
-    let scrolled = enhanced_scrollbar(
-        scroller,
-        scrollbar_visibility,
-        session.scrollbar_viewport_for(&region),
-        ScrollbarAxis::Vertical,
-        COLUMNS_SCROLLBAR_WIDTH,
-    );
+    .direction(enhanced_vertical_scrollbar_direction())
+    .style(enhanced_scrollbar_style)
+    .on_scroll(scrollbar_on_scroll(region));
+    let scrolled = enhanced_scrollbar(scroller, ScrollbarAxis::Vertical);
     container(scrolled)
         .width(Length::Fixed(lane_width.max(MIN_LANE_WIDTH)))
         .height(Length::Fill)

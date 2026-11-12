@@ -2,16 +2,14 @@
 //! 自 app-ui view/preview_panel.rs 下沉；滚动接线（smooth-scroll 包装/
 //! scrollable id/视口回传）经 ScrollRegionWiring 由宿主注入。
 
-use iced::widget::{column, container, mouse_area, row, scrollable, Column, Space};
+use iced::widget::{column, container, mouse_area, row, Column, Space};
 use iced::{Alignment, Element, Length};
 
 use crate::entry_icons::preview_entry_icon_symbol;
 use bennu_theme::icons::{icon_tone_style, rotated_chevron_right_view, themed_icon, IconTone};
 use bennu_theme::measured_text::format_middle_ellipsized_text;
-use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis, ScrollbarViewport};
-use bennu_theme::styles::{
-    enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction, ScrollbarVisibility,
-};
+use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
+use bennu_theme::styles::{enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction};
 
 use crate::panel_text::readable_text;
 use crate::preview::{PreviewTreeDirectoryChildren, PreviewTreeEntry};
@@ -24,82 +22,48 @@ const PREVIEW_ENTRY_NAME_MAX_CHARS: usize = 48;
 const PREVIEW_TREE_INDENT_WIDTH: f32 = 18.0;
 const PREVIEW_TREE_TOGGLE_WIDTH: f32 = 16.0;
 const PREVIEW_TREE_TOGGLE_ROTATION_DEGREES: f32 = 90.0;
-const TREE_SCROLLBAR_WIDTH: f32 = 6.0;
 
 pub(crate) fn directory_preview_panel<Message>(
     entries: &[PreviewTreeEntry],
     scroll_height: f32,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
     scroll: ScrollRegionWiring<'static, Message>,
 ) -> Column<'static, Message>
 where
     Message: 'static + Clone + From<PreviewMessage>,
 {
     let listing = preview_tree_listing(entries, tr!("Empty directory"));
-    tree_scroller(
-        listing,
-        scroll_height,
-        scrollbar_visibility,
-        scrollbar_viewport,
-        scroll,
-    )
+    tree_scroller(listing, scroll_height, scroll)
 }
 
 pub(crate) fn archive_preview_panel<Message>(
     entries: &[PreviewTreeEntry],
     scroll_height: f32,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
     scroll: ScrollRegionWiring<'static, Message>,
 ) -> Column<'static, Message>
 where
     Message: 'static + Clone + From<PreviewMessage>,
 {
     let listing = preview_tree_listing(entries, tr!("Empty archive"));
-    tree_scroller(
-        listing,
-        scroll_height,
-        scrollbar_visibility,
-        scrollbar_viewport,
-        scroll,
-    )
+    tree_scroller(listing, scroll_height, scroll)
 }
 
-/// 目录/归档树共用滚动容器：固定高度 scrollable + enhanced_scrollbar
-/// 浮层拇指；滚轮惯性包装与视口回传闭包来自宿主持有的滚动管线。
+/// 目录/归档树共用滚动容器：固定高度 scrollable + 常驻细线滑块；
+/// 滚轮惯性包装来自宿主持有的滚动管线。
 fn tree_scroller<Message>(
     listing: Column<'static, Message>,
     scroll_height: f32,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
     scroll: ScrollRegionWiring<'static, Message>,
 ) -> Column<'static, Message>
 where
     Message: 'static + Clone,
 {
-    let ScrollRegionWiring {
-        smooth_scroll_wrap,
-        scrollable_id,
-        on_scroll,
-    } = scroll;
-    let scroller = scrollable(smooth_scroll_wrap(listing.into()))
-        .id(scrollable_id)
-        .direction(enhanced_vertical_scrollbar_direction(
-            scrollbar_visibility,
-            TREE_SCROLLBAR_WIDTH,
-        ))
-        .style(enhanced_scrollbar_style(scrollbar_visibility))
-        .height(Length::Fixed(scroll_height))
-        .on_scroll(on_scroll);
+    let scroller = scroll
+        .scrollable(listing.into())
+        .direction(enhanced_vertical_scrollbar_direction())
+        .style(enhanced_scrollbar_style)
+        .height(Length::Fixed(scroll_height));
 
-    column![enhanced_scrollbar(
-        scroller,
-        scrollbar_visibility,
-        scrollbar_viewport,
-        ScrollbarAxis::Vertical,
-        TREE_SCROLLBAR_WIDTH,
-    )]
+    column![enhanced_scrollbar(scroller, ScrollbarAxis::Vertical)]
 }
 
 fn preview_tree_listing<Message>(

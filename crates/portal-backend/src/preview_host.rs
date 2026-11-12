@@ -66,7 +66,7 @@ pub(crate) struct PreviewHost {
     pub(crate) preferences: PreviewPreferences,
     /// 偏好来源库路径：构造注入，测试指向临时目录（缺失 → 默认回落）。
     preferences_database: PathBuf,
-    /// 预览窗滚动管线（七区域：显隐状态机 + 滚轮惯性）。
+    /// 预览窗滚动管线（七区域的滚轮惯性）。
     pub(crate) scroll: PreviewScrollPipeline,
     /// 预览窗指针位置宿主簿记：SQLite 列宽拖拽起点读横坐标（主软件
     /// cursor_position.x 的预览对应物；纵坐标的引擎消费走
@@ -526,8 +526,8 @@ impl PreviewHost {
             || self.scroll.is_animating()
     }
 
-    /// 帧推进：chrome/底部控件透明度、预览树展开动画、惯性滚动与滚动条
-    /// 透明度（app-ui advance_window_animation_frame + WindowChrome-
+    /// 帧推进：chrome/底部控件透明度、预览树展开动画与惯性滚动
+    /// （app-ui advance_window_animation_frame + WindowChrome-
     /// AnimationTick/PreviewTreeAnimationTick 两条订阅的合并驱动）。
     pub(crate) fn advance_frame(&mut self) -> Task<Message> {
         self.engine.preview_window_bottom_controls.advance();

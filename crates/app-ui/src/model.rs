@@ -236,14 +236,6 @@ pub(crate) enum ScrollbarRegion {
     PreviewSqliteTables,
     PreviewSqliteData,
 }
-// 视口快照模型随滚动条视觉层迁至共享 crate `bennu-theme::scrollbar`；
-// 重导出保持 `crate::model::ScrollbarViewport` 路径不变。
-// SCROLLBAR_MIN_THUMB_LENGTH 亦随之下沉，但 crate 内已无直接消费者
-// （thumb 几何在共享层计算），不再经 model 转发以免死重导出。
-pub use bennu_theme::scrollbar::ScrollbarViewport;
-
-// 滚动条可见性模型迁至共享 crate `bennu-theme::styles`；重导出保持调用点不变。
-pub(crate) use bennu_theme::styles::{ScrollbarVisibility, SCROLLBAR_HOVER_WIDTH};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StartupDirectoryValidationRequest {
@@ -527,7 +519,7 @@ pub(crate) enum Message {
     AddressSuggestionSelected(BrowserPaneId, PathBuf),
     AddressSuggestionInputStabilized(AddressSuggestionRequest),
     AddressSuggestionsLoaded(AddressSuggestionRequest, Vec<PathBuf>),
-    AddressBarScrolled(BrowserPaneId),
+    AddressBarScrolled,
     SearchInputChanged(String),
     SearchInputStabilized(SearchInputStabilizationRequest),
     SearchSubmitted,
@@ -690,24 +682,7 @@ pub(crate) enum Message {
     RendererRestartRequested,
     RendererRestartNoticeDismissed,
     SmoothScrollWheel(ScrollbarRegion, mouse::ScrollDelta),
-    ScrollbarViewportChanged {
-        region: ScrollbarRegion,
-        viewport: ScrollbarViewport,
-        event: Box<Message>,
-    },
-    ScrollbarLayoutVerified {
-        region: ScrollbarRegion,
-        viewport: ScrollbarViewport,
-    },
-    ScrollbarAutoHideElapsed(u64),
     WindowChromeAnimationTick,
-    SidebarScrolled,
-    SettingsScrolled,
-    PropertiesScrolled,
-    OpenWithApplicationsScrolled,
-    OperationQueueScrolled,
-    BatchRenamePreviewScrolled,
-    SearchHistoryScrolled,
     ColumnBrowserScrolled(BrowserPaneId, f32, f32),
     ColumnScrolled(BrowserPaneId, PathBuf, f32, f32),
     /// 列表滚动帧:offset_y 为内容偏移,viewport 是 iced 实测的可视区

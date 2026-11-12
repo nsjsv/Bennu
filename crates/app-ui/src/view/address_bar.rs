@@ -10,13 +10,11 @@ use bennu_theme::address_bar::{
 };
 
 use crate::app::panes::BrowserPaneView;
-use crate::app::scrollbar::{enhanced_scrollbar, scrollbar_on_scroll, ScrollbarAxis};
 use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
 use crate::app::FileBrowser;
 use crate::appearance::{
-    address_bar_style, enhanced_horizontal_scrollbar_direction, enhanced_scrollbar_style,
-    faded_button_style, faded_text_input_style, path_suggestion_item_style, path_suggestions_style,
-    scale_color_alpha, selected_path_suggestion_item_style,
+    address_bar_style, faded_button_style, faded_text_input_style, path_suggestion_item_style,
+    path_suggestions_style, scale_color_alpha, selected_path_suggestion_item_style,
 };
 use crate::breadcrumb_drop_target_bounds::{
     track_breadcrumb_drop_target, track_breadcrumb_viewport,
@@ -24,7 +22,7 @@ use crate::breadcrumb_drop_target_bounds::{
 use crate::formatting::format_middle_ellipsized_text;
 use crate::model::{
     breadcrumb_segments, BreadcrumbSegment, BreadcrumbSegmentKind, BrowserPaneId, FileDropTarget,
-    Message, ScrollbarRegion, ScrollbarViewport, ScrollbarVisibility,
+    Message, ScrollbarRegion,
 };
 use crate::view::{icon_tone_style, themed_icon, IconTone};
 use bennu_preview::panel_text::readable_text;
@@ -133,17 +131,12 @@ fn breadcrumb_layer<'a>(
             | None => None,
         }
     });
-    let region = ScrollbarRegion::AddressBar(pane_id);
-    let scrollbar_visibility = browser.scrollbar_visibility_for(&region);
-
     responsive(move |viewport_size| {
         breadcrumb_scrollable(
             pane_id,
             segments.clone(),
             opacity,
             viewport_size.width,
-            scrollbar_visibility,
-            browser.scrollbar_viewport_for(&region),
             active_drop_target.clone(),
             registers_drop_targets,
         )
@@ -158,8 +151,6 @@ fn breadcrumb_scrollable<'a>(
     segments: Vec<BreadcrumbSegment>,
     opacity: f32,
     viewport_width: f32,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
     active_drop_target: Option<PathBuf>,
     registers_drop_targets: bool,
 ) -> Element<'a, Message> {
@@ -174,29 +165,18 @@ fn breadcrumb_scrollable<'a>(
     );
     let scroller = scrollable(smooth_scroll_content(breadcrumbs, region.clone()))
         .id(smooth_scroll_id(&region))
-        .direction(enhanced_horizontal_scrollbar_direction(
-            scrollbar_visibility,
-            8.0,
+        // 面包屑不画滚动条：路径下面多一根线只是噪音，滚轮照样横向滚动。
+        .direction(scrollable::Direction::Horizontal(
+            scrollable::Scrollbar::hidden(),
         ))
-        .style(enhanced_scrollbar_style(scrollbar_visibility))
         .width(Length::Fill)
         .height(Length::Fixed(ADDRESS_BAR_HEIGHT))
-        .on_scroll(scrollbar_on_scroll(region.clone(), move |_| {
-            Message::AddressBarScrolled(pane_id)
-        }));
-    let scroller: Element<'a, Message> = if registers_drop_targets {
+        .on_scroll(|_| Message::AddressBarScrolled);
+    if registers_drop_targets {
         track_breadcrumb_viewport(scroller, pane_id)
     } else {
         scroller.into()
-    };
-
-    enhanced_scrollbar(
-        scroller,
-        scrollbar_visibility,
-        scrollbar_viewport,
-        ScrollbarAxis::Horizontal,
-        8.0,
-    )
+    }
 }
 
 fn elastic_breadcrumbs<'a>(

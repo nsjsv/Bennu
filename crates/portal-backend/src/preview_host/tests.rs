@@ -256,16 +256,10 @@ fn esc_close_clears_session_and_host_bookkeeping() {
     let _ = host.request_preview(None, Some(&file_selection(Path::new("/tmp/a.txt"), 16)));
     let preview_window = host.engine.preview_window.unwrap();
     host.focused_window = Some(preview_window);
-    let _ = host.scroll.handle_layout_verified(
+    let _ = host.scroll.handle_wheel_scrolled(
         PreviewScrollRegion::Directory,
-        bennu_theme::scrollbar::ScrollbarViewport {
-            offset_x: 0.0,
-            offset_y: 0.0,
-            viewport_width: 400.0,
-            viewport_height: 300.0,
-            content_width: 400.0,
-            content_height: 900.0,
-        },
+        false,
+        iced::mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
     );
     assert!(host.scroll.is_animating());
 

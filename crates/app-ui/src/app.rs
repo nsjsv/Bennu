@@ -56,7 +56,6 @@ mod remote_mounts;
 mod rendering_settings;
 pub(crate) mod right_preview_panel;
 mod runtime;
-pub(crate) mod scrollbar;
 mod search;
 mod search_paths;
 mod selection;
@@ -130,7 +129,6 @@ use crate::app::runtime::{
     sidebar_device_refresh_subscription, system_mode_subscription, wayland_file_dnd_subscription,
     x11_file_dnd_subscription,
 };
-use crate::app::scrollbar::{ScrollbarState, SCROLLBAR_ANIMATION_INTERVAL};
 use crate::app::sidebar_bookmarks::SidebarBookmarkMotionState;
 use crate::app::sidebar_resize::SidebarResizeDrag;
 use crate::app::smooth_scroll::MosScrollState;
@@ -156,8 +154,8 @@ use crate::model::{
     FileDragSpringHover, FileDragState, FileDropPrompt, FileDropSessionState, FilePropertiesState,
     IconGridExpansionState, IconGridViewport, ListColumnKind, Message, PaneAddressBarTransition,
     PaneAddressEditingSession, PaneDragPointerPress, PaneDragState, PendingOperation, PreviewState,
-    PreviewWindowProfile, ScrollbarRegion, SearchServiceState, SelectionMarquee, SettingsCategory,
-    SettingsSubpage, SidebarBookmarkDragState, SidebarBookmarkDropSlot, SidebarLocation,
+    PreviewWindowProfile, SearchServiceState, SelectionMarquee, SettingsCategory, SettingsSubpage,
+    SidebarBookmarkDragState, SidebarBookmarkDropSlot, SidebarLocation,
     StartupDirectoryValidationRequest, TabDragState, TransferConflictState, TrashRefreshState,
 };
 use crate::network_connections::{NetworkConnectionEditorState, NetworkConnectionState};
@@ -413,7 +411,6 @@ pub(crate) struct FileBrowser {
     pending_browser_session_save: bool,
     browser_session_saves_in_flight: usize,
     last_browser_session_save: Option<std::time::Instant>,
-    scrollbar: ScrollbarState,
     smooth_scroll: MosScrollState,
     file_drag_edge_scroll: Option<file_drag_edge_scroll::FileDragEdgeScroll>,
     next_tab_id: usize,
@@ -476,7 +473,6 @@ impl FileBrowser {
         // 逐帧把视口收进新内容。
         Task::batch([
             self.advance_smooth_scroll_animation(),
-            self.advance_scrollbar_animation(),
             self.advance_file_drag_edge_scroll(),
             self.advance_address_bar_transition(),
             self.advance_tab_bar_reveal_animation(),
@@ -788,7 +784,6 @@ impl FileBrowser {
             pending_browser_session_save: false,
             browser_session_saves_in_flight: 0,
             last_browser_session_save: None,
-            scrollbar: ScrollbarState::default(),
             smooth_scroll: MosScrollState::default(),
             file_drag_edge_scroll: None,
             next_tab_id: 1,
@@ -952,7 +947,6 @@ impl FileBrowser {
             .preview_engine
             .preview_window_bottom_controls
             .is_animating()
-            || self.scrollbar_animation_is_active()
             || self.smooth_scroll_animation_is_active()
             || self.file_drag_edge_scroll_is_active()
             || self.address_bar_transition_is_active()
@@ -964,7 +958,7 @@ impl FileBrowser {
             || self.terminal_panel.is_animating()
         {
             subscriptions.push(
-                time::every(SCROLLBAR_ANIMATION_INTERVAL)
+                time::every(bennu_theme::animation::FRAME_INTERVAL_60HZ)
                     .map(|_| Message::WindowChromeAnimationTick),
             );
         }
@@ -1022,12 +1016,7 @@ impl FileBrowser {
         match self.auxiliary_window(window) {
             Some(AuxiliaryWindow::Settings) => view_settings_window(self, window),
             Some(AuxiliaryWindow::Properties) => self.window_frame(window, |shell| {
-                view_properties_window(
-                    self.properties.as_ref(),
-                    self.scrollbar_visibility_for(&ScrollbarRegion::Properties),
-                    self.scrollbar_viewport_for(&ScrollbarRegion::Properties),
-                    shell,
-                )
+                view_properties_window(self.properties.as_ref(), shell)
             }),
             Some(AuxiliaryWindow::Transfer) => self.single_window_view(
                 window,

@@ -25,9 +25,6 @@ use crate::picker_session::{
 
 use super::{readable_label, smooth_scroll_region};
 
-/// 大图网格滚动条静态宽度：与列表同值（mac 式细滚动条）。
-const GRID_SCROLLBAR_WIDTH: f32 = 8.0;
-
 /// 大图固定档：portal 不做图标尺寸调节（prd out of scope）。
 const ICON_EDGE: u32 = ICON_GRID_EDGE;
 
@@ -57,7 +54,6 @@ pub(super) fn icon_grid_body(
     }
 
     let region = SessionScrollRegion::List;
-    let scrollbar_visibility = session.scrollbar_visibility_for(&region);
     let scroller = scrollable(smooth_scroll_region(
         container(grid).padding(ICON_GRID_CONTENT_PADDING),
         region,
@@ -66,24 +62,10 @@ pub(super) fn icon_grid_body(
     .id(scroll_id(session.request_path(), region))
     .width(Length::Fill)
     .height(Length::Fill)
-    .direction(enhanced_vertical_scrollbar_direction(
-        scrollbar_visibility,
-        GRID_SCROLLBAR_WIDTH,
-    ))
-    .style(enhanced_scrollbar_style(scrollbar_visibility))
-    .on_scroll(scrollbar_on_scroll(region, |_| {
-        SessionMessage::ScrollbarEngaged {
-            region: SessionScrollRegion::List,
-        }
-    }));
-    // mac 式滚动条与列表同一份包装（透明原生拇指 + canvas 浮层拇指）。
-    enhanced_scrollbar(
-        scroller,
-        scrollbar_visibility,
-        session.scrollbar_viewport_for(&region),
-        ScrollbarAxis::Vertical,
-        GRID_SCROLLBAR_WIDTH,
-    )
+    .direction(enhanced_vertical_scrollbar_direction())
+    .style(enhanced_scrollbar_style)
+    .on_scroll(scrollbar_on_scroll(region));
+    enhanced_scrollbar(scroller, ScrollbarAxis::Vertical)
 }
 
 /// 单个 tile：96px 图标/缩略图槽 + 最多 3 行居中文件名，交互与列表行

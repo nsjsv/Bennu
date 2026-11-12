@@ -1,5 +1,5 @@
-use crate::app::scrollbar::{enhanced_scrollbar, scrollbar_on_scroll, ScrollbarAxis};
 use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
+use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use iced::widget::{
     button, column, container, mouse_area, row, scrollable, text, Column, Row, Space,
 };
@@ -16,7 +16,6 @@ use crate::model::{
     BatchRenameRemoveClass, BatchRenameRemoveMode, BatchRenameReplaceRule, BatchRenameReplaceScope,
     BatchRenameRule, BatchRenameRuleKind, BatchRenameRuleParams, BatchRenameSliceMode,
     BatchRenameSortMode, BatchRenameState, BatchRenameTemplateToken, Message, ScrollbarRegion,
-    ScrollbarViewport, ScrollbarVisibility,
 };
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::anchored_popup::anchored_popup;
@@ -38,15 +37,7 @@ const BATCH_RENAME_PREVIEW_HEIGHT: f32 = 240.0;
 const BATCH_RENAME_PATH_MAX_CHARS: usize = 38;
 const BATCH_RENAME_RULES_AREA_HEIGHT: f32 = 170.0;
 
-fn scrollbar_visibility_stub() -> ScrollbarVisibility {
-    ScrollbarVisibility::Visible
-}
-
-pub(super) fn batch_rename_panel(
-    state: &BatchRenameState,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
-) -> Element<'_, Message> {
+pub(super) fn batch_rename_panel(state: &BatchRenameState) -> Element<'_, Message> {
     let sort_row = row![
         readable_text(tr!("Sort order")).width(Length::Fixed(84.0)),
         dropdown(
@@ -65,7 +56,7 @@ pub(super) fn batch_rename_panel(
         sort_row,
         rules_section(state),
         selected_rule_editor(state),
-        preview_rows(state, scrollbar_visibility, scrollbar_viewport),
+        preview_rows(state),
     ]
     .spacing(12)
     .width(Length::Fill);
@@ -73,11 +64,8 @@ pub(super) fn batch_rename_panel(
     let form_scroller = scrollable(form)
         .width(Length::Fill)
         .height(Length::Fill)
-        .direction(enhanced_vertical_scrollbar_direction(
-            scrollbar_visibility_stub(),
-            6.0,
-        ))
-        .style(enhanced_scrollbar_style(scrollbar_visibility_stub()));
+        .direction(enhanced_vertical_scrollbar_direction())
+        .style(enhanced_scrollbar_style);
 
     Dialog::new(tr!("Batch Rename"), form_scroller)
         .subtitle(tr!("%1 items", state.items.len()))
@@ -103,11 +91,8 @@ fn rules_section(state: &BatchRenameState) -> Element<'_, Message> {
     } else {
         scrollable(chips)
             .height(Length::Fixed(BATCH_RENAME_RULES_AREA_HEIGHT))
-            .direction(enhanced_vertical_scrollbar_direction(
-                scrollbar_visibility_stub(),
-                6.0,
-            ))
-            .style(enhanced_scrollbar_style(scrollbar_visibility_stub()))
+            .direction(enhanced_vertical_scrollbar_direction())
+            .style(enhanced_scrollbar_style)
             .into()
     };
 
@@ -670,11 +655,7 @@ fn sequence_editor<'a>(
     .into()
 }
 
-fn preview_rows(
-    state: &BatchRenameState,
-    scrollbar_visibility: ScrollbarVisibility,
-    scrollbar_viewport: Option<ScrollbarViewport>,
-) -> Element<'_, Message> {
+fn preview_rows(state: &BatchRenameState) -> Element<'_, Message> {
     let mut rows = Column::new().spacing(4);
     let dragging_active = state.dragging_preview_source().is_some();
     let editing_source = state.editing_target_name_source();
@@ -695,22 +676,10 @@ fn preview_rows(
     let scroll_region = ScrollbarRegion::BatchRenamePreview;
     let scroller = scrollable(smooth_scroll_content(rows, scroll_region.clone()))
         .id(smooth_scroll_id(&scroll_region))
-        .direction(enhanced_vertical_scrollbar_direction(
-            scrollbar_visibility,
-            6.0,
-        ))
-        .style(enhanced_scrollbar_style(scrollbar_visibility))
-        .height(Length::Fixed(BATCH_RENAME_PREVIEW_HEIGHT))
-        .on_scroll(scrollbar_on_scroll(scroll_region.clone(), |_| {
-            Message::BatchRenamePreviewScrolled
-        }));
-    let scroller = enhanced_scrollbar(
-        scroller,
-        scrollbar_visibility,
-        scrollbar_viewport,
-        ScrollbarAxis::Vertical,
-        6.0,
-    );
+        .direction(enhanced_vertical_scrollbar_direction())
+        .style(enhanced_scrollbar_style)
+        .height(Length::Fixed(BATCH_RENAME_PREVIEW_HEIGHT));
+    let scroller = enhanced_scrollbar(scroller, ScrollbarAxis::Vertical);
 
     // 表头/行单元文本一律单行测量(Wrapping::None)+ cell clip 水平裁剪:
     // iced 默认 Word 换行,窄面板压窄列时会把行高撑到两倍以上(无头布局

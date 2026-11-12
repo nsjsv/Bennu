@@ -87,10 +87,7 @@ impl FileBrowser {
             viewport_height,
             content_height,
         ) {
-            Some(command) => Task::batch([
-                self.show_scrollbars_temporarily(ScrollbarRegion::PreviewDocument),
-                command.map(Message::Preview),
-            ]),
+            Some(command) => command.map(Message::Preview),
             None => Task::none(),
         }
     }

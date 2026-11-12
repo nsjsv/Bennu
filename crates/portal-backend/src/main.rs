@@ -14,7 +14,6 @@ mod picker_session;
 mod preview_host;
 mod preview_scroll;
 mod renderer_env;
-mod scrollbar_state;
 mod sidebar_bridge;
 mod sidebar_settings;
 mod subscriptions;
@@ -184,24 +183,6 @@ fn update(daemon: &mut PickerDaemon, message: Message) -> Task<Message> {
             .preview
             .scroll
             .handle_wheel_scrolled(region, daemon.keyboard_modifiers.shift(), delta),
-        Message::PreviewScrollbarLayoutVerified { region, viewport } => daemon
-            .preview
-            .scroll
-            .handle_layout_verified(region, viewport),
-        Message::PreviewScrollbarViewportChanged {
-            region,
-            viewport,
-            event,
-        } => {
-            // 视口快照先写缓存（thumb 位置跟随），内层事件回流引擎/
-            // 宿主回退路由（选择窗 ScrollbarViewportChanged 同构）。
-            daemon.preview.scroll.remember_viewport(region, viewport);
-            preview_host::handle_preview_message(daemon, *event)
-        }
-        Message::PreviewScrollbarAutoHideElapsed { generation } => {
-            daemon.preview.scroll.handle_auto_hide_elapsed(generation);
-            Task::none()
-        }
         Message::WindowFocused(window) => {
             // 预览窗 Esc 分层/失焦关闭（步骤 3）读这份焦点簿记。
             daemon.preview.focused_window = Some(window);
@@ -219,7 +200,7 @@ fn update(daemon: &mut PickerDaemon, message: Message) -> Task<Message> {
         Message::AnimationTick => {
             // 帧时钟仅在动画活跃期间存在（见 subscription 的挂载条件），
             // 逐窗口推进动画并批量路由产出的 Task；预览窗（chrome 淡入
-            // 淡出/预览树/惯性滚动/滚动条）一并推进。
+            // 淡出/预览树/惯性滚动）一并推进。
             let mut frame_tasks = Vec::new();
             for (window_id, session) in daemon.windows.iter_mut() {
                 frame_tasks.extend(route_session_tasks(*window_id, session.advance_frame()));
@@ -453,8 +434,7 @@ fn apply_session_message(
         }
         // 键盘导航滚动跟随：scroll_to 可穿透 SmoothScrollArea 直达内层
         // scrollable（Id 按请求路径命名空间不会串窗）；只对 List 发布局
-        // 探针——面包屑布局未变，避免无谓的面包屑滚动条淡入，探针回信
-        // 同时核实溢出联动滚动条显隐并纠偏视口缓存。
+        // 探针，回信纠偏视口缓存。
         SessionEffect::ScrollListTo { offset_y } => Task::batch([
             iced::widget::operation::scroll_to(
                 picker_session::scrollbar::scroll_id(

@@ -5,7 +5,6 @@ use iced::widget::{container, mouse_area, row, scrollable, Column, Row, Space, S
 use iced::{Alignment, Element, Length};
 
 use crate::app::panes::{BrowserPaneView, DirectoryContentAvailability};
-use crate::app::scrollbar::{enhanced_scrollbar, scrollbar_on_scroll, ScrollbarAxis};
 use crate::app::smooth_scroll::{smooth_scroll_content_with_shift, smooth_scroll_id};
 use crate::app::FileBrowser;
 use crate::appearance::{
@@ -29,6 +28,7 @@ use bennu_preview::panel_text::readable_text;
 use bennu_theme::controls::inline_text_field;
 use bennu_theme::icons::rotated_chevron_right_view;
 use bennu_theme::measured_text::measured_middle_ellipsized_text;
+use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use bennu_theme::typography::{BODY_SIZE, CAPTION_SIZE};
 
 const LIST_ROW_TEXT_SIZE: f32 = BODY_SIZE;
@@ -263,35 +263,22 @@ pub(crate) fn list_browser_view<'a>(
         }
     }
     let scrollbar_region = ScrollbarRegion::PaneList(pane.id);
-    let scrollbar_visibility = browser.scrollbar_visibility_for(&scrollbar_region);
     let list_scroll = scrollable(smooth_scroll_content_with_shift(
         rows,
         scrollbar_region.clone(),
         browser.smooth_scroll_shift_pressed(),
     ))
     .id(smooth_scroll_id(&scrollbar_region))
-    .direction(enhanced_vertical_scrollbar_direction(
-        scrollbar_visibility,
-        8.0,
-    ))
-    .style(enhanced_scrollbar_style(scrollbar_visibility))
+    .direction(enhanced_vertical_scrollbar_direction())
+    .style(enhanced_scrollbar_style)
     .width(Length::Fill)
     .height(Length::Fill)
-    .on_scroll(scrollbar_on_scroll(
-        scrollbar_region.clone(),
-        move |viewport: scrollable::Viewport| {
-            let offset = viewport.absolute_offset();
-            let bounds = viewport.bounds();
-            Message::ListScrolled(pane.id, offset.y, bounds)
-        },
-    ));
-    let list_scroll = enhanced_scrollbar(
-        list_scroll,
-        scrollbar_visibility,
-        browser.scrollbar_viewport_for(&scrollbar_region),
-        ScrollbarAxis::Vertical,
-        8.0,
-    );
+    .on_scroll(move |viewport: scrollable::Viewport| {
+        let offset = viewport.absolute_offset();
+        let bounds = viewport.bounds();
+        Message::ListScrolled(pane.id, offset.y, bounds)
+    });
+    let list_scroll = enhanced_scrollbar(list_scroll, ScrollbarAxis::Vertical);
 
     let pane_surface: Element<'a, Message> = container(list_scroll)
         .padding(LIST_CONTENT_PADDING)

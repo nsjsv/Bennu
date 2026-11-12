@@ -7,7 +7,7 @@ use iced::Padding;
 
 /// 目录行尾 chevron 图标边长（基准档）。
 pub const COLUMN_CHEVRON_ICON_SIZE: f32 = 11.0;
-/// 行与行之间的容器 spacing（基准档）。
+/// 行与行之间的间隙（基准档）。
 pub const COLUMN_CONTENT_SPACING: u32 = 2;
 /// 栏内容外层 padding [纵向, 横向]。
 pub const COLUMN_PADDING: [u16; 2] = [5, 5];
@@ -21,8 +21,9 @@ pub const COLUMN_ENTRY_SPACING: u32 = 4;
 pub const COLUMN_ENTRY_PADDING: [u16; 2] = [1, 4];
 
 /// 多栏条目几何按 scale 缩放；列宽、列间距和面板外层留白固定。
-/// `entries_top_padding` 表达 padding 加 top spacer 后首个行间距的真实
-/// 首行起点（app-ui 虚拟 spacer 布局的换算基准）。
+/// `entry_scroll_height` 是一个行槽的高度（行高 + 槽底间隙），
+/// `entries_top_padding` 是第 0 行的起点；第 i 行顶边恒为
+/// `entries_top_padding + i * entry_scroll_height`（app-ui 虚拟布局的换算基准）。
 #[derive(Debug, Clone, Copy)]
 pub struct ColumnEntryGeometry {
     pub entry_height: f32,
@@ -48,7 +49,7 @@ impl ColumnEntryGeometry {
         Self {
             entry_height,
             entry_scroll_height: entry_height + content_spacing,
-            entries_top_padding: COLUMN_PADDING[0] as f32 + content_spacing,
+            entries_top_padding: COLUMN_PADDING[0] as f32,
             content_spacing,
             text_size: scaled(COLUMN_ENTRY_TEXT_SIZE),
             chevron_icon_size: scaled(COLUMN_CHEVRON_ICON_SIZE),
@@ -75,10 +76,7 @@ mod tests {
             geometry.entry_scroll_height,
             COLUMN_ENTRY_HEIGHT + COLUMN_CONTENT_SPACING as f32
         );
-        assert_eq!(
-            geometry.entries_top_padding,
-            COLUMN_PADDING[0] as f32 + COLUMN_CONTENT_SPACING as f32
-        );
+        assert_eq!(geometry.entries_top_padding, COLUMN_PADDING[0] as f32);
         assert_eq!(geometry.content_spacing, COLUMN_CONTENT_SPACING as f32);
         assert_eq!(geometry.text_size, COLUMN_ENTRY_TEXT_SIZE);
         assert_eq!(geometry.chevron_icon_size, COLUMN_CHEVRON_ICON_SIZE);
@@ -91,8 +89,7 @@ mod tests {
 
     #[test]
     fn scaled_dimensions_round_to_whole_pixels_and_padding_stays_fixed() {
-        // 任意 scale 下尺寸四舍五入到整数像素；面板 padding 固定，只有
-        // 行间距部分缩放。
+        // 任意 scale 下尺寸四舍五入到整数像素；面板 padding 固定不缩放。
         let scale = 1.35;
         let geometry = ColumnEntryGeometry::for_scale(scale);
         assert_eq!(geometry.entry_height, (COLUMN_ENTRY_HEIGHT * scale).round());
@@ -100,10 +97,7 @@ mod tests {
             geometry.content_spacing,
             (COLUMN_CONTENT_SPACING as f32 * scale).round()
         );
-        assert_eq!(
-            geometry.entries_top_padding,
-            COLUMN_PADDING[0] as f32 + (COLUMN_CONTENT_SPACING as f32 * scale).round()
-        );
+        assert_eq!(geometry.entries_top_padding, COLUMN_PADDING[0] as f32);
         assert_eq!(geometry.text_size, (COLUMN_ENTRY_TEXT_SIZE * scale).round());
         assert_eq!(
             geometry.chevron_icon_size,

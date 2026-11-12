@@ -122,3 +122,59 @@ fn child_column_preserves_pending_loaded_and_failed_mappings() {
         ColumnContent::Empty
     ));
 }
+
+/// 回归：栏实际排出的内容高度与虚拟窗口位置无关，恒等于 `content_height`，
+/// 首个渲染行的顶边恒为 `entries_top_padding + start * entry_scroll_height`。
+/// 用 iced 真实布局（空渲染器）量，覆盖前 spacer 为 0、中段、后 spacer 为 0
+/// 与整栏都在窗口内几种情况；手写公式测不出 `Column::push` 丢零高 spacer。
+#[test]
+fn laid_out_column_height_is_independent_of_the_virtual_window() {
+    use iced::advanced::layout::Limits;
+    use iced::advanced::widget::Tree;
+    use iced::Size;
+
+    for level_index in [3, 6] {
+        let geometry = ColumnGeometry::for_level(ViewDensityLevel::from_index(level_index));
+        for total in [10_usize, 200] {
+            let viewport_height = 600.0;
+            let bottom = (geometry.content_height(total) - viewport_height).max(0.0);
+            let mut offsets: Vec<f32> = (0..)
+                .map(|step| step as f32 * 37.0)
+                .take_while(|offset| *offset < bottom)
+                .collect();
+            offsets.push(bottom);
+            for offset in offsets {
+                let range = column_virtual_range_for_viewport(
+                    total,
+                    offset,
+                    viewport_height,
+                    COLUMN_OVERSCAN_ROWS,
+                    geometry,
+                );
+                let rows = (range.start..range.end).map(|_| {
+                    Space::new()
+                        .width(Length::Fill)
+                        .height(Length::Fixed(geometry.entry_height))
+                        .into()
+                });
+                let mut content: Element<'_, (), iced::Theme, ()> =
+                    virtual_column_content(range, rows, geometry).into();
+                let mut tree = Tree::new(&content);
+                let node = content.as_widget_mut().layout(
+                    &mut tree,
+                    &(),
+                    &Limits::new(Size::ZERO, Size::new(240.0, f32::INFINITY)),
+                );
+                let case = format!("level {level_index}, {total} rows, offset {offset}");
+                assert_eq!(node.size().height, geometry.content_height(total), "{case}");
+                let first_row = if range.before_height > 0.0 { 1 } else { 0 };
+                assert_eq!(
+                    node.children()[first_row].bounds().y,
+                    geometry.entries_top_padding
+                        + range.start as f32 * geometry.entry_scroll_height,
+                    "{case}"
+                );
+            }
+        }
+    }
+}

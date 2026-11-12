@@ -44,7 +44,7 @@ pub(crate) use bennu_theme::column_geometry::{
 };
 
 /// 多栏条目几何按当前档位比例缩放；列宽、列间距和面板外层留白固定。
-/// `entries_top_padding` 表达 padding 加 top spacer 后首个行间距的真实首行起点。
+/// 第 i 行顶边恒为 `entries_top_padding + i * entry_scroll_height`。
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ColumnGeometry {
     pub(crate) entry_height: f32,
@@ -73,6 +73,13 @@ impl ColumnGeometry {
             entry_padding: base.entry_padding,
             icon_density: FileEntryIconDensity::Column(level),
         }
+    }
+
+    /// 一栏 `item_count` 行的内容总高：上下 padding + 行槽。`virtual_column_content`
+    /// 排出来的高度恒等于它，与当前切出哪一段行无关；视口重钉按它算最大偏移，
+    /// 与 iced 实际能滚到的底部一致。
+    pub(crate) fn content_height(&self, item_count: usize) -> f32 {
+        2.0 * f32::from(COLUMN_PADDING[0]) + item_count as f32 * self.entry_scroll_height
     }
 }
 
@@ -191,10 +198,6 @@ fn directory_column<'a>(
     active_child: Option<&Path>,
 ) -> Element<'a, Message> {
     let geometry = ColumnGeometry::for_level(browser.user_config().columns_view_density);
-    let mut content = Column::new()
-        .spacing(geometry.content_spacing)
-        .padding(COLUMN_PADDING)
-        .width(Length::Fill);
 
     // 占位从操作队列按本栏目录派生,与条目按该目录的排序合入同一条
     // 渲染流后再切虚拟窗口,滚动数学与行渲染共用同一份序列。
@@ -202,7 +205,7 @@ fn directory_column<'a>(
         &browser.operation_queue,
         directory,
     );
-    match column_content(pane, directory) {
+    let content = match column_content(pane, directory) {
         ColumnContent::Entries(entries) => {
             let merged_items = crate::transfer_placeholders::merge_entries_with_placeholders(
                 entries,
@@ -233,14 +236,14 @@ fn directory_column<'a>(
                         ),
                     )
                 });
-            content = content.push(vertical_spacer(range.before_height));
+            let mut rows = Vec::with_capacity(range.end.saturating_sub(range.start));
             for item_index in range.start..range.end {
                 let Some(item) = merged_items.get(item_index) else {
                     break;
                 };
-                match item {
+                rows.push(match item {
                     crate::transfer_placeholders::MergedTransferItem::Entry { entry, transfer } => {
-                        content = content.push(column_entry_row(
+                        column_entry_row(
                             browser,
                             pane,
                             entry,
@@ -251,48 +254,49 @@ fn directory_column<'a>(
                                 item_index,
                                 pane.selected_paths,
                             ),
-                        ));
+                        )
                     }
                     crate::transfer_placeholders::MergedTransferItem::Placeholder(placeholder) => {
-                        content = content.push(
-                            crate::transfer_placeholder_view::transfer_placeholder_column_row(
-                                placeholder,
-                                geometry,
-                            ),
-                        );
+                        crate::transfer_placeholder_view::transfer_placeholder_column_row(
+                            placeholder,
+                            geometry,
+                        )
                     }
-                }
+                });
             }
-            content = content.push(vertical_spacer(range.after_height));
+            virtual_column_content(range, rows, geometry)
         }
-        ColumnContent::Pending => {}
+        ColumnContent::Pending => Column::new().padding(COLUMN_PADDING).width(Length::Fill),
+        ColumnContent::Empty if transfer_placeholders.is_empty() => Column::new()
+            .padding(COLUMN_PADDING)
+            .width(Length::Fill)
+            .push(column_message(empty_directory_message(pane.is_trash_view))),
         ColumnContent::Empty => {
-            if transfer_placeholders.is_empty() {
-                content = content.push(column_message(empty_directory_message(pane.is_trash_view)));
-            } else {
-                let merged_items = crate::transfer_placeholders::merge_entries_with_placeholders(
-                    &[],
-                    &transfer_placeholders,
-                    crate::transfer_placeholder_view::transfer_sort_for_pane_directory(
-                        browser, pane, directory,
-                    ),
-                );
-                for item in &merged_items {
-                    if let crate::transfer_placeholders::MergedTransferItem::Placeholder(
-                        placeholder,
-                    ) = item
-                    {
-                        content = content.push(
+            let merged_items = crate::transfer_placeholders::merge_entries_with_placeholders(
+                &[],
+                &transfer_placeholders,
+                crate::transfer_placeholder_view::transfer_sort_for_pane_directory(
+                    browser, pane, directory,
+                ),
+            );
+            let rows: Vec<_> = merged_items
+                .iter()
+                .filter_map(|item| match item {
+                    crate::transfer_placeholders::MergedTransferItem::Placeholder(placeholder) => {
+                        Some(
                             crate::transfer_placeholder_view::transfer_placeholder_column_row(
                                 placeholder,
                                 geometry,
                             ),
-                        );
+                        )
                     }
-                }
-            }
+                    crate::transfer_placeholders::MergedTransferItem::Entry { .. } => None,
+                })
+                .collect();
+            let whole = initial_virtual_range(rows.len(), geometry.entry_scroll_height, rows.len());
+            virtual_column_content(whole, rows, geometry)
         }
-    }
+    };
 
     let scrollbar_region = ScrollbarRegion::Column {
         pane_id: pane.id,
@@ -410,8 +414,29 @@ fn column_message(message: String) -> Element<'static, Message> {
         .into()
 }
 
-fn vertical_spacer(height: f32) -> Element<'static, Message> {
-    Space::new().height(Length::Fixed(height.max(0.0))).into()
+/// 栏内容：上下 padding + 前 spacer + 行槽 + 后 spacer，不用 `Column::spacing`。
+/// 行间隙放在每个行槽的底部：iced 的 `Column::push` 会丢掉高为 0 的子元素，
+/// 若由 spacing 承担间隙，spacer 归零被丢时会连带少一格间隙，整栏高度随虚拟
+/// 窗口位置跳动，滚到底时又与视口重钉的估算对不上，画面在底部来回弹。
+/// 这样排出来的高度恒为 `ColumnGeometry::content_height(总行数)`。
+fn virtual_column_content<'a, Message: 'a, Renderer: iced::advanced::Renderer + 'a>(
+    range: VirtualRange,
+    rows: impl IntoIterator<Item = Element<'a, Message, iced::Theme, Renderer>>,
+    geometry: ColumnGeometry,
+) -> Column<'a, Message, iced::Theme, Renderer> {
+    let slot_gap = iced::Padding {
+        bottom: geometry.content_spacing,
+        ..iced::Padding::ZERO
+    };
+    Column::new()
+        .padding(COLUMN_PADDING)
+        .width(Length::Fill)
+        .push(Space::new().height(Length::Fixed(range.before_height.max(0.0))))
+        .extend(
+            rows.into_iter()
+                .map(|row| container(row).width(Length::Fill).padding(slot_gap).into()),
+        )
+        .push(Space::new().height(Length::Fixed(range.after_height.max(0.0))))
 }
 
 fn column_entry_row<'a>(
@@ -731,10 +756,10 @@ mod tests {
     }
 
     #[test]
-    fn column_virtual_range_uses_padding_and_top_spacer_gap() {
+    fn column_virtual_range_starts_rows_after_the_top_padding() {
         let geometry = ColumnGeometry::for_level(crate::config::ViewDensityLevel::DEFAULT);
-        // 回归锚点：padding 加 top spacer 后首个行间距 = 7.0。
-        assert_eq!(geometry.entries_top_padding, 7.0);
+        // 回归锚点：第 0 行紧贴上 padding，间隙在每个行槽底部。
+        assert_eq!(geometry.entries_top_padding, 5.0);
 
         let first = column_virtual_range_for_viewport(
             10,
@@ -783,7 +808,7 @@ mod tests {
         );
         assert_eq!(
             default_geometry.entries_top_padding,
-            COLUMN_PADDING[0] as f32 + COLUMN_CONTENT_SPACING as f32
+            COLUMN_PADDING[0] as f32
         );
         assert_eq!(
             default_geometry.content_spacing,
@@ -805,11 +830,8 @@ mod tests {
             geometry.content_spacing,
             (COLUMN_CONTENT_SPACING as f32 * scale).round()
         );
-        // 面板 padding 固定，只有行间距部分缩放。
-        assert_eq!(
-            geometry.entries_top_padding,
-            COLUMN_PADDING[0] as f32 + (COLUMN_CONTENT_SPACING as f32 * scale).round()
-        );
+        // 面板 padding 固定不缩放。
+        assert_eq!(geometry.entries_top_padding, COLUMN_PADDING[0] as f32);
         assert_eq!(geometry.text_size, (COLUMN_ENTRY_TEXT_SIZE * scale).round());
         assert_eq!(
             geometry.entry_padding.right,

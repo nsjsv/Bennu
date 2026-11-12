@@ -282,14 +282,14 @@ impl FileBrowser {
                         let Some(viewport) = pane.column_viewports.get(&directory).copied() else {
                             continue;
                         };
-                        // 栏内容高按合并流格子数乘积保守估计(不含面板外留白),
-                        // clamp 稍紧只是不在最底部,不会二次越界;传输占位计入。
+                        // 内容高必须与栏实际排出的高度完全一致:本函数每个动画帧
+                        // 都跑,估小了会把停在真实底部的视口一帧帧往回拉,滚到底
+                        // 时画面来回弹。传输占位计入行数。
                         let merged_count =
                             crate::transfer_placeholder_view::column_transfer_item_count(
                                 self, pane, &directory,
                             );
-                        let content_height = geometry.entries_top_padding
-                            + merged_count as f32 * geometry.entry_scroll_height;
+                        let content_height = geometry.content_height(merged_count);
                         let max_offset = (content_height - viewport.height).max(0.0);
                         if viewport.offset_y > max_offset {
                             pending.push(Reclamp::Shared {
@@ -1262,6 +1262,40 @@ mod tests {
         drop(browser.advance_window_animation_frame());
 
         assert_eq!(browser.pane().column_viewports[&root].offset_y, 0.0);
+    }
+
+    /// 回归：滚动动画每帧都会重钉视口；停在栏真实底部的偏移必须原样保留，
+    /// 只有越过真实底部才收回到真实底部，否则滚到底时画面来回弹。
+    #[test]
+    fn animation_frames_keep_a_column_viewport_parked_at_the_real_bottom() {
+        let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+        let root = PathBuf::from("/workspace");
+        browser.tab_mut().current_dir = root.clone();
+        browser.tab_mut().view_mode = BrowserViewMode::Columns;
+        browser.tab_mut().entries = (0..200)
+            .map(|index| test_entry(root.join(format!("item-{index}"))))
+            .collect::<Vec<_>>()
+            .into();
+        let geometry = crate::three_column_view::ColumnGeometry::for_level(
+            browser.user_config.columns_view_density,
+        );
+        let viewport_height = 600.0;
+        let real_bottom = geometry.content_height(200) - viewport_height;
+
+        for (offset_y, expected) in [
+            (real_bottom, real_bottom),
+            (real_bottom + 40.0, real_bottom),
+        ] {
+            browser.pane_mut().column_viewports.insert(
+                root.clone(),
+                ColumnViewport {
+                    offset_y,
+                    height: viewport_height,
+                },
+            );
+            drop(browser.advance_window_animation_frame());
+            assert_eq!(browser.pane().column_viewports[&root].offset_y, expected);
+        }
     }
 
     #[test]

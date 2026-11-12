@@ -137,21 +137,6 @@ mod tests {
     }
 
     #[test]
-    fn separated_row_stride_keeps_rendered_content_height_stable() {
-        let row_height = 24.0;
-        let row_gap = 2.0;
-        let row_stride = row_height + row_gap;
-        let first_range = virtual_range_for_viewport(120, row_stride, row_stride * 40.0, 180.0, 16);
-        let second_range =
-            virtual_range_for_viewport(120, row_stride, row_stride * 85.0, 180.0, 16);
-
-        assert_eq!(
-            rendered_height_with_spacer_gaps(first_range, row_height, row_gap),
-            rendered_height_with_spacer_gaps(second_range, row_height, row_gap)
-        );
-    }
-
-    #[test]
     fn reveal_delta_handles_above_visible_and_below_items() {
         assert_eq!(
             vertical_scroll_delta_to_reveal(30.0, 40.0, 10.0, 10.0),
@@ -189,13 +174,5 @@ mod tests {
             VirtualRange::empty()
         );
         assert_eq!(initial_virtual_range(100, 0.0, 12), VirtualRange::empty());
-    }
-
-    fn rendered_height_with_spacer_gaps(range: VirtualRange, row_height: f32, row_gap: f32) -> f32 {
-        let rendered_rows = range.end.saturating_sub(range.start) as f32;
-        range.before_height
-            + range.after_height
-            + rendered_rows * row_height
-            + (rendered_rows + 1.0) * row_gap
     }
 }

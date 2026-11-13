@@ -25,7 +25,7 @@ fn an_expired_ranked_snapshot_restarts_the_search_from_the_top() {
     let next_page = pending_indexed_request(&browser);
     assert!(next_page.cursor.is_some());
 
-    drop(browser.accept_search_results(next_page, IndexedSearchOutcome::RankedSnapshotExpired));
+    drop(browser.accept_search_results(next_page, IndexedSearchOutcome::SnapshotExpired));
 
     let restarted = pending_indexed_request(&browser);
     assert_ne!(restarted.generation, generation);

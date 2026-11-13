@@ -17,6 +17,9 @@ pub struct SearchQuery {
     pub scope: SearchScope,
     pub recursive: bool,
     pub filters: SearchFilters,
+    // 旧客户端不带该字段：serde default 兜底为按相关度排。
+    #[serde(default)]
+    pub order: SearchOrder,
     pub limit: usize,
     pub cursor: Option<SearchCursor>,
 }
@@ -31,10 +34,40 @@ impl SearchQuery {
             scope: SearchScope::Global,
             recursive: true,
             filters: SearchFilters::default(),
+            order: SearchOrder::Relevance,
             limit: 50,
             cursor: None,
         }
     }
+}
+
+/// 结果顺序。按字段排时与界面目录里的排序一致：名字按文件名字节比，类型按
+/// 文件夹、文件、链接、其他再按名字，大小与时间相同再按名字，位置按所在文件夹
+/// 路径再按名字；`directories_first` 时文件夹总在前，不随方向翻转。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SearchOrder {
+    #[default]
+    Relevance,
+    Field {
+        field: SearchSortField,
+        direction: SearchSortDirection,
+        directories_first: bool,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SearchSortField {
+    Name,
+    Location,
+    Size,
+    Kind,
+    Modified,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SearchSortDirection {
+    Ascending,
+    Descending,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -258,12 +291,12 @@ pub struct TimeRange {
 }
 
 /// 翻页游标由服务生成，客户端原样回传。两种翻页是不同的概念：
-/// 按相关度排序的查询在第一页把全部命中的顺序定格在服务里，后续页按位置取，
-/// 免得每页都给全部命中重新打分；其他查询每页现场查询、按偏移跳过前面的行。
+/// 要先看到全部命中才能排的查询（有词按相关度、或按字段排）在第一页把全部命中的
+/// 顺序定格在服务里，后续页按位置取；其他查询每页现场查询、按偏移跳过前面的行。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SearchCursor {
     Offset { offset: usize },
-    RankedSnapshot { snapshot_id: u64, position: usize },
+    Snapshot { snapshot_id: u64, position: usize },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -445,13 +478,13 @@ pub enum SearchProviderFailure {
     InvalidQuery { message: String },
     #[error("search provider failed: {message}")]
     Fatal { message: String },
-    /// 定格的排序结果已被释放（或服务重启过），这次搜索要从头重新查。
-    #[error("ranked search results expired")]
-    RankedSnapshotExpired,
+    /// 定格的结果顺序已被释放（或服务重启过），这次搜索要从头重新查。
+    #[error("search result snapshot expired")]
+    SnapshotExpired,
 }
 
 /// 协议 payload 含义变化时提升版本，让新客户端能退休仍在运行的旧 daemon。
-pub const PROTOCOL_VERSION: u32 = 13;
+pub const PROTOCOL_VERSION: u32 = 14;
 
 /// app 更新后用构建标识识别遗留 daemon；本任务保留现有包版本策略。
 pub fn daemon_build_id() -> String {
@@ -506,9 +539,9 @@ pub enum SearchServiceEvent {
 mod tests {
     use super::{
         normalize_extension_tokens, normalize_size_range, parse_size_text, IndexHealth, IndexPhase,
-        IndexStatus, IndexedQueryAvailability, SearchError, SearchMatchMode, SearchQuery,
-        SearchServiceEvent, SearchServicePhase, SearchServiceStatus, MAX_QUERY_EXTENSIONS,
-        SIZE_UNIT_BYTES,
+        IndexStatus, IndexedQueryAvailability, SearchError, SearchMatchMode, SearchOrder,
+        SearchQuery, SearchServiceEvent, SearchServicePhase, SearchServiceStatus,
+        SearchSortDirection, SearchSortField, MAX_QUERY_EXTENSIONS, SIZE_UNIT_BYTES,
     };
 
     #[test]
@@ -552,6 +585,20 @@ mod tests {
         });
         let query: SearchQuery = serde_json::from_value(legacy).unwrap();
         assert_eq!(query.match_mode, SearchMatchMode::Plain);
+        assert_eq!(query.order, SearchOrder::Relevance);
+    }
+
+    #[test]
+    fn a_field_order_survives_the_wire() {
+        let mut query = SearchQuery::global(7, "needle");
+        query.order = SearchOrder::Field {
+            field: SearchSortField::Location,
+            direction: SearchSortDirection::Descending,
+            directories_first: true,
+        };
+        let decoded: SearchQuery =
+            serde_json::from_str(&serde_json::to_string(&query).unwrap()).unwrap();
+        assert_eq!(decoded, query);
     }
 
     #[test]

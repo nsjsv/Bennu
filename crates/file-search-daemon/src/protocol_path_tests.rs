@@ -79,6 +79,7 @@ async fn non_utf8_scope_hit_and_phase_round_trip_through_protocol_frames() {
         scope: SearchScope::Directory(scope.clone()),
         recursive: true,
         filters: Default::default(),
+        order: file_search::SearchOrder::Relevance,
         limit: 50,
         cursor: None,
     });
@@ -239,6 +240,7 @@ async fn socket_search_preserves_two_lossy_colliding_path_identities() {
             scope: SearchScope::Directory(first_root),
             recursive: true,
             filters: Default::default(),
+            order: file_search::SearchOrder::Relevance,
             limit: 50,
             cursor: None,
         },

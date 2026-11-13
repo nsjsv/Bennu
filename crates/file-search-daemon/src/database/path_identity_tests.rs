@@ -173,6 +173,7 @@ fn recursive_non_utf8_scope_uses_raw_component_boundaries() {
         scope: SearchScope::Directory(scope.clone()),
         recursive: true,
         filters: Default::default(),
+        order: file_search::SearchOrder::Relevance,
         limit: 100,
         cursor: None,
     };

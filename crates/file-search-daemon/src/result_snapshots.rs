@@ -9,35 +9,35 @@ use tokio::sync::Notify;
 use crate::model::SearchQuery;
 
 /// 同时保留的定格份数，与服务同时接纳的客户端数一致。
-const MAX_RANKED_SNAPSHOTS: usize = 8;
+const MAX_RESULT_SNAPSHOTS: usize = 8;
 /// 这么久没被翻页就释放，服务空闲时不留着大结果集占内存。
-const RANKED_SNAPSHOT_IDLE_LIFETIME: Duration = Duration::from_secs(5 * 60);
+const RESULT_SNAPSHOT_IDLE_LIFETIME: Duration = Duration::from_secs(5 * 60);
 
-/// 定格结果中的一条命中：文件行身份与第一页时算出的相关度（越大越相关）。
+/// 定格结果中的一条命中：文件行身份与第一页时算出的相关度（越大越相关；按字段排时为 0）。
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct RankedRow {
+pub(crate) struct SnapshotRow {
     pub(crate) rowid: i64,
     pub(crate) rank: f64,
 }
 
-/// 按相关度排序的查询在第一页定格的全部命中顺序。界面每翻一页都重新连接服务，
-/// 所以定格结果不挂在连接上，由所有连接共享，凭游标里的编号取回。
-pub(crate) struct RankedSnapshots {
-    snapshots: Mutex<Vec<RankedSnapshot>>,
+/// 要先看到全部命中才能排的查询在第一页定格的全部命中顺序。界面每翻一页都重新连接
+/// 服务，所以定格结果不挂在连接上，由所有连接共享，凭游标里的编号取回。
+pub(crate) struct ResultSnapshots {
+    snapshots: Mutex<Vec<ResultSnapshot>>,
     next_id: AtomicU64,
     inserted: Notify,
 }
 
-struct RankedSnapshot {
+struct ResultSnapshot {
     id: u64,
-    /// 去掉 query_id/limit/cursor 的查询。编号必须配同一个查询才算数，
+    /// 去掉 query_id/limit/cursor 的查询（顺序也在里面）。编号必须配同一个查询才算数，
     /// 防止编号碰撞或游标被拿去配别的查询时返回错的结果。
     query: SearchQuery,
-    rows: Arc<[RankedRow]>,
+    rows: Arc<[SnapshotRow]>,
     last_used: Instant,
 }
 
-impl Default for RankedSnapshots {
+impl Default for ResultSnapshots {
     fn default() -> Self {
         Self {
             snapshots: Mutex::new(Vec::new()),
@@ -48,11 +48,11 @@ impl Default for RankedSnapshots {
     }
 }
 
-impl RankedSnapshots {
-    pub(crate) fn insert(&self, query: &SearchQuery, rows: Arc<[RankedRow]>) -> u64 {
+impl ResultSnapshots {
+    pub(crate) fn insert(&self, query: &SearchQuery, rows: Arc<[SnapshotRow]>) -> u64 {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let mut snapshots = self.lock();
-        if snapshots.len() == MAX_RANKED_SNAPSHOTS {
+        if snapshots.len() == MAX_RESULT_SNAPSHOTS {
             let least_recently_used = snapshots
                 .iter()
                 .enumerate()
@@ -61,7 +61,7 @@ impl RankedSnapshots {
                 .expect("a full snapshot list is not empty");
             snapshots.swap_remove(least_recently_used);
         }
-        snapshots.push(RankedSnapshot {
+        snapshots.push(ResultSnapshot {
             id,
             query: snapshot_identity(query),
             rows,
@@ -72,7 +72,7 @@ impl RankedSnapshots {
         id
     }
 
-    pub(crate) fn get(&self, id: u64, query: &SearchQuery) -> Option<Arc<[RankedRow]>> {
+    pub(crate) fn get(&self, id: u64, query: &SearchQuery) -> Option<Arc<[SnapshotRow]>> {
         let identity = snapshot_identity(query);
         let mut snapshots = self.lock();
         let snapshot = snapshots
@@ -85,10 +85,10 @@ impl RankedSnapshots {
     /// 释放到期的定格，返回剩下的最早到期时刻。
     fn release_expired(&self, now: Instant) -> Option<Instant> {
         let mut snapshots = self.lock();
-        snapshots.retain(|snapshot| now < snapshot.last_used + RANKED_SNAPSHOT_IDLE_LIFETIME);
+        snapshots.retain(|snapshot| now < snapshot.last_used + RESULT_SNAPSHOT_IDLE_LIFETIME);
         snapshots
             .iter()
-            .map(|snapshot| snapshot.last_used + RANKED_SNAPSHOT_IDLE_LIFETIME)
+            .map(|snapshot| snapshot.last_used + RESULT_SNAPSHOT_IDLE_LIFETIME)
             .min()
     }
 
@@ -107,10 +107,10 @@ impl RankedSnapshots {
         }
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<RankedSnapshot>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<ResultSnapshot>> {
         self.snapshots
             .lock()
-            .expect("ranked search snapshot mutex poisoned")
+            .expect("search result snapshot mutex poisoned")
     }
 }
 
@@ -127,15 +127,15 @@ fn snapshot_identity(query: &SearchQuery) -> SearchQuery {
 mod tests {
     use super::*;
 
-    fn rows(count: i64) -> Arc<[RankedRow]> {
+    fn rows(count: i64) -> Arc<[SnapshotRow]> {
         (0..count)
-            .map(|rowid| RankedRow { rowid, rank: -1.0 })
+            .map(|rowid| SnapshotRow { rowid, rank: -1.0 })
             .collect()
     }
 
     #[test]
     fn a_snapshot_is_found_only_by_its_id_and_its_own_query() {
-        let snapshots = RankedSnapshots::default();
+        let snapshots = ResultSnapshots::default();
         let query = SearchQuery::global(1, "needle");
         let id = snapshots.insert(&query, rows(3));
 
@@ -151,29 +151,29 @@ mod tests {
 
     #[test]
     fn the_least_recently_used_snapshot_makes_room_for_a_new_one() {
-        let snapshots = RankedSnapshots::default();
-        let queries: Vec<_> = (0..=MAX_RANKED_SNAPSHOTS)
+        let snapshots = ResultSnapshots::default();
+        let queries: Vec<_> = (0..=MAX_RESULT_SNAPSHOTS)
             .map(|index| SearchQuery::global(1, format!("needle-{index}")))
             .collect();
-        let ids: Vec<_> = queries[..MAX_RANKED_SNAPSHOTS]
+        let ids: Vec<_> = queries[..MAX_RESULT_SNAPSHOTS]
             .iter()
             .map(|query| snapshots.insert(query, rows(1)))
             .collect();
         // 第一份刚被翻过页，最久没用的变成第二份。
         assert!(snapshots.get(ids[0], &queries[0]).is_some());
 
-        let newest = snapshots.insert(&queries[MAX_RANKED_SNAPSHOTS], rows(1));
+        let newest = snapshots.insert(&queries[MAX_RESULT_SNAPSHOTS], rows(1));
 
         assert!(snapshots.get(ids[0], &queries[0]).is_some());
         assert!(snapshots.get(ids[1], &queries[1]).is_none());
         assert!(snapshots
-            .get(newest, &queries[MAX_RANKED_SNAPSHOTS])
+            .get(newest, &queries[MAX_RESULT_SNAPSHOTS])
             .is_some());
     }
 
     #[test]
     fn idle_snapshots_are_released_after_their_lifetime() {
-        let snapshots = RankedSnapshots::default();
+        let snapshots = ResultSnapshots::default();
         let query = SearchQuery::global(1, "needle");
         let id = snapshots.insert(&query, rows(1));
         let inserted_at = Instant::now();
@@ -181,7 +181,7 @@ mod tests {
         assert!(snapshots.release_expired(inserted_at).is_some());
         assert!(snapshots.get(id, &query).is_some());
         assert_eq!(
-            snapshots.release_expired(Instant::now() + RANKED_SNAPSHOT_IDLE_LIFETIME),
+            snapshots.release_expired(Instant::now() + RESULT_SNAPSHOT_IDLE_LIFETIME),
             None
         );
         assert!(snapshots.get(id, &query).is_none());

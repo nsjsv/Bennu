@@ -222,6 +222,7 @@ mod tests {
             scope: SearchScope::Directory(root),
             recursive: true,
             filters: SearchFilters::default(),
+            order: crate::model::SearchOrder::Relevance,
             limit: 50,
             cursor: None,
         }

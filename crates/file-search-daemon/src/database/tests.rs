@@ -1051,7 +1051,7 @@ fn search_window_reports_more_rows_only_when_an_extra_row_exists() {
     assert!(!above_window.finished);
     assert!(matches!(
         above_window.next_cursor,
-        Some(crate::model::SearchCursor::RankedSnapshot { position: 100, .. })
+        Some(crate::model::SearchCursor::Snapshot { position: 100, .. })
     ));
 }
 

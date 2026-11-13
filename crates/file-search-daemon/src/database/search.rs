@@ -8,12 +8,12 @@ use rusqlite::{params_from_iter, Connection};
 
 use crate::error::{SearchError, SearchResult};
 use crate::model::{
-    MatchSource, SearchCursor, SearchFileKind, SearchHit, SearchMatchMode, SearchProviderFailure,
-    SearchQuery, SearchResultBatch, SearchScope, SearchTextScope,
+    MatchSource, SearchCursor, SearchFileKind, SearchHit, SearchMatchMode, SearchOrder,
+    SearchProviderFailure, SearchQuery, SearchResultBatch, SearchScope, SearchTextScope,
 };
 use crate::query_state::QueryState;
-use crate::ranked_snapshots::RankedRow;
 use crate::ranking::{relevance, RankingFacts};
+use crate::result_snapshots::SnapshotRow;
 use crate::text_matching::{
     content_term_tokens, fts_phrase, locate_content_term, name_term_tokens, SearchTerms,
 };
@@ -22,6 +22,9 @@ use super::{
     path_from_storage_bytes, path_to_storage, recursive_storage_range, RecursiveStorageRange,
     SearchDatabase,
 };
+
+#[path = "ordered_search.rs"]
+mod ordered_search;
 
 const QUERY_VISIBLE_PREDICATE: &str = "f.tombstoned = 0 AND f.observation_state = 'observable'";
 /// 命中行的列，顺序固定，后面紧跟预览列；`hit_from_row` 按这个顺序读。
@@ -107,64 +110,85 @@ impl SearchDatabase {
         query: &SearchQuery,
         query_state: &QueryState,
     ) -> SearchResult<SearchResultBatch> {
-        if query.match_mode == SearchMatchMode::Regex {
-            return self.search_regex(query);
-        }
         let terms = SearchTerms::parse(&query.terms);
         let text = TextPredicates::new(&terms, query.text_scope);
-        if text.is_empty() {
-            self.search_by_metadata(query, &terms, &text)
-        } else {
-            self.search_ranked(query, &terms, &text, query_state)
+        match query.order {
+            SearchOrder::Field {
+                field,
+                direction,
+                directories_first,
+            } => self.search_snapshot(query, &terms, &text, query_state, |connection| {
+                ordered_search::ordered_rows(
+                    connection,
+                    query,
+                    &text,
+                    field,
+                    direction,
+                    directories_first,
+                )
+            }),
+            SearchOrder::Relevance if query.match_mode == SearchMatchMode::Regex => {
+                self.search_regex(query)
+            }
+            SearchOrder::Relevance if text.is_empty() => {
+                self.search_by_metadata(query, &terms, &text)
+            }
+            // 有搜索词就按相关度排：排序要看每条命中的名字、位置和时间，拿不到「只算前一页」
+            // 的捷径。
+            SearchOrder::Relevance => {
+                self.search_snapshot(query, &terms, &text, query_state, |connection| {
+                    ranked_rows(
+                        connection,
+                        query,
+                        &terms,
+                        &text,
+                        &query_state.recent_files.last_used(),
+                    )
+                })
+            }
         }
     }
 
-    /// 有搜索词就按相关度排：排序要看每条命中的名字、位置和时间，拿不到「只算前一页」
-    /// 的捷径。所以第一页一次给全部命中打分并定格，后续页按位置回表，不再重新打分。
-    fn search_ranked(
+    /// 要先看到全部命中才能排的查询：第一页一次排好全部命中并定格，后续页按位置回表，
+    /// 不再重新排。
+    fn search_snapshot(
         &self,
         query: &SearchQuery,
         terms: &SearchTerms,
         text: &TextPredicates,
         query_state: &QueryState,
+        all_rows: impl FnOnce(&Connection) -> SearchResult<Vec<SnapshotRow>>,
     ) -> SearchResult<SearchResultBatch> {
         let limit = query.limit.clamp(1, 200);
-        let ranked_snapshots = &query_state.ranked_snapshots;
+        let result_snapshots = &query_state.result_snapshots;
         let transaction = self.connection.unchecked_transaction()?;
         let (snapshot_id, rows, position) = match query.cursor {
             None => {
-                let rows: Arc<[RankedRow]> = ranked_rows(
-                    &transaction,
-                    query,
-                    terms,
-                    text,
-                    &query_state.recent_files.last_used(),
-                )?
-                .into();
-                (ranked_snapshots.insert(query, Arc::clone(&rows)), rows, 0)
+                let rows: Arc<[SnapshotRow]> = all_rows(&transaction)?.into();
+                (result_snapshots.insert(query, Arc::clone(&rows)), rows, 0)
             }
-            Some(SearchCursor::RankedSnapshot {
+            Some(SearchCursor::Snapshot {
                 snapshot_id,
                 position,
             }) => {
                 let rows =
-                    ranked_snapshots
+                    result_snapshots
                         .get(snapshot_id, query)
                         .ok_or(SearchError::SearchFailed {
                             query_id: query.query_id,
-                            failure: SearchProviderFailure::RankedSnapshotExpired,
+                            failure: SearchProviderFailure::SnapshotExpired,
                         })?;
                 (snapshot_id, rows, position)
             }
             Some(SearchCursor::Offset { .. }) => {
                 return Err(SearchError::InvalidQuery(
-                    "relevance-ranked search pages by snapshot position, not by offset".to_owned(),
+                    "this search pages by snapshot position, not by offset".to_owned(),
                 ));
             }
         };
         if position > rows.len() {
             return Err(SearchError::InvalidQuery(
-                "ranked search cursor is past the end of its results".to_owned(),
+                "search cursor is past the end of its results".to_owned(),
             ));
         }
         let (hits, next_position) =
@@ -175,7 +199,7 @@ impl SearchDatabase {
         Ok(SearchResultBatch {
             query_id: query.query_id,
             hits,
-            next_cursor: has_more.then_some(SearchCursor::RankedSnapshot {
+            next_cursor: has_more.then_some(SearchCursor::Snapshot {
                 snapshot_id,
                 position: next_position,
             }),
@@ -292,8 +316,8 @@ fn live_offset(query: &SearchQuery) -> SearchResult<usize> {
     match query.cursor {
         None => Ok(0),
         Some(SearchCursor::Offset { offset }) => Ok(offset),
-        Some(SearchCursor::RankedSnapshot { .. }) => Err(SearchError::InvalidQuery(
-            "only relevance-ranked search pages by snapshot position".to_owned(),
+        Some(SearchCursor::Snapshot { .. }) => Err(SearchError::InvalidQuery(
+            "this search pages by offset, not by snapshot position".to_owned(),
         )),
     }
 }
@@ -383,9 +407,10 @@ fn preview_columns(query: &SearchQuery, text: &TextPredicates) -> (&'static str,
     }
 }
 
-/// 打分要用的候选列，顺序固定：rowid、只算正文的 bm25（没有全文表达式时为 NULL）、
-/// display_name、search_name、path、modified_ms。
-const CANDIDATE_COLUMNS: &str = "f.display_name, f.search_name, f.path, f.modified_ms";
+/// 排序要用的候选列，顺序固定：rowid、只算正文的 bm25（没有全文表达式时为 NULL）、
+/// display_name、search_name、path、modified_ms、kind、size。
+const CANDIDATE_COLUMNS: &str =
+    "f.display_name, f.search_name, f.path, f.modified_ms, f.kind, f.size";
 
 /// 全部候选，不在 SQL 里排序（见 `ranked_rows`）。有够 3 个字的词时由 FTS 驱动，
 /// 全可见且没有范围和过滤条件时（`UnfilteredRank`）不带可见性谓词；只有短词时按
@@ -426,7 +451,7 @@ fn ranked_rows(
     terms: &SearchTerms,
     text: &TextPredicates,
     last_used: &HashMap<std::path::PathBuf, i64>,
-) -> SearchResult<Vec<RankedRow>> {
+) -> SearchResult<Vec<SnapshotRow>> {
     let full_text_plan = if text.match_expression.is_some() {
         full_text_query_plan(connection, query, text)?
     } else {
@@ -453,7 +478,7 @@ fn ranked_rows(
                 last_used_ms: last_used.get(&path).copied(),
                 content_bm25: content_bm25.or_else(|| short_term_content.get(&rowid).copied()),
             };
-            Ok(RankedRow {
+            Ok(SnapshotRow {
                 rowid,
                 rank: relevance(terms, &facts, now_ms),
             })
@@ -516,7 +541,7 @@ fn ranked_page(
     query: &SearchQuery,
     terms: &SearchTerms,
     text: &TextPredicates,
-    rows: &[RankedRow],
+    rows: &[SnapshotRow],
     mut position: usize,
     limit: usize,
 ) -> SearchResult<(Vec<SearchHit>, usize)> {

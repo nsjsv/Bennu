@@ -82,7 +82,7 @@ async fn ranked_pages_continue_across_connections_and_report_expiry() {
         let Some(cursor) = batch.next_cursor else {
             break;
         };
-        if let SearchCursor::RankedSnapshot { snapshot_id, .. } = cursor {
+        if let SearchCursor::Snapshot { snapshot_id, .. } = cursor {
             first_snapshot.get_or_insert(snapshot_id);
         }
         query.query_id += 1;
@@ -92,7 +92,7 @@ async fn ranked_pages_continue_across_connections_and_report_expiry() {
     assert_eq!(names, ["note-0.txt", "note-1.txt", "note-2.txt"]);
 
     let mut expired = SearchQuery::global(9, "needle");
-    expired.cursor = Some(SearchCursor::RankedSnapshot {
+    expired.cursor = Some(SearchCursor::Snapshot {
         snapshot_id: first_snapshot.unwrap().wrapping_add(1_000),
         position: 1,
     });
@@ -101,7 +101,7 @@ async fn ranked_pages_continue_across_connections_and_report_expiry() {
         error,
         SearchError::SearchFailed {
             query_id: 9,
-            failure: SearchProviderFailure::RankedSnapshotExpired,
+            failure: SearchProviderFailure::SnapshotExpired,
         }
     ));
 

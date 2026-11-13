@@ -366,8 +366,8 @@ where
 {
     let listener = bound_socket.take_tokio_listener()?;
     let query_state = Arc::new(query_state);
-    let ranked_snapshot_release =
-        tokio::spawn(Arc::clone(&query_state.ranked_snapshots).release_idle_snapshots());
+    let result_snapshot_release =
+        tokio::spawn(Arc::clone(&query_state.result_snapshots).release_idle_snapshots());
     let (shutdown_requested_sender, mut shutdown_requested_receiver) = watch::channel(false);
     let (shutdown_finished_sender, _) = watch::channel(false);
     let (client_ready_sender, mut client_ready_receiver) = mpsc::unbounded_channel();
@@ -426,7 +426,7 @@ where
 
     shutdown_requested_sender.send_replace(true);
     drop(listener);
-    ranked_snapshot_release.abort();
+    result_snapshot_release.abort();
     for _ in 0..client_tasks.len() {
         let _ = client_ready_receiver.recv().await;
     }

@@ -29,10 +29,11 @@ pub use model::{
     daemon_build_id, normalize_extension_tokens, normalize_size_range, parse_size_text,
     ExtractorCapability, FilterInputError, IndexHealth, IndexPhase, IndexStatus,
     IndexedQueryAvailability, MatchSource, MimePattern, SearchCursor, SearchEntryTypeRule,
-    SearchFileKind, SearchFilters, SearchHit, SearchMatchMode, SearchPathConfigurationPhase,
-    SearchPathConfigurationStatus, SearchProviderFailure, SearchQuery, SearchResultBatch,
-    SearchRootAvailability, SearchRootStatus, SearchScope, SearchServiceEvent, SearchServicePhase,
-    SearchServiceRequest, SearchServiceStatus, SearchTextScope, SizeRange, TimeRange,
+    SearchFileKind, SearchFilters, SearchHit, SearchMatchMode, SearchOrder,
+    SearchPathConfigurationPhase, SearchPathConfigurationStatus, SearchProviderFailure,
+    SearchQuery, SearchResultBatch, SearchRootAvailability, SearchRootStatus, SearchScope,
+    SearchServiceEvent, SearchServicePhase, SearchServiceRequest, SearchServiceStatus,
+    SearchSortDirection, SearchSortField, SearchTextScope, SizeRange, TimeRange,
     MAX_EXTENSION_TOKEN_BYTES, MAX_QUERY_EXTENSIONS, PROTOCOL_VERSION, SIZE_UNIT_BYTES,
 };
 pub use protocol::{

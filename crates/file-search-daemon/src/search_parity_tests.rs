@@ -81,6 +81,7 @@ fn directory_query(root: &Path, terms: &str, filters: SearchFilters) -> SearchQu
         scope: SearchScope::Directory(root.to_path_buf()),
         recursive: true,
         filters,
+        order: file_search::SearchOrder::Relevance,
         limit: 200,
         cursor: None,
     }

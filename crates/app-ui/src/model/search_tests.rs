@@ -16,6 +16,7 @@ fn directory_query(query_id: u64, terms: &str) -> SearchQuery {
         scope: SearchScope::Directory(PathBuf::from("/workspace")),
         recursive: true,
         filters: Default::default(),
+        order: file_search::SearchOrder::Relevance,
         limit: SEARCH_RESULT_WINDOW,
         cursor: None,
     }

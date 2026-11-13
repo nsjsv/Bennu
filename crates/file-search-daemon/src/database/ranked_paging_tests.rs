@@ -107,7 +107,7 @@ fn a_released_snapshot_is_reported_as_expired() {
         error,
         SearchError::SearchFailed {
             query_id: 1,
-            failure: SearchProviderFailure::RankedSnapshotExpired,
+            failure: SearchProviderFailure::SnapshotExpired,
         }
     ));
 }
@@ -128,7 +128,7 @@ fn a_cursor_must_match_the_kind_of_paging_its_query_uses() {
     ));
 
     let mut by_metadata = SearchQuery::global(2, "");
-    by_metadata.cursor = Some(SearchCursor::RankedSnapshot {
+    by_metadata.cursor = Some(SearchCursor::Snapshot {
         snapshot_id: 1,
         position: 0,
     });
@@ -148,10 +148,10 @@ fn a_snapshot_position_past_its_end_is_rejected() {
     }
     let query_state = QueryState::default();
     let (mut query, page) = first_page(&database, &query_state, 1);
-    let Some(SearchCursor::RankedSnapshot { snapshot_id, .. }) = page.next_cursor else {
+    let Some(SearchCursor::Snapshot { snapshot_id, .. }) = page.next_cursor else {
         panic!("a ranked first page with more hits returns a snapshot cursor");
     };
-    query.cursor = Some(SearchCursor::RankedSnapshot {
+    query.cursor = Some(SearchCursor::Snapshot {
         snapshot_id,
         position: 3,
     });

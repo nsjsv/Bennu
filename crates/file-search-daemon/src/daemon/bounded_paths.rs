@@ -42,10 +42,6 @@ impl BoundedPathSet {
         self.estimated_bytes = 0;
     }
 
-    pub(super) fn contains(&self, path: &Path) -> bool {
-        self.paths.contains(path)
-    }
-
     pub(super) fn remove(&mut self, path: &Path) -> bool {
         if !self.paths.remove(path) {
             return false;
@@ -54,10 +50,6 @@ impl BoundedPathSet {
             .estimated_bytes
             .saturating_sub(estimated_path_bytes(path));
         true
-    }
-
-    pub(super) fn iter(&self) -> impl Iterator<Item = &Path> {
-        self.paths.iter().map(Box::as_ref)
     }
 
     pub(super) fn retain(&mut self, mut keep: impl FnMut(&Path) -> bool) {
@@ -79,14 +71,6 @@ impl BoundedPathSet {
             .map(PathBuf::from)
             .collect()
     }
-
-    pub(super) fn len(&self) -> usize {
-        self.paths.len()
-    }
-
-    pub(super) fn estimated_bytes(&self) -> usize {
-        self.estimated_bytes
-    }
 }
 
 pub(super) fn estimated_path_bytes(path: &Path) -> usize {
@@ -106,9 +90,9 @@ mod tests {
         let mut paths = BoundedPathSet::new(1, estimated_path_bytes(&path));
 
         paths.insert(path.clone()).unwrap();
-        paths.insert(path).unwrap();
+        paths.insert(path.clone()).unwrap();
 
-        assert_eq!(paths.len(), 1);
+        assert_eq!(paths.take_paths(), vec![path]);
     }
 
     #[test]
@@ -118,27 +102,12 @@ mod tests {
         let mut count_limited = BoundedPathSet::new(1, usize::MAX);
         count_limited.insert(first.clone()).unwrap();
         assert!(count_limited.insert(second.clone()).is_err());
-        assert_eq!(count_limited.len(), 1);
+        assert_eq!(count_limited.take_paths(), vec![first.clone()]);
 
         let mut byte_limited = BoundedPathSet::new(2, estimated_path_bytes(&first));
-        byte_limited.insert(first).unwrap();
+        byte_limited.insert(first.clone()).unwrap();
         assert!(byte_limited.insert(second).is_err());
-        assert_eq!(byte_limited.len(), 1);
-    }
-
-    #[test]
-    fn observed_home_scale_fits_the_realtime_path_budget() {
-        let mut paths = BoundedPathSet::new(96_000, 32_000_000);
-        for position in 0..78_710 {
-            paths
-                .insert(PathBuf::from(format!(
-                    "/home/yuanming/work/project-{position:05}/target/debug/build/dependency-{position:05}/out/generated"
-                )))
-                .unwrap();
-        }
-
-        assert_eq!(paths.len(), 78_710);
-        assert!(paths.estimated_bytes() <= 32_000_000);
+        assert_eq!(byte_limited.take_paths(), vec![first]);
     }
 
     #[cfg(unix)]
@@ -153,13 +122,9 @@ mod tests {
 
         paths.insert(first.clone()).unwrap();
         paths.insert(second.clone()).unwrap();
-
-        assert_eq!(paths.len(), 2);
-        assert!(paths.contains(&first));
-        assert!(paths.contains(&second));
         assert!(paths.remove(&first));
-        assert!(!paths.contains(&first));
-        assert!(paths.contains(&second));
+
+        assert_eq!(paths.take_paths(), vec![second]);
     }
 
     #[test]
@@ -170,11 +135,9 @@ mod tests {
         let mut paths = BoundedPathSet::new(1, capacity);
 
         paths.insert(first.clone()).unwrap();
-        assert!(paths.contains(&first));
         assert!(paths.remove(&first));
         paths.insert(second.clone()).unwrap();
 
-        assert!(!paths.contains(&first));
-        assert!(paths.contains(&second));
+        assert_eq!(paths.take_paths(), vec![second]);
     }
 }

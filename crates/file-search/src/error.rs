@@ -18,8 +18,6 @@ pub enum SearchError {
         path: PathBuf,
         source: std::io::Error,
     },
-    #[error("search watch error: {0}")]
-    Watch(#[from] notify::Error),
     #[error("search database error: {0}")]
     Database(#[from] rusqlite::Error),
     #[error("search database schema {found} is newer than supported schema {supported}")]

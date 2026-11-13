@@ -13,8 +13,8 @@ repository.workspace = true
 file-core = { path = "../file-core" }
 file-search = { path = "../file-search" }
 libc = "0.2"
-notify.workspace = true
 quick-xml = "0.39.4"
+rustix = { workspace = true, features = ["event"] }
 rusqlite = { version = "0.32.1", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json.workspace = true

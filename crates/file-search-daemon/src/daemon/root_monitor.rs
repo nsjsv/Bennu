@@ -1,18 +1,23 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io;
+use std::mem::MaybeUninit;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 
 use file_core::mount_table::PROC_SELF_MOUNTINFO;
-use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use rustix::fs::inotify::{self, CreateFlags, ReadFlags};
+use rustix::io::Errno;
 
 use crate::error::{SearchError, SearchResult};
 use crate::logging::bounded_search_log_detail;
 
+use super::inotify_watch::directory_watch_flags;
 use super::DaemonState;
 
 /// 监视线程被唤醒的原因。
@@ -37,7 +42,7 @@ impl RootAvailabilityMonitor {
             source,
         })?;
         let wake = Arc::new(MonitorWake::new()?);
-        let ancestors = AncestorWatch::new(Arc::clone(&wake))?;
+        let ancestors = AncestorWatch::new()?;
         let thread_wake = Arc::clone(&wake);
         let thread = thread::Builder::new()
             .name("file-search-root-monitor".to_owned())
@@ -79,7 +84,7 @@ fn follow_root_changes(
                 "search root availability could not be reconciled"
             );
         }
-        change = match wait_for_change(mountinfo, wake) {
+        change = match wait_for_change(mountinfo, wake, &mut ancestors) {
             Ok(Some(change)) => change,
             Ok(None) => return,
             Err(error) => {
@@ -92,19 +97,41 @@ fn follow_root_changes(
     }
 }
 
-fn wait_for_change(mountinfo: &File, wake: &MonitorWake) -> io::Result<Option<RootChange>> {
-    let mut descriptors = [
-        libc::pollfd {
-            fd: mountinfo.as_raw_fd(),
-            events: libc::POLLPRI,
-            revents: 0,
-        },
-        libc::pollfd {
-            fd: wake.event.as_raw_fd(),
-            events: libc::POLLIN,
-            revents: 0,
-        },
-    ];
+fn wait_for_change(
+    mountinfo: &File,
+    wake: &MonitorWake,
+    ancestors: &mut AncestorWatch,
+) -> io::Result<Option<RootChange>> {
+    loop {
+        let mut descriptors = [
+            libc::pollfd {
+                fd: mountinfo.as_raw_fd(),
+                events: libc::POLLPRI,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: wake.event.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: ancestors.inotify.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            },
+        ];
+        if let Some(change) = wait_once(&mut descriptors, wake, ancestors)? {
+            return Ok(change);
+        }
+    }
+}
+
+/// 等一次 poll。只有上级目录里与搜索位置无关的变化时返回 None，继续等。
+fn wait_once(
+    descriptors: &mut [libc::pollfd; 3],
+    wake: &MonitorWake,
+    ancestors: &mut AncestorWatch,
+) -> io::Result<Option<Option<RootChange>>> {
     loop {
         let ready = unsafe {
             libc::poll(
@@ -121,20 +148,23 @@ fn wait_for_change(mountinfo: &File, wake: &MonitorWake) -> io::Result<Option<Ro
             return Err(error);
         }
     }
-    if descriptors[1].revents & libc::POLLIN != 0 {
+    let woken = descriptors[1].revents & libc::POLLIN != 0;
+    if woken {
         wake.drain();
     }
     if wake.stop.load(Ordering::Acquire) {
-        return Ok(None);
+        return Ok(Some(None));
     }
     // 挂载表变化后内核对 mountinfo 报 POLLPRI|POLLERR，poll 本身会记下已看过这次变化（同 GLib GUnixMountMonitor）。
     if descriptors[0].revents & (libc::POLLPRI | libc::POLLERR) != 0 {
-        return Ok(Some(RootChange::MountTable));
+        return Ok(Some(Some(RootChange::MountTable)));
     }
-    Ok(Some(RootChange::RootEntries))
+    let ancestors_changed =
+        descriptors[2].revents & libc::POLLIN != 0 && ancestors.drain_relevant_events()?;
+    Ok((woken || ancestors_changed).then_some(Some(RootChange::RootEntries)))
 }
 
-/// 用 eventfd 而不是管道：唤醒只是累加计数，再多次唤醒也不会把写端塞满、卡住 inotify 回调。
+/// 用 eventfd 而不是管道：唤醒只是累加计数，再多次唤醒也不会把写端塞满。
 struct MonitorWake {
     event: OwnedFd,
     stop: AtomicBool,
@@ -179,51 +209,30 @@ impl MonitorWake {
 }
 
 /// 每个位置盯它最近一层存在的上级目录（同 KDE `KDirWatch` 对不存在路径的做法）：
-/// 位置存在时就是父目录，能看到它被建、被删、被换成链接。
+/// 位置存在时就是父目录，能看到它被建、被删、被换成链接。只有几项，用自己的小 inotify，
+/// 和挂载表一起在监视线程的 poll 里等。
 struct AncestorWatch {
-    watcher: RecommendedWatcher,
-    followed_roots: Arc<Mutex<Vec<PathBuf>>>,
-    watched: BTreeSet<PathBuf>,
+    inotify: OwnedFd,
+    followed_roots: Vec<PathBuf>,
+    watched: BTreeMap<PathBuf, i32>,
 }
 
 impl AncestorWatch {
-    fn new(wake: Arc<MonitorWake>) -> SearchResult<Self> {
-        let followed_roots = Arc::new(Mutex::new(Vec::<PathBuf>::new()));
-        let handler_roots = Arc::clone(&followed_roots);
-        let watcher = notify::recommended_watcher(move |event: notify::Result<Event>| {
-            let relevant = match &event {
-                Ok(event) => {
-                    !matches!(event.kind, EventKind::Access(_))
-                        && (event.paths.is_empty()
-                            || touches_followed_root(
-                                &event.paths,
-                                &handler_roots
-                                    .lock()
-                                    .expect("search root monitor roots mutex poisoned"),
-                            ))
-                }
-                Err(_) => true,
-            };
-            if relevant {
-                wake.wake();
-            }
-        })
-        .map_err(|error| {
-            SearchError::WorkerFailed(format!("could not watch search root parents: {error}"))
-        })?;
+    fn new() -> SearchResult<Self> {
+        let inotify =
+            inotify::init(CreateFlags::CLOEXEC | CreateFlags::NONBLOCK).map_err(|error| {
+                SearchError::WorkerFailed(format!("could not watch search root parents: {error}"))
+            })?;
         Ok(Self {
-            watcher,
-            followed_roots,
-            watched: BTreeSet::new(),
+            inotify,
+            followed_roots: Vec::new(),
+            watched: BTreeMap::new(),
         })
     }
 
     /// 反复计算直到监听集合不再变：刚算完上级、还没盯上时被建出来的子目录，下一轮就会算进去。
     fn follow(&mut self, roots: &[PathBuf]) {
-        *self
-            .followed_roots
-            .lock()
-            .expect("search root monitor roots mutex poisoned") = roots.to_vec();
+        self.followed_roots = roots.to_vec();
         let mut applied = None;
         loop {
             let wanted = roots
@@ -233,17 +242,27 @@ impl AncestorWatch {
             if applied.as_ref() == Some(&wanted) {
                 return;
             }
-            let stale: Vec<PathBuf> = self.watched.difference(&wanted).cloned().collect();
+            let stale: Vec<PathBuf> = self
+                .watched
+                .keys()
+                .filter(|directory| !wanted.contains(*directory))
+                .cloned()
+                .collect();
             for directory in stale {
-                // 目录已被删时内核早已撤掉监听，这里报错也无妨。
-                let _ = self.watcher.unwatch(&directory);
-                self.watched.remove(&directory);
+                if let Some(descriptor) = self.watched.remove(&directory) {
+                    // 目录已被删时内核早已撤掉监听，这里报错也无妨。
+                    let _ = inotify::remove_watch(&self.inotify, descriptor);
+                }
             }
-            let added: Vec<PathBuf> = wanted.difference(&self.watched).cloned().collect();
+            let added: Vec<PathBuf> = wanted
+                .iter()
+                .filter(|directory| !self.watched.contains_key(*directory))
+                .cloned()
+                .collect();
             for directory in added {
-                match self.watcher.watch(&directory, RecursiveMode::NonRecursive) {
-                    Ok(()) => {
-                        self.watched.insert(directory);
+                match inotify::add_watch(&self.inotify, &directory, directory_watch_flags()) {
+                    Ok(descriptor) => {
+                        self.watched.insert(directory, descriptor);
                     }
                     Err(error) => {
                         let log_error = bounded_search_log_detail(&error.to_string());
@@ -257,6 +276,46 @@ impl AncestorWatch {
                 }
             }
             applied = Some(wanted);
+        }
+    }
+
+    /// 读完已到的事件。队列溢出、监听被内核撤掉，或事件落在某个位置本身或它的上级上，
+    /// 都算与搜索位置有关。
+    fn drain_relevant_events(&mut self) -> io::Result<bool> {
+        let mut buffer = [MaybeUninit::<u8>::uninit(); 4096];
+        let mut reader = inotify::Reader::new(&self.inotify, &mut buffer);
+        let mut relevant = false;
+        loop {
+            let event = match reader.next() {
+                Ok(event) => event,
+                Err(Errno::AGAIN) => return Ok(relevant),
+                Err(Errno::INTR) => continue,
+                Err(error) => return Err(error.into()),
+            };
+            if event
+                .events()
+                .intersects(ReadFlags::QUEUE_OVERFLOW | ReadFlags::IGNORED)
+            {
+                if event.events().contains(ReadFlags::IGNORED) {
+                    self.watched
+                        .retain(|_, descriptor| *descriptor != event.wd());
+                }
+                relevant = true;
+                continue;
+            }
+            let Some(directory) = self
+                .watched
+                .iter()
+                .find(|(_, descriptor)| **descriptor == event.wd())
+                .map(|(directory, _)| directory.clone())
+            else {
+                continue;
+            };
+            let path = match event.file_name() {
+                Some(name) => directory.join(OsStr::from_bytes(name.to_bytes())),
+                None => directory,
+            };
+            relevant |= touches_followed_root(&[path], &self.followed_roots);
         }
     }
 }

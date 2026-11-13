@@ -14,6 +14,7 @@ use crate::{
 };
 
 mod bounded_paths;
+mod inotify_watch;
 mod lifecycle;
 mod maintenance;
 mod memory;
@@ -23,6 +24,7 @@ mod root_mount;
 mod watch_budget_patrol;
 mod watch_coverage;
 mod watch_ingress;
+mod watched_tree;
 mod work_queue;
 
 #[cfg(test)]
@@ -38,7 +40,7 @@ use self::path_configuration::{
 use self::root_monitor::{RootAvailabilityMonitor, RootChange};
 use self::root_mount::observe_root_mounts;
 #[cfg(test)]
-use self::watch_ingress::changed_paths_from_watch_event;
+use self::watch_ingress::PendingWatchPathBatch;
 #[cfg(test)]
 use self::work_queue::{
     dirty_root_retry_delay, PendingDaemonWork, WorkOutcome, DIRTY_ROOT_QUIET_WINDOW,

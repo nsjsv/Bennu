@@ -6,8 +6,6 @@ use std::path::{Path, PathBuf};
 use crate::database::{SearchDatabase, MAX_KNOWN_ENTRY_PAGE_ENTRIES};
 use crate::error::SearchResult;
 
-use super::bounded_paths::BoundedPathSet;
-
 pub(super) const WATCH_BUDGET_PATROL_BATCH_SIZE: usize = 128;
 const MAX_QUERY_PAGES_PER_BATCH: usize = 8;
 
@@ -44,7 +42,7 @@ impl WatchBudgetPatrol {
     pub(super) fn next_directories(
         &mut self,
         overflow_roots: &BTreeMap<PathBuf, PathBuf>,
-        registered_directories: &BoundedPathSet,
+        is_watched: impl Fn(&Path) -> bool,
     ) -> SearchResult<Vec<PathBuf>> {
         self.synchronize_roots(overflow_roots);
         let Some(root) = self.next_root(overflow_roots) else {
@@ -58,7 +56,7 @@ impl WatchBudgetPatrol {
 
         if let Some(first_unwatched_path) = cursor.first_unwatched_path.take() {
             cursor.after_path = Some(first_unwatched_path.clone());
-            if !registered_directories.contains(&first_unwatched_path) {
+            if !is_watched(&first_unwatched_path) {
                 directories.push(first_unwatched_path);
             }
         }
@@ -82,7 +80,7 @@ impl WatchBudgetPatrol {
             cursor.after_path = page.last().cloned();
             directories.extend(
                 page.into_iter()
-                    .filter(|path| !registered_directories.contains(path))
+                    .filter(|path| !is_watched(path))
                     .take(WATCH_BUDGET_PATROL_BATCH_SIZE - directories.len()),
             );
             if reached_end {
@@ -171,22 +169,20 @@ mod tests {
         }
         drop(database);
 
-        let mut registered = BoundedPathSet::new(1_025, usize::MAX);
-        for position in 0..=1_024 {
-            registered
-                .insert(root.join(format!("d{position:04}")))
-                .unwrap();
-        }
+        let registered = (0..=1_024)
+            .map(|position| root.join(format!("d{position:04}")))
+            .collect::<std::collections::BTreeSet<_>>();
+        let is_watched = |path: &Path| registered.contains(path);
         let overflow_roots = BTreeMap::from([(root.clone(), root.join("d0000"))]);
         let mut patrol = WatchBudgetPatrol::open(&database_path).unwrap();
 
         assert!(patrol
-            .next_directories(&overflow_roots, &registered)
+            .next_directories(&overflow_roots, is_watched)
             .unwrap()
             .is_empty());
         assert_eq!(
             patrol
-                .next_directories(&overflow_roots, &registered)
+                .next_directories(&overflow_roots, is_watched)
                 .unwrap(),
             vec![root.join("d1025")]
         );
@@ -221,23 +217,23 @@ mod tests {
             .unwrap();
         drop(database);
 
-        let mut registered = BoundedPathSet::new(2, usize::MAX);
-        registered.insert(first_root.clone()).unwrap();
-        registered.insert(first_root_directory).unwrap();
+        let registered =
+            std::collections::BTreeSet::from([first_root.clone(), first_root_directory]);
+        let is_watched = |path: &Path| registered.contains(path);
         let overflow_roots = BTreeMap::from([(first_root.clone(), first_unwatched.clone())]);
         let mut patrol = WatchBudgetPatrol::open(&database_path).unwrap();
 
         let first_page = patrol
-            .next_directories(&overflow_roots, &registered)
+            .next_directories(&overflow_roots, is_watched)
             .unwrap();
         let second_page = patrol
-            .next_directories(&overflow_roots, &registered)
+            .next_directories(&overflow_roots, is_watched)
             .unwrap();
         let final_page = patrol
-            .next_directories(&overflow_roots, &registered)
+            .next_directories(&overflow_roots, is_watched)
             .unwrap();
         let wrapped_page = patrol
-            .next_directories(&overflow_roots, &registered)
+            .next_directories(&overflow_roots, is_watched)
             .unwrap();
 
         assert_eq!(first_page.len(), WATCH_BUDGET_PATROL_BATCH_SIZE);

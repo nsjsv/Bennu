@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use notify::{Event, EventKind};
 use rusqlite::Connection;
 use tempfile::tempdir;
 
@@ -848,22 +847,14 @@ fn hybrid_watch_budget_patrol_is_a_healthy_maintenance_mode() {
 }
 
 #[test]
-fn watch_event_paths_are_deduplicated_and_access_events_are_ignored() {
-    let duplicate = PathBuf::from("/tmp/repeated");
-    let changed = changed_paths_from_watch_event(
-        Event::new(EventKind::Any)
-            .add_path(duplicate.clone())
-            .add_path(duplicate.clone()),
-    )
-    .unwrap();
-    assert_eq!(changed, vec![duplicate]);
+fn a_path_reported_twice_is_queued_once() {
+    let repeated = PathBuf::from("/tmp/repeated");
+    let mut batch = PendingWatchPathBatch::default();
 
-    let access = changed_paths_from_watch_event(
-        Event::new(EventKind::Access(notify::event::AccessKind::Any))
-            .add_path(PathBuf::from("/tmp/ignored")),
-    )
-    .unwrap();
-    assert!(access.is_empty());
+    batch.absorb_path(repeated.clone()).unwrap();
+    batch.absorb_path(repeated.clone()).unwrap();
+
+    assert_eq!(batch.into_changed_paths(), vec![repeated]);
 }
 
 #[test]

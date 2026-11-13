@@ -71,14 +71,66 @@ fn name_only_search_excludes_content_matches_and_marks_name_hits() {
     assert!(batch.hits[0].snippet.is_none());
 }
 
+/// The FTS MATCH must be the outer loop. Any other order makes SQLite probe the
+/// full-text index once per file row (`INDEX 0:=M…`), which turns a 3 ms search
+/// into a minute on a 360 000-file index.
+fn assert_full_text_drives_the_plan(plan: &[String]) {
+    assert!(
+        plan.first()
+            .is_some_and(|step| step.starts_with("SCAN file_search_fts VIRTUAL TABLE")),
+        "the full-text match does not drive the query: {plan:#?}"
+    );
+    assert!(
+        !plan
+            .iter()
+            .any(|step| step.contains("file_search_fts VIRTUAL TABLE INDEX 0:=")),
+        "the full-text index is probed once per file row: {plan:#?}"
+    );
+}
+
+#[test]
+fn full_text_match_drives_every_scope_and_text_scope() {
+    let database = SearchDatabase::in_memory().unwrap();
+    database
+        .upsert_file(&indexed_file(
+            "/workspace/notes/needle.txt",
+            "needle.txt",
+            "needle in content",
+        ))
+        .unwrap();
+    let mut hidden = indexed_file("/workspace/gone.txt", "needle-gone.txt", "needle");
+    database.upsert_file(&hidden).unwrap();
+    hidden.content = None;
+    hidden.extraction_status = ExtractionStatus::ReadFailed {
+        message: "permission denied".to_owned(),
+    };
+
+    for hidden_rows in [false, true] {
+        if hidden_rows {
+            database.upsert_inaccessible_file(&hidden).unwrap();
+        }
+        for scope in [
+            SearchScope::Global,
+            SearchScope::Directory(PathBuf::from("/workspace")),
+        ] {
+            for recursive in [true, false] {
+                for text_scope in [SearchTextScope::NameOnly, SearchTextScope::NameAndContent] {
+                    // 表头排序与相关度用同一条候选语句，只看这一条。
+                    let mut query = SearchQuery::global(1, "needle");
+                    query.scope = scope.clone();
+                    query.recursive = recursive;
+                    query.text_scope = text_scope;
+                    assert_full_text_drives_the_plan(&database.search_plan(&query).unwrap());
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn ranked_pages_stay_consistent_without_temporary_sorting() {
     fn assert_ranked_candidate_plan(plan: &[String]) {
-        assert!(
-            plan.iter()
-                .any(|step| step.contains("file_search_fts VIRTUAL TABLE INDEX")),
-            "the ranked snapshot was not driven by the FTS5 MATCH: {plan:#?}"
-        );
+        assert_full_text_drives_the_plan(plan);
         assert!(
             !plan.iter().any(|step| step.contains("USE TEMP B-TREE")),
             "the ranked snapshot query sorted in a temporary b-tree: {plan:#?}"

@@ -16,9 +16,7 @@ use crate::model::{
 use crate::result_snapshots::SnapshotRow;
 use crate::text_matching::SearchTerms;
 
-use super::{
-    candidate_sql, full_text_query_plan, path_from_storage_bytes, FullTextQueryPlan, TextPredicates,
-};
+use super::{candidate_sql, path_from_storage_bytes, TextPredicates};
 
 struct OrderedCandidate {
     rowid: i64,
@@ -76,12 +74,7 @@ fn plain_candidates(
     text: &TextPredicates,
     filters: &ResolvedFilters<'_>,
 ) -> SearchResult<Vec<OrderedCandidate>> {
-    let full_text_plan = if text.match_expression.is_some() {
-        full_text_query_plan(connection, query, text)?
-    } else {
-        FullTextQueryPlan::FilterWithMetadata
-    };
-    let (sql, values) = candidate_sql(query, text, filters, full_text_plan);
+    let (sql, values) = candidate_sql(query, text, filters);
     let mut statement = connection.prepare(&sql)?;
     let candidates = statement
         .query_map(params_from_iter(values), candidate_from_row)?
@@ -97,12 +90,7 @@ fn regex_candidates(
 ) -> SearchResult<Vec<OrderedCandidate>> {
     let name_regex = query.match_mode.name_regex(&query.terms)?;
     let no_terms = TextPredicates::new(&SearchTerms::parse(""), SearchTextScope::NameOnly);
-    let (sql, values) = candidate_sql(
-        query,
-        &no_terms,
-        filters,
-        FullTextQueryPlan::FilterWithMetadata,
-    );
+    let (sql, values) = candidate_sql(query, &no_terms, filters);
     let mut statement = connection.prepare(&sql)?;
     let mut rows = statement.query(params_from_iter(values))?;
     let mut candidates = Vec::new();

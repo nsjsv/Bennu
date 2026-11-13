@@ -34,12 +34,6 @@ const HIT_COLUMNS: &str = "f.path, f.display_name, f.kind, f.size, f.modified_ms
     f.created_ms, f.search_name";
 const SEARCH_SNIPPET_CHARACTER_LIMIT: usize = 240;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum FullTextQueryPlan {
-    FilterWithMetadata,
-    UnfilteredRank,
-}
-
 /// 查询词按 `text_matching` 的规则落到 SQL：够 3 个字的词进 FTS 表达式（名称 trigram
 /// 短语，`NameAndContent` 时或上内容短语）；不满 3 个字的词作为附加条件，名称直接在
 /// 规范化名称上找子串。
@@ -308,12 +302,7 @@ impl SearchDatabase {
                 0,
             )
         } else {
-            candidate_sql(
-                query,
-                &text,
-                &filters,
-                full_text_query_plan(&self.connection, query, &text)?,
-            )
+            candidate_sql(query, &text, &filters)
         };
         let mut statement = self
             .connection
@@ -384,38 +373,6 @@ fn regex_scan_sql(query: &SearchQuery, filters: &ResolvedFilters<'_>) -> (String
     (sql, values)
 }
 
-fn full_text_query_plan(
-    connection: &rusqlite::Connection,
-    query: &SearchQuery,
-    text: &TextPredicates,
-) -> SearchResult<FullTextQueryPlan> {
-    let unrestricted_full_text_query = text.match_expression.is_some()
-        && text.short_terms.is_empty()
-        && matches!(query.scope, SearchScope::Global)
-        && query.filters.entry_type_rules.is_empty()
-        && query.filters.modified.is_none()
-        && query.filters.accessed.is_none()
-        && query.filters.created.is_none()
-        && query.filters.extensions.is_empty()
-        && query.filters.size.is_none();
-    if !unrestricted_full_text_query {
-        return Ok(FullTextQueryPlan::FilterWithMetadata);
-    }
-    let hidden_rows_exist = connection.query_row(
-        "SELECT EXISTS(
-            SELECT 1 FROM files
-            WHERE tombstoned <> 0 OR observation_state <> 'observable'
-         )",
-        [],
-        |row| row.get::<_, bool>(0),
-    )?;
-    Ok(if hidden_rows_exist {
-        FullTextQueryPlan::FilterWithMetadata
-    } else {
-        FullTextQueryPlan::UnfilteredRank
-    })
-}
-
 fn preview_columns(query: &SearchQuery, text: &TextPredicates) -> (&'static str, &'static str) {
     if query.text_scope == SearchTextScope::NameAndContent && !text.is_empty() {
         (
@@ -432,14 +389,12 @@ fn preview_columns(query: &SearchQuery, text: &TextPredicates) -> (&'static str,
 const CANDIDATE_COLUMNS: &str =
     "f.display_name, f.search_name, f.path, f.modified_ms, f.kind, f.size";
 
-/// 全部候选，不在 SQL 里排序（见 `ranked_rows`）。有够 3 个字的词时由 FTS 驱动，
-/// 全可见且没有范围和过滤条件时（`UnfilteredRank`）不带可见性谓词；只有短词时按
-/// 名字子串和正文短语扫描。
+/// 全部候选，不在 SQL 里排序（见 `ranked_rows`）。有够 3 个字的词时由 FTS 驱动；
+/// 只有短词时按名字子串和正文短语扫描。
 fn candidate_sql(
     query: &SearchQuery,
     text: &TextPredicates,
     filters: &ResolvedFilters<'_>,
-    full_text_plan: FullTextQueryPlan,
 ) -> (String, Vec<Value>) {
     let Some(match_expression) = text.match_expression.as_ref() else {
         let mut values = Vec::new();
@@ -449,18 +404,18 @@ fn candidate_sql(
     };
     let mut values = vec![Value::Text(match_expression.clone())];
     // 名字列权重为 0：名字匹配由排序档位决定，bm25 只衡量正文。
+    // CROSS JOIN 让 SQLite 按书写顺序把 FTS MATCH 放在外层：可见性、范围、过滤条件
+    // 都按主键回表逐条判断。交给规划器时，带可见性条件它可能改从 files 的可见性
+    // 索引出发、对每个文件单独跑一次 MATCH，36 万文件的索引上一次搜索从几毫秒变成
+    // 一分钟（规划器版本不同选法也不同，不能指望它）。
     let mut sql = format!(
         "SELECT f.rowid, bm25(file_search_fts, 0.0, 1.0), {CANDIDATE_COLUMNS}
-         FROM file_search_fts JOIN files f ON f.rowid = file_search_fts.rowid
-         WHERE file_search_fts MATCH ?"
+         FROM file_search_fts CROSS JOIN files f ON f.rowid = file_search_fts.rowid
+         WHERE file_search_fts MATCH ? AND {QUERY_VISIBLE_PREDICATE}"
     );
-    if full_text_plan == FullTextQueryPlan::FilterWithMetadata {
-        sql.push_str(" AND ");
-        sql.push_str(QUERY_VISIBLE_PREDICATE);
-        append_scope_filter(&mut sql, &mut values, query);
-        text.append_short_term_sql(&mut sql, &mut values);
-        filters.append_sql(&mut sql, &mut values);
-    }
+    append_scope_filter(&mut sql, &mut values, query);
+    text.append_short_term_sql(&mut sql, &mut values);
+    filters.append_sql(&mut sql, &mut values);
     (sql, values)
 }
 
@@ -474,16 +429,11 @@ fn ranked_rows(
     filters: &ResolvedFilters<'_>,
     last_used: &HashMap<std::path::PathBuf, i64>,
 ) -> SearchResult<Vec<SnapshotRow>> {
-    let full_text_plan = if text.match_expression.is_some() {
-        full_text_query_plan(connection, query, text)?
-    } else {
-        FullTextQueryPlan::FilterWithMetadata
-    };
     let short_term_content = short_term_content_scores(connection, text)?;
     let now_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_millis() as i64);
-    let (sql, values) = candidate_sql(query, text, filters, full_text_plan);
+    let (sql, values) = candidate_sql(query, text, filters);
     let mut statement = connection.prepare(&sql)?;
     let mut rows = statement
         .query_map(params_from_iter(values), |row| {

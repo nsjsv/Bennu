@@ -4,7 +4,7 @@ use file_core::SortDirection;
 use file_search::{SearchOrder, SearchSortDirection, SearchSortField};
 
 use crate::model::search::{SearchWorkspaceSessionId, SearchWorkspaceState};
-use crate::model::{ListColumnKind, SearchDirectoryScope};
+use crate::model::{ListColumnKind, SearchDirectoryScope, SearchEntryTypePreset};
 
 fn search_for(input: &str) -> SearchWorkspaceState {
     let mut search = SearchWorkspaceState::new(
@@ -92,7 +92,9 @@ fn new_words_filters_or_scope_go_back_to_relevance_for_good() {
     assert_eq!(search.order(), SearchOrder::Relevance);
 
     search.click_sort_column(ListColumnKind::Name, true);
-    search.filters.toggle_custom_extensions();
+    search
+        .filters
+        .toggle_entry_type(SearchEntryTypePreset::Images);
     assert_eq!(search.order(), SearchOrder::Relevance);
 
     let mut search = search_for("report");

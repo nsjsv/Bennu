@@ -13,8 +13,8 @@ use crate::formatting::item_count_label;
 use crate::model::{
     ContextMenuPreferences, ContextMenuState, DestructiveActionConfirmation, FileDropPrompt,
     FileGroupingMode, FilePropertiesMessage, ListColumnConfig, ListColumnKind, ListViewPreferences,
-    Message, ScrollbarRegion, SearchEntryTypePreset, SidebarBookmarkContextMenuState,
-    TrashContextMenuState, TrashMenuItem,
+    Message, ScrollbarRegion, SidebarBookmarkContextMenuState, TrashContextMenuState,
+    TrashMenuItem,
 };
 use crate::open_with::OpenWithState;
 use crate::sidebar_devices::SidebarDeviceContextMenuState;
@@ -243,7 +243,6 @@ pub(super) fn context_menu_panel<'a>(
     keyboard_modifiers: iced::keyboard::Modifiers,
     context_menus: &'a ContextMenuPreferences,
     list_view_preferences: &'a ListViewPreferences,
-    selected_search_entry_types: &'a [SearchEntryTypePreset],
     file_grouping: FileGroupingMode,
 ) -> ContextMenuPanels<'a> {
     match menu {
@@ -256,10 +255,6 @@ pub(super) fn context_menu_panel<'a>(
                 file_context_menu_panel(menu, context_menus, keyboard_modifiers, file_grouping);
             ContextMenuPanels { root, submenu }
         }
-        ContextMenuState::SearchEntryTypes(_) => ContextMenuPanels {
-            root: search_entry_types_menu_panel(context_menus, selected_search_entry_types),
-            submenu: None,
-        },
         ContextMenuState::ListColumns(menu) => ContextMenuPanels {
             root: list_column_context_menu_panel(&menu.columns, list_view_preferences),
             submenu: None,
@@ -277,27 +272,6 @@ pub(super) fn context_menu_panel<'a>(
             submenu: None,
         },
     }
-}
-
-fn search_entry_types_menu_panel<'a>(
-    context_menus: &'a ContextMenuPreferences,
-    selected_entry_types: &'a [SearchEntryTypePreset],
-) -> Element<'a, Message> {
-    let mut content = Column::new()
-        .spacing(CONTEXT_MENU_ITEM_SPACING + 2.0)
-        .padding(CONTEXT_MENU_PADDING + 2.0);
-    for entry_type in context_menus.search_entry_type_items() {
-        content = content.push(
-            check_box(selected_entry_types.contains(&entry_type))
-                .label(entry_type.label())
-                .on_toggle(move |_| Message::SearchEntryTypeToggled(entry_type)),
-        );
-    }
-
-    container(content)
-        .width(Length::Fixed(190.0))
-        .style(context_menu_style)
-        .into()
 }
 
 fn list_column_context_menu_panel<'a>(

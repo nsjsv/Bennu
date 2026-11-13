@@ -14,7 +14,7 @@ where
     Element::new(AnchoredPopup {
         anchor: anchor.into(),
         popup,
-        expanding: false,
+        placement: PopupPlacement::AnchorWidth,
     })
 }
 
@@ -30,8 +30,35 @@ where
     Element::new(AnchoredPopup {
         anchor: anchor.into(),
         popup,
-        expanding: true,
+        placement: PopupPlacement::RightAligned,
     })
+}
+
+/// 下拉按钮的变体：弹层按内容定宽（至少和按钮一样宽），左缘对齐按钮，总是向下展开
+/// （顶多被窗口边缘钳住）。适合一排筛选按钮各自的下拉。
+pub fn anchored_dropdown<'a, Message>(
+    anchor: impl Into<Element<'a, Message>>,
+    popup: Option<Element<'a, Message>>,
+) -> Element<'a, Message>
+where
+    Message: 'a,
+{
+    Element::new(AnchoredPopup {
+        anchor: anchor.into(),
+        popup,
+        placement: PopupPlacement::Dropdown,
+    })
+}
+
+/// 弹层相对锚点怎么摆。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PopupPlacement {
+    /// 和锚点一样宽、左对齐，哪边空间大往哪边展开（输入框下的建议列表）。
+    AnchorWidth,
+    /// 自然宽度、右缘对齐锚点、向下（按钮旁的动作菜单）。
+    RightAligned,
+    /// 自然宽度（不窄于锚点）、左缘对齐锚点、向下。
+    Dropdown,
 }
 
 struct AnchoredPopup<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
@@ -40,8 +67,7 @@ where
 {
     anchor: Element<'a, Message, Theme, Renderer>,
     popup: Option<Element<'a, Message, Theme, Renderer>>,
-    /// 展开模式:弹层自然宽度、右对齐锚点、强制向下。
-    expanding: bool,
+    placement: PopupPlacement,
 }
 
 impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
@@ -186,7 +212,7 @@ where
                 popup,
                 state: popup_tree,
                 anchor_bounds,
-                expanding: self.expanding,
+                placement: self.placement,
             })));
         }
 
@@ -201,7 +227,7 @@ where
     popup: &'b mut Element<'a, Message, Theme, Renderer>,
     state: &'b mut widget::Tree,
     anchor_bounds: Rectangle,
-    expanding: bool,
+    placement: PopupPlacement,
 }
 
 impl<'a, 'b, Message, Theme, Renderer> overlay::Overlay<Message, Theme, Renderer>
@@ -216,28 +242,35 @@ where
         let below_y = self.anchor_bounds.y + self.anchor_bounds.height + POPUP_GAP;
         let space_below = (bounds.height - below_y).max(0.0);
         let space_above = (self.anchor_bounds.y - POPUP_GAP).max(0.0);
-        let show_below = if self.expanding {
-            true
-        } else {
-            space_below >= space_above
+        let show_below = match self.placement {
+            PopupPlacement::AnchorWidth => space_below >= space_above,
+            PopupPlacement::RightAligned | PopupPlacement::Dropdown => true,
         };
         let max_height = if show_below { space_below } else { space_above };
-        let limits = if self.expanding {
-            // 展开模式:弹层自然宽度,只受窗口宽度约束。
-            layout::Limits::new(Size::ZERO, Size::new(bounds.width, max_height))
-        } else {
-            layout::Limits::new(Size::ZERO, Size::new(target_width, max_height)).width(target_width)
+        let limits = match self.placement {
+            PopupPlacement::AnchorWidth => {
+                layout::Limits::new(Size::ZERO, Size::new(target_width, max_height))
+                    .width(target_width)
+            }
+            // 弹层自然宽度，只受窗口宽度约束。
+            PopupPlacement::RightAligned => {
+                layout::Limits::new(Size::ZERO, Size::new(bounds.width, max_height))
+            }
+            PopupPlacement::Dropdown => layout::Limits::new(
+                Size::new(target_width, 0.0),
+                Size::new(bounds.width, max_height),
+            ),
         };
         let node = self
             .popup
             .as_widget_mut()
             .layout(self.state, renderer, &limits);
         let size = node.size();
-        let desired_x = if self.expanding {
-            // 右缘对齐锚点右缘。
-            self.anchor_bounds.x + self.anchor_bounds.width - size.width
-        } else {
-            self.anchor_bounds.x
+        let desired_x = match self.placement {
+            PopupPlacement::RightAligned => {
+                self.anchor_bounds.x + self.anchor_bounds.width - size.width
+            }
+            PopupPlacement::AnchorWidth | PopupPlacement::Dropdown => self.anchor_bounds.x,
         };
         let x = desired_x.max(0.0).min((bounds.width - size.width).max(0.0));
         let desired_y = if show_below {

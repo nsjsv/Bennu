@@ -16,7 +16,7 @@ use file_core::{
 };
 use file_search::{
     SearchHit, SearchPathConfigurationStatus, SearchPathPreferences, SearchServiceStatus,
-    SearchTextScope, VersionedSearchPathPreferences,
+    VersionedSearchPathPreferences,
 };
 use iced::keyboard;
 use iced::{event, mouse, window, Point};
@@ -172,11 +172,12 @@ pub(crate) use file_core::log_detail::{
 pub(crate) mod search;
 pub(crate) use search::{
     DirectoryFallbackOutcome, IndexedSearchOutcome, IndexedSearchRequest, LastSearchScope,
-    SearchDateField, SearchDatePreset, SearchDirectoryScope, SearchEntryTypePreset, SearchHistory,
-    SearchHistoryInteraction, SearchHitDetail, SearchInputFocus, SearchInputFocusCheckOrigin,
-    SearchInputFocusCheckRequest, SearchInputStabilizationRequest, SearchInputStabilizationSubject,
-    SearchResultCompletion, SearchRunId, SearchSizePreset, SearchWorkspaceSessionId,
-    SearchWorkspaceState, SEARCH_RESULT_TOTAL_LIMIT,
+    SearchDateField, SearchDatePreset, SearchDirectoryScope, SearchEntryTypePreset,
+    SearchFilterMenu, SearchFilterPick, SearchHistory, SearchHistoryInteraction, SearchHitDetail,
+    SearchInputFocus, SearchInputFocusCheckOrigin, SearchInputFocusCheckRequest,
+    SearchInputStabilizationRequest, SearchInputStabilizationSubject, SearchResultCompletion,
+    SearchRunId, SearchSizePreset, SearchWorkspaceSessionId, SearchWorkspaceState,
+    SEARCH_RESULT_TOTAL_LIMIT,
 };
 mod search_service;
 pub(crate) use search_service::{
@@ -531,16 +532,13 @@ pub(crate) enum Message {
     SearchInputFocusChecked(SearchInputFocusCheckRequest, SearchInputFocus),
     SearchHistoryPopupPointerEntered,
     SearchHistoryPopupPointerExited,
-    SearchEntryTypesMenuOpened,
+    SearchFilterMenuOpened(SearchFilterMenu),
+    SearchFilterMenuClosed,
+    SearchFilterPicked(SearchFilterPick),
     SearchEntryTypeToggled(SearchEntryTypePreset),
-    SearchDirectoryScopeSelected(SearchDirectoryScope),
-    SearchTextScopeSelected(SearchTextScope),
     SearchRegexToggled,
-    SearchCustomExtensionsToggled,
     SearchCustomExtensionsChanged(String),
     SearchDateFieldSelected(SearchDateField),
-    SearchDatePresetSelected(SearchDatePreset),
-    SearchSizePresetSelected(SearchSizePreset),
     SearchCustomSizeMinChanged(String),
     SearchCustomSizeMaxChanged(String),
     SearchFiltersReset,
@@ -876,7 +874,6 @@ pub(crate) struct StartupEnvironment {
 pub(crate) enum ContextMenuState {
     FileArea(FileContextMenuState),
     Trash(TrashContextMenuState),
-    SearchEntryTypes(SearchEntryTypeMenuState),
     ListColumns(ListColumnMenuState),
     SidebarBookmark(SidebarBookmarkContextMenuState),
     SidebarDevice(SidebarDeviceContextMenuState),
@@ -888,7 +885,6 @@ impl ContextMenuState {
         match self {
             Self::FileArea(menu) => menu.position,
             Self::Trash(menu) => menu.position,
-            Self::SearchEntryTypes(menu) => menu.position,
             Self::ListColumns(menu) => menu.position,
             Self::SidebarBookmark(menu) => menu.position,
             Self::SidebarDevice(menu) => menu.position,
@@ -900,7 +896,6 @@ impl ContextMenuState {
         match self {
             Self::FileArea(menu) => Some(&menu.paste_directory),
             Self::Trash(_) => None,
-            Self::SearchEntryTypes(_) => None,
             Self::ListColumns(_) => None,
             Self::SidebarBookmark(_) => None,
             Self::SidebarDevice(_) => None,
@@ -914,11 +909,6 @@ impl ContextMenuState {
 #[derive(Debug, Clone)]
 pub(crate) struct TrashContextMenuState {
     pub(crate) target: Option<PathBuf>,
-    pub(crate) position: Point,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct SearchEntryTypeMenuState {
     pub(crate) position: Point,
 }
 

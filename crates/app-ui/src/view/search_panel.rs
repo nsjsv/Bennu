@@ -1,9 +1,4 @@
-use std::fmt;
-
-use file_search::{SearchMatchMode, SearchTextScope};
-use iced::widget::{
-    button, container, mouse_area, responsive, row, scrollable, tooltip, Button, Column, Row,
-};
+use iced::widget::{button, container, mouse_area, row, scrollable, tooltip, Column};
 use iced::{Alignment, Element, Length};
 
 use super::{themed_icon, IconTone};
@@ -11,92 +6,30 @@ use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
 use crate::app::FileBrowser;
 use crate::appearance::{
     context_menu_style, enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction,
-    list_panel_style, path_suggestion_item_style, path_suggestions_style, transparent_button_style,
+    path_suggestion_item_style, path_suggestions_style, transparent_button_style,
 };
 use crate::formatting::format_middle_ellipsized_text;
-use crate::model::search::SearchFilterPresetState;
-use crate::model::{
-    Message, ScrollbarRegion, SearchDateField, SearchDatePreset, SearchDirectoryScope,
-    SearchEntryTypePreset, SearchResultCompletion, SearchSizePreset, SearchWorkspaceState,
-    SEARCH_RESULT_TOTAL_LIMIT,
-};
+use crate::model::{Message, ScrollbarRegion};
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::anchored_popup::anchored_popup;
-use bennu_theme::controls::dropdown;
 use bennu_theme::controls::icon_button_style;
 use bennu_theme::controls::text_field;
-use bennu_theme::controls::{segmented_choice_row, toggle_button_style, SegmentedChoice};
 use bennu_theme::icons::IconSymbol;
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use bennu_theme::typography::CAPTION_SIZE;
 
 const SEARCH_INPUT_WIDTH: f32 = 140.0;
-const WIDE_SEARCH_TOOLBAR_WIDTH: f32 = 1_000.0;
-const MEDIUM_SEARCH_TOOLBAR_WIDTH: f32 = 560.0;
-const SEARCH_DATE_FIELD_WIDTH: f32 = 122.0;
-const SEARCH_DATE_PRESET_WIDTH: f32 = 138.0;
-const SEARCH_SIZE_PRESET_WIDTH: f32 = 160.0;
-const SEARCH_TEXT_SCOPE_WIDTH: f32 = 274.0;
-const SEARCH_FILTER_BUTTON_HEIGHT: f32 = 30.0;
+const SEARCHING_INPUT_WIDTH: f32 = 320.0;
 const SEARCH_HISTORY_PANEL_MAX_HEIGHT: f32 = 320.0;
 const SEARCH_HISTORY_KEYWORD_MAX_CHARS: usize = 28;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct SearchDateFieldOption(SearchDateField);
-
-impl fmt::Display for SearchDateFieldOption {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0.label())
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct SearchDatePresetOption(SearchDatePreset);
-
-impl fmt::Display for SearchDatePresetOption {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0.label())
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct SearchSizePresetOption(SearchSizePreset);
-
-impl fmt::Display for SearchSizePresetOption {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0.label())
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SearchToolbarDensity {
-    Wide,
-    Medium,
-    Narrow,
-}
-
-impl SearchToolbarDensity {
-    fn for_width(width: f32) -> Self {
-        if width >= WIDE_SEARCH_TOOLBAR_WIDTH {
-            Self::Wide
-        } else if width >= MEDIUM_SEARCH_TOOLBAR_WIDTH {
-            Self::Medium
-        } else {
-            Self::Narrow
-        }
-    }
-
-    fn entry_type_columns(self) -> usize {
-        match self {
-            Self::Wide => 8,
-            Self::Medium => 4,
-            Self::Narrow => 2,
-        }
-    }
-}
-
-fn search_input_width() -> Length {
-    Length::Fixed(SEARCH_INPUT_WIDTH)
+/// 平时窄，搜索时变宽，长一点的词也看得全。
+fn search_input_width(browser: &FileBrowser) -> Length {
+    Length::Fixed(if browser.active_search().is_some() {
+        SEARCHING_INPUT_WIDTH
+    } else {
+        SEARCH_INPUT_WIDTH
+    })
 }
 
 pub(crate) fn search_input_id() -> iced::widget::Id {
@@ -130,7 +63,7 @@ pub(super) fn search_input_panel(browser: &FileBrowser) -> Element<'_, Message> 
         .spacing(4)
         .align_y(Alignment::Center)
     };
-    let anchor = container(content.width(Length::Fill)).width(search_input_width());
+    let anchor = container(content.width(Length::Fill)).width(search_input_width(browser));
     let popup = browser
         .search_history_interaction
         .popup_is_visible(&browser.user_config().search_history)
@@ -205,500 +138,7 @@ fn search_history_row(keyword: &str) -> Element<'static, Message> {
     .into()
 }
 
-/// 搜索结果上方的筛选栏：范围、类型、文本范围、日期、大小、正则，以及这次搜索的进度与提示。
-pub(super) fn search_workspace_toolbar<'a>(
-    search: &'a SearchWorkspaceState,
-    loaded_results: usize,
-) -> Element<'a, Message> {
-    let filters = search.filters.clone();
-    let available_directory_scopes = search.root.available_scopes();
-    let selected_directory_scope = search.root.selected_scope();
-    let last_location_path = search
-        .root
-        .last_location_directory()
-        .map(std::path::Path::to_path_buf);
-    let notices = search_notices(search, loaded_results);
-    let result_count = result_count_label(search, loaded_results);
-
-    let toolbar = responsive(move |viewport_size| {
-        search_workspace_toolbar_layout(
-            available_directory_scopes.clone(),
-            selected_directory_scope,
-            last_location_path.clone(),
-            result_count.clone(),
-            filters.clone(),
-            SearchToolbarDensity::for_width(viewport_size.width),
-        )
-    })
-    .width(Length::Fill)
-    .height(Length::Shrink);
-    let mut content = Column::new().push(toolbar);
-    for notice in notices {
-        content = content.push(search_notice(notice));
-    }
-    content.width(Length::Fill).into()
-}
-
-/// 已加载的结果数，还有下一页时带「+」。没有结果时不显示，列表的空提示会说明原因。
-fn result_count_label(search: &SearchWorkspaceState, loaded_results: usize) -> Option<String> {
-    if loaded_results == 0 {
-        return None;
-    }
-    Some(
-        if search.window.completion == Some(SearchResultCompletion::MoreAvailable) {
-            tr!("%1+ results", loaded_results)
-        } else {
-            tr!("%1 results", loaded_results)
-        },
-    )
-}
-
-/// 结果列表上方要说的话：退化、正则限制、分页状态、截断。空结果的提示在列表里。
-fn search_notices(search: &SearchWorkspaceState, loaded_results: usize) -> Vec<String> {
-    let mut notices = Vec::new();
-    if search.content_search_is_degraded() {
-        notices.push(tr!(
-            "Content indexing is unavailable; matching file names only."
-        ));
-    }
-    if search.filters.match_mode == SearchMatchMode::Regex {
-        notices.push(tr!("Regex mode matches file names only."));
-    }
-    // 没有结果时失败原因写在列表的空提示里，有结果时（翻页失败）写在这里。
-    if loaded_results > 0 {
-        if let Some(failure) = &search.window.failure {
-            notices.push(failure.clone());
-        }
-    }
-    if !search.window.is_loading {
-        match search.window.completion {
-            Some(SearchResultCompletion::Partial { inspected_entries }) => notices.push(tr!(
-                "Partial results after inspecting %1 entries",
-                inspected_entries
-            )),
-            Some(SearchResultCompletion::Complete | SearchResultCompletion::MoreAvailable)
-            | None => {}
-        }
-        if search.window.truncated {
-            notices.push(tr!(
-                "Result limit reached (%1); the oldest results were dropped. Narrow the search to see more.",
-                SEARCH_RESULT_TOTAL_LIMIT
-            ));
-        }
-    }
-    notices
-}
-
-fn search_workspace_toolbar_layout(
-    available_directory_scopes: Vec<SearchDirectoryScope>,
-    selected_directory_scope: SearchDirectoryScope,
-    last_location_path: Option<std::path::PathBuf>,
-    result_count: Option<String>,
-    filters: SearchFilterPresetState,
-    density: SearchToolbarDensity,
-) -> Element<'static, Message> {
-    // 范围选择、结果数与关闭同一行：关闭回到发起搜索的文件夹。
-    let header = row![
-        container(search_directory_scope_filter(
-            &available_directory_scopes,
-            selected_directory_scope,
-            last_location_path,
-        ))
-        .width(Length::Fill),
-        result_count.map(|count| {
-            readable_text(count)
-                .size(CAPTION_SIZE)
-                .style(|theme| iced::widget::text::Style {
-                    color: Some(bennu_theme::styles::muted_text_color(theme)),
-                })
-        }),
-        tooltip(
-            button(themed_icon(IconSymbol::Close, IconTone::Normal, 13.0))
-                .on_press(Message::SearchWorkspaceClosed)
-                .padding([6, 8])
-                .style(icon_button_style),
-            tooltip_label(tr!("Close search")),
-            tooltip::Position::Bottom,
-        )
-    ]
-    .spacing(8)
-    .align_y(Alignment::Center);
-
-    let entry_types = search_entry_type_grid(&filters, density.entry_type_columns());
-    let controls = search_filter_controls(&filters, density);
-    let mut toolbar = Column::new()
-        .push(header)
-        .push(entry_types)
-        .push(controls)
-        .spacing(6);
-    // 自定义大小输入行跟在筛选控件区下方，随档位切回非 Custom 消失。
-    if custom_size_input_is_expanded(&filters) {
-        toolbar = toolbar.push(custom_size_input_row(&filters));
-    }
-
-    container(toolbar)
-        .padding([7, 10])
-        .width(Length::Fill)
-        .height(Length::Shrink)
-        .style(list_panel_style)
-        .into()
-}
-
-fn search_entry_type_grid(
-    filters: &SearchFilterPresetState,
-    column_count: usize,
-) -> Element<'static, Message> {
-    let mut rows = Column::new().spacing(5).width(Length::Fill);
-    let chunk_count = SearchEntryTypePreset::COMMON.chunks(column_count).count();
-    for (chunk_index, entry_types) in SearchEntryTypePreset::COMMON
-        .chunks(column_count)
-        .enumerate()
-    {
-        let mut type_row = Row::new().spacing(6).width(Length::Fill);
-        for entry_type in entry_types {
-            type_row = type_row.push(search_entry_type_button(*entry_type, filters));
-        }
-        // 自定义入口固定收尾：贴在类型网格最后一行末尾，避免独占一整行。
-        if chunk_index + 1 == chunk_count {
-            type_row = type_row.push(custom_extension_button(filters));
-        }
-        rows = rows.push(type_row);
-    }
-    if filters.custom_extensions_open {
-        rows = rows.push(custom_extension_input_row(filters));
-    }
-    rows.into()
-}
-
-fn search_entry_type_button(
-    entry_type: SearchEntryTypePreset,
-    filters: &SearchFilterPresetState,
-) -> Element<'static, Message> {
-    let selected = filters.entry_type_is_selected(entry_type);
-    search_filter_button(
-        search_entry_type_icon(entry_type),
-        if selected {
-            IconTone::OnAccent
-        } else {
-            IconTone::Normal
-        },
-        entry_type.label(),
-        Message::SearchEntryTypeToggled(entry_type),
-    )
-    .width(Length::FillPortion(1))
-    .style(toggle_button_style(selected))
-    .into()
-}
-
-fn custom_extension_button(filters: &SearchFilterPresetState) -> Element<'static, Message> {
-    let selected = filters.custom_extensions_are_active();
-    search_filter_button(
-        IconSymbol::Plus,
-        if selected {
-            IconTone::OnAccent
-        } else {
-            IconTone::Normal
-        },
-        tr!("Custom"),
-        Message::SearchCustomExtensionsToggled,
-    )
-    .width(Length::FillPortion(1))
-    .style(toggle_button_style(selected))
-    .into()
-}
-
-fn custom_extension_input_row(filters: &SearchFilterPresetState) -> Element<'static, Message> {
-    container(
-        text_field(&tr!("e.g. pdf, docx"), &filters.custom_extensions)
-            .on_input(Message::SearchCustomExtensionsChanged)
-            .width(Length::Fill),
-    )
-    .width(Length::Fill)
-    .into()
-}
-
-fn search_entry_type_icon(entry_type: SearchEntryTypePreset) -> IconSymbol {
-    match entry_type {
-        SearchEntryTypePreset::Spreadsheets => IconSymbol::Grid,
-        SearchEntryTypePreset::Video => IconSymbol::Video,
-        SearchEntryTypePreset::Images => IconSymbol::FileImage,
-        SearchEntryTypePreset::Text => IconSymbol::FileText,
-        SearchEntryTypePreset::Documents => IconSymbol::File,
-        SearchEntryTypePreset::Folders => IconSymbol::Folder,
-        SearchEntryTypePreset::Audio => IconSymbol::Music,
-        SearchEntryTypePreset::Pdf => IconSymbol::FileText,
-        SearchEntryTypePreset::Files => IconSymbol::File,
-        SearchEntryTypePreset::Archives => IconSymbol::FileArchive,
-        SearchEntryTypePreset::Links => IconSymbol::Link,
-    }
-}
-
-fn search_filter_controls(
-    filters: &SearchFilterPresetState,
-    density: SearchToolbarDensity,
-) -> Element<'static, Message> {
-    match density {
-        // 宽窗口一行排开：文本范围 | 日期字段 | 日期范围 | 大小 | 命令按钮。
-        SearchToolbarDensity::Wide => {
-            row![
-                container(search_text_scope_filter(filters))
-                    .width(Length::Fixed(SEARCH_TEXT_SCOPE_WIDTH)),
-                search_date_field_filter(
-                    filters.date_field,
-                    Length::Fixed(SEARCH_DATE_FIELD_WIDTH),
-                ),
-                search_date_preset_filter(
-                    filters.date_preset,
-                    Length::Fixed(SEARCH_DATE_PRESET_WIDTH),
-                ),
-                search_size_preset_filter(
-                    filters.size_preset,
-                    Length::Fixed(SEARCH_SIZE_PRESET_WIDTH),
-                ),
-                search_filter_commands(filters),
-            ]
-            .spacing(6)
-            .align_y(Alignment::Center)
-            .into()
-        }
-        // 中窗口：大小下拉紧跟日期行；命令按钮折到下一行。
-        SearchToolbarDensity::Medium => Column::new()
-            .push(search_text_scope_filter(filters))
-            .push(
-                row![
-                    search_date_field_filter(
-                        filters.date_field,
-                        Length::Fixed(SEARCH_DATE_FIELD_WIDTH),
-                    ),
-                    search_date_preset_filter(
-                        filters.date_preset,
-                        Length::Fixed(SEARCH_DATE_PRESET_WIDTH),
-                    ),
-                    search_size_preset_filter(
-                        filters.size_preset,
-                        Length::Fixed(SEARCH_SIZE_PRESET_WIDTH),
-                    ),
-                ]
-                .spacing(6)
-                .align_y(Alignment::Center),
-            )
-            .push(search_filter_commands(filters))
-            .spacing(5)
-            .into(),
-        // 窄窗口：大小与日期系控件同段折行，任何密度不隐藏。
-        SearchToolbarDensity::Narrow => Column::new()
-            .push(search_text_scope_filter(filters))
-            .push(
-                row![
-                    search_date_field_filter(filters.date_field, Length::FillPortion(1)),
-                    search_date_preset_filter(filters.date_preset, Length::FillPortion(1)),
-                    search_size_preset_filter(filters.size_preset, Length::FillPortion(1)),
-                ]
-                .spacing(6),
-            )
-            .push(search_filter_commands(filters))
-            .spacing(5)
-            .into(),
-    }
-}
-
-fn search_directory_scope_filter(
-    available_scopes: &[SearchDirectoryScope],
-    selected: SearchDirectoryScope,
-    last_location_path: Option<std::path::PathBuf>,
-) -> Element<'static, Message> {
-    segmented_choice_row(search_directory_scope_choices(
-        available_scopes,
-        selected,
-        last_location_path,
-    ))
-}
-
-fn search_directory_scope_choices(
-    available_scopes: &[SearchDirectoryScope],
-    selected: SearchDirectoryScope,
-    last_location_path: Option<std::path::PathBuf>,
-) -> Vec<SegmentedChoice<Message>> {
-    available_scopes
-        .iter()
-        .copied()
-        .map(|scope| SegmentedChoice {
-            label: scope.label(),
-            selected: scope == selected,
-            message: Some(Message::SearchDirectoryScopeSelected(scope)),
-            // "上次位置"档只给目录名，悬停补完整路径消歧。
-            tooltip: if scope == SearchDirectoryScope::LastLocation {
-                last_location_path
-                    .as_deref()
-                    .map(|path| path.to_string_lossy().into_owned())
-            } else {
-                None
-            },
-        })
-        .collect()
-}
-
-fn search_text_scope_filter(filters: &SearchFilterPresetState) -> Element<'static, Message> {
-    let regex_mode = filters.match_mode == SearchMatchMode::Regex;
-    // 正则只在名称上执行：置灰范围选择器并固定显示 Name only，与提交的查询语义一致。
-    let name_content_selected =
-        !regex_mode && filters.text_scope == SearchTextScope::NameAndContent;
-    let name_only_selected = regex_mode || filters.text_scope == SearchTextScope::NameOnly;
-    let choices = vec![
-        SegmentedChoice {
-            label: tr!("Name & content"),
-            selected: name_content_selected,
-            message: (!regex_mode).then_some(Message::SearchTextScopeSelected(
-                SearchTextScope::NameAndContent,
-            )),
-            tooltip: None,
-        },
-        SegmentedChoice {
-            label: tr!("Name only"),
-            selected: name_only_selected,
-            message: (!regex_mode)
-                .then_some(Message::SearchTextScopeSelected(SearchTextScope::NameOnly)),
-            tooltip: None,
-        },
-    ];
-    segmented_choice_row(choices)
-}
-
-fn search_date_field_filter(selected: SearchDateField, width: Length) -> Element<'static, Message> {
-    dropdown(
-        SearchDateField::ALL.map(SearchDateFieldOption),
-        Some(SearchDateFieldOption(selected)),
-        |selected| Message::SearchDateFieldSelected(selected.0),
-    )
-    .width(width)
-    .into()
-}
-
-fn search_date_preset_filter(
-    selected: SearchDatePreset,
-    width: Length,
-) -> Element<'static, Message> {
-    dropdown(
-        SearchDatePreset::ALL.map(SearchDatePresetOption),
-        Some(SearchDatePresetOption(selected)),
-        |selected| Message::SearchDatePresetSelected(selected.0),
-    )
-    .width(width)
-    .into()
-}
-
-fn search_size_preset_filter(
-    selected: SearchSizePreset,
-    width: Length,
-) -> Element<'static, Message> {
-    dropdown(
-        SearchSizePreset::ALL.map(SearchSizePresetOption),
-        Some(SearchSizePresetOption(selected)),
-        |selected| Message::SearchSizePresetSelected(selected.0),
-    )
-    .width(width)
-    .into()
-}
-
-/// 自定义大小输入行只跟 Custom 档绑定：下拉本身是开关，无独立展开 bool。
-fn custom_size_input_is_expanded(filters: &SearchFilterPresetState) -> bool {
-    filters.size_preset == SearchSizePreset::Custom
-}
-
-/// 自定义大小输入行：仅在 size_preset == Custom 时展开在筛选控件区下方，
-/// 风格对齐自定义后缀输入行；两侧输入共用 120ms 稳定化。
-fn custom_size_input_row(filters: &SearchFilterPresetState) -> Element<'static, Message> {
-    container(
-        row![
-            readable_text(tr!("Min size")),
-            text_field(&tr!("e.g. 10MB"), &filters.custom_size_min)
-                .on_input(Message::SearchCustomSizeMinChanged)
-                .width(Length::Fill),
-            readable_text(tr!("Max size")),
-            text_field(&tr!("e.g. 2 GB"), &filters.custom_size_max)
-                .on_input(Message::SearchCustomSizeMaxChanged)
-                .width(Length::Fill),
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center),
-    )
-    .width(Length::Fill)
-    .into()
-}
-
-fn search_filter_commands(filters: &SearchFilterPresetState) -> Element<'static, Message> {
-    let selected_more_type_count = filters.selected_more_type_count();
-    let more_label = if selected_more_type_count == 0 {
-        tr!("More")
-    } else {
-        tr!("More (%1)", selected_more_type_count)
-    };
-    let regex_mode = filters.match_mode == SearchMatchMode::Regex;
-    let mut commands = row![
-        search_filter_button(
-            IconSymbol::Regex,
-            if regex_mode {
-                IconTone::OnAccent
-            } else {
-                IconTone::Normal
-            },
-            tr!("Regex"),
-            Message::SearchRegexToggled,
-        )
-        .style(toggle_button_style(regex_mode)),
-        search_filter_button(
-            IconSymbol::Plus,
-            if selected_more_type_count == 0 {
-                IconTone::Normal
-            } else {
-                IconTone::OnAccent
-            },
-            more_label,
-            Message::SearchEntryTypesMenuOpened,
-        )
-        .style(toggle_button_style(selected_more_type_count > 0)),
-    ]
-    .spacing(6)
-    .align_y(Alignment::Center);
-    if !filters.is_default() {
-        commands = commands.push(
-            search_filter_button(
-                IconSymbol::Close,
-                IconTone::Normal,
-                tr!("Reset filters"),
-                Message::SearchFiltersReset,
-            )
-            .style(toggle_button_style(false)),
-        );
-    }
-    commands.into()
-}
-
-fn search_filter_button(
-    icon: IconSymbol,
-    tone: IconTone,
-    label: String,
-    message: Message,
-) -> Button<'static, Message> {
-    button(
-        row![themed_icon(icon, tone, 13.0), readable_text(label)]
-            .spacing(6)
-            .align_y(Alignment::Center),
-    )
-    .on_press(message)
-    .height(Length::Fixed(SEARCH_FILTER_BUTTON_HEIGHT))
-    .padding([4, 8])
-}
-
-fn search_notice(message: String) -> Element<'static, Message> {
-    container(readable_text(message).width(Length::Fill))
-        .padding([7, 10])
-        .width(Length::Fill)
-        .style(list_panel_style)
-        .into()
-}
-
-fn tooltip_label(label: String) -> Element<'static, Message> {
+pub(super) fn tooltip_label(label: String) -> Element<'static, Message> {
     container(readable_text(label).size(CAPTION_SIZE))
         .padding([5, 7])
         .style(context_menu_style)
@@ -707,101 +147,30 @@ fn tooltip_label(label: String) -> Element<'static, Message> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
+    use crate::config;
+    use crate::model::search::{SearchWorkspaceSessionId, SearchWorkspaceState};
+    use crate::model::BrowserLocation;
 
     #[test]
-    fn navigation_search_input_uses_compact_fixed_width() {
-        let Length::Fixed(width) = search_input_width() else {
-            panic!("navigation search input must not participate in Fill layout");
-        };
-        assert_eq!(width, 140.0);
-    }
-
-    #[test]
-    fn directory_scope_choices_follow_model_availability() {
-        let both = search_directory_scope_choices(
-            &[
-                SearchDirectoryScope::CurrentFolder,
-                SearchDirectoryScope::Home,
-            ],
-            SearchDirectoryScope::CurrentFolder,
+    fn the_search_box_widens_while_searching() {
+        let (mut browser, _) = FileBrowser::new(config::default_user_config());
+        browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/tmp"));
+        assert_eq!(
+            search_input_width(&browser),
+            Length::Fixed(SEARCH_INPUT_WIDTH)
+        );
+        browser.tab_mut().location = BrowserLocation::Search(Box::new(SearchWorkspaceState::new(
+            PathBuf::from("/tmp"),
+            PathBuf::from("/home/user"),
             None,
-        );
-        assert_eq!(both.len(), 2);
-        assert_eq!(both[0].label, "Current folder");
-        assert!(both[0].selected);
-        assert_eq!(both[1].label, "Home");
-        assert!(!both[1].selected);
-
-        let home_only = search_directory_scope_choices(
-            &[SearchDirectoryScope::Home],
-            SearchDirectoryScope::Home,
-            None,
-        );
-        assert_eq!(home_only.len(), 1);
-        assert_eq!(home_only[0].label, "Home");
-        assert!(home_only[0].selected);
-    }
-
-    #[test]
-    fn last_location_scope_carries_path_tooltip_only() {
-        let choices = search_directory_scope_choices(
-            &[
-                SearchDirectoryScope::CurrentFolder,
-                SearchDirectoryScope::LastLocation,
-                SearchDirectoryScope::Home,
-                SearchDirectoryScope::AllIndexedLocations,
-            ],
-            SearchDirectoryScope::LastLocation,
-            Some(std::path::PathBuf::from("/srv/downloads")),
-        );
-
-        assert_eq!(choices[0].tooltip, None);
-        assert_eq!(choices[1].tooltip.as_deref(), Some("/srv/downloads"));
-        assert_eq!(choices[2].tooltip, None);
-        assert_eq!(choices[3].tooltip, None);
-    }
-
-    #[test]
-    fn search_toolbar_density_keeps_stable_type_column_counts() {
+            SearchWorkspaceSessionId(1),
+        )));
         assert_eq!(
-            SearchToolbarDensity::for_width(1_000.0).entry_type_columns(),
-            8
+            search_input_width(&browser),
+            Length::Fixed(SEARCHING_INPUT_WIDTH)
         );
-        assert_eq!(
-            SearchToolbarDensity::for_width(700.0).entry_type_columns(),
-            4
-        );
-        assert_eq!(
-            SearchToolbarDensity::for_width(420.0).entry_type_columns(),
-            2
-        );
-    }
-
-    #[test]
-    fn size_preset_choices_carry_unique_non_empty_labels() {
-        let labels: Vec<String> = SearchSizePreset::ALL
-            .iter()
-            .map(|preset| SearchSizePresetOption(*preset).to_string())
-            .collect();
-        assert_eq!(labels.len(), 9);
-        assert!(labels.iter().all(|label| !label.is_empty()));
-        let mut unique = labels.clone();
-        unique.sort();
-        unique.dedup();
-        assert_eq!(unique.len(), labels.len());
-    }
-
-    #[test]
-    fn custom_size_input_row_follows_the_custom_preset() {
-        let mut filters = SearchFilterPresetState::default();
-        assert!(!custom_size_input_is_expanded(&filters));
-
-        filters.select_size_preset(SearchSizePreset::Custom);
-        assert!(custom_size_input_is_expanded(&filters));
-
-        // 切回任意档位：输入行随档位消失。
-        filters.select_size_preset(SearchSizePreset::Any);
-        assert!(!custom_size_input_is_expanded(&filters));
     }
 }

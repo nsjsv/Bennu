@@ -152,7 +152,7 @@ impl ContextMenuPreferences {
             file_entry: ContextMenuLayout::all_visible(FILE_ENTRY_MENU_ITEMS),
             file_blank: ContextMenuLayout::all_visible(FILE_BLANK_MENU_ITEMS),
             trash: ContextMenuLayout::all_visible(TRASH_MENU_ITEMS),
-            search_entry_types: ContextMenuLayout::all_visible(SearchEntryTypePreset::MORE),
+            search_entry_types: ContextMenuLayout::all_visible(SearchEntryTypePreset::ALL),
             list_columns: ContextMenuLayout::all_visible(ListColumnKind::ALL),
             sidebar_bookmark: ContextMenuLayout::all_visible(BOOKMARK_MENU_ITEMS),
             sidebar_device: ContextMenuLayout::all_visible(
@@ -206,7 +206,7 @@ impl ContextMenuPreferences {
             ),
             search_entry_types: ContextMenuLayout::normalized_from_stored(
                 &values.search_entry_types,
-                &SearchEntryTypePreset::MORE,
+                &SearchEntryTypePreset::ALL,
                 search_entry_type_from_config_value,
             ),
             list_columns: ContextMenuLayout::normalized_from_stored(
@@ -583,8 +583,7 @@ impl ContextMenuPreferences {
                 self.trash = ContextMenuLayout::all_visible(TRASH_MENU_ITEMS)
             }
             ContextMenuSettingsPage::SearchEntryTypes => {
-                self.search_entry_types =
-                    ContextMenuLayout::all_visible(SearchEntryTypePreset::MORE)
+                self.search_entry_types = ContextMenuLayout::all_visible(SearchEntryTypePreset::ALL)
             }
             ContextMenuSettingsPage::ListColumns => {
                 self.list_columns = ContextMenuLayout::all_visible(ListColumnKind::ALL)

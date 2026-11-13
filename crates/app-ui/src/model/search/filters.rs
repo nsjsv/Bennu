@@ -21,7 +21,8 @@ pub(crate) enum SearchEntryTypePreset {
 }
 
 impl SearchEntryTypePreset {
-    pub(crate) const COMMON: [Self; 8] = [
+    /// 类型下拉里的默认顺序；用户可以在设置里藏掉、调顺序。
+    pub(crate) const ALL: [Self; 11] = [
         Self::Spreadsheets,
         Self::Video,
         Self::Images,
@@ -30,8 +31,10 @@ impl SearchEntryTypePreset {
         Self::Folders,
         Self::Audio,
         Self::Pdf,
+        Self::Files,
+        Self::Archives,
+        Self::Links,
     ];
-    pub(crate) const MORE: [Self; 3] = [Self::Files, Self::Archives, Self::Links];
 
     pub(crate) fn label(self) -> String {
         match self {
@@ -245,7 +248,6 @@ pub(crate) struct SearchFilterPresetState {
     pub(crate) date_preset: SearchDatePreset,
     pub(crate) size_preset: SearchSizePreset,
     pub(crate) custom_extensions: String,
-    pub(crate) custom_extensions_open: bool,
     pub(crate) custom_size_min: String,
     pub(crate) custom_size_max: String,
 }
@@ -260,7 +262,6 @@ impl Default for SearchFilterPresetState {
             date_preset: SearchDatePreset::Any,
             size_preset: SearchSizePreset::Any,
             custom_extensions: String::new(),
-            custom_extensions_open: false,
             custom_size_min: String::new(),
             custom_size_max: String::new(),
         }
@@ -284,18 +285,9 @@ impl SearchFilterPresetState {
         self.selected_entry_types.contains(&entry_type)
     }
 
-    pub(crate) fn toggle_custom_extensions(&mut self) {
-        self.custom_extensions_open = !self.custom_extensions_open;
-        if !self.custom_extensions_open {
-            self.custom_extensions.clear();
-        }
-    }
-
-    /// 按钮高亮语义（产品确认）：面板展开且当前输入可解析出至少一个后缀。
+    /// 自定义后缀生效：输入能解析出至少一个后缀。
     pub(crate) fn custom_extensions_are_active(&self) -> bool {
-        self.custom_extensions_open
-            && normalize_extension_tokens(&self.custom_extensions)
-                .is_ok_and(|tokens| !tokens.is_empty())
+        normalize_extension_tokens(&self.custom_extensions).is_ok_and(|tokens| !tokens.is_empty())
     }
 
     /// 选择档位即切换：离开 Custom 时收起输入行并清空两侧输入（进入时必为空）。
@@ -315,13 +307,6 @@ impl SearchFilterPresetState {
     pub(crate) fn custom_size_has_intent(&self) -> bool {
         self.size_preset == SearchSizePreset::Custom
             && (!self.custom_size_min.trim().is_empty() || !self.custom_size_max.trim().is_empty())
-    }
-
-    pub(crate) fn selected_more_type_count(&self) -> usize {
-        SearchEntryTypePreset::MORE
-            .iter()
-            .filter(|entry_type| self.entry_type_is_selected(**entry_type))
-            .count()
     }
 
     pub(crate) fn reset(&mut self) {
@@ -593,7 +578,6 @@ mod tests {
             date_field: SearchDateField::Created,
             date_preset: SearchDatePreset::PastYear,
             custom_extensions: ".PDF".to_owned(),
-            custom_extensions_open: true,
             ..SearchFilterPresetState::default()
         };
 
@@ -656,10 +640,9 @@ mod tests {
     }
 
     #[test]
-    fn custom_extensions_flow_into_query_filters_and_toggle_clears_them() {
+    fn custom_extensions_flow_into_query_filters_and_clearing_them_restores_the_default() {
         let mut presets = SearchFilterPresetState::default();
         presets.custom_extensions = ".PDF docx".to_owned();
-        presets.custom_extensions_open = true;
         assert!(presets.custom_extensions_are_active());
 
         let filters = presets
@@ -670,8 +653,7 @@ mod tests {
             vec!["pdf".to_owned(), "docx".to_owned()]
         );
 
-        presets.toggle_custom_extensions();
-        assert!(presets.custom_extensions.is_empty());
+        presets.custom_extensions.clear();
         assert!(!presets.custom_extensions_are_active());
         assert!(presets.is_default());
     }
@@ -680,7 +662,6 @@ mod tests {
     fn invalid_custom_extensions_reject_the_query_filters() {
         let mut presets = SearchFilterPresetState::default();
         presets.custom_extensions = "pd*f".to_owned();
-        presets.custom_extensions_open = true;
         assert!(!presets.custom_extensions_are_active());
         assert!(presets
             .query_filters_at(New_York.with_ymd_and_hms(2026, 6, 1, 12, 0, 0).unwrap())

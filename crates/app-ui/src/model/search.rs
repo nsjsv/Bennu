@@ -17,6 +17,8 @@ pub(crate) use filters::{
 };
 mod history;
 pub(crate) use history::SearchHistory;
+mod filter_menu;
+pub(crate) use filter_menu::{SearchFilterMenu, SearchFilterPick};
 mod order;
 mod scope;
 pub(crate) use scope::{LastSearchScope, SearchDirectoryScope, SearchRootSnapshot};

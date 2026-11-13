@@ -392,3 +392,33 @@ fn config_values_round_trip() {
     let restored = ContextMenuPreferences::from_config_values(&preferences.to_config_values());
     assert_eq!(preferences, restored);
 }
+
+#[test]
+fn saved_type_layout_from_the_old_more_menu_keeps_choices_and_gains_every_type() {
+    let values = ContextMenuLayoutConfigValues {
+        search_entry_types: vec![
+            ("files".to_owned(), true),
+            ("archives".to_owned(), false),
+            ("links".to_owned(), true),
+        ],
+        ..ContextMenuLayoutConfigValues::default()
+    };
+
+    let preferences = ContextMenuPreferences::from_config_values(&values);
+
+    assert_eq!(
+        preferences.search_entry_type_items(),
+        vec![
+            SearchEntryTypePreset::Spreadsheets,
+            SearchEntryTypePreset::Video,
+            SearchEntryTypePreset::Images,
+            SearchEntryTypePreset::Text,
+            SearchEntryTypePreset::Documents,
+            SearchEntryTypePreset::Folders,
+            SearchEntryTypePreset::Audio,
+            SearchEntryTypePreset::Pdf,
+            SearchEntryTypePreset::Files,
+            SearchEntryTypePreset::Links,
+        ]
+    );
+}

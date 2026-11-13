@@ -637,29 +637,18 @@ impl FileBrowser {
                 self.search_history_interaction.exit_popup();
                 Task::none()
             }
-            Message::SearchEntryTypesMenuOpened => self.open_search_entry_types_menu(),
+            Message::SearchFilterMenuOpened(menu) => self.open_search_filter_menu(menu),
+            Message::SearchFilterMenuClosed => self.close_search_filter_menu(),
+            Message::SearchFilterPicked(pick) => self.pick_search_filter(pick),
             Message::SearchEntryTypeToggled(entry_type) => {
                 self.toggle_search_entry_type(entry_type)
-            }
-            Message::SearchDirectoryScopeSelected(scope) => {
-                self.select_search_directory_scope(scope)
-            }
-            Message::SearchTextScopeSelected(text_scope) => {
-                self.select_search_text_scope(text_scope)
             }
             Message::SearchRegexToggled => self.toggle_search_regex(),
             Message::SearchDateFieldSelected(date_field) => {
                 self.select_search_date_field(date_field)
             }
-            Message::SearchDatePresetSelected(date_preset) => {
-                self.select_search_date_preset(date_preset)
-            }
-            Message::SearchCustomExtensionsToggled => self.toggle_search_custom_extensions(),
             Message::SearchCustomExtensionsChanged(value) => {
                 self.update_search_custom_extensions(value)
-            }
-            Message::SearchSizePresetSelected(size_preset) => {
-                self.select_search_size_preset(size_preset)
             }
             Message::SearchCustomSizeMinChanged(value) => self.update_search_custom_size_min(value),
             Message::SearchCustomSizeMaxChanged(value) => self.update_search_custom_size_max(value),

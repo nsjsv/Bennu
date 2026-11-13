@@ -20,13 +20,14 @@ use crate::config;
 use crate::model::search::{SearchProvider, SearchRunId, SEARCH_RESULT_WINDOW};
 use crate::model::BrowserLocation;
 use crate::model::{
-    BrowserViewMode, ContextMenuState, DirectoryFallbackOutcome, HistoryEntry,
-    IndexedSearchOutcome, IndexedSearchRequest, LastSearchScope, Message, SearchDirectoryScope,
-    SearchEntryTypeMenuState, SearchEntryTypePreset, SearchResultCompletion,
-    SearchServiceDiagnosticKind, SearchSizePreset, SelectionMarquee, SelectionMarqueePhase,
-    SelectionMarqueeScrollAnchor, SelectionMarqueeSource,
+    BrowserViewMode, DirectoryFallbackOutcome, HistoryEntry, IndexedSearchOutcome,
+    IndexedSearchRequest, LastSearchScope, Message, SearchDirectoryScope, SearchEntryTypePreset,
+    SearchFilterMenu, SearchResultCompletion, SearchServiceDiagnosticKind, SearchSizePreset,
+    SelectionMarquee, SelectionMarqueePhase, SelectionMarqueeScrollAnchor, SelectionMarqueeSource,
 };
 
+#[path = "search_tests/filter_menu_tests.rs"]
+mod filter_menu_tests;
 #[path = "search_tests/location_tests.rs"]
 mod location_tests;
 #[path = "search_tests/ranked_snapshot_tests.rs"]
@@ -776,21 +777,18 @@ fn immediate_search_actions_invalidate_pending_input_stabilization() {
 }
 
 #[test]
-fn reopening_workspace_rejects_old_session_and_clears_type_menu() {
+fn reopening_workspace_rejects_old_session_and_closes_the_filter_menu() {
     let mut browser = browser_for_search_tests(PathBuf::from("/workspace"));
     drop(submit_search(&mut browser));
     let stale = browser
         .active_search_mut()
         .unwrap()
         .replace_input("old session".to_owned());
-    browser.context_menu = Some(ContextMenuState::SearchEntryTypes(
-        SearchEntryTypeMenuState {
-            position: iced::Point::ORIGIN,
-        },
-    ));
+    drop(browser.open_search_filter_menu(SearchFilterMenu::Types));
+    assert_eq!(browser.search_filter_menu, Some(SearchFilterMenu::Types));
 
     drop(browser.close_search_workspace());
-    assert!(browser.context_menu.is_none());
+    assert!(browser.search_filter_menu.is_none());
     drop(submit_search(&mut browser));
     let reopened_generation = browser.active_search().unwrap().run.generation;
     drop(browser.accept_search_input_stabilization(stale));

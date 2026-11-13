@@ -176,7 +176,7 @@ impl FileBrowser {
         }
     }
 
-    /// 先收搜索历史浮层；在搜索结果里且没有别的浮层占着键盘时退出搜索。
+    /// 先收搜索历史浮层、筛选下拉；在搜索结果里且没有别的浮层占着键盘时退出搜索。
     fn handle_escape_shortcut(&mut self) -> Task<Message> {
         if self
             .search_history_interaction
@@ -184,6 +184,9 @@ impl FileBrowser {
         {
             self.search_history_interaction.dismiss_popup();
             return Task::none();
+        }
+        if self.search_filter_menu.is_some() {
+            return self.close_search_filter_menu();
         }
         if self.active_search().is_some() && self.file_browser_content_shortcuts_enabled() {
             return self.close_search_workspace();

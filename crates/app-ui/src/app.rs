@@ -361,6 +361,8 @@ pub(crate) struct FileBrowser {
     pub(crate) settings_subpage: Option<SettingsSubpage>,
     pub(crate) search_service: SearchServiceState,
     pub(crate) search_history_interaction: crate::model::SearchHistoryInteraction,
+    /// 搜索筛选栏上开着的下拉（一次只开一个）。
+    pub(crate) search_filter_menu: Option<crate::model::SearchFilterMenu>,
     next_search_workspace_session_id: u64,
     focused_column_directory: Option<PathBuf>,
     last_pointer_clicked_column_directory: Option<PathBuf>,
@@ -745,6 +747,7 @@ impl FileBrowser {
             settings_subpage: None,
             search_service,
             search_history_interaction: crate::model::SearchHistoryInteraction::default(),
+            search_filter_menu: None,
             next_search_workspace_session_id: 1,
             focused_column_directory: None,
             last_pointer_clicked_column_directory: None,

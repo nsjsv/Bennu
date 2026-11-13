@@ -33,6 +33,7 @@ mod preview_settings;
 mod properties_window;
 mod rendering_settings;
 mod right_preview_panel;
+mod search_filter_bar;
 mod search_panel;
 mod search_settings;
 mod settings_group;
@@ -123,7 +124,8 @@ use incoming_message_panel::incoming_message_panel;
 use incoming_transfer_panel::incoming_transfer_confirmation_panel;
 use rendering_settings::renderer_restart_notice_panel;
 use right_preview_panel::right_preview_panel;
-use search_panel::{search_input_panel, search_workspace_toolbar};
+use search_filter_bar::search_filter_bar;
+use search_panel::search_input_panel;
 use sidebar_panel::{sidebar_body, sidebar_settings_button};
 use tab_bar::tab_bar;
 use toolbar_controls::{
@@ -377,16 +379,11 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
         });
     } else if let Some(context_menu) = &browser.context_menu {
         floating_input = BrowserFloatingInput::ContextMenuReplacement;
-        let selected_search_entry_types = browser
-            .active_search()
-            .map(|search| search.filters.selected_entry_types.as_slice())
-            .unwrap_or_default();
         let panels = context_menu_panel(
             context_menu,
             browser.keyboard_modifiers,
             &browser.user_config().context_menus,
             &browser.user_config().list_view_preferences,
-            selected_search_entry_types,
             browser.user_config().file_grouping,
         );
         // 主菜单只按自身尺寸做 At 钳制,子菜单展开收起永不挤动它;
@@ -715,7 +712,7 @@ fn browser_content_view<'a>(
 ) -> Element<'a, Message> {
     if let Some(search) = pane.location.search() {
         return Column::new()
-            .push(search_workspace_toolbar(search, pane.entries.len()))
+            .push(search_filter_bar(browser, search, pane.entries.len()))
             .push(directory_content_view(browser, pane))
             .width(Length::Fill)
             .height(Length::Fill)

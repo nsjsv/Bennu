@@ -17,9 +17,9 @@ use crate::commands::{
 };
 use crate::model::search::{SearchRunId, SEARCH_RESULT_WINDOW};
 use crate::model::{
-    BrowserPaneId, BrowserViewMode, ContextMenuState, DirectoryFallbackOutcome,
-    IndexedSearchOutcome, IndexedSearchRequest, Message, NavigationMode, SearchDateField,
-    SearchDatePreset, SearchDirectoryScope, SearchEntryTypeMenuState, SearchEntryTypePreset,
+    BrowserPaneId, BrowserViewMode, DirectoryFallbackOutcome, IndexedSearchOutcome,
+    IndexedSearchRequest, Message, NavigationMode, SearchDateField, SearchDatePreset,
+    SearchDirectoryScope, SearchEntryTypePreset, SearchFilterMenu, SearchFilterPick,
     SearchInputStabilizationRequest, SearchInputStabilizationSubject, SearchServiceDiagnostic,
     SearchServiceDiagnosticKind, SearchServiceRecoveryAction, SearchServiceStatusRequest,
     SearchSizePreset, SearchWorkspaceSessionId, SearchWorkspaceState,
@@ -76,14 +76,6 @@ impl FileBrowser {
         };
         let request = edit(search);
         Task::batch([entered, search_input_stabilization_command(request)])
-    }
-
-    pub(super) fn toggle_search_custom_extensions(&mut self) -> Task<Message> {
-        let Some(workspace) = self.active_search_mut() else {
-            return Task::none();
-        };
-        workspace.filters.toggle_custom_extensions();
-        self.restart_active_search()
     }
 
     pub(super) fn select_search_size_preset(
@@ -198,22 +190,32 @@ impl FileBrowser {
         self.restart_active_search()
     }
 
-    pub(super) fn open_search_entry_types_menu(&mut self) -> Task<Message> {
-        if self.active_search().is_none()
-            || self
-                .user_config
-                .context_menus
-                .search_entry_type_items()
-                .is_empty()
-        {
-            return Task::none();
+    /// 筛选栏上的下拉一次只开一个；按钮在下拉开着时不发打开（点它算“点外面”，由下拉关掉）。
+    pub(super) fn open_search_filter_menu(&mut self, menu: SearchFilterMenu) -> Task<Message> {
+        if self.active_search().is_some() {
+            self.search_filter_menu = Some(menu);
         }
-        self.context_menu = Some(ContextMenuState::SearchEntryTypes(
-            SearchEntryTypeMenuState {
-                position: self.cursor_or_origin(),
-            },
-        ));
         Task::none()
+    }
+
+    pub(super) fn close_search_filter_menu(&mut self) -> Task<Message> {
+        self.search_filter_menu = None;
+        Task::none()
+    }
+
+    /// 下拉里点一下就定下来的选项：先按选项关下拉，再照常改筛选、重搜。
+    pub(super) fn pick_search_filter(&mut self, pick: SearchFilterPick) -> Task<Message> {
+        if pick.closes_menu() {
+            self.search_filter_menu = None;
+        }
+        match pick {
+            SearchFilterPick::Scope(scope) => self.select_search_directory_scope(scope),
+            SearchFilterPick::TextScope(text_scope) => self.select_search_text_scope(text_scope),
+            SearchFilterPick::DatePreset(date_preset) => {
+                self.select_search_date_preset(date_preset)
+            }
+            SearchFilterPick::Size(size_preset) => self.select_search_size_preset(size_preset),
+        }
     }
 
     pub(super) fn toggle_search_entry_type(
@@ -319,12 +321,7 @@ impl FileBrowser {
     /// 标签离开搜索（导航、关闭）后搜索专属的浮层与记忆跟着收掉。
     pub(super) fn forget_search_interaction(&mut self) {
         self.search_history_interaction.reset();
-        if matches!(
-            self.context_menu,
-            Some(ContextMenuState::SearchEntryTypes(_))
-        ) {
-            self.context_menu = None;
-        }
+        self.search_filter_menu = None;
     }
 
     /// 活动标签还不在搜索里时，从它的文件夹进入一次新搜索。

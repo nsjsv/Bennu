@@ -11,7 +11,7 @@ use file_core::{
     extract_archive_with_controls_and_progress, is_direct_move_segment_candidate,
     persist_recoverable_source_manifest_with_controls, prepare_direct_move_intent_segment,
     rename_entry, run_direct_move_batch_to_durable_renamed, run_recoverable_transfer,
-    ArchiveCreationRequest, ArchiveExtractionRequest, CopyProgress, DirectMoveBatchRecord,
+    ArchiveCreationRequest, ArchiveExtractionRequest, DirectMoveBatchRecord,
     DirectMoveIntentBatchRecord, FileError, FileOperationControls, FileOperationVerification,
     FileTransferOptions, RecoverableTransferError, RecoverableTransferOperation,
     RecoverableTransferOutcome, SymbolicLinkRequest, TransferConflictStrategy, TransferJournal,

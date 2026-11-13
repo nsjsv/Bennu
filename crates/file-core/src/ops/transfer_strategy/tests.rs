@@ -199,8 +199,8 @@ async fn progress_events_are_monotonic_and_end_at_total() {
         events.push(event);
     }
     // 事件数取决于 tokio fs::File 的内部单次读上限(MAX_BUF,当前 2 MiB),
-    // 属于实现细节;这里锁定真正的不变量:非空、单调递增、收尾等于总量。
-    assert!(!events.is_empty(), "9 MiB 源必须产生至少一个进度事件");
+    // 属于实现细节;这里锁定真正的不变量:开始事件为 0、单调递增、收尾等于总量。
+    assert_eq!(events.first().unwrap().bytes_done, 0);
     assert!(
         events
             .windows(2)
@@ -210,6 +210,57 @@ async fn progress_events_are_monotonic_and_end_at_total() {
     let last = events.last().unwrap();
     assert_eq!(last.bytes_done, content.len() as u64);
     assert_eq!(last.bytes_total, content.len() as u64);
+}
+
+/// 接收方按“开始事件 + 第一条 done == total”判断单个文件完成：每种策略、
+/// 包括空文件，都必须恰好给出一条开始事件和一条完成事件。
+#[tokio::test]
+async fn every_strategy_reports_one_start_and_one_completion_per_file() {
+    let directory = tempfile::tempdir().unwrap();
+    for (size, strategy) in [
+        (0, None),
+        (0, Some(PayloadCopyStrategy::KernelRange)),
+        (0, Some(PayloadCopyStrategy::UserLoop)),
+        (3 * 1024 * 1024, None),
+        (3 * 1024 * 1024, Some(PayloadCopyStrategy::KernelRange)),
+        (3 * 1024 * 1024, Some(PayloadCopyStrategy::UserLoop)),
+    ] {
+        let source_path = directory.path().join(format!("source-{size}-{strategy:?}"));
+        write_random_file(&source_path, size).await;
+        let source_device = std::fs::symlink_metadata(&source_path).unwrap().dev();
+        let engine = TransferStrategyEngine::probe(source_device, directory.path());
+        if let Some(strategy) = strategy {
+            engine.force_strategy(source_device, source_device, strategy);
+        }
+        let (sender, mut receiver) = mpsc::unbounded_channel::<CopyProgress>();
+        let mut controls = running_controls();
+
+        copy_regular_file_payload(RegularFilePayloadCopy {
+            source: &source_path,
+            target: &directory.path().join(format!("target-{size}-{strategy:?}")),
+            source_device,
+            bytes_total: size as u64,
+            engine: &engine,
+            controls: &mut controls,
+            progress: Some(&sender),
+            source_hasher: None,
+        })
+        .await
+        .unwrap();
+        drop(sender);
+
+        let mut events = Vec::new();
+        while let Some(event) = receiver.recv().await {
+            events.push(event);
+        }
+        assert_eq!(events[0].bytes_done, 0, "{size} {strategy:?}");
+        let completions = events
+            .iter()
+            .filter(|event| event.bytes_done == event.bytes_total)
+            .count();
+        assert_eq!(completions, 1, "{size} {strategy:?}");
+        assert_eq!(events.last().unwrap().bytes_done, size as u64);
+    }
 }
 
 #[tokio::test]

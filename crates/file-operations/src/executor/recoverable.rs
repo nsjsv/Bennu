@@ -1013,30 +1013,25 @@ async fn run_recoverable_record_with_progress(
     let transfer_options = options.clone().with_progress_sender(progress_sender);
     let transfer = run_recoverable_transfer(record, journal, transfer_options);
     tokio::pin!(transfer);
-    let mut latest_copy_progress = None;
-    let mut last_copy_progress_sent_at = None;
+    let mut last_progress_sent_at = None;
 
     loop {
         tokio::select! {
             progress = progress_receiver.recv() => {
                 if let Some(progress) = progress {
-                    latest_copy_progress = Some(progress);
+                    batch_progress.observe_copy_progress(record_index, &progress);
                     let now = Instant::now();
-                    if should_send_byte_progress(last_copy_progress_sent_at, now) {
-                        if let Some(progress) = latest_copy_progress.take() {
-                            send_copy_progress(output, task_id, record_index, progress, batch_progress).await;
-                            last_copy_progress_sent_at = Some(now);
-                        }
+                    if should_send_byte_progress(last_progress_sent_at, now) {
+                        let update = batch_progress.snapshot();
+                        send_transfer_batch_progress(output, task_id, batch_progress, update).await;
+                        last_progress_sent_at = Some(now);
                     }
                 }
             }
             transfer_outcome = &mut transfer => {
-                latest_copy_progress = progress::drain_latest_copy_progress(
-                    &mut progress_receiver,
-                    latest_copy_progress,
-                );
-                if let Some(progress) = latest_copy_progress.take() {
-                    send_copy_progress(output, task_id, record_index, progress, batch_progress).await;
+                // 读空再返回：完成计数不能丢。最新快照由调用方结算记录时发出。
+                while let Ok(progress) = progress_receiver.try_recv() {
+                    batch_progress.observe_copy_progress(record_index, &progress);
                 }
                 return transfer_outcome;
             }
@@ -1076,19 +1071,6 @@ fn history_safe_transfer(transfer: &QueuedTransfer) -> bool {
             | TransferConflictStrategy::KeepBoth
             | TransferConflictStrategy::Skip
     )
-}
-
-async fn send_copy_progress(
-    output: &FileOperationEventSender,
-    task_id: u64,
-    record_index: usize,
-    progress: CopyProgress,
-    batch_progress: &mut TransferBatchProgress,
-) {
-    let Some(update) = batch_progress.observe_copy_progress(record_index, &progress) else {
-        return;
-    };
-    send_transfer_batch_progress(output, task_id, batch_progress, update).await;
 }
 
 #[cfg(test)]
@@ -1298,11 +1280,11 @@ mod recoverable_transfer_tests {
             if let FileOperationEvent::Progressed {
                 task_id: id,
                 update:
-                    FileOperationProgressUpdate::Bytes {
-                        completed_bytes,
-                        total_bytes,
+                    FileOperationProgressUpdate::Transfer {
                         completed_items,
                         total_items,
+                        bytes: Some((completed_bytes, total_bytes)),
+                        ..
                     },
                 ..
             } = event

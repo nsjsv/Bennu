@@ -1,5 +1,5 @@
 use super::*;
-use crate::progress::{FileOperationProgress, FileOperationProgressUpdate};
+use crate::progress::{CurrentFileProgress, FileOperationProgress, FileOperationProgressUpdate};
 
 fn queued_directory_creation() -> QueuedFileOperation {
     QueuedFileOperation::CreateDirectory {
@@ -180,4 +180,74 @@ fn failure_and_cancellation_preserve_last_trusted_progress() {
         Some((600, 1_000))
     );
     assert_eq!(canceled_queue.tasks()[0].progress.items(), Some((2, 3)));
+}
+
+fn transfer_update(
+    completed_items: usize,
+    completed_bytes: u64,
+    current_file: Option<CurrentFileProgress>,
+) -> FileOperationProgressUpdate {
+    FileOperationProgressUpdate::Transfer {
+        completed_items,
+        total_items: 2_049,
+        bytes: Some((completed_bytes, 41)),
+        current_file,
+    }
+}
+
+#[test]
+fn transfer_fraction_follows_items_even_when_bytes_stay_at_zero() {
+    let mut progress = FileOperationProgress::pending();
+
+    progress.update(transfer_update(508, 0, None));
+
+    let fraction = progress.fraction().unwrap();
+    assert!((fraction - 508.0 / 2_049.0).abs() < f32::EPSILON);
+    assert_eq!(progress.bytes(), Some((0, 41)));
+    assert_eq!(progress.items(), Some((508, 2_049)));
+
+    progress.update(transfer_update(2_049, 41, None));
+    assert!(progress.fraction().unwrap() < 1.0);
+}
+
+#[test]
+fn transfer_items_only_grow_and_current_file_follows_the_latest_update() {
+    let movie = CurrentFileProgress {
+        name: "movie.mkv".to_owned(),
+        completed_bytes: 100,
+        total_bytes: 400,
+    };
+    let mut progress = FileOperationProgress::pending();
+
+    progress.update(transfer_update(10, 0, Some(movie.clone())));
+    progress.update(transfer_update(5, 0, None));
+
+    assert_eq!(progress.items(), Some((10, 2_049)));
+    assert_eq!(progress.current_file(), None);
+
+    progress.update(transfer_update(11, 0, Some(movie.clone())));
+    assert_eq!(progress.current_file(), Some(&movie));
+    assert_eq!(movie.fraction(), Some(0.25));
+
+    progress.mark_complete();
+    assert_eq!(progress.current_file(), None);
+    assert_eq!(progress.fraction(), Some(1.0));
+    assert_eq!(progress.items(), Some((2_049, 2_049)));
+}
+
+/// 同一任务的进度条只用一种度量：先按项数，之后来的字节更新不改用字节。
+#[test]
+fn the_first_trusted_measure_keeps_driving_the_fraction() {
+    let mut progress = FileOperationProgress::pending();
+
+    progress.update(transfer_update(1_000, 0, None));
+    progress.update(FileOperationProgressUpdate::Bytes {
+        completed_bytes: 0,
+        total_bytes: 41,
+        completed_items: 1_000,
+        total_items: 2_049,
+    });
+
+    let fraction = progress.fraction().unwrap();
+    assert!((fraction - 1_000.0 / 2_049.0).abs() < f32::EPSILON);
 }

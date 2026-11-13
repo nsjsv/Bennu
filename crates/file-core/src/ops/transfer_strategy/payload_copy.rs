@@ -72,6 +72,18 @@ pub async fn copy_regular_file_payload(
         .map_err(|error_source| copy_error(source, target, error_source))?
         .dev();
 
+    // 开始事件先于任何数据：接收方据此知道哪些文件正在搬运；之后第一条
+    // done == total 即完成。空文件的 0/0 同时是开始和完成——各策略对空文件
+    // 都不发块事件，没有这条，空文件的完成就无从观察。
+    if let Some(progress) = progress {
+        let _ = progress.send(CopyProgress {
+            from: source.to_path_buf(),
+            to: target.to_path_buf(),
+            bytes_done: 0,
+            bytes_total,
+        });
+    }
+
     let mut attempted = engine.strategy(source_device, target_device);
     loop {
         let outcome = match attempted {
@@ -186,7 +198,8 @@ async fn try_kernel_clone(
         }
         return Err(StrategyFailure::Io(error.into()));
     }
-    if let Some(progress) = progress {
+    // 块事件只报真正搬过的字节；空文件的完成已由开始事件 0/0 表达。
+    if let Some(progress) = progress.filter(|_| bytes_total > 0) {
         let _ = progress.send(CopyProgress {
             from: source.to_path_buf(),
             to: target.to_path_buf(),

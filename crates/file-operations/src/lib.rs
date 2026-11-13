@@ -28,7 +28,7 @@ pub use outcome::{
     FileOperationHistoryEligibility, FileOperationOutcome, KeptNewFolder, RenameRejection,
 };
 pub use progress::{
-    FileOperationProgress, FileOperationProgressUpdate, TransferEntrySnapshot,
+    CurrentFileProgress, FileOperationProgress, FileOperationProgressUpdate, TransferEntrySnapshot,
     TransferEntrySnapshotState,
 };
 // 队列的公开面就是它自己声明为 pub 的那些项（模块私有细节仍是 pub(super)）。

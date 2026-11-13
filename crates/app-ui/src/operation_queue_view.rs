@@ -10,7 +10,8 @@ use crate::appearance::{
 use crate::formatting::format_middle_ellipsized_text;
 use crate::model::{Message, ScrollbarRegion};
 use crate::operation_queue_display::{
-    file_operation_progress_text, FileOperationPathLines, OperationPathLines,
+    current_file_size_text, file_operation_progress_text, FileOperationPathLines,
+    OperationPathLines,
 };
 use crate::view::transfer_task_row::transfer_task_row;
 use bennu_preview::operation_progress::{
@@ -21,7 +22,9 @@ use bennu_theme::controls::normal_button;
 use bennu_theme::controls::progress_bar;
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use bennu_theme::typography::{BOLD, CAPTION_SIZE, TITLE_SIZE};
-use file_operations::{FileOperationQueue, FileOperationStatus, FileOperationTask};
+use file_operations::{
+    CurrentFileProgress, FileOperationQueue, FileOperationStatus, FileOperationTask,
+};
 
 pub(crate) const OPERATION_QUEUE_PANEL_WIDTH: f32 = 360.0;
 pub(crate) const OPERATION_QUEUE_PANEL_BOTTOM: f32 = 18.0;
@@ -187,9 +190,11 @@ fn operation_task_row(task: &FileOperationTask, animation_frame: u8) -> Element<
             .into(),
     };
 
-    let mut body = column![title, paths, progress]
-        .spacing(4)
-        .width(Length::Fill);
+    let mut body = column![title, paths].spacing(4).width(Length::Fill);
+    if let Some(current_file) = task.progress.current_file() {
+        body = body.push(current_file_progress(current_file));
+    }
+    body = body.push(progress);
 
     if let Some(detail) = file_operation_progress_text(task) {
         body = body.push(readable_text(detail).size(CAPTION_SIZE).width(Length::Fill));
@@ -222,6 +227,28 @@ fn operation_task_row(task: &FileOperationTask, animation_frame: u8) -> Element<
     };
 
     item.into()
+}
+
+/// 当前文件一行（名字 + 已搬/总大小）加一条细进度条，放在总进度条上面。
+fn current_file_progress(current_file: &CurrentFileProgress) -> Element<'_, Message> {
+    let label = row![
+        readable_text(format_middle_ellipsized_text(
+            &current_file.name,
+            TASK_FILE_NAME_MAX_CHARS
+        ))
+        .size(CAPTION_SIZE)
+        .width(Length::Fill),
+        readable_text(current_file_size_text(current_file)).size(CAPTION_SIZE),
+    ]
+    .spacing(6)
+    .align_y(Alignment::Center);
+    column![
+        label,
+        progress_bar(0.0..=1.0, current_file.fraction().unwrap_or(0.0)).girth(Length::Fixed(2.0)),
+    ]
+    .spacing(2)
+    .width(Length::Fill)
+    .into()
 }
 
 fn operation_title_text(title: String, path_lines: &FileOperationPathLines) -> String {

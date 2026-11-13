@@ -1,78 +1,87 @@
 use std::path::PathBuf;
 
 use bennu_state::StoredProgress;
-use file_core::byte_progress::active_byte_fraction;
+use file_core::byte_progress::{active_byte_fraction, ACTIVE_PROGRESS_LIMIT};
 
+/// 驱动进度条比例的度量。字节数和项数可以同时存在（文字都显示），
+/// 但比例只由其中一种决定，由执行器发来的更新种类选定。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FileOperationWorkProgress {
-    Indeterminate,
-    Bytes {
-        completed_bytes: u64,
-        total_bytes: u64,
-    },
-    Completed {
-        bytes: Option<(u64, u64)>,
-    },
+enum FileOperationProgressMeasure {
+    Unknown,
+    Bytes,
+    Items,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// 正在搬运的单个文件。并行搬运时执行器只挑最大的那个发来。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CurrentFileProgress {
+    pub name: String,
+    pub completed_bytes: u64,
+    pub total_bytes: u64,
+}
+
+impl CurrentFileProgress {
+    pub fn fraction(&self) -> Option<f32> {
+        active_byte_fraction(self.completed_bytes, self.total_bytes)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileOperationProgress {
-    work: FileOperationWorkProgress,
-    completed_items: usize,
-    total_items: Option<usize>,
+    measure: FileOperationProgressMeasure,
+    bytes: Option<(u64, u64)>,
+    items: Option<(usize, usize)>,
+    current_file: Option<CurrentFileProgress>,
+    completed: bool,
 }
 
 impl FileOperationProgress {
     pub fn pending() -> Self {
         Self {
-            work: FileOperationWorkProgress::Indeterminate,
-            completed_items: 0,
-            total_items: None,
+            measure: FileOperationProgressMeasure::Unknown,
+            bytes: None,
+            items: None,
+            current_file: None,
+            completed: false,
         }
     }
 
-    pub fn fraction(self) -> Option<f32> {
-        match self.work {
-            FileOperationWorkProgress::Indeterminate => None,
-            FileOperationWorkProgress::Bytes {
-                completed_bytes,
-                total_bytes,
-            } => active_byte_fraction(completed_bytes, total_bytes),
-            FileOperationWorkProgress::Completed { .. } => Some(1.0),
+    pub fn fraction(&self) -> Option<f32> {
+        if self.completed {
+            return Some(1.0);
+        }
+        match self.measure {
+            FileOperationProgressMeasure::Unknown => None,
+            FileOperationProgressMeasure::Bytes => self
+                .bytes
+                .and_then(|(completed, total)| active_byte_fraction(completed, total)),
+            // 和字节比例同一个上限：最后一项写完到结算之间不显示满格。
+            FileOperationProgressMeasure::Items => self.items.map(|(completed, total)| {
+                (completed as f32 / total as f32).min(ACTIVE_PROGRESS_LIMIT)
+            }),
         }
     }
 
-    pub fn bytes(self) -> Option<(u64, u64)> {
-        match self.work {
-            FileOperationWorkProgress::Bytes {
-                completed_bytes,
-                total_bytes,
-            } => Some((completed_bytes, total_bytes)),
-            FileOperationWorkProgress::Completed { bytes } => bytes,
-            FileOperationWorkProgress::Indeterminate => None,
-        }
+    pub fn bytes(&self) -> Option<(u64, u64)> {
+        self.bytes
     }
 
-    pub fn items(self) -> Option<(usize, usize)> {
-        self.total_items
-            .map(|total_items| (self.completed_items, total_items))
+    pub fn items(&self) -> Option<(usize, usize)> {
+        self.items
+    }
+
+    pub fn current_file(&self) -> Option<&CurrentFileProgress> {
+        self.current_file.as_ref()
     }
 
     pub fn mark_complete(&mut self) {
-        let bytes = match self.work {
-            FileOperationWorkProgress::Bytes { total_bytes, .. } => {
-                Some((total_bytes, total_bytes))
-            }
-            FileOperationWorkProgress::Indeterminate
-            | FileOperationWorkProgress::Completed { .. } => None,
-        };
-        self.work = FileOperationWorkProgress::Completed { bytes };
-        if let Some(total_items) = self.total_items {
-            self.completed_items = total_items;
-        }
+        self.completed = true;
+        self.bytes = self.bytes.map(|(_, total)| (total, total));
+        self.items = self.items.map(|(_, total)| (total, total));
+        self.current_file = None;
     }
 
-    pub fn to_stored(self) -> StoredProgress {
+    pub fn to_stored(&self) -> StoredProgress {
         match self.fraction() {
             Some(fraction) => StoredProgress::with_fraction(fraction as f64),
             None => StoredProgress::pending(),
@@ -88,24 +97,23 @@ impl FileOperationProgress {
                 total_items,
             } => {
                 self.update_items(completed_items, total_items);
-                if total_bytes == 0 {
-                    return;
+                if self.update_bytes(completed_bytes, total_bytes) {
+                    self.select_measure(FileOperationProgressMeasure::Bytes);
                 }
-                let completed_bytes = completed_bytes.min(total_bytes);
-                self.work = match self.work {
-                    FileOperationWorkProgress::Indeterminate => FileOperationWorkProgress::Bytes {
-                        completed_bytes,
-                        total_bytes,
-                    },
-                    FileOperationWorkProgress::Bytes {
-                        completed_bytes: current_completed_bytes,
-                        total_bytes: current_total_bytes,
-                    } if current_total_bytes == total_bytes => FileOperationWorkProgress::Bytes {
-                        completed_bytes: current_completed_bytes.max(completed_bytes),
-                        total_bytes,
-                    },
-                    current => current,
-                };
+            }
+            FileOperationProgressUpdate::Transfer {
+                completed_items,
+                total_items,
+                bytes,
+                current_file,
+            } => {
+                if self.update_items(completed_items, total_items) {
+                    self.select_measure(FileOperationProgressMeasure::Items);
+                }
+                if let Some((completed_bytes, total_bytes)) = bytes {
+                    self.update_bytes(completed_bytes, total_bytes);
+                }
+                self.current_file = current_file;
             }
             FileOperationProgressUpdate::IndeterminateItems { completed, total } => {
                 self.update_items(completed, total);
@@ -114,19 +122,47 @@ impl FileOperationProgress {
         }
     }
 
-    fn update_items(&mut self, completed: usize, total: usize) {
+    /// 第一次拿到可信分母时选定度量，之后不换：同一任务的进度条不能
+    /// 从按字节跳成按项数。
+    fn select_measure(&mut self, measure: FileOperationProgressMeasure) {
+        if self.measure == FileOperationProgressMeasure::Unknown {
+            self.measure = measure;
+        }
+    }
+
+    /// 只增不减；分母变了的更新整条忽略。返回分母是否可信（已采用）。
+    fn update_bytes(&mut self, completed: u64, total: u64) -> bool {
         if total == 0 {
-            return;
+            return false;
         }
         let completed = completed.min(total);
-        match self.total_items {
-            Some(current_total) if current_total == total => {
-                self.completed_items = self.completed_items.max(completed);
+        match self.bytes {
+            Some((current, current_total)) if current_total == total => {
+                self.bytes = Some((current.max(completed), total));
+                true
             }
-            Some(_) => {}
+            Some(_) => false,
             None => {
-                self.completed_items = completed;
-                self.total_items = Some(total);
+                self.bytes = Some((completed, total));
+                true
+            }
+        }
+    }
+
+    fn update_items(&mut self, completed: usize, total: usize) -> bool {
+        if total == 0 {
+            return false;
+        }
+        let completed = completed.min(total);
+        match self.items {
+            Some((current, current_total)) if current_total == total => {
+                self.items = Some((current.max(completed), total));
+                true
+            }
+            Some(_) => false,
+            None => {
+                self.items = Some((completed, total));
+                true
             }
         }
     }
@@ -134,12 +170,21 @@ impl FileOperationProgress {
 
 #[derive(Debug, Clone)]
 pub enum FileOperationProgressUpdate {
+    /// 比例按字节算；项数只用于文字。
     Bytes {
         completed_bytes: u64,
         total_bytes: u64,
         completed_items: usize,
         total_items: usize,
     },
+    /// 比例按项数算；字节只用于文字，当前文件单独一条进度。
+    Transfer {
+        completed_items: usize,
+        total_items: usize,
+        bytes: Option<(u64, u64)>,
+        current_file: Option<CurrentFileProgress>,
+    },
+    /// 只有文字计数，不出比例。
     IndeterminateItems {
         completed: usize,
         total: usize,

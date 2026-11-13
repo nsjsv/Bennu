@@ -33,6 +33,7 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Directory: %1", "目录：%1"),
     ("Status: %1", "状态：%1"),
     ("Progress: %1", "进度：%1"),
+    ("Current file: %1 (%2)", "当前文件：%1（%2）"),
     ("Warning: %1", "警告：%1"),
     ("Error: %1", "错误：%1"),
     ("Task was interrupted and cannot safely resume", "任务已中断，无法安全恢复"),

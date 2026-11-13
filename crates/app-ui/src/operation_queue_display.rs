@@ -4,8 +4,8 @@ use file_core::TrashRestoreEntry;
 
 use crate::formatting::format_file_size;
 use file_operations::{
-    new_directory_name, new_file_name, FileOperationStatus, FileOperationTask, QueuedFileOperation,
-    QueuedTransfer,
+    new_directory_name, new_file_name, CurrentFileProgress, FileOperationStatus, FileOperationTask,
+    QueuedFileOperation, QueuedTransfer,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,7 +149,7 @@ pub(crate) fn file_operation_progress_text(task: &FileOperationTask) -> Option<S
         .map(|(completed_items, total_items)| tr!("%1 / %2 items", completed_items, total_items));
 
     match (byte_detail, item_detail) {
-        (Some(bytes), Some(items)) => Some(format!("{bytes} | {items}")),
+        (Some(bytes), Some(items)) => Some(format!("{items} · {bytes}")),
         (Some(bytes), None) => Some(bytes),
         (None, Some(items)) => Some(items),
         (None, None)
@@ -162,6 +162,14 @@ pub(crate) fn file_operation_progress_text(task: &FileOperationTask) -> Option<S
         }
         (None, None) => None,
     }
+}
+
+pub(crate) fn current_file_size_text(current_file: &CurrentFileProgress) -> String {
+    format!(
+        "{} / {}",
+        format_file_size(current_file.completed_bytes),
+        format_file_size(current_file.total_bytes)
+    )
 }
 
 pub(crate) fn file_operation_copy_text(task: &FileOperationTask) -> String {
@@ -181,6 +189,13 @@ pub(crate) fn file_operation_copy_text(task: &FileOperationTask) -> String {
         tr!("Status: %1", task.status_label()),
         tr!("Progress: %1", progress),
     ];
+    if let Some(current_file) = task.progress.current_file() {
+        lines.push(tr!(
+            "Current file: %1 (%2)",
+            current_file.name,
+            current_file_size_text(current_file)
+        ));
+    }
     if let Some(warning) = task.completion_warning.as_deref() {
         lines.push(tr!("Warning: %1", warning));
     }
@@ -329,5 +344,36 @@ mod tests {
         assert!(copied.contains("Progress: Indeterminate"));
         assert!(copied.contains(&full_error));
         assert!(!copied.contains('…'));
+    }
+
+    #[test]
+    fn transfer_progress_text_leads_with_items_and_names_the_current_file() {
+        let mut queue = file_operations::FileOperationQueue::new();
+        let task_id = queued_task_id(queue.enqueue(QueuedFileOperation::CreateDirectory {
+            parent: PathBuf::from("/tmp"),
+        }));
+        queue.update_progress(
+            task_id,
+            file_operations::FileOperationProgressUpdate::Transfer {
+                completed_items: 508,
+                total_items: 2_049,
+                bytes: Some((0, 41)),
+                current_file: Some(CurrentFileProgress {
+                    name: "movie.mkv".to_owned(),
+                    completed_bytes: 1_024,
+                    total_bytes: 4_096,
+                }),
+            },
+            Vec::new(),
+        );
+        let task = &queue.tasks()[0];
+
+        assert_eq!(
+            file_operation_progress_text(task).as_deref(),
+            Some("508 / 2049 items · 0 B / 41 B")
+        );
+        assert!(
+            file_operation_copy_text(task).contains("Current file: movie.mkv (1.0 KiB / 4.0 KiB)")
+        );
     }
 }

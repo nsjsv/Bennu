@@ -62,7 +62,7 @@ pub(crate) use local_send_window::{local_send_header, view_local_send_window};
 pub(crate) use pane_blank_area::pane_blank_area;
 pub(crate) use preview_panel::view_preview_window;
 pub(crate) use properties_window::view_properties_window;
-pub(crate) use search_panel::{search_input_id, SEARCH_RESULT_ROW_HEIGHT};
+pub(crate) use search_panel::search_input_id;
 pub(crate) use settings_window::view_settings_window;
 pub(crate) use transfer_window::view_transfer_window;
 
@@ -123,7 +123,7 @@ use incoming_message_panel::incoming_message_panel;
 use incoming_transfer_panel::incoming_transfer_confirmation_panel;
 use rendering_settings::renderer_restart_notice_panel;
 use right_preview_panel::right_preview_panel;
-use search_panel::{search_input_panel, search_results_view};
+use search_panel::{search_input_panel, search_workspace_toolbar};
 use sidebar_panel::{sidebar_body, sidebar_settings_button};
 use tab_bar::tab_bar;
 use toolbar_controls::{
@@ -378,9 +378,8 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
     } else if let Some(context_menu) = &browser.context_menu {
         floating_input = BrowserFloatingInput::ContextMenuReplacement;
         let selected_search_entry_types = browser
-            .search_workspace
-            .as_ref()
-            .map(|workspace| workspace.filters.selected_entry_types.as_slice())
+            .active_search()
+            .map(|search| search.filters.selected_entry_types.as_slice())
             .unwrap_or_default();
         let panels = context_menu_panel(
             context_menu,
@@ -714,13 +713,22 @@ fn browser_content_view<'a>(
     browser: &'a FileBrowser,
     pane: BrowserPaneView<'a>,
 ) -> Element<'a, Message> {
-    if browser.search_workspace.is_some() {
-        return track_file_drag_hit_test_marker(
-            search_results_view(browser),
-            FileDragHitTestMarker::BlockedDirectoryTarget { pane_id: pane.id },
-        );
+    if let Some(search) = pane.location.search() {
+        return Column::new()
+            .push(search_workspace_toolbar(search, pane.entries.len()))
+            .push(directory_content_view(browser, pane))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into();
     }
+    directory_content_view(browser, pane)
+}
 
+/// 列表、网格或分栏；搜索结果与回收站也走这里（分栏只给目录）。
+fn directory_content_view<'a>(
+    browser: &'a FileBrowser,
+    pane: BrowserPaneView<'a>,
+) -> Element<'a, Message> {
     let drop_marker = match pane.current_directory() {
         Some(directory) => FileDragHitTestMarker::DirectoryTarget {
             pane_id: pane.id,
@@ -976,6 +984,16 @@ fn tab_title_content<'a>(location: &BrowserLocation) -> Row<'a, Message> {
     match location {
         BrowserLocation::Directory(directory) => directory_title_content(directory),
         BrowserLocation::Trash => title_row(IconSymbol::Trash, tr!("Trash")),
+        BrowserLocation::Search(search) => title_row(IconSymbol::Search, search_tab_title(search)),
+    }
+}
+
+fn search_tab_title(search: &crate::model::SearchWorkspaceState) -> String {
+    let terms = search.input.trim();
+    if terms.is_empty() {
+        tr!("Search")
+    } else {
+        format_middle_ellipsized_text(&tr!("Search “%1”", terms), TAB_LABEL_MAX_CHARS)
     }
 }
 

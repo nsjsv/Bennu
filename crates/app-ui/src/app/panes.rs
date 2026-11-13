@@ -61,11 +61,6 @@ impl<'a> BrowserPaneView<'a> {
         self.location.directory()
     }
 
-    /// 条目能否在原地展开、打开成目录。回收站里的条目只能恢复或删除。
-    pub(crate) fn browses_into_entries(&self) -> bool {
-        matches!(self.location, BrowserLocation::Directory(_))
-    }
-
     pub(crate) fn metadata_for_entry(&self, entry: &DirectoryEntry) -> EntryMetadata {
         let Some(index) = entry.discovery_index else {
             return entry.metadata.clone();
@@ -324,7 +319,7 @@ impl FileBrowser {
         let mut viewport = self
             .icon_grid_viewports
             .get(&pane_id)
-            .filter(|state| state.location == *location)
+            .filter(|state| state.location == location.key())
             .map(|state| state.viewport)
             .unwrap_or_default();
         let pane_width = self.pane_content_width_for(pane_id);

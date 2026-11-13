@@ -57,6 +57,7 @@ mod rendering_settings;
 pub(crate) mod right_preview_panel;
 mod runtime;
 mod search;
+mod search_location;
 mod search_paths;
 mod selection;
 mod session_persistence;
@@ -145,7 +146,6 @@ use crate::commands::{
 };
 use crate::config;
 use crate::config::UiLanguage;
-use crate::model::search::SearchWorkspaceState;
 use crate::model::{
     AdvancedNewFolderAfter, AdvancedNewFolderState, ApplicationLogViewState, BatchRenameState,
     BreadcrumbDropTargetBounds, BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab,
@@ -360,7 +360,6 @@ pub(crate) struct FileBrowser {
     pub(crate) context_menu_preview_expansion: Option<FileAreaMenuItem>,
     pub(crate) settings_subpage: Option<SettingsSubpage>,
     pub(crate) search_service: SearchServiceState,
-    pub(crate) search_workspace: Option<SearchWorkspaceState>,
     pub(crate) search_history_interaction: crate::model::SearchHistoryInteraction,
     next_search_workspace_session_id: u64,
     focused_column_directory: Option<PathBuf>,
@@ -425,7 +424,7 @@ pub(crate) struct FileBrowser {
 
 #[derive(Debug, Clone)]
 struct PaneIconGridViewport {
-    location: crate::model::BrowserLocation,
+    location: crate::model::LocationKey,
     viewport: IconGridViewport,
 }
 
@@ -745,7 +744,6 @@ impl FileBrowser {
             context_menu_preview_expansion: None,
             settings_subpage: None,
             search_service,
-            search_workspace: None,
             search_history_interaction: crate::model::SearchHistoryInteraction::default(),
             next_search_workspace_session_id: 1,
             focused_column_directory: None,

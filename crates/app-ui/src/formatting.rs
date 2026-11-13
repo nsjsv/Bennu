@@ -22,11 +22,23 @@ pub(crate) fn item_count_label(count: usize) -> String {
     }
 }
 
-/// 列表、大图、多栏三种视图的空目录提示。
+/// 列表、大图、多栏三种视图的空内容提示。搜索结果为空时说清是在搜、搜错了、还没输入，
+/// 还是真的没搜到。
 pub(crate) fn empty_location_message(location: &BrowserLocation) -> String {
     match location {
         BrowserLocation::Directory(_) => tr!("No items"),
         BrowserLocation::Trash => tr!("Trash is empty"),
+        BrowserLocation::Search(search) => {
+            if let Some(failure) = &search.window.failure {
+                failure.clone()
+            } else if search.window.is_loading {
+                tr!("Searching...")
+            } else if search.run.active_query.is_none() {
+                tr!("Type to search")
+            } else {
+                tr!("No search results")
+            }
+        }
     }
 }
 

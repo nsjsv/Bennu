@@ -1,8 +1,8 @@
 use std::fmt;
 
-use file_search::{SearchFileKind, SearchMatchMode, SearchTextScope};
+use file_search::{SearchMatchMode, SearchTextScope};
 use iced::widget::{
-    button, container, mouse_area, responsive, row, scrollable, tooltip, Button, Column, Row, Space,
+    button, container, mouse_area, responsive, row, scrollable, tooltip, Button, Column, Row,
 };
 use iced::{Alignment, Element, Length};
 
@@ -11,17 +11,15 @@ use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
 use crate::app::FileBrowser;
 use crate::appearance::{
     context_menu_style, enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction,
-    list_panel_style, list_row_style, path_suggestion_item_style, path_suggestions_style,
-    selected_row_style, transparent_button_style,
+    list_panel_style, path_suggestion_item_style, path_suggestions_style, transparent_button_style,
 };
-use crate::file_entry_view::{file_entry_symbol_icon, FileEntryIconTone, FileEntryVisualState};
-use crate::formatting::{format_file_size, format_middle_ellipsized_text};
+use crate::formatting::format_middle_ellipsized_text;
 use crate::model::search::SearchFilterPresetState;
 use crate::model::{
     Message, ScrollbarRegion, SearchDateField, SearchDatePreset, SearchDirectoryScope,
-    SearchEntryTypePreset, SearchResultCompletion, SearchSizePreset, SEARCH_RESULT_TOTAL_LIMIT,
+    SearchEntryTypePreset, SearchResultCompletion, SearchSizePreset, SearchWorkspaceState,
+    SEARCH_RESULT_TOTAL_LIMIT,
 };
-use crate::virtual_range::{initial_virtual_range, virtual_range_for_viewport};
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::anchored_popup::anchored_popup;
 use bennu_theme::controls::dropdown;
@@ -42,9 +40,6 @@ const SEARCH_TEXT_SCOPE_WIDTH: f32 = 274.0;
 const SEARCH_FILTER_BUTTON_HEIGHT: f32 = 30.0;
 const SEARCH_HISTORY_PANEL_MAX_HEIGHT: f32 = 320.0;
 const SEARCH_HISTORY_KEYWORD_MAX_CHARS: usize = 28;
-pub(crate) const SEARCH_RESULT_ROW_HEIGHT: f32 = 78.0;
-const SEARCH_RESULT_OVERSCAN_ROWS: usize = 12;
-const SEARCH_RESULT_INITIAL_ROWS: usize = SEARCH_RESULT_OVERSCAN_ROWS * 2 + 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct SearchDateFieldOption(SearchDateField);
@@ -110,9 +105,8 @@ pub(crate) fn search_input_id() -> iced::widget::Id {
 
 pub(super) fn search_input_panel(browser: &FileBrowser) -> Element<'_, Message> {
     let input_value = browser
-        .search_workspace
-        .as_ref()
-        .map(|workspace| workspace.input.as_str())
+        .active_search()
+        .map(|search| search.input.as_str())
         .unwrap_or_default();
     let input = text_field(&tr!("Search"), input_value)
         .id(search_input_id())
@@ -211,152 +205,113 @@ fn search_history_row(keyword: &str) -> Element<'static, Message> {
     .into()
 }
 
-pub(super) fn search_results_view(browser: &FileBrowser) -> Element<'_, Message> {
-    let Some(workspace) = browser.search_workspace.as_ref() else {
-        return container(Space::new()).into();
-    };
-    let mut rows = Column::new().spacing(0).width(Length::Fill);
-    let range = if workspace.window.viewport_height > 0.0 {
-        virtual_range_for_viewport(
-            workspace.window.hits.len(),
-            SEARCH_RESULT_ROW_HEIGHT,
-            workspace.window.viewport_offset_y,
-            workspace.window.viewport_height,
-            SEARCH_RESULT_OVERSCAN_ROWS,
-        )
-    } else {
-        initial_virtual_range(
-            workspace.window.hits.len(),
-            SEARCH_RESULT_ROW_HEIGHT,
-            SEARCH_RESULT_INITIAL_ROWS,
-        )
-    };
-    if range.before_height > 0.0 {
-        rows = rows.push(Space::new().height(Length::Fixed(range.before_height)));
-    }
-    for (index, hit) in workspace.window.hits[range.start..range.end]
-        .iter()
-        .enumerate()
-    {
-        let row_index = range.start + index;
-        rows = rows.push(search_result_row(
-            hit.clone(),
-            row_index,
-            workspace.selection.is_selected(&hit.path),
-            workspace.selection.focused_path() == Some(hit.path.as_path()),
-            browser.file_entry_content_modifier(&hit.path),
-        ));
-    }
-    if range.after_height > 0.0 {
-        rows = rows.push(Space::new().height(Length::Fixed(range.after_height)));
-    }
-    if let Some(failure) = &workspace.window.failure {
-        rows = rows.push(search_message(failure.clone()));
-    }
-    if workspace.window.is_loading {
-        rows = rows.push(search_message(tr!("Searching...")));
-    } else if workspace.window.hits.is_empty() && workspace.window.failure.is_none() {
-        rows = rows.push(search_message(tr!("No search results")));
-    }
-    if !workspace.window.is_loading {
-        if let Some(completion) = workspace.window.completion {
-            rows = rows.push(search_completion_message(completion));
-        }
-        if workspace.window.truncated {
-            rows = rows.push(search_message(tr!(
-                "Result limit reached (%1); the oldest results were dropped. Narrow the search to see more.",
-                SEARCH_RESULT_TOTAL_LIMIT
-            )));
-        }
-    }
-
-    let region = ScrollbarRegion::SearchResults;
-    let results = scrollable(smooth_scroll_content(rows, region.clone()))
-        .id(smooth_scroll_id(&region))
-        .direction(enhanced_vertical_scrollbar_direction())
-        .style(enhanced_scrollbar_style)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .on_scroll(|viewport| {
-            let offset = viewport.absolute_offset();
-            Message::SearchResultsScrolled {
-                offset_y: offset.y,
-                viewport_height: viewport.bounds().height,
-            }
-        });
-    let results = enhanced_scrollbar(results, ScrollbarAxis::Vertical);
-
-    let mut content = Column::new().push(search_workspace_toolbar(browser));
-    if workspace.content_search_is_degraded() {
-        content = content.push(search_content_degraded_notice());
-    }
-    if workspace.filters.match_mode == SearchMatchMode::Regex {
-        content = content.push(search_regex_notice());
-    }
-    content
-        .push(
-            container(results)
-                .padding([4, 6])
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .style(list_panel_style),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
-}
-
-fn search_workspace_toolbar(browser: &FileBrowser) -> Element<'_, Message> {
-    let workspace = browser
-        .search_workspace
-        .as_ref()
-        .expect("search toolbar requires an active workspace");
-    let root_label = if workspace.root.selected_scope() == SearchDirectoryScope::AllIndexedLocations
-    {
-        tr!("Search in all indexed locations")
-    } else {
-        tr!(
-            "Search in %1",
-            format_middle_ellipsized_text(&workspace.root.path().to_string_lossy(), 72)
-        )
-    };
-    let filters = workspace.filters.clone();
-    let available_directory_scopes = workspace.root.available_scopes();
-    let selected_directory_scope = workspace.root.selected_scope();
-    let last_location_path = workspace
+/// 搜索结果上方的筛选栏：范围、类型、文本范围、日期、大小、正则，以及这次搜索的进度与提示。
+pub(super) fn search_workspace_toolbar<'a>(
+    search: &'a SearchWorkspaceState,
+    loaded_results: usize,
+) -> Element<'a, Message> {
+    let filters = search.filters.clone();
+    let available_directory_scopes = search.root.available_scopes();
+    let selected_directory_scope = search.root.selected_scope();
+    let last_location_path = search
         .root
         .last_location_directory()
         .map(std::path::Path::to_path_buf);
-    let selected = browser.active_search_selection().unwrap_or_default();
+    let notices = search_notices(search, loaded_results);
+    let result_count = result_count_label(search, loaded_results);
 
-    responsive(move |viewport_size| {
+    let toolbar = responsive(move |viewport_size| {
         search_workspace_toolbar_layout(
-            root_label.clone(),
             available_directory_scopes.clone(),
             selected_directory_scope,
             last_location_path.clone(),
+            result_count.clone(),
             filters.clone(),
-            selected.clone(),
             SearchToolbarDensity::for_width(viewport_size.width),
         )
     })
     .width(Length::Fill)
-    .height(Length::Shrink)
-    .into()
+    .height(Length::Shrink);
+    let mut content = Column::new().push(toolbar);
+    for notice in notices {
+        content = content.push(search_notice(notice));
+    }
+    content.width(Length::Fill).into()
+}
+
+/// 已加载的结果数，还有下一页时带「+」。没有结果时不显示，列表的空提示会说明原因。
+fn result_count_label(search: &SearchWorkspaceState, loaded_results: usize) -> Option<String> {
+    if loaded_results == 0 {
+        return None;
+    }
+    Some(
+        if search.window.completion == Some(SearchResultCompletion::MoreAvailable) {
+            tr!("%1+ results", loaded_results)
+        } else {
+            tr!("%1 results", loaded_results)
+        },
+    )
+}
+
+/// 结果列表上方要说的话：退化、正则限制、分页状态、截断。空结果的提示在列表里。
+fn search_notices(search: &SearchWorkspaceState, loaded_results: usize) -> Vec<String> {
+    let mut notices = Vec::new();
+    if search.content_search_is_degraded() {
+        notices.push(tr!(
+            "Content indexing is unavailable; matching file names only."
+        ));
+    }
+    if search.filters.match_mode == SearchMatchMode::Regex {
+        notices.push(tr!("Regex mode matches file names only."));
+    }
+    // 没有结果时失败原因写在列表的空提示里，有结果时（翻页失败）写在这里。
+    if loaded_results > 0 {
+        if let Some(failure) = &search.window.failure {
+            notices.push(failure.clone());
+        }
+    }
+    if !search.window.is_loading {
+        match search.window.completion {
+            Some(SearchResultCompletion::Partial { inspected_entries }) => notices.push(tr!(
+                "Partial results after inspecting %1 entries",
+                inspected_entries
+            )),
+            Some(SearchResultCompletion::Complete | SearchResultCompletion::MoreAvailable)
+            | None => {}
+        }
+        if search.window.truncated {
+            notices.push(tr!(
+                "Result limit reached (%1); the oldest results were dropped. Narrow the search to see more.",
+                SEARCH_RESULT_TOTAL_LIMIT
+            ));
+        }
+    }
+    notices
 }
 
 fn search_workspace_toolbar_layout(
-    root_label: String,
     available_directory_scopes: Vec<SearchDirectoryScope>,
     selected_directory_scope: SearchDirectoryScope,
     last_location_path: Option<std::path::PathBuf>,
+    result_count: Option<String>,
     filters: SearchFilterPresetState,
-    selected: Vec<std::path::PathBuf>,
     density: SearchToolbarDensity,
 ) -> Element<'static, Message> {
+    // 范围选择、结果数与关闭同一行：关闭回到发起搜索的文件夹。
     let header = row![
-        themed_icon(IconSymbol::Search, IconTone::Normal, 15.0),
-        readable_text(root_label).width(Length::Fill),
+        container(search_directory_scope_filter(
+            &available_directory_scopes,
+            selected_directory_scope,
+            last_location_path,
+        ))
+        .width(Length::Fill),
+        result_count.map(|count| {
+            readable_text(count)
+                .size(CAPTION_SIZE)
+                .style(|theme| iced::widget::text::Style {
+                    color: Some(bennu_theme::styles::muted_text_color(theme)),
+                })
+        }),
         tooltip(
             button(themed_icon(IconSymbol::Close, IconTone::Normal, 13.0))
                 .on_press(Message::SearchWorkspaceClosed)
@@ -370,24 +325,15 @@ fn search_workspace_toolbar_layout(
     .align_y(Alignment::Center);
 
     let entry_types = search_entry_type_grid(&filters, density.entry_type_columns());
-    let directory_scope = search_directory_scope_filter(
-        &available_directory_scopes,
-        selected_directory_scope,
-        last_location_path,
-    );
     let controls = search_filter_controls(&filters, density);
     let mut toolbar = Column::new()
         .push(header)
-        .push(directory_scope)
         .push(entry_types)
         .push(controls)
         .spacing(6);
     // 自定义大小输入行跟在筛选控件区下方，随档位切回非 Custom 消失。
     if custom_size_input_is_expanded(&filters) {
         toolbar = toolbar.push(custom_size_input_row(&filters));
-    }
-    if !selected.is_empty() {
-        toolbar = toolbar.push(search_selection_actions(selected));
     }
 
     container(toolbar)
@@ -744,148 +690,11 @@ fn search_filter_button(
     .padding([4, 8])
 }
 
-fn search_selection_actions(selected: Vec<std::path::PathBuf>) -> Element<'static, Message> {
-    let mut actions = row![
-        search_action_button(IconSymbol::Copy, tr!("Copy"), Message::CopySelected),
-        search_action_button(IconSymbol::ArrowRight, tr!("Cut"), Message::MoveSelected),
-        search_action_button(IconSymbol::Trash, tr!("Trash"), Message::TrashSelected),
-        search_action_button(
-            IconSymbol::TriangleAlert,
-            tr!("Delete"),
-            Message::SearchDeletePermanentlySelected,
-        ),
-    ]
-    .spacing(4)
-    .align_y(Alignment::Center);
-    if let [path] = selected.as_slice() {
-        actions = actions.push(search_action_button(
-            IconSymbol::FolderOpen,
-            tr!("Open folder"),
-            Message::SearchOpenContainingDirectory(path.clone()),
-        ));
-    }
-    container(actions)
-        .width(Length::Fill)
-        .align_x(Alignment::End)
-        .into()
-}
-
-fn search_action_button(
-    icon: IconSymbol,
-    label: String,
-    message: Message,
-) -> Element<'static, Message> {
-    tooltip(
-        button(themed_icon(icon, IconTone::Normal, 13.0))
-            .on_press(message)
-            .width(Length::Fixed(30.0))
-            .height(Length::Fixed(28.0))
-            .padding([5, 7])
-            .style(icon_button_style),
-        tooltip_label(label),
-        tooltip::Position::Bottom,
-    )
-    .into()
-}
-
-fn search_content_degraded_notice() -> Element<'static, Message> {
-    container(
-        row![
-            themed_icon(IconSymbol::TriangleAlert, IconTone::Warning, 14.0),
-            readable_text(tr!(
-                "Content indexing is unavailable; matching file names only."
-            ))
-            .width(Length::Fill),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center),
-    )
-    .padding([7, 10])
-    .width(Length::Fill)
-    .style(list_panel_style)
-    .into()
-}
-fn search_regex_notice() -> Element<'static, Message> {
-    container(readable_text(tr!("Regex mode matches file names only.")).width(Length::Fill))
+fn search_notice(message: String) -> Element<'static, Message> {
+    container(readable_text(message).width(Length::Fill))
         .padding([7, 10])
         .width(Length::Fill)
         .style(list_panel_style)
-        .into()
-}
-
-fn search_completion_message(completion: SearchResultCompletion) -> Element<'static, Message> {
-    match completion {
-        SearchResultCompletion::Complete => container(Space::new()).into(),
-        SearchResultCompletion::MoreAvailable => search_message(tr!("Scroll to load more results")),
-        SearchResultCompletion::Partial { inspected_entries } => search_message(tr!(
-            "Partial results after inspecting %1 entries",
-            inspected_entries
-        )),
-    }
-}
-
-fn search_message(message: String) -> Element<'static, Message> {
-    container(readable_text(message))
-        .padding([14, 12])
-        .width(Length::Fill)
-        .style(list_row_style(0, 0))
-        .into()
-}
-
-fn search_result_row(
-    hit: file_search::SearchHit,
-    row_index: usize,
-    selected: bool,
-    focused: bool,
-    modifier: crate::model::FileEntryContentModifier,
-) -> Element<'static, Message> {
-    let metadata = format!(
-        "{} · {}",
-        format_file_size(hit.size),
-        hit.path
-            .parent()
-            .map(|path| path.to_string_lossy().into_owned())
-            .unwrap_or_default()
-    );
-    let visual_state = if selected || focused {
-        FileEntryVisualState::Selected
-    } else {
-        FileEntryVisualState::Normal
-    };
-    let mut content = Column::new()
-        .spacing(3)
-        .push(readable_text(hit.display_name.clone()))
-        .push(readable_text(metadata));
-    if let Some(snippet) = hit.snippet.clone().filter(|snippet| !snippet.is_empty()) {
-        content = content.push(readable_text(snippet));
-    }
-    let content = container(content).style(visual_state.content_style(modifier));
-    let result_icon = match hit.kind {
-        SearchFileKind::File => IconSymbol::File,
-        SearchFileKind::Directory => IconSymbol::Folder,
-        SearchFileKind::Symlink => IconSymbol::Link,
-        SearchFileKind::Other => IconSymbol::File,
-    };
-    let path = hit.path;
-    let content = row![
-        file_entry_symbol_icon(result_icon, FileEntryIconTone::Normal, 18.0, modifier),
-        content
-    ]
-    .spacing(10)
-    .align_y(Alignment::Center);
-    let row = container(content)
-        .padding([8, 12])
-        .width(Length::Fill)
-        .height(Length::Fixed(SEARCH_RESULT_ROW_HEIGHT));
-    let row = if selected || focused {
-        row.style(selected_row_style)
-    } else {
-        row.style(list_row_style(0, row_index))
-    };
-
-    mouse_area(row)
-        .on_press(Message::SearchResultPressed(path.clone()))
-        .on_right_press(Message::SearchResultRightClicked(path))
         .into()
 }
 

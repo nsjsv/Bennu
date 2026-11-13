@@ -7,7 +7,7 @@ use iced::{keyboard, window, Point};
 
 use crate::app::FileBrowser;
 use crate::config;
-use crate::model::BrowserLocation;
+use crate::model::{BrowserLocation, HistoryEntry};
 use crate::model::{
     BrowserPaneId, BrowserViewMode, DirectoryExpansionLoadContext, ExpandedDirectory,
     ExpandedDirectoryLoadRequest, ExpandedDirectoryStatus, FileDragNativeDndState, FileDragPhase,
@@ -277,7 +277,10 @@ fn plain_double_click_still_activates_directory() {
     assert_eq!(browser.tab().current_directory().unwrap(), directory);
     assert!(matches!(browser.file_drag, None));
     assert!(browser.last_activation_click.is_none());
-    assert_eq!(browser.tab().back_stack, vec![PathBuf::from("/workspace")]);
+    assert_eq!(
+        browser.tab().back_stack,
+        vec![HistoryEntry::Directory(PathBuf::from("/workspace"))]
+    );
     assert_ne!(browser.tab().location, BrowserLocation::Trash);
 }
 
@@ -333,7 +336,10 @@ fn list_double_click_activates_directory() {
     drop(browser.handle_flat_entry_clicked(directory.clone()));
 
     assert_eq!(browser.tab().current_directory().unwrap(), directory);
-    assert_eq!(browser.tab().back_stack, vec![PathBuf::from("/workspace")]);
+    assert_eq!(
+        browser.tab().back_stack,
+        vec![HistoryEntry::Directory(PathBuf::from("/workspace"))]
+    );
 }
 
 #[test]

@@ -322,16 +322,11 @@ fn collapsed_strip(browser: &FileBrowser) -> Element<'_, Message> {
     ))
     .padding(4.0)
     .style(crate::appearance::transparent_button_style());
-    // 搜索工作区替换了窗格内容,常显统计只属于文件浏览窗格。
-    let status_entries =
-        (browser.search_workspace.is_none()).then(|| browser.pane_status_strip_entries());
-    let mut content = row![].align_y(Vertical::Center);
-    if let Some(entries) = status_entries {
-        content = content.push(pane_status_summary_strip(
-            entries,
-            browser.options.include_hidden,
-        ));
-    }
+    let content = row![pane_status_summary_strip(
+        browser.pane_status_strip_entries(),
+        browser.options.include_hidden,
+    )]
+    .align_y(Vertical::Center);
     let content = content.push(space::Space::new().width(Length::Fill)).push(
         icon.width(Length::Fixed(BOTTOM_BAR_HEIGHT - DIVIDER_LINE_HEIGHT))
             .height(Length::Fixed(BOTTOM_BAR_HEIGHT - DIVIDER_LINE_HEIGHT)),

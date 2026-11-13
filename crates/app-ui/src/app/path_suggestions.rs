@@ -208,13 +208,11 @@ impl FileBrowser {
         pane_id: BrowserPaneId,
         target: PathBuf,
     ) -> Task<Message> {
-        let Some(address_bar_directory) = self
-            .pane_view(pane_id)
-            .and_then(|pane| pane.address_bar_directory())
-        else {
+        let Some(pane) = self.pane_view(pane_id) else {
             return Task::none();
         };
-        if address_bar_directory == target {
+        // 点当前文件夹那一段是编辑地址；搜索结果里每一段都是离开搜索去那一层。
+        if pane.address_bar_directory() == Some(target.as_path()) {
             return self.begin_address_editing(pane_id);
         }
 

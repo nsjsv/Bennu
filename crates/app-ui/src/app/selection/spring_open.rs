@@ -224,7 +224,7 @@ mod tests {
     use super::super::super::FileBrowser;
     use super::FILE_DRAG_SPRING_OPEN_DELAY;
     use crate::config;
-    use crate::model::BrowserLocation;
+    use crate::model::{BrowserLocation, HistoryEntry};
     use crate::model::{
         BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, BrowserViewMode,
         FileDragSpringSource, FileDragStationaryAction, SplitAxis,
@@ -295,7 +295,10 @@ mod tests {
             Instant::now() - FILE_DRAG_SPRING_OPEN_DELAY - Duration::from_millis(1);
         drop(browser.handle_file_drag_spring_open_tick());
         assert_eq!(browser.tab().current_directory().unwrap(), dir_a);
-        assert_eq!(browser.tab().back_stack, vec![workspace]);
+        assert_eq!(
+            browser.tab().back_stack,
+            vec![HistoryEntry::Directory(workspace)]
+        );
         // 触发后候选保留(fired):悬停未离开不重复触发,环消失。
         assert!(browser.file_drag_spring_hover.as_ref().unwrap().fired);
         assert_eq!(browser.file_drag_spring_open_progress(&dir_a), None);
@@ -691,7 +694,10 @@ mod tests {
         assert_eq!(browser.tab().current_directory().unwrap(), sub);
         assert_eq!(
             browser.tab().back_stack,
-            vec![dir_a.parent().unwrap().clone(), &dir_a]
+            vec![
+                HistoryEntry::Directory(dir_a.parent().unwrap().to_path_buf()),
+                HistoryEntry::Directory(dir_a.clone())
+            ]
         );
     }
 
@@ -720,7 +726,10 @@ mod tests {
             Instant::now() - FILE_DRAG_SPRING_OPEN_DELAY - Duration::from_millis(1);
         drop(browser.handle_file_drag_spring_open_tick());
         assert_eq!(browser.tab().current_directory().unwrap(), workspace);
-        assert_eq!(browser.tab().back_stack, vec![dir_a]);
+        assert_eq!(
+            browser.tab().back_stack,
+            vec![HistoryEntry::Directory(dir_a)]
+        );
     }
 
     #[test]

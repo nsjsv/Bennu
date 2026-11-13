@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use bennu_sidebar::BrowserLocation;
+use crate::picker_session::PickerLocation;
 use file_core::entry::DirectoryEntry;
 use file_core::scan::{scan_directory, ScanOptions};
 use file_core::trash_bin::scan_trash;
@@ -19,7 +19,7 @@ pub(crate) enum DirectoryListing {
 /// 扫描完成载荷：携带扫描目标，供会话把结果路由回根列表或展开节点。
 #[derive(Debug, Clone)]
 pub(crate) struct DirectoryScanResult {
-    pub(crate) location: BrowserLocation,
+    pub(crate) location: PickerLocation,
     pub(crate) outcome: Result<DirectoryScanOutcome, String>,
 }
 
@@ -32,11 +32,11 @@ pub(crate) struct DirectoryScanOutcome {
 /// 读一个位置的内容（上层在 iced Task 里调用）：目录走常规扫描，回收站走
 /// 回收站列表。
 pub(crate) async fn scan_location(
-    location: BrowserLocation,
+    location: PickerLocation,
 ) -> Result<DirectoryScanOutcome, String> {
     match location {
-        BrowserLocation::Directory(directory) => scan_listing(directory).await,
-        BrowserLocation::Trash => scan_trash_listing().await,
+        PickerLocation::Directory(directory) => scan_listing(directory).await,
+        PickerLocation::Trash => scan_trash_listing().await,
     }
 }
 

@@ -113,7 +113,7 @@ mod tests {
     use super::*;
     use crate::app::global_error::{recorded_global_error_count, reset_recorded_global_errors};
     use crate::config;
-    use crate::model::BrowserLocation;
+    use crate::model::{BrowserLocation, HistoryEntry};
     use crate::model::{
         BrowserPane, BrowserTab, DirectoryExpansionLoadContext, ExpandedDirectory,
         ExpandedDirectoryStatus,
@@ -131,10 +131,12 @@ mod tests {
         browser.tab_mut().directory_collection_phase =
             crate::model::DirectoryCollectionPhase::Discovering;
         browser.tab_mut().back_stack = vec![
-            parent_directory.clone(),
-            unavailable_directory.join("older-child"),
+            HistoryEntry::Directory(parent_directory.clone()),
+            HistoryEntry::Directory(unavailable_directory.join("older-child")),
         ];
-        browser.tab_mut().forward_stack = vec![unavailable_directory.join("newer-child")];
+        browser.tab_mut().forward_stack = vec![HistoryEntry::Directory(
+            unavailable_directory.join("newer-child"),
+        )];
         reset_recorded_global_errors();
 
         drop(browser.accept_directory_load_failure(

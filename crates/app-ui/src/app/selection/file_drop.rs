@@ -752,7 +752,7 @@ impl FileBrowser {
             .and_then(|pane| pane.tabs.iter().find(|tab| tab.id == target.tab_id));
         tab.is_some_and(|tab| {
             !self.tab_is_closing_for_file_drop(target.tab_id)
-                && tab.file_drop_destination() == target.destination
+                && tab.file_drop_destination().as_ref() == Some(&target.destination)
         })
     }
 

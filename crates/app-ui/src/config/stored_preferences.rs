@@ -159,13 +159,13 @@ pub(crate) struct StoredContextMenuItemEntry {
     pub visible: bool,
 }
 
-/// 9 份可配置右键菜单的存储形态,字段与 app 层菜单页一一对应。
+/// 8 份可配置右键菜单的存储形态,字段与 app 层菜单页一一对应。旧版本存过的搜索结果
+/// 菜单（`search`）读取时忽略：搜索结果改用文件条目菜单。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct StoredContextMenuLayouts {
     pub file_entry: StoredContextMenuLayout,
     pub file_blank: StoredContextMenuLayout,
     pub trash: StoredContextMenuLayout,
-    pub search: StoredContextMenuLayout,
     pub search_entry_types: StoredContextMenuLayout,
     pub list_columns: StoredContextMenuLayout,
     pub sidebar_bookmark: StoredContextMenuLayout,

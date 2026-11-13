@@ -323,7 +323,7 @@ impl FileBrowser {
     fn cancel_work_for_application_shutdown(&mut self) {
         self.system_focused_window = None;
         self.maximized_windows.clear();
-        self.discard_search_workspace();
+        self.forget_search_interaction();
         self.invalidate_startup_directory_validation();
         for pane in &mut self.panes {
             if let Some(cancellation) = pane.directory_load_cancel.take() {

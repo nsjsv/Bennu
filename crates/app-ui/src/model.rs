@@ -153,7 +153,7 @@ pub(crate) use bennu_theme::window_controls::{
     WindowControlKind, WindowControlMoveDirection, WindowControlPlacement, WindowControlSide,
     WindowControlVisibility, WindowControlsConfig, WindowFrameState,
 };
-pub(crate) use context_menu_items::{FileAreaMenuItem, SearchResultMenuItem, TrashMenuItem};
+pub(crate) use context_menu_items::{FileAreaMenuItem, TrashMenuItem};
 pub(crate) use context_menu_layout::{
     ContextMenuLayoutConfigValues, ContextMenuPreferences, ContextMenuSettingsDragState,
     ContextMenuSettingsPage, ContextMenuSettingsPageStep, ContextMenuSettingsRow,
@@ -173,10 +173,10 @@ pub(crate) mod search;
 pub(crate) use search::{
     DirectoryFallbackOutcome, IndexedSearchOutcome, IndexedSearchRequest, LastSearchScope,
     SearchDateField, SearchDatePreset, SearchDirectoryScope, SearchEntryTypePreset, SearchHistory,
-    SearchHistoryInteraction, SearchInputFocus, SearchInputFocusCheckOrigin,
+    SearchHistoryInteraction, SearchHitDetail, SearchInputFocus, SearchInputFocusCheckOrigin,
     SearchInputFocusCheckRequest, SearchInputStabilizationRequest, SearchInputStabilizationSubject,
-    SearchKeyboardSelection, SearchResultCompletion, SearchSelectionGesture, SearchSelectionStep,
-    SearchSizePreset, SearchWorkspaceSessionId, SearchWorkspaceState, SEARCH_RESULT_TOTAL_LIMIT,
+    SearchResultCompletion, SearchRunId, SearchSizePreset, SearchWorkspaceSessionId,
+    SearchWorkspaceState, SEARCH_RESULT_TOTAL_LIMIT,
 };
 mod search_service;
 pub(crate) use search_service::{
@@ -227,7 +227,6 @@ pub(crate) enum ScrollbarRegion {
     OperationQueue,
     BatchRenamePreview,
     SearchHistory,
-    SearchResults,
     PreviewDirectory,
     PreviewArchive,
     PreviewDocument,
@@ -554,16 +553,9 @@ pub(crate) enum Message {
         tokio_util::sync::CancellationToken,
         bool,
     ),
-    SearchDirectoryBatchLoaded(u64, Vec<SearchHit>),
-    SearchDirectoryFinished(u64, DirectoryFallbackOutcome),
-    SearchResultPressed(PathBuf),
-    SearchResultRightClicked(PathBuf),
+    SearchDirectoryBatchLoaded(SearchRunId, Vec<SearchHit>),
+    SearchDirectoryFinished(SearchRunId, DirectoryFallbackOutcome),
     SearchOpenContainingDirectory(PathBuf),
-    SearchDeletePermanentlySelected,
-    SearchResultsScrolled {
-        offset_y: f32,
-        viewport_height: f32,
-    },
     SearchServiceEnsured(
         SearchServiceStatusRequest,
         Result<SearchServiceStatus, SearchServiceDiagnostic>,
@@ -591,7 +583,11 @@ pub(crate) enum Message {
             SearchServiceDiagnostic,
         >,
     ),
-    SearchDirectoryFallbackConfigurationLoaded(u64, String, Result<SearchPathPreferences, String>),
+    SearchDirectoryFallbackConfigurationLoaded(
+        SearchRunId,
+        String,
+        Result<SearchPathPreferences, String>,
+    ),
     SearchPathInputChanged(SearchPathEntryKind, String),
     SearchPathInputCommitted(SearchPathEntryKind),
     SearchPathDirectoryChooserPressed(SearchPathEntryKind),
@@ -880,7 +876,6 @@ pub(crate) struct StartupEnvironment {
 pub(crate) enum ContextMenuState {
     FileArea(FileContextMenuState),
     Trash(TrashContextMenuState),
-    Search(SearchContextMenuState),
     SearchEntryTypes(SearchEntryTypeMenuState),
     ListColumns(ListColumnMenuState),
     SidebarBookmark(SidebarBookmarkContextMenuState),
@@ -893,7 +888,6 @@ impl ContextMenuState {
         match self {
             Self::FileArea(menu) => menu.position,
             Self::Trash(menu) => menu.position,
-            Self::Search(menu) => menu.position,
             Self::SearchEntryTypes(menu) => menu.position,
             Self::ListColumns(menu) => menu.position,
             Self::SidebarBookmark(menu) => menu.position,
@@ -906,7 +900,6 @@ impl ContextMenuState {
         match self {
             Self::FileArea(menu) => Some(&menu.paste_directory),
             Self::Trash(_) => None,
-            Self::Search(_) => None,
             Self::SearchEntryTypes(_) => None,
             Self::ListColumns(_) => None,
             Self::SidebarBookmark(_) => None,
@@ -925,12 +918,6 @@ pub(crate) struct TrashContextMenuState {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct SearchContextMenuState {
-    pub(crate) target: PathBuf,
-    pub(crate) position: Point,
-}
-
-#[derive(Debug, Clone)]
 pub(crate) struct SearchEntryTypeMenuState {
     pub(crate) position: Point,
 }
@@ -938,10 +925,21 @@ pub(crate) struct SearchEntryTypeMenuState {
 #[derive(Debug, Clone)]
 pub(crate) struct ListColumnMenuState {
     pub(crate) position: Point,
+    /// 菜单里列出的列：用户配置的列项里、在打开菜单的位置上有内容的那些。
+    pub(crate) columns: Vec<ListColumnKind>,
+}
+
+/// 文件区菜单在哪儿打开：文件夹里能粘贴、新建；搜索结果里没有落点，多一项「打开所在
+/// 文件夹」。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FileMenuPlace {
+    Folder,
+    SearchResults,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct FileContextMenuState {
+    pub(crate) place: FileMenuPlace,
     pub(crate) target: Option<PathBuf>,
     pub(crate) target_is_directory: bool,
     pub(crate) paste_directory: PathBuf,
@@ -995,7 +993,12 @@ pub(crate) struct SidebarBookmarkContextMenuState {
 
 // 纯搬移：SidebarLocation/SidebarLocationKind 已下沉 bennu-sidebar
 // （主程序与 portal 共用）；re-export 维持 crate::model::* 既有路径。
-pub(crate) use bennu_sidebar::{BrowserLocation, SidebarLocation, SidebarLocationKind};
+pub(crate) use bennu_sidebar::{SidebarLocation, SidebarLocationKind};
+mod browser_location;
+pub(crate) use browser_location::{BrowserLocation, LocationKey};
+mod history;
+pub(crate) use history::HistoryEntry;
+mod search_results;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NavigationMode {

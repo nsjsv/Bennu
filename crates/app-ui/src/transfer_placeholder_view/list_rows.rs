@@ -16,7 +16,7 @@ use crate::transfer_placeholders::{
     merge_entries_with_placeholders, transfer_placeholders_for_directory, MergedTransferItem,
     TransferPlaceholder, TransferSortOptions,
 };
-use crate::visible_entries::VisibleEntry;
+use crate::visible_entries::{ListEntryHeights, VisibleEntry};
 
 /// 构建列表合并行流:根层与各展开目录分别派生占位并按各自排序合入。
 pub(crate) fn build_list_transfer_rows<'a>(
@@ -57,7 +57,7 @@ pub(super) fn push_root_transfer_rows<'a>(
         &placeholders,
         transfer_sort_for_root(browser),
     );
-    let Some(grouping) = root_grouping::RootGrouping::for_pane_root(browser) else {
+    let Some(grouping) = root_grouping::RootGrouping::for_pane_root(browser, pane.location) else {
         for item in &merged {
             push_list_transfer_item(
                 browser,
@@ -180,6 +180,8 @@ fn push_list_transfer_item<'a>(
                 },
                 transfer: transfer.clone(),
                 stripe_index: *stripe_index,
+                snippet_height: ListEntryHeights::at(pane.location, row_height)
+                    .snippet_height(entry),
             });
             *stripe_index += 1;
             push_expansion_transfer_rows(

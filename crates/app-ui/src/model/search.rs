@@ -1,8 +1,12 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 
+use file_search::text_highlight::{content_match_ranges, name_match_ranges};
+use file_search::text_matching::SearchTerms;
 use file_search::{
-    SearchCursor, SearchHit, SearchQuery, SearchResultBatch, SearchScope, SearchTextScope,
+    MatchSource, SearchCursor, SearchHit, SearchMatchMode, SearchOrder, SearchQuery,
+    SearchResultBatch, SearchTextScope,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -13,13 +17,16 @@ pub(crate) use filters::{
 };
 mod history;
 pub(crate) use history::SearchHistory;
+mod order;
+mod scope;
+pub(crate) use scope::{LastSearchScope, SearchDirectoryScope, SearchRootSnapshot};
 
 pub(crate) const SEARCH_RESULT_WINDOW: usize = 100;
-/// 结果总量硬上界：无论翻页多少页，窗口最多保留这么多条，超限丢弃最旧页，
+/// 结果总量硬上界：无论翻页多少页，最多保留这么多条，超限丢弃最旧页，
 /// 保证长会话滚动加载不会让内存无限增长。
 pub(crate) const SEARCH_RESULT_TOTAL_LIMIT: usize = 5000;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct SearchWorkspaceSessionId(pub(crate) u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +50,13 @@ pub(crate) struct SearchInputStabilizationRequest {
     input_revision: u64,
     pub(crate) input: SearchStabilizationInput,
     pub(crate) subject: SearchInputStabilizationSubject,
+}
+
+impl SearchInputStabilizationRequest {
+    /// 发出请求的那次搜索：输入停下时标签可能已不是活动的，按它找回。
+    pub(crate) fn session_id(&self) -> SearchWorkspaceSessionId {
+        self.workspace_session_id
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -177,174 +191,21 @@ pub(crate) enum SearchResultCompletion {
     Partial { inspected_entries: usize },
 }
 
+/// 一次查询的身份：哪个标签的哪次搜索（会话号）、第几次发起（代号）。异步回信凭它找回
+/// 标签，标签关了、换了搜索或重新发起后旧回信自然对不上。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SearchDirectoryScope {
-    CurrentFolder,
-    LastLocation,
-    Home,
-    AllIndexedLocations,
-}
-
-impl SearchDirectoryScope {
-    pub(crate) fn label(self) -> String {
-        match self {
-            Self::CurrentFolder => tr!("Current folder"),
-            Self::LastLocation => tr!("Last location"),
-            Self::Home => tr!("Home"),
-            Self::AllIndexedLocations => tr!("All indexed locations"),
-        }
-    }
-}
-
-/// 最近一次搜索实际使用的范围，随用户偏好持久化；打开下一个搜索工作区时
-/// 作为默认范围恢复（访达"使用上一次的搜索范围"语义）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum LastSearchScope {
-    Global,
-    Directory(PathBuf),
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct SearchRootSnapshot {
-    current_folder: PathBuf,
-    home: PathBuf,
-    last_location: Option<LastSearchScope>,
-    selected_scope: SearchDirectoryScope,
-}
-
-impl SearchRootSnapshot {
-    pub(crate) fn new(
-        current_folder: PathBuf,
-        home: PathBuf,
-        last_location: Option<LastSearchScope>,
-    ) -> Self {
-        // 默认档恢复上次范围；无记录时沿用"在 Home 默认 Home，否则当前文件夹"。
-        // 目录记录若与当前文件夹或 Home 相同，直接归并到对应现有档，不产生重复选项。
-        let selected_scope = match &last_location {
-            Some(LastSearchScope::Global) => SearchDirectoryScope::AllIndexedLocations,
-            Some(LastSearchScope::Directory(directory))
-                if directory.as_path() == current_folder.as_path() =>
-            {
-                SearchDirectoryScope::CurrentFolder
-            }
-            Some(LastSearchScope::Directory(directory))
-                if directory.as_path() == home.as_path() =>
-            {
-                SearchDirectoryScope::Home
-            }
-            Some(_) => SearchDirectoryScope::LastLocation,
-            None if current_folder == home => SearchDirectoryScope::Home,
-            None => SearchDirectoryScope::CurrentFolder,
-        };
-        Self {
-            current_folder,
-            home,
-            last_location,
-            selected_scope,
-        }
-    }
-
-    pub(crate) fn path(&self) -> &Path {
-        match self.selected_scope {
-            SearchDirectoryScope::CurrentFolder => &self.current_folder,
-            SearchDirectoryScope::Home | SearchDirectoryScope::AllIndexedLocations => &self.home,
-            // 不变量：selected_scope == LastLocation 当且仅当 last_location 是
-            // 一个不等于 current_folder/home 的目录记录。
-            SearchDirectoryScope::LastLocation => {
-                self.last_location_directory().unwrap_or(&self.home)
-            }
-        }
-    }
-
-    pub(crate) fn query_scope(&self) -> SearchScope {
-        match self.selected_scope {
-            SearchDirectoryScope::CurrentFolder => {
-                SearchScope::Directory(self.current_folder.clone())
-            }
-            SearchDirectoryScope::Home => SearchScope::Directory(self.home.clone()),
-            SearchDirectoryScope::AllIndexedLocations => SearchScope::Global,
-            SearchDirectoryScope::LastLocation => match &self.last_location {
-                Some(LastSearchScope::Directory(directory)) => {
-                    SearchScope::Directory(directory.clone())
-                }
-                // 同 path()：LastLocation 档只在有目录记录时可用。
-                _ => SearchScope::Global,
-            },
-        }
-    }
-
-    /// LastLocation 档指向的目录；仅在持有目录记录时存在。
-    pub(crate) fn last_location_directory(&self) -> Option<&Path> {
-        match &self.last_location {
-            Some(LastSearchScope::Directory(directory)) => Some(directory.as_path()),
-            _ => None,
-        }
-    }
-
-    /// 当前选定范围的持久化事实，用于随用户偏好落盘。
-    pub(crate) fn last_search_scope(&self) -> LastSearchScope {
-        match self.selected_scope {
-            SearchDirectoryScope::CurrentFolder => {
-                LastSearchScope::Directory(self.current_folder.clone())
-            }
-            SearchDirectoryScope::Home => LastSearchScope::Directory(self.home.clone()),
-            SearchDirectoryScope::AllIndexedLocations => LastSearchScope::Global,
-            SearchDirectoryScope::LastLocation => match &self.last_location {
-                Some(directory @ LastSearchScope::Directory(_)) => directory.clone(),
-                _ => LastSearchScope::Global,
-            },
-        }
-    }
-
-    pub(crate) fn selected_scope(&self) -> SearchDirectoryScope {
-        self.selected_scope
-    }
-
-    pub(crate) fn available_scopes(&self) -> Vec<SearchDirectoryScope> {
-        let mut scopes = if self.current_folder == self.home {
-            vec![
-                SearchDirectoryScope::Home,
-                SearchDirectoryScope::AllIndexedLocations,
-            ]
-        } else {
-            vec![
-                SearchDirectoryScope::CurrentFolder,
-                SearchDirectoryScope::Home,
-                SearchDirectoryScope::AllIndexedLocations,
-            ]
-        };
-        // 上次位置只在"不与现有档重复"时出现：等于当前文件夹并入 CurrentFolder，
-        // 等于 Home 并入 Home，全局并入 AllIndexedLocations。
-        let last_directory = self.last_location_directory();
-        if let Some(directory) = last_directory {
-            if directory != self.current_folder && directory != self.home {
-                let insert_at = if self.current_folder == self.home {
-                    0
-                } else {
-                    1
-                };
-                scopes.insert(insert_at, SearchDirectoryScope::LastLocation);
-            }
-        }
-        scopes
-    }
-
-    pub(crate) fn select_scope(&mut self, scope: SearchDirectoryScope) -> bool {
-        if self.selected_scope == scope || !self.available_scopes().contains(&scope) {
-            return false;
-        }
-        self.selected_scope = scope;
-        true
-    }
+pub(crate) struct SearchRunId {
+    pub(crate) session_id: SearchWorkspaceSessionId,
+    pub(crate) generation: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct IndexedSearchRequest {
-    pub(crate) generation: u64,
+    pub(crate) run: SearchRunId,
     pub(crate) cursor: Option<SearchCursor>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct SearchRunState {
     pub(crate) generation: u64,
     pub(crate) active_query: Option<SearchQuery>,
@@ -352,6 +213,20 @@ pub(crate) struct SearchRunState {
     pub(crate) next_cursor: Option<SearchCursor>,
     pub(crate) pending_indexed_request: Option<IndexedSearchRequest>,
     cancellation: Option<CancellationToken>,
+}
+
+/// 副本不持有在途请求：只有原件能取消它、收它的回信，副本被丢弃时也不会取消原件的查询。
+impl Clone for SearchRunState {
+    fn clone(&self) -> Self {
+        Self {
+            generation: self.generation,
+            active_query: self.active_query.clone(),
+            provider: self.provider,
+            next_cursor: self.next_cursor,
+            pending_indexed_request: None,
+            cancellation: None,
+        }
+    }
 }
 
 impl SearchRunState {
@@ -373,197 +248,78 @@ impl SearchRunState {
     }
 }
 
+/// 这次搜索的进度与提示；结果本身是标签的条目（见 `search_results`）。
 #[derive(Debug, Clone)]
 pub(crate) struct SearchResultWindow {
-    pub(crate) hits: Vec<SearchHit>,
     pub(crate) is_loading: bool,
     pub(crate) failure: Option<String>,
     pub(crate) completion: Option<SearchResultCompletion>,
     pub(crate) truncated: bool,
-    pub(crate) viewport_offset_y: f32,
-    pub(crate) viewport_height: f32,
 }
 
 impl SearchResultWindow {
     fn new() -> Self {
         Self {
-            hits: Vec::new(),
             is_loading: false,
             failure: None,
             completion: None,
             truncated: false,
-            viewport_offset_y: 0.0,
-            viewport_height: 0.0,
         }
     }
 
     fn begin_loading(&mut self) {
-        self.hits.clear();
         self.is_loading = true;
         self.failure = None;
         self.completion = None;
         self.truncated = false;
-        self.viewport_offset_y = 0.0;
-        self.viewport_height = 0.0;
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SearchSelectionGesture {
-    Plain,
-    Toggle,
-    Range,
-    AdditiveRange,
+/// 一条结果里条目装不下的信息：正文摘要、命中来源，以及名字和摘要里要高亮的位置
+/// （字节区间，按显示的文字算）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SearchHitDetail {
+    pub(crate) snippet: Option<String>,
+    pub(crate) match_source: MatchSource,
+    pub(crate) name_highlights: Vec<Range<usize>>,
+    pub(crate) snippet_highlights: Vec<Range<usize>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SearchSelectionStep {
-    Previous,
-    Next,
+/// 名字高亮与匹配同一规则：正则模式按正则命中的位置，否则按规范化后的子串。
+struct SearchHighlighter {
+    terms: SearchTerms,
+    name_regex: Option<regex::Regex>,
 }
 
+impl SearchHighlighter {
+    fn name_ranges(&self, display_name: &str) -> Vec<Range<usize>> {
+        match &self.name_regex {
+            Some(regex) => regex
+                .find_iter(display_name)
+                .filter(|found| !found.is_empty())
+                .map(|found| found.range())
+                .collect(),
+            None => name_match_ranges(display_name, &self.terms),
+        }
+    }
+}
+
+/// 一页结果落到标签上的方式：第一页换掉全部，后续页接在后面。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SearchKeyboardSelection {
+pub(crate) enum SearchHitsPlacement {
     Replace,
-    Extend,
+    Append,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct SearchResultSelection {
-    selected_paths: HashSet<PathBuf>,
-    anchor: Option<PathBuf>,
-    focused: Option<PathBuf>,
-}
-
-impl SearchResultSelection {
-    fn new() -> Self {
-        Self {
-            selected_paths: HashSet::new(),
-            anchor: None,
-            focused: None,
-        }
-    }
-
-    pub(crate) fn is_selected(&self, path: &Path) -> bool {
-        self.selected_paths.contains(path)
-    }
-
-    pub(crate) fn focused_path(&self) -> Option<&Path> {
-        self.focused.as_deref()
-    }
-
-    pub(crate) fn selected_paths_in_result_order(&self, hits: &[SearchHit]) -> Vec<PathBuf> {
-        hits.iter()
-            .filter(|hit| self.selected_paths.contains(&hit.path))
-            .map(|hit| hit.path.clone())
-            .collect()
-    }
-
-    pub(crate) fn select(
-        &mut self,
-        hits: &[SearchHit],
-        target: &Path,
-        gesture: SearchSelectionGesture,
-    ) {
-        let Some(target_index) = hits.iter().position(|hit| hit.path == target) else {
-            return;
-        };
-        match gesture {
-            SearchSelectionGesture::Plain => {
-                self.selected_paths.clear();
-                self.selected_paths.insert(target.to_path_buf());
-                self.anchor = Some(target.to_path_buf());
-            }
-            SearchSelectionGesture::Toggle => {
-                if !self.selected_paths.remove(target) {
-                    self.selected_paths.insert(target.to_path_buf());
-                }
-                self.anchor = Some(target.to_path_buf());
-            }
-            SearchSelectionGesture::Range | SearchSelectionGesture::AdditiveRange => {
-                let anchor = self
-                    .anchor
-                    .as_deref()
-                    .and_then(|path| hits.iter().position(|hit| hit.path == path))
-                    .unwrap_or(target_index);
-                if gesture == SearchSelectionGesture::Range {
-                    self.selected_paths.clear();
-                }
-                let start = anchor.min(target_index);
-                let end = anchor.max(target_index);
-                self.selected_paths
-                    .extend(hits[start..=end].iter().map(|hit| hit.path.clone()));
-                self.anchor = Some(hits[anchor].path.clone());
-            }
-        }
-        self.focused = Some(target.to_path_buf());
-    }
-
-    pub(crate) fn move_focus(
-        &mut self,
-        hits: &[SearchHit],
-        step: SearchSelectionStep,
-        keyboard_selection: SearchKeyboardSelection,
-    ) -> Option<PathBuf> {
-        if hits.is_empty() {
-            return None;
-        }
-        let current_index = self
-            .focused
-            .as_deref()
-            .and_then(|path| hits.iter().position(|hit| hit.path == path));
-        let target_index = match (current_index, step) {
-            (Some(index), SearchSelectionStep::Previous) => index.saturating_sub(1),
-            (Some(index), SearchSelectionStep::Next) => (index + 1).min(hits.len() - 1),
-            (None, SearchSelectionStep::Previous) => hits.len() - 1,
-            (None, SearchSelectionStep::Next) => 0,
-        };
-        let target = hits[target_index].path.clone();
-        let gesture = match keyboard_selection {
-            SearchKeyboardSelection::Replace => SearchSelectionGesture::Plain,
-            SearchKeyboardSelection::Extend => SearchSelectionGesture::Range,
-        };
-        self.select(hits, &target, gesture);
-        Some(target)
-    }
-
-    pub(crate) fn select_all(&mut self, hits: &[SearchHit]) {
-        self.selected_paths = hits.iter().map(|hit| hit.path.clone()).collect();
-        self.anchor = hits.first().map(|hit| hit.path.clone());
-        self.focused = hits.first().map(|hit| hit.path.clone());
-    }
-
-    fn clear(&mut self) {
-        self.selected_paths.clear();
-        self.anchor = None;
-        self.focused = None;
-    }
-
-    fn reconcile(&mut self, hits: &[SearchHit]) {
-        let visible_paths = hits
-            .iter()
-            .map(|hit| hit.path.clone())
-            .collect::<HashSet<_>>();
-        self.selected_paths
-            .retain(|path| visible_paths.contains(path));
-        if self
-            .anchor
-            .as_ref()
-            .is_some_and(|path| !visible_paths.contains(path))
-        {
-            self.anchor = None;
-        }
-        if self
-            .focused
-            .as_ref()
-            .is_some_and(|path| !visible_paths.contains(path))
-        {
-            self.focused = hits
-                .iter()
-                .find(|hit| self.selected_paths.contains(&hit.path))
-                .map(|hit| hit.path.clone());
-        }
-    }
+/// 后退/前进回到一次搜索所需的全部意图；回去时按它重搜。
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SearchRecall {
+    pub(crate) origin: PathBuf,
+    pub(crate) scope: SearchDirectoryScope,
+    pub(crate) last_location: Option<LastSearchScope>,
+    pub(crate) input: String,
+    pub(crate) filters: SearchFilterPresetState,
+    pub(crate) order: SearchOrder,
 }
 
 #[derive(Debug, Clone)]
@@ -575,9 +331,12 @@ pub(crate) struct SearchWorkspaceState {
     pub(crate) root: SearchRootSnapshot,
     pub(crate) input: String,
     pub(crate) filters: SearchFilterPresetState,
+    /// 点表头选的顺序，见 `order()`。
+    chosen_order: Option<order::ChosenSearchOrder>,
     pub(crate) run: SearchRunState,
     pub(crate) window: SearchResultWindow,
-    pub(crate) selection: SearchResultSelection,
+    /// 已到结果的摘要与高亮，按路径找；与标签条目一一对应。
+    pub(crate) details: HashMap<PathBuf, SearchHitDetail>,
 }
 
 impl SearchWorkspaceState {
@@ -595,10 +354,50 @@ impl SearchWorkspaceState {
             root: SearchRootSnapshot::new(current_folder, home, last_location),
             input: String::new(),
             filters: SearchFilterPresetState::default(),
+            chosen_order: None,
             run: SearchRunState::new(),
             window: SearchResultWindow::new(),
-            selection: SearchResultSelection::new(),
+            details: HashMap::new(),
         }
+    }
+
+    /// 按历史里记下的意图重建一次搜索（新会话号）；调用方随后重搜。
+    pub(crate) fn from_recall(
+        recall: SearchRecall,
+        home: PathBuf,
+        session_id: SearchWorkspaceSessionId,
+    ) -> Self {
+        let mut state = Self::new(recall.origin, home, recall.last_location, session_id);
+        state.root.select_scope(recall.scope);
+        state.input = recall.input;
+        state.filters = recall.filters;
+        state.choose_order(recall.order);
+        state
+    }
+
+    pub(crate) fn recall(&self) -> SearchRecall {
+        SearchRecall {
+            origin: self.origin().to_path_buf(),
+            scope: self.root.selected_scope(),
+            last_location: self.root.last_location.clone(),
+            input: self.input.clone(),
+            filters: self.filters.clone(),
+            order: self.order(),
+        }
+    }
+
+    /// 发起搜索的文件夹：关闭搜索回到这里，会话恢复也回到这里。
+    pub(crate) fn origin(&self) -> &Path {
+        &self.root.current_folder
+    }
+
+    /// 拆分窗格复制出的副本换一个会话号，与原件分开收回信。
+    pub(crate) fn rebind_session(&mut self, session_id: SearchWorkspaceSessionId) {
+        self.session_id = session_id;
+    }
+
+    pub(crate) fn session_id(&self) -> SearchWorkspaceSessionId {
+        self.session_id
     }
 
     pub(crate) fn next_generation(&self) -> u64 {
@@ -704,7 +503,10 @@ impl SearchWorkspaceState {
         self.run.cancel();
         let cancellation = CancellationToken::new();
         let request = IndexedSearchRequest {
-            generation: query.query_id,
+            run: SearchRunId {
+                session_id: self.session_id,
+                generation: query.query_id,
+            },
             cursor: None,
         };
         self.run.cancellation = Some(cancellation.clone());
@@ -714,7 +516,7 @@ impl SearchWorkspaceState {
         self.run.next_cursor = None;
         self.run.pending_indexed_request = Some(request);
         self.window.begin_loading();
-        self.selection.clear();
+        self.details.clear();
         (request, cancellation)
     }
 
@@ -730,7 +532,7 @@ impl SearchWorkspaceState {
         let mut query = self.run.active_query.clone()?;
         query.cursor = Some(cursor);
         let request = IndexedSearchRequest {
-            generation: self.run.generation,
+            run: self.run_id(),
             cursor: Some(cursor),
         };
         let cancellation = CancellationToken::new();
@@ -741,27 +543,34 @@ impl SearchWorkspaceState {
         Some((request, query, cancellation))
     }
 
+    pub(crate) fn run_id(&self) -> SearchRunId {
+        SearchRunId {
+            session_id: self.session_id,
+            generation: self.run.generation,
+        }
+    }
+
     pub(crate) fn accepts_indexed_outcome(&self, request: IndexedSearchRequest) -> bool {
-        request.generation == self.run.generation
+        request.run == self.run_id()
             && self.run.provider == Some(SearchProvider::Indexed)
             && self.run.pending_indexed_request == Some(request)
     }
 
-    pub(crate) fn apply_indexed_batch(
+    /// 收下一页：返回这页的命中和它们落到标签上的方式。
+    pub(crate) fn accept_indexed_batch(
         &mut self,
         request: IndexedSearchRequest,
         mut batch: SearchResultBatch,
-    ) {
+    ) -> (SearchHitsPlacement, Vec<SearchHit>) {
         self.run.cancellation = None;
         self.run.pending_indexed_request = None;
         batch.hits.truncate(SEARCH_RESULT_WINDOW);
-        if request.cursor.is_none() {
-            self.window.hits = batch.hits;
+        let placement = if request.cursor.is_none() {
             self.window.truncated = false;
+            SearchHitsPlacement::Replace
         } else {
-            self.window.hits.extend(batch.hits);
-        }
-        self.enforce_result_total_limit();
+            SearchHitsPlacement::Append
+        };
         self.run.next_cursor = batch.next_cursor;
         self.window.is_loading = false;
         self.window.failure = None;
@@ -770,18 +579,20 @@ impl SearchWorkspaceState {
         } else {
             SearchResultCompletion::MoreAvailable
         });
-        self.selection.reconcile(&self.window.hits);
+        (placement, batch.hits)
     }
 
-    pub(crate) fn apply_indexed_failure(&mut self, request: IndexedSearchRequest, message: String) {
+    /// 第一页失败时之前的结果不再算数，返回 true 让标签清空结果。
+    pub(crate) fn apply_indexed_failure(
+        &mut self,
+        request: IndexedSearchRequest,
+        message: String,
+    ) -> bool {
         self.run.cancellation = None;
         self.run.pending_indexed_request = None;
-        if request.cursor.is_none() {
-            self.window.hits.clear();
-            self.selection.clear();
-        }
         self.window.is_loading = false;
         self.window.failure = Some(message);
+        request.cursor.is_none()
     }
 
     pub(crate) fn apply_indexed_cancellation(&mut self, request: IndexedSearchRequest) {
@@ -794,17 +605,13 @@ impl SearchWorkspaceState {
         }
     }
 
-    pub(crate) fn update_viewport(&mut self, offset_y: f32, height: f32) {
-        self.window.viewport_offset_y = offset_y.max(0.0);
-        self.window.viewport_height = height.max(0.0);
-    }
-
-    pub(crate) fn indexed_next_page_is_available(&self) -> bool {
+    /// `loaded` 是标签上已有的结果数。
+    pub(crate) fn indexed_next_page_is_available(&self, loaded: usize) -> bool {
         self.run.provider == Some(SearchProvider::Indexed)
             && self.window.completion == Some(SearchResultCompletion::MoreAvailable)
             && self.run.next_cursor.is_some()
             && self.run.pending_indexed_request.is_none()
-            && self.window.hits.len() < SEARCH_RESULT_TOTAL_LIMIT
+            && loaded < SEARCH_RESULT_TOTAL_LIMIT
     }
 
     pub(crate) fn begin_directory_fallback(&mut self) -> CancellationToken {
@@ -815,32 +622,73 @@ impl SearchWorkspaceState {
         self.run.next_cursor = None;
         self.run.pending_indexed_request = None;
         self.window.begin_loading();
-        self.selection.clear();
+        self.details.clear();
         cancellation
     }
 
-    pub(crate) fn accepts_directory_fallback(&self, generation: u64) -> bool {
-        generation == self.run.generation
-            && self.run.provider == Some(SearchProvider::DirectoryFallback)
+    pub(crate) fn accepts_directory_fallback(&self, run: SearchRunId) -> bool {
+        run == self.run_id() && self.run.provider == Some(SearchProvider::DirectoryFallback)
     }
 
-    pub(crate) fn apply_directory_batch(&mut self, hits: Vec<SearchHit>) {
-        self.window.hits.extend(hits);
+    pub(crate) fn accept_directory_batch(&mut self) {
         self.window.failure = None;
-        self.enforce_result_total_limit();
     }
 
-    // 结果总量硬上界：超限丢弃最旧页并置 truncated，翻页/回退两条路径共用。
-    fn enforce_result_total_limit(&mut self) {
-        let excess = self
-            .window
-            .hits
-            .len()
-            .saturating_sub(SEARCH_RESULT_TOTAL_LIMIT);
-        if excess > 0 {
-            self.window.hits.drain(0..excess);
-            self.window.truncated = true;
+    /// 命中转成详情（摘要、高亮）记下；高亮按这次查询的词与匹配方式算。
+    pub(crate) fn remember_details(&mut self, hits: &[SearchHit], display_names: &[String]) {
+        let highlighter = self.highlighter();
+        for (hit, display_name) in hits.iter().zip(display_names) {
+            let snippet = hit.snippet.clone().filter(|snippet| !snippet.is_empty());
+            let snippet_highlights = snippet
+                .as_deref()
+                .map(|snippet| content_match_ranges(snippet, &highlighter.terms))
+                .unwrap_or_default();
+            self.details.insert(
+                hit.path.clone(),
+                SearchHitDetail {
+                    snippet,
+                    match_source: hit.match_source,
+                    name_highlights: highlighter.name_ranges(display_name),
+                    snippet_highlights,
+                },
+            );
         }
+    }
+
+    /// 结果改名或移动：详情跟到新路径，名字高亮按新名字重算。每项是（旧路径、新路径、
+    /// 新的显示名）。
+    pub(crate) fn migrate_details(&mut self, moved: Vec<(PathBuf, PathBuf, String)>) {
+        let highlighter = self.highlighter();
+        let details = moved
+            .into_iter()
+            .filter_map(|(previous, migrated, display_name)| {
+                let mut detail = self.details.remove(&previous)?;
+                detail.name_highlights = highlighter.name_ranges(&display_name);
+                Some((migrated, detail))
+            })
+            .collect::<Vec<_>>();
+        self.details.extend(details);
+    }
+
+    fn highlighter(&self) -> SearchHighlighter {
+        let (terms, match_mode) = self
+            .run
+            .active_query
+            .as_ref()
+            .map(|query| (query.terms.as_str(), query.match_mode))
+            .unwrap_or(("", SearchMatchMode::Plain));
+        SearchHighlighter {
+            terms: SearchTerms::parse(terms),
+            name_regex: match match_mode {
+                SearchMatchMode::Regex => match_mode.name_regex(terms).ok(),
+                SearchMatchMode::Plain => None,
+            },
+        }
+    }
+
+    /// 超出总量上界时丢掉了最旧的若干条。
+    pub(crate) fn note_truncated(&mut self) {
+        self.window.truncated = true;
     }
 
     pub(crate) fn finish_directory_fallback(&mut self, outcome: DirectoryFallbackOutcome) {
@@ -865,7 +713,6 @@ impl SearchWorkspaceState {
                 self.window.failure = Some(message);
             }
         }
-        self.selection.reconcile(&self.window.hits);
     }
 
     pub(crate) fn clear_query(&mut self) {
@@ -875,14 +722,11 @@ impl SearchWorkspaceState {
         self.run.provider = None;
         self.run.next_cursor = None;
         self.run.pending_indexed_request = None;
-        self.window.hits.clear();
         self.window.is_loading = false;
         self.window.failure = None;
         self.window.completion = None;
         self.window.truncated = false;
-        self.window.viewport_offset_y = 0.0;
-        self.window.viewport_height = 0.0;
-        self.selection.clear();
+        self.details.clear();
     }
 
     pub(crate) fn reject_query(&mut self, message: String) {
@@ -890,13 +734,8 @@ impl SearchWorkspaceState {
         self.window.failure = Some(message);
     }
 
-    pub(crate) fn selected_paths_in_result_order(&self) -> Vec<PathBuf> {
-        self.selection
-            .selected_paths_in_result_order(&self.window.hits)
-    }
-
-    pub(crate) fn hit_for_path(&self, path: &Path) -> Option<&SearchHit> {
-        self.window.hits.iter().find(|hit| hit.path == path)
+    pub(crate) fn detail(&self, path: &Path) -> Option<&SearchHitDetail> {
+        self.details.get(path)
     }
 
     pub(crate) fn content_search_is_degraded(&self) -> bool {

@@ -91,7 +91,7 @@ fn savefiles_confirm_requires_names_and_blocks_trash() {
     // 回收站视图禁止确认（与 SaveFile 同一守卫）。
     trash_session.update(SessionMessage::SidebarTrashPressed);
     trash_session.apply_scan(DirectoryScanResult {
-        location: BrowserLocation::Trash,
+        location: PickerLocation::Trash,
         outcome: Ok(DirectoryScanOutcome {
             entries: Vec::new(),
         }),

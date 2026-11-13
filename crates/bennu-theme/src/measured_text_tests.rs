@@ -178,6 +178,8 @@ fn candidate_preserves_start_and_end() {
 }
 
 #[test]
+// 一个加粗片段的区间数组是本意。
+#[allow(clippy::single_range_in_vec_init)]
 fn layout_key_invalidates_changed_measurement_inputs() {
     let bounds = Size::new(96.0, 48.0);
     let size = Pixels(16.0);
@@ -193,6 +195,7 @@ fn layout_key_invalidates_changed_measurement_inputs() {
         text::Wrapping::WordOrGlyph,
         text::Alignment::Center,
         MiddleEllipsisKind::FileName,
+        &[],
     );
 
     assert!(key.matches(
@@ -205,6 +208,7 @@ fn layout_key_invalidates_changed_measurement_inputs() {
         text::Wrapping::WordOrGlyph,
         text::Alignment::Center,
         MiddleEllipsisKind::FileName,
+        &[],
     ));
     assert!(!key.matches(
         "另一个文件名.txt",
@@ -216,6 +220,7 @@ fn layout_key_invalidates_changed_measurement_inputs() {
         text::Wrapping::WordOrGlyph,
         text::Alignment::Center,
         MiddleEllipsisKind::FileName,
+        &[],
     ));
     assert!(!key.matches(
         "文件名.txt",
@@ -227,6 +232,7 @@ fn layout_key_invalidates_changed_measurement_inputs() {
         text::Wrapping::WordOrGlyph,
         text::Alignment::Center,
         MiddleEllipsisKind::FileName,
+        &[],
     ));
     assert!(!key.matches(
         "文件名.txt",
@@ -238,6 +244,7 @@ fn layout_key_invalidates_changed_measurement_inputs() {
         text::Wrapping::WordOrGlyph,
         text::Alignment::Center,
         MiddleEllipsisKind::FileName,
+        &[],
     ));
     assert!(!key.matches(
         "文件名.txt",
@@ -249,6 +256,7 @@ fn layout_key_invalidates_changed_measurement_inputs() {
         text::Wrapping::None,
         text::Alignment::Center,
         MiddleEllipsisKind::FileName,
+        &[],
     ));
     assert!(!key.matches(
         "文件名.txt",
@@ -260,6 +268,7 @@ fn layout_key_invalidates_changed_measurement_inputs() {
         text::Wrapping::WordOrGlyph,
         text::Alignment::Left,
         MiddleEllipsisKind::FileName,
+        &[],
     ));
     assert!(!key.matches(
         "文件名.txt",
@@ -271,6 +280,19 @@ fn layout_key_invalidates_changed_measurement_inputs() {
         text::Wrapping::WordOrGlyph,
         text::Alignment::Center,
         MiddleEllipsisKind::GeneralText,
+        &[],
+    ));
+    assert!(!key.matches(
+        "文件名.txt",
+        bounds,
+        size,
+        line_height,
+        font,
+        text::Shaping::Advanced,
+        text::Wrapping::WordOrGlyph,
+        text::Alignment::Center,
+        MiddleEllipsisKind::FileName,
+        &[0..3],
     ));
 }
 #[test]
@@ -351,6 +373,7 @@ fn wrapped_fit_uses_renderer_measurement_to_stay_within_three_lines() {
 
     assert!(!measured_text_fits::<iced::Renderer>(
         content,
+        &[],
         width,
         height,
         size,
@@ -362,6 +385,7 @@ fn wrapped_fit_uses_renderer_measurement_to_stay_within_three_lines() {
 
     let displayed = fit_middle_ellipsized_text::<iced::Renderer>(
         content,
+        &[],
         width,
         height,
         size,
@@ -378,6 +402,7 @@ fn wrapped_fit_uses_renderer_measurement_to_stay_within_three_lines() {
     assert!(displayed_content_is_ellipsized(content, &displayed));
     assert!(measured_text_fits::<iced::Renderer>(
         &displayed,
+        &[],
         width,
         height,
         size,

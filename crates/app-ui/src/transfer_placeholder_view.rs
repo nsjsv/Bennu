@@ -262,6 +262,8 @@ pub(crate) enum ListTransferRow<'a> {
         /// 同名传输占位改为装饰挂在真实行上(图标叠加进度环),不再单独成行。
         transfer: Option<TransferPlaceholder>,
         stripe_index: usize,
+        /// 搜索结果里正文摘要那一行的高度；没有摘要为 0。
+        snippet_height: f32,
     },
     DirectoryStatusRow {
         status: VisibleEntryStatusRow,
@@ -292,7 +294,11 @@ impl ListTransferRow<'_> {
     fn height(&self, row_height: f32) -> f32 {
         match self {
             Self::DirectoryStatusRow { height, .. } | Self::GroupHeader { height, .. } => *height,
-            Self::Entry { visible, .. } => row_height * visible.animation_progress.clamp(0.0, 1.0),
+            Self::Entry {
+                visible,
+                snippet_height,
+                ..
+            } => (row_height + snippet_height) * visible.animation_progress.clamp(0.0, 1.0),
             Self::Placeholder { .. } => row_height,
         }
     }

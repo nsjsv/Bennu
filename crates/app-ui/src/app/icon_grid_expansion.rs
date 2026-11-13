@@ -90,7 +90,10 @@ impl FileBrowser {
         // 目录置顶、文件段按组划分;子面板/band 永远平铺。元数据解析
         // 绑定 pane 的显示同源入口,分组键与列表行流同源。
         let root_grouping =
-            crate::transfer_placeholder_view::root_grouping::RootGrouping::for_pane_root(self);
+            crate::transfer_placeholder_view::root_grouping::RootGrouping::for_pane_root(
+                self,
+                pane.location,
+            );
         let metadata_for_entry = |entry: &DirectoryEntry| pane.metadata_for_entry(entry);
         let root_grouping =
             root_grouping

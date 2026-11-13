@@ -92,7 +92,7 @@ fn scan(session: &mut PickerSession, directory: &Path, names: &[(&str, FileKind)
         })
         .collect();
     session.update(SessionMessage::ScanReady(Box::new(DirectoryScanResult {
-        location: BrowserLocation::Directory(directory.to_path_buf()),
+        location: PickerLocation::Directory(directory.to_path_buf()),
         outcome: Ok(DirectoryScanOutcome { entries }),
     })));
 }

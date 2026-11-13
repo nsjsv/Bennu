@@ -6,6 +6,9 @@ use file_core::DirectoryEntry;
 use crate::model::{ExpandedDirectory, ExpandedDirectoryStatus};
 use crate::virtual_range::VirtualRange;
 
+mod list_entry_heights;
+pub(crate) use list_entry_heights::ListEntryHeights;
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct VisibleEntry<'a> {
     pub(crate) entry: &'a DirectoryEntry,
@@ -49,12 +52,13 @@ pub(crate) fn visible_entry_status_row_height(
 pub(crate) fn list_entry_range_for_viewport(
     entries: &[DirectoryEntry],
     expanded_directories: &HashMap<PathBuf, ExpandedDirectory>,
-    row_height: f32,
+    heights: ListEntryHeights<'_>,
     header_height: f32,
     viewport_offset: f32,
     viewport_height: f32,
     overscan_rows: usize,
 ) -> VirtualRange {
+    let row_height = heights.row_height();
     if row_height <= f32::EPSILON || viewport_height <= f32::EPSILON {
         return VirtualRange::empty();
     }
@@ -64,26 +68,27 @@ pub(crate) fn list_entry_range_for_viewport(
         top: (viewport_top - header_height - overscan_height).max(0.0),
         bottom: (viewport_top + viewport_height - header_height).max(0.0) + overscan_height,
     };
-    if !has_visible_list_expansion(entries, expanded_directories) {
+    if heights.is_uniform() && !has_visible_list_expansion(entries, expanded_directories) {
         return flat_list_entry_height_range(entries.len(), row_height, limit);
     }
-    list_entry_height_range(entries, expanded_directories, row_height, limit)
+    list_entry_height_range(entries, expanded_directories, heights, limit)
 }
 
 pub(crate) fn initial_list_entry_range(
     entries: &[DirectoryEntry],
     expanded_directories: &HashMap<PathBuf, ExpandedDirectory>,
-    row_height: f32,
+    heights: ListEntryHeights<'_>,
     initial_rows: usize,
 ) -> VirtualRange {
+    let row_height = heights.row_height();
     if row_height <= f32::EPSILON || initial_rows == 0 {
         return VirtualRange::empty();
     }
     let limit = ListEntryRangeLimit::InitialRows(initial_rows);
-    if !has_visible_list_expansion(entries, expanded_directories) {
+    if heights.is_uniform() && !has_visible_list_expansion(entries, expanded_directories) {
         return flat_list_entry_height_range(entries.len(), row_height, limit);
     }
-    list_entry_height_range(entries, expanded_directories, row_height, limit)
+    list_entry_height_range(entries, expanded_directories, heights, limit)
 }
 
 fn has_visible_list_expansion(
@@ -162,9 +167,10 @@ enum ListEntryRangeLimit {
 fn list_entry_height_range(
     entries: &[DirectoryEntry],
     expanded_directories: &HashMap<PathBuf, ExpandedDirectory>,
-    row_height: f32,
+    heights: ListEntryHeights<'_>,
     limit: ListEntryRangeLimit,
 ) -> VirtualRange {
+    let row_height = heights.row_height();
     let mut entry_count = 0;
     let mut total_height = 0.0;
     let mut start = None;
@@ -176,7 +182,8 @@ fn list_entry_height_range(
         let index = entry_count;
         entry_count += 1;
         let block_top = total_height;
-        total_height += row_height * visible_entry.animation_progress.clamp(0.0, 1.0);
+        total_height += (row_height + heights.snippet_height(visible_entry.entry))
+            * visible_entry.animation_progress.clamp(0.0, 1.0);
         if let Some(expanded) = expanded_directories.get(&visible_entry.entry.path) {
             total_height += visible_entry_status_row_height(expanded, row_height);
         }
@@ -468,7 +475,7 @@ mod tests {
         let range = list_entry_range_for_viewport(
             &entries,
             &expanded_directories,
-            10.0,
+            ListEntryHeights::uniform(10.0),
             5.0,
             30.0,
             20.0,
@@ -576,7 +583,7 @@ mod tests {
         let range = list_entry_range_for_viewport(
             &entries,
             &expanded_directories,
-            46.0,
+            ListEntryHeights::uniform(46.0),
             32.0,
             124.0,
             46.0,
@@ -596,7 +603,12 @@ mod tests {
         assert_eq!(visible_entry_status_row_height(&failed, 46.0), 46.0);
 
         assert_eq!(
-            initial_list_entry_range(&entries, &expanded_directories, 46.0, 1),
+            initial_list_entry_range(
+                &entries,
+                &expanded_directories,
+                ListEntryHeights::uniform(46.0),
+                1
+            ),
             VirtualRange {
                 start: 0,
                 end: 1,
@@ -612,7 +624,7 @@ mod tests {
         let range = list_entry_range_for_viewport(
             &entries,
             &expanded_directories,
-            46.0,
+            ListEntryHeights::uniform(46.0),
             32.0,
             101.0,
             46.0,

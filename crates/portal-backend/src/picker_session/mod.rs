@@ -6,7 +6,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use bennu_sidebar::BrowserLocation;
 use bennu_theme::address_bar::{AddressBarTransition, AddressEditingSession};
 use tokio::sync::oneshot;
 
@@ -24,6 +23,7 @@ mod effects;
 mod expansion;
 mod keyboard_nav;
 mod messages;
+mod picker_location;
 pub(crate) mod scan;
 pub(crate) mod scrollbar;
 mod selection;
@@ -49,6 +49,7 @@ pub(crate) use effects::SessionEffect;
 use expansion::ExpansionState;
 use keyboard_nav::KeyboardNavState;
 pub(crate) use messages::SessionMessage;
+pub(crate) use picker_location::PickerLocation;
 pub(crate) use view_mode::{PickerViewMode, ICON_GRID_EDGE};
 
 pub(crate) use expansion::PickerRow;
@@ -61,7 +62,7 @@ pub(crate) struct PickerSession {
     title: Option<String>,
     filters: Vec<FilterRule>,
     active_filter: PickerFilter,
-    location: BrowserLocation,
+    location: PickerLocation,
     listing: DirectoryListing,
     /// 已展开目录：路径 → 子内容。导航切换目录时整体清空。
     expansions: HashMap<PathBuf, ExpansionState>,
@@ -92,7 +93,7 @@ pub(crate) struct PickerSession {
     /// 单调递增，旧会话的迟到回信永远对不上新会话。
     next_address_editing_session_id: u64,
     /// 位置访问历史（含回收站）；`history_position` 指向当前位置（侧键后退/前进）。
-    history: Vec<BrowserLocation>,
+    history: Vec<PickerLocation>,
     history_position: usize,
     /// 滚轮 Mos 惯性状态机与业务视口缓存：逻辑见子模块 scrollbar。
     smooth_scroll: SmoothScrollState,
@@ -152,7 +153,7 @@ impl PickerSession {
             title: title.clone(),
             filters: filters.clone(),
             active_filter,
-            location: BrowserLocation::Directory(start_directory.clone()),
+            location: PickerLocation::Directory(start_directory.clone()),
             listing: DirectoryListing::Pending,
             expansions: HashMap::new(),
             rows: Vec::new(),
@@ -167,7 +168,7 @@ impl PickerSession {
             address_bar_transition: None,
             home_dir: file_core::app_dirs::home_dir(),
             next_address_editing_session_id: 0,
-            history: vec![BrowserLocation::Directory(start_directory.clone())],
+            history: vec![PickerLocation::Directory(start_directory.clone())],
             history_position: 0,
             smooth_scroll: SmoothScrollState::default(),
             scroll_viewports: HashMap::new(),
@@ -185,7 +186,7 @@ impl PickerSession {
         &self.request_path
     }
 
-    pub(crate) fn location(&self) -> &BrowserLocation {
+    pub(crate) fn location(&self) -> &PickerLocation {
         &self.location
     }
 
@@ -443,7 +444,7 @@ impl PickerSession {
             return;
         }
         // 展开节点扫描：结果按路径回填；失败的展开自动收起。
-        let BrowserLocation::Directory(directory) = location else {
+        let PickerLocation::Directory(directory) = location else {
             return;
         };
         if let Some(state) = self.expansions.get_mut(&directory) {
@@ -573,7 +574,7 @@ impl PickerSession {
 
     /// 进入位置：派生状态（选中、锚点、悬停、展开、地址编辑）的统一
     /// 清理点。历史栈由调用方负责记录。
-    fn enter_location(&mut self, location: BrowserLocation) -> SessionEffect {
+    fn enter_location(&mut self, location: PickerLocation) -> SessionEffect {
         self.location = location;
         self.listing = DirectoryListing::Pending;
         self.expansions.clear();
@@ -603,7 +604,7 @@ impl PickerSession {
     }
 
     /// 导航到新位置：记录历史（截断前进分支）并进入。
-    fn begin_navigation(&mut self, location: BrowserLocation) -> SessionEffect {
+    fn begin_navigation(&mut self, location: PickerLocation) -> SessionEffect {
         if location == self.location {
             return SessionEffect::None;
         }
@@ -640,7 +641,7 @@ impl PickerSession {
         else {
             return SessionEffect::None;
         };
-        self.begin_navigation(BrowserLocation::Directory(parent))
+        self.begin_navigation(PickerLocation::Directory(parent))
     }
 }
 

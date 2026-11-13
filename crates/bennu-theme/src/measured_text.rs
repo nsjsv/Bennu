@@ -1,7 +1,10 @@
+use std::ops::Range;
+
 use iced::advanced::text::Paragraph;
 use iced::advanced::{layout, renderer, text, widget, Layout, Widget};
-use iced::{alignment, Element, Length, Pixels, Point, Rectangle, Size};
+use iced::{alignment, Element, Font, Length, Pixels, Point, Rectangle, Size};
 
+mod emphasis;
 mod tooltip;
 
 pub use tooltip::measured_middle_ellipsized_wrapped_text_with_tooltip;
@@ -25,6 +28,23 @@ where
     )
 }
 
+/// 有加粗片段的单行变体：`emphasized` 是原文里的字节区间（按顺序、不重叠、落在字符边界上），
+/// 省略后只加粗还看得见的部分。
+pub fn measured_middle_ellipsized_emphasized_text<'a, Message>(
+    content: impl Into<String>,
+    emphasized: Vec<Range<usize>>,
+    size: f32,
+) -> Element<'a, Message>
+where
+    Message: 'a,
+{
+    let mut text = MeasuredMiddleEllipsizedText::new(content)
+        .size(size)
+        .width(Length::Fill);
+    text.emphasized = emphasized;
+    Element::new(text)
+}
+
 /// 网格瓦片用的居中变体:与带 tooltip 版的文本配置一致(对齐/换行/行高),
 /// 只去掉悬停浮层——占位行等纯展示场景用。
 pub fn measured_middle_ellipsized_centered_text<'a, Message>(
@@ -46,6 +66,27 @@ where
     )
 }
 
+/// 居中变体的加粗版：网格里搜索结果的名字，搜到的字加粗。
+pub fn measured_middle_ellipsized_centered_emphasized_text<'a, Message>(
+    content: impl Into<String>,
+    emphasized: Vec<Range<usize>>,
+    size: f32,
+    line_height_pixels: f32,
+) -> Element<'a, Message>
+where
+    Message: 'a,
+{
+    let mut text = MeasuredMiddleEllipsizedText::file_name(content)
+        .size(size)
+        .line_height(text::LineHeight::Absolute(Pixels(line_height_pixels)))
+        .wrapping(text::Wrapping::WordOrGlyph)
+        .align_x(text::Alignment::Center)
+        .width(Length::Fill)
+        .height(Length::Fill);
+    text.emphasized = emphasized;
+    Element::new(text)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MiddleEllipsisKind {
     GeneralText,
@@ -62,6 +103,7 @@ struct MeasuredMiddleEllipsizedText {
     wrapping: text::Wrapping,
     align_x: text::Alignment,
     ellipsis_kind: MiddleEllipsisKind,
+    emphasized: Vec<Range<usize>>,
 }
 
 impl MeasuredMiddleEllipsizedText {
@@ -83,6 +125,7 @@ impl MeasuredMiddleEllipsizedText {
             wrapping: text::Wrapping::None,
             align_x: text::Alignment::Left,
             ellipsis_kind,
+            emphasized: Vec::new(),
         }
     }
 
@@ -128,6 +171,7 @@ struct MeasuredTextLayoutKey<Font> {
     wrapping: text::Wrapping,
     align_x: text::Alignment,
     ellipsis_kind: MiddleEllipsisKind,
+    emphasized: Vec<Range<usize>>,
 }
 
 impl<Font: PartialEq> MeasuredTextLayoutKey<Font> {
@@ -143,6 +187,7 @@ impl<Font: PartialEq> MeasuredTextLayoutKey<Font> {
         wrapping: text::Wrapping,
         align_x: text::Alignment,
         ellipsis_kind: MiddleEllipsisKind,
+        emphasized: &[Range<usize>],
     ) -> Self {
         Self {
             content: content.to_owned(),
@@ -154,6 +199,7 @@ impl<Font: PartialEq> MeasuredTextLayoutKey<Font> {
             wrapping,
             align_x,
             ellipsis_kind,
+            emphasized: emphasized.to_vec(),
         }
     }
 
@@ -169,6 +215,7 @@ impl<Font: PartialEq> MeasuredTextLayoutKey<Font> {
         wrapping: text::Wrapping,
         align_x: text::Alignment,
         ellipsis_kind: MiddleEllipsisKind,
+        emphasized: &[Range<usize>],
     ) -> bool {
         // 先比廉价标量字段，最后才比较整段字符串：尺寸未变时零字符串比较开销。
         self.bounds == bounds
@@ -179,6 +226,7 @@ impl<Font: PartialEq> MeasuredTextLayoutKey<Font> {
             && self.wrapping == wrapping
             && self.align_x == align_x
             && self.ellipsis_kind == ellipsis_kind
+            && self.emphasized == emphasized
             && self.content == content
     }
 }
@@ -205,8 +253,7 @@ fn displayed_content_is_ellipsized(content: &str, displayed_content: &str) -> bo
 
 impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer> for MeasuredMiddleEllipsizedText
 where
-    Renderer: text::Renderer,
-    Renderer::Font: 'static,
+    Renderer: text::Renderer<Font = Font>,
 {
     fn tag(&self) -> widget::tree::Tag {
         widget::tree::Tag::of::<
@@ -256,12 +303,14 @@ where
                     self.wrapping,
                     self.align_x,
                     self.ellipsis_kind,
+                    &self.emphasized,
                 )
             });
 
             if !layout_key_matches {
                 let displayed_content = fit_middle_ellipsized_text::<Renderer>(
                     &self.content,
+                    &self.emphasized,
                     bounds.width,
                     bounds.height,
                     self.size,
@@ -271,19 +320,28 @@ where
                     self.wrapping,
                     self.ellipsis_kind,
                 );
+                let displayed_emphasis = emphasis::displayed_emphasis(
+                    &self.content,
+                    &displayed_content,
+                    self.ellipsis_kind,
+                    &self.emphasized,
+                );
 
                 text_state.displayed_content = displayed_content;
-                text_state.paragraph = Renderer::Paragraph::with_text(text::Text {
-                    content: text_state.displayed_content.as_str(),
-                    bounds: display_bounds,
-                    size: self.size,
-                    line_height,
-                    font,
-                    align_x: self.align_x,
-                    align_y: alignment::Vertical::Top,
-                    shaping,
-                    wrapping: self.wrapping,
-                });
+                text_state.paragraph = emphasis::emphasized_paragraph(
+                    text::Text {
+                        content: text_state.displayed_content.as_str(),
+                        bounds: display_bounds,
+                        size: self.size,
+                        line_height,
+                        font,
+                        align_x: self.align_x,
+                        align_y: alignment::Vertical::Top,
+                        shaping,
+                        wrapping: self.wrapping,
+                    },
+                    &displayed_emphasis,
+                );
                 text_state.layout_key = Some(MeasuredTextLayoutKey::new(
                     &self.content,
                     display_bounds,
@@ -294,6 +352,7 @@ where
                     self.wrapping,
                     self.align_x,
                     self.ellipsis_kind,
+                    &self.emphasized,
                 ));
             }
 
@@ -339,17 +398,18 @@ where
 #[allow(clippy::too_many_arguments)]
 fn fit_middle_ellipsized_text<Renderer>(
     content: &str,
+    emphasized: &[Range<usize>],
     available_width: f32,
     available_height: f32,
     size: Pixels,
     line_height: text::LineHeight,
-    font: Renderer::Font,
+    font: Font,
     shaping: text::Shaping,
     wrapping: text::Wrapping,
     ellipsis_kind: MiddleEllipsisKind,
 ) -> String
 where
-    Renderer: text::Renderer,
+    Renderer: text::Renderer<Font = Font>,
 {
     if content.is_empty() || available_width <= 0.0 || available_height <= 0.0 {
         return String::new();
@@ -358,6 +418,7 @@ where
     fit_middle_ellipsized_by(content, ellipsis_kind, |candidate| {
         measured_text_fits::<Renderer>(
             candidate,
+            &emphasis::displayed_emphasis(content, candidate, ellipsis_kind, emphasized),
             available_width,
             available_height,
             size,
@@ -432,28 +493,32 @@ fn fit_middle_ellipsized_by(
 #[allow(clippy::too_many_arguments)]
 fn measured_text_fits<Renderer>(
     content: &str,
+    emphasis: &[Range<usize>],
     available_width: f32,
     available_height: f32,
     size: Pixels,
     line_height: text::LineHeight,
-    font: Renderer::Font,
+    font: Font,
     shaping: text::Shaping,
     wrapping: text::Wrapping,
 ) -> bool
 where
-    Renderer: text::Renderer,
+    Renderer: text::Renderer<Font = Font>,
 {
-    let paragraph = Renderer::Paragraph::with_text(text::Text {
-        content,
-        bounds: Size::new(available_width, TEXT_MEASUREMENT_HEIGHT),
-        size,
-        line_height,
-        font,
-        align_x: text::Alignment::Left,
-        align_y: alignment::Vertical::Top,
-        shaping,
-        wrapping,
-    });
+    let paragraph: Renderer::Paragraph = emphasis::emphasized_paragraph(
+        text::Text {
+            content,
+            bounds: Size::new(available_width, TEXT_MEASUREMENT_HEIGHT),
+            size,
+            line_height,
+            font,
+            align_x: text::Alignment::Left,
+            align_y: alignment::Vertical::Top,
+            shaping,
+            wrapping,
+        },
+        emphasis,
+    );
     let bounds = paragraph.min_bounds();
 
     bounds.width <= available_width && bounds.height <= available_height
@@ -505,57 +570,63 @@ fn shaping_for_content(content: &str) -> text::Shaping {
     }
 }
 
+/// 中间省略后原文留下的部分（字节）：头是 `..head_end`，尾是 `tail_start..`。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MiddleCut {
+    head_end: usize,
+    tail_start: usize,
+}
+
 impl MiddleEllipsisKind {
     fn candidate(self, content: &str, visible_chars: usize) -> String {
-        match self {
-            Self::GeneralText => middle_ellipsized_candidate(content, visible_chars),
-            Self::FileName => middle_ellipsized_filename_candidate(content, visible_chars),
+        if visible_chars >= content.chars().count() {
+            return content.to_owned();
+        }
+        let cut = self.cut(content, visible_chars);
+        let mut candidate = String::with_capacity(
+            cut.head_end + ELLIPSIS_MARKER.len() + content.len() - cut.tail_start,
+        );
+        candidate.push_str(&content[..cut.head_end]);
+        candidate.push_str(ELLIPSIS_MARKER);
+        candidate.push_str(&content[cut.tail_start..]);
+        candidate
+    }
+
+    /// 只留 `visible_chars` 个字符时保留的头尾；`visible_chars` 小于原文字符数。文件名
+    /// 至少把整个扩展名留在尾巴里。
+    fn cut(self, content: &str, visible_chars: usize) -> MiddleCut {
+        let minimum_suffix_chars = match self {
+            Self::GeneralText => 0,
+            Self::FileName => content
+                .rsplit_once('.')
+                .filter(|(stem, extension)| !stem.is_empty() && !extension.is_empty())
+                .map_or(0, |(_, extension)| extension.chars().count() + 1),
+        };
+        let end_chars = (visible_chars / 2)
+            .max(minimum_suffix_chars)
+            .min(visible_chars.saturating_sub(1));
+        let start_chars = visible_chars - end_chars;
+        let byte_at_char = |index: usize| {
+            content
+                .char_indices()
+                .nth(index)
+                .map_or(content.len(), |(byte, _)| byte)
+        };
+        MiddleCut {
+            head_end: byte_at_char(start_chars),
+            tail_start: byte_at_char(content.chars().count() - end_chars),
         }
     }
 }
 
+#[cfg(test)]
 fn middle_ellipsized_candidate(content: &str, visible_chars: usize) -> String {
-    middle_ellipsized_candidate_with_minimum_suffix(content, visible_chars, 0)
+    MiddleEllipsisKind::GeneralText.candidate(content, visible_chars)
 }
 
+#[cfg(test)]
 fn middle_ellipsized_filename_candidate(content: &str, visible_chars: usize) -> String {
-    let extension_chars = content
-        .rsplit_once('.')
-        .filter(|(stem, extension)| !stem.is_empty() && !extension.is_empty())
-        .map_or(0, |(_, extension)| extension.chars().count() + 1);
-
-    middle_ellipsized_candidate_with_minimum_suffix(content, visible_chars, extension_chars)
-}
-
-fn middle_ellipsized_candidate_with_minimum_suffix(
-    content: &str,
-    visible_chars: usize,
-    minimum_suffix_chars: usize,
-) -> String {
-    let char_count = content.chars().count();
-    if visible_chars >= char_count {
-        return content.to_owned();
-    }
-
-    let end_chars = (visible_chars / 2)
-        .max(minimum_suffix_chars)
-        .min(visible_chars.saturating_sub(1));
-    let start_chars = visible_chars - end_chars;
-    let mut candidate =
-        String::with_capacity(content.len().min(visible_chars + ELLIPSIS_MARKER.len()));
-
-    candidate.extend(content.chars().take(start_chars));
-    candidate.push_str(ELLIPSIS_MARKER);
-    candidate.extend(
-        content
-            .chars()
-            .rev()
-            .take(end_chars)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev(),
-    );
-    candidate
+    MiddleEllipsisKind::FileName.candidate(content, visible_chars)
 }
 
 impl<'a, Message, Theme, Renderer> From<MeasuredMiddleEllipsizedText>
@@ -563,8 +634,7 @@ impl<'a, Message, Theme, Renderer> From<MeasuredMiddleEllipsizedText>
 where
     Message: 'a,
     Theme: 'a,
-    Renderer: text::Renderer + 'a,
-    Renderer::Font: 'static,
+    Renderer: text::Renderer<Font = Font> + 'a,
 {
     fn from(text: MeasuredMiddleEllipsizedText) -> Self {
         Element::new(text)

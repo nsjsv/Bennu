@@ -14,6 +14,7 @@ pub(super) struct ListColumnResizeDrag {
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ListColumnReorderDrag {
+    pane_id: BrowserPaneId,
     kind: ListColumnKind,
     phase: FileDragPhase,
     drop_target: Option<ListColumnKind>,
@@ -49,7 +50,15 @@ impl FileBrowser {
             .map(|(_, column)| column)
     }
 
-    pub(super) fn select_list_sort_column(&mut self, column: ListColumnKind) -> Task<Message> {
+    /// 点表头排序。搜索结果的顺序属于那次搜索，只改它、对全部结果重搜；文件夹改全局排序。
+    pub(super) fn select_list_sort_column(
+        &mut self,
+        pane_id: BrowserPaneId,
+        column: ListColumnKind,
+    ) -> Task<Message> {
+        if let Some(session_id) = self.pane_search_session(pane_id) {
+            return self.sort_search_by_column(session_id, column);
+        }
         let before_sort = self.user_config.list_view_preferences.sort();
         self.user_config
             .list_view_preferences
@@ -80,8 +89,17 @@ impl FileBrowser {
         self.sidebar_bookmark_drag = None;
         self.sidebar_bookmark_drop_slot = None;
         let _ = self.cancel_address_editing();
+        let location = &self.pane().tab().location;
+        let columns = self
+            .user_config
+            .context_menus
+            .list_column_items()
+            .into_iter()
+            .filter(|kind| kind.applies_at(location))
+            .collect();
         self.context_menu = Some(ContextMenuState::ListColumns(ListColumnMenuState {
             position: self.cursor_or_origin(),
+            columns,
         }));
         rename_command
     }
@@ -156,6 +174,7 @@ impl FileBrowser {
         }
 
         self.list_column_reorder_drag = Some(ListColumnReorderDrag {
+            pane_id,
             kind: column,
             phase: FileDragPhase::WaitingForMovement {
                 origin: self.cursor_or_origin(),
@@ -238,7 +257,7 @@ impl FileBrowser {
             return Task::none();
         };
         if matches!(drag.phase, FileDragPhase::WaitingForMovement { .. }) {
-            self.select_list_sort_column(drag.kind)
+            self.select_list_sort_column(drag.pane_id, drag.kind)
         } else if let Some(target) = drag.drop_target {
             if self
                 .user_config
@@ -353,12 +372,12 @@ mod tests {
     fn selecting_list_sort_column_updates_scan_options() {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
 
-        drop(browser.select_list_sort_column(ListColumnKind::Size));
+        drop(browser.select_list_sort_column(BrowserPaneId::PRIMARY, ListColumnKind::Size));
 
         assert_eq!(browser.options.sort_field, SortField::Size);
         assert_eq!(browser.options.sort_direction, SortDirection::Ascending);
 
-        drop(browser.select_list_sort_column(ListColumnKind::Size));
+        drop(browser.select_list_sort_column(BrowserPaneId::PRIMARY, ListColumnKind::Size));
 
         assert_eq!(browser.options.sort_field, SortField::Size);
         assert_eq!(browser.options.sort_direction, SortDirection::Descending);
@@ -368,7 +387,7 @@ mod tests {
     fn hiding_current_list_sort_column_updates_scan_options() {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
 
-        drop(browser.select_list_sort_column(ListColumnKind::Size));
+        drop(browser.select_list_sort_column(BrowserPaneId::PRIMARY, ListColumnKind::Size));
         drop(browser.toggle_list_column_visibility(ListColumnKind::Size));
 
         assert_eq!(browser.options.sort_field, SortField::Name);
@@ -425,7 +444,7 @@ mod tests {
             remember_summary(&mut browser, path, count, size);
         }
 
-        drop(browser.select_list_sort_column(ListColumnKind::Size));
+        drop(browser.select_list_sort_column(BrowserPaneId::PRIMARY, ListColumnKind::Size));
 
         assert_eq!(browser.options.sort_field, SortField::Size);
         assert_eq!(browser.options.sort_direction, SortDirection::Ascending);
@@ -500,7 +519,7 @@ mod tests {
         browser.tab_mut().entries = vec![test_entry(directory.clone(), FileKind::Directory)].into();
         remember_summary(&mut browser, &directory, 2, 2048);
 
-        drop(browser.select_list_sort_column(ListColumnKind::Size));
+        drop(browser.select_list_sort_column(BrowserPaneId::PRIMARY, ListColumnKind::Size));
         drop(browser.toggle_list_column_visibility(ListColumnKind::Size));
 
         assert_eq!(browser.options.sort_field, SortField::Name);
@@ -598,6 +617,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 ListColumnKind::Name,
+                ListColumnKind::Location,
                 ListColumnKind::Modified,
                 ListColumnKind::Size,
                 ListColumnKind::Kind,
@@ -615,6 +635,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 ListColumnKind::Name,
+                ListColumnKind::Location,
                 ListColumnKind::Size,
                 ListColumnKind::Modified,
                 ListColumnKind::Kind,
@@ -647,6 +668,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 ListColumnKind::Name,
+                ListColumnKind::Location,
                 ListColumnKind::Modified,
                 ListColumnKind::Size,
                 ListColumnKind::Kind,
@@ -718,6 +740,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 ListColumnKind::Name,
+                ListColumnKind::Location,
                 ListColumnKind::Size,
                 ListColumnKind::Modified,
                 ListColumnKind::Kind,
@@ -746,6 +769,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 ListColumnKind::Name,
+                ListColumnKind::Location,
                 ListColumnKind::Modified,
                 ListColumnKind::Size,
                 ListColumnKind::Kind,
@@ -777,6 +801,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 ListColumnKind::Name,
+                ListColumnKind::Location,
                 ListColumnKind::Modified,
                 ListColumnKind::Size,
                 ListColumnKind::Kind,

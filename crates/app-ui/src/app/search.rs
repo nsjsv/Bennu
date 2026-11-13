@@ -1,5 +1,5 @@
-use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::path::PathBuf;
+use std::time::Duration;
 
 use chrono::Local;
 use file_search::{
@@ -9,179 +9,133 @@ use file_search::{
 use iced::Task;
 use tokio_util::sync::CancellationToken;
 
-use super::{FileBrowser, DOUBLE_CLICK_THRESHOLD};
+use super::FileBrowser;
 use crate::commands::{
-    directory_fallback_search_command, open_file_command, read_directory_fallback_preferences,
-    search_command, search_service_recovery_command, search_service_status_command,
+    directory_fallback_search_command, read_directory_fallback_preferences, search_command,
+    search_service_recovery_command, search_service_status_command,
     search_with_scope_root_check_command,
 };
-use crate::model::search::SEARCH_RESULT_WINDOW;
+use crate::model::search::{SearchRunId, SEARCH_RESULT_WINDOW};
 use crate::model::{
-    BrowserViewMode, ContextMenuState, DestructiveActionConfirmation, DirectoryFallbackOutcome,
-    IndexedSearchOutcome, IndexedSearchRequest, LastActivationClick, Message, NavigationMode,
-    SearchContextMenuState, SearchDateField, SearchDatePreset, SearchDirectoryScope,
-    SearchEntryTypeMenuState, SearchEntryTypePreset, SearchInputStabilizationRequest,
-    SearchInputStabilizationSubject, SearchKeyboardSelection, SearchSelectionGesture,
-    SearchSelectionStep, SearchServiceDiagnostic, SearchServiceDiagnosticKind,
-    SearchServiceRecoveryAction, SearchServiceStatusRequest, SearchSizePreset,
-    SearchWorkspaceSessionId, SearchWorkspaceState,
+    BrowserPaneId, BrowserViewMode, ContextMenuState, DirectoryFallbackOutcome,
+    IndexedSearchOutcome, IndexedSearchRequest, Message, NavigationMode, SearchDateField,
+    SearchDatePreset, SearchDirectoryScope, SearchEntryTypeMenuState, SearchEntryTypePreset,
+    SearchInputStabilizationRequest, SearchInputStabilizationSubject, SearchServiceDiagnostic,
+    SearchServiceDiagnosticKind, SearchServiceRecoveryAction, SearchServiceStatusRequest,
+    SearchSizePreset, SearchWorkspaceSessionId, SearchWorkspaceState,
 };
-use crate::shortcuts::{FileSelectionDirection, ShortcutAction};
 
 const SEARCH_INPUT_STABILIZATION_DELAY: Duration = Duration::from_millis(120);
-const SEARCH_PAGE_PREFETCH_ROWS: usize = 12;
 
 impl FileBrowser {
-    pub(crate) fn invoke_search_workspace_shortcut(
-        &mut self,
-        action: ShortcutAction,
-    ) -> Task<Message> {
-        match action {
-            ShortcutAction::OpenSelected => self.activate_selected_search_result(),
-            ShortcutAction::MoveSelection(direction) => {
-                self.move_search_result_selection(direction)
-            }
-            ShortcutAction::SelectAll => self.select_all_search_results(),
-            ShortcutAction::Copy => self.copy_selected(),
-            ShortcutAction::Cut => self.move_selected(),
-            ShortcutAction::Delete => self.trash_selected(),
-            ShortcutAction::Refresh => self.submit_search(),
-            ShortcutAction::Undo => self.undo_file_operation(),
-            ShortcutAction::Redo => self.redo_file_operation(),
-            ShortcutAction::Escape
-                if self
-                    .search_history_interaction
-                    .popup_is_visible(&self.user_config.search_history) =>
-            {
-                self.search_history_interaction.dismiss_popup();
-                Task::none()
-            }
-            ShortcutAction::Escape if !self.file_browser_content_shortcuts_enabled() => {
-                self.handle_focused_window_escape_pressed()
-            }
-            ShortcutAction::Escape => self.close_search_workspace(),
-            ShortcutAction::RenameSelected
-            | ShortcutAction::FocusPathInput
-            | ShortcutAction::NavigateBack
-            | ShortcutAction::NavigateForward
-            | ShortcutAction::NavigateUp
-            | ShortcutAction::FileProperties
-            | ShortcutAction::Preview
-            | ShortcutAction::ToggleRightPreviewPanel
-            | ShortcutAction::ToggleTerminal
-            | ShortcutAction::TerminalNewTab
-            | ShortcutAction::TerminalCloseTab
-            | ShortcutAction::DuplicateSelected
-            | ShortcutAction::NewFolderFromSelection
-            | ShortcutAction::Paste => Task::none(),
-        }
+    /// 活动标签上的搜索（标签在搜索结果里时）。
+    pub(crate) fn active_search(&self) -> Option<&SearchWorkspaceState> {
+        self.tab().location.search()
+    }
+
+    fn active_search_mut(&mut self) -> Option<&mut SearchWorkspaceState> {
+        self.tab_mut().location.search_mut()
     }
 
     pub(super) fn update_search_input(&mut self, value: String) -> Task<Message> {
-        if let Err(message) = self.ensure_search_workspace() {
-            self.show_global_error(message);
-            return Task::none();
-        }
-        let Some(workspace) = self.search_workspace.as_mut() else {
-            return Task::none();
-        };
-        let request = workspace.replace_input(value);
-        search_input_stabilization_command(request)
+        self.edit_active_search(|search| search.replace_input(value))
     }
 
     pub(super) fn update_search_custom_extensions(&mut self, value: String) -> Task<Message> {
-        if let Err(message) = self.ensure_search_workspace() {
-            self.show_global_error(message);
-            return Task::none();
-        }
-        let Some(workspace) = self.search_workspace.as_mut() else {
-            return Task::none();
-        };
-        let request = workspace.replace_custom_extensions(value);
-        search_input_stabilization_command(request)
+        self.edit_active_search(|search| search.replace_custom_extensions(value))
     }
 
     pub(super) fn update_search_custom_size_min(&mut self, value: String) -> Task<Message> {
-        if let Err(message) = self.ensure_search_workspace() {
-            self.show_global_error(message);
-            return Task::none();
-        }
-        let Some(workspace) = self.search_workspace.as_mut() else {
-            return Task::none();
-        };
-        let max = workspace.filters.custom_size_max.clone();
-        let request = workspace.replace_custom_size(value, max);
-        search_input_stabilization_command(request)
+        self.edit_active_search(|search| {
+            let max = search.filters.custom_size_max.clone();
+            search.replace_custom_size(value, max)
+        })
     }
 
     pub(super) fn update_search_custom_size_max(&mut self, value: String) -> Task<Message> {
-        if let Err(message) = self.ensure_search_workspace() {
-            self.show_global_error(message);
-            return Task::none();
-        }
-        let Some(workspace) = self.search_workspace.as_mut() else {
-            return Task::none();
+        self.edit_active_search(|search| {
+            let min = search.filters.custom_size_min.clone();
+            search.replace_custom_size(min, value)
+        })
+    }
+
+    /// 打字类输入：不在搜索里就先进入搜索，改完等输入停下再搜。
+    fn edit_active_search(
+        &mut self,
+        edit: impl FnOnce(&mut SearchWorkspaceState) -> SearchInputStabilizationRequest,
+    ) -> Task<Message> {
+        let entered = match self.ensure_active_search() {
+            Ok(entered) => entered,
+            Err(message) => {
+                self.show_global_error(message);
+                return Task::none();
+            }
         };
-        let min = workspace.filters.custom_size_min.clone();
-        let request = workspace.replace_custom_size(min, value);
-        search_input_stabilization_command(request)
+        let Some(search) = self.active_search_mut() else {
+            return entered;
+        };
+        let request = edit(search);
+        Task::batch([entered, search_input_stabilization_command(request)])
     }
 
     pub(super) fn toggle_search_custom_extensions(&mut self) -> Task<Message> {
-        let Some(workspace) = self.search_workspace.as_mut() else {
+        let Some(workspace) = self.active_search_mut() else {
             return Task::none();
         };
         workspace.filters.toggle_custom_extensions();
-        self.restart_search_workspace()
+        self.restart_active_search()
     }
 
     pub(super) fn select_search_size_preset(
         &mut self,
         size_preset: SearchSizePreset,
     ) -> Task<Message> {
-        let Some(workspace) = self.search_workspace.as_mut() else {
+        let Some(workspace) = self.active_search_mut() else {
             return Task::none();
         };
         // 选任何档位（含进入/离开 Custom）都立即 restart；离开 Custom 由
         // select_size_preset 清空两侧输入。
         workspace.filters.select_size_preset(size_preset);
-        self.restart_search_workspace()
+        self.restart_active_search()
     }
 
     pub(super) fn accept_search_input_stabilization(
         &mut self,
         request: SearchInputStabilizationRequest,
     ) -> Task<Message> {
-        let accepted = match request.subject {
-            SearchInputStabilizationSubject::Terms => self
-                .search_workspace
-                .as_ref()
-                .is_some_and(|workspace| workspace.accepts_input_stabilization(&request)),
-            SearchInputStabilizationSubject::CustomExtensions => {
-                self.search_workspace.as_ref().is_some_and(|workspace| {
-                    workspace.accepts_custom_extensions_stabilization(&request)
-                })
-            }
-            SearchInputStabilizationSubject::CustomSize => self
-                .search_workspace
-                .as_ref()
-                .is_some_and(|workspace| workspace.accepts_custom_size_stabilization(&request)),
-        };
+        // 输入停下时标签可能已经不是活动的了：按会话号找回它。
+        let session_id = request.session_id();
+        let accepted = self
+            .search_tab(session_id)
+            .and_then(|tab| tab.location.search())
+            .is_some_and(|search| match request.subject {
+                SearchInputStabilizationSubject::Terms => {
+                    search.accepts_input_stabilization(&request)
+                }
+                SearchInputStabilizationSubject::CustomExtensions => {
+                    search.accepts_custom_extensions_stabilization(&request)
+                }
+                SearchInputStabilizationSubject::CustomSize => {
+                    search.accepts_custom_size_stabilization(&request)
+                }
+            });
         if !accepted {
             return Task::none();
         }
-        self.restart_search_workspace()
+        self.restart_search(session_id)
     }
 
     pub(super) fn submit_search_input(&mut self) -> Task<Message> {
-        if let Err(message) = self.ensure_search_workspace() {
-            self.show_global_error(message);
-            return Task::none();
-        }
+        let entered = match self.ensure_active_search() {
+            Ok(entered) => entered,
+            Err(message) => {
+                self.show_global_error(message);
+                return Task::none();
+            }
+        };
         let keyword = self
-            .search_workspace
-            .as_ref()
-            .map(|workspace| workspace.input.clone())
+            .active_search()
+            .map(|search| search.input.clone())
             .unwrap_or_default();
         let persist = if self.user_config.search_history.record_submission(&keyword) {
             self.persist_user_preferences_command()
@@ -189,36 +143,31 @@ impl FileBrowser {
             Task::none()
         };
         self.search_history_interaction.dismiss_popup();
-        Task::batch([persist, self.restart_search_workspace()])
-    }
-
-    pub(super) fn submit_search(&mut self) -> Task<Message> {
-        if let Err(message) = self.ensure_search_workspace() {
-            self.show_global_error(message);
-            return Task::none();
-        }
-        self.restart_search_workspace()
+        Task::batch([entered, persist, self.restart_active_search()])
     }
 
     pub(super) fn select_search_history_keyword(&mut self, keyword: String) -> Task<Message> {
         if !self.user_config.search_history.contains(&keyword) {
             return Task::none();
         }
-        if let Err(message) = self.ensure_search_workspace() {
-            self.show_global_error(message);
-            return Task::none();
-        }
-        let Some(workspace) = self.search_workspace.as_mut() else {
-            return Task::none();
+        let entered = match self.ensure_active_search() {
+            Ok(entered) => entered,
+            Err(message) => {
+                self.show_global_error(message);
+                return Task::none();
+            }
         };
-        workspace.replace_input_immediately(keyword.clone());
+        let Some(search) = self.active_search_mut() else {
+            return entered;
+        };
+        search.replace_input_immediately(keyword.clone());
         self.search_history_interaction.reset();
         let persist = if self.user_config.search_history.record_submission(&keyword) {
             self.persist_user_preferences_command()
         } else {
             Task::none()
         };
-        Task::batch([persist, self.restart_search_workspace()])
+        Task::batch([entered, persist, self.restart_active_search()])
     }
 
     pub(super) fn remove_search_history_keyword(&mut self, keyword: &str) -> Task<Message> {
@@ -242,15 +191,15 @@ impl FileBrowser {
     }
 
     pub(super) fn clear_search_keyword(&mut self) -> Task<Message> {
-        let Some(workspace) = self.search_workspace.as_mut() else {
+        let Some(workspace) = self.active_search_mut() else {
             return Task::none();
         };
         workspace.input.clear();
-        self.restart_search_workspace()
+        self.restart_active_search()
     }
 
     pub(super) fn open_search_entry_types_menu(&mut self) -> Task<Message> {
-        if self.search_workspace.is_none()
+        if self.active_search().is_none()
             || self
                 .user_config
                 .context_menus
@@ -271,36 +220,32 @@ impl FileBrowser {
         &mut self,
         entry_type: SearchEntryTypePreset,
     ) -> Task<Message> {
-        let Some(workspace) = self.search_workspace.as_mut() else {
+        let Some(workspace) = self.active_search_mut() else {
             return Task::none();
         };
         workspace.filters.toggle_entry_type(entry_type);
-        self.restart_search_workspace()
+        self.restart_active_search()
     }
 
     pub(super) fn select_search_directory_scope(
         &mut self,
         scope: SearchDirectoryScope,
     ) -> Task<Message> {
-        let Some(workspace) = self.search_workspace.as_mut() else {
+        let Some(workspace) = self.active_search_mut() else {
             return Task::none();
         };
         if !workspace.root.select_scope(scope) {
             return Task::none();
         }
-        self.restart_search_workspace()
+        self.restart_active_search()
     }
 
-    /// 把当前工作区的选定范围写入持久化范围记忆；仅在真实变化时保存。
-    /// 只在 restart_search_workspace 真实构造查询时调用。
-    fn remember_last_search_scope(&mut self) -> Task<Message> {
-        let Some(scope) = self
-            .search_workspace
-            .as_ref()
-            .map(|workspace| workspace.root.last_search_scope())
-        else {
-            return Task::none();
-        };
+    /// 把这次搜索的选定范围写入持久化范围记忆；仅在真实变化时保存。
+    /// 只在 restart_search 真实构造查询时调用。
+    fn remember_last_search_scope(
+        &mut self,
+        scope: crate::model::LastSearchScope,
+    ) -> Task<Message> {
         if self.user_config.last_search_scope.as_ref() == Some(&scope) {
             return Task::none();
         }
@@ -312,74 +257,80 @@ impl FileBrowser {
         &mut self,
         text_scope: SearchTextScope,
     ) -> Task<Message> {
-        let Some(workspace) = self.search_workspace.as_mut() else {
+        let Some(workspace) = self.active_search_mut() else {
             return Task::none();
         };
         workspace.filters.text_scope = text_scope;
-        self.restart_search_workspace()
+        self.restart_active_search()
     }
 
     pub(super) fn toggle_search_regex(&mut self) -> Task<Message> {
-        let Some(workspace) = self.search_workspace.as_mut() else {
+        let Some(workspace) = self.active_search_mut() else {
             return Task::none();
         };
         workspace.filters.match_mode = match workspace.filters.match_mode {
             SearchMatchMode::Plain => SearchMatchMode::Regex,
             SearchMatchMode::Regex => SearchMatchMode::Plain,
         };
-        self.restart_search_workspace()
+        self.restart_active_search()
     }
 
     pub(super) fn select_search_date_field(
         &mut self,
         date_field: SearchDateField,
     ) -> Task<Message> {
-        let Some(workspace) = self.search_workspace.as_mut() else {
+        let Some(workspace) = self.active_search_mut() else {
             return Task::none();
         };
         workspace.filters.date_field = date_field;
-        self.restart_search_workspace()
+        self.restart_active_search()
     }
 
     pub(super) fn select_search_date_preset(
         &mut self,
         date_preset: SearchDatePreset,
     ) -> Task<Message> {
-        let Some(workspace) = self.search_workspace.as_mut() else {
+        let Some(workspace) = self.active_search_mut() else {
             return Task::none();
         };
         workspace.filters.date_preset = date_preset;
-        self.restart_search_workspace()
+        self.restart_active_search()
     }
 
     pub(super) fn reset_search_filters(&mut self) -> Task<Message> {
-        let Some(workspace) = self.search_workspace.as_mut() else {
+        let Some(workspace) = self.active_search_mut() else {
             return Task::none();
         };
         workspace.filters.reset();
-        self.restart_search_workspace()
+        self.restart_active_search()
     }
 
+    /// Esc 或关闭按钮：回到发起搜索的文件夹，这次搜索记进历史。
     pub(super) fn close_search_workspace(&mut self) -> Task<Message> {
-        self.discard_search_workspace();
-        Task::none()
+        let Some(origin) = self
+            .active_search()
+            .map(|search| search.origin().to_path_buf())
+        else {
+            return Task::none();
+        };
+        self.navigate_to(origin, NavigationMode::RecordHistory)
     }
 
-    pub(super) fn discard_search_workspace(&mut self) {
-        self.search_workspace = None;
+    /// 标签离开搜索（导航、关闭）后搜索专属的浮层与记忆跟着收掉。
+    pub(super) fn forget_search_interaction(&mut self) {
         self.search_history_interaction.reset();
-        self.last_activation_click = None;
         if matches!(
             self.context_menu,
-            Some(ContextMenuState::Search(_) | ContextMenuState::SearchEntryTypes(_))
+            Some(ContextMenuState::SearchEntryTypes(_))
         ) {
             self.context_menu = None;
         }
     }
 
-    fn ensure_search_workspace(&mut self) -> Result<(), String> {
-        if self.search_workspace.is_some() {
-            return Ok(());
+    /// 活动标签还不在搜索里时，从它的文件夹进入一次新搜索。
+    fn ensure_active_search(&mut self) -> Result<Task<Message>, String> {
+        if self.active_search().is_some() {
+            return Ok(Task::none());
         }
         let Some(root) = self.current_search_directory() else {
             return Err(tr!("Search is available from a local folder"));
@@ -387,56 +338,65 @@ impl FileBrowser {
         if self.path_is_remote_mount(&root) {
             return Err(tr!("Search is unavailable for remote folders"));
         }
+        let state = SearchWorkspaceState::new(
+            root,
+            self.home_dir.clone(),
+            self.user_config.last_search_scope.clone(),
+            self.next_search_session_id(),
+        );
+        self.clear_pointer_driven_interaction_state();
+        Ok(self.enter_search_location(state, NavigationMode::RecordHistory))
+    }
+
+    pub(super) fn next_search_session_id(&mut self) -> SearchWorkspaceSessionId {
         let session_id = SearchWorkspaceSessionId(self.next_search_workspace_session_id);
         self.next_search_workspace_session_id =
             self.next_search_workspace_session_id.wrapping_add(1);
-        let home = self.home_dir.clone();
-        let last_location = self.user_config.last_search_scope.clone();
-        self.clear_pointer_driven_interaction_state();
-        self.search_workspace = Some(SearchWorkspaceState::new(
-            root,
-            home,
-            last_location,
-            session_id,
-        ));
-        Ok(())
+        session_id
     }
 
-    pub(super) fn restart_search_workspace(&mut self) -> Task<Message> {
-        if let Some(workspace) = self.search_workspace.as_mut() {
-            workspace.invalidate_input_stabilization();
+    /// 刷新、回车、筛选变化：活动标签的这次搜索按当前意图重搜。
+    pub(super) fn restart_active_search(&mut self) -> Task<Message> {
+        match self.active_search().map(SearchWorkspaceState::session_id) {
+            Some(session_id) => self.restart_search(session_id),
+            None => Task::none(),
         }
-        let Some(workspace) = self.search_workspace.as_ref() else {
+    }
+
+    /// 真实查询在这里唯一发起：回车、历史点击、范围切换、稳定输入、刷新、筛选与顺序
+    /// 变化都经过这里。空输入与被拒绝的查询不会走到发起这一步，也不改写范围记忆。
+    pub(super) fn restart_search(&mut self, session_id: SearchWorkspaceSessionId) -> Task<Message> {
+        let Some(tab) = self.search_tab_mut(session_id) else {
             return Task::none();
         };
-        if workspace.input.trim().is_empty()
-            && !workspace.filters.custom_extensions_are_active()
-            && !workspace.filters.custom_size_has_intent()
-        {
-            if let Some(workspace) = self.search_workspace.as_mut() {
-                workspace.clear_query();
-            }
+        let Some(search) = tab.location.search_mut() else {
             return Task::none();
+        };
+        search.invalidate_input_stabilization();
+        if search.input.trim().is_empty()
+            && !search.filters.custom_extensions_are_active()
+            && !search.filters.custom_size_has_intent()
+        {
+            tab.clear_search_query();
+            return self.search_results_changed(session_id);
         }
-        let generation = workspace.next_generation();
-        let scope = workspace.root.query_scope();
-        let filters = match workspace.filters.query_filters_at(Local::now()) {
+        search.drop_order_of_previous_search();
+        let generation = search.next_generation();
+        let scope = search.root.query_scope();
+        let remembered_scope = search.root.last_search_scope();
+        let terms = search.input.trim().to_owned();
+        let match_mode = search.filters.match_mode;
+        let filters = match search.filters.query_filters_at(Local::now()) {
             Ok(filters) => filters,
             Err(message) => {
-                if let Some(workspace) = self.search_workspace.as_mut() {
-                    workspace.reject_query(message);
-                }
-                return Task::none();
+                tab.reject_search_query(message);
+                return self.search_results_changed(session_id);
             }
         };
-        let terms = workspace.input.trim().to_owned();
-        let match_mode = workspace.filters.match_mode;
         if let SearchMatchMode::Regex = match_mode {
             if let Err(SearchError::InvalidQuery(message)) = match_mode.name_regex(&terms) {
-                if let Some(workspace) = self.search_workspace.as_mut() {
-                    workspace.reject_query(tr!("Invalid regular expression: %1", message));
-                }
-                return Task::none();
+                tab.reject_search_query(tr!("Invalid regular expression: %1", message));
+                return self.search_results_changed(session_id);
             }
         }
         let query = SearchQuery {
@@ -446,26 +406,23 @@ impl FileBrowser {
             text_scope: if match_mode == SearchMatchMode::Regex {
                 SearchTextScope::NameOnly
             } else {
-                workspace.filters.text_scope
+                search.filters.text_scope
             },
             match_mode,
             scope,
             recursive: true,
             filters,
-            order: file_search::SearchOrder::Relevance,
+            order: search.order(),
             limit: SEARCH_RESULT_WINDOW,
             cursor: None,
         };
-        let Some(workspace) = self.search_workspace.as_mut() else {
+        let Some((request, cancellation)) = tab.begin_search_query(query.clone()) else {
             return Task::none();
         };
-        let (request, cancellation) = workspace.begin_indexed_query(query.clone());
-        // 真实查询在这里唯一发起：回车、历史点击、范围切换、稳定输入、Refresh、
-        // 筛选变化都经过 restart。空输入与被拒绝的查询不会走到这里，不改写记忆。
-        let remembered = self.remember_last_search_scope();
         Task::batch([
-            remembered,
+            self.remember_last_search_scope(remembered_scope),
             search_with_scope_root_check_command(request, query, cancellation),
+            self.search_results_changed(session_id),
         ])
     }
 
@@ -476,10 +433,15 @@ impl FileBrowser {
         cancellation: CancellationToken,
         root_is_available: bool,
     ) -> Task<Message> {
-        let Some(workspace) = self.search_workspace.as_ref() else {
+        let session_id = request.run.session_id;
+        let Some(tab) = self.search_tab_mut(session_id) else {
             return Task::none();
         };
-        if !workspace.accepts_indexed_outcome(request.clone()) {
+        if !tab
+            .location
+            .search()
+            .is_some_and(|search| search.accepts_indexed_outcome(request))
+        {
             // 过期校验结果：期间查询已重启，直接丢弃。
             return Task::none();
         }
@@ -490,10 +452,8 @@ impl FileBrowser {
                 }
                 _ => tr!("Search root is unavailable"),
             };
-            if let Some(workspace) = self.search_workspace.as_mut() {
-                workspace.reject_query(message);
-            }
-            return Task::none();
+            tab.reject_search_query(message);
+            return self.search_results_changed(session_id);
         }
         search_command(request, query, cancellation)
     }
@@ -503,72 +463,57 @@ impl FileBrowser {
         request: IndexedSearchRequest,
         outcome: IndexedSearchOutcome,
     ) -> Task<Message> {
-        if !self
-            .search_workspace
-            .as_ref()
-            .is_some_and(|workspace| workspace.accepts_indexed_outcome(request))
+        let session_id = request.run.session_id;
+        let Some(tab) = self.search_tab_mut(session_id) else {
+            return Task::none();
+        };
+        if !tab
+            .location
+            .search()
+            .is_some_and(|search| search.accepts_indexed_outcome(request))
         {
             return Task::none();
         }
         match outcome {
             IndexedSearchOutcome::Cancelled => {
-                if let Some(workspace) = self.search_workspace.as_mut() {
-                    workspace.apply_indexed_cancellation(request);
+                if let Some(search) = tab.location.search_mut() {
+                    search.apply_indexed_cancellation(request);
                 }
             }
             IndexedSearchOutcome::Batch(batch) => {
-                if let Some(workspace) = self.search_workspace.as_mut() {
-                    workspace.apply_indexed_batch(request, batch);
-                }
+                tab.accept_search_batch(request, batch);
             }
             IndexedSearchOutcome::TransportUnavailable(message) => {
                 self.search_service
                     .observe_query_transport_failure(&message);
                 if request.cursor.is_none() {
-                    return self.switch_to_directory_fallback(message);
+                    return self.switch_to_directory_fallback(session_id, message);
                 }
-                if let Some(workspace) = self.search_workspace.as_mut() {
-                    workspace.apply_indexed_failure(request, message);
+                if let Some(tab) = self.search_tab_mut(session_id) {
+                    tab.accept_search_failure(request, message);
                 }
             }
             IndexedSearchOutcome::ProviderUnavailable(message) => {
                 if request.cursor.is_none() {
-                    return self.switch_to_directory_fallback(message);
+                    return self.switch_to_directory_fallback(session_id, message);
                 }
-                if let Some(workspace) = self.search_workspace.as_mut() {
-                    workspace.apply_indexed_failure(request, message);
-                }
+                tab.accept_search_failure(request, message);
             }
             IndexedSearchOutcome::InvalidQuery(message) | IndexedSearchOutcome::Fatal(message) => {
-                if let Some(workspace) = self.search_workspace.as_mut() {
-                    workspace.apply_indexed_failure(request, message);
-                }
+                tab.accept_search_failure(request, message);
             }
             // 接着翻会重复或漏条目，所以不报错，直接从头重新搜，列表回到顶部。
-            IndexedSearchOutcome::SnapshotExpired => return self.restart_search_workspace(),
+            IndexedSearchOutcome::SnapshotExpired => return self.restart_search(session_id),
         }
-        Task::none()
+        self.search_results_changed(session_id)
     }
 
-    pub(super) fn update_search_results_viewport(
-        &mut self,
-        offset_y: f32,
-        viewport_height: f32,
-    ) -> Task<Message> {
-        let Some(workspace) = self.search_workspace.as_mut() else {
+    /// 窗格滚到结果末尾附近时取下一页。
+    pub(super) fn load_more_search_results(&mut self, pane_id: BrowserPaneId) -> Task<Message> {
+        let Some(pane) = self.pane_by_id_mut(pane_id) else {
             return Task::none();
         };
-        workspace.update_viewport(offset_y, viewport_height);
-        let content_height =
-            workspace.window.hits.len() as f32 * crate::view::SEARCH_RESULT_ROW_HEIGHT;
-        let remaining_height = content_height - offset_y - viewport_height;
-        if remaining_height
-            > SEARCH_PAGE_PREFETCH_ROWS as f32 * crate::view::SEARCH_RESULT_ROW_HEIGHT
-            || !workspace.indexed_next_page_is_available()
-        {
-            return Task::none();
-        }
-        let Some((request, query, cancellation)) = workspace.begin_next_indexed_page() else {
+        let Some((request, query, cancellation)) = pane.tab_mut().begin_next_search_page() else {
             return Task::none();
         };
         search_command(request, query, cancellation)
@@ -576,221 +521,50 @@ impl FileBrowser {
 
     pub(super) fn accept_directory_search_batch(
         &mut self,
-        generation: u64,
+        run: SearchRunId,
         hits: Vec<SearchHit>,
     ) -> Task<Message> {
-        if let Some(workspace) = self
-            .search_workspace
-            .as_mut()
-            .filter(|workspace| workspace.accepts_directory_fallback(generation))
-        {
-            workspace.apply_directory_batch(hits);
-        }
-        Task::none()
+        let Some(tab) = self.search_tab_mut(run.session_id) else {
+            return Task::none();
+        };
+        tab.accept_fallback_hits(run, hits);
+        self.search_results_changed(run.session_id)
     }
 
     pub(super) fn accept_directory_search_finished(
         &mut self,
-        generation: u64,
+        run: SearchRunId,
         completion: DirectoryFallbackOutcome,
     ) -> Task<Message> {
-        if let Some(workspace) = self
-            .search_workspace
-            .as_mut()
-            .filter(|workspace| workspace.accepts_directory_fallback(generation))
-        {
-            workspace.finish_directory_fallback(completion);
+        if let Some(tab) = self.search_tab_mut(run.session_id) {
+            tab.finish_fallback_search(run, completion);
         }
         Task::none()
     }
 
-    pub(super) fn press_search_result(&mut self, path: PathBuf) -> Task<Message> {
-        let has_selection_modifier =
-            self.keyboard_modifiers.control() || self.keyboard_modifiers.shift();
-        let now = Instant::now();
-        let is_double_click = !has_selection_modifier
-            && self
-                .last_activation_click
-                .as_ref()
-                .is_some_and(|last_click| {
-                    last_click.path == path
-                        && now.duration_since(last_click.at) <= DOUBLE_CLICK_THRESHOLD
-                });
-        let gesture = match (
-            self.keyboard_modifiers.control(),
-            self.keyboard_modifiers.shift(),
-        ) {
-            (true, true) => SearchSelectionGesture::AdditiveRange,
-            (false, true) => SearchSelectionGesture::Range,
-            (true, false) => SearchSelectionGesture::Toggle,
-            (false, false) => SearchSelectionGesture::Plain,
-        };
-        let Some(workspace) = self.search_workspace.as_mut() else {
-            return Task::none();
-        };
-        workspace
-            .selection
-            .select(&workspace.window.hits, &path, gesture);
-        self.context_menu = None;
-        self.last_activation_click = if has_selection_modifier {
-            None
-        } else {
-            Some(LastActivationClick {
-                path: path.clone(),
-                at: now,
-            })
-        };
-
-        if is_double_click {
-            self.activate_search_path(path)
-        } else {
-            Task::none()
-        }
-    }
-
-    pub(super) fn right_click_search_result(&mut self, path: PathBuf) -> Task<Message> {
-        let Some(workspace) = self.search_workspace.as_mut() else {
-            return Task::none();
-        };
-        if !workspace.selection.is_selected(&path) {
-            workspace.selection.select(
-                &workspace.window.hits,
-                &path,
-                SearchSelectionGesture::Plain,
-            );
-        }
-        if !self.user_config.context_menus.search_items().is_empty() {
-            self.context_menu = Some(ContextMenuState::Search(SearchContextMenuState {
-                target: path,
-                position: self.cursor_or_origin(),
-            }));
-        }
-        Task::none()
-    }
-
-    pub(crate) fn activate_selected_search_result(&mut self) -> Task<Message> {
-        let Some(path) = self
-            .search_workspace
-            .as_ref()
-            .and_then(|workspace| workspace.selection.focused_path())
-            .map(Path::to_path_buf)
-        else {
-            return Task::none();
-        };
-        self.activate_search_path(path)
-    }
-
-    pub(crate) fn move_search_result_selection(
-        &mut self,
-        direction: FileSelectionDirection,
-    ) -> Task<Message> {
-        let step = match direction {
-            FileSelectionDirection::Up => SearchSelectionStep::Previous,
-            FileSelectionDirection::Down => SearchSelectionStep::Next,
-            FileSelectionDirection::Left | FileSelectionDirection::Right => return Task::none(),
-        };
-        let keyboard_selection = if self.keyboard_modifiers.shift() {
-            SearchKeyboardSelection::Extend
-        } else {
-            SearchKeyboardSelection::Replace
-        };
-        let Some(workspace) = self.search_workspace.as_mut() else {
-            return Task::none();
-        };
-        let Some(target) =
-            workspace
-                .selection
-                .move_focus(&workspace.window.hits, step, keyboard_selection)
-        else {
-            return Task::none();
-        };
-        let Some(index) = workspace
-            .window
-            .hits
-            .iter()
-            .position(|hit| hit.path == target)
-        else {
-            return Task::none();
-        };
-        iced::widget::operation::scroll_to(
-            crate::app::smooth_scroll::smooth_scroll_id(
-                &crate::model::ScrollbarRegion::SearchResults,
-            ),
-            iced::widget::scrollable::AbsoluteOffset {
-                x: 0.0,
-                y: index as f32 * crate::view::SEARCH_RESULT_ROW_HEIGHT,
-            },
-        )
-    }
-
-    pub(crate) fn select_all_search_results(&mut self) -> Task<Message> {
-        let Some(workspace) = self.search_workspace.as_mut() else {
-            return Task::none();
-        };
-        workspace.selection.select_all(&workspace.window.hits);
-        Task::none()
-    }
-
-    pub(crate) fn active_search_selection(&self) -> Option<Vec<PathBuf>> {
-        self.search_workspace
-            .as_ref()
-            .map(SearchWorkspaceState::selected_paths_in_result_order)
-    }
-
-    pub(super) fn delete_search_selection_permanently(&mut self) -> Task<Message> {
-        self.context_menu = None;
-        let Some(paths) = self.active_search_selection() else {
-            return Task::none();
-        };
-        if paths.is_empty() {
-            return Task::none();
-        }
-        self.request_destructive_action_confirmation(
-            DestructiveActionConfirmation::DeletePermanently { paths },
-        );
-        Task::none()
-    }
-
+    /// 打开结果所在的文件夹并选中它；这次搜索记进历史。
     pub(super) fn open_search_containing_directory(&mut self, path: PathBuf) -> Task<Message> {
-        let Some(parent) = path.parent().map(Path::to_path_buf) else {
-            self.fail_search_workspace(tr!("The result has no containing directory"));
+        self.context_menu = None;
+        let Some(parent) = path.parent().map(std::path::Path::to_path_buf) else {
+            self.fail_active_search(tr!("The result has no containing directory"));
             return Task::none();
         };
         if !parent.is_dir() {
-            self.fail_search_workspace(tr!(
+            self.fail_active_search(tr!(
                 "Containing directory is unavailable: %1",
                 parent.display()
             ));
             return Task::none();
         }
-
-        self.discard_search_workspace();
         let navigation = self.navigate_to(parent, NavigationMode::RecordHistory);
         self.select_path(path);
         Task::batch([navigation, self.request_browser_session_save()])
     }
 
-    fn activate_search_path(&mut self, path: PathBuf) -> Task<Message> {
-        let Some(hit) = self
-            .search_workspace
-            .as_ref()
-            .and_then(|workspace| workspace.hit_for_path(&path))
-            .cloned()
-        else {
-            return Task::none();
-        };
-        if hit.kind == file_search::SearchFileKind::Directory {
-            self.discard_search_workspace();
-            self.navigate_to(hit.path, NavigationMode::RecordHistory)
-        } else {
-            open_file_command(hit.path, self.terminal_emulator)
-        }
-    }
-
-    fn fail_search_workspace(&mut self, message: String) {
-        if let Some(workspace) = self.search_workspace.as_mut() {
-            workspace.window.failure = Some(message);
-            workspace.window.is_loading = false;
+    fn fail_active_search(&mut self, message: String) {
+        if let Some(search) = self.active_search_mut() {
+            search.window.failure = Some(message);
+            search.window.is_loading = false;
         }
     }
 
@@ -858,33 +632,33 @@ impl FileBrowser {
         self.persist_app_config_command()
     }
 
-    fn switch_to_directory_fallback(&mut self, unavailable_message: String) -> Task<Message> {
-        let Some(workspace) = self.search_workspace.as_ref() else {
+    fn switch_to_directory_fallback(
+        &mut self,
+        session_id: SearchWorkspaceSessionId,
+        unavailable_message: String,
+    ) -> Task<Message> {
+        let Some(search) = self
+            .search_tab(session_id)
+            .and_then(|tab| tab.location.search())
+        else {
             return Task::none();
         };
-        let Some(query) = workspace.run.active_query.as_ref() else {
-            self.fail_search_workspace(unavailable_message);
+        let fallback_root = search.run.active_query.as_ref().and_then(|query| {
+            let SearchScope::Directory(directory) = &query.scope else {
+                return None;
+            };
+            (query.recursive && query.cursor.is_none()).then(|| directory.clone())
+        });
+        let run = search.run_id();
+        let Some(_) = fallback_root.filter(|root| !self.path_is_remote_mount(root)) else {
+            self.fail_search(session_id, unavailable_message);
             return Task::none();
         };
-        if !query.recursive {
-            self.fail_search_workspace(unavailable_message);
-            return Task::none();
-        }
-        let SearchScope::Directory(directory) = &query.scope else {
-            self.fail_search_workspace(unavailable_message);
-            return Task::none();
-        };
-        if query.cursor.is_some() || self.path_is_remote_mount(directory) {
-            self.fail_search_workspace(unavailable_message);
-            return Task::none();
-        }
-
-        let generation = workspace.run.generation;
         Task::perform(
             read_directory_fallback_preferences(file_core::app_dirs::user_config_dir()),
             move |outcome| {
                 Message::SearchDirectoryFallbackConfigurationLoaded(
-                    generation,
+                    run,
                     unavailable_message,
                     outcome,
                 )
@@ -894,16 +668,17 @@ impl FileBrowser {
 
     pub(super) fn start_verified_directory_fallback(
         &mut self,
-        generation: u64,
+        run: SearchRunId,
         unavailable_message: String,
         outcome: Result<file_search::SearchPathPreferences, String>,
     ) -> Task<Message> {
         let preferences = match outcome {
             Ok(preferences) => preferences,
             Err(error) => {
-                self.fail_search_workspace(format!(
-                    "{unavailable_message}; could not read search exclusions: {error}"
-                ));
+                self.fail_search(
+                    run.session_id,
+                    format!("{unavailable_message}; could not read search exclusions: {error}"),
+                );
                 return Task::none();
             }
         };
@@ -911,20 +686,20 @@ impl FileBrowser {
             match SearchExcludeRules::for_directory_fallback(self.home_dir.clone(), preferences) {
                 Ok(rules) => rules,
                 Err(message) => {
-                    self.fail_search_workspace(format!(
-                        "{unavailable_message}; search path rules are invalid: {message}"
-                    ));
+                    self.fail_search(
+                        run.session_id,
+                        format!("{unavailable_message}; search path rules are invalid: {message}"),
+                    );
                     return Task::none();
                 }
             };
 
-        let Some(workspace) = self.search_workspace.as_ref() else {
-            return Task::none();
-        };
-        if workspace.run.generation != generation {
-            return Task::none();
-        }
-        let Some(query) = workspace.run.active_query.clone() else {
+        let Some(query) = self
+            .search_tab(run.session_id)
+            .and_then(|tab| tab.location.search())
+            .filter(|search| search.run_id() == run)
+            .and_then(|search| search.run.active_query.clone())
+        else {
             return Task::none();
         };
         let SearchScope::Directory(directory) = &query.scope else {
@@ -933,12 +708,27 @@ impl FileBrowser {
         if !query.recursive || query.cursor.is_some() || self.path_is_remote_mount(directory) {
             return Task::none();
         }
-
-        let Some(workspace) = self.search_workspace.as_mut() else {
+        let Some(search) = self
+            .search_tab_mut(run.session_id)
+            .and_then(|tab| tab.location.search_mut())
+        else {
             return Task::none();
         };
-        let cancellation = workspace.begin_directory_fallback();
-        directory_fallback_search_command(generation, query, rules, cancellation)
+        let cancellation = search.begin_directory_fallback();
+        Task::batch([
+            directory_fallback_search_command(run, query, rules, cancellation),
+            self.search_results_changed(run.session_id),
+        ])
+    }
+
+    fn fail_search(&mut self, session_id: SearchWorkspaceSessionId, message: String) {
+        if let Some(search) = self
+            .search_tab_mut(session_id)
+            .and_then(|tab| tab.location.search_mut())
+        {
+            search.window.failure = Some(message);
+            search.window.is_loading = false;
+        }
     }
 
     /// 搜索的起点目录；回收站不是目录，不能从那里搜。

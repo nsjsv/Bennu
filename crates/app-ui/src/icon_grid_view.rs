@@ -39,7 +39,10 @@ use bennu_preview::panel_text::readable_text;
 use bennu_theme::controls::icon_button_style;
 use bennu_theme::controls::inline_text_field;
 use bennu_theme::icons::rotated_chevron_right_view;
-use bennu_theme::measured_text::measured_middle_ellipsized_wrapped_text_with_tooltip;
+use bennu_theme::measured_text::{
+    measured_middle_ellipsized_centered_emphasized_text,
+    measured_middle_ellipsized_wrapped_text_with_tooltip,
+};
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use bennu_theme::typography::{BOLD, CAPTION_SIZE, HEADING_SIZE};
 
@@ -473,6 +476,31 @@ fn icon_grid_entry<'a>(
             pane.rename_hint,
             browser.active_language(),
         )
+    } else if let Some(search) = pane.location.search() {
+        // 搜索结果：网格放不下所在文件夹和摘要，悬停总是给出完整信息。
+        let detail = search.detail(&entry.path);
+        let name = entry.name().to_string_lossy().into_owned();
+        let name_highlights = detail.map_or_else(Vec::new, |detail| detail.name_highlights.clone());
+        tooltip(
+            container(measured_middle_ellipsized_centered_emphasized_text(
+                name,
+                name_highlights,
+                label_size(icon_edge),
+                label_line_height(icon_edge),
+            ))
+            .style(visual_state.content_style(content_modifier))
+            .width(Length::Fill)
+            .height(Length::Fixed(label_height(icon_edge))),
+            crate::search_result_text::search_result_tooltip(
+                entry,
+                detail,
+                &browser.home_dir,
+                ICON_GRID_NAME_TOOLTIP_WIDTH,
+            ),
+            tooltip::Position::Bottom,
+        )
+        .delay(ICON_GRID_NAME_TOOLTIP_DELAY)
+        .into()
     } else {
         let full_name = entry.name().to_string_lossy().into_owned();
         let full_name_tooltip = container(
@@ -526,7 +554,7 @@ fn icon_grid_entry<'a>(
         .on_release(Message::EntryReleased(pane.id, entry.path.clone()))
         .on_right_press(Message::EntryRightClicked(pane.id, entry.path.clone()))
         .interaction(iced::mouse::Interaction::Pointer);
-    let area = if is_expandable {
+    let area = if entry.expands_as_directory() && pane.location.folder_entries_are_live() {
         area.on_middle_press(crate::model::entry_middle_press_message(pane.id, entry))
     } else {
         area

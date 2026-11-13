@@ -4,7 +4,7 @@
 //! ContextMenuState 构造边界的空菜单判定、设置页展示与编辑都从这里取数据。
 
 use super::context_menu_items::*;
-use crate::model::{ListColumnKind, SearchEntryTypePreset};
+use crate::model::{FileMenuPlace, ListColumnKind, SearchEntryTypePreset};
 use crate::network_connections::SidebarNetworkConnectionAction;
 use crate::sidebar_devices::SidebarDeviceAction;
 use bennu_theme::icons::IconSymbol;
@@ -60,10 +60,15 @@ impl<I: Copy + PartialEq> ContextMenuLayout<I> {
                 .iter()
                 .any(|entry: &ContextMenuEntry<I>| entry.item == *item)
             {
-                entries.push(ContextMenuEntry {
-                    item: *item,
-                    visible: true,
-                });
+                let index =
+                    insertion_index_by_default_order(&entries, all, *item, |entry| entry.item);
+                entries.insert(
+                    index,
+                    ContextMenuEntry {
+                        item: *item,
+                        visible: true,
+                    },
+                );
             }
         }
         Self { entries }
@@ -110,7 +115,6 @@ pub(crate) struct ContextMenuPreferences {
     pub(crate) file_entry: ContextMenuLayout<FileAreaMenuItem>,
     pub(crate) file_blank: ContextMenuLayout<FileAreaMenuItem>,
     pub(crate) trash: ContextMenuLayout<TrashMenuItem>,
-    pub(crate) search: ContextMenuLayout<SearchResultMenuItem>,
     pub(crate) search_entry_types: ContextMenuLayout<SearchEntryTypePreset>,
     pub(crate) list_columns: ContextMenuLayout<ListColumnKind>,
     pub(crate) sidebar_bookmark: ContextMenuLayout<BookmarkMenuItem>,
@@ -129,13 +133,12 @@ pub(crate) enum FileEntryMenuEntry {
     },
 }
 
-/// 菜单布局的存储无关形态:9 页 × 有序 (id, visible)。由 config 层与 Stored 结构互转。
+/// 菜单布局的存储无关形态:8 页 × 有序 (id, visible)。由 config 层与 Stored 结构互转。
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct ContextMenuLayoutConfigValues {
     pub(crate) file_entry: Vec<(String, bool)>,
     pub(crate) file_blank: Vec<(String, bool)>,
     pub(crate) trash: Vec<(String, bool)>,
-    pub(crate) search: Vec<(String, bool)>,
     pub(crate) search_entry_types: Vec<(String, bool)>,
     pub(crate) list_columns: Vec<(String, bool)>,
     pub(crate) sidebar_bookmark: Vec<(String, bool)>,
@@ -149,7 +152,6 @@ impl ContextMenuPreferences {
             file_entry: ContextMenuLayout::all_visible(FILE_ENTRY_MENU_ITEMS),
             file_blank: ContextMenuLayout::all_visible(FILE_BLANK_MENU_ITEMS),
             trash: ContextMenuLayout::all_visible(TRASH_MENU_ITEMS),
-            search: ContextMenuLayout::all_visible(SEARCH_RESULT_MENU_ITEMS),
             search_entry_types: ContextMenuLayout::all_visible(SearchEntryTypePreset::MORE),
             list_columns: ContextMenuLayout::all_visible(ListColumnKind::ALL),
             sidebar_bookmark: ContextMenuLayout::all_visible(BOOKMARK_MENU_ITEMS),
@@ -167,7 +169,6 @@ impl ContextMenuPreferences {
             file_entry: self.file_entry.to_config_values(|item| item.config_value()),
             file_blank: self.file_blank.to_config_values(|item| item.config_value()),
             trash: self.trash.to_config_values(|item| item.config_value()),
-            search: self.search.to_config_values(|item| item.config_value()),
             search_entry_types: self
                 .search_entry_types
                 .to_config_values(search_entry_type_config_value),
@@ -203,11 +204,6 @@ impl ContextMenuPreferences {
                 &TRASH_MENU_ITEMS,
                 TrashMenuItem::from_config_value,
             ),
-            search: ContextMenuLayout::normalized_from_stored(
-                &values.search,
-                &SEARCH_RESULT_MENU_ITEMS,
-                SearchResultMenuItem::from_config_value,
-            ),
             search_entry_types: ContextMenuLayout::normalized_from_stored(
                 &values.search_entry_types,
                 &SearchEntryTypePreset::MORE,
@@ -240,6 +236,7 @@ impl ContextMenuPreferences {
 
     pub(crate) fn file_entry_menu_entries(
         &self,
+        place: FileMenuPlace,
         target_is_directory: bool,
         can_batch_rename: bool,
         can_create_symlink: bool,
@@ -250,6 +247,10 @@ impl ContextMenuPreferences {
                     FileAreaMenuItem::FileChecksum => !target_is_directory,
                     FileAreaMenuItem::BatchRename => can_batch_rename,
                     FileAreaMenuItem::CreateSymlink => can_create_symlink,
+                    FileAreaMenuItem::OpenContainingFolder => place == FileMenuPlace::SearchResults,
+                    FileAreaMenuItem::Paste
+                    | FileAreaMenuItem::NewEntry
+                    | FileAreaMenuItem::NewFolderFromSelection => place == FileMenuPlace::Folder,
                     _ => true,
                 }
         };
@@ -303,10 +304,6 @@ impl ContextMenuPreferences {
         })
     }
 
-    pub(crate) fn search_items(&self) -> Vec<SearchResultMenuItem> {
-        self.search.ordered_visible_where(|_| true)
-    }
-
     pub(crate) fn search_entry_type_items(&self) -> Vec<SearchEntryTypePreset> {
         self.search_entry_types.ordered_visible_where(|_| true)
     }
@@ -350,7 +347,6 @@ pub(crate) enum ContextMenuSettingsPage {
     FileEntry,
     FileBlank,
     Trash,
-    Search,
     SearchEntryTypes,
     ListColumns,
     SidebarBookmark,
@@ -358,11 +354,10 @@ pub(crate) enum ContextMenuSettingsPage {
     NetworkConnection,
 }
 
-pub(crate) const CONTEXT_MENU_SETTINGS_PAGES: [ContextMenuSettingsPage; 9] = [
+pub(crate) const CONTEXT_MENU_SETTINGS_PAGES: [ContextMenuSettingsPage; 8] = [
     ContextMenuSettingsPage::FileEntry,
     ContextMenuSettingsPage::FileBlank,
     ContextMenuSettingsPage::Trash,
-    ContextMenuSettingsPage::Search,
     ContextMenuSettingsPage::SearchEntryTypes,
     ContextMenuSettingsPage::ListColumns,
     ContextMenuSettingsPage::SidebarBookmark,
@@ -426,7 +421,6 @@ impl ContextMenuSettingsPage {
             Self::FileEntry => tr!("File entry menu"),
             Self::FileBlank => tr!("Blank area menu"),
             Self::Trash => tr!("Trash menu"),
-            Self::Search => tr!("Search results menu"),
             Self::SearchEntryTypes => tr!("Search type filters"),
             Self::ListColumns => tr!("List columns menu"),
             Self::SidebarBookmark => tr!("Favorites menu"),
@@ -464,11 +458,6 @@ impl ContextMenuPreferences {
             ContextMenuSettingsPage::Trash => {
                 settings_rows_for(&self.trash, TrashMenuItem::label, TrashMenuItem::icon)
             }
-            ContextMenuSettingsPage::Search => settings_rows_for(
-                &self.search,
-                SearchResultMenuItem::label,
-                SearchResultMenuItem::icon,
-            ),
             ContextMenuSettingsPage::SearchEntryTypes => {
                 // 该菜单本体是勾选行,无图标;设置页用占位图标,视图层按页渲染勾选框。
                 settings_rows_for(
@@ -544,7 +533,6 @@ impl ContextMenuPreferences {
             ContextMenuSettingsPage::FileEntry => self.file_entry.toggle(index),
             ContextMenuSettingsPage::FileBlank => self.file_blank.toggle(index),
             ContextMenuSettingsPage::Trash => self.trash.toggle(index),
-            ContextMenuSettingsPage::Search => self.search.toggle(index),
             ContextMenuSettingsPage::SearchEntryTypes => self.search_entry_types.toggle(index),
             ContextMenuSettingsPage::SidebarBookmark => self.sidebar_bookmark.toggle(index),
             ContextMenuSettingsPage::SidebarDevice => self.sidebar_device.toggle(index),
@@ -571,7 +559,6 @@ impl ContextMenuPreferences {
             }
             ContextMenuSettingsPage::FileBlank => self.file_blank.reordered(from, to),
             ContextMenuSettingsPage::Trash => self.trash.reordered(from, to),
-            ContextMenuSettingsPage::Search => self.search.reordered(from, to),
             ContextMenuSettingsPage::SearchEntryTypes => {
                 self.search_entry_types.reordered(from, to)
             }
@@ -595,9 +582,6 @@ impl ContextMenuPreferences {
             ContextMenuSettingsPage::Trash => {
                 self.trash = ContextMenuLayout::all_visible(TRASH_MENU_ITEMS)
             }
-            ContextMenuSettingsPage::Search => {
-                self.search = ContextMenuLayout::all_visible(SEARCH_RESULT_MENU_ITEMS)
-            }
             ContextMenuSettingsPage::SearchEntryTypes => {
                 self.search_entry_types =
                     ContextMenuLayout::all_visible(SearchEntryTypePreset::MORE)
@@ -618,6 +602,29 @@ impl ContextMenuPreferences {
             }
         }
     }
+}
+
+/// 存储里缺的项（新版本才有的）插回的位置：默认顺序里排在它前面、且已在列表里的最近一项
+/// 之后，一项都没有就放最前。追加到末尾会让新项跑到用户排好的菜单或表头最后。
+pub(crate) fn insertion_index_by_default_order<Stored, I: Copy + PartialEq>(
+    existing: &[Stored],
+    default_order: &[I],
+    item: I,
+    item_of: impl Fn(&Stored) -> I,
+) -> usize {
+    let preceding = default_order
+        .iter()
+        .position(|candidate| *candidate == item)
+        .map_or(default_order, |position| &default_order[..position]);
+    preceding
+        .iter()
+        .rev()
+        .find_map(|previous| {
+            existing
+                .iter()
+                .position(|entry| item_of(entry) == *previous)
+        })
+        .map_or(0, |index| index + 1)
 }
 
 fn settings_rows_for<I: Copy + PartialEq>(

@@ -10,15 +10,15 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use bennu_sidebar::{
-    normalize_sidebar_width, sidebar_locations, BrowserLocation, SidebarConfig, SidebarDeviceEntry,
-    SidebarLocation, SidebarNetworkConnectionEntry, DEFAULT_SIDEBAR_WIDTH,
+    normalize_sidebar_width, sidebar_locations, SidebarConfig, SidebarDeviceEntry, SidebarLocation,
+    SidebarNetworkConnectionEntry, DEFAULT_SIDEBAR_WIDTH,
 };
 use desktop_linux::{
     load_network_mount_states, load_storage_devices, NetworkConnection, NetworkConnectionId,
     NetworkMountState, StorageDeviceId, StorageDeviceProviderFailure,
 };
 
-use super::{PickerSession, SessionEffect};
+use super::{PickerLocation, PickerSession, SessionEffect};
 use crate::sidebar_settings::read_sidebar_config;
 
 /// 侧边栏行悬停身份（驱动 hovered 行样式，对齐主程序悬停反馈）。
@@ -158,11 +158,11 @@ impl PickerSession {
     }
 
     pub(crate) fn sidebar_location_pressed(&mut self, path: PathBuf) -> SessionEffect {
-        self.begin_navigation(BrowserLocation::Directory(path))
+        self.begin_navigation(PickerLocation::Directory(path))
     }
 
     pub(crate) fn sidebar_trash_pressed(&mut self) -> SessionEffect {
-        self.begin_navigation(BrowserLocation::Trash)
+        self.begin_navigation(PickerLocation::Trash)
     }
 
     /// 已挂载设备点击导航挂载点；未挂载且可挂载则置 busy 并发起挂载
@@ -172,7 +172,7 @@ impl PickerSession {
             return SessionEffect::None;
         };
         if let Some(mount_path) = device.primary_mount_path() {
-            return self.begin_navigation(BrowserLocation::Directory(mount_path.to_path_buf()));
+            return self.begin_navigation(PickerLocation::Directory(mount_path.to_path_buf()));
         }
         if !device.can_mount || self.sidebar.mounting_devices.contains(&id) {
             return SessionEffect::None;
@@ -201,7 +201,7 @@ impl PickerSession {
             Ok(mount_path) => {
                 device.mount_points = vec![mount_path.clone()];
                 self.sidebar.notice = None;
-                self.begin_navigation(BrowserLocation::Directory(mount_path))
+                self.begin_navigation(PickerLocation::Directory(mount_path))
             }
             Err(details) => {
                 self.sidebar.notice = Some(details);
@@ -221,7 +221,7 @@ impl PickerSession {
         };
         if let NetworkMountState::Mounted(mount_path) = &entry.state {
             let mount_path = mount_path.clone();
-            return self.begin_navigation(BrowserLocation::Directory(mount_path));
+            return self.begin_navigation(PickerLocation::Directory(mount_path));
         }
         if matches!(entry.state, NetworkMountState::Connecting) {
             return SessionEffect::None;
@@ -251,7 +251,7 @@ impl PickerSession {
             Ok(mount_path) => {
                 entry.state = NetworkMountState::Mounted(mount_path.clone());
                 self.sidebar.notice = None;
-                self.begin_navigation(BrowserLocation::Directory(mount_path))
+                self.begin_navigation(PickerLocation::Directory(mount_path))
             }
             Err(details) => {
                 entry.state = NetworkMountState::Disconnected;

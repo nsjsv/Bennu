@@ -53,18 +53,21 @@ fn tab_button<'a>(
     pane_id: BrowserPaneId,
     tab_id: usize,
     location: &BrowserLocation,
-    destination: TabDropDestination,
+    destination: Option<TabDropDestination>,
     is_active: bool,
     width_fraction: f32,
     shift_offset: f32,
 ) -> Element<'a, Message> {
-    let target = TabFileDropTarget {
+    // 搜索结果标签没有能放文件进去的地方，不是落点。
+    let target = destination.map(|destination| TabFileDropTarget {
         pane_id,
         tab_id,
         destination,
-    };
-    let is_file_drop_target = browser.file_drop_session.as_ref().is_some_and(|session| {
-        session.hovered_target.as_ref() == Some(&FileDropTarget::Tab(target.clone()))
+    });
+    let is_file_drop_target = target.as_ref().is_some_and(|target| {
+        browser.file_drop_session.as_ref().is_some_and(|session| {
+            session.hovered_target.as_ref() == Some(&FileDropTarget::Tab(target.clone()))
+        })
     });
     let label = row![
         Space::new().width(Length::Fixed(TAB_CLOSE_SLOT_WIDTH)),
@@ -92,16 +95,16 @@ fn tab_button<'a>(
         } else {
             tab_item_style
         });
-    let tab = tab_motion::translated(
-        track_file_drag_hit_test_marker(
+    let tab: Element<'a, Message> = match &target {
+        Some(target) => track_file_drag_hit_test_marker(
             tab,
             FileDragHitTestMarker::Tab {
                 target: target.clone(),
             },
         ),
-        shift_offset,
-        0.0,
-    );
+        None => tab.into(),
+    };
+    let tab = tab_motion::translated(tab, shift_offset, 0.0);
     let iced_file_drop_gesture_id =
         browser
             .file_drop_session
@@ -114,15 +117,15 @@ fn tab_button<'a>(
         .on_press(Message::TabPressed(pane_id, tab_id))
         .on_middle_press(Message::TabCloseRequested(pane_id, tab_id))
         .interaction(iced::mouse::Interaction::Pointer);
-    let pointer_area = if let Some(gesture_id) = iced_file_drop_gesture_id {
-        pointer_area
+    let pointer_area = match (iced_file_drop_gesture_id, target) {
+        (Some(gesture_id), Some(target)) => pointer_area
             .on_enter(Message::TabFileDropEntered(gesture_id, target.clone()))
             .on_exit(Message::TabFileDropExited(gesture_id, target.clone()))
-            .on_release(Message::TabFileDropReleased(gesture_id, target))
-    } else {
-        pointer_area
+            .on_release(Message::TabFileDropReleased(gesture_id, target)),
+        (Some(_), None) => pointer_area,
+        (None, _) => pointer_area
             .on_enter(Message::TabDragEntered(pane_id, tab_id))
-            .on_release(Message::TabDragFinished)
+            .on_release(Message::TabDragFinished),
     };
 
     container(pointer_area)

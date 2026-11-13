@@ -5,7 +5,7 @@ use file_core::entry::{DirectoryEntry, FileKind};
 
 use super::{PickerSession, PickerViewMode, SessionEffect};
 use crate::picker_request::PickerKind;
-use bennu_sidebar::BrowserLocation;
+use crate::picker_session::PickerLocation;
 
 impl PickerSession {
     /// 点击/键盘落行的模式门控与 SaveFile 名字同步（列表与多栏共用）：
@@ -107,7 +107,7 @@ impl PickerSession {
             return SessionEffect::None;
         };
         if row.entry.kind == FileKind::Directory {
-            return self.begin_navigation(BrowserLocation::Directory(row.entry.path.clone()));
+            return self.begin_navigation(PickerLocation::Directory(row.entry.path.clone()));
         }
         // 文件双击 = 选中并立即确认（桌面选择器惯例）。
         match self.kind {

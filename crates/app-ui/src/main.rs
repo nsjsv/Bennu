@@ -56,6 +56,7 @@ mod operation_queue_display;
 mod operation_queue_view;
 mod progress_ring;
 mod runtime_logging;
+mod search_result_text;
 mod selection_marquee;
 mod selection_summary;
 mod shortcuts;

@@ -9,8 +9,8 @@ use crate::commands::load_expanded_directory_command;
 use crate::config::normalize_visible_column_count;
 use crate::list_view::LIST_HEADER_HEIGHT;
 use crate::model::{
-    BrowserLocation, BrowserPaneId, BrowserViewMode, DirectoryExpansionLoadContext,
-    ExpandedDirectory, ExpandedDirectoryLoadRequest, ExpandedDirectoryStatus, FileGroupingMode,
+    BrowserPaneId, BrowserViewMode, DirectoryExpansionLoadContext, ExpandedDirectory,
+    ExpandedDirectoryLoadRequest, ExpandedDirectoryStatus, FileGroupingMode,
     ListExpansionFollowSessionId, Message, ScrollbarRegion,
 };
 use crate::thumbnail_cache::ColumnViewport;
@@ -229,7 +229,7 @@ impl FileBrowser {
             },
             Icons {
                 pane_id: BrowserPaneId,
-                location: crate::model::BrowserLocation,
+                location: crate::model::LocationKey,
                 viewport: crate::model::IconGridViewport,
             },
         }
@@ -312,7 +312,7 @@ impl FileBrowser {
                     if viewport.offset_y > max_offset {
                         pending.push(Reclamp::Icons {
                             pane_id,
-                            location: pane.location.clone(),
+                            location: pane.location.key(),
                             viewport: crate::model::IconGridViewport {
                                 offset_y: max_offset,
                                 ..viewport
@@ -866,7 +866,7 @@ impl FileBrowser {
     }
 
     fn toggle_list_directory_for_path(&mut self, path: PathBuf) -> Task<Message> {
-        if self.tab().location == BrowserLocation::Trash || !self.entry_acts_as_directory(&path) {
+        if !self.entry_acts_as_directory(&path) {
             return Task::none();
         }
 
@@ -894,7 +894,11 @@ impl FileBrowser {
         ])
     }
 
+    /// 列表原地展开的入口：点箭头和键盘展开都经过这里。
     fn open_list_directory(&mut self, path: PathBuf) -> Task<Message> {
+        if !self.tab().location.expands_entries_in_place() {
+            return Task::none();
+        }
         if let Some(expanded) = self.tab_mut().expanded_directories.get_mut(&path) {
             expanded.is_expanded = true;
             expanded.is_collapsing = false;
@@ -1083,6 +1087,7 @@ fn advance_expanded_directories(
 mod tests {
     use super::*;
 
+    use crate::model::BrowserLocation;
     use file_core::{DirectoryEntry, EntryMetadata, FileKind};
 
     /// 目录重扫落地：内容换成 `count` 个条目。
@@ -1196,7 +1201,7 @@ mod tests {
         browser.icon_grid_viewports.insert(
             browser.active_pane_id(),
             crate::app::PaneIconGridViewport {
-                location: BrowserLocation::Directory(root.clone()),
+                location: crate::model::LocationKey::Directory(root.clone()),
                 viewport: crate::model::IconGridViewport {
                     offset_y: 20000.0,
                     width: 600.0,

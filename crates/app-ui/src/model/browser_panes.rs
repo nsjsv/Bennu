@@ -17,10 +17,9 @@ use file_operations::{
 use super::path_migration::{
     cancel_and_clear_expanded_directories, detach_directory_discovery, migrate_directory_entries,
     migrate_directory_entry, migrate_expanded_directories, migrate_optional_path,
-    migrate_path_list, migrate_path_map_keys, migrate_path_set,
-    retain_optional_path_outside_subtree,
+    migrate_path_map_keys, migrate_path_set, retain_optional_path_outside_subtree,
 };
-use super::{displayed_address_directory, BrowserLocation, TabDropDestination};
+use super::{displayed_address_directory, BrowserLocation, HistoryEntry, TabDropDestination};
 
 mod load_requests;
 pub(crate) use load_requests::{
@@ -409,8 +408,8 @@ pub(crate) struct BrowserTab {
     pub(crate) expanded_directories: HashMap<PathBuf, ExpandedDirectory>,
     /// 用户给这个标签选的视图，会话保存的也是它；实际显示方式见 `view_mode()`。
     chosen_view_mode: BrowserViewMode,
-    pub(crate) back_stack: Vec<PathBuf>,
-    pub(crate) forward_stack: Vec<PathBuf>,
+    pub(crate) back_stack: Vec<HistoryEntry>,
+    pub(crate) forward_stack: Vec<HistoryEntry>,
     pub(crate) directory_collection_phase: DirectoryCollectionPhase,
     pub(crate) directory_order_phase: DirectoryOrderPhase,
     /// 目录 → 它正在被扫描时到达、还没落到列表上的变化。
@@ -434,7 +433,8 @@ impl BrowserTab {
         self.location.directory()
     }
 
-    /// 这个位置实际的显示方式。分栏要沿一串目录展开，回收站不是目录，选了分栏也按列表显示。
+    /// 这个位置实际的显示方式。分栏要沿一串目录展开，回收站和搜索结果不是目录，选了分栏
+    /// 也按列表显示。
     pub(crate) fn view_mode(&self) -> BrowserViewMode {
         self.view_mode_when_chosen(self.chosen_view_mode)
     }
@@ -442,7 +442,9 @@ impl BrowserTab {
     /// 在这个位置选了 `chosen` 时实际的显示方式。
     pub(crate) fn view_mode_when_chosen(&self, chosen: BrowserViewMode) -> BrowserViewMode {
         match (&self.location, chosen) {
-            (BrowserLocation::Trash, BrowserViewMode::Columns) => BrowserViewMode::List,
+            (BrowserLocation::Trash | BrowserLocation::Search(_), BrowserViewMode::Columns) => {
+                BrowserViewMode::List
+            }
             (_, chosen) => chosen,
         }
     }
@@ -455,17 +457,19 @@ impl BrowserTab {
         self.chosen_view_mode = view_mode;
     }
 
-    pub(crate) fn file_drop_destination(&self) -> TabDropDestination {
+    /// 把文件拖到这个标签上时放到哪儿；搜索结果不是放文件的地方。
+    pub(crate) fn file_drop_destination(&self) -> Option<TabDropDestination> {
         match &self.location {
-            BrowserLocation::Trash => TabDropDestination::Trash,
-            BrowserLocation::Directory(directory) => TabDropDestination::Directory(
+            BrowserLocation::Trash => Some(TabDropDestination::Trash),
+            BrowserLocation::Directory(directory) => Some(TabDropDestination::Directory(
                 displayed_address_directory(
                     directory,
                     self.view_mode(),
                     self.deepest_open_column_directory.as_ref(),
                 )
                 .to_path_buf(),
-            ),
+            )),
+            BrowserLocation::Search(_) => None,
         }
     }
 
@@ -548,12 +552,27 @@ impl BrowserTab {
     /// 自己。
     pub(crate) fn forget_history_into(&mut self, unavailable_directory: &Path, landing: &Path) {
         self.back_stack
-            .retain(|path| !path.starts_with(unavailable_directory));
-        while self.back_stack.last().is_some_and(|path| path == landing) {
+            .retain(|entry| !entry.lies_in(unavailable_directory));
+        while self
+            .back_stack
+            .last()
+            .is_some_and(|entry| entry.is_directory(landing))
+        {
             self.back_stack.pop();
         }
         self.forward_stack
-            .retain(|path| !path.starts_with(unavailable_directory));
+            .retain(|entry| !entry.lies_in(unavailable_directory));
+    }
+
+    /// 离开当前位置时记进历史的一站；回收站不进历史。
+    pub(crate) fn history_entry(&self) -> Option<HistoryEntry> {
+        match &self.location {
+            BrowserLocation::Directory(directory) => {
+                Some(HistoryEntry::Directory(directory.clone()))
+            }
+            BrowserLocation::Search(search) => Some(HistoryEntry::Search(search.recall())),
+            BrowserLocation::Trash => None,
+        }
     }
 
     /// 离开当前目录树：取消展开目录的加载，清空展开状态与多栏链。
@@ -582,8 +601,17 @@ impl BrowserTab {
         &mut self,
         migrations: &[CompletedPathMigration],
     ) -> TabMigrationEffect {
-        migrate_path_list(&mut self.back_stack, migrations);
-        migrate_path_list(&mut self.forward_stack, migrations);
+        for entry in self
+            .back_stack
+            .iter_mut()
+            .chain(self.forward_stack.iter_mut())
+        {
+            entry.migrate(migrations);
+        }
+        if self.location.search().is_some() {
+            self.migrate_search_results(migrations);
+            return TabMigrationEffect::default();
+        }
         let Some(original_directory) = self.location.directory().map(Path::to_path_buf) else {
             return TabMigrationEffect::default();
         };

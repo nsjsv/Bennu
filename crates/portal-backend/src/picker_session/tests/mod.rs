@@ -349,7 +349,7 @@ fn double_click_directory_navigates() {
     });
     let effect = session.update(SessionMessage::EntryDoubleClicked { index: 0 });
     assert!(
-        matches!(effect, SessionEffect::NavigateLocation(target) if target == BrowserLocation::Directory(child))
+        matches!(effect, SessionEffect::NavigateLocation(target) if target == PickerLocation::Directory(child))
     );
 }
 
@@ -419,7 +419,7 @@ fn scan_result(
     outcome: Result<Vec<(&str, FileKind)>, String>,
 ) -> DirectoryScanResult {
     DirectoryScanResult {
-        location: BrowserLocation::Directory(directory.to_path_buf()),
+        location: PickerLocation::Directory(directory.to_path_buf()),
         outcome: outcome.map(|entries| DirectoryScanOutcome {
             entries: entries
                 .into_iter()

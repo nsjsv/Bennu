@@ -11,8 +11,8 @@ use crate::app::FileBrowser;
 use crate::config::UiLanguage;
 use crate::model::{
     date_group_key, dynamic_size_buckets, kind_category_group_key, name_initial_group_key,
-    partition_files_into_groups, size_group_bucket_index, FileGroupKey, FileGroupSection,
-    FileGroupingContext, FileGroupingMode,
+    partition_files_into_groups, size_group_bucket_index, BrowserLocation, FileGroupKey,
+    FileGroupSection, FileGroupingContext, FileGroupingMode,
 };
 use crate::transfer_placeholders::MergedTransferItem;
 use bennu_localization::current_language;
@@ -28,10 +28,11 @@ pub(crate) struct RootGrouping {
 
 impl RootGrouping {
     /// 分组开启时返回根层的划分器;分组关闭返回 None,行流走平铺分支。
-    /// 只给根层用,展开的子目录一律平铺。
-    pub(crate) fn for_pane_root(browser: &FileBrowser) -> Option<Self> {
+    /// 只给根层用,展开的子目录一律平铺。搜索结果按搜索给的顺序（相关度或表头选的
+    /// 顺序）排，分组会把它打散，所以搜索里不分组。
+    pub(crate) fn for_pane_root(browser: &FileBrowser, location: &BrowserLocation) -> Option<Self> {
         let mode = browser.user_config().file_grouping;
-        if mode == FileGroupingMode::None {
+        if mode == FileGroupingMode::None || matches!(location, BrowserLocation::Search(_)) {
             return None;
         }
         Some(Self {

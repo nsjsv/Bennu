@@ -127,7 +127,7 @@ fn entry_types_checked_for(
     if page != ContextMenuSettingsPage::SearchEntryTypes {
         return None;
     }
-    let selected = browser.search_workspace.as_ref()?;
+    let selected = browser.active_search()?;
     let selected = &selected.filters.selected_entry_types;
     Some(
         browser

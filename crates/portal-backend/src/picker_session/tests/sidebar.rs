@@ -112,9 +112,9 @@ fn trash_navigation_scans_and_openfile_confirms_payload_path() {
     let effect = session.update(SessionMessage::SidebarTrashPressed);
     assert!(matches!(
         effect,
-        SessionEffect::NavigateLocation(BrowserLocation::Trash)
+        SessionEffect::NavigateLocation(PickerLocation::Trash)
     ));
-    assert_eq!(*session.location(), BrowserLocation::Trash);
+    assert_eq!(*session.location(), PickerLocation::Trash);
 
     let trash_file = DirectoryEntry::new(
         PathBuf::from("/home/user/.local/share/Trash/files/old.txt"),
@@ -125,7 +125,7 @@ fn trash_navigation_scans_and_openfile_confirms_payload_path() {
         false,
     );
     session.apply_scan(DirectoryScanResult {
-        location: BrowserLocation::Trash,
+        location: PickerLocation::Trash,
         outcome: Ok(DirectoryScanOutcome {
             entries: vec![trash_file],
         }),
@@ -154,7 +154,7 @@ fn savefile_cannot_confirm_in_trash_view() {
     let (mut session, mut receiver) = session(PickerKind::SaveFile { default_name: None });
     session.update(SessionMessage::SidebarTrashPressed);
     session.apply_scan(DirectoryScanResult {
-        location: BrowserLocation::Trash,
+        location: PickerLocation::Trash,
         outcome: Ok(DirectoryScanOutcome {
             entries: Vec::new(),
         }),
@@ -194,7 +194,7 @@ fn unmounted_device_press_mounts_once_and_navigates_on_success() {
     });
     assert!(matches!(
         effect,
-        SessionEffect::NavigateLocation(ref path) if *path == BrowserLocation::Directory(PathBuf::from("/run/media/user/udisk"))
+        SessionEffect::NavigateLocation(ref path) if *path == PickerLocation::Directory(PathBuf::from("/run/media/user/udisk"))
     ));
     assert!(!session.sidebar_device_is_mounting(&StorageDeviceId::new("udisk")));
     assert_eq!(
@@ -249,7 +249,7 @@ fn connection_press_navigates_mounted_and_mounts_disconnected() {
     });
     assert!(matches!(
         effect,
-        SessionEffect::NavigateLocation(ref path) if *path == BrowserLocation::Directory(PathBuf::from("/run/gvfs/server"))
+        SessionEffect::NavigateLocation(ref path) if *path == PickerLocation::Directory(PathBuf::from("/run/gvfs/server"))
     ));
 
     // 未挂载：置 Connecting + 挂载效果；Connecting 期间点击忽略。
@@ -299,7 +299,7 @@ fn location_press_navigates_and_records_history() {
     });
     assert!(matches!(
         effect,
-        SessionEffect::NavigateLocation(ref path) if *path == BrowserLocation::Directory(PathBuf::from("/home/user"))
+        SessionEffect::NavigateLocation(ref path) if *path == PickerLocation::Directory(PathBuf::from("/home/user"))
     ));
     assert!(session.can_navigate_back());
 }

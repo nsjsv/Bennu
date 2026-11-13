@@ -6,7 +6,7 @@ use file_core::{DirectoryEntry, FileKind, TransferConflictMetadata};
 use iced::widget::image;
 use thumbnails::{CachedThumbnail, ThumbnailKey, ThumbnailRequest, ThumbnailSourceMetadata};
 
-use crate::model::BrowserLocation;
+use crate::model::LocationKey;
 
 pub(crate) const LIST_THUMBNAIL_EDGE: u32 = 96;
 pub(crate) const LIST_THUMBNAIL_SIZE: f32 = 42.0;
@@ -99,10 +99,7 @@ pub(crate) struct ColumnViewport {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum ThumbnailScope {
     /// 一个窗格里一个位置（目录、分栏里的一栏、回收站）上可见的缩略图。
-    PaneLocation {
-        pane_id: u64,
-        location: BrowserLocation,
-    },
+    PaneLocation { pane_id: u64, location: LocationKey },
 }
 
 #[derive(Debug)]
@@ -559,7 +556,7 @@ mod tests {
         let mut cache = ThumbnailCache::new(PathBuf::from("cache"));
         let scope = ThumbnailScope::PaneLocation {
             pane_id: 1,
-            location: BrowserLocation::Directory(PathBuf::from("/workspace")),
+            location: LocationKey::Directory(PathBuf::from("/workspace")),
         };
         let kept_request = thumbnail_request("kept.png", 1);
         let stale_request = thumbnail_request("stale.png", 2);

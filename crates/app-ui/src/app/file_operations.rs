@@ -237,9 +237,6 @@ impl FileBrowser {
             })
             .collect::<Vec<_>>();
         tasks.push(self.migrate_completed_paths(&migrations));
-        if self.search_workspace.is_some() {
-            tasks.push(self.submit_search());
-        }
         Task::batch(tasks)
     }
 
@@ -359,9 +356,13 @@ impl FileBrowser {
         };
 
         let path_migration_task = self.migrate_paths_after_file_operation(&completion);
-        if let Some(removed_paths) = &removed_file_paths {
-            self.reconcile_icon_grid_removed_paths(removed_paths);
-        }
+        let search_removal_task = match &removed_file_paths {
+            Some(removed_paths) => {
+                self.reconcile_icon_grid_removed_paths(removed_paths);
+                self.remove_deleted_search_results(removed_paths)
+            }
+            None => Task::none(),
+        };
         match &completion {
             FileOperationCompletion::Succeeded(outcome) => {
                 self.operation_history.accept_completed(task_id, outcome);
@@ -411,16 +412,11 @@ impl FileBrowser {
         } else {
             Task::none()
         };
-        let search_refresh_task = if self.search_workspace.is_some() {
-            self.submit_search()
-        } else {
-            Task::none()
-        };
         Task::batch([
             deletion_focus_task,
+            search_removal_task,
             desktop_notification_task,
             path_migration_task,
-            search_refresh_task,
             pane_reload_task,
             trash_batch_rescan_task,
             self.continue_file_operation_persistence(),
@@ -724,9 +720,6 @@ impl FileBrowser {
         operation: Option<&QueuedFileOperation>,
         removed_file_paths: Option<&[PathBuf]>,
     ) -> Task<Message> {
-        if self.search_workspace.is_some() {
-            return Task::none();
-        }
         if let Some(paths) = removed_file_paths {
             return self.focus_after_removed_file_operation_paths(paths);
         }

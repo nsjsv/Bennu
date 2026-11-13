@@ -11,7 +11,7 @@ use bennu_theme::address_bar::{
 
 use super::suggestions::completed_path_text;
 use super::{PickerSession, SessionEffect};
-use bennu_sidebar::BrowserLocation;
+use crate::picker_session::PickerLocation;
 
 /// 补全选择的循环方向（键盘 ↓/Tab → Next，↑/Shift+Tab → Previous）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -188,7 +188,7 @@ impl PickerSession {
         if self.address_editing.is_some() {
             self.cancel_address_editing();
         }
-        self.begin_navigation(BrowserLocation::Directory(target))
+        self.begin_navigation(PickerLocation::Directory(target))
     }
 
     /// 帧推进的过渡收尾：退出方向（target≤ε）播完即摘除，快照随过渡
@@ -265,7 +265,7 @@ impl PickerSession {
         // 提交即开始渐出：导航扫描期间地址栏保持草稿外观，避免闪回
         // 面包屑再进编辑的抖动。
         self.start_address_bar_exit(editing.draft);
-        self.begin_navigation(BrowserLocation::Directory(target))
+        self.begin_navigation(PickerLocation::Directory(target))
     }
 
     fn start_address_bar_exit(&mut self, snapshot: String) {

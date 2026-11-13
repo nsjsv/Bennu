@@ -9,7 +9,7 @@ fn defaults_match_existing_menu_structure() {
     let preferences = ContextMenuPreferences::defaults();
     // 一级结构:组锚点折叠成员,其余保持全集原序;工具组插在移动和粘贴之间。
     assert_eq!(
-        preferences.file_entry_menu_entries(false, true, true),
+        preferences.file_entry_menu_entries(FileMenuPlace::Folder, false, true, true),
         vec![
             FileEntryMenuEntry::Item(FileAreaMenuItem::Open),
             FileEntryMenuEntry::Item(FileAreaMenuItem::SmartExtractHere),
@@ -52,7 +52,12 @@ fn runtime_eligibility_gates_members_and_degrades_groups() {
     // 目录:工具子菜单无文件校验。
     let tools_members = |target_is_directory: bool, can_create_symlink: bool| {
         preferences
-            .file_entry_menu_entries(target_is_directory, true, can_create_symlink)
+            .file_entry_menu_entries(
+                FileMenuPlace::Folder,
+                target_is_directory,
+                true,
+                can_create_symlink,
+            )
             .iter()
             .find_map(|entry| match entry {
                 FileEntryMenuEntry::Group {
@@ -67,7 +72,7 @@ fn runtime_eligibility_gates_members_and_degrades_groups() {
     // 远程挂载:工具子菜单无创建符号链接。
     assert!(!tools_members(false, false).contains(&FileAreaMenuItem::CreateSymlink));
     // 不可批量重命名:重命名组退化为普通行。
-    let entries = preferences.file_entry_menu_entries(false, false, true);
+    let entries = preferences.file_entry_menu_entries(FileMenuPlace::Folder, false, false, true);
     assert!(entries.contains(&FileEntryMenuEntry::Item(FileAreaMenuItem::Rename)));
     assert!(!entries.iter().any(|entry| matches!(
         entry,
@@ -96,11 +101,11 @@ fn selection_only_items_stay_out_of_the_blank_area_menu() {
 #[test]
 fn new_entry_position_tracks_visibility() {
     let mut preferences = ContextMenuPreferences::defaults();
-    // 隐藏前 5 项(Open/两个解压项/OpenWith/Copy);组行随锚点一起消失。
-    for index in 0..5 {
+    // 隐藏前 6 项(Open/打开所在文件夹/两个解压项/OpenWith/Copy);组行随锚点一起消失。
+    for index in 0..6 {
         preferences.file_entry.toggle(index);
     }
-    let entries = preferences.file_entry_menu_entries(false, false, true);
+    let entries = preferences.file_entry_menu_entries(FileMenuPlace::Folder, false, false, true);
     let new_entry_index = entries
         .iter()
         .position(|entry| {
@@ -127,7 +132,7 @@ fn hidden_group_anchor_hides_the_whole_group() {
         .position(|entry| entry.item == FileAreaMenuItem::Copy)
         .unwrap();
     preferences.file_entry.toggle(copy_index);
-    let entries = preferences.file_entry_menu_entries(false, true, true);
+    let entries = preferences.file_entry_menu_entries(FileMenuPlace::Folder, false, true, true);
     assert!(!entries.iter().any(|entry| matches!(
         entry,
         FileEntryMenuEntry::Group {
@@ -158,7 +163,7 @@ fn empty_member_lists_degrade_or_omit_group_rows() {
     // 复制组成员全部隐藏 → 复制退化为普通行(单点动作仍在)。
     toggle_item(&mut preferences, FileAreaMenuItem::Duplicate);
     toggle_item(&mut preferences, FileAreaMenuItem::CopyPath);
-    let entries = preferences.file_entry_menu_entries(false, true, true);
+    let entries = preferences.file_entry_menu_entries(FileMenuPlace::Folder, false, true, true);
     assert!(entries.contains(&FileEntryMenuEntry::Item(FileAreaMenuItem::Copy)));
     // 工具组成员全部隐藏 → 纯触发器整行省略。
     for member in [
@@ -169,7 +174,7 @@ fn empty_member_lists_degrade_or_omit_group_rows() {
     ] {
         toggle_item(&mut preferences, member);
     }
-    let entries = preferences.file_entry_menu_entries(false, true, true);
+    let entries = preferences.file_entry_menu_entries(FileMenuPlace::Folder, false, true, true);
     assert!(!entries.iter().any(|entry| matches!(
         entry,
         FileEntryMenuEntry::Group {
@@ -179,7 +184,7 @@ fn empty_member_lists_degrade_or_omit_group_rows() {
     )));
     // 「新建...」硬编码行恒在:成员隐藏也保持组行。
     toggle_item(&mut preferences, FileAreaMenuItem::NewFolderFromSelection);
-    let entries = preferences.file_entry_menu_entries(false, true, true);
+    let entries = preferences.file_entry_menu_entries(FileMenuPlace::Folder, false, true, true);
     assert!(entries.iter().any(|entry| matches!(
         entry,
         FileEntryMenuEntry::Group {
@@ -192,15 +197,15 @@ fn empty_member_lists_degrade_or_omit_group_rows() {
 #[test]
 fn all_hidden_menus_report_empty() {
     let mut preferences = ContextMenuPreferences::defaults();
-    let count = preferences.search.entries.len();
+    let count = preferences.trash.entries.len();
     for index in 0..count {
-        preferences.search.toggle(index);
+        preferences.trash.toggle(index);
     }
-    assert!(preferences.search_items().is_empty());
+    assert!(preferences.trash_items(true).is_empty());
 }
 
 #[test]
-fn normalized_from_stored_appends_missing_and_drops_unknown() {
+fn normalized_from_stored_restores_missing_and_drops_unknown() {
     let stored = vec![
         ("copy".to_owned(), true),
         ("bogus".to_owned(), false),
@@ -214,17 +219,29 @@ fn normalized_from_stored_appends_missing_and_drops_unknown() {
     );
     assert_eq!(layout.entries[0].item, FileAreaMenuItem::Copy);
     assert!(layout.entries[0].visible);
-    assert_eq!(layout.entries[1].item, FileAreaMenuItem::Open);
-    assert!(!layout.entries[1].visible);
-    // 缺失项追加且可见;总数等于全集。
+    let open = layout
+        .entries
+        .iter()
+        .position(|entry| entry.item == FileAreaMenuItem::Open)
+        .unwrap();
+    assert!(!layout.entries[open].visible);
+    // 缺失项补回且可见，紧跟默认顺序里它前面的那项；总数等于全集。
     assert_eq!(layout.entries.len(), FILE_ENTRY_MENU_ITEMS.len());
-    assert!(layout.entries.iter().skip(2).all(|entry| entry.visible));
+    assert_eq!(
+        layout.entries[open + 1].item,
+        FileAreaMenuItem::OpenContainingFolder
+    );
+    assert_eq!(layout.entries[1].item, FileAreaMenuItem::Duplicate);
+    assert!(layout
+        .entries
+        .iter()
+        .filter(|entry| entry.item != FileAreaMenuItem::Open)
+        .all(|entry| entry.visible));
 }
 
 #[test]
-fn stored_layout_without_tools_appends_it_visible_at_the_end() {
-    // 老配置没有 tools/send_to_phone 条目:按全集顺序追加到末尾且可见,
-    // 其余保持存储顺序;同批缺失项也按全集相对顺序排列(tools 在前)。
+fn stored_layout_missing_new_items_puts_them_back_where_they_belong() {
+    // 老配置没有后来加的项:各自插回默认顺序里前一项的后面且可见,其余保持存储顺序。
     let old_items = [
         FileAreaMenuItem::Open,
         FileAreaMenuItem::OpenWith,
@@ -254,28 +271,21 @@ fn stored_layout_without_tools_appends_it_visible_at_the_end() {
         &FILE_ENTRY_MENU_ITEMS,
         FileAreaMenuItem::from_config_value,
     );
-    assert_eq!(layout.entries.len(), FILE_ENTRY_MENU_ITEMS.len());
-    // 老清单缺失的 4 项按全集相对顺序追加:
-    // SmartExtractHere、ExtractToArchiveFolder、Tools、SendToPhone。
-    assert_eq!(
-        layout.entries[old_items.len()].item,
-        FileAreaMenuItem::SmartExtractHere
-    );
-    assert_eq!(
-        layout.entries[old_items.len() + 2].item,
-        FileAreaMenuItem::Tools
-    );
-    let last = layout.entries.last().unwrap();
-    assert_eq!(last.item, FileAreaMenuItem::SendToPhone);
-    assert!(last.visible);
+    let items = layout
+        .entries
+        .iter()
+        .map(|entry| entry.item)
+        .collect::<Vec<_>>();
+    assert_eq!(items, FILE_ENTRY_MENU_ITEMS);
+    assert!(layout.entries.iter().all(|entry| entry.visible));
 }
 
 #[test]
 fn file_entry_settings_rows_project_groups_to_single_rows() {
     let preferences = ContextMenuPreferences::defaults();
     let rows = preferences.settings_rows(ContextMenuSettingsPage::FileEntry);
-    // 22 项中 8 个成员被收进组面板,顶级行 = 14 行。
-    assert_eq!(rows.len(), 14);
+    // 23 项中 8 个成员被收进组面板,顶级行 = 15 行。
+    assert_eq!(rows.len(), 15);
     let group_anchors: Vec<_> = rows.iter().filter_map(|row| row.group_anchor).collect();
     assert_eq!(
         group_anchors,
@@ -299,18 +309,18 @@ fn file_entry_settings_rows_project_groups_to_single_rows() {
 #[test]
 fn file_entry_drag_moves_the_anchor_entry_only() {
     let mut preferences = ContextMenuPreferences::defaults();
-    // 复制组锚点在布局下标 4;拖到粘贴(下标 11)之后:
+    // 复制组锚点在布局下标 5;拖到粘贴(下标 12)之后:
     // 锚点条目换位,成员条目留在原下标。
-    preferences.reorder_settings_row(ContextMenuSettingsPage::FileEntry, 4, 11);
+    preferences.reorder_settings_row(ContextMenuSettingsPage::FileEntry, 5, 12);
     let rows = preferences.settings_rows(ContextMenuSettingsPage::FileEntry);
-    assert_eq!(rows[11].label, "Copy");
-    // 锚点移走后,原下标 4 由成员 Duplicate 顶上;CopyPath 前移到 16。
+    assert_eq!(rows[12].label, "Copy");
+    // 锚点移走后,原下标 5 由成员 Duplicate 顶上;CopyPath 前移到 17。
     assert_eq!(
-        preferences.file_entry.entries[4].item,
+        preferences.file_entry.entries[5].item,
         FileAreaMenuItem::Duplicate
     );
     assert_eq!(
-        preferences.file_entry.entries[16].item,
+        preferences.file_entry.entries[17].item,
         FileAreaMenuItem::CopyPath
     );
 }
@@ -344,21 +354,21 @@ fn list_columns_keep_name_visible() {
 #[test]
 fn reorder_settings_row_moves_and_clamps() {
     let mut preferences = ContextMenuPreferences::defaults();
-    preferences.reorder_settings_row(ContextMenuSettingsPage::Search, 1, 0);
+    preferences.reorder_settings_row(ContextMenuSettingsPage::Trash, 1, 0);
     assert_eq!(
-        preferences.search.entries[0].item,
-        SearchResultMenuItem::Copy
+        preferences.trash.entries[0].item,
+        TrashMenuItem::DeletePermanently
     );
     // 同位移动与越界目标都是空操作。
-    preferences.reorder_settings_row(ContextMenuSettingsPage::Search, 0, 0);
+    preferences.reorder_settings_row(ContextMenuSettingsPage::Trash, 0, 0);
     preferences.reorder_settings_row(
-        ContextMenuSettingsPage::Search,
+        ContextMenuSettingsPage::Trash,
         0,
-        preferences.search.entries.len(),
+        preferences.trash.entries.len(),
     );
     assert_eq!(
-        preferences.search.entries[0].item,
-        SearchResultMenuItem::Copy
+        preferences.trash.entries[0].item,
+        TrashMenuItem::DeletePermanently
     );
 }
 

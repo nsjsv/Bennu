@@ -277,7 +277,7 @@ fn user_preferences_round_trip_through_sqlite() {
         .iter()
         .map(|column| (column.kind, column.visible, column.width))
         .collect::<Vec<_>>();
-    assert_eq!(loaded_columns[0].0, ListColumnKind::Modified);
+    assert_eq!(loaded_columns[0].0, ListColumnKind::Location);
     assert_eq!(loaded_columns[1].0, ListColumnKind::Owner);
     assert!(loaded_columns[1].1);
     assert_eq!(loaded_columns[1].2, 140.0);
@@ -401,8 +401,9 @@ fn stored_preferences_drop_removed_list_columns_and_restore_supported_defaults()
             .collect::<Vec<_>>(),
         vec![
             ListColumnKind::Name,
-            ListColumnKind::Size,
+            ListColumnKind::Location,
             ListColumnKind::Modified,
+            ListColumnKind::Size,
             ListColumnKind::Kind,
             ListColumnKind::Owner,
             ListColumnKind::Group,

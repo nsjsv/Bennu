@@ -15,6 +15,7 @@ pub mod path_encoding;
 pub mod protocol;
 mod runtime_identity;
 pub mod search_path_store;
+pub mod text_highlight;
 pub mod text_matching;
 
 pub use config::{

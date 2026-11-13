@@ -677,22 +677,15 @@ impl FileBrowser {
                     root_is_available,
                 )
             }
-            Message::SearchDirectoryBatchLoaded(generation, hits) => {
-                self.accept_directory_search_batch(generation, hits)
+            Message::SearchDirectoryBatchLoaded(run, hits) => {
+                self.accept_directory_search_batch(run, hits)
             }
-            Message::SearchDirectoryFinished(generation, completion) => {
-                self.accept_directory_search_finished(generation, completion)
+            Message::SearchDirectoryFinished(run, completion) => {
+                self.accept_directory_search_finished(run, completion)
             }
-            Message::SearchResultPressed(path) => self.press_search_result(path),
-            Message::SearchResultRightClicked(path) => self.right_click_search_result(path),
             Message::SearchOpenContainingDirectory(path) => {
                 self.open_search_containing_directory(path)
             }
-            Message::SearchDeletePermanentlySelected => self.delete_search_selection_permanently(),
-            Message::SearchResultsScrolled {
-                offset_y,
-                viewport_height,
-            } => self.update_search_results_viewport(offset_y, viewport_height),
             Message::SearchServiceEnsured(request, outcome) => {
                 self.accept_search_service_status(request, outcome)
             }

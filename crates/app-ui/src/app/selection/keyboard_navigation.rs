@@ -386,6 +386,9 @@ impl FileBrowser {
             }
             return self.restore_selected();
         }
+        if let Some(dropped) = self.drop_missing_search_result(&path) {
+            return dropped;
+        }
 
         match self.entry_kind(&path) {
             // 压缩包视作目录：真实目录中的归档条目 kind 是 File，但
@@ -407,7 +410,7 @@ impl FileBrowser {
     }
 
     pub(crate) fn open_column_for_directory(&mut self, path: PathBuf) -> Task<Message> {
-        if self.tab().location == BrowserLocation::Trash {
+        if !self.tab().location.expands_entries_in_place() {
             return Task::none();
         }
 

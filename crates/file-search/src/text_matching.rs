@@ -93,11 +93,12 @@ fn hex_gram(gram: &[char]) -> String {
     encoded
 }
 
-/// 内容里的一个词：规范化后的文本，以及它在原文里起始的字符序号（摘要定位用）。
+/// 内容里的一个词：规范化后的文本，以及它在原文里的字符序号区间（摘要定位、高亮用）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContentToken {
     pub text: String,
     pub char_start: usize,
+    pub char_end: usize,
 }
 
 /// 内容按词切：字母数字开头的字素连成一个词；汉字、假名、泰文等不用空格分词的文字
@@ -112,24 +113,29 @@ pub fn content_tokens(text: &str) -> Vec<ContentToken> {
         char_index += grapheme.chars().count();
         let first = grapheme.chars().next().unwrap_or(' ');
         if is_unsegmented_script(first) {
-            push_content_token(&mut tokens, &word, word_start);
+            push_content_token(&mut tokens, &word, word_start, grapheme_start);
             word.clear();
-            push_content_token(&mut tokens, grapheme, grapheme_start);
+            push_content_token(&mut tokens, grapheme, grapheme_start, char_index);
         } else if first.is_alphanumeric() {
             if word.is_empty() {
                 word_start = grapheme_start;
             }
             word.push_str(grapheme);
         } else {
-            push_content_token(&mut tokens, &word, word_start);
+            push_content_token(&mut tokens, &word, word_start, grapheme_start);
             word.clear();
         }
     }
-    push_content_token(&mut tokens, &word, word_start);
+    push_content_token(&mut tokens, &word, word_start, char_index);
     tokens
 }
 
-fn push_content_token(tokens: &mut Vec<ContentToken>, original: &str, char_start: usize) {
+fn push_content_token(
+    tokens: &mut Vec<ContentToken>,
+    original: &str,
+    char_start: usize,
+    char_end: usize,
+) {
     if original.is_empty() {
         return;
     }
@@ -137,6 +143,7 @@ fn push_content_token(tokens: &mut Vec<ContentToken>, original: &str, char_start
         tokens.push(ContentToken {
             text: text.to_owned(),
             char_start,
+            char_end,
         });
     }
 }

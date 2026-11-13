@@ -564,7 +564,6 @@ fn stored_context_menu_layouts(preferences: &ContextMenuPreferences) -> StoredCo
         file_entry: layout(&values.file_entry),
         file_blank: layout(&values.file_blank),
         trash: layout(&values.trash),
-        search: layout(&values.search),
         search_entry_types: layout(&values.search_entry_types),
         list_columns: layout(&values.list_columns),
         sidebar_bookmark: layout(&values.sidebar_bookmark),
@@ -592,7 +591,6 @@ fn context_menu_preferences_from_stored(
         file_entry: config_values(&layouts.file_entry),
         file_blank: config_values(&layouts.file_blank),
         trash: config_values(&layouts.trash),
-        search: config_values(&layouts.search),
         search_entry_types: config_values(&layouts.search_entry_types),
         list_columns: config_values(&layouts.list_columns),
         sidebar_bookmark: config_values(&layouts.sidebar_bookmark),
@@ -618,12 +616,11 @@ fn context_menu_preferences_from_stored(
     preferences
 }
 
-fn context_menu_layout_lists(values: &ContextMenuLayoutConfigValues) -> [&Vec<(String, bool)>; 9] {
+fn context_menu_layout_lists(values: &ContextMenuLayoutConfigValues) -> [&Vec<(String, bool)>; 8] {
     [
         &values.file_entry,
         &values.file_blank,
         &values.trash,
-        &values.search,
         &values.search_entry_types,
         &values.list_columns,
         &values.sidebar_bookmark,

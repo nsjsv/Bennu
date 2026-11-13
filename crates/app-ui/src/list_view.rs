@@ -46,6 +46,9 @@ pub(crate) const LIST_OVERSCAN_ROWS: usize = 16;
 /// 属面板 chrome 不随密度缩放;行流构建与渲染共用本常量保证同口径。
 pub(crate) const LIST_GROUP_HEADER_HEIGHT: f32 = 32.0;
 
+mod search_rows;
+pub(crate) use search_rows::list_snippet_line_height;
+
 /// 列表条目几何在 100% 基础上按当前档位比例缩放；
 /// 表头、列宽和面板外层留白不参与密度缩放。
 #[derive(Debug, Clone, Copy)]
@@ -113,7 +116,7 @@ pub(crate) fn list_browser_view<'a>(
 ) -> Element<'a, Message> {
     let geometry = ListGeometry::for_level(browser.user_config().list_view_density);
     let mut rows = Column::new().spacing(0).width(Length::Fill);
-    rows = rows.push(list_header(browser, pane.id));
+    rows = rows.push(list_header(browser, pane));
 
     // 分组索引栏数据与行流同源派生;Pending 阶段(加载占位)无组头。
     let mut rail_entries = Vec::new();
@@ -124,7 +127,7 @@ pub(crate) fn list_browser_view<'a>(
         if let Some(placeholder) = pane.directory_loading_placeholder {
             rows = rows.push(vertical_spacer(placeholder.before_height));
             // 列配置每次渲染收集一次，避免每行每帧重复分配 Vec。
-            let visible_columns = list_visible_columns(browser);
+            let visible_columns = list_visible_columns(browser, pane);
             for placeholder_entry in &placeholder.entries {
                 rows = rows.push(list_placeholder_entry_row(
                     browser,
@@ -185,7 +188,7 @@ pub(crate) fn list_browser_view<'a>(
             rows = rows.push(vertical_spacer(range.before_height));
 
             // 列配置每次渲染收集一次，避免每行每帧重复分配 Vec。
-            let visible_columns = list_visible_columns(browser);
+            let visible_columns = list_visible_columns(browser, pane);
             for row_index in range.start..range.end {
                 let Some(row) = transfer_rows.get(row_index) else {
                     break;
@@ -195,6 +198,7 @@ pub(crate) fn list_browser_view<'a>(
                         visible,
                         transfer,
                         stripe_index,
+                        snippet_height,
                     } => {
                         rows = rows.push(list_entry_row(
                             browser,
@@ -206,6 +210,7 @@ pub(crate) fn list_browser_view<'a>(
                             visible.depth,
                             *stripe_index,
                             visible.animation_progress,
+                            *snippet_height,
                             crate::transfer_placeholder_view::selection_run_position_in_transfer_rows(
                                 &transfer_rows,
                                 row_index,
@@ -318,12 +323,9 @@ fn vertical_spacer(height: f32) -> Element<'static, Message> {
     Space::new().height(Length::Fixed(height.max(0.0))).into()
 }
 
-fn list_header<'a>(browser: &'a FileBrowser, pane_id: BrowserPaneId) -> Element<'a, Message> {
-    let visible_columns = browser
-        .user_config()
-        .list_view_preferences
-        .visible_columns()
-        .collect::<Vec<_>>();
+fn list_header<'a>(browser: &'a FileBrowser, pane: BrowserPaneView<'a>) -> Element<'a, Message> {
+    let pane_id = pane.id;
+    let visible_columns = list_visible_columns(browser, pane);
     let hovered_column = browser.hovered_list_header_column(pane_id);
     let dragged_column = browser.list_column_being_reordered();
     let drop_target = browser.list_column_reorder_insertion_target();
@@ -339,11 +341,15 @@ fn list_header<'a>(browser: &'a FileBrowser, pane_id: BrowserPaneId) -> Element<
         {
             header = header.push(list_column_resize_divider(pane_id, previous.kind));
         }
-        let sort_direction = column
-            .kind
-            .sort_field()
-            .filter(|field| *field == sort.field)
-            .map(|_| sort.direction);
+        // 搜索结果的顺序属于这次搜索，不读文件夹的排序。
+        let sort_direction = match pane.location.search() {
+            Some(search) => search.column_sort_direction(column.kind),
+            None => column
+                .kind
+                .sort_field()
+                .filter(|field| *field == sort.field)
+                .map(|_| sort.direction),
+        };
         let visual_state = if drop_target == Some(column.kind) {
             ListHeaderCellVisualState::DropTarget
         } else if dragged_column == Some(column.kind) {
@@ -525,6 +531,7 @@ fn list_entry_row<'a>(
     depth: usize,
     stripe_index: usize,
     animation_progress: f32,
+    snippet_height: f32,
     selection_run_position: Option<crate::file_entry_presentation::SelectionRunPosition>,
 ) -> Element<'a, Message> {
     let visual_state = FileEntryVisualState::from_entry_context(pane, &entry.path, false);
@@ -541,12 +548,32 @@ fn list_entry_row<'a>(
         icon_tone,
     ))
     .width(Length::Fill)
+    .height(Length::Fixed(geometry.row_height))
+    .center_y(Length::Fixed(geometry.row_height))
     .style(visual_state.content_style(modifier));
+    let snippet = (snippet_height > 0.0)
+        .then(|| {
+            search_rows::snippet_line(
+                pane,
+                entry,
+                geometry,
+                depth,
+                visual_state,
+                modifier,
+                snippet_height,
+            )
+        })
+        .flatten();
+    let row_body: Element<'a, Message> = match snippet {
+        Some(snippet) => Column::new().push(row_content).push(snippet).into(),
+        None => row_content.into(),
+    };
 
-    let row_container = container(row_content)
+    let row_height = geometry.row_height + snippet_height;
+    let row_container = container(row_body)
         .padding(geometry.row_padding)
-        .height(Length::Fixed(geometry.row_height))
-        .center_y(Length::Fixed(geometry.row_height))
+        .height(Length::Fixed(row_height))
+        .center_y(Length::Fixed(row_height))
         .width(Length::Fill);
     let row_container =
         if let Some(style) = visual_state.row_style_for_selection_run(selection_run_position) {
@@ -565,7 +592,7 @@ fn list_entry_row<'a>(
         .on_right_press(Message::EntryRightClicked(pane.id, entry.path.clone()))
         .interaction(iced::mouse::Interaction::Pointer);
 
-    let row_area = if entry.expands_as_directory() && pane.browses_into_entries() {
+    let row_area = if entry.expands_as_directory() && pane.location.folder_entries_are_live() {
         row_area.on_middle_press(crate::model::entry_middle_press_message(pane.id, entry))
     } else {
         row_area
@@ -573,7 +600,7 @@ fn list_entry_row<'a>(
 
     let animated_row = container(row_area)
         .height(Length::Fixed(
-            geometry.row_height * animation_progress.clamp(0.0, 1.0),
+            row_height * animation_progress.clamp(0.0, 1.0),
         ))
         .clip(true);
     track_column_entry_bounds(animated_row, pane.id, entry.path.clone())
@@ -639,11 +666,12 @@ fn list_entry_cells<'a>(
     row_content.push(list_column_gap())
 }
 
-fn list_visible_columns(browser: &FileBrowser) -> Vec<ListColumnConfig> {
+fn list_visible_columns(browser: &FileBrowser, pane: BrowserPaneView<'_>) -> Vec<ListColumnConfig> {
     browser
         .user_config()
         .list_view_preferences
         .visible_columns()
+        .filter(|column| column.kind.applies_at(pane.location))
         .cloned()
         .collect()
 }
@@ -692,6 +720,9 @@ fn list_entry_cell<'a>(
             icon_tone,
             column.width,
         ),
+        ListColumnKind::Location => {
+            search_rows::location_cell(entry, &browser.home_dir, geometry, column.width)
+        }
         ListColumnKind::Modified => text_cell(modified_text(&metadata), geometry, column.width),
         ListColumnKind::Size => text_cell(
             browser.list_directory_size_text(entry, &metadata),
@@ -719,6 +750,9 @@ fn list_placeholder_entry_cell<'a>(
     match column.kind {
         ListColumnKind::Name => {
             list_placeholder_name_cell(browser, geometry, entry, depth, column.width)
+        }
+        ListColumnKind::Location => {
+            search_rows::location_cell(entry, &browser.home_dir, geometry, column.width)
         }
         ListColumnKind::Modified => {
             text_cell(modified_text(&entry.metadata), geometry, column.width)
@@ -802,6 +836,8 @@ fn list_name_cell<'a>(
             pane.rename_hint,
             browser.active_language(),
         )
+    } else if let Some(name) = search_rows::emphasized_name(pane, entry, geometry.text_size) {
+        name
     } else {
         measured_middle_ellipsized_text(
             entry.name().to_string_lossy().into_owned(),
@@ -830,7 +866,7 @@ fn list_directory_toggle<'a>(
     geometry: &ListGeometry,
     entry: &DirectoryEntry,
 ) -> Element<'a, Message> {
-    if !entry.expands_as_directory() || !pane.browses_into_entries() {
+    if !entry.expands_as_directory() || !pane.location.expands_entries_in_place() {
         return Space::new()
             .width(Length::Fixed(geometry.toggle_width))
             .into();
@@ -1012,7 +1048,7 @@ mod tests {
                 })
                 .collect::<Vec<_>>(),
             &std::collections::HashMap::new(),
-            LIST_ROW_HEIGHT,
+            crate::visible_entries::ListEntryHeights::uniform(LIST_ROW_HEIGHT),
             list_initial_rows(900.0, default_level),
         );
         assert_eq!(range.end, 34);

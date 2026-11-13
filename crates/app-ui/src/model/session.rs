@@ -9,7 +9,7 @@ use bennu_state::{
 
 use crate::model::{
     BrowserLocation, BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, BrowserViewMode,
-    ColumnBrowserViewport, ExpandedDirectory, ExpandedDirectoryStatus, SplitAxis,
+    ColumnBrowserViewport, ExpandedDirectory, ExpandedDirectoryStatus, HistoryEntry, SplitAxis,
 };
 use crate::thumbnail_cache::ColumnViewport;
 
@@ -60,8 +60,8 @@ impl BrowserTabSession {
         tab.deepest_open_column_directory = self.deepest_open_column_directory.clone();
         tab.expanded_directories = self.restored_expanded_directories();
         tab.choose_view_mode(self.view_mode);
-        tab.back_stack = self.back_stack.clone();
-        tab.forward_stack = self.forward_stack.clone();
+        tab.back_stack = history_from_session(&self.back_stack);
+        tab.forward_stack = history_from_session(&self.forward_stack);
         tab
     }
 
@@ -129,18 +129,50 @@ pub(crate) fn pane_session_from_live(pane: &BrowserPane) -> BrowserPaneSession {
     }
 }
 
+/// 在搜索结果里的标签存成发起搜索的文件夹：下次打开回到那里，不重搜；结果里的选择
+/// 不跟过去。
 pub(crate) fn tab_session_from_live(tab: &BrowserTab) -> BrowserTabSession {
-    BrowserTabSession {
-        id: tab.id,
-        location: tab.location.clone(),
-        selected: tab.selected.clone(),
-        selected_paths: tab.selected_paths.clone(),
-        deepest_open_column_directory: tab.deepest_open_column_directory.clone(),
-        expanded_directories: tab.expanded_directories.keys().cloned().collect(),
-        view_mode: tab.chosen_view_mode(),
-        back_stack: tab.back_stack.clone(),
-        forward_stack: tab.forward_stack.clone(),
+    let session_history = |history: &[HistoryEntry]| {
+        history
+            .iter()
+            .map(|entry| entry.session_directory().to_path_buf())
+            .collect()
+    };
+    let back_stack = session_history(&tab.back_stack);
+    let forward_stack = session_history(&tab.forward_stack);
+    let view_mode = tab.chosen_view_mode();
+    match &tab.location {
+        BrowserLocation::Search(search) => BrowserTabSession {
+            id: tab.id,
+            location: BrowserLocation::Directory(search.origin().to_path_buf()),
+            selected: None,
+            selected_paths: HashSet::new(),
+            deepest_open_column_directory: None,
+            expanded_directories: Vec::new(),
+            view_mode,
+            back_stack,
+            forward_stack,
+        },
+        location @ (BrowserLocation::Directory(_) | BrowserLocation::Trash) => BrowserTabSession {
+            id: tab.id,
+            location: location.clone(),
+            selected: tab.selected.clone(),
+            selected_paths: tab.selected_paths.clone(),
+            deepest_open_column_directory: tab.deepest_open_column_directory.clone(),
+            expanded_directories: tab.expanded_directories.keys().cloned().collect(),
+            view_mode,
+            back_stack,
+            forward_stack,
+        },
     }
+}
+
+fn history_from_session(directories: &[PathBuf]) -> Vec<HistoryEntry> {
+    directories
+        .iter()
+        .cloned()
+        .map(HistoryEntry::Directory)
+        .collect()
 }
 
 fn pane_from_stored(stored: StoredBrowserPane) -> Option<BrowserPaneSession> {
@@ -257,6 +289,10 @@ fn tab_to_stored(tab: BrowserTabSession) -> Option<StoredBrowserTab> {
                 path: StoredPath::from_path(directory),
             },
             BrowserLocation::Trash => StoredBrowserLocation::Trash,
+            // 快照里的搜索标签已换成起点文件夹（见 tab_session_from_live）。
+            BrowserLocation::Search(search) => StoredBrowserLocation::Directory {
+                path: StoredPath::from_path(search.origin()),
+            },
         },
         selected: tab.selected.as_deref().map(StoredPath::from_path),
         selected_paths: tab

@@ -398,7 +398,7 @@ impl FileBrowser {
                 crate::visible_entries::list_entry_range_for_viewport(
                     pane.entries,
                     pane.expanded_directories,
-                    row_height,
+                    crate::visible_entries::ListEntryHeights::at(pane.location, row_height),
                     crate::list_view::LIST_HEADER_HEIGHT,
                     viewport.offset_y,
                     viewport.height,
@@ -409,7 +409,7 @@ impl FileBrowser {
                 crate::visible_entries::initial_list_entry_range(
                     pane.entries,
                     pane.expanded_directories,
-                    row_height,
+                    crate::visible_entries::ListEntryHeights::at(pane.location, row_height),
                     crate::list_view::list_initial_rows(window_height, list_density),
                 )
             });

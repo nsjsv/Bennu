@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::ffi::OsString;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStringExt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use iced::Point;
 
@@ -13,17 +13,22 @@ use file_search::{
 };
 use tempfile::tempdir;
 
+use iced::Task;
+
 use super::FileBrowser;
 use crate::config;
-use crate::model::search::{SearchProvider, SEARCH_RESULT_WINDOW};
+use crate::model::search::{SearchProvider, SearchRunId, SEARCH_RESULT_WINDOW};
 use crate::model::BrowserLocation;
 use crate::model::{
-    ContextMenuState, DirectoryFallbackOutcome, IndexedSearchOutcome, IndexedSearchRequest,
-    LastSearchScope, SearchDirectoryScope, SearchEntryTypeMenuState, SearchEntryTypePreset,
-    SearchResultCompletion, SearchServiceDiagnosticKind, SearchSizePreset, SelectionMarquee,
-    SelectionMarqueePhase, SelectionMarqueeScrollAnchor, SelectionMarqueeSource,
+    BrowserViewMode, ContextMenuState, DirectoryFallbackOutcome, HistoryEntry,
+    IndexedSearchOutcome, IndexedSearchRequest, LastSearchScope, Message, SearchDirectoryScope,
+    SearchEntryTypeMenuState, SearchEntryTypePreset, SearchResultCompletion,
+    SearchServiceDiagnosticKind, SearchSizePreset, SelectionMarquee, SelectionMarqueePhase,
+    SelectionMarqueeScrollAnchor, SelectionMarqueeSource,
 };
 
+#[path = "search_tests/location_tests.rs"]
+mod location_tests;
 #[path = "search_tests/ranked_snapshot_tests.rs"]
 mod ranked_snapshot_tests;
 #[path = "search_tests/search_scope_tests.rs"]
@@ -71,10 +76,28 @@ fn indexed_batch(query_id: u64, hits: Vec<SearchHit>, finished: bool) -> SearchR
     }
 }
 
+/// 进入搜索（还不在搜索里时）并按当前意图重搜；不记搜索历史，与回车区分。
+fn submit_search(browser: &mut FileBrowser) -> Task<Message> {
+    let entered = browser
+        .ensure_active_search()
+        .expect("search starts from a local folder");
+    Task::batch([entered, browser.restart_active_search()])
+}
+
+/// 结果列表滚到 `offset_y`：离末尾不到一屏时取下一页。
+fn scroll_search_list_to(browser: &mut FileBrowser, offset_y: f32) {
+    browser.tab_mut().choose_view_mode(BrowserViewMode::List);
+    browser.pane_mut().list_viewport = Some(crate::thumbnail_cache::ColumnViewport {
+        offset_y,
+        height: crate::list_view::LIST_ROW_HEIGHT * 4.0,
+    });
+    let pane_id = browser.active_pane_id();
+    drop(browser.load_more_search_results_near_end(pane_id));
+}
+
 fn pending_indexed_request(browser: &FileBrowser) -> IndexedSearchRequest {
     browser
-        .search_workspace
-        .as_ref()
+        .active_search()
         .unwrap()
         .run
         .pending_indexed_request
@@ -82,12 +105,11 @@ fn pending_indexed_request(browser: &FileBrowser) -> IndexedSearchRequest {
 }
 
 fn stabilize_search_input(browser: &mut FileBrowser, value: &str) {
-    if browser.search_workspace.is_none() {
-        drop(browser.submit_search());
+    if browser.active_search().is_none() {
+        drop(submit_search(browser));
     }
     let request = browser
-        .search_workspace
-        .as_mut()
+        .active_search_mut()
         .unwrap()
         .replace_input(value.to_owned());
     drop(browser.accept_search_input_stabilization(request));
@@ -95,11 +117,11 @@ fn stabilize_search_input(browser: &mut FileBrowser, value: &str) {
 
 fn start_default_directory_fallback(
     browser: &mut FileBrowser,
-    generation: u64,
+    run: SearchRunId,
     unavailable_message: &str,
 ) {
     drop(browser.start_verified_directory_fallback(
-        generation,
+        run,
         unavailable_message.to_owned(),
         Ok(file_search::SearchPathPreferences::default()),
     ));
@@ -111,15 +133,14 @@ fn explicit_search_submission_records_history_but_internal_restart_does_not() {
     stabilize_search_input(&mut browser, "report");
 
     assert!(browser.user_config.search_history.entries().is_empty());
-    drop(browser.submit_search());
+    drop(submit_search(&mut browser));
     assert!(browser.user_config.search_history.entries().is_empty());
 
     drop(browser.submit_search_input());
     assert_eq!(browser.user_config.search_history.entries(), ["report"]);
 
     browser
-        .search_workspace
-        .as_mut()
+        .active_search_mut()
         .unwrap()
         .replace_input_immediately("   ".to_owned());
     drop(browser.submit_search_input());
@@ -145,7 +166,7 @@ fn real_query_records_last_scope_and_restores_it_on_next_workspace() {
     browser.tab_mut().location = BrowserLocation::Directory(elsewhere);
     stabilize_search_input(&mut browser, "report");
 
-    let workspace = browser.search_workspace.as_ref().unwrap();
+    let workspace = browser.active_search().unwrap();
     assert_eq!(
         workspace.root.selected_scope(),
         SearchDirectoryScope::LastLocation
@@ -173,8 +194,8 @@ fn opening_and_closing_without_a_query_does_not_record_last_scope() {
     let mut browser = browser_for_search_tests(PathBuf::from("/downloads"));
     browser.home_dir = PathBuf::from("/home/test");
 
-    drop(browser.submit_search());
-    assert!(browser.search_workspace.is_some());
+    drop(submit_search(&mut browser));
+    assert!(browser.active_search().is_some());
     drop(browser.close_search_workspace());
     assert_eq!(browser.user_config.last_search_scope, None);
 }
@@ -182,28 +203,20 @@ fn opening_and_closing_without_a_query_does_not_record_last_scope() {
 #[test]
 fn selecting_history_preserves_root_and_invalidates_stable_input_request() {
     let mut browser = browser_for_search_tests(PathBuf::from("/workspace-a"));
-    drop(browser.submit_search());
-    let frozen_root = browser
-        .search_workspace
-        .as_ref()
-        .unwrap()
-        .root
-        .path()
-        .to_path_buf();
+    drop(submit_search(&mut browser));
+    let frozen_root = browser.active_search().unwrap().root.path().to_path_buf();
     let stale = browser
-        .search_workspace
-        .as_mut()
+        .active_search_mut()
         .unwrap()
         .replace_input("rep".to_owned());
     browser
         .user_config
         .search_history
         .record_submission("report");
-    browser.tab_mut().location = BrowserLocation::Directory(tempdir().unwrap().keep());
 
     drop(browser.select_search_history_keyword("report".to_owned()));
 
-    let workspace = browser.search_workspace.as_ref().unwrap();
+    let workspace = browser.active_search().unwrap();
     assert_eq!(workspace.root.path(), frozen_root);
     assert_eq!(workspace.input, "report");
     assert!(!workspace.accepts_input_stabilization(&stale));
@@ -214,7 +227,7 @@ fn selecting_history_preserves_root_and_invalidates_stable_input_request() {
 fn history_removal_and_clear_leave_the_active_search_unchanged() {
     let mut browser = browser_for_search_tests(PathBuf::from("/workspace"));
     stabilize_search_input(&mut browser, "active");
-    let generation = browser.search_workspace.as_ref().unwrap().run.generation;
+    let generation = browser.active_search().unwrap().run.generation;
     browser
         .user_config
         .search_history
@@ -226,19 +239,13 @@ fn history_removal_and_clear_leave_the_active_search_unchanged() {
 
     drop(browser.remove_search_history_keyword("report"));
     assert_eq!(browser.user_config.search_history.entries(), ["images"]);
-    assert_eq!(
-        browser.search_workspace.as_ref().unwrap().run.generation,
-        generation
-    );
-    assert_eq!(browser.search_workspace.as_ref().unwrap().input, "active");
+    assert_eq!(browser.active_search().unwrap().run.generation, generation);
+    assert_eq!(browser.active_search().unwrap().input, "active");
 
     drop(browser.clear_search_history());
     assert!(browser.user_config.search_history.entries().is_empty());
-    assert_eq!(
-        browser.search_workspace.as_ref().unwrap().run.generation,
-        generation
-    );
-    assert_eq!(browser.search_workspace.as_ref().unwrap().input, "active");
+    assert_eq!(browser.active_search().unwrap().run.generation, generation);
+    assert_eq!(browser.active_search().unwrap().input, "active");
 }
 
 #[test]
@@ -266,9 +273,9 @@ fn opening_search_workspace_clears_file_view_pointer_interactions() {
             .join("anchor.txt"),
     );
 
-    drop(browser.submit_search());
+    drop(submit_search(&mut browser));
 
-    assert!(browser.search_workspace.is_some());
+    assert!(browser.active_search().is_some());
     assert!(browser.selection_marquee.is_none());
     assert!(browser.drag_selection_anchor.is_none());
 }
@@ -280,7 +287,7 @@ fn service_status_is_independent_from_search_workspace_lifecycle() {
         .search_service
         .observe_query_transport_failure("daemon exited");
 
-    assert!(browser.search_workspace.is_none());
+    assert!(browser.active_search().is_none());
     assert_eq!(
         browser.search_service.incidents[0].kind,
         SearchServiceDiagnosticKind::EndpointUnavailable
@@ -288,53 +295,46 @@ fn service_status_is_independent_from_search_workspace_lifecycle() {
 }
 
 #[test]
-fn workspace_freezes_root_while_nonempty_input_stays_scoped() {
+fn search_scope_is_the_folder_it_started_from() {
     let mut browser = browser_for_search_tests(PathBuf::from("/workspace-a"));
-    let frozen_root = browser.tab().current_directory().unwrap().to_path_buf();
-    drop(browser.submit_search());
-    let empty_generation = browser.search_workspace.as_ref().unwrap().run.generation;
-    assert!(browser
-        .search_workspace
-        .as_ref()
-        .unwrap()
-        .run
-        .active_query
-        .is_none());
+    let origin = browser.tab().current_directory().unwrap().to_path_buf();
+    drop(submit_search(&mut browser));
+    let empty_generation = browser.active_search().unwrap().run.generation;
+    assert!(browser.active_search().unwrap().run.active_query.is_none());
+    assert!(browser.tab().current_directory().is_none());
 
-    browser.tab_mut().location = BrowserLocation::Directory(tempdir().unwrap().keep());
     stabilize_search_input(&mut browser, "later");
 
-    let workspace = browser.search_workspace.as_ref().unwrap();
-    assert_eq!(workspace.root.path(), frozen_root);
+    let workspace = browser.active_search().unwrap();
+    assert_eq!(workspace.origin(), origin);
     assert_eq!(workspace.input, "later");
     assert!(workspace.run.generation > empty_generation);
     assert!(matches!(
         workspace.run.active_query.as_ref().unwrap().scope,
-        SearchScope::Directory(ref root) if root == &frozen_root
+        SearchScope::Directory(ref root) if root == &origin
     ));
 }
 
 #[test]
 fn empty_and_whitespace_input_leave_search_workspace_idle() {
     let mut browser = browser_for_search_tests(PathBuf::from("/workspace"));
-    drop(browser.submit_search());
-    let first_generation = browser.search_workspace.as_ref().unwrap().run.generation;
+    drop(submit_search(&mut browser));
+    let first_generation = browser.active_search().unwrap().run.generation;
 
     let request = browser
-        .search_workspace
-        .as_mut()
+        .active_search_mut()
         .unwrap()
         .replace_input("  \t  ".to_owned());
     drop(browser.accept_search_input_stabilization(request));
 
-    let workspace = browser.search_workspace.as_ref().unwrap();
+    let workspace = browser.active_search().unwrap();
     assert_eq!(workspace.input, "  \t  ");
     assert!(workspace.run.generation > first_generation);
     assert!(workspace.run.active_query.is_none());
     assert!(workspace.run.provider.is_none());
     assert!(workspace.run.pending_indexed_request.is_none());
     assert!(!workspace.window.is_loading);
-    assert!(workspace.window.hits.is_empty());
+    assert!(browser.tab().entries.is_empty());
     assert!(workspace.window.failure.is_none());
     assert!(workspace.window.completion.is_none());
 }
@@ -344,39 +344,39 @@ fn clearing_search_rejects_old_indexed_and_fallback_messages() {
     let mut browser = browser_for_search_tests(PathBuf::from("/workspace"));
     stabilize_search_input(&mut browser, "report");
     let stale_request = pending_indexed_request(&browser);
-    let stale_generation = stale_request.generation;
+    let stale_run = stale_request.run;
+    let stale_generation = stale_run.generation;
     drop(browser.accept_search_results(
         stale_request,
         IndexedSearchOutcome::ProviderUnavailable("index is starting".to_owned()),
     ));
-    start_default_directory_fallback(&mut browser, stale_generation, "index is starting");
+    start_default_directory_fallback(&mut browser, stale_run, "index is starting");
 
     let stale_path = PathBuf::from("/workspace/stale.txt");
     drop(browser.accept_directory_search_batch(
-        stale_generation,
+        stale_run,
         vec![search_hit(stale_path.clone(), SearchFileKind::File)],
     ));
-    drop(browser.press_search_result(stale_path.clone()));
-    assert_eq!(browser.active_search_selection(), Some(vec![stale_path]));
+    browser.select_path(stale_path.clone());
+    assert!(browser.tab().selected_paths.contains(&stale_path));
 
     let clear_request = browser
-        .search_workspace
-        .as_mut()
+        .active_search_mut()
         .unwrap()
         .replace_input("   ".to_owned());
     drop(browser.accept_search_input_stabilization(clear_request));
 
-    let workspace = browser.search_workspace.as_ref().unwrap();
+    let workspace = browser.active_search().unwrap();
     assert!(workspace.run.generation > stale_generation);
     assert!(workspace.run.active_query.is_none());
     assert!(workspace.run.provider.is_none());
     assert!(workspace.run.next_cursor.is_none());
     assert!(workspace.run.pending_indexed_request.is_none());
-    assert!(workspace.window.hits.is_empty());
+    assert!(browser.tab().entries.is_empty());
     assert!(!workspace.window.is_loading);
     assert!(workspace.window.failure.is_none());
     assert!(workspace.window.completion.is_none());
-    assert!(browser.active_search_selection().unwrap().is_empty());
+    assert!(browser.tab().selected_paths.is_empty());
 
     drop(browser.accept_search_results(
         stale_request,
@@ -390,21 +390,16 @@ fn clearing_search_rejects_old_indexed_and_fallback_messages() {
         )),
     ));
     drop(browser.accept_directory_search_batch(
-        stale_generation,
+        stale_run,
         vec![search_hit(
             PathBuf::from("/workspace/late-fallback.txt"),
             SearchFileKind::File,
         )],
     ));
-    drop(
-        browser.accept_directory_search_finished(
-            stale_generation,
-            DirectoryFallbackOutcome::Cancelled,
-        ),
-    );
+    drop(browser.accept_directory_search_finished(stale_run, DirectoryFallbackOutcome::Cancelled));
 
-    let workspace = browser.search_workspace.as_ref().unwrap();
-    assert!(workspace.window.hits.is_empty());
+    let workspace = browser.active_search().unwrap();
+    assert!(browser.tab().entries.is_empty());
     assert!(workspace.window.completion.is_none());
     assert!(workspace.run.active_query.is_none());
 }
@@ -414,7 +409,7 @@ fn indexed_window_truth_comes_from_provider_completion() {
     let mut browser = browser_for_search_tests(PathBuf::from("/workspace"));
     stabilize_search_input(&mut browser, "report");
     let request = pending_indexed_request(&browser);
-    let generation = request.generation;
+    let generation = request.run.generation;
     let hits = (0..SEARCH_RESULT_WINDOW)
         .map(|index| {
             search_hit(
@@ -429,7 +424,7 @@ fn indexed_window_truth_comes_from_provider_completion() {
     ));
 
     assert_eq!(
-        browser.search_workspace.as_ref().unwrap().window.completion,
+        browser.active_search().unwrap().window.completion,
         Some(SearchResultCompletion::Complete)
     );
 }
@@ -439,7 +434,7 @@ fn approaching_loaded_end_requests_and_appends_one_indexed_page() {
     let mut browser = browser_for_search_tests(PathBuf::from("/workspace"));
     stabilize_search_input(&mut browser, "report");
     let first_request = pending_indexed_request(&browser);
-    let generation = first_request.generation;
+    let generation = first_request.run.generation;
     let first_hits = (0..SEARCH_RESULT_WINDOW)
         .map(|index| {
             search_hit(
@@ -453,9 +448,8 @@ fn approaching_loaded_end_requests_and_appends_one_indexed_page() {
         IndexedSearchOutcome::Batch(indexed_batch(generation, first_hits, false)),
     ));
 
-    let viewport_height = crate::view::SEARCH_RESULT_ROW_HEIGHT * 4.0;
-    let offset_y = crate::view::SEARCH_RESULT_ROW_HEIGHT * 90.0;
-    drop(browser.update_search_results_viewport(offset_y, viewport_height));
+    let near_end = crate::list_view::LIST_ROW_HEIGHT * 96.0;
+    scroll_search_list_to(&mut browser, near_end);
     let next_request = pending_indexed_request(&browser);
     assert_eq!(
         next_request.cursor,
@@ -463,7 +457,7 @@ fn approaching_loaded_end_requests_and_appends_one_indexed_page() {
             offset: SEARCH_RESULT_WINDOW,
         })
     );
-    drop(browser.update_search_results_viewport(offset_y, viewport_height));
+    scroll_search_list_to(&mut browser, near_end);
     assert_eq!(pending_indexed_request(&browser), next_request);
 
     let second_hits = (SEARCH_RESULT_WINDOW..SEARCH_RESULT_WINDOW * 2)
@@ -479,8 +473,8 @@ fn approaching_loaded_end_requests_and_appends_one_indexed_page() {
         IndexedSearchOutcome::Batch(indexed_batch(generation, second_hits, true)),
     ));
 
-    let workspace = browser.search_workspace.as_ref().unwrap();
-    assert_eq!(workspace.window.hits.len(), SEARCH_RESULT_WINDOW * 2);
+    let workspace = browser.active_search().unwrap();
+    assert_eq!(browser.tab().entries.len(), SEARCH_RESULT_WINDOW * 2);
     assert_eq!(
         workspace.window.completion,
         Some(SearchResultCompletion::Complete)
@@ -498,9 +492,9 @@ fn unavailable_before_first_batch_switches_to_directory_fallback() {
         request,
         IndexedSearchOutcome::ProviderUnavailable("index is starting".to_owned()),
     ));
-    start_default_directory_fallback(&mut browser, request.generation, "index is starting");
+    start_default_directory_fallback(&mut browser, request.run, "index is starting");
 
-    let workspace = browser.search_workspace.as_ref().unwrap();
+    let workspace = browser.active_search().unwrap();
     assert_eq!(
         workspace.run.provider,
         Some(SearchProvider::DirectoryFallback)
@@ -525,12 +519,12 @@ async fn directory_fallback_starts_without_the_search_service() {
     ));
 
     drop(browser.start_verified_directory_fallback(
-        request.generation,
+        request.run,
         "search service is not running".to_owned(),
         preferences,
     ));
 
-    let workspace = browser.search_workspace.as_ref().unwrap();
+    let workspace = browser.active_search().unwrap();
     assert_eq!(
         workspace.run.provider,
         Some(SearchProvider::DirectoryFallback)
@@ -557,12 +551,12 @@ async fn unreadable_search_exclusions_stop_the_directory_fallback() {
     ));
 
     drop(browser.start_verified_directory_fallback(
-        request.generation,
+        request.run,
         "search service is not running".to_owned(),
         preferences,
     ));
 
-    let workspace = browser.search_workspace.as_ref().unwrap();
+    let workspace = browser.active_search().unwrap();
     assert!(workspace
         .window
         .failure
@@ -574,15 +568,14 @@ async fn unreadable_search_exclusions_stop_the_directory_fallback() {
 fn unavailable_after_indexed_batch_does_not_mix_providers() {
     let mut browser = browser_for_search_tests(PathBuf::from("/workspace"));
     stabilize_search_input(&mut browser, "report");
-    drop(browser.submit_search());
+    drop(submit_search(&mut browser));
     let request = browser
-        .search_workspace
-        .as_ref()
+        .active_search()
         .unwrap()
         .run
         .pending_indexed_request
         .expect("new indexed request");
-    let generation = request.generation;
+    let generation = request.run.generation;
     drop(browser.accept_search_results(
         request,
         IndexedSearchOutcome::Batch(indexed_batch(
@@ -594,10 +587,9 @@ fn unavailable_after_indexed_batch_does_not_mix_providers() {
             false,
         )),
     ));
-    drop(browser.update_search_results_viewport(f32::MAX, crate::view::SEARCH_RESULT_ROW_HEIGHT));
+    scroll_search_list_to(&mut browser, f32::MAX);
     let next_request = browser
-        .search_workspace
-        .as_ref()
+        .active_search()
         .unwrap()
         .run
         .pending_indexed_request
@@ -607,9 +599,9 @@ fn unavailable_after_indexed_batch_does_not_mix_providers() {
         IndexedSearchOutcome::TransportUnavailable("socket closed".to_owned()),
     ));
 
-    let workspace = browser.search_workspace.as_ref().unwrap();
+    let workspace = browser.active_search().unwrap();
     assert_eq!(workspace.run.provider, Some(SearchProvider::Indexed));
-    assert_eq!(workspace.window.hits.len(), 1);
+    assert_eq!(browser.tab().entries.len(), 1);
     assert_eq!(workspace.window.failure.as_deref(), Some("socket closed"));
 }
 
@@ -618,21 +610,21 @@ fn fallback_budget_and_overflow_have_distinct_truthful_states() {
     let mut browser = browser_for_search_tests(PathBuf::from("/workspace"));
     stabilize_search_input(&mut browser, "partial");
     let request = pending_indexed_request(&browser);
-    let generation = request.generation;
+    let run = request.run;
     drop(browser.accept_search_results(
         request,
         IndexedSearchOutcome::ProviderUnavailable("not ready".to_owned()),
     ));
-    start_default_directory_fallback(&mut browser, generation, "not ready");
+    start_default_directory_fallback(&mut browser, run, "not ready");
     drop(browser.accept_directory_search_batch(
-        generation,
+        run,
         vec![search_hit(
             PathBuf::from("/workspace/partial.txt"),
             SearchFileKind::File,
         )],
     ));
     drop(browser.accept_directory_search_finished(
-        generation,
+        run,
         DirectoryFallbackOutcome::Completed(
             file_search::DirectoryFallbackCompletion::EntryBudgetReached {
                 inspected_entries: 50_000,
@@ -640,7 +632,7 @@ fn fallback_budget_and_overflow_have_distinct_truthful_states() {
         ),
     ));
     assert_eq!(
-        browser.search_workspace.as_ref().unwrap().window.completion,
+        browser.active_search().unwrap().window.completion,
         Some(SearchResultCompletion::Partial {
             inspected_entries: 50_000,
         })
@@ -648,12 +640,12 @@ fn fallback_budget_and_overflow_have_distinct_truthful_states() {
 
     stabilize_search_input(&mut browser, "overflow");
     let request = pending_indexed_request(&browser);
-    let generation = request.generation;
+    let run = request.run;
     drop(browser.accept_search_results(
         request,
         IndexedSearchOutcome::ProviderUnavailable("not ready".to_owned()),
     ));
-    start_default_directory_fallback(&mut browser, generation, "not ready");
+    start_default_directory_fallback(&mut browser, run, "not ready");
     let hits = (0..=SEARCH_RESULT_WINDOW)
         .map(|index| {
             search_hit(
@@ -662,30 +654,26 @@ fn fallback_budget_and_overflow_have_distinct_truthful_states() {
             )
         })
         .collect();
-    drop(browser.accept_directory_search_batch(generation, hits));
-    assert_eq!(
-        browser.search_workspace.as_ref().unwrap().window.hits.len(),
-        SEARCH_RESULT_WINDOW + 1
-    );
+    drop(browser.accept_directory_search_batch(run, hits));
+    assert_eq!(browser.tab().entries.len(), SEARCH_RESULT_WINDOW + 1);
 }
 
 #[test]
 fn unavailable_frozen_root_cancels_the_run_without_switching_scope() {
     let root = tempdir().unwrap().keep();
     let mut browser = browser_for_search_tests(root.clone());
-    drop(browser.submit_search());
-    let first_generation = browser.search_workspace.as_ref().unwrap().run.generation;
+    drop(submit_search(&mut browser));
+    let first_generation = browser.active_search().unwrap().run.generation;
     std::fs::remove_dir(&root).unwrap();
 
     let request = browser
-        .search_workspace
-        .as_mut()
+        .active_search_mut()
         .unwrap()
         .replace_input("later".to_owned());
     drop(browser.accept_search_input_stabilization(request));
 
     {
-        let workspace = browser.search_workspace.as_ref().unwrap();
+        let workspace = browser.active_search().unwrap();
         assert_eq!(workspace.root.path(), root);
         assert!(workspace.run.generation > first_generation);
         // 根目录校验已移入后台：查询此时处于待校验状态而非直接失败。
@@ -695,8 +683,7 @@ fn unavailable_frozen_root_cancels_the_run_without_switching_scope() {
     // 以与消息处理器相同的入口注入“根不可用”的校验结果。
     let request = pending_indexed_request(&browser);
     let query = browser
-        .search_workspace
-        .as_ref()
+        .active_search()
         .unwrap()
         .run
         .active_query
@@ -709,9 +696,9 @@ fn unavailable_frozen_root_cancels_the_run_without_switching_scope() {
         false,
     ));
 
-    let workspace = browser.search_workspace.as_ref().unwrap();
+    let workspace = browser.active_search().unwrap();
     assert!(workspace.run.active_query.is_none());
-    assert!(workspace.window.hits.is_empty());
+    assert!(browser.tab().entries.is_empty());
     assert!(workspace
         .window
         .failure
@@ -728,7 +715,7 @@ fn stale_generation_cannot_pollute_restarted_or_closed_workspace() {
     drop(browser.accept_search_results(
         stale,
         IndexedSearchOutcome::Batch(indexed_batch(
-            stale.generation,
+            stale.run.generation,
             vec![search_hit(
                 PathBuf::from("/workspace/stale.txt"),
                 SearchFileKind::File,
@@ -736,63 +723,54 @@ fn stale_generation_cannot_pollute_restarted_or_closed_workspace() {
             true,
         )),
     ));
-    assert!(browser
-        .search_workspace
-        .as_ref()
-        .unwrap()
-        .window
-        .hits
-        .is_empty());
+    assert!(browser.tab().entries.is_empty());
 
     drop(browser.close_search_workspace());
     drop(browser.accept_search_results(
         stale,
-        IndexedSearchOutcome::Batch(indexed_batch(stale.generation, Vec::new(), true)),
+        IndexedSearchOutcome::Batch(indexed_batch(stale.run.generation, Vec::new(), true)),
     ));
-    assert!(browser.search_workspace.is_none());
+    assert!(browser.active_search().is_none());
 }
 
 #[test]
 fn immediate_search_actions_invalidate_pending_input_stabilization() {
     let mut browser = browser_for_search_tests(PathBuf::from("/workspace"));
-    drop(browser.submit_search());
+    drop(submit_search(&mut browser));
 
     let submit_request = browser
-        .search_workspace
-        .as_mut()
+        .active_search_mut()
         .unwrap()
         .replace_input("submit".to_owned());
-    drop(browser.submit_search());
-    let submit_generation = browser.search_workspace.as_ref().unwrap().run.generation;
+    drop(submit_search(&mut browser));
+    let submit_generation = browser.active_search().unwrap().run.generation;
     drop(browser.accept_search_input_stabilization(submit_request));
     assert_eq!(
-        browser.search_workspace.as_ref().unwrap().run.generation,
+        browser.active_search().unwrap().run.generation,
         submit_generation
     );
 
     let filter_request = browser
-        .search_workspace
-        .as_mut()
+        .active_search_mut()
         .unwrap()
         .replace_input("filter".to_owned());
     drop(browser.toggle_search_entry_type(SearchEntryTypePreset::Images));
-    let filter_generation = browser.search_workspace.as_ref().unwrap().run.generation;
+    let filter_generation = browser.active_search().unwrap().run.generation;
     drop(browser.accept_search_input_stabilization(filter_request));
     assert_eq!(
-        browser.search_workspace.as_ref().unwrap().run.generation,
+        browser.active_search().unwrap().run.generation,
         filter_generation
     );
 
     let reset_request = browser
-        .search_workspace
-        .as_mut()
+        .active_search_mut()
         .unwrap()
         .replace_input("reset".to_owned());
     drop(browser.reset_search_filters());
-    let reset_generation = browser.search_workspace.as_ref().unwrap().run.generation;
+    let reset_generation = browser.active_search().unwrap().run.generation;
     drop(browser.accept_search_input_stabilization(reset_request));
     assert_eq!(
-        browser.search_workspace.as_ref().unwrap().run.generation,
+        browser.active_search().unwrap().run.generation,
         reset_generation
     );
 }
@@ -800,10 +778,9 @@ fn immediate_search_actions_invalidate_pending_input_stabilization() {
 #[test]
 fn reopening_workspace_rejects_old_session_and_clears_type_menu() {
     let mut browser = browser_for_search_tests(PathBuf::from("/workspace"));
-    drop(browser.submit_search());
+    drop(submit_search(&mut browser));
     let stale = browser
-        .search_workspace
-        .as_mut()
+        .active_search_mut()
         .unwrap()
         .replace_input("old session".to_owned());
     browser.context_menu = Some(ContextMenuState::SearchEntryTypes(
@@ -814,28 +791,29 @@ fn reopening_workspace_rejects_old_session_and_clears_type_menu() {
 
     drop(browser.close_search_workspace());
     assert!(browser.context_menu.is_none());
-    drop(browser.submit_search());
-    let reopened_generation = browser.search_workspace.as_ref().unwrap().run.generation;
+    drop(submit_search(&mut browser));
+    let reopened_generation = browser.active_search().unwrap().run.generation;
     drop(browser.accept_search_input_stabilization(stale));
 
     assert_eq!(
-        browser.search_workspace.as_ref().unwrap().run.generation,
+        browser.active_search().unwrap().run.generation,
         reopened_generation
     );
 }
 
 #[test]
-fn search_selection_does_not_mutate_browser_selection() {
+fn results_replace_the_folder_entries_and_use_the_normal_selection() {
     let mut browser = browser_for_search_tests(PathBuf::from("/workspace"));
     browser
         .tab_mut()
         .selected_paths
         .insert(PathBuf::from("/workspace/browser.txt"));
     stabilize_search_input(&mut browser, "selection");
+    assert!(browser.tab().selected_paths.is_empty());
     let request = pending_indexed_request(&browser);
-    let generation = request.generation;
-    let first = PathBuf::from("/workspace/first.txt");
-    let second = PathBuf::from("/workspace/second.txt");
+    let generation = request.run.generation;
+    let first = PathBuf::from("/workspace/b/first.txt");
+    let second = PathBuf::from("/workspace/a/second.txt");
     drop(browser.accept_search_results(
         request,
         IndexedSearchOutcome::Batch(indexed_batch(
@@ -847,19 +825,19 @@ fn search_selection_does_not_mutate_browser_selection() {
             true,
         )),
     ));
-    drop(browser.press_search_result(first.clone()));
-    browser.keyboard_modifiers = iced::keyboard::Modifiers::CTRL;
-    drop(browser.press_search_result(second.clone()));
 
-    assert_eq!(
-        browser.active_search_selection().unwrap(),
-        vec![first, second]
-    );
-    assert_eq!(browser.tab().selected_paths.len(), 1);
-    assert!(browser
+    // 顺序就是搜索服务给的顺序，不按文件夹排序重排。
+    let entries = browser
         .tab()
-        .selected_paths
-        .contains(Path::new("/workspace/browser.txt")));
+        .entries
+        .iter()
+        .map(|entry| entry.path.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(entries, vec![first.clone(), second.clone()]);
+
+    browser.select_path(first.clone());
+    browser.tab_mut().selected_paths.insert(second.clone());
+    assert_eq!(browser.tab().selected_paths.len(), 2);
 }
 
 #[test]
@@ -870,11 +848,15 @@ fn opening_containing_directory_closes_workspace_and_reveals_result() {
     let path = parent.join("report.txt");
     std::fs::write(&path, "report").unwrap();
     let mut browser = browser_for_search_tests(root.path().to_path_buf());
-    drop(browser.submit_search());
+    drop(submit_search(&mut browser));
 
     drop(browser.open_search_containing_directory(path.clone()));
 
-    assert!(browser.search_workspace.is_none());
+    assert!(browser.active_search().is_none());
+    assert!(matches!(
+        browser.tab().back_stack.last(),
+        Some(HistoryEntry::Search(_))
+    ));
     assert_eq!(browser.tab().current_directory().unwrap(), parent);
     assert_eq!(browser.tab().selected.as_ref(), Some(&path));
     assert!(browser.tab().selected_paths.contains(&path));
@@ -885,11 +867,11 @@ fn missing_containing_directory_keeps_workspace_and_reports_failure() {
     let root = tempdir().unwrap();
     let path = root.path().join("missing/report.txt");
     let mut browser = browser_for_search_tests(root.path().to_path_buf());
-    drop(browser.submit_search());
+    drop(submit_search(&mut browser));
 
     drop(browser.open_search_containing_directory(path));
 
-    let workspace = browser.search_workspace.as_ref().unwrap();
+    let workspace = browser.active_search().unwrap();
     assert!(workspace
         .window
         .failure
@@ -899,7 +881,7 @@ fn missing_containing_directory_keeps_workspace_and_reports_failure() {
 
 #[cfg(unix)]
 #[test]
-fn activating_non_utf8_directory_preserves_native_path_and_closes_workspace() {
+fn activating_non_utf8_directory_result_preserves_native_path() {
     let root = tempdir().unwrap();
     let path = root
         .path()
@@ -908,7 +890,7 @@ fn activating_non_utf8_directory_preserves_native_path_and_closes_workspace() {
     let mut browser = browser_for_search_tests(root.path().to_path_buf());
     stabilize_search_input(&mut browser, "directory");
     let request = pending_indexed_request(&browser);
-    let generation = request.generation;
+    let generation = request.run.generation;
     drop(browser.accept_search_results(
         request,
         IndexedSearchOutcome::Batch(indexed_batch(
@@ -918,10 +900,10 @@ fn activating_non_utf8_directory_preserves_native_path_and_closes_workspace() {
         )),
     ));
 
-    drop(browser.activate_search_path(path.clone()));
+    drop(browser.activate_path(path.clone()));
 
     assert_eq!(browser.tab().current_directory().unwrap(), path);
-    assert!(browser.search_workspace.is_none());
+    assert!(browser.active_search().is_none());
 }
 
 #[test]
@@ -930,7 +912,7 @@ fn toggling_regex_mode_submits_name_only_query() {
     stabilize_search_input(&mut browser, "^report-\\d+");
     drop(browser.toggle_search_regex());
 
-    let workspace = browser.search_workspace.as_ref().unwrap();
+    let workspace = browser.active_search().unwrap();
     assert_eq!(workspace.filters.match_mode, SearchMatchMode::Regex);
     let query = workspace.run.active_query.as_ref().unwrap();
     assert_eq!(query.match_mode, SearchMatchMode::Regex);
@@ -945,7 +927,7 @@ fn toggling_regex_off_restores_selected_text_scope() {
     drop(browser.toggle_search_regex());
     drop(browser.toggle_search_regex());
 
-    let workspace = browser.search_workspace.as_ref().unwrap();
+    let workspace = browser.active_search().unwrap();
     assert_eq!(workspace.filters.match_mode, SearchMatchMode::Plain);
     let query = workspace.run.active_query.as_ref().unwrap();
     assert_eq!(query.match_mode, SearchMatchMode::Plain);
@@ -958,7 +940,7 @@ fn invalid_regex_is_rejected_without_submitting_a_query() {
     stabilize_search_input(&mut browser, "foo(");
     drop(browser.toggle_search_regex());
 
-    let workspace = browser.search_workspace.as_ref().unwrap();
+    let workspace = browser.active_search().unwrap();
     assert_eq!(workspace.filters.match_mode, SearchMatchMode::Regex);
     assert!(workspace.run.active_query.is_none());
     let failure = workspace.window.failure.as_deref().unwrap();
@@ -968,21 +950,20 @@ fn invalid_regex_is_rejected_without_submitting_a_query() {
 #[test]
 fn empty_keyword_with_valid_custom_size_submits_a_query() {
     let mut browser = browser_for_search_tests(PathBuf::from("/workspace"));
-    drop(browser.submit_search());
+    drop(submit_search(&mut browser));
     drop(browser.select_search_size_preset(SearchSizePreset::Custom));
     // Custom 全空输入 = 不限：空关键词仍是空闲态，不发查询。
-    let workspace = browser.search_workspace.as_ref().unwrap();
+    let workspace = browser.active_search().unwrap();
     assert!(workspace.run.active_query.is_none());
 
     // 至少一侧可解析后，空关键词 + 有效大小条件必须放行查询。
     let request = browser
-        .search_workspace
-        .as_mut()
+        .active_search_mut()
         .unwrap()
         .replace_custom_size("16kb".to_owned(), String::new());
     drop(browser.accept_search_input_stabilization(request));
 
-    let workspace = browser.search_workspace.as_ref().unwrap();
+    let workspace = browser.active_search().unwrap();
     let query = workspace
         .run
         .active_query
@@ -1001,17 +982,16 @@ fn empty_keyword_with_valid_custom_size_submits_a_query() {
 #[test]
 fn invalid_custom_size_is_rejected_then_recovers_after_fixing_the_input() {
     let mut browser = browser_for_search_tests(PathBuf::from("/workspace"));
-    drop(browser.submit_search());
+    drop(submit_search(&mut browser));
     drop(browser.select_search_size_preset(SearchSizePreset::Custom));
     // 最小值大于最大值：稳定化接受后 restart 走 reject 路径，不发 provider。
     let request = browser
-        .search_workspace
-        .as_mut()
+        .active_search_mut()
         .unwrap()
         .replace_custom_size("2MB".to_owned(), "1MB".to_owned());
     drop(browser.accept_search_input_stabilization(request));
 
-    let workspace = browser.search_workspace.as_ref().unwrap();
+    let workspace = browser.active_search().unwrap();
     assert!(workspace.run.active_query.is_none());
     assert!(workspace.run.pending_indexed_request.is_none());
     let failure = workspace.window.failure.as_deref().unwrap();
@@ -1019,13 +999,12 @@ fn invalid_custom_size_is_rejected_then_recovers_after_fixing_the_input() {
 
     // 修正输入后恢复查询，报错清空。
     let request = browser
-        .search_workspace
-        .as_mut()
+        .active_search_mut()
         .unwrap()
         .replace_custom_size("2MB".to_owned(), "2GB".to_owned());
     drop(browser.accept_search_input_stabilization(request));
 
-    let workspace = browser.search_workspace.as_ref().unwrap();
+    let workspace = browser.active_search().unwrap();
     assert!(workspace.run.active_query.is_some());
     assert!(workspace.window.failure.is_none());
 }
@@ -1033,25 +1012,18 @@ fn invalid_custom_size_is_rejected_then_recovers_after_fixing_the_input() {
 #[test]
 fn switching_size_preset_clears_custom_inputs_and_restarts() {
     let mut browser = browser_for_search_tests(PathBuf::from("/workspace"));
-    drop(browser.submit_search());
+    drop(submit_search(&mut browser));
     drop(browser.select_search_size_preset(SearchSizePreset::Custom));
     let request = browser
-        .search_workspace
-        .as_mut()
+        .active_search_mut()
         .unwrap()
         .replace_custom_size("1MB".to_owned(), String::new());
     drop(browser.accept_search_input_stabilization(request));
-    assert!(browser
-        .search_workspace
-        .as_ref()
-        .unwrap()
-        .run
-        .active_query
-        .is_some());
+    assert!(browser.active_search().unwrap().run.active_query.is_some());
 
     // 从 Custom 切走：清空两侧输入；空关键词回到空闲态。
     drop(browser.select_search_size_preset(SearchSizePreset::Medium));
-    let workspace = browser.search_workspace.as_ref().unwrap();
+    let workspace = browser.active_search().unwrap();
     assert_eq!(workspace.filters.size_preset, SearchSizePreset::Medium);
     assert!(workspace.filters.custom_size_min.is_empty());
     assert!(workspace.filters.custom_size_max.is_empty());

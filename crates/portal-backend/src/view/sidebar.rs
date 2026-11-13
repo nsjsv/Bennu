@@ -6,8 +6,7 @@
 use bennu_preview::formatting::format_file_size;
 use bennu_sidebar::entries::selected_sidebar_device;
 use bennu_sidebar::{
-    BrowserLocation, SidebarDeviceEntry, SidebarLocation, SidebarLocationKind,
-    SidebarNetworkConnectionEntry,
+    SidebarDeviceEntry, SidebarLocation, SidebarLocationKind, SidebarNetworkConnectionEntry,
 };
 use bennu_theme::icons::{icon_tone_style, IconSymbol, IconTone};
 use bennu_theme::measured_text::measured_middle_ellipsized_text;
@@ -24,6 +23,7 @@ use crate::picker_session::scrollbar::scroll_id;
 use crate::picker_session::{PickerSession, SessionMessage, SessionScrollRegion, SidebarEntryId};
 
 use super::readable_label;
+use crate::picker_session::PickerLocation;
 use bennu_theme::typography::{BODY_SIZE, CAPTION_SIZE};
 
 /// 行图标尺寸（与主软件 MENU_ICON_SIZE 同值）。
@@ -169,7 +169,7 @@ fn location_item(
 }
 
 fn trash_item(session: &PickerSession) -> Element<'static, SessionMessage> {
-    let selected = *session.location() == BrowserLocation::Trash;
+    let selected = *session.location() == PickerLocation::Trash;
     let tone = if selected {
         IconTone::Selected
     } else {

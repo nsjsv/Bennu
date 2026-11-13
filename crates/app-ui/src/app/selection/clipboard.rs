@@ -21,7 +21,7 @@ use file_operations::{new_directory_name, QueuedFileOperation, QueuedTransfer};
 impl FileBrowser {
     pub(in crate::app) fn copy_selected(&mut self) -> Task<Message> {
         self.context_menu = None;
-        if self.search_workspace.is_none() && self.tab().location == BrowserLocation::Trash {
+        if self.tab().location == BrowserLocation::Trash {
             return Task::none();
         }
         let paths = self.active_file_selection();
@@ -37,7 +37,7 @@ impl FileBrowser {
 
     pub(in crate::app) fn move_selected(&mut self) -> Task<Message> {
         self.context_menu = None;
-        if self.search_workspace.is_none() && self.tab().location == BrowserLocation::Trash {
+        if self.tab().location == BrowserLocation::Trash {
             return Task::none();
         }
         let paths = self.active_file_selection();
@@ -55,7 +55,7 @@ impl FileBrowser {
     /// 目标名按共享命名规则起名;完成后由 accept_file_operation_finished 选中副本。
     pub(in crate::app) fn duplicate_selected(&mut self) -> Task<Message> {
         self.context_menu = None;
-        if self.search_workspace.is_none() && self.tab().location == BrowserLocation::Trash {
+        if self.tab().location == BrowserLocation::Trash {
             return Task::none();
         }
         let sources = self.active_file_selection();
@@ -79,9 +79,6 @@ impl FileBrowser {
     /// 把 parent 等于该目录的选中项整批移入;跨栏选中项留在原地。
     pub(in crate::app) fn new_folder_from_selection(&mut self) -> Task<Message> {
         self.context_menu = None;
-        if self.search_workspace.is_some() {
-            return Task::none();
-        }
         let Some(directory) = self.gather_target_directory() else {
             return Task::none();
         };
@@ -132,7 +129,7 @@ impl FileBrowser {
 
     pub(in crate::app) fn trash_selected(&mut self) -> Task<Message> {
         self.context_menu = None;
-        if self.search_workspace.is_none() && self.tab().location == BrowserLocation::Trash {
+        if self.tab().location == BrowserLocation::Trash {
             return self.delete_selected_trash_entries();
         }
         self.trash_explicit_paths(self.active_file_selection())
@@ -507,7 +504,7 @@ impl FileBrowser {
         Task::batch(commands)
     }
 
-    /// 回收站不是目录，没有粘贴目标。
+    /// 回收站和搜索结果不是目录，没有粘贴目标。
     pub(super) fn paste_target_directory(&self) -> Option<PathBuf> {
         let current_directory = self.tab().current_directory()?;
         Some(
@@ -519,11 +516,10 @@ impl FileBrowser {
         )
     }
 
-    /// Cmd+V 的目的地对齐 Finder:多栏视图贴进"活动栏"(聚焦且已渲染的那一栏),
-    /// 不看指针悬停;无聚焦时回退最深打开栏,再回退当前目录。搜索结果浮层下
-    /// 浏览器栏不是粘贴语境,保持指针回退。列表/图标单目录,悬停父目录即当前目录。
+    /// Cmd+V 的目的地:多栏视图贴进"活动栏"(聚焦且已渲染的那一栏),不看指针悬停;
+    /// 无聚焦时回退最深打开栏,再回退当前目录。列表/图标单目录,悬停父目录即当前目录。
     fn keyboard_paste_directory(&self, current_directory: &Path) -> PathBuf {
-        if self.tab().view_mode() != BrowserViewMode::Columns || self.search_workspace.is_some() {
+        if self.tab().view_mode() != BrowserViewMode::Columns {
             return self
                 .cursor_paste_directory
                 .clone()

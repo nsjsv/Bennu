@@ -74,20 +74,20 @@ fn column_tab_drop_destination_follows_displayed_directory_only_for_columns() {
     tab.choose_view_mode(BrowserViewMode::Columns);
     assert_eq!(
         tab.file_drop_destination(),
-        TabDropDestination::Directory(deepest),
+        Some(TabDropDestination::Directory(deepest)),
     );
 
     for mode in [BrowserViewMode::List, BrowserViewMode::Icons] {
         tab.choose_view_mode(mode);
         assert_eq!(
             tab.file_drop_destination(),
-            TabDropDestination::Directory(root.clone()),
+            Some(TabDropDestination::Directory(root.clone())),
         );
     }
 
     assert_eq!(
         BrowserTab::trash(2).file_drop_destination(),
-        TabDropDestination::Trash,
+        Some(TabDropDestination::Trash),
     );
 }
 
@@ -104,7 +104,9 @@ fn column_tab_drop_rejects_destination_changed_after_target_was_frozen() {
     let target = TabFileDropTarget {
         pane_id,
         tab_id,
-        destination: tab.file_drop_destination(),
+        destination: tab
+            .file_drop_destination()
+            .expect("a folder tab accepts drops"),
     };
     browser.pane_mut().tabs.push(tab);
 

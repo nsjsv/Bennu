@@ -10,7 +10,7 @@ use file_core::{
 use super::*;
 use crate::config::ui_thread_startup_config;
 use crate::model::{
-    BrowserPaneLayout, BrowserTab, ExpandedDirectory, ExpandedDirectoryStatus,
+    BrowserLocation, BrowserPaneLayout, BrowserTab, ExpandedDirectory, ExpandedDirectoryStatus,
     IconGridExpansionAnchor, IconGridExpansionContext, IconGridExpansionSessionId,
     IconGridExpansionState, IconGridViewport, SplitAxis, TransferConflictMode,
     TransferConflictState,
@@ -113,7 +113,7 @@ fn measured_viewport_schedules_list_rows_from_shared_geometry() {
     let range = crate::visible_entries::list_entry_range_for_viewport(
         &entries,
         &HashMap::new(),
-        crate::list_view::LIST_ROW_HEIGHT,
+        crate::visible_entries::ListEntryHeights::uniform(crate::list_view::LIST_ROW_HEIGHT),
         crate::list_view::LIST_HEADER_HEIGHT,
         crate::list_view::LIST_HEADER_HEIGHT + crate::list_view::LIST_ROW_HEIGHT * 40.0,
         crate::list_view::LIST_ROW_HEIGHT * 3.0,
@@ -275,7 +275,7 @@ fn icon_grid_schedules_only_shared_visible_range_at_dynamic_edge() {
     browser.icon_grid_viewports.insert(
         BrowserPaneId::PRIMARY,
         PaneIconGridViewport {
-            location: browser.tab().location.clone(),
+            location: browser.tab().location.key(),
             viewport,
         },
     );
@@ -352,7 +352,7 @@ fn icon_grid_schedules_visible_expansion_thumbnail_requests() {
     browser.icon_grid_viewports.insert(
         BrowserPaneId::PRIMARY,
         PaneIconGridViewport {
-            location: browser.tab().location.clone(),
+            location: browser.tab().location.key(),
             viewport: IconGridViewport {
                 offset_y: 0.0,
                 width: 500.0,
@@ -530,7 +530,7 @@ fn drifted_thumbnail_result_requeues_with_current_entry_metadata() {
     let request = request_for_entry(&pending_entry, LIST_THUMBNAIL_EDGE).expect("pending request");
     let scope = thumbnail_scope_for_pane_location(
         BrowserPaneId::PRIMARY,
-        BrowserLocation::Directory(PathBuf::from("/workspace")),
+        crate::model::LocationKey::Directory(PathBuf::from("/workspace")),
     );
     browser.thumbnail_cache.enqueue_request_for_scope(
         request,

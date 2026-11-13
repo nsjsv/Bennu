@@ -43,6 +43,7 @@ fn vertical_bounds_count_placeholder_rows_above_the_target() {
             },
             transfer: None,
             stripe_index: 0,
+            snippet_height: 0.0,
         },
         placeholder_row("incoming.txt"),
         ListTransferRow::Entry {
@@ -53,6 +54,7 @@ fn vertical_bounds_count_placeholder_rows_above_the_target() {
             },
             transfer: None,
             stripe_index: 1,
+            snippet_height: 0.0,
         },
     ];
     assert_eq!(
@@ -73,6 +75,7 @@ fn content_height_counts_placeholder_and_animated_rows() {
             },
             transfer: None,
             stripe_index: 0,
+            snippet_height: 0.0,
         },
         placeholder_row("incoming.txt"),
         ListTransferRow::DirectoryStatusRow {
@@ -105,6 +108,7 @@ fn path_at_point_hits_entry_rows_and_skips_chrome_rows() {
             },
             transfer: None,
             stripe_index: 0,
+            snippet_height: 0.0,
         },
         placeholder_row("incoming.txt"),
         ListTransferRow::Entry {
@@ -115,6 +119,7 @@ fn path_at_point_hits_entry_rows_and_skips_chrome_rows() {
             },
             transfer: None,
             stripe_index: 1,
+            snippet_height: 0.0,
         },
     ];
     let at = |y: f32| list_entry_path_at_point(&rows, 40.0, 30.0, Point::new(0.0, y));

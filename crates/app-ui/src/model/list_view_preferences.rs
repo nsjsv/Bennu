@@ -1,11 +1,16 @@
 use file_core::{SortDirection, SortField};
 
+use super::context_menu_layout::insertion_index_by_default_order;
+use super::BrowserLocation;
+
 pub(crate) const LIST_COLUMN_MIN_WIDTH: f32 = 72.0;
 pub(crate) const LIST_COLUMN_MAX_WIDTH: f32 = 520.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum ListColumnKind {
     Name,
+    /// 所在文件夹；只在搜索结果里显示。
+    Location,
     Modified,
     Size,
     Kind,
@@ -17,8 +22,9 @@ pub(crate) enum ListColumnKind {
 }
 
 impl ListColumnKind {
-    pub(crate) const ALL: [Self; 9] = [
+    pub(crate) const ALL: [Self; 10] = [
         Self::Name,
+        Self::Location,
         Self::Modified,
         Self::Size,
         Self::Kind,
@@ -32,6 +38,7 @@ impl ListColumnKind {
     pub(crate) fn label(self) -> String {
         match self {
             Self::Name => tr!("Name"),
+            Self::Location => tr!("Location"),
             Self::Modified => tr!("Modified Time"),
             Self::Size => tr!("Size"),
             Self::Kind => tr!("Kind"),
@@ -46,6 +53,7 @@ impl ListColumnKind {
     pub(crate) fn config_value(self) -> &'static str {
         match self {
             Self::Name => "name",
+            Self::Location => "location",
             Self::Modified => "modified",
             Self::Size => "size",
             Self::Kind => "kind",
@@ -60,6 +68,7 @@ impl ListColumnKind {
     pub(crate) fn from_config_value(value: &str) -> Option<Self> {
         match value {
             "name" => Some(Self::Name),
+            "location" => Some(Self::Location),
             "modified" => Some(Self::Modified),
             "size" => Some(Self::Size),
             "kind" => Some(Self::Kind),
@@ -78,7 +87,20 @@ impl ListColumnKind {
             Self::Modified => Some(SortField::Modified),
             Self::Size => Some(SortField::Size),
             Self::Kind => Some(SortField::Kind),
-            Self::Owner | Self::Group | Self::Permissions | Self::Accessed | Self::Created => None,
+            Self::Location
+            | Self::Owner
+            | Self::Group
+            | Self::Permissions
+            | Self::Accessed
+            | Self::Created => None,
+        }
+    }
+
+    /// 这一列在这个位置上有没有内容：所在文件夹只在搜索结果里各不相同。
+    pub(crate) fn applies_at(self, location: &BrowserLocation) -> bool {
+        match self {
+            Self::Location => matches!(location, BrowserLocation::Search(_)),
+            _ => true,
         }
     }
 }
@@ -283,14 +305,23 @@ fn normalize_columns(columns: Vec<ListColumnConfig>) -> Vec<ListColumnConfig> {
         normalized.push(column);
     }
 
-    for kind in ListColumnKind::ALL {
-        if !normalized.iter().any(|column| column.kind == kind) {
-            normalized.push(ListColumnConfig::new(
+    let missing = ListColumnKind::ALL
+        .into_iter()
+        .filter(|kind| !normalized.iter().any(|column| column.kind == *kind))
+        .collect::<Vec<_>>();
+    for kind in missing {
+        let index =
+            insertion_index_by_default_order(&normalized, &ListColumnKind::ALL, kind, |column| {
+                column.kind
+            });
+        normalized.insert(
+            index,
+            ListColumnConfig::new(
                 kind,
                 default_column_width(kind),
                 default_column_visible(kind),
-            ));
-        }
+            ),
+        );
     }
 
     normalized
@@ -312,6 +343,7 @@ fn default_columns() -> Vec<ListColumnConfig> {
 fn default_column_width(kind: ListColumnKind) -> f32 {
     match kind {
         ListColumnKind::Name => 320.0,
+        ListColumnKind::Location => 240.0,
         ListColumnKind::Modified => 168.0,
         ListColumnKind::Size => 96.0,
         ListColumnKind::Kind => 96.0,
@@ -327,6 +359,7 @@ fn default_column_visible(kind: ListColumnKind) -> bool {
     matches!(
         kind,
         ListColumnKind::Name
+            | ListColumnKind::Location
             | ListColumnKind::Modified
             | ListColumnKind::Size
             | ListColumnKind::Kind
@@ -357,6 +390,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 ListColumnKind::Name,
+                ListColumnKind::Location,
                 ListColumnKind::Modified,
                 ListColumnKind::Size,
                 ListColumnKind::Kind,
@@ -375,11 +409,45 @@ mod tests {
             ListSortPreference::default(),
         );
 
+        let kinds = kinds(&preferences);
+        assert_eq!(kinds.len(), ListColumnKind::ALL.len());
+        assert!(ListColumnKind::ALL.iter().all(|kind| kinds.contains(kind)));
+        assert_eq!(kinds[0], ListColumnKind::Size);
+        assert!(preferences
+            .columns()
+            .iter()
+            .find(|column| column.kind == ListColumnKind::Name)
+            .is_some_and(|column| column.visible));
+    }
+
+    #[test]
+    fn a_column_added_later_appears_next_to_its_default_neighbour() {
+        // 升级前保存的列没有「位置」：它回到「名称」后面，其余保持用户排好的顺序。
+        let stored = [
+            ListColumnKind::Size,
+            ListColumnKind::Name,
+            ListColumnKind::Modified,
+            ListColumnKind::Kind,
+            ListColumnKind::Owner,
+            ListColumnKind::Group,
+            ListColumnKind::Permissions,
+            ListColumnKind::Accessed,
+            ListColumnKind::Created,
+        ];
+        let preferences = ListViewPreferences::new(
+            stored
+                .iter()
+                .map(|kind| ListColumnConfig::new(*kind, 120.0, true))
+                .collect(),
+            ListSortPreference::default(),
+        );
+
         assert_eq!(
             kinds(&preferences),
             vec![
                 ListColumnKind::Size,
                 ListColumnKind::Name,
+                ListColumnKind::Location,
                 ListColumnKind::Modified,
                 ListColumnKind::Kind,
                 ListColumnKind::Owner,
@@ -389,11 +457,6 @@ mod tests {
                 ListColumnKind::Created,
             ]
         );
-        assert!(preferences
-            .columns()
-            .iter()
-            .find(|column| column.kind == ListColumnKind::Name)
-            .is_some_and(|column| column.visible));
     }
 
     #[test]
@@ -436,8 +499,9 @@ mod tests {
         assert_eq!(
             kinds(&preferences),
             vec![
-                ListColumnKind::Modified,
+                ListColumnKind::Location,
                 ListColumnKind::Name,
+                ListColumnKind::Modified,
                 ListColumnKind::Kind,
                 ListColumnKind::Size,
                 ListColumnKind::Owner,
@@ -460,6 +524,7 @@ mod tests {
             vec![
                 ListColumnKind::Owner,
                 ListColumnKind::Name,
+                ListColumnKind::Location,
                 ListColumnKind::Modified,
                 ListColumnKind::Size,
                 ListColumnKind::Kind,
@@ -481,6 +546,7 @@ mod tests {
         assert_eq!(
             kinds(&preferences),
             vec![
+                ListColumnKind::Location,
                 ListColumnKind::Modified,
                 ListColumnKind::Size,
                 ListColumnKind::Name,

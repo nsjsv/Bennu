@@ -7,7 +7,7 @@ use iced::Task;
 
 use super::FileBrowser;
 use crate::model::{
-    AdvancedNewFolderMessage, AdvancedNewFolderState, BrowserLocation, Message, NestedParentListing,
+    AdvancedNewFolderMessage, AdvancedNewFolderState, Message, NestedParentListing,
 };
 use file_operations::QueuedFileOperation;
 
@@ -106,7 +106,8 @@ impl FileBrowser {
     /// 「建完移入」候选（与「用选中项新建文件夹」同一收纳语义）。
     pub(super) fn open_advanced_new_folder(&mut self, directory: PathBuf) -> Task<Message> {
         self.context_menu = None;
-        if self.tab().location == BrowserLocation::Trash || self.search_workspace.is_some() {
+        // 新建要落在当前文件夹里：回收站和搜索结果都不是文件夹。
+        if self.tab().current_directory().is_none() {
             return Task::none();
         }
         let taken_names = self

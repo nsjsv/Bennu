@@ -353,8 +353,8 @@ mod tests {
     use crate::dbus_file_chooser::PickerResolution;
     use crate::picker_request::{PickerKind, PickerRequestSpec};
     use crate::picker_session::scan::{DirectoryScanOutcome, DirectoryScanResult};
+    use crate::picker_session::PickerLocation;
     use crate::picker_session::SessionMessage;
-    use bennu_sidebar::BrowserLocation;
     use file_core::entry::{DirectoryEntry, EntryMetadata};
     use thumbnails::ThumbnailSourceMetadata;
 
@@ -510,9 +510,7 @@ mod tests {
         let request = session.drain_pending_thumbnail_requests().pop().unwrap();
 
         // 换目录清空在途/排队：旧目录的迟到回信必须整体丢弃。
-        session.enter_location(BrowserLocation::Directory(PathBuf::from(
-            "/other/directory",
-        )));
+        session.enter_location(PickerLocation::Directory(PathBuf::from("/other/directory")));
         session.accept_thumbnail_ready(request.clone(), Ok(cached_png(&request)));
         assert!(session.thumbnail_ready(&request.source).is_none());
     }

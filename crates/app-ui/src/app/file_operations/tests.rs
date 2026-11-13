@@ -7,7 +7,7 @@ use super::*;
 use crate::config;
 use crate::model::{
     BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, ExpandedDirectory,
-    ExpandedDirectoryStatus, ListDirectorySummary, SplitAxis,
+    ExpandedDirectoryStatus, HistoryEntry, ListDirectorySummary, SplitAxis,
 };
 use crate::shortcuts::FileSelectionDirection;
 use crate::thumbnail_cache::ColumnViewport;
@@ -372,7 +372,7 @@ async fn moved_renames_migrate_paths_before_terminal_completion() {
 }
 
 #[tokio::test]
-async fn moved_renames_batch_migrates_all_paths_with_one_pane_and_search_refresh() {
+async fn moved_renames_batch_migrates_all_paths_with_one_pane_refresh() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let workspace = tempfile::tempdir().unwrap();
     let first_source = workspace.path().join("first-old");
@@ -383,7 +383,6 @@ async fn moved_renames_batch_migrates_all_paths_with_one_pane_and_search_refresh
     std::fs::create_dir_all(&second_source).unwrap();
     browser.tab_mut().location = BrowserLocation::Directory(first_source.join("nested"));
     browser.renaming = Some(second_source.join("report.txt"));
-    drop(browser.update_search_input("report".to_owned()));
     attach_store(
         &mut browser.operation_queue,
         bennu_state::TaskQueueStore::new(workspace.path().join("state.sqlite")).unwrap(),
@@ -401,7 +400,6 @@ async fn moved_renames_batch_migrates_all_paths_with_one_pane_and_search_refresh
     .await;
     let task_id = browser.operation_queue.tasks().last().unwrap().id;
     let pane_generation = browser.pane().directory_load_generation;
-    let search_generation = browser.search_workspace.as_ref().unwrap().run.generation;
 
     drop(browser.update(direct_move_renamed_batch_message(vec![
         (first_source, first_target.clone()),
@@ -416,10 +414,6 @@ async fn moved_renames_batch_migrates_all_paths_with_one_pane_and_search_refresh
     // renamed 走增量应用：路径迁移照常，但不触发全量重扫（generation 不变）。
     // 目录未在 discovery 中显示时跳过立即应用，由 watcher 与对账兜底。
     assert_eq!(browser.pane().directory_load_generation, pane_generation);
-    assert_eq!(
-        browser.search_workspace.as_ref().unwrap().run.generation,
-        search_generation + 1
-    );
 
     // journal 落盘只失效 summaries 重算，不再整页 reload，也不重复迁移路径。
     drop(browser.update(direct_move_commit_batch_message(
@@ -432,10 +426,6 @@ async fn moved_renames_batch_migrates_all_paths_with_one_pane_and_search_refresh
         )],
     )));
     assert_eq!(browser.pane().directory_load_generation, pane_generation);
-    assert_eq!(
-        browser.search_workspace.as_ref().unwrap().run.generation,
-        search_generation + 1
-    );
     assert_eq!(
         browser.tab().current_directory().unwrap(),
         first_target.join("nested")
@@ -495,53 +485,81 @@ fn direct_move_commit_during_shutdown_does_not_migrate_paths() {
     );
 }
 
-#[test]
-fn completed_path_migration_updates_inline_rename_and_restarts_frozen_root_search() {
-    let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    let workspace = tempfile::tempdir().unwrap();
-    let source = workspace.path().join("old");
-    let destination = workspace.path().join("new");
-    std::fs::create_dir_all(source.join("nested")).unwrap();
-    browser.tab_mut().location = BrowserLocation::Directory(source.join("nested"));
-    browser.renaming = Some(source.join("nested/report.txt"));
+/// 进入一次搜索并收下一页结果；返回这次搜索的代号。
+fn search_with_results(browser: &mut FileBrowser, hits: &[PathBuf]) -> u64 {
     drop(browser.update_search_input("report".to_owned()));
-    let previous_search_generation = browser.search_workspace.as_ref().unwrap().run.generation;
-
-    finish_queued_rename(&mut browser, source.clone(), destination.clone());
-
-    assert_eq!(
-        browser.renaming,
-        Some(destination.join("nested/report.txt"))
-    );
-    let workspace = browser.search_workspace.as_ref().unwrap();
-    assert!(workspace.run.generation > previous_search_generation);
-    assert!(
-        !workspace.accepts_indexed_outcome(crate::model::IndexedSearchRequest {
-            generation: previous_search_generation,
-            cursor: None,
-        },)
-    );
-    let active_query = workspace
+    drop(browser.restart_active_search());
+    let request = browser
+        .active_search()
+        .unwrap()
         .run
-        .active_query
-        .as_ref()
-        .expect("restarted query");
-    assert_eq!(
-        active_query.scope,
-        SearchScope::Directory(source.join("nested"))
-    );
+        .pending_indexed_request
+        .expect("pending indexed request");
+    let hits = hits
+        .iter()
+        .map(|path| file_search::SearchHit {
+            display_name: path.file_name().unwrap().to_string_lossy().into_owned(),
+            path: path.clone(),
+            kind: file_search::SearchFileKind::File,
+            size: 0,
+            modified_ms: None,
+            accessed_ms: None,
+            created_ms: None,
+            rank: 1.0,
+            snippet: Some("a report line".to_owned()),
+            match_source: file_search::MatchSource::Content,
+        })
+        .collect();
+    drop(browser.accept_search_results(
+        request,
+        crate::model::IndexedSearchOutcome::Batch(file_search::SearchResultBatch {
+            query_id: request.run.generation,
+            hits,
+            next_cursor: None,
+            finished: true,
+        }),
+    ));
+    request.run.generation
 }
 
 #[test]
-fn completed_non_migration_operation_restarts_active_search_workspace() {
+fn completed_rename_moves_search_results_and_origin_without_searching_again() {
+    let (mut browser, _) = FileBrowser::new(config::default_user_config());
+    let source = PathBuf::from("/workspace/old");
+    let destination = PathBuf::from("/workspace/new");
+    browser.tab_mut().location = BrowserLocation::Directory(source.join("nested"));
+    let result = source.join("nested/report.txt");
+    let generation = search_with_results(&mut browser, &[result.clone()]);
+    browser.select_path(result.clone());
+    browser.renaming = Some(result);
+
+    finish_queued_rename(&mut browser, source, destination.clone());
+
+    let moved = destination.join("nested/report.txt");
+    assert_eq!(browser.renaming, Some(moved.clone()));
+    assert_eq!(browser.tab().entries[0].path, moved);
+    assert!(browser.tab().selected_paths.contains(&moved));
+    let search = browser.active_search().unwrap();
+    assert!(search.detail(&moved).is_some());
+    assert_eq!(search.origin(), destination.join("nested"));
+    assert_eq!(search.run.generation, generation);
+    assert!(matches!(
+        search.run.active_query.as_ref().unwrap().scope,
+        SearchScope::Directory(_)
+    ));
+}
+
+#[test]
+fn completed_delete_removes_results_without_searching_again() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let root = tempfile::tempdir().unwrap();
     browser.tab_mut().location = BrowserLocation::Directory(root.path().to_path_buf());
-    drop(browser.submit_search());
-    let first_generation = browser.search_workspace.as_ref().unwrap().run.generation;
+    let obsolete = root.path().join("obsolete.txt");
+    let kept = root.path().join("kept.txt");
+    let generation = search_with_results(&mut browser, &[obsolete.clone(), kept.clone()]);
     let task_id = queued_task_id(browser.operation_queue.enqueue(
         QueuedFileOperation::DeletePermanently {
-            paths: vec![root.path().join("obsolete.txt")],
+            paths: vec![obsolete.clone()],
         },
     ));
 
@@ -550,7 +568,16 @@ fn completed_non_migration_operation_restarts_active_search_workspace() {
         FileOperationCompletion::Succeeded(FileOperationOutcome::NoHistory),
     ));
 
-    assert!(browser.search_workspace.as_ref().unwrap().run.generation > first_generation);
+    let remaining = browser
+        .tab()
+        .entries
+        .iter()
+        .map(|entry| entry.path.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(remaining, vec![kept]);
+    let search = browser.active_search().unwrap();
+    assert!(search.detail(&obsolete).is_none());
+    assert_eq!(search.run.generation, generation);
 }
 
 #[test]
@@ -574,13 +601,18 @@ fn completed_rename_migrates_another_pane_hidden_tab_history_and_columns() {
     active_tab
         .expanded_directories
         .insert(source.join("nested"), loaded_expanded_directory());
-    active_tab.back_stack = vec![source.join("back"), PathBuf::from("/workspace/old-copy")];
-    active_tab.forward_stack = vec![source.join("forward")];
+    active_tab.back_stack = vec![
+        HistoryEntry::Directory(source.join("back")),
+        HistoryEntry::Directory(PathBuf::from("/workspace/old-copy")),
+    ];
+    active_tab.forward_stack = vec![HistoryEntry::Directory(source.join("forward"))];
     let mut hidden_tab = BrowserTab::directory(hidden_tab_id, source.join("hidden"));
     hidden_tab
         .expanded_directories
         .insert(source.join("hidden/expanded"), loaded_expanded_directory());
-    hidden_tab.back_stack.push(source.join("hidden/back"));
+    hidden_tab
+        .back_stack
+        .push(HistoryEntry::Directory(source.join("hidden/back")));
     let mut inactive_pane = BrowserPane::with_tabs(
         BrowserPaneId(1),
         vec![active_tab, hidden_tab],
@@ -617,13 +649,13 @@ fn completed_rename_migrates_another_pane_hidden_tab_history_and_columns() {
     assert_eq!(
         migrated_tab.back_stack,
         vec![
-            destination.join("back"),
-            PathBuf::from("/workspace/old-copy")
+            HistoryEntry::Directory(destination.join("back")),
+            HistoryEntry::Directory(PathBuf::from("/workspace/old-copy"))
         ]
     );
     assert_eq!(
         migrated_tab.forward_stack,
-        vec![destination.join("forward")]
+        vec![HistoryEntry::Directory(destination.join("forward"))]
     );
     assert!(migrated_tab
         .expanded_directories
@@ -641,7 +673,10 @@ fn completed_rename_migrates_another_pane_hidden_tab_history_and_columns() {
         hidden_tab.current_directory().unwrap(),
         destination.join("hidden")
     );
-    assert_eq!(hidden_tab.back_stack, vec![destination.join("hidden/back")]);
+    assert_eq!(
+        hidden_tab.back_stack,
+        vec![HistoryEntry::Directory(destination.join("hidden/back"))]
+    );
     assert!(hidden_tab
         .expanded_directories
         .contains_key(&destination.join("hidden/expanded")));

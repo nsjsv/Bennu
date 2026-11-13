@@ -1,25 +1,25 @@
+use std::path::Path;
+
 use file_core::{DirectoryEntry, EntryMetadata, FileKind};
 use file_search::{SearchFileKind, SearchScope, SearchTextScope};
 use tempfile::tempdir;
 
 use super::*;
-use crate::model::BrowserLocation;
 use crate::model::{
     BrowserViewMode, ExpandedDirectory, ExpandedDirectoryStatus, SearchDateField, SearchDatePreset,
     SearchDirectoryScope, SearchEntryTypePreset,
 };
 
-#[test]
-fn columns_search_uses_last_pointer_clicked_column_instead_of_keyboard_focus() {
-    let root = tempdir().unwrap();
-    let project = root.path().join("project");
-    let root_file = root.path().join("root.txt");
+/// 多栏视图：根目录一栏，展开的 project 一栏。
+fn columns_browser(root: &Path) -> (FileBrowser, PathBuf, PathBuf, PathBuf) {
+    let project = root.join("project");
+    let root_file = root.join("root.txt");
     let child_file = project.join("child.txt");
-    std::fs::create_dir(&project).unwrap();
+    std::fs::create_dir_all(&project).unwrap();
     std::fs::write(&root_file, "root").unwrap();
     std::fs::write(&child_file, "child").unwrap();
 
-    let mut browser = browser_for_search_tests(root.path().to_path_buf());
+    let mut browser = browser_for_search_tests(root.to_path_buf());
     browser.tab_mut().choose_view_mode(BrowserViewMode::Columns);
     browser.tab_mut().entries = vec![
         DirectoryEntry::new(
@@ -66,25 +66,31 @@ fn columns_search_uses_last_pointer_clicked_column_instead_of_keyboard_focus() {
         },
     );
     browser.tab_mut().deepest_open_column_directory = Some(project.clone());
+    (browser, root_file, child_file, project)
+}
 
+#[test]
+fn columns_search_uses_last_pointer_clicked_column_instead_of_keyboard_focus() {
+    let root = tempdir().unwrap();
+
+    let (mut browser, root_file, child_file, project) = columns_browser(root.path());
     drop(browser.handle_column_entry_clicked(root_file));
     drop(browser.select_path_from_keyboard(child_file));
-    drop(browser.handle_blank_area_right_clicked(project.clone()));
-    drop(browser.submit_search());
-    assert_eq!(
-        browser.search_workspace.as_ref().unwrap().root.path(),
-        root.path()
-    );
+    drop(browser.handle_blank_area_right_clicked(project));
+    drop(submit_search(&mut browser));
+    assert_eq!(browser.active_search().unwrap().root.path(), root.path());
 
-    drop(browser.close_search_workspace());
+    let (mut browser, _, _, project) = columns_browser(root.path());
     drop(browser.handle_column_blank_right_clicked(project.clone()));
-    drop(browser.submit_search());
+    drop(submit_search(&mut browser));
     assert_eq!(
-        browser.search_workspace.as_ref().unwrap().root.path(),
+        browser.active_search().unwrap().root.path(),
         project.as_path()
     );
 
-    drop(browser.close_search_workspace());
+    // 换过视图后点过的栏作废，回到标签所在的文件夹。
+    let (mut browser, _, _, project) = columns_browser(root.path());
+    drop(browser.handle_column_blank_right_clicked(project));
     drop(
         browser
             .select_browser_view_mode(crate::model::BrowserPaneId::PRIMARY, BrowserViewMode::List),
@@ -93,11 +99,8 @@ fn columns_search_uses_last_pointer_clicked_column_instead_of_keyboard_focus() {
         crate::model::BrowserPaneId::PRIMARY,
         BrowserViewMode::Columns,
     ));
-    drop(browser.submit_search());
-    assert_eq!(
-        browser.search_workspace.as_ref().unwrap().root.path(),
-        root.path()
-    );
+    drop(submit_search(&mut browser));
+    assert_eq!(browser.active_search().unwrap().root.path(), root.path());
 }
 
 #[test]
@@ -105,10 +108,8 @@ fn switching_directory_scope_restarts_with_frozen_roots_and_rejects_stale_result
     let roots = tempdir().unwrap();
     let current_folder = roots.path().join("current");
     let home = roots.path().join("home");
-    let navigated_folder = roots.path().join("navigated");
     std::fs::create_dir(&current_folder).unwrap();
     std::fs::create_dir(&home).unwrap();
-    std::fs::create_dir(&navigated_folder).unwrap();
     let mut browser = browser_for_search_tests(current_folder.clone());
     browser.home_dir = home.clone();
 
@@ -118,24 +119,24 @@ fn switching_directory_scope_restarts_with_frozen_roots_and_rejects_stale_result
     drop(browser.select_search_date_field(SearchDateField::Created));
     drop(browser.select_search_date_preset(SearchDatePreset::PastSevenDays));
     let stale_current_request = pending_indexed_request(&browser);
-    let stale_current_generation = stale_current_request.generation;
+    let stale_current_run = stale_current_request.run;
+    let stale_current_generation = stale_current_run.generation;
     drop(browser.accept_search_results(
         stale_current_request,
         IndexedSearchOutcome::ProviderUnavailable("index is starting".to_owned()),
     ));
-    start_default_directory_fallback(&mut browser, stale_current_generation, "index is starting");
+    start_default_directory_fallback(&mut browser, stale_current_run, "index is starting");
     let old_current_hit = current_folder.join("old-current.txt");
     drop(browser.accept_directory_search_batch(
-        stale_current_generation,
+        stale_current_run,
         vec![search_hit(old_current_hit.clone(), SearchFileKind::File)],
     ));
-    drop(browser.press_search_result(old_current_hit));
+    browser.select_path(old_current_hit);
 
-    browser.tab_mut().location = BrowserLocation::Directory(navigated_folder);
     drop(browser.select_search_directory_scope(SearchDirectoryScope::Home));
     let stale_home_request = pending_indexed_request(&browser);
     {
-        let workspace = browser.search_workspace.as_ref().unwrap();
+        let workspace = browser.active_search().unwrap();
         let query = workspace.run.active_query.as_ref().unwrap();
         assert_eq!(workspace.root.selected_scope(), SearchDirectoryScope::Home);
         assert_eq!(workspace.root.path(), home);
@@ -156,8 +157,8 @@ fn switching_directory_scope_restarts_with_frozen_roots_and_rejects_stale_result
             query.scope,
             SearchScope::Directory(ref root) if root == &home
         ));
-        assert!(workspace.window.hits.is_empty());
-        assert!(workspace.selected_paths_in_result_order().is_empty());
+        assert!(browser.tab().entries.is_empty());
+        assert!(browser.tab().selected_paths.is_empty());
     }
 
     drop(browser.accept_search_results(
@@ -172,33 +173,27 @@ fn switching_directory_scope_restarts_with_frozen_roots_and_rejects_stale_result
         )),
     ));
     drop(browser.accept_directory_search_batch(
-        stale_current_generation,
+        stale_current_run,
         vec![search_hit(
             current_folder.join("late-fallback.txt"),
             SearchFileKind::File,
         )],
     ));
-    assert!(browser
-        .search_workspace
-        .as_ref()
-        .unwrap()
-        .window
-        .hits
-        .is_empty());
+    assert!(browser.tab().entries.is_empty());
 
     drop(browser.select_search_directory_scope(SearchDirectoryScope::CurrentFolder));
     let current_again_request = pending_indexed_request(&browser);
     drop(browser.accept_search_results(
         stale_home_request,
         IndexedSearchOutcome::Batch(indexed_batch(
-            stale_home_request.generation,
+            stale_home_request.run.generation,
             vec![search_hit(home.join("late-home.txt"), SearchFileKind::File)],
             true,
         )),
     ));
-    let workspace = browser.search_workspace.as_ref().unwrap();
+    let workspace = browser.active_search().unwrap();
     let query = workspace.run.active_query.as_ref().unwrap();
-    assert!(current_again_request.generation > stale_home_request.generation);
+    assert!(current_again_request.run.generation > stale_home_request.run.generation);
     assert_eq!(
         workspace.root.selected_scope(),
         SearchDirectoryScope::CurrentFolder
@@ -208,7 +203,7 @@ fn switching_directory_scope_restarts_with_frozen_roots_and_rejects_stale_result
         query.scope,
         SearchScope::Directory(ref root) if root == &current_folder
     ));
-    assert!(workspace.window.hits.is_empty());
+    assert!(browser.tab().entries.is_empty());
 }
 
 #[test]
@@ -225,8 +220,8 @@ fn all_indexed_locations_uses_global_query_without_directory_fallback() {
     let stale_request = pending_indexed_request(&browser);
     drop(browser.select_search_directory_scope(SearchDirectoryScope::AllIndexedLocations));
     let global_request = pending_indexed_request(&browser);
-    let workspace = browser.search_workspace.as_ref().unwrap();
-    assert!(global_request.generation > stale_request.generation);
+    let workspace = browser.active_search().unwrap();
+    assert!(global_request.run.generation > stale_request.run.generation);
     assert_eq!(
         workspace.root.selected_scope(),
         SearchDirectoryScope::AllIndexedLocations
@@ -240,7 +235,7 @@ fn all_indexed_locations_uses_global_query_without_directory_fallback() {
         global_request,
         IndexedSearchOutcome::ProviderUnavailable("index unavailable".to_owned()),
     ));
-    let workspace = browser.search_workspace.as_ref().unwrap();
+    let workspace = browser.active_search().unwrap();
     assert!(workspace.window.failure.is_some());
 }
 
@@ -254,11 +249,11 @@ fn empty_input_scope_selection_is_used_later_and_unavailable_home_fails_closed()
     let mut browser = browser_for_search_tests(current_folder.clone());
     browser.home_dir = home.clone();
 
-    drop(browser.submit_search());
-    let empty_generation = browser.search_workspace.as_ref().unwrap().run.generation;
+    drop(submit_search(&mut browser));
+    let empty_generation = browser.active_search().unwrap().run.generation;
     drop(browser.select_search_directory_scope(SearchDirectoryScope::Home));
     {
-        let workspace = browser.search_workspace.as_ref().unwrap();
+        let workspace = browser.active_search().unwrap();
         assert_eq!(workspace.root.selected_scope(), SearchDirectoryScope::Home);
         assert_eq!(workspace.root.path(), home);
         assert!(workspace.run.generation > empty_generation);
@@ -267,10 +262,7 @@ fn empty_input_scope_selection_is_used_later_and_unavailable_home_fails_closed()
 
     stabilize_search_input(&mut browser, "later");
     assert!(matches!(
-        browser
-            .search_workspace
-            .as_ref()
-            .unwrap()
+        browser.active_search().unwrap()
             .run
             .active_query
             .as_ref()
@@ -284,7 +276,7 @@ fn empty_input_scope_selection_is_used_later_and_unavailable_home_fails_closed()
     drop(browser.accept_search_results(
         current_request,
         IndexedSearchOutcome::Batch(indexed_batch(
-            current_request.generation,
+            current_request.run.generation,
             vec![search_hit(
                 current_folder.join("current.txt"),
                 SearchFileKind::File,
@@ -296,10 +288,10 @@ fn empty_input_scope_selection_is_used_later_and_unavailable_home_fails_closed()
 
     drop(browser.select_search_directory_scope(SearchDirectoryScope::Home));
     {
-        let workspace = browser.search_workspace.as_ref().unwrap();
+        let workspace = browser.active_search().unwrap();
         assert_eq!(workspace.root.selected_scope(), SearchDirectoryScope::Home);
         assert_eq!(workspace.root.path(), home);
-        assert!(workspace.run.generation > current_request.generation);
+        assert!(workspace.run.generation > current_request.run.generation);
         // 根目录校验已移入后台：查询先进入待校验状态。
         assert!(workspace.run.active_query.is_some());
     }
@@ -307,8 +299,7 @@ fn empty_input_scope_selection_is_used_later_and_unavailable_home_fails_closed()
     // 以与消息处理器相同的入口注入“根不可用”的校验结果。
     let request = pending_indexed_request(&browser);
     let query = browser
-        .search_workspace
-        .as_ref()
+        .active_search()
         .unwrap()
         .run
         .active_query
@@ -321,9 +312,9 @@ fn empty_input_scope_selection_is_used_later_and_unavailable_home_fails_closed()
         false,
     ));
 
-    let workspace = browser.search_workspace.as_ref().unwrap();
+    let workspace = browser.active_search().unwrap();
     assert!(workspace.run.active_query.is_none());
-    assert!(workspace.window.hits.is_empty());
+    assert!(browser.tab().entries.is_empty());
     assert!(workspace
         .window
         .failure
@@ -338,10 +329,10 @@ fn opening_search_from_home_exposes_home_and_global_scopes() {
     browser.home_dir = home.clone();
 
     stabilize_search_input(&mut browser, "report");
-    let generation = browser.search_workspace.as_ref().unwrap().run.generation;
+    let generation = browser.active_search().unwrap().run.generation;
     drop(browser.select_search_directory_scope(SearchDirectoryScope::CurrentFolder));
 
-    let workspace = browser.search_workspace.as_ref().unwrap();
+    let workspace = browser.active_search().unwrap();
     assert_eq!(workspace.root.selected_scope(), SearchDirectoryScope::Home);
     assert_eq!(
         workspace.root.available_scopes(),

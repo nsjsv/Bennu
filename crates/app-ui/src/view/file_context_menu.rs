@@ -42,6 +42,7 @@ enum MenuSection {
 fn item_section(item: FileAreaMenuItem) -> MenuSection {
     match item {
         FileAreaMenuItem::Open
+        | FileAreaMenuItem::OpenContainingFolder
         | FileAreaMenuItem::OpenWith
         | FileAreaMenuItem::SmartExtractHere
         | FileAreaMenuItem::ExtractToArchiveFolder => MenuSection::Open,
@@ -150,6 +151,7 @@ pub(super) fn file_context_menu_panel<'a>(
     let entries: Vec<FileEntryMenuEntry> = match &menu.target {
         Some(_) => {
             let mut entries = context_menus.file_entry_menu_entries(
+                menu.place,
                 menu.target_is_directory,
                 menu.can_batch_rename,
                 menu.can_create_symlink,
@@ -317,6 +319,11 @@ fn file_menu_action_row(
             item.label(),
             Message::OpenPath(path.clone()),
         ),
+        (FileAreaMenuItem::OpenContainingFolder, Some(path)) => menu_item(
+            item.icon(),
+            item.label(),
+            Message::SearchOpenContainingDirectory(path.clone()),
+        ),
         (FileAreaMenuItem::SmartExtractHere, _) => {
             menu_item(item.icon(), item.label(), Message::SmartExtractSelected)
         }
@@ -369,6 +376,7 @@ fn file_menu_action_row(
             FileAreaMenuItem::NewEntry
             | FileAreaMenuItem::Tools
             | FileAreaMenuItem::Open
+            | FileAreaMenuItem::OpenContainingFolder
             | FileAreaMenuItem::OpenWith
             | FileAreaMenuItem::Rename
             | FileAreaMenuItem::Properties,

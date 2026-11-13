@@ -3,10 +3,10 @@
 
 use super::{seeded_listing, session};
 use crate::picker_request::PickerKind;
+use crate::picker_session::PickerLocation;
 use crate::picker_session::{
     DirectoryListing, PathSuggestionDirection, SessionEffect, SessionMessage,
 };
-use bennu_sidebar::BrowserLocation;
 use file_core::entry::FileKind;
 
 #[test]
@@ -61,7 +61,7 @@ fn address_editing_prefills_navigates_and_cancels() {
     session.update(SessionMessage::AddressEditChanged("a".to_string()));
     let effect = session.update(SessionMessage::AddressEditingSubmitted);
     assert!(
-        matches!(effect, SessionEffect::NavigateLocation(dir) if dir == BrowserLocation::Directory(start.join("a")))
+        matches!(effect, SessionEffect::NavigateLocation(dir) if dir == PickerLocation::Directory(start.join("a")))
     );
     assert!(session.address_editing().is_none());
 
@@ -90,7 +90,7 @@ fn submitting_prefers_selected_suggestion_over_parsed_draft() {
 
     assert!(matches!(
         effect,
-        SessionEffect::NavigateLocation(dir) if dir == BrowserLocation::Directory(start.join("other"))
+        SessionEffect::NavigateLocation(dir) if dir == PickerLocation::Directory(start.join("other"))
     ));
     assert!(session.address_editing.is_none());
 }
@@ -262,7 +262,7 @@ fn breadcrumb_current_segment_enters_editing_others_navigate() {
         target: parent.clone(),
     });
     assert!(
-        matches!(effect, SessionEffect::NavigateLocation(dir) if dir == BrowserLocation::Directory(parent))
+        matches!(effect, SessionEffect::NavigateLocation(dir) if dir == PickerLocation::Directory(parent))
     );
     assert!(session.address_editing.is_none());
 }
@@ -290,7 +290,7 @@ fn suggestion_row_click_requires_membership_in_current_list() {
     });
     assert!(matches!(
         effect,
-        SessionEffect::NavigateLocation(dir) if dir == BrowserLocation::Directory(start.join("real"))
+        SessionEffect::NavigateLocation(dir) if dir == PickerLocation::Directory(start.join("real"))
     ));
 }
 

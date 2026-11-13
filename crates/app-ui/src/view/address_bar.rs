@@ -22,7 +22,8 @@ use crate::breadcrumb_drop_target_bounds::{
 use crate::formatting::format_middle_ellipsized_text;
 use crate::model::{
     breadcrumb_segments, displayed_address_directory, BreadcrumbSegment, BreadcrumbSegmentKind,
-    BrowserLocation, BrowserPaneId, FileDropTarget, Message, ScrollbarRegion,
+    BrowserLocation, BrowserPaneId, FileDropTarget, Message, ScrollbarRegion, SearchDirectoryScope,
+    SearchWorkspaceState,
 };
 use crate::view::{icon_tone_style, themed_icon, IconTone};
 use bennu_preview::panel_text::readable_text;
@@ -49,6 +50,7 @@ pub(crate) fn address_bar<'a>(
             pane.deepest_open_column_directory,
         ),
         BrowserLocation::Trash => return trash_address_bar(pane.id),
+        BrowserLocation::Search(search) => return search_address_bar(browser, pane, search),
     };
 
     let editing_fraction = pane.address_transition_fraction.clamp(0.0, 1.0);
@@ -88,6 +90,37 @@ pub(crate) fn address_bar<'a>(
     });
 
     address_bar_surface(anchored_popup(anchor, popup), pane.id)
+}
+
+/// 搜索结果：搜索图标 + 搜的文件夹路径（点任一层退出搜索去那里）；搜所有已索引位置时
+/// 只显示文字。
+fn search_address_bar<'a>(
+    browser: &'a FileBrowser,
+    pane: BrowserPaneView<'a>,
+    search: &'a SearchWorkspaceState,
+) -> Element<'a, Message> {
+    let icon = container(themed_icon(
+        IconSymbol::Search,
+        IconTone::Normal,
+        BREADCRUMB_ICON_SIZE,
+    ))
+    .padding(iced::padding::left(10));
+    let place: Element<'a, Message> =
+        if search.root.selected_scope() == SearchDirectoryScope::AllIndexedLocations {
+            container(readable_text(tr!("All indexed locations")))
+                .padding([7, 8])
+                .width(Length::Fill)
+                .into()
+        } else {
+            breadcrumb_layer(browser, pane, search.root.path(), 1.0, true)
+        };
+    address_bar_surface(
+        iced::widget::row![icon, place]
+            .align_y(iced::Alignment::Center)
+            .width(Length::Fill)
+            .into(),
+        pane.id,
+    )
 }
 
 fn trash_address_bar<'a>(pane_id: BrowserPaneId) -> Element<'a, Message> {

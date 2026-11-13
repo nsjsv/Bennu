@@ -149,7 +149,7 @@ mod tests {
     use crate::icon_grid_geometry::{row_height, ICON_GRID_CONTENT_PADDING};
     use crate::icon_grid_layout::ICON_GRID_GROUP_HEADER_HEIGHT;
     use crate::list_view::{LIST_GROUP_HEADER_HEIGHT, LIST_HEADER_HEIGHT, LIST_ROW_HEIGHT};
-    use crate::model::BrowserLocation;
+    use crate::model::{BrowserLocation, LocationKey};
     use crate::model::{BrowserPaneId, BrowserViewMode, FileGroupingMode, Message};
     use crate::thumbnail_cache::ColumnViewport;
 
@@ -234,7 +234,7 @@ mod tests {
             .icon_grid_viewports
             .get(&pane_id)
             .expect("icon grid viewport recorded");
-        assert_eq!(state.location, BrowserLocation::Directory(root));
+        assert_eq!(state.location, LocationKey::Directory(root));
         assert_eq!(state.viewport.offset_y, expected);
     }
 }

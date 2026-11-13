@@ -11,7 +11,7 @@ use super::{FileBrowser, DOUBLE_CLICK_THRESHOLD};
 use crate::model::{
     file_grouping_entry_visible, BrowserLocation, BrowserPaneId, BrowserViewMode, ContextMenuState,
     FileContextMenuExpansion, FileContextMenuState, FileDeleteAction, FileDragSpringSource,
-    FileDragStationaryAction, FileDropTarget, LastActivationClick, Message,
+    FileDragStationaryAction, FileDropTarget, FileMenuPlace, LastActivationClick, Message,
 };
 use crate::selection_summary::{summarize_selected_entries, PaneSelectionSummary};
 
@@ -188,16 +188,17 @@ impl FileBrowser {
         self.hovered_entry = Some(path.clone());
         self.set_cursor_paste_directory(self.entry_parent_directory(&path));
         if self.file_drag.is_some() {
-            self.set_file_drag_target(self.directory_drop_target_for_entry(&path));
+            let pane_id = self.active_pane_id();
+            let target = self.directory_drop_target_for_entry_in_pane(pane_id, &path);
+            // 目录条目的落点是条目自身，构成 spring 候选；其余条目清除候选。
             self.note_file_drag_spring_hover(
-                (self.entry_kind(&path) == Some(FileKind::Directory)).then(|| {
-                    (
-                        self.active_pane_id(),
-                        path.clone(),
-                        FileDragSpringSource::Entry,
-                    )
-                }),
+                (target.as_deref() == Some(path.as_path()))
+                    .then(|| (pane_id, path.clone(), FileDragSpringSource::Entry)),
             );
+            match target {
+                Some(target) => self.set_file_drag_target(target),
+                None => self.clear_file_drag_target(),
+            }
         } else if self.selection_marquee.is_none() {
             self.extend_drag_selection_to(path);
         }
@@ -428,6 +429,7 @@ impl FileBrowser {
             self.open_trash_context_menu(Some(path));
         } else if self.file_area_menu_is_visible(true, target_is_directory, can_batch_rename) {
             self.context_menu = Some(ContextMenuState::FileArea(FileContextMenuState {
+                place: self.file_menu_place(),
                 target: Some(path.clone()),
                 target_is_directory,
                 paste_directory: self.entry_parent_directory(&path),
@@ -475,6 +477,7 @@ impl FileBrowser {
         self.selection_marquee = None;
         if self.file_area_menu_is_visible(false, false, false) {
             self.context_menu = Some(ContextMenuState::FileArea(FileContextMenuState {
+                place: FileMenuPlace::Folder,
                 target: None,
                 target_is_directory: false,
                 paste_directory: directory,
@@ -493,6 +496,13 @@ impl FileBrowser {
         Task::batch([expansion_command, rename_command])
     }
 
+    fn file_menu_place(&self) -> FileMenuPlace {
+        match self.tab().location {
+            BrowserLocation::Search(_) => FileMenuPlace::SearchResults,
+            BrowserLocation::Directory(_) | BrowserLocation::Trash => FileMenuPlace::Folder,
+        }
+    }
+
     /// 与 view 层 entry/blank 面板选择同一谓词,配置后无可见面板时菜单不进入状态。
     pub(super) fn file_area_menu_is_visible(
         &self,
@@ -503,7 +513,12 @@ impl FileBrowser {
         let menus = &self.user_config.context_menus;
         if has_target {
             !menus
-                .file_entry_menu_entries(target_is_directory, can_batch_rename, true)
+                .file_entry_menu_entries(
+                    self.file_menu_place(),
+                    target_is_directory,
+                    can_batch_rename,
+                    true,
+                )
                 .is_empty()
         } else {
             !menus.file_blank_items().is_empty()
@@ -722,22 +737,12 @@ impl FileBrowser {
         })
     }
 
-    fn directory_drop_target_for_entry(&self, path: &Path) -> PathBuf {
-        if self.entry_kind(path) == Some(FileKind::Directory) {
-            path.to_path_buf()
-        } else {
-            self.entry_parent_directory(path)
-        }
-    }
-
-    fn directory_drop_target_for_entry_in_pane(
+    pub(in crate::app) fn directory_drop_target_for_entry_in_pane(
         &self,
         pane_id: BrowserPaneId,
         path: &Path,
     ) -> Option<PathBuf> {
         let pane = self.pane_view(pane_id)?;
-        let current_directory = pane.current_directory()?;
-
         let entry_kind = match pane.view_mode {
             BrowserViewMode::Icons if pane_id == self.active_pane_id() => self.entry_kind(path),
             BrowserViewMode::Icons => pane
@@ -758,10 +763,15 @@ impl FileBrowser {
         };
 
         if entry_kind == Some(FileKind::Directory) {
-            Some(path.to_path_buf())
-        } else {
-            Some(path.parent().unwrap_or(current_directory).to_path_buf())
+            return pane
+                .location
+                .folder_entries_are_live()
+                .then(|| path.to_path_buf());
         }
+        // 文件条目代表它所在的文件夹（当前文件夹或展开的子文件夹）。搜索结果里的文件来自
+        // 各处，放到它上面没有明确的去处。
+        let current_directory = pane.current_directory()?;
+        Some(path.parent().unwrap_or(current_directory).to_path_buf())
     }
 
     fn pane_accepts_file_drag(&self, pane_id: BrowserPaneId) -> bool {
@@ -860,9 +870,7 @@ impl FileBrowser {
         &self,
         pane: BrowserPaneView<'_>,
     ) -> Option<PaneSelectionSummary> {
-        // 搜索工作区替换了窗格内容,生效的是搜索结果独立选择集,
-        // 底栏统计只属于文件浏览窗格。
-        if pane.selected_paths.is_empty() || self.search_workspace.is_some() {
+        if pane.selected_paths.is_empty() {
             return None;
         }
 
@@ -953,8 +961,7 @@ impl FileBrowser {
     }
 
     pub(super) fn active_file_selection(&self) -> Vec<PathBuf> {
-        self.active_search_selection()
-            .unwrap_or_else(|| self.selected_paths_for_operation())
+        self.selected_paths_for_operation()
     }
 
     fn file_delete_action_for_selection(&self) -> FileDeleteAction {

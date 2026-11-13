@@ -7,8 +7,8 @@ use thumbnails::ThumbnailRequest;
 use super::{FileBrowser, PaneIconGridViewport};
 use crate::commands::thumbnail_batch_command;
 use crate::model::{
-    sanitized_application_log_detail, BrowserLocation, BrowserPane, BrowserPaneId, BrowserViewMode,
-    IconGridViewport, Message, ScrollbarRegion,
+    sanitized_application_log_detail, BrowserPane, BrowserPaneId, BrowserViewMode,
+    IconGridViewport, LocationKey, Message, ScrollbarRegion,
 };
 use crate::thumbnail_cache::{
     request_for_entry, request_for_transfer_conflict_path, ColumnViewport, ThumbnailLoadOutcome,
@@ -85,6 +85,7 @@ impl FileBrowser {
             self.sync_selection_marquee_scroll(ScrollbarRegion::PaneList(pane_id), offset_y),
             self.schedule_visible_list_directory_summary_range_for_pane(pane_id, Some(viewport)),
             self.pump_thumbnail_queue(),
+            self.load_more_search_results_near_end(pane_id),
         ])
     }
 
@@ -95,7 +96,7 @@ impl FileBrowser {
         width: f32,
         height: f32,
     ) -> Task<Message> {
-        let Some(location) = self.pane_view(pane_id).map(|pane| pane.location.clone()) else {
+        let Some(location) = self.pane_view(pane_id).map(|pane| pane.location.key()) else {
             return Task::none();
         };
         self.icon_grid_viewports.insert(
@@ -113,6 +114,7 @@ impl FileBrowser {
         Task::batch([
             self.sync_selection_marquee_scroll(ScrollbarRegion::PaneIcons(pane_id), offset_y),
             self.pump_thumbnail_queue(),
+            self.load_more_search_results_near_end(pane_id),
         ])
     }
 
@@ -309,7 +311,7 @@ impl FileBrowser {
                 .into_iter()
                 .filter_map(|visible| request_for_entry(visible.entry, thumbnail_edge))
                 .collect::<Vec<_>>();
-            (pane.location.clone(), requests)
+            (pane.location.key(), requests)
         }) else {
             return;
         };
@@ -342,7 +344,7 @@ impl FileBrowser {
         };
         let geometry =
             crate::list_view::ListGeometry::for_level(self.user_config.list_view_density);
-        let location = pane.location.clone();
+        let location = pane.location.key();
         // 初始预热行数必须由真实视口高度推导；固定行数在窗口较高时会让
         // 折叠线以下的可见条目永远等不到调度，只能靠 hover/滚动补救。
         let initial_rows = crate::list_view::list_initial_rows(
@@ -354,7 +356,10 @@ impl FileBrowser {
                 crate::visible_entries::list_entry_range_for_viewport(
                     pane.entries,
                     pane.expanded_directories,
-                    geometry.row_height,
+                    crate::visible_entries::ListEntryHeights::at(
+                        pane.location,
+                        geometry.row_height,
+                    ),
                     crate::list_view::LIST_HEADER_HEIGHT,
                     viewport.offset_y,
                     viewport.height,
@@ -365,7 +370,10 @@ impl FileBrowser {
                 crate::visible_entries::initial_list_entry_range(
                     pane.entries,
                     pane.expanded_directories,
-                    geometry.row_height,
+                    crate::visible_entries::ListEntryHeights::at(
+                        pane.location,
+                        geometry.row_height,
+                    ),
                     initial_rows,
                 )
             });
@@ -410,10 +418,8 @@ impl FileBrowser {
         priority: ThumbnailPriority,
     ) {
         let requests = self.thumbnail_requests_for_pane_directory_range(pane_id, directory);
-        let scope = thumbnail_scope_for_pane_location(
-            pane_id,
-            BrowserLocation::Directory(directory.into()),
-        );
+        let scope =
+            thumbnail_scope_for_pane_location(pane_id, LocationKey::Directory(directory.into()));
         let keep = requests
             .iter()
             .map(ThumbnailRequest::key)
@@ -730,7 +736,7 @@ fn thumbnail_request_matches_transfer_conflict_path(
 
 fn thumbnail_scope_for_pane_location(
     pane_id: BrowserPaneId,
-    location: BrowserLocation,
+    location: LocationKey,
 ) -> ThumbnailScope {
     ThumbnailScope::PaneLocation {
         pane_id: pane_id.key(),

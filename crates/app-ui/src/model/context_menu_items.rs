@@ -6,6 +6,8 @@ use bennu_theme::icons::IconSymbol;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FileAreaMenuItem {
     Open,
+    /// 只在搜索结果里有意义：打开结果所在的文件夹并选中它。
+    OpenContainingFolder,
     SmartExtractHere,
     ExtractToArchiveFolder,
     OpenWith,
@@ -29,8 +31,9 @@ pub(crate) enum FileAreaMenuItem {
     SendToPhone,
 }
 
-pub(crate) const FILE_ENTRY_MENU_ITEMS: [FileAreaMenuItem; 22] = [
+pub(crate) const FILE_ENTRY_MENU_ITEMS: [FileAreaMenuItem; 23] = [
     FileAreaMenuItem::Open,
+    FileAreaMenuItem::OpenContainingFolder,
     FileAreaMenuItem::SmartExtractHere,
     FileAreaMenuItem::ExtractToArchiveFolder,
     FileAreaMenuItem::OpenWith,
@@ -113,6 +116,7 @@ impl FileAreaMenuItem {
     pub(crate) fn label(self) -> String {
         match self {
             Self::Open => tr!("Open"),
+            Self::OpenContainingFolder => tr!("Open Containing Folder"),
             Self::SmartExtractHere => tr!("Smart Extract Here"),
             Self::ExtractToArchiveFolder => tr!("Extract to Archive Folder"),
             Self::OpenWith => tr!("Open with"),
@@ -140,6 +144,7 @@ impl FileAreaMenuItem {
     pub(super) fn config_value(self) -> &'static str {
         match self {
             Self::Open => "open",
+            Self::OpenContainingFolder => "open_containing_folder",
             Self::SmartExtractHere => "smart_extract_here",
             Self::ExtractToArchiveFolder => "extract_to_archive_folder",
             Self::OpenWith => "open_with",
@@ -167,6 +172,7 @@ impl FileAreaMenuItem {
     pub(super) fn from_config_value(value: &str) -> Option<Self> {
         Some(match value {
             "open" => Self::Open,
+            "open_containing_folder" => Self::OpenContainingFolder,
             "smart_extract_here" => Self::SmartExtractHere,
             "extract_to_archive_folder" => Self::ExtractToArchiveFolder,
             "open_with" => Self::OpenWith,
@@ -201,6 +207,7 @@ impl FileAreaMenuItem {
     pub(crate) fn icon(self) -> IconSymbol {
         match self {
             Self::Open => IconSymbol::Folder,
+            Self::OpenContainingFolder => IconSymbol::FolderOpen,
             Self::SmartExtractHere | Self::ExtractToArchiveFolder => IconSymbol::FileArchive,
             Self::OpenWith => IconSymbol::Monitor,
             Self::Copy | Self::Duplicate | Self::Paste => IconSymbol::Copy,
@@ -271,65 +278,6 @@ impl TrashMenuItem {
             Self::Restore => IconSymbol::ArrowLeft,
             Self::DeletePermanently | Self::EmptyTrash => IconSymbol::Trash,
             Self::Properties => IconSymbol::FileText,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SearchResultMenuItem {
-    OpenContainingFolder,
-    Copy,
-    Cut,
-    MoveToTrash,
-    DeletePermanently,
-}
-
-pub(crate) const SEARCH_RESULT_MENU_ITEMS: [SearchResultMenuItem; 5] = [
-    SearchResultMenuItem::OpenContainingFolder,
-    SearchResultMenuItem::Copy,
-    SearchResultMenuItem::Cut,
-    SearchResultMenuItem::MoveToTrash,
-    SearchResultMenuItem::DeletePermanently,
-];
-
-impl SearchResultMenuItem {
-    pub(crate) fn label(self) -> String {
-        match self {
-            Self::OpenContainingFolder => tr!("Open Containing Folder"),
-            Self::Copy => tr!("Copy"),
-            Self::Cut => tr!("Cut"),
-            Self::MoveToTrash => tr!("Move to Trash"),
-            Self::DeletePermanently => tr!("Delete Permanently"),
-        }
-    }
-
-    pub(super) fn config_value(self) -> &'static str {
-        match self {
-            Self::OpenContainingFolder => "open_containing_folder",
-            Self::Copy => "copy",
-            Self::Cut => "cut",
-            Self::MoveToTrash => "move_to_trash",
-            Self::DeletePermanently => "delete_permanently",
-        }
-    }
-
-    pub(super) fn from_config_value(value: &str) -> Option<Self> {
-        Some(match value {
-            "open_containing_folder" => Self::OpenContainingFolder,
-            "copy" => Self::Copy,
-            "cut" => Self::Cut,
-            "move_to_trash" => Self::MoveToTrash,
-            "delete_permanently" => Self::DeletePermanently,
-            _ => return None,
-        })
-    }
-
-    pub(crate) fn icon(self) -> IconSymbol {
-        match self {
-            Self::OpenContainingFolder => IconSymbol::FolderOpen,
-            Self::Copy => IconSymbol::Copy,
-            Self::Cut => IconSymbol::ArrowRight,
-            Self::MoveToTrash | Self::DeletePermanently => IconSymbol::Trash,
         }
     }
 }

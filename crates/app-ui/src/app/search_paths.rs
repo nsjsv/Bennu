@@ -68,7 +68,7 @@ impl FileBrowser {
                     self.update_search_path_configuration_status(status);
                 }
                 let next_configuration = configure_search_path_request(request);
-                Task::batch([next_configuration, self.restart_search_workspace()])
+                Task::batch([next_configuration, self.restart_active_search()])
             }
             Err(diagnostic) => {
                 self.search_service

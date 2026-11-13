@@ -6,7 +6,9 @@ use iced::futures::SinkExt;
 use iced::Task;
 use tokio_util::sync::CancellationToken;
 
-use crate::model::{DirectoryFallbackOutcome, IndexedSearchOutcome, IndexedSearchRequest, Message};
+use crate::model::{
+    DirectoryFallbackOutcome, IndexedSearchOutcome, IndexedSearchRequest, Message, SearchRunId,
+};
 
 const DIRECTORY_FALLBACK_STREAM_CAPACITY: usize = 8;
 const DIRECTORY_FALLBACK_WORKER_CAPACITY: usize = 4;
@@ -49,7 +51,7 @@ pub(crate) fn search_with_scope_root_check_command(
 }
 
 pub(crate) fn directory_fallback_search_command(
-    generation: u64,
+    run: SearchRunId,
     query: SearchQuery,
     rules: SearchExcludeRules,
     cancellation: CancellationToken,
@@ -78,7 +80,7 @@ pub(crate) fn directory_fallback_search_command(
 
             while let Some(hits) = batch_receiver.recv().await {
                 if output
-                    .send(Message::SearchDirectoryBatchLoaded(generation, hits))
+                    .send(Message::SearchDirectoryBatchLoaded(run, hits))
                     .await
                     .is_err()
                 {
@@ -98,7 +100,7 @@ pub(crate) fn directory_fallback_search_command(
                 )),
             };
             let _ = output
-                .send(Message::SearchDirectoryFinished(generation, completion))
+                .send(Message::SearchDirectoryFinished(run, completion))
                 .await;
         },
     ))

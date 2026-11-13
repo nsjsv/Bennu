@@ -13,7 +13,7 @@ use super::expansion::{LIST_ROW_HEIGHT, LIST_ROW_STRIDE};
 use super::scrollbar::{ScrollbarViewport, SessionScrollRegion};
 use super::thumbnails::VISIBLE_MARGIN_ROWS;
 use super::{DirectoryListing, PickerSession, SessionEffect};
-use bennu_sidebar::BrowserLocation;
+use crate::picker_session::PickerLocation;
 
 /// portal 大图固定默认档图标边长（主软件 DEFAULT_ICON_GRID_SIZE 同值）。
 pub(crate) const ICON_GRID_EDGE: u32 = 96;
@@ -66,7 +66,7 @@ impl PickerSession {
 
     fn view_mode_when_chosen(&self, chosen: PickerViewMode) -> PickerViewMode {
         match (&self.location, chosen) {
-            (BrowserLocation::Trash, PickerViewMode::Columns) => PickerViewMode::List,
+            (PickerLocation::Trash, PickerViewMode::Columns) => PickerViewMode::List,
             (_, chosen) => chosen,
         }
     }
@@ -144,7 +144,7 @@ impl PickerSession {
                     .remove(&focused)
                     .map(|state| state.listing)
                     .unwrap_or(DirectoryListing::Pending);
-                self.location = BrowserLocation::Directory(focused);
+                self.location = PickerLocation::Directory(focused);
                 // 列表视口缓存对新目录是新几何，失效等探针回信。
                 self.scroll_viewports.remove(&SessionScrollRegion::List);
             }
@@ -436,7 +436,7 @@ mod tests {
         // 展开第一行后同时选中深层子条目与根级条目。
         session.update(SessionMessage::EntryExpandToggled { index: 0 });
         session.apply_scan(DirectoryScanResult {
-            location: BrowserLocation::Directory(
+            location: PickerLocation::Directory(
                 session.current_directory().unwrap().join("branch"),
             ),
             outcome: Ok(DirectoryScanOutcome {

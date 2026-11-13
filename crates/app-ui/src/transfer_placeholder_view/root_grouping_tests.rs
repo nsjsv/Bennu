@@ -3,7 +3,7 @@
 // 目录(含目录占位)置顶、
 // 分组关闭(None)回归保护、大小维度未知尺寸归最末兜底组。
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use file_core::{DirectoryEntry, EntryMetadata, FileKind, SortDirection, SortField};
@@ -11,7 +11,7 @@ use file_core::{DirectoryEntry, EntryMetadata, FileKind, SortDirection, SortFiel
 use super::*;
 use crate::config::{self, UiLanguage};
 use crate::file_entry_presentation::SelectionRunPosition;
-use crate::model::{BrowserPaneId, FileGroupingMode};
+use crate::model::{BrowserLocation, BrowserPaneId, FileGroupingMode};
 use crate::transfer_placeholders::{TransferPlaceholder, TransferSortOptions};
 
 fn file_entry(path: &str, len: u64) -> DirectoryEntry {
@@ -93,6 +93,7 @@ fn entry_row_with_stripe(entry: &DirectoryEntry, stripe_index: usize) -> ListTra
         },
         transfer: None,
         stripe_index,
+        snippet_height: 0.0,
     }
 }
 
@@ -281,11 +282,12 @@ fn size_grouping_sends_unknown_placeholder_size_to_last_bucket() {
 fn grouping_applies_only_when_enabled() {
     // 展开的子目录平铺由行流构建器保证(见 stripe_index_tests),这里只管开关。
     let browser = browser_with_grouping(FileGroupingMode::NameInitial);
-    assert!(root_grouping::RootGrouping::for_pane_root(&browser).is_some());
+    let folder = BrowserLocation::Directory(PathBuf::from("/workspace"));
+    assert!(root_grouping::RootGrouping::for_pane_root(&browser, &folder).is_some());
 
     // 分组关闭(默认 None):根层也不划分,行流与既有平铺一致。
     let browser = browser_with_grouping(FileGroupingMode::None);
-    assert!(root_grouping::RootGrouping::for_pane_root(&browser).is_none());
+    assert!(root_grouping::RootGrouping::for_pane_root(&browser, &folder).is_none());
 }
 
 #[test]

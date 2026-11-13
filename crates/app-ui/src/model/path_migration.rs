@@ -48,12 +48,6 @@ pub(super) fn retain_optional_path_outside_subtree(path: &mut Option<PathBuf>, s
     }
 }
 
-pub(super) fn migrate_path_list(paths: &mut [PathBuf], migrations: &[CompletedPathMigration]) {
-    for path in paths {
-        *path = path_after_completed_migrations(path, migrations);
-    }
-}
-
 pub(super) fn migrate_path_set(
     paths: &mut HashSet<PathBuf>,
     migrations: &[CompletedPathMigration],

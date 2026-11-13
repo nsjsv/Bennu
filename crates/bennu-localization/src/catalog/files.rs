@@ -107,7 +107,6 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("File entry menu", "文件条目菜单"),
     ("Blank area menu", "空白处菜单"),
     ("Trash menu", "回收站菜单"),
-    ("Search results menu", "搜索结果菜单"),
     ("Search type filters", "搜索类型筛选"),
     ("List columns menu", "列表列菜单"),
     ("Favorites menu", "收藏夹菜单"),

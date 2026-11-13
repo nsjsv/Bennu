@@ -140,9 +140,6 @@ impl FileBrowser {
     }
 
     pub(super) fn invoke_shortcut(&mut self, action: ShortcutAction) -> Task<Message> {
-        if self.search_workspace.is_some() {
-            return self.invoke_search_workspace_shortcut(action);
-        }
         match action {
             ShortcutAction::OpenSelected => self.activate_selected_path(),
             ShortcutAction::RenameSelected => self.begin_rename_selected(),
@@ -161,7 +158,7 @@ impl FileBrowser {
             ShortcutAction::Refresh => {
                 Task::batch([self.commit_rename_if_active(), self.reload_visible_panes()])
             }
-            ShortcutAction::Escape => self.handle_focused_window_escape_pressed(),
+            ShortcutAction::Escape => self.handle_escape_shortcut(),
             ShortcutAction::Preview => self.request_preview(),
             ShortcutAction::ToggleRightPreviewPanel => self.toggle_right_preview_panel(),
             ShortcutAction::ToggleTerminal => self.toggle_terminal_via_shortcut(),
@@ -177,6 +174,21 @@ impl FileBrowser {
             ShortcutAction::Undo => self.undo_file_operation(),
             ShortcutAction::Redo => self.redo_file_operation(),
         }
+    }
+
+    /// 先收搜索历史浮层；在搜索结果里且没有别的浮层占着键盘时退出搜索。
+    fn handle_escape_shortcut(&mut self) -> Task<Message> {
+        if self
+            .search_history_interaction
+            .popup_is_visible(&self.user_config.search_history)
+        {
+            self.search_history_interaction.dismiss_popup();
+            return Task::none();
+        }
+        if self.active_search().is_some() && self.file_browser_content_shortcuts_enabled() {
+            return self.close_search_workspace();
+        }
+        self.handle_focused_window_escape_pressed()
     }
 
     pub(super) fn start_shortcut_capture(

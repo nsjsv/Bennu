@@ -15,7 +15,7 @@ use crate::model::{
     DirectoryCollectionPhase, DirectoryEntrySnapshot, DirectoryExpansionLoadContext,
     DirectoryLoadRequest, DirectoryLoadingPlaceholder, DirectoryLoadingPlaceholderEntry,
     DirectoryOrderPhase, ExpandedDirectory, ExpandedDirectoryLoadRequest, ExpandedDirectoryStatus,
-    Message, NavigationMode,
+    HistoryEntry, LocationKey, Message, NavigationMode,
 };
 use crate::startup_trace;
 impl FileBrowser {
@@ -206,14 +206,14 @@ impl FileBrowser {
         if mode == NavigationMode::RecordHistory {
             // 回收站不进历史：从回收站出来不记它。
             if let Some(previous) = tab
-                .current_directory()
-                .filter(|current| *current != path)
-                .map(Path::to_path_buf)
+                .history_entry()
+                .filter(|entry| !entry.is_directory(&path))
             {
                 tab.back_stack.push(previous);
                 tab.forward_stack.clear();
             }
         }
+        self.forget_search_interaction();
         self.clear_icon_grid_expansion();
         // 拖拽栏链快照绑定换目录前的多栏链;拖拽中导航(spring 面包屑
         // 返回 / Alt+←)换目录后快照失效,清空让多栏渲染回到活链。
@@ -259,11 +259,12 @@ impl FileBrowser {
         };
         let tab = self.tab_mut();
         if mode == NavigationMode::RecordHistory {
-            if let Some(previous) = tab.current_directory().map(Path::to_path_buf) {
+            if let Some(previous) = tab.history_entry() {
                 tab.back_stack.push(previous);
                 tab.forward_stack.clear();
             }
         }
+        self.forget_search_interaction();
         self.clear_icon_grid_expansion();
         let has_cached_entries = cached_entries.is_some();
         let trash_entries = cached_entries.unwrap_or_default();
@@ -320,17 +321,18 @@ impl FileBrowser {
         self.schedule_directory_reload(self.active_pane_id())
     }
 
-    /// 重新加载窗格活动标签的目录：回收站视图重拉快照，其余重扫目录并刷新
-    /// 已展开的子目录。图标展开只属于活动窗格的交互上下文。
+    /// 重新加载窗格活动标签的内容：回收站视图重拉快照，搜索结果按同样的意图重搜，
+    /// 其余重扫目录并刷新已展开的子目录。图标展开只属于活动窗格的交互上下文。
     fn schedule_directory_reload(&mut self, pane_id: BrowserPaneId) -> Task<Message> {
         let is_active = pane_id == self.active_pane_id();
         let has_trash_snapshot = self.trash_refresh.snapshot().is_some();
         let location = self
             .pane_by_id(pane_id)
-            .map(|pane| pane.tab().location.clone())
+            .map(|pane| pane.tab().location.key())
             .expect("a reload targets an existing pane");
         let current_dir = match location {
-            BrowserLocation::Trash => {
+            LocationKey::Search(session_id) => return self.restart_search(session_id),
+            LocationKey::Trash => {
                 if is_active {
                     self.clear_icon_grid_expansion();
                 }
@@ -350,7 +352,7 @@ impl FileBrowser {
                 self.prune_list_directory_summaries_to_live_roots();
                 return self.request_trash_snapshot_refresh();
             }
-            BrowserLocation::Directory(directory) => directory,
+            LocationKey::Directory(directory) => directory,
         };
         let pane = self
             .pane_by_id_mut(pane_id)
@@ -386,9 +388,18 @@ impl FileBrowser {
         &mut self,
     ) -> Task<Message> {
         let mut commands = vec![self.refresh_trash_snapshot_for_visible_panes()];
+        // 搜索结果在操作完成时已就地更新（改名跟着走、删掉的拿掉），不整次重搜。
+        let rescanned_panes = self
+            .pane_layout
+            .visible_pane_ids()
+            .into_iter()
+            .filter(|pane_id| {
+                self.pane_by_id(*pane_id)
+                    .is_some_and(|pane| pane.tab().location.search().is_none())
+            })
+            .collect::<Vec<_>>();
         commands.extend(
-            self.pane_layout
-                .visible_pane_ids()
+            rescanned_panes
                 .into_iter()
                 .map(|pane_id| self.schedule_directory_reload(pane_id)),
         );
@@ -491,25 +502,34 @@ impl FileBrowser {
 
     pub(super) fn navigate_back(&mut self) -> Task<Message> {
         let tab = self.tab_mut();
-        let Some(path) = tab.back_stack.pop() else {
+        let Some(entry) = tab.back_stack.pop() else {
             return Task::none();
         };
-        if let Some(leaving) = tab.current_directory().map(Path::to_path_buf) {
+        // 回收站不进历史，从回收站后退时不把它记进前进栈。
+        if let Some(leaving) = tab.history_entry() {
             tab.forward_stack.push(leaving);
         }
-        self.navigate_to(path, NavigationMode::KeepHistory)
+        self.go_to_history_entry(entry)
     }
 
     pub(super) fn navigate_forward(&mut self) -> Task<Message> {
         let tab = self.tab_mut();
-        let Some(path) = tab.forward_stack.pop() else {
+        let Some(entry) = tab.forward_stack.pop() else {
             return Task::none();
         };
-        // 回收站不进历史，从回收站前进时不把它记进后退栈。
-        if let Some(leaving) = tab.current_directory().map(Path::to_path_buf) {
+        if let Some(leaving) = tab.history_entry() {
             tab.back_stack.push(leaving);
         }
-        self.navigate_to(path, NavigationMode::KeepHistory)
+        self.go_to_history_entry(entry)
+    }
+
+    fn go_to_history_entry(&mut self, entry: HistoryEntry) -> Task<Message> {
+        match entry {
+            HistoryEntry::Directory(directory) => {
+                self.navigate_to(directory, NavigationMode::KeepHistory)
+            }
+            HistoryEntry::Search(recall) => self.return_to_search(recall),
+        }
     }
 
     // 活动标签主列表条目的写入边界：整体替换经这里，使 hover 热路径的
@@ -596,7 +616,7 @@ impl FileBrowser {
                 crate::visible_entries::list_entry_range_for_viewport(
                     &tab.entries,
                     &tab.expanded_directories,
-                    row_height,
+                    crate::visible_entries::ListEntryHeights::at(&tab.location, row_height),
                     crate::list_view::LIST_HEADER_HEIGHT,
                     viewport.offset_y,
                     viewport.height,
@@ -607,7 +627,7 @@ impl FileBrowser {
                 crate::visible_entries::initial_list_entry_range(
                     &tab.entries,
                     &tab.expanded_directories,
-                    row_height,
+                    crate::visible_entries::ListEntryHeights::at(&tab.location, row_height),
                     crate::list_view::list_initial_rows(
                         self.main_window_height,
                         self.user_config.list_view_density,
@@ -650,7 +670,7 @@ impl FileBrowser {
 
     /// 换位置时清掉依附于旧选择的交互状态（拖拽、悬停、菜单、重命名……）。
     /// 选择本身属于标签，由调用方在标签上清。
-    fn clear_selection_context(&mut self) {
+    pub(super) fn clear_selection_context(&mut self) {
         self.drag_selection_anchor = None;
         self.column_resize_drag = None;
         // 不取消进行中的拖拽:spring 悬停导航是拖拽中导航的唯一来源,
@@ -849,7 +869,7 @@ mod tests {
         let expected_range = crate::visible_entries::list_entry_range_for_viewport(
             &previous_entries,
             &browser.tab().expanded_directories,
-            crate::list_view::LIST_ROW_HEIGHT,
+            crate::visible_entries::ListEntryHeights::uniform(crate::list_view::LIST_ROW_HEIGHT),
             crate::list_view::LIST_HEADER_HEIGHT,
             viewport.offset_y,
             viewport.height,

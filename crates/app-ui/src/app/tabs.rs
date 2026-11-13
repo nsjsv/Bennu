@@ -6,8 +6,8 @@ use iced::Task;
 use super::FileBrowser;
 use crate::model::{
     BrowserLocation, BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, BrowserViewMode,
-    FileDragPhase, Message, NavigationMode, SplitAxis, SplitRegion, TabDragMode, TabDragState,
-    TabSplitTarget,
+    FileDragPhase, Message, NavigationMode, SearchWorkspaceSessionId, SplitAxis, SplitRegion,
+    TabDragMode, TabDragState, TabSplitTarget,
 };
 
 mod animation;
@@ -286,9 +286,10 @@ impl FileBrowser {
         let Some(target) = drag.split_target else {
             return Task::none();
         };
-        self.finish_tab_split_drag(drag.source_pane_id, drag.tab_id, target.region);
+        let copied_search =
+            self.finish_tab_split_drag(drag.source_pane_id, drag.tab_id, target.region);
         // 分屏/跨栏移动改变了 panes 与 pane_layout；与会话保存不变量对齐。
-        self.request_browser_session_save()
+        Task::batch([copied_search, self.request_browser_session_save()])
     }
 
     pub(super) fn update_tab_drag(&mut self, position: iced::Point) {
@@ -323,7 +324,7 @@ impl FileBrowser {
         source_pane_id: BrowserPaneId,
         tab_id: usize,
         region: SplitRegion,
-    ) {
+    ) -> Task<Message> {
         match self.pane_layout {
             BrowserPaneLayout::Single { .. } => {
                 self.split_single_pane_with_tab(source_pane_id, tab_id, region)
@@ -351,10 +352,10 @@ impl FileBrowser {
         source_pane_id: BrowserPaneId,
         tab_id: usize,
         region: SplitRegion,
-    ) {
+    ) -> Task<Message> {
         let destination_id = self.new_pane_id();
-        let Some(tab) = self.detach_or_copy_tab(source_pane_id, tab_id) else {
-            return;
+        let Some((tab, copied_search)) = self.detach_or_copy_tab(source_pane_id, tab_id) else {
+            return Task::none();
         };
         self.panes.push(BrowserPane::new(destination_id, tab));
 
@@ -371,6 +372,7 @@ impl FileBrowser {
             first_portion: 500,
         };
         self.reset_active_pane_context();
+        self.restart_copied_search(copied_search)
     }
 
     fn move_tab_to_split_side(
@@ -382,7 +384,7 @@ impl FileBrowser {
         first: BrowserPaneId,
         second: BrowserPaneId,
         current_first_portion: u16,
-    ) {
+    ) -> Task<Message> {
         let current_destination = if region.places_dragged_first() {
             first
         } else {
@@ -394,6 +396,7 @@ impl FileBrowser {
             current_destination
         };
 
+        let mut copied_search = None;
         if destination_id == source_pane_id {
             if let Some(source) = self.pane_by_id_mut(source_pane_id) {
                 if source.tabs.iter().any(|tab| tab.id == tab_id) {
@@ -401,9 +404,10 @@ impl FileBrowser {
                 }
             }
         } else {
-            let Some(tab) = self.detach_or_copy_tab(source_pane_id, tab_id) else {
-                return;
+            let Some((tab, copied)) = self.detach_or_copy_tab(source_pane_id, tab_id) else {
+                return Task::none();
             };
+            copied_search = copied;
             if let Some(destination) = self.pane_by_id_mut(destination_id) {
                 let tab_id = tab.id;
                 destination.tabs.push(tab);
@@ -434,13 +438,16 @@ impl FileBrowser {
         };
 
         self.reset_active_pane_context();
+        self.restart_copied_search(copied_search)
     }
 
+    /// 拆出标签；窗格只有这一个标签时复制一份。复制出的搜索标签换了会话号，返回它，
+    /// 由调用方重搜（副本不接原件的回信）。
     fn detach_or_copy_tab(
         &mut self,
         source_pane_id: BrowserPaneId,
         tab_id: usize,
-    ) -> Option<BrowserTab> {
+    ) -> Option<(BrowserTab, Option<SearchWorkspaceSessionId>)> {
         let copied_tab = {
             let source = self.pane_by_id_mut(source_pane_id)?;
             let tab_index = source.tabs.iter().position(|tab| tab.id == tab_id)?;
@@ -453,14 +460,15 @@ impl FileBrowser {
                     let adjacent_id = source.tabs[adjacent_index].id;
                     source.activate_tab(adjacent_id);
                 }
-                return Some(tab);
+                return Some((tab, None));
             }
         };
 
         let mut cloned = copied_tab?;
         cloned.id = self.next_tab_id;
         self.next_tab_id += 1;
-        Some(cloned)
+        let copied_search = self.rebind_copied_search(&mut cloned);
+        Some((cloned, copied_search))
     }
 
     pub(super) fn sync_tab_bar_visibility(&mut self) {

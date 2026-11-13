@@ -28,7 +28,7 @@ pub(crate) use message::Message;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use bennu_sidebar::BrowserLocation;
+use crate::picker_session::PickerLocation;
 use iced::{keyboard, window, Element, Task};
 
 use dbus_file_chooser::{BridgeEvent, FileChooserInterface, PickerInvocation};
@@ -260,7 +260,7 @@ fn open_picker_window(daemon: &mut PickerDaemon, invocation: PickerInvocation) -
             SessionEffect::ScanDirectory(directory) => {
                 startup_tasks.push(scan_location_task(
                     window_id,
-                    BrowserLocation::Directory(directory),
+                    PickerLocation::Directory(directory),
                 ));
             }
             SessionEffect::LoadSidebarData => {
@@ -389,13 +389,13 @@ fn apply_session_message(
         // 展开行扫描：只扫描 + 核实滚动条溢出，不滚面包屑（展开与
         // 当前目录段无关，强滚会打断用户正在看的面包屑位置）。
         SessionEffect::ScanDirectory(directory) => Task::batch([
-            scan_location_task(window_id, BrowserLocation::Directory(directory)),
+            scan_location_task(window_id, PickerLocation::Directory(directory)),
             scrollbar_layout_probe_task(window_id, session),
         ]),
         // 多栏打开新栏需要扫描：扫描 + 横向滚到最右 + 探针（新栏视
         // 口缓存驱动键盘揭示与缩略图）。
         SessionEffect::ColumnScanAndReveal(directory) => Task::batch([
-            scan_location_task(window_id, BrowserLocation::Directory(directory)),
+            scan_location_task(window_id, PickerLocation::Directory(directory)),
             columns_rail_scroll_to_end_task(session),
             scrollbar_layout_probe_task(window_id, session),
         ]),

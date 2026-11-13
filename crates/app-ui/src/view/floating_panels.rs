@@ -13,8 +13,8 @@ use crate::formatting::item_count_label;
 use crate::model::{
     ContextMenuPreferences, ContextMenuState, DestructiveActionConfirmation, FileDropPrompt,
     FileGroupingMode, FilePropertiesMessage, ListColumnConfig, ListColumnKind, ListViewPreferences,
-    Message, ScrollbarRegion, SearchContextMenuState, SearchEntryTypePreset, SearchResultMenuItem,
-    SidebarBookmarkContextMenuState, TrashContextMenuState, TrashMenuItem,
+    Message, ScrollbarRegion, SearchEntryTypePreset, SidebarBookmarkContextMenuState,
+    TrashContextMenuState, TrashMenuItem,
 };
 use crate::open_with::OpenWithState;
 use crate::sidebar_devices::SidebarDeviceContextMenuState;
@@ -23,7 +23,7 @@ use bennu_theme::icons::IconSymbol;
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 
 use super::context_menu_submenu::{
-    CONTEXT_MENU_ITEM_HEIGHT, CONTEXT_MENU_ITEM_SPACING, CONTEXT_MENU_PADDING, CONTEXT_MENU_WIDTH,
+    CONTEXT_MENU_ITEM_HEIGHT, CONTEXT_MENU_ITEM_SPACING, CONTEXT_MENU_PADDING,
 };
 use super::dialog::{self, Dialog};
 use super::file_context_menu::file_context_menu_panel;
@@ -256,16 +256,12 @@ pub(super) fn context_menu_panel<'a>(
                 file_context_menu_panel(menu, context_menus, keyboard_modifiers, file_grouping);
             ContextMenuPanels { root, submenu }
         }
-        ContextMenuState::Search(menu) => ContextMenuPanels {
-            root: search_context_menu_panel(menu, context_menus),
-            submenu: None,
-        },
         ContextMenuState::SearchEntryTypes(_) => ContextMenuPanels {
             root: search_entry_types_menu_panel(context_menus, selected_search_entry_types),
             submenu: None,
         },
-        ContextMenuState::ListColumns(_) => ContextMenuPanels {
-            root: list_column_context_menu_panel(context_menus, list_view_preferences),
+        ContextMenuState::ListColumns(menu) => ContextMenuPanels {
+            root: list_column_context_menu_panel(&menu.columns, list_view_preferences),
             submenu: None,
         },
         ContextMenuState::SidebarBookmark(menu) => ContextMenuPanels {
@@ -304,54 +300,18 @@ fn search_entry_types_menu_panel<'a>(
         .into()
 }
 
-fn search_context_menu_panel<'a>(
-    menu: &'a SearchContextMenuState,
-    context_menus: &'a ContextMenuPreferences,
-) -> Element<'a, Message> {
-    let mut content = Column::new()
-        .spacing(CONTEXT_MENU_ITEM_SPACING)
-        .padding(CONTEXT_MENU_PADDING);
-    for item in context_menus.search_items() {
-        let (icon, label, message) = match item {
-            SearchResultMenuItem::OpenContainingFolder => (
-                IconSymbol::FolderOpen,
-                item.label(),
-                Message::SearchOpenContainingDirectory(menu.target.clone()),
-            ),
-            SearchResultMenuItem::Copy => (IconSymbol::Copy, item.label(), Message::CopySelected),
-            SearchResultMenuItem::Cut => {
-                (IconSymbol::ArrowRight, item.label(), Message::MoveSelected)
-            }
-            SearchResultMenuItem::MoveToTrash => {
-                (IconSymbol::Trash, item.label(), Message::TrashSelected)
-            }
-            SearchResultMenuItem::DeletePermanently => (
-                IconSymbol::Trash,
-                item.label(),
-                Message::SearchDeletePermanentlySelected,
-            ),
-        };
-        content = content.push(menu_button(icon, label, message));
-    }
-
-    container(content)
-        .width(Length::Fixed(CONTEXT_MENU_WIDTH))
-        .style(context_menu_style)
-        .into()
-}
-
 fn list_column_context_menu_panel<'a>(
-    context_menus: &'a ContextMenuPreferences,
+    columns: &[ListColumnKind],
     preferences: &'a ListViewPreferences,
 ) -> Element<'a, Message> {
     let mut menu_content = Column::new()
         .spacing(CONTEXT_MENU_ITEM_SPACING)
         .padding(CONTEXT_MENU_PADDING);
-    for kind in context_menus.list_column_items() {
+    for kind in columns {
         if let Some(column) = preferences
             .columns()
             .iter()
-            .find(|column| column.kind == kind)
+            .find(|column| column.kind == *kind)
         {
             menu_content = menu_content.push(list_column_menu_row(column));
         }

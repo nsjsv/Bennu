@@ -104,6 +104,8 @@ fn validated_browser_session(mut session: BrowserSessionSnapshot) -> BrowserSess
         pane.tabs.retain(|tab| match &tab.location {
             BrowserLocation::Directory(directory) => directory_is_usable(directory),
             BrowserLocation::Trash => true,
+            // 会话里的搜索标签已存成起点文件夹，这里不会出现。
+            BrowserLocation::Search(search) => directory_is_usable(search.origin()),
         });
     }
     session.panes.retain(|pane| !pane.tabs.is_empty());

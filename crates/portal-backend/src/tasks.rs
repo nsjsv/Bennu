@@ -36,7 +36,7 @@ pub(crate) fn scrollbar_layout_probe_task(
 /// 结果携带扫描的位置：会话据此路由回根列表或展开节点。
 pub(crate) fn scan_location_task(
     window_id: window::Id,
-    location: bennu_sidebar::BrowserLocation,
+    location: crate::picker_session::PickerLocation,
 ) -> Task<Message> {
     let scan_future = crate::picker_session::scan_location(location.clone());
     Task::perform(scan_future, move |outcome| {

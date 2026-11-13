@@ -217,7 +217,7 @@ impl FileBrowser {
             Some(AuxiliaryWindow::Preview) => tr!("Preview - Bennu"),
             Some(AuxiliaryWindow::Transfer) => tr!("Send to Phone - Bennu"),
             Some(AuxiliaryWindow::LocalSend) => tr!("LocalSend - Bennu"),
-            None if self.search_workspace.is_some() => tr!("Search - Bennu"),
+            None if self.active_search().is_some() => tr!("Search - Bennu"),
             None => "Bennu".to_owned(),
         }
     }

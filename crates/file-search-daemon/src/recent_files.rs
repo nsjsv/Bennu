@@ -1,4 +1,4 @@
-//! 系统最近使用列表（GTK 的 `recently-used.xbel`；Nautilus、编辑器、归档管理器等打开
+//! 桌面的最近使用列表（`recently-used.xbel`，文件管理器、编辑器、归档工具等打开
 //! 文件时都会写）。搜索排序把它当作「常用」信号：用户主动打开过的文件比只是被改过的
 //! 更可能是要找的那个。它只是加分项，读不到时搜索照常进行。
 
@@ -15,7 +15,7 @@ use quick_xml::Reader;
 /// 正常的列表只有几十 KB；超过这么大说明文件异常，不读。
 const MAX_RECENT_FILE_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_RECENT_ENTRIES: usize = 10_000;
-/// GLib 用 1970 年附近的时间表示「没有」，不能当成很久以前用过。
+/// 写列表的一方用 1970 年附近的时间表示「没有」，不能当成很久以前用过。
 const EARLIEST_REAL_USE_MS: i64 = 86_400_000;
 
 /// 路径 → 最后使用时间（Unix 毫秒）。
@@ -128,7 +128,7 @@ fn file_uri_path(uri: &str) -> Option<PathBuf> {
     Some(PathBuf::from(OsString::from_vec(decoded)))
 }
 
-/// GLib 写的 ISO 8601 UTC 时间：`2024-11-10T07:17:23Z` 或带小数秒。
+/// 列表里的 ISO 8601 UTC 时间：`2024-11-10T07:17:23Z` 或带小数秒。
 fn utc_timestamp_ms(value: &str) -> Option<i64> {
     let (date, time) = value.strip_suffix('Z')?.split_once('T')?;
     let mut date_parts = date.splitn(3, '-').map(str::parse::<i64>);

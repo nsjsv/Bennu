@@ -1,6 +1,5 @@
 //! 搜索服务自己的 inotify 后端：一个 inotify 描述符、一棵被监听目录的树、一个读事件线程。
-//! 不借 notify：它给每个监听目录按完整路径各存两张表，7.9 万个目录时光这两份就占二十多 MB。
-//! 注册监听的标志与 notify 6.1 相同，监听到的变化不变。
+//! 不用通用监听库：按完整路径给每个监听目录各存两张表，7.9 万个目录时光这两份就占二十多 MB。
 
 use std::ffi::OsStr;
 use std::io;
@@ -34,7 +33,8 @@ pub(super) enum WatchEvent {
     Failed(String),
 }
 
-/// notify 6.1 对非递归监听用的同一组标志。不加 DONT_FOLLOW：搜索根可以是指向目录的链接。
+/// 目录里条目的增删改、改名移入移出，以及目录自己被删被移。不加 DONT_FOLLOW：搜索根可以是
+/// 指向目录的链接。
 pub(super) fn directory_watch_flags() -> WatchFlags {
     WatchFlags::ATTRIB
         | WatchFlags::CREATE

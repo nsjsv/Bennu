@@ -1,7 +1,6 @@
 //! 相关度查询的排序规则。先按名字匹配分档，档内再按位置、最近使用、最近修改、
-//! 正文相关度和名字长短打分。分档与切词参照 fzf（字符类别切换处算词开头），
-//! 时间分桶参照 Nautilus；与二者不同的是名字匹配的档位压过层级，中文数字后的
-//! 单位字（2024年、第3章）与数字算一个词。
+//! 正文相关度和名字长短打分。字符类别切换处（大小写、字母数字、中西文）算词开头；
+//! 名字匹配的档位压过目录层级，中文数字后的单位字（2024年、第3章）与数字算一个词。
 
 use crate::text_matching::{normalize_search_text, SearchTerms};
 
@@ -98,7 +97,7 @@ fn within_tier_score(name_match: &NameMatch, facts: &RankingFacts<'_>, now_ms: i
     proximity + recently_used + recently_modified + content + shortness
 }
 
-/// Nautilus 的最近分桶。
+/// 最近分桶：一天内、一周内、两周内、一月内、三月内依次递减，更早的不加分。
 fn recency_bucket(now_ms: i64, then_ms: i64) -> f64 {
     match now_ms.saturating_sub(then_ms).max(0) / DAY_MILLISECONDS {
         0..=1 => 100.0,

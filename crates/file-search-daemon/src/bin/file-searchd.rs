@@ -83,7 +83,7 @@ async fn main() {
     }
 }
 
-/// glibc 默认给每个分配内存的线程各开一个分配区，各自留着用不上的碎片：10 万文件时空闲常驻
+/// C 库默认给每个分配内存的线程各开一个分配区，各自留着用不上的碎片：10 万文件时空闲常驻
 /// 内存因此多出约 4MB（21MB → 17MB）。两个分配区够写库线程和查询线程不互相等。必须在开任何
 /// 线程之前设置；单线程 tokio 运行时在这里还没有别的线程。
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
@@ -315,7 +315,7 @@ fn database_path() -> PathBuf {
     file_core::app_dirs::app_data_dir().join("search.sqlite")
 }
 
-/// 系统最近使用列表，与 GTK 应用写入的位置相同；搜索排序拿它给最近打开过的文件加分。
+/// 桌面的最近使用列表；搜索排序拿它给最近打开过的文件加分。
 fn recently_used_file() -> PathBuf {
     file_core::app_dirs::user_data_dir().join("recently-used.xbel")
 }

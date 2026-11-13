@@ -405,7 +405,16 @@ impl FileBrowser {
                 self.activate_pane(pane_id);
                 self.handle_blank_area_right_clicked(directory)
             }
+            Message::TrashBlankAreaRightClicked(pane_id) => {
+                self.activate_pane(pane_id);
+                self.handle_trash_blank_area_right_clicked()
+            }
             Message::SidebarHovered(path) => self.handle_sidebar_hovered(path),
+            Message::SidebarTrashHovered => self.handle_sidebar_trash_hovered(),
+            Message::SidebarTrashHoverCleared => {
+                self.sidebar_trash_hovered = false;
+                Task::none()
+            }
             Message::SidebarHoverCleared(path) => self.handle_sidebar_hover_cleared(path),
             Message::SidebarPointerMoved(position) => {
                 self.update_sidebar_bookmark_drop_slot(position)

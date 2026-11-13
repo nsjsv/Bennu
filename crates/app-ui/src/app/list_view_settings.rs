@@ -282,6 +282,7 @@ mod tests {
 
     use super::*;
     use crate::config;
+    use crate::model::BrowserLocation;
     use crate::model::{
         BrowserPane, BrowserPaneLayout, BrowserTab, BrowserViewMode, ExpandedDirectory,
         ExpandedDirectoryStatus, ListDirectorySummary, SplitAxis,
@@ -385,7 +386,7 @@ mod tests {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
 
         let mut active_tab = BrowserTab::directory(0, active_root);
-        active_tab.view_mode = BrowserViewMode::List;
+        active_tab.choose_view_mode(BrowserViewMode::List);
         active_tab.entries = vec![test_entry(active_dir.clone(), FileKind::Directory)].into();
         active_tab.expanded_directories.insert(
             active_dir.clone(),
@@ -393,7 +394,7 @@ mod tests {
         );
 
         let mut inactive_tab = BrowserTab::directory(1, inactive_root);
-        inactive_tab.view_mode = BrowserViewMode::List;
+        inactive_tab.choose_view_mode(BrowserViewMode::List);
         inactive_tab.entries = vec![test_entry(inactive_dir.clone(), FileKind::Directory)].into();
         inactive_tab.expanded_directories.insert(
             inactive_dir.clone(),
@@ -492,8 +493,8 @@ mod tests {
         let root = PathBuf::from("/workspace");
         let directory = root.join("project");
 
-        browser.tab_mut().current_dir = root;
-        browser.tab_mut().view_mode = BrowserViewMode::List;
+        browser.tab_mut().location = BrowserLocation::Directory(root);
+        browser.tab_mut().choose_view_mode(BrowserViewMode::List);
         browser.tab_mut().directory_collection_phase =
             crate::model::DirectoryCollectionPhase::Ready;
         browser.tab_mut().entries = vec![test_entry(directory.clone(), FileKind::Directory)].into();

@@ -9,8 +9,8 @@ use crate::commands::load_expanded_directory_command;
 use crate::config::normalize_visible_column_count;
 use crate::list_view::LIST_HEADER_HEIGHT;
 use crate::model::{
-    BrowserPaneId, BrowserViewMode, DirectoryExpansionLoadContext, ExpandedDirectory,
-    ExpandedDirectoryLoadRequest, ExpandedDirectoryStatus, FileGroupingMode,
+    BrowserLocation, BrowserPaneId, BrowserViewMode, DirectoryExpansionLoadContext,
+    ExpandedDirectory, ExpandedDirectoryLoadRequest, ExpandedDirectoryStatus, FileGroupingMode,
     ListExpansionFollowSessionId, Message, ScrollbarRegion,
 };
 use crate::thumbnail_cache::ColumnViewport;
@@ -64,25 +64,27 @@ impl FileBrowser {
         view_mode: BrowserViewMode,
     ) -> Task<Message> {
         self.activate_pane(pane_id);
-        if self.tab().view_mode == view_mode {
+        if self.tab().chosen_view_mode() == view_mode {
             return Task::none();
         }
 
-        let previous_mode = self.tab().view_mode;
+        // 下面的过渡都按实际显示方式算：回收站里在列表和分栏之间换，显示不变，只记下选择。
+        let previous_mode = self.tab().view_mode();
+        let shown_mode = self.tab().view_mode_when_chosen(view_mode);
         let list_to_icons = (previous_mode == BrowserViewMode::List
-            && view_mode == BrowserViewMode::Icons)
+            && shown_mode == BrowserViewMode::Icons)
             .then(|| self.list_expansion_transfer())
             .flatten();
         let icons_to_list = (previous_mode == BrowserViewMode::Icons
-            && view_mode == BrowserViewMode::List)
+            && shown_mode == BrowserViewMode::List)
             .then(|| self.icon_grid_expansion_transfer())
             .flatten();
 
         self.clear_icon_grid_expansion_for_context_change();
-        if previous_mode == BrowserViewMode::Icons || view_mode == BrowserViewMode::Icons {
+        if previous_mode == BrowserViewMode::Icons || shown_mode == BrowserViewMode::Icons {
             self.retain_direct_entry_selection();
         }
-        let mut transition_command = match (previous_mode, view_mode) {
+        let mut transition_command = match (previous_mode, shown_mode) {
             (BrowserViewMode::Columns, BrowserViewMode::List) => {
                 self.sync_expanded_directories_to_open_columns();
                 Task::none()
@@ -97,14 +99,14 @@ impl FileBrowser {
             }
             _ => Task::none(),
         };
-        self.tab_mut().view_mode = view_mode;
+        self.tab_mut().choose_view_mode(view_mode);
         if let Some(transfer) = list_to_icons {
             transition_command =
                 self.start_icon_grid_expansion_follow(transfer.chain, transfer.target_selection);
         } else if let Some(transfer) = icons_to_list {
             transition_command =
                 self.start_list_expansion_follow(transfer.chain, transfer.target_selection);
-        } else if previous_mode == BrowserViewMode::Icons && view_mode == BrowserViewMode::List {
+        } else if previous_mode == BrowserViewMode::Icons && shown_mode == BrowserViewMode::List {
             self.clear_list_expansion_for_follow();
         }
         self.hovered_entry = None;
@@ -120,7 +122,7 @@ impl FileBrowser {
         self.user_config.browser_view_mode = view_mode;
         self.follow_terminal_panel_directory();
         let (list_metadata_command, list_directory_summary_command) =
-            if view_mode == BrowserViewMode::List {
+            if shown_mode == BrowserViewMode::List {
                 (
                     self.schedule_visible_directory_metadata(
                         pane_id,
@@ -159,7 +161,7 @@ impl FileBrowser {
                 Task::none()
             }
         };
-        let horizontal = if self.tab().view_mode == BrowserViewMode::Columns {
+        let horizontal = if self.tab().view_mode() == BrowserViewMode::Columns {
             self.focus_column_containing_path(&path)
         } else {
             Task::none()
@@ -193,7 +195,7 @@ impl FileBrowser {
                     LIST_HEADER_HEIGHT,
                 )?;
             Some(reveal_target_y(
-                self.pane().column_viewports.get(&self.tab().current_dir),
+                self.pane().list_viewport.as_ref(),
                 item_offset,
                 item_height,
             ))
@@ -216,15 +218,18 @@ impl FileBrowser {
     pub(super) fn clamp_pane_viewports(&mut self, pane_ids: &[BrowserPaneId]) -> Task<Message> {
         #[derive(Debug)]
         enum Reclamp {
-            Shared {
+            List {
                 pane_id: BrowserPaneId,
-                region: ScrollbarRegion,
+                viewport: ColumnViewport,
+            },
+            Column {
+                pane_id: BrowserPaneId,
                 directory: PathBuf,
                 viewport: ColumnViewport,
             },
             Icons {
                 pane_id: BrowserPaneId,
-                directory: PathBuf,
+                location: crate::model::BrowserLocation,
                 viewport: crate::model::IconGridViewport,
             },
         }
@@ -236,8 +241,7 @@ impl FileBrowser {
             };
             match pane.view_mode {
                 BrowserViewMode::List => {
-                    let Some(viewport) = pane.column_viewports.get(pane.current_dir).copied()
-                    else {
+                    let Some(viewport) = pane.list_viewport else {
                         continue;
                     };
                     let geometry = crate::list_view::ListGeometry::for_level(
@@ -263,10 +267,8 @@ impl FileBrowser {
                         );
                     let max_offset = (content_height - viewport.height).max(0.0);
                     if viewport.offset_y > max_offset {
-                        pending.push(Reclamp::Shared {
+                        pending.push(Reclamp::List {
                             pane_id,
-                            region: ScrollbarRegion::PaneList(pane_id),
-                            directory: pane.current_dir.clone(),
                             viewport: ColumnViewport {
                                 offset_y: max_offset,
                                 height: viewport.height,
@@ -292,12 +294,8 @@ impl FileBrowser {
                         let content_height = geometry.content_height(merged_count);
                         let max_offset = (content_height - viewport.height).max(0.0);
                         if viewport.offset_y > max_offset {
-                            pending.push(Reclamp::Shared {
+                            pending.push(Reclamp::Column {
                                 pane_id,
-                                region: ScrollbarRegion::Column {
-                                    pane_id,
-                                    directory: directory.clone(),
-                                },
                                 directory,
                                 viewport: ColumnViewport {
                                     offset_y: max_offset,
@@ -314,7 +312,7 @@ impl FileBrowser {
                     if viewport.offset_y > max_offset {
                         pending.push(Reclamp::Icons {
                             pane_id,
-                            directory: pane.current_dir.clone(),
+                            location: pane.location.clone(),
                             viewport: crate::model::IconGridViewport {
                                 offset_y: max_offset,
                                 ..viewport
@@ -328,17 +326,28 @@ impl FileBrowser {
         let mut commands = Vec::new();
         for reclamp in pending {
             match reclamp {
-                Reclamp::Shared {
+                Reclamp::List { pane_id, viewport } => {
+                    if let Some(pane) = self.pane_by_id_mut(pane_id) {
+                        pane.list_viewport = Some(viewport);
+                    }
+                    commands.push(iced::widget::operation::scroll_to(
+                        smooth_scroll_id(&ScrollbarRegion::PaneList(pane_id)),
+                        iced::widget::scrollable::AbsoluteOffset {
+                            x: None,
+                            y: Some(viewport.offset_y),
+                        },
+                    ));
+                }
+                Reclamp::Column {
                     pane_id,
-                    region,
                     directory,
                     viewport,
                 } => {
                     if let Some(pane) = self.pane_by_id_mut(pane_id) {
-                        pane.column_viewports.insert(directory, viewport);
+                        pane.column_viewports.insert(directory.clone(), viewport);
                     }
                     commands.push(iced::widget::operation::scroll_to(
-                        smooth_scroll_id(&region),
+                        smooth_scroll_id(&ScrollbarRegion::Column { pane_id, directory }),
                         iced::widget::scrollable::AbsoluteOffset {
                             x: None,
                             y: Some(viewport.offset_y),
@@ -347,16 +356,11 @@ impl FileBrowser {
                 }
                 Reclamp::Icons {
                     pane_id,
-                    directory,
+                    location,
                     viewport,
                 } => {
-                    self.icon_grid_viewports.insert(
-                        pane_id,
-                        super::PaneIconGridViewport {
-                            directory,
-                            viewport,
-                        },
-                    );
+                    self.icon_grid_viewports
+                        .insert(pane_id, super::PaneIconGridViewport { location, viewport });
                     commands.push(iced::widget::operation::scroll_to(
                         smooth_scroll_id(&ScrollbarRegion::PaneIcons(pane_id)),
                         iced::widget::scrollable::AbsoluteOffset {
@@ -377,7 +381,7 @@ impl FileBrowser {
     /// 主选中项在当前视图中的纵向定位任务；目录内容尚未就绪时返回 None。
     pub(super) fn view_switch_reveal_scroll(&self, path: &Path) -> Option<Task<Message>> {
         let pane_id = self.active_pane_id();
-        let (region, target_y) = match self.tab().view_mode {
+        let (region, target_y) = match self.tab().view_mode() {
             BrowserViewMode::Icons => {
                 let pane = self.pane_view(pane_id)?;
                 let viewport = pane.icon_grid_viewport;
@@ -406,7 +410,7 @@ impl FileBrowser {
                         geometry.row_height,
                         LIST_HEADER_HEIGHT,
                     )?;
-                let viewport = self.pane().column_viewports.get(&self.tab().current_dir);
+                let viewport = self.pane().list_viewport.as_ref();
                 (
                     ScrollbarRegion::PaneList(pane_id),
                     reveal_target_y(viewport, item_offset, item_height),
@@ -469,8 +473,10 @@ impl FileBrowser {
 
     fn list_expansion_transfer(&self) -> Option<DirectoryExpansionTransfer> {
         let tab = self.tab();
+        let current_directory = tab.current_directory()?;
         let target_selection = tab.selected.clone()?;
-        if target_selection == tab.current_dir || !target_selection.starts_with(&tab.current_dir) {
+        if target_selection == current_directory || !target_selection.starts_with(current_directory)
+        {
             return None;
         }
 
@@ -484,7 +490,7 @@ impl FileBrowser {
             target_selection.parent()?.to_path_buf()
         };
         let mut chain = Vec::new();
-        while current != tab.current_dir {
+        while current != current_directory {
             chain.push(current.clone());
             current = current.parent()?.to_path_buf();
         }
@@ -493,9 +499,9 @@ impl FileBrowser {
             return None;
         }
 
-        let mut parent = tab.current_dir.as_path();
+        let mut parent = current_directory;
         for directory_path in &chain {
-            let entries = if parent == tab.current_dir {
+            let entries = if parent == current_directory {
                 tab.entries.as_slice()
             } else {
                 tab.expanded_directories
@@ -519,7 +525,7 @@ impl FileBrowser {
         }
 
         let target_parent = target_selection.parent()?;
-        let target_entries = if target_parent == tab.current_dir {
+        let target_entries = if target_parent == current_directory {
             tab.entries.as_slice()
         } else {
             tab.expanded_directories
@@ -562,10 +568,13 @@ impl FileBrowser {
         };
         self.clear_list_expansion_for_follow();
         let tab = self.tab();
+        let Some(current_dir) = tab.current_directory().map(Path::to_path_buf) else {
+            return Task::none();
+        };
         if !tab.entries.iter().any(|entry| {
             entry.path == root_path
                 && entry.expands_as_directory()
-                && entry.path.parent() == Some(tab.current_dir.as_path())
+                && entry.path.parent() == Some(current_dir.as_path())
         }) {
             return Task::none();
         }
@@ -574,7 +583,6 @@ impl FileBrowser {
         let session_id = self.next_list_expansion_follow_session_id();
         let pane_id = self.active_pane_id();
         let tab_id = self.pane().active_tab_id;
-        let current_dir = self.tab().current_dir.clone();
         let (request, cancellation) = Self::next_expanded_directory_load_request(
             DirectoryExpansionLoadContext::ListFollow {
                 pane_id,
@@ -619,11 +627,11 @@ impl FileBrowser {
             return DirectoryExpansionLoadContext::BrowserTree { pane_id };
         };
         let tab = self.tab();
-        if tab.view_mode == BrowserViewMode::List
+        if tab.view_mode() == BrowserViewMode::List
             && pane_id == plan.pane_id
             && self.active_pane_id() == plan.pane_id
             && self.pane().active_tab_id == plan.tab_id
-            && tab.current_dir == plan.current_dir
+            && tab.current_directory() == Some(plan.current_dir.as_path())
             && path == plan.waiting_for
         {
             DirectoryExpansionLoadContext::ListFollow {
@@ -655,10 +663,10 @@ impl FileBrowser {
                 && *tab_id == plan.tab_id
                 && current_dir == &plan.current_dir
                 && *session_id == plan.session_id
-        ) && self.tab().view_mode == BrowserViewMode::List
+        ) && self.tab().view_mode() == BrowserViewMode::List
             && self.active_pane_id() == plan.pane_id
             && self.pane().active_tab_id == plan.tab_id
-            && self.tab().current_dir == plan.current_dir
+            && self.tab().current_directory() == Some(plan.current_dir.as_path())
             && request.path == plan.waiting_for
     }
 
@@ -842,7 +850,7 @@ impl FileBrowser {
             return Task::none();
         };
         let tab = self.tab();
-        if parent == tab.current_dir {
+        if tab.current_directory() == Some(parent.as_path()) {
             return Task::none();
         }
         if !crate::visible_entries::entry_is_visible(
@@ -858,7 +866,7 @@ impl FileBrowser {
     }
 
     fn toggle_list_directory_for_path(&mut self, path: PathBuf) -> Task<Message> {
-        if self.tab().is_trash_view || !self.entry_acts_as_directory(&path) {
+        if self.tab().location == BrowserLocation::Trash || !self.entry_acts_as_directory(&path) {
             return Task::none();
         }
 
@@ -931,7 +939,7 @@ impl FileBrowser {
         let tab = self.tab();
         crate::visible_entries::visible_child_paths(
             directory,
-            &tab.current_dir,
+            tab.current_directory(),
             &tab.entries,
             &tab.expanded_directories,
         )
@@ -942,7 +950,7 @@ impl FileBrowser {
     fn sync_expanded_directories_to_open_columns(&mut self) {
         let retained_paths = crate::three_column_view::column_directories(self)
             .into_iter()
-            .filter(|path| path != &self.tab().current_dir)
+            .filter(|path| self.tab().current_directory() != Some(path.as_path()))
             .collect::<HashSet<_>>();
         self.tab_mut()
             .expanded_directories
@@ -1122,27 +1130,23 @@ mod tests {
     fn list_viewport_offset_is_reclamped_when_entries_shrink_below_it() {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
         let root = PathBuf::from("/workspace");
-        browser.tab_mut().current_dir = root.clone();
-        browser.tab_mut().view_mode = BrowserViewMode::List;
+        browser.tab_mut().location = BrowserLocation::Directory(root.clone());
+        browser.tab_mut().choose_view_mode(BrowserViewMode::List);
         browser.tab_mut().entries = (0..500)
             .map(|index| test_entry(root.join(format!("item-{index}"))))
             .collect::<Vec<_>>()
             .into();
-        browser.pane_mut().column_viewports.insert(
-            root.clone(),
-            ColumnViewport {
-                offset_y: 22000.0,
-                height: 800.0,
-            },
-        );
+        browser.pane_mut().list_viewport = Some(ColumnViewport {
+            offset_y: 22000.0,
+            height: 800.0,
+        });
 
         // 关闭"显示隐藏文件"后重扫落地,条目骤减:滚动偏移仍停在旧内容的底部。
         land_scan(&mut browser, &root, 5);
 
         let clamped = browser
             .pane()
-            .column_viewports
-            .get(&root)
+            .list_viewport
             .expect("viewport stays recorded");
         // 新内容(5 行 + 表头)不足一屏,合法偏移只有 0;保持 22000 会让
         // 虚拟列表渲染出整屏空白。
@@ -1153,8 +1157,8 @@ mod tests {
     fn columns_viewport_offset_is_reclamped_when_entries_shrink_below_it() {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
         let root = PathBuf::from("/workspace");
-        browser.tab_mut().current_dir = root.clone();
-        browser.tab_mut().view_mode = BrowserViewMode::Columns;
+        browser.tab_mut().location = BrowserLocation::Directory(root.clone());
+        browser.tab_mut().choose_view_mode(BrowserViewMode::Columns);
         browser.tab_mut().entries = (0..200)
             .map(|index| test_entry(root.join(format!("item-{index}"))))
             .collect::<Vec<_>>()
@@ -1183,8 +1187,8 @@ mod tests {
     fn icons_viewport_offset_is_reclamped_when_entries_shrink_below_it() {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
         let root = PathBuf::from("/workspace");
-        browser.tab_mut().current_dir = root.clone();
-        browser.tab_mut().view_mode = BrowserViewMode::Icons;
+        browser.tab_mut().location = BrowserLocation::Directory(root.clone());
+        browser.tab_mut().choose_view_mode(BrowserViewMode::Icons);
         browser.tab_mut().entries = (0..5)
             .map(|index| test_entry(root.join(format!("item-{index}"))))
             .collect::<Vec<_>>()
@@ -1192,7 +1196,7 @@ mod tests {
         browser.icon_grid_viewports.insert(
             browser.active_pane_id(),
             crate::app::PaneIconGridViewport {
-                directory: root.clone(),
+                location: BrowserLocation::Directory(root.clone()),
                 viewport: crate::model::IconGridViewport {
                     offset_y: 20000.0,
                     width: 600.0,
@@ -1214,26 +1218,22 @@ mod tests {
     fn list_viewport_within_new_content_is_left_untouched() {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
         let root = PathBuf::from("/workspace");
-        browser.tab_mut().current_dir = root.clone();
-        browser.tab_mut().view_mode = BrowserViewMode::List;
+        browser.tab_mut().location = BrowserLocation::Directory(root.clone());
+        browser.tab_mut().choose_view_mode(BrowserViewMode::List);
         browser.tab_mut().entries = (0..500)
             .map(|index| test_entry(root.join(format!("item-{index}"))))
             .collect::<Vec<_>>()
             .into();
-        browser.pane_mut().column_viewports.insert(
-            root.clone(),
-            ColumnViewport {
-                offset_y: 4600.0,
-                height: 800.0,
-            },
-        );
+        browser.pane_mut().list_viewport = Some(ColumnViewport {
+            offset_y: 4600.0,
+            height: 800.0,
+        });
 
         land_scan(&mut browser, &root, 500);
 
         let viewport = browser
             .pane()
-            .column_viewports
-            .get(&root)
+            .list_viewport
             .expect("viewport stays recorded");
         // 合法偏移不得被自愈误改(内容 500 行 × 46px 远超 4600+800)。
         assert_eq!(viewport.offset_y, 4600.0);
@@ -1243,25 +1243,22 @@ mod tests {
     fn animation_frames_reclamp_viewports_to_the_shrinking_content() {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
         let root = PathBuf::from("/workspace");
-        browser.tab_mut().current_dir = root.clone();
-        browser.tab_mut().view_mode = BrowserViewMode::List;
+        browser.tab_mut().location = BrowserLocation::Directory(root.clone());
+        browser.tab_mut().choose_view_mode(BrowserViewMode::List);
         browser.tab_mut().entries = (0..5)
             .map(|index| test_entry(root.join(format!("item-{index}"))))
             .collect::<Vec<_>>()
             .into();
-        browser.pane_mut().column_viewports.insert(
-            root.clone(),
-            ColumnViewport {
-                offset_y: 22000.0,
-                height: 800.0,
-            },
-        );
+        browser.pane_mut().list_viewport = Some(ColumnViewport {
+            offset_y: 22000.0,
+            height: 800.0,
+        });
 
         // 终端面板收起、标签栏出现、列表折叠这些动画都改变内容或视口高度，
         // 逐帧推进时视口跟着收。
         drop(browser.advance_window_animation_frame());
 
-        assert_eq!(browser.pane().column_viewports[&root].offset_y, 0.0);
+        assert_eq!(browser.pane().list_viewport.unwrap().offset_y, 0.0);
     }
 
     /// 回归：滚动动画每帧都会重钉视口；停在栏真实底部的偏移必须原样保留，
@@ -1270,8 +1267,8 @@ mod tests {
     fn animation_frames_keep_a_column_viewport_parked_at_the_real_bottom() {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
         let root = PathBuf::from("/workspace");
-        browser.tab_mut().current_dir = root.clone();
-        browser.tab_mut().view_mode = BrowserViewMode::Columns;
+        browser.tab_mut().location = BrowserLocation::Directory(root.clone());
+        browser.tab_mut().choose_view_mode(BrowserViewMode::Columns);
         browser.tab_mut().entries = (0..200)
             .map(|index| test_entry(root.join(format!("item-{index}"))))
             .collect::<Vec<_>>()
@@ -1301,7 +1298,7 @@ mod tests {
     #[test]
     fn selecting_file_grouping_updates_config_without_touching_directory_loading() {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.tab_mut().view_mode = BrowserViewMode::List;
+        browser.tab_mut().choose_view_mode(BrowserViewMode::List);
         browser.tab_mut().directory_collection_phase =
             crate::model::DirectoryCollectionPhase::Ready;
         let load_generation_before = browser.pane().directory_load_generation;
@@ -1343,8 +1340,8 @@ mod tests {
         // 键盘 → 展开选中项与点击展开箭头共用“压缩包视作目录”判定。
         let archive = PathBuf::from("/workspace/bundle.zip");
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.tab_mut().current_dir = PathBuf::from("/workspace");
-        browser.tab_mut().view_mode = BrowserViewMode::List;
+        browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
+        browser.tab_mut().choose_view_mode(BrowserViewMode::List);
         browser.tab_mut().entries = vec![DirectoryEntry::new(
             archive.clone(),
             FileKind::File,

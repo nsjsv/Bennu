@@ -24,22 +24,25 @@ impl FileBrowser {
             .cloned()
             .expect("non-empty icon expansion follow chain");
         let tab = self.tab();
+        let Some(current_dir) = tab.current_directory().map(Path::to_path_buf) else {
+            return Task::none();
+        };
         let Some((root_index, _)) = tab
             .entries
             .iter()
             .enumerate()
-            .find(|(_, entry)| root_entry_matches(entry, &root_path, &tab.current_dir))
+            .find(|(_, entry)| root_entry_matches(entry, &root_path, &current_dir))
         else {
             return Task::none();
         };
         let anchor = IconGridExpansionAnchor {
-            parent_directory: self.tab().current_dir.clone(),
+            parent_directory: current_dir.clone(),
             path: root_path.clone(),
             index: root_index,
         };
         let context = IconGridExpansionContext {
             pane_id: self.active_pane_id(),
-            current_dir: self.tab().current_dir.clone(),
+            current_dir,
             session_id: self.next_icon_grid_expansion_session_id(),
         };
         let mut expanded = loading_icon_grid_directory();

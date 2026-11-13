@@ -38,19 +38,19 @@ pub(super) fn view_mode_button_group(pane: BrowserPaneView<'_>) -> Element<'stat
     toolbar_button_group(row![
         view_mode_button(
             pane.id,
-            pane.view_mode,
+            pane.chosen_view_mode,
             BrowserViewMode::Columns,
             IconSymbol::Columns,
         ),
         view_mode_button(
             pane.id,
-            pane.view_mode,
+            pane.chosen_view_mode,
             BrowserViewMode::List,
             IconSymbol::List,
         ),
         view_mode_button(
             pane.id,
-            pane.view_mode,
+            pane.chosen_view_mode,
             BrowserViewMode::Icons,
             IconSymbol::Grid,
         ),

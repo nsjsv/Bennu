@@ -573,7 +573,6 @@ impl FileBrowser {
                             entry.directory == *directory && entry.bounds.contains(position)
                         })
                         .map(|entry| entry.directory.clone()),
-                    Some(FileDropTarget::Trash) => Some(crate::model::trash_location_path()),
                     _ => None,
                 };
                 Some((target, hovered_entry, hovered_sidebar, spring_hover))

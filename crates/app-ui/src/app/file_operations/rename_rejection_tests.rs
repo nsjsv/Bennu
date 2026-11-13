@@ -19,7 +19,7 @@ fn file_entry(path: &PathBuf) -> DirectoryEntry {
 
 fn browser_showing(paths: &[&PathBuf]) -> FileBrowser {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
     browser.tab_mut().directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
     browser.tab_mut().entries = paths
         .iter()

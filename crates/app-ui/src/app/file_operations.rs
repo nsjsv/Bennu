@@ -13,7 +13,7 @@ use super::global_error::GlobalErrorSource;
 use super::FileBrowser;
 use crate::commands::{file_operation_driver_task, file_operation_persistence_command};
 use crate::model::{
-    AdvancedNewFolderAfter, BrowserViewMode, DestructiveActionConfirmation,
+    AdvancedNewFolderAfter, BrowserLocation, BrowserViewMode, DestructiveActionConfirmation,
     IconGridExpansionMigration, Message, NavigationMode,
 };
 use crate::operation_history::PendingHistoryOperation;
@@ -278,7 +278,7 @@ impl FileBrowser {
         match (after, created_path.clone()) {
             (Some(AdvancedNewFolderAfter::Enter), Some(path)) => {
                 // 多栏视图:在另一栏打开新文件夹;其他视图:直接进入。
-                if self.tab().view_mode == BrowserViewMode::Columns {
+                if self.tab().view_mode() == BrowserViewMode::Columns {
                     tasks.push(self.open_column_for_directory(path));
                 } else {
                     tasks.push(self.navigate_to(path, NavigationMode::RecordHistory));
@@ -616,7 +616,7 @@ impl FileBrowser {
     }
 
     pub(super) fn begin_rename(&mut self, path: PathBuf) -> Task<Message> {
-        if self.tab().is_trash_view {
+        if self.tab().location == BrowserLocation::Trash {
             return Task::none();
         }
 

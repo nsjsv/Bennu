@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use super::FileBrowser;
 use crate::model::{
     same_parent, BatchRenameMessage, BatchRenameSource, BatchRenameSourceNameError,
-    BatchRenameState, Message,
+    BatchRenameState, BrowserLocation, Message,
 };
 use crate::view::batch_rename_preview_name_input_id;
 use file_operations::QueuedFileOperation;
@@ -31,7 +31,7 @@ impl FileBrowser {
 
     pub(super) fn batch_rename_available_for_selection(&self) -> bool {
         let paths = self.selected_paths_for_operation();
-        !self.tab().is_trash_view && paths.len() > 1 && same_parent(&paths)
+        self.tab().location != BrowserLocation::Trash && paths.len() > 1 && same_parent(&paths)
     }
 
     fn open_batch_rename_selected(&mut self) -> Task<Message> {

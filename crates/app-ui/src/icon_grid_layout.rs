@@ -82,7 +82,8 @@ pub(crate) struct IconGridVisibleRows {
 
 #[derive(Debug)]
 pub(crate) struct IconGridRowsLayout<'a> {
-    pub(crate) directory: &'a Path,
+    /// 这些格子所在的目录；根面板显示的位置不是目录（回收站）时没有。
+    pub(crate) directory: Option<&'a Path>,
     pub(crate) cells: Arc<[IconGridCell<'a>]>,
     pub(crate) start_row: usize,
     pub(crate) end_row: usize,
@@ -233,7 +234,7 @@ pub(crate) struct IconGridVisibleEntry<'a> {
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct IconGridNavigationTarget<'a> {
-    pub(crate) directory: &'a Path,
+    pub(crate) directory: Option<&'a Path>,
     pub(crate) entry: &'a DirectoryEntry,
 }
 
@@ -244,7 +245,7 @@ impl<'a> IconGridLayout<'a> {
     /// 划分器与列表共用;子面板/band 永远平铺不分组。
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn with_root_transfer_placeholders(
-        root_directory: &'a Path,
+        root_directory: Option<&'a Path>,
         root_entries: &'a [DirectoryEntry],
         root_placeholders: &[TransferPlaceholder],
         root_sort: TransferSortOptions,
@@ -255,7 +256,8 @@ impl<'a> IconGridLayout<'a> {
         expansion: Option<&'a IconGridExpansionState>,
         root_grouping: Option<IconGridRootGrouping<'_>>,
     ) -> Self {
-        let expansion = expansion.filter(|state| state.context().current_dir == root_directory);
+        let expansion =
+            expansion.filter(|state| Some(state.context().current_dir.as_path()) == root_directory);
         let children_by_parent = expansion.map(index_visible_children);
         let merged = merge_entries_with_placeholders(root_entries, root_placeholders, root_sort);
         let (root_cells, root_rows_plan) = split_root_cells(merged, root_entries, root_grouping);
@@ -412,7 +414,7 @@ impl<'a> IconGridLayout<'a> {
             self.icon_edge,
             point,
         )
-        .map(|(_, entry)| entry.path.as_path())
+        .map(|entry| entry.path.as_path())
     }
 
     fn interactive_entry_geometry(&self) -> Vec<IconGridEntryGeometry<'a>> {
@@ -429,7 +431,7 @@ impl<'a> IconGridLayout<'a> {
 }
 
 fn build_panel<'a>(
-    directory: &'a Path,
+    directory: Option<&'a Path>,
     cells: Arc<[IconGridCell<'a>]>,
     status: IconGridPanelStatus,
     width: f32,
@@ -480,7 +482,8 @@ fn build_panel<'a>(
     };
     let total_rows = row_count_for_entries(cells.len(), column_count);
     let children = children_by_parent
-        .and_then(|children| children.get(directory))
+        .zip(directory)
+        .and_then(|(children, directory)| children.get(directory))
         .map(Vec::as_slice)
         .unwrap_or_default();
 
@@ -513,7 +516,7 @@ fn build_panel<'a>(
             let (child_cells, child_status) =
                 expanded_panel_content(child_path, child, expanded_placeholders);
             let child_panel = build_panel(
-                child_path,
+                Some(child_path),
                 child_cells,
                 child_status,
                 width,

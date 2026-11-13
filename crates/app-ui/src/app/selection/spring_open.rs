@@ -53,7 +53,7 @@ impl FileBrowser {
         directory: &Path,
     ) -> bool {
         self.pane_view(pane_id)
-            .is_some_and(|pane| directory != pane.current_dir)
+            .is_some_and(|pane| pane.current_directory() != Some(directory))
     }
 
     /// 所有悬停状态变化后的统一收敛点。`hover` 是 (pane, 目录路径, 来源):
@@ -177,11 +177,14 @@ impl FileBrowser {
         // 不能用 column_directories(self):拖拽中它返回的正是冻结快照,
         // 写回等于没变。按同一展开规则取 deepest 更新后的活链。
         let tab = self.tab();
-        let mut chain = vec![tab.current_dir.clone()];
+        let Some(current_directory) = tab.current_directory() else {
+            return;
+        };
+        let mut chain = vec![current_directory.to_path_buf()];
         if let Some(open_directory) = &tab.deepest_open_column_directory {
             crate::three_column_view::append_column_directory_chain(
                 &mut chain,
-                &tab.current_dir,
+                current_directory,
                 open_directory,
             );
         }
@@ -221,6 +224,7 @@ mod tests {
     use super::super::super::FileBrowser;
     use super::FILE_DRAG_SPRING_OPEN_DELAY;
     use crate::config;
+    use crate::model::BrowserLocation;
     use crate::model::{
         BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, BrowserViewMode,
         FileDragSpringSource, FileDragStationaryAction, SplitAxis,
@@ -248,8 +252,8 @@ mod tests {
         let dir_a = workspace.join("dir_a");
         let dir_b = workspace.join("dir_b");
         let file = workspace.join("file.txt");
-        browser.tab_mut().current_dir = workspace.clone();
-        browser.tab_mut().view_mode = BrowserViewMode::List;
+        browser.tab_mut().location = BrowserLocation::Directory(workspace.clone());
+        browser.tab_mut().choose_view_mode(BrowserViewMode::List);
         browser.tab_mut().entries = vec![
             test_entry(dir_a.clone(), FileKind::Directory),
             test_entry(dir_b.clone(), FileKind::Directory),
@@ -283,20 +287,20 @@ mod tests {
 
         // 未到阈值:不动。
         drop(browser.handle_file_drag_spring_open_tick());
-        assert_eq!(browser.tab().current_dir, workspace);
+        assert_eq!(browser.tab().current_directory().unwrap(), workspace);
         assert!(browser.file_drag_spring_hover.is_some());
 
         // 回拨计时起点后 tick:进入目录,与双击同路径(历史入栈)。
         browser.file_drag_spring_hover.as_mut().unwrap().since =
             Instant::now() - FILE_DRAG_SPRING_OPEN_DELAY - Duration::from_millis(1);
         drop(browser.handle_file_drag_spring_open_tick());
-        assert_eq!(browser.tab().current_dir, dir_a);
+        assert_eq!(browser.tab().current_directory().unwrap(), dir_a);
         assert_eq!(browser.tab().back_stack, vec![workspace]);
         // 触发后候选保留(fired):悬停未离开不重复触发,环消失。
         assert!(browser.file_drag_spring_hover.as_ref().unwrap().fired);
         assert_eq!(browser.file_drag_spring_open_progress(&dir_a), None);
         drop(browser.handle_file_drag_spring_open_tick());
-        assert_eq!(browser.tab().current_dir, dir_a);
+        assert_eq!(browser.tab().current_directory().unwrap(), dir_a);
     }
 
     #[test]
@@ -312,10 +316,18 @@ mod tests {
         assert!(browser.file_drag_spring_hover.is_none());
 
         // 悬停空白处(当前目录落点):不是条目悬停,保持清除。
-        drop(browser.handle_drop_target_hovered(browser.tab().current_dir.clone()));
+        drop(
+            browser.handle_drop_target_hovered(
+                browser.tab().current_directory().unwrap().to_path_buf(),
+            ),
+        );
         drop(browser.handle_entry_hovered(dir_a.clone()));
         assert!(browser.file_drag_spring_hover.is_some());
-        drop(browser.handle_drop_target_hovered(browser.tab().current_dir.clone()));
+        drop(
+            browser.handle_drop_target_hovered(
+                browser.tab().current_directory().unwrap().to_path_buf(),
+            ),
+        );
         assert!(browser.file_drag_spring_hover.is_none());
     }
 
@@ -370,7 +382,7 @@ mod tests {
         let (mut browser, _dir_a, _dir_b, _file, _workspace) = spring_browser();
         let folder = PathBuf::from("/second/folder");
         let mut second_tab = BrowserTab::directory(1, PathBuf::from("/second"));
-        second_tab.view_mode = BrowserViewMode::List;
+        second_tab.choose_view_mode(BrowserViewMode::List);
         second_tab.entries = vec![test_entry(folder.clone(), FileKind::Directory)].into();
         browser
             .panes
@@ -402,14 +414,17 @@ mod tests {
         // 未到阈值:不动,B 也不被激活。
         drop(browser.handle_file_drag_spring_open_tick());
         assert_eq!(browser.active_pane_id(), BrowserPaneId::PRIMARY);
-        assert_eq!(browser.tab().current_dir, PathBuf::from("/workspace"));
+        assert_eq!(
+            browser.tab().current_directory().unwrap(),
+            PathBuf::from("/workspace")
+        );
 
         // 到点:激活 B 并进入目录;拖拽存活,A 快照完整。
         browser.file_drag_spring_hover.as_mut().unwrap().since =
             Instant::now() - FILE_DRAG_SPRING_OPEN_DELAY - Duration::from_millis(1);
         drop(browser.handle_file_drag_spring_open_tick());
         assert_eq!(browser.active_pane_id(), BrowserPaneId(1));
-        assert_eq!(browser.tab().current_dir, folder);
+        assert_eq!(browser.tab().current_directory().unwrap(), folder);
         assert!(browser
             .file_drag
             .as_ref()
@@ -419,7 +434,8 @@ mod tests {
                 .pane_by_id(BrowserPaneId::PRIMARY)
                 .unwrap()
                 .tab()
-                .current_dir,
+                .current_directory()
+                .unwrap(),
             PathBuf::from("/workspace")
         );
     }
@@ -464,7 +480,7 @@ mod tests {
             Instant::now() - FILE_DRAG_SPRING_OPEN_DELAY - Duration::from_millis(1);
         drop(browser.handle_file_drag_spring_open_tick());
         assert_eq!(browser.active_pane_id(), BrowserPaneId(1));
-        assert_eq!(browser.tab().current_dir, folder);
+        assert_eq!(browser.tab().current_directory().unwrap(), folder);
     }
 
     /// 候选 pane 在拖拽中途消失(窗格合并等):候选随 pane 失效,tick
@@ -484,7 +500,7 @@ mod tests {
         drop(browser.handle_file_drag_spring_open_tick());
         assert!(browser.file_drag_spring_hover.is_none());
         assert_eq!(browser.active_pane_id(), BrowserPaneId::PRIMARY);
-        assert_ne!(browser.tab().current_dir, folder);
+        assert_ne!(browser.tab().current_directory().unwrap(), folder);
     }
 
     /// 回收站视图的 pane 不接受拖放,其目录条目悬停不构成候选。
@@ -493,8 +509,7 @@ mod tests {
         let (mut browser, _folder) = split_browser_with_inactive_folder_pane();
         let trashed_folder = PathBuf::from("/trash-root/folder");
         let mut trash_tab = BrowserTab::trash(1);
-        trash_tab.current_dir = PathBuf::from("/trash-root");
-        trash_tab.view_mode = BrowserViewMode::List;
+        trash_tab.choose_view_mode(BrowserViewMode::List);
         trash_tab.entries = vec![test_entry(trashed_folder.clone(), FileKind::Directory)].into();
         browser.panes.pop();
         browser
@@ -517,7 +532,7 @@ mod tests {
         use crate::model::{ColumnEntryBounds, FileDragHitTestBounds, FileDropLayoutState};
 
         let (mut browser, dir_a, _dir_b, file, workspace) = spring_browser();
-        browser.tab_mut().view_mode = BrowserViewMode::Columns;
+        browser.tab_mut().choose_view_mode(BrowserViewMode::Columns);
         // 多栏真实拖拽:单击栏条目起拖,栏链快照被捕获(拖拽期间渲染冻结链)。
         browser.tab_mut().selected = Some(file.clone());
         browser.cursor_position = Some(Point::new(100.0, 100.0));
@@ -569,17 +584,17 @@ mod tests {
                 .column_directories_snapshot,
             vec![workspace.clone(), dir_a.clone()]
         );
-        assert_eq!(browser.tab().current_dir, workspace);
+        assert_eq!(browser.tab().current_directory().unwrap(), workspace);
         // 同一次悬停不重复触发。
         assert!(browser.file_drag_spring_hover.as_ref().unwrap().fired);
         drop(browser.handle_file_drag_spring_open_tick());
-        assert_eq!(browser.tab().current_dir, workspace);
+        assert_eq!(browser.tab().current_directory().unwrap(), workspace);
     }
 
     #[test]
     fn columns_view_opens_next_column_instead_of_navigating() {
         let (mut browser, dir_a, _dir_b, file, workspace) = spring_browser();
-        browser.tab_mut().view_mode = BrowserViewMode::Columns;
+        browser.tab_mut().choose_view_mode(BrowserViewMode::Columns);
         start_drag_on(&mut browser, &file);
 
         drop(browser.handle_entry_hovered(dir_a.clone()));
@@ -588,11 +603,11 @@ mod tests {
         drop(browser.handle_file_drag_spring_open_tick());
 
         // 多栏:当前目录不变,目标目录在下一栏打开;同一次悬停不重复触发。
-        assert_eq!(browser.tab().current_dir, workspace);
+        assert_eq!(browser.tab().current_directory().unwrap(), workspace);
         assert!(browser.tab().expanded_directories.contains_key(&dir_a));
         assert!(browser.file_drag_spring_hover.as_ref().unwrap().fired);
         drop(browser.handle_file_drag_spring_open_tick());
-        assert_eq!(browser.tab().current_dir, workspace);
+        assert_eq!(browser.tab().current_directory().unwrap(), workspace);
     }
 
     #[test]
@@ -639,7 +654,7 @@ mod tests {
         browser.file_drag_spring_hover.as_mut().unwrap().since =
             Instant::now() - FILE_DRAG_SPRING_OPEN_DELAY - Duration::from_millis(1);
         drop(browser.handle_file_drag_spring_open_tick());
-        assert_eq!(browser.tab().current_dir, dir_a);
+        assert_eq!(browser.tab().current_directory().unwrap(), dir_a);
 
         // 导航加载完成:新条目落定,过期布局经 tick 重测进入 Pending。
         let sub = dir_a.join("sub");
@@ -673,7 +688,7 @@ mod tests {
         browser.file_drag_spring_hover.as_mut().unwrap().since =
             Instant::now() - FILE_DRAG_SPRING_OPEN_DELAY - Duration::from_millis(1);
         drop(browser.handle_file_drag_spring_open_tick());
-        assert_eq!(browser.tab().current_dir, sub);
+        assert_eq!(browser.tab().current_directory().unwrap(), sub);
         assert_eq!(
             browser.tab().back_stack,
             vec![dir_a.parent().unwrap().clone(), &dir_a]
@@ -684,7 +699,7 @@ mod tests {
     fn breadcrumb_hover_navigates_back_after_delay() {
         let (mut browser, dir_a, _dir_b, file, workspace) = spring_browser();
         // 模拟 spring 已钻入 dir_a:当前目录与其内容,拖着其中的文件。
-        browser.tab_mut().current_dir = dir_a.clone();
+        browser.tab_mut().location = BrowserLocation::Directory(dir_a.clone());
         browser.tab_mut().entries = vec![test_entry(file.clone(), FileKind::File)].into();
         start_drag_on(&mut browser, &file);
 
@@ -704,7 +719,7 @@ mod tests {
         browser.file_drag_spring_hover.as_mut().unwrap().since =
             Instant::now() - FILE_DRAG_SPRING_OPEN_DELAY - Duration::from_millis(1);
         drop(browser.handle_file_drag_spring_open_tick());
-        assert_eq!(browser.tab().current_dir, workspace);
+        assert_eq!(browser.tab().current_directory().unwrap(), workspace);
         assert_eq!(browser.tab().back_stack, vec![dir_a]);
     }
 
@@ -721,11 +736,11 @@ mod tests {
     #[test]
     fn breadcrumb_hover_in_columns_view_resets_chain_and_keeps_drag() {
         let (mut browser, dir_a, _dir_b, _file, workspace) = spring_browser();
-        browser.tab_mut().view_mode = BrowserViewMode::Columns;
+        browser.tab_mut().choose_view_mode(BrowserViewMode::Columns);
         // 模拟已在 dir_a 内:当前目录、内容与其展开子栏。
         let file_in_a = dir_a.join("file.txt");
         let sub = dir_a.join("sub");
-        browser.tab_mut().current_dir = dir_a.clone();
+        browser.tab_mut().location = BrowserLocation::Directory(dir_a.clone());
         browser.tab_mut().entries = vec![
             test_entry(sub.clone(), FileKind::Directory),
             test_entry(file_in_a.clone(), FileKind::File),
@@ -765,7 +780,7 @@ mod tests {
         browser.file_drag_spring_hover.as_mut().unwrap().since =
             Instant::now() - FILE_DRAG_SPRING_OPEN_DELAY - Duration::from_millis(1);
         drop(browser.handle_file_drag_spring_open_tick());
-        assert_eq!(browser.tab().current_dir, workspace);
+        assert_eq!(browser.tab().current_directory().unwrap(), workspace);
         assert!(browser.tab().expanded_directories.is_empty());
         let drag = browser.file_drag.as_ref().unwrap();
         assert!(drag.column_directories_snapshot.is_empty());

@@ -1,15 +1,12 @@
-//! 根目录分组划分层:分组是纯视图概念,只对当前目录(根)生效——列表
-//! 行流与大图网格共用本划分器,展开子目录递归摊平时 directory 已经是
-//! 子目录路径,天然拿不到划分器。
+//! 根层分组划分层:分组是纯视图概念,只对根层(当前位置自己的条目)生效——
+//! 列表行流与大图网格共用本划分器,展开的子目录一律平铺。
 //! 目录(含目录占位)稳定置顶,文件段经 `partition_files_into_groups`
 //! 做稳定划分——组内保持合并流原序(沿用现有排序),组间按秩排列。
 
-use std::path::Path;
 use std::time::SystemTime;
 
 use file_core::{DirectoryEntry, EntryMetadata, FileKind, SortDirection};
 
-use crate::app::panes::BrowserPaneView;
 use crate::app::FileBrowser;
 use crate::config::UiLanguage;
 use crate::model::{
@@ -30,15 +27,11 @@ pub(crate) struct RootGrouping {
 }
 
 impl RootGrouping {
-    /// 仅当分组开启且 directory 是当前目录时返回划分器。分组关闭与
-    /// 展开子目录都返回 None,行流走原有平铺分支(分组关闭回归保护)。
-    pub(crate) fn for_pane_root(
-        browser: &FileBrowser,
-        pane: BrowserPaneView<'_>,
-        directory: &Path,
-    ) -> Option<Self> {
+    /// 分组开启时返回根层的划分器;分组关闭返回 None,行流走平铺分支。
+    /// 只给根层用,展开的子目录一律平铺。
+    pub(crate) fn for_pane_root(browser: &FileBrowser) -> Option<Self> {
         let mode = browser.user_config().file_grouping;
-        if mode == FileGroupingMode::None || directory != pane.current_dir.as_path() {
+        if mode == FileGroupingMode::None {
             return None;
         }
         Some(Self {

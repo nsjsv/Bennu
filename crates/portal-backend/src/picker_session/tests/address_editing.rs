@@ -6,6 +6,7 @@ use crate::picker_request::PickerKind;
 use crate::picker_session::{
     DirectoryListing, PathSuggestionDirection, SessionEffect, SessionMessage,
 };
+use bennu_sidebar::BrowserLocation;
 use file_core::entry::FileKind;
 
 #[test]
@@ -19,9 +20,9 @@ fn navigation_clears_expansions_and_address_editing() {
     session.update(SessionMessage::AddressEditingStarted);
     assert!(session.address_editing().is_some());
 
-    let target = session.directory().join("sub");
+    let target = session.current_directory().unwrap().join("sub");
     session.update(SessionMessage::EntryDoubleClicked { index: 0 });
-    assert_eq!(session.directory(), target);
+    assert_eq!(session.current_directory().unwrap(), target);
     assert!(session.address_editing().is_none());
     assert!(matches!(session.listing(), DirectoryListing::Pending));
     // 导航退出编辑必须走带快照的 exit transition（target=0）：不允许
@@ -39,7 +40,7 @@ fn address_editing_prefills_navigates_and_cancels() {
         directory: false,
     });
     seeded_listing(&mut session, &[("a", FileKind::Directory)]);
-    let start = session.directory().to_path_buf();
+    let start = session.current_directory().unwrap().to_path_buf();
 
     session.update(SessionMessage::AddressEditingStarted);
     assert_eq!(
@@ -52,14 +53,16 @@ fn address_editing_prefills_navigates_and_cancels() {
     // 空草稿提交 = 取消编辑，留在原地。
     session.update(SessionMessage::AddressEditChanged("  ".to_string()));
     session.update(SessionMessage::AddressEditingSubmitted);
-    assert_eq!(session.directory(), start);
+    assert_eq!(session.current_directory().unwrap(), start);
     assert!(session.address_editing().is_none());
 
     // 相对路径拼接当前目录；成功导航后编辑态退出。
     session.update(SessionMessage::AddressEditingStarted);
     session.update(SessionMessage::AddressEditChanged("a".to_string()));
     let effect = session.update(SessionMessage::AddressEditingSubmitted);
-    assert!(matches!(effect, SessionEffect::NavigateDirectory(dir) if dir == start.join("a")));
+    assert!(
+        matches!(effect, SessionEffect::NavigateLocation(dir) if dir == BrowserLocation::Directory(start.join("a")))
+    );
     assert!(session.address_editing().is_none());
 
     // 取消编辑。
@@ -75,7 +78,7 @@ fn submitting_prefers_selected_suggestion_over_parsed_draft() {
         directory: false,
     });
     seeded_listing(&mut session, &[("a", FileKind::Directory)]);
-    let start = session.directory().to_path_buf();
+    let start = session.current_directory().unwrap().to_path_buf();
     session.update(SessionMessage::AddressEditingStarted);
     let editing = session.address_editing.as_mut().expect("editing session");
     editing.suggestions = vec![start.join("suggestion"), start.join("other")];
@@ -87,7 +90,7 @@ fn submitting_prefers_selected_suggestion_over_parsed_draft() {
 
     assert!(matches!(
         effect,
-        SessionEffect::NavigateDirectory(dir) if dir == start.join("other")
+        SessionEffect::NavigateLocation(dir) if dir == BrowserLocation::Directory(start.join("other"))
     ));
     assert!(session.address_editing.is_none());
 }
@@ -99,7 +102,7 @@ fn submitting_unparsable_draft_cancels_silently_without_navigation() {
         directory: false,
     });
     seeded_listing(&mut session, &[("a", FileKind::Directory)]);
-    let start = session.directory().to_path_buf();
+    let start = session.current_directory().unwrap().to_path_buf();
     session.update(SessionMessage::AddressEditingStarted);
     // 空白草稿解析为 None：静默取消——不导航、不关窗、不回复。
     session.update(SessionMessage::AddressEditChanged("   ".to_string()));
@@ -107,7 +110,7 @@ fn submitting_unparsable_draft_cancels_silently_without_navigation() {
     let effect = session.update(SessionMessage::AddressEditingSubmitted);
 
     assert!(matches!(effect, SessionEffect::None));
-    assert_eq!(session.directory(), start);
+    assert_eq!(session.current_directory().unwrap(), start);
     assert!(session.address_editing.is_none());
     assert!(receiver.try_recv().is_err());
 }
@@ -119,7 +122,7 @@ fn stale_generation_replies_are_rejected() {
         directory: false,
     });
     session.update(SessionMessage::AddressEditingStarted);
-    let current_dir = session.directory().to_path_buf();
+    let current_dir = session.current_directory().unwrap().to_path_buf();
     let editing = session.address_editing.as_mut().expect("editing session");
     editing.draft = "docs".to_string();
     let stale_request = editing.next_suggestion_request(&current_dir);
@@ -150,7 +153,7 @@ fn matched_replies_fill_suggestions_and_enable_keyboard_routing() {
         directory: false,
     });
     session.update(SessionMessage::AddressEditingStarted);
-    let current_dir = session.directory().to_path_buf();
+    let current_dir = session.current_directory().unwrap().to_path_buf();
     let editing = session.address_editing.as_mut().expect("editing session");
     editing.draft = "docs".to_string();
     let request = editing.next_suggestion_request(&current_dir);
@@ -215,19 +218,19 @@ fn navigate_back_forward_bounds_follow_history_position() {
         directory: false,
     });
     seeded_listing(&mut session, &[("a", FileKind::Directory)]);
-    let start = session.directory().to_path_buf();
+    let start = session.current_directory().unwrap().to_path_buf();
 
     assert!(!session.can_navigate_back());
     assert!(!session.can_navigate_forward());
 
     session.update(SessionMessage::EntryDoubleClicked { index: 0 });
     let child = start.join("a");
-    assert_eq!(session.directory(), child);
+    assert_eq!(session.current_directory().unwrap(), child);
     assert!(session.can_navigate_back());
     assert!(!session.can_navigate_forward());
 
     session.update(SessionMessage::NavigateBack);
-    assert_eq!(session.directory(), start);
+    assert_eq!(session.current_directory().unwrap(), start);
     assert!(!session.can_navigate_back());
     assert!(session.can_navigate_forward());
 }
@@ -240,7 +243,7 @@ fn breadcrumb_current_segment_enters_editing_others_navigate() {
     });
     seeded_listing(&mut session, &[("a", FileKind::Directory)]);
     session.update(SessionMessage::EntryDoubleClicked { index: 0 });
-    let current = session.directory().to_path_buf();
+    let current = session.current_directory().unwrap().to_path_buf();
     let parent = current.parent().unwrap().to_path_buf();
 
     // 当前目录段 = 进入编辑（草稿预填当前目录）。
@@ -258,7 +261,9 @@ fn breadcrumb_current_segment_enters_editing_others_navigate() {
     let effect = session.update(SessionMessage::BreadcrumbActivated {
         target: parent.clone(),
     });
-    assert!(matches!(effect, SessionEffect::NavigateDirectory(dir) if dir == parent));
+    assert!(
+        matches!(effect, SessionEffect::NavigateLocation(dir) if dir == BrowserLocation::Directory(parent))
+    );
     assert!(session.address_editing.is_none());
 }
 
@@ -269,7 +274,7 @@ fn suggestion_row_click_requires_membership_in_current_list() {
         directory: false,
     });
     session.update(SessionMessage::AddressEditingStarted);
-    let start = session.directory().to_path_buf();
+    let start = session.current_directory().unwrap().to_path_buf();
 
     // 陈旧浮层的点击：目标不在当前建议列表中，必须被拒。
     let effect = session.update(SessionMessage::AddressSuggestionSelected {
@@ -285,7 +290,7 @@ fn suggestion_row_click_requires_membership_in_current_list() {
     });
     assert!(matches!(
         effect,
-        SessionEffect::NavigateDirectory(dir) if dir == start.join("real")
+        SessionEffect::NavigateLocation(dir) if dir == BrowserLocation::Directory(start.join("real"))
     ));
 }
 
@@ -352,7 +357,7 @@ fn move_selection_cycles_through_suggestions() {
         directory: false,
     });
     session.update(SessionMessage::AddressEditingStarted);
-    let start = session.directory().to_path_buf();
+    let start = session.current_directory().unwrap().to_path_buf();
     let editing = session.address_editing.as_mut().expect("editing session");
     editing.suggestions = vec![start.join("a"), start.join("b"), start.join("c")];
 
@@ -394,7 +399,7 @@ fn completing_suggestion_writes_draft_and_requests_next_level() {
         directory: false,
     });
     session.update(SessionMessage::AddressEditingStarted);
-    let start = session.directory().to_path_buf();
+    let start = session.current_directory().unwrap().to_path_buf();
     let editing = session.address_editing.as_mut().expect("editing session");
     editing.suggestions = vec![start.join("a"), start.join("b")];
 

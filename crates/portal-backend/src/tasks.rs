@@ -33,27 +33,17 @@ pub(crate) fn scrollbar_layout_probe_task(
     ))
 }
 
-pub(crate) fn scan_directory_task(
+/// 结果携带扫描的位置：会话据此路由回根列表或展开节点。
+pub(crate) fn scan_location_task(
     window_id: window::Id,
-    directory: std::path::PathBuf,
+    location: bennu_sidebar::BrowserLocation,
 ) -> Task<Message> {
-    // 回收站虚拟视图：扫描走 file-core trash（行数据复用 PickerRow，
-    // 路径为 files/ 下真实载荷）。其余目录常规扫描。结果统一携带扫描
-    // 目标路径：会话据此路由回根列表或展开节点。
-    let directory_for_scan = directory.clone();
-    let is_trash_scan = directory.as_os_str() == crate::picker_session::TRASH_DIRECTORY;
-    let scan_future = async move {
-        if is_trash_scan {
-            crate::picker_session::scan_trash_listing().await
-        } else {
-            crate::picker_session::scan_listing(directory_for_scan).await
-        }
-    };
+    let scan_future = crate::picker_session::scan_location(location.clone());
     Task::perform(scan_future, move |outcome| {
         Message::Session(
             window_id,
             SessionMessage::ScanReady(Box::new(crate::picker_session::DirectoryScanResult {
-                directory: directory.clone(),
+                location: location.clone(),
                 outcome,
             })),
         )

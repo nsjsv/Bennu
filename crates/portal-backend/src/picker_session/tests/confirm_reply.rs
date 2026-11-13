@@ -91,7 +91,7 @@ fn savefiles_confirm_requires_names_and_blocks_trash() {
     // 回收站视图禁止确认（与 SaveFile 同一守卫）。
     trash_session.update(SessionMessage::SidebarTrashPressed);
     trash_session.apply_scan(DirectoryScanResult {
-        directory: trash_session.directory.clone(),
+        location: BrowserLocation::Trash,
         outcome: Ok(DirectoryScanOutcome {
             entries: Vec::new(),
         }),
@@ -270,7 +270,7 @@ fn confirmed_reply_carries_active_filter_rule() {
         Vec::new(),
     );
     let entries = vec![DirectoryEntry::new(
-        session.directory.join("a.png"),
+        session.current_directory().unwrap().join("a.png"),
         FileKind::File,
         file_core::entry::EntryMetadata::default(),
         false,
@@ -278,7 +278,7 @@ fn confirmed_reply_carries_active_filter_rule() {
         false,
     )];
     session.apply_scan(DirectoryScanResult {
-        directory: session.directory.clone(),
+        location: session.location().clone(),
         outcome: Ok(DirectoryScanOutcome { entries }),
     });
     session.update(SessionMessage::EntryClicked {

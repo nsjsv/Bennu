@@ -5,6 +5,7 @@ use tempfile::tempdir;
 
 use super::FileBrowser;
 use crate::config;
+use crate::model::BrowserLocation;
 use crate::model::{
     BrowserViewMode, ContextMenuState, DestructiveActionConfirmation, IndexedSearchOutcome,
     NavigationMode, PendingOperation,
@@ -39,7 +40,7 @@ fn browser_with_search_selection() -> (FileBrowser, Vec<PathBuf>) {
     std::fs::write(&second, "second").unwrap();
 
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = root;
+    browser.tab_mut().location = BrowserLocation::Directory(root);
     browser.tab_mut().directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
     browser
         .tab_mut()
@@ -79,7 +80,7 @@ fn search_shortcut_context_blocks_hidden_pane_actions_and_routes_supported_comma
     std::fs::write(&underlying_path, "underlying").unwrap();
     browser.tab_mut().selected = Some(underlying_path.clone());
     browser.tab_mut().selected_paths.insert(underlying_path);
-    let current_dir = browser.tab().current_dir.clone();
+    let current_dir = browser.tab().current_directory().unwrap().to_path_buf();
 
     for action in [
         ShortcutAction::RenameSelected,
@@ -93,7 +94,7 @@ fn search_shortcut_context_blocks_hidden_pane_actions_and_routes_supported_comma
     assert!(browser.renaming.is_none());
     assert!(browser.properties_window.is_none());
     assert!(browser.preview_engine.preview_window.is_none());
-    assert_eq!(browser.tab().current_dir, current_dir);
+    assert_eq!(browser.tab().current_directory().unwrap(), current_dir);
 
     drop(browser.invoke_shortcut(ShortcutAction::Copy));
     assert!(matches!(
@@ -122,8 +123,8 @@ fn navigation_behind_workspace_keeps_the_frozen_root_until_explicit_close() {
     std::fs::write(&selected, "selected").unwrap();
 
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = first_directory.clone();
-    browser.tab_mut().view_mode = BrowserViewMode::List;
+    browser.tab_mut().location = BrowserLocation::Directory(first_directory.clone());
+    browser.tab_mut().choose_view_mode(BrowserViewMode::List);
     browser.tab_mut().selected = Some(selected.clone());
     browser.tab_mut().selected_paths.insert(selected.clone());
     drop(browser.submit_search());
@@ -146,8 +147,8 @@ fn navigation_behind_workspace_keeps_the_frozen_root_until_explicit_close() {
     ));
 
     drop(browser.close_search_workspace());
-    assert_eq!(browser.tab().current_dir, second_directory);
-    assert_eq!(browser.tab().view_mode, BrowserViewMode::List);
+    assert_eq!(browser.tab().current_directory().unwrap(), second_directory);
+    assert_eq!(browser.tab().view_mode(), BrowserViewMode::List);
 }
 
 #[test]
@@ -207,7 +208,7 @@ fn shift_delete_menu_action_requests_permanent_delete_confirmation() {
 #[test]
 fn right_click_targets_search_selection_without_mutating_underlying_selection() {
     let (mut browser, expected_paths) = browser_with_search_selection();
-    let third = browser.tab().current_dir.join("third.txt");
+    let third = browser.tab().current_directory().unwrap().join("third.txt");
     drop(browser.update_search_input("third".to_owned()));
     drop(browser.submit_search());
     let request = browser

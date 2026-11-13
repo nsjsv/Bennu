@@ -9,7 +9,7 @@ use file_core::{
 use iced::Task;
 
 use super::FileBrowser;
-use crate::model::Message;
+use crate::model::{BrowserLocation, Message};
 use file_operations::QueuedFileOperation;
 
 pub(crate) const IMAGE_TARGET_FORMATS: [ImageTargetFormat; 9] = [
@@ -454,7 +454,7 @@ impl FileBrowser {
     }
 
     fn open_convert(&mut self) -> Task<Message> {
-        if self.tab().is_trash_view {
+        if self.tab().location == BrowserLocation::Trash {
             return Task::none();
         }
 

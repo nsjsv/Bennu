@@ -6,7 +6,8 @@
 use bennu_preview::formatting::format_file_size;
 use bennu_sidebar::entries::selected_sidebar_device;
 use bennu_sidebar::{
-    SidebarDeviceEntry, SidebarLocation, SidebarLocationKind, SidebarNetworkConnectionEntry,
+    BrowserLocation, SidebarDeviceEntry, SidebarLocation, SidebarLocationKind,
+    SidebarNetworkConnectionEntry,
 };
 use bennu_theme::icons::{icon_tone_style, IconSymbol, IconTone};
 use bennu_theme::measured_text::measured_middle_ellipsized_text;
@@ -143,7 +144,7 @@ fn location_item(
     is_favorite: bool,
 ) -> Element<'static, SessionMessage> {
     let id = SidebarEntryId::Location(location.path.clone());
-    let selected = !session.is_trash_view() && location.path == session.target_directory();
+    let selected = session.target_directory() == Some(location.path.as_path());
     let hovered = session.sidebar().hovered.as_ref() == Some(&id);
     let tone = if selected {
         IconTone::Selected
@@ -168,7 +169,7 @@ fn location_item(
 }
 
 fn trash_item(session: &PickerSession) -> Element<'static, SessionMessage> {
-    let selected = session.is_trash_view();
+    let selected = *session.location() == BrowserLocation::Trash;
     let tone = if selected {
         IconTone::Selected
     } else {
@@ -204,9 +205,10 @@ fn device_item(
 ) -> Element<'static, SessionMessage> {
     let id = SidebarEntryId::Device(device.id.clone());
     // 当前目录所属设备高亮：最长挂载点前缀命中（共享判定，与主程序同源）。
-    let selected = !session.is_trash_view()
-        && selected_sidebar_device(&session.sidebar().devices, session.target_directory())
-            .is_some_and(|selected| selected.id == device.id);
+    let selected = session
+        .target_directory()
+        .and_then(|directory| selected_sidebar_device(&session.sidebar().devices, directory))
+        .is_some_and(|selected| selected.id == device.id);
     let tone = if selected {
         IconTone::Selected
     } else {
@@ -242,10 +244,11 @@ fn connection_item(
     connection: &SidebarNetworkConnectionEntry,
 ) -> Element<'static, SessionMessage> {
     let id = SidebarEntryId::Connection(connection.id().clone());
-    let selected = !session.is_trash_view()
-        && connection
-            .mount_path()
-            .is_some_and(|mount_path| session.target_directory().starts_with(mount_path));
+    let selected = connection.mount_path().is_some_and(|mount_path| {
+        session
+            .target_directory()
+            .is_some_and(|directory| directory.starts_with(mount_path))
+    });
     let tone = if selected {
         IconTone::Selected
     } else {

@@ -15,7 +15,7 @@ use crate::file_drag_hit_test_bounds::FileDragHitTestMarker;
 use crate::file_drag_hit_test_marker::track_file_drag_hit_test_marker;
 use crate::formatting::format_file_size;
 use crate::model::{
-    trash_location_path, FileDropTarget, Message, ScrollbarRegion, SidebarBookmarkDropSlot,
+    BrowserLocation, FileDropTarget, Message, ScrollbarRegion, SidebarBookmarkDropSlot,
     SidebarLocation,
 };
 use crate::network_connections::{NetworkConnectionMessage, SidebarNetworkConnectionEntry};
@@ -442,10 +442,9 @@ fn sidebar_network_connection_item<'a>(
 }
 
 fn sidebar_trash_item(browser: &FileBrowser) -> Element<'_, Message> {
-    let trash_path = trash_location_path();
-    let trash_presentation = if browser.tab().is_trash_view {
+    let trash_presentation = if browser.tab().location == BrowserLocation::Trash {
         SidebarPresentation::Selected
-    } else if browser.hovered_sidebar.as_ref() == Some(&trash_path) {
+    } else if browser.sidebar_trash_hovered {
         SidebarPresentation::Hovered
     } else {
         SidebarPresentation::Normal
@@ -466,10 +465,9 @@ fn sidebar_trash_item(browser: &FileBrowser) -> Element<'_, Message> {
         SidebarPresentation::Hovered => trash_container.style(hovered_sidebar_item_style),
         SidebarPresentation::Normal => trash_container,
     };
-    let trash_hover_path = trash_path.clone();
     mouse_area(trash_container)
-        .on_enter(Message::SidebarHovered(trash_hover_path.clone()))
-        .on_exit(Message::SidebarHoverCleared(trash_hover_path))
+        .on_enter(Message::SidebarTrashHovered)
+        .on_exit(Message::SidebarTrashHoverCleared)
         .on_press(Message::TrashOpened)
         .on_middle_press(Message::OpenTrashInNewTab(browser.active_pane_id()))
         .on_release(Message::DragSelectionFinished)
@@ -551,7 +549,7 @@ fn sidebar_message_row(message: String) -> Element<'static, Message> {
 }
 
 fn sidebar_presentation(browser: &FileBrowser, location: &SidebarLocation) -> SidebarPresentation {
-    if !browser.tab().is_trash_view && location.path == browser.tab().current_dir {
+    if browser.tab().current_directory() == Some(location.path.as_path()) {
         SidebarPresentation::Selected
     } else if browser.hovered_sidebar.as_ref() == Some(&location.path) {
         SidebarPresentation::Hovered

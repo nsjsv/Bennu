@@ -98,18 +98,16 @@ impl FileBrowser {
     ) -> SelectionMarqueeScrollAnchor {
         let pane = self.pane();
         let pane_id = pane.id;
-        let current_dir = &pane.tab().current_dir;
-        match pane.tab().view_mode {
+        match pane.tab().view_mode() {
             BrowserViewMode::List => SelectionMarqueeScrollAnchor::List {
                 pane_id,
-                offset_y: pane
-                    .column_viewports
-                    .get(current_dir)
-                    .map_or(0.0, |viewport| viewport.offset_y),
+                offset_y: pane.list_viewport.map_or(0.0, |viewport| viewport.offset_y),
             },
             BrowserViewMode::Icons => SelectionMarqueeScrollAnchor::Icons {
                 pane_id,
-                offset_y: self.icon_grid_viewport_for(pane_id, current_dir).offset_y,
+                offset_y: self
+                    .icon_grid_viewport_for(pane_id, &pane.tab().location)
+                    .offset_y,
             },
             BrowserViewMode::Columns => match source {
                 SelectionMarqueeSource::ColumnBlank { directory } => {
@@ -178,8 +176,10 @@ impl FileBrowser {
         let marquee_rectangle = marquee.rectangle();
         let icon_grid_panel_directory = match &marquee.source {
             SelectionMarqueeSource::IconGridPanel { directory } => Some(directory.as_path()),
-            SelectionMarqueeSource::PaneBlank if self.tab().view_mode == BrowserViewMode::Icons => {
-                Some(self.tab().current_dir.as_path())
+            SelectionMarqueeSource::PaneBlank
+                if self.tab().view_mode() == BrowserViewMode::Icons =>
+            {
+                self.tab().current_directory()
             }
             SelectionMarqueeSource::PaneBlank | SelectionMarqueeSource::ColumnBlank { .. } => None,
         };

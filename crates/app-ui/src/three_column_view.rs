@@ -21,10 +21,10 @@ use crate::file_entry_view::{
     entry_text_input_style, entry_thumbnail_or_icon, themed_icon, FileEntryIconDensity,
     FileEntryVisualState,
 };
-use crate::formatting::empty_directory_message;
+use crate::formatting::empty_location_message;
 use crate::input_blocking_space::input_blocking_space;
 use crate::model::{BrowserPaneId, ExpandedDirectoryStatus, Message, ScrollbarRegion};
-use crate::view::{column_browser_scroll_id, rename_field, rename_input_id};
+use crate::view::{column_browser_scroll_id, pane_blank_area, rename_field, rename_input_id};
 use crate::virtual_range::{initial_virtual_range, virtual_range_for_viewport, VirtualRange};
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::controls::inline_text_field;
@@ -114,6 +114,7 @@ pub(crate) fn column_virtual_range_for_viewport(
 pub(crate) fn column_browser_view<'a>(
     browser: &'a FileBrowser,
     pane: BrowserPaneView<'a>,
+    current_directory: &'a Path,
 ) -> Element<'a, Message> {
     let rendered_directories = column_directories_for_pane(pane);
     let visible_column_count = rendered_directories
@@ -135,7 +136,7 @@ pub(crate) fn column_browser_view<'a>(
         } else {
             columns = columns.push(empty_column(
                 pane.id,
-                pane.current_dir.clone(),
+                current_directory.to_path_buf(),
                 browser.column_width(index),
             ));
         }
@@ -170,24 +171,13 @@ pub(crate) fn column_browser_view<'a>(
     .into();
     let column_content = enhanced_scrollbar(column_content, ScrollbarAxis::Horizontal);
 
-    mouse_area(
+    pane_blank_area(
+        &pane,
         container(column_content)
             .width(Length::Fill)
             .height(Length::Fill)
             .style(column_browser_style),
     )
-    .on_press(Message::BlankAreaPressed(pane.id))
-    .on_release(Message::DropTargetReleased(
-        pane.id,
-        pane.current_dir.clone(),
-    ))
-    .on_right_press(Message::BlankAreaRightClicked(
-        pane.id,
-        pane.current_dir.clone(),
-    ))
-    .on_enter(Message::ColumnBrowserCursorEntered(pane.id))
-    .on_exit(Message::ColumnBrowserCursorExited(pane.id))
-    .into()
 }
 
 fn directory_column<'a>(
@@ -270,7 +260,7 @@ fn directory_column<'a>(
         ColumnContent::Empty if transfer_placeholders.is_empty() => Column::new()
             .padding(COLUMN_PADDING)
             .width(Length::Fill)
-            .push(column_message(empty_directory_message(pane.is_trash_view))),
+            .push(column_message(empty_location_message(pane.location))),
         ColumnContent::Empty => {
             let merged_items = crate::transfer_placeholders::merge_entries_with_placeholders(
                 &[],
@@ -480,19 +470,18 @@ fn column_entry_row<'a>(
         .into()
     };
 
-    let trailing: Element<'static, Message> =
-        if browser.entry_acts_as_directory(&entry.path) && !pane.is_trash_view {
-            themed_icon(
-                IconSymbol::ChevronRight,
-                icon_tone,
-                geometry.chevron_icon_size,
-            )
+    let trailing: Element<'static, Message> = if browser.entry_acts_as_directory(&entry.path) {
+        themed_icon(
+            IconSymbol::ChevronRight,
+            icon_tone,
+            geometry.chevron_icon_size,
+        )
+        .into()
+    } else {
+        Space::new()
+            .width(Length::Fixed(geometry.chevron_icon_size))
             .into()
-        } else {
-            Space::new()
-                .width(Length::Fixed(geometry.chevron_icon_size))
-                .into()
-        };
+    };
 
     let row_content = row![
         crate::transfer_placeholder_view::entry_icon_with_transfer(
@@ -523,7 +512,7 @@ fn column_entry_row<'a>(
         .on_right_press(Message::EntryRightClicked(pane.id, entry.path.clone()))
         .interaction(iced::mouse::Interaction::Pointer);
 
-    let row_area = if browser.entry_acts_as_directory(&entry.path) && !pane.is_trash_view {
+    let row_area = if browser.entry_acts_as_directory(&entry.path) {
         row_area.on_middle_press(crate::model::entry_middle_press_message(pane.id, entry))
     } else {
         row_area
@@ -567,7 +556,7 @@ fn selection_run_position_in_merged_items(
 
 /// 多栏各栏的排序配置:当前目录用扫描选项,其余栏用各自展开目录的排序。
 fn column_content<'a>(pane: BrowserPaneView<'a>, directory: &Path) -> ColumnContent<'a> {
-    if directory == pane.current_dir.as_path() {
+    if pane.current_directory() == Some(directory) {
         return match pane.current_directory_content() {
             DirectoryContentAvailability::Pending => ColumnContent::Pending,
             DirectoryContentAvailability::Available([]) => ColumnContent::Empty,
@@ -596,10 +585,11 @@ pub(crate) fn column_directories(browser: &FileBrowser) -> Vec<PathBuf> {
     column_directories_for_pane(pane)
 }
 
+/// 分栏显示的目录链；不是目录的位置没有。
 pub(crate) fn column_directories_for_pane(pane: BrowserPaneView<'_>) -> Vec<PathBuf> {
-    if pane.is_trash_view {
-        return vec![pane.current_dir.clone()];
-    }
+    let Some(current_directory) = pane.current_directory() else {
+        return Vec::new();
+    };
 
     if let Some(directories) = pane
         .file_drag
@@ -607,13 +597,9 @@ pub(crate) fn column_directories_for_pane(pane: BrowserPaneView<'_>) -> Vec<Path
     {
         return directories.to_vec();
     }
-    let mut directories = vec![pane.current_dir.clone()];
+    let mut directories = vec![current_directory.to_path_buf()];
     if let Some(open_directory) = pane.deepest_open_column_directory {
-        append_column_directory_chain(
-            &mut directories,
-            pane.current_dir.as_path(),
-            open_directory.as_path(),
-        );
+        append_column_directory_chain(&mut directories, current_directory, open_directory);
     }
     directories
 }
@@ -678,6 +664,7 @@ mod tests {
     use file_core::{DirectoryEntry, EntryMetadata, FileKind};
 
     use super::*;
+    use crate::model::BrowserLocation;
     // 回归锚点引用的共享基准常量（生产代码已不再直接使用）。
     use bennu_theme::column_geometry::{
         COLUMN_CONTENT_SPACING, COLUMN_ENTRY_HEIGHT, COLUMN_ENTRY_SPACING,
@@ -717,7 +704,7 @@ mod tests {
     }
 
     fn test_pane_view<'a>(
-        current_dir: &'a PathBuf,
+        location: &'a BrowserLocation,
         entries: &'a [DirectoryEntry],
         selected: Option<&'a PathBuf>,
         selected_paths: &'a HashSet<PathBuf>,
@@ -727,8 +714,7 @@ mod tests {
     ) -> BrowserPaneView<'a> {
         BrowserPaneView {
             id: BrowserPaneId::PRIMARY,
-            current_dir,
-            is_trash_view: false,
+            location,
             entries,
             directory_discovery: None,
             directory_loading_placeholder: None,
@@ -738,8 +724,10 @@ mod tests {
             hovered_entry: None,
             expanded_directories,
             column_viewports,
+            list_viewport: None,
             icon_grid_viewport: crate::model::IconGridViewport::default(),
             view_mode: crate::model::BrowserViewMode::Columns,
+            chosen_view_mode: crate::model::BrowserViewMode::Columns,
             tabs: &[],
             active_tab_id: 0,
             tab_animations: None,
@@ -847,8 +835,9 @@ mod tests {
         let selected_paths = HashSet::from([directory.clone()]);
         let expanded_directories = HashMap::new();
         let column_viewports = HashMap::new();
+        let location = BrowserLocation::Directory(current_dir.clone());
         let pane = test_pane_view(
-            &current_dir,
+            &location,
             &entries,
             Some(&directory),
             &selected_paths,
@@ -871,8 +860,9 @@ mod tests {
         let selected_paths = HashSet::from([directory.clone()]);
         let expanded_directories = HashMap::new();
         let column_viewports = HashMap::new();
+        let location = BrowserLocation::Directory(current_dir.clone());
         let pane = test_pane_view(
-            &current_dir,
+            &location,
             &entries,
             Some(&directory),
             &selected_paths,
@@ -896,8 +886,9 @@ mod tests {
         let selected_paths = HashSet::from([first, second.clone()]);
         let expanded_directories = HashMap::new();
         let column_viewports = HashMap::new();
+        let location = BrowserLocation::Directory(current_dir.clone());
         let pane = test_pane_view(
-            &current_dir,
+            &location,
             &entries,
             Some(&second),
             &selected_paths,
@@ -924,8 +915,9 @@ mod tests {
             loaded_expanded_directory(Vec::new()),
         )]);
         let column_viewports = HashMap::new();
+        let location = BrowserLocation::Directory(current_dir.clone());
         let pane = test_pane_view(
-            &current_dir,
+            &location,
             &entries,
             Some(&selected_file),
             &selected_paths,
@@ -938,6 +930,28 @@ mod tests {
             column_directories_for_pane(pane),
             vec![current_dir, open_directory]
         );
+    }
+
+    #[test]
+    fn a_location_that_is_not_a_directory_has_no_column_chain() {
+        let entries = vec![test_entry(
+            PathBuf::from("/origin/report.txt"),
+            FileKind::File,
+        )];
+        let selected_paths = HashSet::new();
+        let expanded_directories = HashMap::new();
+        let column_viewports = HashMap::new();
+        let pane = test_pane_view(
+            &BrowserLocation::Trash,
+            &entries,
+            None,
+            &selected_paths,
+            None,
+            &expanded_directories,
+            &column_viewports,
+        );
+
+        assert!(column_directories_for_pane(pane).is_empty());
     }
 
     #[test]

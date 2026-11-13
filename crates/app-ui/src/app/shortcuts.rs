@@ -299,7 +299,7 @@ mod tests {
 
     use super::*;
     use crate::config;
-    use crate::model::trash_location_path;
+    use crate::model::BrowserLocation;
     use file_operations::QueuedFileOperation;
 
     fn test_entry(path: &Path) -> DirectoryEntry {
@@ -330,8 +330,7 @@ mod tests {
         );
         let expected_restore_entry = trash_entry.restore_entry();
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
-        browser.tab_mut().current_dir = trash_location_path();
-        browser.tab_mut().is_trash_view = true;
+        browser.tab_mut().location = BrowserLocation::Trash;
         browser.tab_mut().directory_collection_phase =
             crate::model::DirectoryCollectionPhase::Ready;
         browser.tab_mut().entries = vec![trash_entry.entry.clone()].into();
@@ -359,7 +358,8 @@ mod tests {
     fn ignored_delete_enqueues_immediately_while_captured_delete_stops() {
         let selected_path = PathBuf::from("/workspace/report.txt");
         let mut ignored_browser = FileBrowser::new(config::default_user_config()).0;
-        ignored_browser.tab_mut().current_dir = PathBuf::from("/workspace");
+        ignored_browser.tab_mut().location =
+            BrowserLocation::Directory(PathBuf::from("/workspace"));
         ignored_browser.tab_mut().entries = vec![test_entry(&selected_path)].into();
         ignored_browser.tab_mut().selected = Some(selected_path.clone());
         ignored_browser.tab_mut().selected_paths = HashSet::from([selected_path.clone()]);
@@ -377,7 +377,8 @@ mod tests {
         ));
 
         let mut captured_browser = FileBrowser::new(config::default_user_config()).0;
-        captured_browser.tab_mut().current_dir = PathBuf::from("/workspace");
+        captured_browser.tab_mut().location =
+            BrowserLocation::Directory(PathBuf::from("/workspace"));
         captured_browser.tab_mut().entries = vec![test_entry(&selected_path)].into();
         captured_browser.tab_mut().selected = Some(selected_path.clone());
         captured_browser.tab_mut().selected_paths = HashSet::from([selected_path]);
@@ -427,7 +428,7 @@ mod tests {
     fn ignored_delete_does_not_cross_destructive_confirmation() {
         let selected_path = PathBuf::from("/workspace/report.txt");
         let mut browser = FileBrowser::new(config::default_user_config()).0;
-        browser.tab_mut().current_dir = PathBuf::from("/workspace");
+        browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
         browser.tab_mut().entries = vec![test_entry(&selected_path)].into();
         browser.tab_mut().selected = Some(selected_path.clone());
         browser.tab_mut().selected_paths = HashSet::from([selected_path.clone()]);
@@ -451,7 +452,7 @@ mod tests {
     fn ignored_delete_does_not_cross_file_drop_prompt() {
         let selected_path = PathBuf::from("/workspace/report.txt");
         let mut browser = FileBrowser::new(config::default_user_config()).0;
-        browser.tab_mut().current_dir = PathBuf::from("/workspace");
+        browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
         browser.tab_mut().entries = vec![test_entry(&selected_path)].into();
         browser.tab_mut().selected = Some(selected_path.clone());
         browser.tab_mut().selected_paths = HashSet::from([selected_path]);
@@ -474,7 +475,7 @@ mod tests {
     fn ignored_delete_does_not_cross_network_connection_editor() {
         let selected_path = PathBuf::from("/workspace/report.txt");
         let mut browser = FileBrowser::new(config::default_user_config()).0;
-        browser.tab_mut().current_dir = PathBuf::from("/workspace");
+        browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
         browser.tab_mut().entries = vec![test_entry(&selected_path)].into();
         browser.tab_mut().selected = Some(selected_path.clone());
         browser.tab_mut().selected_paths = HashSet::from([selected_path]);

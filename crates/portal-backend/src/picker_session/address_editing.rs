@@ -11,6 +11,7 @@ use bennu_theme::address_bar::{
 
 use super::suggestions::completed_path_text;
 use super::{PickerSession, SessionEffect};
+use bennu_sidebar::BrowserLocation;
 
 /// 补全选择的循环方向（键盘 ↓/Tab → Next，↑/Shift+Tab → Previous）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,9 +27,13 @@ impl PickerSession {
         if self.address_editing.is_some() {
             return SessionEffect::None;
         }
+        // 回收站不是目录，没有可编辑的路径；进回收站时已取消编辑。
+        let Some(directory) = self.location.directory() else {
+            return SessionEffect::None;
+        };
         let session_id = AddressEditingSessionId(self.next_address_editing_session_id);
         self.next_address_editing_session_id = self.next_address_editing_session_id.wrapping_add(1);
-        self.address_editing = Some(AddressEditingSession::new(session_id, &self.directory));
+        self.address_editing = Some(AddressEditingSession::new(session_id, directory));
         self.address_bar_transition = Some(AddressBarTransition::retarget(
             self.address_bar_transition.as_ref(),
             1.0,
@@ -41,13 +46,15 @@ impl PickerSession {
     /// 改稿：清建议与选中、代数 +1、请求防抖回信；空草稿不发起读取
     /// （防抖回信按代数与内容双重匹配，陈旧回信必然被拒）。
     pub(crate) fn update_address_draft(&mut self, value: String) -> SessionEffect {
-        let Some(session) = self.address_editing.as_mut() else {
+        let (Some(session), Some(directory)) =
+            (self.address_editing.as_mut(), self.location.directory())
+        else {
             return SessionEffect::None;
         };
         session.draft = value;
         session.suggestions.clear();
         session.suggestion_selection = None;
-        let request = session.next_suggestion_request(&self.directory);
+        let request = session.next_suggestion_request(directory);
         if request.draft.trim().is_empty() {
             return SessionEffect::None;
         }
@@ -87,14 +94,16 @@ impl PickerSession {
     /// 提交：选中建议优先，否则按草稿解析（trim、空=None、绝对直用、
     /// 相对拼当前目录）；两者皆无 = 静默取消（不导航、不关窗）。
     pub(crate) fn submit_address_editing(&mut self) -> SessionEffect {
-        let Some(editing) = self.address_editing.as_ref() else {
+        let (Some(editing), Some(directory)) =
+            (self.address_editing.as_ref(), self.location.directory())
+        else {
             return SessionEffect::None;
         };
         let selected_suggestion = editing
             .suggestion_selection
             .and_then(|index| editing.suggestions.get(index))
             .cloned();
-        let parsed_draft = path_from_address_draft(&editing.draft, &self.directory);
+        let parsed_draft = path_from_address_draft(&editing.draft, directory);
         let Some(target) = selected_suggestion.or(parsed_draft) else {
             return self.cancel_address_editing();
         };
@@ -142,7 +151,9 @@ impl PickerSession {
         &mut self,
         direction: PathSuggestionDirection,
     ) -> SessionEffect {
-        let Some(session) = self.address_editing.as_mut() else {
+        let (Some(session), Some(directory)) =
+            (self.address_editing.as_mut(), self.location.directory())
+        else {
             return SessionEffect::None;
         };
         if session.suggestions.is_empty() {
@@ -164,20 +175,20 @@ impl PickerSession {
         };
 
         session.draft = completed_path_text(&path);
-        let request = session.next_suggestion_request(&self.directory);
+        let request = session.next_suggestion_request(directory);
         SessionEffect::LoadPathSuggestions { request }
     }
 
     /// 面包屑段点击：当前目录段 = 进入编辑（主软件 activate_breadcrumb_
     /// target 同语义）；其他段 = 先退出编辑再导航。
     pub(crate) fn activate_breadcrumb_target(&mut self, target: PathBuf) -> SessionEffect {
-        if target == self.directory {
+        if self.current_directory() == Some(target.as_path()) {
             return self.begin_address_editing();
         }
         if self.address_editing.is_some() {
             self.cancel_address_editing();
         }
-        self.begin_navigation(target)
+        self.begin_navigation(BrowserLocation::Directory(target))
     }
 
     /// 帧推进的过渡收尾：退出方向（target≤ε）播完即摘除，快照随过渡
@@ -239,9 +250,12 @@ impl PickerSession {
     }
 
     fn address_suggestion_request_matches(&self, request: &AddressSuggestionRequest) -> bool {
+        let Some(directory) = self.location.directory() else {
+            return false;
+        };
         self.address_editing
             .as_ref()
-            .is_some_and(|editing| editing.matches_suggestion_request(request, &self.directory))
+            .is_some_and(|editing| editing.matches_suggestion_request(request, directory))
     }
 
     fn finish_address_submission(&mut self, target: PathBuf) -> SessionEffect {
@@ -251,7 +265,7 @@ impl PickerSession {
         // 提交即开始渐出：导航扫描期间地址栏保持草稿外观，避免闪回
         // 面包屑再进编辑的抖动。
         self.start_address_bar_exit(editing.draft);
-        self.begin_navigation(target)
+        self.begin_navigation(BrowserLocation::Directory(target))
     }
 
     fn start_address_bar_exit(&mut self, snapshot: String) {

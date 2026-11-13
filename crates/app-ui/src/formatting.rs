@@ -4,6 +4,8 @@ use time::format_description::FormatItem;
 use time::macros::format_description;
 use time::OffsetDateTime;
 
+use crate::model::BrowserLocation;
+
 const UTC_TIMESTAMP_FORMAT: &[FormatItem<'static>] =
     format_description!("[year]-[month]-[day] [hour]:[minute]:[second] UTC");
 
@@ -21,11 +23,10 @@ pub(crate) fn item_count_label(count: usize) -> String {
 }
 
 /// 列表、大图、多栏三种视图的空目录提示。
-pub(crate) fn empty_directory_message(is_trash_view: bool) -> String {
-    if is_trash_view {
-        tr!("Trash is empty")
-    } else {
-        tr!("No items")
+pub(crate) fn empty_location_message(location: &BrowserLocation) -> String {
+    match location {
+        BrowserLocation::Directory(_) => tr!("No items"),
+        BrowserLocation::Trash => tr!("Trash is empty"),
     }
 }
 

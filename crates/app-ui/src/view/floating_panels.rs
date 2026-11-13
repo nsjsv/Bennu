@@ -11,10 +11,10 @@ use crate::appearance::{
 use crate::formatting::format_middle_ellipsized_text;
 use crate::formatting::item_count_label;
 use crate::model::{
-    ContextMenuPreferences, ContextMenuState, DestructiveActionConfirmation, FileContextMenuState,
-    FileDropPrompt, FileGroupingMode, FilePropertiesMessage, ListColumnConfig, ListColumnKind,
-    ListViewPreferences, Message, ScrollbarRegion, SearchContextMenuState, SearchEntryTypePreset,
-    SearchResultMenuItem, SidebarBookmarkContextMenuState, TrashMenuItem,
+    ContextMenuPreferences, ContextMenuState, DestructiveActionConfirmation, FileDropPrompt,
+    FileGroupingMode, FilePropertiesMessage, ListColumnConfig, ListColumnKind, ListViewPreferences,
+    Message, ScrollbarRegion, SearchContextMenuState, SearchEntryTypePreset, SearchResultMenuItem,
+    SidebarBookmarkContextMenuState, TrashContextMenuState, TrashMenuItem,
 };
 use crate::open_with::OpenWithState;
 use crate::sidebar_devices::SidebarDeviceContextMenuState;
@@ -240,7 +240,6 @@ pub(super) struct ContextMenuPanels<'a> {
 
 pub(super) fn context_menu_panel<'a>(
     menu: &'a ContextMenuState,
-    is_trash_view: bool,
     keyboard_modifiers: iced::keyboard::Modifiers,
     context_menus: &'a ContextMenuPreferences,
     list_view_preferences: &'a ListViewPreferences,
@@ -248,7 +247,7 @@ pub(super) fn context_menu_panel<'a>(
     file_grouping: FileGroupingMode,
 ) -> ContextMenuPanels<'a> {
     match menu {
-        ContextMenuState::FileArea(menu) if is_trash_view => ContextMenuPanels {
+        ContextMenuState::Trash(menu) => ContextMenuPanels {
             root: trash_context_menu_panel(menu, context_menus),
             submenu: None,
         },
@@ -444,7 +443,7 @@ fn sidebar_device_context_menu_panel<'a>(
 }
 
 fn trash_context_menu_panel<'a>(
-    menu: &'a FileContextMenuState,
+    menu: &'a TrashContextMenuState,
     context_menus: &'a ContextMenuPreferences,
 ) -> Element<'a, Message> {
     let mut menu_content = iced::widget::Column::new().spacing(4).padding(8);

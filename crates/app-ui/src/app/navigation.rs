@@ -11,7 +11,7 @@ use super::global_error::GlobalErrorSource;
 use super::FileBrowser;
 use crate::commands::{load_directory_command, load_expanded_directory_command};
 use crate::model::{
-    empty_directory_entry_snapshot, trash_location_path, BrowserPaneId, BrowserViewMode,
+    empty_directory_entry_snapshot, BrowserLocation, BrowserPaneId, BrowserViewMode,
     DirectoryCollectionPhase, DirectoryEntrySnapshot, DirectoryExpansionLoadContext,
     DirectoryLoadRequest, DirectoryLoadingPlaceholder, DirectoryLoadingPlaceholderEntry,
     DirectoryOrderPhase, ExpandedDirectory, ExpandedDirectoryLoadRequest, ExpandedDirectoryStatus,
@@ -83,7 +83,7 @@ impl FileBrowser {
         };
         if !directory_load_request_matches_pane(
             &request,
-            pane.tab().current_dir.as_path(),
+            pane.tab().current_directory(),
             pane.directory_load_generation,
         ) {
             return Task::none();
@@ -139,7 +139,7 @@ impl FileBrowser {
         };
         if !directory_load_request_matches_pane(
             &request,
-            pane.tab().current_dir.as_path(),
+            pane.tab().current_directory(),
             pane.directory_load_generation,
         ) {
             return Task::none();
@@ -147,13 +147,13 @@ impl FileBrowser {
 
         pane.directory_loading_placeholder = None;
         let tab = pane.tab_mut();
-        tab.current_dir = path;
+        tab.location = BrowserLocation::Directory(path);
         tab.entries = entries;
         tab.directory_discovery = discovery;
         // 扫描读到的是启动那一刻的磁盘，期间到达的变化排在队里，落地后补上。
         replay_changes_queued_during_current_scan(tab, request.generation, &sort_options);
         // 图标视图的选择修正在活动窗格要结合展开状态，非活动窗格只剩直接条目。
-        if tab.view_mode == BrowserViewMode::Icons && !is_active {
+        if tab.view_mode() == BrowserViewMode::Icons && !is_active {
             tab.retain_direct_entry_selection();
         }
         tab.directory_collection_phase = DirectoryCollectionPhase::Ready;
@@ -176,7 +176,7 @@ impl FileBrowser {
             ]);
         }
 
-        if self.tab().view_mode == BrowserViewMode::Icons {
+        if self.tab().view_mode() == BrowserViewMode::Icons {
             self.retain_icon_grid_visible_selection();
         }
         self.retract_global_error(GlobalErrorSource::DirectoryLoad);
@@ -203,10 +203,16 @@ impl FileBrowser {
         let cancel_address_editing = self.cancel_address_editing();
         let loading_placeholder = self.capture_directory_loading_placeholder();
         let tab = self.tab_mut();
-        if mode == NavigationMode::RecordHistory && !tab.is_trash_view && path != tab.current_dir {
-            let previous = tab.current_dir.clone();
-            tab.back_stack.push(previous);
-            tab.forward_stack.clear();
+        if mode == NavigationMode::RecordHistory {
+            // 回收站不进历史：从回收站出来不记它。
+            if let Some(previous) = tab
+                .current_directory()
+                .filter(|current| *current != path)
+                .map(Path::to_path_buf)
+            {
+                tab.back_stack.push(previous);
+                tab.forward_stack.clear();
+            }
         }
         self.clear_icon_grid_expansion();
         // 拖拽栏链快照绑定换目录前的多栏链;拖拽中导航(spring 面包屑
@@ -215,8 +221,7 @@ impl FileBrowser {
             drag.column_directories_snapshot.clear();
         }
         let tab = self.tab_mut();
-        tab.current_dir = path.clone();
-        tab.is_trash_view = false;
+        tab.location = BrowserLocation::Directory(path.clone());
         tab.trash_entries.clear();
         tab.close_expanded_directories();
         tab.clear_selection();
@@ -253,10 +258,11 @@ impl FileBrowser {
             self.capture_directory_loading_placeholder()
         };
         let tab = self.tab_mut();
-        if mode == NavigationMode::RecordHistory && !tab.is_trash_view {
-            let previous = tab.current_dir.clone();
-            tab.back_stack.push(previous);
-            tab.forward_stack.clear();
+        if mode == NavigationMode::RecordHistory {
+            if let Some(previous) = tab.current_directory().map(Path::to_path_buf) {
+                tab.back_stack.push(previous);
+                tab.forward_stack.clear();
+            }
         }
         self.clear_icon_grid_expansion();
         let has_cached_entries = cached_entries.is_some();
@@ -267,8 +273,7 @@ impl FileBrowser {
             .collect::<Vec<_>>()
             .into();
         let tab = self.tab_mut();
-        tab.current_dir = trash_location_path();
-        tab.is_trash_view = true;
+        tab.location = BrowserLocation::Trash;
         tab.trash_entries = trash_entries;
         tab.directory_discovery = None;
         tab.close_expanded_directories();
@@ -296,7 +301,7 @@ impl FileBrowser {
 
     pub(super) fn reload_current(&mut self) -> Task<Message> {
         self.invalidate_list_directory_summaries_for_pane(self.active_pane_id());
-        if self.tab().is_trash_view {
+        if self.tab().location == BrowserLocation::Trash {
             self.invalidate_trash_snapshot_refresh();
         }
         self.reload_current_preserving_list_directory_summaries()
@@ -304,7 +309,7 @@ impl FileBrowser {
 
     pub(in crate::app) fn reload_current_for_file_drop(&mut self) -> Task<Message> {
         self.invalidate_list_directory_summaries_for_pane(self.active_pane_id());
-        if self.tab().is_trash_view {
+        if self.tab().location == BrowserLocation::Trash {
             self.invalidate_trash_snapshot_refresh();
         }
         self.schedule_directory_reload(self.active_pane_id())
@@ -320,31 +325,38 @@ impl FileBrowser {
     fn schedule_directory_reload(&mut self, pane_id: BrowserPaneId) -> Task<Message> {
         let is_active = pane_id == self.active_pane_id();
         let has_trash_snapshot = self.trash_refresh.snapshot().is_some();
-        let shows_trash = self
+        let location = self
             .pane_by_id(pane_id)
-            .is_some_and(|pane| pane.tab().is_trash_view);
-        if is_active && shows_trash {
-            self.clear_icon_grid_expansion();
-        }
+            .map(|pane| pane.tab().location.clone())
+            .expect("a reload targets an existing pane");
+        let current_dir = match location {
+            BrowserLocation::Trash => {
+                if is_active {
+                    self.clear_icon_grid_expansion();
+                }
+                let pane = self
+                    .pane_by_id_mut(pane_id)
+                    .expect("a reload targets an existing pane");
+                pane.directory_loading_placeholder = None;
+                let tab = pane.tab_mut();
+                tab.directory_collection_phase = if has_trash_snapshot {
+                    DirectoryCollectionPhase::Ready
+                } else {
+                    DirectoryCollectionPhase::Discovering
+                };
+                tab.close_expanded_directories();
+                pane.cancel_directory_load();
+                self.retract_global_error(GlobalErrorSource::DirectoryLoad);
+                self.prune_list_directory_summaries_to_live_roots();
+                return self.request_trash_snapshot_refresh();
+            }
+            BrowserLocation::Directory(directory) => directory,
+        };
         let pane = self
             .pane_by_id_mut(pane_id)
             .expect("a reload targets an existing pane");
         pane.directory_loading_placeholder = None;
-        let tab = pane.tab_mut();
-        if shows_trash {
-            tab.directory_collection_phase = if has_trash_snapshot {
-                DirectoryCollectionPhase::Ready
-            } else {
-                DirectoryCollectionPhase::Discovering
-            };
-            tab.close_expanded_directories();
-            pane.cancel_directory_load();
-            self.retract_global_error(GlobalErrorSource::DirectoryLoad);
-            self.prune_list_directory_summaries_to_live_roots();
-            return self.request_trash_snapshot_refresh();
-        }
-        tab.directory_collection_phase = DirectoryCollectionPhase::Discovering;
-        let current_dir = tab.current_dir.clone();
+        pane.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Discovering;
         self.retract_global_error(GlobalErrorSource::DirectoryLoad);
 
         let mut commands = self.refresh_expanded_directory_commands(pane_id);
@@ -442,10 +454,10 @@ impl FileBrowser {
         let Some(tab) = self.pane_by_id(pane_id).map(|pane| pane.tab()) else {
             return Task::none();
         };
-        if tab.is_trash_view {
+        let Some(current_directory) = tab.current_directory() else {
             return Task::none();
-        }
-        if tab.current_dir == path {
+        };
+        if current_directory == path {
             return if pane_id == self.active_pane_id() {
                 self.reload_current_preserving_list_directory_summaries()
             } else {
@@ -471,14 +483,9 @@ impl FileBrowser {
     }
 
     pub(super) fn navigate_up(&mut self) -> Task<Message> {
-        if self.tab().is_trash_view {
-            return Task::none();
-        }
-
-        if let Some(parent) = self.tab().current_dir.parent() {
-            self.navigate_to(parent.to_path_buf(), NavigationMode::RecordHistory)
-        } else {
-            Task::none()
+        match self.tab().current_directory().and_then(Path::parent) {
+            Some(parent) => self.navigate_to(parent.to_path_buf(), NavigationMode::RecordHistory),
+            None => Task::none(),
         }
     }
 
@@ -487,8 +494,7 @@ impl FileBrowser {
         let Some(path) = tab.back_stack.pop() else {
             return Task::none();
         };
-        if !tab.is_trash_view {
-            let leaving = tab.current_dir.clone();
+        if let Some(leaving) = tab.current_directory().map(Path::to_path_buf) {
             tab.forward_stack.push(leaving);
         }
         self.navigate_to(path, NavigationMode::KeepHistory)
@@ -499,8 +505,10 @@ impl FileBrowser {
         let Some(path) = tab.forward_stack.pop() else {
             return Task::none();
         };
-        let leaving = tab.current_dir.clone();
-        tab.back_stack.push(leaving);
+        // 回收站不进历史，从回收站前进时不把它记进后退栈。
+        if let Some(leaving) = tab.current_directory().map(Path::to_path_buf) {
+            tab.back_stack.push(leaving);
+        }
         self.navigate_to(path, NavigationMode::KeepHistory)
     }
 
@@ -555,7 +563,7 @@ impl FileBrowser {
         tab.entries
             .iter()
             .find(|entry| entry.path == path)
-            .or_else(|| match tab.view_mode {
+            .or_else(|| match tab.view_mode() {
                 BrowserViewMode::Icons => self
                     .icon_grid_expansion
                     .as_ref()
@@ -574,7 +582,7 @@ impl FileBrowser {
 
     fn capture_directory_loading_placeholder(&self) -> Option<DirectoryLoadingPlaceholder> {
         let tab = self.tab();
-        if tab.view_mode != BrowserViewMode::List || tab.entries.is_empty() {
+        if tab.view_mode() != BrowserViewMode::List || tab.entries.is_empty() {
             return None;
         }
 
@@ -583,8 +591,7 @@ impl FileBrowser {
                 .row_height;
         let range = self
             .pane()
-            .column_viewports
-            .get(&tab.current_dir)
+            .list_viewport
             .map(|viewport| {
                 crate::visible_entries::list_entry_range_for_viewport(
                     &tab.entries,
@@ -746,10 +753,10 @@ pub(super) fn directory_order_phase_after_collection(
 
 fn directory_load_request_matches_pane(
     request: &DirectoryLoadRequest,
-    current_dir: &Path,
+    current_directory: Option<&Path>,
     generation: u64,
 ) -> bool {
-    request.generation == generation && request.path.as_path() == current_dir
+    request.generation == generation && current_directory == Some(request.path.as_path())
 }
 
 #[cfg(test)]
@@ -778,7 +785,7 @@ mod tests {
         let discovery_entries = Arc::clone(&discovery.entries);
 
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.tab_mut().current_dir = directory.path().to_path_buf();
+        browser.tab_mut().location = BrowserLocation::Directory(directory.path().to_path_buf());
         let request = browser.next_directory_load_request(directory.path().to_path_buf());
         for batch in batches {
             drop(browser.accept_directory_discovery_batch(request.clone(), batch));
@@ -815,8 +822,8 @@ mod tests {
         let current_directory = PathBuf::from("/workspace/large");
         let destination = PathBuf::from("/workspace");
         let tab = browser.tab_mut();
-        tab.current_dir = current_directory.clone();
-        tab.view_mode = BrowserViewMode::List;
+        tab.location = BrowserLocation::Directory(current_directory.clone());
+        tab.choose_view_mode(BrowserViewMode::List);
         tab.directory_collection_phase = DirectoryCollectionPhase::Ready;
         tab.entries = (0..5_000)
             .map(|index| {
@@ -837,10 +844,7 @@ mod tests {
                 + 2_500.0 * crate::list_view::LIST_ROW_HEIGHT,
             height: 10.0 * crate::list_view::LIST_ROW_HEIGHT,
         };
-        browser
-            .pane_mut()
-            .column_viewports
-            .insert(current_directory.clone(), viewport);
+        browser.pane_mut().list_viewport = Some(viewport);
         let previous_entries = Arc::clone(&browser.tab().entries);
         let expected_range = crate::visible_entries::list_entry_range_for_viewport(
             &previous_entries,
@@ -916,8 +920,8 @@ mod tests {
             false,
         );
         let tab = browser.tab_mut();
-        tab.view_mode = BrowserViewMode::List;
-        tab.current_dir = abandoned.clone();
+        tab.choose_view_mode(BrowserViewMode::List);
+        tab.location = BrowserLocation::Directory(abandoned.clone());
         tab.directory_collection_phase = DirectoryCollectionPhase::Ready;
         tab.entries = vec![
             project.clone(),

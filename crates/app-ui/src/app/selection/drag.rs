@@ -7,9 +7,9 @@ use super::super::wayland_dnd::WaylandFileDragRequest;
 use super::super::{FileBrowser, POINTER_DRAG_ACTIVATION_DISTANCE};
 use super::clipboard::split_archive_member_sources;
 use crate::model::{
-    BrowserPaneId, FileDragDropIntent, FileDragGestureId, FileDragNativeDndState, FileDragPhase,
-    FileDragState, FileDragStationaryAction, FileDropTarget, Message, SelectionMarqueeSource,
-    TabDropDestination, TransferConflictMode,
+    BrowserLocation, BrowserPaneId, FileDragDropIntent, FileDragGestureId, FileDragNativeDndState,
+    FileDragPhase, FileDragState, FileDragStationaryAction, FileDropTarget, Message,
+    SelectionMarqueeSource, TabDropDestination, TransferConflictMode,
 };
 use file_operations::{QueuedFileOperation, QueuedTransfer};
 
@@ -206,7 +206,7 @@ impl FileBrowser {
     ) -> Task<Message> {
         self.sidebar_bookmark_drop_slot = None;
         self.file_drop_session = None;
-        if self.tab().is_trash_view {
+        if self.tab().location == BrowserLocation::Trash {
             self.file_drag = None;
             return Task::none();
         }
@@ -338,8 +338,7 @@ impl FileBrowser {
             matches!(
                 session.hovered_target.as_ref(),
                 Some(FileDropTarget::Directory(target)) if target == directory
-            ) || (directory == crate::model::trash_location_path().as_path()
-                && matches!(session.hovered_target.as_ref(), Some(FileDropTarget::Trash)))
+            )
         });
         if matches {
             self.set_file_drop_target(None);
@@ -369,7 +368,7 @@ impl FileBrowser {
         }
 
         let pane = self.pane_view(pane_id)?;
-        (!pane.is_trash_view).then(|| pane.current_dir.clone())
+        pane.current_directory().map(Path::to_path_buf)
     }
 
     /// 拖放修饰键实时意图:Ctrl=强制复制(Finder Option 语义,优先于

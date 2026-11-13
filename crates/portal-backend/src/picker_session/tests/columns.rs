@@ -92,7 +92,7 @@ fn scan(session: &mut PickerSession, directory: &Path, names: &[(&str, FileKind)
         })
         .collect();
     session.update(SessionMessage::ScanReady(Box::new(DirectoryScanResult {
-        directory: directory.to_path_buf(),
+        location: BrowserLocation::Directory(directory.to_path_buf()),
         outcome: Ok(DirectoryScanOutcome { entries }),
     })));
 }
@@ -104,7 +104,7 @@ fn chain(session: &PickerSession) -> Vec<PathBuf> {
 /// 预置根目录：{adir, bdir}。子目录内容在点开栏后再扫描（未开
 /// 栏前扫描会被会话丢弃——既非根也非展开目标）。
 fn seeded_root(session: &mut PickerSession) -> (PathBuf, PathBuf, PathBuf) {
-    let root = session.directory().to_path_buf();
+    let root = session.current_directory().unwrap().to_path_buf();
     let adir = root.join("adir");
     let bdir = root.join("bdir");
     let deep = adir.join("deep");
@@ -118,7 +118,7 @@ fn seeded_root(session: &mut PickerSession) -> (PathBuf, PathBuf, PathBuf) {
 
 /// 点开 adir 栏并回填其内容（deep 目录 + note.txt）。
 fn open_adir_lane(session: &mut PickerSession) -> (PathBuf, PathBuf) {
-    let root = session.directory().to_path_buf();
+    let root = session.current_directory().unwrap().to_path_buf();
     let adir = root.join("adir");
     let deep = adir.join("deep");
     scan(
@@ -144,7 +144,7 @@ fn open_adir_lane(session: &mut PickerSession) -> (PathBuf, PathBuf) {
 fn clicking_directory_appends_and_truncates_right_side() {
     let (mut session, _rx) = open_file_session(true);
     let (adir, bdir, deep) = seeded_root(&mut session);
-    let root = session.directory().to_path_buf();
+    let root = session.current_directory().unwrap().to_path_buf();
 
     // 点 adir → 栏链 [root, adir]，需要扫描。
     let effect = session.update(SessionMessage::ColumnEntryClicked {
@@ -215,7 +215,7 @@ fn target_directory_and_selected_paths_come_from_columns() {
     let (adir, _deep) = open_adir_lane(&mut session);
 
     // 焦点进入点开的栏：目标目录 = 焦点栏目录。
-    assert_eq!(session.target_directory(), adir);
+    assert_eq!(session.target_directory(), Some(adir.as_path()));
 
     // 点文件：选中集落文件所在栏，确认集 = 该栏选中。
     session.update(SessionMessage::ColumnEntryClicked {
@@ -308,7 +308,7 @@ fn multi_selection_in_one_lane_confirms_as_a_set() {
 #[test]
 fn multi_selection_is_confined_within_one_lane() {
     let (mut session, _rx) = open_file_session(true);
-    let root = session.directory().to_path_buf();
+    let root = session.current_directory().unwrap().to_path_buf();
     scan(
         &mut session,
         &root,
@@ -351,7 +351,7 @@ fn save_file_saves_into_focused_lane_directory() {
     let (mut session, mut receiver) = columns_session(PickerKind::SaveFile {
         default_name: Some("out.png".to_string()),
     });
-    let root = session.directory().to_path_buf();
+    let root = session.current_directory().unwrap().to_path_buf();
     let adir = root.join("adir");
     scan(&mut session, &root, &[("adir", FileKind::Directory)]);
     session.update(SessionMessage::ColumnEntryClicked {
@@ -375,7 +375,7 @@ fn save_file_saves_into_focused_lane_directory() {
 fn navigation_resets_chain_to_single_lane() {
     let (mut session, _rx) = open_file_session(false);
     let (adir, bdir, _deep) = seeded_root(&mut session);
-    let root = session.directory().to_path_buf();
+    let root = session.current_directory().unwrap().to_path_buf();
     session.update(SessionMessage::ColumnEntryClicked {
         lane: 0,
         index: 0,
@@ -405,7 +405,7 @@ fn navigation_resets_chain_to_single_lane() {
 #[test]
 fn view_switch_hands_over_selection_and_directory_both_ways() {
     let (mut session, _rx) = list_session(true, false);
-    let root = session.directory().to_path_buf();
+    let root = session.current_directory().unwrap().to_path_buf();
     scan(
         &mut session,
         &root,
@@ -453,7 +453,7 @@ fn view_switch_hands_over_selection_and_directory_both_ways() {
     session.update(SessionMessage::ViewModeSelected {
         mode: PickerViewMode::List,
     });
-    assert_eq!(session.directory(), root.join("sub"));
+    assert_eq!(session.current_directory().unwrap(), root.join("sub"));
     assert_eq!(
         session.selected_paths(),
         vec![root.join("sub").join("c.txt")]
@@ -466,7 +466,7 @@ fn view_switch_hands_over_selection_and_directory_both_ways() {
 fn entering_columns_with_single_directory_selection_opens_child_lane() {
     // 选目录模式：列表里单选目录 → 进多栏追加其子栏。
     let (mut session, _rx) = list_session(false, true);
-    let root = session.directory().to_path_buf();
+    let root = session.current_directory().unwrap().to_path_buf();
     scan(
         &mut session,
         &root,
@@ -489,7 +489,7 @@ fn entering_columns_with_single_directory_selection_opens_child_lane() {
 fn entering_columns_with_file_selection_keeps_single_lane() {
     // 文件模式：单选文件 → 进多栏不开子栏。
     let (mut session, _rx) = list_session(false, false);
-    let root = session.directory().to_path_buf();
+    let root = session.current_directory().unwrap().to_path_buf();
     scan(
         &mut session,
         &root,
@@ -511,7 +511,7 @@ fn entering_columns_with_file_selection_keeps_single_lane() {
 fn arrow_keys_move_within_lane_and_cross_lanes_without_crossing_bounds() {
     let (mut session, _rx) = open_file_session(false);
     let (adir, _bdir, _deep) = seeded_root(&mut session);
-    let root = session.directory().to_path_buf();
+    let root = session.current_directory().unwrap().to_path_buf();
 
     // ↓：首次键盘移动落在第 0 行（adir，文件模式不可选，仅光标）；
     // 边界：继续 ↓ 不越界。
@@ -610,7 +610,7 @@ fn lane_visible_window_maps_offsets_with_lane_geometry() {
         .iter()
         .map(|name| (name.as_str(), FileKind::File))
         .collect();
-    let lane_root = session.directory().to_path_buf();
+    let lane_root = session.current_directory().unwrap().to_path_buf();
     scan(&mut session, &lane_root, &names);
     let lane = 0;
     let geometry = ColumnEntryGeometry::for_scale(COLUMNS_SCALE);
@@ -683,7 +683,7 @@ fn lane_click_clears_other_lanes_selection() {
 
     // 点回 lane0 的 bdir：lane1 选中熄灭；文件模式下 bdir 不可选，
     // 选中集整体为空（目录导航不等于选中）。
-    let root = session.directory().to_path_buf();
+    let root = session.current_directory().unwrap().to_path_buf();
     scan(
         &mut session,
         &root,

@@ -18,8 +18,9 @@ use crate::network_connections::{
 
 impl FileBrowser {
     pub(crate) fn network_connection_is_selected(&self, id: &NetworkConnectionId) -> bool {
-        self.network_connections
-            .selected_connection_id(&self.tab().current_dir)
+        self.tab()
+            .current_directory()
+            .and_then(|directory| self.network_connections.selected_connection_id(directory))
             .is_some_and(|selected_id| selected_id == id)
     }
 

@@ -33,7 +33,7 @@ impl<'a> IconGridLayout<'a> {
         expansion: Option<&'a IconGridExpansionState>,
     ) -> Self {
         Self::with_root_transfer_placeholders(
-            root_directory,
+            Some(root_directory),
             root_entries,
             &[],
             TransferSortOptions {
@@ -70,7 +70,7 @@ impl<'a> IconGridLayout<'a> {
             now: std::time::SystemTime::UNIX_EPOCH,
         };
         Self::with_root_transfer_placeholders(
-            root_directory,
+            Some(root_directory),
             root_entries,
             root_placeholders,
             TransferSortOptions {
@@ -413,7 +413,7 @@ fn keyboard_navigation_crosses_from_root_row_into_expansion_panel() {
         .keyboard_target(Some(Path::new("/workspace/root")), IconGridDirection::Down)
         .unwrap();
     assert_eq!(down.entry.path, Path::new("/workspace/root/a"));
-    assert_eq!(down.directory, Path::new("/workspace/root"));
+    assert_eq!(down.directory, Some(Path::new("/workspace/root")));
     let left = layout
         .keyboard_target(Some(&down.entry.path), IconGridDirection::Left)
         .unwrap();
@@ -518,7 +518,7 @@ fn expansion_band_merges_transfer_placeholders_for_its_directory() {
         ),
     );
     let layout = IconGridLayout::with_root_transfer_placeholders(
-        Path::new("/workspace"),
+        Some(Path::new("/workspace")),
         &root_entries,
         &[],
         TransferSortOptions {

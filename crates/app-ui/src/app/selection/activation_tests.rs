@@ -7,10 +7,11 @@ use iced::{keyboard, window, Point};
 
 use crate::app::FileBrowser;
 use crate::config;
+use crate::model::BrowserLocation;
 use crate::model::{
-    trash_location_path, BrowserPaneId, BrowserViewMode, DirectoryExpansionLoadContext,
-    ExpandedDirectory, ExpandedDirectoryLoadRequest, ExpandedDirectoryStatus,
-    FileDragNativeDndState, FileDragPhase, Message,
+    BrowserPaneId, BrowserViewMode, DirectoryExpansionLoadContext, ExpandedDirectory,
+    ExpandedDirectoryLoadRequest, ExpandedDirectoryStatus, FileDragNativeDndState, FileDragPhase,
+    Message,
 };
 use crate::shortcuts::FileSelectionDirection;
 
@@ -31,7 +32,7 @@ fn test_entry(path: PathBuf, kind: FileKind) -> DirectoryEntry {
 
 fn browser_with_entries(paths: &[PathBuf]) -> FileBrowser {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
     browser.tab_mut().directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
     browser.tab_mut().entries = paths
         .iter()
@@ -267,17 +268,17 @@ fn control_selection_click_does_not_seed_activation_double_click() {
 fn plain_double_click_still_activates_directory() {
     let directory = PathBuf::from("/workspace/project");
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
     browser.tab_mut().entries = vec![test_entry(directory.clone(), FileKind::Directory)].into();
 
     drop(browser.handle_column_entry_clicked(directory.clone()));
     drop(browser.handle_column_entry_clicked(directory.clone()));
 
-    assert_eq!(browser.tab().current_dir, directory);
+    assert_eq!(browser.tab().current_directory().unwrap(), directory);
     assert!(matches!(browser.file_drag, None));
     assert!(browser.last_activation_click.is_none());
     assert_eq!(browser.tab().back_stack, vec![PathBuf::from("/workspace")]);
-    assert!(matches!(browser.tab().is_trash_view, false));
+    assert_ne!(browser.tab().location, BrowserLocation::Trash);
 }
 
 #[test]
@@ -285,7 +286,7 @@ fn list_single_click_selects_directory_without_expanding_or_opening_column() {
     let directory = PathBuf::from("/workspace/project");
     let child = PathBuf::from("/workspace/project/main.rs");
     let mut browser = browser_with_entries(&[directory.clone()]);
-    browser.tab_mut().view_mode = BrowserViewMode::List;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::List);
     browser.tab_mut().entries = vec![test_entry(directory.clone(), FileKind::Directory)].into();
     browser.tab_mut().expanded_directories.insert(
         directory.clone(),
@@ -309,7 +310,10 @@ fn list_single_click_selects_directory_without_expanding_or_opening_column() {
     drop(browser.handle_flat_entry_clicked(directory.clone()));
 
     assert_eq!(browser.tab().selected, Some(directory.clone()));
-    assert_eq!(browser.tab().current_dir, PathBuf::from("/workspace"));
+    assert_eq!(
+        browser.tab().current_directory().unwrap(),
+        PathBuf::from("/workspace")
+    );
     assert_eq!(browser.tab().deepest_open_column_directory, None);
     assert!(browser
         .tab()
@@ -322,13 +326,13 @@ fn list_single_click_selects_directory_without_expanding_or_opening_column() {
 fn list_double_click_activates_directory() {
     let directory = PathBuf::from("/workspace/project");
     let mut browser = browser_with_entries(&[directory.clone()]);
-    browser.tab_mut().view_mode = BrowserViewMode::List;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::List);
     browser.tab_mut().entries = vec![test_entry(directory.clone(), FileKind::Directory)].into();
 
     drop(browser.handle_flat_entry_clicked(directory.clone()));
     drop(browser.handle_flat_entry_clicked(directory.clone()));
 
-    assert_eq!(browser.tab().current_dir, directory);
+    assert_eq!(browser.tab().current_directory().unwrap(), directory);
     assert_eq!(browser.tab().back_stack, vec![PathBuf::from("/workspace")]);
 }
 
@@ -337,7 +341,7 @@ fn list_double_click_keeps_visible_placeholders_while_canonical_entries_load() {
     let directory = PathBuf::from("/workspace/project");
     let child = PathBuf::from("/workspace/project/main.rs");
     let mut browser = browser_with_entries(&[directory.clone()]);
-    browser.tab_mut().view_mode = BrowserViewMode::List;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::List);
     browser.tab_mut().entries = vec![test_entry(directory.clone(), FileKind::Directory)].into();
     browser.tab_mut().expanded_directories.insert(
         directory.clone(),
@@ -348,7 +352,10 @@ fn list_double_click_keeps_visible_placeholders_while_canonical_entries_load() {
     drop(browser.handle_flat_entry_clicked(directory.clone()));
     drop(browser.handle_flat_entry_clicked(directory.clone()));
 
-    assert_eq!(browser.tab().current_dir, directory.clone());
+    assert_eq!(
+        browser.tab().current_directory().unwrap(),
+        directory.clone()
+    );
     assert!(browser.tab().directory_collection_phase.is_discovering());
     assert!(browser.tab().entries.is_empty());
     assert!(browser.tab().expanded_directories.is_empty());
@@ -378,7 +385,10 @@ fn column_single_click_still_opens_child_column() {
 
     drop(browser.handle_column_entry_clicked(directory.clone()));
 
-    assert_eq!(browser.tab().current_dir, PathBuf::from("/workspace"));
+    assert_eq!(
+        browser.tab().current_directory().unwrap(),
+        PathBuf::from("/workspace")
+    );
     assert_eq!(browser.tab().deepest_open_column_directory, None);
     assert_eq!(
         crate::three_column_view::column_directories(&browser),
@@ -405,7 +415,7 @@ fn column_single_click_requests_session_save_when_enabled() {
     user_config.startup_location_policy = config::StartupLocationPolicy::PreviousSession;
     user_config.save_view_state = user_config.startup_location_policy.saves_view_state();
     let (mut browser, _) = FileBrowser::new(user_config);
-    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
     browser.tab_mut().directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
     browser.tab_mut().entries = vec![test_entry(directory, FileKind::Directory)].into();
 
@@ -522,7 +532,7 @@ fn list_vertical_arrows_move_across_expanded_directory_levels() {
     let child = PathBuf::from("/workspace/project/main.rs");
     let sibling = PathBuf::from("/workspace/readme.txt");
     let mut browser = browser_with_entries(&[parent.clone(), sibling.clone()]);
-    browser.tab_mut().view_mode = BrowserViewMode::List;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::List);
     browser.tab_mut().entries = vec![
         test_entry(parent.clone(), FileKind::Directory),
         test_entry(sibling.clone(), FileKind::File),
@@ -549,7 +559,7 @@ fn list_right_arrow_expands_then_focuses_first_child() {
     let parent = PathBuf::from("/workspace/project");
     let child = PathBuf::from("/workspace/project/main.rs");
     let mut browser = browser_with_entries(&[parent.clone()]);
-    browser.tab_mut().view_mode = BrowserViewMode::List;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::List);
     browser.tab_mut().entries = vec![test_entry(parent.clone(), FileKind::Directory)].into();
     browser.tab_mut().expanded_directories.insert(
         parent.clone(),
@@ -591,7 +601,7 @@ fn list_left_arrow_collapses_then_focuses_visible_parent() {
     let child = PathBuf::from("/workspace/project/src");
     let grandchild = PathBuf::from("/workspace/project/src/main.rs");
     let mut browser = browser_with_entries(&[parent.clone()]);
-    browser.tab_mut().view_mode = BrowserViewMode::List;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::List);
     browser.tab_mut().entries = vec![test_entry(parent.clone(), FileKind::Directory)].into();
     browser.tab_mut().expanded_directories.insert(
         parent.clone(),
@@ -633,7 +643,7 @@ fn list_select_all_and_range_use_the_same_visible_rows() {
     let child = PathBuf::from("/workspace/project/main.rs");
     let sibling = PathBuf::from("/workspace/readme.txt");
     let mut browser = browser_with_entries(&[parent.clone(), sibling.clone()]);
-    browser.tab_mut().view_mode = BrowserViewMode::List;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::List);
     browser.tab_mut().entries = vec![
         test_entry(parent.clone(), FileKind::Directory),
         test_entry(sibling.clone(), FileKind::File),
@@ -667,7 +677,7 @@ fn column_shift_range_stays_in_the_clicked_column() {
     let zeta = PathBuf::from("/workspace/zeta.txt");
     let child = project.join("main.rs");
     let mut browser = browser_with_entries(&[alpha.clone(), zeta.clone()]);
-    browser.tab_mut().view_mode = BrowserViewMode::Columns;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::Columns);
     browser.tab_mut().entries = vec![
         test_entry(alpha.clone(), FileKind::File),
         test_entry(project.clone(), FileKind::Directory),
@@ -697,7 +707,7 @@ fn column_shift_click_in_another_column_selects_only_target_and_reanchors() {
     let child = project.join("main.rs");
     let sibling = project.join("util.rs");
     let mut browser = browser_with_entries(&[alpha.clone()]);
-    browser.tab_mut().view_mode = BrowserViewMode::Columns;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::Columns);
     browser.tab_mut().entries = vec![
         test_entry(alpha.clone(), FileKind::File),
         test_entry(project.clone(), FileKind::Directory),
@@ -729,9 +739,8 @@ fn trash_shift_range_spans_entries_across_original_parents() {
     let first = PathBuf::from("/origin-a/first.txt");
     let second = PathBuf::from("/origin-b/nested/second.txt");
     let mut browser = browser_with_entries(&[first.clone(), second.clone()]);
-    browser.tab_mut().view_mode = BrowserViewMode::Columns;
-    browser.tab_mut().current_dir = trash_location_path();
-    browser.tab_mut().is_trash_view = true;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::Columns);
+    browser.tab_mut().location = BrowserLocation::Trash;
 
     drop(browser.handle_column_entry_clicked(first.clone()));
     browser.keyboard_modifiers = keyboard::Modifiers::SHIFT;
@@ -746,7 +755,7 @@ fn icon_grid_select_all_and_range_only_use_direct_entries() {
     let hidden_child = parent.join("main.rs");
     let sibling = PathBuf::from("/workspace/readme.txt");
     let mut browser = browser_with_entries(&[parent.clone(), sibling.clone()]);
-    browser.tab_mut().view_mode = BrowserViewMode::Icons;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::Icons);
     browser.tab_mut().entries = vec![
         test_entry(parent.clone(), FileKind::Directory),
         test_entry(sibling.clone(), FileKind::File),
@@ -891,9 +900,8 @@ fn trash_select_all_ignores_hovered_entry_real_parent() {
     let first = PathBuf::from("/home/user/.local/share/Trash/files/first.txt");
     let second = PathBuf::from("/home/user/.local/share/Trash/files/second.txt");
     let mut browser = browser_with_entries(&[first.clone(), second.clone()]);
-    browser.tab_mut().current_dir = trash_location_path();
-    browser.tab_mut().is_trash_view = true;
-    browser.tab_mut().view_mode = BrowserViewMode::Columns;
+    browser.tab_mut().location = BrowserLocation::Trash;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::Columns);
     browser.hovered_entry = Some(first.clone());
 
     drop(browser.select_all_in_file_selection_scope());
@@ -910,7 +918,7 @@ fn trash_plain_click_after_select_all_focuses_single_entry() {
     let first = PathBuf::from("/workspace/first.txt");
     let second = PathBuf::from("/workspace/second.txt");
     let mut browser = browser_with_entries(&[first.clone(), second.clone()]);
-    browser.tab_mut().is_trash_view = true;
+    browser.tab_mut().location = BrowserLocation::Trash;
 
     drop(browser.select_all_in_file_selection_scope());
     drop(browser.handle_flat_entry_clicked(second.clone()));

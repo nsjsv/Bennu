@@ -13,6 +13,7 @@ use super::expansion::{LIST_ROW_HEIGHT, LIST_ROW_STRIDE};
 use super::scrollbar::{ScrollbarViewport, SessionScrollRegion};
 use super::thumbnails::VISIBLE_MARGIN_ROWS;
 use super::{DirectoryListing, PickerSession, SessionEffect};
+use bennu_sidebar::BrowserLocation;
 
 /// portal 大图固定默认档图标边长（主软件 DEFAULT_ICON_GRID_SIZE 同值）。
 pub(crate) const ICON_GRID_EDGE: u32 = 96;
@@ -52,23 +53,37 @@ impl PickerViewMode {
 }
 
 impl PickerSession {
+    /// 这个位置实际的显示方式。多栏要沿一串目录展开，回收站不是目录，选了多栏
+    /// 也按列表显示。
     pub(crate) fn view_mode(&self) -> PickerViewMode {
-        self.view_mode
+        self.view_mode_when_chosen(self.chosen_view_mode)
+    }
+
+    /// 用户选的视图：视图按钮亮的、跨窗口记住的都是它。
+    pub(crate) fn chosen_view_mode(&self) -> PickerViewMode {
+        self.chosen_view_mode
+    }
+
+    fn view_mode_when_chosen(&self, chosen: PickerViewMode) -> PickerViewMode {
+        match (&self.location, chosen) {
+            (BrowserLocation::Trash, PickerViewMode::Columns) => PickerViewMode::List,
+            (_, chosen) => chosen,
+        }
     }
 
     /// 确认/保存/记忆的目标目录唯一读取口：列表与大图 = 浏览目录；
-    /// 多栏 = 焦点栏目录。
-    pub(crate) fn target_directory(&self) -> &Path {
-        match self.view_mode {
-            PickerViewMode::List | PickerViewMode::Icons => &self.directory,
-            PickerViewMode::Columns => self.columns.focused_directory(),
+    /// 多栏 = 焦点栏目录。回收站不是目录，没有。
+    pub(crate) fn target_directory(&self) -> Option<&Path> {
+        match self.view_mode() {
+            PickerViewMode::List | PickerViewMode::Icons => self.location.directory(),
+            PickerViewMode::Columns => Some(self.columns.focused_directory()),
         }
     }
 
     /// 确认集唯一读取口：列表/大图 = 选中行路径；多栏 = 最右有选中
     /// 项那一栏的选中路径（多选时为该栏选中集）。
     pub(crate) fn selected_paths(&self) -> Vec<std::path::PathBuf> {
-        if self.view_mode == PickerViewMode::Columns {
+        if self.view_mode() == PickerViewMode::Columns {
             return self.columns_rightmost_selection_paths();
         }
         self.selection
@@ -98,10 +113,16 @@ impl PickerSession {
     /// 展开/悬停/type-ahead 作废；List/Icons 的主选中项在新几何的探
     /// 针回信后揭示。
     pub(crate) fn select_view_mode(&mut self, mode: PickerViewMode) -> SessionEffect {
-        if mode == self.view_mode {
+        if mode == self.chosen_view_mode {
             return SessionEffect::None;
         }
-        let from_columns = self.view_mode == PickerViewMode::Columns;
+        // 过渡按实际显示方式算：回收站里在列表和多栏之间换，显示不变，只记下选择。
+        let shown_mode = self.view_mode_when_chosen(mode);
+        if shown_mode == self.view_mode() {
+            self.chosen_view_mode = mode;
+            return SessionEffect::None;
+        }
+        let from_columns = self.view_mode() == PickerViewMode::Columns;
         // 选中按路径快照（行索引随行集重建位移，路径才跨模式稳定）。
         let carried_paths: Vec<std::path::PathBuf> = if from_columns {
             self.columns_focused_selection_paths()
@@ -117,21 +138,21 @@ impl PickerSession {
             // 离开多栏：目录 = 焦点栏目录；焦点栏扫描内容上移为根列表
             // （扫描在途时保持 Pending，回信按新目录回填根列表）。
             let focused = self.columns.focused_directory().to_path_buf();
-            if focused != self.directory {
+            if self.current_directory() != Some(focused.as_path()) {
                 self.listing = self
                     .expansions
                     .remove(&focused)
                     .map(|state| state.listing)
                     .unwrap_or(DirectoryListing::Pending);
-                self.directory = focused;
+                self.location = BrowserLocation::Directory(focused);
                 // 列表视口缓存对新目录是新几何，失效等探针回信。
                 self.scroll_viewports.remove(&SessionScrollRegion::List);
             }
         }
         self.expansions.clear();
         self.refresh_rows();
-        self.view_mode = mode;
-        if mode == PickerViewMode::Columns {
+        self.chosen_view_mode = mode;
+        if shown_mode == PickerViewMode::Columns {
             return self.begin_columns_chain(carried_paths);
         }
         // 目标 List/Icons：路径映射回新行集合（深层行不存在的自然丢弃）。
@@ -159,7 +180,11 @@ impl PickerSession {
     /// 进入多栏：栏链 = [当前目录]，承接的选中路径映射为第 0 栏选中；
     /// 承接集为单个目录时追加其子栏（扫描随打开效果发起）。
     fn begin_columns_chain(&mut self, carried_paths: Vec<std::path::PathBuf>) -> SessionEffect {
-        self.columns.reset(self.directory.clone());
+        // 只有目录会显示成多栏（见 `view_mode()`）。
+        let Some(root) = self.current_directory().map(Path::to_path_buf) else {
+            return SessionEffect::None;
+        };
+        self.columns.reset(root);
         self.hovered_index = None;
         self.keyboard_nav.reset();
         // 列表几何的揭示不再适用：多栏由栏探针回信重新校准视口。
@@ -172,7 +197,7 @@ impl PickerSession {
         self.columns.set_selection(0, selection, anchor);
         if let (true, Some(anchor)) = (carried_paths.len() == 1, anchor) {
             if let Some(entry) = self.column_entry(0, anchor) {
-                if entry.kind == FileKind::Directory && !self.is_trash_view() {
+                if entry.kind == FileKind::Directory {
                     let directory = entry.path.clone();
                     return self.columns_open_child(0, directory);
                 }
@@ -200,7 +225,7 @@ impl PickerSession {
 
     /// 当前视图每行条目数：列表 1；大图 = 网格列数。
     fn entries_per_row(&self) -> usize {
-        match self.view_mode {
+        match self.view_mode() {
             PickerViewMode::Icons => self.icon_grid_column_count(),
             PickerViewMode::List | PickerViewMode::Columns => 1,
         }
@@ -208,7 +233,7 @@ impl PickerSession {
 
     /// 当前视图的纵向步长（滚动偏移 ↔ 行号换算与翻页共用）。
     fn view_stride(&self) -> f32 {
-        match self.view_mode {
+        match self.view_mode() {
             PickerViewMode::Icons => icon_grid_geometry::row_height(ICON_GRID_EDGE),
             PickerViewMode::List | PickerViewMode::Columns => LIST_ROW_STRIDE,
         }
@@ -217,7 +242,7 @@ impl PickerSession {
     /// 键盘光标条目的纵向矩形（滚动揭示用）：列表 = 行×步长；大图 =
     /// 所在网格行（含内容顶 padding）×网格行高 + tile 视觉高。
     pub(crate) fn cursor_row_span(&self, index: usize) -> (f32, f32) {
-        match self.view_mode {
+        match self.view_mode() {
             PickerViewMode::Icons => {
                 let columns = self.entries_per_row().max(1);
                 let row = index / columns;
@@ -240,7 +265,7 @@ impl PickerSession {
     /// 列表 ↑↓ = ∓1。列表的 ←→ 返回 None（折叠开关归键盘路由的
     /// 既有逻辑，大图无展开语义）。
     pub(crate) fn cursor_move_delta(&self, direction: IconGridDirection) -> Option<isize> {
-        match self.view_mode {
+        match self.view_mode() {
             PickerViewMode::Icons => {
                 let columns = self.entries_per_row().max(1) as isize;
                 Some(match direction {
@@ -270,7 +295,7 @@ impl PickerSession {
         let columns = self.entries_per_row().max(1);
         let stride = self.view_stride();
         // 大图内容有顶部 padding（列表行从 0 开始）：换算同一口径。
-        let top_offset = match self.view_mode {
+        let top_offset = match self.view_mode() {
             PickerViewMode::Icons => icon_grid_geometry::ICON_GRID_CONTENT_PADDING,
             PickerViewMode::List | PickerViewMode::Columns => 0.0,
         };
@@ -294,7 +319,7 @@ impl PickerSession {
         let last = ((last_row + 1) * columns)
             .saturating_sub(1)
             .min(self.rows.len() - 1);
-        let edge = match self.view_mode {
+        let edge = match self.view_mode() {
             PickerViewMode::Icons => icon_grid_geometry::thumbnail_edge(ICON_GRID_EDGE),
             PickerViewMode::List | PickerViewMode::Columns => LIST_THUMBNAIL_EDGE,
         };
@@ -343,7 +368,7 @@ mod tests {
             .iter()
             .map(|&(name, kind)| {
                 DirectoryEntry::new(
-                    session.directory.join(name),
+                    session.current_directory().unwrap().join(name),
                     kind,
                     EntryMetadata::default(),
                     false,
@@ -353,7 +378,7 @@ mod tests {
             })
             .collect();
         session.apply_scan(DirectoryScanResult {
-            directory: session.directory.clone(),
+            location: session.location().clone(),
             outcome: Ok(DirectoryScanOutcome { entries }),
         });
         session
@@ -411,10 +436,12 @@ mod tests {
         // 展开第一行后同时选中深层子条目与根级条目。
         session.update(SessionMessage::EntryExpandToggled { index: 0 });
         session.apply_scan(DirectoryScanResult {
-            directory: session.directory.join("branch"),
+            location: BrowserLocation::Directory(
+                session.current_directory().unwrap().join("branch"),
+            ),
             outcome: Ok(DirectoryScanOutcome {
                 entries: vec![DirectoryEntry::new(
-                    session.directory.join("branch/deep.txt"),
+                    session.current_directory().unwrap().join("branch/deep.txt"),
                     FileKind::File,
                     EntryMetadata::default(),
                     false,
@@ -436,7 +463,7 @@ mod tests {
             shift: false,
         });
         assert_eq!(session.selected_paths().len(), 2);
-        let deep_path = session.directory.join("branch/deep.txt");
+        let deep_path = session.current_directory().unwrap().join("branch/deep.txt");
 
         session.update(SessionMessage::ViewModeSelected {
             mode: PickerViewMode::Icons,
@@ -446,7 +473,10 @@ mod tests {
         assert_eq!(session.rows().len(), 3);
         let paths = session.selected_paths();
         assert!(!paths.contains(&deep_path));
-        assert_eq!(paths, vec![session.directory.join("kept.txt")]);
+        assert_eq!(
+            paths,
+            vec![session.current_directory().unwrap().join("kept.txt")]
+        );
     }
 
     #[test]
@@ -645,10 +675,10 @@ mod tests {
             ctrl: false,
             shift: false,
         });
-        assert_eq!(session.target_directory(), session.directory());
+        assert_eq!(session.target_directory(), session.current_directory());
         assert_eq!(
             session.selected_paths(),
-            vec![session.directory.join("a.txt")]
+            vec![session.current_directory().unwrap().join("a.txt")]
         );
     }
 }

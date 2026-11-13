@@ -120,7 +120,7 @@ mod tests {
             }
         ));
         assert_eq!(browser.pane().tabs.len(), 2);
-        assert_eq!(browser.tab().current_dir, directory);
+        assert_eq!(browser.tab().current_directory().unwrap(), directory);
     }
 
     #[test]
@@ -177,13 +177,14 @@ mod tests {
         assert_eq!(axis, expected_axis);
         assert_eq!(first, BrowserPaneId::PRIMARY);
         assert_eq!(active, second);
-        assert_eq!(browser.tab().current_dir, directory);
+        assert_eq!(browser.tab().current_directory().unwrap(), directory);
         assert_eq!(
             browser
                 .pane_by_id(second)
                 .expect("split destination pane")
                 .tab()
-                .current_dir,
+                .current_directory()
+                .unwrap(),
             directory
         );
     }

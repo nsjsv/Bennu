@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use bennu_sidebar::BrowserLocation;
 use bennu_theme::address_bar::{AddressBarTransition, AddressEditingSession};
 use tokio::sync::oneshot;
 
@@ -37,10 +38,10 @@ pub(crate) use columns::{COLUMNS_SCALE, MIN_LANE_WIDTH};
 /// 行几何唯一真值再导出：view 层行高/间距与各子模块同源（模块本身
 /// 保持私有，只放行这两个常量）。
 pub(crate) use expansion::{LIST_ROW_HEIGHT, LIST_ROW_SPACING};
-pub(crate) use scan::{scan_listing, scan_trash_listing, DirectoryListing, DirectoryScanResult};
+pub(crate) use scan::{scan_location, DirectoryListing, DirectoryScanResult};
 pub(crate) use scrollbar::SessionScrollRegion;
 use scrollbar::{ScrollbarViewport, SmoothScrollState};
-pub(crate) use sidebar::{load_sidebar_data, PickerSidebarState, SidebarEntryId, TRASH_DIRECTORY};
+pub(crate) use sidebar::{load_sidebar_data, PickerSidebarState, SidebarEntryId};
 
 pub(crate) use address_editing::PathSuggestionDirection;
 use columns::ColumnsState;
@@ -60,7 +61,7 @@ pub(crate) struct PickerSession {
     title: Option<String>,
     filters: Vec<FilterRule>,
     active_filter: PickerFilter,
-    directory: PathBuf,
+    location: BrowserLocation,
     listing: DirectoryListing,
     /// 已展开目录：路径 → 子内容。导航切换目录时整体清空。
     expansions: HashMap<PathBuf, ExpansionState>,
@@ -90,8 +91,8 @@ pub(crate) struct PickerSession {
     /// 编辑会话 id 发号器：防陈旧凭据的会话身份部分，跨进入/退出
     /// 单调递增，旧会话的迟到回信永远对不上新会话。
     next_address_editing_session_id: u64,
-    /// 目录访问历史；`history_position` 指向当前目录（侧键后退/前进）。
-    history: Vec<PathBuf>,
+    /// 位置访问历史（含回收站）；`history_position` 指向当前位置（侧键后退/前进）。
+    history: Vec<BrowserLocation>,
     history_position: usize,
     /// 滚轮 Mos 惯性状态机与业务视口缓存：逻辑见子模块 scrollbar。
     smooth_scroll: SmoothScrollState,
@@ -102,8 +103,9 @@ pub(crate) struct PickerSession {
     shift_pressed: bool,
     /// 行内缩略图调度状态（就绪 LRU/在途/排队/失败 backoff），见子模块。
     thumbnails: thumbnails::SessionThumbnailState,
-    /// 视图模式（列表/大图/多栏）；跨窗口记忆见 location 子模块。
-    view_mode: PickerViewMode,
+    /// 用户选的视图（列表/大图/多栏），跨窗口记忆的也是它；实际显示方式见
+    /// `view_mode()`。
+    chosen_view_mode: PickerViewMode,
     /// 多栏视图状态（栏链/焦点栏/逐栏光标选中），语义见 columns 子模块。
     columns: ColumnsState,
     /// 视图切换后待揭示的主选中项：切换瞬间视口缓存仍是旧视图几何，
@@ -150,7 +152,7 @@ impl PickerSession {
             title: title.clone(),
             filters: filters.clone(),
             active_filter,
-            directory: start_directory.clone(),
+            location: BrowserLocation::Directory(start_directory.clone()),
             listing: DirectoryListing::Pending,
             expansions: HashMap::new(),
             rows: Vec::new(),
@@ -165,15 +167,15 @@ impl PickerSession {
             address_bar_transition: None,
             home_dir: file_core::app_dirs::home_dir(),
             next_address_editing_session_id: 0,
-            history: vec![start_directory.clone()],
+            history: vec![BrowserLocation::Directory(start_directory.clone())],
             history_position: 0,
             smooth_scroll: SmoothScrollState::default(),
             scroll_viewports: HashMap::new(),
             sidebar: PickerSidebarState::default(),
             shift_pressed: false,
             thumbnails: thumbnails::SessionThumbnailState::new(::thumbnails::thumbnail_cache_dir()),
-            view_mode,
-            columns: ColumnsState::new(start_directory.clone()),
+            chosen_view_mode: view_mode,
+            columns: ColumnsState::new(start_directory),
             pending_view_switch_reveal: None,
             reply: Some(reply),
         }
@@ -183,8 +185,13 @@ impl PickerSession {
         &self.request_path
     }
 
-    pub(crate) fn directory(&self) -> &Path {
-        &self.directory
+    pub(crate) fn location(&self) -> &BrowserLocation {
+        &self.location
+    }
+
+    /// 正在看的真实目录；回收站没有。
+    pub(crate) fn current_directory(&self) -> Option<&Path> {
+        self.location.directory()
     }
 
     pub(crate) fn listing(&self) -> &DirectoryListing {
@@ -260,18 +267,16 @@ impl PickerSession {
         }
     }
 
-    /// 确认按钮是否可点：SaveFile 在回收站视图下禁止确认（无法把
-    /// 文件保存进 trash:/// 虚拟路径）。
+    /// 确认按钮是否可点：保存要有目标目录，回收站不是目录，不能保存进去。
     pub(crate) fn can_confirm(&self) -> bool {
         match &self.kind {
             PickerKind::OpenFile { .. } => !self.selected_paths().is_empty(),
             PickerKind::SaveFile { .. } => {
-                !self.is_trash_view() && !self.name_input.trim().is_empty()
+                self.target_directory().is_some() && !self.name_input.trim().is_empty()
             }
-            // 名字列表是调用方资产：非空即可确认，目标目录仅在回收站
-            // 视图下禁用（与 SaveFile 同一守卫语义）。
+            // 名字列表是调用方资产：非空即可确认，与 SaveFile 同样要有目标目录。
             PickerKind::SaveFiles { default_names } => {
-                !self.is_trash_view() && !default_names.is_empty()
+                self.target_directory().is_some() && !default_names.is_empty()
             }
         }
     }
@@ -280,7 +285,7 @@ impl PickerSession {
     pub(crate) fn begin(&mut self) -> Vec<SessionEffect> {
         vec![
             SessionEffect::LoadSidebarData,
-            SessionEffect::NavigateDirectory(self.directory.clone()),
+            SessionEffect::NavigateLocation(self.location.clone()),
         ]
     }
 
@@ -420,8 +425,8 @@ impl PickerSession {
     }
 
     pub(crate) fn apply_scan(&mut self, result: DirectoryScanResult) {
-        let DirectoryScanResult { directory, outcome } = result;
-        if directory == self.directory {
+        let DirectoryScanResult { location, outcome } = result;
+        if location == self.location {
             match outcome {
                 Ok(scan) => {
                     self.listing = DirectoryListing::Ready(scan.entries);
@@ -438,6 +443,9 @@ impl PickerSession {
             return;
         }
         // 展开节点扫描：结果按路径回填；失败的展开自动收起。
+        let BrowserLocation::Directory(directory) = location else {
+            return;
+        };
         if let Some(state) = self.expansions.get_mut(&directory) {
             match outcome {
                 Ok(scan) => state.listing = DirectoryListing::Ready(scan.entries),
@@ -467,7 +475,7 @@ impl PickerSession {
         // 键盘光标与悬停同规则：行集变化后必须重新验证，越界回退到
         // 最近合法行（空列表清空）。
         self.keyboard_nav.revalidate_cursor(self.rows.len());
-        if self.view_mode == PickerViewMode::Columns {
+        if self.view_mode() == PickerViewMode::Columns {
             // 多栏：行集重建同样要重验逐栏光标/选中/悬停索引。
             self.columns_revalidate_lane_indices();
         }
@@ -563,10 +571,10 @@ impl PickerSession {
             || self.smooth_scroll.is_active()
     }
 
-    /// 进入目录：派生状态（选中、锚点、悬停、展开、地址编辑）的统一
+    /// 进入位置：派生状态（选中、锚点、悬停、展开、地址编辑）的统一
     /// 清理点。历史栈由调用方负责记录。
-    fn enter_directory(&mut self, directory: PathBuf) -> SessionEffect {
-        self.directory = directory;
+    fn enter_location(&mut self, location: BrowserLocation) -> SessionEffect {
+        self.location = location;
         self.listing = DirectoryListing::Pending;
         self.expansions.clear();
         self.rows.clear();
@@ -591,18 +599,18 @@ impl PickerSession {
         // cancel 无会话时是 no-op，与主软件 navigate_to 首行的
         // cancel_address_editing 同一收口。
         self.cancel_address_editing();
-        SessionEffect::NavigateDirectory(self.directory.clone())
+        SessionEffect::NavigateLocation(self.location.clone())
     }
 
-    /// 导航到新目录：记录历史（截断前进分支）并进入。
-    fn begin_navigation(&mut self, directory: PathBuf) -> SessionEffect {
-        if directory == self.directory {
+    /// 导航到新位置：记录历史（截断前进分支）并进入。
+    fn begin_navigation(&mut self, location: BrowserLocation) -> SessionEffect {
+        if location == self.location {
             return SessionEffect::None;
         }
         self.history.truncate(self.history_position + 1);
-        self.history.push(directory.clone());
+        self.history.push(location.clone());
         self.history_position = self.history.len() - 1;
-        self.enter_directory(directory)
+        self.enter_location(location)
     }
 
     fn navigate_back(&mut self) -> SessionEffect {
@@ -611,7 +619,7 @@ impl PickerSession {
         }
         self.history_position -= 1;
         let target = self.history[self.history_position].clone();
-        self.enter_directory(target)
+        self.enter_location(target)
     }
 
     fn navigate_forward(&mut self) -> SessionEffect {
@@ -620,21 +628,19 @@ impl PickerSession {
         }
         self.history_position += 1;
         let target = self.history[self.history_position].clone();
-        self.enter_directory(target)
+        self.enter_location(target)
     }
 
     fn navigate_up(&mut self) -> SessionEffect {
-        // 回收站虚拟视图没有父目录（"trash:///" 的 parent 是空路径）。
-        if self.is_trash_view() {
-            return SessionEffect::None;
-        }
-        let Some(parent) = self.directory.parent().map(Path::to_path_buf) else {
+        // 回收站不是目录，没有上级。
+        let Some(parent) = self
+            .current_directory()
+            .and_then(Path::parent)
+            .map(Path::to_path_buf)
+        else {
             return SessionEffect::None;
         };
-        if parent == self.directory {
-            return SessionEffect::None;
-        }
-        self.begin_navigation(parent)
+        self.begin_navigation(BrowserLocation::Directory(parent))
     }
 }
 

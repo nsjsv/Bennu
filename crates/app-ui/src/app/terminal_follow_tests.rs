@@ -15,7 +15,7 @@ use file_operations::CompletedTransfer;
 /// 列表视图：跟随目标就是标签当前目录（多栏视图改看悬停的栏）。
 fn list_tab(id: usize, directory: &str) -> BrowserTab {
     let mut tab = BrowserTab::directory(id, PathBuf::from(directory));
-    tab.view_mode = BrowserViewMode::List;
+    tab.choose_view_mode(BrowserViewMode::List);
     tab
 }
 
@@ -42,7 +42,7 @@ fn navigation_moves_the_followed_directory() {
 #[test]
 fn collapsed_panel_does_not_track_navigation() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().view_mode = BrowserViewMode::List;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::List);
 
     drop(browser.navigate_to(PathBuf::from("/workspace/b"), NavigationMode::KeepHistory));
 
@@ -82,7 +82,7 @@ fn activating_another_pane_retargets_the_terminal() {
 #[test]
 fn hovering_a_column_retargets_the_terminal() {
     let mut browser = browser_with_expanded_terminal("/workspace/a");
-    browser.tab_mut().view_mode = BrowserViewMode::Columns;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::Columns);
     assert_eq!(followed(&browser), None);
 
     drop(browser.handle_entry_hovered(PathBuf::from("/workspace/a/file.txt")));

@@ -4,6 +4,7 @@ use file_core::{DirectoryEntry, DirectoryScan, EntryMetadata, FileKind};
 
 use super::FileBrowser;
 use crate::config;
+use crate::model::BrowserLocation;
 use crate::model::{
     BrowserPaneId, BrowserViewMode, DirectoryExpansionLoadContext, ExpandedDirectory,
     ExpandedDirectoryLoadRequest, ExpandedDirectoryStatus, IconGridExpansionAnchor,
@@ -47,17 +48,17 @@ fn completed_root_rename_migrates_temporary_icon_grid_tree() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let root = PathBuf::from("/workspace/root");
     let renamed = PathBuf::from("/workspace/renamed");
-    browser.tab_mut().current_dir = PathBuf::from("/workspace");
-    browser.tab_mut().view_mode = BrowserViewMode::Icons;
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
+    browser.tab_mut().choose_view_mode(BrowserViewMode::Icons);
     browser.tab_mut().entries = vec![directory_entry("/workspace/root")].into();
     browser.icon_grid_expansion = Some(IconGridExpansionState::new(
         IconGridExpansionContext {
             pane_id: BrowserPaneId::PRIMARY,
-            current_dir: browser.tab().current_dir.clone(),
+            current_dir: browser.tab().current_directory().unwrap().to_path_buf(),
             session_id: IconGridExpansionSessionId::new(4),
         },
         IconGridExpansionAnchor {
-            parent_directory: browser.tab().current_dir.clone(),
+            parent_directory: browser.tab().current_directory().unwrap().to_path_buf(),
             path: root.clone(),
             index: 0,
         },
@@ -165,17 +166,17 @@ fn successful_trash_prunes_deleted_icon_grid_branch_before_reload() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let root = PathBuf::from("/workspace/root");
     let branch = PathBuf::from("/workspace/root/branch");
-    browser.tab_mut().current_dir = PathBuf::from("/workspace");
-    browser.tab_mut().view_mode = BrowserViewMode::Icons;
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
+    browser.tab_mut().choose_view_mode(BrowserViewMode::Icons);
     browser.tab_mut().entries = vec![directory_entry("/workspace/root")].into();
     let mut state = IconGridExpansionState::new(
         IconGridExpansionContext {
             pane_id: BrowserPaneId::PRIMARY,
-            current_dir: browser.tab().current_dir.clone(),
+            current_dir: browser.tab().current_directory().unwrap().to_path_buf(),
             session_id: IconGridExpansionSessionId::new(5),
         },
         IconGridExpansionAnchor {
-            parent_directory: browser.tab().current_dir.clone(),
+            parent_directory: browser.tab().current_directory().unwrap().to_path_buf(),
             path: root.clone(),
             index: 0,
         },

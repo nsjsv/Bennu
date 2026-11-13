@@ -6,6 +6,7 @@ use desktop_linux::{
 
 use super::*;
 use crate::config;
+use crate::model::BrowserLocation;
 use crate::network_connections::{
     NetworkConnectionCredentialFallback, NetworkConnectionEditorMode,
     NetworkConnectionMountCompletion,
@@ -446,7 +447,7 @@ fn pressing_mounted_network_connection_navigates_to_mount_path() {
     let command = browser.handle_network_connection_message(NetworkConnectionMessage::Pressed(id));
     drop(command);
 
-    assert_eq!(browser.tab().current_dir, mount_path);
+    assert_eq!(browser.tab().current_directory().unwrap(), mount_path);
     assert!(browser.network_connections.pending_actions.is_empty());
 }
 
@@ -760,7 +761,7 @@ fn mount_failure_sets_global_error_and_entry_error() {
 #[test]
 fn refresh_only_mount_success_does_not_navigate() {
     let (mut browser, id) = browser_with_connection();
-    browser.tab_mut().current_dir = PathBuf::from("/home/user");
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/home/user"));
     let mounted = mounted_connection(
         connection(),
         "/run/user/1000/gvfs/smb-share:server=server,share=share",
@@ -774,7 +775,10 @@ fn refresh_only_mount_success_does_not_navigate() {
         ));
     drop(command);
 
-    assert_eq!(browser.tab().current_dir, PathBuf::from("/home/user"));
+    assert_eq!(
+        browser.tab().current_directory().unwrap(),
+        PathBuf::from("/home/user")
+    );
     assert!(matches!(
         browser.network_connections.entry(&id).map(|entry| &entry.state),
         Some(NetworkMountState::Mounted(path))

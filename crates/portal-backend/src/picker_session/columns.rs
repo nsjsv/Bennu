@@ -317,7 +317,7 @@ impl PickerSession {
         self.columns.clear_selection_except(lane);
         self.columns.place_cursor(lane, index);
         self.columns_apply_click_semantics(lane, index, ctrl, shift, &entry);
-        if entry.kind == FileKind::Directory && !self.is_trash_view() {
+        if entry.kind == FileKind::Directory {
             self.columns_open_child(lane, entry.path.clone())
         } else {
             self.columns.truncate_after(lane);
@@ -359,9 +359,6 @@ impl PickerSession {
             return SessionEffect::None;
         };
         if entry.kind == FileKind::Directory {
-            if self.is_trash_view() {
-                return SessionEffect::None;
-            }
             return self.columns_open_child(lane, entry.path.clone());
         }
         match self.kind {
@@ -457,10 +454,12 @@ impl PickerSession {
     }
 
     /// 导航后重置栏链：面包屑/侧边栏/后退前进/地址栏统一在
-    /// `enter_directory` 收口到此。
+    /// `enter_location` 收口到此。回收站不显示成多栏，没有栏链可重置。
     pub(crate) fn columns_reset_for_navigation(&mut self) {
+        let Some(root) = self.current_directory().map(Path::to_path_buf) else {
+            return;
+        };
         let old_lane_count = self.columns.chain().len();
-        let root = self.directory.clone();
         self.columns.reset(root);
         self.invalidate_lane_viewports(0, old_lane_count);
     }
@@ -582,7 +581,7 @@ impl PickerSession {
         let Some(entry) = self.column_entry(lane, cursor) else {
             return SessionEffect::None;
         };
-        if entry.kind != FileKind::Directory || self.is_trash_view() {
+        if entry.kind != FileKind::Directory {
             return SessionEffect::None;
         }
         let directory = entry.path.clone();

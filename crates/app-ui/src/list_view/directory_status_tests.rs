@@ -4,6 +4,7 @@ use file_core::{DirectoryEntry, EntryMetadata, FileKind};
 
 use super::*;
 use crate::app::FileBrowser;
+use crate::model::BrowserLocation;
 use crate::model::{ExpandedDirectory, ExpandedDirectoryStatus};
 
 fn test_directory_entry(path: PathBuf) -> DirectoryEntry {
@@ -22,9 +23,9 @@ fn browser_with_expanded_directory(
     child_entries: Vec<DirectoryEntry>,
 ) -> FileBrowser {
     let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
     browser.tab_mut().directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
-    let expanded_path = browser.tab().current_dir.join("project");
+    let expanded_path = browser.tab().current_directory().unwrap().join("project");
     browser.tab_mut().entries = vec![test_directory_entry(expanded_path.clone())].into();
     browser.tab_mut().expanded_directories.insert(
         expanded_path,

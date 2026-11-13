@@ -1,16 +1,16 @@
 use std::path::{Path, PathBuf};
 
 use crate::app::FileBrowser;
-use crate::model::BrowserViewMode;
+use crate::model::{BrowserLocation, BrowserViewMode};
 
 impl FileBrowser {
     pub(crate) fn entry_paths_in_directory(&self, directory: &Path) -> Vec<PathBuf> {
         let tab = self.tab();
-        if directory == tab.current_dir.as_path() {
+        if tab.current_directory() == Some(directory) {
             return tab.entries.iter().map(|entry| entry.path.clone()).collect();
         }
 
-        if tab.view_mode == BrowserViewMode::Icons {
+        if tab.view_mode() == BrowserViewMode::Icons {
             return self
                 .icon_grid_expansion
                 .as_ref()
@@ -21,7 +21,7 @@ impl FileBrowser {
 
         crate::visible_entries::visible_child_paths(
             directory,
-            &tab.current_dir,
+            tab.current_directory(),
             &tab.entries,
             &tab.expanded_directories,
         )
@@ -33,14 +33,16 @@ impl FileBrowser {
     pub(super) fn range_selection_confined_to_directory(&self) -> bool {
         let tab = self.tab();
         matches!(
-            tab.view_mode,
+            tab.view_mode(),
             BrowserViewMode::Icons | BrowserViewMode::Columns
-        ) && !tab.is_trash_view
+        ) && tab.location != BrowserLocation::Trash
     }
 
     pub(super) fn visible_range_paths(&self, anchor: &Path, target: &Path) -> Vec<PathBuf> {
         let paths = if self.range_selection_confined_to_directory() {
-            let target_directory = target.parent().unwrap_or(self.tab().current_dir.as_path());
+            let Some(target_directory) = target.parent().or(self.tab().current_directory()) else {
+                return vec![target.to_path_buf()];
+            };
             if anchor.parent() != Some(target_directory) {
                 return vec![target.to_path_buf()];
             }
@@ -65,7 +67,7 @@ impl FileBrowser {
 
     pub(super) fn visible_entry_paths(&self) -> Vec<PathBuf> {
         let tab = self.tab();
-        match tab.view_mode {
+        match tab.view_mode() {
             BrowserViewMode::Icons => self
                 .pane_view(self.active_pane_id())
                 .map(|pane| {

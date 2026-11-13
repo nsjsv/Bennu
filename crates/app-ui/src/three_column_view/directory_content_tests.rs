@@ -4,6 +4,7 @@ use file_core::{DirectoryEntry, EntryMetadata, FileKind};
 
 use super::*;
 use crate::app::FileBrowser;
+use crate::model::BrowserLocation;
 use crate::model::{ExpandedDirectory, ExpandedDirectoryStatus};
 
 fn test_entry(path: PathBuf, kind: FileKind) -> DirectoryEntry {
@@ -14,7 +15,7 @@ fn test_entry(path: PathBuf, kind: FileKind) -> DirectoryEntry {
 fn current_column_distinguishes_pending_empty_and_streamed_entries() {
     let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
     let pane_id = browser.active_pane_id();
-    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
     browser.tab_mut().entries = Vec::new().into();
     browser.tab_mut().directory_collection_phase =
         crate::model::DirectoryCollectionPhase::Discovering;
@@ -22,7 +23,7 @@ fn current_column_distinguishes_pending_empty_and_streamed_entries() {
     assert!(matches!(
         column_content(
             browser.pane_view(pane_id).expect("active pane"),
-            &browser.tab().current_dir,
+            browser.tab().current_directory().unwrap(),
         ),
         ColumnContent::Pending
     ));
@@ -31,7 +32,7 @@ fn current_column_distinguishes_pending_empty_and_streamed_entries() {
     assert!(matches!(
         column_content(
             browser.pane_view(pane_id).expect("active pane"),
-            &browser.tab().current_dir,
+            browser.tab().current_directory().unwrap(),
         ),
         ColumnContent::Empty
     ));
@@ -39,13 +40,17 @@ fn current_column_distinguishes_pending_empty_and_streamed_entries() {
     browser.tab_mut().directory_collection_phase =
         crate::model::DirectoryCollectionPhase::Discovering;
     browser.tab_mut().entries = vec![test_entry(
-        browser.tab().current_dir.join("streamed.txt"),
+        browser
+            .tab()
+            .current_directory()
+            .unwrap()
+            .join("streamed.txt"),
         FileKind::File,
     )]
     .into();
     let ColumnContent::Entries(entries) = column_content(
         browser.pane_view(pane_id).expect("active pane"),
-        &browser.tab().current_dir,
+        browser.tab().current_directory().unwrap(),
     ) else {
         panic!("streamed entries must be visible before load completion");
     };
@@ -56,9 +61,9 @@ fn current_column_distinguishes_pending_empty_and_streamed_entries() {
 fn child_column_preserves_pending_loaded_and_failed_mappings() {
     let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
     let pane_id = browser.active_pane_id();
-    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
     browser.tab_mut().directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
-    let directory = browser.tab().current_dir.join("project");
+    let directory = browser.tab().current_directory().unwrap().join("project");
     browser.tab_mut().entries = vec![test_entry(directory.clone(), FileKind::Directory)].into();
     browser.tab_mut().expanded_directories.insert(
         directory.clone(),

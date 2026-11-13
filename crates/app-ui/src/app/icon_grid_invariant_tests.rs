@@ -4,6 +4,7 @@ use file_core::{DirectoryEntry, EntryMetadata, FileKind};
 
 use super::FileBrowser;
 use crate::config;
+use crate::model::BrowserLocation;
 use crate::model::{
     BrowserPaneId, BrowserViewMode, DirectoryExpansionLoadContext, DirectoryLoadFailure,
     ExpandedDirectory, ExpandedDirectoryLoadRequest, ExpandedDirectoryStatus,
@@ -89,8 +90,8 @@ fn icon_request(
 
 fn browser_with_root(root_contents: ExpandedDirectory) -> FileBrowser {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = PathBuf::from("/workspace");
-    browser.tab_mut().view_mode = BrowserViewMode::Icons;
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
+    browser.tab_mut().choose_view_mode(BrowserViewMode::Icons);
     browser.tab_mut().entries = vec![entry("/workspace/root", FileKind::Directory)].into();
     browser.icon_grid_expansion = Some(IconGridExpansionState::new(
         root_context(),

@@ -196,6 +196,8 @@ pub(crate) struct FileBrowser {
     trash_batch_rescan_pending: bool,
     pub(crate) hovered_entry: Option<PathBuf>,
     pub(crate) hovered_sidebar: Option<PathBuf>,
+    /// 侧栏的回收站行不是路径，悬停单独记。
+    pub(crate) sidebar_trash_hovered: bool,
     pub(crate) hovered_sidebar_device: Option<StorageDeviceId>,
     pub(crate) hovered_network_connection: Option<NetworkConnectionId>,
     cursor_paste_directory: Option<PathBuf>,
@@ -423,7 +425,7 @@ pub(crate) struct FileBrowser {
 
 #[derive(Debug, Clone)]
 struct PaneIconGridViewport {
-    directory: PathBuf,
+    location: crate::model::BrowserLocation,
     viewport: IconGridViewport,
 }
 
@@ -578,7 +580,7 @@ impl FileBrowser {
         let mut search_service = SearchServiceState::new();
         let initial_search_service_request = search_service.begin_initial_status_request();
         let mut initial_tab = BrowserTab::directory(0, placeholder_dir.clone());
-        initial_tab.view_mode = initial_view_mode;
+        initial_tab.choose_view_mode(initial_view_mode);
         initial_tab.directory_order_phase = DirectoryOrderPhase::Ready {
             field: options.sort_field,
             direction: options.sort_direction,
@@ -598,6 +600,7 @@ impl FileBrowser {
             trash_batch_rescan_pending: false,
             hovered_entry: None,
             hovered_sidebar: None,
+            sidebar_trash_hovered: false,
             hovered_sidebar_device: None,
             hovered_network_connection: None,
             cursor_paste_directory: None,

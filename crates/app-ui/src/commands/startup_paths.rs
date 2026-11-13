@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 use iced::Task;
 
 use crate::model::{
-    BrowserSessionSnapshot, ClassifiedStartupSession, Message, SavedBrowserSession,
-    StartupDirectoryAvailability, StartupDirectoryValidationRequest, StartupSessionPlan,
-    StartupSessionPlanRequest, StartupSessionSource,
+    BrowserLocation, BrowserSessionSnapshot, ClassifiedStartupSession, Message,
+    SavedBrowserSession, StartupDirectoryAvailability, StartupDirectoryValidationRequest,
+    StartupSessionPlan, StartupSessionPlanRequest, StartupSessionSource,
 };
 
 pub(crate) fn startup_directory_validation_command(
@@ -101,8 +101,10 @@ async fn validate_startup_directory(directory: PathBuf) -> StartupDirectoryAvail
 
 fn validated_browser_session(mut session: BrowserSessionSnapshot) -> BrowserSessionSnapshot {
     for pane in &mut session.panes {
-        pane.tabs
-            .retain(|tab| tab.is_trash_view || directory_is_usable(&tab.directory));
+        pane.tabs.retain(|tab| match &tab.location {
+            BrowserLocation::Directory(directory) => directory_is_usable(directory),
+            BrowserLocation::Trash => true,
+        });
     }
     session.panes.retain(|pane| !pane.tabs.is_empty());
     session
@@ -127,11 +129,10 @@ mod tests {
         StartupSessionPlanRequest { home, source }
     }
 
-    fn tab_session(id: usize, directory: PathBuf, is_trash_view: bool) -> BrowserTabSession {
+    fn tab_session(id: usize, location: BrowserLocation) -> BrowserTabSession {
         BrowserTabSession {
             id,
-            directory,
-            is_trash_view,
+            location,
             selected: None,
             selected_paths: HashSet::new(),
             deepest_open_column_directory: None,
@@ -192,26 +193,32 @@ mod tests {
                 BrowserPaneSession {
                     id: BrowserPaneId::PRIMARY,
                     tabs: vec![
-                        tab_session(1, valid_directory.clone(), false),
-                        tab_session(2, missing_directory.clone(), false),
+                        tab_session(1, BrowserLocation::Directory(valid_directory.clone())),
+                        tab_session(2, BrowserLocation::Directory(missing_directory.clone())),
                     ],
                     active_tab_id: 2,
                     column_browser_viewport: ColumnBrowserViewport::default(),
                     column_viewports: HashMap::new(),
+                    list_viewport: None,
                 },
                 BrowserPaneSession {
                     id: BrowserPaneId(1),
-                    tabs: vec![tab_session(3, missing_directory.clone(), true)],
+                    tabs: vec![tab_session(3, BrowserLocation::Trash)],
                     active_tab_id: 3,
                     column_browser_viewport: ColumnBrowserViewport::default(),
                     column_viewports: HashMap::new(),
+                    list_viewport: None,
                 },
                 BrowserPaneSession {
                     id: BrowserPaneId(2),
-                    tabs: vec![tab_session(4, missing_directory, false)],
+                    tabs: vec![tab_session(
+                        4,
+                        BrowserLocation::Directory(missing_directory),
+                    )],
                     active_tab_id: 4,
                     column_browser_viewport: ColumnBrowserViewport::default(),
                     column_viewports: HashMap::new(),
+                    list_viewport: None,
                 },
             ],
             layout: BrowserPaneLayout::Single {
@@ -229,8 +236,11 @@ mod tests {
 
         assert_eq!(session.panes.len(), 2);
         assert_eq!(session.panes[0].tabs.len(), 1);
-        assert_eq!(session.panes[0].tabs[0].directory, valid_directory);
-        assert!(session.panes[1].tabs[0].is_trash_view);
+        assert_eq!(
+            session.panes[0].tabs[0].location,
+            BrowserLocation::Directory(valid_directory)
+        );
+        assert_eq!(session.panes[1].tabs[0].location, BrowserLocation::Trash);
     }
 
     #[test]

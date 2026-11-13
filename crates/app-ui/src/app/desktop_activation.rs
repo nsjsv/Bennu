@@ -145,7 +145,7 @@ impl FileBrowser {
                 DesktopTabPlacement::Append => {
                     let mut tab =
                         BrowserTab::directory(tab_merge.tab_id, tab_merge.directory.clone());
-                    tab.view_mode = pane.tab().view_mode;
+                    tab.choose_view_mode(pane.tab().chosen_view_mode());
                     replace_tab_selection(&mut tab, &tab_merge.selected_paths);
                     pane.tabs.push(tab);
                     appended_tab_ids.push(tab_merge.tab_id);
@@ -201,8 +201,7 @@ fn desktop_workspace_merge_plan(
                     .iter()
                     .find(|tab| {
                         tab.id == active_tab_id
-                            && !tab.is_trash_view
-                            && tab.current_dir == requested_tab.directory()
+                            && tab.current_directory() == Some(requested_tab.directory())
                     })
                     .map(|tab| (pane.id, tab))
             })
@@ -210,9 +209,7 @@ fn desktop_workspace_merge_plan(
                 panes.iter().find_map(|pane| {
                     pane.tabs
                         .iter()
-                        .find(|tab| {
-                            !tab.is_trash_view && tab.current_dir == requested_tab.directory()
-                        })
+                        .find(|tab| tab.current_directory() == Some(requested_tab.directory()))
                         .map(|tab| (pane.id, tab))
                 })
             });
@@ -345,8 +342,14 @@ mod tests {
         assert_eq!(browser.tab().selected_paths, HashSet::from([selected]));
         let primary_pane = browser.pane_by_id(primary).expect("primary pane");
         assert_eq!(primary_pane.tabs.len(), 2);
-        assert_eq!(primary_pane.tabs[0].current_dir, active_directory);
-        assert_eq!(primary_pane.tabs[1].current_dir, missing_directory);
+        assert_eq!(
+            primary_pane.tabs[0].current_directory().unwrap(),
+            active_directory
+        );
+        assert_eq!(
+            primary_pane.tabs[1].current_directory().unwrap(),
+            missing_directory
+        );
         assert_eq!(primary_pane.tabs[1].id, 6);
         assert_eq!(browser.next_tab_id, 7);
     }
@@ -397,7 +400,10 @@ mod tests {
         assert_eq!(tabs.len(), 2);
         assert_eq!(tabs[0].selected, Some(selected.clone()));
         assert_eq!(tabs[0].selected_paths, HashSet::from([selected]));
-        assert_eq!(tabs[1].current_dir, untouched_before.current_dir);
+        assert_eq!(
+            tabs[1].current_directory().unwrap(),
+            untouched_before.current_directory().unwrap()
+        );
         assert_eq!(tabs[1].back_stack, untouched_before.back_stack);
     }
 }

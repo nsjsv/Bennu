@@ -6,6 +6,7 @@ use file_core::{DirectoryEntry, EntryMetadata, FileKind};
 
 use super::FileBrowser;
 use crate::config;
+use crate::model::BrowserLocation;
 use crate::model::{
     BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, FileDragPhase, PaneDragState,
     PaneDropTarget, SplitAxis, SplitRegion, TabDragMode, TabDragState, TabSplitTarget,
@@ -29,7 +30,7 @@ fn assert_ownership_invariants(browser: &FileBrowser) {
 
 fn tab_with_selection(id: usize, directory: &str, selected_name: &str) -> BrowserTab {
     let mut tab = BrowserTab::directory(id, PathBuf::from(directory));
-    let selected = tab.current_dir.join(selected_name);
+    let selected = tab.current_directory().unwrap().join(selected_name);
     tab.entries = Arc::new(vec![DirectoryEntry::new(
         selected.clone(),
         FileKind::File,
@@ -76,7 +77,10 @@ fn switching_tabs_leaves_the_background_tab_state_untouched() {
 
     drop(browser.select_tab(1));
 
-    assert_eq!(browser.tab().current_dir, PathBuf::from("/b"));
+    assert_eq!(
+        browser.tab().current_directory().unwrap(),
+        PathBuf::from("/b")
+    );
     assert_eq!(selected_of(browser.tab()), Some(&PathBuf::from("/b/y.txt")));
     let background = &browser.pane().tabs[0];
     assert_eq!(selected_of(background), Some(&PathBuf::from("/a/x.txt")));
@@ -147,9 +151,9 @@ fn splitting_the_only_tab_clones_it_without_sharing_mutable_state() {
 
     // 改动克隆出来的标签不能影响原窗格：两份状态各有各的所有者。
     browser.tab_mut().selected = None;
-    browser.tab_mut().current_dir = PathBuf::from("/elsewhere");
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/elsewhere"));
     let original = browser.pane_by_id(BrowserPaneId::PRIMARY).unwrap().tab();
-    assert_eq!(original.current_dir, PathBuf::from("/a"));
+    assert_eq!(original.current_directory().unwrap(), PathBuf::from("/a"));
     assert_eq!(selected_of(original), Some(&PathBuf::from("/a/x.txt")));
     assert_ownership_invariants(&browser);
 }

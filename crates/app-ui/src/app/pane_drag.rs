@@ -1,12 +1,11 @@
-use std::path::Path;
-
 use iced::{event, Point, Task};
 
 use super::{FileBrowser, POINTER_DRAG_ACTIVATION_DISTANCE};
 use crate::app::panes::SplitOverlayBounds;
 use crate::model::{
-    BrowserPaneId, BrowserPaneLayout, FileDragNativeDndState, FileDragPhase, Message,
-    PaneDragPointerPress, PaneDragState, PaneDropTarget, SelectionMarqueePhase, SplitRegion,
+    BrowserLocation, BrowserPaneId, BrowserPaneLayout, FileDragNativeDndState, FileDragPhase,
+    Message, PaneDragPointerPress, PaneDragState, PaneDropTarget, SelectionMarqueePhase,
+    SplitRegion,
 };
 
 const PANE_DROP_CENTER_FRACTION: f32 = 0.28;
@@ -22,11 +21,6 @@ struct PaneDragContentBounds {
 struct PaneDragPromotion {
     source_pane_id: BrowserPaneId,
     phase: FileDragPhase,
-}
-
-pub(crate) struct PaneDragPreview<'a> {
-    pub(crate) directory: &'a Path,
-    pub(crate) is_trash_view: bool,
 }
 
 impl FileBrowser {
@@ -151,17 +145,14 @@ impl FileBrowser {
         }
     }
 
-    pub(crate) fn pane_drag_preview(&self) -> Option<PaneDragPreview<'_>> {
+    /// 拖动中的窗格当前标签所在的位置，供拖动预览显示标题。
+    pub(crate) fn pane_drag_preview(&self) -> Option<&BrowserLocation> {
         let drag = self.pane_drag.as_ref()?;
         if !drag.is_dragging() {
             return None;
         }
 
-        let tab = self.pane_by_id(drag.source_pane_id)?.tab();
-        Some(PaneDragPreview {
-            directory: tab.current_dir.as_path(),
-            is_trash_view: tab.is_trash_view,
-        })
+        Some(&self.pane_by_id(drag.source_pane_id)?.tab().location)
     }
 
     pub(crate) fn pane_drag_overlay_bounds(&self) -> Option<SplitOverlayBounds> {

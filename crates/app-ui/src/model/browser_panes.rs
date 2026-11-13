@@ -3,8 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use file_core::{
-    DirectoryDiscovery, DirectoryEntry, DirectoryMetadataRequirement, ResolvedEntryChange,
-    SortDirection, SortField, TrashEntry,
+    DirectoryDiscovery, DirectoryEntry, ResolvedEntryChange, SortDirection, SortField, TrashEntry,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -21,7 +20,14 @@ use super::path_migration::{
     migrate_path_list, migrate_path_map_keys, migrate_path_set,
     retain_optional_path_outside_subtree,
 };
-use super::{displayed_address_directory, TabDropDestination};
+use super::{displayed_address_directory, BrowserLocation, TabDropDestination};
+
+mod load_requests;
+pub(crate) use load_requests::{
+    DirectoryExpansionLoadContext, DirectoryLoadFailure, DirectoryLoadRequest,
+    DirectoryMetadataLoadContext, DirectoryMetadataLoadFailure, DirectoryMetadataLoadRequest,
+    ExpandedDirectoryLoadRequest,
+};
 
 pub(crate) type DirectoryEntrySnapshot = Arc<Vec<DirectoryEntry>>;
 
@@ -56,80 +62,6 @@ impl ListExpansionFollowSessionId {
     pub(crate) fn new(value: u64) -> Self {
         Self(value)
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DirectoryLoadRequest {
-    pub(crate) pane_id: BrowserPaneId,
-    pub(crate) path: PathBuf,
-    pub(crate) generation: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) enum DirectoryMetadataLoadContext {
-    Root {
-        pane_id: BrowserPaneId,
-        path: PathBuf,
-        collection_generation: u64,
-    },
-    Expanded {
-        pane_id: BrowserPaneId,
-        path: PathBuf,
-        load_generation: u64,
-    },
-}
-
-impl DirectoryMetadataLoadContext {
-    pub(crate) fn pane_id(&self) -> BrowserPaneId {
-        match self {
-            Self::Root { pane_id, .. } | Self::Expanded { pane_id, .. } => *pane_id,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DirectoryMetadataLoadRequest {
-    pub(crate) context: DirectoryMetadataLoadContext,
-    pub(crate) request_generation: u64,
-    pub(crate) requirement: DirectoryMetadataRequirement,
-    pub(crate) targets: Vec<usize>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum DirectoryMetadataLoadFailure {
-    Cancelled,
-    ReadFailed(String),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum DirectoryExpansionLoadContext {
-    BrowserTree {
-        pane_id: BrowserPaneId,
-    },
-    ListFollow {
-        pane_id: BrowserPaneId,
-        tab_id: usize,
-        current_dir: PathBuf,
-        session_id: ListExpansionFollowSessionId,
-    },
-    IconGrid {
-        pane_id: BrowserPaneId,
-        current_dir: PathBuf,
-        session_id: IconGridExpansionSessionId,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ExpandedDirectoryLoadRequest {
-    pub(crate) context: DirectoryExpansionLoadContext,
-    pub(crate) path: PathBuf,
-    pub(crate) generation: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum DirectoryLoadFailure {
-    DirectoryUnavailable { message: String },
-    ReadFailed { message: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -287,7 +219,11 @@ pub(crate) struct BrowserPane {
     pub(crate) active_tab_id: usize,
     pub(crate) directory_loading_placeholder: Option<DirectoryLoadingPlaceholder>,
     pub(crate) column_browser_viewport: ColumnBrowserViewport,
+    /// 多栏视图每一栏的滚动位置，键是那一栏的目录。
     pub(crate) column_viewports: HashMap<PathBuf, ColumnViewport>,
+    /// 列表视图主区域的滚动位置。主区域可能是回收站，没有目录可当键，所以与
+    /// 多栏各栏分开存。
+    pub(crate) list_viewport: Option<ColumnViewport>,
     pub(crate) directory_load_generation: u64,
     pub(crate) directory_load_cancel: Option<CancellationToken>,
 }
@@ -327,6 +263,7 @@ impl BrowserPane {
             directory_loading_placeholder: None,
             column_browser_viewport: ColumnBrowserViewport::default(),
             column_viewports: HashMap::new(),
+            list_viewport: None,
             directory_load_generation: 0,
             directory_load_cancel: None,
         }
@@ -415,8 +352,7 @@ impl BrowserPane {
     ) {
         let tab = self.tab_mut();
         tab.forget_history_into(unavailable_directory, &parent_directory);
-        tab.current_dir = parent_directory;
-        tab.is_trash_view = false;
+        tab.location = BrowserLocation::Directory(parent_directory);
         tab.trash_entries.clear();
         tab.invalidate_cached_directory_tree();
         tab.directory_collection_phase = DirectoryCollectionPhase::Discovering;
@@ -453,6 +389,7 @@ impl BrowserPane {
         self.directory_loading_placeholder = None;
         self.column_browser_viewport = ColumnBrowserViewport::default();
         self.column_viewports.clear();
+        self.list_viewport = None;
     }
 }
 
@@ -461,8 +398,7 @@ impl BrowserPane {
 #[derive(Debug, Clone)]
 pub(crate) struct BrowserTab {
     pub(crate) id: usize,
-    pub(crate) current_dir: PathBuf,
-    pub(crate) is_trash_view: bool,
+    pub(crate) location: BrowserLocation,
     pub(crate) entries: DirectoryEntrySnapshot,
     pub(crate) directory_discovery: Option<DirectoryDiscovery>,
     pub(crate) trash_entries: Vec<TrashEntry>,
@@ -471,7 +407,8 @@ pub(crate) struct BrowserTab {
     pub(crate) selection_anchor: Option<PathBuf>,
     pub(crate) deepest_open_column_directory: Option<PathBuf>,
     pub(crate) expanded_directories: HashMap<PathBuf, ExpandedDirectory>,
-    pub(crate) view_mode: BrowserViewMode,
+    /// 用户给这个标签选的视图，会话保存的也是它；实际显示方式见 `view_mode()`。
+    chosen_view_mode: BrowserViewMode,
     pub(crate) back_stack: Vec<PathBuf>,
     pub(crate) forward_stack: Vec<PathBuf>,
     pub(crate) directory_collection_phase: DirectoryCollectionPhase,
@@ -492,26 +429,58 @@ pub(crate) struct PendingDirectoryChanges {
 }
 
 impl BrowserTab {
-    pub(crate) fn file_drop_destination(&self) -> TabDropDestination {
-        if self.is_trash_view {
-            return TabDropDestination::Trash;
-        }
+    /// 正在看的真实目录；回收站没有。
+    pub(crate) fn current_directory(&self) -> Option<&Path> {
+        self.location.directory()
+    }
 
-        TabDropDestination::Directory(
-            displayed_address_directory(
-                &self.current_dir,
-                self.view_mode,
-                self.deepest_open_column_directory.as_ref(),
-            )
-            .to_path_buf(),
-        )
+    /// 这个位置实际的显示方式。分栏要沿一串目录展开，回收站不是目录，选了分栏也按列表显示。
+    pub(crate) fn view_mode(&self) -> BrowserViewMode {
+        self.view_mode_when_chosen(self.chosen_view_mode)
+    }
+
+    /// 在这个位置选了 `chosen` 时实际的显示方式。
+    pub(crate) fn view_mode_when_chosen(&self, chosen: BrowserViewMode) -> BrowserViewMode {
+        match (&self.location, chosen) {
+            (BrowserLocation::Trash, BrowserViewMode::Columns) => BrowserViewMode::List,
+            (_, chosen) => chosen,
+        }
+    }
+
+    pub(crate) fn chosen_view_mode(&self) -> BrowserViewMode {
+        self.chosen_view_mode
+    }
+
+    pub(crate) fn choose_view_mode(&mut self, view_mode: BrowserViewMode) {
+        self.chosen_view_mode = view_mode;
+    }
+
+    pub(crate) fn file_drop_destination(&self) -> TabDropDestination {
+        match &self.location {
+            BrowserLocation::Trash => TabDropDestination::Trash,
+            BrowserLocation::Directory(directory) => TabDropDestination::Directory(
+                displayed_address_directory(
+                    directory,
+                    self.view_mode(),
+                    self.deepest_open_column_directory.as_ref(),
+                )
+                .to_path_buf(),
+            ),
+        }
     }
 
     pub(crate) fn directory(id: usize, directory: PathBuf) -> Self {
+        Self::at(id, BrowserLocation::Directory(directory))
+    }
+
+    pub(crate) fn trash(id: usize) -> Self {
+        Self::at(id, BrowserLocation::Trash)
+    }
+
+    pub(crate) fn at(id: usize, location: BrowserLocation) -> Self {
         Self {
             id,
-            current_dir: directory,
-            is_trash_view: false,
+            location,
             entries: empty_directory_entry_snapshot(),
             directory_discovery: None,
             trash_entries: Vec::new(),
@@ -520,7 +489,7 @@ impl BrowserTab {
             selection_anchor: None,
             deepest_open_column_directory: None,
             expanded_directories: HashMap::new(),
-            view_mode: BrowserViewMode::Columns,
+            chosen_view_mode: BrowserViewMode::Columns,
             back_stack: Vec::new(),
             forward_stack: Vec::new(),
             directory_collection_phase: DirectoryCollectionPhase::Discovering,
@@ -566,18 +535,13 @@ impl BrowserTab {
             .map(|pending| pending.changes)
             .unwrap_or_default();
         // 队列只属于标签仍在显示的目录；导航走开后遗留的队列在此清掉。
-        let current_dir = &self.current_dir;
+        let current_directory = self.location.directory();
         let expanded_directories = &self.expanded_directories;
         self.pending_changes.retain(|queued_directory, _| {
-            queued_directory == current_dir || expanded_directories.contains_key(queued_directory)
+            current_directory == Some(queued_directory.as_path())
+                || expanded_directories.contains_key(queued_directory)
         });
         changes
-    }
-
-    pub(crate) fn trash(id: usize) -> Self {
-        let mut tab = Self::directory(id, super::trash_location_path());
-        tab.is_trash_view = true;
-        tab
     }
 
     /// 目录消失后让历史不再指向它（及其子树），也不让「后退」落回 `landing`
@@ -618,7 +582,11 @@ impl BrowserTab {
         &mut self,
         migrations: &[CompletedPathMigration],
     ) -> TabMigrationEffect {
-        let original_directory = self.current_dir.clone();
+        migrate_path_list(&mut self.back_stack, migrations);
+        migrate_path_list(&mut self.forward_stack, migrations);
+        let Some(original_directory) = self.location.directory().map(Path::to_path_buf) else {
+            return TabMigrationEffect::default();
+        };
         let migrated_directory = path_after_completed_migrations(&original_directory, migrations);
         let directory_was_migrated = migrated_directory != original_directory;
         let directory_tree_was_touched =
@@ -628,7 +596,7 @@ impl BrowserTab {
         let migration_has_source_in_directory_tree =
             completed_migrations_have_source_in_directory_tree(&original_directory, migrations);
 
-        self.current_dir = migrated_directory;
+        self.location = BrowserLocation::Directory(migrated_directory);
         let cached_tree = if !directory_was_migrated && migration_left_directory_tree {
             self.invalidate_cached_directory_tree();
             CachedTreeEffect::Invalidated
@@ -638,8 +606,6 @@ impl BrowserTab {
         } else {
             CachedTreeEffect::Kept
         };
-        migrate_path_list(&mut self.back_stack, migrations);
-        migrate_path_list(&mut self.forward_stack, migrations);
         TabMigrationEffect {
             load_interrupted: directory_was_migrated || directory_tree_was_touched,
             cached_tree,
@@ -687,15 +653,12 @@ impl BrowserTab {
             .as_ref()
             .is_some_and(|directory| directory.starts_with(unavailable_directory))
         {
+            let current_directory = self.location.directory();
             self.deepest_open_column_directory =
                 unavailable_directory.parent().and_then(|parent| {
-                    if parent == self.current_dir.as_path()
-                        || !parent.starts_with(&self.current_dir)
-                    {
-                        None
-                    } else {
-                        Some(parent.to_path_buf())
-                    }
+                    let outside_column_chain = current_directory
+                        .is_none_or(|current| parent == current || !parent.starts_with(current));
+                    (!outside_column_chain).then(|| parent.to_path_buf())
                 });
         }
         for expanded_directory in self.expanded_directories.values_mut() {

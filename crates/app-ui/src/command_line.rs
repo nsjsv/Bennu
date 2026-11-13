@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use desktop_linux::{LocalRequestError, LocalWorkspaceRequest};
 
 use crate::model::{
-    BrowserPaneId, BrowserPaneLayout, BrowserPaneSession, BrowserSessionSnapshot,
+    BrowserLocation, BrowserPaneId, BrowserPaneLayout, BrowserPaneSession, BrowserSessionSnapshot,
     BrowserTabSession, BrowserViewMode, ColumnBrowserViewport,
 };
 
@@ -75,8 +75,7 @@ impl ExplicitWorkspace {
             .enumerate()
             .map(|(id, tab)| BrowserTabSession {
                 id,
-                directory: tab.directory().to_path_buf(),
-                is_trash_view: false,
+                location: BrowserLocation::Directory(tab.directory().to_path_buf()),
                 selected: tab.selected_paths().first().cloned(),
                 selected_paths: tab.selected_paths().iter().cloned().collect(),
                 deepest_open_column_directory: None,
@@ -93,6 +92,7 @@ impl ExplicitWorkspace {
                 active_tab_id: 0,
                 column_browser_viewport: ColumnBrowserViewport::default(),
                 column_viewports: HashMap::new(),
+                list_viewport: None,
             }],
             layout: BrowserPaneLayout::Single {
                 active: BrowserPaneId::PRIMARY,
@@ -274,6 +274,7 @@ mod tests {
         parse_arguments, ApplicationLaunchRequest, CommandLineAction, CommandLineError,
         ExplicitWorkspace, HELP_TEXT,
     };
+    use crate::model::BrowserLocation;
     use crate::model::{BrowserPaneId, BrowserPaneLayout, BrowserViewMode};
 
     fn parse(
@@ -502,7 +503,10 @@ mod tests {
             assert_eq!(session.panes.len(), 1);
             assert_eq!(session.panes[0].active_tab_id, 0);
             assert_eq!(session.panes[0].tabs.len(), 1);
-            assert_eq!(session.panes[0].tabs[0].directory, directory);
+            assert_eq!(
+                session.panes[0].tabs[0].location,
+                BrowserLocation::Directory(directory.clone())
+            );
             assert_eq!(session.panes[0].tabs[0].selected.as_ref(), Some(&file));
             assert!(session.panes[0].tabs[0].selected_paths.contains(&file));
             assert_eq!(session.panes[0].tabs[0].view_mode, view_mode);

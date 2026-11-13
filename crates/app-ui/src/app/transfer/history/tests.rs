@@ -330,7 +330,7 @@ fn opening_a_file_record_selects_it_in_a_new_tab_or_says_it_is_gone() {
     drop(browser.handle_transfer_message(TransferMessage::HistoryRecordOpened(present)));
 
     assert_eq!(browser.pane().tabs.len(), tabs_before + 1);
-    assert_eq!(browser.tab().current_dir, dir.path());
+    assert_eq!(browser.tab().current_directory().unwrap(), dir.path());
     assert!(browser.tab().selected_paths.contains(&file));
 
     let gone = record_with(

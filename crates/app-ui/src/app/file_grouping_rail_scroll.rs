@@ -66,8 +66,7 @@ impl FileBrowser {
                     return Task::none();
                 };
                 let viewport_height = pane
-                    .column_viewports
-                    .get(pane.current_dir)
+                    .list_viewport
                     .map(|viewport| viewport.height.max(1.0))
                     .unwrap_or(self.main_window_height);
                 let content_height = crate::list_view::LIST_HEADER_HEIGHT
@@ -150,6 +149,7 @@ mod tests {
     use crate::icon_grid_geometry::{row_height, ICON_GRID_CONTENT_PADDING};
     use crate::icon_grid_layout::ICON_GRID_GROUP_HEADER_HEIGHT;
     use crate::list_view::{LIST_GROUP_HEADER_HEIGHT, LIST_HEADER_HEIGHT, LIST_ROW_HEIGHT};
+    use crate::model::BrowserLocation;
     use crate::model::{BrowserPaneId, BrowserViewMode, FileGroupingMode, Message};
     use crate::thumbnail_cache::ColumnViewport;
 
@@ -168,8 +168,8 @@ mod tests {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
         let root = PathBuf::from("/workspace");
         let pane_id = BrowserPaneId::PRIMARY;
-        browser.tab_mut().view_mode = BrowserViewMode::List;
-        browser.tab_mut().current_dir = root.clone();
+        browser.tab_mut().choose_view_mode(BrowserViewMode::List);
+        browser.tab_mut().location = BrowserLocation::Directory(root.clone());
         browser.tab_mut().entries = Arc::new(vec![
             file_entry("/workspace/a.txt"),
             file_entry("/workspace/z.txt"),
@@ -180,16 +180,13 @@ mod tests {
 
     #[test]
     fn rail_target_message_scrolls_list_and_writes_back_viewport_state() {
-        let (mut browser, root, pane_id) = grouped_list_browser();
+        let (mut browser, _, pane_id) = grouped_list_browser();
         // 行流:[组头A(32), a(46), 组头Z(32), z(46)],内容 156 + 表头 32;
         // 视口高 100 时可支撑的最大偏移 = 188 - 100 = 88。
-        browser.pane_mut().column_viewports.insert(
-            root.clone(),
-            ColumnViewport {
-                offset_y: 0.0,
-                height: 100.0,
-            },
-        );
+        browser.pane_mut().list_viewport = Some(ColumnViewport {
+            offset_y: 0.0,
+            height: 100.0,
+        });
 
         drop(browser.update(Message::FileGroupingRailTargetSelected {
             pane: pane_id,
@@ -198,7 +195,7 @@ mod tests {
         // 组A顶点 0 + 表头留量 32 = 32;ListScrolled 同款状态写入必须发生
         // (scroll_to 不回发 on_scroll,高亮与滚动条靠这次回写活过来)。
         assert_eq!(
-            browser.pane().column_viewports.get(&root).unwrap().offset_y,
+            browser.pane().list_viewport.unwrap().offset_y,
             LIST_HEADER_HEIGHT
         );
 
@@ -209,16 +206,13 @@ mod tests {
         }));
         let max_offset =
             LIST_HEADER_HEIGHT + (LIST_GROUP_HEADER_HEIGHT + LIST_ROW_HEIGHT) * 2.0 - 100.0;
-        assert_eq!(
-            browser.pane().column_viewports.get(&root).unwrap().offset_y,
-            max_offset
-        );
+        assert_eq!(browser.pane().list_viewport.unwrap().offset_y, max_offset);
     }
 
     #[test]
     fn rail_target_message_scrolls_icon_grid_and_writes_back_viewport_state() {
         let (mut browser, root, pane_id) = grouped_list_browser();
-        browser.tab_mut().view_mode = BrowserViewMode::Icons;
+        browser.tab_mut().choose_view_mode(BrowserViewMode::Icons);
         // 预置网格视口(高度 120):IconGridScrolled 的状态写入出口。
         drop(browser.handle_icon_grid_scrolled(pane_id, 0.0, 600.0, 120.0));
 
@@ -240,7 +234,7 @@ mod tests {
             .icon_grid_viewports
             .get(&pane_id)
             .expect("icon grid viewport recorded");
-        assert_eq!(state.directory, root);
+        assert_eq!(state.location, BrowserLocation::Directory(root));
         assert_eq!(state.viewport.offset_y, expected);
     }
 }

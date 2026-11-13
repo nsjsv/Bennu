@@ -9,7 +9,7 @@ use iced::Task;
 
 use super::FileBrowser;
 use crate::appearance::subtle_border_color;
-use crate::model::{FileDragGestureId, Message};
+use crate::model::{BrowserLocation, FileDragGestureId, Message};
 use crate::wayland_drag_icon::{
     file_drag_display_name, file_drag_group_summary_text, render_wayland_file_drag_icon,
     FileDragIconEntry, FileDragPillPalette,
@@ -138,7 +138,7 @@ impl FileBrowser {
         &mut self,
         paths: Vec<PathBuf>,
     ) -> WaylandFileDragRequest {
-        if self.tab().is_trash_view || paths.is_empty() {
+        if self.tab().location == BrowserLocation::Trash || paths.is_empty() {
             return WaylandFileDragRequest::Unavailable;
         }
         // 包内成员是应用内虚拟路径,外部应用拿到的只是一串不存在的

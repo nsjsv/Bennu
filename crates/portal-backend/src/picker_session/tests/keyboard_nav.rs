@@ -255,11 +255,11 @@ fn cursor_revalidates_after_row_set_shrinks() {
 
     // 扫描回填只剩 2 行：光标回退到最近合法行。
     session.apply_scan(DirectoryScanResult {
-        directory: session.directory().to_path_buf(),
+        location: session.location().clone(),
         outcome: Ok(DirectoryScanOutcome {
             entries: vec![
                 file_core::entry::DirectoryEntry::new(
-                    session.directory().join("only.txt"),
+                    session.current_directory().unwrap().join("only.txt"),
                     FileKind::File,
                     file_core::entry::EntryMetadata::default(),
                     false,
@@ -267,7 +267,7 @@ fn cursor_revalidates_after_row_set_shrinks() {
                     false,
                 ),
                 file_core::entry::DirectoryEntry::new(
-                    session.directory().join("second.txt"),
+                    session.current_directory().unwrap().join("second.txt"),
                     FileKind::File,
                     file_core::entry::EntryMetadata::default(),
                     false,

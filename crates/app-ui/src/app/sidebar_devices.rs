@@ -12,8 +12,9 @@ use crate::sidebar_devices::{
 
 impl FileBrowser {
     pub(crate) fn sidebar_device_is_selected(&self, id: &StorageDeviceId) -> bool {
-        self.sidebar_devices
-            .selected_device_id(&self.tab().current_dir)
+        self.tab()
+            .current_directory()
+            .and_then(|directory| self.sidebar_devices.selected_device_id(directory))
             .is_some_and(|selected_id| selected_id == id)
     }
 

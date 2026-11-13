@@ -15,7 +15,7 @@ use iced::{stream, Task};
 use tokio_util::sync::CancellationToken;
 
 use super::FileBrowser;
-use crate::model::Message;
+use crate::model::{BrowserLocation, Message};
 
 /// 校验代际号的全局计数器:跨面板实例单调递增,保证迟到消息永不串扰。
 static NEXT_CHECKSUM_GENERATION: AtomicU64 = AtomicU64::new(1);
@@ -271,7 +271,7 @@ impl FileBrowser {
     }
 
     fn open_checksum(&mut self) -> Task<Message> {
-        if self.tab().is_trash_view {
+        if self.tab().location == BrowserLocation::Trash {
             return Task::none();
         }
         let files: Vec<PathBuf> = self

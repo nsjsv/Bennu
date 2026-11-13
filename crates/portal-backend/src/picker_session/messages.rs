@@ -127,7 +127,7 @@ pub(crate) enum SessionMessage {
     SidebarLocationPressed {
         path: std::path::PathBuf,
     },
-    /// 点击垃圾桶行：进入 trash:/// 虚拟视图。
+    /// 点击垃圾桶行：进入回收站。
     SidebarTrashPressed,
     SidebarDevicePressed {
         id: desktop_linux::StorageDeviceId,

@@ -6,6 +6,7 @@ use iced::{keyboard, Point, Rectangle};
 
 use super::*;
 use crate::config;
+use crate::model::BrowserLocation;
 use crate::model::{
     AddressEditingSession, AddressEditingSessionId, BatchRenameMessage, ColumnEntryBounds,
     DirectoryLoadRequest, PaneAddressEditingSession, SelectionMarquee, SelectionMarqueePhase,
@@ -26,9 +27,9 @@ fn entry(path: &str, kind: FileKind) -> DirectoryEntry {
 
 fn browser_with_entries(entries: Vec<DirectoryEntry>) -> FileBrowser {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
     browser.tab_mut().entries = entries.into();
-    browser.tab_mut().view_mode = BrowserViewMode::Icons;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::Icons);
     browser.tab_mut().directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
     browser
 }

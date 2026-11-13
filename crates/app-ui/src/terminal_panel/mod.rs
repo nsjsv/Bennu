@@ -228,8 +228,8 @@ impl FileBrowser {
     /// 多栏视图鼠标不在任何栏上时返回 None(保持现状,避免来回跳)。
     fn terminal_panel_follow_target(&self) -> Option<PathBuf> {
         let tab = self.tab();
-        if tab.view_mode != crate::model::BrowserViewMode::Columns {
-            return Some(tab.current_dir.clone());
+        if tab.view_mode() != crate::model::BrowserViewMode::Columns {
+            return tab.current_directory().map(std::path::Path::to_path_buf);
         }
         self.pointer_hovered_column_directory()
     }
@@ -288,8 +288,12 @@ impl FileBrowser {
         }
     }
 
+    /// 新终端从当前目录起步；回收站不是目录，从主目录起步。
     fn terminal_panel_spawn_directory(&self) -> PathBuf {
-        self.tab().current_dir.clone()
+        self.tab()
+            .current_directory()
+            .unwrap_or(&self.home_dir)
+            .to_path_buf()
     }
 
     /// 抽屉在内容栏里、左右各留 `PANEL_HORIZONTAL_PADDING`：标签条和终端画布都排在这个宽度里。

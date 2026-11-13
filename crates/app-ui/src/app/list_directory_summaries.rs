@@ -13,9 +13,9 @@ use super::FileBrowser;
 use crate::commands::load_list_directory_summary_command;
 use crate::formatting::{format_file_size, item_count_label};
 use crate::model::{
-    displayed_address_directory, BrowserPaneId, BrowserViewMode, ExpandedDirectory,
-    ExpandedDirectoryStatus, ListDirectorySizeDisplayMode, ListDirectorySummaryCache,
-    ListDirectorySummaryLoadRequest, Message, RecursiveTotalSize,
+    BrowserLocation, BrowserPaneId, BrowserViewMode, ExpandedDirectory, ExpandedDirectoryStatus,
+    ListDirectorySizeDisplayMode, ListDirectorySummaryCache, ListDirectorySummaryLoadRequest,
+    Message, RecursiveTotalSize,
 };
 use crate::thumbnail_cache::ColumnViewport;
 use file_operations::QueuedFileOperation;
@@ -46,7 +46,7 @@ impl FileBrowser {
         let sort_direction = self.options.sort_direction;
         for pane in &mut self.panes {
             let tab = pane.tab_mut();
-            if tab.view_mode != BrowserViewMode::List || tab.is_trash_view {
+            if tab.view_mode() != BrowserViewMode::List || tab.location == BrowserLocation::Trash {
                 continue;
             }
             resort_list_state_by_displayed_size(
@@ -91,14 +91,10 @@ impl FileBrowser {
         // 本漏斗调度，导航/增量失效/文件操作后的重算自动覆盖，无需新触发点。
         // "当前目录"与地址栏同源：多栏模式取最深打开的栏，而非栏浏览根。
         // 递归量对底栏无意义，显式关闭。
-        let displayed_dir = self.pane_view(pane_id).map(|pane| {
-            displayed_address_directory(
-                pane.current_dir,
-                pane.view_mode,
-                pane.deepest_open_column_directory,
-            )
-            .to_path_buf()
-        });
+        let displayed_dir = self
+            .pane_view(pane_id)
+            .and_then(|pane| pane.address_bar_directory())
+            .map(Path::to_path_buf);
         if let Some(displayed_dir) = displayed_dir {
             if let Some(request) = self
                 .list_directory_summary_cache
@@ -165,14 +161,10 @@ impl FileBrowser {
             .iter()
             .filter_map(|pane| {
                 let pane_view = self.pane_view(pane.id)?;
-                let displayed_dir = displayed_address_directory(
-                    pane_view.current_dir,
-                    pane_view.view_mode,
-                    pane_view.deepest_open_column_directory,
-                );
-                let summary = self
-                    .list_directory_summary_cache
-                    .summary_for_path(displayed_dir);
+                let summary = pane_view.address_bar_directory().and_then(|displayed_dir| {
+                    self.list_directory_summary_cache
+                        .summary_for_path(displayed_dir)
+                });
                 Some(crate::selection_summary::PaneStatusStripEntry {
                     selection: self.pane_selection_summary(pane_view),
                     visible_files_total_size_bytes: summary
@@ -221,7 +213,7 @@ impl FileBrowser {
     pub(super) fn prune_list_directory_summaries_to_live_roots(&mut self) {
         let mut roots: Vec<PathBuf> = Vec::new();
         for tab in self.panes.iter().flat_map(|pane| &pane.tabs) {
-            roots.push(tab.current_dir.clone());
+            roots.extend(tab.current_directory().map(Path::to_path_buf));
             roots.extend(tab.expanded_directories.keys().cloned());
         }
         self.list_directory_summary_cache.retain_roots(&roots);
@@ -392,7 +384,7 @@ impl FileBrowser {
             return Vec::new();
         };
         if pane.view_mode != BrowserViewMode::List
-            || pane.is_trash_view
+            || *pane.location == BrowserLocation::Trash
             || pane.directory_collection_phase.is_discovering()
         {
             return Vec::new();
@@ -401,7 +393,7 @@ impl FileBrowser {
         let list_density = self.user_config.list_view_density;
         let row_height = crate::list_view::ListGeometry::for_level(list_density).row_height;
         let range = viewport_override
-            .or_else(|| pane.column_viewports.get(pane.current_dir).copied())
+            .or(pane.list_viewport)
             .map(|viewport| {
                 crate::visible_entries::list_entry_range_for_viewport(
                     pane.entries,
@@ -446,7 +438,7 @@ impl FileBrowser {
         let Some(pane) = self.pane_view(pane_id) else {
             return Vec::new();
         };
-        if pane.view_mode != BrowserViewMode::List || pane.is_trash_view {
+        if pane.view_mode != BrowserViewMode::List || *pane.location == BrowserLocation::Trash {
             return Vec::new();
         }
 
@@ -742,10 +734,10 @@ mod tests {
     #[test]
     fn status_strip_reports_deepest_open_column_in_columns_mode() {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
-        browser.tab_mut().view_mode = BrowserViewMode::Columns;
+        browser.tab_mut().choose_view_mode(BrowserViewMode::Columns);
         let root = PathBuf::from("/workspace");
         let column = root.join("sub");
-        browser.tab_mut().current_dir = root.clone();
+        browser.tab_mut().location = BrowserLocation::Directory(root.clone());
         browser.tab_mut().deepest_open_column_directory = Some(column.clone());
         remember_summary(&mut browser, &root, 10, 1000);
         remember_summary(&mut browser, &column, 4, 256);
@@ -764,8 +756,8 @@ mod tests {
         let smaller = root.join("a");
         let larger = root.join("b");
 
-        browser.tab_mut().current_dir = root;
-        browser.tab_mut().view_mode = BrowserViewMode::List;
+        browser.tab_mut().location = BrowserLocation::Directory(root);
+        browser.tab_mut().choose_view_mode(BrowserViewMode::List);
         browser.options.sort_field = SortField::Size;
         browser.options.sort_direction = SortDirection::Ascending;
         browser.tab_mut().entries = vec![

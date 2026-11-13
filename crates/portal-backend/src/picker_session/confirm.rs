@@ -42,17 +42,6 @@ fn complete_extension(name: &str, rule: Option<&FilterRule>) -> String {
 
 impl PickerSession {
     pub(crate) fn confirm(&mut self) -> SessionEffect {
-        // 回收站视图禁止 SaveFile/SaveFiles 确认（can_confirm 已禁用
-        // 按钮，这里拦住输入框回车）：trash:/// 不是可写目标。
-        // OpenFile 照常确认，返回条目的真实载荷路径。
-        if self.is_trash_view()
-            && matches!(
-                self.kind,
-                PickerKind::SaveFile { .. } | PickerKind::SaveFiles { .. }
-            )
-        {
-            return SessionEffect::None;
-        }
         if !self.overwrite_targets.is_empty() {
             return self.confirm_overwrite();
         }
@@ -73,10 +62,15 @@ impl PickerSession {
                 if name.is_empty() {
                     return SessionEffect::None;
                 }
+                // 回收站不是目录，没有保存目标（can_confirm 已禁用按钮，这里拦住
+                // 输入框回车）。
+                let Some(directory) = self.target_directory() else {
+                    return SessionEffect::None;
+                };
                 // 补全在 join+exists 之前：覆盖确认文案与实际落盘名字
                 // 一致（"照片"+已有"照片.png"须触发覆盖确认）。
                 let completed = complete_extension(name, self.active_filter.active_rule());
-                let target = self.target_directory().join(completed);
+                let target = directory.join(completed);
                 if target.exists() {
                     self.overwrite_targets = vec![target];
                     return SessionEffect::None;
@@ -87,27 +81,30 @@ impl PickerSession {
                 if default_names.is_empty() {
                     return SessionEffect::None;
                 }
-                let targets = self.batch_targets(default_names);
+                let Some(targets) = self.batch_targets(default_names) else {
+                    return SessionEffect::None;
+                };
                 // 只把冲突子集送进覆盖确认；确认后仍返回全部目标（写
                 // 文件由调用方执行，覆盖确认只是 UI 层防误覆盖）。
                 let conflicts: Vec<PathBuf> = targets
-                    .into_iter()
+                    .iter()
                     .filter(|target| target.exists())
+                    .cloned()
                     .collect();
                 if !conflicts.is_empty() {
                     self.overwrite_targets = conflicts;
                     return SessionEffect::None;
                 }
-                self.reply_confirmed(self.batch_targets(default_names))
+                self.reply_confirmed(targets)
             }
         }
     }
 
     /// SaveFiles 的全部确认目标：目标目录 / 每个名字（名字列表是调用
-    /// 方资产，永不改写）。
-    fn batch_targets(&self, names: &[String]) -> Vec<PathBuf> {
-        let directory = self.target_directory().to_path_buf();
-        names.iter().map(|name| directory.join(name)).collect()
+    /// 方资产，永不改写）。回收站不是目录，没有目标。
+    fn batch_targets(&self, names: &[String]) -> Option<Vec<PathBuf>> {
+        let directory = self.target_directory()?;
+        Some(names.iter().map(|name| directory.join(name)).collect())
     }
 
     fn confirm_overwrite(&mut self) -> SessionEffect {
@@ -119,7 +116,10 @@ impl PickerSession {
             return SessionEffect::None;
         }
         let targets = match &self.kind {
-            PickerKind::SaveFiles { default_names } => self.batch_targets(default_names),
+            PickerKind::SaveFiles { default_names } => match self.batch_targets(default_names) {
+                Some(targets) => targets,
+                None => return SessionEffect::None,
+            },
             _ => conflicts,
         };
         self.reply_confirmed(targets)

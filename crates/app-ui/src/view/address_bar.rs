@@ -21,8 +21,8 @@ use crate::breadcrumb_drop_target_bounds::{
 };
 use crate::formatting::format_middle_ellipsized_text;
 use crate::model::{
-    breadcrumb_segments, BreadcrumbSegment, BreadcrumbSegmentKind, BrowserPaneId, FileDropTarget,
-    Message, ScrollbarRegion,
+    breadcrumb_segments, displayed_address_directory, BreadcrumbSegment, BreadcrumbSegmentKind,
+    BrowserLocation, BrowserPaneId, FileDropTarget, Message, ScrollbarRegion,
 };
 use crate::view::{icon_tone_style, themed_icon, IconTone};
 use bennu_preview::panel_text::readable_text;
@@ -42,27 +42,21 @@ pub(crate) fn address_bar<'a>(
     browser: &'a FileBrowser,
     pane: BrowserPaneView<'a>,
 ) -> Element<'a, Message> {
-    if pane.is_trash_view {
-        let content = container(
-            iced::widget::row![
-                themed_icon(IconSymbol::Trash, IconTone::Normal, BREADCRUMB_ICON_SIZE),
-                readable_text(tr!("Trash")),
-            ]
-            .spacing(8)
-            .align_y(iced::Alignment::Center),
-        )
-        .padding([7, 10])
-        .width(Length::Fill)
-        .height(Length::Fixed(ADDRESS_BAR_HEIGHT));
-
-        return address_bar_surface(content.into(), pane.id);
-    }
+    let address_bar_directory = match pane.location {
+        BrowserLocation::Directory(current_directory) => displayed_address_directory(
+            current_directory,
+            pane.view_mode,
+            pane.deepest_open_column_directory,
+        ),
+        BrowserLocation::Trash => return trash_address_bar(pane.id),
+    };
 
     let editing_fraction = pane.address_transition_fraction.clamp(0.0, 1.0);
     let breadcrumb_fraction = 1.0 - editing_fraction;
     let breadcrumbs = breadcrumb_layer(
         browser,
         pane,
+        address_bar_directory,
         breadcrumb_fraction,
         pane.address_editing.is_none(),
     );
@@ -96,6 +90,22 @@ pub(crate) fn address_bar<'a>(
     address_bar_surface(anchored_popup(anchor, popup), pane.id)
 }
 
+fn trash_address_bar<'a>(pane_id: BrowserPaneId) -> Element<'a, Message> {
+    let content = container(
+        iced::widget::row![
+            themed_icon(IconSymbol::Trash, IconTone::Normal, BREADCRUMB_ICON_SIZE),
+            readable_text(tr!("Trash")),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center),
+    )
+    .padding([7, 10])
+    .width(Length::Fill)
+    .height(Length::Fixed(ADDRESS_BAR_HEIGHT));
+
+    address_bar_surface(content.into(), pane_id)
+}
+
 fn address_bar_surface<'a>(
     content: Element<'a, Message>,
     pane_id: BrowserPaneId,
@@ -114,11 +124,12 @@ fn address_bar_surface<'a>(
 fn breadcrumb_layer<'a>(
     browser: &'a FileBrowser,
     pane: BrowserPaneView<'a>,
+    address_bar_directory: &Path,
     opacity: f32,
     registers_drop_targets: bool,
 ) -> Element<'a, Message> {
     let pane_id = pane.id;
-    let segments = breadcrumb_segments(pane.address_bar_directory(), &browser.home_dir);
+    let segments = breadcrumb_segments(address_bar_directory, &browser.home_dir);
     let active_drop_target = browser.file_drop_session.as_ref().and_then(|session| {
         match session.hovered_target.as_ref() {
             Some(FileDropTarget::Directory(directory)) => Some(directory.clone()),

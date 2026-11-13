@@ -10,8 +10,10 @@ use std::sync::Arc;
 
 use file_core::{DirectoryEntry, EntryMetadata, FileKind, SortDirection, SortField};
 
+use super::list_rows::push_root_transfer_rows;
 use super::*;
 use crate::config;
+use crate::model::BrowserLocation;
 use crate::model::{BrowserPaneId, ExpandedDirectory, ExpandedDirectoryStatus, FileGroupingMode};
 use crate::transfer_placeholders::TransferPlaceholder;
 
@@ -54,7 +56,7 @@ fn browser_with_entries(
     let mut user_config = config::default_user_config();
     user_config.file_grouping = grouping;
     let (mut browser, _) = FileBrowser::new(user_config);
-    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
     browser.tab_mut().entries = Arc::new(entries);
     browser
 }
@@ -87,22 +89,25 @@ fn build_rows_with_placeholders(
         crate::list_view::ListGeometry::for_level(browser.user_config().list_view_density)
             .row_height;
     let mut placeholder_cache = HashMap::new();
-    placeholder_cache.insert(browser.tab().current_dir.clone(), placeholders);
+    if let Some(directory) = browser.tab().current_directory() {
+        placeholder_cache.insert(directory.to_path_buf(), placeholders);
+    }
     let mut rows = Vec::new();
-    push_directory_transfer_rows(
+    push_root_transfer_rows(
         browser,
         pane,
-        &browser.tab().entries,
-        browser.tab().current_dir.as_path(),
-        transfer_sort_for_root(browser),
-        0,
-        1.0,
         row_height,
         &mut placeholder_cache,
         &mut 0,
         &mut rows,
     );
     rows
+}
+
+fn group_header_count(rows: &[ListTransferRow<'_>]) -> usize {
+    rows.iter()
+        .filter(|row| matches!(row, ListTransferRow::GroupHeader { .. }))
+        .count()
 }
 
 fn build_rows(browser: &crate::app::FileBrowser) -> Vec<ListTransferRow<'_>> {
@@ -173,7 +178,7 @@ fn expanded_directories_continue_the_visible_row_stripes() {
         file_entry("/workspace/f.txt"),
     ];
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
     browser.tab_mut().entries = Arc::new(root_children.to_vec());
     browser.tab_mut().expanded_directories.insert(
         PathBuf::from("/workspace/project"),
@@ -207,7 +212,7 @@ fn expansion_status_row_consumes_its_own_stripe() {
         file_entry("/workspace/f.txt"),
     ];
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
     browser.tab_mut().entries = Arc::new(root_children.to_vec());
     browser.tab_mut().expanded_directories.insert(
         PathBuf::from("/workspace/project"),
@@ -243,4 +248,45 @@ fn placeholder_conversion_keeps_its_row_stripe_stable() {
     );
     let merged_rows = build_rows(&merged_browser);
     assert_eq!(stripe_sequence(&merged_rows), [0, 1, 2]);
+}
+
+#[test]
+fn grouping_splits_the_root_level_but_never_expanded_children() {
+    // 根层 a.txt / b.txt 首字母不同，分成两组；展开的 project 里
+    // x.rs / y.rs 首字母也不同，但子目录平铺，不再多出组头。
+    let mut browser = browser_with_entries(
+        vec![
+            directory_entry("/workspace/project"),
+            file_entry("/workspace/a.txt"),
+            file_entry("/workspace/b.txt"),
+        ],
+        FileGroupingMode::NameInitial,
+    );
+    browser.tab_mut().expanded_directories.insert(
+        PathBuf::from("/workspace/project"),
+        expanded(
+            vec![
+                file_entry("/workspace/project/x.rs"),
+                file_entry("/workspace/project/y.rs"),
+            ],
+            ExpandedDirectoryStatus::Loaded,
+        ),
+    );
+
+    assert_eq!(group_header_count(&build_rows(&browser)), 2);
+}
+
+#[test]
+fn grouping_also_splits_a_root_that_is_not_a_directory() {
+    // 回收站的条目来自回收站列表，没有所在目录，但根层照样分组。
+    let mut browser = browser_with_entries(
+        vec![
+            file_entry("/origin-a/apple.txt"),
+            file_entry("/origin-b/banana.txt"),
+        ],
+        FileGroupingMode::NameInitial,
+    );
+    browser.tab_mut().location = BrowserLocation::Trash;
+
+    assert_eq!(group_header_count(&build_rows(&browser)), 2);
 }

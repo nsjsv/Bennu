@@ -22,7 +22,7 @@ use file_operations::QueuedTransfer;
 fn missing_viewport_schedules_list_thumbnails_for_full_window_height() {
     let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
     browser.main_window_height = 2000.0;
-    browser.tab_mut().view_mode = BrowserViewMode::List;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::List);
     let initial_rows = crate::list_view::list_initial_rows(
         browser.main_window_height,
         browser.user_config.list_view_density,
@@ -45,7 +45,7 @@ fn missing_viewport_schedules_list_thumbnails_for_full_window_height() {
 fn missing_viewport_schedules_column_thumbnails_for_full_window_height() {
     let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
     browser.main_window_height = 2000.0;
-    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
     browser.tab_mut().entries = (0..120)
         .map(|index| image_entry(&format!("/workspace/{index}.png")))
         .collect::<Vec<_>>()
@@ -68,8 +68,8 @@ fn missing_viewport_schedules_column_thumbnails_for_full_window_height() {
 fn finished_directory_load_starts_visible_thumbnails_at_once() {
     // 目录读完当场就把可见项缩略图送出去，不等固定延时（Nautilus 同）。
     let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
-    browser.tab_mut().view_mode = BrowserViewMode::List;
-    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().choose_view_mode(BrowserViewMode::List);
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
     let image = image_entry("/workspace/a.png");
     let generation = browser.pane().directory_load_generation;
 
@@ -152,7 +152,7 @@ fn icons_pane_rejects_thumbnail_results_from_hidden_persistent_expansions() {
     let (mut browser, _, _, image_entry) = browser_with_inactive_image_pane();
     let request = request_for_entry(&image_entry, LIST_THUMBNAIL_EDGE).expect("image request");
     let tab = browser.panes.last_mut().unwrap().tab_mut();
-    tab.view_mode = BrowserViewMode::Icons;
+    tab.choose_view_mode(BrowserViewMode::Icons);
     tab.entries = Vec::new().into();
     tab.expanded_directories.insert(
         PathBuf::from("/inactive/hidden"),
@@ -202,7 +202,7 @@ fn inactive_pane_thumbnail_range_schedules_svg_request() {
 #[test]
 fn list_scrolled_schedules_visible_list_thumbnail_requests() {
     let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
-    browser.tab_mut().view_mode = BrowserViewMode::List;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::List);
     browser.tab_mut().entries = vec![
         image_entry("/workspace/photo-0.png"),
         image_entry("/workspace/vector.svg"),
@@ -240,8 +240,8 @@ fn icon_grid_schedules_only_shared_visible_range_at_dynamic_edge() {
     let mut config = crate::config::default_user_config();
     config.icons_view_density = crate::config::ViewDensityLevel::from_icon_grid_size(112);
     let (mut browser, _) = FileBrowser::new(config);
-    browser.tab_mut().current_dir = PathBuf::from("/workspace");
-    browser.tab_mut().view_mode = BrowserViewMode::Icons;
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
+    browser.tab_mut().choose_view_mode(BrowserViewMode::Icons);
     browser.main_window_width = 500.0;
     browser.sidebar_width = 0.0;
     browser.tab_mut().entries = (0..100)
@@ -275,7 +275,7 @@ fn icon_grid_schedules_only_shared_visible_range_at_dynamic_edge() {
     browser.icon_grid_viewports.insert(
         BrowserPaneId::PRIMARY,
         PaneIconGridViewport {
-            directory: browser.tab().current_dir.clone(),
+            location: browser.tab().location.clone(),
             viewport,
         },
     );
@@ -319,17 +319,17 @@ fn icon_grid_schedules_visible_expansion_thumbnail_requests() {
     let root = PathBuf::from("/workspace/root");
     let main_image = image_entry("/workspace/main.png");
     let child_image = image_entry("/workspace/root/child.png");
-    browser.tab_mut().current_dir = PathBuf::from("/workspace");
-    browser.tab_mut().view_mode = BrowserViewMode::Icons;
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
+    browser.tab_mut().choose_view_mode(BrowserViewMode::Icons);
     browser.tab_mut().entries = vec![directory_entry(root.clone()), main_image.clone()].into();
     browser.icon_grid_expansion = Some(IconGridExpansionState::new(
         IconGridExpansionContext {
             pane_id: BrowserPaneId::PRIMARY,
-            current_dir: browser.tab().current_dir.clone(),
+            current_dir: browser.tab().current_directory().unwrap().to_path_buf(),
             session_id: IconGridExpansionSessionId::new(1),
         },
         IconGridExpansionAnchor {
-            parent_directory: browser.tab().current_dir.clone(),
+            parent_directory: browser.tab().current_directory().unwrap().to_path_buf(),
             path: root.clone(),
             index: 0,
         },
@@ -352,7 +352,7 @@ fn icon_grid_schedules_visible_expansion_thumbnail_requests() {
     browser.icon_grid_viewports.insert(
         BrowserPaneId::PRIMARY,
         PaneIconGridViewport {
-            directory: browser.tab().current_dir.clone(),
+            location: browser.tab().location.clone(),
             viewport: IconGridViewport {
                 offset_y: 0.0,
                 width: 500.0,
@@ -382,7 +382,7 @@ fn icon_grid_schedules_visible_expansion_thumbnail_requests() {
 #[test]
 fn network_list_thumbnails_default_to_cache_only_policy() {
     let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-    browser.tab_mut().view_mode = BrowserViewMode::List;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::List);
     browser.tab_mut().entries = vec![image_entry("/mnt/nas/photo.png")].into();
     mount_network_root(&mut browser, "/mnt/nas");
 
@@ -405,7 +405,7 @@ fn enabled_network_list_thumbnails_use_generate_policy() {
     let mut config = crate::config::default_user_config();
     config.network_list_thumbnail_downloads_enabled = true;
     let (mut browser, _) = FileBrowser::new(config);
-    browser.tab_mut().view_mode = BrowserViewMode::List;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::List);
     browser.tab_mut().entries = vec![image_entry("/mnt/nas/photo.png")].into();
     mount_network_root(&mut browser, "/mnt/nas");
 
@@ -528,7 +528,10 @@ fn drifted_thumbnail_result_requeues_with_current_entry_metadata() {
     browser.tab_mut().entries = vec![pending_image_entry("/workspace/photo.png")].into();
     let pending_entry = browser.tab().entries.first().unwrap().clone();
     let request = request_for_entry(&pending_entry, LIST_THUMBNAIL_EDGE).expect("pending request");
-    let scope = thumbnail_scope_for_pane_directory(BrowserPaneId::PRIMARY, Path::new("/workspace"));
+    let scope = thumbnail_scope_for_pane_location(
+        BrowserPaneId::PRIMARY,
+        BrowserLocation::Directory(PathBuf::from("/workspace")),
+    );
     browser.thumbnail_cache.enqueue_request_for_scope(
         request,
         ThumbnailPurpose::List,

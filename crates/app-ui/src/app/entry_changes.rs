@@ -128,11 +128,12 @@ impl FileBrowser {
             .visible_pane_ids()
             .into_iter()
             .filter_map(|pane_id| self.pane_by_id(pane_id))
-            .map(BrowserPane::tab)
-            .filter(|tab| !tab.is_trash_view);
+            .map(BrowserPane::tab);
         visible_tabs
             .flat_map(|tab| {
-                std::iter::once(tab.current_dir.clone())
+                tab.current_directory()
+                    .map(Path::to_path_buf)
+                    .into_iter()
                     .chain(tab.expanded_directories.keys().cloned())
             })
             .chain(self.icon_grid_expansion_watch_directories())
@@ -191,7 +192,7 @@ impl FileBrowser {
             .filter_map(|pane_id| self.pane_by_id(pane_id))
             .filter_map(|pane| {
                 let tab = pane.tab();
-                if tab.current_dir.as_path() == directory {
+                if tab.current_directory() == Some(directory) {
                     Some(tab.entries.as_slice())
                 } else {
                     tab.expanded_directories
@@ -261,7 +262,7 @@ fn place_in_current_directory(
     scan_generation: Option<u64>,
     sort_options: &file_core::ScanOptions,
 ) -> Option<Placement> {
-    if tab.is_trash_view || tab.current_dir != directory {
+    if tab.current_directory() != Some(directory) {
         return None;
     }
     if let Some(scan_generation) = scan_generation {
@@ -301,7 +302,9 @@ pub(super) fn replay_changes_queued_during_current_scan(
     scan_generation: u64,
     sort_options: &file_core::ScanOptions,
 ) {
-    let directory = tab.current_dir.clone();
+    let Some(directory) = tab.current_directory().map(Path::to_path_buf) else {
+        return;
+    };
     let changes = tab.take_changes_queued_during_scan(&directory, scan_generation);
     if !changes.is_empty() {
         apply_to_current_directory(tab, &changes, &removed_paths(&changes), sort_options);

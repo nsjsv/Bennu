@@ -431,8 +431,11 @@ pub(crate) enum Message {
     DropTargetReleased(BrowserPaneId, PathBuf),
     BlankAreaPressed(BrowserPaneId),
     BlankAreaRightClicked(BrowserPaneId, PathBuf),
+    TrashBlankAreaRightClicked(BrowserPaneId),
     SidebarHovered(PathBuf),
     SidebarHoverCleared(PathBuf),
+    SidebarTrashHovered,
+    SidebarTrashHoverCleared,
     SidebarPointerMoved(Point),
     SidebarPointerExited,
     SidebarBookmarkPressed(PathBuf),
@@ -876,6 +879,7 @@ pub(crate) struct StartupEnvironment {
 #[derive(Debug, Clone)]
 pub(crate) enum ContextMenuState {
     FileArea(FileContextMenuState),
+    Trash(TrashContextMenuState),
     Search(SearchContextMenuState),
     SearchEntryTypes(SearchEntryTypeMenuState),
     ListColumns(ListColumnMenuState),
@@ -888,6 +892,7 @@ impl ContextMenuState {
     pub(crate) fn position(&self) -> Point {
         match self {
             Self::FileArea(menu) => menu.position,
+            Self::Trash(menu) => menu.position,
             Self::Search(menu) => menu.position,
             Self::SearchEntryTypes(menu) => menu.position,
             Self::ListColumns(menu) => menu.position,
@@ -900,6 +905,7 @@ impl ContextMenuState {
     pub(crate) fn paste_directory(&self) -> Option<&PathBuf> {
         match self {
             Self::FileArea(menu) => Some(&menu.paste_directory),
+            Self::Trash(_) => None,
             Self::Search(_) => None,
             Self::SearchEntryTypes(_) => None,
             Self::ListColumns(_) => None,
@@ -908,6 +914,14 @@ impl ContextMenuState {
             Self::NetworkConnection(_) => None,
         }
     }
+}
+
+/// 回收站里的右键菜单。回收站不是目录，没有粘贴、新建的落点，只有恢复、彻底删除、
+/// 清空和属性。
+#[derive(Debug, Clone)]
+pub(crate) struct TrashContextMenuState {
+    pub(crate) target: Option<PathBuf>,
+    pub(crate) position: Point,
 }
 
 #[derive(Debug, Clone)]
@@ -981,11 +995,7 @@ pub(crate) struct SidebarBookmarkContextMenuState {
 
 // 纯搬移：SidebarLocation/SidebarLocationKind 已下沉 bennu-sidebar
 // （主程序与 portal 共用）；re-export 维持 crate::model::* 既有路径。
-pub(crate) use bennu_sidebar::{SidebarLocation, SidebarLocationKind};
-
-pub(crate) fn trash_location_path() -> PathBuf {
-    PathBuf::from("trash:///")
-}
+pub(crate) use bennu_sidebar::{BrowserLocation, SidebarLocation, SidebarLocationKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NavigationMode {

@@ -35,7 +35,7 @@ impl FileBrowser {
         let configured_startup_request = self.configured_startup_session_plan_request(&home);
         let explicit_startup_session = self
             .application_launch_request
-            .explicit_browser_session(self.tab().view_mode);
+            .explicit_browser_session(self.tab().chosen_view_mode());
         let startup_command = if let Some(session) = explicit_startup_session {
             self.apply_startup_session_plan(StartupSessionPlan::Session(session), &home)
         } else {
@@ -151,7 +151,8 @@ impl FileBrowser {
         self.options.include_hidden = user_config.show_hidden_files;
         self.options.sort_field = user_config.list_view_preferences.sort().field;
         self.options.sort_direction = user_config.list_view_preferences.sort().direction;
-        self.tab_mut().view_mode = user_config.browser_view_mode;
+        self.tab_mut()
+            .choose_view_mode(user_config.browser_view_mode);
         self.preview_size_limit_mib_inputs =
             crate::config::preview_size_limit_mib_inputs(&user_config.preview_size_limits);
         self.preview_size_limit_mib_errors = [const { None }; 7];
@@ -192,6 +193,7 @@ mod tests {
     use crate::app::FileBrowser;
     use crate::commands::classify_startup_session;
     use crate::config::{self, StartupLocationPolicy};
+    use crate::model::BrowserLocation;
     use crate::model::{
         BrowserPaneId, BrowserPaneLayout, BrowserPaneSession, BrowserSessionSnapshot,
         BrowserTabSession, BrowserViewMode, ClassifiedStartupSession, ColumnBrowserViewport,
@@ -295,8 +297,7 @@ mod tests {
     fn tab_session(id: usize, directory: PathBuf, view_mode: BrowserViewMode) -> BrowserTabSession {
         BrowserTabSession {
             id,
-            directory,
-            is_trash_view: false,
+            location: BrowserLocation::Directory(directory),
             selected: None,
             selected_paths: HashSet::new(),
             deepest_open_column_directory: None,
@@ -378,8 +379,8 @@ mod tests {
             temp_dir.path().join("state.sqlite"),
         )));
 
-        assert_eq!(browser.tab().current_dir, home);
-        assert!(!browser.tab().is_trash_view);
+        assert_eq!(browser.tab().current_directory().unwrap(), home);
+        assert_ne!(browser.tab().location, BrowserLocation::Trash);
         assert_eq!(browser.current_error(), None);
         assert!(browser.tab().directory_collection_phase.is_discovering());
         assert_eq!(browser.pane().tabs.len(), 1);
@@ -401,14 +402,14 @@ mod tests {
             user_config,
             temp_dir.path().join("state.sqlite"),
         )));
-        assert_ne!(browser.tab().current_dir, workspace);
+        assert_ne!(browser.tab().current_directory().unwrap(), workspace);
         let classified = classify_startup_session(
             browser.startup_session_plan_request(&home),
             SavedBrowserSession::Missing,
         );
         drop(browser.accept_startup_plan(classified));
 
-        assert_eq!(browser.tab().current_dir, workspace);
+        assert_eq!(browser.tab().current_directory().unwrap(), workspace);
         assert_eq!(browser.current_error(), None);
         assert!(browser.tab().directory_collection_phase.is_discovering());
     }
@@ -435,7 +436,7 @@ mod tests {
         );
         drop(browser.accept_startup_plan(classified));
 
-        assert_eq!(browser.tab().current_dir, home);
+        assert_eq!(browser.tab().current_directory().unwrap(), home);
         assert!(browser
             .current_error()
             .is_some_and(|error| error.contains("Could not open startup directory")));
@@ -456,6 +457,7 @@ mod tests {
                 active_tab_id: 0,
                 column_browser_viewport: ColumnBrowserViewport::default(),
                 column_viewports: HashMap::new(),
+                list_viewport: None,
             }],
             layout: BrowserPaneLayout::Single {
                 active: BrowserPaneId::PRIMARY,
@@ -476,7 +478,7 @@ mod tests {
             )),
         ))));
 
-        assert_eq!(browser.tab().current_dir, previous);
+        assert_eq!(browser.tab().current_directory().unwrap(), previous);
         assert!(browser.user_config.save_view_state);
     }
 
@@ -534,6 +536,10 @@ mod tests {
                             height: 240.0,
                         },
                     )]),
+                    list_viewport: Some(crate::thumbnail_cache::ColumnViewport {
+                        offset_y: 48.0,
+                        height: 320.0,
+                    }),
                 },
                 BrowserPaneSession {
                     id: BrowserPaneId(1),
@@ -541,6 +547,7 @@ mod tests {
                     active_tab_id: 3,
                     column_browser_viewport: ColumnBrowserViewport::default(),
                     column_viewports: HashMap::new(),
+                    list_viewport: None,
                 },
             ],
             layout: BrowserPaneLayout::Split {
@@ -569,8 +576,8 @@ mod tests {
             )),
         ))));
 
-        assert_eq!(browser.tab().current_dir, right);
-        assert_eq!(browser.tab().view_mode, BrowserViewMode::List);
+        assert_eq!(browser.tab().current_directory().unwrap(), right);
+        assert_eq!(browser.tab().view_mode(), BrowserViewMode::List);
         assert!(matches!(
             browser.pane_layout,
             BrowserPaneLayout::Split {
@@ -602,6 +609,12 @@ mod tests {
                 .map(|viewport| (viewport.offset_y, viewport.height)),
             Some((12.0, 240.0))
         );
+        assert_eq!(
+            left_pane
+                .list_viewport
+                .map(|viewport| (viewport.offset_y, viewport.height)),
+            Some((48.0, 320.0))
+        );
         assert!(browser.preview_engine.preview.is_none());
         assert!(browser.properties.is_none());
         assert!(browser.preview_engine.preview_window.is_none());
@@ -628,6 +641,7 @@ mod tests {
                 active_tab_id: 1,
                 column_browser_viewport: ColumnBrowserViewport::default(),
                 column_viewports: HashMap::new(),
+                list_viewport: None,
             }],
             layout: BrowserPaneLayout::Single {
                 active: BrowserPaneId::PRIMARY,
@@ -651,7 +665,7 @@ mod tests {
             )),
         ))));
 
-        assert_eq!(browser.tab().current_dir, home.clone());
+        assert_eq!(browser.tab().current_directory().unwrap(), home.clone());
         assert_eq!(
             browser.tab().deepest_open_column_directory.as_ref(),
             Some(&source)
@@ -711,6 +725,7 @@ mod tests {
                 active_tab_id: 0,
                 column_browser_viewport: ColumnBrowserViewport::default(),
                 column_viewports: HashMap::new(),
+                list_viewport: None,
             }],
             layout: BrowserPaneLayout::Single {
                 active: BrowserPaneId::PRIMARY,
@@ -818,7 +833,10 @@ mod tests {
             PathBuf::from("/tmp/state.sqlite"),
         )));
 
-        assert_eq!(browser.tab().current_dir, PathBuf::from("/home/user"));
+        assert_eq!(
+            browser.tab().current_directory().unwrap(),
+            PathBuf::from("/home/user")
+        );
         assert!(browser.network_connections.is_pending(&auto_id));
         assert!(!browser.network_connections.is_pending(&manual_id));
         assert!(matches!(

@@ -7,9 +7,10 @@ use super::global_error::GlobalErrorSource;
 use super::FileBrowser;
 use crate::commands::load_directory_command;
 use crate::model::{
-    BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserPaneSession, BrowserSessionSnapshot,
-    BrowserTab, BrowserTabSession, ClassifiedStartupSession, ColumnBrowserViewport, Message,
-    StartupSessionPlan, StartupSessionPlanRequest, StartupSessionSource,
+    BrowserLocation, BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserPaneSession,
+    BrowserSessionSnapshot, BrowserTab, BrowserTabSession, ClassifiedStartupSession,
+    ColumnBrowserViewport, Message, StartupSessionPlan, StartupSessionPlanRequest,
+    StartupSessionSource,
 };
 use crate::thumbnail_cache::ColumnViewport;
 
@@ -103,7 +104,7 @@ impl FileBrowser {
         // 启动目录替换整个窗格集合；窗格对象本身保留，让加载代号继续单调递增，
         // 旧请求的迟到响应不会撞上新一轮的代号。
         let mut tab = BrowserTab::directory(0, directory.clone());
-        tab.view_mode = self.tab().view_mode;
+        tab.choose_view_mode(self.tab().chosen_view_mode());
         self.panes.retain(|pane| pane.id == BrowserPaneId::PRIMARY);
         let pane = self
             .pane_by_id_mut(BrowserPaneId::PRIMARY)
@@ -224,6 +225,9 @@ fn restored_pane_from_session(pane: BrowserPaneSession) -> Option<BrowserPane> {
     restored.column_browser_viewport =
         sanitize_column_browser_viewport(pane.column_browser_viewport);
     restored.column_viewports = sanitize_column_viewports(pane.column_viewports);
+    restored.list_viewport = pane
+        .list_viewport
+        .filter(|viewport| viewport.offset_y.is_finite() && viewport.height.is_finite());
     Some(restored)
 }
 
@@ -236,8 +240,11 @@ fn restored_tab(session: &BrowserTabSession) -> BrowserTab {
         file_core::archive_path_identity(path) == file_core::ArchivePathIdentity::InsideArchive
     };
     let mut tab = session.to_browser_tab();
-    if let Some(real_directory) = file_core::real_directory_outside_archive(&tab.current_dir) {
-        tab.current_dir = real_directory;
+    if let Some(real_directory) = tab
+        .current_directory()
+        .and_then(file_core::real_directory_outside_archive)
+    {
+        tab.location = BrowserLocation::Directory(real_directory);
     }
     tab.selected = tab.selected.take().filter(|path| !is_archive_member(path));
     tab.selected_paths.retain(|path| !is_archive_member(path));

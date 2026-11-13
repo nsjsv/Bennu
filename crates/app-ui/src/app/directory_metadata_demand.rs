@@ -48,7 +48,11 @@ impl FileBrowser {
     /// 一律纳入,覆盖三种视图:直接条目走 Root,列表/多栏/图标的展开子
     /// 条目走 Expanded。是否真的发起由 in-flight 去重决定,重复调度安全。
     fn schedule_selected_directory_metadata(&mut self, pane_id: BrowserPaneId) -> Task<Message> {
-        let Some(pane) = self.pane_view(pane_id) else {
+        // 元数据按目录的扫描结果补齐；回收站条目来自回收站列表，没有可补的。
+        let Some((pane, current_directory)) = self
+            .pane_view(pane_id)
+            .and_then(|pane| Some((pane, pane.current_directory()?)))
+        else {
             return Task::none();
         };
         if pane.selected_paths.is_empty() {
@@ -60,7 +64,7 @@ impl FileBrowser {
             .unwrap_or_default();
         let root_context = DirectoryMetadataLoadContext::Root {
             pane_id,
-            path: pane.current_dir.clone(),
+            path: current_directory.to_path_buf(),
             collection_generation: root_generation,
         };
         // (context, discovery, cancellation, targets):一次性收集后统一调度
@@ -124,7 +128,8 @@ impl FileBrowser {
         }
         // 图标视图:展开子条目挂在 icon_grid_expansion 的交互目录里。
         let icon_expansion = self.icon_grid_expansion.as_ref().filter(|state| {
-            state.context().pane_id == pane.id && state.context().current_dir == *pane.current_dir
+            state.context().pane_id == pane.id
+                && state.context().current_dir.as_path() == current_directory
         });
         if let Some(expansion) = icon_expansion {
             for (directory_path, directory) in expansion.directories() {
@@ -211,12 +216,14 @@ impl FileBrowser {
             if pane.view_mode != BrowserViewMode::List {
                 return Task::none();
             }
-            let Some(root_discovery) = pane.directory_discovery.cloned() else {
+            let (Some(current_directory), Some(root_discovery)) =
+                (pane.current_directory(), pane.directory_discovery.cloned())
+            else {
                 return Task::none();
             };
             let root_context = DirectoryMetadataLoadContext::Root {
                 pane_id,
-                path: pane.current_dir.clone(),
+                path: current_directory.to_path_buf(),
                 collection_generation: root_generation,
             };
             let mut sources = HashMap::from([(
@@ -231,7 +238,7 @@ impl FileBrowser {
             let list_density = self.user_config.list_view_density;
             let row_height = crate::list_view::ListGeometry::for_level(list_density).row_height;
             let range = viewport_override
-                .or_else(|| pane.column_viewports.get(pane.current_dir).copied())
+                .or(pane.list_viewport)
                 .map(|viewport| {
                     crate::visible_entries::list_entry_range_for_viewport(
                         pane.entries,
@@ -260,7 +267,7 @@ impl FileBrowser {
                 let Some(index) = visible.entry.discovery_index else {
                     continue;
                 };
-                let context = if visible.entry.path.parent() == Some(pane.current_dir.as_path()) {
+                let context = if visible.entry.path.parent() == Some(current_directory) {
                     root_context.clone()
                 } else {
                     let Some(parent) = visible.entry.path.parent() else {
@@ -501,7 +508,7 @@ impl FileBrowser {
                 collection_generation,
                 ..
             } => {
-                path == &tab.current_dir
+                tab.current_directory() == Some(path.as_path())
                     && *collection_generation == pane.directory_load_generation
                     && tab.directory_discovery.is_some()
             }
@@ -648,6 +655,7 @@ fn directory_metadata_requirement_label(requirement: DirectoryMetadataRequiremen
 mod tests {
     use std::path::PathBuf;
 
+    use crate::model::BrowserLocation;
     use file_core::{
         discover_directory_with_progress, resolve_directory_metadata, DirectoryMetadataRequest,
         ScanOptions, SortDirection, SortField,
@@ -680,9 +688,9 @@ mod tests {
         let options = ScanOptions::default();
         let (directory, discovery) = discovered_fixture(300, options.clone()).await;
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.tab_mut().view_mode = BrowserViewMode::List;
+        browser.tab_mut().choose_view_mode(BrowserViewMode::List);
         browser.options = options;
-        browser.tab_mut().current_dir = directory.path().to_path_buf();
+        browser.tab_mut().location = BrowserLocation::Directory(directory.path().to_path_buf());
         let request = browser.next_directory_load_request(directory.path().to_path_buf());
 
         drop(browser.accept_directory_discovery(
@@ -709,9 +717,9 @@ mod tests {
         };
         let (directory, discovery) = discovered_fixture(300, options.clone()).await;
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.tab_mut().view_mode = BrowserViewMode::List;
+        browser.tab_mut().choose_view_mode(BrowserViewMode::List);
         browser.options = options;
-        browser.tab_mut().current_dir = directory.path().to_path_buf();
+        browser.tab_mut().location = BrowserLocation::Directory(directory.path().to_path_buf());
         let request = browser.next_directory_load_request(directory.path().to_path_buf());
 
         drop(browser.accept_directory_discovery(
@@ -741,9 +749,9 @@ mod tests {
         };
         let (directory, discovery) = discovered_fixture(0, options.clone()).await;
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.tab_mut().view_mode = BrowserViewMode::List;
+        browser.tab_mut().choose_view_mode(BrowserViewMode::List);
         browser.options = options;
-        browser.tab_mut().current_dir = directory.path().to_path_buf();
+        browser.tab_mut().location = BrowserLocation::Directory(directory.path().to_path_buf());
         let request = browser.next_directory_load_request(directory.path().to_path_buf());
 
         drop(browser.accept_directory_discovery(
@@ -790,9 +798,9 @@ mod tests {
         .await
         .unwrap();
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.tab_mut().view_mode = BrowserViewMode::List;
+        browser.tab_mut().choose_view_mode(BrowserViewMode::List);
         browser.options = options;
-        browser.tab_mut().current_dir = directory.path().to_path_buf();
+        browser.tab_mut().location = BrowserLocation::Directory(directory.path().to_path_buf());
         let load_request = browser.next_directory_load_request(directory.path().to_path_buf());
         let collection_generation = load_request.generation;
 
@@ -887,9 +895,9 @@ mod tests {
         let options = ScanOptions::default();
         let (directory, discovery) = discovered_fixture(1, options.clone()).await;
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.tab_mut().view_mode = BrowserViewMode::List;
+        browser.tab_mut().choose_view_mode(BrowserViewMode::List);
         browser.options = options;
-        browser.tab_mut().current_dir = directory.path().to_path_buf();
+        browser.tab_mut().location = BrowserLocation::Directory(directory.path().to_path_buf());
         let load_request = browser.next_directory_load_request(directory.path().to_path_buf());
         let stale_collection_generation = load_request.generation;
         drop(browser.accept_directory_discovery(
@@ -899,7 +907,7 @@ mod tests {
 
         let replacement = directory.path().join("replacement");
         std::fs::create_dir(&replacement).unwrap();
-        browser.tab_mut().current_dir = replacement.clone();
+        browser.tab_mut().location = BrowserLocation::Directory(replacement.clone());
         browser.tab_mut().directory_collection_phase =
             crate::model::DirectoryCollectionPhase::Discovering;
         let _ = browser.next_directory_load_request(replacement);
@@ -939,9 +947,9 @@ mod tests {
         let options = ScanOptions::default();
         let (directory, discovery) = discovered_fixture(2, options.clone()).await;
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.tab_mut().view_mode = BrowserViewMode::List;
+        browser.tab_mut().choose_view_mode(BrowserViewMode::List);
         browser.options = options;
-        browser.tab_mut().current_dir = directory.path().to_path_buf();
+        browser.tab_mut().location = BrowserLocation::Directory(directory.path().to_path_buf());
         for column in [
             ListColumnKind::Modified,
             ListColumnKind::Size,
@@ -981,9 +989,9 @@ mod tests {
         let options = ScanOptions::default();
         let (directory, discovery) = discovered_fixture(2, options.clone()).await;
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.tab_mut().view_mode = BrowserViewMode::Columns;
+        browser.tab_mut().choose_view_mode(BrowserViewMode::Columns);
         browser.options = options;
-        browser.tab_mut().current_dir = directory.path().to_path_buf();
+        browser.tab_mut().location = BrowserLocation::Directory(directory.path().to_path_buf());
         let load_request = browser.next_directory_load_request(directory.path().to_path_buf());
         drop(browser.accept_directory_discovery(
             load_request,
@@ -1038,8 +1046,8 @@ mod tests {
         .await
         .unwrap();
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.tab_mut().view_mode = BrowserViewMode::List;
-        browser.tab_mut().current_dir = root.path().to_path_buf();
+        browser.tab_mut().choose_view_mode(BrowserViewMode::List);
+        browser.tab_mut().location = BrowserLocation::Directory(root.path().to_path_buf());
         let load_request = browser.next_directory_load_request(root.path().to_path_buf());
         drop(browser.accept_directory_discovery(
             load_request,
@@ -1112,8 +1120,8 @@ mod tests {
         .unwrap();
         let resolver = discovery.metadata_resolver.clone();
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.tab_mut().view_mode = BrowserViewMode::List;
-        browser.tab_mut().current_dir = directory.path().to_path_buf();
+        browser.tab_mut().choose_view_mode(BrowserViewMode::List);
+        browser.tab_mut().location = BrowserLocation::Directory(directory.path().to_path_buf());
         let load_request = browser.next_directory_load_request(directory.path().to_path_buf());
         let collection_generation = load_request.generation;
         drop(browser.accept_directory_discovery(
@@ -1170,9 +1178,9 @@ mod tests {
         .unwrap();
         let resolver = discovery.metadata_resolver.clone();
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.tab_mut().view_mode = BrowserViewMode::List;
+        browser.tab_mut().choose_view_mode(BrowserViewMode::List);
         browser.options = options;
-        browser.tab_mut().current_dir = directory.path().to_path_buf();
+        browser.tab_mut().location = BrowserLocation::Directory(directory.path().to_path_buf());
 
         // 预占全部解码槽位：commit 内部的 pump 取不走新请求，才能断言入队结果。
         let max_slots = std::thread::available_parallelism()
@@ -1276,9 +1284,9 @@ mod tests {
         let options = ScanOptions::default();
         let (directory, discovery) = discovered_fixture(300, options.clone()).await;
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.tab_mut().view_mode = BrowserViewMode::Columns;
+        browser.tab_mut().choose_view_mode(BrowserViewMode::Columns);
         browser.options = options;
-        browser.tab_mut().current_dir = directory.path().to_path_buf();
+        browser.tab_mut().location = BrowserLocation::Directory(directory.path().to_path_buf());
         let request = browser.next_directory_load_request(directory.path().to_path_buf());
         drop(browser.accept_directory_discovery(
             request,

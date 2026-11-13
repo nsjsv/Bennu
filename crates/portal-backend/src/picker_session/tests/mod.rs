@@ -40,7 +40,7 @@ fn seeded_listing(session: &mut PickerSession, names: &[(&str, FileKind)]) {
         .iter()
         .map(|&(name, kind)| {
             DirectoryEntry::new(
-                session.directory.join(name),
+                session.current_directory().unwrap().join(name),
                 kind,
                 file_core::entry::EntryMetadata::default(),
                 name.starts_with('.'),
@@ -50,7 +50,7 @@ fn seeded_listing(session: &mut PickerSession, names: &[(&str, FileKind)]) {
         })
         .collect();
     session.apply_scan(DirectoryScanResult {
-        directory: session.directory.clone(),
+        location: session.location().clone(),
         outcome: Ok(DirectoryScanOutcome { entries }),
     });
 }
@@ -153,7 +153,7 @@ fn single_click_selects_and_double_click_confirms_file() {
 
     let effect = session.update(SessionMessage::EntryDoubleClicked { index: 0 });
     assert!(matches!(effect, SessionEffect::Confirmed(_)));
-    let expected = session.directory().join("a.txt");
+    let expected = session.current_directory().unwrap().join("a.txt");
     assert!(matches!(
         receiver.blocking_recv().unwrap(),
         PickerResolution::Confirmed(payload) if payload.paths == vec![expected]
@@ -335,7 +335,7 @@ fn double_click_directory_navigates() {
     );
     // seeded listing 的路径是假名；改为真实路径验证导航。
     session.apply_scan(DirectoryScanResult {
-        directory: session.directory().to_path_buf(),
+        location: session.location().clone(),
         outcome: Ok(DirectoryScanOutcome {
             entries: vec![DirectoryEntry::new(
                 child.clone(),
@@ -348,7 +348,9 @@ fn double_click_directory_navigates() {
         }),
     });
     let effect = session.update(SessionMessage::EntryDoubleClicked { index: 0 });
-    assert!(matches!(effect, SessionEffect::NavigateDirectory(target) if target == child));
+    assert!(
+        matches!(effect, SessionEffect::NavigateLocation(target) if target == BrowserLocation::Directory(child))
+    );
 }
 
 #[test]
@@ -417,7 +419,7 @@ fn scan_result(
     outcome: Result<Vec<(&str, FileKind)>, String>,
 ) -> DirectoryScanResult {
     DirectoryScanResult {
-        directory: directory.to_path_buf(),
+        location: BrowserLocation::Directory(directory.to_path_buf()),
         outcome: outcome.map(|entries| DirectoryScanOutcome {
             entries: entries
                 .into_iter()
@@ -446,7 +448,7 @@ fn expanding_a_directory_appends_indented_children() {
         &mut session,
         &[("sub", FileKind::Directory), ("a.txt", FileKind::File)],
     );
-    let child = session.directory().join("sub");
+    let child = session.current_directory().unwrap().join("sub");
 
     let effect = session.update(SessionMessage::EntryExpandToggled { index: 0 });
     assert!(matches!(effect, SessionEffect::ScanDirectory(dir) if dir == child));
@@ -475,7 +477,7 @@ fn expansion_animation_advances_and_holds_at_full() {
         directory: false,
     });
     seeded_listing(&mut session, &[("sub", FileKind::Directory)]);
-    let child = session.directory().join("sub");
+    let child = session.current_directory().unwrap().join("sub");
     session.update(SessionMessage::EntryExpandToggled { index: 0 });
     session.apply_scan(scan_result(&child, Ok(vec![("inner.txt", FileKind::File)])));
 
@@ -501,7 +503,7 @@ fn collapse_completion_is_reported_for_scrollbar_recheck() {
         directory: false,
     });
     seeded_listing(&mut session, &[("sub", FileKind::Directory)]);
-    let child = session.directory().join("sub");
+    let child = session.current_directory().unwrap().join("sub");
     session.update(SessionMessage::EntryExpandToggled { index: 0 });
     session.apply_scan(scan_result(&child, Ok(vec![("inner.txt", FileKind::File)])));
 
@@ -531,7 +533,7 @@ fn toggle_during_collapse_resumes_expansion() {
         directory: false,
     });
     seeded_listing(&mut session, &[("sub", FileKind::Directory)]);
-    let child = session.directory().join("sub");
+    let child = session.current_directory().unwrap().join("sub");
     session.update(SessionMessage::EntryExpandToggled { index: 0 });
     session.apply_scan(scan_result(&child, Ok(vec![("inner.txt", FileKind::File)])));
     while session.advance_animations().changed {}
@@ -568,7 +570,7 @@ fn failed_expansion_scan_collapses_the_node() {
         directory: false,
     });
     seeded_listing(&mut session, &[("sub", FileKind::Directory)]);
-    let child = session.directory().join("sub");
+    let child = session.current_directory().unwrap().join("sub");
     session.update(SessionMessage::EntryExpandToggled { index: 0 });
     assert_eq!(session.rows().len(), 1);
 
@@ -599,28 +601,28 @@ fn history_back_and_forward_follow_the_visit_order() {
         directory: false,
     });
     seeded_listing(&mut session, &[("a", FileKind::Directory)]);
-    let start = session.directory().to_path_buf();
+    let start = session.current_directory().unwrap().to_path_buf();
     let a = start.join("a");
     let b = a.join("b");
 
     session.update(SessionMessage::EntryDoubleClicked { index: 0 });
-    assert_eq!(session.directory(), a);
+    assert_eq!(session.current_directory().unwrap(), a);
     session.apply_scan(scan_result(&a, Ok(vec![("b", FileKind::Directory)])));
     session.update(SessionMessage::EntryDoubleClicked { index: 0 });
-    assert_eq!(session.directory(), b);
+    assert_eq!(session.current_directory().unwrap(), b);
 
     // 后退两次回到起点，前进按原路径回来；边界外再走无效。
     session.update(SessionMessage::NavigateBack);
-    assert_eq!(session.directory(), a);
+    assert_eq!(session.current_directory().unwrap(), a);
     session.update(SessionMessage::NavigateBack);
-    assert_eq!(session.directory(), start);
+    assert_eq!(session.current_directory().unwrap(), start);
     let stuck = session.update(SessionMessage::NavigateBack);
     assert!(matches!(stuck, SessionEffect::None));
 
     session.update(SessionMessage::NavigateForward);
-    assert_eq!(session.directory(), a);
+    assert_eq!(session.current_directory().unwrap(), a);
     session.update(SessionMessage::NavigateForward);
-    assert_eq!(session.directory(), b);
+    assert_eq!(session.current_directory().unwrap(), b);
     let stuck = session.update(SessionMessage::NavigateForward);
     assert!(matches!(stuck, SessionEffect::None));
 }
@@ -635,7 +637,7 @@ fn new_navigation_after_back_truncates_the_forward_branch() {
         &mut session,
         &[("a", FileKind::Directory), ("c", FileKind::Directory)],
     );
-    let start = session.directory().to_path_buf();
+    let start = session.current_directory().unwrap().to_path_buf();
 
     session.update(SessionMessage::EntryDoubleClicked { index: 0 });
     session.update(SessionMessage::NavigateBack);
@@ -643,7 +645,7 @@ fn new_navigation_after_back_truncates_the_forward_branch() {
     session.update(SessionMessage::EntryDoubleClicked { index: 0 });
     session.update(SessionMessage::NavigateBack);
     let forward = session.update(SessionMessage::NavigateForward);
-    assert!(matches!(forward, SessionEffect::NavigateDirectory(_)));
+    assert!(matches!(forward, SessionEffect::NavigateLocation(_)));
     session.update(SessionMessage::NavigateBack);
 
     // 回退后走新分支：前进历史被截断。
@@ -652,12 +654,12 @@ fn new_navigation_after_back_truncates_the_forward_branch() {
         &[("a", FileKind::Directory), ("c", FileKind::Directory)],
     );
     session.update(SessionMessage::EntryDoubleClicked { index: 1 });
-    assert_eq!(session.directory(), start.join("c"));
+    assert_eq!(session.current_directory().unwrap(), start.join("c"));
     // 前进分支已截断：再前进无效，但仍可后退。
     let stuck = session.update(SessionMessage::NavigateForward);
     assert!(matches!(stuck, SessionEffect::None));
     let back = session.update(SessionMessage::NavigateBack);
-    assert!(matches!(back, SessionEffect::NavigateDirectory(_)));
+    assert!(matches!(back, SessionEffect::NavigateLocation(_)));
 }
 
 #[test]

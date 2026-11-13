@@ -3,6 +3,7 @@
 
 use std::path::PathBuf;
 
+use bennu_sidebar::BrowserLocation;
 use file_core::entry::DirectoryEntry;
 use file_core::scan::{scan_directory, ScanOptions};
 use file_core::trash_bin::scan_trash;
@@ -18,7 +19,7 @@ pub(crate) enum DirectoryListing {
 /// 扫描完成载荷：携带扫描目标，供会话把结果路由回根列表或展开节点。
 #[derive(Debug, Clone)]
 pub(crate) struct DirectoryScanResult {
-    pub(crate) directory: PathBuf,
+    pub(crate) location: BrowserLocation,
     pub(crate) outcome: Result<DirectoryScanOutcome, String>,
 }
 
@@ -28,8 +29,18 @@ pub(crate) struct DirectoryScanOutcome {
     pub(crate) entries: Vec<DirectoryEntry>,
 }
 
-/// 执行目录扫描（上层在 iced Task 里调用）。
-pub(crate) async fn scan_listing(directory: PathBuf) -> Result<DirectoryScanOutcome, String> {
+/// 读一个位置的内容（上层在 iced Task 里调用）：目录走常规扫描，回收站走
+/// 回收站列表。
+pub(crate) async fn scan_location(
+    location: BrowserLocation,
+) -> Result<DirectoryScanOutcome, String> {
+    match location {
+        BrowserLocation::Directory(directory) => scan_listing(directory).await,
+        BrowserLocation::Trash => scan_trash_listing().await,
+    }
+}
+
+async fn scan_listing(directory: PathBuf) -> Result<DirectoryScanOutcome, String> {
     let scan = scan_directory(&directory, ScanOptions::default())
         .await
         .map_err(|error| error.to_string())?;
@@ -38,10 +49,9 @@ pub(crate) async fn scan_listing(directory: PathBuf) -> Result<DirectoryScanOutc
     })
 }
 
-/// 回收站扫描：current_dir 为 `trash:///` 虚拟视图时的列表来源。
-/// 行数据复用 PickerRow：名称取原始文件名（丢弃冲突后缀），路径取
+/// 回收站的列表来源。行数据复用 PickerRow：名称取原始文件名（丢弃冲突后缀），路径取
 /// files/ 下的真实载荷路径——OpenFile 确认时返回的就是这个实际路径。
-pub(crate) async fn scan_trash_listing() -> Result<DirectoryScanOutcome, String> {
+async fn scan_trash_listing() -> Result<DirectoryScanOutcome, String> {
     let scan = scan_trash(ScanOptions::default())
         .await
         .map_err(|error| error.to_string())?;

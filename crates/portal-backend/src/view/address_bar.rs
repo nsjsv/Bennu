@@ -97,7 +97,7 @@ fn view_mode_button_group(
     session: &PickerSession,
     emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'static,
 ) -> Element<'static, SessionMessage> {
-    let current_mode = session.view_mode();
+    let current_mode = session.chosen_view_mode();
     let mut group = iced::widget::row![].spacing(0).align_y(Alignment::Center);
     for (mode, symbol) in [
         (PickerViewMode::Columns, IconSymbol::Columns),
@@ -202,14 +202,14 @@ fn address_bar_surface(
 
 /// 面包屑层：共享 breadcrumb_segments 折叠 Home 段后交给弹性布局；
 /// responsive 先量视口再分配段宽，横向滚动沿用 portal 的滚动接线。
-/// 回收站是虚拟视图（trash:/// 无路径段可拆）：直接渲染静态标签，
-/// 与主程序 trash 视图地址栏语义一致。
+/// 回收站不是目录，没有路径段可拆：直接渲染静态标签，
+/// 与主程序回收站地址栏语义一致。
 fn breadcrumb_layer(
     session: &PickerSession,
     opacity: f32,
     emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'static,
 ) -> Element<'static, SessionMessage> {
-    if session.is_trash_view() {
+    let Some(target_directory) = session.target_directory() else {
         return container(
             readable_label("回收站".to_string())
                 .size(ADDRESS_TEXT_SIZE)
@@ -219,8 +219,8 @@ fn breadcrumb_layer(
         .height(Length::Fixed(ADDRESS_BAR_HEIGHT))
         .align_y(alignment::Vertical::Center)
         .into();
-    }
-    let segments = breadcrumb_segments(session.target_directory(), session.home_dir());
+    };
+    let segments = breadcrumb_segments(target_directory, session.home_dir());
     let request_path = session.request_path().to_string();
     let shift_pressed = session.scroll_shift_pressed();
 

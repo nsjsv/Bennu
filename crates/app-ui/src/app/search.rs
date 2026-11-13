@@ -381,10 +381,9 @@ impl FileBrowser {
         if self.search_workspace.is_some() {
             return Ok(());
         }
-        if self.tab().is_trash_view {
+        let Some(root) = self.current_search_directory() else {
             return Err(tr!("Search is available from a local folder"));
-        }
-        let root = self.current_search_directory();
+        };
         if self.path_is_remote_mount(&root) {
             return Err(tr!("Search is unavailable for remote folders"));
         }
@@ -941,13 +940,15 @@ impl FileBrowser {
         directory_fallback_search_command(generation, query, rules, cancellation)
     }
 
-    fn current_search_directory(&self) -> PathBuf {
-        if self.tab().view_mode == BrowserViewMode::Columns {
+    /// 搜索的起点目录；回收站不是目录，不能从那里搜。
+    fn current_search_directory(&self) -> Option<PathBuf> {
+        let current_directory = self.tab().current_directory()?;
+        if self.tab().view_mode() == BrowserViewMode::Columns {
             if let Some(directory) = self.last_pointer_clicked_rendered_column_directory() {
-                return directory;
+                return Some(directory);
             }
         }
-        self.tab().current_dir.clone()
+        Some(current_directory.to_path_buf())
     }
 }
 

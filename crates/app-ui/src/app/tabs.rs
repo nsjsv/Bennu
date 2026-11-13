@@ -1,12 +1,13 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Instant;
 
 use iced::Task;
 
 use super::FileBrowser;
 use crate::model::{
-    BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, BrowserViewMode, FileDragPhase,
-    Message, NavigationMode, SplitAxis, SplitRegion, TabDragMode, TabDragState, TabSplitTarget,
+    BrowserLocation, BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, BrowserViewMode,
+    FileDragPhase, Message, NavigationMode, SplitAxis, SplitRegion, TabDragMode, TabDragState,
+    TabSplitTarget,
 };
 
 mod animation;
@@ -17,11 +18,6 @@ mod folder_middle_click_split;
 mod view_mode_follow_tests;
 #[cfg(test)]
 mod view_mode_tests;
-
-pub(crate) struct TabDragPreview<'a> {
-    pub(crate) directory: &'a Path,
-    pub(crate) is_trash_view: bool,
-}
 
 impl FileBrowser {
     pub(crate) fn tab_bar_reveal_fraction(&self) -> f32 {
@@ -55,7 +51,8 @@ impl FileBrowser {
         Task::none()
     }
 
-    pub(crate) fn tab_drag_preview(&self) -> Option<TabDragPreview<'_>> {
+    /// 拖动中的标签所在的位置，供拖动预览显示标题。
+    pub(crate) fn tab_drag_preview(&self) -> Option<&BrowserLocation> {
         let drag = self.tab_drag.as_ref()?;
         if !drag.is_dragging() {
             return None;
@@ -67,16 +64,13 @@ impl FileBrowser {
             .iter()
             .find(|tab| tab.id == drag.tab_id)?;
 
-        Some(TabDragPreview {
-            directory: tab.current_dir.as_path(),
-            is_trash_view: tab.is_trash_view,
-        })
+        Some(&tab.location)
     }
 
     pub(super) fn open_directory_in_new_tab(&mut self, directory: PathBuf) -> Task<Message> {
         let cancel_address_editing = self.add_tab_and_activate(|id, view_mode| {
             let mut tab = BrowserTab::directory(id, directory.clone());
-            tab.view_mode = view_mode;
+            tab.choose_view_mode(view_mode);
             tab
         });
         Task::batch([
@@ -89,7 +83,7 @@ impl FileBrowser {
     pub(super) fn open_trash_in_new_tab(&mut self) -> Task<Message> {
         let cancel_address_editing = self.add_tab_and_activate(|id, view_mode| {
             let mut tab = BrowserTab::trash(id);
-            tab.view_mode = view_mode;
+            tab.choose_view_mode(view_mode);
             tab
         });
         Task::batch([
@@ -112,7 +106,7 @@ impl FileBrowser {
 
         let tab_id = self.next_tab_id;
         self.next_tab_id += 1;
-        let view_mode = self.tab().view_mode;
+        let view_mode = self.tab().chosen_view_mode();
         let pane = self.pane_mut();
         pane.tabs.push(new_tab(tab_id, view_mode));
         pane.activate_tab(tab_id);

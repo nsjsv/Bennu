@@ -354,6 +354,7 @@ mod tests {
     use crate::picker_request::{PickerKind, PickerRequestSpec};
     use crate::picker_session::scan::{DirectoryScanOutcome, DirectoryScanResult};
     use crate::picker_session::SessionMessage;
+    use bennu_sidebar::BrowserLocation;
     use file_core::entry::{DirectoryEntry, EntryMetadata};
     use thumbnails::ThumbnailSourceMetadata;
 
@@ -382,7 +383,7 @@ mod tests {
             .iter()
             .map(|&name| {
                 DirectoryEntry::new(
-                    session.directory.join(name),
+                    session.current_directory().unwrap().join(name),
                     FileKind::File,
                     EntryMetadata::default(),
                     false,
@@ -392,7 +393,7 @@ mod tests {
             })
             .collect();
         session.apply_scan(DirectoryScanResult {
-            directory: session.directory.clone(),
+            location: session.location().clone(),
             outcome: Ok(DirectoryScanOutcome { entries }),
         });
         session
@@ -509,7 +510,9 @@ mod tests {
         let request = session.drain_pending_thumbnail_requests().pop().unwrap();
 
         // 换目录清空在途/排队：旧目录的迟到回信必须整体丢弃。
-        session.enter_directory(PathBuf::from("/other/directory"));
+        session.enter_location(BrowserLocation::Directory(PathBuf::from(
+            "/other/directory",
+        )));
         session.accept_thumbnail_ready(request.clone(), Ok(cached_png(&request)));
         assert!(session.thumbnail_ready(&request.source).is_none());
     }
@@ -517,7 +520,7 @@ mod tests {
     #[test]
     fn ready_lru_is_capped_and_keeps_newest_entries() {
         let mut session = image_session(&["seed.png"]);
-        let base = session.directory().to_path_buf();
+        let base = session.current_directory().unwrap().to_path_buf();
         let now = Instant::now();
         for index in 0..=READY_LIMIT {
             let source = base.join(format!("img{index}.png"));
@@ -551,7 +554,7 @@ mod tests {
         let files: Vec<String> = (0..100).map(|index| format!("img{index:03}.png")).collect();
         let names: Vec<&str> = files.iter().map(String::as_str).collect();
         let mut session = image_session(&names);
-        let base = session.directory().to_path_buf();
+        let base = session.current_directory().unwrap().to_path_buf();
 
         // 无视口缓存（首帧探针未回）：不发任何请求。
         session.schedule_visible_thumbnails();
@@ -576,11 +579,11 @@ mod tests {
     fn non_image_rows_and_cache_dir_sources_are_not_enqueued() {
         let mut session = image_session(&[]);
         session.apply_scan(DirectoryScanResult {
-            directory: session.directory().to_path_buf(),
+            location: session.location().clone(),
             outcome: Ok(DirectoryScanOutcome {
                 entries: vec![
                     DirectoryEntry::new(
-                        session.directory.join("photo.jpg"),
+                        session.current_directory().unwrap().join("photo.jpg"),
                         FileKind::File,
                         EntryMetadata::default(),
                         false,
@@ -588,7 +591,7 @@ mod tests {
                         false,
                     ),
                     DirectoryEntry::new(
-                        session.directory.join("notes.txt"),
+                        session.current_directory().unwrap().join("notes.txt"),
                         FileKind::File,
                         EntryMetadata::default(),
                         false,
@@ -596,7 +599,7 @@ mod tests {
                         false,
                     ),
                     DirectoryEntry::new(
-                        session.directory.join("subdir"),
+                        session.current_directory().unwrap().join("subdir"),
                         FileKind::Directory,
                         EntryMetadata::default(),
                         false,
@@ -608,7 +611,7 @@ mod tests {
         });
         // 把缓存目录指到当前目录：其中的"图片"必须被拒（spec 合同），
         // 非图片与目录行同样不入队。
-        session.thumbnails.cache_dir = session.directory().to_path_buf();
+        session.thumbnails.cache_dir = session.current_directory().unwrap().to_path_buf();
         install_viewport(&mut session, viewport_at(0.0, 300.0));
 
         session.schedule_visible_thumbnails();
@@ -655,7 +658,7 @@ mod tests {
     #[test]
     fn icon_view_upgrades_small_ready_thumbnail_and_late_small_reply_never_downgrades() {
         let mut session = image_session(&["photo.png"]);
-        let source = session.directory().join("photo.png");
+        let source = session.current_directory().unwrap().join("photo.png");
         install_viewport(&mut session, viewport_at(0.0, 300.0));
 
         // 列表档就绪后切大图：就绪档位不足，必须补请求大档。

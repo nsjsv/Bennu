@@ -17,7 +17,8 @@ use crate::icon_grid_geometry::{
 /// 保证落点与渲染一致。
 #[derive(Debug, Clone, Copy)]
 pub(super) struct IconGridEntryGeometry<'a> {
-    pub(super) directory: &'a Path,
+    /// 条目所在面板的目录；根面板显示的位置不是目录时没有。
+    pub(super) directory: Option<&'a Path>,
     pub(super) entry: &'a DirectoryEntry,
     pub(super) center_x: f32,
     pub(super) center_y: f32,
@@ -237,7 +238,7 @@ pub(super) fn find_interactive_entry_at_point<'a>(
     panel_left: f32,
     icon_edge: u32,
     point: Point,
-) -> Option<(&'a Path, &'a DirectoryEntry)> {
+) -> Option<&'a DirectoryEntry> {
     for segment in &panel.flow {
         match segment {
             IconGridFlowSegment::Rows(rows) => {
@@ -268,7 +269,7 @@ pub(super) fn find_interactive_entry_at_point<'a>(
                 }
                 let cell_index = row.saturating_mul(rows.column_count) + column;
                 if let Some(entry) = rows.cells.get(cell_index).and_then(IconGridCell::entry) {
-                    return Some((rows.directory, entry));
+                    return Some(entry);
                 }
             }
             IconGridFlowSegment::Band(band) if band.interactive => {

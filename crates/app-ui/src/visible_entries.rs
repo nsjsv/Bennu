@@ -314,11 +314,11 @@ pub(crate) fn visible_entry_paths(
 
 pub(crate) fn visible_child_paths(
     directory: &Path,
-    current_dir: &Path,
+    current_directory: Option<&Path>,
     entries: &[DirectoryEntry],
     expanded_directories: &HashMap<PathBuf, ExpandedDirectory>,
 ) -> Vec<PathBuf> {
-    if directory == current_dir {
+    if current_directory == Some(directory) {
         return entries.iter().map(|entry| entry.path.clone()).collect();
     }
 
@@ -761,7 +761,12 @@ mod tests {
             },
         )]);
 
-        let paths = visible_child_paths(&directory.path, &root, &entries, &expanded_directories);
+        let paths = visible_child_paths(
+            &directory.path,
+            Some(&root),
+            &entries,
+            &expanded_directories,
+        );
 
         assert!(paths.is_empty());
     }

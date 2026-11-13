@@ -6,6 +6,7 @@ use iced::{keyboard, Point};
 
 use crate::app::FileBrowser;
 use crate::config;
+use crate::model::BrowserLocation;
 use crate::model::{ExpandedDirectory, ExpandedDirectoryStatus, SelectionMarqueePhase};
 
 fn test_entry(path: PathBuf, kind: FileKind) -> DirectoryEntry {
@@ -43,7 +44,7 @@ fn loaded_directory(entries: Vec<DirectoryEntry>) -> ExpandedDirectory {
 
 fn browser_with_entries(entries: Vec<DirectoryEntry>) -> FileBrowser {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
     browser.tab_mut().directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
     browser.tab_mut().entries = entries.into();
     browser

@@ -9,9 +9,9 @@ use super::panes::BrowserPaneView;
 use super::{FileBrowser, DOUBLE_CLICK_THRESHOLD};
 
 use crate::model::{
-    file_grouping_entry_visible, BrowserPaneId, BrowserViewMode, ContextMenuState,
+    file_grouping_entry_visible, BrowserLocation, BrowserPaneId, BrowserViewMode, ContextMenuState,
     FileContextMenuExpansion, FileContextMenuState, FileDeleteAction, FileDragSpringSource,
-    FileDragStationaryAction, LastActivationClick, Message,
+    FileDragStationaryAction, FileDropTarget, LastActivationClick, Message,
 };
 use crate::selection_summary::{summarize_selected_entries, PaneSelectionSummary};
 
@@ -142,7 +142,7 @@ impl FileBrowser {
             self.drag_selection_anchor = Some(path.clone());
             self.cancel_file_drag_interaction();
         } else {
-            if was_selected && self.tab().is_trash_view {
+            if was_selected && self.tab().location == BrowserLocation::Trash {
                 self.select_path(path.clone());
             } else if was_selected {
                 self.focus_path(path.clone());
@@ -367,9 +367,7 @@ impl FileBrowser {
         self.hovered_sidebar = Some(path.clone());
         self.cursor_paste_directory = None;
         if self.file_drag.is_some() {
-            self.set_file_drop_target(file_drop_target::sidebar_file_drop_target_for_directory(
-                &path,
-            ));
+            self.set_file_drop_target(Some(FileDropTarget::Directory(path.clone())));
         }
         Task::none()
     }
@@ -413,7 +411,7 @@ impl FileBrowser {
     }
 
     pub(super) fn handle_entry_right_clicked(&mut self, path: PathBuf) -> Task<Message> {
-        if self.tab().view_mode == BrowserViewMode::Columns {
+        if self.tab().view_mode() == BrowserViewMode::Columns {
             self.record_pointer_clicked_column(self.entry_parent_directory(&path));
         }
         let expansion_command = self.prepare_icon_grid_entry_interaction(&path);
@@ -426,7 +424,9 @@ impl FileBrowser {
         let target_is_directory = self.entry_kind(&path) == Some(FileKind::Directory);
         let can_batch_rename = self.batch_rename_available_for_selection();
         let can_create_symlink = self.selection_all_paths_local();
-        if self.file_area_menu_is_visible(true, target_is_directory, can_batch_rename) {
+        if self.tab().location == BrowserLocation::Trash {
+            self.open_trash_context_menu(Some(path));
+        } else if self.file_area_menu_is_visible(true, target_is_directory, can_batch_rename) {
             self.context_menu = Some(ContextMenuState::FileArea(FileContextMenuState {
                 target: Some(path.clone()),
                 target_is_directory,
@@ -459,8 +459,8 @@ impl FileBrowser {
     }
 
     pub(super) fn handle_blank_area_right_clicked(&mut self, directory: PathBuf) -> Task<Message> {
-        let expansion_command = if self.tab().view_mode == BrowserViewMode::Icons
-            && directory == self.tab().current_dir
+        let expansion_command = if self.tab().view_mode() == BrowserViewMode::Icons
+            && self.tab().current_directory() == Some(directory.as_path())
         {
             self.dismiss_icon_grid_expansion_from_outside()
         } else {
@@ -485,7 +485,7 @@ impl FileBrowser {
                 expansion: FileContextMenuExpansion::None,
                 // 按打开菜单那一刻的视图模式定死入口可见性,后续视图
                 // 切换不会让已打开的菜单中途长出入口。
-                grouping_entry_visible: file_grouping_entry_visible(self.tab().view_mode),
+                grouping_entry_visible: file_grouping_entry_visible(self.tab().view_mode()),
                 selection_archives: Vec::new(),
                 inside_archive: self.current_directory_is_inside_archive(),
             }));
@@ -493,7 +493,7 @@ impl FileBrowser {
         Task::batch([expansion_command, rename_command])
     }
 
-    /// 与 view 层 trash/entry/blank 面板选择同一谓词,配置后无可见面板时菜单不进入状态。
+    /// 与 view 层 entry/blank 面板选择同一谓词,配置后无可见面板时菜单不进入状态。
     pub(super) fn file_area_menu_is_visible(
         &self,
         has_target: bool,
@@ -501,9 +501,7 @@ impl FileBrowser {
         can_batch_rename: bool,
     ) -> bool {
         let menus = &self.user_config.context_menus;
-        if self.tab().is_trash_view {
-            !menus.trash_items(has_target).is_empty()
-        } else if has_target {
+        if has_target {
             !menus
                 .file_entry_menu_entries(target_is_directory, can_batch_rename, true)
                 .is_empty()
@@ -541,7 +539,9 @@ impl FileBrowser {
     fn column_blank_context_directory(&self, directory: &Path) -> Option<PathBuf> {
         // 压缩包包根在真实文件系统中是文件(entry_kind=File),必须走
         // “视作目录”共享判定,否则点击包根栏空白会清空整个栏目链。
-        if directory == self.tab().current_dir || !self.entry_acts_as_directory(directory) {
+        if self.tab().current_directory() == Some(directory)
+            || !self.entry_acts_as_directory(directory)
+        {
             None
         } else {
             Some(directory.to_path_buf())
@@ -559,7 +559,9 @@ impl FileBrowser {
     pub(super) fn set_deepest_open_column_directory(&mut self, directory: Option<PathBuf>) {
         let tab = self.tab_mut();
         tab.deepest_open_column_directory = directory.filter(|directory| {
-            directory != &tab.current_dir && directory.starts_with(tab.current_dir.as_path())
+            tab.location
+                .directory()
+                .is_some_and(|current| directory != current && directory.starts_with(current))
         });
     }
 
@@ -595,45 +597,50 @@ impl FileBrowser {
 
     fn select_all_selection_scope_paths(&self) -> Vec<PathBuf> {
         let tab = self.tab();
-        if tab.is_trash_view {
+        if tab.location == BrowserLocation::Trash {
             return self.visible_entry_paths();
         }
 
-        if tab.view_mode == BrowserViewMode::Icons {
+        if tab.view_mode() == BrowserViewMode::Icons {
             let directory = self
                 .icon_grid_expansion
                 .as_ref()
                 .map(|state| state.selection_directory())
-                .unwrap_or(tab.current_dir.as_path());
-            return self.entry_paths_in_directory(directory);
+                .or(tab.current_directory());
+            return directory
+                .map(|directory| self.entry_paths_in_directory(directory))
+                .unwrap_or_default();
         }
 
-        if tab.view_mode == BrowserViewMode::Columns {
-            return self.entry_paths_in_directory(&self.column_select_all_directory());
+        if tab.view_mode() == BrowserViewMode::Columns {
+            return self
+                .column_select_all_directory()
+                .map(|directory| self.entry_paths_in_directory(&directory))
+                .unwrap_or_default();
         }
 
         self.visible_entry_paths()
     }
 
-    fn column_select_all_directory(&self) -> PathBuf {
+    fn column_select_all_directory(&self) -> Option<PathBuf> {
         if let Some(directory) = self.focused_rendered_column_directory() {
-            return directory;
+            return Some(directory);
         }
 
         if let Some(path) = &self.hovered_entry {
-            return self.entry_parent_directory(path);
+            return Some(self.entry_parent_directory(path));
         }
 
         if let Some(directory) = self.hovered_column_directory() {
-            return directory;
+            return Some(directory);
         }
 
         let tab = self.tab();
         tab.selected
             .as_deref()
             .and_then(Path::parent)
+            .or(tab.current_directory())
             .map(Path::to_path_buf)
-            .unwrap_or_else(|| tab.current_dir.clone())
     }
 
     fn focused_rendered_column_directory(&self) -> Option<PathBuf> {
@@ -710,8 +717,9 @@ impl FileBrowser {
 
     /// 当前浏览目录是否位于压缩包内部（含包根），包内只读门控的单一判定。
     pub(super) fn current_directory_is_inside_archive(&self) -> bool {
-        file_core::archive_path_identity(&self.tab().current_dir)
-            != file_core::ArchivePathIdentity::RealFile
+        self.tab().current_directory().is_some_and(|directory| {
+            file_core::archive_path_identity(directory) != file_core::ArchivePathIdentity::RealFile
+        })
     }
 
     fn directory_drop_target_for_entry(&self, path: &Path) -> PathBuf {
@@ -728,9 +736,7 @@ impl FileBrowser {
         path: &Path,
     ) -> Option<PathBuf> {
         let pane = self.pane_view(pane_id)?;
-        if pane.is_trash_view {
-            return None;
-        }
+        let current_directory = pane.current_directory()?;
 
         let entry_kind = match pane.view_mode {
             BrowserViewMode::Icons if pane_id == self.active_pane_id() => self.entry_kind(path),
@@ -754,23 +760,21 @@ impl FileBrowser {
         if entry_kind == Some(FileKind::Directory) {
             Some(path.to_path_buf())
         } else {
-            Some(
-                path.parent()
-                    .map(Path::to_path_buf)
-                    .unwrap_or_else(|| pane.current_dir.clone()),
-            )
+            Some(path.parent().unwrap_or(current_directory).to_path_buf())
         }
     }
 
     fn pane_accepts_file_drag(&self, pane_id: BrowserPaneId) -> bool {
         self.pane_view(pane_id)
-            .is_some_and(|pane| !pane.is_trash_view)
+            .is_some_and(|pane| pane.current_directory().is_some())
     }
 
+    /// 条目所在的目录。只有根目录 `/` 没有父目录，这时退回当前目录或它自己。
     pub(in crate::app) fn entry_parent_directory(&self, path: &Path) -> PathBuf {
         path.parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| self.tab().current_dir.clone())
+            .or(self.tab().current_directory())
+            .unwrap_or(path)
+            .to_path_buf()
     }
 
     fn select_context_menu_target(&mut self, path: PathBuf) {
@@ -870,12 +874,12 @@ impl FileBrowser {
             BrowserViewMode::Icons => {
                 if let Some(expansion) = self.icon_grid_expansion.as_ref().filter(|state| {
                     state.context().pane_id == pane.id
-                        && state.context().current_dir == *pane.current_dir
+                        && pane.current_directory() == Some(state.context().current_dir.as_path())
                 }) {
                     let selected_children = pane
                         .selected_paths
                         .iter()
-                        .filter(|path| path.parent() != Some(pane.current_dir.as_path()))
+                        .filter(|path| path.parent() != pane.current_directory())
                         .filter_map(|path| expansion.entry(path));
                     summary.merge(summarize_selected_entries(
                         selected_children,
@@ -908,14 +912,12 @@ impl FileBrowser {
             return Task::none();
         }
 
-        let paths = match self.tab().view_mode {
-            BrowserViewMode::Columns => {
-                let directory = selected
-                    .parent()
-                    .map(Path::to_path_buf)
-                    .unwrap_or_else(|| self.tab().current_dir.clone());
-                self.entry_paths_in_directory(&directory)
-            }
+        let paths = match self.tab().view_mode() {
+            BrowserViewMode::Columns => selected
+                .parent()
+                .or(self.tab().current_directory())
+                .map(|directory| self.entry_paths_in_directory(directory))
+                .unwrap_or_default(),
             BrowserViewMode::Icons | BrowserViewMode::List => self.visible_entry_paths(),
         };
         let Some(selected_index) = paths.iter().position(|path| path == &selected) else {
@@ -936,7 +938,7 @@ impl FileBrowser {
             return Task::none();
         };
 
-        if self.tab().view_mode == BrowserViewMode::Icons {
+        if self.tab().view_mode() == BrowserViewMode::Icons {
             let target_directory = self.entry_parent_directory(&target);
             if let Some(state) = self.icon_grid_expansion.as_mut() {
                 state.set_selection_directory(&target_directory);

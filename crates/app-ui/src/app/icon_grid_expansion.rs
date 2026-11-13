@@ -33,10 +33,15 @@ impl FileBrowser {
         &'a self,
         pane: BrowserPaneView<'a>,
     ) -> IconGridLayout<'a> {
-        let root_placeholders = crate::transfer_placeholders::transfer_placeholders_for_directory(
-            &self.operation_queue,
-            pane.current_dir,
-        );
+        let root_placeholders = pane
+            .current_directory()
+            .map(|directory| {
+                crate::transfer_placeholders::transfer_placeholders_for_directory(
+                    &self.operation_queue,
+                    directory,
+                )
+            })
+            .unwrap_or_default();
         self.icon_grid_layout_for_pane_with_placeholders(pane, &root_placeholders)
     }
 
@@ -50,7 +55,7 @@ impl FileBrowser {
         let expansion = self.icon_grid_expansion.as_ref().filter(|state| {
             pane.view_mode == BrowserViewMode::Icons
                 && state.context().pane_id == pane.id
-                && state.context().current_dir == *pane.current_dir
+                && pane.current_directory() == Some(state.context().current_dir.as_path())
         });
         // 展开子面板与根面板同一事实源:拖放进展开中的目录时,band 内
         // 占位按该目录的排序出现,与列表/多栏行为一致。
@@ -85,11 +90,7 @@ impl FileBrowser {
         // 目录置顶、文件段按组划分;子面板/band 永远平铺。元数据解析
         // 绑定 pane 的显示同源入口,分组键与列表行流同源。
         let root_grouping =
-            crate::transfer_placeholder_view::root_grouping::RootGrouping::for_pane_root(
-                self,
-                pane,
-                pane.current_dir.as_path(),
-            );
+            crate::transfer_placeholder_view::root_grouping::RootGrouping::for_pane_root(self);
         let metadata_for_entry = |entry: &DirectoryEntry| pane.metadata_for_entry(entry);
         let root_grouping =
             root_grouping
@@ -99,7 +100,7 @@ impl FileBrowser {
                     metadata_for_entry: &metadata_for_entry,
                 });
         IconGridLayout::with_root_transfer_placeholders(
-            pane.current_dir,
+            pane.current_directory(),
             pane.entries,
             root_placeholders,
             crate::transfer_placeholder_view::transfer_sort_for_root(self),
@@ -185,7 +186,7 @@ impl FileBrowser {
             );
         }
 
-        if anchor.parent_directory == self.tab().current_dir {
+        if self.tab().current_directory() == Some(anchor.parent_directory.as_path()) {
             if self.icon_grid_expansion.is_some() {
                 let (hidden_paths, closed_immediately, fallback) = {
                     let state = self
@@ -228,15 +229,18 @@ impl FileBrowser {
 
     fn start_icon_grid_root(&mut self, anchor: IconGridExpansionAnchor) -> Task<Message> {
         let pane_id = self.active_pane_id();
+        let Some(current_dir) = self.tab().current_directory().map(Path::to_path_buf) else {
+            return Task::none();
+        };
         if !self.icon_grid_anchor_is_valid(pane_id, &anchor)
-            || anchor.parent_directory != self.tab().current_dir
+            || anchor.parent_directory != current_dir
         {
             return Task::none();
         }
 
         let context = IconGridExpansionContext {
             pane_id,
-            current_dir: self.tab().current_dir.clone(),
+            current_dir,
             session_id: self.next_icon_grid_expansion_session_id(),
         };
         let mut expanded = loading_icon_grid_directory();
@@ -332,14 +336,11 @@ impl FileBrowser {
     }
 
     pub(super) fn prepare_icon_grid_entry_interaction(&mut self, path: &Path) -> Task<Message> {
-        if self.tab().view_mode != BrowserViewMode::Icons {
+        if self.tab().view_mode() != BrowserViewMode::Icons {
             return Task::none();
         }
         self.cancel_expansion_follow_plans();
-        let parent_directory = path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| self.tab().current_dir.clone());
+        let parent_directory = self.entry_parent_directory(path);
         let path_belongs_to_tree = self.icon_grid_expansion.as_mut().is_some_and(|state| {
             let belongs = state.contains_tree_path(path);
             state.set_selection_directory(&parent_directory);
@@ -561,7 +562,9 @@ impl FileBrowser {
 
     pub(super) fn reconcile_icon_grid_root_after_scan(&mut self, entries: &[DirectoryEntry]) {
         let pane_id = self.active_pane_id();
-        let current_dir = self.tab().current_dir.clone();
+        let Some(current_dir) = self.tab().current_directory().map(Path::to_path_buf) else {
+            return;
+        };
         let root_removed = self
             .icon_grid_expansion
             .as_mut()
@@ -724,8 +727,8 @@ impl FileBrowser {
             return false;
         };
         *pane_id == self.active_pane_id()
-            && self.tab().view_mode == BrowserViewMode::Icons
-            && current_dir == &self.tab().current_dir
+            && self.tab().view_mode() == BrowserViewMode::Icons
+            && self.tab().current_directory() == Some(current_dir.as_path())
             && self.icon_grid_expansion.as_ref().is_some_and(|state| {
                 state.matches_context(*pane_id, current_dir, *session_id)
                     && state.accepts_directory_load(&request.path)
@@ -742,13 +745,13 @@ impl FileBrowser {
         anchor: &IconGridExpansionAnchor,
     ) -> bool {
         let tab = self.tab();
-        if pane_id != self.active_pane_id()
-            || tab.view_mode != BrowserViewMode::Icons
-            || tab.is_trash_view
-        {
+        let Some(current_directory) = tab.current_directory() else {
+            return false;
+        };
+        if pane_id != self.active_pane_id() || tab.view_mode() != BrowserViewMode::Icons {
             return false;
         }
-        let entries = if anchor.parent_directory == tab.current_dir {
+        let entries = if anchor.parent_directory == current_directory {
             Some(tab.entries.as_slice())
         } else {
             self.icon_grid_expansion
@@ -761,9 +764,9 @@ impl FileBrowser {
     }
 
     fn icon_grid_state_matches_active_context(&self, state: &IconGridExpansionState) -> bool {
-        self.tab().view_mode == BrowserViewMode::Icons
+        self.tab().view_mode() == BrowserViewMode::Icons
             && state.context().pane_id == self.active_pane_id()
-            && state.context().current_dir == self.tab().current_dir
+            && self.tab().current_directory() == Some(state.context().current_dir.as_path())
     }
 
     fn next_icon_grid_expansion_session_id(&mut self) -> IconGridExpansionSessionId {

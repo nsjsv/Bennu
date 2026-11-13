@@ -4,15 +4,16 @@
 
 use std::path::PathBuf;
 
+use bennu_sidebar::BrowserLocation;
 use bennu_theme::address_bar::AddressSuggestionRequest;
 
 /// 状态机对外请求的效果。
 pub(crate) enum SessionEffect {
     None,
-    /// 导航类扫描（进入/上级/面包屑/初始 begin）：main 层除扫描外还
+    /// 导航类扫描（进入/上级/面包屑/侧边栏回收站/初始 begin）：main 层除扫描外还
     /// 要把面包屑滚到当前段。与列表展开的 `ScanDirectory` 拆开，是
     /// 为了让「滚尾」只挂在导航上——展开行不该强滚面包屑。
-    NavigateDirectory(PathBuf),
+    NavigateLocation(BrowserLocation),
     /// 列表展开行扫描：结果按路径回填到展开节点，不触发面包屑滚尾。
     ScanDirectory(PathBuf),
     /// 用户确认，携带选中路径。

@@ -27,6 +27,7 @@ mod local_send_window;
 mod network_connections;
 mod network_settings;
 mod option_controls;
+mod pane_blank_area;
 mod preview_panel;
 mod preview_settings;
 mod properties_window;
@@ -58,6 +59,7 @@ pub(crate) use window_chrome::{main_toolbar_height, window_shell};
 
 pub(crate) use address_bar::address_input_id;
 pub(crate) use local_send_window::{local_send_header, view_local_send_window};
+pub(crate) use pane_blank_area::pane_blank_area;
 pub(crate) use preview_panel::view_preview_window;
 pub(crate) use properties_window::view_properties_window;
 pub(crate) use search_panel::{search_input_id, SEARCH_RESULT_ROW_HEIGHT};
@@ -87,7 +89,8 @@ use crate::formatting::format_middle_ellipsized_text;
 use crate::icon_grid_view::icon_grid_view;
 use crate::list_view::list_browser_view;
 use crate::model::{
-    BrowserPaneId, BrowserPaneLayout, BrowserViewMode, Message, ScrollbarRegion, SplitAxis,
+    BrowserLocation, BrowserPaneId, BrowserPaneLayout, BrowserViewMode, Message, ScrollbarRegion,
+    SplitAxis,
 };
 use crate::operation_queue_view::{
     operation_queue_indicator, operation_queue_panel, OPERATION_QUEUE_INDICATOR_BOTTOM,
@@ -381,7 +384,6 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
             .unwrap_or_default();
         let panels = context_menu_panel(
             context_menu,
-            browser.tab().is_trash_view,
             browser.keyboard_modifiers,
             &browser.user_config().context_menus,
             &browser.user_config().list_view_preferences,
@@ -449,7 +451,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
 
     if let Some(directory) = browser.terminal_tab_drag_preview() {
         floating.push(FloatingContent {
-            element: container(tab_title_content(directory, false))
+            element: container(directory_title_content(directory))
                 .padding([7, 10])
                 .width(Length::Fixed(TAB_DRAG_PREVIEW_WIDTH))
                 .style(context_menu_style)
@@ -643,7 +645,7 @@ fn pane_view(browser: &FileBrowser, pane_id: BrowserPaneId) -> Element<'_, Messa
         main_content = main_content.push(tab_bar(browser, pane));
     }
 
-    if pane.is_trash_view {
+    if *pane.location == BrowserLocation::Trash {
         if let Some(warning_panel) = trash_warning::trash_warning_panel(browser) {
             main_content = main_content.push(warning_panel);
         }
@@ -719,22 +721,24 @@ fn browser_content_view<'a>(
         );
     }
 
-    match pane.view_mode {
-        BrowserViewMode::Columns => column_browser_view(browser, pane),
-        BrowserViewMode::List => track_file_drag_hit_test_marker(
-            list_browser_view(browser, pane),
-            FileDragHitTestMarker::DirectoryTarget {
-                pane_id: pane.id,
-                directory: pane.current_dir.clone(),
-            },
-        ),
-        BrowserViewMode::Icons => track_file_drag_hit_test_marker(
-            icon_grid_view(browser, pane),
-            FileDragHitTestMarker::DirectoryTarget {
-                pane_id: pane.id,
-                directory: pane.current_dir.clone(),
-            },
-        ),
+    let drop_marker = match pane.current_directory() {
+        Some(directory) => FileDragHitTestMarker::DirectoryTarget {
+            pane_id: pane.id,
+            directory: directory.to_path_buf(),
+        },
+        None => FileDragHitTestMarker::BlockedDirectoryTarget { pane_id: pane.id },
+    };
+    match (pane.view_mode, pane.current_directory()) {
+        (BrowserViewMode::Columns, Some(directory)) => {
+            column_browser_view(browser, pane, directory)
+        }
+        // 分栏沿目录链展开；不是目录的位置按列表显示。
+        (BrowserViewMode::Columns | BrowserViewMode::List, _) => {
+            track_file_drag_hit_test_marker(list_browser_view(browser, pane), drop_marker)
+        }
+        (BrowserViewMode::Icons, _) => {
+            track_file_drag_hit_test_marker(icon_grid_view(browser, pane), drop_marker)
+        }
     }
 }
 
@@ -946,9 +950,9 @@ fn drag_preview_tile_layer(
 }
 
 fn tab_drag_preview_panel(browser: &FileBrowser) -> Option<Element<'_, Message>> {
-    let preview = browser.tab_drag_preview()?;
+    let location = browser.tab_drag_preview()?;
     Some(
-        container(tab_title_content(preview.directory, preview.is_trash_view))
+        container(tab_title_content(location))
             .padding([7, 10])
             .width(Length::Fixed(TAB_DRAG_PREVIEW_WIDTH))
             .style(context_menu_style)
@@ -957,9 +961,9 @@ fn tab_drag_preview_panel(browser: &FileBrowser) -> Option<Element<'_, Message>>
 }
 
 fn pane_drag_preview_panel(browser: &FileBrowser) -> Option<Element<'_, Message>> {
-    let preview = browser.pane_drag_preview()?;
+    let location = browser.pane_drag_preview()?;
     Some(
-        container(tab_title_content(preview.directory, preview.is_trash_view))
+        container(tab_title_content(location))
             .padding([7, 10])
             .width(Length::Fixed(TAB_DRAG_PREVIEW_WIDTH))
             .style(context_menu_style)
@@ -968,25 +972,27 @@ fn pane_drag_preview_panel(browser: &FileBrowser) -> Option<Element<'_, Message>
 }
 
 /// 标签标题。图标一律用正文色：标签条和拖动中的标签都不再垫强调色底。
-fn tab_title_content<'a>(directory: &'a Path, is_trash_view: bool) -> Row<'a, Message> {
-    let symbol = if is_trash_view {
-        IconSymbol::Trash
-    } else {
-        IconSymbol::Folder
-    };
+fn tab_title_content<'a>(location: &BrowserLocation) -> Row<'a, Message> {
+    match location {
+        BrowserLocation::Directory(directory) => directory_title_content(directory),
+        BrowserLocation::Trash => title_row(IconSymbol::Trash, tr!("Trash")),
+    }
+}
+
+fn directory_title_content<'a>(directory: &Path) -> Row<'a, Message> {
+    title_row(IconSymbol::Folder, tab_title_text(directory))
+}
+
+fn title_row<'a>(symbol: IconSymbol, title: String) -> Row<'a, Message> {
     row![
         themed_icon(symbol, IconTone::Normal, TAB_ICON_SIZE),
-        readable_text(tab_title_text(directory, is_trash_view)),
+        readable_text(title),
     ]
     .spacing(6)
     .align_y(Alignment::Center)
 }
 
-fn tab_title_text(directory: &Path, is_trash_view: bool) -> String {
-    if is_trash_view {
-        return tr!("Trash");
-    }
-
+fn tab_title_text(directory: &Path) -> String {
     let title = directory
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())

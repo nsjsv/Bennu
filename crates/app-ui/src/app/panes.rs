@@ -7,8 +7,8 @@ use iced::Point;
 use super::tabs::{TabAnimationState, TabBarReveal};
 use super::FileBrowser;
 use crate::model::{
-    displayed_address_directory, AddressEditingSession, BrowserPane, BrowserPaneId,
-    BrowserPaneLayout, BrowserTab, BrowserViewMode, DirectoryCollectionPhase,
+    displayed_address_directory, AddressEditingSession, BrowserLocation, BrowserPane,
+    BrowserPaneId, BrowserPaneLayout, BrowserTab, BrowserViewMode, DirectoryCollectionPhase,
     DirectoryLoadingPlaceholder, ExpandedDirectory, FileDragState, IconGridViewport, SplitAxis,
     SplitRegion,
 };
@@ -26,8 +26,7 @@ pub(crate) enum DirectoryContentAvailability<'a> {
 #[derive(Clone, Copy)]
 pub(crate) struct BrowserPaneView<'a> {
     pub(crate) id: BrowserPaneId,
-    pub(crate) current_dir: &'a PathBuf,
-    pub(crate) is_trash_view: bool,
+    pub(crate) location: &'a BrowserLocation,
     pub(crate) entries: &'a [DirectoryEntry],
     pub(crate) directory_discovery: Option<&'a DirectoryDiscovery>,
     pub(crate) directory_loading_placeholder: Option<&'a DirectoryLoadingPlaceholder>,
@@ -37,8 +36,11 @@ pub(crate) struct BrowserPaneView<'a> {
     pub(crate) hovered_entry: Option<&'a PathBuf>,
     pub(crate) expanded_directories: &'a HashMap<PathBuf, ExpandedDirectory>,
     pub(crate) column_viewports: &'a HashMap<PathBuf, ColumnViewport>,
+    pub(crate) list_viewport: Option<ColumnViewport>,
     pub(crate) icon_grid_viewport: IconGridViewport,
     pub(crate) view_mode: BrowserViewMode,
+    /// 视图按钮亮的是用户的选择；回收站选了分栏时实际按列表显示（`view_mode`）。
+    pub(crate) chosen_view_mode: BrowserViewMode,
     pub(crate) tabs: &'a [BrowserTab],
     pub(crate) active_tab_id: usize,
     pub(crate) tab_animations: Option<&'a HashMap<usize, TabAnimationState>>,
@@ -54,12 +56,22 @@ pub(crate) struct BrowserPaneView<'a> {
 }
 
 impl<'a> BrowserPaneView<'a> {
+    /// 正在看的真实目录；回收站没有。
+    pub(crate) fn current_directory(&self) -> Option<&'a Path> {
+        self.location.directory()
+    }
+
+    /// 条目能否在原地展开、打开成目录。回收站里的条目只能恢复或删除。
+    pub(crate) fn browses_into_entries(&self) -> bool {
+        matches!(self.location, BrowserLocation::Directory(_))
+    }
+
     pub(crate) fn metadata_for_entry(&self, entry: &DirectoryEntry) -> EntryMetadata {
         let Some(index) = entry.discovery_index else {
             return entry.metadata.clone();
         };
         let discovery = entry.path.parent().and_then(|parent| {
-            if parent == self.current_dir.as_path() {
+            if Some(parent) == self.current_directory() {
                 self.directory_discovery
             } else {
                 self.expanded_directories
@@ -81,12 +93,14 @@ impl<'a> BrowserPaneView<'a> {
         }
     }
 
-    pub(crate) fn address_bar_directory(&self) -> &Path {
-        displayed_address_directory(
-            self.current_dir,
+    /// 地址栏面包屑与路径补全依据的目录；回收站不是目录，没有。
+    pub(crate) fn address_bar_directory(&self) -> Option<&'a Path> {
+        let current_directory = self.current_directory()?;
+        Some(displayed_address_directory(
+            current_directory,
             self.view_mode,
             self.deepest_open_column_directory,
-        )
+        ))
     }
 
     pub(crate) fn is_path_selected(&self, path: &std::path::Path) -> bool {
@@ -219,8 +233,7 @@ impl FileBrowser {
         // hover、重命名、文件拖拽和标签动画只属于活动窗格的交互，其它窗格静态呈现。
         Some(BrowserPaneView {
             id: pane_id,
-            current_dir: &tab.current_dir,
-            is_trash_view: tab.is_trash_view,
+            location: &tab.location,
             entries: &tab.entries,
             directory_discovery: tab.directory_discovery.as_ref(),
             directory_loading_placeholder: pane.directory_loading_placeholder.as_ref(),
@@ -230,8 +243,10 @@ impl FileBrowser {
             hovered_entry: self.hovered_entry.as_ref().filter(|_| is_active),
             expanded_directories: &tab.expanded_directories,
             column_viewports: &pane.column_viewports,
-            icon_grid_viewport: self.icon_grid_viewport_for(pane_id, &tab.current_dir),
-            view_mode: tab.view_mode,
+            list_viewport: pane.list_viewport,
+            icon_grid_viewport: self.icon_grid_viewport_for(pane_id, &tab.location),
+            view_mode: tab.view_mode(),
+            chosen_view_mode: tab.chosen_view_mode(),
             tabs: &pane.tabs,
             active_tab_id: pane.active_tab_id,
             tab_animations: is_active.then_some(&self.tab_animations),
@@ -304,12 +319,12 @@ impl FileBrowser {
     pub(super) fn icon_grid_viewport_for(
         &self,
         pane_id: BrowserPaneId,
-        directory: &Path,
+        location: &BrowserLocation,
     ) -> IconGridViewport {
         let mut viewport = self
             .icon_grid_viewports
             .get(&pane_id)
-            .filter(|state| state.directory == directory)
+            .filter(|state| state.location == *location)
             .map(|state| state.viewport)
             .unwrap_or_default();
         let pane_width = self.pane_content_width_for(pane_id);
@@ -503,7 +518,7 @@ mod tests {
         browser
             .panes
             .push(BrowserPane::new(second_pane_id, second_tab));
-        browser.tab_mut().current_dir = PathBuf::from("/first");
+        browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/first"));
         browser.tab_mut().entries = Arc::new(vec![DirectoryEntry::new(
             PathBuf::from("/first/a.txt"),
             FileKind::File,
@@ -515,7 +530,10 @@ mod tests {
 
         // 没有任何同步调用：活动窗格的视图、访问器和窗格表读到的是同一份。
         let active = browser.pane_view(browser.active_pane_id()).expect("active");
-        assert_eq!(active.current_dir, &PathBuf::from("/first"));
+        assert_eq!(
+            active.current_directory().unwrap(),
+            &PathBuf::from("/first")
+        );
         assert_eq!(active.entries.len(), 1);
         assert!(Arc::ptr_eq(
             &browser.tab().entries,
@@ -523,13 +541,22 @@ mod tests {
         ));
 
         let inactive = browser.pane_view(second_pane_id).expect("inactive");
-        assert_eq!(inactive.current_dir, &PathBuf::from("/second"));
+        assert_eq!(
+            inactive.current_directory().unwrap(),
+            &PathBuf::from("/second")
+        );
         assert_eq!(inactive.selected, Some(&PathBuf::from("/second/b.txt")));
 
         // 切换窗格只换引用，两边状态原样保留。
         browser.pane_layout = browser.pane_layout.with_active(second_pane_id);
-        assert_eq!(browser.tab().current_dir, PathBuf::from("/second"));
-        assert_eq!(browser.panes[0].tab().current_dir, PathBuf::from("/first"));
+        assert_eq!(
+            browser.tab().current_directory().unwrap(),
+            PathBuf::from("/second")
+        );
+        assert_eq!(
+            browser.panes[0].tab().current_directory().unwrap(),
+            PathBuf::from("/first")
+        );
     }
 
     #[test]

@@ -7,7 +7,7 @@ use thumbnails::ThumbnailRequest;
 use super::{FileBrowser, PaneIconGridViewport};
 use crate::commands::thumbnail_batch_command;
 use crate::model::{
-    sanitized_application_log_detail, BrowserPane, BrowserPaneId, BrowserViewMode,
+    sanitized_application_log_detail, BrowserLocation, BrowserPane, BrowserPaneId, BrowserViewMode,
     IconGridViewport, Message, ScrollbarRegion,
 };
 use crate::thumbnail_cache::{
@@ -77,11 +77,8 @@ impl FileBrowser {
             offset_y: offset_y.max(0.0),
             height: height.max(1.0),
         };
-        let Some(directory) = self.pane_view(pane_id).map(|pane| pane.current_dir.clone()) else {
-            return Task::none();
-        };
         if let Some(pane) = self.pane_by_id_mut(pane_id) {
-            pane.column_viewports.insert(directory, viewport);
+            pane.list_viewport = Some(viewport);
         }
         self.schedule_visible_list_thumbnail_range_for_pane(pane_id, Some(viewport));
         Task::batch([
@@ -98,13 +95,13 @@ impl FileBrowser {
         width: f32,
         height: f32,
     ) -> Task<Message> {
-        let Some(directory) = self.pane_view(pane_id).map(|pane| pane.current_dir.clone()) else {
+        let Some(location) = self.pane_view(pane_id).map(|pane| pane.location.clone()) else {
             return Task::none();
         };
         self.icon_grid_viewports.insert(
             pane_id,
             PaneIconGridViewport {
-                directory,
+                location,
                 viewport: IconGridViewport {
                     offset_y: offset_y.max(0.0),
                     width: width.max(1.0),
@@ -305,18 +302,18 @@ impl FileBrowser {
     fn schedule_visible_icon_grid_thumbnails_for_pane(&mut self, pane_id: BrowserPaneId) {
         let icon_edge = self.user_config.icons_icon_edge();
         let thumbnail_edge = crate::icon_grid_geometry::thumbnail_edge(icon_edge);
-        let Some((directory, requests)) = self.pane_view(pane_id).map(|pane| {
+        let Some((location, requests)) = self.pane_view(pane_id).map(|pane| {
             let layout = self.icon_grid_layout_for_pane(pane);
             let requests = layout
                 .visible_entries(pane.icon_grid_viewport)
                 .into_iter()
                 .filter_map(|visible| request_for_entry(visible.entry, thumbnail_edge))
                 .collect::<Vec<_>>();
-            (pane.current_dir.clone(), requests)
+            (pane.location.clone(), requests)
         }) else {
             return;
         };
-        let scope = thumbnail_scope_for_pane_directory(pane_id, &directory);
+        let scope = thumbnail_scope_for_pane_location(pane_id, location);
         let keep = requests
             .iter()
             .map(ThumbnailRequest::key)
@@ -345,7 +342,7 @@ impl FileBrowser {
         };
         let geometry =
             crate::list_view::ListGeometry::for_level(self.user_config.list_view_density);
-        let directory = pane.current_dir.clone();
+        let location = pane.location.clone();
         // 初始预热行数必须由真实视口高度推导；固定行数在窗口较高时会让
         // 折叠线以下的可见条目永远等不到调度，只能靠 hover/滚动补救。
         let initial_rows = crate::list_view::list_initial_rows(
@@ -378,7 +375,6 @@ impl FileBrowser {
             range.start,
             range.end,
         );
-        let scope = thumbnail_scope_for_pane_directory(pane_id, &directory);
         let requests = entries
             .iter()
             .filter_map(|visible_entry| request_for_entry(visible_entry.entry, LIST_THUMBNAIL_EDGE))
@@ -386,12 +382,13 @@ impl FileBrowser {
         tracing::debug!(
             target: "app_ui::thumbnail",
             pane = %pane_id.key(),
-            directory = %directory.display(),
+            location = ?location,
             range_start = range.start,
             range_end = range.end,
             requests = requests.len(),
             "list thumbnail schedule"
         );
+        let scope = thumbnail_scope_for_pane_location(pane_id, location);
         let keep = requests
             .iter()
             .map(ThumbnailRequest::key)
@@ -413,7 +410,10 @@ impl FileBrowser {
         priority: ThumbnailPriority,
     ) {
         let requests = self.thumbnail_requests_for_pane_directory_range(pane_id, directory);
-        let scope = thumbnail_scope_for_pane_directory(pane_id, directory);
+        let scope = thumbnail_scope_for_pane_location(
+            pane_id,
+            BrowserLocation::Directory(directory.into()),
+        );
         let keep = requests
             .iter()
             .map(ThumbnailRequest::key)
@@ -547,7 +547,7 @@ impl FileBrowser {
         directory: &Path,
     ) -> Option<&[DirectoryEntry]> {
         let tab = self.pane_by_id(pane_id)?.tab();
-        if directory == tab.current_dir {
+        if tab.current_directory() == Some(directory) {
             return Some(&tab.entries);
         }
 
@@ -684,7 +684,7 @@ fn thumbnail_request_matches_entry(entry: &DirectoryEntry, request: &ThumbnailRe
 
 fn thumbnail_request_matches_pane(pane: &BrowserPane, request: &ThumbnailRequest) -> bool {
     let tab = pane.tab();
-    let entry = match tab.view_mode {
+    let entry = match tab.view_mode() {
         BrowserViewMode::Icons => tab
             .entries
             .iter()
@@ -728,10 +728,13 @@ fn thumbnail_request_matches_transfer_conflict_path(
         .is_some_and(|current| current.key() == request.key())
 }
 
-fn thumbnail_scope_for_pane_directory(pane_id: BrowserPaneId, directory: &Path) -> ThumbnailScope {
-    ThumbnailScope::PaneDirectory {
+fn thumbnail_scope_for_pane_location(
+    pane_id: BrowserPaneId,
+    location: BrowserLocation,
+) -> ThumbnailScope {
+    ThumbnailScope::PaneLocation {
         pane_id: pane_id.key(),
-        directory: directory.to_path_buf(),
+        location,
     }
 }
 

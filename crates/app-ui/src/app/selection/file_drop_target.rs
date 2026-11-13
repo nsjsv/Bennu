@@ -7,8 +7,8 @@ use super::super::sidebar_bookmarks::{
 };
 use super::FileBrowser;
 use crate::model::{
-    trash_location_path, FileDragHitTestBounds, FileDropEntryTargetBounds, FileDropHitTestBounds,
-    FileDropTarget, SidebarBookmarkDropSlot,
+    FileDragHitTestBounds, FileDropEntryTargetBounds, FileDropHitTestBounds, FileDropTarget,
+    SidebarBookmarkDropSlot,
 };
 
 pub(super) fn freeze_file_drop_hit_test_bounds(
@@ -92,7 +92,7 @@ pub(super) fn resolve_file_drop_target(
             .find(|target| target.bounds.contains(position))
         {
             let Some(favorite_index) = target.favorite_index else {
-                return sidebar_file_drop_target_for_directory(&target.directory);
+                return Some(FileDropTarget::Directory(target.directory.clone()));
             };
             return match sidebar_bookmark_row_pointer_target(
                 position.y,
@@ -106,8 +106,7 @@ pub(super) fn resolve_file_drop_target(
                 ),
                 SidebarBookmarkRowPointerTarget::Directory => (target.directory
                     != *bookmark_source)
-                    .then(|| sidebar_file_drop_target_for_directory(&target.directory))
-                    .flatten(),
+                    .then(|| FileDropTarget::Directory(target.directory.clone())),
                 SidebarBookmarkRowPointerTarget::InsertAfter => Some(
                     FileDropTarget::SidebarBookmarkSlot(SidebarBookmarkDropSlot::Insert {
                         index: favorite_index + 1,
@@ -121,7 +120,7 @@ pub(super) fn resolve_file_drop_target(
         .rev()
         .find(|target| target.bounds.contains(position))
     {
-        return sidebar_file_drop_target_for_directory(&target.directory);
+        return Some(FileDropTarget::Directory(target.directory.clone()));
     }
 
     if let Some(target) = bounds
@@ -157,11 +156,6 @@ pub(super) fn resolve_file_drop_target(
         .map(|target| FileDropTarget::Directory(target.directory.clone()))
 }
 
-pub(super) fn sidebar_file_drop_target_for_directory(directory: &Path) -> Option<FileDropTarget> {
-    (directory != trash_location_path().as_path())
-        .then(|| FileDropTarget::Directory(directory.to_path_buf()))
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -170,8 +164,7 @@ mod tests {
 
     use super::*;
     use crate::model::{
-        BreadcrumbDropTargetBounds, SidebarFileDragTargetBounds, TabDropDestination,
-        TabFileDropTarget, TabFileDropTargetBounds,
+        BreadcrumbDropTargetBounds, TabDropDestination, TabFileDropTarget, TabFileDropTargetBounds,
     };
 
     #[test]
@@ -222,24 +215,6 @@ mod tests {
         assert_eq!(
             resolve_file_drop_target(&bounds, Point::new(20.0, 100.0), None),
             Some(FileDropTarget::Directory(PathBuf::from("/content")))
-        );
-    }
-
-    #[test]
-    fn sidebar_trash_is_not_a_drop_target() {
-        let trash_path = crate::model::trash_location_path();
-        let bounds = FileDropHitTestBounds {
-            sidebar_directories: vec![SidebarFileDragTargetBounds {
-                directory: trash_path.clone(),
-                favorite_index: None,
-                bounds: Rectangle::new(Point::new(0.0, 0.0), Size::new(180.0, 36.0)),
-            }],
-            ..FileDropHitTestBounds::default()
-        };
-
-        assert_eq!(
-            resolve_file_drop_target(&bounds, Point::new(20.0, 18.0), None),
-            None
         );
     }
 

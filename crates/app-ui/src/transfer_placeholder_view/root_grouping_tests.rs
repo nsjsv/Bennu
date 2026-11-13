@@ -1,6 +1,6 @@
 // 根目录分组接入的单元测试:与实现分文件以守住单文件 800 行约束。
 // 覆盖:组头行高计入虚拟范围/内容高/reveal 纵向界、组头断开选中连排、
-// 目录(含目录占位)置顶、非根目录(展开子目录语义)拿不到划分器、
+// 目录(含目录占位)置顶、
 // 分组关闭(None)回归保护、大小维度未知尺寸归最末兜底组。
 use std::collections::HashSet;
 use std::path::Path;
@@ -278,29 +278,14 @@ fn size_grouping_sends_unknown_placeholder_size_to_last_bucket() {
 }
 
 #[test]
-fn grouping_applies_only_to_pane_root_directory_and_only_when_enabled() {
-    // 分组开启:当前目录拿到划分器;展开子目录(路径≠current_dir)拿不到,
-    // 递归摊平走平铺分支——展开内容不出组头的边界保护。
+fn grouping_applies_only_when_enabled() {
+    // 展开的子目录平铺由行流构建器保证(见 stripe_index_tests),这里只管开关。
     let browser = browser_with_grouping(FileGroupingMode::NameInitial);
-    let pane = browser.pane_view(BrowserPaneId::PRIMARY).unwrap();
-    assert!(
-        root_grouping::RootGrouping::for_pane_root(&browser, pane, pane.current_dir.as_path())
-            .is_some()
-    );
-    assert!(root_grouping::RootGrouping::for_pane_root(
-        &browser,
-        pane,
-        Path::new("/some/child/dir")
-    )
-    .is_none());
+    assert!(root_grouping::RootGrouping::for_pane_root(&browser).is_some());
 
-    // 分组关闭(默认 None):即使当前目录也不划分,行流与既有平铺一致。
+    // 分组关闭(默认 None):根层也不划分,行流与既有平铺一致。
     let browser = browser_with_grouping(FileGroupingMode::None);
-    let pane = browser.pane_view(BrowserPaneId::PRIMARY).unwrap();
-    assert!(
-        root_grouping::RootGrouping::for_pane_root(&browser, pane, pane.current_dir.as_path())
-            .is_none()
-    );
+    assert!(root_grouping::RootGrouping::for_pane_root(&browser).is_none());
 }
 
 #[test]

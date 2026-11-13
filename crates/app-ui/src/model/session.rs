@@ -2,13 +2,13 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use bennu_state::{
-    StoredBrowserPane, StoredBrowserPaneLayout, StoredBrowserSession, StoredBrowserTab,
-    StoredBrowserViewMode, StoredColumnBrowserViewport, StoredColumnViewport, StoredPath,
-    StoredSplitAxis,
+    StoredBrowserLocation, StoredBrowserPane, StoredBrowserPaneLayout, StoredBrowserSession,
+    StoredBrowserTab, StoredBrowserViewMode, StoredColumnBrowserViewport, StoredColumnViewport,
+    StoredListViewport, StoredPath, StoredSplitAxis,
 };
 
 use crate::model::{
-    BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, BrowserViewMode,
+    BrowserLocation, BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, BrowserViewMode,
     ColumnBrowserViewport, ExpandedDirectory, ExpandedDirectoryStatus, SplitAxis,
 };
 use crate::thumbnail_cache::ColumnViewport;
@@ -35,13 +35,13 @@ pub(crate) struct BrowserPaneSession {
     pub(crate) active_tab_id: usize,
     pub(crate) column_browser_viewport: ColumnBrowserViewport,
     pub(crate) column_viewports: HashMap<PathBuf, ColumnViewport>,
+    pub(crate) list_viewport: Option<ColumnViewport>,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct BrowserTabSession {
     pub(crate) id: usize,
-    pub(crate) directory: PathBuf,
-    pub(crate) is_trash_view: bool,
+    pub(crate) location: BrowserLocation,
     pub(crate) selected: Option<PathBuf>,
     pub(crate) selected_paths: HashSet<PathBuf>,
     pub(crate) deepest_open_column_directory: Option<PathBuf>,
@@ -53,17 +53,13 @@ pub(crate) struct BrowserTabSession {
 
 impl BrowserTabSession {
     pub(crate) fn to_browser_tab(&self) -> BrowserTab {
-        let mut tab = if self.is_trash_view {
-            BrowserTab::trash(self.id)
-        } else {
-            BrowserTab::directory(self.id, self.directory.clone())
-        };
+        let mut tab = BrowserTab::at(self.id, self.location.clone());
         tab.selected = self.selected.clone();
         tab.selected_paths = self.selected_paths.clone();
         tab.selection_anchor = self.selected.clone();
         tab.deepest_open_column_directory = self.deepest_open_column_directory.clone();
         tab.expanded_directories = self.restored_expanded_directories();
-        tab.view_mode = self.view_mode;
+        tab.choose_view_mode(self.view_mode);
         tab.back_stack = self.back_stack.clone();
         tab.forward_stack = self.forward_stack.clone();
         tab
@@ -71,18 +67,25 @@ impl BrowserTabSession {
 
     pub(crate) fn restored_expanded_directories(&self) -> HashMap<PathBuf, ExpandedDirectory> {
         let mut directories = self.expanded_directories.clone();
-        if self.view_mode == BrowserViewMode::Columns && !self.is_trash_view {
-            if let Some(open_directory) = &self.deepest_open_column_directory {
+        if self.view_mode == BrowserViewMode::Columns {
+            if let (Some(directory), Some(open_directory)) = (
+                self.location.directory(),
+                &self.deepest_open_column_directory,
+            ) {
                 directories.extend(restored_column_chain_directories(
-                    self.directory.as_path(),
+                    directory,
                     open_directory.as_path(),
                 ));
             }
         }
 
+        // 只有目录位置能展开子目录；回收站的展开记录一律丢掉。
+        let Some(directory) = self.location.directory() else {
+            return HashMap::new();
+        };
         directories
             .into_iter()
-            .filter(|path| path != &self.directory && path.starts_with(self.directory.as_path()))
+            .filter(|path| path != directory && path.starts_with(directory))
             .map(|path| (path, restored_expanded_directory()))
             .collect()
     }
@@ -122,19 +125,19 @@ pub(crate) fn pane_session_from_live(pane: &BrowserPane) -> BrowserPaneSession {
         active_tab_id: pane.active_tab_id,
         column_browser_viewport: pane.column_browser_viewport,
         column_viewports: pane.column_viewports.clone(),
+        list_viewport: pane.list_viewport,
     }
 }
 
 pub(crate) fn tab_session_from_live(tab: &BrowserTab) -> BrowserTabSession {
     BrowserTabSession {
         id: tab.id,
-        directory: tab.current_dir.clone(),
-        is_trash_view: tab.is_trash_view,
+        location: tab.location.clone(),
         selected: tab.selected.clone(),
         selected_paths: tab.selected_paths.clone(),
         deepest_open_column_directory: tab.deepest_open_column_directory.clone(),
         expanded_directories: tab.expanded_directories.keys().cloned().collect(),
-        view_mode: tab.view_mode,
+        view_mode: tab.chosen_view_mode(),
         back_stack: tab.back_stack.clone(),
         forward_stack: tab.forward_stack.clone(),
     }
@@ -173,14 +176,22 @@ fn pane_from_stored(stored: StoredBrowserPane) -> Option<BrowserPaneSession> {
             width: stored.column_browser_viewport.width,
         },
         column_viewports,
+        list_viewport: stored.list_viewport.map(|viewport| ColumnViewport {
+            offset_y: viewport.offset_y,
+            height: viewport.height,
+        }),
     })
 }
 
 fn tab_from_stored(stored: StoredBrowserTab) -> Option<BrowserTabSession> {
     Some(BrowserTabSession {
         id: usize::try_from(stored.id).ok()?,
-        directory: stored.directory.to_path_buf(),
-        is_trash_view: stored.is_trash_view,
+        location: match stored.location {
+            StoredBrowserLocation::Directory { path } => {
+                BrowserLocation::Directory(path.to_path_buf())
+            }
+            StoredBrowserLocation::Trash => BrowserLocation::Trash,
+        },
         selected: stored.selected.map(|path| path.to_path_buf()),
         selected_paths: stored
             .selected_paths
@@ -231,14 +242,22 @@ fn pane_to_stored(pane: BrowserPaneSession) -> Option<StoredBrowserPane> {
                 height: viewport.height,
             })
             .collect(),
+        list_viewport: pane.list_viewport.map(|viewport| StoredListViewport {
+            offset_y: viewport.offset_y,
+            height: viewport.height,
+        }),
     })
 }
 
 fn tab_to_stored(tab: BrowserTabSession) -> Option<StoredBrowserTab> {
     Some(StoredBrowserTab {
         id: u64::try_from(tab.id).ok()?,
-        directory: StoredPath::from_path(&tab.directory),
-        is_trash_view: tab.is_trash_view,
+        location: match &tab.location {
+            BrowserLocation::Directory(directory) => StoredBrowserLocation::Directory {
+                path: StoredPath::from_path(directory),
+            },
+            BrowserLocation::Trash => StoredBrowserLocation::Trash,
+        },
         selected: tab.selected.as_deref().map(StoredPath::from_path),
         selected_paths: tab
             .selected_paths

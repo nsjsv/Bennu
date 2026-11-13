@@ -9,6 +9,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::super::FileBrowser;
 use crate::config;
+use crate::model::BrowserLocation;
 use crate::model::{
     BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, BrowserViewMode,
     DirectoryCollectionPhase, DirectoryExpansionLoadContext, DirectoryLoadRequest,
@@ -63,7 +64,7 @@ async fn added_entries_land_in_sorted_position() {
     std::fs::write(workspace.path().join("a.txt"), b"a").unwrap();
     std::fs::write(workspace.path().join("c.txt"), b"c").unwrap();
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = workspace.path().to_path_buf();
+    browser.tab_mut().location = BrowserLocation::Directory(workspace.path().to_path_buf());
     browser.tab_mut().directory_discovery = Some(discovery_for(workspace.path()).await);
     browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Ready;
     browser.set_entries(Arc::new(crate::model::display_entries_in_discovery_order(
@@ -92,8 +93,8 @@ async fn removed_entries_drop_out_and_clear_selection() {
     std::fs::write(workspace.path().join("a.txt"), b"a").unwrap();
     std::fs::write(workspace.path().join("b.txt"), b"b").unwrap();
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = workspace.path().to_path_buf();
-    browser.tab_mut().view_mode = BrowserViewMode::List;
+    browser.tab_mut().location = BrowserLocation::Directory(workspace.path().to_path_buf());
+    browser.tab_mut().choose_view_mode(BrowserViewMode::List);
     browser.tab_mut().directory_discovery = Some(discovery_for(workspace.path()).await);
     browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Ready;
     browser.set_entries(Arc::new(crate::model::display_entries_in_discovery_order(
@@ -119,7 +120,7 @@ async fn same_directory_rename_moves_entry_in_place() {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::write(workspace.path().join("old.txt"), b"x").unwrap();
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = workspace.path().to_path_buf();
+    browser.tab_mut().location = BrowserLocation::Directory(workspace.path().to_path_buf());
     browser.tab_mut().directory_discovery = Some(discovery_for(workspace.path()).await);
     browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Ready;
     browser.set_entries(Arc::new(crate::model::display_entries_in_discovery_order(
@@ -154,7 +155,7 @@ async fn cross_directory_move_updates_both_expanded_lists_without_trespass() {
     std::fs::create_dir_all(&target_dir).unwrap();
     std::fs::write(source_dir.join("moved.txt"), b"x").unwrap();
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = workspace.path().to_path_buf();
+    browser.tab_mut().location = BrowserLocation::Directory(workspace.path().to_path_buf());
     // 多栏视图场景：两个目录都在 expanded_directories 中显示。
     browser.tab_mut().expanded_directories.insert(
         source_dir.clone(),
@@ -211,7 +212,7 @@ async fn hidden_additions_are_ignored_when_hidden_files_are_excluded() {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::write(workspace.path().join("a.txt"), b"a").unwrap();
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = workspace.path().to_path_buf();
+    browser.tab_mut().location = BrowserLocation::Directory(workspace.path().to_path_buf());
     browser.tab_mut().directory_discovery = Some(discovery_for(workspace.path()).await);
     browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Ready;
     browser.set_entries(Arc::new(crate::model::display_entries_in_discovery_order(
@@ -228,10 +229,10 @@ async fn hidden_additions_are_ignored_when_hidden_files_are_excluded() {
 #[test]
 fn rescan_required_or_missing_targets_fall_back_to_full_reload() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = PathBuf::from("/tmp/somewhere");
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/tmp/somewhere"));
 
     // RescanRequired 必须返回 None 以触发全量重扫兜底。
-    let current_dir = browser.tab().current_dir.clone();
+    let current_dir = browser.tab().current_directory().unwrap().to_path_buf();
     assert!(browser
         .apply_entry_changes(&current_dir, &[ResolvedEntryChange::RescanRequired])
         .is_none());
@@ -251,7 +252,7 @@ async fn transfer_reconciliation_requires_source_gone_and_target_visible() {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::write(workspace.path().join("kept.txt"), b"k").unwrap();
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = workspace.path().to_path_buf();
+    browser.tab_mut().location = BrowserLocation::Directory(workspace.path().to_path_buf());
     browser.tab_mut().directory_discovery = Some(discovery_for(workspace.path()).await);
     browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Ready;
     browser.set_entries(Arc::new(crate::model::display_entries_in_discovery_order(
@@ -290,7 +291,7 @@ async fn transfer_reconciliation_requires_source_gone_and_target_visible() {
 /// 来自真实目录扫描，保证增量应用路径与生产一致。
 async fn split_browser_with_panes(active_dir: &Path, inactive_dir: &Path) -> FileBrowser {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = active_dir.to_path_buf();
+    browser.tab_mut().location = BrowserLocation::Directory(active_dir.to_path_buf());
     browser.tab_mut().directory_discovery = Some(discovery_for(active_dir).await);
     browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Ready;
     browser.set_entries(Arc::new(crate::model::display_entries_in_discovery_order(
@@ -528,30 +529,24 @@ async fn incremental_removals_reclamp_a_viewport_left_past_the_content() {
         std::fs::write(workspace.path().join(format!("f{index}.txt")), b"x").unwrap();
     }
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = workspace.path().to_path_buf();
-    browser.tab_mut().view_mode = BrowserViewMode::List;
+    browser.tab_mut().location = BrowserLocation::Directory(workspace.path().to_path_buf());
+    browser.tab_mut().choose_view_mode(BrowserViewMode::List);
     browser.tab_mut().directory_discovery = Some(discovery_for(workspace.path()).await);
     browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Ready;
     browser.set_entries(Arc::new(crate::model::display_entries_in_discovery_order(
         browser.tab().directory_discovery.as_ref().unwrap(),
     )));
-    browser.pane_mut().column_viewports.insert(
-        workspace.path().to_path_buf(),
-        ColumnViewport {
-            offset_y: 22000.0,
-            height: 800.0,
-        },
-    );
+    browser.pane_mut().list_viewport = Some(ColumnViewport {
+        offset_y: 22000.0,
+        height: 800.0,
+    });
 
     let removals = (0..3)
         .map(|index| removed(workspace.path().join(format!("f{index}.txt"))))
         .collect::<Vec<_>>();
     drop(browser.apply_entry_changes(workspace.path(), &removals));
 
-    assert_eq!(
-        browser.pane().column_viewports[workspace.path()].offset_y,
-        0.0
-    );
+    assert_eq!(browser.pane().list_viewport.unwrap().offset_y, 0.0);
 }
 
 // ---- 扫描期间到达的变化：排队，落地后按到达顺序重放 ----
@@ -565,7 +560,7 @@ async fn start_current_scan(
     browser: &mut FileBrowser,
     directory: &Path,
 ) -> (DirectoryLoadRequest, DirectoryDiscovery) {
-    browser.tab_mut().current_dir = directory.to_path_buf();
+    browser.tab_mut().location = BrowserLocation::Directory(directory.to_path_buf());
     browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Discovering;
     let request = browser.next_directory_load_request(directory.to_path_buf());
     (request, discovery_for(directory).await)
@@ -703,7 +698,7 @@ async fn watched_directories_cover_every_visible_pane_even_while_scanning() {
         .pane_by_id_mut(BrowserPaneId(1))
         .unwrap()
         .tab_mut()
-        .is_trash_view = true;
+        .location = BrowserLocation::Trash;
     assert!(!browser.watched_directories().contains(&other_dir));
 }
 
@@ -714,7 +709,7 @@ async fn changes_during_an_expanded_directory_scan_are_applied_after_it_lands() 
     std::fs::create_dir_all(&child).unwrap();
     std::fs::write(child.join("a.txt"), b"a").unwrap();
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = workspace.path().to_path_buf();
+    browser.tab_mut().location = BrowserLocation::Directory(workspace.path().to_path_buf());
     browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Ready;
     let snapshot = discovery_for(&child).await;
     let mut expanded = expanded_loaded(snapshot.clone());

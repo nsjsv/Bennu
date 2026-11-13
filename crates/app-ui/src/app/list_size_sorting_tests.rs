@@ -54,7 +54,7 @@ fn recursive_size_sort_reorders_expanded_entries_and_inactive_pane() {
     browser.options.sort_direction = SortDirection::Ascending;
 
     let mut active_tab = BrowserTab::directory(0, active_root);
-    active_tab.view_mode = BrowserViewMode::List;
+    active_tab.choose_view_mode(BrowserViewMode::List);
     active_tab.entries = vec![test_entry(parent.clone(), FileKind::Directory)].into();
     active_tab.expanded_directories.insert(
         parent.clone(),
@@ -64,7 +64,7 @@ fn recursive_size_sort_reorders_expanded_entries_and_inactive_pane() {
         ]),
     );
     let mut inactive_tab = BrowserTab::directory(1, inactive_root.clone());
-    inactive_tab.view_mode = BrowserViewMode::List;
+    inactive_tab.choose_view_mode(BrowserViewMode::List);
     inactive_tab.entries = vec![
         test_entry(inactive_large.clone(), FileKind::Directory),
         test_entry(inactive_small.clone(), FileKind::Directory),

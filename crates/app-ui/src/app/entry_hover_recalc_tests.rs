@@ -15,6 +15,7 @@ use crate::icon_grid_geometry::{
     ICON_GRID_CONTENT_PADDING,
 };
 use crate::list_view::{ListGeometry, LIST_HEADER_HEIGHT, LIST_ROW_HEIGHT};
+use crate::model::BrowserLocation;
 use crate::model::{BrowserPaneId, BrowserViewMode, FileGroupingMode, Message};
 
 const PANE_ID: BrowserPaneId = BrowserPaneId::PRIMARY;
@@ -36,9 +37,9 @@ fn file_entry(path: &str) -> DirectoryEntry {
 
 fn list_browser(paths: &[&str]) -> FileBrowser {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
     browser.tab_mut().entries = Arc::new(paths.iter().map(|path| file_entry(path)).collect());
-    browser.tab_mut().view_mode = BrowserViewMode::List;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::List);
     browser
 }
 
@@ -199,13 +200,13 @@ fn rail_barrier_is_dropped_when_entries_or_grouping_change() {
 #[test]
 fn icon_grid_scroll_moves_hover_to_the_cell_under_the_cursor() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
     browser.tab_mut().entries = Arc::new(vec![
         file_entry("/workspace/a.txt"),
         file_entry("/workspace/b.txt"),
         file_entry("/workspace/c.txt"),
     ]);
-    browser.tab_mut().view_mode = BrowserViewMode::Icons;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::Icons);
     let viewport = Rectangle::new(Point::new(200.0, 120.0), Size::new(600.0, 500.0));
     assert!(column_count_for_width(viewport.width, 96) >= 2);
     let edge = browser.user_config.icons_icon_edge();
@@ -233,12 +234,12 @@ fn icon_grid_scroll_moves_hover_to_the_cell_under_the_cursor() {
 #[test]
 fn icon_grid_scroll_over_group_header_clears_hover() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
     browser.tab_mut().entries = Arc::new(vec![
         file_entry("/workspace/apple.txt"),
         file_entry("/workspace/zebra.txt"),
     ]);
-    browser.tab_mut().view_mode = BrowserViewMode::Icons;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::Icons);
     browser.user_config.file_grouping = FileGroupingMode::NameInitial;
     let viewport = Rectangle::new(Point::new(200.0, 120.0), Size::new(600.0, 500.0));
     let edge = browser.user_config.icons_icon_edge();
@@ -260,14 +261,14 @@ fn scrolled_grid_hover_tracks_scroll_offset_from_message() {
     // 同一光标位置,不同滚动偏移落在不同格子上:补偿用消息里的
     // offset_y 换算内容落点,而不是视口内的固定行。
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
     // 条目足够多:窗格宽推导的列数下,row 1 / row 2 都真实存在。
     browser.tab_mut().entries = Arc::new(
         (0..36)
             .map(|index| file_entry(&format!("/workspace/item-{index:02}.txt")))
             .collect(),
     );
-    browser.tab_mut().view_mode = BrowserViewMode::Icons;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::Icons);
     let viewport = Rectangle::new(Point::new(200.0, 120.0), Size::new(600.0, 500.0));
     let edge = browser.user_config.icons_icon_edge();
     // 布局的列数由窗格内容宽推导(icon_grid_viewport_for 会把测量宽

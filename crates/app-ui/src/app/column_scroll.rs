@@ -134,13 +134,10 @@ impl FileBrowser {
     }
 
     fn column_index_containing_path(&self, path: &Path) -> Option<usize> {
-        let directory = path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| self.tab().current_dir.clone());
+        let directory = path.parent().or(self.tab().current_directory())?;
         column_directories(self)
             .iter()
-            .position(|column_directory| column_directory == &directory)
+            .position(|column_directory| column_directory == directory)
     }
 
     fn column_scroll_offset(&self, start_column_index: usize) -> f32 {

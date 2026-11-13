@@ -33,7 +33,10 @@ fn x11_multi_file_directory_drop_opens_one_existing_prompt() {
             rectangle(0.0, 0.0, 100.0, 100.0),
         ),
     ));
-    assert_eq!(browser.paste_target_directory(), clipboard_directory);
+    assert_eq!(
+        browser.paste_target_directory(),
+        Some(clipboard_directory.clone())
+    );
     drop(browser.accept_x11_target_event(
         X11FileDropTargetEvent::Dropped {
             target_session_id: id,
@@ -60,7 +63,10 @@ fn x11_multi_file_directory_drop_opens_one_existing_prompt() {
         Some(FileDropPrompt { paste_directory, paths: actual })
             if paste_directory == &destination && actual == &paths
     ));
-    assert_eq!(browser.paste_target_directory(), clipboard_directory);
+    assert_eq!(
+        browser.paste_target_directory(),
+        Some(clipboard_directory.clone())
+    );
     assert!(browser.file_drop_session.is_none());
 }
 

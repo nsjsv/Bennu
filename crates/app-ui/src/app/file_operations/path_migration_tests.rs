@@ -111,7 +111,7 @@ fn cross_directory_move_invalidates_source_and_preserves_target_tab_tree() {
         }),
     ));
 
-    assert_eq!(browser.tab().current_dir, target_directory);
+    assert_eq!(browser.tab().current_directory().unwrap(), target_directory);
     assert_eq!(browser.tab().entries.len(), 1);
     assert_eq!(
         browser.tab().deepest_open_column_directory,

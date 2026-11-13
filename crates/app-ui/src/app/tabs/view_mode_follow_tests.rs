@@ -5,6 +5,7 @@ use file_core::{DirectoryEntry, DirectoryScan, EntryMetadata, FileKind};
 
 use crate::app::FileBrowser;
 use crate::config;
+use crate::model::BrowserLocation;
 use crate::model::{
     BrowserPaneId, BrowserViewMode, DirectoryExpansionLoadContext, ExpandedDirectory,
     ExpandedDirectoryLoadRequest, ExpandedDirectoryStatus, IconGridExpansionAnchor,
@@ -74,9 +75,9 @@ fn navigation_cancels_icons_to_list_follow_before_old_load_completes() {
     let target = project.join("main.rs");
     let destination = PathBuf::from("/elsewhere");
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = root.clone();
+    browser.tab_mut().location = BrowserLocation::Directory(root.clone());
     browser.tab_mut().entries = vec![test_entry(project.clone(), FileKind::Directory)].into();
-    browser.tab_mut().view_mode = BrowserViewMode::Icons;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::Icons);
     browser.icon_grid_expansion = Some(IconGridExpansionState::new(
         IconGridExpansionContext {
             pane_id: BrowserPaneId::PRIMARY,
@@ -105,7 +106,7 @@ fn navigation_cancels_icons_to_list_follow_before_old_load_completes() {
         }),
     ));
 
-    assert_eq!(browser.tab().current_dir, destination);
+    assert_eq!(browser.tab().current_directory().unwrap(), destination);
     assert!(browser.list_expansion_follow.is_none());
     assert!(browser.tab().expanded_directories.is_empty());
     assert_eq!(browser.tab().selected, None);
@@ -127,13 +128,13 @@ fn nested_icon_selection() -> NestedIconSelection {
     let target = source.join("main.rs");
     let other = root.join("other.txt");
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = root.clone();
+    browser.tab_mut().location = BrowserLocation::Directory(root.clone());
     browser.tab_mut().entries = vec![
         test_entry(project.clone(), FileKind::Directory),
         test_entry(other.clone(), FileKind::File),
     ]
     .into();
-    browser.tab_mut().view_mode = BrowserViewMode::Icons;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::Icons);
     let mut expansion = IconGridExpansionState::new(
         IconGridExpansionContext {
             pane_id: BrowserPaneId::PRIMARY,
@@ -202,8 +203,8 @@ fn completed_path_migration_cancels_list_to_icons_follow() {
     let source = project.join("src");
     let target = source.join("main.rs");
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = root;
-    browser.tab_mut().view_mode = BrowserViewMode::List;
+    browser.tab_mut().location = BrowserLocation::Directory(root);
+    browser.tab_mut().choose_view_mode(BrowserViewMode::List);
     browser.tab_mut().entries = vec![test_entry(project.clone(), FileKind::Directory)].into();
     browser.tab_mut().expanded_directories.insert(
         project.clone(),
@@ -343,9 +344,9 @@ fn stale_nested_selection_does_not_start_list_to_icons_follow() {
     let project = root.join("project");
     let stale_target = project.join("removed.txt");
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = root;
+    browser.tab_mut().location = BrowserLocation::Directory(root);
     browser.tab_mut().entries = vec![test_entry(project.clone(), FileKind::Directory)].into();
-    browser.tab_mut().view_mode = BrowserViewMode::List;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::List);
     browser
         .tab_mut()
         .expanded_directories
@@ -445,13 +446,13 @@ fn select_all_cancels_list_to_icons_follow() {
     let target = source.join("main.rs");
     let other = root.join("other.txt");
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = root;
+    browser.tab_mut().location = BrowserLocation::Directory(root);
     browser.tab_mut().entries = vec![
         test_entry(project.clone(), FileKind::Directory),
         test_entry(other.clone(), FileKind::File),
     ]
     .into();
-    browser.tab_mut().view_mode = BrowserViewMode::List;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::List);
     browser.tab_mut().expanded_directories.insert(
         project.clone(),
         loaded_directory(vec![test_entry(source.clone(), FileKind::Directory)]),

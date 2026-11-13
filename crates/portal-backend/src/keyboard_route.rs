@@ -287,7 +287,7 @@ mod tests {
             .iter()
             .map(|&(name, kind)| {
                 DirectoryEntry::new(
-                    session.directory().join(name),
+                    session.current_directory().unwrap().join(name),
                     kind,
                     EntryMetadata::default(),
                     false,
@@ -297,7 +297,7 @@ mod tests {
             })
             .collect();
         session.update(SessionMessage::ScanReady(Box::new(DirectoryScanResult {
-            directory: session.directory().to_path_buf(),
+            location: session.location().clone(),
             outcome: Ok(DirectoryScanOutcome { entries }),
         })));
     }

@@ -378,9 +378,9 @@ fn daemon_with_image_row(file_name: &str) -> (PickerDaemon, window::Id, PathBuf)
         crate::picker_session::PickerViewMode::List,
         reply,
     );
-    let path = session.directory().join(file_name);
+    let path = session.current_directory().unwrap().join(file_name);
     session.apply_scan(DirectoryScanResult {
-        directory: session.directory().to_path_buf(),
+        location: session.location().clone(),
         outcome: Ok(DirectoryScanOutcome {
             entries: vec![DirectoryEntry::new(
                 path.clone(),

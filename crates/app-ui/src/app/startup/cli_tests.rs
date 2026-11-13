@@ -10,6 +10,7 @@ use super::FileBrowser;
 use crate::command_line::{parse_arguments, ApplicationLaunchRequest, CommandLineAction};
 use crate::commands::classify_startup_session;
 use crate::config::{self, StartupLocationPolicy};
+use crate::model::BrowserLocation;
 use crate::model::{
     BrowserPaneId, BrowserPaneLayout, BrowserPaneSession, BrowserSessionSnapshot,
     BrowserTabSession, BrowserViewMode, ClassifiedStartupSession, ColumnBrowserViewport,
@@ -85,8 +86,7 @@ fn classify_previous_session(
 fn tab_session(id: usize, directory: PathBuf, view_mode: BrowserViewMode) -> BrowserTabSession {
     BrowserTabSession {
         id,
-        directory,
-        is_trash_view: false,
+        location: BrowserLocation::Directory(directory),
         selected: None,
         selected_paths: HashSet::new(),
         deepest_open_column_directory: None,
@@ -120,9 +120,9 @@ fn explicit_workspace_replaces_previous_session_without_persisting_it() {
         temp_dir.path().join("state.sqlite"),
     )));
 
-    assert_eq!(browser.tab().current_dir, first);
+    assert_eq!(browser.tab().current_directory().unwrap(), first);
     assert_eq!(browser.pane().tabs.len(), 2);
-    assert_eq!(browser.pane().tabs[0].current_dir, first);
+    assert_eq!(browser.pane().tabs[0].current_directory().unwrap(), first);
     assert_eq!(
         browser.pane().tabs[0].selected.as_ref(),
         Some(&selected_file)
@@ -130,8 +130,8 @@ fn explicit_workspace_replaces_previous_session_without_persisting_it() {
     assert!(browser.pane().tabs[0]
         .selected_paths
         .contains(&selected_file));
-    assert_eq!(browser.pane().tabs[0].view_mode, BrowserViewMode::Icons);
-    assert_eq!(browser.pane().tabs[1].current_dir, second);
+    assert_eq!(browser.pane().tabs[0].view_mode(), BrowserViewMode::Icons);
+    assert_eq!(browser.pane().tabs[1].current_directory().unwrap(), second);
     assert_eq!(browser.active_tab_id(), 0);
     assert!(!browser.should_save_browser_session());
 
@@ -142,6 +142,7 @@ fn explicit_workspace_replaces_previous_session_without_persisting_it() {
             active_tab_id: 0,
             column_browser_viewport: ColumnBrowserViewport::default(),
             column_viewports: HashMap::new(),
+            list_viewport: None,
         }],
         layout: BrowserPaneLayout::Single {
             active: BrowserPaneId::PRIMARY,
@@ -152,9 +153,9 @@ fn explicit_workspace_replaces_previous_session_without_persisting_it() {
         Some(classify_previous_session(home, old_snapshot)),
     ))));
 
-    assert_eq!(browser.tab().current_dir, first);
+    assert_eq!(browser.tab().current_directory().unwrap(), first);
     assert_eq!(browser.pane().tabs.len(), 2);
-    assert_eq!(browser.pane().tabs[1].current_dir, second);
+    assert_eq!(browser.pane().tabs[1].current_directory().unwrap(), second);
     assert!(!browser.should_save_browser_session());
     drop(browser.request_browser_session_save());
     assert!(!browser.pending_browser_session_save);

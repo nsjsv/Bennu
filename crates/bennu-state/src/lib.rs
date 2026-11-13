@@ -15,9 +15,9 @@ mod transfer_history;
 mod user_settings;
 
 pub use browser_session::{
-    BrowserSessionStore, StoredBrowserPane, StoredBrowserPaneLayout, StoredBrowserSession,
-    StoredBrowserTab, StoredBrowserViewMode, StoredColumnBrowserViewport, StoredColumnViewport,
-    StoredSplitAxis,
+    BrowserSessionStore, StoredBrowserLocation, StoredBrowserPane, StoredBrowserPaneLayout,
+    StoredBrowserSession, StoredBrowserTab, StoredBrowserViewMode, StoredColumnBrowserViewport,
+    StoredColumnViewport, StoredListViewport, StoredSplitAxis,
 };
 pub use database::StateDatabase;
 pub use error::{StoreError, StoreResult};

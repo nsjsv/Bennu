@@ -4,6 +4,7 @@ use file_core::{DirectoryEntry, EntryMetadata, FileKind};
 
 use super::*;
 use crate::config;
+use crate::model::BrowserLocation;
 use crate::model::{
     BrowserTab, BrowserViewMode, FileDragStationaryAction, FileDropOrigin, FileDropTarget,
     InternalFileDragSnapshot, TabFileDropTarget,
@@ -30,8 +31,8 @@ fn column_tab_hover_renders_target_columns_without_losing_source_snapshot() {
     let target_directory = root.join("target");
     let source_path = root.join("report.txt");
 
-    browser.tab_mut().current_dir = root.clone();
-    browser.tab_mut().view_mode = BrowserViewMode::Columns;
+    browser.tab_mut().location = BrowserLocation::Directory(root.clone());
+    browser.tab_mut().choose_view_mode(BrowserViewMode::Columns);
     browser.tab_mut().deepest_open_column_directory = Some(source_directory.clone());
     browser.tab_mut().entries = vec![file_entry(source_path.clone())].into();
     browser.tab_mut().selected_paths.insert(source_path.clone());
@@ -70,14 +71,14 @@ fn column_tab_drop_destination_follows_displayed_directory_only_for_columns() {
     let mut tab = BrowserTab::directory(1, root.clone());
     tab.deepest_open_column_directory = Some(deepest.clone());
 
-    tab.view_mode = BrowserViewMode::Columns;
+    tab.choose_view_mode(BrowserViewMode::Columns);
     assert_eq!(
         tab.file_drop_destination(),
         TabDropDestination::Directory(deepest),
     );
 
     for mode in [BrowserViewMode::List, BrowserViewMode::Icons] {
-        tab.view_mode = mode;
+        tab.choose_view_mode(mode);
         assert_eq!(
             tab.file_drop_destination(),
             TabDropDestination::Directory(root.clone()),

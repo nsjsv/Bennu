@@ -5,7 +5,9 @@ use file_core::{DirectoryEntry, EntryMetadata, FileKind, ScanWarning, TrashEntry
 use super::FileBrowser;
 use crate::config;
 use crate::model::{
-    BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, NavigationMode, SplitAxis,
+    pane_session_from_live, BrowserLocation, BrowserPane, BrowserPaneId, BrowserPaneLayout,
+    BrowserTab, BrowserViewMode, ContextMenuState, DirectoryCollectionPhase, Message,
+    NavigationMode, SplitAxis,
 };
 
 fn pane_from_tab(pane_id: BrowserPaneId, tab: BrowserTab) -> BrowserPane {
@@ -50,7 +52,7 @@ fn opening_trash_projects_the_cached_snapshot_without_a_loading_placeholder() {
 
     drop(browser.open_trash_view(NavigationMode::RecordHistory));
 
-    assert!(browser.tab().is_trash_view);
+    assert_eq!(browser.tab().location, BrowserLocation::Trash);
     assert!(!browser.tab().directory_collection_phase.is_discovering());
     assert!(browser.pane().directory_loading_placeholder.is_none());
     assert_eq!(browser.tab().entries.len(), 1);
@@ -224,7 +226,7 @@ fn completed_refresh_survives_initiating_tab_close_and_updates_other_trash_pane(
 #[test]
 fn trash_watch_event_refreshes_snapshot_but_unrelated_paths_do_not() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().is_trash_view = true;
+    browser.tab_mut().location = BrowserLocation::Trash;
     let watch_root = file_core::trash_bin::trash_watch_directories()
         .into_iter()
         .next()
@@ -242,7 +244,7 @@ fn trash_watch_event_refreshes_snapshot_but_unrelated_paths_do_not() {
 #[test]
 fn trash_watch_event_during_batch_operation_defers_rescan_until_it_finishes() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().is_trash_view = true;
+    browser.tab_mut().location = BrowserLocation::Trash;
     let watch_root = file_core::trash_bin::trash_watch_directories()
         .into_iter()
         .next()
@@ -277,4 +279,91 @@ fn observed_changes(directory: &std::path::Path) -> file_core::DirectoryEntryCha
         directory: directory.to_path_buf(),
         changes: vec![file_core::ResolvedEntryChange::RescanRequired],
     }
+}
+
+fn browser_in_trash_with_entry() -> (FileBrowser, PathBuf) {
+    let (mut browser, _) = FileBrowser::new(config::default_user_config());
+    let trashed = PathBuf::from("/home/test/.local/share/Trash/files/report.txt");
+    browser.tab_mut().location = BrowserLocation::Trash;
+    browser.tab_mut().entries = vec![DirectoryEntry::new(
+        trashed.clone(),
+        FileKind::File,
+        EntryMetadata::default(),
+        false,
+        false,
+        false,
+    )]
+    .into();
+    browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Ready;
+    (browser, trashed)
+}
+
+#[test]
+fn the_trash_is_shown_as_a_list_when_columns_are_chosen() {
+    let (mut browser, _) = browser_in_trash_with_entry();
+    browser.tab_mut().choose_view_mode(BrowserViewMode::Columns);
+
+    assert_eq!(browser.tab().view_mode(), BrowserViewMode::List);
+    assert_eq!(browser.tab().chosen_view_mode(), BrowserViewMode::Columns);
+
+    // 回到目录时，分栏这个选择还在。
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/home/test"));
+    assert_eq!(browser.tab().view_mode(), BrowserViewMode::Columns);
+}
+
+#[test]
+fn switching_between_list_and_columns_in_the_trash_keeps_the_choice() {
+    let (mut browser, _) = browser_in_trash_with_entry();
+    browser.tab_mut().choose_view_mode(BrowserViewMode::List);
+
+    drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::Columns));
+
+    assert_eq!(browser.tab().view_mode(), BrowserViewMode::List);
+    assert_eq!(browser.tab().chosen_view_mode(), BrowserViewMode::Columns);
+    let saved = pane_session_from_live(browser.pane());
+    assert_eq!(saved.tabs[0].view_mode, BrowserViewMode::Columns);
+    assert_eq!(saved.tabs[0].location, BrowserLocation::Trash);
+}
+
+#[test]
+fn right_clicking_in_the_trash_opens_the_trash_menu() {
+    let (mut browser, trashed) = browser_in_trash_with_entry();
+
+    drop(browser.handle_entry_right_clicked(trashed.clone()));
+    assert!(matches!(
+        &browser.context_menu,
+        Some(ContextMenuState::Trash(menu)) if menu.target.as_ref() == Some(&trashed)
+    ));
+
+    browser.context_menu = None;
+    drop(browser.update(Message::TrashBlankAreaRightClicked(BrowserPaneId::PRIMARY)));
+    assert!(matches!(
+        &browser.context_menu,
+        Some(ContextMenuState::Trash(menu)) if menu.target.is_none()
+    ));
+    assert_eq!(
+        browser.context_menu.as_ref().unwrap().paste_directory(),
+        None
+    );
+}
+
+#[test]
+fn the_trash_address_bar_cannot_be_edited() {
+    let (mut browser, _) = browser_in_trash_with_entry();
+
+    drop(browser.begin_address_editing(BrowserPaneId::PRIMARY));
+
+    assert!(browser.address_editing.is_none());
+}
+
+#[test]
+fn hovering_the_sidebar_trash_is_not_a_path_hover() {
+    let (mut browser, _) = FileBrowser::new(config::default_user_config());
+
+    drop(browser.update(Message::SidebarTrashHovered));
+    assert!(browser.sidebar_trash_hovered);
+    assert!(browser.hovered_sidebar.is_none());
+
+    drop(browser.update(Message::SidebarTrashHoverCleared));
+    assert!(!browser.sidebar_trash_hovered);
 }

@@ -381,8 +381,9 @@ fn stored_browser_session(path: &Path) -> StoredBrowserSession {
             id: 0,
             tabs: vec![StoredBrowserTab {
                 id: 0,
-                directory: StoredPath::from_path(path),
-                is_trash_view: false,
+                location: StoredBrowserLocation::Directory {
+                    path: StoredPath::from_path(path),
+                },
                 selected: None,
                 selected_paths: Vec::new(),
                 deepest_open_column_directory: None,
@@ -397,6 +398,7 @@ fn stored_browser_session(path: &Path) -> StoredBrowserSession {
                 width: 800.0,
             },
             column_viewports: Vec::new(),
+            list_viewport: None,
         }],
         layout: StoredBrowserPaneLayout::Single { active: 0 },
     }
@@ -581,8 +583,9 @@ fn browser_session_roundtrip_replace_and_clear() {
             id: 0,
             tabs: vec![StoredBrowserTab {
                 id: 0,
-                directory: StoredPath::from_path(Path::new("/home/user")),
-                is_trash_view: false,
+                location: StoredBrowserLocation::Directory {
+                    path: StoredPath::from_path(Path::new("/home/user")),
+                },
                 selected: Some(StoredPath::from_path(Path::new("/home/user/file.txt"))),
                 selected_paths: vec![StoredPath::from_path(Path::new("/home/user/file.txt"))],
                 deepest_open_column_directory: Some(StoredPath::from_path(Path::new(
@@ -603,6 +606,10 @@ fn browser_session_roundtrip_replace_and_clear() {
                 offset_y: 2.0,
                 height: 400.0,
             }],
+            list_viewport: Some(StoredListViewport {
+                offset_y: 36.0,
+                height: 400.0,
+            }),
         }],
         layout: StoredBrowserPaneLayout::Single { active: 0 },
     };
@@ -662,8 +669,9 @@ fn browser_session_missing_column_browser_viewport_defaults_to_start() {
             id: 0,
             tabs: vec![StoredBrowserTab {
                 id: 0,
-                directory: StoredPath::from_path(Path::new("/home/user")),
-                is_trash_view: false,
+                location: StoredBrowserLocation::Directory {
+                    path: StoredPath::from_path(Path::new("/home/user")),
+                },
                 selected: None,
                 selected_paths: Vec::new(),
                 deepest_open_column_directory: None,
@@ -678,6 +686,7 @@ fn browser_session_missing_column_browser_viewport_defaults_to_start() {
                 width: 900.0,
             },
             column_viewports: Vec::new(),
+            list_viewport: None,
         }],
         layout: StoredBrowserPaneLayout::Single { active: 0 },
     };
@@ -768,8 +777,9 @@ fn browser_session_preserves_non_utf8_unix_paths() {
             id: 0,
             tabs: vec![StoredBrowserTab {
                 id: 0,
-                directory: StoredPath::from_path(&path),
-                is_trash_view: false,
+                location: StoredBrowserLocation::Directory {
+                    path: StoredPath::from_path(&path),
+                },
                 selected: None,
                 selected_paths: Vec::new(),
                 deepest_open_column_directory: None,
@@ -781,6 +791,7 @@ fn browser_session_preserves_non_utf8_unix_paths() {
             active_tab_id: 0,
             column_browser_viewport: StoredColumnBrowserViewport::default(),
             column_viewports: Vec::new(),
+            list_viewport: None,
         }],
         layout: StoredBrowserPaneLayout::Single { active: 0 },
     };
@@ -788,7 +799,13 @@ fn browser_session_preserves_non_utf8_unix_paths() {
     sessions(&store).replace_browser_session(&session).unwrap();
 
     let restored = sessions(&store).read_browser_session().unwrap().unwrap();
-    let restored_path = restored.panes[0].tabs[0].directory.to_path_buf();
+    let StoredBrowserLocation::Directory {
+        path: restored_path,
+    } = &restored.panes[0].tabs[0].location
+    else {
+        panic!("expected a directory tab");
+    };
+    let restored_path = restored_path.to_path_buf();
     assert_eq!(
         restored_path.as_os_str().as_bytes(),
         path.as_os_str().as_bytes()

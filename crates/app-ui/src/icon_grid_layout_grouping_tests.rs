@@ -150,7 +150,7 @@ fn grouped_root_places_directory_cells_and_placeholders_first_without_headers() 
 
     // None 回归:根面板流段与既有平铺一致,不含任何组头段。
     let flat = IconGridLayout::with_root_transfer_placeholders(
-        Path::new("/workspace"),
+        Some(Path::new("/workspace")),
         &entries,
         &placeholders,
         TransferSortOptions {
@@ -320,7 +320,7 @@ fn rail_entries_derive_from_group_header_flow_segments_and_gate_by_count() {
         entry("/workspace/z.txt", FileKind::File),
     ];
     let flat = IconGridLayout::with_root_transfer_placeholders(
-        Path::new("/workspace"),
+        Some(Path::new("/workspace")),
         &flat_entries,
         &[],
         TransferSortOptions {

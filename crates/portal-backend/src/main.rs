@@ -28,6 +28,7 @@ pub(crate) use message::Message;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
+use bennu_sidebar::BrowserLocation;
 use iced::{keyboard, window, Element, Task};
 
 use dbus_file_chooser::{BridgeEvent, FileChooserInterface, PickerInvocation};
@@ -35,7 +36,7 @@ use picker_session::SessionScrollRegion;
 use picker_session::{PickerSession, PickerViewMode, SessionEffect, SessionMessage};
 use tasks::{
     breadcrumb_scroll_to_end_task, columns_rail_scroll_to_end_task, load_path_suggestions_task,
-    route_session_tasks, scan_directory_task, scrollbar_layout_probe_task,
+    route_session_tasks, scan_location_task, scrollbar_layout_probe_task,
     stabilize_address_input_task,
 };
 use thumbnail_dispatch::spawn_thumbnail_tasks;
@@ -253,9 +254,14 @@ fn open_picker_window(daemon: &mut PickerDaemon, invocation: PickerInvocation) -
     let mut startup_tasks = vec![open_task.discard()];
     for effect in effects {
         match effect {
-            SessionEffect::NavigateDirectory(directory)
-            | SessionEffect::ScanDirectory(directory) => {
-                startup_tasks.push(scan_directory_task(window_id, directory));
+            SessionEffect::NavigateLocation(location) => {
+                startup_tasks.push(scan_location_task(window_id, location));
+            }
+            SessionEffect::ScanDirectory(directory) => {
+                startup_tasks.push(scan_location_task(
+                    window_id,
+                    BrowserLocation::Directory(directory),
+                ));
             }
             SessionEffect::LoadSidebarData => {
                 startup_tasks.push(sidebar_bridge::sidebar_data_task(window_id));
@@ -331,7 +337,7 @@ fn apply_session_message(
     // 时刻 UI 还不存在，open_picker_window 里挂 scroll_to 无效）。
     let is_root_scan_ready = matches!(
         &session_message,
-        SessionMessage::ScanReady(result) if result.directory == session.directory()
+        SessionMessage::ScanReady(result) if result.location == *session.location()
     );
     // 会话消息的判别式须在 update 消费前留存；聚焦与否按 update 之后的
     // 会话状态裁决（点面包屑当前段进编辑的判定在会话内完成，pre-state
@@ -375,21 +381,21 @@ fn apply_session_message(
         // 导航类扫描：除扫描与布局探针外，面包屑滚到最右以揭示当前
         // 目录段。scroll_to 可穿透 SmoothScrollArea（其 operate 转发
         // 内层），Id 已按请求路径命名空间不会串窗。
-        SessionEffect::NavigateDirectory(directory) => Task::batch([
-            scan_directory_task(window_id, directory),
+        SessionEffect::NavigateLocation(location) => Task::batch([
+            scan_location_task(window_id, location),
             breadcrumb_scroll_to_end_task(session),
             scrollbar_layout_probe_task(window_id, session),
         ]),
         // 展开行扫描：只扫描 + 核实滚动条溢出，不滚面包屑（展开与
         // 当前目录段无关，强滚会打断用户正在看的面包屑位置）。
         SessionEffect::ScanDirectory(directory) => Task::batch([
-            scan_directory_task(window_id, directory),
+            scan_location_task(window_id, BrowserLocation::Directory(directory)),
             scrollbar_layout_probe_task(window_id, session),
         ]),
         // 多栏打开新栏需要扫描：扫描 + 横向滚到最右 + 探针（新栏视
         // 口缓存驱动键盘揭示与缩略图）。
         SessionEffect::ColumnScanAndReveal(directory) => Task::batch([
-            scan_directory_task(window_id, directory),
+            scan_location_task(window_id, BrowserLocation::Directory(directory)),
             columns_rail_scroll_to_end_task(session),
             scrollbar_layout_probe_task(window_id, session),
         ]),
@@ -470,18 +476,15 @@ fn apply_session_message(
 
 fn remember_portal_memory(session: &PickerSession) {
     // last_directory 与 view_mode 同一写入函数整体落盘，避免两个写者
-    // 互相覆盖字段。回收站是虚拟视图：不作为下次开窗的起始目录
-    //（SaveFile 落在 trash 下确认破禁，且真实路径记忆才有导航价值），
-    // 保留旧记忆的目录，只更新视图模式。
-    let previous = location::load_portal_memory();
-    let last_directory = if session.is_trash_view() {
-        previous.last_directory
-    } else {
-        Some(session.target_directory().to_path_buf())
+    // 互相覆盖字段。回收站不是目录：不作为下次开窗的起始目录（真实路径
+    // 记忆才有导航价值），保留旧记忆的目录，只更新视图模式。
+    let last_directory = match session.target_directory() {
+        Some(directory) => Some(directory.to_path_buf()),
+        None => location::load_portal_memory().last_directory,
     };
     let memory = location::PortalMemory {
         last_directory,
-        view_mode: Some(session.view_mode().storage_value().to_owned()),
+        view_mode: Some(session.chosen_view_mode().storage_value().to_owned()),
     };
     location::store_portal_memory(&memory);
 }

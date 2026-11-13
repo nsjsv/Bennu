@@ -4,12 +4,14 @@
 //! 不 import iced 运行时类型）；位置/设备对应哪个图标是视图层的事，由两个宿主的
 //! 侧边栏视图各自用 bennu-theme 的图标词汇映射。
 
+pub mod browser_location;
 pub mod config;
 pub mod entries;
 pub mod locations;
 pub mod saved_connections;
 pub mod stored;
 
+pub use browser_location::BrowserLocation;
 pub use config::{
     parse_toml_network_connections, parse_toml_sidebar_favorites, SidebarConfig,
     SidebarFavoriteConfig,

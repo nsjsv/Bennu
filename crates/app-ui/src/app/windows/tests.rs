@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use super::*;
 use crate::config;
+use crate::model::BrowserLocation;
 use crate::model::{
     BrowserViewMode, LoadedOperationStore, Message, PreviewContent, PreviewMessage, PreviewSize,
     PreviewState, PreviewWindowProfile, SettingsCategory, SettingsSubpage, WindowFrameState,
@@ -893,7 +894,7 @@ async fn final_shutdown_session_waits_for_an_older_save_outcome() {
     })));
     let final_directory = temp_dir.path().join("final-directory");
     fs::create_dir_all(&final_directory).unwrap();
-    browser.tab_mut().current_dir = final_directory.clone();
+    browser.tab_mut().location = BrowserLocation::Directory(final_directory.clone());
     browser.browser_session_saves_in_flight = 1;
 
     let initial = shutdown_actions(&mut browser, |browser| {
@@ -916,10 +917,11 @@ async fn final_shutdown_session_waits_for_an_older_save_outcome() {
         .read_browser_session()
         .unwrap()
         .unwrap();
-    assert_eq!(
-        stored.panes[0].tabs[0].directory.to_path_buf(),
-        final_directory
-    );
+    let bennu_state::StoredBrowserLocation::Directory { path } = &stored.panes[0].tabs[0].location
+    else {
+        panic!("the saved tab should be a directory");
+    };
+    assert_eq!(path.to_path_buf(), final_directory);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1065,8 +1067,8 @@ async fn close_all_windows_saves_browser_session_before_exit() {
         classified_startup_session: None,
     })));
 
-    browser.tab_mut().current_dir = root.clone();
-    browser.tab_mut().view_mode = BrowserViewMode::Columns;
+    browser.tab_mut().location = BrowserLocation::Directory(root.clone());
+    browser.tab_mut().choose_view_mode(BrowserViewMode::Columns);
     browser.tab_mut().deepest_open_column_directory = Some(deepest.clone());
 
     let shutdown = shutdown_actions(&mut browser, |browser| {

@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
+use crate::model::BrowserLocation;
 use file_core::{DirectoryEntry, EntryMetadata, FileKind};
 use iced::{Point, Rectangle, Size};
 
@@ -138,16 +139,13 @@ fn column_marquee_tracks_outer_and_source_column_scroll_only() {
 fn selection_marquee_captures_view_specific_scroll_anchor() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let current_dir = PathBuf::from("/workspace");
-    browser.tab_mut().current_dir = current_dir.clone();
+    browser.tab_mut().location = BrowserLocation::Directory(current_dir.clone());
     browser.cursor_position = Some(Point::new(30.0, 40.0));
-    browser.tab_mut().view_mode = BrowserViewMode::List;
-    browser.pane_mut().column_viewports.insert(
-        current_dir.clone(),
-        crate::thumbnail_cache::ColumnViewport {
-            offset_y: 70.0,
-            height: 400.0,
-        },
-    );
+    browser.tab_mut().choose_view_mode(BrowserViewMode::List);
+    browser.pane_mut().list_viewport = Some(crate::thumbnail_cache::ColumnViewport {
+        offset_y: 70.0,
+        height: 400.0,
+    });
 
     drop(browser.start_selection_marquee());
 
@@ -163,7 +161,7 @@ fn selection_marquee_captures_view_specific_scroll_anchor() {
     ));
 
     browser.selection_marquee = None;
-    browser.tab_mut().view_mode = BrowserViewMode::Columns;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::Columns);
     browser.pane_mut().column_browser_viewport.offset_x = 55.0;
     browser.pane_mut().column_viewports.insert(
         current_dir.clone(),
@@ -190,7 +188,7 @@ fn selection_marquee_captures_view_specific_scroll_anchor() {
     ));
 
     browser.selection_marquee = None;
-    browser.tab_mut().view_mode = BrowserViewMode::Icons;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::Icons);
     drop(browser.handle_icon_grid_scrolled(BrowserPaneId::PRIMARY, 120.0, 600.0, 400.0));
     drop(browser.start_selection_marquee());
 
@@ -441,7 +439,7 @@ fn marquee_selection_uses_intersecting_bounds() {
     let current_dir = PathBuf::from("/workspace");
     let inside = current_dir.join("inside.txt");
     let outside = current_dir.join("outside.txt");
-    browser.tab_mut().current_dir = current_dir;
+    browser.tab_mut().location = BrowserLocation::Directory(current_dir);
     browser.tab_mut().entries = vec![
         test_entry(inside.clone(), FileKind::File),
         test_entry(outside.clone(), FileKind::File),
@@ -470,7 +468,7 @@ fn marquee_selection_preserves_existing_selection_when_requested() {
     let current_dir = PathBuf::from("/workspace");
     let preserved = current_dir.join("preserved.txt");
     let added = current_dir.join("added.txt");
-    browser.tab_mut().current_dir = current_dir;
+    browser.tab_mut().location = BrowserLocation::Directory(current_dir);
     browser.tab_mut().entries = vec![
         test_entry(preserved.clone(), FileKind::File),
         test_entry(added.clone(), FileKind::File),
@@ -502,7 +500,7 @@ fn clicking_current_column_blank_clears_existing_selection() {
     let first = current_dir.join("first.txt");
     let second = current_dir.join("second.txt");
     let child_directory = current_dir.join("project");
-    browser.tab_mut().current_dir = current_dir.clone();
+    browser.tab_mut().location = BrowserLocation::Directory(current_dir.clone());
     browser.tab_mut().entries = vec![
         test_entry(first.clone(), FileKind::File),
         test_entry(second.clone(), FileKind::File),
@@ -519,7 +517,7 @@ fn clicking_current_column_blank_clears_existing_selection() {
     assert!(browser.tab().selected.is_none());
     assert!(browser.tab().selected_paths.is_empty());
     assert!(browser.tab().selection_anchor.is_none());
-    assert_eq!(browser.tab().current_dir, current_dir);
+    assert_eq!(browser.tab().current_directory().unwrap(), current_dir);
 }
 
 #[test]
@@ -529,7 +527,7 @@ fn clicking_child_column_blank_preserves_open_column_context() {
     let first = current_dir.join("first.txt");
     let second = current_dir.join("second.txt");
     let child_directory = current_dir.join("project");
-    browser.tab_mut().current_dir = current_dir.clone();
+    browser.tab_mut().location = BrowserLocation::Directory(current_dir.clone());
     browser.tab_mut().entries = vec![
         test_entry(first.clone(), FileKind::File),
         test_entry(second.clone(), FileKind::File),
@@ -565,7 +563,7 @@ fn clicking_child_column_blank_preserves_open_column_context() {
         browser.tab().selection_anchor.as_ref(),
         Some(&child_directory)
     );
-    assert_eq!(browser.tab().current_dir, current_dir);
+    assert_eq!(browser.tab().current_directory().unwrap(), current_dir);
     assert_eq!(
         browser
             .address_editing
@@ -580,7 +578,7 @@ fn clicking_column_placeholder_preserves_open_columns_and_selection() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let current_dir = PathBuf::from("/workspace");
     let child_directory = current_dir.join("project");
-    browser.tab_mut().current_dir = current_dir.clone();
+    browser.tab_mut().location = BrowserLocation::Directory(current_dir.clone());
     browser.tab_mut().entries =
         vec![test_entry(child_directory.clone(), FileKind::Directory)].into();
     browser.tab_mut().deepest_open_column_directory = Some(child_directory.clone());
@@ -606,9 +604,12 @@ fn clicking_column_placeholder_preserves_open_columns_and_selection() {
     );
     assert_eq!(
         crate::three_column_view::column_directories(&browser),
-        vec![browser.tab().current_dir.clone(), child_directory.clone()]
+        vec![
+            browser.tab().current_directory().unwrap().to_path_buf(),
+            child_directory.clone()
+        ]
     );
-    assert_eq!(browser.tab().current_dir, current_dir);
+    assert_eq!(browser.tab().current_directory().unwrap(), current_dir);
 }
 
 #[test]
@@ -618,7 +619,7 @@ fn pressing_current_column_blank_clears_selection_before_release() {
     let first = current_dir.join("first.txt");
     let second = current_dir.join("second.txt");
     let child_directory = current_dir.join("project");
-    browser.tab_mut().current_dir = current_dir.clone();
+    browser.tab_mut().location = BrowserLocation::Directory(current_dir.clone());
     browser.tab_mut().entries = vec![
         test_entry(first.clone(), FileKind::File),
         test_entry(second.clone(), FileKind::File),
@@ -636,7 +637,7 @@ fn pressing_current_column_blank_clears_selection_before_release() {
     assert!(browser.tab().selected_paths.is_empty());
     assert!(browser.tab().selection_anchor.is_none());
     assert!(browser.selection_marquee.is_some());
-    assert_eq!(browser.tab().current_dir, current_dir);
+    assert_eq!(browser.tab().current_directory().unwrap(), current_dir);
 }
 
 #[test]
@@ -646,7 +647,7 @@ fn pressing_child_column_blank_preserves_open_column_before_release() {
     let first = current_dir.join("first.txt");
     let second = current_dir.join("second.txt");
     let child_directory = current_dir.join("project");
-    browser.tab_mut().current_dir = current_dir.clone();
+    browser.tab_mut().location = BrowserLocation::Directory(current_dir.clone());
     browser.tab_mut().entries = vec![
         test_entry(first.clone(), FileKind::File),
         test_entry(second.clone(), FileKind::File),
@@ -674,7 +675,7 @@ fn pressing_child_column_blank_preserves_open_column_before_release() {
         Some(&child_directory)
     );
     assert!(browser.selection_marquee.is_some());
-    assert_eq!(browser.tab().current_dir, current_dir);
+    assert_eq!(browser.tab().current_directory().unwrap(), current_dir);
 }
 
 #[test]
@@ -684,7 +685,7 @@ fn dragging_child_column_blank_preserves_open_column_context() {
     let first = current_dir.join("first.txt");
     let second = current_dir.join("second.txt");
     let child_directory = current_dir.join("project");
-    browser.tab_mut().current_dir = current_dir.clone();
+    browser.tab_mut().location = BrowserLocation::Directory(current_dir.clone());
     browser.tab_mut().entries = vec![
         test_entry(first.clone(), FileKind::File),
         test_entry(second.clone(), FileKind::File),
@@ -712,11 +713,14 @@ fn dragging_child_column_blank_preserves_open_column_context() {
     );
     assert_eq!(
         crate::three_column_view::column_directories(&browser),
-        vec![browser.tab().current_dir.clone(), child_directory.clone()]
+        vec![
+            browser.tab().current_directory().unwrap().to_path_buf(),
+            child_directory.clone()
+        ]
     );
     assert!(browser.tab().selected.is_none());
     assert!(browser.tab().selected_paths.is_empty());
-    assert_eq!(browser.tab().current_dir, current_dir);
+    assert_eq!(browser.tab().current_directory().unwrap(), current_dir);
 }
 
 #[test]
@@ -725,7 +729,7 @@ fn releasing_selected_item_without_drag_collapses_multi_selection() {
     let current_dir = PathBuf::from("/workspace");
     let first = current_dir.join("first.txt");
     let second = current_dir.join("second.txt");
-    browser.tab_mut().current_dir = current_dir;
+    browser.tab_mut().location = BrowserLocation::Directory(current_dir);
     browser.tab_mut().entries = vec![
         test_entry(first.clone(), FileKind::File),
         test_entry(second.clone(), FileKind::File),
@@ -757,7 +761,7 @@ fn right_clicking_directory_selects_menu_target_without_focusing_it() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let current_dir = PathBuf::from("/workspace");
     let directory = current_dir.join("project");
-    browser.tab_mut().current_dir = current_dir.clone();
+    browser.tab_mut().location = BrowserLocation::Directory(current_dir.clone());
     browser.tab_mut().entries = vec![test_entry(directory.clone(), FileKind::Directory)].into();
     browser.tab_mut().selected = None;
     browser.tab_mut().selected_paths.clear();
@@ -766,7 +770,7 @@ fn right_clicking_directory_selects_menu_target_without_focusing_it() {
     let command = browser.handle_entry_right_clicked(directory.clone());
     drop(command);
 
-    assert_eq!(browser.tab().current_dir, current_dir);
+    assert_eq!(browser.tab().current_directory().unwrap(), current_dir);
     assert!(browser.tab().selected.is_none());
     assert!(browser.is_path_selected(&directory));
     assert!(!browser.tab().expanded_directories.contains_key(&directory));
@@ -778,7 +782,7 @@ fn right_clicking_directory_selects_menu_target_without_focusing_it() {
     };
     assert_eq!(context_menu.target.as_ref(), Some(&directory));
     assert!(context_menu.target_is_directory);
-    assert_eq!(browser.paste_target_directory(), current_dir);
+    assert_eq!(browser.paste_target_directory(), Some(current_dir));
 }
 
 #[test]
@@ -805,7 +809,7 @@ fn iced_file_drag_keeps_sidebar_trash_non_drop_target() {
         Some(FileDragTarget::Directory(directory)) if directory == &destination
     ));
 
-    drop(browser.handle_sidebar_hovered(crate::model::trash_location_path()));
+    drop(browser.handle_sidebar_trash_hovered());
     assert!(browser
         .file_drop_session
         .as_ref()
@@ -818,7 +822,7 @@ fn symlink_menu_entry_gates_out_remote_mount_selection() {
     let mount = PathBuf::from("/run/user/1000/gvfs/mtp:host=phone");
     let remote_file = mount.join("DCIM/photo.jpg");
     let local_file = PathBuf::from("/workspace/report.txt");
-    browser.tab_mut().current_dir = mount.clone();
+    browser.tab_mut().location = BrowserLocation::Directory(mount.clone());
     browser.tab_mut().entries = vec![
         test_entry(remote_file.clone(), FileKind::File),
         test_entry(local_file.clone(), FileKind::File),
@@ -875,15 +879,15 @@ fn blank_menu_carries_grouping_entry_only_in_grouping_capable_views() {
     };
 
     // 多栏视图不做分组:菜单照常打开,但不携带分组方式入口。
-    browser.tab_mut().view_mode = BrowserViewMode::Columns;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::Columns);
     drop(browser.handle_blank_area_right_clicked(PathBuf::from("/tmp")));
     assert!(!grouping_entry_visible(&browser));
 
-    browser.tab_mut().view_mode = BrowserViewMode::List;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::List);
     drop(browser.handle_blank_area_right_clicked(PathBuf::from("/tmp")));
     assert!(grouping_entry_visible(&browser));
 
-    browser.tab_mut().view_mode = BrowserViewMode::Icons;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::Icons);
     drop(browser.handle_blank_area_right_clicked(PathBuf::from("/tmp")));
     assert!(grouping_entry_visible(&browser));
 }
@@ -891,7 +895,7 @@ fn blank_menu_carries_grouping_entry_only_in_grouping_capable_views() {
 #[test]
 fn entry_menu_never_carries_grouping_entry() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().view_mode = BrowserViewMode::List;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::List);
     let file = PathBuf::from("/tmp/notes.txt");
     browser.tab_mut().selected_paths = std::iter::once(file.clone()).collect();
     browser.tab_mut().selected = Some(file.clone());

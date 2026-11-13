@@ -18,7 +18,7 @@ impl FileBrowser {
     ) -> Task<Message> {
         let request_is_current = self.pane_by_id(request.pane_id).is_some_and(|pane| {
             request.generation == pane.directory_load_generation
-                && request.path == pane.tab().current_dir
+                && pane.tab().current_directory() == Some(request.path.as_path())
         });
         if !request_is_current {
             return Task::none();
@@ -113,6 +113,7 @@ mod tests {
     use super::*;
     use crate::app::global_error::{recorded_global_error_count, reset_recorded_global_errors};
     use crate::config;
+    use crate::model::BrowserLocation;
     use crate::model::{
         BrowserPane, BrowserTab, DirectoryExpansionLoadContext, ExpandedDirectory,
         ExpandedDirectoryStatus,
@@ -124,7 +125,7 @@ mod tests {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
         let parent_directory = PathBuf::from("/workspace/project");
         let unavailable_directory = parent_directory.join("removed");
-        browser.tab_mut().current_dir = unavailable_directory.clone();
+        browser.tab_mut().location = BrowserLocation::Directory(unavailable_directory.clone());
         browser.pane_mut().directory_load_generation = 7;
         browser.pane_mut().directory_load_cancel = Some(tokio_util::sync::CancellationToken::new());
         browser.tab_mut().directory_collection_phase =
@@ -145,7 +146,10 @@ mod tests {
             unavailable_failure(&unavailable_directory),
         ));
 
-        assert_eq!(browser.tab().current_dir, parent_directory.clone());
+        assert_eq!(
+            browser.tab().current_directory().unwrap(),
+            parent_directory.clone()
+        );
         assert!(browser.tab().directory_collection_phase.is_discovering());
         assert_eq!(browser.pane().directory_load_generation, 8);
         assert_eq!(browser.current_error(), None);
@@ -160,7 +164,7 @@ mod tests {
         let available_ancestor = PathBuf::from("/workspace");
         let unavailable_parent = available_ancestor.join("project");
         let unavailable_directory = unavailable_parent.join("removed");
-        browser.tab_mut().current_dir = unavailable_directory.clone();
+        browser.tab_mut().location = BrowserLocation::Directory(unavailable_directory.clone());
         browser.pane_mut().directory_load_generation = 7;
         browser.tab_mut().directory_collection_phase =
             crate::model::DirectoryCollectionPhase::Discovering;
@@ -174,7 +178,10 @@ mod tests {
             },
             unavailable_failure(&unavailable_directory),
         ));
-        assert_eq!(browser.tab().current_dir, unavailable_parent.clone());
+        assert_eq!(
+            browser.tab().current_directory().unwrap(),
+            unavailable_parent.clone()
+        );
         assert_eq!(browser.pane().directory_load_generation, 8);
 
         drop(browser.accept_directory_load_failure(
@@ -186,7 +193,10 @@ mod tests {
             unavailable_failure(&unavailable_parent),
         ));
 
-        assert_eq!(browser.tab().current_dir, available_ancestor);
+        assert_eq!(
+            browser.tab().current_directory().unwrap(),
+            available_ancestor
+        );
         assert_eq!(browser.pane().directory_load_generation, 9);
         assert!(browser.tab().directory_collection_phase.is_discovering());
         assert_eq!(browser.current_error(), None);
@@ -198,7 +208,7 @@ mod tests {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
         let current_directory = PathBuf::from("/workspace/current");
         let stale_directory = PathBuf::from("/workspace/stale");
-        browser.tab_mut().current_dir = current_directory.clone();
+        browser.tab_mut().location = BrowserLocation::Directory(current_directory.clone());
         browser.pane_mut().directory_load_generation = 9;
         browser.tab_mut().directory_collection_phase =
             crate::model::DirectoryCollectionPhase::Discovering;
@@ -213,7 +223,10 @@ mod tests {
             unavailable_failure(&stale_directory),
         ));
 
-        assert_eq!(browser.tab().current_dir, current_directory);
+        assert_eq!(
+            browser.tab().current_directory().unwrap(),
+            current_directory
+        );
         assert_eq!(browser.pane().directory_load_generation, 9);
         assert!(browser.tab().directory_collection_phase.is_discovering());
         assert_eq!(browser.current_error(), None);
@@ -244,7 +257,10 @@ mod tests {
         ));
 
         let recovered_pane = browser.pane_by_id(inactive_pane_id).expect("inactive pane");
-        assert_eq!(recovered_pane.tab().current_dir, parent_directory);
+        assert_eq!(
+            recovered_pane.tab().current_directory().unwrap(),
+            parent_directory
+        );
         assert!(recovered_pane
             .tab()
             .directory_collection_phase
@@ -261,7 +277,7 @@ mod tests {
         let unavailable_directory = root_directory.join("removed");
         let unavailable_child = unavailable_directory.join("child");
         let remaining_entry = root_directory.join("remaining.txt");
-        browser.tab_mut().current_dir = root_directory.clone();
+        browser.tab_mut().location = BrowserLocation::Directory(root_directory.clone());
         browser.tab_mut().deepest_open_column_directory = Some(unavailable_child.clone());
         browser.tab_mut().entries = vec![
             test_entry(unavailable_directory.clone(), FileKind::Directory),
@@ -320,7 +336,7 @@ mod tests {
         let unavailable_directory = ancestor_directory.join("B");
         let unavailable_child = unavailable_directory.join("C");
         let remaining_selection = root_directory.join("remaining.txt");
-        browser.tab_mut().current_dir = root_directory.clone();
+        browser.tab_mut().location = BrowserLocation::Directory(root_directory.clone());
         browser.tab_mut().deepest_open_column_directory = Some(unavailable_child.clone());
         browser.tab_mut().selected = Some(unavailable_child.clone());
         browser
@@ -405,7 +421,7 @@ mod tests {
         let first_directory = root_directory.join("A");
         let second_directory = first_directory.join("B");
         let unavailable_directory = second_directory.join("C");
-        browser.tab_mut().current_dir = root_directory.clone();
+        browser.tab_mut().location = BrowserLocation::Directory(root_directory.clone());
         browser.tab_mut().deepest_open_column_directory = Some(unavailable_directory.clone());
         browser.tab_mut().expanded_directories.insert(
             first_directory.clone(),
@@ -508,7 +524,7 @@ mod tests {
     fn directory_read_failure_still_uses_global_error_channel() {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
         let locked_directory = PathBuf::from("/workspace/locked");
-        browser.tab_mut().current_dir = locked_directory.clone();
+        browser.tab_mut().location = BrowserLocation::Directory(locked_directory.clone());
         browser.pane_mut().directory_load_generation = 3;
         browser.tab_mut().directory_collection_phase =
             crate::model::DirectoryCollectionPhase::Discovering;

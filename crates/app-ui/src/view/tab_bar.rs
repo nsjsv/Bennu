@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use iced::widget::{button, container, mouse_area, row, Row, Space};
 use iced::{Alignment, Element, Length};
 
@@ -11,7 +9,8 @@ use crate::appearance::{selected_tab_item_style, tab_item_style, tab_strip_style
 use crate::file_drag_hit_test_bounds::FileDragHitTestMarker;
 use crate::file_drag_hit_test_marker::track_file_drag_hit_test_marker;
 use crate::model::{
-    BrowserPaneId, FileDropSessionIdentity, FileDropTarget, TabDropDestination, TabFileDropTarget,
+    BrowserLocation, BrowserPaneId, FileDropSessionIdentity, FileDropTarget, TabDropDestination,
+    TabFileDropTarget,
 };
 use bennu_theme::controls::icon_button_style;
 
@@ -33,8 +32,7 @@ pub(super) fn tab_bar<'a>(
             browser,
             pane.id,
             tab.id,
-            tab.current_dir.as_path(),
-            tab.is_trash_view,
+            &tab.location,
             tab.file_drop_destination(),
             tab.id == pane.active_tab_id,
             pane.tab_width_fraction(tab.id),
@@ -54,8 +52,7 @@ fn tab_button<'a>(
     browser: &'a FileBrowser,
     pane_id: BrowserPaneId,
     tab_id: usize,
-    directory: &'a Path,
-    is_trash_view: bool,
+    location: &BrowserLocation,
     destination: TabDropDestination,
     is_active: bool,
     width_fraction: f32,
@@ -71,7 +68,7 @@ fn tab_button<'a>(
     });
     let label = row![
         Space::new().width(Length::Fixed(TAB_CLOSE_SLOT_WIDTH)),
-        container(tab_title_content(directory, is_trash_view)).center_x(Length::Fill),
+        container(tab_title_content(location)).center_x(Length::Fill),
         button(themed_icon(
             IconSymbol::Close,
             IconTone::Normal,

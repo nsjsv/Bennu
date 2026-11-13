@@ -57,7 +57,7 @@ impl FileBrowser {
         }
         let pane_id = self.pane_id_at_position(position)?;
         let pane_bounds = self.pane_bounds(pane_id)?;
-        let view_mode = self.pane_by_id(pane_id)?.tab().view_mode;
+        let view_mode = self.pane_by_id(pane_id)?.tab().view_mode();
         let (region, offset) = match view_mode {
             BrowserViewMode::Columns => {
                 let (direction, step) = edge_approach(
@@ -189,7 +189,7 @@ mod tests {
     #[test]
     fn edge_plan_points_up_near_top_in_list_view() {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.tab_mut().view_mode = BrowserViewMode::List;
+        browser.tab_mut().choose_view_mode(BrowserViewMode::List);
         browser.file_drag = Some(FileDragState {
             gesture_id: crate::model::FileDragGestureId(1),
             source_pane_id: browser.active_pane_id(),
@@ -228,7 +228,7 @@ mod tests {
         // 原生拖放的 Moved 事件负责重算计划,原生会话本身不再阻断规划;
         // 应用内拖拽与原生拖放共用同一套边缘自动滚。
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.tab_mut().view_mode = BrowserViewMode::List;
+        browser.tab_mut().choose_view_mode(BrowserViewMode::List);
         let session_id = desktop_linux::WaylandDndController::new()
             .start_file_drag(
                 vec![std::path::PathBuf::from("/tmp/a.txt")],

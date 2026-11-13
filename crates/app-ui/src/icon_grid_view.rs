@@ -21,7 +21,7 @@ use crate::file_drag_hit_test_marker::track_file_drag_hit_test_marker;
 use crate::file_entry_view::{
     entry_text_input_style, entry_thumbnail_or_icon, FileEntryIconDensity, FileEntryVisualState,
 };
-use crate::formatting::empty_directory_message;
+use crate::formatting::empty_location_message;
 use crate::icon_grid_geometry::{
     grid_gap, icon_label_spacing, label_height, label_line_height, label_size, row_height,
     tile_padding_horizontal, tile_padding_vertical, tile_visual_height, tile_width,
@@ -34,7 +34,7 @@ use crate::icon_grid_layout::{
 };
 use crate::input_blocking_space::input_blocking_space;
 use crate::model::{IconGridExpansionAnchor, IconGridViewport, Message, ScrollbarRegion};
-use crate::view::{rename_field, rename_input_id};
+use crate::view::{pane_blank_area, rename_field, rename_input_id};
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::controls::icon_button_style;
 use bennu_theme::controls::inline_text_field;
@@ -64,16 +64,21 @@ pub(crate) fn icon_grid_view<'a>(
     let pane_id = pane.id;
     // 空目录但目标正在传入(占位非空)时按有内容渲染,占位格子顶掉
     // 「No items」提示;占位派生一次,避免布局与空态判定各查一遍队列。
-    let transfer_placeholders = crate::transfer_placeholders::transfer_placeholders_for_directory(
-        &browser.operation_queue,
-        pane.current_dir,
-    );
+    let transfer_placeholders = pane
+        .current_directory()
+        .map(|directory| {
+            crate::transfer_placeholders::transfer_placeholders_for_directory(
+                &browser.operation_queue,
+                directory,
+            )
+        })
+        .unwrap_or_default();
     // 分组索引栏数据与根面板 flow 同源派生;Pending/空目录无组头段。
     let mut rail_entries = Vec::new();
     let content: Element<'a, Message> = match pane.current_directory_content() {
         DirectoryContentAvailability::Pending => Space::new().height(Length::Fill).into(),
         DirectoryContentAvailability::Available([]) if transfer_placeholders.is_empty() => {
-            grid_message(empty_directory_message(pane.is_trash_view))
+            grid_message(empty_location_message(pane.location))
         }
         DirectoryContentAvailability::Available(_) => {
             let layout =
@@ -135,19 +140,7 @@ pub(crate) fn icon_grid_view<'a>(
         pane_surface
     };
 
-    mouse_area(pane_surface)
-        .on_press(Message::BlankAreaPressed(pane.id))
-        .on_release(Message::DropTargetReleased(
-            pane.id,
-            pane.current_dir.clone(),
-        ))
-        .on_right_press(Message::BlankAreaRightClicked(
-            pane.id,
-            pane.current_dir.clone(),
-        ))
-        .on_enter(Message::ColumnBrowserCursorEntered(pane.id))
-        .on_exit(Message::ColumnBrowserCursorExited(pane.id))
-        .into()
+    pane_blank_area(&pane, pane_surface)
 }
 
 fn start_cell_index(rows: &IconGridRowsLayout, row: usize) -> usize {
@@ -379,7 +372,7 @@ fn render_band<'a>(
 fn icon_grid_entry<'a>(
     browser: &'a FileBrowser,
     pane: BrowserPaneView<'a>,
-    parent_directory: &Path,
+    parent_directory: Option<&Path>,
     entry_index: usize,
     entry: &DirectoryEntry,
     transfer: Option<&crate::transfer_placeholders::TransferPlaceholder>,
@@ -390,10 +383,15 @@ fn icon_grid_entry<'a>(
     let icon_tone = visual_state.icon_tone();
     let icon_edge = browser.user_config().icons_icon_edge();
     let tile_width = tile_width(icon_edge);
-    let is_expandable = entry.expands_as_directory() && !pane.is_trash_view;
-    let disclosure = is_expandable
-        .then(|| browser.icon_grid_disclosure(pane.id, pane.current_dir, &entry.path))
-        .flatten();
+    // 展开要锚在一个目录里：回收站这样不是目录的根面板，条目不在原地展开。
+    let expansion_parent = parent_directory.filter(|_| entry.expands_as_directory());
+    let is_expandable = expansion_parent.is_some();
+    let disclosure =
+        pane.current_directory()
+            .zip(expansion_parent)
+            .and_then(|(current_directory, _)| {
+                browser.icon_grid_disclosure(pane.id, current_directory, &entry.path)
+            });
     let shows_disclosure = is_expandable
         && (pane.hovered_entry == Some(&entry.path)
             || pane.is_path_selected(&entry.path)
@@ -415,47 +413,48 @@ fn icon_grid_entry<'a>(
             transfer,
             icon_edge as f32,
         );
-    let icon: Element<'a, Message> = if shows_disclosure {
-        let (rotation, is_open) = disclosure.unwrap_or((0.0, false));
-        let disclosure_button = button(
-            rotated_chevron_right_view(rotation, DISCLOSURE_ICON_SIZE).style(icon_svg_style()),
-        )
-        .on_press(Message::IconGridDirectoryToggled(
-            pane.id,
-            IconGridExpansionAnchor {
-                path: entry.path.clone(),
-                parent_directory: parent_directory.to_path_buf(),
-                index: entry_index,
-            },
-        ))
-        .padding(0)
-        .width(Length::Fixed(DISCLOSURE_BUTTON_SIZE))
-        .height(Length::Fixed(DISCLOSURE_BUTTON_SIZE))
-        .style(icon_button_style);
-        let label = if is_open {
-            tr!("Collapse folder")
+    let icon: Element<'a, Message> =
+        if let Some(expansion_parent) = expansion_parent.filter(|_| shows_disclosure) {
+            let (rotation, is_open) = disclosure.unwrap_or((0.0, false));
+            let disclosure_button = button(
+                rotated_chevron_right_view(rotation, DISCLOSURE_ICON_SIZE).style(icon_svg_style()),
+            )
+            .on_press(Message::IconGridDirectoryToggled(
+                pane.id,
+                IconGridExpansionAnchor {
+                    path: entry.path.clone(),
+                    parent_directory: expansion_parent.to_path_buf(),
+                    index: entry_index,
+                },
+            ))
+            .padding(0)
+            .width(Length::Fixed(DISCLOSURE_BUTTON_SIZE))
+            .height(Length::Fixed(DISCLOSURE_BUTTON_SIZE))
+            .style(icon_button_style);
+            let label = if is_open {
+                tr!("Collapse folder")
+            } else {
+                tr!("Expand folder")
+            };
+            let disclosure_button = tooltip(
+                disclosure_button,
+                container(readable_text(label).size(CAPTION_SIZE))
+                    .padding([5, 7])
+                    .style(context_menu_style),
+                tooltip::Position::Bottom,
+            );
+            let disclosure_overlay = container(disclosure_button)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(Horizontal::Right)
+                .align_y(Vertical::Bottom);
+            Stack::with_children([base_icon, disclosure_overlay.into()])
+                .width(Length::Fixed(icon_edge as f32))
+                .height(Length::Fixed(icon_edge as f32))
+                .into()
         } else {
-            tr!("Expand folder")
+            base_icon
         };
-        let disclosure_button = tooltip(
-            disclosure_button,
-            container(readable_text(label).size(CAPTION_SIZE))
-                .padding([5, 7])
-                .style(context_menu_style),
-            tooltip::Position::Bottom,
-        );
-        let disclosure_overlay = container(disclosure_button)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(Horizontal::Right)
-            .align_y(Vertical::Bottom);
-        Stack::with_children([base_icon, disclosure_overlay.into()])
-            .width(Length::Fixed(icon_edge as f32))
-            .height(Length::Fixed(icon_edge as f32))
-            .into()
-    } else {
-        base_icon
-    };
 
     let label: Element<'a, Message> = if pane.renaming == Some(&entry.path) {
         rename_field(

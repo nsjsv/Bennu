@@ -4,6 +4,7 @@ use file_core::{DirectoryEntry, DirectoryScan, EntryMetadata, FileKind};
 
 use super::*;
 use crate::config;
+use crate::model::BrowserLocation;
 
 fn entry(path: &str, kind: FileKind) -> DirectoryEntry {
     DirectoryEntry::new(
@@ -18,9 +19,9 @@ fn entry(path: &str, kind: FileKind) -> DirectoryEntry {
 
 fn browser_with_entries(entries: Vec<DirectoryEntry>) -> FileBrowser {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    browser.tab_mut().current_dir = PathBuf::from("/workspace");
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
     browser.tab_mut().entries = entries.into();
-    browser.tab_mut().view_mode = BrowserViewMode::Icons;
+    browser.tab_mut().choose_view_mode(BrowserViewMode::Icons);
     browser.tab_mut().directory_collection_phase = crate::model::DirectoryCollectionPhase::Ready;
     browser
 }

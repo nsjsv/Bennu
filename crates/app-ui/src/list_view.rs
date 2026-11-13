@@ -18,12 +18,12 @@ use crate::file_entry_view::{
     entry_text_input_style, entry_thumbnail_or_icon, FileEntryIconDensity, FileEntryIconTone,
     FileEntryVisualState,
 };
-use crate::formatting::{empty_directory_message, format_system_time};
+use crate::formatting::{empty_location_message, format_system_time};
 use crate::model::{
     BrowserPaneId, DirectoryLoadingPlaceholderEntry, FilePropertiesPermissions, ListColumnConfig,
     ListColumnKind, Message, ScrollbarRegion,
 };
-use crate::view::{rename_field, rename_input_id};
+use crate::view::{pane_blank_area, rename_field, rename_input_id};
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::controls::inline_text_field;
 use bennu_theme::icons::rotated_chevron_right_view;
@@ -158,11 +158,10 @@ pub(crate) fn list_browser_view<'a>(
             )
         });
         if pane.entries.is_empty() && !has_placeholders {
-            rows = rows.push(list_message(empty_directory_message(pane.is_trash_view)));
+            rows = rows.push(list_message(empty_location_message(pane.location)));
         } else {
             let range = pane
-                .column_viewports
-                .get(pane.current_dir)
+                .list_viewport
                 .map(|viewport| {
                     crate::transfer_placeholder_view::list_transfer_rows_range_for_viewport(
                         &transfer_rows,
@@ -292,8 +291,7 @@ pub(crate) fn list_browser_view<'a>(
     let pane_surface: Element<'a, Message> = if crate::model::file_group_rail_visible(&rail_entries)
     {
         let viewport_position = pane
-            .column_viewports
-            .get(pane.current_dir)
+            .list_viewport
             .map(|viewport| viewport.offset_y)
             .unwrap_or(0.0)
             - LIST_HEADER_HEIGHT;
@@ -313,19 +311,7 @@ pub(crate) fn list_browser_view<'a>(
         pane_surface
     };
 
-    mouse_area(pane_surface)
-        .on_press(Message::BlankAreaPressed(pane.id))
-        .on_release(Message::DropTargetReleased(
-            pane.id,
-            pane.current_dir.clone(),
-        ))
-        .on_right_press(Message::BlankAreaRightClicked(
-            pane.id,
-            pane.current_dir.clone(),
-        ))
-        .on_enter(Message::ColumnBrowserCursorEntered(pane.id))
-        .on_exit(Message::ColumnBrowserCursorExited(pane.id))
-        .into()
+    pane_blank_area(&pane, pane_surface)
 }
 
 fn vertical_spacer(height: f32) -> Element<'static, Message> {
@@ -579,7 +565,7 @@ fn list_entry_row<'a>(
         .on_right_press(Message::EntryRightClicked(pane.id, entry.path.clone()))
         .interaction(iced::mouse::Interaction::Pointer);
 
-    let row_area = if entry.expands_as_directory() && !pane.is_trash_view {
+    let row_area = if entry.expands_as_directory() && pane.browses_into_entries() {
         row_area.on_middle_press(crate::model::entry_middle_press_message(pane.id, entry))
     } else {
         row_area
@@ -844,7 +830,7 @@ fn list_directory_toggle<'a>(
     geometry: &ListGeometry,
     entry: &DirectoryEntry,
 ) -> Element<'a, Message> {
-    if !entry.expands_as_directory() || pane.is_trash_view {
+    if !entry.expands_as_directory() || !pane.browses_into_entries() {
         return Space::new()
             .width(Length::Fixed(geometry.toggle_width))
             .into();

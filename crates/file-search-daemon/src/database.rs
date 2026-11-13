@@ -40,7 +40,7 @@ pub(crate) use scan::{
 };
 
 /// Bumped whenever the on-disk schema changes in a way that requires a migration.
-pub(crate) const SCHEMA_VERSION: i64 = 13;
+pub(crate) const SCHEMA_VERSION: i64 = 14;
 pub(super) const SEARCH_CONTENT_PREVIEW_CHARACTER_LIMIT: usize = 1_024;
 
 const WRITER_PAGE_CACHE_KIB: i64 = 2_048;

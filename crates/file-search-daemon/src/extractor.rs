@@ -214,16 +214,24 @@ pub fn plan_content_extraction(
     if let Some(document_kind) = zipped_xml_document_kind(content_type) {
         return whole_document(ExtractionExecutionMode::ZippedXmlTextInProcess { document_kind });
     }
-    let form = if is_markup(content_type, types) {
-        TextForm::Markup
-    } else if types.is_subclass(content_type, TEXT_PLAIN) {
-        TextForm::Plain
-    } else {
+    let Some(form) = text_form(content_type, types) else {
         return skip(ExtractionStatus::Unsupported);
     };
     ExtractionPlan {
         max_output_bytes: max_extract_bytes,
         execution_mode: ExtractionExecutionMode::TextInProcess { form },
+    }
+}
+
+/// 按文字读正文的类型：网页与 XML 去标签，其余 text/plain 子类按原文。升级迁移按同一条
+/// 规则挑出要重读的文件，两处不能各写一份。
+pub(crate) fn text_form(content_type: &str, types: &MimeDatabase) -> Option<TextForm> {
+    if is_markup(content_type, types) {
+        Some(TextForm::Markup)
+    } else if types.is_subclass(content_type, TEXT_PLAIN) {
+        Some(TextForm::Plain)
+    } else {
+        None
     }
 }
 

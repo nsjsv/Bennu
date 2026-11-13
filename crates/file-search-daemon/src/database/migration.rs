@@ -5,7 +5,7 @@ use std::path::Path;
 use file_search::mime::{MimeDatabase, NameType};
 
 use crate::error::{SearchError, SearchResult};
-use crate::extractor::{is_markup, ExtractionStatus};
+use crate::extractor::{is_markup, text_form, ExtractionStatus};
 use crate::model::SearchFileKind;
 use crate::text_matching::{name_index_text, normalize_search_text};
 
@@ -112,6 +112,40 @@ impl SearchDatabase {
         if current < 13 {
             self.migrate_content_types(&MimeDatabase::system())?;
         }
+        if current < 14 {
+            self.requeue_text_content(&MimeDatabase::system())?;
+        }
+        Ok(())
+    }
+
+    /// schema 14：文字类正文以前只要转码成功就入索引，开头没有 NUL 的二进制（游戏资源、
+    /// 数据库文件）被当成乱码文字存了进去，正文也可能超过上限；现在转出来不像文字的不存
+    /// 正文、正文按字节截断。contentless FTS 不存原文，认不出哪些是乱码，按文字读过正文的
+    /// 文件全部重新排队，由服务在后台重新提取。
+    fn requeue_text_content(&self, types: &MimeDatabase) -> SearchResult<()> {
+        let transaction = self.connection.unchecked_transaction()?;
+        let indexed = transaction
+            .prepare(
+                "SELECT path, mime_type FROM files
+                 WHERE content_status = ?1 AND mime_type IS NOT NULL",
+            )?
+            .query_map(
+                [serde_json::to_string(&ExtractionStatus::Indexed)?],
+                |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, String>(1)?)),
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+        {
+            let mut queue_content = transaction.prepare(
+                "UPDATE file_stage_state SET content_stage_state = 'pending' WHERE path = ?1",
+            )?;
+            for (path, mime_type) in &indexed {
+                if text_form(mime_type, types).is_some() {
+                    queue_content.execute([path])?;
+                }
+            }
+        }
+        transaction.pragma_update(None, "user_version", 14)?;
+        transaction.commit()?;
         Ok(())
     }
 

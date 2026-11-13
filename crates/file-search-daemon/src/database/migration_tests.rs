@@ -3,6 +3,8 @@ use std::path::Path;
 use rusqlite::{params, Connection};
 use tempfile::tempdir;
 
+use file_search::mime::MimeDatabase;
+
 use crate::extractor::ExtractionStatus;
 use crate::model::{SearchFileKind, SearchQuery};
 use crate::query_state::QueryState;
@@ -711,13 +713,10 @@ fn schema_thirteen_migration_retypes_files_and_queues_what_reads_differently() {
     ] {
         database.upsert_file(&file).unwrap();
     }
+    // 只跑第 13 步：打开旧库会一路迁到最新，schema 14 会把按文字读过的文件也排队。
     database
-        .connection
-        .execute_batch("PRAGMA user_version = 12;")
+        .migrate_content_types(&MimeDatabase::system())
         .unwrap();
-    drop(database);
-
-    let database = SearchDatabase::open(&database_path).unwrap();
 
     let state = |path: &str| {
         database
@@ -743,4 +742,66 @@ fn schema_thirteen_migration_retypes_files_and_queues_what_reads_differently() {
     assert_eq!(mime_type("/tmp/plain.txt").as_deref(), Some("text/plain"));
     assert_eq!(state("/tmp/runme"), EntryStageProgress::Pending);
     assert_eq!(mime_type("/tmp/runme"), None);
+}
+
+/// 文字类正文改成「转出来不像文字的不存、按字节截断」后：按文字读过正文的文件（纯文本、
+/// 网页）重新排队；pdf 不是按文字读的，没存正文的也不受影响，都不动。
+#[test]
+fn schema_fourteen_migration_queues_content_read_as_text_again() {
+    if !Path::new("/usr/share/mime/mime.cache").exists() {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let database_path = directory.path().join("search.sqlite");
+    let database = SearchDatabase::open(&database_path).unwrap();
+    for file in [
+        indexed_file(
+            "/tmp/game.resS",
+            Some("text/plain"),
+            EntryStageProgress::Complete,
+        ),
+        indexed_file(
+            "/tmp/page.html",
+            Some("text/html"),
+            EntryStageProgress::Complete,
+        ),
+        indexed_file(
+            "/tmp/report.pdf",
+            Some("application/pdf"),
+            EntryStageProgress::Complete,
+        ),
+        indexed_file(
+            "/tmp/binary.txt",
+            Some("text/plain"),
+            EntryStageProgress::Skipped,
+        ),
+    ] {
+        database.upsert_file(&file).unwrap();
+    }
+    database
+        .connection
+        .execute_batch("PRAGMA user_version = 13;")
+        .unwrap();
+    drop(database);
+
+    let database = SearchDatabase::open(&database_path).unwrap();
+
+    let state = |path: &str| {
+        database
+            .entry_stage_state(Path::new(path))
+            .unwrap()
+            .unwrap()
+            .content
+    };
+    assert_eq!(state("/tmp/game.resS"), EntryStageProgress::Pending);
+    assert_eq!(state("/tmp/page.html"), EntryStageProgress::Pending);
+    assert_eq!(state("/tmp/report.pdf"), EntryStageProgress::Complete);
+    assert_eq!(state("/tmp/binary.txt"), EntryStageProgress::Skipped);
+    assert_eq!(
+        database
+            .connection
+            .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        SCHEMA_VERSION
+    );
 }

@@ -288,7 +288,7 @@ impl FileOperationStatus {
     pub fn label(self) -> String {
         match self {
             Self::Pending => tr!("Pending"),
-            Self::Running => tr!("Running"),
+            Self::Running => tr!("In Progress"),
             Self::Paused => tr!("Paused"),
             Self::Canceling => tr!("Canceling"),
             Self::Failed => tr!("Failed"),

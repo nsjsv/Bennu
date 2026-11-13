@@ -11,6 +11,7 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Canceling", "取消中"),
     ("Completed", "已完成"),
     ("Canceled", "已取消"),
+    ("In Progress", "进行中"),
     ("Preparing", "准备中"),
     // 任务队列
     ("Tasks", "任务"),

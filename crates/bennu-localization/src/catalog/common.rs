@@ -9,6 +9,7 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Close", "关闭"),
     ("Minimize", "最小化"),
     ("Maximize", "最大化"),
+    ("Unmaximize", "还原"),
     ("Restore", "恢复"),
     ("Select", "选择"),
     // 窗口标题

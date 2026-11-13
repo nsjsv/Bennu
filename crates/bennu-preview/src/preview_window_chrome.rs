@@ -56,7 +56,7 @@ where
         WindowControlKind::Minimize => (IconSymbol::Minus, tr!("Minimize")),
         WindowControlKind::MaximizeRestore => match frame_state {
             WindowFrameState::Restored => (IconSymbol::Square, tr!("Maximize")),
-            WindowFrameState::Maximized => (IconSymbol::RestoreWindow, tr!("Restore")),
+            WindowFrameState::Maximized => (IconSymbol::RestoreWindow, tr!("Unmaximize")),
         },
         WindowControlKind::Close => (IconSymbol::Close, tr!("Close")),
     };

@@ -106,7 +106,7 @@ fn recoverable_task_waits_for_journal_ack_before_starting() {
         FileOperationProgressUpdate::Indeterminate,
         Vec::new(),
     );
-    assert_eq!(queue.tasks()[0].status_label(), "Running");
+    assert_eq!(queue.tasks()[0].status_label(), "In Progress");
 }
 
 #[test]
@@ -136,7 +136,7 @@ fn direct_move_commit_revisions_are_accepted_once_for_the_active_work_item() {
     let nested_source = second_source.join("nested/child");
 
     assert!(queue.accept_durable_direct_move_commit(task_id, &first_key, &first_source, 4));
-    assert_eq!(queue.tasks()[0].status_label(), "Running");
+    assert_eq!(queue.tasks()[0].status_label(), "In Progress");
     assert!(!queue.accept_durable_direct_move_commit(task_id, &first_key, &first_source, 4));
     assert!(!queue.accept_durable_direct_move_commit(task_id, &first_key, &first_source, 5));
     assert!(!queue.accept_durable_direct_move_commit(task_id, &second_key, &first_source, 4));

@@ -470,7 +470,9 @@ fn column_entry_row<'a>(
         .into()
     };
 
-    let trailing: Element<'static, Message> = if browser.entry_acts_as_directory(&entry.path) {
+    // 行里已有条目：按路径回查在大目录里是线性的，越往下滚每帧越慢。
+    let acts_as_directory = entry.expands_as_directory();
+    let trailing: Element<'static, Message> = if acts_as_directory {
         themed_icon(
             IconSymbol::ChevronRight,
             icon_tone,
@@ -512,7 +514,7 @@ fn column_entry_row<'a>(
         .on_right_press(Message::EntryRightClicked(pane.id, entry.path.clone()))
         .interaction(iced::mouse::Interaction::Pointer);
 
-    let row_area = if browser.entry_acts_as_directory(&entry.path) {
+    let row_area = if acts_as_directory {
         row_area.on_middle_press(crate::model::entry_middle_press_message(pane.id, entry))
     } else {
         row_area

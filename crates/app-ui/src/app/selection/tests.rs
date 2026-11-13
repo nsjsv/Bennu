@@ -909,3 +909,28 @@ fn entry_menu_never_carries_grouping_entry() {
     assert!(menu.target.is_some());
     assert!(!menu.grouping_entry_visible);
 }
+
+/// 渲染行用 `DirectoryEntry::expands_as_directory`，事件入口只有路径时用
+/// `entry_acts_as_directory`：两种入口必须同口径。
+#[test]
+fn path_lookup_and_entry_rule_agree_on_directories_and_archives() {
+    let (mut browser, _) = FileBrowser::new(config::default_user_config());
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/tmp"));
+    let entries = vec![
+        test_entry(PathBuf::from("/tmp/photos"), FileKind::Directory),
+        test_entry(PathBuf::from("/tmp/photos.7z"), FileKind::File),
+        test_entry(PathBuf::from("/tmp/notes.txt"), FileKind::File),
+    ];
+    browser.tab_mut().entries = entries.clone().into();
+
+    for entry in &entries {
+        assert_eq!(
+            browser.entry_acts_as_directory(&entry.path),
+            entry.expands_as_directory(),
+            "{:?}",
+            entry.path
+        );
+    }
+    assert!(entries[1].expands_as_directory());
+    assert!(!entries[2].expands_as_directory());
+}

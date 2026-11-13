@@ -11,10 +11,11 @@ use tokio_util::sync::CancellationToken;
 use crate::config::SearchIndexConfig;
 use crate::database::{EntryStageProgress, IndexedEntryStageState, SearchDatabase};
 use crate::error::SearchError;
-use crate::extractor::{CommandSpec, ExtractionExecutionMode, ExtractionStatus};
+use crate::extractor::{CommandSpec, ExtractionExecutionMode, ExtractionStatus, TextForm};
 use crate::model::{MimePattern, SearchEntryTypeRule, SearchQuery};
 use crate::query_state::QueryState;
 use crate::writer::IndexWriter;
+use file_search::mime::MimeDatabase;
 
 use super::{collapse_affected_prefixes, observed_file_signature, SearchIndexer};
 
@@ -80,8 +81,8 @@ fn changed_path_collapse_preserves_nested_root_ownership() {
     );
 }
 
-#[test]
-fn changed_text_file_pipeline_plan_exposes_stage_boundaries() {
+#[tokio::test]
+async fn changed_text_file_pipeline_plan_exposes_stage_boundaries() {
     let content = tempdir().unwrap();
     let db_dir = tempdir().unwrap();
     let path = content.path().join("note.txt");
@@ -91,8 +92,14 @@ fn changed_text_file_pipeline_plan_exposes_stage_boundaries() {
     let indexer = SearchIndexer::new(Arc::clone(&writer), config_for(content.path()));
     let metadata = fs::metadata(&path).unwrap();
 
-    let changed_file_pipeline =
-        indexer.plan_changed_file_pipeline(&path, &metadata, observed_file_signature(&metadata));
+    let changed_file_pipeline = indexer
+        .plan_changed_file_pipeline(
+            &path,
+            &metadata,
+            observed_file_signature(&metadata),
+            &MimeDatabase::system(),
+        )
+        .await;
 
     assert_eq!(
         changed_file_pipeline.stage1_visible_fields.display_name,
@@ -118,12 +125,14 @@ fn changed_text_file_pipeline_plan_exposes_stage_boundaries() {
             .stage3_content_plan
             .extraction_plan
             .execution_mode,
-        ExtractionExecutionMode::PlainTextInProcess
+        ExtractionExecutionMode::TextInProcess {
+            form: TextForm::Plain
+        }
     );
 }
 
-#[test]
-fn document_pipeline_plan_uses_isolated_subprocess_execution() {
+#[tokio::test]
+async fn document_pipeline_plan_uses_isolated_subprocess_execution() {
     let content = tempdir().unwrap();
     let db_dir = tempdir().unwrap();
     let path = content.path().join("report.pdf");
@@ -133,8 +142,14 @@ fn document_pipeline_plan_uses_isolated_subprocess_execution() {
     let indexer = SearchIndexer::new(Arc::clone(&writer), config_for(content.path()));
     let metadata = fs::metadata(&path).unwrap();
 
-    let changed_file_pipeline =
-        indexer.plan_changed_file_pipeline(&path, &metadata, observed_file_signature(&metadata));
+    let changed_file_pipeline = indexer
+        .plan_changed_file_pipeline(
+            &path,
+            &metadata,
+            observed_file_signature(&metadata),
+            &MimeDatabase::system(),
+        )
+        .await;
 
     assert_eq!(
         changed_file_pipeline
@@ -151,11 +166,11 @@ fn document_pipeline_plan_uses_isolated_subprocess_execution() {
     );
 }
 
-#[test]
-fn oversized_file_pipeline_plan_skips_stage3_before_extraction() {
+#[tokio::test]
+async fn oversized_document_pipeline_plan_skips_stage3_before_extraction() {
     let content = tempdir().unwrap();
     let db_dir = tempdir().unwrap();
-    let path = content.path().join("large.txt");
+    let path = content.path().join("large.pdf");
     fs::write(&path, "needle").unwrap();
 
     let writer = writer_in(&db_dir);
@@ -164,8 +179,14 @@ fn oversized_file_pipeline_plan_skips_stage3_before_extraction() {
     let indexer = SearchIndexer::new(Arc::clone(&writer), config);
     let metadata = fs::metadata(&path).unwrap();
 
-    let changed_file_pipeline =
-        indexer.plan_changed_file_pipeline(&path, &metadata, observed_file_signature(&metadata));
+    let changed_file_pipeline = indexer
+        .plan_changed_file_pipeline(
+            &path,
+            &metadata,
+            observed_file_signature(&metadata),
+            &MimeDatabase::system(),
+        )
+        .await;
 
     assert_eq!(
         changed_file_pipeline
@@ -382,16 +403,15 @@ async fn warm_start_replaces_a_known_directory_with_a_file() {
 }
 
 #[tokio::test]
-async fn unchanged_oversized_files_keep_durable_skip_state() {
+async fn unchanged_skipped_files_keep_durable_skip_state() {
     let content = tempdir().unwrap();
     let db_dir = tempdir().unwrap();
-    let path = content.path().join("large.txt");
-    fs::write(&path, "needle").unwrap();
+    // 名字说是文字，内容是二进制：正文跳过。
+    let path = content.path().join("data.txt");
+    fs::write(&path, [0u8, 1, 2, 3]).unwrap();
 
     let writer = writer_in(&db_dir);
-    let mut config = config_for(content.path());
-    config.max_extract_bytes = 2;
-    let indexer = SearchIndexer::new(Arc::clone(&writer), config);
+    let indexer = SearchIndexer::new(Arc::clone(&writer), config_for(content.path()));
 
     let first = indexer.rebuild().await.unwrap();
     assert_eq!(first.reindexed, 1);
@@ -399,7 +419,7 @@ async fn unchanged_oversized_files_keep_durable_skip_state() {
     let database = SearchDatabase::open_read_only(&db_dir.path().join("search.sqlite")).unwrap();
     assert_eq!(
         database.content_status(&path).unwrap(),
-        Some(ExtractionStatus::TooLarge)
+        Some(ExtractionStatus::Unsupported)
     );
     assert_eq!(
         database.entry_stage_state(&path).unwrap(),
@@ -659,29 +679,32 @@ async fn permission_ctime_change_hides_and_recovers_an_unchanged_file() {
 }
 
 #[tokio::test]
-async fn records_oversized_content_status() {
+async fn long_text_is_indexed_up_to_the_limit() {
     let content = tempdir().unwrap();
     let db_dir = tempdir().unwrap();
     let path = content.path().join("large.txt");
-    fs::write(&path, "needle").unwrap();
+    fs::write(&path, "head tail").unwrap();
 
     let writer = writer_in(&db_dir);
     let mut config = config_for(content.path());
-    config.max_extract_bytes = 2;
+    config.max_extract_bytes = 4;
     let indexer = SearchIndexer::new(Arc::clone(&writer), config);
     indexer.rebuild().await.unwrap();
 
     let reader = SearchDatabase::open_read_only(&db_dir.path().join("search.sqlite")).unwrap();
-    let status = reader.content_status(&path).unwrap();
-    assert_eq!(status, Some(ExtractionStatus::TooLarge));
-    let stage_state = reader.entry_stage_state(&path).unwrap();
     assert_eq!(
-        stage_state,
-        Some(crate::database::IndexedEntryStageState {
-            metadata: crate::database::EntryStageProgress::Complete,
-            content: crate::database::EntryStageProgress::Skipped,
-        })
+        reader.content_status(&path).unwrap(),
+        Some(ExtractionStatus::Indexed)
     );
+    let hits = |terms: &str| {
+        reader
+            .search(&SearchQuery::global(1, terms), &QueryState::default())
+            .unwrap()
+            .hits
+            .len()
+    };
+    assert_eq!(hits("head"), 1);
+    assert_eq!(hits("tail"), 0);
 }
 
 #[tokio::test]

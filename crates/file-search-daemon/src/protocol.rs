@@ -468,7 +468,8 @@ fn validate_wire_query(query: &SearchQuery) -> Result<(), String> {
         })
     {
         let (value, permits_empty_subtype) = match pattern {
-            crate::model::MimePattern::Exact(value) => (value.as_str(), false),
+            crate::model::MimePattern::Exact(value)
+            | crate::model::MimePattern::Inheriting(value) => (value.as_str(), false),
             crate::model::MimePattern::Prefix(value) => (value.as_str(), true),
         };
         if value.len() > MAX_QUERY_MIME_BYTES {

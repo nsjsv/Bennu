@@ -3,6 +3,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use file_search::filter_semantics::ResolvedFilters;
+use file_search::mime::MimeDatabase;
 use rusqlite::types::Value;
 use rusqlite::{params_from_iter, Connection};
 
@@ -112,6 +114,8 @@ impl SearchDatabase {
     ) -> SearchResult<SearchResultBatch> {
         let terms = SearchTerms::parse(&query.terms);
         let text = TextPredicates::new(&terms, query.text_scope);
+        let types = MimeDatabase::system();
+        let filters = query.filters.resolve(&types);
         match query.order {
             SearchOrder::Field {
                 field,
@@ -122,16 +126,17 @@ impl SearchDatabase {
                     connection,
                     query,
                     &text,
+                    &filters,
                     field,
                     direction,
                     directories_first,
                 )
             }),
             SearchOrder::Relevance if query.match_mode == SearchMatchMode::Regex => {
-                self.search_regex(query)
+                self.search_regex(query, &filters)
             }
             SearchOrder::Relevance if text.is_empty() => {
-                self.search_by_metadata(query, &terms, &text)
+                self.search_by_metadata(query, &terms, &text, &filters)
             }
             // 有搜索词就按相关度排：排序要看每条命中的名字、位置和时间，拿不到「只算前一页」
             // 的捷径。
@@ -142,6 +147,7 @@ impl SearchDatabase {
                         query,
                         &terms,
                         &text,
+                        &filters,
                         &query_state.recent_files.last_used(),
                     )
                 })
@@ -213,11 +219,12 @@ impl SearchDatabase {
         query: &SearchQuery,
         terms: &SearchTerms,
         text: &TextPredicates,
+        filters: &ResolvedFilters<'_>,
     ) -> SearchResult<SearchResultBatch> {
         let limit = query.limit.clamp(1, 200);
         let offset = live_offset(query)?;
         let transaction = self.connection.unchecked_transaction()?;
-        let (sql, values) = metadata_sql(query, text, limit.saturating_add(1), offset);
+        let (sql, values) = metadata_sql(query, text, filters, limit.saturating_add(1), offset);
         let hits = {
             let mut statement = transaction.prepare(&sql)?;
             let rows = statement
@@ -232,13 +239,17 @@ impl SearchDatabase {
     }
 
     /// 正则无法在 FTS 倒排索引上执行：按 rowid 扫描序流式过滤名称，凑满一页提前退出。
-    fn search_regex(&self, query: &SearchQuery) -> SearchResult<SearchResultBatch> {
+    fn search_regex(
+        &self,
+        query: &SearchQuery,
+        filters: &ResolvedFilters<'_>,
+    ) -> SearchResult<SearchResultBatch> {
         let limit = query.limit.clamp(1, 200);
         let fetch_limit = limit.saturating_add(1);
         let offset = live_offset(query)?;
         let name_regex = query.match_mode.name_regex(&query.terms)?;
         let transaction = self.connection.unchecked_transaction()?;
-        let (sql, values) = regex_scan_sql(query);
+        let (sql, values) = regex_scan_sql(query, filters);
         let hits = {
             let mut statement = transaction.prepare(&sql)?;
             let mut rows = statement.query(params_from_iter(values))?;
@@ -286,12 +297,21 @@ impl SearchDatabase {
     #[cfg(test)]
     pub(super) fn search_plan(&self, query: &SearchQuery) -> SearchResult<Vec<String>> {
         let text = TextPredicates::new(&SearchTerms::parse(&query.terms), query.text_scope);
+        let types = MimeDatabase::system();
+        let filters = query.filters.resolve(&types);
         let (sql, values) = if text.is_empty() {
-            metadata_sql(query, &text, query.limit.clamp(1, 200).saturating_add(1), 0)
+            metadata_sql(
+                query,
+                &text,
+                &filters,
+                query.limit.clamp(1, 200).saturating_add(1),
+                0,
+            )
         } else {
             candidate_sql(
                 query,
                 &text,
+                &filters,
                 full_text_query_plan(&self.connection, query, &text)?,
             )
         };
@@ -351,7 +371,7 @@ pub(super) fn full_text_match_expression(
     TextPredicates::new(&SearchTerms::parse(terms), text_scope).match_expression
 }
 
-fn regex_scan_sql(query: &SearchQuery) -> (String, Vec<Value>) {
+fn regex_scan_sql(query: &SearchQuery, filters: &ResolvedFilters<'_>) -> (String, Vec<Value>) {
     let mut values = Vec::new();
     let mut sql = "SELECT f.path, f.display_name, f.kind, f.size, f.modified_ms,
                 f.accessed_ms, f.created_ms
@@ -360,7 +380,7 @@ fn regex_scan_sql(query: &SearchQuery) -> (String, Vec<Value>) {
         .to_owned()
         + QUERY_VISIBLE_PREDICATE;
     append_scope_filter(&mut sql, &mut values, query);
-    query.filters.append_sql(&mut sql, &mut values);
+    filters.append_sql(&mut sql, &mut values);
     (sql, values)
 }
 
@@ -418,12 +438,13 @@ const CANDIDATE_COLUMNS: &str =
 fn candidate_sql(
     query: &SearchQuery,
     text: &TextPredicates,
+    filters: &ResolvedFilters<'_>,
     full_text_plan: FullTextQueryPlan,
 ) -> (String, Vec<Value>) {
     let Some(match_expression) = text.match_expression.as_ref() else {
         let mut values = Vec::new();
         let mut sql = format!("SELECT f.rowid, NULL, {CANDIDATE_COLUMNS} FROM files f");
-        append_metadata_conditions(&mut sql, &mut values, query, text);
+        append_metadata_conditions(&mut sql, &mut values, query, text, filters);
         return (sql, values);
     };
     let mut values = vec![Value::Text(match_expression.clone())];
@@ -438,7 +459,7 @@ fn candidate_sql(
         sql.push_str(QUERY_VISIBLE_PREDICATE);
         append_scope_filter(&mut sql, &mut values, query);
         text.append_short_term_sql(&mut sql, &mut values);
-        query.filters.append_sql(&mut sql, &mut values);
+        filters.append_sql(&mut sql, &mut values);
     }
     (sql, values)
 }
@@ -450,6 +471,7 @@ fn ranked_rows(
     query: &SearchQuery,
     terms: &SearchTerms,
     text: &TextPredicates,
+    filters: &ResolvedFilters<'_>,
     last_used: &HashMap<std::path::PathBuf, i64>,
 ) -> SearchResult<Vec<SnapshotRow>> {
     let full_text_plan = if text.match_expression.is_some() {
@@ -461,7 +483,7 @@ fn ranked_rows(
     let now_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_millis() as i64);
-    let (sql, values) = candidate_sql(query, text, full_text_plan);
+    let (sql, values) = candidate_sql(query, text, filters, full_text_plan);
     let mut statement = connection.prepare(&sql)?;
     let mut rows = statement
         .query_map(params_from_iter(values), |row| {
@@ -581,13 +603,14 @@ fn ranked_page(
 fn metadata_sql(
     query: &SearchQuery,
     text: &TextPredicates,
+    filters: &ResolvedFilters<'_>,
     limit: usize,
     offset: usize,
 ) -> (String, Vec<Value>) {
     let (preview_projection, preview_join) = preview_columns(query, text);
     let mut values = Vec::new();
     let mut sql = format!("SELECT {HIT_COLUMNS}, {preview_projection} FROM files f{preview_join}");
-    append_metadata_conditions(&mut sql, &mut values, query, text);
+    append_metadata_conditions(&mut sql, &mut values, query, text, filters);
     sql.push_str(" ORDER BY f.modified_ms DESC, f.display_name ASC LIMIT ? OFFSET ?");
     values.push(Value::Integer(limit as i64));
     values.push(Value::Integer(offset as i64));
@@ -601,6 +624,7 @@ fn append_metadata_conditions(
     values: &mut Vec<Value>,
     query: &SearchQuery,
     text: &TextPredicates,
+    filters: &ResolvedFilters<'_>,
 ) {
     match recursive_path_range(query) {
         Some(range) => {
@@ -616,7 +640,7 @@ fn append_metadata_conditions(
         }
     }
     text.append_short_term_sql(sql, values);
-    query.filters.append_sql(sql, values);
+    filters.append_sql(sql, values);
 }
 
 /// 从第 `first_column` 列起按 `HIT_COLUMNS` 加预览列的顺序读一条命中。

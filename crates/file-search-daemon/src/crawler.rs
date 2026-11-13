@@ -1,7 +1,10 @@
+use std::io::Read;
+use std::os::fd::AsRawFd;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use file_search::mime::{MimeDatabase, NameType};
 use tokio_util::sync::CancellationToken;
 
 use crate::config::{SearchExcludeRules, SearchIndexConfig};
@@ -14,9 +17,7 @@ use crate::extractor::{
     execute_extraction_plan_cancelled, plan_content_extraction, DurableContentStageState,
     ExtractionExecutionMode, ExtractionPlan, ExtractionStatus,
 };
-use crate::filesystem::{
-    display_name, ensure_not_cancelled, file_time_ms, mime_type_for_path, FilesystemEntry,
-};
+use crate::filesystem::{display_name, ensure_not_cancelled, file_time_ms, FilesystemEntry};
 use crate::model::SearchFileKind;
 use crate::writer::IndexWriter;
 
@@ -257,17 +258,22 @@ impl SearchIndexer {
         self.config.owning_root(path)
     }
 
-    fn plan_changed_file_pipeline(
+    /// 名字定不下类型时要读文件开头，所以计划本身是异步的。
+    async fn plan_changed_file_pipeline(
         &self,
         path: &Path,
         metadata: &std::fs::Metadata,
         observed_signature: FileSignature,
+        types: &MimeDatabase,
     ) -> ChangedFilePipelinePlan {
         let stage1_visible_fields =
             self.plan_stage1_visible_fields(path, metadata, observed_signature);
-        let stage2_metadata_shape = self.plan_stage2_metadata_shape(path);
+        let size = stage1_visible_fields.signature.size;
+        let stage2_metadata_shape = Stage2MetadataShape {
+            mime_type: content_type_for(path, size, types).await,
+        };
         let stage3_content_plan =
-            self.plan_stage3_content(path, stage1_visible_fields.signature.size);
+            self.plan_stage3_content(stage2_metadata_shape.mime_type.as_deref(), size, types);
 
         ChangedFilePipelinePlan {
             stage1_visible_fields,
@@ -294,19 +300,19 @@ impl SearchIndexer {
         }
     }
 
-    fn plan_stage2_metadata_shape(&self, path: &Path) -> Stage2MetadataShape {
-        Stage2MetadataShape {
-            mime_type: mime_type_for_path(path),
-        }
-    }
-
-    fn plan_stage3_content(&self, path: &Path, len: u64) -> Stage3ContentPlan {
+    fn plan_stage3_content(
+        &self,
+        content_type: Option<&str>,
+        len: u64,
+        types: &MimeDatabase,
+    ) -> Stage3ContentPlan {
         Stage3ContentPlan {
             extraction_plan: plan_content_extraction(
-                path,
+                content_type,
                 len,
                 self.config.max_extract_bytes,
                 self.config.content_indexing_enabled,
+                types,
             ),
         }
     }
@@ -441,6 +447,44 @@ fn materialize_inaccessible_file(
         mtime_ns: stage1_visible_fields.signature.mtime_ns,
         ctime_ns: stage1_visible_fields.signature.ctime_ns,
     }
+}
+
+/// 只看名字的类型（签名跳过判断要和建索引时同一个依据）。
+pub(crate) fn name_type_for(path: &Path, types: &MimeDatabase) -> NameType {
+    path.file_name()
+        .map_or(NameType::Unknown, |name| types.type_from_name(name))
+}
+
+/// 文件类型：名字能定就不读文件；否则读开头交给类型库。读不了时按名字猜，正文提取会再
+/// 碰到同样的错误并照常记下。
+async fn content_type_for(path: &Path, size: u64, types: &MimeDatabase) -> Option<String> {
+    let name_type = name_type_for(path, types);
+    if let NameType::Known(mime) = name_type {
+        return Some(mime);
+    }
+    let wanted = u64::try_from(types.magic_extent())
+        .unwrap_or(u64::MAX)
+        .min(size);
+    match read_file_head(path, wanted).await {
+        Ok(head) => types.type_from_content(&name_type, &head),
+        Err(_) => name_type.without_content(),
+    }
+}
+
+/// 打开、读、关放在同一次阻塞调用里：名字认不出类型的文件可能有成千上万个，每个都分几次
+/// 进出阻塞线程池，开销比读那几 KB 还大。
+async fn read_file_head(path: &Path, wanted: u64) -> std::io::Result<Vec<u8>> {
+    let path = path.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        let file = std::fs::File::open(&path)?;
+        let mut head = Vec::with_capacity(usize::try_from(wanted).unwrap_or(0));
+        let read = (&file).take(wanted).read_to_end(&mut head);
+        // 只为判断类型读了一小段，不该让这些页留在服务的工作集里。
+        let _ = unsafe { libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED) };
+        read.map(|_| head)
+    })
+    .await
+    .unwrap_or_else(|join_error| Err(std::io::Error::other(join_error)))
 }
 
 fn observed_file_signature(metadata: &std::fs::Metadata) -> FileSignature {
@@ -608,3 +652,7 @@ fn report_crawling(
 #[cfg(test)]
 #[path = "crawler/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "crawler/content_type_tests.rs"]
+mod content_type_tests;

@@ -53,6 +53,8 @@ impl SearchEntryTypePreset {
         let kind = |value| SearchEntryTypeRule::Kind(value);
         let exact = |value: &str| SearchEntryTypeRule::Mime(MimePattern::Exact(value.to_owned()));
         let prefix = |value: &str| SearchEntryTypeRule::Mime(MimePattern::Prefix(value.to_owned()));
+        // 文字类：text/plain 和类型库里它的全部子类（csv、xml、json、脚本、各种源码……）。
+        let text = || SearchEntryTypeRule::Mime(MimePattern::Inheriting("text/plain".to_owned()));
         match self {
             Self::Spreadsheets => vec![
                 exact("application/vnd.ms-excel"),
@@ -61,9 +63,9 @@ impl SearchEntryTypePreset {
             ],
             Self::Video => vec![prefix("video/")],
             Self::Images => vec![prefix("image/")],
-            Self::Text => vec![prefix("text/")],
+            Self::Text => vec![text()],
             Self::Documents => vec![
-                prefix("text/"),
+                text(),
                 exact("application/pdf"),
                 exact("application/rtf"),
                 exact("application/msword"),
@@ -90,6 +92,11 @@ impl SearchEntryTypePreset {
                 exact("application/x-bzip2"),
                 exact("application/x-xz"),
                 exact("application/zstd"),
+                exact("application/x-compressed-tar"),
+                exact("application/x-bzip2-compressed-tar"),
+                exact("application/x-xz-compressed-tar"),
+                exact("application/x-zstd-compressed-tar"),
+                exact("application/x-lzma-compressed-tar"),
             ],
             Self::Links => vec![kind(SearchFileKind::Symlink)],
         }
@@ -474,7 +481,7 @@ mod tests {
             .unwrap();
 
         for expected in [
-            SearchEntryTypeRule::Mime(MimePattern::Prefix("text/".to_owned())),
+            SearchEntryTypeRule::Mime(MimePattern::Inheriting("text/plain".to_owned())),
             SearchEntryTypeRule::Mime(MimePattern::Exact("application/pdf".to_owned())),
             SearchEntryTypeRule::Mime(MimePattern::Exact("application/vnd.ms-excel".to_owned())),
         ] {
@@ -508,7 +515,7 @@ mod tests {
             ),
             (
                 SearchEntryTypePreset::Text,
-                SearchEntryTypeRule::Mime(MimePattern::Prefix("text/".to_owned())),
+                SearchEntryTypeRule::Mime(MimePattern::Inheriting("text/plain".to_owned())),
             ),
             (
                 SearchEntryTypePreset::Documents,
@@ -533,6 +540,12 @@ mod tests {
             (
                 SearchEntryTypePreset::Archives,
                 SearchEntryTypeRule::Mime(MimePattern::Exact("application/zip".to_owned())),
+            ),
+            (
+                SearchEntryTypePreset::Archives,
+                SearchEntryTypeRule::Mime(MimePattern::Exact(
+                    "application/x-compressed-tar".to_owned(),
+                )),
             ),
             (
                 SearchEntryTypePreset::Links,

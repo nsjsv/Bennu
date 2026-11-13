@@ -454,60 +454,6 @@ pub fn file_time_ms(time: Option<SystemTime>) -> Option<i64> {
         .map(|duration| duration.as_millis() as i64)
 }
 
-pub fn mime_type_for_path(path: &Path) -> Option<String> {
-    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
-    let mime_type = match extension.as_str() {
-        "txt" | "rs" | "toml" | "json" | "yaml" | "yml" | "log" => "text/plain",
-        "md" | "markdown" => "text/markdown",
-        "csv" => "text/csv",
-        "html" | "htm" => "text/html",
-        "css" => "text/css",
-        "js" => "text/javascript",
-        "rtf" => "application/rtf",
-        "pdf" => "application/pdf",
-        "doc" => "application/msword",
-        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "xls" => "application/vnd.ms-excel",
-        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "ppt" => "application/vnd.ms-powerpoint",
-        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        "odt" => "application/vnd.oasis.opendocument.text",
-        "ods" => "application/vnd.oasis.opendocument.spreadsheet",
-        "odp" => "application/vnd.oasis.opendocument.presentation",
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "bmp" => "image/bmp",
-        "tif" | "tiff" => "image/tiff",
-        "ico" => "image/vnd.microsoft.icon",
-        "svg" => "image/svg+xml",
-        "mp3" => "audio/mpeg",
-        "wav" => "audio/wav",
-        "flac" => "audio/flac",
-        "ogg" | "opus" => "audio/ogg",
-        "m4a" => "audio/mp4",
-        "aac" => "audio/aac",
-        "mp4" => "video/mp4",
-        "mkv" => "video/x-matroska",
-        "webm" => "video/webm",
-        "avi" => "video/x-msvideo",
-        "mov" => "video/quicktime",
-        "m4v" => "video/x-m4v",
-        "mpg" | "mpeg" => "video/mpeg",
-        "zip" => "application/zip",
-        "7z" => "application/x-7z-compressed",
-        "rar" => "application/vnd.rar",
-        "tar" => "application/x-tar",
-        "gz" => "application/gzip",
-        "bz2" => "application/x-bzip2",
-        "xz" => "application/x-xz",
-        "zst" => "application/zstd",
-        _ => return None,
-    };
-    Some(mime_type.to_owned())
-}
-
 fn entry_kind(metadata: &Metadata) -> SearchFileKind {
     let file_type = metadata.file_type();
     if file_type.is_symlink() {
@@ -578,8 +524,8 @@ mod tests {
     use crate::model::SearchFileKind;
 
     use super::{
-        can_descend, classify_path_error, mime_type_for_path, FilesystemObservation,
-        LocalFilesystemBoundary, TraversalDepth,
+        can_descend, classify_path_error, FilesystemObservation, LocalFilesystemBoundary,
+        TraversalDepth,
     };
 
     #[test]
@@ -596,63 +542,6 @@ mod tests {
             FilesystemObservation::Inaccessible { scope: observed_scope }
                 if observed_scope == scope
         ));
-    }
-
-    #[test]
-    fn common_search_categories_share_one_extension_to_mime_boundary() {
-        let expected_mime_types = [
-            ("notes.md", "text/markdown"),
-            ("photo.png", "image/png"),
-            ("recording.flac", "audio/flac"),
-            ("movie.mkv", "video/x-matroska"),
-            ("bundle.7z", "application/x-7z-compressed"),
-        ];
-
-        for (file_name, expected_mime_type) in expected_mime_types {
-            assert_eq!(
-                mime_type_for_path(Path::new(file_name)).as_deref(),
-                Some(expected_mime_type),
-                "unexpected MIME type for {file_name}"
-            );
-        }
-    }
-
-    #[test]
-    fn office_formats_keep_mime_metadata_when_content_is_not_extracted() {
-        let expected_mime_types = [
-            ("report.doc", "application/msword"),
-            (
-                "report.docx",
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            ),
-            ("workbook.xls", "application/vnd.ms-excel"),
-            (
-                "workbook.xlsx",
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            ),
-            ("slides.ppt", "application/vnd.ms-powerpoint"),
-            (
-                "slides.pptx",
-                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            ),
-            ("document.odt", "application/vnd.oasis.opendocument.text"),
-            (
-                "spreadsheet.ods",
-                "application/vnd.oasis.opendocument.spreadsheet",
-            ),
-            (
-                "presentation.odp",
-                "application/vnd.oasis.opendocument.presentation",
-            ),
-        ];
-
-        for (file_name, expected_mime_type) in expected_mime_types {
-            assert_eq!(
-                mime_type_for_path(Path::new(file_name)).as_deref(),
-                Some(expected_mime_type),
-                "unexpected MIME type for {file_name}"
-            );
-        }
     }
 
     #[test]

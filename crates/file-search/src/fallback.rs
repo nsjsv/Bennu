@@ -3,10 +3,11 @@ use tokio_util::sync::CancellationToken;
 use crate::config::SearchExcludeRules;
 use crate::error::{SearchError, SearchResult};
 use crate::filesystem::{
-    display_name, ensure_not_cancelled, file_time_ms, mime_type_for_path, FilesystemObservation,
+    display_name, ensure_not_cancelled, file_time_ms, FilesystemObservation,
     LocalFilesystemBoundary, TraversalDepth, TraversalEvent,
 };
 use crate::filter_semantics::EntryFacts;
+use crate::mime::{type_for_name_only, MimeDatabase};
 use crate::model::{
     MatchSource, SearchFileKind, SearchHit, SearchMatchMode, SearchQuery, SearchScope,
 };
@@ -101,6 +102,8 @@ pub fn search_directory_fallback(
     let name_regex = (query.match_mode == SearchMatchMode::Regex)
         .then(|| query.match_mode.name_regex(&query.terms))
         .transpose()?;
+    let types = MimeDatabase::system();
+    let filters = query.filters.resolve(&types);
     let batch_size = query.limit.clamp(1, 200);
     let mut batch = Vec::with_capacity(batch_size);
     let mut inspected_entries = 0;
@@ -136,8 +139,9 @@ pub fn search_directory_fallback(
         let modified_ms = file_time_ms(metadata.modified().ok());
         let accessed_ms = file_time_ms(metadata.accessed().ok());
         let created_ms = file_time_ms(metadata.created().ok());
+        // 回退扫描不读文件内容，类型只按名字猜。
         let mime_type = if entry.kind() == SearchFileKind::File {
-            mime_type_for_path(entry.path())
+            type_for_name_only(&types, entry.path())
         } else {
             None
         };
@@ -150,7 +154,7 @@ pub fn search_directory_fallback(
             accessed_ms,
             created_ms,
         };
-        if !query.filters.matches(&facts) {
+        if !filters.matches(&facts) {
             continue;
         }
 

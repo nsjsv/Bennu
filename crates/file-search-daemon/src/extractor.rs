@@ -1,5 +1,4 @@
 use std::io;
-use std::os::fd::AsRawFd;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{ExitStatus, Stdio};
@@ -12,10 +11,16 @@ use tokio::task::JoinHandle;
 use tokio::time;
 use tokio_util::sync::CancellationToken;
 
+use file_search::mime::{MimeDatabase, TEXT_PLAIN};
+
 use crate::error::{SearchError, SearchResult};
 
+mod markup_text;
+mod text_reading;
 mod zip_xml_text;
 
+use text_reading::extract_text;
+pub(crate) use text_reading::TextForm;
 use zip_xml_text::{extract_zipped_xml_text, zipped_xml_document_kind, ZippedXmlDocumentKind};
 
 const DEFAULT_EXTRACTION_TIMEOUT: Duration = Duration::from_secs(10);
@@ -89,8 +94,11 @@ impl ExtractionOutcome {
 pub enum ExtractionStatus {
     Indexed,
     Disabled,
+    /// 不是能取出文字的类型，或类型说是文字、内容却是二进制。
     Unsupported,
     TooLarge,
+    /// 已没有生产路径（非 UTF-8 文本现在识别编码后转换）；保留是为了让旧索引库里存量行的
+    /// JSON 仍能反序列化。
     NonUtf8,
     ReadFailed {
         message: String,
@@ -149,7 +157,10 @@ pub struct ExtractionPlan {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExtractionExecutionMode {
-    PlainTextInProcess,
+    /// 文字类文件：读前 `max_output_bytes` 字节，识别编码；带标签的再去标签。
+    TextInProcess {
+        form: TextForm,
+    },
     IsolatedSubprocess {
         command: CommandSpec,
         timeout: Duration,
@@ -162,73 +173,64 @@ pub enum ExtractionExecutionMode {
     },
 }
 
+/// 按文件类型（`content_type`，见 `file_search::mime`）选怎么取正文。pdf 与 Office
+/// 整个读进来解析，超过上限就跳过；文字类只读前面上限那么多，再长也能搜到开头。
 pub fn plan_content_extraction(
-    path: &Path,
+    content_type: Option<&str>,
     len: u64,
     max_extract_bytes: u64,
     content_indexing_enabled: bool,
+    types: &MimeDatabase,
 ) -> ExtractionPlan {
+    let skip = |skip_reason| ExtractionPlan {
+        max_output_bytes: max_extract_bytes,
+        execution_mode: ExtractionExecutionMode::SkipNow { skip_reason },
+    };
     if !content_indexing_enabled {
-        return ExtractionPlan {
-            max_output_bytes: max_extract_bytes,
-            execution_mode: ExtractionExecutionMode::SkipNow {
-                skip_reason: ExtractionStatus::Disabled,
-            },
-        };
+        return skip(ExtractionStatus::Disabled);
     }
-
-    if len > max_extract_bytes {
-        return ExtractionPlan {
-            max_output_bytes: max_extract_bytes,
-            execution_mode: ExtractionExecutionMode::SkipNow {
-                skip_reason: ExtractionStatus::TooLarge,
-            },
-        };
-    }
-
-    if is_plain_text_path(path) {
-        return ExtractionPlan {
-            max_output_bytes: max_extract_bytes,
-            execution_mode: ExtractionExecutionMode::PlainTextInProcess,
-        };
-    }
-
-    let extension = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(|extension| extension.to_ascii_lowercase());
-    let execution_mode = match extension.as_deref() {
-        Some("pdf") => ExtractionExecutionMode::IsolatedSubprocess {
+    let Some(content_type) = content_type else {
+        return skip(ExtractionStatus::Unsupported);
+    };
+    let whole_document = |execution_mode| {
+        if len > max_extract_bytes {
+            skip(ExtractionStatus::TooLarge)
+        } else {
+            ExtractionPlan {
+                max_output_bytes: max_extract_bytes,
+                execution_mode,
+            }
+        }
+    };
+    if content_type == "application/pdf" {
+        return whole_document(ExtractionExecutionMode::IsolatedSubprocess {
             command: CommandSpec {
                 program: "pdftotext".to_owned(),
                 args: vec!["{}".to_owned(), "-".to_owned()],
             },
             timeout: DEFAULT_EXTRACTION_TIMEOUT,
-        },
-        Some(extension) => match zipped_xml_document_kind(extension) {
-            Some(document_kind) => {
-                ExtractionExecutionMode::ZippedXmlTextInProcess { document_kind }
-            }
-            None => ExtractionExecutionMode::SkipNow {
-                skip_reason: ExtractionStatus::Unsupported,
-            },
-        },
-        None => ExtractionExecutionMode::SkipNow {
-            skip_reason: ExtractionStatus::Unsupported,
-        },
+        });
+    }
+    if let Some(document_kind) = zipped_xml_document_kind(content_type) {
+        return whole_document(ExtractionExecutionMode::ZippedXmlTextInProcess { document_kind });
+    }
+    let form = if is_markup(content_type, types) {
+        TextForm::Markup
+    } else if types.is_subclass(content_type, TEXT_PLAIN) {
+        TextForm::Plain
+    } else {
+        return skip(ExtractionStatus::Unsupported);
     };
     ExtractionPlan {
         max_output_bytes: max_extract_bytes,
-        execution_mode,
+        execution_mode: ExtractionExecutionMode::TextInProcess { form },
     }
 }
 
-pub async fn execute_extraction_plan(
-    path: &Path,
-    extraction_plan: &ExtractionPlan,
-) -> SearchResult<ExtractionOutcome> {
-    let cancellation = CancellationToken::new();
-    execute_extraction_plan_cancelled(path, extraction_plan, &cancellation).await
+/// 网页与各种 XML（svg、rss、atom……）：正文是标签之间的文字。
+pub(crate) fn is_markup(content_type: &str, types: &MimeDatabase) -> bool {
+    types.is_subclass(content_type, "text/html")
+        || types.is_subclass(content_type, "application/xml")
 }
 
 pub(crate) async fn execute_extraction_plan_cancelled(
@@ -241,8 +243,8 @@ pub(crate) async fn execute_extraction_plan_cancelled(
     }
 
     match &extraction_plan.execution_mode {
-        ExtractionExecutionMode::PlainTextInProcess => {
-            extract_plain_text(path, extraction_plan.max_output_bytes).await
+        ExtractionExecutionMode::TextInProcess { form } => {
+            extract_text(path, extraction_plan.max_output_bytes, *form).await
         }
         ExtractionExecutionMode::ZippedXmlTextInProcess { document_kind } => {
             // 与纯文本一致的进程内提取；输入文件已受 max_extract_bytes 上限保护，
@@ -266,17 +268,6 @@ pub(crate) async fn execute_extraction_plan_cancelled(
             Ok(ExtractionOutcome::skipped(skip_reason.clone()))
         }
     }
-}
-
-pub async fn extract_content(
-    path: &Path,
-    len: u64,
-    max_extract_bytes: u64,
-    content_indexing_enabled: bool,
-) -> SearchResult<ExtractionOutcome> {
-    let extraction_plan =
-        plan_content_extraction(path, len, max_extract_bytes, content_indexing_enabled);
-    execute_extraction_plan(path, &extraction_plan).await
 }
 
 pub async fn extract_with_system_command(
@@ -681,77 +672,6 @@ async fn abort_unfinished_pipe_task(
         task.abort();
         let _ = task.await;
     }
-}
-
-async fn extract_plain_text(path: &Path, max_output_bytes: u64) -> SearchResult<ExtractionOutcome> {
-    let file = match tokio::fs::File::open(path).await {
-        Ok(file) => file,
-        Err(source) => return classify_plain_text_read_error(path, source),
-    };
-    let mut bytes = Vec::new();
-    let mut limited_file = file.take(max_output_bytes.saturating_add(1));
-    let read_outcome = limited_file.read_to_end(&mut bytes).await;
-    release_plain_text_file_pages(limited_file.get_ref());
-    if let Err(source) = read_outcome {
-        return classify_plain_text_read_error(path, source);
-    }
-    if bytes.len() as u64 > max_output_bytes {
-        return Ok(ExtractionOutcome::skipped(ExtractionStatus::TooLarge));
-    }
-    match String::from_utf8(bytes) {
-        Ok(text) => Ok(ExtractionOutcome::text(text)),
-        Err(_) => Ok(ExtractionOutcome::skipped(ExtractionStatus::NonUtf8)),
-    }
-}
-
-fn release_plain_text_file_pages(file: &tokio::fs::File) {
-    // 正文已经复制进有界 Vec；保留源文件干净页只会抬高 service cgroup 的空闲工作集。
-    let _ = unsafe { libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED) };
-}
-
-fn classify_plain_text_read_error(
-    path: &Path,
-    source: io::Error,
-) -> SearchResult<ExtractionOutcome> {
-    if source.kind() == io::ErrorKind::PermissionDenied {
-        Err(SearchError::Inaccessible {
-            path: path.to_path_buf(),
-            source,
-        })
-    } else {
-        Ok(ExtractionOutcome::skipped(ExtractionStatus::ReadFailed {
-            message: source.to_string(),
-        }))
-    }
-}
-
-fn is_plain_text_path(path: &Path) -> bool {
-    let Some(extension) = path.extension().and_then(|extension| extension.to_str()) else {
-        return false;
-    };
-    matches!(
-        extension.to_ascii_lowercase().as_str(),
-        "txt"
-            | "md"
-            | "rs"
-            | "toml"
-            | "json"
-            | "yaml"
-            | "yml"
-            | "html"
-            | "css"
-            | "js"
-            | "ts"
-            | "py"
-            | "c"
-            | "h"
-            | "cpp"
-            | "hpp"
-            | "java"
-            | "go"
-            | "sh"
-            | "log"
-    )
 }
 
 #[cfg(test)]

@@ -9,20 +9,29 @@ use tokio_util::sync::CancellationToken;
 
 use crate::error::SearchError;
 
+use super::text_reading::classify_text_read_error;
 use super::{
-    classify_plain_text_read_error, extract_content, extract_with_system_command,
-    extract_with_system_command_cancelled, plan_content_extraction, CommandSpec,
-    DurableContentStageState, ExtractionExecutionMode, ExtractionProcessLimits, ExtractionStatus,
-    ZippedXmlDocumentKind, DEFAULT_EXTRACTION_TIMEOUT, DEFAULT_MAX_ADDRESS_SPACE_BYTES,
-    STDERR_CAPTURE_LIMIT_BYTES,
+    extract_with_system_command, extract_with_system_command_cancelled, plan_content_extraction,
+    CommandSpec, DurableContentStageState, ExtractionExecutionMode, ExtractionProcessLimits,
+    ExtractionStatus, TextForm, ZippedXmlDocumentKind, DEFAULT_EXTRACTION_TIMEOUT,
+    DEFAULT_MAX_ADDRESS_SPACE_BYTES, STDERR_CAPTURE_LIMIT_BYTES,
 };
+use file_search::mime::MimeDatabase;
+
+/// 没有类型库时只剩内建规则（text/* 属于 text/plain），够判断这里的计划。
+fn no_database() -> MimeDatabase {
+    MimeDatabase::load(Vec::new())
+}
+
+fn plan_mode(content_type: Option<&str>, len: u64) -> ExtractionExecutionMode {
+    plan_content_extraction(content_type, len, 1024, true, &no_database()).execution_mode
+}
 
 #[test]
-fn permission_denied_plain_text_read_is_inaccessible() {
+fn permission_denied_text_read_is_inaccessible() {
     let path = Path::new("/tmp/private.txt");
-    let error =
-        classify_plain_text_read_error(path, io::Error::from(io::ErrorKind::PermissionDenied))
-            .unwrap_err();
+    let error = classify_text_read_error(path, io::Error::from(io::ErrorKind::PermissionDenied))
+        .unwrap_err();
 
     assert!(matches!(
         error,
@@ -31,17 +40,47 @@ fn permission_denied_plain_text_read_is_inaccessible() {
 }
 
 #[test]
-fn plans_plain_text_and_pdf_backends_explicitly() {
-    let plain_text_plan = plan_content_extraction(Path::new("/tmp/note.txt"), 12, 1024, true);
+fn text_types_are_read_as_text_and_markup_has_its_tags_removed() {
+    for content_type in ["text/plain", "text/csv", "text/x-python", "text/x-readme"] {
+        assert_eq!(
+            plan_mode(Some(content_type), 12),
+            ExtractionExecutionMode::TextInProcess {
+                form: TextForm::Plain
+            },
+            "{content_type}"
+        );
+    }
+    for content_type in ["text/html", "application/xml"] {
+        assert_eq!(
+            plan_mode(Some(content_type), 12),
+            ExtractionExecutionMode::TextInProcess {
+                form: TextForm::Markup
+            },
+            "{content_type}"
+        );
+    }
+}
 
+#[test]
+fn long_text_is_still_read_but_long_documents_are_skipped() {
     assert_eq!(
-        plain_text_plan.execution_mode,
-        ExtractionExecutionMode::PlainTextInProcess
+        plan_mode(Some("text/plain"), 4096),
+        ExtractionExecutionMode::TextInProcess {
+            form: TextForm::Plain
+        }
     );
-
-    let extraction_plan = plan_content_extraction(Path::new("/tmp/report.pdf"), 12, 1024, true);
     assert_eq!(
-        extraction_plan.execution_mode,
+        plan_mode(Some("application/pdf"), 4096),
+        ExtractionExecutionMode::SkipNow {
+            skip_reason: ExtractionStatus::TooLarge
+        }
+    );
+}
+
+#[test]
+fn pdf_goes_to_the_isolated_tool() {
+    assert_eq!(
+        plan_mode(Some("application/pdf"), 12),
         ExtractionExecutionMode::IsolatedSubprocess {
             command: CommandSpec {
                 program: "pdftotext".to_owned(),
@@ -53,42 +92,61 @@ fn plans_plain_text_and_pdf_backends_explicitly() {
 }
 
 #[test]
-fn office_documents_are_extracted_in_process_by_format() {
+fn office_documents_are_extracted_in_process_by_type() {
     let planned_kinds = [
-        ("/tmp/report.docx", ZippedXmlDocumentKind::WordDocument),
-        ("/tmp/workbook.xlsx", ZippedXmlDocumentKind::Spreadsheet),
-        ("/tmp/slides.pptx", ZippedXmlDocumentKind::Presentation),
-        ("/tmp/notes.odt", ZippedXmlDocumentKind::OpenDocumentText),
-        ("/tmp/UPPERCASE.XLSX", ZippedXmlDocumentKind::Spreadsheet),
+        (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ZippedXmlDocumentKind::WordDocument,
+        ),
+        (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ZippedXmlDocumentKind::Spreadsheet,
+        ),
+        (
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            ZippedXmlDocumentKind::Presentation,
+        ),
+        (
+            "application/vnd.oasis.opendocument.text",
+            ZippedXmlDocumentKind::OpenDocumentText,
+        ),
     ];
-    for (document_path, document_kind) in planned_kinds {
-        let extraction_plan = plan_content_extraction(Path::new(document_path), 12, 1024, true);
+    for (content_type, document_kind) in planned_kinds {
         assert_eq!(
-            extraction_plan.execution_mode,
+            plan_mode(Some(content_type), 12),
             ExtractionExecutionMode::ZippedXmlTextInProcess { document_kind },
-            "{document_path} must be extracted in process"
+            "{content_type} must be extracted in process"
         );
     }
 }
 
 #[test]
-fn unsupported_office_formats_stay_unsupported() {
-    for file_name in [
-        "legacy.doc",
-        "legacy.xls",
-        "legacy.ppt",
-        "spreadsheet.ods",
-        "presentation.odp",
+fn other_and_unknown_types_are_unsupported() {
+    for content_type in [
+        Some("application/msword"),
+        Some("application/vnd.oasis.opendocument.spreadsheet"),
+        Some("image/png"),
+        Some("application/zip"),
+        None,
     ] {
-        let extraction_plan = plan_content_extraction(Path::new(file_name), 12, 1024, true);
         assert_eq!(
-            extraction_plan.execution_mode,
+            plan_mode(content_type, 12),
             ExtractionExecutionMode::SkipNow {
                 skip_reason: ExtractionStatus::Unsupported,
             },
-            "{file_name} must not be routed to a zipped-xml extractor"
+            "{content_type:?}"
         );
     }
+}
+
+#[test]
+fn disabled_content_indexing_skips_everything() {
+    assert_eq!(
+        plan_content_extraction(Some("text/plain"), 12, 1024, false, &no_database()).execution_mode,
+        ExtractionExecutionMode::SkipNow {
+            skip_reason: ExtractionStatus::Disabled,
+        }
+    );
 }
 
 #[test]
@@ -127,69 +185,6 @@ fn failed_statuses_map_to_durable_skipped_state() {
             DurableContentStageState::Skipped
         );
     }
-}
-
-#[tokio::test]
-async fn extracts_plain_text() {
-    let dir = tempdir().unwrap();
-    let path = dir.path().join("note.txt");
-    fs::write(&path, "hello search").unwrap();
-
-    let outcome = extract_content(&path, 12, 1024, true).await.unwrap();
-
-    assert_eq!(outcome.status, ExtractionStatus::Indexed);
-    assert_eq!(outcome.text.as_deref(), Some("hello search"));
-}
-
-#[tokio::test]
-async fn reports_non_utf8_text() {
-    let dir = tempdir().unwrap();
-    let path = dir.path().join("bad.txt");
-    fs::write(&path, [0xff, 0xfe]).unwrap();
-
-    let outcome = extract_content(&path, 2, 1024, true).await.unwrap();
-
-    assert_eq!(outcome.status, ExtractionStatus::NonUtf8);
-    assert!(outcome.text.is_none());
-}
-
-#[tokio::test]
-async fn oversized_file_is_skipped_before_reading() {
-    let dir = tempdir().unwrap();
-    let path = dir.path().join("large.txt");
-    fs::write(&path, "hello").unwrap();
-
-    let outcome = extract_content(&path, 5, 4, true).await.unwrap();
-
-    assert_eq!(outcome.status, ExtractionStatus::TooLarge);
-}
-
-#[tokio::test]
-async fn plain_text_read_stops_at_the_extraction_limit_after_file_growth() {
-    let directory = tempdir().unwrap();
-    let path = directory.path().join("grew-after-stat.txt");
-    fs::write(&path, "0123456789").unwrap();
-
-    let outcome = extract_content(&path, 4, 4, true).await.unwrap();
-
-    assert_eq!(outcome.status, ExtractionStatus::TooLarge);
-    assert!(outcome.text.is_none());
-}
-
-#[tokio::test]
-async fn missing_plain_text_file_is_skipped_instead_of_aborting_crawl() {
-    let dir = tempdir().unwrap();
-    let path = dir.path().join("gone.txt");
-    fs::write(&path, "hello").unwrap();
-    fs::remove_file(&path).unwrap();
-
-    let outcome = extract_content(&path, 5, 1024, true).await.unwrap();
-
-    assert!(matches!(
-        outcome.status,
-        ExtractionStatus::ReadFailed { .. }
-    ));
-    assert!(outcome.text.is_none());
 }
 
 #[tokio::test]

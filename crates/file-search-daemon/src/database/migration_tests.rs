@@ -652,7 +652,95 @@ fn schema_eleven_migration_resets_skipped_office_content_for_reextraction() {
             .unwrap()
             .expect("control row must stay present")
             .content,
-        EntryStageProgress::Skipped,
-        "non-office skip reasons must not be disturbed by the migration"
+        EntryStageProgress::Pending,
+        "schema 13 reads every previously skipped file again"
     );
+}
+
+fn indexed_file(path: &str, mime_type: Option<&str>, content: EntryStageProgress) -> IndexedFile {
+    let path = Path::new(path).to_path_buf();
+    IndexedFile {
+        display_name: path.file_name().unwrap().to_string_lossy().into_owned(),
+        parent_path: path.parent().unwrap().to_path_buf(),
+        path,
+        kind: SearchFileKind::File,
+        size: 4,
+        modified_ms: None,
+        accessed_ms: None,
+        created_ms: None,
+        mime_type: mime_type.map(str::to_owned),
+        stage_state: IndexedEntryStageState {
+            metadata: EntryStageProgress::Complete,
+            content,
+        },
+        content: (content == EntryStageProgress::Complete).then(|| "body".to_owned()),
+        extraction_status: match content {
+            EntryStageProgress::Complete => ExtractionStatus::Indexed,
+            _ => ExtractionStatus::Unsupported,
+        },
+        device: Some(1),
+        inode: Some(2),
+        mtime_ns: Some(3),
+        ctime_ns: Some(4),
+    }
+}
+
+/// 类型改由系统类型库判断后：类型列按名字重算；跳过的、名字定不下类型的、按原文入索引
+/// 的网页重新排队，其余不动。
+#[test]
+fn schema_thirteen_migration_retypes_files_and_queues_what_reads_differently() {
+    if !Path::new("/usr/share/mime/mime.cache").exists() {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let database_path = directory.path().join("search.sqlite");
+    let database = SearchDatabase::open(&database_path).unwrap();
+    for file in [
+        indexed_file("/tmp/notes.csv", None, EntryStageProgress::Skipped),
+        indexed_file(
+            "/tmp/page.html",
+            Some("text/html"),
+            EntryStageProgress::Complete,
+        ),
+        indexed_file(
+            "/tmp/plain.txt",
+            Some("text/plain"),
+            EntryStageProgress::Complete,
+        ),
+        indexed_file("/tmp/runme", None, EntryStageProgress::Complete),
+    ] {
+        database.upsert_file(&file).unwrap();
+    }
+    database
+        .connection
+        .execute_batch("PRAGMA user_version = 12;")
+        .unwrap();
+    drop(database);
+
+    let database = SearchDatabase::open(&database_path).unwrap();
+
+    let state = |path: &str| {
+        database
+            .entry_stage_state(Path::new(path))
+            .unwrap()
+            .unwrap()
+            .content
+    };
+    let mime_type = |path: &str| -> Option<String> {
+        database
+            .connection
+            .query_row(
+                "SELECT mime_type FROM files WHERE path = ?1",
+                [path_to_storage(Path::new(path))],
+                |row| row.get(0),
+            )
+            .unwrap()
+    };
+    assert_eq!(state("/tmp/notes.csv"), EntryStageProgress::Pending);
+    assert_eq!(mime_type("/tmp/notes.csv").as_deref(), Some("text/csv"));
+    assert_eq!(state("/tmp/page.html"), EntryStageProgress::Pending);
+    assert_eq!(state("/tmp/plain.txt"), EntryStageProgress::Complete);
+    assert_eq!(mime_type("/tmp/plain.txt").as_deref(), Some("text/plain"));
+    assert_eq!(state("/tmp/runme"), EntryStageProgress::Pending);
+    assert_eq!(mime_type("/tmp/runme"), None);
 }

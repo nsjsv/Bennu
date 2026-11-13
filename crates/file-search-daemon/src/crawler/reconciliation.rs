@@ -1,6 +1,7 @@
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
+use file_search::mime::MimeDatabase;
 use tokio_util::sync::CancellationToken;
 
 use crate::database::{
@@ -9,14 +10,14 @@ use crate::database::{
 };
 use crate::error::{SearchError, SearchResult};
 use crate::filesystem::{
-    ensure_not_cancelled, mime_type_for_path, observe_path, FilesystemEntry, FilesystemObservation,
+    ensure_not_cancelled, observe_path, FilesystemEntry, FilesystemObservation,
     LocalFilesystemBoundary, TraversalDepth, TraversalEvent,
 };
 use crate::model::SearchFileKind;
 use crate::writer::{scan_file_mutation_bytes, MAX_WRITER_FILE_PAYLOAD_BYTES};
 
 use super::{
-    directory_signature, extraction_plan_reads_content, observed_file_signature,
+    directory_signature, extraction_plan_reads_content, name_type_for, observed_file_signature,
     report_checking_if_needed, report_crawling, report_crawling_if_needed,
     ChangedFilePipelineOutcome, IndexMaintenanceProgress, PendingClassificationBatch, RebuildStats,
     SearchIndexer,
@@ -212,10 +213,10 @@ impl SearchIndexer {
         match self.observe_index_path(&known_file.path)? {
             FilesystemObservation::Complete(entry) if entry.kind() == SearchFileKind::File => {
                 let observed_signature = observed_file_signature(entry.metadata());
-                let current_mime_type = mime_type_for_path(&known_file.path);
+                let name_type = name_type_for(&known_file.path, &MimeDatabase::system());
                 if known_file
                     .state
-                    .allows_signature_skip(observed_signature, current_mime_type.as_deref())
+                    .allows_signature_skip(observed_signature, &name_type)
                 {
                     stats.skipped += 1;
                 } else {
@@ -551,19 +552,20 @@ impl SearchIndexer {
             ));
         }
 
+        // 一批用同一个类型库：库在批中途被换掉时，这批仍按同一套规则判断。
+        let types = MimeDatabase::system();
         let mut pending_mutations = Vec::new();
         let mut pending_mutation_bytes = 0_usize;
         for (entry, classification) in entries.into_iter().zip(classifications) {
             ensure_not_cancelled(cancellation)?;
             let observed_signature = observed_file_signature(entry.metadata());
-            let current_mime_type = mime_type_for_path(entry.path());
+            let name_type = name_type_for(entry.path(), &types);
             stats.scanned += 1;
             if classification
                 .known_entry
                 .as_ref()
                 .is_some_and(|known_entry| {
-                    known_entry
-                        .allows_signature_skip(observed_signature, current_mime_type.as_deref())
+                    known_entry.allows_signature_skip(observed_signature, &name_type)
                 })
             {
                 stats.skipped += 1;
@@ -571,8 +573,14 @@ impl SearchIndexer {
                 continue;
             }
 
-            let changed_file_pipeline =
-                self.plan_changed_file_pipeline(entry.path(), entry.metadata(), observed_signature);
+            let changed_file_pipeline = self
+                .plan_changed_file_pipeline(
+                    entry.path(),
+                    entry.metadata(),
+                    observed_signature,
+                    &types,
+                )
+                .await;
             if extraction_plan_reads_content(&changed_file_pipeline.stage3_content_plan) {
                 stats.content_reads += 1;
             }

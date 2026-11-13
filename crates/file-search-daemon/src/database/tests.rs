@@ -1,3 +1,4 @@
+use file_search::mime::NameType;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -1175,7 +1176,7 @@ fn inaccessible_content_stays_retained_hidden_and_retryable_until_recovery() {
             ctime_ns: Some(99),
             size: file.size,
         },
-        Some("text/plain"),
+        &NameType::Known("text/plain".to_owned()),
     ));
     database.upsert_file(&file).unwrap();
     assert_eq!(
@@ -1414,13 +1415,15 @@ fn migration_backfills_stage_state_for_legacy_rows() {
 
     let database = SearchDatabase::open(&database_path).unwrap();
 
+    // 旧版按 TooLarge 跳过的正文先回填成 skipped，schema 13 再把它重新排队（长文本现在
+    // 读开头）。
     assert_eq!(
         database
             .entry_stage_state(Path::new("/tmp/legacy.txt"))
             .unwrap(),
         Some(IndexedEntryStageState {
             metadata: EntryStageProgress::Complete,
-            content: EntryStageProgress::Skipped,
+            content: EntryStageProgress::Pending,
         })
     );
     let schema_version: i64 = database
@@ -1555,7 +1558,7 @@ fn signatures_round_trip_and_detect_changes() {
             ctime_ns: Some(1_000),
             size: file.size,
         },
-        Some("text/plain"),
+        &NameType::Known("text/plain".to_owned()),
     ));
     assert!(!stored.allows_signature_skip(
         FileSignature {
@@ -1565,7 +1568,7 @@ fn signatures_round_trip_and_detect_changes() {
             ctime_ns: Some(1_000),
             size: file.size,
         },
-        Some("text/plain"),
+        &NameType::Known("text/plain".to_owned()),
     ));
     assert!(!stored.allows_signature_skip(
         FileSignature {
@@ -1575,7 +1578,7 @@ fn signatures_round_trip_and_detect_changes() {
             ctime_ns: Some(2_000),
             size: file.size,
         },
-        Some("text/plain"),
+        &NameType::Known("text/plain".to_owned()),
     ));
     assert!(!stored.allows_signature_skip(
         FileSignature {
@@ -1585,7 +1588,7 @@ fn signatures_round_trip_and_detect_changes() {
             ctime_ns: Some(1_000),
             size: file.size,
         },
-        Some("text/plain"),
+        &NameType::Known("text/plain".to_owned()),
     ));
     assert!(!stored.allows_signature_skip(
         FileSignature {
@@ -1595,7 +1598,18 @@ fn signatures_round_trip_and_detect_changes() {
             ctime_ns: Some(1_000),
             size: file.size,
         },
-        Some("image/png"),
+        &NameType::Known("image/png".to_owned()),
+    ));
+    // 名字定不下类型时类型来自内容，签名没变就可以跳过。
+    assert!(stored.allows_signature_skip(
+        FileSignature {
+            device: Some(7),
+            inode: Some(42),
+            mtime_ns: Some(1_000),
+            ctime_ns: Some(1_000),
+            size: file.size,
+        },
+        &NameType::Unknown,
     ));
     assert_eq!(signature.device, Some(7));
     assert_eq!(signature.inode, Some(42));

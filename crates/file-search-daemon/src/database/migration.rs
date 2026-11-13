@@ -1,5 +1,12 @@
+use std::ffi::OsStr;
+use std::os::unix::ffi::OsStrExt;
+use std::path::Path;
+
+use file_search::mime::{MimeDatabase, NameType};
+
 use crate::error::{SearchError, SearchResult};
-use crate::extractor::ExtractionStatus;
+use crate::extractor::{is_markup, ExtractionStatus};
+use crate::model::SearchFileKind;
 use crate::text_matching::{name_index_text, normalize_search_text};
 
 use super::{IndexedEntryStageState, SearchDatabase, SEARCH_CONTENT_PREVIEW_CHARACTER_LIMIT};
@@ -102,6 +109,54 @@ impl SearchDatabase {
         if current < 12 {
             self.migrate_search_text_rules()?;
         }
+        if current < 13 {
+            self.migrate_content_types(&MimeDatabase::system())?;
+        }
+        Ok(())
+    }
+
+    /// schema 13：文件类型改由系统类型库判断，正文按类型取（识别编码、长文本读开头、网页
+    /// 与 XML 去标签）。按名字重算类型列；以下文件的内容阶段置回 pending，由服务在后台
+    /// 重新处理：以前跳过正文的（可能是现在认得的文字、别的编码、过长的文本）；名字定不下
+    /// 类型的（要看内容）；按原文入了索引的网页与 XML（要去标签）。
+    pub(super) fn migrate_content_types(&self, types: &MimeDatabase) -> SearchResult<()> {
+        let transaction = self.connection.unchecked_transaction()?;
+        let files = transaction
+            .prepare("SELECT rowid, path FROM files WHERE kind = ?1")?
+            .query_map([SearchFileKind::File.as_storage_value()], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        {
+            let mut update_type =
+                transaction.prepare("UPDATE files SET mime_type = ?2 WHERE rowid = ?1")?;
+            let mut queue_content = transaction.prepare(
+                "UPDATE file_stage_state SET content_stage_state = 'pending' WHERE path = ?1",
+            )?;
+            for (rowid, path) in &files {
+                let name_type = Path::new(OsStr::from_bytes(path))
+                    .file_name()
+                    .map_or(NameType::Unknown, |name| types.type_from_name(name));
+                let (mime_type, needs_content_again) = match name_type {
+                    NameType::Known(mime_type) => {
+                        let markup = is_markup(&mime_type, types);
+                        (Some(mime_type), markup)
+                    }
+                    NameType::Candidates(_) | NameType::Unknown => (None, true),
+                };
+                update_type.execute(rusqlite::params![rowid, mime_type])?;
+                if needs_content_again {
+                    queue_content.execute([path])?;
+                }
+            }
+        }
+        transaction.execute(
+            "UPDATE file_stage_state SET content_stage_state = 'pending'
+             WHERE content_stage_state = 'skipped'",
+            [],
+        )?;
+        transaction.pragma_update(None, "user_version", 13)?;
+        transaction.commit()?;
         Ok(())
     }
 

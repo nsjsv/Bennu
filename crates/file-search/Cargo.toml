@@ -12,6 +12,8 @@ repository.workspace = true
 file-core = { path = "../file-core" }
 icu_normalizer = { version = "2.2.0", default-features = false, features = ["compiled_data"] }
 libc = "0.2"
+memchr = "2.7"
+rustix = { workspace = true, features = ["mm"] }
 regex = "1.12.3"
 rusqlite = { version = "0.32.1", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }

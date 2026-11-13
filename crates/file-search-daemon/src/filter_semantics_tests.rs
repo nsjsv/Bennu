@@ -11,6 +11,7 @@ use crate::model::{
 use crate::query_state::QueryState;
 use crate::text_matching::normalize_search_text;
 use file_search::filter_semantics::EntryFacts;
+use file_search::mime::MimeDatabase;
 
 pub(crate) struct FilterCase {
     pub(crate) label: &'static str,
@@ -155,6 +156,54 @@ pub(crate) fn filter_cases() -> Vec<FilterCase> {
                 true,
             )
         },
+        FilterCase {
+            mime_type: Some("text/csv"),
+            ..case(
+                "a text/* type inherits from text/plain",
+                rules(vec![SearchEntryTypeRule::Mime(MimePattern::Inheriting(
+                    "text/plain".to_owned(),
+                ))]),
+                "a.csv",
+                SearchFileKind::File,
+                true,
+            )
+        },
+        FilterCase {
+            mime_type: Some("application/xml"),
+            ..case(
+                "a parent in the type library makes xml text",
+                rules(vec![SearchEntryTypeRule::Mime(MimePattern::Inheriting(
+                    "text/plain".to_owned(),
+                ))]),
+                "a.xml",
+                SearchFileKind::File,
+                true,
+            )
+        },
+        FilterCase {
+            mime_type: Some("image/png"),
+            ..case(
+                "images are not text",
+                rules(vec![SearchEntryTypeRule::Mime(MimePattern::Inheriting(
+                    "text/plain".to_owned(),
+                ))]),
+                "a.png",
+                SearchFileKind::File,
+                false,
+            )
+        },
+        FilterCase {
+            mime_type: Some("application/gzip"),
+            ..case(
+                "an exact type written as an alias",
+                rules(vec![SearchEntryTypeRule::Mime(MimePattern::Exact(
+                    "application/x-gzip".to_owned(),
+                ))]),
+                "a.gz",
+                SearchFileKind::File,
+                true,
+            )
+        },
         case(
             "kind rule",
             rules(vec![SearchEntryTypeRule::Kind(SearchFileKind::Directory)]),
@@ -229,7 +278,9 @@ fn entry_facts_follow_the_filter_matrix() {
             created_ms: None,
         };
         assert_eq!(
-            case.filters.matches(&entry),
+            case.filters
+                .resolve(&MimeDatabase::system())
+                .matches(&entry),
             case.expected,
             "{}",
             case.label

@@ -35,7 +35,7 @@ pub use database::{
     SearchDatabase,
 };
 pub use extractor::{
-    extract_content, extract_with_system_command, CommandSpec, ExtractionOutcome, ExtractionStatus,
+    extract_with_system_command, CommandSpec, ExtractionOutcome, ExtractionStatus,
 };
 pub use protocol::{
     serve_bound_search_socket, serve_search_socket, serve_search_socket_with_status,

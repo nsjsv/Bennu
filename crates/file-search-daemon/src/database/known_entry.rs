@@ -1,3 +1,4 @@
+use file_search::mime::NameType;
 use std::path::PathBuf;
 
 use crate::error::{SearchError, SearchResult};
@@ -89,14 +90,16 @@ pub struct KnownEntryState {
 }
 
 impl KnownEntryState {
-    pub fn allows_signature_skip(
-        &self,
-        observed: FileSignature,
-        current_mime_type: Option<&str>,
-    ) -> bool {
+    /// 文件没变、类型判断也不会变时可以跳过。名字能定类型时，存的类型要和名字现在给的
+    /// 一样（类型库更新后按新规则重做）；类型来自内容时，签名没变内容就没变。
+    pub fn allows_signature_skip(&self, observed: FileSignature, name_type: &NameType) -> bool {
+        let type_unchanged = match name_type {
+            NameType::Known(mime) => self.mime_type.as_deref() == Some(mime.as_str()),
+            NameType::Candidates(_) | NameType::Unknown => true,
+        };
         self.observation_state == EntryObservationState::Observable
             && self.stage_state.allows_signature_skip()
-            && self.mime_type.as_deref() == current_mime_type
+            && type_unchanged
             && self.signature.matches(observed)
     }
 }

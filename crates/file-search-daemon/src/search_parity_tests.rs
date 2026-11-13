@@ -12,12 +12,13 @@ use tokio_util::sync::CancellationToken;
 use crate::config::SearchExcludeRules;
 use crate::database::{EntryStageProgress, IndexedEntryStageState, IndexedFile, SearchDatabase};
 use crate::extractor::ExtractionStatus;
-use crate::filesystem::{display_name, file_time_ms, mime_type_for_path};
+use crate::filesystem::{display_name, file_time_ms};
 use crate::model::{
     SearchFileKind, SearchFilters, SearchMatchMode, SearchQuery, SearchScope, SearchTextScope,
     SizeRange, TimeRange,
 };
 use crate::query_state::QueryState;
+use file_search::mime::{type_for_name_only, MimeDatabase};
 
 const CORPUS: &[(&str, usize)] = &[
     ("年度报告.pdf", 10),
@@ -52,7 +53,7 @@ fn index_directory(database: &SearchDatabase, directory: &Path) {
                 accessed_ms: file_time_ms(metadata.accessed().ok()),
                 created_ms: file_time_ms(metadata.created().ok()),
                 mime_type: (kind == SearchFileKind::File)
-                    .then(|| mime_type_for_path(&path))
+                    .then(|| type_for_name_only(&MimeDatabase::system(), &path))
                     .flatten(),
                 stage_state: IndexedEntryStageState {
                     metadata: EntryStageProgress::Complete,

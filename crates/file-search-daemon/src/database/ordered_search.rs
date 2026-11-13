@@ -5,6 +5,7 @@ use std::cmp::Ordering;
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 
+use file_search::filter_semantics::ResolvedFilters;
 use rusqlite::{params_from_iter, Connection};
 
 use crate::error::SearchResult;
@@ -47,13 +48,14 @@ pub(super) fn ordered_rows(
     connection: &Connection,
     query: &SearchQuery,
     text: &TextPredicates,
+    filters: &ResolvedFilters<'_>,
     field: SearchSortField,
     direction: SearchSortDirection,
     directories_first: bool,
 ) -> SearchResult<Vec<SnapshotRow>> {
     let mut candidates = match query.match_mode {
-        SearchMatchMode::Plain => plain_candidates(connection, query, text)?,
-        SearchMatchMode::Regex => regex_candidates(connection, query)?,
+        SearchMatchMode::Plain => plain_candidates(connection, query, text, filters)?,
+        SearchMatchMode::Regex => regex_candidates(connection, query, filters)?,
     };
     candidates.sort_unstable_by(|left, right| {
         compare_candidates(left, right, field, direction, directories_first)
@@ -72,13 +74,14 @@ fn plain_candidates(
     connection: &Connection,
     query: &SearchQuery,
     text: &TextPredicates,
+    filters: &ResolvedFilters<'_>,
 ) -> SearchResult<Vec<OrderedCandidate>> {
     let full_text_plan = if text.match_expression.is_some() {
         full_text_query_plan(connection, query, text)?
     } else {
         FullTextQueryPlan::FilterWithMetadata
     };
-    let (sql, values) = candidate_sql(query, text, full_text_plan);
+    let (sql, values) = candidate_sql(query, text, filters, full_text_plan);
     let mut statement = connection.prepare(&sql)?;
     let candidates = statement
         .query_map(params_from_iter(values), candidate_from_row)?
@@ -90,10 +93,16 @@ fn plain_candidates(
 fn regex_candidates(
     connection: &Connection,
     query: &SearchQuery,
+    filters: &ResolvedFilters<'_>,
 ) -> SearchResult<Vec<OrderedCandidate>> {
     let name_regex = query.match_mode.name_regex(&query.terms)?;
     let no_terms = TextPredicates::new(&SearchTerms::parse(""), SearchTextScope::NameOnly);
-    let (sql, values) = candidate_sql(query, &no_terms, FullTextQueryPlan::FilterWithMetadata);
+    let (sql, values) = candidate_sql(
+        query,
+        &no_terms,
+        filters,
+        FullTextQueryPlan::FilterWithMetadata,
+    );
     let mut statement = connection.prepare(&sql)?;
     let mut rows = statement.query(params_from_iter(values))?;
     let mut candidates = Vec::new();

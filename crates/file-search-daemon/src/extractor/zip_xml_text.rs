@@ -24,12 +24,18 @@ pub(crate) enum ZippedXmlDocumentKind {
     OpenDocumentText,
 }
 
-pub(crate) fn zipped_xml_document_kind(extension: &str) -> Option<ZippedXmlDocumentKind> {
-    match extension {
-        "docx" => Some(ZippedXmlDocumentKind::WordDocument),
-        "xlsx" => Some(ZippedXmlDocumentKind::Spreadsheet),
-        "pptx" => Some(ZippedXmlDocumentKind::Presentation),
-        "odt" => Some(ZippedXmlDocumentKind::OpenDocumentText),
+pub(crate) fn zipped_xml_document_kind(content_type: &str) -> Option<ZippedXmlDocumentKind> {
+    match content_type {
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => {
+            Some(ZippedXmlDocumentKind::WordDocument)
+        }
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => {
+            Some(ZippedXmlDocumentKind::Spreadsheet)
+        }
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation" => {
+            Some(ZippedXmlDocumentKind::Presentation)
+        }
+        "application/vnd.oasis.opendocument.text" => Some(ZippedXmlDocumentKind::OpenDocumentText),
         _ => None,
     }
 }

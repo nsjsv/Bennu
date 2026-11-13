@@ -267,10 +267,15 @@ async fn serve(socket_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     );
     let socket_service: Arc<dyn SearchSocketService> = service_runtime.clone();
     let shutdown_runtime = Arc::clone(&service_runtime);
-    let socket_server = serve_bound_search_socket(bound_socket, socket_service, move || {
-        let shutdown_runtime = Arc::clone(&shutdown_runtime);
-        async move { shutdown_runtime.shutdown() }
-    });
+    let socket_server = serve_bound_search_socket(
+        bound_socket,
+        socket_service,
+        recently_used_file(),
+        move || {
+            let shutdown_runtime = Arc::clone(&shutdown_runtime);
+            async move { shutdown_runtime.shutdown() }
+        },
+    );
     let terminate_shutdown = async move {
         terminate_signal.recv().await.ok_or_else(|| {
             std::io::Error::other("SIGTERM signal stream closed before receiving a signal")
@@ -294,6 +299,11 @@ fn database_path() -> PathBuf {
     // 守护进程独立启动，同样要在读索引前完成改名迁移。
     file_core::data_dir_migration::migrate_legacy_data_dir(&file_core::app_dirs::user_data_dir());
     file_core::app_dirs::app_data_dir().join("search.sqlite")
+}
+
+/// 系统最近使用列表，与 GTK 应用写入的位置相同；搜索排序拿它给最近打开过的文件加分。
+fn recently_used_file() -> PathBuf {
+    file_core::app_dirs::user_data_dir().join("recently-used.xbel")
 }
 
 fn search_path_file() -> PathBuf {

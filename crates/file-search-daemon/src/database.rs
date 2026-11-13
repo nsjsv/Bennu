@@ -604,6 +604,10 @@ mod path_identity_tests;
 mod ranked_paging_tests;
 
 #[cfg(test)]
+#[path = "database/ranking_golden_tests.rs"]
+mod ranking_golden_tests;
+
+#[cfg(test)]
 #[path = "database/schema_tests.rs"]
 mod schema_tests;
 

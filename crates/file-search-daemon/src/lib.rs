@@ -11,7 +11,10 @@ mod filter_semantics_tests;
 mod logging;
 mod managed_search_index;
 mod protocol;
+mod query_state;
 mod ranked_snapshots;
+mod ranking;
+mod recent_files;
 #[cfg(test)]
 mod search_parity_tests;
 mod service_runtime;

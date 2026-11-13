@@ -12,13 +12,12 @@ use crate::model::{
     MatchSource, MimePattern, SearchEntryTypeRule, SearchFileKind, SearchMatchMode, SearchQuery,
     SearchScope, SearchTextScope, SizeRange, TimeRange,
 };
-use crate::ranked_snapshots::RankedSnapshots;
+use crate::query_state::QueryState;
 
 use super::{
-    path_from_storage_bytes, path_to_storage, DirectorySignature, DirectorySnapshot,
-    EntryObservationState, EntryStageProgress, FileSignature, IndexedEntryStageState, IndexedFile,
-    ObservedFile, SearchDatabase, READER_PAGE_CACHE_KIB, WAL_AUTOCHECKPOINT_PAGES,
-    WRITER_PAGE_CACHE_KIB,
+    path_to_storage, DirectorySignature, DirectorySnapshot, EntryObservationState,
+    EntryStageProgress, FileSignature, IndexedEntryStageState, IndexedFile, ObservedFile,
+    SearchDatabase, READER_PAGE_CACHE_KIB, WAL_AUTOCHECKPOINT_PAGES, WRITER_PAGE_CACHE_KIB,
 };
 
 #[test]
@@ -36,10 +35,7 @@ fn searches_file_name_and_content() {
         .unwrap();
 
     let batch = database
-        .search(
-            &SearchQuery::global(1, "alpha"),
-            &RankedSnapshots::default(),
-        )
+        .search(&SearchQuery::global(1, "alpha"), &QueryState::default())
         .unwrap();
 
     assert_eq!(batch.hits.len(), 2);
@@ -66,9 +62,7 @@ fn name_only_search_excludes_content_matches_and_marks_name_hits() {
     let mut query = SearchQuery::global(1, "needle");
     query.text_scope = SearchTextScope::NameOnly;
 
-    let batch = database
-        .search(&query, &RankedSnapshots::default())
-        .unwrap();
+    let batch = database.search(&query, &QueryState::default()).unwrap();
 
     assert_eq!(batch.hits.len(), 1);
     assert_eq!(batch.hits[0].path, Path::new("/tmp/needle.txt"));
@@ -77,8 +71,8 @@ fn name_only_search_excludes_content_matches_and_marks_name_hits() {
 }
 
 #[test]
-fn ranked_pages_match_bm25_order_without_temporary_sorting() {
-    fn assert_native_rank_plan(plan: &[String]) {
+fn ranked_pages_stay_consistent_without_temporary_sorting() {
+    fn assert_ranked_candidate_plan(plan: &[String]) {
         assert!(
             plan.iter()
                 .any(|step| step.contains("file_search_fts VIRTUAL TABLE INDEX")),
@@ -88,58 +82,22 @@ fn ranked_pages_match_bm25_order_without_temporary_sorting() {
             !plan.iter().any(|step| step.contains("USE TEMP B-TREE")),
             "the ranked snapshot query sorted in a temporary b-tree: {plan:#?}"
         );
-        assert!(
-            !plan.iter().any(|step| step.contains("MATERIALIZE ranked")),
-            "native rank query still materialized an intermediate window: {plan:#?}"
-        );
     }
 
-    fn explicit_bm25_hits(database: &SearchDatabase) -> Vec<(PathBuf, u64)> {
-        let expression =
-            super::search::full_text_match_expression("needle", SearchTextScope::NameAndContent)
-                .unwrap();
-        let mut statement = database
-            .connection
-            .prepare(
-                "SELECT f.path, bm25(file_search_fts) AS score
-                 FROM file_search_fts
-                 JOIN files f ON f.rowid = file_search_fts.rowid
-                 WHERE file_search_fts MATCH ?1
-                   AND f.tombstoned = 0
-                   AND f.observation_state = 'observable'
-                 ORDER BY score, f.rowid",
-            )
-            .unwrap();
-        statement
-            .query_map([expression], |row| {
-                let path: Vec<u8> = row.get(0)?;
-                let score: f64 = row.get(1)?;
-                Ok((path_from_storage_bytes(path), (-score).to_bits()))
-            })
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap()
-    }
-
-    fn searched_hits(database: &SearchDatabase) -> Vec<(PathBuf, u64)> {
+    fn searched_paths(database: &SearchDatabase, page_size: usize) -> Vec<PathBuf> {
         let mut query = SearchQuery::global(1, "needle");
-        query.limit = 2;
-        let ranked_snapshots = RankedSnapshots::default();
-        let mut hits = Vec::new();
+        query.limit = page_size;
+        let query_state = QueryState::default();
+        let mut paths = Vec::new();
         loop {
-            let batch = database.search(&query, &ranked_snapshots).unwrap();
-            hits.extend(
-                batch
-                    .hits
-                    .into_iter()
-                    .map(|hit| (hit.path, hit.rank.to_bits())),
-            );
+            let batch = database.search(&query, &query_state).unwrap();
+            paths.extend(batch.hits.into_iter().map(|hit| hit.path));
             let Some(cursor) = batch.next_cursor else {
                 break;
             };
             query.cursor = Some(cursor);
         }
-        hits
+        paths
     }
 
     let database = SearchDatabase::in_memory().unwrap();
@@ -159,9 +117,10 @@ fn ranked_pages_match_bm25_order_without_temporary_sorting() {
             .unwrap();
     }
     let query = SearchQuery::global(1, "needle");
-    let unfiltered_rank_plan = database.search_plan(&query).unwrap();
-    assert_native_rank_plan(&unfiltered_rank_plan);
-    assert_eq!(searched_hits(&database), explicit_bm25_hits(&database));
+    assert_ranked_candidate_plan(&database.search_plan(&query).unwrap());
+    let one_page = searched_paths(&database, 200);
+    assert_eq!(one_page[0], PathBuf::from("/tmp/name.txt"));
+    assert_eq!(searched_paths(&database, 2), one_page);
 
     let mut inaccessible = indexed_file(
         "/tmp/inaccessible.txt",
@@ -174,9 +133,8 @@ fn ranked_pages_match_bm25_order_without_temporary_sorting() {
         message: "permission denied".to_owned(),
     };
     database.upsert_inaccessible_file(&inaccessible).unwrap();
-    let metadata_filter_plan = database.search_plan(&query).unwrap();
-    assert_native_rank_plan(&metadata_filter_plan);
-    assert_eq!(searched_hits(&database), explicit_bm25_hits(&database));
+    assert_ranked_candidate_plan(&database.search_plan(&query).unwrap());
+    assert_eq!(searched_paths(&database, 2), one_page);
 }
 
 #[test]
@@ -289,7 +247,7 @@ fn search_hits_expose_only_content_snippets() {
     let name_hit = database
         .search(
             &SearchQuery::global(1, "alpha beta"),
-            &RankedSnapshots::default(),
+            &QueryState::default(),
         )
         .unwrap()
         .hits
@@ -300,10 +258,7 @@ fn search_hits_expose_only_content_snippets() {
     assert!(name_hit.snippet.is_none());
 
     let content_hit = database
-        .search(
-            &SearchQuery::global(2, "needle"),
-            &RankedSnapshots::default(),
-        )
+        .search(&SearchQuery::global(2, "needle"), &QueryState::default())
         .unwrap()
         .hits
         .into_iter()
@@ -318,7 +273,7 @@ fn search_hits_expose_only_content_snippets() {
     let mixed_hit = database
         .search(
             &SearchQuery::global(3, "alpha beta"),
-            &RankedSnapshots::default(),
+            &QueryState::default(),
         )
         .unwrap()
         .hits
@@ -332,7 +287,7 @@ fn search_hits_expose_only_content_snippets() {
         .is_some_and(|snippet| snippet.contains("beta")));
 
     let metadata_hit = database
-        .search(&SearchQuery::global(4, ""), &RankedSnapshots::default())
+        .search(&SearchQuery::global(4, ""), &QueryState::default())
         .unwrap()
         .hits
         .into_iter()
@@ -357,7 +312,7 @@ fn content_hit_outside_bounded_preview_has_no_snippet() {
     let hit = database
         .search(
             &SearchQuery::global(1, "deepneedle"),
-            &RankedSnapshots::default(),
+            &QueryState::default(),
         )
         .unwrap()
         .hits
@@ -392,7 +347,7 @@ fn preview_substrings_do_not_masquerade_as_fulltext_tokens() {
         .unwrap();
 
     let hit = database
-        .search(&SearchQuery::global(1, "art"), &RankedSnapshots::default())
+        .search(&SearchQuery::global(1, "art"), &QueryState::default())
         .unwrap()
         .hits
         .into_iter()
@@ -487,7 +442,7 @@ fn snippets_follow_the_same_name_rule_as_match_sources() {
     let batch = database
         .search(
             &SearchQuery::global(1, "alpha beta"),
-            &RankedSnapshots::default(),
+            &QueryState::default(),
         )
         .unwrap();
     for (path, expected_source) in [
@@ -505,10 +460,7 @@ fn snippets_follow_the_same_name_rule_as_match_sources() {
 
     // 旧实现用 SQLite lower()（只折叠 ASCII）判名称，"Ärger" 会被误标成内容命中。
     let umlaut = database
-        .search(
-            &SearchQuery::global(2, "ärger"),
-            &RankedSnapshots::default(),
-        )
+        .search(&SearchQuery::global(2, "ärger"), &QueryState::default())
         .unwrap();
     assert_eq!(umlaut.hits.len(), 1);
     assert_eq!(umlaut.hits[0].match_source, MatchSource::Name);
@@ -517,7 +469,7 @@ fn snippets_follow_the_same_name_rule_as_match_sources() {
     let mut name_only_query = SearchQuery::global(3, "alpha BETA");
     name_only_query.text_scope = SearchTextScope::NameOnly;
     let batch = database
-        .search(&name_only_query, &RankedSnapshots::default())
+        .search(&name_only_query, &QueryState::default())
         .unwrap();
     assert_eq!(batch.hits.len(), 1);
     assert_eq!(batch.hits[0].path, Path::new("/tmp/name.txt"));
@@ -540,7 +492,7 @@ fn names_match_by_any_part_and_short_queries_scan_names() {
     }
     let paths = |terms: &str| {
         let mut paths = database
-            .search(&SearchQuery::global(1, terms), &RankedSnapshots::default())
+            .search(&SearchQuery::global(1, terms), &QueryState::default())
             .unwrap()
             .hits
             .into_iter()
@@ -598,7 +550,7 @@ fn content_matches_whole_words_and_each_unsegmented_character() {
         .unwrap();
     let hit_count = |terms: &str| {
         database
-            .search(&SearchQuery::global(1, terms), &RankedSnapshots::default())
+            .search(&SearchQuery::global(1, terms), &QueryState::default())
             .unwrap()
             .hits
             .len()
@@ -609,7 +561,7 @@ fn content_matches_whole_words_and_each_unsegmented_character() {
     // 内容按词：词的一部分不算（名称才按子串）。
     assert_eq!(hit_count("quarter"), 0);
     let hit = database
-        .search(&SearchQuery::global(2, "报告"), &RankedSnapshots::default())
+        .search(&SearchQuery::global(2, "报告"), &QueryState::default())
         .unwrap()
         .hits
         .remove(0);
@@ -669,9 +621,7 @@ fn filters_by_directory_and_kind() {
     query.scope = SearchScope::Directory(Path::new("/tmp/a").to_path_buf());
     query.filters.entry_type_rules = vec![SearchEntryTypeRule::Kind(SearchFileKind::File)];
 
-    let batch = database
-        .search(&query, &RankedSnapshots::default())
-        .unwrap();
+    let batch = database.search(&query, &QueryState::default()).unwrap();
 
     assert_eq!(batch.hits.len(), 1);
     assert_eq!(batch.hits[0].path, Path::new("/tmp/a/notes.txt"));
@@ -704,9 +654,7 @@ fn recursive_scope_treats_wildcards_and_case_as_literal_path_components() {
     ] {
         let mut query = SearchQuery::global(1, "alpha");
         query.scope = SearchScope::Directory(Path::new(scope).to_path_buf());
-        let batch = database
-            .search(&query, &RankedSnapshots::default())
-            .unwrap();
+        let batch = database.search(&query, &QueryState::default()).unwrap();
         assert_eq!(batch.hits.len(), 1, "scope {scope}");
         assert_eq!(batch.hits[0].path, Path::new(expected_path));
     }
@@ -734,7 +682,7 @@ fn recursive_scope_includes_only_the_directory_and_its_descendants() {
     let mut directory_query = SearchQuery::global(1, "");
     directory_query.scope = SearchScope::Directory(Path::new("/tmp/范围").to_path_buf());
     let directory_paths = database
-        .search(&directory_query, &RankedSnapshots::default())
+        .search(&directory_query, &QueryState::default())
         .unwrap()
         .hits
         .into_iter()
@@ -755,7 +703,7 @@ fn recursive_scope_includes_only_the_directory_and_its_descendants() {
     root_query.scope = SearchScope::Directory(Path::new("/").to_path_buf());
     assert_eq!(
         database
-            .search(&root_query, &RankedSnapshots::default())
+            .search(&root_query, &QueryState::default())
             .unwrap()
             .hits
             .len(),
@@ -799,9 +747,7 @@ fn filters_by_time_range() {
         end_ms: 40,
     });
 
-    let batch = database
-        .search(&query, &RankedSnapshots::default())
-        .unwrap();
+    let batch = database.search(&query, &QueryState::default()).unwrap();
 
     assert_eq!(batch.hits.len(), 1);
     assert_eq!(batch.hits[0].path, Path::new("/tmp/new.txt"));
@@ -850,7 +796,7 @@ fn entry_type_rules_are_or_with_each_other_and_and_with_other_filters() {
     });
 
     let paths = database
-        .search(&query, &RankedSnapshots::default())
+        .search(&query, &QueryState::default())
         .unwrap()
         .hits
         .into_iter()
@@ -889,7 +835,7 @@ fn extension_filters_or_within_themselves_and_exclude_directories() {
     query.filters.extensions = vec!["pdf".to_owned(), "md".to_owned()];
 
     let paths = database
-        .search(&query, &RankedSnapshots::default())
+        .search(&query, &QueryState::default())
         .unwrap()
         .hits
         .into_iter()
@@ -928,9 +874,7 @@ fn extension_filters_and_with_text_terms_and_time_ranges() {
         end_ms: 40,
     });
 
-    let batch = database
-        .search(&query, &RankedSnapshots::default())
-        .unwrap();
+    let batch = database.search(&query, &QueryState::default()).unwrap();
 
     assert_eq!(batch.hits.len(), 1);
     assert_eq!(batch.hits[0].path, Path::new("/tmp/match.pdf"));
@@ -1022,7 +966,7 @@ fn size_filters_apply_half_open_bounds_and_exempt_directories() {
         query.filters.size = Some(range);
 
         let mut names = database
-            .search(&query, &RankedSnapshots::default())
+            .search(&query, &QueryState::default())
             .unwrap()
             .hits
             .into_iter()
@@ -1064,7 +1008,7 @@ fn size_filter_combines_with_terms_extensions_and_directories_stay_exempt() {
     });
 
     let names = database
-        .search(&query, &RankedSnapshots::default())
+        .search(&query, &QueryState::default())
         .unwrap()
         .hits
         .into_iter()
@@ -1089,9 +1033,7 @@ fn search_window_reports_more_rows_only_when_an_extra_row_exists() {
         }
         let mut query = SearchQuery::global(1, "needle");
         query.limit = 100;
-        database
-            .search(&query, &RankedSnapshots::default())
-            .unwrap()
+        database.search(&query, &QueryState::default()).unwrap()
     }
 
     let below_window = search_count(99);
@@ -1187,10 +1129,7 @@ fn inaccessible_content_stays_retained_hidden_and_retryable_until_recovery() {
         .unwrap();
 
     assert!(database
-        .search(
-            &SearchQuery::global(1, "needle"),
-            &RankedSnapshots::default()
-        )
+        .search(&SearchQuery::global(1, "needle"), &QueryState::default())
         .unwrap()
         .hits
         .is_empty());
@@ -1241,10 +1180,7 @@ fn inaccessible_content_stays_retained_hidden_and_retryable_until_recovery() {
     database.upsert_file(&file).unwrap();
     assert_eq!(
         database
-            .search(
-                &SearchQuery::global(2, "needle"),
-                &RankedSnapshots::default()
-            )
+            .search(&SearchQuery::global(2, "needle"), &QueryState::default())
             .unwrap()
             .hits
             .len(),
@@ -1296,10 +1232,7 @@ fn inaccessible_subtree_is_hidden_without_removing_known_rows() {
         .unwrap();
 
     let batch = database
-        .search(
-            &SearchQuery::global(1, "needle"),
-            &RankedSnapshots::default(),
-        )
+        .search(&SearchQuery::global(1, "needle"), &QueryState::default())
         .unwrap();
     assert_eq!(batch.hits.len(), 1);
     assert_eq!(batch.hits[0].path, Path::new("/tmp/public/note.txt"));
@@ -1569,10 +1502,7 @@ fn fts_rowid_migration_keeps_fts_rows_on_the_files_row_identity() {
     // 途经 schema 12：名称立即可搜，内容等服务后台重新提取。
     assert_eq!(
         database
-            .search(
-                &SearchQuery::global(1, "rowid"),
-                &RankedSnapshots::default()
-            )
+            .search(&SearchQuery::global(1, "rowid"), &QueryState::default())
             .unwrap()
             .hits
             .len(),
@@ -1776,10 +1706,7 @@ fn directory_snapshots_page_stably_and_local_delete_cleans_all_rows() {
         .unwrap();
 
     assert!(database
-        .search(
-            &SearchQuery::global(1, "needle"),
-            &RankedSnapshots::default()
-        )
+        .search(&SearchQuery::global(1, "needle"), &QueryState::default())
         .unwrap()
         .hits
         .is_empty());
@@ -1900,9 +1827,7 @@ fn regex_mode_matches_names_without_touching_content() {
     query.match_mode = SearchMatchMode::Regex;
     query.text_scope = SearchTextScope::NameAndContent;
 
-    let batch = database
-        .search(&query, &RankedSnapshots::default())
-        .unwrap();
+    let batch = database.search(&query, &QueryState::default()).unwrap();
 
     assert_eq!(batch.hits.len(), 1);
     assert_eq!(batch.hits[0].path, Path::new("/tmp/alpha-report.txt"));
@@ -1925,7 +1850,7 @@ fn regex_mode_defaults_to_case_insensitive_and_honors_inline_overrides() {
     default_query.match_mode = SearchMatchMode::Regex;
     assert_eq!(
         database
-            .search(&default_query, &RankedSnapshots::default())
+            .search(&default_query, &QueryState::default())
             .unwrap()
             .hits
             .len(),
@@ -1936,7 +1861,7 @@ fn regex_mode_defaults_to_case_insensitive_and_honors_inline_overrides() {
     sensitive_query.match_mode = SearchMatchMode::Regex;
     assert_eq!(
         database
-            .search(&sensitive_query, &RankedSnapshots::default())
+            .search(&sensitive_query, &QueryState::default())
             .unwrap()
             .hits
             .len(),
@@ -1947,7 +1872,7 @@ fn regex_mode_defaults_to_case_insensitive_and_honors_inline_overrides() {
     sensitive_hit_query.match_mode = SearchMatchMode::Regex;
     assert_eq!(
         database
-            .search(&sensitive_hit_query, &RankedSnapshots::default())
+            .search(&sensitive_hit_query, &QueryState::default())
             .unwrap()
             .hits
             .len(),
@@ -1961,9 +1886,7 @@ fn regex_mode_rejects_invalid_patterns_as_invalid_query() {
     let mut query = SearchQuery::global(1, "foo(");
     query.match_mode = SearchMatchMode::Regex;
 
-    let error = database
-        .search(&query, &RankedSnapshots::default())
-        .unwrap_err();
+    let error = database.search(&query, &QueryState::default()).unwrap_err();
     assert!(matches!(error, crate::error::SearchError::InvalidQuery(_)));
 }
 
@@ -1981,7 +1904,7 @@ fn regex_mode_pages_in_scan_order_without_duplicates_or_gaps() {
     first_page_query.match_mode = SearchMatchMode::Regex;
     first_page_query.limit = 3;
     let first_page = database
-        .search(&first_page_query, &RankedSnapshots::default())
+        .search(&first_page_query, &QueryState::default())
         .unwrap();
     assert_eq!(first_page.hits.len(), 3);
     assert!(!first_page.finished);
@@ -1990,7 +1913,7 @@ fn regex_mode_pages_in_scan_order_without_duplicates_or_gaps() {
     second_page_query.query_id = 2;
     second_page_query.cursor = first_page.next_cursor;
     let second_page = database
-        .search(&second_page_query, &RankedSnapshots::default())
+        .search(&second_page_query, &QueryState::default())
         .unwrap();
     assert_eq!(second_page.hits.len(), 2);
     assert!(second_page.finished);
@@ -2021,9 +1944,7 @@ fn regex_mode_still_applies_directory_scope_and_filters() {
     query.match_mode = SearchMatchMode::Regex;
     query.scope = SearchScope::Directory(PathBuf::from("/tmp/docs"));
 
-    let batch = database
-        .search(&query, &RankedSnapshots::default())
-        .unwrap();
+    let batch = database.search(&query, &QueryState::default()).unwrap();
 
     assert_eq!(batch.hits.len(), 1);
     assert_eq!(batch.hits[0].path, Path::new("/tmp/docs/log-1.txt"));

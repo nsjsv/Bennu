@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use crate::extractor::ExtractionStatus;
 use crate::model::{SearchFileKind, SearchMatchMode, SearchQuery, SearchScope, SearchTextScope};
-use crate::ranked_snapshots::RankedSnapshots;
+use crate::query_state::QueryState;
 
 use super::{
     DirectorySignature, DirectorySnapshot, EntryObservationState, EntryStageProgress,
@@ -69,10 +69,7 @@ fn non_utf8_paths_with_the_same_lossy_text_keep_independent_identity() {
     }
 
     let indexed_paths = database
-        .search(
-            &SearchQuery::global(1, "needle"),
-            &RankedSnapshots::default(),
-        )
+        .search(&SearchQuery::global(1, "needle"), &QueryState::default())
         .unwrap()
         .hits
         .into_iter()
@@ -88,10 +85,7 @@ fn non_utf8_paths_with_the_same_lossy_text_keep_independent_identity() {
     assert!(database.mark_scope_inaccessible(&first_root).unwrap());
     assert_eq!(
         database
-            .search(
-                &SearchQuery::global(2, "needle"),
-                &RankedSnapshots::default()
-            )
+            .search(&SearchQuery::global(2, "needle"), &QueryState::default())
             .unwrap()
             .hits
             .into_iter()
@@ -108,10 +102,7 @@ fn non_utf8_paths_with_the_same_lossy_text_keep_independent_identity() {
     assert!(database.directory_snapshot(&second_root).unwrap().is_some());
     assert_eq!(
         database
-            .search(
-                &SearchQuery::global(3, "needle"),
-                &RankedSnapshots::default()
-            )
+            .search(&SearchQuery::global(3, "needle"), &QueryState::default())
             .unwrap()
             .hits
             .into_iter()
@@ -187,7 +178,7 @@ fn recursive_non_utf8_scope_uses_raw_component_boundaries() {
     };
 
     let paths = database
-        .search(&query, &RankedSnapshots::default())
+        .search(&query, &QueryState::default())
         .unwrap()
         .hits
         .into_iter()

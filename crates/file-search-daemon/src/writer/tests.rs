@@ -8,7 +8,7 @@ use tracing_subscriber::prelude::*;
 use crate::database::{EntryStageProgress, IndexedEntryStageState, SearchDatabase};
 use crate::extractor::ExtractionStatus;
 use crate::model::{SearchFileKind, SearchQuery};
-use crate::ranked_snapshots::RankedSnapshots;
+use crate::query_state::QueryState;
 
 use super::*;
 
@@ -124,10 +124,7 @@ fn writes_are_visible_to_a_concurrent_reader_without_locking() {
 
     // 写库线程还活着、仍持有写连接时，只读连接就能看到已提交的写入。
     let batch = reader
-        .search(
-            &SearchQuery::global(1, "needle"),
-            &RankedSnapshots::default(),
-        )
+        .search(&SearchQuery::global(1, "needle"), &QueryState::default())
         .unwrap();
     assert_eq!(batch.hits.len(), 1);
     assert_eq!(batch.hits[0].display_name, "note.txt");
@@ -230,10 +227,7 @@ fn local_delete_only_removes_its_target() {
     assert_eq!(writer.count().unwrap(), 1);
     let reader = SearchDatabase::open_read_only(&db_path).unwrap();
     let batch = reader
-        .search(
-            &SearchQuery::global(1, "needle"),
-            &RankedSnapshots::default(),
-        )
+        .search(&SearchQuery::global(1, "needle"), &QueryState::default())
         .unwrap();
     assert_eq!(batch.hits.len(), 1);
     assert_eq!(batch.hits[0].path, kept);
@@ -251,10 +245,7 @@ fn shutdown_drains_queued_writes_before_stopping_writer() {
 
     let reader = SearchDatabase::open_read_only(&db_path).unwrap();
     let batch = reader
-        .search(
-            &SearchQuery::global(1, "needle"),
-            &RankedSnapshots::default(),
-        )
+        .search(&SearchQuery::global(1, "needle"), &QueryState::default())
         .unwrap();
     assert_eq!(batch.hits.len(), 1);
     assert_eq!(batch.hits[0].display_name, "note.txt");
@@ -375,10 +366,7 @@ fn file_batch_rejects_combined_payload_above_the_fixed_budget() {
 fn committed_names(database_path: &Path) -> Vec<String> {
     let reader = SearchDatabase::open_read_only(database_path).unwrap();
     let mut names: Vec<String> = reader
-        .search(
-            &SearchQuery::global(1, "needle"),
-            &RankedSnapshots::default(),
-        )
+        .search(&SearchQuery::global(1, "needle"), &QueryState::default())
         .unwrap()
         .hits
         .into_iter()

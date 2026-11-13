@@ -13,7 +13,7 @@ const MAX_RANKED_SNAPSHOTS: usize = 8;
 /// 这么久没被翻页就释放，服务空闲时不留着大结果集占内存。
 const RANKED_SNAPSHOT_IDLE_LIFETIME: Duration = Duration::from_secs(5 * 60);
 
-/// 定格结果中的一条命中：文件行身份与第一页时算出的 FTS rank。
+/// 定格结果中的一条命中：文件行身份与第一页时算出的相关度（越大越相关）。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct RankedRow {
     pub(crate) rowid: i64,

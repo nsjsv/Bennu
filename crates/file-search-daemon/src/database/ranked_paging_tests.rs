@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use crate::error::SearchError;
 use crate::extractor::ExtractionStatus;
 use crate::model::{SearchCursor, SearchFileKind, SearchProviderFailure, SearchQuery};
-use crate::ranked_snapshots::RankedSnapshots;
+use crate::query_state::QueryState;
 
 use super::{EntryStageProgress, IndexedEntryStageState, IndexedFile, SearchDatabase};
 
@@ -34,12 +34,12 @@ fn needle_file(path: &str, content: &str) -> IndexedFile {
 
 fn first_page(
     database: &SearchDatabase,
-    ranked_snapshots: &RankedSnapshots,
+    query_state: &QueryState,
     limit: usize,
 ) -> (SearchQuery, crate::model::SearchResultBatch) {
     let mut query = SearchQuery::global(1, "needle");
     query.limit = limit;
-    let batch = database.search(&query, ranked_snapshots).unwrap();
+    let batch = database.search(&query, query_state).unwrap();
     (query, batch)
 }
 
@@ -54,8 +54,8 @@ fn ranked_pages_stay_on_the_first_page_snapshot_while_the_index_changes() {
             ))
             .unwrap();
     }
-    let ranked_snapshots = RankedSnapshots::default();
-    let (mut query, page) = first_page(&database, &ranked_snapshots, 2);
+    let query_state = QueryState::default();
+    let (mut query, page) = first_page(&database, &query_state, 2);
     let mut seen: Vec<PathBuf> = page.hits.into_iter().map(|hit| hit.path).collect();
     let mut cursor = page.next_cursor;
 
@@ -72,7 +72,7 @@ fn ranked_pages_stay_on_the_first_page_snapshot_while_the_index_changes() {
     while let Some(next_cursor) = cursor {
         query.query_id += 1;
         query.cursor = Some(next_cursor);
-        let page = database.search(&query, &ranked_snapshots).unwrap();
+        let page = database.search(&query, &query_state).unwrap();
         seen.extend(page.hits.into_iter().map(|hit| hit.path));
         cursor = page.next_cursor;
     }
@@ -97,13 +97,11 @@ fn a_released_snapshot_is_reported_as_expired() {
             .upsert_file(&needle_file(&format!("/tmp/note-{index}.txt"), "needle"))
             .unwrap();
     }
-    let (mut query, page) = first_page(&database, &RankedSnapshots::default(), 1);
+    let (mut query, page) = first_page(&database, &QueryState::default(), 1);
     query.cursor = page.next_cursor;
 
     // 另一份存储里没有这个编号，等同于定格已被释放或服务重启过。
-    let error = database
-        .search(&query, &RankedSnapshots::default())
-        .unwrap_err();
+    let error = database.search(&query, &QueryState::default()).unwrap_err();
 
     assert!(matches!(
         error,
@@ -120,12 +118,12 @@ fn a_cursor_must_match_the_kind_of_paging_its_query_uses() {
     database
         .upsert_file(&needle_file("/tmp/note.txt", "needle"))
         .unwrap();
-    let ranked_snapshots = RankedSnapshots::default();
+    let query_state = QueryState::default();
 
     let mut ranked = SearchQuery::global(1, "needle");
     ranked.cursor = Some(SearchCursor::Offset { offset: 1 });
     assert!(matches!(
-        database.search(&ranked, &ranked_snapshots),
+        database.search(&ranked, &query_state),
         Err(SearchError::InvalidQuery(_))
     ));
 
@@ -135,7 +133,7 @@ fn a_cursor_must_match_the_kind_of_paging_its_query_uses() {
         position: 0,
     });
     assert!(matches!(
-        database.search(&by_metadata, &ranked_snapshots),
+        database.search(&by_metadata, &query_state),
         Err(SearchError::InvalidQuery(_))
     ));
 }
@@ -148,8 +146,8 @@ fn a_snapshot_position_past_its_end_is_rejected() {
             .upsert_file(&needle_file(&format!("/tmp/note-{index}.txt"), "needle"))
             .unwrap();
     }
-    let ranked_snapshots = RankedSnapshots::default();
-    let (mut query, page) = first_page(&database, &ranked_snapshots, 1);
+    let query_state = QueryState::default();
+    let (mut query, page) = first_page(&database, &query_state, 1);
     let Some(SearchCursor::RankedSnapshot { snapshot_id, .. }) = page.next_cursor else {
         panic!("a ranked first page with more hits returns a snapshot cursor");
     };
@@ -159,7 +157,7 @@ fn a_snapshot_position_past_its_end_is_rejected() {
     });
 
     assert!(matches!(
-        database.search(&query, &ranked_snapshots),
+        database.search(&query, &query_state),
         Err(SearchError::InvalidQuery(_))
     ));
 }
@@ -172,8 +170,8 @@ fn deleted_hits_at_the_end_leave_an_empty_final_page() {
             .upsert_file(&needle_file(&format!("/tmp/note-{index}.txt"), "needle"))
             .unwrap();
     }
-    let ranked_snapshots = RankedSnapshots::default();
-    let (mut query, page) = first_page(&database, &ranked_snapshots, 1);
+    let query_state = QueryState::default();
+    let (mut query, page) = first_page(&database, &query_state, 1);
     let shown = page.hits[0].path.clone();
     for index in 0..3 {
         let path = PathBuf::from(format!("/tmp/note-{index}.txt"));
@@ -183,7 +181,7 @@ fn deleted_hits_at_the_end_leave_an_empty_final_page() {
     }
 
     query.cursor = page.next_cursor;
-    let rest = database.search(&query, &ranked_snapshots).unwrap();
+    let rest = database.search(&query, &query_state).unwrap();
 
     assert!(rest.hits.is_empty());
     assert!(rest.finished);

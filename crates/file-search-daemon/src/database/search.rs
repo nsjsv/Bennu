@@ -1,5 +1,7 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::types::Value;
 use rusqlite::{params_from_iter, Connection};
@@ -9,7 +11,9 @@ use crate::model::{
     MatchSource, SearchCursor, SearchFileKind, SearchHit, SearchMatchMode, SearchProviderFailure,
     SearchQuery, SearchResultBatch, SearchScope, SearchTextScope,
 };
-use crate::ranked_snapshots::{RankedRow, RankedSnapshots};
+use crate::query_state::QueryState;
+use crate::ranked_snapshots::RankedRow;
+use crate::ranking::{relevance, RankingFacts};
 use crate::text_matching::{
     content_term_tokens, fts_phrase, locate_content_term, name_term_tokens, SearchTerms,
 };
@@ -101,36 +105,42 @@ impl SearchDatabase {
     pub(crate) fn search(
         &self,
         query: &SearchQuery,
-        ranked_snapshots: &RankedSnapshots,
+        query_state: &QueryState,
     ) -> SearchResult<SearchResultBatch> {
         if query.match_mode == SearchMatchMode::Regex {
             return self.search_regex(query);
         }
         let terms = SearchTerms::parse(&query.terms);
         let text = TextPredicates::new(&terms, query.text_scope);
-        if text.match_expression.is_some() {
-            self.search_ranked(query, &terms, &text, ranked_snapshots)
-        } else {
+        if text.is_empty() {
             self.search_by_metadata(query, &terms, &text)
+        } else {
+            self.search_ranked(query, &terms, &text, query_state)
         }
     }
 
-    /// FTS5 按 rank 排序时要给全部命中打分，拿不到「只算前一页」的捷径。所以第一页一次
-    /// 算出全部命中的顺序并定格，后续页按位置回表，不再每页重新打分。
+    /// 有搜索词就按相关度排：排序要看每条命中的名字、位置和时间，拿不到「只算前一页」
+    /// 的捷径。所以第一页一次给全部命中打分并定格，后续页按位置回表，不再重新打分。
     fn search_ranked(
         &self,
         query: &SearchQuery,
         terms: &SearchTerms,
         text: &TextPredicates,
-        ranked_snapshots: &RankedSnapshots,
+        query_state: &QueryState,
     ) -> SearchResult<SearchResultBatch> {
         let limit = query.limit.clamp(1, 200);
+        let ranked_snapshots = &query_state.ranked_snapshots;
         let transaction = self.connection.unchecked_transaction()?;
         let (snapshot_id, rows, position) = match query.cursor {
             None => {
-                let full_text_plan = full_text_query_plan(&transaction, query, text)?;
-                let rows: Arc<[RankedRow]> =
-                    ranked_rows(&transaction, query, text, full_text_plan)?.into();
+                let rows: Arc<[RankedRow]> = ranked_rows(
+                    &transaction,
+                    query,
+                    terms,
+                    text,
+                    &query_state.recent_files.last_used(),
+                )?
+                .into();
                 (ranked_snapshots.insert(query, Arc::clone(&rows)), rows, 0)
             }
             Some(SearchCursor::RankedSnapshot {
@@ -252,11 +262,14 @@ impl SearchDatabase {
     #[cfg(test)]
     pub(super) fn search_plan(&self, query: &SearchQuery) -> SearchResult<Vec<String>> {
         let text = TextPredicates::new(&SearchTerms::parse(&query.terms), query.text_scope);
-        let (sql, values) = if text.match_expression.is_some() {
-            let full_text_plan = full_text_query_plan(&self.connection, query, &text)?;
-            ranked_rows_sql(query, &text, full_text_plan)
-        } else {
+        let (sql, values) = if text.is_empty() {
             metadata_sql(query, &text, query.limit.clamp(1, 200).saturating_add(1), 0)
+        } else {
+            candidate_sql(
+                query,
+                &text,
+                full_text_query_plan(&self.connection, query, &text)?,
+            )
         };
         let mut statement = self
             .connection
@@ -370,58 +383,130 @@ fn preview_columns(query: &SearchQuery, text: &TextPredicates) -> (&'static str,
     }
 }
 
-/// 全部命中的 rowid 与 rank，不在 SQL 里排序（见 `ranked_rows`）。没有可见性、范围和
-/// 过滤条件时（`UnfilteredRank`）不用联表 files。
-fn ranked_rows_sql(
+/// 打分要用的候选列，顺序固定：rowid、只算正文的 bm25（没有全文表达式时为 NULL）、
+/// display_name、search_name、path、modified_ms。
+const CANDIDATE_COLUMNS: &str = "f.display_name, f.search_name, f.path, f.modified_ms";
+
+/// 全部候选，不在 SQL 里排序（见 `ranked_rows`）。有够 3 个字的词时由 FTS 驱动，
+/// 全可见且没有范围和过滤条件时（`UnfilteredRank`）不带可见性谓词；只有短词时按
+/// 名字子串和正文短语扫描。
+fn candidate_sql(
     query: &SearchQuery,
     text: &TextPredicates,
     full_text_plan: FullTextQueryPlan,
 ) -> (String, Vec<Value>) {
-    let match_expression = text
-        .match_expression
-        .as_ref()
-        .expect("relevance-ranked search has a full-text expression");
+    let Some(match_expression) = text.match_expression.as_ref() else {
+        let mut values = Vec::new();
+        let mut sql = format!("SELECT f.rowid, NULL, {CANDIDATE_COLUMNS} FROM files f");
+        append_metadata_conditions(&mut sql, &mut values, query, text);
+        return (sql, values);
+    };
     let mut values = vec![Value::Text(match_expression.clone())];
-    let mut sql =
-        "SELECT file_search_fts.rowid, file_search_fts.rank FROM file_search_fts".to_owned();
-    match full_text_plan {
-        FullTextQueryPlan::UnfilteredRank => sql.push_str(" WHERE file_search_fts MATCH ?"),
-        FullTextQueryPlan::FilterWithMetadata => {
-            sql.push_str(" JOIN files f ON f.rowid = file_search_fts.rowid");
-            sql.push_str(" WHERE file_search_fts MATCH ? AND ");
-            sql.push_str(QUERY_VISIBLE_PREDICATE);
-            append_scope_filter(&mut sql, &mut values, query);
-            text.append_short_term_sql(&mut sql, &mut values);
-            query.filters.append_sql(&mut sql, &mut values);
-        }
+    // 名字列权重为 0：名字匹配由排序档位决定，bm25 只衡量正文。
+    let mut sql = format!(
+        "SELECT f.rowid, bm25(file_search_fts, 0.0, 1.0), {CANDIDATE_COLUMNS}
+         FROM file_search_fts JOIN files f ON f.rowid = file_search_fts.rowid
+         WHERE file_search_fts MATCH ?"
+    );
+    if full_text_plan == FullTextQueryPlan::FilterWithMetadata {
+        sql.push_str(" AND ");
+        sql.push_str(QUERY_VISIBLE_PREDICATE);
+        append_scope_filter(&mut sql, &mut values, query);
+        text.append_short_term_sql(&mut sql, &mut values);
+        query.filters.append_sql(&mut sql, &mut values);
     }
     (sql, values)
 }
 
+/// 给全部候选打分，按相关度从高到低排，同分按 rowid 排，翻页顺序因此是确定的。
+/// 排序在这里而不是 SQL 里做：全部命中都要排时，SQL 排序比读出来排慢一倍。
 fn ranked_rows(
     connection: &Connection,
     query: &SearchQuery,
+    terms: &SearchTerms,
     text: &TextPredicates,
-    full_text_plan: FullTextQueryPlan,
+    last_used: &HashMap<std::path::PathBuf, i64>,
 ) -> SearchResult<Vec<RankedRow>> {
-    let (sql, values) = ranked_rows_sql(query, text, full_text_plan);
+    let full_text_plan = if text.match_expression.is_some() {
+        full_text_query_plan(connection, query, text)?
+    } else {
+        FullTextQueryPlan::FilterWithMetadata
+    };
+    let short_term_content = short_term_content_scores(connection, text)?;
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_millis() as i64);
+    let (sql, values) = candidate_sql(query, text, full_text_plan);
     let mut statement = connection.prepare(&sql)?;
     let mut rows = statement
         .query_map(params_from_iter(values), |row| {
+            let rowid: i64 = row.get(0)?;
+            let content_bm25: Option<f64> = row.get(1)?;
+            let display_name: String = row.get(2)?;
+            let search_name: String = row.get(3)?;
+            let path = path_from_storage_bytes(row.get(4)?);
+            let facts = RankingFacts {
+                display_name: &display_name,
+                search_name: &search_name,
+                depth: depth_below_scope(query, &path),
+                modified_ms: row.get(5)?,
+                last_used_ms: last_used.get(&path).copied(),
+                content_bm25: content_bm25.or_else(|| short_term_content.get(&rowid).copied()),
+            };
             Ok(RankedRow {
-                rowid: row.get(0)?,
-                rank: row.get(1)?,
+                rowid,
+                rank: relevance(terms, &facts, now_ms),
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
-    // 全部命中都要排序时，SQL 的 ORDER BY rank 比读出来在这里排慢一倍（FTS5 排序器
-    // 还会溢出到临时文件）。同分按 rowid 排，翻页顺序因此是确定的。
     rows.sort_unstable_by(|left, right| {
-        left.rank
-            .total_cmp(&right.rank)
+        right
+            .rank
+            .total_cmp(&left.rank)
             .then(left.rowid.cmp(&right.rowid))
     });
     Ok(rows)
+}
+
+/// 只有短词时没有驱动查询的全文表达式，正文相关度要按每个短词的正文短语另查一次。
+fn short_term_content_scores(
+    connection: &Connection,
+    text: &TextPredicates,
+) -> SearchResult<HashMap<i64, f64>> {
+    let mut scores = HashMap::new();
+    if text.match_expression.is_some() {
+        return Ok(scores);
+    }
+    for content_expression in text
+        .short_terms
+        .iter()
+        .filter_map(|short_term| short_term.content_expression.as_ref())
+    {
+        let mut statement = connection.prepare_cached(
+            "SELECT rowid, bm25(file_search_fts, 0.0, 1.0) FROM file_search_fts
+             WHERE file_search_fts MATCH ?",
+        )?;
+        let term_scores = statement.query_map([content_expression], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?))
+        })?;
+        for term_score in term_scores {
+            let (rowid, score) = term_score?;
+            *scores.entry(rowid).or_insert(0.0) += score;
+        }
+    }
+    Ok(scores)
+}
+
+/// 相对搜索目录的层数，直接子项为 0；不递归时都算直接子项；全局搜索没有层数。
+fn depth_below_scope(query: &SearchQuery, path: &Path) -> Option<usize> {
+    match &query.scope {
+        SearchScope::Directory(directory) if query.recursive => path
+            .strip_prefix(directory)
+            .ok()
+            .map(|relative| relative.components().count().saturating_sub(1)),
+        SearchScope::Directory(_) => Some(0),
+        SearchScope::Global => None,
+    }
 }
 
 /// 从定格的 `position` 起凑一页。定格之后文件可能被删除或隐藏，回表时带上可见性
@@ -458,7 +543,7 @@ fn ranked_page(
             .collect::<Result<HashMap<_, _>, _>>()?;
         hits.extend(chunk.iter().filter_map(|row| {
             visible.remove(&row.rowid).map(|hit| SearchHit {
-                rank: -row.rank,
+                rank: row.rank,
                 ..hit
             })
         }));
@@ -477,25 +562,36 @@ fn metadata_sql(
     let (preview_projection, preview_join) = preview_columns(query, text);
     let mut values = Vec::new();
     let mut sql = format!("SELECT {HIT_COLUMNS}, {preview_projection} FROM files f{preview_join}");
+    append_metadata_conditions(&mut sql, &mut values, query, text);
+    sql.push_str(" ORDER BY f.modified_ms DESC, f.display_name ASC LIMIT ? OFFSET ?");
+    values.push(Value::Integer(limit as i64));
+    values.push(Value::Integer(offset as i64));
+    (sql, values)
+}
+
+/// 不经 FTS 驱动时的条件：可见性、范围、短词、过滤。递归范围先按路径区间取 rowid，
+/// 让外层沿可见性索引走。
+fn append_metadata_conditions(
+    sql: &mut String,
+    values: &mut Vec<Value>,
+    query: &SearchQuery,
+    text: &TextPredicates,
+) {
     match recursive_path_range(query) {
         Some(range) => {
             sql.push_str(" WHERE f.rowid IN (SELECT rowid FROM files WHERE ");
-            append_recursive_path_range(&mut sql, &mut values, "path", &range);
+            append_recursive_path_range(sql, values, "path", &range);
             sql.push_str(") AND ");
             sql.push_str(QUERY_VISIBLE_PREDICATE);
         }
         None => {
             sql.push_str(" WHERE ");
             sql.push_str(QUERY_VISIBLE_PREDICATE);
-            append_scope_filter(&mut sql, &mut values, query);
+            append_scope_filter(sql, values, query);
         }
     }
-    text.append_short_term_sql(&mut sql, &mut values);
-    query.filters.append_sql(&mut sql, &mut values);
-    sql.push_str(" ORDER BY f.modified_ms DESC, f.display_name ASC LIMIT ? OFFSET ?");
-    values.push(Value::Integer(limit as i64));
-    values.push(Value::Integer(offset as i64));
-    (sql, values)
+    text.append_short_term_sql(sql, values);
+    query.filters.append_sql(sql, values);
 }
 
 /// 从第 `first_column` 列起按 `HIT_COLUMNS` 加预览列的顺序读一条命中。

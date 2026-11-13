@@ -8,7 +8,7 @@ use crate::model::{
     MimePattern, SearchEntryTypeRule, SearchFileKind, SearchFilters, SearchQuery, SizeRange,
     TimeRange,
 };
-use crate::ranked_snapshots::RankedSnapshots;
+use crate::query_state::QueryState;
 use crate::text_matching::normalize_search_text;
 use file_search::filter_semantics::EntryFacts;
 
@@ -206,7 +206,7 @@ fn index_sql_follows_the_same_filter_matrix() {
         query.filters = case.filters.clone();
 
         let matched = !database
-            .search(&query, &RankedSnapshots::default())
+            .search(&query, &QueryState::default())
             .unwrap()
             .hits
             .is_empty();

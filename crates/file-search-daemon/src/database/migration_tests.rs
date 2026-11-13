@@ -5,7 +5,7 @@ use tempfile::tempdir;
 
 use crate::extractor::ExtractionStatus;
 use crate::model::{SearchFileKind, SearchQuery};
-use crate::ranked_snapshots::RankedSnapshots;
+use crate::query_state::QueryState;
 
 use super::{
     path_to_storage, EntryStageProgress, IndexedEntryStageState, IndexedFile, SearchDatabase,
@@ -241,10 +241,7 @@ fn schema_eight_fulltext_migration_preserves_hits_and_builds_bounded_preview() {
         "preserved needle body"
     );
     let hits = database
-        .search(
-            &SearchQuery::global(1, "needle"),
-            &RankedSnapshots::default(),
-        )
+        .search(&SearchQuery::global(1, "needle"), &QueryState::default())
         .unwrap()
         .hits;
     assert_eq!(hits.len(), 1);
@@ -301,10 +298,7 @@ fn schema_ten_migration_adds_path_configuration_without_losing_search_rows() {
     // 途经 schema 12：名称立即可搜，内容等服务后台重新提取。
     assert_eq!(
         database
-            .search(
-                &SearchQuery::global(1, "preserved"),
-                &RankedSnapshots::default()
-            )
+            .search(&SearchQuery::global(1, "preserved"), &QueryState::default())
             .unwrap()
             .hits
             .len(),
@@ -379,7 +373,7 @@ fn schema_twelve_migration_indexes_names_by_any_part_and_queues_content_again() 
 
     let names = |terms: &str| {
         database
-            .search(&SearchQuery::global(1, terms), &RankedSnapshots::default())
+            .search(&SearchQuery::global(1, terms), &QueryState::default())
             .unwrap()
             .hits
             .into_iter()

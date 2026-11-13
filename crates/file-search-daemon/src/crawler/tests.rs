@@ -13,7 +13,7 @@ use crate::database::{EntryStageProgress, IndexedEntryStageState, SearchDatabase
 use crate::error::SearchError;
 use crate::extractor::{CommandSpec, ExtractionExecutionMode, ExtractionStatus};
 use crate::model::{MimePattern, SearchEntryTypeRule, SearchQuery};
-use crate::ranked_snapshots::RankedSnapshots;
+use crate::query_state::QueryState;
 use crate::writer::IndexWriter;
 
 use super::{collapse_affected_prefixes, observed_file_signature, SearchIndexer};
@@ -196,10 +196,7 @@ async fn indexes_text_and_skips_hidden_directories() {
 
     let reader = SearchDatabase::open_read_only(&db_dir.path().join("search.sqlite")).unwrap();
     let batch = reader
-        .search(
-            &SearchQuery::global(1, "needle"),
-            &RankedSnapshots::default(),
-        )
+        .search(&SearchQuery::global(1, "needle"), &QueryState::default())
         .unwrap();
     assert_eq!(batch.hits.len(), 1);
     assert_eq!(batch.hits[0].display_name, "visible.txt");
@@ -223,10 +220,7 @@ async fn nested_root_has_one_owner_across_cold_and_warm_rebuilds() {
     let database_path = db_dir.path().join("search.sqlite");
     let reader = SearchDatabase::open_read_only(&database_path).unwrap();
     let cold_batch = reader
-        .search(
-            &SearchQuery::global(1, "needle"),
-            &RankedSnapshots::default(),
-        )
+        .search(&SearchQuery::global(1, "needle"), &QueryState::default())
         .unwrap();
     assert_eq!(cold_batch.hits.len(), 1);
     drop(reader);
@@ -234,10 +228,7 @@ async fn nested_root_has_one_owner_across_cold_and_warm_rebuilds() {
     indexer.rebuild().await.unwrap();
     let reader = SearchDatabase::open_read_only(&database_path).unwrap();
     let batch = reader
-        .search(
-            &SearchQuery::global(1, "needle"),
-            &RankedSnapshots::default(),
-        )
+        .search(&SearchQuery::global(1, "needle"), &QueryState::default())
         .unwrap();
     assert_eq!(batch.hits.len(), 1);
     assert_eq!(batch.hits[0].display_name, "owned.txt");
@@ -271,7 +262,7 @@ async fn warm_check_reclassifies_unchanged_files_when_mime_semantics_changed() {
     ))];
     assert_eq!(
         reader
-            .search(&image_query, &RankedSnapshots::default())
+            .search(&image_query, &QueryState::default())
             .unwrap()
             .hits
             .len(),
@@ -298,10 +289,7 @@ async fn rebuild_tombstones_deleted_files() {
 
     let reader = SearchDatabase::open_read_only(&db_dir.path().join("search.sqlite")).unwrap();
     let batch = reader
-        .search(
-            &SearchQuery::global(1, "needle"),
-            &RankedSnapshots::default(),
-        )
+        .search(&SearchQuery::global(1, "needle"), &QueryState::default())
         .unwrap();
     assert!(batch.hits.is_empty());
 }
@@ -354,10 +342,7 @@ async fn warm_start_enumerates_only_the_parent_of_an_offline_new_file() {
     let reader = SearchDatabase::open_read_only(&db_dir.path().join("search.sqlite")).unwrap();
     assert_eq!(
         reader
-            .search(
-                &SearchQuery::global(1, "needle"),
-                &RankedSnapshots::default()
-            )
+            .search(&SearchQuery::global(1, "needle"), &QueryState::default())
             .unwrap()
             .hits
             .len(),
@@ -384,16 +369,13 @@ async fn warm_start_replaces_a_known_directory_with_a_file() {
 
     let reader = SearchDatabase::open_read_only(&db_dir.path().join("search.sqlite")).unwrap();
     let hits = reader
-        .search(
-            &SearchQuery::global(1, "replaced"),
-            &RankedSnapshots::default(),
-        )
+        .search(&SearchQuery::global(1, "replaced"), &QueryState::default())
         .unwrap()
         .hits;
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].path, replaced_path);
     assert!(reader
-        .search(&SearchQuery::global(2, "old"), &RankedSnapshots::default())
+        .search(&SearchQuery::global(2, "old"), &QueryState::default())
         .unwrap()
         .hits
         .is_empty());
@@ -457,7 +439,7 @@ async fn rebuild_paths_only_scans_the_requested_file_and_keeps_skip_semantics() 
 
     let reader = SearchDatabase::open_read_only(&db_dir.path().join("search.sqlite")).unwrap();
     let batch = reader
-        .search(&SearchQuery::global(1, "beta"), &RankedSnapshots::default())
+        .search(&SearchQuery::global(1, "beta"), &QueryState::default())
         .unwrap();
     assert_eq!(batch.hits.len(), 1);
     assert_eq!(batch.hits[0].display_name, "second.txt");
@@ -567,10 +549,7 @@ async fn watch_budget_patrol_checks_parent_and_nested_directories_independently(
     let reader = SearchDatabase::open_read_only(&db_dir.path().join("search.sqlite")).unwrap();
     assert_eq!(
         reader
-            .search(
-                &SearchQuery::global(1, "fresh"),
-                &RankedSnapshots::default()
-            )
+            .search(&SearchQuery::global(1, "fresh"), &QueryState::default())
             .unwrap()
             .hits
             .len(),
@@ -602,16 +581,13 @@ async fn rebuild_paths_tombstones_deleted_subtrees_without_a_full_rebuild() {
 
     let reader = SearchDatabase::open_read_only(&db_dir.path().join("search.sqlite")).unwrap();
     assert!(reader
-        .search(
-            &SearchQuery::global(1, "vanish"),
-            &RankedSnapshots::default()
-        )
+        .search(&SearchQuery::global(1, "vanish"), &QueryState::default())
         .unwrap()
         .hits
         .is_empty());
 
     let kept_batch = reader
-        .search(&SearchQuery::global(2, "keep"), &RankedSnapshots::default())
+        .search(&SearchQuery::global(2, "keep"), &QueryState::default())
         .unwrap();
     assert_eq!(kept_batch.hits.len(), 1);
     assert_eq!(kept_batch.hits[0].display_name, "kept.txt");
@@ -645,10 +621,7 @@ async fn modified_file_is_reindexed() {
 
     let reader = SearchDatabase::open_read_only(&db_dir.path().join("search.sqlite")).unwrap();
     let batch = reader
-        .search(
-            &SearchQuery::global(1, "words"),
-            &RankedSnapshots::default(),
-        )
+        .search(&SearchQuery::global(1, "words"), &QueryState::default())
         .unwrap();
     assert_eq!(batch.hits.len(), 1);
 }
@@ -669,10 +642,7 @@ async fn permission_ctime_change_hides_and_recovers_an_unchanged_file() {
     assert_eq!(hidden.reindexed, 1);
     let reader = SearchDatabase::open_read_only(&db_dir.path().join("search.sqlite")).unwrap();
     assert!(reader
-        .search(
-            &SearchQuery::global(1, "needle"),
-            &RankedSnapshots::default()
-        )
+        .search(&SearchQuery::global(1, "needle"), &QueryState::default())
         .unwrap()
         .hits
         .is_empty());
@@ -681,10 +651,7 @@ async fn permission_ctime_change_hides_and_recovers_an_unchanged_file() {
     let recovered = indexer.rebuild_paths(vec![path.clone()]).await.unwrap();
     assert_eq!(recovered.reindexed, 1);
     let hits = reader
-        .search(
-            &SearchQuery::global(2, "needle"),
-            &RankedSnapshots::default(),
-        )
+        .search(&SearchQuery::global(2, "needle"), &QueryState::default())
         .unwrap()
         .hits;
     assert_eq!(hits.len(), 1);
@@ -756,10 +723,7 @@ async fn cancelled_full_and_local_crawls_do_not_tombstone_missing_files() {
 
     let reader = SearchDatabase::open_read_only(&db_dir.path().join("search.sqlite")).unwrap();
     let hits = reader
-        .search(
-            &SearchQuery::global(1, "victim"),
-            &RankedSnapshots::default(),
-        )
+        .search(&SearchQuery::global(1, "victim"), &QueryState::default())
         .unwrap()
         .hits;
     assert_eq!(hits.len(), 1);
@@ -789,10 +753,7 @@ async fn a_cancelled_crawl_commits_what_it_wrote_before_returning() {
     // 不等批龄到期：工作一返回，它写过的东西别的连接就能读到，批不会留给下一件工作。
     let reader = SearchDatabase::open_read_only(&db_dir.path().join("search.sqlite")).unwrap();
     let hits = reader
-        .search(
-            &SearchQuery::global(1, "needle"),
-            &RankedSnapshots::default(),
-        )
+        .search(&SearchQuery::global(1, "needle"), &QueryState::default())
         .unwrap()
         .hits;
     assert_eq!(hits.len(), 1);

@@ -374,7 +374,7 @@ mod tests {
         SearchServicePhase,
     };
     use crate::protocol::{serve_bound_search_socket, BoundSearchSocket, SearchSocketService};
-    use crate::ranked_snapshots::RankedSnapshots;
+    use crate::query_state::QueryState;
 
     use super::*;
 
@@ -474,10 +474,7 @@ mod tests {
             runtime
                 .open_query_reader()
                 .unwrap()
-                .search(
-                    &SearchQuery::global(6, "needle"),
-                    &RankedSnapshots::default()
-                )
+                .search(&SearchQuery::global(6, "needle"), &QueryState::default())
                 .unwrap()
                 .hits
                 .len(),
@@ -520,10 +517,15 @@ mod tests {
         let socket_service: Arc<dyn SearchSocketService> = runtime.clone();
         let shutdown_runtime = Arc::clone(&runtime);
         let server = tokio::spawn(async move {
-            serve_bound_search_socket(bound_socket, socket_service, move || {
-                let shutdown_runtime = Arc::clone(&shutdown_runtime);
-                async move { shutdown_runtime.shutdown() }
-            })
+            serve_bound_search_socket(
+                bound_socket,
+                socket_service,
+                std::path::PathBuf::from("/nonexistent/recently-used.xbel"),
+                move || {
+                    let shutdown_runtime = Arc::clone(&shutdown_runtime);
+                    async move { shutdown_runtime.shutdown() }
+                },
+            )
             .await
         });
 
@@ -607,10 +609,7 @@ mod tests {
         let batch = runtime
             .open_query_reader()
             .unwrap()
-            .search(
-                &SearchQuery::global(7, "needle"),
-                &RankedSnapshots::default(),
-            )
+            .search(&SearchQuery::global(7, "needle"), &QueryState::default())
             .unwrap();
         assert_eq!(batch.hits.len(), 1);
         assert_eq!(batch.hits[0].display_name, "note.txt");
@@ -650,7 +649,7 @@ mod tests {
         assert!(runtime
             .open_query_reader()
             .unwrap()
-            .search(&SearchQuery::global(9, ""), &RankedSnapshots::default())
+            .search(&SearchQuery::global(9, ""), &QueryState::default())
             .is_ok());
 
         runtime.shutdown().unwrap();

@@ -20,7 +20,8 @@ use crate::model::{
     IndexStatus, IndexedQueryAvailability, SearchPathConfigurationStatus, SearchProviderFailure,
     SearchQuery, SearchServicePhase, SearchServiceRequest, SearchServiceStatus,
 };
-use crate::ranked_snapshots::RankedSnapshots;
+use crate::query_state::QueryState;
+use crate::recent_files::RecentFiles;
 use crate::{SearchPathPreferences, VersionedSearchPathPreferences};
 
 const MAX_ACTIVE_CLIENTS: usize = 8;
@@ -323,14 +324,18 @@ where
             database_path,
             status,
         },
+        QueryState::default(),
         on_shutdown,
     )
     .await
 }
 
+/// `recently_used_file` 是系统最近使用列表（`$XDG_DATA_HOME/recently-used.xbel`），
+/// 搜索排序拿它给最近打开过的文件加分；文件不存在时不加分。
 pub async fn serve_bound_search_socket<ShutdownFuture, ShutdownHandler>(
     bound_socket: BoundSearchSocket,
     service: Arc<dyn SearchSocketService>,
+    recently_used_file: PathBuf,
     on_shutdown: ShutdownHandler,
 ) -> SearchResult<()>
 where
@@ -340,6 +345,10 @@ where
     serve_search_socket_with_backend(
         bound_socket,
         SearchServiceBackend::Runtime(service),
+        QueryState {
+            recent_files: RecentFiles::at(recently_used_file),
+            ..QueryState::default()
+        },
         on_shutdown,
     )
     .await
@@ -348,6 +357,7 @@ where
 async fn serve_search_socket_with_backend<ShutdownFuture, ShutdownHandler>(
     mut bound_socket: BoundSearchSocket,
     backend: SearchServiceBackend,
+    query_state: QueryState,
     on_shutdown: ShutdownHandler,
 ) -> SearchResult<()>
 where
@@ -355,9 +365,9 @@ where
     ShutdownHandler: FnOnce() -> ShutdownFuture + Send,
 {
     let listener = bound_socket.take_tokio_listener()?;
-    let ranked_snapshots = Arc::new(RankedSnapshots::default());
+    let query_state = Arc::new(query_state);
     let ranked_snapshot_release =
-        tokio::spawn(Arc::clone(&ranked_snapshots).release_idle_snapshots());
+        tokio::spawn(Arc::clone(&query_state.ranked_snapshots).release_idle_snapshots());
     let (shutdown_requested_sender, mut shutdown_requested_receiver) = watch::channel(false);
     let (shutdown_finished_sender, _) = watch::channel(false);
     let (client_ready_sender, mut client_ready_receiver) = mpsc::unbounded_channel();
@@ -384,7 +394,7 @@ where
                 client_tasks.spawn(handle_client(
                     stream,
                     backend.clone(),
-                    Arc::clone(&ranked_snapshots),
+                    Arc::clone(&query_state),
                     shutdown_requested_sender.clone(),
                     shutdown_requested_sender.subscribe(),
                     shutdown_finished_sender.subscribe(),

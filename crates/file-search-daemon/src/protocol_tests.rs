@@ -28,6 +28,11 @@ use file_search::{
     version_via_socket, write_service_event, write_service_request,
 };
 
+/// 测试服务没有系统最近使用列表：给一个不存在的路径，排序不加「常用」分。
+fn missing_recently_used_file() -> std::path::PathBuf {
+    std::path::PathBuf::from("/nonexistent/recently-used.xbel")
+}
+
 struct UnavailableSearchService;
 
 impl SearchSocketService for UnavailableSearchService {
@@ -241,6 +246,7 @@ async fn socket_server_never_owns_more_than_the_fixed_client_limit() {
     let server = tokio::spawn(serve_bound_search_socket(
         bound_socket,
         Arc::new(UnavailableSearchService),
+        missing_recently_used_file(),
         || async { Ok(()) },
     ));
 
@@ -297,6 +303,7 @@ async fn blocking_reader_open_does_not_block_status_on_the_current_thread_runtim
             entered: Mutex::new(Some(entered_sender)),
             release: Arc::clone(&release),
         }),
+        missing_recently_used_file(),
         || async { Ok(()) },
     ));
 
@@ -421,6 +428,7 @@ async fn cancellable_client_waits_for_the_server_to_finish_cancelling() {
             entered: Mutex::new(Some(entered_sender)),
             release: Arc::clone(&release),
         }),
+        missing_recently_used_file(),
         || async { Ok(()) },
     ));
     let cancellation = CancellationToken::new();
@@ -459,6 +467,7 @@ async fn shutdown_waits_for_the_active_query_worker_to_exit() {
             entered: Mutex::new(Some(entered_sender)),
             release: Arc::clone(&release),
         }),
+        missing_recently_used_file(),
         || async { Ok(()) },
     ));
     let mut search_client = UnixStream::connect(&socket_path).await.unwrap();
@@ -585,6 +594,7 @@ async fn search_client_preserves_query_id_and_unavailable_failure() {
     let server = tokio::spawn(serve_bound_search_socket(
         bound_socket,
         Arc::new(UnavailableSearchService),
+        missing_recently_used_file(),
         || async { Ok(()) },
     ));
 
@@ -611,6 +621,7 @@ async fn control_plane_responds_without_query_core() {
     let server = tokio::spawn(serve_bound_search_socket(
         bound_socket,
         Arc::new(UnavailableSearchService),
+        missing_recently_used_file(),
         || async { Ok(()) },
     ));
 
@@ -714,6 +725,7 @@ async fn shutdown_is_sticky_for_concurrent_requests_and_idle_client() {
     let server = tokio::spawn(serve_bound_search_socket(
         bound_socket,
         Arc::new(UnavailableSearchService),
+        missing_recently_used_file(),
         move || async move {
             cleanup_started_sender.send(()).unwrap();
             cleanup_release_receiver.await.unwrap();

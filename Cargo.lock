@@ -1860,6 +1860,7 @@ dependencies = [
  "exacl",
  "filetime",
  "flate2",
+ "futures-util",
  "getrandom 0.4.2",
  "image",
  "libc",

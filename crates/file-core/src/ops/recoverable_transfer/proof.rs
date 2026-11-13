@@ -45,12 +45,6 @@ pub struct ProofContext {
 }
 
 impl ProofContext {
-    /// 无 memo 的退化上下文:settle 结算等无传输选项的路径用,行为等同
-    /// 历史版本(每次全文重算,结算路径本就只做一次性校验)。
-    pub fn blank_proof() -> Self {
-        Self { memo: None }
-    }
-
     /// Strong 是显式的"宁可慢也要严"模式:memo 置空,每个检查点全文重读。
     pub fn new(verification: FileOperationVerification, memo: Option<SharedProofMemo>) -> Self {
         let memo = match verification {

@@ -115,23 +115,13 @@ async fn cancellation_after_direct_move_intents_terminalizes_every_record() {
     assert_persisted(&mut queue);
     let running = queue.active_subscription().unwrap();
     let stored_task_id = running.stored_id.unwrap();
-    let controls = running.controls.clone();
-    let journal = task_queue_transfer_journal(store.clone(), controls.clone());
-    let records = load_recoverable_transfer_records(store.clone(), stored_task_id)
-        .await
-        .unwrap();
-    for record in records {
-        assert!(matches!(
-            run_recoverable_transfer_to_direct_move_intent(
-                record,
-                &journal,
-                FileTransferOptions::new(controls.clone()),
-            )
-            .await
-            .unwrap(),
-            DirectMoveIntentBoundary::Intent(_)
-        ));
-    }
+    run_until_checkpoint(&store, stored_task_id, &running.controls, |checkpoint| {
+        matches!(
+            checkpoint,
+            file_core::TransferCheckpoint::DirectMoveIntent(_)
+        )
+    })
+    .await;
     assert!(
         load_recoverable_transfer_records(store.clone(), stored_task_id)
             .await

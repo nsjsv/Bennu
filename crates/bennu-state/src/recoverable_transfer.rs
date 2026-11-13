@@ -62,35 +62,30 @@ pub use lease::{
 };
 pub use model::*;
 
-/// One manifest + checkpoint install inside a batch commit. Every update moves
-/// a distinct top-level record forward by exactly one revision.
+/// One record's durable transition. A batch moves every listed top-level
+/// record forward by exactly one revision inside one transaction.
 #[derive(Debug, Clone)]
-pub struct StoredManifestCheckpointBatchUpdate {
+pub struct StoredTransferMutation {
     pub task_id: u64,
     pub key: StoredTransferWorkKey,
     pub expected_revision: u64,
-    pub manifest_entries: Vec<StoredManifestEntry>,
-    pub replacement_manifest_entries: Vec<StoredManifestEntry>,
-    pub checkpoint: StoredTransferCheckpoint,
+    pub change: StoredTransferChange,
 }
 
-#[derive(Clone, Copy)]
-pub struct TransferManifestCheckpointUpdate<'a> {
-    pub key: &'a StoredTransferWorkKey,
-    pub expected_revision: u64,
-    pub manifest_entries: &'a [StoredManifestEntry],
-    pub replacement_manifest_entries: &'a [StoredManifestEntry],
-    pub checkpoint: &'a StoredTransferCheckpoint,
-}
-
-/// One checkpoint compare-and-swap in a batch commit. Every swap moves a
-/// distinct top-level transfer record forward by exactly one revision.
 #[derive(Debug, Clone)]
-pub struct StoredTransferCheckpointSwap {
-    pub task_id: u64,
-    pub key: StoredTransferWorkKey,
-    pub expected_revision: u64,
-    pub checkpoint: StoredTransferCheckpoint,
+pub enum StoredTransferChange {
+    Checkpoint(StoredTransferCheckpoint),
+    /// Replaces the record's source and replacement manifests together with
+    /// its checkpoint.
+    ManifestAndCheckpoint {
+        manifest_entries: Vec<StoredManifestEntry>,
+        replacement_manifest_entries: Vec<StoredManifestEntry>,
+        checkpoint: StoredTransferCheckpoint,
+    },
+    MergeCompletionAndCheckpoint {
+        completion: StoredMergeChildCompletion,
+        checkpoint: StoredTransferCheckpoint,
+    },
 }
 
 impl TaskQueueStore {
@@ -294,337 +289,119 @@ impl TaskQueueStore {
         })
     }
 
-    pub fn install_transfer_manifest_and_checkpoint(
+    pub fn apply_transfer_mutations(
         &self,
-        task_id: u64,
-        key: &StoredTransferWorkKey,
-        expected_revision: u64,
-        manifest_entries: &[StoredManifestEntry],
-        checkpoint: &StoredTransferCheckpoint,
-    ) -> StoreResult<u64> {
-        self.install_transfer_manifests_and_checkpoint(
-            task_id,
-            key,
-            expected_revision,
-            manifest_entries,
-            &[],
-            checkpoint,
-        )
-    }
-
-    pub fn install_transfer_manifests_and_checkpoint(
-        &self,
-        task_id: u64,
-        key: &StoredTransferWorkKey,
-        expected_revision: u64,
-        manifest_entries: &[StoredManifestEntry],
-        replacement_manifest_entries: &[StoredManifestEntry],
-        checkpoint: &StoredTransferCheckpoint,
-    ) -> StoreResult<u64> {
-        let update = TransferManifestCheckpointUpdate {
-            key,
-            expected_revision,
-            manifest_entries,
-            replacement_manifest_entries,
-            checkpoint,
-        };
+        mutations: &[StoredTransferMutation],
+    ) -> StoreResult<Vec<u64>> {
         Ok(self
-            .install_transfer_manifests_and_checkpoint_while(task_id, update, || true)?
-            .expect("unconditional manifest transaction cannot be interrupted"))
+            .apply_transfer_mutations_while(mutations, || true)?
+            .expect("unconditional transfer transaction cannot be interrupted"))
     }
 
-    pub fn install_transfer_manifests_and_checkpoint_while(
+    /// Applies every mutation in one transaction, or none of them: a stale
+    /// revision anywhere rolls the whole batch back. `continue_transaction` is
+    /// polled only between manifest rows, so cancelling a huge manifest install
+    /// does not wait for the last row while a checkpoint-only batch (such as
+    /// the cancellation cleanup itself) always completes. Returning false
+    /// abandons the transaction and yields `None`.
+    pub fn apply_transfer_mutations_while(
         &self,
-        task_id: u64,
-        update: TransferManifestCheckpointUpdate<'_>,
+        mutations: &[StoredTransferMutation],
         mut continue_transaction: impl FnMut() -> bool,
-    ) -> StoreResult<Option<u64>> {
-        let TransferManifestCheckpointUpdate {
-            key,
-            expected_revision,
-            manifest_entries,
-            replacement_manifest_entries,
-            checkpoint,
-        } = update;
-        ensure_top_level_work_key(key)?;
-        checkpoint.validate()?;
-        if manifest_entries
-            .iter()
-            .chain(replacement_manifest_entries)
-            .any(|entry| entry.transfer_index != key.transfer_index)
-        {
-            return Err(StoreError::InvalidRecoverableOperation(
-                "manifest entry belongs to another transfer",
-            ));
+    ) -> StoreResult<Option<Vec<u64>>> {
+        for mutation in mutations {
+            validate_transfer_mutation(mutation)?;
         }
-        if !continue_transaction() {
-            return Ok(None);
+        if mutations.is_empty() {
+            return Ok(Some(Vec::new()));
         }
 
         let mut connection = self.database.write();
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let next_revision =
-            expected_revision
-                .checked_add(1)
-                .ok_or(StoreError::InvalidRecoverableOperation(
-                    "transfer revision overflow",
-                ))?;
-        let updated = update_checkpoint(
-            &transaction,
-            task_id,
-            key,
-            expected_revision,
-            next_revision,
-            checkpoint,
-        )?;
-        ensure_revision_updated(updated, task_id, key.transfer_index, expected_revision)?;
-
-        transaction.execute(
-            "DELETE FROM transfer_manifest WHERE task_id = ?1 AND transfer_index = ?2",
-            params![sqlite_index(task_id)?, sqlite_index(key.transfer_index)?],
-        )?;
-        for entry in manifest_entries {
-            if !continue_transaction() {
-                return Ok(None);
-            }
-            transaction.execute(
-                "INSERT INTO transfer_manifest (
-                    task_id, transfer_index, relative_path_json, identity_json
-                 ) VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    sqlite_index(task_id)?,
-                    sqlite_index(entry.transfer_index)?,
-                    serde_json::to_string(&entry.relative_path)?,
-                    serde_json::to_string(&entry.identity)?,
-                ],
-            )?;
-        }
-        transaction.execute(
-            "DELETE FROM transfer_replacement_manifest
-             WHERE task_id = ?1 AND transfer_index = ?2",
-            params![sqlite_index(task_id)?, sqlite_index(key.transfer_index)?],
-        )?;
-        for entry in replacement_manifest_entries {
-            if !continue_transaction() {
-                return Ok(None);
-            }
-            transaction.execute(
-                "INSERT INTO transfer_replacement_manifest (
-                    task_id, transfer_index, relative_path_json, identity_json
-                 ) VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    sqlite_index(task_id)?,
-                    sqlite_index(entry.transfer_index)?,
-                    serde_json::to_string(&entry.relative_path)?,
-                    serde_json::to_string(&entry.identity)?,
-                ],
-            )?;
-        }
-        if !continue_transaction() {
-            return Ok(None);
-        }
-        transaction.commit()?;
-        Ok(Some(next_revision))
-    }
-
-    pub fn install_transfer_manifests_and_checkpoints_batch(
-        &self,
-        updates: &[StoredManifestCheckpointBatchUpdate],
-    ) -> StoreResult<Vec<u64>> {
-        if updates.is_empty() {
-            return Ok(Vec::new());
-        }
-        let mut connection = self.database.write();
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut revisions = Vec::with_capacity(updates.len());
-        for update in updates {
-            ensure_top_level_work_key(&update.key)?;
-            update.checkpoint.validate()?;
-            if update
-                .manifest_entries
-                .iter()
-                .chain(update.replacement_manifest_entries.iter())
-                .any(|entry| entry.transfer_index != update.key.transfer_index)
-            {
-                return Err(StoreError::InvalidRecoverableOperation(
-                    "manifest entry belongs to another transfer",
-                ));
-            }
-            let next_revision = update.expected_revision.checked_add(1).ok_or(
+        let mut revisions = Vec::with_capacity(mutations.len());
+        for mutation in mutations {
+            let task_id = sqlite_index(mutation.task_id)?;
+            let transfer_index = sqlite_index(mutation.key.transfer_index)?;
+            let next_revision = mutation.expected_revision.checked_add(1).ok_or(
                 StoreError::InvalidRecoverableOperation("transfer revision overflow"),
             )?;
+            let checkpoint = match &mutation.change {
+                StoredTransferChange::Checkpoint(checkpoint)
+                | StoredTransferChange::ManifestAndCheckpoint { checkpoint, .. }
+                | StoredTransferChange::MergeCompletionAndCheckpoint { checkpoint, .. } => {
+                    checkpoint
+                }
+            };
             let updated = update_checkpoint(
                 &transaction,
-                update.task_id,
-                &update.key,
-                update.expected_revision,
+                mutation.task_id,
+                &mutation.key,
+                mutation.expected_revision,
                 next_revision,
-                &update.checkpoint,
+                checkpoint,
             )?;
             ensure_revision_updated(
                 updated,
-                update.task_id,
-                update.key.transfer_index,
-                update.expected_revision,
+                mutation.task_id,
+                mutation.key.transfer_index,
+                mutation.expected_revision,
             )?;
-            transaction.execute(
-                "DELETE FROM transfer_manifest WHERE task_id = ?1 AND transfer_index = ?2",
-                params![
-                    sqlite_index(update.task_id)?,
-                    sqlite_index(update.key.transfer_index)?
-                ],
-            )?;
-            for entry in &update.manifest_entries {
-                transaction.execute(
-                    "INSERT INTO transfer_manifest (
-                        task_id, transfer_index, relative_path_json, identity_json
-                     ) VALUES (?1, ?2, ?3, ?4)",
-                    params![
-                        sqlite_index(update.task_id)?,
-                        sqlite_index(entry.transfer_index)?,
-                        serde_json::to_string(&entry.relative_path)?,
-                        serde_json::to_string(&entry.identity)?,
-                    ],
-                )?;
-            }
-            transaction.execute(
-                "DELETE FROM transfer_replacement_manifest
-                 WHERE task_id = ?1 AND transfer_index = ?2",
-                params![
-                    sqlite_index(update.task_id)?,
-                    sqlite_index(update.key.transfer_index)?
-                ],
-            )?;
-            for entry in &update.replacement_manifest_entries {
-                transaction.execute(
-                    "INSERT INTO transfer_replacement_manifest (
-                        task_id, transfer_index, relative_path_json, identity_json
-                     ) VALUES (?1, ?2, ?3, ?4)",
-                    params![
-                        sqlite_index(update.task_id)?,
-                        sqlite_index(entry.transfer_index)?,
-                        serde_json::to_string(&entry.relative_path)?,
-                        serde_json::to_string(&entry.identity)?,
-                    ],
-                )?;
+            match &mutation.change {
+                StoredTransferChange::Checkpoint(_) => {}
+                StoredTransferChange::ManifestAndCheckpoint {
+                    manifest_entries,
+                    replacement_manifest_entries,
+                    ..
+                } => {
+                    for (table, entries) in [
+                        ("transfer_manifest", manifest_entries),
+                        (
+                            "transfer_replacement_manifest",
+                            replacement_manifest_entries,
+                        ),
+                    ] {
+                        transaction.execute(
+                            &format!(
+                                "DELETE FROM {table} WHERE task_id = ?1 AND transfer_index = ?2"
+                            ),
+                            params![task_id, transfer_index],
+                        )?;
+                        let mut insert = transaction.prepare_cached(&format!(
+                            "INSERT INTO {table} (
+                                task_id, transfer_index, relative_path_json, identity_json
+                             ) VALUES (?1, ?2, ?3, ?4)"
+                        ))?;
+                        for entry in entries {
+                            if !continue_transaction() {
+                                return Ok(None);
+                            }
+                            insert.execute(params![
+                                task_id,
+                                transfer_index,
+                                serde_json::to_string(&entry.relative_path)?,
+                                serde_json::to_string(&entry.identity)?,
+                            ])?;
+                        }
+                    }
+                }
+                StoredTransferChange::MergeCompletionAndCheckpoint { completion, .. } => {
+                    transaction.execute(
+                        "INSERT INTO transfer_merge_completion (
+                            task_id, transfer_index, child_relative_path_json, completion_json
+                         ) VALUES (?1, ?2, ?3, ?4)",
+                        params![
+                            task_id,
+                            transfer_index,
+                            serde_json::to_string(&completion.child_relative_path)?,
+                            completion.completion_json,
+                        ],
+                    )?;
+                }
             }
             revisions.push(next_revision);
         }
         transaction.commit()?;
-        Ok(revisions)
-    }
-
-    pub fn compare_and_swap_transfer_checkpoint(
-        &self,
-        task_id: u64,
-        key: &StoredTransferWorkKey,
-        expected_revision: u64,
-        checkpoint: &StoredTransferCheckpoint,
-    ) -> StoreResult<u64> {
-        ensure_top_level_work_key(key)?;
-        checkpoint.validate()?;
-        let next_revision =
-            expected_revision
-                .checked_add(1)
-                .ok_or(StoreError::InvalidRecoverableOperation(
-                    "transfer revision overflow",
-                ))?;
-        let connection = self.database.write();
-        let updated = update_checkpoint(
-            &connection,
-            task_id,
-            key,
-            expected_revision,
-            next_revision,
-            checkpoint,
-        )?;
-        ensure_revision_updated(updated, task_id, key.transfer_index, expected_revision)?;
-        Ok(next_revision)
-    }
-
-    pub fn compare_and_swap_transfer_checkpoints(
-        &self,
-        swaps: &[StoredTransferCheckpointSwap],
-    ) -> StoreResult<Vec<u64>> {
-        if swaps.is_empty() {
-            return Ok(Vec::new());
-        }
-        let mut connection = self.database.write();
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut revisions = Vec::with_capacity(swaps.len());
-        for swap in swaps {
-            ensure_top_level_work_key(&swap.key)?;
-            swap.checkpoint.validate()?;
-            let next_revision = swap.expected_revision.checked_add(1).ok_or(
-                StoreError::InvalidRecoverableOperation("transfer revision overflow"),
-            )?;
-            let updated = update_checkpoint(
-                &transaction,
-                swap.task_id,
-                &swap.key,
-                swap.expected_revision,
-                next_revision,
-                &swap.checkpoint,
-            )?;
-            ensure_revision_updated(
-                updated,
-                swap.task_id,
-                swap.key.transfer_index,
-                swap.expected_revision,
-            )?;
-            revisions.push(next_revision);
-        }
-        transaction.commit()?;
-        Ok(revisions)
-    }
-
-    pub fn compare_and_swap_transfer_merge_completion(
-        &self,
-        task_id: u64,
-        key: &StoredTransferWorkKey,
-        expected_revision: u64,
-        completion: &StoredMergeChildCompletion,
-        checkpoint: &StoredTransferCheckpoint,
-    ) -> StoreResult<u64> {
-        ensure_top_level_work_key(key)?;
-        validate_merge_completion(key, completion)?;
-        serde_json::from_str::<serde_json::Value>(&completion.completion_json)?;
-        checkpoint.validate()?;
-        if checkpoint.kind != StoredTransferCheckpointKind::Merging {
-            return Err(StoreError::InvalidRecoverableOperation(
-                "merge completion requires a merging checkpoint",
-            ));
-        }
-        let next_revision =
-            expected_revision
-                .checked_add(1)
-                .ok_or(StoreError::InvalidRecoverableOperation(
-                    "transfer revision overflow",
-                ))?;
-        let mut connection = self.database.write();
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let updated = update_checkpoint(
-            &transaction,
-            task_id,
-            key,
-            expected_revision,
-            next_revision,
-            checkpoint,
-        )?;
-        ensure_revision_updated(updated, task_id, key.transfer_index, expected_revision)?;
-        transaction.execute(
-            "INSERT INTO transfer_merge_completion (
-                task_id, transfer_index, child_relative_path_json, completion_json
-             ) VALUES (?1, ?2, ?3, ?4)",
-            params![
-                sqlite_index(task_id)?,
-                sqlite_index(key.transfer_index)?,
-                serde_json::to_string(&completion.child_relative_path)?,
-                completion.completion_json,
-            ],
-        )?;
-        transaction.commit()?;
-        Ok(next_revision)
+        Ok(Some(revisions))
     }
 
     pub fn finalize_recoverable_transfer_task(
@@ -719,6 +496,44 @@ impl TaskQueueStore {
     }
 }
 
+fn validate_transfer_mutation(mutation: &StoredTransferMutation) -> StoreResult<()> {
+    ensure_top_level_work_key(&mutation.key)?;
+    match &mutation.change {
+        StoredTransferChange::Checkpoint(checkpoint) => checkpoint.validate(),
+        StoredTransferChange::ManifestAndCheckpoint {
+            manifest_entries,
+            replacement_manifest_entries,
+            checkpoint,
+        } => {
+            checkpoint.validate()?;
+            if manifest_entries
+                .iter()
+                .chain(replacement_manifest_entries)
+                .any(|entry| entry.transfer_index != mutation.key.transfer_index)
+            {
+                return Err(StoreError::InvalidRecoverableOperation(
+                    "manifest entry belongs to another transfer",
+                ));
+            }
+            Ok(())
+        }
+        StoredTransferChange::MergeCompletionAndCheckpoint {
+            completion,
+            checkpoint,
+        } => {
+            validate_merge_completion(&mutation.key, completion)?;
+            serde_json::from_str::<serde_json::Value>(&completion.completion_json)?;
+            checkpoint.validate()?;
+            if checkpoint.kind != StoredTransferCheckpointKind::Merging {
+                return Err(StoreError::InvalidRecoverableOperation(
+                    "merge completion requires a merging checkpoint",
+                ));
+            }
+            Ok(())
+        }
+    }
+}
+
 fn validate_merge_completion(
     journal_key: &StoredTransferWorkKey,
     completion: &StoredMergeChildCompletion,
@@ -755,12 +570,15 @@ fn update_checkpoint(
     next_revision: u64,
     checkpoint: &StoredTransferCheckpoint,
 ) -> StoreResult<usize> {
-    Ok(connection.execute(
-        "UPDATE transfer_journal
-         SET checkpoint_kind = ?1, checkpoint_json = ?2, revision = ?3
-         WHERE task_id = ?4 AND transfer_index = ?5
-           AND relative_path_json = ?6 AND revision = ?7",
-        params![
+    // 一批转移逐条走同一条语句：缓存住，不必每条重新解析。
+    Ok(connection
+        .prepare_cached(
+            "UPDATE transfer_journal
+             SET checkpoint_kind = ?1, checkpoint_json = ?2, revision = ?3
+             WHERE task_id = ?4 AND transfer_index = ?5
+               AND relative_path_json = ?6 AND revision = ?7",
+        )?
+        .execute(params![
             checkpoint.kind.as_str(),
             checkpoint.state_json,
             sqlite_index(next_revision)?,
@@ -768,8 +586,7 @@ fn update_checkpoint(
             sqlite_index(key.transfer_index)?,
             serde_json::to_string(&key.relative_path)?,
             sqlite_index(expected_revision)?,
-        ],
-    )?)
+        ])?)
 }
 
 fn ensure_revision_updated(

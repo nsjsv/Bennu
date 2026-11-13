@@ -1,8 +1,6 @@
-use std::io;
 use std::path::{Path, PathBuf};
 
 use tokio::fs;
-use tokio_util::sync::CancellationToken;
 
 use super::super::copy::{
     copy_path_with_inspected_source, FileOperationControls, FileTransferOptions,
@@ -17,38 +15,38 @@ use super::super::transfer_strategy::RegularFilePayloadCopy;
 use super::{
     build_source_manifest_with_controls, fingerprint_object_with_controls, inspect_file_identity,
     plan_owned_artifact, recover_owned_artifact, remove_owned_artifact, rename_noreplace,
-    sync_parent_blocking, sync_tree_blocking, verify_source_manifest_with_controls,
-    BackupCreationTransfer, CommitPayload, CommitTransfer, FileIdentity, FileObjectKind,
-    ManifestCheckpointBatchUpdate, NoReplaceRenameError, OwnedArtifact, OwnedArtifactKind,
-    PreparedTransfer, ProofContext, RecoverableTransferError, RecoverableTransferOperation,
-    RecoverableTransferOutcome, SourceManifest, StagedSourceLocation, StagingTransfer,
-    TransferCheckpoint, TransferExecutionKind, TransferFingerprint, TransferJournal,
-    TransferJournalError, TransferJournalMutation, TransferJournalRecord,
+    verify_source_manifest_with_controls, BackupCreationTransfer, CommitBarrier, CommitPayload,
+    CommitTransfer, FileIdentity, FileObjectKind, NoReplaceRenameError, OwnedArtifact,
+    OwnedArtifactKind, PreparedTransfer, ProofContext, RecoverableTransferError,
+    RecoverableTransferOperation, RecoverableTransferOutcome, SourceManifest, StagedSourceLocation,
+    StagingTransfer, TransferCheckpoint, TransferExecutionKind, TransferFingerprint,
+    TransferJournalError, TransferJournalRecord, TransferTransition,
 };
 use crate::transfer_conflict::{first_available_entry_path, transfer_target_metadata_if_exists};
 use crate::EntryNameKind;
 
-mod batch;
 mod commit;
 mod direct_move;
 mod merge;
 mod recovery;
+mod retirement;
 mod run;
 #[cfg(unix)]
 mod staging_parallel;
 mod validation;
 
-pub use batch::{run_direct_move_batch_to_durable_renamed, DirectMoveBatchRecord};
 use commit::{
-    advance_committed_transfer, advance_retired_source, commit_transfer, create_replace_backup,
-    retire_source, verify_completed_target, verify_prepared_source_with_controls,
+    advance_committed_transfer, commit_transfer, create_replace_backup, verify_completed_target,
+    verify_prepared_source_with_controls,
 };
 use direct_move::{advance_direct_move_intent, advance_direct_move_renamed};
 use merge::{advance_merge_transfer, prepare_merge_transfer};
 use recovery::{finish_cancel, finish_failure};
+use retirement::{advance_retired_source, retire_source};
 pub use run::{
-    run_recoverable_transfer, run_recoverable_transfer_to_direct_move_intent,
-    settle_failed_recoverable_transfer, DirectMoveIntentBoundary,
+    advance_recoverable_transfer, durable_direct_move_commit, persist_source_manifests,
+    run_recoverable_segment, run_recoverable_transfer, settle_failed_recoverable_transfers,
+    DurableDirectMoveCommit, TransferSegmentEvent,
 };
 use validation::validate_checkpoint_semantics;
 
@@ -58,44 +56,21 @@ pub enum TransferAdvance {
     Complete(RecoverableTransferOutcome),
 }
 
-pub async fn persist_recoverable_source_manifest<J: TransferJournal>(
-    record: &mut TransferJournalRecord,
-    journal: &J,
-) -> Result<(), RecoverableTransferError> {
-    let mut controls = FileOperationControls::running(CancellationToken::new());
-    persist_recoverable_source_manifest_with_controls(record, journal, &mut controls).await
+/// What one step left for its record: a transition the runner commits once the
+/// step's effects are durable, or the finished transfer.
+enum TransferStep {
+    Transition(Box<TransferTransition>),
+    Complete(RecoverableTransferOutcome),
 }
 
-pub async fn persist_recoverable_source_manifest_with_controls<J: TransferJournal>(
-    record: &mut TransferJournalRecord,
-    journal: &J,
-    controls: &mut FileOperationControls,
-) -> Result<(), RecoverableTransferError> {
-    if record.manifest.is_some() {
-        return Ok(());
-    }
-    if !matches!(record.checkpoint, TransferCheckpoint::AwaitingManifest) {
-        return Err(RecoverableTransferError::InvalidCheckpoint {
-            message: "source manifest can only be installed while awaiting manifest".to_owned(),
-        });
-    }
-
-    let manifest = build_source_manifest_with_controls(&record.request.source, controls).await?;
-    install_manifest_and_checkpoint(
-        record,
-        journal,
-        manifest,
-        None,
-        TransferCheckpoint::AwaitingManifest,
-    )
-    .await
-}
-
-pub async fn advance_recoverable_transfer<J: TransferJournal>(
-    record: &mut TransferJournalRecord,
-    journal: &J,
+/// Runs the effects of the record's current checkpoint and returns the next
+/// one. Durability of those effects is registered on `barrier`; the caller
+/// flushes it before committing the transition.
+async fn step_recoverable_transfer(
+    record: &TransferJournalRecord,
     transfer_options: &FileTransferOptions,
-) -> Result<TransferAdvance, RecoverableTransferError> {
+    barrier: &mut CommitBarrier,
+) -> Result<TransferStep, RecoverableTransferError> {
     let proof = ProofContext::new(
         record.request.verification,
         transfer_options.proof_memo.clone(),
@@ -105,14 +80,10 @@ pub async fn advance_recoverable_transfer<J: TransferJournal>(
     if checkpoint_accepts_controls(&checkpoint) {
         wait_until_running(transfer_options).await?;
     }
-    match checkpoint {
-        TransferCheckpoint::AwaitingManifest => {
-            prepare_transfer(record, journal, transfer_options).await?;
-            Ok(TransferAdvance::Continue)
-        }
+    let transition = match checkpoint {
+        TransferCheckpoint::AwaitingManifest => prepare_transfer(record, transfer_options).await?,
         TransferCheckpoint::Merging(merge) => {
-            advance_merge_transfer(record, journal, transfer_options, merge).await?;
-            Ok(TransferAdvance::Continue)
+            advance_merge_transfer(record, transfer_options, merge, barrier).await?
         }
         TransferCheckpoint::StageCreationIntent(prepared) => {
             let staging_plan = prepared.staging_plan.clone().ok_or_else(|| {
@@ -122,83 +93,72 @@ pub async fn advance_recoverable_transfer<J: TransferJournal>(
             })?;
             verify_prepared_source_with_controls(record, &prepared, &transfer_options.controls)
                 .await?;
-            let artifact = recover_owned_artifact(staging_plan).await?;
-            persist_checkpoint(
-                record,
-                journal,
-                TransferCheckpoint::Staging(StagingTransfer { prepared, artifact }),
-            )
-            .await?;
-            Ok(TransferAdvance::Continue)
+            let artifact = recover_owned_artifact(staging_plan, barrier).await?;
+            TransferTransition::Checkpoint(TransferCheckpoint::Staging(StagingTransfer {
+                prepared,
+                artifact,
+            }))
         }
         TransferCheckpoint::Staging(staging) => {
-            stage_transfer(record, journal, transfer_options, staging, &proof).await?;
-            Ok(TransferAdvance::Continue)
+            stage_transfer(record, transfer_options, staging, &proof, barrier).await?
         }
         TransferCheckpoint::DirectMoveIntent(prepared) => {
-            advance_direct_move_intent(record, journal, transfer_options, prepared).await?;
-            Ok(TransferAdvance::Continue)
+            advance_direct_move_intent(record, transfer_options, prepared, barrier).await?
         }
         TransferCheckpoint::DirectMoveRenamed(renamed) => {
-            advance_direct_move_renamed(record, journal, renamed, &proof).await?;
-            Ok(TransferAdvance::Continue)
+            advance_direct_move_renamed(renamed, &proof).await?
         }
         TransferCheckpoint::BackupCreationIntent(backup) => {
-            create_replace_backup(record, journal, backup, &proof).await?;
-            Ok(TransferAdvance::Continue)
+            create_replace_backup(backup, &proof, barrier).await?
         }
         TransferCheckpoint::CommitIntent(commit) => {
             if path_exists(&commit_payload_path(record, &commit)).await? {
                 wait_until_running(transfer_options).await?;
             }
-            commit_transfer(record, journal, commit, &proof).await?;
-            Ok(TransferAdvance::Continue)
+            commit_transfer(record, commit, &proof, barrier).await?
         }
         TransferCheckpoint::TargetCommitted(committed) => {
-            advance_committed_transfer(record, journal, committed, &proof).await?;
-            Ok(TransferAdvance::Continue)
+            advance_committed_transfer(record, committed, &proof, barrier).await?
         }
         TransferCheckpoint::SourceRetirementIntent(retirement) => {
-            retire_source(record, journal, *retirement, &proof).await?;
-            Ok(TransferAdvance::Continue)
+            retire_source(record, *retirement, &proof, barrier).await?
         }
         TransferCheckpoint::SourceRetired(retired) => {
-            advance_retired_source(record, journal, *retired, &proof).await?;
-            Ok(TransferAdvance::Continue)
+            advance_retired_source(record, *retired, &proof, barrier).await?
         }
         TransferCheckpoint::Completed(completed) => {
             verify_completed_target(&completed, &proof).await?;
-            Ok(TransferAdvance::Complete(RecoverableTransferOutcome {
+            return Ok(TransferStep::Complete(RecoverableTransferOutcome {
                 source: record.request.source.clone(),
                 final_target: Some(completed.path),
                 metadata_loss: completed.metadata_loss,
-            }))
+            }));
         }
         TransferCheckpoint::CancelIntent(previous) => {
-            finish_cancel(record, journal, *previous, &proof).await?;
-            Ok(TransferAdvance::Continue)
+            finish_cancel(record, *previous, &proof, barrier).await?
         }
-        TransferCheckpoint::Canceled { .. } => Err(crate::FileError::Cancelled.into()),
+        TransferCheckpoint::Canceled { .. } => return Err(crate::FileError::Cancelled.into()),
         TransferCheckpoint::FailureIntent(failure) => {
-            finish_failure(record, journal, failure, &proof).await?;
-            Ok(TransferAdvance::Continue)
+            finish_failure(record, failure, &proof, barrier).await?
         }
         TransferCheckpoint::Failed { diagnostic, .. } => {
-            Err(RecoverableTransferError::RecordedFailure { diagnostic })
+            return Err(RecoverableTransferError::RecordedFailure { diagnostic });
         }
-        TransferCheckpoint::Skipped => Ok(TransferAdvance::Complete(RecoverableTransferOutcome {
-            source: record.request.source.clone(),
-            final_target: None,
-            metadata_loss: MetadataLossSummary::default(),
-        })),
-    }
+        TransferCheckpoint::Skipped => {
+            return Ok(TransferStep::Complete(RecoverableTransferOutcome {
+                source: record.request.source.clone(),
+                final_target: None,
+                metadata_loss: MetadataLossSummary::default(),
+            }));
+        }
+    };
+    Ok(TransferStep::Transition(Box::new(transition)))
 }
 
-async fn prepare_transfer<J: TransferJournal>(
-    record: &mut TransferJournalRecord,
-    journal: &J,
+async fn prepare_transfer(
+    record: &TransferJournalRecord,
     transfer_options: &FileTransferOptions,
-) -> Result<(), RecoverableTransferError> {
+) -> Result<TransferTransition, RecoverableTransferError> {
     let mut controls = transfer_options.controls.clone();
     // 红线修订三:manifest 从 journal 恢复(进程曾经中断)必须全文重验;
     // 本进程刚构建的 manifest 距构建仅一个 journal 边界、期间无任何副作用,
@@ -224,8 +184,7 @@ async fn prepare_transfer<J: TransferJournal>(
     if record.request.source == record.request.requested_target
         && record.request.conflict_strategy != TransferConflictStrategy::KeepBoth
     {
-        persist_checkpoint(record, journal, TransferCheckpoint::Skipped).await?;
-        return Ok(());
+        return Ok(TransferTransition::Checkpoint(TransferCheckpoint::Skipped));
     }
 
     if record.request.conflict_strategy == TransferConflictStrategy::Merge {
@@ -233,11 +192,9 @@ async fn prepare_transfer<J: TransferJournal>(
             if source_identity.object_kind == FileObjectKind::Directory
                 && target_identity.object_kind == FileObjectKind::Directory
             {
-                return prepare_merge_transfer(record, journal, manifest, target_identity.clone())
-                    .await;
+                return prepare_merge_transfer(record, manifest, target_identity.clone()).await;
             }
-            persist_checkpoint(record, journal, TransferCheckpoint::Skipped).await?;
-            return Ok(());
+            return Ok(TransferTransition::Checkpoint(TransferCheckpoint::Skipped));
         }
     }
 
@@ -255,8 +212,7 @@ async fn prepare_transfer<J: TransferJournal>(
                 });
             }
             TransferConflictStrategy::Skip => {
-                persist_checkpoint(record, journal, TransferCheckpoint::Skipped).await?;
-                return Ok(());
+                return Ok(TransferTransition::Checkpoint(TransferCheckpoint::Skipped));
             }
             TransferConflictStrategy::KeepBoth => (
                 first_available_entry_path(
@@ -382,208 +338,20 @@ async fn prepare_transfer<J: TransferJournal>(
         }
         (TransferExecutionKind::MergeDirectory, _) => unreachable!(),
     };
-    install_manifest_and_checkpoint(record, journal, manifest, replacement_manifest, checkpoint)
-        .await
-}
-
-/// A record that has completed the intent-preparation boundary of a Basic
-/// DirectMove segment.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DirectMoveIntentBatchRecord {
-    /// At a durable `DirectMoveIntent`, ready for the rename batch.
-    Intent(TransferJournalRecord),
-    /// At a durable non-direct checkpoint (StageCreationIntent, Skipped,
-    /// Merging, CommitIntent, ...); still needs the sequential executor.
-    NotApplicable(TransferJournalRecord),
-}
-
-struct PendingDirectMoveIntent {
-    index: usize,
-    record: TransferJournalRecord,
-    manifest: SourceManifest,
-    checkpoint: TransferCheckpoint,
-}
-
-pub fn is_direct_move_segment_candidate(record: &TransferJournalRecord) -> bool {
-    match record.checkpoint {
-        TransferCheckpoint::DirectMoveIntent(_) => true,
-        TransferCheckpoint::AwaitingManifest => {
-            record.request.operation == RecoverableTransferOperation::Move
-                && record.request.verification
-                    == crate::ops::FileOperationVerification::BasicMetadata
-                && record.request.conflict_strategy != TransferConflictStrategy::Merge
-                && (record.request.source != record.request.requested_target
-                    || record.request.conflict_strategy == TransferConflictStrategy::KeepBoth)
-        }
-        _ => false,
-    }
-}
-
-/// Compute the `DirectMoveIntent` for one Basic Move that can take the direct
-/// rename fast path. Returns `None` for anything that must stay on the sequential
-/// `prepare_transfer` path (Copy, Strong, Replace, Skip, Merge, source == target,
-/// or a conflicting target under Fail/Skip). This mirrors the MoveDirect branch
-/// of [`prepare_transfer`]; keep the two in sync.
-async fn compute_direct_move_intent(
-    record: &TransferJournalRecord,
-    controls: &mut FileOperationControls,
-) -> Result<Option<(SourceManifest, TransferCheckpoint)>, RecoverableTransferError> {
-    match &record.checkpoint {
-        TransferCheckpoint::DirectMoveRenamed(_) => return Ok(None),
-        TransferCheckpoint::DirectMoveIntent(_) => {
-            let manifest = record.manifest.clone().ok_or_else(|| {
-                RecoverableTransferError::InvalidCheckpoint {
-                    message: "DirectMoveIntent is missing its persisted source manifest".to_owned(),
-                }
-            })?;
-            return Ok(Some((manifest, record.checkpoint.clone())));
-        }
-        TransferCheckpoint::AwaitingManifest => {}
-        _ => return Ok(None),
-    }
-
-    if record.request.operation != RecoverableTransferOperation::Move
-        || record.request.verification != crate::ops::FileOperationVerification::BasicMetadata
-    {
-        return Ok(None);
-    }
-    if record.request.source == record.request.requested_target
-        && record.request.conflict_strategy != TransferConflictStrategy::KeepBoth
-    {
-        return Ok(None);
-    }
-    if record.request.conflict_strategy == TransferConflictStrategy::Merge {
-        return Ok(None);
-    }
-
-    let manifest = match &record.manifest {
-        Some(manifest) => manifest.clone(),
-        None => build_source_manifest_with_controls(&record.request.source, controls).await?,
-    };
-    verify_source_manifest_with_controls(&manifest, controls).await?;
-    let source_identity = manifest_root_identity(&manifest)?.clone();
-    let target_exists = inspect_optional_identity(&record.request.requested_target)
-        .await?
-        .is_some();
-    let resolved_target = match (target_exists, record.request.conflict_strategy) {
-        (false, _) => record.request.requested_target.clone(),
-        (true, TransferConflictStrategy::KeepBoth) => {
-            first_available_entry_path(
-                &record.request.requested_target,
-                EntryNameKind::from(source_identity.object_kind),
-            )
-            .await?
-        }
-        (true, _) => return Ok(None),
-    };
-    let prepared = PreparedTransfer {
-        source_identity,
-        resolved_target,
-        expected_target_identity: None,
-        expected_target_fingerprint: None,
-        source_fingerprint: None,
-        execution: TransferExecutionKind::MoveDirect,
-        staging_plan: None,
-    };
-    Ok(Some((
+    Ok(TransferTransition::ManifestAndCheckpoint {
         manifest,
-        TransferCheckpoint::DirectMoveIntent(prepared),
-    )))
+        replacement_manifest,
+        checkpoint,
+    })
 }
 
-/// Prepare a whole Basic DirectMove segment in one pass: compute every
-/// DirectMove intent (and, implicitly, verify every source) before any rename,
-/// then persist all intents + manifests in a single batch transaction. A source
-/// identity change fails the whole segment before anything is persisted; a
-/// business conflict only excludes that record and lets its siblings proceed.
-pub async fn prepare_direct_move_intent_segment<J: TransferJournal>(
-    records: Vec<TransferJournalRecord>,
-    journal: &J,
-    transfer_options: &FileTransferOptions,
-) -> Result<Vec<DirectMoveIntentBatchRecord>, RecoverableTransferError> {
-    let mut controls = transfer_options.controls.clone();
-    let mut pending: Vec<PendingDirectMoveIntent> = Vec::new();
-    let mut output: Vec<Option<DirectMoveIntentBatchRecord>> = Vec::with_capacity(records.len());
-
-    for record in records {
-        let index = output.len();
-        match compute_direct_move_intent(&record, &mut controls).await? {
-            Some((manifest, checkpoint)) => {
-                pending.push(PendingDirectMoveIntent {
-                    index,
-                    record,
-                    manifest,
-                    checkpoint,
-                });
-                output.push(None);
-            }
-            None => {
-                if !pending.is_empty() {
-                    persist_direct_move_intents(&mut pending, journal, &mut output).await?;
-                }
-                output.push(Some(DirectMoveIntentBatchRecord::NotApplicable(record)));
-            }
-        }
-    }
-
-    if !pending.is_empty() {
-        persist_direct_move_intents(&mut pending, journal, &mut output).await?;
-    }
-
-    Ok(output
-        .into_iter()
-        .map(|record| record.expect("direct move preparation record is present"))
-        .collect())
-}
-
-async fn persist_direct_move_intents<J: TransferJournal>(
-    pending: &mut Vec<PendingDirectMoveIntent>,
-    journal: &J,
-    output: &mut [Option<DirectMoveIntentBatchRecord>],
-) -> Result<(), RecoverableTransferError> {
-    let updates = pending
-        .iter()
-        .map(|pending| ManifestCheckpointBatchUpdate {
-            task_id: pending.record.task_id,
-            key: pending.record.key.clone(),
-            expected_revision: pending.record.revision,
-            manifest: pending.manifest.clone(),
-            replacement_manifest: None,
-            checkpoint: pending.checkpoint.clone(),
-        })
-        .collect::<Vec<_>>();
-    let revisions = journal
-        .commit_manifest_batch(updates)
-        .await
-        .map_err(journal_error)?;
-    if revisions.len() != pending.len() {
-        return Err(RecoverableTransferError::Journal {
-            message: format!(
-                "manifest batch commit returned {} revisions for {} intents",
-                revisions.len(),
-                pending.len()
-            ),
-        });
-    }
-
-    for (pending, revision) in pending.drain(..).zip(revisions) {
-        validate_next_revision(pending.record.revision, revision)?;
-        let mut record = pending.record;
-        record.revision = revision;
-        record.checkpoint = pending.checkpoint;
-        record.manifest = Some(pending.manifest);
-        output[pending.index] = Some(DirectMoveIntentBatchRecord::Intent(record));
-    }
-    Ok(())
-}
-
-async fn stage_transfer<J: TransferJournal>(
-    record: &mut TransferJournalRecord,
-    journal: &J,
+async fn stage_transfer(
+    record: &TransferJournalRecord,
     transfer_options: &FileTransferOptions,
     staging: StagingTransfer,
     proof: &ProofContext,
-) -> Result<(), RecoverableTransferError> {
+    barrier: &mut CommitBarrier,
+) -> Result<TransferTransition, RecoverableTransferError> {
     super::validate_owned_artifact(&staging.artifact).await?;
     let payload_path = staging.artifact.plan.payload_path();
     let source_exists = path_exists(&record.request.source).await?;
@@ -605,20 +373,16 @@ async fn stage_transfer<J: TransferJournal>(
                 MetadataLossSummary::default(),
             )
         } else if source_exists {
-            remove_owned_artifact(&staging.artifact).await?;
+            remove_owned_artifact(&staging.artifact, barrier).await?;
             let mut prepared = staging.prepared;
             prepared.staging_plan = Some(plan_owned_artifact(
                 target_parent(&prepared.resolved_target)?,
                 OwnedArtifactKind::TargetStaging,
                 record.owner(0),
             )?);
-            persist_checkpoint(
-                record,
-                journal,
+            return Ok(TransferTransition::Checkpoint(
                 TransferCheckpoint::StageCreationIntent(prepared),
-            )
-            .await?;
-            return Ok(());
+            ));
         } else {
             return Err(RecoverableTransferError::InvalidCheckpoint {
                 message: "staged payload exists but no matching source object remains".to_owned(),
@@ -674,7 +438,7 @@ async fn stage_transfer<J: TransferJournal>(
             TransferExecutionKind::MoveToStage => {
                 match rename_noreplace(&record.request.source, &payload_path) {
                     Ok(()) => {
-                        sync_rename_parents(&record.request.source, &payload_path).await?;
+                        barrier.require_rename(&record.request.source, &payload_path);
                         (
                             StagedSourceLocation::ArtifactPayload,
                             MetadataLossSummary::default(),
@@ -703,7 +467,7 @@ async fn stage_transfer<J: TransferJournal>(
         verify_prepared_source_with_controls(record, &staging.prepared, &transfer_options.controls)
             .await?;
     }
-    sync_tree(&payload_path).await?;
+    barrier.require_parent_of(&payload_path);
     let payload_identity = inspect_file_identity(&payload_path).await?;
     // 克隆 staging 的证明 = 内核原子克隆 + 此处 payload 身份与后续夹心;
     // 其余路径按"身份→哈希→身份"夹心产出 Blake3 证明(Basic 走运行内 memo)。
@@ -763,7 +527,7 @@ async fn stage_transfer<J: TransferJournal>(
             metadata_loss,
         })
     };
-    persist_checkpoint(record, journal, checkpoint).await
+    Ok(TransferTransition::Checkpoint(checkpoint))
 }
 
 /// KernelClone staging 的候选条件:Basic 校验、顶层普通文件、Copy 且无
@@ -952,125 +716,6 @@ async fn wait_until_running(
 ) -> Result<(), RecoverableTransferError> {
     let mut controls: FileOperationControls = transfer_options.controls.clone();
     controls.wait_until_running().await.map_err(Into::into)
-}
-
-pub(super) async fn sync_parent(path: &Path) -> Result<(), RecoverableTransferError> {
-    let work_path = path.to_path_buf();
-    let error_path = work_path.clone();
-    tokio::task::spawn_blocking(move || sync_parent_blocking(&work_path))
-        .await
-        .map_err(|join_error| {
-            RecoverableTransferError::file_system(
-                "join parent sync task for",
-                &error_path,
-                io::Error::other(join_error),
-            )
-        })?
-}
-
-async fn sync_tree(path: &Path) -> Result<(), RecoverableTransferError> {
-    let work_path = path.to_path_buf();
-    let error_path = work_path.clone();
-    tokio::task::spawn_blocking(move || sync_tree_blocking(&work_path))
-        .await
-        .map_err(|join_error| {
-            RecoverableTransferError::file_system(
-                "join staged sync task for",
-                &error_path,
-                io::Error::other(join_error),
-            )
-        })?
-}
-
-async fn sync_rename_parents(from: &Path, to: &Path) -> Result<(), RecoverableTransferError> {
-    let from = from.to_path_buf();
-    let to = to.to_path_buf();
-    let error_path = to.clone();
-    tokio::task::spawn_blocking(move || {
-        sync_parent_blocking(&from)?;
-        if from.parent() != to.parent() {
-            sync_parent_blocking(&to)?;
-        }
-        Ok(())
-    })
-    .await
-    .map_err(|join_error| {
-        RecoverableTransferError::file_system(
-            "join rename sync task for",
-            &error_path,
-            io::Error::other(join_error),
-        )
-    })?
-}
-
-async fn install_manifest_and_checkpoint<J: TransferJournal>(
-    record: &mut TransferJournalRecord,
-    journal: &J,
-    manifest: SourceManifest,
-    replacement_manifest: Option<SourceManifest>,
-    checkpoint: TransferCheckpoint,
-) -> Result<(), RecoverableTransferError> {
-    let revision = journal
-        .commit(TransferJournalMutation::InstallManifestAndCheckpoint {
-            task_id: record.task_id,
-            key: record.key.clone(),
-            expected_revision: record.revision,
-            manifest: manifest.clone(),
-            replacement_manifest: replacement_manifest.clone(),
-            checkpoint: checkpoint.clone(),
-        })
-        .await
-        .map_err(journal_error)?;
-    validate_next_revision(record.revision, revision)?;
-    record.revision = revision;
-    record.manifest = Some(manifest);
-    record.replacement_manifest = replacement_manifest;
-    record.checkpoint = checkpoint;
-    Ok(())
-}
-
-async fn persist_merge_completion<J: TransferJournal>(
-    record: &mut TransferJournalRecord,
-    journal: &J,
-    completion: super::MergeChildCompletion,
-    checkpoint: TransferCheckpoint,
-) -> Result<(), RecoverableTransferError> {
-    let revision = journal
-        .commit(
-            TransferJournalMutation::PersistMergeCompletionAndCheckpoint {
-                task_id: record.task_id,
-                key: record.key.clone(),
-                expected_revision: record.revision,
-                completion,
-                checkpoint: checkpoint.clone(),
-            },
-        )
-        .await
-        .map_err(journal_error)?;
-    validate_next_revision(record.revision, revision)?;
-    record.revision = revision;
-    record.checkpoint = checkpoint;
-    Ok(())
-}
-
-async fn persist_checkpoint<J: TransferJournal>(
-    record: &mut TransferJournalRecord,
-    journal: &J,
-    checkpoint: TransferCheckpoint,
-) -> Result<(), RecoverableTransferError> {
-    let revision = journal
-        .commit(TransferJournalMutation::CompareAndSwapCheckpoint {
-            task_id: record.task_id,
-            key: record.key.clone(),
-            expected_revision: record.revision,
-            checkpoint: checkpoint.clone(),
-        })
-        .await
-        .map_err(journal_error)?;
-    validate_next_revision(record.revision, revision)?;
-    record.revision = revision;
-    record.checkpoint = checkpoint;
-    Ok(())
 }
 
 pub(super) fn validate_next_revision(

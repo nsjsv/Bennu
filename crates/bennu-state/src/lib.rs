@@ -26,12 +26,11 @@ pub use preferences_payload::{
 };
 pub use recoverable_transfer::{
     ClaimedRecoverableTask, RecoverableRestoreCoordinatorLease, RecoverableTaskRunnerLease,
-    StoredFileIdentity, StoredFileObjectKind, StoredFileOperationVerification,
-    StoredManifestCheckpointBatchUpdate, StoredManifestEntry, StoredMergeChildCompletion,
-    StoredTransferCheckpoint, StoredTransferCheckpointKind, StoredTransferCheckpointSwap,
-    StoredTransferConflictStrategy, StoredTransferJournalEntry, StoredTransferOperation,
-    StoredTransferRecoverySnapshot, StoredTransferWorkKey, TransferManifestCheckpointUpdate,
-    TRANSFER_JOURNAL_VERSION,
+    StoredFileIdentity, StoredFileObjectKind, StoredFileOperationVerification, StoredManifestEntry,
+    StoredMergeChildCompletion, StoredTransferChange, StoredTransferCheckpoint,
+    StoredTransferCheckpointKind, StoredTransferConflictStrategy, StoredTransferJournalEntry,
+    StoredTransferMutation, StoredTransferOperation, StoredTransferRecoverySnapshot,
+    StoredTransferWorkKey, TRANSFER_JOURNAL_VERSION,
 };
 pub use shutdown::{StoredApplicationShutdown, StoredBrowserSessionShutdown};
 pub use stored_path::{StoredFileName, StoredPath};

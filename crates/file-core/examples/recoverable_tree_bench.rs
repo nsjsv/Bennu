@@ -13,16 +13,15 @@ use file_core::ops::{
 };
 use tokio_util::sync::CancellationToken;
 
-struct NoopJournal {
-    revision: std::sync::Mutex<u64>,
-}
+struct NoopJournal;
 
 impl TransferJournal for NoopJournal {
-    fn commit(&self, _mutation: TransferJournalMutation) -> TransferJournalFuture<'_> {
-        Box::pin(async {
-            let mut revision = self.revision.lock().unwrap();
-            *revision += 1;
-            Ok(*revision)
+    fn commit(&self, mutations: Vec<TransferJournalMutation>) -> TransferJournalFuture<'_> {
+        Box::pin(async move {
+            Ok(mutations
+                .iter()
+                .map(|mutation| mutation.expected_revision + 1)
+                .collect())
         })
     }
 }
@@ -75,9 +74,7 @@ async fn main() {
             conflict_strategy: TransferConflictStrategy::Fail,
             verification: file_core::ops::FileOperationVerification::BasicMetadata,
         };
-        let journal = NoopJournal {
-            revision: std::sync::Mutex::new(0),
-        };
+        let journal = NoopJournal;
         let record = TransferJournalRecord {
             task_id: 1,
             key: TransferWorkKey::top_level(run + 1),

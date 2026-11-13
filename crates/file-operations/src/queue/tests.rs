@@ -101,11 +101,18 @@ fn recoverable_task_waits_for_journal_ack_before_starting() {
     assert_eq!(queue.tasks()[0].status_label(), "Preparing");
     assert!(queue.active_subscription().is_some());
 
+    let task_id = queue.tasks()[0].id;
+    queue.update_scan(task_id, 1_200);
+    assert_eq!(queue.tasks()[0].status_label(), "Preparing · 1200 scanned");
+
     queue.update_progress(
-        queue.tasks()[0].id,
+        task_id,
         FileOperationProgressUpdate::Indeterminate,
         Vec::new(),
     );
+    assert_eq!(queue.tasks()[0].status_label(), "In Progress");
+    // 执行开始后迟到的扫描计数不能把状态拉回“准备中”。
+    queue.update_scan(task_id, 1_300);
     assert_eq!(queue.tasks()[0].status_label(), "In Progress");
 }
 
@@ -297,12 +304,12 @@ fn persist_terminal_checkpoint(
     )
     .unwrap();
     store
-        .compare_and_swap_transfer_checkpoint(
+        .apply_transfer_mutations(&[bennu_state::StoredTransferMutation {
             task_id,
-            &bennu_state::StoredTransferWorkKey::top_level(0),
-            0,
-            &checkpoint,
-        )
+            key: bennu_state::StoredTransferWorkKey::top_level(0),
+            expected_revision: 0,
+            change: bennu_state::StoredTransferChange::Checkpoint(checkpoint),
+        }])
         .unwrap();
 }
 

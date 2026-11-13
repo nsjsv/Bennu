@@ -75,14 +75,16 @@ async fn copy_cannot_execute_move_direct_from_corrupted_checkpoint() {
         metadata_loss: Default::default(),
     });
     journal
-        .commit(TransferJournalMutation::InstallManifestAndCheckpoint {
+        .commit(vec![TransferJournalMutation {
             task_id: 1_601,
             key,
             expected_revision: 0,
-            manifest,
-            replacement_manifest: None,
-            checkpoint: corrupted.clone(),
-        })
+            transition: TransferTransition::ManifestAndCheckpoint {
+                manifest,
+                replacement_manifest: None,
+                checkpoint: corrupted.clone(),
+            },
+        }])
         .await
         .unwrap();
 
@@ -126,12 +128,12 @@ async fn semantic_checkpoint_corruption_blocks_without_cleanup_mutation() {
         staging_plan: None,
     });
     journal
-        .commit(TransferJournalMutation::CompareAndSwapCheckpoint {
+        .commit(vec![TransferJournalMutation {
             task_id: 1_600,
             key,
             expected_revision: 0,
-            checkpoint: corrupted.clone(),
-        })
+            transition: TransferTransition::Checkpoint(corrupted.clone()),
+        }])
         .await
         .unwrap();
 

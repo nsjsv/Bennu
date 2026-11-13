@@ -18,21 +18,18 @@ mod rename;
 #[cfg(test)]
 pub(crate) use artifacts::create_owned_artifact;
 pub(crate) use artifacts::{
-    plan_owned_artifact, recover_owned_artifact, remove_empty_owned_artifact,
-    remove_incomplete_empty_artifact, remove_owned_artifact, remove_owned_artifact_if_exists,
+    owner_marker_written, plan_owned_artifact, recover_owned_artifact, remove_empty_owned_artifact,
+    remove_owned_artifact, remove_owned_artifact_if_exists, remove_unclaimed_artifact,
     validate_owned_artifact,
 };
 pub use artifacts::{
     ArtifactOwner, ArtifactToken, OwnedArtifact, OwnedArtifactKind, OwnedArtifactPlan,
 };
-pub(crate) use durability::{sync_parent_blocking, sync_tree_blocking};
+pub(crate) use durability::CommitBarrier;
 pub use executor::{
-    advance_recoverable_transfer, is_direct_move_segment_candidate,
-    persist_recoverable_source_manifest, persist_recoverable_source_manifest_with_controls,
-    prepare_direct_move_intent_segment, run_direct_move_batch_to_durable_renamed,
-    run_recoverable_transfer, run_recoverable_transfer_to_direct_move_intent,
-    settle_failed_recoverable_transfer, DirectMoveBatchRecord, DirectMoveIntentBatchRecord,
-    DirectMoveIntentBoundary, TransferAdvance,
+    advance_recoverable_transfer, durable_direct_move_commit, persist_source_manifests,
+    run_recoverable_segment, run_recoverable_transfer, settle_failed_recoverable_transfers,
+    DurableDirectMoveCommit, TransferAdvance, TransferSegmentEvent,
 };
 pub use fingerprint::ObjectFingerprint;
 pub(crate) use fingerprint::{fingerprint_object, fingerprint_object_with_controls};
@@ -41,7 +38,7 @@ pub use identity::{FileIdentity, FileObjectKind};
 #[cfg(test)]
 pub(crate) use manifest::build_source_manifest;
 pub(crate) use manifest::{
-    build_source_manifest_with_controls, verify_source_manifest,
+    build_counted_source_manifest, build_source_manifest_with_controls, verify_source_manifest,
     verify_source_manifest_with_controls,
 };
 pub use manifest::{SourceManifest, SourceManifestEntry};
@@ -50,13 +47,13 @@ pub use proof::TransferFingerprint;
 pub(crate) use proof_memo::{ProofMemo, SharedProofMemo};
 pub use protocol::{
     BackupCreationTransfer, CommitPayload, CommitTransfer, CommittedTransfer, CompletedTarget,
-    ManifestCheckpointBatchUpdate, MergeChildCompletion, MergeChildOutcome, MergeTransfer,
-    OwnedTreeEntryDeletionIntent, PreparedTransfer, RecoverableTransferOperation,
-    RecoverableTransferOutcome, RecoverableTransferRequest, RenamedDirectMove, RetiredSource,
-    SourceDisposition, SourceRetirementPlan, StagedSourceLocation, StagingTransfer,
-    TransferCheckpoint, TransferCheckpointSwap, TransferExecutionKind, TransferFailureIntent,
-    TransferJournal, TransferJournalError, TransferJournalFuture, TransferJournalMutation,
-    TransferJournalRecord, TransferWorkKey,
+    MergeChildCompletion, MergeChildOutcome, MergeTransfer, OwnedTreeEntryDeletionIntent,
+    PreparedTransfer, RecoverableTransferOperation, RecoverableTransferOutcome,
+    RecoverableTransferRequest, RenamedDirectMove, RetiredSource, SourceDisposition,
+    SourceRetirementPlan, StagedSourceLocation, StagingTransfer, TransferCheckpoint,
+    TransferExecutionKind, TransferFailureIntent, TransferJournal, TransferJournalError,
+    TransferJournalFuture, TransferJournalMutation, TransferJournalRecord, TransferTransition,
+    TransferWorkKey,
 };
 pub(crate) use rename::{rename_noreplace, NoReplaceRenameError};
 

@@ -1,39 +1,27 @@
 use super::commit::verify_prepared_source_with_controls;
-use super::{
-    path_exists, persist_checkpoint, sync_rename_parents, target_parent, wait_until_running,
-};
+use super::{path_exists, target_parent, wait_until_running};
 use crate::ops::metadata_loss::MetadataLossSummary;
+use crate::ops::recoverable_transfer::CommitBarrier;
 use crate::ops::recoverable_transfer::{
     inspect_file_identity, plan_owned_artifact, rename_noreplace, CommittedTransfer,
     NoReplaceRenameError, OwnedArtifactKind, PreparedTransfer, ProofContext,
     RecoverableTransferError, RenamedDirectMove, SourceDisposition, TransferCheckpoint,
-    TransferExecutionKind, TransferFingerprint, TransferJournal, TransferJournalRecord,
+    TransferExecutionKind, TransferFingerprint, TransferJournalRecord, TransferTransition,
 };
 use crate::transfer_conflict::first_available_entry_path;
 use crate::{EntryNameKind, FileTransferOptions, TransferConflictStrategy};
 
-/// Result of the rename-only step of a Basic DirectMove intent.
-pub(super) enum DirectMoveRenameStep {
-    /// The source was atomically renamed to the final target (or recovery
-    /// observed that an earlier run already performed the rename). Parent
-    /// directories have not been synced and no post-rename fact is durable yet.
-    Renamed { prepared: Box<PreparedTransfer> },
-    /// The record left the direct-move path. The carried checkpoint is the
-    /// transition to persist later (EXDEV staging or KeepBoth retarget); it is
-    /// NOT persisted here so a diverging sibling cannot block the rename wave.
-    Diverged(Box<TransferCheckpoint>),
-}
-
-/// Perform the atomic rename for a `DirectMoveIntent` without syncing parents or
-/// persisting a post-rename fact. The intent is already durable before this is
-/// called, so every crash after a rename here recovers through the same source/
-/// target matrix on the next run. Divergence is reported as a pending checkpoint
-/// transition and never persisted inline.
-pub(super) async fn direct_move_rename_only(
+/// Renames the source onto the prepared target. The intent is durable before
+/// this runs, so a crash after the rename recovers through the same
+/// source/target matrix: a target that already identifies the source means an
+/// earlier run renamed it. Leaving the direct path (another filesystem, or a
+/// KeepBoth name taken meanwhile) is a transition like any other.
+pub(super) async fn advance_direct_move_intent(
     record: &TransferJournalRecord,
     transfer_options: &FileTransferOptions,
     prepared: PreparedTransfer,
-) -> Result<DirectMoveRenameStep, RecoverableTransferError> {
+    barrier: &mut CommitBarrier,
+) -> Result<TransferTransition, RecoverableTransferError> {
     let source_exists = path_exists(&record.request.source).await.map_err(|error| {
         RecoverableTransferError::RecoveryRequired {
             diagnostic: error.to_string(),
@@ -64,9 +52,7 @@ pub(super) async fn direct_move_rename_only(
                 ),
             });
         }
-        return Ok(DirectMoveRenameStep::Renamed {
-            prepared: Box::new(prepared),
-        });
+        return renamed_transition(record, prepared, barrier).await;
     }
 
     match (source_exists, target_exists) {
@@ -74,9 +60,7 @@ pub(super) async fn direct_move_rename_only(
             verify_prepared_source_with_controls(record, &prepared, &transfer_options.controls)
                 .await?;
             match rename_noreplace(&record.request.source, &prepared.resolved_target) {
-                Ok(()) => Ok(DirectMoveRenameStep::Renamed {
-                    prepared: Box::new(prepared),
-                }),
+                Ok(()) => renamed_transition(record, prepared, barrier).await,
                 Err(NoReplaceRenameError::CrossDevice) => {
                     let mut prepared = prepared;
                     prepared.execution = TransferExecutionKind::MoveToStage;
@@ -85,17 +69,17 @@ pub(super) async fn direct_move_rename_only(
                         OwnedArtifactKind::TargetStaging,
                         record.owner(0),
                     )?);
-                    Ok(DirectMoveRenameStep::Diverged(Box::new(
+                    Ok(TransferTransition::Checkpoint(
                         TransferCheckpoint::StageCreationIntent(prepared),
-                    )))
+                    ))
                 }
                 Err(NoReplaceRenameError::TargetExists)
                     if record.request.conflict_strategy == TransferConflictStrategy::KeepBoth =>
                 {
                     let prepared = select_keep_both_candidate(record, prepared).await?;
-                    Ok(DirectMoveRenameStep::Diverged(Box::new(
+                    Ok(TransferTransition::Checkpoint(
                         TransferCheckpoint::DirectMoveIntent(prepared),
-                    )))
+                    ))
                 }
                 Err(error) => {
                     Err(error
@@ -107,9 +91,9 @@ pub(super) async fn direct_move_rename_only(
             wait_until_running(transfer_options).await?;
             if record.request.conflict_strategy == TransferConflictStrategy::KeepBoth {
                 let prepared = select_keep_both_candidate(record, prepared).await?;
-                Ok(DirectMoveRenameStep::Diverged(Box::new(
+                Ok(TransferTransition::Checkpoint(
                     TransferCheckpoint::DirectMoveIntent(prepared),
-                )))
+                ))
             } else {
                 Err(RecoverableTransferError::TargetConflict {
                     path: prepared.resolved_target,
@@ -131,58 +115,37 @@ pub(super) async fn direct_move_rename_only(
     }
 }
 
-/// Advance a durable DirectMoveIntent through rename, parent sync and the
-/// post-rename durable checkpoint. UI facts are emitted by the caller only
-/// after that checkpoint has succeeded.
-pub(super) async fn advance_direct_move_intent<J: TransferJournal>(
-    record: &mut TransferJournalRecord,
-    journal: &J,
-    transfer_options: &FileTransferOptions,
+async fn renamed_transition(
+    record: &TransferJournalRecord,
     prepared: PreparedTransfer,
-) -> Result<(), RecoverableTransferError> {
-    match direct_move_rename_only(record, transfer_options, prepared).await? {
-        DirectMoveRenameStep::Renamed { prepared } => {
-            let prepared = *prepared;
-            sync_rename_parents(&record.request.source, &prepared.resolved_target)
-                .await
-                .map_err(|error| RecoverableTransferError::RecoveryRequired {
-                    diagnostic: error.to_string(),
-                })?;
-            let target_identity = inspect_file_identity(&prepared.resolved_target)
-                .await
-                .map_err(|error| RecoverableTransferError::RecoveryRequired {
-                    diagnostic: error.to_string(),
-                })?;
-            if !renamed_target_matches_source(&target_identity, &prepared.source_identity) {
-                return Err(RecoverableTransferError::RecoveryBlocked {
-                    diagnostic: format!(
-                        "direct move target does not identify the prepared source: {:?}",
-                        prepared.resolved_target
-                    ),
-                });
-            }
-            persist_checkpoint(
-                record,
-                journal,
-                TransferCheckpoint::DirectMoveRenamed(RenamedDirectMove {
-                    prepared,
-                    target_identity,
-                }),
-            )
-            .await
-        }
-        DirectMoveRenameStep::Diverged(checkpoint) => {
-            persist_checkpoint(record, journal, *checkpoint).await
-        }
+    barrier: &mut CommitBarrier,
+) -> Result<TransferTransition, RecoverableTransferError> {
+    barrier.require_rename(&record.request.source, &prepared.resolved_target);
+    let target_identity = inspect_file_identity(&prepared.resolved_target)
+        .await
+        .map_err(|error| RecoverableTransferError::RecoveryRequired {
+            diagnostic: error.to_string(),
+        })?;
+    if !renamed_target_matches_source(&target_identity, &prepared.source_identity) {
+        return Err(RecoverableTransferError::RecoveryBlocked {
+            diagnostic: format!(
+                "direct move target does not identify the prepared source: {:?}",
+                prepared.resolved_target
+            ),
+        });
     }
+    Ok(TransferTransition::Checkpoint(
+        TransferCheckpoint::DirectMoveRenamed(RenamedDirectMove {
+            prepared,
+            target_identity,
+        }),
+    ))
 }
 
-pub(super) async fn advance_direct_move_renamed<J: TransferJournal>(
-    record: &mut TransferJournalRecord,
-    journal: &J,
+pub(super) async fn advance_direct_move_renamed(
     renamed: RenamedDirectMove,
     proof: &ProofContext,
-) -> Result<(), RecoverableTransferError> {
+) -> Result<TransferTransition, RecoverableTransferError> {
     let identity_before = inspect_file_identity(&renamed.prepared.resolved_target).await?;
     if identity_before != renamed.target_identity {
         return Err(RecoverableTransferError::TargetConflict {
@@ -200,9 +163,7 @@ pub(super) async fn advance_direct_move_renamed<J: TransferJournal>(
             path: renamed.prepared.resolved_target,
         });
     }
-    persist_checkpoint(
-        record,
-        journal,
+    Ok(TransferTransition::Checkpoint(
         TransferCheckpoint::TargetCommitted(CommittedTransfer {
             final_target: renamed.prepared.resolved_target,
             target_identity: identity_after,
@@ -216,8 +177,7 @@ pub(super) async fn advance_direct_move_renamed<J: TransferJournal>(
             // 同盘 rename 不改动元数据,没有可丢的。
             metadata_loss: MetadataLossSummary::default(),
         }),
-    )
-    .await
+    ))
 }
 
 async fn select_keep_both_candidate(

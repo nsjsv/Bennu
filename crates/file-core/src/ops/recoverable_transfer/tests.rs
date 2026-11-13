@@ -92,130 +92,6 @@ async fn source_manifest_detects_content_version_change() {
     ));
 }
 
-#[tokio::test]
-async fn owned_artifact_requires_matching_marker_and_identity() {
-    let directory = tempdir().unwrap();
-    let plan =
-        plan_owned_artifact(directory.path(), OwnedArtifactKind::TargetStaging, owner()).unwrap();
-    let artifact = create_owned_artifact(plan).await.unwrap();
-    fs::write(artifact.plan.payload_path(), b"partial")
-        .await
-        .unwrap();
-
-    validate_owned_artifact(&artifact).await.unwrap();
-    remove_owned_artifact(&artifact).await.unwrap();
-    assert!(fs::symlink_metadata(&artifact.plan.root).await.is_err());
-}
-
-#[tokio::test]
-async fn owned_staging_cleanup_refuses_backup_entry() {
-    let directory = tempdir().unwrap();
-    let plan =
-        plan_owned_artifact(directory.path(), OwnedArtifactKind::TargetStaging, owner()).unwrap();
-    let artifact = create_owned_artifact(plan.clone()).await.unwrap();
-    fs::create_dir(plan.payload_path()).await.unwrap();
-    fs::write(plan.payload_path().join("partial"), b"source")
-        .await
-        .unwrap();
-    fs::write(plan.backup_path(), b"old-target").await.unwrap();
-
-    assert!(matches!(
-        remove_owned_artifact(&artifact).await,
-        Err(RecoverableTransferError::ArtifactOwnership { .. })
-    ));
-    assert!(fs::symlink_metadata(&plan.root).await.is_ok());
-    assert_eq!(fs::read(plan.backup_path()).await.unwrap(), b"old-target");
-    assert_eq!(
-        fs::read(plan.payload_path().join("partial")).await.unwrap(),
-        b"source"
-    );
-}
-
-#[tokio::test]
-async fn owned_cleanup_finishes_empty_root_after_owner_removal() {
-    let directory = tempdir().unwrap();
-    let plan =
-        plan_owned_artifact(directory.path(), OwnedArtifactKind::TargetStaging, owner()).unwrap();
-    let artifact = create_owned_artifact(plan.clone()).await.unwrap();
-    fs::remove_file(plan.owner_path()).await.unwrap();
-
-    remove_owned_artifact_if_exists(&artifact).await.unwrap();
-
-    assert!(fs::symlink_metadata(&plan.root).await.is_err());
-}
-
-#[tokio::test]
-async fn tampered_owner_marker_blocks_recursive_cleanup() {
-    let directory = tempdir().unwrap();
-    let plan =
-        plan_owned_artifact(directory.path(), OwnedArtifactKind::TargetStaging, owner()).unwrap();
-    let artifact = create_owned_artifact(plan).await.unwrap();
-    let payload = artifact.plan.payload_path();
-    fs::write(&payload, b"must-stay").await.unwrap();
-    fs::write(artifact.plan.owner_path(), b"not-the-owner")
-        .await
-        .unwrap();
-
-    assert!(matches!(
-        remove_owned_artifact(&artifact).await,
-        Err(RecoverableTransferError::ArtifactOwnership { .. })
-    ));
-    assert_eq!(fs::read(&payload).await.unwrap(), b"must-stay");
-}
-
-#[cfg(unix)]
-#[tokio::test]
-async fn symbolic_link_owner_marker_cannot_authorize_cleanup() {
-    let directory = tempdir().unwrap();
-    let plan =
-        plan_owned_artifact(directory.path(), OwnedArtifactKind::TargetStaging, owner()).unwrap();
-    let artifact = create_owned_artifact(plan).await.unwrap();
-    let owner_path = artifact.plan.owner_path();
-    let marker = fs::read(&owner_path).await.unwrap();
-    let external_marker = directory.path().join("external-owner");
-    fs::write(&external_marker, marker).await.unwrap();
-    fs::remove_file(&owner_path).await.unwrap();
-    std::os::unix::fs::symlink(&external_marker, &owner_path).unwrap();
-    let payload = artifact.plan.payload_path();
-    fs::write(&payload, b"must-stay").await.unwrap();
-
-    assert!(remove_owned_artifact(&artifact).await.is_err());
-    assert_eq!(fs::read(&payload).await.unwrap(), b"must-stay");
-}
-
-#[tokio::test]
-async fn markerless_artifact_cleanup_only_removes_empty_directory() {
-    let directory = tempdir().unwrap();
-    let empty_plan = OwnedArtifactPlan {
-        kind: OwnedArtifactKind::TargetStaging,
-        root: directory.path().join("empty"),
-        token: ArtifactToken::from_bytes([1; 16]),
-        owner: owner(),
-    };
-    fs::create_dir(&empty_plan.root).await.unwrap();
-    remove_incomplete_empty_artifact(&empty_plan).await.unwrap();
-    assert!(fs::symlink_metadata(&empty_plan.root).await.is_err());
-
-    let occupied_plan = OwnedArtifactPlan {
-        kind: OwnedArtifactKind::TargetStaging,
-        root: directory.path().join("occupied"),
-        token: ArtifactToken::from_bytes([2; 16]),
-        owner: owner(),
-    };
-    fs::create_dir(&occupied_plan.root).await.unwrap();
-    fs::write(occupied_plan.root.join("unknown"), b"keep")
-        .await
-        .unwrap();
-    assert!(matches!(
-        remove_incomplete_empty_artifact(&occupied_plan).await,
-        Err(RecoverableTransferError::ArtifactOwnership { .. })
-    ));
-    assert_eq!(
-        fs::read(occupied_plan.root.join("unknown")).await.unwrap(),
-        b"keep"
-    );
-}
-
 #[test]
 fn no_replace_rename_never_overwrites_existing_target() {
     let directory = tempdir().unwrap();
@@ -245,8 +121,8 @@ fn no_replace_rename_moves_to_absent_target() {
     assert_eq!(std::fs::read(&target).unwrap(), b"source");
 }
 
-#[test]
-fn durability_sync_accepts_files_directories_and_links() {
+#[tokio::test]
+async fn commit_barrier_flushes_registered_and_removed_locations() {
     let directory = tempdir().unwrap();
     let root = directory.path().join("tree");
     std::fs::create_dir(&root).unwrap();
@@ -255,8 +131,10 @@ fn durability_sync_accepts_files_directories_and_links() {
     #[cfg(unix)]
     std::os::unix::fs::symlink("nested/file", root.join("link")).unwrap();
 
-    sync_tree_blocking(&root).unwrap();
-    sync_parent_blocking(&root).unwrap();
+    let mut barrier = CommitBarrier::default();
+    barrier.require_parent_of(&root.join("nested/file"));
+    barrier.require_rename(&root.join("link"), &root.join("gone/child"));
+    barrier.flush().await.unwrap();
 }
 
 #[cfg(unix)]
@@ -281,26 +159,6 @@ async fn identity_and_manifest_preserve_non_utf8_paths() {
         inspect_file_identity(&child).await.unwrap().object_kind,
         FileObjectKind::RegularFile
     );
-}
-
-#[tokio::test]
-async fn unexpected_artifact_entry_blocks_cleanup() {
-    let directory = tempdir().unwrap();
-    let plan = plan_owned_artifact(
-        directory.path(),
-        OwnedArtifactKind::SourceRetirement,
-        owner(),
-    )
-    .unwrap();
-    let artifact = create_owned_artifact(plan).await.unwrap();
-    fs::write(artifact.plan.root.join("untracked"), b"keep")
-        .await
-        .unwrap();
-
-    assert!(matches!(
-        validate_owned_artifact(&artifact).await,
-        Err(RecoverableTransferError::ArtifactOwnership { .. })
-    ));
 }
 
 #[tokio::test]
@@ -380,12 +238,14 @@ fn recovered_name_keeps_original_name_bytes() {
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
-use crate::{FileOperationVerification, FileTransferOptions, TransferConflictStrategy};
+use crate::{
+    FileOperationControls, FileOperationVerification, FileTransferOptions, TransferConflictStrategy,
+};
 use tokio_util::sync::CancellationToken;
 
 use super::executor::{
-    advance_recoverable_transfer, persist_recoverable_source_manifest, run_recoverable_transfer,
-    run_recoverable_transfer_to_direct_move_intent, DirectMoveIntentBoundary, TransferAdvance,
+    advance_recoverable_transfer, persist_source_manifests, run_recoverable_segment,
+    run_recoverable_transfer, TransferAdvance, TransferSegmentEvent,
 };
 
 struct MemoryJournalState {
@@ -442,7 +302,7 @@ impl MemoryJournal {
 }
 
 impl TransferJournal for MemoryJournal {
-    fn commit(&self, mutation: TransferJournalMutation) -> TransferJournalFuture<'_> {
+    fn commit(&self, mutations: Vec<TransferJournalMutation>) -> TransferJournalFuture<'_> {
         Box::pin(async move {
             let attempt = self.attempts.fetch_add(1, Ordering::SeqCst) + 1;
             if *self.fail_on_attempt.lock().unwrap() == Some(attempt) {
@@ -452,103 +312,50 @@ impl TransferJournal for MemoryJournal {
             }
 
             let mut state = self.state.lock().unwrap();
-            match mutation {
-                TransferJournalMutation::InstallManifestAndCheckpoint {
-                    task_id,
-                    key,
-                    expected_revision,
-                    manifest,
-                    replacement_manifest,
-                    checkpoint,
-                } => {
-                    if task_id != self.task_id
-                        || key != self.key
-                        || expected_revision != state.revision
-                    {
-                        return Err(TransferJournalError::StaleRevision);
+            let mut revisions = Vec::with_capacity(mutations.len());
+            for mutation in mutations {
+                if mutation.task_id != self.task_id
+                    || mutation.key != self.key
+                    || mutation.expected_revision != state.revision
+                {
+                    return Err(TransferJournalError::StaleRevision);
+                }
+                match mutation.transition {
+                    TransferTransition::ManifestAndCheckpoint {
+                        manifest,
+                        replacement_manifest,
+                        checkpoint,
+                    } => {
+                        state.manifest = Some(manifest);
+                        state.replacement_manifest = replacement_manifest;
+                        state.checkpoint = checkpoint;
                     }
-                    state.manifest = Some(manifest);
-                    state.replacement_manifest = replacement_manifest;
-                    state.checkpoint = checkpoint;
-                }
-                TransferJournalMutation::CompareAndSwapCheckpoint {
-                    task_id,
-                    key,
-                    expected_revision,
-                    checkpoint,
-                }
-                | TransferJournalMutation::PersistMergeCompletionAndCheckpoint {
-                    task_id,
-                    key,
-                    expected_revision,
-                    checkpoint,
-                    ..
-                } => {
-                    if task_id != self.task_id
-                        || key != self.key
-                        || expected_revision != state.revision
-                    {
-                        return Err(TransferJournalError::StaleRevision);
+                    TransferTransition::Checkpoint(checkpoint)
+                    | TransferTransition::MergeCompletionAndCheckpoint { checkpoint, .. } => {
+                        state.checkpoint = checkpoint;
                     }
-                    state.checkpoint = checkpoint;
                 }
-                TransferJournalMutation::InstallManifestAndCheckpointBatch { .. } => {
-                    return Err(TransferJournalError::Storage(
-                        "memory journal does not support batch manifest installs".to_owned(),
-                    ));
-                }
-            }
-            state.revision += 1;
-            Ok(state.revision)
-        })
-    }
-
-    fn commit_checkpoint_batch<'a>(
-        &'a self,
-        swaps: Vec<TransferCheckpointSwap>,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Vec<u64>, TransferJournalError>> + Send + 'a>,
-    > {
-        Box::pin(async move {
-            let mut revisions = Vec::with_capacity(swaps.len());
-            for swap in swaps {
-                revisions.push(
-                    self.commit(TransferJournalMutation::CompareAndSwapCheckpoint {
-                        task_id: swap.task_id,
-                        key: swap.key,
-                        expected_revision: swap.expected_revision,
-                        checkpoint: swap.checkpoint,
-                    })
-                    .await?,
-                );
+                state.revision += 1;
+                revisions.push(state.revision);
             }
             Ok(revisions)
         })
     }
+}
 
-    fn commit_manifest_batch<'a>(
-        &'a self,
-        updates: Vec<ManifestCheckpointBatchUpdate>,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Vec<u64>, TransferJournalError>> + Send + 'a>,
-    > {
-        Box::pin(async move {
-            let mut revisions = Vec::with_capacity(updates.len());
-            for update in updates {
-                revisions.push(
-                    self.commit(TransferJournalMutation::InstallManifestAndCheckpoint {
-                        task_id: update.task_id,
-                        key: update.key,
-                        expected_revision: update.expected_revision,
-                        manifest: update.manifest,
-                        replacement_manifest: update.replacement_manifest,
-                        checkpoint: update.checkpoint,
-                    })
-                    .await?,
-                );
-            }
-            Ok(revisions)
-        })
+/// 准备阶段装清单的单条记录版本：建不出清单时把那条错误交回来。
+async fn persist_recoverable_source_manifest(
+    record: &mut TransferJournalRecord,
+    journal: &impl TransferJournal,
+) -> Result<(), RecoverableTransferError> {
+    let controls = FileOperationControls::running(CancellationToken::new());
+    let scanned = AtomicUsize::new(0);
+    let mut build_errors =
+        persist_source_manifests(std::slice::from_mut(record), journal, &controls, &scanned)
+            .await?;
+    match build_errors.pop().flatten() {
+        Some(error) => Err(error),
+        None => Ok(()),
     }
 }
 
@@ -820,7 +627,7 @@ async fn basic_copy_and_same_filesystem_move_build_complete_post_side_effect_pro
     }
 }
 
-mod batch_cases;
+mod artifact_cases;
 mod conflict_cases;
 mod direct_move_cases;
 mod invalid_checkpoint_cases;
@@ -830,4 +637,5 @@ mod metadata_loss_cases;
 mod payload_integrity_cases;
 mod recovery_cases;
 mod replacement_backup_cases;
+mod segment_cases;
 mod source_retirement_cases;

@@ -39,6 +39,13 @@ fn file_operation_event_message(event: FileOperationEvent) -> Message {
             update,
             entries,
         } => Message::FileOperationProgressed(task_id, update, entries),
+        FileOperationEvent::Scanned {
+            task_id,
+            scanned_items,
+        } => Message::FileOperationScanned {
+            task_id,
+            scanned_items,
+        },
         FileOperationEvent::MovesRenamed { task_id, moves } => {
             Message::FileOperationMovesRenamed { task_id, moves }
         }

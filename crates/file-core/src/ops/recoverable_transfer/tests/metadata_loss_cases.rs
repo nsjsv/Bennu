@@ -137,12 +137,12 @@ async fn resumed_transfer_still_reports_metadata_loss_recorded_before_restart() 
         let recorded = loss(&["/dst/target.txt"]);
         *checkpoint_loss(&mut checkpoint) = recorded.clone();
         journal
-            .commit(TransferJournalMutation::CompareAndSwapCheckpoint {
+            .commit(vec![TransferJournalMutation {
                 task_id: record.task_id,
                 key: record.key.clone(),
                 expected_revision: record.revision,
-                checkpoint,
-            })
+                transition: TransferTransition::Checkpoint(checkpoint),
+            }])
             .await
             .unwrap();
 

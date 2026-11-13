@@ -4,8 +4,7 @@ use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::{
-    inspect_file_identity, sync_parent_blocking, FileIdentity, FileObjectKind,
-    RecoverableTransferError,
+    inspect_file_identity, CommitBarrier, FileIdentity, FileObjectKind, RecoverableTransferError,
 };
 
 const OWNER_FILE_NAME: &str = "owner";
@@ -95,7 +94,7 @@ impl OwnedArtifactPlan {
         self.root.join(BACKUP_NAME)
     }
 
-    fn marker_bytes(&self) -> Vec<u8> {
+    pub(super) fn marker_bytes(&self) -> Vec<u8> {
         format!(
             "{OWNER_PROTOCOL}\nkind={}\ntask={}\ntransfer={}\nwork={}\ntoken={}\n",
             self.kind.marker_value(),
@@ -128,12 +127,18 @@ pub fn plan_owned_artifact(
     })
 }
 
+/// The marker is not flushed on its own: it reaches the disk with the rest of
+/// the batch, before any checkpoint claims the artifact. Until then a crash can
+/// leave it empty or cut short, which `owner_marker_written` treats like a
+/// missing marker.
 pub async fn create_owned_artifact(
     plan: OwnedArtifactPlan,
+    barrier: &mut CommitBarrier,
 ) -> Result<OwnedArtifact, RecoverableTransferError> {
     fs::create_dir(&plan.root).await.map_err(|source| {
         RecoverableTransferError::file_system("create transfer artifact", &plan.root, source)
     })?;
+    barrier.require_parent_of(&plan.root);
     #[cfg(unix)]
     if let Err(source) = set_owner_only_permissions(&plan.root).await {
         let _ = fs::remove_dir(&plan.root).await;
@@ -152,7 +157,7 @@ pub async fn create_owned_artifact(
             .open(&owner_path)
             .await?;
         owner_file.write_all(&plan.marker_bytes()).await?;
-        owner_file.sync_all().await
+        owner_file.flush().await
     }
     .await;
     if let Err(source) = marker_outcome {
@@ -164,8 +169,6 @@ pub async fn create_owned_artifact(
             source,
         ));
     }
-    sync_directory_in_place(&plan.root).await?;
-    sync_parent_in_place(&plan.root).await?;
 
     Ok(OwnedArtifact {
         plan,
@@ -175,28 +178,21 @@ pub async fn create_owned_artifact(
 
 pub async fn recover_owned_artifact(
     plan: OwnedArtifactPlan,
+    barrier: &mut CommitBarrier,
 ) -> Result<OwnedArtifact, RecoverableTransferError> {
     match fs::symlink_metadata(&plan.root).await {
         Ok(metadata) if metadata.file_type().is_dir() => {
-            match fs::symlink_metadata(plan.owner_path()).await {
-                Ok(_) => {
-                    let root_identity = inspect_file_identity(&plan.root).await?;
-                    let artifact = OwnedArtifact {
-                        plan,
-                        root_identity,
-                    };
-                    validate_owned_artifact(&artifact).await?;
-                    Ok(artifact)
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    remove_incomplete_empty_artifact(&plan).await?;
-                    create_owned_artifact(plan).await
-                }
-                Err(source) => Err(RecoverableTransferError::file_system(
-                    "read transfer owner marker metadata",
-                    &plan.owner_path(),
-                    source,
-                )),
+            if owner_marker_written(&plan).await? {
+                let root_identity = inspect_file_identity(&plan.root).await?;
+                let artifact = OwnedArtifact {
+                    plan,
+                    root_identity,
+                };
+                validate_owned_artifact(&artifact).await?;
+                Ok(artifact)
+            } else {
+                remove_unclaimed_artifact(&plan, barrier).await?;
+                create_owned_artifact(plan, barrier).await
             }
         }
         Ok(_) => Err(RecoverableTransferError::artifact_ownership(
@@ -204,7 +200,7 @@ pub async fn recover_owned_artifact(
             "artifact path is not a directory",
         )),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            create_owned_artifact(plan).await
+            create_owned_artifact(plan, barrier).await
         }
         Err(source) => Err(RecoverableTransferError::file_system(
             "read transfer artifact metadata",
@@ -304,6 +300,7 @@ async fn read_owner_marker(
 
 pub async fn remove_owned_artifact(
     artifact: &OwnedArtifact,
+    barrier: &mut CommitBarrier,
 ) -> Result<(), RecoverableTransferError> {
     validate_owned_artifact(artifact).await?;
     let backup_path = artifact.plan.backup_path();
@@ -325,11 +322,12 @@ pub async fn remove_owned_artifact(
     }
     remove_owned_entry_if_exists(&artifact.plan.payload_path()).await?;
     validate_owned_artifact(artifact).await?;
-    remove_owned_artifact_root(artifact).await
+    remove_owned_artifact_root(artifact, barrier).await
 }
 
 pub async fn remove_empty_owned_artifact(
     artifact: &OwnedArtifact,
+    barrier: &mut CommitBarrier,
 ) -> Result<(), RecoverableTransferError> {
     validate_owned_artifact(artifact).await?;
     for path in [artifact.plan.payload_path(), artifact.plan.backup_path()] {
@@ -350,17 +348,20 @@ pub async fn remove_empty_owned_artifact(
             }
         }
     }
-    remove_owned_artifact_root(artifact).await
+    remove_owned_artifact_root(artifact, barrier).await
 }
 
+/// rmdir only succeeds once the marker is gone, so a crash can leave a root
+/// without its marker (handled as unclaimed) but never a marker without its
+/// root: no flush is needed between the two.
 async fn remove_owned_artifact_root(
     artifact: &OwnedArtifact,
+    barrier: &mut CommitBarrier,
 ) -> Result<(), RecoverableTransferError> {
     let owner_path = artifact.plan.owner_path();
     fs::remove_file(&owner_path).await.map_err(|source| {
         RecoverableTransferError::file_system("remove transfer owner marker", &owner_path, source)
     })?;
-    sync_directory_in_place(&artifact.plan.root).await?;
     fs::remove_dir(&artifact.plan.root)
         .await
         .map_err(|source| {
@@ -370,7 +371,8 @@ async fn remove_owned_artifact_root(
                 source,
             )
         })?;
-    sync_parent_in_place(&artifact.plan.root).await
+    barrier.require_parent_of(&artifact.plan.root);
+    Ok(())
 }
 
 async fn remove_owned_entry_if_exists(path: &Path) -> Result<(), RecoverableTransferError> {
@@ -397,17 +399,15 @@ async fn remove_owned_entry_if_exists(path: &Path) -> Result<(), RecoverableTran
 
 pub async fn remove_owned_artifact_if_exists(
     artifact: &OwnedArtifact,
+    barrier: &mut CommitBarrier,
 ) -> Result<(), RecoverableTransferError> {
     match fs::symlink_metadata(&artifact.plan.root).await {
         Ok(metadata)
-            if metadata.file_type().is_dir()
-                && fs::symlink_metadata(artifact.plan.owner_path())
-                    .await
-                    .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound) =>
+            if metadata.file_type().is_dir() && !owner_marker_written(&artifact.plan).await? =>
         {
-            remove_incomplete_empty_artifact(&artifact.plan).await
+            remove_unclaimed_artifact(&artifact.plan, barrier).await
         }
-        Ok(_) => remove_owned_artifact(artifact).await,
+        Ok(_) => remove_owned_artifact(artifact, barrier).await,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(source) => Err(RecoverableTransferError::file_system(
             "read transfer artifact metadata",
@@ -417,8 +417,33 @@ pub async fn remove_owned_artifact_if_exists(
     }
 }
 
-pub async fn remove_incomplete_empty_artifact(
+/// Whether the owner marker reached its full length. A missing marker, or one
+/// cut short by a crash before the batch flush, belongs to an artifact no
+/// checkpoint has claimed yet. A full-length marker is checked for content by
+/// `validate_owned_artifact`.
+pub(crate) async fn owner_marker_written(
     plan: &OwnedArtifactPlan,
+) -> Result<bool, RecoverableTransferError> {
+    let owner_path = plan.owner_path();
+    match fs::symlink_metadata(&owner_path).await {
+        Ok(metadata) => {
+            Ok(!metadata.is_file() || metadata.len() >= plan.marker_bytes().len() as u64)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(source) => Err(RecoverableTransferError::file_system(
+            "read transfer owner marker metadata",
+            &owner_path,
+            source,
+        )),
+    }
+}
+
+/// Removes an artifact root whose creation never finished: it may hold nothing
+/// but an owner marker that is a cut-short prefix of the expected one. Anything
+/// else in it means the directory is not ours to delete.
+pub async fn remove_unclaimed_artifact(
+    plan: &OwnedArtifactPlan,
+    barrier: &mut CommitBarrier,
 ) -> Result<(), RecoverableTransferError> {
     let metadata = match fs::symlink_metadata(&plan.root).await {
         Ok(metadata) => metadata,
@@ -444,22 +469,35 @@ pub async fn remove_incomplete_empty_artifact(
             source,
         )
     })?;
-    if entries
-        .next_entry()
-        .await
-        .map_err(|source| {
-            RecoverableTransferError::file_system(
-                "read incomplete transfer artifact entry",
-                &plan.root,
-                source,
-            )
-        })?
-        .is_some()
-    {
-        return Err(RecoverableTransferError::artifact_ownership(
+    let expected_marker = plan.marker_bytes();
+    let mut partial_marker = None;
+    while let Some(entry) = entries.next_entry().await.map_err(|source| {
+        RecoverableTransferError::file_system(
+            "read incomplete transfer artifact entry",
             &plan.root,
-            "incomplete artifact is not empty and has no valid owner marker",
-        ));
+            source,
+        )
+    })? {
+        let path = entry.path();
+        let is_partial_marker = entry.file_name() == OWNER_FILE_NAME
+            && fs::symlink_metadata(&path)
+                .await
+                .is_ok_and(|metadata| metadata.is_file())
+            && fs::read(&path).await.is_ok_and(|bytes| {
+                bytes.len() < expected_marker.len() && expected_marker.starts_with(&bytes)
+            });
+        if !is_partial_marker {
+            return Err(RecoverableTransferError::artifact_ownership(
+                &plan.root,
+                "incomplete artifact is not empty and has no valid owner marker",
+            ));
+        }
+        partial_marker = Some(path);
+    }
+    if let Some(marker) = partial_marker {
+        fs::remove_file(&marker).await.map_err(|source| {
+            RecoverableTransferError::file_system("remove partial owner marker", &marker, source)
+        })?;
     }
     fs::remove_dir(&plan.root).await.map_err(|source| {
         RecoverableTransferError::file_system(
@@ -468,39 +506,6 @@ pub async fn remove_incomplete_empty_artifact(
             source,
         )
     })?;
-    sync_parent_in_place(&plan.root).await
-}
-
-async fn sync_directory_in_place(path: &Path) -> Result<(), RecoverableTransferError> {
-    let work_path = path.to_path_buf();
-    let error_path = work_path.clone();
-    tokio::task::spawn_blocking(move || {
-        std::fs::File::open(&work_path)
-            .and_then(|directory| directory.sync_all())
-            .map_err(|source| {
-                RecoverableTransferError::file_system("sync directory", &work_path, source)
-            })
-    })
-    .await
-    .map_err(|join_error| {
-        RecoverableTransferError::file_system(
-            "join directory sync task for",
-            &error_path,
-            std::io::Error::other(join_error),
-        )
-    })?
-}
-
-async fn sync_parent_in_place(path: &Path) -> Result<(), RecoverableTransferError> {
-    let work_path = path.to_path_buf();
-    let error_path = work_path.clone();
-    tokio::task::spawn_blocking(move || sync_parent_blocking(&work_path))
-        .await
-        .map_err(|join_error| {
-            RecoverableTransferError::file_system(
-                "join parent sync task for",
-                &error_path,
-                std::io::Error::other(join_error),
-            )
-        })?
+    barrier.require_parent_of(&plan.root);
+    Ok(())
 }

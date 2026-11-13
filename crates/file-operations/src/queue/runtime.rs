@@ -37,7 +37,8 @@ impl FileOperationQueue {
         {
             let task = &mut self.tasks[position];
             task.status = FileOperationStatus::Running;
-            task.execution_phase = Some(FileOperationExecutionPhase::Preparing);
+            task.execution_phase =
+                Some(FileOperationExecutionPhase::Preparing { scanned_items: 0 });
             task.progress = FileOperationProgress::pending();
             task.completion_warning = None;
             task.error = None;
@@ -128,7 +129,7 @@ impl FileOperationQueue {
                 task_status,
                 FileOperationStatus::Paused | FileOperationStatus::Canceling
             )
-            .then_some(FileOperationExecutionPhase::Preparing),
+            .then_some(FileOperationExecutionPhase::Preparing { scanned_items: 0 }),
             post_insert_disposition: PostInsertDisposition::Continue,
             terminal_persistence_pending: false,
             accepted_direct_move_revisions: HashMap::new(),

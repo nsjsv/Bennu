@@ -10,23 +10,22 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use file_core::ops::{
-    persist_recoverable_source_manifest, run_recoverable_transfer, FileTransferOptions,
+    persist_source_manifests, run_recoverable_transfer, FileTransferOptions,
     RecoverableTransferOperation, RecoverableTransferOutcome, RecoverableTransferRequest,
     TransferConflictStrategy, TransferJournal, TransferJournalFuture, TransferJournalMutation,
     TransferJournalRecord, TransferWorkKey,
 };
 use tokio_util::sync::CancellationToken;
 
-struct NoopJournal {
-    revision: std::sync::Mutex<u64>,
-}
+struct NoopJournal;
 
 impl TransferJournal for NoopJournal {
-    fn commit(&self, _mutation: TransferJournalMutation) -> TransferJournalFuture<'_> {
-        Box::pin(async {
-            let mut revision = self.revision.lock().unwrap();
-            *revision += 1;
-            Ok(*revision)
+    fn commit(&self, mutations: Vec<TransferJournalMutation>) -> TransferJournalFuture<'_> {
+        Box::pin(async move {
+            Ok(mutations
+                .iter()
+                .map(|mutation| mutation.expected_revision + 1)
+                .collect())
         })
     }
 }
@@ -72,12 +71,16 @@ async fn main() {
             manifest: None,
             replacement_manifest: None,
         };
-        let journal = NoopJournal {
-            revision: std::sync::Mutex::new(0),
-        };
-        persist_recoverable_source_manifest(&mut record, &journal)
-            .await
-            .expect("manifest 装订失败");
+        let journal = NoopJournal;
+        let controls = file_core::ops::FileOperationControls::running(fresh_cancel_token());
+        persist_source_manifests(
+            std::slice::from_mut(&mut record),
+            &journal,
+            &controls,
+            &std::sync::atomic::AtomicUsize::new(0),
+        )
+        .await
+        .expect("manifest 装订失败");
 
         let start = Instant::now();
         let outcome: RecoverableTransferOutcome = run_recoverable_transfer(

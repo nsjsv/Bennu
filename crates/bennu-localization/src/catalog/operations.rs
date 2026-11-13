@@ -13,6 +13,7 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Canceled", "已取消"),
     ("In Progress", "进行中"),
     ("Preparing", "准备中"),
+    ("Preparing · %1 scanned", "准备中 · 已扫描 %1 项"),
     // 任务队列
     ("Tasks", "任务"),
     ("%1 tasks", "%1 个任务"),

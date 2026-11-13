@@ -130,6 +130,14 @@ impl FileBrowser {
                 }
                 Task::none()
             }
+            Message::FileOperationScanned {
+                task_id,
+                scanned_items,
+            } => {
+                self.operation_queue.note_driver_signal(task_id);
+                self.operation_queue.update_scan(task_id, scanned_items);
+                Task::none()
+            }
             Message::FileOperationDirectMovesCommitted { task_id, commits } => {
                 self.operation_queue.note_driver_signal(task_id);
                 self.accept_file_operation_direct_moves_committed(task_id, commits)

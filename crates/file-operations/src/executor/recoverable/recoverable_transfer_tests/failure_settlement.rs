@@ -2,9 +2,10 @@ use super::*;
 use std::os::unix::fs::PermissionsExt;
 
 /// 普通失败(非取消)也必须把恢复日志关账到终态,队列才能写入失败状态。
-/// 回归场景:首条传输的源目录含无权限子目录,准备阶段扫描清单即失败;
-/// 修复前日志行停留在 awaiting_manifest,finalize 拒绝写终态,任务在数据
-/// 库里永远悬在中间状态、每次启动被恢复重跑并弹出存储错误。
+/// 回归场景:首条传输的源目录含无权限子目录,扫描清单即失败;修复前日志行
+/// 停留在 awaiting_manifest,finalize 拒绝写终态,任务在数据库里永远悬在
+/// 中间状态、每次启动被恢复重跑并弹出存储错误。一个文件出错不拦其它文件:
+/// 第二条照常移动完成。
 #[tokio::test]
 async fn prepare_failure_settles_journal_and_finalizes_failed_task() {
     let directory = tempfile::tempdir().unwrap();
@@ -62,16 +63,20 @@ async fn prepare_failure_settles_journal_and_finalizes_failed_task() {
         error.contains("could not read directory"),
         "unexpected diagnostic: {error}"
     );
-    assert!(partial_outcome.completed_path_migrations().is_empty());
+    assert_eq!(partial_outcome.completed_path_migrations().len(), 1);
 
     let records = load_recoverable_transfer_records(store.clone(), stored_task_id)
         .await
         .unwrap();
     assert_eq!(records.len(), transfers.len());
-    assert!(records.iter().all(|record| matches!(
-        record.checkpoint,
+    assert!(matches!(
+        records[0].checkpoint,
         file_core::TransferCheckpoint::Failed { .. }
-    )));
+    ));
+    assert!(matches!(
+        records[1].checkpoint,
+        file_core::TransferCheckpoint::Completed(_)
+    ));
     assert_eq!(
         queue.finish(task_id, FileOperationFinish::Failed(error.clone())),
         Some(crate::FileOperationTerminalStatus::Failed)
@@ -88,7 +93,13 @@ async fn prepare_failure_settles_journal_and_finalizes_failed_task() {
         .is_empty());
 
     assert!(tokio::fs::symlink_metadata(&first_source).await.is_ok());
-    assert!(tokio::fs::symlink_metadata(&second_source).await.is_ok());
+    assert!(tokio::fs::symlink_metadata(&second_source).await.is_err());
+    assert_eq!(
+        tokio::fs::read(directory.path().join("second-target"))
+            .await
+            .unwrap(),
+        b"second-original"
+    );
     std::fs::set_permissions(&locked_child, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 

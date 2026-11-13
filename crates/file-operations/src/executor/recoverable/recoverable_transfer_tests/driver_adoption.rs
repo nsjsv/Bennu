@@ -30,35 +30,15 @@ async fn supervision_adopts_a_foreign_nonterminal_task_with_a_free_lease() {
 
     // 模拟死亡驱动者留下的中间态:rename 已落盘,journal 停在 durable renamed。
     let running = owner.active_subscription().unwrap();
-    let record = load_recoverable_transfer_records(store.clone(), stored_task_id)
-        .await
-        .unwrap()
-        .remove(0);
-    let journal = task_queue_transfer_journal(store.clone(), running.controls.clone());
-    let DirectMoveIntentBoundary::Intent(record) = run_recoverable_transfer_to_direct_move_intent(
-        record,
-        &journal,
-        FileTransferOptions::new(running.controls.clone()),
+    run_until_checkpoint(
+        &store,
+        stored_task_id,
+        &running.controls,
+        is_direct_move_renamed,
     )
-    .await
-    .unwrap() else {
-        panic!("fresh same-filesystem move should prepare a direct move intent");
-    };
-    let batch = run_direct_move_batch_to_durable_renamed(
-        vec![record],
-        &journal,
-        &FileTransferOptions::new(running.controls.clone()),
-        |_| async {},
-    )
-    .await
-    .unwrap();
-    assert!(matches!(
-        batch.as_slice(),
-        [DirectMoveBatchRecord::Renamed(_)]
-    ));
+    .await;
     assert!(tokio::fs::symlink_metadata(&source).await.is_err());
     drop(running);
-    drop(journal);
     drop(owner);
 
     // 幸存实例:内存为空,监督 tick 扫 store 认领并推进到 Running。

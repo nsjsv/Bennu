@@ -1,7 +1,7 @@
 use super::*;
 
 #[tokio::test]
-async fn direct_move_batch_defers_fingerprint_and_resumes_to_completion() {
+async fn direct_move_renames_only_after_its_intent_is_durable() {
     let directory = tempdir().unwrap();
     let source = directory.path().join("source");
     let target = directory.path().join("target");
@@ -13,21 +13,11 @@ async fn direct_move_batch_defers_fingerprint_and_resumes_to_completion() {
         TransferConflictStrategy::Fail,
     );
     let journal = MemoryJournal::new(203, TransferWorkKey::top_level(0), None);
+    let mut record = journal.record(request.clone());
 
-    let intent = run_recoverable_transfer_to_direct_move_intent(
-        journal.record(request.clone()),
-        &journal,
-        running_transfer_options(),
-    )
-    .await
-    .unwrap();
-    let DirectMoveIntentBoundary::Intent(record) = intent else {
-        panic!("basic same-filesystem move should prepare a direct move intent");
-    };
-    assert!(matches!(
-        record.checkpoint,
-        TransferCheckpoint::DirectMoveIntent(_)
-    ));
+    advance_recoverable_transfer(&mut record, &journal, &running_transfer_options())
+        .await
+        .unwrap();
     assert!(matches!(
         journal.record(request.clone()).checkpoint,
         TransferCheckpoint::DirectMoveIntent(_)
@@ -35,21 +25,9 @@ async fn direct_move_batch_defers_fingerprint_and_resumes_to_completion() {
     assert_eq!(fs::read(&source).await.unwrap(), b"source");
     assert!(fs::symlink_metadata(&target).await.is_err());
 
-    let batch = run_direct_move_batch_to_durable_renamed(
-        vec![record],
-        &journal,
-        &running_transfer_options(),
-        |_| async {},
-    )
-    .await
-    .unwrap();
-    let [DirectMoveBatchRecord::Renamed(record)] = batch.as_slice() else {
-        panic!("batch should rename the single record");
-    };
-    assert!(matches!(
-        record.checkpoint,
-        TransferCheckpoint::DirectMoveRenamed(_)
-    ));
+    advance_recoverable_transfer(&mut record, &journal, &running_transfer_options())
+        .await
+        .unwrap();
     assert!(matches!(
         journal.record(request.clone()).checkpoint,
         TransferCheckpoint::DirectMoveRenamed(_)
@@ -57,7 +35,7 @@ async fn direct_move_batch_defers_fingerprint_and_resumes_to_completion() {
     assert!(fs::symlink_metadata(&source).await.is_err());
     assert_eq!(fs::read(&target).await.unwrap(), b"source");
 
-    let outcome = run_recoverable_transfer(record.clone(), &journal, running_transfer_options())
+    let outcome = run_recoverable_transfer(record, &journal, running_transfer_options())
         .await
         .unwrap();
     assert_eq!(outcome.final_target, Some(target));
@@ -68,7 +46,7 @@ async fn direct_move_batch_defers_fingerprint_and_resumes_to_completion() {
 }
 
 #[tokio::test]
-async fn direct_move_intent_boundary_returns_non_direct_before_copy_side_effects() {
+async fn copy_preparation_has_no_filesystem_effects() {
     let directory = tempdir().unwrap();
     let source = directory.path().join("source");
     let target = directory.path().join("target");
@@ -80,27 +58,22 @@ async fn direct_move_intent_boundary_returns_non_direct_before_copy_side_effects
         TransferConflictStrategy::Fail,
     );
     let journal = MemoryJournal::new(204, TransferWorkKey::top_level(0), None);
+    let mut record = journal.record(request);
 
-    let intent = run_recoverable_transfer_to_direct_move_intent(
-        journal.record(request),
-        &journal,
-        running_transfer_options(),
-    )
-    .await
-    .unwrap();
-    let DirectMoveIntentBoundary::NotApplicable(record) = intent else {
-        panic!("copy must remain on the sequential completion path");
-    };
+    advance_recoverable_transfer(&mut record, &journal, &running_transfer_options())
+        .await
+        .unwrap();
     assert!(matches!(
         record.checkpoint,
         TransferCheckpoint::StageCreationIntent(_)
     ));
     assert_eq!(fs::read(&source).await.unwrap(), b"source");
     assert!(fs::symlink_metadata(&target).await.is_err());
+    assert_no_transfer_artifacts(directory.path());
 }
 
 #[tokio::test]
-async fn direct_move_intent_boundary_uses_existing_cancellation_cleanup() {
+async fn canceled_direct_move_before_rename_keeps_the_source() {
     let directory = tempdir().unwrap();
     let source = directory.path().join("source");
     let target = directory.path().join("target");
@@ -116,7 +89,7 @@ async fn direct_move_intent_boundary_uses_existing_cancellation_cleanup() {
     cancellation.cancel();
 
     assert!(matches!(
-        run_recoverable_transfer_to_direct_move_intent(
+        run_recoverable_transfer(
             journal.record(request.clone()),
             &journal,
             FileTransferOptions::running(cancellation),

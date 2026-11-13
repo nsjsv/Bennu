@@ -307,57 +307,40 @@ impl TransferJournalRecord {
     }
 }
 
+/// The one durable fact a step produces for its record. Steps never write the
+/// journal themselves: the runner makes the step's filesystem effects durable
+/// first, then commits the transitions of a whole batch in one transaction.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TransferJournalMutation {
-    InstallManifestAndCheckpoint {
-        task_id: u64,
-        key: TransferWorkKey,
-        expected_revision: u64,
+pub enum TransferTransition {
+    Checkpoint(TransferCheckpoint),
+    ManifestAndCheckpoint {
         manifest: SourceManifest,
         replacement_manifest: Option<SourceManifest>,
         checkpoint: TransferCheckpoint,
     },
-    CompareAndSwapCheckpoint {
-        task_id: u64,
-        key: TransferWorkKey,
-        expected_revision: u64,
-        checkpoint: TransferCheckpoint,
-    },
-    PersistMergeCompletionAndCheckpoint {
-        task_id: u64,
-        key: TransferWorkKey,
-        expected_revision: u64,
+    MergeCompletionAndCheckpoint {
         completion: MergeChildCompletion,
         checkpoint: TransferCheckpoint,
     },
-    InstallManifestAndCheckpointBatch {
-        updates: Vec<ManifestCheckpointBatchUpdate>,
-    },
 }
 
-/// One checkpoint compare-and-swap in a batch commit. A batch swap is only
-/// valid when every swap moves a distinct top-level record forward by exactly
-/// one revision; it is the persistence unit for the post-rename facts of a
-/// Basic DirectMove visibility segment.
+impl TransferTransition {
+    pub fn checkpoint(&self) -> &TransferCheckpoint {
+        match self {
+            Self::Checkpoint(checkpoint)
+            | Self::ManifestAndCheckpoint { checkpoint, .. }
+            | Self::MergeCompletionAndCheckpoint { checkpoint, .. } => checkpoint,
+        }
+    }
+}
+
+/// One record's transition, guarded by the revision it was computed from.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TransferCheckpointSwap {
+pub struct TransferJournalMutation {
     pub task_id: u64,
     pub key: TransferWorkKey,
     pub expected_revision: u64,
-    pub checkpoint: TransferCheckpoint,
-}
-
-/// One manifest + checkpoint install inside a batch commit. Every update moves
-/// a distinct top-level record forward by exactly one revision and installs the
-/// manifest entries for that record in the same transaction.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ManifestCheckpointBatchUpdate {
-    pub task_id: u64,
-    pub key: TransferWorkKey,
-    pub expected_revision: u64,
-    pub manifest: SourceManifest,
-    pub replacement_manifest: Option<SourceManifest>,
-    pub checkpoint: TransferCheckpoint,
+    pub transition: TransferTransition,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -369,35 +352,12 @@ pub enum TransferJournalError {
 }
 
 pub type TransferJournalFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<u64, TransferJournalError>> + Send + 'a>>;
+    Pin<Box<dyn Future<Output = Result<Vec<u64>, TransferJournalError>> + Send + 'a>>;
 
 pub trait TransferJournal: Send + Sync {
-    fn commit(&self, mutation: TransferJournalMutation) -> TransferJournalFuture<'_>;
-
-    /// Journals must opt into an atomic batch implementation. A journal that
-    /// cannot provide this boundary fails closed instead of silently turning a
-    /// segment back into per-record persistence.
-    fn commit_checkpoint_batch<'a>(
-        &'a self,
-        _swaps: Vec<TransferCheckpointSwap>,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<u64>, TransferJournalError>> + Send + 'a>> {
-        Box::pin(async {
-            Err(TransferJournalError::Storage(
-                "atomic checkpoint batches are not supported by this journal".to_owned(),
-            ))
-        })
-    }
-
-    fn commit_manifest_batch<'a>(
-        &'a self,
-        _updates: Vec<ManifestCheckpointBatchUpdate>,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<u64>, TransferJournalError>> + Send + 'a>> {
-        Box::pin(async {
-            Err(TransferJournalError::Storage(
-                "atomic manifest batches are not supported by this journal".to_owned(),
-            ))
-        })
-    }
+    /// Applies every mutation in one transaction, or none of them, and returns
+    /// each record's new revision in order.
+    fn commit(&self, mutations: Vec<TransferJournalMutation>) -> TransferJournalFuture<'_>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

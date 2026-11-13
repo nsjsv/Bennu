@@ -1,28 +1,25 @@
 use std::ffi::OsString;
 use std::future::Future;
 use std::path::PathBuf;
-use std::pin::Pin;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use bennu_state::TaskQueueStore;
 use file_core::{
     create_archive_with_controls_and_progress, create_directory_at_available_name,
     create_empty_file_at_available_name, create_symbolic_links, delete_path_permanently,
-    extract_archive_with_controls_and_progress, is_direct_move_segment_candidate,
-    persist_recoverable_source_manifest_with_controls, prepare_direct_move_intent_segment,
-    rename_entry, run_direct_move_batch_to_durable_renamed, run_recoverable_transfer,
-    ArchiveCreationRequest, ArchiveExtractionRequest, ArchiveProgress, DirectMoveBatchRecord,
-    DirectMoveIntentBatchRecord, FileError, FileOperationControls, FileOperationVerification,
-    FileTransferOptions, RecoverableTransferError, RecoverableTransferOperation,
-    RecoverableTransferOutcome, SymbolicLinkRequest, TransferConflictStrategy, TransferJournal,
-    TransferJournalError, TransferJournalMutation, TransferJournalRecord, TrashRestoreEntry,
-    TrashVerificationBatch,
+    extract_archive_with_controls_and_progress, rename_entry, ArchiveCreationRequest,
+    ArchiveExtractionRequest, ArchiveProgress, FileError, FileOperationControls,
+    FileOperationVerification, FileTransferOptions, RecoverableTransferError,
+    RecoverableTransferOperation, RecoverableTransferOutcome, SymbolicLinkRequest,
+    TransferConflictStrategy, TransferJournal, TransferJournalError, TransferJournalFuture,
+    TransferJournalMutation, TransferJournalRecord, TrashRestoreEntry, TrashVerificationBatch,
 };
 
 use crate::FileOperationProgressUpdate;
 use crate::{
-    new_directory_name, new_file_name, DurableDirectMoveCommit, FileOperationEvent,
-    FileOperationEventSender, QueuedFileOperation, QueuedTransfer, RunningFileOperation,
+    new_directory_name, new_file_name, FileOperationEvent, FileOperationEventSender,
+    QueuedFileOperation, QueuedTransfer, RunningFileOperation,
 };
 use crate::{
     CompletedTransfer, FileOperationCompletion, FileOperationHistoryEligibility,

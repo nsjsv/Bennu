@@ -366,6 +366,10 @@ pub(crate) enum Message {
         file_operations::FileOperationProgressUpdate,
         Vec<file_operations::TransferEntrySnapshot>,
     ),
+    FileOperationScanned {
+        task_id: u64,
+        scanned_items: usize,
+    },
     FileOperationDirectMovesCommitted {
         task_id: u64,
         commits: Vec<file_operations::DurableDirectMoveCommit>,

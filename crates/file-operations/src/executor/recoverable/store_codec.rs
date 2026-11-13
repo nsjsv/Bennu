@@ -3,13 +3,15 @@ use std::collections::BTreeMap;
 use bennu_state::{
     StoreError, StoreResult, StoredFileIdentity, StoredFileObjectKind,
     StoredFileOperationVerification, StoredManifestEntry, StoredMergeChildCompletion, StoredPath,
-    StoredTransferCheckpoint, StoredTransferCheckpointKind, StoredTransferConflictStrategy,
-    StoredTransferOperation, StoredTransferRecoverySnapshot, StoredTransferWorkKey,
+    StoredTransferChange, StoredTransferCheckpoint, StoredTransferCheckpointKind,
+    StoredTransferConflictStrategy, StoredTransferMutation, StoredTransferOperation,
+    StoredTransferRecoverySnapshot, StoredTransferWorkKey,
 };
 use file_core::{
     FileIdentity, FileObjectKind, FileOperationVerification, MergeChildCompletion,
     RecoverableTransferOperation, RecoverableTransferRequest, SourceManifest, SourceManifestEntry,
-    TransferCheckpoint, TransferConflictStrategy, TransferJournalRecord, TransferWorkKey,
+    TransferCheckpoint, TransferConflictStrategy, TransferJournalMutation, TransferJournalRecord,
+    TransferTransition, TransferWorkKey,
 };
 
 pub(super) fn encode_work_key(key: &TransferWorkKey) -> StoredTransferWorkKey {
@@ -26,6 +28,59 @@ pub(super) fn encode_checkpoint(
         checkpoint_kind(checkpoint),
         serde_json::to_string(checkpoint)?,
     )
+}
+
+/// `None` when `continue_encoding` stopped a manifest midway; only manifests
+/// are long enough to be worth interrupting.
+pub(super) fn encode_mutation(
+    mutation: &TransferJournalMutation,
+    continue_encoding: impl FnMut() -> bool + Copy,
+) -> StoreResult<Option<StoredTransferMutation>> {
+    let change = match &mutation.transition {
+        TransferTransition::Checkpoint(checkpoint) => {
+            StoredTransferChange::Checkpoint(encode_checkpoint(checkpoint)?)
+        }
+        TransferTransition::ManifestAndCheckpoint {
+            manifest,
+            replacement_manifest,
+            checkpoint,
+        } => {
+            let transfer_index = mutation.key.transfer_index;
+            let Some(manifest_entries) =
+                encode_manifest_entries_while(transfer_index, manifest, continue_encoding)
+            else {
+                return Ok(None);
+            };
+            let replacement_manifest_entries = match replacement_manifest {
+                Some(manifest) => {
+                    match encode_manifest_entries_while(transfer_index, manifest, continue_encoding)
+                    {
+                        Some(entries) => entries,
+                        None => return Ok(None),
+                    }
+                }
+                None => Vec::new(),
+            };
+            StoredTransferChange::ManifestAndCheckpoint {
+                manifest_entries,
+                replacement_manifest_entries,
+                checkpoint: encode_checkpoint(checkpoint)?,
+            }
+        }
+        TransferTransition::MergeCompletionAndCheckpoint {
+            completion,
+            checkpoint,
+        } => StoredTransferChange::MergeCompletionAndCheckpoint {
+            completion: encode_merge_completion(completion)?,
+            checkpoint: encode_checkpoint(checkpoint)?,
+        },
+    };
+    Ok(Some(StoredTransferMutation {
+        task_id: mutation.task_id,
+        key: encode_work_key(&mutation.key),
+        expected_revision: mutation.expected_revision,
+        change,
+    }))
 }
 
 pub(super) fn encode_manifest_entries_while(

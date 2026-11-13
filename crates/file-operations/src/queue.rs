@@ -264,7 +264,10 @@ pub enum FileOperationStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileOperationExecutionPhase {
-    Preparing,
+    /// 动手之前（复制、移动先建清单）。`scanned_items` 是已经扫过的项数。
+    Preparing {
+        scanned_items: usize,
+    },
     Executing,
 }
 
@@ -360,12 +363,16 @@ pub struct FileOperationTask {
 
 impl FileOperationTask {
     pub fn status_label(&self) -> String {
-        if self.status == FileOperationStatus::Running
-            && self.execution_phase == Some(FileOperationExecutionPhase::Preparing)
-        {
-            tr!("Preparing")
-        } else {
-            self.status.label()
+        match (self.status, self.execution_phase) {
+            (
+                FileOperationStatus::Running,
+                Some(FileOperationExecutionPhase::Preparing { scanned_items: 0 }),
+            ) => tr!("Preparing"),
+            (
+                FileOperationStatus::Running,
+                Some(FileOperationExecutionPhase::Preparing { scanned_items }),
+            ) => tr!("Preparing · %1 scanned", scanned_items),
+            _ => self.status.label(),
         }
     }
 
@@ -720,6 +727,21 @@ impl FileOperationQueue {
                 .map(|(ui_task_id, _)| *ui_task_id)
                 .collect(),
         });
+    }
+
+    /// 扫描计数只在还没开始执行时生效：执行开始后迟到的计数不能把状态拉回“准备中”。
+    pub fn update_scan(&mut self, id: u64, scanned_items: usize) {
+        let Some(task) = self.tasks.iter_mut().find(|task| task.id == id) else {
+            return;
+        };
+        if task.status == FileOperationStatus::Running
+            && matches!(
+                task.execution_phase,
+                Some(FileOperationExecutionPhase::Preparing { .. })
+            )
+        {
+            task.execution_phase = Some(FileOperationExecutionPhase::Preparing { scanned_items });
+        }
     }
 
     pub fn update_progress(

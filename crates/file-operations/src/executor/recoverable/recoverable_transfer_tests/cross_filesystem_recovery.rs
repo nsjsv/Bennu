@@ -7,17 +7,10 @@ struct InterruptSourceRetiredJournal {
 }
 
 impl TransferJournal for InterruptSourceRetiredJournal {
-    fn commit(
-        &self,
-        mutation: TransferJournalMutation,
-    ) -> Pin<Box<dyn Future<Output = Result<u64, TransferJournalError>> + Send + '_>> {
-        if matches!(
-            &mutation,
-            TransferJournalMutation::CompareAndSwapCheckpoint {
-                checkpoint: file_core::TransferCheckpoint::SourceRetired(_),
-                ..
-            }
-        ) && !self
+    fn commit(&self, mutations: Vec<TransferJournalMutation>) -> TransferJournalFuture<'_> {
+        if commits_checkpoint(&mutations, |checkpoint| {
+            matches!(checkpoint, file_core::TransferCheckpoint::SourceRetired(_))
+        }) && !self
             .interrupted
             .swap(true, std::sync::atomic::Ordering::SeqCst)
         {
@@ -27,7 +20,7 @@ impl TransferJournal for InterruptSourceRetiredJournal {
                 ))
             });
         }
-        self.inner.commit(mutation)
+        self.inner.commit(mutations)
     }
 }
 
@@ -67,11 +60,7 @@ async fn sqlite_cross_filesystem_move_resumes_from_identified_retirement_artifac
         .await
         .unwrap()
         .remove(0);
-    let (journal, _direct_move_commit_receiver) = task_queue_transfer_journal_channel(
-        store.clone(),
-        running.controls.clone(),
-        std::slice::from_ref(&record),
-    );
+    let journal = task_queue_transfer_journal(store.clone(), running.controls.clone());
     let interrupted_journal = InterruptSourceRetiredJournal {
         inner: journal,
         interrupted: Default::default(),

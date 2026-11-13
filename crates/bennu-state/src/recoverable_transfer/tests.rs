@@ -47,19 +47,48 @@ fn completed_checkpoint() -> StoredTransferCheckpoint {
     stored_checkpoint(StoredTransferCheckpointKind::Completed)
 }
 
+fn apply_one(
+    store: &TaskQueueStore,
+    task_id: u64,
+    key: &StoredTransferWorkKey,
+    expected_revision: u64,
+    change: StoredTransferChange,
+) -> StoreResult<u64> {
+    store
+        .apply_transfer_mutations(&[StoredTransferMutation {
+            task_id,
+            key: key.clone(),
+            expected_revision,
+            change,
+        }])
+        .map(|revisions| revisions[0])
+}
+
+fn install_manifests(
+    manifest: &[StoredManifestEntry],
+    replacement_manifest: &[StoredManifestEntry],
+    checkpoint: &StoredTransferCheckpoint,
+) -> StoredTransferChange {
+    StoredTransferChange::ManifestAndCheckpoint {
+        manifest_entries: manifest.to_vec(),
+        replacement_manifest_entries: replacement_manifest.to_vec(),
+        checkpoint: checkpoint.clone(),
+    }
+}
+
 fn persist_initial_checkpoint(
     store: &TaskQueueStore,
     task_id: u64,
     checkpoint: &StoredTransferCheckpoint,
 ) {
-    store
-        .compare_and_swap_transfer_checkpoint(
-            task_id,
-            &StoredTransferWorkKey::top_level(0),
-            0,
-            checkpoint,
-        )
-        .unwrap();
+    apply_one(
+        store,
+        task_id,
+        &StoredTransferWorkKey::top_level(0),
+        0,
+        StoredTransferChange::Checkpoint(checkpoint.clone()),
+    )
+    .unwrap();
 }
 
 #[test]
@@ -252,9 +281,14 @@ fn manifest_and_checkpoint_update_are_atomic() {
     ];
     let checkpoint = stored_checkpoint(StoredTransferCheckpointKind::StageCreationIntent);
 
-    assert!(store
-        .install_transfer_manifest_and_checkpoint(task_id, &key, 0, &manifest, &checkpoint)
-        .is_err());
+    assert!(apply_one(
+        &store,
+        task_id,
+        &key,
+        0,
+        install_manifests(&manifest, &[], &checkpoint)
+    )
+    .is_err());
 
     let snapshot = store.read_transfer_recovery(task_id).unwrap();
     assert!(snapshot.manifest_entries.is_empty());
@@ -287,15 +321,13 @@ fn interrupted_manifest_transaction_rolls_back_checkpoint_and_entries() {
     let mut checks = 0;
 
     let revision = store
-        .install_transfer_manifests_and_checkpoint_while(
-            task_id,
-            TransferManifestCheckpointUpdate {
-                key: &key,
+        .apply_transfer_mutations_while(
+            &[StoredTransferMutation {
+                task_id,
+                key: key.clone(),
                 expected_revision: 0,
-                manifest_entries: &manifest,
-                replacement_manifest_entries: &[],
-                checkpoint: &checkpoint,
-            },
+                change: install_manifests(&manifest, &[], &checkpoint),
+            }],
             || {
                 checks += 1;
                 checks < 8
@@ -343,16 +375,14 @@ fn replacement_manifest_and_checkpoint_commit_atomically() {
         )
         .unwrap();
 
-    assert!(store
-        .install_transfer_manifests_and_checkpoint(
-            task_id,
-            &key,
-            0,
-            &manifest,
-            &replacement_manifest,
-            &checkpoint,
-        )
-        .is_err());
+    assert!(apply_one(
+        &store,
+        task_id,
+        &key,
+        0,
+        install_manifests(&manifest, &replacement_manifest, &checkpoint),
+    )
+    .is_err());
     let unchanged = store.read_transfer_recovery(task_id).unwrap();
     assert_eq!(unchanged.journal_entries[0].revision, 0);
     assert!(unchanged.manifest_entries.is_empty());
@@ -361,16 +391,14 @@ fn replacement_manifest_and_checkpoint_commit_atomically() {
     connection
         .execute_batch("DROP TRIGGER reject_replacement_manifest")
         .unwrap();
-    store
-        .install_transfer_manifests_and_checkpoint(
-            task_id,
-            &key,
-            0,
-            &manifest,
-            &replacement_manifest,
-            &checkpoint,
-        )
-        .unwrap();
+    apply_one(
+        &store,
+        task_id,
+        &key,
+        0,
+        install_manifests(&manifest, &replacement_manifest, &checkpoint),
+    )
+    .unwrap();
     let snapshot = store.read_transfer_recovery(task_id).unwrap();
     assert_eq!(snapshot.manifest_entries, manifest);
     assert_eq!(snapshot.replacement_manifest_entries, replacement_manifest);
@@ -389,14 +417,24 @@ fn checkpoint_compare_and_swap_rejects_stale_revision() {
     let staging = stored_checkpoint(StoredTransferCheckpointKind::Staging);
 
     assert_eq!(
-        store
-            .compare_and_swap_transfer_checkpoint(task_id, &key, 0, &staging)
-            .unwrap(),
+        apply_one(
+            &store,
+            task_id,
+            &key,
+            0,
+            StoredTransferChange::Checkpoint(staging.clone()),
+        )
+        .unwrap(),
         1
     );
-    let error = store
-        .compare_and_swap_transfer_checkpoint(task_id, &key, 0, &staging)
-        .unwrap_err();
+    let error = apply_one(
+        &store,
+        task_id,
+        &key,
+        0,
+        StoredTransferChange::Checkpoint(staging.clone()),
+    )
+    .unwrap_err();
     assert!(matches!(
         error,
         StoreError::StaleTransferRevision {
@@ -432,9 +470,14 @@ fn merge_completion_and_cursor_commit_atomically_and_reload_identity_fact() {
     )
     .unwrap();
     assert_eq!(
-        store
-            .install_transfer_manifest_and_checkpoint(task_id, &key, 0, &manifest, &initial_merge,)
-            .unwrap(),
+        apply_one(
+            &store,
+            task_id,
+            &key,
+            0,
+            install_manifests(&manifest, &[], &initial_merge),
+        )
+        .unwrap(),
         1
     );
 
@@ -456,17 +499,17 @@ fn merge_completion_and_cursor_commit_atomically_and_reload_identity_fact() {
              BEGIN SELECT RAISE(ABORT, 'injected merge completion failure'); END;",
         )
         .unwrap();
-    assert!(
-        store
-            .compare_and_swap_transfer_merge_completion(
-                task_id,
-                &key,
-                1,
-                &completion,
-                &completed_merge,
-            )
-            .is_err()
-    );
+    assert!(apply_one(
+        &store,
+        task_id,
+        &key,
+        1,
+        StoredTransferChange::MergeCompletionAndCheckpoint {
+            completion: completion.clone(),
+            checkpoint: completed_merge.clone(),
+        },
+    )
+    .is_err());
     connection
         .execute_batch("DROP TRIGGER reject_merge_completion;")
         .unwrap();
@@ -475,24 +518,29 @@ fn merge_completion_and_cursor_commit_atomically_and_reload_identity_fact() {
     assert!(unchanged.merge_completions.is_empty());
 
     assert_eq!(
-        store
-            .compare_and_swap_transfer_merge_completion(
-                task_id,
-                &key,
-                1,
-                &completion,
-                &completed_merge,
-            )
-            .unwrap(),
-        2
-    );
-    assert!(matches!(
-        store.compare_and_swap_transfer_merge_completion(
+        apply_one(
+            &store,
             task_id,
             &key,
             1,
-            &completion,
-            &completed_merge,
+            StoredTransferChange::MergeCompletionAndCheckpoint {
+                completion: completion.clone(),
+                checkpoint: completed_merge.clone(),
+            },
+        )
+        .unwrap(),
+        2
+    );
+    assert!(matches!(
+        apply_one(
+            &store,
+            task_id,
+            &key,
+            1,
+            StoredTransferChange::MergeCompletionAndCheckpoint {
+                completion: completion.clone(),
+                checkpoint: completed_merge.clone(),
+            },
         ),
         Err(StoreError::StaleTransferRevision { .. })
     ));
@@ -526,9 +574,14 @@ fn manifest_roundtrips_and_is_removed_with_recovery_details() {
     }];
     let checkpoint = stored_checkpoint(StoredTransferCheckpointKind::StageCreationIntent);
 
-    store
-        .install_transfer_manifest_and_checkpoint(task_id, &key, 0, &entries, &checkpoint)
-        .unwrap();
+    apply_one(
+        &store,
+        task_id,
+        &key,
+        0,
+        install_manifests(&entries, &[], &checkpoint),
+    )
+    .unwrap();
     assert_eq!(
         store
             .read_transfer_recovery(task_id)
@@ -713,15 +766,18 @@ fn recovery_paths_preserve_non_utf8_bytes() {
         relative_path: StoredPath::from_path(&relative),
         identity: identity(1),
     }];
-    store
-        .install_transfer_manifest_and_checkpoint(
-            task_id,
-            &key,
-            0,
+    apply_one(
+        &store,
+        task_id,
+        &key,
+        0,
+        install_manifests(
             &manifest,
+            &[],
             &stored_checkpoint(StoredTransferCheckpointKind::StageCreationIntent),
-        )
-        .unwrap();
+        ),
+    )
+    .unwrap();
 
     let snapshot = store.read_transfer_recovery(task_id).unwrap();
     assert_eq!(snapshot.journal_entries[0].source.to_path_buf(), source);
@@ -759,7 +815,7 @@ fn deleting_task_cascades_recovery_rows() {
 }
 
 #[test]
-fn batch_checkpoint_swap_updates_every_record_in_one_transaction() {
+fn mutation_batch_updates_every_record_in_one_transaction() {
     let directory = tempdir().unwrap();
     let store = TaskQueueStore::new(directory.path().join("state.sqlite")).unwrap();
     let operation = recoverable_copy(vec![
@@ -772,26 +828,44 @@ fn batch_checkpoint_swap_updates_every_record_in_one_transaction() {
     let task_id = claimed.task_id;
     drop(claimed);
 
-    let swap = |transfer_index: u64| StoredTransferCheckpointSwap {
-        task_id,
-        key: StoredTransferWorkKey::top_level(transfer_index),
-        expected_revision: 0,
-        checkpoint: completed_checkpoint(),
-    };
-    let revisions = store
-        .compare_and_swap_transfer_checkpoints(&[swap(0), swap(1)])
-        .unwrap();
+    let manifest = vec![StoredManifestEntry {
+        transfer_index: 1,
+        relative_path: StoredPath::from_path(Path::new("")),
+        identity: identity(5),
+    }];
+    let batch = [
+        StoredTransferMutation {
+            task_id,
+            key: StoredTransferWorkKey::top_level(0),
+            expected_revision: 0,
+            change: StoredTransferChange::Checkpoint(completed_checkpoint()),
+        },
+        StoredTransferMutation {
+            task_id,
+            key: StoredTransferWorkKey::top_level(1),
+            expected_revision: 0,
+            change: install_manifests(&manifest, &[], &completed_checkpoint()),
+        },
+    ];
+    let revisions = store.apply_transfer_mutations(&batch).unwrap();
     assert_eq!(revisions, vec![1, 1]);
 
     let snapshot = store.read_transfer_recovery(task_id).unwrap();
     assert!(snapshot.journal_entries.iter().all(|entry| {
         entry.revision == 1 && entry.checkpoint.kind == StoredTransferCheckpointKind::Completed
     }));
+    assert_eq!(snapshot.manifest_entries, manifest);
 
-    // A stale revision in one swap must fail the whole batch atomically.
-    assert!(store
-        .compare_and_swap_transfer_checkpoints(&[swap(0), swap(1)])
-        .is_err());
+    // One stale revision rolls back every mutation in the batch.
+    let mut stale = batch.clone();
+    stale[0].expected_revision = 1;
+    assert!(store.apply_transfer_mutations(&stale).is_err());
+    let snapshot = store.read_transfer_recovery(task_id).unwrap();
+    assert!(snapshot
+        .journal_entries
+        .iter()
+        .all(|entry| entry.revision == 1));
+    assert_eq!(snapshot.manifest_entries, manifest);
     let snapshot = store.read_transfer_recovery(task_id).unwrap();
     assert!(snapshot
         .journal_entries

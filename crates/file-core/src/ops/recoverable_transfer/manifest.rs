@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use tokio::fs;
@@ -33,12 +34,23 @@ pub async fn build_source_manifest_with_controls(
     root: &Path,
     controls: &mut FileOperationControls,
 ) -> Result<SourceManifest, RecoverableTransferError> {
+    build_counted_source_manifest(root, controls, &AtomicUsize::new(0)).await
+}
+
+/// `scanned` grows by one for every entry read, so a caller can show scan
+/// progress while a large tree is still being listed.
+pub async fn build_counted_source_manifest(
+    root: &Path,
+    controls: &mut FileOperationControls,
+    scanned: &AtomicUsize,
+) -> Result<SourceManifest, RecoverableTransferError> {
     controls.wait_until_running().await?;
     let root_identity = inspect_file_identity(root).await?;
     let mut entries = vec![SourceManifestEntry {
         relative_path: PathBuf::new(),
         identity: root_identity.clone(),
     }];
+    scanned.fetch_add(1, Ordering::Relaxed);
 
     if root_identity.object_kind != FileObjectKind::Directory {
         controls.wait_until_running().await?;
@@ -177,6 +189,7 @@ pub async fn build_source_manifest_with_controls(
             Ok(result) => result,
             Err(error) => return Err(error),
         };
+        scanned.fetch_add(result.entries.len(), Ordering::Relaxed);
         entries.extend(result.entries);
         for subdirectory in result.subdirectories {
             outstanding += 1;

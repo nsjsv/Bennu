@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use file_core::TransferWorkKey;
+pub use file_core::DurableDirectMoveCommit;
 
 use crate::outcome::CompletedTransfer;
 use crate::progress::{FileOperationProgressUpdate, TransferEntrySnapshot};
@@ -14,15 +14,6 @@ pub const FILE_OPERATION_EVENT_CAPACITY: usize = 32;
 
 pub type FileOperationEventSender = tokio::sync::mpsc::Sender<FileOperationEvent>;
 
-/// 已经写进恢复日志的直接移动提交点。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DurableDirectMoveCommit {
-    pub work_key: TransferWorkKey,
-    pub source: PathBuf,
-    pub target: PathBuf,
-    pub checkpoint_revision: u64,
-}
-
 #[derive(Debug, Clone)]
 pub enum FileOperationEvent {
     /// 进度与逐条目占位快照同行发送;快照全量替换界面侧任务状态。
@@ -31,6 +22,8 @@ pub enum FileOperationEvent {
         update: FileOperationProgressUpdate,
         entries: Vec<TransferEntrySnapshot>,
     },
+    /// 准备阶段建清单时已经扫过多少项；任务仍算“准备中”。
+    Scanned { task_id: u64, scanned_items: usize },
     /// rename 已全部完成但提交点还没落盘,让列表刷新不等 parent fsync 与日志落盘。
     MovesRenamed {
         task_id: u64,

@@ -4,26 +4,23 @@ use std::path::PathBuf;
 use tokio::fs;
 
 use super::commit::verify_completed_target;
-use super::{
-    advance_recoverable_transfer, install_manifest_and_checkpoint, persist_checkpoint,
-    persist_merge_completion, record_manifest, sync_parent, TransferAdvance,
-};
+use super::run::apply_transition;
+use super::{record_manifest, step_recoverable_transfer, TransferStep};
 use crate::ops::metadata_loss::MetadataLossSummary;
+use crate::ops::recoverable_transfer::CommitBarrier;
 use crate::ops::recoverable_transfer::{
     inspect_file_identity, verify_source_manifest, CompletedTarget, FileIdentity,
     MergeChildCompletion, MergeChildOutcome, MergeTransfer, ProofContext, RecoverableTransferError,
     RecoverableTransferOperation, RecoverableTransferRequest, SourceManifest, TransferCheckpoint,
-    TransferFingerprint, TransferJournal, TransferJournalError, TransferJournalMutation,
-    TransferJournalRecord, TransferWorkKey,
+    TransferFingerprint, TransferJournalRecord, TransferTransition, TransferWorkKey,
 };
 use crate::{FileTransferOptions, TransferConflictStrategy};
 
-pub(super) async fn prepare_merge_transfer<J: TransferJournal>(
-    record: &mut TransferJournalRecord,
-    journal: &J,
+pub(super) async fn prepare_merge_transfer(
+    record: &TransferJournalRecord,
     manifest: SourceManifest,
     target_identity: FileIdentity,
-) -> Result<(), RecoverableTransferError> {
+) -> Result<TransferTransition, RecoverableTransferError> {
     if record
         .request
         .requested_target
@@ -34,12 +31,10 @@ pub(super) async fn prepare_merge_transfer<J: TransferJournal>(
         });
     }
     let child_names = merge_child_names(&manifest);
-    install_manifest_and_checkpoint(
-        record,
-        journal,
+    Ok(TransferTransition::ManifestAndCheckpoint {
         manifest,
-        None,
-        TransferCheckpoint::Merging(MergeTransfer {
+        replacement_manifest: None,
+        checkpoint: TransferCheckpoint::Merging(MergeTransfer {
             target_root_identity: target_identity,
             next_child: 0,
             active_child: None,
@@ -47,16 +42,15 @@ pub(super) async fn prepare_merge_transfer<J: TransferJournal>(
             completed_children: Vec::new(),
             completed_prefix_verified: true,
         }),
-    )
-    .await
+    })
 }
 
-pub(super) async fn advance_merge_transfer<J: TransferJournal>(
-    record: &mut TransferJournalRecord,
-    journal: &J,
+pub(super) async fn advance_merge_transfer(
+    record: &TransferJournalRecord,
     transfer_options: &FileTransferOptions,
     mut merge: MergeTransfer,
-) -> Result<(), RecoverableTransferError> {
+    barrier: &mut CommitBarrier,
+) -> Result<TransferTransition, RecoverableTransferError> {
     let proof = ProofContext::new(
         record.request.verification,
         transfer_options.proof_memo.clone(),
@@ -90,35 +84,38 @@ pub(super) async fn advance_merge_transfer<J: TransferJournal>(
         if matches!(child.checkpoint, TransferCheckpoint::AwaitingManifest) {
             verify_source_manifest(record_manifest(child)?).await?;
         }
-        let child_journal = ChildCheckpointJournal::default();
-        let advance = Box::pin(advance_recoverable_transfer(
-            child,
-            &child_journal,
-            transfer_options,
-        ))
-        .await?;
-        let nested_completion = child_journal.take_completion()?;
-        let completed_child = if matches!(advance, TransferAdvance::Complete(_)) {
-            let completion = terminal_child_completion(&record.key, child)?;
-            merge.active_child = None;
-            merge.next_child += 1;
-            merge.completed_children.push(completion.clone());
-            Some(completion)
-        } else {
-            None
+        let child_step =
+            Box::pin(step_recoverable_transfer(child, transfer_options, barrier)).await?;
+        // 子记录嵌在父 checkpoint 里，不单独提交：它的转移随父记录这一次提交落盘。
+        let completion = match child_step {
+            TransferStep::Transition(transition) => {
+                let transition = *transition;
+                let nested_completion = match &transition {
+                    TransferTransition::MergeCompletionAndCheckpoint { completion, .. } => {
+                        Some(completion.clone())
+                    }
+                    _ => None,
+                };
+                child.revision += 1;
+                apply_transition(child, transition);
+                nested_completion
+            }
+            TransferStep::Complete(_) => {
+                let completion = terminal_child_completion(&record.key, child)?;
+                merge.active_child = None;
+                merge.next_child += 1;
+                merge.completed_children.push(completion.clone());
+                Some(completion)
+            }
         };
-        if nested_completion.is_some() && completed_child.is_some() {
-            return Err(RecoverableTransferError::InvalidCheckpoint {
-                message: "one merge advance produced two completion facts".to_owned(),
-            });
-        }
         let checkpoint = TransferCheckpoint::Merging(merge);
-        if let Some(completion) = nested_completion.or(completed_child) {
-            persist_merge_completion(record, journal, completion, checkpoint).await?;
-        } else {
-            persist_checkpoint(record, journal, checkpoint).await?;
-        }
-        return Ok(());
+        return Ok(match completion {
+            Some(completion) => TransferTransition::MergeCompletionAndCheckpoint {
+                completion,
+                checkpoint,
+            },
+            None => TransferTransition::Checkpoint(checkpoint),
+        });
     }
     if merge.active_child.is_some() {
         return Err(RecoverableTransferError::InvalidCheckpoint {
@@ -131,7 +128,7 @@ pub(super) async fn advance_merge_transfer<J: TransferJournal>(
         verify_source_manifest(record_manifest(record)?).await?;
     } else {
         match fs::remove_dir(&record.request.source).await {
-            Ok(()) => sync_parent(&record.request.source).await?,
+            Ok(()) => barrier.require_parent_of(&record.request.source),
             Err(error)
                 if matches!(
                     error.kind(),
@@ -166,7 +163,9 @@ pub(super) async fn advance_merge_transfer<J: TransferJournal>(
         path,
         metadata_loss,
     };
-    persist_checkpoint(record, journal, TransferCheckpoint::Completed(completed)).await
+    Ok(TransferTransition::Checkpoint(
+        TransferCheckpoint::Completed(completed),
+    ))
 }
 
 fn merge_child_names(manifest: &SourceManifest) -> Vec<PathBuf> {
@@ -297,63 +296,4 @@ fn terminal_child_completion(
         child_key: child.key.clone(),
         outcome,
     })
-}
-
-#[derive(Default)]
-struct ChildCheckpointJournal {
-    completion: std::sync::Mutex<Option<MergeChildCompletion>>,
-}
-
-impl ChildCheckpointJournal {
-    fn take_completion(&self) -> Result<Option<MergeChildCompletion>, RecoverableTransferError> {
-        self.completion
-            .lock()
-            .map_err(|_| RecoverableTransferError::Journal {
-                message: "merge child completion lock was poisoned".to_owned(),
-            })
-            .map(|mut completion| completion.take())
-    }
-}
-
-impl TransferJournal for ChildCheckpointJournal {
-    fn commit(
-        &self,
-        mutation: TransferJournalMutation,
-    ) -> crate::ops::recoverable_transfer::TransferJournalFuture<'_> {
-        Box::pin(async move {
-            let expected_revision = match mutation {
-                TransferJournalMutation::InstallManifestAndCheckpoint {
-                    expected_revision, ..
-                }
-                | TransferJournalMutation::CompareAndSwapCheckpoint {
-                    expected_revision, ..
-                } => expected_revision,
-                TransferJournalMutation::PersistMergeCompletionAndCheckpoint {
-                    expected_revision,
-                    completion,
-                    ..
-                } => {
-                    let mut pending = self.completion.lock().map_err(|_| {
-                        TransferJournalError::Storage(
-                            "merge child completion lock was poisoned".to_owned(),
-                        )
-                    })?;
-                    if pending.replace(completion).is_some() {
-                        return Err(TransferJournalError::Storage(
-                            "one merge advance produced multiple completion facts".to_owned(),
-                        ));
-                    }
-                    expected_revision
-                }
-                TransferJournalMutation::InstallManifestAndCheckpointBatch { .. } => {
-                    return Err(TransferJournalError::Storage(
-                        "merge child journal does not support batch manifest installs".to_owned(),
-                    ));
-                }
-            };
-            expected_revision.checked_add(1).ok_or_else(|| {
-                TransferJournalError::Storage("child transfer revision overflow".to_owned())
-            })
-        })
-    }
 }

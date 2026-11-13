@@ -13,156 +13,128 @@ use crate::{
 use super::super::QueuedTransferMode;
 
 pub(super) struct TransferBatchProgress {
-    /// 每条顶层记录算几项：清单里非目录条目的个数，至少 1（空文件夹、
-    /// 建不出清单的记录各算 1 项）。目录没有字节事件，计入的话会在记录
-    /// 结算时整段跳一下。
-    record_items: Vec<usize>,
+    records: Vec<TransferRecordProgress>,
     total_items: usize,
-    completed_records: usize,
-    /// 已结算记录的项数之和。
-    settled_items: usize,
-    /// 当前记录里已搬完的普通文件数。
-    current_record_files: usize,
-    /// 当前记录里已开始、未完成的文件：源路径 → (已搬字节, 总字节)。
-    /// 目录并行 staging 时同时有多个。
-    in_flight: HashMap<PathBuf, (u64, u64)>,
-    byte_workload: Option<TransferBatchByteWorkload>,
-    /// 逐条目展示元数据:占位快照的常量部分(目标/目录性/字节总量)。
-    records: Vec<TransferRecordDisplayMeta>,
-    /// 该条目是否进入占位流。Copy/Duplicate 全量true(入队即占位);
-    /// Move 只在真正发生字节复制时置位,同盘 rename 路径永不产生占位。
-    copy_observed: Vec<bool>,
+    /// `None` when some record has no manifest or the batch has no bytes: the
+    /// bar then counts items only.
+    total_bytes: Option<u64>,
+    /// `CopyProgress` only names the source file; walking up its path to a
+    /// record's source root says which record it belongs to.
+    record_by_source: HashMap<PathBuf, usize>,
 }
 
-struct TransferRecordDisplayMeta {
+struct TransferRecordProgress {
+    /// 这条记录算几项：清单里非目录条目的个数，至少 1（空文件夹、建不出
+    /// 清单的记录各算 1 项）。目录没有字节事件，计入的话会在记录结算时整段跳一下。
+    items: usize,
+    state: TransferRecordState,
+    /// 已搬完的文件数，结算前显示时不超过 `items`。
+    copied_files: usize,
+    /// 已开始、未完成的文件：源路径 → (已搬字节, 总字节)。目录并行 staging
+    /// 和一段里的多条记录都会让它同时有好几个。
+    in_flight: HashMap<PathBuf, (u64, u64)>,
+    /// 清单里每个普通文件的大小；字节进度只认和清单一致的事件。
+    regular_files: HashMap<PathBuf, u64>,
+    copied_bytes: u64,
+    file_bytes: HashMap<PathBuf, u64>,
     target: PathBuf,
     is_directory: bool,
-    total_bytes: Option<u64>,
+    /// 清单里普通文件的总字节；没有清单时未知。
+    display_bytes: Option<u64>,
+    /// 是否进入占位流。复制全量 true（入队即占位）；移动只在真正发生字节
+    /// 复制时置位，同盘 rename 永不产生占位。
+    copy_observed: bool,
 }
 
-struct TransferBatchByteWorkload {
-    total_bytes: u64,
-    resolved_bytes: u64,
-    current_record_bytes: u64,
-    current_file_bytes: HashMap<PathBuf, u64>,
-    records: Vec<TransferRecordByteWorkload>,
-}
-
-struct TransferRecordByteWorkload {
-    logical_bytes: u64,
-    regular_files: HashMap<PathBuf, u64>,
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TransferRecordState {
+    Queued,
+    Active,
+    Settled,
 }
 
 impl TransferBatchProgress {
     pub(super) fn new(records: &[TransferJournalRecord], mode: QueuedTransferMode) -> Self {
-        let record_items = records.iter().map(record_item_count).collect::<Vec<_>>();
+        let record_by_source = records
+            .iter()
+            .enumerate()
+            .map(|(index, record)| (record.request.source.clone(), index))
+            .collect();
+        let records = records
+            .iter()
+            .map(|record| record_progress(record, mode))
+            .collect::<Vec<_>>();
+        let total_bytes = records
+            .iter()
+            .map(|record| record.display_bytes)
+            .try_fold(0_u64, |total, bytes| total.checked_add(bytes?))
+            .filter(|total| *total > 0);
         Self {
-            total_items: record_items.iter().sum(),
-            record_items,
-            completed_records: 0,
-            settled_items: 0,
-            current_record_files: 0,
-            in_flight: HashMap::new(),
-            byte_workload: batch_byte_workload(records),
-            records: records.iter().map(record_display_meta).collect(),
-            copy_observed: records
-                .iter()
-                .map(|_| matches!(mode, QueuedTransferMode::Copy))
-                .collect(),
+            total_items: records.iter().map(|record| record.items).sum(),
+            total_bytes,
+            record_by_source,
+            records,
+        }
+    }
+
+    /// The records of a segment that just started running.
+    pub(super) fn start_records(&mut self, indices: &[usize]) {
+        for &index in indices {
+            if self.records[index].state == TransferRecordState::Queued {
+                self.records[index].state = TransferRecordState::Active;
+            }
         }
     }
 
     /// 每一条 `CopyProgress` 都要经过这里（只有发往界面的消息才节流），
     /// 否则完成计数会随被丢掉的事件一起丢失。
-    pub(super) fn observe_copy_progress(&mut self, record_index: usize, progress: &CopyProgress) {
-        debug_assert_eq!(record_index, self.completed_records);
-        self.copy_observed[record_index] = true;
-        self.observe_file_lifecycle(progress);
-        self.observe_copied_bytes(record_index, progress);
-    }
-
-    /// 搬运方对每个文件先发 `0/total` 开始事件，第一条 `done == total` 即完成
-    /// （空文件的 `0/0` 两者合一）。
-    fn observe_file_lifecycle(&mut self, progress: &CopyProgress) {
-        let finished = progress.bytes_done >= progress.bytes_total;
-        if let Some((completed_bytes, _)) = self.in_flight.get_mut(&progress.from) {
-            *completed_bytes = (*completed_bytes).max(progress.bytes_done);
-            if !finished {
-                return;
-            }
-            self.in_flight.remove(&progress.from);
-        } else if progress.bytes_done != 0 {
-            // 已完成文件的迟到事件。
-            return;
-        } else if !finished {
-            self.in_flight
-                .insert(progress.from.clone(), (0, progress.bytes_total));
-            return;
-        }
-        self.current_record_files += 1;
-    }
-
-    fn observe_copied_bytes(&mut self, record_index: usize, progress: &CopyProgress) {
-        let Some(byte_workload) = self.byte_workload.as_mut() else {
+    pub(super) fn observe_copy_progress(&mut self, progress: &CopyProgress) {
+        let Some(index) = progress
+            .from
+            .ancestors()
+            .find_map(|path| self.record_by_source.get(path).copied())
+        else {
             return;
         };
-        let Some(record) = byte_workload.records.get(record_index) else {
-            return;
-        };
-        let Some(&expected_bytes) = record.regular_files.get(progress.from.as_path()) else {
-            return;
-        };
-        if progress.bytes_total != expected_bytes {
+        let record = &mut self.records[index];
+        if record.state == TransferRecordState::Settled {
             return;
         }
-
-        let completed_file_bytes = progress.bytes_done.min(expected_bytes);
-        let previous_file_bytes = byte_workload
-            .current_file_bytes
-            .get(progress.from.as_path())
-            .copied()
-            .unwrap_or(0);
-        if completed_file_bytes <= previous_file_bytes {
-            return;
-        }
-        byte_workload
-            .current_file_bytes
-            .insert(progress.from.clone(), completed_file_bytes);
-        byte_workload.current_record_bytes += completed_file_bytes - previous_file_bytes;
+        record.copy_observed = true;
+        record.observe_file_lifecycle(progress);
+        record.observe_copied_bytes(progress);
     }
 
-    pub(super) fn complete_record(&mut self, record_index: usize) -> FileOperationProgressUpdate {
-        debug_assert_eq!(record_index, self.completed_records);
-        if let Some(byte_workload) = self.byte_workload.as_mut() {
-            byte_workload.resolved_bytes += byte_workload.records[record_index].logical_bytes;
-            byte_workload.current_record_bytes = 0;
-            byte_workload.current_file_bytes.clear();
-        }
-        // 符号链接这类没有字节事件的条目在这里补齐。
-        self.settled_items += self.record_items[record_index];
-        self.completed_records += 1;
-        self.current_record_files = 0;
-        self.in_flight.clear();
-        self.snapshot()
+    pub(super) fn complete_record(&mut self, index: usize) {
+        let record = &mut self.records[index];
+        record.state = TransferRecordState::Settled;
+        record.in_flight.clear();
+        record.file_bytes.clear();
     }
 
     pub(super) fn snapshot(&self) -> FileOperationProgressUpdate {
-        // 清单缺失的记录只算 1 项，里面搬完的文件不能越过它的份额。
-        let current_record_items = self
-            .record_items
-            .get(self.completed_records)
-            .copied()
-            .unwrap_or_default();
+        let mut completed_items = 0;
+        let mut completed_bytes = 0_u64;
+        for record in &self.records {
+            match record.state {
+                TransferRecordState::Settled => {
+                    // 符号链接这类没有字节事件的条目在这里补齐。
+                    completed_items += record.items;
+                    completed_bytes += record.display_bytes.unwrap_or(0);
+                }
+                // 清单缺失的记录只算 1 项，里面搬完的文件不能越过它的份额。
+                _ => {
+                    completed_items += record.copied_files.min(record.items);
+                    completed_bytes += record.copied_bytes;
+                }
+            }
+        }
         FileOperationProgressUpdate::Transfer {
-            completed_items: self.settled_items
-                + self.current_record_files.min(current_record_items),
+            completed_items,
             total_items: self.total_items,
-            bytes: self.byte_workload.as_ref().map(|byte_workload| {
-                (
-                    byte_workload.resolved_bytes + byte_workload.current_record_bytes,
-                    byte_workload.total_bytes,
-                )
-            }),
+            bytes: self
+                .total_bytes
+                .map(|total_bytes| (completed_bytes.min(total_bytes), total_bytes)),
             current_file: self.current_file(),
         }
     }
@@ -170,8 +142,9 @@ impl TransferBatchProgress {
     /// 并行搬运时取最大的那个：小文件一闪就完，条不会在它们之间乱跳。
     /// 同样大小按路径定序，避免 HashMap 遍历顺序让显示来回换。
     fn current_file(&self) -> Option<CurrentFileProgress> {
-        self.in_flight
+        self.records
             .iter()
+            .flat_map(|record| record.in_flight.iter())
             .max_by(
                 |(left_path, (_, left_total)), (right_path, (_, right_total))| {
                     left_total
@@ -192,35 +165,28 @@ impl TransferBatchProgress {
             )
     }
 
-    /// 全量占位快照:按位置推导每条目的排队/进行/完成状态,随进度消息
-    /// 整批替换 UI 侧 `transfer_progress`。Move 任务未开始复制的条目
-    /// (同盘 rename)不进入快照,从源头保证不产生占位。
+    /// 全量占位快照，随进度消息整批替换 UI 侧 `transfer_progress`。移动任务
+    /// 没开始复制的条目（同盘 rename）不进入快照，从源头保证不产生占位。
     pub(super) fn transfer_entry_snapshots(&self) -> Vec<TransferEntrySnapshot> {
         self.records
             .iter()
-            .zip(&self.copy_observed)
-            .enumerate()
-            .filter(|(_, (_, copy_observed))| **copy_observed)
-            .map(|(record_index, (meta, _))| {
-                let (state, completed_bytes) = if record_index < self.completed_records {
-                    (TransferEntrySnapshotState::Completed, meta.total_bytes)
-                } else if record_index == self.completed_records {
-                    let current_bytes = self
-                        .byte_workload
-                        .as_ref()
-                        .map(|workload| workload.current_record_bytes);
-                    (
+            .filter(|record| record.copy_observed)
+            .map(|record| {
+                let (state, completed_bytes) = match record.state {
+                    TransferRecordState::Settled => {
+                        (TransferEntrySnapshotState::Completed, record.display_bytes)
+                    }
+                    TransferRecordState::Active => (
                         TransferEntrySnapshotState::Active,
-                        Some(current_bytes.unwrap_or_default()),
-                    )
-                } else {
-                    (TransferEntrySnapshotState::Queued, None)
+                        Some(record.copied_bytes),
+                    ),
+                    TransferRecordState::Queued => (TransferEntrySnapshotState::Queued, None),
                 };
                 TransferEntrySnapshot {
-                    target: meta.target.clone(),
-                    is_directory: meta.is_directory,
+                    target: record.target.clone(),
+                    is_directory: record.is_directory,
                     completed_bytes,
-                    total_bytes: meta.total_bytes,
+                    total_bytes: record.display_bytes,
                     state,
                 }
             })
@@ -228,44 +194,108 @@ impl TransferBatchProgress {
     }
 }
 
-fn record_display_meta(record: &TransferJournalRecord) -> TransferRecordDisplayMeta {
-    TransferRecordDisplayMeta {
-        target: record.request.requested_target.clone(),
-        // 清单首条即源根自身:目录源的根条目 kind 为 Directory。
-        is_directory: record
-            .manifest
-            .as_ref()
-            .and_then(|manifest| manifest.entries.first())
-            .is_some_and(|root| root.identity.object_kind == FileObjectKind::Directory),
-        total_bytes: record
-            .manifest
-            .as_ref()
-            .map(|manifest| manifest_regular_bytes(manifest)),
+impl TransferRecordProgress {
+    /// 搬运方对每个文件先发 `0/total` 开始事件，第一条 `done == total` 即完成
+    /// （空文件的 `0/0` 两者合一）。
+    fn observe_file_lifecycle(&mut self, progress: &CopyProgress) {
+        let finished = progress.bytes_done >= progress.bytes_total;
+        if let Some((completed_bytes, _)) = self.in_flight.get_mut(&progress.from) {
+            *completed_bytes = (*completed_bytes).max(progress.bytes_done);
+            if !finished {
+                return;
+            }
+            self.in_flight.remove(&progress.from);
+        } else if progress.bytes_done != 0 {
+            // 已完成文件的迟到事件。
+            return;
+        } else if !finished {
+            self.in_flight
+                .insert(progress.from.clone(), (0, progress.bytes_total));
+            return;
+        }
+        self.copied_files += 1;
+    }
+
+    fn observe_copied_bytes(&mut self, progress: &CopyProgress) {
+        let Some(&expected_bytes) = self.regular_files.get(progress.from.as_path()) else {
+            return;
+        };
+        if progress.bytes_total != expected_bytes {
+            return;
+        }
+        let completed_file_bytes = progress.bytes_done.min(expected_bytes);
+        let previous_file_bytes = self
+            .file_bytes
+            .get(progress.from.as_path())
+            .copied()
+            .unwrap_or(0);
+        if completed_file_bytes <= previous_file_bytes {
+            return;
+        }
+        self.file_bytes
+            .insert(progress.from.clone(), completed_file_bytes);
+        self.copied_bytes += completed_file_bytes - previous_file_bytes;
     }
 }
 
-fn manifest_regular_bytes(manifest: &SourceManifest) -> u64 {
-    manifest
-        .entries
-        .iter()
-        .filter(|entry| entry.identity.object_kind == FileObjectKind::RegularFile)
-        .fold(0_u64, |total, entry| {
-            total.saturating_add(entry.identity.size)
-        })
+/// 一条记录的工作量：算几个文件（清单里非目录条目，至少 1）、多少字节
+/// （普通文件之和）。进度的总数和分段的上限都按它算。
+pub(super) fn record_workload(record: &TransferJournalRecord) -> (usize, u64) {
+    let Some(manifest) = record.manifest.as_ref() else {
+        return (1, 0);
+    };
+    let (mut files, mut bytes) = (0_usize, 0_u64);
+    for entry in &manifest.entries {
+        match entry.identity.object_kind {
+            FileObjectKind::Directory => {}
+            FileObjectKind::RegularFile => {
+                files += 1;
+                bytes = bytes.saturating_add(entry.identity.size);
+            }
+            FileObjectKind::SymbolicLink => files += 1,
+        }
+    }
+    (files.max(1), bytes)
 }
 
-fn record_item_count(record: &TransferJournalRecord) -> usize {
-    record
-        .manifest
-        .as_ref()
-        .map_or(0, |manifest| {
+fn record_progress(
+    record: &TransferJournalRecord,
+    mode: QueuedTransferMode,
+) -> TransferRecordProgress {
+    let manifest = record.manifest.as_ref();
+    let (items, bytes) = record_workload(record);
+    let regular_files = manifest
+        .map(|manifest| {
             manifest
                 .entries
                 .iter()
-                .filter(|entry| entry.identity.object_kind != FileObjectKind::Directory)
-                .count()
+                .filter(|entry| entry.identity.object_kind == FileObjectKind::RegularFile)
+                .map(|entry| {
+                    (
+                        manifest_entry_path(manifest, &entry.relative_path),
+                        entry.identity.size,
+                    )
+                })
+                .collect::<HashMap<_, _>>()
         })
-        .max(1)
+        .unwrap_or_default();
+    let display_bytes = manifest.map(|_| bytes);
+    TransferRecordProgress {
+        items,
+        state: TransferRecordState::Queued,
+        copied_files: 0,
+        in_flight: HashMap::new(),
+        regular_files,
+        copied_bytes: 0,
+        file_bytes: HashMap::new(),
+        target: record.request.requested_target.clone(),
+        // 清单首条即源根自身:目录源的根条目 kind 为 Directory。
+        is_directory: manifest
+            .and_then(|manifest| manifest.entries.first())
+            .is_some_and(|root| root.identity.object_kind == FileObjectKind::Directory),
+        display_bytes,
+        copy_observed: matches!(mode, QueuedTransferMode::Copy),
+    }
 }
 
 pub(crate) async fn send_archive_progress(
@@ -341,44 +371,6 @@ fn archive_progress_update(progress: ArchiveProgress) -> FileOperationProgressUp
     }
 }
 
-fn batch_byte_workload(records: &[TransferJournalRecord]) -> Option<TransferBatchByteWorkload> {
-    let records = records
-        .iter()
-        .map(|record| record.manifest.as_ref().and_then(record_byte_workload))
-        .collect::<Option<Vec<_>>>()?;
-    let total_bytes = records.iter().try_fold(0_u64, |total, record| {
-        total.checked_add(record.logical_bytes)
-    })?;
-    if total_bytes == 0 {
-        return None;
-    }
-
-    Some(TransferBatchByteWorkload {
-        total_bytes,
-        resolved_bytes: 0,
-        current_record_bytes: 0,
-        current_file_bytes: HashMap::new(),
-        records,
-    })
-}
-
-fn record_byte_workload(manifest: &SourceManifest) -> Option<TransferRecordByteWorkload> {
-    let mut logical_bytes = 0_u64;
-    let mut regular_files = HashMap::new();
-    for entry in &manifest.entries {
-        if entry.identity.object_kind != FileObjectKind::RegularFile {
-            continue;
-        }
-        logical_bytes = logical_bytes.checked_add(entry.identity.size)?;
-        let source_path = manifest_entry_path(manifest, &entry.relative_path);
-        regular_files.insert(source_path, entry.identity.size);
-    }
-    Some(TransferRecordByteWorkload {
-        logical_bytes,
-        regular_files,
-    })
-}
-
 fn manifest_entry_path(manifest: &SourceManifest, relative_path: &Path) -> PathBuf {
     if relative_path.as_os_str().is_empty() {
         manifest.root.clone()
@@ -439,6 +431,11 @@ mod tests {
         }
     }
 
+    fn settle(progress: &mut TransferBatchProgress, index: usize) -> FileOperationProgressUpdate {
+        progress.complete_record(index);
+        progress.snapshot()
+    }
+
     fn copy_progress(path: &str, bytes_done: u64, bytes_total: u64) -> CopyProgress {
         CopyProgress {
             from: PathBuf::from(path),
@@ -485,8 +482,8 @@ mod tests {
         let records = vec![record(0, "/source", &[("small", 10), ("large", 990)])];
         let mut progress = TransferBatchProgress::new(&records, QueuedTransferMode::Copy);
 
-        progress.observe_copy_progress(0, &copy_progress("/source/small", 0, 10));
-        progress.observe_copy_progress(0, &copy_progress("/source/small", 10, 10));
+        progress.observe_copy_progress(&copy_progress("/source/small", 0, 10));
+        progress.observe_copy_progress(&copy_progress("/source/small", 10, 10));
 
         assert_eq!(bytes(progress.snapshot()), (10, 1_000, 1, 2));
     }
@@ -499,8 +496,8 @@ mod tests {
         ];
         let mut progress = TransferBatchProgress::new(&records, QueuedTransferMode::Copy);
 
-        assert_eq!(bytes(progress.complete_record(0)), (10, 1_000, 1, 2));
-        progress.observe_copy_progress(1, &copy_progress("/large", 495, 990));
+        assert_eq!(bytes(settle(&mut progress, 0)), (10, 1_000, 1, 2));
+        progress.observe_copy_progress(&copy_progress("/large", 495, 990));
         assert_eq!(bytes(progress.snapshot()), (505, 1_000, 1, 2));
     }
 
@@ -509,10 +506,10 @@ mod tests {
         let records = vec![record(0, "/source", &[("file", 100)])];
         let mut progress = TransferBatchProgress::new(&records, QueuedTransferMode::Copy);
 
-        progress.observe_copy_progress(0, &copy_progress("/source/file", 60, 100));
+        progress.observe_copy_progress(&copy_progress("/source/file", 60, 100));
         assert_eq!(bytes(progress.snapshot()), (60, 100, 0, 1));
-        progress.observe_copy_progress(0, &copy_progress("/source/file", 20, 100));
-        progress.observe_copy_progress(0, &copy_progress("/source/file", 90, 200));
+        progress.observe_copy_progress(&copy_progress("/source/file", 20, 100));
+        progress.observe_copy_progress(&copy_progress("/source/file", 90, 200));
         assert_eq!(bytes(progress.snapshot()), (60, 100, 0, 1));
     }
 
@@ -521,7 +518,7 @@ mod tests {
         let records = vec![record(0, "/source", &[("", 500)])];
         let mut progress = TransferBatchProgress::new(&records, QueuedTransferMode::Copy);
 
-        assert_eq!(bytes(progress.complete_record(0)), (500, 500, 1, 1));
+        assert_eq!(bytes(settle(&mut progress, 0)), (500, 500, 1, 1));
     }
 
     /// 2049 个空文件那次：字节分母只有 41 B，进度条一直是 0。项数必须
@@ -535,8 +532,8 @@ mod tests {
         )];
         let mut progress = TransferBatchProgress::new(&records, QueuedTransferMode::Copy);
 
-        progress.observe_copy_progress(0, &copy_progress("/source/a", 0, 0));
-        progress.observe_copy_progress(0, &copy_progress("/source/b", 0, 0));
+        progress.observe_copy_progress(&copy_progress("/source/a", 0, 0));
+        progress.observe_copy_progress(&copy_progress("/source/b", 0, 0));
 
         assert_eq!(bytes(progress.snapshot()), (0, 41, 2, 4));
     }
@@ -546,9 +543,9 @@ mod tests {
         let records = vec![record(0, "/source", &[("file", 100), ("other", 5)])];
         let mut progress = TransferBatchProgress::new(&records, QueuedTransferMode::Copy);
 
-        progress.observe_copy_progress(0, &copy_progress("/source/file", 0, 100));
-        progress.observe_copy_progress(0, &copy_progress("/source/file", 100, 100));
-        progress.observe_copy_progress(0, &copy_progress("/source/file", 100, 100));
+        progress.observe_copy_progress(&copy_progress("/source/file", 0, 100));
+        progress.observe_copy_progress(&copy_progress("/source/file", 100, 100));
+        progress.observe_copy_progress(&copy_progress("/source/file", 100, 100));
 
         assert_eq!(items(progress.snapshot()), (1, 2));
     }
@@ -562,11 +559,11 @@ mod tests {
         )];
         let mut progress = TransferBatchProgress::new(&records, QueuedTransferMode::Copy);
 
-        progress.observe_copy_progress(0, &copy_progress("/source/small", 0, 10));
-        progress.observe_copy_progress(0, &copy_progress("/source/movie.mkv", 0, 3_000));
-        progress.observe_copy_progress(0, &copy_progress("/source/medium", 0, 500));
-        progress.observe_copy_progress(0, &copy_progress("/source/movie.mkv", 1_200, 3_000));
-        progress.observe_copy_progress(0, &copy_progress("/source/small", 10, 10));
+        progress.observe_copy_progress(&copy_progress("/source/small", 0, 10));
+        progress.observe_copy_progress(&copy_progress("/source/movie.mkv", 0, 3_000));
+        progress.observe_copy_progress(&copy_progress("/source/medium", 0, 500));
+        progress.observe_copy_progress(&copy_progress("/source/movie.mkv", 1_200, 3_000));
+        progress.observe_copy_progress(&copy_progress("/source/small", 10, 10));
 
         assert_eq!(
             current_file(progress.snapshot()),
@@ -577,12 +574,12 @@ mod tests {
             })
         );
 
-        progress.observe_copy_progress(0, &copy_progress("/source/movie.mkv", 3_000, 3_000));
+        progress.observe_copy_progress(&copy_progress("/source/movie.mkv", 3_000, 3_000));
         assert_eq!(
             current_file(progress.snapshot()).map(|file| file.name),
             Some("medium".to_owned())
         );
-        assert!(current_file(progress.complete_record(0)).is_none());
+        assert!(current_file(settle(&mut progress, 0)).is_none());
     }
 
     #[test]
@@ -605,10 +602,10 @@ mod tests {
 
         // 目录本身不算项：文件 + 符号链接 = 2，加下一条记录 1。
         assert_eq!(items(progress.snapshot()), (0, 3));
-        progress.observe_copy_progress(0, &copy_progress("/source/file", 0, 10));
-        progress.observe_copy_progress(0, &copy_progress("/source/file", 10, 10));
+        progress.observe_copy_progress(&copy_progress("/source/file", 0, 10));
+        progress.observe_copy_progress(&copy_progress("/source/file", 10, 10));
         assert_eq!(items(progress.snapshot()), (1, 3));
-        assert_eq!(items(progress.complete_record(0)), (2, 3));
+        assert_eq!(items(settle(&mut progress, 0)), (2, 3));
     }
 
     #[test]
@@ -620,7 +617,7 @@ mod tests {
 
         for name in ["a", "b", "c"] {
             let path = format!("/source/{name}");
-            progress.observe_copy_progress(0, &copy_progress(&path, 0, 0));
+            progress.observe_copy_progress(&copy_progress(&path, 0, 0));
         }
 
         assert_eq!(items(progress.snapshot()), (1, 2));
@@ -677,8 +674,8 @@ mod tests {
         let mut zero_progress = TransferBatchProgress::new(&zero_records, QueuedTransferMode::Copy);
 
         for update in [
-            missing_progress.complete_record(0),
-            zero_progress.complete_record(0),
+            settle(&mut missing_progress, 0),
+            settle(&mut zero_progress, 0),
         ] {
             assert!(matches!(
                 update,
@@ -699,10 +696,11 @@ mod tests {
             record(1, "/large", &[("", 990)]),
         ];
         let mut progress = TransferBatchProgress::new(&records, QueuedTransferMode::Copy);
+        progress.start_records(&[0]);
 
         let snapshots = progress.transfer_entry_snapshots();
         assert_eq!(snapshots.len(), 2);
-        // 批次起点:当前记录 Active(零字节,环画空弧),后续记录排队。
+        // 段起点:段里的记录 Active(零字节,环画空弧),后面段的记录排队。
         assert_eq!(snapshots[0].state, TransferEntrySnapshotState::Active);
         assert_eq!(snapshots[0].completed_bytes, Some(0));
         assert_eq!(snapshots[0].total_bytes, Some(10));
@@ -710,12 +708,13 @@ mod tests {
         assert_eq!(snapshots[1].state, TransferEntrySnapshotState::Queued);
         assert_eq!(snapshots[1].completed_bytes, None);
 
-        progress.observe_copy_progress(0, &copy_progress("/small", 4, 10));
+        progress.observe_copy_progress(&copy_progress("/small", 4, 10));
         let snapshots = progress.transfer_entry_snapshots();
         assert_eq!(snapshots[0].state, TransferEntrySnapshotState::Active);
         assert_eq!(snapshots[0].completed_bytes, Some(4));
 
         progress.complete_record(0);
+        progress.start_records(&[1]);
         let snapshots = progress.transfer_entry_snapshots();
         assert_eq!(snapshots[0].state, TransferEntrySnapshotState::Completed);
         assert_eq!(snapshots[0].total_bytes, Some(10));
@@ -730,18 +729,53 @@ mod tests {
             record(1, "/large", &[("", 990)]),
         ];
         let mut progress = TransferBatchProgress::new(&records, QueuedTransferMode::Move);
+        progress.start_records(&[0, 1]);
 
         // rename 结算推进完成计数,但未发生字节复制:不产生任何占位。
         progress.complete_record(0);
         assert!(progress.transfer_entry_snapshots().is_empty());
 
         // 分歧退回复制后,只有真正复制过的条目进入占位流。
-        progress.observe_copy_progress(1, &copy_progress("/large", 495, 990));
+        progress.observe_copy_progress(&copy_progress("/large", 495, 990));
         let snapshots = progress.transfer_entry_snapshots();
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].target, PathBuf::from("/large-target"));
         assert_eq!(snapshots[0].state, TransferEntrySnapshotState::Active);
         assert_eq!(snapshots[0].completed_bytes, Some(495));
+    }
+
+    /// 一段里的记录同时在跑，谁先做完谁先结算，计数和字节都不能乱。
+    #[test]
+    fn records_of_one_segment_settle_in_any_order() {
+        let records = vec![
+            record(0, "/first", &[("", 10)]),
+            record(1, "/second", &[("", 90)]),
+        ];
+        let mut progress = TransferBatchProgress::new(&records, QueuedTransferMode::Copy);
+        progress.start_records(&[0, 1]);
+
+        progress.observe_copy_progress(&copy_progress("/first", 0, 10));
+        progress.observe_copy_progress(&copy_progress("/second", 0, 90));
+        progress.observe_copy_progress(&copy_progress("/second", 90, 90));
+        assert_eq!(bytes(progress.snapshot()), (90, 100, 1, 2));
+        assert_eq!(bytes(settle(&mut progress, 1)), (90, 100, 1, 2));
+        assert_eq!(
+            current_file(progress.snapshot()).map(|file| file.name),
+            Some("first".to_owned())
+        );
+        assert_eq!(bytes(settle(&mut progress, 0)), (100, 100, 2, 2));
+        let states = progress
+            .transfer_entry_snapshots()
+            .into_iter()
+            .map(|snapshot| snapshot.state)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            states,
+            vec![
+                TransferEntrySnapshotState::Completed,
+                TransferEntrySnapshotState::Completed
+            ]
+        );
     }
 
     #[test]

@@ -230,11 +230,9 @@ impl QueuedFileOperation {
         matches!(self, Self::Duplicate { .. })
     }
 
+    /// 格式转换跑的外部进程不受运行状态监督，暂停了也停不住，不给按钮。
     pub fn supports_pause(&self) -> bool {
-        !matches!(
-            self,
-            Self::CreateArchive { .. } | Self::ExtractArchive { .. } | Self::Convert { .. }
-        )
+        !matches!(self, Self::Convert { .. })
     }
 
     fn uses_recovery_journal(&self) -> bool {

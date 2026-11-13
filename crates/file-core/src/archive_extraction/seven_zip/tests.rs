@@ -1,8 +1,10 @@
+use std::ffi::OsStr;
 #[cfg(unix)]
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::process::ExitStatusExt;
 
 use super::*;
+use crate::ArchivePassword;
 
 fn seven_zip_test_request(password: Option<ArchivePassword>) -> ArchiveExtractionRequest {
     ArchiveExtractionRequest {
@@ -95,4 +97,40 @@ fn seven_zip_wrong_password_reports_invalid_password() {
         error,
         FileError::ArchiveInvalidPassword { path } if path == request.archive
     ));
+}
+
+fn listed(path: &str, len: u64, encrypted: bool, block: Option<u64>) -> SevenZipListedEntry {
+    SevenZipListedEntry {
+        path: path.to_owned(),
+        is_directory: false,
+        len,
+        encrypted,
+        block,
+    }
+}
+
+/// solid block 只能从块头按顺序解：块尾的小文件要先解完前面的大文件，
+/// 代价反而最大。试解要挑“块内到它为止”累计最少的那个。
+#[test]
+fn password_probe_picks_the_cheapest_encrypted_file_to_decode() {
+    let entries = vec![
+        SevenZipListedEntry {
+            path: "dir".to_owned(),
+            is_directory: true,
+            len: 0,
+            encrypted: false,
+            block: None,
+        },
+        listed("empty.txt", 0, false, None),
+        listed("big.bin", 3_000_000_000, true, Some(0)),
+        listed("tiny-after-big.txt", 10, true, Some(0)),
+        listed("medium-first-in-block.bin", 5_000, true, Some(1)),
+        listed("small-second-in-block.txt", 100, true, Some(1)),
+    ];
+
+    assert_eq!(
+        password_probe_entry(&entries).map(|entry| entry.path.as_str()),
+        Some("medium-first-in-block.bin")
+    );
+    assert!(password_probe_entry(&entries[..2]).is_none());
 }

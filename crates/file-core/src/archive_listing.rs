@@ -268,7 +268,25 @@ async fn read_seven_zip_members(
 }
 
 fn parse_seven_zip_listing(technical_listing: &str) -> Vec<ArchiveListingEntry> {
-    let mut members = Vec::new();
+    parse_seven_zip_entries(technical_listing)
+        .into_iter()
+        .map(|entry| ArchiveListingEntry {
+            path: entry.path,
+            kind: if entry.is_directory {
+                FileKind::Directory
+            } else {
+                FileKind::File
+            },
+            len: entry.len,
+            modified: None,
+        })
+        .collect()
+}
+
+/// `7z l -slt` 的条目段。浏览只用路径/类型/大小；整包解压的密码检查还要
+/// `Encrypted` 和 `Block`（同一 solid block 里的文件要按顺序解）。
+pub(crate) fn parse_seven_zip_entries(technical_listing: &str) -> Vec<SevenZipListedEntry> {
+    let mut entries = Vec::new();
     let mut in_archive_entries = false;
     let mut current_entry: Option<SevenZipListedEntry> = None;
 
@@ -281,16 +299,18 @@ fn parse_seven_zip_listing(technical_listing: &str) -> Vec<ArchiveListingEntry> 
             continue;
         }
         if line.trim().is_empty() {
-            push_listed_archive_member(current_entry.take(), &mut members);
+            entries.extend(current_entry.take());
             continue;
         }
 
         if let Some(path) = line.strip_prefix("Path = ") {
-            push_listed_archive_member(current_entry.take(), &mut members);
+            entries.extend(current_entry.take());
             current_entry = Some(SevenZipListedEntry {
                 path: path.to_owned(),
                 is_directory: path.ends_with('/') || path.ends_with('\\'),
                 len: 0,
+                encrypted: false,
+                block: None,
             });
             continue;
         }
@@ -304,34 +324,16 @@ fn parse_seven_zip_listing(technical_listing: &str) -> Vec<ArchiveListingEntry> 
             entry.is_directory |= seven_zip_attributes_field_is_directory(attributes);
         } else if let Some(size) = line.strip_prefix("Size = ") {
             entry.len = size.trim().parse().unwrap_or(0);
+        } else if let Some(encrypted) = line.strip_prefix("Encrypted = ") {
+            entry.encrypted = encrypted.trim() == "+";
+        } else if let Some(block) = line.strip_prefix("Block = ") {
+            entry.block = block.trim().parse().ok();
         }
     }
 
-    push_listed_archive_member(current_entry, &mut members);
-    members
-}
-
-fn push_listed_archive_member(
-    listed_entry: Option<SevenZipListedEntry>,
-    members: &mut Vec<ArchiveListingEntry>,
-) {
-    let Some(listed_entry) = listed_entry else {
-        return;
-    };
-    if listed_entry.path.is_empty() {
-        return;
-    }
-
-    members.push(ArchiveListingEntry {
-        path: listed_entry.path,
-        kind: if listed_entry.is_directory {
-            FileKind::Directory
-        } else {
-            FileKind::File
-        },
-        len: listed_entry.len,
-        modified: None,
-    });
+    entries.extend(current_entry);
+    entries.retain(|entry| !entry.path.is_empty());
+    entries
 }
 
 fn seven_zip_folder_field_is_directory(folder: &str) -> bool {
@@ -406,10 +408,14 @@ enum TarCompression {
     Gzip,
 }
 
-struct SevenZipListedEntry {
-    path: String,
-    is_directory: bool,
-    len: u64,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SevenZipListedEntry {
+    pub(crate) path: String,
+    pub(crate) is_directory: bool,
+    pub(crate) len: u64,
+    pub(crate) encrypted: bool,
+    /// 7z 格式才有；rar 等没有时为 None，按各文件独立解码对待。
+    pub(crate) block: Option<u64>,
 }
 
 /// zip 的 MS-DOS 时间戳按 UTC 解释成 `SystemTime`。DOS 时间本身不

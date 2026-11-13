@@ -1394,3 +1394,30 @@ fn transient_operation_driver_is_never_restarted() {
     assert_eq!(queue.tasks()[0].driver_generation, 0);
     assert!(queue.tasks()[0].driver_running);
 }
+
+/// 压缩、解压的暂停现在真的能停住（7z 子进程 SIGSTOP、Rust 实现在读数据处等），
+/// 任务行要给暂停按钮；格式转换的外部进程不受监督，不给。
+#[test]
+fn archive_tasks_offer_pause_but_format_conversion_does_not() {
+    let extract = QueuedFileOperation::ExtractArchive {
+        request: file_core::ArchiveExtractionRequest {
+            archive: PathBuf::from("/tmp/a.7z"),
+            destination: PathBuf::from("/tmp/a"),
+            password: None,
+        },
+    };
+    let create = QueuedFileOperation::CreateArchive {
+        sources: vec![PathBuf::from("/tmp/a")],
+        target: PathBuf::from("/tmp/a.zip"),
+        format: file_core::ArchiveFormat::Zip,
+        compression_level: file_core::ArchiveCompressionLevel::Store,
+        password: None,
+    };
+
+    assert!(extract.supports_pause());
+    assert!(create.supports_pause());
+    assert!(!QueuedFileOperation::Convert {
+        requests: Vec::new()
+    }
+    .supports_pause());
+}

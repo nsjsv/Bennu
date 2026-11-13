@@ -2,8 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use file_core::{
-    ArchiveCreationProgress, ArchiveExtractionProgress, CopyProgress, FileObjectKind,
-    SourceManifest, TransferJournalRecord,
+    ArchiveProgress, CopyProgress, FileObjectKind, SourceManifest, TransferJournalRecord,
 };
 
 use crate::{
@@ -269,40 +268,12 @@ fn record_item_count(record: &TransferJournalRecord) -> usize {
         .max(1)
 }
 
-pub(crate) async fn send_archive_creation_progress(
+pub(crate) async fn send_archive_progress(
     output: &FileOperationEventSender,
     task_id: u64,
-    progress: ArchiveCreationProgress,
+    progress: ArchiveProgress,
 ) {
-    send_file_operation_progress(
-        output,
-        task_id,
-        archive_progress_update(
-            progress.completed_source_bytes,
-            progress.total_source_bytes,
-            progress.completed_entries,
-            progress.total_entries,
-        ),
-    )
-    .await;
-}
-
-pub(crate) async fn send_archive_extraction_progress(
-    output: &FileOperationEventSender,
-    task_id: u64,
-    progress: ArchiveExtractionProgress,
-) {
-    send_file_operation_progress(
-        output,
-        task_id,
-        archive_progress_update(
-            progress.completed_bytes,
-            progress.total_bytes,
-            progress.completed_entries,
-            progress.total_entries,
-        ),
-    )
-    .await;
+    send_file_operation_progress(output, task_id, archive_progress_update(progress)).await;
 }
 
 pub(crate) async fn send_file_operation_progress(
@@ -337,24 +308,36 @@ pub(super) async fn send_transfer_batch_progress(
         .await;
 }
 
-fn archive_progress_update(
-    completed_bytes: u64,
-    total_bytes: u64,
-    completed_items: usize,
-    total_items: usize,
-) -> FileOperationProgressUpdate {
-    if total_bytes == 0 {
-        FileOperationProgressUpdate::IndeterminateItems {
-            completed: completed_items,
-            total: total_items,
-        }
-    } else {
-        FileOperationProgressUpdate::Bytes {
+/// 度量由产出方选定：按条目算的发 `Transfer`（可带当前文件），按字节算的
+/// 发 `Bytes`。分母为 0 时进度模型自己不出比例，这里不必再分支。
+fn archive_progress_update(progress: ArchiveProgress) -> FileOperationProgressUpdate {
+    match progress {
+        ArchiveProgress::Entries {
+            completed_entries,
+            total_entries,
+            bytes,
+            current_entry,
+        } => FileOperationProgressUpdate::Transfer {
+            completed_items: completed_entries,
+            total_items: total_entries,
+            bytes,
+            current_file: current_entry.map(|entry| CurrentFileProgress {
+                name: entry.name,
+                completed_bytes: entry.completed_bytes,
+                total_bytes: entry.total_bytes,
+            }),
+        },
+        ArchiveProgress::Bytes {
             completed_bytes,
             total_bytes,
-            completed_items,
-            total_items,
-        }
+            completed_entries,
+            total_entries,
+        } => FileOperationProgressUpdate::Bytes {
+            completed_bytes,
+            total_bytes,
+            completed_items: completed_entries,
+            total_items: total_entries,
+        },
     }
 }
 
@@ -643,22 +626,44 @@ mod tests {
         assert_eq!(items(progress.snapshot()), (1, 2));
     }
 
+    /// 度量由产出方选定，这里只照着搬：按条目的带当前文件发 Transfer，
+    /// 按字节的（7z 百分比、tar 已读字节）发 Bytes，总数未知照样透传。
     #[test]
-    fn archive_bytes_drive_fraction_while_zero_byte_workload_stays_indeterminate() {
+    fn archive_progress_keeps_the_measure_its_producer_chose() {
         assert!(matches!(
-            archive_progress_update(40, 100, 2, 4),
+            archive_progress_update(ArchiveProgress::Entries {
+                completed_entries: 1,
+                total_entries: 3,
+                bytes: Some((40, 100)),
+                current_entry: Some(file_core::ArchiveEntryProgress {
+                    name: "a.bin".to_owned(),
+                    completed_bytes: 5,
+                    total_bytes: 50,
+                }),
+            }),
+            FileOperationProgressUpdate::Transfer {
+                completed_items: 1,
+                total_items: 3,
+                bytes: Some((40, 100)),
+                current_file: Some(CurrentFileProgress {
+                    completed_bytes: 5,
+                    total_bytes: 50,
+                    ..
+                }),
+            }
+        ));
+        assert!(matches!(
+            archive_progress_update(ArchiveProgress::Bytes {
+                completed_bytes: 40,
+                total_bytes: 100,
+                completed_entries: 2,
+                total_entries: None,
+            }),
             FileOperationProgressUpdate::Bytes {
                 completed_bytes: 40,
                 total_bytes: 100,
                 completed_items: 2,
-                total_items: 4,
-            }
-        ));
-        assert!(matches!(
-            archive_progress_update(0, 0, 2, 4),
-            FileOperationProgressUpdate::IndeterminateItems {
-                completed: 2,
-                total: 4,
+                total_items: None,
             }
         ));
     }

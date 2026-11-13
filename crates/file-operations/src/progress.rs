@@ -30,7 +30,8 @@ impl CurrentFileProgress {
 pub struct FileOperationProgress {
     measure: FileOperationProgressMeasure,
     bytes: Option<(u64, u64)>,
-    items: Option<(usize, usize)>,
+    /// (已完成, 总数)；总数未知（tar 流式解压）时只有已完成数。
+    items: Option<(usize, Option<usize>)>,
     current_file: Option<CurrentFileProgress>,
     completed: bool,
 }
@@ -56,8 +57,8 @@ impl FileOperationProgress {
                 .bytes
                 .and_then(|(completed, total)| active_byte_fraction(completed, total)),
             // 和字节比例同一个上限：最后一项写完到结算之间不显示满格。
-            FileOperationProgressMeasure::Items => self.items.map(|(completed, total)| {
-                (completed as f32 / total as f32).min(ACTIVE_PROGRESS_LIMIT)
+            FileOperationProgressMeasure::Items => self.items.and_then(|(completed, total)| {
+                total.map(|total| (completed as f32 / total as f32).min(ACTIVE_PROGRESS_LIMIT))
             }),
         }
     }
@@ -66,7 +67,7 @@ impl FileOperationProgress {
         self.bytes
     }
 
-    pub fn items(&self) -> Option<(usize, usize)> {
+    pub fn items(&self) -> Option<(usize, Option<usize>)> {
         self.items
     }
 
@@ -77,7 +78,9 @@ impl FileOperationProgress {
     pub fn mark_complete(&mut self) {
         self.completed = true;
         self.bytes = self.bytes.map(|(_, total)| (total, total));
-        self.items = self.items.map(|(_, total)| (total, total));
+        self.items = self
+            .items
+            .map(|(completed, total)| (total.unwrap_or(completed), total));
         self.current_file = None;
     }
 
@@ -107,7 +110,7 @@ impl FileOperationProgress {
                 bytes,
                 current_file,
             } => {
-                if self.update_items(completed_items, total_items) {
+                if self.update_items(completed_items, Some(total_items)) {
                     self.select_measure(FileOperationProgressMeasure::Items);
                 }
                 if let Some((completed_bytes, total_bytes)) = bytes {
@@ -116,7 +119,7 @@ impl FileOperationProgress {
                 self.current_file = current_file;
             }
             FileOperationProgressUpdate::IndeterminateItems { completed, total } => {
-                self.update_items(completed, total);
+                self.update_items(completed, Some(total));
             }
             FileOperationProgressUpdate::Indeterminate => {}
         }
@@ -149,20 +152,22 @@ impl FileOperationProgress {
         }
     }
 
-    fn update_items(&mut self, completed: usize, total: usize) -> bool {
-        if total == 0 {
+    /// 同 `update_bytes`；`total == None` 表示总数未知，只累计已完成数，
+    /// 不算可信分母。
+    fn update_items(&mut self, completed: usize, total: Option<usize>) -> bool {
+        if total == Some(0) {
             return false;
         }
-        let completed = completed.min(total);
+        let completed = total.map_or(completed, |total| completed.min(total));
         match self.items {
             Some((current, current_total)) if current_total == total => {
                 self.items = Some((current.max(completed), total));
-                true
+                total.is_some()
             }
             Some(_) => false,
             None => {
                 self.items = Some((completed, total));
-                true
+                total.is_some()
             }
         }
     }
@@ -170,12 +175,12 @@ impl FileOperationProgress {
 
 #[derive(Debug, Clone)]
 pub enum FileOperationProgressUpdate {
-    /// 比例按字节算；项数只用于文字。
+    /// 比例按字节算；项数只用于文字，总数未知时为 `None`。
     Bytes {
         completed_bytes: u64,
         total_bytes: u64,
         completed_items: usize,
-        total_items: usize,
+        total_items: Option<usize>,
     },
     /// 比例按项数算；字节只用于文字，当前文件单独一条进度。
     Transfer {

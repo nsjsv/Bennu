@@ -7,9 +7,7 @@ use bennu_state::{
 mod progress;
 mod store_codec;
 
-pub(super) use progress::{
-    send_archive_creation_progress, send_archive_extraction_progress, send_file_operation_progress,
-};
+pub(super) use progress::{send_archive_progress, send_file_operation_progress};
 use progress::{send_transfer_batch_progress, TransferBatchProgress};
 
 /// Convert only durable checkpoints into UI facts. Merge children retain their

@@ -9,8 +9,8 @@ use tokio_util::sync::CancellationToken;
 use crate::archive_extraction::archive_extraction_format_for_path;
 use crate::seven_zip_password::seven_zip_password_error;
 use crate::{
-    ArchiveExtractionFormat, ArchiveExtractionProgress, ArchivePassword, FileError,
-    FileOperationControls, SEVEN_ZIP_COMMAND_NAMES,
+    ArchiveExtractionFormat, ArchivePassword, ArchiveProgress, FileError, FileOperationControls,
+    SEVEN_ZIP_COMMAND_NAMES,
 };
 
 /// 批量提取请求：把包内虚拟路径成员解压到真实目标目录。
@@ -43,7 +43,7 @@ impl ArchiveMemberExtractionRequest {
 pub async fn extract_archive_members_with_controls_and_progress(
     request: ArchiveMemberExtractionRequest,
     mut controls: FileOperationControls,
-    mut progress: impl FnMut(ArchiveExtractionProgress) + Send,
+    mut progress: impl FnMut(ArchiveProgress) + Send,
 ) -> Result<PathBuf, FileError> {
     controls.wait_until_running().await?;
     let destination = request.destination.clone();
@@ -61,6 +61,7 @@ pub async fn extract_archive_members_with_controls_and_progress(
                 message: format!("archive member not found: {}", inner.display()),
             })?;
             let total_entries = worklist.len();
+            let total_bytes = worklist.iter().map(|(_, len)| *len).sum::<u64>();
             let mut completed_bytes = 0;
             // 落地锚点必须保留被拖成员自身这一层名字：文件夹成员 A 的
             // 子孙要落成 目标/A/<子结构>，而不是把 A 剥掉、把子项散在
@@ -92,11 +93,11 @@ pub async fn extract_archive_members_with_controls_and_progress(
                 )
                 .await?;
                 completed_bytes += len;
-                progress(ArchiveExtractionProgress {
-                    completed_bytes,
-                    total_bytes: 0,
+                progress(ArchiveProgress::Entries {
                     completed_entries: completed_index + 1,
                     total_entries,
+                    bytes: Some((completed_bytes, total_bytes)),
+                    current_entry: None,
                 });
             }
         }

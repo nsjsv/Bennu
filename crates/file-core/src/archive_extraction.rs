@@ -2,17 +2,18 @@ use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::time::Instant;
 
-use tokio::process::Command;
 use tokio::runtime::Handle;
 use tokio_util::sync::CancellationToken;
 use zip::result::ZipError;
 
-use crate::archive_listing::split_volume_hint;
-// 密码错误分类收口在独立模块:与 archive_vfs::extract 的成员级提取共用。
-use crate::seven_zip_password::seven_zip_password_error;
-use crate::{ArchivePassword, FileError, FileOperationControls, SEVEN_ZIP_COMMAND_NAMES};
+use self::seven_zip::{extract_archive_with_seven_zip, inspect_archive_with_seven_zip};
+use crate::{
+    ArchiveEntryProgress, ArchivePassword, ArchiveProgress, FileError, FileOperationControls,
+};
+
+mod seven_zip;
 
 const ARCHIVE_EXTRACTION_BUFFER_SIZE: usize = 1024 * 1024;
 
@@ -25,18 +26,12 @@ pub enum ArchiveExtractionFormat {
     Rar,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ArchiveExtractionProgress {
-    pub completed_bytes: u64,
-    pub total_bytes: u64,
-    pub completed_entries: usize,
-    pub total_entries: usize,
-}
-
 #[derive(Debug)]
 struct ZipExtractionWorkload {
     entry_bytes: Vec<u64>,
     total_bytes: u64,
+    /// 目录不计：总进度按文件个数走。
+    total_files: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -142,7 +137,7 @@ pub async fn extract_archive(
 pub async fn extract_archive_with_progress(
     request: ArchiveExtractionRequest,
     cancel: CancellationToken,
-    progress: impl FnMut(ArchiveExtractionProgress) + Send + 'static,
+    progress: impl FnMut(ArchiveProgress) + Send + 'static,
 ) -> Result<PathBuf, FileError> {
     extract_archive_with_controls_and_progress(
         request,
@@ -155,7 +150,7 @@ pub async fn extract_archive_with_progress(
 pub async fn extract_archive_with_controls_and_progress(
     request: ArchiveExtractionRequest,
     mut controls: FileOperationControls,
-    progress: impl FnMut(ArchiveExtractionProgress) + Send + 'static,
+    progress: impl FnMut(ArchiveProgress) + Send + 'static,
 ) -> Result<PathBuf, FileError> {
     let format = archive_extraction_format_for_path(&request.archive).ok_or(
         FileError::Unsupported("archive format is not supported for extraction"),
@@ -166,14 +161,14 @@ pub async fn extract_archive_with_controls_and_progress(
         ArchiveExtractionFormat::Zip => extract_zip_archive(request, controls, progress).await,
         ArchiveExtractionFormat::Tar => {
             reject_tar_password(&request)?;
-            extract_tar_archive(request, TarCompression::Plain, controls).await
+            extract_tar_archive(request, TarCompression::Plain, controls, progress).await
         }
         ArchiveExtractionFormat::TarGz => {
             reject_tar_password(&request)?;
-            extract_tar_archive(request, TarCompression::Gzip, controls).await
+            extract_tar_archive(request, TarCompression::Gzip, controls, progress).await
         }
         ArchiveExtractionFormat::SevenZip | ArchiveExtractionFormat::Rar => {
-            extract_archive_with_seven_zip(request, controls.cancellation_token()).await
+            extract_archive_with_seven_zip(request, controls, progress).await
         }
     }
 }
@@ -194,7 +189,7 @@ async fn inspect_zip_archive(
 async fn extract_zip_archive(
     request: ArchiveExtractionRequest,
     controls: FileOperationControls,
-    progress: impl FnMut(ArchiveExtractionProgress) + Send + 'static,
+    progress: impl FnMut(ArchiveProgress) + Send + 'static,
 ) -> Result<PathBuf, FileError> {
     let destination = request.destination.clone();
     let join_destination = destination.clone();
@@ -213,23 +208,32 @@ fn extract_zip_archive_blocking(
     request: ArchiveExtractionRequest,
     mut controls: FileOperationControls,
     runtime: Handle,
-    mut progress: impl FnMut(ArchiveExtractionProgress),
+    mut progress: impl FnMut(ArchiveProgress),
 ) -> Result<PathBuf, FileError> {
     let cancel = controls.cancellation_token();
     let workload = inspect_zip_entries(&request, &cancel)?;
     archive_control_checkpoint(&mut controls, &runtime)?;
-    progress(ArchiveExtractionProgress {
-        completed_bytes: 0,
-        total_bytes: workload.total_bytes,
-        completed_entries: 0,
-        total_entries: workload.entry_bytes.len(),
-    });
-    let destination_created = ensure_destination_directory(&request.destination)?;
-    let outcome = extract_zip_entries(&request, &mut controls, &runtime, &workload, &mut progress);
-    if outcome.is_err() && destination_created {
-        let _ = fs::remove_dir_all(&request.destination);
+    progress(workload.progress(0, 0, None));
+    // 出错或取消时不删已经解出来的东西：清理一旦有 bug 会多删用户文件。
+    ensure_destination_directory(&request.destination)?;
+    extract_zip_entries(&request, &mut controls, &runtime, &workload, &mut progress)?;
+    Ok(request.destination)
+}
+
+impl ZipExtractionWorkload {
+    fn progress(
+        &self,
+        completed_files: usize,
+        completed_bytes: u64,
+        current_entry: Option<ArchiveEntryProgress>,
+    ) -> ArchiveProgress {
+        ArchiveProgress::Entries {
+            completed_entries: completed_files,
+            total_entries: self.total_files,
+            bytes: Some((completed_bytes, self.total_bytes)),
+            current_entry,
+        }
     }
-    outcome.map(|_| request.destination)
 }
 
 fn inspect_zip_entries(
@@ -241,6 +245,7 @@ fn inspect_zip_entries(
         zip::ZipArchive::new(file).map_err(|error| zip_error(&request.archive, error))?;
     let mut entry_bytes = Vec::with_capacity(archive.len());
     let mut total_bytes = 0_u64;
+    let mut total_files = 0;
 
     for index in 0..archive.len() {
         cancel_if_requested(cancel)?;
@@ -257,6 +262,7 @@ fn inspect_zip_entries(
             ));
         }
         let size = if entry.is_dir() { 0 } else { entry.size() };
+        total_files += usize::from(!entry.is_dir());
         total_bytes = total_bytes
             .checked_add(size)
             .ok_or_else(|| FileError::InvalidInput {
@@ -268,6 +274,7 @@ fn inspect_zip_entries(
     Ok(ZipExtractionWorkload {
         entry_bytes,
         total_bytes,
+        total_files,
     })
 }
 
@@ -276,7 +283,7 @@ fn extract_zip_entries(
     controls: &mut FileOperationControls,
     runtime: &Handle,
     workload: &ZipExtractionWorkload,
-    progress: &mut impl FnMut(ArchiveExtractionProgress),
+    progress: &mut impl FnMut(ArchiveProgress),
 ) -> Result<(), FileError> {
     let file = open_archive_file(&request.archive)?;
     let mut archive =
@@ -284,8 +291,8 @@ fn extract_zip_entries(
     if archive.len() != workload.entry_bytes.len() {
         return Err(archive_changed_after_inspection(&request.archive));
     }
-    let total_entries = workload.entry_bytes.len();
     let mut completed_bytes = 0_u64;
+    let mut completed_files = 0;
     let mut buffer = vec![0_u8; ARCHIVE_EXTRACTION_BUFFER_SIZE];
 
     for (index, expected_entry_bytes) in workload.entry_bytes.iter().copied().enumerate() {
@@ -300,19 +307,17 @@ fn extract_zip_entries(
         if entry.size() != expected_entry_bytes {
             return Err(archive_changed_after_inspection(&request.archive));
         }
+        let entry_name = relative_path
+            .file_name()
+            .unwrap_or(relative_path.as_os_str())
+            .to_string_lossy()
+            .into_owned();
         let target = request.destination.join(relative_path);
         if entry.is_dir() {
             fs::create_dir_all(&target).map_err(|source| FileError::CreateDirectory {
                 path: target,
                 source,
             })?;
-            archive_control_checkpoint(controls, runtime)?;
-            progress(ArchiveExtractionProgress {
-                completed_bytes,
-                total_bytes: workload.total_bytes,
-                completed_entries: index + 1,
-                total_entries,
-            });
             continue;
         }
         if let Some(parent) = target.parent() {
@@ -355,12 +360,15 @@ fn extract_zip_entries(
                 })?;
             completed_bytes += read as u64;
             archive_control_checkpoint(controls, runtime)?;
-            progress(ArchiveExtractionProgress {
+            progress(workload.progress(
+                completed_files,
                 completed_bytes,
-                total_bytes: workload.total_bytes,
-                completed_entries: index,
-                total_entries,
-            });
+                Some(ArchiveEntryProgress {
+                    name: entry_name.clone(),
+                    completed_bytes: completed_entry_bytes,
+                    total_bytes: expected_entry_bytes,
+                }),
+            ));
         }
         if completed_entry_bytes != expected_entry_bytes {
             return Err(archive_changed_after_inspection(&request.archive));
@@ -369,13 +377,9 @@ fn extract_zip_entries(
             path: target,
             message: source.to_string(),
         })?;
+        completed_files += 1;
         archive_control_checkpoint(controls, runtime)?;
-        progress(ArchiveExtractionProgress {
-            completed_bytes,
-            total_bytes: workload.total_bytes,
-            completed_entries: index + 1,
-            total_entries,
-        });
+        progress(workload.progress(completed_files, completed_bytes, None));
     }
     Ok(())
 }
@@ -420,12 +424,13 @@ async fn extract_tar_archive(
     request: ArchiveExtractionRequest,
     compression: TarCompression,
     controls: FileOperationControls,
+    mut progress: impl FnMut(ArchiveProgress) + Send + 'static,
 ) -> Result<PathBuf, FileError> {
     let destination = request.destination.clone();
     let join_destination = destination.clone();
     let runtime = Handle::current();
     tokio::task::spawn_blocking(move || {
-        extract_tar_archive_blocking(request, compression, controls, runtime)
+        extract_tar_archive_blocking(request, compression, controls, runtime, &mut progress)
     })
     .await
     .map_err(|error| FileError::Archive {
@@ -439,233 +444,130 @@ fn extract_tar_archive_blocking(
     compression: TarCompression,
     mut controls: FileOperationControls,
     runtime: Handle,
+    progress: &mut dyn FnMut(ArchiveProgress),
 ) -> Result<PathBuf, FileError> {
     archive_control_checkpoint(&mut controls, &runtime)?;
-    let destination_created = ensure_destination_directory(&request.destination)?;
-    let outcome = match compression {
-        TarCompression::Plain => {
-            let file = open_archive_file(&request.archive)?;
-            extract_tar_entries(file, &request, &mut controls, &runtime)
-        }
-        TarCompression::Gzip => {
-            let file = open_archive_file(&request.archive)?;
-            extract_tar_entries(
-                flate2::read::GzDecoder::new(file),
-                &request,
-                &mut controls,
-                &runtime,
-            )
-        }
+    // 出错或取消时不删已经解出来的东西：清理一旦有 bug 会多删用户文件。
+    ensure_destination_directory(&request.destination)?;
+    let file = open_archive_file(&request.archive)?;
+    let total_bytes = file
+        .metadata()
+        .map_err(|source| FileError::Metadata {
+            path: request.archive.clone(),
+            source,
+        })?
+        .len();
+    let completed_entries = std::rc::Rc::new(std::cell::Cell::new(0));
+    let reader = TarReadProgress {
+        inner: file,
+        controls: controls.clone(),
+        runtime: runtime.clone(),
+        read_bytes: 0,
+        total_bytes,
+        completed_entries: completed_entries.clone(),
+        last_sent_at: None,
+        progress,
     };
-    if outcome.is_err() && destination_created {
-        let _ = fs::remove_dir_all(&request.destination);
+    let reader = match compression {
+        TarCompression::Plain => {
+            extract_tar_entries(reader, &request, &controls, &completed_entries)?
+        }
+        TarCompression::Gzip => extract_tar_entries(
+            flate2::read::GzDecoder::new(reader),
+            &request,
+            &controls,
+            &completed_entries,
+        )?
+        .into_inner(),
+    };
+    reader.report_finished();
+    Ok(request.destination)
+}
+
+/// tar 没有目录表，只能边读边解：进度按读过的压缩包原始字节算（gzip 解码
+/// 在它外面），事先不知道条目总数。单个大条目解到一半时也要有进度，所以
+/// 在读的地方按间隔报，而不是每解完一个条目才报；暂停也在读的地方等，
+/// 大条目解到一半也能停住。
+struct TarReadProgress<'p, R> {
+    inner: R,
+    controls: FileOperationControls,
+    runtime: Handle,
+    read_bytes: u64,
+    total_bytes: u64,
+    completed_entries: std::rc::Rc<std::cell::Cell<usize>>,
+    last_sent_at: Option<Instant>,
+    progress: &'p mut dyn FnMut(ArchiveProgress),
+}
+
+impl<R> TarReadProgress<'_, R> {
+    fn report(&mut self, completed_bytes: u64) {
+        (self.progress)(ArchiveProgress::Bytes {
+            completed_bytes,
+            total_bytes: self.total_bytes,
+            completed_entries: self.completed_entries.get(),
+            total_entries: None,
+        });
     }
-    outcome.map(|_| request.destination)
+
+    /// 解完了：gzip 尾部和 tar 结尾的空块不一定会被读到，直接报满，并带上
+    /// 最终条目数（读完最后一块数据时，最后一个条目还没解完）。
+    fn report_finished(mut self) {
+        self.report(self.total_bytes);
+    }
+}
+
+impl<R: io::Read> io::Read for TarReadProgress<'_, R> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        self.runtime
+            .block_on(self.controls.wait_until_running())
+            .map_err(io::Error::other)?;
+        let read = self.inner.read(buffer)?;
+        self.read_bytes += read as u64;
+        let now = Instant::now();
+        if self
+            .last_sent_at
+            .is_none_or(|sent| now.duration_since(sent) >= crate::PROGRESS_REPORT_INTERVAL)
+        {
+            self.last_sent_at = Some(now);
+            self.report(self.read_bytes.min(self.total_bytes));
+        }
+        Ok(read)
+    }
 }
 
 fn extract_tar_entries<R: io::Read>(
     reader: R,
     request: &ArchiveExtractionRequest,
-    controls: &mut FileOperationControls,
-    runtime: &Handle,
-) -> Result<(), FileError> {
+    controls: &FileOperationControls,
+    completed_entries: &std::cell::Cell<usize>,
+) -> Result<R, FileError> {
     let mut archive = tar::Archive::new(reader);
-    let entries = archive.entries().map_err(|source| FileError::Archive {
-        path: request.archive.clone(),
-        message: source.to_string(),
-    })?;
+    // 读数据时被取消或关机打断：tar 会把它包成自己的读错误，按运行状态还原。
+    let tar_error = |source: io::Error| {
+        controls
+            .interruption()
+            .unwrap_or_else(|| FileError::Archive {
+                path: request.archive.clone(),
+                message: source.to_string(),
+            })
+    };
+    let entries = archive.entries().map_err(tar_error)?;
 
+    // 暂停/取消在 reader 里每次读数据时检查（读条目头也算），这里不用再查。
     for entry in entries {
-        archive_control_checkpoint(controls, runtime)?;
-        let mut entry = entry.map_err(|source| FileError::Archive {
-            path: request.archive.clone(),
-            message: source.to_string(),
-        })?;
-        let unpacked =
-            entry
-                .unpack_in(&request.destination)
-                .map_err(|source| FileError::Archive {
-                    path: request.archive.clone(),
-                    message: source.to_string(),
-                })?;
+        let mut entry = entry.map_err(tar_error)?;
+        let unpacked = entry.unpack_in(&request.destination).map_err(tar_error)?;
         if !unpacked {
             return Err(FileError::InvalidInput {
                 path: request.archive.clone(),
                 message: "archive entry path is not safe".to_owned(),
             });
         }
-        archive_control_checkpoint(controls, runtime)?;
-    }
-    Ok(())
-}
-
-async fn extract_archive_with_seven_zip(
-    request: ArchiveExtractionRequest,
-    cancel: CancellationToken,
-) -> Result<PathBuf, FileError> {
-    for command_name in SEVEN_ZIP_COMMAND_NAMES {
-        match test_seven_zip_archive(command_name, &request, &cancel).await {
-            Ok(()) => {
-                let destination_created = ensure_destination_directory(&request.destination)?;
-                let outcome = run_seven_zip_extract(command_name, &request, &cancel).await;
-                if outcome.is_err() && destination_created {
-                    let _ = fs::remove_dir_all(&request.destination);
-                }
-                return outcome.map(|_| request.destination);
-            }
-            Err(FileError::Archive { message, .. }) if message == command_not_found_marker() => {
-                continue;
-            }
-            Err(error) => return Err(error),
+        if !entry.header().entry_type().is_dir() {
+            completed_entries.set(completed_entries.get() + 1);
         }
     }
-
-    Err(FileError::Unsupported(
-        "7z, 7zz or 7za command is required to extract this archive",
-    ))
-}
-
-async fn inspect_archive_with_seven_zip(
-    request: ArchiveExtractionRequest,
-    cancel: CancellationToken,
-) -> Result<(), FileError> {
-    for command_name in SEVEN_ZIP_COMMAND_NAMES {
-        match test_seven_zip_archive(command_name, &request, &cancel).await {
-            Ok(()) => return Ok(()),
-            Err(FileError::Archive { message, .. }) if message == command_not_found_marker() => {
-                continue;
-            }
-            Err(error) => return Err(error),
-        }
-    }
-
-    Err(FileError::Unsupported(
-        "7z, 7zz or 7za command is required to extract this archive",
-    ))
-}
-
-async fn test_seven_zip_archive(
-    command_name: &str,
-    request: &ArchiveExtractionRequest,
-    cancel: &CancellationToken,
-) -> Result<(), FileError> {
-    let mut command = seven_zip_command(command_name, "t", request);
-    append_seven_zip_archive_operand(&mut command, &request.archive);
-    run_seven_zip_command(&mut command, request, cancel).await
-}
-
-async fn run_seven_zip_extract(
-    command_name: &str,
-    request: &ArchiveExtractionRequest,
-    cancel: &CancellationToken,
-) -> Result<(), FileError> {
-    let mut command = seven_zip_extract_command(command_name, request);
-    run_seven_zip_command(&mut command, request, cancel).await
-}
-
-fn seven_zip_extract_command(command_name: &str, request: &ArchiveExtractionRequest) -> Command {
-    let mut command = seven_zip_command(command_name, "x", request);
-    command.arg(seven_zip_output_directory_switch(&request.destination));
-    append_seven_zip_archive_operand(&mut command, &request.archive);
-    command
-}
-
-fn seven_zip_output_directory_switch(destination: &Path) -> OsString {
-    let mut output_switch = OsString::from("-o");
-    output_switch.push(destination.as_os_str());
-    output_switch
-}
-
-fn seven_zip_command(
-    command_name: &str,
-    action: &str,
-    request: &ArchiveExtractionRequest,
-) -> Command {
-    let mut command = Command::new(command_name);
-    command
-        .arg(action)
-        .arg("-y")
-        .arg("-bd")
-        .arg("-bsp0")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    if let Some(password) = &request.password {
-        command.arg(format!("-p{}", password.as_str()));
-    }
-    command
-}
-
-fn append_seven_zip_archive_operand(command: &mut Command, archive: &Path) {
-    // 7z treats arguments after `--` as operands, so switches such as `-o` must be finalized first.
-    command.arg("--").arg(archive);
-}
-
-async fn run_seven_zip_command(
-    command: &mut Command,
-    request: &ArchiveExtractionRequest,
-    cancel: &CancellationToken,
-) -> Result<(), FileError> {
-    let output = tokio::select! {
-        output = command.output() => output.map_err(|source| {
-            if source.kind() == io::ErrorKind::NotFound {
-                FileError::Archive {
-                    path: request.archive.clone(),
-                    message: command_not_found_marker().to_owned(),
-                }
-            } else {
-                FileError::Archive {
-                    path: request.archive.clone(),
-                    message: source.to_string(),
-                }
-            }
-        })?,
-        _ = cancel.cancelled() => return Err(FileError::Cancelled),
-    };
-    if output.status.success() {
-        return Ok(());
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-    Err(seven_zip_error(request, output.status, stdout, stderr))
-}
-
-fn seven_zip_error(
-    request: &ArchiveExtractionRequest,
-    status: std::process::ExitStatus,
-    stdout: String,
-    stderr: String,
-) -> FileError {
-    let combined_output = if stdout.is_empty() {
-        stderr.clone()
-    } else if stderr.is_empty() {
-        stdout.clone()
-    } else {
-        format!("{stdout}\n{stderr}")
-    };
-    if let Some(error) = seven_zip_password_error(
-        &combined_output,
-        request.password.is_some(),
-        &request.archive,
-    ) {
-        return error;
-    }
-    let message = if combined_output.is_empty() {
-        format!("7z exited with status {status}")
-    } else {
-        combined_output
-    };
-    // 分卷后续卷在这里只报裸的 Headers Error:与列表失败同一套文件名
-    // 启发式,补一句「请打开第一个卷」的提示。
-    let message = match split_volume_hint(&request.archive) {
-        Some(hint) => format!("{message}; {hint}"),
-        None => message,
-    };
-    FileError::Archive {
-        path: request.archive.clone(),
-        message,
-    }
+    Ok(archive.into_inner())
 }
 
 fn default_archive_extraction_directory(archive: &Path) -> Result<PathBuf, FileError> {
@@ -704,17 +606,14 @@ fn archive_extraction_directory_name(archive: &Path) -> Option<OsString> {
 }
 
 /// 目的地允许已存在：右键智能解压的单根语义直接解入压缩包所在文件夹。
-/// 返回本次是否新建了目录——失败清理只移除自建目录，
-/// 解入已存在目录失败时必须原样保留用户数据。
-fn ensure_destination_directory(destination: &Path) -> Result<bool, FileError> {
+fn ensure_destination_directory(destination: &Path) -> Result<(), FileError> {
     if destination.is_dir() {
-        return Ok(false);
+        return Ok(());
     }
     fs::create_dir(destination).map_err(|source| FileError::CreateDirectory {
         path: destination.to_path_buf(),
         source,
-    })?;
-    Ok(true)
+    })
 }
 
 fn reject_tar_password(request: &ArchiveExtractionRequest) -> Result<(), FileError> {
@@ -773,15 +672,8 @@ fn cancel_if_requested(cancel: &CancellationToken) -> Result<(), FileError> {
     }
 }
 
-fn command_not_found_marker() -> &'static str {
-    "__7z_command_not_found__"
-}
-
 #[derive(Debug, Clone, Copy)]
 enum TarCompression {
     Plain,
     Gzip,
 }
-
-#[cfg(test)]
-mod tests;

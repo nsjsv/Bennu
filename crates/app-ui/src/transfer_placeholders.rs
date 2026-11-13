@@ -332,7 +332,7 @@ mod tests {
                 completed_bytes: 0,
                 total_bytes: 0,
                 completed_items: 0,
-                total_items: 1,
+                total_items: Some(1),
             },
             vec![TransferEntrySnapshot {
                 target: PathBuf::from("/target/incoming.txt"),
@@ -357,7 +357,7 @@ mod tests {
                 completed_bytes: 1_000,
                 total_bytes: 1_000,
                 completed_items: 1,
-                total_items: 1,
+                total_items: Some(1),
             },
             vec![TransferEntrySnapshot {
                 target: PathBuf::from("/target/incoming.txt"),

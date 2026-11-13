@@ -6,6 +6,7 @@ pub mod app_dirs;
 pub mod archive;
 pub mod archive_extraction;
 pub mod archive_listing;
+pub mod archive_progress;
 pub mod archive_vfs;
 pub mod byte_progress;
 pub mod checksum;
@@ -18,6 +19,7 @@ pub mod media;
 pub mod mount_table;
 pub mod ops;
 pub mod scan;
+mod seven_zip_job;
 pub mod seven_zip_password;
 pub mod sort;
 pub mod transfer_conflict;
@@ -26,19 +28,19 @@ pub mod watch;
 
 pub use archive::{
     create_archive_with_controls_and_progress, create_archive_with_progress,
-    ArchiveCompressionLevel, ArchiveCreationProgress, ArchiveCreationRequest, ArchiveFormat,
-    ArchivePassword,
+    ArchiveCompressionLevel, ArchiveCreationRequest, ArchiveFormat, ArchivePassword,
 };
 pub use archive_extraction::{
     archive_extraction_format_for_path, extract_archive,
     extract_archive_with_controls_and_progress, extract_archive_with_progress,
     inspect_archive_extraction, is_supported_archive_path, ArchiveExtractionFormat,
-    ArchiveExtractionProgress, ArchiveExtractionRequest,
+    ArchiveExtractionRequest,
 };
 pub use archive_listing::{
     list_archive_members, list_archive_members_with_format, sniff_archive_extraction_format,
     ArchiveListingEntry,
 };
+pub use archive_progress::{ArchiveEntryProgress, ArchiveProgress};
 pub use archive_vfs::{
     archive_path_identity, extract_archive_members_with_controls_and_progress,
     materialize_archive_member_for_open, real_directory_outside_archive, single_root_member_name,

@@ -143,10 +143,13 @@ pub(crate) fn file_operation_progress_text(task: &FileOperationTask) -> Option<S
             format_file_size(total_bytes)
         )
     });
-    let item_detail = task
-        .progress
-        .items()
-        .map(|(completed_items, total_items)| tr!("%1 / %2 items", completed_items, total_items));
+    let item_detail =
+        task.progress
+            .items()
+            .map(|(completed_items, total_items)| match total_items {
+                Some(total_items) => tr!("%1 / %2 items", completed_items, total_items),
+                None => tr!("%1 items", completed_items),
+            });
 
     match (byte_detail, item_detail) {
         (Some(bytes), Some(items)) => Some(format!("{items} · {bytes}")),

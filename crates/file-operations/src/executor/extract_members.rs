@@ -7,9 +7,8 @@ use file_core::{
     ArchivePassword, FileError, FileOperationControls,
 };
 
-use crate::{
-    FileOperationEvent, FileOperationEventSender, FileOperationOutcome, FileOperationProgressUpdate,
-};
+use super::run_archive_operation;
+use crate::{FileOperationEvent, FileOperationEventSender, FileOperationOutcome};
 
 pub(crate) async fn run_queued_extract_archive_members(
     sources: Vec<PathBuf>,
@@ -19,17 +18,12 @@ pub(crate) async fn run_queued_extract_archive_members(
     task_id: u64,
     output: &FileOperationEventSender,
 ) -> Result<FileOperationOutcome, String> {
-    let _ = output
-        .send(FileOperationEvent::Progressed {
-            task_id,
-            update: FileOperationProgressUpdate::Indeterminate,
-            entries: Vec::new(),
-        })
-        .await;
     let request = ArchiveMemberExtractionRequest::new(sources.clone(), destination.clone())
         .with_password(password);
-    let outcome =
-        extract_archive_members_with_controls_and_progress(request, controls, |_| {}).await;
+    let outcome = run_archive_operation(task_id, output, |progress| {
+        extract_archive_members_with_controls_and_progress(request, controls, progress)
+    })
+    .await;
     match outcome {
         Ok(_) => Ok(FileOperationOutcome::NoHistory),
         Err(error) => {

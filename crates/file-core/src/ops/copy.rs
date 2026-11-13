@@ -86,6 +86,15 @@ impl FileOperationControls {
         self.cancel.clone()
     }
 
+    /// 已被取消或关机打断时的错误；还能继续（运行中，或只是暂停）时为 None。
+    /// 读数据的地方被打断后，外层库常把错误包成自己的类型，原错误拿不回来，
+    /// 只能事后按运行状态重新判定。
+    pub fn interruption(&self) -> Option<FileError> {
+        self.checkpoint_now()
+            .err()
+            .or_else(|| self.cancel.is_cancelled().then_some(FileError::Cancelled))
+    }
+
     pub fn checkpoint_now(&self) -> Result<(), FileError> {
         match *self.run_state.borrow() {
             FileOperationRunState::ApplicationStopping => Err(FileError::ApplicationStopping),
@@ -94,6 +103,13 @@ impl FileOperationControls {
             }
             FileOperationRunState::Running | FileOperationRunState::Paused => Ok(()),
         }
+    }
+
+    /// 等下一次运行状态变化。外部子进程不经过本进程的检查点，监督方据此
+    /// 冻结或恢复它。没人再能改状态（发送端已关闭）时返回 None。
+    pub async fn run_state_changed(&mut self) -> Option<FileOperationRunState> {
+        self.run_state.changed().await.ok()?;
+        Some(*self.run_state.borrow_and_update())
     }
 
     pub async fn wait_until_running(&mut self) -> Result<(), FileError> {

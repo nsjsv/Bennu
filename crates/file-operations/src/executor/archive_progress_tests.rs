@@ -22,7 +22,7 @@ async fn collected_progress_updates(
 }
 
 #[tokio::test]
-async fn queued_zip_creation_emits_real_source_byte_progress() {
+async fn queued_zip_creation_counts_files_with_real_source_bytes() {
     let directory = tempfile::tempdir().unwrap();
     let small = directory.path().join("small.bin");
     let large = directory.path().join("large.bin");
@@ -50,32 +50,31 @@ async fn queued_zip_creation_emits_real_source_byte_progress() {
         updates.first(),
         Some(FileOperationProgressUpdate::Indeterminate)
     ));
-    let byte_updates = updates
+    let transfer_updates = transfer_counts(&updates);
+    assert!(!transfer_updates.is_empty());
+    assert_eq!(transfer_updates.last(), Some(&(2, 2, Some((1_000, 1_000)))));
+}
+
+/// (已完成项, 总项, 字节)：按条目计数的进度。
+type TransferCounts = (usize, usize, Option<(u64, u64)>);
+
+fn transfer_counts(updates: &[FileOperationProgressUpdate]) -> Vec<TransferCounts> {
+    updates
         .iter()
         .filter_map(|update| match update {
-            FileOperationProgressUpdate::Bytes {
-                completed_bytes,
-                total_bytes,
+            FileOperationProgressUpdate::Transfer {
                 completed_items,
                 total_items,
-            } => Some((
-                *completed_bytes,
-                *total_bytes,
-                *completed_items,
-                *total_items,
-            )),
+                bytes,
+                ..
+            } => Some((*completed_items, *total_items, *bytes)),
             _ => None,
         })
-        .collect::<Vec<_>>();
-    assert!(!byte_updates.is_empty());
-    assert_eq!(byte_updates.last(), Some(&(1_000, 1_000, 2, 2)));
-    assert!(byte_updates
-        .iter()
-        .all(|(_, total_bytes, _, total_items)| *total_bytes == 1_000 && *total_items == 2));
+        .collect()
 }
 
 #[tokio::test]
-async fn queued_zip_extraction_emits_bytes_but_tar_gz_remains_indeterminate() {
+async fn queued_zip_extraction_counts_files_and_tar_gz_reports_read_bytes() {
     let directory = tempfile::tempdir().unwrap();
     let source = directory.path().join("payload.bin");
     tokio::fs::write(&source, vec![5_u8; 2_500_000])
@@ -130,28 +129,27 @@ async fn queued_zip_extraction_emits_bytes_but_tar_gz_remains_indeterminate() {
             updates.first(),
             Some(FileOperationProgressUpdate::Indeterminate)
         ));
-        let byte_updates = updates
-            .iter()
-            .filter_map(|update| match update {
-                FileOperationProgressUpdate::Bytes {
-                    completed_bytes,
-                    total_bytes,
-                    completed_items,
-                    total_items,
-                } => Some((
-                    *completed_bytes,
-                    *total_bytes,
-                    *completed_items,
-                    *total_items,
-                )),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
         match format {
             file_core::ArchiveFormat::Zip => {
-                assert_eq!(byte_updates.last(), Some(&(2_500_000, 2_500_000, 1, 1)));
+                assert_eq!(
+                    transfer_counts(&updates).last(),
+                    Some(&(1, 1, Some((2_500_000, 2_500_000))))
+                );
             }
-            file_core::ArchiveFormat::TarGz => assert!(byte_updates.is_empty()),
+            file_core::ArchiveFormat::TarGz => {
+                let archive_bytes = std::fs::metadata(directory.path().join("payload.tar.gz"))
+                    .unwrap()
+                    .len();
+                assert!(matches!(
+                    updates.last(),
+                    Some(FileOperationProgressUpdate::Bytes {
+                        completed_bytes,
+                        total_bytes,
+                        completed_items: 1,
+                        total_items: None,
+                    }) if *completed_bytes == archive_bytes && *total_bytes == archive_bytes
+                ));
+            }
             file_core::ArchiveFormat::SevenZip => unreachable!(),
         }
     }

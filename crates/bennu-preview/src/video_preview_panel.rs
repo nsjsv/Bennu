@@ -7,11 +7,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use iced::alignment::{Horizontal, Vertical};
-use iced::widget::{button, column, container, mouse_area, row, Space, Stack};
+use iced::widget::{button, column, container, mouse_area, row, Column, Space, Stack};
 use iced::{Alignment, Element, Length};
 
-use bennu_theme::icons::IconSymbol;
+use bennu_theme::anchored_popup::anchored_dropup;
+use bennu_theme::icons::{themed_icon, IconSymbol, IconTone};
 use bennu_theme::preview_styles::{preview_media_style, preview_window_bottom_gradient_style};
+use bennu_theme::styles::{context_menu_item_button_style, context_menu_style};
 
 use crate::media_controls::{
     faded_media_button_style, faded_media_icon, faded_media_slider_style, faded_media_text_style,
@@ -21,22 +23,27 @@ use crate::media_controls::{
     VIDEO_PREVIEW_CONTROL_HEIGHT,
 };
 use crate::panel_text::readable_text;
-use crate::preview::VideoPreviewPlayback;
-use crate::preview::VideoPreviewPlaybackStatus;
 use crate::preview::{scaled_media_size, PreviewSize};
+use crate::preview::{
+    VideoPreviewDetails, VideoPreviewPlayback, VideoPreviewPlaybackStatus, VideoTrackMenu,
+};
 use crate::preview_message::PreviewMessage;
 use crate::video_surface::{video_surface, VideoPicture};
+use crate::video_track_text::{audio_track_label, subtitle_label};
+use bennu_localization::tr;
 use bennu_theme::controls::slider;
 
 const VIDEO_PROGRESS_SLIDER_PORTION: u16 = 4;
 const VIDEO_VOLUME_SLIDER_PORTION: u16 = 1;
 const VIDEO_CONTROL_SLIDER_GAP: f32 = 14.0;
 const VIDEO_VOLUME_ICON_GAP: f32 = 6.0;
+const TRACK_MENU_ITEM_PADDING: [u16; 2] = [5, 12];
+const TRACK_MENU_CHECK_SIZE: f32 = 14.0;
 
 pub(crate) fn video_preview_panel<Message>(
     path: &Path,
     picture: Option<&Arc<VideoPicture>>,
-    duration: Option<Duration>,
+    details: &VideoPreviewDetails,
     playback: Option<&VideoPreviewPlayback>,
     media_volume: f32,
     size: PreviewSize,
@@ -46,6 +53,7 @@ where
     Message: 'static + Clone + From<PreviewMessage>,
 {
     let playback = playback.filter(|playback| playback.path.as_path() == path);
+    let duration = details.probe.duration;
     // 控件和画面一样宽；画面还没出来时按整块宽度。
     let frame_width = picture.map_or(size.width, |picture| {
         scaled_media_size(
@@ -91,7 +99,7 @@ where
             .into();
         let controls: Element<'static, Message> = container(video_controls(
             playback,
-            duration,
+            details,
             media_volume,
             frame_width,
             effective_opacity,
@@ -117,12 +125,14 @@ where
     overlay.into()
 }
 
-/// 拖进度条时控件强制可见，其余跟随底部悬停透明度。
+/// 拖进度条、菜单开着时控件强制可见，其余跟随底部悬停透明度。
 pub(crate) fn video_controls_opacity_for_playback(
     playback: Option<&VideoPreviewPlayback>,
     opacity: f32,
 ) -> f32 {
-    if playback.is_some_and(|playback| playback.seek_drag.is_some()) {
+    if playback
+        .is_some_and(|playback| playback.seek_drag.is_some() || playback.track_menu.is_some())
+    {
         1.0
     } else {
         opacity.clamp(0.0, 1.0)
@@ -167,7 +177,7 @@ where
 
 fn video_controls<Message>(
     playback: Option<&VideoPreviewPlayback>,
-    duration: Option<Duration>,
+    details: &VideoPreviewDetails,
     media_volume: f32,
     width: f32,
     opacity: f32,
@@ -179,7 +189,9 @@ where
     let position = playback
         .map(|playback| playback.position)
         .unwrap_or(Duration::ZERO);
-    let duration = playback.and_then(|playback| playback.duration).or(duration);
+    let duration = playback
+        .and_then(|playback| playback.duration)
+        .or(details.probe.duration);
     let duration_seconds = duration
         .map(|duration| duration.as_secs_f32())
         .unwrap_or_else(|| (position.as_secs_f32() + 1.0).max(1.0))
@@ -202,23 +214,115 @@ where
     .width(Length::Fill)
     .align_y(Alignment::Center);
 
+    let mut top_row = row![
+        video_primary_button(playback, opacity),
+        readable_text(media_position_text(position, duration))
+            .style(move |theme| faded_media_text_style(theme, opacity)),
+        Space::new().width(Length::Fill),
+    ]
+    .spacing(AUDIO_TIMELINE_CONTROL_GAP)
+    .align_y(Alignment::Center);
+    let open_menu = playback.and_then(|playback| playback.track_menu);
+    if !details.subtitles.is_empty() {
+        let current = playback.and_then(|playback| playback.subtitle.choice());
+        let items = std::iter::once((tr!("No Subtitles"), current.is_none(), None))
+            .chain(details.subtitles.iter().enumerate().map(|(index, choice)| {
+                (subtitle_label(choice), current == Some(index), Some(index))
+            }))
+            .map(|(label, selected, choice)| {
+                (
+                    label,
+                    selected,
+                    Message::from(PreviewMessage::VideoPreviewSubtitleSelected(choice)),
+                )
+            });
+        top_row = top_row.push(track_menu_button(
+            IconSymbol::Captions,
+            VideoTrackMenu::Subtitles,
+            open_menu,
+            items.collect(),
+            opacity,
+        ));
+    }
+    if details.probe.audio_tracks.len() > 1 {
+        let current = playback.map_or(0, |playback| playback.audio_track);
+        let items = details
+            .probe
+            .audio_tracks
+            .iter()
+            .map(|track| {
+                (
+                    audio_track_label(track),
+                    track.ordinal == current,
+                    Message::from(PreviewMessage::VideoPreviewAudioTrackSelected(
+                        track.ordinal,
+                    )),
+                )
+            })
+            .collect();
+        top_row = top_row.push(track_menu_button(
+            IconSymbol::AudioLines,
+            VideoTrackMenu::Audio,
+            open_menu,
+            items,
+            opacity,
+        ));
+    }
+
     container(
-        column![
-            row![
-                video_primary_button(playback, opacity),
-                readable_text(media_position_text(position, duration))
-                    .style(move |theme| faded_media_text_style(theme, opacity)),
-            ]
-            .spacing(AUDIO_TIMELINE_CONTROL_GAP)
-            .align_y(Alignment::Center),
-            slider_row,
-        ]
-        .spacing(8)
-        .width(Length::Fixed(width)),
+        column![top_row, slider_row]
+            .spacing(8)
+            .width(Length::Fixed(width)),
     )
     .padding([0, VIDEO_CONTROL_HORIZONTAL_PADDING])
     .width(Length::Fixed(width))
     .into()
+}
+
+/// 控制条上的字幕/音轨按钮，点了在上方弹出菜单（贴着窗口底边，只能往上开）。
+fn track_menu_button<Message>(
+    icon: IconSymbol,
+    menu: VideoTrackMenu,
+    open_menu: Option<VideoTrackMenu>,
+    items: Vec<(String, bool, Message)>,
+    opacity: f32,
+) -> Element<'static, Message>
+where
+    Message: 'static + Clone + From<PreviewMessage>,
+{
+    let anchor = button(faded_media_icon(icon, AUDIO_CONTROL_ICON_SIZE, opacity))
+        .on_press(Message::from(PreviewMessage::VideoPreviewTrackMenuToggled(
+            menu,
+        )))
+        .padding(8)
+        .width(Length::Fixed(AUDIO_CONTROL_BUTTON_SIZE))
+        .height(Length::Fixed(AUDIO_CONTROL_BUTTON_SIZE))
+        .style(move |theme, status| faded_media_button_style(theme, status, opacity));
+    let popup = (open_menu == Some(menu)).then(|| {
+        let mut list = Column::new().spacing(2);
+        for (label, selected, message) in items {
+            let check: Element<'static, Message> = if selected {
+                themed_icon(IconSymbol::Check, IconTone::Normal, TRACK_MENU_CHECK_SIZE).into()
+            } else {
+                Space::new()
+                    .width(Length::Fixed(TRACK_MENU_CHECK_SIZE))
+                    .into()
+            };
+            list = list.push(
+                button(
+                    row![check, readable_text(label)]
+                        .spacing(8)
+                        .align_y(Alignment::Center),
+                )
+                .padding(TRACK_MENU_ITEM_PADDING)
+                .width(Length::Fill)
+                .style(context_menu_item_button_style())
+                .on_press(message),
+            );
+        }
+        container(list).padding(4).style(context_menu_style).into()
+    });
+    anchored_dropup(anchor, popup)
 }
 
 fn video_volume_control<Message>(media_volume: f32, opacity: f32) -> Element<'static, Message>

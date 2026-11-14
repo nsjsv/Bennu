@@ -242,7 +242,7 @@ pub(crate) fn start_audio_preview_at_command(
 ) -> Task<PreviewMessage> {
     let audio_path = path.clone();
     Task::perform(
-        start_audio_preview_at(path, position),
+        start_audio_preview_at(path, 0, position),
         move |playback_outcome| {
             PreviewMessage::AudioPreviewStarted(audio_path.clone(), playback_outcome)
         },
@@ -308,11 +308,12 @@ pub(crate) fn measure_audio_preview_duration_command(path: PathBuf) -> Task<Prev
 pub fn start_video_preview_audio_command(
     path: PathBuf,
     generation: u64,
+    track: usize,
     position: Duration,
 ) -> Task<PreviewMessage> {
     let video_path = path.clone();
     Task::perform(
-        start_audio_preview_at(path, position),
+        start_audio_preview_at(path, track, position),
         move |audio_outcome| {
             PreviewMessage::VideoPreviewAudioStarted(video_path.clone(), generation, audio_outcome)
         },

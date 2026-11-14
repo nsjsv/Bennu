@@ -91,7 +91,7 @@ fn filters_deinterlace_only_marked_frames_and_keep_hdr_in_ten_bits() {
         FULL_HD_SCREEN,
     );
     assert_eq!(
-        interlaced.stream_filter(),
+        interlaced.stream_filter(None),
         "bwdif=deint=interlaced,fps=30/1,scale=720:576:out_range=tv:flags=area,format=nv12"
     );
     assert_eq!(
@@ -109,7 +109,7 @@ fn filters_deinterlace_only_marked_frames_and_keep_hdr_in_ten_bits() {
         },
         FULL_HD_SCREEN,
     );
-    assert!(hdr.stream_filter().ends_with("format=p010le"));
+    assert!(hdr.stream_filter(None).ends_with("format=p010le"));
     assert_eq!(hdr.frame_bytes(), 1920 * 1080 * 3 / 2 * 2);
 }
 
@@ -121,7 +121,7 @@ async fn ffmpeg_streams_whole_frames_and_seeks_to_stills() {
     };
     let plan = FramePlan::new(&facts(320, 240), FULL_HD_SCREEN);
 
-    let mut child = stream_command(&path, &plan, Duration::from_secs(1), None)
+    let mut child = stream_command(&path, &plan, Duration::from_secs(1), None, None)
         .spawn()
         .expect("spawn ffmpeg");
     let mut stdout = child.stdout.take().expect("stdout");
@@ -158,7 +158,7 @@ async fn exact_still_is_the_same_frame_continuous_decoding_shows_there() {
     let plan = FramePlan::new(&facts(320, 240), FULL_HD_SCREEN);
     let target = Duration::from_millis(1500);
 
-    let mut child = stream_command(&path, &plan, Duration::ZERO, None)
+    let mut child = stream_command(&path, &plan, Duration::ZERO, None, None)
         .spawn()
         .expect("spawn ffmpeg");
     let mut stdout = child.stdout.take().expect("stdout");

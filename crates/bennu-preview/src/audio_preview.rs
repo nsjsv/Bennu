@@ -4,6 +4,7 @@
 use std::fmt;
 use std::num::NonZero;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -36,6 +37,8 @@ pub struct AudioPreviewRuntime {
 
 struct AudioPreviewHandles {
     path: PathBuf,
+    /// 第几条音轨；视频换音轨时改它，之后的跳转、循环都用新的。
+    track: AtomicUsize,
     format: PcmFormat,
     exchange: Arc<PlaybackExchange>,
     player: Player,
@@ -61,6 +64,7 @@ impl AudioPreviewRuntime {
         let handles = &self.handles;
         let stream = spawn_pcm_stream(
             &handles.path,
+            handles.track.load(std::sync::atomic::Ordering::Acquire),
             position,
             handles.format,
             Arc::clone(handles.exchange.failure()),
@@ -69,6 +73,20 @@ impl AudioPreviewRuntime {
         .map_err(|error| format!("could not start ffmpeg: {error}"))?;
         handles.exchange.replace_stream(stream);
         Ok(())
+    }
+
+    pub fn track(&self) -> usize {
+        self.handles
+            .track
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// 换到第 `track` 条音轨，从 `position` 接着放；声卡输出不重开。
+    pub fn switch_track(&self, track: usize, position: Duration) -> Result<(), String> {
+        self.handles
+            .track
+            .store(track, std::sync::atomic::Ordering::Release);
+        self.seek_to(position)
     }
 
     /// 单曲循环：开着时读线程读完一遍直接从头接上，没有停顿。
@@ -119,15 +137,17 @@ pub async fn measure_audio_preview_duration(path: PathBuf) -> Option<Duration> {
 
 pub async fn start_audio_preview_at(
     path: PathBuf,
+    track: usize,
     position: Duration,
 ) -> Result<AudioPreviewRuntime, String> {
-    tokio::task::spawn_blocking(move || start_audio_preview_blocking(path, position))
+    tokio::task::spawn_blocking(move || start_audio_preview_blocking(path, track, position))
         .await
         .map_err(|error| format!("could not start audio preview: {error}"))?
 }
 
 fn start_audio_preview_blocking(
     path: PathBuf,
+    track: usize,
     position: Duration,
 ) -> Result<AudioPreviewRuntime, String> {
     let mut device_sink = DeviceSinkBuilder::open_default_sink()
@@ -137,6 +157,7 @@ fn start_audio_preview_blocking(
     let exchange = Arc::new(PlaybackExchange::new(format.sample_rate));
     let mut stream = spawn_pcm_stream(
         &path,
+        track,
         position,
         format,
         Arc::clone(exchange.failure()),
@@ -153,6 +174,7 @@ fn start_audio_preview_blocking(
     Ok(AudioPreviewRuntime {
         handles: Arc::new(AudioPreviewHandles {
             path,
+            track: AtomicUsize::new(track),
             format,
             exchange,
             player,

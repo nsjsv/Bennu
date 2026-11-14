@@ -16,7 +16,7 @@ use crate::commands::preview::{
 };
 use crate::preview::{
     PreviewContent, PreviewState, PreviewWindowProfile, VideoPreviewDetails, VideoPreviewFrame,
-    VideoPreviewPlayback, VideoPreviewPlaybackStatus, VideoSeekDrag, VideoSound,
+    VideoPreviewPlayback, VideoPreviewPlaybackStatus, VideoSeekDrag, VideoSound, VideoSubtitle,
 };
 use crate::preview_message::PreviewMessage;
 use crate::video_preview::{FramePlan, SeekPrecision, VideoSegment, FALLBACK_DISPLAY};
@@ -47,7 +47,11 @@ impl super::PreviewEngine {
             }
             _ => Task::none(),
         };
-        Task::batch([window, measure_video_display_command(path.to_path_buf())])
+        Task::batch([
+            window,
+            measure_video_display_command(path.to_path_buf()),
+            self.choose_default_video_tracks(details),
+        ])
     }
 
     /// 屏幕量好了：独立窗口（含文件选择对话框）一打开就播；右侧面板只显示静止画面，点了才播。
@@ -117,6 +121,7 @@ impl super::PreviewEngine {
             return Task::none();
         };
         if playback.seek_drag.is_none() {
+            playback.track_menu = None;
             playback.seek_drag = Some(VideoSeekDrag {
                 resume_after: playback.status == VideoPreviewPlaybackStatus::Playing,
             });
@@ -215,11 +220,16 @@ impl super::PreviewEngine {
         match outcome {
             Ok(runtime) => {
                 runtime.set_volume(volume);
-                // 起声音期间跳转过：从现在这段的位置放。
-                if generation != playback.generation {
-                    if let Err(error) = runtime.seek_to(playback.clock.position()) {
-                        playback.error = Some(tr!("Audio unavailable: %1", error));
-                    }
+                // 起声音期间换过音轨或跳转过：换到现在的音轨、从现在这段的位置放。
+                let resync = if runtime.track() != playback.audio_track {
+                    runtime.switch_track(playback.audio_track, playback.clock.position())
+                } else if generation != playback.generation {
+                    runtime.seek_to(playback.clock.position())
+                } else {
+                    Ok(())
+                };
+                if let Err(error) = resync {
+                    playback.error = Some(tr!("Audio unavailable: %1", error));
                 }
                 if playback.status != VideoPreviewPlaybackStatus::Playing {
                     runtime.pause();
@@ -294,11 +304,15 @@ impl super::PreviewEngine {
         Task::none()
     }
 
-    /// 在画面上按了一下：已经有一下在等判定就是双击（不切播放），否则等一会儿再算单击。
+    /// 在画面上按了一下：菜单开着就只是关菜单；已经有一下在等判定就是双击（不切播放），
+    /// 否则等一会儿再算单击。
     pub fn video_surface_pressed(&mut self) -> Task<PreviewMessage> {
         let Some(playback) = self.video_preview.as_mut() else {
             return Task::none();
         };
+        if playback.track_menu.take().is_some() {
+            return Task::none();
+        }
         if playback.pending_click.take().is_some() {
             return Task::none();
         }
@@ -331,6 +345,10 @@ impl super::PreviewEngine {
             clock: Arc::clone(&playback.clock),
             generation: playback.generation,
             start: playback.segment_start?,
+            subtitle: match &playback.subtitle {
+                VideoSubtitle::Showing { burn, .. } => Some(Arc::clone(burn)),
+                VideoSubtitle::Off | VideoSubtitle::Preparing { .. } => None,
+            },
         })
     }
 
@@ -351,7 +369,7 @@ impl super::PreviewEngine {
     }
 
     /// 从 `position` 开一段新的解码，`status` 是开好之后的状态（播放或停在那一帧）。
-    fn start_video_segment(
+    pub(super) fn start_video_segment(
         &mut self,
         position: Duration,
         status: VideoPreviewPlaybackStatus,
@@ -405,6 +423,7 @@ impl super::PreviewEngine {
                 start_video_preview_audio_command(
                     playback.path.clone(),
                     playback.generation,
+                    playback.audio_track,
                     playback.clock.position(),
                 )
             }
@@ -427,7 +446,7 @@ impl super::PreviewEngine {
         Task::none()
     }
 
-    fn active_video_details(&self, path: &Path) -> Option<&VideoPreviewDetails> {
+    pub(super) fn active_video_details(&self, path: &Path) -> Option<&VideoPreviewDetails> {
         match &self.preview {
             Some(PreviewState::Ready(PreviewContent::Video {
                 path: preview_path,

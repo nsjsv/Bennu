@@ -20,6 +20,7 @@ mod clock;
 mod frames;
 mod hwaccel;
 mod probe;
+mod subtitles;
 #[cfg(test)]
 pub(crate) mod test_fixtures;
 
@@ -30,6 +31,10 @@ pub use probe::{
     AudioTrack, SubtitleTrack, VideoColor, VideoPrimaries, VideoProbe, VideoProbeError,
     VideoStreamFacts, VideoTransfer, YuvMatrix,
 };
+pub(crate) use subtitles::{
+    default_subtitle, find_external_subtitles, prepare_subtitle, subtitle_choices,
+};
+pub use subtitles::{ExternalSubtitle, SubtitleBurn, SubtitleChoice};
 
 /// ffmpeg 出错时只留 stderr 末尾这么多字节，防止管道写满把它卡死。
 const STDERR_TAIL_BYTES: usize = 16 * 1024;
@@ -78,6 +83,8 @@ pub struct VideoSegment {
     pub clock: Arc<PlaybackClock>,
     pub generation: u64,
     pub start: Duration,
+    /// 要烧进画面的字幕；换字幕会开新的一段（代数变），不参与订阅身份。
+    pub subtitle: Option<Arc<SubtitleBurn>>,
 }
 
 // 订阅身份是路径 + 代数 + 起点：暂停、继续、进度刷新都不重建 ffmpeg。
@@ -118,11 +125,12 @@ async fn stream_frames(
         clock,
         generation,
         start,
+        subtitle,
     } = segment;
     let hwaccel = tokio::task::spawn_blocking(hwaccel::available_hwaccel)
         .await
         .unwrap_or(None);
-    let mut child = frames::stream_command(path, plan, *start, hwaccel)
+    let mut child = frames::stream_command(path, plan, *start, hwaccel, subtitle.as_deref())
         .spawn()
         .map_err(|error| format!("could not start ffmpeg: {error}"))?;
     let mut stdout = child

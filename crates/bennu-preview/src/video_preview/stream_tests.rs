@@ -21,6 +21,7 @@ async fn paused_stream_shows_one_frame_then_waits_and_resumes_without_restarting
         clock: Arc::clone(&clock),
         generation: 7,
         start: Duration::ZERO,
+        subtitle: None,
     };
     let (mut sender, mut frames) = iced::futures::channel::mpsc::channel(4);
     let stream = tokio::spawn(async move { stream_frames(&segment, &mut sender).await });

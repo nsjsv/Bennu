@@ -284,6 +284,7 @@ fn browser_with_video_preview() -> (FileBrowser, window::Id) {
                 duration: Some(Duration::from_secs(10)),
                 ..Default::default()
             },
+            subtitles: Vec::new(),
         }),
         frame: None,
     }));

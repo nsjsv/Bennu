@@ -735,7 +735,11 @@ mod tests {
         };
         let content = PreviewContent::Video {
             path: path.clone(),
-            details: std::sync::Arc::new(VideoPreviewDetails { len: 1, probe }),
+            details: std::sync::Arc::new(VideoPreviewDetails {
+                len: 1,
+                probe,
+                subtitles: Vec::new(),
+            }),
             frame: None,
         };
         drop(engine.accept_preview(

@@ -122,6 +122,7 @@ fn ffmpeg_stream_decodes_any_format_and_starts_at_the_seek_position() {
 
     let mut whole = spawn_pcm_stream(
         &opus,
+        0,
         Duration::ZERO,
         STEREO_48K,
         Arc::clone(&failure),
@@ -134,6 +135,7 @@ fn ffmpeg_stream_decodes_any_format_and_starts_at_the_seek_position() {
 
     let mut tail = spawn_pcm_stream(
         &opus,
+        0,
         Duration::from_secs(1),
         STEREO_48K,
         Arc::clone(&failure),
@@ -158,6 +160,7 @@ fn undecodable_file_fails_before_playback_starts() {
 
     let mut stream = spawn_pcm_stream(
         &broken,
+        0,
         Duration::ZERO,
         STEREO_48K,
         Arc::clone(&failure),
@@ -203,6 +206,7 @@ fn repeating_stream_starts_the_next_pass_without_ending() {
     let repeat = Arc::new(AtomicBool::new(true));
     let mut stream = spawn_pcm_stream(
         &wav,
+        0,
         Duration::ZERO,
         STEREO_48K,
         Arc::clone(&failure),
@@ -227,4 +231,54 @@ fn repeating_stream_starts_the_next_pass_without_ending() {
         "{frames_after_restart}"
     );
     repeat.store(false, Ordering::Release);
+}
+
+#[test]
+fn the_chosen_audio_track_is_the_one_decoded() {
+    // 两条音轨：440 Hz 和 880 Hz；选第 1 条，过零次数应是第 0 条的两倍。
+    let directory = tempfile::tempdir().expect("temp dir");
+    if sine_fixture(directory.path(), "probe.wav", 1).is_none() {
+        return;
+    }
+    let path = directory.path().join("tracks.mka");
+    let status = std::process::Command::new("ffmpeg")
+        .args(["-nostdin", "-v", "error"])
+        .args(["-f", "lavfi", "-i", "sine=frequency=440:duration=1"])
+        .args(["-f", "lavfi", "-i", "sine=frequency=880:duration=1"])
+        .args(["-map", "0", "-map", "1", "-c:a", "flac"])
+        .arg(&path)
+        .status()
+        .expect("run ffmpeg");
+    assert!(status.success());
+    let zero_crossings = |track| {
+        let failure = Arc::new(StreamFailure::default());
+        let mut stream = spawn_pcm_stream(
+            &path,
+            track,
+            Duration::ZERO,
+            STEREO_48K,
+            Arc::clone(&failure),
+            no_repeat(),
+        )
+        .expect("spawn ffmpeg");
+        stream.wait_for_audio(&failure).expect("first chunk");
+        let mut samples = stream.first_chunk.take().unwrap_or_default();
+        while let Ok(PcmChunk::Samples(chunk)) = stream.chunks.recv() {
+            samples.extend(chunk);
+        }
+        // 只看左声道。
+        samples
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|[left, _]| *left)
+            .collect::<Vec<_>>()
+            .windows(2)
+            .filter(|pair| (pair[0] < 0.0) != (pair[1] < 0.0))
+            .count()
+    };
+    let low = zero_crossings(0);
+    let high = zero_crossings(1);
+    assert!((850..=910).contains(&low), "{low}");
+    assert!((1720..=1800).contains(&high), "{high}");
 }

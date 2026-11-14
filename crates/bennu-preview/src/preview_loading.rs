@@ -19,7 +19,9 @@ use crate::preview::{
 use crate::preview_config::{PreviewExtensionRules, PreviewFileSizeKind, PreviewSizeLimitKind};
 use crate::sqlite_preview::load_sqlite_preview;
 use crate::text_preview_loading::{load_initial_text_preview, TextOpening};
-use crate::video_preview::{probe_video_preview, VideoProbeError};
+use crate::video_preview::{
+    find_external_subtitles, probe_video_preview, subtitle_choices, VideoProbeError,
+};
 
 pub const PREVIEW_ARCHIVE_ENTRY_LIMIT: usize = 500;
 
@@ -252,11 +254,19 @@ async fn load_video_preview(path: PathBuf) -> Result<PreviewContent, String> {
         .len();
     match probe_video_preview(path.clone()).await {
         Ok(probe) if probe.video.is_none() => load_audio_preview(path).await,
-        Ok(probe) => Ok(PreviewContent::Video {
-            path,
-            details: Arc::new(VideoPreviewDetails { len, probe }),
-            frame: None,
-        }),
+        Ok(probe) => {
+            let external = find_external_subtitles(path.clone()).await;
+            let subtitles = subtitle_choices(external, &probe);
+            Ok(PreviewContent::Video {
+                path,
+                details: Arc::new(VideoPreviewDetails {
+                    len,
+                    probe,
+                    subtitles,
+                }),
+                frame: None,
+            })
+        }
         Err(VideoProbeError::FfmpegMissing) => Ok(PreviewContent::ToolRequired {
             path,
             tool: ExternalTool::Ffmpeg,

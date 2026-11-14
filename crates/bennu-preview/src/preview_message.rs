@@ -96,6 +96,16 @@ pub enum PreviewMessage {
     /// 单独解的一帧（右侧面板的静止画面、拖进度条时的关键帧）。
     VideoPreviewStillLoaded(VideoPreviewFrame),
     VideoPreviewStillFailed(PathBuf, u64, Duration, String),
+    VideoPreviewTrackMenuToggled(crate::preview::VideoTrackMenu),
+    /// 字幕菜单里选了第几条（`VideoPreviewDetails::subtitles`），None 是关掉。
+    VideoPreviewSubtitleSelected(Option<usize>),
+    VideoPreviewSubtitleReady(
+        PathBuf,
+        usize,
+        Result<Arc<crate::video_preview::SubtitleBurn>, String>,
+    ),
+    /// 音轨菜单里选了第几条音轨（`-map 0:a:N`）。
+    VideoPreviewAudioTrackSelected(usize),
     /// 在画面上按了一下；单击还是双击由引擎等一会儿再定。
     VideoPreviewSurfacePressed,
     VideoPreviewClickSettled(u64),

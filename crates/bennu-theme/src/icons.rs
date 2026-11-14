@@ -74,6 +74,11 @@ pub enum IconSymbol {
     StopAfterTrack,
     Repeat1,
     SkipForward,
+    Captions,
+    AudioLines,
+    Info,
+    Maximize,
+    Minimize,
 }
 
 pub fn rotated_chevron_right_view(rotation_degrees: f32, size: f32) -> Svg<'static, Theme> {
@@ -226,6 +231,11 @@ impl IconSymbol {
             Self::StopAfterTrack => ARROW_RIGHT_TO_LINE_ICON,
             Self::Repeat1 => REPEAT_1_ICON,
             Self::SkipForward => SKIP_FORWARD_ICON,
+            Self::Captions => include_bytes!("../assets/icons/lucide/captions.svg"),
+            Self::AudioLines => include_bytes!("../assets/icons/lucide/audio-lines.svg"),
+            Self::Info => include_bytes!("../assets/icons/lucide/info.svg"),
+            Self::Maximize => include_bytes!("../assets/icons/lucide/maximize.svg"),
+            Self::Minimize => include_bytes!("../assets/icons/lucide/minimize.svg"),
         }
     }
 }

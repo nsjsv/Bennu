@@ -250,6 +250,18 @@ impl PreviewEngine {
                 self.accept_video_preview_still_error(&path, generation, position, error)
             }
             PreviewMessage::VideoPreviewSurfacePressed => self.video_surface_pressed(),
+            PreviewMessage::VideoPreviewTrackMenuToggled(menu) => {
+                self.toggle_video_track_menu(menu)
+            }
+            PreviewMessage::VideoPreviewSubtitleSelected(choice) => {
+                self.select_video_subtitle(choice)
+            }
+            PreviewMessage::VideoPreviewSubtitleReady(path, choice, outcome) => {
+                self.accept_video_subtitle(&path, choice, outcome)
+            }
+            PreviewMessage::VideoPreviewAudioTrackSelected(track) => {
+                self.select_video_audio_track(track)
+            }
             PreviewMessage::VideoPreviewClickSettled(click) => self.video_click_settled(click),
             PreviewMessage::VideoPreviewFinished(path, generation) => {
                 self.accept_video_preview_finished(&path, generation)
@@ -277,6 +289,7 @@ mod text;
 mod text_find;
 mod tree;
 mod video;
+mod video_tracks;
 mod windows;
 
 pub use media::{audio_preview_tick_subscription, video_preview_tick_subscription};

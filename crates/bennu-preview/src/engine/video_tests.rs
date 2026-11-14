@@ -4,6 +4,7 @@ use super::*;
 use crate::engine::{
     default_preview_size, PreviewEngine, PreviewEngineConfig, PreviewWindowIdentity,
 };
+use crate::preview::{VideoSubtitle, VideoTrackMenu};
 use crate::preview_config::PreviewFileSizeLimits;
 use crate::video_preview::{
     AudioTrack, VideoColor, VideoPrimaries, VideoProbe, VideoStreamFacts, VideoTransfer, YuvMatrix,
@@ -64,6 +65,7 @@ fn details(audio_tracks: usize) -> VideoPreviewDetails {
                 .collect(),
             subtitle_tracks: Vec::new(),
         },
+        subtitles: Vec::new(),
     }
 }
 
@@ -334,4 +336,94 @@ fn audio_content_opens_its_own_playback_and_window() {
         panel.audio_preview.as_ref().map(|playback| playback.status),
         Some(crate::preview::AudioPreviewPlaybackStatus::Ready)
     );
+}
+
+fn with_subtitles(engine: &mut PreviewEngine, path: &Path) {
+    let Some(PreviewState::Ready(PreviewContent::Video { details, .. })) = &mut engine.preview
+    else {
+        panic!("video content");
+    };
+    let details = Arc::make_mut(details);
+    details.subtitles = vec![crate::video_preview::SubtitleChoice::External(
+        crate::video_preview::ExternalSubtitle {
+            path: path.with_extension("srt"),
+            language: None,
+        },
+    )];
+}
+
+#[tokio::test]
+async fn changing_subtitles_waits_for_preparation_then_restarts_where_it_was() {
+    let (mut engine, path) = opened(PreviewLoadSurface::StandaloneWindow, 0);
+    with_subtitles(&mut engine, &path);
+    let before = engine.active_video_preview_stream().expect("decoding");
+    assert!(before.subtitle.is_none());
+
+    drop(engine.select_video_subtitle(Some(0)));
+    assert!(matches!(
+        playback(&engine).subtitle,
+        VideoSubtitle::Preparing { choice: 0, .. }
+    ));
+    // 准备好之前照常放，不重开。
+    assert_eq!(
+        engine
+            .active_video_preview_stream()
+            .expect("decoding")
+            .generation,
+        before.generation
+    );
+
+    let burn = Arc::new(crate::video_preview::SubtitleBurn::Image { ordinal: 0 });
+    drop(engine.accept_video_subtitle(&path, 0, Ok(burn)));
+    let with_subtitle = engine.active_video_preview_stream().expect("decoding");
+    assert!(with_subtitle.subtitle.is_some());
+    assert!(with_subtitle.generation > before.generation);
+    assert_eq!(
+        playback(&engine).status,
+        VideoPreviewPlaybackStatus::Playing
+    );
+
+    // 关掉：再从当前位置重开一段，没有字幕。
+    drop(engine.select_video_subtitle(None));
+    let off = engine.active_video_preview_stream().expect("decoding");
+    assert!(off.subtitle.is_none());
+    assert!(off.generation > with_subtitle.generation);
+
+    // 迟到的准备结果（已经换过选择）不理。
+    drop(engine.accept_video_subtitle(
+        &path,
+        0,
+        Ok(Arc::new(crate::video_preview::SubtitleBurn::Image {
+            ordinal: 0,
+        })),
+    ));
+    assert!(matches!(playback(&engine).subtitle, VideoSubtitle::Off));
+}
+
+#[test]
+fn the_default_audio_track_is_chosen_and_menus_toggle_and_close() {
+    let (mut engine, _) = opened(PreviewLoadSurface::RightDockedPanel, 3);
+    // details() 把第 0 条标成默认。
+    assert_eq!(playback(&engine).audio_track, 0);
+
+    drop(engine.toggle_video_track_menu(VideoTrackMenu::Audio));
+    assert_eq!(playback(&engine).track_menu, Some(VideoTrackMenu::Audio));
+    drop(engine.toggle_video_track_menu(VideoTrackMenu::Subtitles));
+    assert_eq!(
+        playback(&engine).track_menu,
+        Some(VideoTrackMenu::Subtitles)
+    );
+    drop(engine.toggle_video_track_menu(VideoTrackMenu::Subtitles));
+    assert_eq!(playback(&engine).track_menu, None);
+
+    drop(engine.toggle_video_track_menu(VideoTrackMenu::Audio));
+    drop(engine.select_video_audio_track(2));
+    assert_eq!(playback(&engine).audio_track, 2);
+    assert_eq!(playback(&engine).track_menu, None);
+
+    // 菜单开着时点画面只关菜单，不算一次单击。
+    drop(engine.toggle_video_track_menu(VideoTrackMenu::Audio));
+    drop(engine.video_surface_pressed());
+    assert_eq!(playback(&engine).track_menu, None);
+    assert_eq!(playback(&engine).pending_click, None);
 }

@@ -12,6 +12,7 @@ use iced::Size;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 
+use crate::video_preview::subtitles::{text_subtitle_filter, SubtitleBurn};
 use crate::video_preview::VideoStreamFacts;
 use crate::video_surface::{picture_bytes, SampleDepth, VideoPicture};
 
@@ -80,23 +81,31 @@ impl FramePlan {
         picture_bytes(self.width, self.height, self.depth)
     }
 
-    /// 去隔行（只处理标了隔行的帧）→ 规整帧率 → 缩放并转成有限范围 → 像素格式。
-    fn stream_filter(&self) -> String {
+    /// 去隔行（只处理标了隔行的帧）→ 规整帧率 → 缩放并转成有限范围 → 文字字幕 → 像素格式。
+    /// 文字字幕放在缩放之后：按屏幕上的大小渲染，清楚也省事。
+    fn stream_filter(&self, subtitle: Option<&SubtitleBurn>) -> String {
         let (numerator, denominator) = self.frame_rate;
-        let rate = format!("fps={numerator}/{denominator}");
+        let text_subtitle = match subtitle {
+            Some(SubtitleBurn::Text(file)) => Some(text_subtitle_filter(file)),
+            Some(SubtitleBurn::Image { .. }) | None => None,
+        };
         self.deinterlace_filter()
             .into_iter()
-            .chain([rate])
-            .chain(self.picture_filters())
+            .chain([
+                format!("fps={numerator}/{denominator}"),
+                self.scale_filter(),
+            ])
+            .chain(text_subtitle)
+            .chain([self.format_filter()])
             .collect::<Vec<_>>()
             .join(",")
     }
 
-    /// 单帧不用规整帧率。
+    /// 单帧不用规整帧率，也不烧字幕（拖动时的预览、右侧面板的静止画面）。
     fn still_filter(&self) -> String {
         self.deinterlace_filter()
             .into_iter()
-            .chain(self.picture_filters())
+            .chain([self.scale_filter(), self.format_filter()])
             .collect::<Vec<_>>()
             .join(",")
     }
@@ -106,18 +115,19 @@ impl FramePlan {
             .then(|| "bwdif=deint=interlaced".to_owned())
     }
 
-    fn picture_filters(&self) -> [String; 2] {
-        let format = match self.depth {
-            SampleDepth::Eight => "nv12",
-            SampleDepth::Sixteen => "p010le",
-        };
-        [
-            format!(
-                "scale={}:{}:out_range=tv:flags=area",
-                self.width, self.height
-            ),
-            format!("format={format}"),
-        ]
+    fn scale_filter(&self) -> String {
+        format!(
+            "scale={}:{}:out_range=tv:flags=area",
+            self.width, self.height
+        )
+    }
+
+    fn format_filter(&self) -> String {
+        match self.depth {
+            SampleDepth::Eight => "format=nv12",
+            SampleDepth::Sixteen => "format=p010le",
+        }
+        .to_owned()
     }
 }
 
@@ -126,19 +136,35 @@ fn even(value: f64) -> u32 {
     ((value / 2.0).round() as u32 * 2).max(2)
 }
 
-/// 从 `start` 起连续出帧（播放用）。`hwaccel` 是探测出能用的显卡解码（见 `hwaccel` 模块）。
+/// 从 `start` 起连续出帧（播放用）。`hwaccel` 是探测出能用的显卡解码（见 `hwaccel` 模块），
+/// `subtitle` 是要烧进画面的字幕。
 pub(crate) fn stream_command(
     path: &Path,
     plan: &FramePlan,
     start: Duration,
     hwaccel: Option<&str>,
+    subtitle: Option<&SubtitleBurn>,
 ) -> Command {
     let mut command = base_command();
     if let Some(api) = hwaccel {
         command.args(["-hwaccel", api]);
     }
     seek_and_input(&mut command, path, start);
-    output(&mut command, plan, plan.stream_filter(), &[]);
+    let filter = plan.stream_filter(subtitle);
+    match subtitle {
+        // 图片字幕是另一路流，要用滤镜图把它叠到画面上。
+        Some(SubtitleBurn::Image { ordinal }) => {
+            command
+                .arg("-filter_complex")
+                .arg(format!(
+                    "[0:v:{}][0:s:{ordinal}]overlay=eof_action=pass,{filter}[picture]",
+                    plan.video_ordinal
+                ))
+                .args(["-map", "[picture]"]);
+        }
+        Some(SubtitleBurn::Text(_)) | None => video_filter(&mut command, plan, filter),
+    }
+    output(&mut command, &[]);
     command
 }
 
@@ -154,7 +180,8 @@ pub(crate) fn still_command(
         command.arg("-noaccurate_seek");
     }
     seek_and_input(&mut command, path, position);
-    output(&mut command, plan, plan.still_filter(), &["-frames:v", "1"]);
+    video_filter(&mut command, plan, plan.still_filter());
+    output(&mut command, &["-frames:v", "1"]);
     command
 }
 
@@ -176,13 +203,18 @@ fn seek_and_input(command: &mut Command, path: &Path, position: Duration) {
     command.arg("-i").arg(path);
 }
 
-/// `limits` 是输出端选项（如只要一帧），必须写在输出目标之前，写在后面 ffmpeg 不认。
-fn output(command: &mut Command, plan: &FramePlan, filter: String, limits: &[&str]) {
+fn video_filter(command: &mut Command, plan: &FramePlan, filter: String) {
     command
         .arg("-map")
         .arg(format!("0:v:{}", plan.video_ordinal))
-        .args(["-an", "-sn", "-dn", "-vf"])
-        .arg(filter)
+        .arg("-vf")
+        .arg(filter);
+}
+
+/// `limits` 是输出端选项（如只要一帧），必须写在输出目标之前，写在后面 ffmpeg 不认。
+fn output(command: &mut Command, limits: &[&str]) {
+    command
+        .args(["-an", "-sn", "-dn"])
         .args(limits)
         .args(["-f", "rawvideo", "pipe:1"])
         .stdin(Stdio::null())

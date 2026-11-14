@@ -85,15 +85,17 @@ impl StreamFailure {
     }
 }
 
+/// `track` 是第几条音轨（`-map 0:a:N`）：音频文件是 0，视频可以选。
 pub(crate) fn spawn_pcm_stream(
     path: &Path,
+    track: usize,
     start: Duration,
     format: PcmFormat,
     failure: Arc<StreamFailure>,
     repeat: Arc<AtomicBool>,
 ) -> std::io::Result<PcmStream> {
     // 第一遍在这里起：没装 ffmpeg 之类的启动错误直接还给调用方。
-    let first_pass = ffmpeg_pcm_command(path, start, format).spawn()?;
+    let first_pass = ffmpeg_pcm_command(path, track, start, format).spawn()?;
     let (sender, chunks) = sync_channel(BUFFERED_CHUNKS);
     let channels = format.channel_count();
     let path = path.to_path_buf();
@@ -111,7 +113,7 @@ pub(crate) fn spawn_pcm_stream(
                 if !repeat.load(Ordering::Acquire) || sender.send(PcmChunk::Restart).is_err() {
                     return;
                 }
-                child = match ffmpeg_pcm_command(&path, Duration::ZERO, format).spawn() {
+                child = match ffmpeg_pcm_command(&path, track, Duration::ZERO, format).spawn() {
                     Ok(child) => child,
                     Err(error) => {
                         failure.record(format!("could not start ffmpeg: {error}"));
@@ -128,7 +130,7 @@ pub(crate) fn spawn_pcm_stream(
     })
 }
 
-fn ffmpeg_pcm_command(path: &Path, start: Duration, format: PcmFormat) -> Command {
+fn ffmpeg_pcm_command(path: &Path, track: usize, start: Duration, format: PcmFormat) -> Command {
     let mut command = Command::new("ffmpeg");
     command.args(["-nostdin", "-hide_banner", "-v", "error"]);
     if start > Duration::ZERO {
@@ -140,7 +142,9 @@ fn ffmpeg_pcm_command(path: &Path, start: Duration, format: PcmFormat) -> Comman
     command
         .arg("-i")
         .arg(path)
-        .args(["-map", "0:a:0", "-vn", "-sn", "-dn"])
+        .arg("-map")
+        .arg(format!("0:a:{track}"))
+        .args(["-vn", "-sn", "-dn"])
         .arg("-ac")
         .arg(format.channels.get().to_string())
         .arg("-ar")

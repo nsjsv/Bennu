@@ -213,7 +213,7 @@ where
         }) => media_keys(video_preview_panel(
             path,
             frame.as_ref(),
-            details.probe.duration,
+            details,
             video_preview,
             media_settings.volume,
             size,

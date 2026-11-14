@@ -50,6 +50,22 @@ where
     })
 }
 
+/// 向上展开的变体：弹层按内容定宽（至少和按钮一样宽），右缘对齐按钮，总是在按钮上方
+/// （顶多被窗口边缘钳住）。适合贴着窗口底边的按钮（视频控制条上的字幕、音轨菜单）。
+pub fn anchored_dropup<'a, Message>(
+    anchor: impl Into<Element<'a, Message>>,
+    popup: Option<Element<'a, Message>>,
+) -> Element<'a, Message>
+where
+    Message: 'a,
+{
+    Element::new(AnchoredPopup {
+        anchor: anchor.into(),
+        popup,
+        placement: PopupPlacement::DropUp,
+    })
+}
+
 /// 弹层相对锚点怎么摆。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PopupPlacement {
@@ -59,6 +75,8 @@ enum PopupPlacement {
     RightAligned,
     /// 自然宽度（不窄于锚点）、左缘对齐锚点、向下。
     Dropdown,
+    /// 自然宽度（不窄于锚点）、右缘对齐锚点、向上。
+    DropUp,
 }
 
 struct AnchoredPopup<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
@@ -245,6 +263,7 @@ where
         let show_below = match self.placement {
             PopupPlacement::AnchorWidth => space_below >= space_above,
             PopupPlacement::RightAligned | PopupPlacement::Dropdown => true,
+            PopupPlacement::DropUp => false,
         };
         let max_height = if show_below { space_below } else { space_above };
         let limits = match self.placement {
@@ -256,7 +275,7 @@ where
             PopupPlacement::RightAligned => {
                 layout::Limits::new(Size::ZERO, Size::new(bounds.width, max_height))
             }
-            PopupPlacement::Dropdown => layout::Limits::new(
+            PopupPlacement::Dropdown | PopupPlacement::DropUp => layout::Limits::new(
                 Size::new(target_width, 0.0),
                 Size::new(bounds.width, max_height),
             ),
@@ -267,7 +286,7 @@ where
             .layout(self.state, renderer, &limits);
         let size = node.size();
         let desired_x = match self.placement {
-            PopupPlacement::RightAligned => {
+            PopupPlacement::RightAligned | PopupPlacement::DropUp => {
                 self.anchor_bounds.x + self.anchor_bounds.width - size.width
             }
             PopupPlacement::AnchorWidth | PopupPlacement::Dropdown => self.anchor_bounds.x,

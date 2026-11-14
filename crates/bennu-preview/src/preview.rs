@@ -13,7 +13,7 @@ use crate::audio_preview::{AudioLyrics, AudioPreviewRuntime, AudioProbe, AudioWa
 use crate::document_preview::PagedDocumentPreview;
 use crate::sqlite_preview::SqliteDatabasePreview;
 use crate::text_document::TextOpened;
-use crate::video_preview::{FramePlan, PlaybackClock, VideoProbe};
+use crate::video_preview::{FramePlan, PlaybackClock, SubtitleBurn, SubtitleChoice, VideoProbe};
 use crate::video_surface::VideoPicture;
 use file_core::byte_progress::active_byte_fraction;
 use tokio_util::sync::CancellationToken;
@@ -187,11 +187,13 @@ pub struct AudioPreviewDetails {
     pub probe: AudioProbe,
 }
 
-/// 打开时一次 ffprobe 读到的信息（解码参数、音轨字幕轨、信息层都用它）和文件大小。
+/// 打开时一次 ffprobe 读到的信息（解码参数、音轨字幕轨、信息层都用它）、文件大小和能选的字幕
+/// （同目录同名外挂在前，然后是视频里的字幕轨）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct VideoPreviewDetails {
     pub len: u64,
     pub probe: VideoProbe,
+    pub subtitles: Vec<SubtitleChoice>,
 }
 
 /// 进度区显示哪一种图。
@@ -384,6 +386,11 @@ pub struct VideoPreviewPlayback {
     /// 单击要等双击判定：待定那一下的编号。
     pub pending_click: Option<u64>,
     pub clicks: u64,
+    /// 放第几条音轨（`-map 0:a:N`）。
+    pub audio_track: usize,
+    pub subtitle: VideoSubtitle,
+    /// 控制条上展开着的字幕/音轨菜单。
+    pub track_menu: Option<VideoTrackMenu>,
     pub error: Option<String>,
 }
 
@@ -409,6 +416,9 @@ impl VideoPreviewPlayback {
             pending_still: None,
             pending_click: None,
             clicks: 0,
+            audio_track: 0,
+            subtitle: VideoSubtitle::Off,
+            track_menu: None,
             error: None,
         }
     }
@@ -432,6 +442,38 @@ pub enum VideoSound {
     Running(AudioPreviewRuntime),
     /// 声音起不来或放坏了：时钟改按墙钟，画面照放。
     Failed,
+}
+
+/// 字幕显示到哪一步了；序号指 `VideoPreviewDetails::subtitles`。
+#[derive(Debug, Clone)]
+pub enum VideoSubtitle {
+    Off,
+    /// 选了，正在后台准备（文字字幕要先抽成小文件）；换选择或预览结束时随句柄丢掉而取消。
+    Preparing {
+        choice: usize,
+        work: iced::task::Handle,
+    },
+    Showing {
+        choice: usize,
+        burn: Arc<SubtitleBurn>,
+    },
+}
+
+impl VideoSubtitle {
+    pub fn choice(&self) -> Option<usize> {
+        match self {
+            VideoSubtitle::Off => None,
+            VideoSubtitle::Preparing { choice, .. } | VideoSubtitle::Showing { choice, .. } => {
+                Some(*choice)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VideoTrackMenu {
+    Subtitles,
+    Audio,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

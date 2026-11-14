@@ -12,6 +12,7 @@ use bennu_theme::styles::base_text_color;
 use bennu_theme::ui_colors;
 
 use crate::formatting::format_duration;
+use crate::preview_config::MediaEndAction;
 use bennu_theme::controls::progress_bar;
 
 pub(crate) const AUDIO_CONTROL_BUTTON_SIZE: f32 = 30.0;
@@ -115,6 +116,15 @@ pub(crate) fn faded_media_slider_style(
 pub(crate) fn faded_media_text_style(theme: &Theme, opacity: f32) -> iced::widget::text::Style {
     iced::widget::text::Style {
         color: Some(base_text_color(theme).scale_alpha(opacity)),
+    }
+}
+
+/// 播完模式按钮的图标（音频、视频共用一个设置）：放完停（→|）、单个循环、接着放下一个。
+pub(crate) fn end_action_icon(action: MediaEndAction) -> IconSymbol {
+    match action {
+        MediaEndAction::Stop => IconSymbol::StopAfterTrack,
+        MediaEndAction::Repeat => IconSymbol::Repeat1,
+        MediaEndAction::Next => IconSymbol::SkipForward,
     }
 }
 

@@ -77,9 +77,10 @@ pub enum PreviewMessage {
     AudioLyricsLineSelected(usize),
     CopyToolInstallCommand(file_core::ExternalTool),
     /// 播完模式按钮：交宿主按它提供的模式表轮换并记住。
-    AudioEndActionCycled,
+    MediaEndActionCycled,
     /// 「播下一首」模式下这首放完了：宿主在当前列表里找下一首。
-    AudioNextTrackRequested(PathBuf),
+    /// 放完的那个和它是什么（音频接音频、视频接视频）。
+    MediaNextRequested(PathBuf, crate::preview_loading::PreviewPathKind),
     AudioPreviewTick,
     VideoPreviewPlaybackToggled,
     VideoPreviewAudioStarted(PathBuf, u64, Result<AudioPreviewRuntime, String>),

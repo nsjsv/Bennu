@@ -247,11 +247,7 @@ impl PreviewEngine {
         self.preview_window_pointer_y = None;
         self.reset_preview_window_bottom_controls();
         let initial_controls = self.start_preview_window_initial_controls();
-        let (window, command) = window::open(preview_window_settings(
-            profile,
-            size,
-            &self.window_identity,
-        ));
+        let (window, command) = window::open(self.preview_window_open_settings(profile, size));
         self.preview_window = Some(window);
         (
             window,
@@ -345,11 +341,8 @@ impl PreviewEngine {
         self.preview_window_pointer_y = None;
         self.reset_preview_window_bottom_controls();
         let initial_controls = self.start_preview_window_initial_controls();
-        let (window, command) = window::open(preview_window_settings(
-            profile,
-            self.preview_size,
-            &self.window_identity,
-        ));
+        let (window, command) =
+            window::open(self.preview_window_open_settings(profile, self.preview_size));
         self.preview_window = Some(window);
         (
             window,
@@ -460,6 +453,18 @@ impl PreviewEngine {
             return (None, Task::none());
         };
         (Some(window), window::close(window))
+    }
+
+    /// 新开预览窗口的设置：全屏着「播下一个」时新窗口直接以全屏打开（开好再切会和开窗赛跑）。
+    fn preview_window_open_settings(
+        &self,
+        profile: PreviewWindowProfile,
+        size: PreviewSize,
+    ) -> window::Settings {
+        let mut settings = preview_window_settings(profile, size, &self.window_identity);
+        settings.fullscreen =
+            self.video_fullscreen == Some(super::video_fullscreen::VideoFullscreen::PreviewWindow);
+        settings
     }
 
     /// 失焦自动关闭的判定：预览窗口失焦且未被钉住时按 Space 语义关闭。

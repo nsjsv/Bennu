@@ -215,7 +215,7 @@ where
             frame.as_ref(),
             details,
             video_preview,
-            media_settings.volume,
+            media_settings,
             size,
             preview_bottom_controls_opacity,
         )),

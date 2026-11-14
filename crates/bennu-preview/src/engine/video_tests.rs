@@ -437,3 +437,79 @@ fn info_layer_toggles_for_this_preview_only() {
     drop(engine.handle_media_key(crate::preview_message::MediaKeyCommand::ToggleInfo));
     assert!(!playback(&engine).info_visible);
 }
+
+#[tokio::test]
+async fn finishing_follows_the_shared_end_action() {
+    use crate::preview_config::MediaEndAction;
+    use crate::preview_loading::PreviewPathKind;
+
+    // 单个循环：从头开一段接着放。
+    let (mut engine, path) = opened(PreviewLoadSurface::StandaloneWindow, 0);
+    engine.set_media_end_action(MediaEndAction::Repeat);
+    let generation = playback(&engine).generation;
+    drop(engine.accept_video_preview_finished(&path, generation));
+    assert_eq!(
+        playback(&engine).status,
+        VideoPreviewPlaybackStatus::Playing
+    );
+    let segment = engine.active_video_preview_stream().expect("decoding");
+    assert_eq!(segment.start, Duration::ZERO);
+    assert!(segment.generation > generation);
+
+    // 播下一个：停下，交宿主找下一个视频。
+    let (mut engine, path) = opened(PreviewLoadSurface::StandaloneWindow, 0);
+    engine.set_media_end_action(MediaEndAction::Next);
+    let generation = playback(&engine).generation;
+    let task = engine.accept_video_preview_finished(&path, generation);
+    assert_eq!(
+        playback(&engine).status,
+        VideoPreviewPlaybackStatus::Finished
+    );
+    let outputs = task_outputs(task).await;
+    assert!(matches!(
+        outputs.as_slice(),
+        [PreviewMessage::MediaNextRequested(finished, PreviewPathKind::Video)] if finished == &path
+    ));
+}
+
+async fn task_outputs(task: Task<PreviewMessage>) -> Vec<PreviewMessage> {
+    use iced::futures::StreamExt;
+    let Some(mut stream) = iced_runtime::task::into_stream(task) else {
+        return Vec::new();
+    };
+    let mut outputs = Vec::new();
+    while let Some(action) = stream.next().await {
+        if let iced_runtime::Action::Output(message) = action {
+            outputs.push(message);
+        }
+    }
+    outputs
+}
+
+#[tokio::test]
+async fn the_queued_next_video_plays_in_the_panel_and_keeps_fullscreen() {
+    use crate::engine::video_fullscreen::VideoFullscreen;
+
+    let (mut engine, _) = opened(PreviewLoadSurface::RightDockedPanel, 0);
+    engine.video_fullscreen = Some(VideoFullscreen::MainWindow);
+    let next = PathBuf::from("/videos/next.mkv");
+    engine.queue_next_media(next.clone());
+    // 下一个在加载、旧的已经清掉：主窗口别退出全屏。
+    engine.clear_video_preview();
+    assert!(engine.keeps_video_fullscreen());
+
+    let details = Arc::new(details(0));
+    engine.preview = Some(PreviewState::Ready(PreviewContent::Video {
+        path: next.clone(),
+        details: Arc::clone(&details),
+        frame: None,
+    }));
+    drop(engine.open_video_preview(&next, &details));
+    drop(engine.accept_video_display(&next, Some(Size::new(1920, 1080))));
+    assert_eq!(
+        playback(&engine).status,
+        VideoPreviewPlaybackStatus::Playing
+    );
+    assert_eq!(engine.video_fullscreen, Some(VideoFullscreen::MainWindow));
+    assert!(engine.queued_media.is_none());
+}

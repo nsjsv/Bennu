@@ -20,7 +20,6 @@ mod activation_tests;
 mod clipboard;
 // 高级新建文件夹复用同一收纳谓词，与「用选中项新建文件夹」同语义。
 pub(in crate::app) use clipboard::gather_sources_in_directory;
-mod audio_next_track;
 #[cfg(test)]
 mod clipboard_tests;
 #[cfg(test)]
@@ -34,6 +33,7 @@ mod file_drop;
 mod file_drop_target;
 mod keyboard_navigation;
 mod marquee;
+mod media_next;
 // spring_open 的 tick 间隔常量由 app.rs 的 subscription 引用。
 pub(super) mod spring_open;
 #[cfg(test)]

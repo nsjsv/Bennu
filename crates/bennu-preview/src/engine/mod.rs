@@ -63,10 +63,10 @@ pub struct PreviewEngine {
     pub video_fullscreen: Option<video_fullscreen::VideoFullscreen>,
     pub(crate) fullscreen_idle: video_fullscreen::FullscreenIdle,
     /// 音频、视频预览共用的音量与播完模式，唯一来源：宿主加载设置时注入；改动经
-    /// `MediaVolumeChanged` / `AudioEndActionCycled` 交宿主记住后由对应的 set 方法生效。
+    /// `MediaVolumeChanged` / `MediaEndActionCycled` 交宿主记住后由对应的 set 方法生效。
     pub media_settings: MediaPlaybackSettings,
     /// 「播下一首」时宿主排进来的下一首：打开它时右侧面板也直接播。
-    pub queued_audio_track: Option<std::path::PathBuf>,
+    pub queued_media: Option<media::QueuedMedia>,
     pub preview_size: PreviewSize,
     pub pending_preview_resize: Option<PreviewSize>,
     pub preview_window_profile: PreviewWindowProfile,
@@ -139,7 +139,7 @@ impl PreviewEngine {
             video_fullscreen: None,
             fullscreen_idle: video_fullscreen::FullscreenIdle::default(),
             media_settings: MediaPlaybackSettings::default(),
-            queued_audio_track: None,
+            queued_media: None,
             preview_size: initial_preview_size,
             pending_preview_resize: None,
             preview_window_profile: PreviewWindowProfile::Regular,
@@ -638,7 +638,7 @@ mod tests {
         let mut engine = engine();
         engine.preview_load_surface = PreviewLoadSurface::RightDockedPanel;
         let next = PathBuf::from("/music/02.flac");
-        engine.queue_next_audio_track(next.clone());
+        engine.queue_next_media(next.clone());
         // 用户在排队期间点开的是别的文件：照常只就绪，排队也作废。
         drop(engine.open_audio_preview(PathBuf::from("/music/other.flac")));
         assert_eq!(
@@ -648,7 +648,7 @@ mod tests {
                 .map(|playback| playback.status),
             Some(AudioPreviewPlaybackStatus::Ready)
         );
-        engine.queue_next_audio_track(next.clone());
+        engine.queue_next_media(next.clone());
         drop(engine.open_audio_preview(next.clone()));
         assert_eq!(
             engine
@@ -657,27 +657,30 @@ mod tests {
                 .map(|playback| playback.status),
             Some(AudioPreviewPlaybackStatus::Loading)
         );
-        assert!(engine.queued_audio_track.is_none());
+        assert!(engine.queued_media.is_none());
     }
 
     #[test]
     fn end_action_messages_go_to_the_host() {
         let mut engine = engine();
         assert!(matches!(
-            returned_to_host(&mut engine, PreviewMessage::AudioEndActionCycled),
-            PreviewMessage::AudioEndActionCycled
+            returned_to_host(&mut engine, PreviewMessage::MediaEndActionCycled),
+            PreviewMessage::MediaEndActionCycled
         ));
         assert!(matches!(
             returned_to_host(
                 &mut engine,
-                PreviewMessage::AudioNextTrackRequested(PathBuf::from("/m/a.mp3"))
+                PreviewMessage::MediaNextRequested(
+                    PathBuf::from("/m/a.mp3"),
+                    crate::preview_loading::PreviewPathKind::Audio,
+                )
             ),
-            PreviewMessage::AudioNextTrackRequested(_)
+            PreviewMessage::MediaNextRequested(..)
         ));
-        engine.set_audio_end_action(crate::preview_config::AudioEndAction::Repeat);
+        engine.set_media_end_action(crate::preview_config::MediaEndAction::Repeat);
         assert_eq!(
-            engine.media_settings.audio_end_action,
-            crate::preview_config::AudioEndAction::Repeat
+            engine.media_settings.end_action,
+            crate::preview_config::MediaEndAction::Repeat
         );
     }
 }

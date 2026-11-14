@@ -14,7 +14,7 @@ use crate::commands::preview::start_audio_preview_at_command;
 use crate::preview::{
     AudioPreviewPlayback, AudioPreviewPlaybackStatus, PreviewContent, PreviewState,
 };
-use crate::preview_config::AudioEndAction;
+use crate::preview_config::MediaEndAction;
 use crate::preview_message::PreviewMessage;
 
 impl super::PreviewEngine {
@@ -87,7 +87,7 @@ impl super::PreviewEngine {
     /// （选中项在音乐文件夹里移动时不该每移一下就出声）。
     /// 「播下一首」排进来的那首例外：右侧面板也接着播，这是同一次播放的延续。
     pub(crate) fn open_audio_preview(&mut self, path: PathBuf) -> Task<PreviewMessage> {
-        let continues_playback = self.queued_audio_track.take().as_ref() == Some(&path);
+        let continues_playback = self.take_queued_media(&path).is_some();
         match self.preview_load_surface {
             PreviewLoadSurface::RightDockedPanel if !continues_playback => {
                 self.clear_audio_preview();
@@ -98,20 +98,15 @@ impl super::PreviewEngine {
         }
     }
 
-    /// 宿主找到了下一首、即将把选中移过去：打开它时直接开播。
-    pub fn queue_next_audio_track(&mut self, path: PathBuf) {
-        self.queued_audio_track = Some(path);
-    }
-
     /// 宿主记住播完模式后调用；单曲循环交给读线程做无缝衔接。
-    pub fn set_audio_end_action(&mut self, action: AudioEndAction) {
-        self.media_settings.audio_end_action = action;
+    pub fn set_media_end_action(&mut self, action: MediaEndAction) {
+        self.media_settings.end_action = action;
         if let Some(runtime) = self
             .audio_preview
             .as_ref()
             .and_then(|playback| playback.runtime.as_ref())
         {
-            runtime.set_repeat(action == AudioEndAction::Repeat);
+            runtime.set_repeat(action == MediaEndAction::Repeat);
         }
     }
 
@@ -137,7 +132,7 @@ impl super::PreviewEngine {
         match playback_outcome {
             Ok(runtime) => {
                 runtime.set_volume(settings.volume);
-                runtime.set_repeat(settings.audio_end_action == AudioEndAction::Repeat);
+                runtime.set_repeat(settings.end_action == MediaEndAction::Repeat);
                 playback.position = runtime.position();
                 playback.runtime = Some(runtime);
                 playback.status = AudioPreviewPlaybackStatus::Playing;
@@ -239,7 +234,7 @@ impl super::PreviewEngine {
     }
 
     pub fn update_audio_preview_playback(&mut self) -> Task<PreviewMessage> {
-        let end_action = self.media_settings.audio_end_action;
+        let end_action = self.media_settings.end_action;
         let Some(playback) = self.audio_preview.as_mut() else {
             return Task::none();
         };
@@ -268,20 +263,21 @@ impl super::PreviewEngine {
         } else if runtime.is_finished() {
             match end_action {
                 // 正常由读线程无缝接上；循环是在这一遍读完之后才打开的，就在这里从头换流。
-                AudioEndAction::Repeat => {
+                MediaEndAction::Repeat => {
                     if let Err(error) = runtime.seek_to(Duration::ZERO) {
                         runtime.pause();
                         playback.status = AudioPreviewPlaybackStatus::Error;
                         playback.error = Some(error);
                     }
                 }
-                AudioEndAction::Stop | AudioEndAction::Next => {
+                MediaEndAction::Stop | MediaEndAction::Next => {
                     // 留着运行时：重播、往回拖都不用重新打开声卡。
                     runtime.pause();
                     playback.status = AudioPreviewPlaybackStatus::Finished;
-                    if end_action == AudioEndAction::Next {
-                        return Task::done(PreviewMessage::AudioNextTrackRequested(
+                    if end_action == MediaEndAction::Next {
+                        return Task::done(PreviewMessage::MediaNextRequested(
                             playback.path.clone(),
+                            crate::preview_loading::PreviewPathKind::Audio,
                         ));
                     }
                 }

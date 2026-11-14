@@ -59,6 +59,23 @@ impl super::PreviewEngine {
         }
     }
 
+    /// 「播下一个」接着全屏：预览窗口还在就切全屏，还没开就由开窗时的设置直接全屏
+    /// （`ensure_preview_window` 看 `video_fullscreen`）；铺满主窗口的本来就还在全屏（宿主看
+    /// `keeps_video_fullscreen`，加载下一个的空当不退回去）。
+    pub(super) fn continue_video_fullscreen(
+        &mut self,
+        fullscreen: VideoFullscreen,
+    ) -> Task<PreviewMessage> {
+        self.video_fullscreen = Some(fullscreen);
+        let window_mode = match (fullscreen, self.preview_window) {
+            (VideoFullscreen::PreviewWindow, Some(preview_window)) => {
+                window::set_mode(preview_window, window::Mode::Fullscreen)
+            }
+            _ => Task::none(),
+        };
+        Task::batch([window_mode, self.show_fullscreen_controls()])
+    }
+
     /// F、Esc、双击退出全屏；没在全屏时什么都不做（宿主的 Esc 照常关窗口）。
     pub fn leave_video_fullscreen(&mut self) -> Task<PreviewMessage> {
         let Some(fullscreen) = self.video_fullscreen.take() else {

@@ -873,19 +873,19 @@ fn media_preview_volume_roundtrips_as_a_percentage() {
 
 #[test]
 fn audio_end_action_roundtrips_and_unknown_values_fall_back() {
-    use bennu_preview::preview_config::AudioEndAction;
+    use bennu_preview::preview_config::MediaEndAction;
     let default = default_user_config();
-    assert_eq!(default.audio_end_action, AudioEndAction::Stop);
+    assert_eq!(default.media_end_action, MediaEndAction::Stop);
     let mut config = default.clone();
-    config.audio_end_action = AudioEndAction::Next;
+    config.media_end_action = MediaEndAction::Next;
     let mut stored = config.user_preferences().to_stored();
     assert_eq!(stored.preview.audio_end_action.as_deref(), Some("next"));
     let restored = UserPreferences::from_stored(stored.clone(), &default).preferences;
-    assert_eq!(restored.audio_end_action, AudioEndAction::Next);
+    assert_eq!(restored.media_end_action, MediaEndAction::Next);
 
     stored.preview.audio_end_action = Some("shuffle".to_owned());
     let restored = UserPreferences::from_stored(stored, &default).preferences;
-    assert_eq!(restored.audio_end_action, AudioEndAction::Stop);
+    assert_eq!(restored.media_end_action, MediaEndAction::Stop);
 }
 
 #[test]

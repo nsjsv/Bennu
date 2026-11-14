@@ -395,6 +395,8 @@ pub struct VideoPreviewPlayback {
     pub cursor_hidden: bool,
     /// 画面上盖着信息层（按钮或 I 键开关，只对这次预览有效）。
     pub info_visible: bool,
+    /// 量好屏幕之后怎么开始。
+    pub opening: VideoOpening,
     pub error: Option<String>,
 }
 
@@ -425,6 +427,7 @@ impl VideoPreviewPlayback {
             track_menu: None,
             cursor_hidden: false,
             info_visible: false,
+            opening: VideoOpening::ShowStill,
             error: None,
         }
     }
@@ -474,6 +477,14 @@ impl VideoSubtitle {
             }
         }
     }
+}
+
+/// 量好屏幕之后：直接播（独立窗口、对话框、「播下一个」接上的），还是先显示静止画面、
+/// 点了才播（右侧面板）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VideoOpening {
+    Play,
+    ShowStill,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

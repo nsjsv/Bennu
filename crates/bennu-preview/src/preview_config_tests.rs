@@ -219,7 +219,7 @@ fn legacy_video_list_migrates_once_keeping_only_user_additions() {
 
 #[test]
 fn end_action_cycles_through_what_the_host_offers() {
-    use AudioEndAction::{Next, Repeat, Stop};
+    use MediaEndAction::{Next, Repeat, Stop};
     let main_app = [Stop, Repeat, Next];
     assert_eq!(Stop.after(&main_app), Repeat);
     assert_eq!(Repeat.after(&main_app), Next);
@@ -230,12 +230,12 @@ fn end_action_cycles_through_what_the_host_offers() {
     assert_eq!(Next.after(&dialog), Stop);
     for action in main_app {
         assert_eq!(
-            AudioEndAction::from_stored(Some(action.stored_name())),
+            MediaEndAction::from_stored(Some(action.stored_name())),
             action
         );
     }
-    assert_eq!(AudioEndAction::from_stored(Some("shuffle")), Stop);
-    assert_eq!(AudioEndAction::from_stored(None), Stop);
+    assert_eq!(MediaEndAction::from_stored(Some("shuffle")), Stop);
+    assert_eq!(MediaEndAction::from_stored(None), Stop);
 }
 
 #[test]

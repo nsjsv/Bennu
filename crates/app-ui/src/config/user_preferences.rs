@@ -35,7 +35,7 @@ use crate::shortcuts::ShortcutConfig;
 use bennu_preview::preview_config::{
     media_preview_volume_from_stored, media_preview_volume_percent,
     preview_directory_expand_levels_from_stored, preview_extension_rules_from_stored,
-    preview_size_limits_from_stored, AudioEndAction,
+    preview_size_limits_from_stored, MediaEndAction,
 };
 use bennu_preview::text_view::TextViewSettings;
 use bennu_theme::window_controls::SidebarStyle;
@@ -49,7 +49,7 @@ pub(crate) struct UserPreferences {
     pub(crate) preview_extension_rules: PreviewExtensionRules,
     pub(crate) text_preview_view: TextViewSettings,
     pub(crate) media_preview_volume: f32,
-    pub(crate) audio_end_action: AudioEndAction,
+    pub(crate) media_end_action: MediaEndAction,
     pub(crate) show_hidden_files: bool,
     pub(crate) language_setting: UiLanguageSetting,
     pub(crate) sidebar_width: f32,
@@ -101,7 +101,7 @@ impl UserPreferences {
             preview_extension_rules: config.preview_extension_rules.clone(),
             text_preview_view: config.text_preview_view,
             media_preview_volume: config.media_preview_volume,
-            audio_end_action: config.audio_end_action,
+            media_end_action: config.media_end_action,
             show_hidden_files: config.show_hidden_files,
             language_setting: config.language_setting,
             sidebar_width: normalize_sidebar_width(config.sidebar_width),
@@ -156,7 +156,7 @@ impl UserPreferences {
         config.preview_extension_rules = self.preview_extension_rules.clone();
         config.text_preview_view = self.text_preview_view;
         config.media_preview_volume = self.media_preview_volume;
-        config.audio_end_action = self.audio_end_action;
+        config.media_end_action = self.media_end_action;
         config.show_hidden_files = self.show_hidden_files;
         config.language_setting = self.language_setting;
         config.sidebar_width = self.sidebar_width;
@@ -230,7 +230,7 @@ impl UserPreferences {
             media_preview_volume_percent: Some(media_preview_volume_percent(
                 self.media_preview_volume,
             )),
-            audio_end_action: Some(self.audio_end_action.stored_name().to_owned()),
+            audio_end_action: Some(self.media_end_action.stored_name().to_owned()),
             preview_extra_video_extensions: Some(self.preview_extension_rules.video.clone()),
         };
         stored.show_hidden_files = self.show_hidden_files;
@@ -383,7 +383,7 @@ impl UserPreferences {
             media_preview_volume: media_preview_volume_from_stored(
                 stored.preview.media_preview_volume_percent,
             ),
-            audio_end_action: AudioEndAction::from_stored(
+            media_end_action: MediaEndAction::from_stored(
                 stored.preview.audio_end_action.as_deref(),
             ),
             preview_extension_rules: preview_extension_rules_from_stored(

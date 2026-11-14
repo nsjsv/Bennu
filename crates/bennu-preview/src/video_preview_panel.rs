@@ -16,17 +16,18 @@ use bennu_theme::preview_styles::{preview_media_style, preview_window_bottom_gra
 use bennu_theme::styles::{context_menu_item_button_style, context_menu_style};
 
 use crate::media_controls::{
-    faded_media_button_style, faded_media_icon, faded_media_slider_style, faded_media_text_style,
-    media_position_text, mini_progress_bar_layer, mini_progress_opacity_for_controls_opacity,
-    AUDIO_CONTROL_BUTTON_SIZE, AUDIO_CONTROL_ICON_SIZE, AUDIO_PROGRESS_SLIDER_STEP_SECONDS,
-    AUDIO_TIMELINE_CONTROL_GAP, AUDIO_VOLUME_SLIDER_STEP, VIDEO_CONTROL_HORIZONTAL_PADDING,
-    VIDEO_PREVIEW_CONTROL_HEIGHT,
+    end_action_icon, faded_media_button_style, faded_media_icon, faded_media_slider_style,
+    faded_media_text_style, media_position_text, mini_progress_bar_layer,
+    mini_progress_opacity_for_controls_opacity, AUDIO_CONTROL_BUTTON_SIZE, AUDIO_CONTROL_ICON_SIZE,
+    AUDIO_PROGRESS_SLIDER_STEP_SECONDS, AUDIO_TIMELINE_CONTROL_GAP, AUDIO_VOLUME_SLIDER_STEP,
+    VIDEO_CONTROL_HORIZONTAL_PADDING, VIDEO_PREVIEW_CONTROL_HEIGHT,
 };
 use crate::panel_text::readable_text;
 use crate::preview::{scaled_media_size, PreviewSize};
 use crate::preview::{
     VideoPreviewDetails, VideoPreviewPlayback, VideoPreviewPlaybackStatus, VideoTrackMenu,
 };
+use crate::preview_config::{MediaEndAction, MediaPlaybackSettings};
 use crate::preview_message::PreviewMessage;
 use crate::video_surface::{video_surface, VideoPicture};
 use crate::video_track_text::{audio_track_label, subtitle_label, video_info_rows};
@@ -54,7 +55,7 @@ pub(crate) fn video_preview_panel<Message>(
     picture: Option<&Arc<VideoPicture>>,
     details: &VideoPreviewDetails,
     playback: Option<&VideoPreviewPlayback>,
-    media_volume: f32,
+    media_settings: MediaPlaybackSettings,
     size: PreviewSize,
     preview_bottom_controls_opacity: f32,
 ) -> Element<'static, Message>
@@ -115,7 +116,7 @@ where
         let controls: Element<'static, Message> = container(video_controls(
             playback,
             details,
-            media_volume,
+            media_settings,
             frame_width,
             effective_opacity,
         ))
@@ -193,7 +194,7 @@ where
 fn video_controls<Message>(
     playback: Option<&VideoPreviewPlayback>,
     details: &VideoPreviewDetails,
-    media_volume: f32,
+    media_settings: MediaPlaybackSettings,
     width: f32,
     opacity: f32,
 ) -> Element<'static, Message>
@@ -222,7 +223,7 @@ where
     .style(move |theme, status| faded_media_slider_style(theme, status, opacity));
     let slider_row = row![
         progress_slider,
-        container(video_volume_control(media_volume, opacity))
+        container(video_volume_control(media_settings.volume, opacity))
             .width(Length::FillPortion(VIDEO_VOLUME_SLIDER_PORTION)),
     ]
     .spacing(VIDEO_CONTROL_SLIDER_GAP)
@@ -234,6 +235,7 @@ where
         readable_text(media_position_text(position, duration))
             .style(move |theme| faded_media_text_style(theme, opacity)),
         Space::new().width(Length::Fill),
+        video_end_action_button(media_settings.end_action, opacity),
     ]
     .spacing(AUDIO_TIMELINE_CONTROL_GAP)
     .align_y(Alignment::Center);
@@ -348,6 +350,34 @@ where
         .align_x(Horizontal::Left)
         .align_y(Vertical::Top)
         .into()
+}
+
+/// 播完怎么办（和音频共用一个设置）：图标 + 小字，三种模式的图标不常见，光看图标认不出。
+fn video_end_action_button<Message>(
+    action: MediaEndAction,
+    opacity: f32,
+) -> Element<'static, Message>
+where
+    Message: 'static + Clone + From<PreviewMessage>,
+{
+    let label = match action {
+        MediaEndAction::Stop => tr!("Stop After Video"),
+        MediaEndAction::Repeat => tr!("Repeat Video"),
+        MediaEndAction::Next => tr!("Play Next Video"),
+    };
+    button(
+        row![
+            faded_media_icon(end_action_icon(action), AUDIO_CONTROL_ICON_SIZE, opacity),
+            readable_text(label).style(move |theme| faded_media_text_style(theme, opacity)),
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center),
+    )
+    .on_press(Message::from(PreviewMessage::MediaEndActionCycled))
+    .padding([8, 10])
+    .height(Length::Fixed(AUDIO_CONTROL_BUTTON_SIZE))
+    .style(move |theme, status| faded_media_button_style(theme, status, opacity))
+    .into()
 }
 
 /// 控制条上的字幕/音轨按钮，点了在上方弹出菜单（贴着窗口底边，只能往上开）。

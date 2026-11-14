@@ -131,10 +131,14 @@ fn subtitle_info(choice: &SubtitleChoice) -> String {
     let kind = match choice {
         SubtitleChoice::External(_) => tr!("External file"),
         SubtitleChoice::Embedded(track) if track.is_image => {
-            format!("{} · {}", tr!("Embedded"), tr!("Image"))
+            format!("{} · {}", tr!("Embedded track"), tr!("Image"))
         }
         SubtitleChoice::Embedded(track) => {
-            format!("{} · {}", tr!("Embedded"), track.codec.to_ascii_uppercase())
+            format!(
+                "{} · {}",
+                tr!("Embedded track"),
+                track.codec.to_ascii_uppercase()
+            )
         }
     };
     format!("{} · {kind}", subtitle_label(choice))

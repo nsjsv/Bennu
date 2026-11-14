@@ -15,7 +15,7 @@ use iced::Task;
 use super::global_error::GlobalErrorSource;
 use super::FileBrowser;
 use crate::model::{Message, PreviewContent, PreviewMessage};
-use bennu_preview::preview_config::AudioEndAction;
+use bennu_preview::preview_config::MediaEndAction;
 
 mod animated_image;
 mod document;
@@ -28,10 +28,10 @@ mod tests;
 mod tree;
 
 /// 主程序提供的播完模式（对话框没有「播下一首」）。
-const MAIN_APP_AUDIO_END_ACTIONS: [AudioEndAction; 3] = [
-    AudioEndAction::Stop,
-    AudioEndAction::Repeat,
-    AudioEndAction::Next,
+const MAIN_APP_END_ACTIONS: [MediaEndAction; 3] = [
+    MediaEndAction::Stop,
+    MediaEndAction::Repeat,
+    MediaEndAction::Next,
 ];
 
 impl FileBrowser {
@@ -40,7 +40,7 @@ impl FileBrowser {
         self.preview_engine
             .set_media_volume(self.user_config.media_preview_volume);
         self.preview_engine
-            .set_audio_end_action(self.user_config.audio_end_action);
+            .set_media_end_action(self.user_config.media_end_action);
     }
 
     pub(super) fn handle_preview_message(&mut self, message: PreviewMessage) -> Task<Message> {
@@ -113,17 +113,17 @@ impl FileBrowser {
                 self.persist_user_preferences_command()
             }
             // 播完模式是主程序设置：按主程序的三种轮换，改了就记住。
-            PreviewMessage::AudioEndActionCycled => {
+            PreviewMessage::MediaEndActionCycled => {
                 let action = self
                     .user_config
-                    .audio_end_action
-                    .after(&MAIN_APP_AUDIO_END_ACTIONS);
-                self.user_config.audio_end_action = action;
-                self.preview_engine.set_audio_end_action(action);
+                    .media_end_action
+                    .after(&MAIN_APP_END_ACTIONS);
+                self.user_config.media_end_action = action;
+                self.preview_engine.set_media_end_action(action);
                 self.persist_user_preferences_command()
             }
-            PreviewMessage::AudioNextTrackRequested(finished) => {
-                self.play_next_audio_track(finished)
+            PreviewMessage::MediaNextRequested(finished, kind) => {
+                self.play_next_media(finished, kind)
             }
             engine_message => {
                 unreachable!("{engine_message:?} 由 PreviewEngine::handle 处理，不会还给宿主")

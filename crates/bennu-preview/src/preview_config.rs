@@ -323,7 +323,7 @@ pub const DEFAULT_MEDIA_PREVIEW_VOLUME: f32 = 1.0;
 
 /// 一首放完之后做什么。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum AudioEndAction {
+pub enum MediaEndAction {
     #[default]
     Stop,
     Repeat,
@@ -331,9 +331,9 @@ pub enum AudioEndAction {
     Next,
 }
 
-impl AudioEndAction {
+impl MediaEndAction {
     /// 模式按钮的轮换：宿主给出自己提供的模式表，不在表里的从表头开始。
-    pub fn after(self, offered: &[AudioEndAction]) -> AudioEndAction {
+    pub fn after(self, offered: &[MediaEndAction]) -> MediaEndAction {
         let next = offered
             .iter()
             .position(|action| *action == self)
@@ -342,7 +342,7 @@ impl AudioEndAction {
     }
 
     /// 宿主不提供的模式（对话框没有「播下一首」）落到表头。
-    pub fn within(self, offered: &[AudioEndAction]) -> AudioEndAction {
+    pub fn within(self, offered: &[MediaEndAction]) -> MediaEndAction {
         if offered.contains(&self) {
             self
         } else {
@@ -352,18 +352,18 @@ impl AudioEndAction {
 
     pub fn stored_name(self) -> &'static str {
         match self {
-            AudioEndAction::Stop => "stop",
-            AudioEndAction::Repeat => "repeat",
-            AudioEndAction::Next => "next",
+            MediaEndAction::Stop => "stop",
+            MediaEndAction::Repeat => "repeat",
+            MediaEndAction::Next => "next",
         }
     }
 
     /// 存成字符串：读不懂的值（新版本写的）当默认，不让整份设置读失败。
-    pub fn from_stored(name: Option<&str>) -> AudioEndAction {
+    pub fn from_stored(name: Option<&str>) -> MediaEndAction {
         match name {
-            Some("repeat") => AudioEndAction::Repeat,
-            Some("next") => AudioEndAction::Next,
-            _ => AudioEndAction::Stop,
+            Some("repeat") => MediaEndAction::Repeat,
+            Some("next") => MediaEndAction::Next,
+            _ => MediaEndAction::Stop,
         }
     }
 }
@@ -373,14 +373,14 @@ impl AudioEndAction {
 pub struct MediaPlaybackSettings {
     /// 0.0–1.0。
     pub volume: f32,
-    pub audio_end_action: AudioEndAction,
+    pub end_action: MediaEndAction,
 }
 
 impl Default for MediaPlaybackSettings {
     fn default() -> Self {
         Self {
             volume: DEFAULT_MEDIA_PREVIEW_VOLUME,
-            audio_end_action: AudioEndAction::default(),
+            end_action: MediaEndAction::default(),
         }
     }
 }
@@ -566,7 +566,7 @@ pub fn preview_preferences_from_stored(stored: &StoredPreviewPreferences) -> Pre
         ),
         media_playback: MediaPlaybackSettings {
             volume: media_preview_volume_from_stored(stored.media_preview_volume_percent),
-            audio_end_action: AudioEndAction::from_stored(stored.audio_end_action.as_deref()),
+            end_action: MediaEndAction::from_stored(stored.audio_end_action.as_deref()),
         },
     }
 }

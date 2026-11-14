@@ -350,17 +350,17 @@ impl PreviewHost {
                 self.engine.set_media_volume(volume);
                 Task::none()
             }
-            PreviewMessage::AudioEndActionCycled => {
+            PreviewMessage::MediaEndActionCycled => {
                 let action = self
                     .engine
                     .media_settings
-                    .audio_end_action
+                    .end_action
                     .after(&super::DIALOG_AUDIO_END_ACTIONS);
-                self.engine.set_audio_end_action(action);
+                self.engine.set_media_end_action(action);
                 Task::none()
             }
             // 对话框从不设成「播下一首」，引擎不会要下一首。
-            PreviewMessage::AudioNextTrackRequested(_) => Task::none(),
+            PreviewMessage::MediaNextRequested(..) => Task::none(),
             // 窗口在消息回到宿主前已被关掉时，焦点簿记不能指向已死窗口。
             PreviewMessage::PreviewWindowPresented(window) => {
                 if self.engine.preview_window == Some(window) {

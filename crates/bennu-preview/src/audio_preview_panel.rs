@@ -22,14 +22,16 @@ use crate::audio_preview::{AudioLyrics, AudioStreamFacts};
 use crate::audio_timeline::{audio_timeline, TimelinePicture};
 use crate::audio_track_text::{fact_line, stream_facts, track_subtitle, track_title};
 use crate::formatting::{format_duration, format_file_size};
-use crate::media_controls::{AUDIO_PROGRESS_SLIDER_STEP_SECONDS, AUDIO_VOLUME_SLIDER_STEP};
+use crate::media_controls::{
+    end_action_icon, AUDIO_PROGRESS_SLIDER_STEP_SECONDS, AUDIO_VOLUME_SLIDER_STEP,
+};
 use crate::media_keys::media_keys;
 use crate::panel_text::readable_text;
 use crate::preview::{
     AudioAnalysis, AudioAnalysisState, AudioPreviewDetails, AudioPreviewPlayback,
     AudioPreviewPlaybackStatus, AudioTimelineView, PreviewSize,
 };
-use crate::preview_config::{AudioEndAction, MediaPlaybackSettings};
+use crate::preview_config::{MediaEndAction, MediaPlaybackSettings};
 use crate::preview_message::PreviewMessage;
 
 const PANEL_PADDING: f32 = 20.0;
@@ -283,7 +285,7 @@ where
     ];
     let controls = row![
         // 左右两侧等宽，播放键才在正中。
-        container(end_action_button(input.media_settings.audio_end_action))
+        container(end_action_button(input.media_settings.end_action))
             .width(Length::Fill)
             .align_x(Horizontal::Left),
         play_button(input.playback),
@@ -478,18 +480,18 @@ where
 }
 
 /// 图标 + 小字：三种模式的图标不常见，光看图标认不出。
-fn end_action_button<Message>(action: AudioEndAction) -> Element<'static, Message>
+fn end_action_button<Message>(action: MediaEndAction) -> Element<'static, Message>
 where
     Message: 'static + Clone + From<PreviewMessage>,
 {
-    let (icon, label) = match action {
-        AudioEndAction::Stop => (IconSymbol::StopAfterTrack, tr!("Stop After Track")),
-        AudioEndAction::Repeat => (IconSymbol::Repeat1, tr!("Repeat Track")),
-        AudioEndAction::Next => (IconSymbol::SkipForward, tr!("Play Next Track")),
+    let label = match action {
+        MediaEndAction::Stop => tr!("Stop After Track"),
+        MediaEndAction::Repeat => tr!("Repeat Track"),
+        MediaEndAction::Next => tr!("Play Next Track"),
     };
     button(
         row![
-            themed_icon(icon, IconTone::Normal, VOLUME_ICON_EDGE),
+            themed_icon(end_action_icon(action), IconTone::Normal, VOLUME_ICON_EDGE),
             readable_text(label).style(muted_text),
         ]
         .spacing(6)
@@ -497,7 +499,7 @@ where
     )
     .padding([4, 8])
     .style(transparent_button_style())
-    .on_press(Message::from(PreviewMessage::AudioEndActionCycled))
+    .on_press(Message::from(PreviewMessage::MediaEndActionCycled))
     .into()
 }
 

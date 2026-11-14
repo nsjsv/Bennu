@@ -15,7 +15,7 @@ impl FileBrowser {
     pub(super) fn sync_main_window_video_fullscreen(&mut self) -> Task<Message> {
         let engine = &mut self.preview_engine;
         let requested = engine.video_fullscreen == Some(VideoFullscreen::MainWindow);
-        let showing_video = engine.video_preview.is_some();
+        let showing_video = engine.keeps_video_fullscreen();
         if requested && !showing_video {
             engine.video_fullscreen = None;
         }

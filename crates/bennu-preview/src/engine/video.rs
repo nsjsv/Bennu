@@ -15,9 +15,12 @@ use crate::commands::preview::{
     measure_video_display_command, start_video_preview_audio_command, video_still_command,
 };
 use crate::preview::{
-    PreviewContent, PreviewState, PreviewWindowProfile, VideoPreviewDetails, VideoPreviewFrame,
-    VideoPreviewPlayback, VideoPreviewPlaybackStatus, VideoSeekDrag, VideoSound, VideoSubtitle,
+    PreviewContent, PreviewState, PreviewWindowProfile, VideoOpening, VideoPreviewDetails,
+    VideoPreviewFrame, VideoPreviewPlayback, VideoPreviewPlaybackStatus, VideoSeekDrag, VideoSound,
+    VideoSubtitle,
 };
+use crate::preview_config::MediaEndAction;
+use crate::preview_loading::PreviewPathKind;
 use crate::preview_message::PreviewMessage;
 use crate::video_preview::{FramePlan, SeekPrecision, VideoSegment, FALLBACK_DISPLAY};
 
@@ -34,11 +37,23 @@ impl super::PreviewEngine {
         details: &VideoPreviewDetails,
     ) -> Task<PreviewMessage> {
         self.clear_video_preview();
-        self.video_preview = Some(VideoPreviewPlayback::ready(
+        let queued = self.take_queued_media(path);
+        let mut playback = VideoPreviewPlayback::ready(
             path.to_path_buf(),
             details.probe.duration,
             !details.probe.audio_tracks.is_empty(),
-        ));
+        );
+        // 「播下一个」接上的右侧面板也直接播。
+        playback.opening = match (self.preview_load_surface, &queued) {
+            (PreviewLoadSurface::RightDockedPanel, None) => VideoOpening::ShowStill,
+            _ => VideoOpening::Play,
+        };
+        self.video_preview = Some(playback);
+        // 先接上全屏：独立窗口还没开时新窗口直接以全屏打开。
+        let fullscreen = match queued.and_then(|queued| queued.fullscreen) {
+            Some(fullscreen) => self.continue_video_fullscreen(fullscreen),
+            None => Task::none(),
+        };
         // 独立窗口按画面比例开好，第一帧到了不再跳一下。
         let window = match &details.probe.video {
             Some(video) if self.preview_load_surface == PreviewLoadSurface::StandaloneWindow => {
@@ -49,12 +64,14 @@ impl super::PreviewEngine {
         };
         Task::batch([
             window,
+            fullscreen,
             measure_video_display_command(path.to_path_buf()),
             self.choose_default_video_tracks(details),
         ])
     }
 
-    /// 屏幕量好了：独立窗口（含文件选择对话框）一打开就播；右侧面板只显示静止画面，点了才播。
+    /// 屏幕量好了：独立窗口（含文件选择对话框）一打开就播；右侧面板只显示静止画面，点了才播
+    /// （「播下一个」接上的例外，见 `VideoOpening`）。
     pub fn accept_video_display(
         &mut self,
         path: &Path,
@@ -76,11 +93,11 @@ impl super::PreviewEngine {
             Some(duration) if duration < STILL_PICTURE_TIME * 2 => duration / 2,
             _ => STILL_PICTURE_TIME,
         };
-        match self.preview_load_surface {
-            PreviewLoadSurface::StandaloneWindow => {
+        match playback.opening {
+            VideoOpening::Play => {
                 self.start_video_segment(Duration::ZERO, VideoPreviewPlaybackStatus::Playing)
             }
-            PreviewLoadSurface::RightDockedPanel => video_still_command(
+            VideoOpening::ShowStill => video_still_command(
                 path.to_path_buf(),
                 plan,
                 generation,
@@ -267,18 +284,29 @@ impl super::PreviewEngine {
         Task::none()
     }
 
+    /// 放完：按「播完怎么办」（和音频共用）停下、从头再放，或交宿主找下一个视频。
     pub fn accept_video_preview_finished(
         &mut self,
         path: &Path,
         generation: u64,
     ) -> Task<PreviewMessage> {
+        let end_action = self.media_settings.end_action;
         let Some(playback) = self.active_video_preview_mut(path, generation) else {
             return Task::none();
         };
+        if end_action == MediaEndAction::Repeat {
+            return self.start_video_segment(Duration::ZERO, VideoPreviewPlaybackStatus::Playing);
+        }
         pause_video(playback);
         playback.status = VideoPreviewPlaybackStatus::Finished;
         playback.segment_start = None;
         playback.position = playback.duration.unwrap_or(playback.position);
+        if end_action == MediaEndAction::Next {
+            return Task::done(PreviewMessage::MediaNextRequested(
+                path.to_path_buf(),
+                PreviewPathKind::Video,
+            ));
+        }
         Task::none()
     }
 

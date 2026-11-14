@@ -5,11 +5,14 @@
 use bennu_theme::controls::{segmented_choice_row, SegmentedChoice};
 use bennu_theme::scrollbar::{enhanced_scrollbar, enhanced_scrollbar_both, ScrollbarAxis};
 
-use crate::markdown_preview::markdown_preview_body;
+use crate::markdown_keys::markdown_keys;
+use crate::markdown_preview::{markdown_preview_body, MarkdownMarks};
 use crate::panel_text::readable_text;
 use crate::preview_message::PreviewMessage;
 use crate::scroll_wiring::ScrollRegionWiring;
+use crate::text_document::{FindEvent, TextViewerEvent};
 use crate::text_find_bar::text_find_bar;
+use crate::text_highlight::HighlightPalette;
 use crate::text_preview::{
     MarkdownModeChoice, MarkdownPreviewMode, TextPreviewDocument, TextPreviewFormat,
 };
@@ -22,8 +25,9 @@ use iced::Element;
 pub fn text_preview_panel<'a, Message>(
     document: Option<&'a TextPreviewDocument>,
     view: TextViewSettings,
+    palette: HighlightPalette,
     plain_viewer: impl Fn(&'a TextPreviewDocument, TextViewSettings) -> Element<'a, Message> + 'a,
-    markdown_scroll: ScrollRegionWiring<'static, Message>,
+    markdown_scroll: ScrollRegionWiring<'a, Message>,
 ) -> Column<'a, Message>
 where
     Message: 'static + Clone + From<PreviewMessage>,
@@ -31,35 +35,51 @@ where
     let Some(document) = document else {
         return column![readable_text(tr!("Text preview is not ready"))];
     };
-    // 不换行时多一条横向细线滑块；搜索条/跳行条在文字上方。
-    let raw = || {
-        let viewer = plain_viewer(document, view);
-        let viewer = if view.wrap {
-            enhanced_scrollbar(viewer, ScrollbarAxis::Vertical)
-        } else {
-            enhanced_scrollbar_both(viewer)
-        };
-        match text_find_bar(document) {
-            Some(bar) => column![bar, viewer].into(),
-            None => viewer,
+    let body: Element<'a, Message> = match document
+        .markdown()
+        .filter(|_| document.shows_rendered_markdown())
+    {
+        Some(markdown) => {
+            let (matches, current) = document.rendered_search().unwrap_or((&[], None));
+            let escape = document.find_bar().map(|_| {
+                Message::from(PreviewMessage::TextViewer(TextViewerEvent::Find(
+                    FindEvent::Close,
+                )))
+            });
+            markdown_keys(
+                markdown_preview_body(
+                    markdown,
+                    view,
+                    palette,
+                    MarkdownMarks { matches, current },
+                    markdown_scroll,
+                ),
+                escape,
+            )
+        }
+        // 不换行时多一条横向细线滑块。
+        None => {
+            let viewer = plain_viewer(document, view);
+            if view.wrap {
+                enhanced_scrollbar(viewer, ScrollbarAxis::Vertical)
+            } else {
+                enhanced_scrollbar_both(viewer)
+            }
         }
     };
-    let mut rendered = false;
-    let body: Element<'a, Message> = match document.format() {
-        TextPreviewFormat::Plain => raw(),
-        TextPreviewFormat::Markdown => {
-            let choice = MarkdownModeChoice::for_document(document);
-            let body = match (choice, document.markdown()) {
-                (MarkdownModeChoice::Switchable(MarkdownPreviewMode::Rendered), Some(markdown)) => {
-                    rendered = true;
-                    markdown_preview_body(markdown, markdown_scroll)
-                }
-                _ => raw(),
-            };
-            column![markdown_mode_switch(choice), body]
-                .spacing(8)
-                .into()
-        }
+    // 搜索条/跳行条在文字上方。
+    let body = match text_find_bar(document) {
+        Some(bar) => column![bar, body].into(),
+        None => body,
+    };
+    let body = match document.format() {
+        TextPreviewFormat::Plain => body,
+        TextPreviewFormat::Markdown => column![
+            markdown_mode_switch(MarkdownModeChoice::for_document(document)),
+            body
+        ]
+        .spacing(8)
+        .into(),
     };
 
     let mut panel = column![body];
@@ -69,8 +89,7 @@ where
             error
         )));
     }
-    // 渲染模式不按行排版，换行开关不适用。
-    panel.push(text_status_bar(document, view, !rendered))
+    panel.push(text_status_bar(document, view))
 }
 
 /// 渲染/原文切换行。超过 2 MB 的 Markdown 没有渲染全文，「渲染」置灰并说明原因。

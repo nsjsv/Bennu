@@ -61,6 +61,16 @@ pub fn detect_language(path: &Path, first_line: &str) -> Option<HighlightLanguag
     })
 }
 
+/// 围栏代码块标注的语言（`rust`、`Python`、`js`、`rust,ignore`）：按语法名或扩展名认，
+/// 不分大小写；认不出或只认出纯文本就不高亮。
+pub(crate) fn language_for_fence(label: &str) -> Option<HighlightLanguage> {
+    let token = label.split([' ', ',', '{']).next()?;
+    let syntax = syntaxes().find_syntax_by_token(token)?;
+    (syntax.name != "Plain Text").then(|| HighlightLanguage {
+        name: syntax.name.clone(),
+    })
+}
+
 /// 上色用的记号种类：比语法定义里的作用域粗得多，配色才好统一。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TokenKind {
@@ -270,6 +280,30 @@ impl HighlightPalette {
         match bennu_theme::ui_colors(theme).mode {
             bennu_theme::AppearanceMode::Light => Self::Light,
             bennu_theme::AppearanceMode::Dark => Self::Dark,
+        }
+    }
+
+    /// 搜索匹配的底色：浅黄；深色主题底本来就深，透明度低一点。
+    pub fn match_background(self) -> Color {
+        match self {
+            Self::Light => Color::from_rgba8(250, 204, 21, 0.38),
+            Self::Dark => Color::from_rgba8(250, 204, 21, 0.24),
+        }
+    }
+
+    /// 当前匹配的底色：橙，和其他匹配分得开。
+    pub fn current_match_background(self) -> Color {
+        match self {
+            Self::Light => Color::from_rgba8(249, 115, 22, 0.55),
+            Self::Dark => Color::from_rgba8(251, 146, 60, 0.55),
+        }
+    }
+
+    /// 行内代码的淡底。
+    pub fn inline_code_background(self) -> Color {
+        match self {
+            Self::Light => Color::from_rgba8(0, 0, 0, 0.06),
+            Self::Dark => Color::from_rgba8(255, 255, 255, 0.08),
         }
     }
 

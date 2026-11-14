@@ -247,8 +247,8 @@ impl super::PreviewEngine {
             Ok(opened) => {
                 let mut task = self.open_text_document(path.clone(), &opened);
                 if let Some(document) = self.text_preview_document.as_mut() {
-                    document.select_markdown_preview_mode(mode);
-                    let reads = document.restore_find(find);
+                    let mut reads = document.select_markdown_preview_mode(mode);
+                    reads.extend(document.restore_find(find));
                     task = Task::batch([task, text_read_tasks(document, reads)]);
                 }
                 self.preview = Some(PreviewState::Ready(PreviewContent::Text { path, opened }));

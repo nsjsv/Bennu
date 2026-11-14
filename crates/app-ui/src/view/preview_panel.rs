@@ -55,6 +55,7 @@ pub(crate) fn view_preview_window<'a>(
         sqlite_tables_scroll_wiring(),
         sqlite_data_scroll_wiring(),
         text_view,
+        palette,
         // 查看器是渲染器敏感部件（Paragraph 泛型），宿主实例化注入；它自己就是滚动区，
         // 部件 id 用平滑滚动管线的区域 id，滚轮的 scroll_by 直接作用到它。
         move |document: &TextPreviewDocument, view| {

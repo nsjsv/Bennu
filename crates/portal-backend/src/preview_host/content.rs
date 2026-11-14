@@ -282,13 +282,11 @@ impl PreviewHost {
                     ScanOptions::default(),
                     self.preferences.directory_expand_levels,
                 );
-                // 预览窗一打开键盘就归文本查看器（全选、复制、翻页不用先点一下）。
+                // 预览窗一打开键盘就归文本预览（全选、复制、翻页、搜索不用先点一下）。
                 if self.engine.active_text_preview_document().is_some() {
                     return Task::batch([
                         task,
-                        iced::widget::operation::focus(preview_scroll_id(
-                            PreviewScrollRegion::Text,
-                        )),
+                        bennu_preview::text_preview_viewer::focus_text_preview(),
                     ]);
                 }
                 task

@@ -161,12 +161,7 @@ impl PreviewEngine {
             PreviewMessage::TextPreviewEncodingSelected(encoding) => {
                 self.select_text_preview_encoding(encoding)
             }
-            PreviewMessage::MarkdownPreviewModeSelected(mode) => {
-                if let Some(document) = self.active_text_preview_document_mut() {
-                    document.select_markdown_preview_mode(mode);
-                }
-                Task::none()
-            }
+            PreviewMessage::MarkdownPreviewModeSelected(mode) => self.select_markdown_mode(mode),
             PreviewMessage::PreviewTreeAnimationTick => self.advance_preview_tree_animation(),
             PreviewMessage::PreviewWindowPinToggled => self.toggle_preview_window_pin(),
             PreviewMessage::PreviewWindowInitialControlsElapsed(generation) => {

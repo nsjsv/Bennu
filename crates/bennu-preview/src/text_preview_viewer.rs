@@ -29,7 +29,7 @@ use crate::text_document::{
 };
 use crate::text_highlight::HighlightPalette;
 use crate::text_view::{TextViewChange, TextViewSettings};
-pub(crate) use find::focus_text_viewer;
+pub use find::focus_text_preview;
 use geometry::{
     anchor_index, is_at_bottom, normalize_anchor, note_measured_height, row_height,
     scroll_viewer_by, scroll_viewer_horizontally, visible_rows, window_span,
@@ -285,7 +285,7 @@ where
             ..bounds
         };
         // 独立预览窗口打开时宿主对这个 id 发 focus 操作：键盘一开始就归查看器。关掉搜索条
-        // 后引擎的 `focus_text_viewer` 经 custom 认出查看器的状态。
+        // 后引擎的 `focus_text_preview` 经 custom 认出查看器的状态。
         operation.focusable(Some(&self.id), bounds, state);
         operation.custom(Some(&self.id), bounds, state);
         operation.scrollable(
@@ -357,7 +357,7 @@ where
             return;
         }
         let visible = visible_rows(state, self.document);
-        find::draw_match_marks(renderer, state, self.document, &visible, text_bounds, theme);
+        find::draw_match_marks(renderer, state, self.document, &visible, text_bounds);
         draw_selection_ranges(renderer, state, self.document, &visible, text_bounds, theme);
         draw_visible_rows(
             renderer,
@@ -406,7 +406,10 @@ where
 }
 
 /// Ctrl+= / Ctrl++ / Ctrl+- / Ctrl+0 缩放，Alt+Z 切换换行。
-fn view_shortcut(key: &keyboard::Key, modifiers: keyboard::Modifiers) -> Option<TextViewChange> {
+pub(crate) fn view_shortcut(
+    key: &keyboard::Key,
+    modifiers: keyboard::Modifiers,
+) -> Option<TextViewChange> {
     let keyboard::Key::Character(character) = key else {
         return None;
     };

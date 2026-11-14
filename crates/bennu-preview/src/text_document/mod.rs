@@ -10,6 +10,7 @@ mod highlight;
 mod index;
 mod line_breaks;
 mod open;
+mod rendered_find;
 mod rows;
 mod search_scan;
 mod watch;
@@ -32,6 +33,7 @@ pub use index::{IndexProgress, LineCountStatus};
 pub use open::{
     FileChange, JumpPlace, RowBatch, TextJump, TextOpened, MARKDOWN_RENDER_LIMIT_BYTES,
 };
+pub use rendered_find::RenderedMatch;
 pub use rows::{TextPosition, TextRow};
 pub use search_scan::{SearchDirection, SearchQuery, TextMatch};
 pub use watch::text_file_watch_subscription;
@@ -46,6 +48,7 @@ pub(crate) use search_scan::{
 
 use index::LineIndex;
 
+use crate::markdown_render::RenderedMarkdown;
 use crate::text_preview::{MarkdownPreviewMode, TextPreviewFormat};
 
 /// 往前/往后补一次读多少。
@@ -252,7 +255,7 @@ pub struct TextPreviewDocument {
     decoding: TextDecoding,
     encoding_chosen: bool,
     stamp: FileStamp,
-    markdown: Option<Arc<str>>,
+    markdown: Option<Arc<RenderedMarkdown>>,
     markdown_preview_mode: MarkdownPreviewMode,
     rows: VecDeque<TextRow>,
     /// 窗口被整个替换（跳转）时加一；旧窗口的补读结果到达时丢弃。
@@ -446,19 +449,33 @@ impl TextPreviewDocument {
         }
     }
 
-    pub fn markdown(&self) -> Option<&Arc<str>> {
-        self.markdown.as_ref()
+    pub fn markdown(&self) -> Option<&RenderedMarkdown> {
+        self.markdown.as_deref()
     }
 
     pub fn markdown_preview_mode(&self) -> MarkdownPreviewMode {
         self.markdown_preview_mode
     }
 
-    /// 只有拿到了渲染全文（≤ 2 MB）才能切到渲染模式。
-    pub fn select_markdown_preview_mode(&mut self, mode: MarkdownPreviewMode) {
-        if mode == MarkdownPreviewMode::Raw || self.markdown.is_some() {
-            self.markdown_preview_mode = mode;
+    /// 正在显示渲染后的 Markdown（不是原文查看器）。
+    pub fn shows_rendered_markdown(&self) -> bool {
+        self.markdown_preview_mode == MarkdownPreviewMode::Rendered && self.markdown.is_some()
+    }
+
+    /// 只有拿到了渲染内容（≤ 2 MB）才能切到渲染模式。换模式后搜索按新模式重算；跳行
+    /// 只对原文有意义，切到渲染时跳行条关掉。
+    pub(crate) fn select_markdown_preview_mode(
+        &mut self,
+        mode: MarkdownPreviewMode,
+    ) -> Vec<TextRead> {
+        if mode == self.markdown_preview_mode
+            || (mode == MarkdownPreviewMode::Rendered && self.markdown.is_none())
+        {
+            return Vec::new();
         }
+        self.markdown_preview_mode = mode;
+        self.revision += 1;
+        self.search_after_mode_change()
     }
 
     /// 查看器可见范围变了：记下来，视口外剩得不多就补读。

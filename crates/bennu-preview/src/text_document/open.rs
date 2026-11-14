@@ -12,6 +12,7 @@ use super::rows::{
 };
 use super::TextDecoding;
 use super::{RowsRequest, EXTEND_BUDGET};
+use crate::markdown_render::RenderedMarkdown;
 use crate::text_preview::TextPreviewFormat;
 
 /// Markdown 渲染模式要整篇读进内存再排版，超过这个大小只显示原文（第五轮决定）。
@@ -79,7 +80,7 @@ pub enum FileChange {
     Deleted,
 }
 
-/// 打开后的文本：句柄、解码方式、第一个窗口与 Markdown 全文。
+/// 打开后的文本：句柄、解码方式、第一个窗口与解析好的 Markdown（≤ 2 MB）。
 pub struct TextOpened {
     pub(crate) source: Arc<dyn ByteSource>,
     pub(crate) decoding: TextDecoding,
@@ -87,7 +88,7 @@ pub struct TextOpened {
     pub(crate) encoding_chosen: bool,
     pub(crate) stamp: FileStamp,
     pub(crate) batch: RowBatch,
-    pub(crate) markdown: Option<Arc<str>>,
+    pub(crate) markdown: Option<Arc<RenderedMarkdown>>,
     pub(crate) format: TextPreviewFormat,
 }
 
@@ -132,7 +133,8 @@ pub(crate) fn open_text(
         && stamp.len - decoding.data_start() <= MARKDOWN_RENDER_LIMIT_BYTES)
         .then(|| read_whole_text(&reader))
         .transpose()?
-        .map(Arc::from);
+        // 渲染要的解析（含代码块高亮）在这里、后台线程里做一次，画的时候只借用。
+        .map(|text| Arc::new(RenderedMarkdown::parse(&text)));
     Ok(TextOpened {
         source,
         decoding,

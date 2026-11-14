@@ -56,6 +56,7 @@ pub(crate) fn preview_window_view(
         sqlite_data_scroll_wiring(),
         // 字号与换行读主程序记住的值，本次会话里改了只当次有效（第四轮决定）。
         host.preferences.text_view,
+        palette,
         // 查看器是渲染器敏感部件，宿主实例化注入；它自己就是滚动区，部件 id 用平滑
         // 滚动管线的区域 id（app-ui 适配层同构）。
         move |document: &TextPreviewDocument, view| {
@@ -159,7 +160,7 @@ fn document_scroll_wiring(preview: Option<&PreviewState>) -> ScrollRegionWiring<
 }
 
 // Markdown 渲染体接线：整篇已经在内存里，不需要视口回传。
-fn markdown_scroll_wiring() -> ScrollRegionWiring<'static, Message> {
+fn markdown_scroll_wiring<'a>() -> ScrollRegionWiring<'a, Message> {
     ScrollRegionWiring {
         smooth_scroll_wrap: smooth_scroll_wrap(PreviewScrollRegion::Markdown),
         scrollable_id: preview_scroll_id(PreviewScrollRegion::Markdown),

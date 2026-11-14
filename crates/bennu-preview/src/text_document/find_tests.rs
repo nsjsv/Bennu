@@ -228,3 +228,70 @@ fn goto_input_keeps_only_digits() {
         })
     );
 }
+
+fn markdown_document(markdown: &str) -> TextPreviewDocument {
+    let mut document = document_from_bytes(markdown.as_bytes().to_vec(), TextJump::Start);
+    document.markdown = Some(std::sync::Arc::new(
+        crate::markdown_render::RenderedMarkdown::parse(markdown),
+    ));
+    document.format = crate::text_preview::TextPreviewFormat::Markdown;
+    document.markdown_preview_mode = crate::text_preview::MarkdownPreviewMode::Rendered;
+    document
+}
+
+#[test]
+fn rendered_markdown_is_searched_without_markup_and_steps_through_blocks() {
+    use crate::text_preview::MarkdownPreviewMode;
+
+    let source = "# Needle title\n\nplain **nee**dle\n\n| a | b |\n| - | - |\n| x | needle |\n";
+    let mut document = markdown_document(source);
+    search(&mut document, "needle");
+    // 「**nee**dle」去掉标记后也是 needle；标题、正文、表格单元格各一处。
+    let (matches, current) = document.rendered_search().expect("rendered search");
+    assert_eq!(matches.len(), 3);
+    assert_eq!(current, Some(0));
+    assert_eq!(
+        document.search_summary(),
+        Some(SearchSummary {
+            ordinal: Some(1),
+            total: 3,
+            finished: true,
+        })
+    );
+    assert_eq!(document.rendered_current_block(), Some(0));
+    let reads = document.step_search(SearchDirection::Backward);
+    settle(&mut document, reads);
+    assert_eq!(
+        document.rendered_current_block(),
+        Some(2),
+        "wrapped to the table"
+    );
+    // 原文模式里同一个词按文件搜：标记符号里的「**nee**dle」不算。
+    let reads = document.select_markdown_preview_mode(MarkdownPreviewMode::Raw);
+    settle(&mut document, reads);
+    assert!(document.rendered_search().is_none());
+    assert_eq!(
+        document.search_summary().map(|summary| summary.total),
+        Some(2)
+    );
+}
+
+#[test]
+fn going_to_a_line_is_only_for_the_raw_text() {
+    use crate::text_preview::MarkdownPreviewMode;
+
+    let mut document = markdown_document("# a\n\nb\n");
+    document.open_goto();
+    assert!(document.find_bar().is_none());
+    let reads = document.select_markdown_preview_mode(MarkdownPreviewMode::Raw);
+    settle(&mut document, reads);
+    document.open_goto();
+    assert!(matches!(
+        document.find_bar(),
+        Some(FindBar::GotoLine { .. })
+    ));
+    // 切回渲染模式时跳行条关掉。
+    let reads = document.select_markdown_preview_mode(MarkdownPreviewMode::Rendered);
+    settle(&mut document, reads);
+    assert!(document.find_bar().is_none());
+}

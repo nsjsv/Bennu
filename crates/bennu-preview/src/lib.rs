@@ -62,9 +62,13 @@ pub mod text_preview_viewer;
 // 面板文本构造辅助（readable_text 单源；只收成品字符串，文案由调用方
 // 经 tr! 取得），app-ui typography re-export 维持调用路径。
 pub mod panel_text;
-// Markdown 预览渲染面板（pulldown-cmark 收集器 + 块视图），滚动接线经
+// Markdown 预览渲染面板（借用解析好的内容画块视图），滚动接线经
 // scroll_wiring 由宿主注入。
 pub mod markdown_preview;
+// Markdown 渲染内容：打开时后台解析一次，文档里留着。
+pub mod markdown_render;
+// 渲染模式的键盘（搜索、缩放快捷键）。
+mod markdown_keys;
 // 文档（PDF/Office 分页）预览面板，滚动接线经 scroll_wiring 由宿主注入。
 pub mod document_preview_panel;
 // SQLite 预览面板（表列表/数据网格/SQL 查询），标签行与滚动接线由宿主注入。

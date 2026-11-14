@@ -108,7 +108,12 @@ async fn markdown_is_decided_by_type_and_rendered_only_up_to_two_megabytes() {
 
     let markdown = opened(markdown, &rules).await.expect("md");
     assert_eq!(markdown.format, TextPreviewFormat::Markdown);
-    assert_eq!(markdown.markdown.as_deref(), Some("# Title\n"));
+    assert_eq!(
+        markdown.markdown.as_deref(),
+        Some(&crate::markdown_render::RenderedMarkdown::parse(
+            "# Title\n"
+        ))
+    );
     let plain = opened(plain, &rules).await.expect("readme");
     assert_eq!(plain.format, TextPreviewFormat::Plain);
     assert!(plain.markdown.is_none());

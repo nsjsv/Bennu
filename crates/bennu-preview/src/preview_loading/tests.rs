@@ -225,7 +225,9 @@ async fn load_preview_renders_markdown_text_preview() {
     assert_eq!(opened.format(), TextPreviewFormat::Markdown);
     assert_eq!(
         opened.markdown.as_deref(),
-        Some("# Title\n\nHello **world**.\n")
+        Some(&crate::markdown_render::RenderedMarkdown::parse(
+            "# Title\n\nHello **world**.\n"
+        ))
     );
 }
 

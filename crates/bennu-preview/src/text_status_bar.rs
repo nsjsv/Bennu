@@ -44,11 +44,12 @@ impl std::fmt::Display for EncodingOption {
 pub(crate) fn text_status_bar<'a, Message>(
     document: &'a TextPreviewDocument,
     view: TextViewSettings,
-    show_wrap: bool,
 ) -> Element<'a, Message>
 where
     Message: 'static + Clone + From<PreviewMessage>,
 {
+    // Markdown 渲染模式不按行排版：换行开关不适用，位置只报总行数。
+    let rendered = document.shows_rendered_markdown();
     responsive(move |size| {
         let mut available = size.width - POSITION_WIDTH;
         let mut fits = |width: f32| {
@@ -59,7 +60,7 @@ where
             fits
         };
         let show_encoding = fits(ENCODING_WIDTH);
-        let show_wrap = show_wrap && fits(WRAP_WIDTH);
+        let show_wrap = !rendered && fits(WRAP_WIDTH);
         let show_zoom = fits(ZOOM_WIDTH);
 
         let mut bar = row![].spacing(6).align_y(Alignment::Center);
@@ -183,7 +184,11 @@ fn encoding_options() -> Vec<EncodingOption> {
 
 /// 「第 120 行，共 35,201 行」；统计中「第 120 行，正在统计…」；行号还不知道时只说统计中。
 pub(crate) fn position_label(document: &TextPreviewDocument) -> String {
-    let line = document.viewport().and_then(|viewport| {
+    // 渲染模式没有「当前行」，只报总行数。
+    let viewport = document
+        .viewport()
+        .filter(|_| !document.shows_rendered_markdown());
+    let line = viewport.and_then(|viewport| {
         let row = viewport
             .cursor
             .map_or(viewport.first_row, |cursor| cursor.row);

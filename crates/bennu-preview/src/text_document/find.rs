@@ -2,12 +2,14 @@
 //! 最多 4 MB）、当前匹配与它的序号、后台计数与查找。
 //!
 //! 搜索条跟着文档走：换文件就没了；同一文件改写重开、改编码时引擎把条和搜索词搬过去。
+//! Markdown 渲染模式下搜的是渲染后的文字（`rendered_find`），原文模式搜文件。
 
 use std::collections::VecDeque;
 
 use tokio_util::sync::CancellationToken;
 
 use super::open::{JumpPlace, TextJump};
+use super::rendered_find::{RenderedMatch, RenderedSearch};
 use super::rows::{TextPosition, TextRow};
 use super::search_scan::{
     anchored_position, CountProgress, SearchCheckpoint, SearchDirection, SearchMatcher,
@@ -44,8 +46,10 @@ pub(crate) enum WindowChange {
 pub(crate) struct TextFind {
     bar: Option<FindBar>,
     query: SearchQuery,
-    /// 搜索条开着、搜索词非空时的这一轮搜索。
+    /// 搜索条开着、搜索词非空时的这一轮搜索：原文模式是 `run`（搜文件），渲染模式是
+    /// `rendered`（搜渲染后的文字），同一时间至多一个，都在 `stop_search` 里清掉。
     run: Option<SearchRun>,
+    rendered: Option<RenderedSearch>,
     /// 每开一轮搜索加一；旧一轮的回复到达时丢弃。
     generation: u64,
     /// 正在后台找这一行（从 0 数）的行首。
@@ -94,6 +98,7 @@ impl TextFind {
             bar: self.bar.clone(),
             query: self.query.clone(),
             run: None,
+            rendered: None,
             generation: self.generation,
             goto_in_flight: None,
         }
@@ -128,8 +133,28 @@ impl TextPreviewDocument {
         self.find.run.as_ref().and_then(|run| run.current)
     }
 
-    /// 搜索条上的计数；没有在搜时 None。
+    /// 渲染模式的匹配与当前匹配的下标。
+    pub fn rendered_search(&self) -> Option<(&[RenderedMatch], Option<usize>)> {
+        let rendered = self.find.rendered.as_ref()?;
+        Some((rendered.matches(), rendered.current()))
+    }
+
+    /// 渲染模式当前匹配所在的块（引擎据此把那一块滚进视口）。
+    pub(crate) fn rendered_current_block(&self) -> Option<usize> {
+        let rendered = self.find.rendered.as_ref()?;
+        let found = &rendered.matches()[rendered.current()?];
+        self.markdown()?.block_of_unit(found.unit)
+    }
+
+    /// 搜索条上的计数；没有在搜时 None。渲染模式一次就数完。
     pub fn search_summary(&self) -> Option<SearchSummary> {
+        if let Some(rendered) = &self.find.rendered {
+            return Some(SearchSummary {
+                ordinal: rendered.current().map(|index| index as u64 + 1),
+                total: rendered.matches().len() as u64,
+                finished: true,
+            });
+        }
         let run = self.find.run.as_ref()?;
         Some(SearchSummary {
             ordinal: match (run.current, run.ordinal) {
@@ -170,9 +195,12 @@ impl TextPreviewDocument {
         }
     }
 
-    /// Ctrl+G：打开跳行条（搜索停下）。
+    /// Ctrl+G：打开跳行条（搜索停下）。跳行只对原文有意义，渲染模式里不开。
     pub(crate) fn open_goto(&mut self) {
-        self.find.run = None;
+        if self.shows_rendered_markdown() {
+            return;
+        }
+        self.stop_search();
         self.find.bar = Some(FindBar::GotoLine {
             input: String::new(),
         });
@@ -180,7 +208,7 @@ impl TextPreviewDocument {
     }
 
     pub(crate) fn close_find(&mut self) {
-        self.find.run = None;
+        self.stop_search();
         self.find.bar = None;
         self.find.goto_in_flight = None;
         self.revision += 1;
@@ -203,6 +231,11 @@ impl TextPreviewDocument {
     pub(crate) fn step_search(&mut self, direction: SearchDirection) -> Vec<TextRead> {
         if self.find.bar != Some(FindBar::Search) {
             return self.open_search(None);
+        }
+        if let Some(rendered) = &mut self.find.rendered {
+            rendered.step(direction);
+            self.revision += 1;
+            return Vec::new();
         }
         let Some(run) = &self.find.run else {
             return Vec::new();
@@ -384,15 +417,38 @@ impl TextPreviewDocument {
         self.revision += 1;
     }
 
-    fn restart_search(&mut self) -> Vec<TextRead> {
+    /// Markdown 换了模式：搜索按新模式重算；跳行只对原文有意义，切到渲染时关掉跳行条。
+    pub(crate) fn search_after_mode_change(&mut self) -> Vec<TextRead> {
+        if self.shows_rendered_markdown() && matches!(self.find.bar, Some(FindBar::GotoLine { .. }))
+        {
+            self.find.bar = None;
+            self.find.goto_in_flight = None;
+        }
+        self.restart_search()
+    }
+
+    fn stop_search(&mut self) {
         self.find.run = None;
+        self.find.rendered = None;
         self.revision += 1;
+    }
+
+    fn restart_search(&mut self) -> Vec<TextRead> {
+        self.stop_search();
         if self.find.bar != Some(FindBar::Search) {
             return Vec::new();
         }
         let Some(matcher) = SearchMatcher::new(&self.find.query) else {
             return Vec::new();
         };
+        if let Some(markdown) = self
+            .markdown
+            .as_deref()
+            .filter(|_| self.shows_rendered_markdown())
+        {
+            self.find.rendered = Some(RenderedSearch::new(markdown, &matcher));
+            return Vec::new();
+        }
         self.find.generation += 1;
         let generation = self.find.generation;
         let start = SearchCheckpoint {

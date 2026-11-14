@@ -29,6 +29,7 @@ use crate::preview_surface::preview_surface;
 use crate::preview_tree_panel::{archive_preview_panel, directory_preview_panel};
 use crate::scroll_wiring::ScrollRegionWiring;
 use crate::sqlite_preview_panel::sqlite_preview_panel;
+use crate::text_highlight::HighlightPalette;
 use crate::text_preview::TextPreviewDocument;
 use crate::text_preview_panel::text_preview_panel;
 use crate::text_view::TextViewSettings;
@@ -50,10 +51,11 @@ pub fn view_preview_window<'a, Message>(
     directory_scroll: ScrollRegionWiring<'static, Message>,
     archive_scroll: ScrollRegionWiring<'static, Message>,
     document_scroll: ScrollRegionWiring<'static, Message>,
-    markdown_scroll: ScrollRegionWiring<'static, Message>,
+    markdown_scroll: ScrollRegionWiring<'a, Message>,
     sqlite_tables_scroll: ScrollRegionWiring<'a, Message>,
     sqlite_data_scroll: ScrollRegionWiring<'a, Message>,
     text_view: TextViewSettings,
+    text_palette: HighlightPalette,
     plain_viewer: impl Fn(&'a TextPreviewDocument, TextViewSettings) -> Element<'a, Message> + 'a,
     sqlite_tabs: Element<'static, Message>,
     on_sqlite_resize_drag_finished: impl Fn() -> Message + 'static,
@@ -79,6 +81,7 @@ where
             sqlite_tables_scroll,
             sqlite_data_scroll,
             text_view,
+            text_palette,
             plain_viewer,
             sqlite_tabs,
             on_sqlite_resize_drag_finished,
@@ -103,10 +106,11 @@ fn preview_panel<'a, Message>(
     directory_scroll: ScrollRegionWiring<'static, Message>,
     archive_scroll: ScrollRegionWiring<'static, Message>,
     document_scroll: ScrollRegionWiring<'static, Message>,
-    markdown_scroll: ScrollRegionWiring<'static, Message>,
+    markdown_scroll: ScrollRegionWiring<'a, Message>,
     sqlite_tables_scroll: ScrollRegionWiring<'a, Message>,
     sqlite_data_scroll: ScrollRegionWiring<'a, Message>,
     text_view: TextViewSettings,
+    text_palette: HighlightPalette,
     plain_viewer: impl Fn(&'a TextPreviewDocument, TextViewSettings) -> Element<'a, Message> + 'a,
     sqlite_tabs: Element<'static, Message>,
     on_sqlite_resize_drag_finished: impl Fn() -> Message + 'static,
@@ -126,6 +130,7 @@ where
             text_preview_document
                 .filter(|document: &&TextPreviewDocument| document.path() == path.as_path()),
             text_view,
+            text_palette,
             plain_viewer,
             markdown_scroll,
         )

@@ -288,7 +288,13 @@ mod tests {
         let window = Id::unique();
         let path = PathBuf::from("/tmp/photo.png");
 
-        for message in [PreviewMessage::SqliteTablesResizeStarted] {
+        for message in [
+            PreviewMessage::SqliteTablesResizeStarted,
+            // 字号与换行是宿主设置，引擎原样还回去。
+            PreviewMessage::TextViewer(TextViewerEvent::ChangeView(
+                crate::text_view::TextViewChange::ZoomIn,
+            )),
+        ] {
             returned_to_host(&mut engine, message);
         }
         assert!(matches!(

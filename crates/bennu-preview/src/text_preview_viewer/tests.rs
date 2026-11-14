@@ -1,5 +1,6 @@
 use iced::advanced::widget::operation::scrollable::AbsoluteOffset;
 use iced::advanced::widget::operation::Scrollable as _;
+use iced::widget::text_editor;
 use iced::{Point, Rectangle};
 
 use super::*;
@@ -407,4 +408,244 @@ fn view_shortcuts_map_to_zoom_and_wrap_changes() {
     );
     assert_eq!(view_shortcut(&key("z"), keyboard::Modifiers::empty()), None);
     assert_eq!(view_shortcut(&key("0"), keyboard::Modifiers::empty()), None);
+}
+
+/// 记下写入的剪贴板内容（普通 / 主选区）。
+#[derive(Default)]
+struct RecordingClipboard {
+    standard: Option<String>,
+    primary: Option<String>,
+}
+
+impl iced::advanced::Clipboard for RecordingClipboard {
+    fn read(&self, _kind: iced::advanced::clipboard::Kind) -> Option<String> {
+        None
+    }
+
+    fn write(&mut self, kind: iced::advanced::clipboard::Kind, contents: String) {
+        match kind {
+            iced::advanced::clipboard::Kind::Standard => self.standard = Some(contents),
+            iced::advanced::clipboard::Kind::Primary => self.primary = Some(contents),
+        }
+    }
+}
+
+fn viewer_bounds() -> Rectangle {
+    Rectangle::new(Point::ORIGIN, Size::new(480.0, 400.0))
+}
+
+fn at(x: f32, y: f32) -> mouse::Cursor {
+    mouse::Cursor::Available(Point::new(x, y))
+}
+
+fn send(
+    state: &mut TextPreviewViewerState,
+    document: &TextPreviewDocument,
+    event: Event,
+    cursor: mouse::Cursor,
+    clipboard: &mut RecordingClipboard,
+) -> interaction::EventOutcome {
+    interaction::handle_event(state, document, &event, viewer_bounds(), cursor, clipboard)
+}
+
+fn escape_key() -> Event {
+    Event::Keyboard(keyboard::Event::KeyPressed {
+        key: keyboard::Key::Named(keyboard::key::Named::Escape),
+        modified_key: keyboard::Key::Named(keyboard::key::Named::Escape),
+        physical_key: keyboard::key::Physical::Code(keyboard::key::Code::Escape),
+        location: keyboard::Location::Standard,
+        modifiers: keyboard::Modifiers::empty(),
+        text: None,
+        repeat: false,
+    })
+}
+
+#[test]
+fn escape_first_clears_the_selection_then_lets_the_window_close() {
+    let document = document_from_bytes(lines(20), TextJump::Start);
+    let mut state = synced_state(&document);
+    let mut clipboard = RecordingClipboard::default();
+    state.is_focused = true;
+    state.selection_anchor = Some(TextPosition { row: 0, column: 0 });
+    state.cursor = Some(TextPosition { row: 0, column: 4 });
+
+    assert!(
+        send(
+            &mut state,
+            &document,
+            escape_key(),
+            at(10.0, 10.0),
+            &mut clipboard
+        )
+        .captured
+    );
+    assert_eq!(state.selection_anchor, state.cursor);
+    // 第二下没东西可取消：不捕获，宿主关窗口。
+    assert!(
+        !send(
+            &mut state,
+            &document,
+            escape_key(),
+            at(10.0, 10.0),
+            &mut clipboard
+        )
+        .captured
+    );
+}
+
+#[test]
+fn dragging_past_the_bottom_edge_keeps_scrolling_and_extending_the_selection() {
+    let document = document_from_bytes(lines(500), TextJump::Start);
+    let mut state = synced_state(&document);
+    let mut clipboard = RecordingClipboard::default();
+    let text_x = state.gutter_width + 20.0;
+    let press = Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left));
+    send(
+        &mut state,
+        &document,
+        press,
+        at(text_x, 20.0),
+        &mut clipboard,
+    );
+    let below = Event::Mouse(mouse::Event::CursorMoved {
+        position: Point::new(text_x, 460.0),
+    });
+    assert!(
+        send(
+            &mut state,
+            &document,
+            below,
+            at(text_x, 460.0),
+            &mut clipboard
+        )
+        .captured
+    );
+    assert!(state.autoscroll_velocity > 0.0);
+
+    let anchor_before = state.anchor;
+    interaction::autoscroll_step(&mut state, &document, std::time::Duration::from_millis(500));
+    assert_ne!(state.anchor, anchor_before);
+    let cursor = state.cursor.expect("cursor");
+    assert!(cursor.row > document.rows()[15].start);
+
+    // 松开：停止滚动，选区写进主选区。
+    let release = Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left));
+    send(
+        &mut state,
+        &document,
+        release,
+        at(text_x, 460.0),
+        &mut clipboard,
+    );
+    assert_eq!(state.autoscroll_velocity, 0.0);
+    assert!(clipboard
+        .primary
+        .as_deref()
+        .is_some_and(|text| text.contains("line 10")));
+}
+
+#[test]
+fn right_click_menu_offers_select_all_and_greys_out_copy_without_a_selection() {
+    let document = document_from_bytes(lines(20), TextJump::Start);
+    let mut state = synced_state(&document);
+    let mut clipboard = RecordingClipboard::default();
+    let text_x = state.gutter_width + 20.0;
+    let right = Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right));
+    assert!(
+        send(
+            &mut state,
+            &document,
+            right,
+            at(text_x, 30.0),
+            &mut clipboard
+        )
+        .captured
+    );
+    assert!(state.context_menu.is_some());
+
+    // 没有选区：点「复制」什么也不写。
+    let copy =
+        interaction::menu_item_center_for_tests(&state, viewer_bounds(), false).expect("menu");
+    let click = Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left));
+    send(
+        &mut state,
+        &document,
+        click.clone(),
+        mouse::Cursor::Available(copy),
+        &mut clipboard,
+    );
+    assert!(clipboard.standard.is_none());
+    assert!(state.context_menu.is_none());
+
+    // 「全选」：选中整篇并写主选区。
+    let right = Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right));
+    send(
+        &mut state,
+        &document,
+        right,
+        at(text_x, 30.0),
+        &mut clipboard,
+    );
+    let select_all =
+        interaction::menu_item_center_for_tests(&state, viewer_bounds(), true).expect("menu");
+    send(
+        &mut state,
+        &document,
+        click,
+        mouse::Cursor::Available(select_all),
+        &mut clipboard,
+    );
+    assert_eq!(
+        state.selection_anchor,
+        Some(TextPosition { row: 0, column: 0 })
+    );
+    assert_eq!(
+        state.cursor,
+        Some(TextPosition {
+            row: document.len(),
+            column: 0
+        })
+    );
+    assert_eq!(clipboard.primary.as_deref(), Some(lines_text(20).as_str()));
+}
+
+fn lines_text(count: usize) -> String {
+    (0..count)
+        .map(|index| format!("line {index}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn copying_more_than_fifteen_megabytes_shows_a_notice_instead() {
+    let document = document_from_bytes(lines(1_600_000), TextJump::Start);
+    assert!(document.len() > crate::text_document::COPY_LIMIT_BYTES);
+    let mut state = synced_state(&document);
+    let mut clipboard = RecordingClipboard::default();
+    state.is_focused = true;
+    state.selection_anchor = Some(TextPosition { row: 0, column: 0 });
+    state.cursor = Some(TextPosition {
+        row: document.len(),
+        column: 0,
+    });
+    selection::apply_key_binding(
+        text_editor::Binding::<()>::Copy,
+        &mut state,
+        &document,
+        &mut clipboard,
+    );
+    assert!(state.notice.is_some());
+    assert!(clipboard.standard.is_none());
+    assert!(state.pending_events.is_empty());
+}
+
+#[test]
+fn the_focus_operation_gives_the_viewer_the_keyboard() {
+    use iced::advanced::widget::operation::Focusable as _;
+    let mut state = TextPreviewViewerState::default();
+    assert!(!state.is_focused());
+    state.focus();
+    assert!(state.is_focused);
+    state.unfocus();
+    assert!(!state.is_focused);
 }

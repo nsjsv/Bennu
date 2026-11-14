@@ -4,7 +4,6 @@
 //! 整篇读进来。几何换算复用 retained 段落的 hit test；选区高亮按视觉行拆分，列边界 x 由
 //! 对段落二分 hit test 求得。选区超出窗口时复制交给引擎在后台读。
 
-use iced::advanced::clipboard::Kind as ClipboardKind;
 use iced::advanced::mouse::{click, Click};
 use iced::advanced::text::{Hit, Paragraph};
 use iced::advanced::Clipboard;
@@ -15,7 +14,9 @@ use super::{
     row_height, scroll_viewer_by, visible_rows, TextPreviewViewerState, VisibleRow,
     TEXT_PREVIEW_DRAG_THRESHOLD_PX,
 };
-use crate::text_document::{TextJump, TextPosition, TextPreviewDocument, TextViewerEvent};
+use crate::text_document::{
+    ClipboardTarget, TextJump, TextPosition, TextPreviewDocument, TextViewerEvent,
+};
 
 /// 视口内坐标（text_bounds 相对）→ 光标位置。段落缓存缺失时退化为行首，
 /// 保证「单击清除选区」的语义不因缓存时序失效。
@@ -531,28 +532,79 @@ pub(super) fn apply_key_binding<Message>(
     }
 }
 
-/// 复制：选区在窗口里直接写剪贴板；超出窗口交给引擎后台读（超过 15 MB 引擎不复制）。
+/// 复制：超过 15 MB 不复制并提示；选区在窗口里直接写剪贴板；超出窗口交给引擎后台读。
 fn copy_selection(
     state: &mut TextPreviewViewerState,
     document: &TextPreviewDocument,
     clipboard: &mut dyn Clipboard,
 ) {
-    let Some((anchor, cursor)) = state.selection_anchor.zip(state.cursor) else {
+    let Some((from, to)) = selected_range(state) else {
         return;
     };
-    if anchor == cursor {
+    if !TextPreviewDocument::copy_fits(from, to) {
+        super::interaction::show_notice(
+            state,
+            bennu_localization::tr!("The selection is too large to copy."),
+        );
         return;
     }
-    match selection_text(document, anchor, cursor) {
-        Some(text) if !text.is_empty() => clipboard.write(ClipboardKind::Standard, text),
-        Some(_) => {}
-        None => {
-            let (from, to) = ordered(anchor, cursor);
-            state
-                .pending_events
-                .push(TextViewerEvent::CopyRequested { from, to });
-        }
+    write_selection(
+        state,
+        document,
+        clipboard,
+        from,
+        to,
+        ClipboardTarget::Standard,
+    );
+}
+
+/// 选区变了就写 Linux 主选区（中键粘贴）；超过 15 MB 不写，也不提示。
+pub(super) fn publish_primary(
+    state: &mut TextPreviewViewerState,
+    document: &TextPreviewDocument,
+    clipboard: &mut dyn Clipboard,
+) {
+    let Some((from, to)) = selected_range(state) else {
+        return;
+    };
+    if TextPreviewDocument::copy_fits(from, to) {
+        write_selection(
+            state,
+            document,
+            clipboard,
+            from,
+            to,
+            ClipboardTarget::Primary,
+        );
     }
+}
+
+fn write_selection(
+    state: &mut TextPreviewViewerState,
+    document: &TextPreviewDocument,
+    clipboard: &mut dyn Clipboard,
+    from: TextPosition,
+    to: TextPosition,
+    target: ClipboardTarget,
+) {
+    match selection_text(document, from, to) {
+        Some(text) if !text.is_empty() => clipboard.write(target.kind(), text),
+        Some(_) => {}
+        None => state
+            .pending_events
+            .push(TextViewerEvent::CopyRequested { from, to, target }),
+    }
+}
+
+/// 非空选区的有序端点。
+fn selected_range(state: &TextPreviewViewerState) -> Option<(TextPosition, TextPosition)> {
+    let (anchor, cursor) = state.selection_anchor.zip(state.cursor)?;
+    (anchor != cursor).then(|| ordered(anchor, cursor))
+}
+
+/// 位置是否落在当前选区里（右键点在选区里时保留选区）。
+pub(super) fn selection_contains(state: &TextPreviewViewerState, position: TextPosition) -> bool {
+    selected_range(state).is_some_and(|(from, to)| from <= position && position <= to)
 }
 
 fn default_position(state: &TextPreviewViewerState) -> TextPosition {

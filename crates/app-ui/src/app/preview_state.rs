@@ -105,11 +105,24 @@ impl FileBrowser {
         let (acceptance, command) =
             self.preview_engine
                 .accept_preview(path, preview_outcome, options, expand_levels);
-        if matches!(
+        if !matches!(
             acceptance,
             bennu_preview::engine::PreviewAcceptance::ContentReady
         ) {
-            self.retract_global_error(GlobalErrorSource::Preview);
+            return command.map(Message::Preview);
+        }
+        self.retract_global_error(GlobalErrorSource::Preview);
+        // 独立预览窗口一打开键盘就归文本查看器；右侧面板不抢，点一下文字才归它。
+        let focus_viewer = self.preview_engine.preview_load_surface
+            == bennu_preview::engine::PreviewLoadSurface::StandaloneWindow
+            && self.preview_engine.active_text_preview_document().is_some();
+        if focus_viewer {
+            return Task::batch([
+                command.map(Message::Preview),
+                iced::widget::operation::focus(crate::app::smooth_scroll::smooth_scroll_id(
+                    &crate::model::ScrollbarRegion::TextPreview,
+                )),
+            ]);
         }
         command.map(Message::Preview)
     }

@@ -74,9 +74,26 @@ pub enum TextViewerEvent {
     CopyRequested {
         from: TextPosition,
         to: TextPosition,
+        target: ClipboardTarget,
     },
     /// 调整字号或换行；设置归宿主（主程序记住，对话框只当次有效），引擎原样还给宿主。
     ChangeView(crate::text_view::TextViewChange),
+}
+
+/// 复制写到哪：普通剪贴板（Ctrl+C）或 Linux 主选区（选中即写，中键粘贴）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClipboardTarget {
+    Standard,
+    Primary,
+}
+
+impl ClipboardTarget {
+    pub(crate) fn kind(self) -> iced::advanced::clipboard::Kind {
+        match self {
+            Self::Standard => iced::advanced::clipboard::Kind::Standard,
+            Self::Primary => iced::advanced::clipboard::Kind::Primary,
+        }
+    }
 }
 
 /// 后台读取的回复；内容只有引擎和文档看得懂。
@@ -97,7 +114,10 @@ pub(crate) enum TextReadReplyKind {
     },
     Index(IndexProgress),
     FileChecked(Result<(FileChange, Option<FileStamp>), String>),
-    Selection(Result<String, String>),
+    Selection {
+        target: ClipboardTarget,
+        outcome: Result<String, String>,
+    },
     Reopened(Result<Arc<TextOpened>, String>),
 }
 

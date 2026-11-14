@@ -10,9 +10,9 @@ use iced::{Subscription, Task};
 use crate::preview::{PreviewContent, PreviewState};
 use crate::preview_message::PreviewMessage;
 use crate::text_document::{
-    check_file_change, count_lines, read_rows, text_file_watch_subscription, FileChange, RowReader,
-    TextJump, TextOpened, TextPreviewDocument, TextRead, TextReadReply, TextReadReplyKind,
-    TextViewerEvent,
+    check_file_change, count_lines, read_rows, text_file_watch_subscription, ClipboardTarget,
+    FileChange, RowReader, TextJump, TextOpened, TextPreviewDocument, TextRead, TextReadReply,
+    TextReadReplyKind, TextViewerEvent,
 };
 use crate::text_preview_loading::{reopen_text_preview, TextEncodingChoice};
 
@@ -46,7 +46,7 @@ impl super::PreviewEngine {
             }
             // 视图设置归宿主，引擎的 handle 已经把它还给宿主。
             TextViewerEvent::ChangeView(_) => Task::none(),
-            TextViewerEvent::CopyRequested { from, to } => {
+            TextViewerEvent::CopyRequested { from, to, target } => {
                 // 超过 15 MB 不复制（子任务 4 补提示）。
                 if !TextPreviewDocument::copy_fits(from, to) {
                     return Task::none();
@@ -60,11 +60,12 @@ impl super::PreviewEngine {
                         decoding,
                         len,
                     };
-                    TextReadReplyKind::Selection(
-                        reader
+                    TextReadReplyKind::Selection {
+                        target,
+                        outcome: reader
                             .text_between(from, to)
                             .map_err(|error| error.to_string()),
-                    )
+                    }
                 })
             }
         }
@@ -103,10 +104,14 @@ impl super::PreviewEngine {
                 text_read_tasks(document, reads)
             }
             TextReadReplyKind::FileChecked(outcome) => self.accept_text_file_check(outcome),
-            TextReadReplyKind::Selection(Ok(text)) if !text.is_empty() => {
-                iced::clipboard::write(text)
-            }
-            TextReadReplyKind::Selection(_) => Task::none(),
+            TextReadReplyKind::Selection {
+                target,
+                outcome: Ok(text),
+            } if !text.is_empty() => match target {
+                ClipboardTarget::Standard => iced::clipboard::write(text),
+                ClipboardTarget::Primary => iced::clipboard::write_primary(text),
+            },
+            TextReadReplyKind::Selection { .. } => Task::none(),
             TextReadReplyKind::Reopened(outcome) => self.accept_reopened_text(outcome),
         }
     }
@@ -308,7 +313,10 @@ fn read_task(
                 Ok(reply) => reply,
                 // 读取代码里的 panic 是缺陷，照样抛出；只有运行时关闭时才会被取消。
                 Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
-                Err(error) => TextReadReplyKind::Selection(Err(error.to_string())),
+                Err(error) => TextReadReplyKind::Selection {
+                    target: ClipboardTarget::Standard,
+                    outcome: Err(error.to_string()),
+                },
             }
         },
         move |reply| PreviewMessage::TextRead {

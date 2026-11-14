@@ -12,6 +12,7 @@ use iced::Size;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 
+use crate::video_preview::hwaccel;
 use crate::video_preview::subtitles::{text_subtitle_filter, SubtitleBurn};
 use crate::video_preview::VideoStreamFacts;
 use crate::video_surface::{picture_bytes, SampleDepth, VideoPicture};
@@ -136,18 +137,21 @@ fn even(value: f64) -> u32 {
     ((value / 2.0).round() as u32 * 2).max(2)
 }
 
-/// 从 `start` 起连续出帧（播放用）。`hwaccel` 是探测出能用的显卡解码（见 `hwaccel` 模块），
-/// `subtitle` 是要烧进画面的字幕。
+/// 从 `start` 起连续出帧（播放用）。`hwaccel` 是探测出能用的显卡（render 节点，见 `hwaccel`
+/// 模块），`subtitle` 是要烧进画面的字幕。
 pub(crate) fn stream_command(
     path: &Path,
     plan: &FramePlan,
     start: Duration,
-    hwaccel: Option<&str>,
+    hwaccel: Option<&Path>,
     subtitle: Option<&SubtitleBurn>,
 ) -> Command {
     let mut command = base_command();
-    if let Some(api) = hwaccel {
-        command.args(["-hwaccel", api]);
+    if let Some(node) = hwaccel {
+        command
+            .arg("-init_hw_device")
+            .arg(hwaccel::device_argument(node))
+            .args(["-hwaccel", "vaapi", "-hwaccel_device", "va"]);
     }
     seek_and_input(&mut command, path, start);
     let filter = plan.stream_filter(subtitle);

@@ -182,3 +182,32 @@ async fn exact_still_is_the_same_frame_continuous_decoding_shows_there() {
         .expect("still");
     assert!(still.same_pixels(&continuous));
 }
+
+#[test]
+fn hardware_decoding_names_the_display_gpu_before_the_input() {
+    let plan = FramePlan::new(&facts(1920, 1080), FULL_HD_SCREEN);
+    let command = stream_command(
+        Path::new("/videos/clip.mkv"),
+        &plan,
+        Duration::ZERO,
+        Some(Path::new("/dev/dri/renderD129")),
+        None,
+    );
+    let arguments = command
+        .as_std()
+        .get_args()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    let input = arguments
+        .iter()
+        .position(|argument| argument == "-i")
+        .expect("-i");
+    let device = arguments
+        .windows(2)
+        .position(|pair| pair == ["-init_hw_device", "vaapi=va:/dev/dri/renderD129"])
+        .expect("named device");
+    assert!(device < input);
+    assert!(arguments
+        .windows(4)
+        .any(|four| four == ["-hwaccel", "vaapi", "-hwaccel_device", "va"]));
+}

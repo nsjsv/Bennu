@@ -130,6 +130,33 @@ fn detect_display_renderer_gpu_at(
         .find_map(|node| gpu_from_drm_node(&node, drm_class_root))
 }
 
+/// 合成器正在用的那块卡的 render 节点（`/dev/dri/renderDN`），和 `detect_display_renderer_gpu`
+/// 挑的是同一块卡。要在一块肯定醒着的卡上做事、又不能碰别的卡时用（视频硬解：混合显卡笔记本
+/// 上默认的第一块卡常是断电的独显，碰一下就要唤醒好几秒）。
+pub fn display_render_node() -> Option<PathBuf> {
+    display_render_node_at(Path::new("/proc"), Path::new("/sys/class/drm"))
+}
+
+fn display_render_node_at(proc_root: &Path, drm_class_root: &Path) -> Option<PathBuf> {
+    compositor_candidates(proc_root)
+        .into_iter()
+        .flat_map(|candidate| drm_nodes_for_pid(proc_root, candidate.pid, drm_class_root))
+        .find_map(|node| render_node_for_drm_node(&node, drm_class_root))
+        .map(|render_node| Path::new("/dev/dri").join(render_node))
+}
+
+/// card 节点换成同一块卡的 renderD 节点（sysfs 里它们在同一个设备目录下）。
+fn render_node_for_drm_node(node: &str, drm_class_root: &Path) -> Option<String> {
+    if node.starts_with("renderD") {
+        return Some(node.to_owned());
+    }
+    fs::read_dir(drm_class_root.join(node).join("device").join("drm"))
+        .ok()?
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_str().map(str::to_owned))
+        .find(|entry_name| entry_name.starts_with("renderD"))
+}
+
 fn compositor_candidates(proc_root: &Path) -> Vec<CompositorCandidate> {
     let current_uid = current_uid();
     let Ok(proc_entries) = fs::read_dir(proc_root) else {
@@ -361,6 +388,28 @@ mod tests {
         assert_eq!(
             detected_device(&proc_root, &drm_root).as_deref(),
             Some("10de:2484!")
+        );
+    }
+
+    #[test]
+    fn render_node_is_the_compositor_card_even_when_it_holds_the_card_node() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let proc_root = temp_dir.path().join("proc");
+        let drm_root = temp_dir.path().join("drm");
+        // 混合显卡：独显是 renderD128，合成器开着核显的 card2。
+        create_compositor_fd(&proc_root, 100, "niri", "card2");
+        fs::create_dir_all(drm_root.join("card2/device/drm/renderD129")).expect("card2");
+        fs::create_dir_all(drm_root.join("card1/device/drm/renderD128")).expect("card1");
+
+        assert_eq!(
+            display_render_node_at(&proc_root, &drm_root),
+            Some(PathBuf::from("/dev/dri/renderD129"))
+        );
+
+        create_compositor_fd(&proc_root, 200, "gnome-shell", "renderD128");
+        assert_eq!(
+            display_render_node_at(&proc_root, &drm_root),
+            Some(PathBuf::from("/dev/dri/renderD128"))
         );
     }
 

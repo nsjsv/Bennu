@@ -34,6 +34,8 @@ rodio = { version = "0.22.2", default-features = false, features = ["playback"] 
 # 视频画面部件要分辨当前是显卡还是软件渲染（fallback::Renderer 的两个分支）；
 # iced 不公开这个枚举，直接依赖它（iced 本来就依赖同一版本，二进制不增加）。
 iced_renderer = "0.14"
+# 视频硬解只用合成器正在用的那块卡（找卡的规则和窗口渲染用的同一份），不碰断电的独显。
+display-renderer = { path = "../display-renderer" }
 tokio.workspace = true
 # 动图预览：image=GIF 帧解码（workspace 定义含 gif codec）；gif=跳帧
 # 元数据巡检（Duration 上限判定）。

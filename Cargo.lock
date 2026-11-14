@@ -603,6 +603,7 @@ dependencies = [
  "bennu-subprocess",
  "bennu-theme",
  "blake3",
+ "display-renderer",
  "encoding_rs",
  "file-core",
  "gif 0.14.2",

@@ -27,6 +27,7 @@ pub(crate) mod test_fixtures;
 pub use clock::PlaybackClock;
 pub use frames::FramePlan;
 pub(crate) use frames::{SeekPrecision, FALLBACK_DISPLAY};
+pub(crate) use hwaccel::start_detection as start_hwaccel_detection;
 pub use probe::{
     AudioTrack, SubtitleTrack, VideoColor, VideoPrimaries, VideoProbe, VideoProbeError,
     VideoStreamFacts, VideoTransfer, YuvMatrix,
@@ -127,9 +128,7 @@ async fn stream_frames(
         start,
         subtitle,
     } = segment;
-    let hwaccel = tokio::task::spawn_blocking(hwaccel::available_hwaccel)
-        .await
-        .unwrap_or(None);
+    let hwaccel = hwaccel::render_node();
     let mut child = frames::stream_command(path, plan, *start, hwaccel, subtitle.as_deref())
         .spawn()
         .map_err(|error| format!("could not start ffmpeg: {error}"))?;

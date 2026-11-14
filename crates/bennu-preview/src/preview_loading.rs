@@ -248,6 +248,8 @@ async fn load_audio_preview(path: PathBuf) -> Result<PreviewContent, String> {
 
 /// 只有声音、没有画面（或只有封面图）的「视频」按音频预览打开。
 async fn load_video_preview(path: PathBuf) -> Result<PreviewContent, String> {
+    // 硬解探测在后台跑，和读视频信息并行；出帧不等它。
+    crate::video_preview::start_hwaccel_detection();
     let len = tokio::fs::metadata(&path)
         .await
         .map_err(|error| tr!("Could not read this video file: %1", error.to_string()))?

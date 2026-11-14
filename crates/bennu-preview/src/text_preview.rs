@@ -2,9 +2,6 @@
 
 pub use crate::text_document::TextPreviewDocument;
 
-pub const TEXT_PREVIEW_TEXT_SIZE: f32 = 16.0;
-pub const TEXT_PREVIEW_LINE_HEIGHT: f32 = 1.3;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextPreviewFormat {
     Plain,

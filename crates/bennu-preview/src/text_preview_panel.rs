@@ -3,7 +3,7 @@
 //! ScrollRegionWiring 注入。查看器自己就是滚动区，外面只包细线滑块。
 
 use bennu_theme::controls::{segmented_choice_row, SegmentedChoice};
-use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
+use bennu_theme::scrollbar::{enhanced_scrollbar, enhanced_scrollbar_both, ScrollbarAxis};
 
 use crate::markdown_preview::markdown_preview_body;
 use crate::panel_text::readable_text;
@@ -12,13 +12,16 @@ use crate::scroll_wiring::ScrollRegionWiring;
 use crate::text_preview::{
     MarkdownModeChoice, MarkdownPreviewMode, TextPreviewDocument, TextPreviewFormat,
 };
+use crate::text_status_bar::text_status_bar;
+use crate::text_view::TextViewSettings;
 use bennu_localization::tr;
 use iced::widget::{column, Column};
 use iced::Element;
 
 pub fn text_preview_panel<'a, Message>(
     document: Option<&'a TextPreviewDocument>,
-    plain_viewer: impl Fn(&'a TextPreviewDocument) -> Element<'a, Message> + 'a,
+    view: TextViewSettings,
+    plain_viewer: impl Fn(&'a TextPreviewDocument, TextViewSettings) -> Element<'a, Message> + 'a,
     markdown_scroll: ScrollRegionWiring<'static, Message>,
 ) -> Column<'a, Message>
 where
@@ -27,13 +30,23 @@ where
     let Some(document) = document else {
         return column![readable_text(tr!("Text preview is not ready"))];
     };
-    let raw = || enhanced_scrollbar(plain_viewer(document), ScrollbarAxis::Vertical);
+    // 不换行时多一条横向细线滑块。
+    let raw = || {
+        let viewer = plain_viewer(document, view);
+        if view.wrap {
+            enhanced_scrollbar(viewer, ScrollbarAxis::Vertical)
+        } else {
+            enhanced_scrollbar_both(viewer)
+        }
+    };
+    let mut rendered = false;
     let body: Element<'a, Message> = match document.format() {
         TextPreviewFormat::Plain => raw(),
         TextPreviewFormat::Markdown => {
             let choice = MarkdownModeChoice::for_document(document);
             let body = match (choice, document.markdown()) {
                 (MarkdownModeChoice::Switchable(MarkdownPreviewMode::Rendered), Some(markdown)) => {
+                    rendered = true;
                     markdown_preview_body(markdown, markdown_scroll)
                 }
                 _ => raw(),
@@ -44,14 +57,15 @@ where
         }
     };
 
-    let mut panel = column![body].spacing(8);
+    let mut panel = column![body];
     if let Some(error) = document.read_error() {
         panel = panel.push(readable_text(tr!(
             "Could not load more text preview: %1",
             error
         )));
     }
-    panel
+    // 渲染模式不按行排版，换行开关不适用。
+    panel.push(text_status_bar(document, view, !rendered))
 }
 
 /// 渲染/原文切换行。超过 2 MB 的 Markdown 没有渲染全文，「渲染」置灰并说明原因。

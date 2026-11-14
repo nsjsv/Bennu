@@ -7,6 +7,7 @@
 //! 回传，目录展开的扫描选项与展开层数实时读取 user_config 传入（引擎配置
 //! 快照只随持久化刷新）。
 
+use bennu_preview::text_document::TextViewerEvent;
 use std::path::PathBuf;
 
 use iced::Task;
@@ -78,6 +79,15 @@ impl FileBrowser {
                     self.focused_window = window;
                 }
                 Task::none()
+            }
+            // 字号与换行是主程序设置：改了就记住。
+            PreviewMessage::TextViewer(TextViewerEvent::ChangeView(change)) => {
+                let view = self.user_config.text_preview_view.apply(change);
+                if view == self.user_config.text_preview_view {
+                    return Task::none();
+                }
+                self.user_config.text_preview_view = view;
+                self.persist_user_preferences_command()
             }
             engine_message => {
                 unreachable!("{engine_message:?} 由 PreviewEngine::handle 处理，不会还给宿主")

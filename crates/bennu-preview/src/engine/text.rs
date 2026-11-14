@@ -44,6 +44,8 @@ impl super::PreviewEngine {
                 let reads = document.jump_to(jump);
                 text_read_tasks(document, reads)
             }
+            // 视图设置归宿主，引擎的 handle 已经把它还给宿主。
+            TextViewerEvent::ChangeView(_) => Task::none(),
             TextViewerEvent::CopyRequested { from, to } => {
                 // 超过 15 MB 不复制（子任务 4 补提示）。
                 if !TextPreviewDocument::copy_fits(from, to) {

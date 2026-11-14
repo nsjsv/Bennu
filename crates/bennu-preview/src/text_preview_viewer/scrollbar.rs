@@ -9,14 +9,15 @@ use bennu_theme::styles::SCROLLBAR_HIT_WIDTH;
 use iced::{mouse, Event, Padding, Point, Rectangle};
 
 use super::{
-    anchor_index, base_line_height, is_at_bottom, refresh_retained_content, row_height,
-    scroll_viewer_by, visible_rows, TextPreviewViewerState, TEXT_PREVIEW_VIEWER_PADDING,
+    anchor_index, is_at_bottom, refresh_retained_content, row_height, scroll_viewer_by,
+    visible_rows, TextPreviewViewerState, TEXT_PREVIEW_VIEWER_PADDING,
 };
 use crate::text_document::{TextJump, TextPreviewDocument, TextViewerEvent};
 
 /// 拖滑块：按下点在滑块里的位置，拖动时保持不变。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct ThumbDrag {
+    axis: Axis,
     grab: f32,
 }
 
@@ -41,7 +42,8 @@ pub(super) fn virtual_geometry(
     let content_height = if is_whole_file_loaded(document) {
         window_height + padding
     } else {
-        (document.estimated_total_rows() as f32 * base_line_height()).max(window_height) + padding
+        (document.estimated_total_rows() as f32 * state.line_height.max(1.0)).max(window_height)
+            + padding
     };
     let fraction = state
         .drag_fraction
@@ -99,14 +101,105 @@ fn viewport_bytes(state: &TextPreviewViewerState, document: &TextPreviewDocument
     }
 }
 
-pub(super) fn is_over_track(bounds: Rectangle, cursor: mouse::Cursor) -> bool {
-    cursor
-        .position()
-        .is_some_and(|position| track_contains(bounds, position))
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Axis {
+    Vertical,
+    Horizontal,
 }
 
-fn track_contains(bounds: Rectangle, position: Point) -> bool {
-    bounds.contains(position) && position.x >= bounds.x + bounds.width - SCROLLBAR_HIT_WIDTH
+pub(super) fn is_over_track(
+    state: &TextPreviewViewerState,
+    document: &TextPreviewDocument,
+    bounds: Rectangle,
+    cursor: mouse::Cursor,
+) -> bool {
+    cursor
+        .position()
+        .is_some_and(|position| track_at(state, document, bounds, position).is_some())
+}
+
+/// 竖向轨道贴右缘、横向轨道贴下缘（不换行且有超宽行时才有）；两向都能滚时竖向让出
+/// 右下角，与细线滑块的轨道一致。
+fn track_bounds(
+    state: &TextPreviewViewerState,
+    document: &TextPreviewDocument,
+    bounds: Rectangle,
+    axis: Axis,
+) -> Option<Rectangle> {
+    let vertical_overflow =
+        virtual_geometry(state, document, bounds.height).content_height > bounds.height;
+    let horizontal_overflow = state.max_scroll_x() > 0.0;
+    match axis {
+        Axis::Vertical if vertical_overflow => {
+            let corner = if horizontal_overflow {
+                SCROLLBAR_HIT_WIDTH
+            } else {
+                0.0
+            };
+            Some(Rectangle {
+                x: bounds.x + bounds.width - SCROLLBAR_HIT_WIDTH,
+                y: bounds.y,
+                width: SCROLLBAR_HIT_WIDTH,
+                height: (bounds.height - corner).max(0.0),
+            })
+        }
+        Axis::Horizontal if horizontal_overflow => {
+            let corner = if vertical_overflow {
+                SCROLLBAR_HIT_WIDTH
+            } else {
+                0.0
+            };
+            Some(Rectangle {
+                x: bounds.x,
+                y: bounds.y + bounds.height - SCROLLBAR_HIT_WIDTH,
+                width: (bounds.width - corner).max(0.0),
+                height: SCROLLBAR_HIT_WIDTH,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn track_at(
+    state: &TextPreviewViewerState,
+    document: &TextPreviewDocument,
+    bounds: Rectangle,
+    position: Point,
+) -> Option<(Axis, Rectangle)> {
+    [Axis::Vertical, Axis::Horizontal]
+        .into_iter()
+        .find_map(|axis| {
+            track_bounds(state, document, bounds, axis)
+                .filter(|track| track.contains(position))
+                .map(|track| (axis, track))
+        })
+}
+
+/// 滑块在轨道上的起点与长度。
+fn thumb_span(
+    state: &TextPreviewViewerState,
+    document: &TextPreviewDocument,
+    bounds: Rectangle,
+    axis: Axis,
+    track: Rectangle,
+) -> Option<(f32, f32)> {
+    match axis {
+        Axis::Vertical => {
+            let geometry = virtual_geometry(state, document, bounds.height);
+            scrollbar_thumb_span(
+                geometry.offset,
+                bounds.height,
+                geometry.content_height,
+                track.height,
+            )
+        }
+        Axis::Horizontal => scrollbar_thumb_span(
+            state.scroll_x,
+            bounds.width,
+            bounds.width + state.max_scroll_x(),
+            track.width,
+        ),
+    }
 }
 
 /// 处理滑块的按下、拖动、松开；返回事件是否被滑块用掉。
@@ -119,37 +212,32 @@ pub(super) fn handle_event(
 ) -> bool {
     match event {
         Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-            let Some(position) = cursor
-                .position()
-                .filter(|position| track_contains(bounds, *position))
+            let Some((position, (axis, track))) = cursor.position().and_then(|position| {
+                Some((position, track_at(state, document, bounds, position)?))
+            }) else {
+                return false;
+            };
+            let Some((thumb_start, thumb_length)) =
+                thumb_span(state, document, bounds, axis, track)
             else {
                 return false;
             };
-            let geometry = virtual_geometry(state, document, bounds.height);
-            let Some((thumb_start, thumb_length)) = scrollbar_thumb_span(
-                geometry.offset,
-                bounds.height,
-                geometry.content_height,
-                bounds.height,
-            ) else {
-                return false;
-            };
-            let y = position.y - bounds.y;
+            let along = along_track(axis, track, position);
             // 按在滑块上保持抓取点；按在轨道上让滑块中心跳到指针处。
-            let grab = if (thumb_start..=thumb_start + thumb_length).contains(&y) {
-                y - thumb_start
+            let grab = if (thumb_start..=thumb_start + thumb_length).contains(&along) {
+                along - thumb_start
             } else {
                 thumb_length / 2.0
             };
-            state.thumb_drag = Some(ThumbDrag { grab });
-            drag_thumb_to(state, document, bounds, y);
+            state.thumb_drag = Some(ThumbDrag { axis, grab });
+            drag_thumb_to(state, document, bounds, position);
             true
         }
         Event::Mouse(mouse::Event::CursorMoved { position }) => {
             if state.thumb_drag.is_none() {
                 return false;
             }
-            drag_thumb_to(state, document, bounds, position.y - bounds.y);
+            drag_thumb_to(state, document, bounds, *position);
             true
         }
         Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
@@ -159,23 +247,38 @@ pub(super) fn handle_event(
     }
 }
 
+fn along_track(axis: Axis, track: Rectangle, position: Point) -> f32 {
+    match axis {
+        Axis::Vertical => position.y - track.y,
+        Axis::Horizontal => position.x - track.x,
+    }
+}
+
 fn drag_thumb_to(
     state: &mut TextPreviewViewerState,
     document: &TextPreviewDocument,
     bounds: Rectangle,
-    y: f32,
+    position: Point,
 ) {
     let Some(drag) = state.thumb_drag else {
         return;
     };
-    let geometry = virtual_geometry(state, document, bounds.height);
-    let Some((_, thumb_length)) =
-        scrollbar_thumb_span(0.0, bounds.height, geometry.content_height, bounds.height)
-    else {
+    let Some(track) = track_bounds(state, document, bounds, drag.axis) else {
         return;
     };
-    let travel = (bounds.height - thumb_length).max(f32::EPSILON);
-    let fraction = ((y - drag.grab) / travel).clamp(0.0, 1.0);
+    let Some((_, thumb_length)) = thumb_span(state, document, bounds, drag.axis, track) else {
+        return;
+    };
+    let track_length = match drag.axis {
+        Axis::Vertical => track.height,
+        Axis::Horizontal => track.width,
+    };
+    let travel = (track_length - thumb_length).max(f32::EPSILON);
+    let fraction = ((along_track(drag.axis, track, position) - drag.grab) / travel).clamp(0.0, 1.0);
+    if drag.axis == Axis::Horizontal {
+        state.scroll_x = fraction * state.max_scroll_x();
+        return;
+    }
     if is_whole_file_loaded(document) {
         scroll_to_fraction(state, document, fraction);
         return;

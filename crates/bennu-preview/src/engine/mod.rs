@@ -17,6 +17,7 @@ use crate::preview::{
 };
 use crate::preview_config::{PreviewExtensionRules, PreviewFileSizeLimits};
 use crate::preview_message::PreviewMessage;
+use crate::text_document::TextViewerEvent;
 use crate::text_preview::TextPreviewDocument;
 
 /// 引擎的宿主配置快照：预览域行为参数由宿主（app-ui 的 UserConfig /
@@ -148,6 +149,12 @@ impl PreviewEngine {
     ) -> Result<Task<PreviewMessage>, Box<PreviewMessage>> {
         let task = match message {
             PreviewMessage::SqlitePreview(inner) => self.handle_sqlite_preview_message(inner),
+            // 字号与换行是宿主的设置（主程序要写设置库，对话框只当次有效）。
+            PreviewMessage::TextViewer(TextViewerEvent::ChangeView(change)) => {
+                return Err(Box::new(PreviewMessage::TextViewer(
+                    TextViewerEvent::ChangeView(change),
+                )));
+            }
             PreviewMessage::TextViewer(event) => self.handle_text_viewer_event(event),
             PreviewMessage::TextRead { document, reply } => self.accept_text_read(document, reply),
             PreviewMessage::TextFileChanged { document } => self.handle_text_file_changed(document),

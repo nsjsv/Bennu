@@ -12,8 +12,8 @@ use iced::widget::text_editor;
 use iced::{mouse, Point, Rectangle, Size};
 
 use super::{
-    base_line_height, row_height, scroll_viewer_by, visible_rows, TextPreviewViewerState,
-    VisibleRow, TEXT_PREVIEW_DRAG_THRESHOLD_PX,
+    row_height, scroll_viewer_by, visible_rows, TextPreviewViewerState, VisibleRow,
+    TEXT_PREVIEW_DRAG_THRESHOLD_PX,
 };
 use crate::text_document::{TextJump, TextPosition, TextPreviewDocument, TextViewerEvent};
 
@@ -379,7 +379,7 @@ pub(crate) fn selection_quads(
     if start == end {
         return Vec::new();
     }
-    let base = base_line_height();
+    let base = state.line_height.max(1.0);
     let rows = document.rows();
 
     let mut quads = Vec::new();
@@ -571,7 +571,8 @@ fn apply_motion(
     extend: bool,
 ) {
     let from = state.cursor.unwrap_or(default_position(state));
-    let visible_row_count = ((state.viewport_height / base_line_height()).floor() as usize).max(1);
+    let visible_row_count =
+        ((state.viewport_height / state.line_height.max(1.0)).floor() as usize).max(1);
     let to = move_position(document, from, motion, visible_row_count);
     state.cursor = Some(to);
     if !extend {
@@ -618,5 +619,45 @@ fn ensure_cursor_visible(
     }
     if bottom > state.viewport_height {
         scroll_viewer_by(state, document, bottom - state.viewport_height);
+    }
+}
+
+/// 不换行时光标移出左右边缘：横向滚到光标可见（左右各留两个字宽的余地）。
+pub(super) fn reveal_cursor_horizontally(
+    state: &mut TextPreviewViewerState,
+    document: &TextPreviewDocument,
+) {
+    if state.view().wrap {
+        return;
+    }
+    let Some(cursor) = state.cursor else {
+        return;
+    };
+    let Ok(index) = document.row_index(cursor.row) else {
+        return;
+    };
+    let Some(retained) = state
+        .retained_rows
+        .iter()
+        .find(|retained| retained.start == cursor.row)
+    else {
+        return;
+    };
+    let text = document.rows()[index].text.as_str();
+    let paragraph = &retained.paragraph;
+    let width = paragraph.min_bounds().width.max(1.0);
+    let x = column_x(
+        paragraph,
+        state.line_height * 0.5,
+        width,
+        text,
+        cursor.column,
+    );
+    let margin = state.view().font_size() * 2.0;
+    let text_width = state.text_width();
+    if x < state.scroll_x + margin {
+        state.scroll_x = (x - margin).max(0.0);
+    } else if x > state.scroll_x + text_width - margin {
+        state.scroll_x = (x - text_width + margin).min(state.max_scroll_x());
     }
 }

@@ -3,6 +3,7 @@
 //! 生命周期/开关/窗口簿记在父模块（[`super`]），本模块只做内容态的
 //! 接收与升级。
 
+use bennu_preview::text_document::TextViewerEvent;
 use std::path::PathBuf;
 
 use file_core::{DirectoryEntry, FileKind, ScanOptions};
@@ -323,6 +324,11 @@ impl PreviewHost {
             // 解码失败重试：重新走分类分发（主软件 retry_image_preview）。
             PreviewMessage::RetryImagePreview(path) => {
                 self.open_preview_for_resolved_path(path, FileKind::File)
+            }
+            // 字号与换行：对话框读主程序记住的值，这里改了只当次有效，不写回。
+            PreviewMessage::TextViewer(TextViewerEvent::ChangeView(change)) => {
+                self.preferences.text_view = self.preferences.text_view.apply(change);
+                Task::none()
             }
             // 窗口在消息回到宿主前已被关掉时，焦点簿记不能指向已死窗口。
             PreviewMessage::PreviewWindowPresented(window) => {

@@ -18,6 +18,8 @@ pub mod audio_preview;
 // 纯搬移：文本预览模型（分块/行索引/Markdown 模式）自 app-ui 下沉；
 // 纯 std 实现，无宿主耦合。
 pub mod text_preview;
+mod text_status_bar;
+pub mod text_view;
 // 纯搬移：文档预览模型自 app-ui 下沉；命令层（外部进程调用）仍留 app-ui。
 pub mod document_preview;
 // 纯搬移：GIF 动图预览的类型/解码管线自 app-ui 下沉；返回 app-ui

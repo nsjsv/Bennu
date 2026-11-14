@@ -978,3 +978,24 @@ fn saving_app_config_keeps_the_probe_cache_section() {
     );
     assert_eq!(app_config::load_app_config_at(&path), user_persisted);
 }
+
+#[test]
+fn text_preview_zoom_and_wrap_survive_a_save() {
+    use bennu_preview::text_view::{TextViewChange, TextViewSettings};
+
+    let default = default_user_config();
+    let mut config = default.clone();
+    config.text_preview_view = TextViewSettings::default()
+        .apply(TextViewChange::ZoomIn)
+        .apply(TextViewChange::ZoomIn)
+        .apply(TextViewChange::ToggleWrap);
+    let stored = config.user_preferences().to_stored();
+    let restored = UserPreferences::from_stored(stored, &default).preferences;
+    assert_eq!(restored.text_preview_view.zoom_percent, 120);
+    assert!(!restored.text_preview_view.wrap);
+
+    // 没存过：默认 100%、自动换行。
+    let restored =
+        UserPreferences::from_stored(StoredUserPreferences::default(), &default).preferences;
+    assert_eq!(restored.text_preview_view, TextViewSettings::default());
+}

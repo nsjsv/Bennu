@@ -27,8 +27,10 @@ where
     Message: 'static,
 {
     let blocks = markdown_preview_blocks(markdown);
+    // 四周留白与原文模式的查看器一致，文字不贴边框。
     let mut content = Column::new()
         .spacing(MARKDOWN_BLOCK_SPACING)
+        .padding([12, 16])
         .width(Length::Fill);
 
     if blocks.is_empty() {

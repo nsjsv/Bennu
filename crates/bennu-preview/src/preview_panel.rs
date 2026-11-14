@@ -4,8 +4,11 @@
 //! 事件统一以 `PreviewMessage` 表达（宿主 Message 需 `From<PreviewMessage>`）。
 
 use bennu_localization::tr;
-use iced::widget::{button, column};
-use iced::{Alignment, Element};
+use bennu_theme::controls::normal_button;
+use bennu_theme::icons::{themed_icon, IconSymbol, IconTone};
+use bennu_theme::styles::muted_text_color;
+use iced::widget::{column, container};
+use iced::{Alignment, Element, Length};
 
 use crate::animated_image_preview_panel::animated_image_preview_panel;
 use crate::audio_preview_panel::audio_preview_panel;
@@ -28,6 +31,7 @@ use crate::scroll_wiring::ScrollRegionWiring;
 use crate::sqlite_preview_panel::sqlite_preview_panel;
 use crate::text_preview::TextPreviewDocument;
 use crate::text_preview_panel::text_preview_panel;
+use crate::text_view::TextViewSettings;
 use crate::video_preview_panel::video_preview_panel;
 
 /// 预览窗口/右侧停靠面板共用入口：无预览会话时显示空态提示。
@@ -49,7 +53,8 @@ pub fn view_preview_window<'a, Message>(
     markdown_scroll: ScrollRegionWiring<'static, Message>,
     sqlite_tables_scroll: ScrollRegionWiring<'a, Message>,
     sqlite_data_scroll: ScrollRegionWiring<'a, Message>,
-    plain_viewer: impl Fn(&'a TextPreviewDocument) -> Element<'a, Message> + 'a,
+    text_view: TextViewSettings,
+    plain_viewer: impl Fn(&'a TextPreviewDocument, TextViewSettings) -> Element<'a, Message> + 'a,
     sqlite_tabs: Element<'static, Message>,
     on_sqlite_resize_drag_finished: impl Fn() -> Message + 'static,
 ) -> Element<'a, Message>
@@ -73,6 +78,7 @@ where
             markdown_scroll,
             sqlite_tables_scroll,
             sqlite_data_scroll,
+            text_view,
             plain_viewer,
             sqlite_tabs,
             on_sqlite_resize_drag_finished,
@@ -100,7 +106,8 @@ fn preview_panel<'a, Message>(
     markdown_scroll: ScrollRegionWiring<'static, Message>,
     sqlite_tables_scroll: ScrollRegionWiring<'a, Message>,
     sqlite_data_scroll: ScrollRegionWiring<'a, Message>,
-    plain_viewer: impl Fn(&'a TextPreviewDocument) -> Element<'a, Message> + 'a,
+    text_view: TextViewSettings,
+    plain_viewer: impl Fn(&'a TextPreviewDocument, TextViewSettings) -> Element<'a, Message> + 'a,
     sqlite_tabs: Element<'static, Message>,
     on_sqlite_resize_drag_finished: impl Fn() -> Message + 'static,
 ) -> Element<'a, Message>
@@ -118,6 +125,7 @@ where
         PreviewState::Ready(PreviewContent::Text { path, .. }) => text_preview_panel(
             text_preview_document
                 .filter(|document: &&TextPreviewDocument| document.path() == path.as_path()),
+            text_view,
             plain_viewer,
             markdown_scroll,
         )
@@ -188,17 +196,42 @@ where
             size,
             preview_bottom_controls_opacity,
         ),
-        PreviewState::Error(error) => column![readable_text(error.clone())].into(),
-        PreviewState::ImageError { path, error } => column![
-            readable_text(error.clone()),
-            button(readable_text(tr!("Retry"))).on_press(Message::from(
-                PreviewMessage::RetryImagePreview(path.clone(),)
-            )),
-        ]
-        .spacing(10)
-        .align_x(Alignment::Center)
-        .into(),
+        PreviewState::Error(error) => preview_error_panel(error.clone(), None),
+        PreviewState::ImageError { path, error } => preview_error_panel(
+            error.clone(),
+            Some(
+                normal_button(readable_text(tr!("Retry")))
+                    .on_press(Message::from(PreviewMessage::RetryImagePreview(
+                        path.clone(),
+                    )))
+                    .into(),
+            ),
+        ),
     };
 
     preview_surface(panel)
+}
+
+/// 预览失败（二进制、不支持的类型、读取失败）：居中，上面一个警告图标，文字用次要色、
+/// 窄一点自动换行，不再贴在左上角。
+fn preview_error_panel<'a, Message: 'a>(
+    error: String,
+    action: Option<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    let mut content = column![
+        themed_icon(IconSymbol::TriangleAlert, IconTone::Warning, 32.0),
+        readable_text(error)
+            .style(|theme: &iced::Theme| iced::widget::text::Style {
+                color: Some(muted_text_color(theme)),
+            })
+            .align_x(iced::alignment::Horizontal::Center)
+            .width(Length::Shrink),
+    ]
+    .spacing(12)
+    .max_width(420)
+    .align_x(Alignment::Center);
+    if let Some(action) = action {
+        content = content.push(action);
+    }
+    container(content).center(Length::Fill).into()
 }

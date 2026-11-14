@@ -2,7 +2,7 @@
 //!
 //! 位置 = 视口顶部那一行的起点（字节偏移）+ 该行内已滚过的像素。滚轮的平滑滚动直接
 //! `scroll_by` 到这里（相对量，精度与文件大小无关）；滑块按字节比例画、拖动由这里处理；
-//! 可见范围变了就告诉引擎（引擎据此往前往后补读）。
+//! 可见范围变了就告诉引擎（引擎据此往前往后补读）。字号与是否换行来自视图设置。
 
 use std::collections::HashMap;
 
@@ -24,27 +24,28 @@ mod style;
 use crate::text_document::{
     JumpPlace, TextPosition, TextPreviewDocument, TextViewerEvent, TextViewport,
 };
-use crate::text_preview::{TEXT_PREVIEW_LINE_HEIGHT, TEXT_PREVIEW_TEXT_SIZE};
+use crate::text_view::{TextViewChange, TextViewSettings};
 use render::{
-    draw_empty_placeholder, draw_selection_ranges, draw_visible_rows, line_number_bounds,
-    line_number_digit_count, line_number_paragraph, text_bounds, text_line_paragraph,
-    text_preview_line_number_gutter_width,
+    draw_empty_placeholder, draw_selection_ranges, draw_visible_rows, gutter_width,
+    line_number_bounds, line_number_digit_count, line_number_paragraph, text_bounds,
+    text_line_paragraph,
 };
 use selection::apply_key_binding;
-use style::{divider_color, placeholder_color, viewer_background_color};
+use style::{
+    current_line_number_color, gutter_background_color, line_number_color, viewer_background_color,
+};
 
 const TEXT_PREVIEW_VIEWER_PADDING: f32 = 8.0;
-const TEXT_PREVIEW_GUTTER_HORIZONTAL_PADDING: f32 = 6.0;
-const TEXT_PREVIEW_GUTTER_DIGIT_WIDTH: f32 = 10.0;
-const TEXT_PREVIEW_GUTTER_MIN_WIDTH: f32 = 30.0;
-const TEXT_PREVIEW_GUTTER_SPACING: f32 = 8.0;
-const TEXT_PREVIEW_DIVIDER_WIDTH: f32 = 1.0;
+const TEXT_PREVIEW_GUTTER_HORIZONTAL_PADDING: f32 = 8.0;
+const TEXT_PREVIEW_GUTTER_MIN_DIGITS: usize = 3;
+const TEXT_PREVIEW_GUTTER_SPACING: f32 = 4.0;
 pub(crate) const TEXT_PREVIEW_DRAG_THRESHOLD_PX: f32 = 3.0;
 
 type PreviewParagraph = graphics::text::Paragraph;
 
 pub fn text_preview_viewer<'a, Message, Renderer>(
     document: &'a TextPreviewDocument,
+    view: TextViewSettings,
     id: widget::Id,
     on_wheel: impl Fn(mouse::ScrollDelta) -> Message + 'a,
     on_event: impl Fn(TextViewerEvent) -> Message + 'a,
@@ -60,6 +61,7 @@ where
     Element::new(TextPreviewViewer {
         id,
         document,
+        view,
         on_wheel: Box::new(on_wheel),
         on_event: Box::new(on_event),
     })
@@ -68,6 +70,7 @@ where
 struct TextPreviewViewer<'a, Message> {
     id: widget::Id,
     document: &'a TextPreviewDocument,
+    view: TextViewSettings,
     on_wheel: Box<dyn Fn(mouse::ScrollDelta) -> Message + 'a>,
     on_event: Box<dyn Fn(TextViewerEvent) -> Message + 'a>,
 }
@@ -77,6 +80,11 @@ struct TextPreviewViewerState {
     document_id: Option<u64>,
     revision: Option<u64>,
     jump_revision: Option<u64>,
+    view: Option<TextViewSettings>,
+    /// 当前字号下一行（不换行时）的高度；未排版的行按它估算。
+    line_height: f32,
+    digit_count: usize,
+    gutter_width: f32,
     content_width: f32,
     // 文字视口高度 = 布局高度 − 上下内边距；只在布局时换算一次。
     viewport_height: f32,
@@ -84,13 +92,15 @@ struct TextPreviewViewerState {
     anchor: u64,
     /// 该行内已经滚过的像素。
     pixel: f32,
+    /// 不换行时横向滚过的像素。
+    scroll_x: f32,
+    /// 不换行时已排版行的最大宽度（只增不减），决定横向能滚多远。
+    max_row_width: f32,
     /// 已排版行的真实高度（换行后多行），按行起点记，只增不减。
     heights: HashMap<u64, f32>,
     retained_rows: Vec<RetainedRow>,
     retained_text_width: f32,
     retained_numbers: Vec<RetainedNumber>,
-    retained_digit_count: usize,
-    retained_gutter_width: f32,
     // 光标 = 选择焦点；selection_anchor 与 cursor 相异时存在选区。
     cursor: Option<TextPosition>,
     selection_anchor: Option<TextPosition>,
@@ -101,6 +111,7 @@ struct TextPreviewViewerState {
     drag_press: Option<Point>,
     drag_active: bool,
     is_focused: bool,
+    modifiers: keyboard::Modifiers,
     thumb_drag: Option<scrollbar::ThumbDrag>,
     /// 拖滑块时滑块跟手画在这个比例上，直到落点的内容到了。
     drag_fraction: Option<f32>,
@@ -108,9 +119,23 @@ struct TextPreviewViewerState {
     pending_events: Vec<TextViewerEvent>,
 }
 
-/// 基准行高：未排版的行按它估算。
-fn base_line_height() -> f32 {
-    TEXT_PREVIEW_TEXT_SIZE * TEXT_PREVIEW_LINE_HEIGHT
+impl TextPreviewViewerState {
+    fn view(&self) -> TextViewSettings {
+        self.view.unwrap_or_default()
+    }
+
+    /// 正文可用宽度（行号栏右边、去掉左右内边距）。
+    fn text_width(&self) -> f32 {
+        (self.content_width - Padding::new(TEXT_PREVIEW_VIEWER_PADDING).x()).max(0.0)
+    }
+
+    fn max_scroll_x(&self) -> f32 {
+        if self.view().wrap {
+            0.0
+        } else {
+            (self.max_row_width - self.text_width()).max(0.0)
+        }
+    }
 }
 
 /// 段落按行的字节范围缓存；可见行集合变化时只排版新进入的行。范围也作为身份：文件
@@ -159,15 +184,11 @@ where
         limits: &layout::Limits,
     ) -> layout::Node {
         let size = limits.resolve(Length::Fill, Length::Fill, Size::ZERO);
-        let gutter_width = text_preview_line_number_gutter_width(self.document);
-        let content_offset =
-            gutter_width + TEXT_PREVIEW_GUTTER_SPACING + TEXT_PREVIEW_DIVIDER_WIDTH;
-        let content_width = (size.width - content_offset).max(0.0);
         sync_with_document(
             tree.state.downcast_mut::<TextPreviewViewerState>(),
             self.document,
-            content_width,
-            size.height,
+            self.view,
+            size,
         );
         layout::Node::new(size)
     }
@@ -185,9 +206,12 @@ where
     ) {
         let state = tree.state.downcast_mut::<TextPreviewViewerState>();
         let bounds = layout.bounds();
-        let text_bounds = text_bounds(bounds, self.document);
+        let text_bounds = text_bounds(bounds, state.gutter_width);
         let document = self.document;
 
+        if let Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) = event {
+            state.modifiers = *modifiers;
+        }
         if scrollbar::handle_event(state, document, event, bounds, cursor) {
             shell.capture_event();
             shell.request_redraw();
@@ -195,6 +219,7 @@ where
             match event {
                 Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                     if let Some(position) = cursor.position_in(text_bounds) {
+                        let position = Point::new(position.x + state.scroll_x, position.y);
                         let click = selection::press(state, document, position);
                         state.last_click = Some(click);
                         shell.capture_event();
@@ -205,9 +230,10 @@ where
                     }
                 }
                 Event::Mouse(mouse::Event::CursorMoved { .. }) => {
-                    let moved = cursor
-                        .position_in(text_bounds)
-                        .is_some_and(|position| selection::drag(state, document, position));
+                    let moved = cursor.position_in(text_bounds).is_some_and(|position| {
+                        let position = Point::new(position.x + state.scroll_x, position.y);
+                        selection::drag(state, document, position)
+                    });
                     if moved {
                         shell.capture_event();
                         shell.request_redraw();
@@ -219,7 +245,23 @@ where
                     }
                 }
                 Event::Mouse(mouse::Event::WheelScrolled { delta }) if cursor.is_over(bounds) => {
-                    shell.publish((self.on_wheel)(*delta));
+                    // Ctrl+滚轮缩放字号，其余交给宿主的平滑滚动管线。
+                    if state.modifiers.command() {
+                        let upward = match delta {
+                            mouse::ScrollDelta::Lines { y, .. }
+                            | mouse::ScrollDelta::Pixels { y, .. } => *y > 0.0,
+                        };
+                        let change = if upward {
+                            TextViewChange::ZoomIn
+                        } else {
+                            TextViewChange::ZoomOut
+                        };
+                        state
+                            .pending_events
+                            .push(TextViewerEvent::ChangeView(change));
+                    } else {
+                        shell.publish((self.on_wheel)(*delta));
+                    }
                     shell.capture_event();
                 }
                 Event::Keyboard(keyboard::Event::KeyPressed {
@@ -230,7 +272,12 @@ where
                     text,
                     ..
                 }) if state.is_focused => {
-                    if let Some(binding) =
+                    if let Some(change) = view_shortcut(key, *modifiers) {
+                        state
+                            .pending_events
+                            .push(TextViewerEvent::ChangeView(change));
+                        shell.capture_event();
+                    } else if let Some(binding) =
                         text_editor::Binding::<Message>::from_key_press(text_editor::KeyPress {
                             key: key.clone(),
                             modified_key: modified_key.clone(),
@@ -244,6 +291,7 @@ where
                     {
                         apply_key_binding(binding, state, document, clipboard);
                         refresh_retained_content(state, document);
+                        selection::reveal_cursor_horizontally(state, document);
                         shell.capture_event();
                         shell.request_redraw();
                     }
@@ -268,7 +316,9 @@ where
         let state = tree.state.downcast_mut::<TextPreviewViewerState>();
         let bounds = layout.bounds();
         let geometry = scrollbar::virtual_geometry(state, self.document, bounds.height);
+        // 横向同竖向：报给细线滑块的内容宽 = 视口宽 + 能滚的距离，两边最大偏移相等。
         let content_bounds = Rectangle {
+            width: bounds.width + state.max_scroll_x(),
             height: geometry.content_height,
             ..bounds
         };
@@ -276,7 +326,7 @@ where
             Some(&self.id),
             bounds,
             content_bounds,
-            Vector::new(0.0, geometry.offset),
+            Vector::new(state.scroll_x, geometry.offset),
             &mut ScrollBridge {
                 state,
                 document: self.document,
@@ -286,16 +336,17 @@ where
 
     fn mouse_interaction(
         &self,
-        _tree: &widget::Tree,
+        tree: &widget::Tree,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         _viewport: &Rectangle,
         _renderer: &Renderer,
     ) -> mouse::Interaction {
+        let state = tree.state.downcast_ref::<TextPreviewViewerState>();
         let bounds = layout.bounds();
-        if scrollbar::is_over_track(bounds, cursor) {
+        if scrollbar::is_over_track(state, self.document, bounds, cursor) {
             mouse::Interaction::default()
-        } else if cursor.is_over(text_bounds(bounds, self.document)) {
+        } else if cursor.is_over(text_bounds(bounds, state.gutter_width)) {
             mouse::Interaction::Text
         } else {
             mouse::Interaction::default()
@@ -314,18 +365,11 @@ where
     ) {
         let state = tree.state.downcast_ref::<TextPreviewViewerState>();
         let bounds = layout.bounds();
-        let gutter_width = text_preview_line_number_gutter_width(self.document);
         let gutter_bounds = Rectangle {
-            width: gutter_width,
+            width: state.gutter_width,
             ..bounds
         };
-        let text_bounds = text_bounds(bounds, self.document);
-        let divider_bounds = Rectangle {
-            x: bounds.x + gutter_width + TEXT_PREVIEW_GUTTER_SPACING / 2.0,
-            y: bounds.y,
-            width: TEXT_PREVIEW_DIVIDER_WIDTH,
-            height: bounds.height,
-        };
+        let text_bounds = text_bounds(bounds, state.gutter_width);
 
         renderer.fill_quad(
             renderer::Quad {
@@ -336,14 +380,14 @@ where
         );
         renderer.fill_quad(
             renderer::Quad {
-                bounds: divider_bounds,
+                bounds: gutter_bounds,
                 ..renderer::Quad::default()
             },
-            divider_color(theme),
+            gutter_background_color(theme),
         );
 
         if self.document.is_empty() {
-            draw_empty_placeholder(renderer, text_bounds, theme);
+            draw_empty_placeholder(renderer, text_bounds, state.view(), theme);
             return;
         }
         let visible = visible_rows(state, self.document);
@@ -361,7 +405,10 @@ where
         let Some(clip_bounds) = gutter_bounds.intersection(viewport) else {
             return;
         };
-        let line_number_color = placeholder_color(theme);
+        let cursor_line_start = state.cursor.and_then(|cursor| {
+            let index = self.document.row_index(cursor.row).ok()?;
+            Some(self.document.rows()[index].line_start)
+        });
         for entry in &visible {
             let row = &self.document.rows()[entry.index];
             let Some(number) = state
@@ -371,32 +418,77 @@ where
             else {
                 continue;
             };
-            let line_bounds = line_number_bounds(gutter_bounds, text_bounds.y + entry.visible_y);
+            let line_bounds =
+                line_number_bounds(gutter_bounds, text_bounds.y + entry.visible_y, state.view());
             let position = line_bounds.anchor(
                 number.paragraph.min_bounds(),
                 alignment::Horizontal::Right,
                 alignment::Vertical::Top,
             );
-            renderer.fill_paragraph(&number.paragraph, position, line_number_color, clip_bounds);
+            // 光标所在行的行号用正文色，其余淡一级。
+            let color = if cursor_line_start == Some(row.line_start) {
+                current_line_number_color(theme)
+            } else {
+                line_number_color(theme)
+            };
+            renderer.fill_paragraph(&number.paragraph, position, color, clip_bounds);
         }
     }
 }
 
-/// 与文档对齐：换了文档全部重置；窗口内容变了刷新可见段落；文档发来新的跳转就照做。
+/// Ctrl+= / Ctrl++ / Ctrl+- / Ctrl+0 缩放，Alt+Z 切换换行。
+fn view_shortcut(key: &keyboard::Key, modifiers: keyboard::Modifiers) -> Option<TextViewChange> {
+    let keyboard::Key::Character(character) = key else {
+        return None;
+    };
+    match character.as_str() {
+        "=" | "+" if modifiers.command() => Some(TextViewChange::ZoomIn),
+        "-" | "_" if modifiers.command() => Some(TextViewChange::ZoomOut),
+        "0" if modifiers.command() => Some(TextViewChange::ZoomReset),
+        "z" | "Z" if modifiers.alt() && !modifiers.command() => Some(TextViewChange::ToggleWrap),
+        _ => None,
+    }
+}
+
+/// 与文档、视图设置对齐：换了文档全部重置；字号或换行变了重新排版并保持看的那一行；
+/// 窗口内容变了刷新可见段落；文档发来新的跳转就照做。
 fn sync_with_document(
     state: &mut TextPreviewViewerState,
     document: &TextPreviewDocument,
-    content_width: f32,
-    layout_height: f32,
+    view: TextViewSettings,
+    layout: Size,
 ) {
-    let viewport_height = (layout_height - Padding::new(TEXT_PREVIEW_VIEWER_PADDING).y()).max(0.0);
     if state.document_id != Some(document.id()) {
         *state = TextPreviewViewerState {
             document_id: Some(document.id()),
             anchor: document.rows().front().map_or(0, |row| row.start),
+            modifiers: state.modifiers,
             ..TextPreviewViewerState::default()
         };
     }
+    let view_changed = state.view != Some(view);
+    if view_changed {
+        let previous_line_height = state.line_height;
+        state.view = Some(view);
+        state.line_height = view.line_height();
+        // 锚点行不变，行内像素按字号比例换算：缩放后看的还是那一行。
+        if previous_line_height > 0.0 {
+            state.pixel *= state.line_height / previous_line_height;
+        }
+        state.heights.clear();
+        state.retained_rows.clear();
+        state.retained_numbers.clear();
+        state.max_row_width = 0.0;
+        state.scroll_x = 0.0;
+    }
+    let digit_count = line_number_digit_count(document);
+    if view_changed || state.digit_count != digit_count {
+        state.digit_count = digit_count;
+        state.gutter_width = gutter_width(digit_count, view);
+        state.retained_numbers.clear();
+    }
+    let content_width = (layout.width - state.gutter_width - TEXT_PREVIEW_GUTTER_SPACING).max(0.0);
+    let viewport_height = (layout.height - Padding::new(TEXT_PREVIEW_VIEWER_PADDING).y()).max(0.0);
     let layout_changed = (state.content_width - content_width).abs() >= f32::EPSILON
         || (state.viewport_height - viewport_height).abs() >= f32::EPSILON;
     let content_changed = state.revision != Some(document.revision());
@@ -422,7 +514,7 @@ fn sync_with_document(
             }
         }
     }
-    if content_changed || layout_changed {
+    if content_changed || layout_changed || view_changed {
         normalize_anchor(state, document);
         refresh_retained_content(state, document);
         // 量出来的行高可能让当前位置越过窗口底部，重新夹一次。
@@ -469,7 +561,7 @@ fn row_height(state: &TextPreviewViewerState, start: u64) -> f32 {
         .heights
         .get(&start)
         .copied()
-        .unwrap_or_else(base_line_height)
+        .unwrap_or(state.line_height.max(1.0))
 }
 
 /// 量到的行高只增不减：排版器会裁掉视口外行的布局，观测值缩小时保留旧值，位置因此稳定。
@@ -545,6 +637,13 @@ fn scroll_viewer_by(
     (state.anchor, state.pixel) != before
 }
 
+/// 不换行时横向滚动，夹在 [0, 最宽行 − 文字区宽] 之间。返回位置是否变了。
+fn scroll_viewer_horizontally(state: &mut TextPreviewViewerState, delta_x: f32) -> bool {
+    let before = state.scroll_x;
+    state.scroll_x = (state.scroll_x + delta_x).clamp(0.0, state.max_scroll_x());
+    state.scroll_x != before
+}
+
 /// 能滚到的最远位置：从窗口最后一行往上累加行高，刚好填满文字视口。
 fn bottom_position(state: &TextPreviewViewerState, document: &TextPreviewDocument) -> (usize, f32) {
     let rows = document.rows();
@@ -569,7 +668,7 @@ fn is_at_bottom(state: &TextPreviewViewerState, document: &TextPreviewDocument) 
     document.at_end() && (index, state.pixel + 0.5) >= (max_index, max_pixel)
 }
 
-/// 可见范围变了就排队一条报告（在 update 里发出）。
+/// 可见范围或光标变了就排队一条报告（在 update 里发出）。
 fn queue_viewport_report(state: &mut TextPreviewViewerState, document: &TextPreviewDocument) {
     let rows = document.rows();
     let visible = visible_rows(state, document);
@@ -580,6 +679,7 @@ fn queue_viewport_report(state: &mut TextPreviewViewerState, document: &TextPrev
         first_row: rows[first.index].start,
         last_row: rows[last.index].start,
         at_bottom: is_at_bottom(state, document),
+        cursor: state.cursor,
     };
     if state.reported_viewport != Some(viewport) {
         state.reported_viewport = Some(viewport);
@@ -605,6 +705,7 @@ impl widget::operation::Scrollable for ScrollBridge<'_> {
         _bounds: Rectangle,
         _content_bounds: Rectangle,
     ) {
+        scroll_viewer_horizontally(self.state, offset.x);
         if scroll_viewer_by(self.state, self.document, offset.y) {
             self.state.drag_fraction = None;
             refresh_retained_content(self.state, self.document);
@@ -613,20 +714,21 @@ impl widget::operation::Scrollable for ScrollBridge<'_> {
 }
 
 /// 重建可见行的段落与行号缓存：仍在视口里的复用，只排版新进入的行；排版出的真实高度
-/// 回填行高（只增不减）。
+/// 回填行高（只增不减），不换行时记下最宽行。
 fn refresh_retained_content(state: &mut TextPreviewViewerState, document: &TextPreviewDocument) {
-    let text_width = (state.content_width - Padding::new(TEXT_PREVIEW_VIEWER_PADDING).x()).max(0.0);
+    let text_width = state.text_width();
     // 宽度还没建立（第一次布局之前）时排版出的高度是错的，不能写进行高表。
     if text_width <= 0.0 {
         return;
     }
+    let view = state.view();
     let width_changed = (state.retained_text_width - text_width).abs() >= f32::EPSILON;
     let mut previous = std::mem::take(&mut state.retained_rows);
     let mut retained = Vec::new();
     let rows = document.rows();
     for entry in visible_rows(state, document) {
         let row = &rows[entry.index];
-        let reused = (!width_changed)
+        let reused = (!(width_changed && view.wrap))
             .then(|| {
                 previous
                     .iter()
@@ -637,8 +739,10 @@ fn refresh_retained_content(state: &mut TextPreviewViewerState, document: &TextP
         let paragraph = match reused {
             Some(reused) => reused.paragraph,
             None => {
-                let paragraph = text_line_paragraph(&row.text, text_width);
-                note_measured_height(state, row.start, paragraph.min_bounds().height);
+                let paragraph = text_line_paragraph(&row.text, text_width, view);
+                let bounds = paragraph.min_bounds();
+                note_measured_height(state, row.start, bounds.height);
+                state.max_row_width = state.max_row_width.max(bounds.width);
                 paragraph
             }
         };
@@ -650,11 +754,9 @@ fn refresh_retained_content(state: &mut TextPreviewViewerState, document: &TextP
     }
     state.retained_rows = retained;
     state.retained_text_width = text_width;
+    state.scroll_x = state.scroll_x.min(state.max_scroll_x());
 
-    let digit_count = line_number_digit_count(document);
-    let gutter_width = text_preview_line_number_gutter_width(document);
-    let numbers_changed = state.retained_digit_count != digit_count
-        || (state.retained_gutter_width - gutter_width).abs() >= f32::EPSILON;
+    let gutter_width = state.gutter_width;
     let mut previous = std::mem::take(&mut state.retained_numbers);
     let mut numbers = Vec::new();
     for entry in visible_rows(state, document) {
@@ -663,23 +765,17 @@ fn refresh_retained_content(state: &mut TextPreviewViewerState, document: &TextP
         let Some(line_number) = row.line_number.filter(|_| row.is_line_start()) else {
             continue;
         };
-        let reused = (!numbers_changed)
-            .then(|| {
-                previous.iter().position(|retained| {
-                    retained.start == row.start && retained.line_number == line_number
-                })
-            })
-            .flatten()
+        let reused = previous
+            .iter()
+            .position(|retained| retained.start == row.start && retained.line_number == line_number)
             .map(|position| previous.swap_remove(position));
         numbers.push(reused.unwrap_or_else(|| RetainedNumber {
             start: row.start,
             line_number,
-            paragraph: line_number_paragraph(line_number + 1, digit_count, gutter_width),
+            paragraph: line_number_paragraph(line_number + 1, gutter_width, view),
         }));
     }
     state.retained_numbers = numbers;
-    state.retained_digit_count = digit_count;
-    state.retained_gutter_width = gutter_width;
 }
 
 #[cfg(test)]

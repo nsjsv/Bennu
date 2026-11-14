@@ -20,6 +20,7 @@ impl FileBrowser {
             preview_engine.video_preview.as_ref(),
             preview_bottom_controls_opacity,
             self.operation_progress_animation_frame,
+            self.user_config.text_preview_view,
         )
     }
 }

@@ -36,6 +36,7 @@ use bennu_preview::preview_config::{
     preview_directory_expand_levels_from_stored, preview_extension_rules_from_stored,
     preview_size_limits_from_stored,
 };
+use bennu_preview::text_view::TextViewSettings;
 use bennu_theme::window_controls::SidebarStyle;
 use bennu_theme::{ColorSchemePreset, ThemeMode};
 
@@ -45,6 +46,7 @@ pub(crate) struct UserPreferences {
     pub(crate) preview_size_limits: PreviewFileSizeLimits,
     pub(crate) preview_directory_expand_levels: u8,
     pub(crate) preview_extension_rules: PreviewExtensionRules,
+    pub(crate) text_preview_view: TextViewSettings,
     pub(crate) show_hidden_files: bool,
     pub(crate) language_setting: UiLanguageSetting,
     pub(crate) sidebar_width: f32,
@@ -94,6 +96,7 @@ impl UserPreferences {
             preview_size_limits: config.preview_size_limits,
             preview_directory_expand_levels: config.preview_directory_expand_levels,
             preview_extension_rules: config.preview_extension_rules.clone(),
+            text_preview_view: config.text_preview_view,
             show_hidden_files: config.show_hidden_files,
             language_setting: config.language_setting,
             sidebar_width: normalize_sidebar_width(config.sidebar_width),
@@ -146,6 +149,7 @@ impl UserPreferences {
         config.preview_size_limits = self.preview_size_limits;
         config.preview_directory_expand_levels = self.preview_directory_expand_levels;
         config.preview_extension_rules = self.preview_extension_rules.clone();
+        config.text_preview_view = self.text_preview_view;
         config.show_hidden_files = self.show_hidden_files;
         config.language_setting = self.language_setting;
         config.sidebar_width = self.sidebar_width;
@@ -213,6 +217,8 @@ impl UserPreferences {
             }),
             preview_directory_expand_levels: Some(self.preview_directory_expand_levels),
             preview_extra_text_extensions: Some(self.preview_extension_rules.text.clone()),
+            text_preview_zoom_percent: Some(self.text_preview_view.zoom_percent),
+            text_preview_wrap: Some(self.text_preview_view.wrap),
         };
         stored.show_hidden_files = self.show_hidden_files;
         stored.language_setting = self.language_setting.config_value().to_owned();
@@ -356,6 +362,10 @@ impl UserPreferences {
             preview_directory_expand_levels: preview_directory_expand_levels_from_stored(
                 &stored.preview,
                 default_preferences.preview_directory_expand_levels,
+            ),
+            text_preview_view: TextViewSettings::from_stored(
+                stored.preview.text_preview_zoom_percent,
+                stored.preview.text_preview_wrap,
             ),
             preview_extension_rules: preview_extension_rules_from_stored(
                 &stored.preview,

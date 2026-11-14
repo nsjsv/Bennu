@@ -8,6 +8,8 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::text_view::TextViewSettings;
+
 /// 空格预览偏好段的存储形态：legacy 全局上限（max_preview_file_bytes，
 /// 只读迁移，新代码写 None）、分类型大小上限、后缀规则与目录展开层级。
 /// 字段声明顺序即序列化顺序，冻结为既有文档布局，不得重排。
@@ -40,6 +42,11 @@ pub struct StoredPreviewPreferences {
     /// 从旧的 `preview_extension_rules.text` 迁移一次。
     #[serde(default)]
     pub preview_extra_text_extensions: Option<Vec<String>>,
+    /// 文本预览字号缩放（百分比）与自动换行；None 用默认。
+    #[serde(default)]
+    pub text_preview_zoom_percent: Option<u16>,
+    #[serde(default)]
+    pub text_preview_wrap: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -319,6 +326,7 @@ pub struct PreviewPreferences {
     pub size_limits: PreviewFileSizeLimits,
     pub extension_rules: PreviewExtensionRules,
     pub directory_expand_levels: u8,
+    pub text_view: TextViewSettings,
 }
 
 impl PreviewPreferences {
@@ -329,6 +337,7 @@ impl PreviewPreferences {
             size_limits: PreviewFileSizeLimits::with_default_limits(),
             extension_rules: PreviewExtensionRules::default_rules(),
             directory_expand_levels: DEFAULT_PREVIEW_DIRECTORY_EXPAND_LEVELS,
+            text_view: TextViewSettings::default(),
         }
     }
 }
@@ -428,6 +437,10 @@ pub fn preview_preferences_from_stored(stored: &StoredPreviewPreferences) -> Pre
         directory_expand_levels: preview_directory_expand_levels_from_stored(
             stored,
             defaults.directory_expand_levels,
+        ),
+        text_view: TextViewSettings::from_stored(
+            stored.text_preview_zoom_percent,
+            stored.text_preview_wrap,
         ),
     }
 }

@@ -53,6 +53,8 @@ pub struct TextViewport {
     pub last_row: u64,
     /// 视口贴着文件末尾（追加内容时要跟到新末尾）。
     pub at_bottom: bool,
+    /// 光标位置（状态栏显示所在行）。
+    pub cursor: Option<TextPosition>,
 }
 
 /// 给查看器的跳转指令：revision 变了就把锚点放到 `row`。
@@ -73,6 +75,8 @@ pub enum TextViewerEvent {
         from: TextPosition,
         to: TextPosition,
     },
+    /// 调整字号或换行；设置归宿主（主程序记住，对话框只当次有效），引擎原样还给宿主。
+    ChangeView(crate::text_view::TextViewChange),
 }
 
 /// 后台读取的回复；内容只有引擎和文档看得懂。

@@ -5,11 +5,20 @@ use iced::{Point, Rectangle};
 use super::*;
 use crate::text_document::{document_from_bytes, TextJump};
 
-/// 文字视口 384 px（布局 400 减上下内边距）、文字宽度 376 px 的查看器状态。
+/// 布局 480 × 400（文字视口高 384）的查看器状态。
 fn synced_state(document: &TextPreviewDocument) -> TextPreviewViewerState {
     let mut state = TextPreviewViewerState::default();
-    sync_with_document(&mut state, document, 392.0, 400.0);
+    sync(&mut state, document);
     state
+}
+
+fn sync(state: &mut TextPreviewViewerState, document: &TextPreviewDocument) {
+    let view = state.view.unwrap_or_default();
+    sync_with_document(state, document, view, Size::new(480.0, 400.0));
+}
+
+fn base_line_height() -> f32 {
+    TextViewSettings::default().line_height()
 }
 
 fn lines(count: usize) -> Vec<u8> {
@@ -114,7 +123,7 @@ fn a_jump_from_the_document_moves_the_anchor_to_the_target_row() {
 
     let reads = document.jump_to(TextJump::Offset(len / 2));
     apply_reads(&mut document, reads);
-    sync_with_document(&mut state, &document, 392.0, 400.0);
+    sync(&mut state, &document);
     let jump = document.jump().expect("jump");
     assert_eq!(state.anchor, jump.row);
     assert_eq!(state.pixel, 0.0);
@@ -124,7 +133,7 @@ fn a_jump_from_the_document_moves_the_anchor_to_the_target_row() {
     // 跳到末尾：贴住底部。
     let reads = document.jump_to(TextJump::End);
     apply_reads(&mut document, reads);
-    sync_with_document(&mut state, &document, 392.0, 400.0);
+    sync(&mut state, &document);
     assert!(is_at_bottom(&state, &document));
     assert_eq!(scrollbar::scroll_fraction(&state, &document), 1.0);
 }
@@ -308,7 +317,94 @@ fn a_new_document_resets_position_and_selection() {
     let mut other = document_from_bytes(lines(5), TextJump::Start);
     // 不同文档：id 不同。
     other = TextPreviewDocument::reidentified_for_tests(other, 2);
-    sync_with_document(&mut state, &other, 392.0, 400.0);
+    sync(&mut state, &other);
     assert_eq!(state.anchor, 0);
     assert_eq!(state.cursor, None);
+}
+
+#[test]
+fn zooming_keeps_the_same_row_at_the_top() {
+    let document = document_from_bytes(lines(200), TextJump::Start);
+    let mut state = synced_state(&document);
+    scroll_viewer_by(&mut state, &document, base_line_height() * 10.0 + 5.0);
+    let anchor = state.anchor;
+    let zoomed = TextViewSettings::default().apply(TextViewChange::ZoomIn);
+    sync_with_document(&mut state, &document, zoomed, Size::new(480.0, 400.0));
+    assert_eq!(state.anchor, anchor);
+    assert!(
+        (state.pixel - 5.0 * 1.1).abs() < 0.01,
+        "pixel {}",
+        state.pixel
+    );
+    assert!((state.line_height - zoomed.line_height()).abs() < 0.01);
+    // 行号栏随字号变宽。
+    let normal_gutter = render::gutter_width(3, TextViewSettings::default());
+    assert!(state.gutter_width > normal_gutter);
+}
+
+#[test]
+fn without_wrapping_long_rows_scroll_horizontally_within_their_width() {
+    let mut text = lines(5);
+    text.extend_from_slice("x".repeat(400).as_bytes());
+    text.push(b'\n');
+    let document = document_from_bytes(text, TextJump::Start);
+    let mut state = TextPreviewViewerState::default();
+    let view = TextViewSettings::default().apply(TextViewChange::ToggleWrap);
+    sync_with_document(&mut state, &document, view, Size::new(480.0, 400.0));
+    assert!(state.max_scroll_x() > 0.0);
+    // 不换行：长行仍是一行高。
+    let last_start = document.rows().back().expect("last").start;
+    assert!((row_height(&state, last_start) - base_line_height()).abs() < 0.5);
+
+    assert!(scroll_viewer_horizontally(&mut state, 1.0e6));
+    assert_eq!(state.scroll_x, state.max_scroll_x());
+    assert!(scroll_viewer_horizontally(&mut state, -1.0e6));
+    assert_eq!(state.scroll_x, 0.0);
+
+    // 打开换行：横向滚动归零、不再能横向滚。
+    sync_with_document(
+        &mut state,
+        &document,
+        TextViewSettings::default(),
+        Size::new(480.0, 400.0),
+    );
+    assert_eq!(state.max_scroll_x(), 0.0);
+}
+
+#[test]
+fn wide_scripts_use_the_interface_font() {
+    assert_eq!(
+        render::wide_runs_for_tests("abc中文，def"),
+        vec![
+            ("abc".to_owned(), false),
+            ("中文，".to_owned(), true),
+            ("def".to_owned(), false)
+        ]
+    );
+    assert_eq!(
+        render::wide_runs_for_tests(""),
+        vec![(String::new(), false)]
+    );
+}
+
+#[test]
+fn view_shortcuts_map_to_zoom_and_wrap_changes() {
+    let key = |character: &str| keyboard::Key::Character(character.into());
+    let ctrl = keyboard::Modifiers::CTRL;
+    assert_eq!(view_shortcut(&key("="), ctrl), Some(TextViewChange::ZoomIn));
+    assert_eq!(view_shortcut(&key("+"), ctrl), Some(TextViewChange::ZoomIn));
+    assert_eq!(
+        view_shortcut(&key("-"), ctrl),
+        Some(TextViewChange::ZoomOut)
+    );
+    assert_eq!(
+        view_shortcut(&key("0"), ctrl),
+        Some(TextViewChange::ZoomReset)
+    );
+    assert_eq!(
+        view_shortcut(&key("z"), keyboard::Modifiers::ALT),
+        Some(TextViewChange::ToggleWrap)
+    );
+    assert_eq!(view_shortcut(&key("z"), keyboard::Modifiers::empty()), None);
+    assert_eq!(view_shortcut(&key("0"), keyboard::Modifiers::empty()), None);
 }

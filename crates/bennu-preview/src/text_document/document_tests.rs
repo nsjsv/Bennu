@@ -59,6 +59,7 @@ fn viewport_at(document: &TextPreviewDocument, first: usize, rows: usize) -> Tex
         first_row: window[first].start,
         last_row: window[(first + rows - 1).min(window.len() - 1)].start,
         at_bottom: false,
+        cursor: None,
     }
 }
 

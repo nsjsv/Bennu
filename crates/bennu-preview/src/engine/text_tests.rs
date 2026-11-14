@@ -71,6 +71,7 @@ async fn report_viewport(engine: &mut PreviewEngine, first: usize, rows: usize, 
         first_row: window[first].start,
         last_row: window[(first + rows - 1).min(window.len() - 1)].start,
         at_bottom,
+        cursor: None,
     };
     let task = engine.handle_text_viewer_event(TextViewerEvent::ViewportChanged(viewport));
     drive(engine, task).await;

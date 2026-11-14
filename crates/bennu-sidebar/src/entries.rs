@@ -188,9 +188,54 @@ impl SidebarNetworkConnectionEntry {
     }
 }
 
+/// 路径是不是在网络位置上：已挂载的网络连接里，或标成远程文件系统的设备（gvfs 的
+/// MTP/SMB/SFTP 等）里。读这种路径要走网络，整份读取（预览下载、波形、搜索遍历）前先问它。
+/// 主程序和文件选择对话框共用这一条规则。
+pub fn path_is_on_network(
+    path: &Path,
+    connections: &[SidebarNetworkConnectionEntry],
+    devices: &[SidebarDeviceEntry],
+) -> bool {
+    connections.iter().any(|entry| {
+        entry
+            .mount_path()
+            .is_some_and(|mount_path| path.starts_with(mount_path))
+    }) || devices.iter().any(|device| {
+        device.access == StorageDeviceAccess::RemoteFilesystem
+            && device
+                .mount_points
+                .iter()
+                .any(|mount_point| path.starts_with(mount_point))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_device_mounts_are_network_but_local_mounts_are_not() {
+        let mut phone = device("phone", vec![PathBuf::from("/run/user/1000/gvfs/mtp")]);
+        phone.access = StorageDeviceAccess::RemoteFilesystem;
+        let disk = device("disk", vec![PathBuf::from("/run/media/user/disk")]);
+        let devices = [phone, disk];
+
+        assert!(path_is_on_network(
+            Path::new("/run/user/1000/gvfs/mtp/DCIM"),
+            &[],
+            &devices
+        ));
+        assert!(!path_is_on_network(
+            Path::new("/run/media/user/disk/song.flac"),
+            &[],
+            &devices
+        ));
+        assert!(!path_is_on_network(
+            Path::new("/home/user/DCIM"),
+            &[],
+            &devices
+        ));
+    }
 
     fn device(id: &str, mount_points: Vec<PathBuf>) -> SidebarDeviceEntry {
         SidebarDeviceEntry {

@@ -109,6 +109,7 @@ impl FileBrowser {
     ) -> Task<Message> {
         let options = self.options.clone();
         let expand_levels = self.preview_directory_expand_levels();
+        let on_network_mount = self.path_is_remote_mount(&path);
         let (acceptance, command) =
             self.preview_engine
                 .accept_preview(path, preview_outcome, options, expand_levels);
@@ -124,12 +125,21 @@ impl FileBrowser {
         let focus_viewer = self.preview_engine.preview_load_surface
             == bennu_preview::engine::PreviewLoadSurface::StandaloneWindow
             && self.preview_engine.preview_takes_keyboard();
-        if focus_viewer {
-            return Task::batch([
-                command.map(Message::Preview),
-                bennu_preview::text_preview_viewer::focus_preview_keyboard(),
-            ]);
-        }
-        command.map(Message::Preview)
+        // 本地音频一打开就算波形；网络挂载上的要读完整个文件，等用户点「生成波形」。
+        let waveform = if on_network_mount {
+            Task::none()
+        } else {
+            self.preview_engine.request_audio_waveform()
+        };
+        let focus = if focus_viewer {
+            bennu_preview::text_preview_viewer::focus_preview_keyboard()
+        } else {
+            Task::none()
+        };
+        Task::batch([
+            command.map(Message::Preview),
+            waveform.map(Message::Preview),
+            focus,
+        ])
     }
 }

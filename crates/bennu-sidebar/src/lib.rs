@@ -15,7 +15,7 @@ pub use config::{
     SidebarFavoriteConfig,
 };
 pub use entries::{
-    selected_sidebar_device, SidebarDeviceAction, SidebarDeviceEntry,
+    path_is_on_network, selected_sidebar_device, SidebarDeviceAction, SidebarDeviceEntry,
     SidebarNetworkConnectionAction, SidebarNetworkConnectionEntry,
 };
 pub use locations::{

@@ -5,6 +5,7 @@
 //! 设置窗口/停靠面板发出的输入域消息直接定义在 app-ui 的 Message 上。
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use file_core::DirectoryEntry;
@@ -12,12 +13,13 @@ use iced::widget::image;
 use iced::window;
 
 use crate::animated_image_preview::{AnimatedImageFrame, AnimatedImagePreview};
-use crate::audio_preview::AudioPreviewRuntime;
+use crate::audio_preview::{AudioPreviewRuntime, AudioWaveform};
 use crate::document_preview::DocumentPreviewMessage;
 use crate::image_preview_viewport::PreviewImageViewportMessage;
 use crate::original_image_preview::OriginalImagePreview;
 use crate::preview::{
-    PreviewContent, RemotePreviewCacheMessage, RightPreviewPanelInfoSnapshot, VideoPreviewFrame,
+    AudioTimelineView, PreviewContent, RemotePreviewCacheMessage, RightPreviewPanelInfoSnapshot,
+    VideoPreviewFrame,
 };
 use crate::sqlite_preview::SqlitePreviewMessage;
 use crate::text_document::{TextReadReply, TextViewerEvent};
@@ -63,6 +65,11 @@ pub enum PreviewMessage {
     /// ffprobe 只能估时长时，后台量出的准确时长。
     AudioPreviewDurationMeasured(PathBuf, Duration),
     AudioPreviewCoverLoaded(PathBuf, image::Handle),
+    /// 「生成波形」按钮（网络挂载上的文件默认不算）。
+    AudioWaveformRequested,
+    AudioWaveformComputed(PathBuf, Result<Arc<AudioWaveform>, String>),
+    AudioTimelineViewSelected(AudioTimelineView),
+    AudioSpectrogramComputed(PathBuf, Result<image::Handle, String>),
     CopyFfmpegInstallCommand,
     AudioPreviewTick,
     VideoPreviewPlaybackToggled,

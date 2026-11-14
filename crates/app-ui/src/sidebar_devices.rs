@@ -1,8 +1,6 @@
 use std::path::Path;
 
-use desktop_linux::{
-    StorageDeviceAccess, StorageDeviceId, StorageDeviceProviderFailure, StorageDeviceSnapshot,
-};
+use desktop_linux::{StorageDeviceId, StorageDeviceProviderFailure, StorageDeviceSnapshot};
 
 // 纯搬移：SidebarDeviceEntry/SidebarDeviceAction（含 available_actions 与
 // 最长前缀选中判定）已下沉 bennu-sidebar（portal 侧栏与主程序共用）；
@@ -65,16 +63,6 @@ impl SidebarDeviceState {
         selected_sidebar_device(&self.devices, current_dir).map(|device| &device.id)
     }
 
-    pub(crate) fn path_is_remote_mount(&self, path: &Path) -> bool {
-        self.devices.iter().any(|device| {
-            device.access == StorageDeviceAccess::RemoteFilesystem
-                && device
-                    .mount_points
-                    .iter()
-                    .any(|mount_point| path.starts_with(mount_point))
-        })
-    }
-
     pub(crate) fn begin_action(
         &mut self,
         id: StorageDeviceId,
@@ -110,35 +98,8 @@ impl SidebarDeviceState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use desktop_linux::{StorageDevice, StorageDeviceMountState};
+    use desktop_linux::{StorageDevice, StorageDeviceAccess, StorageDeviceMountState};
     use std::path::PathBuf;
-
-    fn device(id: &str, mount_points: Vec<PathBuf>) -> SidebarDeviceEntry {
-        SidebarDeviceEntry {
-            id: StorageDeviceId::new(id),
-            label: id.to_owned(),
-            detail: None,
-            size_bytes: 0,
-            mount_points,
-            access: StorageDeviceAccess::LocalFilesystem,
-            can_mount: true,
-            can_unmount: true,
-            removal: None,
-        }
-    }
-
-    #[test]
-    fn portable_mount_is_remote_without_affecting_local_mounts() {
-        let mut device = device("phone", vec![PathBuf::from("/run/user/1000/gvfs/mtp")]);
-        device.access = StorageDeviceAccess::RemoteFilesystem;
-        let state = SidebarDeviceState {
-            devices: vec![device],
-            ..SidebarDeviceState::default()
-        };
-
-        assert!(state.path_is_remote_mount(Path::new("/run/user/1000/gvfs/mtp/DCIM")));
-        assert!(!state.path_is_remote_mount(Path::new("/home/user/DCIM")));
-    }
 
     #[test]
     fn stale_action_result_cannot_clear_new_request_for_same_device() {

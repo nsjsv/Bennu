@@ -9,7 +9,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::animated_image_preview::load_animated_image_preview;
 use crate::audio_preview::{
-    load_audio_cover, measure_audio_preview_duration, start_audio_preview_at,
+    compute_audio_spectrogram, compute_audio_waveform, load_audio_cover,
+    measure_audio_preview_duration, start_audio_preview_at,
 };
 use crate::original_image_preview::load_original_image_preview;
 use crate::preview::{
@@ -256,6 +257,26 @@ pub(crate) fn load_audio_cover_command(
             audio_path.clone(),
             cover,
         ))
+    })
+}
+
+pub(crate) fn compute_audio_waveform_command(
+    path: PathBuf,
+    cancel: CancellationToken,
+) -> Task<PreviewMessage> {
+    let audio_path = path.clone();
+    Task::perform(compute_audio_waveform(path, cancel), move |outcome| {
+        PreviewMessage::AudioWaveformComputed(audio_path.clone(), outcome)
+    })
+}
+
+pub(crate) fn compute_audio_spectrogram_command(
+    path: PathBuf,
+    cancel: CancellationToken,
+) -> Task<PreviewMessage> {
+    let audio_path = path.clone();
+    Task::perform(compute_audio_spectrogram(path, cancel), move |outcome| {
+        PreviewMessage::AudioSpectrogramComputed(audio_path.clone(), outcome)
     })
 }
 

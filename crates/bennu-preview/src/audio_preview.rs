@@ -9,12 +9,17 @@ use std::time::Duration;
 
 use rodio::{DeviceSinkBuilder, MixerDeviceSink, Player};
 
+mod analysis;
 mod cover;
 mod pcm_stream;
 mod probe;
 #[cfg(test)]
 pub(crate) mod test_fixtures;
 
+pub use analysis::{
+    compute_audio_spectrogram, compute_audio_waveform, AudioWaveform, SPECTROGRAM_HEIGHT,
+    SPECTROGRAM_WIDTH,
+};
 pub use cover::load_audio_cover;
 use pcm_stream::{spawn_pcm_stream, FfmpegPcmSource, PcmFormat, PlaybackExchange};
 pub use probe::{AudioProbe, AudioProbeError, AudioStreamFacts, AudioTags};

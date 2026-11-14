@@ -12,8 +12,8 @@ use tokio_util::sync::CancellationToken;
 use crate::document_preview::PendingDocumentPreview;
 use crate::image_preview_viewport::ImagePreviewViewport;
 use crate::preview::{
-    AudioPreviewPlayback, PreviewBottomControlsState, PreviewSize, PreviewState,
-    PreviewWindowProfile, VideoPreviewPlayback,
+    AudioAnalysis, AudioAnalysisCache, AudioPreviewPlayback, PreviewBottomControlsState,
+    PreviewSize, PreviewState, PreviewWindowProfile, VideoPreviewPlayback,
 };
 use crate::preview_config::{PreviewExtensionRules, PreviewFileSizeLimits};
 use crate::preview_message::PreviewMessage;
@@ -55,6 +55,9 @@ pub struct PreviewEngine {
     pub sqlite_preview_generation: u64,
     pub sqlite_tables_resize_drag: Option<crate::engine::sqlite::SqliteTablesResizeDrag>,
     pub audio_preview: Option<AudioPreviewPlayback>,
+    /// 当前这首的波形与声谱图；换内容时丢弃（丢弃即取消计算）。
+    pub audio_analysis: Option<AudioAnalysis>,
+    pub audio_analysis_cache: AudioAnalysisCache,
     pub video_preview: Option<VideoPreviewPlayback>,
     /// 音频、视频预览共用的音量（0.0–1.0），唯一来源：宿主加载设置时注入，
     /// 改动经 `MediaVolumeChanged` 交宿主记住后由 `set_media_volume` 生效。
@@ -125,6 +128,8 @@ impl PreviewEngine {
             sqlite_preview_generation: 0,
             sqlite_tables_resize_drag: None,
             audio_preview: None,
+            audio_analysis: None,
+            audio_analysis_cache: AudioAnalysisCache::default(),
             video_preview: None,
             media_volume: 1.0,
             preview_size: initial_preview_size,
@@ -200,6 +205,16 @@ impl PreviewEngine {
             PreviewMessage::AudioPreviewCoverLoaded(path, cover) => {
                 self.accept_audio_preview_cover(&path, cover)
             }
+            PreviewMessage::AudioWaveformRequested => self.request_audio_waveform(),
+            PreviewMessage::AudioWaveformComputed(path, outcome) => {
+                self.accept_audio_waveform(&path, outcome)
+            }
+            PreviewMessage::AudioTimelineViewSelected(view) => {
+                self.select_audio_timeline_view(view)
+            }
+            PreviewMessage::AudioSpectrogramComputed(path, outcome) => {
+                self.accept_audio_spectrogram(&path, outcome)
+            }
             PreviewMessage::CopyFfmpegInstallCommand => {
                 match crate::ffmpeg_install::ffmpeg_install_command() {
                     Some(command) => iced::clipboard::write(command.to_owned()),
@@ -238,6 +253,8 @@ impl PreviewEngine {
 }
 
 mod animated_image;
+mod audio;
+mod audio_analysis;
 mod document;
 mod image_viewport;
 mod media;
@@ -369,7 +386,7 @@ mod tests {
     fn ready_audio(engine: &mut PreviewEngine, path: &std::path::Path, seconds: u64) {
         engine.preview = Some(PreviewState::Ready(PreviewContent::Audio {
             path: path.to_path_buf(),
-            details: crate::preview::AudioPreviewDetails {
+            details: Box::new(crate::preview::AudioPreviewDetails {
                 len: 1,
                 probe: crate::audio_preview::AudioProbe {
                     duration: Some(std::time::Duration::from_secs(seconds)),
@@ -378,7 +395,7 @@ mod tests {
                     stream: Default::default(),
                     embedded_cover_stream: None,
                 },
-            },
+            }),
             cover: None,
         }));
     }
@@ -462,5 +479,79 @@ mod tests {
         assert!(!engine.preview_takes_keyboard());
         ready_audio(&mut engine, std::path::Path::new("/music/a.mp3"), 1);
         assert!(engine.preview_takes_keyboard());
+    }
+
+    #[test]
+    fn waveform_starts_once_fills_the_cache_and_fixes_an_estimated_duration() {
+        use crate::preview::AudioAnalysisState;
+        let path = PathBuf::from("/music/vbr.mp3");
+        let mut engine = engine();
+        ready_audio(&mut engine, &path, 300);
+        if let Some(PreviewState::Ready(PreviewContent::Audio { details, .. })) =
+            &mut engine.preview
+        {
+            details.probe.duration_is_estimate = true;
+        }
+        engine.begin_audio_analysis(&path, 1);
+
+        drop(engine.request_audio_waveform());
+        assert!(matches!(
+            engine
+                .audio_analysis
+                .as_ref()
+                .map(|analysis| &analysis.waveform),
+            Some(AudioAnalysisState::Computing)
+        ));
+        // 正在算时再要一次不会再起一个 ffmpeg。
+        drop(engine.request_audio_waveform());
+
+        let measured = std::sync::Arc::new(crate::audio_preview::AudioWaveform {
+            peaks: vec![0.2; 10],
+            duration: std::time::Duration::from_secs(287),
+        });
+        drop(engine.handle(PreviewMessage::AudioWaveformComputed(
+            path.clone(),
+            Ok(measured),
+        )));
+        let Some(PreviewState::Ready(PreviewContent::Audio { details, .. })) = &engine.preview
+        else {
+            panic!("audio preview");
+        };
+        assert_eq!(
+            details.probe.duration,
+            Some(std::time::Duration::from_secs(287))
+        );
+        assert!(!details.probe.duration_is_estimate);
+
+        // 下次打开同一首直接就绪。
+        engine.begin_audio_analysis(&path, 1);
+        assert!(matches!(
+            engine
+                .audio_analysis
+                .as_ref()
+                .map(|analysis| &analysis.waveform),
+            Some(AudioAnalysisState::Ready(_))
+        ));
+    }
+
+    #[test]
+    fn switching_to_the_spectrogram_starts_it_only_once() {
+        use crate::preview::{AudioAnalysisState, AudioTimelineView};
+        let path = PathBuf::from("/music/a.flac");
+        let mut engine = engine();
+        engine.begin_audio_analysis(&path, 1);
+        drop(engine.handle(PreviewMessage::AudioTimelineViewSelected(
+            AudioTimelineView::Spectrogram,
+        )));
+        let analysis = engine.audio_analysis.as_ref().expect("analysis");
+        assert_eq!(analysis.view, AudioTimelineView::Spectrogram);
+        assert!(matches!(
+            analysis.spectrogram,
+            AudioAnalysisState::Computing
+        ));
+        assert!(matches!(
+            analysis.waveform,
+            AudioAnalysisState::NotRequested
+        ));
     }
 }

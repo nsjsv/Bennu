@@ -280,6 +280,7 @@ impl FileBrowser {
             self.right_preview_panel_viewport(),
             &preview_engine.preview_image_viewport,
             preview_engine.audio_preview.as_ref(),
+            preview_engine.audio_analysis.as_ref(),
             preview_engine.video_preview.as_ref(),
             preview_engine.media_volume,
             1.0,

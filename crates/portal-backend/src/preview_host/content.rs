@@ -284,6 +284,13 @@ impl PreviewHost {
                 );
                 // 预览窗一打开键盘就归预览内容（文本的全选、复制、搜索，音视频的回车、方向键
                 // 都不用先点一下）。
+                // 本地音频一打开就算波形；网络位置上的要读完整个文件，等用户点「生成波形」。
+                let waveform = if self.preview_on_network {
+                    Task::none()
+                } else {
+                    self.engine.request_audio_waveform()
+                };
+                let task = Task::batch([task, waveform]);
                 if self.engine.preview_takes_keyboard() {
                     return Task::batch([
                         task,

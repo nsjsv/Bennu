@@ -50,6 +50,8 @@ pub(crate) struct PreviewSelection {
     pub(crate) path: PathBuf,
     pub(crate) kind: FileKind,
     pub(crate) file_bytes: u64,
+    /// 在网络位置上（按选择窗侧栏的网络连接与设备判断，与主程序同一规则）。
+    pub(crate) on_network: bool,
 }
 
 pub(crate) struct PreviewHost {
@@ -71,6 +73,8 @@ pub(crate) struct PreviewHost {
     /// cursor_position.x 的预览对应物；纵坐标的引擎消费走
     /// engine.preview_window_pointer_y）。
     pub(crate) preview_window_pointer: Option<Point>,
+    /// 当前预览的文件在网络位置上：音频波形要读完整个文件，这种情况等用户点「生成波形」。
+    pub(crate) preview_on_network: bool,
 }
 
 impl PreviewHost {
@@ -93,6 +97,7 @@ impl PreviewHost {
             preferences_database,
             scroll: PreviewScrollPipeline::default(),
             preview_window_pointer: None,
+            preview_on_network: false,
         }
     }
 
@@ -172,6 +177,7 @@ impl PreviewHost {
 
         self.refresh_session_preferences();
         self.engine.preview_shown_path = Some(selection.path.clone());
+        self.preview_on_network = selection.on_network;
         self.request_window = source;
         if selection.kind == FileKind::File {
             // 门禁放在大小检查之前：不可预览的文件不应误报“文件太大”。
@@ -399,10 +405,16 @@ impl PreviewHost {
 /// 图 = 主选中行；多栏 = 焦点栏锚点条目，见 view_mode 子模块）。
 pub(crate) fn preview_selection(session: &PickerSession) -> Option<PreviewSelection> {
     let entry = session.preview_target_entry()?;
+    let sidebar = session.sidebar();
     Some(PreviewSelection {
         path: entry.path.clone(),
         kind: entry.kind,
         file_bytes: entry.metadata.len,
+        on_network: bennu_sidebar::path_is_on_network(
+            &entry.path,
+            &sidebar.connections,
+            &sidebar.devices,
+        ),
     })
 }
 

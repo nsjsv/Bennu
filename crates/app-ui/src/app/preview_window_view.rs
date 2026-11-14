@@ -17,6 +17,7 @@ impl FileBrowser {
             preview_engine.preview_size,
             &preview_engine.preview_image_viewport,
             preview_engine.audio_preview.as_ref(),
+            preview_engine.audio_analysis.as_ref(),
             preview_engine.video_preview.as_ref(),
             preview_engine.media_volume,
             preview_bottom_controls_opacity,

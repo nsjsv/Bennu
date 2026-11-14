@@ -44,6 +44,7 @@ pub(crate) fn preview_window_view(
         engine.preview_size,
         &engine.preview_image_viewport,
         engine.audio_preview.as_ref(),
+        engine.audio_analysis.as_ref(),
         engine.video_preview.as_ref(),
         engine.media_volume,
         engine.preview_window_bottom_controls.opacity(),

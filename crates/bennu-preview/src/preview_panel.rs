@@ -23,7 +23,7 @@ use crate::operation_progress::remote_preview_download_panel;
 use crate::panel_text::readable_text;
 use crate::preview::PreviewSize;
 use crate::preview::VideoPreviewPlayback;
-use crate::preview::{AudioPreviewPlayback, ImagePreviewContent};
+use crate::preview::{AudioAnalysis, AudioPreviewPlayback, ImagePreviewContent};
 use crate::preview::{PreviewContent, PreviewState};
 use crate::preview_message::PreviewMessage;
 use crate::preview_surface::preview_surface;
@@ -46,6 +46,7 @@ pub fn view_preview_window<'a, Message>(
     size: PreviewSize,
     image_preview_viewport: &ImagePreviewViewport,
     audio_preview: Option<&'a AudioPreviewPlayback>,
+    audio_analysis: Option<&'a AudioAnalysis>,
     video_preview: Option<&'a VideoPreviewPlayback>,
     media_volume: f32,
     preview_bottom_controls_opacity: f32,
@@ -73,6 +74,7 @@ where
             size,
             image_preview_viewport,
             audio_preview,
+            audio_analysis,
             video_preview,
             media_volume,
             preview_bottom_controls_opacity,
@@ -103,6 +105,7 @@ fn preview_panel<'a, Message>(
     size: PreviewSize,
     image_preview_viewport: &ImagePreviewViewport,
     audio_preview: Option<&'a AudioPreviewPlayback>,
+    audio_analysis: Option<&'a AudioAnalysis>,
     video_preview: Option<&'a VideoPreviewPlayback>,
     media_volume: f32,
     preview_bottom_controls_opacity: f32,
@@ -192,6 +195,7 @@ where
             details,
             cover: cover.as_ref(),
             playback: audio_preview,
+            analysis: audio_analysis,
             media_volume,
             size,
         }),

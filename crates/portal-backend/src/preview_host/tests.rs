@@ -42,6 +42,7 @@ fn file_selection(path: &Path, file_bytes: u64) -> PreviewSelection {
         path: path.to_path_buf(),
         kind: FileKind::File,
         file_bytes,
+        on_network: false,
     }
 }
 

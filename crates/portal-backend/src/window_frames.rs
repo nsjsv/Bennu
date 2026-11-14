@@ -110,6 +110,7 @@ mod tests {
                 path: "/tmp/a.txt".into(),
                 kind: file_core::FileKind::File,
                 file_bytes: 16,
+                on_network: false,
             }),
         );
         let preview_window = daemon.preview.engine.preview_window.unwrap();

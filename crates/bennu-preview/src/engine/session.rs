@@ -47,12 +47,14 @@ impl super::PreviewEngine {
                 let command = match &preview {
                     PreviewContent::Text { path, opened } => {
                         self.clear_audio_preview();
+                        self.audio_analysis = None;
                         self.clear_video_preview();
                         self.open_text_document(path.clone(), opened)
                     }
                     PreviewContent::Audio { path, details, .. } => {
                         self.text_preview_document = None;
                         self.clear_video_preview();
+                        self.begin_audio_analysis(path, details.len);
                         let measure_duration = if details.probe.duration_is_estimate {
                             measure_audio_preview_duration_command(path.clone())
                         } else {
@@ -69,17 +71,20 @@ impl super::PreviewEngine {
                     PreviewContent::Video { path, duration, .. } => {
                         self.text_preview_document = None;
                         self.clear_audio_preview();
+                        self.audio_analysis = None;
                         self.start_video_preview_playback(path.clone(), *duration)
                     }
                     PreviewContent::Sqlite(database) => {
                         self.text_preview_document = None;
                         self.clear_audio_preview();
+                        self.audio_analysis = None;
                         self.clear_video_preview();
                         self.start_sqlite_preview(path.clone(), database)
                     }
                     _ => {
                         self.text_preview_document = None;
                         self.clear_audio_preview();
+                        self.audio_analysis = None;
                         self.clear_video_preview();
                         Task::none()
                     }
@@ -93,6 +98,7 @@ impl super::PreviewEngine {
             Err(error) => {
                 self.text_preview_document = None;
                 self.clear_audio_preview();
+                self.audio_analysis = None;
                 self.clear_video_preview();
                 self.preview = Some(PreviewState::Error(error));
                 // 面板会话不弹独立窗口;错误态直接呈现在面板里。
@@ -119,6 +125,7 @@ impl super::PreviewEngine {
         self.text_preview_document = None;
         self.clear_sqlite_preview();
         self.clear_audio_preview();
+        self.audio_analysis = None;
         self.clear_video_preview();
         let preview = self.preview.take();
         if let Some(PreviewState::Ready(PreviewContent::Image(

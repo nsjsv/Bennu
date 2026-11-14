@@ -1,4 +1,5 @@
-use std::path::PathBuf;
+use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -8,11 +9,12 @@ use iced::widget::{image, svg};
 // 原 app-ui 内 `use super::SqliteDatabasePreview`（model.rs 门面）；下沉后
 // sqlite_preview 是本 crate 顶层模块，改为 crate 路径。
 use crate::animated_image_preview::AnimatedImagePreview;
-use crate::audio_preview::{AudioPreviewRuntime, AudioProbe};
+use crate::audio_preview::{AudioPreviewRuntime, AudioProbe, AudioWaveform};
 use crate::document_preview::PagedDocumentPreview;
 use crate::sqlite_preview::SqliteDatabasePreview;
 use crate::text_document::TextOpened;
 use file_core::byte_progress::active_byte_fraction;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone)]
 pub enum PreviewState {
@@ -99,7 +101,8 @@ pub enum PreviewContent {
     AnimatedImage(AnimatedImagePreview),
     Audio {
         path: PathBuf,
-        details: AudioPreviewDetails,
+        // 装箱：标签、技术参数让它比其余内容大好几倍，整个枚举不该跟着变大。
+        details: Box<AudioPreviewDetails>,
         /// 打开后在后台取；没有封面就一直是 None。
         cover: Option<image::Handle>,
     },
@@ -178,6 +181,119 @@ pub fn scaled_media_size(max_width: f32, max_height: f32, width: u32, height: u3
 pub struct AudioPreviewDetails {
     pub len: u64,
     pub probe: AudioProbe,
+}
+
+/// 进度区显示哪一种图。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AudioTimelineView {
+    #[default]
+    Waveform,
+    Spectrogram,
+}
+
+#[derive(Debug, Clone)]
+pub enum AudioAnalysisState<T> {
+    /// 还没算：网络挂载上的波形等用户点「生成波形」，声谱图等用户切过去。
+    NotRequested,
+    Computing,
+    Ready(T),
+    Failed(String),
+}
+
+/// 当前这首的波形与声谱图。被替换或丢弃时取消还在算的 ffmpeg。
+#[derive(Debug)]
+pub struct AudioAnalysis {
+    pub path: PathBuf,
+    pub len: u64,
+    pub view: AudioTimelineView,
+    pub waveform: AudioAnalysisState<Arc<AudioWaveform>>,
+    pub spectrogram: AudioAnalysisState<image::Handle>,
+    cancel: AnalysisCancel,
+}
+
+impl AudioAnalysis {
+    pub fn new(path: PathBuf, len: u64) -> Self {
+        Self {
+            path,
+            len,
+            view: AudioTimelineView::default(),
+            waveform: AudioAnalysisState::NotRequested,
+            spectrogram: AudioAnalysisState::NotRequested,
+            cancel: AnalysisCancel(CancellationToken::new()),
+        }
+    }
+
+    pub fn cancel_token(&self) -> CancellationToken {
+        self.cancel.0.clone()
+    }
+}
+
+#[derive(Debug)]
+struct AnalysisCancel(CancellationToken);
+
+impl Drop for AnalysisCancel {
+    fn drop(&mut self) {
+        self.0.cancel();
+    }
+}
+
+/// 最近算过的几首（用户定的 3 首），只在内存里；键是路径加文件大小，文件被改写多半
+/// 大小也变了。
+#[derive(Debug, Default)]
+pub struct AudioAnalysisCache {
+    entries: VecDeque<CachedAudioAnalysis>,
+}
+
+#[derive(Debug)]
+struct CachedAudioAnalysis {
+    path: PathBuf,
+    len: u64,
+    waveform: Option<Arc<AudioWaveform>>,
+    spectrogram: Option<image::Handle>,
+}
+
+const AUDIO_ANALYSIS_CACHE_SONGS: usize = 3;
+
+impl AudioAnalysisCache {
+    pub fn waveform(&self, path: &Path, len: u64) -> Option<Arc<AudioWaveform>> {
+        self.find(path, len)?.waveform.clone()
+    }
+
+    pub fn spectrogram(&self, path: &Path, len: u64) -> Option<image::Handle> {
+        self.find(path, len)?.spectrogram.clone()
+    }
+
+    pub fn store_waveform(&mut self, path: &Path, len: u64, waveform: Arc<AudioWaveform>) {
+        self.entry(path, len).waveform = Some(waveform);
+    }
+
+    pub fn store_spectrogram(&mut self, path: &Path, len: u64, spectrogram: image::Handle) {
+        self.entry(path, len).spectrogram = Some(spectrogram);
+    }
+
+    fn find(&self, path: &Path, len: u64) -> Option<&CachedAudioAnalysis> {
+        self.entries
+            .iter()
+            .find(|entry| entry.path == path && entry.len == len)
+    }
+
+    /// 取出（或新建）这首的条目并挪到最前；超出数量丢最旧的。
+    fn entry(&mut self, path: &Path, len: u64) -> &mut CachedAudioAnalysis {
+        let existing = self
+            .entries
+            .iter()
+            .position(|entry| entry.path == path && entry.len == len)
+            .and_then(|index| self.entries.remove(index));
+        let entry = existing.unwrap_or_else(|| CachedAudioAnalysis {
+            path: path.to_path_buf(),
+            len,
+            waveform: None,
+            spectrogram: None,
+        });
+        self.entries.push_front(entry);
+        self.entries.truncate(AUDIO_ANALYSIS_CACHE_SONGS);
+        self.entries.front_mut().expect("just inserted")
+    }
 }
 
 #[derive(Debug, Clone)]

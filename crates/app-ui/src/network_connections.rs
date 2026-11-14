@@ -368,14 +368,6 @@ impl NetworkConnectionState {
             .map(|(id, _)| id)
     }
 
-    pub(crate) fn path_is_mounted_network(&self, path: &Path) -> bool {
-        self.entries.iter().any(|entry| {
-            entry
-                .mount_path()
-                .is_some_and(|mount_path| path.starts_with(mount_path))
-        })
-    }
-
     pub(crate) fn unique_id_for(&self, label: &str, uri: &str) -> NetworkConnectionId {
         let base = network_connection_id_base(label, uri);
         let mut candidate = base.clone();

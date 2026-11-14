@@ -24,6 +24,7 @@ pub struct StoredPreviewPreferences {
     pub preview_image_size_bytes: Option<u64>,
     #[serde(default)]
     pub preview_video_size_bytes: Option<u64>,
+    /// 旧版本的音频大小上限；音频边读边放后不再使用，只为保持文档布局保留，新代码写 None。
     #[serde(default)]
     pub preview_audio_size_bytes: Option<u64>,
     #[serde(default)]
@@ -47,6 +48,10 @@ pub struct StoredPreviewPreferences {
     pub text_preview_zoom_percent: Option<u16>,
     #[serde(default)]
     pub text_preview_wrap: Option<bool>,
+    /// 额外当作音频的后缀（音频主要由类型库判定）。None 表示还没迁移过，读取端
+    /// 从旧的 `preview_extension_rules.audio` 迁移一次。
+    #[serde(default)]
+    pub preview_extra_audio_extensions: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -58,6 +63,7 @@ pub struct StoredPreviewExtensionRules {
     pub image: Option<Vec<String>>,
     #[serde(default)]
     pub video: Option<Vec<String>>,
+    /// 旧版本的替换式音频后缀表，只读迁移，新代码写 None。
     #[serde(default)]
     pub audio: Option<Vec<String>>,
     #[serde(default)]
@@ -71,7 +77,6 @@ pub struct StoredPreviewExtensionRules {
 pub const PREVIEW_FILE_SIZE_UNIT_BYTES: u64 = 1024 * 1024;
 pub const DEFAULT_PREVIEW_IMAGE_SIZE_BYTES: u64 = 100 * PREVIEW_FILE_SIZE_UNIT_BYTES;
 pub const DEFAULT_PREVIEW_VIDEO_SIZE_BYTES: u64 = 1024 * PREVIEW_FILE_SIZE_UNIT_BYTES;
-pub const DEFAULT_PREVIEW_AUDIO_SIZE_BYTES: u64 = 200 * PREVIEW_FILE_SIZE_UNIT_BYTES;
 pub const DEFAULT_PREVIEW_ARCHIVE_SIZE_BYTES: u64 = 25 * PREVIEW_FILE_SIZE_UNIT_BYTES;
 pub const DEFAULT_PREVIEW_SQLITE_SIZE_BYTES: u64 = 100 * PREVIEW_FILE_SIZE_UNIT_BYTES;
 pub const DEFAULT_PREVIEW_DOCUMENT_SIZE_BYTES: u64 = 100 * PREVIEW_FILE_SIZE_UNIT_BYTES;
@@ -84,15 +89,17 @@ const LEGACY_DEFAULT_PREVIEW_TEXT_EXTENSIONS: [&str; 22] = [
     "txt", "md", "log", "conf", "ini", "yaml", "yml", "json", "xml", "toml", "sh", "py", "js",
     "ts", "c", "cpp", "h", "rs", "java", "css", "html", "csv",
 ];
-/// 空格预览各非文本类型的默认后缀表，镜像各预览类型的内置判定；
+/// 旧版本的内置音频后缀表，只用于迁移，理由同文本：保存时写的是全量，原样搬成
+/// 额外后缀会让这 7 个后缀永远绕过类型库。
+const LEGACY_DEFAULT_PREVIEW_AUDIO_EXTENSIONS: [&str; 7] =
+    ["mp3", "wav", "flac", "ogg", "oga", "m4a", "aac"];
+/// 空格预览其余类型的默认后缀表，镜像各预览类型的内置判定；
 /// 后缀以小写、无前导点的规范形态存储。替换式语义：用户可增删，
 /// 删除即该后缀不再按此类型预览。
 pub const DEFAULT_PREVIEW_IMAGE_EXTENSIONS: [&str; 11] = [
     "avif", "bmp", "gif", "ico", "jpg", "jpeg", "png", "svg", "tif", "tiff", "webp",
 ];
 pub const DEFAULT_PREVIEW_VIDEO_EXTENSIONS: [&str; 6] = ["mp4", "m4v", "mkv", "mov", "webm", "avi"];
-pub const DEFAULT_PREVIEW_AUDIO_EXTENSIONS: [&str; 7] =
-    ["mp3", "wav", "flac", "ogg", "oga", "m4a", "aac"];
 pub const DEFAULT_PREVIEW_SQLITE_EXTENSIONS: [&str; 4] = ["db", "sqlite", "sqlite3", "db3"];
 pub const DEFAULT_PREVIEW_ARCHIVE_EXTENSIONS: [&str; 6] =
     ["zip", "tar", "tar.gz", "tgz", "7z", "rar"];
@@ -123,22 +130,20 @@ impl PreviewFileSizeKind {
     ];
 }
 
-/// 有大小上限的预览类型。文本按需从磁盘读、内存不随文件大小增长，不设上限。
+/// 有大小上限的预览类型。文本按需从磁盘读、音频边读边放，内存都不随文件大小增长，不设上限。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreviewSizeLimitKind {
     Image,
     Video,
-    Audio,
     Archive,
     Document,
     Sqlite,
 }
 
 impl PreviewSizeLimitKind {
-    pub const ALL: [PreviewSizeLimitKind; 6] = [
+    pub const ALL: [PreviewSizeLimitKind; 5] = [
         Self::Image,
         Self::Video,
-        Self::Audio,
         Self::Archive,
         Self::Document,
         Self::Sqlite,
@@ -149,7 +154,6 @@ impl PreviewSizeLimitKind {
 pub struct PreviewFileSizeLimits {
     pub image_bytes: u64,
     pub video_bytes: u64,
-    pub audio_bytes: u64,
     pub archive_bytes: u64,
     pub document_bytes: u64,
     pub sqlite_bytes: u64,
@@ -160,7 +164,6 @@ impl PreviewFileSizeLimits {
         Self {
             image_bytes: DEFAULT_PREVIEW_IMAGE_SIZE_BYTES,
             video_bytes: DEFAULT_PREVIEW_VIDEO_SIZE_BYTES,
-            audio_bytes: DEFAULT_PREVIEW_AUDIO_SIZE_BYTES,
             archive_bytes: DEFAULT_PREVIEW_ARCHIVE_SIZE_BYTES,
             document_bytes: DEFAULT_PREVIEW_DOCUMENT_SIZE_BYTES,
             sqlite_bytes: DEFAULT_PREVIEW_SQLITE_SIZE_BYTES,
@@ -171,7 +174,6 @@ impl PreviewFileSizeLimits {
         match kind {
             PreviewSizeLimitKind::Image => self.image_bytes,
             PreviewSizeLimitKind::Video => self.video_bytes,
-            PreviewSizeLimitKind::Audio => self.audio_bytes,
             PreviewSizeLimitKind::Archive => self.archive_bytes,
             PreviewSizeLimitKind::Document => self.document_bytes,
             PreviewSizeLimitKind::Sqlite => self.sqlite_bytes,
@@ -182,7 +184,6 @@ impl PreviewFileSizeLimits {
         match kind {
             PreviewSizeLimitKind::Image => self.image_bytes = bytes,
             PreviewSizeLimitKind::Video => self.video_bytes = bytes,
-            PreviewSizeLimitKind::Audio => self.audio_bytes = bytes,
             PreviewSizeLimitKind::Archive => self.archive_bytes = bytes,
             PreviewSizeLimitKind::Document => self.document_bytes = bytes,
             PreviewSizeLimitKind::Sqlite => self.sqlite_bytes = bytes,
@@ -194,7 +195,6 @@ impl PreviewFileSizeLimits {
         Self {
             image_bytes: bytes,
             video_bytes: bytes,
-            audio_bytes: bytes,
             archive_bytes: bytes,
             document_bytes: bytes,
             sqlite_bytes: bytes,
@@ -220,9 +220,9 @@ pub fn normalize_preview_extension(raw: &str) -> Option<String> {
     Some(trimmed.to_lowercase())
 }
 
-/// 空格预览的分类型后缀规则：非文本类型的列表完全决定该类型识别哪些
-/// 后缀（替换式）；文本列表是「额外当作文本的后缀」，默认空，文本主要由
-/// 类型库判定。匹配按文件名 `ends_with` 进行，天然覆盖 tar.gz
+/// 空格预览的分类型后缀规则：文本、音频列表是「额外当作文本/音频的后缀」，
+/// 默认空，这两类主要由类型库判定；其余类型的列表完全决定该类型识别哪些
+/// 后缀（替换式）。匹配按文件名 `ends_with` 进行，天然覆盖 tar.gz
 /// 这类复合后缀；大小写不敏感，与各渲染器行为保持一致。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PreviewExtensionRules {
@@ -241,7 +241,7 @@ impl PreviewExtensionRules {
             text: Vec::new(),
             image: default_extensions(&DEFAULT_PREVIEW_IMAGE_EXTENSIONS),
             video: default_extensions(&DEFAULT_PREVIEW_VIDEO_EXTENSIONS),
-            audio: default_extensions(&DEFAULT_PREVIEW_AUDIO_EXTENSIONS),
+            audio: Vec::new(),
             sqlite: default_extensions(&DEFAULT_PREVIEW_SQLITE_EXTENSIONS),
             archive: default_extensions(&DEFAULT_PREVIEW_ARCHIVE_EXTENSIONS),
             document: default_extensions(&DEFAULT_PREVIEW_DOCUMENT_EXTENSIONS),
@@ -282,10 +282,9 @@ impl PreviewExtensionRules {
 
     pub fn default_list(kind: PreviewFileSizeKind) -> Vec<String> {
         let builtin: &[&str] = match kind {
-            PreviewFileSizeKind::Text => &[],
+            PreviewFileSizeKind::Text | PreviewFileSizeKind::Audio => &[],
             PreviewFileSizeKind::Image => &DEFAULT_PREVIEW_IMAGE_EXTENSIONS,
             PreviewFileSizeKind::Video => &DEFAULT_PREVIEW_VIDEO_EXTENSIONS,
-            PreviewFileSizeKind::Audio => &DEFAULT_PREVIEW_AUDIO_EXTENSIONS,
             PreviewFileSizeKind::Archive => &DEFAULT_PREVIEW_ARCHIVE_EXTENSIONS,
             PreviewFileSizeKind::Document => &DEFAULT_PREVIEW_DOCUMENT_EXTENSIONS,
             PreviewFileSizeKind::Sqlite => &DEFAULT_PREVIEW_SQLITE_EXTENSIONS,
@@ -355,11 +354,10 @@ pub fn preview_size_limits_from_stored(
             .or(legacy_global_limit)
             .unwrap_or(fallback_bytes)
     };
-    // 文本不再有上限：旧的 preview_text_size_bytes 读到也不用。
+    // 文本、音频不再有上限：旧的 preview_text_size_bytes / preview_audio_size_bytes 读到也不用。
     PreviewFileSizeLimits {
         image_bytes: resolve(stored.preview_image_size_bytes, fallback.image_bytes),
         video_bytes: resolve(stored.preview_video_size_bytes, fallback.video_bytes),
-        audio_bytes: resolve(stored.preview_audio_size_bytes, fallback.audio_bytes),
         archive_bytes: resolve(stored.preview_archive_size_bytes, fallback.archive_bytes),
         document_bytes: resolve(stored.preview_document_size_bytes, fallback.document_bytes),
         sqlite_bytes: resolve(stored.preview_sqlite_size_bytes, fallback.sqlite_bytes),
@@ -372,10 +370,23 @@ pub fn preview_extension_rules_from_stored(
     stored: &StoredPreviewPreferences,
     fallback: &PreviewExtensionRules,
 ) -> PreviewExtensionRules {
-    let extra_text = preview_extra_text_extensions_from_stored(stored, &fallback.text);
-    let Some(stored_rules) = &stored.preview_extension_rules else {
+    let legacy_rules = stored.preview_extension_rules.as_ref();
+    let extra_text = extra_extensions_from_stored(
+        &stored.preview_extra_text_extensions,
+        legacy_rules.and_then(|rules| rules.text.as_ref()),
+        &LEGACY_DEFAULT_PREVIEW_TEXT_EXTENSIONS,
+        &fallback.text,
+    );
+    let extra_audio = extra_extensions_from_stored(
+        &stored.preview_extra_audio_extensions,
+        legacy_rules.and_then(|rules| rules.audio.as_ref()),
+        &LEGACY_DEFAULT_PREVIEW_AUDIO_EXTENSIONS,
+        &fallback.audio,
+    );
+    let Some(stored_rules) = legacy_rules else {
         return PreviewExtensionRules {
             text: extra_text,
+            audio: extra_audio,
             ..fallback.clone()
         };
     };
@@ -386,33 +397,31 @@ pub fn preview_extension_rules_from_stored(
         text: extra_text,
         image: per_type(&stored_rules.image, &fallback.image),
         video: per_type(&stored_rules.video, &fallback.video),
-        audio: per_type(&stored_rules.audio, &fallback.audio),
+        audio: extra_audio,
         sqlite: per_type(&stored_rules.sqlite, &fallback.sqlite),
         archive: per_type(&stored_rules.archive, &fallback.archive),
         document: per_type(&stored_rules.document, &fallback.document),
     }
 }
 
-/// 额外文本后缀：新键说了算；新键还没写过时从旧的替换式文本表迁移一次——
+/// 额外后缀（文本、音频）：新键说了算；新键还没写过时从旧的替换式表迁移一次——
 /// 去掉旧内置默认值，只留用户自己加的。迁移结果随下次保存写进新键，之后用户
-/// 再加 `txt` 也不会被过滤。
-fn preview_extra_text_extensions_from_stored(
-    stored: &StoredPreviewPreferences,
+/// 再加 `txt` / `mp3` 也不会被过滤。
+fn extra_extensions_from_stored(
+    saved: &Option<Vec<String>>,
+    legacy: Option<&Vec<String>>,
+    legacy_defaults: &[&str],
     fallback: &[String],
 ) -> Vec<String> {
-    if let Some(extra) = &stored.preview_extra_text_extensions {
+    if let Some(extra) = saved {
         return extra.clone();
     }
-    let legacy = stored
-        .preview_extension_rules
-        .as_ref()
-        .and_then(|rules| rules.text.as_ref());
     let Some(legacy) = legacy else {
         return fallback.to_vec();
     };
     legacy
         .iter()
-        .filter(|extension| !LEGACY_DEFAULT_PREVIEW_TEXT_EXTENSIONS.contains(&extension.as_str()))
+        .filter(|extension| !legacy_defaults.contains(&extension.as_str()))
         .cloned()
         .collect()
 }
@@ -495,7 +504,6 @@ mod stored_preferences_migration_tests {
         // null（缺失）类型吃 legacy 全局值，显式分类型键覆盖全局值。
         assert_eq!(limits.image_bytes, 1048576);
         assert_eq!(limits.video_bytes, 4194304);
-        assert_eq!(limits.audio_bytes, 5242880);
         assert_eq!(limits.archive_bytes, 4194304);
         assert_eq!(limits.document_bytes, 4194304);
         assert_eq!(limits.sqlite_bytes, 4194304);
@@ -569,6 +577,41 @@ mod stored_preferences_migration_tests {
         let rules =
             preview_extension_rules_from_stored(&StoredPreviewPreferences::default(), &defaults);
         assert!(rules.text.is_empty());
+    }
+
+    #[test]
+    fn legacy_audio_list_migrates_once_keeping_only_user_additions() {
+        let defaults = PreviewExtensionRules::default_rules();
+        let mut legacy_audio = LEGACY_DEFAULT_PREVIEW_AUDIO_EXTENSIONS
+            .iter()
+            .map(|extension| (*extension).to_owned())
+            .collect::<Vec<_>>();
+        legacy_audio.push("dsf".to_owned());
+        let legacy = StoredPreviewPreferences {
+            preview_extension_rules: Some(StoredPreviewExtensionRules {
+                audio: Some(legacy_audio),
+                ..StoredPreviewExtensionRules::default()
+            }),
+            ..StoredPreviewPreferences::default()
+        };
+
+        // 旧内置 7 个去掉，只剩用户自己加的；其余类型不受影响。
+        let rules = preview_extension_rules_from_stored(&legacy, &defaults);
+        assert_eq!(rules.audio, vec!["dsf".to_owned()]);
+        assert_eq!(rules.video, defaults.video);
+
+        // 新键写过之后旧键不再参与：用户清空也原样保留。
+        let saved = StoredPreviewPreferences {
+            preview_extra_audio_extensions: Some(Vec::new()),
+            ..legacy
+        };
+        let rules = preview_extension_rules_from_stored(&saved, &defaults);
+        assert!(rules.audio.is_empty());
+
+        // 什么都没存：默认空。
+        let rules =
+            preview_extension_rules_from_stored(&StoredPreviewPreferences::default(), &defaults);
+        assert!(rules.audio.is_empty());
     }
 
     #[test]

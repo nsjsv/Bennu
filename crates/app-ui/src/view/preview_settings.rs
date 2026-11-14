@@ -55,7 +55,7 @@ fn preview_extension_row(
         config::PreviewFileSizeKind::Text => tr!("Extra Text Extensions"),
         config::PreviewFileSizeKind::Image => tr!("Image Preview Extensions"),
         config::PreviewFileSizeKind::Video => tr!("Video Preview Extensions"),
-        config::PreviewFileSizeKind::Audio => tr!("Audio Preview Extensions"),
+        config::PreviewFileSizeKind::Audio => tr!("Extra Audio Extensions"),
         config::PreviewFileSizeKind::Archive => tr!("Archive Preview Extensions"),
         config::PreviewFileSizeKind::Document => tr!("Document Preview Extensions"),
         config::PreviewFileSizeKind::Sqlite => tr!("SQLite Preview Extensions"),

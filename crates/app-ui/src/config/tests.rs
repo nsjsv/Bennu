@@ -709,7 +709,6 @@ fn default_user_config_keeps_expected_preview_defaults() {
     );
     assert_eq!(config.preview_size_limits.image_bytes, 100 * 1024 * 1024);
     assert_eq!(config.preview_size_limits.video_bytes, 1024 * 1024 * 1024);
-    assert_eq!(config.preview_size_limits.audio_bytes, 200 * 1024 * 1024);
     assert_eq!(config.preview_size_limits.archive_bytes, 25 * 1024 * 1024);
     assert_eq!(config.preview_size_limits.document_bytes, 100 * 1024 * 1024);
     assert_eq!(config.preview_directory_expand_levels, 1);
@@ -838,12 +837,12 @@ fn extension_rules_match_case_insensitively_and_support_compound_suffixes() {
 #[test]
 fn extension_rules_default_lists_mirror_builtin_types() {
     let rules = PreviewExtensionRules::default_rules();
-    // 文本由类型库判定，额外文本后缀默认空。
+    // 文本、音频由类型库判定，额外后缀默认空。
     assert!(rules.list(PreviewFileSizeKind::Text).is_empty());
+    assert!(rules.list(PreviewFileSizeKind::Audio).is_empty());
     for (kind, expected) in [
         (PreviewFileSizeKind::Image, "png"),
         (PreviewFileSizeKind::Video, "mp4"),
-        (PreviewFileSizeKind::Audio, "mp3"),
         (PreviewFileSizeKind::Sqlite, "sqlite"),
         (PreviewFileSizeKind::Archive, "7z"),
         (PreviewFileSizeKind::Document, "docx"),
@@ -865,10 +864,25 @@ fn preview_extension_rules_roundtrip_through_stored_preferences() {
     let mut config = default.clone();
     config.preview_extension_rules.text = vec!["nfo".to_owned(), "cfg".to_owned()];
     config.preview_extension_rules.image = Vec::new();
+    config.preview_extension_rules.audio = vec!["dsf".to_owned()];
 
     let stored = config.user_preferences().to_stored();
+    // 额外音频后缀写新键，旧的替换式音频表不再写。
+    assert_eq!(
+        stored.preview.preview_extra_audio_extensions,
+        Some(vec!["dsf".to_owned()])
+    );
+    assert_eq!(
+        stored
+            .preview
+            .preview_extension_rules
+            .as_ref()
+            .and_then(|rules| rules.audio.clone()),
+        None
+    );
     let restored = UserPreferences::from_stored(stored, &default).preferences;
     assert_eq!(restored.preview_extension_rules.text, vec!["nfo", "cfg"]);
+    assert_eq!(restored.preview_extension_rules.audio, vec!["dsf"]);
     // 用户显式清空是合法选择，不能回退默认列表。
     assert!(restored.preview_extension_rules.image.is_empty());
     // 未触发的类型保持默认。

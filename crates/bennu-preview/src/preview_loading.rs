@@ -38,24 +38,29 @@ pub async fn load_preview(
         FileKind::Directory => load_directory_preview(path, options).await,
         FileKind::File => {
             reject_file_over_preview_limit(&path, max_file_bytes).await?;
-            if rules.matches(PreviewFileSizeKind::Archive, &path) {
-                load_archive_preview(path).await
-            } else if is_recognized_unsupported_archive_path(&path) {
-                Err(tr!("This archive format is not supported yet. Archive preview supports .zip, .tar, .tar.gz, .tgz, .7z, and .rar files"))
-            } else if rules.matches(PreviewFileSizeKind::Audio, &path) {
-                load_audio_preview(path).await
-            } else if rules.matches(PreviewFileSizeKind::Video, &path) {
-                load_video_preview(path).await
-            } else if rules.matches(PreviewFileSizeKind::Sqlite, &path) {
-                load_sqlite_preview(path).await.map(PreviewContent::Sqlite)
-            } else {
-                load_initial_text_preview(path, rules).await
+            match classify_preview_path(&path, rules) {
+                Some(PreviewPathKind::Archive) => load_archive_preview(path).await,
+                Some(PreviewPathKind::Audio) => load_audio_preview(path).await,
+                Some(PreviewPathKind::Video) => load_video_preview(path).await,
+                Some(PreviewPathKind::Sqlite) => {
+                    load_sqlite_preview(path).await.map(PreviewContent::Sqlite)
+                }
+                Some(PreviewPathKind::Text) => load_initial_text_preview(path, rules).await,
+                // 文档、图片各有专门的加载命令，不经过这里；未分类的文件在宿主门禁就被拦下。
+                Some(
+                    PreviewPathKind::Document
+                    | PreviewPathKind::Image
+                    | PreviewPathKind::AnimatedImage,
+                )
+                | None => Err(unsupported_preview_kind()),
             }
         }
-        FileKind::Symlink | FileKind::Other => Err(tr!(
-            "Preview is only available for directories, archives, audio files, images, and text files"
-        )),
+        FileKind::Symlink | FileKind::Other => Err(unsupported_preview_kind()),
     }
+}
+
+fn unsupported_preview_kind() -> String {
+    tr!("Preview is only available for directories, archives, audio files, images, and text files")
 }
 
 async fn reject_file_over_preview_limit(path: &Path, max_file_bytes: u64) -> Result<(), String> {
@@ -85,7 +90,7 @@ pub enum PreviewPathKind {
 }
 
 impl PreviewPathKind {
-    /// 适用哪一类大小上限；文本按需读取，没有上限。
+    /// 适用哪一类大小上限；文本按需读取、音频边读边放，没有上限。
     pub fn size_limit_kind(self) -> Option<PreviewSizeLimitKind> {
         match self {
             PreviewPathKind::Document => Some(PreviewSizeLimitKind::Document),
@@ -95,20 +100,20 @@ impl PreviewPathKind {
                 Some(PreviewSizeLimitKind::Image)
             }
             PreviewPathKind::Video => Some(PreviewSizeLimitKind::Video),
-            PreviewPathKind::Audio => Some(PreviewSizeLimitKind::Audio),
-            PreviewPathKind::Text => None,
+            PreviewPathKind::Audio | PreviewPathKind::Text => None,
         }
     }
 
     /// 要先把远程挂载上的文件整个下载到本地缓存才能预览（解码器、转换器只认本地文件）。
-    /// 文本按需读挂载路径，不下载（第五轮决定）。
+    /// 文本按需读挂载路径；音频播放和读信息也是对挂载路径边读边用，都不下载。
     pub fn needs_local_copy(self) -> bool {
-        self != PreviewPathKind::Text
+        !matches!(self, PreviewPathKind::Text | PreviewPathKind::Audio)
     }
 }
 
-/// 返回 `None` 表示文件不属于任何可预览类型。非文本类型的后缀列表
-/// 完全决定该类型识别哪些后缀（替换式）；图片列表中的 gif 走动图渲染。
+/// 返回 `None` 表示文件不属于任何可预览类型。文档、归档、SQLite、图片、
+/// 视频的后缀列表完全决定该类型识别哪些后缀（替换式）；图片列表中的 gif
+/// 走动图渲染。音频：额外音频后缀直接算，其余按类型库只看名字。
 /// 文本是兜底：额外文本后缀直接算，其余按类型库只看名字——名字确定是
 /// 非文本类型的不预览，名字定不下来的先放行，打开时看内容定论
 /// （`text_preview_loading::inspect_text_file`）。
@@ -136,7 +141,7 @@ pub fn classify_preview_path(
     if rules.matches(Kind::Video, path) {
         return Some(PreviewPathKind::Video);
     }
-    if rules.matches(Kind::Audio, path) {
+    if rules.matches(Kind::Audio, path) || file_core::is_audio_by_name(path) {
         return Some(PreviewPathKind::Audio);
     }
     if rules.matches(Kind::Text, path) || may_be_text_by_name(path) {
@@ -198,16 +203,6 @@ async fn load_archive_preview(path: PathBuf) -> Result<PreviewContent, String> {
     Ok(PreviewContent::Archive {
         entries: archive_preview.entries,
     })
-}
-
-fn is_recognized_unsupported_archive_path(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| {
-            ["xz", "bz2", "zst", "deb", "rpm"]
-                .iter()
-                .any(|candidate| extension.eq_ignore_ascii_case(candidate))
-        })
 }
 
 async fn load_audio_preview(path: PathBuf) -> Result<PreviewContent, String> {

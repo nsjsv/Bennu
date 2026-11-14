@@ -44,56 +44,6 @@ async fn load_preview_reads_zip_archive_tree() {
 }
 
 #[tokio::test]
-async fn load_preview_reports_recognized_unsupported_archive_format() {
-    let temp_dir = tempdir().expect("temp dir");
-    let archive_path = temp_dir.path().join("sample.XZ");
-    std::fs::write(&archive_path, b"not an archive").expect("write archive fixture");
-
-    let error = load_preview(
-        archive_path,
-        FileKind::File,
-        &default_rules(),
-        ScanOptions::default(),
-        TEST_MAX_PREVIEW_FILE_BYTES,
-    )
-    .await
-    .expect_err("unsupported archive should be identified");
-
-    assert!(error.contains("This archive format is not supported yet"));
-    assert!(error.contains(".tar.gz, .tgz, .7z, and .rar"));
-}
-
-#[test]
-fn unsupported_archive_classifier_does_not_overlap_supported_formats() {
-    for path in [
-        "sample.xz",
-        "sample.BZ2",
-        "sample.zst",
-        "sample.deb",
-        "sample.rpm",
-    ] {
-        assert!(
-            is_recognized_unsupported_archive_path(Path::new(path)),
-            "{path}"
-        );
-    }
-    for path in [
-        "sample.zip",
-        "sample.tar",
-        "sample.tar.gz",
-        "sample.tgz",
-        "sample.7z",
-        "sample.rar",
-        "sample.txt",
-    ] {
-        assert!(
-            !is_recognized_unsupported_archive_path(Path::new(path)),
-            "{path}"
-        );
-    }
-}
-
-#[tokio::test]
 async fn load_preview_reads_directory_top_layer_only() {
     let temp_dir = tempdir().expect("temp dir");
     let nested_dir = temp_dir.path().join("src");
@@ -373,6 +323,44 @@ fn classify_preview_path_asks_the_type_library_for_text() {
 }
 
 #[test]
+fn classify_preview_path_asks_the_type_library_for_audio() {
+    let rules = default_rules();
+    let classify = |name: &str| classify_preview_path(Path::new(name), &rules);
+    for name in [
+        "a.mp3", "a.flac", "a.m4a", "a.opus", "a.wma", "a.ape", "a.aiff", "a.mka", "a.wv",
+    ] {
+        assert_eq!(classify(name), Some(PreviewPathKind::Audio), "{name}");
+    }
+    // 播放列表不是音频数据：m3u 声明继承 text/plain，走文本；pls 不预览。
+    assert_eq!(classify("list.m3u"), Some(PreviewPathKind::Text));
+    assert_eq!(classify("list.pls"), None);
+    // 视频后缀表排在音频前面。
+    assert_eq!(classify("clip.mp4"), Some(PreviewPathKind::Video));
+    // 没后缀不为音频读内容，仍归文本兜底。
+    assert_eq!(classify("track01"), Some(PreviewPathKind::Text));
+}
+
+#[tokio::test]
+async fn load_preview_dispatches_type_library_audio_to_the_audio_loader() {
+    let temp_dir = tempdir().expect("temp dir");
+    let audio_path = temp_dir.path().join("broken.opus");
+    std::fs::write(&audio_path, b"not really opus").expect("write audio fixture");
+
+    let error = load_preview(
+        audio_path,
+        FileKind::File,
+        &default_rules(),
+        ScanOptions::default(),
+        TEST_MAX_PREVIEW_FILE_BYTES,
+    )
+    .await
+    .expect_err("garbage audio cannot decode");
+
+    // 走的是音频加载（解码失败），不是文本加载（“二进制数据”）。
+    assert!(error.contains("audio preview"), "{error}");
+}
+
+#[test]
 fn classify_preview_path_follows_user_rules_replacing_builtins() {
     use crate::preview_config::PreviewExtensionRules;
 
@@ -398,6 +386,14 @@ fn classify_preview_path_follows_user_rules_replacing_builtins() {
         Some(PreviewPathKind::Document)
     );
 
+    // 额外音频后缀压过类型库的结论（xyz 在类型库里是化学结构文件）。
+    let mut rules = default_rules();
+    rules.audio.push("xyz".to_owned());
+    assert_eq!(
+        classify_preview_path(Path::new("a.xyz"), &rules),
+        Some(PreviewPathKind::Audio)
+    );
+
     // 额外文本后缀压过类型库的非文本结论。
     let mut rules = default_rules();
     rules.text.push("so".to_owned());
@@ -406,9 +402,13 @@ fn classify_preview_path_follows_user_rules_replacing_builtins() {
         Some(PreviewPathKind::Text)
     );
 
-    // 清空全部列表后，文本仍由类型库认，其他类型不再预览。
+    // 清空全部列表后，文本、音频仍由类型库认，其他类型不再预览。
     let empty = PreviewExtensionRules::default();
     assert_eq!(classify_preview_path(Path::new("photo.png"), &empty), None);
+    assert_eq!(
+        classify_preview_path(Path::new("song.flac"), &empty),
+        Some(PreviewPathKind::Audio)
+    );
     assert_eq!(
         classify_preview_path(Path::new("notes.txt"), &empty),
         Some(PreviewPathKind::Text)
@@ -511,10 +511,12 @@ fn assert_preview_tree_entry(
 }
 
 #[test]
-fn text_reads_on_demand_without_a_size_limit_or_a_local_copy() {
-    // 文本按需读取：没有大小上限，网络挂载上也不先下载（第五轮决定）。
-    assert_eq!(PreviewPathKind::Text.size_limit_kind(), None);
-    assert!(!PreviewPathKind::Text.needs_local_copy());
+fn text_and_audio_read_on_demand_without_a_size_limit_or_a_local_copy() {
+    // 文本按需读取、音频边读边放：没有大小上限，网络挂载上也不先下载。
+    for kind in [PreviewPathKind::Text, PreviewPathKind::Audio] {
+        assert_eq!(kind.size_limit_kind(), None, "{kind:?}");
+        assert!(!kind.needs_local_copy(), "{kind:?}");
+    }
     for kind in [
         PreviewPathKind::Document,
         PreviewPathKind::Archive,
@@ -522,7 +524,6 @@ fn text_reads_on_demand_without_a_size_limit_or_a_local_copy() {
         PreviewPathKind::AnimatedImage,
         PreviewPathKind::Image,
         PreviewPathKind::Video,
-        PreviewPathKind::Audio,
     ] {
         assert!(kind.size_limit_kind().is_some(), "{kind:?}");
         assert!(kind.needs_local_copy(), "{kind:?}");

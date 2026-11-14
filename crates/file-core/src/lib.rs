@@ -65,9 +65,9 @@ pub use entry_naming::{
     EntryNameKind, InvalidEntryName, ENTRY_NAME_LAST_CANDIDATE_NUMBER,
 };
 pub use media::{
-    is_supported_audio_extension, is_supported_audio_path, is_supported_image_extension,
-    is_supported_image_path, is_supported_video_extension, is_supported_video_path,
-    supported_media_kind_for_path, SupportedMediaKind,
+    is_audio_by_name, is_supported_image_extension, is_supported_image_path,
+    is_supported_video_extension, is_supported_video_path, supported_media_kind_for_path,
+    SupportedMediaKind,
 };
 pub use ops::{
     available_conversion_encoders, batch_rename_paths, convert_file_with_controls, copy_path,

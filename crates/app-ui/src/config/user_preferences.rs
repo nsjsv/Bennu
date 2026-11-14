@@ -202,7 +202,7 @@ impl UserPreferences {
             preview_text_size_bytes: None,
             preview_image_size_bytes: Some(self.preview_size_limits.image_bytes),
             preview_video_size_bytes: Some(self.preview_size_limits.video_bytes),
-            preview_audio_size_bytes: Some(self.preview_size_limits.audio_bytes),
+            preview_audio_size_bytes: None,
             preview_archive_size_bytes: Some(self.preview_size_limits.archive_bytes),
             preview_document_size_bytes: Some(self.preview_size_limits.document_bytes),
             preview_sqlite_size_bytes: Some(self.preview_size_limits.sqlite_bytes),
@@ -210,7 +210,7 @@ impl UserPreferences {
                 text: None,
                 image: Some(self.preview_extension_rules.image.clone()),
                 video: Some(self.preview_extension_rules.video.clone()),
-                audio: Some(self.preview_extension_rules.audio.clone()),
+                audio: None,
                 sqlite: Some(self.preview_extension_rules.sqlite.clone()),
                 archive: Some(self.preview_extension_rules.archive.clone()),
                 document: Some(self.preview_extension_rules.document.clone()),
@@ -219,6 +219,7 @@ impl UserPreferences {
             preview_extra_text_extensions: Some(self.preview_extension_rules.text.clone()),
             text_preview_zoom_percent: Some(self.text_preview_view.zoom_percent),
             text_preview_wrap: Some(self.text_preview_view.wrap),
+            preview_extra_audio_extensions: Some(self.preview_extension_rules.audio.clone()),
         };
         stored.show_hidden_files = self.show_hidden_files;
         stored.language_setting = self.language_setting.config_value().to_owned();

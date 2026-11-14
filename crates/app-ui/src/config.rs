@@ -606,7 +606,9 @@ pub(crate) fn normalize_visible_column_count(count: usize) -> usize {
     count.clamp(MIN_VISIBLE_COLUMN_COUNT, MAX_VISIBLE_COLUMN_COUNT)
 }
 
-pub(crate) fn preview_size_limit_mib_inputs(limits: &PreviewFileSizeLimits) -> [String; 6] {
+pub(crate) fn preview_size_limit_mib_inputs(
+    limits: &PreviewFileSizeLimits,
+) -> [String; PreviewSizeLimitKind::ALL.len()] {
     PreviewSizeLimitKind::ALL.map(|kind| preview_size_limit_mib(limits.limit(kind)).to_string())
 }
 

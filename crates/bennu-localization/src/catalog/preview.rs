@@ -1,5 +1,7 @@
 //! 预览面板、预览窗口与文档预览（主程序和文件选择器共用）。
 
+// 文案表一条一行，方便对照中英文；其他文案表靠超长行让 rustfmt 放弃折行，这张表没有超长行了，显式跳过。
+#[rustfmt::skip]
 pub(super) const ENTRIES: &[(&str, &str)] = &[
     // 面板与窗口
     ("Select an item to preview", "请选择一个项目进行预览"),
@@ -13,10 +15,6 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     (
         "Preview is only available for directories, archives, audio files, images, and text files",
         "仅支持预览目录、归档、音频、图像和文本文件",
-    ),
-    (
-        "This archive format is not supported yet. Archive preview supports .zip, .tar, .tar.gz, .tgz, .7z, and .rar files",
-        "暂不支持此归档格式。归档预览支持 .zip、.tar、.tar.gz、.tgz、.7z 和 .rar 文件",
     ),
     ("Empty directory", "空目录"),
     ("Empty archive", "空归档"),

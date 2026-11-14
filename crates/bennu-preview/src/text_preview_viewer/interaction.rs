@@ -212,7 +212,7 @@ pub(super) fn handle_event(
             let changes_selection = changes_selection(&binding);
             apply_key_binding(binding, state, document, clipboard);
             refresh_retained_content(state, document);
-            selection::reveal_cursor_horizontally(state, document);
+            selection::reveal_cursor_horizontally(state);
             if changes_selection {
                 selection::publish_primary(state, document, clipboard);
             }

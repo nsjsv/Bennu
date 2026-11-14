@@ -76,6 +76,14 @@ impl Inline {
     }
 }
 
+/// 列表项前面的符号；待办项画成勾选框。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListMarker {
+    Bullet,
+    Ordered(u64),
+    Task { done: bool },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextBlockKind {
     Paragraph,
@@ -102,8 +110,8 @@ pub struct CodeLine {
 pub enum MarkdownBlock {
     Text {
         kind: TextBlockKind,
-        /// 列表项的符号（•、1.、☑、☐），不算能搜的文字。
-        marker: Option<String>,
+        /// 列表项的符号，不算能搜的文字。
+        marker: Option<ListMarker>,
         content: MarkdownUnit,
     },
     Code {
@@ -180,7 +188,7 @@ fn markdown_options() -> Options {
 enum Active {
     Text {
         kind: TextBlockKind,
-        marker: Option<String>,
+        marker: Option<ListMarker>,
         inline: Inline,
     },
     Code {
@@ -240,7 +248,7 @@ impl Collector {
             }
             Event::TaskListMarker(checked) => {
                 if let Some(Active::Text { marker, .. }) = &mut self.active {
-                    *marker = Some(if checked { "☑" } else { "☐" }.to_owned());
+                    *marker = Some(ListMarker::Task { done: checked });
                 }
             }
             Event::FootnoteReference(label) => self.append(&format!("[{label}]")),
@@ -277,11 +285,10 @@ impl Collector {
                 let depth = self.lists.len().saturating_sub(1);
                 let marker = match self.lists.last_mut() {
                     Some(Some(number)) => {
-                        let label = format!("{number}.");
                         *number += 1;
-                        label
+                        ListMarker::Ordered(*number - 1)
                     }
-                    _ => "•".to_owned(),
+                    _ => ListMarker::Bullet,
                 };
                 self.start_text(TextBlockKind::ListItem { depth }, Some(marker));
             }
@@ -421,7 +428,7 @@ impl Collector {
         self.start_text(kind, None);
     }
 
-    fn start_text(&mut self, kind: TextBlockKind, marker: Option<String>) {
+    fn start_text(&mut self, kind: TextBlockKind, marker: Option<ListMarker>) {
         self.finish_active();
         self.active = Some(Active::Text {
             kind,

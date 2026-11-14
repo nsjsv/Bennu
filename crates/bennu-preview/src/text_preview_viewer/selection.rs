@@ -10,9 +10,11 @@ use iced::advanced::Clipboard;
 use iced::widget::text_editor;
 use iced::{mouse, Point, Rectangle, Size};
 
+use iced::advanced::graphics::text::cosmic_text::LayoutGlyph;
+
 use super::{
-    row_height, scroll_viewer_by, visible_rows, TextPreviewViewerState, VisibleRow,
-    TEXT_PREVIEW_DRAG_THRESHOLD_PX,
+    row_height, scroll_viewer_by, visible_rows, PreviewParagraph, TextPreviewViewerState,
+    VisibleRow, TEXT_PREVIEW_DRAG_THRESHOLD_PX,
 };
 use crate::text_document::{
     ClipboardTarget, TextJump, TextPosition, TextPreviewDocument, TextRow, TextViewerEvent,
@@ -366,8 +368,7 @@ fn ordered(a: TextPosition, b: TextPosition) -> (TextPosition, TextPosition) {
     }
 }
 
-/// 选区高亮矩形（text_bounds 相对坐标）：按可见行的视觉行拆分，列边界 x 用二分
-/// hit test 求得，每视觉行成本 O(log 列数)。
+/// 选区高亮矩形（text_bounds 相对坐标）：按可见行的视觉行拆分。
 pub(crate) fn selection_quads(
     state: &TextPreviewViewerState,
     document: &TextPreviewDocument,
@@ -380,7 +381,6 @@ pub(crate) fn selection_quads(
     if start == end {
         return Vec::new();
     }
-    let base = state.line_height.max(1.0);
     let rows = document.rows();
 
     let mut quads = Vec::new();
@@ -397,7 +397,7 @@ pub(crate) fn selection_quads(
             continue;
         };
         quads.extend(
-            row_range_quads(&retained.paragraph, &row.text, base, from, to)
+            row_range_quads(&retained.paragraph, from, to)
                 .into_iter()
                 .map(|quad| Rectangle {
                     y: quad.y + entry.visible_y,
@@ -433,71 +433,61 @@ pub(crate) fn columns_in_row(
     Some((from, to))
 }
 
-/// 一个显示行里 `[from, to)` 的高亮矩形，相对这一行左上角；换行后按视觉行拆开，列边界
-/// x 用二分 hit test 求得，每视觉行成本 O(log 列数)。
+/// 一个显示行里 `[from, to)` 的高亮矩形，相对这一行左上角：每个视觉行一块，左右边就是
+/// 落在范围里的字形的边（排版结果里的位置，全角/半角、Tab 都准）。
 pub(crate) fn row_range_quads(
-    paragraph: &impl Paragraph,
-    text: &str,
-    base: f32,
+    paragraph: &PreviewParagraph,
     from: usize,
     to: usize,
 ) -> Vec<Rectangle> {
-    let visual_rows = ((paragraph.min_bounds().height / base).round() as usize).max(1);
-    let width = paragraph.min_bounds().width.max(1.0);
-    let mut quads = Vec::new();
-    for visual in 0..visual_rows {
-        let row_y = visual as f32 * base;
-        let mid_y = row_y + base * 0.5;
-        let (visual_start, visual_end) = if visual_rows == 1 {
-            (0, text.len())
-        } else {
-            (
-                paragraph
-                    .hit_test(Point::new(0.0, mid_y))
-                    .map(Hit::cursor)
-                    .unwrap_or(0),
-                paragraph
-                    .hit_test(Point::new(width, mid_y))
-                    .map(Hit::cursor)
-                    .unwrap_or(text.len()),
-            )
-        };
-        let low = visual_start.max(from);
-        let high = visual_end.min(to);
-        if high <= low {
-            continue;
-        }
-        let x0 = column_x(paragraph, mid_y, width, text, low);
-        let x1 = column_x(paragraph, mid_y, width, text, high);
-        quads.push(Rectangle::new(
-            Point::new(x0, row_y),
-            Size::new((x1 - x0).max(1.0), base),
-        ));
-    }
-    quads
+    paragraph
+        .buffer()
+        .layout_runs()
+        .filter_map(|run| {
+            let (left, right) = run
+                .glyphs
+                .iter()
+                .filter_map(|glyph| glyph_span(glyph, from, to))
+                .fold(
+                    (f32::INFINITY, f32::NEG_INFINITY),
+                    |(left, right), (x0, x1)| (left.min(x0), right.max(x1)),
+                );
+            (left < right).then(|| {
+                Rectangle::new(
+                    Point::new(left, run.line_top),
+                    Size::new(right - left, run.line_height),
+                )
+            })
+        })
+        .collect()
 }
 
-fn column_x(paragraph: &impl Paragraph, mid_y: f32, width: f32, text: &str, column: usize) -> f32 {
-    if column == 0 {
-        return 0.0;
+/// 字形落在 `[from, to)` 里的那一段的左右 x。一个字形盖住多个字节（组合字符、连字）时
+/// 按字节比例分。
+fn glyph_span(glyph: &LayoutGlyph, from: usize, to: usize) -> Option<(f32, f32)> {
+    let start = glyph.start.max(from);
+    let end = glyph.end.min(to);
+    if start >= end {
+        return None;
     }
-    if column >= text.len() {
-        return width;
-    }
-    let (mut lo, mut hi) = (0.0f32, width);
-    for _ in 0..14 {
-        let mid = (lo + hi) * 0.5;
-        let hit_column = paragraph
-            .hit_test(Point::new(mid, mid_y))
-            .map(Hit::cursor)
-            .unwrap_or(text.len());
-        if hit_column < column {
-            lo = mid;
-        } else {
-            hi = mid;
+    let bytes = (glyph.end - glyph.start).max(1) as f32;
+    let at = |offset: usize| glyph.x + glyph.w * (offset - glyph.start) as f32 / bytes;
+    Some((at(start).min(at(end)), at(start).max(at(end))))
+}
+
+/// 行内第 `column` 字节处的 x（段落坐标）：落在哪个字形里就按它的位置算；在所有字形之后
+/// 就是最后一个字形的右边。
+fn column_x(paragraph: &PreviewParagraph, column: usize) -> f32 {
+    let mut end_x = 0.0_f32;
+    for run in paragraph.buffer().layout_runs() {
+        for glyph in run.glyphs {
+            if (glyph.start..glyph.end).contains(&column) {
+                return glyph_span(glyph, glyph.start, column).map_or(glyph.x, |(_, x)| x);
+            }
+            end_x = end_x.max(glyph.x + glyph.w);
         }
     }
-    hi
+    end_x
 }
 
 pub(super) fn apply_key_binding<Message>(
@@ -703,17 +693,11 @@ fn ensure_cursor_visible(
 }
 
 /// 不换行时光标移出左右边缘：横向滚到光标可见（左右各留两个字宽的余地）。
-pub(super) fn reveal_cursor_horizontally(
-    state: &mut TextPreviewViewerState,
-    document: &TextPreviewDocument,
-) {
+pub(super) fn reveal_cursor_horizontally(state: &mut TextPreviewViewerState) {
     if state.view().wrap {
         return;
     }
     let Some(cursor) = state.cursor else {
-        return;
-    };
-    let Ok(index) = document.row_index(cursor.row) else {
         return;
     };
     let Some(retained) = state
@@ -723,16 +707,7 @@ pub(super) fn reveal_cursor_horizontally(
     else {
         return;
     };
-    let text = document.rows()[index].text.as_str();
-    let paragraph = &retained.paragraph;
-    let width = paragraph.min_bounds().width.max(1.0);
-    let x = column_x(
-        paragraph,
-        state.line_height * 0.5,
-        width,
-        text,
-        cursor.column,
-    );
+    let x = column_x(&retained.paragraph, cursor.column);
     let margin = state.view().font_size() * 2.0;
     let text_width = state.text_width();
     if x < state.scroll_x + margin {

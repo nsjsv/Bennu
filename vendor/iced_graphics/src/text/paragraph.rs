@@ -59,6 +59,9 @@ impl Paragraph {
     }
 }
 
+/// 一个 Tab 占几个空格宽。
+const TAB_WIDTH: u16 = 4;
+
 impl core::text::Paragraph for Paragraph {
     type Font = Font;
 
@@ -83,6 +86,8 @@ impl core::text::Paragraph for Paragraph {
         );
 
         buffer.set_wrap(font_system.raw(), text::to_wrap(text.wrapping));
+        // Bennu 补丁：Tab 按 4 个空格宽排（cosmic-text 默认 8，代码缩进显得过宽）。
+        buffer.set_tab_width(font_system.raw(), TAB_WIDTH);
 
         buffer.set_text(
             font_system.raw(),
@@ -129,6 +134,8 @@ impl core::text::Paragraph for Paragraph {
         );
 
         buffer.set_wrap(font_system.raw(), text::to_wrap(text.wrapping));
+        // Bennu 补丁：Tab 按 4 个空格宽排（cosmic-text 默认 8，代码缩进显得过宽）。
+        buffer.set_tab_width(font_system.raw(), TAB_WIDTH);
 
         buffer.set_rich_text(
             font_system.raw(),

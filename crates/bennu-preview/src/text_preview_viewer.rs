@@ -517,7 +517,7 @@ fn apply_jump(
         refresh_retained_content(state, document);
     }
     if jump.cursor.is_some() {
-        selection::reveal_cursor_horizontally(state, document);
+        selection::reveal_cursor_horizontally(state);
     }
 }
 
@@ -623,9 +623,7 @@ fn refresh_retained_content(state: &mut TextPreviewViewerState, document: &TextP
                 (paragraph, None)
             }
         };
-        let marks = marks.unwrap_or_else(|| {
-            find::row_match_marks(document, row, &paragraph, state.line_height.max(1.0))
-        });
+        let marks = marks.unwrap_or_else(|| find::row_match_marks(document, row, &paragraph));
         retained.push(RetainedRow {
             start: row.start,
             end: row.end,

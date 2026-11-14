@@ -1,6 +1,6 @@
 use super::*;
 
-fn text_blocks(rendered: &RenderedMarkdown) -> Vec<(TextBlockKind, Option<&str>, &str)> {
+fn text_blocks(rendered: &RenderedMarkdown) -> Vec<(TextBlockKind, Option<ListMarker>, &str)> {
     rendered
         .blocks()
         .iter()
@@ -9,7 +9,7 @@ fn text_blocks(rendered: &RenderedMarkdown) -> Vec<(TextBlockKind, Option<&str>,
                 kind,
                 marker,
                 content,
-            } => Some((*kind, marker.as_deref(), content.inline.text.as_str())),
+            } => Some((*kind, *marker, content.inline.text.as_str())),
             _ => None,
         })
         .collect()
@@ -23,9 +23,21 @@ fn headings_lists_and_quotes_keep_their_kind_and_markers() {
         text_blocks(&rendered),
         vec![
             (TextBlockKind::Heading(HeadingLevel::H1), None, "Title"),
-            (TextBlockKind::ListItem { depth: 0 }, Some("☑"), "done"),
-            (TextBlockKind::ListItem { depth: 0 }, Some("•"), "next"),
-            (TextBlockKind::ListItem { depth: 0 }, Some("3."), "third"),
+            (
+                TextBlockKind::ListItem { depth: 0 },
+                Some(ListMarker::Task { done: true }),
+                "done"
+            ),
+            (
+                TextBlockKind::ListItem { depth: 0 },
+                Some(ListMarker::Bullet),
+                "next"
+            ),
+            (
+                TextBlockKind::ListItem { depth: 0 },
+                Some(ListMarker::Ordered(3)),
+                "third"
+            ),
             (TextBlockKind::Quote { depth: 1 }, None, "quoted"),
         ]
     );

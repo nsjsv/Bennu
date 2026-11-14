@@ -47,3 +47,32 @@ fn each_block_has_its_own_container_id() {
     assert_ne!(markdown_block_id(1), markdown_block_id(2));
     assert_eq!(markdown_block_id(3), markdown_block_id(3));
 }
+
+#[test]
+fn chinese_inside_code_uses_the_interface_font() {
+    let code = SpanLook {
+        font: Font::MONOSPACE,
+        color: None,
+        background: None,
+        strike: false,
+    };
+    let text = "// 注释 ok";
+    let spans = marked_spans(
+        text,
+        [(0..text.len(), code)].into_iter(),
+        &[],
+        HighlightPalette::Dark,
+    );
+    let fonts: Vec<(String, Option<Font>)> = spans
+        .iter()
+        .map(|span| (span.text.to_string(), span.font))
+        .collect();
+    assert_eq!(
+        fonts,
+        vec![
+            ("// ".to_owned(), Some(Font::MONOSPACE)),
+            ("注释".to_owned(), Some(Font::DEFAULT)),
+            (" ok".to_owned(), Some(Font::MONOSPACE)),
+        ]
+    );
+}

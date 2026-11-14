@@ -1,8 +1,9 @@
 use iced::advanced::clipboard;
+use iced::advanced::text::Paragraph as _;
 use iced::{mouse, Event, Point, Size};
 
 use super::super::interaction;
-use super::super::{sync_with_document, visible_rows, TextPreviewViewerState};
+use super::super::{sync_with_document, visible_rows, PreviewParagraph, TextPreviewViewerState};
 use super::*;
 use crate::text_document::test_support::settle;
 use crate::text_document::{document_from_bytes, TextJump, TextPosition, TextViewerEvent};
@@ -167,4 +168,40 @@ fn a_revealed_match_moves_into_view_a_third_down_and_gets_the_cursor() {
         .expect("laid out");
     assert_eq!(retained.marks.len(), 1);
     assert!(retained.marks[0].current);
+}
+
+fn monospace_paragraph(content: &str) -> PreviewParagraph {
+    super::super::render::text_line_paragraph(
+        content,
+        480.0,
+        TextViewSettings::default(),
+        None,
+        crate::text_highlight::HighlightPalette::Light,
+    )
+}
+
+#[test]
+fn highlight_edges_sit_exactly_on_the_glyph_edges() {
+    let content = "request 123 handled";
+    let paragraph = monospace_paragraph(content);
+    let cell = paragraph.min_bounds().width / content.len() as f32;
+    let quads = super::super::selection::row_range_quads(&paragraph, 8, 11);
+    assert_eq!(quads.len(), 1);
+    let quad = quads[0];
+    // 以前用二分 hit test 求边界，落在两个字中间，整块往左偏半个字。
+    assert!(
+        (quad.x - 8.0 * cell).abs() < 0.5,
+        "left {} cell {cell}",
+        quad.x
+    );
+    assert!((quad.x + quad.width - 11.0 * cell).abs() < 0.5);
+}
+
+#[test]
+fn a_tab_is_four_columns_wide() {
+    let paragraph = monospace_paragraph("\tx");
+    let plain = monospace_paragraph("x");
+    let cell = plain.min_bounds().width;
+    let quads = super::super::selection::row_range_quads(&paragraph, 1, 2);
+    assert!((quads[0].x - 4.0 * cell).abs() < 0.5, "x at {}", quads[0].x);
 }

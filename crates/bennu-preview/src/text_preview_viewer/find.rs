@@ -29,7 +29,6 @@ pub(super) fn row_match_marks(
     document: &TextPreviewDocument,
     row: &TextRow,
     paragraph: &PreviewParagraph,
-    base: f32,
 ) -> Vec<MatchMark> {
     let matches = document.search_matches();
     if matches.is_empty() {
@@ -49,7 +48,7 @@ pub(super) fn row_match_marks(
         };
         let is_current = current == Some(*found);
         marks.extend(
-            row_range_quads(paragraph, &row.text, base, from, to)
+            row_range_quads(paragraph, from, to)
                 .into_iter()
                 .map(|bounds| MatchMark {
                     bounds,

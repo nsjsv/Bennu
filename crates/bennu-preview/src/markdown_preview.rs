@@ -10,17 +10,18 @@ use iced::font::{Style as FontStyle, Weight};
 use iced::widget::scrollable::{AbsoluteOffset, Direction, Scrollbar};
 use iced::widget::text::Span;
 use iced::widget::{container, rich_text, row, rule, scrollable, span, table, Column, Space};
-use iced::{Alignment, Color, Element, Font, Length, Pixels, Rectangle, Task, Vector};
+use iced::{Alignment, Color, Element, Font, Length, Padding, Pixels, Rectangle, Task, Vector};
 use pulldown_cmark::{Alignment as ColumnAlignment, HeadingLevel};
 
+use bennu_theme::icons::{themed_icon, IconSymbol, IconTone};
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use bennu_theme::styles::{enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction};
 use bennu_theme::ui_colors;
 
 use crate::markdown_render::{
-    CodeLine, InlineStyle, MarkdownBlock, MarkdownUnit, RenderedMarkdown, TextBlockKind,
+    CodeLine, InlineStyle, ListMarker, MarkdownBlock, MarkdownUnit, RenderedMarkdown, TextBlockKind,
 };
-use crate::panel_text::readable_text;
+use crate::panel_text::{readable_text, wide_script_runs};
 use crate::scroll_wiring::ScrollRegionWiring;
 use crate::text_document::RenderedMatch;
 use crate::text_highlight::{HighlightPalette, TokenKind};
@@ -120,7 +121,7 @@ fn block_view<'a, Message: 'a>(block: &'a MarkdownBlock, look: Look<'a>) -> Elem
             kind,
             marker,
             content,
-        } => text_block(*kind, marker.as_deref(), content, look),
+        } => text_block(*kind, *marker, content, look),
         MarkdownBlock::Code {
             language,
             content,
@@ -137,7 +138,7 @@ fn block_view<'a, Message: 'a>(block: &'a MarkdownBlock, look: Look<'a>) -> Elem
 
 fn text_block<'a, Message: 'a>(
     kind: TextBlockKind,
-    marker: Option<&'a str>,
+    marker: Option<ListMarker>,
     content: &'a MarkdownUnit,
     look: Look<'a>,
 ) -> Element<'a, Message> {
@@ -152,9 +153,7 @@ fn text_block<'a, Message: 'a>(
         TextBlockKind::Paragraph | TextBlockKind::Heading(_) => body.into(),
         TextBlockKind::ListItem { depth } => row![
             Space::new().width(Length::Fixed(depth as f32 * LIST_INDENT * look.zoom)),
-            rich_text([plain_span(marker.unwrap_or("•"))])
-                .size(look.size(BODY_TEXT_SIZE))
-                .width(Length::Fixed(MARKER_WIDTH * look.zoom)),
+            list_marker(marker.unwrap_or(ListMarker::Bullet), look),
             body,
         ]
         .spacing(6)
@@ -167,7 +166,14 @@ fn text_block<'a, Message: 'a>(
             container(Space::new().width(Length::Fixed(3.0)).height(Length::Fill))
                 .height(Length::Fill)
                 .style(|theme| container::Style {
-                    background: Some(ui_colors(theme).outline_variant.into()),
+                    // 轮廓色在深色底上几乎看不见，用次要文字色的半透明。
+                    background: Some(
+                        Color {
+                            a: 0.45,
+                            ..ui_colors(theme).on_surface_variant
+                        }
+                        .into()
+                    ),
                     ..container::Style::default()
                 }),
             body,
@@ -176,6 +182,52 @@ fn text_block<'a, Message: 'a>(
         .height(Length::Shrink)
         .into(),
     }
+}
+
+/// 列表项前面的符号：圆点、序号，待办项画成和应用复选框一样的方框（Unicode 的 ☑ ☐
+/// 会被字体回退成彩色表情或小方块，大小、风格都对不上）。
+fn list_marker<'a, Message: 'a>(marker: ListMarker, look: Look<'a>) -> Element<'a, Message> {
+    let width = Length::Fixed(MARKER_WIDTH * look.zoom);
+    let label = match marker {
+        ListMarker::Bullet => "•".to_owned(),
+        ListMarker::Ordered(number) => format!("{number}."),
+        ListMarker::Task { done } => {
+            let size = (BODY_TEXT_SIZE * look.zoom).round();
+            let check: Element<'a, Message> = if done {
+                themed_icon(IconSymbol::Check, IconTone::OnAccent, size * 0.75).into()
+            } else {
+                Space::new().into()
+            };
+            let check_box = container(check)
+                .center(Length::Fixed(size))
+                .style(move |theme| {
+                    let colors = ui_colors(theme);
+                    container::Style {
+                        background: done.then(|| colors.primary.into()),
+                        border: iced::Border {
+                            color: if done { colors.primary } else { colors.outline },
+                            width: 1.5,
+                            radius: 3.0.into(),
+                        },
+                        ..container::Style::default()
+                    }
+                });
+            // 方框和第一行文字的中线对齐（富文本行高是字号的 1.3 倍）。
+            let line = BODY_TEXT_SIZE * look.zoom * 1.3;
+            return container(check_box)
+                .padding(Padding {
+                    top: ((line - size) / 2.0).max(0.0),
+                    ..Padding::ZERO
+                })
+                .width(width)
+                .into();
+        }
+    };
+    let label: Span<'a, (), Font> = span(label);
+    rich_text([label])
+        .size(look.size(BODY_TEXT_SIZE))
+        .width(width)
+        .into()
 }
 
 fn heading_size(level: HeadingLevel) -> f32 {
@@ -362,20 +414,34 @@ fn marked_spans<'a>(
     marks: &[(Range<usize>, bool)],
     palette: HighlightPalette,
 ) -> Vec<Span<'a, (), Font>> {
+    // 等宽段里的全角文字换无衬线字体，否则汉字按两格排、字间空隙过大（同原文模式）。
+    let wide_runs = wide_script_runs(text);
     let mut spans = Vec::new();
     for (range, look) in looks {
         let mut cuts = vec![range.start, range.end];
-        for (mark, _) in marks {
-            for edge in [mark.start, mark.end] {
-                if range.start < edge && edge < range.end {
-                    cuts.push(edge);
-                }
-            }
-        }
+        let edges = marks
+            .iter()
+            .flat_map(|(mark, _)| [mark.start, mark.end])
+            .chain(
+                wide_runs
+                    .iter()
+                    .filter(|_| look.font == Font::MONOSPACE)
+                    .map(|(run, _)| run.start),
+            );
+        cuts.extend(edges.filter(|edge| range.start < *edge && *edge < range.end));
         cuts.sort_unstable();
         cuts.dedup();
         for piece in cuts.windows(2) {
             let (start, end) = (piece[0], piece[1]);
+            let wide = wide_runs
+                .iter()
+                .find(|(run, _)| run.contains(&start))
+                .is_some_and(|(_, wide)| *wide);
+            let font = if look.font == Font::MONOSPACE && wide {
+                Font::DEFAULT
+            } else {
+                look.font
+            };
             let marked = marks
                 .iter()
                 .find(|(mark, _)| mark.start <= start && end <= mark.end);
@@ -385,7 +451,7 @@ fn marked_spans<'a>(
                 None => look.background,
             };
             let mut piece = span(&text[start..end])
-                .font(look.font)
+                .font(font)
                 .strikethrough(look.strike);
             if let Some(color) = look.color {
                 piece = piece.color(color);

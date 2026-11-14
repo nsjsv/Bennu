@@ -16,7 +16,7 @@ use crate::preview::{
 };
 use crate::preview_config::{PreviewExtensionRules, PreviewFileSizeKind, PreviewSizeLimitKind};
 use crate::sqlite_preview::load_sqlite_preview;
-use crate::text_preview_loading::load_initial_text_preview;
+use crate::text_preview_loading::{load_initial_text_preview, TextOpening};
 
 pub const PREVIEW_ARCHIVE_ENTRY_LIMIT: usize = 500;
 
@@ -47,7 +47,12 @@ pub async fn load_preview(
                 Some(PreviewPathKind::Sqlite) => {
                     load_sqlite_preview(path).await.map(PreviewContent::Sqlite)
                 }
-                Some(PreviewPathKind::Text) => load_initial_text_preview(path, rules).await,
+                Some(PreviewPathKind::Text) => {
+                    match load_initial_text_preview(path.clone(), rules).await? {
+                        TextOpening::Text(opened) => Ok(PreviewContent::Text { path, opened }),
+                        TextOpening::Video => load_video_preview(path).await,
+                    }
+                }
                 // 文档、图片各有专门的加载命令，不经过这里；未分类的文件在宿主门禁就被拦下。
                 Some(
                     PreviewPathKind::Document
@@ -88,11 +93,12 @@ pub enum PreviewPathKind {
     Image,
     Video,
     Audio,
+    /// 文本，或名字定不下来的文件：打开时看内容，内容是视频就按视频打开。
     Text,
 }
 
 impl PreviewPathKind {
-    /// 适用哪一类大小上限；文本按需读取、音频边读边放，没有上限。
+    /// 适用哪一类大小上限；文本按需读取、音频视频边读边放，没有上限。
     pub fn size_limit_kind(self) -> Option<PreviewSizeLimitKind> {
         match self {
             PreviewPathKind::Document => Some(PreviewSizeLimitKind::Document),
@@ -101,24 +107,26 @@ impl PreviewPathKind {
             PreviewPathKind::AnimatedImage | PreviewPathKind::Image => {
                 Some(PreviewSizeLimitKind::Image)
             }
-            PreviewPathKind::Video => Some(PreviewSizeLimitKind::Video),
-            PreviewPathKind::Audio | PreviewPathKind::Text => None,
+            PreviewPathKind::Video | PreviewPathKind::Audio | PreviewPathKind::Text => None,
         }
     }
 
     /// 要先把远程挂载上的文件整个下载到本地缓存才能预览（解码器、转换器只认本地文件）。
-    /// 文本按需读挂载路径；音频播放和读信息也是对挂载路径边读边用，都不下载。
+    /// 文本按需读挂载路径；音视频播放和读信息也是 ffmpeg 对挂载路径边读边用，都不下载。
     pub fn needs_local_copy(self) -> bool {
-        !matches!(self, PreviewPathKind::Text | PreviewPathKind::Audio)
+        !matches!(
+            self,
+            PreviewPathKind::Text | PreviewPathKind::Audio | PreviewPathKind::Video
+        )
     }
 }
 
-/// 返回 `None` 表示文件不属于任何可预览类型。文档、归档、SQLite、图片、
-/// 视频的后缀列表完全决定该类型识别哪些后缀（替换式）；图片列表中的 gif
-/// 走动图渲染。音频：额外音频后缀直接算，其余按类型库只看名字。
+/// 返回 `None` 表示文件不属于任何可预览类型。文档、归档、SQLite、图片
+/// 的后缀列表完全决定该类型识别哪些后缀（替换式）；图片列表中的 gif
+/// 走动图渲染。视频、音频：额外后缀直接算，其余按类型库只看名字。
 /// 文本是兜底：额外文本后缀直接算，其余按类型库只看名字——名字确定是
-/// 非文本类型的不预览，名字定不下来的先放行，打开时看内容定论
-/// （`text_preview_loading::inspect_text_file`）。
+/// 非文本类型的不预览，名字定不下来的（如 `.ts`：电视录像 / Qt 翻译）先放行，
+/// 打开时看内容定论，内容是视频就改按视频打开（`text_preview_loading::inspect_text_file`）。
 pub fn classify_preview_path(
     path: &Path,
     rules: &PreviewExtensionRules,
@@ -140,7 +148,7 @@ pub fn classify_preview_path(
         }
         return Some(PreviewPathKind::Image);
     }
-    if rules.matches(Kind::Video, path) {
+    if rules.matches(Kind::Video, path) || file_core::is_video_by_name(path) {
         return Some(PreviewPathKind::Video);
     }
     if rules.matches(Kind::Audio, path) || file_core::is_audio_by_name(path) {

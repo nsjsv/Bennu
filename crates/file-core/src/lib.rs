@@ -70,9 +70,9 @@ pub use entry_naming::{
 };
 pub use external_tools::ExternalTool;
 pub use media::{
-    is_audio_by_name, is_supported_image_extension, is_supported_image_path,
-    is_supported_video_extension, is_supported_video_path, supported_media_kind_for_path,
-    SupportedMediaKind,
+    is_audio_by_name, is_supported_image_extension, is_supported_image_path, is_video_by_name,
+    is_video_content, is_video_file, media_kind_for_file, video_by_name, SupportedMediaKind,
+    VideoByName,
 };
 pub use ops::{
     available_conversion_encoders, batch_rename_paths, convert_file_with_controls, copy_path,

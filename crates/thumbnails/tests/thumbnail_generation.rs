@@ -196,6 +196,21 @@ async fn load_or_generate_thumbnail_rejects_cache_directory_source() {
 }
 
 #[tokio::test]
+async fn ambiguous_video_name_with_text_content_is_not_thumbnailed() {
+    // .ts 既可能是电视录像也可能是代码：生成前看内容，代码不交给视频缩略图命令。
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("component.ts");
+    std::fs::write(&source, "export const answer: number = 42;\n").unwrap();
+    let cache_dir = dir.path().join("cache");
+
+    let error = load_or_generate_thumbnail(&cache_dir, thumbnail_request(&source, 128))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, ThumbnailError::UnsupportedFormat { path } if path == source));
+}
+
+#[tokio::test]
 async fn small_bitmaps_are_not_upscaled() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("source.bmp");
@@ -312,8 +327,18 @@ fn supported_thumbnail_path_includes_images_and_videos() {
     ] {
         assert!(is_supported_thumbnail_path(path), "{path}");
     }
-    assert!(is_supported_thumbnail_path("clip.MP4"));
-    assert!(is_supported_thumbnail_path("movie.webm"));
+    for path in [
+        "clip.MP4",
+        "movie.webm",
+        "tv.m2ts",
+        "old.rmvb",
+        "show.flv",
+        "clip.ts",
+    ] {
+        assert!(is_supported_thumbnail_path(path), "{path}");
+    }
+    // 候选里有音频的 .ogg 归音频，不为它跑缩略图。
+    assert!(!is_supported_thumbnail_path("song.ogg"));
     assert!(!is_supported_thumbnail_path("notes.txt"));
     assert!(!is_supported_thumbnail_path("photo.heic"));
     assert!(!is_supported_thumbnail_path("photo.heif"));

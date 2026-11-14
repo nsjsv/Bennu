@@ -10,8 +10,15 @@ use crate::engine::{
 use crate::preview::PreviewWindowProfile;
 use crate::preview_config::{PreviewExtensionRules, PreviewFileSizeLimits};
 use crate::text_document::{LineCountStatus, TextViewport};
-use crate::text_preview_loading::load_initial_text_preview;
+use crate::text_preview_loading::{load_initial_text_preview, TextOpening};
 use file_core::ScanOptions;
+
+async fn open_text_content(path: std::path::PathBuf) -> Result<PreviewContent, String> {
+    match load_initial_text_preview(path.clone(), &PreviewExtensionRules::default_rules()).await? {
+        TextOpening::Text(opened) => Ok(PreviewContent::Text { path, opened }),
+        TextOpening::Video => panic!("expected text preview"),
+    }
+}
 
 fn test_engine() -> PreviewEngine {
     PreviewEngine::new(
@@ -50,10 +57,7 @@ async fn drive(engine: &mut PreviewEngine, task: Task<PreviewMessage>) {
 
 async fn open(engine: &mut PreviewEngine, path: &Path) {
     engine.preview = Some(PreviewState::Loading(path.to_path_buf()));
-    let content =
-        load_initial_text_preview(path.to_path_buf(), &PreviewExtensionRules::default_rules())
-            .await
-            .expect("open");
+    let content = open_text_content(path.to_path_buf()).await.expect("open");
     let (_, task) =
         engine.accept_preview(path.to_path_buf(), Ok(content), ScanOptions::default(), 1);
     drive(engine, task).await;
@@ -245,9 +249,7 @@ async fn measure_large_text_files() {
     let mut engine = test_engine();
     engine.preview = Some(PreviewState::Loading(log.clone()));
     let started = Instant::now();
-    let content = load_initial_text_preview(log.clone(), &PreviewExtensionRules::default_rules())
-        .await
-        .expect("open");
+    let content = open_text_content(log.clone()).await.expect("open");
     let (_, count_task) =
         engine.accept_preview(log.clone(), Ok(content), ScanOptions::default(), 1);
     let open_time = started.elapsed();
@@ -293,9 +295,7 @@ async fn measure_large_text_files() {
     let mut json_engine = test_engine();
     json_engine.preview = Some(PreviewState::Loading(json.clone()));
     let started = Instant::now();
-    let content = load_initial_text_preview(json.clone(), &PreviewExtensionRules::default_rules())
-        .await
-        .expect("open json");
+    let content = open_text_content(json.clone()).await.expect("open json");
     let (_, json_count) =
         json_engine.accept_preview(json.clone(), Ok(content), ScanOptions::default(), 1);
     let json_open_time = started.elapsed();

@@ -334,10 +334,76 @@ fn classify_preview_path_asks_the_type_library_for_audio() {
     // 播放列表不是音频数据：m3u 声明继承 text/plain，走文本；pls 不预览。
     assert_eq!(classify("list.m3u"), Some(PreviewPathKind::Text));
     assert_eq!(classify("list.pls"), None);
-    // 视频后缀表排在音频前面。
+    // 视频排在音频前面。
     assert_eq!(classify("clip.mp4"), Some(PreviewPathKind::Video));
     // 没后缀不为音频读内容，仍归文本兜底。
     assert_eq!(classify("track01"), Some(PreviewPathKind::Text));
+}
+
+#[test]
+fn classify_preview_path_asks_the_type_library_for_video() {
+    let rules = default_rules();
+    let classify = |name: &str| classify_preview_path(Path::new(name), &rules);
+    for name in [
+        "a.mkv", "a.m2ts", "a.mts", "a.flv", "a.wmv", "a.mpg", "a.vob", "a.3gp", "a.ogv", "a.rmvb",
+        "a.asf",
+    ] {
+        assert_eq!(classify(name), Some(PreviewPathKind::Video), "{name}");
+    }
+    // .ogg 的候选里音频、视频都有：归音频。
+    assert_eq!(classify("a.ogg"), Some(PreviewPathKind::Audio));
+    // .ts 名字定不下来：先当文本放行，打开时看内容。
+    assert_eq!(classify("clip.ts"), Some(PreviewPathKind::Text));
+}
+
+/// 五个 188 字节的 MPEG-TS 包，同步字节 0x47 打头。
+fn transport_stream_bytes() -> Vec<u8> {
+    let mut bytes = vec![0; 188 * 5];
+    for packet in bytes.chunks_mut(188) {
+        packet[0] = 0x47;
+    }
+    bytes
+}
+
+#[tokio::test]
+async fn ambiguous_ts_opens_as_video_or_text_by_content() {
+    let temp_dir = tempdir().expect("temp dir");
+    let recording = temp_dir.path().join("recording.ts");
+    std::fs::write(&recording, transport_stream_bytes()).expect("write recording");
+    let code = temp_dir.path().join("component.ts");
+    std::fs::write(&code, "export const answer: number = 42;\n").expect("write code");
+    let open = |path: PathBuf, rules: PreviewExtensionRules| async move {
+        load_preview(
+            path,
+            FileKind::File,
+            &rules,
+            ScanOptions::default(),
+            TEST_MAX_PREVIEW_FILE_BYTES,
+        )
+        .await
+    };
+
+    // 内容是 MPEG-TS：按视频打开（没装 ffmpeg 时是安装提示）。
+    let content = open(recording.clone(), default_rules())
+        .await
+        .expect("video preview");
+    assert!(
+        matches!(
+            content,
+            PreviewContent::Video { .. } | PreviewContent::ToolRequired { .. }
+        ),
+        "{content:?}"
+    );
+    let content = open(code, default_rules()).await.expect("text preview");
+    assert!(
+        matches!(content, PreviewContent::Text { .. }),
+        "{content:?}"
+    );
+
+    // 用户把 ts 列为额外文本后缀：压过内容，按文本判（这份字节不是文字）。
+    let mut rules = default_rules();
+    rules.text.push("ts".to_owned());
+    assert!(open(recording, rules).await.is_err());
 }
 
 #[tokio::test]
@@ -516,9 +582,13 @@ fn assert_preview_tree_entry(
 }
 
 #[test]
-fn text_and_audio_read_on_demand_without_a_size_limit_or_a_local_copy() {
-    // 文本按需读取、音频边读边放：没有大小上限，网络挂载上也不先下载。
-    for kind in [PreviewPathKind::Text, PreviewPathKind::Audio] {
+fn text_and_media_read_on_demand_without_a_size_limit_or_a_local_copy() {
+    // 文本按需读取、音视频边读边放：没有大小上限，网络挂载上也不先下载。
+    for kind in [
+        PreviewPathKind::Text,
+        PreviewPathKind::Audio,
+        PreviewPathKind::Video,
+    ] {
         assert_eq!(kind.size_limit_kind(), None, "{kind:?}");
         assert!(!kind.needs_local_copy(), "{kind:?}");
     }
@@ -528,7 +598,6 @@ fn text_and_audio_read_on_demand_without_a_size_limit_or_a_local_copy() {
         PreviewPathKind::Sqlite,
         PreviewPathKind::AnimatedImage,
         PreviewPathKind::Image,
-        PreviewPathKind::Video,
     ] {
         assert!(kind.size_limit_kind().is_some(), "{kind:?}");
         assert!(kind.needs_local_copy(), "{kind:?}");

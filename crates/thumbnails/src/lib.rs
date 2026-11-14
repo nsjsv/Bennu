@@ -275,6 +275,11 @@ fn generate_thumbnail_blocking(
             svg::render_svg_thumbnail(&request.source, edge)?
         }
         ThumbnailMediaKind::Image => raster_thumbnail(&request.source, edge)?,
+        ThumbnailMediaKind::Video if !file_core::is_video_file(&request.source) => {
+            return Err(ThumbnailError::UnsupportedFormat {
+                path: request.source,
+            });
+        }
         ThumbnailMediaKind::Video => video_thumbnail(&request.source, &temporary, edge)?,
     };
     write_thumbnail(
@@ -534,11 +539,11 @@ fn bounded_video_thumbnailer_detail(detail: &str) -> String {
     bounded
 }
 
+/// 只看名字（列表里每个条目都要问，不能读文件）；名字定不下来的视频后缀也先算，生成时再看内容。
 fn thumbnail_media_kind_for_path(path: &Path) -> Option<ThumbnailMediaKind> {
-    let extension = path.extension().and_then(std::ffi::OsStr::to_str)?;
-    if file_core::is_supported_image_extension(extension) {
+    if file_core::is_supported_image_path(path) {
         Some(ThumbnailMediaKind::Image)
-    } else if file_core::is_supported_video_extension(extension) {
+    } else if file_core::video_by_name(path) != file_core::VideoByName::No {
         Some(ThumbnailMediaKind::Video)
     } else {
         None

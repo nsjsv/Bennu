@@ -22,6 +22,7 @@ pub struct StoredPreviewPreferences {
     pub preview_text_size_bytes: Option<u64>,
     #[serde(default)]
     pub preview_image_size_bytes: Option<u64>,
+    /// 旧版本的视频大小上限；视频边读边放后不再使用，只为保持文档布局保留，新代码写 None。
     #[serde(default)]
     pub preview_video_size_bytes: Option<u64>,
     /// 旧版本的音频大小上限；音频边读边放后不再使用，只为保持文档布局保留，新代码写 None。
@@ -58,6 +59,10 @@ pub struct StoredPreviewPreferences {
     /// 音频播完之后做什么（stop / repeat / next）；None 用默认。
     #[serde(default)]
     pub audio_end_action: Option<String>,
+    /// 额外当作视频的后缀（视频主要由类型库判定）。None 表示还没迁移过，读取端
+    /// 从旧的 `preview_extension_rules.video` 迁移一次。
+    #[serde(default)]
+    pub preview_extra_video_extensions: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -67,6 +72,7 @@ pub struct StoredPreviewExtensionRules {
     pub text: Option<Vec<String>>,
     #[serde(default)]
     pub image: Option<Vec<String>>,
+    /// 旧版本的替换式视频后缀表，只读迁移，新代码写 None。
     #[serde(default)]
     pub video: Option<Vec<String>>,
     /// 旧版本的替换式音频后缀表，只读迁移，新代码写 None。
@@ -82,7 +88,6 @@ pub struct StoredPreviewExtensionRules {
 
 pub const PREVIEW_FILE_SIZE_UNIT_BYTES: u64 = 1024 * 1024;
 pub const DEFAULT_PREVIEW_IMAGE_SIZE_BYTES: u64 = 100 * PREVIEW_FILE_SIZE_UNIT_BYTES;
-pub const DEFAULT_PREVIEW_VIDEO_SIZE_BYTES: u64 = 1024 * PREVIEW_FILE_SIZE_UNIT_BYTES;
 pub const DEFAULT_PREVIEW_ARCHIVE_SIZE_BYTES: u64 = 25 * PREVIEW_FILE_SIZE_UNIT_BYTES;
 pub const DEFAULT_PREVIEW_SQLITE_SIZE_BYTES: u64 = 100 * PREVIEW_FILE_SIZE_UNIT_BYTES;
 pub const DEFAULT_PREVIEW_DOCUMENT_SIZE_BYTES: u64 = 100 * PREVIEW_FILE_SIZE_UNIT_BYTES;
@@ -99,13 +104,15 @@ const LEGACY_DEFAULT_PREVIEW_TEXT_EXTENSIONS: [&str; 22] = [
 /// 额外后缀会让这 7 个后缀永远绕过类型库。
 const LEGACY_DEFAULT_PREVIEW_AUDIO_EXTENSIONS: [&str; 7] =
     ["mp3", "wav", "flac", "ogg", "oga", "m4a", "aac"];
+/// 旧版本的内置视频后缀表，只用于迁移，理由同音频。
+const LEGACY_DEFAULT_PREVIEW_VIDEO_EXTENSIONS: [&str; 6] =
+    ["mp4", "m4v", "mkv", "mov", "webm", "avi"];
 /// 空格预览其余类型的默认后缀表，镜像各预览类型的内置判定；
 /// 后缀以小写、无前导点的规范形态存储。替换式语义：用户可增删，
 /// 删除即该后缀不再按此类型预览。
 pub const DEFAULT_PREVIEW_IMAGE_EXTENSIONS: [&str; 11] = [
     "avif", "bmp", "gif", "ico", "jpg", "jpeg", "png", "svg", "tif", "tiff", "webp",
 ];
-pub const DEFAULT_PREVIEW_VIDEO_EXTENSIONS: [&str; 6] = ["mp4", "m4v", "mkv", "mov", "webm", "avi"];
 pub const DEFAULT_PREVIEW_SQLITE_EXTENSIONS: [&str; 4] = ["db", "sqlite", "sqlite3", "db3"];
 pub const DEFAULT_PREVIEW_ARCHIVE_EXTENSIONS: [&str; 13] = [
     "zip", "tar", "tar.gz", "tgz", "tar.xz", "txz", "tar.zst", "tzst", "tar.bz2", "tbz2", "tbz",
@@ -142,30 +149,23 @@ impl PreviewFileSizeKind {
     ];
 }
 
-/// 有大小上限的预览类型。文本按需从磁盘读、音频边读边放，内存都不随文件大小增长，不设上限。
+/// 有大小上限的预览类型。文本按需从磁盘读、音频视频边读边放，内存都不随文件大小增长，不设上限。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreviewSizeLimitKind {
     Image,
-    Video,
     Archive,
     Document,
     Sqlite,
 }
 
 impl PreviewSizeLimitKind {
-    pub const ALL: [PreviewSizeLimitKind; 5] = [
-        Self::Image,
-        Self::Video,
-        Self::Archive,
-        Self::Document,
-        Self::Sqlite,
-    ];
+    pub const ALL: [PreviewSizeLimitKind; 4] =
+        [Self::Image, Self::Archive, Self::Document, Self::Sqlite];
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PreviewFileSizeLimits {
     pub image_bytes: u64,
-    pub video_bytes: u64,
     pub archive_bytes: u64,
     pub document_bytes: u64,
     pub sqlite_bytes: u64,
@@ -175,7 +175,6 @@ impl PreviewFileSizeLimits {
     pub fn with_default_limits() -> Self {
         Self {
             image_bytes: DEFAULT_PREVIEW_IMAGE_SIZE_BYTES,
-            video_bytes: DEFAULT_PREVIEW_VIDEO_SIZE_BYTES,
             archive_bytes: DEFAULT_PREVIEW_ARCHIVE_SIZE_BYTES,
             document_bytes: DEFAULT_PREVIEW_DOCUMENT_SIZE_BYTES,
             sqlite_bytes: DEFAULT_PREVIEW_SQLITE_SIZE_BYTES,
@@ -185,7 +184,6 @@ impl PreviewFileSizeLimits {
     pub fn limit(self, kind: PreviewSizeLimitKind) -> u64 {
         match kind {
             PreviewSizeLimitKind::Image => self.image_bytes,
-            PreviewSizeLimitKind::Video => self.video_bytes,
             PreviewSizeLimitKind::Archive => self.archive_bytes,
             PreviewSizeLimitKind::Document => self.document_bytes,
             PreviewSizeLimitKind::Sqlite => self.sqlite_bytes,
@@ -195,7 +193,6 @@ impl PreviewFileSizeLimits {
     pub fn set_limit(&mut self, kind: PreviewSizeLimitKind, bytes: u64) {
         match kind {
             PreviewSizeLimitKind::Image => self.image_bytes = bytes,
-            PreviewSizeLimitKind::Video => self.video_bytes = bytes,
             PreviewSizeLimitKind::Archive => self.archive_bytes = bytes,
             PreviewSizeLimitKind::Document => self.document_bytes = bytes,
             PreviewSizeLimitKind::Sqlite => self.sqlite_bytes = bytes,
@@ -206,7 +203,6 @@ impl PreviewFileSizeLimits {
     pub fn from_legacy_global_bytes(bytes: u64) -> Self {
         Self {
             image_bytes: bytes,
-            video_bytes: bytes,
             archive_bytes: bytes,
             document_bytes: bytes,
             sqlite_bytes: bytes,
@@ -232,8 +228,8 @@ pub fn normalize_preview_extension(raw: &str) -> Option<String> {
     Some(trimmed.to_lowercase())
 }
 
-/// 空格预览的分类型后缀规则：文本、音频列表是「额外当作文本/音频的后缀」，
-/// 默认空，这两类主要由类型库判定；其余类型的列表完全决定该类型识别哪些
+/// 空格预览的分类型后缀规则：文本、音频、视频列表是「额外当作文本/音频/视频的后缀」，
+/// 默认空，这三类主要由类型库判定；其余类型的列表完全决定该类型识别哪些
 /// 后缀（替换式）。匹配按文件名 `ends_with` 进行，天然覆盖 tar.gz
 /// 这类复合后缀；大小写不敏感，与各渲染器行为保持一致。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -252,7 +248,7 @@ impl PreviewExtensionRules {
         Self {
             text: Vec::new(),
             image: default_extensions(&DEFAULT_PREVIEW_IMAGE_EXTENSIONS),
-            video: default_extensions(&DEFAULT_PREVIEW_VIDEO_EXTENSIONS),
+            video: Vec::new(),
             audio: Vec::new(),
             sqlite: default_extensions(&DEFAULT_PREVIEW_SQLITE_EXTENSIONS),
             archive: default_extensions(&DEFAULT_PREVIEW_ARCHIVE_EXTENSIONS),
@@ -294,9 +290,10 @@ impl PreviewExtensionRules {
 
     pub fn default_list(kind: PreviewFileSizeKind) -> Vec<String> {
         let builtin: &[&str] = match kind {
-            PreviewFileSizeKind::Text | PreviewFileSizeKind::Audio => &[],
+            PreviewFileSizeKind::Text | PreviewFileSizeKind::Audio | PreviewFileSizeKind::Video => {
+                &[]
+            }
             PreviewFileSizeKind::Image => &DEFAULT_PREVIEW_IMAGE_EXTENSIONS,
-            PreviewFileSizeKind::Video => &DEFAULT_PREVIEW_VIDEO_EXTENSIONS,
             PreviewFileSizeKind::Archive => &DEFAULT_PREVIEW_ARCHIVE_EXTENSIONS,
             PreviewFileSizeKind::Document => &DEFAULT_PREVIEW_DOCUMENT_EXTENSIONS,
             PreviewFileSizeKind::Sqlite => &DEFAULT_PREVIEW_SQLITE_EXTENSIONS,
@@ -446,10 +443,9 @@ pub fn preview_size_limits_from_stored(
             .or(legacy_global_limit)
             .unwrap_or(fallback_bytes)
     };
-    // 文本、音频不再有上限：旧的 preview_text_size_bytes / preview_audio_size_bytes 读到也不用。
+    // 文本、音频、视频不再有上限：旧的 preview_{text,audio,video}_size_bytes 读到也不用。
     PreviewFileSizeLimits {
         image_bytes: resolve(stored.preview_image_size_bytes, fallback.image_bytes),
-        video_bytes: resolve(stored.preview_video_size_bytes, fallback.video_bytes),
         archive_bytes: resolve(stored.preview_archive_size_bytes, fallback.archive_bytes),
         document_bytes: resolve(stored.preview_document_size_bytes, fallback.document_bytes),
         sqlite_bytes: resolve(stored.preview_sqlite_size_bytes, fallback.sqlite_bytes),
@@ -475,9 +471,16 @@ pub fn preview_extension_rules_from_stored(
         &LEGACY_DEFAULT_PREVIEW_AUDIO_EXTENSIONS,
         &fallback.audio,
     );
+    let extra_video = extra_extensions_from_stored(
+        &stored.preview_extra_video_extensions,
+        legacy_rules.and_then(|rules| rules.video.as_ref()),
+        &LEGACY_DEFAULT_PREVIEW_VIDEO_EXTENSIONS,
+        &fallback.video,
+    );
     let Some(stored_rules) = legacy_rules else {
         return PreviewExtensionRules {
             text: extra_text,
+            video: extra_video,
             audio: extra_audio,
             ..fallback.clone()
         };
@@ -488,7 +491,7 @@ pub fn preview_extension_rules_from_stored(
     PreviewExtensionRules {
         text: extra_text,
         image: per_type(&stored_rules.image, &fallback.image),
-        video: per_type(&stored_rules.video, &fallback.video),
+        video: extra_video,
         audio: extra_audio,
         sqlite: per_type(&stored_rules.sqlite, &fallback.sqlite),
         archive: archive_extensions_with_current_defaults(
@@ -499,7 +502,7 @@ pub fn preview_extension_rules_from_stored(
     }
 }
 
-/// 额外后缀（文本、音频）：新键说了算；新键还没写过时从旧的替换式表迁移一次——
+/// 额外后缀（文本、音频、视频）：新键说了算；新键还没写过时从旧的替换式表迁移一次——
 /// 去掉旧内置默认值，只留用户自己加的。迁移结果随下次保存写进新键，之后用户
 /// 再加 `txt` / `mp3` 也不会被过滤。
 fn extra_extensions_from_stored(
@@ -569,241 +572,5 @@ pub fn preview_preferences_from_stored(stored: &StoredPreviewPreferences) -> Pre
 }
 
 #[cfg(test)]
-mod stored_preferences_migration_tests {
-    use super::*;
-
-    /// 下沉前（平铺字段时代）整份用户偏好文档样本：仅含无 serde 缺省的
-    /// 必需键 + 全部 preview 键，字段名与旧设置文档逐字一致。
-    const LEGACY_DOCUMENT: &str = r#"{
-        "network_list_thumbnail_downloads_enabled": false,
-        "max_preview_file_bytes": 4194304,
-        "preview_text_size_bytes": null,
-        "preview_image_size_bytes": 1048576,
-        "preview_video_size_bytes": null,
-        "preview_audio_size_bytes": 5242880,
-        "preview_archive_size_bytes": null,
-        "preview_document_size_bytes": null,
-        "preview_sqlite_size_bytes": null,
-        "preview_extension_rules": {
-            "text": ["txt", "log"],
-            "image": [],
-            "video": null,
-            "audio": ["flac"],
-            "sqlite": null,
-            "archive": null,
-            "document": null
-        },
-        "preview_directory_expand_levels": 2,
-        "show_hidden_files": true,
-        "sidebar_width": 200.0,
-        "sidebar_favorites": null,
-        "network_connections": [],
-        "terminal_emulator": "automatic",
-        "file_operation_verification": "basic_metadata",
-        "browser_view_mode": "columns",
-        "startup_location": "home",
-        "startup_custom_directory": {"encoding": "unix_bytes", "bytes": []},
-        "save_view_state": false,
-        "shortcuts": []
-    }"#;
-
-    #[test]
-    fn legacy_document_resolves_per_kind_limits_with_legacy_global_seeding() {
-        // 整份设置文档里只取 preview 段解析（loader 的视角）。
-        let stored: StoredPreviewPreferences = serde_json::from_str(LEGACY_DOCUMENT)
-            .expect("legacy document parses as preview segment");
-
-        let limits =
-            preview_size_limits_from_stored(&stored, PreviewFileSizeLimits::with_default_limits());
-        // null（缺失）类型吃 legacy 全局值，显式分类型键覆盖全局值。
-        assert_eq!(limits.image_bytes, 1048576);
-        assert_eq!(limits.video_bytes, 4194304);
-        assert_eq!(limits.archive_bytes, 4194304);
-        assert_eq!(limits.document_bytes, 4194304);
-        assert_eq!(limits.sqlite_bytes, 4194304);
-
-        let preferences = preview_preferences_from_stored(&stored);
-        assert_eq!(
-            preferences.size_limits,
-            preview_size_limits_from_stored(&stored, PreviewFileSizeLimits::with_default_limits())
-        );
-        assert_eq!(preferences.directory_expand_levels, 2);
-    }
-
-    #[test]
-    fn extension_rules_fallback_matrix_preserves_empty_lists() {
-        let defaults = PreviewExtensionRules::default_rules();
-
-        // 整段缺失：全部回退默认表。
-        let missing = StoredPreviewPreferences::default();
-        assert_eq!(
-            preview_extension_rules_from_stored(&missing, &defaults),
-            defaults
-        );
-
-        // 段存在但单类型 None：该类型回退默认，空列表是用户显式清空。
-        let stored = StoredPreviewPreferences {
-            preview_extension_rules: Some(StoredPreviewExtensionRules {
-                image: Some(Vec::new()),
-                ..StoredPreviewExtensionRules::default()
-            }),
-            ..StoredPreviewPreferences::default()
-        };
-        let rules = preview_extension_rules_from_stored(&stored, &defaults);
-        assert_eq!(rules.text, Vec::<String>::new());
-        assert_eq!(rules.image, Vec::<String>::new());
-        assert_eq!(rules.video, defaults.video);
-        assert_eq!(rules.audio, defaults.audio);
-        assert_eq!(rules.sqlite, defaults.sqlite);
-        assert_eq!(rules.archive, defaults.archive);
-        assert_eq!(rules.document, defaults.document);
-    }
-
-    #[test]
-    fn legacy_text_list_migrates_once_keeping_only_user_additions() {
-        let defaults = PreviewExtensionRules::default_rules();
-        let mut legacy_text = LEGACY_DEFAULT_PREVIEW_TEXT_EXTENSIONS
-            .iter()
-            .map(|extension| (*extension).to_owned())
-            .collect::<Vec<_>>();
-        legacy_text.extend(["nfo".to_owned(), "srt".to_owned()]);
-        let legacy = StoredPreviewPreferences {
-            preview_extension_rules: Some(StoredPreviewExtensionRules {
-                text: Some(legacy_text),
-                ..StoredPreviewExtensionRules::default()
-            }),
-            ..StoredPreviewPreferences::default()
-        };
-
-        // 旧默认（含 ts）去掉，只剩用户自己加的。
-        let rules = preview_extension_rules_from_stored(&legacy, &defaults);
-        assert_eq!(rules.text, vec!["nfo".to_owned(), "srt".to_owned()]);
-
-        // 新键写过之后旧键不再参与：用户后来自己加回 txt 也保留。
-        let saved = StoredPreviewPreferences {
-            preview_extra_text_extensions: Some(vec!["txt".to_owned()]),
-            ..legacy
-        };
-        let rules = preview_extension_rules_from_stored(&saved, &defaults);
-        assert_eq!(rules.text, vec!["txt".to_owned()]);
-
-        // 什么都没存：默认空。
-        let rules =
-            preview_extension_rules_from_stored(&StoredPreviewPreferences::default(), &defaults);
-        assert!(rules.text.is_empty());
-    }
-
-    #[test]
-    fn untouched_legacy_archive_list_gains_the_new_tar_suffixes() {
-        let defaults = PreviewExtensionRules::default_rules();
-        let stored_archive = |extensions: &[&str]| StoredPreviewPreferences {
-            preview_extension_rules: Some(StoredPreviewExtensionRules {
-                archive: Some(
-                    extensions
-                        .iter()
-                        .map(|extension| (*extension).to_owned())
-                        .collect(),
-                ),
-                ..StoredPreviewExtensionRules::default()
-            }),
-            ..StoredPreviewPreferences::default()
-        };
-
-        let rules = preview_extension_rules_from_stored(
-            &stored_archive(&LEGACY_DEFAULT_PREVIEW_ARCHIVE_EXTENSIONS),
-            &defaults,
-        );
-        assert_eq!(rules.archive, defaults.archive);
-        assert!(rules.archive.contains(&"tar.zst".to_owned()));
-
-        // 用户改过的表原样保留。
-        let rules =
-            preview_extension_rules_from_stored(&stored_archive(&["zip", "cbz"]), &defaults);
-        assert_eq!(rules.archive, vec!["zip".to_owned(), "cbz".to_owned()]);
-    }
-
-    #[test]
-    fn legacy_audio_list_migrates_once_keeping_only_user_additions() {
-        let defaults = PreviewExtensionRules::default_rules();
-        let mut legacy_audio = LEGACY_DEFAULT_PREVIEW_AUDIO_EXTENSIONS
-            .iter()
-            .map(|extension| (*extension).to_owned())
-            .collect::<Vec<_>>();
-        legacy_audio.push("dsf".to_owned());
-        let legacy = StoredPreviewPreferences {
-            preview_extension_rules: Some(StoredPreviewExtensionRules {
-                audio: Some(legacy_audio),
-                ..StoredPreviewExtensionRules::default()
-            }),
-            ..StoredPreviewPreferences::default()
-        };
-
-        // 旧内置 7 个去掉，只剩用户自己加的；其余类型不受影响。
-        let rules = preview_extension_rules_from_stored(&legacy, &defaults);
-        assert_eq!(rules.audio, vec!["dsf".to_owned()]);
-        assert_eq!(rules.video, defaults.video);
-
-        // 新键写过之后旧键不再参与：用户清空也原样保留。
-        let saved = StoredPreviewPreferences {
-            preview_extra_audio_extensions: Some(Vec::new()),
-            ..legacy
-        };
-        let rules = preview_extension_rules_from_stored(&saved, &defaults);
-        assert!(rules.audio.is_empty());
-
-        // 什么都没存：默认空。
-        let rules =
-            preview_extension_rules_from_stored(&StoredPreviewPreferences::default(), &defaults);
-        assert!(rules.audio.is_empty());
-    }
-
-    #[test]
-    fn end_action_cycles_through_what_the_host_offers() {
-        use AudioEndAction::{Next, Repeat, Stop};
-        let main_app = [Stop, Repeat, Next];
-        assert_eq!(Stop.after(&main_app), Repeat);
-        assert_eq!(Repeat.after(&main_app), Next);
-        assert_eq!(Next.after(&main_app), Stop);
-        let dialog = [Stop, Repeat];
-        assert_eq!(Repeat.after(&dialog), Stop);
-        assert_eq!(Next.within(&dialog), Stop);
-        assert_eq!(Next.after(&dialog), Stop);
-        for action in main_app {
-            assert_eq!(
-                AudioEndAction::from_stored(Some(action.stored_name())),
-                action
-            );
-        }
-        assert_eq!(AudioEndAction::from_stored(Some("shuffle")), Stop);
-        assert_eq!(AudioEndAction::from_stored(None), Stop);
-    }
-
-    #[test]
-    fn media_volume_round_trips_as_a_percentage() {
-        assert_eq!(media_preview_volume_from_stored(None), 1.0);
-        assert_eq!(media_preview_volume_from_stored(Some(35)), 0.35);
-        assert_eq!(media_preview_volume_from_stored(Some(250)), 1.0);
-        assert_eq!(media_preview_volume_percent(0.354), 35);
-        assert_eq!(media_preview_volume_percent(1.5), 100);
-        assert_eq!(media_preview_volume_percent(-0.2), 0);
-    }
-
-    #[test]
-    fn directory_expand_levels_fallback_and_clamp() {
-        let fallback = 1_u8;
-        let levels = |stored: Option<u8>| {
-            preview_directory_expand_levels_from_stored(
-                &StoredPreviewPreferences {
-                    preview_directory_expand_levels: stored,
-                    ..StoredPreviewPreferences::default()
-                },
-                fallback,
-            )
-        };
-        assert_eq!(levels(None), 1);
-        assert_eq!(levels(Some(0)), 0);
-        assert_eq!(levels(Some(3)), 3);
-        // 越界存值归一化夹住，与 app-ui 历史行为一致。
-        assert_eq!(levels(Some(9)), 3);
-    }
-}
+#[path = "preview_config_tests.rs"]
+mod stored_preferences_migration_tests;

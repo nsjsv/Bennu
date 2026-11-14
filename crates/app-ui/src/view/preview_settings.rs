@@ -54,7 +54,7 @@ fn preview_extension_row(
     let title = match kind {
         config::PreviewFileSizeKind::Text => tr!("Extra Text Extensions"),
         config::PreviewFileSizeKind::Image => tr!("Image Preview Extensions"),
-        config::PreviewFileSizeKind::Video => tr!("Video Preview Extensions"),
+        config::PreviewFileSizeKind::Video => tr!("Extra Video Extensions"),
         config::PreviewFileSizeKind::Audio => tr!("Extra Audio Extensions"),
         config::PreviewFileSizeKind::Archive => tr!("Archive Preview Extensions"),
         config::PreviewFileSizeKind::Document => tr!("Document Preview Extensions"),

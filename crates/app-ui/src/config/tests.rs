@@ -230,9 +230,10 @@ fn user_preferences_round_trip_through_sqlite() {
     config.terminal_emulator = TerminalEmulator::Ghostty;
     config.file_operation_verification = FileOperationVerification::Strong;
     config.network_list_thumbnail_downloads_enabled = true;
-    config
-        .preview_size_limits
-        .set_limit(crate::config::PreviewSizeLimitKind::Video, 8 * 1024 * 1024);
+    config.preview_size_limits.set_limit(
+        crate::config::PreviewSizeLimitKind::Archive,
+        8 * 1024 * 1024,
+    );
     config.search_history.record_submission("report");
     config.search_history.record_submission("images");
     config.last_search_scope = Some(LastSearchScope::Directory(PathBuf::from("/srv/projects")));
@@ -304,7 +305,7 @@ fn user_preferences_round_trip_through_sqlite() {
         FileOperationVerification::Strong
     );
     assert!(loaded.network_list_thumbnail_downloads_enabled);
-    assert_eq!(loaded.preview_size_limits.video_bytes, 8 * 1024 * 1024);
+    assert_eq!(loaded.preview_size_limits.archive_bytes, 8 * 1024 * 1024);
     assert_eq!(loaded.search_history.entries(), ["images", "report"]);
     assert_eq!(
         loaded.last_search_scope,
@@ -708,7 +709,6 @@ fn default_user_config_keeps_expected_preview_defaults() {
         PreviewFileSizeLimits::with_default_limits()
     );
     assert_eq!(config.preview_size_limits.image_bytes, 100 * 1024 * 1024);
-    assert_eq!(config.preview_size_limits.video_bytes, 1024 * 1024 * 1024);
     assert_eq!(config.preview_size_limits.archive_bytes, 25 * 1024 * 1024);
     assert_eq!(config.preview_size_limits.document_bytes, 100 * 1024 * 1024);
     assert_eq!(config.preview_directory_expand_levels, 1);
@@ -790,14 +790,14 @@ fn per_kind_preview_limits_override_legacy_global_value() {
         r#"
 max_preview_file_bytes = 4194304
 max_preview_text_bytes = 1048576
-max_preview_video_bytes = 0
+max_preview_archive_bytes = 0
 preview_directory_expand_levels = 3
 "#,
         default_user_config(),
     );
 
     // 文本上限键不再迁移（文本没有上限）。
-    assert_eq!(parsed.preview_size_limits.video_bytes, 0);
+    assert_eq!(parsed.preview_size_limits.archive_bytes, 0);
     assert_eq!(parsed.preview_size_limits.image_bytes, 4 * 1024 * 1024);
     assert_eq!(parsed.preview_directory_expand_levels, 3);
 }
@@ -837,12 +837,12 @@ fn extension_rules_match_case_insensitively_and_support_compound_suffixes() {
 #[test]
 fn extension_rules_default_lists_mirror_builtin_types() {
     let rules = PreviewExtensionRules::default_rules();
-    // 文本、音频由类型库判定，额外后缀默认空。
+    // 文本、音频、视频由类型库判定，额外后缀默认空。
     assert!(rules.list(PreviewFileSizeKind::Text).is_empty());
     assert!(rules.list(PreviewFileSizeKind::Audio).is_empty());
+    assert!(rules.list(PreviewFileSizeKind::Video).is_empty());
     for (kind, expected) in [
         (PreviewFileSizeKind::Image, "png"),
-        (PreviewFileSizeKind::Video, "mp4"),
         (PreviewFileSizeKind::Sqlite, "sqlite"),
         (PreviewFileSizeKind::Archive, "7z"),
         (PreviewFileSizeKind::Document, "docx"),
@@ -930,19 +930,19 @@ fn preview_extension_rules_roundtrip_through_stored_preferences() {
     );
 
     // 单类型缺失时该类型回退默认，其他类型保留用户值。
-    config.preview_extension_rules.video = vec!["dat".to_owned()];
+    config.preview_extension_rules.document = vec!["dat".to_owned()];
     let mut stored = config.user_preferences().to_stored();
     let mut rules = stored
         .preview
         .preview_extension_rules
         .take()
         .expect("stored rules");
-    rules.video = None;
+    rules.document = None;
     stored.preview.preview_extension_rules = Some(rules);
     let restored = UserPreferences::from_stored(stored, &default).preferences;
     assert_eq!(
-        restored.preview_extension_rules.video,
-        default.preview_extension_rules.video
+        restored.preview_extension_rules.document,
+        default.preview_extension_rules.document
     );
     assert!(restored.preview_extension_rules.image.is_empty());
     assert_eq!(restored.preview_extension_rules.text, vec!["nfo", "cfg"]);

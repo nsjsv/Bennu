@@ -208,7 +208,7 @@ impl UserPreferences {
             max_preview_file_bytes: None,
             preview_text_size_bytes: None,
             preview_image_size_bytes: Some(self.preview_size_limits.image_bytes),
-            preview_video_size_bytes: Some(self.preview_size_limits.video_bytes),
+            preview_video_size_bytes: None,
             preview_audio_size_bytes: None,
             preview_archive_size_bytes: Some(self.preview_size_limits.archive_bytes),
             preview_document_size_bytes: Some(self.preview_size_limits.document_bytes),
@@ -216,7 +216,7 @@ impl UserPreferences {
             preview_extension_rules: Some(StoredPreviewExtensionRules {
                 text: None,
                 image: Some(self.preview_extension_rules.image.clone()),
-                video: Some(self.preview_extension_rules.video.clone()),
+                video: None,
                 audio: None,
                 sqlite: Some(self.preview_extension_rules.sqlite.clone()),
                 archive: Some(self.preview_extension_rules.archive.clone()),
@@ -231,6 +231,7 @@ impl UserPreferences {
                 self.media_preview_volume,
             )),
             audio_end_action: Some(self.audio_end_action.stored_name().to_owned()),
+            preview_extra_video_extensions: Some(self.preview_extension_rules.video.clone()),
         };
         stored.show_hidden_files = self.show_hidden_files;
         stored.language_setting = self.language_setting.config_value().to_owned();

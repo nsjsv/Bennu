@@ -32,7 +32,6 @@ fn preview_size_limit_row(
 ) -> SettingsRow<'_> {
     let title = match kind {
         config::PreviewSizeLimitKind::Image => tr!("Max Image Preview"),
-        config::PreviewSizeLimitKind::Video => tr!("Max Video Preview"),
         config::PreviewSizeLimitKind::Archive => tr!("Max Archive Preview"),
         config::PreviewSizeLimitKind::Document => tr!("Max Document Preview"),
         config::PreviewSizeLimitKind::Sqlite => tr!("Max SQLite Preview"),

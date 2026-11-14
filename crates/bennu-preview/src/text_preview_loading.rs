@@ -1,4 +1,5 @@
 //! 打开文本预览：先判定是不是文字、用什么编码（只看开头 64 KB），再读第一个窗口。
+//! 名字定不下来的文件（`.ts`）也在这里按内容定论，内容是视频就交还给分类那一层。
 //! 全部阻塞 I/O 放在 `spawn_blocking` 里：网络挂载上读一次可能要几十毫秒。
 
 use std::fs::File;
@@ -9,7 +10,6 @@ use encoding_rs::Encoding;
 use file_core::mime::{MimeDatabase, NameType, TEXT_PLAIN};
 use file_core::text_encoding::{reads_as_text, sniff_text_encoding, SniffedEncoding};
 
-use crate::preview::PreviewContent;
 use crate::preview_config::{PreviewExtensionRules, PreviewFileSizeKind};
 use crate::text_document::{open_text, ByteSource, TextDecoding, TextJump, TextOpened};
 use crate::text_preview::TextPreviewFormat;
@@ -24,6 +24,18 @@ struct TextFileInspection {
     format: TextPreviewFormat,
 }
 
+/// 按内容定论的结果。
+enum ContentVerdict {
+    Text(TextFileInspection),
+    Video,
+}
+
+/// 打开的结果：文字已经打开；或者内容其实是视频，该按视频预览打开。
+pub enum TextOpening {
+    Text(Arc<TextOpened>),
+    Video,
+}
+
 /// 编码怎么定：打开时识别，或用户手选（只对这次预览有效，文件改写重新打开时保留）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextEncodingChoice {
@@ -34,21 +46,21 @@ pub enum TextEncodingChoice {
 pub async fn load_initial_text_preview(
     path: PathBuf,
     rules: &PreviewExtensionRules,
-) -> Result<PreviewContent, String> {
+) -> Result<TextOpening, String> {
     let treat_as_text = rules.matches(PreviewFileSizeKind::Text, &path);
     blocking(move || {
         let file = open_file(&path)?;
-        let inspection = inspect_text_file(&path, &file, treat_as_text)?;
+        let inspection = match inspect_text_file(&path, &file, treat_as_text)? {
+            ContentVerdict::Text(inspection) => inspection,
+            ContentVerdict::Video => return Ok(TextOpening::Video),
+        };
         let decoding = TextDecoding::new(
             inspection.encoding.encoding,
             inspection.encoding.bom_length as u64,
         );
         let opened = open_text(file, decoding, false, inspection.format, TextJump::Start)
             .map_err(read_error)?;
-        Ok(PreviewContent::Text {
-            path,
-            opened: Arc::new(opened),
-        })
+        Ok(TextOpening::Text(Arc::new(opened)))
     })
     .await
 }
@@ -94,7 +106,7 @@ fn inspect_text_file(
     path: &Path,
     file: &File,
     treat_as_text: bool,
-) -> Result<TextFileInspection, String> {
+) -> Result<ContentVerdict, String> {
     let (sample, sample_is_whole_file) = read_text_sample(file)?;
     let types = MimeDatabase::system();
     let name_type = path
@@ -105,6 +117,9 @@ fn inspect_text_file(
         .as_deref()
         .is_some_and(|content_type| !types.is_subclass(content_type, TEXT_PLAIN));
     if is_typed_as_other && !treat_as_text {
+        if file_core::is_video_content(&name_type, &sample) {
+            return Ok(ContentVerdict::Video);
+        }
         return Err(not_text());
     }
     let encoding = detect_encoding(&sample, sample_is_whole_file)?;
@@ -114,7 +129,10 @@ fn inspect_text_file(
         }
         _ => TextPreviewFormat::Plain,
     };
-    Ok(TextFileInspection { encoding, format })
+    Ok(ContentVerdict::Text(TextFileInspection {
+        encoding,
+        format,
+    }))
 }
 
 fn detect_encoding(sample: &[u8], sample_is_whole_file: bool) -> Result<SniffedEncoding, String> {

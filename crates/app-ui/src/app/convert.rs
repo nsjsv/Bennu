@@ -287,6 +287,7 @@ impl fmt::Debug for ConvertState {
 #[derive(Debug, Clone)]
 pub(crate) enum ConvertMessage {
     OpenSelected,
+    SourcesClassified(Vec<(PathBuf, ConvertibleMediaKind)>),
     Submitted,
     FfmpegProbed {
         available: bool,
@@ -319,6 +320,7 @@ impl FileBrowser {
     pub(super) fn handle_convert_message(&mut self, message: ConvertMessage) -> Task<Message> {
         match message {
             ConvertMessage::OpenSelected => self.open_convert(),
+            ConvertMessage::SourcesClassified(sources) => self.show_convert(sources),
             ConvertMessage::Submitted => self.submit_convert(),
             ConvertMessage::FfmpegProbed {
                 available,
@@ -457,20 +459,19 @@ impl FileBrowser {
         if self.tab().location == BrowserLocation::Trash {
             return Task::none();
         }
+        Task::perform(
+            classify_convert_sources(self.selected_paths_for_operation()),
+            |sources| Message::Convert(ConvertMessage::SourcesClassified(sources)),
+        )
+    }
 
+    fn show_convert(&mut self, sources: Vec<(PathBuf, ConvertibleMediaKind)>) -> Task<Message> {
         let mut state = ConvertState::default();
-        for path in self.selected_paths_for_operation() {
-            match convertible_media_kind(&path) {
-                Some(ConvertibleMediaKind::Image) => {
-                    state.image_sources.push(path);
-                }
-                Some(ConvertibleMediaKind::Video) => {
-                    state.video_sources.push(path);
-                }
-                Some(ConvertibleMediaKind::Audio) => {
-                    state.audio_sources.push(path);
-                }
-                None => {}
+        for (path, kind) in sources {
+            match kind {
+                ConvertibleMediaKind::Image => state.image_sources.push(path),
+                ConvertibleMediaKind::Video => state.video_sources.push(path),
+                ConvertibleMediaKind::Audio => state.audio_sources.push(path),
             }
         }
         state.image = (!state.image_sources.is_empty()).then(ImageConvertOptions::default);
@@ -526,13 +527,32 @@ fn probe_media_tools_command() -> Task<Message> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ConvertibleMediaKind {
+pub(crate) enum ConvertibleMediaKind {
     Image,
     Video,
     Audio,
 }
 
-/// 转换源按扩展名分类;SVG 是矢量源,引擎无法处理,不进入对话框。
+/// 名字定不下来的视频后缀（`.ts`）要读开头内容，放到后台线程：网络挂载卡住也不冻界面。
+async fn classify_convert_sources(paths: Vec<PathBuf>) -> Vec<(PathBuf, ConvertibleMediaKind)> {
+    tokio::task::spawn_blocking(move || {
+        paths
+            .into_iter()
+            .filter_map(|path| convertible_media_kind(&path).map(|kind| (path, kind)))
+            .collect()
+    })
+    .await
+    .unwrap_or_else(|error| {
+        tracing::warn!(
+            target: "app_ui::convert",
+            error = %error,
+            "convert source classification worker failed"
+        );
+        Vec::new()
+    })
+}
+
+/// 转换源按文件类型分类;SVG 是矢量源,引擎无法处理,不进入对话框。
 fn convertible_media_kind(path: &Path) -> Option<ConvertibleMediaKind> {
     let is_svg = path
         .extension()
@@ -541,7 +561,7 @@ fn convertible_media_kind(path: &Path) -> Option<ConvertibleMediaKind> {
     if is_svg {
         return None;
     }
-    match file_core::supported_media_kind_for_path(path) {
+    match file_core::media_kind_for_file(path) {
         Some(file_core::SupportedMediaKind::Image) => Some(ConvertibleMediaKind::Image),
         Some(file_core::SupportedMediaKind::Video) => Some(ConvertibleMediaKind::Video),
         Some(file_core::SupportedMediaKind::Audio) => Some(ConvertibleMediaKind::Audio),
@@ -802,5 +822,28 @@ mod tests {
         );
         assert_eq!(convertible_media_kind(Path::new("/tmp/logo.svg")), None);
         assert_eq!(convertible_media_kind(Path::new("/tmp/notes.txt")), None);
+    }
+
+    #[test]
+    fn convertible_media_kind_follows_the_shared_video_rule() {
+        assert_eq!(
+            convertible_media_kind(Path::new("/tmp/old.rmvb")),
+            Some(ConvertibleMediaKind::Video)
+        );
+        // .ts 看内容：电视录像能转，代码不进对话框。
+        let directory = tempfile::tempdir().expect("temp dir");
+        let recording = directory.path().join("recording.ts");
+        let mut transport_stream = vec![0; 188 * 5];
+        for packet in transport_stream.chunks_mut(188) {
+            packet[0] = 0x47;
+        }
+        std::fs::write(&recording, transport_stream).expect("write recording");
+        let code = directory.path().join("component.ts");
+        std::fs::write(&code, "export const answer: number = 42;\n").expect("write code");
+        assert_eq!(
+            convertible_media_kind(&recording),
+            Some(ConvertibleMediaKind::Video)
+        );
+        assert_eq!(convertible_media_kind(&code), None);
     }
 }

@@ -17,8 +17,8 @@ fn joined(opened: &TextOpened) -> String {
 
 async fn opened(path: PathBuf, rules: &PreviewExtensionRules) -> Result<Arc<TextOpened>, String> {
     match load_initial_text_preview(path, rules).await? {
-        PreviewContent::Text { opened, .. } => Ok(opened),
-        _ => panic!("expected text preview"),
+        TextOpening::Text(opened) => Ok(opened),
+        TextOpening::Video => panic!("expected text preview"),
     }
 }
 
@@ -78,7 +78,7 @@ async fn binary_content_is_rejected_whatever_the_name() {
 }
 
 #[tokio::test]
-async fn typescript_is_text_but_mpeg_ts_is_not() {
+async fn typescript_is_text_but_mpeg_ts_is_video() {
     let temp_dir = tempdir().expect("temp dir");
     let rules = PreviewExtensionRules::default_rules();
     let source = temp_dir.path().join("index.ts");
@@ -94,7 +94,15 @@ async fn typescript_is_text_but_mpeg_ts_is_not() {
     }
     let video = temp_dir.path().join("clip.ts");
     std::fs::write(&video, transport_stream).expect("write transport stream");
-    assert_eq!(opened(video, &rules).await.err(), Some(not_text()));
+    assert!(matches!(
+        load_initial_text_preview(video.clone(), &rules).await,
+        Ok(TextOpening::Video)
+    ));
+
+    // 名字认不出的不为视频看内容：同样的字节没后缀仍是「不是文字」。
+    let unnamed = temp_dir.path().join("clip");
+    std::fs::copy(&video, &unnamed).expect("copy transport stream");
+    assert_eq!(opened(unnamed, &rules).await.err(), Some(not_text()));
 }
 
 #[tokio::test]

@@ -18,6 +18,8 @@ const BAR_WIDTH: f32 = 2.0;
 const BAR_PITCH: f32 = 3.0;
 const MIN_BAR_HEIGHT: f32 = 2.0;
 const PLAYHEAD_WIDTH: f32 = 2.0;
+/// 声谱图未播部分盖一层多深的黑。
+const UNPLAYED_SPECTROGRAM_DIM: f32 = 0.45;
 
 pub(crate) enum TimelinePicture {
     Waveform(Arc<AudioWaveform>),
@@ -203,16 +205,32 @@ where
                     bounds,
                     bounds,
                 );
-                fill(
-                    renderer,
-                    Rectangle {
-                        x: played_x - PLAYHEAD_WIDTH / 2.0,
-                        y: bounds.y,
-                        width: PLAYHEAD_WIDTH,
-                        height: bounds.height,
-                    },
-                    colors.primary,
-                );
+                // 渲染器在同一图层里先画所有矩形、后画图片，同层画的矩形会被图片盖住；
+                // 进度要另起一层才在图片上面。
+                renderer.with_layer(bounds, |renderer| {
+                    // 还没播的部分压暗，和波形的已播/未播两种颜色一样一眼看出播到哪。
+                    renderer.fill_quad(
+                        renderer::Quad {
+                            bounds: Rectangle {
+                                x: played_x,
+                                width: bounds.x + bounds.width - played_x,
+                                ..bounds
+                            },
+                            ..renderer::Quad::default()
+                        },
+                        Color::from_rgba(0.0, 0.0, 0.0, UNPLAYED_SPECTROGRAM_DIM),
+                    );
+                    fill(
+                        renderer,
+                        Rectangle {
+                            x: played_x - PLAYHEAD_WIDTH / 2.0,
+                            y: bounds.y,
+                            width: PLAYHEAD_WIDTH,
+                            height: bounds.height,
+                        },
+                        colors.primary,
+                    );
+                });
             }
         }
     }

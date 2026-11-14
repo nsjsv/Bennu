@@ -1,167 +1,91 @@
 //! 文本/Markdown 预览面板：自 app-ui view/text_preview_panel.rs 下沉。
-//! 渲染器敏感部件与共用词汇经参数由宿主注入——查看器（Paragraph 泛型
-//! 部件，宿主实例化）、模式切换行（segmented_choice_row 是设置窗口
-//! 共用词汇，5a 结论留 app-ui）；滚动接线经 ScrollRegionWiring 注入。
+//! 查看器（Paragraph 泛型部件）由宿主实例化注入；Markdown 渲染的滚动接线经
+//! ScrollRegionWiring 注入。查看器自己就是滚动区，外面只包细线滑块。
 
+use bennu_theme::controls::{segmented_choice_row, SegmentedChoice};
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
-use bennu_theme::styles::{
-    enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction, SCROLLBAR_HIT_WIDTH,
-};
 
 use crate::markdown_preview::markdown_preview_body;
 use crate::panel_text::readable_text;
 use crate::preview_message::PreviewMessage;
 use crate::scroll_wiring::ScrollRegionWiring;
 use crate::text_preview::{
-    MarkdownPreviewMode, TextPreviewDocument, TextPreviewFormat, TextPreviewLineLimitNotice,
+    MarkdownModeChoice, MarkdownPreviewMode, TextPreviewDocument, TextPreviewFormat,
 };
 use bennu_localization::tr;
-use iced::widget::{column, row, Column, Space};
-use iced::{Element, Length};
+use iced::widget::{column, Column};
+use iced::Element;
 
-// 参数即文本预览面板的完整输入（渲染产物 + 文档 + 接线），与调用点一一对应
-#[allow(clippy::too_many_arguments)]
 pub fn text_preview_panel<'a, Message>(
-    rendered: &'a str,
-    format: TextPreviewFormat,
-    line_limit_notice: Option<TextPreviewLineLimitNotice>,
     document: Option<&'a TextPreviewDocument>,
-    text_preview_content_height: f32,
     plain_viewer: impl Fn(&'a TextPreviewDocument) -> Element<'a, Message> + 'a,
-    text_scroll: ScrollRegionWiring<'a, Message>,
     markdown_scroll: ScrollRegionWiring<'static, Message>,
-    markdown_mode_switch: impl Fn(MarkdownPreviewMode) -> Element<'static, Message>,
 ) -> Column<'a, Message>
 where
-    Message: 'static + From<PreviewMessage>,
+    Message: 'static + Clone + From<PreviewMessage>,
 {
-    let line_limit_notice = document
-        .and_then(TextPreviewDocument::line_limit_notice)
-        .or(line_limit_notice);
-    let chunk_error = document.and_then(TextPreviewDocument::chunk_error);
-    let external_notice_is_visible =
-        text_preview_external_notice_is_visible(format, document, line_limit_notice);
-    let body: Element<'_, Message> = match format {
-        TextPreviewFormat::Plain => plain_text_preview_body(
-            document,
-            text_preview_content_height,
-            plain_viewer,
-            text_scroll,
-        ),
-        TextPreviewFormat::Markdown => markdown_text_preview_body(
-            rendered,
-            document,
-            line_limit_notice,
-            text_preview_content_height,
-            plain_viewer,
-            text_scroll,
-            markdown_scroll,
-            markdown_mode_switch,
-        ),
+    let Some(document) = document else {
+        return column![readable_text(tr!("Text preview is not ready"))];
+    };
+    let raw = || enhanced_scrollbar(plain_viewer(document), ScrollbarAxis::Vertical);
+    let body: Element<'a, Message> = match document.format() {
+        TextPreviewFormat::Plain => raw(),
+        TextPreviewFormat::Markdown => {
+            let choice = MarkdownModeChoice::for_document(document);
+            let body = match (choice, document.markdown()) {
+                (MarkdownModeChoice::Switchable(MarkdownPreviewMode::Rendered), Some(markdown)) => {
+                    markdown_preview_body(markdown, markdown_scroll)
+                }
+                _ => raw(),
+            };
+            column![markdown_mode_switch(choice), body]
+                .spacing(8)
+                .into()
+        }
     };
 
     let mut panel = column![body].spacing(8);
-    if external_notice_is_visible {
-        let Some(notice) = line_limit_notice else {
-            return panel;
-        };
-        panel = panel.push(text_preview_line_limit_notice(notice));
-    }
-    if let Some(error) = chunk_error {
-        panel = panel.push(text_preview_chunk_error(error));
+    if let Some(error) = document.read_error() {
+        panel = panel.push(readable_text(tr!(
+            "Could not load more text preview: %1",
+            error
+        )));
     }
     panel
 }
 
-fn plain_text_preview_body<'a, Message>(
-    document: Option<&'a TextPreviewDocument>,
-    content_height: f32,
-    plain_viewer: impl Fn(&'a TextPreviewDocument) -> Element<'a, Message> + 'a,
-    scroll: ScrollRegionWiring<'a, Message>,
-) -> Element<'a, Message>
+/// 渲染/原文切换行。超过 2 MB 的 Markdown 没有渲染全文，「渲染」置灰并说明原因。
+fn markdown_mode_switch<Message>(choice: MarkdownModeChoice) -> Element<'static, Message>
 where
-    Message: 'static + From<PreviewMessage>,
+    Message: 'static + Clone + From<PreviewMessage>,
 {
-    let Some(document) = document else {
-        return readable_text(tr!("Text preview is not ready")).into();
+    let select = |mode| {
+        Some(Message::from(PreviewMessage::MarkdownPreviewModeSelected(
+            mode,
+        )))
     };
-    let viewer = plain_viewer(document);
-    let geometry = scroll
-        .scrollable(
-            Space::new()
-                .width(Length::Fill)
-                .height(Length::Fixed(content_height.max(0.0)))
-                .into(),
-        )
-        .direction(enhanced_vertical_scrollbar_direction())
-        .style(enhanced_scrollbar_style)
-        .height(Length::Fill)
-        .width(Length::Fixed(SCROLLBAR_HIT_WIDTH));
-    // 只包几何宿主：查看器自己也经 operate 报告 scrollable，包整行会让滑块读到它。
-    row![
-        viewer,
-        enhanced_scrollbar(geometry, ScrollbarAxis::Vertical)
-    ]
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .into()
-}
-
-fn text_preview_line_limit_notice<Message: 'static>(
-    notice: TextPreviewLineLimitNotice,
-) -> Element<'static, Message> {
-    readable_text(notice.label()).into()
-}
-
-fn text_preview_chunk_error<Message: 'static>(error: &str) -> Element<'static, Message> {
-    readable_text(tr!("Could not load more text preview: %1", error)).into()
-}
-
-fn text_preview_external_notice_is_visible(
-    format: TextPreviewFormat,
-    document: Option<&TextPreviewDocument>,
-    notice: Option<TextPreviewLineLimitNotice>,
-) -> bool {
-    notice.is_some_and(|_| {
-        document
-            .filter(|document| {
-                format == TextPreviewFormat::Plain
-                    || document.markdown_preview_mode() == MarkdownPreviewMode::Raw
-            })
-            .map(TextPreviewDocument::is_scrolled_to_preview_end)
-            .unwrap_or(false)
-    })
-}
-// 参数与 text_preview_panel 同源，保持镜像签名
-#[allow(clippy::too_many_arguments)]
-fn markdown_text_preview_body<'a, Message>(
-    rendered: &'a str,
-    document: Option<&'a TextPreviewDocument>,
-    line_limit_notice: Option<TextPreviewLineLimitNotice>,
-    text_preview_content_height: f32,
-    plain_viewer: impl Fn(&'a TextPreviewDocument) -> Element<'a, Message> + 'a,
-    text_scroll: ScrollRegionWiring<'a, Message>,
-    markdown_scroll: ScrollRegionWiring<'static, Message>,
-    markdown_mode_switch: impl Fn(MarkdownPreviewMode) -> Element<'static, Message>,
-) -> Element<'a, Message>
-where
-    Message: 'static + From<PreviewMessage>,
-{
-    let Some(document) = document else {
-        return readable_text(tr!("Text preview is not ready")).into();
-    };
-    let mode = document.markdown_preview_mode();
-    let body = match mode {
-        MarkdownPreviewMode::Rendered => {
-            markdown_preview_body(rendered, line_limit_notice, markdown_scroll)
-        }
-        MarkdownPreviewMode::Raw => plain_text_preview_body(
-            Some(document),
-            text_preview_content_height,
-            plain_viewer,
-            text_scroll,
+    let (selected, rendered_message, rendered_tooltip) = match choice {
+        MarkdownModeChoice::Switchable(mode) => (mode, select(MarkdownPreviewMode::Rendered), None),
+        MarkdownModeChoice::RawOnly => (
+            MarkdownPreviewMode::Raw,
+            None,
+            Some(tr!(
+                "This file is larger than 2 MB, so only the raw text is shown."
+            )),
         ),
     };
-
-    column![markdown_mode_switch(mode), body].spacing(8).into()
+    segmented_choice_row(vec![
+        SegmentedChoice {
+            label: tr!("Rendered"),
+            selected: selected == MarkdownPreviewMode::Rendered,
+            message: rendered_message,
+            tooltip: rendered_tooltip,
+        },
+        SegmentedChoice {
+            label: tr!("Raw"),
+            selected: selected == MarkdownPreviewMode::Raw,
+            message: select(MarkdownPreviewMode::Raw),
+            tooltip: None,
+        },
+    ])
 }

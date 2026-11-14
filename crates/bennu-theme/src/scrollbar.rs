@@ -484,6 +484,42 @@ pub fn scrollbar_layout_probe<V>(
     }
 }
 
+/// 滑块沿轨道的起点与长度（轨道坐标）：长度按视口占内容的比例（不短于
+/// `SCROLLBAR_MIN_THUMB_LENGTH`），位置按 `offset / (content - viewport)` 映射到
+/// `track - thumb`。自己处理拖动的滚动区（文本查看器）用它保证命中与画出的滑块一致。
+pub fn scrollbar_thumb_span(
+    offset: f32,
+    viewport_extent: f32,
+    content_extent: f32,
+    track_length: f32,
+) -> Option<(f32, f32)> {
+    if !offset.is_finite()
+        || !viewport_extent.is_finite()
+        || !content_extent.is_finite()
+        || !track_length.is_finite()
+        || viewport_extent <= 0.0
+        || content_extent <= viewport_extent
+        || track_length <= 0.0
+    {
+        return None;
+    }
+
+    let ratio = (viewport_extent / content_extent).clamp(0.0, 1.0);
+    let thumb_length = (track_length * ratio)
+        .max(SCROLLBAR_MIN_THUMB_LENGTH.min(track_length))
+        .min(track_length);
+    let maximum_offset = (content_extent - viewport_extent).max(0.0);
+    let scroll_progress = if maximum_offset > f32::EPSILON {
+        (offset.clamp(0.0, maximum_offset) / maximum_offset).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    Some((
+        scroll_progress * (track_length - thumb_length).max(0.0),
+        thumb_length,
+    ))
+}
+
 /// 滑块在轨道坐标系内的矩形。厚度在细线与展开之间插值，贴轨道外缘、
 /// 向内长粗；长度与位置按 `offset / (content - viewport)` 映射到
 /// `track - thumb`，零偏移与最大偏移分别贴合轨道首尾。
@@ -509,28 +545,8 @@ fn scrollbar_thumb_bounds(
             track_size.height,
         ),
     };
-    if !offset.is_finite()
-        || !viewport_extent.is_finite()
-        || !content_extent.is_finite()
-        || !track_length.is_finite()
-        || viewport_extent <= 0.0
-        || content_extent <= viewport_extent
-        || track_length <= 0.0
-    {
-        return None;
-    }
-
-    let ratio = (viewport_extent / content_extent).clamp(0.0, 1.0);
-    let thumb_length = (track_length * ratio)
-        .max(SCROLLBAR_MIN_THUMB_LENGTH.min(track_length))
-        .min(track_length);
-    let maximum_offset = (content_extent - viewport_extent).max(0.0);
-    let scroll_progress = if maximum_offset > f32::EPSILON {
-        (offset.clamp(0.0, maximum_offset) / maximum_offset).clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
-    let thumb_offset = scroll_progress * (track_length - thumb_length).max(0.0);
+    let (thumb_offset, thumb_length) =
+        scrollbar_thumb_span(offset, viewport_extent, content_extent, track_length)?;
     let thickness = (SCROLLBAR_THIN_THICKNESS
         + (SCROLLBAR_EXPANDED_THICKNESS - SCROLLBAR_THIN_THICKNESS) * expansion.clamp(0.0, 1.0))
     .min(track_thickness);

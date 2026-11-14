@@ -1,7 +1,6 @@
 //! 预览窗口宿主适配层：面板本体已下沉 `bennu_preview::preview_panel`，
-//! 这里保持 `view_preview_window` 原签名（25 参数）不变，只负责把宿主
-//! 专属词汇与滚动管线接线拼装后注入——查看器实例化（渲染器敏感部件）、
-//! Markdown 模式切换行与 SQLite 标签行（segmented_choice_row 是设置窗口
+//! 这里只负责把宿主专属词汇与滚动管线接线拼装后注入——查看器实例化
+//! （渲染器敏感部件）、SQLite 标签行（segmented_choice_row 是设置窗口
 //! 共用词汇，5a 结论留 app-ui）、SQLite 拖选结束事件、smooth-scroll 与
 //! 视口回传闭包（scrollbar-guidelines 的宿主分工）。
 
@@ -9,9 +8,9 @@ use iced::Element;
 
 use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
 use crate::model::{
-    AudioPreviewPlayback, ImagePreviewViewport, MarkdownPreviewMode, Message, PreviewContent,
-    PreviewSize, PreviewState, ScrollbarRegion, SqlitePreviewMessage, SqlitePreviewTab,
-    TextPreviewDocument, VideoPreviewPlayback,
+    AudioPreviewPlayback, ImagePreviewViewport, Message, PreviewContent, PreviewSize, PreviewState,
+    ScrollbarRegion, SqlitePreviewMessage, SqlitePreviewTab, TextPreviewDocument,
+    VideoPreviewPlayback,
 };
 use bennu_preview::document_preview::{
     DocumentPreviewMessage, DocumentPreviewRequestKey, DocumentRenderKey, DocumentViewportKey,
@@ -33,7 +32,6 @@ pub(crate) fn view_preview_window<'a>(
     video_preview: Option<&'a VideoPreviewPlayback>,
     preview_bottom_controls_opacity: f32,
     operation_progress_animation_frame: u8,
-    text_preview_content_height: f32,
 ) -> Element<'a, Message> {
     bennu_preview::preview_panel::view_preview_window(
         preview,
@@ -45,63 +43,22 @@ pub(crate) fn view_preview_window<'a>(
         video_preview,
         preview_bottom_controls_opacity,
         operation_progress_animation_frame,
-        text_preview_content_height,
         directory_scroll_wiring(),
         archive_scroll_wiring(),
         // 文档视口 key 依赖当前文档，接线在此（而不是 wiring 辅助内）构造。
         document_scroll_wiring(preview),
-        text_scroll_wiring(),
         markdown_scroll_wiring(),
         sqlite_tables_scroll_wiring(),
         sqlite_data_scroll_wiring(),
-        // 查看器是渲染器敏感部件（Paragraph 泛型），宿主实例化注入；
-        // 内容事件走 PreviewMessage，滚轮走宿主滚动管线。
+        // 查看器是渲染器敏感部件（Paragraph 泛型），宿主实例化注入；它自己就是滚动区，
+        // 部件 id 用平滑滚动管线的区域 id，滚轮的 scroll_by 直接作用到它。
         |document: &TextPreviewDocument| {
-            let wheel_region = ScrollbarRegion::TextPreview;
             text_preview_viewer(
                 document,
-                // 滚动几何宿主是输入源：只镜像文档副本预取分块，不回推宿主。
-                |lines, _offset_y, viewport_height| {
-                    Message::from(PreviewMessage::TextPreviewContentScrolled {
-                        lines,
-                        viewport_height,
-                    })
-                },
-                move |delta| Message::SmoothScrollWheel(wheel_region.clone(), delta),
-                |content_height| {
-                    Message::from(PreviewMessage::TextPreviewContentHeightChanged(
-                        content_height,
-                    ))
-                },
-                // 查看器内部滚动（键盘/光标跟随）才回推宿主滚动位置。
-                |lines, offset_y, viewport_height| {
-                    Message::from(PreviewMessage::TextPreviewViewerScrolled {
-                        lines,
-                        offset_y,
-                        viewport_height,
-                    })
-                },
+                smooth_scroll_id(&ScrollbarRegion::TextPreview),
+                |delta| Message::SmoothScrollWheel(ScrollbarRegion::TextPreview, delta),
+                |event| Message::from(PreviewMessage::TextViewer(event)),
             )
-        },
-        |mode| {
-            segmented_choice_row(vec![
-                SegmentedChoice {
-                    label: tr!("Rendered"),
-                    selected: mode == MarkdownPreviewMode::Rendered,
-                    message: Some(Message::Preview(
-                        PreviewMessage::MarkdownPreviewModeSelected(MarkdownPreviewMode::Rendered),
-                    )),
-                    tooltip: None,
-                },
-                SegmentedChoice {
-                    label: tr!("Raw"),
-                    selected: mode == MarkdownPreviewMode::Raw,
-                    message: Some(Message::Preview(
-                        PreviewMessage::MarkdownPreviewModeSelected(MarkdownPreviewMode::Raw),
-                    )),
-                    tooltip: None,
-                },
-            ])
         },
         sqlite_tabs_row(sqlite_preview_state),
         || Message::DragSelectionFinished,
@@ -193,42 +150,14 @@ fn document_scroll_wiring(preview: Option<&PreviewState>) -> ScrollRegionWiring<
     }
 }
 
-// 纯文本几何宿主接线：视口回传把几何宿主的滚动位置同步给查看器
-// （TextPreviewViewportSynced，查看器从动不回推，见
-// text-preview-scrolling-guidelines）。'a 出现在 Fn 参数位（不变），
-// 须在面板借用期上实例化。
-fn text_scroll_wiring<'a>() -> ScrollRegionWiring<'a, Message> {
-    ScrollRegionWiring {
-        smooth_scroll_wrap: Box::new(|content| {
-            smooth_scroll_content(content, ScrollbarRegion::TextPreview)
-        }),
-        scrollable_id: smooth_scroll_id(&ScrollbarRegion::TextPreview),
-        on_scroll: Some(Box::new(|viewport| {
-            Message::Preview(PreviewMessage::TextPreviewViewportSynced {
-                offset_y: viewport.absolute_offset().y,
-                viewport_height: viewport.bounds().height,
-            })
-        })),
-    }
-}
-
-// Markdown 渲染体接线：滚动偏移随视口回传归档到文档滚动状态。
+// Markdown 渲染体接线：整篇已经在内存里，不需要视口回传。
 fn markdown_scroll_wiring<'a>() -> ScrollRegionWiring<'a, Message> {
     ScrollRegionWiring {
         smooth_scroll_wrap: Box::new(|content| {
             smooth_scroll_content(content, ScrollbarRegion::MarkdownPreview)
         }),
         scrollable_id: smooth_scroll_id(&ScrollbarRegion::MarkdownPreview),
-        on_scroll: Some(Box::new(|viewport| {
-            let offset = viewport.absolute_offset();
-            let bounds = viewport.bounds();
-            let content_bounds = viewport.content_bounds();
-            Message::Preview(PreviewMessage::MarkdownPreviewScrolled {
-                offset_y: offset.y,
-                viewport_height: bounds.height,
-                content_height: content_bounds.height,
-            })
-        })),
+        on_scroll: None,
     }
 }
 

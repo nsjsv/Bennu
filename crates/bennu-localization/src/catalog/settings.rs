@@ -82,7 +82,6 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Archive Preview Extensions", "压缩包预览后缀"),
     ("Document Preview Extensions", "文档预览后缀"),
     ("SQLite Preview Extensions", "SQLite 预览后缀"),
-    ("Max Text Preview", "最大文本预览"),
     ("Max Image Preview", "最大图片预览"),
     ("Max Video Preview", "最大视频预览"),
     ("Max Audio Preview", "最大音频预览"),

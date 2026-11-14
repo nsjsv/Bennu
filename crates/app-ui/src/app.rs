@@ -326,8 +326,8 @@ pub(crate) struct FileBrowser {
     pub(crate) options: ScanOptions,
     application_launch_request: ApplicationLaunchRequest,
     user_config: config::UserConfig,
-    pub(crate) preview_size_limit_mib_inputs: [String; 7],
-    pub(crate) preview_size_limit_mib_errors: [Option<String>; 7],
+    pub(crate) preview_size_limit_mib_inputs: [String; 6],
+    pub(crate) preview_size_limit_mib_errors: [Option<String>; 6],
     pub(crate) preview_extension_inputs: [String; 7],
     pub(crate) preview_extension_input_errors: [Option<String>; 7],
     pub(crate) preview_extension_expanded: [bool; 7],
@@ -499,13 +499,12 @@ impl FileBrowser {
         self.user_config.network_list_thumbnail_downloads_enabled
     }
 
+    /// 这个路径的预览大小上限，0 = 不限制（命令层的既有约定）。文本按需读取，没有上限；
+    /// 调用点都位于预览门禁之后，分类不会失败。
     pub(crate) fn preview_file_size_limit_for(&self, path: &Path) -> u64 {
-        // 调用点都位于预览门禁之后，分类必然成功；`None` 只可能来自
-        // 门禁外的元数据查询，按文本上限处理是安全的兜底。
-        let size_kind = classify_preview_path(path, &self.user_config.preview_extension_rules)
-            .map(PreviewPathKind::file_size_kind)
-            .unwrap_or(crate::config::PreviewFileSizeKind::Text);
-        self.user_config.preview_size_limits.limit(size_kind)
+        classify_preview_path(path, &self.user_config.preview_extension_rules)
+            .and_then(PreviewPathKind::size_limit_kind)
+            .map_or(0, |kind| self.user_config.preview_size_limits.limit(kind))
     }
 
     pub(crate) fn preview_directory_expand_levels(&self) -> u8 {
@@ -712,7 +711,7 @@ impl FileBrowser {
             preview_size_limit_mib_inputs: config::preview_size_limit_mib_inputs(
                 &user_config.preview_size_limits,
             ),
-            preview_size_limit_mib_errors: [const { None }; 7],
+            preview_size_limit_mib_errors: [const { None }; 6],
             preview_extension_inputs: [const { String::new() }; 7],
             preview_extension_input_errors: [const { None }; 7],
             preview_extension_expanded: [false; 7],
@@ -970,6 +969,13 @@ impl FileBrowser {
         if self.preview_engine.audio_preview_is_active() {
             subscriptions.push(audio_preview_tick_subscription().map(Message::Preview));
         }
+
+        // 预览中的文本文件被追加/改写时跟着变；没有文本预览时是空订阅。
+        subscriptions.push(
+            self.preview_engine
+                .text_file_watch_subscription()
+                .map(Message::Preview),
+        );
 
         if self.preview_engine.video_preview_is_active() {
             subscriptions.push(video_preview_tick_subscription().map(Message::Preview));

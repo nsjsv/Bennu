@@ -8,25 +8,24 @@ use iced::{alignment, Font, Padding, Pixels, Point, Rectangle, Size, Theme};
 
 use super::style::{placeholder_color, selection_color, text_color};
 use super::{
-    selection, visible_logical_lines, PreviewParagraph, TextPreviewViewerState,
-    TEXT_PREVIEW_DIVIDER_WIDTH, TEXT_PREVIEW_GUTTER_DIGIT_WIDTH,
-    TEXT_PREVIEW_GUTTER_HORIZONTAL_PADDING, TEXT_PREVIEW_GUTTER_MIN_WIDTH,
-    TEXT_PREVIEW_GUTTER_SPACING, TEXT_PREVIEW_LINE_HEIGHT, TEXT_PREVIEW_TEXT_SIZE,
-    TEXT_PREVIEW_VIEWER_PADDING,
+    selection, PreviewParagraph, TextPreviewViewerState, VisibleRow, TEXT_PREVIEW_DIVIDER_WIDTH,
+    TEXT_PREVIEW_GUTTER_DIGIT_WIDTH, TEXT_PREVIEW_GUTTER_HORIZONTAL_PADDING,
+    TEXT_PREVIEW_GUTTER_MIN_WIDTH, TEXT_PREVIEW_GUTTER_SPACING, TEXT_PREVIEW_LINE_HEIGHT,
+    TEXT_PREVIEW_TEXT_SIZE, TEXT_PREVIEW_VIEWER_PADDING,
 };
 use crate::text_preview::TextPreviewDocument;
 
-/// 选区高亮：直接按查看器坐标系绘制（选区状态自管后不再有
-/// 编辑器视口与查看器锚点的偏移差换算）。
+/// 选区高亮：直接按查看器坐标系绘制。
 pub(super) fn draw_selection_ranges(
     renderer: &mut impl TextRenderer<Paragraph = PreviewParagraph, Font = Font>,
     state: &TextPreviewViewerState,
     document: &TextPreviewDocument,
+    visible: &[VisibleRow],
     text_bounds: Rectangle,
     theme: &Theme,
 ) {
     let origin = text_bounds.position();
-    for quad in selection::selection_quads(state, document) {
+    for quad in selection::selection_quads(state, document, visible) {
         let bounds = Rectangle {
             x: quad.x + origin.x,
             y: quad.y + origin.y,
@@ -42,9 +41,11 @@ pub(super) fn draw_selection_ranges(
     }
 }
 
-pub(super) fn draw_visible_text_lines(
+pub(super) fn draw_visible_rows(
     renderer: &mut impl TextRenderer<Paragraph = PreviewParagraph, Font = Font>,
     state: &TextPreviewViewerState,
+    document: &TextPreviewDocument,
+    visible: &[VisibleRow],
     text_bounds: Rectangle,
     theme: &Theme,
     viewport: &Rectangle,
@@ -53,16 +54,13 @@ pub(super) fn draw_visible_text_lines(
         return;
     };
     let color = text_color(theme);
-    for entry in visible_logical_lines(state, text_bounds.height) {
-        let Some(text_line) = state
-            .retained_text_lines
-            .iter()
-            .find(|line| line.line_index == entry.line_index)
-        else {
+    for entry in visible {
+        let start = document.rows()[entry.index].start;
+        let Some(row) = state.retained_rows.iter().find(|row| row.start == start) else {
             continue;
         };
         renderer.fill_paragraph(
-            &text_line.paragraph,
+            &row.paragraph,
             Point::new(text_bounds.x, text_bounds.y + entry.visible_y),
             color,
             clip_bounds,
@@ -106,8 +104,13 @@ pub(super) fn text_bounds(bounds: Rectangle, document: &TextPreviewDocument) -> 
     .shrink(Padding::new(TEXT_PREVIEW_VIEWER_PADDING))
 }
 
+/// 行号栏按最大行号的位数定宽（统计完用总行数，统计中用估算值）。
+pub(super) fn line_number_digit_count(document: &TextPreviewDocument) -> usize {
+    document.largest_line_number().max(1).ilog10() as usize + 1
+}
+
 pub(super) fn text_preview_line_number_gutter_width(document: &TextPreviewDocument) -> f32 {
-    let digit_width = document.line_number_digit_count() as f32 * TEXT_PREVIEW_GUTTER_DIGIT_WIDTH;
+    let digit_width = line_number_digit_count(document) as f32 * TEXT_PREVIEW_GUTTER_DIGIT_WIDTH;
     let padding_width = TEXT_PREVIEW_GUTTER_HORIZONTAL_PADDING * 2.0;
 
     (digit_width + padding_width).max(TEXT_PREVIEW_GUTTER_MIN_WIDTH)
@@ -123,7 +126,7 @@ pub(super) fn line_number_bounds(gutter_bounds: Rectangle, y: f32) -> Rectangle 
 }
 
 pub(super) fn line_number_paragraph(
-    line_number: usize,
+    line_number: u64,
     digit_count: usize,
     gutter_width: f32,
 ) -> PreviewParagraph {
@@ -143,10 +146,11 @@ pub(super) fn line_number_paragraph(
     })
 }
 
-pub(super) fn text_line_paragraph(content: &str, width: f32, height: f32) -> PreviewParagraph {
+/// 高度不设限：换行后的真实高度要完整量出来。
+pub(super) fn text_line_paragraph(content: &str, width: f32) -> PreviewParagraph {
     PreviewParagraph::with_text(text::Text {
         content,
-        bounds: Size::new(width, height),
+        bounds: Size::new(width, f32::INFINITY),
         size: Pixels(TEXT_PREVIEW_TEXT_SIZE),
         line_height: text::LineHeight::Relative(TEXT_PREVIEW_LINE_HEIGHT),
         font: Font::MONOSPACE,

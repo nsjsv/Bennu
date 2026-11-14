@@ -232,7 +232,7 @@ fn user_preferences_round_trip_through_sqlite() {
     config.network_list_thumbnail_downloads_enabled = true;
     config
         .preview_size_limits
-        .set_limit(crate::config::PreviewFileSizeKind::Video, 8 * 1024 * 1024);
+        .set_limit(crate::config::PreviewSizeLimitKind::Video, 8 * 1024 * 1024);
     config.search_history.record_submission("report");
     config.search_history.record_submission("images");
     config.last_search_scope = Some(LastSearchScope::Directory(PathBuf::from("/srv/projects")));
@@ -707,7 +707,6 @@ fn default_user_config_keeps_expected_preview_defaults() {
         config.preview_size_limits,
         PreviewFileSizeLimits::with_default_limits()
     );
-    assert_eq!(config.preview_size_limits.text_bytes, 25 * 1024 * 1024);
     assert_eq!(config.preview_size_limits.image_bytes, 100 * 1024 * 1024);
     assert_eq!(config.preview_size_limits.video_bytes, 1024 * 1024 * 1024);
     assert_eq!(config.preview_size_limits.audio_bytes, 200 * 1024 * 1024);
@@ -798,7 +797,7 @@ preview_directory_expand_levels = 3
         default_user_config(),
     );
 
-    assert_eq!(parsed.preview_size_limits.text_bytes, 1024 * 1024);
+    // 文本上限键不再迁移（文本没有上限）。
     assert_eq!(parsed.preview_size_limits.video_bytes, 0);
     assert_eq!(parsed.preview_size_limits.image_bytes, 4 * 1024 * 1024);
     assert_eq!(parsed.preview_directory_expand_levels, 3);

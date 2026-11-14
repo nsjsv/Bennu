@@ -23,7 +23,6 @@ mod remote_cache;
 mod sqlite;
 #[cfg(test)]
 mod tests;
-mod text;
 mod tree;
 
 impl FileBrowser {
@@ -58,33 +57,6 @@ impl FileBrowser {
             }
             PreviewMessage::PreviewDirectoryChildrenLoaded(parent_path, outcome) => {
                 self.accept_preview_directory_children(parent_path, outcome)
-            }
-            PreviewMessage::TextPreviewViewerScrolled {
-                lines,
-                offset_y,
-                viewport_height,
-            } => self.handle_text_preview_viewer_scrolled(lines, offset_y, viewport_height),
-            PreviewMessage::TextPreviewViewportSynced {
-                offset_y,
-                viewport_height,
-            } => self.handle_text_preview_viewport_synced(offset_y, viewport_height),
-            PreviewMessage::TextPreviewContentHeightChanged(content_height) => {
-                self.preview_engine.text_preview_content_height = content_height;
-                Task::none()
-            }
-            PreviewMessage::MarkdownPreviewScrolled {
-                offset_y,
-                viewport_height,
-                content_height,
-            } => self
-                .preview_engine
-                .handle_markdown_preview_scrolled(offset_y, viewport_height, content_height)
-                .map(Message::Preview),
-            PreviewMessage::MarkdownPreviewModeSelected(mode) => {
-                if let Some(document) = self.preview_engine.text_preview_document.as_mut() {
-                    document.select_markdown_preview_mode(mode);
-                }
-                Task::none()
             }
             PreviewMessage::ImagePreviewDimensionsLoaded(path, generation, outcome) => {
                 self.accept_image_preview_dimensions(path, generation, outcome)

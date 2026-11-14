@@ -19,7 +19,8 @@ use crate::preview::{
     PreviewContent, RemotePreviewCacheMessage, RightPreviewPanelInfoSnapshot, VideoPreviewFrame,
 };
 use crate::sqlite_preview::SqlitePreviewMessage;
-use crate::text_preview::{MarkdownPreviewMode, TextPreviewChunk};
+use crate::text_document::{TextReadReply, TextViewerEvent};
+use crate::text_preview::MarkdownPreviewMode;
 
 #[derive(Debug, Clone)]
 pub enum PreviewMessage {
@@ -31,39 +32,20 @@ pub enum PreviewMessage {
     OriginalImagePreviewLoaded(PathBuf, u64, Result<OriginalImagePreview, String>),
     RetryImagePreview(PathBuf),
     PreviewDirectoryChildrenLoaded(PathBuf, Result<Vec<DirectoryEntry>, String>),
-    TextPreviewContentScrolled {
-        lines: i32,
-        viewport_height: f32,
+    /// 文本查看器的可见范围、跳转、超出窗口的复制。
+    TextViewer(TextViewerEvent),
+    /// 文本文档的后台读取回来了；`document` 不是当前文档就丢弃。
+    TextRead {
+        document: u64,
+        reply: TextReadReply,
     },
-    TextPreviewViewerScrolled {
-        lines: i32,
-        offset_y: f32,
-        viewport_height: f32,
-    },
-    TextPreviewViewportSynced {
-        offset_y: f32,
-        viewport_height: f32,
-    },
-    TextPreviewContentHeightChanged(f32),
-    TextPreviewChunkLoaded {
-        path: PathBuf,
-        generation: u64,
-        start_offset: u64,
-        outcome: Result<TextPreviewChunk, String>,
-    },
-    MarkdownPreviewScrolled {
-        offset_y: f32,
-        viewport_height: f32,
-        content_height: f32,
+    /// 预览中的文本文件可能变了（文件监视）。
+    TextFileChanged {
+        document: u64,
     },
     MarkdownPreviewModeSelected(MarkdownPreviewMode),
     /// 用户为当前文本预览指定编码；只对这次预览有效。
     TextPreviewEncodingSelected(&'static encoding_rs::Encoding),
-    TextPreviewReencoded {
-        path: PathBuf,
-        generation: u64,
-        outcome: Result<PreviewContent, String>,
-    },
     ImagePreviewDimensionsLoaded(PathBuf, u64, Result<(u32, u32), String>),
     PreviewImageViewport(PreviewImageViewportMessage),
     AnimatedImageFrameLoaded(AnimatedImageFrame),

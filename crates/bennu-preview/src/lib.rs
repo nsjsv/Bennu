@@ -45,7 +45,7 @@ pub mod original_image_preview;
 // 纯搬移：远程预览缓存（下载/容量预算/LRU 清理）自 app-ui 下沉。
 pub mod remote_preview_cache;
 // 纯搬移：文本预览分块加载自 app-ui 下沉。
-mod text_line_breaks;
+pub mod text_document;
 pub mod text_preview_loading;
 // 纯搬移：文本预览自绘查看器部件（滚动几何/自管光标选择/行号 gutter）
 // 自 app-ui 下沉。渲染器保持泛型（R: text::Renderer<Paragraph=…>）：

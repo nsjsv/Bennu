@@ -322,8 +322,8 @@ pub(crate) fn list_directory_size_display_mode_config_value(
 pub(crate) use bennu_preview::preview_config::{
     normalize_preview_directory_expand_levels, normalize_preview_extension,
     preview_size_limit_bytes_from_mib, preview_size_limit_mib, PreviewExtensionRules,
-    PreviewFileSizeKind, PreviewFileSizeLimits, DEFAULT_PREVIEW_DIRECTORY_EXPAND_LEVELS,
-    MAX_PREVIEW_DIRECTORY_EXPAND_LEVELS,
+    PreviewFileSizeKind, PreviewFileSizeLimits, PreviewSizeLimitKind,
+    DEFAULT_PREVIEW_DIRECTORY_EXPAND_LEVELS, MAX_PREVIEW_DIRECTORY_EXPAND_LEVELS,
 };
 
 #[derive(Debug, Clone)]
@@ -602,8 +602,8 @@ pub(crate) fn normalize_visible_column_count(count: usize) -> usize {
     count.clamp(MIN_VISIBLE_COLUMN_COUNT, MAX_VISIBLE_COLUMN_COUNT)
 }
 
-pub(crate) fn preview_size_limit_mib_inputs(limits: &PreviewFileSizeLimits) -> [String; 7] {
-    PreviewFileSizeKind::ALL.map(|kind| preview_size_limit_mib(limits.limit(kind)).to_string())
+pub(crate) fn preview_size_limit_mib_inputs(limits: &PreviewFileSizeLimits) -> [String; 6] {
+    PreviewSizeLimitKind::ALL.map(|kind| preview_size_limit_mib(limits.limit(kind)).to_string())
 }
 
 pub(crate) fn matugen_theme_file_path() -> PathBuf {

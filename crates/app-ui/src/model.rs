@@ -41,7 +41,7 @@ use crate::thumbnail_cache::ThumbnailLoadOutcome;
 use file_operations::FileOperationCompletion;
 use file_operations::QueuedTransfer;
 
-pub(crate) use crate::text_preview::{MarkdownPreviewMode, TextPreviewDocument};
+pub(crate) use crate::text_preview::TextPreviewDocument;
 pub(crate) use file_core::{TransferConflictItem, TransferConflictMetadata};
 
 mod address_bar;

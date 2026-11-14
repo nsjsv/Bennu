@@ -14,7 +14,6 @@ use iced::Task;
 use super::PreviewAcceptance;
 use crate::preview::{ImagePreviewContent, PreviewContent, PreviewState, PreviewWindowProfile};
 use crate::preview_message::PreviewMessage;
-use crate::text_preview::TextPreviewDocument;
 
 impl super::PreviewEngine {
     pub fn accept_preview(
@@ -45,15 +44,10 @@ impl super::PreviewEngine {
                     );
                 }
                 let command = match &preview {
-                    PreviewContent::Text { .. } => {
+                    PreviewContent::Text { path, opened } => {
                         self.clear_audio_preview();
                         self.clear_video_preview();
-                        self.text_preview_generation = self.text_preview_generation.wrapping_add(1);
-                        self.text_preview_document = TextPreviewDocument::from_loaded(
-                            &preview,
-                            self.text_preview_generation,
-                        );
-                        Task::none()
+                        self.open_text_document(path.clone(), opened)
                     }
                     PreviewContent::Audio { .. } => {
                         self.text_preview_document = None;

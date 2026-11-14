@@ -12,7 +12,7 @@ use crate::animated_image_preview::is_animated_image_preview_path;
 use crate::audio_preview::inspect_audio_preview_metadata;
 use crate::formatting::format_file_size;
 use crate::preview::{PreviewContent, PreviewTreeDirectoryChildren, PreviewTreeEntry};
-use crate::preview_config::{PreviewExtensionRules, PreviewFileSizeKind};
+use crate::preview_config::{PreviewExtensionRules, PreviewFileSizeKind, PreviewSizeLimitKind};
 use crate::sqlite_preview::load_sqlite_preview;
 use crate::text_preview_loading::load_initial_text_preview;
 
@@ -85,16 +85,25 @@ pub enum PreviewPathKind {
 }
 
 impl PreviewPathKind {
-    pub fn file_size_kind(self) -> PreviewFileSizeKind {
+    /// 适用哪一类大小上限；文本按需读取，没有上限。
+    pub fn size_limit_kind(self) -> Option<PreviewSizeLimitKind> {
         match self {
-            PreviewPathKind::Document => PreviewFileSizeKind::Document,
-            PreviewPathKind::Archive => PreviewFileSizeKind::Archive,
-            PreviewPathKind::Sqlite => PreviewFileSizeKind::Sqlite,
-            PreviewPathKind::AnimatedImage | PreviewPathKind::Image => PreviewFileSizeKind::Image,
-            PreviewPathKind::Video => PreviewFileSizeKind::Video,
-            PreviewPathKind::Audio => PreviewFileSizeKind::Audio,
-            PreviewPathKind::Text => PreviewFileSizeKind::Text,
+            PreviewPathKind::Document => Some(PreviewSizeLimitKind::Document),
+            PreviewPathKind::Archive => Some(PreviewSizeLimitKind::Archive),
+            PreviewPathKind::Sqlite => Some(PreviewSizeLimitKind::Sqlite),
+            PreviewPathKind::AnimatedImage | PreviewPathKind::Image => {
+                Some(PreviewSizeLimitKind::Image)
+            }
+            PreviewPathKind::Video => Some(PreviewSizeLimitKind::Video),
+            PreviewPathKind::Audio => Some(PreviewSizeLimitKind::Audio),
+            PreviewPathKind::Text => None,
         }
+    }
+
+    /// 要先把远程挂载上的文件整个下载到本地缓存才能预览（解码器、转换器只认本地文件）。
+    /// 文本按需读挂载路径，不下载（第五轮决定）。
+    pub fn needs_local_copy(self) -> bool {
+        self != PreviewPathKind::Text
     }
 }
 

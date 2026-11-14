@@ -17,8 +17,6 @@ use crate::preview_config::PreviewExtensionRules;
 use crate::preview_loading::{load_directory_preview_children, load_preview};
 use crate::preview_message::PreviewMessage;
 use crate::remote_preview_cache::{cache_remote_preview_file, RemotePreviewCacheRequest};
-use crate::text_preview::TextPreviewChunkRequest;
-use crate::text_preview_loading::load_text_preview_chunk;
 use crate::video_preview::{inspect_video_preview_metadata, load_video_preview_frame};
 
 const NETWORK_PREVIEW_CACHE_CHANNEL_SIZE: usize = 16;
@@ -231,20 +229,6 @@ pub fn animated_image_preview_command(
             )
         },
     )
-}
-
-pub fn text_preview_chunk_command(request: TextPreviewChunkRequest) -> Task<PreviewMessage> {
-    let path = request.path.clone();
-    let generation = request.generation;
-    let start_offset = request.start_offset;
-    Task::perform(load_text_preview_chunk(request), move |chunk_outcome| {
-        PreviewMessage::TextPreviewChunkLoaded {
-            path: path.clone(),
-            generation,
-            start_offset,
-            outcome: chunk_outcome,
-        }
-    })
 }
 
 pub fn start_audio_preview_command(path: PathBuf) -> Task<PreviewMessage> {

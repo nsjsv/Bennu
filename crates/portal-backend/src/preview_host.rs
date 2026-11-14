@@ -26,7 +26,7 @@ use bennu_preview::engine::{
 };
 use bennu_preview::image_preview_viewport::ImagePreviewViewport;
 use bennu_preview::preview::{AudioPreviewPlayback, PreviewState, PreviewWindowProfile};
-use bennu_preview::preview_config::{PreviewFileSizeKind, PreviewPreferences};
+use bennu_preview::preview_config::PreviewPreferences;
 use bennu_preview::preview_loading::{
     classify_preview_path, file_too_large_to_preview, PreviewPathKind,
 };
@@ -255,12 +255,11 @@ impl PreviewHost {
     }
 
     /// 分类器 + 上限查询的单一事实源（主软件 preview_file_size_limit_for
-    /// 的对齐物）：未识别扩展名兜底 Text 上限。
+    /// 的对齐物）：0 = 不限制；文本按需读取，没有上限。
     fn file_size_limit_for(&self, path: &Path) -> u64 {
-        let kind = classify_preview_path(path, &self.preferences.extension_rules)
-            .map(|classified| classified.file_size_kind())
-            .unwrap_or(PreviewFileSizeKind::Text);
-        self.preferences.size_limits.limit(kind)
+        classify_preview_path(path, &self.preferences.extension_rules)
+            .and_then(PreviewPathKind::size_limit_kind)
+            .map_or(0, |kind| self.preferences.size_limits.limit(kind))
     }
 
     fn open_preview_for_resolved_path(

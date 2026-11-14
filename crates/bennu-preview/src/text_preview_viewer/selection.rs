@@ -1,9 +1,9 @@
 //! 查看器自管的光标与选择状态。
 //!
-//! 定位模型：(逻辑行, 行内 byte 偏移)。几何换算复用 retained 段落的
-//! cosmic hit test —— `Hit::CharOffset` 即逻辑行内 byte 偏移；
-//! 选区高亮按视觉行拆分，列边界 x 由对段落二分 hit test 求得，
-//! 不保留第二份文本布局。
+//! 位置 = （显示行起点, 行内文字的字节下标）。文件末尾是（文件长度, 0），全选因此不用把
+//! 整篇读进来。几何换算复用 retained 段落的 hit test；选区高亮按视觉行拆分，列边界 x 由
+//! 对段落二分 hit test 求得。选区超出窗口时复制交给引擎在后台读。
+
 use iced::advanced::clipboard::Kind as ClipboardKind;
 use iced::advanced::mouse::{click, Click};
 use iced::advanced::text::{Hit, Paragraph};
@@ -12,63 +12,52 @@ use iced::widget::text_editor;
 use iced::{mouse, Point, Rectangle, Size};
 
 use super::{
-    base_line_height, line_height_of, visible_logical_lines, TextPreviewViewerState,
-    TEXT_PREVIEW_DRAG_THRESHOLD_PX,
+    base_line_height, row_height, scroll_viewer_by, visible_rows, TextPreviewViewerState,
+    VisibleRow, TEXT_PREVIEW_DRAG_THRESHOLD_PX,
 };
-use crate::text_preview::TextPreviewDocument;
-/// 光标或选择端点：逻辑行 + 行内 byte 偏移。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct TextPos {
-    pub(crate) line: usize,
-    pub(crate) column: usize,
-}
+use crate::text_document::{TextJump, TextPosition, TextPreviewDocument, TextViewerEvent};
 
-fn line_len(document: &TextPreviewDocument, line: usize) -> usize {
-    document.line(line).map(str::len).unwrap_or(0)
-}
-
-/// 视口内坐标（text_bounds 相对）→ 光标位置。
-/// 段落缓存缺失（行高量测回填后可见集合先行变化）时退化为行首，
-/// 保证"单击清除选区"的语义不因缓存时序失效。
+/// 视口内坐标（text_bounds 相对）→ 光标位置。段落缓存缺失时退化为行首，
+/// 保证「单击清除选区」的语义不因缓存时序失效。
 pub(crate) fn hit_test(
     state: &TextPreviewViewerState,
     document: &TextPreviewDocument,
     position: Point,
-) -> Option<TextPos> {
-    let viewport_height = state.viewport_height;
-    let mut last_visible: Option<(usize, f32)> = None;
-    for entry in visible_logical_lines(state, viewport_height) {
+) -> Option<TextPosition> {
+    let rows = document.rows();
+    let mut last_visible = None;
+    for entry in visible_rows(state, document) {
         if position.y < entry.visible_y {
             break;
         }
+        let row = &rows[entry.index];
         if position.y < entry.visible_y + entry.height {
             let column = match state
-                .retained_text_lines
+                .retained_rows
                 .iter()
-                .find(|line| line.line_index == entry.line_index)
+                .find(|retained| retained.start == row.start)
             {
-                Some(paragraph) => paragraph
+                Some(retained) => retained
                     .paragraph
                     .hit_test(Point::new(position.x, position.y - entry.visible_y))
                     .map(Hit::cursor)
-                    .unwrap_or_else(|| line_len(document, entry.line_index)),
+                    .unwrap_or(row.text.len()),
                 None => 0,
             };
-            return Some(TextPos {
-                line: entry.line_index,
+            return Some(TextPosition {
+                row: row.start,
                 column,
             });
         }
-        last_visible = Some((entry.line_index, entry.visible_y));
+        last_visible = Some(TextPosition {
+            row: row.start,
+            column: row.text.len(),
+        });
     }
-    last_visible.map(|(line, _)| TextPos {
-        line,
-        column: line_len(document, line),
-    })
+    last_visible
 }
 
-/// 按下：按点击次数定位光标/选区并记录拖动起点，返回本次 Click
-///（供调用方存入 last_click 状态）。
+/// 按下：按点击次数定位光标/选区并记录拖动起点。
 pub(super) fn press(
     state: &mut TextPreviewViewerState,
     document: &TextPreviewDocument,
@@ -77,39 +66,27 @@ pub(super) fn press(
     let click = Click::new(position, mouse::Button::Left, state.last_click);
     let kind = click.kind();
     match hit_test(state, document, position) {
-        Some(pos) => match kind {
-            click::Kind::Single => {
-                state.cursor = Some(pos);
-                state.anchor = Some(pos);
-            }
-            click::Kind::Double => {
-                let text = document.line(pos.line).unwrap_or_default();
-                let (start, end) = word_range(text, pos.column);
-                state.anchor = Some(TextPos {
-                    line: pos.line,
-                    column: start,
-                });
-                state.cursor = Some(TextPos {
-                    line: pos.line,
-                    column: end,
-                });
-            }
-            click::Kind::Triple => {
-                state.anchor = Some(TextPos {
-                    line: pos.line,
-                    column: 0,
-                });
-                state.cursor = Some(TextPos {
-                    line: pos.line,
-                    column: document.line(pos.line).map(str::len).unwrap_or(0),
-                });
-            }
-        },
-        // 定位失败（空文档等）也必须清掉残留选区：
-        // 单击清除选择是硬语义，不能因定位失败而跳过。
+        Some(pos) => {
+            let text = row_text(document, pos.row);
+            let (anchor, cursor) = match kind {
+                click::Kind::Single => (pos.column, pos.column),
+                click::Kind::Double => word_range(text, pos.column),
+                // 三击选点中的那一段（超长行切开的段各自独立，第六轮决定）。
+                click::Kind::Triple => (0, text.len()),
+            };
+            state.selection_anchor = Some(TextPosition {
+                row: pos.row,
+                column: anchor,
+            });
+            state.cursor = Some(TextPosition {
+                row: pos.row,
+                column: cursor,
+            });
+        }
+        // 定位失败（空文档等）也必须清掉残留选区。
         None => {
             state.cursor = None;
-            state.anchor = None;
+            state.selection_anchor = None;
         }
     }
     state.is_focused = true;
@@ -157,96 +134,75 @@ pub(super) fn release(state: &mut TextPreviewViewerState) -> bool {
     state.drag_click.take().is_some()
 }
 
-/// 键盘 Motion → 新光标位置；文档边界处原地不动。
-/// 上/下按逻辑行移动并保持列（byte 偏移）钳制到目标行长。
+fn row_text(document: &TextPreviewDocument, row: u64) -> &str {
+    document
+        .row_index(row)
+        .ok()
+        .map_or("", |index| document.rows()[index].text.as_str())
+}
+
+/// 键盘 Motion → 新光标位置，只在窗口里移动；文件头/尾直接给出位置，由滚动跟随
+/// 去请求那里的内容。
 pub(crate) fn move_position(
     document: &TextPreviewDocument,
-    from: TextPos,
+    from: TextPosition,
     motion: text_editor::Motion,
-    visible_line_count: usize,
-) -> TextPos {
-    let line_count = document.line_count();
-    let last = line_count.saturating_sub(1);
-    let clamp_to = |line: usize, column: usize| TextPos {
-        line,
-        column: column.min(line_len(document, line)),
+    visible_row_count: usize,
+) -> TextPosition {
+    let rows = document.rows();
+    let document_start = TextPosition {
+        row: document.data_start(),
+        column: 0,
     };
+    let document_end = TextPosition {
+        row: document.len(),
+        column: 0,
+    };
+    let Ok(index) = document.row_index(from.row) else {
+        return match motion {
+            text_editor::Motion::DocumentStart => document_start,
+            text_editor::Motion::DocumentEnd => document_end,
+            _ => from,
+        };
+    };
+    let text = rows[index].text.as_str();
+    let at = |index: usize, column: usize| TextPosition {
+        row: rows[index].start,
+        column: rows[index].text.floor_char_boundary(column),
+    };
+    let row_end = |index: usize| at(index, usize::MAX);
+    let last = rows.len() - 1;
     match motion {
-        text_editor::Motion::Left => {
-            if from.column > 0 {
-                clamp_to(
-                    from.line,
-                    prev_boundary(document.line(from.line).unwrap_or_default(), from.column),
-                )
-            } else if from.line > 0 {
-                TextPos {
-                    line: from.line - 1,
-                    column: line_len(document, from.line - 1),
-                }
-            } else {
-                from
-            }
+        text_editor::Motion::Left if from.column > 0 => at(index, prev_boundary(text, from.column)),
+        text_editor::Motion::Left if index > 0 => row_end(index - 1),
+        text_editor::Motion::Right if from.column < text.len() => {
+            at(index, next_boundary(text, from.column))
         }
-        text_editor::Motion::Right => {
-            let len = line_len(document, from.line);
-            if from.column < len {
-                clamp_to(
-                    from.line,
-                    next_boundary(document.line(from.line).unwrap_or_default(), from.column),
-                )
-            } else if from.line < last {
-                TextPos {
-                    line: from.line + 1,
-                    column: 0,
-                }
-            } else {
-                from
-            }
-        }
-        text_editor::Motion::Up => {
-            if from.line > 0 {
-                clamp_to(from.line - 1, from.column)
-            } else {
-                TextPos { line: 0, column: 0 }
-            }
-        }
-        text_editor::Motion::Down => {
-            if from.line < last {
-                clamp_to(from.line + 1, from.column)
-            } else {
-                TextPos {
-                    line: last,
-                    column: line_len(document, last),
-                }
-            }
-        }
-        text_editor::Motion::Home => TextPos {
-            line: from.line,
-            column: 0,
-        },
-        text_editor::Motion::End => clamp_to(from.line, usize::MAX),
-        text_editor::Motion::WordLeft => word_left(document, from),
-        text_editor::Motion::WordRight => word_right(document, from, last),
-        text_editor::Motion::PageUp => {
-            let line = from
-                .line
-                .saturating_sub(visible_line_count.saturating_sub(1));
-            clamp_to(line, from.column)
-        }
-        text_editor::Motion::PageDown => {
-            let line = (from.line + visible_line_count.saturating_sub(1)).min(last);
-            clamp_to(line, from.column)
-        }
-        text_editor::Motion::DocumentStart => TextPos { line: 0, column: 0 },
-        text_editor::Motion::DocumentEnd => clamp_to(last, usize::MAX),
+        text_editor::Motion::Right if index < last => at(index + 1, 0),
+        text_editor::Motion::Left | text_editor::Motion::Right => from,
+        text_editor::Motion::Up if index > 0 => at(index - 1, from.column),
+        text_editor::Motion::Up => at(0, 0),
+        text_editor::Motion::Down if index < last => at(index + 1, from.column),
+        text_editor::Motion::Down => row_end(last),
+        text_editor::Motion::Home => at(index, 0),
+        text_editor::Motion::End => row_end(index),
+        text_editor::Motion::WordLeft => word_left(document, index, from.column),
+        text_editor::Motion::WordRight => word_right(document, index, from.column),
+        text_editor::Motion::PageUp => at(
+            index.saturating_sub(visible_row_count.saturating_sub(1)),
+            from.column,
+        ),
+        text_editor::Motion::PageDown => at(
+            (index + visible_row_count.saturating_sub(1)).min(last),
+            from.column,
+        ),
+        text_editor::Motion::DocumentStart => document_start,
+        text_editor::Motion::DocumentEnd => document_end,
     }
 }
 
 fn prev_boundary(text: &str, column: usize) -> usize {
-    let mut column = column.min(text.len());
-    while column > 0 && !text.is_char_boundary(column) {
-        column -= 1;
-    }
+    let column = text.floor_char_boundary(column);
     text[..column]
         .chars()
         .next_back()
@@ -269,44 +225,46 @@ fn is_word_char(text: &str, index: usize) -> bool {
         .is_some_and(|c| c.is_alphanumeric() || c == '_')
 }
 
-fn word_left(document: &TextPreviewDocument, from: TextPos) -> TextPos {
-    let text = document.line(from.line).unwrap_or_default();
-    let mut column = from.column.min(text.len());
+fn word_left(document: &TextPreviewDocument, index: usize, from: usize) -> TextPosition {
+    let rows = document.rows();
+    let text = rows[index].text.as_str();
+    let mut column = from.min(text.len());
     while column > 0 && !is_word_char(text, prev_boundary(text, column)) {
         column = prev_boundary(text, column);
     }
     while column > 0 && is_word_char(text, prev_boundary(text, column)) {
         column = prev_boundary(text, column);
     }
-    if column == from.column && from.line > 0 {
-        return TextPos {
-            line: from.line - 1,
-            column: line_len(document, from.line - 1),
+    if column == from && index > 0 {
+        return TextPosition {
+            row: rows[index - 1].start,
+            column: rows[index - 1].text.len(),
         };
     }
-    TextPos {
-        line: from.line,
+    TextPosition {
+        row: rows[index].start,
         column,
     }
 }
 
-fn word_right(document: &TextPreviewDocument, from: TextPos, last: usize) -> TextPos {
-    let text = document.line(from.line).unwrap_or_default();
-    let mut column = from.column.min(text.len());
+fn word_right(document: &TextPreviewDocument, index: usize, from: usize) -> TextPosition {
+    let rows = document.rows();
+    let text = rows[index].text.as_str();
+    let mut column = from.min(text.len());
     while column < text.len() && !is_word_char(text, column) {
         column = next_boundary(text, column);
     }
     while column < text.len() && is_word_char(text, column) {
         column = next_boundary(text, column);
     }
-    if column == from.column && from.line < last {
-        return TextPos {
-            line: from.line + 1,
+    if column == from && index + 1 < rows.len() {
+        return TextPosition {
+            row: rows[index + 1].start,
             column: 0,
         };
     }
-    TextPos {
-        line: from.line,
+    TextPosition {
+        row: rows[index].start,
         column,
     }
 }
@@ -316,10 +274,7 @@ pub(crate) fn word_range(text: &str, column: usize) -> (usize, usize) {
     if text.is_empty() {
         return (0, 0);
     }
-    let mut start = column.min(text.len());
-    while start > 0 && !text.is_char_boundary(start) {
-        start -= 1;
-    }
+    let mut start = text.floor_char_boundary(column);
     let class_at = |index: usize| {
         text[index..]
             .chars()
@@ -354,86 +309,116 @@ pub(crate) fn word_range(text: &str, column: usize) -> (usize, usize) {
     (start, end)
 }
 
-/// 选区文本（有序端点间），跨行以 `\n` 连接。
+/// 选区全在窗口里时直接拼出文字：同一原始行的各段直接相连，原始行之间补 `\n`。
+/// 有一端在窗口外时 None（交给引擎后台读）。
 pub(crate) fn selection_text(
     document: &TextPreviewDocument,
-    anchor: TextPos,
-    cursor: TextPos,
+    anchor: TextPosition,
+    cursor: TextPosition,
 ) -> Option<String> {
     let (start, end) = ordered(anchor, cursor);
-    if start.line == end.line {
-        let text = document.line(start.line)?;
-        return Some(text[start.column..end.column].to_owned());
-    }
+    let rows = document.rows();
+    let first = document.row_index(start.row).ok()?;
+    let last = match document.row_index(end.row) {
+        Ok(index) => index,
+        // 选到文件尾：窗口到达文件尾时就是最后一行之后。
+        Err(index) if end.row == document.len() && document.at_end() => index,
+        Err(_) => return None,
+    };
     let mut out = String::new();
-    out.push_str(&document.line(start.line)?[start.column..]);
-    for line in start.line + 1..end.line {
-        out.push('\n');
-        out.push_str(document.line(line)?);
+    let last = last.min(rows.len().saturating_sub(1));
+    for (index, row) in rows.iter().enumerate().take(last + 1).skip(first) {
+        if row.start == end.row && end.column == 0 && index != first {
+            if row.is_line_start() {
+                out.push('\n');
+            }
+            break;
+        }
+        if index != first && row.is_line_start() {
+            out.push('\n');
+        }
+        let low = if index == first {
+            row.text.floor_char_boundary(start.column)
+        } else {
+            0
+        };
+        let high = if row.start == end.row {
+            row.text.floor_char_boundary(end.column)
+        } else {
+            row.text.len()
+        };
+        if low < high {
+            out.push_str(&row.text[low..high]);
+        }
+        if row.start == end.row {
+            break;
+        }
     }
-    out.push('\n');
-    out.push_str(&document.line(end.line)?[..end.column]);
     Some(out)
 }
 
-fn ordered(a: TextPos, b: TextPos) -> (TextPos, TextPos) {
-    if (a.line, a.column) <= (b.line, b.column) {
+fn ordered(a: TextPosition, b: TextPosition) -> (TextPosition, TextPosition) {
+    if a <= b {
         (a, b)
     } else {
         (b, a)
     }
 }
 
-/// 选区高亮矩形（text_bounds 相对坐标）：按可见逻辑行的视觉行拆分，
-/// 列边界 x 用二分 hit test 求得，每视觉行成本 O(log 列数)。
+/// 选区高亮矩形（text_bounds 相对坐标）：按可见行的视觉行拆分，列边界 x 用二分
+/// hit test 求得，每视觉行成本 O(log 列数)。
 pub(crate) fn selection_quads(
     state: &TextPreviewViewerState,
     document: &TextPreviewDocument,
+    visible: &[VisibleRow],
 ) -> Vec<Rectangle> {
-    let Some((anchor, cursor)) = state.anchor.zip(state.cursor) else {
+    let Some((anchor, cursor)) = state.selection_anchor.zip(state.cursor) else {
         return Vec::new();
     };
     let (start, end) = ordered(anchor, cursor);
-    let viewport_height = state.viewport_height;
+    if start == end {
+        return Vec::new();
+    }
     let base = base_line_height();
+    let rows = document.rows();
 
     let mut quads = Vec::new();
-    for entry in visible_logical_lines(state, viewport_height) {
-        if entry.line_index < start.line || entry.line_index > end.line {
+    for entry in visible {
+        let row = &rows[entry.index];
+        if row.start < start.row && row.end <= start.row
+            || row.start > end.row
+            || row.start == end.row && end.column == 0 && start.row != end.row
+        {
             continue;
         }
         let Some(retained) = state
-            .retained_text_lines
+            .retained_rows
             .iter()
-            .find(|line| line.line_index == entry.line_index)
+            .find(|retained| retained.start == row.start)
         else {
             continue;
         };
-        let Some(text) = document.line(entry.line_index) else {
-            continue;
-        };
+        let text = row.text.as_str();
         let paragraph = &retained.paragraph;
-        let row_height = paragraph.min_bounds().height;
-        let row_count = ((row_height / base).round() as usize).max(1);
+        let row_height_px = paragraph.min_bounds().height;
+        let visual_rows = ((row_height_px / base).round() as usize).max(1);
         let width = paragraph.min_bounds().width.max(1.0);
         // 每个视觉行的高亮 = 该视觉行字符范围 ∩ 选区 byte 范围。
-        // 以前只对首/尾视觉行应用选区端点，单点光标落在 wrap 续行
-        // （中间视觉行）时会被整行画出——表现为"单击选中一段"。
-        let sel_lo = if start.line == entry.line_index {
+        let sel_lo = if start.row == row.start {
             start.column
         } else {
             0
         };
-        let sel_hi = if end.line == entry.line_index {
+        let sel_hi = if end.row == row.start {
             end.column
         } else {
             text.len()
         };
 
-        for row in 0..row_count {
-            let row_y = entry.visible_y + row as f32 * base;
-            let mid_y = row as f32 * base + base * 0.5;
-            let (row_start, row_end) = if row_count == 1 {
+        for visual in 0..visual_rows {
+            let row_y = entry.visible_y + visual as f32 * base;
+            let mid_y = visual as f32 * base + base * 0.5;
+            let (row_start, row_end) = if visual_rows == 1 {
                 (0, text.len())
             } else {
                 (
@@ -494,46 +479,41 @@ pub(super) fn apply_key_binding<Message>(
 ) {
     match binding {
         text_editor::Binding::Copy | text_editor::Binding::Cut => {
-            if let (Some(anchor), Some(cursor)) = (state.anchor, state.cursor) {
-                if let Some(text) = selection_text(document, anchor, cursor) {
-                    if !text.is_empty() {
-                        clipboard.write(ClipboardKind::Standard, text);
-                    }
-                }
-            }
+            copy_selection(state, document, clipboard)
         }
         text_editor::Binding::Move(motion) => apply_motion(state, document, motion, false),
         text_editor::Binding::Select(motion) => apply_motion(state, document, motion, true),
         text_editor::Binding::SelectWord => {
-            let cursor = state.cursor.unwrap_or(TextPos { line: 0, column: 0 });
-            let text = document.line(cursor.line).unwrap_or_default();
-            let (start, end) = word_range(text, cursor.column);
-            state.anchor = Some(TextPos {
-                line: cursor.line,
+            let cursor = state.cursor.unwrap_or(default_position(state));
+            let (start, end) = word_range(row_text(document, cursor.row), cursor.column);
+            state.selection_anchor = Some(TextPosition {
+                row: cursor.row,
                 column: start,
             });
-            state.cursor = Some(TextPos {
-                line: cursor.line,
+            state.cursor = Some(TextPosition {
+                row: cursor.row,
                 column: end,
             });
         }
         text_editor::Binding::SelectLine => {
-            let cursor = state.cursor.unwrap_or(TextPos { line: 0, column: 0 });
-            state.anchor = Some(TextPos {
-                line: cursor.line,
+            let cursor = state.cursor.unwrap_or(default_position(state));
+            state.selection_anchor = Some(TextPosition {
+                row: cursor.row,
                 column: 0,
             });
-            state.cursor = Some(TextPos {
-                line: cursor.line,
-                column: document.line(cursor.line).map(str::len).unwrap_or(0),
+            state.cursor = Some(TextPosition {
+                row: cursor.row,
+                column: row_text(document, cursor.row).len(),
             });
         }
         text_editor::Binding::SelectAll => {
-            let last = document.line_count().saturating_sub(1);
-            state.anchor = Some(TextPos { line: 0, column: 0 });
-            state.cursor = Some(TextPos {
-                line: last,
-                column: document.line(last).map(str::len).unwrap_or(0),
+            state.selection_anchor = Some(TextPosition {
+                row: document.data_start(),
+                column: 0,
+            });
+            state.cursor = Some(TextPosition {
+                row: document.len(),
+                column: 0,
             });
         }
         text_editor::Binding::Sequence(sequence) => {
@@ -551,53 +531,92 @@ pub(super) fn apply_key_binding<Message>(
     }
 }
 
-/// 光标移动：非扩展移动取消选区（anchor 跟随光标），
-/// 扩展移动保留 anchor 形成选区；随后滚动跟随使光标行可见。
+/// 复制：选区在窗口里直接写剪贴板；超出窗口交给引擎后台读（超过 15 MB 引擎不复制）。
+fn copy_selection(
+    state: &mut TextPreviewViewerState,
+    document: &TextPreviewDocument,
+    clipboard: &mut dyn Clipboard,
+) {
+    let Some((anchor, cursor)) = state.selection_anchor.zip(state.cursor) else {
+        return;
+    };
+    if anchor == cursor {
+        return;
+    }
+    match selection_text(document, anchor, cursor) {
+        Some(text) if !text.is_empty() => clipboard.write(ClipboardKind::Standard, text),
+        Some(_) => {}
+        None => {
+            let (from, to) = ordered(anchor, cursor);
+            state
+                .pending_events
+                .push(TextViewerEvent::CopyRequested { from, to });
+        }
+    }
+}
+
+fn default_position(state: &TextPreviewViewerState) -> TextPosition {
+    TextPosition {
+        row: state.anchor,
+        column: 0,
+    }
+}
+
+/// 光标移动：非扩展移动取消选区（anchor 跟随光标），扩展移动保留 anchor 形成选区；
+/// 随后滚动跟随使光标行可见。
 fn apply_motion(
     state: &mut TextPreviewViewerState,
     document: &TextPreviewDocument,
     motion: text_editor::Motion,
     extend: bool,
 ) {
-    let from = state.cursor.unwrap_or(TextPos { line: 0, column: 0 });
-    let viewport_height = state.viewport_height;
-    let visible_line_count = ((viewport_height / base_line_height()).floor() as usize).max(1);
-    let to = move_position(document, from, motion, visible_line_count);
+    let from = state.cursor.unwrap_or(default_position(state));
+    let visible_row_count = ((state.viewport_height / base_line_height()).floor() as usize).max(1);
+    let to = move_position(document, from, motion, visible_row_count);
     state.cursor = Some(to);
     if !extend {
-        state.anchor = Some(to);
-    } else if state.anchor.is_none() {
-        state.anchor = Some(from);
+        state.selection_anchor = Some(to);
+    } else if state.selection_anchor.is_none() {
+        state.selection_anchor = Some(from);
     }
-    ensure_cursor_visible(state, document, to.line);
+    ensure_cursor_visible(state, document, to);
 }
 
-/// 光标行移出锚定行覆盖的估算可见范围时，整行粒度滚动锚点。
+/// 光标行在窗口里就滚到看得见；不在窗口里（文件头/尾）就请求跳过去。
 fn ensure_cursor_visible(
     state: &mut TextPreviewViewerState,
     document: &TextPreviewDocument,
-    cursor_line: usize,
+    cursor: TextPosition,
 ) {
-    let viewport_height = state.viewport_height;
-    let visible_line_count = ((viewport_height / base_line_height()).floor() as usize).max(1);
-    let target = if cursor_line < state.scroll_line {
-        Some(cursor_line)
-    } else if cursor_line >= state.scroll_line + visible_line_count {
-        Some(cursor_line + 1 - visible_line_count)
-    } else {
-        None
-    };
-    let Some(target) = target else {
+    let rows = document.rows();
+    let Ok(cursor_index) = document.row_index(cursor.row) else {
+        let jump = if cursor.row >= document.len() {
+            TextJump::End
+        } else if cursor.row <= document.data_start() {
+            TextJump::Start
+        } else {
+            TextJump::Offset(cursor.row)
+        };
+        state
+            .pending_events
+            .push(TextViewerEvent::JumpRequested(jump));
         return;
     };
-    let target = target.min(document.line_count().saturating_sub(1));
-    while state.scroll_line < target {
-        state.anchor_prefix += line_height_of(state, state.scroll_line);
-        state.scroll_line += 1;
+    let Some(anchor_index) = document.row_index(state.anchor).ok() else {
+        return;
+    };
+    if cursor_index < anchor_index || cursor_index == anchor_index && state.pixel > 0.0 {
+        state.anchor = rows[cursor_index].start;
+        state.pixel = 0.0;
+        scroll_viewer_by(state, document, 0.0);
+        return;
     }
-    while state.scroll_line > target {
-        state.scroll_line -= 1;
-        state.anchor_prefix -= line_height_of(state, state.scroll_line);
+    // 光标行底边超出视口：往下滚到它底边贴住视口底边。
+    let mut bottom = -state.pixel;
+    for row in rows.range(anchor_index..=cursor_index) {
+        bottom += row_height(state, row.start);
     }
-    state.scroll_pixel = 0.0;
+    if bottom > state.viewport_height {
+        scroll_viewer_by(state, document, bottom - state.viewport_height);
+    }
 }

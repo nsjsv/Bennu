@@ -19,7 +19,7 @@ use bennu_preview::preview_panel;
 use bennu_preview::preview_window_chrome::preview_pin_button;
 use bennu_preview::scroll_wiring::ScrollRegionWiring;
 use bennu_preview::sqlite_preview::{SqlitePreviewMessage, SqlitePreviewTab};
-use bennu_preview::text_preview::{MarkdownPreviewMode, TextPreviewDocument};
+use bennu_preview::text_preview::TextPreviewDocument;
 use bennu_preview::text_preview_viewer::text_preview_viewer;
 use bennu_preview::window_shell::{single_window, HeaderBar};
 use bennu_theme::controls::{segmented_choice_row, SegmentedChoice};
@@ -47,47 +47,25 @@ pub(crate) fn preview_window_view(
         engine.preview_window_bottom_controls.opacity(),
         // 不定进度动画帧：portal 不移植远程下载管线，无生产者，恒 0。
         0,
-        engine.text_preview_content_height,
         directory_scroll_wiring(),
         archive_scroll_wiring(),
         document_scroll_wiring(engine.preview.as_ref()),
-        text_scroll_wiring(),
         markdown_scroll_wiring(),
         sqlite_tables_scroll_wiring(),
         sqlite_data_scroll_wiring(),
-        // 查看器是渲染器敏感部件，宿主实例化注入；内容事件走
-        // PreviewMessage，滚轮走宿主滚动管线（app-ui 适配层同构）。
+        // 查看器是渲染器敏感部件，宿主实例化注入；它自己就是滚动区，部件 id 用平滑
+        // 滚动管线的区域 id（app-ui 适配层同构）。
         |document: &TextPreviewDocument| {
-            let wheel_region = PreviewScrollRegion::Text;
             text_preview_viewer(
                 document,
-                // 滚动几何宿主是输入源：只镜像文档副本预取分块，不回推宿主。
-                |lines, _offset_y, viewport_height| {
-                    Message::from(PreviewMessage::TextPreviewContentScrolled {
-                        lines,
-                        viewport_height,
-                    })
-                },
-                move |delta| Message::PreviewWheelScrolled {
-                    region: wheel_region,
+                preview_scroll_id(PreviewScrollRegion::Text),
+                |delta| Message::PreviewWheelScrolled {
+                    region: PreviewScrollRegion::Text,
                     delta,
                 },
-                |content_height| {
-                    Message::from(PreviewMessage::TextPreviewContentHeightChanged(
-                        content_height,
-                    ))
-                },
-                // 查看器内部滚动（键盘/光标跟随）才回推宿主滚动位置。
-                |lines, offset_y, viewport_height| {
-                    Message::from(PreviewMessage::TextPreviewViewerScrolled {
-                        lines,
-                        offset_y,
-                        viewport_height,
-                    })
-                },
+                |event| Message::from(PreviewMessage::TextViewer(event)),
             )
         },
-        markdown_mode_switch_row,
         sqlite_tabs_row(engine.sqlite_preview.as_ref()),
         || Message::PreviewSqliteDragFinished,
     );
@@ -175,33 +153,12 @@ fn document_scroll_wiring(preview: Option<&PreviewState>) -> ScrollRegionWiring<
     }
 }
 
-// 纯文本几何宿主接线：视口回传把滚动位置同步给查看器（查看器从动不
-// 回推）。'a 出现在 Fn 参数位（不变），须生命周期泛型实例化（教训⑥）。
-fn text_scroll_wiring<'a>() -> ScrollRegionWiring<'a, Message> {
-    ScrollRegionWiring {
-        smooth_scroll_wrap: smooth_scroll_wrap(PreviewScrollRegion::Text),
-        scrollable_id: preview_scroll_id(PreviewScrollRegion::Text),
-        on_scroll: Some(Box::new(|viewport| {
-            Message::from(PreviewMessage::TextPreviewViewportSynced {
-                offset_y: viewport.absolute_offset().y,
-                viewport_height: viewport.bounds().height,
-            })
-        })),
-    }
-}
-
-// Markdown 渲染体接线：滚动偏移随视口回传归档到文档滚动状态。
+// Markdown 渲染体接线：整篇已经在内存里，不需要视口回传。
 fn markdown_scroll_wiring() -> ScrollRegionWiring<'static, Message> {
     ScrollRegionWiring {
         smooth_scroll_wrap: smooth_scroll_wrap(PreviewScrollRegion::Markdown),
         scrollable_id: preview_scroll_id(PreviewScrollRegion::Markdown),
-        on_scroll: Some(Box::new(|viewport| {
-            Message::from(PreviewMessage::MarkdownPreviewScrolled {
-                offset_y: viewport.absolute_offset().y,
-                viewport_height: viewport.bounds().height,
-                content_height: viewport.content_bounds().height,
-            })
-        })),
+        on_scroll: None,
     }
 }
 
@@ -219,28 +176,6 @@ fn sqlite_data_scroll_wiring<'a>() -> ScrollRegionWiring<'a, Message> {
         scrollable_id: preview_scroll_id(PreviewScrollRegion::SqliteData),
         on_scroll: None,
     }
-}
-
-/// Markdown 渲染/原文切换行（app-ui 适配层同款两段）。
-fn markdown_mode_switch_row(mode: MarkdownPreviewMode) -> Element<'static, Message> {
-    segmented_choice_row(vec![
-        SegmentedChoice {
-            label: tr!("Rendered"),
-            selected: mode == MarkdownPreviewMode::Rendered,
-            message: Some(Message::from(PreviewMessage::MarkdownPreviewModeSelected(
-                MarkdownPreviewMode::Rendered,
-            ))),
-            tooltip: None,
-        },
-        SegmentedChoice {
-            label: tr!("Raw"),
-            selected: mode == MarkdownPreviewMode::Raw,
-            message: Some(Message::from(PreviewMessage::MarkdownPreviewModeSelected(
-                MarkdownPreviewMode::Raw,
-            ))),
-            tooltip: None,
-        },
-    ])
 }
 
 /// SQLite 标签行（Table Data / SQL Query，app-ui 适配层同款）。

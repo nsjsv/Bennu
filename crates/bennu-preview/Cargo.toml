@@ -71,6 +71,11 @@ pulldown-cmark = "0.13.4"
 # 文本预览按识别出的编码逐块解码；memchr=按编码找换行。
 encoding_rs = "0.8.35"
 memchr = "2.7"
+# 超长行切段不切开字形簇（cosmic-text 已经依赖它，二进制不增加）。
+unicode-segmentation = "1.13.2"
+# 预览中的文本文件变化：notify=本地 inotify，rustix=statfs 认网络文件系统（改为轮询）。
+notify.workspace = true
+rustix.workspace = true
 # tracing=图片预览视口交互的调试日志（迁移自 app-ui，target 名不变）。
 tracing.workspace = true
 

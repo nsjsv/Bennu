@@ -38,7 +38,7 @@ impl FileBrowser {
         &mut self,
         kind_index: usize,
     ) -> Task<Message> {
-        let Some(kind) = config::PreviewFileSizeKind::ALL.get(kind_index).copied() else {
+        let Some(kind) = config::PreviewSizeLimitKind::ALL.get(kind_index).copied() else {
             return Task::none();
         };
         let mib = match self.preview_size_limit_mib_inputs[kind_index]
@@ -145,7 +145,8 @@ mod tests {
         let _ = browser.update_preview_size_limit_mib_input(0, "0".to_owned());
         let _ = browser.commit_preview_size_limit_mib_input(0);
 
-        assert_eq!(browser.user_config.preview_size_limits.text_bytes, 0);
+        // 第 0 行是图片（文本没有上限，不在列表里）。
+        assert_eq!(browser.user_config.preview_size_limits.image_bytes, 0);
         assert!(browser.preview_size_limit_mib_errors[0].is_none());
     }
 

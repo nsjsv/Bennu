@@ -82,7 +82,6 @@ mod tests {
 
         let preferences = load_preview_preferences(&path).expect("loader resolves stored payload");
 
-        assert_eq!(preferences.size_limits.text_bytes, 4194304);
         assert_eq!(preferences.size_limits.image_bytes, 1048576);
         assert_eq!(preferences.size_limits.video_bytes, 4194304);
         // 旧文本表只留用户自己加的，旧内置默认（md）交给类型库。

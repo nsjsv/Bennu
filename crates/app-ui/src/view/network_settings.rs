@@ -16,7 +16,7 @@ pub(super) fn network_thumbnails_row(browser: &FileBrowser) -> SettingsRow<'stat
 }
 
 pub(super) fn preview_size_limit_rows(browser: &FileBrowser) -> Vec<SettingsRow<'_>> {
-    let mut rows: Vec<SettingsRow<'_>> = config::PreviewFileSizeKind::ALL
+    let mut rows: Vec<SettingsRow<'_>> = config::PreviewSizeLimitKind::ALL
         .iter()
         .enumerate()
         .map(|(kind_index, kind)| preview_size_limit_row(browser, kind_index, *kind))
@@ -28,16 +28,15 @@ pub(super) fn preview_size_limit_rows(browser: &FileBrowser) -> Vec<SettingsRow<
 fn preview_size_limit_row(
     browser: &FileBrowser,
     kind_index: usize,
-    kind: config::PreviewFileSizeKind,
+    kind: config::PreviewSizeLimitKind,
 ) -> SettingsRow<'_> {
     let title = match kind {
-        config::PreviewFileSizeKind::Text => tr!("Max Text Preview"),
-        config::PreviewFileSizeKind::Image => tr!("Max Image Preview"),
-        config::PreviewFileSizeKind::Video => tr!("Max Video Preview"),
-        config::PreviewFileSizeKind::Audio => tr!("Max Audio Preview"),
-        config::PreviewFileSizeKind::Archive => tr!("Max Archive Preview"),
-        config::PreviewFileSizeKind::Document => tr!("Max Document Preview"),
-        config::PreviewFileSizeKind::Sqlite => tr!("Max SQLite Preview"),
+        config::PreviewSizeLimitKind::Image => tr!("Max Image Preview"),
+        config::PreviewSizeLimitKind::Video => tr!("Max Video Preview"),
+        config::PreviewSizeLimitKind::Audio => tr!("Max Audio Preview"),
+        config::PreviewSizeLimitKind::Archive => tr!("Max Archive Preview"),
+        config::PreviewSizeLimitKind::Document => tr!("Max Document Preview"),
+        config::PreviewSizeLimitKind::Sqlite => tr!("Max SQLite Preview"),
     };
     let saved_limit = browser.user_config().preview_size_limits.limit(kind);
     let note = match &browser.preview_size_limit_mib_errors[kind_index] {

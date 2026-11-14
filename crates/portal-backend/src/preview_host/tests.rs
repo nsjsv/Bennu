@@ -131,9 +131,9 @@ fn inside_archive_member_is_silent_but_browsing_root_previews() {
 #[test]
 fn oversized_file_is_rejected_with_error_window() {
     let mut host = host();
-    // 默认文本上限 25 MiB（preview_config 默认值），26 MiB 必超限。
-    let oversized = 26 * 1024 * 1024;
-    let selection = file_selection(Path::new("/tmp/big.txt"), oversized);
+    // 默认图片上限 100 MiB（preview_config 默认值），101 MiB 必超限。
+    let oversized = 101 * 1024 * 1024;
+    let selection = file_selection(Path::new("/tmp/big.png"), oversized);
     let _ = host.request_preview(None, Some(&selection));
     let Some(PreviewState::Error(message)) = &host.engine.preview else {
         panic!("超限文件必须进入错误态");
@@ -147,11 +147,14 @@ fn zero_limit_disables_size_guard() {
     // 0 = 不限制（与历史行为相反）；判定源是会话偏好。
     let mut host = host();
     let oversized = 26 * 1024 * 1024;
-    let selection = file_selection(Path::new("/tmp/big.txt"), oversized);
-    host.preferences.size_limits.text_bytes = 0;
+    let selection = file_selection(Path::new("/tmp/big.png"), oversized);
+    host.preferences.size_limits.image_bytes = 0;
     assert!(host.reject_oversized_file_preview(&selection).is_none());
-    host.preferences.size_limits.text_bytes = 1024;
+    host.preferences.size_limits.image_bytes = 1024;
     assert!(host.reject_oversized_file_preview(&selection).is_some());
+    // 文本按需读取，多大都不拦。
+    let text = file_selection(Path::new("/tmp/big.log"), u64::MAX / 2);
+    assert!(host.reject_oversized_file_preview(&text).is_none());
 }
 
 #[test]
@@ -233,10 +236,10 @@ fn session_preferences_drive_classification_and_limits() {
         &host.preferences.extension_rules
     )
     .is_some());
-    host.preferences.size_limits.text_bytes = 10;
-    assert_eq!(host.file_size_limit_for(Path::new("/tmp/notes.md")), 10);
-    // 未识别扩展名兜底 Text 上限。
-    assert_eq!(host.file_size_limit_for(Path::new("/tmp/blob.xyz")), 10);
+    host.preferences.size_limits.image_bytes = 10;
+    assert_eq!(host.file_size_limit_for(Path::new("/tmp/photo.png")), 10);
+    // 文本没有上限（0 = 不限制）。
+    assert_eq!(host.file_size_limit_for(Path::new("/tmp/notes.md")), 0);
 }
 
 #[test]

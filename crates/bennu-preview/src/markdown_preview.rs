@@ -11,7 +11,6 @@ use bennu_theme::styles::{enhanced_scrollbar_style, enhanced_vertical_scrollbar_
 
 use crate::panel_text::readable_text;
 use crate::scroll_wiring::ScrollRegionWiring;
-use crate::text_preview::TextPreviewLineLimitNotice;
 use bennu_localization::tr;
 
 const MARKDOWN_BODY_TEXT_SIZE: u32 = 14;
@@ -22,7 +21,6 @@ const MARKDOWN_MARKER_WIDTH: f32 = 22.0;
 
 pub fn markdown_preview_body<Message>(
     markdown: &str,
-    line_limit_notice: Option<TextPreviewLineLimitNotice>,
     scroll: ScrollRegionWiring<'static, Message>,
 ) -> Element<'static, Message>
 where
@@ -39,9 +37,6 @@ where
         for block in blocks {
             content = content.push(markdown_block_view(block));
         }
-    }
-    if let Some(notice) = line_limit_notice {
-        content = content.push(readable_text(notice.label()));
     }
     let scroller = scroll
         .scrollable(content.into())

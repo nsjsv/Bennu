@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 pub struct StoredPreviewPreferences {
     #[serde(default)]
     pub max_preview_file_bytes: Option<u64>,
+    /// 旧版本的文本大小上限；文本改为按需读取后不再使用，只为保持文档布局保留，新代码写 None。
     #[serde(default)]
     pub preview_text_size_bytes: Option<u64>,
     #[serde(default)]
@@ -61,7 +62,6 @@ pub struct StoredPreviewExtensionRules {
 }
 
 pub const PREVIEW_FILE_SIZE_UNIT_BYTES: u64 = 1024 * 1024;
-pub const DEFAULT_PREVIEW_TEXT_SIZE_BYTES: u64 = 25 * PREVIEW_FILE_SIZE_UNIT_BYTES;
 pub const DEFAULT_PREVIEW_IMAGE_SIZE_BYTES: u64 = 100 * PREVIEW_FILE_SIZE_UNIT_BYTES;
 pub const DEFAULT_PREVIEW_VIDEO_SIZE_BYTES: u64 = 1024 * PREVIEW_FILE_SIZE_UNIT_BYTES;
 pub const DEFAULT_PREVIEW_AUDIO_SIZE_BYTES: u64 = 200 * PREVIEW_FILE_SIZE_UNIT_BYTES;
@@ -116,9 +116,30 @@ impl PreviewFileSizeKind {
     ];
 }
 
+/// 有大小上限的预览类型。文本按需从磁盘读、内存不随文件大小增长，不设上限。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreviewSizeLimitKind {
+    Image,
+    Video,
+    Audio,
+    Archive,
+    Document,
+    Sqlite,
+}
+
+impl PreviewSizeLimitKind {
+    pub const ALL: [PreviewSizeLimitKind; 6] = [
+        Self::Image,
+        Self::Video,
+        Self::Audio,
+        Self::Archive,
+        Self::Document,
+        Self::Sqlite,
+    ];
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PreviewFileSizeLimits {
-    pub text_bytes: u64,
     pub image_bytes: u64,
     pub video_bytes: u64,
     pub audio_bytes: u64,
@@ -130,7 +151,6 @@ pub struct PreviewFileSizeLimits {
 impl PreviewFileSizeLimits {
     pub fn with_default_limits() -> Self {
         Self {
-            text_bytes: DEFAULT_PREVIEW_TEXT_SIZE_BYTES,
             image_bytes: DEFAULT_PREVIEW_IMAGE_SIZE_BYTES,
             video_bytes: DEFAULT_PREVIEW_VIDEO_SIZE_BYTES,
             audio_bytes: DEFAULT_PREVIEW_AUDIO_SIZE_BYTES,
@@ -140,34 +160,31 @@ impl PreviewFileSizeLimits {
         }
     }
 
-    pub fn limit(self, kind: PreviewFileSizeKind) -> u64 {
+    pub fn limit(self, kind: PreviewSizeLimitKind) -> u64 {
         match kind {
-            PreviewFileSizeKind::Text => self.text_bytes,
-            PreviewFileSizeKind::Image => self.image_bytes,
-            PreviewFileSizeKind::Video => self.video_bytes,
-            PreviewFileSizeKind::Audio => self.audio_bytes,
-            PreviewFileSizeKind::Archive => self.archive_bytes,
-            PreviewFileSizeKind::Document => self.document_bytes,
-            PreviewFileSizeKind::Sqlite => self.sqlite_bytes,
+            PreviewSizeLimitKind::Image => self.image_bytes,
+            PreviewSizeLimitKind::Video => self.video_bytes,
+            PreviewSizeLimitKind::Audio => self.audio_bytes,
+            PreviewSizeLimitKind::Archive => self.archive_bytes,
+            PreviewSizeLimitKind::Document => self.document_bytes,
+            PreviewSizeLimitKind::Sqlite => self.sqlite_bytes,
         }
     }
 
-    pub fn set_limit(&mut self, kind: PreviewFileSizeKind, bytes: u64) {
+    pub fn set_limit(&mut self, kind: PreviewSizeLimitKind, bytes: u64) {
         match kind {
-            PreviewFileSizeKind::Text => self.text_bytes = bytes,
-            PreviewFileSizeKind::Image => self.image_bytes = bytes,
-            PreviewFileSizeKind::Video => self.video_bytes = bytes,
-            PreviewFileSizeKind::Audio => self.audio_bytes = bytes,
-            PreviewFileSizeKind::Archive => self.archive_bytes = bytes,
-            PreviewFileSizeKind::Document => self.document_bytes = bytes,
-            PreviewFileSizeKind::Sqlite => self.sqlite_bytes = bytes,
+            PreviewSizeLimitKind::Image => self.image_bytes = bytes,
+            PreviewSizeLimitKind::Video => self.video_bytes = bytes,
+            PreviewSizeLimitKind::Audio => self.audio_bytes = bytes,
+            PreviewSizeLimitKind::Archive => self.archive_bytes = bytes,
+            PreviewSizeLimitKind::Document => self.document_bytes = bytes,
+            PreviewSizeLimitKind::Sqlite => self.sqlite_bytes = bytes,
         }
     }
 
-    /// 迁移时用旧的全局单值上限同时填充全部六个类型。
+    /// 迁移时用旧的全局单值上限同时填充全部类型。
     pub fn from_legacy_global_bytes(bytes: u64) -> Self {
         Self {
-            text_bytes: bytes,
             image_bytes: bytes,
             video_bytes: bytes,
             audio_bytes: bytes,
@@ -329,8 +346,8 @@ pub fn preview_size_limits_from_stored(
             .or(legacy_global_limit)
             .unwrap_or(fallback_bytes)
     };
+    // 文本不再有上限：旧的 preview_text_size_bytes 读到也不用。
     PreviewFileSizeLimits {
-        text_bytes: resolve(stored.preview_text_size_bytes, fallback.text_bytes),
         image_bytes: resolve(stored.preview_image_size_bytes, fallback.image_bytes),
         video_bytes: resolve(stored.preview_video_size_bytes, fallback.video_bytes),
         audio_bytes: resolve(stored.preview_audio_size_bytes, fallback.audio_bytes),
@@ -463,7 +480,6 @@ mod stored_preferences_migration_tests {
         let limits =
             preview_size_limits_from_stored(&stored, PreviewFileSizeLimits::with_default_limits());
         // null（缺失）类型吃 legacy 全局值，显式分类型键覆盖全局值。
-        assert_eq!(limits.text_bytes, 4194304);
         assert_eq!(limits.image_bytes, 1048576);
         assert_eq!(limits.video_bytes, 4194304);
         assert_eq!(limits.audio_bytes, 5242880);

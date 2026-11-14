@@ -283,7 +283,6 @@ impl FileBrowser {
             preview_engine.video_preview.as_ref(),
             1.0,
             self.operation_progress_animation_frame,
-            preview_engine.text_preview_content_height,
         )
     }
 

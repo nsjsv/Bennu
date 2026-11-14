@@ -8,13 +8,12 @@ use super::startup;
 use super::{
     browser_view_mode_from_config_value, file_operation_verification_from_config_value,
     normalize_preview_directory_expand_levels, normalize_sidebar_width, toml_string,
-    PreviewFileSizeKind, PreviewFileSizeLimits, UserConfig, ViewDensityLevel, CONFIG_FILE_NAME,
+    PreviewFileSizeLimits, PreviewSizeLimitKind, UserConfig, ViewDensityLevel, CONFIG_FILE_NAME,
 };
 
 const NETWORK_LIST_THUMBNAIL_DOWNLOADS_ENABLED_KEY: &str =
     "network_list_thumbnail_downloads_enabled";
 const MAX_PREVIEW_FILE_BYTES_KEY: &str = "max_preview_file_bytes";
-const MAX_PREVIEW_TEXT_BYTES_KEY: &str = "max_preview_text_bytes";
 const MAX_PREVIEW_IMAGE_BYTES_KEY: &str = "max_preview_image_bytes";
 const MAX_PREVIEW_VIDEO_BYTES_KEY: &str = "max_preview_video_bytes";
 const MAX_PREVIEW_AUDIO_BYTES_KEY: &str = "max_preview_audio_bytes";
@@ -23,17 +22,17 @@ const MAX_PREVIEW_DOCUMENT_BYTES_KEY: &str = "max_preview_document_bytes";
 const MAX_PREVIEW_SQLITE_BYTES_KEY: &str = "max_preview_sqlite_bytes";
 const PREVIEW_DIRECTORY_EXPAND_LEVELS_KEY: &str = "preview_directory_expand_levels";
 
-const PREVIEW_SIZE_LIMIT_KEYS: &[(&str, PreviewFileSizeKind)] = &[
-    (MAX_PREVIEW_TEXT_BYTES_KEY, PreviewFileSizeKind::Text),
-    (MAX_PREVIEW_IMAGE_BYTES_KEY, PreviewFileSizeKind::Image),
-    (MAX_PREVIEW_VIDEO_BYTES_KEY, PreviewFileSizeKind::Video),
-    (MAX_PREVIEW_AUDIO_BYTES_KEY, PreviewFileSizeKind::Audio),
-    (MAX_PREVIEW_ARCHIVE_BYTES_KEY, PreviewFileSizeKind::Archive),
+// 旧的 max_preview_text_bytes 不再迁移：文本改为按需读取，没有上限。
+const PREVIEW_SIZE_LIMIT_KEYS: &[(&str, PreviewSizeLimitKind)] = &[
+    (MAX_PREVIEW_IMAGE_BYTES_KEY, PreviewSizeLimitKind::Image),
+    (MAX_PREVIEW_VIDEO_BYTES_KEY, PreviewSizeLimitKind::Video),
+    (MAX_PREVIEW_AUDIO_BYTES_KEY, PreviewSizeLimitKind::Audio),
+    (MAX_PREVIEW_ARCHIVE_BYTES_KEY, PreviewSizeLimitKind::Archive),
     (
         MAX_PREVIEW_DOCUMENT_BYTES_KEY,
-        PreviewFileSizeKind::Document,
+        PreviewSizeLimitKind::Document,
     ),
-    (MAX_PREVIEW_SQLITE_BYTES_KEY, PreviewFileSizeKind::Sqlite),
+    (MAX_PREVIEW_SQLITE_BYTES_KEY, PreviewSizeLimitKind::Sqlite),
 ];
 const SHOW_HIDDEN_FILES_KEY: &str = "show_hidden_files";
 const SIDEBAR_WIDTH_KEY: &str = "sidebar_width";

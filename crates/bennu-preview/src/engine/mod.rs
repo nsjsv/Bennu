@@ -56,7 +56,6 @@ pub struct PreviewEngine {
     pub audio_preview: Option<AudioPreviewPlayback>,
     pub video_preview: Option<VideoPreviewPlayback>,
     pub preview_size: PreviewSize,
-    pub text_preview_content_height: f32,
     pub pending_preview_resize: Option<PreviewSize>,
     pub preview_window_profile: PreviewWindowProfile,
     pub preview_window_pinned: bool,
@@ -124,7 +123,6 @@ impl PreviewEngine {
             audio_preview: None,
             video_preview: None,
             preview_size: initial_preview_size,
-            text_preview_content_height: 0.0,
             pending_preview_resize: None,
             preview_window_profile: PreviewWindowProfile::Regular,
             preview_window_pinned: false,
@@ -150,24 +148,18 @@ impl PreviewEngine {
     ) -> Result<Task<PreviewMessage>, Box<PreviewMessage>> {
         let task = match message {
             PreviewMessage::SqlitePreview(inner) => self.handle_sqlite_preview_message(inner),
-            PreviewMessage::TextPreviewContentScrolled {
-                lines,
-                viewport_height,
-            } => self.handle_text_preview_content_scrolled(lines, viewport_height),
-            PreviewMessage::TextPreviewChunkLoaded {
-                path,
-                generation,
-                start_offset,
-                outcome,
-            } => self.accept_text_preview_chunk(path, generation, start_offset, outcome),
+            PreviewMessage::TextViewer(event) => self.handle_text_viewer_event(event),
+            PreviewMessage::TextRead { document, reply } => self.accept_text_read(document, reply),
+            PreviewMessage::TextFileChanged { document } => self.handle_text_file_changed(document),
             PreviewMessage::TextPreviewEncodingSelected(encoding) => {
                 self.select_text_preview_encoding(encoding)
             }
-            PreviewMessage::TextPreviewReencoded {
-                path,
-                generation,
-                outcome,
-            } => self.accept_reencoded_text_preview(path, generation, outcome),
+            PreviewMessage::MarkdownPreviewModeSelected(mode) => {
+                if let Some(document) = self.active_text_preview_document_mut() {
+                    document.select_markdown_preview_mode(mode);
+                }
+                Task::none()
+            }
             PreviewMessage::PreviewTreeAnimationTick => self.advance_preview_tree_animation(),
             PreviewMessage::PreviewWindowPinToggled => self.toggle_preview_window_pin(),
             PreviewMessage::PreviewWindowInitialControlsElapsed(generation) => {
@@ -289,10 +281,7 @@ mod tests {
         let window = Id::unique();
         let path = PathBuf::from("/tmp/photo.png");
 
-        for message in [
-            PreviewMessage::SqliteTablesResizeStarted,
-            PreviewMessage::TextPreviewContentHeightChanged(12.0),
-        ] {
+        for message in [PreviewMessage::SqliteTablesResizeStarted] {
             returned_to_host(&mut engine, message);
         }
         assert!(matches!(

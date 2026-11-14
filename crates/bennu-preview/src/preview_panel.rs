@@ -26,7 +26,7 @@ use crate::preview_surface::preview_surface;
 use crate::preview_tree_panel::{archive_preview_panel, directory_preview_panel};
 use crate::scroll_wiring::ScrollRegionWiring;
 use crate::sqlite_preview_panel::sqlite_preview_panel;
-use crate::text_preview::{MarkdownPreviewMode, TextPreviewDocument};
+use crate::text_preview::TextPreviewDocument;
 use crate::text_preview_panel::text_preview_panel;
 use crate::video_preview_panel::video_preview_panel;
 
@@ -43,16 +43,13 @@ pub fn view_preview_window<'a, Message>(
     video_preview: Option<&'a VideoPreviewPlayback>,
     preview_bottom_controls_opacity: f32,
     operation_progress_animation_frame: u8,
-    text_preview_content_height: f32,
     directory_scroll: ScrollRegionWiring<'static, Message>,
     archive_scroll: ScrollRegionWiring<'static, Message>,
     document_scroll: ScrollRegionWiring<'static, Message>,
-    text_scroll: ScrollRegionWiring<'a, Message>,
     markdown_scroll: ScrollRegionWiring<'static, Message>,
     sqlite_tables_scroll: ScrollRegionWiring<'a, Message>,
     sqlite_data_scroll: ScrollRegionWiring<'a, Message>,
     plain_viewer: impl Fn(&'a TextPreviewDocument) -> Element<'a, Message> + 'a,
-    markdown_mode_switch: impl Fn(MarkdownPreviewMode) -> Element<'static, Message>,
     sqlite_tabs: Element<'static, Message>,
     on_sqlite_resize_drag_finished: impl Fn() -> Message + 'static,
 ) -> Element<'a, Message>
@@ -70,16 +67,13 @@ where
             video_preview,
             preview_bottom_controls_opacity,
             operation_progress_animation_frame,
-            text_preview_content_height,
             directory_scroll,
             archive_scroll,
             document_scroll,
-            text_scroll,
             markdown_scroll,
             sqlite_tables_scroll,
             sqlite_data_scroll,
             plain_viewer,
-            markdown_mode_switch,
             sqlite_tabs,
             on_sqlite_resize_drag_finished,
         ),
@@ -100,16 +94,13 @@ fn preview_panel<'a, Message>(
     video_preview: Option<&'a VideoPreviewPlayback>,
     preview_bottom_controls_opacity: f32,
     operation_progress_animation_frame: u8,
-    text_preview_content_height: f32,
     directory_scroll: ScrollRegionWiring<'static, Message>,
     archive_scroll: ScrollRegionWiring<'static, Message>,
     document_scroll: ScrollRegionWiring<'static, Message>,
-    text_scroll: ScrollRegionWiring<'a, Message>,
     markdown_scroll: ScrollRegionWiring<'static, Message>,
     sqlite_tables_scroll: ScrollRegionWiring<'a, Message>,
     sqlite_data_scroll: ScrollRegionWiring<'a, Message>,
     plain_viewer: impl Fn(&'a TextPreviewDocument) -> Element<'a, Message> + 'a,
-    markdown_mode_switch: impl Fn(MarkdownPreviewMode) -> Element<'static, Message>,
     sqlite_tabs: Element<'static, Message>,
     on_sqlite_resize_drag_finished: impl Fn() -> Message + 'static,
 ) -> Element<'a, Message>
@@ -124,23 +115,11 @@ where
         PreviewState::Ready(PreviewContent::Directory { entries, .. }) => {
             directory_preview_panel(entries, directory_scroll).into()
         }
-        PreviewState::Ready(PreviewContent::Text {
-            path,
-            rendered,
-            format,
-            line_limit_notice,
-            ..
-        }) => text_preview_panel(
-            rendered,
-            *format,
-            *line_limit_notice,
+        PreviewState::Ready(PreviewContent::Text { path, .. }) => text_preview_panel(
             text_preview_document
                 .filter(|document: &&TextPreviewDocument| document.path() == path.as_path()),
-            text_preview_content_height,
             plain_viewer,
-            text_scroll,
             markdown_scroll,
-            markdown_mode_switch,
         )
         .into(),
         PreviewState::Ready(PreviewContent::Archive { entries, .. }) => {

@@ -488,17 +488,20 @@ impl FileBrowser {
         if kind == FileKind::File {
             // 门禁放在远程下载与大小检查之前：不可预览的远程文件不值得下载，
             // 也不应误报“文件太大”。
-            if classify_preview_path(&path, &self.user_config.preview_extension_rules).is_none() {
+            let Some(classification) =
+                classify_preview_path(&path, &self.user_config.preview_extension_rules)
+            else {
                 self.preview_engine.preview_window_pinned = pinned;
                 return close_window_command.chain(self.show_unpreviewable_file_preview());
-            }
+            };
             if let Some(command) = self.reject_oversized_file_preview(&path) {
                 return close_window_command.chain(command);
             }
-        }
-        if kind == FileKind::File && self.path_is_remote_mount(&path) {
-            self.preview_engine.preview_window_pinned = pinned;
-            return close_window_command.chain(self.start_remote_preview_download(path));
+            // 文本按需读挂载路径，不先整个下载。
+            if classification.needs_local_copy() && self.path_is_remote_mount(&path) {
+                self.preview_engine.preview_window_pinned = pinned;
+                return close_window_command.chain(self.start_remote_preview_download(path));
+            }
         }
 
         self.preview_engine.preview_window_pinned = pinned;

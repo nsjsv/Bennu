@@ -6,7 +6,6 @@ use tokio_util::sync::CancellationToken;
 
 use crate::preview::PreviewTreeDirectoryChildren;
 use crate::text_preview::TextPreviewFormat;
-use crate::text_preview_loading::PREVIEW_TEXT_LIMIT;
 
 use super::*;
 
@@ -191,14 +190,17 @@ async fn load_preview_keeps_utf8_text_preview() {
     .await
     .expect("text preview");
 
-    let PreviewContent::Text {
-        rendered, format, ..
-    } = preview_content
-    else {
+    let PreviewContent::Text { opened, .. } = preview_content else {
         panic!("expected text preview");
     };
-    assert_eq!(rendered.as_ref(), "hello\n");
-    assert_eq!(format, TextPreviewFormat::Plain);
+    let rows: Vec<_> = opened
+        .batch
+        .rows
+        .iter()
+        .map(|row| row.text.as_str())
+        .collect();
+    assert_eq!(rows, ["hello"]);
+    assert_eq!(opened.format(), TextPreviewFormat::Plain);
 }
 
 #[tokio::test]
@@ -217,18 +219,18 @@ async fn load_preview_renders_markdown_text_preview() {
     .await
     .expect("markdown preview");
 
-    let PreviewContent::Text {
-        rendered, format, ..
-    } = preview_content
-    else {
+    let PreviewContent::Text { opened, .. } = preview_content else {
         panic!("expected text preview");
     };
-    assert_eq!(format, TextPreviewFormat::Markdown);
-    assert_eq!(rendered.as_ref(), "# Title\n\nHello **world**.\n");
+    assert_eq!(opened.format(), TextPreviewFormat::Markdown);
+    assert_eq!(
+        opened.markdown.as_deref(),
+        Some("# Title\n\nHello **world**.\n")
+    );
 }
 
 #[tokio::test]
-async fn load_preview_chunks_plain_text_preview() {
+async fn load_preview_reads_a_first_window_of_rows() {
     let temp_dir = tempdir().expect("temp dir");
     let text_path = temp_dir.path().join("large.txt");
     let content = numbered_line_range(0, 150);
@@ -244,21 +246,14 @@ async fn load_preview_chunks_plain_text_preview() {
     .await
     .expect("text preview");
 
-    let PreviewContent::Text {
-        rendered,
-        next_offset,
-        loaded_line_count,
-        line_limit_notice,
-        ..
-    } = preview_content
-    else {
+    let PreviewContent::Text { opened, .. } = preview_content else {
         panic!("expected text preview");
     };
-    assert!(rendered.contains("line 49"));
-    assert!(!rendered.contains("line 50"));
-    assert_eq!(loaded_line_count, 50);
-    assert!(next_offset.is_some());
-    assert_eq!(line_limit_notice, None);
+    // 小文件第一个窗口就读完：150 行全在，最后一行行号 149。
+    assert_eq!(opened.batch.rows.len(), 150);
+    assert!(opened.batch.at_start && opened.batch.at_end);
+    assert_eq!(opened.batch.rows[149].text, "line 149");
+    assert_eq!(opened.batch.rows[149].line_number, Some(149));
 }
 
 #[tokio::test]
@@ -439,10 +434,10 @@ async fn load_preview_sniffs_custom_archive_extension_by_content() {
     assert!(matches!(preview_content, PreviewContent::Archive { .. }));
 }
 #[tokio::test]
-async fn load_preview_truncates_long_markdown_on_utf8_boundary() {
+async fn load_preview_splits_a_long_markdown_line_on_character_boundaries() {
     let temp_dir = tempdir().expect("temp dir");
     let text_path = temp_dir.path().join("unicode.md");
-    let content = "€".repeat(PREVIEW_TEXT_LIMIT);
+    let content = "€".repeat(4 * 1024 * 1024);
     std::fs::write(&text_path, content).expect("write text file");
 
     let preview_content = load_preview(
@@ -455,11 +450,16 @@ async fn load_preview_truncates_long_markdown_on_utf8_boundary() {
     .await
     .expect("text preview");
 
-    let PreviewContent::Text { rendered, .. } = preview_content else {
+    let PreviewContent::Text { opened, .. } = preview_content else {
         panic!("expected text preview");
     };
-    assert_eq!(rendered.len(), PREVIEW_TEXT_LIMIT - 1);
-    assert!(rendered.is_char_boundary(rendered.len()));
+    // 12 MB 的一行：超过 2 MB 不给渲染全文；按约 1 万字节切段，每段都是完整的「€」。
+    assert!(opened.markdown.is_none());
+    assert!(opened.batch.rows.len() > 1);
+    for row in &opened.batch.rows {
+        assert!(row.text.chars().all(|character| character == '€'));
+        assert!(row.end - row.start <= 10_002);
+    }
 }
 
 fn numbered_line_range(start: usize, end: usize) -> String {
@@ -506,4 +506,23 @@ fn assert_preview_tree_entry(
     assert_eq!(entry.kind, kind);
     assert_eq!(entry.depth, depth);
     assert_eq!(entry.parent, parent);
+}
+
+#[test]
+fn text_reads_on_demand_without_a_size_limit_or_a_local_copy() {
+    // 文本按需读取：没有大小上限，网络挂载上也不先下载（第五轮决定）。
+    assert_eq!(PreviewPathKind::Text.size_limit_kind(), None);
+    assert!(!PreviewPathKind::Text.needs_local_copy());
+    for kind in [
+        PreviewPathKind::Document,
+        PreviewPathKind::Archive,
+        PreviewPathKind::Sqlite,
+        PreviewPathKind::AnimatedImage,
+        PreviewPathKind::Image,
+        PreviewPathKind::Video,
+        PreviewPathKind::Audio,
+    ] {
+        assert!(kind.size_limit_kind().is_some(), "{kind:?}");
+        assert!(kind.needs_local_copy(), "{kind:?}");
+    }
 }

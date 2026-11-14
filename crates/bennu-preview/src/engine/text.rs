@@ -1,173 +1,319 @@
-//! 文本/Markdown 预览内容与分块加载处理：自 app-ui 的
-//! preview_state/text.rs 迁入（impl FileBrowser → impl PreviewEngine，
-//! 逐字节保真；分块命令直连本 crate 命令层）。
-//! 查看器内部滚动/滚动几何宿主同步（smooth_scroll、text_preview_viewer
-//! 的部件 id）依赖宿主视图层，留在宿主侧同名方法。
+//! 文本预览：把文档要的后台读取变成任务，把读回来的结果交回文档；查看器事件、文件
+//! 变化、改编码重新打开也在这里。
 
 use std::path::{Path, PathBuf};
-
-use iced::Task;
+use std::sync::Arc;
 
 use encoding_rs::Encoding;
+use iced::{Subscription, Task};
 
-use crate::commands::preview::text_preview_chunk_command;
 use crate::preview::{PreviewContent, PreviewState};
 use crate::preview_message::PreviewMessage;
-use crate::text_preview::{TextPreviewChunk, TextPreviewDocument, TextPreviewFormat};
-use crate::text_preview_loading::load_reencoded_text_preview;
+use crate::text_document::{
+    check_file_change, count_lines, read_rows, text_file_watch_subscription, FileChange, RowReader,
+    TextJump, TextOpened, TextPreviewDocument, TextRead, TextReadReply, TextReadReplyKind,
+    TextViewerEvent,
+};
+use crate::text_preview_loading::{reopen_text_preview, TextEncodingChoice};
 
 impl super::PreviewEngine {
-    pub fn handle_text_preview_content_scrolled(
+    /// 新打开的文本：建文档，开始后台统计行号。
+    pub(crate) fn open_text_document(
         &mut self,
-        lines: i32,
-        viewport_height: f32,
+        path: PathBuf,
+        opened: &Arc<TextOpened>,
     ) -> Task<PreviewMessage> {
-        // 滚动几何宿主是输入源（滚轮动画/滚动条），查看器从动；
-        // 这里只镜像文档副本以预取分块，不回推宿主，避免滞后回拉振荡。
-        self.active_text_preview_document_mut()
-            .map(|document| {
-                document
-                    .scroll_by(lines, viewport_height)
-                    .map(text_preview_chunk_command)
-                    .unwrap_or_else(Task::none)
-            })
-            .unwrap_or_else(Task::none)
+        self.text_preview_generation = self.text_preview_generation.wrapping_add(1);
+        let (document, reads) =
+            TextPreviewDocument::open(self.text_preview_generation, path, opened);
+        let task = text_read_tasks(&document, reads);
+        self.text_preview_document = Some(document);
+        task
     }
 
-    pub fn handle_markdown_preview_scrolled(
-        &mut self,
-        offset_y: f32,
-        viewport_height: f32,
-        content_height: f32,
-    ) -> Task<PreviewMessage> {
+    pub fn handle_text_viewer_event(&mut self, event: TextViewerEvent) -> Task<PreviewMessage> {
         let Some(document) = self.active_text_preview_document_mut() else {
             return Task::none();
         };
-
-        document
-            .request_next_chunk_for_rendered_markdown(offset_y, viewport_height, content_height)
-            .map(text_preview_chunk_command)
-            .unwrap_or_else(Task::none)
-    }
-
-    pub fn accept_text_preview_chunk(
-        &mut self,
-        path: PathBuf,
-        generation: u64,
-        start_offset: u64,
-        outcome: Result<TextPreviewChunk, String>,
-    ) -> Task<PreviewMessage> {
-        let Some(format) = active_text_preview_format(self.preview.as_ref()) else {
-            return Task::none();
-        };
-        let preview_height = self.preview_size.height;
-        let Some(document) = self.active_text_preview_document_mut().filter(|document| {
-            document.path() == path.as_path() && document.generation() == generation
-        }) else {
-            return Task::none();
-        };
-
-        match outcome {
-            Ok(chunk) => {
-                if chunk.start_offset != start_offset {
-                    return Task::none();
-                }
-                if !document.append_chunk(chunk, preview_height) {
-                    return Task::none();
-                }
-                self.preview = Some(text_preview_state_from_document(path, format, document));
+        match event {
+            TextViewerEvent::ViewportChanged(viewport) => {
+                let reads = document.accept_viewport(viewport);
+                text_read_tasks(document, reads)
             }
-            Err(error) => {
-                document.accept_chunk_error(start_offset, error);
+            TextViewerEvent::JumpRequested(jump) => {
+                let reads = document.jump_to(jump);
+                text_read_tasks(document, reads)
+            }
+            TextViewerEvent::CopyRequested { from, to } => {
+                // 超过 15 MB 不复制（子任务 4 补提示）。
+                if !TextPreviewDocument::copy_fits(from, to) {
+                    return Task::none();
+                }
+                let source = document.source();
+                let decoding = document.decoding();
+                let len = document.len();
+                read_task(document.id(), move || {
+                    let reader = RowReader {
+                        source: source.as_ref(),
+                        decoding,
+                        len,
+                    };
+                    TextReadReplyKind::Selection(
+                        reader
+                            .text_between(from, to)
+                            .map_err(|error| error.to_string()),
+                    )
+                })
             }
         }
-
-        Task::none()
     }
 
-    /// 按用户指定的编码重读当前文本预览。代次在发起时推进：期间又改编码或换了文件，
-    /// 先发出的结果到达时代次已过期，直接丢弃。
+    pub fn accept_text_read(
+        &mut self,
+        document_id: u64,
+        reply: TextReadReply,
+    ) -> Task<PreviewMessage> {
+        let Some(document) = self
+            .active_text_preview_document_mut()
+            .filter(|document| document.id() == document_id)
+        else {
+            return Task::none();
+        };
+        match reply.0 {
+            TextReadReplyKind::Rows {
+                generation,
+                request,
+                outcome,
+            } => {
+                let reads = document.accept_rows(generation, request, outcome);
+                text_read_tasks(document, reads)
+            }
+            TextReadReplyKind::Number {
+                generation,
+                line_start,
+                outcome,
+            } => {
+                let reads = document.accept_numbering(generation, line_start, outcome);
+                text_read_tasks(document, reads)
+            }
+            TextReadReplyKind::Index(progress) => {
+                let reads = document.accept_index_progress(progress);
+                text_read_tasks(document, reads)
+            }
+            TextReadReplyKind::FileChecked(outcome) => self.accept_text_file_check(outcome),
+            TextReadReplyKind::Selection(Ok(text)) if !text.is_empty() => {
+                iced::clipboard::write(text)
+            }
+            TextReadReplyKind::Selection(_) => Task::none(),
+            TextReadReplyKind::Reopened(outcome) => self.accept_reopened_text(outcome),
+        }
+    }
+
+    /// 文件监视说可能变了：后台比对文件戳。
+    pub fn handle_text_file_changed(&mut self, document_id: u64) -> Task<PreviewMessage> {
+        let Some(document) = self
+            .active_text_preview_document_mut()
+            .filter(|document| document.id() == document_id)
+        else {
+            return Task::none();
+        };
+        let path = document.path().to_path_buf();
+        let stamp = document.stamp().clone();
+        read_task(document.id(), move || {
+            TextReadReplyKind::FileChecked(
+                check_file_change(&path, &stamp).map_err(|error| error.to_string()),
+            )
+        })
+    }
+
+    /// 用户指定编码：按新编码重新打开，停在原来的位置。
     pub fn select_text_preview_encoding(
         &mut self,
         encoding: &'static Encoding,
     ) -> Task<PreviewMessage> {
-        let Some(format) = active_text_preview_format(self.preview.as_ref()) else {
+        self.reopen_text_document(TextEncodingChoice::Chosen(encoding))
+    }
+
+    /// 当前文本预览的文件监视；没有文本预览时没有订阅。
+    pub fn text_file_watch_subscription(&self) -> Subscription<PreviewMessage> {
+        match self.active_text_preview_document() {
+            Some(document) => text_file_watch_subscription(document.id(), document.path()),
+            None => Subscription::none(),
+        }
+    }
+
+    fn accept_text_file_check(
+        &mut self,
+        outcome: Result<(FileChange, Option<crate::text_document::FileStamp>), String>,
+    ) -> Task<PreviewMessage> {
+        let Ok((change, stamp)) = outcome else {
             return Task::none();
         };
-        let Some(path) = self
-            .active_text_preview_document_mut()
-            .map(|document| document.path().to_path_buf())
-        else {
+        let Some(document) = self.active_text_preview_document_mut() else {
             return Task::none();
         };
-        self.text_preview_generation = self.text_preview_generation.wrapping_add(1);
-        let generation = self.text_preview_generation;
+        match (change, stamp) {
+            (FileChange::Appended { .. }, Some(stamp)) => {
+                let reads = document.accept_append(stamp);
+                text_read_tasks(document, reads)
+            }
+            (FileChange::Rewritten, _) => {
+                let choice = if document.encoding_chosen() {
+                    TextEncodingChoice::Chosen(document.encoding())
+                } else {
+                    TextEncodingChoice::Detect
+                };
+                self.reopen_text_document(choice)
+            }
+            // 被删：已打开的句柄还能读，继续显示（第六轮决定）。
+            _ => Task::none(),
+        }
+    }
+
+    /// 同一路径重新打开（文件改写、改编码），落点是原视口顶部那一行，原来贴着末尾的到末尾。
+    fn reopen_text_document(&mut self, choice: TextEncodingChoice) -> Task<PreviewMessage> {
+        let Some(document) = self.active_text_preview_document_mut() else {
+            return Task::none();
+        };
+        let jump = match document.viewport() {
+            Some(viewport) if viewport.at_bottom => TextJump::End,
+            Some(viewport) => TextJump::Offset(viewport.first_row),
+            None => TextJump::Start,
+        };
+        let path = document.path().to_path_buf();
+        let format = document.format();
+        let document_id = document.id();
         Task::perform(
-            load_reencoded_text_preview(path.clone(), encoding, format),
-            move |outcome| PreviewMessage::TextPreviewReencoded {
-                path: path.clone(),
-                generation,
-                outcome,
+            reopen_text_preview(path, choice, format, jump),
+            move |outcome| PreviewMessage::TextRead {
+                document: document_id,
+                reply: TextReadReply(TextReadReplyKind::Reopened(outcome.map(Arc::new))),
             },
         )
     }
 
-    /// 重读结果替换文档内容；Markdown 原文/渲染模式是用户当前的选择，保留。
-    pub fn accept_reencoded_text_preview(
+    fn accept_reopened_text(
         &mut self,
-        path: PathBuf,
-        generation: u64,
-        outcome: Result<PreviewContent, String>,
+        outcome: Result<Arc<TextOpened>, String>,
     ) -> Task<PreviewMessage> {
-        if generation != self.text_preview_generation {
-            return Task::none();
-        }
-        let Some(mode) = self
-            .active_text_preview_document_mut()
-            .filter(|document| document.path() == path.as_path())
-            .map(|document| document.markdown_preview_mode())
-        else {
+        let Some(previous) = self.active_text_preview_document_mut() else {
             return Task::none();
         };
+        let path = previous.path().to_path_buf();
+        let mode = previous.markdown_preview_mode();
         match outcome {
-            Ok(content) => {
-                self.text_preview_document = TextPreviewDocument::from_loaded(&content, generation)
-                    .map(|mut document| {
-                        document.select_markdown_preview_mode(mode);
-                        document
-                    });
-                self.preview = Some(PreviewState::Ready(content));
+            Ok(opened) => {
+                let task = self.open_text_document(path.clone(), &opened);
+                if let Some(document) = self.text_preview_document.as_mut() {
+                    document.select_markdown_preview_mode(mode);
+                }
+                self.preview = Some(PreviewState::Ready(PreviewContent::Text { path, opened }));
+                task
             }
             Err(error) => {
                 self.text_preview_document = None;
                 self.preview = Some(PreviewState::Error(error));
+                Task::none()
             }
         }
-        Task::none()
     }
 
     pub fn active_text_preview_document_mut(&mut self) -> Option<&mut TextPreviewDocument> {
-        let path = active_text_preview_path(self.preview.as_ref())?;
+        let path = active_text_preview_path(self.preview.as_ref())?.to_path_buf();
         self.text_preview_document
             .as_mut()
             .filter(|document| document.path() == path)
     }
+
+    pub fn active_text_preview_document(&self) -> Option<&TextPreviewDocument> {
+        let path = active_text_preview_path(self.preview.as_ref())?;
+        self.text_preview_document
+            .as_ref()
+            .filter(|document| document.path() == path)
+    }
 }
 
-fn text_preview_state_from_document(
-    path: PathBuf,
-    format: TextPreviewFormat,
-    document: &TextPreviewDocument,
-) -> PreviewState {
-    PreviewState::Ready(PreviewContent::Text {
-        path,
-        rendered: document.shared_content(),
-        format,
-        encoding: document.encoding(),
-        next_offset: document.next_offset(),
-        loaded_line_count: document.loaded_line_count(),
-        line_limit_notice: document.line_limit_notice(),
-    })
+/// 文档要的读取变成后台任务。
+fn text_read_tasks(document: &TextPreviewDocument, reads: Vec<TextRead>) -> Task<PreviewMessage> {
+    let document_id = document.id();
+    let source = document.source();
+    let decoding = document.decoding();
+    let len = document.len();
+    Task::batch(reads.into_iter().map(|read| match read {
+        TextRead::Rows {
+            generation,
+            request,
+        } => {
+            let source = Arc::clone(&source);
+            read_task(document_id, move || TextReadReplyKind::Rows {
+                generation,
+                request,
+                outcome: read_rows(source.as_ref(), decoding, len, request)
+                    .map_err(|error| error.to_string()),
+            })
+        }
+        TextRead::Number {
+            generation,
+            line_start,
+            known,
+        } => {
+            let source = Arc::clone(&source);
+            read_task(document_id, move || {
+                let reader = RowReader {
+                    source: source.as_ref(),
+                    decoding,
+                    len,
+                };
+                TextReadReplyKind::Number {
+                    generation,
+                    line_start,
+                    outcome: reader
+                        .lines_before(line_start, known)
+                        .map_err(|error| error.to_string()),
+                }
+            })
+        }
+        TextRead::Count {
+            start,
+            first_checkpoint,
+            len,
+            cancel,
+        } => Task::run(
+            count_lines(
+                Arc::clone(&source),
+                decoding,
+                len,
+                start,
+                first_checkpoint,
+                cancel,
+            ),
+            move |progress| PreviewMessage::TextRead {
+                document: document_id,
+                reply: TextReadReply(TextReadReplyKind::Index(progress)),
+            },
+        ),
+    }))
+}
+
+/// 阻塞读取放进线程池，结果包成消息。
+fn read_task(
+    document_id: u64,
+    work: impl FnOnce() -> TextReadReplyKind + Send + 'static,
+) -> Task<PreviewMessage> {
+    Task::perform(
+        async move {
+            match tokio::task::spawn_blocking(work).await {
+                Ok(reply) => reply,
+                // 读取代码里的 panic 是缺陷，照样抛出；只有运行时关闭时才会被取消。
+                Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
+                Err(error) => TextReadReplyKind::Selection(Err(error.to_string())),
+            }
+        },
+        move |reply| PreviewMessage::TextRead {
+            document: document_id,
+            reply: TextReadReply(reply),
+        },
+    )
 }
 
 fn active_text_preview_path(preview: Option<&PreviewState>) -> Option<&Path> {
@@ -177,89 +323,6 @@ fn active_text_preview_path(preview: Option<&PreviewState>) -> Option<&Path> {
     }
 }
 
-fn active_text_preview_format(preview: Option<&PreviewState>) -> Option<TextPreviewFormat> {
-    match preview? {
-        PreviewState::Ready(PreviewContent::Text { format, .. }) => Some(*format),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
-mod tests {
-    use std::path::{Path, PathBuf};
-    use std::sync::Arc;
-
-    use encoding_rs::{Encoding, GBK, UTF_8};
-
-    use super::*;
-    use crate::engine::{PreviewEngine, PreviewEngineConfig, PreviewWindowIdentity};
-    use crate::preview::PreviewWindowProfile;
-    use crate::preview_config::PreviewFileSizeLimits;
-    use crate::text_preview::MarkdownPreviewMode;
-
-    fn markdown_content(path: &Path, encoding: &'static Encoding, text: &str) -> PreviewContent {
-        PreviewContent::Text {
-            path: path.to_path_buf(),
-            rendered: Arc::from(text),
-            format: TextPreviewFormat::Markdown,
-            encoding,
-            next_offset: None,
-            loaded_line_count: 1,
-            line_limit_notice: None,
-        }
-    }
-
-    fn engine_showing(content: PreviewContent) -> PreviewEngine {
-        let mut engine = PreviewEngine::new(
-            PreviewEngineConfig {
-                directory_expand_levels: 1,
-                extension_rules: Default::default(),
-                size_limits: PreviewFileSizeLimits::with_default_limits(),
-            },
-            crate::engine::default_preview_size(PreviewWindowProfile::Regular),
-            PreviewWindowIdentity {
-                app_id: "bennu-preview-tests".to_owned(),
-                icon: None,
-            },
-        );
-        engine.text_preview_generation = 1;
-        engine.text_preview_document = TextPreviewDocument::from_loaded(&content, 1);
-        engine.preview = Some(PreviewState::Ready(content));
-        engine
-    }
-
-    #[test]
-    fn only_the_latest_reencode_replaces_the_document_and_keeps_the_mode() {
-        let path = PathBuf::from("/tmp/notes.md");
-        let mut engine = engine_showing(markdown_content(&path, UTF_8, "original"));
-        engine
-            .text_preview_document
-            .as_mut()
-            .expect("document")
-            .select_markdown_preview_mode(MarkdownPreviewMode::Raw);
-
-        let _ = engine.select_text_preview_encoding(GBK);
-        let _ = engine.select_text_preview_encoding(GBK);
-        let latest = engine.text_preview_generation;
-
-        // 先发出的那次重读晚到：代次已过期，丢弃。
-        let _ = engine.accept_reencoded_text_preview(
-            path.clone(),
-            latest - 1,
-            Ok(markdown_content(&path, GBK, "stale")),
-        );
-        let document = engine.text_preview_document.as_ref().expect("document");
-        assert_eq!(document.encoding(), UTF_8);
-        assert_eq!(document.content(), "original");
-
-        let _ = engine.accept_reencoded_text_preview(
-            path.clone(),
-            latest,
-            Ok(markdown_content(&path, GBK, "reencoded")),
-        );
-        let document = engine.text_preview_document.as_ref().expect("document");
-        assert_eq!(document.encoding(), GBK);
-        assert_eq!(document.content(), "reencoded");
-        assert_eq!(document.markdown_preview_mode(), MarkdownPreviewMode::Raw);
-    }
-}
+#[path = "text_tests.rs"]
+mod tests;

@@ -195,7 +195,7 @@ impl UserPreferences {
         // bennu-preview::preview_config 的迁移语义）。
         stored.preview = StoredPreviewPreferences {
             max_preview_file_bytes: None,
-            preview_text_size_bytes: Some(self.preview_size_limits.text_bytes),
+            preview_text_size_bytes: None,
             preview_image_size_bytes: Some(self.preview_size_limits.image_bytes),
             preview_video_size_bytes: Some(self.preview_size_limits.video_bytes),
             preview_audio_size_bytes: Some(self.preview_size_limits.audio_bytes),

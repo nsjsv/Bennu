@@ -98,6 +98,14 @@ pub(crate) fn subscription(daemon: &PickerDaemon) -> Subscription<Message> {
     // 播放结束/会话切换自然摘除）：音频/视频进度 tick（250ms）与动图/
     // 视频帧流（当前播放路径 + 代数 + 起播位置）。挂载判定在
     // active_media_streams（纯查询，单测锚点）。
+    // 预览中的文本文件被追加/改写时跟着变；没有文本预览时是空订阅。
+    subscriptions.push(
+        daemon
+            .preview
+            .engine
+            .text_file_watch_subscription()
+            .map(Message::Preview),
+    );
     let media = active_media_streams(&daemon.preview.engine);
     if media.audio_tick {
         subscriptions.push(audio_preview_tick_subscription().map(Message::Preview));

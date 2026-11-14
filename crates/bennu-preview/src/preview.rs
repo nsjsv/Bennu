@@ -11,7 +11,7 @@ use crate::animated_image_preview::AnimatedImagePreview;
 use crate::audio_preview::AudioPreviewRuntime;
 use crate::document_preview::PagedDocumentPreview;
 use crate::sqlite_preview::SqliteDatabasePreview;
-use crate::text_preview::{TextPreviewFormat, TextPreviewLineLimitNotice};
+use crate::text_document::TextOpened;
 use file_core::byte_progress::active_byte_fraction;
 
 #[derive(Debug, Clone)]
@@ -85,14 +85,10 @@ pub enum PreviewContent {
     Directory {
         entries: Vec<PreviewTreeEntry>,
     },
+    /// 打开的文本：句柄、解码方式、第一个窗口；引擎据此建按需读取的文档。
     Text {
         path: PathBuf,
-        rendered: Arc<str>,
-        format: TextPreviewFormat,
-        encoding: &'static encoding_rs::Encoding,
-        next_offset: Option<u64>,
-        loaded_line_count: usize,
-        line_limit_notice: Option<TextPreviewLineLimitNotice>,
+        opened: Arc<TextOpened>,
     },
     Archive {
         entries: Vec<PreviewTreeEntry>,

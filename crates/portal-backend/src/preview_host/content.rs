@@ -16,7 +16,6 @@ use bennu_preview::engine::{
 };
 use bennu_preview::preview::{ImagePreviewContent, PreviewContent, PreviewSize, PreviewState};
 use bennu_preview::preview_message::PreviewMessage;
-use bennu_preview::text_preview_viewer::TEXT_PREVIEW_VIEWER_ID;
 use thumbnails::{CachedThumbnail, ThumbnailRequest, ThumbnailSourceMetadata};
 
 use crate::picker_session::thumbnails::ThumbnailLoadFailed;
@@ -324,53 +323,6 @@ impl PreviewHost {
             // 解码失败重试：重新走分类分发（主软件 retry_image_preview）。
             PreviewMessage::RetryImagePreview(path) => {
                 self.open_preview_for_resolved_path(path, FileKind::File)
-            }
-            // 滚动几何宿主 → 查看器从动（scroll_to 穿透到查看器内部滚动）。
-            PreviewMessage::TextPreviewViewportSynced { offset_y, .. } => {
-                iced::widget::operation::scroll_to(
-                    iced::widget::Id::new(TEXT_PREVIEW_VIEWER_ID),
-                    iced::widget::scrollable::AbsoluteOffset {
-                        x: 0.0,
-                        y: offset_y,
-                    },
-                )
-            }
-            // 查看器内部滚动：镜像预取分块 + 把总偏移同步回几何宿主滚动区。
-            PreviewMessage::TextPreviewViewerScrolled {
-                lines,
-                offset_y,
-                viewport_height,
-            } => {
-                let chunk_task = self
-                    .engine
-                    .handle_text_preview_content_scrolled(lines, viewport_height);
-                let sync_task = iced::widget::operation::scroll_to(
-                    preview_scroll_id(PreviewScrollRegion::Text),
-                    iced::widget::scrollable::AbsoluteOffset {
-                        x: 0.0,
-                        y: offset_y,
-                    },
-                );
-                Task::batch([chunk_task, sync_task])
-            }
-            PreviewMessage::TextPreviewContentHeightChanged(content_height) => {
-                self.engine.text_preview_content_height = content_height;
-                Task::none()
-            }
-            PreviewMessage::MarkdownPreviewScrolled {
-                offset_y,
-                viewport_height,
-                content_height,
-            } => self.engine.handle_markdown_preview_scrolled(
-                offset_y,
-                viewport_height,
-                content_height,
-            ),
-            PreviewMessage::MarkdownPreviewModeSelected(mode) => {
-                if let Some(document) = self.engine.text_preview_document.as_mut() {
-                    document.select_markdown_preview_mode(mode);
-                }
-                Task::none()
             }
             // 窗口在消息回到宿主前已被关掉时，焦点簿记不能指向已死窗口。
             PreviewMessage::PreviewWindowPresented(window) => {

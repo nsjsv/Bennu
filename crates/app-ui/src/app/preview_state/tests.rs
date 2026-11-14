@@ -478,17 +478,10 @@ fn every_message_the_engine_returns_has_a_host_handler() {
 
     for message in [
         PreviewMessage::SqliteTablesResizeStarted,
-        PreviewMessage::TextPreviewContentHeightChanged(12.0),
-        PreviewMessage::TextPreviewViewportSynced {
-            offset_y: 0.0,
-            viewport_height: 100.0,
-        },
-        PreviewMessage::TextPreviewViewerScrolled {
-            lines: 1,
-            offset_y: 0.0,
-            viewport_height: 100.0,
-        },
-        PreviewMessage::MarkdownPreviewModeSelected(crate::model::MarkdownPreviewMode::Raw),
+        PreviewMessage::MarkdownPreviewModeSelected(
+            bennu_preview::text_preview::MarkdownPreviewMode::Raw,
+        ),
+        PreviewMessage::TextFileChanged { document: 7 },
         PreviewMessage::PreviewTreeDirectoryToggled(0),
         PreviewMessage::AudioPreviewSeekRequested(0.0),
         PreviewMessage::PreviewImageViewport(PreviewImageViewportMessage::ResetRequested),

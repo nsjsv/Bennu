@@ -622,11 +622,13 @@ dependencies = [
  "image",
  "libc",
  "memchr",
+ "notify",
  "pulldown-cmark",
  "resvg",
  "rodio",
  "roxmltree",
  "rusqlite",
+ "rustix 1.1.4",
  "serde",
  "serde_json",
  "tempfile",
@@ -635,6 +637,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "unicode-segmentation",
  "url",
 ]
 

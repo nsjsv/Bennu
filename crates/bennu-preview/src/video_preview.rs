@@ -128,7 +128,7 @@ async fn stream_frames(
         start,
         subtitle,
     } = segment;
-    let hwaccel = hwaccel::render_node();
+    let hwaccel = hwaccel::decoder();
     let mut child = frames::stream_command(path, plan, *start, hwaccel, subtitle.as_deref())
         .spawn()
         .map_err(|error| format!("could not start ffmpeg: {error}"))?;

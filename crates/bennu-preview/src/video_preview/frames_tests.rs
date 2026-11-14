@@ -190,7 +190,9 @@ fn hardware_decoding_names_the_display_gpu_before_the_input() {
         Path::new("/videos/clip.mkv"),
         &plan,
         Duration::ZERO,
-        Some(Path::new("/dev/dri/renderD129")),
+        Some(&crate::video_preview::hwaccel::HardwareDecoder::Vaapi {
+            render_node: std::path::PathBuf::from("/dev/dri/renderD129"),
+        }),
         None,
     );
     let arguments = command
@@ -204,10 +206,10 @@ fn hardware_decoding_names_the_display_gpu_before_the_input() {
         .expect("-i");
     let device = arguments
         .windows(2)
-        .position(|pair| pair == ["-init_hw_device", "vaapi=va:/dev/dri/renderD129"])
+        .position(|pair| pair == ["-init_hw_device", "vaapi=hw:/dev/dri/renderD129"])
         .expect("named device");
     assert!(device < input);
     assert!(arguments
         .windows(4)
-        .any(|four| four == ["-hwaccel", "vaapi", "-hwaccel_device", "va"]));
+        .any(|four| four == ["-hwaccel", "vaapi", "-hwaccel_device", "hw"]));
 }

@@ -70,15 +70,18 @@ where
         Some(picture) => video_surface(Arc::clone(picture)),
         None => Space::new().width(Length::Fill).height(Length::Fill).into(),
     };
-    // 单击播放/暂停、双击全屏：判定交给引擎（要等一会儿看有没有第二下）。
-    let frame_view: Element<'static, Message> = mouse_area(
+    // 单击播放/暂停、双击全屏：判定交给引擎（要等一会儿看有没有第二下）。全屏时鼠标停一会儿就藏。
+    let mut frame_area = mouse_area(
         container(frame_content)
             .width(Length::Fill)
             .height(Length::Fill)
             .style(preview_media_style),
     )
-    .on_press(Message::from(PreviewMessage::VideoPreviewSurfacePressed))
-    .into();
+    .on_press(Message::from(PreviewMessage::VideoPreviewSurfacePressed));
+    if playback.is_some_and(|playback| playback.cursor_hidden) {
+        frame_area = frame_area.interaction(iced::mouse::Interaction::Hidden);
+    }
+    let frame_view: Element<'static, Message> = frame_area.into();
 
     let mini_progress_opacity = mini_progress_opacity_for_controls_opacity(effective_opacity);
     let mut overlay = Stack::with_children([frame_view])

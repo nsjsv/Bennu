@@ -27,6 +27,10 @@ impl FileBrowser {
             };
         }
 
+        if let Some(task) = self.video_fullscreen_key(&key) {
+            return task;
+        }
+
         // 终端面板聚焦时键盘归 PTY;除宿主保留键外不进入文件管理器快捷键路由。
         if let Some(task) = self.terminal_panel_keyboard_input(&key, modifiers) {
             return task;

@@ -59,6 +59,9 @@ pub struct PreviewEngine {
     pub audio_analysis: Option<AudioAnalysis>,
     pub audio_analysis_cache: AudioAnalysisCache,
     pub video_preview: Option<VideoPreviewPlayback>,
+    /// 视频全屏在哪：独立预览窗口自己全屏，或右侧面板的视频铺满主窗口（宿主据此切主窗口）。
+    pub video_fullscreen: Option<video_fullscreen::VideoFullscreen>,
+    pub(crate) fullscreen_idle: video_fullscreen::FullscreenIdle,
     /// 音频、视频预览共用的音量与播完模式，唯一来源：宿主加载设置时注入；改动经
     /// `MediaVolumeChanged` / `AudioEndActionCycled` 交宿主记住后由对应的 set 方法生效。
     pub media_settings: MediaPlaybackSettings,
@@ -133,6 +136,8 @@ impl PreviewEngine {
             audio_analysis: None,
             audio_analysis_cache: AudioAnalysisCache::default(),
             video_preview: None,
+            video_fullscreen: None,
+            fullscreen_idle: video_fullscreen::FullscreenIdle::default(),
             media_settings: MediaPlaybackSettings::default(),
             queued_audio_track: None,
             preview_size: initial_preview_size,
@@ -250,6 +255,8 @@ impl PreviewEngine {
                 self.accept_video_preview_still_error(&path, generation, position, error)
             }
             PreviewMessage::VideoPreviewSurfacePressed => self.video_surface_pressed(),
+            PreviewMessage::VideoFullscreenToggled => self.toggle_video_fullscreen(),
+            PreviewMessage::VideoFullscreenIdleElapsed => self.video_fullscreen_idle_elapsed(),
             PreviewMessage::VideoPreviewTrackMenuToggled(menu) => {
                 self.toggle_video_track_menu(menu)
             }
@@ -289,6 +296,7 @@ mod text;
 mod text_find;
 mod tree;
 mod video;
+pub mod video_fullscreen;
 mod video_tracks;
 mod windows;
 

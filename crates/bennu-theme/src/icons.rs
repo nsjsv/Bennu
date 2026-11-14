@@ -77,8 +77,6 @@ pub enum IconSymbol {
     Captions,
     AudioLines,
     Info,
-    Maximize,
-    Minimize,
 }
 
 pub fn rotated_chevron_right_view(rotation_degrees: f32, size: f32) -> Svg<'static, Theme> {
@@ -234,8 +232,6 @@ impl IconSymbol {
             Self::Captions => include_bytes!("../assets/icons/lucide/captions.svg"),
             Self::AudioLines => include_bytes!("../assets/icons/lucide/audio-lines.svg"),
             Self::Info => include_bytes!("../assets/icons/lucide/info.svg"),
-            Self::Maximize => include_bytes!("../assets/icons/lucide/maximize.svg"),
-            Self::Minimize => include_bytes!("../assets/icons/lucide/minimize.svg"),
         }
     }
 }

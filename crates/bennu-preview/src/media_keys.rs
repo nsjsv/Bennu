@@ -1,5 +1,5 @@
 //! 音频、视频预览的键盘：包住面板的可聚焦壳。回车播放/暂停，←/→ 后退/前进 5 秒
-//! （Shift 加按 30 秒），↑/↓ 音量 ±5%。空格不接，照旧开关预览窗口。点一下面板才聚焦
+//! （Shift 加按 30 秒），↑/↓ 音量 ±5%，F 视频进出全屏（Esc 退全屏归宿主的 Esc 路由）。空格不接，照旧开关预览窗口。点一下面板才聚焦
 //! （独立预览窗口打开时由 `focus_preview_keyboard` 聚焦），点别处失焦——右侧面板里
 //! 方向键默认还归文件列表。
 
@@ -70,6 +70,9 @@ pub(crate) fn media_key_command(
         }
         keyboard::Key::Named(Named::ArrowDown) if !modifiers.shift() => {
             Some(MediaKeyCommand::ChangeVolume(-VOLUME_STEP))
+        }
+        keyboard::Key::Character(character) if character.eq_ignore_ascii_case("f") => {
+            Some(MediaKeyCommand::ToggleFullscreen)
         }
         _ => None,
     }

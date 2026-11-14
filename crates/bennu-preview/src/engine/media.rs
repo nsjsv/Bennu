@@ -33,6 +33,7 @@ impl super::PreviewEngine {
             MediaKeyCommand::ChangeVolume(delta) => Task::done(PreviewMessage::MediaVolumeChanged(
                 (self.media_settings.volume + delta).clamp(0.0, 1.0),
             )),
+            MediaKeyCommand::ToggleFullscreen => self.toggle_video_fullscreen(),
         }
     }
 }

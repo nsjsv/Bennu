@@ -38,6 +38,14 @@ pub(crate) fn handle_key(
         return Task::none();
     }
     if daemon.preview.is_preview_window(window_id) {
+        // 视频全屏时 Esc 只退出全屏，不关预览。
+        if daemon.preview.engine.video_fullscreen.is_some()
+            && matches!(key, keyboard::Key::Named(keyboard::key::Named::Escape))
+        {
+            return Task::done(Message::Preview(
+                bennu_preview::preview_message::PreviewMessage::VideoFullscreenToggled,
+            ));
+        }
         // 未捕获的 Esc 关预览（与主软件辅助窗口一致：被捕获的 Esc 只「离开」）；
         // 其余键归预览窗控件（滚动/媒体控件由 iced widget 自理）。
         if preview_escape_requested(daemon, window_id, &key, captured) {

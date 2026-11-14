@@ -391,6 +391,8 @@ pub struct VideoPreviewPlayback {
     pub subtitle: VideoSubtitle,
     /// 控制条上展开着的字幕/音轨菜单。
     pub track_menu: Option<VideoTrackMenu>,
+    /// 全屏时鼠标停了一会儿：画面上不显示鼠标。
+    pub cursor_hidden: bool,
     pub error: Option<String>,
 }
 
@@ -419,6 +421,7 @@ impl VideoPreviewPlayback {
             audio_track: 0,
             subtitle: VideoSubtitle::Off,
             track_menu: None,
+            cursor_hidden: false,
             error: None,
         }
     }

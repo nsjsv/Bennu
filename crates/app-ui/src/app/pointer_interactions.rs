@@ -58,10 +58,15 @@ impl FileBrowser {
             self.cursor_position = Some(position);
             let preview_engine = &mut self.preview_engine;
             preview_engine.update_sqlite_tables_resize_drag(position);
-            preview_engine.cancel_preview_window_initial_controls_hide();
-            preview_engine.preview_window_pointer_y = Some(position.y);
-            preview_engine.refresh_preview_window_bottom_controls();
-            return Task::none();
+            return preview_engine
+                .preview_pointer_moved(position.y)
+                .map(Message::Preview);
+        }
+        if window == self.main_window && self.main_window_video_fullscreen {
+            return self
+                .preview_engine
+                .preview_pointer_moved(position.y)
+                .map(Message::Preview);
         }
         if self.settings_window == Some(window) {
             return self.update_context_menu_settings_drag(position);

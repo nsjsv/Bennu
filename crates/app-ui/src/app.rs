@@ -64,6 +64,7 @@ mod session_persistence;
 mod session_restore;
 mod shortcuts;
 mod sidebar_bookmarks;
+mod video_fullscreen;
 pub(crate) use sidebar_bookmarks::SidebarFixedEntry;
 mod sidebar_devices;
 mod sidebar_resize;
@@ -111,8 +112,11 @@ use iced::{time, Element, Point, Subscription, Task, Theme};
 // 媒体预览流式订阅（自本 crate 订阅桥下沉 bennu-preview 后直连）：
 // 输出 PreviewMessage，经 Message::Preview 包装回流引擎。
 use bennu_preview::animated_image_preview::animated_image_preview_subscription;
+use bennu_preview::engine::video_fullscreen::VideoFullscreen;
 use bennu_preview::engine::{audio_preview_tick_subscription, video_preview_tick_subscription};
+use bennu_preview::preview::PreviewSize;
 use bennu_preview::video_preview::video_preview_subscription;
+use bennu_preview::window_shell::HEADER_BAR_HEIGHT;
 
 use bennu_preview::preview_loading::{classify_preview_path, PreviewPathKind};
 use bennu_preview::preview_message::PreviewMessage;
@@ -383,6 +387,8 @@ pub(crate) struct FileBrowser {
     pub(crate) cursor_position: Option<Point>,
     pub(crate) main_window_width: f32,
     pub(crate) main_window_height: f32,
+    /// 主窗口现在是不是在全屏放右侧面板的视频（宿主已切过去的状态，跟着引擎收敛）。
+    main_window_video_fullscreen: bool,
     /// 光标当前压着的浏览内容区(窗格内容不含 tab 条)。悬停不激活窗格,
     /// 该记录只用于 Ctrl+Shift 分栏拖拽在被捕获控件上仍可判定起点。
     cursor_over_browser_content_pane: Option<BrowserPaneId>,
@@ -762,6 +768,7 @@ impl FileBrowser {
             ),
             system_language: UiLanguage::English,
             cursor_position: None,
+            main_window_video_fullscreen: false,
             main_window_width: MAIN_WINDOW_INITIAL_WIDTH,
             main_window_height: MAIN_WINDOW_INITIAL_HEIGHT,
             cursor_over_browser_content_pane: None,
@@ -1052,10 +1059,21 @@ impl FileBrowser {
             .and_then(|path| path.file_name())
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| tr!("Preview"));
+        let opacity = engine.preview_window_bottom_controls.opacity();
+        // 全屏：没有顶栏和窗口边框，内容就是整个屏幕。
+        if engine.video_fullscreen == Some(VideoFullscreen::PreviewWindow) {
+            return self.preview_window_content(
+                PreviewSize {
+                    width: engine.preview_size.width,
+                    height: engine.preview_size.height + HEADER_BAR_HEIGHT,
+                },
+                opacity,
+            );
+        }
         let header = HeaderBar::new()
             .title(title)
             .start(preview_pin_button(engine.preview_window_pinned));
-        let content = self.preview_window_content(engine.preview_window_bottom_controls.opacity());
+        let content = self.preview_window_content(engine.preview_size, opacity);
         self.single_window_view(window, header, content)
     }
 
@@ -1068,6 +1086,9 @@ impl FileBrowser {
             .width(iced::Length::Fill)
             .height(iced::Length::Fill)
             .into();
+        }
+        if self.main_window_video_fullscreen {
+            return self.main_window_video_fullscreen_view();
         }
         startup_trace::mark_once("first_main_window_view");
         if !self.tab().directory_collection_phase.is_discovering()

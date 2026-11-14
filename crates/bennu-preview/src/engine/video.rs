@@ -314,7 +314,7 @@ impl super::PreviewEngine {
             return Task::none();
         }
         if playback.pending_click.take().is_some() {
-            return Task::none();
+            return self.toggle_video_fullscreen();
         }
         playback.clicks += 1;
         let click = playback.clicks;

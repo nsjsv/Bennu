@@ -1,3 +1,4 @@
+use bennu_preview::preview::PreviewSize;
 use iced::Element;
 
 use super::FileBrowser;
@@ -5,8 +6,10 @@ use crate::model::Message;
 use crate::view::view_preview_window;
 
 impl FileBrowser {
+    /// `size` 是内容区大小：窗口里是顶栏下面那块，全屏时是整个屏幕。
     pub(super) fn preview_window_content(
         &self,
+        size: PreviewSize,
         preview_bottom_controls_opacity: f32,
     ) -> Element<'_, Message> {
         let preview_engine = &self.preview_engine;
@@ -14,7 +17,7 @@ impl FileBrowser {
             preview_engine.preview.as_ref(),
             preview_engine.text_preview_document.as_ref(),
             preview_engine.sqlite_preview.as_ref(),
-            preview_engine.preview_size,
+            size,
             &preview_engine.preview_image_viewport,
             preview_engine.audio_preview.as_ref(),
             preview_engine.audio_analysis.as_ref(),

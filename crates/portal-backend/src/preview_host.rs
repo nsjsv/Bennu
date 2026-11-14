@@ -510,11 +510,10 @@ impl PreviewHost {
             return Task::none();
         }
         self.engine.update_sqlite_tables_resize_drag(position);
-        self.engine.cancel_preview_window_initial_controls_hide();
-        self.engine.preview_window_pointer_y = Some(position.y);
         self.preview_window_pointer = Some(position);
-        self.engine.refresh_preview_window_bottom_controls();
-        Task::none()
+        self.engine
+            .preview_pointer_moved(position.y)
+            .map(Message::Preview)
     }
 
     /// 指针离开预览窗：隐藏底部控制条；按着左键离开时就地结束图片平移

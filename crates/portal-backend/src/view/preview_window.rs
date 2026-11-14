@@ -78,6 +78,10 @@ pub(crate) fn preview_window_view(
         || Message::PreviewSqliteDragFinished,
     );
 
+    // 视频全屏：没有顶栏和窗口边框，面板就是整个屏幕。
+    if engine.video_fullscreen.is_some() {
+        return panel;
+    }
     let title = engine
         .preview_shown_path
         .as_deref()

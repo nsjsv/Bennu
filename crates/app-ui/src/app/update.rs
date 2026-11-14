@@ -38,7 +38,8 @@ impl FileBrowser {
         // 交互入口(拖拽起手、菜单、选择变化……)顺手调用,面板内容随时可能被
         // 清掉;不把槽拆开,就只能在出口重新对齐一次。面板关闭时是空操作。
         let right_preview_panel_command = self.sync_right_preview_panel();
-        Task::batch([command, right_preview_panel_command])
+        let fullscreen_command = self.sync_main_window_video_fullscreen();
+        Task::batch([command, right_preview_panel_command, fullscreen_command])
     }
 
     /// 消息分派体：自 update 的主 match 提出，出口收敛钩子只在 update 里执行一次。

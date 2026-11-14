@@ -377,6 +377,10 @@ impl PreviewEngine {
     }
 
     pub fn refresh_preview_window_bottom_controls(&mut self) {
+        // 全屏时控件按「鼠标动没动」显隐（video_fullscreen），不按指针在不在底部。
+        if self.video_fullscreen.is_some() {
+            return;
+        }
         if !self.preview_window_has_bottom_media_controls() {
             self.preview_window_bottom_controls.reset_hidden();
             return;
@@ -442,6 +446,10 @@ impl PreviewEngine {
     pub fn close_preview_window(&mut self) -> (Option<Id>, Task<PreviewMessage>) {
         // 先复位固定，保证 clear_preview 的固定守卫不会跳过内容清理。
         self.preview_window_pinned = false;
+        if self.video_fullscreen == Some(super::video_fullscreen::VideoFullscreen::PreviewWindow) {
+            self.video_fullscreen = None;
+            self.fullscreen_idle = super::video_fullscreen::FullscreenIdle::default();
+        }
         self.preview_shown_path = None;
         self.clear_preview();
         self.pending_preview_resize = None;

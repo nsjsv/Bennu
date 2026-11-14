@@ -83,10 +83,10 @@ impl super::PreviewEngine {
         self.start_audio_preview_playback(path, resume_from)
     }
 
-    /// 宿主打开音频预览的唯一入口：独立窗口一打开就播，右侧面板只就绪、点了才播
+    /// 音频内容到了（`accept_preview`）时打开播放：独立窗口一打开就播，右侧面板只就绪、点了才播
     /// （选中项在音乐文件夹里移动时不该每移一下就出声）。
     /// 「播下一首」排进来的那首例外：右侧面板也接着播，这是同一次播放的延续。
-    pub fn open_audio_preview(&mut self, path: PathBuf) -> Task<PreviewMessage> {
+    pub(crate) fn open_audio_preview(&mut self, path: PathBuf) -> Task<PreviewMessage> {
         let continues_playback = self.queued_audio_track.take().as_ref() == Some(&path);
         match self.preview_load_surface {
             PreviewLoadSurface::RightDockedPanel if !continues_playback => {
@@ -232,7 +232,7 @@ impl super::PreviewEngine {
         let video = self
             .video_preview
             .as_ref()
-            .and_then(|playback| playback.audio_runtime.as_ref());
+            .and_then(|playback| playback.audio_runtime());
         for runtime in [audio, video].into_iter().flatten() {
             runtime.set_volume(self.media_settings.volume);
         }

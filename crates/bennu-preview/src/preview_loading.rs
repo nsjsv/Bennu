@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use bennu_localization::tr;
 use file_core::mime::{MimeDatabase, NameType, TEXT_PLAIN};
@@ -13,10 +14,12 @@ use crate::audio_preview::{probe_audio_preview, AudioProbeError};
 use crate::formatting::format_file_size;
 use crate::preview::{
     AudioPreviewDetails, PreviewContent, PreviewTreeDirectoryChildren, PreviewTreeEntry,
+    VideoPreviewDetails,
 };
 use crate::preview_config::{PreviewExtensionRules, PreviewFileSizeKind, PreviewSizeLimitKind};
 use crate::sqlite_preview::load_sqlite_preview;
 use crate::text_preview_loading::{load_initial_text_preview, TextOpening};
+use crate::video_preview::{probe_video_preview, VideoProbeError};
 
 pub const PREVIEW_ARCHIVE_ENTRY_LIMIT: usize = 500;
 
@@ -241,21 +244,27 @@ async fn load_audio_preview(path: PathBuf) -> Result<PreviewContent, String> {
     }
 }
 
+/// 只有声音、没有画面（或只有封面图）的「视频」按音频预览打开。
 async fn load_video_preview(path: PathBuf) -> Result<PreviewContent, String> {
-    // 打开前先看一眼：没装就直接给安装提示，而不是等解帧失败再报错。
-    if ExternalTool::Ffmpeg.locate().is_none() {
-        return Ok(PreviewContent::ToolRequired {
+    let len = tokio::fs::metadata(&path)
+        .await
+        .map_err(|error| tr!("Could not read this video file: %1", error.to_string()))?
+        .len();
+    match probe_video_preview(path.clone()).await {
+        Ok(probe) if probe.video.is_none() => load_audio_preview(path).await,
+        Ok(probe) => Ok(PreviewContent::Video {
+            path,
+            details: Arc::new(VideoPreviewDetails { len, probe }),
+            frame: None,
+        }),
+        Err(VideoProbeError::FfmpegMissing) => Ok(PreviewContent::ToolRequired {
             path,
             tool: ExternalTool::Ffmpeg,
-        });
+        }),
+        Err(VideoProbeError::Failed(reason)) => {
+            Err(tr!("Could not read this video file: %1", reason))
+        }
     }
-    Ok(PreviewContent::Video {
-        path,
-        frame: None,
-        width: 0,
-        height: 0,
-        duration: None,
-    })
 }
 
 struct ArchivePreview {

@@ -383,17 +383,15 @@ async fn ambiguous_ts_opens_as_video_or_text_by_content() {
         .await
     };
 
-    // 内容是 MPEG-TS：按视频打开（没装 ffmpeg 时是安装提示）。
-    let content = open(recording.clone(), default_rules())
-        .await
-        .expect("video preview");
-    assert!(
-        matches!(
-            content,
-            PreviewContent::Video { .. } | PreviewContent::ToolRequired { .. }
+    // 内容是 MPEG-TS：交给视频加载（这几个包只有同步字节，ffprobe 读不出画面就报视频错误；
+    // 没装 ffmpeg 时是安装提示），不是文本加载的「二进制数据」。
+    match open(recording.clone(), default_rules()).await {
+        Err(error) => assert!(error.contains("video file"), "{error}"),
+        Ok(content) => assert!(
+            matches!(content, PreviewContent::ToolRequired { .. }),
+            "{content:?}"
         ),
-        "{content:?}"
-    );
+    }
     let content = open(code, default_rules()).await.expect("text preview");
     assert!(
         matches!(content, PreviewContent::Text { .. }),
@@ -404,6 +402,59 @@ async fn ambiguous_ts_opens_as_video_or_text_by_content() {
     let mut rules = default_rules();
     rules.text.push("ts".to_owned());
     assert!(open(recording, rules).await.is_err());
+}
+
+#[tokio::test]
+async fn videos_are_probed_once_and_picture_less_ones_open_as_audio() {
+    use crate::video_preview::test_fixtures::video_fixture;
+    let temp_dir = tempdir().expect("temp dir");
+    let Some(movie) = video_fixture(
+        temp_dir.path(),
+        "movie.mkv",
+        "320x240",
+        1,
+        &["-f", "lavfi", "-i", "sine=duration=1", "-c:a", "aac"],
+    ) else {
+        return;
+    };
+    let open = |path: PathBuf| async move {
+        load_preview(
+            path,
+            FileKind::File,
+            &default_rules(),
+            ScanOptions::default(),
+            TEST_MAX_PREVIEW_FILE_BYTES,
+        )
+        .await
+        .expect("preview")
+    };
+    match open(movie).await {
+        PreviewContent::Video { details, .. } => {
+            let video = details.probe.video.as_ref().expect("picture");
+            assert_eq!((video.width, video.height), (320, 240));
+            assert_eq!(details.probe.audio_tracks.len(), 1);
+        }
+        other => panic!("{other:?}"),
+    }
+
+    // 只有音轨的 .mp4（类型库按名字算视频）按音频预览打开。
+    let voice = temp_dir.path().join("voice.mp4");
+    let status = std::process::Command::new("ffmpeg")
+        .args([
+            "-nostdin",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=duration=1",
+        ])
+        .args(["-c:a", "aac"])
+        .arg(&voice)
+        .status()
+        .expect("run ffmpeg");
+    assert!(status.success());
+    assert!(matches!(open(voice).await, PreviewContent::Audio { .. }));
 }
 
 #[tokio::test]

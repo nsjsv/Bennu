@@ -24,6 +24,7 @@ pub use analysis::{
 pub use cover::load_audio_cover;
 pub use lyrics::{load_audio_lyrics, AudioLyrics, LyricLine};
 use pcm_stream::{spawn_pcm_stream, FfmpegPcmSource, PcmFormat, PlaybackExchange};
+pub(crate) use probe::{positive_number, seconds_field};
 pub use probe::{AudioProbe, AudioProbeError, AudioStreamFacts, AudioTags};
 
 /// 一个文件一次预览会话的播放：声卡输出与播放器只开一次，播放、暂停、跳转、

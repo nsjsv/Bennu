@@ -83,7 +83,8 @@ pub enum PreviewMessage {
     AudioPreviewTick,
     VideoPreviewPlaybackToggled,
     VideoPreviewAudioStarted(PathBuf, u64, Result<AudioPreviewRuntime, String>),
-    VideoPreviewMetadataLoaded(PathBuf, Result<Option<Duration>, String>),
+    /// 屏幕多大（物理像素）；量不到是 None。量好才定出帧大小、开始解码。
+    VideoPreviewDisplayMeasured(PathBuf, Option<iced::Size<u32>>),
     VideoPreviewSeekRequested(f32),
     VideoPreviewSeekCommitted,
     /// 音频、视频共用的音量（0.0–1.0）；交给宿主记住后再由 `set_media_volume` 生效。
@@ -92,7 +93,12 @@ pub enum PreviewMessage {
     MediaKey(MediaKeyCommand),
     VideoPreviewTick,
     VideoPreviewFrameLoaded(VideoPreviewFrame),
-    VideoPreviewSeekFrameFailed(PathBuf, u64, Duration, String),
+    /// 单独解的一帧（右侧面板的静止画面、拖进度条时的关键帧）。
+    VideoPreviewStillLoaded(VideoPreviewFrame),
+    VideoPreviewStillFailed(PathBuf, u64, Duration, String),
+    /// 在画面上按了一下；单击还是双击由引擎等一会儿再定。
+    VideoPreviewSurfacePressed,
+    VideoPreviewClickSettled(u64),
     VideoPreviewFinished(PathBuf, u64),
     VideoPreviewFailed(PathBuf, u64, String),
     PreviewTreeDirectoryToggled(usize),

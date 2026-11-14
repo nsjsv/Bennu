@@ -118,9 +118,8 @@ pub(crate) fn subscription(daemon: &PickerDaemon) -> Subscription<Message> {
             animated_image_preview_subscription(path, generation, position).map(Message::Preview),
         );
     }
-    if let Some((path, generation, position)) = media.video {
-        subscriptions
-            .push(video_preview_subscription(path, generation, position).map(Message::Preview));
+    if let Some(segment) = media.video {
+        subscriptions.push(video_preview_subscription(segment).map(Message::Preview));
     }
     Subscription::batch(subscriptions)
 }
@@ -146,7 +145,7 @@ pub(crate) struct ActiveMediaStreams {
     pub(crate) audio_tick: bool,
     pub(crate) video_tick: bool,
     pub(crate) animated_image: Option<(std::path::PathBuf, u64, Duration)>,
-    pub(crate) video: Option<(std::path::PathBuf, u64, Duration)>,
+    pub(crate) video: Option<bennu_preview::video_preview::VideoSegment>,
 }
 
 pub(crate) fn active_media_streams(

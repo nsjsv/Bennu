@@ -993,11 +993,8 @@ impl FileBrowser {
             );
         }
 
-        if let Some((path, generation, position)) =
-            self.preview_engine.active_video_preview_stream()
-        {
-            subscriptions
-                .push(video_preview_subscription(path, generation, position).map(Message::Preview));
+        if let Some(segment) = self.preview_engine.active_video_preview_stream() {
+            subscriptions.push(video_preview_subscription(segment).map(Message::Preview));
         }
 
         Subscription::batch(subscriptions)

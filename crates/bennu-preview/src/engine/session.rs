@@ -56,6 +56,14 @@ impl super::PreviewEngine {
                     PreviewContent::Audio { path, details, .. } => {
                         self.text_preview_document = None;
                         self.clear_video_preview();
+                        // 打开播放在这里而不在宿主分派处：只有声音的「视频」走视频分派，
+                        // 内容到了才知道是音频。
+                        let open_playback = Task::batch([
+                            self.ensure_preview_window_for_standalone_load(
+                                PreviewWindowProfile::Audio,
+                            ),
+                            self.open_audio_preview(path.clone()),
+                        ]);
                         self.begin_audio_analysis(path, details.len);
                         let measure_duration = if details.probe.duration_is_estimate {
                             measure_audio_preview_duration_command(path.clone())
@@ -63,6 +71,7 @@ impl super::PreviewEngine {
                             Task::none()
                         };
                         Task::batch([
+                            open_playback,
                             measure_duration,
                             load_audio_cover_command(
                                 path.clone(),
@@ -74,11 +83,11 @@ impl super::PreviewEngine {
                             ),
                         ])
                     }
-                    PreviewContent::Video { path, duration, .. } => {
+                    PreviewContent::Video { path, details, .. } => {
                         self.text_preview_document = None;
                         self.clear_audio_preview();
                         self.audio_analysis = None;
-                        self.start_video_preview_playback(path.clone(), *duration)
+                        self.open_video_preview(path, details)
                     }
                     PreviewContent::Sqlite(database) => {
                         self.text_preview_document = None;

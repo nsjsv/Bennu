@@ -3,10 +3,11 @@
 //! image-preview-guidelines 第三节。
 
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use iced::alignment::{Horizontal, Vertical};
-use iced::widget::{button, column, container, image, row, Space, Stack};
+use iced::widget::{button, column, container, mouse_area, row, Space, Stack};
 use iced::{Alignment, Element, Length};
 
 use bennu_theme::icons::IconSymbol;
@@ -24,6 +25,7 @@ use crate::preview::VideoPreviewPlayback;
 use crate::preview::VideoPreviewPlaybackStatus;
 use crate::preview::{scaled_media_size, PreviewSize};
 use crate::preview_message::PreviewMessage;
+use crate::video_surface::{video_surface, VideoPicture};
 use bennu_theme::controls::slider;
 
 const VIDEO_PROGRESS_SLIDER_PORTION: u16 = 4;
@@ -31,13 +33,9 @@ const VIDEO_VOLUME_SLIDER_PORTION: u16 = 1;
 const VIDEO_CONTROL_SLIDER_GAP: f32 = 14.0;
 const VIDEO_VOLUME_ICON_GAP: f32 = 6.0;
 
-// 参数即视频面板的完整输入（路径 + 帧 + 播放态 + 接线），拆结构体只是搬家
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn video_preview_panel<Message>(
     path: &Path,
-    frame: Option<&image::Handle>,
-    width: u32,
-    height: u32,
+    picture: Option<&Arc<VideoPicture>>,
     duration: Option<Duration>,
     playback: Option<&VideoPreviewPlayback>,
     media_volume: f32,
@@ -48,29 +46,31 @@ where
     Message: 'static + Clone + From<PreviewMessage>,
 {
     let playback = playback.filter(|playback| playback.path.as_path() == path);
-    let (frame_width, frame_height) = video_frame_size(size, width, height);
+    // 控件和画面一样宽；画面还没出来时按整块宽度。
+    let frame_width = picture.map_or(size.width, |picture| {
+        scaled_media_size(
+            size.width.max(1.0),
+            size.height.max(1.0),
+            picture.width(),
+            picture.height(),
+        )
+        .0
+    });
     let effective_opacity =
         video_controls_opacity_for_playback(playback, preview_bottom_controls_opacity);
-    let frame_content: Element<'static, Message> = if let Some(frame) = frame {
-        image::Image::new(frame.clone())
-            .width(Length::Fixed(frame_width))
-            .height(Length::Fixed(frame_height))
-            .into()
-    } else {
-        container(Space::new().width(Length::Fixed(frame_width)))
-            .width(Length::Fixed(frame_width))
-            .height(Length::Fixed(frame_height))
-            .center_x(Length::Fixed(frame_width))
-            .center_y(Length::Fixed(frame_height))
-            .into()
+    let frame_content: Element<'static, Message> = match picture {
+        Some(picture) => video_surface(Arc::clone(picture)),
+        None => Space::new().width(Length::Fill).height(Length::Fill).into(),
     };
-    let frame_view: Element<'static, Message> = container(frame_content)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .center_x(Length::Fill)
-        .center_y(Length::Fill)
-        .style(preview_media_style)
-        .into();
+    // 单击播放/暂停、双击全屏：判定交给引擎（要等一会儿看有没有第二下）。
+    let frame_view: Element<'static, Message> = mouse_area(
+        container(frame_content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(preview_media_style),
+    )
+    .on_press(Message::from(PreviewMessage::VideoPreviewSurfacePressed))
+    .into();
 
     let mini_progress_opacity = mini_progress_opacity_for_controls_opacity(effective_opacity);
     let mut overlay = Stack::with_children([frame_view])
@@ -117,12 +117,12 @@ where
     overlay.into()
 }
 
-/// seek 未提交时控件强制可见，其余跟随底部悬停透明度。
+/// 拖进度条时控件强制可见，其余跟随底部悬停透明度。
 pub(crate) fn video_controls_opacity_for_playback(
     playback: Option<&VideoPreviewPlayback>,
     opacity: f32,
 ) -> f32 {
-    if playback.is_some_and(|playback| playback.seek_completion.is_some()) {
+    if playback.is_some_and(|playback| playback.seek_drag.is_some()) {
         1.0
     } else {
         opacity.clamp(0.0, 1.0)
@@ -144,12 +144,6 @@ pub(crate) fn video_progress_fraction(
         .unwrap_or_else(|| position.as_secs_f32() + 1.0)
         .max(1.0);
     (position.as_secs_f32().min(duration_seconds) / duration_seconds).clamp(0.0, 1.0)
-}
-
-fn video_frame_size(size: PreviewSize, width: u32, height: u32) -> (f32, f32) {
-    let max_width = size.width.max(1.0);
-    let max_height = size.height.max(1.0);
-    scaled_media_size(max_width, max_height, width, height)
 }
 
 fn video_primary_button<Message>(
@@ -257,26 +251,31 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::preview::VideoPreviewSeekCompletion;
+    use crate::preview::VideoSeekDrag;
     use std::path::PathBuf;
+
+    fn playback(path: &str, duration: Option<Duration>) -> VideoPreviewPlayback {
+        VideoPreviewPlayback::ready(PathBuf::from(path), duration, true)
+    }
 
     #[test]
     fn seek_keeps_video_controls_visible_until_commit() {
-        let mut playback =
-            VideoPreviewPlayback::playing(PathBuf::from("clip.mp4"), Some(Duration::from_secs(10)));
+        let mut playback = playback("clip.mp4", Some(Duration::from_secs(10)));
 
         assert_eq!(
             video_controls_opacity_for_playback(Some(&playback), 0.0),
             0.0
         );
 
-        playback.seek_completion = Some(VideoPreviewSeekCompletion::StayPaused);
+        playback.seek_drag = Some(VideoSeekDrag {
+            resume_after: false,
+        });
         assert_eq!(
             video_controls_opacity_for_playback(Some(&playback), 0.0),
             1.0
         );
 
-        playback.seek_completion = None;
+        playback.seek_drag = None;
         assert_eq!(
             video_controls_opacity_for_playback(Some(&playback), 0.25),
             0.25
@@ -285,13 +284,12 @@ mod tests {
 
     #[test]
     fn video_progress_fraction_follows_playback() {
-        let mut playback =
-            VideoPreviewPlayback::playing(PathBuf::from("clip.mp4"), Some(Duration::from_secs(10)));
-        playback.position = Duration::from_secs(4);
-        assert_eq!(video_progress_fraction(Some(&playback), None), 0.4);
+        let mut playback_10s = playback("clip.mp4", Some(Duration::from_secs(10)));
+        playback_10s.position = Duration::from_secs(4);
+        assert_eq!(video_progress_fraction(Some(&playback_10s), None), 0.4);
 
         // duration 未知时回退语义与 video_controls 一致:按 position + 1s 计算。
-        let mut unknown = VideoPreviewPlayback::playing(PathBuf::from("clip.webm"), None);
+        let mut unknown = playback("clip.webm", None);
         unknown.position = Duration::from_secs(5);
         assert_eq!(video_progress_fraction(Some(&unknown), None), 5.0 / 6.0);
 

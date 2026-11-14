@@ -355,13 +355,12 @@ impl PreviewHost {
                 Task::batch([
                     window_command,
                     preview_command(
-                        path.clone(),
+                        path,
                         FileKind::File,
                         rules,
                         ScanOptions::default(),
                         max_file_bytes,
                     ),
-                    self.engine.open_audio_preview(path),
                 ])
             }
             PreviewPathKind::Archive | PreviewPathKind::Sqlite | PreviewPathKind::Text => {

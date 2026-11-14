@@ -6,21 +6,19 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-# 渲染器 feature 由宿主决定（app-ui=wgpu、portal-backend=tiny-skia），
-# workspace 的 iced 定义带 wgpu 且 feature 只能追加不能削减，故此处单独
-# 声明最小 feature：本 crate 模型层只需要 core 类型（Point/Size/mouse），
-# 不得把渲染器（wgpu/tiny-skia）强加给任何宿主——feature 会与宿主并集，
-# 追加 tiny-skia 会把宿主的默认 Compositor 换成 fallback 组合。
+# workspace 的 iced 定义 feature 只能追加不能削减，故此处单独声明需要的 feature。
+# 渲染器：视频画面部件在 wgpu 上画自定义图元、软件渲染（tiny-skia）时退回图片，
+# 两个渲染器都要认得（`iced_renderer::fallback::Renderer` 的两个分支），所以声明
+# wgpu + tiny-skia——两个宿主（app-ui、portal-backend）本来就是这一组合，并集不变。
 # x11/wayland 必须开：iced 无条件依赖 iced_winit，Linux 上无平台 feature
 # 的 winit 直接编译失败；tokio 是 iced 强制的 executor 选择，两个宿主
-# 都用 tokio，feature 与宿主并集不会引入第二套运行时。代价是单独
-# release 构建本 crate 会触发
-# iced_renderer "no renderer" 的 compile_error，但本 crate 从不脱离宿主
-# 单独 release（宿主必然带渲染器 feature，联合构建即恢复）。
+# 都用 tokio，feature 与宿主并集不会引入第二套运行时。
 iced = { version = "0.14", default-features = false, features = [
     "x11",
     "wayland",
     "tokio",
+    "wgpu",
+    "tiny-skia",
     # image-without-codecs/svg 是 widget 层 feature（iced::widget::image/svg 模块
     # 与 Handle 类型），不是渲染器选择：迁移进来的预览模型持有 image::Handle /
     # svg::Handle。不能开 iced 的 image feature：它强制 image/default，把
@@ -33,6 +31,9 @@ iced = { version = "0.14", default-features = false, features = [
 # rodio=音频预览输出（解码交给 ffmpeg，只开播放功能，不带 symphonia 解码器、录音、
 # 抖动噪声）；tokio=spawn_blocking 音频/动图解码线程池。
 rodio = { version = "0.22.2", default-features = false, features = ["playback"] }
+# 视频画面部件要分辨当前是显卡还是软件渲染（fallback::Renderer 的两个分支）；
+# iced 不公开这个枚举，直接依赖它（iced 本来就依赖同一版本，二进制不增加）。
+iced_renderer = "0.14"
 tokio.workspace = true
 # 动图预览：image=GIF 帧解码（workspace 定义含 gif codec）；gif=跳帧
 # 元数据巡检（Duration 上限判定）。
@@ -88,6 +89,8 @@ two-face = { version = "0.5.2", default-features = false, features = ["syntect-o
 tracing.workspace = true
 
 [dev-dependencies]
+# 仅测试用：校验视频着色器（wgpu 本来就依赖同一版本的 naga 解析 WGSL）。
+naga = { version = "27.0.3", features = ["wgsl-in"] }
 # 仅测试用：把 Task 还原成动作流断言窗口/输出动作（自 app-ui 迁入的
 # 初始 chrome 计时命令测试依赖）。
 iced_runtime = "0.14"

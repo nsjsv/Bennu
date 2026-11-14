@@ -208,17 +208,12 @@ where
         }
         PreviewState::Ready(PreviewContent::Video {
             path,
+            details,
             frame,
-            width,
-            height,
-            duration,
-            ..
         }) => media_keys(video_preview_panel(
             path,
             frame.as_ref(),
-            *width,
-            *height,
-            *duration,
+            details.probe.duration,
             video_preview,
             media_settings.volume,
             size,

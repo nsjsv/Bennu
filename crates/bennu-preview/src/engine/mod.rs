@@ -229,10 +229,10 @@ impl PreviewEngine {
             },
             PreviewMessage::VideoPreviewPlaybackToggled => self.toggle_video_preview_playback(),
             PreviewMessage::VideoPreviewAudioStarted(path, generation, audio_outcome) => {
-                self.accept_video_preview_audio_started(path, generation, audio_outcome)
+                self.accept_video_preview_audio_started(&path, generation, audio_outcome)
             }
-            PreviewMessage::VideoPreviewMetadataLoaded(path, metadata_outcome) => {
-                self.accept_video_preview_metadata(path, metadata_outcome)
+            PreviewMessage::VideoPreviewDisplayMeasured(path, display) => {
+                self.accept_video_display(&path, display)
             }
             PreviewMessage::VideoPreviewSeekRequested(position) => {
                 self.seek_video_preview_playback(position)
@@ -243,14 +243,19 @@ impl PreviewEngine {
             PreviewMessage::VideoPreviewFrameLoaded(frame) => {
                 self.accept_video_preview_frame(frame)
             }
-            PreviewMessage::VideoPreviewSeekFrameFailed(path, generation, position, error) => {
-                self.accept_video_preview_seek_frame_error(path, generation, position, error)
+            PreviewMessage::VideoPreviewStillLoaded(frame) => {
+                self.accept_video_preview_still(frame)
             }
+            PreviewMessage::VideoPreviewStillFailed(path, generation, position, error) => {
+                self.accept_video_preview_still_error(&path, generation, position, error)
+            }
+            PreviewMessage::VideoPreviewSurfacePressed => self.video_surface_pressed(),
+            PreviewMessage::VideoPreviewClickSettled(click) => self.video_click_settled(click),
             PreviewMessage::VideoPreviewFinished(path, generation) => {
-                self.accept_video_preview_finished(path, generation)
+                self.accept_video_preview_finished(&path, generation)
             }
             PreviewMessage::VideoPreviewFailed(path, generation, error) => {
-                self.accept_video_preview_error(path, generation, error)
+                self.accept_video_preview_error(&path, generation, error)
             }
             host_message => return Err(Box::new(host_message)),
         };
@@ -271,6 +276,7 @@ mod sqlite;
 mod text;
 mod text_find;
 mod tree;
+mod video;
 mod windows;
 
 pub use media::{audio_preview_tick_subscription, video_preview_tick_subscription};

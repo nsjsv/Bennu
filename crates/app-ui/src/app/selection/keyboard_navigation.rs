@@ -606,15 +606,12 @@ impl FileBrowser {
                 Task::batch([
                     window_command,
                     preview_command(
-                        path.clone(),
+                        path,
                         FileKind::File,
                         self.user_config.preview_extension_rules.clone(),
                         self.options.clone(),
                         max_file_bytes,
                     ),
-                    self.preview_engine
-                        .open_audio_preview(path)
-                        .map(Message::Preview),
                     self.request_browser_session_save(),
                 ])
             }

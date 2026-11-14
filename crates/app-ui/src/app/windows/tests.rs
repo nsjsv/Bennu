@@ -278,10 +278,14 @@ fn browser_with_video_preview() -> (FileBrowser, window::Id) {
     browser.preview_engine.preview_window_profile = PreviewWindowProfile::Video;
     browser.preview_engine.preview = Some(PreviewState::Ready(PreviewContent::Video {
         path: PathBuf::from("clip.mp4"),
+        details: std::sync::Arc::new(bennu_preview::preview::VideoPreviewDetails {
+            len: 1,
+            probe: bennu_preview::video_preview::VideoProbe {
+                duration: Some(Duration::from_secs(10)),
+                ..Default::default()
+            },
+        }),
         frame: None,
-        width: 320,
-        height: 180,
-        duration: Some(Duration::from_secs(10)),
     }));
     browser.preview_engine.preview_size = PreviewSize {
         width: 640.0,

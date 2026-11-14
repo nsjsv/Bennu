@@ -90,6 +90,8 @@ mod audio_timeline;
 mod audio_track_text;
 // 视频预览面板（帧视图/底部控件/音量/迷你进度条）。
 pub mod video_preview_panel;
+// 视频画面：YUV 上显卡换颜色、缩放，软件渲染时退回图片。
+pub mod video_surface;
 // 动图（GIF）预览面板（双帧叠加/底部 seek 控件）。
 pub mod animated_image_preview_panel;
 // 目录/归档预览树面板（缩进条目行/展开切换/状态行）。

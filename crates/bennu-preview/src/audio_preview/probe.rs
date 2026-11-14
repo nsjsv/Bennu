@@ -158,7 +158,7 @@ fn tag(format: &Value, stream: &Value, key: &str) -> Option<String> {
 }
 
 /// ffprobe 的数字有的写成字符串（"44100"），有的写成数字（2）；0 表示不知道。
-fn positive_number(value: &Value) -> Option<u64> {
+pub(crate) fn positive_number(value: &Value) -> Option<u64> {
     value
         .as_u64()
         .or_else(|| value.as_str()?.parse().ok())
@@ -231,7 +231,7 @@ fn latin1_bytes(text: &str) -> Option<Vec<u8>> {
 }
 
 /// ffprobe 的 JSON 把秒数写成字符串（如 "215.640000"）。
-fn seconds_field(value: &Value) -> Option<Duration> {
+pub(crate) fn seconds_field(value: &Value) -> Option<Duration> {
     let seconds = value.as_str()?.parse::<f64>().ok()?;
     (seconds.is_finite() && seconds > 0.0).then(|| Duration::from_secs_f64(seconds))
 }

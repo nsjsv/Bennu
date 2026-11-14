@@ -703,29 +703,56 @@ mod tests {
 
     #[test]
     fn media_streams_active_while_video_preview_is_playing() {
-        // 视频播放中：进度 tick 与帧流两路同时挂载（携带路径+代数+
-        // 起播位置，帧流订阅身份的三大要素）。
+        // 视频播放中：进度 tick 与帧流两路同时挂载。走真实流程：内容到了 → 量好屏幕 → 开播。
+        use bennu_preview::preview::{PreviewContent, PreviewState, VideoPreviewDetails};
+        use bennu_preview::preview_message::PreviewMessage;
+        use bennu_preview::video_preview::{
+            VideoColor, VideoPrimaries, VideoProbe, VideoStreamFacts, VideoTransfer, YuvMatrix,
+        };
         let mut daemon = test_daemon();
+        let engine = &mut daemon.preview.engine;
         let path = std::path::PathBuf::from("/tmp/movie.mp4");
-        daemon.preview.engine.preview = Some(bennu_preview::preview::PreviewState::Ready(
-            bennu_preview::preview::PreviewContent::Video {
-                path: path.clone(),
-                frame: None,
+        engine.preview = Some(PreviewState::Loading(path.clone()));
+        let probe = VideoProbe {
+            video: Some(VideoStreamFacts {
+                ordinal: 0,
+                codec: "h264".to_owned(),
                 width: 640,
                 height: 360,
-                duration: None,
-            },
+                sample_aspect: (1, 1),
+                frame_rate: Some((30, 1)),
+                rotation: 0,
+                pixel_format: None,
+                color: VideoColor {
+                    matrix: YuvMatrix::Bt709,
+                    transfer: VideoTransfer::Sdr,
+                    primaries: VideoPrimaries::Bt709,
+                },
+                interlaced: false,
+                bit_rate: None,
+            }),
+            ..VideoProbe::default()
+        };
+        let content = PreviewContent::Video {
+            path: path.clone(),
+            details: std::sync::Arc::new(VideoPreviewDetails { len: 1, probe }),
+            frame: None,
+        };
+        drop(engine.accept_preview(
+            path.clone(),
+            Ok(content),
+            file_core::ScanOptions::default(),
+            1,
         ));
-        daemon.preview.engine.video_preview = Some(
-            bennu_preview::preview::VideoPreviewPlayback::playing(path.clone(), None),
-        );
+        drop(engine.handle(PreviewMessage::VideoPreviewDisplayMeasured(
+            path.clone(),
+            Some(iced::Size::new(1920, 1080)),
+        )));
 
         let media = active_media_streams(&daemon.preview.engine);
         assert!(!media.audio_tick);
         assert!(media.video_tick);
-        assert!(media
-            .video
-            .is_some_and(|(stream_path, _, _)| stream_path == path));
+        assert!(media.video.is_some_and(|segment| segment.path == path));
         assert!(media.animated_image.is_none());
     }
 }

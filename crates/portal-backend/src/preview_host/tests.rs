@@ -197,7 +197,8 @@ fn audio_selection_uses_audio_profile_window() {
         host.engine.preview_window_profile,
         PreviewWindowProfile::Audio
     );
-    assert!(host.engine.audio_preview.is_some());
+    // 播放在内容到了时由引擎打开（只有声音的「视频」走视频分派，也是这样打开）。
+    assert!(host.engine.audio_preview.is_none());
 }
 
 #[test]

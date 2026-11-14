@@ -16,12 +16,13 @@ use crate::audio_preview::{
 use crate::original_image_preview::load_original_image_preview;
 use crate::preview::{
     RemotePreviewCacheFinished, RemotePreviewCacheMessage, RemotePreviewCacheProgress,
+    VideoPreviewFrame,
 };
 use crate::preview_config::PreviewExtensionRules;
 use crate::preview_loading::{load_directory_preview_children, load_preview};
 use crate::preview_message::PreviewMessage;
 use crate::remote_preview_cache::{cache_remote_preview_file, RemotePreviewCacheRequest};
-use crate::video_preview::{inspect_video_preview_metadata, load_video_preview_frame};
+use crate::video_preview::{load_video_still, FramePlan, SeekPrecision};
 
 const NETWORK_PREVIEW_CACHE_CHANNEL_SIZE: usize = 16;
 const NETWORK_PREVIEW_PROGRESS_UI_INTERVAL: Duration = file_core::PROGRESS_REPORT_INTERVAL;
@@ -318,31 +319,43 @@ pub fn start_video_preview_audio_command(
     )
 }
 
-pub fn video_preview_metadata_command(path: PathBuf) -> Task<PreviewMessage> {
-    let video_path = path.clone();
-    Task::perform(
-        async move {
-            inspect_video_preview_metadata(path)
-                .await
-                .map(|metadata| metadata.duration)
-        },
-        move |metadata_outcome| {
-            PreviewMessage::VideoPreviewMetadataLoaded(video_path.clone(), metadata_outcome)
-        },
-    )
+/// 量屏幕：最近打开的窗口（独立预览窗口还没开时就是主窗口）所在显示器的物理像素。
+pub(crate) fn measure_video_display_command(path: PathBuf) -> Task<PreviewMessage> {
+    iced::window::latest()
+        .then(|window| match window {
+            Some(window) => iced::window::monitor_size(window).then(move |logical| {
+                iced::window::scale_factor(window).map(move |scale| {
+                    logical.map(|size| {
+                        iced::Size::new(
+                            (size.width * scale).round() as u32,
+                            (size.height * scale).round() as u32,
+                        )
+                    })
+                })
+            }),
+            None => Task::done(None),
+        })
+        .map(move |display| PreviewMessage::VideoPreviewDisplayMeasured(path.clone(), display))
 }
 
-pub fn video_preview_frame_command(
+pub(crate) fn video_still_command(
     path: PathBuf,
+    plan: Arc<FramePlan>,
     generation: u64,
     position: Duration,
+    precision: SeekPrecision,
 ) -> Task<PreviewMessage> {
     let video_path = path.clone();
     Task::perform(
-        load_video_preview_frame(path, generation, position),
-        move |frame_outcome| match frame_outcome {
-            Ok(frame) => PreviewMessage::VideoPreviewFrameLoaded(frame),
-            Err(error) => PreviewMessage::VideoPreviewSeekFrameFailed(
+        load_video_still(path, plan, position, precision),
+        move |outcome| match outcome {
+            Ok(picture) => PreviewMessage::VideoPreviewStillLoaded(VideoPreviewFrame {
+                path: video_path.clone(),
+                generation,
+                position,
+                picture,
+            }),
+            Err(error) => PreviewMessage::VideoPreviewStillFailed(
                 video_path.clone(),
                 generation,
                 position,

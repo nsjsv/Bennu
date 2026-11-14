@@ -13,6 +13,8 @@ use crate::audio_preview::{AudioLyrics, AudioPreviewRuntime, AudioProbe, AudioWa
 use crate::document_preview::PagedDocumentPreview;
 use crate::sqlite_preview::SqliteDatabasePreview;
 use crate::text_document::TextOpened;
+use crate::video_preview::{FramePlan, PlaybackClock, VideoProbe};
+use crate::video_surface::VideoPicture;
 use file_core::byte_progress::active_byte_fraction;
 use tokio_util::sync::CancellationToken;
 
@@ -115,10 +117,9 @@ pub enum PreviewContent {
     },
     Video {
         path: PathBuf,
-        frame: Option<image::Handle>,
-        width: u32,
-        height: u32,
-        duration: Option<Duration>,
+        details: Arc<VideoPreviewDetails>,
+        /// 正在显示的那一帧；第一帧解出来之前是 None。
+        frame: Option<Arc<VideoPicture>>,
     },
 }
 
@@ -184,6 +185,13 @@ pub fn scaled_media_size(max_width: f32, max_height: f32, width: u32, height: u3
 pub struct AudioPreviewDetails {
     pub len: u64,
     pub probe: AudioProbe,
+}
+
+/// 打开时一次 ffprobe 读到的信息（解码参数、音轨字幕轨、信息层都用它）和文件大小。
+#[derive(Debug, Clone, PartialEq)]
+pub struct VideoPreviewDetails {
+    pub len: u64,
+    pub probe: VideoProbe,
 }
 
 /// 进度区显示哪一种图。
@@ -352,50 +360,90 @@ pub enum AudioPreviewPlaybackStatus {
     Error,
 }
 
+/// 一次视频预览的播放状态。画面、声音、进度都跟 `clock` 走。
 #[derive(Debug, Clone)]
 pub struct VideoPreviewPlayback {
     pub path: PathBuf,
-    pub audio_runtime: Option<AudioPreviewRuntime>,
     pub status: VideoPreviewPlaybackStatus,
+    /// 进度条和时间显示的位置；播放中由刷新节拍从时钟取。
     pub position: Duration,
-    // Subscription 的身份必须固定；播放进度 tick 只更新 position，不能重建 ffmpeg 流。
-    pub stream_start_position: Duration,
     pub duration: Option<Duration>,
+    pub clock: Arc<PlaybackClock>,
+    /// 量好屏幕之后才有（出帧大小按屏幕定）。
+    pub plan: Option<Arc<FramePlan>>,
+    /// 当前这段连续解码的起点；暂停时这段还在（不重开），拖进度条、播完时没有。
+    pub segment_start: Option<Duration>,
+    /// 每换一段解码、每次拖动 +1：旧的帧、静止画面回来时认得出来丢掉。
     pub generation: u64,
-    pub seek_completion: Option<VideoPreviewSeekCompletion>,
-    pub seek_frame_in_flight: Option<Duration>,
-    pub pending_seek_frame: Option<Duration>,
-    pub started_at: Option<Instant>,
+    pub sound: VideoSound,
+    /// 正在拖进度条。
+    pub seek_drag: Option<VideoSeekDrag>,
+    /// 拖动时的关键帧画面：同时只解一张，拖得快时只记最后的位置。
+    pub still_in_flight: Option<Duration>,
+    pub pending_still: Option<Duration>,
+    /// 单击要等双击判定：待定那一下的编号。
+    pub pending_click: Option<u64>,
+    pub clicks: u64,
     pub error: Option<String>,
 }
 
 impl VideoPreviewPlayback {
-    pub fn playing(path: PathBuf, duration: Option<Duration>) -> Self {
+    /// 打开时：停在开头，还没量屏幕。
+    pub fn ready(path: PathBuf, duration: Option<Duration>, has_audio: bool) -> Self {
         Self {
             path,
-            audio_runtime: None,
-            status: VideoPreviewPlaybackStatus::Playing,
+            status: VideoPreviewPlaybackStatus::Ready,
             position: Duration::ZERO,
-            stream_start_position: Duration::ZERO,
             duration,
+            clock: PlaybackClock::new(has_audio),
+            plan: None,
+            segment_start: None,
             generation: 1,
-            seek_completion: None,
-            seek_frame_in_flight: None,
-            pending_seek_frame: None,
-            started_at: Some(Instant::now()),
+            sound: if has_audio {
+                VideoSound::NotStarted
+            } else {
+                VideoSound::Silent
+            },
+            seek_drag: None,
+            still_in_flight: None,
+            pending_still: None,
+            pending_click: None,
+            clicks: 0,
             error: None,
+        }
+    }
+
+    pub fn audio_runtime(&self) -> Option<&AudioPreviewRuntime> {
+        match &self.sound {
+            VideoSound::Running(runtime) => Some(runtime),
+            _ => None,
         }
     }
 }
 
+/// 视频的声音走到哪一步了。
+#[derive(Debug, Clone)]
+pub enum VideoSound {
+    /// 文件没有音轨：时钟按墙钟走。
+    Silent,
+    /// 有音轨，还没开始放（右侧面板没点播放、跳转后暂停着）。
+    NotStarted,
+    Starting,
+    Running(AudioPreviewRuntime),
+    /// 声音起不来或放坏了：时钟改按墙钟，画面照放。
+    Failed,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum VideoPreviewSeekCompletion {
-    ResumePlayback,
-    StayPaused,
+pub struct VideoSeekDrag {
+    /// 松手后接着播（按下时在播）。
+    pub resume_after: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VideoPreviewPlaybackStatus {
+    /// 打开了还没播（右侧面板点了才播）；显示的是静止画面。
+    Ready,
     Playing,
     Paused,
     Finished,
@@ -407,9 +455,7 @@ pub struct VideoPreviewFrame {
     pub path: PathBuf,
     pub generation: u64,
     pub position: Duration,
-    pub handle: image::Handle,
-    pub width: u32,
-    pub height: u32,
+    pub picture: Arc<VideoPicture>,
 }
 
 #[derive(Debug, Clone, Copy)]

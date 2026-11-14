@@ -649,3 +649,32 @@ fn the_focus_operation_gives_the_viewer_the_keyboard() {
     state.unfocus();
     assert!(!state.is_focused);
 }
+
+#[test]
+fn highlight_tokens_split_font_runs_and_carry_colours() {
+    use crate::text_highlight::{TextToken, TokenKind};
+    let spans = render::styled_spans_for_tests(
+        "let 名字 = 1;",
+        &[
+            TextToken {
+                range: 0..3,
+                kind: TokenKind::Keyword,
+            },
+            TextToken {
+                range: 13..14,
+                kind: TokenKind::Number,
+            },
+        ],
+    );
+    assert_eq!(
+        spans,
+        vec![
+            ("let".to_owned(), false, true),
+            (" ".to_owned(), false, false),
+            ("名字".to_owned(), true, false),
+            (" = ".to_owned(), false, false),
+            ("1".to_owned(), false, true),
+            (";".to_owned(), false, false),
+        ]
+    );
+}

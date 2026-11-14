@@ -318,3 +318,131 @@ async fn measure_large_text_files() {
     println!("RSS before {rss_before} KiB, after jumps {rss_after_jumps} KiB, after count {rss_after_count} KiB");
     println!("json: open {json_open_time:?}, jump to middle of the single line {json_middle_time:?}, window rows {}", rows.len());
 }
+
+fn token_kinds(
+    document: &TextPreviewDocument,
+    row_text: &str,
+) -> Vec<crate::text_highlight::TokenKind> {
+    let row = document
+        .rows()
+        .iter()
+        .find(|row| row.text == row_text)
+        .unwrap_or_else(|| panic!("row {row_text:?} not in window"));
+    document
+        .row_tokens(row.start)
+        .map(|tokens| tokens.iter().map(|token| token.kind).collect())
+        .unwrap_or_default()
+}
+
+#[tokio::test]
+async fn code_is_highlighted_consistently_after_a_jump_into_a_block_comment() {
+    use crate::text_document::HighlightStatus;
+    use crate::text_highlight::TokenKind;
+
+    let dir = tempdir().expect("dir");
+    let path = dir.path().join("main.c");
+    // 一个跨越很多检查点的块注释，跳进中间看颜色是否仍是注释。
+    let mut source = String::from("int before;\n/* long comment starts\n");
+    for index in 0..5_000 {
+        source.push_str(&format!("comment body {index}\n"));
+    }
+    source.push_str("comment ends */\nint after;\n");
+    for index in 0..20_000 {
+        source.push_str(&format!("int value_{index} = {index};\n"));
+    }
+    std::fs::write(&path, &source).expect("write");
+    let mut engine = test_engine();
+    open(&mut engine, &path).await;
+    assert!(matches!(
+        document(&engine).highlight_status(),
+        HighlightStatus::Ready(_)
+    ));
+    report_viewport(&mut engine, 0, 20, false).await;
+    assert!(token_kinds(document(&engine), "int before;").contains(&TokenKind::Keyword));
+
+    let target = source.find("comment body 4000").expect("line") as u64;
+    let task =
+        engine.handle_text_viewer_event(TextViewerEvent::JumpRequested(TextJump::Offset(target)));
+    drive(&mut engine, task).await;
+    let focus = document(&engine).jump().expect("jump").row;
+    let index = document(&engine).row_index(focus).expect("focus");
+    report_viewport(&mut engine, index, 20, false).await;
+    assert_eq!(
+        token_kinds(document(&engine), "comment body 4000"),
+        vec![TokenKind::Comment]
+    );
+}
+
+#[tokio::test]
+async fn plain_text_and_huge_files_are_not_highlighted() {
+    use crate::text_document::HighlightStatus;
+
+    let dir = tempdir().expect("dir");
+    let plain = dir.path().join("notes.txt");
+    std::fs::write(&plain, numbered(100)).expect("write");
+    let mut engine = test_engine();
+    open(&mut engine, &plain).await;
+    assert_eq!(
+        *document(&engine).highlight_status(),
+        HighlightStatus::Unavailable
+    );
+
+    let huge = dir.path().join("huge.rs");
+    let line = "fn f() { let x = 1; }\n";
+    let count = (crate::text_highlight::HIGHLIGHT_LIMIT_BYTES as usize / line.len()) + 10;
+    std::fs::write(&huge, line.repeat(count)).expect("write");
+    let mut engine = test_engine();
+    open(&mut engine, &huge).await;
+    report_viewport(&mut engine, 0, 20, false).await;
+    assert_eq!(
+        *document(&engine).highlight_status(),
+        HighlightStatus::TooLarge
+    );
+    assert!(document(&engine).row_tokens(0).is_none());
+}
+
+/// 手动跑的测量：`... measure_highlighting -- --ignored --nocapture`。一个约 10 MB 的 Rust
+/// 源文件：打开到首屏上色、跳到末尾到上色（要等后台从头解析到末尾）、解析完后跳到中间
+/// 到上色的耗时，以及前后的常驻内存。
+#[tokio::test]
+#[ignore]
+async fn measure_highlighting() {
+    use std::time::Instant;
+
+    let dir = tempdir().expect("dir");
+    let path = dir.path().join("big.rs");
+    let unit = "/// 文档注释\npub fn compute(value: u64) -> Result<u64, String> {\n    let doubled = value * 2; // 注释\n    if doubled > 100 { return Err(\"too big\".to_owned()); }\n    Ok(doubled)\n}\n";
+    let count = (crate::text_highlight::HIGHLIGHT_LIMIT_BYTES as usize - 4096) / unit.len();
+    std::fs::write(&path, unit.repeat(count)).expect("write");
+    let rss_before = resident_memory_kib();
+
+    let mut engine = test_engine();
+    let started = Instant::now();
+    open(&mut engine, &path).await;
+    let first_screen = started.elapsed();
+    assert!(document(&engine)
+        .row_tokens(document(&engine).rows()[0].start)
+        .is_some());
+
+    let end_time = jump_and_colour(&mut engine, TextJump::End).await;
+    let rss_after_pass = resident_memory_kib();
+    let middle = document(&engine).len() / 2;
+    let middle_time = jump_and_colour(&mut engine, TextJump::Offset(middle)).await;
+
+    println!("file: {} bytes", document(&engine).len());
+    println!("open + colour first screen: {first_screen:?}");
+    println!("jump to end + colour (waits for the whole pass): {end_time:?}");
+    println!("jump to middle + colour after the pass: {middle_time:?}");
+    println!("RSS before {rss_before} KiB, after highlighting {rss_after_pass} KiB");
+}
+
+async fn jump_and_colour(engine: &mut PreviewEngine, jump: TextJump) -> std::time::Duration {
+    let started = std::time::Instant::now();
+    let task = engine.handle_text_viewer_event(TextViewerEvent::JumpRequested(jump));
+    drive(engine, task).await;
+    let focus = document(engine).jump().expect("jump").row;
+    let index = document(engine).row_index(focus).expect("focus");
+    report_viewport(engine, index.saturating_sub(40), 40, false).await;
+    assert!(document(engine).row_tokens(focus).is_some());
+    started.elapsed()
+}

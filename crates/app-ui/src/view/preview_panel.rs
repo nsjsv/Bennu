@@ -20,6 +20,7 @@ use bennu_theme::controls::{segmented_choice_row, SegmentedChoice};
 
 use bennu_preview::preview_message::PreviewMessage;
 use bennu_preview::scroll_wiring::ScrollRegionWiring;
+use bennu_preview::text_highlight::HighlightPalette;
 use bennu_preview::text_preview_viewer::text_preview_viewer;
 use bennu_preview::text_view::TextViewSettings;
 
@@ -34,6 +35,7 @@ pub(crate) fn view_preview_window<'a>(
     preview_bottom_controls_opacity: f32,
     operation_progress_animation_frame: u8,
     text_view: TextViewSettings,
+    palette: HighlightPalette,
 ) -> Element<'a, Message> {
     bennu_preview::preview_panel::view_preview_window(
         preview,
@@ -55,10 +57,11 @@ pub(crate) fn view_preview_window<'a>(
         text_view,
         // 查看器是渲染器敏感部件（Paragraph 泛型），宿主实例化注入；它自己就是滚动区，
         // 部件 id 用平滑滚动管线的区域 id，滚轮的 scroll_by 直接作用到它。
-        |document: &TextPreviewDocument, view| {
+        move |document: &TextPreviewDocument, view| {
             text_preview_viewer(
                 document,
                 view,
+                palette,
                 smooth_scroll_id(&ScrollbarRegion::TextPreview),
                 |delta| Message::SmoothScrollWheel(ScrollbarRegion::TextPreview, delta),
                 |event| Message::from(PreviewMessage::TextViewer(event)),

@@ -16,7 +16,9 @@ use iced::widget::{button, container, responsive, row, text, Space};
 use iced::{Alignment, Element, Length, Padding};
 
 use crate::preview_message::PreviewMessage;
-use crate::text_document::{LineCountStatus, TextPreviewDocument, TextViewerEvent};
+use crate::text_document::{
+    HighlightStatus, LineCountStatus, TextPreviewDocument, TextViewerEvent,
+};
 use crate::text_view::{TextViewChange, TextViewSettings};
 
 const STATUS_BAR_HEIGHT: f32 = 30.0;
@@ -80,9 +82,11 @@ where
                     .on_press(change_view(TextViewChange::ZoomReset)),
             );
         }
-        bar = bar
-            .push(Space::new().width(Length::Fill))
-            .push(text(position_label(document)).size(CAPTION_SIZE));
+        bar = bar.push(Space::new().width(Length::Fill));
+        if *document.highlight_status() == HighlightStatus::TooLarge {
+            bar = bar.push(text(tr!("Too large to highlight")).size(CAPTION_SIZE));
+        }
+        bar = bar.push(text(position_label(document)).size(CAPTION_SIZE));
         container(bar)
             .padding(Padding::from([0, 8]))
             .height(Length::Fill)

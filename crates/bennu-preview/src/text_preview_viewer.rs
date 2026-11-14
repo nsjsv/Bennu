@@ -26,6 +26,7 @@ mod style;
 use crate::text_document::{
     JumpPlace, TextPosition, TextPreviewDocument, TextViewerEvent, TextViewport,
 };
+use crate::text_highlight::HighlightPalette;
 use crate::text_view::{TextViewChange, TextViewSettings};
 use geometry::{
     anchor_index, is_at_bottom, normalize_anchor, note_measured_height, row_height,
@@ -51,6 +52,7 @@ type PreviewParagraph = graphics::text::Paragraph;
 pub fn text_preview_viewer<'a, Message, Renderer>(
     document: &'a TextPreviewDocument,
     view: TextViewSettings,
+    palette: HighlightPalette,
     id: widget::Id,
     on_wheel: impl Fn(mouse::ScrollDelta) -> Message + 'a,
     on_event: impl Fn(TextViewerEvent) -> Message + 'a,
@@ -67,6 +69,7 @@ where
         id,
         document,
         view,
+        palette,
         on_wheel: Box::new(on_wheel),
         on_event: Box::new(on_event),
     })
@@ -76,6 +79,7 @@ struct TextPreviewViewer<'a, Message> {
     id: widget::Id,
     document: &'a TextPreviewDocument,
     view: TextViewSettings,
+    palette: HighlightPalette,
     on_wheel: Box<dyn Fn(mouse::ScrollDelta) -> Message + 'a>,
     on_event: Box<dyn Fn(TextViewerEvent) -> Message + 'a>,
 }
@@ -86,6 +90,8 @@ struct TextPreviewViewerState {
     revision: Option<u64>,
     jump_revision: Option<u64>,
     view: Option<TextViewSettings>,
+    /// 段落按这套配色上的色；应用切换明暗后全部重排。
+    palette: HighlightPalette,
     /// 当前字号下一行（不换行时）的高度；未排版的行按它估算。
     line_height: f32,
     digit_count: usize,
@@ -170,6 +176,8 @@ impl TextPreviewViewerState {
 struct RetainedRow {
     start: u64,
     end: u64,
+    /// 排版时已经有高亮记号（记号后到时要重排上色）。
+    colored: bool,
     paragraph: PreviewParagraph,
 }
 
@@ -211,12 +219,12 @@ where
         limits: &layout::Limits,
     ) -> layout::Node {
         let size = limits.resolve(Length::Fill, Length::Fill, Size::ZERO);
-        sync_with_document(
-            tree.state.downcast_mut::<TextPreviewViewerState>(),
-            self.document,
-            self.view,
-            size,
-        );
+        let state = tree.state.downcast_mut::<TextPreviewViewerState>();
+        if state.palette != self.palette {
+            state.palette = self.palette;
+            state.retained_rows.clear();
+        }
+        sync_with_document(state, self.document, self.view, size);
         layout::Node::new(size)
     }
 
@@ -537,18 +545,27 @@ fn refresh_retained_content(state: &mut TextPreviewViewerState, document: &TextP
     let rows = document.rows();
     for entry in visible_rows(state, document) {
         let row = &rows[entry.index];
+        let tokens = document.row_tokens(row.start);
         let reused = (!(width_changed && view.wrap))
             .then(|| {
-                previous
-                    .iter()
-                    .position(|retained| retained.start == row.start && retained.end == row.end)
+                previous.iter().position(|retained| {
+                    retained.start == row.start
+                        && retained.end == row.end
+                        && retained.colored == tokens.is_some()
+                })
             })
             .flatten()
             .map(|position| previous.swap_remove(position));
         let paragraph = match reused {
             Some(reused) => reused.paragraph,
             None => {
-                let paragraph = text_line_paragraph(&row.text, text_width, view);
+                let paragraph = text_line_paragraph(
+                    &row.text,
+                    text_width,
+                    view,
+                    tokens.map(|tokens| &tokens[..]),
+                    state.palette,
+                );
                 let bounds = paragraph.min_bounds();
                 note_measured_height(state, row.start, bounds.height);
                 state.max_row_width = state.max_row_width.max(bounds.width);
@@ -558,6 +575,7 @@ fn refresh_retained_content(state: &mut TextPreviewViewerState, document: &TextP
         retained.push(RetainedRow {
             start: row.start,
             end: row.end,
+            colored: tokens.is_some(),
             paragraph,
         });
     }

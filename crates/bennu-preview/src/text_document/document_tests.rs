@@ -35,7 +35,7 @@ fn settle(document: &mut TextPreviewDocument, mut reads: Vec<TextRead>) {
                         .map_err(|error| error.to_string());
                     next.extend(document.accept_numbering(generation, line_start, outcome));
                 }
-                TextRead::Count { .. } => {}
+                TextRead::Count { .. } | TextRead::Highlight(_) | TextRead::HighlightRows(_) => {}
             }
         }
         if next.is_empty() {

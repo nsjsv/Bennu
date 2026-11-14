@@ -21,6 +21,9 @@ impl FileBrowser {
             preview_bottom_controls_opacity,
             self.operation_progress_animation_frame,
             self.user_config.text_preview_view,
+            bennu_preview::text_highlight::HighlightPalette::for_theme(
+                &self.theme(self.main_window),
+            ),
         )
     }
 }

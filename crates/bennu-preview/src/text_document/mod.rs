@@ -5,11 +5,13 @@
 //! 只产出读取请求（`TextRead`），引擎执行后把结果交回来。
 
 mod decoding;
+mod highlight;
 mod index;
 mod line_breaks;
 mod open;
 mod rows;
 mod watch;
+mod window;
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -18,6 +20,9 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 pub use decoding::TextDecoding;
+use highlight::HighlightState;
+pub use highlight::HighlightStatus;
+pub(crate) use highlight::{highlight_worker, HighlightStart, HighlightedRows};
 pub use index::{IndexProgress, LineCountStatus};
 pub use open::{
     FileChange, JumpPlace, RowBatch, TextJump, TextOpened, MARKDOWN_RENDER_LIMIT_BYTES,
@@ -118,11 +123,13 @@ pub(crate) enum TextReadReplyKind {
         target: ClipboardTarget,
         outcome: Result<String, String>,
     },
+    HighlightLanguage(Option<crate::text_highlight::HighlightLanguage>),
+    HighlightRows(HighlightedRows),
     Reopened(Result<Arc<TextOpened>, String>),
 }
 
 /// 文档要的后台读取。
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) enum TextRead {
     Rows {
         generation: u64,
@@ -140,6 +147,10 @@ pub(crate) enum TextRead {
         len: u64,
         cancel: CancellationToken,
     },
+    /// 启动这个文档的高亮线程。
+    Highlight(HighlightStart),
+    /// 等高亮线程给这些行上色的回复（被更新的请求替换时取消）。
+    HighlightRows(iced::futures::channel::oneshot::Receiver<HighlightedRows>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -188,6 +199,7 @@ pub struct TextPreviewDocument {
     jump: Option<ViewerJump>,
     revision: u64,
     read_error: Option<String>,
+    highlight: HighlightState,
 }
 
 struct IndexRun {
@@ -206,6 +218,7 @@ impl Drop for TextPreviewDocument {
 impl TextPreviewDocument {
     /// 用打开结果建文档，并给出要开始的后台读取（行号统计）。
     pub(crate) fn open(id: u64, path: PathBuf, opened: &TextOpened) -> (Self, Vec<TextRead>) {
+        let (highlight, highlight_start) = HighlightState::new(opened.stamp.len);
         let mut document = Self {
             id,
             path,
@@ -235,9 +248,11 @@ impl TextPreviewDocument {
             jump: None,
             revision: 0,
             read_error: None,
+            highlight,
         };
         document.replace_window(opened.batch.clone());
-        let reads = document.start_counting().into_iter().collect();
+        let mut reads: Vec<TextRead> = document.start_counting().into_iter().collect();
+        reads.extend(highlight_start.map(TextRead::Highlight));
         (document, reads)
     }
 
@@ -377,7 +392,9 @@ impl TextPreviewDocument {
             self.revision += 1;
         }
         self.trim_window();
-        self.extension_reads()
+        let mut reads = self.extension_reads();
+        reads.extend(self.highlight_read());
+        reads
     }
 
     /// 跳到文件开头/某处/末尾：读落点附近的窗口整个替换当前窗口。
@@ -447,6 +464,7 @@ impl TextPreviewDocument {
         self.trim_window();
         let mut reads = self.extension_reads();
         reads.extend(self.numbering_read());
+        reads.extend(self.highlight_read());
         reads
     }
 
@@ -528,7 +546,44 @@ impl TextPreviewDocument {
         if self.index_run.is_none() {
             reads.extend(self.start_counting());
         }
+        let stale_from = self.rows.back().map_or(0, |row| row.end);
+        self.highlight.accept_append(self.stamp.len, stale_from);
         reads
+    }
+
+    pub fn highlight_status(&self) -> &HighlightStatus {
+        self.highlight.status()
+    }
+
+    /// 这一行（整行）的高亮记号；还没解析到或不高亮时 None。
+    pub fn row_tokens(&self, row_start: u64) -> Option<&Arc<[crate::text_highlight::TextToken]>> {
+        self.highlight.tokens(row_start)
+    }
+
+    pub(crate) fn accept_highlight_language(
+        &mut self,
+        language: Option<crate::text_highlight::HighlightLanguage>,
+    ) -> Vec<TextRead> {
+        self.highlight.accept_language(language);
+        self.revision += 1;
+        self.highlight_read().into_iter().collect()
+    }
+
+    pub(crate) fn accept_highlight_rows(&mut self, rows: HighlightedRows) -> Vec<TextRead> {
+        self.highlight.accept_rows(rows);
+        // 回复到达前窗口可能已经被跳转替换：只留窗口里的。
+        if let (Some(first), Some(last)) = (self.rows.front(), self.rows.back()) {
+            self.highlight.retain_window(first.start, last.end);
+        }
+        self.revision += 1;
+        // 窗口比一次请求的行数多：接着要还没上色的行。
+        self.highlight_read().into_iter().collect()
+    }
+
+    fn highlight_read(&mut self) -> Option<TextRead> {
+        self.highlight
+            .request_rows(&self.rows, self.stamp.len)
+            .map(TextRead::HighlightRows)
     }
 
     /// 选区 `[from, to)` 能不能复制（不超过 15 MB）。
@@ -551,162 +606,6 @@ impl TextPreviewDocument {
             len: self.stamp.len,
             cancel,
         })
-    }
-
-    fn replace_window(&mut self, batch: RowBatch) {
-        // 旧的可见范围不属于新窗口；等查看器报告新的。
-        self.viewport = None;
-        self.at_start = batch.at_start;
-        self.at_end = batch.at_end;
-        self.rows = batch.rows.into();
-        self.revision += 1;
-        if let Some((row, place)) = batch.focus {
-            self.jump = Some(ViewerJump {
-                revision: self.jump.map_or(1, |jump| jump.revision + 1),
-                row,
-                place,
-            });
-        }
-    }
-
-    fn append_rows(&mut self, batch: RowBatch) {
-        let continues = self.rows.back().is_none_or(|last| {
-            batch
-                .rows
-                .first()
-                .is_none_or(|first| first.start == last.end)
-        });
-        if !continues {
-            return;
-        }
-        self.rows.extend(batch.rows);
-        self.at_end = batch.at_end;
-        self.revision += 1;
-        if self.follow_end && self.at_end {
-            self.follow_end = false;
-            if let Some(last) = self.rows.back() {
-                self.jump = Some(ViewerJump {
-                    revision: self.jump.map_or(1, |jump| jump.revision + 1),
-                    row: last.start,
-                    place: JumpPlace::Bottom,
-                });
-            }
-        }
-    }
-
-    fn prepend_rows(&mut self, batch: RowBatch) {
-        let continues = self
-            .rows
-            .front()
-            .is_none_or(|first| batch.rows.last().is_none_or(|last| last.end == first.start));
-        if !continues {
-            return;
-        }
-        for row in batch.rows.into_iter().rev() {
-            self.rows.push_front(row);
-        }
-        self.at_start = batch.at_start;
-        self.revision += 1;
-    }
-
-    /// 视口两侧剩下的行数；查看器还没报告当前窗口里的可见范围时不知道（窗口刚被
-    /// 跳转替换，旧的可见范围已经不在里面了）。
-    fn margins(&self) -> Option<(usize, usize)> {
-        let viewport = self.viewport?;
-        let first = self.row_index_containing(viewport.first_row)?;
-        let last = self.row_index_containing(viewport.last_row)?;
-        Some((first, self.rows.len().saturating_sub(last + 1)))
-    }
-
-    fn extension_reads(&mut self) -> Vec<TextRead> {
-        if self.jump_in_flight {
-            return Vec::new();
-        }
-        // 窗口空了（空文件后来写进了内容、末尾几行被丢掉重读）：查看器没有可见行可报，
-        // 直接从头读。
-        if self.rows.is_empty() && !self.at_end && !self.forward_in_flight {
-            self.forward_in_flight = true;
-            let start = self.decoding.data_start();
-            return vec![TextRead::Rows {
-                generation: self.generation,
-                request: RowsRequest::Forward {
-                    from: RowStart {
-                        start,
-                        line_start: start,
-                    },
-                    line_number: Some(0),
-                },
-            }];
-        }
-        let Some((before, after)) = self.margins() else {
-            return Vec::new();
-        };
-        let mut reads = Vec::new();
-        if !self.at_end && !self.forward_in_flight && after < PREFETCH_ROWS {
-            let last = self.rows.back().expect("a visible row is in the window");
-            let from = last.next_row_start();
-            let line_number = last.next_line_number();
-            self.forward_in_flight = true;
-            reads.push(TextRead::Rows {
-                generation: self.generation,
-                request: RowsRequest::Forward { from, line_number },
-            });
-        }
-        if !self.at_start && !self.backward_in_flight && before < PREFETCH_ROWS {
-            if let Some(first) = self.rows.front() {
-                self.backward_in_flight = true;
-                reads.push(TextRead::Rows {
-                    generation: self.generation,
-                    request: RowsRequest::Backward {
-                        before: first.row_start(),
-                        line_number: first.line_number,
-                    },
-                });
-            }
-        }
-        reads
-    }
-
-    fn numbering_read(&mut self) -> Option<TextRead> {
-        if self.numbering_in_flight || self.jump_in_flight {
-            return None;
-        }
-        let first = self.rows.front()?;
-        if first.line_number.is_some() {
-            return None;
-        }
-        let known = self.index.line_count_before(first.line_start)?;
-        self.numbering_in_flight = true;
-        Some(TextRead::Number {
-            generation: self.generation,
-            line_start: first.line_start,
-            known,
-        })
-    }
-
-    /// 超出上限时从离视口远的一端丢，两侧至少留两倍预取余量。
-    fn trim_window(&mut self) {
-        let keep = PREFETCH_ROWS * 2;
-        let mut bytes: u64 = self.rows.iter().map(|row| row.end - row.start).sum();
-        while self.rows.len() > WINDOW_MAX_ROWS || bytes > WINDOW_MAX_BYTES {
-            let Some((before, after)) = self.margins() else {
-                break;
-            };
-            let removed = if before >= after && before > keep {
-                self.at_start = false;
-                self.rows.pop_front()
-            } else if after > keep {
-                self.at_end = false;
-                self.rows.pop_back()
-            } else {
-                None
-            };
-            let Some(removed) = removed else {
-                break;
-            };
-            bytes -= removed.end - removed.start;
-            self.revision += 1;
-        }
     }
 }
 

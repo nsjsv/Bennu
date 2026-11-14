@@ -36,6 +36,7 @@ pub(crate) fn preview_window_view(
 ) -> Element<'_, Message> {
     let host = &daemon.preview;
     let engine = &host.engine;
+    let palette = bennu_preview::text_highlight::HighlightPalette::for_theme(&daemon.look.theme);
     let panel = preview_panel::view_preview_window(
         engine.preview.as_ref(),
         engine.text_preview_document.as_ref(),
@@ -57,10 +58,11 @@ pub(crate) fn preview_window_view(
         host.preferences.text_view,
         // 查看器是渲染器敏感部件，宿主实例化注入；它自己就是滚动区，部件 id 用平滑
         // 滚动管线的区域 id（app-ui 适配层同构）。
-        |document: &TextPreviewDocument, view| {
+        move |document: &TextPreviewDocument, view| {
             text_preview_viewer(
                 document,
                 view,
+                palette,
                 preview_scroll_id(PreviewScrollRegion::Text),
                 |delta| Message::PreviewWheelScrolled {
                     region: PreviewScrollRegion::Text,

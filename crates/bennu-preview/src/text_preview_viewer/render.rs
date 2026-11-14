@@ -12,6 +12,7 @@ use super::{
     TEXT_PREVIEW_GUTTER_HORIZONTAL_PADDING, TEXT_PREVIEW_GUTTER_MIN_DIGITS,
     TEXT_PREVIEW_GUTTER_SPACING, TEXT_PREVIEW_VIEWER_PADDING,
 };
+use crate::text_highlight::{HighlightPalette, TextToken};
 use crate::text_preview::TextPreviewDocument;
 use crate::text_view::{TextViewSettings, TEXT_VIEW_LINE_HEIGHT};
 
@@ -167,13 +168,15 @@ pub(super) fn line_number_paragraph(
 }
 
 /// 一行的段落。换行时宽度是文字区宽，高度不设限（换行后的真实高度要完整量出来）；
-/// 不换行时宽高都不设限，量出的宽度决定横向能滚多远。
+/// 不换行时宽高都不设限，量出的宽度决定横向能滚多远。有高亮记号时按记号上色。
 pub(super) fn text_line_paragraph(
     content: &str,
     width: f32,
     view: TextViewSettings,
+    tokens: Option<&[TextToken]>,
+    palette: HighlightPalette,
 ) -> PreviewParagraph {
-    let spans = font_spans(content);
+    let spans = styled_spans(content, tokens.unwrap_or_default(), palette);
     PreviewParagraph::with_spans(text::Text {
         content: spans.as_slice(),
         bounds: Size::new(if view.wrap { width } else { f32::INFINITY }, f32::INFINITY),
@@ -191,25 +194,50 @@ pub(super) fn text_line_paragraph(
     })
 }
 
+/// 按字体分段（全角文字用界面字体）再按记号切开上色；没被记号覆盖的部分用正文色。
+fn styled_spans<'a>(
+    content: &'a str,
+    tokens: &[TextToken],
+    palette: HighlightPalette,
+) -> Vec<Span<'a, (), Font>> {
+    let mut spans = Vec::new();
+    for (run, is_wide) in font_runs(content) {
+        let mut position = run.start;
+        for token in tokens
+            .iter()
+            .filter(|token| token.range.start < run.end && token.range.end > run.start)
+        {
+            let start = token.range.start.max(run.start);
+            let end = token.range.end.min(run.end);
+            if start > position {
+                spans.push(font_span(&content[position..start], is_wide));
+            }
+            spans.push(font_span(&content[start..end], is_wide).color(palette.color(token.kind)));
+            position = end;
+        }
+        if position < run.end || run.is_empty() {
+            spans.push(font_span(&content[position..run.end], is_wide));
+        }
+    }
+    spans
+}
+
 /// 全角文字（汉字、假名、谚文、全角标点）用界面无衬线字体，其余等宽。等宽字体自带的
 /// CJK 字形常按「两格」排，一格 0.6 em 时一个汉字占 1.2 em，字间空隙明显过大。
-fn font_spans(content: &str) -> Vec<Span<'_, (), Font>> {
-    let mut spans = Vec::new();
+fn font_runs(content: &str) -> Vec<(std::ops::Range<usize>, bool)> {
+    let mut runs = Vec::new();
     let mut run_start = 0;
     let mut run_is_wide = None;
     for (index, character) in content.char_indices() {
         let is_wide = is_wide_script(character);
         if run_is_wide.is_some_and(|wide| wide != is_wide) {
-            spans.push(font_span(
-                &content[run_start..index],
-                run_is_wide == Some(true),
-            ));
+            runs.push((run_start..index, run_is_wide == Some(true)));
             run_start = index;
         }
         run_is_wide = Some(is_wide);
     }
-    spans.push(font_span(&content[run_start..], run_is_wide == Some(true)));
-    spans
+    runs.push((run_start..content.len(), run_is_wide == Some(true)));
+    runs
 }
 
 fn font_span(text: &str, is_wide: bool) -> Span<'_, (), Font> {
@@ -240,8 +268,25 @@ fn is_wide_script(character: char) -> bool {
 
 #[cfg(test)]
 pub(super) fn wide_runs_for_tests(content: &str) -> Vec<(String, bool)> {
-    font_spans(content)
+    font_runs(content)
         .into_iter()
-        .map(|span| (span.text.to_string(), span.font == Some(Font::DEFAULT)))
+        .map(|(range, is_wide)| (content[range].to_string(), is_wide))
+        .collect()
+}
+
+#[cfg(test)]
+pub(super) fn styled_spans_for_tests(
+    content: &str,
+    tokens: &[TextToken],
+) -> Vec<(String, bool, bool)> {
+    styled_spans(content, tokens, HighlightPalette::Light)
+        .into_iter()
+        .map(|span| {
+            (
+                span.text.to_string(),
+                span.font == Some(Font::DEFAULT),
+                span.color.is_some(),
+            )
+        })
         .collect()
 }

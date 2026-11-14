@@ -76,6 +76,11 @@ unicode-segmentation = "1.13.2"
 # 预览中的文本文件变化：notify=本地 inotify，rustix=statfs 认网络文件系统（改为轮询）。
 notify.workspace = true
 rustix.workspace = true
+# 文本预览语法高亮：syntect 解析器 + two-face 的语法包（含 TOML、TypeScript、Dockerfile
+# 等 syntect 默认包没有的语言）。正则用 oniguruma：纯 Rust 的 fancy-regex 解析 10 MB
+# 源文件要 19 秒，跳到大文件中间要等很久才上色。
+syntect = { version = "5.3.0", default-features = false, features = ["parsing", "regex-onig"] }
+two-face = { version = "0.5.2", default-features = false, features = ["syntect-onig"] }
 # tracing=图片预览视口交互的调试日志（迁移自 app-ui，target 名不变）。
 tracing.workspace = true
 

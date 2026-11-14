@@ -59,6 +59,7 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ),
     // 文本预览状态栏
     ("Wrap Lines", "自动换行"),
+    ("Too large to highlight", "文件太大，未高亮"),
     ("The selection is too large to copy.", "选中内容太大，无法复制。"),
     ("Line %1 of %2", "第 %1 行，共 %2 行"),
     ("Line %1, counting lines…", "第 %1 行，正在统计…"),

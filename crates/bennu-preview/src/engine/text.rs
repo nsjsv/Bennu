@@ -5,14 +5,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use encoding_rs::Encoding;
+use iced::futures::{future, stream, StreamExt};
 use iced::{Subscription, Task};
 
 use crate::preview::{PreviewContent, PreviewState};
 use crate::preview_message::PreviewMessage;
 use crate::text_document::{
-    check_file_change, count_lines, read_rows, text_file_watch_subscription, ClipboardTarget,
-    FileChange, RowReader, TextJump, TextOpened, TextPreviewDocument, TextRead, TextReadReply,
-    TextReadReplyKind, TextViewerEvent,
+    check_file_change, count_lines, highlight_worker, read_rows, text_file_watch_subscription,
+    ClipboardTarget, FileChange, RowReader, TextJump, TextOpened, TextPreviewDocument, TextRead,
+    TextReadReply, TextReadReplyKind, TextViewerEvent,
 };
 use crate::text_preview_loading::{reopen_text_preview, TextEncodingChoice};
 
@@ -101,6 +102,14 @@ impl super::PreviewEngine {
             }
             TextReadReplyKind::Index(progress) => {
                 let reads = document.accept_index_progress(progress);
+                text_read_tasks(document, reads)
+            }
+            TextReadReplyKind::HighlightLanguage(language) => {
+                let reads = document.accept_highlight_language(language);
+                text_read_tasks(document, reads)
+            }
+            TextReadReplyKind::HighlightRows(rows) => {
+                let reads = document.accept_highlight_rows(rows);
                 text_read_tasks(document, reads)
             }
             TextReadReplyKind::FileChecked(outcome) => self.accept_text_file_check(outcome),
@@ -246,6 +255,7 @@ fn text_read_tasks(document: &TextPreviewDocument, reads: Vec<TextRead>) -> Task
     let source = document.source();
     let decoding = document.decoding();
     let len = document.len();
+    let path = document.path().to_path_buf();
     Task::batch(reads.into_iter().map(|read| match read {
         TextRead::Rows {
             generation,
@@ -297,6 +307,21 @@ fn text_read_tasks(document: &TextPreviewDocument, reads: Vec<TextRead>) -> Task
             move |progress| PreviewMessage::TextRead {
                 document: document_id,
                 reply: TextReadReply(TextReadReplyKind::Index(progress)),
+            },
+        ),
+        TextRead::Highlight(start) => Task::perform(
+            highlight_worker(Arc::clone(&source), decoding, path.clone(), len, start),
+            move |language| PreviewMessage::TextRead {
+                document: document_id,
+                reply: TextReadReply(TextReadReplyKind::HighlightLanguage(language)),
+            },
+        ),
+        // 被更新的请求替换（回复取消）时没有消息。
+        TextRead::HighlightRows(reply) => Task::run(
+            stream::once(reply).filter_map(|rows| future::ready(rows.ok())),
+            move |rows| PreviewMessage::TextRead {
+                document: document_id,
+                reply: TextReadReply(TextReadReplyKind::HighlightRows(rows)),
             },
         ),
     }))

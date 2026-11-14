@@ -64,7 +64,7 @@ mod tests {
             "max_preview_file_bytes": 4194304,
             "preview_text_size_bytes": null,
             "preview_image_size_bytes": 1048576,
-            "preview_extension_rules": {"text": ["md"], "image": []},
+            "preview_extension_rules": {"text": ["md", "nfo"], "image": []},
             "preview_directory_expand_levels": 2,
             "show_hidden_files": false,
             "sidebar_width": 180.0,
@@ -85,7 +85,8 @@ mod tests {
         assert_eq!(preferences.size_limits.text_bytes, 4194304);
         assert_eq!(preferences.size_limits.image_bytes, 1048576);
         assert_eq!(preferences.size_limits.video_bytes, 4194304);
-        assert_eq!(preferences.extension_rules.text, vec!["md".to_owned()]);
+        // 旧文本表只留用户自己加的，旧内置默认（md）交给类型库。
+        assert_eq!(preferences.extension_rules.text, vec!["nfo".to_owned()]);
         assert_eq!(preferences.extension_rules.image, Vec::<String>::new());
         assert_eq!(
             preferences.extension_rules.video,

@@ -345,11 +345,34 @@ fn classify_preview_path_matches_preview_dispatch() {
         classify_preview_path(Path::new("notes.txt"), &rules),
         Some(PreviewPathKind::Text)
     );
-    // 不在任何类型列表里的后缀不可预览。
+    // 名字认不出的先当文本，打开时看内容定论。
     assert_eq!(
         classify_preview_path(Path::new("data.unknownext"), &rules),
-        None
+        Some(PreviewPathKind::Text)
     );
+}
+
+#[test]
+fn classify_preview_path_asks_the_type_library_for_text() {
+    let rules = default_rules();
+    for name in [
+        "Makefile",
+        "Dockerfile",
+        "README",
+        "main.go",
+        "init.lua",
+        "build-script",
+        // TypeScript 与 MPEG-TS 同名，名字定不下来，交给内容。
+        "index.ts",
+    ] {
+        assert_eq!(
+            classify_preview_path(Path::new(name), &rules),
+            Some(PreviewPathKind::Text),
+            "{name}"
+        );
+    }
+    // 名字已确定是非文本类型的不预览。
+    assert_eq!(classify_preview_path(Path::new("libfoo.so"), &rules), None);
 }
 
 #[test]
@@ -378,9 +401,21 @@ fn classify_preview_path_follows_user_rules_replacing_builtins() {
         Some(PreviewPathKind::Document)
     );
 
-    // 清空全部列表后没有文件可预览。
+    // 额外文本后缀压过类型库的非文本结论。
+    let mut rules = default_rules();
+    rules.text.push("so".to_owned());
+    assert_eq!(
+        classify_preview_path(Path::new("libfoo.so"), &rules),
+        Some(PreviewPathKind::Text)
+    );
+
+    // 清空全部列表后，文本仍由类型库认，其他类型不再预览。
     let empty = PreviewExtensionRules::default();
-    assert_eq!(classify_preview_path(Path::new("notes.txt"), &empty), None);
+    assert_eq!(classify_preview_path(Path::new("photo.png"), &empty), None);
+    assert_eq!(
+        classify_preview_path(Path::new("notes.txt"), &empty),
+        Some(PreviewPathKind::Text)
+    );
 }
 
 #[tokio::test]

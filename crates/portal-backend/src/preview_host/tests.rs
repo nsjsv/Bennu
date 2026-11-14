@@ -157,7 +157,8 @@ fn zero_limit_disables_size_guard() {
 #[test]
 fn unpreviewable_type_shows_error_window() {
     let mut host = host();
-    let selection = file_selection(Path::new("/tmp/blob.xyz"), 16);
+    // 类型库按名字就能确定是非文本（共享库），门禁直接拒绝。
+    let selection = file_selection(Path::new("/tmp/libblob.so"), 16);
     let _ = host.request_preview(None, Some(&selection));
     let Some(PreviewState::Error(message)) = &host.engine.preview else {
         panic!("不可预览类型必须进入错误态");
@@ -221,15 +222,17 @@ fn session_preferences_drive_classification_and_limits() {
     // 会话偏好是分类/上限的唯一判定源（open_preview 会话开始时从
     // 主软件库重读；库→域类型的解析在 bennu-preview 侧已测）。
     let mut host = host();
-    host.preferences
-        .extension_rules
-        .text
-        .retain(|extension| extension != "txt");
     assert!(classify_preview_path(
-        Path::new("/tmp/notes.txt"),
+        Path::new("/tmp/libnotes.so"),
         &host.preferences.extension_rules
     )
     .is_none());
+    host.preferences.extension_rules.text.push("so".to_owned());
+    assert!(classify_preview_path(
+        Path::new("/tmp/libnotes.so"),
+        &host.preferences.extension_rules
+    )
+    .is_some());
     host.preferences.size_limits.text_bytes = 10;
     assert_eq!(host.file_size_limit_for(Path::new("/tmp/notes.md")), 10);
     // 未识别扩展名兜底 Text 上限。

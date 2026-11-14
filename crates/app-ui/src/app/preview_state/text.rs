@@ -65,17 +65,20 @@ mod tests {
             .map(|line_number| format!("line {line_number}"))
             .collect::<Vec<_>>()
             .join("\n");
+        let utf8 = file_core::text_encoding::Encoding::for_label(b"utf-8").expect("utf-8");
         browser.preview_engine.text_preview_generation = 1;
         browser.preview_engine.preview = Some(PreviewState::Ready(PreviewContent::Text {
             path: path.clone(),
             rendered: Arc::from(content.as_str()),
             format: TextPreviewFormat::Plain,
+            encoding: utf8,
             next_offset: Some(100),
             loaded_line_count: 50,
             line_limit_notice: None,
         }));
         let mut document = TextPreviewDocument::new_initial(
             path.clone(),
+            utf8,
             &content,
             TextPreviewFormat::Plain,
             1,

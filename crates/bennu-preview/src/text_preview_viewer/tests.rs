@@ -19,6 +19,7 @@ fn viewer_state_for(document: &TextPreviewDocument) -> TextPreviewViewerState {
 fn document_for_text(content: &str) -> TextPreviewDocument {
     TextPreviewDocument::new_initial(
         PathBuf::from("/tmp/text-preview-test.txt"),
+        encoding_rs::UTF_8,
         content,
         TextPreviewFormat::Plain,
         1,

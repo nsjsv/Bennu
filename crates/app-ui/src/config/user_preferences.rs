@@ -203,7 +203,7 @@ impl UserPreferences {
             preview_document_size_bytes: Some(self.preview_size_limits.document_bytes),
             preview_sqlite_size_bytes: Some(self.preview_size_limits.sqlite_bytes),
             preview_extension_rules: Some(StoredPreviewExtensionRules {
-                text: Some(self.preview_extension_rules.text.clone()),
+                text: None,
                 image: Some(self.preview_extension_rules.image.clone()),
                 video: Some(self.preview_extension_rules.video.clone()),
                 audio: Some(self.preview_extension_rules.audio.clone()),
@@ -212,6 +212,7 @@ impl UserPreferences {
                 document: Some(self.preview_extension_rules.document.clone()),
             }),
             preview_directory_expand_levels: Some(self.preview_directory_expand_levels),
+            preview_extra_text_extensions: Some(self.preview_extension_rules.text.clone()),
         };
         stored.show_hidden_files = self.show_hidden_files;
         stored.language_setting = self.language_setting.config_value().to_owned();

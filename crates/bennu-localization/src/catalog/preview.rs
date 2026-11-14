@@ -11,8 +11,8 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
         "文件过大，无法预览（%1）。最大预览大小为 %2。",
     ),
     (
-        "Preview is only available for directories, archives, audio files, images, and UTF-8 text files",
-        "仅支持预览目录、归档、音频、图像和 UTF-8 文本文件",
+        "Preview is only available for directories, archives, audio files, images, and text files",
+        "仅支持预览目录、归档、音频、图像和文本文件",
     ),
     (
         "This archive format is not supported yet. Archive preview supports .zip, .tar, .tar.gz, .tgz, .7z, and .rar files",
@@ -46,7 +46,10 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     // 文本、Markdown、SQLite
     ("Text preview is not ready", "文本预览尚未就绪"),
     ("(empty file)", "（空文件）"),
-    ("Preview is only available for UTF-8 text files", "仅支持预览 UTF-8 文本文件"),
+    (
+        "This file contains binary data and can't be previewed as text.",
+        "这个文件是二进制数据，无法按文本预览。",
+    ),
     ("Only showing %1 lines. Full line count: %2.", "当前仅显示 %1 行，完整行数为 %2。"),
     ("Could not load more text preview: %1", "无法继续加载文本预览：%1"),
     ("Rendered", "渲染"),

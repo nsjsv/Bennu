@@ -160,6 +160,14 @@ impl PreviewEngine {
                 start_offset,
                 outcome,
             } => self.accept_text_preview_chunk(path, generation, start_offset, outcome),
+            PreviewMessage::TextPreviewEncodingSelected(encoding) => {
+                self.select_text_preview_encoding(encoding)
+            }
+            PreviewMessage::TextPreviewReencoded {
+                path,
+                generation,
+                outcome,
+            } => self.accept_reencoded_text_preview(path, generation, outcome),
             PreviewMessage::PreviewTreeAnimationTick => self.advance_preview_tree_animation(),
             PreviewMessage::PreviewWindowPinToggled => self.toggle_preview_window_pin(),
             PreviewMessage::PreviewWindowInitialControlsElapsed(generation) => {

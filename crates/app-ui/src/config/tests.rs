@@ -822,9 +822,10 @@ fn normalizes_preview_extension_input() {
 
 #[test]
 fn extension_rules_match_case_insensitively_and_support_compound_suffixes() {
-    let rules = PreviewExtensionRules::default_rules();
+    let mut rules = PreviewExtensionRules::default_rules();
+    rules.text.push("nfo".to_owned());
 
-    assert!(rules.matches(PreviewFileSizeKind::Text, &PathBuf::from("notes.TXT")));
+    assert!(rules.matches(PreviewFileSizeKind::Text, &PathBuf::from("readme.NFO")));
     assert!(rules.matches(
         PreviewFileSizeKind::Archive,
         &PathBuf::from("bundle.tar.gz")
@@ -838,8 +839,9 @@ fn extension_rules_match_case_insensitively_and_support_compound_suffixes() {
 #[test]
 fn extension_rules_default_lists_mirror_builtin_types() {
     let rules = PreviewExtensionRules::default_rules();
+    // 文本由类型库判定，额外文本后缀默认空。
+    assert!(rules.list(PreviewFileSizeKind::Text).is_empty());
     for (kind, expected) in [
-        (PreviewFileSizeKind::Text, "txt"),
         (PreviewFileSizeKind::Image, "png"),
         (PreviewFileSizeKind::Video, "mp4"),
         (PreviewFileSizeKind::Audio, "mp3"),
@@ -885,20 +887,22 @@ fn preview_extension_rules_roundtrip_through_stored_preferences() {
     );
 
     // 单类型缺失时该类型回退默认，其他类型保留用户值。
+    config.preview_extension_rules.video = vec!["dat".to_owned()];
     let mut stored = config.user_preferences().to_stored();
     let mut rules = stored
         .preview
         .preview_extension_rules
         .take()
         .expect("stored rules");
-    rules.text = None;
+    rules.video = None;
     stored.preview.preview_extension_rules = Some(rules);
     let restored = UserPreferences::from_stored(stored, &default).preferences;
     assert_eq!(
-        restored.preview_extension_rules.text,
-        default.preview_extension_rules.text
+        restored.preview_extension_rules.video,
+        default.preview_extension_rules.video
     );
     assert!(restored.preview_extension_rules.image.is_empty());
+    assert_eq!(restored.preview_extension_rules.text, vec!["nfo", "cfg"]);
 }
 
 #[test]

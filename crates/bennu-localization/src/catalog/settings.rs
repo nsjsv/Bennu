@@ -75,7 +75,7 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Enter a smaller preview size.", "请输入更小的预览大小。"),
     ("Enter a whole number from 0 to 3.", "请输入 0 到 3 的整数。"),
     ("Enter an extension like txt (a leading dot is optional).", "请输入类似 txt 的后缀（前导点可省略）。"),
-    ("Text Preview Extensions", "文本预览后缀"),
+    ("Extra Text Extensions", "额外当作文本的后缀"),
     ("Image Preview Extensions", "图片预览后缀"),
     ("Video Preview Extensions", "视频预览后缀"),
     ("Audio Preview Extensions", "音频预览后缀"),

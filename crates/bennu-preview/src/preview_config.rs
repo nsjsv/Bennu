@@ -35,10 +35,15 @@ pub struct StoredPreviewPreferences {
     pub preview_extension_rules: Option<StoredPreviewExtensionRules>,
     #[serde(default)]
     pub preview_directory_expand_levels: Option<u8>,
+    /// 额外当作文本的后缀（文本主要由类型库判定）。None 表示还没迁移过，读取端
+    /// 从旧的 `preview_extension_rules.text` 迁移一次。
+    #[serde(default)]
+    pub preview_extra_text_extensions: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct StoredPreviewExtensionRules {
+    /// 旧版本的替换式文本后缀表，只读迁移，新代码写 None。
     #[serde(default)]
     pub text: Option<Vec<String>>,
     #[serde(default)]
@@ -66,13 +71,15 @@ pub const DEFAULT_PREVIEW_DOCUMENT_SIZE_BYTES: u64 = 100 * PREVIEW_FILE_SIZE_UNI
 pub const MIN_PREVIEW_DIRECTORY_EXPAND_LEVELS: u8 = 0;
 pub const MAX_PREVIEW_DIRECTORY_EXPAND_LEVELS: u8 = 3;
 pub const DEFAULT_PREVIEW_DIRECTORY_EXPAND_LEVELS: u8 = 1;
-/// 空格预览各类型的默认后缀表，镜像各预览类型的内置判定；
-/// 后缀以小写、无前导点的规范形态存储。替换式语义：用户可增删，
-/// 删除即该后缀不再按此类型预览。
-pub const DEFAULT_PREVIEW_TEXT_EXTENSIONS: [&str; 22] = [
+/// 旧版本的内置文本后缀表。文本改由类型库判定后它只用于迁移：几乎所有用户存的
+/// 都是这份默认值（保存时写全量），原样搬成额外后缀会让 `.ts` 视频也被硬当文本。
+const LEGACY_DEFAULT_PREVIEW_TEXT_EXTENSIONS: [&str; 22] = [
     "txt", "md", "log", "conf", "ini", "yaml", "yml", "json", "xml", "toml", "sh", "py", "js",
     "ts", "c", "cpp", "h", "rs", "java", "css", "html", "csv",
 ];
+/// 空格预览各非文本类型的默认后缀表，镜像各预览类型的内置判定；
+/// 后缀以小写、无前导点的规范形态存储。替换式语义：用户可增删，
+/// 删除即该后缀不再按此类型预览。
 pub const DEFAULT_PREVIEW_IMAGE_EXTENSIONS: [&str; 11] = [
     "avif", "bmp", "gif", "ico", "jpg", "jpeg", "png", "svg", "tif", "tiff", "webp",
 ];
@@ -189,8 +196,9 @@ pub fn normalize_preview_extension(raw: &str) -> Option<String> {
     Some(trimmed.to_lowercase())
 }
 
-/// 空格预览的分类型后缀规则：每个类型的列表完全决定该类型识别哪些
-/// 后缀（替换式）。匹配按文件名 `ends_with` 进行，天然覆盖 tar.gz
+/// 空格预览的分类型后缀规则：非文本类型的列表完全决定该类型识别哪些
+/// 后缀（替换式）；文本列表是「额外当作文本的后缀」，默认空，文本主要由
+/// 类型库判定。匹配按文件名 `ends_with` 进行，天然覆盖 tar.gz
 /// 这类复合后缀；大小写不敏感，与各渲染器行为保持一致。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PreviewExtensionRules {
@@ -206,7 +214,7 @@ pub struct PreviewExtensionRules {
 impl PreviewExtensionRules {
     pub fn default_rules() -> Self {
         Self {
-            text: default_extensions(&DEFAULT_PREVIEW_TEXT_EXTENSIONS),
+            text: Vec::new(),
             image: default_extensions(&DEFAULT_PREVIEW_IMAGE_EXTENSIONS),
             video: default_extensions(&DEFAULT_PREVIEW_VIDEO_EXTENSIONS),
             audio: default_extensions(&DEFAULT_PREVIEW_AUDIO_EXTENSIONS),
@@ -250,7 +258,7 @@ impl PreviewExtensionRules {
 
     pub fn default_list(kind: PreviewFileSizeKind) -> Vec<String> {
         let builtin: &[&str] = match kind {
-            PreviewFileSizeKind::Text => &DEFAULT_PREVIEW_TEXT_EXTENSIONS,
+            PreviewFileSizeKind::Text => &[],
             PreviewFileSizeKind::Image => &DEFAULT_PREVIEW_IMAGE_EXTENSIONS,
             PreviewFileSizeKind::Video => &DEFAULT_PREVIEW_VIDEO_EXTENSIONS,
             PreviewFileSizeKind::Audio => &DEFAULT_PREVIEW_AUDIO_EXTENSIONS,
@@ -338,14 +346,18 @@ pub fn preview_extension_rules_from_stored(
     stored: &StoredPreviewPreferences,
     fallback: &PreviewExtensionRules,
 ) -> PreviewExtensionRules {
+    let extra_text = preview_extra_text_extensions_from_stored(stored, &fallback.text);
     let Some(stored_rules) = &stored.preview_extension_rules else {
-        return fallback.clone();
+        return PreviewExtensionRules {
+            text: extra_text,
+            ..fallback.clone()
+        };
     };
     let per_type = |stored: &Option<Vec<String>>, default_extensions: &Vec<String>| {
         stored.clone().unwrap_or_else(|| default_extensions.clone())
     };
     PreviewExtensionRules {
-        text: per_type(&stored_rules.text, &fallback.text),
+        text: extra_text,
         image: per_type(&stored_rules.image, &fallback.image),
         video: per_type(&stored_rules.video, &fallback.video),
         audio: per_type(&stored_rules.audio, &fallback.audio),
@@ -353,6 +365,30 @@ pub fn preview_extension_rules_from_stored(
         archive: per_type(&stored_rules.archive, &fallback.archive),
         document: per_type(&stored_rules.document, &fallback.document),
     }
+}
+
+/// 额外文本后缀：新键说了算；新键还没写过时从旧的替换式文本表迁移一次——
+/// 去掉旧内置默认值，只留用户自己加的。迁移结果随下次保存写进新键，之后用户
+/// 再加 `txt` 也不会被过滤。
+fn preview_extra_text_extensions_from_stored(
+    stored: &StoredPreviewPreferences,
+    fallback: &[String],
+) -> Vec<String> {
+    if let Some(extra) = &stored.preview_extra_text_extensions {
+        return extra.clone();
+    }
+    let legacy = stored
+        .preview_extension_rules
+        .as_ref()
+        .and_then(|rules| rules.text.as_ref());
+    let Some(legacy) = legacy else {
+        return fallback.to_vec();
+    };
+    legacy
+        .iter()
+        .filter(|extension| !LEGACY_DEFAULT_PREVIEW_TEXT_EXTENSIONS.contains(&extension.as_str()))
+        .cloned()
+        .collect()
 }
 
 /// 存储形态 → 目录展开层级：缺省回退 fallback，存值越界时归一化夹住。
@@ -457,20 +493,53 @@ mod stored_preferences_migration_tests {
         // 段存在但单类型 None：该类型回退默认，空列表是用户显式清空。
         let stored = StoredPreviewPreferences {
             preview_extension_rules: Some(StoredPreviewExtensionRules {
-                text: Some(vec!["txt".to_owned()]),
                 image: Some(Vec::new()),
                 ..StoredPreviewExtensionRules::default()
             }),
             ..StoredPreviewPreferences::default()
         };
         let rules = preview_extension_rules_from_stored(&stored, &defaults);
-        assert_eq!(rules.text, vec!["txt".to_owned()]);
+        assert_eq!(rules.text, Vec::<String>::new());
         assert_eq!(rules.image, Vec::<String>::new());
         assert_eq!(rules.video, defaults.video);
         assert_eq!(rules.audio, defaults.audio);
         assert_eq!(rules.sqlite, defaults.sqlite);
         assert_eq!(rules.archive, defaults.archive);
         assert_eq!(rules.document, defaults.document);
+    }
+
+    #[test]
+    fn legacy_text_list_migrates_once_keeping_only_user_additions() {
+        let defaults = PreviewExtensionRules::default_rules();
+        let mut legacy_text = LEGACY_DEFAULT_PREVIEW_TEXT_EXTENSIONS
+            .iter()
+            .map(|extension| (*extension).to_owned())
+            .collect::<Vec<_>>();
+        legacy_text.extend(["nfo".to_owned(), "srt".to_owned()]);
+        let legacy = StoredPreviewPreferences {
+            preview_extension_rules: Some(StoredPreviewExtensionRules {
+                text: Some(legacy_text),
+                ..StoredPreviewExtensionRules::default()
+            }),
+            ..StoredPreviewPreferences::default()
+        };
+
+        // 旧默认（含 ts）去掉，只剩用户自己加的。
+        let rules = preview_extension_rules_from_stored(&legacy, &defaults);
+        assert_eq!(rules.text, vec!["nfo".to_owned(), "srt".to_owned()]);
+
+        // 新键写过之后旧键不再参与：用户后来自己加回 txt 也保留。
+        let saved = StoredPreviewPreferences {
+            preview_extra_text_extensions: Some(vec!["txt".to_owned()]),
+            ..legacy
+        };
+        let rules = preview_extension_rules_from_stored(&saved, &defaults);
+        assert_eq!(rules.text, vec!["txt".to_owned()]);
+
+        // 什么都没存：默认空。
+        let rules =
+            preview_extension_rules_from_stored(&StoredPreviewPreferences::default(), &defaults);
+        assert!(rules.text.is_empty());
     }
 
     #[test]

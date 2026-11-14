@@ -10,7 +10,7 @@ pub mod error;
 mod fallback;
 pub mod filesystem;
 pub mod filter_semantics;
-pub mod mime;
+pub use file_core::mime;
 pub mod model;
 pub mod path_encoding;
 pub mod protocol;

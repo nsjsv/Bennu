@@ -158,15 +158,19 @@ mod tests {
     fn removing_extension_updates_requested_type_only() {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
         let text_index = kind_index(config::PreviewFileSizeKind::Text);
+        browser
+            .user_config
+            .preview_extension_rules
+            .list_mut(config::PreviewFileSizeKind::Text)
+            .push("nfo".to_owned());
 
-        let _ = browser.remove_preview_extension(text_index, "TXT");
+        let _ = browser.remove_preview_extension(text_index, "NFO");
 
-        assert!(!browser
+        assert!(browser
             .user_config
             .preview_extension_rules
             .list(config::PreviewFileSizeKind::Text)
-            .iter()
-            .any(|candidate| candidate == "txt"));
+            .is_empty());
         // 其他类型的列表不受影响。
         assert!(browser
             .user_config

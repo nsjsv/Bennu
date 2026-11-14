@@ -57,6 +57,13 @@ pub enum PreviewMessage {
         content_height: f32,
     },
     MarkdownPreviewModeSelected(MarkdownPreviewMode),
+    /// 用户为当前文本预览指定编码；只对这次预览有效。
+    TextPreviewEncodingSelected(&'static encoding_rs::Encoding),
+    TextPreviewReencoded {
+        path: PathBuf,
+        generation: u64,
+        outcome: Result<PreviewContent, String>,
+    },
     ImagePreviewDimensionsLoaded(PathBuf, u64, Result<(u32, u32), String>),
     PreviewImageViewport(PreviewImageViewportMessage),
     AnimatedImageFrameLoaded(AnimatedImageFrame),

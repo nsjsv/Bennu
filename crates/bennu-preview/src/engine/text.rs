@@ -8,10 +8,13 @@ use std::path::{Path, PathBuf};
 
 use iced::Task;
 
+use encoding_rs::Encoding;
+
 use crate::commands::preview::text_preview_chunk_command;
 use crate::preview::{PreviewContent, PreviewState};
 use crate::preview_message::PreviewMessage;
 use crate::text_preview::{TextPreviewChunk, TextPreviewDocument, TextPreviewFormat};
+use crate::text_preview_loading::load_reencoded_text_preview;
 
 impl super::PreviewEngine {
     pub fn handle_text_preview_content_scrolled(
@@ -82,6 +85,67 @@ impl super::PreviewEngine {
         Task::none()
     }
 
+    /// 按用户指定的编码重读当前文本预览。代次在发起时推进：期间又改编码或换了文件，
+    /// 先发出的结果到达时代次已过期，直接丢弃。
+    pub fn select_text_preview_encoding(
+        &mut self,
+        encoding: &'static Encoding,
+    ) -> Task<PreviewMessage> {
+        let Some(format) = active_text_preview_format(self.preview.as_ref()) else {
+            return Task::none();
+        };
+        let Some(path) = self
+            .active_text_preview_document_mut()
+            .map(|document| document.path().to_path_buf())
+        else {
+            return Task::none();
+        };
+        self.text_preview_generation = self.text_preview_generation.wrapping_add(1);
+        let generation = self.text_preview_generation;
+        Task::perform(
+            load_reencoded_text_preview(path.clone(), encoding, format),
+            move |outcome| PreviewMessage::TextPreviewReencoded {
+                path: path.clone(),
+                generation,
+                outcome,
+            },
+        )
+    }
+
+    /// 重读结果替换文档内容；Markdown 原文/渲染模式是用户当前的选择，保留。
+    pub fn accept_reencoded_text_preview(
+        &mut self,
+        path: PathBuf,
+        generation: u64,
+        outcome: Result<PreviewContent, String>,
+    ) -> Task<PreviewMessage> {
+        if generation != self.text_preview_generation {
+            return Task::none();
+        }
+        let Some(mode) = self
+            .active_text_preview_document_mut()
+            .filter(|document| document.path() == path.as_path())
+            .map(|document| document.markdown_preview_mode())
+        else {
+            return Task::none();
+        };
+        match outcome {
+            Ok(content) => {
+                self.text_preview_document = TextPreviewDocument::from_loaded(&content, generation)
+                    .map(|mut document| {
+                        document.select_markdown_preview_mode(mode);
+                        document
+                    });
+                self.preview = Some(PreviewState::Ready(content));
+            }
+            Err(error) => {
+                self.text_preview_document = None;
+                self.preview = Some(PreviewState::Error(error));
+            }
+        }
+        Task::none()
+    }
+
     pub fn active_text_preview_document_mut(&mut self) -> Option<&mut TextPreviewDocument> {
         let path = active_text_preview_path(self.preview.as_ref())?;
         self.text_preview_document
@@ -99,6 +163,7 @@ fn text_preview_state_from_document(
         path,
         rendered: document.shared_content(),
         format,
+        encoding: document.encoding(),
         next_offset: document.next_offset(),
         loaded_line_count: document.loaded_line_count(),
         line_limit_notice: document.line_limit_notice(),
@@ -116,5 +181,85 @@ fn active_text_preview_format(preview: Option<&PreviewState>) -> Option<TextPrev
     match preview? {
         PreviewState::Ready(PreviewContent::Text { format, .. }) => Some(*format),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+
+    use encoding_rs::{Encoding, GBK, UTF_8};
+
+    use super::*;
+    use crate::engine::{PreviewEngine, PreviewEngineConfig, PreviewWindowIdentity};
+    use crate::preview::PreviewWindowProfile;
+    use crate::preview_config::PreviewFileSizeLimits;
+    use crate::text_preview::MarkdownPreviewMode;
+
+    fn markdown_content(path: &Path, encoding: &'static Encoding, text: &str) -> PreviewContent {
+        PreviewContent::Text {
+            path: path.to_path_buf(),
+            rendered: Arc::from(text),
+            format: TextPreviewFormat::Markdown,
+            encoding,
+            next_offset: None,
+            loaded_line_count: 1,
+            line_limit_notice: None,
+        }
+    }
+
+    fn engine_showing(content: PreviewContent) -> PreviewEngine {
+        let mut engine = PreviewEngine::new(
+            PreviewEngineConfig {
+                directory_expand_levels: 1,
+                extension_rules: Default::default(),
+                size_limits: PreviewFileSizeLimits::with_default_limits(),
+            },
+            crate::engine::default_preview_size(PreviewWindowProfile::Regular),
+            PreviewWindowIdentity {
+                app_id: "bennu-preview-tests".to_owned(),
+                icon: None,
+            },
+        );
+        engine.text_preview_generation = 1;
+        engine.text_preview_document = TextPreviewDocument::from_loaded(&content, 1);
+        engine.preview = Some(PreviewState::Ready(content));
+        engine
+    }
+
+    #[test]
+    fn only_the_latest_reencode_replaces_the_document_and_keeps_the_mode() {
+        let path = PathBuf::from("/tmp/notes.md");
+        let mut engine = engine_showing(markdown_content(&path, UTF_8, "original"));
+        engine
+            .text_preview_document
+            .as_mut()
+            .expect("document")
+            .select_markdown_preview_mode(MarkdownPreviewMode::Raw);
+
+        let _ = engine.select_text_preview_encoding(GBK);
+        let _ = engine.select_text_preview_encoding(GBK);
+        let latest = engine.text_preview_generation;
+
+        // 先发出的那次重读晚到：代次已过期，丢弃。
+        let _ = engine.accept_reencoded_text_preview(
+            path.clone(),
+            latest - 1,
+            Ok(markdown_content(&path, GBK, "stale")),
+        );
+        let document = engine.text_preview_document.as_ref().expect("document");
+        assert_eq!(document.encoding(), UTF_8);
+        assert_eq!(document.content(), "original");
+
+        let _ = engine.accept_reencoded_text_preview(
+            path.clone(),
+            latest,
+            Ok(markdown_content(&path, GBK, "reencoded")),
+        );
+        let document = engine.text_preview_document.as_ref().expect("document");
+        assert_eq!(document.encoding(), GBK);
+        assert_eq!(document.content(), "reencoded");
+        assert_eq!(document.markdown_preview_mode(), MarkdownPreviewMode::Raw);
     }
 }

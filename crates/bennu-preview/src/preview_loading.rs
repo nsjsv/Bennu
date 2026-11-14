@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use bennu_localization::tr;
+use file_core::mime::{MimeDatabase, NameType, TEXT_PLAIN};
 use file_core::{
     list_archive_members_with_format, scan_directory, sniff_archive_extraction_format,
     ArchiveListingEntry, DirectoryEntry, FileKind, ScanOptions,
@@ -48,11 +49,11 @@ pub async fn load_preview(
             } else if rules.matches(PreviewFileSizeKind::Sqlite, &path) {
                 load_sqlite_preview(path).await.map(PreviewContent::Sqlite)
             } else {
-                load_text_preview(path).await
+                load_initial_text_preview(path, rules).await
             }
         }
         FileKind::Symlink | FileKind::Other => Err(tr!(
-            "Preview is only available for directories, archives, audio files, images, and UTF-8 text files"
+            "Preview is only available for directories, archives, audio files, images, and text files"
         )),
     }
 }
@@ -97,8 +98,11 @@ impl PreviewPathKind {
     }
 }
 
-/// 返回 `None` 表示文件不属于任何可预览类型。每个类型的后缀列表
+/// 返回 `None` 表示文件不属于任何可预览类型。非文本类型的后缀列表
 /// 完全决定该类型识别哪些后缀（替换式）；图片列表中的 gif 走动图渲染。
+/// 文本是兜底：额外文本后缀直接算，其余按类型库只看名字——名字确定是
+/// 非文本类型的不预览，名字定不下来的先放行，打开时看内容定论
+/// （`text_preview_loading::inspect_text_file`）。
 pub fn classify_preview_path(
     path: &Path,
     rules: &PreviewExtensionRules,
@@ -126,10 +130,24 @@ pub fn classify_preview_path(
     if rules.matches(Kind::Audio, path) {
         return Some(PreviewPathKind::Audio);
     }
-    if rules.matches(Kind::Text, path) {
+    if rules.matches(Kind::Text, path) || may_be_text_by_name(path) {
         return Some(PreviewPathKind::Text);
     }
     None
+}
+
+fn may_be_text_by_name(path: &Path) -> bool {
+    let Some(file_name) = path.file_name() else {
+        return false;
+    };
+    let types = MimeDatabase::system();
+    match types.type_from_name(file_name) {
+        NameType::Known(mime) => types.is_subclass(&mime, TEXT_PLAIN),
+        NameType::Candidates(candidates) => candidates
+            .iter()
+            .any(|candidate| types.is_subclass(candidate, TEXT_PLAIN)),
+        NameType::Unknown => true,
+    }
 }
 
 async fn load_directory_preview(
@@ -369,10 +387,6 @@ fn archive_path_segments(path: &str) -> Vec<&str> {
     path.split(['/', '\\'])
         .filter(|segment| !segment.is_empty() && *segment != ".")
         .collect()
-}
-
-async fn load_text_preview(path: PathBuf) -> Result<PreviewContent, String> {
-    load_initial_text_preview(path).await
 }
 
 #[cfg(test)]

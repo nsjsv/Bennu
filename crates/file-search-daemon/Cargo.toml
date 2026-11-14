@@ -10,7 +10,6 @@ repository.workspace = true
 # 搜索守护进程：索引数据库、爬虫、内容提取、写入线程、socket 服务端与 bennu-searchd。
 # 主程序只依赖客户端 file-search，不链接本 crate。
 [dependencies]
-chardetng = "1.0.0"
 encoding_rs = "0.8.35"
 file-core = { path = "../file-core" }
 file-search = { path = "../file-search" }

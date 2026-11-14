@@ -68,6 +68,9 @@ bennu-subprocess = { path = "../bennu-subprocess" }
 bennu-localization = { path = "../bennu-localization" }
 # Markdown 预览渲染（自 app-ui 随面板下沉，版本与 app-ui 原声明一致）。
 pulldown-cmark = "0.13.4"
+# 文本预览按识别出的编码逐块解码；memchr=按编码找换行。
+encoding_rs = "0.8.35"
+memchr = "2.7"
 # tracing=图片预览视口交互的调试日志（迁移自 app-ui，target 名不变）。
 tracing.workspace = true
 

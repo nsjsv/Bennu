@@ -45,26 +45,14 @@ impl super::PreviewEngine {
                     );
                 }
                 let command = match &preview {
-                    PreviewContent::Text {
-                        path,
-                        rendered,
-                        format,
-                        next_offset,
-                        loaded_line_count,
-                        line_limit_notice,
-                    } => {
+                    PreviewContent::Text { .. } => {
                         self.clear_audio_preview();
                         self.clear_video_preview();
                         self.text_preview_generation = self.text_preview_generation.wrapping_add(1);
-                        self.text_preview_document = Some(TextPreviewDocument::new_initial(
-                            path.clone(),
-                            rendered,
-                            *format,
+                        self.text_preview_document = TextPreviewDocument::from_loaded(
+                            &preview,
                             self.text_preview_generation,
-                            *next_offset,
-                            *loaded_line_count,
-                            *line_limit_notice,
-                        ));
+                        );
                         Task::none()
                     }
                     PreviewContent::Audio { .. } => {

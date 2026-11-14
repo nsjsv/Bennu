@@ -127,7 +127,7 @@ impl MimeDatabase {
             .collect::<Vec<_>>();
         if caches.is_empty() {
             tracing::warn!(
-                target: "file_search::mime",
+                target: "file_core::mime",
                 event = "mime_database_unavailable",
                 "no shared-mime-info cache was found; file types fall back to text detection"
             );
@@ -331,7 +331,7 @@ fn system_cache_paths() -> Vec<PathBuf> {
                 PathBuf::from("/usr/share"),
             ]
         });
-    std::iter::once(file_core::app_dirs::user_data_dir())
+    std::iter::once(crate::app_dirs::user_data_dir())
         .chain(data_dirs)
         .map(|directory| directory.join("mime").join("mime.cache"))
         .collect()

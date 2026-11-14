@@ -679,7 +679,12 @@ impl widget::operation::Scrollable for ScrollBridge<'_> {
         self.apply_pixel_delta(target_y - viewer_scroll_absolute(self.state));
     }
 
-    fn scroll_by(&mut self, offset: AbsoluteOffset, _bounds: Rectangle, _content_bounds: Rectangle) {
+    fn scroll_by(
+        &mut self,
+        offset: AbsoluteOffset,
+        _bounds: Rectangle,
+        _content_bounds: Rectangle,
+    ) {
         self.apply_pixel_delta(offset.y);
     }
 }

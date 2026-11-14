@@ -89,6 +89,7 @@ pub enum PreviewContent {
         path: PathBuf,
         rendered: Arc<str>,
         format: TextPreviewFormat,
+        encoding: &'static encoding_rs::Encoding,
         next_offset: Option<u64>,
         loaded_line_count: usize,
         line_limit_notice: Option<TextPreviewLineLimitNotice>,

@@ -1,5 +1,9 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
+
+use encoding_rs::Encoding;
+
+use crate::preview::PreviewContent;
 
 pub const TEXT_PREVIEW_LINE_LIMIT: usize = 10_000;
 pub const TEXT_PREVIEW_INITIAL_LINE_LIMIT: usize = 50;
@@ -51,6 +55,7 @@ impl TextPreviewLineLimitNotice {
 pub struct TextPreviewChunkRequest {
     pub path: PathBuf,
     pub generation: u64,
+    pub encoding: &'static Encoding,
     pub start_offset: u64,
     pub loaded_line_count: usize,
     pub line_limit: usize,
@@ -67,6 +72,8 @@ pub struct TextPreviewChunk {
 
 pub struct TextPreviewDocument {
     path: PathBuf,
+    /// 打开时识别或用户指定的编码；后续分块按它解码。
+    encoding: &'static Encoding,
     content: String,
     // 每行起始 byte offset（首项 0）；行数即 line_starts.len()。
     // 追加 chunk 时按追加段增量扩展，避免整篇重扫。
@@ -84,8 +91,11 @@ pub struct TextPreviewDocument {
 }
 
 impl TextPreviewDocument {
+    // 参数即首块加载结论（PreviewContent::Text 的各字段），与调用点一一对应
+    #[allow(clippy::too_many_arguments)]
     pub fn new_initial(
         path: PathBuf,
+        encoding: &'static Encoding,
         content: &str,
         format: TextPreviewFormat,
         generation: u64,
@@ -95,6 +105,7 @@ impl TextPreviewDocument {
     ) -> Self {
         Self {
             path,
+            encoding,
             content: content.to_owned(),
             line_starts: build_line_starts(content),
             markdown_preview_mode: initial_markdown_preview_mode(format),
@@ -110,8 +121,38 @@ impl TextPreviewDocument {
         }
     }
 
+    /// 首块加载结论 → 文档；不是文本内容时 None。
+    pub fn from_loaded(content: &PreviewContent, generation: u64) -> Option<Self> {
+        let PreviewContent::Text {
+            path,
+            rendered,
+            format,
+            encoding,
+            next_offset,
+            loaded_line_count,
+            line_limit_notice,
+        } = content
+        else {
+            return None;
+        };
+        Some(Self::new_initial(
+            path.clone(),
+            encoding,
+            rendered,
+            *format,
+            generation,
+            *next_offset,
+            *loaded_line_count,
+            *line_limit_notice,
+        ))
+    }
+
     pub fn path(&self) -> &std::path::Path {
         self.path.as_path()
+    }
+
+    pub fn encoding(&self) -> &'static Encoding {
+        self.encoding
     }
 
     pub fn content(&self) -> &str {
@@ -284,6 +325,7 @@ impl TextPreviewDocument {
         Some(TextPreviewChunkRequest {
             path: self.path.clone(),
             generation: self.generation,
+            encoding: self.encoding,
             start_offset,
             loaded_line_count: self.loaded_line_count,
             line_limit,
@@ -362,28 +404,9 @@ pub fn text_preview_loaded_line_count(content: &str) -> usize {
     content.bytes().filter(|byte| *byte == b'\n').count() + 1
 }
 
-pub fn render_text_preview(path: &Path, content: &str) -> (String, TextPreviewFormat) {
-    let format = text_preview_format_for_path(path);
-    (content.to_owned(), format)
-}
-
-pub fn text_preview_format_for_path(path: &Path) -> TextPreviewFormat {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .filter(|extension| markdown_extension(extension))
-        .map(|_| TextPreviewFormat::Markdown)
-        .unwrap_or(TextPreviewFormat::Plain)
-}
-
-fn markdown_extension(extension: &str) -> bool {
-    ["md", "markdown", "mdown", "mkd"]
-        .iter()
-        .any(|candidate| extension.eq_ignore_ascii_case(candidate))
-}
-
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
 
     use super::*;
 
@@ -395,6 +418,7 @@ mod tests {
 
         TextPreviewDocument::new_initial(
             PathBuf::from("large.txt"),
+            encoding_rs::UTF_8,
             &content,
             TextPreviewFormat::Plain,
             7,
@@ -409,6 +433,7 @@ mod tests {
         let content = "first line\nsecond line\n";
         let document = TextPreviewDocument::new_initial(
             PathBuf::from("note.txt"),
+            encoding_rs::UTF_8,
             content,
             TextPreviewFormat::Plain,
             1,
@@ -425,6 +450,7 @@ mod tests {
     fn empty_text_preview_document_keeps_empty_selectable_text() {
         let document = TextPreviewDocument::new_initial(
             PathBuf::from("empty.txt"),
+            encoding_rs::UTF_8,
             "",
             TextPreviewFormat::Plain,
             1,
@@ -543,26 +569,5 @@ mod tests {
         assert_eq!(text_preview_loaded_line_count(""), 0);
         assert_eq!(text_preview_loaded_line_count("one"), 1);
         assert_eq!(text_preview_loaded_line_count("one\ntwo"), 2);
-    }
-
-    #[test]
-    fn markdown_extension_selects_markdown_format() {
-        assert_eq!(
-            text_preview_format_for_path(Path::new("README.md")),
-            TextPreviewFormat::Markdown
-        );
-        assert_eq!(
-            text_preview_format_for_path(Path::new("notes.txt")),
-            TextPreviewFormat::Plain
-        );
-    }
-
-    #[test]
-    fn render_markdown_preview_formats_common_blocks() {
-        let markdown = "# Title\n\nParagraph with **bold** and [link](https://example.com).\n\n- [x] done\n- next\n\n```rust\nfn main() {}\n```\n";
-        let (rendered, format) = render_text_preview(Path::new("README.md"), markdown);
-
-        assert_eq!(format, TextPreviewFormat::Markdown);
-        assert_eq!(rendered, markdown);
     }
 }

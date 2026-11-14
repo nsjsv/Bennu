@@ -614,12 +614,14 @@ dependencies = [
  "bennu-subprocess",
  "bennu-theme",
  "blake3",
+ "encoding_rs",
  "file-core",
  "gif 0.14.2",
  "iced",
  "iced_runtime",
  "image",
  "libc",
+ "memchr",
  "pulldown-cmark",
  "resvg",
  "rodio",
@@ -1855,8 +1857,10 @@ name = "file-core"
 version = "0.4.2"
 dependencies = [
  "blake3",
+ "chardetng",
  "chrono",
  "dirs",
+ "encoding_rs",
  "exacl",
  "filetime",
  "flate2",
@@ -1865,6 +1869,7 @@ dependencies = [
  "image",
  "libc",
  "md-5",
+ "memchr",
  "notify",
  "regex",
  "rustix 1.1.4",
@@ -1907,10 +1912,8 @@ dependencies = [
  "file-core",
  "icu_normalizer",
  "libc",
- "memchr",
  "regex",
  "rusqlite",
- "rustix 1.1.4",
  "serde",
  "serde_json",
  "tempfile",
@@ -1926,7 +1929,6 @@ dependencies = [
 name = "file-search-daemon"
 version = "0.4.2"
 dependencies = [
- "chardetng",
  "encoding_rs",
  "file-core",
  "file-search",

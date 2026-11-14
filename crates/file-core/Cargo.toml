@@ -7,14 +7,17 @@ license.workspace = true
 
 [dependencies]
 blake3.workspace = true
+chardetng = "1.0.0"
 chrono.workspace = true
 dirs.workspace = true
+encoding_rs = "0.8.35"
 getrandom = "0.4.2"
 filetime = "0.2.29"
 flate2 = "1.1.9"
 image.workspace = true
 libc = "0.2"
 md-5.workspace = true
+memchr = "2.7"
 notify.workspace = true
 regex = "1.12.3"
 serde = { version = "1", features = ["derive"] }
@@ -33,7 +36,7 @@ xattr = "1.6.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 exacl = "0.13.0"
-rustix = { version = "1.1.4", features = ["fs"] }
+rustix = { version = "1.1.4", features = ["fs", "mm"] }
 
 [dev-dependencies]
 serde_json.workspace = true

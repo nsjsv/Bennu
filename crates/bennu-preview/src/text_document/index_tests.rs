@@ -112,3 +112,54 @@ fn a_file_without_a_final_newline_counts_its_last_line() {
     );
     assert_eq!(index.line_count_before(8), None);
 }
+
+fn naive_line_start(bytes: &[u8], line: u64) -> u64 {
+    let mut starts = vec![0_u64];
+    starts.extend(
+        bytes
+            .iter()
+            .enumerate()
+            .filter(|(_, byte)| **byte == b'\n')
+            .map(|(index, _)| index as u64 + 1),
+    );
+    // 以换行结尾的文件没有空的末行。
+    if starts.last() == Some(&(bytes.len() as u64)) && starts.len() > 1 {
+        starts.pop();
+    }
+    starts[(line as usize).min(starts.len() - 1)]
+}
+
+#[tokio::test]
+async fn line_starts_are_found_from_checkpoints_or_while_still_counting() {
+    let bytes = numbered_lines(60_000);
+    let len = bytes.len() as u64;
+    let reader = RowReader {
+        source: &bytes,
+        decoding: TextDecoding::new(UTF_8, 0),
+        len,
+    };
+    let mut counting = LineIndex::new(0);
+    let mut index = LineIndex::new(0);
+    counted(bytes.clone(), &mut index, len).await;
+    for line in [0, 1, 7_777, 30_001, 59_999, 60_000, 1_000_000] {
+        let expected = naive_line_start(&bytes, line);
+        for known in [&index, &mut counting] {
+            let seek = known.seek_line(line);
+            assert!(seek.lines_before <= line);
+            assert_eq!(
+                line_start_for_number(&reader, line, seek).expect("line"),
+                expected,
+                "line {line}"
+            );
+        }
+    }
+    // 没有换行结尾的最后一行也能跳到。
+    let tail = b"one\ntwo\nthree".to_vec();
+    let reader = RowReader {
+        source: &tail,
+        decoding: TextDecoding::new(UTF_8, 0),
+        len: tail.len() as u64,
+    };
+    let seek = LineIndex::new(0).seek_line(9);
+    assert_eq!(line_start_for_number(&reader, 9, seek).expect("line"), 8);
+}

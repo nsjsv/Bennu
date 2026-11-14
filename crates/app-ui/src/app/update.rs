@@ -1030,6 +1030,7 @@ impl FileBrowser {
                     self.commit_rename_if_active()
                 }
             }
+            Message::CapturedPreviewShortcutConfirmed => self.close_focused_preview_window(),
             Message::RenameInputChanged(value) => self.apply_rename_input_change(value),
             Message::RenameInputUndoRequested => self.undo_rename_input_change(),
             Message::RenameInputRedoRequested => self.redo_rename_input_change(),

@@ -7,7 +7,9 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use super::rows::{read_full, ByteSource, LineCountAt, RowBudget, RowReader, RowStart, TextRow};
+use super::rows::{
+    read_full, ByteSource, LineCountAt, RowBudget, RowReader, RowStart, TextPosition, TextRow,
+};
 use super::TextDecoding;
 use super::{RowsRequest, EXTEND_BUDGET};
 use crate::text_preview::TextPreviewFormat;
@@ -26,19 +28,22 @@ pub(crate) const ROWS_AFTER_FOCUS: RowBudget = RowBudget {
     bytes: 256 * 1024,
 };
 
-/// 读取的落点：文件开头、某个字节所在的行、文件末尾。
+/// 读取的落点：文件开头、某个字节所在的行、文件末尾、要显示出来的一个位置（搜索、跳行）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextJump {
     Start,
     Offset(u64),
     End,
+    Reveal(TextPosition),
 }
 
-/// 落点行在视口里的位置：顶到视口顶部，或（文件末尾）贴住视口底部。
+/// 落点行在视口里的位置：顶到视口顶部；（文件末尾）贴住视口底部；（搜索、跳行）已经看得见
+/// 就不动，看不见就放到视口约三分之一高处。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JumpPlace {
     Top,
     Bottom,
+    Reveal,
 }
 
 /// 一次读取的结果：连续的显示行、是否到了文件头/尾、落点行。
@@ -156,6 +161,7 @@ pub(crate) fn rows_around(
             JumpPlace::Top,
         ),
         TextJump::Offset(offset) => (reader.row_at(offset, floor)?, JumpPlace::Top),
+        TextJump::Reveal(position) => (reader.row_at(position.row, floor)?, JumpPlace::Reveal),
         TextJump::End => {
             let line_start = reader.line_start_of(reader.len, floor)?;
             (
@@ -174,7 +180,7 @@ pub(crate) fn rows_around(
     let before = reader.rows_before(focus_row, line_number, ROWS_BEFORE_FOCUS)?;
     let after = reader.rows_after(focus_row, line_number, ROWS_AFTER_FOCUS)?;
     let focus = match place {
-        JumpPlace::Top => after
+        JumpPlace::Top | JumpPlace::Reveal => after
             .first()
             .or(before.last())
             .map(|row| (row.start, place)),

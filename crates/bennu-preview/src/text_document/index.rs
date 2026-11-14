@@ -8,7 +8,7 @@ use iced::futures::channel::mpsc;
 use iced::futures::Stream;
 use tokio_util::sync::CancellationToken;
 
-use super::rows::{read_full, ByteSource, LineCountAt, RowStart};
+use super::rows::{read_full, ByteSource, LineCountAt, RowReader, RowStart};
 use super::TextDecoding;
 
 /// 检查点间隔，也是统计时每次读的块大小。
@@ -129,6 +129,33 @@ impl LineIndex {
         })
     }
 
+    /// 第 `line` 行（从 0 数）之前最近的已知位置：从这里往后数换行就到它的行首。统计
+    /// 还没数到那一行时从数到的地方接着数，不必等统计。
+    pub(crate) fn seek_line(&self, line: u64) -> LineSeek {
+        if self.cursor.lines_before <= line {
+            return LineSeek {
+                offset: self.cursor.counted_until,
+                lines_before: self.cursor.lines_before,
+                line_start: self.cursor.last_line_start,
+            };
+        }
+        let after = self
+            .checkpoints
+            .partition_point(|checkpoint| checkpoint.lines_before <= line);
+        match after.checked_sub(1) {
+            Some(index) => LineSeek {
+                offset: self.checkpoint_offset(index),
+                lines_before: self.checkpoints[index].lines_before,
+                line_start: self.checkpoints[index].line_start,
+            },
+            None => LineSeek {
+                offset: self.data_start,
+                lines_before: 0,
+                line_start: self.data_start,
+            },
+        }
+    }
+
     fn checkpoint_at_or_before(&self, offset: u64) -> Option<usize> {
         let index = (offset.checked_sub(self.data_start)? / CHECKPOINT_BYTES) as usize;
         Some(index.min(self.checkpoints.len().checked_sub(1)?))
@@ -137,6 +164,59 @@ impl LineIndex {
     fn checkpoint_offset(&self, index: usize) -> u64 {
         self.data_start + index as u64 * CHECKPOINT_BYTES
     }
+}
+
+/// 已知行号的位置：`offset` 之前有 `lines_before` 个换行，`offset` 所在行的行首是
+/// `line_start`。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LineSeek {
+    pub(crate) offset: u64,
+    pub(crate) lines_before: u64,
+    pub(crate) line_start: u64,
+}
+
+/// 第 `line` 行（从 0 数）的行首：从 `seek` 往后数换行。超出文件时夹到最后一行。
+pub(crate) fn line_start_for_number(
+    reader: &RowReader<'_>,
+    line: u64,
+    seek: LineSeek,
+) -> std::io::Result<u64> {
+    let breaks = reader.decoding.line_breaks();
+    let mut remaining = line.saturating_sub(seek.lines_before);
+    let mut position = seek.offset;
+    let mut line_start = seek.line_start;
+    let mut block = vec![0; CHECKPOINT_BYTES as usize];
+    while remaining > 0 && position < reader.len {
+        let wanted = (reader.len - position).min(CHECKPOINT_BYTES) as usize;
+        let read = breaks.complete_len(read_full(reader.source, position, &mut block[..wanted])?);
+        if read == 0 {
+            break;
+        }
+        let bytes = &block[..read];
+        let count = breaks.count(bytes);
+        if count < remaining {
+            if let Some(last) = breaks.last_line_end(bytes) {
+                line_start = position + last as u64;
+            }
+            remaining -= count;
+            position += read as u64;
+            continue;
+        }
+        let mut consumed = 0;
+        while remaining > 0 {
+            consumed += breaks
+                .next_line_end(&bytes[consumed..])
+                .expect("the block holds at least `remaining` line breaks");
+            remaining -= 1;
+        }
+        line_start = position + consumed as u64;
+    }
+    // 以换行结尾的文件没有空的末行：文件尾不是行首，夹到最后一行。
+    if line_start >= reader.len && reader.len > reader.decoding.data_start() {
+        let unit = breaks.unit_len() as u64;
+        return reader.line_start_of(reader.len - unit, None);
+    }
+    Ok(line_start)
 }
 
 /// 从 `start` 数到 `len`，按节流报进度，结束时再报一次（文件比预期短、读出错时停在

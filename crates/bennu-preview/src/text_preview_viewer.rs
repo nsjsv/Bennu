@@ -16,6 +16,7 @@ use iced::{
     alignment, mouse, Element, Event, Font, Length, Padding, Point, Rectangle, Size, Theme, Vector,
 };
 
+mod find;
 mod geometry;
 mod interaction;
 mod render;
@@ -24,10 +25,11 @@ mod selection;
 mod style;
 
 use crate::text_document::{
-    JumpPlace, TextPosition, TextPreviewDocument, TextViewerEvent, TextViewport,
+    JumpPlace, TextPosition, TextPreviewDocument, TextViewerEvent, TextViewport, ViewerJump,
 };
 use crate::text_highlight::HighlightPalette;
 use crate::text_view::{TextViewChange, TextViewSettings};
+pub(crate) use find::focus_text_viewer;
 use geometry::{
     anchor_index, is_at_bottom, normalize_anchor, note_measured_height, row_height,
     scroll_viewer_by, scroll_viewer_horizontally, visible_rows, window_span,
@@ -179,6 +181,9 @@ struct RetainedRow {
     /// 排版时已经有高亮记号（记号后到时要重排上色）。
     colored: bool,
     paragraph: PreviewParagraph,
+    /// 搜索匹配的底色，按文档 revision 记：搜索变了才重算，滚动时复用。
+    marks: Vec<find::MatchMark>,
+    marks_revision: u64,
 }
 
 struct RetainedNumber {
@@ -279,8 +284,10 @@ where
             height: geometry.content_height,
             ..bounds
         };
-        // 独立预览窗口打开时宿主对这个 id 发 focus 操作：键盘一开始就归查看器。
+        // 独立预览窗口打开时宿主对这个 id 发 focus 操作：键盘一开始就归查看器。关掉搜索条
+        // 后引擎的 `focus_text_viewer` 经 custom 认出查看器的状态。
         operation.focusable(Some(&self.id), bounds, state);
+        operation.custom(Some(&self.id), bounds, state);
         operation.scrollable(
             Some(&self.id),
             bounds,
@@ -350,6 +357,7 @@ where
             return;
         }
         let visible = visible_rows(state, self.document);
+        find::draw_match_marks(renderer, state, self.document, &visible, text_bounds, theme);
         draw_selection_ranges(renderer, state, self.document, &visible, text_bounds, theme);
         draw_visible_rows(
             renderer,
@@ -469,12 +477,7 @@ fn sync_with_document(
         if state.jump_revision != Some(jump.revision) {
             state.jump_revision = Some(jump.revision);
             state.drag_fraction = None;
-            state.anchor = jump.row;
-            state.pixel = 0.0;
-            refresh_retained_content(state, document);
-            if jump.place == JumpPlace::Bottom {
-                scroll_viewer_by(state, document, f32::MAX / 4.0);
-            }
+            apply_jump(state, document, jump);
         }
     }
     if content_changed || layout_changed || view_changed {
@@ -483,6 +486,48 @@ fn sync_with_document(
         // 量出来的行高可能让当前位置越过窗口底部，重新夹一次。
         scroll_viewer_by(state, document, 0.0);
     }
+}
+
+/// 跳转：顶到视口顶部、贴住底部，或（搜索、跳行）看得见就不动、看不见放到视口约三分之一
+/// 高处；带光标时光标移过去、选区清掉，不换行时横向也滚到它。
+fn apply_jump(
+    state: &mut TextPreviewViewerState,
+    document: &TextPreviewDocument,
+    jump: ViewerJump,
+) {
+    let stays = jump.place == JumpPlace::Reveal && row_fully_visible(state, document, jump.row);
+    if !stays {
+        state.anchor = jump.row;
+        state.pixel = 0.0;
+    }
+    if let Some(cursor) = jump.cursor {
+        state.cursor = Some(cursor);
+        state.selection_anchor = None;
+    }
+    refresh_retained_content(state, document);
+    let lift = match jump.place {
+        JumpPlace::Bottom => f32::MAX / 4.0,
+        JumpPlace::Reveal if !stays => -state.viewport_height / 3.0,
+        JumpPlace::Top | JumpPlace::Reveal => 0.0,
+    };
+    if scroll_viewer_by(state, document, lift) {
+        refresh_retained_content(state, document);
+    }
+    if jump.cursor.is_some() {
+        selection::reveal_cursor_horizontally(state, document);
+    }
+}
+
+fn row_fully_visible(
+    state: &TextPreviewViewerState,
+    document: &TextPreviewDocument,
+    row: u64,
+) -> bool {
+    visible_rows(state, document).iter().any(|entry| {
+        document.rows()[entry.index].start == row
+            && entry.visible_y >= 0.0
+            && entry.visible_y + entry.height <= state.viewport_height
+    })
 }
 
 /// 可见范围或光标变了就排队一条报告（在 update 里发出）。
@@ -556,8 +601,11 @@ fn refresh_retained_content(state: &mut TextPreviewViewerState, document: &TextP
             })
             .flatten()
             .map(|position| previous.swap_remove(position));
-        let paragraph = match reused {
-            Some(reused) => reused.paragraph,
+        let (paragraph, marks) = match reused {
+            Some(reused) => {
+                let marks = (reused.marks_revision == document.revision()).then_some(reused.marks);
+                (reused.paragraph, marks)
+            }
             None => {
                 let paragraph = text_line_paragraph(
                     &row.text,
@@ -569,14 +617,19 @@ fn refresh_retained_content(state: &mut TextPreviewViewerState, document: &TextP
                 let bounds = paragraph.min_bounds();
                 note_measured_height(state, row.start, bounds.height);
                 state.max_row_width = state.max_row_width.max(bounds.width);
-                paragraph
+                (paragraph, None)
             }
         };
+        let marks = marks.unwrap_or_else(|| {
+            find::row_match_marks(document, row, &paragraph, state.line_height.max(1.0))
+        });
         retained.push(RetainedRow {
             start: row.start,
             end: row.end,
             colored: tokens.is_some(),
             paragraph,
+            marks,
+            marks_revision: document.revision(),
         });
     }
     state.retained_rows = retained;

@@ -388,7 +388,20 @@ impl FileBrowser {
         window::close(window)
     }
 
+    /// 预览窗里被控件捕获的 Space 照样关预览，除非是文本预览搜索条的输入框在打字：先
+    /// 查真实焦点再决定。
     pub(super) fn handle_captured_preview_shortcut(&mut self) -> Task<Message> {
+        if self.preview_engine.preview_window == Some(self.focused_window) {
+            bennu_preview::text_find_bar::unless_find_input_focused(
+                Message::CapturedPreviewShortcutConfirmed,
+            )
+        } else {
+            Task::none()
+        }
+    }
+
+    /// 焦点查完回来时预览窗可能已经不在前台了。
+    pub(super) fn close_focused_preview_window(&mut self) -> Task<Message> {
         if self.preview_engine.preview_window == Some(self.focused_window) {
             self.close_preview_window()
         } else {

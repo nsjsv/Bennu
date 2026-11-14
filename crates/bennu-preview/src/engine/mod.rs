@@ -236,6 +236,7 @@ mod remote_cache;
 mod session;
 mod sqlite;
 mod text;
+mod text_find;
 mod tree;
 mod windows;
 

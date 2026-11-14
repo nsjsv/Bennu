@@ -1,7 +1,8 @@
 //! 键盘路由：全局按键 → 会话消息的裁决层。优先级（对齐主软件
 //! keyboard-routing 规范的 captured 语义）：
 //! 1. 补全面板活跃：↑/↓/Tab/Shift+Tab 无视 captured 优先归补全；
-//! 2. Esc：编辑态退编辑 > type-ahead 清缓冲 > 未捕获时关窗；
+//! 2. Esc：编辑态退编辑 > type-ahead 清缓冲 > 未捕获时关窗（预览窗同样只在未捕获时关：
+//!    被捕获的 Esc 是查看器在关菜单、搜索条或取消选区）；
 //! 3. 仅 Ignored 的动作：Ctrl+A 全选、Enter、Backspace 上级、列表
 //!    导航与 type-ahead 字符（编辑态的 Enter/字符已被 text_input 捕获，
 //!    天然不进这里）。
@@ -26,15 +27,20 @@ pub(crate) fn handle_key(
         // Space 预览（主软件 ShortcutAction::Preview / 预览窗内
         // CapturedPreviewShortcutPressed 的合流）。
         if let Some(source) = space_toggle_source(daemon, window_id, captured) {
+            if daemon.preview.is_preview_window(window_id) {
+                // 预览窗里的 Space 可能是在文本预览的搜索条里打字：先查真实焦点。
+                return bennu_preview::text_find_bar::unless_find_input_focused(
+                    Message::PreviewSpacePressed { source },
+                );
+            }
             return dispatch_space_toggle(source);
         }
         return Task::none();
     }
     if daemon.preview.is_preview_window(window_id) {
-        // Esc 只关预览且无视 captured（主软件 Escape 恒走 Application
-        // 路由的 handle_focused_window_escape_pressed → Preview 分支）；
+        // 未捕获的 Esc 关预览（与主软件辅助窗口一致：被捕获的 Esc 只「离开」）；
         // 其余键归预览窗控件（滚动/媒体控件由 iced widget 自理）。
-        if preview_escape_requested(daemon, window_id, &key) {
+        if preview_escape_requested(daemon, window_id, &key, captured) {
             return dispatch_preview_close();
         }
         return Task::none();
@@ -72,15 +78,17 @@ fn dispatch_space_toggle(source: Option<window::Id>) -> Task<Message> {
     Task::perform(async {}, move |_| Message::PreviewSpacePressed { source })
 }
 
-/// Esc 分层门禁（纯函数便于单测）：预览窗的 Esc 只关预览（无视
-/// captured）；其余键与选择窗的 Esc 均不走此路（选择窗 Esc 走既有
-/// 会话裁决：编辑退编辑 > type-ahead > 关窗），互不穿透。
+/// Esc 分层门禁（纯函数便于单测）：预览窗里没被控件捕获的 Esc 关预览；
+/// 其余键与选择窗的 Esc 均不走此路（选择窗 Esc 走既有会话裁决：编辑退
+/// 编辑 > type-ahead > 关窗），互不穿透。
 fn preview_escape_requested(
     daemon: &PickerDaemon,
     window_id: window::Id,
     key: &keyboard::Key,
+    captured: bool,
 ) -> bool {
     daemon.preview.is_preview_window(window_id)
+        && !captured
         && matches!(key, keyboard::Key::Named(keyboard::key::Named::Escape))
 }
 
@@ -670,13 +678,37 @@ mod tests {
             .ensure_preview_window(PreviewWindowProfile::Regular);
         let escape = named(keyboard::key::Named::Escape);
         let arrow = named(keyboard::key::Named::ArrowDown);
-        assert!(preview_escape_requested(&daemon, preview_window, &escape));
+        assert!(preview_escape_requested(
+            &daemon,
+            preview_window,
+            &escape,
+            false
+        ));
+        // 被查看器或搜索条捕获的 Esc（关菜单、关搜索条、取消选区）不关预览。
+        assert!(!preview_escape_requested(
+            &daemon,
+            preview_window,
+            &escape,
+            true
+        ));
         // 预览窗内非 Esc 键不关预览（归 iced 控件）。
-        assert!(!preview_escape_requested(&daemon, preview_window, &arrow));
+        assert!(!preview_escape_requested(
+            &daemon,
+            preview_window,
+            &arrow,
+            false
+        ));
         // 选择窗的 Esc 走会话裁决，不进预览分支。
-        assert!(!preview_escape_requested(&daemon, window_id, &escape));
+        assert!(!preview_escape_requested(
+            &daemon, window_id, &escape, false
+        ));
         // 未知窗口（预览窗已关）：不落入预览分支。
         daemon.preview.engine.preview_window = None;
-        assert!(!preview_escape_requested(&daemon, preview_window, &escape));
+        assert!(!preview_escape_requested(
+            &daemon,
+            preview_window,
+            &escape,
+            false
+        ));
     }
 }

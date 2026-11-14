@@ -18,6 +18,7 @@ pub mod audio_preview;
 pub mod text_highlight;
 // 纯搬移：文本预览模型（分块/行索引/Markdown 模式）自 app-ui 下沉；
 // 纯 std 实现，无宿主耦合。
+pub mod text_find_bar;
 pub mod text_preview;
 mod text_status_bar;
 pub mod text_view;

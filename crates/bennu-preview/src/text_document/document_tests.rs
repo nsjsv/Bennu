@@ -1,50 +1,6 @@
 use super::*;
 
-/// 测试里替引擎执行文档要的读取（行号统计除外），把结果交回文档，直到没有新请求。
-fn settle(document: &mut TextPreviewDocument, mut reads: Vec<TextRead>) {
-    for _ in 0..50 {
-        let mut next = Vec::new();
-        for read in reads {
-            let source = document.source();
-            let reader = RowReader {
-                source: source.as_ref(),
-                decoding: document.decoding(),
-                len: document.len(),
-            };
-            match read {
-                TextRead::Rows {
-                    generation,
-                    request,
-                } => {
-                    let outcome = read_rows(
-                        source.as_ref(),
-                        document.decoding(),
-                        document.len(),
-                        request,
-                    )
-                    .map_err(|error| error.to_string());
-                    next.extend(document.accept_rows(generation, request, outcome));
-                }
-                TextRead::Number {
-                    generation,
-                    line_start,
-                    known,
-                } => {
-                    let outcome = reader
-                        .lines_before(line_start, known)
-                        .map_err(|error| error.to_string());
-                    next.extend(document.accept_numbering(generation, line_start, outcome));
-                }
-                TextRead::Count { .. } | TextRead::Highlight(_) | TextRead::HighlightRows(_) => {}
-            }
-        }
-        if next.is_empty() {
-            return;
-        }
-        reads = next;
-    }
-    panic!("reads never settled");
-}
+use super::test_support::settle;
 
 fn numbered_lines(count: usize) -> Vec<u8> {
     (0..count)

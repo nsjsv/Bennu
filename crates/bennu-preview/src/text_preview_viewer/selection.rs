@@ -15,7 +15,7 @@ use super::{
     TEXT_PREVIEW_DRAG_THRESHOLD_PX,
 };
 use crate::text_document::{
-    ClipboardTarget, TextJump, TextPosition, TextPreviewDocument, TextViewerEvent,
+    ClipboardTarget, TextJump, TextPosition, TextPreviewDocument, TextRow, TextViewerEvent,
 };
 
 /// 视口内坐标（text_bounds 相对）→ 光标位置。段落缓存缺失时退化为行首，
@@ -386,12 +386,9 @@ pub(crate) fn selection_quads(
     let mut quads = Vec::new();
     for entry in visible {
         let row = &rows[entry.index];
-        if row.start < start.row && row.end <= start.row
-            || row.start > end.row
-            || row.start == end.row && end.column == 0 && start.row != end.row
-        {
+        let Some((from, to)) = columns_in_row(row, start, end) else {
             continue;
-        }
+        };
         let Some(retained) = state
             .retained_rows
             .iter()
@@ -399,52 +396,83 @@ pub(crate) fn selection_quads(
         else {
             continue;
         };
-        let text = row.text.as_str();
-        let paragraph = &retained.paragraph;
-        let row_height_px = paragraph.min_bounds().height;
-        let visual_rows = ((row_height_px / base).round() as usize).max(1);
-        let width = paragraph.min_bounds().width.max(1.0);
-        // 每个视觉行的高亮 = 该视觉行字符范围 ∩ 选区 byte 范围。
-        let sel_lo = if start.row == row.start {
-            start.column
-        } else {
-            0
-        };
-        let sel_hi = if end.row == row.start {
-            end.column
-        } else {
-            text.len()
-        };
+        quads.extend(
+            row_range_quads(&retained.paragraph, &row.text, base, from, to)
+                .into_iter()
+                .map(|quad| Rectangle {
+                    y: quad.y + entry.visible_y,
+                    ..quad
+                }),
+        );
+    }
+    quads
+}
 
-        for visual in 0..visual_rows {
-            let row_y = entry.visible_y + visual as f32 * base;
-            let mid_y = visual as f32 * base + base * 0.5;
-            let (row_start, row_end) = if visual_rows == 1 {
-                (0, text.len())
-            } else {
-                (
-                    paragraph
-                        .hit_test(Point::new(0.0, mid_y))
-                        .map(Hit::cursor)
-                        .unwrap_or(0),
-                    paragraph
-                        .hit_test(Point::new(width, mid_y))
-                        .map(Hit::cursor)
-                        .unwrap_or(text.len()),
-                )
-            };
-            let from = row_start.max(sel_lo);
-            let to = row_end.min(sel_hi);
-            if to <= from {
-                continue;
-            }
-            let x0 = column_x(paragraph, mid_y, width, text, from);
-            let x1 = column_x(paragraph, mid_y, width, text, to);
-            quads.push(Rectangle::new(
-                Point::new(x0, row_y),
-                Size::new((x1 - x0).max(1.0), base),
-            ));
+/// `[start, end)` 落在这一显示行里的行内字节范围；不沾这一行时 None。
+pub(crate) fn columns_in_row(
+    row: &TextRow,
+    start: TextPosition,
+    end: TextPosition,
+) -> Option<(usize, usize)> {
+    if row.start < start.row && row.end <= start.row
+        || row.start > end.row
+        || row.start == end.row && end.column == 0 && start.row != end.row
+    {
+        return None;
+    }
+    let from = if start.row == row.start {
+        start.column
+    } else {
+        0
+    };
+    let to = if end.row == row.start {
+        end.column
+    } else {
+        row.text.len()
+    };
+    Some((from, to))
+}
+
+/// 一个显示行里 `[from, to)` 的高亮矩形，相对这一行左上角；换行后按视觉行拆开，列边界
+/// x 用二分 hit test 求得，每视觉行成本 O(log 列数)。
+pub(crate) fn row_range_quads(
+    paragraph: &impl Paragraph,
+    text: &str,
+    base: f32,
+    from: usize,
+    to: usize,
+) -> Vec<Rectangle> {
+    let visual_rows = ((paragraph.min_bounds().height / base).round() as usize).max(1);
+    let width = paragraph.min_bounds().width.max(1.0);
+    let mut quads = Vec::new();
+    for visual in 0..visual_rows {
+        let row_y = visual as f32 * base;
+        let mid_y = row_y + base * 0.5;
+        let (visual_start, visual_end) = if visual_rows == 1 {
+            (0, text.len())
+        } else {
+            (
+                paragraph
+                    .hit_test(Point::new(0.0, mid_y))
+                    .map(Hit::cursor)
+                    .unwrap_or(0),
+                paragraph
+                    .hit_test(Point::new(width, mid_y))
+                    .map(Hit::cursor)
+                    .unwrap_or(text.len()),
+            )
+        };
+        let low = visual_start.max(from);
+        let high = visual_end.min(to);
+        if high <= low {
+            continue;
         }
+        let x0 = column_x(paragraph, mid_y, width, text, low);
+        let x1 = column_x(paragraph, mid_y, width, text, high);
+        quads.push(Rectangle::new(
+            Point::new(x0, row_y),
+            Size::new((x1 - x0).max(1.0), base),
+        ));
     }
     quads
 }

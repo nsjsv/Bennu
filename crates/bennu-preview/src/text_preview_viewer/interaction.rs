@@ -15,13 +15,14 @@ use iced::{
     Size, Theme,
 };
 
+use super::find::find_shortcut;
 use super::geometry::scroll_viewer_by;
 use super::render::text_bounds;
 use super::selection::{self, apply_key_binding};
 use super::{
     refresh_retained_content, scrollbar, view_shortcut, PreviewParagraph, TextPreviewViewerState,
 };
-use crate::text_document::{TextPreviewDocument, TextViewerEvent};
+use crate::text_document::{FindEvent, TextPreviewDocument, TextViewerEvent};
 use crate::text_view::TextViewChange;
 
 /// 拖出边界时每越界 1 px 每秒滚的像素，以及最快速度。
@@ -184,7 +185,11 @@ pub(super) fn handle_event(
             ..
         }) if state.is_focused => {
             if matches!(key, keyboard::Key::Named(keyboard::key::Named::Escape)) {
-                return escape(state);
+                return escape(state, document);
+            }
+            if let Some(event) = find_shortcut(state, document, key, *modifiers) {
+                state.pending_events.push(TextViewerEvent::Find(event));
+                return EventOutcome::captured();
             }
             if let Some(change) = view_shortcut(key, *modifiers) {
                 state
@@ -230,8 +235,15 @@ fn changes_selection(binding: &text_editor::Binding<()>) -> bool {
 }
 
 /// Esc：先关菜单，再取消选区；都没有就不捕获，让宿主关窗口。
-fn escape(state: &mut TextPreviewViewerState) -> EventOutcome {
+/// Esc 一层层关：右键菜单 > 搜索条/跳行条 > 选区；都没有就不捕获，交给宿主关窗口。
+fn escape(state: &mut TextPreviewViewerState, document: &TextPreviewDocument) -> EventOutcome {
     if state.context_menu.take().is_some() {
+        return EventOutcome::captured();
+    }
+    if document.find_bar().is_some() {
+        state
+            .pending_events
+            .push(TextViewerEvent::Find(FindEvent::Close));
         return EventOutcome::captured();
     }
     let has_selection = state

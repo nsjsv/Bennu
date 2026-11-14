@@ -624,6 +624,7 @@ dependencies = [
  "memchr",
  "notify",
  "pulldown-cmark",
+ "regex",
  "resvg",
  "rodio",
  "roxmltree",

@@ -9,6 +9,7 @@ use crate::markdown_preview::markdown_preview_body;
 use crate::panel_text::readable_text;
 use crate::preview_message::PreviewMessage;
 use crate::scroll_wiring::ScrollRegionWiring;
+use crate::text_find_bar::text_find_bar;
 use crate::text_preview::{
     MarkdownModeChoice, MarkdownPreviewMode, TextPreviewDocument, TextPreviewFormat,
 };
@@ -30,13 +31,17 @@ where
     let Some(document) = document else {
         return column![readable_text(tr!("Text preview is not ready"))];
     };
-    // 不换行时多一条横向细线滑块。
+    // 不换行时多一条横向细线滑块；搜索条/跳行条在文字上方。
     let raw = || {
         let viewer = plain_viewer(document, view);
-        if view.wrap {
+        let viewer = if view.wrap {
             enhanced_scrollbar(viewer, ScrollbarAxis::Vertical)
         } else {
             enhanced_scrollbar_both(viewer)
+        };
+        match text_find_bar(document) {
+            Some(bar) => column![bar, viewer].into(),
+            None => viewer,
         }
     };
     let mut rendered = false;

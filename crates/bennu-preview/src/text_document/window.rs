@@ -20,6 +20,7 @@ impl TextPreviewDocument {
                 revision: self.jump.map_or(1, |jump| jump.revision + 1),
                 row,
                 place,
+                cursor: None,
             });
         }
     }
@@ -44,6 +45,7 @@ impl TextPreviewDocument {
                     revision: self.jump.map_or(1, |jump| jump.revision + 1),
                     row: last.start,
                     place: JumpPlace::Bottom,
+                    cursor: None,
                 });
             }
         }
@@ -164,6 +166,7 @@ impl TextPreviewDocument {
         }
         if let (Some(first), Some(last)) = (self.rows.front(), self.rows.back()) {
             self.highlight.retain_window(first.start, last.end);
+            self.find.retain_window(first.start, last.end);
         }
     }
 }

@@ -11,8 +11,9 @@ use iced::{Subscription, Task};
 use crate::preview::{PreviewContent, PreviewState};
 use crate::preview_message::PreviewMessage;
 use crate::text_document::{
-    check_file_change, count_lines, highlight_worker, read_rows, text_file_watch_subscription,
-    ClipboardTarget, FileChange, RowReader, TextJump, TextOpened, TextPreviewDocument, TextRead,
+    check_file_change, count_lines, count_matches, find_match, highlight_worker,
+    line_start_for_number, match_ordinal, read_rows, text_file_watch_subscription, ClipboardTarget,
+    FileChange, MatchScanner, RowReader, TextJump, TextOpened, TextPreviewDocument, TextRead,
     TextReadReply, TextReadReplyKind, TextViewerEvent,
 };
 use crate::text_preview_loading::{reopen_text_preview, TextEncodingChoice};
@@ -47,6 +48,7 @@ impl super::PreviewEngine {
             }
             // 视图设置归宿主，引擎的 handle 已经把它还给宿主。
             TextViewerEvent::ChangeView(_) => Task::none(),
+            TextViewerEvent::Find(event) => self.handle_find_event(event),
             TextViewerEvent::CopyRequested { from, to, target } => {
                 // 超过 15 MB 不复制（子任务 4 补提示）。
                 if !TextPreviewDocument::copy_fits(from, to) {
@@ -112,6 +114,29 @@ impl super::PreviewEngine {
                 let reads = document.accept_highlight_rows(rows);
                 text_read_tasks(document, reads)
             }
+            TextReadReplyKind::SearchCounted {
+                generation,
+                progress,
+            } => {
+                let reads = document.accept_search_counted(generation, progress);
+                text_read_tasks(document, reads)
+            }
+            TextReadReplyKind::SearchFound {
+                generation,
+                outcome,
+            } => {
+                let reads = document.accept_search_found(generation, outcome);
+                text_read_tasks(document, reads)
+            }
+            TextReadReplyKind::SearchOrdinal {
+                generation,
+                at,
+                outcome,
+            } => {
+                document.accept_search_ordinal(generation, at, outcome);
+                Task::none()
+            }
+            TextReadReplyKind::LineStart { line, outcome } => self.accept_line_start(line, outcome),
             TextReadReplyKind::FileChecked(outcome) => self.accept_text_file_check(outcome),
             TextReadReplyKind::Selection {
                 target,
@@ -217,11 +242,14 @@ impl super::PreviewEngine {
         };
         let path = previous.path().to_path_buf();
         let mode = previous.markdown_preview_mode();
+        let find = previous.carried_find();
         match outcome {
             Ok(opened) => {
-                let task = self.open_text_document(path.clone(), &opened);
+                let mut task = self.open_text_document(path.clone(), &opened);
                 if let Some(document) = self.text_preview_document.as_mut() {
                     document.select_markdown_preview_mode(mode);
+                    let reads = document.restore_find(find);
+                    task = Task::batch([task, text_read_tasks(document, reads)]);
                 }
                 self.preview = Some(PreviewState::Ready(PreviewContent::Text { path, opened }));
                 task
@@ -250,7 +278,10 @@ impl super::PreviewEngine {
 }
 
 /// 文档要的读取变成后台任务。
-fn text_read_tasks(document: &TextPreviewDocument, reads: Vec<TextRead>) -> Task<PreviewMessage> {
+pub(super) fn text_read_tasks(
+    document: &TextPreviewDocument,
+    reads: Vec<TextRead>,
+) -> Task<PreviewMessage> {
     let document_id = document.id();
     let source = document.source();
     let decoding = document.decoding();
@@ -316,6 +347,86 @@ fn text_read_tasks(document: &TextPreviewDocument, reads: Vec<TextRead>) -> Task
                 reply: TextReadReply(TextReadReplyKind::HighlightLanguage(language)),
             },
         ),
+        TextRead::SearchCount {
+            generation,
+            matcher,
+            start,
+            cancel,
+        } => Task::run(
+            count_matches(Arc::clone(&source), decoding, len, matcher, start, cancel),
+            move |progress| PreviewMessage::TextRead {
+                document: document_id,
+                reply: TextReadReply(TextReadReplyKind::SearchCounted {
+                    generation,
+                    progress,
+                }),
+            },
+        ),
+        TextRead::SearchFind {
+            generation,
+            matcher,
+            line_start,
+            from,
+            direction,
+            cancel,
+        } => {
+            let source = Arc::clone(&source);
+            read_task(document_id, move || {
+                let scanner = MatchScanner {
+                    reader: RowReader {
+                        source: source.as_ref(),
+                        decoding,
+                        len,
+                    },
+                    matcher: &matcher,
+                };
+                TextReadReplyKind::SearchFound {
+                    generation,
+                    outcome: find_match(&scanner, line_start, from, direction, &cancel)
+                        .map_err(|error| error.to_string()),
+                }
+            })
+        }
+        TextRead::SearchOrdinal {
+            generation,
+            matcher,
+            at,
+            from,
+            cancel,
+        } => {
+            let source = Arc::clone(&source);
+            read_task(document_id, move || {
+                let scanner = MatchScanner {
+                    reader: RowReader {
+                        source: source.as_ref(),
+                        decoding,
+                        len,
+                    },
+                    matcher: &matcher,
+                };
+                TextReadReplyKind::SearchOrdinal {
+                    generation,
+                    at,
+                    outcome: match_ordinal(&scanner, at, from, &cancel)
+                        .map_err(|error| error.to_string()),
+                }
+            })
+        }
+        TextRead::LineStart { line, seek } => {
+            let source = Arc::clone(&source);
+            read_task(document_id, move || {
+                let reader = RowReader {
+                    source: source.as_ref(),
+                    decoding,
+                    len,
+                };
+                TextReadReplyKind::LineStart {
+                    line,
+                    outcome: line_start_for_number(&reader, line, seek)
+                        .map_err(|error| error.to_string()),
+                }
+            })
+        }
         // 被更新的请求替换（回复取消）时没有消息。
         TextRead::HighlightRows(reply) => Task::run(
             stream::once(reply).filter_map(|rows| future::ready(rows.ok())),

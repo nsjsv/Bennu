@@ -446,3 +446,136 @@ async fn jump_and_colour(engine: &mut PreviewEngine, jump: TextJump) -> std::tim
     assert!(document(engine).row_tokens(focus).is_some());
     started.elapsed()
 }
+
+fn find(event: crate::text_document::FindEvent) -> TextViewerEvent {
+    TextViewerEvent::Find(event)
+}
+
+fn marked(count: usize, every: usize) -> String {
+    (0..count)
+        .map(|index| {
+            let mark = if index % every == every - 1 {
+                " mark"
+            } else {
+                ""
+            };
+            format!("line {index}{mark}\n")
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn searching_counts_in_the_background_and_survives_a_rewrite() {
+    use crate::text_document::{FindBar, FindEvent, SearchSummary};
+
+    let dir = tempdir().expect("dir");
+    let path = dir.path().join("server.log");
+    std::fs::write(&path, marked(300_000, 100_000)).expect("write");
+    let mut engine = test_engine();
+    open(&mut engine, &path).await;
+    for event in [
+        FindEvent::OpenSearch { seed: None },
+        FindEvent::QueryChanged("MARK".to_owned()),
+    ] {
+        let task = engine.handle_text_viewer_event(find(event));
+        drive(&mut engine, task).await;
+    }
+    assert_eq!(
+        document(&engine).search_summary(),
+        Some(SearchSummary {
+            ordinal: Some(1),
+            total: 3,
+            finished: true,
+        })
+    );
+    let current = document(&engine).current_match().expect("first match");
+    assert!(document(&engine).row_index(current.start.row).is_ok());
+
+    // 改写：重新打开后搜索条和搜索词还在，结果按新内容重算。
+    let replacement = dir.path().join("server.log.tmp");
+    std::fs::write(&replacement, marked(300_000, 75_000)).expect("write new");
+    std::fs::rename(&replacement, &path).expect("replace");
+    let task = engine.handle_text_file_changed(document(&engine).id());
+    drive(&mut engine, task).await;
+    let document = document(&engine);
+    assert_eq!(document.find_bar(), Some(&FindBar::Search));
+    assert_eq!(document.search_query().text, "MARK");
+    assert_eq!(
+        document
+            .search_summary()
+            .map(|summary| (summary.total, summary.finished)),
+        Some((4, true))
+    );
+}
+
+#[tokio::test]
+async fn going_to_a_line_jumps_there_and_closes_the_bar() {
+    use crate::text_document::FindEvent;
+
+    let dir = tempdir().expect("dir");
+    let path = dir.path().join("long.log");
+    let content = numbered(300_000);
+    std::fs::write(&path, &content).expect("write");
+    let mut engine = test_engine();
+    open(&mut engine, &path).await;
+    for event in [
+        FindEvent::OpenGoto,
+        FindEvent::GotoInputChanged("250000".to_owned()),
+        FindEvent::GotoSubmitted,
+    ] {
+        let task = engine.handle_text_viewer_event(find(event));
+        drive(&mut engine, task).await;
+    }
+    let document = document(&engine);
+    assert!(document.find_bar().is_none());
+    let target = content.find("line 249999\n").expect("line") as u64;
+    let jump = document.jump().expect("jump");
+    assert_eq!(jump.cursor.map(|cursor| cursor.row), Some(target));
+    assert!(document.row_index(target).is_ok());
+}
+
+/// 手动跑的测量：`... measure_search -- --ignored --nocapture`。约 1 GB 的日志：
+/// 后台数完全部匹配的耗时、跳到文件末尾附近那个匹配的耗时、前后的常驻内存。
+#[tokio::test]
+#[ignore]
+async fn measure_search() {
+    use crate::text_document::FindEvent;
+    use std::time::Instant;
+
+    let dir = tempdir().expect("dir");
+    let path = dir.path().join("huge.log");
+    {
+        let mut file = std::io::BufWriter::new(std::fs::File::create(&path).expect("create"));
+        let line = "2026-11-13 12:00:00.000 INFO  request handled in 12 ms path=/api/items\n";
+        let count = (1u64 << 30) / line.len() as u64;
+        for index in 0..count {
+            std::io::Write::write_all(&mut file, line.as_bytes()).expect("write");
+            if index == count - 1_000 {
+                std::io::Write::write_all(&mut file, b"2026-11-13 ERROR needle here\n")
+                    .expect("write");
+            }
+        }
+    }
+    let rss_before = resident_memory_kib();
+    let mut engine = test_engine();
+    open(&mut engine, &path).await;
+    let task = engine.handle_text_viewer_event(find(FindEvent::OpenSearch { seed: None }));
+    drive(&mut engine, task).await;
+    let started = Instant::now();
+    let task = engine.handle_text_viewer_event(find(FindEvent::QueryChanged("needle".to_owned())));
+    drive(&mut engine, task).await;
+    let found_and_counted = started.elapsed();
+    assert!(document(&engine).current_match().is_some());
+    let rss_after = resident_memory_kib();
+
+    let started = Instant::now();
+    let task = engine.handle_text_viewer_event(find(FindEvent::QueryChanged("INFO".to_owned())));
+    drive(&mut engine, task).await;
+    let dense = started.elapsed();
+
+    println!("file: {} bytes", document(&engine).len());
+    println!("rare word (find near the end + count all): {found_and_counted:?}");
+    println!("dense word, one per line (count all): {dense:?}");
+    println!("matches counted: {:?}", document(&engine).search_summary());
+    println!("RSS before {rss_before} KiB, after the rare search {rss_after} KiB");
+}

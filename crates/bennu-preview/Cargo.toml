@@ -76,6 +76,8 @@ unicode-segmentation = "1.13.2"
 # 预览中的文本文件变化：notify=本地 inotify，rustix=statfs 认网络文件系统（改为轮询）。
 notify.workspace = true
 rustix.workspace = true
+# 文本预览搜索：字面量（不分大小写时按 Unicode 折叠）匹配，工作区里本来就有。
+regex = "1.12.3"
 # 文本预览语法高亮：syntect 解析器 + two-face 的语法包（含 TOML、TypeScript、Dockerfile
 # 等 syntect 默认包没有的语言）。正则用 oniguruma：纯 Rust 的 fancy-regex 解析 10 MB
 # 源文件要 19 秒，跳到大文件中间要等很久才上色。

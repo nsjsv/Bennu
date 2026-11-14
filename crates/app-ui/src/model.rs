@@ -728,6 +728,8 @@ pub(crate) enum Message {
     Forward,
     AddressInputFocusChecked(BrowserPaneId, bool),
     RenameInputFocusChecked(bool),
+    /// 预览窗里被捕获的 Space 不是在搜索条里打字：关预览。
+    CapturedPreviewShortcutConfirmed,
     RenameInputChanged(String),
     RenameInputUndoRequested,
     RenameInputRedoRequested,

@@ -5,11 +5,13 @@
 //! 只产出读取请求（`TextRead`），引擎执行后把结果交回来。
 
 mod decoding;
+mod find;
 mod highlight;
 mod index;
 mod line_breaks;
 mod open;
 mod rows;
+mod search_scan;
 mod watch;
 mod window;
 
@@ -20,6 +22,9 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 pub use decoding::TextDecoding;
+pub(crate) use find::TextFind;
+use find::WindowChange;
+pub use find::{FindBar, SearchSummary};
 use highlight::HighlightState;
 pub use highlight::HighlightStatus;
 pub(crate) use highlight::{highlight_worker, HighlightStart, HighlightedRows};
@@ -28,11 +33,16 @@ pub use open::{
     FileChange, JumpPlace, RowBatch, TextJump, TextOpened, MARKDOWN_RENDER_LIMIT_BYTES,
 };
 pub use rows::{TextPosition, TextRow};
+pub use search_scan::{SearchDirection, SearchQuery, TextMatch};
 pub use watch::text_file_watch_subscription;
 
-pub(crate) use index::{count_lines, IndexCursor};
+pub(crate) use index::{count_lines, line_start_for_number, IndexCursor, LineSeek};
 pub(crate) use open::{check_file_change, open_text, read_rows, FileStamp};
 pub(crate) use rows::{read_full, ByteSource, LineCountAt, RowBudget, RowReader, RowStart};
+pub(crate) use search_scan::{
+    count_matches, find_match, match_ordinal, CountProgress, MatchScanner, SearchCheckpoint,
+    SearchMatcher,
+};
 
 use index::LineIndex;
 
@@ -62,12 +72,14 @@ pub struct TextViewport {
     pub cursor: Option<TextPosition>,
 }
 
-/// 给查看器的跳转指令：revision 变了就把锚点放到 `row`。
+/// 给查看器的跳转指令：revision 变了就把锚点放到 `row`；带 `cursor` 时光标移过去、选区
+/// 清掉（搜索、跳行）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ViewerJump {
     pub revision: u64,
     pub row: u64,
     pub place: JumpPlace,
+    pub cursor: Option<TextPosition>,
 }
 
 /// 查看器发给引擎的事件（滚轮另走宿主的平滑滚动管线）。
@@ -83,6 +95,25 @@ pub enum TextViewerEvent {
     },
     /// 调整字号或换行；设置归宿主（主程序记住，对话框只当次有效），引擎原样还给宿主。
     ChangeView(crate::text_view::TextViewChange),
+    /// 搜索条、跳行条（查看器的快捷键与条上的控件都发它）。
+    Find(FindEvent),
+}
+
+/// 搜索与跳行的操作。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FindEvent {
+    /// Ctrl+F；`seed` 是选中的一小段文字。
+    OpenSearch {
+        seed: Option<String>,
+    },
+    /// Ctrl+G。
+    OpenGoto,
+    Close,
+    QueryChanged(String),
+    CaseToggled,
+    Step(SearchDirection),
+    GotoInputChanged(String),
+    GotoSubmitted,
 }
 
 /// 复制写到哪：普通剪贴板（Ctrl+C）或 Linux 主选区（选中即写，中键粘贴）。
@@ -125,6 +156,23 @@ pub(crate) enum TextReadReplyKind {
     },
     HighlightLanguage(Option<crate::text_highlight::HighlightLanguage>),
     HighlightRows(HighlightedRows),
+    SearchCounted {
+        generation: u64,
+        progress: CountProgress,
+    },
+    SearchFound {
+        generation: u64,
+        outcome: Result<Option<TextMatch>, String>,
+    },
+    SearchOrdinal {
+        generation: u64,
+        at: TextMatch,
+        outcome: Result<u64, String>,
+    },
+    LineStart {
+        line: u64,
+        outcome: Result<u64, String>,
+    },
     Reopened(Result<Arc<TextOpened>, String>),
 }
 
@@ -151,6 +199,32 @@ pub(crate) enum TextRead {
     Highlight(HighlightStart),
     /// 等高亮线程给这些行上色的回复（被更新的请求替换时取消）。
     HighlightRows(iced::futures::channel::oneshot::Receiver<HighlightedRows>),
+    /// 从检查点 `start` 往后数匹配。
+    SearchCount {
+        generation: u64,
+        matcher: SearchMatcher,
+        start: SearchCheckpoint,
+        cancel: CancellationToken,
+    },
+    /// 从 `from`（所在原始行行首 `line_start`）往后/往前找下一个匹配。
+    SearchFind {
+        generation: u64,
+        matcher: SearchMatcher,
+        line_start: u64,
+        from: TextPosition,
+        direction: SearchDirection,
+        cancel: CancellationToken,
+    },
+    /// 匹配 `at` 是第几个：从检查点 `from` 数到它。
+    SearchOrdinal {
+        generation: u64,
+        matcher: SearchMatcher,
+        at: TextMatch,
+        from: SearchCheckpoint,
+        cancel: CancellationToken,
+    },
+    /// 第 `line` 行（从 0 数）的行首。
+    LineStart { line: u64, seek: LineSeek },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -200,6 +274,7 @@ pub struct TextPreviewDocument {
     revision: u64,
     read_error: Option<String>,
     highlight: HighlightState,
+    find: TextFind,
 }
 
 struct IndexRun {
@@ -249,6 +324,7 @@ impl TextPreviewDocument {
             revision: 0,
             read_error: None,
             highlight,
+            find: TextFind::default(),
         };
         document.replace_window(opened.batch.clone());
         let mut reads: Vec<TextRead> = document.start_counting().into_iter().collect();
@@ -411,6 +487,7 @@ impl TextPreviewDocument {
         let offset = match jump {
             TextJump::Start => self.decoding.data_start(),
             TextJump::Offset(offset) => offset,
+            TextJump::Reveal(position) => position.row,
             TextJump::End => self.stamp.len,
         };
         vec![TextRead::Rows {
@@ -450,17 +527,31 @@ impl TextPreviewDocument {
                     .unwrap_or_default();
             }
         };
-        match request {
-            RowsRequest::Forward { .. } => self.append_rows(batch),
-            RowsRequest::Backward { .. } => self.prepend_rows(batch),
-            RowsRequest::Around { .. } => {
+        let before = self.rows.len();
+        let change = match request {
+            RowsRequest::Forward { .. } => {
+                self.append_rows(batch);
+                WindowChange::Appended { first_new: before }
+            }
+            RowsRequest::Backward { .. } => {
+                self.prepend_rows(batch);
+                WindowChange::Prepended {
+                    added: self.rows.len() - before,
+                }
+            }
+            RowsRequest::Around { jump, .. } => {
                 if let Some(jump) = self.queued_jump.take() {
                     // 拖动滑块时只有最新的落点有意义。
                     return self.jump_to(jump);
                 }
                 self.replace_window(batch);
+                if let (TextJump::Reveal(position), Some(viewer_jump)) = (jump, &mut self.jump) {
+                    viewer_jump.cursor = Some(position);
+                }
+                WindowChange::Replaced
             }
-        }
+        };
+        self.refresh_window_matches(change);
         self.trim_window();
         let mut reads = self.extension_reads();
         reads.extend(self.numbering_read());
@@ -548,6 +639,9 @@ impl TextPreviewDocument {
         }
         let stale_from = self.rows.back().map_or(0, |row| row.end);
         self.highlight.accept_append(self.stamp.len, stale_from);
+        let first = self.rows.front().map_or(0, |row| row.start);
+        self.find.retain_window(first, stale_from);
+        reads.extend(self.search_after_append());
         reads
     }
 
@@ -654,6 +748,9 @@ pub(crate) fn document_from_bytes(bytes: Vec<u8>, jump: TextJump) -> TextPreview
 fn decoding_lookahead() -> u64 {
     decoding::CUT_LOOKAHEAD_BYTES
 }
+
+#[cfg(test)]
+pub(crate) mod test_support;
 
 #[cfg(test)]
 #[path = "document_tests.rs"]

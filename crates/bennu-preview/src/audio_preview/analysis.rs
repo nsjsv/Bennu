@@ -13,16 +13,16 @@ use tokio_util::sync::CancellationToken;
 
 /// 只看轮廓，8 kHz 单声道足够，也让一小时的文件很快解完。
 const WAVEFORM_SAMPLE_RATE: u32 = 8_000;
-/// 每 400 个采样一个峰值：每秒 20 个，放大到整个窗口宽也不糊。
-const SAMPLES_PER_PEAK: usize = 400;
+/// 每 400 个采样一段：每秒 20 段，放大到整个窗口宽也不糊。
+const SAMPLES_PER_SLICE: usize = 400;
 const READ_CHUNK_BYTES: usize = 64 * 1024;
 pub const SPECTROGRAM_WIDTH: u32 = 1024;
 pub const SPECTROGRAM_HEIGHT: u32 = 256;
 
 #[derive(Debug, PartialEq)]
 pub struct AudioWaveform {
-    /// 每段的绝对值最大者，0.0–1.0。
-    pub peaks: Vec<f32>,
+    /// 每段的平均响度（均方根），按整首最响的一段放大到 0.0–1.0。
+    pub levels: Vec<f32>,
     /// 真正解出来的长度：ffprobe 只能估时长的文件拿它替换。
     pub duration: Duration,
 }
@@ -55,7 +55,7 @@ async fn decode_waveform(path: &Path) -> Result<AudioWaveform, String> {
         .stdout
         .take()
         .ok_or_else(|| "ffmpeg has no output pipe".to_owned())?;
-    let mut peaks = PeakCollector::default();
+    let mut levels = LoudnessCollector::default();
     let mut buffer = vec![0_u8; READ_CHUNK_BYTES];
     let mut carry = Vec::new();
     loop {
@@ -68,48 +68,61 @@ async fn decode_waveform(path: &Path) -> Result<AudioWaveform, String> {
         }
         carry.extend_from_slice(&buffer[..read]);
         let whole = carry.len() - carry.len() % 4;
-        peaks.feed(&carry[..whole]);
+        levels.feed(&carry[..whole]);
         carry.drain(..whole);
     }
     let status = child
         .wait()
         .await
         .map_err(|error| format!("ffmpeg did not finish: {error}"))?;
-    if !status.success() && peaks.sample_count == 0 {
+    if !status.success() && levels.sample_count == 0 {
         return Err(format!("ffmpeg exited with {status}"));
     }
-    Ok(peaks.finish())
+    Ok(levels.finish())
 }
 
+/// 用每段的均方根而不是峰值：响度大的母带峰值几乎处处顶满，按峰值画就是一整块，
+/// 看不出强弱；再按整首最响的一段放大，很轻的录音也不会只剩薄薄一条。
 #[derive(Default)]
-struct PeakCollector {
-    peaks: Vec<f32>,
-    current: f32,
+struct LoudnessCollector {
+    levels: Vec<f32>,
+    squares: f64,
     in_current: usize,
     sample_count: u64,
 }
 
-impl PeakCollector {
+impl LoudnessCollector {
     fn feed(&mut self, bytes: &[u8]) {
         for sample in bytes.as_chunks::<4>().0 {
-            let level = f32::from_le_bytes(*sample).abs().min(1.0);
-            self.current = self.current.max(level);
+            let sample = f64::from(f32::from_le_bytes(*sample));
+            self.squares += sample * sample;
             self.in_current += 1;
             self.sample_count += 1;
-            if self.in_current == SAMPLES_PER_PEAK {
-                self.peaks.push(self.current);
-                self.current = 0.0;
-                self.in_current = 0;
+            if self.in_current == SAMPLES_PER_SLICE {
+                self.close_slice();
             }
         }
     }
 
+    fn close_slice(&mut self) {
+        let root_mean_square = (self.squares / self.in_current as f64).sqrt();
+        self.levels.push(root_mean_square as f32);
+        self.squares = 0.0;
+        self.in_current = 0;
+    }
+
     fn finish(mut self) -> AudioWaveform {
         if self.in_current > 0 {
-            self.peaks.push(self.current);
+            self.close_slice();
+        }
+        let loudest = self.levels.iter().copied().fold(0.0_f32, f32::max);
+        if loudest > 0.0 {
+            for level in &mut self.levels {
+                *level /= loudest;
+            }
         }
         AudioWaveform {
-            peaks: self.peaks,
+            levels: self.levels,
             duration: Duration::from_secs_f64(
                 self.sample_count as f64 / f64::from(WAVEFORM_SAMPLE_RATE),
             ),
@@ -171,17 +184,23 @@ mod tests {
     }
 
     #[test]
-    fn peaks_keep_the_loudest_sample_of_each_slice() {
-        let mut collector = PeakCollector::default();
-        let mut levels = vec![0.1_f32; SAMPLES_PER_PEAK];
+    fn levels_are_slice_loudness_scaled_to_the_loudest_slice() {
+        let mut collector = LoudnessCollector::default();
+        // 第一段：几乎都是 0.1，只有一个 -0.9 的尖峰；第二段（不满一段）：0.2、0.3。
+        let mut levels = vec![0.1_f32; SAMPLES_PER_SLICE];
         levels[7] = -0.9;
         levels.extend([0.2, 0.3]);
         collector.feed(&samples(&levels));
         let waveform = collector.finish();
-        assert_eq!(waveform.peaks, vec![0.9, 0.3]);
+        let first = ((399.0 * 0.01 + 0.81) / 400.0_f64).sqrt();
+        let second = ((0.04 + 0.09) / 2.0_f64).sqrt();
+        assert_eq!(waveform.levels.len(), 2);
+        // 一个尖峰不再把整段顶满：第一段比第二段轻。
+        assert!((f64::from(waveform.levels[0]) - first / second).abs() < 1e-4);
+        assert_eq!(waveform.levels[1], 1.0);
         assert_eq!(
             waveform.duration,
-            Duration::from_secs_f64((SAMPLES_PER_PEAK + 2) as f64 / 8000.0)
+            Duration::from_secs_f64((SAMPLES_PER_SLICE + 2) as f64 / 8000.0)
         );
     }
 
@@ -198,12 +217,15 @@ mod tests {
             .expect("waveform");
         assert!((waveform.duration.as_secs_f64() - 3.0).abs() < 0.05);
         assert!(
-            (58..=62).contains(&waveform.peaks.len()),
+            (58..=62).contains(&waveform.levels.len()),
             "{}",
-            waveform.peaks.len()
+            waveform.levels.len()
         );
-        // ffmpeg 的 sine 源振幅 1/8。
-        assert!(waveform.peaks.iter().all(|peak| (0.1..0.15).contains(peak)));
+        // 正弦波每段一样响，放大后都接近 1。
+        assert!(waveform
+            .levels
+            .iter()
+            .all(|level| (0.9..=1.0).contains(level)));
 
         let image::Handle::Rgba { width, height, .. } =
             compute_audio_spectrogram(path, CancellationToken::new())

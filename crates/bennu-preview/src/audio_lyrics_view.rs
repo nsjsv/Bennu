@@ -22,7 +22,11 @@ use crate::panel_text::readable_text;
 use crate::preview::LyricsBrowse;
 use crate::preview_message::PreviewMessage;
 
-pub(crate) const LYRIC_ROW_HEIGHT: f32 = 28.0;
+/// 一句歌词最多占两行（双语歌词常把原文和译文写在同一行，一行放不下）。iced 0.14 的文字
+/// 没有省略号，超过两行的部分被截掉；行高固定，按面板高度算放得下几句才算得准。
+pub(crate) const LYRIC_ROW_HEIGHT: f32 = 44.0;
+/// 触控板的像素滚动按多少像素折一句。
+const WHEEL_PIXELS_PER_LINE: f32 = 28.0;
 
 pub(crate) fn lyrics_view<Message>(
     lyrics: &AudioLyrics,
@@ -74,7 +78,7 @@ where
     for index in visible_window(lines.len(), current, browse.offset_lines, rows) {
         let is_current = current == Some(index);
         let mut text = readable_text(lines[index].text.clone())
-            .wrapping(Wrapping::None)
+            .wrapping(Wrapping::WordOrGlyph)
             .width(Length::Fill)
             .align_x(align);
         text = if is_current {
@@ -112,7 +116,7 @@ where
 fn wheel_lines(delta: mouse::ScrollDelta) -> i32 {
     let (y, per_line) = match delta {
         mouse::ScrollDelta::Lines { y, .. } => (y, 1.0),
-        mouse::ScrollDelta::Pixels { y, .. } => (y, LYRIC_ROW_HEIGHT),
+        mouse::ScrollDelta::Pixels { y, .. } => (y, WHEEL_PIXELS_PER_LINE),
     };
     let lines = (y / per_line).round().abs().max(1.0) as i32;
     if y > 0.0 {

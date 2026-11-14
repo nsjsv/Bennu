@@ -516,7 +516,7 @@ mod tests {
         drop(engine.request_audio_waveform());
 
         let measured = std::sync::Arc::new(crate::audio_preview::AudioWaveform {
-            peaks: vec![0.2; 10],
+            levels: vec![0.2; 10],
             duration: std::time::Duration::from_secs(287),
         });
         drop(engine.handle(PreviewMessage::AudioWaveformComputed(

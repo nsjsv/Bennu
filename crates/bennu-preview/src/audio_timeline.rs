@@ -67,18 +67,18 @@ impl AudioTimeline {
     }
 }
 
-/// 每根竖条代表的那一段里最响的峰值；竖条比峰值多时（短文件）就近取。
-pub(crate) fn bar_levels(peaks: &[f32], bars: usize) -> Vec<f32> {
-    if peaks.is_empty() || bars == 0 {
+/// 每根竖条代表的那几段里最响的一段；竖条比段多时（短文件）就近取。
+pub(crate) fn bar_levels(levels: &[f32], bars: usize) -> Vec<f32> {
+    if levels.is_empty() || bars == 0 {
         return vec![0.0; bars];
     }
     (0..bars)
         .map(|bar| {
-            let start = bar * peaks.len() / bars;
-            let end = ((bar + 1) * peaks.len() / bars)
+            let start = bar * levels.len() / bars;
+            let end = ((bar + 1) * levels.len() / bars)
                 .max(start + 1)
-                .min(peaks.len());
-            peaks[start..end].iter().copied().fold(0.0, f32::max)
+                .min(levels.len());
+            levels[start..end].iter().copied().fold(0.0, f32::max)
         })
         .collect()
 }
@@ -178,7 +178,7 @@ where
         match &self.picture {
             TimelinePicture::Waveform(waveform) => {
                 let bars = (bounds.width / BAR_PITCH).floor().max(0.0) as usize;
-                for (index, level) in bar_levels(&waveform.peaks, bars).into_iter().enumerate() {
+                for (index, level) in bar_levels(&waveform.levels, bars).into_iter().enumerate() {
                     let x = bounds.x + index as f32 * BAR_PITCH;
                     let height = (level * bounds.height).max(MIN_BAR_HEIGHT);
                     let color = if x < played_x {
@@ -252,9 +252,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bars_take_the_loudest_peak_of_their_slice() {
-        let peaks = [0.1, 0.9, 0.2, 0.3, 0.4, 0.5];
-        assert_eq!(bar_levels(&peaks, 3), vec![0.9, 0.3, 0.5]);
+    fn bars_take_the_loudest_slice_they_cover() {
+        let levels = [0.1, 0.9, 0.2, 0.3, 0.4, 0.5];
+        assert_eq!(bar_levels(&levels, 3), vec![0.9, 0.3, 0.5]);
         // 竖条比峰值多：每根取最近的一个，不越界。
         assert_eq!(bar_levels(&[0.5, 1.0], 4), vec![0.5, 0.5, 1.0, 1.0]);
         assert_eq!(bar_levels(&[], 2), vec![0.0, 0.0]);

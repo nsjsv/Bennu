@@ -7,20 +7,20 @@ use std::time::Duration;
 
 use bennu_localization::tr;
 use iced::alignment::Horizontal;
-use iced::widget::{button, column, container, image, row, Column, Space};
-use iced::{Alignment, Element, Length};
+use iced::widget::{button, column, container, image, row, stack, Column, Space};
+use iced::{Alignment, Color, Element, Length};
 
 use bennu_theme::controls::{
     icon_button_style, normal_button, segmented_choice_row, slider, SegmentedChoice,
 };
 use bennu_theme::icons::{themed_icon, IconSymbol, IconTone};
 use bennu_theme::styles::{muted_text_color, transparent_button_style};
-use bennu_theme::typography::{BOLD, TITLE_SIZE};
+use bennu_theme::typography::{BOLD, CAPTION_SIZE, TITLE_SIZE};
 
 use crate::audio_lyrics_view::{lyrics_view, LYRIC_ROW_HEIGHT};
 use crate::audio_preview::{AudioLyrics, AudioStreamFacts};
 use crate::audio_timeline::{audio_timeline, TimelinePicture};
-use crate::audio_track_text::{stream_summary, track_subtitle, track_title};
+use crate::audio_track_text::{fact_line, stream_facts, track_subtitle, track_title};
 use crate::formatting::{format_duration, format_file_size};
 use crate::media_controls::{AUDIO_PROGRESS_SLIDER_STEP_SECONDS, AUDIO_VOLUME_SLIDER_STEP};
 use crate::media_keys::media_keys;
@@ -39,17 +39,19 @@ const COVER_MIN_EDGE: f32 = 96.0;
 const COVER_MAX_EDGE: f32 = 280.0;
 /// 进度区上方那一行（波形/声谱图切换、生成波形按钮、计算中提示）。
 const TIMELINE_HEADER_HEIGHT: f32 = 28.0;
-const WAVEFORM_HEIGHT: f32 = 48.0;
-const SPECTROGRAM_VIEW_HEIGHT: f32 = 112.0;
-const SLIDER_HEIGHT: f32 = 20.0;
+/// 波形、声谱图、还没算好时的普通滑杆共用一个高度：切换视图、算完替换时布局都不跳。
+const TIMELINE_PICTURE_HEIGHT: f32 = 88.0;
 /// 时间一行 + 控件行 + 间距。
 const TIMES_AND_CONTROLS_HEIGHT: f32 = 68.0;
+/// 进度区整块的高度，不随视图和计算状态变，用来算封面和歌词还剩多少地方。
+const TRANSPORT_HEIGHT: f32 =
+    TIMELINE_HEADER_HEIGHT + TIMELINE_PICTURE_HEIGHT + TIMES_AND_CONTROLS_HEIGHT;
 const VIEW_SWITCH_WIDTH: f32 = 168.0;
 /// 上下排时标题、歌手专辑、技术参数三行大约占的高度。
 const STACKED_INFO_HEIGHT: f32 = 76.0;
 const SECTION_GAP: f32 = 16.0;
-/// 上下排时给歌词至少留的高度（4 行）。
-const STACKED_LYRICS_MIN_HEIGHT: f32 = 4.0 * LYRIC_ROW_HEIGHT;
+/// 上下排时给歌词至少留的高度（3 句）。
+const STACKED_LYRICS_MIN_HEIGHT: f32 = 3.0 * LYRIC_ROW_HEIGHT;
 const PLAY_BUTTON_EDGE: f32 = 40.0;
 const PLAY_ICON_EDGE: f32 = 18.0;
 const VOLUME_ICON_EDGE: f32 = 16.0;
@@ -77,7 +79,6 @@ where
     let analysis = input
         .analysis
         .filter(|analysis| analysis.path.as_path() == input.path);
-    let transport_height = timeline_height(analysis) + TIMES_AND_CONTROLS_HEIGHT;
     let transport = transport(TransportInput {
         playback,
         duration: input.details.probe.duration,
@@ -91,7 +92,7 @@ where
         .unwrap_or_default();
     let side_by_side = input.size.width >= SIDE_BY_SIDE_MIN_WIDTH;
     let body: Element<'static, Message> = if side_by_side {
-        let top_height = input.size.height - 2.0 * PANEL_PADDING - transport_height - SECTION_GAP;
+        let top_height = input.size.height - 2.0 * PANEL_PADDING - TRANSPORT_HEIGHT - SECTION_GAP;
         let cover_edge = top_height.min(COVER_MAX_EDGE);
         let mut top = row![].spacing(24).align_y(Alignment::Center);
         if cover_edge >= COVER_MIN_EDGE {
@@ -118,7 +119,7 @@ where
         .spacing(SECTION_GAP)
         .into()
     } else {
-        let fixed_height = 2.0 * PANEL_PADDING + STACKED_INFO_HEIGHT + transport_height;
+        let fixed_height = 2.0 * PANEL_PADDING + STACKED_INFO_HEIGHT + TRANSPORT_HEIGHT;
         // 有歌词时先给它留几行，再看封面还放不放得下。
         let lyrics_reserve = if input.lyrics.is_some() {
             STACKED_LYRICS_MIN_HEIGHT + SECTION_GAP
@@ -226,12 +227,9 @@ fn muted_text(theme: &iced::Theme) -> iced::widget::text::Style {
 }
 
 fn file_summary(stream: &AudioStreamFacts, len: u64) -> String {
-    let facts = stream_summary(stream);
-    if facts.is_empty() {
-        format_file_size(len)
-    } else {
-        format!("{facts} · {}", format_file_size(len))
-    }
+    let mut facts = stream_facts(stream);
+    facts.push(format_file_size(len));
+    fact_line(facts)
 }
 
 /// 播放/暂停看按钮就知道；只有加载中和出错时多说一句。
@@ -310,20 +308,6 @@ where
     .into()
 }
 
-fn timeline_height(analysis: Option<&AudioAnalysis>) -> f32 {
-    let picture = match analysis {
-        Some(analysis) => match (analysis.view, &analysis.waveform, &analysis.spectrogram) {
-            (AudioTimelineView::Waveform, AudioAnalysisState::Ready(_), _) => WAVEFORM_HEIGHT,
-            (AudioTimelineView::Spectrogram, _, AudioAnalysisState::Ready(_)) => {
-                SPECTROGRAM_VIEW_HEIGHT
-            }
-            _ => SLIDER_HEIGHT,
-        },
-        None => SLIDER_HEIGHT,
-    };
-    TIMELINE_HEADER_HEIGHT + picture
-}
-
 /// 左边是这张图现在的情况（要点「生成波形」、正在算、算不出），右边是波形/声谱图切换。
 fn timeline_header<Message>(analysis: Option<&AudioAnalysis>) -> Element<'static, Message>
 where
@@ -396,54 +380,78 @@ fn timeline_picture<Message>(
 where
     Message: 'static + Clone + From<PreviewMessage>,
 {
-    if let Some(analysis) = analysis {
-        match (analysis.view, &analysis.waveform, &analysis.spectrogram) {
-            (AudioTimelineView::Waveform, AudioAnalysisState::Ready(waveform), _) => {
-                return audio_timeline(
+    let picture: Element<'static, Message> =
+        match analysis.map(|analysis| (analysis.view, &analysis.waveform, &analysis.spectrogram)) {
+            Some((AudioTimelineView::Waveform, AudioAnalysisState::Ready(waveform), _)) => {
+                audio_timeline(
                     TimelinePicture::Waveform(Arc::clone(waveform)),
                     position_seconds,
                     duration_seconds,
-                    WAVEFORM_HEIGHT,
-                );
+                    TIMELINE_PICTURE_HEIGHT,
+                )
             }
-            (AudioTimelineView::Spectrogram, _, AudioAnalysisState::Ready(spectrogram)) => {
-                return row![
+            // 刻度叠在声谱图里面（右侧），声谱图才能和波形、时间一样占满整宽、两端对齐。
+            Some((AudioTimelineView::Spectrogram, _, AudioAnalysisState::Ready(spectrogram))) => {
+                stack![
                     audio_timeline(
                         TimelinePicture::Spectrogram(spectrogram.clone()),
                         position_seconds,
                         duration_seconds,
-                        SPECTROGRAM_VIEW_HEIGHT,
+                        TIMELINE_PICTURE_HEIGHT,
                     ),
                     frequency_scale(sample_rate),
                 ]
-                .spacing(6)
-                .into();
+                .into()
             }
-            _ => {}
-        }
-    }
-    slider(0.0..=duration_seconds, position_seconds, |value: f32| {
-        Message::from(PreviewMessage::AudioPreviewSeekRequested(value))
-    })
-    .on_release(Message::from(PreviewMessage::AudioPreviewSeekCommitted))
-    .step(AUDIO_PROGRESS_SLIDER_STEP_SECONDS)
-    .width(Length::Fill)
-    .into()
+            _ => slider(0.0..=duration_seconds, position_seconds, |value: f32| {
+                Message::from(PreviewMessage::AudioPreviewSeekRequested(value))
+            })
+            .on_release(Message::from(PreviewMessage::AudioPreviewSeekCommitted))
+            .step(AUDIO_PROGRESS_SLIDER_STEP_SECONDS)
+            .width(Length::Fill)
+            .into(),
+        };
+    container(picture)
+        .width(Length::Fill)
+        .height(Length::Fixed(TIMELINE_PICTURE_HEIGHT))
+        .center_y(Length::Fixed(TIMELINE_PICTURE_HEIGHT))
+        .into()
 }
 
-/// 声谱图是线性频率，从下往上 0 到奈奎斯特频率；标三处够看出截止线在哪。
+/// 声谱图是线性频率，从下往上 0 到奈奎斯特频率；标三处够看出截止线在哪。标签压在图上，
+/// 底下垫一块半透明深色，亮色频谱上也读得清。
 fn frequency_scale<Message: 'static>(sample_rate: Option<u32>) -> Element<'static, Message> {
     let nyquist = sample_rate.unwrap_or(44_100) / 2;
+    let label = |text: String| {
+        container(
+            readable_text(text)
+                .size(CAPTION_SIZE)
+                .style(|_: &iced::Theme| iced::widget::text::Style {
+                    color: Some(Color::WHITE),
+                }),
+        )
+        .padding([0, 4])
+        .style(|_: &iced::Theme| container::Style {
+            background: Some(Color::from_rgba(0.0, 0.0, 0.0, 0.55).into()),
+            border: iced::Border::default().rounded(3),
+            ..container::Style::default()
+        })
+    };
     let kilohertz = |hertz: u32| format!("{} kHz", (hertz + 500) / 1000);
-    column![
-        readable_text(kilohertz(nyquist)).style(muted_text),
-        Space::new().height(Length::Fill),
-        readable_text(kilohertz(nyquist / 2)).style(muted_text),
-        Space::new().height(Length::Fill),
-        readable_text("0".to_owned()).style(muted_text),
-    ]
+    container(
+        column![
+            label(kilohertz(nyquist)),
+            Space::new().height(Length::Fill),
+            label(kilohertz(nyquist / 2)),
+            Space::new().height(Length::Fill),
+            label("0".to_owned()),
+        ]
+        .align_x(Horizontal::Right),
+    )
+    .width(Length::Fill)
+    .height(Length::Fixed(TIMELINE_PICTURE_HEIGHT))
+    .padding(4)
     .align_x(Horizontal::Right)
-    .height(Length::Fixed(SPECTROGRAM_VIEW_HEIGHT))
     .into()
 }
 

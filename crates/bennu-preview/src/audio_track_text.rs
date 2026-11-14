@@ -24,8 +24,8 @@ pub(crate) fn track_subtitle(tags: &AudioTags) -> Option<String> {
     }
 }
 
-/// 如「FLAC · 44.1 kHz · 16 位 · 立体声 · 1411 kbps」；读不到的项不写。
-pub(crate) fn stream_summary(facts: &AudioStreamFacts) -> String {
+/// 如「FLAC · 44.1 kHz · 16 位 · 立体声 · 1411 kbps」的各项；读不到的项不写。
+pub(crate) fn stream_facts(facts: &AudioStreamFacts) -> Vec<String> {
     let mut parts = Vec::new();
     if let Some(codec) = &facts.codec {
         parts.push(codec.clone());
@@ -46,7 +46,17 @@ pub(crate) fn stream_summary(facts: &AudioStreamFacts) -> String {
     if let Some(bit_rate) = facts.bit_rate {
         parts.push(format!("{} kbps", (bit_rate + 500) / 1000));
     }
-    parts.join(" · ")
+    parts
+}
+
+/// 把几项用「 · 」连成一行。窄面板会折行：项里的空格（44.1 kHz）和分隔点前的空格都换成
+/// 不换行空格，折行只能落在分隔点后面，新的一行不会以「·」开头，也不会把一项拆成两半。
+pub(crate) fn fact_line(parts: impl IntoIterator<Item = String>) -> String {
+    parts
+        .into_iter()
+        .map(|part| part.replace(' ', "\u{a0}"))
+        .collect::<Vec<_>>()
+        .join("\u{a0}· ")
 }
 
 /// 44100 → 44.1 kHz，48000 → 48 kHz。
@@ -101,8 +111,8 @@ mod tests {
             bit_rate: Some(1_411_200),
         };
         assert_eq!(
-            stream_summary(&facts),
-            "FLAC · 44.1 kHz · 16-bit · Stereo · 1411 kbps"
+            fact_line(stream_facts(&facts)),
+            "FLAC\u{a0}· 44.1\u{a0}kHz\u{a0}· 16-bit\u{a0}· Stereo\u{a0}· 1411\u{a0}kbps"
         );
         let facts = AudioStreamFacts {
             codec: Some("Opus".to_owned()),
@@ -110,6 +120,13 @@ mod tests {
             channels: Some(6),
             ..AudioStreamFacts::default()
         };
-        assert_eq!(stream_summary(&facts), "Opus · 48 kHz · 6 channels");
+        assert_eq!(
+            stream_facts(&facts),
+            vec![
+                "Opus".to_owned(),
+                "48 kHz".to_owned(),
+                "6 channels".to_owned()
+            ]
+        );
     }
 }

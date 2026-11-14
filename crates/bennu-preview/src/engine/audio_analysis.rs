@@ -133,7 +133,7 @@ mod tests {
 
     fn waveform(seconds: u64) -> Arc<AudioWaveform> {
         Arc::new(AudioWaveform {
-            peaks: vec![0.5; 4],
+            levels: vec![0.5; 4],
             duration: Duration::from_secs(seconds),
         })
     }

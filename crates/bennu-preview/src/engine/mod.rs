@@ -215,6 +215,11 @@ impl PreviewEngine {
             PreviewMessage::AudioSpectrogramComputed(path, outcome) => {
                 self.accept_audio_spectrogram(&path, outcome)
             }
+            PreviewMessage::AudioLyricsLoaded(path, lyrics) => {
+                self.accept_audio_lyrics(&path, lyrics)
+            }
+            PreviewMessage::AudioLyricsBrowsed(lines) => self.browse_audio_lyrics(lines),
+            PreviewMessage::AudioLyricsLineSelected(index) => self.seek_to_lyric_line(index),
             PreviewMessage::CopyFfmpegInstallCommand => {
                 match crate::ffmpeg_install::ffmpeg_install_command() {
                     Some(command) => iced::clipboard::write(command.to_owned()),
@@ -394,9 +399,11 @@ mod tests {
                     tags: Default::default(),
                     stream: Default::default(),
                     embedded_cover_stream: None,
+                    embedded_lyrics: None,
                 },
             }),
             cover: None,
+            lyrics: None,
         }));
     }
 
@@ -553,5 +560,46 @@ mod tests {
             analysis.waveform,
             AudioAnalysisState::NotRequested
         ));
+    }
+
+    #[test]
+    fn clicking_a_lyric_line_seeks_there_and_stops_browsing() {
+        use crate::audio_preview::{AudioLyrics, LyricLine};
+        let path = PathBuf::from("/music/song.flac");
+        let mut engine = engine();
+        engine.preview_load_surface = PreviewLoadSurface::RightDockedPanel;
+        ready_audio(&mut engine, &path, 200);
+        if let Some(PreviewState::Ready(PreviewContent::Audio { lyrics, .. })) = &mut engine.preview
+        {
+            *lyrics = Some(std::sync::Arc::new(AudioLyrics::Synced(vec![
+                LyricLine {
+                    time: std::time::Duration::from_secs(5),
+                    text: "a".to_owned(),
+                },
+                LyricLine {
+                    time: std::time::Duration::from_secs(42),
+                    text: "b".to_owned(),
+                },
+            ])));
+        }
+        drop(engine.open_audio_preview(path));
+
+        drop(engine.handle(PreviewMessage::AudioLyricsBrowsed(3)));
+        let browse = engine
+            .audio_preview
+            .as_ref()
+            .map(|playback| playback.lyrics_browse);
+        assert_eq!(browse.map(|browse| browse.offset_lines), Some(3));
+        assert!(browse.and_then(|browse| browse.resume_at).is_some());
+
+        drop(engine.handle(PreviewMessage::AudioLyricsLineSelected(1)));
+        let playback = engine.audio_preview.as_ref().expect("playback");
+        assert_eq!(playback.position, std::time::Duration::from_secs(42));
+        assert_eq!(
+            playback.lyrics_browse,
+            crate::preview::LyricsBrowse::default()
+        );
+        // 越界的句号什么都不做。
+        drop(engine.handle(PreviewMessage::AudioLyricsLineSelected(9)));
     }
 }

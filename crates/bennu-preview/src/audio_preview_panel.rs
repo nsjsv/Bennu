@@ -17,7 +17,8 @@ use bennu_theme::icons::{themed_icon, IconSymbol, IconTone};
 use bennu_theme::styles::muted_text_color;
 use bennu_theme::typography::{BOLD, TITLE_SIZE};
 
-use crate::audio_preview::AudioStreamFacts;
+use crate::audio_lyrics_view::{lyrics_view, LYRIC_ROW_HEIGHT};
+use crate::audio_preview::{AudioLyrics, AudioStreamFacts};
 use crate::audio_timeline::{audio_timeline, TimelinePicture};
 use crate::audio_track_text::{stream_summary, track_subtitle, track_title};
 use crate::formatting::{format_duration, format_file_size};
@@ -46,6 +47,8 @@ const VIEW_SWITCH_WIDTH: f32 = 168.0;
 /// 上下排时标题、歌手专辑、技术参数三行大约占的高度。
 const STACKED_INFO_HEIGHT: f32 = 76.0;
 const SECTION_GAP: f32 = 16.0;
+/// 上下排时给歌词至少留的高度（4 行）。
+const STACKED_LYRICS_MIN_HEIGHT: f32 = 4.0 * LYRIC_ROW_HEIGHT;
 const PLAY_BUTTON_EDGE: f32 = 40.0;
 const PLAY_ICON_EDGE: f32 = 18.0;
 const VOLUME_ICON_EDGE: f32 = 16.0;
@@ -58,6 +61,7 @@ pub(crate) struct AudioPanelInput<'a> {
     pub cover: Option<&'a image::Handle>,
     pub playback: Option<&'a AudioPreviewPlayback>,
     pub analysis: Option<&'a AudioAnalysis>,
+    pub lyrics: Option<&'a AudioLyrics>,
     pub media_volume: f32,
     pub size: PreviewSize,
 }
@@ -80,15 +84,32 @@ where
         sample_rate: input.details.probe.stream.sample_rate,
         media_volume: input.media_volume,
     });
+    let position = playback.map_or(Duration::ZERO, |playback| playback.position);
+    let browse = playback
+        .map(|playback| playback.lyrics_browse)
+        .unwrap_or_default();
     let side_by_side = input.size.width >= SIDE_BY_SIDE_MIN_WIDTH;
     let body: Element<'static, Message> = if side_by_side {
-        let cover_edge = (input.size.height - 2.0 * PANEL_PADDING - transport_height - SECTION_GAP)
-            .min(COVER_MAX_EDGE);
+        let top_height = input.size.height - 2.0 * PANEL_PADDING - transport_height - SECTION_GAP;
+        let cover_edge = top_height.min(COVER_MAX_EDGE);
         let mut top = row![].spacing(24).align_y(Alignment::Center);
         if cover_edge >= COVER_MIN_EDGE {
             top = top.push(cover_art(input.cover, cover_edge));
         }
         top = top.push(info_column(&input, playback, Horizontal::Left));
+        // 歌词在信息右边，和信息平分剩下的宽度；高度就是上半部分的高度。
+        if let Some(lyrics) = input.lyrics.filter(|_| top_height >= LYRIC_ROW_HEIGHT) {
+            top = top.push(
+                container(lyrics_view(
+                    lyrics,
+                    position,
+                    browse,
+                    top_height,
+                    Horizontal::Center,
+                ))
+                .width(Length::Fill),
+            );
+        }
         column![
             container(top).height(Length::Fill).center_y(Length::Fill),
             transport,
@@ -96,25 +117,46 @@ where
         .spacing(SECTION_GAP)
         .into()
     } else {
-        let available_height = input.size.height
-            - 2.0 * PANEL_PADDING
-            - STACKED_INFO_HEIGHT
-            - transport_height
-            - 2.0 * SECTION_GAP;
+        let fixed_height = 2.0 * PANEL_PADDING + STACKED_INFO_HEIGHT + transport_height;
+        // 有歌词时先给它留几行，再看封面还放不放得下。
+        let lyrics_reserve = if input.lyrics.is_some() {
+            STACKED_LYRICS_MIN_HEIGHT + SECTION_GAP
+        } else {
+            0.0
+        };
         let cover_edge = (input.size.width - 2.0 * PANEL_PADDING)
-            .min(available_height)
+            .min(input.size.height - fixed_height - lyrics_reserve - 2.0 * SECTION_GAP)
             .min(COVER_MAX_EDGE);
+        let show_cover = cover_edge >= COVER_MIN_EDGE;
         let mut stacked = Column::new()
             .spacing(SECTION_GAP)
             .align_x(Alignment::Center)
             .width(Length::Fill);
-        if cover_edge >= COVER_MIN_EDGE {
+        if show_cover {
             stacked = stacked.push(cover_art(input.cover, cover_edge));
         }
-        stacked
+        stacked = stacked
             .push(info_column(&input, playback, Horizontal::Center))
-            .push(transport)
-            .into()
+            .push(transport);
+        let cover_height = if show_cover {
+            cover_edge + SECTION_GAP
+        } else {
+            0.0
+        };
+        let lyrics_height = input.size.height - fixed_height - cover_height - 2.0 * SECTION_GAP;
+        if let Some(lyrics) = input
+            .lyrics
+            .filter(|_| lyrics_height >= 2.0 * LYRIC_ROW_HEIGHT)
+        {
+            stacked = stacked.push(lyrics_view(
+                lyrics,
+                position,
+                browse,
+                lyrics_height,
+                Horizontal::Center,
+            ));
+        }
+        stacked.into()
     };
     media_keys(
         container(body)

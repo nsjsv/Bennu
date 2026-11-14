@@ -11,6 +11,7 @@ use rodio::{DeviceSinkBuilder, MixerDeviceSink, Player};
 
 mod analysis;
 mod cover;
+mod lyrics;
 mod pcm_stream;
 mod probe;
 #[cfg(test)]
@@ -21,6 +22,7 @@ pub use analysis::{
     SPECTROGRAM_WIDTH,
 };
 pub use cover::load_audio_cover;
+pub use lyrics::{load_audio_lyrics, AudioLyrics, LyricLine};
 use pcm_stream::{spawn_pcm_stream, FfmpegPcmSource, PcmFormat, PlaybackExchange};
 pub use probe::{AudioProbe, AudioProbeError, AudioStreamFacts, AudioTags};
 

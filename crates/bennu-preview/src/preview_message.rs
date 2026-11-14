@@ -13,7 +13,7 @@ use iced::widget::image;
 use iced::window;
 
 use crate::animated_image_preview::{AnimatedImageFrame, AnimatedImagePreview};
-use crate::audio_preview::{AudioPreviewRuntime, AudioWaveform};
+use crate::audio_preview::{AudioLyrics, AudioPreviewRuntime, AudioWaveform};
 use crate::document_preview::DocumentPreviewMessage;
 use crate::image_preview_viewport::PreviewImageViewportMessage;
 use crate::original_image_preview::OriginalImagePreview;
@@ -70,6 +70,11 @@ pub enum PreviewMessage {
     AudioWaveformComputed(PathBuf, Result<Arc<AudioWaveform>, String>),
     AudioTimelineViewSelected(AudioTimelineView),
     AudioSpectrogramComputed(PathBuf, Result<image::Handle, String>),
+    AudioLyricsLoaded(PathBuf, Arc<AudioLyrics>),
+    /// 在带时间轴的歌词上滚滚轮：正数往后翻。
+    AudioLyricsBrowsed(i32),
+    /// 点了第几句（带时间轴的歌词），从这句开始放。
+    AudioLyricsLineSelected(usize),
     CopyFfmpegInstallCommand,
     AudioPreviewTick,
     VideoPreviewPlaybackToggled,

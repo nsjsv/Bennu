@@ -20,6 +20,8 @@ pub struct AudioProbe {
     pub stream: AudioStreamFacts,
     /// 内嵌封面（标成 attached_pic 的图片流）的流序号。
     pub embedded_cover_stream: Option<usize>,
+    /// 内嵌歌词标签（ID3 USLT 出来是 `lyrics-<语言>`，Vorbis 注释是 LYRICS/UNSYNCEDLYRICS）。
+    pub embedded_lyrics: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -109,7 +111,40 @@ fn audio_probe_from_output(output: &Output) -> Result<AudioProbe, AudioProbeErro
             .find(|stream| stream["disposition"]["attached_pic"] == 1)
             .and_then(|stream| stream["index"].as_u64())
             .and_then(|index| usize::try_from(index).ok()),
+        embedded_lyrics: lyrics_tag(format, stream).map(repair_mislabeled_text),
     })
+}
+
+fn lyrics_tag(format: &Value, stream: &Value) -> Option<String> {
+    let is_lyrics = |name: &str| {
+        let name = name.to_ascii_lowercase();
+        name == "lyrics" || name == "unsyncedlyrics" || name.starts_with("lyrics-")
+    };
+    [format, stream].into_iter().find_map(|owner| {
+        owner["tags"].as_object()?.iter().find_map(|(name, value)| {
+            let value = value.as_str()?.trim();
+            (is_lyrics(name) && !value.is_empty()).then(|| value.to_owned())
+        })
+    })
+}
+
+/// 一段较长的文字（歌词）单独就够判断编码，规则同 `repair_mislabeled_tags`。
+fn repair_mislabeled_text(text: String) -> String {
+    let Some(bytes) = latin1_bytes(&text) else {
+        return text;
+    };
+    let Some(sniffed) = file_core::text_encoding::sniff_text_encoding(&bytes, true) else {
+        return text;
+    };
+    if sniffed.encoding == encoding_rs::WINDOWS_1252 {
+        return text;
+    }
+    let (decoded, _, had_errors) = sniffed.encoding.decode(&bytes);
+    if had_errors {
+        text
+    } else {
+        decoded.into_owned()
+    }
 }
 
 /// 标签键大小写不定（ID3 小写，Vorbis 注释常见大写），容器上的优先。
@@ -299,7 +334,7 @@ mod tests {
                 "streams": [
                     {"index": 0, "codec_type": "audio", "codec_name": "flac",
                      "sample_rate": "96000", "channels": 2, "bits_per_raw_sample": "24",
-                     "tags": {"TITLE": "Stream Title", "ARTIST": "Stream Artist"}},
+                     "tags": {"TITLE": "Stream Title", "ARTIST": "Stream Artist", "lyrics-eng": "  "}},
                     {"index": 1, "codec_type": "video", "disposition": {"attached_pic": 1}}
                 ],
                 "format": {"duration": "1.0", "bit_rate": "2500000",
@@ -327,6 +362,7 @@ mod tests {
             }
         );
         assert_eq!(probe.embedded_cover_stream, Some(1));
+        assert_eq!(probe.embedded_lyrics, None);
     }
 
     #[test]

@@ -234,6 +234,13 @@ impl super::PreviewEngine {
         if !playback.seeking {
             playback.position = runtime.position();
         }
+        if playback
+            .lyrics_browse
+            .resume_at
+            .is_some_and(|resume_at| resume_at <= std::time::Instant::now())
+        {
+            playback.lyrics_browse = crate::preview::LyricsBrowse::default();
+        }
         if let Some(failure) = runtime.take_failure() {
             runtime.pause();
             playback.status = AudioPreviewPlaybackStatus::Error;
@@ -303,3 +310,59 @@ fn active_audio_preview_path(preview: Option<&PreviewState>) -> Option<&Path> {
         _ => None,
     }
 }
+
+impl super::PreviewEngine {
+    pub(super) fn accept_audio_lyrics(
+        &mut self,
+        path: &Path,
+        loaded: std::sync::Arc<crate::audio_preview::AudioLyrics>,
+    ) -> Task<PreviewMessage> {
+        if let Some(PreviewState::Ready(PreviewContent::Audio {
+            path: preview_path,
+            lyrics,
+            ..
+        })) = &mut self.preview
+        {
+            if preview_path == path {
+                *lyrics = Some(loaded);
+            }
+        }
+        Task::none()
+    }
+
+    /// 翻歌词时暂停跟随，停手一会儿再回到当前句（用户确认的「几秒」取 3 秒）。
+    pub(super) fn browse_audio_lyrics(&mut self, lines: i32) -> Task<PreviewMessage> {
+        if let Some(playback) = self.audio_preview.as_mut() {
+            playback.lyrics_browse.offset_lines =
+                playback.lyrics_browse.offset_lines.saturating_add(lines);
+            playback.lyrics_browse.resume_at =
+                Some(std::time::Instant::now() + LYRICS_BROWSE_RESUME_DELAY);
+        }
+        Task::none()
+    }
+
+    pub(super) fn seek_to_lyric_line(&mut self, index: usize) -> Task<PreviewMessage> {
+        let Some(PreviewState::Ready(PreviewContent::Audio {
+            lyrics: Some(lyrics),
+            ..
+        })) = &self.preview
+        else {
+            return Task::none();
+        };
+        let crate::audio_preview::AudioLyrics::Synced(lines) = lyrics.as_ref() else {
+            return Task::none();
+        };
+        let Some(line) = lines.get(index) else {
+            return Task::none();
+        };
+        let time = line.time;
+        let Some(playback) = self.audio_preview.as_mut() else {
+            return Task::none();
+        };
+        playback.position = time;
+        playback.lyrics_browse = crate::preview::LyricsBrowse::default();
+        self.commit_audio_preview_seek()
+    }
+}
+
+const LYRICS_BROWSE_RESUME_DELAY: Duration = Duration::from_secs(3);

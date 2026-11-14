@@ -190,10 +190,12 @@ where
             path,
             details,
             cover,
+            lyrics,
         }) => audio_preview_panel(AudioPanelInput {
             path,
             details,
             cover: cover.as_ref(),
+            lyrics: lyrics.as_deref(),
             playback: audio_preview,
             analysis: audio_analysis,
             media_volume,

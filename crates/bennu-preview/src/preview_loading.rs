@@ -218,6 +218,7 @@ async fn load_audio_preview(path: PathBuf) -> Result<PreviewContent, String> {
             path,
             details: Box::new(AudioPreviewDetails { len, probe }),
             cover: None,
+            lyrics: None,
         }),
         Err(AudioProbeError::FfmpegMissing) => Ok(PreviewContent::FfmpegRequired { path }),
         Err(AudioProbeError::Failed(reason)) => {

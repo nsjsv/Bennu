@@ -9,7 +9,7 @@ use iced::widget::{image, svg};
 // 原 app-ui 内 `use super::SqliteDatabasePreview`（model.rs 门面）；下沉后
 // sqlite_preview 是本 crate 顶层模块，改为 crate 路径。
 use crate::animated_image_preview::AnimatedImagePreview;
-use crate::audio_preview::{AudioPreviewRuntime, AudioProbe, AudioWaveform};
+use crate::audio_preview::{AudioLyrics, AudioPreviewRuntime, AudioProbe, AudioWaveform};
 use crate::document_preview::PagedDocumentPreview;
 use crate::sqlite_preview::SqliteDatabasePreview;
 use crate::text_document::TextOpened;
@@ -105,6 +105,8 @@ pub enum PreviewContent {
         details: Box<AudioPreviewDetails>,
         /// 打开后在后台取；没有封面就一直是 None。
         cover: Option<image::Handle>,
+        /// 同上，没有歌词就一直是 None。
+        lyrics: Option<Arc<AudioLyrics>>,
     },
     /// 音频、视频预览要靠 ffmpeg，系统里没有；面板给出安装命令。
     FfmpegRequired {
@@ -304,7 +306,15 @@ pub struct AudioPreviewPlayback {
     pub position: Duration,
     /// 正在拖进度条：显示拖到的位置，tick 不拿播放进度覆盖它，松手才真正跳转。
     pub seeking: bool,
+    pub lyrics_browse: LyricsBrowse,
     pub error: Option<String>,
+}
+
+/// 用滚轮翻带时间轴的歌词：显示窗口偏离当前句几行，以及什么时候回到当前句。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LyricsBrowse {
+    pub offset_lines: i32,
+    pub resume_at: Option<Instant>,
 }
 
 impl AudioPreviewPlayback {
@@ -323,6 +333,7 @@ impl AudioPreviewPlayback {
             status,
             position: Duration::ZERO,
             seeking: false,
+            lyrics_browse: LyricsBrowse::default(),
             error: None,
         }
     }

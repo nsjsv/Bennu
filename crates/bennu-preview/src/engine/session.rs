@@ -12,7 +12,9 @@ use iced::widget::image;
 use iced::Task;
 
 use super::PreviewAcceptance;
-use crate::commands::preview::{load_audio_cover_command, measure_audio_preview_duration_command};
+use crate::commands::preview::{
+    load_audio_cover_command, load_audio_lyrics_command, measure_audio_preview_duration_command,
+};
 use crate::preview::{ImagePreviewContent, PreviewContent, PreviewState, PreviewWindowProfile};
 use crate::preview_message::PreviewMessage;
 
@@ -65,6 +67,10 @@ impl super::PreviewEngine {
                             load_audio_cover_command(
                                 path.clone(),
                                 details.probe.embedded_cover_stream,
+                            ),
+                            load_audio_lyrics_command(
+                                path.clone(),
+                                details.probe.embedded_lyrics.clone(),
                             ),
                         ])
                     }

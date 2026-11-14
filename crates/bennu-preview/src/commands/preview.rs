@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use file_core::{CopyProgress, FileKind, ScanOptions};
@@ -9,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::animated_image_preview::load_animated_image_preview;
 use crate::audio_preview::{
-    compute_audio_spectrogram, compute_audio_waveform, load_audio_cover,
+    compute_audio_spectrogram, compute_audio_waveform, load_audio_cover, load_audio_lyrics,
     measure_audio_preview_duration, start_audio_preview_at,
 };
 use crate::original_image_preview::load_original_image_preview;
@@ -256,6 +257,19 @@ pub(crate) fn load_audio_cover_command(
         Task::done(PreviewMessage::AudioPreviewCoverLoaded(
             audio_path.clone(),
             cover,
+        ))
+    })
+}
+
+pub(crate) fn load_audio_lyrics_command(
+    path: PathBuf,
+    embedded: Option<String>,
+) -> Task<PreviewMessage> {
+    let audio_path = path.clone();
+    Task::future(load_audio_lyrics(path, embedded)).and_then(move |lyrics| {
+        Task::done(PreviewMessage::AudioLyricsLoaded(
+            audio_path.clone(),
+            Arc::new(lyrics),
         ))
     })
 }

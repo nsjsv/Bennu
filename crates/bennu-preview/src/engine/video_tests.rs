@@ -427,3 +427,13 @@ fn the_default_audio_track_is_chosen_and_menus_toggle_and_close() {
     assert_eq!(playback(&engine).track_menu, None);
     assert_eq!(playback(&engine).pending_click, None);
 }
+
+#[test]
+fn info_layer_toggles_for_this_preview_only() {
+    let (mut engine, _) = opened(PreviewLoadSurface::RightDockedPanel, 0);
+    assert!(!playback(&engine).info_visible);
+    drop(engine.toggle_video_info());
+    assert!(playback(&engine).info_visible);
+    drop(engine.handle_media_key(crate::preview_message::MediaKeyCommand::ToggleInfo));
+    assert!(!playback(&engine).info_visible);
+}

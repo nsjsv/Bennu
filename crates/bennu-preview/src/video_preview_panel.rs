@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use iced::alignment::{Horizontal, Vertical};
-use iced::widget::{button, column, container, mouse_area, row, Column, Space, Stack};
+use iced::widget::{button, column, container, mouse_area, row, scrollable, Column, Space, Stack};
 use iced::{Alignment, Element, Length};
 
 use bennu_theme::anchored_popup::anchored_dropup;
@@ -29,7 +29,7 @@ use crate::preview::{
 };
 use crate::preview_message::PreviewMessage;
 use crate::video_surface::{video_surface, VideoPicture};
-use crate::video_track_text::{audio_track_label, subtitle_label};
+use crate::video_track_text::{audio_track_label, subtitle_label, video_info_rows};
 use bennu_localization::tr;
 use bennu_theme::controls::slider;
 
@@ -38,6 +38,15 @@ const VIDEO_VOLUME_SLIDER_PORTION: u16 = 1;
 const VIDEO_CONTROL_SLIDER_GAP: f32 = 14.0;
 const VIDEO_VOLUME_ICON_GAP: f32 = 6.0;
 const TRACK_MENU_ITEM_PADDING: [u16; 2] = [5, 12];
+const INFO_MARGIN: f32 = 16.0;
+const INFO_PADDING: f32 = 14.0;
+const INFO_RADIUS: f32 = 8.0;
+const INFO_MAX_WIDTH: f32 = 520.0;
+const INFO_LABEL_WIDTH: f32 = 96.0;
+const INFO_COLUMN_GAP: f32 = 12.0;
+const INFO_ROW_SPACING: f32 = 4.0;
+const INFO_BACKGROUND_ALPHA: f32 = 0.68;
+const INFO_LABEL_ALPHA: f32 = 0.62;
 const TRACK_MENU_CHECK_SIZE: f32 = 14.0;
 
 pub(crate) fn video_preview_panel<Message>(
@@ -87,6 +96,9 @@ where
     let mut overlay = Stack::with_children([frame_view])
         .width(Length::Fill)
         .height(Length::Fill);
+    if playback.is_some_and(|playback| playback.info_visible) {
+        overlay = overlay.push(video_info_layer(details));
+    }
     if mini_progress_opacity > f32::EPSILON {
         overlay = overlay.push(mini_progress_bar_layer(
             video_progress_fraction(playback, duration),
@@ -225,6 +237,18 @@ where
     ]
     .spacing(AUDIO_TIMELINE_CONTROL_GAP)
     .align_y(Alignment::Center);
+    top_row = top_row.push(
+        button(faded_media_icon(
+            IconSymbol::Info,
+            AUDIO_CONTROL_ICON_SIZE,
+            opacity,
+        ))
+        .on_press(Message::from(PreviewMessage::VideoPreviewInfoToggled))
+        .padding(8)
+        .width(Length::Fixed(AUDIO_CONTROL_BUTTON_SIZE))
+        .height(Length::Fixed(AUDIO_CONTROL_BUTTON_SIZE))
+        .style(move |theme, status| faded_media_button_style(theme, status, opacity)),
+    );
     let open_menu = playback.and_then(|playback| playback.track_menu);
     if !details.subtitles.is_empty() {
         let current = playback.and_then(|playback| playback.subtitle.choice());
@@ -280,6 +304,50 @@ where
     .padding([0, VIDEO_CONTROL_HORIZONTAL_PADDING])
     .width(Length::Fixed(width))
     .into()
+}
+
+/// 盖在画面左上角的信息层：深色半透明底、浅色字，不管主题深浅、画面明暗都看得清；
+/// 行多（几十条字幕轨）时在框里滚动。
+fn video_info_layer<Message>(details: &VideoPreviewDetails) -> Element<'static, Message>
+where
+    Message: 'static + Clone + From<PreviewMessage>,
+{
+    let label_style = |_: &iced::Theme| iced::widget::text::Style {
+        color: Some(iced::Color::from_rgba(1.0, 1.0, 1.0, INFO_LABEL_ALPHA)),
+    };
+    let value_style = |_: &iced::Theme| iced::widget::text::Style {
+        color: Some(iced::Color::WHITE),
+    };
+    let mut rows = Column::new().spacing(INFO_ROW_SPACING);
+    for row in video_info_rows(details) {
+        rows = rows.push(
+            row![
+                readable_text(row.label)
+                    .style(label_style)
+                    .width(Length::Fixed(INFO_LABEL_WIDTH)),
+                readable_text(row.value).style(value_style),
+            ]
+            .spacing(INFO_COLUMN_GAP),
+        );
+    }
+    let card = container(scrollable(rows).height(Length::Shrink))
+        .padding(INFO_PADDING)
+        .max_width(INFO_MAX_WIDTH)
+        .style(|_| container::Style {
+            background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, INFO_BACKGROUND_ALPHA).into()),
+            border: iced::Border {
+                radius: INFO_RADIUS.into(),
+                ..iced::Border::default()
+            },
+            ..container::Style::default()
+        });
+    container(card)
+        .padding(INFO_MARGIN)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(Horizontal::Left)
+        .align_y(Vertical::Top)
+        .into()
 }
 
 /// 控制条上的字幕/音轨按钮，点了在上方弹出菜单（贴着窗口底边，只能往上开）。

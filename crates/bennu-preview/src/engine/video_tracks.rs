@@ -1,4 +1,4 @@
-//! 视频的字幕和音轨：打开时按规则挑默认的，菜单里换。字幕烧在画面里，换了要从当前位置
+//! 视频的字幕和音轨：打开时按规则挑默认的，菜单里换；信息层开关。字幕烧在画面里，换了要从当前位置
 //! 重开一段解码（顿一下）；音轨换的是声卡背后的解码流，画面不停。
 
 use std::path::Path;
@@ -32,6 +32,13 @@ impl super::PreviewEngine {
             .map_or(0, |track| track.ordinal);
         let choice = default_subtitle(&details.subtitles, bennu_localization::current_language());
         self.select_video_subtitle(choice)
+    }
+
+    pub fn toggle_video_info(&mut self) -> Task<PreviewMessage> {
+        if let Some(playback) = self.video_preview.as_mut() {
+            playback.info_visible = !playback.info_visible;
+        }
+        Task::none()
     }
 
     pub fn toggle_video_track_menu(&mut self, menu: VideoTrackMenu) -> Task<PreviewMessage> {

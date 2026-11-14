@@ -1,5 +1,5 @@
 //! 音频、视频预览的键盘：包住面板的可聚焦壳。回车播放/暂停，←/→ 后退/前进 5 秒
-//! （Shift 加按 30 秒），↑/↓ 音量 ±5%，F 视频进出全屏（Esc 退全屏归宿主的 Esc 路由）。空格不接，照旧开关预览窗口。点一下面板才聚焦
+//! （Shift 加按 30 秒），↑/↓ 音量 ±5%，F 视频进出全屏（Esc 退全屏归宿主的 Esc 路由），I 视频信息层。空格不接，照旧开关预览窗口。点一下面板才聚焦
 //! （独立预览窗口打开时由 `focus_preview_keyboard` 聚焦），点别处失焦——右侧面板里
 //! 方向键默认还归文件列表。
 
@@ -73,6 +73,9 @@ pub(crate) fn media_key_command(
         }
         keyboard::Key::Character(character) if character.eq_ignore_ascii_case("f") => {
             Some(MediaKeyCommand::ToggleFullscreen)
+        }
+        keyboard::Key::Character(character) if character.eq_ignore_ascii_case("i") => {
+            Some(MediaKeyCommand::ToggleInfo)
         }
         _ => None,
     }
@@ -250,6 +253,20 @@ mod tests {
         assert_eq!(
             media_key_command(&named(Named::ArrowDown), none),
             Some(MediaKeyCommand::ChangeVolume(-VOLUME_STEP))
+        );
+        let character = |text: &str| keyboard::Key::Character(text.into());
+        assert_eq!(
+            media_key_command(&character("f"), none),
+            Some(MediaKeyCommand::ToggleFullscreen)
+        );
+        assert_eq!(
+            media_key_command(&character("I"), shift),
+            Some(MediaKeyCommand::ToggleInfo)
+        );
+        // Ctrl+F 之类留给应用（文本预览的搜索）。
+        assert_eq!(
+            media_key_command(&character("f"), keyboard::Modifiers::CTRL),
+            None
         );
     }
 

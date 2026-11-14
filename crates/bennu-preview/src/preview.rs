@@ -393,6 +393,8 @@ pub struct VideoPreviewPlayback {
     pub track_menu: Option<VideoTrackMenu>,
     /// 全屏时鼠标停了一会儿：画面上不显示鼠标。
     pub cursor_hidden: bool,
+    /// 画面上盖着信息层（按钮或 I 键开关，只对这次预览有效）。
+    pub info_visible: bool,
     pub error: Option<String>,
 }
 
@@ -422,6 +424,7 @@ impl VideoPreviewPlayback {
             subtitle: VideoSubtitle::Off,
             track_menu: None,
             cursor_hidden: false,
+            info_visible: false,
             error: None,
         }
     }

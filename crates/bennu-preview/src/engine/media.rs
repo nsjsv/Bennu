@@ -34,6 +34,7 @@ impl super::PreviewEngine {
                 (self.media_settings.volume + delta).clamp(0.0, 1.0),
             )),
             MediaKeyCommand::ToggleFullscreen => self.toggle_video_fullscreen(),
+            MediaKeyCommand::ToggleInfo => self.toggle_video_info(),
         }
     }
 }

@@ -256,6 +256,7 @@ impl PreviewEngine {
             }
             PreviewMessage::VideoPreviewSurfacePressed => self.video_surface_pressed(),
             PreviewMessage::VideoFullscreenToggled => self.toggle_video_fullscreen(),
+            PreviewMessage::VideoPreviewInfoToggled => self.toggle_video_info(),
             PreviewMessage::VideoFullscreenIdleElapsed => self.video_fullscreen_idle_elapsed(),
             PreviewMessage::VideoPreviewTrackMenuToggled(menu) => {
                 self.toggle_video_track_menu(menu)

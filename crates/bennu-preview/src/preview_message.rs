@@ -106,8 +106,10 @@ pub enum PreviewMessage {
     ),
     /// 音轨菜单里选了第几条音轨（`-map 0:a:N`）。
     VideoPreviewAudioTrackSelected(usize),
-    /// F 键、双击画面、全屏按钮。
+    /// F 键、双击画面。
     VideoFullscreenToggled,
+    /// 信息按钮、I 键。
+    VideoPreviewInfoToggled,
     /// 全屏时「鼠标多久没动」的计时到了。
     VideoFullscreenIdleElapsed,
     /// 在画面上按了一下；单击还是双击由引擎等一会儿再定。
@@ -138,4 +140,6 @@ pub enum MediaKeyCommand {
     ChangeVolume(f32),
     /// F：视频进出全屏（音频没有全屏，不处理）。
     ToggleFullscreen,
+    /// I：视频信息层开关（音频不处理）。
+    ToggleInfo,
 }

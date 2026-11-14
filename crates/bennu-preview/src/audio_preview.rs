@@ -63,10 +63,19 @@ impl AudioPreviewRuntime {
             position,
             handles.format,
             Arc::clone(handles.exchange.failure()),
+            Arc::clone(handles.exchange.repeat()),
         )
         .map_err(|error| format!("could not start ffmpeg: {error}"))?;
         handles.exchange.replace_stream(stream);
         Ok(())
+    }
+
+    /// 单曲循环：开着时读线程读完一遍直接从头接上，没有停顿。
+    pub fn set_repeat(&self, repeat: bool) {
+        self.handles
+            .exchange
+            .repeat()
+            .store(repeat, std::sync::atomic::Ordering::Release);
     }
 
     pub fn set_volume(&self, volume: f32) {
@@ -125,8 +134,14 @@ fn start_audio_preview_blocking(
     device_sink.log_on_drop(false);
     let format = pcm_format_for_output(&device_sink);
     let exchange = Arc::new(PlaybackExchange::new(format.sample_rate));
-    let mut stream = spawn_pcm_stream(&path, position, format, Arc::clone(exchange.failure()))
-        .map_err(|error| format!("could not start ffmpeg: {error}"))?;
+    let mut stream = spawn_pcm_stream(
+        &path,
+        position,
+        format,
+        Arc::clone(exchange.failure()),
+        Arc::clone(exchange.repeat()),
+    )
+    .map_err(|error| format!("could not start ffmpeg: {error}"))?;
     stream.wait_for_audio(exchange.failure())?;
     exchange.replace_stream(stream);
 

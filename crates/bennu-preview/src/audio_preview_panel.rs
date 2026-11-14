@@ -14,7 +14,7 @@ use bennu_theme::controls::{
     icon_button_style, normal_button, segmented_choice_row, slider, SegmentedChoice,
 };
 use bennu_theme::icons::{themed_icon, IconSymbol, IconTone};
-use bennu_theme::styles::muted_text_color;
+use bennu_theme::styles::{muted_text_color, transparent_button_style};
 use bennu_theme::typography::{BOLD, TITLE_SIZE};
 
 use crate::audio_lyrics_view::{lyrics_view, LYRIC_ROW_HEIGHT};
@@ -29,6 +29,7 @@ use crate::preview::{
     AudioAnalysis, AudioAnalysisState, AudioPreviewDetails, AudioPreviewPlayback,
     AudioPreviewPlaybackStatus, AudioTimelineView, PreviewSize,
 };
+use crate::preview_config::{AudioEndAction, MediaPlaybackSettings};
 use crate::preview_message::PreviewMessage;
 
 const PANEL_PADDING: f32 = 20.0;
@@ -62,7 +63,7 @@ pub(crate) struct AudioPanelInput<'a> {
     pub playback: Option<&'a AudioPreviewPlayback>,
     pub analysis: Option<&'a AudioAnalysis>,
     pub lyrics: Option<&'a AudioLyrics>,
-    pub media_volume: f32,
+    pub media_settings: MediaPlaybackSettings,
     pub size: PreviewSize,
 }
 
@@ -82,7 +83,7 @@ where
         duration: input.details.probe.duration,
         analysis,
         sample_rate: input.details.probe.stream.sample_rate,
-        media_volume: input.media_volume,
+        media_settings: input.media_settings,
     });
     let position = playback.map_or(Duration::ZERO, |playback| playback.position);
     let browse = playback
@@ -253,7 +254,7 @@ struct TransportInput<'a> {
     duration: Option<Duration>,
     analysis: Option<&'a AudioAnalysis>,
     sample_rate: Option<u32>,
-    media_volume: f32,
+    media_settings: MediaPlaybackSettings,
 }
 
 fn transport<Message>(input: TransportInput<'_>) -> Element<'static, Message>
@@ -283,10 +284,12 @@ where
             .style(muted_text),
     ];
     let controls = row![
-        // 左边留给播完模式按钮；两侧等宽，播放键才在正中。
-        Space::new().width(Length::Fill),
+        // 左右两侧等宽，播放键才在正中。
+        container(end_action_button(input.media_settings.audio_end_action))
+            .width(Length::Fill)
+            .align_x(Horizontal::Left),
         play_button(input.playback),
-        container(volume_control(input.media_volume))
+        container(volume_control(input.media_settings.volume))
             .width(Length::Fill)
             .align_x(Horizontal::Right),
     ]
@@ -464,6 +467,30 @@ where
         play.on_press(Message::from(PreviewMessage::AudioPreviewPlaybackToggled))
             .into()
     }
+}
+
+/// 图标 + 小字：三种模式的图标不常见，光看图标认不出。
+fn end_action_button<Message>(action: AudioEndAction) -> Element<'static, Message>
+where
+    Message: 'static + Clone + From<PreviewMessage>,
+{
+    let (icon, label) = match action {
+        AudioEndAction::Stop => (IconSymbol::StopAfterTrack, tr!("Stop After Track")),
+        AudioEndAction::Repeat => (IconSymbol::Repeat1, tr!("Repeat Track")),
+        AudioEndAction::Next => (IconSymbol::SkipForward, tr!("Play Next Track")),
+    };
+    button(
+        row![
+            themed_icon(icon, IconTone::Normal, VOLUME_ICON_EDGE),
+            readable_text(label).style(muted_text),
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center),
+    )
+    .padding([4, 8])
+    .style(transparent_button_style())
+    .on_press(Message::from(PreviewMessage::AudioEndActionCycled))
+    .into()
 }
 
 fn volume_control<Message>(media_volume: f32) -> Element<'static, Message>

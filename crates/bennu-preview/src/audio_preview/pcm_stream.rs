@@ -35,11 +35,17 @@ impl PcmFormat {
     }
 }
 
+/// 通道里送的东西：一块采样，或「又从头来一遍」（单曲循环时读线程接着送下一遍）。
+pub(crate) enum PcmChunk {
+    Samples(Vec<f32>),
+    Restart,
+}
+
 /// 从 `start` 开始的一条解码流。`first_chunk` 是启动时为确认能解码而先取出的一块。
 pub(crate) struct PcmStream {
     start: Duration,
     first_chunk: Option<Vec<f32>>,
-    chunks: Receiver<Vec<f32>>,
+    chunks: Receiver<PcmChunk>,
 }
 
 impl PcmStream {
@@ -47,11 +53,12 @@ impl PcmStream {
     /// 不会先进入「播放中」再变成错误。
     pub(crate) fn wait_for_audio(&mut self, failure: &StreamFailure) -> Result<(), String> {
         match self.chunks.recv() {
-            Ok(chunk) => {
+            Ok(PcmChunk::Samples(chunk)) => {
                 self.first_chunk = Some(chunk);
                 Ok(())
             }
-            Err(_) => Err(failure
+            // 读线程只在完整读完一遍、而且读到过采样之后才会发 Restart，第一块不会是它。
+            Ok(PcmChunk::Restart) | Err(_) => Err(failure
                 .take()
                 .unwrap_or_else(|| "the file has no playable audio".to_owned())),
         }
@@ -83,7 +90,45 @@ pub(crate) fn spawn_pcm_stream(
     start: Duration,
     format: PcmFormat,
     failure: Arc<StreamFailure>,
+    repeat: Arc<AtomicBool>,
 ) -> std::io::Result<PcmStream> {
+    // 第一遍在这里起：没装 ffmpeg 之类的启动错误直接还给调用方。
+    let first_pass = ffmpeg_pcm_command(path, start, format).spawn()?;
+    let (sender, chunks) = sync_channel(BUFFERED_CHUNKS);
+    let channels = format.channel_count();
+    let path = path.to_path_buf();
+    thread::Builder::new()
+        .name("audio-preview-pcm".to_owned())
+        .spawn(move || {
+            let mut child = first_pass;
+            loop {
+                let PassEnd::Completed { produced: true } =
+                    pump_pass(child, &sender, channels, &failure)
+                else {
+                    return;
+                };
+                // 单曲循环：通道里还缓着约半秒，趁这时从头再起一遍接着送，听不出缝。
+                if !repeat.load(Ordering::Acquire) || sender.send(PcmChunk::Restart).is_err() {
+                    return;
+                }
+                child = match ffmpeg_pcm_command(&path, Duration::ZERO, format).spawn() {
+                    Ok(child) => child,
+                    Err(error) => {
+                        failure.record(format!("could not start ffmpeg: {error}"));
+                        return;
+                    }
+                };
+            }
+            // 线程结束时 sender 才释放：失败说明先写好，接收端看到断开时一定读得到。
+        })?;
+    Ok(PcmStream {
+        start,
+        first_chunk: None,
+        chunks,
+    })
+}
+
+fn ffmpeg_pcm_command(path: &Path, start: Duration, format: PcmFormat) -> Command {
     let mut command = Command::new("ffmpeg");
     command.args(["-nostdin", "-hide_banner", "-v", "error"]);
     if start > Duration::ZERO {
@@ -104,25 +149,26 @@ pub(crate) fn spawn_pcm_stream(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let child = command.spawn()?;
-    let (sender, chunks) = sync_channel(BUFFERED_CHUNKS);
-    let channels = format.channel_count();
-    thread::Builder::new()
-        .name("audio-preview-pcm".to_owned())
-        .spawn(move || pump_pcm(child, sender, channels, &failure))?;
-    Ok(PcmStream {
-        start,
-        first_chunk: None,
-        chunks,
-    })
+    command
 }
 
-fn pump_pcm(
+enum PassEnd {
+    /// 接收端没了（被跳转换掉或会话结束），ffmpeg 已被杀掉。
+    ReceiverGone,
+    /// ffmpeg 自己失败，说明已写进 `StreamFailure`。
+    Failed,
+    Completed {
+        produced: bool,
+    },
+}
+
+/// 把一个 ffmpeg 的输出全部送进通道。
+fn pump_pass(
     mut child: Child,
-    sender: SyncSender<Vec<f32>>,
+    sender: &SyncSender<PcmChunk>,
     channels: usize,
     failure: &StreamFailure,
-) {
+) -> PassEnd {
     let stderr_tail = child.stderr.take().and_then(|stderr| {
         thread::Builder::new()
             .name("audio-preview-stderr".to_owned())
@@ -132,9 +178,10 @@ fn pump_pcm(
     let Some(mut stdout) = child.stdout.take() else {
         let _ = child.kill();
         let _ = child.wait();
-        return;
+        return PassEnd::Failed;
     };
     let mut bytes = vec![0_u8; FRAMES_PER_CHUNK * channels * F32_BYTES];
+    let mut produced = false;
     loop {
         let filled = read_until_full(&mut stdout, &mut bytes);
         let whole_frames = filled - filled % (channels * F32_BYTES);
@@ -145,12 +192,13 @@ fn pump_pcm(
                 .iter()
                 .map(|sample| f32::from_le_bytes(*sample))
                 .collect();
-            if sender.send(samples).is_err() {
-                // 接收端没了：被跳转换掉或会话结束。主动杀掉，不算失败。
+            if sender.send(PcmChunk::Samples(samples)).is_err() {
+                // 主动杀掉，不算失败。
                 let _ = child.kill();
                 let _ = child.wait();
-                return;
+                return PassEnd::ReceiverGone;
             }
+            produced = true;
         }
         if filled < bytes.len() {
             break;
@@ -162,12 +210,16 @@ fn pump_pcm(
         .and_then(|reader| reader.join().ok())
         .unwrap_or_default();
     match status {
-        Ok(status) if status.success() => {}
-        Ok(status) => failure.record(ffmpeg_failure_message(&tail, &status.to_string())),
-        Err(error) => failure.record(ffmpeg_failure_message(&tail, &error.to_string())),
+        Ok(status) if status.success() => PassEnd::Completed { produced },
+        Ok(status) => {
+            failure.record(ffmpeg_failure_message(&tail, &status.to_string()));
+            PassEnd::Failed
+        }
+        Err(error) => {
+            failure.record(ffmpeg_failure_message(&tail, &error.to_string()));
+            PassEnd::Failed
+        }
     }
-    // sender 在这里才释放：失败说明先写好，接收端看到断开时一定读得到。
-    drop(sender);
 }
 
 /// 读满缓冲区或读到结尾，返回读到的字节数；读出错按结尾处理（随后看退出码）。
@@ -219,6 +271,8 @@ pub(crate) struct PlaybackExchange {
     frames_played: AtomicU64,
     ended: AtomicBool,
     failure: Arc<StreamFailure>,
+    /// 单曲循环开关：读线程每读完一遍看一次。
+    repeat: Arc<AtomicBool>,
 }
 
 impl PlaybackExchange {
@@ -232,11 +286,16 @@ impl PlaybackExchange {
             frames_played: AtomicU64::new(0),
             ended: AtomicBool::new(false),
             failure: Arc::new(StreamFailure::default()),
+            repeat: Arc::new(AtomicBool::new(false)),
         }
     }
 
     pub(crate) fn failure(&self) -> &Arc<StreamFailure> {
         &self.failure
+    }
+
+    pub(crate) fn repeat(&self) -> &Arc<AtomicBool> {
+        &self.repeat
     }
 
     /// 新流排队，声卡回调线程下一帧边界换上；旧流随即被丢弃，它的 ffmpeg 被读线程杀掉。
@@ -290,7 +349,7 @@ fn duration_nanos(duration: Duration) -> u64 {
 pub(crate) struct FfmpegPcmSource {
     exchange: Arc<PlaybackExchange>,
     format: PcmFormat,
-    chunks: Option<Receiver<Vec<f32>>>,
+    chunks: Option<Receiver<PcmChunk>>,
     chunk: Vec<f32>,
     next_sample: usize,
     silent_samples_left: usize,
@@ -331,9 +390,15 @@ impl FfmpegPcmSource {
             return false;
         };
         match chunks.try_recv() {
-            Ok(chunk) => {
+            Ok(PcmChunk::Samples(chunk)) => {
                 self.chunk = chunk;
                 true
+            }
+            // 单曲循环的下一遍：进度从 0 重新数。
+            Ok(PcmChunk::Restart) => {
+                self.exchange.stream_start_nanos.store(0, Ordering::Release);
+                self.exchange.frames_played.store(0, Ordering::Release);
+                self.refill()
             }
             Err(TryRecvError::Empty) => false,
             Err(TryRecvError::Disconnected) => {

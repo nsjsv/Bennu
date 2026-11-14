@@ -25,7 +25,7 @@ use bennu_preview::engine::{
 };
 use bennu_preview::image_preview_viewport::ImagePreviewViewport;
 use bennu_preview::preview::{PreviewState, PreviewWindowProfile};
-use bennu_preview::preview_config::PreviewPreferences;
+use bennu_preview::preview_config::{AudioEndAction, PreviewPreferences};
 use bennu_preview::preview_loading::{
     classify_preview_path, file_too_large_to_preview, PreviewPathKind,
 };
@@ -44,6 +44,9 @@ use settings::load_preview_preferences;
 /// 预览窗的 WM 身份：沿用 portal 窗口家族的 bennu-filechooser 前缀
 /// （app-ui 侧对应物是 bennu-preview）。
 const PORTAL_PREVIEW_WINDOW_APP_ID: &str = "bennu-filechooser-preview";
+/// 对话框只提供这两种播完模式：它是拿来选文件的，连播用处不大（用户定的）。
+pub(crate) const DIALOG_AUDIO_END_ACTIONS: [AudioEndAction; 2] =
+    [AudioEndAction::Stop, AudioEndAction::Repeat];
 
 /// 空格预览的目标条目（选择窗主选中行的快照：路径 + 种类 + 行缓存大小）。
 pub(crate) struct PreviewSelection {
@@ -396,8 +399,16 @@ impl PreviewHost {
             });
         let preferences = &self.preferences;
         self.engine.config = Self::engine_config(preferences);
-        // 每次打开会话都按主程序记住的音量来；对话框里改的只到这次会话结束。
-        self.engine.set_media_volume(preferences.media_volume);
+        // 每次打开会话都按主程序记住的音量和播完模式来；对话框里改的只到这次会话结束。
+        // 对话框没有「播下一首」，主程序设成它时这里当作「播完停」。
+        self.engine
+            .set_media_volume(preferences.media_playback.volume);
+        self.engine.set_audio_end_action(
+            preferences
+                .media_playback
+                .audio_end_action
+                .within(&DIALOG_AUDIO_END_ACTIONS),
+        );
     }
 }
 

@@ -282,7 +282,7 @@ impl FileBrowser {
             preview_engine.audio_preview.as_ref(),
             preview_engine.audio_analysis.as_ref(),
             preview_engine.video_preview.as_ref(),
-            preview_engine.media_volume,
+            preview_engine.media_settings,
             1.0,
             self.operation_progress_animation_frame,
             self.user_config.text_preview_view,

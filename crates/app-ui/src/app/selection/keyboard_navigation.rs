@@ -460,7 +460,7 @@ impl FileBrowser {
         ])
     }
 
-    fn open_preview(&mut self) -> Task<Message> {
+    pub(super) fn open_preview(&mut self) -> Task<Message> {
         self.context_menu = None;
         // 包内成员按空格完全无动作:虚拟路径读不了文件,加载必然失败
         // 并弹「could not read image」全局错误;按只读浏览语义静默忽略。

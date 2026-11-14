@@ -15,6 +15,7 @@ use iced::Task;
 use super::global_error::GlobalErrorSource;
 use super::FileBrowser;
 use crate::model::{Message, PreviewContent, PreviewMessage};
+use bennu_preview::preview_config::AudioEndAction;
 
 mod animated_image;
 mod document;
@@ -26,7 +27,22 @@ mod sqlite;
 mod tests;
 mod tree;
 
+/// 主程序提供的播完模式（对话框没有「播下一首」）。
+const MAIN_APP_AUDIO_END_ACTIONS: [AudioEndAction; 3] = [
+    AudioEndAction::Stop,
+    AudioEndAction::Repeat,
+    AudioEndAction::Next,
+];
+
 impl FileBrowser {
+    /// 设置载入（启动、启动环境就绪）后把音量和播完模式交给预览引擎。
+    pub(crate) fn apply_media_preferences_to_preview(&mut self) {
+        self.preview_engine
+            .set_media_volume(self.user_config.media_preview_volume);
+        self.preview_engine
+            .set_audio_end_action(self.user_config.audio_end_action);
+    }
+
     pub(super) fn handle_preview_message(&mut self, message: PreviewMessage) -> Task<Message> {
         match self.preview_engine.handle(message) {
             Ok(task) => task.map(Message::Preview),
@@ -95,6 +111,19 @@ impl FileBrowser {
                 self.user_config.media_preview_volume = volume;
                 self.preview_engine.set_media_volume(volume);
                 self.persist_user_preferences_command()
+            }
+            // 播完模式是主程序设置：按主程序的三种轮换，改了就记住。
+            PreviewMessage::AudioEndActionCycled => {
+                let action = self
+                    .user_config
+                    .audio_end_action
+                    .after(&MAIN_APP_AUDIO_END_ACTIONS);
+                self.user_config.audio_end_action = action;
+                self.preview_engine.set_audio_end_action(action);
+                self.persist_user_preferences_command()
+            }
+            PreviewMessage::AudioNextTrackRequested(finished) => {
+                self.play_next_audio_track(finished)
             }
             engine_message => {
                 unreachable!("{engine_message:?} 由 PreviewEngine::handle 处理，不会还给宿主")

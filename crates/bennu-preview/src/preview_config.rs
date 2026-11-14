@@ -55,6 +55,9 @@ pub struct StoredPreviewPreferences {
     /// 音频、视频预览共用的音量（0–100）；None 用默认。
     #[serde(default)]
     pub media_preview_volume_percent: Option<u8>,
+    /// 音频播完之后做什么（stop / repeat / next）；None 用默认。
+    #[serde(default)]
+    pub audio_end_action: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -315,6 +318,70 @@ fn extensions_match(extensions: &[String], path: &Path) -> bool {
 
 pub const DEFAULT_MEDIA_PREVIEW_VOLUME: f32 = 1.0;
 
+/// 一首放完之后做什么。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AudioEndAction {
+    #[default]
+    Stop,
+    Repeat,
+    /// 接着放当前列表里的下一个音频（只有主程序提供）。
+    Next,
+}
+
+impl AudioEndAction {
+    /// 模式按钮的轮换：宿主给出自己提供的模式表，不在表里的从表头开始。
+    pub fn after(self, offered: &[AudioEndAction]) -> AudioEndAction {
+        let next = offered
+            .iter()
+            .position(|action| *action == self)
+            .map_or(0, |index| (index + 1) % offered.len());
+        offered.get(next).copied().unwrap_or_default()
+    }
+
+    /// 宿主不提供的模式（对话框没有「播下一首」）落到表头。
+    pub fn within(self, offered: &[AudioEndAction]) -> AudioEndAction {
+        if offered.contains(&self) {
+            self
+        } else {
+            offered.first().copied().unwrap_or_default()
+        }
+    }
+
+    pub fn stored_name(self) -> &'static str {
+        match self {
+            AudioEndAction::Stop => "stop",
+            AudioEndAction::Repeat => "repeat",
+            AudioEndAction::Next => "next",
+        }
+    }
+
+    /// 存成字符串：读不懂的值（新版本写的）当默认，不让整份设置读失败。
+    pub fn from_stored(name: Option<&str>) -> AudioEndAction {
+        match name {
+            Some("repeat") => AudioEndAction::Repeat,
+            Some("next") => AudioEndAction::Next,
+            _ => AudioEndAction::Stop,
+        }
+    }
+}
+
+/// 音频、视频预览共用的播放设置：引擎持有一份，宿主加载设置时注入，面板从参数读。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MediaPlaybackSettings {
+    /// 0.0–1.0。
+    pub volume: f32,
+    pub audio_end_action: AudioEndAction,
+}
+
+impl Default for MediaPlaybackSettings {
+    fn default() -> Self {
+        Self {
+            volume: DEFAULT_MEDIA_PREVIEW_VOLUME,
+            audio_end_action: AudioEndAction::default(),
+        }
+    }
+}
+
 /// 存成整数百分比：设置文档里好读，也免得浮点误差让「没改」看起来像改了。
 pub fn media_preview_volume_from_stored(percent: Option<u8>) -> f32 {
     percent.map_or(DEFAULT_MEDIA_PREVIEW_VOLUME, |percent| {
@@ -343,8 +410,7 @@ pub struct PreviewPreferences {
     pub extension_rules: PreviewExtensionRules,
     pub directory_expand_levels: u8,
     pub text_view: TextViewSettings,
-    /// 音频、视频预览共用的音量（0.0–1.0）。
-    pub media_volume: f32,
+    pub media_playback: MediaPlaybackSettings,
 }
 
 impl PreviewPreferences {
@@ -356,7 +422,7 @@ impl PreviewPreferences {
             extension_rules: PreviewExtensionRules::default_rules(),
             directory_expand_levels: DEFAULT_PREVIEW_DIRECTORY_EXPAND_LEVELS,
             text_view: TextViewSettings::default(),
-            media_volume: DEFAULT_MEDIA_PREVIEW_VOLUME,
+            media_playback: MediaPlaybackSettings::default(),
         }
     }
 }
@@ -471,7 +537,10 @@ pub fn preview_preferences_from_stored(stored: &StoredPreviewPreferences) -> Pre
             stored.text_preview_zoom_percent,
             stored.text_preview_wrap,
         ),
-        media_volume: media_preview_volume_from_stored(stored.media_preview_volume_percent),
+        media_playback: MediaPlaybackSettings {
+            volume: media_preview_volume_from_stored(stored.media_preview_volume_percent),
+            audio_end_action: AudioEndAction::from_stored(stored.audio_end_action.as_deref()),
+        },
     }
 }
 
@@ -633,6 +702,27 @@ mod stored_preferences_migration_tests {
         let rules =
             preview_extension_rules_from_stored(&StoredPreviewPreferences::default(), &defaults);
         assert!(rules.audio.is_empty());
+    }
+
+    #[test]
+    fn end_action_cycles_through_what_the_host_offers() {
+        use AudioEndAction::{Next, Repeat, Stop};
+        let main_app = [Stop, Repeat, Next];
+        assert_eq!(Stop.after(&main_app), Repeat);
+        assert_eq!(Repeat.after(&main_app), Next);
+        assert_eq!(Next.after(&main_app), Stop);
+        let dialog = [Stop, Repeat];
+        assert_eq!(Repeat.after(&dialog), Stop);
+        assert_eq!(Next.within(&dialog), Stop);
+        assert_eq!(Next.after(&dialog), Stop);
+        for action in main_app {
+            assert_eq!(
+                AudioEndAction::from_stored(Some(action.stored_name())),
+                action
+            );
+        }
+        assert_eq!(AudioEndAction::from_stored(Some("shuffle")), Stop);
+        assert_eq!(AudioEndAction::from_stored(None), Stop);
     }
 
     #[test]

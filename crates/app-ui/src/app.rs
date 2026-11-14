@@ -800,9 +800,7 @@ impl FileBrowser {
             application_shutdown_phase: ApplicationShutdownPhase::Running,
         };
         browser.refresh_current_language();
-        browser
-            .preview_engine
-            .set_media_volume(browser.user_config.media_preview_volume);
+        browser.apply_media_preferences_to_preview();
         browser.refresh_column_width_reference_content_width();
         startup_trace::mark_once("file_browser_new_ready");
         let startup_rendering_environment = browser.startup_rendering_environment.clone();

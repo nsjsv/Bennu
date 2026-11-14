@@ -336,6 +336,8 @@ pub(crate) struct UserConfig {
     pub(crate) text_preview_view: bennu_preview::text_view::TextViewSettings,
     /// 音频、视频预览共用的音量（0.0–1.0）。
     pub(crate) media_preview_volume: f32,
+    /// 音频播完之后做什么。
+    pub(crate) audio_end_action: bennu_preview::preview_config::AudioEndAction,
     pub(crate) show_hidden_files: bool,
     pub(crate) language_setting: UiLanguageSetting,
     pub(crate) sidebar_width: f32,
@@ -475,6 +477,7 @@ pub(crate) fn default_user_config() -> UserConfig {
         preview_extension_rules: PreviewExtensionRules::default_rules(),
         text_preview_view: bennu_preview::text_view::TextViewSettings::default(),
         media_preview_volume: bennu_preview::preview_config::DEFAULT_MEDIA_PREVIEW_VOLUME,
+        audio_end_action: bennu_preview::preview_config::AudioEndAction::Stop,
         show_hidden_files: false,
         language_setting: UiLanguageSetting::System,
         sidebar_width: DEFAULT_SIDEBAR_WIDTH,
@@ -528,6 +531,7 @@ pub(crate) fn ui_thread_startup_config() -> UserConfig {
         preview_extension_rules: PreviewExtensionRules::default_rules(),
         text_preview_view: bennu_preview::text_view::TextViewSettings::default(),
         media_preview_volume: bennu_preview::preview_config::DEFAULT_MEDIA_PREVIEW_VOLUME,
+        audio_end_action: bennu_preview::preview_config::AudioEndAction::Stop,
         show_hidden_files: false,
         language_setting: UiLanguageSetting::System,
         sidebar_width: DEFAULT_SIDEBAR_WIDTH,

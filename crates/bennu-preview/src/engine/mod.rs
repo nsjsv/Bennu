@@ -15,7 +15,7 @@ use crate::preview::{
     AudioAnalysis, AudioAnalysisCache, AudioPreviewPlayback, PreviewBottomControlsState,
     PreviewSize, PreviewState, PreviewWindowProfile, VideoPreviewPlayback,
 };
-use crate::preview_config::{PreviewExtensionRules, PreviewFileSizeLimits};
+use crate::preview_config::{MediaPlaybackSettings, PreviewExtensionRules, PreviewFileSizeLimits};
 use crate::preview_message::PreviewMessage;
 use crate::text_document::TextViewerEvent;
 use crate::text_preview::TextPreviewDocument;
@@ -59,9 +59,11 @@ pub struct PreviewEngine {
     pub audio_analysis: Option<AudioAnalysis>,
     pub audio_analysis_cache: AudioAnalysisCache,
     pub video_preview: Option<VideoPreviewPlayback>,
-    /// 音频、视频预览共用的音量（0.0–1.0），唯一来源：宿主加载设置时注入，
-    /// 改动经 `MediaVolumeChanged` 交宿主记住后由 `set_media_volume` 生效。
-    pub media_volume: f32,
+    /// 音频、视频预览共用的音量与播完模式，唯一来源：宿主加载设置时注入；改动经
+    /// `MediaVolumeChanged` / `AudioEndActionCycled` 交宿主记住后由对应的 set 方法生效。
+    pub media_settings: MediaPlaybackSettings,
+    /// 「播下一首」时宿主排进来的下一首：打开它时右侧面板也直接播。
+    pub queued_audio_track: Option<std::path::PathBuf>,
     pub preview_size: PreviewSize,
     pub pending_preview_resize: Option<PreviewSize>,
     pub preview_window_profile: PreviewWindowProfile,
@@ -131,7 +133,8 @@ impl PreviewEngine {
             audio_analysis: None,
             audio_analysis_cache: AudioAnalysisCache::default(),
             video_preview: None,
-            media_volume: 1.0,
+            media_settings: MediaPlaybackSettings::default(),
+            queued_audio_track: None,
             preview_size: initial_preview_size,
             pending_preview_resize: None,
             preview_window_profile: PreviewWindowProfile::Regular,
@@ -449,7 +452,7 @@ mod tests {
             [PreviewMessage::MediaVolumeChanged(volume)] if *volume == 1.0
         ));
         engine.set_media_volume(7.0);
-        assert_eq!(engine.media_volume, 1.0);
+        assert_eq!(engine.media_settings.volume, 1.0);
     }
 
     #[test]
@@ -601,5 +604,54 @@ mod tests {
         );
         // 越界的句号什么都不做。
         drop(engine.handle(PreviewMessage::AudioLyricsLineSelected(9)));
+    }
+
+    #[test]
+    fn a_queued_next_track_plays_even_in_the_right_panel_once() {
+        use crate::preview::AudioPreviewPlaybackStatus;
+        let mut engine = engine();
+        engine.preview_load_surface = PreviewLoadSurface::RightDockedPanel;
+        let next = PathBuf::from("/music/02.flac");
+        engine.queue_next_audio_track(next.clone());
+        // 用户在排队期间点开的是别的文件：照常只就绪，排队也作废。
+        drop(engine.open_audio_preview(PathBuf::from("/music/other.flac")));
+        assert_eq!(
+            engine
+                .audio_preview
+                .as_ref()
+                .map(|playback| playback.status),
+            Some(AudioPreviewPlaybackStatus::Ready)
+        );
+        engine.queue_next_audio_track(next.clone());
+        drop(engine.open_audio_preview(next.clone()));
+        assert_eq!(
+            engine
+                .audio_preview
+                .as_ref()
+                .map(|playback| playback.status),
+            Some(AudioPreviewPlaybackStatus::Loading)
+        );
+        assert!(engine.queued_audio_track.is_none());
+    }
+
+    #[test]
+    fn end_action_messages_go_to_the_host() {
+        let mut engine = engine();
+        assert!(matches!(
+            returned_to_host(&mut engine, PreviewMessage::AudioEndActionCycled),
+            PreviewMessage::AudioEndActionCycled
+        ));
+        assert!(matches!(
+            returned_to_host(
+                &mut engine,
+                PreviewMessage::AudioNextTrackRequested(PathBuf::from("/m/a.mp3"))
+            ),
+            PreviewMessage::AudioNextTrackRequested(_)
+        ));
+        engine.set_audio_end_action(crate::preview_config::AudioEndAction::Repeat);
+        assert_eq!(
+            engine.media_settings.audio_end_action,
+            crate::preview_config::AudioEndAction::Repeat
+        );
     }
 }

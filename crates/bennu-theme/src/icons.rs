@@ -70,6 +70,10 @@ pub enum IconSymbol {
     TriangleAlert,
     Video,
     Volume2,
+    /// 音频播完模式：放完停（→|）、单曲循环、接着放下一首。
+    StopAfterTrack,
+    Repeat1,
+    SkipForward,
 }
 
 pub fn rotated_chevron_right_view(rotation_degrees: f32, size: f32) -> Svg<'static, Theme> {
@@ -219,6 +223,9 @@ impl IconSymbol {
             Self::TriangleAlert => include_bytes!("../assets/icons/lucide/triangle-alert.svg"),
             Self::Video => include_bytes!("../assets/icons/lucide/video.svg"),
             Self::Volume2 => VOLUME_2_ICON,
+            Self::StopAfterTrack => ARROW_RIGHT_TO_LINE_ICON,
+            Self::Repeat1 => REPEAT_1_ICON,
+            Self::SkipForward => SKIP_FORWARD_ICON,
         }
     }
 }
@@ -264,4 +271,8 @@ const PLAY_ICON: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" width="24" 
 const SETTINGS_ICON: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.32-1.915"/><circle cx="12" cy="12" r="3"/></svg>"#;
 const SQUARE_ICON: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/></svg>"#;
 const TERMINAL_ICON: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>"#;
+// lucide 的 arrow-right-to-line、repeat-1、skip-forward（ISC 许可，同目录 LICENSE）。
+const ARROW_RIGHT_TO_LINE_ICON: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 12H3"/><path d="m11 18 6-6-6-6"/><path d="M21 5v14"/></svg>"#;
+const REPEAT_1_ICON: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/><path d="M11 10h1v4"/></svg>"#;
+const SKIP_FORWARD_ICON: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" x2="19" y1="5" y2="19"/></svg>"#;
 const VOLUME_2_ICON: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4.702a1 1 0 0 0-1.707-.707L5.586 7.702A1 1 0 0 1 4.879 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1.879a1 1 0 0 1 .707.298l3.707 3.707A1 1 0 0 0 11 19.298z"/><path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.364 18.364a9 9 0 0 0 0-12.728"/></svg>"#;

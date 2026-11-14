@@ -872,6 +872,23 @@ fn media_preview_volume_roundtrips_as_a_percentage() {
 }
 
 #[test]
+fn audio_end_action_roundtrips_and_unknown_values_fall_back() {
+    use bennu_preview::preview_config::AudioEndAction;
+    let default = default_user_config();
+    assert_eq!(default.audio_end_action, AudioEndAction::Stop);
+    let mut config = default.clone();
+    config.audio_end_action = AudioEndAction::Next;
+    let mut stored = config.user_preferences().to_stored();
+    assert_eq!(stored.preview.audio_end_action.as_deref(), Some("next"));
+    let restored = UserPreferences::from_stored(stored.clone(), &default).preferences;
+    assert_eq!(restored.audio_end_action, AudioEndAction::Next);
+
+    stored.preview.audio_end_action = Some("shuffle".to_owned());
+    let restored = UserPreferences::from_stored(stored, &default).preferences;
+    assert_eq!(restored.audio_end_action, AudioEndAction::Stop);
+}
+
+#[test]
 fn preview_extension_rules_roundtrip_through_stored_preferences() {
     let default = default_user_config();
     let mut config = default.clone();

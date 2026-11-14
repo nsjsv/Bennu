@@ -345,11 +345,22 @@ impl PreviewHost {
                 self.preferences.text_view = self.preferences.text_view.apply(change);
                 Task::none()
             }
-            // 音量：读主程序记住的值，这里改了只当次有效，不写回（同字号）。
+            // 音量、播完模式：读主程序记住的值，这里改了只当次有效，不写回（同字号）。
             PreviewMessage::MediaVolumeChanged(volume) => {
                 self.engine.set_media_volume(volume);
                 Task::none()
             }
+            PreviewMessage::AudioEndActionCycled => {
+                let action = self
+                    .engine
+                    .media_settings
+                    .audio_end_action
+                    .after(&super::DIALOG_AUDIO_END_ACTIONS);
+                self.engine.set_audio_end_action(action);
+                Task::none()
+            }
+            // 对话框从不设成「播下一首」，引擎不会要下一首。
+            PreviewMessage::AudioNextTrackRequested(_) => Task::none(),
             // 窗口在消息回到宿主前已被关掉时，焦点簿记不能指向已死窗口。
             PreviewMessage::PreviewWindowPresented(window) => {
                 if self.engine.preview_window == Some(window) {

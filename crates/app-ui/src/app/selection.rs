@@ -20,6 +20,7 @@ mod activation_tests;
 mod clipboard;
 // 高级新建文件夹复用同一收纳谓词，与「用选中项新建文件夹」同语义。
 pub(in crate::app) use clipboard::gather_sources_in_directory;
+mod audio_next_track;
 #[cfg(test)]
 mod clipboard_tests;
 #[cfg(test)]

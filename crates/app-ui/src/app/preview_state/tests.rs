@@ -489,3 +489,34 @@ fn every_message_the_engine_returns_has_a_host_handler() {
         drop(browser.update(Message::Preview(message)));
     }
 }
+
+#[test]
+fn end_action_button_cycles_the_three_main_app_modes_and_reaches_the_engine() {
+    use bennu_preview::preview_config::AudioEndAction;
+    let mut browser = browser_with_image(Path::new("/workspace/song.flac"));
+    for expected in [
+        AudioEndAction::Repeat,
+        AudioEndAction::Next,
+        AudioEndAction::Stop,
+    ] {
+        drop(browser.update(Message::Preview(PreviewMessage::AudioEndActionCycled)));
+        assert_eq!(browser.user_config.audio_end_action, expected);
+        assert_eq!(
+            browser.preview_engine.media_settings.audio_end_action,
+            expected
+        );
+    }
+}
+
+#[test]
+fn next_track_request_for_a_track_no_longer_selected_does_nothing() {
+    let mut browser = browser_with_image(Path::new("/workspace/photo.png"));
+    let selected_before = browser.tab().selected.clone();
+    drop(
+        browser.update(Message::Preview(PreviewMessage::AudioNextTrackRequested(
+            PathBuf::from("/workspace/elsewhere.mp3"),
+        ))),
+    );
+    assert_eq!(browser.tab().selected, selected_before);
+    assert!(browser.preview_engine.queued_audio_track.is_none());
+}

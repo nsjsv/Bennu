@@ -11,7 +11,7 @@ const STEREO_48K: PcmFormat = PcmFormat {
 fn stream_from_chunks(start: Duration, chunks: Vec<Vec<f32>>) -> PcmStream {
     let (sender, receiver) = sync_channel(chunks.len().max(1));
     for chunk in chunks {
-        sender.send(chunk).expect("queue chunk");
+        sender.send(PcmChunk::Samples(chunk)).expect("queue chunk");
     }
     PcmStream {
         start,
@@ -49,7 +49,7 @@ fn position_counts_consumed_frames_from_the_stream_start() {
 #[test]
 fn underrun_outputs_whole_silent_frames_without_advancing_position() {
     let exchange = Arc::new(PlaybackExchange::new(STEREO_48K.sample_rate));
-    let (_sender, receiver) = sync_channel::<Vec<f32>>(1);
+    let (_sender, receiver) = sync_channel::<PcmChunk>(1);
     exchange.replace_stream(PcmStream {
         start: Duration::ZERO,
         first_chunk: None,
@@ -101,9 +101,15 @@ fn failure_message_keeps_the_last_ffmpeg_line() {
 fn drain_frames(mut stream: PcmStream) -> usize {
     let mut samples = stream.first_chunk.take().map_or(0, |chunk| chunk.len());
     while let Ok(chunk) = stream.chunks.recv() {
-        samples += chunk.len();
+        if let PcmChunk::Samples(chunk) = chunk {
+            samples += chunk.len();
+        }
     }
     samples / STEREO_48K.channel_count()
+}
+
+fn no_repeat() -> Arc<AtomicBool> {
+    Arc::new(AtomicBool::new(false))
 }
 
 #[test]
@@ -114,8 +120,14 @@ fn ffmpeg_stream_decodes_any_format_and_starts_at_the_seek_position() {
     };
     let failure = Arc::new(StreamFailure::default());
 
-    let mut whole = spawn_pcm_stream(&opus, Duration::ZERO, STEREO_48K, Arc::clone(&failure))
-        .expect("spawn ffmpeg");
+    let mut whole = spawn_pcm_stream(
+        &opus,
+        Duration::ZERO,
+        STEREO_48K,
+        Arc::clone(&failure),
+        no_repeat(),
+    )
+    .expect("spawn ffmpeg");
     whole.wait_for_audio(&failure).expect("first chunk");
     let frames = drain_frames(whole);
     assert!((95_000..=97_000).contains(&frames), "{frames}");
@@ -125,6 +137,7 @@ fn ffmpeg_stream_decodes_any_format_and_starts_at_the_seek_position() {
         Duration::from_secs(1),
         STEREO_48K,
         Arc::clone(&failure),
+        no_repeat(),
     )
     .expect("spawn ffmpeg");
     tail.wait_for_audio(&failure).expect("first chunk");
@@ -143,8 +156,75 @@ fn undecodable_file_fails_before_playback_starts() {
     std::fs::write(&broken, b"not audio at all").expect("write fixture");
     let failure = Arc::new(StreamFailure::default());
 
-    let mut stream = spawn_pcm_stream(&broken, Duration::ZERO, STEREO_48K, Arc::clone(&failure))
-        .expect("spawn ffmpeg");
+    let mut stream = spawn_pcm_stream(
+        &broken,
+        Duration::ZERO,
+        STEREO_48K,
+        Arc::clone(&failure),
+        no_repeat(),
+    )
+    .expect("spawn ffmpeg");
     let error = stream.wait_for_audio(&failure).expect_err("cannot decode");
     assert!(!error.is_empty());
+}
+
+#[test]
+fn restart_marker_resets_the_position_to_the_start() {
+    let exchange = Arc::new(PlaybackExchange::new(STEREO_48K.sample_rate));
+    let (sender, receiver) = sync_channel(4);
+    sender
+        .send(PcmChunk::Samples(vec![0.5; 48_000]))
+        .expect("queue");
+    sender.send(PcmChunk::Restart).expect("queue");
+    sender
+        .send(PcmChunk::Samples(vec![0.25; 4]))
+        .expect("queue");
+    exchange.replace_stream(PcmStream {
+        start: Duration::from_secs(100),
+        first_chunk: None,
+        chunks: receiver,
+    });
+    let mut source = source_with(&exchange);
+    for _ in 0..48_000 {
+        assert_eq!(source.next(), Some(0.5));
+    }
+    // 下一遍的第一个采样直接接上，进度归零。
+    assert_eq!(source.next(), Some(0.25));
+    assert_eq!(exchange.position(), Duration::ZERO);
+}
+
+#[test]
+fn repeating_stream_starts_the_next_pass_without_ending() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let Some(wav) = sine_fixture(directory.path(), "short.wav", 1) else {
+        return;
+    };
+    let failure = Arc::new(StreamFailure::default());
+    let repeat = Arc::new(AtomicBool::new(true));
+    let mut stream = spawn_pcm_stream(
+        &wav,
+        Duration::ZERO,
+        STEREO_48K,
+        Arc::clone(&failure),
+        Arc::clone(&repeat),
+    )
+    .expect("spawn ffmpeg");
+    stream.wait_for_audio(&failure).expect("first chunk");
+    let mut restarts = 0;
+    let mut frames_after_restart = 0;
+    while restarts < 2 {
+        match stream.chunks.recv().expect("stream keeps going") {
+            PcmChunk::Restart => restarts += 1,
+            PcmChunk::Samples(chunk) if restarts > 0 => {
+                frames_after_restart += chunk.len() / STEREO_48K.channel_count();
+            }
+            PcmChunk::Samples(_) => {}
+        }
+    }
+    // 第二遍完整送到了第二个 Restart 之前。
+    assert!(
+        (47_000..=49_000).contains(&frames_after_restart),
+        "{frames_after_restart}"
+    );
+    repeat.store(false, Ordering::Release);
 }

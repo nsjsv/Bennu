@@ -195,7 +195,7 @@ impl super::PreviewEngine {
                 self.commit_audio_preview_seek()
             }
             MediaKeyCommand::ChangeVolume(delta) => Task::done(PreviewMessage::MediaVolumeChanged(
-                (self.media_volume + delta).clamp(0.0, 1.0),
+                (self.media_settings.volume + delta).clamp(0.0, 1.0),
             )),
         }
     }
@@ -240,7 +240,7 @@ impl super::PreviewEngine {
         generation: u64,
         audio_outcome: Result<AudioPreviewRuntime, String>,
     ) -> Task<PreviewMessage> {
-        let volume = self.media_volume;
+        let volume = self.media_settings.volume;
         let Some(playback) = self.active_video_preview_mut(&path, generation) else {
             if let Ok(runtime) = audio_outcome {
                 runtime.stop();
@@ -360,7 +360,7 @@ impl super::PreviewEngine {
     }
 
     fn resume_video_preview_playback(&mut self) -> Task<PreviewMessage> {
-        let volume = self.media_volume;
+        let volume = self.media_settings.volume;
         let Some(playback) = self.video_preview.as_mut() else {
             return Task::none();
         };

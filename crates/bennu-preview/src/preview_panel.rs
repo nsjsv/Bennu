@@ -25,6 +25,7 @@ use crate::preview::PreviewSize;
 use crate::preview::VideoPreviewPlayback;
 use crate::preview::{AudioAnalysis, AudioPreviewPlayback, ImagePreviewContent};
 use crate::preview::{PreviewContent, PreviewState};
+use crate::preview_config::MediaPlaybackSettings;
 use crate::preview_message::PreviewMessage;
 use crate::preview_surface::preview_surface;
 use crate::preview_tree_panel::{archive_preview_panel, directory_preview_panel};
@@ -48,7 +49,7 @@ pub fn view_preview_window<'a, Message>(
     audio_preview: Option<&'a AudioPreviewPlayback>,
     audio_analysis: Option<&'a AudioAnalysis>,
     video_preview: Option<&'a VideoPreviewPlayback>,
-    media_volume: f32,
+    media_settings: MediaPlaybackSettings,
     preview_bottom_controls_opacity: f32,
     operation_progress_animation_frame: u8,
     directory_scroll: ScrollRegionWiring<'static, Message>,
@@ -76,7 +77,7 @@ where
             audio_preview,
             audio_analysis,
             video_preview,
-            media_volume,
+            media_settings,
             preview_bottom_controls_opacity,
             operation_progress_animation_frame,
             directory_scroll,
@@ -107,7 +108,7 @@ fn preview_panel<'a, Message>(
     audio_preview: Option<&'a AudioPreviewPlayback>,
     audio_analysis: Option<&'a AudioAnalysis>,
     video_preview: Option<&'a VideoPreviewPlayback>,
-    media_volume: f32,
+    media_settings: MediaPlaybackSettings,
     preview_bottom_controls_opacity: f32,
     operation_progress_animation_frame: u8,
     directory_scroll: ScrollRegionWiring<'static, Message>,
@@ -198,7 +199,7 @@ where
             lyrics: lyrics.as_deref(),
             playback: audio_preview,
             analysis: audio_analysis,
-            media_volume,
+            media_settings,
             size,
         }),
         PreviewState::Ready(PreviewContent::FfmpegRequired { .. }) => ffmpeg_required_panel(),
@@ -216,7 +217,7 @@ where
             *height,
             *duration,
             video_preview,
-            media_volume,
+            media_settings.volume,
             size,
             preview_bottom_controls_opacity,
         )),

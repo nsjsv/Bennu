@@ -76,6 +76,10 @@ pub enum PreviewMessage {
     /// 点了第几句（带时间轴的歌词），从这句开始放。
     AudioLyricsLineSelected(usize),
     CopyFfmpegInstallCommand,
+    /// 播完模式按钮：交宿主按它提供的模式表轮换并记住。
+    AudioEndActionCycled,
+    /// 「播下一首」模式下这首放完了：宿主在当前列表里找下一首。
+    AudioNextTrackRequested(PathBuf),
     AudioPreviewTick,
     VideoPreviewPlaybackToggled,
     VideoPreviewAudioStarted(PathBuf, u64, Result<AudioPreviewRuntime, String>),

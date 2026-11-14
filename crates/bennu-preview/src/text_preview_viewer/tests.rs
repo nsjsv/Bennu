@@ -15,7 +15,13 @@ fn synced_state(document: &TextPreviewDocument) -> TextPreviewViewerState {
 
 fn sync(state: &mut TextPreviewViewerState, document: &TextPreviewDocument) {
     let view = state.view.unwrap_or_default();
-    sync_with_document(state, document, view, Size::new(480.0, 400.0));
+    sync_with_document(
+        state,
+        document,
+        view,
+        HighlightPalette::Light,
+        Size::new(480.0, 400.0),
+    );
 }
 
 fn base_line_height() -> f32 {
@@ -330,7 +336,13 @@ fn zooming_keeps_the_same_row_at_the_top() {
     scroll_viewer_by(&mut state, &document, base_line_height() * 10.0 + 5.0);
     let anchor = state.anchor;
     let zoomed = TextViewSettings::default().apply(TextViewChange::ZoomIn);
-    sync_with_document(&mut state, &document, zoomed, Size::new(480.0, 400.0));
+    sync_with_document(
+        &mut state,
+        &document,
+        zoomed,
+        HighlightPalette::Light,
+        Size::new(480.0, 400.0),
+    );
     assert_eq!(state.anchor, anchor);
     assert!(
         (state.pixel - 5.0 * 1.1).abs() < 0.01,
@@ -351,7 +363,13 @@ fn without_wrapping_long_rows_scroll_horizontally_within_their_width() {
     let document = document_from_bytes(text, TextJump::Start);
     let mut state = TextPreviewViewerState::default();
     let view = TextViewSettings::default().apply(TextViewChange::ToggleWrap);
-    sync_with_document(&mut state, &document, view, Size::new(480.0, 400.0));
+    sync_with_document(
+        &mut state,
+        &document,
+        view,
+        HighlightPalette::Light,
+        Size::new(480.0, 400.0),
+    );
     assert!(state.max_scroll_x() > 0.0);
     // 不换行：长行仍是一行高。
     let last_start = document.rows().back().expect("last").start;
@@ -367,6 +385,7 @@ fn without_wrapping_long_rows_scroll_horizontally_within_their_width() {
         &mut state,
         &document,
         TextViewSettings::default(),
+        HighlightPalette::Light,
         Size::new(480.0, 400.0),
     );
     assert_eq!(state.max_scroll_x(), 0.0);
@@ -677,4 +696,23 @@ fn highlight_tokens_split_font_runs_and_carry_colours() {
             (";".to_owned(), false, false),
         ]
     );
+}
+
+#[test]
+fn a_dark_palette_on_a_new_document_still_lays_out_the_text() {
+    // 换文档时状态重置回默认（浅色）配色；深色主题下下一次布局发现配色不同，以前只清掉
+    // 已排版的行、不重新排版，文字整片空白，只剩行号。
+    let document = document_from_bytes(lines(20), TextJump::Start);
+    let mut state = TextPreviewViewerState::default();
+    for _ in 0..3 {
+        sync_with_document(
+            &mut state,
+            &document,
+            TextViewSettings::default(),
+            HighlightPalette::Dark,
+            Size::new(480.0, 400.0),
+        );
+        assert!(!state.retained_rows.is_empty(), "visible rows are laid out");
+    }
+    assert_eq!(state.palette, HighlightPalette::Dark);
 }

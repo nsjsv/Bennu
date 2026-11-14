@@ -24,6 +24,7 @@ fn sync(state: &mut TextPreviewViewerState, document: &TextPreviewDocument) {
         state,
         document,
         TextViewSettings::default(),
+        crate::text_highlight::HighlightPalette::Light,
         Size::new(480.0, 400.0),
     );
 }

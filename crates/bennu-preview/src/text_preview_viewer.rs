@@ -225,11 +225,7 @@ where
     ) -> layout::Node {
         let size = limits.resolve(Length::Fill, Length::Fill, Size::ZERO);
         let state = tree.state.downcast_mut::<TextPreviewViewerState>();
-        if state.palette != self.palette {
-            state.palette = self.palette;
-            state.retained_rows.clear();
-        }
-        sync_with_document(state, self.document, self.view, size);
+        sync_with_document(state, self.document, self.view, self.palette, size);
         layout::Node::new(size)
     }
 
@@ -428,6 +424,7 @@ fn sync_with_document(
     state: &mut TextPreviewViewerState,
     document: &TextPreviewDocument,
     view: TextViewSettings,
+    palette: HighlightPalette,
     layout: Size,
 ) {
     if state.document_id != Some(document.id()) {
@@ -439,6 +436,12 @@ fn sync_with_document(
             is_focused: state.is_focused,
             ..TextPreviewViewerState::default()
         };
+    }
+    // 配色跟着应用明暗走：换了就按新配色重新排版可见行（行高不变）。
+    let palette_changed = state.palette != palette;
+    if palette_changed {
+        state.palette = palette;
+        state.retained_rows.clear();
     }
     let view_changed = state.view != Some(view);
     if view_changed {
@@ -483,7 +486,7 @@ fn sync_with_document(
             apply_jump(state, document, jump);
         }
     }
-    if content_changed || layout_changed || view_changed {
+    if content_changed || layout_changed || view_changed || palette_changed {
         normalize_anchor(state, document);
         refresh_retained_content(state, document);
         // 量出来的行高可能让当前位置越过窗口底部，重新夹一次。

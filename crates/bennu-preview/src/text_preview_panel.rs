@@ -19,10 +19,6 @@ use bennu_localization::tr;
 use iced::widget::{column, row, Column, Space};
 use iced::{Element, Length};
 
-const MARKDOWN_MODE_SWITCH_RESERVED_HEIGHT: f32 = 40.0;
-const MARKDOWN_MIN_BODY_SCROLL_HEIGHT: f32 = 120.0;
-const TEXT_PREVIEW_LIMIT_NOTICE_RESERVED_HEIGHT: f32 = 30.0;
-const TEXT_PREVIEW_MIN_BODY_SCROLL_HEIGHT: f32 = 120.0;
 // 参数即文本预览面板的完整输入（渲染产物 + 文档 + 接线），与调用点一一对应
 #[allow(clippy::too_many_arguments)]
 pub fn text_preview_panel<'a, Message>(
@@ -30,9 +26,8 @@ pub fn text_preview_panel<'a, Message>(
     format: TextPreviewFormat,
     line_limit_notice: Option<TextPreviewLineLimitNotice>,
     document: Option<&'a TextPreviewDocument>,
-    scroll_height: f32,
     text_preview_content_height: f32,
-    plain_viewer: impl Fn(&'a TextPreviewDocument, f32) -> Element<'a, Message> + 'a,
+    plain_viewer: impl Fn(&'a TextPreviewDocument) -> Element<'a, Message> + 'a,
     text_scroll: ScrollRegionWiring<'a, Message>,
     markdown_scroll: ScrollRegionWiring<'static, Message>,
     markdown_mode_switch: impl Fn(MarkdownPreviewMode) -> Element<'static, Message>,
@@ -46,14 +41,9 @@ where
     let chunk_error = document.and_then(TextPreviewDocument::chunk_error);
     let external_notice_is_visible =
         text_preview_external_notice_is_visible(format, document, line_limit_notice);
-    let footer_count = usize::from(external_notice_is_visible) + usize::from(chunk_error.is_some());
-    let body_height = (scroll_height
-        - TEXT_PREVIEW_LIMIT_NOTICE_RESERVED_HEIGHT * footer_count as f32)
-        .max(TEXT_PREVIEW_MIN_BODY_SCROLL_HEIGHT);
     let body: Element<'_, Message> = match format {
         TextPreviewFormat::Plain => plain_text_preview_body(
             document,
-            body_height,
             text_preview_content_height,
             plain_viewer,
             text_scroll,
@@ -62,7 +52,6 @@ where
             rendered,
             document,
             line_limit_notice,
-            body_height,
             text_preview_content_height,
             plain_viewer,
             text_scroll,
@@ -86,9 +75,8 @@ where
 
 fn plain_text_preview_body<'a, Message>(
     document: Option<&'a TextPreviewDocument>,
-    scroll_height: f32,
     content_height: f32,
-    plain_viewer: impl Fn(&'a TextPreviewDocument, f32) -> Element<'a, Message> + 'a,
+    plain_viewer: impl Fn(&'a TextPreviewDocument) -> Element<'a, Message> + 'a,
     scroll: ScrollRegionWiring<'a, Message>,
 ) -> Element<'a, Message>
 where
@@ -97,7 +85,7 @@ where
     let Some(document) = document else {
         return readable_text(tr!("Text preview is not ready")).into();
     };
-    let viewer = plain_viewer(document, scroll_height);
+    let viewer = plain_viewer(document);
     let geometry = scroll
         .scrollable(
             Space::new()
@@ -107,7 +95,7 @@ where
         )
         .direction(enhanced_vertical_scrollbar_direction())
         .style(enhanced_scrollbar_style)
-        .height(Length::Fixed(scroll_height))
+        .height(Length::Fill)
         .width(Length::Fixed(SCROLLBAR_HIT_WIDTH));
     // 只包几何宿主：查看器自己也经 operate 报告 scrollable，包整行会让滑块读到它。
     row![
@@ -115,7 +103,7 @@ where
         enhanced_scrollbar(geometry, ScrollbarAxis::Vertical)
     ]
     .width(Length::Fill)
-    .height(Length::Fixed(scroll_height))
+    .height(Length::Fill)
     .into()
 }
 
@@ -150,9 +138,8 @@ fn markdown_text_preview_body<'a, Message>(
     rendered: &'a str,
     document: Option<&'a TextPreviewDocument>,
     line_limit_notice: Option<TextPreviewLineLimitNotice>,
-    scroll_height: f32,
     text_preview_content_height: f32,
-    plain_viewer: impl Fn(&'a TextPreviewDocument, f32) -> Element<'a, Message> + 'a,
+    plain_viewer: impl Fn(&'a TextPreviewDocument) -> Element<'a, Message> + 'a,
     text_scroll: ScrollRegionWiring<'a, Message>,
     markdown_scroll: ScrollRegionWiring<'static, Message>,
     markdown_mode_switch: impl Fn(MarkdownPreviewMode) -> Element<'static, Message>,
@@ -164,15 +151,12 @@ where
         return readable_text(tr!("Text preview is not ready")).into();
     };
     let mode = document.markdown_preview_mode();
-    let body_height =
-        (scroll_height - MARKDOWN_MODE_SWITCH_RESERVED_HEIGHT).max(MARKDOWN_MIN_BODY_SCROLL_HEIGHT);
     let body = match mode {
         MarkdownPreviewMode::Rendered => {
-            markdown_preview_body(rendered, line_limit_notice, body_height, markdown_scroll)
+            markdown_preview_body(rendered, line_limit_notice, markdown_scroll)
         }
         MarkdownPreviewMode::Raw => plain_text_preview_body(
             Some(document),
-            body_height,
             text_preview_content_height,
             plain_viewer,
             text_scroll,

@@ -35,7 +35,6 @@ type PreviewParagraph = graphics::text::Paragraph;
 
 pub fn text_preview_viewer<'a, Message, Renderer>(
     document: &'a TextPreviewDocument,
-    scroll_height: f32,
     on_scroll: impl Fn(i32, f32, f32) -> Message + 'a,
     on_wheel: impl Fn(mouse::ScrollDelta) -> Message + 'a,
     on_content_height: impl Fn(f32) -> Message + 'a,
@@ -52,7 +51,6 @@ where
     Element::new(TextPreviewViewer {
         id: widget::Id::new(TEXT_PREVIEW_VIEWER_ID),
         document,
-        scroll_height,
         on_scroll: Box::new(on_scroll),
         on_wheel: Box::new(on_wheel),
         on_content_height: Box::new(on_content_height),
@@ -63,7 +61,6 @@ where
 struct TextPreviewViewer<'a, Message> {
     id: widget::Id,
     document: &'a TextPreviewDocument,
-    scroll_height: f32,
     on_scroll: Box<dyn Fn(i32, f32, f32) -> Message + 'a>,
     on_wheel: Box<dyn Fn(mouse::ScrollDelta) -> Message + 'a>,
     on_content_height: Box<dyn Fn(f32) -> Message + 'a>,
@@ -80,7 +77,8 @@ struct TextPreviewViewerState {
     generation: Option<u64>,
     content_revision: Option<u64>,
     content_width: f32,
-    scroll_height: f32,
+    // 文字视口高度 = 布局高度 − 上下内边距；只在布局时换算一次。
+    viewport_height: f32,
     scroll_line: usize,
     scroll_pixel: f32,
     // 锚定行上方的行高总和（增量维护，避免逐帧前缀遍历）。
@@ -145,7 +143,7 @@ where
     }
 
     fn size(&self) -> Size<Length> {
-        Size::new(Length::Fill, Length::Fixed(self.scroll_height))
+        Size::new(Length::Fill, Length::Fill)
     }
 
     fn layout(
@@ -154,10 +152,7 @@ where
         _renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
-        let size = limits
-            .width(Length::Fill)
-            .height(Length::Fixed(self.scroll_height))
-            .resolve(Length::Fill, Length::Fixed(self.scroll_height), Size::ZERO);
+        let size = limits.resolve(Length::Fill, Length::Fill, Size::ZERO);
         let gutter_width = text_preview_line_number_gutter_width(self.document);
         let content_offset =
             gutter_width + TEXT_PREVIEW_GUTTER_SPACING + TEXT_PREVIEW_DIVIDER_WIDTH;
@@ -167,7 +162,7 @@ where
             tree.state.downcast_mut::<TextPreviewViewerState>(),
             self.document,
             content_width,
-            self.scroll_height,
+            size.height,
         );
         layout::Node::new(size)
     }
@@ -189,9 +184,10 @@ where
         if let Some((lines, offset_y, viewport_height)) = state.pending_scroll_report.take() {
             shell.publish((self.on_scroll)(lines, offset_y, viewport_height));
         }
-        if state.reported_content_height != Some(state.cached_content_height) {
-            state.reported_content_height = Some(state.cached_content_height);
-            shell.publish((self.on_content_height)(state.cached_content_height));
+        let extent = host_scroll_extent(state);
+        if state.reported_content_height != Some(extent) {
+            state.reported_content_height = Some(extent);
+            shell.publish((self.on_content_height)(extent));
         }
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
@@ -282,7 +278,7 @@ where
         let bounds = layout.bounds();
         let text_width = text_bounds(bounds, self.document).width;
         let content_bounds = Rectangle {
-            height: bounds.height + state.cached_content_height,
+            height: host_scroll_extent(state),
             ..bounds
         };
         let translation = Vector::new(0.0, viewer_scroll_absolute(state));
@@ -367,8 +363,7 @@ where
         };
         let line_number_color = placeholder_color(theme);
         let text_origin_y = bounds.y + TEXT_PREVIEW_VIEWER_PADDING;
-        for entry in visible_logical_lines(state, bounds.height - TEXT_PREVIEW_VIEWER_PADDING * 2.0)
-        {
+        for entry in visible_logical_lines(state, state.viewport_height) {
             let Some(line_number) = state
                 .retained_line_numbers
                 .iter()
@@ -398,12 +393,13 @@ fn sync_with_document(
     state: &mut TextPreviewViewerState,
     document: &TextPreviewDocument,
     content_width: f32,
-    scroll_height: f32,
+    layout_height: f32,
 ) {
+    let viewport_height = (layout_height - Padding::new(TEXT_PREVIEW_VIEWER_PADDING).y()).max(0.0);
     let needs_source_update = state.source_path.as_deref() != Some(document.path())
         || state.generation != Some(document.generation());
     let needs_layout_update = (state.content_width - content_width).abs() >= f32::EPSILON
-        || (state.scroll_height - scroll_height).abs() >= f32::EPSILON;
+        || (state.viewport_height - viewport_height).abs() >= f32::EPSILON;
     let previous_line_count = state.line_heights.len();
     let needs_line_update = state.content_revision != Some(document.content_revision())
         || previous_line_count != document.line_count();
@@ -427,10 +423,8 @@ fn sync_with_document(
     }
 
     state.content_width = content_width;
-    state.scroll_height = scroll_height;
-    let padding = Padding::new(TEXT_PREVIEW_VIEWER_PADDING);
-    let text_width = (content_width - padding.x()).max(0.0);
-    let viewport_height = (scroll_height - padding.y()).max(0.0);
+    state.viewport_height = viewport_height;
+    let text_width = (content_width - Padding::new(TEXT_PREVIEW_VIEWER_PADDING).x()).max(0.0);
 
     if needs_source_update {
         let line_count = document.line_count();
@@ -563,6 +557,13 @@ fn note_measured_line_height(state: &mut TextPreviewViewerState, line_index: usi
     }
 }
 
+/// 宿主滚动区的内容高：文字总高 + 上下内边距。宿主视口是整个查看器
+/// 高度，文字视口少了上下内边距，内容高补上同样的量，两边最大偏移才相等
+/// ——宿主滚到底时最后一行正好贴住文字区底边。
+fn host_scroll_extent(state: &TextPreviewViewerState) -> f32 {
+    state.cached_content_height + Padding::new(TEXT_PREVIEW_VIEWER_PADDING).y()
+}
+
 fn viewer_scroll_absolute(state: &TextPreviewViewerState) -> f32 {
     state.anchor_prefix + state.scroll_pixel
 }
@@ -675,23 +676,17 @@ impl widget::operation::Scrollable for ScrollBridge<'_> {
         let Some(target_y) = offset.y else {
             return;
         };
-        let viewport_height =
-            (self.state.scroll_height - Padding::new(TEXT_PREVIEW_VIEWER_PADDING).y()).max(0.0);
-        self.apply_pixel_delta(
-            target_y - viewer_scroll_absolute(self.state),
-            viewport_height,
-        );
+        self.apply_pixel_delta(target_y - viewer_scroll_absolute(self.state));
     }
 
-    fn scroll_by(&mut self, offset: AbsoluteOffset, bounds: Rectangle, _content_bounds: Rectangle) {
-        let padding = Padding::new(TEXT_PREVIEW_VIEWER_PADDING);
-        let viewport_height = (bounds.height - padding.y()).max(0.0);
-        self.apply_pixel_delta(offset.y, viewport_height);
+    fn scroll_by(&mut self, offset: AbsoluteOffset, _bounds: Rectangle, _content_bounds: Rectangle) {
+        self.apply_pixel_delta(offset.y);
     }
 }
 impl ScrollBridge<'_> {
-    fn apply_pixel_delta(&mut self, delta_y: f32, viewport_height: f32) {
+    fn apply_pixel_delta(&mut self, delta_y: f32) {
         let state = &mut *self.state;
+        let viewport_height = state.viewport_height;
         let previous_line = state.scroll_line;
         let applied_lines = scroll_viewer_by(state, delta_y, viewport_height);
 

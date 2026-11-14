@@ -56,11 +56,10 @@ pub(crate) fn view_preview_window<'a>(
         sqlite_data_scroll_wiring(),
         // 查看器是渲染器敏感部件（Paragraph 泛型），宿主实例化注入；
         // 内容事件走 PreviewMessage，滚轮走宿主滚动管线。
-        |document: &TextPreviewDocument, scroll_height| {
+        |document: &TextPreviewDocument| {
             let wheel_region = ScrollbarRegion::TextPreview;
             text_preview_viewer(
                 document,
-                scroll_height,
                 // 滚动几何宿主是输入源：只镜像文档副本预取分块，不回推宿主。
                 |lines, _offset_y, viewport_height| {
                     Message::from(PreviewMessage::TextPreviewContentScrolled {

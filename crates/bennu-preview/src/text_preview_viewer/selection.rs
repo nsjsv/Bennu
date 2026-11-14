@@ -13,7 +13,7 @@ use iced::{mouse, Point, Rectangle, Size};
 
 use super::{
     base_line_height, line_height_of, visible_logical_lines, TextPreviewViewerState,
-    TEXT_PREVIEW_DRAG_THRESHOLD_PX, TEXT_PREVIEW_VIEWER_PADDING,
+    TEXT_PREVIEW_DRAG_THRESHOLD_PX,
 };
 use crate::text_preview::TextPreviewDocument;
 /// 光标或选择端点：逻辑行 + 行内 byte 偏移。
@@ -35,7 +35,7 @@ pub(crate) fn hit_test(
     document: &TextPreviewDocument,
     position: Point,
 ) -> Option<TextPos> {
-    let viewport_height = (state.scroll_height - TEXT_PREVIEW_VIEWER_PADDING * 2.0).max(0.0);
+    let viewport_height = state.viewport_height;
     let mut last_visible: Option<(usize, f32)> = None;
     for entry in visible_logical_lines(state, viewport_height) {
         if position.y < entry.visible_y {
@@ -394,7 +394,7 @@ pub(crate) fn selection_quads(
         return Vec::new();
     };
     let (start, end) = ordered(anchor, cursor);
-    let viewport_height = (state.scroll_height - TEXT_PREVIEW_VIEWER_PADDING * 2.0).max(0.0);
+    let viewport_height = state.viewport_height;
     let base = base_line_height();
 
     let mut quads = Vec::new();
@@ -560,7 +560,7 @@ fn apply_motion(
     extend: bool,
 ) {
     let from = state.cursor.unwrap_or(TextPos { line: 0, column: 0 });
-    let viewport_height = (state.scroll_height - TEXT_PREVIEW_VIEWER_PADDING * 2.0).max(0.0);
+    let viewport_height = state.viewport_height;
     let visible_line_count = ((viewport_height / base_line_height()).floor() as usize).max(1);
     let to = move_position(document, from, motion, visible_line_count);
     state.cursor = Some(to);
@@ -578,7 +578,7 @@ fn ensure_cursor_visible(
     document: &TextPreviewDocument,
     cursor_line: usize,
 ) {
-    let viewport_height = (state.scroll_height - TEXT_PREVIEW_VIEWER_PADDING * 2.0).max(0.0);
+    let viewport_height = state.viewport_height;
     let visible_line_count = ((viewport_height / base_line_height()).floor() as usize).max(1);
     let target = if cursor_line < state.scroll_line {
         Some(cursor_line)

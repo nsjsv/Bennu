@@ -7,11 +7,13 @@ use iced::Point;
 use super::*;
 
 fn viewer_state_for(document: &TextPreviewDocument) -> TextPreviewViewerState {
-    let mut state = TextPreviewViewerState::default();
-    state.line_heights = vec![None; document.line_count()];
-    state.cached_content_height = document.line_count() as f32 * base_line_height();
-    state.content_revision = Some(document.content_revision());
-    state
+    TextPreviewViewerState {
+        line_heights: vec![None; document.line_count()],
+        cached_content_height: document.line_count() as f32 * base_line_height(),
+        content_revision: Some(document.content_revision()),
+        viewport_height: 384.0,
+        ..TextPreviewViewerState::default()
+    }
 }
 
 fn document_for_text(content: &str) -> TextPreviewDocument {
@@ -449,4 +451,72 @@ fn press_then_release_without_motion_keeps_caret() {
 
     assert_eq!(state.cursor, state.anchor);
     assert!(selection::selection_quads(&state, &document).is_empty());
+}
+
+/// 底部契约：宿主滚到最大偏移（内容高 − 布局高）时最后一行底边正好贴住
+/// 文字视口底边；查看器自己（键盘）滚到底的偏移与宿主最大偏移相同。
+fn assert_bottom_contract(
+    state: &mut TextPreviewViewerState,
+    document: &TextPreviewDocument,
+    layout_height: f32,
+) {
+    let host_max_offset = host_scroll_extent(state) - layout_height;
+    let mut bridge = ScrollBridge {
+        state: &mut *state,
+        document,
+        text_width: 376.0,
+    };
+    bridge.scroll_to(AbsoluteOffset {
+        x: None,
+        y: Some(host_max_offset),
+    });
+    let last = visible_logical_lines(state, state.viewport_height)
+        .pop()
+        .expect("visible lines");
+    assert_eq!(last.line_index, document.line_count() - 1);
+    assert!(
+        (last.visible_y + last.height - state.viewport_height).abs() < 0.01,
+        "last line bottom {} != viewport bottom {}",
+        last.visible_y + last.height,
+        state.viewport_height
+    );
+
+    scroll_viewer_by(state, -1.0e6, state.viewport_height);
+    scroll_viewer_by(state, 1.0e6, state.viewport_height);
+    let host_max_offset = host_scroll_extent(state) - layout_height;
+    assert!((viewer_scroll_absolute(state) - host_max_offset).abs() < 0.01);
+}
+
+#[test]
+fn host_max_offset_shows_last_line_fully() {
+    let document = document_for_text(&lines(100));
+    let mut state = TextPreviewViewerState::default();
+    sync_with_document(&mut state, &document, 392.0, 400.0);
+
+    assert_bottom_contract(&mut state, &document, 400.0);
+}
+
+#[test]
+fn host_extent_tracks_measured_line_growth() {
+    let document = document_for_text(&lines(100));
+    let mut state = TextPreviewViewerState::default();
+    sync_with_document(&mut state, &document, 392.0, 400.0);
+    let extent = host_scroll_extent(&state);
+
+    // 换行变高的行抬高文字总高，宿主内容高同步抬高同样的量。
+    note_measured_line_height(&mut state, 50, base_line_height() * 3.0);
+    assert!((host_scroll_extent(&state) - extent - base_line_height() * 2.0).abs() < 0.01);
+    assert_bottom_contract(&mut state, &document, 400.0);
+}
+
+#[test]
+fn viewport_height_follows_layout() {
+    let document = document_for_text(&lines(100));
+    let mut state = TextPreviewViewerState::default();
+
+    for layout_height in [400.0, 250.0, 600.0] {
+        sync_with_document(&mut state, &document, 392.0, layout_height);
+        assert!((state.viewport_height - (layout_height - 16.0)).abs() < f32::EPSILON);
+        assert_bottom_contract(&mut state, &document, layout_height);
+    }
 }

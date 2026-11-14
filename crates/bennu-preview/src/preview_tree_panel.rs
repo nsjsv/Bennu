@@ -25,33 +25,30 @@ const PREVIEW_TREE_TOGGLE_ROTATION_DEGREES: f32 = 90.0;
 
 pub(crate) fn directory_preview_panel<Message>(
     entries: &[PreviewTreeEntry],
-    scroll_height: f32,
     scroll: ScrollRegionWiring<'static, Message>,
 ) -> Column<'static, Message>
 where
     Message: 'static + Clone + From<PreviewMessage>,
 {
     let listing = preview_tree_listing(entries, tr!("Empty directory"));
-    tree_scroller(listing, scroll_height, scroll)
+    tree_scroller(listing, scroll)
 }
 
 pub(crate) fn archive_preview_panel<Message>(
     entries: &[PreviewTreeEntry],
-    scroll_height: f32,
     scroll: ScrollRegionWiring<'static, Message>,
 ) -> Column<'static, Message>
 where
     Message: 'static + Clone + From<PreviewMessage>,
 {
     let listing = preview_tree_listing(entries, tr!("Empty archive"));
-    tree_scroller(listing, scroll_height, scroll)
+    tree_scroller(listing, scroll)
 }
 
-/// 目录/归档树共用滚动容器：固定高度 scrollable + 常驻细线滑块；
+/// 目录/归档树共用滚动容器：填满剩余高度的 scrollable + 常驻细线滑块；
 /// 滚轮惯性包装来自宿主持有的滚动管线。
 fn tree_scroller<Message>(
     listing: Column<'static, Message>,
-    scroll_height: f32,
     scroll: ScrollRegionWiring<'static, Message>,
 ) -> Column<'static, Message>
 where
@@ -61,7 +58,7 @@ where
         .scrollable(listing.into())
         .direction(enhanced_vertical_scrollbar_direction())
         .style(enhanced_scrollbar_style)
-        .height(Length::Fixed(scroll_height));
+        .height(Length::Fill);
 
     column![enhanced_scrollbar(scroller, ScrollbarAxis::Vertical)]
 }

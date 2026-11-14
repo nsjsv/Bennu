@@ -22,7 +22,7 @@ use crate::preview::VideoPreviewPlayback;
 use crate::preview::{AudioPreviewPlayback, ImagePreviewContent};
 use crate::preview::{PreviewContent, PreviewState};
 use crate::preview_message::PreviewMessage;
-use crate::preview_surface::{preview_scroll_height, preview_surface};
+use crate::preview_surface::preview_surface;
 use crate::preview_tree_panel::{archive_preview_panel, directory_preview_panel};
 use crate::scroll_wiring::ScrollRegionWiring;
 use crate::sqlite_preview_panel::sqlite_preview_panel;
@@ -51,7 +51,7 @@ pub fn view_preview_window<'a, Message>(
     markdown_scroll: ScrollRegionWiring<'static, Message>,
     sqlite_tables_scroll: ScrollRegionWiring<'a, Message>,
     sqlite_data_scroll: ScrollRegionWiring<'a, Message>,
-    plain_viewer: impl Fn(&'a TextPreviewDocument, f32) -> Element<'a, Message> + 'a,
+    plain_viewer: impl Fn(&'a TextPreviewDocument) -> Element<'a, Message> + 'a,
     markdown_mode_switch: impl Fn(MarkdownPreviewMode) -> Element<'static, Message>,
     sqlite_tabs: Element<'static, Message>,
     on_sqlite_resize_drag_finished: impl Fn() -> Message + 'static,
@@ -108,7 +108,7 @@ fn preview_panel<'a, Message>(
     markdown_scroll: ScrollRegionWiring<'static, Message>,
     sqlite_tables_scroll: ScrollRegionWiring<'a, Message>,
     sqlite_data_scroll: ScrollRegionWiring<'a, Message>,
-    plain_viewer: impl Fn(&'a TextPreviewDocument, f32) -> Element<'a, Message> + 'a,
+    plain_viewer: impl Fn(&'a TextPreviewDocument) -> Element<'a, Message> + 'a,
     markdown_mode_switch: impl Fn(MarkdownPreviewMode) -> Element<'static, Message>,
     sqlite_tabs: Element<'static, Message>,
     on_sqlite_resize_drag_finished: impl Fn() -> Message + 'static,
@@ -116,14 +116,13 @@ fn preview_panel<'a, Message>(
 where
     Message: 'static + Clone + From<PreviewMessage>,
 {
-    let scroll_height = preview_scroll_height(size);
     let panel: Element<'a, Message> = match preview {
         PreviewState::Loading(_) => column![readable_text(tr!("Loading preview..."))].into(),
         PreviewState::DownloadingRemoteFile(download) => {
             remote_preview_download_panel(download, operation_progress_animation_frame).into()
         }
         PreviewState::Ready(PreviewContent::Directory { entries, .. }) => {
-            directory_preview_panel(entries, scroll_height, directory_scroll).into()
+            directory_preview_panel(entries, directory_scroll).into()
         }
         PreviewState::Ready(PreviewContent::Text {
             path,
@@ -137,7 +136,6 @@ where
             *line_limit_notice,
             text_preview_document
                 .filter(|document: &&TextPreviewDocument| document.path() == path.as_path()),
-            scroll_height,
             text_preview_content_height,
             plain_viewer,
             text_scroll,
@@ -146,7 +144,7 @@ where
         )
         .into(),
         PreviewState::Ready(PreviewContent::Archive { entries, .. }) => {
-            archive_preview_panel(entries, scroll_height, archive_scroll).into()
+            archive_preview_panel(entries, archive_scroll).into()
         }
         PreviewState::Ready(PreviewContent::Sqlite(database)) => sqlite_preview_panel(
             database,

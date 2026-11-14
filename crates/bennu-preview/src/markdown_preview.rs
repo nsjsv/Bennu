@@ -23,7 +23,6 @@ const MARKDOWN_MARKER_WIDTH: f32 = 22.0;
 pub fn markdown_preview_body<Message>(
     markdown: &str,
     line_limit_notice: Option<TextPreviewLineLimitNotice>,
-    scroll_height: f32,
     scroll: ScrollRegionWiring<'static, Message>,
 ) -> Element<'static, Message>
 where
@@ -48,7 +47,7 @@ where
         .scrollable(content.into())
         .direction(enhanced_vertical_scrollbar_direction())
         .style(enhanced_scrollbar_style)
-        .height(Length::Fixed(scroll_height))
+        .height(Length::Fill)
         .width(Length::Fill);
 
     enhanced_scrollbar(scroller, ScrollbarAxis::Vertical)

@@ -60,7 +60,3 @@ pub(crate) fn animated_image_preview_command(
     )
     .map(Message::Preview)
 }
-
-pub(crate) fn start_audio_preview_command(path: PathBuf) -> Task<Message> {
-    bennu_preview::commands::preview::start_audio_preview_command(path).map(Message::Preview)
-}

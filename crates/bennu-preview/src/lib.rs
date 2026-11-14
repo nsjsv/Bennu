@@ -70,6 +70,7 @@ pub mod markdown_preview;
 pub mod markdown_render;
 // 渲染模式的键盘（搜索、缩放快捷键）。
 mod markdown_keys;
+mod media_keys;
 // 文档（PDF/Office 分页）预览面板，滚动接线经 scroll_wiring 由宿主注入。
 pub mod document_preview_panel;
 // SQLite 预览面板（表列表/数据网格/SQL 查询），标签行与滚动接线由宿主注入。

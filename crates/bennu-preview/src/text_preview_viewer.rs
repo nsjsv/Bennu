@@ -29,7 +29,7 @@ use crate::text_document::{
 };
 use crate::text_highlight::HighlightPalette;
 use crate::text_view::{TextViewChange, TextViewSettings};
-pub use find::focus_text_preview;
+pub use find::focus_preview_keyboard;
 use geometry::{
     anchor_index, is_at_bottom, normalize_anchor, note_measured_height, row_height,
     scroll_viewer_by, scroll_viewer_horizontally, visible_rows, window_span,
@@ -281,7 +281,7 @@ where
             ..bounds
         };
         // 独立预览窗口打开时宿主对这个 id 发 focus 操作：键盘一开始就归查看器。关掉搜索条
-        // 后引擎的 `focus_text_preview` 经 custom 认出查看器的状态。
+        // 后引擎的 `focus_preview_keyboard` 经 custom 认出查看器的状态。
         operation.focusable(Some(&self.id), bounds, state);
         operation.custom(Some(&self.id), bounds, state);
         operation.scrollable(

@@ -859,6 +859,19 @@ fn extension_rules_default_lists_mirror_builtin_types() {
 }
 
 #[test]
+fn media_preview_volume_roundtrips_as_a_percentage() {
+    let default = default_user_config();
+    assert_eq!(default.media_preview_volume, 1.0);
+    let mut config = default.clone();
+    config.media_preview_volume = 0.35;
+
+    let stored = config.user_preferences().to_stored();
+    assert_eq!(stored.preview.media_preview_volume_percent, Some(35));
+    let restored = UserPreferences::from_stored(stored, &default).preferences;
+    assert_eq!(restored.media_preview_volume, 0.35);
+}
+
+#[test]
 fn preview_extension_rules_roundtrip_through_stored_preferences() {
     let default = default_user_config();
     let mut config = default.clone();

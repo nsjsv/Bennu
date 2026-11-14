@@ -1,181 +1,167 @@
-//! 音频预览面板（标题摘要/时间线控制/音量控制）。自 app-ui
-//! view/preview_panel.rs 下沉，逐字节保真。
+//! 音频预览面板。够宽时左右分栏（左封面 + 歌曲信息，歌词在右），不够宽时上下排；
+//! 底部整宽是进度区、时间和控件。外面包一层媒体键盘壳（回车、方向键）。
 
 use std::path::Path;
 use std::time::Duration;
 
 use bennu_localization::tr;
-use iced::widget::{button, column, container, image, row, Button, Column, Space};
+use iced::alignment::Horizontal;
+use iced::widget::{button, column, container, image, row, Column, Space};
 use iced::{Alignment, Element, Length};
 
-use bennu_theme::controls::icon_button_style;
+use bennu_theme::controls::{icon_button_style, slider};
 use bennu_theme::icons::{themed_icon, IconSymbol, IconTone};
+use bennu_theme::styles::muted_text_color;
+use bennu_theme::typography::{BOLD, TITLE_SIZE};
 
 use crate::audio_preview::AudioStreamFacts;
 use crate::audio_track_text::{stream_summary, track_subtitle, track_title};
-use crate::formatting::format_file_size;
-use crate::media_controls::{
-    media_position_text, AUDIO_CONTROL_BUTTON_SIZE, AUDIO_CONTROL_ICON_SIZE,
-    AUDIO_PROGRESS_SLIDER_STEP_SECONDS, AUDIO_TIMELINE_CONTROL_GAP, AUDIO_VOLUME_SLIDER_STEP,
-};
+use crate::formatting::{format_duration, format_file_size};
+use crate::media_controls::{AUDIO_PROGRESS_SLIDER_STEP_SECONDS, AUDIO_VOLUME_SLIDER_STEP};
+use crate::media_keys::media_keys;
 use crate::panel_text::readable_text;
-use crate::preview::{AudioPreviewDetails, AudioPreviewPlayback, AudioPreviewPlaybackStatus};
+use crate::preview::{
+    AudioPreviewDetails, AudioPreviewPlayback, AudioPreviewPlaybackStatus, PreviewSize,
+};
 use crate::preview_message::PreviewMessage;
-use bennu_theme::controls::slider;
-use bennu_theme::typography::{BOLD, TITLE_SIZE};
 
-const AUDIO_PREVIEW_CONTROL_HEIGHT: f32 = 92.0;
-const AUDIO_PROGRESS_SLIDER_WIDTH: f32 = 280.0;
-const AUDIO_VOLUME_SLIDER_WIDTH: f32 = 100.0;
+const PANEL_PADDING: f32 = 20.0;
+/// 够放下「封面 + 信息」一行的宽度；再窄就上下排。
+const SIDE_BY_SIDE_MIN_WIDTH: f32 = 560.0;
+const COVER_MIN_EDGE: f32 = 96.0;
+const COVER_MAX_EDGE: f32 = 280.0;
+/// 进度区 + 时间 + 控件行大约占的高度，用来算封面还剩多少地方。
+const TRANSPORT_HEIGHT: f32 = 96.0;
+/// 上下排时标题、歌手专辑、技术参数三行大约占的高度。
+const STACKED_INFO_HEIGHT: f32 = 76.0;
+const SECTION_GAP: f32 = 16.0;
+const PLAY_BUTTON_EDGE: f32 = 40.0;
+const PLAY_ICON_EDGE: f32 = 18.0;
+const VOLUME_ICON_EDGE: f32 = 16.0;
+const VOLUME_SLIDER_WIDTH: f32 = 96.0;
 
-pub(crate) fn audio_preview_panel<Message>(
-    path: &Path,
-    details: &AudioPreviewDetails,
-    cover: Option<&image::Handle>,
-    playback: Option<&AudioPreviewPlayback>,
-) -> Column<'static, Message>
-where
-    Message: 'static + Clone + From<PreviewMessage>,
-{
-    let duration = details.probe.duration;
-    let len = details.len;
-    let playback = playback.filter(|playback| playback.path.as_path() == path);
-    let mut title = column![readable_text(track_title(path, &details.probe.tags))
-        .size(TITLE_SIZE)
-        .font(BOLD)]
-    .spacing(4)
-    .width(Length::Fill);
-    if let Some(subtitle) = track_subtitle(&details.probe.tags) {
-        title = title.push(readable_text(subtitle));
-    }
-    title = title
-        .push(readable_text(audio_file_summary(
-            &details.probe.stream,
-            len,
-        )))
-        .push(readable_text(audio_preview_status(playback, duration)));
-
-    let controls = row![
-        audio_cover(cover),
-        title,
-        audio_timeline_control(playback, duration),
-        audio_volume_control(playback),
-    ]
-    .spacing(12)
-    .align_y(Alignment::Center);
-
-    column![container(controls)
-        .width(Length::Fill)
-        .height(Length::Fixed(AUDIO_PREVIEW_CONTROL_HEIGHT))
-        .center_y(Length::Fixed(AUDIO_PREVIEW_CONTROL_HEIGHT)),]
+/// 面板要显示的东西，避免一长串参数。
+pub(crate) struct AudioPanelInput<'a> {
+    pub path: &'a Path,
+    pub details: &'a AudioPreviewDetails,
+    pub cover: Option<&'a image::Handle>,
+    pub playback: Option<&'a AudioPreviewPlayback>,
+    pub media_volume: f32,
+    pub size: PreviewSize,
 }
 
-fn audio_primary_button<Message>(
-    playback: Option<&AudioPreviewPlayback>,
-) -> Button<'static, Message>
+pub(crate) fn audio_preview_panel<Message>(input: AudioPanelInput<'_>) -> Element<'static, Message>
 where
     Message: 'static + Clone + From<PreviewMessage>,
 {
-    let icon = match playback.map(|playback| playback.status) {
-        Some(AudioPreviewPlaybackStatus::Playing) => IconSymbol::Pause,
-        _ => IconSymbol::Play,
-    };
-    let button = button(themed_icon(icon, IconTone::Normal, AUDIO_CONTROL_ICON_SIZE))
-        .padding(8)
-        .width(Length::Fixed(AUDIO_CONTROL_BUTTON_SIZE))
-        .height(Length::Fixed(AUDIO_CONTROL_BUTTON_SIZE))
-        .style(icon_button_style);
-    if matches!(
-        playback.map(|playback| playback.status),
-        Some(AudioPreviewPlaybackStatus::Loading)
-    ) {
-        button
+    let playback = input
+        .playback
+        .filter(|playback| playback.path.as_path() == input.path);
+    let duration = input.details.probe.duration;
+    let transport = transport(playback, duration, input.media_volume);
+    let side_by_side = input.size.width >= SIDE_BY_SIDE_MIN_WIDTH;
+    let body: Element<'static, Message> = if side_by_side {
+        let cover_edge = (input.size.height - 2.0 * PANEL_PADDING - TRANSPORT_HEIGHT - SECTION_GAP)
+            .min(COVER_MAX_EDGE);
+        let mut top = row![].spacing(24).align_y(Alignment::Center);
+        if cover_edge >= COVER_MIN_EDGE {
+            top = top.push(cover_art(input.cover, cover_edge));
+        }
+        top = top.push(info_column(&input, playback, Horizontal::Left));
+        column![
+            container(top).height(Length::Fill).center_y(Length::Fill),
+            transport,
+        ]
+        .spacing(SECTION_GAP)
+        .into()
     } else {
-        button.on_press(Message::from(PreviewMessage::AudioPreviewPlaybackToggled))
-    }
+        let available_height = input.size.height
+            - 2.0 * PANEL_PADDING
+            - STACKED_INFO_HEIGHT
+            - TRANSPORT_HEIGHT
+            - 2.0 * SECTION_GAP;
+        let cover_edge = (input.size.width - 2.0 * PANEL_PADDING)
+            .min(available_height)
+            .min(COVER_MAX_EDGE);
+        let mut stacked = Column::new()
+            .spacing(SECTION_GAP)
+            .align_x(Alignment::Center)
+            .width(Length::Fill);
+        if cover_edge >= COVER_MIN_EDGE {
+            stacked = stacked.push(cover_art(input.cover, cover_edge));
+        }
+        stacked
+            .push(info_column(&input, playback, Horizontal::Center))
+            .push(transport)
+            .into()
+    };
+    media_keys(
+        container(body)
+            .padding(PANEL_PADDING)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_y(Length::Fill)
+            .into(),
+    )
 }
 
-fn audio_timeline_control<Message>(
-    playback: Option<&AudioPreviewPlayback>,
-    duration: Option<Duration>,
-) -> Element<'static, Message>
-where
-    Message: 'static + Clone + From<PreviewMessage>,
-{
-    let position = playback
-        .map(|playback| playback.position)
-        .unwrap_or(Duration::ZERO);
-    let duration_seconds = duration
-        .map(|duration| duration.as_secs_f32())
-        .unwrap_or_else(|| (position.as_secs_f32() + 1.0).max(1.0))
-        .max(1.0);
-    let position_seconds = position.as_secs_f32().min(duration_seconds);
-
-    let slider_row = row![
-        audio_primary_button(playback),
-        slider(0.0..=duration_seconds, position_seconds, |value: f32| {
-            Message::from(PreviewMessage::AudioPreviewSeekRequested(value))
-        },)
-        .on_release(Message::from(PreviewMessage::AudioPreviewSeekCommitted))
-        .step(AUDIO_PROGRESS_SLIDER_STEP_SECONDS)
-        .width(Length::Fixed(AUDIO_PROGRESS_SLIDER_WIDTH)),
-    ]
-    .spacing(AUDIO_TIMELINE_CONTROL_GAP)
-    .align_y(Alignment::Center);
-    let label_offset = AUDIO_CONTROL_BUTTON_SIZE + AUDIO_TIMELINE_CONTROL_GAP;
-
-    column![
-        slider_row,
-        row![
-            Space::new().width(Length::Fixed(label_offset)),
-            readable_text(media_position_text(position, duration)),
-        ],
-    ]
-    .spacing(4)
-    .width(Length::Fixed(label_offset + AUDIO_PROGRESS_SLIDER_WIDTH))
-    .into()
-}
-
-fn audio_volume_control<Message>(
-    playback: Option<&AudioPreviewPlayback>,
-) -> Element<'static, Message>
-where
-    Message: 'static + Clone + From<PreviewMessage>,
-{
-    let volume = playback.map(|playback| playback.volume).unwrap_or(1.0);
-    column![
-        readable_text(tr!("Volume %1%", format!("{:.0}", volume * 100.0))),
-        slider(0.0..=1.0, volume, |value: f32| Message::from(
-            PreviewMessage::AudioPreviewVolumeChanged(value)
-        ),)
-        .step(AUDIO_VOLUME_SLIDER_STEP)
-        .width(Length::Fixed(AUDIO_VOLUME_SLIDER_WIDTH)),
-    ]
-    .spacing(4)
-    .width(Length::Fixed(AUDIO_VOLUME_SLIDER_WIDTH))
-    .into()
-}
-
-const AUDIO_COVER_SIZE: f32 = 72.0;
-
-fn audio_cover<Message: 'static>(cover: Option<&image::Handle>) -> Element<'static, Message> {
+fn cover_art<Message: 'static>(
+    cover: Option<&image::Handle>,
+    edge: f32,
+) -> Element<'static, Message> {
     let artwork: Element<'static, Message> = match cover {
         Some(handle) => image(handle.clone())
             .content_fit(iced::ContentFit::Cover)
-            .width(Length::Fixed(AUDIO_COVER_SIZE))
-            .height(Length::Fixed(AUDIO_COVER_SIZE))
+            .width(Length::Fixed(edge))
+            .height(Length::Fixed(edge))
             .into(),
-        None => themed_icon(IconSymbol::Music, IconTone::Normal, AUDIO_COVER_SIZE * 0.5).into(),
+        None => themed_icon(IconSymbol::Music, IconTone::Normal, edge * 0.4).into(),
     };
     container(artwork)
-        .width(Length::Fixed(AUDIO_COVER_SIZE))
-        .height(Length::Fixed(AUDIO_COVER_SIZE))
-        .center_x(Length::Fixed(AUDIO_COVER_SIZE))
-        .center_y(Length::Fixed(AUDIO_COVER_SIZE))
+        .width(Length::Fixed(edge))
+        .height(Length::Fixed(edge))
+        .center_x(Length::Fixed(edge))
+        .center_y(Length::Fixed(edge))
         .into()
 }
 
-fn audio_file_summary(stream: &AudioStreamFacts, len: u64) -> String {
+fn info_column<Message: 'static>(
+    input: &AudioPanelInput<'_>,
+    playback: Option<&AudioPreviewPlayback>,
+    align: Horizontal,
+) -> Element<'static, Message> {
+    let tags = &input.details.probe.tags;
+    let mut info = Column::new()
+        .spacing(6)
+        .width(Length::Fill)
+        .align_x(align)
+        .push(
+            readable_text(track_title(input.path, tags))
+                .size(TITLE_SIZE)
+                .font(BOLD)
+                .align_x(align),
+        );
+    if let Some(subtitle) = track_subtitle(tags) {
+        info = info.push(readable_text(subtitle).align_x(align));
+    }
+    info = info.push(
+        readable_text(file_summary(&input.details.probe.stream, input.details.len))
+            .style(muted_text)
+            .align_x(align),
+    );
+    if let Some(status) = playback.and_then(status_line) {
+        info = info.push(readable_text(status).style(muted_text).align_x(align));
+    }
+    info.into()
+}
+
+fn muted_text(theme: &iced::Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(muted_text_color(theme)),
+    }
+}
+
+fn file_summary(stream: &AudioStreamFacts, len: u64) -> String {
     let facts = stream_summary(stream);
     if facts.is_empty() {
         format_file_size(len)
@@ -184,31 +170,98 @@ fn audio_file_summary(stream: &AudioStreamFacts, len: u64) -> String {
     }
 }
 
-fn audio_preview_status(
+/// 播放/暂停看按钮就知道；只有加载中和出错时多说一句。
+fn status_line(playback: &AudioPreviewPlayback) -> Option<String> {
+    match playback.status {
+        AudioPreviewPlaybackStatus::Loading => Some(tr!("Opening audio output...")),
+        AudioPreviewPlaybackStatus::Error => Some(
+            playback
+                .error
+                .as_ref()
+                .map(|error| tr!("Audio unavailable: %1", error))
+                .unwrap_or_else(|| tr!("Could not start audio preview")),
+        ),
+        _ => None,
+    }
+}
+
+fn transport<Message>(
     playback: Option<&AudioPreviewPlayback>,
     duration: Option<Duration>,
-) -> String {
-    use AudioPreviewPlaybackStatus as Status;
-    let Some(playback) = playback else {
-        return tr!("Ready to play");
-    };
+    media_volume: f32,
+) -> Element<'static, Message>
+where
+    Message: 'static + Clone + From<PreviewMessage>,
+{
+    let position = playback.map_or(Duration::ZERO, |playback| playback.position);
+    let duration_seconds = duration
+        .map(|duration| duration.as_secs_f32())
+        .unwrap_or_else(|| position.as_secs_f32() + 1.0)
+        .max(1.0);
+    let timeline = slider(
+        0.0..=duration_seconds,
+        position.as_secs_f32().min(duration_seconds),
+        |value: f32| Message::from(PreviewMessage::AudioPreviewSeekRequested(value)),
+    )
+    .on_release(Message::from(PreviewMessage::AudioPreviewSeekCommitted))
+    .step(AUDIO_PROGRESS_SLIDER_STEP_SECONDS)
+    .width(Length::Fill);
+    let times = row![
+        readable_text(format_duration(position)).style(muted_text),
+        Space::new().width(Length::Fill),
+        readable_text(duration.map_or_else(|| "--:--".to_owned(), format_duration))
+            .style(muted_text),
+    ];
+    let controls = row![
+        // 左边留给播完模式按钮；两侧等宽，播放键才在正中。
+        Space::new().width(Length::Fill),
+        play_button(playback),
+        container(volume_control(media_volume))
+            .width(Length::Fill)
+            .align_x(Horizontal::Right),
+    ]
+    .align_y(Alignment::Center);
+    column![timeline, times, controls]
+        .spacing(4)
+        .width(Length::Fill)
+        .into()
+}
 
-    match playback.status {
-        Status::Loading => tr!("Opening audio output..."),
-        Status::Playing => tr!(
-            "Playing · %1",
-            media_position_text(playback.position, duration)
-        ),
-        Status::Paused => tr!(
-            "Paused · %1",
-            media_position_text(playback.position, duration)
-        ),
-        Status::Stopped => tr!("Stopped"),
-        Status::Finished => tr!("Finished"),
-        Status::Error => playback
-            .error
-            .as_ref()
-            .map(|error| tr!("Audio unavailable: %1", error))
-            .unwrap_or_else(|| tr!("Could not start audio preview")),
+fn play_button<Message>(playback: Option<&AudioPreviewPlayback>) -> Element<'static, Message>
+where
+    Message: 'static + Clone + From<PreviewMessage>,
+{
+    let status = playback.map(|playback| playback.status);
+    let icon = match status {
+        Some(AudioPreviewPlaybackStatus::Playing) => IconSymbol::Pause,
+        _ => IconSymbol::Play,
+    };
+    let play = button(themed_icon(icon, IconTone::Normal, PLAY_ICON_EDGE))
+        .width(Length::Fixed(PLAY_BUTTON_EDGE))
+        .height(Length::Fixed(PLAY_BUTTON_EDGE))
+        .padding((PLAY_BUTTON_EDGE - PLAY_ICON_EDGE) / 2.0)
+        .style(icon_button_style);
+    if status == Some(AudioPreviewPlaybackStatus::Loading) {
+        play.into()
+    } else {
+        play.on_press(Message::from(PreviewMessage::AudioPreviewPlaybackToggled))
+            .into()
     }
+}
+
+fn volume_control<Message>(media_volume: f32) -> Element<'static, Message>
+where
+    Message: 'static + Clone + From<PreviewMessage>,
+{
+    row![
+        themed_icon(IconSymbol::Volume2, IconTone::Normal, VOLUME_ICON_EDGE),
+        slider(0.0..=1.0, media_volume, |value: f32| {
+            Message::from(PreviewMessage::MediaVolumeChanged(value))
+        })
+        .step(AUDIO_VOLUME_SLIDER_STEP)
+        .width(Length::Fixed(VOLUME_SLIDER_WIDTH)),
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center)
+    .into()
 }

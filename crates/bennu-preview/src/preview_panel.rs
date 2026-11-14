@@ -11,13 +11,14 @@ use iced::widget::{column, container};
 use iced::{Alignment, Element, Length};
 
 use crate::animated_image_preview_panel::animated_image_preview_panel;
-use crate::audio_preview_panel::audio_preview_panel;
+use crate::audio_preview_panel::{audio_preview_panel, AudioPanelInput};
 use crate::document_preview_panel::document_preview_panel;
 use crate::engine::SqlitePreviewState;
 use crate::image_preview_panel::{
     image_preview_panel, raster_image_preview_panel, svg_preview_panel,
 };
 use crate::image_preview_viewport::ImagePreviewViewport;
+use crate::media_keys::media_keys;
 use crate::operation_progress::remote_preview_download_panel;
 use crate::panel_text::readable_text;
 use crate::preview::PreviewSize;
@@ -46,6 +47,7 @@ pub fn view_preview_window<'a, Message>(
     image_preview_viewport: &ImagePreviewViewport,
     audio_preview: Option<&'a AudioPreviewPlayback>,
     video_preview: Option<&'a VideoPreviewPlayback>,
+    media_volume: f32,
     preview_bottom_controls_opacity: f32,
     operation_progress_animation_frame: u8,
     directory_scroll: ScrollRegionWiring<'static, Message>,
@@ -72,6 +74,7 @@ where
             image_preview_viewport,
             audio_preview,
             video_preview,
+            media_volume,
             preview_bottom_controls_opacity,
             operation_progress_animation_frame,
             directory_scroll,
@@ -101,6 +104,7 @@ fn preview_panel<'a, Message>(
     image_preview_viewport: &ImagePreviewViewport,
     audio_preview: Option<&'a AudioPreviewPlayback>,
     video_preview: Option<&'a VideoPreviewPlayback>,
+    media_volume: f32,
     preview_bottom_controls_opacity: f32,
     operation_progress_animation_frame: u8,
     directory_scroll: ScrollRegionWiring<'static, Message>,
@@ -183,7 +187,14 @@ where
             path,
             details,
             cover,
-        }) => audio_preview_panel(path, details, cover.as_ref(), audio_preview).into(),
+        }) => audio_preview_panel(AudioPanelInput {
+            path,
+            details,
+            cover: cover.as_ref(),
+            playback: audio_preview,
+            media_volume,
+            size,
+        }),
         PreviewState::Ready(PreviewContent::FfmpegRequired { .. }) => ffmpeg_required_panel(),
         PreviewState::Ready(PreviewContent::Video {
             path,
@@ -192,16 +203,17 @@ where
             height,
             duration,
             ..
-        }) => video_preview_panel(
+        }) => media_keys(video_preview_panel(
             path,
             frame.as_ref(),
             *width,
             *height,
             *duration,
             video_preview,
+            media_volume,
             size,
             preview_bottom_controls_opacity,
-        ),
+        )),
         PreviewState::Error(error) => preview_error_panel(error.clone(), None),
         PreviewState::ImageError { path, error } => preview_error_panel(
             error.clone(),

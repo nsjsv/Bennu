@@ -1,6 +1,6 @@
 //! Markdown 渲染模式的键盘：渲染内容不是查看器，外面包一层可聚焦的壳接住搜索与缩放
 //! 快捷键（Ctrl+F、F3、Shift+F3、Esc 关搜索条、Ctrl+=/-/0、Ctrl+滚轮）。点一下内容
-//! 才聚焦（独立预览窗口打开时由 `focus_text_preview` 聚焦），点别处失焦。
+//! 才聚焦（独立预览窗口打开时由 `focus_preview_keyboard` 聚焦），点别处失焦。
 
 use iced::advanced::widget::{self, operation, Operation};
 use iced::advanced::{layout, mouse, overlay, renderer, Clipboard, Layout, Shell, Widget};

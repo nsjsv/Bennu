@@ -9,7 +9,7 @@ use crate::preview_message::PreviewMessage;
 use crate::text_document::FindEvent;
 use crate::text_find_bar::focus_find_input;
 use crate::text_preview::MarkdownPreviewMode;
-use crate::text_preview_viewer::focus_text_preview;
+use crate::text_preview_viewer::focus_preview_keyboard;
 
 impl super::PreviewEngine {
     pub(crate) fn handle_find_event(&mut self, event: FindEvent) -> Task<PreviewMessage> {
@@ -48,7 +48,7 @@ impl super::PreviewEngine {
         let focus = if focus_input {
             focus_find_input()
         } else if closed {
-            focus_text_preview()
+            focus_preview_keyboard()
         } else {
             Task::none()
         };
@@ -84,7 +84,7 @@ impl super::PreviewEngine {
         let reads = document.accept_line_start(line, outcome);
         let reads = text_read_tasks(document, reads);
         if was_open && document.find_bar().is_none() {
-            return Task::batch([reads, focus_text_preview()]);
+            return Task::batch([reads, focus_preview_keyboard()]);
         }
         reads
     }

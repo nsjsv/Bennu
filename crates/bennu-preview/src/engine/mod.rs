@@ -56,6 +56,9 @@ pub struct PreviewEngine {
     pub sqlite_tables_resize_drag: Option<crate::engine::sqlite::SqliteTablesResizeDrag>,
     pub audio_preview: Option<AudioPreviewPlayback>,
     pub video_preview: Option<VideoPreviewPlayback>,
+    /// 音频、视频预览共用的音量（0.0–1.0），唯一来源：宿主加载设置时注入，
+    /// 改动经 `MediaVolumeChanged` 交宿主记住后由 `set_media_volume` 生效。
+    pub media_volume: f32,
     pub preview_size: PreviewSize,
     pub pending_preview_resize: Option<PreviewSize>,
     pub preview_window_profile: PreviewWindowProfile,
@@ -123,6 +126,7 @@ impl PreviewEngine {
             sqlite_tables_resize_drag: None,
             audio_preview: None,
             video_preview: None,
+            media_volume: 1.0,
             preview_size: initial_preview_size,
             pending_preview_resize: None,
             preview_window_profile: PreviewWindowProfile::Regular,
@@ -185,9 +189,6 @@ impl PreviewEngine {
             PreviewMessage::AudioPreviewStarted(path, playback_outcome) => {
                 self.accept_audio_preview_started(path, playback_outcome)
             }
-            PreviewMessage::AudioPreviewVolumeChanged(volume) => {
-                self.change_audio_preview_volume(volume)
-            }
             PreviewMessage::AudioPreviewTick => self.update_audio_preview_playback(),
             PreviewMessage::AudioPreviewSeekRequested(position) => {
                 self.drag_audio_preview_position(position)
@@ -216,9 +217,7 @@ impl PreviewEngine {
                 self.seek_video_preview_playback(position)
             }
             PreviewMessage::VideoPreviewSeekCommitted => self.commit_video_preview_seek(),
-            PreviewMessage::VideoPreviewVolumeChanged(volume) => {
-                self.change_video_preview_volume(volume)
-            }
+            PreviewMessage::MediaKey(command) => self.handle_media_key(command),
             PreviewMessage::VideoPreviewTick => self.update_video_preview_playback(),
             PreviewMessage::VideoPreviewFrameLoaded(frame) => {
                 self.accept_video_preview_frame(frame)
@@ -270,7 +269,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::preview::PreviewWindowProfile;
+    use crate::preview::{PreviewContent, PreviewWindowProfile};
+    use crate::preview_message::MediaKeyCommand;
 
     fn engine() -> PreviewEngine {
         PreviewEngine::new(
@@ -351,5 +351,116 @@ mod tests {
         }
 
         assert!(announced);
+    }
+
+    async fn task_outputs(task: Task<PreviewMessage>) -> Vec<PreviewMessage> {
+        let Some(mut stream) = iced_runtime::task::into_stream(task) else {
+            return Vec::new();
+        };
+        let mut outputs = Vec::new();
+        while let Some(action) = stream.next().await {
+            if let iced_runtime::Action::Output(message) = action {
+                outputs.push(message);
+            }
+        }
+        outputs
+    }
+
+    fn ready_audio(engine: &mut PreviewEngine, path: &std::path::Path, seconds: u64) {
+        engine.preview = Some(PreviewState::Ready(PreviewContent::Audio {
+            path: path.to_path_buf(),
+            details: crate::preview::AudioPreviewDetails {
+                len: 1,
+                probe: crate::audio_preview::AudioProbe {
+                    duration: Some(std::time::Duration::from_secs(seconds)),
+                    duration_is_estimate: false,
+                    tags: Default::default(),
+                    stream: Default::default(),
+                    embedded_cover_stream: None,
+                },
+            },
+            cover: None,
+        }));
+    }
+
+    #[test]
+    fn right_panel_audio_waits_for_play_but_the_window_starts_at_once() {
+        let path = PathBuf::from("/music/song.opus");
+        let mut panel = engine();
+        panel.preview_load_surface = PreviewLoadSurface::RightDockedPanel;
+        drop(panel.open_audio_preview(path.clone()));
+        assert_eq!(
+            panel.audio_preview.as_ref().map(|playback| playback.status),
+            Some(crate::preview::AudioPreviewPlaybackStatus::Ready)
+        );
+
+        let mut window = engine();
+        drop(window.open_audio_preview(path));
+        assert_eq!(
+            window
+                .audio_preview
+                .as_ref()
+                .map(|playback| playback.status),
+            Some(crate::preview::AudioPreviewPlaybackStatus::Loading)
+        );
+    }
+
+    #[tokio::test]
+    async fn volume_changes_go_to_the_host_and_keys_turn_into_volume_changes() {
+        let mut engine = engine();
+        assert!(matches!(
+            returned_to_host(&mut engine, PreviewMessage::MediaVolumeChanged(0.4)),
+            PreviewMessage::MediaVolumeChanged(volume) if volume == 0.4
+        ));
+
+        engine.set_media_volume(0.98);
+        let task = engine
+            .handle(PreviewMessage::MediaKey(MediaKeyCommand::ChangeVolume(
+                0.05,
+            )))
+            .expect("engine handles media keys");
+        let outputs = task_outputs(task).await;
+        assert!(matches!(
+            outputs.as_slice(),
+            [PreviewMessage::MediaVolumeChanged(volume)] if *volume == 1.0
+        ));
+        engine.set_media_volume(7.0);
+        assert_eq!(engine.media_volume, 1.0);
+    }
+
+    #[test]
+    fn seek_keys_step_from_the_current_position_within_the_track() {
+        let path = PathBuf::from("/music/song.flac");
+        let mut engine = engine();
+        engine.preview_load_surface = PreviewLoadSurface::RightDockedPanel;
+        ready_audio(&mut engine, &path, 12);
+        drop(engine.open_audio_preview(path));
+
+        let step = std::time::Duration::from_secs(5);
+        for _ in 0..3 {
+            drop(engine.handle(PreviewMessage::MediaKey(MediaKeyCommand::SeekForward(step))));
+        }
+        let position = |engine: &PreviewEngine| {
+            engine
+                .audio_preview
+                .as_ref()
+                .map(|playback| playback.position)
+        };
+        // 停在结尾，不越过时长。
+        assert_eq!(position(&engine), Some(std::time::Duration::from_secs(12)));
+        drop(
+            engine.handle(PreviewMessage::MediaKey(MediaKeyCommand::SeekBackward(
+                std::time::Duration::from_secs(30),
+            ))),
+        );
+        assert_eq!(position(&engine), Some(std::time::Duration::ZERO));
+    }
+
+    #[test]
+    fn audio_and_video_previews_take_the_keyboard() {
+        let mut engine = engine();
+        assert!(!engine.preview_takes_keyboard());
+        ready_audio(&mut engine, std::path::Path::new("/music/a.mp3"), 1);
+        assert!(engine.preview_takes_keyboard());
     }
 }

@@ -49,7 +49,7 @@ fn sentences_can_reorder_arguments_and_keep_other_percent_signs() {
     assert_eq!(fill_placeholders("%2 和 %1", &[&"a", &"b"]), "b 和 a");
     assert_eq!(fill_placeholders("100% %", &[]), "100% %");
     assert_eq!(
-        crate::tr_in!(UiLanguage::Chinese, "Volume %1%", 80),
-        "音量 80%"
+        crate::tr_in!(UiLanguage::Chinese, "Checking files %1%", 80),
+        "正在校验 80%"
     );
 }

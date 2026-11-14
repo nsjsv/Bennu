@@ -64,14 +64,16 @@ pub enum PreviewMessage {
     AudioPreviewDurationMeasured(PathBuf, Duration),
     AudioPreviewCoverLoaded(PathBuf, image::Handle),
     CopyFfmpegInstallCommand,
-    AudioPreviewVolumeChanged(f32),
     AudioPreviewTick,
     VideoPreviewPlaybackToggled,
     VideoPreviewAudioStarted(PathBuf, u64, Result<AudioPreviewRuntime, String>),
     VideoPreviewMetadataLoaded(PathBuf, Result<Option<Duration>, String>),
     VideoPreviewSeekRequested(f32),
     VideoPreviewSeekCommitted,
-    VideoPreviewVolumeChanged(f32),
+    /// 音频、视频共用的音量（0.0–1.0）；交给宿主记住后再由 `set_media_volume` 生效。
+    MediaVolumeChanged(f32),
+    /// 预览区聚焦时的播放快捷键，引擎分给当前的音频或视频。
+    MediaKey(MediaKeyCommand),
     VideoPreviewTick,
     VideoPreviewFrameLoaded(VideoPreviewFrame),
     VideoPreviewSeekFrameFailed(PathBuf, u64, Duration, String),
@@ -89,4 +91,13 @@ pub enum PreviewMessage {
     /// （focused_window）不归引擎所有，由宿主认领。
     PreviewWindowPresented(window::Id),
     PreviewWindowInitialControlsElapsed(u64),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MediaKeyCommand {
+    TogglePlayback,
+    SeekForward(Duration),
+    SeekBackward(Duration),
+    /// 音量增减量（正数调大）。
+    ChangeVolume(f32),
 }

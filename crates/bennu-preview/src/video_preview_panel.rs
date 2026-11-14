@@ -40,6 +40,7 @@ pub(crate) fn video_preview_panel<Message>(
     height: u32,
     duration: Option<Duration>,
     playback: Option<&VideoPreviewPlayback>,
+    media_volume: f32,
     size: PreviewSize,
     preview_bottom_controls_opacity: f32,
 ) -> Element<'static, Message>
@@ -91,6 +92,7 @@ where
         let controls: Element<'static, Message> = container(video_controls(
             playback,
             duration,
+            media_volume,
             frame_width,
             effective_opacity,
         ))
@@ -172,6 +174,7 @@ where
 fn video_controls<Message>(
     playback: Option<&VideoPreviewPlayback>,
     duration: Option<Duration>,
+    media_volume: f32,
     width: f32,
     opacity: f32,
 ) -> Element<'static, Message>
@@ -198,7 +201,7 @@ where
     .style(move |theme, status| faded_media_slider_style(theme, status, opacity));
     let slider_row = row![
         progress_slider,
-        container(video_volume_control(playback, opacity))
+        container(video_volume_control(media_volume, opacity))
             .width(Length::FillPortion(VIDEO_VOLUME_SLIDER_PORTION)),
     ]
     .spacing(VIDEO_CONTROL_SLIDER_GAP)
@@ -224,16 +227,13 @@ where
     .into()
 }
 
-fn video_volume_control<Message>(
-    playback: Option<&VideoPreviewPlayback>,
-    opacity: f32,
-) -> Element<'static, Message>
+fn video_volume_control<Message>(media_volume: f32, opacity: f32) -> Element<'static, Message>
 where
     Message: 'static + Clone + From<PreviewMessage>,
 {
     row![
         faded_media_icon(IconSymbol::Volume2, AUDIO_CONTROL_ICON_SIZE, opacity),
-        video_volume_slider(playback, opacity).width(Length::Fill),
+        video_volume_slider(media_volume, opacity).width(Length::Fill),
     ]
     .spacing(VIDEO_VOLUME_ICON_GAP)
     .align_y(Alignment::Center)
@@ -241,15 +241,14 @@ where
 }
 
 fn video_volume_slider<Message>(
-    playback: Option<&VideoPreviewPlayback>,
+    media_volume: f32,
     opacity: f32,
 ) -> iced::widget::Slider<'static, f32, Message>
 where
     Message: 'static + Clone + From<PreviewMessage>,
 {
-    let volume = playback.map(|playback| playback.volume).unwrap_or(1.0);
-    slider(0.0..=1.0, volume, |value: f32| {
-        Message::from(PreviewMessage::VideoPreviewVolumeChanged(value))
+    slider(0.0..=1.0, media_volume, |value: f32| {
+        Message::from(PreviewMessage::MediaVolumeChanged(value))
     })
     .step(AUDIO_VOLUME_SLIDER_STEP)
     .style(move |theme, status| faded_media_slider_style(theme, status, opacity))

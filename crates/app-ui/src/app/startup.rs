@@ -171,6 +171,8 @@ impl FileBrowser {
                 user_config.network_connections.clone(),
             );
         self.user_config = user_config;
+        self.preview_engine
+            .set_media_volume(self.user_config.media_preview_volume);
         self.refresh_current_language();
         // 设置页设备名输入框显示生效别名（配置值优先，缺省 hostname）。
         self.transfer_device_alias_input = self.effective_transfer_device_alias();

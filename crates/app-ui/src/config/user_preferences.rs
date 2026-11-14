@@ -33,6 +33,7 @@ use crate::model::{
 use crate::network_connections::SavedNetworkConnection;
 use crate::shortcuts::ShortcutConfig;
 use bennu_preview::preview_config::{
+    media_preview_volume_from_stored, media_preview_volume_percent,
     preview_directory_expand_levels_from_stored, preview_extension_rules_from_stored,
     preview_size_limits_from_stored,
 };
@@ -47,6 +48,7 @@ pub(crate) struct UserPreferences {
     pub(crate) preview_directory_expand_levels: u8,
     pub(crate) preview_extension_rules: PreviewExtensionRules,
     pub(crate) text_preview_view: TextViewSettings,
+    pub(crate) media_preview_volume: f32,
     pub(crate) show_hidden_files: bool,
     pub(crate) language_setting: UiLanguageSetting,
     pub(crate) sidebar_width: f32,
@@ -97,6 +99,7 @@ impl UserPreferences {
             preview_directory_expand_levels: config.preview_directory_expand_levels,
             preview_extension_rules: config.preview_extension_rules.clone(),
             text_preview_view: config.text_preview_view,
+            media_preview_volume: config.media_preview_volume,
             show_hidden_files: config.show_hidden_files,
             language_setting: config.language_setting,
             sidebar_width: normalize_sidebar_width(config.sidebar_width),
@@ -150,6 +153,7 @@ impl UserPreferences {
         config.preview_directory_expand_levels = self.preview_directory_expand_levels;
         config.preview_extension_rules = self.preview_extension_rules.clone();
         config.text_preview_view = self.text_preview_view;
+        config.media_preview_volume = self.media_preview_volume;
         config.show_hidden_files = self.show_hidden_files;
         config.language_setting = self.language_setting;
         config.sidebar_width = self.sidebar_width;
@@ -220,6 +224,9 @@ impl UserPreferences {
             text_preview_zoom_percent: Some(self.text_preview_view.zoom_percent),
             text_preview_wrap: Some(self.text_preview_view.wrap),
             preview_extra_audio_extensions: Some(self.preview_extension_rules.audio.clone()),
+            media_preview_volume_percent: Some(media_preview_volume_percent(
+                self.media_preview_volume,
+            )),
         };
         stored.show_hidden_files = self.show_hidden_files;
         stored.language_setting = self.language_setting.config_value().to_owned();
@@ -367,6 +374,9 @@ impl UserPreferences {
             text_preview_view: TextViewSettings::from_stored(
                 stored.preview.text_preview_zoom_percent,
                 stored.preview.text_preview_wrap,
+            ),
+            media_preview_volume: media_preview_volume_from_stored(
+                stored.preview.media_preview_volume_percent,
             ),
             preview_extension_rules: preview_extension_rules_from_stored(
                 &stored.preview,

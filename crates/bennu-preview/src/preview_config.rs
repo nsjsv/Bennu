@@ -52,6 +52,9 @@ pub struct StoredPreviewPreferences {
     /// 从旧的 `preview_extension_rules.audio` 迁移一次。
     #[serde(default)]
     pub preview_extra_audio_extensions: Option<Vec<String>>,
+    /// 音频、视频预览共用的音量（0–100）；None 用默认。
+    #[serde(default)]
+    pub media_preview_volume_percent: Option<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -310,6 +313,20 @@ fn extensions_match(extensions: &[String], path: &Path) -> bool {
         .any(|candidate| file_name.ends_with(&format!(".{candidate}")))
 }
 
+pub const DEFAULT_MEDIA_PREVIEW_VOLUME: f32 = 1.0;
+
+/// 存成整数百分比：设置文档里好读，也免得浮点误差让「没改」看起来像改了。
+pub fn media_preview_volume_from_stored(percent: Option<u8>) -> f32 {
+    percent.map_or(DEFAULT_MEDIA_PREVIEW_VOLUME, |percent| {
+        f32::from(percent.min(100)) / 100.0
+    })
+}
+
+pub fn media_preview_volume_percent(volume: f32) -> u8 {
+    // 先夹到 0–1 再乘，结果一定在 0–100 之内。
+    (volume.clamp(0.0, 1.0) * 100.0).round() as u8
+}
+
 pub fn preview_size_limit_mib(bytes: u64) -> u64 {
     bytes.div_ceil(PREVIEW_FILE_SIZE_UNIT_BYTES)
 }
@@ -326,6 +343,8 @@ pub struct PreviewPreferences {
     pub extension_rules: PreviewExtensionRules,
     pub directory_expand_levels: u8,
     pub text_view: TextViewSettings,
+    /// 音频、视频预览共用的音量（0.0–1.0）。
+    pub media_volume: f32,
 }
 
 impl PreviewPreferences {
@@ -337,6 +356,7 @@ impl PreviewPreferences {
             extension_rules: PreviewExtensionRules::default_rules(),
             directory_expand_levels: DEFAULT_PREVIEW_DIRECTORY_EXPAND_LEVELS,
             text_view: TextViewSettings::default(),
+            media_volume: DEFAULT_MEDIA_PREVIEW_VOLUME,
         }
     }
 }
@@ -451,6 +471,7 @@ pub fn preview_preferences_from_stored(stored: &StoredPreviewPreferences) -> Pre
             stored.text_preview_zoom_percent,
             stored.text_preview_wrap,
         ),
+        media_volume: media_preview_volume_from_stored(stored.media_preview_volume_percent),
     }
 }
 
@@ -612,6 +633,16 @@ mod stored_preferences_migration_tests {
         let rules =
             preview_extension_rules_from_stored(&StoredPreviewPreferences::default(), &defaults);
         assert!(rules.audio.is_empty());
+    }
+
+    #[test]
+    fn media_volume_round_trips_as_a_percentage() {
+        assert_eq!(media_preview_volume_from_stored(None), 1.0);
+        assert_eq!(media_preview_volume_from_stored(Some(35)), 0.35);
+        assert_eq!(media_preview_volume_from_stored(Some(250)), 1.0);
+        assert_eq!(media_preview_volume_percent(0.354), 35);
+        assert_eq!(media_preview_volume_percent(1.5), 100);
+        assert_eq!(media_preview_volume_percent(-0.2), 0);
     }
 
     #[test]

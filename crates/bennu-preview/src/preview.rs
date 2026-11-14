@@ -188,19 +188,25 @@ pub struct AudioPreviewPlayback {
     pub position: Duration,
     /// 正在拖进度条：显示拖到的位置，tick 不拿播放进度覆盖它，松手才真正跳转。
     pub seeking: bool,
-    pub volume: f32,
     pub error: Option<String>,
 }
 
 impl AudioPreviewPlayback {
     pub fn loading(path: PathBuf) -> Self {
+        Self::with_status(path, AudioPreviewPlaybackStatus::Loading)
+    }
+
+    pub fn ready(path: PathBuf) -> Self {
+        Self::with_status(path, AudioPreviewPlaybackStatus::Ready)
+    }
+
+    fn with_status(path: PathBuf, status: AudioPreviewPlaybackStatus) -> Self {
         Self {
             path,
             runtime: None,
-            status: AudioPreviewPlaybackStatus::Loading,
+            status,
             position: Duration::ZERO,
             seeking: false,
-            volume: 1.0,
             error: None,
         }
     }
@@ -208,6 +214,8 @@ impl AudioPreviewPlayback {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AudioPreviewPlaybackStatus {
+    /// 打开了但还没播（右侧面板不自动播放）；按播放从 `position` 开始。
+    Ready,
     Loading,
     Playing,
     Paused,
@@ -225,7 +233,6 @@ pub struct VideoPreviewPlayback {
     // Subscription 的身份必须固定；播放进度 tick 只更新 position，不能重建 ffmpeg 流。
     pub stream_start_position: Duration,
     pub duration: Option<Duration>,
-    pub volume: f32,
     pub generation: u64,
     pub seek_completion: Option<VideoPreviewSeekCompletion>,
     pub seek_frame_in_flight: Option<Duration>,
@@ -243,7 +250,6 @@ impl VideoPreviewPlayback {
             position: Duration::ZERO,
             stream_start_position: Duration::ZERO,
             duration,
-            volume: 1.0,
             generation: 1,
             seek_completion: None,
             seek_frame_in_flight: None,

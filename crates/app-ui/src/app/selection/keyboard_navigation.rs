@@ -11,13 +11,12 @@ use super::super::{
 use crate::commands::{
     animated_image_preview_command, image_preview_dimensions_command,
     load_expanded_directory_command, open_file_command, open_terminal_command, preview_command,
-    start_audio_preview_command,
 };
 use crate::list_view::LIST_HEADER_HEIGHT;
 use crate::model::{
-    AudioPreviewPlayback, BrowserLocation, BrowserViewMode, DirectoryExpansionLoadContext,
-    ExpandedDirectory, ExpandedDirectoryStatus, ImagePreviewViewport, Message, NavigationMode,
-    PreviewState, PreviewWindowProfile, ScrollbarRegion,
+    BrowserLocation, BrowserViewMode, DirectoryExpansionLoadContext, ExpandedDirectory,
+    ExpandedDirectoryStatus, ImagePreviewViewport, Message, NavigationMode, PreviewState,
+    PreviewWindowProfile, ScrollbarRegion,
 };
 use crate::shortcuts::FileSelectionDirection;
 use crate::virtual_range::vertical_scroll_delta_to_reveal;
@@ -603,8 +602,6 @@ impl FileBrowser {
                 self.preview_engine.clear_preview();
                 self.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
                 self.retract_global_error(GlobalErrorSource::Preview);
-                self.preview_engine.audio_preview =
-                    Some(AudioPreviewPlayback::loading(path.clone()));
                 let max_file_bytes = self.preview_file_size_limit_for(&path);
                 Task::batch([
                     window_command,
@@ -615,7 +612,9 @@ impl FileBrowser {
                         self.options.clone(),
                         max_file_bytes,
                     ),
-                    start_audio_preview_command(path),
+                    self.preview_engine
+                        .open_audio_preview(path)
+                        .map(Message::Preview),
                     self.request_browser_session_save(),
                 ])
             }

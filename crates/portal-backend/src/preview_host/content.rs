@@ -282,11 +282,12 @@ impl PreviewHost {
                     ScanOptions::default(),
                     self.preferences.directory_expand_levels,
                 );
-                // 预览窗一打开键盘就归文本预览（全选、复制、翻页、搜索不用先点一下）。
-                if self.engine.active_text_preview_document().is_some() {
+                // 预览窗一打开键盘就归预览内容（文本的全选、复制、搜索，音视频的回车、方向键
+                // 都不用先点一下）。
+                if self.engine.preview_takes_keyboard() {
                     return Task::batch([
                         task,
-                        bennu_preview::text_preview_viewer::focus_text_preview(),
+                        bennu_preview::text_preview_viewer::focus_preview_keyboard(),
                     ]);
                 }
                 task
@@ -335,6 +336,11 @@ impl PreviewHost {
             // 字号与换行：对话框读主程序记住的值，这里改了只当次有效，不写回。
             PreviewMessage::TextViewer(TextViewerEvent::ChangeView(change)) => {
                 self.preferences.text_view = self.preferences.text_view.apply(change);
+                Task::none()
+            }
+            // 音量：读主程序记住的值，这里改了只当次有效，不写回（同字号）。
+            PreviewMessage::MediaVolumeChanged(volume) => {
+                self.engine.set_media_volume(volume);
                 Task::none()
             }
             // 窗口在消息回到宿主前已被关掉时，焦点簿记不能指向已死窗口。

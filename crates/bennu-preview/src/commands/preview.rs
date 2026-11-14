@@ -233,10 +233,6 @@ pub fn animated_image_preview_command(
     )
 }
 
-pub fn start_audio_preview_command(path: PathBuf) -> Task<PreviewMessage> {
-    start_audio_preview_at_command(path, Duration::ZERO)
-}
-
 pub(crate) fn start_audio_preview_at_command(
     path: PathBuf,
     position: Duration,

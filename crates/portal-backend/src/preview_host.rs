@@ -17,7 +17,6 @@ use iced::Task;
 
 use bennu_preview::commands::preview::{
     animated_image_preview_command, image_preview_dimensions_command, preview_command,
-    start_audio_preview_command,
 };
 use bennu_preview::engine::{
     default_preview_size, preview_content_size_from_window, preview_size_matches,
@@ -25,7 +24,7 @@ use bennu_preview::engine::{
     PreviewWindowIdentity,
 };
 use bennu_preview::image_preview_viewport::ImagePreviewViewport;
-use bennu_preview::preview::{AudioPreviewPlayback, PreviewState, PreviewWindowProfile};
+use bennu_preview::preview::{PreviewState, PreviewWindowProfile};
 use bennu_preview::preview_config::PreviewPreferences;
 use bennu_preview::preview_loading::{
     classify_preview_path, file_too_large_to_preview, PreviewPathKind,
@@ -343,7 +342,6 @@ impl PreviewHost {
                     .preview_window_presentation_command(PreviewWindowProfile::Audio);
                 self.engine.clear_preview();
                 self.engine.preview = Some(PreviewState::Loading(path.clone()));
-                self.engine.audio_preview = Some(AudioPreviewPlayback::loading(path.clone()));
                 let max_file_bytes = self.file_size_limit_for(&path);
                 Task::batch([
                     window_command,
@@ -354,7 +352,7 @@ impl PreviewHost {
                         ScanOptions::default(),
                         max_file_bytes,
                     ),
-                    start_audio_preview_command(path),
+                    self.engine.open_audio_preview(path),
                 ])
             }
             PreviewPathKind::Archive | PreviewPathKind::Sqlite | PreviewPathKind::Text => {
@@ -392,6 +390,8 @@ impl PreviewHost {
             });
         let preferences = &self.preferences;
         self.engine.config = Self::engine_config(preferences);
+        // 每次打开会话都按主程序记住的音量来；对话框里改的只到这次会话结束。
+        self.engine.set_media_volume(preferences.media_volume);
     }
 }
 

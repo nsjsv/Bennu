@@ -86,6 +86,16 @@ impl FileBrowser {
                 self.user_config.text_preview_view = view;
                 self.persist_user_preferences_command()
             }
+            // 音频、视频共用的音量是主程序设置：改了就记住（落盘已合并，拖动不会狂写）。
+            PreviewMessage::MediaVolumeChanged(volume) => {
+                let volume = volume.clamp(0.0, 1.0);
+                if volume == self.user_config.media_preview_volume {
+                    return Task::none();
+                }
+                self.user_config.media_preview_volume = volume;
+                self.preview_engine.set_media_volume(volume);
+                self.persist_user_preferences_command()
+            }
             engine_message => {
                 unreachable!("{engine_message:?} 由 PreviewEngine::handle 处理，不会还给宿主")
             }
@@ -109,15 +119,15 @@ impl FileBrowser {
             return command.map(Message::Preview);
         }
         self.retract_global_error(GlobalErrorSource::Preview);
-        // 独立预览窗口一打开键盘就归文本预览（原文查看器或 Markdown 渲染内容）；右侧面板
-        // 不抢，点一下文字才归它。
+        // 独立预览窗口一打开键盘就归预览内容（文本查看器、Markdown 渲染内容、音视频）；
+        // 右侧面板不抢，点一下内容才归它。
         let focus_viewer = self.preview_engine.preview_load_surface
             == bennu_preview::engine::PreviewLoadSurface::StandaloneWindow
-            && self.preview_engine.active_text_preview_document().is_some();
+            && self.preview_engine.preview_takes_keyboard();
         if focus_viewer {
             return Task::batch([
                 command.map(Message::Preview),
-                bennu_preview::text_preview_viewer::focus_text_preview(),
+                bennu_preview::text_preview_viewer::focus_preview_keyboard(),
             ]);
         }
         command.map(Message::Preview)

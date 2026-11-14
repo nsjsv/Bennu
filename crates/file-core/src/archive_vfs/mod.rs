@@ -155,20 +155,11 @@ fn segment_is_archive_boundary(segment: &std::ffi::OsStr) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::archive_test_fixtures::write_tar;
     use crate::{FileError, FileKind};
-    use std::io::Write;
-    use zip::write::SimpleFileOptions;
-    use zip::ZipWriter;
 
-    fn write_sample_zip(path: &Path) {
-        let file = std::fs::File::create(path).unwrap();
-        let mut zip = ZipWriter::new(file);
-        zip.add_directory("photos", SimpleFileOptions::default())
-            .unwrap();
-        zip.start_file("photos/1.txt", SimpleFileOptions::default())
-            .unwrap();
-        zip.write_all(b"hello").unwrap();
-        zip.finish().unwrap();
+    fn write_sample_archive(path: &Path) {
+        write_tar(path, &[("photos/", b""), ("photos/1.txt", b"hello")]);
     }
 
     #[test]
@@ -204,8 +195,8 @@ mod tests {
     #[test]
     fn archive_file_is_browsing_root() {
         let workspace = tempfile::tempdir().unwrap();
-        let archive = workspace.path().join("docs.zip");
-        write_sample_zip(&archive);
+        let archive = workspace.path().join("docs.tar");
+        write_sample_archive(&archive);
 
         assert_eq!(
             archive_path_identity(&archive),
@@ -216,8 +207,8 @@ mod tests {
     #[test]
     fn paths_below_archive_are_inside_archive() {
         let workspace = tempfile::tempdir().unwrap();
-        let archive = workspace.path().join("docs.zip");
-        write_sample_zip(&archive);
+        let archive = workspace.path().join("docs.tar");
+        write_sample_archive(&archive);
 
         assert_eq!(
             archive_path_identity(&archive.join("photos")),
@@ -233,17 +224,17 @@ mod tests {
     fn nested_archive_segments_split_boundaries() {
         let workspace = tempfile::tempdir().unwrap();
         let outer = workspace.path().join("a.zip");
-        write_sample_zip(&outer);
+        std::fs::write(&outer, b"payload").unwrap();
 
-        let resolved = resolve_archive_virtual_path(&outer.join("inner/b.zip/x/c.txt"))
+        let resolved = resolve_archive_virtual_path(&outer.join("inner/b.tar.xz/x/c.txt"))
             .expect("nested archive path must resolve");
         assert_eq!(
             resolved.boundaries,
-            vec![outer.clone(), outer.join("inner/b.zip")]
+            vec![outer.clone(), outer.join("inner/b.tar.xz")]
         );
         assert_eq!(resolved.inner, PathBuf::from("x/c.txt"));
         assert_eq!(
-            archive_path_identity(&outer.join("inner/b.zip/x/c.txt")),
+            archive_path_identity(&outer.join("inner/b.tar.xz/x/c.txt")),
             ArchivePathIdentity::InsideArchive
         );
     }
@@ -251,7 +242,14 @@ mod tests {
     #[test]
     fn tgz_and_tar_gz_suffixes_are_boundaries() {
         let workspace = tempfile::tempdir().unwrap();
-        for name in ["bundle.tar.gz", "bundle.tgz", "bundle.7z", "bundle.rar"] {
+        for name in [
+            "bundle.tar.gz",
+            "bundle.tgz",
+            "bundle.tar.zst",
+            "bundle.txz",
+            "bundle.7z",
+            "bundle.rar",
+        ] {
             let archive = workspace.path().join(name);
             std::fs::write(&archive, b"payload").unwrap();
             assert_eq!(
@@ -270,8 +268,8 @@ mod tests {
     #[tokio::test]
     async fn scan_directory_lists_archive_root_and_inner_directory() {
         let workspace = tempfile::tempdir().unwrap();
-        let archive = workspace.path().join("docs.zip");
-        write_sample_zip(&archive);
+        let archive = workspace.path().join("docs.tar");
+        write_sample_archive(&archive);
 
         let root_scan = crate::scan_directory(&archive, Default::default())
             .await
@@ -305,8 +303,8 @@ mod tests {
     #[tokio::test]
     async fn scan_directory_reports_missing_inner_directory_as_unavailable() {
         let workspace = tempfile::tempdir().unwrap();
-        let archive = workspace.path().join("docs.zip");
-        write_sample_zip(&archive);
+        let archive = workspace.path().join("docs.tar");
+        write_sample_archive(&archive);
 
         let outcome = crate::scan_directory(&archive.join("missing"), Default::default()).await;
         assert!(matches!(
@@ -317,20 +315,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn nested_zip_member_materializes_and_browses() {
+    async fn nested_archive_member_materializes_and_browses() {
         let workspace = tempfile::tempdir().unwrap();
-        let inner_path = workspace.path().join("inner.zip");
-        write_sample_zip(&inner_path);
+        let inner_path = workspace.path().join("inner.tar");
+        write_sample_archive(&inner_path);
 
-        let outer_path = workspace.path().join("outer.zip");
-        let file = std::fs::File::create(&outer_path).unwrap();
-        let mut zip = zip::ZipWriter::new(file);
-        let options = zip::write::SimpleFileOptions::default();
-        zip.start_file("inner.zip", options).unwrap();
-        zip.write_all(&std::fs::read(&inner_path).unwrap()).unwrap();
-        zip.finish().unwrap();
+        let outer_path = workspace.path().join("outer.tar");
+        write_tar(
+            &outer_path,
+            &[("inner.tar", &std::fs::read(&inner_path).unwrap())],
+        );
 
-        let nested_root = outer_path.join("inner.zip");
+        let nested_root = outer_path.join("inner.tar");
         let scan = crate::scan_directory(&nested_root, Default::default())
             .await
             .expect("nested zip must materialize and scan");
@@ -342,30 +338,49 @@ mod tests {
         assert_eq!(names, vec!["photos"]);
     }
 
+    /// 物化出来的嵌套包要留整段后缀（`.tar.gz`），只留 `.gz` 就认不出格式、进不去。
+    #[tokio::test]
+    async fn nested_compressed_tar_member_browses() {
+        let workspace = tempfile::tempdir().unwrap();
+        let inner_tar = workspace.path().join("inner.tar");
+        write_sample_archive(&inner_tar);
+        let status = std::process::Command::new("gzip")
+            .arg(&inner_tar)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let inner_path = workspace.path().join("inner.tar.gz");
+        let outer_path = workspace.path().join("outer.tar");
+        write_tar(
+            &outer_path,
+            &[("inner.tar.gz", &std::fs::read(&inner_path).unwrap())],
+        );
+
+        let scan =
+            crate::scan_directory(outer_path.join("inner.tar.gz/photos"), Default::default())
+                .await
+                .expect("nested tar.gz must materialize and scan");
+        let names: Vec<&str> = scan
+            .entries
+            .iter()
+            .map(|entry| entry.name().to_str().unwrap())
+            .collect();
+        assert_eq!(names, vec!["1.txt"]);
+    }
+
     #[tokio::test]
     async fn single_root_member_name_reports_root_and_scatter() {
         let workspace = tempfile::tempdir().unwrap();
 
-        let single_path = workspace.path().join("single.zip");
-        let file = std::fs::File::create(&single_path).unwrap();
-        let mut zip = zip::ZipWriter::new(file);
-        let options = zip::write::SimpleFileOptions::default();
-        zip.add_directory("root", options).unwrap();
-        zip.start_file("root/a.txt", options).unwrap();
-        zip.write_all(b"1").unwrap();
-        zip.finish().unwrap();
+        let single_path = workspace.path().join("single.tar");
+        write_tar(&single_path, &[("root/", b""), ("root/a.txt", b"1")]);
         assert_eq!(
             single_root_member_name(&single_path).await.unwrap(),
             Some("root".to_owned())
         );
 
-        let scattered_path = workspace.path().join("scattered.zip");
-        let file = std::fs::File::create(&scattered_path).unwrap();
-        let mut zip = zip::ZipWriter::new(file);
-        zip.start_file("a.txt", options).unwrap();
-        zip.write_all(b"1").unwrap();
-        zip.add_directory("dir", options).unwrap();
-        zip.finish().unwrap();
+        let scattered_path = workspace.path().join("scattered.tar");
+        write_tar(&scattered_path, &[("a.txt", b"1"), ("dir/", b"")]);
         assert_eq!(
             single_root_member_name(&scattered_path).await.unwrap(),
             None
@@ -375,8 +390,8 @@ mod tests {
     #[tokio::test]
     async fn member_extraction_lands_files_and_numbers_duplicates() {
         let workspace = tempfile::tempdir().unwrap();
-        let archive = workspace.path().join("docs.zip");
-        write_sample_zip(&archive);
+        let archive = workspace.path().join("docs.tar");
+        write_sample_archive(&archive);
 
         let destination = workspace.path().join("out");
         let request =
@@ -410,8 +425,8 @@ mod tests {
     #[tokio::test]
     async fn materialize_member_for_open_extracts_to_temp() {
         let workspace = tempfile::tempdir().unwrap();
-        let archive = workspace.path().join("docs.zip");
-        write_sample_zip(&archive);
+        let archive = workspace.path().join("docs.tar");
+        write_sample_archive(&archive);
 
         let member = archive.join("photos/1.txt");
         let temp_file = materialize_archive_member_for_open(

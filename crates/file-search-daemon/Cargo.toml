@@ -24,7 +24,8 @@ tokio-util.workspace = true
 tracing.workspace = true
 tracing-journald.workspace = true
 tracing-subscriber.workspace = true
-zip = "8.6.0"
+# docx/odt/xlsx 正文只用 store 和 deflate；其余算法与加密都不要（各带一份压缩库）。
+zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -163,5 +163,8 @@ async fn progress_and_stderr_reach_the_caller() {
     let Err(SevenZipJobFailure::Exited { stderr, .. }) = outcome else {
         panic!("expected a failed exit");
     };
-    assert_eq!(stderr, "ERROR: Wrong password?");
+    assert_eq!(
+        String::from_utf8_lossy(&stderr).trim(),
+        "ERROR: Wrong password?"
+    );
 }

@@ -19,7 +19,7 @@ use super::mountinfo::{mounts_candidate_for_trash_probing, parse_mountinfo, MOUN
 use super::operations::trash_info_name;
 use super::trash_info::{create_trash_info, remove_unused_trash_info};
 use crate::mount_table::MountTableEntry;
-use crate::ops::{rename_noreplace, NoReplaceRenameError};
+use crate::ops::{move_without_replacing, NoReplaceRenameError};
 use crate::{FileError, ScanWarning};
 
 /// 放入回收站并返回确切的条目，照 GLib `g_local_file_trash`：选好位置，先独占
@@ -245,6 +245,8 @@ fn move_into_location(
             }
         };
         let trash_path = location.files.path.join(&item_name);
+        // 名字已由 `.trashinfo` 独占（规范里名字归属以它为准），这里只防 `files/` 里的孤儿，
+        // 同 GLib/KDE。
         if let Err(error) = move_without_replacing(path, &trash_path) {
             remove_unused_trash_info(&info_path);
             match error {
@@ -282,29 +284,6 @@ fn move_into_location(
         });
     }
     unreachable!("Trash item name candidates are unbounded")
-}
-
-/// 文件系统不支持 `RENAME_NOREPLACE`（如 ntfs-3g）时先确认目标不存在再普通改名。
-/// 名字已由 `.trashinfo` 独占（规范里名字归属以它为准），这里只防 `files/` 里的孤儿，
-/// 同 GLib/KDE。
-fn move_without_replacing(from: &Path, to: &Path) -> Result<(), NoReplaceRenameError> {
-    match rename_noreplace(from, to) {
-        Err(NoReplaceRenameError::Unsupported(_)) => rename_if_absent(from, to),
-        moved => moved,
-    }
-}
-
-fn rename_if_absent(from: &Path, to: &Path) -> Result<(), NoReplaceRenameError> {
-    match fs::symlink_metadata(to) {
-        Ok(_) => Err(NoReplaceRenameError::TargetExists),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            fs::rename(from, to).map_err(|error| match error.kind() {
-                io::ErrorKind::CrossesDevices => NoReplaceRenameError::CrossDevice,
-                _ => NoReplaceRenameError::Failed(error),
-            })
-        }
-        Err(error) => Err(NoReplaceRenameError::Failed(error)),
-    }
 }
 
 /// 同名时照 GLib `get_unique_filename`：编号插在第一个点前（`a.2.tar.gz`、`.2.env`），

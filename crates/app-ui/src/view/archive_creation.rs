@@ -1,3 +1,4 @@
+use file_core::{ArchiveFormat, ExternalTool};
 use iced::widget::column;
 use iced::{Element, Length};
 
@@ -40,20 +41,45 @@ pub(super) fn archive_creation_panel(state: &ArchiveCreationState) -> Element<'_
 }
 
 fn archive_format_buttons(state: &ArchiveCreationState) -> Element<'_, Message> {
-    segmented_choice_row(
+    let choices = segmented_choice_row(
         ARCHIVE_FORMATS
             .iter()
             .copied()
             .map(|format| SegmentedChoice {
                 label: archive_format_label(format),
                 selected: format == state.format(),
-                message: Some(Message::ArchiveCreation(
-                    ArchiveCreationMessage::FormatSelected(format),
-                )),
+                message: state
+                    .format_available(format)
+                    .then_some(Message::ArchiveCreation(
+                        ArchiveCreationMessage::FormatSelected(format),
+                    )),
                 tooltip: None,
             })
             .collect(),
-    )
+    );
+    if state.format_available(ArchiveFormat::Zip) {
+        return choices;
+    }
+    // 没装 7-Zip：zip、7z 置灰，下面说明怎么装。
+    let mut control = column![choices].spacing(6);
+    match ExternalTool::SevenZip.install_command() {
+        Some(command) => {
+            control = control
+                .push(dialog::hint(tr!(
+                    "zip and 7z need 7-Zip. Install it with: %1",
+                    command
+                )))
+                .push(normal_button(readable_text(tr!("Copy Command"))).on_press(
+                    Message::ArchiveCreation(ArchiveCreationMessage::CopySevenZipInstallCommand),
+                ));
+        }
+        None => {
+            control = control.push(dialog::hint(tr!(
+                "zip and 7z need 7-Zip. Install it with your system's package manager."
+            )));
+        }
+    }
+    control.into()
 }
 
 fn archive_compression_buttons(state: &ArchiveCreationState) -> Element<'_, Message> {

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use file_core::{DirectoryEntry, FileKind};
+use file_core::{DirectoryEntry, ExternalTool, FileKind};
 use iced::widget::{image, svg};
 
 // 原 app-ui 内 `use super::SqliteDatabasePreview`（model.rs 门面）；下沉后
@@ -108,9 +108,10 @@ pub enum PreviewContent {
         /// 同上，没有歌词就一直是 None。
         lyrics: Option<Arc<AudioLyrics>>,
     },
-    /// 音频、视频预览要靠 ffmpeg，系统里没有；面板给出安装命令。
-    FfmpegRequired {
+    /// 预览要靠的外部工具（音视频靠 ffmpeg，zip/7z/rar 靠 7-Zip）没装；面板给出安装命令。
+    ToolRequired {
         path: PathBuf,
+        tool: ExternalTool,
     },
     Video {
         path: PathBuf,

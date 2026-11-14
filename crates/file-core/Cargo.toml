@@ -13,7 +13,6 @@ dirs.workspace = true
 encoding_rs = "0.8.35"
 getrandom = "0.4.2"
 filetime = "0.2.29"
-flate2 = "1.1.9"
 image.workspace = true
 libc = "0.2"
 md-5.workspace = true
@@ -24,12 +23,10 @@ serde = { version = "1", features = ["derive"] }
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 sha1.workspace = true
 sha2.workspace = true
-tar = "0.4.46"
 tracing.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
-zip = "8.6.0"
 
 [target.'cfg(unix)'.dependencies]
 xattr = "1.6.1"

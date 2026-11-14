@@ -3,8 +3,8 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use file_core::{
-    validate_entry_name, ArchiveCompressionLevel, ArchiveFormat, ArchivePassword, FileKind,
-    InvalidEntryName,
+    validate_entry_name, ArchiveCompressionLevel, ArchiveFormat, ArchivePassword, ExternalTool,
+    FileKind, InvalidEntryName,
 };
 use iced::Task;
 
@@ -31,6 +31,8 @@ pub(crate) struct ArchiveCreationState {
     sources: Vec<PathBuf>,
     target_directory: PathBuf,
     file_name: String,
+    /// 打开时看一眼装了什么：zip、7z 要 7-Zip，tar.gz 系统自带。
+    available_formats: Vec<ArchiveFormat>,
     format: ArchiveFormat,
     compression_level: ArchiveCompressionLevel,
     password: ArchivePasswordDraft,
@@ -43,13 +45,16 @@ impl ArchiveCreationState {
         sources: Vec<PathBuf>,
         target_directory: PathBuf,
         single_source_kind: Option<FileKind>,
+        available_formats: Vec<ArchiveFormat>,
     ) -> Self {
         let file_name = default_archive_name(&sources, single_source_kind);
+        let format = available_formats[0];
         Self {
             sources,
             target_directory,
             file_name,
-            format: ArchiveFormat::Zip,
+            available_formats,
+            format,
             compression_level: ArchiveCompressionLevel::Balanced,
             password: ArchivePasswordDraft::new(String::new()),
             validation_error: None,
@@ -71,6 +76,10 @@ impl ArchiveCreationState {
 
     pub(crate) fn format(&self) -> ArchiveFormat {
         self.format
+    }
+
+    pub(crate) fn format_available(&self, format: ArchiveFormat) -> bool {
+        self.available_formats.contains(&format)
     }
 
     pub(crate) fn compression_level(&self) -> ArchiveCompressionLevel {
@@ -113,6 +122,9 @@ impl ArchiveCreationState {
     }
 
     fn select_format(&mut self, format: ArchiveFormat) {
+        if !self.format_available(format) {
+            return;
+        }
         self.format = format;
         if !self.password_supported() {
             self.password = ArchivePasswordDraft::new(String::new());
@@ -159,6 +171,7 @@ impl fmt::Debug for ArchiveCreationState {
             .field("sources", &self.sources)
             .field("target_directory", &self.target_directory)
             .field("file_name", &self.file_name)
+            .field("available_formats", &self.available_formats)
             .field("format", &self.format)
             .field("compression_level", &self.compression_level)
             .field("password", &self.password)
@@ -175,6 +188,7 @@ pub(crate) enum ArchiveCreationMessage {
     FormatSelected(ArchiveFormat),
     CompressionLevelSelected(ArchiveCompressionLevel),
     PasswordChanged(ArchivePasswordDraft),
+    CopySevenZipInstallCommand,
     Submitted,
     TargetChecked {
         state: ArchiveCreationState,
@@ -214,6 +228,12 @@ impl FileBrowser {
                 }
                 Task::none()
             }
+            ArchiveCreationMessage::CopySevenZipInstallCommand => {
+                match ExternalTool::SevenZip.install_command() {
+                    Some(command) => iced::clipboard::write(command.to_owned()),
+                    None => Task::none(),
+                }
+            }
             ArchiveCreationMessage::Submitted => self.submit_archive_creation(),
             ArchiveCreationMessage::TargetChecked {
                 state,
@@ -252,6 +272,7 @@ impl FileBrowser {
             sources,
             target_directory,
             single_source_kind,
+            available_archive_formats(),
         ));
         Task::none()
     }
@@ -340,6 +361,16 @@ pub(crate) fn archive_compression_level_label(
     }
 }
 
+/// 排在前面的是默认格式：装了 7-Zip 默认 zip，没装只能 tar.gz。只在 PATH 里找几个
+/// 文件，界面线程上做没问题。
+fn available_archive_formats() -> Vec<ArchiveFormat> {
+    if ExternalTool::SevenZip.locate().is_some() {
+        ARCHIVE_FORMATS.to_vec()
+    } else {
+        vec![ArchiveFormat::TarGz]
+    }
+}
+
 fn archive_target_directory(sources: &[PathBuf], current_dir: &Path) -> PathBuf {
     sources
         .first()
@@ -398,6 +429,7 @@ mod tests {
             vec![PathBuf::from("/docs/report.pdf")],
             PathBuf::from("/docs"),
             Some(FileKind::File),
+            ARCHIVE_FORMATS.to_vec(),
         );
         state.update_name(name.to_owned());
         state
@@ -421,6 +453,25 @@ mod tests {
                 "{name:?}"
             );
         }
+    }
+
+    #[test]
+    fn without_seven_zip_only_tar_gz_can_be_chosen() {
+        let mut state = ArchiveCreationState::new(
+            vec![PathBuf::from("/docs/report.pdf")],
+            PathBuf::from("/docs"),
+            Some(FileKind::File),
+            vec![ArchiveFormat::TarGz],
+        );
+        assert_eq!(state.format(), ArchiveFormat::TarGz);
+        assert!(!state.format_available(ArchiveFormat::Zip));
+
+        state.select_format(ArchiveFormat::Zip);
+        assert_eq!(state.format(), ArchiveFormat::TarGz);
+        assert_eq!(
+            state.target_path(),
+            Ok(PathBuf::from("/docs/report.tar.gz"))
+        );
     }
 
     #[test]

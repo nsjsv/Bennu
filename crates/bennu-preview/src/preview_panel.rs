@@ -7,6 +7,7 @@ use bennu_localization::tr;
 use bennu_theme::controls::normal_button;
 use bennu_theme::icons::{themed_icon, IconSymbol, IconTone};
 use bennu_theme::styles::muted_text_color;
+use file_core::ExternalTool;
 use iced::widget::{column, container};
 use iced::{Alignment, Element, Length};
 
@@ -202,7 +203,9 @@ where
             media_settings,
             size,
         }),
-        PreviewState::Ready(PreviewContent::FfmpegRequired { .. }) => ffmpeg_required_panel(),
+        PreviewState::Ready(PreviewContent::ToolRequired { tool, .. }) => {
+            tool_required_panel(*tool)
+        }
         PreviewState::Ready(PreviewContent::Video {
             path,
             frame,
@@ -237,28 +240,40 @@ where
     preview_surface(panel)
 }
 
-/// 预览失败（二进制、不支持的类型、读取失败）：居中，上面一个警告图标，文字用次要色、
-/// 窄一点自动换行，不再贴在左上角。
-fn ffmpeg_required_panel<'a, Message>() -> Element<'a, Message>
+fn tool_required_panel<'a, Message>(tool: ExternalTool) -> Element<'a, Message>
 where
     Message: 'a + Clone + From<PreviewMessage>,
 {
-    match crate::ffmpeg_install::ffmpeg_install_command() {
-        Some(command) => preview_error_panel(
-            tr!("Audio and video previews need ffmpeg. Install it with:\n%1", command),
-            Some(
-                normal_button(readable_text(tr!("Copy Command")))
-                    .on_press(Message::from(PreviewMessage::CopyFfmpegInstallCommand))
-                    .into(),
-            ),
+    let explanation = match (tool, tool.install_command()) {
+        (ExternalTool::Ffmpeg, Some(command)) => {
+            tr!(
+                "Audio and video previews need ffmpeg. Install it with:\n%1",
+                command
+            )
+        }
+        (ExternalTool::Ffmpeg, None) => tr!(
+            "Audio and video previews need ffmpeg. Install it with your system's package manager."
         ),
-        None => preview_error_panel(
-            tr!("Audio and video previews need ffmpeg. Install it with your system's package manager."),
-            None,
+        (ExternalTool::SevenZip, Some(command)) => {
+            tr!(
+                "Zip, 7z and rar archives need 7-Zip. Install it with:\n%1",
+                command
+            )
+        }
+        (ExternalTool::SevenZip, None) => tr!(
+            "Zip, 7z and rar archives need 7-Zip. Install it with your system's package manager."
         ),
-    }
+    };
+    let copy_button = tool.install_command().map(|_| {
+        normal_button(readable_text(tr!("Copy Command")))
+            .on_press(Message::from(PreviewMessage::CopyToolInstallCommand(tool)))
+            .into()
+    });
+    preview_error_panel(explanation, copy_button)
 }
 
+/// 预览失败（二进制、不支持的类型、读取失败）：居中，上面一个警告图标，文字用次要色、
+/// 窄一点自动换行，不再贴在左上角。
 fn preview_error_panel<'a, Message: 'a>(
     error: String,
     action: Option<Element<'a, Message>>,

@@ -1,24 +1,39 @@
-use std::fs::File;
-use std::io;
+//! 列压缩包目录：zip、7z、rar 交给系统 7z，tar 一类交给系统 tar。两边都给出包里原样存的
+//! 名字字节，再统一转成显示用的名字（见 `member_names`）。
+
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::time::SystemTime;
 
-use tokio::process::Command;
+use tokio_util::sync::CancellationToken;
 
-use crate::{
-    archive_extraction_format_for_path, ArchiveExtractionFormat, FileError, FileKind,
-    SEVEN_ZIP_COMMAND_NAMES,
-};
+use crate::{archive_extraction_format_for_path, ArchiveExtractionFormat, FileError, FileKind};
+
+mod member_names;
+mod seven_zip;
+mod tar;
+
+pub(crate) use member_names::decode_member_names;
+pub(crate) use seven_zip::{list_seven_zip_entries, SevenZipListedEntry};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArchiveListingEntry {
+    /// 显示用路径：包里存的不是 UTF-8 时已按识别出的编码转好。
     pub path: String,
+    /// 包里原样存的路径字节（列目录工具打印的样子），解出单个成员时按它找。
+    pub(crate) stored_path: Vec<u8>,
     pub kind: FileKind,
     /// 未压缩大小；目录为 0。虚拟目录的 Size 排序与属性面板消费。
     pub len: u64,
-    /// 归档头记录的修改时间；7z 外部命令不解析时区敏感的 MTime，保持 None。
     pub modified: Option<SystemTime>,
+}
+
+/// 列目录工具给出的一条，名字还没转成显示用的。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StoredMember {
+    pub(crate) stored_path: Vec<u8>,
+    pub(crate) kind: FileKind,
+    pub(crate) len: u64,
+    pub(crate) modified: Option<SystemTime>,
 }
 
 pub async fn list_archive_members(
@@ -38,31 +53,34 @@ pub async fn list_archive_members_with_format(
     format: ArchiveExtractionFormat,
 ) -> Result<Vec<ArchiveListingEntry>, FileError> {
     let archive = archive.into();
-
-    match format {
-        ArchiveExtractionFormat::Zip => {
-            spawn_archive_listing(archive, |archive| read_zip_members(&archive)).await
+    let members = match format {
+        ArchiveExtractionFormat::Tar => tar::list_tar_members(&archive).await?,
+        ArchiveExtractionFormat::Zip
+        | ArchiveExtractionFormat::SevenZip
+        | ArchiveExtractionFormat::Rar => {
+            list_seven_zip_entries(&archive, None, &CancellationToken::new())
+                .await?
+                .into_iter()
+                .map(|entry| entry.member)
+                .collect()
         }
-        ArchiveExtractionFormat::Tar => {
-            spawn_archive_listing(archive, |archive| {
-                read_tar_members(&archive, TarCompression::Plain)
-            })
-            .await
-        }
-        ArchiveExtractionFormat::TarGz => {
-            spawn_archive_listing(archive, |archive| {
-                read_tar_members(&archive, TarCompression::Gzip)
-            })
-            .await
-        }
-        ArchiveExtractionFormat::SevenZip | ArchiveExtractionFormat::Rar => {
-            read_seven_zip_members(&archive, archive_format_label(format)).await
-        }
-    }
+    };
+    let display_paths = decode_member_names(members.iter().map(|member| &member.stored_path[..]));
+    Ok(members
+        .into_iter()
+        .zip(display_paths)
+        .map(|(member, path)| ArchiveListingEntry {
+            path,
+            stored_path: member.stored_path,
+            kind: member.kind,
+            len: member.len,
+            modified: member.modified,
+        })
+        .collect())
 }
 
 /// 读取文件头识别归档格式。调用方已确认该路径属于归档类型，
-/// 无法识别魔数时按 tar 兜底——识别错误由解压/列成员环节报错。
+/// 无法识别魔数时按 tar 兜底——识别错误由列成员环节报错。
 pub async fn sniff_archive_extraction_format(
     archive: impl Into<PathBuf>,
 ) -> ArchiveExtractionFormat {
@@ -70,24 +88,16 @@ pub async fn sniff_archive_extraction_format(
     let Some(header) = read_archive_header(&archive).await else {
         return ArchiveExtractionFormat::Tar;
     };
-
-    if header.starts_with(&[0x50, 0x4b, 0x03, 0x04]) {
+    if header.starts_with(b"PK\x03\x04") || header.starts_with(b"PK\x05\x06") {
         return ArchiveExtractionFormat::Zip;
-    }
-    if header.starts_with(&[0x1f, 0x8b]) {
-        // gzip 单文件归档不在预览支持范围，维持内置 .tar.gz 语义。
-        return ArchiveExtractionFormat::TarGz;
     }
     if header.starts_with(&[0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c]) {
         return ArchiveExtractionFormat::SevenZip;
     }
-    if header.starts_with(&[0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x00]) {
+    if header.starts_with(b"Rar!\x1a\x07") {
         return ArchiveExtractionFormat::Rar;
     }
-    // ustar 魔数位于偏移 257；旧式 tar 无魔数，靠上面的兜底处理。
-    if header.len() >= 262 && &header[257..262] == b"ustar" {
-        return ArchiveExtractionFormat::Tar;
-    }
+    // 压缩过的 tar（gzip/xz/zstd/bzip2）和旧式无魔数的 tar 都交给 tar 自己认。
     ArchiveExtractionFormat::Tar
 }
 
@@ -95,264 +105,9 @@ async fn read_archive_header(path: &Path) -> Option<Vec<u8>> {
     use tokio::io::AsyncReadExt;
 
     let mut file = tokio::fs::File::open(path).await.ok()?;
-    let mut header = [0u8; 512];
+    let mut header = [0u8; 8];
     let read = file.read(&mut header).await.ok()?;
     Some(header[..read].to_vec())
-}
-
-async fn spawn_archive_listing(
-    archive: PathBuf,
-    read_members: impl FnOnce(PathBuf) -> Result<Vec<ArchiveListingEntry>, FileError> + Send + 'static,
-) -> Result<Vec<ArchiveListingEntry>, FileError> {
-    let join_path = archive.clone();
-    tokio::task::spawn_blocking(move || read_members(archive))
-        .await
-        .map_err(|error| FileError::Archive {
-            path: join_path,
-            message: error.to_string(),
-        })?
-}
-
-fn read_zip_members(path: &Path) -> Result<Vec<ArchiveListingEntry>, FileError> {
-    let file = open_archive_file(path)?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|source| FileError::Archive {
-        path: path.to_path_buf(),
-        message: source.to_string(),
-    })?;
-    let mut members = Vec::with_capacity(archive.len());
-
-    for index in 0..archive.len() {
-        let entry = archive
-            .by_index(index)
-            .map_err(|source| FileError::Archive {
-                path: path.to_path_buf(),
-                message: source.to_string(),
-            })?;
-        let kind = if entry.is_dir() {
-            FileKind::Directory
-        } else if entry.is_symlink() {
-            FileKind::Symlink
-        } else {
-            FileKind::File
-        };
-        members.push(ArchiveListingEntry {
-            path: entry.name().to_owned(),
-            kind,
-            len: entry.size(),
-            modified: zip_datetime_to_system_time(entry.last_modified()),
-        });
-    }
-
-    Ok(members)
-}
-
-fn read_tar_members(
-    path: &Path,
-    compression: TarCompression,
-) -> Result<Vec<ArchiveListingEntry>, FileError> {
-    let file = open_archive_file(path)?;
-    match compression {
-        TarCompression::Plain => read_tar_members_from(path, file),
-        TarCompression::Gzip => read_tar_members_from(path, flate2::read::GzDecoder::new(file)),
-    }
-}
-
-fn read_tar_members_from<R: io::Read>(
-    archive_path: &Path,
-    reader: R,
-) -> Result<Vec<ArchiveListingEntry>, FileError> {
-    let mut archive = tar::Archive::new(reader);
-    let entries = archive.entries().map_err(|source| FileError::Archive {
-        path: archive_path.to_path_buf(),
-        message: source.to_string(),
-    })?;
-    let mut members = Vec::new();
-
-    for entry_outcome in entries {
-        let entry = entry_outcome.map_err(|source| FileError::Archive {
-            path: archive_path.to_path_buf(),
-            message: source.to_string(),
-        })?;
-        let entry_type = entry.header().entry_type();
-        let kind = if entry_type.is_dir() {
-            FileKind::Directory
-        } else if entry_type.is_symlink() {
-            FileKind::Symlink
-        } else if entry_type.is_file() {
-            FileKind::File
-        } else {
-            FileKind::Other
-        };
-        let path = entry
-            .path()
-            .map_err(|source| FileError::Archive {
-                path: archive_path.to_path_buf(),
-                message: source.to_string(),
-            })?
-            .to_string_lossy()
-            .into_owned();
-        let header = entry.header();
-        let modified = header
-            .mtime()
-            .ok()
-            .map(|seconds| SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(seconds));
-        members.push(ArchiveListingEntry {
-            path,
-            kind,
-            len: header.size().unwrap_or(0),
-            modified,
-        });
-    }
-
-    Ok(members)
-}
-
-async fn read_seven_zip_members(
-    path: &Path,
-    format_label: &str,
-) -> Result<Vec<ArchiveListingEntry>, FileError> {
-    for command_name in SEVEN_ZIP_COMMAND_NAMES {
-        let output = Command::new(command_name)
-            .arg("l")
-            .arg("-slt")
-            .arg("-bd")
-            .arg("-bsp0")
-            .arg("--")
-            .arg(path)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .output()
-            .await;
-        let output = match output {
-            Ok(output) => output,
-            Err(source) if source.kind() == io::ErrorKind::NotFound => continue,
-            Err(source) => {
-                return Err(FileError::Archive {
-                    path: path.to_path_buf(),
-                    message: format!("could not run {command_name} for {format_label}: {source}"),
-                });
-            }
-        };
-
-        if output.status.success() {
-            let listing = String::from_utf8_lossy(&output.stdout);
-            return Ok(parse_seven_zip_listing(&listing));
-        }
-
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-        let message = if stderr.is_empty() {
-            format!(
-                "could not list {format_label} archive with {command_name}: {}",
-                output.status
-            )
-        } else {
-            format!("could not list {format_label} archive with {command_name}: {stderr}")
-        };
-        // 分卷后续卷在这里报 Headers Error:按文件名启发式补一句
-        // 「这是分卷的后续卷,请打开第一个卷」的提示。
-        let message = match split_volume_hint(path) {
-            Some(hint) => format!("{message}; {hint}"),
-            None => message,
-        };
-        return Err(FileError::Archive {
-            path: path.to_path_buf(),
-            message,
-        });
-    }
-
-    Err(FileError::Unsupported(
-        "7z, 7zz or 7za command is required to preview this archive",
-    ))
-}
-
-fn parse_seven_zip_listing(technical_listing: &str) -> Vec<ArchiveListingEntry> {
-    parse_seven_zip_entries(technical_listing)
-        .into_iter()
-        .map(|entry| ArchiveListingEntry {
-            path: entry.path,
-            kind: if entry.is_directory {
-                FileKind::Directory
-            } else {
-                FileKind::File
-            },
-            len: entry.len,
-            modified: None,
-        })
-        .collect()
-}
-
-/// `7z l -slt` 的条目段。浏览只用路径/类型/大小；整包解压的密码检查还要
-/// `Encrypted` 和 `Block`（同一 solid block 里的文件要按顺序解）。
-pub(crate) fn parse_seven_zip_entries(technical_listing: &str) -> Vec<SevenZipListedEntry> {
-    let mut entries = Vec::new();
-    let mut in_archive_entries = false;
-    let mut current_entry: Option<SevenZipListedEntry> = None;
-
-    for line in technical_listing.lines() {
-        if line.trim() == "----------" {
-            in_archive_entries = true;
-            continue;
-        }
-        if !in_archive_entries {
-            continue;
-        }
-        if line.trim().is_empty() {
-            entries.extend(current_entry.take());
-            continue;
-        }
-
-        if let Some(path) = line.strip_prefix("Path = ") {
-            entries.extend(current_entry.take());
-            current_entry = Some(SevenZipListedEntry {
-                path: path.to_owned(),
-                is_directory: path.ends_with('/') || path.ends_with('\\'),
-                len: 0,
-                encrypted: false,
-                block: None,
-            });
-            continue;
-        }
-
-        let Some(entry) = current_entry.as_mut() else {
-            continue;
-        };
-        if let Some(folder) = line.strip_prefix("Folder = ") {
-            entry.is_directory |= seven_zip_folder_field_is_directory(folder);
-        } else if let Some(attributes) = line.strip_prefix("Attributes = ") {
-            entry.is_directory |= seven_zip_attributes_field_is_directory(attributes);
-        } else if let Some(size) = line.strip_prefix("Size = ") {
-            entry.len = size.trim().parse().unwrap_or(0);
-        } else if let Some(encrypted) = line.strip_prefix("Encrypted = ") {
-            entry.encrypted = encrypted.trim() == "+";
-        } else if let Some(block) = line.strip_prefix("Block = ") {
-            entry.block = block.trim().parse().ok();
-        }
-    }
-
-    entries.extend(current_entry);
-    entries.retain(|entry| !entry.path.is_empty());
-    entries
-}
-
-fn seven_zip_folder_field_is_directory(folder: &str) -> bool {
-    let folder = folder.trim();
-    folder == "+" || folder.eq_ignore_ascii_case("true")
-}
-
-fn seven_zip_attributes_field_is_directory(attributes: &str) -> bool {
-    attributes.trim_start().starts_with('D')
-}
-
-fn archive_format_label(format: ArchiveExtractionFormat) -> &'static str {
-    match format {
-        ArchiveExtractionFormat::Zip => "zip",
-        ArchiveExtractionFormat::Tar => "tar",
-        ArchiveExtractionFormat::TarGz => "tar.gz",
-        ArchiveExtractionFormat::SevenZip => "7z",
-        ArchiveExtractionFormat::Rar => "rar",
-    }
 }
 
 /// 分卷后续卷在 7z 眼里是残缺包,只报 Headers Error,报错信息对用户
@@ -395,88 +150,9 @@ pub(crate) fn split_volume_hint(path: &Path) -> Option<&'static str> {
     }
 }
 
-fn open_archive_file(path: &Path) -> Result<File, FileError> {
-    File::open(path).map_err(|source| FileError::Archive {
-        path: path.to_path_buf(),
-        message: source.to_string(),
-    })
-}
-
-#[derive(Debug, Clone, Copy)]
-enum TarCompression {
-    Plain,
-    Gzip,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SevenZipListedEntry {
-    pub(crate) path: String,
-    pub(crate) is_directory: bool,
-    pub(crate) len: u64,
-    pub(crate) encrypted: bool,
-    /// 7z 格式才有；rar 等没有时为 None，按各文件独立解码对待。
-    pub(crate) block: Option<u64>,
-}
-
-/// zip 的 MS-DOS 时间戳按 UTC 解释成 `SystemTime`。DOS 时间本身不
-/// 携带时区，主流工具（info-zip）同样按 UTC 存取；显示语义足够。
-fn zip_datetime_to_system_time(datetime: Option<zip::DateTime>) -> Option<SystemTime> {
-    fn civil_days_since_epoch(year: i64, month: u32, day: u32) -> i64 {
-        let shifted_year = year - i64::from(month <= 2);
-        let era = shifted_year.div_euclid(400);
-        let year_of_era = shifted_year - era * 400;
-        let month_pattern = (month + 9) % 12;
-        let day_of_year = (153 * i64::from(month_pattern) + 2) / 5 + i64::from(day) - 1;
-        let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-        era * 146_097 + day_of_era - 719_468
-    }
-
-    let datetime = datetime?;
-    let (year, month, day) = (i64::from(datetime.year()), datetime.month(), datetime.day());
-    if year < 1970 {
-        return None;
-    }
-    let seconds = civil_days_since_epoch(year, u32::from(month), u32::from(day)) * 86_400
-        + i64::from(datetime.hour()) * 3_600
-        + i64::from(datetime.minute()) * 60
-        + i64::from(datetime.second());
-    Some(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(seconds as u64))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parse_seven_zip_listing_reads_directory_markers() {
-        let members = parse_seven_zip_listing(
-            r#"
-Path = archive.rar
-Type = Rar
-
-----------
-Path = src
-Folder = +
-Attributes = D_ drwxr-xr-x
-
-Path = src/main.rs
-Folder = -
-Attributes = A_ -rw-r--r--
-
-Path = docs\guide.md
-Folder = -
-Attributes = A_ -rw-r--r--
-"#,
-        );
-
-        assert_eq!(members.len(), 3);
-        assert_eq!(members[0].path, "src");
-        assert_eq!(members[0].kind, FileKind::Directory);
-        assert_eq!(members[1].path, "src/main.rs");
-        assert_eq!(members[1].kind, FileKind::File);
-        assert_eq!(members[2].path, "docs\\guide.md");
-        assert_eq!(members[2].kind, FileKind::File);
-    }
 
     #[test]
     fn split_volume_hint_flags_continuation_volumes_only() {
@@ -512,47 +188,28 @@ Attributes = A_ -rw-r--r--
         // 无扩展名:早退返回 None,不 panic。
         assert_eq!(hint("/tmp/noext"), None);
     }
-}
-
-#[cfg(test)]
-mod sniff_tests {
-    use super::*;
 
     #[tokio::test]
     async fn sniffs_archive_formats_from_file_headers() {
         let directory = tempfile::tempdir().expect("temp dir");
-        let cases: Vec<(&str, Vec<u8>, ArchiveExtractionFormat)> = vec![
-            (
-                "a.zip",
-                b"PK\x03\x04rest".to_vec(),
-                ArchiveExtractionFormat::Zip,
-            ),
-            (
-                "a.tgz",
-                [0x1f, 0x8b]
-                    .iter()
-                    .copied()
-                    .chain(b"rest".iter().copied())
-                    .collect(),
-                ArchiveExtractionFormat::TarGz,
-            ),
+        let cases: [(&str, &[u8], ArchiveExtractionFormat); 6] = [
+            ("a.zip", b"PK\x03\x04rest", ArchiveExtractionFormat::Zip),
+            ("empty.zip", b"PK\x05\x06rest", ArchiveExtractionFormat::Zip),
             (
                 "a.7z",
-                [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c]
-                    .iter()
-                    .copied()
-                    .chain(b"rest".iter().copied())
-                    .collect(),
+                b"7z\xbc\xaf\x27\x1crest",
                 ArchiveExtractionFormat::SevenZip,
             ),
             (
                 "a.rar",
-                [0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x00]
-                    .iter()
-                    .copied()
-                    .chain(b"rest".iter().copied())
-                    .collect(),
+                b"Rar!\x1a\x07\x00rest",
                 ArchiveExtractionFormat::Rar,
+            ),
+            ("a.tgz", b"\x1f\x8brest", ArchiveExtractionFormat::Tar),
+            (
+                "a.datpack",
+                b"not a known archive",
+                ArchiveExtractionFormat::Tar,
             ),
         ];
         for (name, bytes, expected) in cases {
@@ -564,16 +221,5 @@ mod sniff_tests {
                 "sniffing {name}"
             );
         }
-    }
-
-    #[tokio::test]
-    async fn sniff_falls_back_to_tar_for_unrecognized_headers() {
-        let directory = tempfile::tempdir().expect("temp dir");
-        let path = directory.path().join("a.datpack");
-        std::fs::write(&path, b"not a known archive").expect("write fixture");
-        assert_eq!(
-            sniff_archive_extraction_format(&path).await,
-            ArchiveExtractionFormat::Tar
-        );
     }
 }

@@ -101,12 +101,12 @@ journalctl --user -u bennu-search.service -f
 bennu
 ```
 
-| 命令                                     | 行为                        |
-| -------------------------------------- | ------------------------- |
-| `bennu`                         | 按设置中的 Home、自定义目录或上次会话策略启动 |
-| `bennu .`                       | 打开当前目录                    |
-| `bennu ~/Downloads ~/Documents` | 按顺序在同一窗格中打开多个标签           |
-| `bennu report.pdf notes.txt`    | 打开文件所在目录并选中对应文件           |
+| 命令| 行为|
+| - | - |
+| `bennu`| 按设置中的 Home、自定义目录或上次会话策略启动|
+| `bennu .`| 打开当前目录|
+| `bennu ~/Downloads ~/Documents`| 按顺序在同一窗格中打开多个标签|
+| `bennu report.pdf notes.txt`| 打开文件所在目录并选中对应文件|
 
 应用已经运行时，再次执行命令会复用现有实例：不带路径时聚焦主窗口，带路径时复用已有标签并补充缺失目录，不会清空其他标签或分栏。
 
@@ -159,19 +159,20 @@ sudo pacman -S --needed 7zip ffmpeg ffmpegthumbnailer libreoffice-fresh poppler 
   gvfs gvfs-afc gvfs-gphoto2 gvfs-mtp gvfs-smb libsecret udisks2
 ```
 
-| 能力                               | 依赖                                    |
-| -------------------------------- | ------------------------------------- |
-| 音频、视频预览与元数据                   | `ffmpeg`；视频缩略图可使用 `ffmpegthumbnailer` |
-| PDF 预览                           | Poppler（`pdfinfo`、`pdftoppm`）         |
-| Office 文档预览                      | LibreOffice 与 Poppler                 |
-| `.7z` 创建，以及 `.7z` / `.rar` 预览和解压 | `7z`、`7zz` 或 `7za`（Arch 包名为 `7zip`）   |
-| SFTP、WebDAV                      | `gvfs`                                |
-| SMB                              | `gvfs-smb`                            |
-| Android / MTP 设备                 | `gvfs-mtp`                            |
-| 数码相机                             | `gvfs-gphoto2`                        |
-| Apple / AFC 设备                   | `gvfs-afc`                            |
-| 保存网络密码                           | `libsecret` 提供的 `secret-tool`         |
-| 存储设备发现、挂载与安全移除                   | `udisks2`                             |
+| 能力| 依赖|
+| - | - |
+| 音频、视频预览与元数据| `ffmpeg`；视频缩略图可使用 `ffmpegthumbnailer`|
+| PDF 预览| Poppler（`pdfinfo`、`pdftoppm`）|
+| Office 文档预览| LibreOffice 与 Poppler|
+| `.zip` / `.7z` 创建，以及 `.zip` / `.7z` / `.rar` 预览、包内浏览和解压 | `7z`、`7zz` 或 `7za`（Arch 包名为 `7zip`）|
+| `.tar` / `.tar.gz` / `.tar.xz` / `.tar.zst` / `.tar.bz2` | GNU `tar` 与 `gzip`（多数发行版自带）；对应格式另需 `xz`、`zstd`、`bzip2`|
+| SFTP、WebDAV| `gvfs`|
+| SMB|`gvfs-smb`|
+| Android / MTP 设备|`gvfs-mtp`|
+| 数码相机|`gvfs-gphoto2`|
+| Apple / AFC 设备|`gvfs-afc`|
+| 保存网络密码|`libsecret` 提供的 `secret-tool`|
+| 存储设备发现、挂载与安全移除| `udisks2`|
 
 缺少可选依赖时，只会影响对应能力。AVIF 由内置图片解码器支持，构建和运行时使用 `dav1d`。
 

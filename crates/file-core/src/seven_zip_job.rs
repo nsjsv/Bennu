@@ -2,12 +2,57 @@
 //! 都在这里——子进程不经过本进程的检查点，只能由监督方替它响应运行状态。
 
 use std::io;
+use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
 
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
-use crate::{FileError, FileOperationControls, FileOperationRunState};
+use crate::archive_listing::split_volume_hint;
+use crate::seven_zip_password::seven_zip_password_error;
+use crate::tar_job::collect_output;
+use crate::{ExternalTool, FileError, FileOperationControls, FileOperationRunState};
+
+/// 7-Zip 是可选依赖：没装就是 `ToolMissing`，界面据此给安装命令。
+pub(crate) fn locate_seven_zip() -> Result<PathBuf, FileError> {
+    ExternalTool::SevenZip
+        .locate()
+        .ok_or(FileError::ToolMissing(ExternalTool::SevenZip))
+}
+
+/// 7z 失败的统一分类：先认密码问题，再补分卷后续卷的提示，其余把 7z 的原话给用户。
+pub(crate) fn seven_zip_failure(
+    archive: &Path,
+    password_provided: bool,
+    status: ExitStatus,
+    stdout: &[u8],
+    stderr: &[u8],
+) -> FileError {
+    let stdout = String::from_utf8_lossy(stdout);
+    let stderr = String::from_utf8_lossy(stderr);
+    let combined_output = [stdout.trim(), stderr.trim()]
+        .into_iter()
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if let Some(error) = seven_zip_password_error(&combined_output, password_provided, archive) {
+        return error;
+    }
+    let message = if combined_output.is_empty() {
+        format!("7z exited with status {status}")
+    } else {
+        combined_output
+    };
+    // 分卷后续卷 7z 只报裸的 Headers Error：按文件名补一句「请打开第一个卷」。
+    let message = match split_volume_hint(archive) {
+        Some(hint) => format!("{message}; {hint}"),
+        None => message,
+    };
+    FileError::Archive {
+        path: archive.to_path_buf(),
+        message,
+    }
+}
 
 /// `-bsp1` 进度流里的一次更新。`completed_items` 是 7z 报的已完成条目数
 /// （目录也算），为 0 时 7z 不写这个数。
@@ -19,13 +64,11 @@ pub(crate) struct SevenZipProgress {
 
 #[derive(Debug)]
 pub(crate) enum SevenZipJobFailure {
-    /// 找不到这个命令名，调用方换下一个（7z / 7zz / 7za）。
-    CommandNotFound,
     Spawn(io::Error),
     /// 进程跑完但失败；stderr 原文交给调用方分类（密码错误等）。
     Exited {
         status: ExitStatus,
-        stderr: String,
+        stderr: Vec<u8>,
     },
     /// 取消或关机：进程已被杀掉。
     Interrupted(FileError),
@@ -48,21 +91,9 @@ pub(crate) async fn run_seven_zip_job(
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|error| {
-            if error.kind() == io::ErrorKind::NotFound {
-                SevenZipJobFailure::CommandNotFound
-            } else {
-                SevenZipJobFailure::Spawn(error)
-            }
-        })?;
+        .map_err(SevenZipJobFailure::Spawn)?;
     let mut stdout = child.stdout.take().expect("7z stdout is piped");
-    let mut stderr = child.stderr.take().expect("7z stderr is piped");
-    // stderr 必须并发读尽：管道塞满时 7z 会卡在写 stderr 上，和这边的 wait 互相等死。
-    let stderr_text = tokio::spawn(async move {
-        let mut bytes = Vec::new();
-        let _ = stderr.read_to_end(&mut bytes).await;
-        String::from_utf8_lossy(&bytes).trim().to_owned()
-    });
+    let stderr_text = collect_output(child.stderr.take().expect("7z stderr is piped"));
     let pid = child.id();
     let cancel = controls.cancellation_token();
     let mut progress_stream = SevenZipProgressStream::default();

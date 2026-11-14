@@ -523,6 +523,9 @@ pub enum FileError {
     ApplicationStopping,
     #[error("unsupported operation: {0}")]
     Unsupported(&'static str),
+    /// 可选的外部工具没装。文字里带上安装命令：错误转成文字后一路传到界面。
+    #[error("{0} is not installed; {}", crate::external_tools::install_hint(*.0))]
+    ToolMissing(crate::ExternalTool),
 }
 
 fn rollback_details(unrestored: &[UnrestoredEntry], leftover_entries: &[LeftoverEntry]) -> String {

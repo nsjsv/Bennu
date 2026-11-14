@@ -21,8 +21,31 @@ async fn collected_progress_updates(
     updates
 }
 
+/// (已完成字节, 总字节, 已完成项, 总项)：外部命令都按字节报进度。
+type ByteCounts = (u64, u64, usize, Option<usize>);
+
+fn byte_counts(updates: &[FileOperationProgressUpdate]) -> Vec<ByteCounts> {
+    updates
+        .iter()
+        .filter_map(|update| match update {
+            FileOperationProgressUpdate::Bytes {
+                completed_bytes,
+                total_bytes,
+                completed_items,
+                total_items,
+            } => Some((
+                *completed_bytes,
+                *total_bytes,
+                *completed_items,
+                *total_items,
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
 #[tokio::test]
-async fn queued_zip_creation_counts_files_with_real_source_bytes() {
+async fn queued_archive_creation_reports_source_bytes_and_entries() {
     let directory = tempfile::tempdir().unwrap();
     let small = directory.path().join("small.bin");
     let large = directory.path().join("large.bin");
@@ -33,8 +56,8 @@ async fn queued_zip_creation_counts_files_with_real_source_bytes() {
 
     let outcome = run_queued_create_archive(
         vec![small, large],
-        directory.path().join("bundle.zip"),
-        file_core::ArchiveFormat::Zip,
+        directory.path().join("bundle.tar.gz"),
+        file_core::ArchiveFormat::TarGz,
         file_core::ArchiveCompressionLevel::Store,
         None,
         FileOperationControls::running(CancellationToken::new()),
@@ -50,49 +73,33 @@ async fn queued_zip_creation_counts_files_with_real_source_bytes() {
         updates.first(),
         Some(FileOperationProgressUpdate::Indeterminate)
     ));
-    let transfer_updates = transfer_counts(&updates);
-    assert!(!transfer_updates.is_empty());
-    assert_eq!(transfer_updates.last(), Some(&(2, 2, Some((1_000, 1_000)))));
-}
-
-/// (已完成项, 总项, 字节)：按条目计数的进度。
-type TransferCounts = (usize, usize, Option<(u64, u64)>);
-
-fn transfer_counts(updates: &[FileOperationProgressUpdate]) -> Vec<TransferCounts> {
-    updates
-        .iter()
-        .filter_map(|update| match update {
-            FileOperationProgressUpdate::Transfer {
-                completed_items,
-                total_items,
-                bytes,
-                ..
-            } => Some((*completed_items, *total_items, *bytes)),
-            _ => None,
-        })
-        .collect()
+    assert_eq!(
+        byte_counts(&updates).last(),
+        Some(&(1_000, 1_000, 2, Some(2)))
+    );
 }
 
 #[tokio::test]
-async fn queued_zip_extraction_counts_files_and_tar_gz_reports_read_bytes() {
+async fn queued_archive_extraction_reports_bytes() {
     let directory = tempfile::tempdir().unwrap();
     let source = directory.path().join("payload.bin");
     tokio::fs::write(&source, vec![5_u8; 2_500_000])
         .await
         .unwrap();
+    // zip 要 7-Zip，没装的机器上只测 tar.gz。
+    let formats = if file_core::ExternalTool::SevenZip.locate().is_some() {
+        vec![
+            file_core::ArchiveFormat::TarGz,
+            file_core::ArchiveFormat::Zip,
+        ]
+    } else {
+        vec![file_core::ArchiveFormat::TarGz]
+    };
 
-    for (index, format) in [
-        file_core::ArchiveFormat::Zip,
-        file_core::ArchiveFormat::TarGz,
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let archive = directory.path().join(match format {
-            file_core::ArchiveFormat::Zip => "payload.zip",
-            file_core::ArchiveFormat::TarGz => "payload.tar.gz",
-            file_core::ArchiveFormat::SevenZip => unreachable!(),
-        });
+    for (index, format) in formats.into_iter().enumerate() {
+        let archive = directory
+            .path()
+            .join(format!("payload.{}", format.extension()));
         file_core::create_archive_with_progress(
             ArchiveCreationRequest {
                 sources: vec![source.clone()],
@@ -106,6 +113,7 @@ async fn queued_zip_extraction_counts_files_and_tar_gz_reports_read_bytes() {
         )
         .await
         .unwrap();
+        let archive_bytes = std::fs::metadata(&archive).unwrap().len();
         let request = ArchiveExtractionRequest {
             archive,
             destination: directory.path().join(format!("extracted-{index}")),
@@ -129,26 +137,15 @@ async fn queued_zip_extraction_counts_files_and_tar_gz_reports_read_bytes() {
             updates.first(),
             Some(FileOperationProgressUpdate::Indeterminate)
         ));
+        let last = byte_counts(&updates).last().copied();
         match format {
-            file_core::ArchiveFormat::Zip => {
-                assert_eq!(
-                    transfer_counts(&updates).last(),
-                    Some(&(1, 1, Some((2_500_000, 2_500_000))))
-                );
-            }
+            // tar 按送进去的压缩包字节，条目总数未知。
             file_core::ArchiveFormat::TarGz => {
-                let archive_bytes = std::fs::metadata(directory.path().join("payload.tar.gz"))
-                    .unwrap()
-                    .len();
-                assert!(matches!(
-                    updates.last(),
-                    Some(FileOperationProgressUpdate::Bytes {
-                        completed_bytes,
-                        total_bytes,
-                        completed_items: 1,
-                        total_items: None,
-                    }) if *completed_bytes == archive_bytes && *total_bytes == archive_bytes
-                ));
+                assert_eq!(last, Some((archive_bytes, archive_bytes, 1, None)));
+            }
+            // 7z 按它报的百分比折算解出的字节。
+            file_core::ArchiveFormat::Zip => {
+                assert!(matches!(last, Some((_, 2_500_000, _, Some(1)))), "{last:?}");
             }
             file_core::ArchiveFormat::SevenZip => unreachable!(),
         }

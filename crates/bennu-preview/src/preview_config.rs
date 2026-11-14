@@ -107,7 +107,13 @@ pub const DEFAULT_PREVIEW_IMAGE_EXTENSIONS: [&str; 11] = [
 ];
 pub const DEFAULT_PREVIEW_VIDEO_EXTENSIONS: [&str; 6] = ["mp4", "m4v", "mkv", "mov", "webm", "avi"];
 pub const DEFAULT_PREVIEW_SQLITE_EXTENSIONS: [&str; 4] = ["db", "sqlite", "sqlite3", "db3"];
-pub const DEFAULT_PREVIEW_ARCHIVE_EXTENSIONS: [&str; 6] =
+pub const DEFAULT_PREVIEW_ARCHIVE_EXTENSIONS: [&str; 13] = [
+    "zip", "tar", "tar.gz", "tgz", "tar.xz", "txz", "tar.zst", "tzst", "tar.bz2", "tbz2", "tbz",
+    "7z", "rar",
+];
+/// 加上 tar.xz / tar.zst / tar.bz2 之前的默认归档后缀表，只用于迁移：保存时写的是全量，
+/// 存的表和它一样就是没动过，换成现在的默认表。
+const LEGACY_DEFAULT_PREVIEW_ARCHIVE_EXTENSIONS: [&str; 6] =
     ["zip", "tar", "tar.gz", "tgz", "7z", "rar"];
 pub const DEFAULT_PREVIEW_DOCUMENT_EXTENSIONS: [&str; 10] = [
     "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp",
@@ -485,7 +491,10 @@ pub fn preview_extension_rules_from_stored(
         video: per_type(&stored_rules.video, &fallback.video),
         audio: extra_audio,
         sqlite: per_type(&stored_rules.sqlite, &fallback.sqlite),
-        archive: per_type(&stored_rules.archive, &fallback.archive),
+        archive: archive_extensions_with_current_defaults(
+            per_type(&stored_rules.archive, &fallback.archive),
+            &fallback.archive,
+        ),
         document: per_type(&stored_rules.document, &fallback.document),
     }
 }
@@ -510,6 +519,21 @@ fn extra_extensions_from_stored(
         .filter(|extension| !legacy_defaults.contains(&extension.as_str()))
         .cloned()
         .collect()
+}
+
+fn archive_extensions_with_current_defaults(
+    stored: Vec<String>,
+    defaults: &[String],
+) -> Vec<String> {
+    let untouched = stored.len() == LEGACY_DEFAULT_PREVIEW_ARCHIVE_EXTENSIONS.len()
+        && stored.iter().all(|extension| {
+            LEGACY_DEFAULT_PREVIEW_ARCHIVE_EXTENSIONS.contains(&extension.as_str())
+        });
+    if untouched {
+        defaults.to_vec()
+    } else {
+        stored
+    }
 }
 
 /// 存储形态 → 目录展开层级：缺省回退 fallback，存值越界时归一化夹住。
@@ -667,6 +691,35 @@ mod stored_preferences_migration_tests {
         let rules =
             preview_extension_rules_from_stored(&StoredPreviewPreferences::default(), &defaults);
         assert!(rules.text.is_empty());
+    }
+
+    #[test]
+    fn untouched_legacy_archive_list_gains_the_new_tar_suffixes() {
+        let defaults = PreviewExtensionRules::default_rules();
+        let stored_archive = |extensions: &[&str]| StoredPreviewPreferences {
+            preview_extension_rules: Some(StoredPreviewExtensionRules {
+                archive: Some(
+                    extensions
+                        .iter()
+                        .map(|extension| (*extension).to_owned())
+                        .collect(),
+                ),
+                ..StoredPreviewExtensionRules::default()
+            }),
+            ..StoredPreviewPreferences::default()
+        };
+
+        let rules = preview_extension_rules_from_stored(
+            &stored_archive(&LEGACY_DEFAULT_PREVIEW_ARCHIVE_EXTENSIONS),
+            &defaults,
+        );
+        assert_eq!(rules.archive, defaults.archive);
+        assert!(rules.archive.contains(&"tar.zst".to_owned()));
+
+        // 用户改过的表原样保留。
+        let rules =
+            preview_extension_rules_from_stored(&stored_archive(&["zip", "cbz"]), &defaults);
+        assert_eq!(rules.archive, vec!["zip".to_owned(), "cbz".to_owned()]);
     }
 
     #[test]

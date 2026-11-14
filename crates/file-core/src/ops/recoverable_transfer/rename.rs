@@ -54,6 +54,27 @@ pub fn rename_noreplace(_from: &Path, _to: &Path) -> Result<(), NoReplaceRenameE
     )))
 }
 
+/// 文件系统不支持 `RENAME_NOREPLACE`（如 ntfs-3g）时先确认目标不存在再普通改名。
+pub(crate) fn move_without_replacing(from: &Path, to: &Path) -> Result<(), NoReplaceRenameError> {
+    match rename_noreplace(from, to) {
+        Err(NoReplaceRenameError::Unsupported(_)) => rename_if_absent(from, to),
+        moved => moved,
+    }
+}
+
+fn rename_if_absent(from: &Path, to: &Path) -> Result<(), NoReplaceRenameError> {
+    match std::fs::symlink_metadata(to) {
+        Ok(_) => Err(NoReplaceRenameError::TargetExists),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            std::fs::rename(from, to).map_err(|error| match error.kind() {
+                io::ErrorKind::CrossesDevices => NoReplaceRenameError::CrossDevice,
+                _ => NoReplaceRenameError::Failed(error),
+            })
+        }
+        Err(error) => Err(NoReplaceRenameError::Failed(error)),
+    }
+}
+
 pub fn recovered_name_candidate(path: &Path, sequence: u64) -> PathBuf {
     let mut name = path
         .file_name()
@@ -61,4 +82,28 @@ pub fn recovered_name_candidate(path: &Path, sequence: u64) -> PathBuf {
         .unwrap_or_else(|| "recovered".into());
     name.push(format!(".recovered{sequence}"));
     path.with_file_name(name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rename_without_noreplace_support_still_never_replaces() {
+        let fixture = tempfile::tempdir().unwrap();
+        let source = fixture.path().join("source");
+        let target = fixture.path().join("target");
+        std::fs::write(&source, b"source").unwrap();
+        std::fs::write(&target, b"target").unwrap();
+
+        assert!(matches!(
+            rename_if_absent(&source, &target),
+            Err(NoReplaceRenameError::TargetExists)
+        ));
+        assert_eq!(std::fs::read(&target).unwrap(), b"target");
+
+        std::fs::remove_file(&target).unwrap();
+        rename_if_absent(&source, &target).unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"source");
+    }
 }

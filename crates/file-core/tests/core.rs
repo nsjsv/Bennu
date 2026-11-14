@@ -8,16 +8,15 @@ use file_core::{
     batch_rename_paths, check_transfer_conflicts, copy_path, copy_path_with_options,
     create_archive_with_controls_and_progress, create_archive_with_progress, create_directory,
     create_empty_file, create_file_with_contents, delete_path_permanently,
-    discover_directory_with_progress, discovered_sort_is_ready, extract_archive,
-    extract_archive_with_progress, filter_hidden, is_transfer_target_available, rename_entry,
-    resolve_directory_metadata, scan_directory, scan_directory_with_progress,
-    sort_discovered_entry_indices, sort_entries, watch_directory, ArchiveCompressionLevel,
-    ArchiveCreationRequest, ArchiveExtractionRequest, ArchiveFormat, ArchivePassword,
-    ArchiveProgress, BatchRenameItem, DirectoryEntry, DirectoryMetadataAvailability,
-    DirectoryMetadataRequest, DirectoryMetadataRequirement, DirectoryMetadataState, EntryMetadata,
-    FileError, FileKind, FileOperationControls, FileOperationRunState, FileOperationVerification,
-    FileTransferOptions, ResolvedEntryChange, ScanOptions, SortDirection, SortField,
-    TransferConflictCheck, TransferConflictStrategy,
+    discover_directory_with_progress, discovered_sort_is_ready, extract_archive_with_progress,
+    filter_hidden, is_transfer_target_available, rename_entry, resolve_directory_metadata,
+    scan_directory, scan_directory_with_progress, sort_discovered_entry_indices, sort_entries,
+    watch_directory, ArchiveCompressionLevel, ArchiveCreationRequest, ArchiveExtractionRequest,
+    ArchiveFormat, ArchivePassword, ArchiveProgress, BatchRenameItem, DirectoryEntry,
+    DirectoryMetadataAvailability, DirectoryMetadataRequest, DirectoryMetadataRequirement,
+    DirectoryMetadataState, EntryMetadata, FileError, FileKind, FileOperationControls,
+    FileOperationRunState, FileOperationVerification, FileTransferOptions, ResolvedEntryChange,
+    ScanOptions, SortDirection, SortField, TransferConflictCheck, TransferConflictStrategy,
 };
 use tempfile::tempdir;
 
@@ -45,6 +44,8 @@ fn names(entries: &[DirectoryEntry]) -> Vec<String> {
 
 #[path = "core/archive.rs"]
 mod archive;
+#[path = "core/archive_tar.rs"]
+mod archive_tar;
 #[path = "core/ops.rs"]
 mod ops;
 #[path = "core/scan.rs"]

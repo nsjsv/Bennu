@@ -38,6 +38,8 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Password", "密码"),
     ("Optional password", "可选密码"),
     ("tar.gz archives do not support passwords.", "tar.gz 归档不支持密码。"),
+    ("zip and 7z need 7-Zip. Install it with: %1", "zip 和 7z 需要 7-Zip。用这条命令安装：%1"),
+    ("zip and 7z need 7-Zip. Install it with your system's package manager.", "zip 和 7z 需要 7-Zip，请用系统的包管理器安装。"),
     ("Checking...", "正在检查..."),
     ("Create", "创建"),
     ("Extract", "解压"),

@@ -22,10 +22,34 @@ pub(crate) struct ArchiveMemberInfo {
 #[derive(Debug, Default)]
 struct ArchiveMemberNode {
     info: Option<ArchiveMemberInfo>,
+    /// 列目录工具打印的原样路径，解出这个成员时按它找；只有列出过的条目才有。
+    stored_path: Option<Vec<u8>>,
     children: BTreeMap<OsString, ArchiveMemberNode>,
 }
 
+/// 要解出的一个文件成员。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WorklistMember {
+    /// 显示用的包内路径，决定落到哪里。
+    pub(crate) path: PathBuf,
+    pub(crate) stored_path: Vec<u8>,
+    pub(crate) len: u64,
+}
+
 impl ArchiveMemberNode {
+    /// 叶子上的文件条目才解得出来；同名又有子项的节点按目录对待。
+    fn file_member(&self, path: &Path) -> Option<WorklistMember> {
+        let info = self.info.as_ref()?;
+        if !self.children.is_empty() || info.kind == FileKind::Directory {
+            return None;
+        }
+        Some(WorklistMember {
+            path: path.to_path_buf(),
+            stored_path: self.stored_path.clone()?,
+            len: info.len,
+        })
+    }
+
     fn is_directory(&self) -> bool {
         !self.children.is_empty()
             || self
@@ -69,6 +93,7 @@ impl ArchiveMemberTree {
                 len: member.len,
                 modified: member.modified,
             });
+            node.stored_path = Some(member.stored_path);
         }
     }
 
@@ -121,16 +146,11 @@ impl ArchiveMemberTree {
     }
 
     /// 提取工作清单：文件成员是它自身，文件夹成员是子树内全部文件。
-    /// 返回 (成员路径, 未压缩大小)；成员不存在返回 `None`。
-    pub(crate) fn worklist_under(&self, inner_member: &Path) -> Option<Vec<(PathBuf, u64)>> {
-        fn collect(node: &ArchiveMemberNode, prefix: &Path, out: &mut Vec<(PathBuf, u64)>) {
-            if node.children.is_empty() {
-                if let Some(info) = &node.info {
-                    if info.kind != FileKind::Directory {
-                        out.push((prefix.to_path_buf(), info.len));
-                    }
-                }
-                return;
+    /// 成员不存在返回 `None`。
+    pub(crate) fn worklist_under(&self, inner_member: &Path) -> Option<Vec<WorklistMember>> {
+        fn collect(node: &ArchiveMemberNode, prefix: &Path, out: &mut Vec<WorklistMember>) {
+            if let Some(member) = node.file_member(prefix) {
+                out.push(member);
             }
             for (name, child) in &node.children {
                 collect(child, &prefix.join(name), out);
@@ -139,20 +159,13 @@ impl ArchiveMemberTree {
 
         let node = self.lookup(inner_member)?;
         let mut worklist = Vec::new();
-        if node.children.is_empty()
-            && node
-                .info
-                .as_ref()
-                .is_some_and(|info| info.kind != FileKind::Directory)
-        {
-            worklist.push((
-                inner_member.to_path_buf(),
-                node.info.as_ref().map(|info| info.len).unwrap_or(0),
-            ));
-        } else {
-            collect(node, inner_member, &mut worklist);
-        }
+        collect(node, inner_member, &mut worklist);
         Some(worklist)
+    }
+
+    /// 单个文件成员（打开包内文件、物化嵌套压缩包用）；是目录或不存在为 None。
+    pub(crate) fn file_member(&self, inner_member: &Path) -> Option<WorklistMember> {
+        self.lookup(inner_member)?.file_member(inner_member)
     }
 }
 
@@ -185,6 +198,7 @@ mod tests {
     fn member(path: &str, kind: FileKind, len: u64) -> ArchiveListingEntry {
         ArchiveListingEntry {
             path: path.to_owned(),
+            stored_path: path.as_bytes().to_vec(),
             kind,
             len,
             modified: None,

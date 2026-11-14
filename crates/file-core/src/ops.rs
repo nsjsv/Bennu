@@ -40,7 +40,9 @@ pub use recoverable_transfer::{
     TransferJournal, TransferJournalError, TransferJournalFuture, TransferJournalMutation,
     TransferJournalRecord, TransferSegmentEvent, TransferTransition, TransferWorkKey,
 };
-pub(crate) use recoverable_transfer::{rename_noreplace, NoReplaceRenameError};
+pub(crate) use recoverable_transfer::{
+    move_without_replacing, rename_noreplace, NoReplaceRenameError,
+};
 mod transfer_metadata;
 mod transfer_object;
 mod transfer_strategy;

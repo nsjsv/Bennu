@@ -84,7 +84,7 @@ DEB_SUGGESTS=(
     gvfs-backends
     libreoffice
     libsecret
-    p7zip-full
+    "7zip | p7zip-full"
     poppler-utils
 )
 

@@ -275,25 +275,6 @@ fn cancelled_request_moves_nothing() {
 }
 
 #[test]
-fn rename_without_noreplace_support_still_never_replaces() {
-    let fixture = tempdir().unwrap();
-    let source = fixture.path().join("source");
-    let target = fixture.path().join("target");
-    fs::write(&source, b"source").unwrap();
-    fs::write(&target, b"target").unwrap();
-
-    assert!(matches!(
-        rename_if_absent(&source, &target),
-        Err(NoReplaceRenameError::TargetExists)
-    ));
-    assert_eq!(fs::read(&target).unwrap(), b"target");
-
-    fs::remove_file(&target).unwrap();
-    rename_if_absent(&source, &target).unwrap();
-    assert_eq!(fs::read(&target).unwrap(), b"source");
-}
-
-#[test]
 fn source_canonicalizes_the_parent_without_following_the_leaf() {
     let fixture = tempdir().unwrap();
     let actual_parent = fs::canonicalize(fixture.path()).unwrap().join("actual");

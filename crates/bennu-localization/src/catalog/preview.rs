@@ -36,6 +36,8 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Could not read this audio file: %1", "无法读取这个音频文件：%1"),
     ("Audio and video previews need ffmpeg. Install it with:\n%1", "音频和视频预览需要 ffmpeg。用下面的命令安装：\n%1"),
     ("Audio and video previews need ffmpeg. Install it with your system's package manager.", "音频和视频预览需要 ffmpeg，请用系统的包管理器安装。"),
+    ("Zip, 7z and rar archives need 7-Zip. Install it with:\n%1", "zip、7z、rar 压缩包需要 7-Zip。用下面的命令安装：\n%1"),
+    ("Zip, 7z and rar archives need 7-Zip. Install it with your system's package manager.", "zip、7z、rar 压缩包需要 7-Zip，请用系统的包管理器安装。"),
     ("Copy Command", "复制命令"),
     ("Stop After Track", "播完停止"),
     ("Repeat Track", "单曲循环"),

@@ -223,12 +223,10 @@ impl PreviewEngine {
             }
             PreviewMessage::AudioLyricsBrowsed(lines) => self.browse_audio_lyrics(lines),
             PreviewMessage::AudioLyricsLineSelected(index) => self.seek_to_lyric_line(index),
-            PreviewMessage::CopyFfmpegInstallCommand => {
-                match crate::ffmpeg_install::ffmpeg_install_command() {
-                    Some(command) => iced::clipboard::write(command.to_owned()),
-                    None => Task::none(),
-                }
-            }
+            PreviewMessage::CopyToolInstallCommand(tool) => match tool.install_command() {
+                Some(command) => iced::clipboard::write(command.to_owned()),
+                None => Task::none(),
+            },
             PreviewMessage::VideoPreviewPlaybackToggled => self.toggle_video_preview_playback(),
             PreviewMessage::VideoPreviewAudioStarted(path, generation, audio_outcome) => {
                 self.accept_video_preview_audio_started(path, generation, audio_outcome)

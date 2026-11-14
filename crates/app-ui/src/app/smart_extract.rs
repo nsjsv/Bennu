@@ -62,19 +62,9 @@ fn unique_folder_destination(
     candidate
 }
 
-/// 剥掉压缩包扩展名作为落地文件夹名，与既有解压行为同名同规则。
-fn archive_folder_name(archive: &Path) -> String {
-    let file_name = archive
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "archive".to_owned());
-    let lowered = file_name.to_ascii_lowercase();
-    for suffix in [".tar.gz", ".tgz", ".zip", ".tar", ".7z", ".rar"] {
-        if lowered.ends_with(suffix) {
-            return file_name[..file_name.len() - suffix.len()].to_owned();
-        }
-    }
-    file_name
+/// 剥掉压缩包扩展名作为落地文件夹名，与整包解压的默认目的地同一套规则。
+fn archive_folder_name(archive: &Path) -> std::ffi::OsString {
+    file_core::archive_folder_name(archive).unwrap_or_else(|| "archive".into())
 }
 
 impl FileBrowser {

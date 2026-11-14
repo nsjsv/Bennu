@@ -4,7 +4,8 @@ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::process::ExitStatusExt;
 
 use super::*;
-use crate::ArchivePassword;
+use crate::archive_listing::StoredMember;
+use crate::{ArchivePassword, FileKind};
 
 fn seven_zip_test_request(password: Option<ArchivePassword>) -> ArchiveExtractionRequest {
     ArchiveExtractionRequest {
@@ -21,7 +22,7 @@ fn seven_zip_exit_status(code: i32) -> std::process::ExitStatus {
 #[test]
 fn seven_zip_extract_output_switch_precedes_archive_operand() {
     let request = seven_zip_test_request(None);
-    let command = seven_zip_extract_command("7z", &request);
+    let command = seven_zip_extract_command(Path::new("7z"), &request);
     let arguments = command
         .as_std()
         .get_args()
@@ -56,7 +57,7 @@ fn seven_zip_extract_output_switch_preserves_destination_bytes() {
         request.archive = PathBuf::from(format!("/tmp/locked.{extension}"));
         request.destination = PathBuf::from(OsString::from_vec(destination_bytes.clone()));
 
-        let command = seven_zip_extract_command("7z", &request);
+        let command = seven_zip_extract_command(Path::new("7z"), &request);
         let output_switch = command
             .as_std()
             .get_args()
@@ -70,11 +71,12 @@ fn seven_zip_extract_output_switch_preserves_destination_bytes() {
 #[test]
 fn seven_zip_stdout_password_prompt_requires_password() {
     let request = seven_zip_test_request(None);
-    let error = seven_zip_error(
-        &request,
+    let error = seven_zip_failure(
+        &request.archive,
+        request.password.is_some(),
         seven_zip_exit_status(255),
-        "Enter password:".to_owned(),
-        "Break signaled".to_owned(),
+        b"Enter password:",
+        b"Break signaled",
     );
 
     assert!(matches!(
@@ -86,11 +88,12 @@ fn seven_zip_stdout_password_prompt_requires_password() {
 #[test]
 fn seven_zip_wrong_password_reports_invalid_password() {
     let request = seven_zip_test_request(ArchivePassword::new("wrong"));
-    let error = seven_zip_error(
-        &request,
+    let error = seven_zip_failure(
+        &request.archive,
+        request.password.is_some(),
         seven_zip_exit_status(2),
-        String::new(),
-        "Cannot open encrypted archive. Wrong password?".to_owned(),
+        b"",
+        b"Cannot open encrypted archive. Wrong password?",
     );
 
     assert!(matches!(
@@ -101,9 +104,12 @@ fn seven_zip_wrong_password_reports_invalid_password() {
 
 fn listed(path: &str, len: u64, encrypted: bool, block: Option<u64>) -> SevenZipListedEntry {
     SevenZipListedEntry {
-        path: path.to_owned(),
-        is_directory: false,
-        len,
+        member: StoredMember {
+            stored_path: path.as_bytes().to_vec(),
+            kind: FileKind::File,
+            len,
+            modified: None,
+        },
         encrypted,
         block,
     }
@@ -115,9 +121,12 @@ fn listed(path: &str, len: u64, encrypted: bool, block: Option<u64>) -> SevenZip
 fn password_probe_picks_the_cheapest_encrypted_file_to_decode() {
     let entries = vec![
         SevenZipListedEntry {
-            path: "dir".to_owned(),
-            is_directory: true,
-            len: 0,
+            member: StoredMember {
+                stored_path: b"dir".to_vec(),
+                kind: FileKind::Directory,
+                len: 0,
+                modified: None,
+            },
             encrypted: false,
             block: None,
         },
@@ -129,8 +138,8 @@ fn password_probe_picks_the_cheapest_encrypted_file_to_decode() {
     ];
 
     assert_eq!(
-        password_probe_entry(&entries).map(|entry| entry.path.as_str()),
-        Some("medium-first-in-block.bin")
+        password_probe_entry(&entries).map(|entry| entry.member.stored_path.as_slice()),
+        Some(&b"medium-first-in-block.bin"[..])
     );
     assert!(password_probe_entry(&entries[..2]).is_none());
 }

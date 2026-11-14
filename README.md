@@ -101,12 +101,12 @@ The command after installation is `bennu`:
 bennu
 ```
 
-| Command                         | Behavior                                                    |
-| ------------------------------- | ----------------------------------------------------------- |
-| `bennu`                         | Starts following the Home, custom directories, or last-session policy in Settings |
-| `bennu .`                       | Opens the current directory                                  |
-| `bennu ~/Downloads ~/Documents` | Opens multiple locations as tabs in one pane, in order       |
-| `bennu report.pdf notes.txt`    | Opens each file's folder and selects it                      |
+| Command| Behavior|
+| - | - |
+| `bennu`| Starts following the Home, custom directories, or last-session policy in Settings |
+| `bennu .`| Opens the current directory|
+| `bennu ~/Downloads ~/Documents`| Opens multiple locations as tabs in one pane, in order|
+| `bennu report.pdf notes.txt`| Opens each file's folder and selects it|
 
 If the app is already running, invoking the command again reuses the existing instance: without paths it focuses the main window; with paths it reuses existing tabs and only adds missing directories — other tabs and columns are never cleared.
 
@@ -159,19 +159,20 @@ sudo pacman -S --needed 7zip ffmpeg ffmpegthumbnailer libreoffice-fresh poppler 
   gvfs gvfs-afc gvfs-gphoto2 gvfs-mtp gvfs-smb libsecret udisks2
 ```
 
-| Capability                                        | Dependency                                             |
-| ------------------------------------------------- | ------------------------------------------------------ |
-| Audio and video preview, media metadata           | `ffmpeg`; `ffmpegthumbnailer` for video thumbnails     |
-| PDF preview                                       | Poppler (`pdfinfo`, `pdftoppm`)                        |
-| Office document preview                           | LibreOffice and Poppler                                |
-| `.7z` creation, plus `.7z` / `.rar` preview and extraction | `7z`, `7zz`, or `7za` (Arch package: `7zip`)  |
-| SFTP, WebDAV                                      | `gvfs`                                                 |
-| SMB                                               | `gvfs-smb`                                             |
-| Android / MTP devices                             | `gvfs-mtp`                                             |
-| Digital cameras                                   | `gvfs-gphoto2`                                         |
-| Apple / AFC devices                               | `gvfs-afc`                                             |
-| Saving network passwords                          | `secret-tool` provided by `libsecret`                  |
-| Storage device discovery, mounting, safe removal  | `udisks2`                                              |
+| Capability| Dependency|
+| - | - |
+| Audio and video preview, media metadata|`ffmpeg`; `ffmpegthumbnailer` for video thumbnails|
+| PDF preview| Poppler (`pdfinfo`, `pdftoppm`)|
+| Office document preview| LibreOffice and Poppler|
+| `.zip` / `.7z` creation, plus `.zip` / `.7z` / `.rar` preview, browsing, and extraction | `7z`, `7zz`, or `7za` (Arch package: `7zip`)|
+| `.tar` / `.tar.gz` / `.tar.xz` / `.tar.zst` / `.tar.bz2` | GNU `tar` and `gzip` (preinstalled on most distributions); `xz`, `zstd`, `bzip2` for those formats |
+| SFTP, WebDAV|`gvfs`|
+| SMB|`gvfs-smb`|
+| Android / MTP devices|`gvfs-mtp`|
+| Digital cameras|`gvfs-gphoto2`|
+| Apple / AFC devices|`gvfs-afc`|
+| Saving network passwords|`secret-tool` provided by `libsecret`|
+| Storage device discovery, mounting, safe removal|`udisks2`|
 
 A missing optional dependency only affects the matching capability. AVIF is supported by the built-in image decoder, which uses `dav1d` at build and run time.
 

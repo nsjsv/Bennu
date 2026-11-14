@@ -18,7 +18,7 @@ depends=(
     'xdg-utils'
 )
 optdepends=(
-    '7zip: 7z and rar preview and extraction, plus 7z creation'
+    '7zip: zip, 7z and rar preview and extraction, plus zip and 7z creation'
     'ffmpeg: audio and video preview and metadata support'
     'ffmpegthumbnailer: video thumbnail generation'
     'gvfs: SFTP and WebDAV network locations'

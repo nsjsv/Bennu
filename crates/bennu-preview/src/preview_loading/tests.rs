@@ -359,7 +359,7 @@ async fn load_preview_dispatches_type_library_audio_to_the_audio_loader() {
     match outcome {
         Err(error) => assert!(error.contains("audio file"), "{error}"),
         Ok(content) => assert!(
-            matches!(content, PreviewContent::FfmpegRequired { .. }),
+            matches!(content, PreviewContent::ToolRequired { .. }),
             "{content:?}"
         ),
     }

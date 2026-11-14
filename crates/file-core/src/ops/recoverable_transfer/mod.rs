@@ -55,7 +55,7 @@ pub use protocol::{
     TransferJournalFuture, TransferJournalMutation, TransferJournalRecord, TransferTransition,
     TransferWorkKey,
 };
-pub(crate) use rename::{rename_noreplace, NoReplaceRenameError};
+pub(crate) use rename::{move_without_replacing, rename_noreplace, NoReplaceRenameError};
 
 #[derive(Debug, Error)]
 pub enum RecoverableTransferError {

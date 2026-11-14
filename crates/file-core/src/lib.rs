@@ -7,6 +7,8 @@ pub mod archive;
 pub mod archive_extraction;
 pub mod archive_listing;
 pub mod archive_progress;
+#[cfg(test)]
+mod archive_test_fixtures;
 pub mod archive_vfs;
 pub mod byte_progress;
 pub mod checksum;
@@ -14,6 +16,7 @@ pub mod data_dir_migration;
 pub mod directory_metadata;
 pub mod entry;
 pub mod entry_naming;
+pub mod external_tools;
 pub mod log_detail;
 pub mod media;
 pub mod mime;
@@ -23,6 +26,7 @@ pub mod scan;
 mod seven_zip_job;
 pub mod seven_zip_password;
 pub mod sort;
+mod tar_job;
 pub mod text_encoding;
 pub mod transfer_conflict;
 pub mod trash_bin;
@@ -33,7 +37,7 @@ pub use archive::{
     ArchiveCompressionLevel, ArchiveCreationRequest, ArchiveFormat, ArchivePassword,
 };
 pub use archive_extraction::{
-    archive_extraction_format_for_path, extract_archive,
+    archive_extraction_format_for_path, archive_folder_name, extract_archive,
     extract_archive_with_controls_and_progress, extract_archive_with_progress,
     inspect_archive_extraction, is_supported_archive_path, ArchiveExtractionFormat,
     ArchiveExtractionRequest,
@@ -64,6 +68,7 @@ pub use entry_naming::{
     entry_name_candidates, entry_name_with_suffix, validate_entry_name, EntryNameCandidates,
     EntryNameKind, InvalidEntryName, ENTRY_NAME_LAST_CANDIDATE_NUMBER,
 };
+pub use external_tools::ExternalTool;
 pub use media::{
     is_audio_by_name, is_supported_image_extension, is_supported_image_path,
     is_supported_video_extension, is_supported_video_path, supported_media_kind_for_path,
@@ -121,5 +126,3 @@ pub use trash_bin::{
     TrashVerificationBatch,
 };
 pub use watch::{watch_directory, DirectoryEntryChanges, DirectoryWatcher, ResolvedEntryChange};
-
-pub(crate) const SEVEN_ZIP_COMMAND_NAMES: [&str; 3] = ["7z", "7zz", "7za"];

@@ -5,12 +5,11 @@ use bennu_localization::tr;
 use file_core::mime::{MimeDatabase, NameType, TEXT_PLAIN};
 use file_core::{
     list_archive_members_with_format, scan_directory, sniff_archive_extraction_format,
-    ArchiveListingEntry, DirectoryEntry, FileKind, ScanOptions,
+    ArchiveListingEntry, DirectoryEntry, ExternalTool, FileError, FileKind, ScanOptions,
 };
 
 use crate::animated_image_preview::is_animated_image_preview_path;
 use crate::audio_preview::{probe_audio_preview, AudioProbeError};
-use crate::ffmpeg_install::ffmpeg_is_installed;
 use crate::formatting::format_file_size;
 use crate::preview::{
     AudioPreviewDetails, PreviewContent, PreviewTreeDirectoryChildren, PreviewTreeEntry,
@@ -194,9 +193,13 @@ pub async fn load_directory_preview_children(
 async fn load_archive_preview(path: PathBuf) -> Result<PreviewContent, String> {
     // 自定义归档后缀无法从扩展名推断解压后端，按文件头嗅探决定。
     let format = sniff_archive_extraction_format(&path).await;
-    let members = list_archive_members_with_format(path, format)
-        .await
-        .map_err(|error| error.to_string())?;
+    let members = match list_archive_members_with_format(path.clone(), format).await {
+        Ok(members) => members,
+        Err(FileError::ToolMissing(tool)) => {
+            return Ok(PreviewContent::ToolRequired { path, tool })
+        }
+        Err(error) => return Err(error.to_string()),
+    };
     let mut tree_builder = ArchiveTreeBuilder::new();
     for member in members {
         tree_builder.insert_member(member);
@@ -220,7 +223,10 @@ async fn load_audio_preview(path: PathBuf) -> Result<PreviewContent, String> {
             cover: None,
             lyrics: None,
         }),
-        Err(AudioProbeError::FfmpegMissing) => Ok(PreviewContent::FfmpegRequired { path }),
+        Err(AudioProbeError::FfmpegMissing) => Ok(PreviewContent::ToolRequired {
+            path,
+            tool: ExternalTool::Ffmpeg,
+        }),
         Err(AudioProbeError::Failed(reason)) => {
             Err(tr!("Could not read this audio file: %1", reason))
         }
@@ -228,8 +234,12 @@ async fn load_audio_preview(path: PathBuf) -> Result<PreviewContent, String> {
 }
 
 async fn load_video_preview(path: PathBuf) -> Result<PreviewContent, String> {
-    if !ffmpeg_is_installed().await {
-        return Ok(PreviewContent::FfmpegRequired { path });
+    // 打开前先看一眼：没装就直接给安装提示，而不是等解帧失败再报错。
+    if ExternalTool::Ffmpeg.locate().is_none() {
+        return Ok(PreviewContent::ToolRequired {
+            path,
+            tool: ExternalTool::Ffmpeg,
+        });
     }
     Ok(PreviewContent::Video {
         path,

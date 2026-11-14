@@ -35,7 +35,7 @@ pub(crate) async fn discover_archive_directory(
     let innermost_archive =
         temp_store::materialize_innermost_archive(&resolved.boundaries, cancellation.clone())
             .await?;
-    let format = archive_format_for_materialized(&innermost_archive, resolved)?;
+    let format = archive_format_for_materialized(&innermost_archive)?;
     let members = list_archive_members_with_format(innermost_archive, format).await?;
     let tree = ArchiveMemberTree::build(members);
     let children = tree.children_of(&resolved.inner).ok_or_else(|| {
@@ -77,20 +77,12 @@ pub(crate) async fn discover_archive_directory(
     })
 }
 
-/// 物化后的归档文件沿用原扩展名；单层边界直接按原路径判定格式。
-/// 扩展名与内容不符时由列成员环节报错，与既有预览管道一致。
+/// 物化后的归档文件沿用原后缀（见 `temp_store::cache_file_path`）。扩展名与内容不符时由
+/// 列成员环节报错，与既有预览管道一致。
 fn archive_format_for_materialized(
     materialized: &Path,
-    resolved: &ResolvedArchivePath,
 ) -> Result<ArchiveExtractionFormat, FileError> {
-    archive_extraction_format_for_path(materialized)
-        .or_else(|| {
-            resolved
-                .boundaries
-                .first()
-                .and_then(archive_extraction_format_for_path)
-        })
-        .ok_or(FileError::Unsupported(
-            "archive format is not supported for directory discovery",
-        ))
+    archive_extraction_format_for_path(materialized).ok_or(FileError::Unsupported(
+        "archive format is not supported for directory discovery",
+    ))
 }

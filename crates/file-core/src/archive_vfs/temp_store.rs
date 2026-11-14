@@ -10,8 +10,9 @@ use std::time::SystemTime;
 
 use tokio_util::sync::CancellationToken;
 
-use crate::archive_vfs::extract::extract_member;
-use crate::{archive_extraction_format_for_path, FileError};
+use crate::archive_extraction::archive_suffix;
+use crate::archive_vfs::extract::extract_file_member;
+use crate::FileError;
 
 const CACHE_DIRECTORY_NAME: &str = "file-manager-archive-vfs";
 
@@ -49,9 +50,7 @@ pub(crate) async fn materialize_innermost_archive(
         }
         let member = boundaries[index]
             .strip_prefix(&boundaries[index - 1])
-            .expect("boundary chain entries share the outermost prefix")
-            .to_string_lossy()
-            .into_owned();
+            .expect("boundary chain entries share the outermost prefix");
         let is_innermost = index + 1 == boundaries.len();
         let target = if is_innermost {
             cache_path.clone()
@@ -63,7 +62,7 @@ pub(crate) async fn materialize_innermost_archive(
             current_archive = target;
             continue;
         }
-        extract_member(&current_archive, &member, &target, None).await?;
+        extract_file_member(&current_archive, member, &target, None).await?;
         current_archive = target;
     }
 
@@ -98,18 +97,16 @@ fn compute_cache_key(outermost: &Path, boundaries: &[PathBuf]) -> Result<String,
     Ok(hasher.finalize().to_hex().to_string())
 }
 
-/// 缓存文件保留原归档扩展名，保证后续按扩展名的格式分派依然成立。
+/// 缓存文件保留原归档的整段后缀（`.tar.gz` 而不只是 `.gz`），后续按后缀的格式分派依然成立。
 fn cache_file_path(cache_key: &str, boundaries: &[PathBuf]) -> PathBuf {
     let innermost = boundaries
         .last()
         .expect("boundary chain is never empty")
         .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("archive.zip");
-    let extension = archive_extraction_format_for_path(Path::new(innermost))
-        .map(|_| innermost.rsplit('.').next().unwrap_or("zip"))
-        .unwrap_or("zip");
-    cache_root().join(format!("{cache_key}.{extension}"))
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let suffix = archive_suffix(&innermost).map_or(".zip", |(suffix, _)| suffix);
+    cache_root().join(format!("{cache_key}{suffix}"))
 }
 
 /// 打开/预览用临时文件路径：`cache_root/open/<key>/<成员文件名>`。

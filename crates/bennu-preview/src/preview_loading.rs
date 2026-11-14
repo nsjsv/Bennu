@@ -216,11 +216,8 @@ async fn load_audio_preview(path: PathBuf) -> Result<PreviewContent, String> {
     match probe_audio_preview(path.clone()).await {
         Ok(probe) => Ok(PreviewContent::Audio {
             path,
-            details: AudioPreviewDetails {
-                duration: probe.duration,
-                duration_is_estimate: probe.duration_is_estimate,
-                len,
-            },
+            details: AudioPreviewDetails { len, probe },
+            cover: None,
         }),
         Err(AudioProbeError::FfmpegMissing) => Ok(PreviewContent::FfmpegRequired { path }),
         Err(AudioProbeError::Failed(reason)) => {

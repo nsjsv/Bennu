@@ -9,13 +9,15 @@ use std::time::Duration;
 
 use rodio::{DeviceSinkBuilder, MixerDeviceSink, Player};
 
+mod cover;
 mod pcm_stream;
 mod probe;
 #[cfg(test)]
 pub(crate) mod test_fixtures;
 
+pub use cover::load_audio_cover;
 use pcm_stream::{spawn_pcm_stream, FfmpegPcmSource, PcmFormat, PlaybackExchange};
-pub use probe::{AudioProbe, AudioProbeError};
+pub use probe::{AudioProbe, AudioProbeError, AudioStreamFacts, AudioTags};
 
 /// 一个文件一次预览会话的播放：声卡输出与播放器只开一次，播放、暂停、跳转、
 /// 播完重播都复用；随最后一个克隆释放（播放器停止 → 音源被丢 → ffmpeg 被杀）。

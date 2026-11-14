@@ -179,9 +179,11 @@ where
         PreviewState::Ready(PreviewContent::AnimatedImage(preview)) => {
             animated_image_preview_panel(preview, size, preview_bottom_controls_opacity)
         }
-        PreviewState::Ready(PreviewContent::Audio { path, details }) => {
-            audio_preview_panel(path, details, audio_preview).into()
-        }
+        PreviewState::Ready(PreviewContent::Audio {
+            path,
+            details,
+            cover,
+        }) => audio_preview_panel(path, details, cover.as_ref(), audio_preview).into(),
         PreviewState::Ready(PreviewContent::FfmpegRequired { .. }) => ffmpeg_required_panel(),
         PreviewState::Ready(PreviewContent::Video {
             path,

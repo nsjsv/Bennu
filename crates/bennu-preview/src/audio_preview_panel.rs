@@ -5,13 +5,15 @@ use std::path::Path;
 use std::time::Duration;
 
 use bennu_localization::tr;
-use iced::widget::{button, column, container, row, Button, Column, Space};
+use iced::widget::{button, column, container, image, row, Button, Column, Space};
 use iced::{Alignment, Element, Length};
 
 use bennu_theme::controls::icon_button_style;
 use bennu_theme::icons::{themed_icon, IconSymbol, IconTone};
 
-use crate::formatting::{format_duration, format_file_size};
+use crate::audio_preview::AudioStreamFacts;
+use crate::audio_track_text::{stream_summary, track_subtitle, track_title};
+use crate::formatting::format_file_size;
 use crate::media_controls::{
     media_position_text, AUDIO_CONTROL_BUTTON_SIZE, AUDIO_CONTROL_ICON_SIZE,
     AUDIO_PROGRESS_SLIDER_STEP_SECONDS, AUDIO_TIMELINE_CONTROL_GAP, AUDIO_VOLUME_SLIDER_STEP,
@@ -29,25 +31,32 @@ const AUDIO_VOLUME_SLIDER_WIDTH: f32 = 100.0;
 pub(crate) fn audio_preview_panel<Message>(
     path: &Path,
     details: &AudioPreviewDetails,
+    cover: Option<&image::Handle>,
     playback: Option<&AudioPreviewPlayback>,
 ) -> Column<'static, Message>
 where
     Message: 'static + Clone + From<PreviewMessage>,
 {
-    let duration = details.duration;
+    let duration = details.probe.duration;
     let len = details.len;
     let playback = playback.filter(|playback| playback.path.as_path() == path);
-    let title = column![
-        readable_text(tr!("Audio preview"))
-            .size(TITLE_SIZE)
-            .font(BOLD),
-        readable_text(audio_preview_summary(duration, len)),
-        readable_text(audio_preview_status(playback, duration)),
-    ]
+    let mut title = column![readable_text(track_title(path, &details.probe.tags))
+        .size(TITLE_SIZE)
+        .font(BOLD)]
     .spacing(4)
-    .width(Length::Fixed(150.0));
+    .width(Length::Fill);
+    if let Some(subtitle) = track_subtitle(&details.probe.tags) {
+        title = title.push(readable_text(subtitle));
+    }
+    title = title
+        .push(readable_text(audio_file_summary(
+            &details.probe.stream,
+            len,
+        )))
+        .push(readable_text(audio_preview_status(playback, duration)));
 
     let controls = row![
+        audio_cover(cover),
         title,
         audio_timeline_control(playback, duration),
         audio_volume_control(playback),
@@ -147,10 +156,31 @@ where
     .into()
 }
 
-fn audio_preview_summary(duration: Option<Duration>, len: u64) -> String {
-    match duration {
-        Some(duration) => format!("{} · {}", format_duration(duration), format_file_size(len)),
-        None => tr!("Duration unknown · %1", format_file_size(len)),
+const AUDIO_COVER_SIZE: f32 = 72.0;
+
+fn audio_cover<Message: 'static>(cover: Option<&image::Handle>) -> Element<'static, Message> {
+    let artwork: Element<'static, Message> = match cover {
+        Some(handle) => image(handle.clone())
+            .content_fit(iced::ContentFit::Cover)
+            .width(Length::Fixed(AUDIO_COVER_SIZE))
+            .height(Length::Fixed(AUDIO_COVER_SIZE))
+            .into(),
+        None => themed_icon(IconSymbol::Music, IconTone::Normal, AUDIO_COVER_SIZE * 0.5).into(),
+    };
+    container(artwork)
+        .width(Length::Fixed(AUDIO_COVER_SIZE))
+        .height(Length::Fixed(AUDIO_COVER_SIZE))
+        .center_x(Length::Fixed(AUDIO_COVER_SIZE))
+        .center_y(Length::Fixed(AUDIO_COVER_SIZE))
+        .into()
+}
+
+fn audio_file_summary(stream: &AudioStreamFacts, len: u64) -> String {
+    let facts = stream_summary(stream);
+    if facts.is_empty() {
+        format_file_size(len)
+    } else {
+        format!("{facts} · {}", format_file_size(len))
     }
 }
 

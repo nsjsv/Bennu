@@ -196,6 +196,9 @@ impl PreviewEngine {
             PreviewMessage::AudioPreviewDurationMeasured(path, duration) => {
                 self.accept_audio_preview_duration(&path, duration)
             }
+            PreviewMessage::AudioPreviewCoverLoaded(path, cover) => {
+                self.accept_audio_preview_cover(&path, cover)
+            }
             PreviewMessage::CopyFfmpegInstallCommand => {
                 match crate::ffmpeg_install::ffmpeg_install_command() {
                     Some(command) => iced::clipboard::write(command.to_owned()),

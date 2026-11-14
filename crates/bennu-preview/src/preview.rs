@@ -8,7 +8,7 @@ use iced::widget::{image, svg};
 // 原 app-ui 内 `use super::SqliteDatabasePreview`（model.rs 门面）；下沉后
 // sqlite_preview 是本 crate 顶层模块，改为 crate 路径。
 use crate::animated_image_preview::AnimatedImagePreview;
-use crate::audio_preview::AudioPreviewRuntime;
+use crate::audio_preview::{AudioPreviewRuntime, AudioProbe};
 use crate::document_preview::PagedDocumentPreview;
 use crate::sqlite_preview::SqliteDatabasePreview;
 use crate::text_document::TextOpened;
@@ -100,6 +100,8 @@ pub enum PreviewContent {
     Audio {
         path: PathBuf,
         details: AudioPreviewDetails,
+        /// 打开后在后台取；没有封面就一直是 None。
+        cover: Option<image::Handle>,
     },
     /// 音频、视频预览要靠 ffmpeg，系统里没有；面板给出安装命令。
     FfmpegRequired {
@@ -171,13 +173,11 @@ pub fn scaled_media_size(max_width: f32, max_height: f32, width: u32, height: u3
     (frame_width.max(1.0), frame_height.max(1.0))
 }
 
-/// 打开音频预览时读到的信息。
+/// 打开音频预览时读到的信息；`probe.duration_is_estimate` 为真时打开后后台再量一次准确值替换。
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioPreviewDetails {
-    pub duration: Option<Duration>,
-    /// ffmpeg 只能按码率估的时长；打开后后台再量一次准确值替换。
-    pub duration_is_estimate: bool,
     pub len: u64,
+    pub probe: AudioProbe,
 }
 
 #[derive(Debug, Clone)]

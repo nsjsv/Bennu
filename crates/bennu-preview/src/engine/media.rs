@@ -284,6 +284,24 @@ impl super::PreviewEngine {
         Task::none()
     }
 
+    pub(super) fn accept_audio_preview_cover(
+        &mut self,
+        path: &Path,
+        handle: image::Handle,
+    ) -> Task<PreviewMessage> {
+        if let Some(PreviewState::Ready(PreviewContent::Audio {
+            path: preview_path,
+            cover,
+            ..
+        })) = &mut self.preview
+        {
+            if preview_path == path {
+                *cover = Some(handle);
+            }
+        }
+        Task::none()
+    }
+
     pub(super) fn accept_audio_preview_duration(
         &mut self,
         path: &Path,
@@ -292,11 +310,12 @@ impl super::PreviewEngine {
         if let Some(PreviewState::Ready(PreviewContent::Audio {
             path: preview_path,
             details,
+            ..
         })) = &mut self.preview
         {
             if preview_path == path {
-                details.duration = Some(duration);
-                details.duration_is_estimate = false;
+                details.probe.duration = Some(duration);
+                details.probe.duration_is_estimate = false;
             }
         }
         Task::none()

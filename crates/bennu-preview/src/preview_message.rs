@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use file_core::DirectoryEntry;
+use iced::widget::image;
 use iced::window;
 
 use crate::animated_image_preview::{AnimatedImageFrame, AnimatedImagePreview};
@@ -61,6 +62,7 @@ pub enum PreviewMessage {
     AudioPreviewSeekCommitted,
     /// ffprobe 只能估时长时，后台量出的准确时长。
     AudioPreviewDurationMeasured(PathBuf, Duration),
+    AudioPreviewCoverLoaded(PathBuf, image::Handle),
     CopyFfmpegInstallCommand,
     AudioPreviewVolumeChanged(f32),
     AudioPreviewTick,

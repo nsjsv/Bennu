@@ -12,7 +12,7 @@ use iced::widget::image;
 use iced::Task;
 
 use super::PreviewAcceptance;
-use crate::commands::preview::measure_audio_preview_duration_command;
+use crate::commands::preview::{load_audio_cover_command, measure_audio_preview_duration_command};
 use crate::preview::{ImagePreviewContent, PreviewContent, PreviewState, PreviewWindowProfile};
 use crate::preview_message::PreviewMessage;
 
@@ -50,14 +50,21 @@ impl super::PreviewEngine {
                         self.clear_video_preview();
                         self.open_text_document(path.clone(), opened)
                     }
-                    PreviewContent::Audio { path, details } => {
+                    PreviewContent::Audio { path, details, .. } => {
                         self.text_preview_document = None;
                         self.clear_video_preview();
-                        if details.duration_is_estimate {
+                        let measure_duration = if details.probe.duration_is_estimate {
                             measure_audio_preview_duration_command(path.clone())
                         } else {
                             Task::none()
-                        }
+                        };
+                        Task::batch([
+                            measure_duration,
+                            load_audio_cover_command(
+                                path.clone(),
+                                details.probe.embedded_cover_stream,
+                            ),
+                        ])
                     }
                     PreviewContent::Video { path, duration, .. } => {
                         self.text_preview_document = None;

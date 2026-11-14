@@ -30,8 +30,6 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Animated image preview has no frames", "动态图像预览没有可用帧"),
     ("This GIF has too many frames to inspect safely", "此 GIF 帧数过多，无法安全解析"),
     // 音频
-    ("Audio preview", "音频预览"),
-    ("Duration unknown · %1", "时长未知 · %1"),
     ("Ready to play", "可以播放"),
     ("Opening audio output...", "正在打开音频输出..."),
     ("Playing · %1", "播放中 · %1"),
@@ -45,6 +43,9 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Audio and video previews need ffmpeg. Install it with:\n%1", "音频和视频预览需要 ffmpeg。用下面的命令安装：\n%1"),
     ("Audio and video previews need ffmpeg. Install it with your system's package manager.", "音频和视频预览需要 ffmpeg，请用系统的包管理器安装。"),
     ("Copy Command", "复制命令"),
+    ("%1-bit", "%1 位"),
+    ("Stereo", "立体声"),
+    ("%1 channels", "%1 声道"),
     // 文本、Markdown、SQLite
     ("Text preview is not ready", "文本预览尚未就绪"),
     ("(empty file)", "（空文件）"),

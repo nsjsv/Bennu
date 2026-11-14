@@ -85,6 +85,7 @@ pub mod preview_surface;
 pub mod image_preview_panel;
 // 音频预览面板（标题摘要/时间线控制/音量控制）。
 pub mod audio_preview_panel;
+mod audio_track_text;
 // 视频预览面板（帧视图/底部控件/音量/迷你进度条）。
 pub mod video_preview_panel;
 // 动图（GIF）预览面板（双帧叠加/底部 seek 控件）。

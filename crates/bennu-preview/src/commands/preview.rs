@@ -8,7 +8,9 @@ use iced::Task;
 use tokio_util::sync::CancellationToken;
 
 use crate::animated_image_preview::load_animated_image_preview;
-use crate::audio_preview::{measure_audio_preview_duration, start_audio_preview_at};
+use crate::audio_preview::{
+    load_audio_cover, measure_audio_preview_duration, start_audio_preview_at,
+};
 use crate::original_image_preview::load_original_image_preview;
 use crate::preview::{
     RemotePreviewCacheFinished, RemotePreviewCacheMessage, RemotePreviewCacheProgress,
@@ -246,6 +248,19 @@ pub(crate) fn start_audio_preview_at_command(
             PreviewMessage::AudioPreviewStarted(audio_path.clone(), playback_outcome)
         },
     )
+}
+
+pub(crate) fn load_audio_cover_command(
+    path: PathBuf,
+    embedded_stream: Option<usize>,
+) -> Task<PreviewMessage> {
+    let audio_path = path.clone();
+    Task::future(load_audio_cover(path, embedded_stream)).and_then(move |cover| {
+        Task::done(PreviewMessage::AudioPreviewCoverLoaded(
+            audio_path.clone(),
+            cover,
+        ))
+    })
 }
 
 pub(crate) fn measure_audio_preview_duration_command(path: PathBuf) -> Task<PreviewMessage> {

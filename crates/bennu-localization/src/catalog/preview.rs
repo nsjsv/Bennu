@@ -41,6 +41,10 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Audio unavailable: %1", "音频不可用：%1"),
     ("Could not start audio preview", "无法启动音频预览"),
     ("Volume %1%", "音量 %1%"),
+    ("Could not read this audio file: %1", "无法读取这个音频文件：%1"),
+    ("Audio and video previews need ffmpeg. Install it with:\n%1", "音频和视频预览需要 ffmpeg。用下面的命令安装：\n%1"),
+    ("Audio and video previews need ffmpeg. Install it with your system's package manager.", "音频和视频预览需要 ffmpeg，请用系统的包管理器安装。"),
+    ("Copy Command", "复制命令"),
     // 文本、Markdown、SQLite
     ("Text preview is not ready", "文本预览尚未就绪"),
     ("(empty file)", "（空文件）"),

@@ -99,8 +99,11 @@ pub enum PreviewContent {
     AnimatedImage(AnimatedImagePreview),
     Audio {
         path: PathBuf,
-        duration: Option<Duration>,
-        len: u64,
+        details: AudioPreviewDetails,
+    },
+    /// 音频、视频预览要靠 ffmpeg，系统里没有；面板给出安装命令。
+    FfmpegRequired {
+        path: PathBuf,
     },
     Video {
         path: PathBuf,
@@ -168,12 +171,23 @@ pub fn scaled_media_size(max_width: f32, max_height: f32, width: u32, height: u3
     (frame_width.max(1.0), frame_height.max(1.0))
 }
 
+/// 打开音频预览时读到的信息。
+#[derive(Debug, Clone, PartialEq)]
+pub struct AudioPreviewDetails {
+    pub duration: Option<Duration>,
+    /// ffmpeg 只能按码率估的时长；打开后后台再量一次准确值替换。
+    pub duration_is_estimate: bool,
+    pub len: u64,
+}
+
 #[derive(Debug, Clone)]
 pub struct AudioPreviewPlayback {
     pub path: PathBuf,
     pub runtime: Option<AudioPreviewRuntime>,
     pub status: AudioPreviewPlaybackStatus,
     pub position: Duration,
+    /// 正在拖进度条：显示拖到的位置，tick 不拿播放进度覆盖它，松手才真正跳转。
+    pub seeking: bool,
     pub volume: f32,
     pub error: Option<String>,
 }
@@ -185,6 +199,7 @@ impl AudioPreviewPlayback {
             runtime: None,
             status: AudioPreviewPlaybackStatus::Loading,
             position: Duration::ZERO,
+            seeking: false,
             volume: 1.0,
             error: None,
         }

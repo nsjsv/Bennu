@@ -483,7 +483,6 @@ fn every_message_the_engine_returns_has_a_host_handler() {
         ),
         PreviewMessage::TextFileChanged { document: 7 },
         PreviewMessage::PreviewTreeDirectoryToggled(0),
-        PreviewMessage::AudioPreviewSeekRequested(0.0),
         PreviewMessage::PreviewImageViewport(PreviewImageViewportMessage::ResetRequested),
         PreviewMessage::PreviewWindowPresented(iced::window::Id::unique()),
     ] {

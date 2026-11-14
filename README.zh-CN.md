@@ -76,7 +76,7 @@ sudo dnf install ./bennu-0.2.6-1.*.rpm
 
 其他发行版可以先查看 [Releases](https://github.com/nsjsv/Bennu/releases)。如果预编译包无法运行，请按下文从源码构建。
 
-以上预编译包均不自动启用后台服务，PDF/Office、视频、压缩包等预览依赖的可选软件（poppler、ffmpeg、7zip、gvfs 等）以弱依赖声明，需要时自行安装。
+以上预编译包均不自动启用后台服务，PDF/Office、音频、视频、压缩包等预览依赖的可选软件（poppler、ffmpeg、7zip、gvfs 等）以弱依赖声明，需要时自行安装。
 
 ### 启用索引搜索
 
@@ -161,7 +161,7 @@ sudo pacman -S --needed 7zip ffmpeg ffmpegthumbnailer libreoffice-fresh poppler 
 
 | 能力                               | 依赖                                    |
 | -------------------------------- | ------------------------------------- |
-| 视频预览与元数据                         | `ffmpeg`；视频缩略图可使用 `ffmpegthumbnailer` |
+| 音频、视频预览与元数据                   | `ffmpeg`；视频缩略图可使用 `ffmpegthumbnailer` |
 | PDF 预览                           | Poppler（`pdfinfo`、`pdftoppm`）         |
 | Office 文档预览                      | LibreOffice 与 Poppler                 |
 | `.7z` 创建，以及 `.7z` / `.rar` 预览和解压 | `7z`、`7zz` 或 `7za`（Arch 包名为 `7zip`）   |

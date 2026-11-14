@@ -15,6 +15,7 @@ pub mod operation_progress;
 // 纯搬移：rodio 音频预览运行时自 app-ui 下沉；app-ui 经 main.rs 的
 // re-export 维持 crate::audio_preview::* 调用路径不变。
 pub mod audio_preview;
+pub mod ffmpeg_install;
 pub mod text_highlight;
 // 纯搬移：文本预览模型（分块/行索引/Markdown 模式）自 app-ui 下沉；
 // 纯 std 实现，无宿主耦合。

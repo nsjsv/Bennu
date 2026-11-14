@@ -8,7 +8,7 @@ use iced::Task;
 use tokio_util::sync::CancellationToken;
 
 use crate::animated_image_preview::load_animated_image_preview;
-use crate::audio_preview::{start_audio_preview, start_audio_preview_at};
+use crate::audio_preview::{measure_audio_preview_duration, start_audio_preview_at};
 use crate::original_image_preview::load_original_image_preview;
 use crate::preview::{
     RemotePreviewCacheFinished, RemotePreviewCacheMessage, RemotePreviewCacheProgress,
@@ -232,9 +232,29 @@ pub fn animated_image_preview_command(
 }
 
 pub fn start_audio_preview_command(path: PathBuf) -> Task<PreviewMessage> {
+    start_audio_preview_at_command(path, Duration::ZERO)
+}
+
+pub(crate) fn start_audio_preview_at_command(
+    path: PathBuf,
+    position: Duration,
+) -> Task<PreviewMessage> {
     let audio_path = path.clone();
-    Task::perform(start_audio_preview(path), move |playback_outcome| {
-        PreviewMessage::AudioPreviewStarted(audio_path.clone(), playback_outcome)
+    Task::perform(
+        start_audio_preview_at(path, position),
+        move |playback_outcome| {
+            PreviewMessage::AudioPreviewStarted(audio_path.clone(), playback_outcome)
+        },
+    )
+}
+
+pub(crate) fn measure_audio_preview_duration_command(path: PathBuf) -> Task<PreviewMessage> {
+    let audio_path = path.clone();
+    Task::future(measure_audio_preview_duration(path)).and_then(move |duration| {
+        Task::done(PreviewMessage::AudioPreviewDurationMeasured(
+            audio_path.clone(),
+            duration,
+        ))
     })
 }
 

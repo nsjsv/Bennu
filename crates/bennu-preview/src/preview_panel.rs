@@ -179,11 +179,10 @@ where
         PreviewState::Ready(PreviewContent::AnimatedImage(preview)) => {
             animated_image_preview_panel(preview, size, preview_bottom_controls_opacity)
         }
-        PreviewState::Ready(PreviewContent::Audio {
-            path,
-            duration,
-            len,
-        }) => audio_preview_panel(path, *duration, *len, audio_preview).into(),
+        PreviewState::Ready(PreviewContent::Audio { path, details }) => {
+            audio_preview_panel(path, details, audio_preview).into()
+        }
+        PreviewState::Ready(PreviewContent::FfmpegRequired { .. }) => ffmpeg_required_panel(),
         PreviewState::Ready(PreviewContent::Video {
             path,
             frame,
@@ -219,6 +218,26 @@ where
 
 /// 预览失败（二进制、不支持的类型、读取失败）：居中，上面一个警告图标，文字用次要色、
 /// 窄一点自动换行，不再贴在左上角。
+fn ffmpeg_required_panel<'a, Message>() -> Element<'a, Message>
+where
+    Message: 'a + Clone + From<PreviewMessage>,
+{
+    match crate::ffmpeg_install::ffmpeg_install_command() {
+        Some(command) => preview_error_panel(
+            tr!("Audio and video previews need ffmpeg. Install it with:\n%1", command),
+            Some(
+                normal_button(readable_text(tr!("Copy Command")))
+                    .on_press(Message::from(PreviewMessage::CopyFfmpegInstallCommand))
+                    .into(),
+            ),
+        ),
+        None => preview_error_panel(
+            tr!("Audio and video previews need ffmpeg. Install it with your system's package manager."),
+            None,
+        ),
+    }
+}
+
 fn preview_error_panel<'a, Message: 'a>(
     error: String,
     action: Option<Element<'a, Message>>,

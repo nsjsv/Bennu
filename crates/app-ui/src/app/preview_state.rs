@@ -62,9 +62,6 @@ impl FileBrowser {
             PreviewMessage::ImagePreviewDimensionsLoaded(path, generation, outcome) => {
                 self.accept_image_preview_dimensions(path, generation, outcome)
             }
-            PreviewMessage::AudioPreviewSeekRequested(position) => {
-                self.seek_audio_preview_playback(position)
-            }
             PreviewMessage::PreviewTreeDirectoryToggled(entry_id) => {
                 self.toggle_preview_tree_directory(entry_id)
             }
@@ -124,15 +121,5 @@ impl FileBrowser {
             ]);
         }
         command.map(Message::Preview)
-    }
-
-    fn seek_audio_preview_playback(&mut self, position_seconds: f32) -> Task<Message> {
-        if let Some(error) = self
-            .preview_engine
-            .seek_audio_preview_playback(position_seconds)
-        {
-            self.show_global_error_from(GlobalErrorSource::Preview, error);
-        }
-        Task::none()
     }
 }

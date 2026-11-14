@@ -55,7 +55,13 @@ pub enum PreviewMessage {
     AnimatedImageSeekCommitted,
     AudioPreviewPlaybackToggled,
     AudioPreviewStarted(PathBuf, Result<AudioPreviewRuntime, String>),
+    /// 拖进度条途中：只改显示位置。
     AudioPreviewSeekRequested(f32),
+    /// 松手（或键盘、点击这类一次到位的操作）：真正跳转。
+    AudioPreviewSeekCommitted,
+    /// ffprobe 只能估时长时，后台量出的准确时长。
+    AudioPreviewDurationMeasured(PathBuf, Duration),
+    CopyFfmpegInstallCommand,
     AudioPreviewVolumeChanged(f32),
     AudioPreviewTick,
     VideoPreviewPlaybackToggled,

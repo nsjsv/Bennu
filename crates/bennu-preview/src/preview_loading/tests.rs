@@ -346,18 +346,23 @@ async fn load_preview_dispatches_type_library_audio_to_the_audio_loader() {
     let audio_path = temp_dir.path().join("broken.opus");
     std::fs::write(&audio_path, b"not really opus").expect("write audio fixture");
 
-    let error = load_preview(
+    let outcome = load_preview(
         audio_path,
         FileKind::File,
         &default_rules(),
         ScanOptions::default(),
         TEST_MAX_PREVIEW_FILE_BYTES,
     )
-    .await
-    .expect_err("garbage audio cannot decode");
+    .await;
 
-    // 走的是音频加载（解码失败），不是文本加载（“二进制数据”）。
-    assert!(error.contains("audio preview"), "{error}");
+    // 走的是音频加载（读不出音频信息；没装 ffmpeg 时是安装提示），不是文本加载（“二进制数据”）。
+    match outcome {
+        Err(error) => assert!(error.contains("audio file"), "{error}"),
+        Ok(content) => assert!(
+            matches!(content, PreviewContent::FfmpegRequired { .. }),
+            "{content:?}"
+        ),
+    }
 }
 
 #[test]

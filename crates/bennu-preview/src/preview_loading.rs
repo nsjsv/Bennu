@@ -9,9 +9,12 @@ use file_core::{
 };
 
 use crate::animated_image_preview::is_animated_image_preview_path;
-use crate::audio_preview::inspect_audio_preview_metadata;
+use crate::audio_preview::{probe_audio_preview, AudioProbeError};
+use crate::ffmpeg_install::ffmpeg_is_installed;
 use crate::formatting::format_file_size;
-use crate::preview::{PreviewContent, PreviewTreeDirectoryChildren, PreviewTreeEntry};
+use crate::preview::{
+    AudioPreviewDetails, PreviewContent, PreviewTreeDirectoryChildren, PreviewTreeEntry,
+};
 use crate::preview_config::{PreviewExtensionRules, PreviewFileSizeKind, PreviewSizeLimitKind};
 use crate::sqlite_preview::load_sqlite_preview;
 use crate::text_preview_loading::load_initial_text_preview;
@@ -206,17 +209,30 @@ async fn load_archive_preview(path: PathBuf) -> Result<PreviewContent, String> {
 }
 
 async fn load_audio_preview(path: PathBuf) -> Result<PreviewContent, String> {
-    let preview_path = path.clone();
-    let metadata = inspect_audio_preview_metadata(path).await?;
-
-    Ok(PreviewContent::Audio {
-        path: preview_path,
-        duration: metadata.duration,
-        len: metadata.len,
-    })
+    let len = tokio::fs::metadata(&path)
+        .await
+        .map_err(|error| tr!("Could not read this audio file: %1", error.to_string()))?
+        .len();
+    match probe_audio_preview(path.clone()).await {
+        Ok(probe) => Ok(PreviewContent::Audio {
+            path,
+            details: AudioPreviewDetails {
+                duration: probe.duration,
+                duration_is_estimate: probe.duration_is_estimate,
+                len,
+            },
+        }),
+        Err(AudioProbeError::FfmpegMissing) => Ok(PreviewContent::FfmpegRequired { path }),
+        Err(AudioProbeError::Failed(reason)) => {
+            Err(tr!("Could not read this audio file: %1", reason))
+        }
+    }
 }
 
 async fn load_video_preview(path: PathBuf) -> Result<PreviewContent, String> {
+    if !ffmpeg_is_installed().await {
+        return Ok(PreviewContent::FfmpegRequired { path });
+    }
     Ok(PreviewContent::Video {
         path,
         frame: None,

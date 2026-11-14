@@ -19,7 +19,7 @@ depends=(
 )
 optdepends=(
     '7zip: 7z and rar preview and extraction, plus 7z creation'
-    'ffmpeg: video preview and metadata support'
+    'ffmpeg: audio and video preview and metadata support'
     'ffmpegthumbnailer: video thumbnail generation'
     'gvfs: SFTP and WebDAV network locations'
     'gvfs-afc: Apple/AFC portable device support'

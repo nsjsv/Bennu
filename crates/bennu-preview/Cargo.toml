@@ -30,8 +30,9 @@ iced = { version = "0.14", default-features = false, features = [
     "svg",
 ] }
 # 预览运行时依赖（版本与 app-ui 原声明一致，随模块一并下沉）：
-# rodio=音频预览输出；tokio=spawn_blocking 音频/动图解码线程池。
-rodio = "0.22.2"
+# rodio=音频预览输出（解码交给 ffmpeg，只开播放功能，不带 symphonia 解码器、录音、
+# 抖动噪声）；tokio=spawn_blocking 音频/动图解码线程池。
+rodio = { version = "0.22.2", default-features = false, features = ["playback"] }
 tokio.workspace = true
 # 动图预览：image=GIF 帧解码（workspace 定义含 gif codec）；gif=跳帧
 # 元数据巡检（Duration 上限判定）。

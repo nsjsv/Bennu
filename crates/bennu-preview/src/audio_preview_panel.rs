@@ -17,7 +17,7 @@ use crate::media_controls::{
     AUDIO_PROGRESS_SLIDER_STEP_SECONDS, AUDIO_TIMELINE_CONTROL_GAP, AUDIO_VOLUME_SLIDER_STEP,
 };
 use crate::panel_text::readable_text;
-use crate::preview::{AudioPreviewPlayback, AudioPreviewPlaybackStatus};
+use crate::preview::{AudioPreviewDetails, AudioPreviewPlayback, AudioPreviewPlaybackStatus};
 use crate::preview_message::PreviewMessage;
 use bennu_theme::controls::slider;
 use bennu_theme::typography::{BOLD, TITLE_SIZE};
@@ -28,13 +28,14 @@ const AUDIO_VOLUME_SLIDER_WIDTH: f32 = 100.0;
 
 pub(crate) fn audio_preview_panel<Message>(
     path: &Path,
-    duration: Option<Duration>,
-    len: u64,
+    details: &AudioPreviewDetails,
     playback: Option<&AudioPreviewPlayback>,
 ) -> Column<'static, Message>
 where
     Message: 'static + Clone + From<PreviewMessage>,
 {
+    let duration = details.duration;
+    let len = details.len;
     let playback = playback.filter(|playback| playback.path.as_path() == path);
     let title = column![
         readable_text(tr!("Audio preview"))
@@ -106,6 +107,7 @@ where
         slider(0.0..=duration_seconds, position_seconds, |value: f32| {
             Message::from(PreviewMessage::AudioPreviewSeekRequested(value))
         },)
+        .on_release(Message::from(PreviewMessage::AudioPreviewSeekCommitted))
         .step(AUDIO_PROGRESS_SLIDER_STEP_SECONDS)
         .width(Length::Fixed(AUDIO_PROGRESS_SLIDER_WIDTH)),
     ]

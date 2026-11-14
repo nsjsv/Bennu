@@ -189,6 +189,19 @@ impl PreviewEngine {
                 self.change_audio_preview_volume(volume)
             }
             PreviewMessage::AudioPreviewTick => self.update_audio_preview_playback(),
+            PreviewMessage::AudioPreviewSeekRequested(position) => {
+                self.drag_audio_preview_position(position)
+            }
+            PreviewMessage::AudioPreviewSeekCommitted => self.commit_audio_preview_seek(),
+            PreviewMessage::AudioPreviewDurationMeasured(path, duration) => {
+                self.accept_audio_preview_duration(&path, duration)
+            }
+            PreviewMessage::CopyFfmpegInstallCommand => {
+                match crate::ffmpeg_install::ffmpeg_install_command() {
+                    Some(command) => iced::clipboard::write(command.to_owned()),
+                    None => Task::none(),
+                }
+            }
             PreviewMessage::VideoPreviewPlaybackToggled => self.toggle_video_preview_playback(),
             PreviewMessage::VideoPreviewAudioStarted(path, generation, audio_outcome) => {
                 self.accept_video_preview_audio_started(path, generation, audio_outcome)

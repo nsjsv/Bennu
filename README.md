@@ -76,7 +76,7 @@ sudo dnf install ./bennu-0.2.6-1.*.rpm
 
 For other distributions, check [Releases](https://github.com/nsjsv/Bennu/releases) first. If the prebuilt packages don't work for you, build from source below.
 
-The prebuilt packages above never enable the background service automatically, and the optional software needed for PDF/Office, video, and archive previews (poppler, ffmpeg, 7zip, gvfs, etc.) is declared as weak dependencies — install it as needed.
+The prebuilt packages above never enable the background service automatically, and the optional software needed for PDF/Office, audio, video, and archive previews (poppler, ffmpeg, 7zip, gvfs, etc.) is declared as weak dependencies — install it as needed.
 
 ### Enabling indexed search
 
@@ -161,7 +161,7 @@ sudo pacman -S --needed 7zip ffmpeg ffmpegthumbnailer libreoffice-fresh poppler 
 
 | Capability                                        | Dependency                                             |
 | ------------------------------------------------- | ------------------------------------------------------ |
-| Video preview and metadata                        | `ffmpeg`; `ffmpegthumbnailer` for video thumbnails     |
+| Audio and video preview, media metadata           | `ffmpeg`; `ffmpegthumbnailer` for video thumbnails     |
 | PDF preview                                       | Poppler (`pdfinfo`, `pdftoppm`)                        |
 | Office document preview                           | LibreOffice and Poppler                                |
 | `.7z` creation, plus `.7z` / `.rar` preview and extraction | `7z`, `7zz`, or `7za` (Arch package: `7zip`)  |

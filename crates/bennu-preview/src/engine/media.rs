@@ -14,7 +14,7 @@ use iced::{Subscription, Task};
 use super::PreviewLoadSurface;
 use crate::audio_preview::AudioPreviewRuntime;
 use crate::commands::preview::{
-    start_audio_preview_command, start_video_preview_audio_command, video_preview_frame_command,
+    start_audio_preview_at_command, start_video_preview_audio_command, video_preview_frame_command,
     video_preview_metadata_command,
 };
 use crate::preview::{
@@ -196,13 +196,33 @@ impl super::PreviewEngine {
                         return Task::none();
                     }
                 }
-                AudioPreviewPlaybackStatus::Stopped
-                | AudioPreviewPlaybackStatus::Finished
-                | AudioPreviewPlaybackStatus::Error => {}
+                // 播完重播复用同一个声卡输出，只从头换一条解码流。
+                AudioPreviewPlaybackStatus::Finished => {
+                    if let Some(runtime) = &playback.runtime {
+                        match runtime.seek_to(Duration::ZERO) {
+                            Ok(()) => {
+                                runtime.play();
+                                playback.position = Duration::ZERO;
+                                playback.status = AudioPreviewPlaybackStatus::Playing;
+                                playback.error = None;
+                            }
+                            Err(error) => playback.error = Some(error),
+                        }
+                        return Task::none();
+                    }
+                }
+                AudioPreviewPlaybackStatus::Stopped | AudioPreviewPlaybackStatus::Error => {}
             }
         }
 
-        self.start_audio_preview_playback(path)
+        let resume_from = self
+            .audio_preview
+            .as_ref()
+            .filter(|playback| {
+                playback.path == path && playback.status == AudioPreviewPlaybackStatus::Stopped
+            })
+            .map_or(Duration::ZERO, |playback| playback.position);
+        self.start_audio_preview_playback(path, resume_from)
     }
 
     pub fn accept_audio_preview_started(
@@ -232,24 +252,54 @@ impl super::PreviewEngine {
         Task::none()
     }
 
-    /// 跳转失败时返回错误串：播放状态内的 error 已由引擎落位，全局
-    /// 错误通知属宿主通知域，由宿主转发层展示。
-    pub fn seek_audio_preview_playback(&mut self, position_seconds: f32) -> Option<String> {
-        let playback = self.audio_preview.as_mut()?;
-        let runtime = playback.runtime.as_ref()?;
+    pub(super) fn drag_audio_preview_position(
+        &mut self,
+        position_seconds: f32,
+    ) -> Task<PreviewMessage> {
+        if let Some(playback) = self.audio_preview.as_mut() {
+            playback.seeking = true;
+            playback.position = Duration::from_secs_f32(position_seconds.max(0.0));
+        }
+        Task::none()
+    }
 
-        let position = Duration::from_secs_f32(position_seconds.max(0.0));
-        match runtime.seek_to(position) {
+    /// 还没开始播放（或已出错）时只记下位置，下次开始播放从这里起。
+    pub(super) fn commit_audio_preview_seek(&mut self) -> Task<PreviewMessage> {
+        let Some(playback) = self.audio_preview.as_mut() else {
+            return Task::none();
+        };
+        playback.seeking = false;
+        let Some(runtime) = playback.runtime.as_ref() else {
+            return Task::none();
+        };
+        match runtime.seek_to(playback.position) {
             Ok(()) => {
-                playback.position = position;
+                if playback.status == AudioPreviewPlaybackStatus::Finished {
+                    playback.status = AudioPreviewPlaybackStatus::Paused;
+                }
                 playback.error = None;
-                None
             }
-            Err(error) => {
-                playback.error = Some(error.clone());
-                Some(error)
+            Err(error) => playback.error = Some(error),
+        }
+        Task::none()
+    }
+
+    pub(super) fn accept_audio_preview_duration(
+        &mut self,
+        path: &Path,
+        duration: Duration,
+    ) -> Task<PreviewMessage> {
+        if let Some(PreviewState::Ready(PreviewContent::Audio {
+            path: preview_path,
+            details,
+        })) = &mut self.preview
+        {
+            if preview_path == path {
+                details.duration = Some(duration);
+                details.duration_is_estimate = false;
             }
         }
+        Task::none()
     }
 
     pub fn change_audio_preview_volume(&mut self, volume: f32) -> Task<PreviewMessage> {
@@ -276,10 +326,16 @@ impl super::PreviewEngine {
             return Task::none();
         };
 
-        playback.position = runtime.position();
-        if runtime.is_finished() {
-            runtime.stop();
-            playback.runtime = None;
+        if !playback.seeking {
+            playback.position = runtime.position();
+        }
+        if let Some(failure) = runtime.take_failure() {
+            runtime.pause();
+            playback.status = AudioPreviewPlaybackStatus::Error;
+            playback.error = Some(failure);
+        } else if runtime.is_finished() {
+            // 留着运行时：重播、往回拖都不用重新打开声卡。
+            runtime.pause();
             playback.status = AudioPreviewPlaybackStatus::Finished;
         }
 
@@ -446,10 +502,16 @@ impl super::PreviewEngine {
         })
     }
 
-    pub(crate) fn start_audio_preview_playback(&mut self, path: PathBuf) -> Task<PreviewMessage> {
+    pub(crate) fn start_audio_preview_playback(
+        &mut self,
+        path: PathBuf,
+        from: Duration,
+    ) -> Task<PreviewMessage> {
         self.clear_audio_preview();
-        self.audio_preview = Some(AudioPreviewPlayback::loading(path.clone()));
-        start_audio_preview_command(path)
+        let mut playback = AudioPreviewPlayback::loading(path.clone());
+        playback.position = from;
+        self.audio_preview = Some(playback);
+        start_audio_preview_at_command(path, from)
     }
 
     pub(crate) fn clear_audio_preview(&mut self) {

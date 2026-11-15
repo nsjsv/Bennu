@@ -210,7 +210,7 @@ impl UserPreferences {
             preview_image_size_bytes: Some(self.preview_size_limits.image_bytes),
             preview_video_size_bytes: None,
             preview_audio_size_bytes: None,
-            preview_archive_size_bytes: Some(self.preview_size_limits.archive_bytes),
+            preview_archive_size_bytes: None,
             preview_document_size_bytes: Some(self.preview_size_limits.document_bytes),
             preview_sqlite_size_bytes: Some(self.preview_size_limits.sqlite_bytes),
             preview_extension_rules: Some(StoredPreviewExtensionRules {

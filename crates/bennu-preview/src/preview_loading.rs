@@ -12,8 +12,8 @@ use file_core::{
 use crate::audio_preview::{probe_audio_preview, AudioProbeError};
 use crate::formatting::format_file_size;
 use crate::preview::{
-    AudioPreviewDetails, PreviewContent, PreviewTreeDirectoryChildren, PreviewTreeEntry,
-    VideoPreviewDetails,
+    ArchiveSummary, AudioPreviewDetails, PreviewContent, PreviewTreeDirectoryChildren,
+    PreviewTreeEntry, TreeViewport, VideoPreviewDetails,
 };
 use crate::preview_config::{PreviewExtensionRules, PreviewFileSizeKind, PreviewSizeLimitKind};
 use crate::sqlite_preview::load_sqlite_preview;
@@ -21,8 +21,6 @@ use crate::text_preview_loading::{load_initial_text_preview, TextOpening};
 use crate::video_preview::{
     find_external_subtitles, probe_video_preview, subtitle_choices, VideoProbeError,
 };
-
-pub const PREVIEW_ARCHIVE_ENTRY_LIMIT: usize = 500;
 
 /// 所有预览入口（本地、远程缓存、动图、文档、文件选择器）共用的超限提示。
 pub fn file_too_large_to_preview(size: u64, maximum: u64) -> String {
@@ -99,23 +97,29 @@ pub enum PreviewPathKind {
 }
 
 impl PreviewPathKind {
-    /// 适用哪一类大小上限；文本按需读取、音频视频边读边放，没有上限。
+    /// 适用哪一类大小上限；文本按需读取、音频视频边读边放、压缩包只列目录，没有上限。
     pub fn size_limit_kind(self) -> Option<PreviewSizeLimitKind> {
         match self {
             PreviewPathKind::Document => Some(PreviewSizeLimitKind::Document),
-            PreviewPathKind::Archive => Some(PreviewSizeLimitKind::Archive),
             PreviewPathKind::Sqlite => Some(PreviewSizeLimitKind::Sqlite),
             PreviewPathKind::Image => Some(PreviewSizeLimitKind::Image),
-            PreviewPathKind::Video | PreviewPathKind::Audio | PreviewPathKind::Text => None,
+            PreviewPathKind::Video
+            | PreviewPathKind::Audio
+            | PreviewPathKind::Text
+            | PreviewPathKind::Archive => None,
         }
     }
 
     /// 要先把远程挂载上的文件整个下载到本地缓存才能预览（解码器、转换器只认本地文件）。
-    /// 文本按需读挂载路径；音视频播放和读信息也是 ffmpeg 对挂载路径边读边用，都不下载。
+    /// 文本按需读挂载路径；音视频播放和读信息也是 ffmpeg 对挂载路径边读边用；压缩包由
+    /// 7-Zip/tar 直接读挂载路径列目录（zip、7z 只读目录区），都不下载。
     pub fn needs_local_copy(self) -> bool {
         !matches!(
             self,
-            PreviewPathKind::Text | PreviewPathKind::Audio | PreviewPathKind::Video
+            PreviewPathKind::Text
+                | PreviewPathKind::Audio
+                | PreviewPathKind::Video
+                | PreviewPathKind::Archive
         )
     }
 }
@@ -195,6 +199,10 @@ pub async fn load_directory_preview_children(
 }
 
 async fn load_archive_preview(path: PathBuf) -> Result<PreviewContent, String> {
+    let archive_bytes = tokio::fs::metadata(&path)
+        .await
+        .map_err(|error| error.to_string())?
+        .len();
     // 自定义归档后缀无法从扩展名推断解压后端，按文件头嗅探决定。
     let format = sniff_archive_extraction_format(&path).await;
     let members = match list_archive_members_with_format(path.clone(), format).await {
@@ -208,10 +216,12 @@ async fn load_archive_preview(path: PathBuf) -> Result<PreviewContent, String> {
     for member in members {
         tree_builder.insert_member(member);
     }
-    let archive_preview = tree_builder.finish(PREVIEW_ARCHIVE_ENTRY_LIMIT);
-
+    let (entries, mut summary) = tree_builder.finish();
+    summary.archive_bytes = archive_bytes;
     Ok(PreviewContent::Archive {
-        entries: archive_preview.entries,
+        entries,
+        summary,
+        viewport: TreeViewport::default(),
     })
 }
 
@@ -270,10 +280,6 @@ async fn load_video_preview(path: PathBuf) -> Result<PreviewContent, String> {
     }
 }
 
-struct ArchivePreview {
-    entries: Vec<PreviewTreeEntry>,
-}
-
 struct ArchiveTreeBuilder {
     nodes: Vec<ArchiveTreeNode>,
     children_by_parent: Vec<BTreeMap<String, usize>>,
@@ -303,7 +309,12 @@ impl ArchiveTreeBuilder {
             } else {
                 FileKind::Directory
             };
-            parent = Some(self.insert_segment(parent, segment, kind));
+            let node = self.insert_segment(parent, segment, kind);
+            if is_leaf {
+                self.nodes[node].len = member.len;
+                self.nodes[node].modified = member.modified;
+            }
+            parent = Some(node);
         }
     }
 
@@ -319,6 +330,9 @@ impl ArchiveTreeBuilder {
         self.nodes.push(ArchiveTreeNode {
             name: name.to_owned(),
             kind,
+            parent,
+            len: 0,
+            modified: None,
         });
         self.children_by_parent.push(BTreeMap::new());
         self.children_mut(parent)
@@ -340,17 +354,30 @@ impl ArchiveTreeBuilder {
         }
     }
 
-    fn finish(self, limit: usize) -> ArchivePreview {
-        let mut entries = Vec::new();
-        let root_children = self.sorted_child_indices(None);
-        for node_index in root_children {
-            self.append_flattened_entry(node_index, None, 0, limit, &mut entries);
-            if entries.len() >= limit {
-                break;
+    /// 摊平成树行（全部展开），文件夹大小是里面文件加起来；顺带数出总计。
+    fn finish(mut self) -> (Vec<PreviewTreeEntry>, ArchiveSummary) {
+        let mut summary = ArchiveSummary::default();
+        for node in &mut self.nodes {
+            if node.kind == FileKind::Directory {
+                summary.folders += 1;
+                node.len = 0;
+            } else {
+                summary.files += 1;
+                summary.unpacked_bytes = summary.unpacked_bytes.saturating_add(node.len);
             }
         }
-
-        ArchivePreview { entries }
+        // 子节点总是在父节点之后建的：倒着加一遍，文件夹就拿到整棵子树的大小。
+        for index in (0..self.nodes.len()).rev() {
+            if let Some(parent) = self.nodes[index].parent {
+                let len = self.nodes[index].len;
+                self.nodes[parent].len = self.nodes[parent].len.saturating_add(len);
+            }
+        }
+        let mut entries = Vec::with_capacity(self.nodes.len());
+        for node_index in self.sorted_child_indices(None) {
+            self.append_flattened_entry(node_index, None, 0, &mut entries);
+        }
+        (entries, summary)
     }
 
     fn append_flattened_entry(
@@ -358,13 +385,8 @@ impl ArchiveTreeBuilder {
         node_index: usize,
         parent: Option<usize>,
         depth: usize,
-        limit: usize,
         entries: &mut Vec<PreviewTreeEntry>,
     ) {
-        if entries.len() >= limit {
-            return;
-        }
-
         let node = &self.nodes[node_index];
         let entry_id = entries.len();
         entries.push(PreviewTreeEntry {
@@ -381,6 +403,8 @@ impl ArchiveTreeBuilder {
             } else {
                 0.0
             },
+            len: Some(node.len),
+            modified: node.modified,
         });
 
         if node.kind != FileKind::Directory {
@@ -388,10 +412,7 @@ impl ArchiveTreeBuilder {
         }
 
         for child_index in self.sorted_child_indices(Some(node_index)) {
-            self.append_flattened_entry(child_index, Some(entry_id), depth + 1, limit, entries);
-            if entries.len() >= limit {
-                break;
-            }
+            self.append_flattened_entry(child_index, Some(entry_id), depth + 1, entries);
         }
     }
 
@@ -413,6 +434,9 @@ fn preview_archive_directory_children(kind: FileKind) -> Option<PreviewTreeDirec
 struct ArchiveTreeNode {
     name: String,
     kind: FileKind,
+    parent: Option<usize>,
+    len: u64,
+    modified: Option<std::time::SystemTime>,
 }
 
 fn archive_node_order(left: &ArchiveTreeNode, right: &ArchiveTreeNode) -> std::cmp::Ordering {

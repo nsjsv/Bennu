@@ -3,24 +3,11 @@
 //! 宿主消息，维持既有函数名与签名、调用点零改动（状态机组迁移后由
 //! PreviewEngine 直接消费 crate 命令，本层随之收拢）。
 
-use file_core::{FileKind, ScanOptions};
 use iced::Task;
 use std::path::PathBuf;
 use tokio_util::sync::CancellationToken;
 
-use crate::config::PreviewExtensionRules;
 use crate::model::Message;
-
-pub(crate) fn preview_command(
-    path: PathBuf,
-    kind: FileKind,
-    rules: PreviewExtensionRules,
-    options: ScanOptions,
-    max_file_bytes: u64,
-) -> Task<Message> {
-    bennu_preview::commands::preview::preview_command(path, kind, rules, options, max_file_bytes)
-        .map(Message::Preview)
-}
 
 pub(crate) fn right_preview_panel_info_command(path: PathBuf) -> Task<Message> {
     bennu_preview::commands::preview::right_preview_panel_info_command(path).map(Message::Preview)

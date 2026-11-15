@@ -28,6 +28,8 @@ pub struct StoredPreviewPreferences {
     /// 旧版本的音频大小上限；音频边读边放后不再使用，只为保持文档布局保留，新代码写 None。
     #[serde(default)]
     pub preview_audio_size_bytes: Option<u64>,
+    /// 旧版本的压缩包大小上限；列目录只读目录区、不随包大小占内存后不再使用，只为保持
+    /// 文档布局保留，新代码写 None。
     #[serde(default)]
     pub preview_archive_size_bytes: Option<u64>,
     #[serde(default)]
@@ -93,7 +95,6 @@ pub struct StoredPreviewExtensionRules {
 
 pub const PREVIEW_FILE_SIZE_UNIT_BYTES: u64 = 1024 * 1024;
 pub const DEFAULT_PREVIEW_IMAGE_SIZE_BYTES: u64 = 100 * PREVIEW_FILE_SIZE_UNIT_BYTES;
-pub const DEFAULT_PREVIEW_ARCHIVE_SIZE_BYTES: u64 = 25 * PREVIEW_FILE_SIZE_UNIT_BYTES;
 pub const DEFAULT_PREVIEW_SQLITE_SIZE_BYTES: u64 = 100 * PREVIEW_FILE_SIZE_UNIT_BYTES;
 pub const DEFAULT_PREVIEW_DOCUMENT_SIZE_BYTES: u64 = 100 * PREVIEW_FILE_SIZE_UNIT_BYTES;
 pub const MIN_PREVIEW_DIRECTORY_EXPAND_LEVELS: u8 = 0;
@@ -155,24 +156,22 @@ impl PreviewFileSizeKind {
     ];
 }
 
-/// 有大小上限的预览类型。文本按需从磁盘读、音频视频边读边放，内存都不随文件大小增长，不设上限。
+/// 有大小上限的预览类型。文本按需从磁盘读、音频视频边读边放、压缩包只列目录，内存都不随
+/// 文件大小增长，不设上限。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreviewSizeLimitKind {
     Image,
-    Archive,
     Document,
     Sqlite,
 }
 
 impl PreviewSizeLimitKind {
-    pub const ALL: [PreviewSizeLimitKind; 4] =
-        [Self::Image, Self::Archive, Self::Document, Self::Sqlite];
+    pub const ALL: [PreviewSizeLimitKind; 3] = [Self::Image, Self::Document, Self::Sqlite];
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PreviewFileSizeLimits {
     pub image_bytes: u64,
-    pub archive_bytes: u64,
     pub document_bytes: u64,
     pub sqlite_bytes: u64,
 }
@@ -181,7 +180,6 @@ impl PreviewFileSizeLimits {
     pub fn with_default_limits() -> Self {
         Self {
             image_bytes: DEFAULT_PREVIEW_IMAGE_SIZE_BYTES,
-            archive_bytes: DEFAULT_PREVIEW_ARCHIVE_SIZE_BYTES,
             document_bytes: DEFAULT_PREVIEW_DOCUMENT_SIZE_BYTES,
             sqlite_bytes: DEFAULT_PREVIEW_SQLITE_SIZE_BYTES,
         }
@@ -190,7 +188,6 @@ impl PreviewFileSizeLimits {
     pub fn limit(self, kind: PreviewSizeLimitKind) -> u64 {
         match kind {
             PreviewSizeLimitKind::Image => self.image_bytes,
-            PreviewSizeLimitKind::Archive => self.archive_bytes,
             PreviewSizeLimitKind::Document => self.document_bytes,
             PreviewSizeLimitKind::Sqlite => self.sqlite_bytes,
         }
@@ -199,7 +196,6 @@ impl PreviewFileSizeLimits {
     pub fn set_limit(&mut self, kind: PreviewSizeLimitKind, bytes: u64) {
         match kind {
             PreviewSizeLimitKind::Image => self.image_bytes = bytes,
-            PreviewSizeLimitKind::Archive => self.archive_bytes = bytes,
             PreviewSizeLimitKind::Document => self.document_bytes = bytes,
             PreviewSizeLimitKind::Sqlite => self.sqlite_bytes = bytes,
         }
@@ -209,7 +205,6 @@ impl PreviewFileSizeLimits {
     pub fn from_legacy_global_bytes(bytes: u64) -> Self {
         Self {
             image_bytes: bytes,
-            archive_bytes: bytes,
             document_bytes: bytes,
             sqlite_bytes: bytes,
         }
@@ -449,10 +444,9 @@ pub fn preview_size_limits_from_stored(
             .or(legacy_global_limit)
             .unwrap_or(fallback_bytes)
     };
-    // 文本、音频、视频不再有上限：旧的 preview_{text,audio,video}_size_bytes 读到也不用。
+    // 文本、音频、视频、压缩包不再有上限：旧的 preview_{text,audio,video,archive}_size_bytes 读到也不用。
     PreviewFileSizeLimits {
         image_bytes: resolve(stored.preview_image_size_bytes, fallback.image_bytes),
-        archive_bytes: resolve(stored.preview_archive_size_bytes, fallback.archive_bytes),
         document_bytes: resolve(stored.preview_document_size_bytes, fallback.document_bytes),
         sqlite_bytes: resolve(stored.preview_sqlite_size_bytes, fallback.sqlite_bytes),
     }

@@ -153,9 +153,11 @@ where
             markdown_scroll,
         )
         .into(),
-        PreviewState::Ready(PreviewContent::Archive { entries, .. }) => {
-            archive_preview_panel(entries, archive_scroll).into()
-        }
+        PreviewState::Ready(PreviewContent::Archive {
+            entries,
+            summary,
+            viewport,
+        }) => archive_preview_panel(entries, summary, *viewport, size, archive_scroll).into(),
         PreviewState::Ready(PreviewContent::Sqlite(database)) => sqlite_preview_panel(
             database,
             sqlite_preview_state,

@@ -125,7 +125,15 @@ fn archive_scroll_wiring() -> ScrollRegionWiring<'static, Message> {
     ScrollRegionWiring {
         smooth_scroll_wrap: smooth_scroll_wrap(PreviewScrollRegion::Archive),
         scrollable_id: preview_scroll_id(PreviewScrollRegion::Archive),
-        on_scroll: None,
+        // 压缩包几万条只排看得见的行：视口回给引擎。
+        on_scroll: Some(Box::new(|viewport| {
+            Message::from(PreviewMessage::PreviewTreeScrolled(
+                bennu_preview::preview::TreeViewport {
+                    offset: viewport.absolute_offset().y,
+                    height: viewport.bounds().height,
+                },
+            ))
+        })),
     }
 }
 

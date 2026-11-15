@@ -45,7 +45,6 @@ fn legacy_document_resolves_per_kind_limits_with_legacy_global_seeding() {
         preview_size_limits_from_stored(&stored, PreviewFileSizeLimits::with_default_limits());
     // null（缺失）类型吃 legacy 全局值，显式分类型键覆盖全局值。
     assert_eq!(limits.image_bytes, 1048576);
-    assert_eq!(limits.archive_bytes, 4194304);
     assert_eq!(limits.document_bytes, 4194304);
     assert_eq!(limits.sqlite_bytes, 4194304);
 

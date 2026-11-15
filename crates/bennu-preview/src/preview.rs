@@ -96,6 +96,9 @@ pub enum PreviewContent {
     },
     Archive {
         entries: Vec<PreviewTreeEntry>,
+        summary: ArchiveSummary,
+        /// 滚到哪了（滚动回流写进来）：几万条只排看得见的行。
+        viewport: TreeViewport,
     },
     PagedDocument(Box<PagedDocumentPreview>),
     Sqlite(SqliteDatabasePreview),
@@ -192,6 +195,32 @@ impl ImagePreviewContent {
             ImagePreviewContent::Thumbnail { width, height, .. } => (*width, *height),
             ImagePreviewContent::OriginalRaster { width, height, .. } => (*width, *height),
             ImagePreviewContent::OriginalSvg { width, height, .. } => (*width, *height),
+        }
+    }
+}
+
+/// 压缩包顶上那一行：多少文件、多少文件夹、解压后多大、包本身多大（算压缩率）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ArchiveSummary {
+    pub files: usize,
+    pub folders: usize,
+    pub unpacked_bytes: u64,
+    pub archive_bytes: u64,
+}
+
+/// 目录/压缩包树滚到哪：压缩包几万条只排看得见的那些行。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TreeViewport {
+    pub offset: f32,
+    pub height: f32,
+}
+
+impl Default for TreeViewport {
+    /// 还没收到滚动回流时按一个高屏排，第一屏不缺行。
+    fn default() -> Self {
+        Self {
+            offset: 0.0,
+            height: 2_000.0,
         }
     }
 }
@@ -810,6 +839,9 @@ pub struct PreviewTreeEntry {
     pub directory_children: Option<PreviewTreeDirectoryChildren>,
     pub is_expanded: bool,
     pub toggle_rotation_progress: f32,
+    /// 压缩包里的大小（文件夹是里面文件加起来）和修改时间；文件夹预览不显示，为 None。
+    pub len: Option<u64>,
+    pub modified: Option<std::time::SystemTime>,
 }
 
 impl PreviewTreeEntry {
@@ -830,6 +862,8 @@ impl PreviewTreeEntry {
             directory_children: preview_tree_directory_children(kind),
             is_expanded: false,
             toggle_rotation_progress: 0.0,
+            len: None,
+            modified: None,
         }
     }
 

@@ -136,6 +136,8 @@ impl super::PreviewEngine {
         self.invalidate_animated_image_preview();
         self.invalidate_original_image_preview();
         self.loading_backdrop = None;
+        // 丢掉句柄就停掉还在跑的加载（压缩包列目录、读音视频信息……），子进程随之结束。
+        self.preview_load = None;
         self.cancel_document_preview();
         self.cancel_remote_preview_download();
         self.text_preview_document = None;

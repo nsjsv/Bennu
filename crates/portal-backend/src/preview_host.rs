@@ -15,7 +15,7 @@ use iced::window;
 use iced::Point;
 use iced::Task;
 
-use bennu_preview::commands::preview::{image_preview_dimensions_command, preview_command};
+use bennu_preview::commands::preview::image_preview_dimensions_command;
 use bennu_preview::engine::{
     default_preview_size, preview_content_size_from_window, preview_size_matches,
     preview_window_size_for_content, PreviewEngine, PreviewEngineConfig, PreviewLoadSurface,
@@ -295,7 +295,7 @@ impl PreviewHost {
         let max_file_bytes = self.file_size_limit_for(&path);
         Task::batch([
             window_command,
-            preview_command(
+            self.engine.load_preview(
                 path,
                 kind,
                 self.preferences.extension_rules.clone(),
@@ -329,7 +329,7 @@ impl PreviewHost {
             PreviewPathKind::Video => {
                 self.engine.preview = Some(PreviewState::Loading(path.clone()));
                 let max_file_bytes = self.file_size_limit_for(&path);
-                preview_command(
+                self.engine.load_preview(
                     path,
                     FileKind::File,
                     rules,
@@ -346,7 +346,7 @@ impl PreviewHost {
                 let max_file_bytes = self.file_size_limit_for(&path);
                 Task::batch([
                     window_command,
-                    preview_command(
+                    self.engine.load_preview(
                         path,
                         FileKind::File,
                         rules,
@@ -364,7 +364,7 @@ impl PreviewHost {
                 let max_file_bytes = self.file_size_limit_for(&path);
                 Task::batch([
                     window_command,
-                    preview_command(
+                    self.engine.load_preview(
                         path,
                         FileKind::File,
                         rules,

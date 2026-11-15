@@ -15,15 +15,13 @@ const NETWORK_LIST_THUMBNAIL_DOWNLOADS_ENABLED_KEY: &str =
     "network_list_thumbnail_downloads_enabled";
 const MAX_PREVIEW_FILE_BYTES_KEY: &str = "max_preview_file_bytes";
 const MAX_PREVIEW_IMAGE_BYTES_KEY: &str = "max_preview_image_bytes";
-const MAX_PREVIEW_ARCHIVE_BYTES_KEY: &str = "max_preview_archive_bytes";
 const MAX_PREVIEW_DOCUMENT_BYTES_KEY: &str = "max_preview_document_bytes";
 const MAX_PREVIEW_SQLITE_BYTES_KEY: &str = "max_preview_sqlite_bytes";
 const PREVIEW_DIRECTORY_EXPAND_LEVELS_KEY: &str = "preview_directory_expand_levels";
 
-// 旧的 max_preview_{text,audio,video}_bytes 不再迁移：文本按需读取、音视频边读边放，没有上限。
+// 旧的 max_preview_{text,audio,video,archive}_bytes 不再迁移：文本按需读取、音视频边读边放、压缩包只列目录，没有上限。
 const PREVIEW_SIZE_LIMIT_KEYS: &[(&str, PreviewSizeLimitKind)] = &[
     (MAX_PREVIEW_IMAGE_BYTES_KEY, PreviewSizeLimitKind::Image),
-    (MAX_PREVIEW_ARCHIVE_BYTES_KEY, PreviewSizeLimitKind::Archive),
     (
         MAX_PREVIEW_DOCUMENT_BYTES_KEY,
         PreviewSizeLimitKind::Document,

@@ -66,7 +66,7 @@ pub(crate) use network_connections::{
 };
 mod preview;
 pub(crate) use preview::{
-    image_preview_dimensions_command, original_image_preview_command, preview_command,
+    image_preview_dimensions_command, original_image_preview_command,
     right_preview_panel_info_command,
 };
 mod properties;

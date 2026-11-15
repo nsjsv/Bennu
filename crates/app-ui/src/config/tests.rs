@@ -230,10 +230,9 @@ fn user_preferences_round_trip_through_sqlite() {
     config.terminal_emulator = TerminalEmulator::Ghostty;
     config.file_operation_verification = FileOperationVerification::Strong;
     config.network_list_thumbnail_downloads_enabled = true;
-    config.preview_size_limits.set_limit(
-        crate::config::PreviewSizeLimitKind::Archive,
-        8 * 1024 * 1024,
-    );
+    config
+        .preview_size_limits
+        .set_limit(crate::config::PreviewSizeLimitKind::Sqlite, 8 * 1024 * 1024);
     config.search_history.record_submission("report");
     config.search_history.record_submission("images");
     config.last_search_scope = Some(LastSearchScope::Directory(PathBuf::from("/srv/projects")));
@@ -305,7 +304,7 @@ fn user_preferences_round_trip_through_sqlite() {
         FileOperationVerification::Strong
     );
     assert!(loaded.network_list_thumbnail_downloads_enabled);
-    assert_eq!(loaded.preview_size_limits.archive_bytes, 8 * 1024 * 1024);
+    assert_eq!(loaded.preview_size_limits.sqlite_bytes, 8 * 1024 * 1024);
     assert_eq!(loaded.search_history.entries(), ["images", "report"]);
     assert_eq!(
         loaded.last_search_scope,
@@ -709,7 +708,6 @@ fn default_user_config_keeps_expected_preview_defaults() {
         PreviewFileSizeLimits::with_default_limits()
     );
     assert_eq!(config.preview_size_limits.image_bytes, 100 * 1024 * 1024);
-    assert_eq!(config.preview_size_limits.archive_bytes, 25 * 1024 * 1024);
     assert_eq!(config.preview_size_limits.document_bytes, 100 * 1024 * 1024);
     assert_eq!(config.preview_directory_expand_levels, 1);
     assert_eq!(config.startup_location_policy, StartupLocationPolicy::Home);
@@ -790,14 +788,14 @@ fn per_kind_preview_limits_override_legacy_global_value() {
         r#"
 max_preview_file_bytes = 4194304
 max_preview_text_bytes = 1048576
-max_preview_archive_bytes = 0
+max_preview_sqlite_bytes = 0
 preview_directory_expand_levels = 3
 "#,
         default_user_config(),
     );
 
     // 文本上限键不再迁移（文本没有上限）。
-    assert_eq!(parsed.preview_size_limits.archive_bytes, 0);
+    assert_eq!(parsed.preview_size_limits.sqlite_bytes, 0);
     assert_eq!(parsed.preview_size_limits.image_bytes, 4 * 1024 * 1024);
     assert_eq!(parsed.preview_directory_expand_levels, 3);
 }

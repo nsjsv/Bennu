@@ -10,7 +10,7 @@ use super::super::{
 };
 use crate::commands::{
     image_preview_dimensions_command, load_expanded_directory_command, open_file_command,
-    open_terminal_command, preview_command,
+    open_terminal_command,
 };
 use crate::list_view::LIST_HEADER_HEIGHT;
 use crate::model::{
@@ -556,13 +556,15 @@ impl FileBrowser {
         let max_file_bytes = self.preview_file_size_limit_for(&path);
         Task::batch([
             window_command,
-            preview_command(
-                path,
-                kind,
-                self.user_config.preview_extension_rules.clone(),
-                self.options.clone(),
-                max_file_bytes,
-            ),
+            self.preview_engine
+                .load_preview(
+                    path,
+                    kind,
+                    self.user_config.preview_extension_rules.clone(),
+                    self.options.clone(),
+                    max_file_bytes,
+                )
+                .map(Message::Preview),
             self.request_browser_session_save(),
         ])
     }
@@ -588,13 +590,15 @@ impl FileBrowser {
                 self.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
                 self.retract_global_error(GlobalErrorSource::Preview);
                 let max_file_bytes = self.preview_file_size_limit_for(&path);
-                preview_command(
-                    path,
-                    FileKind::File,
-                    self.user_config.preview_extension_rules.clone(),
-                    self.options.clone(),
-                    max_file_bytes,
-                )
+                self.preview_engine
+                    .load_preview(
+                        path,
+                        FileKind::File,
+                        self.user_config.preview_extension_rules.clone(),
+                        self.options.clone(),
+                        max_file_bytes,
+                    )
+                    .map(Message::Preview)
             }
             PreviewPathKind::Audio => {
                 let window_command =
@@ -605,13 +609,15 @@ impl FileBrowser {
                 let max_file_bytes = self.preview_file_size_limit_for(&path);
                 Task::batch([
                     window_command,
-                    preview_command(
-                        path,
-                        FileKind::File,
-                        self.user_config.preview_extension_rules.clone(),
-                        self.options.clone(),
-                        max_file_bytes,
-                    ),
+                    self.preview_engine
+                        .load_preview(
+                            path,
+                            FileKind::File,
+                            self.user_config.preview_extension_rules.clone(),
+                            self.options.clone(),
+                            max_file_bytes,
+                        )
+                        .map(Message::Preview),
                     self.request_browser_session_save(),
                 ])
             }
@@ -624,13 +630,15 @@ impl FileBrowser {
                 let max_file_bytes = self.preview_file_size_limit_for(&path);
                 Task::batch([
                     window_command,
-                    preview_command(
-                        path,
-                        FileKind::File,
-                        self.user_config.preview_extension_rules.clone(),
-                        self.options.clone(),
-                        max_file_bytes,
-                    ),
+                    self.preview_engine
+                        .load_preview(
+                            path,
+                            FileKind::File,
+                            self.user_config.preview_extension_rules.clone(),
+                            self.options.clone(),
+                            max_file_bytes,
+                        )
+                        .map(Message::Preview),
                     self.request_browser_session_save(),
                 ])
             }

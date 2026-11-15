@@ -126,6 +126,8 @@ pub enum PreviewMessage {
     VideoPreviewFinished(PathBuf, u64),
     VideoPreviewFailed(PathBuf, u64, String),
     PreviewTreeDirectoryToggled(usize),
+    /// 压缩包树滚到哪了：只排看得见的行。
+    PreviewTreeScrolled(crate::preview::TreeViewport),
     PreviewTreeAnimationTick,
     RightPreviewPanelInfoLoaded {
         path: PathBuf,

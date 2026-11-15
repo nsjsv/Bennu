@@ -32,7 +32,10 @@ async fn load_preview_reads_zip_archive_tree() {
     .await
     .expect("zip archive preview");
 
-    let PreviewContent::Archive { entries } = preview_content else {
+    let PreviewContent::Archive {
+        entries, summary, ..
+    } = preview_content
+    else {
         panic!("expected archive preview");
     };
 
@@ -41,6 +44,60 @@ async fn load_preview_reads_zip_archive_tree() {
     assert_preview_tree_entry(&entries[2], "README.md", FileKind::File, 0, None);
     assert!(entries[0].is_expanded);
     assert_eq!(entries[0].toggle_rotation_progress, 1.0);
+    // 文件夹的大小是里面文件加起来；总计数文件、文件夹，带包本身大小算压缩率。
+    let file_bytes = entries[1].len.expect("file size") + entries[2].len.expect("file size");
+    assert_eq!(entries[0].len, entries[1].len);
+    assert!(entries[1].modified.is_some());
+    assert_eq!((summary.files, summary.folders), (2, 1));
+    assert_eq!(summary.unpacked_bytes, file_bytes);
+    assert_eq!(
+        summary.archive_bytes,
+        std::fs::metadata(&archive_path).unwrap().len()
+    );
+}
+
+/// 不再只列前 500 条：超过的也全在。
+#[tokio::test]
+async fn archive_preview_keeps_every_member() {
+    let temp_dir = tempdir().expect("temp dir");
+    let source = temp_dir.path().join("data");
+    std::fs::create_dir(&source).expect("create source");
+    for index in 0..600 {
+        std::fs::write(source.join(format!("{index:03}.txt")), "x").expect("write member");
+    }
+    let archive_path = temp_dir.path().join("many.zip");
+    create_archive_with_progress(
+        ArchiveCreationRequest {
+            sources: vec![source],
+            target: archive_path.clone(),
+            format: ArchiveFormat::Zip,
+            compression_level: ArchiveCompressionLevel::Balanced,
+            password: None,
+        },
+        CancellationToken::new(),
+        |_| {},
+    )
+    .await
+    .expect("create archive");
+
+    let preview_content = load_preview(
+        archive_path,
+        FileKind::File,
+        &default_rules(),
+        ScanOptions::default(),
+        TEST_MAX_PREVIEW_FILE_BYTES,
+    )
+    .await
+    .expect("archive preview");
+    let PreviewContent::Archive {
+        entries, summary, ..
+    } = preview_content
+    else {
+        panic!("expected archive preview");
+    };
+    assert_eq!(entries.len(), 601);
+    assert_eq!(summary.files, 600);
+    assert_eq!(entries[0].len, Some(600));
 }
 
 #[tokio::test]
@@ -652,18 +709,18 @@ fn assert_preview_tree_entry(
 
 #[test]
 fn text_and_media_read_on_demand_without_a_size_limit_or_a_local_copy() {
-    // 文本按需读取、音视频边读边放：没有大小上限，网络挂载上也不先下载。
+    // 文本按需读取、音视频边读边放、压缩包只列目录：没有大小上限，网络挂载上也不先下载。
     for kind in [
         PreviewPathKind::Text,
         PreviewPathKind::Audio,
         PreviewPathKind::Video,
+        PreviewPathKind::Archive,
     ] {
         assert_eq!(kind.size_limit_kind(), None, "{kind:?}");
         assert!(!kind.needs_local_copy(), "{kind:?}");
     }
     for kind in [
         PreviewPathKind::Document,
-        PreviewPathKind::Archive,
         PreviewPathKind::Sqlite,
         PreviewPathKind::Image,
     ] {

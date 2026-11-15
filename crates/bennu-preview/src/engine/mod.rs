@@ -13,7 +13,7 @@ use crate::document_preview::PendingDocumentPreview;
 use crate::image_preview_viewport::ImagePreviewViewport;
 use crate::preview::{
     AudioAnalysis, AudioAnalysisCache, AudioPreviewPlayback, PreviewBottomControlsState,
-    PreviewSize, PreviewState, PreviewWindowProfile, VideoPreviewPlayback,
+    PreviewContent, PreviewSize, PreviewState, PreviewWindowProfile, VideoPreviewPlayback,
 };
 use crate::preview_config::{MediaPlaybackSettings, PreviewExtensionRules, PreviewFileSizeLimits};
 use crate::preview_message::PreviewMessage;
@@ -55,6 +55,8 @@ pub struct PreviewEngine {
     pub(crate) display: Option<crate::preview::DisplayMetrics>,
     /// 图片信息层开着没有：换图片时保持（一张张看信息），关预览窗口时关掉。
     pub(crate) image_info_visible: bool,
+    /// 正在跑的通用加载（`load_preview`）：换内容、关预览时丢掉它就中止。
+    preview_load: Option<iced::task::Handle>,
     pub(crate) image_info: Option<std::sync::Arc<crate::preview::ImageInfo>>,
     /// 加载下一张图时垫着的上一张，连同它垫给的是哪个路径（只在加载那张时显示）。
     pub(crate) loading_backdrop: Option<(std::path::PathBuf, crate::preview::ImagePreviewContent)>,
@@ -139,6 +141,7 @@ impl PreviewEngine {
             full_image_requested: false,
             display: None,
             image_info_visible: false,
+            preview_load: None,
             image_info: None,
             loading_backdrop: None,
             remote_preview_download_generation: 0,
@@ -170,6 +173,23 @@ impl PreviewEngine {
         }
     }
 
+    /// 目录、压缩包、文本、音视频、SQLite 的加载。新开一个就中止上一个（句柄丢弃即中止），
+    /// 切走了还在后台读的列目录子进程也跟着结束。
+    pub fn load_preview(
+        &mut self,
+        path: std::path::PathBuf,
+        kind: file_core::FileKind,
+        rules: PreviewExtensionRules,
+        options: file_core::ScanOptions,
+        max_file_bytes: u64,
+    ) -> Task<PreviewMessage> {
+        let (task, handle) =
+            crate::commands::preview::preview_command(path, kind, rules, options, max_file_bytes)
+                .abortable();
+        self.preview_load = Some(handle.abort_on_drop());
+        task
+    }
+
     /// 处理只依赖引擎自身状态的 [`PreviewMessage`] 变体。需要宿主参数
     /// （扫描选项、视口几何、滚动管线）或宿主通知域的变体原样经 `Err`
     /// 还给宿主：每个变体只有一个处理者，且无需为转交而克隆消息。消息体
@@ -194,6 +214,14 @@ impl PreviewEngine {
             }
             PreviewMessage::MarkdownPreviewModeSelected(mode) => self.select_markdown_mode(mode),
             PreviewMessage::PreviewTreeAnimationTick => self.advance_preview_tree_animation(),
+            PreviewMessage::PreviewTreeScrolled(scrolled) => {
+                if let Some(PreviewState::Ready(PreviewContent::Archive { viewport, .. })) =
+                    &mut self.preview
+                {
+                    *viewport = scrolled;
+                }
+                Task::none()
+            }
             PreviewMessage::PreviewWindowPinToggled => self.toggle_preview_window_pin(),
             PreviewMessage::PreviewWindowInitialControlsElapsed(generation) => {
                 self.hide_preview_window_initial_controls(generation);

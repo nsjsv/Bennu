@@ -1,5 +1,6 @@
-//! 音频、视频预览的键盘：包住面板的可聚焦壳。回车播放/暂停，←/→ 后退/前进 5 秒
-//! （Shift 加按 30 秒），↑/↓ 音量 ±5%，F 视频进出全屏（Esc 退全屏归宿主的 Esc 路由），I 视频信息层。空格不接，照旧开关预览窗口。点一下面板才聚焦
+//! 音频、视频、图片预览的键盘：包住面板的可聚焦壳。音视频：回车播放/暂停，←/→ 后退/前进 5 秒
+//! （Shift 加按 30 秒），↑/↓ 音量 ±5%，F 视频进出全屏（Esc 退全屏归宿主的 Esc 路由），I 视频信息层。
+//! 图片：+/- 缩放一档，0 适应窗口，1 原始大小。空格不接，照旧开关预览窗口。点一下面板才聚焦
 //! （独立预览窗口打开时由 `focus_preview_keyboard` 聚焦），点别处失焦——右侧面板里
 //! 方向键默认还归文件列表。
 
@@ -10,6 +11,7 @@ use iced::advanced::{layout, mouse, overlay, renderer, Clipboard, Layout, Shell,
 use iced::keyboard::{self, key::Named};
 use iced::{Element, Event, Length, Rectangle, Size, Vector};
 
+use crate::image_preview_viewport::PreviewImageViewportMessage;
 use crate::preview_message::{MediaKeyCommand, PreviewMessage};
 
 const SHORT_SEEK: Duration = Duration::from_secs(5);
@@ -39,11 +41,27 @@ pub(crate) fn media_keys<'a, Message>(content: Element<'a, Message>) -> Element<
 where
     Message: 'a + Clone + From<PreviewMessage>,
 {
-    Element::new(MediaKeys { content })
+    Element::new(MediaKeys {
+        content,
+        keymap: |key, modifiers| media_key_command(key, modifiers).map(PreviewMessage::MediaKey),
+    })
 }
+
+pub(crate) fn image_keys<'a, Message>(content: Element<'a, Message>) -> Element<'a, Message>
+where
+    Message: 'a + Clone + From<PreviewMessage>,
+{
+    Element::new(MediaKeys {
+        content,
+        keymap: image_key_message,
+    })
+}
+
+type Keymap = fn(&keyboard::Key, keyboard::Modifiers) -> Option<PreviewMessage>;
 
 struct MediaKeys<'a, Message> {
     content: Element<'a, Message>,
+    keymap: Keymap,
 }
 
 /// 带 Ctrl/Alt/Super 的组合键不接，留给应用快捷键。
@@ -79,6 +97,27 @@ pub(crate) fn media_key_command(
         }
         _ => None,
     }
+}
+
+/// 同上，带 Ctrl/Alt/Super 的不接；Shift 照接（多数键盘上 + 要按 Shift）。
+pub(crate) fn image_key_message(
+    key: &keyboard::Key,
+    modifiers: keyboard::Modifiers,
+) -> Option<PreviewMessage> {
+    if modifiers.command() || modifiers.alt() || modifiers.logo() || modifiers.control() {
+        return None;
+    }
+    let keyboard::Key::Character(character) = key.as_ref() else {
+        return None;
+    };
+    let viewport = match character {
+        "+" | "=" => PreviewImageViewportMessage::ZoomedIn,
+        "-" => PreviewImageViewportMessage::ZoomedOut,
+        "0" => PreviewImageViewportMessage::FitRequested,
+        "1" => PreviewImageViewportMessage::ActualSizeRequested,
+        _ => return None,
+    };
+    Some(PreviewMessage::PreviewImageViewport(viewport))
 }
 
 impl<Message> Widget<Message, iced::Theme, iced::Renderer> for MediaKeys<'_, Message>
@@ -150,8 +189,8 @@ where
             Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. })
                 if state.is_focused && !shell.is_event_captured() =>
             {
-                if let Some(command) = media_key_command(key, *modifiers) {
-                    shell.publish(Message::from(PreviewMessage::MediaKey(command)));
+                if let Some(message) = (self.keymap)(key, *modifiers) {
+                    shell.publish(Message::from(message));
                     shell.capture_event();
                     return;
                 }
@@ -268,6 +307,26 @@ mod tests {
             media_key_command(&character("f"), keyboard::Modifiers::CTRL),
             None
         );
+    }
+
+    #[test]
+    fn image_keys_zoom_and_leave_chords_alone() {
+        let character = |text: &str| keyboard::Key::Character(text.into());
+        let zoom = |text: &str, modifiers| match image_key_message(&character(text), modifiers) {
+            Some(PreviewMessage::PreviewImageViewport(message)) => Some(format!("{message:?}")),
+            _ => None,
+        };
+        let none = keyboard::Modifiers::empty();
+        assert_eq!(
+            zoom("+", keyboard::Modifiers::SHIFT).as_deref(),
+            Some("ZoomedIn")
+        );
+        assert_eq!(zoom("=", none).as_deref(), Some("ZoomedIn"));
+        assert_eq!(zoom("-", none).as_deref(), Some("ZoomedOut"));
+        assert_eq!(zoom("0", none).as_deref(), Some("FitRequested"));
+        assert_eq!(zoom("1", none).as_deref(), Some("ActualSizeRequested"));
+        assert_eq!(zoom("1", keyboard::Modifiers::CTRL), None);
+        assert_eq!(zoom("x", none), None);
     }
 
     #[test]

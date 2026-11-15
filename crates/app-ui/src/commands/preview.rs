@@ -35,6 +35,7 @@ pub(crate) fn original_image_preview_command(
     path: PathBuf,
     generation: u64,
     max_file_bytes: u64,
+    bound: file_core::image_decode::DecodeBound,
     placeholder_handle: Option<iced::widget::image::Handle>,
     cancellation: CancellationToken,
 ) -> Task<Message> {
@@ -42,6 +43,7 @@ pub(crate) fn original_image_preview_command(
         path,
         generation,
         max_file_bytes,
+        bound,
         placeholder_handle,
         cancellation,
     )

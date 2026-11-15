@@ -12,6 +12,7 @@ use tokio_util::sync::CancellationToken;
 use crate::original_image_preview::OriginalImagePreview;
 use crate::preview::{ImagePreviewContent, PreviewContent, PreviewState};
 use crate::preview_message::PreviewMessage;
+use crate::text_preview_viewer::focus_preview_keyboard;
 
 /// 预览档位缩略图的展示占位标记：原图已并行加载,该标记只决定
 /// 磁盘缓存探测结果到达时是否替换 Loading 展示,与原图启动无关。
@@ -36,6 +37,7 @@ impl PendingPreviewThumbnailDisplay {
 impl super::PreviewEngine {
     pub(crate) fn invalidate_original_image_preview(&mut self) {
         self.pending_preview_thumbnail_display = None;
+        self.full_image_requested = false;
         if let Some(cancellation) = self.original_image_preview_cancel.take() {
             cancellation.cancel();
         }
@@ -55,31 +57,48 @@ impl super::PreviewEngine {
         generation: u64,
         outcome: Result<OriginalImagePreview, String>,
     ) -> Task<PreviewMessage> {
-        let active_preview = matches!(
-            &self.preview,
-            Some(PreviewState::Loading(current)) if current == &path
-        ) || matches!(
-            &self.preview,
+        if generation != self.original_image_preview_generation {
+            return Task::none();
+        }
+        // 原图到之前显示的是什么：加载中、缩略图占位，或按屏幕大小解的那张（放大后换原尺寸）。
+        let upgrading = match &self.preview {
+            Some(PreviewState::Loading(current)) if current == &path => false,
+            Some(PreviewState::Ready(PreviewContent::Image(ImagePreviewContent::Thumbnail {
+                path: current,
+                ..
+            }))) if current == &path => false,
             Some(PreviewState::Ready(PreviewContent::Image(
-                ImagePreviewContent::Thumbnail { path: current, .. }
-            ))) if current == &path
-        );
-        if generation != self.original_image_preview_generation || !active_preview {
+                ImagePreviewContent::OriginalRaster { path: current, .. },
+            ))) if current == &path => true,
+            _ => return Task::none(),
+        };
+        if upgrading {
+            // 只收自己要的那次原尺寸：同一代际里别的迟到结果不许换掉正在显示的图。
+            if self.full_image_requested {
+                self.accept_full_image(path, outcome);
+            }
             return Task::none();
         }
         self.pending_preview_thumbnail_display = None;
-        // 独立窗口会话在内容就绪后按内容尺寸补开/适配窗口;
-        // 面板会话始终不动窗口,内容按面板视口渲染。
+        // 独立窗口会话在内容就绪后按内容尺寸补开/适配窗口，键盘归图片（缩放键）;
+        // 面板会话始终不动窗口,内容按面板视口渲染,点一下才拿键盘。
         let presents_in_window =
             self.preview_load_surface == super::PreviewLoadSurface::StandaloneWindow;
         let window_is_missing = self.preview_window.is_none();
+        let focus = if presents_in_window {
+            focus_preview_keyboard()
+        } else {
+            Task::none()
+        };
 
-        match outcome {
+        let window_command = match outcome {
             Ok(OriginalImagePreview::Raster {
                 raster_handle,
                 placeholder_handle: decoded_placeholder_handle,
                 width,
                 height,
+                pixel_width,
+                has_alpha,
             }) => {
                 let placeholder_handle = match &self.preview {
                     Some(PreviewState::Ready(PreviewContent::Image(
@@ -89,10 +108,13 @@ impl super::PreviewEngine {
                 };
                 self.preview = Some(PreviewState::Ready(PreviewContent::Image(
                     ImagePreviewContent::OriginalRaster {
+                        path,
                         raster_handle,
                         placeholder_handle,
                         width,
                         height,
+                        pixel_width,
+                        has_alpha,
                     },
                 )));
                 if presents_in_window && window_is_missing {
@@ -132,6 +154,42 @@ impl super::PreviewEngine {
                 } else {
                     Task::none()
                 }
+            }
+        };
+        Task::batch([window_command, focus])
+    }
+
+    /// 放大后要的原尺寸到了：换上，视口不动。解不了（超出内存上限）就留着按屏幕大小那张。
+    fn accept_full_image(&mut self, path: PathBuf, outcome: Result<OriginalImagePreview, String>) {
+        match outcome {
+            Ok(OriginalImagePreview::Raster {
+                raster_handle,
+                placeholder_handle,
+                width,
+                height,
+                pixel_width,
+                has_alpha,
+            }) => {
+                self.preview = Some(PreviewState::Ready(PreviewContent::Image(
+                    ImagePreviewContent::OriginalRaster {
+                        path,
+                        raster_handle,
+                        placeholder_handle,
+                        width,
+                        height,
+                        pixel_width,
+                        has_alpha,
+                    },
+                )));
+            }
+            Ok(OriginalImagePreview::Svg { .. }) => {}
+            Err(error) => {
+                tracing::warn!(
+                    target: "app_ui::preview",
+                    path = ?path,
+                    error = %error,
+                    "full-size image for zooming failed; keeping the screen-sized one"
+                );
             }
         }
     }

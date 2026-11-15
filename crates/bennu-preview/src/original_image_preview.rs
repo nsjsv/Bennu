@@ -33,8 +33,11 @@ pub enum OriginalImagePreview {
     Raster {
         raster_handle: iced_image::Handle,
         placeholder_handle: iced_image::Handle,
+        /// 转正后的原图大小；解出来的像素可能小一些（`pixel_width`）。
         width: u32,
         height: u32,
+        pixel_width: u32,
+        has_alpha: bool,
     },
     Svg {
         handle: svg::Handle,
@@ -44,9 +47,11 @@ pub enum OriginalImagePreview {
     },
 }
 
+/// `bound`：按屏幕大小解（放大到超过它时再用 `DecodeBound::FULL` 解一次原图）。
 pub async fn load_original_image_preview(
     path: PathBuf,
     max_file_bytes: u64,
+    bound: DecodeBound,
     cancellation: CancellationToken,
     placeholder_handle: Option<iced_image::Handle>,
 ) -> Result<OriginalImagePreview, String> {
@@ -61,6 +66,7 @@ pub async fn load_original_image_preview(
         load_original_image_preview_blocking(
             &path,
             max_file_bytes,
+            bound,
             &decode_cancellation,
             placeholder_handle,
         )
@@ -76,6 +82,7 @@ pub async fn load_original_image_preview(
 fn load_original_image_preview_blocking(
     path: &Path,
     max_file_bytes: u64,
+    bound: DecodeBound,
     cancellation: &CancellationToken,
     placeholder_handle: Option<iced_image::Handle>,
 ) -> Result<OriginalImagePreview, String> {
@@ -89,7 +96,7 @@ fn load_original_image_preview_blocking(
         Some(ImageKind::Raster(source)) => source,
         None => RasterSource::Picture,
     };
-    let decoded = decode_image(path, source, DecodeBound::FULL)
+    let decoded = decode_image(path, source, bound)
         .map_err(|error| format!("could not decode original image {path:?}: {error}"))?;
     if cancellation.is_cancelled() {
         return Err(original_image_preview_cancelled(path));
@@ -98,11 +105,13 @@ fn load_original_image_preview_blocking(
     let (width, height) = (decoded.width, decoded.height);
     let raster = decoded.pixels;
     let placeholder_handle = placeholder_handle.unwrap_or_else(|| {
-        let placeholder = ::image::imageops::thumbnail(
-            &raster,
-            ORIGINAL_IMAGE_PLACEHOLDER_MAX_EDGE.min(width),
-            ORIGINAL_IMAGE_PLACEHOLDER_MAX_EDGE.min(height),
-        );
+        let (placeholder_width, placeholder_height) = DecodeBound::within(
+            ORIGINAL_IMAGE_PLACEHOLDER_MAX_EDGE,
+            ORIGINAL_IMAGE_PLACEHOLDER_MAX_EDGE,
+        )
+        .fit(raster.width(), raster.height());
+        let placeholder =
+            ::image::imageops::thumbnail(&raster, placeholder_width, placeholder_height);
         iced_image::Handle::from_rgba(
             placeholder.width(),
             placeholder.height(),
@@ -111,6 +120,7 @@ fn load_original_image_preview_blocking(
     });
 
     Ok(OriginalImagePreview::Raster {
+        pixel_width: raster.width(),
         raster_handle: iced_image::Handle::from_rgba(
             raster.width(),
             raster.height(),
@@ -119,6 +129,7 @@ fn load_original_image_preview_blocking(
         placeholder_handle,
         width,
         height,
+        has_alpha: decoded.has_alpha,
     })
 }
 
@@ -219,15 +230,21 @@ mod tests {
             .save_with_format(&path, ::image::ImageFormat::Png)
             .unwrap();
 
-        let preview =
-            load_original_image_preview(path, MAX_FILE_BYTES, CancellationToken::new(), None)
-                .await
-                .unwrap();
+        let preview = load_original_image_preview(
+            path,
+            MAX_FILE_BYTES,
+            DecodeBound::FULL,
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
         let OriginalImagePreview::Raster {
             raster_handle,
             placeholder_handle,
             width,
             height,
+            ..
         } = preview
         else {
             panic!("PNG must load as a raster preview");
@@ -260,6 +277,7 @@ mod tests {
         let preview = load_original_image_preview(
             path,
             MAX_FILE_BYTES,
+            DecodeBound::FULL,
             CancellationToken::new(),
             Some(placeholder_handle),
         )
@@ -284,10 +302,15 @@ mod tests {
             .save_with_format(&path, ::image::ImageFormat::Jpeg)
             .unwrap();
 
-        let preview =
-            load_original_image_preview(path, MAX_FILE_BYTES, CancellationToken::new(), None)
-                .await
-                .unwrap();
+        let preview = load_original_image_preview(
+            path,
+            MAX_FILE_BYTES,
+            DecodeBound::FULL,
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
         let OriginalImagePreview::Raster { width, height, .. } = preview else {
             panic!("JPEG must load as a raster preview");
         };
@@ -304,10 +327,15 @@ mod tests {
         )
         .unwrap();
 
-        let preview =
-            load_original_image_preview(path, MAX_FILE_BYTES, CancellationToken::new(), None)
-                .await
-                .unwrap();
+        let preview = load_original_image_preview(
+            path,
+            MAX_FILE_BYTES,
+            DecodeBound::FULL,
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
         let OriginalImagePreview::Svg {
             handle,
             width,
@@ -330,6 +358,7 @@ mod tests {
         let no_size = load_original_image_preview(
             no_size_path,
             MAX_FILE_BYTES,
+            DecodeBound::FULL,
             CancellationToken::new(),
             None,
         )
@@ -350,10 +379,15 @@ mod tests {
         let path = directory.path().join("rotated.jpg");
         write_exif_rotated_jpeg(&path, 4, 2);
 
-        let preview =
-            load_original_image_preview(path, MAX_FILE_BYTES, CancellationToken::new(), None)
-                .await
-                .unwrap();
+        let preview = load_original_image_preview(
+            path,
+            MAX_FILE_BYTES,
+            DecodeBound::FULL,
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
         let OriginalImagePreview::Raster {
             placeholder_handle,
             width,
@@ -380,10 +414,15 @@ mod tests {
         let path = directory.path().join("broken.png");
         std::fs::write(&path, b"not an image").unwrap();
 
-        let error =
-            load_original_image_preview(path, MAX_FILE_BYTES, CancellationToken::new(), None)
-                .await
-                .expect_err("invalid image must fail");
+        let error = load_original_image_preview(
+            path,
+            MAX_FILE_BYTES,
+            DecodeBound::FULL,
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect_err("invalid image must fail");
         assert!(error.contains("original image"));
     }
 
@@ -413,10 +452,15 @@ mod tests {
             .expect("truncated payload must retain a valid PNG header");
         assert_eq!(decoder.dimensions(), (32, 32));
 
-        let error =
-            load_original_image_preview(path, MAX_FILE_BYTES, CancellationToken::new(), None)
-                .await
-                .expect_err("truncated pixel data must fail before reaching the renderer");
+        let error = load_original_image_preview(
+            path,
+            MAX_FILE_BYTES,
+            DecodeBound::FULL,
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect_err("truncated pixel data must fail before reaching the renderer");
 
         assert!(error.contains("could not decode original image"));
     }
@@ -429,6 +473,7 @@ mod tests {
         let error = load_original_image_preview(
             PathBuf::from("/workspace/photo.png"),
             MAX_FILE_BYTES,
+            DecodeBound::FULL,
             cancellation,
             None,
         )
@@ -448,10 +493,15 @@ mod tests {
             .unwrap();
         let source_len = std::fs::metadata(&path).unwrap().len();
 
-        let error =
-            load_original_image_preview(path, source_len - 1, CancellationToken::new(), None)
-                .await
-                .expect_err("source over the configured limit must fail");
+        let error = load_original_image_preview(
+            path,
+            source_len - 1,
+            DecodeBound::FULL,
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect_err("source over the configured limit must fail");
         assert!(error.contains("too large to preview"));
     }
 
@@ -471,14 +521,21 @@ mod tests {
         drop(source);
         let source_len = std::fs::metadata(&path).unwrap().len();
 
-        let preview = load_original_image_preview(path, source_len, CancellationToken::new(), None)
-            .await
-            .expect("a real 183 MiB decoded RGBA image must pass the decoder budget");
+        let preview = load_original_image_preview(
+            path,
+            source_len,
+            DecodeBound::FULL,
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect("a real 183 MiB decoded RGBA image must pass the decoder budget");
         let OriginalImagePreview::Raster {
             raster_handle,
             placeholder_handle,
             width,
             height,
+            ..
         } = preview
         else {
             panic!("PNG must load as a raster preview");

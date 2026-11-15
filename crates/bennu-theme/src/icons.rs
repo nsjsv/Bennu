@@ -77,6 +77,10 @@ pub enum IconSymbol {
     Captions,
     AudioLines,
     Info,
+    ZoomIn,
+    ZoomOut,
+    /// 图片适应窗口（四角括号）。
+    Maximize,
 }
 
 pub fn rotated_chevron_right_view(rotation_degrees: f32, size: f32) -> Svg<'static, Theme> {
@@ -232,6 +236,9 @@ impl IconSymbol {
             Self::Captions => include_bytes!("../assets/icons/lucide/captions.svg"),
             Self::AudioLines => include_bytes!("../assets/icons/lucide/audio-lines.svg"),
             Self::Info => include_bytes!("../assets/icons/lucide/info.svg"),
+            Self::ZoomIn => include_bytes!("../assets/icons/lucide/zoom-in.svg"),
+            Self::ZoomOut => include_bytes!("../assets/icons/lucide/zoom-out.svg"),
+            Self::Maximize => include_bytes!("../assets/icons/lucide/maximize.svg"),
         }
     }
 }

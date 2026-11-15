@@ -49,6 +49,10 @@ pub struct PreviewEngine {
     pub animated_image_preview_generation: u64,
     pub original_image_preview_generation: u64,
     pub original_image_preview_cancel: Option<CancellationToken>,
+    /// 这张图已经要过一次原尺寸（放大到超过按屏幕大小解出的像素时），不再重复要。
+    pub(crate) full_image_requested: bool,
+    /// 预览所在屏幕的物理像素：原图按它解；量不到时按 4K。
+    pub(crate) display_pixels: Option<iced::Size<u32>>,
     pub remote_preview_download_generation: u64,
     pub text_preview_generation: u64,
     pub sqlite_preview: Option<crate::engine::sqlite::SqlitePreviewState>,
@@ -127,6 +131,8 @@ impl PreviewEngine {
             animated_image_preview_generation: 0,
             original_image_preview_generation: 0,
             original_image_preview_cancel: None,
+            full_image_requested: false,
+            display_pixels: None,
             remote_preview_download_generation: 0,
             text_preview_generation: 0,
             sqlite_preview: None,
@@ -239,6 +245,7 @@ impl PreviewEngine {
             PreviewMessage::VideoPreviewDisplayMeasured(path, display) => {
                 self.accept_video_display(&path, display)
             }
+            PreviewMessage::PreviewDisplayMeasured(display) => self.accept_preview_display(display),
             PreviewMessage::VideoPreviewSeekRequested(position) => {
                 self.seek_video_preview_playback(position)
             }

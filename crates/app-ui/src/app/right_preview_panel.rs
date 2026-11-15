@@ -263,9 +263,9 @@ impl FileBrowser {
     }
 
     /// 面板内容:无预览状态时显示空态;有则复用独立窗口的渲染管线,
-    /// 仅把视口尺寸换成面板自己的估算值。媒体播放控件固定全显:
-    /// 控件透明度归属预览窗口的指针跟踪状态,面板会话永远等不到
-    /// 悬停显隐事件,强制复用会让面板视频/动图没有可操作的控件。
+    /// 仅把视口尺寸换成面板自己的估算值。控件透明度归属预览窗口的指针跟踪状态,
+    /// 面板会话等不到窗口底部的悬停显隐事件,透明度改由引擎按面板规则给
+    /// (音视频/动图全显,图片指针在图上才显)。
     pub(crate) fn right_preview_panel_content(&self) -> Element<'_, Message> {
         let preview_engine = &self.preview_engine;
         if preview_engine.preview.is_none() {
@@ -283,7 +283,7 @@ impl FileBrowser {
             preview_engine.audio_analysis.as_ref(),
             preview_engine.video_preview.as_ref(),
             preview_engine.media_settings,
-            1.0,
+            preview_engine.docked_panel_controls_opacity(),
             self.operation_progress_animation_frame,
             self.user_config.text_preview_view,
             bennu_preview::text_highlight::HighlightPalette::for_theme(

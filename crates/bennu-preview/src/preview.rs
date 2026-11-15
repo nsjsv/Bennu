@@ -133,10 +133,15 @@ pub enum ImagePreviewContent {
         max_edge: u32,
     },
     OriginalRaster {
+        path: PathBuf,
         raster_handle: image::Handle,
         placeholder_handle: image::Handle,
+        /// 转正后的原图大小。
         width: u32,
         height: u32,
+        /// 解出来的像素大小：先按屏幕大小解，放大到超过它才换成原图。
+        pixel_width: u32,
+        has_alpha: bool,
     },
     OriginalSvg {
         handle: svg::Handle,
@@ -154,6 +159,13 @@ impl ImagePreviewContent {
             ImagePreviewContent::OriginalSvg { width, height, .. } => (*width, *height),
         }
     }
+}
+
+/// 预览所在屏幕：物理像素大小（图片、视频按它定解多大）和缩放倍数（逻辑像素换物理像素）。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DisplayMetrics {
+    pub pixels: iced::Size<u32>,
+    pub scale_factor: f32,
 }
 
 /// 图片在预览媒体区内按纵横比缩放后的适应窗口（fit）显示尺寸。

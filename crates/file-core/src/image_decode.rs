@@ -69,6 +69,8 @@ pub struct DecodedImage {
     /// 转正后的原图大小（1:1 显示、图片信息用）。
     pub width: u32,
     pub height: u32,
+    /// 有没有透明（半透明）的像素：有才在底下垫棋盘格。
+    pub has_alpha: bool,
 }
 
 /// 转正后的原图大小。内置格式和 RAW 只读文件头；ffmpeg 格式要跑一次 ffprobe。
@@ -111,6 +113,7 @@ pub fn decode_image(
                 let plan = ffmpeg_still::probe(path)?;
                 let pixels = ffmpeg_still::decode(path, &plan, bound)?;
                 Ok(DecodedImage {
+                    has_alpha: has_transparent_pixel(&pixels),
                     pixels,
                     width: plan.width,
                     height: plan.height,
@@ -184,6 +187,7 @@ fn decode_with(
     limits.reserve(decoder.total_bytes())?;
     decoder.set_limits(limits)?;
     let image = DynamicImage::from_decoder(decoder)?;
+    let has_alpha_channel = image.color().has_alpha();
     let (width, height) = oriented_dimensions((image.width(), image.height()), orientation);
     let (fit_width, fit_height) = bound.fit(width, height);
     let mut image = if (fit_width, fit_height) == (width, height) {
@@ -194,11 +198,18 @@ fn decode_with(
         image.thumbnail(fit_width, fit_height)
     };
     image.apply_orientation(orientation);
+    let pixels = image.into_rgba8();
     Ok(DecodedImage {
-        pixels: image.into_rgba8(),
+        // 没有透明通道的格式不用一个个像素看。
+        has_alpha: has_alpha_channel && has_transparent_pixel(&pixels),
+        pixels,
         width,
         height,
     })
+}
+
+fn has_transparent_pixel(pixels: &image::RgbaImage) -> bool {
+    pixels.pixels().any(|pixel| pixel.0[3] < u8::MAX)
 }
 
 pub fn oriented_dimensions((width, height): (u32, u32), orientation: Orientation) -> (u32, u32) {

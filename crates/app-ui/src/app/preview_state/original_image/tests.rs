@@ -365,6 +365,8 @@ fn expected_thumbnail_for_removed_entry_falls_back_to_original_result_window() {
                 ),
                 width: 4,
                 height: 3,
+                pixel_width: 4,
+                has_alpha: false,
             },
         ),
     );
@@ -380,7 +382,8 @@ fn expected_thumbnail_for_removed_entry_falls_back_to_original_result_window() {
         )))
     ));
     assert!(browser.preview_engine.preview_window.is_some());
-    assert_eq!(original_command.units(), 0);
+    // 窗口已开，不再开窗；只有把键盘交给图片（缩放键）的那一下。
+    assert_eq!(original_command.units(), 1);
 }
 
 #[test]
@@ -419,10 +422,13 @@ fn late_thumbnail_result_does_not_replace_original_preview() {
     browser.tab_mut().entries = vec![image_entry.clone()].into();
     browser.preview_engine.preview = Some(PreviewState::Ready(PreviewContent::Image(
         ImagePreviewContent::OriginalRaster {
+            path: path.clone(),
             raster_handle: iced::widget::image::Handle::from_rgba(4, 3, vec![255; 48]),
             placeholder_handle: iced::widget::image::Handle::from_rgba(1, 1, vec![0, 0, 0, 255]),
             width: 4,
             height: 3,
+            pixel_width: 4,
+            has_alpha: false,
         },
     )));
     let request = request_for_entry(&image_entry, 512).expect("image request");

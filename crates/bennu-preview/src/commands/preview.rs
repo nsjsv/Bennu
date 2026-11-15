@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use file_core::image_decode::DecodeBound;
 use file_core::{CopyProgress, FileKind, ScanOptions};
 use iced::futures::channel::mpsc::Sender as IcedSender;
 use iced::futures::SinkExt;
@@ -15,8 +16,8 @@ use crate::audio_preview::{
 };
 use crate::original_image_preview::{load_image_dimensions, load_original_image_preview};
 use crate::preview::{
-    RemotePreviewCacheFinished, RemotePreviewCacheMessage, RemotePreviewCacheProgress,
-    VideoPreviewFrame,
+    DisplayMetrics, RemotePreviewCacheFinished, RemotePreviewCacheMessage,
+    RemotePreviewCacheProgress, VideoPreviewFrame,
 };
 use crate::preview_config::PreviewExtensionRules;
 use crate::preview_loading::{load_directory_preview_children, load_preview};
@@ -132,10 +133,21 @@ pub fn preview_directory_children_command(
     )
 }
 
+/// 先量屏幕（原图按屏幕大小解、1:1 要知道缩放倍数），量完再读尺寸：宿主收到尺寸时屏幕一定量好了。
 pub fn image_preview_dimensions_command(path: PathBuf, generation: u64) -> Task<PreviewMessage> {
     let image_path = path.clone();
-    Task::perform(load_image_dimensions(path), move |dimensions| {
-        PreviewMessage::ImagePreviewDimensionsLoaded(image_path.clone(), generation, dimensions)
+    measure_display_command().then(move |display| {
+        let image_path = image_path.clone();
+        Task::done(PreviewMessage::PreviewDisplayMeasured(display)).chain(Task::perform(
+            load_image_dimensions(image_path.clone()),
+            move |dimensions| {
+                PreviewMessage::ImagePreviewDimensionsLoaded(
+                    image_path.clone(),
+                    generation,
+                    dimensions,
+                )
+            },
+        ))
     })
 }
 
@@ -143,12 +155,19 @@ pub fn original_image_preview_command(
     path: PathBuf,
     generation: u64,
     max_file_bytes: u64,
+    bound: DecodeBound,
     placeholder_handle: Option<iced::widget::image::Handle>,
     cancellation: CancellationToken,
 ) -> Task<PreviewMessage> {
     let image_path = path.clone();
     Task::perform(
-        load_original_image_preview(path, max_file_bytes, cancellation, placeholder_handle),
+        load_original_image_preview(
+            path,
+            max_file_bytes,
+            bound,
+            cancellation,
+            placeholder_handle,
+        ),
         move |outcome| {
             PreviewMessage::OriginalImagePreviewLoaded(image_path.clone(), generation, outcome)
         },
@@ -320,23 +339,31 @@ pub fn start_video_preview_audio_command(
     )
 }
 
-/// 量屏幕：最近打开的窗口（独立预览窗口还没开时就是主窗口）所在显示器的物理像素。
-pub(crate) fn measure_video_display_command(path: PathBuf) -> Task<PreviewMessage> {
-    iced::window::latest()
-        .then(|window| match window {
-            Some(window) => iced::window::monitor_size(window).then(move |logical| {
-                iced::window::scale_factor(window).map(move |scale| {
-                    logical.map(|size| {
-                        iced::Size::new(
-                            (size.width * scale).round() as u32,
-                            (size.height * scale).round() as u32,
-                        )
-                    })
+/// 量屏幕：最近打开的窗口（独立预览窗口还没开时就是主窗口）所在显示器。
+fn measure_display_command() -> Task<Option<DisplayMetrics>> {
+    iced::window::latest().then(|window| match window {
+        Some(window) => iced::window::monitor_size(window).then(move |logical| {
+            iced::window::scale_factor(window).map(move |scale_factor| {
+                logical.map(|size| DisplayMetrics {
+                    pixels: iced::Size::new(
+                        (size.width * scale_factor).round() as u32,
+                        (size.height * scale_factor).round() as u32,
+                    ),
+                    scale_factor,
                 })
-            }),
-            None => Task::done(None),
-        })
-        .map(move |display| PreviewMessage::VideoPreviewDisplayMeasured(path.clone(), display))
+            })
+        }),
+        None => Task::done(None),
+    })
+}
+
+pub(crate) fn measure_video_display_command(path: PathBuf) -> Task<PreviewMessage> {
+    measure_display_command().map(move |display| {
+        PreviewMessage::VideoPreviewDisplayMeasured(
+            path.clone(),
+            display.map(|display| display.pixels),
+        )
+    })
 }
 
 pub(crate) fn video_still_command(

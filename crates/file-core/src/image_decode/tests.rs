@@ -37,6 +37,14 @@ fn builtin_picture_is_bounded_and_keeps_the_source_size() {
     assert_eq!((decoded.width, decoded.height), (400, 200));
     assert_eq!(decoded.pixels.dimensions(), (100, 50));
     assert_eq!(decoded.pixels.get_pixel(0, 0).0[3], 128);
+    assert!(decoded.has_alpha);
+
+    let opaque = directory.path().join("opaque.png");
+    image::RgbaImage::from_pixel(4, 4, image::Rgba([1, 2, 3, 255]))
+        .save(&opaque)
+        .expect("save png");
+    let decoded = decode_image(&opaque, RasterSource::Picture, DecodeBound::FULL).expect("decode");
+    assert!(!decoded.has_alpha);
 }
 
 #[test]

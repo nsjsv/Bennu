@@ -32,6 +32,7 @@ struct OriginalImagePreviewRequest {
     path: PathBuf,
     generation: u64,
     max_file_bytes: u64,
+    bound: file_core::image_decode::DecodeBound,
     cancellation: CancellationToken,
     placeholder_handle: Option<iced::widget::image::Handle>,
 }
@@ -42,6 +43,7 @@ impl OriginalImagePreviewRequest {
             self.path,
             self.generation,
             self.max_file_bytes,
+            self.bound,
             self.placeholder_handle,
             self.cancellation,
         )
@@ -291,6 +293,7 @@ impl FileBrowser {
             path: path.clone(),
             generation,
             max_file_bytes: self.user_config.preview_size_limits.image_bytes,
+            bound: self.preview_engine.image_decode_bound(),
             placeholder_handle: None,
             cancellation: self
                 .preview_engine

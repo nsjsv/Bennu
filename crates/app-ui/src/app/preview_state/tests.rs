@@ -35,6 +35,8 @@ fn raster_result() -> bennu_preview::original_image_preview::OriginalImagePrevie
         placeholder_handle: image::Handle::from_rgba(1, 1, vec![0, 0, 0, 255]),
         width: 4,
         height: 3,
+        pixel_width: 4,
+        has_alpha: false,
     }
 }
 
@@ -103,7 +105,8 @@ fn original_result_replaces_thumbnail_placeholder() {
         ))) if placeholder_handle.id() == thumbnail_id
     ));
     assert_eq!(browser.preview_engine.preview_window, Some(preview_window));
-    assert_eq!(command.units(), 0);
+    // 窗口已开，不再开窗；只有把键盘交给图片（缩放键）的那一下。
+    assert_eq!(command.units(), 1);
 }
 
 #[test]
@@ -163,10 +166,13 @@ fn original_result_cannot_replace_existing_original_content() {
     let mut browser = browser_with_image(&path);
     browser.preview_engine.preview = Some(PreviewState::Ready(PreviewContent::Image(
         ImagePreviewContent::OriginalRaster {
+            path: path.clone(),
             raster_handle: image::Handle::from_rgba(2, 2, vec![255; 16]),
             placeholder_handle: image::Handle::from_rgba(1, 1, vec![0, 0, 0, 255]),
             width: 2,
             height: 2,
+            pixel_width: 2,
+            has_alpha: false,
         },
     )));
     let generation = browser
@@ -193,10 +199,13 @@ fn clear_preview_drops_original_image_state() {
     let mut browser = browser_with_image(&path);
     browser.preview_engine.preview = Some(PreviewState::Ready(PreviewContent::Image(
         ImagePreviewContent::OriginalRaster {
+            path: path.clone(),
             raster_handle: image::Handle::from_rgba(16, 16, vec![7; 1024]),
             placeholder_handle: image::Handle::from_rgba(1, 1, vec![0, 0, 0, 255]),
             width: 16,
             height: 16,
+            pixel_width: 16,
+            has_alpha: false,
         },
     )));
 
@@ -460,7 +469,7 @@ fn zoom_and_reset_update_the_viewport_for_ready_image_previews() {
 
     drop(
         browser.update(Message::Preview(PreviewMessage::PreviewImageViewport(
-            PreviewImageViewportMessage::ResetRequested,
+            PreviewImageViewportMessage::FitRequested,
         ))),
     );
     assert_eq!(
@@ -483,7 +492,7 @@ fn every_message_the_engine_returns_has_a_host_handler() {
         ),
         PreviewMessage::TextFileChanged { document: 7 },
         PreviewMessage::PreviewTreeDirectoryToggled(0),
-        PreviewMessage::PreviewImageViewport(PreviewImageViewportMessage::ResetRequested),
+        PreviewMessage::PreviewImageViewport(PreviewImageViewportMessage::FitRequested),
         PreviewMessage::PreviewWindowPresented(iced::window::Id::unique()),
     ] {
         drop(browser.update(Message::Preview(message)));

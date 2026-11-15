@@ -9,7 +9,7 @@ use iced::{Size, Task};
 
 use super::PreviewEngine;
 use crate::preview::{
-    PreviewContent, PreviewSize, PreviewState, PreviewWindowProfile,
+    ImagePreviewContent, PreviewContent, PreviewSize, PreviewState, PreviewWindowProfile,
     PREVIEW_WINDOW_INITIAL_CONTROLS_DURATION,
 };
 use crate::preview_message::PreviewMessage;
@@ -354,9 +354,26 @@ impl PreviewEngine {
         )
     }
 
+    /// 右侧面板里的媒体控件：音视频、动图一直显示（面板收不到窗口底部的悬停）；图片只在
+    /// 指针在图上时显示，不一直挡着图。
+    pub fn docked_panel_controls_opacity(&self) -> f32 {
+        match self.preview.as_ref() {
+            Some(PreviewState::Ready(PreviewContent::Image(_)))
+                if self.preview_image_viewport.pointer.is_none() =>
+            {
+                0.0
+            }
+            _ => 1.0,
+        }
+    }
+
     fn preview_window_has_bottom_media_controls(&self) -> bool {
         match self.preview.as_ref() {
             Some(PreviewState::Ready(PreviewContent::Video { .. })) => true,
+            // 缩略图占位时还不知道原图多大，缩放控件等原图到了才有。
+            Some(PreviewState::Ready(PreviewContent::Image(content))) => {
+                !matches!(content, ImagePreviewContent::Thumbnail { .. })
+            }
             Some(PreviewState::Ready(PreviewContent::AnimatedImage(preview))) => {
                 preview.playback_duration().is_some()
             }

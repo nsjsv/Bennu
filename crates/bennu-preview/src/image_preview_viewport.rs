@@ -3,13 +3,16 @@ use iced::{mouse, Point, Size};
 /// 图片预览的缩放/平移视口。scale 相对"适应窗口"尺寸（1.0 = fit），
 /// offset 是图片中心相对媒体区中心的偏移（媒体区坐标）。
 /// 所有权在 FileBrowser：open_preview_for_resolved_path 开启新会话时重置，
-/// 同一会话内缩略图→原图的内容替换保留；pointer 缓存供滚轮缩放取锚点。
+/// 同一会话内缩略图→原图的内容替换保留；pointer 缓存供滚轮缩放取锚点，
+/// 指针离开媒体区时清掉（右侧面板据此显隐控件）。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ImagePreviewViewport {
     pub scale: f32,
     pub offset: Point,
     pub pointer: Option<Point>,
     pub panning: bool,
+    /// 屏幕缩放倍数（逻辑像素换物理像素），算 1:1 用；量屏幕时更新，换图片不清。
+    pub display_scale: f32,
 }
 
 impl Default for ImagePreviewViewport {
@@ -19,6 +22,7 @@ impl Default for ImagePreviewViewport {
             offset: Point::ORIGIN,
             pointer: None,
             panning: false,
+            display_scale: 1.0,
         }
     }
 }
@@ -28,14 +32,37 @@ impl ImagePreviewViewport {
         self.scale != 1.0 || self.offset != Point::ORIGIN
     }
 
+    /// 一个图片像素对一个屏幕像素时的 scale。
+    pub fn actual_size_scale(&self, source_width: u32, fit: Size) -> f32 {
+        source_width as f32 / (fit.width.max(1.0) * self.display_scale.max(f32::EPSILON))
+    }
+
+    /// 显示出来的大小相对原图像素的百分比。
+    pub fn zoom_percent(&self, source_width: u32, fit: Size) -> f32 {
+        self.scale / self.actual_size_scale(source_width, fit) * 100.0
+    }
+
     /// 缩放：scale > 1 时以锚点（指针位置）为中心，缩放前后锚点下的图像
-    /// 内容不动；锚点缺失时退化为围绕媒体区中心缩放。
+    /// 内容不动；锚点缺失时围绕媒体区中心缩放。
     /// scale 缩到不大于 1 后图片四周已有空隙，锚点保持只会把图片推向
     /// 窗口边缘方向，因此一律归零 offset 围绕中心居中缩小。
-    pub fn apply_zoom(&mut self, multiplier: f32, anchor: Option<Point>, panel: Size, fit: Size) {
+    /// `actual` 是 1:1 的 scale（知道原图大小时）：缩放范围按它放宽，跨过它时停在 1:1。
+    pub fn apply_zoom(
+        &mut self,
+        multiplier: f32,
+        anchor: Option<Point>,
+        panel: Size,
+        fit: Size,
+        actual: Option<f32>,
+    ) {
+        let (min_scale, max_scale) = scale_limits(actual);
+        let mut next_scale = (self.scale * multiplier).clamp(min_scale, max_scale);
+        if let Some(actual) = actual {
+            if (self.scale - actual) * (next_scale - actual) < 0.0 {
+                next_scale = actual;
+            }
+        }
         let panel_center = Point::new(panel.width / 2.0, panel.height / 2.0);
-        let next_scale =
-            (self.scale * multiplier).clamp(IMAGE_PREVIEW_MIN_SCALE, IMAGE_PREVIEW_MAX_SCALE);
         if next_scale <= 1.0 {
             self.offset = Point::ORIGIN;
             self.scale = next_scale;
@@ -65,8 +92,12 @@ impl ImagePreviewViewport {
         self.pointer = Some(position);
     }
 
+    /// 回到适应窗口；屏幕缩放倍数不是这张图的状态，留着。
     pub fn reset(&mut self) {
-        *self = Self::default();
+        *self = Self {
+            display_scale: self.display_scale,
+            ..Self::default()
+        };
     }
 
     /// 标准钳制：某轴缩放后图片大于媒体区时，图片边缘最多拖到与媒体区
@@ -89,6 +120,17 @@ fn clamp_axis(offset: f32, scaled: f32, panel: f32) -> f32 {
     }
 }
 
+/// 知道 1:1 在哪时，最小要能缩到 1:1（小图标的 1:1 比适应窗口小得多），最大能放到 16 倍原始像素。
+fn scale_limits(actual: Option<f32>) -> (f32, f32) {
+    match actual {
+        Some(actual) => (
+            IMAGE_PREVIEW_MIN_SCALE.min(actual),
+            IMAGE_PREVIEW_MAX_SCALE.max(actual * IMAGE_PREVIEW_MAX_ACTUAL_ZOOM),
+        ),
+        None => (IMAGE_PREVIEW_MIN_SCALE, IMAGE_PREVIEW_MAX_SCALE),
+    }
+}
+
 /// 滚轮增量 → 缩放倍率；行增量按每行 10%，像素增量按 40px 一行折算。
 pub fn image_preview_zoom_multiplier(delta: mouse::ScrollDelta) -> f32 {
     let lines = match delta {
@@ -101,14 +143,28 @@ pub fn image_preview_zoom_multiplier(delta: mouse::ScrollDelta) -> f32 {
 #[derive(Debug, Clone, Copy)]
 pub enum PreviewImageViewportMessage {
     PointerMoved(Point),
+    PointerLeft,
     PanStarted,
     PanEnded,
     Zoomed(mouse::ScrollDelta),
-    ResetRequested,
+    /// 双击：缩放着就回到适应窗口，否则以指针为中心放到 1:1。
+    DoubleClicked,
+    /// 按钮、+/- 键：放大/缩小一档，围着中心。
+    ZoomedIn,
+    ZoomedOut,
+    /// 0 键：适应窗口。
+    FitRequested,
+    /// 1 键：1:1。
+    ActualSizeRequested,
+    /// 控件上的「适应窗口 / 1:1」按钮。
+    FitOrActualToggled,
 }
 
+/// 按钮、按键缩放一档的倍率。
+pub const IMAGE_PREVIEW_ZOOM_STEP: f32 = 1.25;
 const IMAGE_PREVIEW_MIN_SCALE: f32 = 0.2;
 const IMAGE_PREVIEW_MAX_SCALE: f32 = 8.0;
+const IMAGE_PREVIEW_MAX_ACTUAL_ZOOM: f32 = 16.0;
 
 #[cfg(test)]
 mod image_preview_viewport_tests {
@@ -123,7 +179,7 @@ mod image_preview_viewport_tests {
         let mut viewport = ImagePreviewViewport::default();
         let anchor = Point::new(200.0, 150.0);
 
-        viewport.apply_zoom(2.0, Some(anchor), PANEL, FIT);
+        viewport.apply_zoom(2.0, Some(anchor), PANEL, FIT, None);
 
         assert_eq!(viewport.scale, 2.0);
         // 缩放前锚点在中心左侧 200px；缩放后该图像点必须仍在锚点处。
@@ -138,17 +194,17 @@ mod image_preview_viewport_tests {
     #[test]
     fn zoom_is_clamped_to_the_configured_range() {
         let mut viewport = ImagePreviewViewport::default();
-        viewport.apply_zoom(1_000.0, None, PANEL, FIT);
+        viewport.apply_zoom(1_000.0, None, PANEL, FIT, None);
         assert_eq!(viewport.scale, IMAGE_PREVIEW_MAX_SCALE);
 
-        viewport.apply_zoom(0.0, None, PANEL, FIT);
+        viewport.apply_zoom(0.0, None, PANEL, FIT, None);
         assert_eq!(viewport.scale, IMAGE_PREVIEW_MIN_SCALE);
     }
 
     #[test]
     fn pan_accumulates_only_while_panning() {
         let mut viewport = ImagePreviewViewport::default();
-        viewport.apply_zoom(2.0, None, PANEL, FIT);
+        viewport.apply_zoom(2.0, None, PANEL, FIT, None);
         viewport.apply_pointer_motion(Point::new(10.0, 10.0), PANEL, FIT);
 
         viewport.panning = true;
@@ -175,13 +231,46 @@ mod image_preview_viewport_tests {
     #[test]
     fn reset_restores_the_fit_viewport() {
         let mut viewport = ImagePreviewViewport::default();
-        viewport.apply_zoom(2.0, None, PANEL, FIT);
+        viewport.apply_zoom(2.0, None, PANEL, FIT, None);
         viewport.panning = true;
 
         viewport.reset();
 
         assert_eq!(viewport, ImagePreviewViewport::default());
         assert!(!viewport.is_zoomed());
+    }
+
+    #[test]
+    fn crossing_actual_size_stops_there_and_widens_the_range() {
+        // 原图 3200 宽、适应窗口 800：1:1 是 4 倍，最大能到 64 倍。
+        let mut viewport = ImagePreviewViewport::default();
+        let actual = viewport.actual_size_scale(3200, FIT);
+        assert_eq!(actual, 4.0);
+        viewport.apply_zoom(3.0, None, PANEL, FIT, Some(actual));
+        viewport.apply_zoom(2.0, None, PANEL, FIT, Some(actual));
+        assert_eq!(viewport.scale, 4.0);
+        assert_eq!(viewport.zoom_percent(3200, FIT), 100.0);
+        viewport.apply_zoom(1_000.0, None, PANEL, FIT, Some(actual));
+        assert_eq!(viewport.scale, 64.0);
+
+        // 高分屏：两倍缩放时 1:1 只要 2 倍。
+        let hidpi = ImagePreviewViewport {
+            display_scale: 2.0,
+            ..ImagePreviewViewport::default()
+        };
+        assert_eq!(hidpi.actual_size_scale(3200, FIT), 2.0);
+    }
+
+    #[test]
+    fn reset_keeps_the_display_scale() {
+        let mut viewport = ImagePreviewViewport {
+            display_scale: 1.5,
+            ..ImagePreviewViewport::default()
+        };
+        viewport.apply_zoom(2.0, None, PANEL, FIT, None);
+        viewport.reset();
+        assert_eq!(viewport.scale, 1.0);
+        assert_eq!(viewport.display_scale, 1.5);
     }
 
     #[test]
@@ -201,11 +290,11 @@ mod image_preview_viewport_tests {
         let mut viewport = ImagePreviewViewport::default();
 
         // 从适应窗口连续缩小，锚点取在窗口边缘：图片必须原地居中缩小。
-        viewport.apply_zoom(0.9, Some(Point::new(20.0, 20.0)), PANEL, FIT);
+        viewport.apply_zoom(0.9, Some(Point::new(20.0, 20.0)), PANEL, FIT, None);
         assert_eq!(viewport.scale, 0.9);
         assert_eq!(viewport.offset, Point::ORIGIN);
 
-        viewport.apply_zoom(0.9, Some(Point::new(20.0, 20.0)), PANEL, FIT);
+        viewport.apply_zoom(0.9, Some(Point::new(20.0, 20.0)), PANEL, FIT, None);
         assert_eq!(viewport.offset, Point::ORIGIN);
     }
 
@@ -213,14 +302,14 @@ mod image_preview_viewport_tests {
     fn zooming_back_below_fit_clears_pan_offset_left_by_zooming_in() {
         let mut viewport = ImagePreviewViewport::default();
         let anchor = Point::new(100.0, 500.0);
-        viewport.apply_zoom(4.0, Some(anchor), PANEL, FIT);
+        viewport.apply_zoom(4.0, Some(anchor), PANEL, FIT, None);
         viewport.apply_pointer_motion(Point::new(120.0, 480.0), PANEL, FIT);
         viewport.panning = true;
         viewport.apply_pointer_motion(Point::new(300.0, 300.0), PANEL, FIT);
         viewport.panning = false;
         assert_ne!(viewport.offset, Point::ORIGIN);
 
-        viewport.apply_zoom(0.2, Some(anchor), PANEL, FIT);
+        viewport.apply_zoom(0.2, Some(anchor), PANEL, FIT, None);
 
         assert_eq!(viewport.scale, 0.8);
         assert_eq!(viewport.offset, Point::ORIGIN);
@@ -229,7 +318,7 @@ mod image_preview_viewport_tests {
     #[test]
     fn panning_beyond_the_scaled_edges_stops_at_alignment() {
         let mut viewport = ImagePreviewViewport::default();
-        viewport.apply_zoom(4.0, None, PANEL, FIT);
+        viewport.apply_zoom(4.0, None, PANEL, FIT, None);
         viewport.apply_pointer_motion(Point::new(400.0, 300.0), PANEL, FIT);
         viewport.panning = true;
 
@@ -246,7 +335,7 @@ mod image_preview_viewport_tests {
         // 竖长图：fit 宽 400 高 600，放大 2 倍后 x 轴恰好等于面板，必须锁中。
         let fit = Size::new(400.0, 600.0);
         let mut viewport = ImagePreviewViewport::default();
-        viewport.apply_zoom(2.0, None, PANEL, fit);
+        viewport.apply_zoom(2.0, None, PANEL, fit, None);
         viewport.apply_pointer_motion(Point::new(400.0, 300.0), PANEL, fit);
         viewport.panning = true;
 
@@ -264,7 +353,7 @@ mod image_preview_viewport_tests {
         let mut viewport = ImagePreviewViewport::default();
         let anchor = Point::new(0.0, 300.0);
 
-        viewport.apply_zoom(4.0, Some(anchor), PANEL, fit);
+        viewport.apply_zoom(4.0, Some(anchor), PANEL, fit, None);
 
         assert_eq!(viewport.offset, Point::new(400.0, 0.0));
     }

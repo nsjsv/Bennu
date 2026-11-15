@@ -15,16 +15,14 @@ use crate::animated_image_preview_panel::animated_image_preview_panel;
 use crate::audio_preview_panel::{audio_preview_panel, AudioPanelInput};
 use crate::document_preview_panel::document_preview_panel;
 use crate::engine::SqlitePreviewState;
-use crate::image_preview_panel::{
-    image_preview_panel, raster_image_preview_panel, svg_preview_panel,
-};
+use crate::image_preview_panel::image_preview_panel;
 use crate::image_preview_viewport::ImagePreviewViewport;
-use crate::media_keys::media_keys;
+use crate::media_keys::{image_keys, media_keys};
 use crate::operation_progress::remote_preview_download_panel;
 use crate::panel_text::readable_text;
 use crate::preview::PreviewSize;
 use crate::preview::VideoPreviewPlayback;
-use crate::preview::{AudioAnalysis, AudioPreviewPlayback, ImagePreviewContent};
+use crate::preview::{AudioAnalysis, AudioPreviewPlayback};
 use crate::preview::{PreviewContent, PreviewState};
 use crate::preview_config::MediaPlaybackSettings;
 use crate::preview_message::PreviewMessage;
@@ -158,33 +156,12 @@ where
         PreviewState::Ready(PreviewContent::PagedDocument(document)) => {
             document_preview_panel(document, size, document_scroll)
         }
-        PreviewState::Ready(PreviewContent::Image(content)) => match content {
-            ImagePreviewContent::Thumbnail {
-                handle,
-                width,
-                height,
-                ..
-            } => image_preview_panel(handle, *width, *height, size, image_preview_viewport),
-            ImagePreviewContent::OriginalRaster {
-                raster_handle,
-                placeholder_handle,
-                width,
-                height,
-            } => raster_image_preview_panel(
-                placeholder_handle,
-                raster_handle,
-                *width,
-                *height,
-                size,
-                image_preview_viewport,
-            ),
-            ImagePreviewContent::OriginalSvg {
-                handle,
-                width,
-                height,
-                ..
-            } => svg_preview_panel(handle, *width, *height, size, image_preview_viewport),
-        },
+        PreviewState::Ready(PreviewContent::Image(content)) => image_keys(image_preview_panel(
+            content,
+            size,
+            image_preview_viewport,
+            preview_bottom_controls_opacity,
+        )),
         PreviewState::Ready(PreviewContent::AnimatedImage(preview)) => {
             animated_image_preview_panel(preview, size, preview_bottom_controls_opacity)
         }

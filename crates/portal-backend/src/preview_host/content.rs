@@ -200,6 +200,7 @@ impl PreviewHost {
             .clone()
             .expect("image preview generation must own cancellation");
         let max_file_bytes = host.preferences.size_limits.image_bytes;
+        let bound = host.engine.image_decode_bound();
         let preview_edge =
             preview_thumbnail_edge_for_size(image_preview_size_from_dimensions(width, height));
         let original_command = |placeholder: Option<iced::widget::image::Handle>| {
@@ -207,6 +208,7 @@ impl PreviewHost {
                 path.clone(),
                 generation,
                 max_file_bytes,
+                bound,
                 placeholder,
                 cancellation.clone(),
             )

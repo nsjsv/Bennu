@@ -82,6 +82,7 @@ pub mod media_controls;
 // 预览面板外层 surface（背景容器与滚动区高度下限）。
 pub mod preview_surface;
 // 静态图片预览面板（缩略图/光栅/SVG）与缩放平移媒体区。
+mod checkerboard;
 pub mod image_preview_panel;
 // 音频预览面板（标题摘要/时间线控制/音量控制）。
 mod audio_lyrics_view;

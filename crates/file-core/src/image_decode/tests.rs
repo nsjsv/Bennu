@@ -82,12 +82,13 @@ fn tiff_raw_shows_the_largest_preview_turned_upright() {
 }
 
 #[test]
-fn raf_and_cr3_previews_are_found() {
+fn raf_cr3_and_olympus_previews_are_found() {
     let directory = tempfile::tempdir().expect("temp dir");
     let preview = test_files::jpeg(64, 48);
     for (name, bytes) in [
         ("shot.raf", test_files::raf(&preview)),
         ("shot.cr3", test_files::cr3(&preview)),
+        ("shot.orf", test_files::olympus_orf(&preview)),
     ] {
         let path = write(directory.path(), name, &bytes);
         assert_eq!(

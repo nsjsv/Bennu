@@ -125,6 +125,25 @@ impl<S: ByteSource> TiffReader<S> {
         Ok(reader)
     }
 
+    /// 厂商私有区（MakerNote）里自成一体的目录：没有 TIFF 头，字节序、第一个目录的位置由
+    /// 厂商的头说了算，偏移从 `base` 算起。
+    pub(crate) fn embedded(source: S, base: u64, little_endian: bool, first_ifd: u32) -> Self {
+        Self {
+            source,
+            base,
+            order: if little_endian {
+                ByteOrder::Little
+            } else {
+                ByteOrder::Big
+            },
+            first_ifd,
+        }
+    }
+
+    pub(crate) fn source_mut(&mut self) -> &mut S {
+        &mut self.source
+    }
+
     /// IFD0 及其后续目录、它们的子目录和 EXIF 目录，按发现顺序；IFD0 排第一。
     pub(crate) fn directories(&mut self) -> io::Result<Vec<Ifd>> {
         let mut pending = vec![self.first_ifd];
@@ -173,8 +192,13 @@ impl<S: ByteSource> TiffReader<S> {
             return None;
         }
         let bytes = self.value_bytes(&entry, 1).ok()?;
-        let text = String::from_utf8_lossy(&bytes);
-        let text = text.trim_end_matches('\0').trim();
+        // 有的相机在 NUL 后面还留着垃圾字节：到第一个 NUL 为止。
+        let end = bytes
+            .iter()
+            .position(|byte| *byte == 0)
+            .unwrap_or(bytes.len());
+        let text = String::from_utf8_lossy(&bytes[..end]);
+        let text = text.trim();
         (!text.is_empty()).then(|| text.to_owned())
     }
 

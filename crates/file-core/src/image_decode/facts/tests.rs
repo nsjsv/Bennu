@@ -130,6 +130,15 @@ fn camera_name_drops_the_repeated_brand() {
         camera_name(None, Some("X100V".to_owned())).as_deref(),
         Some("X100V")
     );
+    assert_eq!(
+        name("RICOH IMAGING COMPANY, LTD.", "PENTAX K-3 Mark III").as_deref(),
+        Some("PENTAX K-3 Mark III")
+    );
+    assert_eq!(
+        name("OLYMPUS CORPORATION", "E-M10MarkIV").as_deref(),
+        Some("OLYMPUS E-M10MarkIV")
+    );
+    assert_eq!(name("FUJIFILM", "X-T3").as_deref(), Some("FUJIFILM X-T3"));
 }
 
 #[test]

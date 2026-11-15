@@ -396,8 +396,29 @@ fn read_location<S: ByteSource>(reader: &mut TiffReader<S>, ifd: &Ifd, facts: &m
         .filter(|(latitude, longitude)| *latitude != 0.0 || *longitude != 0.0);
 }
 
-/// 型号里已经带厂商名（`Canon EOS R5`、`NIKON D850`）就只显示型号。
+/// 厂商名去掉公司后缀（`OLYMPUS CORPORATION` → `OLYMPUS`）；型号里已经带了品牌
+/// （`Canon EOS R5`、`NIKON Z 6`、理光的 `PENTAX K-3 Mark III`）就只显示型号。
 fn camera_name(make: Option<String>, model: Option<String>) -> Option<String> {
+    const COMPANY_WORDS: [&str; 10] = [
+        "CORPORATION",
+        "CORP.",
+        "CORP",
+        "COMPANY",
+        "IMAGING",
+        "CO.,",
+        "LTD.",
+        "LTD",
+        "INC.",
+        "AG",
+    ];
+    let make = make
+        .map(|make| {
+            make.split_whitespace()
+                .filter(|word| !COMPANY_WORDS.contains(&word.to_uppercase().as_str()))
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .filter(|make| !make.is_empty());
     match (make, model) {
         (Some(make), Some(model)) => {
             let brand = make
@@ -405,7 +426,12 @@ fn camera_name(make: Option<String>, model: Option<String>) -> Option<String> {
                 .next()
                 .unwrap_or(&make)
                 .to_lowercase();
-            if model.to_lowercase().contains(&brand) {
+            // 型号的第一个词是全大写字母的品牌名（没有数字），后面还有型号。
+            let mut words = model.split_whitespace();
+            let model_starts_with_brand = words.next().is_some_and(|word| {
+                word.len() >= 3 && word.chars().all(|character| character.is_ascii_uppercase())
+            }) && words.next().is_some();
+            if model.to_lowercase().contains(&brand) || model_starts_with_brand {
                 Some(model)
             } else {
                 Some(format!("{make} {model}"))

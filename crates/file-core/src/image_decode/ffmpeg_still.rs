@@ -9,8 +9,9 @@ use std::process::{Command, Stdio};
 
 use super::{DecodeBound, ImageDecodeError};
 
-/// ffprobe 的输出只取几十行，超过这么多说明不是图片，不再往下读。
-const PROBE_OUTPUT_LIMIT: u64 = 1024 * 1024;
+/// ffprobe 的输出：普通图片几十行；2 亿像素的手机拼图有上千块，每块都列一遍，几 MB。
+/// 再多说明不是图片，不再往下读。
+const PROBE_OUTPUT_LIMIT: u64 = 32 * 1024 * 1024;
 const ERROR_DETAIL_LIMIT: usize = 400;
 
 /// ffprobe 看到的要解的那一路：滤镜输入写法和转正后的尺寸。
@@ -80,6 +81,17 @@ fn plan_from_probe(output: &str) -> Option<StillPlan> {
         ) else {
             continue;
         };
+        // 拼图的旋转（手机竖拍）只写成组里的显示矩阵，没有 rotation 这一项。
+        let quarter_turn = (0..8).any(|side| {
+            fields
+                .get(format!("{component}.side_data_list.side_data.{side}.displaymatrix").as_str())
+                .is_some_and(|matrix| display_matrix_turns_quarter(matrix))
+        });
+        let (width, height) = if quarter_turn {
+            (height, width)
+        } else {
+            (width, height)
+        };
         let is_default = number(format!("{prefix}.disposition.default")) == Some(1);
         let plan = StillPlan {
             input: format!("0:g:{index}"),
@@ -144,6 +156,20 @@ fn plan_from_probe(output: &str) -> Option<StillPlan> {
     best_stream.map(|(_, _, plan)| plan)
 }
 
+/// ffprobe 把显示矩阵写成三行 `00000000: a b u`；第一行 a 为 0、b 不为 0 就是转了四分之一圈。
+fn display_matrix_turns_quarter(matrix: &str) -> bool {
+    let values: Vec<i64> = matrix
+        .replace("\\n", "\n")
+        .lines()
+        .filter_map(|line| line.split_once(':'))
+        .flat_map(|(_, row)| {
+            row.split_whitespace()
+                .filter_map(|value| value.parse().ok())
+        })
+        .collect();
+    matches!(values.as_slice(), [a, b, ..] if *a == 0 && *b != 0)
+}
+
 /// 按计划解一张，最大不超过 `bound`（只缩不放）。
 pub(super) fn decode(
     path: &Path,
@@ -158,12 +184,13 @@ pub(super) fn decode(
             image::error::LimitError::from_kind(image::error::LimitErrorKind::InsufficientMemory),
         )));
     }
+    // 缩放框用表达式按实际出来的画面算（ffmpeg 已经按方向转正），探测的尺寸万一没对上方向也不会把图拉变形。
     let filter = if (width, height) == (plan.width, plan.height) {
         format!("[{}]format=rgba", plan.input)
     } else {
         format!(
-            "[{}]scale={width}:{height}:flags=area,format=rgba",
-            plan.input
+            "[{}]scale=w='min(iw,{})':h='min(ih,{})':force_original_aspect_ratio=decrease:flags=area,format=rgba",
+            plan.input, bound.max_width, bound.max_height
         )
     };
     let output = spawn(
@@ -250,6 +277,24 @@ streams.stream.0.height=720
                 input: "0:g:0".to_owned(),
                 width: 2560,
                 height: 1440
+            })
+        );
+    }
+
+    #[test]
+    fn a_rotated_grid_swaps_its_size() {
+        let output = r#"stream_groups.stream_group.0.type="Tile Grid"
+stream_groups.stream_group.0.components.component.0.width=4032
+stream_groups.stream_group.0.components.component.0.height=3024
+stream_groups.stream_group.0.components.component.0.side_data_list.side_data.1.side_data_type="Display Matrix"
+stream_groups.stream_group.0.components.component.0.side_data_list.side_data.1.displaymatrix="\n00000000:            0       65536           0\n00000001:       -65536           0           0\n00000002:            0           0  1073741824\n"
+"#;
+        assert_eq!(
+            plan_from_probe(output),
+            Some(StillPlan {
+                input: "0:g:0".to_owned(),
+                width: 3024,
+                height: 4032
             })
         );
     }

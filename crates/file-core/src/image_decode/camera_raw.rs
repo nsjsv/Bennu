@@ -20,6 +20,14 @@ use super::ImageDecodeError;
 const RAF_SIGNATURE: &[u8] = b"FUJIFILMCCD-RAW ";
 /// RAF 文件头里预览图偏移、长度所在位置（大端 u32）。
 const RAF_PREVIEW_OFFSET_AT: u64 = 84;
+/// 奥林巴斯把预览图放在厂商私有区（EXIF 的 MakerNote）里：私有区以 `OLYMPUS\0` 加字节序开头，
+/// 第一个目录在第 12 字节，偏移从私有区开头算；CameraSettings 子目录里记着预览图的位置和长度。
+const TAG_MAKER_NOTE: u16 = 0x927C;
+const OLYMPUS_MAKER_NOTE: &[u8] = b"OLYMPUS\0";
+const OLYMPUS_FIRST_IFD: u32 = 12;
+const TAG_OLYMPUS_CAMERA_SETTINGS: u16 = 0x2020;
+const TAG_OLYMPUS_PREVIEW_START: u16 = 0x0101;
+const TAG_OLYMPUS_PREVIEW_LENGTH: u16 = 0x0102;
 /// RW2 把整张 JPEG 放在 IFD0 的这个标签里。
 const TAG_RW2_JPEG_FROM_RAW: u16 = 0x002E;
 /// TIFF 压缩方式 6、7 是 JPEG；但原始数据本身也常用无损 JPEG 存，要看帧头分辨。
@@ -162,7 +170,31 @@ fn tiff_candidates<S: ByteSource>(
             }
         }
     }
+    candidates.extend(olympus_preview(reader, directories));
     candidates
+}
+
+fn olympus_preview<S: ByteSource>(
+    reader: &mut TiffReader<S>,
+    directories: &[Ifd],
+) -> Option<ByteRange> {
+    let (start, _) = directories.iter().find_map(|ifd| {
+        ifd.entry(TAG_MAKER_NOTE)
+            .and_then(|entry| reader.blob_range(entry))
+    })?;
+    let mut header = [0; 12];
+    reader.source_mut().read_exact_at(start, &mut header).ok()?;
+    if !header.starts_with(OLYMPUS_MAKER_NOTE) {
+        return None;
+    }
+    let little_endian = &header[8..10] == b"II";
+    let mut note =
+        TiffReader::embedded(reader.source_mut(), start, little_endian, OLYMPUS_FIRST_IFD);
+    let ifd = note.first_directory().ok()?;
+    let settings = note.linked_directory(&ifd, TAG_OLYMPUS_CAMERA_SETTINGS)?;
+    let offset = note.first_unsigned(&settings, TAG_OLYMPUS_PREVIEW_START)?;
+    let length = note.first_unsigned(&settings, TAG_OLYMPUS_PREVIEW_LENGTH)?;
+    Some((note.absolute(offset), u64::from(length)))
 }
 
 fn raf_candidates(file: &mut File) -> io::Result<Vec<ByteRange>> {
@@ -401,6 +433,43 @@ pub(super) mod test_files {
         entry(&mut bytes, 0x0202, 4, preview.len() as u32);
         bytes.extend(0u32.to_le_bytes());
         bytes.extend_from_slice(thumbnail);
+        bytes.extend_from_slice(preview);
+        bytes
+    }
+
+    /// ORF：IFD0 → EXIF 目录 → MakerNote（`OLYMPUS\0II` 头，偏移从私有区开头算）
+    /// → CameraSettings 子目录记着预览图的位置和长度。
+    pub(in super::super) fn olympus_orf(preview: &[u8]) -> Vec<u8> {
+        let entry = |bytes: &mut Vec<u8>, tag: u16, field_type: u16, count: u32, value: u32| {
+            bytes.extend(tag.to_le_bytes());
+            bytes.extend(field_type.to_le_bytes());
+            bytes.extend(count.to_le_bytes());
+            bytes.extend(value.to_le_bytes());
+        };
+        let ifd0 = 8u32;
+        let exif = ifd0 + 2 + 12 + 4;
+        let note = exif + 2 + 12 + 4;
+        // 私有区里：12 字节头，一个目录（1 项），CameraSettings（2 项），然后是 JPEG。
+        let settings_relative = 12 + 2 + 12 + 4;
+        let preview_relative = settings_relative + 2 + 2 * 12 + 4;
+        let note_len = preview_relative + preview.len() as u32;
+
+        let mut bytes = b"IIRO".to_vec();
+        bytes.extend(ifd0.to_le_bytes());
+        bytes.extend(1u16.to_le_bytes());
+        entry(&mut bytes, 0x8769, 4, 1, exif);
+        bytes.extend(0u32.to_le_bytes());
+        bytes.extend(1u16.to_le_bytes());
+        entry(&mut bytes, 0x927C, 7, note_len, note);
+        bytes.extend(0u32.to_le_bytes());
+        bytes.extend(b"OLYMPUS\0II\x03\0");
+        bytes.extend(1u16.to_le_bytes());
+        entry(&mut bytes, 0x2020, 13, 1, settings_relative);
+        bytes.extend(0u32.to_le_bytes());
+        bytes.extend(2u16.to_le_bytes());
+        entry(&mut bytes, 0x0101, 4, 1, preview_relative);
+        entry(&mut bytes, 0x0102, 4, 1, preview.len() as u32);
+        bytes.extend(0u32.to_le_bytes());
         bytes.extend_from_slice(preview);
         bytes
     }

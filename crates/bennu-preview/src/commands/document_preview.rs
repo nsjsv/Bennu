@@ -13,7 +13,7 @@ use self::process::{
     run_document_tool_command, DocumentToolCommand, DocumentToolError, DocumentToolOutput,
 };
 use crate::document_preview::{
-    document_preview_format_for_path, parse_pdfinfo_pages, parse_pdfinfo_summary,
+    document_preview_format_for_path, parse_pdfinfo_page_count, parse_pdfinfo_pages,
     DocumentPageRenderOutcome, DocumentPageRenderRequest, DocumentPageRenderResult,
     DocumentPrepareOutcome, DocumentPrepareRequest, DocumentPreviewFormat, DocumentPreviewMessage,
     DocumentPreviewWorkspace, DocumentScaleAxis, OfficeDocumentFormat, PreparedDocumentPreview,
@@ -192,16 +192,13 @@ async fn prepare_document_inner(
         Ok(None) => return Ok(None),
         Err(error) => return Err(pdf_inspection_error(error)),
     };
-    let summary = parse_pdfinfo_summary(&summary_output.stdout.bytes)?;
-    if summary.encrypted {
-        return Err(tr!("Encrypted PDF preview is not supported"));
-    }
+    let page_count = parse_pdfinfo_page_count(&summary_output.stdout.bytes)?;
 
     let page_arguments = vec![
         OsString::from("-f"),
         OsString::from("1"),
         OsString::from("-l"),
-        OsString::from(summary.page_count.to_string()),
+        OsString::from(page_count.to_string()),
         OsString::from("-box"),
         workspace.pdf_path().as_os_str().to_owned(),
     ];
@@ -220,7 +217,7 @@ async fn prepare_document_inner(
     else {
         return Ok(None);
     };
-    let pages = parse_pdfinfo_pages(&page_output.stdout.bytes, summary.page_count)?;
+    let pages = parse_pdfinfo_pages(&page_output.stdout.bytes, page_count)?;
 
     Ok(Some(PreparedDocumentPreview {
         key: request.key.clone(),

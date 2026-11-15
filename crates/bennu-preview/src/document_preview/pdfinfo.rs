@@ -2,22 +2,17 @@ use bennu_localization::tr;
 
 use super::model::{DocumentPageSize, MAX_DOCUMENT_PAGES};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PdfInfoSummary {
-    pub page_count: usize,
-    pub encrypted: bool,
-}
-
 /// pdfinfo 的输出不合格式：外层一句译文，里面的英文诊断只作详情。
 fn malformed(detail: String) -> String {
     tr!("Invalid PDF metadata: %1", detail)
 }
 
-pub fn parse_pdfinfo_summary(output: &[u8]) -> Result<PdfInfoSummary, String> {
+/// 只认页数：只限制复制、打印的加密 PDF 不要密码也能画、能抽字，照常预览；
+/// 要打开密码的那种 pdfinfo 自己就报错。
+pub fn parse_pdfinfo_page_count(output: &[u8]) -> Result<usize, String> {
     let output = std::str::from_utf8(output)
         .map_err(|_| malformed("Poppler returned non-UTF-8 PDF metadata".to_owned()))?;
     let mut page_count = None;
-    let mut encrypted = None;
 
     for line in output.lines() {
         if let Some(value) = line.strip_prefix("Pages:") {
@@ -40,31 +35,10 @@ pub fn parse_pdfinfo_summary(output: &[u8]) -> Result<PdfInfoSummary, String> {
                 ));
             }
             page_count = Some(value);
-        } else if let Some(value) = line.strip_prefix("Encrypted:") {
-            if encrypted.is_some() {
-                return Err(malformed(
-                    "Poppler returned duplicate PDF encryption metadata".to_owned(),
-                ));
-            }
-            let value = value.trim();
-            encrypted = Some(if value == "no" {
-                false
-            } else if value == "yes" || value.starts_with("yes ") {
-                true
-            } else {
-                return Err(malformed(
-                    "Poppler returned invalid PDF encryption metadata".to_owned(),
-                ));
-            });
         }
     }
 
-    Ok(PdfInfoSummary {
-        page_count: page_count
-            .ok_or_else(|| malformed("Poppler omitted the PDF page count".to_owned()))?,
-        encrypted: encrypted
-            .ok_or_else(|| malformed("Poppler omitted PDF encryption metadata".to_owned()))?,
-    })
+    page_count.ok_or_else(|| malformed("Poppler omitted the PDF page count".to_owned()))
 }
 
 pub fn parse_pdfinfo_pages(
@@ -176,27 +150,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_summary_and_rejects_missing_or_excessive_counts() {
+    fn parses_page_count_and_rejects_missing_or_excessive_counts() {
         assert_eq!(
-            parse_pdfinfo_summary(b"Pages:           2\nEncrypted:       no\n").unwrap(),
-            PdfInfoSummary {
-                page_count: 2,
-                encrypted: false,
-            }
+            parse_pdfinfo_page_count(b"Pages:           2\nEncrypted:       no\n").unwrap(),
+            2
         );
-        assert!(parse_pdfinfo_summary(b"Encrypted: no\n").is_err());
-        assert!(parse_pdfinfo_summary(b"Pages: 0\nEncrypted: no\n").is_err());
-        assert!(parse_pdfinfo_summary(b"Pages: 10001\nEncrypted: no\n").is_err());
-        assert!(parse_pdfinfo_summary(b"Pages: 1\nPages: 1\nEncrypted: no\n").is_err());
-    }
-
-    #[test]
-    fn recognizes_encrypted_pdf_metadata() {
-        assert!(
-            parse_pdfinfo_summary(b"Pages: 1\nEncrypted: yes (print:yes)\n")
-                .unwrap()
-                .encrypted
+        assert_eq!(
+            parse_pdfinfo_page_count(b"Pages: 1\nEncrypted: yes (print:yes copy:no)\n").unwrap(),
+            1
         );
+        assert!(parse_pdfinfo_page_count(b"Encrypted: no\n").is_err());
+        assert!(parse_pdfinfo_page_count(b"Pages: 0\n").is_err());
+        assert!(parse_pdfinfo_page_count(b"Pages: 10001\n").is_err());
+        assert!(parse_pdfinfo_page_count(b"Pages: 1\nPages: 1\n").is_err());
     }
 
     #[test]

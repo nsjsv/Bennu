@@ -22,7 +22,7 @@ pub use model::{
 pub use model::{
     DocumentPageRenderPlan, DocumentPageRequestKey, DocumentPageSize, DocumentRenderKey,
 };
-pub use pdfinfo::{parse_pdfinfo_pages, parse_pdfinfo_summary};
+pub use pdfinfo::{parse_pdfinfo_page_count, parse_pdfinfo_pages};
 pub use resources::{MAX_DOCUMENT_PAGE_EDGE, MAX_DOCUMENT_PAGE_PIXELS};
 pub use text_layer::{
     find_matches, parse_bbox_layout, word_near, DocumentSearch, DocumentSelection, DocumentText,

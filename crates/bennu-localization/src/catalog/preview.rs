@@ -154,7 +154,6 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Only the first 200 rows are shown.", "仅显示前 200 行。"),
     // PDF
     ("PDF preview requires Poppler. Install the poppler package.", "PDF 预览需要 Poppler，请安装 poppler 软件包。"),
-    ("Encrypted PDF preview is not supported", "不支持预览加密 PDF"),
     ("Could not inspect PDF: %1", "无法检查 PDF：%1"),
     ("PDF preview source is not a regular file", "PDF 预览源不是普通文件"),
     ("Could not create PDF preview workspace: %1", "无法创建 PDF 预览工作区：%1"),

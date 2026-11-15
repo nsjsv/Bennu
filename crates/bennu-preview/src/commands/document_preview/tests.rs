@@ -310,6 +310,24 @@ async fn password_protected_pdf_shows_what_poppler_said() {
 }
 
 #[tokio::test]
+async fn pdf_restricted_only_by_owner_password_still_previews() {
+    let outcome = prepare_document_with_programs(
+        request(fixture("owner-encrypted.pdf"), 1024 * 1024),
+        DocumentPrograms::default(),
+    )
+    .await;
+    let DocumentPrepareOutcome::Ready(prepared) = outcome else {
+        panic!("expected owner-encrypted PDF preparation");
+    };
+
+    assert_eq!(prepared.pages.len(), 1);
+    assert_eq!(
+        (prepared.pages[0].width, prepared.pages[0].height),
+        (300.0, 200.0)
+    );
+}
+
+#[tokio::test]
 async fn fake_page_failure_removes_partial_output_and_stays_page_local() {
     let directory = tempdir().unwrap();
     let source = directory.path().join("page-fail.pdf");

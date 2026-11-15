@@ -11,9 +11,12 @@ use iced::advanced::{layout, mouse, overlay, renderer, Clipboard, Layout, Shell,
 use iced::keyboard::{self, key::Named};
 use iced::{Element, Event, Length, Rectangle, Size, Vector};
 
-use crate::document_preview::{DocumentPageTurn, DocumentPreviewMessage, DocumentZoom};
+use crate::document_preview::{
+    DocumentPageTurn, DocumentPreviewMessage, DocumentTextMessage, DocumentZoom,
+};
 use crate::image_preview_viewport::PreviewImageViewportMessage;
 use crate::preview_message::{ImageStep, MediaKeyCommand, PreviewMessage};
+use crate::text_document::SearchDirection;
 
 const SHORT_SEEK: Duration = Duration::from_secs(5);
 const LONG_SEEK: Duration = Duration::from_secs(30);
@@ -61,7 +64,8 @@ where
     })
 }
 
-/// 文档：+/-/0（带不带 Ctrl 都行）缩放，Ctrl+滚轮缩放，PageUp/PageDown/Home/End 翻页。
+/// 文档：+/-/0（带不带 Ctrl 都行）缩放，Ctrl+滚轮缩放，PageUp/PageDown/Home/End 翻页，
+/// Ctrl+F 搜索、F3/Shift+F3 下一处/上一处、Ctrl+C 复制选中的文字。
 pub(crate) fn document_keys<'a, Message>(content: Element<'a, Message>) -> Element<'a, Message>
 where
     Message: 'a + Clone + From<PreviewMessage>,
@@ -155,6 +159,29 @@ pub(crate) fn document_key_message(
 ) -> Option<PreviewMessage> {
     if modifiers.alt() || modifiers.logo() {
         return None;
+    }
+    let text = |message| {
+        Some(PreviewMessage::DocumentPreview(
+            DocumentPreviewMessage::Text(message),
+        ))
+    };
+    match key.as_ref() {
+        keyboard::Key::Character(character) if modifiers.command() => {
+            match character.to_ascii_lowercase().as_str() {
+                "f" => return text(DocumentTextMessage::SearchOpened),
+                "c" => return text(DocumentTextMessage::CopyRequested),
+                _ => {}
+            }
+        }
+        keyboard::Key::Named(Named::F3) => {
+            let direction = if modifiers.shift() {
+                SearchDirection::Backward
+            } else {
+                SearchDirection::Forward
+            };
+            return text(DocumentTextMessage::Stepped(direction));
+        }
+        _ => {}
     }
     let message = match key.as_ref() {
         keyboard::Key::Named(Named::PageDown) => {

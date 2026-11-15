@@ -5,6 +5,7 @@ mod format;
 mod model;
 mod pdfinfo;
 mod resources;
+pub(crate) mod text_layer;
 mod workspace;
 
 pub use format::{document_preview_format_for_path, DocumentPreviewFormat, OfficeDocumentFormat};
@@ -12,8 +13,8 @@ pub use model::{
     document_viewport_height, DocumentPageRenderOutcome, DocumentPageRenderRequest,
     DocumentPageRenderResult, DocumentPageTurn, DocumentPageView, DocumentPrepareOutcome,
     DocumentPrepareRequest, DocumentPreviewMessage, DocumentPreviewRequestKey, DocumentScaleAxis,
-    DocumentViewportKey, DocumentZoom, PagedDocumentPreview, PendingDocumentPreview,
-    PreparedDocumentPreview, DOCUMENT_ZOOM_STEP,
+    DocumentTextMessage, DocumentViewportKey, DocumentZoom, PageMarkKind, PagedDocumentPreview,
+    PendingDocumentPreview, PreparedDocumentPreview, DOCUMENT_ZOOM_STEP,
 };
 // 原 app-ui 侧为 #[cfg(test)] 门控的测试用类型改为无条件 pub：app-ui 的
 // cfg(test) 编译 bennu-preview 依赖时不会开启对方的 cfg(test)，门控会让
@@ -23,4 +24,8 @@ pub use model::{
 };
 pub use pdfinfo::{parse_pdfinfo_pages, parse_pdfinfo_summary};
 pub use resources::{MAX_DOCUMENT_PAGE_EDGE, MAX_DOCUMENT_PAGE_PIXELS};
+pub use text_layer::{
+    find_matches, parse_bbox_layout, word_near, DocumentSearch, DocumentSelection, DocumentText,
+    DocumentTextLayer, PageRect, PageText, TextMatch, TextWord,
+};
 pub use workspace::{DocumentPreviewWorkspace, OfficeDocumentPreviewWorkspace};

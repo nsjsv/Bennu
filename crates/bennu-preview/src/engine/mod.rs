@@ -304,6 +304,7 @@ mod animated_image;
 mod audio;
 mod audio_analysis;
 mod document;
+mod document_text;
 mod image_info;
 mod image_session;
 mod image_viewport;

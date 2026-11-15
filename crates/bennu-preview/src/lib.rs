@@ -71,6 +71,7 @@ pub mod markdown_render;
 mod markdown_keys;
 mod media_keys;
 // 文档（PDF/Office 分页）预览面板，滚动接线经 scroll_wiring 由宿主注入。
+mod document_page_marks;
 pub mod document_preview_panel;
 // SQLite 预览面板（表列表/数据网格/SQL 查询），标签行与滚动接线由宿主注入。
 pub mod sqlite_preview_panel;

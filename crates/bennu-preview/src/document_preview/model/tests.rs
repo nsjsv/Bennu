@@ -345,3 +345,73 @@ fn page_turns_and_typed_page_numbers_land_on_page_tops() {
     preview.edit_page_number("0".to_owned());
     assert_eq!(preview.take_page_number(), None);
 }
+
+fn word(text: &str, left: f32, top: f32, ends_line: bool) -> super::super::text_layer::TextWord {
+    super::super::text_layer::TextWord {
+        text: text.to_owned(),
+        bounds: super::super::text_layer::PageRect {
+            left,
+            top,
+            right: left + 0.1,
+            bottom: top + 0.02,
+        },
+        ends_line,
+    }
+}
+
+#[test]
+fn search_marks_matches_and_drag_selects_words_for_copy() {
+    use super::super::text_layer::{DocumentText, PageText};
+    use std::sync::Arc;
+
+    let mut preview = preview_with_pages(vec![page(600.0, 800.0); 3]);
+    let request = preview
+        .request_text(CancellationToken::new())
+        .expect("first request");
+    assert_eq!(request.page_sizes.len(), 3);
+    assert!(preview.request_text(CancellationToken::new()).is_none());
+
+    let text = DocumentText {
+        pages: vec![
+            PageText {
+                words: vec![word("alpha", 0.1, 0.1, false), word("beta", 0.3, 0.1, true)],
+            },
+            PageText::default(),
+            PageText {
+                words: vec![word("Beta", 0.1, 0.9, true)],
+            },
+        ],
+    };
+    preview.open_search();
+    preview.set_search_query("beta".to_owned());
+    // 文字还没到：没有标记，状态是「没搜完」。
+    assert!(preview.page_marks(0).is_empty());
+    let key = request.key.clone();
+    assert!(preview.accept_text(&key, Ok(Arc::new(text))));
+    assert_eq!(
+        preview.search_summary().map(|summary| summary.total),
+        Some(2)
+    );
+    let marks = preview.page_marks(0);
+    assert_eq!(marks.len(), 1);
+    assert_eq!(marks[0].0.left, 0.3);
+    assert_eq!(marks[0].1, PageMarkKind::CurrentMatch);
+    // 下一处在第三页靠底：滚过去。
+    preview.step_search(SearchDirection::Forward);
+    assert!(preview.scroll_to_current_match().is_some());
+    assert_eq!(preview.page_marks(2)[0].1, PageMarkKind::CurrentMatch);
+
+    preview.pointer_moved(0, 0.12, 0.11);
+    preview.press();
+    preview.pointer_moved(2, 0.15, 0.91);
+    preview.release();
+    assert_eq!(
+        preview.selected_text().as_deref(),
+        Some("alpha beta\n\nBeta")
+    );
+    preview.close_search();
+    assert!(preview
+        .page_marks(0)
+        .iter()
+        .all(|(_, kind)| *kind == PageMarkKind::Selection));
+}

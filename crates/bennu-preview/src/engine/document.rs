@@ -283,7 +283,7 @@ impl super::PreviewEngine {
         }
     }
 
-    fn schedule_document_page_renders(&mut self) -> Task<PreviewMessage> {
+    pub(super) fn schedule_document_page_renders(&mut self) -> Task<PreviewMessage> {
         let Some(document) = self.active_document_preview_mut() else {
             return Task::none();
         };

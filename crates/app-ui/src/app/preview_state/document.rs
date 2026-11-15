@@ -63,6 +63,12 @@ impl FileBrowser {
                     .submit_document_page_number(scroll_region_id)
                     .map(Message::Preview)
             }
+            DocumentPreviewMessage::Text(message) => {
+                let scroll_region_id = smooth_scroll_id(&ScrollbarRegion::PreviewDocument);
+                self.preview_engine
+                    .handle_document_text(message, scroll_region_id)
+                    .map(Message::Preview)
+            }
         }
     }
 

@@ -434,6 +434,9 @@ impl PreviewHost {
             DocumentPreviewMessage::PageNumberSubmitted => self
                 .engine
                 .submit_document_page_number(preview_scroll_id(PreviewScrollRegion::Document)),
+            DocumentPreviewMessage::Text(message) => self
+                .engine
+                .handle_document_text(message, preview_scroll_id(PreviewScrollRegion::Document)),
         }
     }
 

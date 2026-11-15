@@ -71,6 +71,9 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("%1 mm (%2 mm equivalent)", "%1 mm（等效 %2 mm）"),
     ("Aperture", "光圈"),
     ("Shutter speed", "快门"),
+    // 文档文字层
+    ("Could not read the document's text: %1", "读不出文档里的文字：%1"),
+    ("Reading the document's text…", "正在读取文档文字…"),
     // 文本、Markdown、SQLite
     ("Text preview is not ready", "文本预览尚未就绪"),
     ("(empty file)", "（空文件）"),

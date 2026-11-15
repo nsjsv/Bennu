@@ -105,17 +105,9 @@ where
                 find_message(FindEvent::GotoSubmitted),
             ),
         };
-    let bar = container(content)
-        .padding(Padding::from([4, 8]))
-        .width(Length::Fill)
-        .style(|theme| container::Style {
-            background: Some(ui_colors(theme).surface_container_low.into()),
-            text_color: Some(ui_colors(theme).on_surface_variant),
-            ..container::Style::default()
-        });
-    Some(Element::new(FindBarKeys {
-        content: bar.into(),
-        keys: FindKeys {
+    Some(find_bar(
+        content,
+        FindKeys {
             escape: find_message(FindEvent::Close),
             enter,
             shift_enter,
@@ -124,7 +116,29 @@ where
             open_search: find_message(FindEvent::OpenSearch { seed: None }),
             open_goto: find_message(FindEvent::OpenGoto),
         },
-    }))
+    ))
+}
+
+/// 搜索条的外框和快捷键壳（文本预览、文档预览共用）。
+pub(crate) fn find_bar<'a, Message>(
+    content: Element<'a, Message>,
+    keys: FindKeys<Message>,
+) -> Element<'a, Message>
+where
+    Message: 'a + Clone,
+{
+    let bar = container(content)
+        .padding(Padding::from([4, 8]))
+        .width(Length::Fill)
+        .style(|theme| container::Style {
+            background: Some(ui_colors(theme).surface_container_low.into()),
+            text_color: Some(ui_colors(theme).on_surface_variant),
+            ..container::Style::default()
+        });
+    Element::new(FindBarKeys {
+        content: bar.into(),
+        keys,
+    })
 }
 
 fn search_row<'a, Message>(document: &'a TextPreviewDocument) -> Element<'a, Message>
@@ -214,14 +228,14 @@ pub(crate) fn summary_label(summary: Option<SearchSummary>) -> String {
 }
 
 #[derive(Clone)]
-struct FindKeys<Message> {
-    escape: Message,
-    enter: Message,
-    shift_enter: Message,
-    next: Message,
-    previous: Message,
-    open_search: Message,
-    open_goto: Message,
+pub(crate) struct FindKeys<Message> {
+    pub(crate) escape: Message,
+    pub(crate) enter: Message,
+    pub(crate) shift_enter: Message,
+    pub(crate) next: Message,
+    pub(crate) previous: Message,
+    pub(crate) open_search: Message,
+    pub(crate) open_goto: Message,
 }
 
 impl<Message: Clone> FindKeys<Message> {

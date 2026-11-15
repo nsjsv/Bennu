@@ -34,6 +34,9 @@ static PAGE_RENDER_SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();
 
 mod office;
 mod process;
+mod text;
+
+pub use text::{extract_document_text_command, DocumentTextRequest};
 
 #[derive(Debug, Clone)]
 struct PopplerPrograms {

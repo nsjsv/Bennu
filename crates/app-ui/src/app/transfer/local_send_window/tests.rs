@@ -108,7 +108,12 @@ fn staged_size_reads_files_and_sums_folders() {
     std::fs::write(folder.join("b.txt"), b"abc").unwrap();
     std::fs::write(folder.join("inner/c.txt"), b"de").unwrap();
 
-    let measure = |path: &Path| staged_size(path, CancellationToken::new());
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    let measure =
+        |path: &Path| runtime.block_on(staged_size(path.to_path_buf(), CancellationToken::new()));
 
     assert_eq!(
         measure(&file),
@@ -118,11 +123,13 @@ fn staged_size_reads_files_and_sums_folders() {
         })
     );
     // 文件夹与列表视图同一规则（子文件夹条目自身的大小也算进去，随文件系统而异）。
+    let inner_len = std::fs::metadata(folder.join("inner")).unwrap().len();
     assert_eq!(
         measure(&folder),
-        StagedSize::Measured(
-            read_directory_recursive_total_size(&folder, CancellationToken::new()).unwrap()
-        )
+        StagedSize::Measured(RecursiveTotalSize {
+            bytes: 3 + 2 + inner_len,
+            complete: true
+        })
     );
     assert!(matches!(
         measure(&directory.path().join("missing")),

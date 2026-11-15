@@ -14,6 +14,7 @@ pub mod byte_progress;
 pub mod checksum;
 pub mod data_dir_migration;
 pub mod directory_metadata;
+pub mod directory_usage;
 pub mod entry;
 pub mod entry_naming;
 pub mod external_tools;
@@ -63,6 +64,9 @@ pub use directory_metadata::{
     DirectoryMetadataRequest, DirectoryMetadataRequirement, DirectoryMetadataResolution,
     DirectoryMetadataResolver, DirectoryMetadataState, DirectoryMetadataUnavailable,
     DiscoveredDirectoryEntry,
+};
+pub use directory_usage::{
+    DirectoryUsage, HiddenEntries, UsageMeasurement, UsageProgress, UsageSnapshot,
 };
 pub use entry::{DirectoryEntry, DirectoryMetadataAvailability, EntryMetadata, FileKind};
 pub use entry_naming::{

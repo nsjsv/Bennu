@@ -6,6 +6,14 @@ use tempfile::tempdir;
 
 use super::*;
 
+fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .expect("test runtime")
+        .block_on(future)
+}
+
 #[test]
 fn aggregate_properties_combine_top_level_kinds_and_recursive_contents() {
     let temp = tempdir().expect("create temp dir");
@@ -18,9 +26,12 @@ fn aggregate_properties_combine_top_level_kinds_and_recursive_contents() {
     fs::write(&nested, b"nested").expect("write nested");
     fs::write(&file, b"file").expect("write file");
 
-    let snapshot =
-        read_aggregate_file_properties(&[directory, file], CancellationToken::new(), |_| {})
-            .expect("aggregate properties");
+    let snapshot = block_on(read_aggregate_file_properties(
+        &[directory, file],
+        CancellationToken::new(),
+        |_| {},
+    ))
+    .expect("aggregate properties");
 
     assert_eq!(snapshot.target_count, 2);
     assert_eq!(snapshot.file_count, 1);
@@ -40,8 +51,12 @@ fn aggregate_properties_honor_cancellation_before_initial_stat() {
     let cancellation = CancellationToken::new();
     cancellation.cancel();
 
-    let error = read_aggregate_file_properties(&[target], cancellation, |_| {})
-        .expect_err("cancelled aggregate must stop");
+    let error = block_on(read_aggregate_file_properties(
+        &[target],
+        cancellation,
+        |_| {},
+    ))
+    .expect_err("cancelled aggregate must stop");
 
     assert_eq!(error, "operation cancelled");
 }
@@ -54,9 +69,12 @@ fn aggregate_symlink_makes_permissions_read_only() {
     fs::write(&target, b"target").expect("write target");
     symlink(&target, &link).expect("create symlink");
 
-    let snapshot =
-        read_aggregate_file_properties(&[target, link], CancellationToken::new(), |_| {})
-            .expect("aggregate properties");
+    let snapshot = block_on(read_aggregate_file_properties(
+        &[target, link],
+        CancellationToken::new(),
+        |_| {},
+    ))
+    .expect("aggregate properties");
 
     assert_eq!(snapshot.permissions, None);
     assert!(snapshot.permission_baselines.is_empty());
@@ -229,4 +247,27 @@ fn assert_mode(path: &Path, expected_mode: u32) {
         .mode()
         & 0o7777;
     assert_eq!(mode, expected_mode, "unexpected mode for {:?}", path);
+}
+
+#[test]
+fn a_single_folder_counts_everything_inside_not_only_its_first_level() {
+    let temp = tempdir().expect("create temp dir");
+    let nested = temp.path().join("child").join("grandchild");
+    fs::create_dir_all(&nested).expect("create nested directories");
+    fs::write(nested.join("deep.txt"), b"deep").expect("write deep file");
+    let request = FilePropertiesRequest {
+        targets: crate::model::FilePropertiesTargetSet::single(temp.path().to_path_buf()),
+        generation: 1,
+    };
+    let (mut output, _receiver) = iced::futures::channel::mpsc::channel(64);
+
+    let contents = block_on(load_directory_properties_contents(
+        request,
+        CancellationToken::new(),
+        &mut output,
+    ))
+    .expect("directory contents");
+
+    assert_eq!((contents.file_count, contents.directory_count), (1, 2));
+    assert!(contents.total_size_bytes >= 4);
 }

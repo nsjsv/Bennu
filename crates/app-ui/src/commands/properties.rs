@@ -9,10 +9,7 @@ use iced::futures::SinkExt;
 use iced::Task;
 use tokio_util::sync::CancellationToken;
 
-use crate::directory_summary::{
-    metadata_disk_size, read_directory_contents_summary, read_directory_tree_summary,
-    DirectoryContentsSummary, DirectorySummaryError,
-};
+use crate::directory_summary::{measure_directories, metadata_disk_size, MeasureFailure};
 use crate::model::{
     FilePropertiesAggregateSnapshot, FilePropertiesDirectoryContents,
     FilePropertiesDirectoryContentsState, FilePropertiesIdentity, FilePropertiesMessage,
@@ -20,6 +17,7 @@ use crate::model::{
     FilePropertiesPermissions, FilePropertiesPresentation, FilePropertiesRequest,
     FilePropertiesSnapshot, Message, PermissionBatchOutcome, PermissionBatchPathFailure,
 };
+use file_core::DirectoryUsage;
 
 const FILE_PROPERTIES_CHANNEL_SIZE: usize = 8;
 
@@ -94,17 +92,14 @@ fn aggregate_file_properties_command(
             let targets = request.targets.clone();
             let progress_request = request.clone();
             let mut progress_output = output.clone();
-            let outcome = tokio::task::spawn_blocking(move || {
+            let outcome =
                 read_aggregate_file_properties(targets.paths(), cancellation, |snapshot| {
                     let _ = progress_output.try_send(Message::FileProperties(
                         FilePropertiesMessage::AggregateUpdated(progress_request.clone(), snapshot),
                     ));
                 })
-            })
-            .await
-            .map_err(|error| error.to_string())
-            .and_then(|outcome| outcome)
-            .map(FilePropertiesPresentation::Aggregate);
+                .await
+                .map(FilePropertiesPresentation::Aggregate);
             let _ = output
                 .send(Message::FileProperties(FilePropertiesMessage::Loaded(
                     request, outcome,
@@ -229,72 +224,44 @@ fn read_file_properties(path: PathBuf) -> Result<FilePropertiesSnapshot, String>
     })
 }
 
-fn read_aggregate_file_properties(
+async fn read_aggregate_file_properties(
     paths: &[PathBuf],
     cancellation: CancellationToken,
     mut progress: impl FnMut(FilePropertiesAggregateSnapshot),
 ) -> Result<FilePropertiesAggregateSnapshot, String> {
-    let mut inspected = Vec::with_capacity(paths.len());
-    for path in paths {
-        if cancellation.is_cancelled() {
-            return Err("operation cancelled".to_owned());
+    let inspection_paths = paths.to_vec();
+    let inspection_cancellation = cancellation.clone();
+    let (snapshot, directories) = tokio::task::spawn_blocking(move || {
+        let mut inspected = Vec::with_capacity(inspection_paths.len());
+        for path in inspection_paths {
+            if inspection_cancellation.is_cancelled() {
+                return Err("operation cancelled".to_owned());
+            }
+            inspected.push(inspect_aggregate_target(path)?);
         }
-        inspected.push(inspect_aggregate_target(path.clone())?);
-    }
-    let mut snapshot = aggregate_snapshot_for_targets(&inspected)?;
+        let snapshot = aggregate_snapshot_for_targets(&inspected)?;
+        let directories = inspected
+            .into_iter()
+            .filter(|target| target.kind == FileKind::Directory)
+            .map(|target| target.path)
+            .collect::<Vec<_>>();
+        Ok((snapshot, directories))
+    })
+    .await
+    .map_err(|error| error.to_string())??;
 
-    for target in inspected
-        .iter()
-        .filter(|target| target.kind == FileKind::Directory)
-    {
-        if cancellation.is_cancelled() {
-            return Err("operation cancelled".to_owned());
+    let usage = measure_directories(&directories, &cancellation, |usage| {
+        progress(with_directory_usage(&snapshot, usage));
+    })
+    .await
+    .map_err(|failure| match failure {
+        MeasureFailure::Cancelled => "operation cancelled".to_owned(),
+        MeasureFailure::Unreadable(path, error) => {
+            format!("could not read directory contents for {path:?}: {error}")
         }
-        let completed_size = snapshot.total_size_bytes;
-        let completed_disk_size = snapshot.total_disk_size_bytes;
-        let completed_contents = snapshot.recursive_contents.clone();
-        let summary =
-            read_directory_tree_summary(&target.path, cancellation.clone(), |directory_summary| {
-                let mut current = snapshot.clone();
-                current.total_size_bytes =
-                    completed_size.saturating_add(directory_summary.total_size_bytes);
-                current.total_disk_size_bytes =
-                    completed_disk_size.saturating_add(directory_summary.total_disk_size_bytes);
-                current.recursive_contents = FilePropertiesDirectoryContents {
-                    file_count: completed_contents
-                        .file_count
-                        .saturating_add(directory_summary.file_count),
-                    directory_count: completed_contents
-                        .directory_count
-                        .saturating_add(directory_summary.directory_count),
-                    total_size_bytes: completed_contents
-                        .total_size_bytes
-                        .saturating_add(directory_summary.total_size_bytes),
-                    total_disk_size_bytes: completed_contents
-                        .total_disk_size_bytes
-                        .saturating_add(directory_summary.total_disk_size_bytes),
-                    unreadable_entries: completed_contents
-                        .unreadable_entries
-                        .saturating_add(directory_summary.unreadable_entries),
-                };
-                progress(current);
-            })
-            .map_err(|error| match error {
-                DirectorySummaryError::Cancelled => "operation cancelled".to_owned(),
-                DirectorySummaryError::Io(error) => {
-                    format!(
-                        "could not read directory contents for {:?}: {error}",
-                        target.path
-                    )
-                }
-                DirectorySummaryError::Overflow(field) => {
-                    format!("directory summary {field} overflowed for {:?}", target.path)
-                }
-            })?;
-        add_directory_summary(&mut snapshot, summary)?;
-        progress(snapshot.clone());
-    }
-
+    })?;
+    let snapshot = with_directory_usage(&snapshot, usage);
+    progress(snapshot.clone());
     Ok(snapshot)
 }
 
@@ -420,43 +387,18 @@ fn retain_common_optional<T: PartialEq>(common: &mut Option<T>, candidate: Optio
     }
 }
 
-fn add_directory_summary(
-    snapshot: &mut FilePropertiesAggregateSnapshot,
-    summary: DirectoryContentsSummary,
-) -> Result<(), String> {
-    snapshot.total_size_bytes = snapshot
-        .total_size_bytes
-        .checked_add(summary.total_size_bytes)
-        .ok_or_else(|| "aggregate logical size overflowed u64".to_owned())?;
+/// 选中的那几个文件夹里面的用量加到选中项本身的合计上。
+fn with_directory_usage(
+    snapshot: &FilePropertiesAggregateSnapshot,
+    usage: DirectoryUsage,
+) -> FilePropertiesAggregateSnapshot {
+    let mut snapshot = snapshot.clone();
+    snapshot.total_size_bytes = snapshot.total_size_bytes.saturating_add(usage.bytes);
     snapshot.total_disk_size_bytes = snapshot
         .total_disk_size_bytes
-        .checked_add(summary.total_disk_size_bytes)
-        .ok_or_else(|| "aggregate disk size overflowed u64".to_owned())?;
-    snapshot.recursive_contents.file_count = snapshot
-        .recursive_contents
-        .file_count
-        .checked_add(summary.file_count)
-        .ok_or_else(|| "aggregate file count overflowed usize".to_owned())?;
-    snapshot.recursive_contents.directory_count = snapshot
-        .recursive_contents
-        .directory_count
-        .checked_add(summary.directory_count)
-        .ok_or_else(|| "aggregate directory count overflowed usize".to_owned())?;
-    snapshot.recursive_contents.total_size_bytes = snapshot
-        .recursive_contents
-        .total_size_bytes
-        .checked_add(summary.total_size_bytes)
-        .ok_or_else(|| "aggregate logical size overflowed u64".to_owned())?;
-    snapshot.recursive_contents.total_disk_size_bytes = snapshot
-        .recursive_contents
-        .total_disk_size_bytes
-        .checked_add(summary.total_disk_size_bytes)
-        .ok_or_else(|| "aggregate disk size overflowed u64".to_owned())?;
-    snapshot.recursive_contents.unreadable_entries = snapshot
-        .recursive_contents
-        .unreadable_entries
-        .saturating_add(summary.unreadable_entries);
-    Ok(())
+        .saturating_add(usage.disk_bytes);
+    snapshot.recursive_contents = FilePropertiesDirectoryContents::from(usage);
+    snapshot
 }
 
 fn file_kind_for_metadata(metadata: &std::fs::Metadata) -> FileKind {
@@ -491,40 +433,22 @@ async fn load_directory_properties_contents(
     cancellation: CancellationToken,
     output: &mut IcedSender<Message>,
 ) -> Result<FilePropertiesDirectoryContents, String> {
-    let progress = {
-        let request = request.clone();
-        let mut output = output.clone();
-        move |contents: FilePropertiesDirectoryContents| {
-            let _ = output.try_send(Message::FileProperties(
-                FilePropertiesMessage::DirectoryContentsUpdated(request.clone(), contents),
-            ));
-        }
-    };
-
-    let join_path = request
+    let path = request
         .targets
         .single_path()
         .expect("directory contents require one target")
         .to_path_buf();
-    let directory_path = join_path.clone();
-    tokio::task::spawn_blocking(move || {
-        read_directory_properties_contents(&directory_path, cancellation, progress)
+    let mut progress_output = output.clone();
+    measure_directories(&[path], &cancellation, |usage| {
+        let _ = progress_output.try_send(Message::FileProperties(
+            FilePropertiesMessage::DirectoryContentsUpdated(request.clone(), usage.into()),
+        ));
     })
     .await
-    .map_err(|error| error.to_string())?
-    .map_err(|error| match error {
-        DirectorySummaryError::Cancelled => "operation cancelled".to_owned(),
-        DirectorySummaryError::Io(error) => error.to_string(),
-        DirectorySummaryError::Overflow(field) => {
-            format!("directory summary {field} overflowed")
-        }
-    })
-    .map_err(|error| {
-        if error.is_empty() {
-            format!("could not read directory contents for {:?}", join_path)
-        } else {
-            error
-        }
+    .map(FilePropertiesDirectoryContents::from)
+    .map_err(|failure| match failure {
+        MeasureFailure::Cancelled => "operation cancelled".to_owned(),
+        MeasureFailure::Unreadable(_, error) => error,
     })
 }
 
@@ -716,26 +640,15 @@ fn write_file_properties_permissions_to_enclosed_items(
     Err("permission editing is only available on Unix filesystems".to_owned())
 }
 
-fn read_directory_properties_contents(
-    path: &Path,
-    cancellation: CancellationToken,
-    mut progress: impl FnMut(FilePropertiesDirectoryContents),
-) -> Result<FilePropertiesDirectoryContents, DirectorySummaryError> {
-    read_directory_contents_summary(path, cancellation, |summary| {
-        progress(file_properties_directory_contents(summary));
-    })
-    .map(file_properties_directory_contents)
-}
-
-fn file_properties_directory_contents(
-    summary: DirectoryContentsSummary,
-) -> FilePropertiesDirectoryContents {
-    FilePropertiesDirectoryContents {
-        file_count: summary.file_count,
-        directory_count: summary.directory_count,
-        total_size_bytes: summary.total_size_bytes,
-        total_disk_size_bytes: summary.total_disk_size_bytes,
-        unreadable_entries: summary.unreadable_entries,
+impl From<DirectoryUsage> for FilePropertiesDirectoryContents {
+    fn from(usage: DirectoryUsage) -> Self {
+        Self {
+            file_count: usage.files as usize,
+            directory_count: usage.folders as usize,
+            total_size_bytes: usage.bytes,
+            total_disk_size_bytes: usage.disk_bytes,
+            unreadable_entries: usage.unreadable,
+        }
     }
 }
 

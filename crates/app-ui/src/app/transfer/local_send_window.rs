@@ -13,9 +13,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::super::FileBrowser;
 use super::{Outgoing, TransferMessage};
-use crate::directory_summary::{
-    read_directory_recursive_total_size, DirectorySummaryError, RecursiveTotalSize,
-};
+use crate::directory_summary::{measure_directories, MeasureFailure, RecursiveTotalSize};
 use crate::model::Message;
 use bennu_preview::window_shell::HEADER_BAR_HEIGHT;
 
@@ -199,18 +197,13 @@ fn local_send_window_settings() -> window::Settings {
 /// 文件取元数据长度；文件夹与列表视图同一规则递归求和，读不全时标"≥"。
 fn measure_staged_size(path: PathBuf, measuring: CancellationToken) -> Task<Message> {
     let measured_path = path.clone();
-    Task::perform(
-        async move {
-            tokio::task::spawn_blocking(move || staged_size(&measured_path, measuring))
-                .await
-                .unwrap_or_else(|error| StagedSize::Unreadable(error.to_string()))
-        },
-        move |size| Message::Transfer(TransferMessage::StagedSizeMeasured { path, size }),
-    )
+    Task::perform(staged_size(measured_path, measuring), move |size| {
+        Message::Transfer(TransferMessage::StagedSizeMeasured { path, size })
+    })
 }
 
-fn staged_size(path: &Path, measuring: CancellationToken) -> StagedSize {
-    let metadata = match std::fs::metadata(path) {
+async fn staged_size(path: PathBuf, measuring: CancellationToken) -> StagedSize {
+    let metadata = match tokio::fs::metadata(&path).await {
         Ok(metadata) => metadata,
         Err(error) => return StagedSize::Unreadable(error.to_string()),
     };
@@ -220,12 +213,11 @@ fn staged_size(path: &Path, measuring: CancellationToken) -> StagedSize {
             complete: true,
         });
     }
-    match read_directory_recursive_total_size(path, measuring) {
-        Ok(size) => StagedSize::Measured(size),
+    match measure_directories(&[path], &measuring, |_| {}).await {
+        Ok(usage) => StagedSize::Measured(usage.into()),
         // 被取消的结果到达时该项已不在列表里，回填时会被丢弃。
-        Err(DirectorySummaryError::Cancelled) => StagedSize::Measuring,
-        Err(DirectorySummaryError::Io(error)) => StagedSize::Unreadable(error.to_string()),
-        Err(DirectorySummaryError::Overflow(reason)) => StagedSize::Unreadable(reason.to_owned()),
+        Err(MeasureFailure::Cancelled) => StagedSize::Measuring,
+        Err(MeasureFailure::Unreadable(_, error)) => StagedSize::Unreadable(error),
     }
 }
 

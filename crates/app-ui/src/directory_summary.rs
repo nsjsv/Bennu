@@ -3,10 +3,12 @@ use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 
-use file_core::is_hidden_name;
+use file_core::{is_hidden_name, DirectoryUsage, HiddenEntries, UsageMeasurement, UsageProgress};
 use tokio_util::sync::CancellationToken;
 
 const DIRECTORY_CONTENTS_PROGRESS_INTERVAL: usize = 128;
+/// 测量时多久报一次进度：数字在跳，但不至于每帧都重画。
+const MEASUREMENT_PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_millis(150);
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct DirectoryContentsSummary {
@@ -56,123 +58,68 @@ pub(crate) enum DirectorySummaryError {
     Overflow(&'static str),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DirectorySummaryScope {
-    DirectChildren,
-    Descendants,
-}
-
 pub(crate) fn read_directory_contents_summary(
     path: &Path,
     cancellation: CancellationToken,
-    progress: impl FnMut(DirectoryContentsSummary),
-) -> Result<DirectoryContentsSummary, DirectorySummaryError> {
-    read_directory_summary(
-        path,
-        cancellation,
-        DirectorySummaryScope::DirectChildren,
-        progress,
-    )
-}
-
-pub(crate) fn read_directory_tree_summary(
-    path: &Path,
-    cancellation: CancellationToken,
-    progress: impl FnMut(DirectoryContentsSummary),
-) -> Result<DirectoryContentsSummary, DirectorySummaryError> {
-    read_directory_summary(
-        path,
-        cancellation,
-        DirectorySummaryScope::Descendants,
-        progress,
-    )
-}
-
-fn read_directory_summary(
-    path: &Path,
-    cancellation: CancellationToken,
-    scope: DirectorySummaryScope,
     mut progress: impl FnMut(DirectoryContentsSummary),
 ) -> Result<DirectoryContentsSummary, DirectorySummaryError> {
     let mut summary = DirectoryContentsSummary::default();
-    // 根目录本身读不了才算失败；更深处读不了的跳过并记数，同 Nautilus 属性的
-    // "(some contents unreadable)"：给出能算出的部分，并标明不完整。
-    let mut pending = vec![PathBuf::from(path)];
     let mut processed_entries = 0usize;
-
-    while let Some(directory) = pending.pop() {
+    let entries = std::fs::read_dir(path).map_err(DirectorySummaryError::Io)?;
+    for entry in entries {
         if cancellation.is_cancelled() {
             return Err(DirectorySummaryError::Cancelled);
         }
 
-        let entries = match std::fs::read_dir(&directory) {
-            Ok(entries) => entries,
-            Err(error) if directory.as_path() == path => {
-                return Err(DirectorySummaryError::Io(error));
-            }
-            Err(_) => {
-                summary.unreadable_entries = summary.unreadable_entries.saturating_add(1);
-                continue;
-            }
+        let Ok((entry, file_type, metadata)) = entry.and_then(|entry| {
+            let file_type = entry.file_type()?;
+            let metadata = entry.metadata()?;
+            Ok((entry, file_type, metadata))
+        }) else {
+            summary.unreadable_entries = summary.unreadable_entries.saturating_add(1);
+            continue;
         };
-        for entry in entries {
-            if cancellation.is_cancelled() {
-                return Err(DirectorySummaryError::Cancelled);
-            }
-
-            let Ok((entry, file_type, metadata)) = entry.and_then(|entry| {
-                let file_type = entry.file_type()?;
-                let metadata = entry.metadata()?;
-                Ok((entry, file_type, metadata))
-            }) else {
-                summary.unreadable_entries = summary.unreadable_entries.saturating_add(1);
-                continue;
-            };
-            if file_type.is_dir() {
-                summary.directory_count = summary
-                    .directory_count
-                    .checked_add(1)
-                    .ok_or(DirectorySummaryError::Overflow("directory count"))?;
-                if scope == DirectorySummaryScope::Descendants {
-                    pending.push(entry.path());
-                }
-            } else {
-                summary.file_count = summary
-                    .file_count
-                    .checked_add(1)
-                    .ok_or(DirectorySummaryError::Overflow("file count"))?;
-                summary.files_total_size_bytes = summary
-                    .files_total_size_bytes
-                    .checked_add(metadata.len())
-                    .ok_or(DirectorySummaryError::Overflow("file size"))?;
-                if is_hidden_name(&entry.file_name()) {
-                    summary.hidden_files_total_size_bytes = summary
-                        .hidden_files_total_size_bytes
-                        .checked_add(metadata.len())
-                        .ok_or(DirectorySummaryError::Overflow("hidden file size"))?;
-                }
-            }
-            // 幽灵开关的数量口径：隐藏文件夹与隐藏文件都算一个条目。
-            if is_hidden_name(&entry.file_name()) {
-                summary.hidden_entry_count = summary
-                    .hidden_entry_count
-                    .checked_add(1)
-                    .ok_or(DirectorySummaryError::Overflow("hidden entry count"))?;
-            }
-            summary.total_size_bytes = summary
-                .total_size_bytes
-                .checked_add(metadata.len())
-                .ok_or(DirectorySummaryError::Overflow("logical size"))?;
-            summary.total_disk_size_bytes = summary
-                .total_disk_size_bytes
-                .checked_add(metadata_disk_size(&metadata))
-                .ok_or(DirectorySummaryError::Overflow("disk size"))?;
-            processed_entries = processed_entries
+        if file_type.is_dir() {
+            summary.directory_count = summary
+                .directory_count
                 .checked_add(1)
-                .ok_or(DirectorySummaryError::Overflow("processed entry count"))?;
-            if processed_entries % DIRECTORY_CONTENTS_PROGRESS_INTERVAL == 0 {
-                progress(summary.clone());
+                .ok_or(DirectorySummaryError::Overflow("directory count"))?;
+        } else {
+            summary.file_count = summary
+                .file_count
+                .checked_add(1)
+                .ok_or(DirectorySummaryError::Overflow("file count"))?;
+            summary.files_total_size_bytes = summary
+                .files_total_size_bytes
+                .checked_add(metadata.len())
+                .ok_or(DirectorySummaryError::Overflow("file size"))?;
+            if is_hidden_name(&entry.file_name()) {
+                summary.hidden_files_total_size_bytes = summary
+                    .hidden_files_total_size_bytes
+                    .checked_add(metadata.len())
+                    .ok_or(DirectorySummaryError::Overflow("hidden file size"))?;
             }
+        }
+        // 幽灵开关的数量口径：隐藏文件夹与隐藏文件都算一个条目。
+        if is_hidden_name(&entry.file_name()) {
+            summary.hidden_entry_count = summary
+                .hidden_entry_count
+                .checked_add(1)
+                .ok_or(DirectorySummaryError::Overflow("hidden entry count"))?;
+        }
+        summary.total_size_bytes = summary
+            .total_size_bytes
+            .checked_add(metadata.len())
+            .ok_or(DirectorySummaryError::Overflow("logical size"))?;
+        summary.total_disk_size_bytes = summary
+            .total_disk_size_bytes
+            .checked_add(metadata_disk_size(&metadata))
+            .ok_or(DirectorySummaryError::Overflow("disk size"))?;
+        processed_entries = processed_entries
+            .checked_add(1)
+            .ok_or(DirectorySummaryError::Overflow("processed entry count"))?;
+        if processed_entries % DIRECTORY_CONTENTS_PROGRESS_INTERVAL == 0 {
+            progress(summary.clone());
         }
     }
 
@@ -180,16 +127,67 @@ fn read_directory_summary(
     Ok(summary)
 }
 
-/// 列表大小列用的递归总大小，与属性窗口走同一次遍历、同一套"读不了就跳过并标注"规则。
-pub(crate) fn read_directory_recursive_total_size(
-    path: &Path,
-    cancellation: CancellationToken,
-) -> Result<RecursiveTotalSize, DirectorySummaryError> {
-    let summary = read_directory_tree_summary(path, cancellation, |_| {})?;
-    Ok(RecursiveTotalSize {
-        bytes: summary.total_size_bytes,
-        complete: summary.unreadable_entries == 0,
-    })
+#[derive(Debug)]
+pub(crate) enum MeasureFailure {
+    Cancelled,
+    /// 这个文件夹本身读不了。
+    Unreadable(PathBuf, String),
+}
+
+/// 几个文件夹里面全部层的总用量加起来（多线程测量，几个同时测）；等的时候按节拍
+/// 报当前的和，`cancellation` 一取消就停。
+pub(crate) async fn measure_directories(
+    paths: &[PathBuf],
+    cancellation: &CancellationToken,
+    mut progress: impl FnMut(DirectoryUsage),
+) -> Result<DirectoryUsage, MeasureFailure> {
+    let measurements = paths
+        .iter()
+        .map(|path| UsageMeasurement::start(path.clone(), HiddenEntries::Counted))
+        .collect::<Vec<_>>();
+    let mut ticks = tokio::time::interval(MEASUREMENT_PROGRESS_INTERVAL);
+    ticks.tick().await;
+    let all_finished = async {
+        for measurement in &measurements {
+            measurement.finished().await;
+        }
+    };
+    tokio::pin!(all_finished);
+    loop {
+        tokio::select! {
+            () = cancellation.cancelled() => return Err(MeasureFailure::Cancelled),
+            () = &mut all_finished => break,
+            _ = ticks.tick() => progress(sum_of(&measurements)),
+        }
+    }
+    for (path, measurement) in paths.iter().zip(&measurements) {
+        if let UsageProgress::Failed(error) = measurement.snapshot().progress {
+            return Err(MeasureFailure::Unreadable(path.clone(), error));
+        }
+    }
+    Ok(sum_of(&measurements))
+}
+
+fn sum_of(measurements: &[UsageMeasurement]) -> DirectoryUsage {
+    measurements
+        .iter()
+        .map(|measurement| measurement.snapshot().usage)
+        .fold(DirectoryUsage::default(), |total, usage| DirectoryUsage {
+            files: total.files + usage.files,
+            folders: total.folders + usage.folders,
+            bytes: total.bytes.saturating_add(usage.bytes),
+            disk_bytes: total.disk_bytes.saturating_add(usage.disk_bytes),
+            unreadable: total.unreadable + usage.unreadable,
+        })
+}
+
+impl From<DirectoryUsage> for RecursiveTotalSize {
+    fn from(usage: DirectoryUsage) -> Self {
+        Self {
+            bytes: usage.bytes,
+            complete: usage.unreadable == 0,
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -217,14 +215,18 @@ mod tests {
         let direct =
             read_directory_contents_summary(temp_dir.path(), CancellationToken::new(), |_| {})
                 .expect("direct summary");
-        let recursive =
-            read_directory_tree_summary(temp_dir.path(), CancellationToken::new(), |_| {})
-                .expect("recursive summary");
+        let recursive = tokio_test_runtime()
+            .block_on(measure_directories(
+                &[temp_dir.path().to_path_buf()],
+                &CancellationToken::new(),
+                |_| {},
+            ))
+            .expect("recursive usage");
 
         assert_eq!(direct.file_count, 1);
         assert_eq!(direct.directory_count, 1);
-        assert_eq!(recursive.file_count, 2);
-        assert_eq!(recursive.directory_count, 1);
+        assert_eq!(recursive.files, 2);
+        assert_eq!(recursive.folders, 1);
     }
 
     #[test]
@@ -316,13 +318,17 @@ mod tests {
             return;
         }
 
-        let total = read_directory_recursive_total_size(root, CancellationToken::new())
-            .expect("recursive total size");
-        let tree = read_directory_tree_summary(root, CancellationToken::new(), |_| {})
-            .expect("tree summary");
+        let usage = tokio_test_runtime()
+            .block_on(measure_directories(
+                &[root.to_path_buf()],
+                &CancellationToken::new(),
+                |_| {},
+            ))
+            .expect("recursive usage");
 
         std::fs::set_permissions(&blocked_dir, original_permissions).expect("unlock blocked dir");
 
+        let total = RecursiveTotalSize::from(usage);
         assert_eq!(
             total,
             RecursiveTotalSize {
@@ -331,9 +337,7 @@ mod tests {
             }
         );
         assert!(total.display_text().starts_with("≥ "));
-        // 属性窗口用同一次遍历：同样的数字、同样标明有读不了的部分。
-        assert_eq!(tree.total_size_bytes, expected);
-        assert_eq!(tree.unreadable_entries, 1);
+        assert_eq!(usage.unreadable, 1);
     }
 
     #[test]
@@ -341,8 +345,15 @@ mod tests {
         let temp_dir = tempfile::tempdir().expect("create temp dir");
         std::fs::write(temp_dir.path().join("top.txt"), b"top").expect("write top file");
 
-        let total = read_directory_recursive_total_size(temp_dir.path(), CancellationToken::new())
-            .expect("recursive total size");
+        let total = RecursiveTotalSize::from(
+            tokio_test_runtime()
+                .block_on(measure_directories(
+                    &[temp_dir.path().to_path_buf()],
+                    &CancellationToken::new(),
+                    |_| {},
+                ))
+                .expect("recursive usage"),
+        );
 
         assert!(total.complete);
         assert!(!total.display_text().starts_with('≥'));
@@ -367,10 +378,39 @@ mod tests {
             return;
         }
 
-        let outcome = read_directory_recursive_total_size(&root, CancellationToken::new());
+        let outcome = tokio_test_runtime().block_on(measure_directories(
+            std::slice::from_ref(&root),
+            &CancellationToken::new(),
+            |_| {},
+        ));
 
         std::fs::set_permissions(&root, original_permissions).expect("unlock root dir");
 
-        assert!(matches!(outcome, Err(DirectorySummaryError::Io(_))));
+        assert!(matches!(outcome, Err(MeasureFailure::Unreadable(path, _)) if path == root));
+    }
+
+    #[test]
+    fn several_folders_are_measured_together_and_summed() {
+        let first = tempfile::tempdir().expect("create temp dir");
+        let second = tempfile::tempdir().expect("create temp dir");
+        std::fs::write(first.path().join("a"), b"12").expect("write file");
+        std::fs::write(second.path().join("b"), b"345").expect("write file");
+
+        let usage = tokio_test_runtime()
+            .block_on(measure_directories(
+                &[first.path().to_path_buf(), second.path().to_path_buf()],
+                &CancellationToken::new(),
+                |_| {},
+            ))
+            .expect("recursive usage");
+
+        assert_eq!((usage.files, usage.bytes), (2, 5));
+    }
+
+    fn tokio_test_runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .expect("test runtime")
     }
 }

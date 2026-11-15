@@ -20,7 +20,7 @@ use crate::thumbnail_cache::{
     PREVIEW_THUMBNAIL_MAX_EDGE,
 };
 use bennu_preview::engine::PendingPreviewThumbnailDisplay;
-use bennu_preview::original_image_preview::OriginalImagePreview;
+use bennu_preview::original_image_preview::{ImageProbeError, OriginalImagePreview};
 
 #[cfg(test)]
 mod tests;
@@ -237,7 +237,7 @@ impl FileBrowser {
         &mut self,
         path: PathBuf,
         generation: u64,
-        dimensions: Result<(u32, u32), String>,
+        dimensions: Result<(u32, u32), ImageProbeError>,
     ) -> Task<Message> {
         let active_preview_loading = generation
             == self.preview_engine.original_image_preview_generation
@@ -262,7 +262,13 @@ impl FileBrowser {
                     bennu_localization::tr!("Image preview has invalid dimensions"),
                 );
             }
-            Err(error) => {
+            Err(ImageProbeError::FfmpegMissing) => {
+                return self
+                    .preview_engine
+                    .show_image_tool_required(path)
+                    .map(Message::Preview);
+            }
+            Err(ImageProbeError::Failed(error)) => {
                 tracing::warn!(
                     target: "app_ui::preview",
                     path = ?path,

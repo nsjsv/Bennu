@@ -324,6 +324,11 @@ fn supported_thumbnail_path_includes_images_and_videos() {
         "source.tif",
         "source.tiff",
         "source.webp",
+        "photo.heic",
+        "photo.jxl",
+        "layers.psd",
+        "shot.cr2",
+        "shot.nef",
     ] {
         assert!(is_supported_thumbnail_path(path), "{path}");
     }
@@ -340,8 +345,7 @@ fn supported_thumbnail_path_includes_images_and_videos() {
     // 候选里有音频的 .ogg 归音频，不为它跑缩略图。
     assert!(!is_supported_thumbnail_path("song.ogg"));
     assert!(!is_supported_thumbnail_path("notes.txt"));
-    assert!(!is_supported_thumbnail_path("photo.heic"));
-    assert!(!is_supported_thumbnail_path("photo.heif"));
+    assert!(!is_supported_thumbnail_path("drawing.xcf"));
 }
 
 #[test]

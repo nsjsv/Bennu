@@ -121,6 +121,36 @@ fn legacy_text_list_migrates_once_keeping_only_user_additions() {
 }
 
 #[test]
+fn legacy_image_list_migrates_once_keeping_only_user_additions() {
+    let defaults = PreviewExtensionRules::default_rules();
+    let mut legacy_image = LEGACY_DEFAULT_PREVIEW_IMAGE_EXTENSIONS
+        .iter()
+        .map(|extension| (*extension).to_owned())
+        .collect::<Vec<_>>();
+    legacy_image.push("kra".to_owned());
+    let legacy = StoredPreviewPreferences {
+        preview_extension_rules: Some(StoredPreviewExtensionRules {
+            image: Some(legacy_image),
+            ..StoredPreviewExtensionRules::default()
+        }),
+        ..StoredPreviewPreferences::default()
+    };
+    let rules = preview_extension_rules_from_stored(&legacy, &defaults);
+    assert_eq!(rules.image, vec!["kra".to_owned()]);
+
+    let saved = StoredPreviewPreferences {
+        preview_extra_image_extensions: Some(vec!["png".to_owned()]),
+        ..legacy
+    };
+    let rules = preview_extension_rules_from_stored(&saved, &defaults);
+    assert_eq!(rules.image, vec!["png".to_owned()]);
+
+    let rules =
+        preview_extension_rules_from_stored(&StoredPreviewPreferences::default(), &defaults);
+    assert!(rules.image.is_empty());
+}
+
+#[test]
 fn untouched_legacy_archive_list_gains_the_new_tar_suffixes() {
     let defaults = PreviewExtensionRules::default_rules();
     let stored_archive = |extensions: &[&str]| StoredPreviewPreferences {

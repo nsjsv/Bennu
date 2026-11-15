@@ -126,9 +126,9 @@ impl PreviewPathKind {
     }
 }
 
-/// 返回 `None` 表示文件不属于任何可预览类型。文档、归档、SQLite、图片
-/// 的后缀列表完全决定该类型识别哪些后缀（替换式）；图片列表中的 gif
-/// 走动图渲染。视频、音频：额外后缀直接算，其余按类型库只看名字。
+/// 返回 `None` 表示文件不属于任何可预览类型。文档、归档、SQLite
+/// 的后缀列表完全决定该类型识别哪些后缀（替换式）。图片、视频、音频：额外后缀直接算，
+/// 其余按类型库只看名字；gif 走动图渲染。
 /// 文本是兜底：额外文本后缀直接算，其余按类型库只看名字——名字确定是
 /// 非文本类型的不预览，名字定不下来的（如 `.ts`：电视录像 / Qt 翻译）先放行，
 /// 打开时看内容定论，内容是视频就改按视频打开（`text_preview_loading::inspect_text_file`）。
@@ -147,7 +147,7 @@ pub fn classify_preview_path(
     if rules.matches(Kind::Sqlite, path) {
         return Some(PreviewPathKind::Sqlite);
     }
-    if rules.matches(Kind::Image, path) {
+    if rules.matches(Kind::Image, path) || file_core::is_image_by_name(path) {
         if is_animated_image_preview_path(path) {
             return Some(PreviewPathKind::AnimatedImage);
         }

@@ -1,13 +1,32 @@
-use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
+use file_core::image_decode::{decode_image, DecodeBound};
+use file_core::{ImageKind, RasterSource};
 use iced::widget::{image as iced_image, svg};
-use image::ImageDecoder;
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
 static ORIGINAL_IMAGE_DECODE_SEMAPHORE: Semaphore = Semaphore::const_new(1);
 const ORIGINAL_IMAGE_PLACEHOLDER_MAX_EDGE: u32 = 512;
+
+/// 读图片尺寸失败：没装 ffmpeg 要显示安装命令，其余只显示原因。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImageProbeError {
+    FfmpegMissing,
+    Failed(String),
+}
+
+pub async fn load_image_dimensions(path: PathBuf) -> Result<(u32, u32), ImageProbeError> {
+    thumbnails::load_image_dimensions(path)
+        .await
+        .map_err(|error| match error {
+            thumbnails::ThumbnailError::DecodeImage {
+                source: file_core::image_decode::ImageDecodeError::FfmpegMissing,
+                ..
+            } => ImageProbeError::FfmpegMissing,
+            error => ImageProbeError::Failed(error.to_string()),
+        })
+}
 
 #[derive(Debug, Clone)]
 pub enum OriginalImagePreview {
@@ -64,79 +83,32 @@ fn load_original_image_preview_blocking(
         return Err(original_image_preview_cancelled(path));
     }
     ensure_preview_file_size(path, max_file_bytes)?;
-    let bytes = std::fs::read(path)
-        .map_err(|error| format!("could not read original image {path:?}: {error}"))?;
-    let byte_len = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
-    if max_file_bytes != 0 && byte_len > max_file_bytes {
-        return Err(preview_file_size_error(path, byte_len, max_file_bytes));
-    }
-    if cancellation.is_cancelled() {
-        return Err(original_image_preview_cancelled(path));
-    }
-
-    if path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("svg"))
-    {
-        let has_intrinsic_size = svg_has_intrinsic_pixel_size(&bytes);
-        let tree = resvg::usvg::Tree::from_data(&bytes, &resvg::usvg::Options::default())
-            .map_err(|error| format!("could not parse original SVG {path:?}: {error}"))?;
-        if cancellation.is_cancelled() {
-            return Err(original_image_preview_cancelled(path));
-        }
-        let size = tree.size();
-        return Ok(OriginalImagePreview::Svg {
-            handle: svg::Handle::from_memory(bytes),
-            width: size.width().round().max(1.0) as u32,
-            height: size.height().round().max(1.0) as u32,
-            has_intrinsic_size,
-        });
-    }
-
-    let mut reader = ::image::ImageReader::new(Cursor::new(bytes.as_slice()))
-        .with_guessed_format()
-        .map_err(|error| format!("could not identify original image {path:?}: {error}"))?;
-    reader.limits(::image::Limits::default());
-    let mut decoder = reader
-        .into_decoder()
-        .map_err(|error| format!("could not inspect original image {path:?}: {error}"))?;
-    let source_dimensions = decoder.dimensions();
-    let orientation = decoder
-        .orientation()
-        .unwrap_or(::image::metadata::Orientation::NoTransforms);
-    let (expected_width, expected_height) =
-        thumbnails::oriented_image_dimensions(source_dimensions, orientation);
-    validate_raster_decode_budget(path, expected_width, expected_height)?;
-    let limits = decoder_limits_for_total_bytes(path, decoder.total_bytes())?;
-    decoder
-        .set_limits(limits)
-        .map_err(|error| format!("could not apply original image limits {path:?}: {error}"))?;
-    let mut decoded = ::image::DynamicImage::from_decoder(decoder)
+    // 名字认不出类型、但用户在设置里加了后缀的，按普通像素图试。
+    let source = match file_core::image_kind_by_name(path) {
+        Some(ImageKind::Vector) => return load_svg_preview(path, max_file_bytes, cancellation),
+        Some(ImageKind::Raster(source)) => source,
+        None => RasterSource::Picture,
+    };
+    let decoded = decode_image(path, source, DecodeBound::FULL)
         .map_err(|error| format!("could not decode original image {path:?}: {error}"))?;
-    decoded.apply_orientation(orientation);
     if cancellation.is_cancelled() {
         return Err(original_image_preview_cancelled(path));
     }
 
-    let width = decoded.width();
-    let height = decoded.height();
-    validate_raster_decode_budget(path, width, height)?;
-    let placeholder_handle = if let Some(placeholder_handle) = placeholder_handle {
-        placeholder_handle
-    } else {
-        let placeholder = decoded.thumbnail(
-            ORIGINAL_IMAGE_PLACEHOLDER_MAX_EDGE,
-            ORIGINAL_IMAGE_PLACEHOLDER_MAX_EDGE,
+    let (width, height) = (decoded.width, decoded.height);
+    let raster = decoded.pixels;
+    let placeholder_handle = placeholder_handle.unwrap_or_else(|| {
+        let placeholder = ::image::imageops::thumbnail(
+            &raster,
+            ORIGINAL_IMAGE_PLACEHOLDER_MAX_EDGE.min(width),
+            ORIGINAL_IMAGE_PLACEHOLDER_MAX_EDGE.min(height),
         );
-        let placeholder = placeholder.into_rgba8();
         iced_image::Handle::from_rgba(
             placeholder.width(),
             placeholder.height(),
             placeholder.into_raw(),
         )
-    };
-    let raster = decoded.into_rgba8();
+    });
 
     Ok(OriginalImagePreview::Raster {
         raster_handle: iced_image::Handle::from_rgba(
@@ -147,6 +119,32 @@ fn load_original_image_preview_blocking(
         placeholder_handle,
         width,
         height,
+    })
+}
+
+fn load_svg_preview(
+    path: &Path,
+    max_file_bytes: u64,
+    cancellation: &CancellationToken,
+) -> Result<OriginalImagePreview, String> {
+    let bytes = std::fs::read(path)
+        .map_err(|error| format!("could not read original image {path:?}: {error}"))?;
+    let byte_len = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+    if max_file_bytes != 0 && byte_len > max_file_bytes {
+        return Err(preview_file_size_error(path, byte_len, max_file_bytes));
+    }
+    let has_intrinsic_size = svg_has_intrinsic_pixel_size(&bytes);
+    let tree = resvg::usvg::Tree::from_data(&bytes, &resvg::usvg::Options::default())
+        .map_err(|error| format!("could not parse original SVG {path:?}: {error}"))?;
+    if cancellation.is_cancelled() {
+        return Err(original_image_preview_cancelled(path));
+    }
+    let size = tree.size();
+    Ok(OriginalImagePreview::Svg {
+        handle: svg::Handle::from_memory(bytes),
+        width: size.width().round().max(1.0) as u32,
+        height: size.height().round().max(1.0) as u32,
+        has_intrinsic_size,
     })
 }
 
@@ -175,32 +173,6 @@ fn svg_length_is_intrinsic(value: &str) -> bool {
         && !value.eq_ignore_ascii_case("inherit")
 }
 
-fn validate_raster_decode_budget(path: &Path, width: u32, height: u32) -> Result<(), String> {
-    let rgba_bytes = u64::from(width)
-        .checked_mul(u64::from(height))
-        .and_then(|pixels| pixels.checked_mul(4))
-        .ok_or_else(|| format!("original image {path:?} has invalid dimensions"))?;
-    let max_alloc = ::image::Limits::default().max_alloc.unwrap_or(u64::MAX);
-    if rgba_bytes > max_alloc {
-        return Err(format!(
-            "Original image {path:?} needs {rgba_bytes} decoded RGBA bytes, exceeding the decoder's {} MiB allocation limit",
-            max_alloc / 1024 / 1024
-        ));
-    }
-    Ok(())
-}
-
-fn decoder_limits_for_total_bytes(
-    path: &Path,
-    total_bytes: u64,
-) -> Result<::image::Limits, String> {
-    let mut limits = ::image::Limits::default();
-    limits.reserve(total_bytes).map_err(|error| {
-        format!("original image {path:?} exceeds the decoder allocation limit: {error}")
-    })?;
-    Ok(limits)
-}
-
 fn original_image_preview_cancelled(path: &Path) -> String {
     format!("original image preview cancelled for {path:?}")
 }
@@ -226,6 +198,10 @@ fn preview_file_size_error(path: &Path, byte_len: u64, max_file_bytes: u64) -> S
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
+    use ::image::ImageDecoder;
+
     use super::*;
     use ::image::ImageEncoder;
     use iced::advanced::svg::Data;
@@ -479,12 +455,6 @@ mod tests {
         assert!(error.contains("too large to preview"));
     }
 
-    #[test]
-    fn accepts_raster_dimensions_above_the_old_preview_budget() {
-        validate_raster_decode_budget(Path::new("/workspace/large.png"), 8_000, 6_000)
-            .expect("decoder default must allow a 192 MB RGBA image");
-    }
-
     #[tokio::test]
     #[ignore = "allocates and decodes a real 183 MiB RGBA image; run explicitly"]
     async fn decodes_real_image_above_the_old_128_mib_budget() {
@@ -522,29 +492,6 @@ mod tests {
         };
         assert!(placeholder_width <= ORIGINAL_IMAGE_PLACEHOLDER_MAX_EDGE);
         assert!(placeholder_height <= ORIGINAL_IMAGE_PLACEHOLDER_MAX_EDGE);
-    }
-
-    #[test]
-    fn rejects_raster_dimensions_over_decoder_budget() {
-        let max_alloc = ::image::Limits::default().max_alloc.unwrap();
-        let width = (max_alloc / 4 + 1) as u32;
-        let error = validate_raster_decode_budget(Path::new("/workspace/huge.png"), width, 1)
-            .expect_err("decoded RGBA buffer over the decoder limit must be rejected");
-        assert!(error.contains("decoded RGBA bytes"));
-    }
-
-    #[test]
-    fn rejects_high_bit_depth_decoder_allocation_above_default_limit() {
-        let path = Path::new("/workspace/rgba16.png");
-        let (width, height) = (9_000_u32, 9_000_u32);
-        validate_raster_decode_budget(path, width, height)
-            .expect("RGBA8 renderer budget alone would allow this image");
-        let rgba16_bytes = u64::from(width) * u64::from(height) * 8;
-
-        let error = decoder_limits_for_total_bytes(path, rgba16_bytes)
-            .expect_err("RGBA16 decoder allocation over the default limit must fail");
-
-        assert!(error.contains("decoder allocation limit"));
     }
 
     fn write_exif_rotated_jpeg(path: &Path, width: u32, height: u32) {

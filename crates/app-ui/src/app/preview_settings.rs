@@ -175,9 +175,9 @@ mod tests {
         assert!(browser
             .user_config
             .preview_extension_rules
-            .list(config::PreviewFileSizeKind::Image)
+            .list(config::PreviewFileSizeKind::Document)
             .iter()
-            .any(|candidate| candidate == "png"));
+            .any(|candidate| candidate == "pdf"));
     }
 
     #[test]

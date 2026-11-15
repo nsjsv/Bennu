@@ -136,6 +136,23 @@ impl super::PreviewEngine {
         }
     }
 
+    /// 图片要靠 ffmpeg 解（HEIC、JPEG XL……）但没装：和音视频一样显示安装命令。
+    /// 独立窗口会话这时还没开窗（窗口在尺寸到了才开），按默认大小开。
+    pub fn show_image_tool_required(&mut self, path: PathBuf) -> Task<PreviewMessage> {
+        self.pending_preview_thumbnail_display = None;
+        self.preview = Some(PreviewState::Ready(PreviewContent::ToolRequired {
+            path,
+            tool: file_core::ExternalTool::Ffmpeg,
+        }));
+        if self.preview_load_surface == super::PreviewLoadSurface::StandaloneWindow
+            && self.preview_window.is_none()
+        {
+            self.open_image_preview_error_window()
+        } else {
+            Task::none()
+        }
+    }
+
     /// 缩略图回流是否命中等待标记：回流入口在宿主缩略图管线（产物
     /// 类型归宿主），命中判定与标记清理语义归预览会话。
     pub fn pending_preview_thumbnail_display_matches(&self, request: &ThumbnailRequest) -> bool {

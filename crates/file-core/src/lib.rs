@@ -17,6 +17,7 @@ pub mod directory_metadata;
 pub mod entry;
 pub mod entry_naming;
 pub mod external_tools;
+pub mod image_decode;
 pub mod log_detail;
 pub mod media;
 pub mod mime;
@@ -70,8 +71,8 @@ pub use entry_naming::{
 };
 pub use external_tools::ExternalTool;
 pub use media::{
-    is_audio_by_name, is_supported_image_extension, is_supported_image_path, is_video_by_name,
-    is_video_content, is_video_file, media_kind_for_file, video_by_name, SupportedMediaKind,
+    image_kind_by_name, is_audio_by_name, is_image_by_name, is_video_by_name, is_video_content,
+    is_video_file, media_kind_for_file, video_by_name, ImageKind, RasterSource, SupportedMediaKind,
     VideoByName,
 };
 pub use ops::{

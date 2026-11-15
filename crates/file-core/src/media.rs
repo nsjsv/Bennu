@@ -12,9 +12,88 @@ const VIDEO_CONTAINER_TYPES: [&str; 3] = [
     "application/vnd.ms-asf",
     "application/mxf",
 ];
-const SUPPORTED_IMAGE_EXTENSIONS: [&str; 11] = [
-    "avif", "bmp", "gif", "ico", "jpg", "jpeg", "png", "svg", "tif", "tiff", "webp",
+/// 像素图：内置解码器认得的自己解，其余交给 ffmpeg（见 `image_decode`）。只列画得出来的；
+/// 类型库里还有 XCF、EPS、DjVu、WMF、CAD、3D 之类挂在 image/ 下但没法当图片画的，不算。
+const PICTURE_IMAGE_TYPES: [&str; 35] = [
+    "image/png",
+    "image/apng",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "image/bmp",
+    "image/vnd.microsoft.icon",
+    "image/tiff",
+    "image/x-tiff-multipage",
+    "image/avif",
+    "image/heif",
+    "image/jxl",
+    "image/vnd.adobe.photoshop",
+    "image/x-tga",
+    "image/x-exr",
+    "image/vnd.radiance",
+    "image/vnd.ms-dds",
+    "image/qoi",
+    "image/x-portable-anymap",
+    "image/x-portable-bitmap",
+    "image/x-portable-graymap",
+    "image/x-portable-pixmap",
+    "image/x-pfm",
+    "image/x-phm",
+    "image/jp2",
+    "image/x-jp2-codestream",
+    "image/x-sgi",
+    "image/x-rgb",
+    "image/x-sun-raster",
+    "image/x-xwindowdump",
+    "image/vnd.zbrush.pcx",
+    "image/x-photo-cd",
+    "image/x-ilbm",
+    "image/dpx",
+    "image/vnd.wap.wbmp",
 ];
+/// 相机 RAW：显示里面自带的 JPEG 预览图。只列预览图放在我们认得的位置（TIFF 目录、
+/// RAF 文件头、CR3 第一条轨道）的。
+const CAMERA_RAW_IMAGE_TYPES: [&str; 23] = [
+    "image/x-adobe-dng",
+    "image/x-canon-cr2",
+    "image/x-canon-cr3",
+    "image/x-nikon-nef",
+    "image/x-nikon-nrw",
+    "image/x-sony-arw",
+    "image/x-sony-sr2",
+    "image/x-sony-srf",
+    "image/x-olympus-orf",
+    "image/x-panasonic-rw2",
+    "image/x-panasonic-rw",
+    "image/x-pentax-pef",
+    "image/x-samsung-srw",
+    "image/x-fuji-raf",
+    "image/x-epson-erf",
+    "image/x-hasselblad-3fr",
+    "image/x-hasselblad-fff",
+    "image/x-kodak-dcr",
+    "image/x-kodak-kdc",
+    "image/x-kodak-k25",
+    "image/x-mamiya-mef",
+    "image/x-leaf-mos",
+    "image/x-phaseone-iiq",
+];
+const VECTOR_IMAGE_TYPES: [&str; 2] = ["image/svg+xml", "image/svg+xml-compressed"];
+
+/// 图片按怎么画分：SVG 按显示大小现画，其余解成像素。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageKind {
+    Vector,
+    Raster(RasterSource),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RasterSource {
+    /// 普通像素图。
+    Picture,
+    /// 相机 RAW，画的是里面自带的预览图。
+    CameraRaw,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SupportedMediaKind {
@@ -35,7 +114,7 @@ pub enum VideoByName {
 /// 会读文件：名字定不下来的视频后缀要看开头内容。
 pub fn media_kind_for_file(path: impl AsRef<Path>) -> Option<SupportedMediaKind> {
     let path = path.as_ref();
-    if is_supported_image_path(path) {
+    if is_image_by_name(path) {
         Some(SupportedMediaKind::Image)
     } else if is_video_file(path) {
         Some(SupportedMediaKind::Video)
@@ -153,24 +232,47 @@ fn read_head(path: &Path, extent: usize) -> Option<Vec<u8>> {
     Some(head)
 }
 
-pub fn is_supported_image_path(path: impl AsRef<Path>) -> bool {
-    path.as_ref()
-        .extension()
-        .and_then(std::ffi::OsStr::to_str)
-        .is_some_and(is_supported_image_extension)
+/// 图片也按类型库认，只看名字：列表里每个条目都要问，不能读文件。
+pub fn image_kind_by_name(path: impl AsRef<Path>) -> Option<ImageKind> {
+    let file_name = path.as_ref().file_name()?;
+    let types = MimeDatabase::system();
+    match types.type_from_name(file_name) {
+        NameType::Known(mime) => image_kind_of_type(&types, &mime),
+        // 候选全是图片才算：名字同时可能是文本之类的，不为它去起解码器。
+        NameType::Candidates(candidates) => candidates
+            .iter()
+            .map(|mime| image_kind_of_type(&types, mime))
+            .collect::<Option<Vec<_>>>()?
+            .first()
+            .copied(),
+        NameType::Unknown => None,
+    }
 }
 
-pub fn is_supported_image_extension(extension: &str) -> bool {
-    SUPPORTED_IMAGE_EXTENSIONS
-        .iter()
-        .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+pub fn is_image_by_name(path: impl AsRef<Path>) -> bool {
+    image_kind_by_name(path).is_some()
+}
+
+fn image_kind_of_type(types: &MimeDatabase, mime: &str) -> Option<ImageKind> {
+    let mime = types.canonical(mime);
+    let mime = mime.as_str();
+    if PICTURE_IMAGE_TYPES.contains(&mime) {
+        Some(ImageKind::Raster(RasterSource::Picture))
+    } else if CAMERA_RAW_IMAGE_TYPES.contains(&mime) {
+        Some(ImageKind::Raster(RasterSource::CameraRaw))
+    } else if VECTOR_IMAGE_TYPES.contains(&mime) {
+        Some(ImageKind::Vector)
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        is_audio_by_name, is_supported_image_path, is_video_by_name, is_video_file,
-        media_kind_for_file, video_by_name, SupportedMediaKind, VideoByName,
+        image_kind_by_name, is_audio_by_name, is_image_by_name, is_video_by_name, is_video_file,
+        media_kind_for_file, video_by_name, ImageKind, RasterSource, SupportedMediaKind,
+        VideoByName,
     };
 
     /// 五个 188 字节的 MPEG-TS 包，同步字节 0x47 打头。
@@ -202,24 +304,45 @@ mod tests {
     #[test]
     fn exposes_specific_media_predicates() {
         assert!(is_audio_by_name("voice.m4a"));
-        for path in [
-            "image.avif",
-            "icon.bmp",
-            "animation.gif",
-            "favicon.ico",
-            "photo.jpg",
-            "photo.jpeg",
-            "icon.png",
-            "vector.svg",
-            "scan.tif",
-            "scan.tiff",
-            "image.webp",
-        ] {
-            assert!(is_supported_image_path(path), "{path}");
-        }
         assert!(!is_audio_by_name("archive.zip"));
-        assert!(!is_supported_image_path("photo.heic"));
-        assert!(!is_supported_image_path("photo.heif"));
+        assert!(!is_image_by_name("archive.zip"));
+    }
+
+    #[test]
+    fn images_follow_the_type_library_by_name() {
+        for path in [
+            "a.avif", "a.bmp", "a.gif", "a.ico", "a.jpg", "a.JPEG", "a.png", "a.tif", "a.tiff",
+            "a.webp", "a.heic", "a.HEIF", "a.jxl", "a.psd", "a.tga", "a.exr", "a.hdr", "a.dds",
+            "a.qoi", "a.ppm", "a.pgm", "a.jp2", "a.pcx",
+        ] {
+            assert_eq!(
+                image_kind_by_name(path),
+                Some(ImageKind::Raster(RasterSource::Picture)),
+                "{path}"
+            );
+            assert_eq!(
+                media_kind_for_file(path),
+                Some(SupportedMediaKind::Image),
+                "{path}"
+            );
+        }
+        for path in [
+            "a.cr2", "a.CR3", "a.nef", "a.arw", "a.dng", "a.raf", "a.orf", "a.rw2", "a.pef",
+        ] {
+            assert_eq!(
+                image_kind_by_name(path),
+                Some(ImageKind::Raster(RasterSource::CameraRaw)),
+                "{path}"
+            );
+        }
+        assert_eq!(image_kind_by_name("a.svg"), Some(ImageKind::Vector));
+        assert_eq!(image_kind_by_name("a.svgz"), Some(ImageKind::Vector));
+        // 挂在 image/ 下但画不出来的、文本形式的图片、没后缀的都不算。
+        for path in [
+            "a.xcf", "a.eps", "a.djvu", "a.wmf", "a.xpm", "a.dwg", "photo", "a.txt",
+        ] {
+            assert!(!is_image_by_name(path), "{path}");
+        }
     }
 
     #[test]

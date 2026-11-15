@@ -78,7 +78,7 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Extra Text Extensions", "额外当作文本的后缀"),
     ("Extra Audio Extensions", "额外当作音频的后缀"),
     ("Extra Video Extensions", "额外当作视频的后缀"),
-    ("Image Preview Extensions", "图片预览后缀"),
+    ("Extra Image Extensions", "额外当作图片的后缀"),
     ("Archive Preview Extensions", "压缩包预览后缀"),
     ("Document Preview Extensions", "文档预览后缀"),
     ("SQLite Preview Extensions", "SQLite 预览后缀"),

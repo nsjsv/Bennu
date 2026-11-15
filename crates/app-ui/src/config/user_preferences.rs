@@ -215,7 +215,7 @@ impl UserPreferences {
             preview_sqlite_size_bytes: Some(self.preview_size_limits.sqlite_bytes),
             preview_extension_rules: Some(StoredPreviewExtensionRules {
                 text: None,
-                image: Some(self.preview_extension_rules.image.clone()),
+                image: None,
                 video: None,
                 audio: None,
                 sqlite: Some(self.preview_extension_rules.sqlite.clone()),
@@ -232,6 +232,7 @@ impl UserPreferences {
             )),
             audio_end_action: Some(self.media_end_action.stored_name().to_owned()),
             preview_extra_video_extensions: Some(self.preview_extension_rules.video.clone()),
+            preview_extra_image_extensions: Some(self.preview_extension_rules.image.clone()),
         };
         stored.show_hidden_files = self.show_hidden_files;
         stored.language_setting = self.language_setting.config_value().to_owned();

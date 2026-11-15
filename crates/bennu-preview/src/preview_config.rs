@@ -63,6 +63,10 @@ pub struct StoredPreviewPreferences {
     /// 从旧的 `preview_extension_rules.video` 迁移一次。
     #[serde(default)]
     pub preview_extra_video_extensions: Option<Vec<String>>,
+    /// 额外当作图片的后缀（图片主要由类型库判定）。None 表示还没迁移过，读取端
+    /// 从旧的 `preview_extension_rules.image` 迁移一次。
+    #[serde(default)]
+    pub preview_extra_image_extensions: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -70,6 +74,7 @@ pub struct StoredPreviewExtensionRules {
     /// 旧版本的替换式文本后缀表，只读迁移，新代码写 None。
     #[serde(default)]
     pub text: Option<Vec<String>>,
+    /// 旧版本的替换式图片后缀表，只读迁移，新代码写 None。
     #[serde(default)]
     pub image: Option<Vec<String>>,
     /// 旧版本的替换式视频后缀表，只读迁移，新代码写 None。
@@ -107,12 +112,13 @@ const LEGACY_DEFAULT_PREVIEW_AUDIO_EXTENSIONS: [&str; 7] =
 /// 旧版本的内置视频后缀表，只用于迁移，理由同音频。
 const LEGACY_DEFAULT_PREVIEW_VIDEO_EXTENSIONS: [&str; 6] =
     ["mp4", "m4v", "mkv", "mov", "webm", "avi"];
+/// 旧版本的内置图片后缀表，只用于迁移，理由同音频。
+const LEGACY_DEFAULT_PREVIEW_IMAGE_EXTENSIONS: [&str; 11] = [
+    "avif", "bmp", "gif", "ico", "jpg", "jpeg", "png", "svg", "tif", "tiff", "webp",
+];
 /// 空格预览其余类型的默认后缀表，镜像各预览类型的内置判定；
 /// 后缀以小写、无前导点的规范形态存储。替换式语义：用户可增删，
 /// 删除即该后缀不再按此类型预览。
-pub const DEFAULT_PREVIEW_IMAGE_EXTENSIONS: [&str; 11] = [
-    "avif", "bmp", "gif", "ico", "jpg", "jpeg", "png", "svg", "tif", "tiff", "webp",
-];
 pub const DEFAULT_PREVIEW_SQLITE_EXTENSIONS: [&str; 4] = ["db", "sqlite", "sqlite3", "db3"];
 pub const DEFAULT_PREVIEW_ARCHIVE_EXTENSIONS: [&str; 13] = [
     "zip", "tar", "tar.gz", "tgz", "tar.xz", "txz", "tar.zst", "tzst", "tar.bz2", "tbz2", "tbz",
@@ -228,8 +234,8 @@ pub fn normalize_preview_extension(raw: &str) -> Option<String> {
     Some(trimmed.to_lowercase())
 }
 
-/// 空格预览的分类型后缀规则：文本、音频、视频列表是「额外当作文本/音频/视频的后缀」，
-/// 默认空，这三类主要由类型库判定；其余类型的列表完全决定该类型识别哪些
+/// 空格预览的分类型后缀规则：文本、图片、音频、视频列表是「额外当作文本/图片/音频/视频的后缀」，
+/// 默认空，这四类主要由类型库判定；其余类型的列表完全决定该类型识别哪些
 /// 后缀（替换式）。匹配按文件名 `ends_with` 进行，天然覆盖 tar.gz
 /// 这类复合后缀；大小写不敏感，与各渲染器行为保持一致。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -247,7 +253,7 @@ impl PreviewExtensionRules {
     pub fn default_rules() -> Self {
         Self {
             text: Vec::new(),
-            image: default_extensions(&DEFAULT_PREVIEW_IMAGE_EXTENSIONS),
+            image: Vec::new(),
             video: Vec::new(),
             audio: Vec::new(),
             sqlite: default_extensions(&DEFAULT_PREVIEW_SQLITE_EXTENSIONS),
@@ -290,10 +296,10 @@ impl PreviewExtensionRules {
 
     pub fn default_list(kind: PreviewFileSizeKind) -> Vec<String> {
         let builtin: &[&str] = match kind {
-            PreviewFileSizeKind::Text | PreviewFileSizeKind::Audio | PreviewFileSizeKind::Video => {
-                &[]
-            }
-            PreviewFileSizeKind::Image => &DEFAULT_PREVIEW_IMAGE_EXTENSIONS,
+            PreviewFileSizeKind::Text
+            | PreviewFileSizeKind::Image
+            | PreviewFileSizeKind::Audio
+            | PreviewFileSizeKind::Video => &[],
             PreviewFileSizeKind::Archive => &DEFAULT_PREVIEW_ARCHIVE_EXTENSIONS,
             PreviewFileSizeKind::Document => &DEFAULT_PREVIEW_DOCUMENT_EXTENSIONS,
             PreviewFileSizeKind::Sqlite => &DEFAULT_PREVIEW_SQLITE_EXTENSIONS,
@@ -477,9 +483,16 @@ pub fn preview_extension_rules_from_stored(
         &LEGACY_DEFAULT_PREVIEW_VIDEO_EXTENSIONS,
         &fallback.video,
     );
+    let extra_image = extra_extensions_from_stored(
+        &stored.preview_extra_image_extensions,
+        legacy_rules.and_then(|rules| rules.image.as_ref()),
+        &LEGACY_DEFAULT_PREVIEW_IMAGE_EXTENSIONS,
+        &fallback.image,
+    );
     let Some(stored_rules) = legacy_rules else {
         return PreviewExtensionRules {
             text: extra_text,
+            image: extra_image,
             video: extra_video,
             audio: extra_audio,
             ..fallback.clone()
@@ -490,7 +503,7 @@ pub fn preview_extension_rules_from_stored(
     };
     PreviewExtensionRules {
         text: extra_text,
-        image: per_type(&stored_rules.image, &fallback.image),
+        image: extra_image,
         video: extra_video,
         audio: extra_audio,
         sqlite: per_type(&stored_rules.sqlite, &fallback.sqlite),
@@ -502,7 +515,7 @@ pub fn preview_extension_rules_from_stored(
     }
 }
 
-/// 额外后缀（文本、音频、视频）：新键说了算；新键还没写过时从旧的替换式表迁移一次——
+/// 额外后缀（文本、图片、音频、视频）：新键说了算；新键还没写过时从旧的替换式表迁移一次——
 /// 去掉旧内置默认值，只留用户自己加的。迁移结果随下次保存写进新键，之后用户
 /// 再加 `txt` / `mp3` 也不会被过滤。
 fn extra_extensions_from_stored(

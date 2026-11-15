@@ -15,7 +15,7 @@ use bennu_theme::styles::{
     open_child_row_style, selected_icon_svg_style, selected_row_style, subtle_border_color,
 };
 use file_core::entry::FileKind;
-use file_core::is_supported_image_path;
+use file_core::is_image_by_name;
 use iced::widget::{container, image, mouse_area, row, scrollable, Space};
 use iced::{alignment, Element, Length, Theme};
 
@@ -146,7 +146,7 @@ fn lane_entry_row(
     // 图片行有就绪缩略图时用行内 PNG 替换类型图标（与列表行同尺寸；
     // image 默认 ContentFit::Contain 保持纵横比）。
     let icon: Element<'static, SessionMessage> =
-        if entry.kind == FileKind::File && is_supported_image_path(&entry.path) {
+        if entry.kind == FileKind::File && is_image_by_name(&entry.path) {
             match session.thumbnail_ready(&entry.path) {
                 Some(cached) => image(image::Handle::from_path(&cached.output))
                     .width(Length::Fixed(LANE_ICON_EDGE))

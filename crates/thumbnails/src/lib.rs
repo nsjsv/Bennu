@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use image::{metadata::Orientation, ImageDecoder};
+use file_core::image_decode::{decode_image, image_dimensions, DecodeBound, ImageDecodeError};
+use file_core::{ImageKind, RasterSource};
 use thiserror::Error;
 
 mod cache_format;
@@ -23,7 +24,7 @@ const VIDEO_THUMBNAILER_DETAIL_CHAR_LIMIT: usize = 1_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ThumbnailMediaKind {
-    Image,
+    Image(ImageKind),
     Video,
 }
 
@@ -102,10 +103,10 @@ pub enum ThumbnailError {
     #[error("thumbnail task failed: {0}")]
     Join(String),
     #[error("could not read image {path:?}: {source}")]
-    ReadImage {
+    DecodeImage {
         path: PathBuf,
         #[source]
-        source: image::ImageError,
+        source: ImageDecodeError,
     },
     #[error("could not read SVG image {path:?}: {source}")]
     ReadSvg {
@@ -271,10 +272,12 @@ fn generate_thumbnail_blocking(
     let edge = request.bucket().edge();
     let temporary = temporary_output_path(&slot.output);
     let image = match slot.media_kind {
-        ThumbnailMediaKind::Image if is_svg_path(&request.source) => {
+        ThumbnailMediaKind::Image(ImageKind::Vector) => {
             svg::render_svg_thumbnail(&request.source, edge)?
         }
-        ThumbnailMediaKind::Image => raster_thumbnail(&request.source, edge)?,
+        ThumbnailMediaKind::Image(ImageKind::Raster(source)) => {
+            raster_thumbnail(&request.source, source, edge)?
+        }
         ThumbnailMediaKind::Video if !file_core::is_video_file(&request.source) => {
             return Err(ThumbnailError::UnsupportedFormat {
                 path: request.source,
@@ -304,15 +307,17 @@ fn generate_thumbnail_blocking(
 }
 
 /// 比这一档小的原图不放大（同 gnome-desktop），显示时再缩放。
-fn raster_thumbnail(source: &Path, edge: u32) -> Result<image::RgbaImage, ThumbnailError> {
-    let (image, orientation) = decode_raster_with_orientation(source)?;
-    let mut thumbnail = if image.width() > edge || image.height() > edge {
-        image.thumbnail(edge, edge)
-    } else {
-        image
-    };
-    thumbnail.apply_orientation(orientation);
-    Ok(thumbnail.to_rgba8())
+fn raster_thumbnail(
+    path: &Path,
+    source: RasterSource,
+    edge: u32,
+) -> Result<image::RgbaImage, ThumbnailError> {
+    decode_image(path, source, DecodeBound::within(edge, edge))
+        .map(|decoded| decoded.pixels)
+        .map_err(|source| ThumbnailError::DecodeImage {
+            path: path.to_path_buf(),
+            source,
+        })
 }
 
 /// 视频缩略图命令只会写普通 PNG：先写到临时位置，读回后再按规范写一遍。
@@ -364,71 +369,16 @@ pub async fn load_image_dimensions(source: impl AsRef<Path>) -> Result<(u32, u32
     dimensions
 }
 
-fn load_image_dimensions_blocking(source: PathBuf) -> Result<(u32, u32), ThumbnailError> {
-    if is_svg_path(&source) {
-        return svg::load_svg_dimensions(&source);
-    }
-
-    let mut decoder = open_raster_decoder(&source)?;
-    let dimensions = decoder.dimensions();
-    let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
-    Ok(oriented_image_dimensions(dimensions, orientation))
-}
-
-fn open_raster_decoder(source: &Path) -> Result<impl ImageDecoder, ThumbnailError> {
-    image::ImageReader::open(source)
-        .map_err(|source_error| ThumbnailError::ReadImage {
-            path: source.to_path_buf(),
-            source: image::ImageError::IoError(source_error),
-        })?
-        .into_decoder()
-        .map_err(|source_error| ThumbnailError::ReadImage {
-            path: source.to_path_buf(),
-            source: source_error,
-        })
-}
-
-fn decode_raster_with_orientation(
-    source: &Path,
-) -> Result<(image::DynamicImage, Orientation), ThumbnailError> {
-    let mut decoder = open_raster_decoder(source)?;
-    let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
-    let mut limits = image::Limits::default();
-    limits
-        .reserve(decoder.total_bytes())
-        .map_err(|source_error| ThumbnailError::ReadImage {
-            path: source.to_path_buf(),
-            source: source_error,
-        })?;
-    decoder
-        .set_limits(limits)
-        .map_err(|source_error| ThumbnailError::ReadImage {
-            path: source.to_path_buf(),
-            source: source_error,
-        })?;
-    let image = image::DynamicImage::from_decoder(decoder).map_err(|source_error| {
-        ThumbnailError::ReadImage {
-            path: source.to_path_buf(),
-            source: source_error,
+/// 名字认不出类型、但用户在设置里加了后缀的，按普通像素图试。
+fn load_image_dimensions_blocking(path: PathBuf) -> Result<(u32, u32), ThumbnailError> {
+    match file_core::image_kind_by_name(&path).unwrap_or(ImageKind::Raster(RasterSource::Picture)) {
+        ImageKind::Vector => svg::load_svg_dimensions(&path),
+        ImageKind::Raster(source) => {
+            image_dimensions(&path, source).map_err(|source| ThumbnailError::DecodeImage {
+                path: path.clone(),
+                source,
+            })
         }
-    })?;
-    Ok((image, orientation))
-}
-
-pub fn oriented_image_dimensions(
-    (width, height): (u32, u32),
-    orientation: Orientation,
-) -> (u32, u32) {
-    if matches!(
-        orientation,
-        Orientation::Rotate90
-            | Orientation::Rotate270
-            | Orientation::Rotate90FlipH
-            | Orientation::Rotate270FlipH
-    ) {
-        (height, width)
-    } else {
-        (width, height)
     }
 }
 
@@ -541,19 +491,13 @@ fn bounded_video_thumbnailer_detail(detail: &str) -> String {
 
 /// 只看名字（列表里每个条目都要问，不能读文件）；名字定不下来的视频后缀也先算，生成时再看内容。
 fn thumbnail_media_kind_for_path(path: &Path) -> Option<ThumbnailMediaKind> {
-    if file_core::is_supported_image_path(path) {
-        Some(ThumbnailMediaKind::Image)
+    if let Some(kind) = file_core::image_kind_by_name(path) {
+        Some(ThumbnailMediaKind::Image(kind))
     } else if file_core::video_by_name(path) != file_core::VideoByName::No {
         Some(ThumbnailMediaKind::Video)
     } else {
         None
     }
-}
-
-fn is_svg_path(path: &Path) -> bool {
-    path.extension()
-        .and_then(std::ffi::OsStr::to_str)
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("svg"))
 }
 
 /// 与成品同目录，名字以 `.png` 结尾：崩溃留下的也会被定期清理按时间删掉。

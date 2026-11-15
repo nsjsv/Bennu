@@ -15,6 +15,7 @@ use bennu_preview::document_preview::DocumentPreviewMessage;
 use bennu_preview::engine::{
     image_preview_size_from_dimensions, PendingPreviewThumbnailDisplay, PreviewLoadSurface,
 };
+use bennu_preview::original_image_preview::ImageProbeError;
 use bennu_preview::preview::{ImagePreviewContent, PreviewContent, PreviewSize, PreviewState};
 use bennu_preview::preview_message::PreviewMessage;
 use thumbnails::{CachedThumbnail, ThumbnailRequest, ThumbnailSourceMetadata};
@@ -152,7 +153,7 @@ impl PreviewHost {
         daemon: &mut PickerDaemon,
         path: PathBuf,
         generation: u64,
-        dimensions: Result<(u32, u32), String>,
+        dimensions: Result<(u32, u32), ImageProbeError>,
     ) -> Task<Message> {
         let host = &mut daemon.preview;
         let active_loading = generation == host.engine.original_image_preview_generation
@@ -173,7 +174,13 @@ impl PreviewHost {
                     )
                     .map(Message::Preview)
             }
-            Err(error) => {
+            Err(ImageProbeError::FfmpegMissing) => {
+                return host
+                    .engine
+                    .show_image_tool_required(path)
+                    .map(Message::Preview)
+            }
+            Err(ImageProbeError::Failed(error)) => {
                 return host
                     .fail_image_preview_dimensions(path, error)
                     .map(Message::Preview)

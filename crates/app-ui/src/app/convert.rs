@@ -552,20 +552,17 @@ async fn classify_convert_sources(paths: Vec<PathBuf>) -> Vec<(PathBuf, Converti
     })
 }
 
-/// 转换源按文件类型分类;SVG 是矢量源,引擎无法处理,不进入对话框。
+/// 转换源按文件类型分类。SVG 是矢量、相机 RAW 只有自带的预览图，引擎都没法当原片转，
+/// 不进入对话框。
 fn convertible_media_kind(path: &Path) -> Option<ConvertibleMediaKind> {
-    let is_svg = path
-        .extension()
-        .and_then(std::ffi::OsStr::to_str)
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("svg"));
-    if is_svg {
-        return None;
-    }
-    match file_core::media_kind_for_file(path) {
-        Some(file_core::SupportedMediaKind::Image) => Some(ConvertibleMediaKind::Image),
-        Some(file_core::SupportedMediaKind::Video) => Some(ConvertibleMediaKind::Video),
-        Some(file_core::SupportedMediaKind::Audio) => Some(ConvertibleMediaKind::Audio),
-        None => None,
+    match file_core::media_kind_for_file(path)? {
+        file_core::SupportedMediaKind::Image => (file_core::image_kind_by_name(path)
+            == Some(file_core::ImageKind::Raster(
+                file_core::RasterSource::Picture,
+            )))
+        .then_some(ConvertibleMediaKind::Image),
+        file_core::SupportedMediaKind::Video => Some(ConvertibleMediaKind::Video),
+        file_core::SupportedMediaKind::Audio => Some(ConvertibleMediaKind::Audio),
     }
 }
 
@@ -815,12 +812,16 @@ mod tests {
     }
 
     #[test]
-    fn convertible_media_kind_skips_svg() {
-        assert_eq!(
-            convertible_media_kind(Path::new("/tmp/photo.png")),
-            Some(ConvertibleMediaKind::Image)
-        );
+    fn convertible_media_kind_skips_svg_and_camera_raw() {
+        for path in ["/tmp/photo.png", "/tmp/phone.heic", "/tmp/layers.psd"] {
+            assert_eq!(
+                convertible_media_kind(Path::new(path)),
+                Some(ConvertibleMediaKind::Image),
+                "{path}"
+            );
+        }
         assert_eq!(convertible_media_kind(Path::new("/tmp/logo.svg")), None);
+        assert_eq!(convertible_media_kind(Path::new("/tmp/shot.cr2")), None);
         assert_eq!(convertible_media_kind(Path::new("/tmp/notes.txt")), None);
     }
 

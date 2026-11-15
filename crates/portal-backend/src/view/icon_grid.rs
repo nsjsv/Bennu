@@ -14,7 +14,7 @@ use bennu_theme::styles::{
     muted_icon_svg_style, selected_icon_svg_style, selected_row_style,
 };
 use file_core::entry::FileKind;
-use file_core::is_supported_image_path;
+use file_core::is_image_by_name;
 use iced::widget::{column, container, image, mouse_area, row, scrollable};
 use iced::{alignment, Element, Length, Padding, Theme};
 
@@ -88,7 +88,7 @@ fn tile(
     // ContentFit::Contain 保持纵横比）。Handle::from_path 只持路径不驻
     // 留像素，每帧重建成本可忽略。
     let icon: Element<'static, SessionMessage> =
-        if entry.kind == FileKind::File && is_supported_image_path(&entry.path) {
+        if entry.kind == FileKind::File && is_image_by_name(&entry.path) {
             match session.thumbnail_ready(&entry.path) {
                 Some(cached) => image(image::Handle::from_path(&cached.output))
                     .width(Length::Fixed(ICON_EDGE as f32))

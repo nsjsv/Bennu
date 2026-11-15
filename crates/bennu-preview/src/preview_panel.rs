@@ -242,12 +242,12 @@ where
     let explanation = match (tool, tool.install_command()) {
         (ExternalTool::Ffmpeg, Some(command)) => {
             tr!(
-                "Audio and video previews need ffmpeg. Install it with:\n%1",
+                "Audio, video and some image previews need ffmpeg. Install it with:\n%1",
                 command
             )
         }
         (ExternalTool::Ffmpeg, None) => tr!(
-            "Audio and video previews need ffmpeg. Install it with your system's package manager."
+            "Audio, video and some image previews need ffmpeg. Install it with your system's package manager."
         ),
         (ExternalTool::SevenZip, Some(command)) => {
             tr!(

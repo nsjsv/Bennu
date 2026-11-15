@@ -837,12 +837,12 @@ fn extension_rules_match_case_insensitively_and_support_compound_suffixes() {
 #[test]
 fn extension_rules_default_lists_mirror_builtin_types() {
     let rules = PreviewExtensionRules::default_rules();
-    // 文本、音频、视频由类型库判定，额外后缀默认空。
+    // 文本、图片、音频、视频由类型库判定，额外后缀默认空。
     assert!(rules.list(PreviewFileSizeKind::Text).is_empty());
+    assert!(rules.list(PreviewFileSizeKind::Image).is_empty());
     assert!(rules.list(PreviewFileSizeKind::Audio).is_empty());
     assert!(rules.list(PreviewFileSizeKind::Video).is_empty());
     for (kind, expected) in [
-        (PreviewFileSizeKind::Image, "png"),
         (PreviewFileSizeKind::Sqlite, "sqlite"),
         (PreviewFileSizeKind::Archive, "7z"),
         (PreviewFileSizeKind::Document, "docx"),

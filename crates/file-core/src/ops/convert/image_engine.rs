@@ -54,9 +54,9 @@ fn decode_source_image(
     if cancel.is_cancelled() {
         return Err(FileError::Cancelled);
     }
-    image::open(source).map_err(|error| FileError::Convert {
+    crate::image_decode::open_picture(source).map_err(|error| FileError::Convert {
         path: source.to_path_buf(),
-        message: format!("could not decode image: {error}"),
+        message: error.to_string(),
     })
 }
 

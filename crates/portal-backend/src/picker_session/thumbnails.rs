@@ -148,7 +148,7 @@ impl SessionThumbnailState {
                 continue;
             };
             // 仅图片：视频依赖外部 ffmpegthumbnailer，生成慢不做（prd 约定）。
-            if entry.kind != FileKind::File || !file_core::is_supported_image_path(&entry.path) {
+            if entry.kind != FileKind::File || !file_core::is_image_by_name(&entry.path) {
                 continue;
             }
             if !self.can_cache(&entry.path) {

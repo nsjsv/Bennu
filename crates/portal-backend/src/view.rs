@@ -17,7 +17,7 @@ use bennu_theme::styles::{
 };
 use bennu_theme::ui_colors;
 use file_core::entry::FileKind;
-use file_core::is_supported_image_path;
+use file_core::is_image_by_name;
 use iced::widget::{button, column, container, mouse_area, row, scrollable, text};
 use iced::widget::{image, Space};
 use iced::{alignment, Color, Element, Length, Padding, Size, Theme};
@@ -245,7 +245,7 @@ fn entry_row(
     // 尺寸；image 默认 ContentFit::Contain 保持纵横比）。Handle::from_path
     // 只持路径不驻留像素，每帧重建成本可忽略。
     let icon: Element<'static, SessionMessage> =
-        if entry.kind == FileKind::File && is_supported_image_path(&entry.path) {
+        if entry.kind == FileKind::File && is_image_by_name(&entry.path) {
             match session.thumbnail_ready(&entry.path) {
                 Some(cached) => image(image::Handle::from_path(&cached.output))
                     .width(Length::Fixed(18.0))

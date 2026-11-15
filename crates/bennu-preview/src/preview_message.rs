@@ -16,7 +16,7 @@ use crate::animated_image_preview::{AnimatedImageFrame, AnimatedImagePreview};
 use crate::audio_preview::{AudioLyrics, AudioPreviewRuntime, AudioWaveform};
 use crate::document_preview::DocumentPreviewMessage;
 use crate::image_preview_viewport::PreviewImageViewportMessage;
-use crate::original_image_preview::OriginalImagePreview;
+use crate::original_image_preview::{ImageProbeError, OriginalImagePreview};
 use crate::preview::{
     AudioTimelineView, PreviewContent, RemotePreviewCacheMessage, RightPreviewPanelInfoSnapshot,
     VideoPreviewFrame,
@@ -49,7 +49,7 @@ pub enum PreviewMessage {
     MarkdownPreviewModeSelected(MarkdownPreviewMode),
     /// 用户为当前文本预览指定编码；只对这次预览有效。
     TextPreviewEncodingSelected(&'static encoding_rs::Encoding),
-    ImagePreviewDimensionsLoaded(PathBuf, u64, Result<(u32, u32), String>),
+    ImagePreviewDimensionsLoaded(PathBuf, u64, Result<(u32, u32), ImageProbeError>),
     PreviewImageViewport(PreviewImageViewportMessage),
     AnimatedImageFrameLoaded(AnimatedImageFrame),
     AnimatedImagePreviewFinished(PathBuf, u64),

@@ -13,7 +13,7 @@ use crate::audio_preview::{
     compute_audio_spectrogram, compute_audio_waveform, load_audio_cover, load_audio_lyrics,
     measure_audio_preview_duration, start_audio_preview_at,
 };
-use crate::original_image_preview::load_original_image_preview;
+use crate::original_image_preview::{load_image_dimensions, load_original_image_preview};
 use crate::preview::{
     RemotePreviewCacheFinished, RemotePreviewCacheMessage, RemotePreviewCacheProgress,
     VideoPreviewFrame,
@@ -364,10 +364,4 @@ pub(crate) fn video_still_command(
             ),
         },
     )
-}
-
-async fn load_image_dimensions(path: PathBuf) -> Result<(u32, u32), String> {
-    thumbnails::load_image_dimensions(path)
-        .await
-        .map_err(|error| error.to_string())
 }

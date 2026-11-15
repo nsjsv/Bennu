@@ -486,10 +486,24 @@ async fn load_preview_dispatches_type_library_audio_to_the_audio_loader() {
 fn classify_preview_path_follows_user_rules_replacing_builtins() {
     use crate::preview_config::PreviewExtensionRules;
 
-    // 替换式语义：从图片列表删掉 png 后，png 不再按图片预览。
+    // 图片按类型库认（HEIC、RAW 都算），额外后缀直接算，画不出来的 XCF 不算。
     let mut rules = default_rules();
-    rules.image.retain(|candidate| candidate != "png");
-    assert_eq!(classify_preview_path(Path::new("photo.png"), &rules), None);
+    for path in ["photo.png", "phone.HEIC", "shot.cr2", "vector.svg"] {
+        assert_eq!(
+            classify_preview_path(Path::new(path), &rules),
+            Some(PreviewPathKind::Image),
+            "{path}"
+        );
+    }
+    assert_eq!(
+        classify_preview_path(Path::new("drawing.xcf"), &rules),
+        None
+    );
+    rules.image.push("xcf".to_owned());
+    assert_eq!(
+        classify_preview_path(Path::new("drawing.xcf"), &rules),
+        Some(PreviewPathKind::Image)
+    );
 
     // 自定义后缀加入视频列表后按视频预览。
     let mut rules = default_rules();
@@ -524,9 +538,13 @@ fn classify_preview_path_follows_user_rules_replacing_builtins() {
         Some(PreviewPathKind::Text)
     );
 
-    // 清空全部列表后，文本、音频仍由类型库认，其他类型不再预览。
+    // 清空全部列表后，文本、图片、音频仍由类型库认，替换式的类型不再预览。
     let empty = PreviewExtensionRules::default();
-    assert_eq!(classify_preview_path(Path::new("photo.png"), &empty), None);
+    assert_eq!(
+        classify_preview_path(Path::new("photo.png"), &empty),
+        Some(PreviewPathKind::Image)
+    );
+    assert_eq!(classify_preview_path(Path::new("notes.pdf"), &empty), None);
     assert_eq!(
         classify_preview_path(Path::new("song.flac"), &empty),
         Some(PreviewPathKind::Audio)

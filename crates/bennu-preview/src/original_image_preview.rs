@@ -16,16 +16,34 @@ pub enum ImageProbeError {
     Failed(String),
 }
 
-pub async fn load_image_dimensions(path: PathBuf) -> Result<(u32, u32), ImageProbeError> {
-    thumbnails::load_image_dimensions(path)
-        .await
-        .map_err(|error| match error {
-            thumbnails::ThumbnailError::DecodeImage {
-                source: file_core::image_decode::ImageDecodeError::FfmpegMissing,
-                ..
-            } => ImageProbeError::FfmpegMissing,
-            error => ImageProbeError::Failed(error.to_string()),
-        })
+/// 打开图片前先看的：转正后的尺寸、是不是动图（GIF/WebP/APNG 有两帧以上，按动图播）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImageProbe {
+    pub width: u32,
+    pub height: u32,
+    pub animated: bool,
+}
+
+pub async fn probe_image(path: PathBuf) -> Result<ImageProbe, ImageProbeError> {
+    let animation_path = path.clone();
+    let animated = tokio::task::spawn_blocking(move || {
+        crate::animated_image_preview::is_animated_image(&animation_path)
+    });
+    let (width, height) =
+        thumbnails::load_image_dimensions(path)
+            .await
+            .map_err(|error| match error {
+                thumbnails::ThumbnailError::DecodeImage {
+                    source: file_core::image_decode::ImageDecodeError::FfmpegMissing,
+                    ..
+                } => ImageProbeError::FfmpegMissing,
+                error => ImageProbeError::Failed(error.to_string()),
+            })?;
+    Ok(ImageProbe {
+        width,
+        height,
+        animated: animated.await.unwrap_or(false),
+    })
 }
 
 #[derive(Debug, Clone)]

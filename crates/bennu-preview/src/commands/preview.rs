@@ -14,7 +14,7 @@ use crate::audio_preview::{
     compute_audio_spectrogram, compute_audio_waveform, load_audio_cover, load_audio_lyrics,
     measure_audio_preview_duration, start_audio_preview_at,
 };
-use crate::original_image_preview::{load_image_dimensions, load_original_image_preview};
+use crate::original_image_preview::{load_original_image_preview, probe_image};
 use crate::preview::{
     DisplayMetrics, ImageInfo, RemotePreviewCacheFinished, RemotePreviewCacheMessage,
     RemotePreviewCacheProgress, VideoPreviewFrame,
@@ -166,7 +166,7 @@ pub fn image_preview_dimensions_command(path: PathBuf, generation: u64) -> Task<
     measure_display_command().then(move |display| {
         let image_path = image_path.clone();
         Task::done(PreviewMessage::PreviewDisplayMeasured(display)).chain(Task::perform(
-            load_image_dimensions(image_path.clone()),
+            probe_image(image_path.clone()),
             move |dimensions| {
                 PreviewMessage::ImagePreviewDimensionsLoaded(
                     image_path.clone(),

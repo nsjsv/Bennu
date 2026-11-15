@@ -52,10 +52,7 @@ impl FileBrowser {
         let rules = &self.user_config.preview_extension_rules;
         let is_image = |path: &Path| {
             self.entry_kind(path) == Some(FileKind::File)
-                && matches!(
-                    classify_preview_path(path, rules),
-                    Some(PreviewPathKind::Image | PreviewPathKind::AnimatedImage)
-                )
+                && classify_preview_path(path, rules) == Some(PreviewPathKind::Image)
         };
         let mut order = self.media_queue_order(&shown);
         if step == ImageStep::Previous {
@@ -136,12 +133,8 @@ mod tests {
             .into_iter()
             .map(PathBuf::from)
             .collect();
-        let is_image = |path: &Path| {
-            matches!(
-                classify_preview_path(path, &rules),
-                Some(PreviewPathKind::Image | PreviewPathKind::AnimatedImage)
-            )
-        };
+        let is_image =
+            |path: &Path| classify_preview_path(path, &rules) == Some(PreviewPathKind::Image);
         assert_eq!(
             next_media_after(&paths, Path::new("a.jpg"), is_image),
             Some(PathBuf::from("b.gif"))

@@ -25,6 +25,16 @@ impl super::PreviewEngine {
         self.animated_image_preview_generation
     }
 
+    /// 尺寸探测发现是动图（两帧以上）：改走动图播放。显示仍是加载中（上一张垫着）。
+    pub fn start_animated_image_preview(
+        &mut self,
+        path: PathBuf,
+        max_file_bytes: u64,
+    ) -> Task<PreviewMessage> {
+        let generation = self.next_animated_image_preview_generation();
+        crate::commands::preview::animated_image_preview_command(path, generation, max_file_bytes)
+    }
+
     pub fn accept_animated_image_preview_loaded(
         &mut self,
         path: PathBuf,

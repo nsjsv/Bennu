@@ -478,7 +478,11 @@ fn image_first_frame_hit_shows_thumbnail_without_pending_mark() {
         &mut daemon,
         path.clone(),
         generation,
-        Ok((2000, 3000)),
+        Ok(bennu_preview::original_image_preview::ImageProbe {
+            width: 2000,
+            height: 3000,
+            animated: false,
+        }),
     );
 
     let host = &daemon.preview;
@@ -522,7 +526,11 @@ fn image_first_frame_miss_marks_pending_and_cleared_by_failure() {
         &mut daemon,
         path.clone(),
         generation,
-        Ok((2000, 3000)),
+        Ok(bennu_preview::original_image_preview::ImageProbe {
+            width: 2000,
+            height: 3000,
+            animated: false,
+        }),
     );
 
     let host = &mut daemon.preview;
@@ -555,7 +563,11 @@ fn image_first_frame_pending_replaced_by_ready_reply() {
         &mut daemon,
         path.clone(),
         generation,
-        Ok((2000, 3000)),
+        Ok(bennu_preview::original_image_preview::ImageProbe {
+            width: 2000,
+            height: 3000,
+            animated: false,
+        }),
     );
 
     let request = preview_tier_request(&path);
@@ -582,7 +594,11 @@ fn late_smaller_thumbnail_never_downgrades_display() {
         &mut daemon,
         path.clone(),
         generation,
-        Ok((2000, 3000)),
+        Ok(bennu_preview::original_image_preview::ImageProbe {
+            width: 2000,
+            height: 3000,
+            animated: false,
+        }),
     );
 
     let edge = preview_edge_for_test_dimensions();
@@ -619,7 +635,11 @@ fn image_dimensions_without_session_falls_back_to_original_only() {
         &mut daemon,
         path.clone(),
         generation,
-        Ok((2000, 3000)),
+        Ok(bennu_preview::original_image_preview::ImageProbe {
+            width: 2000,
+            height: 3000,
+            animated: false,
+        }),
     );
 
     // 仍处 Loading（原图命令已发起，回信才上屏）；无等待标记。

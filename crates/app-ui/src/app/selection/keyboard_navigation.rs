@@ -9,8 +9,8 @@ use super::super::{
     PendingKeyboardColumnFocus,
 };
 use crate::commands::{
-    animated_image_preview_command, image_preview_dimensions_command,
-    load_expanded_directory_command, open_file_command, open_terminal_command, preview_command,
+    image_preview_dimensions_command, load_expanded_directory_command, open_file_command,
+    open_terminal_command, preview_command,
 };
 use crate::list_view::LIST_HEADER_HEIGHT;
 use crate::model::{
@@ -574,16 +574,7 @@ impl FileBrowser {
     ) -> Task<Message> {
         match classification {
             PreviewPathKind::Document => self.start_document_preview(path),
-            PreviewPathKind::AnimatedImage => {
-                self.preview_engine.show_image_loading(path.clone());
-                self.retract_global_error(GlobalErrorSource::Preview);
-                let max_file_bytes = self.preview_file_size_limit_for(&path);
-                let generation = self.preview_engine.next_animated_image_preview_generation();
-                Task::batch([
-                    animated_image_preview_command(path, generation, max_file_bytes),
-                    self.request_browser_session_save(),
-                ])
-            }
+            // 是不是动图由尺寸探测看内容决定（accept_image_preview_dimensions）。
             PreviewPathKind::Image => {
                 self.preview_engine.show_image_loading(path.clone());
                 self.retract_global_error(GlobalErrorSource::Preview);

@@ -15,9 +15,7 @@ use iced::window;
 use iced::Point;
 use iced::Task;
 
-use bennu_preview::commands::preview::{
-    animated_image_preview_command, image_preview_dimensions_command, preview_command,
-};
+use bennu_preview::commands::preview::{image_preview_dimensions_command, preview_command};
 use bennu_preview::engine::{
     default_preview_size, preview_content_size_from_window, preview_size_matches,
     preview_window_size_for_content, PreviewEngine, PreviewEngineConfig, PreviewLoadSurface,
@@ -321,15 +319,9 @@ impl PreviewHost {
                 // 引擎内部完成 Regular 开窗 + Loading 态 + prepare 命令。
                 self.engine.start_document_preview(path, max_file_bytes)
             }
-            PreviewPathKind::AnimatedImage => {
-                self.engine.show_image_loading(path.clone());
-                let generation = self.engine.next_animated_image_preview_generation();
-                let max_file_bytes = self.file_size_limit_for(&path);
-                animated_image_preview_command(path, generation, max_file_bytes)
-            }
             PreviewPathKind::Image => {
-                // 图片先完成尺寸探测，窗口按内容尺寸在探测回流时开启
-                // （accept_image_preview_dimensions）。
+                // 图片先完成尺寸探测（是不是动图也在这时看内容），窗口按内容尺寸在
+                // 探测回流时开启（accept_image_preview_dimensions）。
                 self.engine.show_image_loading(path.clone());
                 let generation = self.engine.next_original_image_preview_generation();
                 image_preview_dimensions_command(path, generation)

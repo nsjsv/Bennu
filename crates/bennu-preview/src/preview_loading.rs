@@ -9,7 +9,6 @@ use file_core::{
     ArchiveListingEntry, DirectoryEntry, ExternalTool, FileError, FileKind, ScanOptions,
 };
 
-use crate::animated_image_preview::is_animated_image_preview_path;
 use crate::audio_preview::{probe_audio_preview, AudioProbeError};
 use crate::formatting::format_file_size;
 use crate::preview::{
@@ -59,12 +58,9 @@ pub async fn load_preview(
                     }
                 }
                 // 文档、图片各有专门的加载命令，不经过这里；未分类的文件在宿主门禁就被拦下。
-                Some(
-                    PreviewPathKind::Document
-                    | PreviewPathKind::Image
-                    | PreviewPathKind::AnimatedImage,
-                )
-                | None => Err(unsupported_preview_kind()),
+                Some(PreviewPathKind::Document | PreviewPathKind::Image) | None => {
+                    Err(unsupported_preview_kind())
+                }
             }
         }
         FileKind::Symlink | FileKind::Other => Err(unsupported_preview_kind()),
@@ -94,7 +90,7 @@ pub enum PreviewPathKind {
     Document,
     Archive,
     Sqlite,
-    AnimatedImage,
+    /// 静态图和动图：是不是动图打开时看内容（尺寸探测）。
     Image,
     Video,
     Audio,
@@ -109,9 +105,7 @@ impl PreviewPathKind {
             PreviewPathKind::Document => Some(PreviewSizeLimitKind::Document),
             PreviewPathKind::Archive => Some(PreviewSizeLimitKind::Archive),
             PreviewPathKind::Sqlite => Some(PreviewSizeLimitKind::Sqlite),
-            PreviewPathKind::AnimatedImage | PreviewPathKind::Image => {
-                Some(PreviewSizeLimitKind::Image)
-            }
+            PreviewPathKind::Image => Some(PreviewSizeLimitKind::Image),
             PreviewPathKind::Video | PreviewPathKind::Audio | PreviewPathKind::Text => None,
         }
     }
@@ -128,7 +122,7 @@ impl PreviewPathKind {
 
 /// 返回 `None` 表示文件不属于任何可预览类型。文档、归档、SQLite
 /// 的后缀列表完全决定该类型识别哪些后缀（替换式）。图片、视频、音频：额外后缀直接算，
-/// 其余按类型库只看名字；gif 走动图渲染。
+/// 其余按类型库只看名字；动图打开时看内容。
 /// 文本是兜底：额外文本后缀直接算，其余按类型库只看名字——名字确定是
 /// 非文本类型的不预览，名字定不下来的（如 `.ts`：电视录像 / Qt 翻译）先放行，
 /// 打开时看内容定论，内容是视频就改按视频打开（`text_preview_loading::inspect_text_file`）。
@@ -148,9 +142,6 @@ pub fn classify_preview_path(
         return Some(PreviewPathKind::Sqlite);
     }
     if rules.matches(Kind::Image, path) || file_core::is_image_by_name(path) {
-        if is_animated_image_preview_path(path) {
-            return Some(PreviewPathKind::AnimatedImage);
-        }
         return Some(PreviewPathKind::Image);
     }
     if rules.matches(Kind::Video, path) || file_core::is_video_by_name(path) {

@@ -20,7 +20,7 @@ use crate::thumbnail_cache::{
     PREVIEW_THUMBNAIL_MAX_EDGE,
 };
 use bennu_preview::engine::PendingPreviewThumbnailDisplay;
-use bennu_preview::original_image_preview::{ImageProbeError, OriginalImagePreview};
+use bennu_preview::original_image_preview::{ImageProbe, ImageProbeError, OriginalImagePreview};
 
 #[cfg(test)]
 mod tests;
@@ -239,7 +239,7 @@ impl FileBrowser {
         &mut self,
         path: PathBuf,
         generation: u64,
-        dimensions: Result<(u32, u32), ImageProbeError>,
+        dimensions: Result<ImageProbe, ImageProbeError>,
     ) -> Task<Message> {
         let active_preview_loading = generation
             == self.preview_engine.original_image_preview_generation
@@ -252,7 +252,15 @@ impl FileBrowser {
         }
 
         let (width, height) = match dimensions {
-            Ok((width, height)) if width > 0 && height > 0 => (width, height),
+            // 两帧以上的 GIF/WebP/APNG：改走动图播放。
+            Ok(probe) if probe.animated => {
+                let max_file_bytes = self.preview_file_size_limit_for(&path);
+                return self
+                    .preview_engine
+                    .start_animated_image_preview(path, max_file_bytes)
+                    .map(Message::Preview);
+            }
+            Ok(ImageProbe { width, height, .. }) if width > 0 && height > 0 => (width, height),
             Ok(_) => {
                 tracing::warn!(
                     target: "app_ui::preview",

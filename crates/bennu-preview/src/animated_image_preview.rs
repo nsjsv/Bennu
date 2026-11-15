@@ -8,14 +8,15 @@ use iced::futures::channel::mpsc::Sender as IcedSender;
 use iced::futures::{SinkExt, Stream};
 use iced::widget::image as iced_image;
 use iced::Subscription;
-use image::codecs::gif::GifDecoder;
-use image::{AnimationDecoder, ImageDecoder};
 use tokio::time;
+
+mod container;
+pub use container::is_animated_image;
+use container::{chunk_frame_delays, open_frames, AnimationContainer, FRAME_DELAY_SCAN_LIMIT};
 
 use crate::preview_message::PreviewMessage;
 
 const MIN_ANIMATED_IMAGE_FRAME_DELAY: Duration = Duration::from_millis(10);
-const ANIMATED_IMAGE_PREVIEW_DURATION_FRAME_LIMIT: usize = 20_000;
 const ANIMATED_IMAGE_PREVIEW_MAX_RGBA_BYTES: usize = 128 * 1024 * 1024;
 /// 解码与输出之间的小队列：解码线程先行至多 2 帧，播放侧按节拍消费。
 const ANIMATED_IMAGE_DECODE_QUEUE_CAPACITY: usize = 2;
@@ -158,11 +159,6 @@ impl AnimatedImagePreview {
     }
 }
 
-pub fn is_animated_image_preview_path(path: &Path) -> bool {
-    path.extension()
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("gif"))
-}
-
 pub async fn load_animated_image_preview(
     path: PathBuf,
     generation: u64,
@@ -225,16 +221,12 @@ fn decode_first_animated_image_frame_at(
     generation: u64,
     start_position: Duration,
 ) -> Result<AnimatedImageFrame, String> {
-    let file = File::open(path)
-        .map_err(|error| format!("could not open animated image preview: {error}"))?;
-    let decoder = GifDecoder::new(BufReader::new(file))
-        .map_err(|error| format!("could not decode animated image preview: {error}"))?;
-    let (canvas_width, canvas_height) = decoder.dimensions();
+    let ((canvas_width, canvas_height), frames) = open_frames(path)?;
     validate_animated_image_frame_decode_budget(canvas_width, canvas_height)?;
 
     let mut position = Duration::ZERO;
     let mut first_frame = None;
-    for decoded_frame in decoder.into_frames() {
+    for decoded_frame in frames {
         let decoded_frame = decoded_frame
             .map_err(|error| format!("could not decode animated image frames: {error}"))?;
         let delay = normalized_frame_delay(decoded_frame.delay());
@@ -267,16 +259,12 @@ pub fn decode_animated_image_frames_into_channel(
     start_position: Duration,
     frame_sender: tokio::sync::mpsc::Sender<AnimatedImageFrame>,
 ) -> Result<(), String> {
-    let file = File::open(path)
-        .map_err(|error| format!("could not open animated image preview: {error}"))?;
-    let decoder = GifDecoder::new(BufReader::new(file))
-        .map_err(|error| format!("could not decode animated image preview: {error}"))?;
-    let (canvas_width, canvas_height) = decoder.dimensions();
+    let ((canvas_width, canvas_height), frames) = open_frames(path)?;
     validate_animated_image_frame_decode_budget(canvas_width, canvas_height)?;
 
     let mut position = Duration::ZERO;
     let mut sent_any_frame = false;
-    for decoded_frame in decoder.into_frames() {
+    for decoded_frame in frames {
         let decoded_frame = decoded_frame
             .map_err(|error| format!("could not decode animated image frames: {error}"))?;
         let delay = normalized_frame_delay(decoded_frame.delay());
@@ -316,7 +304,36 @@ pub fn decode_animated_image_frames_into_channel(
     Ok(())
 }
 
+/// 时长和要不要播：GIF 扫帧头，WebP、APNG 扫块表，都不解像素。
 pub fn inspect_animated_image_metadata(path: &Path) -> Result<AnimatedImageMetadata, String> {
+    match AnimationContainer::sniff(path) {
+        Some(AnimationContainer::Gif) => inspect_gif_metadata(path),
+        Some(container) => chunk_frame_delays(path, container)
+            .map(metadata_from_frame_delays)
+            .map_err(|error| format!("could not inspect animated image frames: {error}")),
+        None => Err(tr!("Animated image preview has no frames")),
+    }
+}
+
+/// 数不完（帧太多）就按未知时长播；只有一帧按静态显示。
+fn metadata_from_frame_delays(delays: Option<Vec<Duration>>) -> AnimatedImageMetadata {
+    match delays {
+        None => AnimatedImageMetadata {
+            duration: None,
+            playback: AnimatedImagePlayback::Animated,
+        },
+        Some(delays) if delays.len() > 1 => AnimatedImageMetadata {
+            duration: Some(delays.into_iter().map(normalized_delay).sum()),
+            playback: AnimatedImagePlayback::Animated,
+        },
+        Some(_) => AnimatedImageMetadata {
+            duration: None,
+            playback: AnimatedImagePlayback::Static,
+        },
+    }
+}
+
+fn inspect_gif_metadata(path: &Path) -> Result<AnimatedImageMetadata, String> {
     let file = File::open(path)
         .map_err(|error| format!("could not open animated image preview: {error}"))?;
     let mut options = gif::DecodeOptions::new();
@@ -338,7 +355,7 @@ pub fn inspect_animated_image_metadata(path: &Path) -> Result<AnimatedImageMetad
         frame_count = frame_count
             .checked_add(1)
             .ok_or_else(|| tr!("This GIF has too many frames to inspect safely"))?;
-        if frame_count > ANIMATED_IMAGE_PREVIEW_DURATION_FRAME_LIMIT {
+        if frame_count > FRAME_DELAY_SCAN_LIMIT {
             return Ok(AnimatedImageMetadata {
                 duration: None,
                 playback: AnimatedImagePlayback::Animated,
@@ -414,7 +431,7 @@ fn validate_animated_image_frame_decode_budget(width: u32, height: u32) -> Resul
 
 fn animated_image_preview_too_many_rgba_bytes_message() -> String {
     format!(
-        "This GIF is too large to preview safely: decoded RGBA frames are limited to {} MiB",
+        "This animation is too large to preview safely: decoded RGBA frames are limited to {} MiB",
         ANIMATED_IMAGE_PREVIEW_MAX_RGBA_BYTES / 1024 / 1024
     )
 }

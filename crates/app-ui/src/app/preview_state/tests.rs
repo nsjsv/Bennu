@@ -222,7 +222,15 @@ fn clear_preview_drops_pending_original_image_request() {
     let generation = browser
         .preview_engine
         .next_original_image_preview_generation();
-    drop(browser.accept_image_preview_dimensions(path, generation, Ok((320, 240))));
+    drop(browser.accept_image_preview_dimensions(
+        path,
+        generation,
+        Ok(bennu_preview::original_image_preview::ImageProbe {
+            width: 320,
+            height: 240,
+            animated: false,
+        }),
+    ));
     assert!(browser
         .preview_engine
         .pending_preview_thumbnail_display
@@ -254,7 +262,15 @@ fn new_original_request_drops_previous_pending_request() {
     let generation = browser
         .preview_engine
         .next_original_image_preview_generation();
-    drop(browser.accept_image_preview_dimensions(path, generation, Ok((320, 240))));
+    drop(browser.accept_image_preview_dimensions(
+        path,
+        generation,
+        Ok(bennu_preview::original_image_preview::ImageProbe {
+            width: 320,
+            height: 240,
+            animated: false,
+        }),
+    ));
     assert!(browser
         .preview_engine
         .pending_preview_thumbnail_display

@@ -282,7 +282,7 @@ fn classify_preview_path_matches_preview_dispatch() {
     );
     assert_eq!(
         classify_preview_path(Path::new("animation.gif"), &rules),
-        Some(PreviewPathKind::AnimatedImage)
+        Some(PreviewPathKind::Image)
     );
     assert_eq!(
         classify_preview_path(Path::new("photo.png"), &rules),
@@ -665,7 +665,6 @@ fn text_and_media_read_on_demand_without_a_size_limit_or_a_local_copy() {
         PreviewPathKind::Document,
         PreviewPathKind::Archive,
         PreviewPathKind::Sqlite,
-        PreviewPathKind::AnimatedImage,
         PreviewPathKind::Image,
     ] {
         assert!(kind.size_limit_kind().is_some(), "{kind:?}");

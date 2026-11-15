@@ -49,16 +49,3 @@ pub(crate) fn original_image_preview_command(
     )
     .map(Message::Preview)
 }
-
-pub(crate) fn animated_image_preview_command(
-    path: PathBuf,
-    generation: u64,
-    max_file_bytes: u64,
-) -> Task<Message> {
-    bennu_preview::commands::preview::animated_image_preview_command(
-        path,
-        generation,
-        max_file_bytes,
-    )
-    .map(Message::Preview)
-}

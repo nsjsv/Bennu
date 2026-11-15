@@ -110,7 +110,15 @@ fn stale_image_dimensions_do_not_start_an_original_preview_request() {
         .next_original_image_preview_generation();
     browser.preview_engine.clear_preview();
 
-    let command = browser.accept_image_preview_dimensions(path, stale_generation, Ok((320, 240)));
+    let command = browser.accept_image_preview_dimensions(
+        path,
+        stale_generation,
+        Ok(bennu_preview::original_image_preview::ImageProbe {
+            width: 320,
+            height: 240,
+            animated: false,
+        }),
+    );
 
     assert_eq!(command.units(), 0);
     assert!(browser.preview_engine.preview.is_none());
@@ -125,7 +133,15 @@ fn image_preview_without_directory_entry_opens_window_before_original_load() {
         .preview_engine
         .next_original_image_preview_generation();
 
-    let command = browser.accept_image_preview_dimensions(path.clone(), generation, Ok((320, 240)));
+    let command = browser.accept_image_preview_dimensions(
+        path.clone(),
+        generation,
+        Ok(bennu_preview::original_image_preview::ImageProbe {
+            width: 320,
+            height: 240,
+            animated: false,
+        }),
+    );
 
     assert!(matches!(
         &browser.preview_engine.preview,
@@ -163,7 +179,15 @@ fn ready_listing_thumbnail_shows_immediately_and_starts_original() {
         LIST_THUMBNAIL_EDGE,
     );
 
-    let command = browser.accept_image_preview_dimensions(path.clone(), generation, Ok((320, 240)));
+    let command = browser.accept_image_preview_dimensions(
+        path.clone(),
+        generation,
+        Ok(bennu_preview::original_image_preview::ImageProbe {
+            width: 320,
+            height: 240,
+            animated: false,
+        }),
+    );
 
     assert!(matches!(
         &browser.preview_engine.preview,
@@ -203,7 +227,15 @@ fn small_ready_thumbnail_upgrades_when_preview_thumbnail_arrives() {
         LIST_THUMBNAIL_EDGE,
     );
 
-    drop(browser.accept_image_preview_dimensions(path.clone(), generation, Ok((320, 240))));
+    drop(browser.accept_image_preview_dimensions(
+        path.clone(),
+        generation,
+        Ok(bennu_preview::original_image_preview::ImageProbe {
+            width: 320,
+            height: 240,
+            animated: false,
+        }),
+    ));
 
     // 预览档位缩略图已并行生成并派发;模拟生成完成返回:
     // 展示升级到更大尺寸帧,原图并行加载不受影响。
@@ -229,7 +261,15 @@ fn cold_cache_starts_original_and_display_upgrades_from_generated_thumbnail() {
         .preview_engine
         .next_original_image_preview_generation();
 
-    let command = browser.accept_image_preview_dimensions(path.clone(), generation, Ok((320, 240)));
+    let command = browser.accept_image_preview_dimensions(
+        path.clone(),
+        generation,
+        Ok(bennu_preview::original_image_preview::ImageProbe {
+            width: 320,
+            height: 240,
+            animated: false,
+        }),
+    );
 
     assert!(matches!(
         &browser.preview_engine.preview,
@@ -268,7 +308,15 @@ fn failed_preview_thumbnail_keeps_window_open_while_original_loads() {
         .preview_engine
         .next_original_image_preview_generation();
     let request = preview_request(&image_entry, 320, 240);
-    drop(browser.accept_image_preview_dimensions(path.clone(), generation, Ok((320, 240))));
+    drop(browser.accept_image_preview_dimensions(
+        path.clone(),
+        generation,
+        Ok(bennu_preview::original_image_preview::ImageProbe {
+            width: 320,
+            height: 240,
+            animated: false,
+        }),
+    ));
 
     assert!(browser.preview_engine.preview_window.is_some());
 
@@ -299,7 +347,15 @@ fn stale_preview_thumbnail_key_cannot_consume_current_request() {
     let expected_request = preview_request(&image_entry, 320, 240);
     let stale_request = request_for_entry(&image_entry, expected_request.max_edge + 128)
         .expect("stale preview thumbnail request");
-    drop(browser.accept_image_preview_dimensions(path.clone(), generation, Ok((320, 240))));
+    drop(browser.accept_image_preview_dimensions(
+        path.clone(),
+        generation,
+        Ok(bennu_preview::original_image_preview::ImageProbe {
+            width: 320,
+            height: 240,
+            animated: false,
+        }),
+    ));
 
     drop(browser.accept_thumbnail_batch(vec![ready_preview_outcome(stale_request, 400, 300)]));
 
@@ -335,7 +391,15 @@ fn expected_thumbnail_for_removed_entry_falls_back_to_original_result_window() {
         .preview_engine
         .next_original_image_preview_generation();
     let request = preview_request(&image_entry, 320, 240);
-    drop(browser.accept_image_preview_dimensions(path.clone(), generation, Ok((320, 240))));
+    drop(browser.accept_image_preview_dimensions(
+        path.clone(),
+        generation,
+        Ok(bennu_preview::original_image_preview::ImageProbe {
+            width: 320,
+            height: 240,
+            animated: false,
+        }),
+    ));
     browser.tab_mut().entries = Vec::new().into();
 
     let fallback_command =

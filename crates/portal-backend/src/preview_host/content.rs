@@ -13,7 +13,7 @@ use iced::Task;
 use bennu_preview::commands::preview::original_image_preview_command;
 use bennu_preview::document_preview::DocumentPreviewMessage;
 use bennu_preview::engine::{image_preview_size_from_dimensions, PendingPreviewThumbnailDisplay};
-use bennu_preview::original_image_preview::ImageProbeError;
+use bennu_preview::original_image_preview::{ImageProbe, ImageProbeError};
 use bennu_preview::preview::{ImagePreviewContent, PreviewContent, PreviewSize, PreviewState};
 use bennu_preview::preview_message::PreviewMessage;
 use thumbnails::{CachedThumbnail, ThumbnailRequest, ThumbnailSourceMetadata};
@@ -151,7 +151,7 @@ impl PreviewHost {
         daemon: &mut PickerDaemon,
         path: PathBuf,
         generation: u64,
-        dimensions: Result<(u32, u32), ImageProbeError>,
+        dimensions: Result<ImageProbe, ImageProbeError>,
     ) -> Task<Message> {
         let host = &mut daemon.preview;
         let active_loading = generation == host.engine.original_image_preview_generation
@@ -163,7 +163,15 @@ impl PreviewHost {
             return Task::none();
         }
         let (width, height) = match dimensions {
-            Ok((width, height)) if width > 0 && height > 0 => (width, height),
+            // 两帧以上的 GIF/WebP/APNG：改走动图播放。
+            Ok(probe) if probe.animated => {
+                let max_file_bytes = host.file_size_limit_for(&path);
+                return host
+                    .engine
+                    .start_animated_image_preview(path, max_file_bytes)
+                    .map(Message::Preview);
+            }
+            Ok(ImageProbe { width, height, .. }) if width > 0 && height > 0 => (width, height),
             Ok(_) => {
                 return host
                     .fail_image_preview_dimensions(

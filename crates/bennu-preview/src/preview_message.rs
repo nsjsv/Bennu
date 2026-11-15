@@ -16,7 +16,7 @@ use crate::animated_image_preview::{AnimatedImageFrame, AnimatedImagePreview};
 use crate::audio_preview::{AudioLyrics, AudioPreviewRuntime, AudioWaveform};
 use crate::document_preview::DocumentPreviewMessage;
 use crate::image_preview_viewport::PreviewImageViewportMessage;
-use crate::original_image_preview::{ImageProbeError, OriginalImagePreview};
+use crate::original_image_preview::{ImageProbe, ImageProbeError, OriginalImagePreview};
 use crate::preview::{
     AudioTimelineView, PreviewContent, RemotePreviewCacheMessage, RightPreviewPanelInfoSnapshot,
     VideoPreviewFrame,
@@ -49,7 +49,7 @@ pub enum PreviewMessage {
     MarkdownPreviewModeSelected(MarkdownPreviewMode),
     /// 用户为当前文本预览指定编码；只对这次预览有效。
     TextPreviewEncodingSelected(&'static encoding_rs::Encoding),
-    ImagePreviewDimensionsLoaded(PathBuf, u64, Result<(u32, u32), ImageProbeError>),
+    ImagePreviewDimensionsLoaded(PathBuf, u64, Result<ImageProbe, ImageProbeError>),
     /// ←/→：换到当前列表里的上一张/下一张图片（列表归宿主）。
     ImageStepRequested(ImageStep),
     /// 图片信息层开关（按钮、I 键）。

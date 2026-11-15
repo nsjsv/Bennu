@@ -8,9 +8,8 @@ use iced::Element;
 
 use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
 use crate::model::{
-    AudioPreviewPlayback, ImagePreviewViewport, Message, PreviewContent, PreviewSize, PreviewState,
-    ScrollbarRegion, SqlitePreviewMessage, SqlitePreviewTab, TextPreviewDocument,
-    VideoPreviewPlayback,
+    AudioPreviewPlayback, Message, PreviewContent, PreviewSize, PreviewState, ScrollbarRegion,
+    SqlitePreviewMessage, SqlitePreviewTab, TextPreviewDocument, VideoPreviewPlayback,
 };
 use bennu_preview::document_preview::{
     DocumentPreviewMessage, DocumentPreviewRequestKey, DocumentRenderKey, DocumentViewportKey,
@@ -29,11 +28,10 @@ pub(crate) fn view_preview_window<'a>(
     text_preview_document: Option<&'a TextPreviewDocument>,
     sqlite_preview_state: Option<&'a SqlitePreviewState>,
     size: PreviewSize,
-    image_preview_viewport: &ImagePreviewViewport,
+    image_view: bennu_preview::preview::ImageView<'a>,
     audio_preview: Option<&'a AudioPreviewPlayback>,
     audio_analysis: Option<&'a bennu_preview::preview::AudioAnalysis>,
     video_preview: Option<&'a VideoPreviewPlayback>,
-    image_info: Option<&'a bennu_preview::preview::ImageInfo>,
     media_settings: bennu_preview::preview_config::MediaPlaybackSettings,
     preview_bottom_controls_opacity: f32,
     operation_progress_animation_frame: u8,
@@ -45,11 +43,10 @@ pub(crate) fn view_preview_window<'a>(
         text_preview_document,
         sqlite_preview_state,
         size,
-        image_preview_viewport,
+        image_view,
         audio_preview,
         audio_analysis,
         video_preview,
-        image_info,
         media_settings,
         preview_bottom_controls_opacity,
         operation_progress_animation_frame,

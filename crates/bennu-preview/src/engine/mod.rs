@@ -56,6 +56,8 @@ pub struct PreviewEngine {
     /// 图片信息层开着没有：换图片时保持（一张张看信息），关预览窗口时关掉。
     pub(crate) image_info_visible: bool,
     pub(crate) image_info: Option<std::sync::Arc<crate::preview::ImageInfo>>,
+    /// 加载下一张图时垫着的上一张，连同它垫给的是哪个路径（只在加载那张时显示）。
+    pub(crate) loading_backdrop: Option<(std::path::PathBuf, crate::preview::ImagePreviewContent)>,
     pub remote_preview_download_generation: u64,
     pub text_preview_generation: u64,
     pub sqlite_preview: Option<crate::engine::sqlite::SqlitePreviewState>,
@@ -138,6 +140,7 @@ impl PreviewEngine {
             display_pixels: None,
             image_info_visible: false,
             image_info: None,
+            loading_backdrop: None,
             remote_preview_download_generation: 0,
             text_preview_generation: 0,
             sqlite_preview: None,
@@ -302,12 +305,15 @@ mod audio;
 mod audio_analysis;
 mod document;
 mod image_info;
+mod image_session;
 mod image_viewport;
 mod media;
 mod original_image;
 mod remote_cache;
 mod session;
 mod sqlite;
+#[cfg(test)]
+mod test_support;
 mod text;
 mod text_find;
 mod tree;

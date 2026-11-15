@@ -151,6 +151,14 @@ pub enum ImagePreviewContent {
     },
 }
 
+/// 视图画图片要的引擎状态：缩放视口、开着的信息层、加载下一张时垫着的上一张。
+#[derive(Debug, Clone, Copy)]
+pub struct ImageView<'a> {
+    pub viewport: &'a crate::image_preview_viewport::ImagePreviewViewport,
+    pub info: Option<&'a ImageInfo>,
+    pub loading_backdrop: Option<&'a ImagePreviewContent>,
+}
+
 /// 图片信息层的内容（后台读文件头得到）；跟着路径走，换了图旧的就不显示。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImageInfo {

@@ -50,6 +50,8 @@ pub enum PreviewMessage {
     /// 用户为当前文本预览指定编码；只对这次预览有效。
     TextPreviewEncodingSelected(&'static encoding_rs::Encoding),
     ImagePreviewDimensionsLoaded(PathBuf, u64, Result<(u32, u32), ImageProbeError>),
+    /// ←/→：换到当前列表里的上一张/下一张图片（列表归宿主）。
+    ImageStepRequested(ImageStep),
     /// 图片信息层开关（按钮、I 键）。
     ImageInfoToggled,
     ImageInfoLoaded(Arc<crate::preview::ImageInfo>),
@@ -135,6 +137,12 @@ pub enum PreviewMessage {
     /// （focused_window）不归引擎所有，由宿主认领。
     PreviewWindowPresented(window::Id),
     PreviewWindowInitialControlsElapsed(u64),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageStep {
+    Previous,
+    Next,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

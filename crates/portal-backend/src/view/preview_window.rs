@@ -42,11 +42,10 @@ pub(crate) fn preview_window_view(
         engine.text_preview_document.as_ref(),
         engine.sqlite_preview.as_ref(),
         engine.preview_size,
-        &engine.preview_image_viewport,
+        engine.image_view(),
         engine.audio_preview.as_ref(),
         engine.audio_analysis.as_ref(),
         engine.video_preview.as_ref(),
-        engine.visible_image_info(),
         engine.media_settings,
         engine.preview_window_bottom_controls.opacity(),
         // 不定进度动画帧：portal 不移植远程下载管线，无生产者，恒 0。

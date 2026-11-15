@@ -2,11 +2,15 @@
 //! 视频），把选中移过去。独立窗口重新打开预览；右侧面板由更新出口的收敛点
 //! （sync_right_preview_panel）自然跟上。引擎记着排进来的这个，打开时右侧面板也直接播、
 //! 全屏的接着全屏。
+//!
+//! 图片的 ←/→ 用同一个列表顺序换上一张/下一张图片（静态、动图都算），到头停下；独立窗口
+//! 不关窗，在原窗口里换内容。
 
 use std::path::{Path, PathBuf};
 
 use bennu_preview::engine::PreviewLoadSurface;
 use bennu_preview::preview_loading::{classify_preview_path, PreviewPathKind};
+use bennu_preview::preview_message::ImageStep;
 use file_core::FileKind;
 use iced::Task;
 
@@ -39,6 +43,36 @@ impl FileBrowser {
             PreviewLoadSurface::RightDockedPanel => Task::none(),
         };
         Task::batch([select, reopen])
+    }
+
+    pub(in crate::app) fn step_preview_image(&mut self, step: ImageStep) -> Task<Message> {
+        let Some(shown) = self.preview_engine.preview_shown_path.clone() else {
+            return Task::none();
+        };
+        let rules = &self.user_config.preview_extension_rules;
+        let is_image = |path: &Path| {
+            self.entry_kind(path) == Some(FileKind::File)
+                && matches!(
+                    classify_preview_path(path, rules),
+                    Some(PreviewPathKind::Image | PreviewPathKind::AnimatedImage)
+                )
+        };
+        let mut order = self.media_queue_order(&shown);
+        if step == ImageStep::Previous {
+            order.reverse();
+        }
+        let Some(neighbour) = next_media_after(&order, &shown, is_image) else {
+            return Task::none();
+        };
+        let select = self.select_path_from_keyboard(neighbour.clone());
+        let show = match self.preview_engine.preview_load_surface {
+            PreviewLoadSurface::StandaloneWindow => {
+                let pinned = self.preview_engine.preview_window_pinned;
+                self.present_preview_target(neighbour, pinned)
+            }
+            PreviewLoadSurface::RightDockedPanel => Task::none(),
+        };
+        Task::batch([select, show])
     }
 
     /// 「当前列表的顺序」：搜索结果按结果顺序；多栏按这首所在的那一栏；列表、图标按当前可见顺序。
@@ -93,6 +127,36 @@ mod tests {
             next_media_after(&paths, Path::new("gone.mp3"), is_audio),
             None
         );
+    }
+
+    #[test]
+    fn neighbouring_images_skip_other_files_both_ways() {
+        let rules = bennu_preview::preview_config::PreviewExtensionRules::default_rules();
+        let mut paths: Vec<PathBuf> = ["a.jpg", "song.mp3", "b.gif", "notes.txt", "c.heic"]
+            .into_iter()
+            .map(PathBuf::from)
+            .collect();
+        let is_image = |path: &Path| {
+            matches!(
+                classify_preview_path(path, &rules),
+                Some(PreviewPathKind::Image | PreviewPathKind::AnimatedImage)
+            )
+        };
+        assert_eq!(
+            next_media_after(&paths, Path::new("a.jpg"), is_image),
+            Some(PathBuf::from("b.gif"))
+        );
+        assert_eq!(
+            next_media_after(&paths, Path::new("c.heic"), is_image),
+            None
+        );
+        // 往前找就是倒过来的列表往后找；第一张再往前停下。
+        paths.reverse();
+        assert_eq!(
+            next_media_after(&paths, Path::new("c.heic"), is_image),
+            Some(PathBuf::from("b.gif"))
+        );
+        assert_eq!(next_media_after(&paths, Path::new("a.jpg"), is_image), None);
     }
 
     #[test]

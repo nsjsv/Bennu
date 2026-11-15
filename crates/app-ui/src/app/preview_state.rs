@@ -125,6 +125,7 @@ impl FileBrowser {
             PreviewMessage::MediaNextRequested(finished, kind) => {
                 self.play_next_media(finished, kind)
             }
+            PreviewMessage::ImageStepRequested(step) => self.step_preview_image(step),
             engine_message => {
                 unreachable!("{engine_message:?} 由 PreviewEngine::handle 处理，不会还给宿主")
             }

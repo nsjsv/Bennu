@@ -12,9 +12,7 @@ use iced::Task;
 
 use bennu_preview::commands::preview::original_image_preview_command;
 use bennu_preview::document_preview::DocumentPreviewMessage;
-use bennu_preview::engine::{
-    image_preview_size_from_dimensions, PendingPreviewThumbnailDisplay, PreviewLoadSurface,
-};
+use bennu_preview::engine::{image_preview_size_from_dimensions, PendingPreviewThumbnailDisplay};
 use bennu_preview::original_image_preview::ImageProbeError;
 use bennu_preview::preview::{ImagePreviewContent, PreviewContent, PreviewSize, PreviewState};
 use bennu_preview::preview_message::PreviewMessage;
@@ -186,14 +184,10 @@ impl PreviewHost {
                     .map(Message::Preview)
             }
         };
-        let window_command =
-            if host.engine.preview_load_surface == PreviewLoadSurface::StandaloneWindow {
-                host.engine
-                    .open_image_preview_window_for_dimensions(width, height)
-                    .map(Message::Preview)
-            } else {
-                Task::none()
-            };
+        let window_command = host
+            .engine
+            .fit_image_preview_window(Some((width, height)))
+            .map(Message::Preview);
         let cancellation = host
             .engine
             .original_image_preview_cancel
@@ -368,8 +362,10 @@ impl PreviewHost {
                 self.engine.set_media_end_action(action);
                 Task::none()
             }
-            // 对话框从不设成「播下一首」，引擎不会要下一首。
-            PreviewMessage::MediaNextRequested(..) => Task::none(),
+            // 对话框从不设成「播下一首」，引擎不会要下一首；也不做上一张/下一张（同一规矩）。
+            PreviewMessage::MediaNextRequested(..) | PreviewMessage::ImageStepRequested(_) => {
+                Task::none()
+            }
             // 窗口在消息回到宿主前已被关掉时，焦点簿记不能指向已死窗口。
             PreviewMessage::PreviewWindowPresented(window) => {
                 if self.engine.preview_window == Some(window) {

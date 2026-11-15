@@ -481,7 +481,16 @@ impl FileBrowser {
         let Some(path) = self.tab().selected.clone() else {
             return Task::none();
         };
+        close_window_command.chain(self.present_preview_target(path, pinned))
+    }
 
+    /// 打开预览的后半段：登记目标、过门禁（不能预览、太大、远程先下载），再按类型加载。
+    /// 空格先关窗再走这里；←/→ 换图在原来的窗口里直接走这里。
+    pub(in crate::app) fn present_preview_target(
+        &mut self,
+        path: PathBuf,
+        pinned: bool,
+    ) -> Task<Message> {
         let kind = self.entry_kind(&path).unwrap_or(FileKind::Other);
         self.preview_engine.preview_shown_path = Some(path.clone());
         if kind == FileKind::File {
@@ -491,20 +500,20 @@ impl FileBrowser {
                 classify_preview_path(&path, &self.user_config.preview_extension_rules)
             else {
                 self.preview_engine.preview_window_pinned = pinned;
-                return close_window_command.chain(self.show_unpreviewable_file_preview());
+                return self.show_unpreviewable_file_preview();
             };
             if let Some(command) = self.reject_oversized_file_preview(&path) {
-                return close_window_command.chain(command);
+                return command;
             }
             // 文本按需读挂载路径，不先整个下载。
             if classification.needs_local_copy() && self.path_is_remote_mount(&path) {
                 self.preview_engine.preview_window_pinned = pinned;
-                return close_window_command.chain(self.start_remote_preview_download(path));
+                return self.start_remote_preview_download(path);
             }
         }
 
         self.preview_engine.preview_window_pinned = pinned;
-        close_window_command.chain(self.open_preview_for_resolved_path(path, kind))
+        self.open_preview_for_resolved_path(path, kind)
     }
 
     /// QuickLook 式占位：不可预览类型弹预览窗口显示错误，与“文件太大”同一表现。
@@ -566,7 +575,7 @@ impl FileBrowser {
         match classification {
             PreviewPathKind::Document => self.start_document_preview(path),
             PreviewPathKind::AnimatedImage => {
-                self.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
+                self.preview_engine.show_image_loading(path.clone());
                 self.retract_global_error(GlobalErrorSource::Preview);
                 let max_file_bytes = self.preview_file_size_limit_for(&path);
                 let generation = self.preview_engine.next_animated_image_preview_generation();
@@ -576,7 +585,7 @@ impl FileBrowser {
                 ])
             }
             PreviewPathKind::Image => {
-                self.preview_engine.preview = Some(PreviewState::Loading(path.clone()));
+                self.preview_engine.show_image_loading(path.clone());
                 self.retract_global_error(GlobalErrorSource::Preview);
                 let generation = self.preview_engine.next_original_image_preview_generation();
                 Task::batch([

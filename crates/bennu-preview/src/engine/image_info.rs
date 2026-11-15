@@ -65,27 +65,12 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
 
-    use crate::engine::{
-        default_preview_size, PreviewEngine, PreviewEngineConfig, PreviewWindowIdentity,
-    };
-    use crate::preview::{
-        ImageInfo, ImagePreviewContent, PreviewContent, PreviewState, PreviewWindowProfile,
-    };
-    use crate::preview_config::PreviewFileSizeLimits;
+    use crate::engine::test_support::test_engine;
+    use crate::engine::{PreviewEngine, PreviewLoadSurface};
+    use crate::preview::{ImageInfo, ImagePreviewContent, PreviewContent, PreviewState};
 
     fn engine_showing(path: &str) -> PreviewEngine {
-        let mut engine = PreviewEngine::new(
-            PreviewEngineConfig {
-                directory_expand_levels: 1,
-                extension_rules: Default::default(),
-                size_limits: PreviewFileSizeLimits::with_default_limits(),
-            },
-            default_preview_size(PreviewWindowProfile::Regular),
-            PreviewWindowIdentity {
-                app_id: "bennu-preview-tests".to_owned(),
-                icon: None,
-            },
-        );
+        let mut engine = test_engine(PreviewLoadSurface::RightDockedPanel);
         engine.preview = Some(PreviewState::Ready(PreviewContent::Image(
             ImagePreviewContent::OriginalSvg {
                 path: PathBuf::from(path),

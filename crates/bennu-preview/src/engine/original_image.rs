@@ -80,6 +80,7 @@ impl super::PreviewEngine {
             return Task::none();
         }
         self.pending_preview_thumbnail_display = None;
+        self.loading_backdrop = None;
         // 独立窗口会话在内容就绪后按内容尺寸补开/适配窗口，键盘归图片（缩放键）;
         // 面板会话始终不动窗口,内容按面板视口渲染,点一下才拿键盘。
         let presents_in_window =
@@ -129,15 +130,8 @@ impl super::PreviewEngine {
                 height,
                 has_intrinsic_size,
             }) => {
-                let window_command = if presents_in_window {
-                    if has_intrinsic_size {
-                        self.open_image_preview_window_for_dimensions(width, height)
-                    } else {
-                        self.open_image_preview_window_with_default_size()
-                    }
-                } else {
-                    Task::none()
-                };
+                let window_command =
+                    self.fit_image_preview_window(has_intrinsic_size.then_some((width, height)));
                 self.preview = Some(PreviewState::Ready(PreviewContent::Image(
                     ImagePreviewContent::OriginalSvg {
                         path,

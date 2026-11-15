@@ -135,6 +135,7 @@ impl super::PreviewEngine {
         }
         self.invalidate_animated_image_preview();
         self.invalidate_original_image_preview();
+        self.loading_backdrop = None;
         self.cancel_document_preview();
         self.cancel_remote_preview_download();
         self.text_preview_document = None;

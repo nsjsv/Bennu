@@ -301,15 +301,11 @@ impl FileBrowser {
                 .clone()
                 .expect("image preview generation must own cancellation"),
         };
-        let window_command = if self.preview_engine.preview_load_surface
-            == bennu_preview::engine::PreviewLoadSurface::StandaloneWindow
-        {
-            self.preview_engine
-                .open_image_preview_window_for_dimensions(width, height)
-                .map(Message::Preview)
-        } else {
-            Task::none()
-        };
+        // 在图片窗口里换图不改窗口大小（用户调过的留着）。
+        let window_command = self
+            .preview_engine
+            .fit_image_preview_window(Some((width, height)))
+            .map(Message::Preview);
         let Some(entry) = self.entry_for_path(&path).cloned() else {
             return Task::batch([window_command, original.load_command()]);
         };

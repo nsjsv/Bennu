@@ -493,6 +493,7 @@ fn every_message_the_engine_returns_has_a_host_handler() {
         PreviewMessage::TextFileChanged { document: 7 },
         PreviewMessage::PreviewTreeDirectoryToggled(0),
         PreviewMessage::PreviewImageViewport(PreviewImageViewportMessage::FitRequested),
+        PreviewMessage::ImageStepRequested(bennu_preview::preview_message::ImageStep::Next),
         PreviewMessage::PreviewWindowPresented(iced::window::Id::unique()),
     ] {
         drop(browser.update(Message::Preview(message)));

@@ -1,6 +1,6 @@
 //! 音频、视频、图片预览的键盘：包住面板的可聚焦壳。音视频：回车播放/暂停，←/→ 后退/前进 5 秒
 //! （Shift 加按 30 秒），↑/↓ 音量 ±5%，F 视频进出全屏（Esc 退全屏归宿主的 Esc 路由），I 视频信息层。
-//! 图片：+/- 缩放一档，0 适应窗口，1 原始大小，I 信息层。空格不接，照旧开关预览窗口。点一下面板才聚焦
+//! 图片：+/- 缩放一档，0 适应窗口，1 原始大小，I 信息层，←/→ 上一张/下一张。空格不接，照旧开关预览窗口。点一下面板才聚焦
 //! （独立预览窗口打开时由 `focus_preview_keyboard` 聚焦），点别处失焦——右侧面板里
 //! 方向键默认还归文件列表。
 
@@ -12,7 +12,7 @@ use iced::keyboard::{self, key::Named};
 use iced::{Element, Event, Length, Rectangle, Size, Vector};
 
 use crate::image_preview_viewport::PreviewImageViewportMessage;
-use crate::preview_message::{MediaKeyCommand, PreviewMessage};
+use crate::preview_message::{ImageStep, MediaKeyCommand, PreviewMessage};
 
 const SHORT_SEEK: Duration = Duration::from_secs(5);
 const LONG_SEEK: Duration = Duration::from_secs(30);
@@ -107,8 +107,15 @@ pub(crate) fn image_key_message(
     if modifiers.command() || modifiers.alt() || modifiers.logo() || modifiers.control() {
         return None;
     }
-    let keyboard::Key::Character(character) = key.as_ref() else {
-        return None;
+    let character = match key.as_ref() {
+        keyboard::Key::Named(Named::ArrowLeft) => {
+            return Some(PreviewMessage::ImageStepRequested(ImageStep::Previous))
+        }
+        keyboard::Key::Named(Named::ArrowRight) => {
+            return Some(PreviewMessage::ImageStepRequested(ImageStep::Next))
+        }
+        keyboard::Key::Character(character) => character,
+        _ => return None,
     };
     if character.eq_ignore_ascii_case("i") {
         return Some(PreviewMessage::ImageInfoToggled);
@@ -330,6 +337,19 @@ mod tests {
         assert_eq!(zoom("1", none).as_deref(), Some("ActualSizeRequested"));
         assert_eq!(zoom("1", keyboard::Modifiers::CTRL), None);
         assert_eq!(zoom("x", none), None);
+        assert!(matches!(
+            image_key_message(&named(Named::ArrowRight), none),
+            Some(PreviewMessage::ImageStepRequested(ImageStep::Next))
+        ));
+        assert!(matches!(
+            image_key_message(&named(Named::ArrowLeft), none),
+            Some(PreviewMessage::ImageStepRequested(ImageStep::Previous))
+        ));
+        assert!(matches!(
+            image_key_message(&character("i"), none),
+            Some(PreviewMessage::ImageInfoToggled)
+        ));
+        assert!(image_key_message(&named(Named::ArrowLeft), keyboard::Modifiers::CTRL).is_none());
     }
 
     #[test]

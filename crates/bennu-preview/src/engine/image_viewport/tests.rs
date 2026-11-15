@@ -2,17 +2,13 @@ use std::path::PathBuf;
 
 use iced::widget::image;
 
-use crate::engine::{
-    default_preview_size, PreviewEngine, PreviewEngineConfig, PreviewLoadSurface,
-    PreviewWindowIdentity,
-};
+use crate::engine::test_support::test_engine;
+use crate::engine::{PreviewEngine, PreviewLoadSurface};
 use crate::image_preview_viewport::PreviewImageViewportMessage;
 use crate::original_image_preview::OriginalImagePreview;
 use crate::preview::{
     DisplayMetrics, ImagePreviewContent, PreviewContent, PreviewSize, PreviewState,
-    PreviewWindowProfile,
 };
-use crate::preview_config::PreviewFileSizeLimits;
 
 const PANEL: PreviewSize = PreviewSize {
     width: 800.0,
@@ -20,20 +16,7 @@ const PANEL: PreviewSize = PreviewSize {
 };
 
 fn engine() -> PreviewEngine {
-    let mut engine = PreviewEngine::new(
-        PreviewEngineConfig {
-            directory_expand_levels: 1,
-            extension_rules: Default::default(),
-            size_limits: PreviewFileSizeLimits::with_default_limits(),
-        },
-        default_preview_size(PreviewWindowProfile::Regular),
-        PreviewWindowIdentity {
-            app_id: "bennu-preview-tests".to_owned(),
-            icon: None,
-        },
-    );
-    engine.preview_load_surface = PreviewLoadSurface::RightDockedPanel;
-    engine
+    test_engine(PreviewLoadSurface::RightDockedPanel)
 }
 
 /// 原图 3200×2400，按屏幕大小解成 1600×1200。

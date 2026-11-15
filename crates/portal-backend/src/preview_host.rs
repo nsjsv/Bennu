@@ -322,7 +322,7 @@ impl PreviewHost {
                 self.engine.start_document_preview(path, max_file_bytes)
             }
             PreviewPathKind::AnimatedImage => {
-                self.engine.preview = Some(PreviewState::Loading(path.clone()));
+                self.engine.show_image_loading(path.clone());
                 let generation = self.engine.next_animated_image_preview_generation();
                 let max_file_bytes = self.file_size_limit_for(&path);
                 animated_image_preview_command(path, generation, max_file_bytes)
@@ -330,7 +330,7 @@ impl PreviewHost {
             PreviewPathKind::Image => {
                 // 图片先完成尺寸探测，窗口按内容尺寸在探测回流时开启
                 // （accept_image_preview_dimensions）。
-                self.engine.preview = Some(PreviewState::Loading(path.clone()));
+                self.engine.show_image_loading(path.clone());
                 let generation = self.engine.next_original_image_preview_generation();
                 image_preview_dimensions_command(path, generation)
             }

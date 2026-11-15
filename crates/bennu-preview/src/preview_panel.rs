@@ -16,13 +16,12 @@ use crate::audio_preview_panel::{audio_preview_panel, AudioPanelInput};
 use crate::document_preview_panel::document_preview_panel;
 use crate::engine::SqlitePreviewState;
 use crate::image_preview_panel::image_preview_panel;
-use crate::image_preview_viewport::ImagePreviewViewport;
 use crate::media_keys::{image_keys, media_keys};
 use crate::operation_progress::remote_preview_download_panel;
 use crate::panel_text::readable_text;
 use crate::preview::PreviewSize;
 use crate::preview::VideoPreviewPlayback;
-use crate::preview::{AudioAnalysis, AudioPreviewPlayback, ImageInfo};
+use crate::preview::{AudioAnalysis, AudioPreviewPlayback, ImageView};
 use crate::preview::{PreviewContent, PreviewState};
 use crate::preview_config::MediaPlaybackSettings;
 use crate::preview_message::PreviewMessage;
@@ -44,11 +43,10 @@ pub fn view_preview_window<'a, Message>(
     text_preview_document: Option<&'a TextPreviewDocument>,
     sqlite_preview_state: Option<&'a SqlitePreviewState>,
     size: PreviewSize,
-    image_preview_viewport: &ImagePreviewViewport,
+    image_view: ImageView<'a>,
     audio_preview: Option<&'a AudioPreviewPlayback>,
     audio_analysis: Option<&'a AudioAnalysis>,
     video_preview: Option<&'a VideoPreviewPlayback>,
-    image_info: Option<&'a ImageInfo>,
     media_settings: MediaPlaybackSettings,
     preview_bottom_controls_opacity: f32,
     operation_progress_animation_frame: u8,
@@ -73,11 +71,10 @@ where
             text_preview_document,
             sqlite_preview_state,
             size,
-            image_preview_viewport,
+            image_view,
             audio_preview,
             audio_analysis,
             video_preview,
-            image_info,
             media_settings,
             preview_bottom_controls_opacity,
             operation_progress_animation_frame,
@@ -105,11 +102,10 @@ fn preview_panel<'a, Message>(
     text_preview_document: Option<&'a TextPreviewDocument>,
     sqlite_preview_state: Option<&'a SqlitePreviewState>,
     size: PreviewSize,
-    image_preview_viewport: &ImagePreviewViewport,
+    image_view: ImageView<'a>,
     audio_preview: Option<&'a AudioPreviewPlayback>,
     audio_analysis: Option<&'a AudioAnalysis>,
     video_preview: Option<&'a VideoPreviewPlayback>,
-    image_info: Option<&'a ImageInfo>,
     media_settings: MediaPlaybackSettings,
     preview_bottom_controls_opacity: f32,
     operation_progress_animation_frame: u8,
@@ -129,7 +125,18 @@ where
     Message: 'static + Clone + From<PreviewMessage>,
 {
     let panel: Element<'a, Message> = match preview {
-        PreviewState::Loading(_) => column![readable_text(tr!("Loading preview..."))].into(),
+        // 连着看图时上一张垫着，新图第一帧到了才换（不闪「加载中」）。
+        PreviewState::Loading(_) => match image_view.loading_backdrop {
+            // 和显示图片时同一套键盘壳：连按方向键时焦点不丢。
+            Some(backdrop) => image_keys(image_preview_panel(
+                backdrop,
+                size,
+                image_view.viewport,
+                0.0,
+                None,
+            )),
+            None => column![readable_text(tr!("Loading preview..."))].into(),
+        },
         PreviewState::DownloadingRemoteFile(download) => {
             remote_preview_download_panel(download, operation_progress_animation_frame).into()
         }
@@ -162,9 +169,9 @@ where
         PreviewState::Ready(PreviewContent::Image(content)) => image_keys(image_preview_panel(
             content,
             size,
-            image_preview_viewport,
+            image_view.viewport,
             preview_bottom_controls_opacity,
-            image_info,
+            image_view.info,
         )),
         PreviewState::Ready(PreviewContent::AnimatedImage(preview)) => {
             animated_image_preview_panel(preview, size, preview_bottom_controls_opacity)

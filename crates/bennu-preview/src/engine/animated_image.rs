@@ -54,12 +54,15 @@ impl super::PreviewEngine {
             Ok(preview) => {
                 let width = preview.width();
                 let height = preview.height();
+                self.loading_backdrop = None;
                 self.text_preview_document = None;
                 self.clear_audio_preview();
                 self.clear_video_preview();
                 self.preview = Some(PreviewState::Ready(PreviewContent::AnimatedImage(preview)));
-                // 窗口尺寸跟随内容只归独立窗口会话;面板按面板视口适配。
-                let command = if self.preview_load_surface == PreviewLoadSurface::StandaloneWindow {
+                // 窗口尺寸跟随内容只归独立窗口会话;面板按面板视口适配;在图片窗口里换图不改大小。
+                let command = if self.preview_load_surface == PreviewLoadSurface::StandaloneWindow
+                    && !self.shows_image_window()
+                {
                     self.open_animated_image_preview_window_for_dimensions(width, height)
                 } else {
                     Task::none()

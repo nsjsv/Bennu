@@ -10,6 +10,7 @@ use image::codecs::jpeg::JpegDecoder;
 use image::metadata::Orientation;
 use image::ImageDecoder;
 
+use super::iso_media::{box_uuid, descend, iso_boxes, IsoBox};
 use super::tiff::{
     ByteSource, Ifd, TiffReader, TAG_COMPRESSION, TAG_JPEG_LENGTH, TAG_JPEG_OFFSET,
     TAG_ORIENTATION, TAG_STRIP_BYTE_COUNTS, TAG_STRIP_OFFSETS,
@@ -43,6 +44,10 @@ pub(super) struct EmbeddedPreview {
 }
 
 impl EmbeddedPreview {
+    pub(super) fn jpeg(&self) -> &[u8] {
+        &self.jpeg
+    }
+
     /// 解码器（只读了头）、该用的方向。
     pub(super) fn decoder(&self) -> Result<(PreviewDecoder<'_>, Orientation), ImageDecodeError> {
         let mut decoder = JpegDecoder::new(Cursor::new(self.jpeg.as_slice()))?;
@@ -54,27 +59,59 @@ impl EmbeddedPreview {
     }
 }
 
-pub(super) fn read_embedded_preview(path: &Path) -> Result<EmbeddedPreview, ImageDecodeError> {
-    let mut file = File::open(path)?;
-    let file_len = file.metadata()?.len();
+/// RAW 文件的三种结构，预览图和拍摄参数各在不同地方。
+pub(super) enum RawLayout {
+    Tiff,
+    Raf,
+    Cr3(Cr3Metadata),
+}
+
+/// CR3 把 IFD0、EXIF、GPS 三个目录分别存成三段 TIFF（CMT1、CMT2、CMT4），这里是各段的开头。
+#[derive(Default)]
+pub(super) struct Cr3Metadata {
+    pub(super) primary: Option<u64>,
+    pub(super) exif: Option<u64>,
+    pub(super) gps: Option<u64>,
+}
+
+pub(super) fn raw_layout(file: &mut File, file_len: u64) -> io::Result<RawLayout> {
     let mut head = [0; 16];
     let head_len = file_len.min(16) as usize;
     file.read_exact_at(0, &mut head[..head_len])?;
-    let (candidates, raw_orientation) = if head == RAF_SIGNATURE {
-        (raf_candidates(&mut file)?, None)
+    Ok(if head == RAF_SIGNATURE {
+        RawLayout::Raf
     } else if &head[4..8] == b"ftyp" {
-        let (candidates, orientation) = cr3_candidates(&mut file, file_len)?;
-        (candidates, Some(orientation))
+        RawLayout::Cr3(cr3_metadata(file, file_len)?)
     } else {
-        let mut reader = TiffReader::open(file, 0)?;
-        let directories = reader.directories()?;
-        let orientation = directories
-            .first()
-            .and_then(|ifd0| reader.first_unsigned(ifd0, TAG_ORIENTATION))
-            .map_or(Orientation::NoTransforms, exif_orientation);
-        let candidates = tiff_candidates(&mut reader, &directories);
-        file = reader.into_source();
-        (candidates, Some(orientation))
+        RawLayout::Tiff
+    })
+}
+
+pub(super) fn read_embedded_preview(path: &Path) -> Result<EmbeddedPreview, ImageDecodeError> {
+    let mut file = File::open(path)?;
+    let file_len = file.metadata()?.len();
+    let (candidates, raw_orientation) = match raw_layout(&mut file, file_len)? {
+        RawLayout::Raf => (raf_candidates(&mut file)?, None),
+        RawLayout::Cr3(metadata) => {
+            let orientation = match metadata.primary {
+                Some(start) => {
+                    tiff_orientation(&mut file, start).unwrap_or(Orientation::NoTransforms)
+                }
+                None => Orientation::NoTransforms,
+            };
+            (cr3_candidates(&mut file, file_len)?, Some(orientation))
+        }
+        RawLayout::Tiff => {
+            let mut reader = TiffReader::open(file, 0)?;
+            let directories = reader.directories()?;
+            let orientation = directories
+                .first()
+                .and_then(|ifd0| reader.first_unsigned(ifd0, TAG_ORIENTATION))
+                .map_or(Orientation::NoTransforms, exif_orientation);
+            let candidates = tiff_candidates(&mut reader, &directories);
+            file = reader.into_source();
+            (candidates, Some(orientation))
+        }
     };
     let jpeg = largest_displayable_jpeg(&mut file, file_len, candidates)?;
     Ok(EmbeddedPreview {
@@ -138,22 +175,35 @@ fn raf_candidates(file: &mut File) -> io::Result<Vec<ByteRange>> {
 
 /// CR3：第一条轨道的第一帧是整张 JPEG；另有一个中等大小的预览框（PRVW）。方向记在元数据框
 /// CMT1 里（一段 TIFF）。
-fn cr3_candidates(file: &mut File, file_len: u64) -> io::Result<(Vec<ByteRange>, Orientation)> {
+fn cr3_metadata(file: &mut File, file_len: u64) -> io::Result<Cr3Metadata> {
+    let mut metadata = Cr3Metadata::default();
+    for top in iso_boxes(file, 0, file_len)? {
+        if &top.kind != b"moov" {
+            continue;
+        }
+        for child in iso_boxes(file, top.payload, top.end)? {
+            if &child.kind != b"uuid" || box_uuid(file, &child)? != CANON_METADATA_UUID {
+                continue;
+            }
+            for section in iso_boxes(file, child.payload + 16, child.end)? {
+                match &section.kind {
+                    b"CMT1" => metadata.primary = Some(section.payload),
+                    b"CMT2" => metadata.exif = Some(section.payload),
+                    b"CMT4" => metadata.gps = Some(section.payload),
+                    _ => {}
+                }
+            }
+        }
+    }
+    Ok(metadata)
+}
+
+/// CR3：第一条轨道的第一帧是整张 JPEG；另有一个中等大小的预览框（PRVW）。
+fn cr3_candidates(file: &mut File, file_len: u64) -> io::Result<Vec<ByteRange>> {
     let mut candidates = Vec::new();
-    let mut orientation = Orientation::NoTransforms;
     for top in iso_boxes(file, 0, file_len)? {
         match &top.kind {
             b"moov" => {
-                for child in iso_boxes(file, top.payload, top.end)? {
-                    if &child.kind == b"uuid" && box_uuid(file, &child)? == CANON_METADATA_UUID {
-                        for metadata in iso_boxes(file, child.payload + 16, child.end)? {
-                            if &metadata.kind == b"CMT1" {
-                                orientation = cr3_orientation(file, metadata.payload)
-                                    .unwrap_or(Orientation::NoTransforms);
-                            }
-                        }
-                    }
-                }
                 if let Some(range) = first_track_sample(file, &top)? {
                     candidates.push(range);
                 }
@@ -178,10 +228,10 @@ fn cr3_candidates(file: &mut File, file_len: u64) -> io::Result<(Vec<ByteRange>,
             _ => {}
         }
     }
-    Ok((candidates, orientation))
+    Ok(candidates)
 }
 
-fn cr3_orientation(file: &mut File, tiff_start: u64) -> io::Result<Orientation> {
+fn tiff_orientation(file: &mut File, tiff_start: u64) -> io::Result<Orientation> {
     let mut reader = TiffReader::open(file, tiff_start)?;
     let directories = reader.directories()?;
     Ok(directories
@@ -235,72 +285,6 @@ fn first_track_sample(file: &mut File, moov: &IsoBox) -> io::Result<Option<ByteR
     Ok(size
         .zip(offset)
         .map(|(size, offset)| (offset, u64::from(size))))
-}
-
-fn descend(file: &mut File, parent: &IsoBox, path: &[&[u8; 4]]) -> io::Result<Option<IsoBox>> {
-    let mut current = IsoBox {
-        kind: parent.kind,
-        payload: parent.payload,
-        end: parent.end,
-    };
-    for kind in path {
-        let Some(child) = iso_boxes(file, current.payload, current.end)?
-            .into_iter()
-            .find(|child| &child.kind == *kind)
-        else {
-            return Ok(None);
-        };
-        current = child;
-    }
-    Ok(Some(current))
-}
-
-struct IsoBox {
-    kind: [u8; 4],
-    payload: u64,
-    end: u64,
-}
-
-fn iso_boxes(file: &mut File, mut offset: u64, end: u64) -> io::Result<Vec<IsoBox>> {
-    let mut boxes = Vec::new();
-    while offset + 8 <= end {
-        let mut header = [0; 16];
-        file.read_exact_at(offset, &mut header[..8])?;
-        let size = u64::from(u32::from_be_bytes([
-            header[0], header[1], header[2], header[3],
-        ]));
-        let kind = [header[4], header[5], header[6], header[7]];
-        let (size, header_len) = match size {
-            0 => (end - offset, 8),
-            1 => {
-                file.read_exact_at(offset + 8, &mut header[8..16])?;
-                let large = u64::from_be_bytes([
-                    header[8], header[9], header[10], header[11], header[12], header[13],
-                    header[14], header[15],
-                ]);
-                (large, 16)
-            }
-            size => (size, 8),
-        };
-        if size < header_len || offset + size > end {
-            break;
-        }
-        boxes.push(IsoBox {
-            kind,
-            payload: offset + header_len,
-            end: offset + size,
-        });
-        offset += size;
-    }
-    Ok(boxes)
-}
-
-fn box_uuid(file: &mut File, uuid_box: &IsoBox) -> io::Result<[u8; 16]> {
-    let mut uuid = [0; 16];
-    if uuid_box.end - uuid_box.payload >= 16 {
-        file.read_exact_at(uuid_box.payload, &mut uuid)?;
-    }
-    Ok(uuid)
 }
 
 /// 候选里最大的、看帧头是普通 JPEG（不是存原始数据用的无损 JPEG）的那段。

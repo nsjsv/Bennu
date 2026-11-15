@@ -50,6 +50,9 @@ pub enum PreviewMessage {
     /// 用户为当前文本预览指定编码；只对这次预览有效。
     TextPreviewEncodingSelected(&'static encoding_rs::Encoding),
     ImagePreviewDimensionsLoaded(PathBuf, u64, Result<(u32, u32), ImageProbeError>),
+    /// 图片信息层开关（按钮、I 键）。
+    ImageInfoToggled,
+    ImageInfoLoaded(Arc<crate::preview::ImageInfo>),
     /// 屏幕量好了（量不到是 None）：图片按它定解多大、1:1 怎么算。
     PreviewDisplayMeasured(Option<crate::preview::DisplayMetrics>),
     PreviewImageViewport(PreviewImageViewportMessage),

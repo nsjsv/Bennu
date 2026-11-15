@@ -2,14 +2,9 @@
 
 use bennu_localization::{format_duration, format_file_size, tr};
 
+use crate::info_overlay::InfoRow;
 use crate::preview::VideoPreviewDetails;
 use crate::video_preview::{AudioTrack, SubtitleChoice, VideoStreamFacts, VideoTransfer};
-
-/// 信息层的一行：名称和内容。
-pub(crate) struct InfoRow {
-    pub label: String,
-    pub value: String,
-}
 
 /// 信息层：分辨率、帧率、时长、视频编码、码率、动态范围、各音轨、各字幕、容器、大小。
 /// 都来自打开时那一次 ffprobe，读不到的行不写。

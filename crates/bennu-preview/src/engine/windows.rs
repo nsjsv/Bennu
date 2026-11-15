@@ -456,6 +456,7 @@ impl PreviewEngine {
     pub fn close_preview_window(&mut self) -> (Option<Id>, Task<PreviewMessage>) {
         // 先复位固定，保证 clear_preview 的固定守卫不会跳过内容清理。
         self.preview_window_pinned = false;
+        self.image_info_visible = false;
         if self.video_fullscreen == Some(super::video_fullscreen::VideoFullscreen::PreviewWindow) {
             self.video_fullscreen = None;
             self.fullscreen_idle = super::video_fullscreen::FullscreenIdle::default();

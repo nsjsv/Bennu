@@ -53,6 +53,9 @@ pub struct PreviewEngine {
     pub(crate) full_image_requested: bool,
     /// 预览所在屏幕的物理像素：原图按它解；量不到时按 4K。
     pub(crate) display_pixels: Option<iced::Size<u32>>,
+    /// 图片信息层开着没有：换图片时保持（一张张看信息），关预览窗口时关掉。
+    pub(crate) image_info_visible: bool,
+    pub(crate) image_info: Option<std::sync::Arc<crate::preview::ImageInfo>>,
     pub remote_preview_download_generation: u64,
     pub text_preview_generation: u64,
     pub sqlite_preview: Option<crate::engine::sqlite::SqlitePreviewState>,
@@ -133,6 +136,8 @@ impl PreviewEngine {
             original_image_preview_cancel: None,
             full_image_requested: false,
             display_pixels: None,
+            image_info_visible: false,
+            image_info: None,
             remote_preview_download_generation: 0,
             text_preview_generation: 0,
             sqlite_preview: None,
@@ -246,6 +251,8 @@ impl PreviewEngine {
                 self.accept_video_display(&path, display)
             }
             PreviewMessage::PreviewDisplayMeasured(display) => self.accept_preview_display(display),
+            PreviewMessage::ImageInfoToggled => self.toggle_image_info(),
+            PreviewMessage::ImageInfoLoaded(info) => self.accept_image_info(info),
             PreviewMessage::VideoPreviewSeekRequested(position) => {
                 self.seek_video_preview_playback(position)
             }
@@ -294,6 +301,7 @@ mod animated_image;
 mod audio;
 mod audio_analysis;
 mod document;
+mod image_info;
 mod image_viewport;
 mod media;
 mod original_image;

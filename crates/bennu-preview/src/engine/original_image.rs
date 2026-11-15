@@ -140,6 +140,7 @@ impl super::PreviewEngine {
                 };
                 self.preview = Some(PreviewState::Ready(PreviewContent::Image(
                     ImagePreviewContent::OriginalSvg {
+                        path,
                         handle,
                         width,
                         height,
@@ -156,7 +157,7 @@ impl super::PreviewEngine {
                 }
             }
         };
-        Task::batch([window_command, focus])
+        Task::batch([window_command, focus, self.request_image_info()])
     }
 
     /// 放大后要的原尺寸到了：换上，视口不动。解不了（超出内存上限）就留着按屏幕大小那张。

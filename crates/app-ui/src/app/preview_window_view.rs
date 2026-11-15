@@ -22,6 +22,7 @@ impl FileBrowser {
             preview_engine.audio_preview.as_ref(),
             preview_engine.audio_analysis.as_ref(),
             preview_engine.video_preview.as_ref(),
+            preview_engine.visible_image_info(),
             preview_engine.media_settings,
             preview_bottom_controls_opacity,
             self.operation_progress_animation_frame,

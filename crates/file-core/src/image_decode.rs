@@ -3,8 +3,12 @@
 //! 可以要求不超过某个大小（预览按屏幕大小、缩略图按档位），大图不用先解成原尺寸再缩。
 
 mod camera_raw;
+mod facts;
 mod ffmpeg_still;
+mod iso_media;
 mod tiff;
+
+pub use facts::{image_facts, ImageFacts};
 
 use std::path::Path;
 

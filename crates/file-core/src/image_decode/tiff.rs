@@ -17,13 +17,17 @@ pub(crate) const TAG_SUB_IFDS: u16 = 0x014A;
 pub(crate) const TAG_JPEG_OFFSET: u16 = 0x0201;
 pub(crate) const TAG_JPEG_LENGTH: u16 = 0x0202;
 pub(crate) const TAG_EXIF_IFD: u16 = 0x8769;
+pub(crate) const TAG_GPS_IFD: u16 = 0x8825;
 
 const TYPE_BYTE: u16 = 1;
+const TYPE_ASCII: u16 = 2;
 const TYPE_SHORT: u16 = 3;
 const TYPE_LONG: u16 = 4;
+const TYPE_RATIONAL: u16 = 5;
 const TYPE_UNDEFINED: u16 = 7;
 const TYPE_SSHORT: u16 = 8;
 const TYPE_SLONG: u16 = 9;
+const TYPE_SRATIONAL: u16 = 10;
 const TYPE_IFD: u16 = 13;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -150,6 +154,47 @@ impl<S: ByteSource> TiffReader<S> {
             directories.push(ifd);
         }
         Ok(directories)
+    }
+
+    pub(crate) fn first_directory(&mut self) -> io::Result<Ifd> {
+        self.read_ifd(self.first_ifd)
+    }
+
+    /// 顺着指针标签（EXIF、GPS 目录）读子目录。
+    pub(crate) fn linked_directory(&mut self, ifd: &Ifd, tag: u16) -> Option<Ifd> {
+        let offset = self.first_unsigned(ifd, tag)?;
+        self.read_ifd(offset).ok()
+    }
+
+    /// 文字标签，去掉末尾的 NUL 和空白；空的算没有。
+    pub(crate) fn ascii(&mut self, ifd: &Ifd, tag: u16) -> Option<String> {
+        let entry = *ifd.entry(tag)?;
+        if entry.field_type != TYPE_ASCII || entry.count > MAX_VALUES_PER_TAG {
+            return None;
+        }
+        let bytes = self.value_bytes(&entry, 1).ok()?;
+        let text = String::from_utf8_lossy(&bytes);
+        let text = text.trim_end_matches('\0').trim();
+        (!text.is_empty()).then(|| text.to_owned())
+    }
+
+    /// 分数标签（分子, 分母）；有符号的按无符号读，曝光、光圈、坐标都不会是负数。
+    pub(crate) fn rationals(&mut self, ifd: &Ifd, tag: u16) -> Option<Vec<(u32, u32)>> {
+        let entry = *ifd.entry(tag)?;
+        if !matches!(entry.field_type, TYPE_RATIONAL | TYPE_SRATIONAL)
+            || entry.count > MAX_VALUES_PER_TAG
+        {
+            return None;
+        }
+        let bytes = self.value_bytes(&entry, 8).ok()?;
+        Some(
+            bytes
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .map(|value| (self.u32_from(&value[..4]), self.u32_from(&value[4..])))
+                .collect(),
+        )
     }
 
     fn read_ifd(&mut self, offset: u32) -> io::Result<Ifd> {

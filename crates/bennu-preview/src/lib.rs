@@ -83,7 +83,9 @@ pub mod media_controls;
 pub mod preview_surface;
 // 静态图片预览面板（缩略图/光栅/SVG）与缩放平移媒体区。
 mod checkerboard;
+mod image_info_text;
 pub mod image_preview_panel;
+mod info_overlay;
 // 音频预览面板（标题摘要/时间线控制/音量控制）。
 mod audio_lyrics_view;
 pub mod audio_preview_panel;

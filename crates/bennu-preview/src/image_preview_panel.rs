@@ -12,10 +12,12 @@ use bennu_theme::translated_surface::translated_surface;
 use bennu_theme::ui_colors;
 
 use crate::checkerboard::checkerboard;
+use crate::image_info_text::image_info_rows;
 use crate::image_preview_viewport::{ImagePreviewViewport, PreviewImageViewportMessage};
+use crate::info_overlay::info_overlay;
 use crate::media_controls::{faded_media_button_style, faded_media_icon, faded_media_text_style};
 use crate::panel_text::readable_text;
-use crate::preview::{image_preview_size, ImagePreviewContent, PreviewSize};
+use crate::preview::{image_preview_size, ImageInfo, ImagePreviewContent, PreviewSize};
 use crate::preview_message::PreviewMessage;
 
 const ZOOM_CONTROL_BUTTON_SIZE: f32 = 28.0;
@@ -32,6 +34,7 @@ pub(crate) fn image_preview_panel<Message>(
     size: PreviewSize,
     viewport: &ImagePreviewViewport,
     controls_opacity: f32,
+    info: Option<&ImageInfo>,
 ) -> Element<'static, Message>
 where
     Message: 'static + Clone + From<PreviewMessage>,
@@ -61,6 +64,9 @@ where
     let mut layers = Stack::with_children([media])
         .width(Length::Fill)
         .height(Length::Fill);
+    if let Some(info) = info {
+        layers = layers.push(info_overlay(image_info_rows(content, info)));
+    }
     if let Some(percent) = percent {
         if controls_opacity > f32::EPSILON {
             layers = layers.push(zoom_controls_layer(percent, controls_opacity));
@@ -169,7 +175,7 @@ where
         .into()
 }
 
-/// 底部居中浮着的一条：缩小、比例、放大、适应窗口/1:1。跟主题配色，深浅主题、图片明暗下都看得清。
+/// 底部居中浮着的一条：缩小、比例、放大、适应窗口/1:1、信息。跟主题配色，深浅主题、图片明暗下都看得清。
 fn zoom_controls_layer<Message>(percent: f32, opacity: f32) -> Element<'static, Message>
 where
     Message: 'static + Clone + From<PreviewMessage>,
@@ -213,6 +219,16 @@ where
         icon_button(IconSymbol::ZoomIn, PreviewImageViewportMessage::ZoomedIn),
         Space::new().width(Length::Fixed(4.0)),
         toggle,
+        button(faded_media_icon(
+            IconSymbol::Info,
+            ZOOM_CONTROL_ICON_SIZE,
+            opacity
+        ))
+        .on_press(Message::from(PreviewMessage::ImageInfoToggled))
+        .padding(6)
+        .width(Length::Fixed(ZOOM_CONTROL_BUTTON_SIZE))
+        .height(Length::Fixed(ZOOM_CONTROL_BUTTON_SIZE))
+        .style(move |theme, status| faded_media_button_style(theme, status, opacity)),
     ]
     .spacing(2)
     .align_y(Alignment::Center);

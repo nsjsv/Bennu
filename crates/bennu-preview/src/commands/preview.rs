@@ -16,7 +16,7 @@ use crate::audio_preview::{
 };
 use crate::original_image_preview::{load_image_dimensions, load_original_image_preview};
 use crate::preview::{
-    DisplayMetrics, RemotePreviewCacheFinished, RemotePreviewCacheMessage,
+    DisplayMetrics, ImageInfo, RemotePreviewCacheFinished, RemotePreviewCacheMessage,
     RemotePreviewCacheProgress, VideoPreviewFrame,
 };
 use crate::preview_config::PreviewExtensionRules;
@@ -131,6 +131,33 @@ pub fn preview_directory_children_command(
             PreviewMessage::PreviewDirectoryChildrenLoaded(parent_path.clone(), children_outcome)
         },
     )
+}
+
+/// 图片信息层要的文件头信息；读不了的项留空，所以这里不报错。
+pub(crate) fn image_info_command(
+    path: PathBuf,
+    kind: file_core::ImageKind,
+) -> Task<PreviewMessage> {
+    let read = move || {
+        let byte_len = std::fs::metadata(&path).map_or(0, |metadata| metadata.len());
+        let facts = match kind {
+            file_core::ImageKind::Vector => file_core::image_decode::ImageFacts {
+                format: Some("SVG".to_owned()),
+                ..Default::default()
+            },
+            file_core::ImageKind::Raster(source) => {
+                file_core::image_decode::image_facts(&path, source)
+            }
+        };
+        ImageInfo {
+            path,
+            facts,
+            byte_len,
+        }
+    };
+    // 读的线程崩了就是没有信息，信息层不出来，再按一次 I 重读。
+    Task::future(async move { tokio::task::spawn_blocking(read).await.ok() })
+        .and_then(|info| Task::done(PreviewMessage::ImageInfoLoaded(Arc::new(info))))
 }
 
 /// 先量屏幕（原图按屏幕大小解、1:1 要知道缩放倍数），量完再读尺寸：宿主收到尺寸时屏幕一定量好了。

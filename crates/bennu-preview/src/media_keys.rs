@@ -1,6 +1,6 @@
 //! 音频、视频、图片预览的键盘：包住面板的可聚焦壳。音视频：回车播放/暂停，←/→ 后退/前进 5 秒
 //! （Shift 加按 30 秒），↑/↓ 音量 ±5%，F 视频进出全屏（Esc 退全屏归宿主的 Esc 路由），I 视频信息层。
-//! 图片：+/- 缩放一档，0 适应窗口，1 原始大小。空格不接，照旧开关预览窗口。点一下面板才聚焦
+//! 图片：+/- 缩放一档，0 适应窗口，1 原始大小，I 信息层。空格不接，照旧开关预览窗口。点一下面板才聚焦
 //! （独立预览窗口打开时由 `focus_preview_keyboard` 聚焦），点别处失焦——右侧面板里
 //! 方向键默认还归文件列表。
 
@@ -110,6 +110,9 @@ pub(crate) fn image_key_message(
     let keyboard::Key::Character(character) = key.as_ref() else {
         return None;
     };
+    if character.eq_ignore_ascii_case("i") {
+        return Some(PreviewMessage::ImageInfoToggled);
+    }
     let viewport = match character {
         "+" | "=" => PreviewImageViewportMessage::ZoomedIn,
         "-" => PreviewImageViewportMessage::ZoomedOut,

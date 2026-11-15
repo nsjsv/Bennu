@@ -144,13 +144,38 @@ pub enum ImagePreviewContent {
         has_alpha: bool,
     },
     OriginalSvg {
+        path: PathBuf,
         handle: svg::Handle,
         width: u32,
         height: u32,
     },
 }
 
+/// 图片信息层的内容（后台读文件头得到）；跟着路径走，换了图旧的就不显示。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImageInfo {
+    pub path: PathBuf,
+    pub facts: file_core::image_decode::ImageFacts,
+    pub byte_len: u64,
+}
+
 impl ImagePreviewContent {
+    /// 显示的是哪个文件、按什么方式画（信息层、上一张/下一张用）。缩略图占位时还不算。
+    pub fn shown_source(&self) -> Option<(&Path, file_core::ImageKind)> {
+        match self {
+            ImagePreviewContent::Thumbnail { .. } => None,
+            ImagePreviewContent::OriginalRaster { path, .. } => Some((
+                path,
+                file_core::image_kind_by_name(path).unwrap_or(file_core::ImageKind::Raster(
+                    file_core::RasterSource::Picture,
+                )),
+            )),
+            ImagePreviewContent::OriginalSvg { path, .. } => {
+                Some((path, file_core::ImageKind::Vector))
+            }
+        }
+    }
+
     /// 原始像素尺寸；缩略图形态取缩略图尺寸，fit 计算只看纵横比时二者等价。
     pub fn dimensions(&self) -> (u32, u32) {
         match self {

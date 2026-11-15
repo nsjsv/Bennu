@@ -73,6 +73,10 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Shutter speed", "快门"),
     // 压缩包
     ("%1 unpacked", "解压后 %1"),
+    // 文件夹预览
+    ("%1 in total", "共 %1"),
+    ("Calculating… %1", "正在计算… %1"),
+    ("Reading…", "正在读取…"),
     ("packed to %1%", "压缩到 %1%"),
     // 文档文字层
     ("Could not read the document's text: %1", "读不出文档里的文字：%1"),

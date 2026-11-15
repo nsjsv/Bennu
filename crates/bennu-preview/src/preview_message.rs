@@ -8,7 +8,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use file_core::DirectoryEntry;
 use iced::widget::image;
 use iced::window;
 
@@ -34,7 +33,13 @@ pub enum PreviewMessage {
     AnimatedImagePreviewLoaded(PathBuf, u64, Result<AnimatedImagePreview, String>),
     OriginalImagePreviewLoaded(PathBuf, u64, Result<OriginalImagePreview, String>),
     RetryImagePreview(PathBuf),
-    PreviewDirectoryChildrenLoaded(PathBuf, Result<Vec<DirectoryEntry>, String>),
+    FolderPreview(crate::folder_preview::FolderPreviewMessage),
+    /// 文件夹预览里双击（或回车）了一项：打开它归宿主（主窗口进入文件夹、用默认程序
+    /// 打开文件；对话框进入文件夹、选这个文件）。
+    FolderEntryOpened {
+        path: PathBuf,
+        kind: file_core::FileKind,
+    },
     /// 文本查看器的可见范围、跳转、超出窗口的复制。
     TextViewer(TextViewerEvent),
     /// 文本文档的后台读取回来了；`document` 不是当前文档就丢弃。
@@ -126,7 +131,7 @@ pub enum PreviewMessage {
     VideoPreviewFinished(PathBuf, u64),
     VideoPreviewFailed(PathBuf, u64, String),
     PreviewTreeDirectoryToggled(usize),
-    /// 压缩包树滚到哪了：只排看得见的行。
+    /// 文件夹、压缩包树滚到哪了：只排看得见的行。
     PreviewTreeScrolled(crate::preview::TreeViewport),
     PreviewTreeAnimationTick,
     RightPreviewPanelInfoLoaded {

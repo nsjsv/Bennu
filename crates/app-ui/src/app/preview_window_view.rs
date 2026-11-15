@@ -18,6 +18,7 @@ impl FileBrowser {
             preview_engine.text_preview_document.as_ref(),
             preview_engine.sqlite_preview.as_ref(),
             size,
+            bennu_preview::engine::PreviewLoadSurface::StandaloneWindow,
             preview_engine.image_view(),
             preview_engine.audio_preview.as_ref(),
             preview_engine.audio_analysis.as_ref(),

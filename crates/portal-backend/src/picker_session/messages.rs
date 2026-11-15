@@ -20,6 +20,11 @@ pub(crate) enum SessionMessage {
     EntryDoubleClicked {
         index: usize,
     },
+    /// 文件夹预览里双击（或回车）了一项。
+    PreviewEntryOpened {
+        path: std::path::PathBuf,
+        kind: file_core::FileKind,
+    },
     /// 目录行的展开/收起开关（访达列表语义）。
     EntryExpandToggled {
         index: usize,

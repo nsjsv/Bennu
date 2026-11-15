@@ -1,13 +1,11 @@
 //! 预览会话状态机：accept_preview 的内容分派与 clear_preview 的会话
 //! 收尾，自 app-ui 的 app/preview_state.rs 迁入（impl FileBrowser →
 //! impl PreviewEngine，逐字节保真；Task 输出统一为 PreviewMessage）。
-//! 目录展开的扫描选项与展开层数是宿主目录域快照，由宿主转发层实时
-//! 读取传入（引擎配置快照只随持久化刷新，宿主直读保证测试与运行期
-//! 行为一致）；全局错误通知的清除归宿主通知域，经验收结论回传。
+//! 文件夹自动展开的层数是宿主的设置，由宿主转发层实时读取传入；全局
+//! 错误通知的清除归宿主通知域，经验收结论回传。
 
 use std::path::PathBuf;
 
-use file_core::ScanOptions;
 use iced::widget::image;
 use iced::Task;
 
@@ -23,7 +21,6 @@ impl super::PreviewEngine {
         &mut self,
         path: PathBuf,
         preview_outcome: Result<PreviewContent, String>,
-        options: ScanOptions,
         expand_levels: u8,
     ) -> (PreviewAcceptance, Task<PreviewMessage>) {
         let is_active_preview_request = matches!(
@@ -36,15 +33,10 @@ impl super::PreviewEngine {
 
         match preview_outcome {
             Ok(mut preview) => {
-                let mut directory_expand_command = Task::none();
-                if let PreviewContent::Directory { entries, .. } = &mut preview {
-                    let range = 0..entries.len();
-                    directory_expand_command = super::auto_expand_preview_tree_directories(
-                        entries,
-                        range,
-                        expand_levels,
-                        &options,
-                    );
+                let mut folder_command = Task::none();
+                if let PreviewContent::Folder(folder) = &mut preview {
+                    self.folder_preview_generation += 1;
+                    folder_command = folder.begin(self.folder_preview_generation, expand_levels);
                 }
                 let command = match &preview {
                     PreviewContent::Text { path, opened } => {
@@ -107,7 +99,7 @@ impl super::PreviewEngine {
                 self.preview = Some(PreviewState::Ready(preview));
                 (
                     PreviewAcceptance::ContentReady,
-                    Task::batch([command, directory_expand_command]),
+                    Task::batch([command, folder_command]),
                 )
             }
             Err(error) => {

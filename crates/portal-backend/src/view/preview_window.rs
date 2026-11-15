@@ -42,6 +42,7 @@ pub(crate) fn preview_window_view(
         engine.text_preview_document.as_ref(),
         engine.sqlite_preview.as_ref(),
         engine.preview_size,
+        bennu_preview::engine::PreviewLoadSurface::StandaloneWindow,
         engine.image_view(),
         engine.audio_preview.as_ref(),
         engine.audio_analysis.as_ref(),
@@ -117,7 +118,8 @@ fn directory_scroll_wiring() -> ScrollRegionWiring<'static, Message> {
     ScrollRegionWiring {
         smooth_scroll_wrap: smooth_scroll_wrap(PreviewScrollRegion::Directory),
         scrollable_id: preview_scroll_id(PreviewScrollRegion::Directory),
-        on_scroll: None,
+        // 和压缩包一样只排看得见的行：视口回给引擎。
+        on_scroll: Some(Box::new(tree_viewport_message)),
     }
 }
 
@@ -126,15 +128,17 @@ fn archive_scroll_wiring() -> ScrollRegionWiring<'static, Message> {
         smooth_scroll_wrap: smooth_scroll_wrap(PreviewScrollRegion::Archive),
         scrollable_id: preview_scroll_id(PreviewScrollRegion::Archive),
         // 压缩包几万条只排看得见的行：视口回给引擎。
-        on_scroll: Some(Box::new(|viewport| {
-            Message::from(PreviewMessage::PreviewTreeScrolled(
-                bennu_preview::preview::TreeViewport {
-                    offset: viewport.absolute_offset().y,
-                    height: viewport.bounds().height,
-                },
-            ))
-        })),
+        on_scroll: Some(Box::new(tree_viewport_message)),
     }
+}
+
+fn tree_viewport_message(viewport: iced::widget::scrollable::Viewport) -> Message {
+    Message::from(PreviewMessage::PreviewTreeScrolled(
+        bennu_preview::preview::TreeViewport {
+            offset: viewport.absolute_offset().y,
+            height: viewport.bounds().height,
+        },
+    ))
 }
 
 // 文档分页滚动接线：视口事件按当前文档会话的视口 key 归档到对应渲染

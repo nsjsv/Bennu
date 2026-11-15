@@ -13,7 +13,7 @@ use crate::document_preview::PendingDocumentPreview;
 use crate::image_preview_viewport::ImagePreviewViewport;
 use crate::preview::{
     AudioAnalysis, AudioAnalysisCache, AudioPreviewPlayback, PreviewBottomControlsState,
-    PreviewContent, PreviewSize, PreviewState, PreviewWindowProfile, VideoPreviewPlayback,
+    PreviewSize, PreviewState, PreviewWindowProfile, VideoPreviewPlayback,
 };
 use crate::preview_config::{MediaPlaybackSettings, PreviewExtensionRules, PreviewFileSizeLimits};
 use crate::preview_message::PreviewMessage;
@@ -62,6 +62,8 @@ pub struct PreviewEngine {
     pub(crate) loading_backdrop: Option<(std::path::PathBuf, crate::preview::ImagePreviewContent)>,
     pub remote_preview_download_generation: u64,
     pub text_preview_generation: u64,
+    /// 文件夹预览会话的代号：读目录、监视的回流带着它，旧会话的丢弃。
+    pub folder_preview_generation: u64,
     pub sqlite_preview: Option<crate::engine::sqlite::SqlitePreviewState>,
     pub sqlite_preview_generation: u64,
     pub sqlite_tables_resize_drag: Option<crate::engine::sqlite::SqliteTablesResizeDrag>,
@@ -146,6 +148,7 @@ impl PreviewEngine {
             loading_backdrop: None,
             remote_preview_download_generation: 0,
             text_preview_generation: 0,
+            folder_preview_generation: 0,
             sqlite_preview: None,
             sqlite_preview_generation: 0,
             sqlite_tables_resize_drag: None,
@@ -215,13 +218,13 @@ impl PreviewEngine {
             PreviewMessage::MarkdownPreviewModeSelected(mode) => self.select_markdown_mode(mode),
             PreviewMessage::PreviewTreeAnimationTick => self.advance_preview_tree_animation(),
             PreviewMessage::PreviewTreeScrolled(scrolled) => {
-                if let Some(PreviewState::Ready(PreviewContent::Archive { viewport, .. })) =
-                    &mut self.preview
-                {
-                    *viewport = scrolled;
-                }
+                self.scroll_preview_tree(scrolled);
                 Task::none()
             }
+            PreviewMessage::PreviewTreeDirectoryToggled(entry_id) => {
+                self.toggle_archive_tree_directory(entry_id)
+            }
+            PreviewMessage::FolderPreview(message) => self.handle_folder_preview_message(message),
             PreviewMessage::PreviewWindowPinToggled => self.toggle_preview_window_pin(),
             PreviewMessage::PreviewWindowInitialControlsElapsed(generation) => {
                 self.hide_preview_window_initial_controls(generation);
@@ -333,6 +336,7 @@ mod audio;
 mod audio_analysis;
 mod document;
 mod document_text;
+mod folder;
 mod image_info;
 mod image_session;
 mod image_viewport;
@@ -355,7 +359,6 @@ pub use media::{audio_preview_tick_subscription, video_preview_tick_subscription
 pub use original_image::PendingPreviewThumbnailDisplay;
 pub use remote_cache::RemotePreviewCacheCompletion;
 pub use sqlite::{SqlitePreviewState, SqliteTablesResizeDrag, SQLITE_DEFAULT_TABLES_WIDTH};
-pub use tree::auto_expand_preview_tree_directories;
 pub use windows::{
     animated_image_preview_size_from_dimensions, clamp_preview_size_to_minimum,
     default_preview_size, image_preview_initial_fit_max_size, image_preview_size_from_dimensions,

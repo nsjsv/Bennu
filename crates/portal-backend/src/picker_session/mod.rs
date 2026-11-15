@@ -112,6 +112,8 @@ pub(crate) struct PickerSession {
     /// 视图切换后待揭示的主选中项：切换瞬间视口缓存仍是旧视图几何，
     /// 推迟到 List 探针回信（新几何就位）再滚动；按路径记，行集已变则丢弃。
     pending_view_switch_reveal: Option<PathBuf>,
+    /// 文件夹预览里双击的文件：进入它所在的文件夹，列表载好后对它做一次双击。
+    pending_preview_activation: Option<PathBuf>,
     reply: Option<oneshot::Sender<PickerResolution>>,
 }
 
@@ -178,6 +180,7 @@ impl PickerSession {
             chosen_view_mode: view_mode,
             columns: ColumnsState::new(start_directory),
             pending_view_switch_reveal: None,
+            pending_preview_activation: None,
             reply: Some(reply),
         }
     }
@@ -294,8 +297,16 @@ impl PickerSession {
         match message {
             SessionMessage::ScanReady(result) => {
                 self.apply_scan(*result);
-                // 扫描回填改变列表/面包屑内容高度：核实滚动条溢出。
-                SessionEffect::VerifyScrollbarLayout
+                match self.activate_pending_preview_entry() {
+                    Some(SessionEffect::None) | None => {
+                        // 扫描回填改变列表/面包屑内容高度：核实滚动条溢出。
+                        SessionEffect::VerifyScrollbarLayout
+                    }
+                    Some(effect) => effect,
+                }
+            }
+            SessionMessage::PreviewEntryOpened { path, kind } => {
+                self.open_previewed_entry(path, kind)
             }
             SessionMessage::EntryClicked { index, ctrl, shift } => {
                 self.click_entry(index, ctrl, shift);
@@ -600,7 +611,43 @@ impl PickerSession {
         // cancel 无会话时是 no-op，与主软件 navigate_to 首行的
         // cancel_address_editing 同一收口。
         self.cancel_address_editing();
+        self.pending_preview_activation = None;
         SessionEffect::NavigateLocation(self.location.clone())
+    }
+
+    /// 文件夹预览里双击了一项：文件夹直接进入；文件进入它所在的文件夹，列表载好后
+    /// 对它做一次双击——选择模式、过滤规则都按列表的来（被过滤掉的就只是进去）。
+    fn open_previewed_entry(&mut self, path: PathBuf, kind: FileKind) -> SessionEffect {
+        if kind == FileKind::Directory {
+            return self.begin_navigation(PickerLocation::Directory(path));
+        }
+        let Some(parent) = path.parent().map(Path::to_path_buf) else {
+            return SessionEffect::None;
+        };
+        let effect = self.begin_navigation(PickerLocation::Directory(parent));
+        self.pending_preview_activation = Some(path);
+        match effect {
+            // 已经在那个文件夹里：列表是现成的，马上双击。
+            SessionEffect::None => self
+                .activate_pending_preview_entry()
+                .unwrap_or(SessionEffect::None),
+            effect => effect,
+        }
+    }
+
+    fn activate_pending_preview_entry(&mut self) -> Option<SessionEffect> {
+        if !matches!(self.listing, DirectoryListing::Ready(_)) {
+            return None;
+        }
+        let path = self.pending_preview_activation.take()?;
+        if self.view_mode() == PickerViewMode::Columns {
+            let index = self
+                .column_entries_iter(0)
+                .position(|entry| entry.path == path)?;
+            return Some(self.columns_entry_double_clicked(0, index));
+        }
+        let index = self.rows.iter().position(|row| row.entry.path == path)?;
+        Some(self.activate_entry(index))
     }
 
     /// 导航到新位置：记录历史（截断前进分支）并进入。

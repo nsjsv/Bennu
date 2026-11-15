@@ -742,12 +742,7 @@ mod tests {
             }),
             frame: None,
         };
-        drop(engine.accept_preview(
-            path.clone(),
-            Ok(content),
-            file_core::ScanOptions::default(),
-            1,
-        ));
+        drop(engine.accept_preview(path.clone(), Ok(content), 1));
         drop(engine.handle(PreviewMessage::VideoPreviewDisplayMeasured(
             path.clone(),
             Some(iced::Size::new(1920, 1080)),

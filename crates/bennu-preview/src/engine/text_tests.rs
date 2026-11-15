@@ -58,8 +58,7 @@ async fn drive(engine: &mut PreviewEngine, task: Task<PreviewMessage>) {
 async fn open(engine: &mut PreviewEngine, path: &Path) {
     engine.preview = Some(PreviewState::Loading(path.to_path_buf()));
     let content = open_text_content(path.to_path_buf()).await.expect("open");
-    let (_, task) =
-        engine.accept_preview(path.to_path_buf(), Ok(content), ScanOptions::default(), 1);
+    let (_, task) = engine.accept_preview(path.to_path_buf(), Ok(content), 1);
     drive(engine, task).await;
 }
 
@@ -250,8 +249,7 @@ async fn measure_large_text_files() {
     engine.preview = Some(PreviewState::Loading(log.clone()));
     let started = Instant::now();
     let content = open_text_content(log.clone()).await.expect("open");
-    let (_, count_task) =
-        engine.accept_preview(log.clone(), Ok(content), ScanOptions::default(), 1);
+    let (_, count_task) = engine.accept_preview(log.clone(), Ok(content), 1);
     let open_time = started.elapsed();
 
     let middle = document(&engine).len() / 2;
@@ -296,8 +294,7 @@ async fn measure_large_text_files() {
     json_engine.preview = Some(PreviewState::Loading(json.clone()));
     let started = Instant::now();
     let content = open_text_content(json.clone()).await.expect("open json");
-    let (_, json_count) =
-        json_engine.accept_preview(json.clone(), Ok(content), ScanOptions::default(), 1);
+    let (_, json_count) = json_engine.accept_preview(json.clone(), Ok(content), 1);
     let json_open_time = started.elapsed();
     let json_middle = document(&json_engine).len() / 2;
     let started = Instant::now();

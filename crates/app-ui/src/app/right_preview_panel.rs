@@ -278,6 +278,7 @@ impl FileBrowser {
             preview_engine.text_preview_document.as_ref(),
             preview_engine.sqlite_preview.as_ref(),
             self.right_preview_panel_viewport(),
+            PreviewLoadSurface::RightDockedPanel,
             preview_engine.image_view(),
             preview_engine.audio_preview.as_ref(),
             preview_engine.audio_analysis.as_ref(),
@@ -481,16 +482,20 @@ mod tests {
         let path = PathBuf::from("/workspace/report.txt");
         let mut browser = panel_open_browser();
         browser.preview_engine.preview_shown_path = Some(path.clone());
-        browser.preview_engine.preview = Some(PreviewState::Ready(PreviewContent::Directory {
-            entries: Vec::new(),
-        }));
+        browser.preview_engine.preview = Some(PreviewState::Ready(PreviewContent::Folder(
+            Box::new(bennu_preview::folder_preview::FolderPreview::new(
+                PathBuf::from("/workspace"),
+                Vec::new(),
+                file_core::ScanOptions::default(),
+            )),
+        )));
         browser.tab_mut().selected = Some(path);
 
         drop(browser.sync_right_preview_panel());
 
         assert!(matches!(
             browser.preview_engine.preview,
-            Some(PreviewState::Ready(PreviewContent::Directory { .. }))
+            Some(PreviewState::Ready(PreviewContent::Folder(_)))
         ));
     }
 

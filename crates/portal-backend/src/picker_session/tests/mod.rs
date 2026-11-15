@@ -691,3 +691,70 @@ fn save_file_click_selects_file_and_directory_rows() {
     // 目录不改名字（既有行为）。
     assert_eq!(session.name_input(), "模板.txt");
 }
+
+/// 文件夹预览里双击文件：进入它所在的文件夹，列表载好后等于在列表里双击它。
+#[test]
+fn a_file_opened_from_the_folder_preview_is_double_clicked_once_its_folder_is_listed() {
+    let (mut session, receiver) = session(PickerKind::OpenFile {
+        multiple: false,
+        directory: false,
+    });
+    let base = session.current_directory().unwrap().to_path_buf();
+    let inner = base.join("inner");
+    let file = inner.join("photo.png");
+
+    let effect = session.update(SessionMessage::PreviewEntryOpened {
+        path: file.clone(),
+        kind: FileKind::File,
+    });
+    assert!(matches!(
+        effect,
+        SessionEffect::NavigateLocation(PickerLocation::Directory(ref target)) if *target == inner
+    ));
+
+    let effect = session.update(SessionMessage::ScanReady(Box::new(DirectoryScanResult {
+        location: PickerLocation::Directory(inner.clone()),
+        outcome: Ok(DirectoryScanOutcome {
+            entries: vec![DirectoryEntry::new(
+                file.clone(),
+                FileKind::File,
+                file_core::entry::EntryMetadata::default(),
+                false,
+                false,
+                false,
+            )],
+        }),
+    })));
+
+    assert!(matches!(effect, SessionEffect::Confirmed(_)));
+    assert!(matches!(
+        receiver.blocking_recv().unwrap(),
+        PickerResolution::Confirmed(payload) if payload.paths == vec![file]
+    ));
+}
+
+#[test]
+fn a_folder_opened_from_the_folder_preview_is_entered_and_nothing_is_picked() {
+    let (mut session, _receiver) = session(PickerKind::OpenFile {
+        multiple: false,
+        directory: false,
+    });
+    let inner = session.current_directory().unwrap().join("inner");
+
+    let effect = session.update(SessionMessage::PreviewEntryOpened {
+        path: inner.clone(),
+        kind: FileKind::Directory,
+    });
+    let after_scan = session.update(SessionMessage::ScanReady(Box::new(DirectoryScanResult {
+        location: PickerLocation::Directory(inner.clone()),
+        outcome: Ok(DirectoryScanOutcome {
+            entries: Vec::new(),
+        }),
+    })));
+
+    assert!(matches!(
+        effect,
+        SessionEffect::NavigateLocation(PickerLocation::Directory(ref target)) if *target == inner
+    ));
+    assert!(matches!(after_scan, SessionEffect::VerifyScrollbarLayout));
+}

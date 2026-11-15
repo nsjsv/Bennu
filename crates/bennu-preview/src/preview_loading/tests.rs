@@ -4,7 +4,6 @@ use file_core::{
 use tempfile::tempdir;
 use tokio_util::sync::CancellationToken;
 
-use crate::preview::PreviewTreeDirectoryChildren;
 use crate::text_preview::TextPreviewFormat;
 
 use super::*;
@@ -118,23 +117,27 @@ async fn load_preview_reads_directory_top_layer_only() {
     .await
     .expect("directory preview");
 
-    let PreviewContent::Directory { entries } = preview_content else {
-        panic!("expected directory preview");
+    let PreviewContent::Folder(folder) = preview_content else {
+        panic!("expected folder preview");
     };
 
-    assert_eq!(entries.len(), 2);
-    assert_preview_tree_entry(&entries[0], "src", FileKind::Directory, 0, None);
-    assert_preview_tree_entry(&entries[1], "README.md", FileKind::File, 0, None);
+    let entries = folder.entries();
+    let names = entries
+        .iter()
+        .map(|node| (node.name.as_str(), node.kind))
+        .collect::<Vec<_>>();
     assert_eq!(
-        entries[0].filesystem_path.as_deref(),
-        Some(nested_dir.as_path())
+        names,
+        [("src", FileKind::Directory), ("README.md", FileKind::File)]
     );
-    assert_eq!(
-        entries[0].directory_children.as_ref(),
-        Some(&PreviewTreeDirectoryChildren::Pending)
-    );
-    assert!(!entries[0].is_expanded);
-    assert_eq!(entries[0].toggle_rotation_progress, 0.0);
+    assert_eq!(entries[0].path, nested_dir);
+    // 打开前（`begin` 之前）还没展开、没读孩子。
+    let src = entries[0].folder.as_deref().expect("folder state");
+    assert!(!src.expanded);
+    assert!(matches!(
+        src.listing,
+        crate::folder_preview::FolderListing::NotLoaded
+    ));
 }
 
 #[tokio::test]

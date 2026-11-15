@@ -10,10 +10,11 @@ use file_core::{
 };
 
 use crate::audio_preview::{probe_audio_preview, AudioProbeError};
+use crate::folder_preview::FolderPreview;
 use crate::formatting::format_file_size;
 use crate::preview::{
-    ArchiveSummary, AudioPreviewDetails, PreviewContent, PreviewTreeDirectoryChildren,
-    PreviewTreeEntry, TreeViewport, VideoPreviewDetails,
+    ArchiveSummary, AudioPreviewDetails, PreviewContent, PreviewTreeEntry, TreeViewport,
+    VideoPreviewDetails,
 };
 use crate::preview_config::{PreviewExtensionRules, PreviewFileSizeKind, PreviewSizeLimitKind};
 use crate::sqlite_preview::load_sqlite_preview;
@@ -178,14 +179,10 @@ async fn load_directory_preview(
     path: PathBuf,
     options: ScanOptions,
 ) -> Result<PreviewContent, String> {
-    let directory_entries = load_directory_preview_children(path, options).await?;
-    let entries = directory_entries
-        .into_iter()
-        .enumerate()
-        .map(|(index, entry)| PreviewTreeEntry::from_directory_entry(index, entry, 0, None))
-        .collect();
-
-    Ok(PreviewContent::Directory { entries })
+    let listing = load_directory_preview_children(path.clone(), options.clone()).await?;
+    Ok(PreviewContent::Folder(Box::new(FolderPreview::new(
+        path, listing, options,
+    ))))
 }
 
 pub async fn load_directory_preview_children(
@@ -395,8 +392,6 @@ impl ArchiveTreeBuilder {
             kind: node.kind,
             depth,
             parent,
-            filesystem_path: None,
-            directory_children: preview_archive_directory_children(node.kind),
             is_expanded: true,
             toggle_rotation_progress: if node.kind == FileKind::Directory {
                 1.0
@@ -425,10 +420,6 @@ impl ArchiveTreeBuilder {
         indices.sort_by(|left, right| archive_node_order(&self.nodes[*left], &self.nodes[*right]));
         indices
     }
-}
-
-fn preview_archive_directory_children(kind: FileKind) -> Option<PreviewTreeDirectoryChildren> {
-    (kind == FileKind::Directory).then_some(PreviewTreeDirectoryChildren::Loaded)
 }
 
 struct ArchiveTreeNode {

@@ -4,8 +4,8 @@
 //! 引擎处理，其余变体依赖宿主的扫描选项、视口几何、滚动管线或通知域，
 //! 在本模块及子模块里各有一个处理者。宿主域差异以参数/返回值补齐——
 //! 全局错误通知（accept_preview 就绪分支与音频跳转失败）经验收结论/错误串
-//! 回传，目录展开的扫描选项与展开层数实时读取 user_config 传入（引擎配置
-//! 快照只随持久化刷新）。
+//! 回传，文件夹的自动展开层数实时读取 user_config 传入（引擎配置快照只随
+//! 持久化刷新）。
 
 use bennu_preview::text_document::TextViewerEvent;
 use std::path::PathBuf;
@@ -19,13 +19,13 @@ use bennu_preview::preview_config::MediaEndAction;
 
 mod animated_image;
 mod document;
+mod folder;
 mod image_viewport;
 mod original_image;
 mod remote_cache;
 mod sqlite;
 #[cfg(test)]
 mod tests;
-mod tree;
 
 /// 主程序提供的播完模式（对话框没有「播下一首」）。
 const MAIN_APP_END_ACTIONS: [MediaEndAction; 3] = [
@@ -72,14 +72,11 @@ impl FileBrowser {
             PreviewMessage::PreviewImageViewport(message) => {
                 self.update_preview_image_viewport(message)
             }
-            PreviewMessage::PreviewDirectoryChildrenLoaded(parent_path, outcome) => {
-                self.accept_preview_directory_children(parent_path, outcome)
-            }
             PreviewMessage::ImagePreviewDimensionsLoaded(path, generation, outcome) => {
                 self.accept_image_preview_dimensions(path, generation, outcome)
             }
-            PreviewMessage::PreviewTreeDirectoryToggled(entry_id) => {
-                self.toggle_preview_tree_directory(entry_id)
+            PreviewMessage::FolderEntryOpened { path, kind } => {
+                self.open_folder_preview_entry(path, kind)
             }
             PreviewMessage::RightPreviewPanelInfoLoaded { path, snapshot } => {
                 self.accept_right_preview_panel_info(&path, snapshot);
@@ -137,12 +134,11 @@ impl FileBrowser {
         path: PathBuf,
         preview_outcome: Result<PreviewContent, String>,
     ) -> Task<Message> {
-        let options = self.options.clone();
         let expand_levels = self.preview_directory_expand_levels();
         let on_network_mount = self.path_is_remote_mount(&path);
         let (acceptance, command) =
             self.preview_engine
-                .accept_preview(path, preview_outcome, options, expand_levels);
+                .accept_preview(path, preview_outcome, expand_levels);
         if !matches!(
             acceptance,
             bennu_preview::engine::PreviewAcceptance::ContentReady

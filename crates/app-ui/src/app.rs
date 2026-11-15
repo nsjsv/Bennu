@@ -984,6 +984,12 @@ impl FileBrowser {
                 .text_file_watch_subscription()
                 .map(Message::Preview),
         );
+        // 文件夹预览：监视根和展开的文件夹、测量在跑时的读数节拍；不是文件夹时是空订阅。
+        subscriptions.push(
+            self.preview_engine
+                .folder_preview_subscription()
+                .map(Message::Preview),
+        );
 
         if self.preview_engine.video_preview_is_active() {
             subscriptions.push(video_preview_tick_subscription().map(Message::Preview));

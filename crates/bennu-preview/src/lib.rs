@@ -43,6 +43,7 @@ pub mod formatting;
 // 目录条目按种类选图标（FileKind → 图标词汇），主程序与 portal 共用。
 pub mod entry_icons;
 // 空格预览的路径分类与内容加载管线自 app-ui preview.rs 下沉。
+pub mod folder_preview;
 pub mod preview_loading;
 // 纯搬移：原图预览解码管线（光栅/SVG）自 app-ui 下沉。
 pub mod original_image_preview;

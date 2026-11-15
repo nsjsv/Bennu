@@ -14,7 +14,7 @@ use iced::{Alignment, Element, Length};
 use crate::animated_image_preview_panel::animated_image_preview_panel;
 use crate::audio_preview_panel::{audio_preview_panel, AudioPanelInput};
 use crate::document_preview_panel::document_preview_panel;
-use crate::engine::SqlitePreviewState;
+use crate::engine::{PreviewLoadSurface, SqlitePreviewState};
 use crate::image_preview_panel::image_preview_panel;
 use crate::media_keys::{image_keys, media_keys};
 use crate::operation_progress::remote_preview_download_panel;
@@ -26,7 +26,7 @@ use crate::preview::{PreviewContent, PreviewState};
 use crate::preview_config::MediaPlaybackSettings;
 use crate::preview_message::PreviewMessage;
 use crate::preview_surface::preview_surface;
-use crate::preview_tree_panel::{archive_preview_panel, directory_preview_panel};
+use crate::preview_tree_panel::{archive_preview_panel, folder_preview_panel};
 use crate::scroll_wiring::ScrollRegionWiring;
 use crate::sqlite_preview_panel::sqlite_preview_panel;
 use crate::text_highlight::HighlightPalette;
@@ -43,6 +43,8 @@ pub fn view_preview_window<'a, Message>(
     text_preview_document: Option<&'a TextPreviewDocument>,
     sqlite_preview_state: Option<&'a SqlitePreviewState>,
     size: PreviewSize,
+    // 会话在哪个呈现面：文件夹的键盘只在独立预览窗口里接。
+    surface: PreviewLoadSurface,
     image_view: ImageView<'a>,
     audio_preview: Option<&'a AudioPreviewPlayback>,
     audio_analysis: Option<&'a AudioAnalysis>,
@@ -71,6 +73,7 @@ where
             text_preview_document,
             sqlite_preview_state,
             size,
+            surface,
             image_view,
             audio_preview,
             audio_analysis,
@@ -102,6 +105,8 @@ fn preview_panel<'a, Message>(
     text_preview_document: Option<&'a TextPreviewDocument>,
     sqlite_preview_state: Option<&'a SqlitePreviewState>,
     size: PreviewSize,
+    // 会话在哪个呈现面：文件夹的键盘只在独立预览窗口里接。
+    surface: PreviewLoadSurface,
     image_view: ImageView<'a>,
     audio_preview: Option<&'a AudioPreviewPlayback>,
     audio_analysis: Option<&'a AudioAnalysis>,
@@ -141,8 +146,8 @@ where
         PreviewState::DownloadingRemoteFile(download) => {
             remote_preview_download_panel(download, operation_progress_animation_frame).into()
         }
-        PreviewState::Ready(PreviewContent::Directory { entries, .. }) => {
-            directory_preview_panel(entries, directory_scroll).into()
+        PreviewState::Ready(PreviewContent::Folder(folder)) => {
+            folder_preview_panel(folder, size, surface, directory_scroll)
         }
         PreviewState::Ready(PreviewContent::Text { path, .. }) => text_preview_panel(
             text_preview_document

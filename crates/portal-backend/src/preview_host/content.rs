@@ -6,7 +6,7 @@
 use bennu_preview::text_document::TextViewerEvent;
 use std::path::PathBuf;
 
-use file_core::{DirectoryEntry, FileKind, ScanOptions};
+use file_core::{DirectoryEntry, FileKind};
 use iced::window;
 use iced::Task;
 
@@ -19,6 +19,7 @@ use bennu_preview::preview_message::PreviewMessage;
 use thumbnails::{CachedThumbnail, ThumbnailRequest, ThumbnailSourceMetadata};
 
 use crate::picker_session::thumbnails::ThumbnailLoadFailed;
+use crate::picker_session::SessionMessage;
 use crate::preview_scroll::{preview_scroll_id, PreviewScrollRegion};
 use crate::thumbnail_dispatch::spawn_thumbnail_tasks;
 use crate::{Message, PickerDaemon};
@@ -42,6 +43,20 @@ pub(crate) fn handle_preview_message(
         // 图泵送），不经引擎。
         PreviewMessage::ImagePreviewDimensionsLoaded(path, generation, outcome) => {
             PreviewHost::accept_image_preview_dimensions(daemon, path, generation, outcome)
+        }
+        // 文件夹预览里双击：关掉预览窗，交给发起预览的那个选择窗（进入文件夹、选文件）。
+        PreviewMessage::FolderEntryOpened { path, kind } => {
+            let Some(window) = daemon.preview.request_window else {
+                return Task::none();
+            };
+            let close = daemon.preview.close_preview_session().map(Message::Preview);
+            Task::batch([
+                close,
+                Task::done(Message::Session(
+                    window,
+                    SessionMessage::PreviewEntryOpened { path, kind },
+                )),
+            ])
         }
         other => {
             let host = &mut daemon.preview;
@@ -290,7 +305,6 @@ impl PreviewHost {
                 let (_, task) = self.engine.accept_preview(
                     path,
                     outcome,
-                    ScanOptions::default(),
                     self.preferences.directory_expand_levels,
                 );
                 // 预览窗一打开键盘就归预览内容（文本的全选、复制、搜索，音视频的回车、方向键
@@ -330,23 +344,11 @@ impl PreviewHost {
                 }
             }
             PreviewMessage::DocumentPreview(inner) => self.route_document_preview_message(inner),
-            PreviewMessage::PreviewDirectoryChildrenLoaded(parent_path, outcome) => {
-                self.engine.accept_preview_directory_children(
-                    parent_path,
-                    outcome,
-                    ScanOptions::default(),
-                    self.preferences.directory_expand_levels,
-                )
-            }
             // 图片缩放/平移/重置：面板事件直达引擎（主软件
             // update_preview_image_viewport 的转发）。
             PreviewMessage::PreviewImageViewport(viewport_message) => self
                 .engine
                 .update_preview_image_viewport(viewport_message, self.engine.preview_size),
-            // 预览树目录展开开关（主软件 toggle_preview_tree_directory）。
-            PreviewMessage::PreviewTreeDirectoryToggled(entry_id) => self
-                .engine
-                .toggle_preview_tree_directory(entry_id, ScanOptions::default()),
             // 解码失败重试：重新走分类分发（主软件 retry_image_preview）。
             PreviewMessage::RetryImagePreview(path) => {
                 self.open_preview_for_resolved_path(path, FileKind::File)

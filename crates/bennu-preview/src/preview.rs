@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use file_core::{DirectoryEntry, ExternalTool, FileKind};
+use file_core::{ExternalTool, FileKind};
 use iced::widget::{image, svg};
 
 // 原 app-ui 内 `use super::SqliteDatabasePreview`（model.rs 门面）；下沉后
@@ -86,9 +86,7 @@ pub struct RemotePreviewCacheFinished {
 
 #[derive(Debug, Clone)]
 pub enum PreviewContent {
-    Directory {
-        entries: Vec<PreviewTreeEntry>,
-    },
+    Folder(Box<crate::folder_preview::FolderPreview>),
     /// 打开的文本：句柄、解码方式、第一个窗口；引擎据此建按需读取的文档。
     Text {
         path: PathBuf,
@@ -835,53 +833,17 @@ pub struct PreviewTreeEntry {
     pub kind: FileKind,
     pub depth: usize,
     pub parent: Option<usize>,
-    pub filesystem_path: Option<PathBuf>,
-    pub directory_children: Option<PreviewTreeDirectoryChildren>,
     pub is_expanded: bool,
     pub toggle_rotation_progress: f32,
-    /// 压缩包里的大小（文件夹是里面文件加起来）和修改时间；文件夹预览不显示，为 None。
+    /// 压缩包里的大小（文件夹是里面文件加起来）和修改时间。
     pub len: Option<u64>,
     pub modified: Option<std::time::SystemTime>,
 }
 
 impl PreviewTreeEntry {
-    pub fn from_directory_entry(
-        id: usize,
-        entry: DirectoryEntry,
-        depth: usize,
-        parent: Option<usize>,
-    ) -> Self {
-        let kind = entry.kind;
-        Self {
-            id,
-            name: entry.name().to_string_lossy().into_owned(),
-            kind,
-            depth,
-            parent,
-            filesystem_path: Some(entry.path),
-            directory_children: preview_tree_directory_children(kind),
-            is_expanded: false,
-            toggle_rotation_progress: 0.0,
-            len: None,
-            modified: None,
-        }
-    }
-
     pub fn is_directory(&self) -> bool {
         self.kind == FileKind::Directory
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PreviewTreeDirectoryChildren {
-    Pending,
-    Loading,
-    Loaded,
-    Error(String),
-}
-
-fn preview_tree_directory_children(kind: FileKind) -> Option<PreviewTreeDirectoryChildren> {
-    (kind == FileKind::Directory).then_some(PreviewTreeDirectoryChildren::Pending)
 }
 
 #[cfg(test)]

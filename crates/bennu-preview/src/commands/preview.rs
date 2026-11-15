@@ -20,7 +20,7 @@ use crate::preview::{
     RemotePreviewCacheProgress, VideoPreviewFrame,
 };
 use crate::preview_config::PreviewExtensionRules;
-use crate::preview_loading::{load_directory_preview_children, load_preview};
+use crate::preview_loading::load_preview;
 use crate::preview_message::PreviewMessage;
 use crate::remote_preview_cache::{cache_remote_preview_file, RemotePreviewCacheRequest};
 use crate::video_preview::{load_video_still, FramePlan, SeekPrecision};
@@ -118,19 +118,6 @@ pub fn remote_preview_cache_command(
                 .await;
         },
     ))
-}
-
-pub fn preview_directory_children_command(
-    path: PathBuf,
-    options: ScanOptions,
-) -> Task<PreviewMessage> {
-    let parent_path = path.clone();
-    Task::perform(
-        load_directory_preview_children(path, options),
-        move |children_outcome| {
-            PreviewMessage::PreviewDirectoryChildrenLoaded(parent_path.clone(), children_outcome)
-        },
-    )
 }
 
 /// 图片信息层要的文件头信息；读不了的项留空，所以这里不报错。

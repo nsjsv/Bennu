@@ -287,14 +287,16 @@ impl super::PreviewEngine {
         Task::none()
     }
 
-    /// 这次预览的内容自己接键盘（文本查看器、Markdown 壳、音视频键盘壳）：独立预览窗口
+    /// 这次预览的内容自己接键盘（文本查看器、Markdown 壳、音视频、文件夹的键盘壳）：独立预览窗口
     /// 一打开，宿主就用 `focus_preview_keyboard` 把键盘交给它。
     pub fn preview_takes_keyboard(&self) -> bool {
         self.active_text_preview_document().is_some()
             || matches!(
                 self.preview,
                 Some(PreviewState::Ready(
-                    PreviewContent::Audio { .. } | PreviewContent::Video { .. }
+                    PreviewContent::Audio { .. }
+                        | PreviewContent::Video { .. }
+                        | PreviewContent::Folder(_)
                 ))
             )
     }

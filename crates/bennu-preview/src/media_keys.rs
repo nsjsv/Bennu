@@ -48,7 +48,9 @@ where
 {
     Element::new(MediaKeys {
         content,
-        keymap: |key, modifiers| media_key_command(key, modifiers).map(PreviewMessage::MediaKey),
+        keymap: Box::new(|key, modifiers| {
+            media_key_command(key, modifiers).map(PreviewMessage::MediaKey)
+        }),
         wheel: None,
     })
 }
@@ -59,7 +61,7 @@ where
 {
     Element::new(MediaKeys {
         content,
-        keymap: image_key_message,
+        keymap: Box::new(image_key_message),
         wheel: None,
     })
 }
@@ -72,18 +74,59 @@ where
 {
     Element::new(MediaKeys {
         content,
-        keymap: document_key_message,
+        keymap: Box::new(document_key_message),
         wheel: Some(document_wheel_message),
     })
 }
 
-type Keymap = fn(&keyboard::Key, keyboard::Modifiers) -> Option<PreviewMessage>;
+/// 文件夹（只在独立预览窗口里套）：↑/↓ 选行，→ 展开，← 收起或回上一层，回车打开。
+/// 键盘移动后要把选中行滚进视口，滚动区 id 随消息带给引擎。
+pub(crate) fn folder_keys<'a, Message>(
+    content: Element<'a, Message>,
+    scroll_region_id: iced::widget::Id,
+) -> Element<'a, Message>
+where
+    Message: 'a + Clone + From<PreviewMessage>,
+{
+    Element::new(MediaKeys {
+        content,
+        keymap: Box::new(move |key, modifiers| {
+            folder_key(key, modifiers).map(|key| {
+                PreviewMessage::FolderPreview(crate::folder_preview::FolderPreviewMessage::Key(
+                    key,
+                    scroll_region_id.clone(),
+                ))
+            })
+        }),
+        wheel: None,
+    })
+}
+
+fn folder_key(
+    key: &keyboard::Key,
+    modifiers: keyboard::Modifiers,
+) -> Option<crate::folder_preview::FolderKey> {
+    use crate::folder_preview::FolderKey;
+    if modifiers.command() || modifiers.alt() || modifiers.logo() || modifiers.control() {
+        return None;
+    }
+    match key.as_ref() {
+        keyboard::Key::Named(Named::ArrowUp) => Some(FolderKey::Up),
+        keyboard::Key::Named(Named::ArrowDown) => Some(FolderKey::Down),
+        keyboard::Key::Named(Named::ArrowRight) => Some(FolderKey::Expand),
+        keyboard::Key::Named(Named::ArrowLeft) => Some(FolderKey::Collapse),
+        keyboard::Key::Named(Named::Enter) => Some(FolderKey::Open),
+        _ => None,
+    }
+}
+
+type Keymap<'a> = Box<dyn Fn(&keyboard::Key, keyboard::Modifiers) -> Option<PreviewMessage> + 'a>;
 /// 滚轮先问这个：给出消息就不让里面的滚动区滚（Ctrl+滚轮缩放）。
 type WheelMap = fn(mouse::ScrollDelta, keyboard::Modifiers) -> Option<PreviewMessage>;
 
 struct MediaKeys<'a, Message> {
     content: Element<'a, Message>,
-    keymap: Keymap,
+    keymap: Keymap<'a>,
     wheel: Option<WheelMap>,
 }
 

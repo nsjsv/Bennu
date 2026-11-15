@@ -320,18 +320,13 @@ fn audio_content_opens_its_own_playback_and_window() {
         cover: None,
         lyrics: None,
     };
-    drop(window.accept_preview(
-        path.clone(),
-        Ok(content.clone()),
-        file_core::ScanOptions::default(),
-        1,
-    ));
+    drop(window.accept_preview(path.clone(), Ok(content.clone()), 1));
     assert_eq!(window.preview_window_profile, PreviewWindowProfile::Audio);
     assert!(window.audio_preview.is_some());
 
     let mut panel = engine(PreviewLoadSurface::RightDockedPanel);
     panel.preview = Some(PreviewState::Loading(path.clone()));
-    drop(panel.accept_preview(path, Ok(content), file_core::ScanOptions::default(), 1));
+    drop(panel.accept_preview(path, Ok(content), 1));
     assert_eq!(
         panel.audio_preview.as_ref().map(|playback| playback.status),
         Some(crate::preview::AudioPreviewPlaybackStatus::Ready)

@@ -106,6 +106,14 @@ pub(crate) fn subscription(daemon: &PickerDaemon) -> Subscription<Message> {
             .text_file_watch_subscription()
             .map(Message::Preview),
     );
+    // 文件夹预览：监视根和展开的文件夹、测量在跑时的读数节拍。
+    subscriptions.push(
+        daemon
+            .preview
+            .engine
+            .folder_preview_subscription()
+            .map(Message::Preview),
+    );
     let media = active_media_streams(&daemon.preview.engine);
     if media.audio_tick {
         subscriptions.push(audio_preview_tick_subscription().map(Message::Preview));

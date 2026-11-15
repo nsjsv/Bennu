@@ -201,7 +201,7 @@ impl PreviewHost {
     /// 收尾（滚动管线复位 + 焦点回请求窗，design 生命周期合同；请求
     /// 窗已亡时 gain_focus 是 no-op）。域内主动关闭与外部关窗（X）共用
     /// 此路径。
-    fn close_preview_session(&mut self) -> Task<PreviewMessage> {
+    pub(crate) fn close_preview_session(&mut self) -> Task<PreviewMessage> {
         let (closed_window, command) = self.engine.close_preview_window();
         let request_window = self.request_window.take();
         self.scroll.reset();

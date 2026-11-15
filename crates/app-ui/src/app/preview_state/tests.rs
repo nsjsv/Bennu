@@ -324,28 +324,54 @@ fn file_entry_at(path: &Path) -> DirectoryEntry {
 }
 
 fn directory_preview_content(root: &Path, names: &[(&str, FileKind)]) -> PreviewContent {
-    let entries = names
+    let listing = names
         .iter()
-        .enumerate()
-        .map(|(index, (name, kind))| {
+        .map(|(name, kind)| {
             let path = root.join(name);
-            let entry = match kind {
+            match kind {
                 FileKind::Directory => directory_entry_at(&path),
                 _ => file_entry_at(&path),
-            };
-            bennu_preview::preview::PreviewTreeEntry::from_directory_entry(index, entry, 0, None)
+            }
         })
         .collect();
-    PreviewContent::Directory { entries }
+    PreviewContent::Folder(Box::new(bennu_preview::folder_preview::FolderPreview::new(
+        root.to_path_buf(),
+        listing,
+        file_core::ScanOptions::default(),
+    )))
 }
 
-fn ready_directory_entries(
-    browser: &FileBrowser,
-) -> &Vec<bennu_preview::preview::PreviewTreeEntry> {
+fn ready_folder(browser: &FileBrowser) -> &bennu_preview::folder_preview::FolderPreview {
     match &browser.preview_engine.preview {
-        Some(PreviewState::Ready(PreviewContent::Directory { entries, .. })) => entries,
-        _ => panic!("directory preview expected"),
+        Some(PreviewState::Ready(PreviewContent::Folder(folder))) => folder,
+        _ => panic!("folder preview expected"),
     }
+}
+
+fn is_expanded(node: &bennu_preview::folder_preview::FolderNode) -> bool {
+    node.folder.as_ref().is_some_and(|state| state.expanded)
+}
+
+fn children(
+    node: &bennu_preview::folder_preview::FolderNode,
+) -> &[bennu_preview::folder_preview::FolderNode] {
+    match &node.folder.as_ref().expect("folder").listing {
+        bennu_preview::folder_preview::FolderListing::Loaded(children) => children,
+        _ => panic!("listed folder expected"),
+    }
+}
+
+fn folder_listed(browser: &mut FileBrowser, directory: PathBuf, listing: Vec<DirectoryEntry>) {
+    let generation = browser.preview_engine.folder_preview_generation;
+    drop(
+        browser.update(Message::Preview(PreviewMessage::FolderPreview(
+            bennu_preview::folder_preview::FolderPreviewMessage::Listed {
+                generation,
+                directory,
+                outcome: Ok(listing),
+            },
+        ))),
+    );
 }
 
 #[test]
@@ -362,9 +388,9 @@ fn directory_preview_auto_expands_root_directories_by_default() {
         )),
     );
 
-    let entries = ready_directory_entries(&browser);
-    assert!(entries[0].is_expanded);
-    assert!(!entries[1].is_expanded);
+    let entries = ready_folder(&browser).entries();
+    assert!(is_expanded(&entries[0]));
+    assert!(!is_expanded(&entries[1]));
     assert!(command.units() > 0);
 }
 
@@ -383,10 +409,10 @@ fn directory_preview_without_auto_expansion_stays_collapsed() {
         )),
     ));
 
-    let entries = ready_directory_entries(&browser);
-    assert!(!entries[0].is_expanded);
+    assert!(!is_expanded(&ready_folder(&browser).entries()[0]));
 }
 
+/// 展开层数在打开时定下：这次会话里往下读到的文件夹都按它展开，之后改设置不影响。
 #[test]
 fn directory_preview_children_expand_up_to_configured_levels() {
     let root = PathBuf::from("/workspace");
@@ -402,31 +428,27 @@ fn directory_preview_children_expand_up_to_configured_levels() {
         )),
     ));
 
-    drop(browser.accept_preview_directory_children(
+    folder_listed(
+        &mut browser,
         src_dir.clone(),
-        Ok(vec![
+        vec![
             directory_entry_at(&src_dir.join("app")),
             file_entry_at(&src_dir.join("main.rs")),
-        ]),
-    ));
-    let entries = ready_directory_entries(&browser);
-    let nested = entries
-        .iter()
-        .find(|entry| entry.name == "app")
-        .expect("nested entry");
-    assert!(nested.is_expanded);
+        ],
+    );
+    let src = &ready_folder(&browser).entries()[0];
+    assert!(is_expanded(&children(src)[0]));
 
     browser.user_config.preview_directory_expand_levels = 1;
-    drop(browser.accept_preview_directory_children(
+    folder_listed(
+        &mut browser,
         src_dir.join("app"),
-        Ok(vec![directory_entry_at(&src_dir.join("app").join("deep"))]),
-    ));
-    let entries = ready_directory_entries(&browser);
-    let deep = entries
-        .iter()
-        .find(|entry| entry.name == "deep")
-        .expect("deep entry");
-    assert!(!deep.is_expanded);
+        vec![directory_entry_at(&src_dir.join("app").join("deep"))],
+    );
+    let src = &ready_folder(&browser).entries()[0];
+    let deep = &children(&children(src)[0])[0];
+    assert_eq!(deep.name, "deep");
+    assert!(!is_expanded(deep));
 }
 
 #[test]
@@ -508,6 +530,10 @@ fn every_message_the_engine_returns_has_a_host_handler() {
         ),
         PreviewMessage::TextFileChanged { document: 7 },
         PreviewMessage::PreviewTreeDirectoryToggled(0),
+        PreviewMessage::FolderEntryOpened {
+            path: PathBuf::from("/workspace/notes.txt"),
+            kind: FileKind::File,
+        },
         PreviewMessage::PreviewImageViewport(PreviewImageViewportMessage::FitRequested),
         PreviewMessage::ImageStepRequested(bennu_preview::preview_message::ImageStep::Next),
         PreviewMessage::PreviewWindowPresented(iced::window::Id::unique()),
@@ -543,4 +569,31 @@ fn next_track_request_for_a_track_no_longer_selected_does_nothing() {
     );
     assert_eq!(browser.tab().selected, selected_before);
     assert!(browser.preview_engine.queued_media.is_none());
+}
+
+/// 文件夹预览里双击：文件夹、能浏览的压缩包让主窗口进入；文件交给默认程序，主窗口不动。
+#[test]
+fn opening_from_the_folder_preview_enters_folders_and_archives_in_the_main_window() {
+    let root = PathBuf::from("/workspace");
+    for (path, kind, enters) in [
+        (root.join("src"), FileKind::Directory, true),
+        (root.join("backup.zip"), FileKind::File, true),
+        (root.join("notes.txt"), FileKind::File, false),
+    ] {
+        let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
+        drop(browser.navigate_to(root.clone(), crate::model::NavigationMode::RecordHistory));
+
+        drop(
+            browser.update(Message::Preview(PreviewMessage::FolderEntryOpened {
+                path: path.clone(),
+                kind,
+            })),
+        );
+
+        let expected = if enters { path } else { root.clone() };
+        assert_eq!(
+            browser.tab().location,
+            crate::model::BrowserLocation::Directory(expected)
+        );
+    }
 }

@@ -28,6 +28,7 @@ pub(crate) fn view_preview_window<'a>(
     text_preview_document: Option<&'a TextPreviewDocument>,
     sqlite_preview_state: Option<&'a SqlitePreviewState>,
     size: PreviewSize,
+    surface: bennu_preview::engine::PreviewLoadSurface,
     image_view: bennu_preview::preview::ImageView<'a>,
     audio_preview: Option<&'a AudioPreviewPlayback>,
     audio_analysis: Option<&'a bennu_preview::preview::AudioAnalysis>,
@@ -43,6 +44,7 @@ pub(crate) fn view_preview_window<'a>(
         text_preview_document,
         sqlite_preview_state,
         size,
+        surface,
         image_view,
         audio_preview,
         audio_analysis,
@@ -108,7 +110,8 @@ fn directory_scroll_wiring() -> ScrollRegionWiring<'static, Message> {
             smooth_scroll_content(content, ScrollbarRegion::PreviewDirectory)
         }),
         scrollable_id: smooth_scroll_id(&ScrollbarRegion::PreviewDirectory),
-        on_scroll: None,
+        // 和压缩包一样只排看得见的行：视口回给引擎。
+        on_scroll: Some(Box::new(tree_viewport_message)),
     }
 }
 
@@ -119,15 +122,17 @@ fn archive_scroll_wiring() -> ScrollRegionWiring<'static, Message> {
         }),
         scrollable_id: smooth_scroll_id(&ScrollbarRegion::PreviewArchive),
         // 压缩包几万条只排看得见的行：视口回给引擎。
-        on_scroll: Some(Box::new(|viewport| {
-            Message::from(PreviewMessage::PreviewTreeScrolled(
-                bennu_preview::preview::TreeViewport {
-                    offset: viewport.absolute_offset().y,
-                    height: viewport.bounds().height,
-                },
-            ))
-        })),
+        on_scroll: Some(Box::new(tree_viewport_message)),
     }
+}
+
+fn tree_viewport_message(viewport: iced::widget::scrollable::Viewport) -> Message {
+    Message::from(PreviewMessage::PreviewTreeScrolled(
+        bennu_preview::preview::TreeViewport {
+            offset: viewport.absolute_offset().y,
+            height: viewport.bounds().height,
+        },
+    ))
 }
 
 // 文档分页滚动接线：视口事件合成闭包留在宿主，key 是文档会话的视口身份，滚轮/拖动偏移

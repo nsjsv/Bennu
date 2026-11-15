@@ -4,8 +4,13 @@
 use std::sync::atomic::{AtomicU8, Ordering};
 
 mod catalog;
+mod file_size;
 mod message;
 
+pub use file_size::{
+    format_file_size, format_file_size_compact, format_file_size_exact, parse_file_size,
+    FileSizeInputError, BYTES_PER_KIB,
+};
 pub use message::MessageId;
 
 /// 界面语言。语言设置（UiLanguageSetting 与 TOML 存取）属 app-ui 存储域，经 re-export
@@ -34,19 +39,6 @@ impl UiLanguage {
 
 static CURRENT_LANGUAGE: AtomicU8 = AtomicU8::new(UiLanguage::English.as_u8());
 
-/// 全应用唯一的文件大小写法，同 KDE `KFormat::formatByteSize` 的默认：1024 进制、
-/// IEC 单位、一位小数（"14.3 MiB"）；不到 1 KiB 写字节数（"123 B"）。放在本 crate
-/// 是因为它最底层，主窗口、文件选择器、传输窗口和扫码页都能用到。
-pub fn format_file_size(bytes: u64) -> String {
-    format_size_with_units(bytes, ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"], " ")
-}
-
-/// 宽度受限的短标签（分组索引栏）：数值口径与 [`format_file_size`] 相同，单位缩成
-/// 一个字母、不留空格（"14.3M"）。
-pub fn format_file_size_compact(bytes: u64) -> String {
-    format_size_with_units(bytes, ["B", "K", "M", "G", "T", "P", "E"], "")
-}
-
 /// 音视频/动图预览的播放时长文案（H:MM:SS / M:SS），纯数字不随语言变化。
 pub fn format_duration(duration: std::time::Duration) -> String {
     let total_seconds = duration.as_secs();
@@ -59,19 +51,6 @@ pub fn format_duration(duration: std::time::Duration) -> String {
     } else {
         format!("{minutes}:{seconds:02}")
     }
-}
-
-fn format_size_with_units(bytes: u64, units: [&str; 7], separator: &str) -> String {
-    if bytes < 1024 {
-        return format!("{bytes}{separator}{}", units[0]);
-    }
-    let mut value = bytes as f64;
-    let mut unit = 0;
-    while value >= 1024.0 && unit < units.len() - 1 {
-        value /= 1024.0;
-        unit += 1;
-    }
-    format!("{value:.1}{separator}{}", units[unit])
 }
 
 pub fn set_current_language(language: UiLanguage) {

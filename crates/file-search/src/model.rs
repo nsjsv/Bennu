@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use bennu_localization::{parse_file_size, FileSizeInputError};
 use serde::{Deserialize, Serialize};
 
 use crate::config::{SearchPathPreferences, VersionedSearchPathPreferences};
@@ -114,9 +115,6 @@ pub struct SearchFilters {
     pub size: Option<SizeRange>,
 }
 
-/// 大小解析的进制：与资源管理器档位一致，KB = 1024 B。
-pub const SIZE_UNIT_BYTES: u64 = 1024;
-
 /// 文件大小区间，语义统一为 `[min_bytes, max_bytes)`（上界排他）。
 /// 「空 (0 B)」档位即 `{ min: 0, max: Some(1) }`，不引入任何特判。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -132,29 +130,9 @@ pub struct SizeRange {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FilterInputError {
     InvalidSizeRange { min: String, max: String },
-    UnknownSizeUnit(String),
-    InvalidSizeValue(String),
-    SizeTooLarge(String),
+    Size(FileSizeInputError),
     InvalidExtension(String),
     TooManyExtensions { limit: usize },
-}
-
-/// 单个大小文本的唯一解析入口：UI 预检与查询构造共用同一语义。
-/// 规则：正十进制数（允许小数）+ 可选单位 `B/KB/MB/GB`（大小写不敏感、
-/// 数字与单位间允许空白）；省略单位按字节；负数、非法字符、未知单位、
-/// 溢出都报错。
-pub fn parse_size_text(input: &str) -> Result<u64, FilterInputError> {
-    let text = input.trim();
-    let Some(digits_end) = text
-        .char_indices()
-        .find(|(_, character)| !character.is_ascii_digit() && *character != '.')
-        .map(|(index, _)| index)
-    else {
-        return parse_size_bytes(text, 1);
-    };
-    let (number_text, unit_text) = text.split_at(digits_end);
-    let multiplier = size_unit_multiplier(unit_text.trim())?;
-    parse_size_bytes(number_text.trim(), multiplier)
 }
 
 /// 自定义大小范围的唯一归一化入口：两侧全空 = 不限；单侧空按缺省
@@ -171,12 +149,12 @@ pub fn normalize_size_range(
     let min_bytes = if min_text.is_empty() {
         0
     } else {
-        parse_size_text(min_text)?
+        parse_file_size(min_text).map_err(FilterInputError::Size)?
     };
     let max_bytes = if max_text.is_empty() {
         None
     } else {
-        Some(parse_size_text(max_text)?)
+        Some(parse_file_size(max_text).map_err(FilterInputError::Size)?)
     };
     if max_bytes.is_some_and(|max_bytes| min_bytes > max_bytes) {
         return Err(FilterInputError::InvalidSizeRange {
@@ -188,46 +166,6 @@ pub fn normalize_size_range(
         min_bytes,
         max_bytes,
     }))
-}
-
-fn size_unit_multiplier(unit: &str) -> Result<u64, FilterInputError> {
-    match unit.to_ascii_lowercase().as_str() {
-        "" | "b" => Ok(1),
-        "kb" => Ok(SIZE_UNIT_BYTES),
-        "mb" => Ok(SIZE_UNIT_BYTES * SIZE_UNIT_BYTES),
-        "gb" => Ok(SIZE_UNIT_BYTES * SIZE_UNIT_BYTES * SIZE_UNIT_BYTES),
-        other => Err(FilterInputError::UnknownSizeUnit(other.to_owned())),
-    }
-}
-
-fn parse_size_bytes(number_text: &str, multiplier: u64) -> Result<u64, FilterInputError> {
-    let invalid = || FilterInputError::InvalidSizeValue(number_text.to_owned());
-    let overflow = || FilterInputError::SizeTooLarge(number_text.to_owned());
-    let (integer_text, fractional_text) = match number_text.split_once('.') {
-        Some((integer_text, fractional_text)) => (integer_text, fractional_text),
-        None => (number_text, ""),
-    };
-    // "1." 与 ".5" 这类残缺小数视为误输入，而不是静默补零。
-    if integer_text.is_empty() || (number_text.contains('.') && fractional_text.is_empty()) {
-        return Err(invalid());
-    }
-    let integer: u64 = integer_text.parse().map_err(|_| invalid())?;
-    let bytes = u128::from(integer.checked_mul(multiplier).ok_or_else(overflow)?);
-    if fractional_text.is_empty() {
-        return u64::try_from(bytes).map_err(|_| overflow());
-    }
-    // 小数部分用 u128 中转，避免先乘单位再除进位时的中间溢出；结果向下取整到字节。
-    // 裸乘法在超长小数（如 38 位）+ 大单位时会溢出 u128：debug panic、release
-    // 静默回绕成错误字节值，必须与整数路径一样归类为 overflow 拒绝。
-    let fractional: u128 = fractional_text.parse().map_err(|_| invalid())?;
-    let scale = 10u128
-        .checked_pow(fractional_text.len() as u32)
-        .ok_or_else(overflow)?;
-    let fractional_bytes = fractional
-        .checked_mul(u128::from(multiplier))
-        .ok_or_else(overflow)?
-        / scale;
-    u64::try_from(bytes + fractional_bytes).map_err(|_| overflow())
 }
 
 /// 单个扩展名 token 的最大字节数；超长输入视为误输入而非合法后缀。
@@ -540,11 +478,12 @@ pub enum SearchServiceEvent {
 #[cfg(test)]
 mod tests {
     use super::{
-        normalize_extension_tokens, normalize_size_range, parse_size_text, IndexHealth, IndexPhase,
-        IndexStatus, IndexedQueryAvailability, SearchError, SearchMatchMode, SearchOrder,
-        SearchQuery, SearchServiceEvent, SearchServicePhase, SearchServiceStatus,
-        SearchSortDirection, SearchSortField, MAX_QUERY_EXTENSIONS, SIZE_UNIT_BYTES,
+        normalize_extension_tokens, normalize_size_range, IndexHealth, IndexPhase, IndexStatus,
+        IndexedQueryAvailability, SearchError, SearchMatchMode, SearchOrder, SearchQuery,
+        SearchServiceEvent, SearchServicePhase, SearchServiceStatus, SearchSortDirection,
+        SearchSortField, MAX_QUERY_EXTENSIONS,
     };
+    use bennu_localization::BYTES_PER_KIB;
 
     #[test]
     fn service_phase_and_query_availability_round_trip_independently() {
@@ -676,54 +615,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_size_text_accepts_units_whitespace_and_fractions() {
-        let kb = SIZE_UNIT_BYTES;
-        let mb = kb * kb;
-        let gb = mb * kb;
-        assert_eq!(parse_size_text("10MB").unwrap(), 10 * mb);
-        assert_eq!(parse_size_text("500kb").unwrap(), 500 * kb);
-        assert_eq!(parse_size_text("2 GB").unwrap(), 2 * gb);
-        assert_eq!(parse_size_text("1.5GB").unwrap(), gb + gb / 2);
-        // 省略单位按字节；单位与 b 等价。
-        assert_eq!(parse_size_text("42").unwrap(), 42);
-        assert_eq!(parse_size_text("42 B").unwrap(), 42);
-        assert_eq!(parse_size_text("  7b ").unwrap(), 7);
-        // 小数向下取整到字节。
-        assert_eq!(parse_size_text("0.5KB").unwrap(), kb / 2);
-        assert_eq!(parse_size_text("1.25 KB").unwrap(), kb + kb / 4);
-    }
-
-    #[test]
-    fn parse_size_text_rejects_negative_unknown_and_malformed_values() {
-        for invalid in [
-            "-5", "-1 B", "5 TB", "5kib", "1M2", "abc", "4.", ".5", "1.2.3", "", "   ",
-        ] {
-            assert!(parse_size_text(invalid).is_err(), "{invalid:?}");
-        }
-    }
-
-    #[test]
-    fn parse_size_text_rejects_values_beyond_u64_bytes() {
-        assert_eq!(parse_size_text("18446744073709551615").unwrap(), u64::MAX,);
-        assert!(parse_size_text("18446744073709551616").is_err());
-        assert!(parse_size_text("17179869184 GB").is_err());
-    }
-
-    #[test]
-    fn parse_size_text_rejects_fractions_whose_unit_scaling_overflows() {
-        // 38 位小数本身在 u128 内可表示，但乘上 GB 进制会溢出：
-        // 必须报错，而不是 panic（debug）或静默回绕成错误字节值（release）。
-        let long_fraction = format!("0.{}GB", "9".repeat(38));
-        assert!(parse_size_text(&long_fraction).is_err());
-
-        // 不会溢出的超长小数仍正常解析：向下取整到字节。
-        assert_eq!(
-            parse_size_text(&format!("0.{}1", "0".repeat(37))).unwrap(),
-            0
-        );
-    }
-
-    #[test]
     fn normalize_size_range_defaults_missing_sides_and_rejects_inversion() {
         // 两侧全空 = 不限。
         assert_eq!(normalize_size_range("", "  ").unwrap(), None);
@@ -733,13 +624,13 @@ mod tests {
             normalize_size_range("", "10KB").unwrap(),
             Some(super::SizeRange {
                 min_bytes: 0,
-                max_bytes: Some(10 * SIZE_UNIT_BYTES),
+                max_bytes: Some(10 * BYTES_PER_KIB),
             })
         );
         assert_eq!(
             normalize_size_range("10KB", "").unwrap(),
             Some(super::SizeRange {
-                min_bytes: 10 * SIZE_UNIT_BYTES,
+                min_bytes: 10 * BYTES_PER_KIB,
                 max_bytes: None,
             })
         );
@@ -750,8 +641,8 @@ mod tests {
         assert_eq!(
             normalize_size_range("1MB", "1MB").unwrap(),
             Some(super::SizeRange {
-                min_bytes: SIZE_UNIT_BYTES * SIZE_UNIT_BYTES,
-                max_bytes: Some(SIZE_UNIT_BYTES * SIZE_UNIT_BYTES),
+                min_bytes: BYTES_PER_KIB * BYTES_PER_KIB,
+                max_bytes: Some(BYTES_PER_KIB * BYTES_PER_KIB),
             })
         );
     }

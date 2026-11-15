@@ -71,8 +71,6 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Remote List Thumbnails", "远程位置列表缩略图"),
     ("When enabled, images and videos on remote locations may use more data.", "启用后，远程位置中的图片和视频可能会使用更多流量。"),
     ("Preview settings", "预览设置"),
-    ("Enter a whole number of MiB (0 = unlimited).", "请输入 MiB 整数（0 表示不限制）。"),
-    ("Enter a smaller preview size.", "请输入更小的预览大小。"),
     ("Enter a whole number from 0 to 3.", "请输入 0 到 3 的整数。"),
     ("Enter an extension like txt (a leading dot is optional).", "请输入类似 txt 的后缀（前导点可省略）。"),
     ("Extra Text Extensions", "额外当作文本的后缀"),

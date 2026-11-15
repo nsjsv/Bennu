@@ -1823,6 +1823,7 @@ dependencies = [
 name = "file-search"
 version = "0.4.3"
 dependencies = [
+ "bennu-localization",
  "file-core",
  "icu_normalizer",
  "libc",

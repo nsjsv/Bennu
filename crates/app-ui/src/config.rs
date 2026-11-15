@@ -320,8 +320,7 @@ pub(crate) fn list_directory_size_display_mode_config_value(
 // 维持 crate::config::* 既有调用路径，TOML 键解析/写出仍在本 crate
 // 存储域（user_preferences/legacy_toml）。
 pub(crate) use bennu_preview::preview_config::{
-    normalize_preview_directory_expand_levels, normalize_preview_extension,
-    preview_size_limit_bytes_from_mib, preview_size_limit_mib, PreviewExtensionRules,
+    normalize_preview_directory_expand_levels, normalize_preview_extension, PreviewExtensionRules,
     PreviewFileSizeKind, PreviewFileSizeLimits, PreviewSizeLimitKind,
     DEFAULT_PREVIEW_DIRECTORY_EXPAND_LEVELS, MAX_PREVIEW_DIRECTORY_EXPAND_LEVELS,
 };
@@ -614,10 +613,11 @@ pub(crate) fn normalize_visible_column_count(count: usize) -> usize {
     count.clamp(MIN_VISIBLE_COLUMN_COUNT, MAX_VISIBLE_COLUMN_COUNT)
 }
 
-pub(crate) fn preview_size_limit_mib_inputs(
+pub(crate) fn preview_size_limit_inputs(
     limits: &PreviewFileSizeLimits,
 ) -> [String; PreviewSizeLimitKind::ALL.len()] {
-    PreviewSizeLimitKind::ALL.map(|kind| preview_size_limit_mib(limits.limit(kind)).to_string())
+    PreviewSizeLimitKind::ALL
+        .map(|kind| bennu_localization::format_file_size_exact(limits.limit(kind)))
 }
 
 pub(crate) fn matugen_theme_file_path() -> PathBuf {

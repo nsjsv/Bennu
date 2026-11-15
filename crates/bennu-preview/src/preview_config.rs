@@ -398,14 +398,6 @@ pub fn media_preview_volume_percent(volume: f32) -> u8 {
     (volume.clamp(0.0, 1.0) * 100.0).round() as u8
 }
 
-pub fn preview_size_limit_mib(bytes: u64) -> u64 {
-    bytes.div_ceil(PREVIEW_FILE_SIZE_UNIT_BYTES)
-}
-
-pub fn preview_size_limit_bytes_from_mib(mib: u64) -> Option<u64> {
-    mib.checked_mul(PREVIEW_FILE_SIZE_UNIT_BYTES)
-}
-
 /// 解析后的预览偏好（域类型），两个宿主并轨消费；默认值见
 /// `PreviewPreferences::default_preferences`。
 #[derive(Debug, Clone, PartialEq)]

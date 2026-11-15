@@ -20,47 +20,37 @@ impl FileBrowser {
         ])
     }
 
-    pub(super) fn update_preview_size_limit_mib_input(
+    pub(super) fn update_preview_size_limit_input(
         &mut self,
         kind_index: usize,
         value: String,
     ) -> Task<Message> {
-        if let Some(input) = self.preview_size_limit_mib_inputs.get_mut(kind_index) {
+        if let Some(input) = self.preview_size_limit_inputs.get_mut(kind_index) {
             *input = value;
         }
-        if let Some(error) = self.preview_size_limit_mib_errors.get_mut(kind_index) {
+        if let Some(error) = self.preview_size_limit_errors.get_mut(kind_index) {
             *error = None;
         }
         Task::none()
     }
 
-    pub(super) fn commit_preview_size_limit_mib_input(
-        &mut self,
-        kind_index: usize,
-    ) -> Task<Message> {
+    pub(super) fn commit_preview_size_limit_input(&mut self, kind_index: usize) -> Task<Message> {
         let Some(kind) = config::PreviewSizeLimitKind::ALL.get(kind_index).copied() else {
             return Task::none();
         };
-        let mib = match self.preview_size_limit_mib_inputs[kind_index]
-            .trim()
-            .parse::<u64>()
-        {
-            Ok(mib) => mib,
-            Err(_) => {
-                self.preview_size_limit_mib_errors[kind_index] =
-                    Some(tr!("Enter a whole number of MiB (0 = unlimited)."));
+        let bytes = match bennu_localization::parse_file_size(
+            &self.preview_size_limit_inputs[kind_index],
+        ) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                self.preview_size_limit_errors[kind_index] = Some(error.message());
                 return Task::none();
             }
         };
-        let Some(bytes) = config::preview_size_limit_bytes_from_mib(mib) else {
-            self.preview_size_limit_mib_errors[kind_index] =
-                Some(tr!("Enter a smaller preview size."));
-            return Task::none();
-        };
 
-        self.preview_size_limit_mib_inputs[kind_index] =
-            config::preview_size_limit_mib(bytes).to_string();
-        self.preview_size_limit_mib_errors[kind_index] = None;
+        self.preview_size_limit_inputs[kind_index] =
+            bennu_localization::format_file_size_exact(bytes);
+        self.preview_size_limit_errors[kind_index] = None;
         if self.user_config.preview_size_limits.limit(kind) == bytes {
             return Task::none();
         }
@@ -128,13 +118,13 @@ mod tests {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
         let original_limits = browser.user_config.preview_size_limits;
 
-        let _ = browser.update_preview_size_limit_mib_input(0, "abc".to_owned());
-        let _ = browser.commit_preview_size_limit_mib_input(0);
+        let _ = browser.update_preview_size_limit_input(0, "abc".to_owned());
+        let _ = browser.commit_preview_size_limit_input(0);
 
         assert_eq!(browser.user_config.preview_size_limits, original_limits);
         assert_eq!(
-            browser.preview_size_limit_mib_errors[0].as_deref(),
-            Some("Enter a whole number of MiB (0 = unlimited).")
+            browser.preview_size_limit_errors[0].as_deref(),
+            Some("Unknown size unit: abc")
         );
     }
 
@@ -142,12 +132,12 @@ mod tests {
     fn committing_zero_persists_unlimited_preview_size() {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
 
-        let _ = browser.update_preview_size_limit_mib_input(0, "0".to_owned());
-        let _ = browser.commit_preview_size_limit_mib_input(0);
+        let _ = browser.update_preview_size_limit_input(0, "0".to_owned());
+        let _ = browser.commit_preview_size_limit_input(0);
 
         // 第 0 行是图片（文本没有上限，不在列表里）。
         assert_eq!(browser.user_config.preview_size_limits.image_bytes, 0);
-        assert!(browser.preview_size_limit_mib_errors[0].is_none());
+        assert!(browser.preview_size_limit_errors[0].is_none());
     }
 
     #[test]

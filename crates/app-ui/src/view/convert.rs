@@ -336,7 +336,7 @@ fn target_size_row(
     control_row(
         tr!("Target size per file"),
         None,
-        text_field("500KB / 2MB", target_size_text)
+        text_field("500 KiB / 2 MiB", target_size_text)
             .on_input(size_message)
             .width(Length::Fixed(ROW_CONTROL_WIDTH)),
     )

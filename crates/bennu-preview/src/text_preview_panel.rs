@@ -108,7 +108,10 @@ where
             MarkdownPreviewMode::Raw,
             None,
             Some(tr!(
-                "This file is larger than 2 MB, so only the raw text is shown."
+                "This file is larger than %1, so only the raw text is shown.",
+                crate::formatting::format_file_size(
+                    crate::text_document::MARKDOWN_RENDER_LIMIT_BYTES
+                )
             )),
         ),
     };

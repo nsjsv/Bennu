@@ -50,7 +50,7 @@ pub(crate) const QUALITY_PRESETS: [ConversionQualityPreset; 3] = [
 pub(crate) const RESIZE_PERCENT_CHOICES: [u8; 3] = [100, 75, 50];
 pub(crate) const FPS_CHOICES: [u32; 3] = [60, 30, 24];
 
-const DEFAULT_TARGET_SIZE_TEXT: &str = "1MB";
+const DEFAULT_TARGET_SIZE_TEXT: &str = "1 MiB";
 const DEFAULT_IMAGE_QUALITY: u8 = 80;
 fn ffmpeg_missing() -> String {
     tr!("ffmpeg is missing for the selected target format. Install ffmpeg and retry.")
@@ -753,24 +753,12 @@ fn default_target_size_text() -> String {
     DEFAULT_TARGET_SIZE_TEXT.to_owned()
 }
 
-/// 体积文本解析:数字 + 可选 KB/MB/B 单位;无单位按 KB。
+/// 体积文本与其余大小输入同一读法（`parse_file_size`）；0 没有意义，一并拒绝。
 fn parse_target_size_text(text: &str) -> Result<u64, String> {
-    let normalized = text.trim().to_uppercase().replace(' ', "");
-    let (number_part, multiplier) = if let Some(number) = normalized.strip_suffix("MB") {
-        (number, 1024 * 1024)
-    } else if let Some(number) = normalized.strip_suffix("KB") {
-        (number, 1024)
-    } else if let Some(number) = normalized.strip_suffix('B') {
-        (number, 1)
-    } else {
-        (normalized.as_str(), 1024)
-    };
-    number_part
-        .parse::<u64>()
+    bennu_localization::parse_file_size(text)
         .ok()
-        .filter(|value| *value > 0)
-        .map(|value| value.saturating_mul(multiplier))
-        .ok_or_else(|| tr!("Enter a target size like 500KB or 2MB."))
+        .filter(|bytes| *bytes > 0)
+        .ok_or_else(|| tr!("Enter a target size like 500 KiB or 2 MiB."))
 }
 
 #[cfg(test)]
@@ -786,7 +774,11 @@ mod tests {
             2 * 1024 * 1024
         );
         assert_eq!(parse_target_size_text("512b").expect("bytes"), 512);
-        assert_eq!(parse_target_size_text("100").expect("bare"), 100 * 1024);
+        assert_eq!(parse_target_size_text("100").expect("bare"), 100);
+        assert_eq!(
+            parse_target_size_text(DEFAULT_TARGET_SIZE_TEXT).expect("default"),
+            1024 * 1024
+        );
         assert!(parse_target_size_text("").is_err());
         assert!(parse_target_size_text("0KB").is_err());
         assert!(parse_target_size_text("abc").is_err());

@@ -88,8 +88,12 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Rendered", "渲染"),
     ("Raw", "原文"),
     (
-        "This file is larger than 2 MB, so only the raw text is shown.",
-        "文件超过 2 MB，只显示原文。",
+        "This file is larger than %1, so only the raw text is shown.",
+        "文件超过 %1，只显示原文。",
+    ),
+    (
+        "This animation is too large to preview safely: decoded frames are limited to %1",
+        "动图太大，无法安全预览：解码后的画面最多 %1",
     ),
     // 文本预览状态栏
     ("Wrap Lines", "自动换行"),

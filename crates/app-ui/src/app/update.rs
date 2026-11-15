@@ -822,10 +822,10 @@ impl FileBrowser {
             }
             Message::SearchContentIndexingToggled => self.toggle_search_content_indexing(),
             Message::PreviewSizeLimitInputChanged(kind_index, value) => {
-                self.update_preview_size_limit_mib_input(kind_index, value)
+                self.update_preview_size_limit_input(kind_index, value)
             }
             Message::PreviewSizeLimitInputCommitted(kind_index) => {
-                self.commit_preview_size_limit_mib_input(kind_index)
+                self.commit_preview_size_limit_input(kind_index)
             }
             Message::PreviewDirectoryExpandLevelsInputChanged(value) => {
                 self.update_preview_directory_expand_levels_input(value)

@@ -9,6 +9,7 @@ repository.workspace = true
 # 客户端与两端共享的约定；守护进程（数据库、爬虫、内容提取、bennu-searchd）在 file-search-daemon。
 # rusqlite 只为共享的 SearchError 变体与过滤条件的 SQL 参数类型服务，客户端不打开数据库。
 [dependencies]
+bennu-localization = { path = "../bennu-localization" }
 file-core = { path = "../file-core" }
 icu_normalizer = { version = "2.2.0", default-features = false, features = ["compiled_data"] }
 libc = "0.2"

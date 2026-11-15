@@ -36,7 +36,7 @@ fn preview_size_limit_row(
         config::PreviewSizeLimitKind::Sqlite => tr!("Max SQLite Preview"),
     };
     let saved_limit = browser.user_config().preview_size_limits.limit(kind);
-    let note = match &browser.preview_size_limit_mib_errors[kind_index] {
+    let note = match &browser.preview_size_limit_errors[kind_index] {
         Some(error) => Some(RowNote::Error(error.clone())),
         None if saved_limit == 0 => Some(RowNote::Hint(tr!(
             "Size is unlimited: previewing very large files may use a lot of memory."
@@ -45,13 +45,13 @@ fn preview_size_limit_row(
     };
     entry_row(EntryRow {
         title,
-        saved: config::preview_size_limit_mib(saved_limit).to_string(),
-        draft: &browser.preview_size_limit_mib_inputs[kind_index],
+        saved: bennu_localization::format_file_size_exact(saved_limit),
+        draft: &browser.preview_size_limit_inputs[kind_index],
         placeholder: "0".to_owned(),
         on_input: Box::new(move |value| Message::PreviewSizeLimitInputChanged(kind_index, value)),
         submit: Message::PreviewSizeLimitInputCommitted(kind_index),
         note,
-        unit: Some("MiB".to_owned()),
+        unit: None,
         trailing: Vec::new(),
     })
 }

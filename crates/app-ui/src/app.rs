@@ -330,9 +330,8 @@ pub(crate) struct FileBrowser {
     pub(crate) options: ScanOptions,
     application_launch_request: ApplicationLaunchRequest,
     user_config: config::UserConfig,
-    pub(crate) preview_size_limit_mib_inputs: [String; config::PreviewSizeLimitKind::ALL.len()],
-    pub(crate) preview_size_limit_mib_errors:
-        [Option<String>; config::PreviewSizeLimitKind::ALL.len()],
+    pub(crate) preview_size_limit_inputs: [String; config::PreviewSizeLimitKind::ALL.len()],
+    pub(crate) preview_size_limit_errors: [Option<String>; config::PreviewSizeLimitKind::ALL.len()],
     pub(crate) preview_extension_inputs: [String; 7],
     pub(crate) preview_extension_input_errors: [Option<String>; 7],
     pub(crate) preview_extension_expanded: [bool; 7],
@@ -715,11 +714,10 @@ impl FileBrowser {
             options: options.clone(),
             application_launch_request,
             user_config: user_config.clone(),
-            preview_size_limit_mib_inputs: config::preview_size_limit_mib_inputs(
+            preview_size_limit_inputs: config::preview_size_limit_inputs(
                 &user_config.preview_size_limits,
             ),
-            preview_size_limit_mib_errors: [const { None };
-                config::PreviewSizeLimitKind::ALL.len()],
+            preview_size_limit_errors: [const { None }; config::PreviewSizeLimitKind::ALL.len()],
             preview_extension_inputs: [const { String::new() }; 7],
             preview_extension_input_errors: [const { None }; 7],
             preview_extension_expanded: [false; 7],

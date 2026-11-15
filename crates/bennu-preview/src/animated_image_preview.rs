@@ -430,9 +430,9 @@ fn validate_animated_image_frame_decode_budget(width: u32, height: u32) -> Resul
 }
 
 fn animated_image_preview_too_many_rgba_bytes_message() -> String {
-    format!(
-        "This animation is too large to preview safely: decoded RGBA frames are limited to {} MiB",
-        ANIMATED_IMAGE_PREVIEW_MAX_RGBA_BYTES / 1024 / 1024
+    tr!(
+        "This animation is too large to preview safely: decoded frames are limited to %1",
+        crate::formatting::format_file_size(ANIMATED_IMAGE_PREVIEW_MAX_RGBA_BYTES as u64)
     )
 }
 
@@ -682,6 +682,6 @@ mod tests {
         let error = validate_animated_image_frame_decode_budget(over_budget_width, 1)
             .expect_err("oversized canvas should be rejected before frame decode");
 
-        assert!(error.contains("decoded RGBA frames are limited"));
+        assert!(error.ends_with("decoded frames are limited to 128.0 MiB"));
     }
 }

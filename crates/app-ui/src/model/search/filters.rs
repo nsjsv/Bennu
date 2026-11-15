@@ -1,8 +1,9 @@
+use bennu_localization::BYTES_PER_KIB;
 use chrono::{DateTime, Datelike, Duration, NaiveDate, TimeZone};
 use file_search::{
     normalize_extension_tokens, normalize_size_range, FilterInputError, MimePattern,
     SearchEntryTypeRule, SearchFileKind, SearchFilters, SearchMatchMode, SearchTextScope,
-    SizeRange, TimeRange, SIZE_UNIT_BYTES,
+    SizeRange, TimeRange,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -189,21 +190,21 @@ impl SearchSizePreset {
         match self {
             Self::Any => tr!("Any size"),
             Self::Empty => tr!("Empty (0 B)"),
-            Self::Tiny => tr!("Tiny (0-16 KB)"),
-            Self::Small => tr!("Small (16 KB-1 MB)"),
-            Self::Medium => tr!("Medium (1-128 MB)"),
-            Self::Large => tr!("Large (128 MB-1 GB)"),
-            Self::Huge => tr!("Huge (1-4 GB)"),
-            Self::Gigantic => tr!("Gigantic (>4 GB)"),
+            Self::Tiny => tr!("Tiny (0-16 KiB)"),
+            Self::Small => tr!("Small (16 KiB-1 MiB)"),
+            Self::Medium => tr!("Medium (1-128 MiB)"),
+            Self::Large => tr!("Large (128 MiB-1 GiB)"),
+            Self::Huge => tr!("Huge (1-4 GiB)"),
+            Self::Gigantic => tr!("Gigantic (>4 GiB)"),
             Self::Custom => tr!("Custom"),
         }
     }
 
     /// 唯一的档位 → 区间映射；Custom 由查询构造时按输入文本解析，不经此表。
     pub(crate) fn range(self) -> Option<SizeRange> {
-        let kb = SIZE_UNIT_BYTES;
-        let mb = kb * kb;
-        let gb = mb * kb;
+        let kib = BYTES_PER_KIB;
+        let mib = kib * kib;
+        let gib = mib * kib;
         match self {
             Self::Any | Self::Custom => None,
             // 「空」= 仅 size == 0，用 [0, 1) 表达，无特判。
@@ -213,26 +214,26 @@ impl SearchSizePreset {
             }),
             Self::Tiny => Some(SizeRange {
                 min_bytes: 0,
-                max_bytes: Some(16 * kb),
+                max_bytes: Some(16 * kib),
             }),
             Self::Small => Some(SizeRange {
-                min_bytes: 16 * kb,
-                max_bytes: Some(mb),
+                min_bytes: 16 * kib,
+                max_bytes: Some(mib),
             }),
             Self::Medium => Some(SizeRange {
-                min_bytes: mb,
-                max_bytes: Some(128 * mb),
+                min_bytes: mib,
+                max_bytes: Some(128 * mib),
             }),
             Self::Large => Some(SizeRange {
-                min_bytes: 128 * mb,
-                max_bytes: Some(gb),
+                min_bytes: 128 * mib,
+                max_bytes: Some(gib),
             }),
             Self::Huge => Some(SizeRange {
-                min_bytes: gb,
-                max_bytes: Some(4 * gb),
+                min_bytes: gib,
+                max_bytes: Some(4 * gib),
             }),
             Self::Gigantic => Some(SizeRange {
-                min_bytes: 4 * gb,
+                min_bytes: 4 * gib,
                 max_bytes: None,
             }),
         }
@@ -361,9 +362,7 @@ fn filter_input_error_message(error: FilterInputError) -> String {
         FilterInputError::InvalidSizeRange { min, max } => {
             tr!("Invalid size range: %1 - %2", min, max)
         }
-        FilterInputError::UnknownSizeUnit(unit) => tr!("Unknown size unit: %1", unit),
-        FilterInputError::InvalidSizeValue(value) => tr!("Invalid size value: %1", value),
-        FilterInputError::SizeTooLarge(value) => tr!("Size value is too large: %1", value),
+        FilterInputError::Size(error) => error.message(),
         FilterInputError::InvalidExtension(extension) => {
             tr!("Invalid file extension: %1", extension)
         }
@@ -670,9 +669,9 @@ mod tests {
 
     #[test]
     fn size_presets_map_to_half_open_resource_manager_bounds() {
-        let kb = SIZE_UNIT_BYTES;
-        let mb = kb * kb;
-        let gb = mb * kb;
+        let kib = BYTES_PER_KIB;
+        let mib = kib * kib;
+        let gib = mib * kib;
         let expected = [
             (SearchSizePreset::Any, None),
             (
@@ -686,41 +685,41 @@ mod tests {
                 SearchSizePreset::Tiny,
                 Some(SizeRange {
                     min_bytes: 0,
-                    max_bytes: Some(16 * kb),
+                    max_bytes: Some(16 * kib),
                 }),
             ),
             (
                 SearchSizePreset::Small,
                 Some(SizeRange {
-                    min_bytes: 16 * kb,
-                    max_bytes: Some(mb),
+                    min_bytes: 16 * kib,
+                    max_bytes: Some(mib),
                 }),
             ),
             (
                 SearchSizePreset::Medium,
                 Some(SizeRange {
-                    min_bytes: mb,
-                    max_bytes: Some(128 * mb),
+                    min_bytes: mib,
+                    max_bytes: Some(128 * mib),
                 }),
             ),
             (
                 SearchSizePreset::Large,
                 Some(SizeRange {
-                    min_bytes: 128 * mb,
-                    max_bytes: Some(gb),
+                    min_bytes: 128 * mib,
+                    max_bytes: Some(gib),
                 }),
             ),
             (
                 SearchSizePreset::Huge,
                 Some(SizeRange {
-                    min_bytes: gb,
-                    max_bytes: Some(4 * gb),
+                    min_bytes: gib,
+                    max_bytes: Some(4 * gib),
                 }),
             ),
             (
                 SearchSizePreset::Gigantic,
                 Some(SizeRange {
-                    min_bytes: 4 * gb,
+                    min_bytes: 4 * gib,
                     max_bytes: None,
                 }),
             ),
@@ -759,7 +758,7 @@ mod tests {
         assert_eq!(
             filters.size,
             Some(SizeRange {
-                min_bytes: 16 * SIZE_UNIT_BYTES,
+                min_bytes: 16 * BYTES_PER_KIB,
                 max_bytes: None,
             })
         );
@@ -771,7 +770,7 @@ mod tests {
         assert!(presets
             .query_filters_at(New_York.with_ymd_and_hms(2026, 6, 1, 12, 0, 0).unwrap())
             .is_err());
-        presets.custom_size_min = "5 TB".to_owned();
+        presets.custom_size_min = "5 XB".to_owned();
         presets.custom_size_max = String::new();
         assert!(presets.custom_size_has_intent());
         assert!(presets

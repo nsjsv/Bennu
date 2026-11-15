@@ -375,14 +375,14 @@ fn size_filter<'a>(
         if filters.size_preset == SearchSizePreset::Custom {
             items.push(menu_section(
                 tr!("Min size"),
-                text_field(&tr!("e.g. 10MB"), &filters.custom_size_min)
+                text_field(&tr!("e.g. 10 MiB"), &filters.custom_size_min)
                     .on_input(Message::SearchCustomSizeMinChanged)
                     .width(Length::Fill)
                     .into(),
             ));
             items.push(menu_section(
                 tr!("Max size"),
-                text_field(&tr!("e.g. 2 GB"), &filters.custom_size_max)
+                text_field(&tr!("e.g. 2 GiB"), &filters.custom_size_max)
                     .on_input(Message::SearchCustomSizeMaxChanged)
                     .width(Length::Fill)
                     .into(),

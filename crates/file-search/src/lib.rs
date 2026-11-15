@@ -28,15 +28,14 @@ pub use fallback::{
     search_directory_fallback, DirectoryFallbackCompletion, DirectoryFallbackLimits,
 };
 pub use model::{
-    daemon_build_id, normalize_extension_tokens, normalize_size_range, parse_size_text,
-    ExtractorCapability, FilterInputError, IndexHealth, IndexPhase, IndexStatus,
-    IndexedQueryAvailability, MatchSource, MimePattern, SearchCursor, SearchEntryTypeRule,
-    SearchFileKind, SearchFilters, SearchHit, SearchMatchMode, SearchOrder,
-    SearchPathConfigurationPhase, SearchPathConfigurationStatus, SearchProviderFailure,
-    SearchQuery, SearchResultBatch, SearchRootAvailability, SearchRootStatus, SearchScope,
-    SearchServiceEvent, SearchServicePhase, SearchServiceRequest, SearchServiceStatus,
-    SearchSortDirection, SearchSortField, SearchTextScope, SizeRange, TimeRange,
-    MAX_EXTENSION_TOKEN_BYTES, MAX_QUERY_EXTENSIONS, PROTOCOL_VERSION, SIZE_UNIT_BYTES,
+    daemon_build_id, normalize_extension_tokens, normalize_size_range, ExtractorCapability,
+    FilterInputError, IndexHealth, IndexPhase, IndexStatus, IndexedQueryAvailability, MatchSource,
+    MimePattern, SearchCursor, SearchEntryTypeRule, SearchFileKind, SearchFilters, SearchHit,
+    SearchMatchMode, SearchOrder, SearchPathConfigurationPhase, SearchPathConfigurationStatus,
+    SearchProviderFailure, SearchQuery, SearchResultBatch, SearchRootAvailability,
+    SearchRootStatus, SearchScope, SearchServiceEvent, SearchServicePhase, SearchServiceRequest,
+    SearchServiceStatus, SearchSortDirection, SearchSortField, SearchTextScope, SizeRange,
+    TimeRange, MAX_EXTENSION_TOKEN_BYTES, MAX_QUERY_EXTENSIONS, PROTOCOL_VERSION,
 };
 pub use protocol::{
     configure_path_preferences_via_socket, default_socket_path, path_configuration_via_socket,

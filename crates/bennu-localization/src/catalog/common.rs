@@ -64,4 +64,8 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Hide", "隐藏"),
     ("New File", "新建文件"),
     ("New Folder", "新建文件夹"),
+    // 大小输入框（搜索筛选、格式转换、设置）共用的读法报错。
+    ("Unknown size unit: %1", "未知的大小单位：%1"),
+    ("Invalid size value: %1", "无效的大小值：%1"),
+    ("Size value is too large: %1", "大小值过大：%1"),
 ];

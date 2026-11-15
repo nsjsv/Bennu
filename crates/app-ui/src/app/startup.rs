@@ -153,9 +153,9 @@ impl FileBrowser {
         self.options.sort_direction = user_config.list_view_preferences.sort().direction;
         self.tab_mut()
             .choose_view_mode(user_config.browser_view_mode);
-        self.preview_size_limit_mib_inputs =
-            crate::config::preview_size_limit_mib_inputs(&user_config.preview_size_limits);
-        self.preview_size_limit_mib_errors =
+        self.preview_size_limit_inputs =
+            crate::config::preview_size_limit_inputs(&user_config.preview_size_limits);
+        self.preview_size_limit_errors =
             [const { None }; crate::config::PreviewSizeLimitKind::ALL.len()];
         self.preview_directory_expand_levels_input =
             user_config.preview_directory_expand_levels.to_string();

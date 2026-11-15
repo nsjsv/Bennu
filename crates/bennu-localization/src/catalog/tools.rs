@@ -25,7 +25,7 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("ffmpeg is missing; video, audio, WebP and AVIF conversion is disabled. Install ffmpeg to enable them.", "缺少 ffmpeg:视频、音频、WebP 和 AVIF 转换已禁用,安装 ffmpeg 后可用。"),
     ("ffmpeg is missing for the selected target format. Install ffmpeg and retry.", "所选目标格式缺少 ffmpeg 支持,请安装 ffmpeg 后重试。"),
     ("Enter a custom width in pixels.", "请输入自定义宽度(像素)。"),
-    ("Enter a target size like 500KB or 2MB.", "请输入目标体积,例如 500KB 或 2MB。"),
+    ("Enter a target size like 500 KiB or 2 MiB.", "请输入目标体积,例如 500 KiB 或 2 MiB。"),
     ("Select at least one convertible file.", "请至少选择一个可转换的文件。"),
     // 归档
     ("Archive", "归档"),

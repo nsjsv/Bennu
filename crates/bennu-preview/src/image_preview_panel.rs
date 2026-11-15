@@ -1,31 +1,25 @@
 //! 静态图片预览面板（缩略图/光栅原图/SVG 原图）：缩放平移媒体区、透明处的棋盘格、
 //! 底部浮着的缩放控件。交互契约见 image-preview-guidelines 第一节（视口钳制/锚点缩放/双击）。
 
-use iced::alignment::{Horizontal, Vertical};
 use iced::widget::image::FilterMethod;
-use iced::widget::{button, container, image, mouse_area, row, svg, text, Space, Stack};
-use iced::{Alignment, ContentFit, Element, Length, Shadow, Size, Vector};
+use iced::widget::{container, image, mouse_area, row, svg, Space, Stack};
+use iced::{Alignment, ContentFit, Element, Length, Size, Vector};
 
 use bennu_theme::icons::IconSymbol;
 use bennu_theme::preview_styles::preview_media_style;
 use bennu_theme::translated_surface::translated_surface;
-use bennu_theme::ui_colors;
 
 use crate::checkerboard::checkerboard;
 use crate::image_info_text::image_info_rows;
 use crate::image_preview_viewport::{ImagePreviewViewport, PreviewImageViewportMessage};
 use crate::info_overlay::info_overlay;
-use crate::media_controls::{faded_media_button_style, faded_media_icon, faded_media_text_style};
-use crate::panel_text::readable_text;
+use crate::media_controls::{
+    floating_bar, floating_bar_text, floating_icon_button, floating_text_button,
+};
 use crate::preview::{image_preview_size, ImageInfo, ImagePreviewContent, PreviewSize};
 use crate::preview_message::PreviewMessage;
 
-const ZOOM_CONTROL_BUTTON_SIZE: f32 = 28.0;
-const ZOOM_CONTROL_ICON_SIZE: f32 = 16.0;
 const ZOOM_PERCENT_WIDTH: f32 = 52.0;
-const ZOOM_CONTROLS_BOTTOM_MARGIN: f32 = 14.0;
-const ZOOM_CONTROLS_RADIUS: f32 = 18.0;
-const ZOOM_CONTROLS_BACKGROUND_ALPHA: f32 = 0.9;
 /// 百分比和 100% 差这么多以内算 1:1（缩放倍率是浮点连乘出来的）。
 const ACTUAL_SIZE_TOLERANCE_PERCENT: f32 = 0.5;
 
@@ -33,6 +27,7 @@ pub(crate) fn image_preview_panel<Message>(
     content: &ImagePreviewContent,
     size: PreviewSize,
     viewport: &ImagePreviewViewport,
+    display_scale: f32,
     controls_opacity: f32,
     info: Option<&ImageInfo>,
 ) -> Element<'static, Message>
@@ -46,7 +41,7 @@ where
         ImagePreviewContent::Thumbnail { .. } => None,
         ImagePreviewContent::OriginalRaster { width, .. }
         | ImagePreviewContent::OriginalSvg { width, .. } => {
-            Some(viewport.zoom_percent(*width, Size::new(fit_width, fit_height)))
+            Some(viewport.zoom_percent(*width, Size::new(fit_width, fit_height), display_scale))
         }
     };
     // 放大到超过原始像素后按像素块显示，不插值糊掉；适应窗口时小图被拉大照旧平滑。
@@ -175,99 +170,51 @@ where
         .into()
 }
 
-/// 底部居中浮着的一条：缩小、比例、放大、适应窗口/1:1、信息。跟主题配色，深浅主题、图片明暗下都看得清。
+/// 底部浮条：缩小、比例、放大、适应窗口/1:1、信息。
 fn zoom_controls_layer<Message>(percent: f32, opacity: f32) -> Element<'static, Message>
 where
     Message: 'static + Clone + From<PreviewMessage>,
 {
-    let opacity = opacity.clamp(0.0, 1.0);
     let at_actual_size = (percent - 100.0).abs() <= ACTUAL_SIZE_TOLERANCE_PERCENT;
-    let icon_button = |symbol, message| {
-        button(faded_media_icon(symbol, ZOOM_CONTROL_ICON_SIZE, opacity))
-            .on_press(Message::from(PreviewMessage::PreviewImageViewport(message)))
-            .padding(6)
-            .width(Length::Fixed(ZOOM_CONTROL_BUTTON_SIZE))
-            .height(Length::Fixed(ZOOM_CONTROL_BUTTON_SIZE))
-            .style(move |theme, status| faded_media_button_style(theme, status, opacity))
-    };
+    let viewport = |message| Message::from(PreviewMessage::PreviewImageViewport(message));
     // 在 1:1 时按钮回到适应窗口，否则去 1:1。
     let toggle: Element<'static, Message> = if at_actual_size {
-        icon_button(
+        floating_icon_button(
             IconSymbol::Maximize,
-            PreviewImageViewportMessage::FitOrActualToggled,
+            viewport(PreviewImageViewportMessage::FitOrActualToggled),
+            opacity,
         )
         .into()
     } else {
-        button(
-            readable_text("1:1".to_owned())
-                .style(move |theme| faded_media_text_style(theme, opacity)),
+        floating_text_button(
+            "1:1".to_owned(),
+            viewport(PreviewImageViewportMessage::FitOrActualToggled),
+            opacity,
         )
-        .on_press(Message::from(PreviewMessage::PreviewImageViewport(
-            PreviewImageViewportMessage::FitOrActualToggled,
-        )))
-        .padding([4, 8])
-        .height(Length::Fixed(ZOOM_CONTROL_BUTTON_SIZE))
-        .style(move |theme, status| faded_media_button_style(theme, status, opacity))
-        .into()
     };
     let controls = row![
-        icon_button(IconSymbol::ZoomOut, PreviewImageViewportMessage::ZoomedOut),
-        text(format!("{percent:.0}%"))
-            .width(Length::Fixed(ZOOM_PERCENT_WIDTH))
-            .align_x(Horizontal::Center)
-            .style(move |theme| faded_media_text_style(theme, opacity)),
-        icon_button(IconSymbol::ZoomIn, PreviewImageViewportMessage::ZoomedIn),
+        floating_icon_button(
+            IconSymbol::ZoomOut,
+            viewport(PreviewImageViewportMessage::ZoomedOut),
+            opacity
+        ),
+        floating_bar_text(format!("{percent:.0}%"), ZOOM_PERCENT_WIDTH, opacity),
+        floating_icon_button(
+            IconSymbol::ZoomIn,
+            viewport(PreviewImageViewportMessage::ZoomedIn),
+            opacity
+        ),
         Space::new().width(Length::Fixed(4.0)),
         toggle,
-        button(faded_media_icon(
+        floating_icon_button(
             IconSymbol::Info,
-            ZOOM_CONTROL_ICON_SIZE,
+            Message::from(PreviewMessage::ImageInfoToggled),
             opacity
-        ))
-        .on_press(Message::from(PreviewMessage::ImageInfoToggled))
-        .padding(6)
-        .width(Length::Fixed(ZOOM_CONTROL_BUTTON_SIZE))
-        .height(Length::Fixed(ZOOM_CONTROL_BUTTON_SIZE))
-        .style(move |theme, status| faded_media_button_style(theme, status, opacity)),
+        ),
     ]
     .spacing(2)
     .align_y(Alignment::Center);
-    let bar = container(controls)
-        .padding([4, 8])
-        .style(move |theme| zoom_controls_style(theme, opacity));
-    container(bar)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .align_x(Horizontal::Center)
-        .align_y(Vertical::Bottom)
-        .padding(iced::Padding {
-            bottom: ZOOM_CONTROLS_BOTTOM_MARGIN,
-            ..iced::Padding::ZERO
-        })
-        .into()
-}
-
-fn zoom_controls_style(theme: &iced::Theme, opacity: f32) -> container::Style {
-    let colors = ui_colors(theme);
-    container::Style {
-        background: Some(
-            colors
-                .surface_container_high
-                .scale_alpha(ZOOM_CONTROLS_BACKGROUND_ALPHA * opacity)
-                .into(),
-        ),
-        border: iced::Border {
-            color: colors.outline_variant.scale_alpha(opacity),
-            width: 1.0,
-            radius: ZOOM_CONTROLS_RADIUS.into(),
-        },
-        shadow: Shadow {
-            color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.25 * opacity),
-            offset: Vector::new(0.0, 2.0),
-            blur_radius: 8.0,
-        },
-        ..container::Style::default()
-    }
+    floating_bar(controls.into(), opacity)
 }
 
 pub(crate) fn preview_image_frame(

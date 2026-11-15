@@ -9,7 +9,8 @@ pub const MAX_READY_DOCUMENT_PAGES: usize = 6;
 pub const MAX_READY_DOCUMENT_RGBA_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_DOCUMENT_PAGE_EDGE: u32 = 4096;
 pub const MAX_DOCUMENT_PAGE_PIXELS: u64 = 16 * 1024 * 1024;
-const RENDER_WIDTH_BUCKETS: [u32; 5] = [512, 768, 1024, 1280, 1600];
+/// 放大和高分屏都要更宽的页：最宽到单页边长上限（再大由像素预算压回）。
+const RENDER_WIDTH_BUCKETS: [u32; 9] = [512, 768, 1024, 1280, 1600, 2048, 2560, 3200, 4096];
 
 #[derive(Debug, Clone)]
 pub(super) struct ReadyDocumentPage {
@@ -31,10 +32,6 @@ impl ReadyDocumentPageCache {
 
     pub(super) fn get(&self, page_index: usize) -> Option<&ReadyDocumentPage> {
         self.pages.get(&page_index)
-    }
-
-    pub(super) fn clear(&mut self) {
-        *self = Self::default();
     }
 
     pub(super) fn touch(&mut self, page_index: usize) {

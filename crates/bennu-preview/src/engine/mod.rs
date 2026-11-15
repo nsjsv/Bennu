@@ -51,8 +51,8 @@ pub struct PreviewEngine {
     pub original_image_preview_cancel: Option<CancellationToken>,
     /// 这张图已经要过一次原尺寸（放大到超过按屏幕大小解出的像素时），不再重复要。
     pub(crate) full_image_requested: bool,
-    /// 预览所在屏幕的物理像素：原图按它解；量不到时按 4K。
-    pub(crate) display_pixels: Option<iced::Size<u32>>,
+    /// 预览所在屏幕：物理像素（原图按它解，量不到按 4K）和缩放倍数（1:1、文档按物理像素渲染）。
+    pub(crate) display: Option<crate::preview::DisplayMetrics>,
     /// 图片信息层开着没有：换图片时保持（一张张看信息），关预览窗口时关掉。
     pub(crate) image_info_visible: bool,
     pub(crate) image_info: Option<std::sync::Arc<crate::preview::ImageInfo>>,
@@ -137,7 +137,7 @@ impl PreviewEngine {
             original_image_preview_generation: 0,
             original_image_preview_cancel: None,
             full_image_requested: false,
-            display_pixels: None,
+            display: None,
             image_info_visible: false,
             image_info: None,
             loading_backdrop: None,

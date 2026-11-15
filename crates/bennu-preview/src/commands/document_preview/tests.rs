@@ -262,7 +262,7 @@ async fn real_poppler_parses_rotated_crop_boxes_and_renders_only_requested_pages
 
     let workspace_root = prepared.workspace.root_path().to_path_buf();
     let mut preview =
-        PagedDocumentPreview::new(prepared, CancellationToken::new(), 720.0, 440.0).unwrap();
+        PagedDocumentPreview::new(prepared, CancellationToken::new(), 720.0, 440.0, 1.0).unwrap();
     let requests = preview.drain_render_requests(2);
     assert_eq!(requests.len(), 2);
     let mut ratios = BTreeMap::new();

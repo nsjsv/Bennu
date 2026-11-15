@@ -79,7 +79,7 @@ fn actual_size_follows_the_display_scale_and_toggles_back_to_fit() {
             .update_preview_image_viewport(PreviewImageViewportMessage::FitOrActualToggled, PANEL),
     );
     assert!(!engine.preview_image_viewport.is_zoomed());
-    assert_eq!(engine.preview_image_viewport.display_scale, 2.0);
+    assert_eq!(engine.display_scale(), 2.0);
     assert_eq!(
         engine.image_decode_bound().fit(10_000, 10_000),
         (1600, 1600)

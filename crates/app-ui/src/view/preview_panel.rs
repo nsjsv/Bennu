@@ -152,6 +152,7 @@ fn document_scroll_wiring(preview: Option<&PreviewState>) -> ScrollRegionWiring<
             Message::Preview(PreviewMessage::DocumentPreview(
                 DocumentPreviewMessage::Scrolled {
                     key: key.clone(),
+                    offset_x: viewport.absolute_offset().x,
                     offset_y: viewport.absolute_offset().y,
                     viewport_height: viewport.bounds().height,
                     content_height: viewport.content_bounds().height,

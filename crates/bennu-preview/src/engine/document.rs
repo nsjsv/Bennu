@@ -11,12 +11,15 @@ use iced::{widget::Id as WidgetId, Task};
 use tokio_util::sync::CancellationToken;
 
 use crate::commands::document_preview::{prepare_document_command, render_document_page_command};
+use crate::commands::preview::measure_preview_display_command;
 use crate::document_preview::{
-    DocumentPageRenderOutcome, DocumentPrepareOutcome, DocumentPrepareRequest,
-    DocumentPreviewRequestKey, DocumentViewportKey, PagedDocumentPreview, PendingDocumentPreview,
+    DocumentPageRenderOutcome, DocumentPageTurn, DocumentPrepareOutcome, DocumentPrepareRequest,
+    DocumentPreviewRequestKey, DocumentViewportKey, DocumentZoom, PagedDocumentPreview,
+    PendingDocumentPreview, DOCUMENT_ZOOM_STEP,
 };
 use crate::preview::{PreviewContent, PreviewSize, PreviewState, PreviewWindowProfile};
 use crate::preview_message::PreviewMessage;
+use crate::text_preview_viewer::focus_preview_keyboard;
 
 const DOCUMENT_RENDER_REQUESTS_PER_PREVIEW: usize = 2;
 const DOCUMENT_CONTENT_HEIGHT_TOLERANCE: f32 = 1.0;
@@ -42,8 +45,10 @@ impl super::PreviewEngine {
         });
         self.preview = Some(PreviewState::Loading(path));
 
+        // 屏幕在准备文档的工夫里就量好了：页按物理像素渲染，高分屏上字不糊。
         Task::batch([
             window_command,
+            measure_preview_display_command(),
             prepare_document_command(DocumentPrepareRequest {
                 key,
                 max_file_bytes,
@@ -82,6 +87,7 @@ impl super::PreviewEngine {
                     pending.cancellation,
                     layout_size.width,
                     layout_size.height,
+                    self.display_scale(),
                 ) {
                     Ok(document) => document,
                     Err(error) => {
@@ -99,7 +105,17 @@ impl super::PreviewEngine {
                     scroll_region_id,
                     scrollable::AbsoluteOffset { x: 0.0, y: 0.0 },
                 );
-                reset_scroll.chain(self.schedule_document_page_renders())
+                // 独立窗口一打开键盘就归文档（缩放、翻页键）；面板点一下才归它。
+                let focus =
+                    if self.preview_load_surface == super::PreviewLoadSurface::StandaloneWindow {
+                        focus_preview_keyboard()
+                    } else {
+                        Task::none()
+                    };
+                Task::batch([
+                    reset_scroll.chain(self.schedule_document_page_renders()),
+                    focus,
+                ])
             }
             DocumentPrepareOutcome::Failed(_, error) => {
                 self.text_preview_document = None;
@@ -130,11 +146,13 @@ impl super::PreviewEngine {
     pub fn handle_document_preview_scrolled(
         &mut self,
         key: DocumentViewportKey,
+        offset_x: f32,
         offset_y: f32,
         viewport_height: f32,
         content_height: f32,
     ) -> Option<Task<PreviewMessage>> {
         if !offset_y.is_finite()
+            || !offset_x.is_finite()
             || !viewport_height.is_finite()
             || !content_height.is_finite()
             || viewport_height <= 0.0
@@ -144,7 +162,7 @@ impl super::PreviewEngine {
         }
         let document = self.active_document_preview_mut()?;
         if (document.content_height() - content_height).abs() > DOCUMENT_CONTENT_HEIGHT_TOLERANCE
-            || !document.update_viewport(&key, offset_y, viewport_height)
+            || !document.update_viewport(&key, offset_x, offset_y, viewport_height)
         {
             return None;
         }
@@ -167,6 +185,91 @@ impl super::PreviewEngine {
         let scroll = iced::widget::operation::scroll_to(
             scroll_region_id,
             scrollable::AbsoluteOffset { x: 0.0, y: offset },
+        );
+        Task::batch([scroll, self.schedule_document_page_renders()])
+    }
+
+    /// 缩放：看着的地方不跑，放大后横向滚到正中。
+    pub fn zoom_document_preview(
+        &mut self,
+        zoom: DocumentZoom,
+        scroll_region_id: WidgetId,
+    ) -> Task<PreviewMessage> {
+        let Some(document) = self.active_document_preview_mut() else {
+            return Task::none();
+        };
+        let target = match zoom {
+            DocumentZoom::In => document.zoom() * DOCUMENT_ZOOM_STEP,
+            DocumentZoom::Out => document.zoom() / DOCUMENT_ZOOM_STEP,
+            DocumentZoom::FitWidth => 1.0,
+        };
+        let offset = match document.set_zoom(target) {
+            Ok(offset) => offset,
+            Err(error) => {
+                document.cancel();
+                self.preview = Some(PreviewState::Error(error));
+                return Task::none();
+            }
+        };
+        let scroll = iced::widget::operation::scroll_to(
+            scroll_region_id,
+            scrollable::AbsoluteOffset {
+                x: document.centered_horizontal_offset(),
+                y: offset,
+            },
+        );
+        Task::batch([scroll, self.schedule_document_page_renders()])
+    }
+
+    /// PageUp/PageDown/Home/End：滚到目标页页头，横向位置不动。
+    pub fn turn_document_page(
+        &mut self,
+        turn: DocumentPageTurn,
+        scroll_region_id: WidgetId,
+    ) -> Task<PreviewMessage> {
+        let Some(document) = self.active_document_preview_mut() else {
+            return Task::none();
+        };
+        let page = document.page_after_turn(turn);
+        self.scroll_document_to_page(page, scroll_region_id)
+    }
+
+    pub fn edit_document_page_number(&mut self, draft: String) -> Task<PreviewMessage> {
+        if let Some(document) = self.active_document_preview_mut() {
+            document.edit_page_number(draft);
+        }
+        Task::none()
+    }
+
+    /// 页码框回车：跳过去，框里回到显示当前页。
+    pub fn submit_document_page_number(
+        &mut self,
+        scroll_region_id: WidgetId,
+    ) -> Task<PreviewMessage> {
+        let Some(page) = self
+            .active_document_preview_mut()
+            .and_then(PagedDocumentPreview::take_page_number)
+        else {
+            return Task::none();
+        };
+        self.scroll_document_to_page(page, scroll_region_id)
+    }
+
+    fn scroll_document_to_page(
+        &mut self,
+        page: usize,
+        scroll_region_id: WidgetId,
+    ) -> Task<PreviewMessage> {
+        let Some(document) = self.active_document_preview_mut() else {
+            return Task::none();
+        };
+        let offset = document.scroll_to_page(page);
+        let scroll = iced::widget::operation::scroll_to(
+            scroll_region_id,
+            scrollable::AbsoluteOffset {
+                x: document.horizontal_offset(),
+                y: offset,
+            },
         );
         Task::batch([scroll, self.schedule_document_page_renders()])
     }

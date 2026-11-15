@@ -30,15 +30,39 @@ impl FileBrowser {
             }
             DocumentPreviewMessage::Scrolled {
                 key,
+                offset_x,
                 offset_y,
                 viewport_height,
                 content_height,
             } => self.handle_document_preview_scrolled(
                 key,
+                offset_x,
                 offset_y,
                 viewport_height,
                 content_height,
             ),
+            DocumentPreviewMessage::Zoomed(zoom) => {
+                let scroll_region_id = smooth_scroll_id(&ScrollbarRegion::PreviewDocument);
+                self.preview_engine
+                    .zoom_document_preview(zoom, scroll_region_id)
+                    .map(Message::Preview)
+            }
+            DocumentPreviewMessage::PageTurned(turn) => {
+                let scroll_region_id = smooth_scroll_id(&ScrollbarRegion::PreviewDocument);
+                self.preview_engine
+                    .turn_document_page(turn, scroll_region_id)
+                    .map(Message::Preview)
+            }
+            DocumentPreviewMessage::PageNumberEdited(draft) => self
+                .preview_engine
+                .edit_document_page_number(draft)
+                .map(Message::Preview),
+            DocumentPreviewMessage::PageNumberSubmitted => {
+                let scroll_region_id = smooth_scroll_id(&ScrollbarRegion::PreviewDocument);
+                self.preview_engine
+                    .submit_document_page_number(scroll_region_id)
+                    .map(Message::Preview)
+            }
         }
     }
 
@@ -77,12 +101,14 @@ impl FileBrowser {
     pub(in crate::app) fn handle_document_preview_scrolled(
         &mut self,
         key: DocumentViewportKey,
+        offset_x: f32,
         offset_y: f32,
         viewport_height: f32,
         content_height: f32,
     ) -> Task<Message> {
         match self.preview_engine.handle_document_preview_scrolled(
             key,
+            offset_x,
             offset_y,
             viewport_height,
             content_height,

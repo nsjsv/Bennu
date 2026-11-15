@@ -37,6 +37,7 @@ impl super::PreviewEngine {
     pub fn image_view(&self) -> ImageView<'_> {
         ImageView {
             viewport: &self.preview_image_viewport,
+            display_scale: self.display_scale(),
             info: self.visible_image_info(),
             loading_backdrop: self
                 .loading_backdrop

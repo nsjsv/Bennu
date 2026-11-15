@@ -25,6 +25,7 @@ fn preview_with_pages(pages: Vec<DocumentPageSize>) -> PagedDocumentPreview {
         CancellationToken::new(),
         720.0,
         440.0,
+        1.0,
     )
     .unwrap()
 }
@@ -64,6 +65,7 @@ fn cumulative_layout_height_overflow_is_rejected() {
         CancellationToken::new(),
         720.0,
         440.0,
+        1.0,
     )
     .unwrap_err();
 
@@ -78,11 +80,11 @@ fn wanted_window_prefetches_one_page_at_start_middle_and_end() {
     assert_eq!(preview.wanted_pages(), &[0, 1, 2]);
 
     let middle_key = preview.viewport_key();
-    assert!(preview.update_viewport(&middle_key, 1200.0, 300.0));
+    assert!(preview.update_viewport(&middle_key, 0.0, 1200.0, 300.0));
     assert_eq!(preview.wanted_pages(), &[2, 3, 4, 5]);
 
     let end_key = preview.viewport_key();
-    assert!(preview.update_viewport(&end_key, preview.content_height() - 300.0, 300.0));
+    assert!(preview.update_viewport(&end_key, 0.0, preview.content_height() - 300.0, 300.0));
     assert_eq!(preview.wanted_pages(), &[6, 7]);
 }
 
@@ -94,7 +96,7 @@ fn jumping_to_last_page_replaces_queue_without_requesting_middle_pages() {
     assert!(initial.iter().all(|request| request.key.page_index <= 4));
 
     let key = preview.viewport_key();
-    assert!(preview.update_viewport(&key, preview.content_height() - 300.0, 300.0));
+    assert!(preview.update_viewport(&key, 0.0, preview.content_height() - 300.0, 300.0));
     assert!(preview
         .queued_pages()
         .iter()
@@ -184,7 +186,7 @@ fn resize_preserves_anchor_and_separates_layout_from_render_generation() {
     let initial_render = preview.render_key();
     let initial_layout = preview.viewport_key().layout_generation;
     let scroll_key = preview.viewport_key();
-    assert!(preview.update_viewport(&scroll_key, 1100.0, 300.0));
+    assert!(preview.update_viewport(&scroll_key, 0.0, 1100.0, 300.0));
     let anchor_page = page_at_offset(
         &preview.page_tops,
         &preview.display_heights,
@@ -210,10 +212,10 @@ fn scroll_viewport_height_change_advances_layout_generation() {
     let old_key = preview.viewport_key();
     let old_render = preview.render_key();
 
-    assert!(preview.update_viewport(&old_key, 0.0, 420.0));
+    assert!(preview.update_viewport(&old_key, 0.0, 0.0, 420.0));
     assert_eq!(preview.render_key(), old_render);
     assert_ne!(preview.viewport_key(), old_key);
-    assert!(!preview.update_viewport(&old_key, 0.0, 440.0));
+    assert!(!preview.update_viewport(&old_key, 0.0, 0.0, 440.0));
 }
 
 #[test]
@@ -225,7 +227,7 @@ fn height_resize_invalidates_old_viewport_key_without_changing_render_key() {
     preview.resize(720.0, 620.0).unwrap();
 
     assert_eq!(preview.render_key(), old_render);
-    assert!(!preview.update_viewport(&old_viewport, 100.0, 300.0));
+    assert!(!preview.update_viewport(&old_viewport, 0.0, 100.0, 300.0));
 }
 
 #[test]
@@ -264,7 +266,7 @@ fn result_for_page_that_left_render_set_is_discarded() {
     let mut preview = preview_with_pages(vec![page(600.0, 100.0); 80]);
     let request = preview.drain_render_requests(1).remove(0);
     let key = preview.viewport_key();
-    preview.update_viewport(&key, preview.content_height() - 200.0, 200.0);
+    preview.update_viewport(&key, 0.0, preview.content_height() - 200.0, 200.0);
 
     assert!(preview.accept_page_outcome(ready_result(&request, request.plan.estimated_rgba_bytes)));
     assert_eq!(preview.ready_page_count(), 0);
@@ -289,4 +291,57 @@ fn quarter_turn_page_inverts_poppler_axis_to_keep_effective_width_bucket() {
     assert_eq!((rotated.width, rotated.height), (400.0, 600.0));
     assert_eq!((plan.width, plan.height), (768, 1152));
     assert_eq!(plan.scale_axis, DocumentScaleAxis::Height(768));
+}
+
+#[test]
+fn zoom_keeps_the_page_in_view_and_old_renders_stand_in_until_new_ones_arrive() {
+    let mut preview = preview_with_pages(vec![page(600.0, 800.0); 10]);
+    let request = preview.drain_render_requests(1).remove(0);
+    assert!(preview.accept_page_outcome(ready_result(&request, request.plan.estimated_rgba_bytes)));
+    let fit_width = preview.page_width();
+    let old_render = preview.render_key();
+
+    preview.set_zoom(2.0).unwrap();
+    assert_eq!(preview.zoom(), 2.0);
+    assert_eq!(preview.page_width(), fit_width * 2.0);
+    assert!(preview.content_width() > preview.page_width());
+    assert!(preview.centered_horizontal_offset() > 0.0);
+    // 渲染宽度换了一档：新页还没渲染，旧的那张先拉伸着顶上。
+    assert_ne!(preview.render_key(), old_render);
+    assert!(matches!(
+        preview.page_view(request.key.page_index),
+        DocumentPageView::Ready(_)
+    ));
+    // 夹在范围内，回到铺满宽度。
+    preview.set_zoom(100.0).unwrap();
+    assert_eq!(preview.zoom(), DOCUMENT_MAX_ZOOM);
+    preview.set_zoom(1.0).unwrap();
+    assert_eq!(preview.page_width(), fit_width);
+}
+
+#[test]
+fn page_turns_and_typed_page_numbers_land_on_page_tops() {
+    let mut preview = preview_with_pages(vec![page(600.0, 800.0); 5]);
+    assert_eq!(preview.page_count(), 5);
+    assert_eq!(preview.current_page(), 0);
+    assert_eq!(preview.page_after_turn(DocumentPageTurn::Next), 1);
+    assert_eq!(preview.page_after_turn(DocumentPageTurn::Previous), 0);
+    assert_eq!(preview.page_after_turn(DocumentPageTurn::Last), 4);
+
+    let offset = preview.scroll_to_page(2);
+    assert_eq!(preview.viewport_offset(), offset);
+    assert_eq!(preview.page_after_turn(DocumentPageTurn::Previous), 1);
+    // 在页中间往前翻先回这页页头。
+    let key = preview.viewport_key();
+    assert!(preview.update_viewport(&key, 0.0, offset + 100.0, 440.0));
+    assert_eq!(preview.page_after_turn(DocumentPageTurn::Previous), 2);
+
+    preview.edit_page_number("4a".to_owned());
+    assert_eq!(preview.page_number_draft(), Some("4"));
+    assert_eq!(preview.take_page_number(), Some(3));
+    assert_eq!(preview.page_number_draft(), None);
+    preview.edit_page_number("99".to_owned());
+    assert_eq!(preview.take_page_number(), Some(4));
+    preview.edit_page_number("0".to_owned());
+    assert_eq!(preview.take_page_number(), None);
 }

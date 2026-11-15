@@ -269,6 +269,7 @@ fn stale_page_and_scroll_are_rejected_after_width_bucket_resize() {
     );
     drop(browser.handle_document_preview_scrolled(
         old_viewport_key,
+        0.0,
         offset_after_resize + 100.0,
         400.0,
         content_height,
@@ -332,6 +333,7 @@ fn height_resize_advances_only_layout_generation_and_rejects_old_widget_event() 
 
     drop(browser.handle_document_preview_scrolled(
         old_key,
+        0.0,
         stable_offset + 200.0,
         500.0,
         content_height,

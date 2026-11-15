@@ -712,7 +712,8 @@ async fn real_office_samples_convert_and_render_the_first_page() {
         );
 
         let mut preview =
-            PagedDocumentPreview::new(prepared, CancellationToken::new(), 720.0, 440.0).unwrap();
+            PagedDocumentPreview::new(prepared, CancellationToken::new(), 720.0, 440.0, 1.0)
+                .unwrap();
         let page_request = preview
             .drain_render_requests(1)
             .pop()

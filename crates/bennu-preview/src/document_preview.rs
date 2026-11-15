@@ -10,9 +10,10 @@ mod workspace;
 pub use format::{document_preview_format_for_path, DocumentPreviewFormat, OfficeDocumentFormat};
 pub use model::{
     document_viewport_height, DocumentPageRenderOutcome, DocumentPageRenderRequest,
-    DocumentPageRenderResult, DocumentPageView, DocumentPrepareOutcome, DocumentPrepareRequest,
-    DocumentPreviewMessage, DocumentPreviewRequestKey, DocumentScaleAxis, DocumentViewportKey,
-    PagedDocumentPreview, PendingDocumentPreview, PreparedDocumentPreview,
+    DocumentPageRenderResult, DocumentPageTurn, DocumentPageView, DocumentPrepareOutcome,
+    DocumentPrepareRequest, DocumentPreviewMessage, DocumentPreviewRequestKey, DocumentScaleAxis,
+    DocumentViewportKey, DocumentZoom, PagedDocumentPreview, PendingDocumentPreview,
+    PreparedDocumentPreview, DOCUMENT_ZOOM_STEP,
 };
 // 原 app-ui 侧为 #[cfg(test)] 门控的测试用类型改为无条件 pub：app-ui 的
 // cfg(test) 编译 bennu-preview 依赖时不会开启对方的 cfg(test)，门控会让

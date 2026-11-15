@@ -408,11 +408,13 @@ impl PreviewHost {
             // 文档滚动偏移归档到渲染代（None = 过期/非法丢弃）。
             DocumentPreviewMessage::Scrolled {
                 key,
+                offset_x,
                 offset_y,
                 viewport_height,
                 content_height,
             } => match self.engine.handle_document_preview_scrolled(
                 key,
+                offset_x,
                 offset_y,
                 viewport_height,
                 content_height,
@@ -420,6 +422,18 @@ impl PreviewHost {
                 Some(command) => command,
                 None => Task::none(),
             },
+            DocumentPreviewMessage::Zoomed(zoom) => self
+                .engine
+                .zoom_document_preview(zoom, preview_scroll_id(PreviewScrollRegion::Document)),
+            DocumentPreviewMessage::PageTurned(turn) => self
+                .engine
+                .turn_document_page(turn, preview_scroll_id(PreviewScrollRegion::Document)),
+            DocumentPreviewMessage::PageNumberEdited(draft) => {
+                self.engine.edit_document_page_number(draft)
+            }
+            DocumentPreviewMessage::PageNumberSubmitted => self
+                .engine
+                .submit_document_page_number(preview_scroll_id(PreviewScrollRegion::Document)),
         }
     }
 

@@ -119,6 +119,99 @@ pub(crate) fn faded_media_text_style(theme: &Theme, opacity: f32) -> iced::widge
     }
 }
 
+const FLOATING_BUTTON_SIZE: f32 = 28.0;
+const FLOATING_ICON_SIZE: f32 = 16.0;
+const FLOATING_BAR_BOTTOM_MARGIN: f32 = 14.0;
+const FLOATING_BAR_RADIUS: f32 = 18.0;
+const FLOATING_BAR_BACKGROUND_ALPHA: f32 = 0.9;
+
+/// 浮在内容底部正中的一条控件（图片缩放、文档缩放翻页共用）：跟主题配色，深浅主题、
+/// 内容明暗下都看得清；整层铺满，只有控件那一条接事件。
+pub(crate) fn floating_bar<'a, Message: 'a>(
+    controls: Element<'a, Message>,
+    opacity: f32,
+) -> Element<'a, Message> {
+    let opacity = opacity.clamp(0.0, 1.0);
+    let bar = container(controls)
+        .padding([4, 8])
+        .style(move |theme| floating_bar_style(theme, opacity));
+    container(bar)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(iced::alignment::Horizontal::Center)
+        .align_y(Vertical::Bottom)
+        .padding(iced::Padding {
+            bottom: FLOATING_BAR_BOTTOM_MARGIN,
+            ..iced::Padding::ZERO
+        })
+        .into()
+}
+
+fn floating_bar_style(theme: &Theme, opacity: f32) -> container::Style {
+    let colors = ui_colors(theme);
+    container::Style {
+        background: Some(
+            colors
+                .surface_container_high
+                .scale_alpha(FLOATING_BAR_BACKGROUND_ALPHA * opacity)
+                .into(),
+        ),
+        border: Border {
+            color: colors.outline_variant.scale_alpha(opacity),
+            width: 1.0,
+            radius: FLOATING_BAR_RADIUS.into(),
+        },
+        shadow: iced::Shadow {
+            color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.25 * opacity),
+            offset: iced::Vector::new(0.0, 2.0),
+            blur_radius: 8.0,
+        },
+        ..container::Style::default()
+    }
+}
+
+pub(crate) fn floating_icon_button<Message: Clone + 'static>(
+    symbol: IconSymbol,
+    message: Message,
+    opacity: f32,
+) -> iced::widget::Button<'static, Message> {
+    iced::widget::button(faded_media_icon(symbol, FLOATING_ICON_SIZE, opacity))
+        .on_press(message)
+        .padding(6)
+        .width(Length::Fixed(FLOATING_BUTTON_SIZE))
+        .height(Length::Fixed(FLOATING_BUTTON_SIZE))
+        .style(move |theme, status| faded_media_button_style(theme, status, opacity))
+}
+
+pub(crate) fn floating_text_button<Message: Clone + 'static>(
+    label: String,
+    message: Message,
+    opacity: f32,
+) -> Element<'static, Message> {
+    iced::widget::button(
+        crate::panel_text::readable_text(label)
+            .style(move |theme| faded_media_text_style(theme, opacity)),
+    )
+    .on_press(message)
+    .padding([4, 8])
+    .height(Length::Fixed(FLOATING_BUTTON_SIZE))
+    .style(move |theme, status| faded_media_button_style(theme, status, opacity))
+    .into()
+}
+
+/// 浮条上居中的一段字（百分比、页数），宽度固定，数字变了不跳。
+pub(crate) fn floating_bar_text<Message: 'static>(
+    content: String,
+    width: f32,
+    opacity: f32,
+) -> Element<'static, Message> {
+    iced::widget::text(content)
+        .width(Length::Fixed(width))
+        .align_x(iced::alignment::Horizontal::Center)
+        .style(move |theme| faded_media_text_style(theme, opacity))
+        .into()
+}
+
 /// 播完模式按钮的图标（音频、视频共用一个设置）：放完停（→|）、单个循环、接着放下一个。
 pub(crate) fn end_action_icon(action: MediaEndAction) -> IconSymbol {
     match action {

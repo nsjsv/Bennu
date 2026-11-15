@@ -384,6 +384,11 @@ fn measure_display_command() -> Task<Option<DisplayMetrics>> {
     })
 }
 
+/// 只量屏幕、记下来（文档按物理像素渲染页面要缩放倍数）。
+pub(crate) fn measure_preview_display_command() -> Task<PreviewMessage> {
+    measure_display_command().map(PreviewMessage::PreviewDisplayMeasured)
+}
+
 pub(crate) fn measure_video_display_command(path: PathBuf) -> Task<PreviewMessage> {
     measure_display_command().map(move |display| {
         PreviewMessage::VideoPreviewDisplayMeasured(

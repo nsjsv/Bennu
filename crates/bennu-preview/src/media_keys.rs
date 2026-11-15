@@ -11,6 +11,7 @@ use iced::advanced::{layout, mouse, overlay, renderer, Clipboard, Layout, Shell,
 use iced::keyboard::{self, key::Named};
 use iced::{Element, Event, Length, Rectangle, Size, Vector};
 
+use crate::document_preview::{DocumentPageTurn, DocumentPreviewMessage, DocumentZoom};
 use crate::image_preview_viewport::PreviewImageViewportMessage;
 use crate::preview_message::{ImageStep, MediaKeyCommand, PreviewMessage};
 
@@ -21,6 +22,7 @@ const VOLUME_STEP: f32 = 0.05;
 #[derive(Debug, Default)]
 pub(crate) struct MediaKeysState {
     pub(crate) is_focused: bool,
+    modifiers: keyboard::Modifiers,
 }
 
 impl operation::Focusable for MediaKeysState {
@@ -44,6 +46,7 @@ where
     Element::new(MediaKeys {
         content,
         keymap: |key, modifiers| media_key_command(key, modifiers).map(PreviewMessage::MediaKey),
+        wheel: None,
     })
 }
 
@@ -54,14 +57,30 @@ where
     Element::new(MediaKeys {
         content,
         keymap: image_key_message,
+        wheel: None,
+    })
+}
+
+/// 文档：+/-/0（带不带 Ctrl 都行）缩放，Ctrl+滚轮缩放，PageUp/PageDown/Home/End 翻页。
+pub(crate) fn document_keys<'a, Message>(content: Element<'a, Message>) -> Element<'a, Message>
+where
+    Message: 'a + Clone + From<PreviewMessage>,
+{
+    Element::new(MediaKeys {
+        content,
+        keymap: document_key_message,
+        wheel: Some(document_wheel_message),
     })
 }
 
 type Keymap = fn(&keyboard::Key, keyboard::Modifiers) -> Option<PreviewMessage>;
+/// 滚轮先问这个：给出消息就不让里面的滚动区滚（Ctrl+滚轮缩放）。
+type WheelMap = fn(mouse::ScrollDelta, keyboard::Modifiers) -> Option<PreviewMessage>;
 
 struct MediaKeys<'a, Message> {
     content: Element<'a, Message>,
     keymap: Keymap,
+    wheel: Option<WheelMap>,
 }
 
 /// 带 Ctrl/Alt/Super 的组合键不接，留给应用快捷键。
@@ -130,6 +149,52 @@ pub(crate) fn image_key_message(
     Some(PreviewMessage::PreviewImageViewport(viewport))
 }
 
+pub(crate) fn document_key_message(
+    key: &keyboard::Key,
+    modifiers: keyboard::Modifiers,
+) -> Option<PreviewMessage> {
+    if modifiers.alt() || modifiers.logo() {
+        return None;
+    }
+    let message = match key.as_ref() {
+        keyboard::Key::Named(Named::PageDown) => {
+            DocumentPreviewMessage::PageTurned(DocumentPageTurn::Next)
+        }
+        keyboard::Key::Named(Named::PageUp) => {
+            DocumentPreviewMessage::PageTurned(DocumentPageTurn::Previous)
+        }
+        keyboard::Key::Named(Named::Home) => {
+            DocumentPreviewMessage::PageTurned(DocumentPageTurn::First)
+        }
+        keyboard::Key::Named(Named::End) => {
+            DocumentPreviewMessage::PageTurned(DocumentPageTurn::Last)
+        }
+        keyboard::Key::Character("+" | "=") => DocumentPreviewMessage::Zoomed(DocumentZoom::In),
+        keyboard::Key::Character("-") => DocumentPreviewMessage::Zoomed(DocumentZoom::Out),
+        keyboard::Key::Character("0") => DocumentPreviewMessage::Zoomed(DocumentZoom::FitWidth),
+        _ => return None,
+    };
+    Some(PreviewMessage::DocumentPreview(message))
+}
+
+fn document_wheel_message(
+    delta: mouse::ScrollDelta,
+    modifiers: keyboard::Modifiers,
+) -> Option<PreviewMessage> {
+    if !modifiers.command() {
+        return None;
+    }
+    let (mouse::ScrollDelta::Lines { y, .. } | mouse::ScrollDelta::Pixels { y, .. }) = delta;
+    let zoom = if y > 0.0 {
+        DocumentZoom::In
+    } else {
+        DocumentZoom::Out
+    };
+    Some(PreviewMessage::DocumentPreview(
+        DocumentPreviewMessage::Zoomed(zoom),
+    ))
+}
+
 impl<Message> Widget<Message, iced::Theme, iced::Renderer> for MediaKeys<'_, Message>
 where
     Message: Clone + From<PreviewMessage>,
@@ -193,13 +258,16 @@ where
     ) {
         let state = tree.state.downcast_mut::<MediaKeysState>();
         match event {
+            Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
+                state.modifiers = *modifiers;
+            }
             Event::Mouse(mouse::Event::ButtonPressed(_)) => {
                 state.is_focused = cursor.is_over(layout.bounds());
             }
-            Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. })
-                if state.is_focused && !shell.is_event_captured() =>
+            Event::Mouse(mouse::Event::WheelScrolled { delta })
+                if cursor.is_over(layout.bounds()) =>
             {
-                if let Some(message) = (self.keymap)(key, *modifiers) {
+                if let Some(message) = self.wheel.and_then(|wheel| wheel(*delta, state.modifiers)) {
                     shell.publish(Message::from(message));
                     shell.capture_event();
                     return;
@@ -207,6 +275,7 @@ where
             }
             _ => {}
         }
+        // 里面先接：文档的页码框在打字时，数字和 +/- 归输入框，不当缩放键。
         self.content.as_widget_mut().update(
             &mut tree.children[0],
             event,
@@ -217,6 +286,15 @@ where
             shell,
             viewport,
         );
+        let state = tree.state.downcast_mut::<MediaKeysState>();
+        if let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = event {
+            if state.is_focused && !shell.is_event_captured() {
+                if let Some(message) = (self.keymap)(key, *modifiers) {
+                    shell.publish(Message::from(message));
+                    shell.capture_event();
+                }
+            }
+        }
     }
 
     fn mouse_interaction(
@@ -350,6 +428,41 @@ mod tests {
             Some(PreviewMessage::ImageInfoToggled)
         ));
         assert!(image_key_message(&named(Named::ArrowLeft), keyboard::Modifiers::CTRL).is_none());
+    }
+
+    #[test]
+    fn document_keys_zoom_and_turn_pages() {
+        let none = keyboard::Modifiers::empty();
+        let document = |key: &keyboard::Key, modifiers| match document_key_message(key, modifiers) {
+            Some(PreviewMessage::DocumentPreview(message)) => Some(format!("{message:?}")),
+            _ => None,
+        };
+        let character = |text: &str| keyboard::Key::Character(text.into());
+        assert_eq!(
+            document(&named(Named::PageDown), none).as_deref(),
+            Some("PageTurned(Next)")
+        );
+        assert_eq!(
+            document(&named(Named::Home), none).as_deref(),
+            Some("PageTurned(First)")
+        );
+        assert_eq!(
+            document(&character("="), keyboard::Modifiers::CTRL).as_deref(),
+            Some("Zoomed(In)")
+        );
+        assert_eq!(
+            document(&character("0"), none).as_deref(),
+            Some("Zoomed(FitWidth)")
+        );
+        assert!(document_wheel_message(
+            mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
+            keyboard::Modifiers::CTRL
+        )
+        .is_some());
+        // 不按 Ctrl 的滚轮照常滚动。
+        assert!(
+            document_wheel_message(mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 }, none).is_none()
+        );
     }
 
     #[test]

@@ -155,6 +155,8 @@ pub enum ImagePreviewContent {
 #[derive(Debug, Clone, Copy)]
 pub struct ImageView<'a> {
     pub viewport: &'a crate::image_preview_viewport::ImagePreviewViewport,
+    /// 逻辑像素换物理像素的倍数（比例按原始像素算）。
+    pub display_scale: f32,
     pub info: Option<&'a ImageInfo>,
     pub loading_backdrop: Option<&'a ImagePreviewContent>,
 }

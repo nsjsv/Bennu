@@ -13,6 +13,10 @@ use super::resources::{
 use super::DocumentPreviewWorkspace;
 
 pub const MAX_DOCUMENT_PAGES: usize = 10_000;
+/// 缩放相对「铺满宽度」：最小一半，最大四倍，按钮和按键一档 1.25 倍。
+pub const DOCUMENT_MIN_ZOOM: f32 = 0.5;
+pub const DOCUMENT_MAX_ZOOM: f32 = 4.0;
+pub const DOCUMENT_ZOOM_STEP: f32 = 1.25;
 const DOCUMENT_PAGE_SIDE_MARGIN: f32 = 12.0;
 const DOCUMENT_PAGE_GAP: f32 = 12.0;
 
@@ -163,10 +167,34 @@ pub enum DocumentPreviewMessage {
     PageRendered(DocumentPageRenderOutcome),
     Scrolled {
         key: DocumentViewportKey,
+        offset_x: f32,
         offset_y: f32,
         viewport_height: f32,
         content_height: f32,
     },
+    /// 按钮、+/-/0、Ctrl+滚轮。
+    Zoomed(DocumentZoom),
+    /// PageUp/PageDown/Home/End。
+    PageTurned(DocumentPageTurn),
+    /// 页码框里在打字（还没回车）。
+    PageNumberEdited(String),
+    /// 页码框里按了回车：跳到那一页。
+    PageNumberSubmitted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocumentZoom {
+    In,
+    Out,
+    FitWidth,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocumentPageTurn {
+    Previous,
+    Next,
+    First,
+    Last,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -194,9 +222,17 @@ pub struct PagedDocumentPreview {
     width_bucket: u32,
     preview_width: f32,
     preview_height: f32,
+    /// 相对铺满宽度的缩放；页宽 = 铺满宽度 × zoom。
+    zoom: f32,
+    /// 屏幕缩放倍数：页按物理像素渲染，高分屏上字不糊。
+    render_scale: f32,
     page_width: f32,
     viewport_offset: f32,
+    /// 横向滚到哪（放大后页比视口宽）；翻页、跳页时保持。
+    horizontal_offset: f32,
     viewport_height: f32,
+    /// 页码框里还没回车的输入；None 时显示当前页。
+    page_number_draft: Option<String>,
     display_heights: Vec<f32>,
     page_tops: Vec<f32>,
     content_height: f32,
@@ -205,6 +241,8 @@ pub struct PagedDocumentPreview {
     queued: VecDeque<usize>,
     in_flight: BTreeSet<usize>,
     ready: ReadyDocumentPageCache,
+    /// 缩放/改窗口换了渲染宽度后，上一档渲染好的页先拉伸着顶上，新的到了再换，不闪「正在渲染」。
+    previous_renders: BTreeMap<usize, image::Handle>,
     failures: BTreeMap<usize, String>,
 }
 
@@ -214,13 +252,15 @@ impl PagedDocumentPreview {
         document_cancellation: CancellationToken,
         preview_width: f32,
         preview_height: f32,
+        render_scale: f32,
     ) -> Result<Self, String> {
         if prepared.pages.is_empty() || prepared.pages.len() > MAX_DOCUMENT_PAGES {
             return Err(tr!("PDF preview has an invalid page count"));
         }
+        let render_scale = render_scale.max(1.0);
         let page_width = document_page_width(preview_width);
         let viewport_height = document_viewport_height(preview_height);
-        let width_bucket = render_width_bucket(page_width);
+        let width_bucket = render_width_bucket(page_width * render_scale);
         let mut preview = Self {
             key: prepared.key,
             workspace: prepared.workspace,
@@ -232,9 +272,13 @@ impl PagedDocumentPreview {
             width_bucket,
             preview_width,
             preview_height,
+            zoom: 1.0,
+            render_scale,
             page_width,
             viewport_offset: 0.0,
+            horizontal_offset: 0.0,
             viewport_height,
+            page_number_draft: None,
             display_heights: Vec::new(),
             page_tops: Vec::new(),
             content_height: 0.0,
@@ -243,6 +287,7 @@ impl PagedDocumentPreview {
             queued: VecDeque::new(),
             in_flight: BTreeSet::new(),
             ready: ReadyDocumentPageCache::default(),
+            previous_renders: BTreeMap::new(),
             failures: BTreeMap::new(),
         };
         preview.rebuild_layout()?;
@@ -303,6 +348,8 @@ impl PagedDocumentPreview {
     pub fn page_view(&self, page_index: usize) -> DocumentPageView<'_> {
         if let Some(page) = self.ready.get(page_index) {
             DocumentPageView::Ready(&page.handle)
+        } else if let Some(handle) = self.previous_renders.get(&page_index) {
+            DocumentPageView::Ready(handle)
         } else if let Some(error) = self.failures.get(&page_index) {
             DocumentPageView::Error(error)
         } else if self.current_render_set.contains(&page_index) {
@@ -320,12 +367,14 @@ impl PagedDocumentPreview {
     pub fn update_viewport(
         &mut self,
         key: &DocumentViewportKey,
+        horizontal_offset: f32,
         offset: f32,
         viewport_height: f32,
     ) -> bool {
         if key != &self.viewport_key() {
             return false;
         }
+        self.horizontal_offset = horizontal_offset.max(0.0);
         let viewport_height = viewport_height.max(1.0);
         if (self.viewport_height - viewport_height).abs() > f32::EPSILON {
             self.layout_generation = self.layout_generation.wrapping_add(1);
@@ -341,10 +390,33 @@ impl PagedDocumentPreview {
         if self.preview_width == preview_width && self.preview_height == preview_height {
             return Ok(self.viewport_offset);
         }
+        self.relayout(preview_width, preview_height, self.zoom)
+    }
+
+    pub fn zoom(&self) -> f32 {
+        self.zoom
+    }
+
+    /// 改缩放：看着的那页那一处不跑（按顶部页和页内比例还原）；返回新的纵向位置。
+    pub fn set_zoom(&mut self, zoom: f32) -> Result<f32, String> {
+        let zoom = zoom.clamp(DOCUMENT_MIN_ZOOM, DOCUMENT_MAX_ZOOM);
+        if (zoom - self.zoom).abs() <= f32::EPSILON {
+            return Ok(self.viewport_offset);
+        }
+        self.relayout(self.preview_width, self.preview_height, zoom)
+    }
+
+    fn relayout(
+        &mut self,
+        preview_width: f32,
+        preview_height: f32,
+        zoom: f32,
+    ) -> Result<f32, String> {
         let anchor = self.scroll_anchor();
-        let next_page_width = document_page_width(preview_width);
+        let next_page_width = document_page_width(preview_width) * zoom;
         let next_viewport_height = document_viewport_height(preview_height);
-        let next_bucket = render_width_bucket(next_page_width);
+        let next_bucket = render_width_bucket(next_page_width * self.render_scale);
+        self.zoom = zoom;
         self.layout_generation = self.layout_generation.wrapping_add(1);
         self.preview_width = preview_width;
         self.preview_height = preview_height;
@@ -356,7 +428,12 @@ impl PagedDocumentPreview {
             self.render_generation = self.render_generation.wrapping_add(1);
             self.width_bucket = next_bucket;
             self.in_flight.clear();
-            self.ready.clear();
+            let previous = std::mem::take(&mut self.ready);
+            self.previous_renders = previous
+                .pages
+                .into_iter()
+                .map(|(page_index, page)| (page_index, page.handle))
+                .collect();
             self.failures.clear();
         }
         self.rebuild_layout()?;
@@ -415,6 +492,7 @@ impl PagedDocumentPreview {
                     return true;
                 }
                 self.failures.remove(&result.key.page_index);
+                self.previous_renders.remove(&result.key.page_index);
                 self.ready.insert(
                     result.key.page_index,
                     ReadyDocumentPage {
@@ -488,6 +566,8 @@ impl PagedDocumentPreview {
         self.current_render_set = select_render_set(candidates);
         self.failures
             .retain(|page_index, _| self.current_render_set.contains(page_index));
+        self.previous_renders
+            .retain(|page_index, _| self.current_render_set.contains(page_index));
         let ready_active = self
             .current_render_set
             .iter()
@@ -539,6 +619,80 @@ impl PagedDocumentPreview {
         let offset =
             self.page_tops[page_index] + self.display_heights[page_index] * anchor.page_fraction;
         clamp_viewport_offset(offset, self.viewport_height, self.content_height)
+    }
+
+    /// 内容宽：页宽加两边留白，不比视口窄（缩小后页居中）。
+    pub fn content_width(&self) -> f32 {
+        (self.page_width + 2.0 * DOCUMENT_PAGE_SIDE_MARGIN).max(self.preview_width)
+    }
+
+    /// 放大后横向滚到正中的位置。
+    pub fn centered_horizontal_offset(&self) -> f32 {
+        ((self.content_width() - self.preview_width) / 2.0).max(0.0)
+    }
+
+    pub fn horizontal_offset(&self) -> f32 {
+        self.horizontal_offset
+            .min((self.content_width() - self.preview_width).max(0.0))
+    }
+
+    pub fn page_count(&self) -> usize {
+        self.pages.len()
+    }
+
+    /// 视口中线落在哪页（页码框显示的那页，从 0 数）。
+    pub fn current_page(&self) -> usize {
+        page_at_offset(
+            &self.page_tops,
+            &self.display_heights,
+            self.viewport_offset + self.viewport_height / 2.0,
+        )
+    }
+
+    /// 翻页的目标页：往后是顶部那页的下一页；往前时顶部那页没从页头开始看就回它的页头。
+    pub fn page_after_turn(&self, turn: DocumentPageTurn) -> usize {
+        let last = self.pages.len() - 1;
+        let top_page = page_at_offset(
+            &self.page_tops,
+            &self.display_heights,
+            self.viewport_offset + 1.0,
+        );
+        match turn {
+            DocumentPageTurn::First => 0,
+            DocumentPageTurn::Last => last,
+            DocumentPageTurn::Next => (top_page + 1).min(last),
+            DocumentPageTurn::Previous if self.viewport_offset > self.page_tops[top_page] + 1.0 => {
+                top_page
+            }
+            DocumentPageTurn::Previous => top_page.saturating_sub(1),
+        }
+    }
+
+    /// 滚到某页页头（到底了就停在最底）；返回新的纵向位置。
+    pub fn scroll_to_page(&mut self, page_index: usize) -> f32 {
+        let page_index = page_index.min(self.pages.len() - 1);
+        self.viewport_offset = clamp_viewport_offset(
+            self.page_tops[page_index],
+            self.viewport_height,
+            self.content_height,
+        );
+        self.replace_render_window();
+        self.viewport_offset
+    }
+
+    pub fn page_number_draft(&self) -> Option<&str> {
+        self.page_number_draft.as_deref()
+    }
+
+    pub fn edit_page_number(&mut self, draft: String) {
+        // 只收数字：页码框里打别的没有意义。
+        self.page_number_draft = Some(draft.chars().filter(char::is_ascii_digit).collect());
+    }
+
+    /// 回车：按输入的页码（从 1 数）定目标页，越界的夹到首尾；没输或输了 0 不跳。
+    pub fn take_page_number(&mut self) -> Option<usize> {
+        let number = self.page_number_draft.take()?.parse::<usize>().ok()?;
+        (number > 0).then(|| (number - 1).min(self.pages.len() - 1))
     }
 
     pub fn document_cancellation(&self) -> CancellationToken {

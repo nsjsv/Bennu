@@ -4,15 +4,13 @@ use iced::{mouse, Point, Size};
 /// offset 是图片中心相对媒体区中心的偏移（媒体区坐标）。
 /// 所有权在 FileBrowser：open_preview_for_resolved_path 开启新会话时重置，
 /// 同一会话内缩略图→原图的内容替换保留；pointer 缓存供滚轮缩放取锚点，
-/// 指针离开媒体区时清掉（右侧面板据此显隐控件）。
+/// 指针离开媒体区时清掉（右侧面板据此显隐控件）。1:1 要的屏幕缩放倍数由调用方给。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ImagePreviewViewport {
     pub scale: f32,
     pub offset: Point,
     pub pointer: Option<Point>,
     pub panning: bool,
-    /// 屏幕缩放倍数（逻辑像素换物理像素），算 1:1 用；量屏幕时更新，换图片不清。
-    pub display_scale: f32,
 }
 
 impl Default for ImagePreviewViewport {
@@ -22,7 +20,6 @@ impl Default for ImagePreviewViewport {
             offset: Point::ORIGIN,
             pointer: None,
             panning: false,
-            display_scale: 1.0,
         }
     }
 }
@@ -32,14 +29,14 @@ impl ImagePreviewViewport {
         self.scale != 1.0 || self.offset != Point::ORIGIN
     }
 
-    /// 一个图片像素对一个屏幕像素时的 scale。
-    pub fn actual_size_scale(&self, source_width: u32, fit: Size) -> f32 {
-        source_width as f32 / (fit.width.max(1.0) * self.display_scale.max(f32::EPSILON))
+    /// 一个图片像素对一个屏幕像素时的 scale（`display_scale`：逻辑像素换物理像素）。
+    pub fn actual_size_scale(source_width: u32, fit: Size, display_scale: f32) -> f32 {
+        source_width as f32 / (fit.width.max(1.0) * display_scale.max(f32::EPSILON))
     }
 
     /// 显示出来的大小相对原图像素的百分比。
-    pub fn zoom_percent(&self, source_width: u32, fit: Size) -> f32 {
-        self.scale / self.actual_size_scale(source_width, fit) * 100.0
+    pub fn zoom_percent(&self, source_width: u32, fit: Size, display_scale: f32) -> f32 {
+        self.scale / Self::actual_size_scale(source_width, fit, display_scale) * 100.0
     }
 
     /// 缩放：scale > 1 时以锚点（指针位置）为中心，缩放前后锚点下的图像
@@ -92,12 +89,8 @@ impl ImagePreviewViewport {
         self.pointer = Some(position);
     }
 
-    /// 回到适应窗口；屏幕缩放倍数不是这张图的状态，留着。
     pub fn reset(&mut self) {
-        *self = Self {
-            display_scale: self.display_scale,
-            ..Self::default()
-        };
+        *self = Self::default();
     }
 
     /// 标准钳制：某轴缩放后图片大于媒体区时，图片边缘最多拖到与媒体区
@@ -244,33 +237,17 @@ mod image_preview_viewport_tests {
     fn crossing_actual_size_stops_there_and_widens_the_range() {
         // 原图 3200 宽、适应窗口 800：1:1 是 4 倍，最大能到 64 倍。
         let mut viewport = ImagePreviewViewport::default();
-        let actual = viewport.actual_size_scale(3200, FIT);
+        let actual = ImagePreviewViewport::actual_size_scale(3200, FIT, 1.0);
         assert_eq!(actual, 4.0);
         viewport.apply_zoom(3.0, None, PANEL, FIT, Some(actual));
         viewport.apply_zoom(2.0, None, PANEL, FIT, Some(actual));
         assert_eq!(viewport.scale, 4.0);
-        assert_eq!(viewport.zoom_percent(3200, FIT), 100.0);
+        assert_eq!(viewport.zoom_percent(3200, FIT, 1.0), 100.0);
         viewport.apply_zoom(1_000.0, None, PANEL, FIT, Some(actual));
         assert_eq!(viewport.scale, 64.0);
 
         // 高分屏：两倍缩放时 1:1 只要 2 倍。
-        let hidpi = ImagePreviewViewport {
-            display_scale: 2.0,
-            ..ImagePreviewViewport::default()
-        };
-        assert_eq!(hidpi.actual_size_scale(3200, FIT), 2.0);
-    }
-
-    #[test]
-    fn reset_keeps_the_display_scale() {
-        let mut viewport = ImagePreviewViewport {
-            display_scale: 1.5,
-            ..ImagePreviewViewport::default()
-        };
-        viewport.apply_zoom(2.0, None, PANEL, FIT, None);
-        viewport.reset();
-        assert_eq!(viewport.scale, 1.0);
-        assert_eq!(viewport.display_scale, 1.5);
+        assert_eq!(ImagePreviewViewport::actual_size_scale(3200, FIT, 2.0), 2.0);
     }
 
     #[test]

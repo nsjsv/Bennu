@@ -40,8 +40,10 @@ impl super::PreviewEngine {
         let panel = Size::new(panel_size.width, panel_size.height);
         let (fit_width, fit_height) = image_preview_size(panel_size, image_width, image_height);
         let fit = Size::new(fit_width, fit_height);
+        let display_scale = self.display_scale();
         let viewport = &mut self.preview_image_viewport;
-        let actual = source_width.map(|width| viewport.actual_size_scale(width, fit));
+        let actual = source_width
+            .map(|width| ImagePreviewViewport::actual_size_scale(width, fit, display_scale));
         let at_actual =
             actual.is_some_and(|actual| (viewport.scale - actual).abs() <= actual * 1e-3);
         // 缩放范围只为像素图按 1:1 放宽：SVG 放大是按显示大小把整张图重画一遍，放到原始
@@ -91,23 +93,29 @@ impl super::PreviewEngine {
         self.load_full_image_when_magnified(fit)
     }
 
-    /// 屏幕量好了：记下物理像素（下一张图按它解）和缩放倍数（算 1:1）。
+    /// 屏幕量好了：记下物理像素（下一张图按它解）和缩放倍数（1:1、文档渲染）。
     pub(crate) fn accept_preview_display(
         &mut self,
         display: Option<crate::preview::DisplayMetrics>,
     ) -> Task<PreviewMessage> {
-        if let Some(display) = display {
-            self.display_pixels = Some(display.pixels);
-            self.preview_image_viewport.display_scale = display.scale_factor;
+        if display.is_some() {
+            self.display = display;
         }
         Task::none()
+    }
+
+    /// 逻辑像素换物理像素的倍数；还没量到按 1。
+    pub fn display_scale(&self) -> f32 {
+        self.display.map_or(1.0, |display| display.scale_factor)
     }
 
     /// 原图按屏幕大小解：再大窗口也放不下更多像素，放大时再解原图。
     pub fn image_decode_bound(&self) -> DecodeBound {
         let display = self
-            .display_pixels
-            .unwrap_or(crate::video_preview::FALLBACK_DISPLAY);
+            .display
+            .map_or(crate::video_preview::FALLBACK_DISPLAY, |display| {
+                display.pixels
+            });
         DecodeBound::within(display.width, display.height)
     }
 
@@ -123,7 +131,7 @@ impl super::PreviewEngine {
             return Task::none();
         };
         let viewport = &self.preview_image_viewport;
-        let shown_pixels = fit.width * viewport.scale * viewport.display_scale;
+        let shown_pixels = fit.width * viewport.scale * self.display_scale();
         if self.full_image_requested
             || pixel_width >= width
             || shown_pixels <= *pixel_width as f32 * RESOLUTION_UPGRADE_SLACK

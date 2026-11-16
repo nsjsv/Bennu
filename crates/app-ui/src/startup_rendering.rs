@@ -1,10 +1,8 @@
-use std::io::{Read, Write};
+use std::io::Read;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use desktop_linux::display_renderer::HardwareRenderingBackend;
 use desktop_linux::{DisplayRendererGpu, DisplayRendererGpuClass};
-use iced::{window, Element, Size, Task};
 
 #[cfg(test)]
 use crate::config::DEFAULT_RENDERING_GPU_PREFERENCE;
@@ -21,6 +19,9 @@ const GL_BACKEND_VALUE: &str = "gl";
 const SOFTWARE_BACKEND_NAME: &str = "software";
 const SOFTWARE_ICED_BACKEND: &str = "tiny-skia";
 const RENDERER_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+
+mod probe_process;
+pub(crate) use probe_process::run_renderer_probe_process;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StartupRenderingBackend {
@@ -397,12 +398,24 @@ struct RendererProbeCompletion {
 }
 
 impl RendererProbeCompletion {
-    fn gl_fallback() -> Self {
+    /// 显卡这条路走不通或没得出结论：tiny-skia 不碰显卡驱动，哪里都画得出来。
+    fn software() -> Self {
         Self {
-            backend: StartupRenderingBackend::Gl,
+            backend: StartupRenderingBackend::Software,
             gpu_selection: None,
         }
     }
+}
+
+/// 探针的结论。
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RendererProbeVerdict {
+    /// 探针在这条路上画出了一帧（或判定没有真显卡）：照它启动，记进缓存。
+    Verified(RendererProbeCompletion),
+    /// 探针在显卡上画不出来（崩了、读回的像素不对）：用软件渲染，记进缓存，以后不再试。
+    Failed,
+    /// 没得出结论（超时、起不来）：这次用软件渲染，不记缓存，下次启动再试。
+    Inconclusive,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -435,21 +448,20 @@ fn renderer_probe_command_for_executable(
     command
 }
 
-fn run_renderer_probe(mut command: Command, timeout: Duration) -> RendererProbeCompletion {
+fn run_renderer_probe(mut command: Command, timeout: Duration) -> RendererProbeVerdict {
     let Ok(mut child) = command.spawn() else {
-        return RendererProbeCompletion::gl_fallback();
+        return RendererProbeVerdict::Inconclusive;
     };
     match wait_for_renderer_probe(&mut child, timeout) {
         RendererProbeOutcome::Succeeded => {
             let report = read_renderer_probe_report(&mut child).unwrap_or_default();
-            RendererProbeCompletion {
+            RendererProbeVerdict::Verified(RendererProbeCompletion {
                 backend: report.backend.unwrap_or(StartupRenderingBackend::Vulkan),
                 gpu_selection: report.gpu_selection,
-            }
+            })
         }
-        RendererProbeOutcome::Failed | RendererProbeOutcome::TimedOut => {
-            RendererProbeCompletion::gl_fallback()
-        }
+        RendererProbeOutcome::Failed => RendererProbeVerdict::Failed,
+        RendererProbeOutcome::TimedOut => RendererProbeVerdict::Inconclusive,
     }
 }
 
@@ -501,82 +513,6 @@ fn terminate_and_reap(child: &mut Child) {
     let _ = child.wait();
 }
 
-pub(crate) fn run_vulkan_renderer_probe() -> iced::Result {
-    std::env::set_var(ICED_BACKEND_ENV, "wgpu");
-    std::env::set_var(WGPU_BACKEND_ENV, VULKAN_BACKEND_VALUE);
-
-    let display_gpu = (std::env::var(WGPU_POWER_PREF_ENV).ok().as_deref() == Some("none"))
-        .then(desktop_linux::detect_display_renderer_gpu)
-        .flatten();
-    if let Some(display_gpu) = display_gpu {
-        std::env::set_var(
-            MESA_VK_DEVICE_SELECT_ENV,
-            display_gpu.mesa_vulkan_device_select(),
-        );
-        match display_gpu.vulkan_loader_driver_select() {
-            Some(driver_select) => {
-                std::env::set_var(VK_LOADER_DRIVERS_SELECT_ENV, driver_select);
-            }
-            None => std::env::remove_var(VK_LOADER_DRIVERS_SELECT_ENV),
-        }
-        // 设好设备选择和驱动过滤之后再问类型：Vulkan 只加载这块卡的驱动。
-        let class = display_gpu.vulkan_class();
-        emit_renderer_probe_line(
-            &RendererProbeGpuSelection::from_display_gpu(&display_gpu, class).encode(),
-        );
-    }
-    // 没有真 Vulkan 显卡就不开窗口验证：lavapipe 上窗口照样开得出来，主程序就会
-    // 跑在 CPU 光栅器上。
-    match desktop_linux::display_renderer::hardware_rendering_backend() {
-        Some(HardwareRenderingBackend::Vulkan) => {}
-        Some(HardwareRenderingBackend::Gl) => {
-            emit_renderer_probe_line(&encode_backend_line(StartupRenderingBackend::Gl));
-            return Ok(());
-        }
-        None => {
-            emit_renderer_probe_line(&encode_backend_line(StartupRenderingBackend::Software));
-            return Ok(());
-        }
-    }
-
-    iced::daemon(
-        renderer_probe_boot,
-        renderer_probe_update,
-        renderer_probe_view,
-    )
-    .run()
-}
-
-fn emit_renderer_probe_line(line: &str) {
-    let mut stdout = std::io::stdout().lock();
-    let _ = writeln!(stdout, "{line}");
-    let _ = stdout.flush();
-}
-
-fn renderer_probe_boot() -> ((), Task<()>) {
-    let settings = window::Settings {
-        size: Size::new(1.0, 1.0),
-        visible: false,
-        resizable: false,
-        closeable: false,
-        minimizable: false,
-        decorations: false,
-        exit_on_close_request: false,
-        ..window::Settings::default()
-    };
-    let (_, open_window) = window::open(settings);
-    // window::open 的回执晚于 compositor、surface、adapter/device 和 renderer 创建。
-    ((), open_window.then(|_| iced::exit()))
-}
-
-fn renderer_probe_update(_state: &mut (), _message: ()) -> Task<()> {
-    Task::none()
-}
-
-fn renderer_probe_view(_state: &(), _window: window::Id) -> Element<'_, ()> {
-    iced::widget::Space::new().into()
-}
-
 pub(crate) fn apply_fast_startup_environment() -> StartupRenderingEnvironment {
     let preference = config::load_app_config().rendering_gpu_preference;
     // DisplayGpu 偏好需要显示 GPU 身份参与缓存判定与写回;sysfs 枚举毫秒级。
@@ -597,23 +533,22 @@ pub(crate) fn apply_fast_startup_environment() -> StartupRenderingEnvironment {
         }
         None => {
             startup_trace::mark("startup_probe_cache_miss");
-            let probe_completion = renderer_probe_command(preference)
-                .map(|command| run_renderer_probe(command, RENDERER_PROBE_TIMEOUT))
-                .unwrap_or_else(|_| RendererProbeCompletion::gl_fallback());
-            let record = crate::startup_probe_cache::probe_completion_record(
-                preference,
-                probe_completion.gpu_selection.as_ref(),
-                probe_completion.backend,
-                display_gpu.as_ref(),
-            );
-            if let Err(error) = config::save_renderer_probe_cache(&record) {
-                tracing::warn!(
-                    target: "app_ui::startup",
-                    event = "probe_cache_write_failed",
-                    error = %error,
-                    "failed to persist renderer probe cache"
-                );
-            }
+            let verdict = renderer_probe_command(preference)
+                .map_or(RendererProbeVerdict::Inconclusive, |command| {
+                    run_renderer_probe(command, RENDERER_PROBE_TIMEOUT)
+                });
+            let probe_completion = match verdict {
+                RendererProbeVerdict::Verified(completion) => {
+                    remember_probe_completion(preference, &completion, display_gpu.as_ref());
+                    completion
+                }
+                RendererProbeVerdict::Failed => {
+                    let completion = RendererProbeCompletion::software();
+                    remember_probe_completion(preference, &completion, display_gpu.as_ref());
+                    completion
+                }
+                RendererProbeVerdict::Inconclusive => RendererProbeCompletion::software(),
+            };
             StartupRenderingEnvironment::from_probe_selection(
                 preference,
                 probe_completion.gpu_selection.as_ref(),
@@ -625,6 +560,27 @@ pub(crate) fn apply_fast_startup_environment() -> StartupRenderingEnvironment {
     startup_trace::record_rendering_backend_selected(environment.backend().name());
     startup_trace::mark("startup_rendering_environment_ready");
     environment
+}
+
+fn remember_probe_completion(
+    preference: RenderingGpuPreference,
+    completion: &RendererProbeCompletion,
+    display_gpu: Option<&DisplayRendererGpu>,
+) {
+    let record = crate::startup_probe_cache::probe_completion_record(
+        preference,
+        completion.gpu_selection.as_ref(),
+        completion.backend,
+        display_gpu,
+    );
+    if let Err(error) = config::save_renderer_probe_cache(&record) {
+        tracing::warn!(
+            target: "app_ui::startup",
+            event = "probe_cache_write_failed",
+            error = %error,
+            "failed to persist renderer probe cache"
+        );
+    }
 }
 
 #[cfg(unix)]
@@ -1045,21 +1001,25 @@ mod tests {
     #[test]
     fn probe_success_selects_vulkan() {
         assert_eq!(
-            run_renderer_probe(test_probe_command("success"), Duration::from_secs(5),).backend,
-            StartupRenderingBackend::Vulkan
+            run_renderer_probe(test_probe_command("success"), Duration::from_secs(5)),
+            RendererProbeVerdict::Verified(RendererProbeCompletion {
+                backend: StartupRenderingBackend::Vulkan,
+                gpu_selection: None,
+            })
         );
     }
 
+    /// 探针崩了或读回的像素不对（非零退出）：这条路确定不能用。
     #[test]
-    fn probe_failure_selects_gl() {
+    fn probe_failure_is_a_verdict_against_the_gpu() {
         assert_eq!(
-            run_renderer_probe(test_probe_command("failure"), Duration::from_secs(5),).backend,
-            StartupRenderingBackend::Gl
+            run_renderer_probe(test_probe_command("failure"), Duration::from_secs(5)),
+            RendererProbeVerdict::Failed
         );
     }
 
     #[test]
-    fn probe_timeout_kills_and_reaps_child_before_selecting_gl() {
+    fn probe_timeout_kills_and_reaps_the_child() {
         let mut child = test_probe_command("timeout")
             .spawn()
             .expect("spawn timeout probe child");
@@ -1071,12 +1031,17 @@ mod tests {
         assert!(child.try_wait().expect("check reaped child").is_some());
     }
 
+    /// 起不来、超时都只是没得出结论：这次用软件渲染，但不当成显卡坏了。
     #[test]
-    fn probe_spawn_failure_selects_gl() {
+    fn probe_spawn_failure_and_timeout_are_inconclusive() {
         let command = Command::new("/path/that/does/not/exist");
         assert_eq!(
-            run_renderer_probe(command, Duration::from_secs(1)).backend,
-            StartupRenderingBackend::Gl
+            run_renderer_probe(command, Duration::from_secs(1)),
+            RendererProbeVerdict::Inconclusive
+        );
+        assert_eq!(
+            run_renderer_probe(test_probe_command("timeout"), Duration::from_millis(30)),
+            RendererProbeVerdict::Inconclusive
         );
     }
 }

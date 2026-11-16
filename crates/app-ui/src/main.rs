@@ -102,7 +102,7 @@ fn main() -> std::process::ExitCode {
         command_line::CommandLineAction::Launch(request) => (Some(request), false),
         command_line::CommandLineAction::ActivationService => (None, true),
         command_line::CommandLineAction::RendererProbe => {
-            return match startup_rendering::run_vulkan_renderer_probe() {
+            return match startup_rendering::run_renderer_probe_process() {
                 Ok(()) => std::process::ExitCode::SUCCESS,
                 Err(_) => std::process::ExitCode::FAILURE,
             };

@@ -19,7 +19,9 @@ use crate::startup_rendering::{
 
 // 2:电源偏好改由 Vulkan 报告的类型决定;旧缓存按设备号表猜的,一律重探。
 // 3:探针会判断有没有真显卡并记录 software;旧缓存可能把 lavapipe 记成 vulkan。
-const RENDERER_PROBE_CACHE_VERSION: i64 = 3;
+// 4:探针真画一帧读回核对,画不出来记 software;旧缓存的 vulkan/gl 没验证过能画(wlroots 系
+//   合成器上旧探针的窗口尺寸还会触发协议错误,一律退到 GL)。
+const RENDERER_PROBE_CACHE_VERSION: i64 = 4;
 pub(crate) const RENDERER_FALLBACK_GUARD_ENV: &str = "FILE_MANAGER_RENDERER_FALLBACK";
 
 /// 缓存命中的完整判定。`display_gpu` 由调用方在 DisplayGpu 偏好下预先检测;

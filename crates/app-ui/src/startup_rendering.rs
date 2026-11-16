@@ -2,6 +2,7 @@ use std::io::{Read, Write};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+use desktop_linux::display_renderer::HardwareRenderingBackend;
 use desktop_linux::{DisplayRendererGpu, DisplayRendererGpuClass};
 use iced::{window, Element, Size, Task};
 
@@ -17,27 +18,50 @@ pub(crate) const WGPU_POWER_PREF_ENV: &str = "WGPU_POWER_PREF";
 pub(crate) const VK_LOADER_DRIVERS_SELECT_ENV: &str = "VK_LOADER_DRIVERS_SELECT";
 const VULKAN_BACKEND_VALUE: &str = "vulkan";
 const GL_BACKEND_VALUE: &str = "gl";
+const SOFTWARE_BACKEND_NAME: &str = "software";
+const SOFTWARE_ICED_BACKEND: &str = "tiny-skia";
 const RENDERER_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StartupRenderingBackend {
     Vulkan,
     Gl,
+    /// 没有真显卡（只有 llvmpipe/lavapipe 这类 CPU 光栅器）：不走 wgpu，用只画变化区域的 tiny-skia。
+    Software,
 }
 
 impl StartupRenderingBackend {
-    pub(crate) fn environment_value(self) -> &'static str {
+    /// 记录（探针缓存、日志）里的名字。
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Vulkan => VULKAN_BACKEND_VALUE,
             Self::Gl => GL_BACKEND_VALUE,
+            Self::Software => SOFTWARE_BACKEND_NAME,
         }
     }
 
-    pub(crate) fn from_environment_value(value: &str) -> Option<Self> {
+    pub(crate) fn from_name(value: &str) -> Option<Self> {
         match value {
             VULKAN_BACKEND_VALUE => Some(Self::Vulkan),
             GL_BACKEND_VALUE => Some(Self::Gl),
+            SOFTWARE_BACKEND_NAME => Some(Self::Software),
             _ => None,
+        }
+    }
+
+    pub(crate) fn wgpu_backend(self) -> Option<&'static str> {
+        match self {
+            Self::Vulkan => Some(VULKAN_BACKEND_VALUE),
+            Self::Gl => Some(GL_BACKEND_VALUE),
+            Self::Software => None,
+        }
+    }
+
+    /// 软件渲染只给 tiny-skia：先让 iced 去试 wgpu 会成功地跑在 CPU 光栅器上。
+    fn iced_backend_candidates(self, preference: RenderingGpuPreference) -> &'static str {
+        match self {
+            Self::Vulkan | Self::Gl => preference.iced_backend_candidates(),
+            Self::Software => SOFTWARE_ICED_BACKEND,
         }
     }
 }
@@ -92,7 +116,7 @@ impl StartupRenderingEnvironment {
             variables: vec![
                 StartupRenderingVariable {
                     key: ICED_BACKEND_ENV,
-                    value: Some(preference.iced_backend_candidates().to_owned()),
+                    value: Some(backend.iced_backend_candidates(preference).to_owned()),
                 },
                 StartupRenderingVariable {
                     key: MESA_VK_DEVICE_SELECT_ENV,
@@ -100,7 +124,7 @@ impl StartupRenderingEnvironment {
                 },
                 StartupRenderingVariable {
                     key: WGPU_BACKEND_ENV,
-                    value: Some(backend.environment_value().to_owned()),
+                    value: backend.wgpu_backend().map(str::to_owned),
                 },
                 StartupRenderingVariable {
                     key: WGPU_POWER_PREF_ENV,
@@ -139,7 +163,7 @@ impl StartupRenderingEnvironment {
             variables: vec![
                 StartupRenderingVariable {
                     key: ICED_BACKEND_ENV,
-                    value: Some(preference.iced_backend_candidates().to_owned()),
+                    value: Some(backend.iced_backend_candidates(preference).to_owned()),
                 },
                 StartupRenderingVariable {
                     key: MESA_VK_DEVICE_SELECT_ENV,
@@ -147,7 +171,7 @@ impl StartupRenderingEnvironment {
                 },
                 StartupRenderingVariable {
                     key: WGPU_BACKEND_ENV,
-                    value: Some(backend.environment_value().to_owned()),
+                    value: backend.wgpu_backend().map(str::to_owned),
                 },
                 StartupRenderingVariable {
                     key: WGPU_POWER_PREF_ENV,
@@ -246,6 +270,46 @@ impl StartupRenderingEnvironmentStatus {
 }
 
 const RENDERER_PROBE_SELECTION_PREFIX: &str = "bennu-renderer-gpu-v1";
+const RENDERER_PROBE_BACKEND_PREFIX: &str = "bennu-renderer-backend";
+
+/// 探针 stdout 的全部内容。这些值会变成主进程的环境变量，所以只认至多一行
+/// GPU 选择、至多一行后端，出现别的行或重复行整份不认。没有后端行表示
+/// 有真 Vulkan 且窗口验证通过。
+#[derive(Debug, Default, PartialEq, Eq)]
+struct RendererProbeReport {
+    gpu_selection: Option<RendererProbeGpuSelection>,
+    backend: Option<StartupRenderingBackend>,
+}
+
+impl RendererProbeReport {
+    fn decode(output: &[u8]) -> Option<Self> {
+        let mut report = Self::default();
+        for line in std::str::from_utf8(output).ok()?.lines() {
+            if let Some(gpu_selection) = RendererProbeGpuSelection::decode_line(line) {
+                if report.gpu_selection.replace(gpu_selection).is_some() {
+                    return None;
+                }
+            } else {
+                let backend = decode_backend_line(line)?;
+                if report.backend.replace(backend).is_some() {
+                    return None;
+                }
+            }
+        }
+        Some(report)
+    }
+}
+
+fn encode_backend_line(backend: StartupRenderingBackend) -> String {
+    format!("{RENDERER_PROBE_BACKEND_PREFIX}\t{}", backend.name())
+}
+
+fn decode_backend_line(line: &str) -> Option<StartupRenderingBackend> {
+    let (prefix, name) = line.split_once('\t')?;
+    (prefix == RENDERER_PROBE_BACKEND_PREFIX)
+        .then(|| StartupRenderingBackend::from_name(name))
+        .flatten()
+}
 
 impl RendererProbeGpuSelection {
     /// `class` 是 Vulkan 驱动报告的类型；问不到时偏好 `none`：设备已钉住，
@@ -271,12 +335,7 @@ impl RendererProbeGpuSelection {
         )
     }
 
-    fn decode(output: &[u8]) -> Option<Self> {
-        let mut lines = std::str::from_utf8(output).ok()?.lines();
-        let line = lines.next()?;
-        if lines.next().is_some() {
-            return None;
-        }
+    fn decode_line(line: &str) -> Option<Self> {
         let mut fields = line.split('\t');
         if fields.next()? != RENDERER_PROBE_SELECTION_PREFIX {
             return None;
@@ -353,15 +412,6 @@ enum RendererProbeOutcome {
     TimedOut,
 }
 
-impl RendererProbeOutcome {
-    fn backend(self) -> StartupRenderingBackend {
-        match self {
-            Self::Succeeded => StartupRenderingBackend::Vulkan,
-            Self::Failed | Self::TimedOut => StartupRenderingBackend::Gl,
-        }
-    }
-}
-
 fn renderer_probe_command(preference: RenderingGpuPreference) -> std::io::Result<Command> {
     let current_exe = std::env::current_exe()?;
     Ok(renderer_probe_command_for_executable(
@@ -386,26 +436,27 @@ fn renderer_probe_command_for_executable(
 }
 
 fn run_renderer_probe(mut command: Command, timeout: Duration) -> RendererProbeCompletion {
-    let completion = match command.spawn() {
-        Ok(mut child) => {
-            let outcome = wait_for_renderer_probe(&mut child, timeout);
-            let gpu_selection = (outcome == RendererProbeOutcome::Succeeded)
-                .then(|| read_renderer_probe_selection(&mut child))
-                .flatten();
+    let Ok(mut child) = command.spawn() else {
+        return RendererProbeCompletion::gl_fallback();
+    };
+    match wait_for_renderer_probe(&mut child, timeout) {
+        RendererProbeOutcome::Succeeded => {
+            let report = read_renderer_probe_report(&mut child).unwrap_or_default();
             RendererProbeCompletion {
-                backend: outcome.backend(),
-                gpu_selection,
+                backend: report.backend.unwrap_or(StartupRenderingBackend::Vulkan),
+                gpu_selection: report.gpu_selection,
             }
         }
-        Err(_) => RendererProbeCompletion::gl_fallback(),
-    };
-    completion
+        RendererProbeOutcome::Failed | RendererProbeOutcome::TimedOut => {
+            RendererProbeCompletion::gl_fallback()
+        }
+    }
 }
 
-fn read_renderer_probe_selection(child: &mut Child) -> Option<RendererProbeGpuSelection> {
+fn read_renderer_probe_report(child: &mut Child) -> Option<RendererProbeReport> {
     let mut output = Vec::new();
     child.stdout.as_mut()?.read_to_end(&mut output).ok()?;
-    RendererProbeGpuSelection::decode(&output)
+    RendererProbeReport::decode(&output)
 }
 
 /// 等探针退出：子进程的 pidfd 在它退出时变为可读，poll 带超时等这一次，
@@ -470,10 +521,22 @@ pub(crate) fn run_vulkan_renderer_probe() -> iced::Result {
         }
         // 设好设备选择和驱动过滤之后再问类型：Vulkan 只加载这块卡的驱动。
         let class = display_gpu.vulkan_class();
-        emit_renderer_probe_selection(&RendererProbeGpuSelection::from_display_gpu(
-            &display_gpu,
-            class,
-        ));
+        emit_renderer_probe_line(
+            &RendererProbeGpuSelection::from_display_gpu(&display_gpu, class).encode(),
+        );
+    }
+    // 没有真 Vulkan 显卡就不开窗口验证：lavapipe 上窗口照样开得出来，主程序就会
+    // 跑在 CPU 光栅器上。
+    match desktop_linux::display_renderer::hardware_rendering_backend() {
+        Some(HardwareRenderingBackend::Vulkan) => {}
+        Some(HardwareRenderingBackend::Gl) => {
+            emit_renderer_probe_line(&encode_backend_line(StartupRenderingBackend::Gl));
+            return Ok(());
+        }
+        None => {
+            emit_renderer_probe_line(&encode_backend_line(StartupRenderingBackend::Software));
+            return Ok(());
+        }
     }
 
     iced::daemon(
@@ -484,9 +547,9 @@ pub(crate) fn run_vulkan_renderer_probe() -> iced::Result {
     .run()
 }
 
-fn emit_renderer_probe_selection(gpu_selection: &RendererProbeGpuSelection) {
+fn emit_renderer_probe_line(line: &str) {
     let mut stdout = std::io::stdout().lock();
-    let _ = writeln!(stdout, "{}", gpu_selection.encode());
+    let _ = writeln!(stdout, "{line}");
     let _ = stdout.flush();
 }
 
@@ -559,7 +622,7 @@ pub(crate) fn apply_fast_startup_environment() -> StartupRenderingEnvironment {
         }
     };
     environment.apply_to_current_process();
-    startup_trace::record_rendering_backend_selected(environment.backend().environment_value());
+    startup_trace::record_rendering_backend_selected(environment.backend().name());
     startup_trace::mark("startup_rendering_environment_ready");
     environment
 }
@@ -691,7 +754,7 @@ mod tests {
             );
             assert_eq!(
                 environment.variable_value(WGPU_BACKEND_ENV),
-                Some(backend.environment_value())
+                backend.wgpu_backend()
             );
             assert!(!environment
                 .variable_value(WGPU_BACKEND_ENV)
@@ -740,17 +803,71 @@ mod tests {
         };
 
         assert_eq!(
-            RendererProbeGpuSelection::decode(gpu_selection.encode().as_bytes()),
+            RendererProbeReport::decode(gpu_selection.encode().as_bytes())
+                .and_then(|report| report.gpu_selection),
             Some(gpu_selection.clone())
         );
-        assert!(RendererProbeGpuSelection::decode(
+        assert!(RendererProbeReport::decode(
             b"unexpected\nbennu-renderer-gpu-v1\tlow\t1002:15bf!\n"
         )
         .is_none());
-        assert!(RendererProbeGpuSelection::decode(
-            b"bennu-renderer-gpu-v1\tlow\t$LD_PRELOAD!\t*nvidia*"
-        )
-        .is_none());
+        assert!(
+            RendererProbeReport::decode(b"bennu-renderer-gpu-v1\tlow\t$LD_PRELOAD!\t*nvidia*")
+                .is_none()
+        );
+    }
+
+    /// 探针在没有真显卡时报 software/gl；报告只认至多一条选择、至多一条后端。
+    #[test]
+    fn probe_report_reads_the_backend_and_rejects_anything_else() {
+        let gpu_selection = RendererProbeGpuSelection {
+            wgpu_power_preference: "none",
+            mesa_vulkan_device_select: String::from("1af4:1050!"),
+            vulkan_loader_driver_select: None,
+        };
+        let software = encode_backend_line(StartupRenderingBackend::Software);
+        let gl = encode_backend_line(StartupRenderingBackend::Gl);
+
+        assert_eq!(
+            RendererProbeReport::decode(format!("{software}\n").as_bytes()),
+            Some(RendererProbeReport {
+                gpu_selection: None,
+                backend: Some(StartupRenderingBackend::Software),
+            })
+        );
+        assert_eq!(
+            RendererProbeReport::decode(format!("{}\n{gl}\n", gpu_selection.encode()).as_bytes()),
+            Some(RendererProbeReport {
+                gpu_selection: Some(gpu_selection),
+                backend: Some(StartupRenderingBackend::Gl),
+            })
+        );
+        // 有真 Vulkan 时探针什么后端都不报，由退出状态决定。
+        assert_eq!(
+            RendererProbeReport::decode(b""),
+            Some(RendererProbeReport::default())
+        );
+        assert!(RendererProbeReport::decode(format!("{software}\n{gl}\n").as_bytes()).is_none());
+        assert!(RendererProbeReport::decode(b"bennu-renderer-backend\tdirectx\n").is_none());
+    }
+
+    #[test]
+    fn software_rendering_uses_only_tiny_skia_and_leaves_wgpu_unset() {
+        let environment = StartupRenderingEnvironment::from_probe_selection(
+            RenderingGpuPreference::DisplayGpu,
+            None,
+            StartupRenderingBackend::Software,
+        );
+
+        assert_eq!(
+            environment.variable_value(ICED_BACKEND_ENV),
+            Some("tiny-skia")
+        );
+        assert_eq!(environment.variable_value(WGPU_BACKEND_ENV), None);
+        assert_eq!(
+            StartupRenderingBackend::from_name(StartupRenderingBackend::Software.name()),
+            Some(StartupRenderingBackend::Software)
+        );
     }
 
     #[test]
@@ -766,7 +883,8 @@ mod tests {
         assert_eq!(discrete.wgpu_power_preference, "high");
         assert_eq!(unknown.wgpu_power_preference, "none");
         assert_eq!(
-            RendererProbeGpuSelection::decode(unknown.encode().as_bytes()),
+            RendererProbeReport::decode(unknown.encode().as_bytes())
+                .and_then(|report| report.gpu_selection),
             Some(unknown)
         );
     }

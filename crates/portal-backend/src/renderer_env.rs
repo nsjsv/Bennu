@@ -1,10 +1,13 @@
 //! 渲染链环境设定：在任何 iced/wgpu 初始化前定下核显 → 独显 → 软件
-//! 渲染的回退链。从 main.rs 拆出以守住其 800 行上限（与窗口/会话编
+//! 渲染的回退链；没有真显卡时直接用软件渲染。从 main.rs 拆出以守住其 800 行上限（与窗口/会话编
 //! 排是彼此独立的关注点）。
 
 /// iced fallback 候选链：GPU（wgpu）→ 软件渲染。GPU 首选由
 /// [`apply_renderer_environment`] 钉在驱动显示器的 GPU（通常为核显）。
 const PORTAL_ICED_BACKEND_CANDIDATES: &str = "wgpu,tiny-skia";
+/// 没有真显卡时只给 tiny-skia：先试 wgpu 会成功地跑在 llvmpipe/lavapipe 上，
+/// 每帧整窗光栅，比只画变化区域的 tiny-skia 费几倍 CPU 和内存。
+const PORTAL_SOFTWARE_ICED_BACKEND: &str = "tiny-skia";
 
 /// 在任何 iced/wgpu 初始化前定下渲染链：核显 → 独显 → 软件渲染。
 ///
@@ -16,11 +19,13 @@ const PORTAL_ICED_BACKEND_CANDIDATES: &str = "wgpu,tiny-skia";
 ///   驱动过滤之后问，Vulkan 才只加载这块卡的驱动。问不到时设 `none`，
 ///   wgpu 取第一块（即钉住的那块）。
 /// - 检测失败时仅设 `WGPU_POWER_PREF=low`，让 wgpu 自行排序（有核显选核显）。
+/// - 钉好之后问有没有真显卡（与主程序探针同一判断
+///   `display_renderer::hardware_rendering_backend`）：有就把 wgpu 定在那个后端，
+///   没有就只用 tiny-skia。
 /// - 已存在的环境变量不覆盖：保留运维/实验入口（如强制软渲染排障）。
 pub(crate) fn apply_renderer_environment() {
-    if std::env::var_os("ICED_BACKEND").is_none() {
-        std::env::set_var("ICED_BACKEND", PORTAL_ICED_BACKEND_CANDIDATES);
-    }
+    let iced_backend_chosen = std::env::var_os("ICED_BACKEND").is_some();
+    let wgpu_backend_chosen = std::env::var_os("WGPU_BACKEND").is_some();
     if std::env::var_os("WGPU_POWER_PREF").is_none() {
         match display_renderer::detect_display_renderer_gpu() {
             Some(gpu) => {
@@ -36,5 +41,21 @@ pub(crate) fn apply_renderer_environment() {
             }
             None => std::env::set_var("WGPU_POWER_PREF", "low"),
         }
+    }
+    if iced_backend_chosen {
+        return;
+    }
+    match display_renderer::hardware_rendering_backend() {
+        Some(backend) => {
+            std::env::set_var("ICED_BACKEND", PORTAL_ICED_BACKEND_CANDIDATES);
+            if !wgpu_backend_chosen {
+                let wgpu_backend = match backend {
+                    display_renderer::HardwareRenderingBackend::Vulkan => "vulkan",
+                    display_renderer::HardwareRenderingBackend::Gl => "gl",
+                };
+                std::env::set_var("WGPU_BACKEND", wgpu_backend);
+            }
+        }
+        None => std::env::set_var("ICED_BACKEND", PORTAL_SOFTWARE_ICED_BACKEND),
     }
 }

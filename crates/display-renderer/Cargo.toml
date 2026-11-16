@@ -9,7 +9,7 @@ edition = "2021"
 # wayland/x11/udisks2 全家桶。wgpu 与 iced 用的是同一份，不多编译。
 
 [dependencies]
-wgpu = { version = "27", default-features = false, features = ["std", "vulkan"] }
+wgpu = { version = "27", default-features = false, features = ["std", "vulkan", "gles"] }
 
 [dev-dependencies]
 tempfile = "3"

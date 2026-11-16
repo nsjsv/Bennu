@@ -18,7 +18,8 @@ use crate::startup_rendering::{
 };
 
 // 2:电源偏好改由 Vulkan 报告的类型决定;旧缓存按设备号表猜的,一律重探。
-const RENDERER_PROBE_CACHE_VERSION: i64 = 2;
+// 3:探针会判断有没有真显卡并记录 software;旧缓存可能把 lavapipe 记成 vulkan。
+const RENDERER_PROBE_CACHE_VERSION: i64 = 3;
 pub(crate) const RENDERER_FALLBACK_GUARD_ENV: &str = "FILE_MANAGER_RENDERER_FALLBACK";
 
 /// 缓存命中的完整判定。`display_gpu` 由调用方在 DisplayGpu 偏好下预先检测;
@@ -40,7 +41,7 @@ pub(crate) fn cached_probe_environment(
     {
         return None;
     }
-    let backend = StartupRenderingBackend::from_environment_value(&record.backend)?;
+    let backend = StartupRenderingBackend::from_name(&record.backend)?;
     let gpu_selection = gpu_selection_from_record(record)?;
     Some(StartupRenderingEnvironment::from_probe_selection(
         preference,
@@ -67,7 +68,7 @@ pub(crate) fn probe_completion_record(
     };
     RendererProbeCacheRecord {
         version: RENDERER_PROBE_CACHE_VERSION,
-        backend: backend.environment_value().to_owned(),
+        backend: backend.name().to_owned(),
         rendering_gpu_preference: rendering_gpu_preference.config_value().to_owned(),
         wgpu_power_preference: wgpu_power_preference.map(str::to_owned),
         mesa_vulkan_device_select: probe_gpu_selection
@@ -183,7 +184,7 @@ mod tests {
     ) -> HashMap<&'static str, Option<&str>> {
         HashMap::from([
             (ICED_BACKEND_ENV, Some("wgpu,tiny-skia")),
-            (WGPU_BACKEND_ENV, Some(backend.environment_value())),
+            (WGPU_BACKEND_ENV, backend.wgpu_backend()),
             (WGPU_POWER_PREF_ENV, Some(power)),
             (MESA_VK_DEVICE_SELECT_ENV, Some("1002:15bf!")),
             (VK_LOADER_DRIVERS_SELECT_ENV, Some("*amd*,*radeon*")),
@@ -241,6 +242,27 @@ mod tests {
             &cached,
             &expected_environment_map(StartupRenderingBackend::Vulkan, "none")
         ));
+    }
+
+    /// 没有真显卡的机器记成 software，下次启动直接用 tiny-skia，不再探测。
+    #[test]
+    fn cached_software_environment_round_trips() {
+        let preference = RenderingGpuPreference::DisplayGpu;
+        let record =
+            probe_completion_record(preference, None, StartupRenderingBackend::Software, None);
+        assert_eq!(record.backend, "software");
+
+        let cached = cached_probe_environment(preference, &record, None).expect("cache hit");
+
+        assert_eq!(cached.backend(), StartupRenderingBackend::Software);
+        assert_eq!(
+            cached,
+            StartupRenderingEnvironment::from_probe_selection(
+                preference,
+                None,
+                StartupRenderingBackend::Software,
+            )
+        );
     }
 
     #[test]

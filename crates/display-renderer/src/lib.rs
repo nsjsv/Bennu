@@ -35,6 +35,51 @@ impl DisplayRendererGpuClass {
     }
 }
 
+/// 有真显卡（不是 CPU 光栅）的 wgpu 后端。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HardwareRenderingBackend {
+    Vulkan,
+    Gl,
+}
+
+/// 有真显卡的后端，Vulkan 优先；都没有时为 `None`，只能软件渲染。
+///
+/// llvmpipe、lavapipe、SwiftShader 在 wgpu 里都是 `Cpu`：拿它们跑 wgpu 每帧都要
+/// 整窗光栅，比只画变化区域的软件渲染器费几倍 CPU 和内存。virgl 这类把绘制
+/// 转给宿主显卡的虚拟显卡不是 `Cpu`，照旧算真显卡。
+///
+/// 调用前先写好显示 GPU 的设备选择与驱动过滤（同 [`DisplayRendererGpu::vulkan_class`]），
+/// Vulkan 只加载那块卡的驱动。只在 Vulkan 没有真显卡时才问 GL：EGL 会加载所有
+/// 厂商的库，混合显卡笔记本上可能唤醒睡着的独显。
+pub fn hardware_rendering_backend() -> Option<HardwareRenderingBackend> {
+    if has_hardware_adapter(wgpu::Backends::VULKAN) {
+        Some(HardwareRenderingBackend::Vulkan)
+    } else if has_hardware_adapter(wgpu::Backends::GL) {
+        Some(HardwareRenderingBackend::Gl)
+    } else {
+        None
+    }
+}
+
+fn has_hardware_adapter(backends: wgpu::Backends) -> bool {
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        backends,
+        ..Default::default()
+    });
+    any_hardware(
+        instance
+            .enumerate_adapters(backends)
+            .iter()
+            .map(|adapter| adapter.get_info().device_type),
+    )
+}
+
+fn any_hardware(device_types: impl IntoIterator<Item = wgpu::DeviceType>) -> bool {
+    device_types
+        .into_iter()
+        .any(|device_type| device_type != wgpu::DeviceType::Cpu)
+}
+
 /// 合成器正在用的那块卡（DRM 报告的 PCI vendor/device）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DisplayRendererGpu {
@@ -441,6 +486,16 @@ mod tests {
             detected_device(&proc_root, &drm_root).as_deref(),
             Some("1002:15bf!")
         );
+    }
+
+    #[test]
+    fn only_cpu_rasterizers_mean_software_rendering() {
+        use wgpu::DeviceType::{Cpu, IntegratedGpu, Other, VirtualGpu};
+        assert!(!any_hardware([]));
+        assert!(!any_hardware([Cpu, Cpu])); // llvmpipe + lavapipe
+        assert!(any_hardware([Cpu, IntegratedGpu]));
+        assert!(any_hardware([Other])); // virgl：绘制在宿主显卡上
+        assert!(any_hardware([VirtualGpu])); // venus
     }
 
     #[test]

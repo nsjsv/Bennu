@@ -381,7 +381,7 @@ pub(crate) struct FileBrowser {
     /// 最近一次指针事件给出的窗口坐标（主窗口、预览窗口根部的指针记录器静默写入）；
     /// `None` = 还没有收到过任何指针事件。读取方需要"光标确实在某处"的事实时
     /// （hover 重算）必须判 `None`；只在指针手势里取起点的读取方经 [`Self::cursor_or_origin`]。
-    pub(crate) cursor_position: crate::pointer_tracker::PointerPosition,
+    pub(crate) cursor_position: bennu_theme::pointer_tracker::PointerPosition,
     /// 按住左键的那个窗口：按住期间该窗口的指针移动才作为消息进来（拖动、改大小、框选都要按住）。
     pointer_held_window: Option<window::Id>,
     pub(crate) main_window_width: f32,
@@ -763,7 +763,7 @@ impl FileBrowser {
                 crate::runtime_logging::journald_initialization_warning(),
             ),
             system_language: UiLanguage::English,
-            cursor_position: crate::pointer_tracker::PointerPosition::default(),
+            cursor_position: bennu_theme::pointer_tracker::PointerPosition::default(),
             pointer_held_window: None,
             main_window_video_fullscreen: false,
             main_window_width: MAIN_WINDOW_INITIAL_WIDTH,
@@ -1043,7 +1043,7 @@ impl FileBrowser {
         let content = self.window_content(window);
         let shares_position =
             window == self.main_window || self.preview_engine.preview_window == Some(window);
-        crate::pointer_tracker::track_pointer(
+        bennu_theme::pointer_tracker::track_pointer(
             content,
             shares_position.then(|| self.cursor_position.clone()),
             self.pointer_follow(window),

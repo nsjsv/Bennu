@@ -7,6 +7,7 @@
 //! 焦点跟踪、请求窗登记、会话级偏好重读与引擎不处理消息的回退路由
 //! （内容回流在 [`content`] 子模块）。
 
+use bennu_theme::pointer_tracker::PointerPosition;
 use std::path::{Path, PathBuf};
 
 use file_core::archive_path_identity;
@@ -67,10 +68,10 @@ pub(crate) struct PreviewHost {
     pub(crate) preferences: PreviewPreferences,
     /// 偏好来源库路径：构造注入，测试指向临时目录（缺失 → 默认回落）。
     preferences_database: PathBuf,
-    /// 预览窗指针位置宿主簿记：SQLite 列宽拖拽起点读横坐标（主软件
-    /// cursor_position.x 的预览对应物；纵坐标的引擎消费走
-    /// engine.preview_window_pointer_y）。
-    pub(crate) preview_window_pointer: Option<Point>,
+    /// 预览窗指针位置：窗口根部的指针记录器静默写入，SQLite 列宽拖拽起点读横坐标
+    /// （主软件 cursor_position.x 的预览对应物；纵坐标的引擎消费走
+    /// engine.preview_window_pointer_y）；记下的移动时刻交给引擎，全屏控件到点时按它顺延。
+    pub(crate) preview_window_pointer: PointerPosition,
     /// 当前预览的文件在网络位置上：音频波形要读完整个文件，这种情况等用户点「生成波形」。
     pub(crate) preview_on_network: bool,
 }
@@ -78,7 +79,7 @@ pub(crate) struct PreviewHost {
 impl PreviewHost {
     pub(crate) fn new(preferences_database: PathBuf) -> Self {
         let preferences = PreviewPreferences::default_preferences();
-        let engine = PreviewEngine::new(
+        let mut engine = PreviewEngine::new(
             Self::engine_config(&preferences),
             default_preview_size(PreviewWindowProfile::Regular),
             PreviewWindowIdentity {
@@ -87,13 +88,15 @@ impl PreviewHost {
                 icon: None,
             },
         );
+        let preview_window_pointer = PointerPosition::default();
+        engine.share_pointer_motion(preview_window_pointer.motion());
         Self {
             engine,
             focused_window: None,
             request_window: None,
             preferences,
             preferences_database,
-            preview_window_pointer: None,
+            preview_window_pointer,
             preview_on_network: false,
         }
     }
@@ -497,7 +500,6 @@ impl PreviewHost {
             return Task::none();
         }
         self.engine.update_sqlite_tables_resize_drag(position);
-        self.preview_window_pointer = Some(position);
         self.engine
             .preview_pointer_moved(position.y)
             .map(Message::Preview)
@@ -511,7 +513,7 @@ impl PreviewHost {
         }
         self.engine.cancel_preview_window_initial_controls_hide();
         self.engine.preview_window_pointer_y = None;
-        self.preview_window_pointer = None;
+        self.preview_window_pointer.set(None);
         self.engine.preview_image_viewport.panning = false;
         self.engine.preview_window_bottom_controls.start_hide();
         Task::none()

@@ -82,7 +82,7 @@ pub(crate) fn start_sidebar_resize(daemon: &mut PickerDaemon, window_id: window:
     let Some(session) = daemon.windows.get(&window_id) else {
         return;
     };
-    let Some(cursor_start_x) = daemon.cursor_position.map(|point| point.x) else {
+    let Some(cursor_start_x) = daemon.cursor_position.get().map(|point| point.x) else {
         return;
     };
     daemon.sidebar_resize.insert(
@@ -100,7 +100,6 @@ pub(crate) fn handle_pointer_moved(
     window_id: window::Id,
     position: iced::Point,
 ) -> Task<Message> {
-    daemon.cursor_position = Some(position);
     if let Some(drag) = daemon.sidebar_resize.get(&window_id) {
         if let Some(session) = daemon.windows.get_mut(&window_id) {
             session.set_sidebar_width(drag.width_start + position.x - drag.cursor_start_x);

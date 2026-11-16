@@ -41,14 +41,8 @@ pub(crate) fn subscription(daemon: &PickerDaemon) -> Subscription<Message> {
             iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 Some(Message::WindowLeftPressed { window: window_id })
             }
-            // 预览窗指针事件（chrome 淡入淡出/拖拽收尾/列宽拖拽）：全窗
-            // 转发、update 按预览窗过滤（主软件 events.rs 同构）。
-            iced::Event::Mouse(mouse::Event::CursorMoved { position }) => {
-                Some(Message::PreviewPointerMoved {
-                    window: window_id,
-                    position,
-                })
-            }
+            // 指针移动不在这里转发（每条消息都会重建所有窗口）：各窗口根部的指针记录器静默
+            // 记下位置，只在跟着指针走时才发 `PreviewPointerMoved`（见 `pointer_follow`）。
             iced::Event::Mouse(mouse::Event::CursorLeft) => {
                 Some(Message::PreviewPointerLeft { window: window_id })
             }

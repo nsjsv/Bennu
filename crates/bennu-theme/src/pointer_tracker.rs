@@ -2,7 +2,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Instant;
 
-use bennu_theme::pointer_motion::PointerMotion;
+use crate::pointer_motion::PointerMotion;
 use iced::advanced::widget::tree;
 use iced::advanced::{layout, overlay, renderer, widget, Clipboard, Layout, Shell, Widget};
 use iced::{mouse, Element, Event, Length, Point, Rectangle, Size, Vector};
@@ -13,28 +13,28 @@ use iced::{mouse, Element, Event, Length, Point, Rectangle, Size, Vector};
 /// 移动都发消息，iced 每条消息都要重建所有窗口的界面并重画（高回报率鼠标每秒
 /// 三百多次），所以只写这里，不打扰 update。
 #[derive(Debug, Clone, Default)]
-pub(crate) struct PointerPosition {
+pub struct PointerPosition {
     position: Rc<Cell<Option<Point>>>,
     /// 最后一次真移动的时刻（全屏控件「停多久才藏」读它）。
     motion: PointerMotion,
 }
 
 impl PointerPosition {
-    pub(crate) fn get(&self) -> Option<Point> {
+    pub fn get(&self) -> Option<Point> {
         self.position.get()
     }
 
-    pub(crate) fn set(&self, position: Option<Point>) {
+    pub fn set(&self, position: Option<Point>) {
         self.position.set(position);
     }
 
-    pub(crate) fn motion(&self) -> PointerMotion {
+    pub fn motion(&self) -> PointerMotion {
         self.motion.clone()
     }
 }
 
 /// 窗口里的指针移动怎样作为消息发出去。
-pub(crate) enum PointerFollow<'a, Message> {
+pub enum PointerFollow<'a, Message> {
     /// 没有东西跟着指针走：只记位置和时刻。
     Still,
     /// 每次移动都发：拖动、改大小、框选，全屏时把藏着的控件叫出来。
@@ -48,7 +48,7 @@ pub(crate) enum PointerFollow<'a, Message> {
 }
 
 /// 包住一个窗口的整棵界面：记下指针位置和移动时刻，按 `follow` 决定哪些移动作为消息发出去。
-pub(crate) fn track_pointer<'a, Message, Theme, Renderer>(
+pub fn track_pointer<'a, Message, Theme, Renderer>(
     content: impl Into<Element<'a, Message, Theme, Renderer>>,
     position: Option<PointerPosition>,
     follow: PointerFollow<'a, Message>,

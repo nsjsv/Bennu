@@ -340,7 +340,7 @@ impl PreviewHost {
             // SQLite 表格列宽拖拽起点：横坐标来自宿主指针簿记（主软件
             // cursor_position.x 的预览对应物；引擎不持有宿主输入）。
             PreviewMessage::SqliteTablesResizeStarted => {
-                match self.preview_window_pointer.map(|point| point.x) {
+                match self.preview_window_pointer.get().map(|point| point.x) {
                     Some(x) => self.engine.start_sqlite_tables_resize_drag(x),
                     None => Task::none(),
                 }

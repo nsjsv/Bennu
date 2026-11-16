@@ -650,7 +650,9 @@ fn sqlite_drag_start_uses_tracked_pointer_x() {
     let mut host = host();
     let _ = host.request_preview(None, Some(&file_selection(Path::new("/tmp/a.txt"), 16)));
     let preview_window = host.engine.preview_window.unwrap();
-    let _ = host.handle_pointer_moved(preview_window, iced::Point::new(240.0, 10.0));
+    // 窗口根部的指针记录器静默记下的位置。
+    host.preview_window_pointer
+        .set(Some(iced::Point::new(240.0, 10.0)));
 
     host.engine.sqlite_preview = Some(SqlitePreviewState {
         path: PathBuf::from("/tmp/a.txt"),
@@ -683,7 +685,7 @@ fn sqlite_drag_start_uses_tracked_pointer_x() {
     assert_eq!(width, 300.0);
     // 无指针簿记（未移动过即按下，或指针已离开）：拖拽不启动。
     let _ = host.finish_window_drags();
-    host.preview_window_pointer = None;
+    host.preview_window_pointer.set(None);
     let _ = host.route_engine_fallback(PreviewMessage::SqliteTablesResizeStarted);
     assert!(host.engine.sqlite_tables_resize_drag.is_none());
 }

@@ -29,6 +29,8 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
 use crate::picker_session::PickerLocation;
+use bennu_preview::engine::PointerInterest;
+use bennu_theme::pointer_tracker::{track_pointer, PointerFollow, PointerPosition};
 use iced::{keyboard, window, Element, Task};
 
 use dbus_file_chooser::{BridgeEvent, FileChooserInterface, PickerInvocation};
@@ -54,9 +56,11 @@ struct PickerDaemon {
     /// 最近一次收到的系统深浅色；开窗、系统设置变化时据此重算 `look`。
     system_mode: bennu_theme::AppearanceMode,
     keyboard_modifiers: keyboard::Modifiers,
-    /// 最新指针位置（拖宽增量基准；与主程序 FileBrowser.cursor_position
-    /// 同一角色）。全部窗口的 CursorMoved 都更新，按下时读取。
-    cursor_position: Option<iced::Point>,
+    /// 选择窗里指针最后的位置（拖宽增量基准；与主程序 FileBrowser.cursor_position
+    /// 同一角色）。窗口根部的指针记录器静默写入，按下时读取。
+    cursor_position: PointerPosition,
+    /// 按住左键的窗口：按住期间这个窗口的指针移动才作为消息进来（拖宽侧栏、拖列宽、平移）。
+    pointer_held_window: Option<window::Id>,
     /// 进行中的侧栏拖宽：窗口 → 起点（指针 X + 起始宽度）。
     sidebar_resize: HashMap<window::Id, sidebar_bridge::SidebarResizeDrag>,
     /// 各窗口的最大化状态（顶栏窗口按钮与缩放边用）。
@@ -75,7 +79,8 @@ impl PickerDaemon {
             look: theme::resolve_look(system_mode),
             system_mode,
             keyboard_modifiers: keyboard::Modifiers::default(),
-            cursor_position: None,
+            cursor_position: PointerPosition::default(),
+            pointer_held_window: None,
             sidebar_resize: HashMap::new(),
             frames: window_frames::WindowFrames::default(),
             preview: preview_host::PreviewHost::new(theme::state_database_path()),
@@ -121,7 +126,10 @@ fn update(daemon: &mut PickerDaemon, message: Message) -> Task<Message> {
             modifiers,
             captured,
         } => keyboard_route::handle_key(daemon, window, key, modifiers, captured),
-        Message::WindowLeftPressed { window } => check_address_input_focus(daemon, window),
+        Message::WindowLeftPressed { window } => {
+            daemon.pointer_held_window = Some(window);
+            check_address_input_focus(daemon, window)
+        }
         Message::AddressInputFocusChecked { window, is_focused } => {
             handle_address_input_focus_checked(daemon, window, is_focused)
         }
@@ -155,6 +163,7 @@ fn update(daemon: &mut PickerDaemon, message: Message) -> Task<Message> {
             daemon.preview.handle_pointer_left(window)
         }
         Message::PreviewPointerReleased { window } => {
+            daemon.pointer_held_window = None;
             if daemon.preview.is_preview_window(window) {
                 daemon.preview.finish_window_drags()
             } else {
@@ -529,15 +538,44 @@ fn handle_address_input_focus_checked(
 }
 
 fn view_picker(daemon: &PickerDaemon, window_id: window::Id) -> Element<'_, Message> {
-    if daemon.preview.is_preview_window(window_id) {
+    let (content, position) = if daemon.preview.is_preview_window(window_id) {
         // 预览窗视图适配层（面板 + 滚动接线 + chrome + 拖动面 + resize）。
-        return view::preview_window_view(daemon, window_id);
-    }
-    let Some(session) = daemon.windows.get(&window_id) else {
+        (
+            view::preview_window_view(daemon, window_id),
+            daemon.preview.preview_window_pointer.clone(),
+        )
+    } else if let Some(session) = daemon.windows.get(&window_id) {
+        (
+            view::picker_window_view(daemon, session, window_id),
+            daemon.cursor_position.clone(),
+        )
+    } else {
         // 拾取窗之外的未知窗口安全空白。
         return iced::widget::text("").into();
     };
-    view::picker_window_view(daemon, session, window_id)
+    track_pointer(content, Some(position), pointer_follow(daemon, window_id))
+}
+
+/// 这个窗口的指针移动怎样作为消息进来。每条消息都会重建所有窗口，所以只在跟着指针走时才要：
+/// 按住左键的窗口每次都要（拖宽侧栏、拖列宽、平移）；预览窗按引擎要的（底部控制条只要进出底部
+/// 那一条，全屏时只在控件藏着时要）。其余时候位置和时刻只记在窗口根部的记录器里。
+fn pointer_follow(daemon: &PickerDaemon, window: window::Id) -> PointerFollow<'static, Message> {
+    let on_move = move |position| Message::PreviewPointerMoved { window, position };
+    if daemon.pointer_held_window == Some(window) {
+        return PointerFollow::Moves(Box::new(on_move));
+    }
+    if !daemon.preview.is_preview_window(window) {
+        return PointerFollow::Still;
+    }
+    match daemon.preview.engine.preview_window_pointer_interest() {
+        PointerInterest::Nothing => PointerFollow::Still,
+        PointerInterest::Band { top, bottom } => PointerFollow::Band {
+            top,
+            bottom,
+            on_move: Box::new(on_move),
+        },
+        PointerInterest::Moves => PointerFollow::Moves(Box::new(on_move)),
+    }
 }
 
 fn daemon_title(daemon: &PickerDaemon, window_id: window::Id) -> String {
@@ -635,7 +673,8 @@ pub(crate) fn test_daemon() -> PickerDaemon {
         },
         system_mode: bennu_theme::AppearanceMode::Light,
         keyboard_modifiers: keyboard::Modifiers::default(),
-        cursor_position: None,
+        cursor_position: PointerPosition::default(),
+        pointer_held_window: None,
         sidebar_resize: HashMap::new(),
         frames: window_frames::WindowFrames::default(),
         preview: preview_host::PreviewHost::new(std::path::PathBuf::new()),
@@ -646,6 +685,38 @@ pub(crate) fn test_daemon() -> PickerDaemon {
 mod tests {
     use super::*;
     use crate::picker_request::{PickerKind, PickerRequestSpec};
+
+    /// 指针移动只在跟着指针走时才作为消息：选择窗按住左键期间每次都要，松开后只记录；
+    /// 没有底部控制条的预览窗只记录。
+    #[test]
+    fn pointer_moves_become_messages_only_while_something_follows_them() {
+        let follows_every_move = |daemon: &PickerDaemon, window| {
+            matches!(pointer_follow(daemon, window), PointerFollow::Moves(_))
+        };
+        let mut daemon = test_daemon();
+        let picker = window::Id::unique();
+        assert!(matches!(
+            pointer_follow(&daemon, picker),
+            PointerFollow::Still
+        ));
+        drop(update(
+            &mut daemon,
+            Message::WindowLeftPressed { window: picker },
+        ));
+        assert!(follows_every_move(&daemon, picker));
+        drop(update(
+            &mut daemon,
+            Message::PreviewPointerReleased { window: picker },
+        ));
+        assert!(!follows_every_move(&daemon, picker));
+
+        let preview = window::Id::unique();
+        daemon.preview.engine.preview_window = Some(preview);
+        assert!(matches!(
+            pointer_follow(&daemon, preview),
+            PointerFollow::Still
+        ));
+    }
     use crate::subscriptions::active_media_streams;
     use crate::view::session_window_title;
 

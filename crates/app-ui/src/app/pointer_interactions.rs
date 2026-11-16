@@ -56,9 +56,9 @@ impl FileBrowser {
     pub(super) fn pointer_follow(
         &self,
         window: window::Id,
-    ) -> crate::pointer_tracker::PointerFollow<'static, Message> {
-        use crate::pointer_tracker::PointerFollow;
+    ) -> bennu_theme::pointer_tracker::PointerFollow<'static, Message> {
         use bennu_preview::engine::PointerInterest;
+        use bennu_theme::pointer_tracker::PointerFollow;
 
         let on_move = move |position| Message::CursorMoved { window, position };
         if self.pointer_held_window == Some(window) {
@@ -165,7 +165,7 @@ mod tests {
     fn follows_every_move(browser: &FileBrowser, window: window::Id) -> bool {
         matches!(
             browser.pointer_follow(window),
-            crate::pointer_tracker::PointerFollow::Moves(_)
+            bennu_theme::pointer_tracker::PointerFollow::Moves(_)
         )
     }
 
@@ -199,7 +199,7 @@ mod tests {
         browser.preview_engine.preview_window = Some(preview);
         assert!(matches!(
             browser.pointer_follow(preview),
-            crate::pointer_tracker::PointerFollow::Still
+            bennu_theme::pointer_tracker::PointerFollow::Still
         ));
     }
 }

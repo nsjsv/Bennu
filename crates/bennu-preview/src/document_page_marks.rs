@@ -8,12 +8,13 @@ use iced::{mouse, Color, Element, Length, Rectangle, Size};
 
 use crate::document_preview::{PageMarkKind, PageRect};
 
-/// 匹配用黄、当前那处用橙、选中用主题色，都半透明，盖在字上还看得清字。
-fn mark_color(kind: PageMarkKind, theme: &iced::Theme) -> Color {
+/// 匹配用黄、当前那处用橙、选中用蓝，都半透明，盖在字上还看得清字。纸总是白的，颜色不跟主题走：
+/// 深色主题的主色偏浅，叠在白纸上看不见。
+fn mark_color(kind: PageMarkKind) -> Color {
     match kind {
         PageMarkKind::Match => Color::from_rgba(1.0, 0.84, 0.0, 0.35),
         PageMarkKind::CurrentMatch => Color::from_rgba(1.0, 0.55, 0.0, 0.55),
-        PageMarkKind::Selection => bennu_theme::ui_colors(theme).primary.scale_alpha(0.3),
+        PageMarkKind::Selection => Color::from_rgba(0.16, 0.45, 0.95, 0.35),
     }
 }
 
@@ -57,7 +58,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for PageMarks {
         &self,
         _tree: &widget::Tree,
         renderer: &mut iced::Renderer,
-        theme: &iced::Theme,
+        _theme: &iced::Theme,
         _style: &renderer::Style,
         layout: Layout<'_>,
         _cursor: mouse::Cursor,
@@ -79,7 +80,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for PageMarks {
                     },
                     ..Quad::default()
                 },
-                mark_color(*kind, theme),
+                mark_color(*kind),
             );
         }
     }

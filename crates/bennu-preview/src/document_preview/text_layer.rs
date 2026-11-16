@@ -167,6 +167,13 @@ impl DocumentSelection {
 }
 
 /// 指着的地方离哪个词最近（在词里就是那个词）。
+/// 指在哪个词上（落在词的框里）；指在空白处是 `None`。
+pub fn word_under(page: &PageText, x: f32, y: f32) -> Option<usize> {
+    page.words
+        .iter()
+        .position(|word| word.bounds.distance_to(x, y) == 0.0)
+}
+
 pub fn word_near(page: &PageText, x: f32, y: f32) -> Option<usize> {
     page.words
         .iter()

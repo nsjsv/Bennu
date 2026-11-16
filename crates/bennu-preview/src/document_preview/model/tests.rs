@@ -359,6 +359,45 @@ fn word(text: &str, left: f32, top: f32, ends_line: bool) -> super::super::text_
     }
 }
 
+/// 按在空白处清掉选区；从空白处拖到字上，从离按下处最近的词选起；点在字上选这个词。
+#[test]
+fn pressing_on_blank_paper_clears_the_selection() {
+    use super::super::text_layer::{DocumentText, PageText};
+    use std::sync::Arc;
+
+    let mut preview = preview_with_pages(vec![page(600.0, 800.0)]);
+    let request = preview
+        .request_text(CancellationToken::new())
+        .expect("first request");
+    let text = DocumentText {
+        pages: vec![PageText {
+            words: vec![word("alpha", 0.1, 0.1, false), word("beta", 0.3, 0.1, true)],
+        }],
+    };
+    assert!(preview.accept_text(&request.key, Ok(Arc::new(text))));
+
+    preview.pointer_moved(0, 0.32, 0.11);
+    preview.press();
+    preview.release();
+    assert_eq!(preview.selected_text().as_deref(), Some("beta"));
+
+    // 点在两个词之间的空白：选区清掉，不去选附近的词。
+    preview.pointer_moved(0, 0.25, 0.11);
+    preview.press();
+    preview.pointer_moved(0, 0.26, 0.12);
+    preview.release();
+    assert_eq!(preview.selected_text(), None);
+
+    // 从左边空白拖到第二个词上：从离按下处最近的第一个词选起。
+    preview.pointer_moved(0, 0.02, 0.11);
+    preview.press();
+    preview.pointer_moved(0, 0.05, 0.11);
+    assert!(preview.is_selecting());
+    preview.pointer_moved(0, 0.35, 0.11);
+    preview.release();
+    assert_eq!(preview.selected_text().as_deref(), Some("alpha beta"));
+}
+
 #[test]
 fn search_marks_matches_and_drag_selects_words_for_copy() {
     use super::super::text_layer::{DocumentText, PageText};

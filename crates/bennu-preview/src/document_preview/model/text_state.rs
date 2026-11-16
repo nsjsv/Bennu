@@ -7,7 +7,8 @@ use tokio_util::sync::CancellationToken;
 use super::{DocumentPreviewRequestKey, PagedDocumentPreview};
 use crate::commands::document_preview::DocumentTextRequest;
 use crate::document_preview::text_layer::{
-    word_near, DocumentSearch, DocumentSelection, DocumentText, DocumentTextLayer, PageRect,
+    word_near, word_under, DocumentSearch, DocumentSelection, DocumentText, DocumentTextLayer,
+    PageRect,
 };
 use crate::text_document::{SearchDirection, SearchSummary};
 
@@ -21,6 +22,8 @@ pub(super) struct TextState {
     selection: Option<DocumentSelection>,
     /// 指针最近在哪页哪（页内比例）：按下时从这里起选。
     pointer: Option<(usize, f32, f32)>,
+    /// 按在哪：按在空白处时，拖到字上才从离这里最近的词开始选。
+    pressed_at: Option<(usize, f32, f32)>,
     selecting: bool,
 }
 
@@ -31,6 +34,7 @@ impl Default for TextState {
             search: None,
             selection: None,
             pointer: None,
+            pressed_at: None,
             selecting: false,
         }
     }
@@ -152,26 +156,40 @@ impl PagedDocumentPreview {
 
     pub fn pointer_moved(&mut self, page: usize, x: f32, y: f32) {
         self.text.pointer = Some((page, x, y));
-        if self.text.selecting {
+        if !self.text.selecting {
+            return;
+        }
+        if self.text.selection.is_some() {
             if let Some(word) = self.word_at_pointer() {
                 if let Some(selection) = self.text.selection.as_mut() {
                     selection.focus = word;
                 }
             }
+        } else if let Some(focus) = self.word_under_pointer() {
+            // 从空白处拖到了字上：从离按下处最近的词选到这里。
+            let anchor = self.word_near_press().unwrap_or(focus);
+            self.text.selection = Some(DocumentSelection { anchor, focus });
         }
     }
 
-    /// 按下：从指着的词开始选；文字还没抽好时什么也不选（按下会去抽）。
+    /// 按在字上：从这个词开始选（只点一下也算选了它）；按在空白处：清掉选区，拖到字上时再选。
+    /// 文字还没抽好时什么也不选（按下会去抽）。
     pub fn press(&mut self) {
-        self.text.selection = self.word_at_pointer().map(|word| DocumentSelection {
+        self.text.pressed_at = self.text.pointer;
+        self.text.selection = self.word_under_pointer().map(|word| DocumentSelection {
             anchor: word,
             focus: word,
         });
-        self.text.selecting = self.text.selection.is_some();
+        self.text.selecting = matches!(self.text.layer, DocumentTextLayer::Ready(_));
     }
 
     pub fn release(&mut self) {
         self.text.selecting = false;
+    }
+
+    /// 正按着拖选：视图这时才要逐次的指针移动。
+    pub fn is_selecting(&self) -> bool {
+        self.text.selecting
     }
 
     /// 选中的文字；只点了一下没拖（选中一个词又松开在原处）也算选了那个词。
@@ -224,10 +242,25 @@ impl PagedDocumentPreview {
     }
 
     fn word_at_pointer(&self) -> Option<(usize, usize)> {
-        let (page, x, y) = self.text.pointer?;
+        self.word_near_point(self.text.pointer?)
+    }
+
+    fn word_near_press(&self) -> Option<(usize, usize)> {
+        self.word_near_point(self.text.pressed_at?)
+    }
+
+    fn word_near_point(&self, (page, x, y): (usize, f32, f32)) -> Option<(usize, usize)> {
         let DocumentTextLayer::Ready(text) = &self.text.layer else {
             return None;
         };
         Some((page, word_near(text.pages.get(page)?, x, y)?))
+    }
+
+    fn word_under_pointer(&self) -> Option<(usize, usize)> {
+        let (page, x, y) = self.text.pointer?;
+        let DocumentTextLayer::Ready(text) = &self.text.layer else {
+            return None;
+        };
+        Some((page, word_under(text.pages.get(page)?, x, y)?))
     }
 }

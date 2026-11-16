@@ -769,12 +769,14 @@ impl Weak {
     }
 }
 
+/// Bennu 补丁：按是不是同一个编辑框比，不再按排版参数比。
+///
+/// 上游比字体、对齐、尺寸，不比文字：同样宽的两段字（「07」变「08」、虚拟列表同一位置换了一行）
+/// 被当成没变，只重画变了的部分时旧字留在屏幕上。改动编辑框时旧帧手里的弱引用会失效（`Arc::make_mut`
+/// 遇到弱引用就另起一份，编辑框换新的 `Arc`），所以同一个对象、还活着，就是同样的内容。
 impl PartialEq for Weak {
     fn eq(&self, other: &Self) -> bool {
-        match (self.raw.upgrade(), other.raw.upgrade()) {
-            (Some(p1), Some(p2)) => p1 == p2,
-            _ => false,
-        }
+        sync::Weak::ptr_eq(&self.raw, &other.raw) && self.raw.strong_count() > 0
     }
 }
 

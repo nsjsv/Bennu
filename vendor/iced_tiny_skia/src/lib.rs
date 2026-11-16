@@ -7,6 +7,7 @@ pub use clip_mask::ClipMask;
 mod engine;
 mod layer;
 mod primitive;
+mod scroll_blit;
 mod settings;
 mod text;
 
@@ -79,7 +80,10 @@ impl Renderer {
         self.layers.flush();
 
         for &damage_bounds in damage {
-            let damage_bounds = damage_bounds * scale_factor;
+            let Some(damage_bounds) = snap_to_pixels(damage_bounds * scale_factor)
+            else {
+                continue;
+            };
 
             let path = tiny_skia::PathBuilder::from_rect(
                 tiny_skia::Rect::from_xywh(
@@ -107,8 +111,9 @@ impl Renderer {
             );
 
             for layer in self.layers.iter() {
-                let Some(layer_bounds) =
-                    damage_bounds.intersection(&(layer.bounds * scale_factor))
+                let Some(layer_bounds) = damage_bounds
+                    .intersection(&(layer.bounds * scale_factor))
+                    .and_then(snap_to_pixels)
                 else {
                     continue;
                 };
@@ -200,6 +205,23 @@ impl Renderer {
 
         self.engine.trim();
     }
+}
+
+/// Bennu 补丁：裁剪框对齐到像素格，与不抗锯齿填充（遮罩、重画区域的底色）同样四舍五入。
+///
+/// 图元整个在裁剪框里时不加遮罩直接画。框的边若是小数（缩放 1.25 时常见），框内贴边的图元的抗锯齿
+/// 像素会写到框外那一行：层外的像素被画、重画区域外没清底色的像素被叠画。对齐后每层只写自己的像素。
+fn snap_to_pixels(bounds: Rectangle) -> Option<Rectangle> {
+    let left = bounds.x.round();
+    let top = bounds.y.round();
+    let right = (bounds.x + bounds.width).round();
+    let bottom = (bounds.y + bounds.height).round();
+    (right > left && bottom > top).then(|| Rectangle {
+        x: left,
+        y: top,
+        width: right - left,
+        height: bottom - top,
+    })
 }
 
 impl core::Renderer for Renderer {

@@ -82,6 +82,10 @@ panic = "abort"
 # 区域碎成上百块（能并就并，块多了合成外框）；iced_tiny_skia 的 ClipMask 换裁剪
 # 矩形时只擦旧填新，不再每次清整张窗口大小的遮罩；越出裁剪区的矩形只填可见、
 # 不含圆角的那一块。后两处有与上游画法逐字节比对的测试，合并有不漏区域的测试。
+# 再两处：滚动时整层只是平移了就把画好的像素整块挪过去，只重画露出的和变了的
+# （scroll_blit.rs，有与整帧重画比对的测试）；画每层前裁剪框对齐到像素格，贴边的
+# 图元不再把抗锯齿像素写到层外。iced_graphics 的段落、编辑框弱引用按是不是同一个对象比（上游只比
+# 排版参数，一样宽的两段字被当成同一段，只重画变了的部分时旧字留在屏幕上）。
 [patch.crates-io]
 iced_graphics = { path = "vendor/iced_graphics" }
 iced_tiny_skia = { path = "vendor/iced_tiny_skia" }

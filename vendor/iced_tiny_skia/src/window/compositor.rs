@@ -3,7 +3,7 @@ use crate::graphics::compositor::{self, Information};
 use crate::graphics::damage;
 use crate::graphics::error::{self, Error};
 use crate::graphics::{self, Shell, Viewport};
-use crate::{ClipMask, Layer, Renderer, Settings};
+use crate::{scroll_blit, ClipMask, Layer, Renderer, Settings};
 
 use std::collections::VecDeque;
 use std::num::NonZeroU32;
@@ -173,18 +173,23 @@ pub fn present(
         }
     };
 
-    let damage = last_layers
+    // Bennu 补丁：滚动的那一层先整块挪像素，只重画露出的和变了的（见 `scroll_blit`）。
+    let plan = last_layers
         .and_then(|last_layers| {
             (surface.background_color == background_color).then(|| {
-                damage::diff(
+                scroll_blit::plan(
                     last_layers,
                     renderer.layers(),
-                    |layer| vec![layer.bounds],
-                    Layer::damage,
+                    viewport.scale_factor(),
+                    physical_size,
                 )
             })
         })
-        .unwrap_or_else(|| vec![Rectangle::with_size(viewport.logical_size())]);
+        .unwrap_or_else(|| scroll_blit::Plan {
+            scroll: None,
+            damage: vec![Rectangle::with_size(viewport.logical_size())],
+        });
+    let damage = plan.damage;
 
     if damage.is_empty() {
         if let Some(last_layers) = last_layers {
@@ -205,6 +210,10 @@ pub fn present(
             physical_size.height,
         )
         .expect("Create pixel map");
+
+        if let Some(scroll) = plan.scroll {
+            scroll.apply(&mut pixels);
+        }
 
         renderer.draw(
             &mut pixels,

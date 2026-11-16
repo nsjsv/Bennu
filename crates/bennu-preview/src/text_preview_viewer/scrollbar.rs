@@ -19,6 +19,9 @@ use crate::text_document::{TextJump, TextPreviewDocument, TextViewerEvent};
 pub(super) struct ThumbDrag {
     axis: Axis,
     grab: f32,
+    /// 指针最后的位置对应的比例，画下一帧前才照着滚：指针一秒移动几百次，每次都滚就要
+    /// 每次重排一屏文字（大文件还要让引擎每次读一遍文件），而一帧只显示最后一个位置。
+    pending: Option<f32>,
 }
 
 /// 报告给细线滑块的虚拟内容高与偏移。
@@ -202,7 +205,8 @@ fn thumb_span(
     }
 }
 
-/// 处理滑块的按下、拖动、松开；返回事件是否被滑块用掉。
+/// 处理滑块的按下、拖动、松开；返回事件是否被滑块用掉。按下和松开立刻滚到位，拖动中
+/// 的移动只记下位置，由 [`follow_thumb_drag`] 每帧滚一次。
 pub(super) fn handle_event(
     state: &mut TextPreviewViewerState,
     document: &TextPreviewDocument,
@@ -229,22 +233,53 @@ pub(super) fn handle_event(
             } else {
                 thumb_length / 2.0
             };
-            state.thumb_drag = Some(ThumbDrag { axis, grab });
-            drag_thumb_to(state, document, bounds, position);
+            let drag = ThumbDrag {
+                axis,
+                grab,
+                pending: None,
+            };
+            state.thumb_drag = Some(drag);
+            if let Some(fraction) = drag_fraction_at(state, document, bounds, drag, position) {
+                scroll_thumb_to(state, document, axis, fraction);
+            }
             true
         }
         Event::Mouse(mouse::Event::CursorMoved { position }) => {
-            if state.thumb_drag.is_none() {
+            let Some(drag) = state.thumb_drag else {
                 return false;
+            };
+            let fraction = drag_fraction_at(state, document, bounds, drag, *position);
+            if let (Some(drag), Some(fraction)) = (state.thumb_drag.as_mut(), fraction) {
+                drag.pending = Some(fraction);
             }
-            drag_thumb_to(state, document, bounds, *position);
             true
         }
         Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-            state.thumb_drag.take().is_some()
+            let Some(drag) = state.thumb_drag.take() else {
+                return false;
+            };
+            if let Some(fraction) = drag.pending {
+                scroll_thumb_to(state, document, drag.axis, fraction);
+            }
+            true
         }
         _ => false,
     }
+}
+
+/// 每帧画之前：拖动中按指针最后的位置滚一次。
+pub(super) fn follow_thumb_drag(
+    state: &mut TextPreviewViewerState,
+    document: &TextPreviewDocument,
+) {
+    let Some(drag) = state.thumb_drag.as_mut() else {
+        return;
+    };
+    let Some(fraction) = drag.pending.take() else {
+        return;
+    };
+    let axis = drag.axis;
+    scroll_thumb_to(state, document, axis, fraction);
 }
 
 fn along_track(axis: Axis, track: Rectangle, position: Point) -> f32 {
@@ -254,28 +289,31 @@ fn along_track(axis: Axis, track: Rectangle, position: Point) -> f32 {
     }
 }
 
-fn drag_thumb_to(
-    state: &mut TextPreviewViewerState,
+/// 指针在这个位置时滑块该在的比例。
+fn drag_fraction_at(
+    state: &TextPreviewViewerState,
     document: &TextPreviewDocument,
     bounds: Rectangle,
+    drag: ThumbDrag,
     position: Point,
-) {
-    let Some(drag) = state.thumb_drag else {
-        return;
-    };
-    let Some(track) = track_bounds(state, document, bounds, drag.axis) else {
-        return;
-    };
-    let Some((_, thumb_length)) = thumb_span(state, document, bounds, drag.axis, track) else {
-        return;
-    };
+) -> Option<f32> {
+    let track = track_bounds(state, document, bounds, drag.axis)?;
+    let (_, thumb_length) = thumb_span(state, document, bounds, drag.axis, track)?;
     let track_length = match drag.axis {
         Axis::Vertical => track.height,
         Axis::Horizontal => track.width,
     };
     let travel = (track_length - thumb_length).max(f32::EPSILON);
-    let fraction = ((along_track(drag.axis, track, position) - drag.grab) / travel).clamp(0.0, 1.0);
-    if drag.axis == Axis::Horizontal {
+    Some(((along_track(drag.axis, track, position) - drag.grab) / travel).clamp(0.0, 1.0))
+}
+
+fn scroll_thumb_to(
+    state: &mut TextPreviewViewerState,
+    document: &TextPreviewDocument,
+    axis: Axis,
+    fraction: f32,
+) {
+    if axis == Axis::Horizontal {
         state.scroll_x = fraction * state.max_scroll_x();
         return;
     }

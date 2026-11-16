@@ -202,21 +202,28 @@ fn dragging_the_thumb_in_a_large_file_requests_a_proportional_jump() {
     };
     let fraction = offset as f64 / document.len() as f64;
     assert!((fraction - 0.5).abs() < 0.05, "fraction {fraction}");
-    // 拖到底：跳到文件末尾。
-    let moved = Event::Mouse(mouse::Event::CursorMoved {
-        position: Point::new(track_x, 1_000.0),
-    });
-    assert!(scrollbar::handle_event(
-        &mut state, &document, &moved, bounds, cursor
-    ));
+    // 一帧里拖过好几个位置：只在下一帧按最后的位置（底）跳一次。
+    for y in [100.0, 300.0, 1_000.0] {
+        let moved = Event::Mouse(mouse::Event::CursorMoved {
+            position: Point::new(track_x, y),
+        });
+        assert!(scrollbar::handle_event(
+            &mut state, &document, &moved, bounds, cursor
+        ));
+    }
+    assert!(state.pending_events.is_empty());
+    scrollbar::follow_thumb_drag(&mut state, &document);
     assert_eq!(
-        state.pending_events.pop(),
-        Some(TextViewerEvent::JumpRequested(TextJump::End))
+        std::mem::take(&mut state.pending_events),
+        vec![TextViewerEvent::JumpRequested(TextJump::End)]
     );
+    scrollbar::follow_thumb_drag(&mut state, &document);
+    assert!(state.pending_events.is_empty());
     let release = Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left));
     assert!(scrollbar::handle_event(
         &mut state, &document, &release, bounds, cursor
     ));
+    assert!(state.pending_events.is_empty());
 }
 
 #[test]
@@ -231,6 +238,42 @@ fn dragging_the_thumb_in_a_loaded_file_scrolls_by_pixels() {
     ));
     assert!(state.pending_events.is_empty());
     assert!(is_at_bottom(&state, &document));
+}
+
+#[test]
+fn dragging_the_thumb_scrolls_once_per_frame_and_lands_on_release() {
+    let document = document_from_bytes(lines(100), TextJump::Start);
+    let mut state = synced_state(&document);
+    let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(400.0, 400.0));
+    let track_x = bounds.width - 2.0;
+    let cursor = mouse::Cursor::Available(Point::new(track_x, 1.0));
+    let press = Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left));
+    assert!(scrollbar::handle_event(
+        &mut state, &document, &press, bounds, cursor
+    ));
+    assert_eq!((state.anchor, state.pixel), (0, 0.0));
+    let move_to = |y: f32| {
+        Event::Mouse(mouse::Event::CursorMoved {
+            position: Point::new(track_x, y),
+        })
+    };
+
+    // 移动只记位置；下一帧按最后一次移动滚到底。
+    for y in [100.0, 250.0, 1_000.0] {
+        scrollbar::handle_event(&mut state, &document, &move_to(y), bounds, cursor);
+    }
+    assert_eq!((state.anchor, state.pixel), (0, 0.0));
+    scrollbar::follow_thumb_drag(&mut state, &document);
+    assert!(is_at_bottom(&state, &document));
+
+    // 还没到下一帧就松开：按松开前最后的位置落定。
+    scrollbar::handle_event(&mut state, &document, &move_to(-1_000.0), bounds, cursor);
+    let release = Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left));
+    assert!(scrollbar::handle_event(
+        &mut state, &document, &release, bounds, cursor
+    ));
+    assert_eq!((state.anchor, state.pixel), (0, 0.0));
+    assert!(state.thumb_drag.is_none());
 }
 
 #[test]

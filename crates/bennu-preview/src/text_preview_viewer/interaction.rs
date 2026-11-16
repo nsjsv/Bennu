@@ -291,12 +291,13 @@ fn drag_selection(
     }
 }
 
-/// 每帧：自动滚动推进一步、提示到点消失。
+/// 每帧：拖滑块跟到指针最后的位置、自动滚动推进一步、提示到点消失。
 fn tick(
     state: &mut TextPreviewViewerState,
     document: &TextPreviewDocument,
     now: Instant,
 ) -> EventOutcome {
+    scrollbar::follow_thumb_drag(state, document);
     let mut outcome = EventOutcome::default();
     if let Some(notice) = &state.notice {
         if now >= notice.until {

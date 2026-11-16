@@ -227,6 +227,36 @@ fn dragging_the_thumb_in_a_large_file_requests_a_proportional_jump() {
 }
 
 #[test]
+fn dragging_the_thumb_onto_rows_already_read_scrolls_without_a_jump() {
+    let document = document_from_bytes(lines(3_000), TextJump::Start);
+    assert!(!document.at_end());
+    let (_, window_end) = window_span(&document);
+    let mut state = synced_state(&document);
+    let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(400.0, 400.0));
+    let track_x = bounds.width - 2.0;
+    let press = Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left));
+    // 轨道上方约十分之一处：落点在已经读进来的行里。
+    let cursor = mouse::Cursor::Available(Point::new(track_x, 40.0));
+    assert!(scrollbar::handle_event(
+        &mut state, &document, &press, bounds, cursor
+    ));
+    assert!(state.pending_events.is_empty());
+    assert_eq!(state.drag_fraction, None);
+    assert!(state.anchor > 0 && state.anchor < window_end);
+
+    // 拖到读进来的行之外：才让引擎去读。
+    let moved = Event::Mouse(mouse::Event::CursorMoved {
+        position: Point::new(track_x, 300.0),
+    });
+    scrollbar::handle_event(&mut state, &document, &moved, bounds, cursor);
+    scrollbar::follow_thumb_drag(&mut state, &document);
+    assert!(matches!(
+        state.pending_events.as_slice(),
+        [TextViewerEvent::JumpRequested(TextJump::Offset(offset))] if *offset >= window_end
+    ));
+}
+
+#[test]
 fn dragging_the_thumb_in_a_loaded_file_scrolls_by_pixels() {
     let document = document_from_bytes(lines(100), TextJump::Start);
     let mut state = synced_state(&document);

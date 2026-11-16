@@ -321,7 +321,6 @@ fn scroll_thumb_to(
         scroll_to_fraction(state, document, fraction);
         return;
     }
-    state.drag_fraction = Some(fraction);
     let jump = if fraction <= 0.0 {
         TextJump::Start
     } else if fraction >= 1.0 {
@@ -331,9 +330,45 @@ fn scroll_thumb_to(
             .saturating_sub(viewport_bytes(state, document)) as f64;
         TextJump::Offset(document.data_start() + (fraction as f64 * range) as u64)
     };
+    if scroll_within_window(state, document, jump) {
+        return;
+    }
+    state.drag_fraction = Some(fraction);
     state
         .pending_events
         .push(TextViewerEvent::JumpRequested(jump));
+}
+
+/// 落点已经在读进来的行里就地滚过去，返回 false 时才让引擎去读落点附近：拖动时每帧
+/// 都重读、重新上色落点附近几百行，而落点大多就在刚读进来的那些行里。
+fn scroll_within_window(
+    state: &mut TextPreviewViewerState,
+    document: &TextPreviewDocument,
+    jump: TextJump,
+) -> bool {
+    let rows = document.rows();
+    let (anchor, lift) = match jump {
+        TextJump::Start if document.at_start() => (rows.front().map_or(0, |row| row.start), 0.0),
+        TextJump::End if document.at_end() => (state.anchor, f32::MAX / 4.0),
+        TextJump::Offset(offset) => match document
+            .row_index_containing(offset)
+            .map(|index| &rows[index])
+        {
+            // 行内按字节比例落到对应像素，拖动时位置连续。
+            Some(row) if offset < row.end => {
+                let within = (offset - row.start) as f32 / (row.end - row.start).max(1) as f32;
+                (row.start, within * row_height(state, row.start))
+            }
+            _ => return false,
+        },
+        _ => return false,
+    };
+    state.anchor = anchor;
+    state.pixel = 0.0;
+    state.drag_fraction = None;
+    scroll_viewer_by(state, document, lift);
+    refresh_retained_content(state, document);
+    true
 }
 
 /// 整个文件都在窗口里：直接按像素滚到比例处。

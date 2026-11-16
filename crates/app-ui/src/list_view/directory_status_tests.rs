@@ -30,7 +30,7 @@ fn browser_with_expanded_directory(
     browser.tab_mut().expanded_directories.insert(
         expanded_path,
         ExpandedDirectory {
-            entries: child_entries,
+            entries: child_entries.into(),
             directory_discovery: None,
             status,
             is_expanded: true,

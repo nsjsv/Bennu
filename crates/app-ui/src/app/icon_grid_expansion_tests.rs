@@ -188,7 +188,8 @@ fn icon_grid_load_rejects_every_stale_identity_dimension() {
             .directory(&root)
             .unwrap()
             .contents
-            .entries,
+            .entries
+            .to_vec(),
         vec![child]
     );
 }

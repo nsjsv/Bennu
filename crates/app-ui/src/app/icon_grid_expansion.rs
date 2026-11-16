@@ -19,8 +19,8 @@ use super::FileBrowser;
 use crate::commands::load_expanded_directory_command;
 use crate::icon_grid_layout::IconGridLayout;
 use crate::model::{
-    BrowserPaneId, BrowserViewMode, DirectoryExpansionLoadContext, DirectoryLoadFailure,
-    ExpandedDirectory, ExpandedDirectoryLoadRequest, ExpandedDirectoryStatus,
+    BrowserPaneId, BrowserViewMode, DirectoryEntrySnapshot, DirectoryExpansionLoadContext,
+    DirectoryLoadFailure, ExpandedDirectory, ExpandedDirectoryLoadRequest, ExpandedDirectoryStatus,
     IconGridAnchorReconciliation, IconGridChildSwitch, IconGridExpansionAnchor,
     IconGridExpansionContext, IconGridExpansionSessionId, IconGridExpansionState,
     IconGridRemovedPathReconciliation, Message,
@@ -474,7 +474,7 @@ impl FileBrowser {
         };
         // 分批只填第一次加载的空面板；刷新中的旧条目等结果落地整体替换。
         if !expanded.contents.status.has_listing() {
-            expanded.contents.entries.extend(entries);
+            expanded.contents.entries.make_mut().extend(entries);
         }
         Task::none()
     }
@@ -485,13 +485,13 @@ impl FileBrowser {
         request: ExpandedDirectoryLoadRequest,
         scan: Result<file_core::DirectoryScan, DirectoryLoadFailure>,
     ) -> Task<Message> {
-        self.accept_icon_grid_directory_entries(request, scan.map(|scan| scan.entries))
+        self.accept_icon_grid_directory_entries(request, scan.map(|scan| scan.entries.into()))
     }
 
     pub(super) fn accept_icon_grid_directory_entries(
         &mut self,
         request: ExpandedDirectoryLoadRequest,
-        entries: Result<Vec<DirectoryEntry>, DirectoryLoadFailure>,
+        entries: Result<DirectoryEntrySnapshot, DirectoryLoadFailure>,
     ) -> Task<Message> {
         if !self.icon_grid_request_is_current(&request) {
             return Task::none();
@@ -540,7 +540,7 @@ impl FileBrowser {
                 else {
                     return Task::none();
                 };
-                expanded.contents.entries.clear();
+                expanded.contents.entries = Default::default();
                 expanded.contents.status = ExpandedDirectoryStatus::Error;
                 expanded.contents.load_context = None;
                 expanded.contents.load_cancel = None;
@@ -870,7 +870,7 @@ impl FileBrowser {
 
 fn loading_icon_grid_directory() -> ExpandedDirectory {
     ExpandedDirectory {
-        entries: Vec::new(),
+        entries: Default::default(),
         directory_discovery: None,
         status: ExpandedDirectoryStatus::Loading,
         is_expanded: true,

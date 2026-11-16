@@ -3,7 +3,6 @@ use file_core::{
 };
 use iced::Task;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 use super::entry_changes::replay_changes_queued_during_current_scan;
@@ -11,11 +10,11 @@ use super::global_error::GlobalErrorSource;
 use super::FileBrowser;
 use crate::commands::{load_directory_command, load_expanded_directory_command};
 use crate::model::{
-    empty_directory_entry_snapshot, BrowserLocation, BrowserPaneId, BrowserViewMode,
+    empty_directory_entry_snapshot, pane_entry, BrowserLocation, BrowserPaneId, BrowserViewMode,
     DirectoryCollectionPhase, DirectoryEntrySnapshot, DirectoryExpansionLoadContext,
     DirectoryLoadRequest, DirectoryLoadingPlaceholder, DirectoryLoadingPlaceholderEntry,
     DirectoryOrderPhase, ExpandedDirectory, ExpandedDirectoryLoadRequest, HistoryEntry,
-    LocationKey, Message, NavigationMode,
+    IconGridExpansionState, LocationKey, Message, NavigationMode,
 };
 use crate::startup_trace;
 impl FileBrowser {
@@ -94,10 +93,8 @@ impl FileBrowser {
         if !pane.tab().directory_collection_phase.is_discovering() {
             return Task::none();
         }
-        Arc::make_mut(&mut pane.tab_mut().entries).extend(entries);
+        pane.tab_mut().entries.make_mut().extend(entries);
         pane.directory_loading_placeholder = None;
-        // 原地扩展可能在共享指针内变更内容：主列表条目索引在此失效。
-        self.entry_index = None;
         Task::none()
     }
 
@@ -122,19 +119,14 @@ impl FileBrowser {
         request: DirectoryLoadRequest,
         scan: file_core::DirectoryScan,
     ) -> Task<Message> {
-        self.accept_authoritative_directory_entries(
-            request,
-            scan.path,
-            Arc::new(scan.entries),
-            None,
-        )
+        self.accept_authoritative_directory_entries(request, scan.path, scan.entries.into(), None)
     }
 
     fn accept_authoritative_directory_entries(
         &mut self,
         request: DirectoryLoadRequest,
         path: PathBuf,
-        entries: Arc<Vec<DirectoryEntry>>,
+        entries: DirectoryEntrySnapshot,
         discovery: Option<DirectoryDiscovery>,
     ) -> Task<Message> {
         let sort_options = self.options.clone();
@@ -154,7 +146,7 @@ impl FileBrowser {
         pane.directory_loading_placeholder = None;
         let tab = pane.tab_mut();
         tab.location = BrowserLocation::Directory(path.clone());
-        tab.entries = Arc::clone(&entries);
+        tab.entries = entries.clone();
         tab.directory_discovery = discovery;
         // 扫描读到的是启动那一刻的磁盘，期间到达的变化排在队里，落地后补上。
         replay_changes_queued_during_current_scan(tab, request.generation, &sort_options);
@@ -169,7 +161,7 @@ impl FileBrowser {
         self.release_interactions_targeting(|target| gone.iter().any(|path| path == target));
         self.entries_replaced();
         if is_active {
-            let entries = Arc::clone(&self.tab().entries);
+            let entries = self.tab().entries.clone();
             self.reconcile_icon_grid_root_after_scan(&entries);
         }
 
@@ -544,8 +536,7 @@ impl FileBrowser {
         }
     }
 
-    // 活动标签主列表条目的写入边界：整体替换经这里，使 hover 热路径的
-    // 条目索引随之失效（内存/正确性不变量）。
+    // 活动标签主列表条目的写入边界：整体替换经这里。
     pub(super) fn set_entries(&mut self, entries: DirectoryEntrySnapshot) {
         self.tab_mut().entries = entries;
         self.entries_replaced();
@@ -553,7 +544,6 @@ impl FileBrowser {
 
     // 主列表条目被整体换掉（或换了一个活动标签/窗格）之后的善后。
     pub(super) fn entries_replaced(&mut self) {
-        self.entry_index = None;
         // 分组索引栏随条目分组出现或消失，消失的栏发不出 exit，屏障必须在
         // 条目变化时就地作废，否则栏再出现前滚动补偿一直被它挡住。
         self.hovered_grouping_rail_pane = None;
@@ -562,50 +552,27 @@ impl FileBrowser {
         self.file_drop_layout_stale |= self.file_drop_session.is_some();
     }
 
-    // hover 热路径的 O(1) 查找前提：按需惰性重建索引（导航级一次 O(n)）。
-    pub(super) fn refresh_entry_index(&mut self) {
-        let entries = Arc::clone(&self.tab().entries);
-        let already_valid = self
-            .entry_index
-            .as_ref()
-            .is_some_and(|(indexed, _)| Arc::ptr_eq(indexed, &entries));
-        if already_valid {
-            return;
-        }
-        let index = entries
-            .iter()
-            .enumerate()
-            .map(|(position, entry)| (entry.path().to_path_buf(), position))
-            .collect();
-        self.entry_index = Some((entries, index));
-    }
-
     pub(crate) fn entry_for_path(&self, path: &Path) -> Option<&DirectoryEntry> {
         let tab = self.tab();
-        if let Some((snapshot, index)) = &self.entry_index {
-            if Arc::ptr_eq(snapshot, &tab.entries) {
-                if let Some(position) = index.get(path) {
-                    if let Some(entry) = tab.entries.get(*position) {
-                        return Some(entry);
-                    }
-                }
-            }
-        }
-        // 索引过期或未命中主列表时退回线性查找，保证语义不变。
-        tab.entries
-            .iter()
-            .find(|entry| entry.path() == path)
-            .or_else(|| match tab.view_mode() {
-                BrowserViewMode::Icons => self
-                    .icon_grid_expansion
-                    .as_ref()
-                    .and_then(|state| state.entry(path)),
-                BrowserViewMode::List | BrowserViewMode::Columns => tab
-                    .expanded_directories
-                    .values()
-                    .flat_map(|expanded| expanded.entries.iter())
-                    .find(|entry| entry.path() == path),
-            })
+        pane_entry(
+            &tab.entries,
+            tab.view_mode(),
+            &tab.expanded_directories,
+            self.pane_icon_expansion(self.active_pane_id(), tab.current_directory()),
+            path,
+        )
+    }
+
+    /// 窗格的图标交互展开：展开的正是这个窗格的当前目录时才算它的。
+    pub(crate) fn pane_icon_expansion(
+        &self,
+        pane_id: BrowserPaneId,
+        current_directory: Option<&Path>,
+    ) -> Option<&IconGridExpansionState> {
+        self.icon_grid_expansion.as_ref().filter(|state| {
+            state.context().pane_id == pane_id
+                && current_directory == Some(state.context().current_dir.as_path())
+        })
     }
 
     pub(super) fn entry_kind_recursive(&self, path: &Path) -> Option<FileKind> {
@@ -796,6 +763,7 @@ mod tests {
     use file_core::{
         discover_directory_with_progress, DirectoryMetadataAvailability, EntryMetadata, ScanOptions,
     };
+    use std::sync::Arc;
 
     use super::*;
     use crate::model::ExpandedDirectoryStatus;
@@ -878,7 +846,7 @@ mod tests {
             height: 10.0 * crate::list_view::LIST_ROW_HEIGHT,
         };
         browser.pane_mut().list_viewport = Some(viewport);
-        let previous_entries = Arc::clone(&browser.tab().entries);
+        let previous_entries = browser.tab().entries.clone();
         let expected_range = crate::visible_entries::list_entry_range_for_viewport(
             &previous_entries,
             &browser.tab().expanded_directories,
@@ -968,7 +936,7 @@ mod tests {
         tab.expanded_directories.insert(
             project.path().to_path_buf(),
             ExpandedDirectory {
-                entries: Vec::new(),
+                entries: Default::default(),
                 directory_discovery: None,
                 status: ExpandedDirectoryStatus::Error,
                 is_expanded: true,

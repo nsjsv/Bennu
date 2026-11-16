@@ -553,7 +553,7 @@ mod tests {
 
     fn expanded(entries: Vec<DirectoryEntry>, is_expanded: bool) -> ExpandedDirectory {
         ExpandedDirectory {
-            entries,
+            entries: entries.into(),
             directory_discovery: None,
             status: ExpandedDirectoryStatus::Loaded,
             is_expanded,
@@ -713,7 +713,7 @@ mod tests {
         let expanded_directories = HashMap::from([(
             directory.path().to_path_buf(),
             ExpandedDirectory {
-                entries: vec![child],
+                entries: vec![child].into(),
                 directory_discovery: None,
                 status: ExpandedDirectoryStatus::Loaded,
                 is_expanded: false,
@@ -745,7 +745,7 @@ mod tests {
         let expanded_directories = HashMap::from([(
             directory.path().to_path_buf(),
             ExpandedDirectory {
-                entries: vec![child],
+                entries: vec![child].into(),
                 directory_discovery: None,
                 status: ExpandedDirectoryStatus::Loading,
                 is_expanded: true,
@@ -775,7 +775,7 @@ mod tests {
         let expanded_directories = HashMap::from([(
             directory.path().to_path_buf(),
             ExpandedDirectory {
-                entries: vec![child],
+                entries: vec![child].into(),
                 directory_discovery: None,
                 status: ExpandedDirectoryStatus::Loading,
                 is_expanded: true,
@@ -810,7 +810,7 @@ mod tests {
         let expanded_directories = HashMap::from([(
             directory.path().to_path_buf(),
             ExpandedDirectory {
-                entries: vec![child.clone()],
+                entries: vec![child.clone()].into(),
                 directory_discovery: None,
                 status: ExpandedDirectoryStatus::Loaded,
                 is_expanded: true,

@@ -9,11 +9,12 @@ use super::panes::BrowserPaneView;
 use super::{FileBrowser, DOUBLE_CLICK_THRESHOLD};
 
 use crate::model::{
-    file_grouping_entry_visible, BrowserLocation, BrowserPaneId, BrowserViewMode, ContextMenuState,
-    FileContextMenuExpansion, FileContextMenuState, FileDeleteAction, FileDragSpringSource,
-    FileDragStationaryAction, FileDropTarget, FileMenuPlace, LastActivationClick, Message,
+    file_grouping_entry_visible, pane_entry, BrowserLocation, BrowserPaneId, BrowserViewMode,
+    ContextMenuState, FileContextMenuExpansion, FileContextMenuState, FileDeleteAction,
+    FileDragSpringSource, FileDragStationaryAction, FileDropTarget, FileMenuPlace,
+    LastActivationClick, Message,
 };
-use crate::selection_summary::{summarize_selected_entries, PaneSelectionSummary};
+use crate::selection_summary::{summarize_entries, PaneSelectionSummary};
 
 #[cfg(test)]
 mod activation_tests;
@@ -34,6 +35,8 @@ mod file_drop_target;
 mod keyboard_navigation;
 mod marquee;
 mod media_next;
+#[cfg(test)]
+mod summary_tests;
 // spring_open 的 tick 间隔常量由 app.rs 的 subscription 引用。
 pub(super) mod spring_open;
 #[cfg(test)]
@@ -184,8 +187,6 @@ impl FileBrowser {
     }
 
     pub(super) fn handle_entry_hovered(&mut self, path: PathBuf) -> Task<Message> {
-        // hover 是鼠标移动热路径：先保证条目索引可用，避免每次悬停线性扫描。
-        self.refresh_entry_index();
         self.hovered_entry = Some(path.clone());
         self.set_cursor_paste_directory(self.entry_parent_directory(&path));
         if self.file_drag.is_some() {
@@ -864,49 +865,25 @@ impl FileBrowser {
         paths
     }
 
-    /// 窗格底部选中统计。候选条目与各视图的操作可见集同源:
-    /// 列表/多栏取直接条目+展开子条目,图标取直接条目+交互展开子条目,
-    /// 保证底栏数字与删除/复制等操作作用范围一致。
+    /// 窗格底部选中统计。按选中路径去找条目,范围与各视图的操作可见集同源:
+    /// 列表/多栏是直接条目+展开子条目,图标是直接条目+交互展开子条目,
+    /// 保证底栏数字与删除/复制等操作作用范围一致;已离开窗格的选中路径不计。
     pub(crate) fn pane_selection_summary(
         &self,
         pane: BrowserPaneView<'_>,
     ) -> Option<PaneSelectionSummary> {
-        if pane.selected_paths.is_empty() {
-            return None;
-        }
-
-        let mut summary =
-            summarize_selected_entries(pane.entries.iter(), pane.selected_paths, |entry| {
-                pane.metadata_for_entry(entry).len
-            });
-        match pane.view_mode {
-            BrowserViewMode::Icons => {
-                if let Some(expansion) = self.icon_grid_expansion.as_ref().filter(|state| {
-                    state.context().pane_id == pane.id
-                        && pane.current_directory() == Some(state.context().current_dir.as_path())
-                }) {
-                    let selected_children = pane
-                        .selected_paths
-                        .iter()
-                        .filter(|path| path.parent() != pane.current_directory())
-                        .filter_map(|path| expansion.entry(path));
-                    summary.merge(summarize_selected_entries(
-                        selected_children,
-                        pane.selected_paths,
-                        |entry| pane.metadata_for_entry(entry).len,
-                    ));
-                }
-            }
-            BrowserViewMode::Columns | BrowserViewMode::List => {
-                summary.merge(summarize_selected_entries(
-                    pane.expanded_directories
-                        .values()
-                        .flat_map(|expanded| expanded.entries.iter()),
-                    pane.selected_paths,
-                    |entry| pane.metadata_for_entry(entry).len,
-                ));
-            }
-        }
+        let icon_expansion = self.pane_icon_expansion(pane.id, pane.current_directory());
+        let selected_entries = pane.selected_paths.iter().filter_map(|path| {
+            pane_entry(
+                pane.entries,
+                pane.view_mode,
+                pane.expanded_directories,
+                icon_expansion,
+                path,
+            )
+        });
+        let summary =
+            summarize_entries(selected_entries, |entry| pane.metadata_for_entry(entry).len);
         (!summary.is_empty()).then_some(summary)
     }
 

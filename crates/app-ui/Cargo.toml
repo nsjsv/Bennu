@@ -19,6 +19,7 @@ desktop-linux = { path = "../desktop-linux" }
 file-core = { path = "../file-core" }
 file-operations = { path = "../file-operations" }
 file-search = { path = "../file-search" }
+hashbrown = { version = "0.16", default-features = false, features = ["default-hasher"] }
 bennu-state = { path = "../bennu-state" }
 iced.workspace = true
 image.workspace = true

@@ -910,7 +910,7 @@ impl FileBrowser {
         }
 
         let mut expanded = ExpandedDirectory {
-            entries: Vec::new(),
+            entries: Default::default(),
             directory_discovery: None,
             status: ExpandedDirectoryStatus::Loading,
             is_expanded: true,
@@ -1044,7 +1044,7 @@ fn list_directory_is_followable(expanded: &ExpandedDirectory) -> bool {
 
 fn loading_list_directory() -> ExpandedDirectory {
     ExpandedDirectory {
-        entries: Vec::new(),
+        entries: Default::default(),
         directory_discovery: None,
         status: ExpandedDirectoryStatus::Loading,
         is_expanded: true,

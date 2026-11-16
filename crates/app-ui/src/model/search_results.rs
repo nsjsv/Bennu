@@ -2,7 +2,6 @@
 //! 文件处理），条目装不下的摘要与高亮记在搜索状态的详情里，两边在这里一起变。
 
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use file_core::{DirectoryEntry, DirectoryMetadataAvailability, EntryMetadata, FileKind};
@@ -122,7 +121,9 @@ impl BrowserTab {
             return false;
         }
         search.details.retain(|path, _| !is_removed(path));
-        Arc::make_mut(&mut self.entries).retain(|entry| !is_removed(entry.path()));
+        self.entries
+            .make_mut()
+            .retain(|entry| !is_removed(entry.path()));
         self.retain_direct_entry_selection();
         true
     }
@@ -135,7 +136,7 @@ impl BrowserTab {
         };
         search.root.migrate_origin(migrations);
         let mut moved = Vec::new();
-        for entry in Arc::make_mut(&mut self.entries) {
+        for entry in self.entries.make_mut() {
             let migrated = path_after_completed_migrations(entry.path(), migrations);
             if migrated == entry.path() {
                 continue;
@@ -164,7 +165,7 @@ impl BrowserTab {
     }
 
     fn clear_search_entries(&mut self) {
-        Arc::make_mut(&mut self.entries).clear();
+        self.entries.make_mut().clear();
         self.clear_selection();
         self.directory_collection_phase = DirectoryCollectionPhase::Ready;
     }
@@ -182,7 +183,7 @@ impl BrowserTab {
             search.details.clear();
         }
         search.remember_details(&hits, &display_names);
-        let listing = Arc::make_mut(&mut self.entries);
+        let listing = self.entries.make_mut();
         if placement == SearchHitsPlacement::Replace {
             listing.clear();
         }

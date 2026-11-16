@@ -25,7 +25,7 @@ fn directory_entry(path: &str) -> DirectoryEntry {
 
 fn loading_expanded_directory(load_cancel: CancellationToken) -> ExpandedDirectory {
     ExpandedDirectory {
-        entries: Vec::new(),
+        entries: Default::default(),
         directory_discovery: None,
         status: ExpandedDirectoryStatus::Loading,
         is_expanded: true,

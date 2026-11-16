@@ -9,8 +9,8 @@ use super::FileBrowser;
 use crate::model::{
     displayed_address_directory, AddressEditingSession, BrowserLocation, BrowserPane,
     BrowserPaneId, BrowserPaneLayout, BrowserTab, BrowserViewMode, DirectoryCollectionPhase,
-    DirectoryLoadingPlaceholder, ExpandedDirectory, FileDragState, IconGridViewport, SplitAxis,
-    SplitRegion,
+    DirectoryEntrySnapshot, DirectoryLoadingPlaceholder, ExpandedDirectory, FileDragState,
+    IconGridViewport, SplitAxis, SplitRegion,
 };
 use crate::thumbnail_cache::ColumnViewport;
 use file_operations::RenameRejection;
@@ -27,7 +27,7 @@ pub(crate) enum DirectoryContentAvailability<'a> {
 pub(crate) struct BrowserPaneView<'a> {
     pub(crate) id: BrowserPaneId,
     pub(crate) location: &'a BrowserLocation,
-    pub(crate) entries: &'a [DirectoryEntry],
+    pub(crate) entries: &'a DirectoryEntrySnapshot,
     pub(crate) directory_discovery: Option<&'a DirectoryDiscovery>,
     pub(crate) directory_loading_placeholder: Option<&'a DirectoryLoadingPlaceholder>,
     pub(crate) selected: Option<&'a PathBuf>,
@@ -451,7 +451,6 @@ impl FileBrowser {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use file_core::{DirectoryEntry, EntryMetadata, FileKind};
 
@@ -462,7 +461,7 @@ mod tests {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
         let pane_id = browser.active_pane_id();
 
-        Arc::make_mut(&mut browser.tab_mut().entries).clear();
+        browser.tab_mut().entries.make_mut().clear();
         browser.tab_mut().directory_collection_phase =
             crate::model::DirectoryCollectionPhase::Discovering;
         assert!(matches!(
@@ -486,14 +485,18 @@ mod tests {
 
         browser.tab_mut().directory_collection_phase =
             crate::model::DirectoryCollectionPhase::Discovering;
-        Arc::make_mut(&mut browser.tab_mut().entries).push(DirectoryEntry::new(
-            PathBuf::from("/streamed.txt"),
-            FileKind::File,
-            EntryMetadata::default(),
-            false,
-            false,
-            false,
-        ));
+        browser
+            .tab_mut()
+            .entries
+            .make_mut()
+            .push(DirectoryEntry::new(
+                PathBuf::from("/streamed.txt"),
+                FileKind::File,
+                EntryMetadata::default(),
+                false,
+                false,
+                false,
+            ));
         let DirectoryContentAvailability::Available(entries) = browser
             .pane_view(pane_id)
             .expect("active pane")
@@ -514,14 +517,15 @@ mod tests {
             .panes
             .push(BrowserPane::new(second_pane_id, second_tab));
         browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/first"));
-        browser.tab_mut().entries = Arc::new(vec![DirectoryEntry::new(
+        browser.tab_mut().entries = vec![DirectoryEntry::new(
             PathBuf::from("/first/a.txt"),
             FileKind::File,
             EntryMetadata::default(),
             false,
             false,
             false,
-        )]);
+        )]
+        .into();
 
         // 没有任何同步调用：活动窗格的视图、访问器和窗格表读到的是同一份。
         let active = browser.pane_view(browser.active_pane_id()).expect("active");
@@ -530,10 +534,10 @@ mod tests {
             &PathBuf::from("/first")
         );
         assert_eq!(active.entries.len(), 1);
-        assert!(Arc::ptr_eq(
-            &browser.tab().entries,
-            &browser.panes[0].tabs[0].entries
-        ));
+        assert!(browser
+            .tab()
+            .entries
+            .shares_entries_with(&browser.panes[0].tabs[0].entries));
 
         let inactive = browser.pane_view(second_pane_id).expect("inactive");
         assert_eq!(

@@ -560,7 +560,7 @@ mod tests {
 
     fn loading_expanded_directory(pane_id: BrowserPaneId, generation: u64) -> ExpandedDirectory {
         ExpandedDirectory {
-            entries: Vec::new(),
+            entries: Default::default(),
             directory_discovery: None,
             status: ExpandedDirectoryStatus::Loading,
             is_expanded: true,

@@ -138,7 +138,6 @@ impl FileBrowser {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
-    use std::sync::Arc;
 
     use file_core::{DirectoryEntry, EntryMetadata, FileKind};
 
@@ -168,10 +167,11 @@ mod tests {
         let pane_id = BrowserPaneId::PRIMARY;
         browser.tab_mut().choose_view_mode(BrowserViewMode::List);
         browser.tab_mut().location = BrowserLocation::Directory(root.clone());
-        browser.tab_mut().entries = Arc::new(vec![
+        browser.tab_mut().entries = vec![
             file_entry("/workspace/a.txt"),
             file_entry("/workspace/z.txt"),
-        ]);
+        ]
+        .into();
         browser.user_config.file_grouping = FileGroupingMode::NameInitial;
         (browser, root, pane_id)
     }

@@ -290,11 +290,11 @@ impl IconGridExpansionState {
     }
 
     pub(crate) fn entry(&self, path: &Path) -> Option<&DirectoryEntry> {
-        self.directories
-            .iter()
-            .filter(|(directory, _)| self.node_is_interactive(directory))
-            .flat_map(|(_, expanded)| expanded.contents.entries.iter())
-            .find(|entry| entry.path() == path)
+        let directory = path.parent()?;
+        if !self.node_is_interactive(directory) {
+            return None;
+        }
+        self.directories.get(directory)?.contents.entries.find(path)
     }
 
     fn begin_directory_close(&mut self, path: &Path) -> Vec<PathBuf> {
@@ -675,7 +675,7 @@ impl IconGridExpansionState {
                 directory.cancel_pending_load();
                 directory.parent_directory =
                     path_after_completed_migrations(&directory.parent_directory, migrations);
-                migrate_directory_entries(&mut directory.contents.entries, migrations);
+                migrate_directory_entries(directory.contents.entries.make_mut(), migrations);
                 (
                     path_after_completed_migrations(&path, migrations),
                     directory,

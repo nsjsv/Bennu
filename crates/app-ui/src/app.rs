@@ -153,8 +153,8 @@ use crate::model::{
     AdvancedNewFolderAfter, AdvancedNewFolderState, ApplicationLogViewState, BatchRenameState,
     BreadcrumbDropTargetBounds, BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab,
     ColumnEntryBounds, ContextMenuSettingsDragState, ContextMenuSettingsPage, ContextMenuState,
-    DestructiveActionConfirmation, DirectoryEntrySnapshot, DirectoryOrderPhase, FileAreaMenuItem,
-    FileDragSpringHover, FileDragState, FileDropPrompt, FileDropSessionState, FilePropertiesState,
+    DestructiveActionConfirmation, DirectoryOrderPhase, FileAreaMenuItem, FileDragSpringHover,
+    FileDragState, FileDropPrompt, FileDropSessionState, FilePropertiesState,
     IconGridExpansionState, IconGridViewport, ListColumnKind, Message, PaneAddressBarTransition,
     PaneAddressEditingSession, PaneDragPointerPress, PaneDragState, PendingOperation, PreviewState,
     PreviewWindowProfile, SearchServiceState, SelectionMarquee, SettingsCategory, SettingsSubpage,
@@ -189,9 +189,6 @@ struct DirectoryMetadataDemandKey {
 
 pub(crate) struct FileBrowser {
     pub(crate) home_dir: PathBuf,
-    /// 活动标签主列表的条目索引缓存（hover 热路径 O(1) 查找）。以快照指针
-    /// 校验有效性；原地改写条目的路径必须自己清空它。
-    entry_index: Option<(DirectoryEntrySnapshot, HashMap<PathBuf, usize>)>,
     pub(crate) trash_refresh: TrashRefreshState,
     /// 回收站批量任务运行期间,watcher 触发的回收站重扫被挂起,只置此标记;
     /// 批量任务终结时统一补刷一次,避免逐条全量重扫的平方级风暴。
@@ -599,7 +596,6 @@ impl FileBrowser {
         let initial_pane = BrowserPane::new(BrowserPaneId::PRIMARY, initial_tab);
         let mut browser = Self {
             home_dir: placeholder_dir,
-            entry_index: None,
             trash_refresh: TrashRefreshState::default(),
             trash_batch_rescan_pending: false,
             hovered_entry: None,

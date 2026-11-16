@@ -99,7 +99,7 @@ pub(super) fn files(directory: &str, count: usize) -> Vec<DirectoryEntry> {
 
 pub(super) fn loaded(entries: Vec<DirectoryEntry>) -> ExpandedDirectory {
     ExpandedDirectory {
-        entries,
+        entries: entries.into(),
         directory_discovery: None,
         status: ExpandedDirectoryStatus::Loaded,
         is_expanded: true,

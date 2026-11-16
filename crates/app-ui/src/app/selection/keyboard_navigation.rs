@@ -430,7 +430,7 @@ impl FileBrowser {
         }
 
         let mut expanded = ExpandedDirectory {
-            entries: Vec::new(),
+            entries: Default::default(),
             directory_discovery: None,
             status: ExpandedDirectoryStatus::Loading,
             is_expanded: true,
@@ -726,7 +726,7 @@ mod tests {
         animation_progress: f32,
     ) -> ExpandedDirectory {
         ExpandedDirectory {
-            entries,
+            entries: entries.into(),
             directory_discovery: None,
             status: ExpandedDirectoryStatus::Loaded,
             is_expanded: true,

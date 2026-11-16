@@ -54,12 +54,12 @@ mod entry_naming;
 pub(crate) use entry_naming::invalid_entry_name_label;
 mod browser_panes;
 pub(crate) use browser_panes::{
-    empty_directory_entry_snapshot, BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab,
-    BrowserViewMode, ColumnBrowserViewport, DirectoryCollectionPhase, DirectoryEntrySnapshot,
-    DirectoryExpansionLoadContext, DirectoryLoadFailure, DirectoryLoadRequest,
-    DirectoryLoadingPlaceholder, DirectoryLoadingPlaceholderEntry, DirectoryMetadataLoadContext,
-    DirectoryMetadataLoadFailure, DirectoryMetadataLoadRequest, DirectoryOrderPhase,
-    ExpandedDirectory, ExpandedDirectoryLoadRequest, ExpandedDirectoryStatus,
+    empty_directory_entry_snapshot, pane_entry, BrowserPane, BrowserPaneId, BrowserPaneLayout,
+    BrowserTab, BrowserViewMode, ColumnBrowserViewport, DirectoryCollectionPhase,
+    DirectoryEntrySnapshot, DirectoryExpansionLoadContext, DirectoryLoadFailure,
+    DirectoryLoadRequest, DirectoryLoadingPlaceholder, DirectoryLoadingPlaceholderEntry,
+    DirectoryMetadataLoadContext, DirectoryMetadataLoadFailure, DirectoryMetadataLoadRequest,
+    DirectoryOrderPhase, ExpandedDirectory, ExpandedDirectoryLoadRequest, ExpandedDirectoryStatus,
     IconGridExpansionSessionId, IconGridViewport, ListExpansionFollowSessionId, SplitAxis,
     SplitRegion,
 };
@@ -293,12 +293,12 @@ pub(crate) struct LoadedOperationStore {
 // update 线程只做整体替换——目录提交路径不在 UI 线程逐条深拷贝。
 pub(crate) struct PrebuiltDirectoryDiscovery {
     pub(crate) discovery: DirectoryDiscovery,
-    pub(crate) display_entries: std::sync::Arc<Vec<DirectoryEntry>>,
+    pub(crate) display_entries: DirectoryEntrySnapshot,
 }
 
 impl PrebuiltDirectoryDiscovery {
     pub(crate) fn build(discovery: DirectoryDiscovery) -> Self {
-        let display_entries = std::sync::Arc::new(display_entries_in_discovery_order(&discovery));
+        let display_entries = display_entries_in_discovery_order(&discovery).into();
         Self {
             discovery,
             display_entries,

@@ -410,7 +410,7 @@ fn restored_column_chain_directories(current_dir: &Path, open_directory: &Path) 
 
 fn restored_expanded_directory() -> ExpandedDirectory {
     ExpandedDirectory {
-        entries: Vec::new(),
+        entries: Default::default(),
         directory_discovery: None,
         status: ExpandedDirectoryStatus::Loading,
         is_expanded: true,

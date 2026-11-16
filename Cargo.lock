@@ -153,6 +153,7 @@ dependencies = [
  "file-core",
  "file-operations",
  "file-search",
+ "hashbrown 0.16.1",
  "iced",
  "iced_runtime",
  "image",

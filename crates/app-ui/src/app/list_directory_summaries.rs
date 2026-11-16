@@ -1,7 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use file_core::{
     DirectoryEntry, DirectoryMetadataAvailability, EntryMetadata, FileKind, ScanOptions,
@@ -50,7 +49,7 @@ impl FileBrowser {
                 continue;
             }
             resort_list_state_by_displayed_size(
-                Arc::make_mut(&mut tab.entries),
+                tab.entries.make_mut(),
                 &mut tab.expanded_directories,
                 &self.list_directory_summary_cache,
                 display_mode,
@@ -501,7 +500,7 @@ fn resort_entry_tree_by_displayed_size(
             continue;
         };
         resort_entry_tree_by_displayed_size(
-            &mut expanded.entries,
+            expanded.entries.make_mut(),
             expanded_directories,
             loaded_child_counts,
             summary_cache,

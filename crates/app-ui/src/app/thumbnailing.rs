@@ -227,8 +227,6 @@ impl FileBrowser {
     }
 
     fn schedule_interaction_thumbnails(&mut self) {
-        // hover/选中缩略图调度走条目索引查找：先保证索引可用。
-        self.refresh_entry_index();
         if self
             .pane_view(self.active_pane_id())
             .is_some_and(|pane| pane.view_mode == BrowserViewMode::Icons)

@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use file_core::{
     discover_directory_with_progress, DirectoryDiscovery, DiscoveredDirectoryEntry,
@@ -67,9 +66,12 @@ async fn added_entries_land_in_sorted_position() {
     browser.tab_mut().location = BrowserLocation::Directory(workspace.path().to_path_buf());
     browser.tab_mut().directory_discovery = Some(discovery_for(workspace.path()).await);
     browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Ready;
-    browser.set_entries(Arc::new(crate::model::display_entries_in_discovery_order(
-        browser.tab().directory_discovery.as_ref().unwrap(),
-    )));
+    browser.set_entries(
+        crate::model::display_entries_in_discovery_order(
+            browser.tab().directory_discovery.as_ref().unwrap(),
+        )
+        .into(),
+    );
 
     std::fs::write(workspace.path().join("b.txt"), b"b").unwrap();
     let change = added(workspace.path().join("b.txt"));
@@ -97,9 +99,12 @@ async fn removed_entries_drop_out_and_clear_selection() {
     browser.tab_mut().choose_view_mode(BrowserViewMode::List);
     browser.tab_mut().directory_discovery = Some(discovery_for(workspace.path()).await);
     browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Ready;
-    browser.set_entries(Arc::new(crate::model::display_entries_in_discovery_order(
-        browser.tab().directory_discovery.as_ref().unwrap(),
-    )));
+    browser.set_entries(
+        crate::model::display_entries_in_discovery_order(
+            browser.tab().directory_discovery.as_ref().unwrap(),
+        )
+        .into(),
+    );
     let removed_path = workspace.path().join("a.txt");
     browser.select_path(removed_path.clone());
 
@@ -123,9 +128,12 @@ async fn same_directory_rename_moves_entry_in_place() {
     browser.tab_mut().location = BrowserLocation::Directory(workspace.path().to_path_buf());
     browser.tab_mut().directory_discovery = Some(discovery_for(workspace.path()).await);
     browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Ready;
-    browser.set_entries(Arc::new(crate::model::display_entries_in_discovery_order(
-        browser.tab().directory_discovery.as_ref().unwrap(),
-    )));
+    browser.set_entries(
+        crate::model::display_entries_in_discovery_order(
+            browser.tab().directory_discovery.as_ref().unwrap(),
+        )
+        .into(),
+    );
 
     let from = workspace.path().join("old.txt");
     let to = workspace.path().join("new.txt");
@@ -191,7 +199,7 @@ async fn cross_directory_move_updates_both_expanded_lists_without_trespass() {
 
 fn expanded_loaded(discovery: DirectoryDiscovery) -> crate::model::ExpandedDirectory {
     crate::model::ExpandedDirectory {
-        entries: crate::model::display_entries_in_discovery_order(&discovery),
+        entries: crate::model::display_entries_in_discovery_order(&discovery).into(),
         directory_discovery: Some(discovery),
         status: crate::model::ExpandedDirectoryStatus::Loaded,
         is_expanded: true,
@@ -215,9 +223,12 @@ async fn hidden_additions_are_ignored_when_hidden_files_are_excluded() {
     browser.tab_mut().location = BrowserLocation::Directory(workspace.path().to_path_buf());
     browser.tab_mut().directory_discovery = Some(discovery_for(workspace.path()).await);
     browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Ready;
-    browser.set_entries(Arc::new(crate::model::display_entries_in_discovery_order(
-        browser.tab().directory_discovery.as_ref().unwrap(),
-    )));
+    browser.set_entries(
+        crate::model::display_entries_in_discovery_order(
+            browser.tab().directory_discovery.as_ref().unwrap(),
+        )
+        .into(),
+    );
 
     std::fs::write(workspace.path().join(".hidden"), b"h").unwrap();
     let change = added(workspace.path().join(".hidden"));
@@ -279,9 +290,12 @@ async fn transfer_reconciliation_requires_source_gone_and_target_visible() {
     browser.tab_mut().location = BrowserLocation::Directory(workspace.path().to_path_buf());
     browser.tab_mut().directory_discovery = Some(discovery_for(workspace.path()).await);
     browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Ready;
-    browser.set_entries(Arc::new(crate::model::display_entries_in_discovery_order(
-        browser.tab().directory_discovery.as_ref().unwrap(),
-    )));
+    browser.set_entries(
+        crate::model::display_entries_in_discovery_order(
+            browser.tab().directory_discovery.as_ref().unwrap(),
+        )
+        .into(),
+    );
 
     let moved_out = workspace.path().join("kept.txt");
     let moved_in = workspace.path().join("fresh.txt");
@@ -318,9 +332,12 @@ async fn split_browser_with_panes(active_dir: &Path, inactive_dir: &Path) -> Fil
     browser.tab_mut().location = BrowserLocation::Directory(active_dir.to_path_buf());
     browser.tab_mut().directory_discovery = Some(discovery_for(active_dir).await);
     browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Ready;
-    browser.set_entries(Arc::new(crate::model::display_entries_in_discovery_order(
-        browser.tab().directory_discovery.as_ref().unwrap(),
-    )));
+    browser.set_entries(
+        crate::model::display_entries_in_discovery_order(
+            browser.tab().directory_discovery.as_ref().unwrap(),
+        )
+        .into(),
+    );
 
     let mut inactive_tab = BrowserTab::directory(1, inactive_dir.to_path_buf());
     inactive_tab.directory_discovery = Some(discovery_for(inactive_dir).await);
@@ -557,9 +574,12 @@ async fn incremental_removals_reclamp_a_viewport_left_past_the_content() {
     browser.tab_mut().choose_view_mode(BrowserViewMode::List);
     browser.tab_mut().directory_discovery = Some(discovery_for(workspace.path()).await);
     browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Ready;
-    browser.set_entries(Arc::new(crate::model::display_entries_in_discovery_order(
-        browser.tab().directory_discovery.as_ref().unwrap(),
-    )));
+    browser.set_entries(
+        crate::model::display_entries_in_discovery_order(
+            browser.tab().directory_discovery.as_ref().unwrap(),
+        )
+        .into(),
+    );
     browser.pane_mut().list_viewport = Some(ColumnViewport {
         offset_y: 22000.0,
         height: 800.0,
@@ -738,7 +758,7 @@ async fn changes_during_an_expanded_directory_scan_are_applied_after_it_lands() 
     let snapshot = discovery_for(&child).await;
     let mut expanded = expanded_loaded(snapshot.clone());
     expanded.status = ExpandedDirectoryStatus::Loading;
-    expanded.entries.clear();
+    expanded.entries = Default::default();
     expanded.directory_discovery = None;
     let (request, _cancel) = FileBrowser::next_expanded_directory_load_request(
         DirectoryExpansionLoadContext::BrowserTree {
@@ -779,9 +799,12 @@ async fn ready_browser_at(directory: &Path) -> FileBrowser {
     browser.tab_mut().location = BrowserLocation::Directory(directory.to_path_buf());
     browser.tab_mut().directory_discovery = Some(discovery_for(directory).await);
     browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Ready;
-    browser.set_entries(Arc::new(crate::model::display_entries_in_discovery_order(
-        browser.tab().directory_discovery.as_ref().unwrap(),
-    )));
+    browser.set_entries(
+        crate::model::display_entries_in_discovery_order(
+            browser.tab().directory_discovery.as_ref().unwrap(),
+        )
+        .into(),
+    );
     browser
 }
 

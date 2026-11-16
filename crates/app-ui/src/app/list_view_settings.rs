@@ -324,7 +324,7 @@ mod tests {
 
     fn loaded_directory(entries: Vec<DirectoryEntry>) -> ExpandedDirectory {
         ExpandedDirectory {
-            entries,
+            entries: entries.into(),
             directory_discovery: None,
             status: ExpandedDirectoryStatus::Loaded,
             is_expanded: true,

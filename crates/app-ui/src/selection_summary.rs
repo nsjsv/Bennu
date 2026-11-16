@@ -1,6 +1,3 @@
-use std::collections::HashSet;
-use std::path::PathBuf;
-
 use file_core::{DirectoryEntry, FileKind};
 
 /// 窗格底部选中统计:文件夹只计数量,大小只累加非文件夹条目。
@@ -15,12 +12,6 @@ impl PaneSelectionSummary {
     pub(crate) fn is_empty(&self) -> bool {
         self.directory_count == 0 && self.file_count == 0
     }
-
-    pub(crate) fn merge(&mut self, other: Self) {
-        self.directory_count += other.directory_count;
-        self.file_count += other.file_count;
-        self.file_total_bytes += other.file_total_bytes;
-    }
 }
 
 /// 底部工具栏单窗格状态:选中统计(无选中为空)+ 当前目录可见文件总大小。
@@ -33,20 +24,14 @@ pub(crate) struct PaneStatusStripEntry {
     pub(crate) hidden_entry_count: Option<usize>,
 }
 
-/// 聚合候选条目中被选中的部分。候选集必须与窗格可见条目同源,
-/// 已失效的选中路径(条目离开窗格)自然落空,不进入统计。
-/// 大小经由 display_len 取 UI 权威值(基础扫描阶段 len 尚未补全,
+/// 统计选中的条目。大小经由 display_len 取 UI 权威值(基础扫描阶段 len 尚未补全,
 /// 列表大小列用的 discovery 元数据才是真实大小)。
-pub(crate) fn summarize_selected_entries<'a>(
-    candidates: impl Iterator<Item = &'a DirectoryEntry>,
-    selected_paths: &HashSet<PathBuf>,
+pub(crate) fn summarize_entries<'a>(
+    selected_entries: impl Iterator<Item = &'a DirectoryEntry>,
     display_len: impl Fn(&DirectoryEntry) -> u64,
 ) -> PaneSelectionSummary {
     let mut summary = PaneSelectionSummary::default();
-    for entry in candidates {
-        if !selected_paths.contains(entry.path()) {
-            continue;
-        }
+    for entry in selected_entries {
         match entry.kind {
             FileKind::Directory => summary.directory_count += 1,
             FileKind::File | FileKind::Symlink | FileKind::Other => {
@@ -82,19 +67,13 @@ mod tests {
 
     #[test]
     fn counts_directories_separately_and_sums_only_file_sizes() {
-        let candidates = [
+        let selected = [
             entry("/dir/a", FileKind::Directory, 4096),
             entry("/dir/b.txt", FileKind::File, 100),
-            entry("/dir/c.txt", FileKind::File, 23),
             entry("/dir/d", FileKind::Directory, 4096),
         ];
-        let mut selected = HashSet::new();
-        selected.insert(PathBuf::from("/dir/a"));
-        selected.insert(PathBuf::from("/dir/b.txt"));
-        selected.insert(PathBuf::from("/dir/d"));
 
-        let summary =
-            summarize_selected_entries(candidates.iter(), &selected, |entry| entry.metadata.len);
+        let summary = summarize_entries(selected.iter(), |entry| entry.metadata.len);
 
         assert_eq!(summary.directory_count, 2);
         assert_eq!(summary.file_count, 1);
@@ -102,41 +81,20 @@ mod tests {
     }
 
     #[test]
-    fn selected_paths_missing_from_candidates_do_not_count() {
-        let candidates = [entry("/dir/a.txt", FileKind::File, 100)];
-        let mut selected = HashSet::new();
-        selected.insert(PathBuf::from("/dir/a.txt"));
-        selected.insert(PathBuf::from("/dir/gone.txt"));
-
-        let summary =
-            summarize_selected_entries(candidates.iter(), &selected, |entry| entry.metadata.len);
-
-        assert_eq!(summary.file_count, 1);
-        assert_eq!(summary.file_total_bytes, 100);
-    }
-
-    #[test]
     fn sizes_come_from_display_len_provider_not_raw_metadata() {
         // 基础扫描阶段 metadata.len 为 0,权威大小由 discovery 元数据提供。
-        let candidates = [entry("/dir/a.mp4", FileKind::File, 0)];
-        let mut selected = HashSet::new();
-        selected.insert(PathBuf::from("/dir/a.mp4"));
+        let selected = [entry("/dir/a.mp4", FileKind::File, 0)];
 
-        let summary =
-            summarize_selected_entries(candidates.iter(), &selected, |entry| entry.metadata.len);
+        let summary = summarize_entries(selected.iter(), |entry| entry.metadata.len);
         assert_eq!(summary.file_total_bytes, 0);
 
-        let summary = summarize_selected_entries(candidates.iter(), &selected, |_| 7_340_032);
+        let summary = summarize_entries(selected.iter(), |_| 7_340_032);
         assert_eq!(summary.file_total_bytes, 7_340_032);
     }
 
     #[test]
     fn empty_selection_yields_empty_summary() {
-        let candidates = [entry("/dir/a.txt", FileKind::File, 100)];
-        let selected = HashSet::new();
-
-        let summary =
-            summarize_selected_entries(candidates.iter(), &selected, |entry| entry.metadata.len);
+        let summary = summarize_entries(std::iter::empty(), |entry| entry.metadata.len);
 
         assert!(summary.is_empty());
     }

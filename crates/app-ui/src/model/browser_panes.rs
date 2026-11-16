@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use file_core::{
     DirectoryDiscovery, DirectoryEntry, ResolvedEntryChange, SortDirection, SortField, TrashEntry,
@@ -19,7 +18,10 @@ use super::path_migration::{
     migrate_directory_entry, migrate_expanded_directories, migrate_optional_path,
     migrate_path_map_keys, migrate_path_set, retain_optional_path_outside_subtree,
 };
-use super::{displayed_address_directory, BrowserLocation, HistoryEntry, TabDropDestination};
+use super::{
+    displayed_address_directory, BrowserLocation, HistoryEntry, IconGridExpansionState,
+    TabDropDestination,
+};
 
 mod load_requests;
 pub(crate) use load_requests::{
@@ -28,10 +30,11 @@ pub(crate) use load_requests::{
     ExpandedDirectoryLoadRequest,
 };
 
-pub(crate) type DirectoryEntrySnapshot = Arc<Vec<DirectoryEntry>>;
+mod entry_snapshot;
+pub(crate) use entry_snapshot::DirectoryEntrySnapshot;
 
 pub(crate) fn empty_directory_entry_snapshot() -> DirectoryEntrySnapshot {
-    Arc::new(Vec::new())
+    DirectoryEntrySnapshot::default()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -384,7 +387,7 @@ impl BrowserPane {
         // request owns the single generation advance for the whole commit batch.
         let tab = self.tab_mut();
         detach_directory_discovery(
-            Arc::make_mut(&mut tab.entries).as_mut_slice(),
+            tab.entries.make_mut().as_mut_slice(),
             &mut tab.directory_discovery,
             &mut tab.directory_order_phase,
         );
@@ -651,11 +654,11 @@ impl BrowserTab {
 
     fn migrate_cached_directory_tree_paths(&mut self, migrations: &[CompletedPathMigration]) {
         detach_directory_discovery(
-            Arc::make_mut(&mut self.entries).as_mut_slice(),
+            self.entries.make_mut().as_mut_slice(),
             &mut self.directory_discovery,
             &mut self.directory_order_phase,
         );
-        migrate_directory_entries(Arc::make_mut(&mut self.entries).as_mut_slice(), migrations);
+        migrate_directory_entries(self.entries.make_mut().as_mut_slice(), migrations);
         migrate_optional_path(&mut self.selected, migrations);
         migrate_path_set(&mut self.selected_paths, migrations);
         migrate_optional_path(&mut self.selection_anchor, migrations);
@@ -675,11 +678,12 @@ impl BrowserTab {
 
     fn discard_unavailable_directory_subtree(&mut self, unavailable_directory: &Path) {
         detach_directory_discovery(
-            Arc::make_mut(&mut self.entries).as_mut_slice(),
+            self.entries.make_mut().as_mut_slice(),
             &mut self.directory_discovery,
             &mut self.directory_order_phase,
         );
-        Arc::make_mut(&mut self.entries)
+        self.entries
+            .make_mut()
             .retain(|entry| !entry.path().starts_with(unavailable_directory));
         retain_optional_path_outside_subtree(&mut self.selected, unavailable_directory);
         self.selected_paths
@@ -705,12 +709,13 @@ impl BrowserTab {
                 .any(|entry| entry.path().starts_with(unavailable_directory))
             {
                 detach_directory_discovery(
-                    &mut expanded_directory.entries,
+                    expanded_directory.entries.make_mut(),
                     &mut expanded_directory.directory_discovery,
                     &mut expanded_directory.directory_order_phase,
                 );
                 expanded_directory
                     .entries
+                    .make_mut()
                     .retain(|entry| !entry.path().starts_with(unavailable_directory));
             }
         }
@@ -727,9 +732,26 @@ impl BrowserTab {
     }
 }
 
+/// 窗格里路径对应的条目：先找直接条目；不在其中时找它父目录展开的那一份——列表、多栏是
+/// `expanded_directories`，图标视图是交互展开的目录。都按路径直接找，与条目总数无关。
+pub(crate) fn pane_entry<'a>(
+    entries: &'a DirectoryEntrySnapshot,
+    view_mode: BrowserViewMode,
+    expanded_directories: &'a HashMap<PathBuf, ExpandedDirectory>,
+    icon_expansion: Option<&'a IconGridExpansionState>,
+    path: &Path,
+) -> Option<&'a DirectoryEntry> {
+    entries.find(path).or_else(|| match view_mode {
+        BrowserViewMode::Icons => icon_expansion?.entry(path),
+        BrowserViewMode::List | BrowserViewMode::Columns => {
+            expanded_directories.get(path.parent()?)?.entries.find(path)
+        }
+    })
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ExpandedDirectory {
-    pub(crate) entries: Vec<DirectoryEntry>,
+    pub(crate) entries: DirectoryEntrySnapshot,
     pub(crate) directory_discovery: Option<DirectoryDiscovery>,
     pub(crate) status: ExpandedDirectoryStatus,
     pub(crate) is_expanded: bool,

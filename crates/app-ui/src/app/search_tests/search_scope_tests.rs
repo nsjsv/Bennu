@@ -50,7 +50,8 @@ fn columns_browser(root: &Path) -> (FileBrowser, PathBuf, PathBuf, PathBuf) {
                 false,
                 false,
                 false,
-            )],
+            )]
+            .into(),
             directory_discovery: None,
             status: ExpandedDirectoryStatus::Loaded,
             is_expanded: true,

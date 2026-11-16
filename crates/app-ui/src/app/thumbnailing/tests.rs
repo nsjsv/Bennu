@@ -157,7 +157,7 @@ fn icons_pane_rejects_thumbnail_results_from_hidden_persistent_expansions() {
     tab.expanded_directories.insert(
         PathBuf::from("/inactive/hidden"),
         ExpandedDirectory {
-            entries: vec![image_entry],
+            entries: vec![image_entry].into(),
             directory_discovery: None,
             status: ExpandedDirectoryStatus::Loaded,
             is_expanded: true,
@@ -251,7 +251,7 @@ fn icon_grid_schedules_only_shared_visible_range_at_dynamic_edge() {
     browser.tab_mut().expanded_directories.insert(
         PathBuf::from("/workspace/subdir"),
         ExpandedDirectory {
-            entries: vec![image_entry("/workspace/subdir/hidden.png")],
+            entries: vec![image_entry("/workspace/subdir/hidden.png")].into(),
             directory_discovery: None,
             status: ExpandedDirectoryStatus::Loaded,
             is_expanded: true,
@@ -334,7 +334,7 @@ fn icon_grid_schedules_visible_expansion_thumbnail_requests() {
             index: 0,
         },
         ExpandedDirectory {
-            entries: vec![child_image.clone()],
+            entries: vec![child_image.clone()].into(),
             directory_discovery: None,
             status: ExpandedDirectoryStatus::Loaded,
             is_expanded: true,

@@ -104,11 +104,11 @@ pub(super) fn migrate_expanded_directories(
             }
             directory.status = directory.status.scan_abandoned();
             detach_directory_discovery(
-                &mut directory.entries,
+                directory.entries.make_mut(),
                 &mut directory.directory_discovery,
                 &mut directory.directory_order_phase,
             );
-            migrate_directory_entries(&mut directory.entries, migrations);
+            migrate_directory_entries(directory.entries.make_mut(), migrations);
             Some((
                 path_after_completed_migrations(&path, migrations),
                 directory,

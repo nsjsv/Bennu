@@ -330,7 +330,6 @@ fn container_centered<'a>(
 mod tests {
     use std::collections::HashSet;
     use std::path::{Path, PathBuf};
-    use std::sync::Arc;
 
     use file_core::{DirectoryEntry, EntryMetadata, FileKind};
 
@@ -363,7 +362,7 @@ mod tests {
     fn sync_loads_selected_target_only_while_panel_is_open() {
         let path = PathBuf::from("/workspace/report.txt");
         let mut browser = panel_open_browser();
-        browser.tab_mut().entries = Arc::new(vec![test_file_entry(&path)]);
+        browser.tab_mut().entries = vec![test_file_entry(&path)].into();
         browser.tab_mut().selected = Some(path.clone());
 
         drop(browser.sync_right_preview_panel());
@@ -405,7 +404,7 @@ mod tests {
         // 清空 → 再选中 A”时若只比较路径会误判“已一致”,面板停留在空态。
         let path = PathBuf::from("/workspace/report.txt");
         let mut browser = panel_open_browser();
-        browser.tab_mut().entries = Arc::new(vec![test_file_entry(&path)]);
+        browser.tab_mut().entries = vec![test_file_entry(&path)].into();
         browser.preview_engine.preview_shown_path = Some(path.clone());
         browser.preview_engine.preview = None;
         browser.tab_mut().selected = Some(path.clone());
@@ -424,14 +423,15 @@ mod tests {
         // 信息区仍显示目录条目;目标必须登记,否则每轮 update 重复清空。
         let folder = PathBuf::from("/workspace/Projects");
         let mut browser = panel_open_browser();
-        browser.tab_mut().entries = Arc::new(vec![DirectoryEntry::new(
+        browser.tab_mut().entries = vec![DirectoryEntry::new(
             folder.clone(),
             FileKind::Directory,
             EntryMetadata::default(),
             false,
             false,
             false,
-        )]);
+        )]
+        .into();
         browser.tab_mut().selected = Some(folder.clone());
         browser.preview_engine.preview = Some(PreviewState::Error("previous".to_owned()));
 
@@ -454,7 +454,7 @@ mod tests {
         let folder = PathBuf::from("/workspace/Projects");
         let file = PathBuf::from("/workspace/Projects/main.rs");
         let mut browser = panel_open_browser();
-        browser.tab_mut().entries = Arc::new(vec![
+        browser.tab_mut().entries = vec![
             DirectoryEntry::new(
                 folder.clone(),
                 FileKind::Directory,
@@ -464,7 +464,8 @@ mod tests {
                 false,
             ),
             test_file_entry(&file),
-        ]);
+        ]
+        .into();
         browser.tab_mut().selected = Some(folder);
         drop(browser.sync_right_preview_panel());
         assert!(browser.preview_engine.preview.is_none());
@@ -592,8 +593,7 @@ mod tests {
         let first = PathBuf::from("/workspace/a.txt");
         let second = PathBuf::from("/workspace/b.txt");
         let mut browser = panel_open_browser();
-        browser.tab_mut().entries =
-            Arc::new(vec![test_file_entry(&first), test_file_entry(&second)]);
+        browser.tab_mut().entries = vec![test_file_entry(&first), test_file_entry(&second)].into();
         browser.tab_mut().selected_paths = HashSet::from([first.clone(), second.clone()]);
         browser.tab_mut().selected = Some(second.clone());
 
@@ -608,7 +608,7 @@ mod tests {
         // preview.is_some() 会误判“已显示”而永远打不开独立窗口。
         let path = PathBuf::from("/workspace/report.txt");
         let mut browser = panel_open_browser();
-        browser.tab_mut().entries = Arc::new(vec![test_file_entry(&path)]);
+        browser.tab_mut().entries = vec![test_file_entry(&path)].into();
         browser.tab_mut().selected = Some(path.clone());
         browser.hovered_entry = Some(path.clone());
         drop(browser.sync_right_preview_panel());
@@ -647,7 +647,7 @@ mod tests {
         // 开独立窗口;面板会话(无独立窗口)不被清空,而是切到独立窗口。
         let path = PathBuf::from("/workspace/report.txt");
         let mut browser = panel_open_browser();
-        browser.tab_mut().entries = Arc::new(vec![test_file_entry(&path)]);
+        browser.tab_mut().entries = vec![test_file_entry(&path)].into();
         browser.tab_mut().selected = Some(path.clone());
         browser.preview_engine.preview_shown_path = Some(path.clone());
         browser.preview_engine.preview = Some(PreviewState::Loading(path.clone()));

@@ -68,7 +68,7 @@ fn child_column_preserves_pending_loaded_and_failed_mappings() {
     browser.tab_mut().expanded_directories.insert(
         directory.clone(),
         ExpandedDirectory {
-            entries: Vec::new(),
+            entries: Default::default(),
             directory_discovery: None,
             status: ExpandedDirectoryStatus::Loading,
             is_expanded: true,
@@ -96,6 +96,7 @@ fn child_column_preserves_pending_loaded_and_failed_mappings() {
         .expect("expanded directory");
     expanded
         .entries
+        .make_mut()
         .push(test_entry(directory.join("src"), FileKind::Directory));
     let ColumnContent::Entries(entries) =
         column_content(browser.pane_view(pane_id).expect("active pane"), &directory)
@@ -109,7 +110,7 @@ fn child_column_preserves_pending_loaded_and_failed_mappings() {
         .expanded_directories
         .get_mut(&directory)
         .expect("expanded directory");
-    expanded.entries.clear();
+    expanded.entries = Default::default();
     expanded.status = ExpandedDirectoryStatus::Loaded;
     assert!(matches!(
         column_content(browser.pane_view(pane_id).expect("active pane"), &directory,),

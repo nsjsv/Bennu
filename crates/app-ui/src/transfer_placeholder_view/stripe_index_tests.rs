@@ -6,7 +6,6 @@
 // 不需要为测试拼装真实操作队列任务。
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use file_core::{DirectoryEntry, EntryMetadata, FileKind, SortDirection, SortField};
 
@@ -57,13 +56,13 @@ fn browser_with_entries(
     user_config.file_grouping = grouping;
     let (mut browser, _) = FileBrowser::new(user_config);
     browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
-    browser.tab_mut().entries = Arc::new(entries);
+    browser.tab_mut().entries = entries.into();
     browser
 }
 
 fn expanded(entries: Vec<DirectoryEntry>, status: ExpandedDirectoryStatus) -> ExpandedDirectory {
     ExpandedDirectory {
-        entries,
+        entries: entries.into(),
         directory_discovery: None,
         status,
         is_expanded: true,
@@ -179,7 +178,7 @@ fn expanded_directories_continue_the_visible_row_stripes() {
     ];
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
-    browser.tab_mut().entries = Arc::new(root_children.to_vec());
+    browser.tab_mut().entries = root_children.to_vec().into();
     browser.tab_mut().expanded_directories.insert(
         PathBuf::from("/workspace/project"),
         expanded(
@@ -213,7 +212,7 @@ fn expansion_status_row_consumes_its_own_stripe() {
     ];
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
-    browser.tab_mut().entries = Arc::new(root_children.to_vec());
+    browser.tab_mut().entries = root_children.to_vec().into();
     browser.tab_mut().expanded_directories.insert(
         PathBuf::from("/workspace/project"),
         expanded(Vec::new(), ExpandedDirectoryStatus::Error),

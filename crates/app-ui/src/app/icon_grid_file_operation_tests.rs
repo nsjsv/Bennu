@@ -16,7 +16,7 @@ use file_operations::{FileOperationCompletion, FileOperationOutcome};
 
 fn loaded_directory() -> ExpandedDirectory {
     ExpandedDirectory {
-        entries: Vec::new(),
+        entries: Default::default(),
         directory_discovery: None,
         status: ExpandedDirectoryStatus::Loaded,
         is_expanded: true,
@@ -70,7 +70,8 @@ fn completed_root_rename_migrates_temporary_icon_grid_tree() {
                 false,
                 false,
                 false,
-            )],
+            )]
+            .into(),
             directory_discovery: None,
             status: ExpandedDirectoryStatus::Loaded,
             is_expanded: true,
@@ -187,7 +188,7 @@ fn successful_trash_prunes_deleted_icon_grid_branch_before_reload() {
             index: 0,
         },
         ExpandedDirectory {
-            entries: vec![directory_entry("/workspace/root/branch")],
+            entries: vec![directory_entry("/workspace/root/branch")].into(),
             directory_discovery: None,
             status: ExpandedDirectoryStatus::Loaded,
             is_expanded: true,

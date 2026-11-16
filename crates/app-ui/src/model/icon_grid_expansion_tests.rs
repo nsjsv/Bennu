@@ -19,7 +19,7 @@ fn entry(path: &str, kind: FileKind) -> DirectoryEntry {
 
 fn loaded(entries: Vec<DirectoryEntry>) -> ExpandedDirectory {
     ExpandedDirectory {
-        entries,
+        entries: entries.into(),
         directory_discovery: None,
         status: ExpandedDirectoryStatus::Loaded,
         is_expanded: true,
@@ -264,6 +264,7 @@ fn latest_sibling_click_replaces_pending_child_intent() {
         .unwrap()
         .contents
         .entries
+        .make_mut()
         .push(entry("/workspace/root/gamma", FileKind::Directory));
     assert!(state.insert_directory(
         anchor("/workspace/root", "/workspace/root/alpha", 0),
@@ -478,4 +479,21 @@ fn cross_tree_path_migration_invalidates_expansion() {
         state.migrate_completed_paths(&migrations),
         IconGridExpansionMigration::Invalidated,
     );
+}
+
+/// 按路径找交互展开目录里的条目：不在展开目录里的、所在目录正在收起（不可交互）的找不到。
+#[test]
+fn entries_are_found_in_interactive_directories_only() {
+    let mut state = state_with_root();
+    assert!(state.entry(Path::new("/workspace/root/alpha")).is_some());
+    assert!(state.entry(Path::new("/workspace/root/gamma")).is_none());
+    assert!(state.entry(Path::new("/workspace/other/alpha")).is_none());
+
+    state
+        .directory_mut(Path::new("/workspace/root"))
+        .unwrap()
+        .contents
+        .is_collapsing = true;
+
+    assert!(state.entry(Path::new("/workspace/root/alpha")).is_none());
 }

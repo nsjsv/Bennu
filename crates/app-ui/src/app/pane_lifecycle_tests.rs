@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use file_core::{DirectoryEntry, EntryMetadata, FileKind};
 
@@ -31,14 +30,15 @@ fn assert_ownership_invariants(browser: &FileBrowser) {
 fn tab_with_selection(id: usize, directory: &str, selected_name: &str) -> BrowserTab {
     let mut tab = BrowserTab::directory(id, PathBuf::from(directory));
     let selected = tab.current_directory().unwrap().join(selected_name);
-    tab.entries = Arc::new(vec![DirectoryEntry::new(
+    tab.entries = vec![DirectoryEntry::new(
         selected.clone(),
         FileKind::File,
         EntryMetadata::default(),
         false,
         false,
         false,
-    )]);
+    )]
+    .into();
     tab.selected_paths.insert(selected.clone());
     tab.selected = Some(selected);
     tab
@@ -73,7 +73,7 @@ fn switching_tabs_leaves_the_background_tab_state_untouched() {
         tab_with_selection(0, "/a", "x.txt"),
         tab_with_selection(1, "/b", "y.txt"),
     ]);
-    let background_entries = Arc::clone(&browser.pane().tabs[0].entries);
+    let background_entries = browser.pane().tabs[0].entries.clone();
 
     drop(browser.select_tab(1));
 
@@ -84,7 +84,7 @@ fn switching_tabs_leaves_the_background_tab_state_untouched() {
     assert_eq!(selected_of(browser.tab()), Some(&PathBuf::from("/b/y.txt")));
     let background = &browser.pane().tabs[0];
     assert_eq!(selected_of(background), Some(&PathBuf::from("/a/x.txt")));
-    assert!(Arc::ptr_eq(&background.entries, &background_entries));
+    assert!(background.entries.shares_entries_with(&background_entries));
     assert_ownership_invariants(&browser);
 
     drop(browser.select_tab(0));

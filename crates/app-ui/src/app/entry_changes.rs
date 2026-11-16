@@ -11,7 +11,7 @@ use iced::Task;
 use super::FileBrowser;
 use crate::model::{
     display_entries_in_discovery_order, BrowserPane, BrowserPaneId, BrowserTab, ContextMenuState,
-    ExpandedDirectory, ExpandedDirectoryStatus, Message,
+    DirectoryEntrySnapshot, ExpandedDirectory, ExpandedDirectoryStatus, Message,
 };
 
 /// 目录条目增量应用唯一入口：watcher 事件与文件操作事件都汇入这里。
@@ -369,7 +369,7 @@ fn apply_to_current_directory(
     if !apply_changes_to_discovery(discovery, changes, sort_options) {
         return Some(Placement::Unchanged);
     }
-    let display = Arc::new(display_entries_in_discovery_order(discovery));
+    let display = DirectoryEntrySnapshot::from(display_entries_in_discovery_order(discovery));
     // 被移走的源路径不能继续留在选中集合或锚点上。
     for path in removed_paths {
         tab.selected_paths.remove(path);
@@ -395,7 +395,7 @@ pub(super) fn apply_changes_to_expanded(
     if !apply_changes_to_discovery(discovery, changes, sort_options) {
         return Some(Placement::Unchanged);
     }
-    expanded.entries = display_entries_in_discovery_order(discovery);
+    expanded.entries = display_entries_in_discovery_order(discovery).into();
     Some(Placement::Applied {
         child_count: expanded.entries.len(),
     })

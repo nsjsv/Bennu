@@ -45,7 +45,7 @@ fn browser_with_entries(paths: &[PathBuf]) -> FileBrowser {
 
 fn loaded_directory(entries: Vec<DirectoryEntry>) -> ExpandedDirectory {
     ExpandedDirectory {
-        entries,
+        entries: entries.into(),
         directory_discovery: None,
         status: ExpandedDirectoryStatus::Loaded,
         is_expanded: true,
@@ -294,7 +294,7 @@ fn list_single_click_selects_directory_without_expanding_or_opening_column() {
     browser.tab_mut().expanded_directories.insert(
         directory.clone(),
         ExpandedDirectory {
-            entries: vec![test_entry(child, FileKind::File)],
+            entries: vec![test_entry(child, FileKind::File)].into(),
             directory_discovery: None,
             status: ExpandedDirectoryStatus::Loaded,
             is_expanded: false,
@@ -570,7 +570,7 @@ fn list_right_arrow_expands_then_focuses_first_child() {
     browser.tab_mut().expanded_directories.insert(
         parent.clone(),
         ExpandedDirectory {
-            entries: vec![test_entry(child.clone(), FileKind::File)],
+            entries: vec![test_entry(child.clone(), FileKind::File)].into(),
             directory_discovery: None,
             status: ExpandedDirectoryStatus::Loaded,
             is_expanded: false,

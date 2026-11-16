@@ -31,7 +31,7 @@ fn expanded(
     generation: u64,
 ) -> ExpandedDirectory {
     ExpandedDirectory {
-        entries,
+        entries: entries.into(),
         directory_discovery: None,
         status,
         is_expanded: true,

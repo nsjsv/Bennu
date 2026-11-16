@@ -728,7 +728,7 @@ mod tests {
 
     fn loaded_expanded_directory(entries: Vec<DirectoryEntry>) -> crate::model::ExpandedDirectory {
         crate::model::ExpandedDirectory {
-            entries,
+            entries: entries.into(),
             directory_discovery: None,
             status: ExpandedDirectoryStatus::Loaded,
             is_expanded: true,
@@ -746,7 +746,7 @@ mod tests {
 
     fn test_pane_view<'a>(
         location: &'a BrowserLocation,
-        entries: &'a [DirectoryEntry],
+        entries: &'a crate::model::DirectoryEntrySnapshot,
         selected: Option<&'a PathBuf>,
         selected_paths: &'a HashSet<PathBuf>,
         deepest_open_column_directory: Option<&'a PathBuf>,
@@ -872,7 +872,10 @@ mod tests {
     fn open_column_context_opens_child_column() {
         let current_dir = PathBuf::from("/workspace");
         let directory = current_dir.join("alpha");
-        let entries = vec![test_entry(directory.clone(), FileKind::Directory)];
+        let entries = crate::model::DirectoryEntrySnapshot::from(vec![test_entry(
+            directory.clone(),
+            FileKind::Directory,
+        )]);
         let selected_paths = HashSet::from([directory.clone()]);
         let expanded_directories = HashMap::new();
         let column_viewports = HashMap::new();
@@ -897,7 +900,10 @@ mod tests {
     fn selected_directory_without_open_column_context_does_not_open_child_column() {
         let current_dir = PathBuf::from("/workspace");
         let directory = current_dir.join("alpha");
-        let entries = vec![test_entry(directory.clone(), FileKind::Directory)];
+        let entries = crate::model::DirectoryEntrySnapshot::from(vec![test_entry(
+            directory.clone(),
+            FileKind::Directory,
+        )]);
         let selected_paths = HashSet::from([directory.clone()]);
         let expanded_directories = HashMap::new();
         let column_viewports = HashMap::new();
@@ -920,10 +926,10 @@ mod tests {
         let current_dir = PathBuf::from("/workspace");
         let first = current_dir.join("alpha");
         let second = current_dir.join("beta");
-        let entries = vec![
+        let entries = crate::model::DirectoryEntrySnapshot::from(vec![
             test_entry(first.clone(), FileKind::Directory),
             test_entry(second.clone(), FileKind::Directory),
-        ];
+        ]);
         let selected_paths = HashSet::from([first, second.clone()]);
         let expanded_directories = HashMap::new();
         let column_viewports = HashMap::new();
@@ -946,10 +952,10 @@ mod tests {
         let current_dir = PathBuf::from("/workspace");
         let open_directory = current_dir.join("project");
         let selected_file = current_dir.join("notes.txt");
-        let entries = vec![
+        let entries = crate::model::DirectoryEntrySnapshot::from(vec![
             test_entry(open_directory.clone(), FileKind::Directory),
             test_entry(selected_file.clone(), FileKind::File),
-        ];
+        ]);
         let selected_paths = HashSet::from([open_directory.clone(), selected_file.clone()]);
         let expanded_directories = HashMap::from([(
             open_directory.clone(),
@@ -975,10 +981,10 @@ mod tests {
 
     #[test]
     fn a_location_that_is_not_a_directory_has_no_column_chain() {
-        let entries = vec![test_entry(
+        let entries = crate::model::DirectoryEntrySnapshot::from(vec![test_entry(
             PathBuf::from("/origin/report.txt"),
             FileKind::File,
-        )];
+        )]);
         let selected_paths = HashSet::new();
         let expanded_directories = HashMap::new();
         let column_viewports = HashMap::new();

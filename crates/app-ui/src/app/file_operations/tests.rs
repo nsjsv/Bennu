@@ -123,7 +123,7 @@ fn direct_move_renamed_batch_message(moves: Vec<(PathBuf, PathBuf)>) -> Message 
 
 fn loaded_expanded_directory() -> ExpandedDirectory {
     ExpandedDirectory {
-        entries: Vec::new(),
+        entries: Default::default(),
         directory_discovery: None,
         status: ExpandedDirectoryStatus::Loaded,
         is_expanded: true,

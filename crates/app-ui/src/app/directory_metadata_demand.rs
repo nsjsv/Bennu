@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
 use file_core::{
@@ -12,7 +13,8 @@ use super::{DirectoryMetadataDemandKey, FileBrowser};
 use crate::commands::load_directory_metadata_command;
 use crate::model::{
     BrowserPaneId, BrowserViewMode, DirectoryMetadataLoadContext, DirectoryMetadataLoadFailure,
-    DirectoryMetadataLoadRequest, ExpandedDirectoryStatus, ListColumnKind, Message,
+    DirectoryMetadataLoadRequest, ExpandedDirectory, ExpandedDirectoryStatus, ListColumnKind,
+    Message,
 };
 use crate::thumbnail_cache::ColumnViewport;
 
@@ -67,6 +69,42 @@ impl FileBrowser {
             path: current_directory.to_path_buf(),
             collection_generation: root_generation,
         };
+        let icon_expansion = self.pane_icon_expansion(pane_id, Some(current_directory));
+
+        // 按选中路径去找条目（开销只与选中个数有关）：直接条目走 Root；其余在父目录展开的
+        // 那一份里——列表/多栏展开的、图标交互展开的，各自走 Expanded。
+        let mut root_targets = Vec::new();
+        let mut expanded_targets: Vec<(&Path, &ExpandedDirectory, Vec<usize>)> = Vec::new();
+        for path in pane.selected_paths {
+            if let Some(entry) = pane.entries.find(path) {
+                root_targets.extend(entry.discovery_index);
+                continue;
+            }
+            let Some(directory) = path.parent() else {
+                continue;
+            };
+            let listed = pane.expanded_directories.get(directory);
+            let icon_listed = icon_expansion
+                .and_then(|expansion| expansion.directory(directory))
+                .map(|expanded| &expanded.contents);
+            for expanded in listed.into_iter().chain(icon_listed) {
+                let Some(index) = expanded
+                    .entries
+                    .find(path)
+                    .and_then(|entry| entry.discovery_index)
+                else {
+                    continue;
+                };
+                match expanded_targets
+                    .iter_mut()
+                    .find(|(_, known, _)| std::ptr::eq(*known, expanded))
+                {
+                    Some((_, _, targets)) => targets.push(index),
+                    None => expanded_targets.push((directory, expanded, vec![index])),
+                }
+            }
+        }
+
         // (context, discovery, cancellation, targets):一次性收集后统一调度
         let mut groups: Vec<(
             DirectoryMetadataLoadContext,
@@ -74,94 +112,34 @@ impl FileBrowser {
             tokio_util::sync::CancellationToken,
             Vec<usize>,
         )> = Vec::new();
-
-        let selected = pane.selected_paths;
-        // 直接条目:一次遍历窗格条目,避免按选中路径逐个线性查找。
-        if let Some(discovery) = pane.directory_discovery.cloned() {
-            let mut targets = Vec::new();
-            for entry in pane.entries.iter() {
-                if !selected.contains(entry.path()) {
-                    continue;
-                }
-                if let Some(index) = entry.discovery_index {
-                    targets.push(index);
-                }
-            }
-            if !targets.is_empty() {
-                groups.push((
-                    root_context.clone(),
-                    discovery,
-                    self.directory_load_cancel_for_pane(pane_id),
-                    targets,
-                ));
-            }
+        if let Some(discovery) = pane
+            .directory_discovery
+            .filter(|_| !root_targets.is_empty())
+        {
+            groups.push((
+                root_context,
+                discovery.clone(),
+                self.directory_load_cancel_for_pane(pane_id),
+                root_targets,
+            ));
         }
-        // 列表/多栏:展开子条目挂在 expanded_directories。
-        for (directory_path, expanded) in pane.expanded_directories.iter() {
+        for (directory, expanded, targets) in expanded_targets {
             if !matches!(expanded.status, ExpandedDirectoryStatus::Loaded) {
                 continue;
             }
             let Some(discovery) = expanded.directory_discovery.clone() else {
                 continue;
             };
-            let mut targets = Vec::new();
-            for entry in expanded.entries.iter() {
-                if !selected.contains(entry.path()) {
-                    continue;
-                }
-                if let Some(index) = entry.discovery_index {
-                    targets.push(index);
-                }
-            }
-            if !targets.is_empty() {
-                groups.push((
-                    DirectoryMetadataLoadContext::Expanded {
-                        pane_id,
-                        path: directory_path.clone(),
-                        load_generation: expanded.load_generation,
-                    },
-                    discovery,
-                    expanded.load_cancel.clone().unwrap_or_default(),
-                    targets,
-                ));
-            }
-        }
-        // 图标视图:展开子条目挂在 icon_grid_expansion 的交互目录里。
-        let icon_expansion = self.icon_grid_expansion.as_ref().filter(|state| {
-            state.context().pane_id == pane.id
-                && state.context().current_dir.as_path() == current_directory
-        });
-        if let Some(expansion) = icon_expansion {
-            for (directory_path, directory) in expansion.directories() {
-                let contents = &directory.contents;
-                if !matches!(contents.status, ExpandedDirectoryStatus::Loaded) {
-                    continue;
-                }
-                let Some(discovery) = contents.directory_discovery.clone() else {
-                    continue;
-                };
-                let mut targets = Vec::new();
-                for entry in contents.entries.iter() {
-                    if !selected.contains(entry.path()) {
-                        continue;
-                    }
-                    if let Some(index) = entry.discovery_index {
-                        targets.push(index);
-                    }
-                }
-                if !targets.is_empty() {
-                    groups.push((
-                        DirectoryMetadataLoadContext::Expanded {
-                            pane_id,
-                            path: directory_path.to_path_buf(),
-                            load_generation: contents.load_generation,
-                        },
-                        discovery,
-                        contents.load_cancel.clone().unwrap_or_default(),
-                        targets,
-                    ));
-                }
-            }
+            groups.push((
+                DirectoryMetadataLoadContext::Expanded {
+                    pane_id,
+                    path: directory.to_path_buf(),
+                    load_generation: expanded.load_generation,
+                },
+                discovery,
+                expanded.load_cancel.clone().unwrap_or_default(),
+                targets,
+            ));
         }
 
         let mut tasks = Vec::new();
@@ -572,7 +550,7 @@ impl FileBrowser {
             return Task::none();
         }
         discovery.order = Arc::new(sort_discovered_entry_indices(&discovery.entries, &options));
-        tab.entries = Arc::new(crate::model::display_entries_in_discovery_order(discovery));
+        tab.entries = crate::model::display_entries_in_discovery_order(discovery).into();
         tab.directory_order_phase = crate::model::DirectoryOrderPhase::Ready { field, direction };
         let entry_count = tab.entries.len();
         self.entries_replaced();
@@ -639,7 +617,7 @@ fn commit_expanded_metadata_sort(
         return false;
     }
     discovery.order = Arc::new(sort_discovered_entry_indices(&discovery.entries, &options));
-    expanded.entries = crate::model::display_entries_in_discovery_order(discovery);
+    expanded.entries = crate::model::display_entries_in_discovery_order(discovery).into();
     expanded.directory_order_phase = crate::model::DirectoryOrderPhase::Ready { field, direction };
     true
 }
@@ -650,6 +628,10 @@ fn directory_metadata_requirement_label(requirement: DirectoryMetadataRequiremen
         DirectoryMetadataRequirement::IdentityNames => "identity_names",
     }
 }
+
+#[cfg(test)]
+#[path = "directory_metadata_demand_selected_tests.rs"]
+mod selected_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1058,7 +1040,7 @@ mod tests {
         browser.tab_mut().expanded_directories.insert(
             expanded_path.clone(),
             crate::model::ExpandedDirectory {
-                entries: expanded_entries,
+                entries: expanded_entries.into(),
                 directory_discovery: Some(expanded_discovery.clone()),
                 status: ExpandedDirectoryStatus::Loaded,
                 is_expanded: true,

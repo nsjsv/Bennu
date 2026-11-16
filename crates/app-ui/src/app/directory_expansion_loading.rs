@@ -4,7 +4,7 @@ use iced::Task;
 use super::entry_changes::apply_changes_to_expanded;
 use super::FileBrowser;
 use crate::model::{
-    DirectoryExpansionLoadContext, DirectoryLoadFailure, ExpandedDirectory,
+    DirectoryEntrySnapshot, DirectoryExpansionLoadContext, DirectoryLoadFailure, ExpandedDirectory,
     ExpandedDirectoryLoadRequest, ExpandedDirectoryStatus, Message,
 };
 
@@ -42,7 +42,7 @@ impl FileBrowser {
         {
             return Task::none();
         }
-        expanded.entries.extend(entries);
+        expanded.entries.make_mut().extend(entries);
         Task::none()
     }
 
@@ -55,16 +55,10 @@ impl FileBrowser {
             &request.context,
             DirectoryExpansionLoadContext::IconGrid { .. }
         ) {
-            let entries =
-                prebuilt.map(|prebuilt| std::sync::Arc::unwrap_or_clone(prebuilt.display_entries));
+            let entries = prebuilt.map(|prebuilt| prebuilt.display_entries);
             return self.accept_icon_grid_directory_entries(request, entries);
         }
-        let entries = prebuilt.map(|prebuilt| {
-            (
-                std::sync::Arc::unwrap_or_clone(prebuilt.display_entries),
-                Some(prebuilt.discovery),
-            )
-        });
+        let entries = prebuilt.map(|prebuilt| (prebuilt.display_entries, Some(prebuilt.discovery)));
         self.accept_expanded_directory_entries(request, entries)
     }
 
@@ -78,18 +72,19 @@ impl FileBrowser {
             &request.context,
             DirectoryExpansionLoadContext::IconGrid { .. }
         ) {
-            return self.accept_icon_grid_directory_entries(request, scan.map(|scan| scan.entries));
+            return self
+                .accept_icon_grid_directory_entries(request, scan.map(|scan| scan.entries.into()));
         }
-        self.accept_expanded_directory_entries(request, scan.map(|scan| (scan.entries, None)))
+        self.accept_expanded_directory_entries(
+            request,
+            scan.map(|scan| (scan.entries.into(), None)),
+        )
     }
 
     fn accept_expanded_directory_entries(
         &mut self,
         request: ExpandedDirectoryLoadRequest,
-        entries: Result<
-            (Vec<file_core::DirectoryEntry>, Option<DirectoryDiscovery>),
-            DirectoryLoadFailure,
-        >,
+        entries: Result<(DirectoryEntrySnapshot, Option<DirectoryDiscovery>), DirectoryLoadFailure>,
     ) -> Task<Message> {
         let Some(load_owner) = self.browser_tree_load_owner(&request) else {
             return Task::none();
@@ -136,7 +131,7 @@ impl FileBrowser {
                     None
                 }
                 Err(failure) => {
-                    expanded.entries.clear();
+                    expanded.entries = Default::default();
                     expanded.directory_discovery = None;
                     expanded.load_cancel = None;
                     expanded.status = ExpandedDirectoryStatus::Error;

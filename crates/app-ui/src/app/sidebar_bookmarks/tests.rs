@@ -41,7 +41,7 @@ fn start_directory_file_drag(browser: &mut FileBrowser, path: &Path) {
     browser.tab_mut().entries = vec![directory_entry(path)].into();
     browser.tab_mut().selected_paths.clear();
     browser.tab_mut().selected_paths.insert(path.to_path_buf());
-    browser.cursor_position = Some(Point::new(0.0, 0.0));
+    browser.cursor_position.set(Some(Point::new(0.0, 0.0)));
     drop(browser.start_file_drag(
         path.to_path_buf(),
         crate::model::FileDragStationaryAction::SelectionOnly,

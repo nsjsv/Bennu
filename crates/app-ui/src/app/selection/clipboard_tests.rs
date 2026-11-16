@@ -88,7 +88,9 @@ fn entry_hover_uses_current_level_for_paste_and_directory_for_drop() {
     drop(browser.handle_entry_hovered(source.clone()));
     assert_eq!(browser.paste_target_directory(), Some(current_dir.clone()));
 
-    browser.cursor_position = Some(iced::Point::new(0.0, 0.0));
+    browser
+        .cursor_position
+        .set(Some(iced::Point::new(0.0, 0.0)));
     drop(browser.start_file_drag(source, FileDragStationaryAction::SelectionOnly, Vec::new()));
     drop(browser.update_file_drag(iced::Point::new(10.0, 0.0)));
     drop(browser.handle_entry_hovered(directory.clone()));

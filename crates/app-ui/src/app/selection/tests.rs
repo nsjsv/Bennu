@@ -140,7 +140,7 @@ fn selection_marquee_captures_view_specific_scroll_anchor() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let current_dir = PathBuf::from("/workspace");
     browser.tab_mut().location = BrowserLocation::Directory(current_dir.clone());
-    browser.cursor_position = Some(Point::new(30.0, 40.0));
+    browser.cursor_position.set(Some(Point::new(30.0, 40.0)));
     browser.tab_mut().choose_view_mode(BrowserViewMode::List);
     browser.pane_mut().list_viewport = Some(crate::thumbnail_cache::ColumnViewport {
         offset_y: 70.0,
@@ -792,7 +792,7 @@ fn iced_file_drag_keeps_sidebar_trash_non_drop_target() {
     let destination = PathBuf::from("/workspace/destination");
     browser.tab_mut().entries = vec![test_entry(source.clone(), FileKind::File)].into();
     browser.tab_mut().selected_paths.insert(source.clone());
-    browser.cursor_position = Some(Point::new(0.0, 0.0));
+    browser.cursor_position.set(Some(Point::new(0.0, 0.0)));
     drop(browser.start_file_drag(
         source,
         crate::model::FileDragStationaryAction::SelectionOnly,

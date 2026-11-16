@@ -935,7 +935,7 @@ fn trash_plain_click_after_select_all_focuses_single_entry() {
 
 fn active_drag_browser(origin: Point) -> FileBrowser {
     let mut browser = browser_with_entries(&[]);
-    browser.cursor_position = Some(origin);
+    browser.cursor_position.set(Some(origin));
     browser.file_drag = Some(crate::model::FileDragState {
         gesture_id: crate::model::FileDragGestureId(1),
         source_pane_id: browser.active_pane_id(),

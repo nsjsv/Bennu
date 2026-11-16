@@ -115,6 +115,7 @@ impl FileBrowser {
             return None;
         }
         self.cursor_position
+            .get()
             .filter(|cursor| viewport.contains(*cursor))
     }
 }

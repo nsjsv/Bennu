@@ -362,7 +362,7 @@ impl FileBrowser {
     }
 
     pub(super) fn file_drag_drop_directory_at_cursor(&self) -> Option<PathBuf> {
-        let pane_id = self.pane_id_at_position(self.cursor_position?)?;
+        let pane_id = self.pane_id_at_position(self.cursor_position.get()?)?;
         if pane_id == self.active_pane_id() {
             return None;
         }

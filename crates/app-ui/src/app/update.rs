@@ -558,10 +558,13 @@ impl FileBrowser {
             Message::ShortcutCaptureStarted(binding_id) => self.start_shortcut_capture(binding_id),
             Message::ShortcutCaptureCanceled => self.cancel_shortcut_capture(),
             Message::ShortcutBindingReset(binding_id) => self.reset_shortcut_binding(binding_id),
-            Message::WindowPointerReleased(status) => match status {
-                iced::event::Status::Captured => self.finish_tab_drag_from_captured_release(),
-                iced::event::Status::Ignored => self.finish_pointer_drag_interactions(),
-            },
+            Message::WindowPointerReleased(status) => {
+                self.release_pointer();
+                match status {
+                    iced::event::Status::Captured => self.finish_tab_drag_from_captured_release(),
+                    iced::event::Status::Ignored => self.finish_pointer_drag_interactions(),
+                }
+            }
             Message::DragSelectionFinished => self.finish_pointer_drag_interactions(),
             Message::GlobalErrorNotificationElapsed(generation) => {
                 self.expire_global_error_notification(generation);
@@ -622,7 +625,10 @@ impl FileBrowser {
                 window,
                 button,
                 status,
-            } => self.handle_window_pointer_pressed(window, button, status),
+            } => {
+                self.hold_pointer(window, button);
+                self.handle_window_pointer_pressed(window, button, status)
+            }
             Message::AddressEditingRequested(pane_id) => self.begin_address_editing(pane_id),
             Message::BreadcrumbSegmentPressed(pane_id, target) => {
                 self.activate_breadcrumb_target(pane_id, target)

@@ -263,7 +263,9 @@ mod tests {
     fn browser_with_pressed_drag(browser: &mut FileBrowser) {
         let source = PathBuf::from("/workspace/report.txt");
         browser.tab_mut().selected = Some(source.clone());
-        browser.cursor_position = Some(iced::Point::new(0.0, 0.0));
+        browser
+            .cursor_position
+            .set(Some(iced::Point::new(0.0, 0.0)));
         drop(browser.start_file_drag(source, FileDragStationaryAction::SelectionOnly, Vec::new()));
     }
 

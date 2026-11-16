@@ -131,7 +131,9 @@ fn drag_action_capsule_label_follows_target_and_intent() {
 
     // entries 为空时 sources 回退到 self.selected。
     browser.tab_mut().selected = Some(source.clone());
-    browser.cursor_position = Some(iced::Point::new(0.0, 0.0));
+    browser
+        .cursor_position
+        .set(Some(iced::Point::new(0.0, 0.0)));
     drop(browser.start_file_drag(
         source.clone(),
         FileDragStationaryAction::SelectionOnly,
@@ -376,7 +378,9 @@ fn activation_hands_file_drag_to_native_wayland_session() {
     });
     let source = PathBuf::from("/workspace/report.txt");
     browser.tab_mut().selected = Some(source.clone());
-    browser.cursor_position = Some(iced::Point::new(0.0, 0.0));
+    browser
+        .cursor_position
+        .set(Some(iced::Point::new(0.0, 0.0)));
     drop(browser.start_file_drag(source, FileDragStationaryAction::SelectionOnly, Vec::new()));
 
     drop(browser.update_file_drag(iced::Point::new(10.0, 0.0)));
@@ -399,7 +403,9 @@ fn activation_without_wayland_runtime_falls_back_to_iced_drag() {
     let (mut browser, _) = crate::app::FileBrowser::new(crate::config::default_user_config());
     let source = PathBuf::from("/workspace/report.txt");
     browser.tab_mut().selected = Some(source.clone());
-    browser.cursor_position = Some(iced::Point::new(0.0, 0.0));
+    browser
+        .cursor_position
+        .set(Some(iced::Point::new(0.0, 0.0)));
     drop(browser.start_file_drag(source, FileDragStationaryAction::SelectionOnly, Vec::new()));
 
     drop(browser.update_file_drag(iced::Point::new(10.0, 0.0)));
@@ -423,7 +429,9 @@ fn preview_offsets_fill_while_waiting_for_movement() {
     let (mut browser, _) = crate::app::FileBrowser::new(crate::config::default_user_config());
     let source = PathBuf::from("/workspace/report.txt");
     browser.tab_mut().selected = Some(source.clone());
-    browser.cursor_position = Some(iced::Point::new(20.0, 30.0));
+    browser
+        .cursor_position
+        .set(Some(iced::Point::new(20.0, 30.0)));
     drop(browser.start_file_drag(
         source.clone(),
         FileDragStationaryAction::SelectionOnly,

@@ -503,7 +503,7 @@ mod tests {
     fn resize_drag_clamps_width_to_configured_bounds() {
         let mut browser = panel_open_browser();
         browser.right_preview_panel_width = 320.0;
-        browser.cursor_position = Some(Point::new(600.0, 0.0));
+        browser.cursor_position.set(Some(Point::new(600.0, 0.0)));
         drop(browser.start_right_preview_panel_resize_drag());
         // 指针右移 400px:宽度应收窄并夹在下限。
         browser.update_right_preview_panel_resize_drag(Point::new(1000.0, 0.0));
@@ -535,7 +535,7 @@ mod tests {
     fn ratio_drag_clamps_to_configured_bounds() {
         let mut browser = panel_open_browser();
         browser.right_preview_preview_ratio = 0.7;
-        browser.cursor_position = Some(Point::new(0.0, 400.0));
+        browser.cursor_position.set(Some(Point::new(0.0, 400.0)));
         drop(browser.start_right_preview_panel_ratio_resize_drag());
         // 指针大幅上移:比例压到存储下限。
         browser.update_right_preview_panel_ratio_resize_drag(Point::new(0.0, -100.0));

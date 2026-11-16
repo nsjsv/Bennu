@@ -723,7 +723,7 @@ async fn iced_fallback_tab_release_uses_same_internal_dispatch() {
     let target = add_inactive_directory_tab(&mut browser, destination.clone());
     browser.tab_mut().entries = vec![test_entry(&source)].into();
     browser.tab_mut().selected_paths.insert(source.clone());
-    browser.cursor_position = Some(Point::new(0.0, 0.0));
+    browser.cursor_position.set(Some(Point::new(0.0, 0.0)));
     drop(browser.start_file_drag(
         source.clone(),
         crate::model::FileDragStationaryAction::SelectionOnly,
@@ -983,7 +983,7 @@ fn external_and_iced_fallback_sessions_do_not_plan_scroll_refresh() {
     let source = PathBuf::from("/tmp/fallback.txt");
     browser.tab_mut().entries = vec![test_entry(&source)].into();
     browser.tab_mut().selected_paths.insert(source.clone());
-    browser.cursor_position = Some(Point::new(50.0, 20.0));
+    browser.cursor_position.set(Some(Point::new(50.0, 20.0)));
     drop(browser.start_file_drag(
         source.clone(),
         crate::model::FileDragStationaryAction::SelectionOnly,
@@ -1055,7 +1055,7 @@ fn iced_fallback_trash_tab_uses_drag_snapshot_paths() {
     let source = PathBuf::from("/tmp/iced-trash.txt");
     browser.tab_mut().entries = vec![test_entry(&source)].into();
     browser.tab_mut().selected_paths.insert(source.clone());
-    browser.cursor_position = Some(Point::new(0.0, 0.0));
+    browser.cursor_position.set(Some(Point::new(0.0, 0.0)));
     drop(browser.start_file_drag(
         source.clone(),
         crate::model::FileDragStationaryAction::SelectionOnly,

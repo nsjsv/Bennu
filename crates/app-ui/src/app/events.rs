@@ -43,13 +43,6 @@ pub(super) fn global_event_message(
         });
     }
 
-    if let Event::Mouse(mouse::Event::CursorMoved { position }) = &event {
-        return Some(Message::CursorMoved {
-            window,
-            position: *position,
-        });
-    }
-
     if matches!(&event, Event::Mouse(mouse::Event::CursorLeft)) {
         return Some(Message::CursorLeft { window });
     }
@@ -177,24 +170,17 @@ mod tests {
         ));
     }
 
+    /// 指针移动不经全局监听进 update：每条消息都会重建所有窗口的界面，移动由窗口
+    /// 根部的指针记录器静默记录，只在跟着指针走时才发消息（见 pointer_tracker）。
     #[test]
-    fn captured_cursor_move_updates_cursor_position() {
-        let window = window::Id::unique();
-        let position = iced::Point::new(12.0, 24.0);
-        let event = Event::Mouse(mouse::Event::CursorMoved { position });
+    fn cursor_moves_never_become_messages_through_the_global_listener() {
+        let event = Event::Mouse(mouse::Event::CursorMoved {
+            position: iced::Point::new(12.0, 24.0),
+        });
 
-        let message = route_event_with_window(event, event::Status::Captured, window);
-
-        let Some(Message::CursorMoved {
-            window: received_window,
-            position: received,
-        }) = message
-        else {
-            panic!("expected cursor movement message");
-        };
-        assert_eq!(received_window, window);
-        assert_eq!(received.x, position.x);
-        assert_eq!(received.y, position.y);
+        for status in [event::Status::Captured, event::Status::Ignored] {
+            assert!(route_event(event.clone(), status).is_none());
+        }
     }
 
     #[test]

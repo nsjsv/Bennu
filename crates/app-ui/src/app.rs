@@ -379,10 +379,12 @@ pub(crate) struct FileBrowser {
     next_global_error_notification_generation: u64,
     pub(crate) application_logs: ApplicationLogViewState,
     system_language: UiLanguage,
-    /// 最近一次指针事件给出的窗口坐标；`None` = 还没有收到过任何指针事件。
-    /// 读取方需要"光标确实在某处"的事实时（hover 重算）必须判 `None`；只在
-    /// 指针手势里取起点的读取方经 [`Self::cursor_or_origin`]。
-    pub(crate) cursor_position: Option<Point>,
+    /// 最近一次指针事件给出的窗口坐标（主窗口、预览窗口根部的指针记录器静默写入）；
+    /// `None` = 还没有收到过任何指针事件。读取方需要"光标确实在某处"的事实时
+    /// （hover 重算）必须判 `None`；只在指针手势里取起点的读取方经 [`Self::cursor_or_origin`]。
+    pub(crate) cursor_position: crate::pointer_tracker::PointerPosition,
+    /// 按住左键的那个窗口：按住期间该窗口的指针移动才作为消息进来（拖动、改大小、框选都要按住）。
+    pointer_held_window: Option<window::Id>,
     pub(crate) main_window_width: f32,
     pub(crate) main_window_height: f32,
     /// 主窗口现在是不是在全屏放右侧面板的视频（宿主已切过去的状态，跟着引擎收敛）。
@@ -451,7 +453,7 @@ impl FileBrowser {
     /// 记录；键盘等没有指针的入口触发时退回窗口原点，这是整个应用唯一把
     /// "未知"折成坐标的地方。
     pub(crate) fn cursor_or_origin(&self) -> Point {
-        self.cursor_position.unwrap_or(Point::ORIGIN)
+        self.cursor_position.get().unwrap_or(Point::ORIGIN)
     }
 
     pub(crate) fn active_language(&self) -> UiLanguage {
@@ -764,7 +766,8 @@ impl FileBrowser {
                 crate::runtime_logging::journald_initialization_warning(),
             ),
             system_language: UiLanguage::English,
-            cursor_position: None,
+            cursor_position: crate::pointer_tracker::PointerPosition::default(),
+            pointer_held_window: None,
             main_window_video_fullscreen: false,
             main_window_width: MAIN_WINDOW_INITIAL_WIDTH,
             main_window_height: MAIN_WINDOW_INITIAL_HEIGHT,
@@ -1039,6 +1042,21 @@ impl FileBrowser {
     }
 
     fn view(&self, window: window::Id) -> Element<'_, Message> {
+        let content = self.window_content(window);
+        let shares_position =
+            window == self.main_window || self.preview_engine.preview_window == Some(window);
+        let on_move = self.follows_pointer(window).then(|| {
+            Box::new(move |position| Message::CursorMoved { window, position })
+                as Box<dyn Fn(Point) -> Message>
+        });
+        crate::pointer_tracker::track_pointer(
+            content,
+            shares_position.then(|| self.cursor_position.clone()),
+            on_move,
+        )
+    }
+
+    fn window_content(&self, window: window::Id) -> Element<'_, Message> {
         match self.auxiliary_window(window) {
             Some(AuxiliaryWindow::Settings) => view_settings_window(self, window),
             Some(AuxiliaryWindow::Properties) => self.window_frame(window, |shell| {

@@ -68,7 +68,7 @@ impl FileBrowser {
             return Task::none();
         }
         session.position = Some(position);
-        self.cursor_position = Some(position);
+        self.cursor_position.set(Some(position));
         // 内部原生拖放没有指针移动事件,边缘自动滚改由 Moved 事件重算;
         // 外部拖入悬停不自动滚(与现状一致)。
         if matches!(session.origin, FileDropOrigin::Internal(_)) {
@@ -105,7 +105,7 @@ impl FileBrowser {
         session.tab_hover = None;
         if let Some(position) = position {
             session.position = Some(position);
-            self.cursor_position = Some(position);
+            self.cursor_position.set(Some(position));
         } else {
             session.position = None;
             session.frozen_drop_target = Some(FrozenFileDropTarget::Rejected);
@@ -164,7 +164,7 @@ impl FileBrowser {
             origin: FileDropOrigin::Internal(snapshot),
             phase: FileDropSessionPhase::Hovering,
             layout: FileDropLayoutState::Pending(request),
-            position: self.cursor_position,
+            position: self.cursor_position.get(),
             hovered_target: None,
             tab_hover: None,
             hover_generation: 0,

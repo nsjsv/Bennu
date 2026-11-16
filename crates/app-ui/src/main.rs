@@ -54,6 +54,7 @@ mod open_with;
 mod operation_history;
 mod operation_queue_display;
 mod operation_queue_view;
+mod pointer_tracker;
 mod progress_ring;
 mod runtime_logging;
 mod search_result_text;

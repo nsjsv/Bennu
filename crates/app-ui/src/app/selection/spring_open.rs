@@ -266,7 +266,7 @@ mod tests {
     /// 从按下 dir_a 进入真实拖拽(跨过移动阈值,建立 iced 落点会话)。
     fn start_drag_on(browser: &mut FileBrowser, pressed: &PathBuf) {
         browser.tab_mut().selected = Some(pressed.clone());
-        browser.cursor_position = Some(Point::new(10.0, 10.0));
+        browser.cursor_position.set(Some(Point::new(10.0, 10.0)));
         drop(browser.start_file_drag(
             pressed.clone(),
             FileDragStationaryAction::SelectionOnly,
@@ -538,7 +538,7 @@ mod tests {
         browser.tab_mut().choose_view_mode(BrowserViewMode::Columns);
         // 多栏真实拖拽:单击栏条目起拖,栏链快照被捕获(拖拽期间渲染冻结链)。
         browser.tab_mut().selected = Some(file.clone());
-        browser.cursor_position = Some(Point::new(100.0, 100.0));
+        browser.cursor_position.set(Some(Point::new(100.0, 100.0)));
         drop(browser.handle_column_entry_clicked(file.clone()));
         drop(browser.update_file_drag(Point::new(130.0, 100.0)));
         assert_eq!(
@@ -759,7 +759,7 @@ mod tests {
 
         // 按多栏方式起拖(捕获真实栏链快照 [dir_a, dir_a/sub])。
         browser.tab_mut().selected = Some(file_in_a.clone());
-        browser.cursor_position = Some(Point::new(100.0, 100.0));
+        browser.cursor_position.set(Some(Point::new(100.0, 100.0)));
         let snapshot = crate::three_column_view::column_directories(&browser);
         drop(browser.start_file_drag(
             file_in_a.clone(),

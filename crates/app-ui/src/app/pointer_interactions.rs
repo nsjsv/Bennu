@@ -1,5 +1,5 @@
 use super::FileBrowser;
-use iced::{window, Point, Task};
+use iced::{mouse, window, Point, Task};
 
 use crate::model::Message;
 
@@ -49,13 +49,32 @@ impl FileBrowser {
         ])
     }
 
+    /// 这个窗口的指针移动要不要作为消息进来。每条消息都会重建所有窗口的界面并重画，
+    /// 所以只有跟着指针走的时候才要：按住左键的窗口（拖动、改大小、框选都要按住）、
+    /// 预览窗口与主窗口全屏视频（控制条随移动显隐）。其余时候位置只记在 `cursor_position`。
+    pub(super) fn follows_pointer(&self, window: window::Id) -> bool {
+        self.pointer_held_window == Some(window)
+            || self.preview_engine.preview_window == Some(window)
+            || (window == self.main_window && self.main_window_video_fullscreen)
+    }
+
+    pub(super) fn hold_pointer(&mut self, window: window::Id, button: mouse::Button) {
+        if button == mouse::Button::Left {
+            self.pointer_held_window = Some(window);
+        }
+    }
+
+    pub(super) fn release_pointer(&mut self) {
+        self.pointer_held_window = None;
+    }
+
     pub(super) fn update_pointer_motion(
         &mut self,
         window: window::Id,
         position: Point,
     ) -> Task<Message> {
         if self.preview_engine.preview_window == Some(window) {
-            self.cursor_position = Some(position);
+            self.cursor_position.set(Some(position));
             let preview_engine = &mut self.preview_engine;
             preview_engine.update_sqlite_tables_resize_drag(position);
             return preview_engine
@@ -74,7 +93,7 @@ impl FileBrowser {
         if window != self.main_window {
             return Task::none();
         }
-        self.cursor_position = Some(position);
+        self.cursor_position.set(Some(position));
         self.promote_ctrl_shift_pane_drag_from_active_pointer_drag();
         self.update_tab_drag(position);
         self.update_pane_drag(position);
@@ -109,5 +128,35 @@ impl FileBrowser {
             || self.split_resize_drag.is_some()
             || self.right_preview_panel_resize_drag.is_some()
             || self.terminal_panel.is_resizing()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use iced::{event, mouse};
+
+    use super::*;
+    use crate::config;
+
+    /// 主窗口只在按住左键期间把指针移动作为消息收进来；右键、松开之后都只静默记录。
+    #[test]
+    fn only_a_held_left_button_makes_the_main_window_follow_the_pointer() {
+        let (mut browser, _) = FileBrowser::new(config::default_user_config());
+        let main = browser.main_window;
+        let press = |button| Message::WindowPointerPressed {
+            window: main,
+            button,
+            status: event::Status::Ignored,
+        };
+        assert!(!browser.follows_pointer(main));
+
+        drop(browser.update(press(mouse::Button::Right)));
+        assert!(!browser.follows_pointer(main));
+
+        drop(browser.update(press(mouse::Button::Left)));
+        assert!(browser.follows_pointer(main));
+
+        drop(browser.update(Message::WindowPointerReleased(event::Status::Ignored)));
+        assert!(!browser.follows_pointer(main));
     }
 }

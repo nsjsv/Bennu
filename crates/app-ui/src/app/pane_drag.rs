@@ -552,7 +552,7 @@ mod tests {
     fn ctrl_shift_during_file_drag_promotes_to_pane_drag() {
         let mut browser = split_browser_for_test();
         let source = PathBuf::from("/workspace/left/report.txt");
-        browser.cursor_position = Some(Point::new(190.0, 50.0));
+        browser.cursor_position.set(Some(Point::new(190.0, 50.0)));
         browser.file_drag = Some(FileDragState {
             gesture_id: crate::model::FileDragGestureId(1),
             source_pane_id: browser.active_pane_id(),
@@ -585,7 +585,7 @@ mod tests {
     fn ctrl_shift_during_marquee_drag_promotes_to_pane_drag() {
         let mut browser = split_browser_for_test();
         let anchor = PathBuf::from("/workspace/left/report.txt");
-        browser.cursor_position = Some(Point::new(190.0, 50.0));
+        browser.cursor_position.set(Some(Point::new(190.0, 50.0)));
         browser.drag_selection_anchor = Some(anchor);
         browser.selection_marquee = Some(SelectionMarquee {
             gesture_origin: Point::new(10.0, 10.0),
@@ -623,7 +623,7 @@ mod tests {
         browser.tab_mut().selection_anchor = Some(selected_path);
         browser.tab_mut().deepest_open_column_directory =
             Some(PathBuf::from("/workspace/left/src"));
-        browser.cursor_position = Some(Point::new(10.0, 50.0));
+        browser.cursor_position.set(Some(Point::new(10.0, 50.0)));
 
         drop(browser.update(Message::ColumnPlaceholderPressed(BrowserPaneId::PRIMARY)));
         drop(browser.update(Message::CursorMoved {

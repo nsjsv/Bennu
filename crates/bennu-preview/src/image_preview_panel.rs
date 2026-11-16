@@ -2,7 +2,7 @@
 //! 底部浮着的缩放控件。交互契约见 image-preview-guidelines 第一节（视口钳制/锚点缩放/双击）。
 
 use iced::widget::image::FilterMethod;
-use iced::widget::{container, image, mouse_area, row, svg, Space, Stack};
+use iced::widget::{container, image, row, svg, Space, Stack};
 use iced::{Alignment, ContentFit, Element, Length, Size, Vector};
 
 use bennu_theme::icons::IconSymbol;
@@ -16,6 +16,7 @@ use crate::info_overlay::info_overlay;
 use crate::media_controls::{
     floating_bar, floating_bar_text, floating_icon_button, floating_text_button,
 };
+use crate::pointer_area::pointer_area;
 use crate::preview::{image_preview_size, ImageInfo, ImagePreviewContent, PreviewSize};
 use crate::preview_message::PreviewMessage;
 
@@ -69,18 +70,25 @@ where
     }
 
     // 指针事件包住整块（含控件）：指针移到控件上不算离开，右侧面板的控件不会一碰就消失。
+    // 缩放锚点随滚轮、双击一起带过去；逐次的移动只在平移时要。
     let viewport_message = |message| Message::from(PreviewMessage::PreviewImageViewport(message));
-    mouse_area(layers)
-        .on_move(move |position| {
+    let area = pointer_area(layers)
+        .on_exit(viewport_message(PreviewImageViewportMessage::PointerLeft))
+        .on_press(move |at| viewport_message(PreviewImageViewportMessage::PanStarted(at)))
+        .on_release(viewport_message(PreviewImageViewportMessage::PanEnded))
+        .on_double_click(move |at| viewport_message(PreviewImageViewportMessage::DoubleClicked(at)))
+        .on_scroll(move |delta, at| {
+            viewport_message(PreviewImageViewportMessage::Zoomed(delta, at))
+        })
+        .interaction(iced::mouse::Interaction::Grab);
+    if viewport.panning {
+        area.on_move(move |position| {
             viewport_message(PreviewImageViewportMessage::PointerMoved(position))
         })
-        .on_exit(viewport_message(PreviewImageViewportMessage::PointerLeft))
-        .on_press(viewport_message(PreviewImageViewportMessage::PanStarted))
-        .on_release(viewport_message(PreviewImageViewportMessage::PanEnded))
-        .on_double_click(viewport_message(PreviewImageViewportMessage::DoubleClicked))
-        .on_scroll(move |delta| viewport_message(PreviewImageViewportMessage::Zoomed(delta)))
-        .interaction(iced::mouse::Interaction::Grab)
         .into()
+    } else {
+        area.into()
+    }
 }
 
 /// 一张图按显示大小叠起来：透明的垫棋盘格；不透明的垫缩略图，原图大贴图还没传上显卡时不露底。

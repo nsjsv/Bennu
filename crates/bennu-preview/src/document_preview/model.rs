@@ -199,13 +199,18 @@ pub enum DocumentTextMessage {
     /// F3 / Shift+F3、Enter / Shift+Enter、搜索条上的上下箭头。
     Stepped(SearchDirection),
     SearchClosed,
-    /// 指针在第几页的哪（页内比例）。
+    /// 拖选中指针在第几页的哪（页内比例；只在拖着时报告）。
     PointerMoved {
         page: usize,
         x: f32,
         y: f32,
     },
-    Pressed,
+    /// 按在第几页的哪：从这里开始选。
+    Pressed {
+        page: usize,
+        x: f32,
+        y: f32,
+    },
     Released,
     /// Ctrl+C。
     CopyRequested,

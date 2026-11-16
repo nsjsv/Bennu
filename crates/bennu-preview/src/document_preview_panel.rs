@@ -2,9 +2,7 @@
 //! （页码框里输数字回车跳页）；顶上是搜索条（Ctrl+F），页上画匹配和拖选的文字。
 //! 事件滚动接线经 ScrollRegionWiring 由宿主注入。
 
-use iced::widget::{
-    button, container, image, mouse_area, row, text, tooltip, Column, Space, Stack,
-};
+use iced::widget::{button, container, image, row, text, tooltip, Column, Space, Stack};
 use iced::{Alignment, ContentFit, Element, Length};
 
 use bennu_theme::controls::{icon_button, text_field, toggle_button_style, tooltip_bubble};
@@ -22,6 +20,7 @@ use crate::document_preview::{
 use crate::media_controls::{floating_bar, floating_bar_text, floating_icon_button};
 use crate::media_keys::document_keys;
 use crate::panel_text::readable_text;
+use crate::pointer_area::pointer_area;
 use crate::preview::PreviewSize;
 use crate::preview_message::PreviewMessage;
 use crate::scroll_wiring::ScrollRegionWiring;
@@ -94,17 +93,28 @@ where
         } else {
             iced::mouse::Interaction::Idle
         };
-        let page = mouse_area(marked)
-            .on_move(move |point| {
+        // 按下的位置随按下一起带过去；逐次的移动只在拖选时要（选区可以拖过别的页，每页都挂）。
+        let page = pointer_area(marked)
+            .on_press(move |point| {
+                text_message(DocumentTextMessage::Pressed {
+                    page: page_index,
+                    x: point.x / width,
+                    y: point.y / height,
+                })
+            })
+            .on_release(text_message(DocumentTextMessage::Released))
+            .interaction(interaction);
+        let page = if document.is_selecting() {
+            page.on_move(move |point| {
                 text_message(DocumentTextMessage::PointerMoved {
                     page: page_index,
                     x: point.x / width,
                     y: point.y / height,
                 })
             })
-            .on_press(text_message(DocumentTextMessage::Pressed))
-            .on_release(text_message(DocumentTextMessage::Released))
-            .interaction(interaction);
+        } else {
+            page
+        };
         pages = pages.push(page);
         if position + 1 < wanted_pages.len() {
             pages = pages.push(Space::new().height(Length::Fixed(DOCUMENT_PAGE_GAP)));

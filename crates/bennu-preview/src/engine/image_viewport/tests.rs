@@ -93,7 +93,10 @@ fn magnifying_past_the_decoded_pixels_asks_for_the_original_once() {
 
     // 1.5 倍还在 1600 像素以内。
     let task = engine.update_preview_image_viewport(
-        PreviewImageViewportMessage::Zoomed(iced::mouse::ScrollDelta::Lines { x: 0.0, y: 4.0 }),
+        PreviewImageViewportMessage::Zoomed(
+            iced::mouse::ScrollDelta::Lines { x: 0.0, y: 4.0 },
+            iced::Point::new(10.0, 10.0),
+        ),
         PANEL,
     );
     assert_eq!(task.units(), 0);

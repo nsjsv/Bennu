@@ -135,13 +135,16 @@ pub fn image_preview_zoom_multiplier(delta: mouse::ScrollDelta) -> f32 {
 
 #[derive(Debug, Clone, Copy)]
 pub enum PreviewImageViewportMessage {
+    /// 平移中指针移到了哪（只在拖着时报告）。
     PointerMoved(Point),
     PointerLeft,
-    PanStarted,
+    /// 按在哪：从这里开始平移。
+    PanStarted(Point),
     PanEnded,
-    Zoomed(mouse::ScrollDelta),
+    /// 滚轮缩放，围着指针所在处。
+    Zoomed(mouse::ScrollDelta, Point),
     /// 双击：缩放着就回到适应窗口，否则以指针为中心放到 1:1。
-    DoubleClicked,
+    DoubleClicked(Point),
     /// 按钮、+/- 键：放大/缩小一档，围着中心。
     ZoomedIn,
     ZoomedOut,

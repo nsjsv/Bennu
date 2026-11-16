@@ -87,6 +87,8 @@ pub struct PreviewEngine {
     pub preview_shown_path: Option<std::path::PathBuf>,
     pub preview_window_bottom_controls: PreviewBottomControlsState,
     pub preview_window_pointer_y: Option<f32>,
+    /// 宿主的指针记录器写入的最后移动时刻：全屏控件亮着时移动不发消息，到点时按它顺延。
+    pointer_motion: bennu_theme::pointer_motion::PointerMotion,
     pub preview_image_viewport: ImagePreviewViewport,
     pub preview_window_initial_controls_generation: u64,
     pub preview_window: Option<Id>,
@@ -167,6 +169,7 @@ impl PreviewEngine {
             preview_shown_path: None,
             preview_window_bottom_controls: PreviewBottomControlsState::default(),
             preview_window_pointer_y: None,
+            pointer_motion: bennu_theme::pointer_motion::PointerMotion::default(),
             preview_image_viewport: ImagePreviewViewport::default(),
             preview_window_initial_controls_generation: 0,
             preview_window: None,
@@ -342,6 +345,7 @@ mod image_session;
 mod image_viewport;
 mod media;
 mod original_image;
+mod pointer;
 mod remote_cache;
 mod session;
 mod sqlite;
@@ -357,6 +361,7 @@ mod windows;
 
 pub use media::{audio_preview_tick_subscription, video_preview_tick_subscription};
 pub use original_image::PendingPreviewThumbnailDisplay;
+pub use pointer::PointerInterest;
 pub use remote_cache::RemotePreviewCacheCompletion;
 pub use sqlite::{SqlitePreviewState, SqliteTablesResizeDrag, SQLITE_DEFAULT_TABLES_WIDTH};
 pub use windows::{

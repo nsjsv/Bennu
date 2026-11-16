@@ -367,7 +367,7 @@ impl PreviewEngine {
         }
     }
 
-    fn preview_window_has_bottom_media_controls(&self) -> bool {
+    pub(super) fn preview_window_has_bottom_media_controls(&self) -> bool {
         match self.preview.as_ref() {
             Some(PreviewState::Ready(PreviewContent::Video { .. })) => true,
             // 缩略图占位时还不知道原图多大，缩放控件等原图到了才有。

@@ -88,6 +88,7 @@ mod checkerboard;
 mod image_info_text;
 pub mod image_preview_panel;
 mod info_overlay;
+mod pointer_area;
 // 音频预览面板（标题摘要/时间线控制/音量控制）。
 mod audio_lyrics_view;
 pub mod audio_preview_panel;

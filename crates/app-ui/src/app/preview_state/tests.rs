@@ -475,7 +475,10 @@ fn image_viewport_messages_are_ignored_without_a_ready_image_preview() {
 
     drop(
         browser.update(Message::Preview(PreviewMessage::PreviewImageViewport(
-            PreviewImageViewportMessage::Zoomed(mouse::ScrollDelta::Lines { x: 0.0, y: 3.0 }),
+            PreviewImageViewportMessage::Zoomed(
+                mouse::ScrollDelta::Lines { x: 0.0, y: 3.0 },
+                Point::new(300.0, 200.0),
+            ),
         ))),
     );
 
@@ -493,12 +496,10 @@ fn zoom_and_reset_update_the_viewport_for_ready_image_previews() {
 
     drop(
         browser.update(Message::Preview(PreviewMessage::PreviewImageViewport(
-            PreviewImageViewportMessage::PointerMoved(Point::new(300.0, 200.0)),
-        ))),
-    );
-    drop(
-        browser.update(Message::Preview(PreviewMessage::PreviewImageViewport(
-            PreviewImageViewportMessage::Zoomed(mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 }),
+            PreviewImageViewportMessage::Zoomed(
+                mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
+                Point::new(300.0, 200.0),
+            ),
         ))),
     );
 

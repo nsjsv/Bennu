@@ -25,6 +25,7 @@ pub mod icon_grid_geometry;
 pub mod icons;
 pub mod measured_text;
 pub mod metrics;
+pub mod pointer_motion;
 pub mod preview_styles;
 pub mod scroll_report;
 pub mod scrollbar;

@@ -57,7 +57,8 @@ impl super::PreviewEngine {
                 return Task::none();
             }
             // 第一次按下才去抽文字；抽好之前点了不选。
-            DocumentTextMessage::Pressed => {
+            DocumentTextMessage::Pressed { page, x, y } => {
+                document.pointer_moved(page, x, y);
                 document.press();
                 document.request_text(document.document_cancellation())
             }

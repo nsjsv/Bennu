@@ -802,6 +802,9 @@ impl FileBrowser {
             application_theme: ApplicationTheme::new(AppearanceMode::Light),
             application_shutdown_phase: ApplicationShutdownPhase::Running,
         };
+        // 全屏视频的控件亮着时，指针移动只由窗口根部的记录器记下时刻，引擎到点时读。
+        let pointer_motion = browser.cursor_position.motion();
+        browser.preview_engine.share_pointer_motion(pointer_motion);
         browser.refresh_current_language();
         browser.apply_media_preferences_to_preview();
         browser.refresh_column_width_reference_content_width();
@@ -1040,14 +1043,10 @@ impl FileBrowser {
         let content = self.window_content(window);
         let shares_position =
             window == self.main_window || self.preview_engine.preview_window == Some(window);
-        let on_move = self.follows_pointer(window).then(|| {
-            Box::new(move |position| Message::CursorMoved { window, position })
-                as Box<dyn Fn(Point) -> Message>
-        });
         crate::pointer_tracker::track_pointer(
             content,
             shares_position.then(|| self.cursor_position.clone()),
-            on_move,
+            self.pointer_follow(window),
         )
     }
 

@@ -60,17 +60,20 @@ impl super::PreviewEngine {
                 viewport.apply_pointer_motion(position, panel, fit);
             }
             PreviewImageViewportMessage::PointerLeft => viewport.pointer = None,
-            PreviewImageViewportMessage::PanStarted => viewport.panning = true,
-            PreviewImageViewportMessage::PanEnded => viewport.panning = false,
-            PreviewImageViewportMessage::Zoomed(delta) => {
-                let anchor = viewport.pointer;
-                zoom(viewport, image_preview_zoom_multiplier(delta), anchor);
+            PreviewImageViewportMessage::PanStarted(at) => {
+                viewport.pointer = Some(at);
+                viewport.panning = true;
             }
-            PreviewImageViewportMessage::DoubleClicked => match actual {
+            PreviewImageViewportMessage::PanEnded => viewport.panning = false,
+            PreviewImageViewportMessage::Zoomed(delta, at) => {
+                viewport.pointer = Some(at);
+                zoom(viewport, image_preview_zoom_multiplier(delta), Some(at));
+            }
+            PreviewImageViewportMessage::DoubleClicked(at) => match actual {
                 _ if viewport.is_zoomed() => viewport.reset(),
                 Some(actual) => {
-                    let anchor = viewport.pointer;
-                    zoom(viewport, actual / viewport.scale, anchor);
+                    viewport.pointer = Some(at);
+                    zoom(viewport, actual / viewport.scale, Some(at));
                 }
                 None => {}
             },

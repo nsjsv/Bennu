@@ -49,13 +49,37 @@ impl FileBrowser {
         ])
     }
 
-    /// 这个窗口的指针移动要不要作为消息进来。每条消息都会重建所有窗口的界面并重画，
-    /// 所以只有跟着指针走的时候才要：按住左键的窗口（拖动、改大小、框选都要按住）、
-    /// 预览窗口与主窗口全屏视频（控制条随移动显隐）。其余时候位置只记在 `cursor_position`。
-    pub(super) fn follows_pointer(&self, window: window::Id) -> bool {
-        self.pointer_held_window == Some(window)
-            || self.preview_engine.preview_window == Some(window)
-            || (window == self.main_window && self.main_window_video_fullscreen)
+    /// 这个窗口的指针移动怎样作为消息进来。每条消息都会重建所有窗口的界面并重画，所以只在
+    /// 跟着指针走时才要：按住左键的窗口每次都要（拖动、改大小、框选都要按住）；预览画面按引擎
+    /// 要的来（底部控制条只要进出底部那一条，全屏时只在控件藏着时要）。其余时候位置和时刻只记在
+    /// `cursor_position`。
+    pub(super) fn pointer_follow(
+        &self,
+        window: window::Id,
+    ) -> crate::pointer_tracker::PointerFollow<'static, Message> {
+        use crate::pointer_tracker::PointerFollow;
+        use bennu_preview::engine::PointerInterest;
+
+        let on_move = move |position| Message::CursorMoved { window, position };
+        if self.pointer_held_window == Some(window) {
+            return PointerFollow::Moves(Box::new(on_move));
+        }
+        let interest = if self.preview_engine.preview_window == Some(window) {
+            self.preview_engine.preview_window_pointer_interest()
+        } else if window == self.main_window && self.main_window_video_fullscreen {
+            self.preview_engine.main_window_pointer_interest()
+        } else {
+            PointerInterest::Nothing
+        };
+        match interest {
+            PointerInterest::Nothing => PointerFollow::Still,
+            PointerInterest::Band { top, bottom } => PointerFollow::Band {
+                top,
+                bottom,
+                on_move: Box::new(on_move),
+            },
+            PointerInterest::Moves => PointerFollow::Moves(Box::new(on_move)),
+        }
     }
 
     pub(super) fn hold_pointer(&mut self, window: window::Id, button: mouse::Button) {
@@ -138,6 +162,13 @@ mod tests {
     use super::*;
     use crate::config;
 
+    fn follows_every_move(browser: &FileBrowser, window: window::Id) -> bool {
+        matches!(
+            browser.pointer_follow(window),
+            crate::pointer_tracker::PointerFollow::Moves(_)
+        )
+    }
+
     /// 主窗口只在按住左键期间把指针移动作为消息收进来；右键、松开之后都只静默记录。
     #[test]
     fn only_a_held_left_button_makes_the_main_window_follow_the_pointer() {
@@ -148,15 +179,27 @@ mod tests {
             button,
             status: event::Status::Ignored,
         };
-        assert!(!browser.follows_pointer(main));
+        assert!(!follows_every_move(&browser, main));
 
         drop(browser.update(press(mouse::Button::Right)));
-        assert!(!browser.follows_pointer(main));
+        assert!(!follows_every_move(&browser, main));
 
         drop(browser.update(press(mouse::Button::Left)));
-        assert!(browser.follows_pointer(main));
+        assert!(follows_every_move(&browser, main));
 
         drop(browser.update(Message::WindowPointerReleased(event::Status::Ignored)));
-        assert!(!browser.follows_pointer(main));
+        assert!(!follows_every_move(&browser, main));
+    }
+
+    /// 预览窗口里没有底部控制条（文本这类预览）时，移动只静默记录，不让所有窗口重建。
+    #[test]
+    fn a_preview_without_bottom_controls_does_not_follow_the_pointer() {
+        let (mut browser, _) = FileBrowser::new(config::default_user_config());
+        let preview = window::Id::unique();
+        browser.preview_engine.preview_window = Some(preview);
+        assert!(matches!(
+            browser.pointer_follow(preview),
+            crate::pointer_tracker::PointerFollow::Still
+        ));
     }
 }

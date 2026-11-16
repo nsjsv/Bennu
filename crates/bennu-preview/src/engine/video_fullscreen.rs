@@ -119,6 +119,10 @@ impl super::PreviewEngine {
         let Some(deadline) = self.fullscreen_idle.deadline else {
             return Task::none();
         };
+        // 控件亮着时移动不发消息（宿主只记时刻），截止时间按最后一次移动顺延。
+        let deadline = self
+            .last_pointer_motion()
+            .map_or(deadline, |moved| deadline.max(moved + FULLSCREEN_IDLE));
         let now = Instant::now();
         if now < deadline {
             return self.schedule_fullscreen_idle(deadline - now);

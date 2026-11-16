@@ -16,6 +16,7 @@ mod dialog;
 mod file_context_menu;
 mod file_operation_verification_settings;
 mod floating_panels;
+mod font_settings;
 mod incoming_message_panel;
 mod incoming_transfer_panel;
 mod link_receive;
@@ -122,7 +123,7 @@ use floating_panels::{
 };
 use incoming_message_panel::incoming_message_panel;
 use incoming_transfer_panel::incoming_transfer_confirmation_panel;
-use rendering_settings::renderer_restart_notice_panel;
+use rendering_settings::restart_notice_panel;
 use right_preview_panel::right_preview_panel;
 use search_filter_bar::search_filter_bar;
 use search_panel::search_input_panel;
@@ -462,9 +463,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
         browser
             .current_error_notification()
             .map(|(error, generation)| error_notification_panel(error, generation)),
-        browser
-            .renderer_restart_notice_visible
-            .then(renderer_restart_notice_panel),
+        browser.restart_notice_visible.then(restart_notice_panel),
     ]
     .into_iter()
     .flatten()

@@ -31,7 +31,19 @@ pub(crate) fn run(
     startup_rendering_environment: StartupRenderingEnvironment,
 ) -> iced::Result {
     startup_trace::mark("iced_run_entered");
-    bennu_theme::typography::adopt_system_font_families();
+    // 字体要在第一次排版前定下，等不到完整的设置加载；读不了就跟随系统，出错由那次加载提示。
+    let preferences = crate::config::read_user_preferences_without_repair(
+        &crate::config::default_state_database_path(),
+    )
+    .ok();
+    bennu_theme::font_families::adopt_font_families(
+        preferences
+            .as_ref()
+            .map_or("", |preferences| &preferences.interface_font),
+        preferences
+            .as_ref()
+            .map_or("", |preferences| &preferences.monospace_font),
+    );
     startup_trace::mark("system_fonts_adopted");
     iced::daemon(
         move || {

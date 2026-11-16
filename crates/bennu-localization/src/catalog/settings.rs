@@ -58,7 +58,11 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Discrete GPU", "独立显卡"),
     ("Restart Required", "需要重启"),
     ("Restart", "重启"),
-    ("Rendering GPU preference changes require restarting Bennu.", "更改渲染显卡偏好后需要重启文件管理器。"),
+    ("This change takes effect after restarting Bennu.", "重启文件管理器后生效。"),
+    ("Fonts", "字体"),
+    ("Interface font", "界面字体"),
+    ("Monospace font", "等宽字体"),
+    ("Code previews and the terminal", "代码预览和终端"),
     // 文件
     ("File display", "文件显示"),
     ("Show Hidden Files", "显示隐藏文件"),

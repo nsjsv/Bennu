@@ -14,10 +14,13 @@ use alacritty_terminal::vte::ansi::{Color as TermColor, CursorShape, NamedColor}
 use bennu_theme::icons::IconSymbol;
 use bennu_theme::typography::CAPTION_SIZE;
 
-/// 终端字号;等宽字体在 cosmic-text 下的 advance 约 0.6em。
+/// 终端字号。
 pub(crate) const FONT_SIZE: f32 = 14.0;
-/// 单元格宽度(像素):按等宽字体 advance 近似,run 内累计误差在 2px 内。
-pub(crate) const CELL_WIDTH: f32 = FONT_SIZE * 0.602;
+/// 单元格宽度(像素):一行按 run 整段排字,格子必须和所用等宽字体的 advance 一样宽,
+/// 字才落在自己的格子里。
+pub(crate) fn cell_width() -> f32 {
+    FONT_SIZE * bennu_theme::font_families::monospace_advance_em()
+}
 /// 单元格高度(像素)。
 pub(crate) const CELL_HEIGHT: f32 = FONT_SIZE * 1.4;
 /// 底部窄条高度(收起时)。
@@ -486,7 +489,7 @@ fn content_background_style(theme: &Theme) -> iced::widget::container::Style {
 
 /// 把面板内坐标换算成 (row, column) 网格单元;选区消息使用。
 pub(crate) fn grid_cell_for_position(position: Point) -> (usize, usize) {
-    let column = (position.x / CELL_WIDTH).floor().max(0.0) as usize;
+    let column = (position.x / cell_width()).floor().max(0.0) as usize;
     let row = (position.y / CELL_HEIGHT).floor().max(0.0) as usize;
     (row, column)
 }
@@ -633,11 +636,11 @@ fn cell_text_style(cell: &TerminalCell, theme: &Theme, highlight: Color) -> (Col
 }
 
 fn draw_cursor(frame: &mut Frame, row: usize, column: usize, shape: CursorShape, color: Color) {
-    let x = column as f32 * CELL_WIDTH;
+    let x = column as f32 * cell_width();
     let y = row as f32 * CELL_HEIGHT;
     match shape {
         CursorShape::Block => {
-            frame.fill_rectangle(Point::new(x, y), Size::new(CELL_WIDTH, CELL_HEIGHT), {
+            frame.fill_rectangle(Point::new(x, y), Size::new(cell_width(), CELL_HEIGHT), {
                 let mut background = color;
                 background.a = 0.35;
                 background
@@ -645,7 +648,7 @@ fn draw_cursor(frame: &mut Frame, row: usize, column: usize, shape: CursorShape,
         }
         CursorShape::Underline => frame.fill_rectangle(
             Point::new(x, y + CELL_HEIGHT - 2.0),
-            Size::new(CELL_WIDTH, 2.0),
+            Size::new(cell_width(), 2.0),
             color,
         ),
         _ => frame.fill_rectangle(Point::new(x, y), Size::new(2.0, CELL_HEIGHT), color),
@@ -668,7 +671,7 @@ fn flush_text_run(
     let content = std::mem::take(run);
     frame.fill_text(CanvasText {
         content,
-        position: Point::new(run_start as f32 * CELL_WIDTH, y),
+        position: Point::new(run_start as f32 * cell_width(), y),
         max_width: f32::INFINITY,
         color,
         size: iced::Pixels(FONT_SIZE),

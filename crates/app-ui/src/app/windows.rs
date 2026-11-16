@@ -234,24 +234,30 @@ impl FileBrowser {
         self.sidebar_bookmark_drop_slot = None;
         self.selection_marquee = None;
         let _ = self.cancel_address_editing();
-        let refresh_selected_category = match self.selected_settings_category {
-            SettingsCategory::Search => Task::batch([
-                self.refresh_search_service_status(),
-                self.refresh_search_path_configuration(),
-            ]),
-            SettingsCategory::Logs => self.refresh_application_logs(),
-            SettingsCategory::General
-            | SettingsCategory::Appearance
-            | SettingsCategory::Files
-            | SettingsCategory::Transfer
-            | SettingsCategory::Shortcuts
-            | SettingsCategory::About => Task::none(),
-        };
+        let refresh_selected_category =
+            self.refresh_settings_category(self.selected_settings_category);
         Task::batch([
             self.commit_rename_if_active(),
             self.ensure_settings_window(),
             refresh_selected_category,
         ])
+    }
+
+    /// 设置页显示前读它要的数据：搜索服务状态、日志、装了的字体。
+    fn refresh_settings_category(&mut self, category: SettingsCategory) -> Task<Message> {
+        match category {
+            SettingsCategory::Search => Task::batch([
+                self.refresh_search_service_status(),
+                self.refresh_search_path_configuration(),
+            ]),
+            SettingsCategory::Logs => self.refresh_application_logs(),
+            SettingsCategory::Appearance => self.read_installed_fonts(),
+            SettingsCategory::General
+            | SettingsCategory::Files
+            | SettingsCategory::Transfer
+            | SettingsCategory::Shortcuts
+            | SettingsCategory::About => Task::none(),
+        }
     }
 
     pub(super) fn select_settings_category(&mut self, category: SettingsCategory) -> Task<Message> {
@@ -263,19 +269,7 @@ impl FileBrowser {
         self.selected_settings_category = category;
         self.settings_subpage = None;
         let reset_scroll = self.reset_settings_detail_scroll();
-        let refresh = match category {
-            SettingsCategory::Search => Task::batch([
-                self.refresh_search_service_status(),
-                self.refresh_search_path_configuration(),
-            ]),
-            SettingsCategory::Logs => self.refresh_application_logs(),
-            SettingsCategory::General
-            | SettingsCategory::Appearance
-            | SettingsCategory::Files
-            | SettingsCategory::Transfer
-            | SettingsCategory::Shortcuts
-            | SettingsCategory::About => Task::none(),
-        };
+        let refresh = self.refresh_settings_category(category);
         Task::batch([reset_scroll, refresh])
     }
 

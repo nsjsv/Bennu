@@ -29,7 +29,7 @@ impl FileBrowser {
         self.pending_renderer_restart_environment = rendering_environment_status
             .restart_required
             .then_some(rendering_environment_status.environment);
-        self.renderer_restart_notice_visible = self.pending_renderer_restart_environment.is_some();
+        self.restart_notice_visible = self.pending_renderer_restart_environment.is_some();
         let configured_favorites = self.user_config.sidebar_favorites.clone();
         self.sidebar_locations = vec![home_sidebar_location(&home)];
         let configured_startup_request = self.configured_startup_session_plan_request(&home);
@@ -320,7 +320,7 @@ mod tests {
             PathBuf::from("/tmp/state.sqlite"),
         )));
 
-        assert!(!browser.renderer_restart_notice_visible);
+        assert!(!browser.restart_notice_visible);
         assert!(browser.pending_renderer_restart_environment.is_none());
     }
 

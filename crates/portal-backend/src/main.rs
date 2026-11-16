@@ -644,7 +644,8 @@ fn main() {
         })
         .expect("D-Bus 线程创建失败");
 
-    bennu_theme::typography::adopt_system_font_families();
+    let fonts = theme::read_stored_fonts(&theme::state_database_path());
+    bennu_theme::font_families::adopt_font_families(&fonts.interface_font, &fonts.monospace_font);
     let result = iced::daemon(boot, update, view_picker)
         .title(daemon_title)
         .settings(iced::Settings {

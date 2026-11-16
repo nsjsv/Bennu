@@ -686,8 +686,10 @@ pub(crate) enum Message {
     TerminalEmulatorSelected(TerminalEmulator),
     TerminalShellSelected(String),
     RenderingGpuPreferenceSelected(RenderingGpuPreference),
-    RendererRestartRequested,
-    RendererRestartNoticeDismissed,
+    RestartRequested,
+    RestartNoticeDismissed,
+    InstalledFontsRead(std::sync::Arc<bennu_theme::font_families::InstalledFonts>),
+    FontSelected(crate::app::font_settings::FontRole, String),
     /// 浏览内容区上的 Ctrl+滚轮：调密度档（普通滚轮在滚动控件里自己滚，不经过应用）。
     ViewDensityWheel(ScrollbarRegion, mouse::ScrollDelta),
     WindowChromeAnimationTick,

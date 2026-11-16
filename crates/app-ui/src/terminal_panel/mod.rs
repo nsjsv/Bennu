@@ -302,7 +302,7 @@ impl FileBrowser {
     }
 
     pub(crate) fn terminal_panel_grid_columns(&self) -> usize {
-        ((self.terminal_panel_inner_width() / view::CELL_WIDTH).floor() as usize).max(2)
+        ((self.terminal_panel_inner_width() / view::cell_width()).floor() as usize).max(2)
     }
 
     /// 面板高度稳定后把新尺寸同步给所有 PTY;动画期间跳过,结束时再收敛。
@@ -643,7 +643,7 @@ mod tests {
         assert_eq!(browser.terminal_panel_inner_width(), inner_width);
         assert_eq!(
             browser.terminal_panel_grid_columns(),
-            (inner_width / view::CELL_WIDTH).floor() as usize
+            (inner_width / view::cell_width()).floor() as usize
         );
     }
 

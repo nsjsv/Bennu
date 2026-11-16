@@ -24,6 +24,8 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+# 与 cosmic-text 用的同一个版本：字体回退按它的文字系统类型划分。
+unicode-script = "0.5"
 toml = "1.1.2"
 
 [dev-dependencies]

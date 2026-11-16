@@ -348,6 +348,10 @@ pub(crate) struct UserConfig {
     pub(crate) terminal_emulator: TerminalEmulator,
     /// 内嵌终端 shell;空串 = 跟随系统登录 shell。
     pub(crate) terminal_shell: String,
+    /// 界面字体家族;空串 = 跟随系统。启动时生效。
+    pub(crate) interface_font: String,
+    /// 等宽字体家族(代码预览、终端);空串 = 跟随系统。启动时生效。
+    pub(crate) monospace_font: String,
     pub(crate) rendering_gpu_preference: RenderingGpuPreference,
     pub(crate) search_content_indexing_enabled: bool,
     pub(crate) search_max_extract_bytes: u64,
@@ -487,6 +491,8 @@ pub(crate) fn default_user_config() -> UserConfig {
         network_connections: Vec::new(),
         terminal_emulator: DEFAULT_TERMINAL_EMULATOR,
         terminal_shell: String::new(),
+        interface_font: String::new(),
+        monospace_font: String::new(),
         rendering_gpu_preference: DEFAULT_RENDERING_GPU_PREFERENCE,
         search_content_indexing_enabled: true,
         search_max_extract_bytes: DEFAULT_SEARCH_MAX_EXTRACT_BYTES,
@@ -541,6 +547,8 @@ pub(crate) fn ui_thread_startup_config() -> UserConfig {
         network_connections: Vec::new(),
         terminal_emulator: DEFAULT_TERMINAL_EMULATOR,
         terminal_shell: String::new(),
+        interface_font: String::new(),
+        monospace_font: String::new(),
         rendering_gpu_preference: DEFAULT_RENDERING_GPU_PREFERENCE,
         search_content_indexing_enabled: true,
         search_max_extract_bytes: DEFAULT_SEARCH_MAX_EXTRACT_BYTES,

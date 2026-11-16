@@ -26,6 +26,7 @@ mod file_drag_edge_scroll;
 mod file_grouping_rail_scroll;
 mod file_operation_notifications;
 mod file_operations;
+pub(crate) mod font_settings;
 mod global_error;
 mod icon_grid_expansion;
 #[cfg(test)]
@@ -338,7 +339,9 @@ pub(crate) struct FileBrowser {
     pending_startup_directory_validation: Option<StartupDirectoryValidationRequest>,
     startup_directory_validation_generation: u64,
     pub(crate) rendering_gpu_preference: config::RenderingGpuPreference,
-    pub(crate) renderer_restart_notice_visible: bool,
+    /// 改了要重启才生效的设置（渲染显卡、字体）之后的提示。
+    pub(crate) restart_notice_visible: bool,
+    pub(crate) installed_fonts: font_settings::InstalledFontList,
     startup_rendering_environment: StartupRenderingEnvironment,
     pub(super) pending_renderer_restart_environment:
         Option<crate::startup_rendering::StartupRenderingEnvironment>,
@@ -728,7 +731,8 @@ impl FileBrowser {
             pending_startup_directory_validation: None,
             startup_directory_validation_generation: 0,
             rendering_gpu_preference: user_config.rendering_gpu_preference,
-            renderer_restart_notice_visible: false,
+            restart_notice_visible: false,
+            installed_fonts: font_settings::InstalledFontList::default(),
             startup_rendering_environment,
             pending_renderer_restart_environment: None,
             address_editing: None,

@@ -46,6 +46,11 @@ pub(crate) struct StoredUserPreferences {
     /// 内嵌终端使用的 shell;None 为旧版本数据,读取端回退系统登录 shell。
     #[serde(default)]
     pub terminal_shell: Option<String>,
+    /// 界面、等宽字体家族;None 为旧版本数据,空串 = 跟随系统。文件选择对话框也读这两个键。
+    #[serde(default)]
+    pub interface_font: Option<String>,
+    #[serde(default)]
+    pub monospace_font: Option<String>,
     pub file_operation_verification: String,
     pub browser_view_mode: String,
     /// 旧版本用边长而不是档位保存图标大小。只读：`icons_view_density` 缺失时
@@ -188,6 +193,8 @@ impl Default for StoredUserPreferences {
             network_connections: Vec::new(),
             terminal_emulator: "automatic".to_owned(),
             terminal_shell: None,
+            interface_font: None,
+            monospace_font: None,
             file_operation_verification: "basic_metadata".to_owned(),
             browser_view_mode: "columns".to_owned(),
             icon_grid_size: None,

@@ -21,6 +21,7 @@ pub mod anchored_popup;
 pub mod animation;
 pub mod column_geometry;
 pub mod controls;
+pub mod font_families;
 pub mod icon_grid_geometry;
 pub mod icons;
 pub mod measured_text;

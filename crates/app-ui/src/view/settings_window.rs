@@ -21,6 +21,7 @@ use super::auxiliary_window_layout::{
 use super::color_scheme_picker::color_scheme_row;
 use super::context_menu_settings::context_menu_settings_section;
 use super::file_operation_verification_settings::file_operation_verification_options;
+use super::font_settings::font_settings_group;
 use super::network_settings::network_thumbnails_row;
 use super::preview_settings::{preview_settings_entry_card, preview_settings_subpage_sections};
 use super::rendering_settings::rendering_gpu_preference_row;
@@ -39,7 +40,7 @@ use bennu_theme::controls::dropdown;
 use bennu_theme::controls::icon_button;
 use bennu_theme::controls::SegmentedChoice;
 
-const SETTINGS_DROPDOWN_WIDTH: f32 = 220.0;
+pub(super) const SETTINGS_DROPDOWN_WIDTH: f32 = 220.0;
 
 /// 顶栏里图标按钮的图标尺寸。
 const HEADER_ICON_SIZE: f32 = 14.0;
@@ -221,6 +222,7 @@ fn appearance_settings_sections(browser: &FileBrowser) -> Vec<Element<'_, Messag
             None,
             vec![theme_mode_row(browser), color_scheme_row(browser)],
         ),
+        font_settings_group(browser),
         settings_group(
             tr!("Window controls"),
             None,

@@ -176,6 +176,28 @@ fn read_stored_appearance(db_path: &Path) -> Option<StoredAppearance> {
     })
 }
 
+/// 主程序设置里选的界面、等宽字体，空串 = 跟随系统。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub(crate) struct StoredFonts {
+    #[serde(default)]
+    pub(crate) interface_font: String,
+    #[serde(default)]
+    pub(crate) monospace_font: String,
+}
+
+/// 进程启动时读一次：字体要在第一次排版前定下，之后改了要等这个进程重启。
+pub(crate) fn read_stored_fonts(db_path: &Path) -> StoredFonts {
+    let read = UserSettingsStore::new(db_path)
+        .and_then(|store| store.read_user_preferences(&StoredFonts::default()));
+    match read {
+        Ok(read) => read.map(|read| read.preferences).unwrap_or_default(),
+        Err(error) => {
+            tracing::warn!(%error, "Bennu settings could not be read; following the system fonts");
+            StoredFonts::default()
+        }
+    }
+}
+
 fn load_matugen_colors() -> Option<MatugenColors> {
     let path = file_core::app_dirs::app_config_dir().join("matugen.toml");
     let document = std::fs::read_to_string(path).ok()?;
@@ -186,6 +208,31 @@ fn load_matugen_colors() -> Option<MatugenColors> {
 mod tests {
     use super::*;
     use bennu_theme::ui_colors;
+
+    /// 字体键与主程序设置文档同名；旧文档没有这两个键时跟随系统。
+    #[test]
+    fn stored_fonts_read_the_application_keys() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let database = directory.path().join("state.sqlite");
+        assert_eq!(read_stored_fonts(&database).interface_font, "");
+
+        UserSettingsStore::new(&database).expect("create store");
+        rusqlite::Connection::open(&database)
+            .unwrap()
+            .execute(
+                "INSERT INTO user_preferences (preference_key, payload_json, updated_at_ms)
+                 VALUES (?1, ?2, 1)",
+                [
+                    bennu_state::USER_PREFERENCES_KEY,
+                    r#"{"theme_mode":"dark","interface_font":"Fira Sans","monospace_font":""}"#,
+                ],
+            )
+            .unwrap();
+
+        let fonts = read_stored_fonts(&database);
+        assert_eq!(fonts.interface_font, "Fira Sans");
+        assert_eq!(fonts.monospace_font, "");
+    }
 
     const GENERATED: &str = include_str!("../../bennu-theme/test-data/matugen.toml");
 

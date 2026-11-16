@@ -21,17 +21,18 @@ impl FileBrowser {
                 preference,
                 self.startup_rendering_environment.backend(),
             ));
-        self.renderer_restart_notice_visible = true;
+        self.restart_notice_visible = true;
         self.persist_app_config_command()
     }
 
-    pub(super) fn restart_with_selected_renderer(&mut self) -> Task<Message> {
-        let Some(environment) = self.pending_renderer_restart_environment.clone() else {
-            self.renderer_restart_notice_visible = false;
-            return Task::none();
-        };
+    /// 重启自己：改过渲染显卡就带上新的渲染环境，否则（字体）照原样重启。
+    pub(super) fn restart_to_apply_settings(&mut self) -> Task<Message> {
+        let environment = self
+            .pending_renderer_restart_environment
+            .as_ref()
+            .unwrap_or(&self.startup_rendering_environment);
 
-        match startup_rendering::restart_current_process(&environment) {
+        match startup_rendering::restart_current_process(environment) {
             Ok(()) => Task::none(),
             Err(error) => {
                 self.show_global_error(error);
@@ -40,8 +41,8 @@ impl FileBrowser {
         }
     }
 
-    pub(super) fn dismiss_renderer_restart_notice(&mut self) -> Task<Message> {
-        self.renderer_restart_notice_visible = false;
+    pub(super) fn dismiss_restart_notice(&mut self) -> Task<Message> {
+        self.restart_notice_visible = false;
         Task::none()
     }
 }
@@ -62,7 +63,7 @@ mod tests {
             browser.rendering_gpu_preference,
             RenderingGpuPreference::HighPerformanceGpu
         );
-        assert!(browser.renderer_restart_notice_visible);
+        assert!(browser.restart_notice_visible);
         assert_eq!(
             browser
                 .pending_renderer_restart_environment

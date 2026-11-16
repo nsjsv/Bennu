@@ -20,20 +20,17 @@ pub(super) fn rendering_gpu_preference_row(
     )
 }
 
-pub(super) fn renderer_restart_notice_panel() -> Element<'static, Message> {
+pub(super) fn restart_notice_panel() -> Element<'static, Message> {
     Dialog::new(
         tr!("Restart Required"),
-        readable_text(tr!(
-            "Rendering GPU preference changes require restarting Bennu."
-        ))
-        .width(Length::Fill),
+        readable_text(tr!("This change takes effect after restarting Bennu.")).width(Length::Fill),
     )
     .actions(vec![
         normal_button(readable_text(tr!("OK")))
-            .on_press(Message::RendererRestartNoticeDismissed)
+            .on_press(Message::RestartNoticeDismissed)
             .into(),
         suggested_button(readable_text(tr!("Restart")))
-            .on_press(Message::RendererRestartRequested)
+            .on_press(Message::RestartRequested)
             .into(),
     ])
     .width(RENDERER_RESTART_NOTICE_WIDTH)

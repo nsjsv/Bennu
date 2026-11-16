@@ -920,8 +920,10 @@ impl FileBrowser {
             Message::RenderingGpuPreferenceSelected(preference) => {
                 self.select_rendering_gpu_preference(preference)
             }
-            Message::RendererRestartRequested => self.restart_with_selected_renderer(),
-            Message::RendererRestartNoticeDismissed => self.dismiss_renderer_restart_notice(),
+            Message::RestartRequested => self.restart_to_apply_settings(),
+            Message::RestartNoticeDismissed => self.dismiss_restart_notice(),
+            Message::InstalledFontsRead(fonts) => self.accept_installed_fonts(fonts),
+            Message::FontSelected(role, family) => self.select_font(role, family),
             Message::ViewDensityWheel(region, delta) => {
                 self.handle_view_density_wheel(region, delta)
             }

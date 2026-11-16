@@ -24,10 +24,12 @@ use crate::model::{
     ListColumnKind, Message, ScrollbarRegion,
 };
 use crate::view::{pane_blank_area, rename_field, rename_input_id};
+use crate::virtual_range::{both_quiet, covered_offsets};
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::controls::inline_text_field;
 use bennu_theme::icons::rotated_chevron_right_view;
 use bennu_theme::measured_text::measured_middle_ellipsized_text;
+use bennu_theme::scroll_report::report_scroll;
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use bennu_theme::typography::{BODY_SIZE, CAPTION_SIZE};
 
@@ -120,6 +122,8 @@ pub(crate) fn list_browser_view<'a>(
 
     // 分组索引栏数据与行流同源派生;Pending 阶段(加载占位)无组头。
     let mut rail_entries = Vec::new();
+    // 已排的行盖得住视口的偏移范围：没按视口排（加载占位、空目录、还没有视口）时每次变化都要知道。
+    let mut covered = 0.0..0.0;
     if matches!(
         pane.current_directory_content(),
         DirectoryContentAvailability::Pending
@@ -185,6 +189,14 @@ pub(crate) fn list_browser_view<'a>(
                         ),
                     )
                 });
+            if let Some(viewport) = pane.list_viewport {
+                covered = covered_offsets(
+                    viewport.offset_y,
+                    LIST_OVERSCAN_ROWS as f32 * geometry.row_height,
+                    range.before_height,
+                    range.after_height,
+                );
+            }
             rows = rows.push(vertical_spacer(range.before_height));
 
             // 列配置每次渲染收集一次，避免每行每帧重复分配 Vec。
@@ -266,6 +278,24 @@ pub(crate) fn list_browser_view<'a>(
             rows = rows.push(vertical_spacer(range.after_height));
         }
     }
+    let rail_visible = crate::model::file_group_rail_visible(&rail_entries);
+    let viewport_position = pane
+        .list_viewport
+        .map(|viewport| viewport.offset_y)
+        .unwrap_or(0.0)
+        - LIST_HEADER_HEIGHT;
+    let quiet = if browser.selection_marquee.is_some() {
+        // 框选跟着每一帧的位置走。
+        0.0..0.0
+    } else if rail_visible {
+        let group = crate::model::active_file_group_span(&rail_entries, viewport_position);
+        both_quiet(
+            covered,
+            group.start + LIST_HEADER_HEIGHT..group.end + LIST_HEADER_HEIGHT,
+        )
+    } else {
+        covered
+    };
     let scrollbar_region = ScrollbarRegion::PaneList(pane.id);
     let smooth = smooth_scroll(&scrollbar_region);
     let list_scroll = scrollable(smooth.capture(rows))
@@ -273,13 +303,12 @@ pub(crate) fn list_browser_view<'a>(
         .direction(enhanced_vertical_scrollbar_direction())
         .style(enhanced_scrollbar_style)
         .width(Length::Fill)
-        .height(Length::Fill)
-        .on_scroll(move |viewport: scrollable::Viewport| {
-            let offset = viewport.absolute_offset();
-            let bounds = viewport.bounds();
-            Message::ListScrolled(pane.id, offset.y, bounds)
-        });
-    let list_scroll = smooth.drive(enhanced_scrollbar(list_scroll, ScrollbarAxis::Vertical));
+        .height(Length::Fill);
+    let list_scroll = report_scroll(
+        smooth.drive(enhanced_scrollbar(list_scroll, ScrollbarAxis::Vertical)),
+        quiet,
+        move |position| Message::ListScrolled(pane.id, position.offset.y, position.bounds),
+    );
 
     let pane_surface: Element<'a, Message> = container(list_scroll)
         .padding(LIST_CONTENT_PADDING)
@@ -290,13 +319,7 @@ pub(crate) fn list_browser_view<'a>(
     // 索引栏叠层:分组开启且组数 ≥2 时挂在滚动区之上;当前可视区顶部
     // 所在组在渲染期由派生 offsets 与视口偏移推得,不占持久状态。栏右
     // 缘自带避开滚动条 thumb 的间隙,不会遮挡 overlay 滚动条。
-    let pane_surface: Element<'a, Message> = if crate::model::file_group_rail_visible(&rail_entries)
-    {
-        let viewport_position = pane
-            .list_viewport
-            .map(|viewport| viewport.offset_y)
-            .unwrap_or(0.0)
-            - LIST_HEADER_HEIGHT;
+    let pane_surface: Element<'a, Message> = if rail_visible {
         let active_group = crate::model::active_file_group_index(&rail_entries, viewport_position);
         Stack::with_children([
             pane_surface,

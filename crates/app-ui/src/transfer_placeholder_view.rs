@@ -472,7 +472,7 @@ pub(crate) fn list_transfer_rows_vertical_bounds(
 }
 
 /// 光标落点 → 条目路径:沿行流按 `row.height` 累计命中 Entry 行,与
-/// 虚拟范围/reveal 用同一份高度口径,滚动帧的 hover 补偿重算才有与
+/// 虚拟范围/reveal 用同一份高度口径,滚动后的 hover 补偿重算才有与
 /// 渲染一致的落点。组头/状态行/占位行不是条目,命中即返回 None;
 /// 落点越过最后一行(表尾空白)同样为 None。
 pub(crate) fn list_entry_path_at_point<'a>(

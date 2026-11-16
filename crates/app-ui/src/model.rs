@@ -88,10 +88,11 @@ pub(crate) use list_view_preferences::{
 };
 mod file_grouping;
 pub(crate) use file_grouping::{
-    active_file_group_index, date_group_key, dynamic_size_buckets, file_group_rail_visible,
-    file_group_scroll_target_offset, file_grouping_entry_visible, kind_category_group_key,
-    name_initial_group_key, partition_files_into_groups, size_group_bucket_index, FileGroupKey,
-    FileGroupRailEntry, FileGroupSection, FileGroupingContext, FileGroupingMode,
+    active_file_group_index, active_file_group_span, date_group_key, dynamic_size_buckets,
+    file_group_rail_visible, file_group_scroll_target_offset, file_grouping_entry_visible,
+    kind_category_group_key, name_initial_group_key, partition_files_into_groups,
+    size_group_bucket_index, FileGroupKey, FileGroupRailEntry, FileGroupSection,
+    FileGroupingContext, FileGroupingMode,
 };
 mod list_directory_summary;
 pub(crate) use list_directory_summary::{
@@ -692,11 +693,12 @@ pub(crate) enum Message {
     WindowChromeAnimationTick,
     ColumnBrowserScrolled(BrowserPaneId, f32, f32),
     ColumnScrolled(BrowserPaneId, PathBuf, f32, f32),
-    /// 列表滚动帧:offset_y 为内容偏移,viewport 是 iced 实测的可视区
+    /// 列表滚动位置(`report_scroll` 只在应用需要时报告:越过已排行的余量、
+    /// 有输入、停下):offset_y 为内容偏移,viewport 是滚动区的可视区
     /// 窗口坐标矩形——hover 滚动补偿用它把存量光标位置换算成行流内
     /// 落点,与渲染同源,不另推布局。
     ListScrolled(BrowserPaneId, f32, iced::Rectangle),
-    /// 大图滚动帧:语义同 ListScrolled,网格无表头,flow 顶点即内容偏移。
+    /// 大图滚动位置:语义同 ListScrolled,网格无表头,flow 顶点即内容偏移。
     IconGridScrolled(BrowserPaneId, f32, iced::Rectangle),
     ColumnResizeStarted(BrowserPaneId, usize),
     OpenDirectoryFromMiddleClick(BrowserPaneId, PathBuf),

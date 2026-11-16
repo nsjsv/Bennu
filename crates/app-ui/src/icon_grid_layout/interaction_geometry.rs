@@ -229,7 +229,7 @@ pub(super) fn find_interactive_entry<'a>(
 
 /// 光标落点(面板内容坐标)→ 交互条目:列位换算与
 /// `collect_interactive_entries` 的命中几何同源(tile 宽 + 间隙的
-/// 等宽槽位、行内顶端对齐),滚动帧的 hover 补偿与 mouse_area 的
+/// 等宽槽位、行内顶端对齐),滚动后的 hover 补偿与 mouse_area 的
 /// bounds 门控因此落在同一格子上。占位格、组头条、列间隙与 tile
 /// 上下方的行内空白都不产生命中。
 pub(super) fn find_interactive_entry_at_point<'a>(

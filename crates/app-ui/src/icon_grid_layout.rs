@@ -406,7 +406,7 @@ impl<'a> IconGridLayout<'a> {
     }
 
     /// 光标落点(滚动内容坐标)→ 可交互条目路径:与键盘/reveal 的命中
-    /// 几何同源,滚动帧的 hover 补偿由此与渲染瓦片落在同一格子上;
+    /// 几何同源,滚动后的 hover 补偿由此与渲染瓦片落在同一格子上;
     /// 组头/占位/空白落点返回 None。
     pub(crate) fn entry_path_at_point(&self, point: Point) -> Option<&Path> {
         interaction_geometry::find_interactive_entry_at_point(

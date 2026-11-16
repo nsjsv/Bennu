@@ -8,6 +8,7 @@
 use bennu_preview::entry_icons::file_entry_icon_symbol;
 use bennu_preview::formatting::format_file_size;
 use bennu_theme::icons::rotated_chevron_right_view;
+use bennu_theme::scroll_report::report_scroll;
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use bennu_theme::smooth_scroll::{smooth_scroll, SmoothScroll};
 use bennu_theme::styles::{
@@ -23,7 +24,7 @@ use iced::widget::{image, Space};
 use iced::{alignment, Color, Element, Length, Padding, Size, Theme};
 
 use crate::picker_request::PickerKind;
-use crate::picker_session::scrollbar::{scroll_axis, scroll_id, scrollbar_on_scroll};
+use crate::picker_session::scrollbar::{scroll_axis, scroll_id, scrollbar_report};
 use crate::picker_session::{
     DirectoryListing, PickerRow, PickerSession, PickerViewMode, SessionMessage,
     SessionScrollRegion, LIST_ROW_HEIGHT, LIST_ROW_SPACING,
@@ -200,9 +201,12 @@ fn list_body(
         .width(Length::Fill)
         .height(Length::Fill)
         .direction(enhanced_vertical_scrollbar_direction())
-        .style(enhanced_scrollbar_style)
-        .on_scroll(scrollbar_on_scroll(region));
-    smooth.drive(enhanced_scrollbar(list_scroller, ScrollbarAxis::Vertical))
+        .style(enhanced_scrollbar_style);
+    report_scroll(
+        smooth.drive(enhanced_scrollbar(list_scroller, ScrollbarAxis::Vertical)),
+        session.scroll_quiet(region),
+        scrollbar_report(region),
+    )
 }
 
 fn centered_hint(label: &str, size: f32, color: Color) -> Element<'static, SessionMessage> {

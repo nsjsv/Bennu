@@ -1,6 +1,6 @@
 //! 分组索引栏的滚动定位:组序 → 组头顶点偏移 → 滚动目标偏移,并把
-//! 目标主动回写视口状态。iced 编程 `scroll_to` 不回发 on_scroll——只发
-//! 命令的话,滚动条缓存与"当前组高亮"都停在原地;因此滚动命令必须与
+//! 目标主动回写视口状态。编程 `scroll_to` 之后滚动区要停一会儿才报告位置——只发
+//! 命令的话,滚动条缓存与"当前组高亮"先停在原地;因此滚动命令必须与
 //! `ListScrolled`/`IconGridScrolled` 同款的状态写入成对出现。定位数据
 //! 与渲染同源:列表取合并行流、网格取根面板 flow,不重算分组。
 
@@ -191,7 +191,7 @@ mod tests {
             group_index: 0,
         }));
         // 组A顶点 0 + 表头留量 32 = 32;ListScrolled 同款状态写入必须发生
-        // (scroll_to 不回发 on_scroll,高亮与滚动条靠这次回写活过来)。
+        // (scroll_to 后位置要等滚动区停下才报告,高亮与滚动条靠这次回写立刻跟上)。
         assert_eq!(
             browser.pane().list_viewport.unwrap().offset_y,
             LIST_HEADER_HEIGHT

@@ -232,7 +232,7 @@ impl PickerSession {
     }
 
     /// 当前视图的纵向步长（滚动偏移 ↔ 行号换算与翻页共用）。
-    fn view_stride(&self) -> f32 {
+    pub(super) fn view_stride(&self) -> f32 {
         match self.view_mode() {
             PickerViewMode::Icons => icon_grid_geometry::row_height(ICON_GRID_EDGE),
             PickerViewMode::List | PickerViewMode::Columns => LIST_ROW_STRIDE,

@@ -170,8 +170,8 @@ fn update(daemon: &mut PickerDaemon, message: Message) -> Task<Message> {
             height,
         } => match daemon.windows.get(&window) {
             // 大图列数取自 List 视口宽缓存；多栏栏宽取自 ColumnsRail：
-            // resize 不发 on_scroll，必须探针回写，否则拉宽窗口列数/
-            // 栏宽要等下次滚动才更新。
+            // 栏容器的 on_scroll 不为 resize 发、列表的位置报告晚一帧，必须探针
+            // 回写，否则拉宽窗口列数/栏宽要等下次滚动才更新。
             Some(session) => scrollbar_layout_probe_task(window, session),
             None => preview_host::handle_window_resized(daemon, window, width, height),
         },

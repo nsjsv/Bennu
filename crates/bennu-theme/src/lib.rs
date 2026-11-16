@@ -26,6 +26,7 @@ pub mod icons;
 pub mod measured_text;
 pub mod metrics;
 pub mod preview_styles;
+pub mod scroll_report;
 pub mod scrollbar;
 pub mod segmented_buttons;
 pub mod smooth_scroll;

@@ -552,6 +552,45 @@ fn active_group_follows_viewport_top_position() {
     assert_eq!(active_file_group_index(&entries, 999.0), Some(2));
 }
 
+/// 组的范围与高亮同一口径：范围内任意位置高亮同一组，出了范围就换组。
+#[test]
+fn active_group_span_holds_the_highlight() {
+    let entries = [
+        FileGroupRailEntry {
+            index_label: "#".to_owned(),
+            top_offset: 0.0,
+        },
+        FileGroupRailEntry {
+            index_label: "A".to_owned(),
+            top_offset: 80.0,
+        },
+        FileGroupRailEntry {
+            index_label: "Z".to_owned(),
+            top_offset: 200.0,
+        },
+    ];
+    assert_eq!(
+        active_file_group_span(&entries, 10.0),
+        f32::NEG_INFINITY..80.0
+    );
+    assert_eq!(active_file_group_span(&entries, 120.0), 80.0..200.0);
+    assert_eq!(
+        active_file_group_span(&entries, 999.0),
+        200.0..f32::INFINITY
+    );
+    for position in [-30.0, 0.0, 79.0, 80.0, 199.0, 200.0, 999.0] {
+        let span = active_file_group_span(&entries, position);
+        let inside = [span.start.max(-30.0), (span.end - 1.0).min(999.0)];
+        for other in inside {
+            assert_eq!(
+                active_file_group_index(&entries, other),
+                active_file_group_index(&entries, position),
+                "{position} vs {other}"
+            );
+        }
+    }
+}
+
 #[test]
 fn scroll_target_aligns_group_top_and_clamps_to_content() {
     // 表头留量加回:组头顶点对齐视口顶部。

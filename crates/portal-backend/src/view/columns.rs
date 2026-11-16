@@ -8,6 +8,7 @@ use bennu_preview::entry_icons::file_entry_icon_symbol;
 use bennu_theme::column_geometry::{ColumnEntryGeometry, COLUMN_ENTRY_TEXT_SIZE, COLUMN_PADDING};
 use bennu_theme::icons::IconSymbol;
 use bennu_theme::measured_text::measured_middle_ellipsized_text;
+use bennu_theme::scroll_report::report_scroll;
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use bennu_theme::styles::{
     enhanced_horizontal_scrollbar_direction, enhanced_scrollbar_style,
@@ -19,7 +20,7 @@ use file_core::MediaByName;
 use iced::widget::{container, image, mouse_area, row, scrollable, Space};
 use iced::{alignment, Element, Length, Theme};
 
-use crate::picker_session::scrollbar::{scroll_id, scrollbar_on_scroll};
+use crate::picker_session::scrollbar::{scroll_id, scrollbar_on_scroll, scrollbar_report};
 use crate::picker_session::{
     PickerSession, SessionMessage, SessionScrollRegion, COLUMNS_SCALE, MIN_LANE_WIDTH,
 };
@@ -107,9 +108,12 @@ fn lane_view(
         .width(Length::Fill)
         .height(Length::Fill)
         .direction(enhanced_vertical_scrollbar_direction())
-        .style(enhanced_scrollbar_style)
-        .on_scroll(scrollbar_on_scroll(region));
-    let scrolled = smooth.drive(enhanced_scrollbar(scroller, ScrollbarAxis::Vertical));
+        .style(enhanced_scrollbar_style);
+    let scrolled = report_scroll(
+        smooth.drive(enhanced_scrollbar(scroller, ScrollbarAxis::Vertical)),
+        session.scroll_quiet(region),
+        scrollbar_report(region),
+    );
     container(scrolled)
         .width(Length::Fixed(lane_width.max(MIN_LANE_WIDTH)))
         .height(Length::Fill)

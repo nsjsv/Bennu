@@ -110,7 +110,7 @@ pub(crate) enum SessionMessage {
         region: SessionScrollRegion,
         viewport: ScrollbarViewport,
     },
-    /// 视口回传（on_scroll 持续刷业务视口缓存）。
+    /// 视口回传（列表/大图/各栏由 `report_scroll` 在需要时报告，栏容器走 on_scroll）。
     ScrollbarViewportChanged {
         region: SessionScrollRegion,
         viewport: ScrollbarViewport,

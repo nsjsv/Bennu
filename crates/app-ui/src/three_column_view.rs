@@ -25,11 +25,14 @@ use crate::formatting::empty_location_message;
 use crate::input_blocking_space::input_blocking_space;
 use crate::model::{BrowserPaneId, ExpandedDirectoryStatus, Message, ScrollbarRegion};
 use crate::view::{column_browser_scroll_id, pane_blank_area, rename_field, rename_input_id};
-use crate::virtual_range::{initial_virtual_range, virtual_range_for_viewport, VirtualRange};
+use crate::virtual_range::{
+    covered_offsets, initial_virtual_range, virtual_range_for_viewport, VirtualRange,
+};
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::controls::inline_text_field;
 use bennu_theme::icons::IconSymbol;
 use bennu_theme::measured_text::measured_middle_ellipsized_text;
+use bennu_theme::scroll_report::report_scroll;
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 
 pub(crate) const COLUMN_RESIZE_DIVIDER_WIDTH: f32 = 5.0;
@@ -195,6 +198,8 @@ fn directory_column<'a>(
         &browser.operation_queue,
         directory,
     );
+    // 已排的行盖得住视口的偏移范围：没按视口排（加载中、空目录、还没有视口）时每次变化都要知道。
+    let mut covered = 0.0..0.0;
     let content = match column_content(pane, directory) {
         ColumnContent::Entries(entries) => {
             let merged_items = crate::transfer_placeholders::merge_entries_with_placeholders(
@@ -226,6 +231,14 @@ fn directory_column<'a>(
                         ),
                     )
                 });
+            if let Some(viewport) = pane.column_viewports.get(directory) {
+                covered = covered_offsets(
+                    viewport.offset_y,
+                    COLUMN_OVERSCAN_ROWS as f32 * geometry.entry_scroll_height,
+                    range.before_height,
+                    range.after_height,
+                );
+            }
             let mut rows = Vec::with_capacity(range.end.saturating_sub(range.start));
             for item_index in range.start..range.end {
                 let Some(item) = merged_items.get(item_index) else {
@@ -299,13 +312,24 @@ fn directory_column<'a>(
         .direction(enhanced_vertical_scrollbar_direction())
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(enhanced_scrollbar_style)
-        .on_scroll(move |viewport: scrollable::Viewport| {
-            let offset = viewport.absolute_offset();
-            let bounds = viewport.bounds();
-            Message::ColumnScrolled(pane.id, scroll_directory.clone(), offset.y, bounds.height)
-        });
-    let column_scroll = smooth.drive(enhanced_scrollbar(column_scroll, ScrollbarAxis::Vertical));
+        .style(enhanced_scrollbar_style);
+    let column_scroll = report_scroll(
+        smooth.drive(enhanced_scrollbar(column_scroll, ScrollbarAxis::Vertical)),
+        // 框选跟着每一帧的位置走。
+        if browser.selection_marquee.is_some() {
+            0.0..0.0
+        } else {
+            covered
+        },
+        move |position| {
+            Message::ColumnScrolled(
+                pane.id,
+                scroll_directory.clone(),
+                position.offset.y,
+                position.bounds.height,
+            )
+        },
+    );
 
     let column = container(column_scroll)
         .width(Length::Fixed(browser.column_width(column_index)))

@@ -521,6 +521,23 @@ pub(crate) fn active_file_group_index(
         .rposition(|entry| entry.top_offset <= position + f32::EPSILON)
 }
 
+/// 视口顶点在内容流里落在这个范围时 [`active_file_group_index`] 的结果不变：滚动时索引栏的高亮
+/// 只在越过组边界时才要重画。顶点被夹到 0 以上，所以从头开始的那一组下边不设限。
+pub(crate) fn active_file_group_span(
+    entries: &[FileGroupRailEntry],
+    viewport_position: f32,
+) -> std::ops::Range<f32> {
+    let active = active_file_group_index(entries, viewport_position);
+    let start = active
+        .map(|index| entries[index].top_offset)
+        .filter(|top| *top > 0.0)
+        .unwrap_or(f32::NEG_INFINITY);
+    let end = entries
+        .get(active.map_or(0, |index| index + 1))
+        .map_or(f32::INFINITY, |next| next.top_offset);
+    start..end
+}
+
 /// 索引栏点击/扫动的滚动目标：组头顶点对齐视口顶部，`header_allowance`
 /// 是内容流里组头顶点之前的固定留量（列表为表头高，与 reveal/虚拟范围
 /// 同一口径），并夹到内容可支撑的最大偏移内，视口越界自愈不被击穿。

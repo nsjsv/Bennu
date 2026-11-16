@@ -1,10 +1,10 @@
-//! hover 所有权补偿:hovered_entry 恒等于"光标正下方那个条目",但
-//! 滚动/虚拟窗口切换只是平移行的 bounds,iced 的 mouse_area 按 bounds
-//! 门控重算,不会为静止的光标补发 enter/exit——高亮会残留在旧行。
-//! 列表/大图的滚动帧(平滑滚动惯性逐帧触发 Scrolled)在这里用 iced
-//! 实测的可视区矩形把存量光标位置(`cursor_position`,拖拽位图与框选
-//! 共用的同一事实源)换算成内容落点,按渲染同源的几何重算 hover。
-//! 指针移动产生的 enter/exit 仍是主通道,本模块只是逐帧补偿路径。
+//! hover 所有权补偿:hovered_entry 恒等于"光标正下方那个条目"。同一批
+//! 行滚动时 mouse_area 按平移后的光标自己补发 enter/exit;但虚拟窗口
+//! 切换后同一位置的行控件换成了别的条目,沿用的悬停状态对不上新行,
+//! 高亮会残留在旧行。滚动区报告位置(`ListScrolled`/`IconGridScrolled`,
+//! 越过余量时窗口就在这时切换)时,这里用可视区矩形把存量光标位置
+//! (`cursor_position`,拖拽位图与框选共用的同一事实源)换算成内容落点,
+//! 按渲染同源的几何重算 hover。指针移动产生的 enter/exit 仍是主通道。
 
 use std::path::{Path, PathBuf};
 
@@ -120,8 +120,8 @@ impl FileBrowser {
     }
 }
 
-/// 窗口坐标光标 → 滚动内容坐标:viewport 是 iced on_scroll 实测的
-/// 可视区窗口矩形,内容偏移加上视口内偏移即落点,滚动帧间无陈旧量。
+/// 窗口坐标光标 → 滚动内容坐标:viewport 是滚动区报告的可视区窗口
+/// 矩形,内容偏移加上视口内偏移即落点。
 fn cursor_content_point(cursor: Point, viewport: Rectangle, offset_y: f32) -> Point {
     Point::new(cursor.x - viewport.x, cursor.y - viewport.y + offset_y)
 }

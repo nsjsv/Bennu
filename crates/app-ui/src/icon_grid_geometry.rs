@@ -85,6 +85,25 @@ pub(crate) fn visible_vertical_window(
     }
 }
 
+/// 按 [`visible_vertical_window`] 排好的格子盖得住视口的偏移范围（交给 `report_scroll`）；视口还没量到、
+/// 从顶部兜底排时每次变化都要知道。
+pub(crate) fn covered_grid_offsets(
+    viewport: IconGridViewport,
+    icon_edge: u32,
+    total_height: f32,
+) -> std::ops::Range<f32> {
+    if viewport.width <= f32::EPSILON || viewport.height <= f32::EPSILON {
+        return 0.0..0.0;
+    }
+    let (top, bottom) = visible_vertical_window(viewport, icon_edge, viewport.height);
+    crate::virtual_range::covered_offsets(
+        viewport.offset_y,
+        ICON_GRID_OVERSCAN_ROWS as f32 * row_height(icon_edge),
+        top,
+        total_height - bottom,
+    )
+}
+
 #[cfg(test)]
 pub(crate) fn scroll_delta_to_reveal_row(
     viewport: IconGridViewport,

@@ -8,6 +8,7 @@ use bennu_theme::icon_grid_geometry::{
     grid_gap, icon_label_spacing, label_height, label_size, tile_padding_horizontal,
     tile_padding_vertical, tile_visual_height, tile_width, ICON_GRID_CONTENT_PADDING,
 };
+use bennu_theme::scroll_report::report_scroll;
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use bennu_theme::styles::{
     enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction, hovered_row_style,
@@ -18,7 +19,7 @@ use file_core::MediaByName;
 use iced::widget::{column, container, image, mouse_area, row, scrollable};
 use iced::{alignment, Element, Length, Padding, Theme};
 
-use crate::picker_session::scrollbar::{scroll_id, scrollbar_on_scroll};
+use crate::picker_session::scrollbar::{scroll_id, scrollbar_report};
 use crate::picker_session::{
     PickerRow, PickerSession, SessionMessage, SessionScrollRegion, ICON_GRID_EDGE,
 };
@@ -60,9 +61,12 @@ pub(super) fn icon_grid_body(
         .width(Length::Fill)
         .height(Length::Fill)
         .direction(enhanced_vertical_scrollbar_direction())
-        .style(enhanced_scrollbar_style)
-        .on_scroll(scrollbar_on_scroll(region));
-    smooth.drive(enhanced_scrollbar(scroller, ScrollbarAxis::Vertical))
+        .style(enhanced_scrollbar_style);
+    report_scroll(
+        smooth.drive(enhanced_scrollbar(scroller, ScrollbarAxis::Vertical)),
+        session.scroll_quiet(region),
+        scrollbar_report(region),
+    )
 }
 
 /// 单个 tile：96px 图标/缩略图槽 + 最多 3 行居中文件名，交互与列表行

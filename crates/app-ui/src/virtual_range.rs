@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct VirtualRange {
     pub(crate) start: usize,
@@ -94,9 +96,51 @@ fn heights_for_range(total_rows: usize, row_height: f32, start: usize, end: usiz
     }
 }
 
+/// 滚动区偏移里应用不用知道的范围（交给 `report_scroll`）：按偏移 `offset` 排内容时视口上下各多排了
+/// `overscan`，挪出多排的一半之前，排好的内容仍盖得住视口、还多出一半。没排的部分是零的那一头
+/// （顶到内容头/尾）不设限。
+pub(crate) fn covered_offsets(
+    offset: f32,
+    overscan: f32,
+    unrendered_above: f32,
+    unrendered_below: f32,
+) -> Range<f32> {
+    let reach = overscan / 2.0;
+    let start = if unrendered_above > 0.0 {
+        offset - reach
+    } else {
+        f32::NEG_INFINITY
+    };
+    let end = if unrendered_below > 0.0 {
+        offset + reach
+    } else {
+        f32::INFINITY
+    };
+    start..end
+}
+
+/// 两个「不用知道」的范围都满足时才不用知道。
+pub(crate) fn both_quiet(a: Range<f32>, b: Range<f32>) -> Range<f32> {
+    a.start.max(b.start)..a.end.min(b.end)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn covered_offsets_reach_half_the_overscan_and_open_at_the_ends() {
+        assert_eq!(covered_offsets(500.0, 160.0, 340.0, 900.0), 420.0..580.0);
+        assert_eq!(
+            covered_offsets(40.0, 160.0, 0.0, 900.0),
+            f32::NEG_INFINITY..120.0
+        );
+        assert_eq!(
+            covered_offsets(950.0, 160.0, 790.0, 0.0),
+            870.0..f32::INFINITY
+        );
+        assert_eq!(both_quiet(420.0..580.0, 300.0..500.0), 420.0..500.0);
+    }
 
     #[test]
     fn viewport_at_start_includes_overscan() {

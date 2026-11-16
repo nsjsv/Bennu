@@ -35,6 +35,7 @@ use crate::icon_grid_layout::{
 use crate::input_blocking_space::input_blocking_space;
 use crate::model::{IconGridExpansionAnchor, IconGridViewport, Message, ScrollbarRegion};
 use crate::view::{pane_blank_area, rename_field, rename_input_id};
+use crate::virtual_range::both_quiet;
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::controls::icon_button_style;
 use bennu_theme::controls::inline_text_field;
@@ -43,6 +44,7 @@ use bennu_theme::measured_text::{
     measured_middle_ellipsized_centered_emphasized_text,
     measured_middle_ellipsized_wrapped_text_with_tooltip,
 };
+use bennu_theme::scroll_report::report_scroll;
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use bennu_theme::typography::{BOLD, CAPTION_SIZE, HEADING_SIZE};
 
@@ -78,6 +80,8 @@ pub(crate) fn icon_grid_view<'a>(
         .unwrap_or_default();
     // 分组索引栏数据与根面板 flow 同源派生;Pending/空目录无组头段。
     let mut rail_entries = Vec::new();
+    // 排好的格子盖得住视口的偏移范围：没按视口排（加载中、空目录）时每次变化都要知道。
+    let mut covered = 0.0..0.0;
     let content: Element<'a, Message> = match pane.current_directory_content() {
         DirectoryContentAvailability::Pending => Space::new().height(Length::Fill).into(),
         DirectoryContentAvailability::Available([]) if transfer_placeholders.is_empty() => {
@@ -87,6 +91,11 @@ pub(crate) fn icon_grid_view<'a>(
             let layout =
                 browser.icon_grid_layout_for_pane_with_placeholders(pane, &transfer_placeholders);
             rail_entries = layout.root().file_group_rail_entries();
+            covered = crate::icon_grid_geometry::covered_grid_offsets(
+                pane.icon_grid_viewport,
+                browser.user_config().icons_icon_edge(),
+                layout.total_height(),
+            );
             render_panel(
                 browser,
                 pane,
@@ -99,6 +108,18 @@ pub(crate) fn icon_grid_view<'a>(
             )
         }
     };
+    let rail_visible = crate::model::file_group_rail_visible(&rail_entries);
+    let quiet = if browser.selection_marquee.is_some() {
+        // 框选跟着每一帧的位置走。
+        0.0..0.0
+    } else if rail_visible {
+        both_quiet(
+            covered,
+            crate::model::active_file_group_span(&rail_entries, pane.icon_grid_viewport.offset_y),
+        )
+    } else {
+        covered
+    };
     let scrollbar_region = ScrollbarRegion::PaneIcons(pane_id);
     let smooth = smooth_scroll(&scrollbar_region);
     let grid_scroll = scrollable(smooth.capture(content))
@@ -106,13 +127,12 @@ pub(crate) fn icon_grid_view<'a>(
         .direction(enhanced_vertical_scrollbar_direction())
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(enhanced_scrollbar_style)
-        .on_scroll(move |viewport: scrollable::Viewport| {
-            let offset = viewport.absolute_offset();
-            let bounds = viewport.bounds();
-            Message::IconGridScrolled(pane_id, offset.y, bounds)
-        });
-    let grid_scroll = smooth.drive(enhanced_scrollbar(grid_scroll, ScrollbarAxis::Vertical));
+        .style(enhanced_scrollbar_style);
+    let grid_scroll = report_scroll(
+        smooth.drive(enhanced_scrollbar(grid_scroll, ScrollbarAxis::Vertical)),
+        quiet,
+        move |position| Message::IconGridScrolled(pane_id, position.offset.y, position.bounds),
+    );
 
     let pane_surface: Element<'a, Message> = container(grid_scroll)
         .width(Length::Fill)
@@ -121,8 +141,7 @@ pub(crate) fn icon_grid_view<'a>(
         .into();
     // 索引栏叠层:分组开启且组数 ≥2 时挂上;当前可视区顶部所在组由
     // flow 派生的 offsets 与视口偏移在渲染期推得,不占持久状态。
-    let pane_surface: Element<'a, Message> = if crate::model::file_group_rail_visible(&rail_entries)
-    {
+    let pane_surface: Element<'a, Message> = if rail_visible {
         let active_group =
             crate::model::active_file_group_index(&rail_entries, pane.icon_grid_viewport.offset_y);
         Stack::with_children([

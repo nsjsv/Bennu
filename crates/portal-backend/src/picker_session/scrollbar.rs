@@ -6,11 +6,12 @@
 //! 内所有窗口的控件树，widget Id 必须带会话命名空间（请求路径），
 //! 才能保证只命中本窗口的滚动容器。
 
+use bennu_theme::scroll_report::ScrollPosition;
 use bennu_theme::scrollbar::scrollbar_layout_probe;
 use bennu_theme::smooth_scroll::SmoothScrollAxis;
 use iced::advanced::widget as advanced_widget;
 use iced::widget::scrollable;
-use iced::Task;
+use iced::{Size, Task, Vector};
 
 use super::{PickerSession, PickerViewMode, SessionMessage};
 
@@ -77,7 +78,7 @@ impl SessionMessage {
 }
 
 /// `Scrollable::on_scroll` 回调：快照视口并发 `ScrollbarViewportChanged`。
-/// 只接在业务要读视口的区域（列表、多栏栏容器与各栏）。
+/// 只接在很少滚动的多栏栏容器（横向）上。
 pub(crate) fn scrollbar_on_scroll(
     region: SessionScrollRegion,
 ) -> impl Fn(scrollable::Viewport) -> SessionMessage {
@@ -85,17 +86,45 @@ pub(crate) fn scrollbar_on_scroll(
         let absolute_offset = viewport.absolute_offset();
         let bounds = viewport.bounds();
         let content_bounds = viewport.content_bounds();
-        SessionMessage::ScrollbarViewportChanged {
+        viewport_changed(
             region,
-            viewport: ScrollbarViewport {
-                offset_x: absolute_offset.x,
-                offset_y: absolute_offset.y,
-                viewport_width: bounds.width,
-                viewport_height: bounds.height,
-                content_width: content_bounds.width,
-                content_height: content_bounds.height,
-            },
-        }
+            Vector::new(absolute_offset.x, absolute_offset.y),
+            bounds.size(),
+            content_bounds.size(),
+        )
+    }
+}
+
+/// `report_scroll` 回调：列表、大图和各栏只在需要时（越过缩略图余量、有输入、停下）报告位置。
+pub(crate) fn scrollbar_report(
+    region: SessionScrollRegion,
+) -> impl Fn(ScrollPosition) -> SessionMessage {
+    move |position| {
+        viewport_changed(
+            region,
+            position.offset,
+            position.bounds.size(),
+            position.content_bounds.size(),
+        )
+    }
+}
+
+fn viewport_changed(
+    region: SessionScrollRegion,
+    offset: Vector,
+    viewport: Size,
+    content: Size,
+) -> SessionMessage {
+    SessionMessage::ScrollbarViewportChanged {
+        region,
+        viewport: ScrollbarViewport {
+            offset_x: offset.x,
+            offset_y: offset.y,
+            viewport_width: viewport.width,
+            viewport_height: viewport.height,
+            content_width: content.width,
+            content_height: content.height,
+        },
     }
 }
 
@@ -107,8 +136,8 @@ impl PickerSession {
         self.scroll_viewports.get(region).copied()
     }
 
-    /// 键盘导航滚动跟随的偏移写入收口：程序化 scroll_to 不回发
-    /// on_scroll，视口缓存在此同步（真实几何由随后的布局探针回信
+    /// 键盘导航滚动跟随的偏移写入收口：程序化 scroll_to 后位置要等
+    /// 滚动区停下才报告，视口缓存在此同步（真实几何由随后的布局探针回信
     /// 纠偏）；同时打断滚轮惯性——键盘滚动即时到位，不允许惯性把
     /// 偏移再拉走。
     pub(crate) fn record_keyboard_list_scroll(&mut self, offset_y: f32) {
@@ -153,7 +182,7 @@ impl PickerSession {
     }
 
     /// 内容骤变后（导航/展开/扫描回填/过滤切换）把当帧布局写回视口缓存：
-    /// iced 在内容塞得下时不发 on_scroll，缓存只能靠探针自愈。多栏视图下
+    /// 位置报告要等下一次重画，栏容器的 on_scroll 在内容塞得下时不发，缓存靠探针立刻对上。多栏视图下
     /// 追加栏容器与各栏（逐栏视口缓存驱动键盘揭示与缩略图可见区间）。
     pub(crate) fn scrollbar_layout_probe_tasks(&self) -> Vec<Task<SessionMessage>> {
         let mut regions = vec![SessionScrollRegion::List];

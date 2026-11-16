@@ -6,9 +6,11 @@
 //! update 路径统一生效。本模块不 import iced 类型，可脱离窗口单测。
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use bennu_theme::column_geometry::ColumnEntryGeometry;
 use file_core::entry::FileKind;
 use file_core::DirectoryEntry;
 // 本模块名与 crate 同名，mod.rs 侧的 `use thumbnails::…` 解析到本模块；
@@ -17,6 +19,7 @@ use file_core::DirectoryEntry;
 use thumbnails::ThumbnailKey;
 pub(crate) use thumbnails::{CachedThumbnail, ThumbnailRequest};
 
+use super::columns::COLUMNS_SCALE;
 use super::scrollbar::SessionScrollRegion;
 use super::view_mode::LIST_THUMBNAIL_EDGE;
 use super::{PickerRow, PickerSession, PickerViewMode};
@@ -271,6 +274,22 @@ impl SessionThumbnailState {
 }
 
 impl PickerSession {
+    /// 交给 `report_scroll` 的「不用知道」的范围：缩略图按上次报告的位置上下各多排了
+    /// `VISIBLE_MARGIN_ROWS` 行，挪出一半之前不用重排。还没有位置时每次变化都要知道。
+    pub(crate) fn scroll_quiet(&self, region: SessionScrollRegion) -> Range<f32> {
+        let Some(viewport) = self.scrollbar_viewport_for(&region) else {
+            return 0.0..0.0;
+        };
+        let stride = match region {
+            SessionScrollRegion::ColumnsLane(_) => {
+                ColumnEntryGeometry::for_scale(COLUMNS_SCALE).entry_scroll_height
+            }
+            _ => self.view_stride(),
+        };
+        let reach = VISIBLE_MARGIN_ROWS as f32 / 2.0 * stride;
+        viewport.offset_y - reach..viewport.offset_y + reach
+    }
+
     /// 重算可见区间并入队缺失请求。无视口缓存（首帧探针未回）或
     /// 视口退化时不发请求，等滚动条布局回信触发。可见区间与请求档
     /// 位按视图模式计算：列表/大图用 List 视口；多栏逐栏用各自栏

@@ -170,8 +170,8 @@ impl FileBrowser {
     }
 
     /// 切到 List 后列表的真实起始视口:有可计算的主选中项时与
-    /// `view_switch_reveal_scroll` 的揭示落点一致(scroll_to 不触发
-    /// on_scroll,落点只能在此同步推算),否则列表从顶部开始。
+    /// `view_switch_reveal_scroll` 的揭示落点一致(scroll_to 后位置要等
+    /// 滚动区停下才报告,落点只能在此同步推算),否则列表从顶部开始。
     /// 不能沿用 `column_viewports` 记录:切换瞬间该键下还是多栏当前列
     /// 的滚动偏移,按它取 demand 范围会漏掉列表首屏行的元数据。
     fn list_demand_viewport_after_view_switch(&self) -> ColumnViewport {

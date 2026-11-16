@@ -154,22 +154,33 @@ pub(crate) fn merge_entries_with_placeholders<'a>(
     placeholders: &[TransferPlaceholder],
     sort: TransferSortOptions,
 ) -> Vec<MergedTransferItem<'a>> {
-    let entry_names: std::collections::HashSet<&OsStr> =
-        entries.iter().map(|entry| entry.name()).collect();
-    let mut decorations: std::collections::HashMap<String, TransferPlaceholder> =
-        std::collections::HashMap::new();
-    let mut unmatched: Vec<TransferPlaceholder> = Vec::new();
-    for placeholder in placeholders {
-        if entry_names.contains(OsStr::new(&placeholder.name)) {
-            decorations.insert(placeholder.name.clone(), placeholder.clone());
-        } else {
-            unmatched.push(placeholder.clone());
+    // 同名查找只替占位做：占位通常没有或只有几个，目录却可能有几万个条目，每次排版都把所有条目名
+    // 放进集合（原来的做法）在大目录里一次就要几十毫秒。同名的占位以最后一个为准。
+    let mut wanted: std::collections::HashMap<&OsStr, &TransferPlaceholder> = placeholders
+        .iter()
+        .map(|placeholder| (OsStr::new(placeholder.name.as_str()), placeholder))
+        .collect();
+    let mut matched: std::collections::HashSet<&OsStr> = std::collections::HashSet::new();
+    let mut decorations: Vec<(usize, TransferPlaceholder)> = Vec::new();
+    for (index, entry) in entries.iter().enumerate() {
+        if wanted.is_empty() {
+            break;
+        }
+        if let Some(placeholder) = wanted.remove(entry.name()) {
+            matched.insert(OsStr::new(placeholder.name.as_str()));
+            decorations.push((index, placeholder.clone()));
         }
     }
+    let mut unmatched: Vec<TransferPlaceholder> = placeholders
+        .iter()
+        .filter(|placeholder| !matched.contains(OsStr::new(placeholder.name.as_str())))
+        .cloned()
+        .collect();
     unmatched.sort_by(|left, right| compare_placeholder_with_placeholder(left, right, sort));
     let mut merged = Vec::with_capacity(entries.len() + unmatched.len());
     let mut pending = unmatched.iter().peekable();
-    for entry in entries {
+    let mut decorations = decorations.into_iter().peekable();
+    for (index, entry) in entries.iter().enumerate() {
         while let Some(placeholder) = pending.peek() {
             if compare_placeholder_with_entry(placeholder, entry, sort) != Ordering::Less {
                 break;
@@ -178,7 +189,9 @@ pub(crate) fn merge_entries_with_placeholders<'a>(
                 pending.next().unwrap().clone(),
             ));
         }
-        let transfer = decorations.remove(entry.name().to_string_lossy().as_ref());
+        let transfer = decorations
+            .next_if(|(decorated, _)| *decorated == index)
+            .map(|(_, placeholder)| placeholder);
         merged.push(MergedTransferItem::Entry { entry, transfer });
     }
     merged.extend(pending.map(|placeholder| MergedTransferItem::Placeholder(placeholder.clone())));
@@ -409,6 +422,54 @@ mod tests {
                 panic!("placeholder must not duplicate the entry")
             }
         }
+    }
+
+    /// 同名查找只替占位做：每个占位挂到自己那一行（同名的以最后一个为准），别的行不带进度，
+    /// 没有同名行的占位按排序单独成行。
+    #[test]
+    fn placeholders_decorate_exactly_their_own_rows() {
+        let entries = [
+            entry("/target/a.bin", FileKind::File, 1, None),
+            entry("/target/b.bin", FileKind::File, 1, None),
+            entry("/target/c.bin", FileKind::File, 1, None),
+            entry("/target/e.bin", FileKind::File, 1, None),
+        ];
+        let placeholders = [
+            placeholder("b.bin", false, Some(0.1)),
+            placeholder("e.bin", false, Some(0.2)),
+            placeholder("d.bin", false, Some(0.3)),
+            placeholder("b.bin", false, Some(0.4)),
+        ];
+
+        let merged = merge_entries_with_placeholders(
+            &entries,
+            &placeholders,
+            name_sort(SortDirection::Ascending),
+        );
+
+        let rows: Vec<(String, Option<f32>, bool)> = merged
+            .iter()
+            .map(|item| match item {
+                MergedTransferItem::Entry { entry, transfer } => (
+                    entry.name().to_string_lossy().into_owned(),
+                    transfer.as_ref().and_then(|transfer| transfer.progress),
+                    false,
+                ),
+                MergedTransferItem::Placeholder(placeholder) => {
+                    (placeholder.name.clone(), placeholder.progress, true)
+                }
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                ("a.bin".to_owned(), None, false),
+                ("b.bin".to_owned(), Some(0.4), false),
+                ("c.bin".to_owned(), None, false),
+                ("d.bin".to_owned(), Some(0.3), true),
+                ("e.bin".to_owned(), Some(0.2), false),
+            ]
+        );
     }
 
     #[test]

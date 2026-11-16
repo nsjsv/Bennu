@@ -75,6 +75,9 @@ pub trait Compositor: Sized {
 
     /// Presents the [`Renderer`] primitives to the next frame of the given [`Surface`].
     ///
+    /// Bennu 补丁：表面能一直显示最后提交的那帧时（见 [`keeps_last_frame`]），与它一模一样的帧不渲染、
+    /// 不提交，也不调 `on_pre_present`；调用方据此知道这帧没提交、收不到帧回调。
+    ///
     /// [`Renderer`]: Self::Renderer
     /// [`Surface`]: Self::Surface
     fn present(
@@ -110,6 +113,18 @@ pub trait Window:
 impl<T> Window for T where
     T: HasWindowHandle + HasDisplayHandle + MaybeSend + MaybeSync + 'static
 {
+}
+
+/// Bennu 补丁：窗口系统会不会一直显示最后提交的那帧，从而可以跳过与它相同的帧。Wayland 的表面总会保留；
+/// X11 没有合成器时窗口被挡住的像素会丢，winit 把要求补画的 Expose 和程序自己要的重画合成同一个事件，
+/// 分不清哪次必须提交，只能每帧都提交。
+pub fn keeps_last_frame(window: &impl Window) -> bool {
+    window.window_handle().is_ok_and(|handle| {
+        matches!(
+            handle.as_raw(),
+            raw_window_handle::RawWindowHandle::Wayland(_)
+        )
+    })
 }
 
 /// An owned display handle that can be used in a [`Compositor`].

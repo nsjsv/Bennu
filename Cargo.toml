@@ -86,6 +86,14 @@ panic = "abort"
 # （scroll_blit.rs，有与整帧重画比对的测试）；画每层前裁剪框对齐到像素格，贴边的
 # 图元不再把抗锯齿像素写到层外。iced_graphics 的段落、编辑框弱引用按是不是同一个对象比（上游只比
 # 排版参数，一样宽的两段字被当成同一段，只重画变了的部分时旧字留在屏幕上）。
+#
+# 画面没变的帧不提交：iced 每条消息都让所有窗口重画，上游 wgpu 每次整窗渲染、提交，
+# tiny-skia 没变化也整窗提交。iced_wgpu 保留上一帧的层、表面记着显示的是哪一帧，
+# 与它一样就不渲染不提交（tiny-skia 同理）；只在 Wayland（窗口系统一直显示最后那帧）。
+# iced_winit 在没提交时把下一帧改为按屏幕刷新间隔定时，否则没有帧回调会空转。图片句柄
+# 按编号比（上游逐字节比整张图）。各补丁都有测试。
 [patch.crates-io]
 iced_graphics = { path = "vendor/iced_graphics" }
 iced_tiny_skia = { path = "vendor/iced_tiny_skia" }
+iced_wgpu = { path = "vendor/iced_wgpu" }
+iced_winit = { path = "vendor/iced_winit" }

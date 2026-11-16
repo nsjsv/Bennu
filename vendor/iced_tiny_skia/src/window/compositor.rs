@@ -22,6 +22,8 @@ pub struct Surface {
     layer_stack: VecDeque<Vec<Layer>>,
     background_color: Color,
     max_age: u8,
+    /// Bennu 补丁：见 `compositor::keeps_last_frame`。
+    keeps_last_frame: bool,
 }
 
 impl crate::graphics::Compositor for Compositor {
@@ -61,6 +63,7 @@ impl crate::graphics::Compositor for Compositor {
         width: u32,
         height: u32,
     ) -> Self::Surface {
+        let keeps_last_frame = compositor::keeps_last_frame(&window);
         let window = softbuffer::Surface::new(
             &self.context,
             Box::new(window.clone()) as _,
@@ -73,6 +76,7 @@ impl crate::graphics::Compositor for Compositor {
             layer_stack: VecDeque::new(),
             background_color: Color::BLACK,
             max_age: 0,
+            keeps_last_frame,
         };
 
         if width > 0 && height > 0 {
@@ -153,6 +157,17 @@ pub fn present(
     background_color: Color,
     on_pre_present: impl FnOnce(),
 ) -> Result<(), compositor::SurfaceError> {
+    // Bennu 补丁：与屏幕上那帧（最近提交的，在 `layer_stack` 最前）像素一样就不提交。上游这时仍把整块
+    // 缓冲区按整窗变化提交，合成器跟着整窗重新合成。
+    if surface.keeps_last_frame
+        && surface.background_color == background_color
+        && surface.layer_stack.front().is_some_and(|shown| {
+            scroll_blit::unchanged(shown, renderer.layers())
+        })
+    {
+        return Ok(());
+    }
+
     let physical_size = viewport.physical_size();
 
     let mut buffer = surface

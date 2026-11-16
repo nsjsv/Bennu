@@ -8,7 +8,7 @@ use crate::core::svg;
 
 /// A raster or vector image.
 #[allow(missing_docs)]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Image {
     /// A raster image.
     Raster {
@@ -23,6 +23,56 @@ pub enum Image {
         bounds: Rectangle,
         clip_bounds: Rectangle,
     },
+}
+
+// Bennu 补丁：句柄按编号比。渲染器按编号缓存图片，编号相同画出来就相同；派生的相等逐字节比内存里整张图的
+// 像素，渲染器每帧比较前后两帧时一张 4K 图就是 30 多 MB。
+impl PartialEq for Image {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Image::Raster {
+                    image: a,
+                    bounds: a_bounds,
+                    clip_bounds: a_clip,
+                },
+                Image::Raster {
+                    image: b,
+                    bounds: b_bounds,
+                    clip_bounds: b_clip,
+                },
+            ) => {
+                a.handle.id() == b.handle.id()
+                    && a.filter_method == b.filter_method
+                    && a.rotation == b.rotation
+                    && a.border_radius == b.border_radius
+                    && a.opacity == b.opacity
+                    && a.snap == b.snap
+                    && a_bounds == b_bounds
+                    && a_clip == b_clip
+            }
+            (
+                Image::Vector {
+                    svg: a,
+                    bounds: a_bounds,
+                    clip_bounds: a_clip,
+                },
+                Image::Vector {
+                    svg: b,
+                    bounds: b_bounds,
+                    clip_bounds: b_clip,
+                },
+            ) => {
+                a.handle.id() == b.handle.id()
+                    && a.color == b.color
+                    && a.rotation == b.rotation
+                    && a.opacity == b.opacity
+                    && a_bounds == b_bounds
+                    && a_clip == b_clip
+            }
+            _ => false,
+        }
+    }
 }
 
 impl Image {

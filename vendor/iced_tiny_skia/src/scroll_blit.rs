@@ -155,6 +155,12 @@ fn pixel_rect(
 }
 
 /// 不挪时每对层（按位置配对）要重画的区域，与上游的算法相同；多出来、少掉的层整层重画（放在最后一项）。
+/// 两帧画出来的像素一样：层数相同，每层都算不出变化区域。
+pub fn unchanged(previous: &[Layer], current: &[Layer]) -> bool {
+    previous.len() == current.len()
+        && plain_damage(previous, current).iter().all(Vec::is_empty)
+}
+
 fn plain_damage(previous: &[Layer], current: &[Layer]) -> Vec<Vec<Rectangle>> {
     let mut damage: Vec<Vec<Rectangle>> = previous
         .iter()

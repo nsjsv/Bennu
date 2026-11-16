@@ -490,3 +490,22 @@ fn same_width_labels_of_other_rows_are_not_taken_for_moved_ones() {
         );
     }
 }
+
+/// 同样的一帧再画一次算没变（不提交）；悬停换了行、滚了 1 像素都算变了。
+#[test]
+fn only_an_identical_frame_counts_as_unchanged() {
+    let mut renderer = Renderer::new(Font::DEFAULT, Pixels(16.0));
+    let labels = labels();
+    let mut layers = |scene| {
+        draw_scene(&mut renderer, &labels, scene);
+        renderer.layers().to_vec()
+    };
+    let shown = layers(Scene::at(20.0));
+    assert!(unchanged(&shown, &layers(Scene::at(20.0))));
+    let hovered = Scene {
+        hovered: Some(3),
+        ..Scene::at(20.0)
+    };
+    assert!(!unchanged(&shown, &layers(hovered)));
+    assert!(!unchanged(&shown, &layers(Scene::at(21.0))));
+}

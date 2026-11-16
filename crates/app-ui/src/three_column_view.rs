@@ -23,6 +23,7 @@ use crate::file_entry_view::{
 };
 use crate::formatting::empty_location_message;
 use crate::input_blocking_space::input_blocking_space;
+use crate::keyed_rows::keyed_rows;
 use crate::model::{BrowserPaneId, ExpandedDirectoryStatus, Message, ScrollbarRegion};
 use crate::view::{column_browser_scroll_id, pane_blank_area, rename_field, rename_input_id};
 use crate::virtual_range::{
@@ -439,14 +440,16 @@ fn virtual_column_content<'a, Message: 'a, Renderer: iced::advanced::Renderer + 
         bottom: geometry.content_spacing,
         ..iced::Padding::ZERO
     };
+    // 行按在整栏里的序号对应控件状态：窗口挪动时留下的行不重排文字（见 `keyed_rows`）。
+    let rows = (range.start as u64..).zip(
+        rows.into_iter()
+            .map(|row| container(row).width(Length::Fill).padding(slot_gap).into()),
+    );
     Column::new()
         .padding(COLUMN_PADDING)
         .width(Length::Fill)
         .push(Space::new().height(Length::Fixed(range.before_height.max(0.0))))
-        .extend(
-            rows.into_iter()
-                .map(|row| container(row).width(Length::Fill).padding(slot_gap).into()),
-        )
+        .push(keyed_rows(rows))
         .push(Space::new().height(Length::Fixed(range.after_height.max(0.0))))
 }
 

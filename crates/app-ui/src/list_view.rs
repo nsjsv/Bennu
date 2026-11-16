@@ -19,6 +19,7 @@ use crate::file_entry_view::{
     FileEntryVisualState,
 };
 use crate::formatting::{empty_location_message, format_system_time};
+use crate::keyed_rows::keyed_rows;
 use crate::model::{
     BrowserPaneId, DirectoryLoadingPlaceholderEntry, FilePropertiesPermissions, ListColumnConfig,
     ListColumnKind, Message, ScrollbarRegion,
@@ -201,6 +202,8 @@ pub(crate) fn list_browser_view<'a>(
 
             // 列配置每次渲染收集一次，避免每行每帧重复分配 Vec。
             let visible_columns = list_visible_columns(browser, pane);
+            // 行按在整个列表里的序号对应控件状态：窗口挪动时留下的行不重排文字（见 `keyed_rows`）。
+            let mut visible_rows = Vec::with_capacity(range.end.saturating_sub(range.start));
             for row_index in range.start..range.end {
                 let Some(row) = transfer_rows.get(row_index) else {
                     break;
@@ -212,7 +215,7 @@ pub(crate) fn list_browser_view<'a>(
                         stripe_index,
                         snippet_height,
                     } => {
-                        rows = rows.push(list_entry_row(
+                        visible_rows.push((row_index as u64, list_entry_row(
                             browser,
                             pane,
                             &geometry,
@@ -228,7 +231,7 @@ pub(crate) fn list_browser_view<'a>(
                                 row_index,
                                 pane.selected_paths,
                             ),
-                        ));
+                        )));
                     }
                     crate::transfer_placeholder_view::ListTransferRow::DirectoryStatusRow {
                         status,
@@ -244,26 +247,30 @@ pub(crate) fn list_browser_view<'a>(
                                 tr!("No items")
                             }
                         };
-                        rows = rows.push(list_directory_status_row(
-                            message,
-                            *depth,
-                            *stripe_index,
-                            *height,
-                            &geometry,
+                        visible_rows.push((
+                            row_index as u64,
+                            list_directory_status_row(
+                                message,
+                                *depth,
+                                *stripe_index,
+                                *height,
+                                &geometry,
+                            ),
                         ));
                     }
                     crate::transfer_placeholder_view::ListTransferRow::Placeholder {
                         placeholder,
                         stripe_index,
                     } => {
-                        rows = rows.push(
+                        visible_rows.push((
+                            row_index as u64,
                             crate::transfer_placeholder_view::transfer_placeholder_list_row(
                                 placeholder,
                                 &geometry,
                                 &visible_columns,
                                 *stripe_index,
                             ),
-                        );
+                        ));
                     }
                     crate::transfer_placeholder_view::ListTransferRow::GroupHeader {
                         title,
@@ -271,10 +278,14 @@ pub(crate) fn list_browser_view<'a>(
                         height,
                         ..
                     } => {
-                        rows = rows.push(list_group_header_row(title, *count, *height, &geometry));
+                        visible_rows.push((
+                            row_index as u64,
+                            list_group_header_row(title, *count, *height, &geometry),
+                        ));
                     }
                 }
             }
+            rows = rows.push(keyed_rows(visible_rows));
             rows = rows.push(vertical_spacer(range.after_height));
         }
     }

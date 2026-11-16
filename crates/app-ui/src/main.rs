@@ -47,6 +47,7 @@ mod icon_grid_geometry;
 mod icon_grid_layout;
 mod icon_grid_view;
 mod input_blocking_space;
+mod keyed_rows;
 mod list_view;
 mod model;
 mod network_connections;

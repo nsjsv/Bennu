@@ -33,6 +33,7 @@ use crate::icon_grid_layout::{
     ICON_GRID_STATUS_HEIGHT,
 };
 use crate::input_blocking_space::input_blocking_space;
+use crate::keyed_rows::keyed_rows;
 use crate::model::{IconGridExpansionAnchor, IconGridViewport, Message, ScrollbarRegion};
 use crate::view::{pane_blank_area, rename_field, rename_input_id};
 use crate::virtual_range::both_quiet;
@@ -246,6 +247,8 @@ fn render_rows<'a>(
         .spacing(0)
         .push(vertical_spacer(visible.before_height));
     let row_height = row_height(icon_edge);
+    // 行按在这一段里的序号对应控件状态：窗口挪动时留下的格子不重排文字（见 `keyed_rows`）。
+    let mut visible_rows = Vec::with_capacity(visible.end_row.saturating_sub(visible.start_row));
     for row_index in visible.start_row..visible.end_row {
         let start = start_cell_index(rows, row_index);
         let end = start
@@ -280,9 +283,11 @@ fn render_rows<'a>(
                 }
             }
         }
-        content = content.push(row);
+        visible_rows.push((row_index as u64, row.into()));
     }
-    content = content.push(vertical_spacer(visible.after_height));
+    content = content
+        .push(keyed_rows(visible_rows))
+        .push(vertical_spacer(visible.after_height));
     container(content)
         .padding([0, GRID_PADDING as u16])
         .width(Length::Fill)
